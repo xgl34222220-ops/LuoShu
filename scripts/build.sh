@@ -7,7 +7,7 @@ OUT_DIR="$ROOT/dist"
 STAGE="$OUT_DIR/LuoShu"
 ZIP="$OUT_DIR/LuoShu-${VERSION}.zip"
 
-"$ROOT/scripts/check.sh"
+sh "$ROOT/scripts/check.sh"
 rm -rf "$STAGE"
 mkdir -p "$STAGE" "$OUT_DIR"
 
