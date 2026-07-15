@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: 22
       - name: Build module
-        run: ./scripts/build.sh
+        run: sh ./scripts/build.sh
       - name: Read release version
         id: version
         shell: bash
