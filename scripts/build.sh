@@ -11,7 +11,7 @@ ZIP="$OUT_DIR/LuoShu-${VERSION}.zip"
 rm -rf "$STAGE"
 mkdir -p "$STAGE" "$OUT_DIR"
 
-for path in common config fonts webroot customize.sh module.prop post-fs-data.sh service.sh uninstall.sh; do
+for path in common config fonts system webroot customize.sh module.prop post-fs-data.sh service.sh uninstall.sh; do
     cp -R "$ROOT/$path" "$STAGE/"
 done
 
@@ -25,8 +25,8 @@ rm -f "$STAGE/config/webui_font_list.json" \
 chmod 755 "$STAGE/customize.sh" "$STAGE/post-fs-data.sh" \
           "$STAGE/service.sh" "$STAGE/uninstall.sh"
 find "$STAGE/common" -type f -name '*.sh' -exec chmod 755 {} \;
+[ ! -f "$STAGE/system/bin/luoshud" ] || chmod 755 "$STAGE/system/bin/luoshud"
 
 rm -f "$ZIP"
 (cd "$STAGE" && zip -qr "$ZIP" .)
 echo "Built: $ZIP"
-
