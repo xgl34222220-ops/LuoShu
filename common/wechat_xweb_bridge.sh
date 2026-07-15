@@ -1,0 +1,110 @@
+#!/system/bin/sh
+# 洛书 v12.8 - 微信公众号/XWeb 字体命名空间桥接
+# 不改微信 APK，不删除微信数据，只在运行期做 bind mount。
+
+set +e
+
+MODDIR="${MODDIR:-/data/adb/modules/LuoShu}"
+LOG_FILE="$MODDIR/logs/fontswitch.log"
+
+xlog() {
+    mkdir -p "$MODDIR/logs" 2>/dev/null || true
+    echo "[$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)] [XWEB-BRIDGE] $*" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+valid_font() {
+    [ -f "$1" ] || return 1
+    _n=$(wc -c < "$1" 2>/dev/null | tr -d '[:space:]')
+    case "$_n" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$_n" -ge 1024 ]
+}
+
+bridge_file() {
+    _pid="$1"
+    _src="$2"
+    _dst="$3"
+    valid_font "$_src" || return 1
+    # 目标进程可能隐藏 /data/adb/modules；通过 PID 1 的 root 访问稳定源文件。
+    _ns_src="/proc/1/root$_src"
+    nsenter -t "$_pid" -m -- test -f "$_ns_src" >/dev/null 2>&1 || _ns_src="$_src"
+    nsenter -t "$_pid" -m -- test -e "$_dst" >/dev/null 2>&1 || return 1
+    nsenter -t "$_pid" -m -- mount --bind "$_ns_src" "$_dst" >/dev/null 2>&1
+}
+
+bridge_namespace() {
+    _pid="$1"
+    [ -d "/proc/$_pid" ] || return 1
+    _ok=0
+
+    # Android/ColorOS/HyperOS 常规 sans、中文 fallback 与 WebView 入口。
+    for _name in \
+        Roboto-Regular.ttf RobotoStatic-Regular.ttf \
+        Roboto-Medium.ttf Roboto-Bold.ttf Roboto-Light.ttf \
+        SysFont-Regular.ttf SysFont-Static-Regular.ttf \
+        SysFont-Hans-Regular.ttf SysSans-Hans-Regular.ttf \
+        SysSans-En-Regular.ttf OPSans-En-Regular.ttf \
+        MiSansL3.otf MiSansVF.ttf MiSansVF_Overlay.ttf MiSansLatinVF.ttf \
+        GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-Bold.ttf \
+        GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-Bold.ttf; do
+        _src="$MODDIR/system/fonts/$_name"
+        _dst="/system/fonts/$_name"
+        bridge_file "$_pid" "$_src" "$_dst" && _ok=$((_ok + 1))
+    done
+
+    # HyperOS 的 XWeb/Chromium 可能绕过 fonts.xml 直接打开 /product/fonts。
+    for _name in MiSansL3.otf MiSansVF.ttf MiSansLatinVF.ttf; do
+        _src="$MODDIR/system/fonts/$_name"
+        _dst="/product/fonts/$_name"
+        bridge_file "$_pid" "$_src" "$_dst" && _ok=$((_ok + 1))
+    done
+
+    # 小米 WebView 主题入口。目标可能是软链接，失败时保持原状。
+    bridge_file "$_pid" "$MODDIR/system/fonts/Roboto-Regular.ttf" \
+        /data/system/fonts/theme_webview/Roboto-Regular.ttf && _ok=$((_ok + 1))
+
+    [ "$_ok" -gt 0 ] && xlog "pid=$_pid cmd=$(tr '\000' ' ' < /proc/$_pid/cmdline 2>/dev/null) 成功=$_ok"
+    [ "$_ok" -gt 0 ]
+}
+
+candidate_pids() {
+    {
+        echo 1
+        pidof zygote64 zygote zygote_ocomp webview_zygote system_server 2>/dev/null
+        for _p in /proc/[0-9]*; do
+            [ -r "$_p/cmdline" ] || continue
+            _cmd=$(tr '\000' ' ' < "$_p/cmdline" 2>/dev/null)
+            case "$_cmd" in
+                *com.tencent.mm*|*com.tencent.xweb*|*xweb*|*webview_zygote*) basename "$_p" ;;
+            esac
+        done
+    } | tr ' ' '\n' | awk '/^[0-9]+$/ && !seen[$0]++'
+}
+
+apply_all() {
+    for _pid in $(candidate_pids); do
+        case " $DONE_PIDS " in
+            *" $_pid "*) continue ;;
+        esac
+        bridge_namespace "$_pid" && DONE_PIDS="$DONE_PIDS $_pid"
+    done
+}
+
+command -v nsenter >/dev/null 2>&1 || {
+    xlog "nsenter 不可用，跳过 XWeb 桥接"
+    exit 0
+}
+
+DONE_PIDS=""
+apply_all
+
+# XWeb 子进程通常在打开文章时才创建。短时监听新进程；之后的新进程会从
+# 已处理的 zygote/webview_zygote 继承挂载，避免永久轮询耗电。
+_round=0
+while [ "$_round" -lt 180 ]; do
+    sleep 1
+    apply_all
+    _round=$((_round + 1))
+done
+
+xlog "公众号/XWeb 启动期桥接监听结束"
+exit 0
