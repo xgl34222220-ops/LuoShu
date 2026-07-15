@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>洛书 LuoShu</title>
-    <link rel="stylesheet" href="style.css?v=1280">
+    <link rel="stylesheet" href="style.css?v=1331">
 </head>
 <body>
     <!-- 背景装饰 -->
@@ -75,7 +75,7 @@
             </svg>
         </div>
         <div class="engine-copy">
-            <div class="engine-heading"><span>全局字体引擎</span><b id="engineVersion">v12.8</b></div>
+            <div class="engine-heading"><span>全局字体引擎</span><b id="engineVersion">v13.3 Beta2</b></div>
             <p>替换中文、英文和数字 · 兼容 ColorOS 16 / HyperOS 3</p>
         </div>
         <span class="engine-state" id="engineState"><i></i>运行中</span>
@@ -109,14 +109,14 @@
 
     <!-- 快捷操作 -->
     <section class="quick-actions">
-        <button class="action-btn primary" id="restartUIBtn">
+        <button class="action-btn primary" id="rebootDeviceBtn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M1 4v6h6M23 20v-6h-6"/>
                 <path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/>
             </svg>
             <span class="action-btn-text">
-                <span class="action-btn-title">重启系统界面</span>
-                <small class="action-btn-hint">刷新UI显示</small>
+                <span class="action-btn-title">重启手机</span>
+                <small class="action-btn-hint">完成字体应用</small>
             </span>
         </button>
         <button class="action-btn secondary" id="resetDefaultBtn">
@@ -129,6 +129,21 @@
                 <small class="action-btn-hint">使用系统字体</small>
             </span>
         </button>
+    </section>
+
+    <section class="switch-result" id="switchResult" hidden aria-live="polite"></section>
+
+    <section class="emoji-section" id="emojiSection" aria-label="Emoji 字体">
+        <div class="section-header emoji-header">
+            <div><h2>Emoji</h2><small>与文字字体独立挂载</small></div>
+            <div class="section-actions">
+                <button class="icon-btn small" id="openEmojiFolderBtn" title="打开 Emoji 文件夹" aria-label="打开 Emoji 文件夹">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
+                </button>
+            </div>
+        </div>
+        <div class="emoji-current" id="emojiCurrent"><span class="emoji-sample">😀</span><div><strong>系统默认 Emoji</strong><small>/sdcard/LuoShu/emoji/</small></div></div>
+        <div class="emoji-list" id="emojiList"></div>
     </section>
 
     <!-- 字体列表（本地） -->
@@ -159,7 +174,7 @@
 
     <!-- 底部信息 -->
     <footer class="footer">
-        <span>洛书 LuoShu <b data-module-version>v12.8</b></span>
+        <span>洛书 LuoShu <b data-module-version>v13.3 Beta2</b></span>
         <span>·</span>
         <span>惜故里丶</span>
     </footer>
@@ -191,7 +206,7 @@
             <p>确定切换到 <strong id="targetFont">--</strong>？</p>
             <div class="modal-hint">
                 <span class="hint-dot"></span>
-                切换后自动重启系统界面生效
+                切换后需完整重启手机生效
             </div>
             <div class="modal-actions">
                 <button class="btn-cancel" id="cancelBtn">取消</button>
@@ -222,41 +237,118 @@
         </div>
     </div>
 
-    <!-- 帮助/关于弹窗 -->
+    <!-- 更多设置 -->
     <div class="modal" id="helpModal">
-        <div class="modal-content" style="max-width:380px; padding:0; overflow:hidden;">
-            <div class="help-header">
-                <div class="help-title">洛书</div>
-                <div class="help-subtitle">全局字体管理</div>
-                <div class="help-version"><span data-module-version>v12.8</span> · 惜故里丶</div>
+        <div class="modal-content more-sheet">
+            <div class="more-hero">
+                <div class="more-mark" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7V4h16v3M9 20h6M12 4v16m-4-4h8"/></svg>
+                </div>
+                <div class="more-heading">
+                    <div class="more-title-row"><h2>更多</h2><span data-module-version>v13.3 Beta2</span></div>
+                    <p>洛书全局字体管理 · 惜故里丶</p>
+                </div>
+                <button class="more-close" id="closeHelpTopBtn" type="button" aria-label="关闭">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                </button>
             </div>
             <div class="help-body">
-                <div class="help-section-title">模块用途</div>
-                <p class="help-description">全局替换手机中文、英文和数字字体。兼容 Android 16、ColorOS 16 和 HyperOS 3。</p>
-                <button class="appearance-row" id="themeToggleBtn" type="button">
-                    <span class="appearance-icon">
-                        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
-                        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg>
-                    </span>
-                    <span><strong>外观模式</strong><small id="themeModeLabel">跟随系统</small></span>
-                    <svg class="appearance-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
-                </button>
-                <div class="help-section-title help-guide-title">使用指南</div>
-                <div class="help-steps">
-                    <div class="help-step"><span class="help-step-num">1</span><span>将 .ttf / .otf 字体文件放入 <code>/sdcard/Fonts/</code></span></div>
-                    <div class="help-step"><span class="help-step-num">2</span><span>在 Magisk/KernelSU 中刷入洛书模块，音量键选择字体</span></div>
-                    <div class="help-step"><span class="help-step-num">3</span><span>WebUI 中点击字体卡片查看详情，一键切换字体</span></div>
-                    <div class="help-step"><span class="help-step-num">4</span><span>切换后完整重启手机生效；仅重启系统界面不能刷新所有应用进程</span></div>
+                <div class="compat-row" aria-label="兼容系统">
+                    <span>Android 16</span><span>ColorOS 16</span><span>HyperOS 3</span>
                 </div>
-                <div class="help-note"><strong>Play 商店说明</strong><span>模块会处理系统及 GMS 下载的 Google Sans。Play APK 自带的 Product Sans 属于应用内资源，普通系统挂载无法强制替换。</span></div>
-                <div class="help-commands">
-                    <div class="help-commands-title">命令行工具</div>
-                    <code>su -c "洛书 切换 字体名"<br>su -c "洛书 回滚"<br>su -c "洛书 列表"<br>su -c "洛书 重启界面"</code>
-                </div>
+
+                <section class="more-group">
+                    <div class="more-group-label">常用设置</div>
+                    <button class="setting-row" id="themeToggleBtn" type="button">
+                        <span class="setting-icon blue">
+                            <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4l1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+                            <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg>
+                        </span>
+                        <span class="setting-copy"><strong>外观模式</strong><small id="themeModeLabel">跟随系统</small></span>
+                        <svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                    </button>
+                    <button class="setting-row" id="moreOpenFolderBtn" type="button">
+                        <span class="setting-icon violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg></span>
+                        <span class="setting-copy"><strong>打开文字字体文件夹</strong><small>/sdcard/LuoShu/fonts/</small></span>
+                        <svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                    </button>
+                    <button class="setting-row" id="moreOpenEmojiFolderBtn" type="button">
+                        <span class="setting-icon violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></span>
+                        <span class="setting-copy"><strong>打开 Emoji 文件夹</strong><small>/sdcard/LuoShu/emoji/</small></span>
+                        <svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                    </button>
+                    <button class="setting-row" id="restartUIBtn" type="button">
+                        <span class="setting-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M1 4v6h6M23 20v-6h-6"/><path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/></svg></span>
+                        <span class="setting-copy"><strong>仅重启系统界面</strong><small>实验功能，不代替完整重启</small></span>
+                        <svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                    </button>
+                    <button class="setting-row" id="generateReportBtn" type="button">
+                        <span class="setting-icon orange"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M6 2h9l3 3v17H6z"/><path d="M14 2v5h5M9 12h6M9 16h6M9 8h2"/></svg></span>
+                        <span class="setting-copy"><strong>生成诊断报告</strong><small>保存到 /sdcard/LuoShu/reports/</small></span>
+                        <svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                    </button>
+                    <button class="setting-row" id="copyFontPathBtn" type="button">
+                        <span class="setting-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 00-2-2H5a2 2 0 00-2 2v9a2 2 0 002 2h3"/></svg></span>
+                        <span class="setting-copy"><strong>复制字体路径</strong><small>用于文件管理器中快速定位</small></span>
+                        <svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                    </button>
+                </section>
+
+                <section class="more-group guide-group">
+                    <div class="more-group-label">使用方法</div>
+                    <div class="guide-grid">
+                        <div class="guide-item"><b>1</b><span><strong>放入字体</strong><small>支持真实 TTF / OTF / TTC；不能只改扩展名</small></span></div>
+                        <div class="guide-item"><b>2</b><span><strong>选择并切换</strong><small>文字和 Emoji 可分别选择</small></span></div>
+                        <div class="guide-item"><b>3</b><span><strong>完整重启</strong><small>切换后必须完整重启</small></span></div>
+                    </div>
+                </section>
+
+                <div class="help-note"><span class="note-icon">G</span><span><strong>Google Play / GMS</strong><small>洛书会处理系统和 GMS 动态下载的 Google Sans；应用 APK 内置字体不属于系统字体。</small></span></div>
+                <div class="help-note warning"><span class="note-icon">M</span><span><strong>Hybrid Mount</strong><small>推荐把洛书设置为 Magic。不要选择 Ignore，否则 system/fonts 不会被挂载。模块已内置 magic marker。</small></span></div>
+
+                <details class="more-advanced">
+                    <summary><span>高级工具</span><small>命令行与模块说明</small><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></summary>
+                    <div class="advanced-content">
+                        <p>替换系统中文、英文和数字字体，并适配 GMS 与微信 XWeb 字体环境。</p>
+                        <code>su -c "洛书 切换 字体名"<br>su -c "洛书 回滚"<br>su -c "洛书 列表"<br>su -c "洛书 重启界面"</code>
+                    </div>
+                </details>
+                <div class="more-meta">洛书 <span data-module-version>v13.3 Beta2</span> · 开源字体切换模块</div>
             </div>
             <div class="help-footer">
-                <button class="btn-confirm" id="closeHelpBtn" style="width:100%;">知道了</button>
+                <button class="btn-confirm" id="closeHelpBtn" type="button">完成</button>
             </div>
+        </div>
+    </div>
+
+    <!-- 字体风险确认 -->
+    <div class="modal" id="riskModal">
+        <div class="modal-content">
+            <div class="modal-icon warn">!</div>
+            <h3>字体兼容性提醒</h3>
+            <p id="riskMessage">该字体可能缺少部分字符。</p>
+            <div class="modal-hint warn"><span class="hint-dot warn"></span>继续应用后必须重启；如出现漏字或闪退，请恢复默认或更换字体。</div>
+            <div class="modal-actions"><button class="btn-cancel" id="cancelRiskBtn">取消</button><button class="btn-confirm warn" id="confirmRiskBtn">仍然应用</button></div>
+        </div>
+    </div>
+
+    <!-- 应用完成，需要重启 -->
+    <div class="modal" id="applyDoneModal">
+        <div class="modal-content">
+            <div class="modal-icon">✓</div>
+            <h3>已准备完成</h3>
+            <p id="applyDoneMessage">字体将在完整重启后全局生效。</p>
+            <div class="modal-hint"><span class="hint-dot"></span>重启前会锁定同类切换，防止连续热切换导致卡死。</div>
+            <div class="modal-actions"><button class="btn-cancel" id="rebootLaterBtn">稍后重启</button><button class="btn-confirm" id="rebootNowBtn">立即重启</button></div>
+        </div>
+    </div>
+
+    <!-- 重启手机确认 -->
+    <div class="modal" id="rebootDeviceModal">
+        <div class="modal-content">
+            <div class="modal-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2v10"/><path d="M6.3 5.3a8 8 0 1011.4 0"/></svg></div>
+            <h3>重启手机</h3><p>保存当前工作后再重启，字体将在开机时安全应用。</p>
+            <div class="modal-actions"><button class="btn-cancel" id="cancelRebootDeviceBtn">取消</button><button class="btn-confirm" id="confirmRebootDeviceBtn">重启</button></div>
         </div>
     </div>
 
@@ -282,6 +374,6 @@
         </div>
     </div>
 
-    <script type="module" src="app.js?v=1280"></script>
+    <script type="module" src="app.js?v=1331"></script>
 </body>
 </html>

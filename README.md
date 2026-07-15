@@ -1,48 +1,65 @@
 # 洛书（LuoShu）
 
-面向 Android 16 的全局字体切换模块，支持替换系统与应用中的中文、英文和数字字体，并针对 ColorOS、HyperOS、Google Play/GMS 动态字体及微信 XWeb 页面做了适配。
+面向现代 Android 的通用全局字体管理模块，支持文字字体与 Emoji 独立切换，并针对 Android 16、ColorOS 16、HyperOS 3、Google/GMS 动态字体和微信 XWeb 做兼容处理。
 
-这个项目最初只是自用。新系统的字体链路越来越分散：系统界面已经换了字体，Google Play 仍可能使用 Google Sans，微信公众号/XWeb 页面也可能继续显示默认字体。为了把这些入口统一起来，我做了洛书，并在实际设备上不断补齐兼容处理。
+项目最初用于自用。随着 Android 字体来源分散到系统字体、ROM 私有字体、GMS 动态字体和应用独立 WebView，仅替换单个字体文件已经无法获得一致效果，因此逐步整理为可维护的开源模块。
 
-## 功能
+## 主要功能
 
-- 从 `/sdcard/Fonts/` 识别和切换 TTF/OTF 字体
-- 覆盖系统中文、英文和数字字体别名
-- 适配 ColorOS 16、HyperOS 3 与 Android 16
-- 桥接 Google Play/GMS 动态字体目录
-- 桥接微信 XWeb/公众号字体渲染
-- 提供 MIUIX 风格 WebUI、字体预览、收藏和恢复默认
-- 保留系统 Emoji、代码字体、可变字体等必要回退
+- 从 `/sdcard/LuoShu/fonts/` 扫描 TTF、OTF、TTC 文字字体
+- 从 `/sdcard/LuoShu/emoji/` 独立管理 Emoji 字体
+- 检查真实文件头，拦截仅修改扩展名的 WOFF、WOFF2、ZIP 或损坏文件
+- WebUI 字符抽样覆盖分析：中文、英文、数字、标点、符号、日文、韩文、Emoji 与私用区
+- 解析可变字体 `fvar` 表，显示 `wght`、`wdth` 等轴的最小值、默认值和最大值
+- 安全重启工作流：一次开机只允许准备一次文字字体和一次 Emoji，避免连续热切换造成系统卡死
+- 保留 ROM 自带 `fonts.xml`、fallback、符号字体和其他语言字体
+- 适配 Google Play、GMS、Google 搜索、Gemini 相关进程的动态 Google Sans 挂载命名空间
+- 适配微信 XWeb/公众号字体命名空间
+- 支持 Magisk、KernelSU、SukiSU、APatch 常见模块环境
 
-正式构建包内含 ARM64 原生字体扫描加速程序 `luoshud`；扫描失败时会自动回退到 Shell 实现，不参与字体挂载核心流程。
+正式构建包保留 ARM64 原生扫描器 `system/bin/luoshud`，用于旧目录诊断与故障回退；WebUI 默认仍使用安全 Shell 扫描，它不参与字体挂载核心流程。
 
 ## 已测试设备
 
-- 一加 15（PLK110），ColorOS 16
-- Redmi K80 至尊版（25060RK16C），HyperOS 3
+- 一加 15（ColorOS 16）
+- Redmi K80 至尊版（HyperOS 3）
 
-其他 Android 设备可自行测试。不同 ROM、应用版本和字体文件的字形覆盖范围可能影响最终效果。
+其他设备和 ROM 可自行测试。字体自身的字形覆盖、私用区字符和应用内置字体会影响最终效果。
 
 ## 安装与使用
 
-1. 将 TTF/OTF 字体放入 `/sdcard/Fonts/`。
-2. 通过 KernelSU、Magisk 或兼容管理器刷入模块。
-3. 完整重启手机。
-4. 打开模块 WebUI 选择字体；切换后按提示重启系统界面或手机。
+1. 把文字字体放入 `/sdcard/LuoShu/fonts/`。
+2. 可选：把 Emoji 字体放入 `/sdcard/LuoShu/emoji/`。
+3. 在 Magisk、KernelSU 或兼容管理器中刷入模块。
+4. 完整重启手机。
+5. 在模块 WebUI 中选择字体，准备完成后按提示再次完整重启。
 
-建议使用同时包含中文、拉丁字母和数字的完整字体。字体自身缺字时，Android 会回退到系统字体；应用明确打包并强制使用的私有字体也不一定能由系统模块覆盖。
+切换字体后不要连续热切换。洛书会在同一次开机内阻止第二次文字/Emoji 准备，这是稳定性保护，不是故障。
+
+## Hybrid Mount
+
+- 推荐将洛书设置为 **Magic**。
+- 不要设置为 **Ignore**，否则模块文件不会参与挂载。
+- 洛书自己管理字体目标，避免与其他字体模块、字体元模块重复覆盖同一路径。
 
 ## 构建
 
 ```sh
-./scripts/build.sh
+sh ./scripts/check.sh
+sh ./scripts/build.sh
 ```
 
-生成文件位于 `dist/`。GitHub Actions 也会自动检查脚本并生成可刷入 ZIP。
+产物位于 `dist/`。更新 `module.prop` 版本并推送到 `main` 后，GitHub Actions 会自动构建并创建对应 Release。
 
 ## 反馈
 
-提交 Issue 时请附上设备型号、ROM/Android 版本、Root 管理器、复现步骤和脱敏日志。请勿上传账号、完整设备备份或个人字体文件。
+提交 Issue 时请附上：
+
+- 设备型号、ROM 与 Android 版本
+- Root 管理器和版本
+- 使用的字体格式（不要上传无授权字体文件）
+- 复现步骤
+- `/sdcard/LuoShu/reports/` 中的脱敏检测报告
 
 ## 开源协议
 

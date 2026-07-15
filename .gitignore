@@ -1,16 +1,3 @@
 dist/
-build/
-*.zip
 *.log
-*.tar.gz
 .DS_Store
-
-# 运行时缓存与用户状态
-config/webui_font_list.json
-config/webui_font_list.key
-config/recent_fonts.conf
-config/previous_font.conf
-webroot/fonts/
-logs/
-backup/
-

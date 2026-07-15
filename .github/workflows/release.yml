@@ -5,6 +5,20 @@ on:
   push:
     branches: [main]
     paths:
+      - module.prop
+      - common/**
+      - config/**
+      - fonts/**
+      - system/**
+      - webroot/**
+      - scripts/**
+      - customize.sh
+      - post-fs-data.sh
+      - service.sh
+      - uninstall.sh
+      - magic
+      - 兼容与目录说明.txt
+      - CHANGELOG.md
       - .github/workflows/release.yml
 
 permissions:
@@ -24,19 +38,33 @@ jobs:
         id: version
         shell: bash
         run: |
-          version="$(sed -n 's/^version=//p' module.prop | head -n 1 | awk '{print $1}')"
-          echo "tag=${version}" >> "$GITHUB_OUTPUT"
+          version="$(sed -n 's/^version=//p' module.prop | head -n 1)"
+          tag="$(printf '%s' "$version" | sed 's#[ /]#-#g')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          awk -v target="## $version" '
+            $0 == target { found=1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          test -s release-notes.md || printf '洛书 %s 自动构建发布。\n' "$version" > release-notes.md
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
         shell: bash
         run: |
           asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          checksum="${asset}.sha256"
+          flags=()
+          case "$VERSION" in *Beta*|*RC*) flags+=(--prerelease) ;; esac
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$asset" --clobber
+            gh release upload "$TAG" "$asset" "$checksum" --clobber
+            gh release edit "$TAG" --title "洛书 $VERSION" --notes-file release-notes.md "${flags[@]}"
           else
-            gh release create "$TAG" "$asset" \
-              --title "洛书 $TAG" \
-              --notes "首个 GitHub 正式发布版。支持 Android 16、ColorOS 16 与 HyperOS 3，包含 GMS 和微信 XWeb 字体桥接。"
+            gh release create "$TAG" "$asset" "$checksum" \
+              --title "洛书 $VERSION" \
+              --notes-file release-notes.md \
+              "${flags[@]}"
           fi

@@ -2,7 +2,7 @@
 # ============================================================
 # 洛书 - 服务脚本 (service.sh)
 # 作者：惜故里丶
-# 版本：v12.8
+# 版本：v13.3 Beta2
 # 功能：系统启动后刷新字体缓存并桥接 GMS 动态字体
 # ============================================================
 
@@ -33,7 +33,7 @@ MODDIR="${0%/*}"
         fi
     }
 
-    log_service "INFO" "服务脚本开始执行 (v12.8)"
+    log_service "INFO" "服务脚本开始执行 (v13.3 Beta2)"
 
     # 刷新字体缓存
     if command -v cmd >/dev/null 2>&1; then
@@ -51,14 +51,14 @@ MODDIR="${0%/*}"
 
     # Android 16 的 GMS 字体既可能注册到 /data/fonts/files，也可能只保存在
     # GMS 私有 opentype 目录。桥接两种真机路径；Flex/Code 保留原版。
-    if [ -f "$MODDIR/common/play_font_bridge.sh" ]; then
-        MODDIR="$MODDIR" sh "$MODDIR/common/play_font_bridge.sh" boot
+    if [ -f "$MODDIR/common/play_font_bridge" ]; then
+        MODDIR="$MODDIR" sh "$MODDIR/common/play_font_bridge" boot
     fi
 
     # 微信公众号由 XWeb/独立 Chromium 进程渲染，不一定沿用微信主进程
     # 的字体视图。单独桥接相关 zygote、XWeb 和微信子进程。
-    if [ -f "$MODDIR/common/wechat_xweb_bridge.sh" ]; then
-        MODDIR="$MODDIR" sh "$MODDIR/common/wechat_xweb_bridge.sh" &
+    if [ -f "$MODDIR/common/wechat_xweb_bridge" ]; then
+        MODDIR="$MODDIR" sh "$MODDIR/common/wechat_xweb_bridge" &
     fi
 
     # 删除首次启动标记

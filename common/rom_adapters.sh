@@ -70,6 +70,16 @@ link_or_copy_font() {
     chmod 644 "$dest" 2>/dev/null || true
 }
 
+# 只为 ROM 真正存在的目标创建别名，避免 Hybrid Mount 为不存在的路径
+# 生成大量 staging 节点，降低 No space left on device / 挂载上限风险。
+_rom_font_target_exists() {
+    _name="$1"
+    for _root in /system/fonts /system_ext/fonts /product/fonts /my_product/fonts /vendor/fonts; do
+        [ -e "$_root/${_name}.ttf" ] || [ -e "$_root/${_name}.otf" ] || [ -e "$_root/${_name}.ttc" ] && return 0
+    done
+    return 1
+}
+
 # ============================================================
 # ColorOS（OPPO/一加/realme 同属 oplus 系）
 # ============================================================
@@ -108,9 +118,10 @@ copy_as_coloros() {
     regular_anchor=$(_font_anchor "$src" "$dest_dir" "regular") || return 1
 
     _log_step "  正在应用用户字体（ColorOS）..."
-    base_names="SysSans-Hant-Regular SysSans-Hans-Regular SysFont-Static-Regular SysFont-Myanmar SysFont-Hant-Regular SysFont-Hans-Regular SysFont-Regular SysSans-En-Regular"
+    base_names="SysSans-Hant-Regular SysSans-Hans-Regular SysFont-Static-Regular SysFont-Hant-Regular SysFont-Hans-Regular SysFont-Regular SysSans-En-Regular"
     bad_count=0
     for name in $base_names; do
+        _rom_font_target_exists "$name" || continue
         if _font_alias "$regular_anchor" "$dest_dir/${name}.ttf"; then
             if _verify_font_copy "$dest_dir/${name}.ttf"; then
                 coloros_count=$((coloros_count + 1))
@@ -123,6 +134,7 @@ copy_as_coloros() {
     [ "$bad_count" -gt 0 ] && _log_step "  ⚠ 其中 $bad_count 个校验异常，请检查源字体文件是否完整"
 
     for name in $(_coloros_extra_names); do
+        _rom_font_target_exists "$name" || continue
         if _font_alias "$regular_anchor" "$dest_dir/${name}.ttf"; then
             extra_count=$((extra_count + 1))
         fi
@@ -148,6 +160,7 @@ copy_as_coloros() {
         done
         [ "$weight_count" -gt 0 ] && _log_step "  已创建 $weight_count 个字重变体文件（Bold/Medium/Light等）"
     fi
+    return 0
 }
 
 # ============================================================
@@ -239,6 +252,7 @@ copy_as_hyperos() {
         done
         [ "$weight_count" -gt 0 ] && _log_step "  已创建 $weight_count 个字重变体文件（Bold/Medium/Light等）"
     fi
+    return 0
 }
 
 # ============================================================
@@ -276,6 +290,7 @@ copy_as_generic() {
     done
     _log_step "  已覆盖 $core_count 个通用字体文件"
     [ "$bad_count" -gt 0 ] && _log_step "  ⚠ 其中 $bad_count 个校验异常，请检查源字体文件是否完整"
+    return 0
 }
 
 # ============================================================

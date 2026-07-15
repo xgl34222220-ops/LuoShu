@@ -1,0 +1,32 @@
+洛书 LuoShu v13.3 Beta2
+
+公开目录
+- 文字字体：/sdcard/LuoShu/fonts/
+- Emoji 字体：/sdcard/LuoShu/emoji/
+- 检测报告：/sdcard/LuoShu/reports/
+- 旧目录 /sdcard/Fonts/ 的 TTF/OTF/TTC 会在首次运行时复制迁移，不会删除原文件。
+
+安全切换
+- 文字字体和 Emoji 可以分别选择，并共用一次完整重启。
+- 同一类别每次开机只允许修改一次；重启后可再次切换。
+- 默认不热重启 SystemUI，不在应用运行中反复覆盖字体，避免卡死、闪退或整机软死机。
+
+字体文件
+- 支持真实 TTF、OTF、TTC。
+- WOFF/WOFF2、ZIP 或其他文件不能仅靠修改扩展名变成 TTF。
+- WebUI 会检查真实文件头、基础字体表、可变字体和彩色 Emoji 表，并抽样分析字符覆盖。
+- 某些字体本身缺少中文、符号或私用区字形，可能出现漏字、图标异常或应用闪退；风险提示后仍可由用户决定是否应用。
+
+覆盖范围
+- 保留 ROM 原始 fonts.xml、fallback、符号字体、其他语言字体。
+- Emoji 默认保持系统原版，只有在 Emoji 页面单独选择后才替换 NotoColorEmoji。
+- 应用 APK、网页或游戏自带的字体无法由系统字体模块强制替换。
+
+Hybrid Mount
+- 推荐选择 Magic；模块根目录已包含 magic marker。
+- 不要选择 Ignore：Ignore 的含义是不让 Hybrid Mount 挂载该模块，system/fonts 将不会生效。
+- 模块只为 ROM 实际存在的字体目标创建别名，减少无效 staging 节点和 No space left on device 风险。
+- 遇到 failed to canonicalize source_path，通常是 Hybrid Mount 中残留了已删除模块路径，应清理其错误记录或旧配置。
+
+原生扫描器：system/bin/luoshud 仅用于 ARM64 诊断回退；WebUI 默认使用安全 Shell 扫描。
+可变字体：详情页会显示 fvar 轴范围；ROM 是否使用完整字重由系统映射决定。

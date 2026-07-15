@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v12.8 - 字体管理核心（硬链接精简版）
+# 洛书 v13.3 Beta2 - 字体管理核心（任务状态 + 硬链接精简版）
 
 # 关键：禁用严格错误终止，避免任何命令失败导致脚本退出
 set +e
@@ -9,7 +9,9 @@ set +e
 # 任何 exit 都会终止父脚本，导致 Magisk 显示刷写失败
 MODDIR="${MODDIR:-}"
 if [ -z "$MODDIR" ]; then
-    if [ -f "${0%/*}/../../module.prop" ]; then
+    if [ -f "${0%/*}/../module.prop" ]; then
+        MODDIR="$(cd "${0%/*}/.." && pwd)"
+    elif [ -f "${0%/*}/../../module.prop" ]; then
         MODDIR="$(cd "${0%/*}/../.." && pwd)"
     elif [ -f "/data/adb/modules/LuoShu/module.prop" ]; then
         MODDIR="/data/adb/modules/LuoShu"
@@ -25,7 +27,17 @@ SYSTEM_FONTS_DIR="$MODULE_DIR/system/fonts"
 SYSTEM_ETC_DIR="$MODULE_DIR/system/etc"
 ACTIVE_FONT_CONF="$CONFIG_DIR/active_font.conf"
 FONT_LIST_CONF="$CONFIG_DIR/font_list.conf"
-USER_FONTS_DIR="/sdcard/Fonts"
+LUOSHU_PUBLIC_DIR="/sdcard/LuoShu"
+USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
+USER_EMOJI_DIR="$LUOSHU_PUBLIC_DIR/emoji"
+USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
+LEGACY_FONTS_DIR="/sdcard/Fonts"
+ACTIVE_EMOJI_CONF="$CONFIG_DIR/active_emoji.conf"
+TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
+EMOJI_REBOOT_REQUIRED="$CONFIG_DIR/emoji_reboot_required.conf"
+SWITCH_TASK_FILE="$CONFIG_DIR/switch_task.conf"
+EMOJI_TASK_FILE="$CONFIG_DIR/emoji_task.conf"
+NATIVE_BIN="$MODULE_DIR/system/bin/luoshud"
 
 # ---------- 加载共享工具函数 ----------
 # detect_font_family 等基础函数统一由 util_functions.sh 提供
@@ -33,6 +45,10 @@ USER_FONTS_DIR="/sdcard/Fonts"
 if [ -f "$MODULE_DIR/common/util_functions.sh" ]; then
     . "$MODULE_DIR/common/util_functions.sh"
 fi
+if [ -f "$MODULE_DIR/common/font_check.sh" ]; then
+    . "$MODULE_DIR/common/font_check.sh"
+fi
+if type ensure_public_storage >/dev/null 2>&1; then ensure_public_storage; fi
 
 # 加载 ROM 适配层（copy_as_coloros / copy_as_hyperos / apply_font_by_rom 等）
 # 与 customize.sh 共用同一份逻辑，避免两处各写一套导致后续改一处漏一处
@@ -94,7 +110,7 @@ get_font_stats() {
     total_count=0
     total_bytes=0
     weight_dist=""
-    for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF; do
+    for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$f" ] || continue
         name=$(basename "$f")
         case "$name" in SysFont*|SysSans*) continue ;; esac
@@ -117,7 +133,7 @@ get_font_stats() {
 scan_user_families() {
     result=""
     [ -d "$USER_FONTS_DIR" ] || return
-    for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF; do
+    for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$f" ] || continue
         fam=$(detect_font_family "$(basename "$f")")
         case "$fam" in SysFont*|SysSans*) continue ;; esac
@@ -128,12 +144,24 @@ scan_user_families() {
     echo "$result"
 }
 
+# WebUI 使用逐行字体族列表，完整保留文件名中的空格和括号。
+scan_user_families_lines() {
+    [ -d "$USER_FONTS_DIR" ] || return 0
+    for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
+              "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+        [ -f "$_f" ] || continue
+        _fam=$(detect_font_family "$(basename "$_f")")
+        case "$_fam" in SysFont*|SysSans*|'') continue ;; esac
+        printf '%s\n' "$_fam"
+    done | awk '!seen[$0]++'
+}
+
 # 扫描字体族的字重变体、获取指定字重文件：scan_family_weights() /
 # get_weight_file() 已迁移到 util_functions.sh 统一维护
 
 get_current_font_id() {
     active=""
-    [ -f "$ACTIVE_FONT_CONF" ] && active=$(head -n1 "$ACTIVE_FONT_CONF" 2>/dev/null | tr -d '[:space:]')
+    [ -f "$ACTIVE_FONT_CONF" ] && active=$(head -n1 "$ACTIVE_FONT_CONF" 2>/dev/null | tr -d '\r\n')
     [ -z "$active" ] && active="default"
     echo "$active"
 }
@@ -156,127 +184,180 @@ if ! type apply_font_by_rom >/dev/null 2>&1; then
     }
 fi
 
+# ---------- 安全覆盖范围 / 重启保护 / Emoji ----------
+get_managed_text_files() {
+    if [ "$IS_COLOROS" = "true" ]; then
+        for _n in $(get_all_coloros_names); do printf '%s.ttf\n' "$_n"; done
+    elif [ "$IS_HYPEROS" = "true" ]; then
+        get_all_hyperos_files
+    else
+        echo "Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf Roboto-Light.ttf Roboto-Thin.ttf NotoSansCJK-Regular.ttc NotoSansSC-Regular.otf NotoSansTC-Regular.otf"
+    fi
+}
+
+clear_managed_text_fonts() {
+    for _f in $(get_managed_text_files); do
+        rm -f "$SYSTEM_FONTS_DIR/$_f" "$MODULE_DIR/system_ext/fonts/$_f" "$MODULE_DIR/product/fonts/$_f" 2>/dev/null || true
+    done
+    rm -rf "$SYSTEM_FONTS_DIR/.luoshu-font-store" 2>/dev/null || true
+}
+
+get_current_emoji_id() {
+    _active="default"
+    [ -f "$ACTIVE_EMOJI_CONF" ] && _active=$(head -n1 "$ACTIVE_EMOJI_CONF" 2>/dev/null | tr -d '\r\n')
+    [ -z "$_active" ] && _active="default"
+    echo "$_active"
+}
+
+find_emoji_file() {
+    _id="$1"
+    for _f in "$USER_EMOJI_DIR"/*.ttf "$USER_EMOJI_DIR"/*.otf "$USER_EMOJI_DIR"/*.ttc \
+              "$USER_EMOJI_DIR"/*.TTF "$USER_EMOJI_DIR"/*.OTF "$USER_EMOJI_DIR"/*.TTC; do
+        [ -f "$_f" ] || continue
+        _base=$(basename "$_f")
+        _name="${_base%.*}"
+        [ "$_name" = "$_id" ] && { echo "$_f"; return 0; }
+    done
+    return 1
+}
+
+clear_managed_emoji_fonts() {
+    rm -f "$SYSTEM_FONTS_DIR/NotoColorEmoji.ttf" "$SYSTEM_FONTS_DIR/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
+    rm -rf "$SYSTEM_FONTS_DIR/.luoshu-emoji-store" 2>/dev/null || true
+}
+
+switch_emoji() {
+    _id="$1"
+    [ -z "$_id" ] && { echo "错误：未指定 Emoji 字体" >&2; return 1; }
+    if [ -f "$EMOJI_REBOOT_REQUIRED" ]; then
+        echo "错误：本次开机已更改 Emoji，请先重启手机后再切换" >&2
+        return 3
+    fi
+    mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" "$USER_EMOJI_DIR" 2>/dev/null || true
+    clear_managed_emoji_fonts
+    if [ "$_id" != "default" ]; then
+        _src=$(find_emoji_file "$_id")
+        [ -f "$_src" ] || { echo "错误：Emoji 字体 $_id 不存在" >&2; return 1; }
+        if type font_validate >/dev/null 2>&1 && ! font_validate "$_src" emoji; then
+            echo "错误：$FONT_CHECK_ERROR" >&2
+            return 4
+        fi
+        mkdir -p "$SYSTEM_FONTS_DIR/.luoshu-emoji-store" 2>/dev/null || true
+        _anchor="$SYSTEM_FONTS_DIR/.luoshu-emoji-store/current.font"
+        cp -f "$_src" "$_anchor" 2>/dev/null || return 1
+        chmod 644 "$_anchor" 2>/dev/null || true
+        ln "$_anchor" "$SYSTEM_FONTS_DIR/NotoColorEmoji.ttf" 2>/dev/null || cp -f "$_anchor" "$SYSTEM_FONTS_DIR/NotoColorEmoji.ttf" 2>/dev/null || return 1
+        if [ -e /system/fonts/NotoColorEmojiLegacy.ttf ]; then
+            ln "$_anchor" "$SYSTEM_FONTS_DIR/NotoColorEmojiLegacy.ttf" 2>/dev/null || cp -f "$_anchor" "$SYSTEM_FONTS_DIR/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
+        fi
+        chmod 644 "$SYSTEM_FONTS_DIR"/NotoColorEmoji*.ttf 2>/dev/null || true
+    fi
+    echo "$_id" > "$ACTIVE_EMOJI_CONF"
+    printf 'emoji=%s\ntime=%s\n' "$_id" "$(date +%s)" > "$EMOJI_REBOOT_REQUIRED"
+    chmod 644 "$ACTIVE_EMOJI_CONF" "$EMOJI_REBOOT_REQUIRED" 2>/dev/null || true
+    return 0
+}
+
+find_text_font_file() {
+    _font_id="$1"
+    for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
+              "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+        [ -f "$_f" ] || continue
+        _fam=$(detect_font_family "$(basename "$_f")")
+        case "$_fam" in SysFont*|SysSans*) continue ;; esac
+        [ "$_fam" = "$_font_id" ] && { echo "$_f"; return 0; }
+    done
+    return 1
+}
+
 # ---------- 切换字体 ----------
 switch_font() {
-    font_id="$1"
+    SWITCH_LOCK="$MODULE_DIR/.font_switch.lock"
+    if [ -e "$SWITCH_LOCK" ]; then
+        old_pid=$(cat "$SWITCH_LOCK" 2>/dev/null)
+        if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
+            echo "错误：字体正在切换中，请稍候" >&2
+            return 2
+        fi
+        rm -f "$SWITCH_LOCK" 2>/dev/null || true
+    fi
+    if [ -f "$TEXT_REBOOT_REQUIRED" ]; then
+        echo "错误：本次开机已更改文字字体，请先重启手机后再切换" >&2
+        return 3
+    fi
+    echo $$ > "$SWITCH_LOCK"
+    trap 'rm -f "$SWITCH_LOCK" 2>/dev/null' EXIT
 
-    # 备份当前字体（用于回滚）
+    font_id="$1"
+    [ -z "$font_id" ] && { echo "错误：未指定字体" >&2; return 1; }
+    mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" 2>/dev/null || true
+
     if [ -f "$ACTIVE_FONT_CONF" ]; then
-        current_backup=$(head -n1 "$ACTIVE_FONT_CONF" 2>/dev/null | tr -d '[:space:]')
+        current_backup=$(head -n1 "$ACTIVE_FONT_CONF" 2>/dev/null | tr -d '\r\n')
         if [ -n "$current_backup" ] && [ "$current_backup" != "default" ] && [ "$current_backup" != "$font_id" ]; then
             echo "$current_backup" > "$CONFIG_DIR/previous_font.conf"
         fi
     fi
 
-    [ -z "$font_id" ] && { echo "错误：未指定字体" >&2; return 1; }
-    
-    # 找到对应的字体文件
     src_file=""
     if [ "$font_id" != "default" ]; then
-        for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF; do
-            [ -f "$f" ] || continue
-            fam=$(detect_font_family "$(basename "$f")")
-            case "$fam" in SysFont*|SysSans*) continue ;; esac
-            [ "$fam" = "$font_id" ] && { src_file="$f"; break; }
-        done
-        
-        if [ -z "$src_file" ]; then
+        src_file=$(find_text_font_file "$font_id")
+        if [ ! -f "$src_file" ]; then
             echo "错误：字体 $font_id 不存在于 $USER_FONTS_DIR" >&2
             return 1
         fi
+        if type font_validate >/dev/null 2>&1 && ! font_validate "$src_file" text; then
+            echo "错误：$FONT_CHECK_ERROR" >&2
+            return 4
+        fi
     fi
-    
-    if [ "$font_id" = "default" ]; then
-        rm -f "$SYSTEM_FONTS_DIR"/*.ttf "$SYSTEM_FONTS_DIR"/*.otf "$SYSTEM_FONTS_DIR"/*.ttc 2>/dev/null
-        rm -rf "$SYSTEM_FONTS_DIR/.luoshu-font-store" 2>/dev/null || true
-        # Overlay 中移除目标文件后，下层 ROM 原字体会自动恢复，无需复制。
-        echo "  [洛书] 已恢复 ROM 原始字体（Overlay 下层）"
-    else
-        # 使用 quick 模式：只替换 ROM 对应的核心文件，不重新复制所有系统字体
-        # 这样切换速度从 5-10 秒缩短到 1 秒以内
-        apply_font_by_rom "$src_file" "$SYSTEM_FONTS_DIR" "quick" "$font_id"
-    fi
-    
-    # 注意：不替换 fonts.xml，系统继续使用原始的 fonts.xml
-    # 因为我们只替换字体文件（文件名不变），原始 fonts.xml 完全兼容
-    echo "$font_id" > "$ACTIVE_FONT_CONF"
 
-    # 记录到最近使用列表
+    # 只删除洛书管理的文字目标，Emoji、符号与 ROM fallback 永远保留。
+    clear_managed_text_fonts
+    if [ "$font_id" = "default" ]; then
+        echo "  [洛书] 已恢复 ROM 原始文字字体（Emoji 保持独立设置）"
+    else
+        apply_font_by_rom "$src_file" "$SYSTEM_FONTS_DIR" "quick" "$font_id" || {
+            echo "错误：ROM 字体映射失败" >&2
+            return 5
+        }
+        if [ "$IS_COLOROS" = "true" ]; then
+            mkdir -p "$MODULE_DIR/system_ext/fonts" "$MODULE_DIR/product/fonts" 2>/dev/null || true
+            for _n in $(get_all_coloros_names); do
+                _src="$SYSTEM_FONTS_DIR/${_n}.ttf"
+                [ -f "$_src" ] || continue
+                [ -e "/system_ext/fonts/${_n}.ttf" ] && link_or_copy_font "$_src" "$MODULE_DIR/system_ext/fonts/${_n}.ttf" 2>/dev/null || true
+                [ -e "/product/fonts/${_n}.ttf" ] && link_or_copy_font "$_src" "$MODULE_DIR/product/fonts/${_n}.ttf" 2>/dev/null || true
+            done
+        fi
+    fi
+
+    echo "$font_id" > "$ACTIVE_FONT_CONF"
+    chmod 644 "$ACTIVE_FONT_CONF" "$SYSTEM_FONTS_DIR"/* 2>/dev/null || true
+
     if [ -n "$font_id" ] && [ "$font_id" != "default" ]; then
         recent_file="$CONFIG_DIR/recent_fonts.conf"
-        # 读取现有列表，去掉重复，限制10条
         recent_list=""
         recent_count=0
         if [ -f "$recent_file" ]; then
             while IFS= read -r line; do
-                line=$(echo "$line" | tr -d '[:space:]')
                 [ -z "$line" ] && continue
                 [ "$line" = "$font_id" ] && continue
                 if [ "$recent_count" -lt 9 ]; then
-                    recent_list="$recent_list$line
-"
+                    recent_list="$recent_list$line\n"
                     recent_count=$((recent_count + 1))
                 fi
             done < "$recent_file"
         fi
-        # 新字体放最前面
-        printf '%s\n%s' "$font_id" "$recent_list" > "$recent_file" 2>/dev/null || true
+        printf '%s\n%b' "$font_id" "$recent_list" > "$recent_file" 2>/dev/null || true
     fi
 
-    chmod 644 "$ACTIVE_FONT_CONF" 2>/dev/null
-    chmod 644 "$SYSTEM_FONTS_DIR"/* 2>/dev/null
-    
-    # ColorOS 专属同步：/data/fonts、system_ext/fonts、product/fonts
-    # 这三处是真机验证过的 ColorOS 行为（锁屏大时钟等场景可能不经过
-    # /system/fonts），HyperOS 暂无证据需要，故只在 ColorOS 上执行
-    if [ "$IS_COLOROS" = "true" ]; then
-        all_names=$(get_all_coloros_names)
-        if [ -d /data/fonts ]; then
-            for cname in $all_names; do
-                cfile="$SYSTEM_FONTS_DIR/${cname}.ttf"
-                if [ -f "$cfile" ]; then
-                    cp -f "$cfile" /data/fonts/ 2>/dev/null || true
-                    chmod 644 "/data/fonts/${cname}.ttf" 2>/dev/null || true
-                fi
-            done
-        fi
-        if [ -d "$MODULE_DIR/system_ext/fonts" ]; then
-            for cname in $all_names; do
-                cfile="$SYSTEM_FONTS_DIR/${cname}.ttf"
-                if [ -f "$cfile" ]; then
-                    link_or_copy_font "$cfile" "$MODULE_DIR/system_ext/fonts/${cname}.ttf" 2>/dev/null || true
-                fi
-            done
-        fi
-        if [ -d "$MODULE_DIR/product/fonts" ]; then
-            for cname in $all_names; do
-                cfile="$SYSTEM_FONTS_DIR/${cname}.ttf"
-                if [ -f "$cfile" ]; then
-                    link_or_copy_font "$cfile" "$MODULE_DIR/product/fonts/${cname}.ttf" 2>/dev/null || true
-                fi
-            done
-        fi
-    fi
-    
-    # Android 16 / GMS 动态字体在 /data/fonts/files，切换字体后同步重绑。
-    # 恢复默认时只卸载 bind mount，不改写 GMS 原文件。
-    if [ -f "$MODULE_DIR/common/play_font_bridge.sh" ]; then
-        if [ "$font_id" = "default" ]; then
-            MODDIR="$MODULE_DIR" sh "$MODULE_DIR/common/play_font_bridge.sh" restore >/dev/null 2>&1 || true
-        else
-            MODDIR="$MODULE_DIR" sh "$MODULE_DIR/common/play_font_bridge.sh" now >/dev/null 2>&1 || true
-        fi
-    fi
-
-    # ========== 切换完成提示 ==========
-    # 字体文件已替换，只请求系统字体服务刷新。Android 16 的字体配置由
-    # FontManagerService 管理，直接删除 /data/system/font_config.xml 可能造成
-    # 服务重建期间应用闪退，因此不再手工删除系统配置文件。
-    cmd font system --update >/dev/null 2>&1 || true
-    if [ -f /system/bin/oplus-font ]; then
-        oplus-font refresh >/dev/null 2>&1 || true
-    fi
-    # 注意：需要手动重启手机才能完全生效
+    # 不热重启 SystemUI、不立即改写 /data/fonts、不在当前进程做 GMS bind。
+    # 统一在完整重启后由 post-fs-data/service 安全同步，避免第二次热切换死机。
+    printf 'font=%s\ntime=%s\n' "$font_id" "$(date +%s)" > "$TEXT_REBOOT_REQUIRED"
+    echo "$font_id" > "$CONFIG_DIR/last_switch_result.conf"
+    date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
+    chmod 644 "$TEXT_REBOOT_REQUIRED" 2>/dev/null || true
     return 0
 }
 
@@ -295,7 +376,7 @@ sync_preview_fonts() {
     latest_mtime=0
     
     # 获取用户字体目录最新修改时间
-    for src in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF; do
+    for src in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$src" ] || continue
         mtime=$(stat -c %Y "$src" 2>/dev/null || echo 0)
         [ "$mtime" -gt "$latest_mtime" ] && latest_mtime="$mtime"
@@ -303,7 +384,7 @@ sync_preview_fonts() {
     
     # 没有字体文件，清理预览目录
     if [ "$latest_mtime" -eq 0 ]; then
-        for f in "$preview_dir"/*.ttf "$preview_dir"/*.otf "$preview_dir"/*.TTF "$preview_dir"/*.OTF; do
+        for f in "$preview_dir"/*.ttf "$preview_dir"/*.otf "$preview_dir"/*.ttc "$preview_dir"/*.TTF "$preview_dir"/*.OTF "$preview_dir"/*.TTC; do
             [ -f "$f" ] && rm -f "$f" 2>/dev/null
         done
         rm -f "$cache_file" 2>/dev/null
@@ -320,11 +401,11 @@ sync_preview_fonts() {
     fi
     
     # 需要同步：清除旧文件，创建新链接
-    for f in "$preview_dir"/*.ttf "$preview_dir"/*.otf "$preview_dir"/*.TTF "$preview_dir"/*.OTF; do
+    for f in "$preview_dir"/*.ttf "$preview_dir"/*.otf "$preview_dir"/*.ttc "$preview_dir"/*.TTF "$preview_dir"/*.OTF "$preview_dir"/*.TTC; do
         [ -f "$f" ] && rm -f "$f" 2>/dev/null
     done
     
-    for src in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF; do
+    for src in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$src" ] || continue
         name=$(basename "$src")
         case "$name" in SysFont*|SysSans*) continue ;; esac
@@ -336,6 +417,76 @@ sync_preview_fonts() {
     echo "$latest_mtime" > "$cache_file" 2>/dev/null
 }
 
+
+sync_emoji_preview_fonts() {
+    _preview_dir="$MODULE_DIR/webroot/emoji"
+    mkdir -p "$_preview_dir" "$USER_EMOJI_DIR" 2>/dev/null || true
+    rm -f "$_preview_dir"/*.ttf "$_preview_dir"/*.otf "$_preview_dir"/*.ttc 2>/dev/null || true
+    for _src in "$USER_EMOJI_DIR"/*.ttf "$USER_EMOJI_DIR"/*.otf "$USER_EMOJI_DIR"/*.ttc \
+                "$USER_EMOJI_DIR"/*.TTF "$USER_EMOJI_DIR"/*.OTF "$USER_EMOJI_DIR"/*.TTC; do
+        [ -f "$_src" ] || continue
+        _name=$(basename "$_src")
+        ln -f "$_src" "$_preview_dir/$_name" 2>/dev/null || cp -f "$_src" "$_preview_dir/$_name" 2>/dev/null || true
+        chmod 644 "$_preview_dir/$_name" 2>/dev/null || true
+    done
+}
+
+write_emoji_task() {
+    _task="$1"; _state="$2"; _emoji="$3"; _message="$4"; _started="$5"; _finished="$6"
+    _tmp="${EMOJI_TASK_FILE}.tmp.$$"
+    {
+        printf 'task=%s\n' "$_task"
+        printf 'state=%s\n' "$_state"
+        printf 'emoji=%s\n' "$_emoji"
+        printf 'message=%s\n' "$_message"
+        printf 'started=%s\n' "$_started"
+        printf 'finished=%s\n' "$_finished"
+    } > "$_tmp"
+    mv -f "$_tmp" "$EMOJI_TASK_FILE" 2>/dev/null || true
+    chmod 644 "$EMOJI_TASK_FILE" 2>/dev/null || true
+}
+
+# ---------- 异步切换任务状态 ----------
+json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
+}
+
+write_switch_task() {
+    task_id="$1"
+    task_state="$2"
+    task_font="$3"
+    task_message="$4"
+    task_started="$5"
+    task_finished="$6"
+    tmp_file="${SWITCH_TASK_FILE}.tmp.$$"
+    {
+        printf 'task=%s\n' "$task_id"
+        printf 'state=%s\n' "$task_state"
+        printf 'font=%s\n' "$task_font"
+        printf 'message=%s\n' "$task_message"
+        printf 'started=%s\n' "$task_started"
+        printf 'finished=%s\n' "$task_finished"
+    } > "$tmp_file" 2>/dev/null
+    mv -f "$tmp_file" "$SWITCH_TASK_FILE" 2>/dev/null || true
+    chmod 644 "$SWITCH_TASK_FILE" 2>/dev/null || true
+}
+
+read_task_value() {
+    key="$1"
+    [ -f "$SWITCH_TASK_FILE" ] || return 0
+    sed -n "s/^${key}=//p" "$SWITCH_TASK_FILE" 2>/dev/null | head -n 1
+}
+
+# ---------- 用户反馈（系统通知为尽力而为，WebUI 弹窗为可靠兜底） ----------
+notify_user() {
+    _title="$1"; _message="$2"; _tag="${3:-luoshu}"
+    if command -v cmd >/dev/null 2>&1; then
+        cmd notification post -S bigtext -t "$_title" "$_tag" "$_message" >/dev/null 2>&1 && return 0
+        cmd notification post -t "$_title" "$_tag" "$_message" >/dev/null 2>&1 && return 0
+    fi
+    return 1
+}
+
 # ---------- WebUI 接口 ----------
 handle_action() {
     action="$1"
@@ -344,24 +495,9 @@ handle_action() {
 
     # 同步预览字体到 webroot/fonts/（供 WebUI 用相对路径加载，避免 file:// CORS 限制）
     sync_preview_fonts 2>/dev/null || true
+    sync_emoji_preview_fonts 2>/dev/null || true
 
-    # ── C 核心加速引擎桥接 ──
-    # 如果 C 二进制可用，用于 scan（纯扫描）操作。
-    # 注意：list 操作不走 C 核心，因为 WebUI 需要 file/date 字段用于字体预览，
-    # 而 C scan 输出不含这些字段。list 始终走 Shell 路径以保证数据完整。
-    NATIVE_BIN="$MODULE_DIR/system/bin/luoshud"
-    if [ -x "$NATIVE_BIN" ]; then
-        case "$action" in
-            scan)
-                output=$("$NATIVE_BIN" scan 2>/dev/null)
-                if [ -n "$output" ] && echo "$output" | grep -q '"status":"ok"'; then
-                    echo "$output" | sed "s/\"data\":{/\"data\":{\"current\":\"$current\",/"
-                    return 0
-                fi
-                log_debug "[bridge] C core failed, falling back to shell"
-                ;;
-        esac
-    fi
+    # WebUI 列表统一走受控 Shell 扫描，避免旧原生工具执行过时路径或清理逻辑。
 
     case "$action" in
         list)
@@ -376,81 +512,105 @@ handle_action() {
                 cat "$list_cache_json"
                 return 0
             fi
+            fam_list_file="$CONFIG_DIR/.webui_families.$$"
+            scan_user_families_lines > "$fam_list_file" 2>/dev/null || : > "$fam_list_file"
             {
-            user_fams=$(scan_user_families 2>/dev/null)
             first="true"
             total_bytes=0
-            font_count=0
-            
-            # 先计算总大小和数量
-            log_debug "[list] 开始扫描 $font_count 个字体族"
-            for fam in $user_fams; do
-                font_count=$((font_count + 1))
+            font_count=$(grep -c . "$fam_list_file" 2>/dev/null)
+            [ -n "$font_count" ] || font_count=0
+
+            while IFS= read -r fam; do
+                [ -n "$fam" ] || continue
                 wfile_tmp=$(get_weight_file "$fam" "regular")
                 [ -z "$wfile_tmp" ] && wfile_tmp=$(get_weight_file "$fam" "bold")
-                [ -z "$wfile_tmp" ] && {
-                    for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf; do
-                        [ -f "$f" ] || continue
-                        tn=$(basename "$f")
-                        tf=$(detect_font_family "$tn")
-                        [ "$tf" = "$fam" ] && { wfile_tmp="$f"; break; }
-                    done
-                }
                 if [ -f "$wfile_tmp" ]; then
-                    fb=$(ls -l "$wfile_tmp" 2>/dev/null | awk '{print $5}')
+                    fb=$(wc -c < "$wfile_tmp" 2>/dev/null | tr -d '[:space:]')
                     case "$fb" in ''|*[!0-9]*) fb=0 ;; esac
                     total_bytes=$((total_bytes + fb))
-                    log_debug "[list] fam=$fam file=$(basename "$wfile_tmp") size=$fb"
-                else
-                    log_debug "[list] fam=$fam wfile_tmp='' NOT FOUND"
                 fi
-            done
-            
-            printf '{"status":"ok","data":{"current":"%s","stats":{"count":%d,"totalSize":"%s"},"fonts":[' "$current" "$font_count" "$(format_filesize "$total_bytes")"
-            
-            for fam in $user_fams; do
+            done < "$fam_list_file"
+
+            native_available=false; [ -x "$NATIVE_BIN" ] && native_available=true
+            printf '{"status":"ok","data":{"current":"%s","scanner":{"primary":"shell","nativeAvailable":%s},"stats":{"count":%d,"totalSize":"%s"},"fonts":[' "$(json_escape "$current")" "$native_available" "$font_count" "$(format_filesize "$total_bytes")"
+
+            while IFS= read -r fam; do
+                [ -n "$fam" ] || continue
                 [ "$first" = "true" ] || printf ','
                 fw=$(scan_family_weights "$fam")
-                # 构建字重 JSON 数组
                 weights_json=""
-                for w in $(echo "$fw" | tr ',' ' '); do
+                _old_ifs="$IFS"; IFS=','
+                for w in $fw; do
+                    [ -n "$w" ] || continue
                     [ -n "$weights_json" ] && weights_json="$weights_json,"
-                    weights_json="$weights_json\"$w\""
+                    weights_json="$weights_json\"$(json_escape "$w")\""
                 done
-                # 获取该字体族第一个文件的路径
+                IFS="$_old_ifs"
                 wfile=$(get_weight_file "$fam" "regular")
                 [ -z "$wfile" ] && wfile=$(get_weight_file "$fam" "bold")
                 [ -z "$wfile" ] && wfile=$(get_weight_file "$fam" "medium")
-                [ -z "$wfile" ] && {
-                    for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf; do
-                        [ -f "$f" ] || continue
-                        tmp_name=$(basename "$f")
-                        tmp_fam=$(detect_font_family "$tmp_name")
-                        [ "$tmp_fam" = "$fam" ] && { wfile="$f"; break; }
-                    done
-                }
-                # 获取文件大小（ls -l + awk，不受文件名空格影响）
-                fbytes=$(ls -l "$wfile" 2>/dev/null | awk '{print $5}')
-                case "$fbytes" in ''|*[!0-9]*) fbytes=0 ;; esac
-                # 文件格式（纯 shell 提取扩展名）
-                fformat="${wfile##*.}"
-                case "$fformat" in [Tt][Tt][Ff]) fformat="TTF" ;; [Oo][Tt][Ff]) fformat="OTF" ;; *) fformat="$fformat" ;; esac
-                # 修改日期（ls -l 第6=月 第7=日 第8=时间/年，多方式尝试）
-                ftime=""
-                # 方式1: stat %y
-                ftime=$(stat -c '%y' "$wfile" 2>/dev/null | cut -c1-10)
-                # 方式2: 从 ls -l 构造（简化显示 月-日）
-                if [ -z "$ftime" ]; then
-                    ftime="$6-$7"
+                if [ ! -f "$wfile" ]; then
+                    while IFS= read -r _candidate; do
+                        [ -f "$_candidate" ] || continue
+                        [ "$(detect_font_family "$(basename "$_candidate")")" = "$fam" ] && { wfile="$_candidate"; break; }
+                    done <<EOF_FONTS
+$(find "$USER_FONTS_DIR" -maxdepth 1 -type f 2>/dev/null)
+EOF_FONTS
                 fi
-                # 使用相对路径 ./fonts/xxx.ttf（避免 file:// CORS 限制）
+                fbytes=$(wc -c < "$wfile" 2>/dev/null | tr -d '[:space:]')
+                case "$fbytes" in ''|*[!0-9]*) fbytes=0 ;; esac
+                if type font_detect_format >/dev/null 2>&1; then
+                    fformat=$(font_detect_format "$wfile" 2>/dev/null)
+                else
+                    fformat="${wfile##*.}"
+                    case "$fformat" in [Tt][Tt][Ff]) fformat="TTF" ;; [Oo][Tt][Ff]) fformat="OTF" ;; [Tt][Tt][Cc]) fformat="TTC" ;; *) fformat="UNKNOWN" ;; esac
+                fi
+                fvalid=true; fwarning=""; ferror=""
+                if type font_validate >/dev/null 2>&1; then
+                    if font_validate "$wfile" text 2>/dev/null; then
+                        fwarning="$FONT_CHECK_WARNING"
+                    else
+                        fvalid=false; ferror="$FONT_CHECK_ERROR"
+                    fi
+                fi
+                fvariable=false
+                if type is_variable_font >/dev/null 2>&1 && is_variable_font "$wfile"; then fvariable=true; fi
+                ftime=$(stat -c '%y' "$wfile" 2>/dev/null | cut -c1-10)
                 fname=$(basename "$wfile" 2>/dev/null)
-                printf '{"id":"%s","name":"%s","weights":[%s],"file":"./fonts/%s","size":"%s","bytes":%s,"format":"%s","date":"%s"}' "$fam" "$fam" "$weights_json" "$fname" "$(format_filesize "$fbytes")" "$fbytes" "$fformat" "$ftime"
+                printf '{"id":"%s","name":"%s","weights":[%s],"file":"./fonts/%s","size":"%s","bytes":%s,"format":"%s","valid":%s,"warning":"%s","error":"%s","variable":%s,"date":"%s"}' \
+                    "$(json_escape "$fam")" "$(json_escape "$fam")" "$weights_json" "$(json_escape "$fname")" "$(format_filesize "$fbytes")" "$fbytes" "$(json_escape "$fformat")" "$fvalid" "$(json_escape "$fwarning")" "$(json_escape "$ferror")" "$fvariable" "$(json_escape "$ftime")"
                 first="false"
-            done
+            done < "$fam_list_file"
             printf ']}}\n'
             } | tee "$list_cache_json"
+            rm -f "$fam_list_file" 2>/dev/null || true
             echo "$current_key" > "$list_cache_key" 2>/dev/null || true
+            ;;
+        native_status)
+            _legacy_count=0
+            for _nf in "$LEGACY_FONTS_DIR"/*.ttf "$LEGACY_FONTS_DIR"/*.otf "$LEGACY_FONTS_DIR"/*.ttc \
+                       "$LEGACY_FONTS_DIR"/*.TTF "$LEGACY_FONTS_DIR"/*.OTF "$LEGACY_FONTS_DIR"/*.TTC; do
+                [ -f "$_nf" ] && _legacy_count=$((_legacy_count + 1))
+            done
+            if [ -x "$NATIVE_BIN" ]; then
+                printf '{"status":"ok","data":{"available":true,"arch":"arm64-v8a","legacyFonts":%d,"mode":"diagnostic-fallback"}}\n' "$_legacy_count"
+            else
+                printf '{"status":"ok","data":{"available":false,"arch":"","legacyFonts":%d,"mode":"shell-only"}}\n' "$_legacy_count"
+            fi
+            ;;
+        native_scan)
+            if [ ! -x "$NATIVE_BIN" ]; then
+                printf '{"status":"error","message":"原生扫描器不可用"}\n'
+            elif [ ! -d "$LEGACY_FONTS_DIR" ]; then
+                printf '{"status":"error","message":"原生扫描器仅兼容旧目录 /sdcard/Fonts"}\n'
+            else
+                _native_out=$("$NATIVE_BIN" scan 2>/dev/null)
+                if [ -n "$_native_out" ] && printf '%s' "$_native_out" | grep -q '"status":"ok"'; then
+                    printf '%s\n' "$_native_out"
+                else
+                    printf '{"status":"error","message":"原生扫描失败，继续使用 Shell 扫描"}\n'
+                fi
+            fi
             ;;
         current)
             printf '{"status":"ok","data":{"current":"%s"}}\n' "$current"
@@ -462,6 +622,61 @@ handle_action() {
                 printf '{"status":"ok","data":{"font":"%s","message":"已切换，重启手机后生效"}}\n' "$param"
             else
                 printf '{"status":"error","message":"切换失败"}\n'
+            fi
+            ;;
+        switch_async)
+            # 创建可查询的后台任务。WebUI 只在 state=success 后显示“应用完成”。
+            if [ -z "$param" ]; then
+                printf '{"status":"error","message":"未指定字体"}\n'
+            elif [ -f "$TEXT_REBOOT_REQUIRED" ]; then
+                printf '{"status":"error","message":"本次开机已更改文字字体，请先重启手机"}\n'
+            else
+                if [ -e "$MODULE_DIR/.font_switch.lock" ]; then
+                    lock_pid=$(cat "$MODULE_DIR/.font_switch.lock" 2>/dev/null)
+                    if [ -n "$lock_pid" ] && kill -0 "$lock_pid" 2>/dev/null; then
+                        printf '{"status":"error","message":"字体正在切换中，请稍候"}\n'
+                        return 0
+                    fi
+                    rm -f "$MODULE_DIR/.font_switch.lock" 2>/dev/null || true
+                fi
+                mkdir -p "$MODULE_DIR/logs" "$CONFIG_DIR"
+                task_id="$(date +%s)-$$"
+                task_started=$(date +%s)
+                write_switch_task "$task_id" "running" "$param" "正在应用字体" "$task_started" ""
+                (
+                    echo "[$(date '+%Y-%m-%d %H:%M:%S')] async switch start: $param task=$task_id" >> "$MODULE_DIR/logs/fontswitch.log" 2>/dev/null
+                    if switch_font "$param" >> "$MODULE_DIR/logs/fontswitch.log" 2>&1; then
+                        task_finished=$(date +%s)
+                        write_switch_task "$task_id" "success" "$param" "字体已准备，必须重启手机后全局生效" "$task_started" "$task_finished"
+                        notify_user "洛书" "文字字体已准备：$param。请完整重启手机。" "luoshu-text" || true
+                        echo "[$(date '+%Y-%m-%d %H:%M:%S')] async switch success: $param task=$task_id" >> "$MODULE_DIR/logs/fontswitch.log" 2>/dev/null
+                    else
+                        task_rc=$?
+                        task_finished=$(date +%s)
+                        write_switch_task "$task_id" "failed" "$param" "切换失败（代码 $task_rc）" "$task_started" "$task_finished"
+                        echo "[$(date '+%Y-%m-%d %H:%M:%S')] async switch failed: $param rc=$task_rc task=$task_id" >> "$MODULE_DIR/logs/fontswitch.log" 2>/dev/null
+                    fi
+                ) &
+                printf '{"status":"ok","data":{"font":"%s","task":"%s","message":"任务已开始"}}\n' "$(json_escape "$param")" "$(json_escape "$task_id")"
+            fi
+            ;;
+        switch_status)
+            if [ ! -s "$SWITCH_TASK_FILE" ]; then
+                printf '{"status":"error","message":"暂无切换任务"}\n'
+            else
+                saved_task=$(read_task_value task)
+                if [ -n "$param" ] && [ "$param" != "$saved_task" ]; then
+                    printf '{"status":"error","message":"任务不存在或已被新任务替换"}\n'
+                else
+                    task_state=$(read_task_value state)
+                    task_font=$(read_task_value font)
+                    task_message=$(read_task_value message)
+                    task_started=$(read_task_value started)
+                    task_finished=$(read_task_value finished)
+                    printf '{"status":"ok","data":{"task":"%s","state":"%s","font":"%s","message":"%s","started":%s,"finished":%s}}\n' \
+                        "$(json_escape "$saved_task")" "$(json_escape "$task_state")" "$(json_escape "$task_font")" "$(json_escape "$task_message")" \
+                        "${task_started:-0}" "${task_finished:-0}"
+                fi
             fi
             ;;
         restart_ui)
@@ -478,20 +693,121 @@ handle_action() {
             recent_json=""
             if [ -f "$recent_file" ]; then
                 while IFS= read -r line; do
-                    line=$(echo "$line" | tr -d '[:space:]')
+                    line=$(printf '%s' "$line" | tr -d '\r\n')
                     [ -z "$line" ] && continue
                     [ -n "$recent_json" ] && recent_json="$recent_json,"
-                    recent_json="$recent_json\"$line\""
+                    recent_json="$recent_json\"$(json_escape "$line")\""
                 done < "$recent_file"
             fi
             printf '{"status":"ok","data":{"recent":[%s]}}\n' "$recent_json"
             ;;
+        report)
+            _report_font=""
+            [ "$current" = "default" ] || _report_font=$(find_text_font_file "$current")
+            _report_path=$(sh "$MODULE_DIR/common/font_report.sh" "$_report_font" 2>/dev/null | tail -n1)
+            if [ -n "$_report_path" ] && [ -f "$_report_path" ]; then
+                printf '{"status":"ok","data":{"path":"%s","message":"诊断报告已生成"}}\n' "$(json_escape "$_report_path")"
+            else
+                printf '{"status":"error","message":"诊断报告生成失败"}\n'
+            fi
+            ;;
+        validate)
+            _file=$(find_text_font_file "$param")
+            if [ -f "$_file" ] && type font_check_json >/dev/null 2>&1; then
+                _check=$(font_check_json "$_file" text 2>/dev/null | tr -d '\n')
+                printf '{"status":"ok","data":%s}\n' "$_check"
+            else
+                printf '{"status":"error","message":"未找到字体或检测器不可用"}\n'
+            fi
+            ;;
+        reboot_required)
+            _text=false; _emoji=false
+            [ -f "$TEXT_REBOOT_REQUIRED" ] && _text=true
+            [ -f "$EMOJI_REBOOT_REQUIRED" ] && _emoji=true
+            _required=false
+            if [ "$_text" = true ] || [ "$_emoji" = true ]; then _required=true; fi
+            printf '{"status":"ok","data":{"required":%s,"text":%s,"emoji":%s}}\n' "$_required" "$_text" "$_emoji"
+            ;;
+        reboot_device)
+            printf '{"status":"ok","data":{"message":"正在重启手机"}}\n'
+            (sleep 1; svc power reboot 2>/dev/null || reboot 2>/dev/null) &
+            ;;
+        emoji_list)
+            _current=$(get_current_emoji_id)
+            _first=true
+            printf '{"status":"ok","data":{"current":"%s","path":"%s","emojis":[' "$(json_escape "$_current")" "$(json_escape "$USER_EMOJI_DIR")"
+            for _f in "$USER_EMOJI_DIR"/*.ttf "$USER_EMOJI_DIR"/*.otf "$USER_EMOJI_DIR"/*.ttc \
+                      "$USER_EMOJI_DIR"/*.TTF "$USER_EMOJI_DIR"/*.OTF "$USER_EMOJI_DIR"/*.TTC; do
+                [ -f "$_f" ] || continue
+                _base=$(basename "$_f")
+                _id="${_base%.*}"
+                _bytes=$(wc -c < "$_f" 2>/dev/null | tr -d '[:space:]')
+                case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
+                _fmt=$(font_detect_format "$_f" 2>/dev/null || echo UNKNOWN)
+                _valid=false; _color=false; _warning=""; _error=""
+                if font_validate "$_f" emoji 2>/dev/null; then
+                    _valid=true; _color="$FONT_CHECK_COLOR"; _warning="$FONT_CHECK_WARNING"
+                else
+                    _error="$FONT_CHECK_ERROR"
+                fi
+                [ "$_first" = true ] || printf ','
+                printf '{"id":"%s","name":"%s","file":"./emoji/%s","size":"%s","bytes":%s,"format":"%s","valid":%s,"color":%s,"warning":"%s","error":"%s"}' \
+                    "$(json_escape "$_id")" "$(json_escape "$_id")" "$(json_escape "$_base")" "$(format_filesize "$_bytes")" "$_bytes" "$(json_escape "$_fmt")" "$_valid" "$_color" "$(json_escape "$_warning")" "$(json_escape "$_error")"
+                _first=false
+            done
+            printf ']}}\n'
+            ;;
+        emoji_switch_async)
+            if [ -z "$param" ]; then
+                printf '{"status":"error","message":"未指定 Emoji 字体"}\n'
+            elif [ -f "$EMOJI_REBOOT_REQUIRED" ]; then
+                printf '{"status":"error","message":"本次开机已更改 Emoji，请先重启手机"}\n'
+            else
+                _task="emoji-$(date +%s)-$$"; _started=$(date +%s)
+                write_emoji_task "$_task" running "$param" "正在应用 Emoji" "$_started" ""
+                (
+                    if switch_emoji "$param" >> "$MODULE_DIR/logs/fontswitch.log" 2>&1; then
+                        write_emoji_task "$_task" success "$param" "Emoji 已准备，重启后生效" "$_started" "$(date +%s)"
+                        notify_user "洛书" "Emoji 已准备：$param。请完整重启手机。" "luoshu-emoji" || true
+                    else
+                        _rc=$?
+                        write_emoji_task "$_task" failed "$param" "Emoji 应用失败（代码 $_rc）" "$_started" "$(date +%s)"
+                    fi
+                ) &
+                printf '{"status":"ok","data":{"task":"%s","emoji":"%s"}}\n' "$(json_escape "$_task")" "$(json_escape "$param")"
+            fi
+            ;;
+        emoji_status)
+            if [ ! -s "$EMOJI_TASK_FILE" ]; then
+                printf '{"status":"error","message":"暂无 Emoji 任务"}\n'
+            else
+                _saved=$(sed -n 's/^task=//p' "$EMOJI_TASK_FILE" | head -n1)
+                if [ -n "$param" ] && [ "$param" != "$_saved" ]; then
+                    printf '{"status":"error","message":"Emoji 任务不存在"}\n'
+                else
+                    _state=$(sed -n 's/^state=//p' "$EMOJI_TASK_FILE" | head -n1)
+                    _emoji=$(sed -n 's/^emoji=//p' "$EMOJI_TASK_FILE" | head -n1)
+                    _msg=$(sed -n 's/^message=//p' "$EMOJI_TASK_FILE" | head -n1)
+                    printf '{"status":"ok","data":{"task":"%s","state":"%s","emoji":"%s","message":"%s"}}\n' \
+                        "$(json_escape "$_saved")" "$(json_escape "$_state")" "$(json_escape "$_emoji")" "$(json_escape "$_msg")"
+                fi
+            fi
+            ;;
         delete)
             if [ -z "$param" ]; then
                 printf '{"status":"error","message":"未指定字体"}\n'
+            elif [ "$param" = "$current" ] && [ -f "$TEXT_REBOOT_REQUIRED" ]; then
+                printf '{"status":"error","message":"当前字体已等待重启，请先重启后再删除"}\n'
             else
+                if [ "$param" = "$current" ]; then
+                    if ! switch_font "default" >/dev/null 2>&1; then
+                        printf '{"status":"error","message":"无法先恢复系统默认字体"}\n'
+                        return 0
+                    fi
+                    current="default"
+                fi
                 del_count=0
-                for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF; do
+                for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
                     [ -f "$f" ] || continue
                     tmp_name=$(basename "$f")
                     tmp_fam=$(detect_font_family "$tmp_name")
@@ -500,10 +816,7 @@ handle_action() {
                     fi
                 done
                 if [ "$del_count" -gt 0 ]; then
-                    if [ "$param" = "$current" ]; then
-                        switch_font "default" 2>/dev/null || true
-                        echo "default" > "$ACTIVE_FONT_CONF"
-                    fi
+                    rm -f "$CONFIG_DIR/webui_font_list.key" "$CONFIG_DIR/webui_font_list.json" 2>/dev/null || true
                     printf '{"status":"ok","data":{"deleted":%d,"message":"已删除 %d 个文件"}}\n' "$del_count" "$del_count"
                 else
                     printf '{"status":"error","message":"未找到字体文件"}\n'
@@ -527,6 +840,10 @@ log_debug() {
 }
 
 # ---------- 命令行 ----------
+# 被 post-fs-data/customize source 时只提供函数，不能执行 CLI 或 exit 父脚本。
+case "${0##*/}" in
+    post-fs-data.sh|customize.sh|service.sh|uninstall.sh) return 0 2>/dev/null || true ;;
+esac
 case "$1" in
     切换|switch)
         [ -z "$2" ] && { echo "用法：洛书 切换 <字体名>"; return 1 2>/dev/null || exit 1; }
@@ -537,7 +854,7 @@ case "$1" in
         echo "╔══════════════════════════════════╗"
         printf '║  ✓ 已切换到：%-22s ║\n' "$2"
         echo "║  重启手机后字体完全生效          ║"
-        echo "║  或执行「洛书 重启界面」立即刷新 ║"
+        echo "║  请重启手机完成应用；重启前不可再次切换 ║"
         echo "╚══════════════════════════════════╝"
         echo ""
         ;;
@@ -557,7 +874,7 @@ case "$1" in
 
         idx=0
         if [ "$total" -eq 0 ]; then
-            echo "║  未找到字体，请将 .ttf 放入 /sdcard/Fonts/   ║"
+            echo "║  未找到字体，请将 .ttf 放入 /sdcard/LuoShu/fonts/   ║"
         else
             for fam in $fams; do
                 idx=$((idx + 1))
@@ -613,7 +930,7 @@ case "$1" in
         echo ""
         echo "  正在删除字体：$2 ..."
         del_count=0
-        for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF; do
+        for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
             [ -f "$f" ] || continue
             tmp_name=$(basename "$f")
             tmp_fam=$(detect_font_family "$tmp_name")
@@ -647,7 +964,7 @@ case "$1" in
     回滚|rollback)
         echo ""
         if [ -f "$CONFIG_DIR/previous_font.conf" ]; then
-            prev=$(head -n1 "$CONFIG_DIR/previous_font.conf" 2>/dev/null | tr -d '[:space:]')
+            prev=$(head -n1 "$CONFIG_DIR/previous_font.conf" 2>/dev/null | tr -d '\r\n')
             if [ -n "$prev" ]; then
                 switch_font "$prev"
                 echo "╔══════════════════════════════════╗"
@@ -673,7 +990,7 @@ case "$1" in
         current=$(get_current_font_id)
         echo ""
         echo "╔══════════════════════════════════════╗"
-        echo "║        洛 书  v12.8                   ║"
+        echo "║        洛 书  v13.3 Beta2                   ║"
         echo "║        演宇宙之理，塑文字之骨        ║"
         echo "╠══════════════════════════════════════╣"
         printf '║  当前字体：\033[1;36m%-24s\033[0m║\n' "$current"
@@ -687,7 +1004,7 @@ case "$1" in
         echo "║    洛书 刷新           刷新字体缓存  ║"
         echo "║    洛书 回滚           回滚上一字体  ║"
         echo "╠══════════════════════════════════════╣"
-        echo "║  切换后可「重启界面」立即生效       ║"
+        echo "║  切换后必须重启手机完成应用       ║"
         echo "║  或重启手机完全生效                  ║"
         echo "╚══════════════════════════════════════╝"
         echo ""

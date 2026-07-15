@@ -1,11 +1,15 @@
 // 洛书 WebUI - 支持 Magisk / KernelSU / SukiSU
-// v12.8 — MIUIX Layered UI
+// v13.3 Beta2 — safe reboot workflow + independent Emoji management
 
 import { exec } from './kernelsu.js';
+import { analyzeFontUrl, formatAnalysisReport } from './font_analyzer.js';
 
 const MODULE_DIR = '/data/adb/modules/LuoShu';
 const FONT_MANAGER = `${MODULE_DIR}/common/font_manager.sh`;
 const DATA_CACHE_KEY = 'luoshu_font_data_v2';
+const ANALYSIS_CACHE_KEY = 'luoshu_font_analysis_v2';
+const USAGE_CACHE_KEY = 'luoshu_font_usage_v1';
+const LAST_RESULT_KEY = 'luoshu_last_switch_result_v1';
 
 const WEIGHT_LABELS = {
     thin: '极细', light: '细体', regular: '常规',
@@ -183,29 +187,43 @@ const App = {
     sortMode: 'name',
     theme: null,            // 'light' | 'dark' | null (auto)
     favorites: new Set(),   // 收藏字体 ID 集合
+    usageCounts: {},
+    analysisCache: {},
+    lastSwitchResult: null,
     dataSignature: '',
     dockActive: '',
     searchTimer: null,
+    emojis: [],
+    currentEmoji: 'default',
+    textRebootRequired: false,
+    emojiRebootRequired: false,
+    pendingRiskFont: null,
+    pendingEmoji: null,
+    isEmojiSwitching: false,
 
     async init() {
         this.loadTheme();
         this.loadFavorites();
+        this.loadUsageCounts();
+        this.loadAnalysisCache();
+        this.loadLastSwitchResult();
         this.bindEvents();
         this.bindScrollHeader();
         const restored = this.restoreDataCache();
         if (!restored) this.showSkeleton();
         await this.loadData({ background: restored });
+        await Promise.all([this.loadEmojis(), this.loadRebootStatus()]);
         // 字体列表完成后再低优先级读取状态，避免多个 Root 命令争用启动时间。
         setTimeout(() => this.loadModuleInfo(), 0);
+        this.renderSwitchResult();
     },
 
     async loadModuleInfo() {
-        let version = 'v12.8';
+        let version = 'v13.3 Beta2';
         try {
             const prop = await this.execShell(`sed -n 's/^version=//p' ${MODULE_DIR}/module.prop | head -n 1`);
             const raw = (prop || '').trim();
-            const match = raw.match(/v?\d+(?:\.\d+)+/i);
-            if (match) version = match[0].startsWith('v') ? match[0] : `v${match[0]}`;
+            if (raw) version = raw.startsWith('v') ? raw : `v${raw}`;
         } catch (e) {
             console.warn('[洛书] 无法读取模块版本，使用内置版本', e);
         }
@@ -271,6 +289,284 @@ const App = {
         }
         this.saveFavorites();
         this.renderList();
+    },
+
+    loadUsageCounts() {
+        try { this.usageCounts = JSON.parse(localStorage.getItem(USAGE_CACHE_KEY) || '{}') || {}; }
+        catch (_) { this.usageCounts = {}; }
+    },
+    recordUsage(fontId) {
+        if (!fontId || fontId === 'default') return;
+        this.usageCounts[fontId] = (Number(this.usageCounts[fontId]) || 0) + 1;
+        localStorage.setItem(USAGE_CACHE_KEY, JSON.stringify(this.usageCounts));
+    },
+    loadAnalysisCache() {
+        try { this.analysisCache = JSON.parse(localStorage.getItem(ANALYSIS_CACHE_KEY) || '{}') || {}; }
+        catch (_) { this.analysisCache = {}; }
+    },
+    saveAnalysisCache() {
+        try { localStorage.setItem(ANALYSIS_CACHE_KEY, JSON.stringify(this.analysisCache)); }
+        catch (_) { /* WebView 存储不足时忽略 */ }
+    },
+    loadLastSwitchResult() {
+        try { this.lastSwitchResult = JSON.parse(localStorage.getItem(LAST_RESULT_KEY) || 'null'); }
+        catch (_) { this.lastSwitchResult = null; }
+    },
+    saveLastSwitchResult(result) {
+        this.lastSwitchResult = result;
+        localStorage.setItem(LAST_RESULT_KEY, JSON.stringify(result));
+        this.renderSwitchResult();
+    },
+    renderSwitchResult() {
+        const el = document.getElementById('switchResult');
+        if (!el) return;
+        const result = this.lastSwitchResult;
+        if (!result) { el.hidden = true; return; }
+        const ok = result.status === 'success';
+        const time = result.time ? new Date(result.time).toLocaleString([], { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '';
+        el.className = `switch-result ${ok ? 'success' : 'failed'}`;
+        el.innerHTML = `<span class="switch-result-icon">${ok ? '✓' : '!'}</span><span class="switch-result-copy"><strong>${ok ? '字体应用完成' : '字体应用失败'}</strong><small>${this.escape(result.font || '未知字体')}${time ? ` · ${time}` : ''}${result.message ? ` · ${this.escape(result.message)}` : ''}</small></span>`;
+        el.hidden = false;
+    },
+    analysisKey(font) {
+        return `${font.id}|${font.bytes || 0}|${font.date || ''}|${font.file || ''}`;
+    },
+    async analyzeFont(font, force = false) {
+        if (!font?.file) throw new Error('字体预览文件不可用');
+        const key = this.analysisKey(font);
+        if (!force && this.analysisCache[key]) return this.analysisCache[key];
+        const result = await analyzeFontUrl(font.file);
+        this.analysisCache[key] = result;
+        this.saveAnalysisCache();
+        return result;
+    },
+    coverageRow(label, item, tone = '') {
+        return `<div class="coverage-row"><span>${label}</span><div class="coverage-track"><i class="${tone}" style="width:${Math.max(2, item.percent)}%"></i></div><b>${item.percent}%</b></div>`;
+    },
+    renderAnalysis(container, font, result) {
+        if (!container) return;
+        const c = result.coverage;
+        const assessment = result.assessment;
+        const warningHtml = assessment.warnings.length
+            ? `<div class="analysis-warnings">${assessment.warnings.map(w => `<span>⚠ ${this.escape(w)}</span>`).join('')}</div>`
+            : '<div class="analysis-ok">✓ 未发现明显的字体文件风险</div>';
+        const axes = result.variable?.axes || [];
+        const axesHtml = axes.length ? `<div class="variable-panel"><div class="variable-title">可变字体轴 · ${axes.length} 个</div>${axes.map(a => `<div class="variable-axis"><b>${this.escape(a.tag)}</b><span>${a.min} — ${a.max}</span><small>默认 ${a.default}</small></div>`).join('')}<div class="analysis-note">系统会保留字体原始轴；具体字重是否被应用取决于 ROM 和目标字体映射。</div></div>` : '';
+        container.innerHTML = `
+            <div class="analysis-head"><div><small>字符抽样检测</small><strong>${assessment.label}</strong></div><span class="analysis-score ${assessment.level}">${assessment.score}</span></div>
+            <div class="coverage-list">
+                ${this.coverageRow('常用中文', c.cjk, c.cjk.percent < 70 ? 'warn' : '')}
+                ${this.coverageRow('英文字母', c.latin, c.latin.percent < 90 ? 'warn' : '')}
+                ${this.coverageRow('数字', c.digits, c.digits.percent < 100 ? 'warn' : '')}
+                ${this.coverageRow('标点符号', c.punctuation, c.punctuation.percent < 60 ? 'warn' : '')}
+                ${this.coverageRow('特殊符号', c.symbols, c.symbols.percent < 35 ? 'warn' : '')}
+                ${this.coverageRow('私用区', c.pua, c.pua.percent >= 22 ? 'danger' : 'muted')}
+            </div>
+            ${axesHtml}
+            ${warningHtml}
+            <div class="analysis-note">抽样结果只反映字体自身字符映射；缺失字符仍可能由 Android fallback 字体补齐。</div>
+            <button class="analysis-report-btn" id="copyAnalysisReportBtn" type="button">复制检测报告</button>`;
+        document.getElementById('copyAnalysisReportBtn')?.addEventListener('click', () => this.copyText(formatAnalysisReport(font, result), '检测报告已复制'));
+    },
+    async loadDetailAnalysis(font, force = false) {
+        const container = document.getElementById('fontAnalysis');
+        if (!container) return;
+        container.innerHTML = '<div class="analysis-loading"><span></span>正在读取字体字符映射…</div>';
+        try {
+            const result = await this.analyzeFont(font, force);
+            this.renderAnalysis(container, font, result);
+        } catch (e) {
+            container.innerHTML = `<div class="analysis-error"><strong>检测失败</strong><span>${this.escape((e && e.message) || String(e))}</span><button id="retryAnalysisBtn" type="button">重新检测</button></div>`;
+            document.getElementById('retryAnalysisBtn')?.addEventListener('click', () => this.loadDetailAnalysis(font, true));
+        }
+    },
+
+    async loadRebootStatus() {
+        try {
+            const output = await this.execShell(`${FONT_MANAGER} action reboot_required`);
+            const line = output.split('\n').find(v => v.trim().startsWith('{'));
+            const res = line ? JSON.parse(line.trim()) : null;
+            if (res?.status === 'ok') {
+                this.textRebootRequired = Boolean(res.data?.text);
+                this.emojiRebootRequired = Boolean(res.data?.emoji);
+                this.updateRebootUI();
+            }
+        } catch (e) {
+            console.warn('[洛书] 无法读取重启状态', e);
+        }
+    },
+
+    updateRebootUI() {
+        const pending = this.textRebootRequired || this.emojiRebootRequired;
+        document.body.classList.toggle('reboot-required', pending);
+        const btn = document.getElementById('rebootDeviceBtn');
+        const hint = btn?.querySelector('.action-btn-hint');
+        if (btn) btn.classList.toggle('pending', pending);
+        if (hint) hint.textContent = pending
+            ? `${this.textRebootRequired ? '文字' : ''}${this.textRebootRequired && this.emojiRebootRequired ? ' + ' : ''}${this.emojiRebootRequired ? 'Emoji' : ''}等待重启`
+            : '完成字体应用';
+        const badge = document.querySelector('.current-badge');
+        if (badge) badge.innerHTML = `<span class="pulse-dot"></span>${pending ? '配置待重启' : '正在使用'}`;
+    },
+
+    async loadEmojis() {
+        const container = document.getElementById('emojiList');
+        try {
+            const output = await this.execShell(`${FONT_MANAGER} action emoji_list`);
+            const line = output.split('\n').find(v => v.trim().startsWith('{'));
+            const res = line ? JSON.parse(line.trim()) : null;
+            if (res?.status !== 'ok') throw new Error(res?.message || 'Emoji 列表读取失败');
+            this.currentEmoji = res.data?.current || 'default';
+            this.emojis = Array.isArray(res.data?.emojis) ? res.data.emojis : [];
+            this.renderEmojis();
+        } catch (e) {
+            if (container) container.innerHTML = `<div class="emoji-empty">${this.escape((e && e.message) || String(e))}</div>`;
+        }
+    },
+
+    renderEmojis() {
+        const current = document.getElementById('emojiCurrent');
+        const list = document.getElementById('emojiList');
+        if (!current || !list) return;
+        const active = this.currentEmoji === 'default'
+            ? { name: '系统默认 Emoji', size: '保留 ROM 原始表情' }
+            : (this.emojis.find(v => v.id === this.currentEmoji) || { name: this.currentEmoji, size: '自定义 Emoji' });
+        current.innerHTML = `<span class="emoji-sample">😀</span><div><strong>${this.escape(active.name || active.id)}</strong><small>${this.escape(active.size || '/sdcard/LuoShu/emoji/')}</small></div><span class="emoji-active">使用中</span>`;
+        const items = [{ id:'default', name:'系统默认 Emoji', size:'不替换 NotoColorEmoji' }, ...this.emojis];
+        list.innerHTML = items.map(item => {
+            const isActive = item.id === this.currentEmoji;
+            const invalid = item.id !== 'default' && item.valid === false;
+            const note = invalid ? (item.error || '文件无效') : (item.warning || (item.format ? `${item.format} · ${item.size || ''}` : (item.size || '')));
+            return `<button class="emoji-card ${isActive ? 'active' : ''} ${invalid ? 'invalid' : ''}" data-emoji="${this.escape(item.id)}" type="button" ${isActive || invalid ? 'disabled' : ''}>
+                <span class="emoji-card-icon">${item.id === 'default' ? '🙂' : '😀'}</span>
+                <span class="emoji-card-copy"><strong>${this.escape(item.name || item.id)}</strong><small>${this.escape(note)}</small></span>
+                <span class="emoji-card-action">${invalid ? '无效' : (isActive ? '当前' : '选择')}</span>
+            </button>`;
+        }).join('');
+        list.querySelectorAll('[data-emoji]').forEach(btn => btn.addEventListener('click', () => this.switchEmoji(btn.dataset.emoji)));
+    },
+
+    async waitForEmojiTask(taskId, timeoutMs = 70000) {
+        const started = Date.now();
+        while (Date.now() - started < timeoutMs) {
+            await new Promise(resolve => setTimeout(resolve, 650));
+            const output = await this.execShell(`${FONT_MANAGER} action emoji_status ${this.shellQuote(taskId)}`);
+            const line = output.split('\n').find(v => v.trim().startsWith('{'));
+            if (!line) continue;
+            const res = JSON.parse(line.trim());
+            if (res.status !== 'ok' || !res.data) continue;
+            if (res.data.state === 'success' || res.data.state === 'failed') return res.data;
+        }
+        throw new Error('Emoji 任务超时，请查看日志');
+    },
+
+    async switchEmoji(emojiId, force = false) {
+        if (this.emojiRebootRequired) { this.showToast('本次开机已更改 Emoji，请先重启手机'); return; }
+        const targetEmoji = this.emojis.find(v => v.id === emojiId);
+        if (!force && emojiId !== 'default' && targetEmoji && targetEmoji.color === false) {
+            this.pendingEmoji = emojiId;
+            document.getElementById('riskMessage').innerHTML = `<strong>${this.escape(targetEmoji.name || emojiId)}</strong><br>• 未检测到常见彩色 Emoji 表，可能显示为单色或无法正常渲染`;
+            document.getElementById('riskModal').classList.add('show');
+            return;
+        }
+        if (this.isEmojiSwitching) { this.showToast('Emoji 正在处理'); return; }
+        this.isEmojiSwitching = true;
+        this.showToast('正在准备 Emoji…');
+        try {
+            const output = await this.execShell(`${FONT_MANAGER} action emoji_switch_async ${this.shellQuote(emojiId)}`);
+            const line = output.split('\n').find(v => v.trim().startsWith('{'));
+            const res = line ? JSON.parse(line.trim()) : null;
+            if (res?.status !== 'ok') throw new Error(res?.message || '无法启动 Emoji 任务');
+            const status = await this.waitForEmojiTask(res.data?.task);
+            if (status.state !== 'success') throw new Error(status.message || 'Emoji 应用失败');
+            this.currentEmoji = emojiId;
+            this.emojiRebootRequired = true;
+            this.renderEmojis();
+            this.updateRebootUI();
+            this.showApplyDone('Emoji', emojiId === 'default' ? '系统默认 Emoji' : emojiId);
+        } catch (e) {
+            this.showToast('Emoji 失败: ' + ((e && e.message) || String(e)));
+        } finally {
+            this.isEmojiSwitching = false;
+        }
+    },
+
+    async requestFontSwitch(fontId) {
+        if (this.textRebootRequired) { this.showToast('本次开机已更改文字字体，请先重启手机'); return; }
+        this.pendingFont = fontId;
+        if (fontId === 'default') {
+            document.getElementById('targetFont').textContent = '系统默认字体';
+            document.getElementById('modal').classList.add('show');
+            return;
+        }
+        const font = this.fonts.find(v => v.id === fontId);
+        if (!font) { this.showToast('字体不存在'); return; }
+        let validation;
+        try {
+            const validationOutput = await this.execShell(`${FONT_MANAGER} action validate ${this.shellQuote(fontId)}`);
+            const validationLine = validationOutput.split('\n').find(v => v.trim().startsWith('{'));
+            validation = validationLine ? JSON.parse(validationLine.trim()) : null;
+            if (validation?.status !== 'ok' || validation.data?.valid === false) {
+                throw new Error(validation?.message || validation?.data?.error || '字体文件未通过格式检测');
+            }
+        } catch (e) {
+            this.showToast('无法应用: ' + ((e && e.message) || String(e)));
+            return;
+        }
+        const risks = [];
+        if (validation.data?.warning) risks.push(validation.data.warning);
+        try {
+            const result = await this.analyzeFont(font);
+            risks.push(...(result.assessment?.warnings || []));
+            if ((result.coverage?.cjk?.percent || 0) < 55) risks.unshift('常用中文覆盖较低，可能出现漏字');
+            if ((result.coverage?.pua?.percent || 0) >= 22) risks.push('私用区字形较多，部分 ROM 图标可能异常');
+        } catch (_) {
+            risks.push('无法读取详细字符覆盖，请确认字体在当前 ROM 上可用');
+        }
+        if (risks.length) {
+            this.pendingRiskFont = fontId;
+            document.getElementById('riskMessage').innerHTML = `<strong>${this.escape(font.name || font.id)}</strong><br>${risks.slice(0,4).map(v => `• ${this.escape(v)}`).join('<br>')}`;
+            document.getElementById('riskModal').classList.add('show');
+            return;
+        }
+        document.getElementById('targetFont').textContent = font.name || font.id;
+        document.getElementById('modal').classList.add('show');
+    },
+
+    showApplyDone(kind, name) {
+        const message = document.getElementById('applyDoneMessage');
+        if (message) message.textContent = `${kind}「${name}」已准备，将在完整重启后安全生效。`;
+        document.getElementById('applyDoneModal')?.classList.add('show');
+    },
+
+    async rebootDevice() {
+        try {
+            this.showToast('正在重启手机…');
+            await this.execShell(`${FONT_MANAGER} action reboot_device`);
+        } catch (e) {
+            this.showToast('重启失败: ' + ((e && e.message) || String(e)));
+        }
+    },
+
+    async openPublicFolder(kind = 'fonts') {
+        const safeKind = kind === 'emoji' ? 'emoji' : 'fonts';
+        const path = `/sdcard/LuoShu/${safeKind}`;
+        const title = safeKind === 'emoji' ? 'Emoji' : '文字字体';
+        try { await this.execShell(`mkdir -p "${path}" && chmod 0777 "${path}" 2>/dev/null || true`); }
+        catch (_) { this.showToast('无法创建目录'); return; }
+        const docId = encodeURIComponent(`primary:LuoShu/${safeKind}`);
+        const intents = [
+            `am start --user 0 -a android.intent.action.OPEN_DOCUMENT_TREE --eu android.provider.extra.INITIAL_URI 'content://com.android.externalstorage.documents/document/${docId}' --activity-new-task`,
+            `am start --user 0 -a android.intent.action.VIEW -d 'content://com.android.externalstorage.documents/document/${docId}' -t 'vnd.android.document/directory' --activity-new-task`,
+            `am start --user 0 -a android.intent.action.VIEW -d 'file://${path}' -t 'resource/folder' --activity-new-task`
+        ];
+        for (const intent of intents) {
+            try {
+                const output = await this.execShell(`result=$(${intent} 2>&1); echo "$result"; echo "$result" | grep -Eqi 'Error|Exception|unable to resolve|not found' && exit 1 || exit 0`);
+                if (!/Error|Exception|unable to resolve|not found/i.test(output || '')) { this.showToast(`已打开${title}文件夹`); return; }
+            } catch (_) { /* try next */ }
+        }
+        await this.copyText(`${path}/`, `${title}路径已复制`);
     },
 
     async execShell(cmd) {
@@ -412,7 +708,7 @@ const App = {
         descEl.textContent = font && font.weights
             ? `字重: ${font.weights.map(w => WEIGHT_LABELS[w] || w).join(' / ')}`
             : '自定义字体';
-        mainEl.textContent = font ? font.name.substring(0, 4) : '洛书';
+        mainEl.textContent = font ? font.name : '洛书';
         fullEl.textContent = PREVIEW_CHARS_SMALL;
         formatEl.textContent = font ? (font.format || 'TTF') : 'TTF';
         sizeEl.textContent = font ? (font.size || '') : '';
@@ -445,6 +741,7 @@ const App = {
         switch (this.sortMode) {
             case 'size': list.sort((a, b) => (parseInt(b.bytes) || 0) - (parseInt(a.bytes) || 0)); break;
             case 'date': list.sort((a, b) => (b.date || '').localeCompare(a.date || '')); break;
+            case 'usage': list.sort((a, b) => (Number(this.usageCounts[b.id]) || 0) - (Number(this.usageCounts[a.id]) || 0)); break;
             default:
                 // 先按收藏排序（收藏在前），再按名称排序
                 list.sort((a, b) => {
@@ -495,7 +792,7 @@ const App = {
                     <div class="onboarding-title">欢迎使用洛书</div>
                     <div class="onboarding-subtitle">三步开始使用自定义字体</div>
                     <div class="onboarding-steps">
-                        <div class="onboarding-step"><div class="step-num">1</div><div class="step-content"><div class="step-title">准备字体</div><div class="step-desc">将 .ttf 字体文件放入<br><code>/sdcard/Fonts/</code> 目录</div></div></div>
+                        <div class="onboarding-step"><div class="step-num">1</div><div class="step-content"><div class="step-title">准备字体</div><div class="step-desc">将 .ttf 字体文件放入<br><code>/sdcard/LuoShu/fonts/</code> 目录</div></div></div>
                         <div class="onboarding-arrow">↓</div>
                         <div class="onboarding-step"><div class="step-num">2</div><div class="step-content"><div class="step-title">刷入模块</div><div class="step-desc">在 Magisk/KernelSU 中刷入本模块<br>用音量键选择字体</div></div></div>
                         <div class="onboarding-arrow">↓</div>
@@ -515,6 +812,7 @@ const App = {
         container.innerHTML = userFonts.map(font => {
             const isActive = font.id === this.currentFont;
             const isFav = this.favorites.has(font.id);
+            const isInvalid = font.valid === false;
             const safe = this.safeId(font.id);
             const previewFamily = font.file ? `'preview_${safe}', sans-serif` : '';
             const weightTags = (font.weights || []).map(w =>
@@ -525,7 +823,7 @@ const App = {
                 ? this.highlightText(font.name || font.id, this.searchQuery)
                 : this.escape(font.name || font.id);
             return `
-                <div class="font-card ${isActive ? 'active' : ''} ${isFav ? 'pinned' : ''}" data-id="${this.escape(font.id)}">
+                <div class="font-card ${isActive ? 'active' : ''} ${isFav ? 'pinned' : ''} ${isInvalid ? 'invalid' : ''}" data-id="${this.escape(font.id)}">
                     <div class="card-left">
                         <div class="card-cover" style="background:${gradient}">
                             <span class="card-cover-text" style="font-family:${previewFamily}">Aa</span>
@@ -533,7 +831,7 @@ const App = {
                         <div class="card-body">
                             <div class="card-title-row">
                                 <div class="card-title">${titleHtml}</div>
-                                ${isActive ? '<span class="card-status">✓ 使用中</span>' : ''}
+                                ${isInvalid ? '<span class="card-status invalid">无效文件</span>' : (isActive ? '<span class="card-status">✓ 使用中</span>' : '')}
                             </div>
                             <div class="card-weights">${weightTags}</div>
                             <div class="card-preview-row">
@@ -541,8 +839,8 @@ const App = {
                                 <span class="card-preview-small" style="font-family:${previewFamily}">${PREVIEW_CHARS_SMALL}</span>
                             </div>
                             <div class="card-meta">
-                                ${isActive ? '<span class="card-hint">点击查看详情</span>' : '<span class="card-hint">点击切换字体</span>'}
-                                <span class="card-fileinfo">${font.size || ''}${font.size && font.date ? ' · ' : ''}${font.date || ''}</span>
+                                ${isInvalid ? `<span class="card-hint danger">${this.escape(font.error || '文件格式无效')}</span>` : (isActive ? '<span class="card-hint">点击查看详情</span>' : '<span class="card-hint">点击切换字体</span>')}
+                                <span class="card-fileinfo">${this.usageCounts[font.id] ? `使用 ${this.usageCounts[font.id]} 次 · ` : ''}${font.size || ''}${font.size && font.date ? ' · ' : ''}${font.date || ''}</span>
                             </div>
                         </div>
                     </div>
@@ -606,7 +904,11 @@ const App = {
                 <div class="detail-row"><span class="detail-label">大小</span><span class="detail-value">${font.size || '未知'}</span></div>
                 <div class="detail-row"><span class="detail-label">日期</span><span class="detail-value">${font.date || '未知'}</span></div>
                 <div class="detail-row"><span class="detail-label">字重</span><span class="detail-value">${weightTags}</span></div>
+                <div class="detail-row"><span class="detail-label">可变字体</span><span class="detail-value">${font.variable ? '是（保留原始可变轴）' : '否'}</span></div>
+                <div class="detail-row"><span class="detail-label">文件检测</span><span class="detail-value ${font.valid === false ? 'danger-text' : ''}">${font.valid === false ? this.escape(font.error || '未通过') : '通过'}</span></div>
+                <div class="detail-row"><span class="detail-label">使用次数</span><span class="detail-value">${Number(this.usageCounts[font.id]) || 0} 次</span></div>
             </div>
+            <div class="font-analysis" id="fontAnalysis"><div class="analysis-loading"><span></span>正在读取字体字符映射…</div></div>
         `;
 
         // 绑定自定义预览输入事件
@@ -618,8 +920,8 @@ const App = {
             if (input && nameEl && subEl && smallEl) {
                 const handler = () => {
                     const val = input.value || ' ';
-                    nameEl.textContent = val.length > 12 ? val.substring(0, 12) + '…' : val;
-                    subEl.textContent = val.length > 20 ? val.substring(0, 20) + '…' : val;
+                    nameEl.textContent = val;
+                    subEl.textContent = val;
                     smallEl.textContent = val;
                 };
                 input.addEventListener('input', handler);
@@ -628,7 +930,13 @@ const App = {
 
         const switchBtn = document.getElementById('detailSwitchBtn');
         const deleteBtn = document.getElementById('detailDeleteBtn');
-        if (isActive) {
+        if (font.valid === false) {
+            switchBtn.textContent = '文件无效，不能应用';
+            switchBtn.disabled = true;
+            switchBtn.style.opacity = '0.5';
+            deleteBtn.style.display = '';
+            deleteBtn.onclick = () => { document.getElementById('detailModal').classList.remove('show'); this.deleteTarget = fontId; document.getElementById('deleteTarget').textContent = this.escape(fontId); document.getElementById('deleteModal').classList.add('show'); };
+        } else if (isActive) {
             switchBtn.textContent = '当前使用中';
             switchBtn.disabled = true;
             switchBtn.style.opacity = '0.5';
@@ -638,10 +946,11 @@ const App = {
             switchBtn.disabled = false;
             switchBtn.style.opacity = '1';
             deleteBtn.style.display = '';
-            switchBtn.onclick = () => { document.getElementById('detailModal').classList.remove('show'); this.switchFont(fontId); };
+            switchBtn.onclick = () => { document.getElementById('detailModal').classList.remove('show'); this.requestFontSwitch(fontId); };
             deleteBtn.onclick = () => { document.getElementById('detailModal').classList.remove('show'); this.deleteTarget = fontId; document.getElementById('deleteTarget').textContent = this.escape(fontId); document.getElementById('deleteModal').classList.add('show'); };
         }
         document.getElementById('detailModal').classList.add('show');
+        this.loadDetailAnalysis(font);
     },
 
     toggleSearch() {
@@ -706,8 +1015,8 @@ const App = {
     },
 
     cycleSort() {
-        const modes = ['name', 'size', 'date'];
-        const labels = { name: '名称', size: '大小', date: '日期' };
+        const modes = ['name', 'size', 'date', 'usage'];
+        const labels = { name: '名称', size: '大小', date: '日期', usage: '使用次数' };
         this.sortMode = modes[(modes.indexOf(this.sortMode) + 1) % modes.length];
         this.showToast(`已按${labels[this.sortMode]}排序`);
         this.renderList();
@@ -742,9 +1051,19 @@ const App = {
             this.searchTimer = setTimeout(() => { this.searchQuery = value; this.renderList(); }, 100);
         });
         document.getElementById('sortBtn')?.addEventListener('click', () => this.cycleSort());
+        document.getElementById('rebootDeviceBtn')?.addEventListener('click', () => document.getElementById('rebootDeviceModal')?.classList.add('show'));
+        document.getElementById('openEmojiFolderBtn')?.addEventListener('click', () => this.openPublicFolder('emoji'));
+        document.getElementById('moreOpenEmojiFolderBtn')?.addEventListener('click', () => this.openPublicFolder('emoji'));
 
         // 弹窗事件委托
-        const modalClose = (id) => document.getElementById(id).classList.remove('show');
+        const modalClose = (id) => document.getElementById(id)?.classList.remove('show');
+        document.getElementById('confirmRiskBtn')?.addEventListener('click', () => { const id = this.pendingRiskFont; const emoji = this.pendingEmoji; this.pendingRiskFont = null; this.pendingEmoji = null; modalClose('riskModal'); if (id) this.switchFont(id); else if (emoji) this.switchEmoji(emoji, true); });
+        document.getElementById('cancelRiskBtn')?.addEventListener('click', () => { this.pendingRiskFont = null; this.pendingEmoji = null; modalClose('riskModal'); });
+        document.getElementById('riskModal')?.addEventListener('click', e => { if (e.target.id === 'riskModal') modalClose('riskModal'); });
+        document.getElementById('rebootLaterBtn')?.addEventListener('click', () => modalClose('applyDoneModal'));
+        document.getElementById('rebootNowBtn')?.addEventListener('click', () => { modalClose('applyDoneModal'); this.rebootDevice(); });
+        document.getElementById('confirmRebootDeviceBtn')?.addEventListener('click', () => { modalClose('rebootDeviceModal'); this.rebootDevice(); });
+        document.getElementById('cancelRebootDeviceBtn')?.addEventListener('click', () => modalClose('rebootDeviceModal'));
         document.getElementById('confirmBtn').addEventListener('click', () => { modalClose('modal'); if (this.pendingFont) this.switchFont(this.pendingFont); });
         document.getElementById('cancelBtn').addEventListener('click', () => { modalClose('modal'); this.pendingFont = null; });
         document.getElementById('modal').addEventListener('click', (e) => { if (e.target.id === 'modal') modalClose('modal'); });
@@ -755,40 +1074,61 @@ const App = {
         document.getElementById('confirmRestartBtn').addEventListener('click', () => { modalClose('restartModal'); this.restartUI(); });
         document.getElementById('cancelRestartBtn').addEventListener('click', () => modalClose('restartModal'));
         document.getElementById('restartModal').addEventListener('click', (e) => { if (e.target.id === 'restartModal') modalClose('restartModal'); });
-        document.getElementById('resetDefaultBtn').addEventListener('click', () => { document.getElementById('targetFont').textContent = '系统默认'; this.pendingFont = 'default'; document.getElementById('modal').classList.add('show'); });
+        document.getElementById('resetDefaultBtn').addEventListener('click', () => this.requestFontSwitch('default'));
         document.getElementById('detailCancelBtn').addEventListener('click', () => modalClose('detailModal'));
         document.getElementById('detailModal').addEventListener('click', (e) => { if (e.target.id === 'detailModal') modalClose('detailModal'); });
         const closeHelp = () => { modalClose('helpModal'); this.updateDockFromScroll(); };
         document.getElementById('closeHelpBtn').addEventListener('click', closeHelp);
+        document.getElementById('closeHelpTopBtn')?.addEventListener('click', closeHelp);
+        document.getElementById('moreOpenFolderBtn')?.addEventListener('click', () => this.openPublicFolder('fonts'));
+        document.getElementById('generateReportBtn')?.addEventListener('click', () => this.generateReport());
+        document.getElementById('copyFontPathBtn')?.addEventListener('click', () => this.copyFontsPath());
         document.getElementById('helpModal').addEventListener('click', (e) => { if (e.target.id === 'helpModal') closeHelp(); });
     },
 
+    async waitForSwitchTask(taskId, timeoutMs = 70000) {
+        const started = Date.now();
+        while (Date.now() - started < timeoutMs) {
+            await new Promise(resolve => setTimeout(resolve, 650));
+            const output = await this.execShell(`${FONT_MANAGER} action switch_status ${this.shellQuote(taskId)}`);
+            const jsonLine = output.split('\n').find(l => l.trim().startsWith('{'));
+            if (!jsonLine) continue;
+            const res = JSON.parse(jsonLine.trim());
+            if (res.status !== 'ok' || !res.data) continue;
+            if (res.data.state === 'success' || res.data.state === 'failed') return res.data;
+        }
+        throw new Error('切换任务超时，请查看日志');
+    },
+
     async switchFont(fontId) {
-        // 防抖：切换进行中禁止重复点击，避免重复执行大量文件复制导致卡顿
-        if (this.isSwitching) return;
+        if (this.isSwitching) { this.showToast('字体切换正在进行中'); return; }
         this.isSwitching = true;
-        this.showToast(fontId === 'default' ? '正在恢复默认字体...' : '正在切换字体，请稍候...');
+        this.showToast(fontId === 'default' ? '正在恢复默认字体…' : '正在应用字体…');
         document.body.classList.add('switching');
         try {
-            const output = await this.execShell(`${FONT_MANAGER} action switch "${fontId}"`);
+            const output = await this.execShell(`${FONT_MANAGER} action switch_async ${this.shellQuote(fontId)}`);
             const jsonLine = output.split('\n').find(l => l.trim().startsWith('{'));
-            if (jsonLine) {
-                const res = JSON.parse(jsonLine.trim());
-                if (res.status === 'ok') {
-                    this.showToast(fontId === 'default' ? '✓ 已恢复默认字体' : '✓ 切换成功！重启手机后生效');
-                    // 更新页面与本地缓存（当前字体会自动置顶）。
-                    this.applyFontData({ current: fontId, fonts: this.fonts, stats: this.stats });
-                    // 平滑滚动到列表顶部，让置顶的当前字体可见
-                    requestAnimationFrame(() => {
-                        const el = document.getElementById('listSection');
-                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    });
-                } else {
-                    this.showToast(res.message || '切换失败');
-                }
-            }
+            if (!jsonLine) throw new Error('未收到切换任务信息');
+            const res = JSON.parse(jsonLine.trim());
+            if (res.status !== 'ok') throw new Error(res.message || '无法启动切换任务');
+            const taskId = res.data?.task;
+            if (!taskId) throw new Error('切换任务 ID 缺失');
+            const status = await this.waitForSwitchTask(taskId);
+            if (status.state !== 'success') throw new Error(status.message || '字体应用失败');
+
+            this.applyFontData({ current: fontId, fonts: this.fonts, stats: this.stats });
+            this.recordUsage(fontId);
+            const displayName = fontId === 'default' ? '系统默认字体' : (this.fonts.find(v => v.id === fontId)?.name || fontId);
+            this.saveLastSwitchResult({ status: 'success', font: displayName, time: Date.now(), message: status.message || '' });
+            this.textRebootRequired = true;
+            this.updateRebootUI();
+            this.showToast(fontId === 'default' ? '✓ 已准备恢复系统默认字体' : '✓ 字体已准备，重启后全局生效');
+            this.showApplyDone('文字字体', displayName);
+            this.renderList();
+            requestAnimationFrame(() => document.getElementById('currentCard')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
         } catch (e) {
             const msg = (e && e.message) ? e.message : String(e);
+            this.saveLastSwitchResult({ status: 'failed', font: fontId === 'default' ? '系统默认字体' : fontId, time: Date.now(), message: msg });
             this.showToast('切换失败: ' + msg);
         } finally {
             this.isSwitching = false;
@@ -799,18 +1139,21 @@ const App = {
     async deleteFont(fontId) {
         this.showToast('正在删除字体...');
         try {
-            const output = await this.execShell(`${FONT_MANAGER} action delete "${fontId}"`);
+            const output = await this.execShell(`${FONT_MANAGER} action delete ${this.shellQuote(fontId)}`);
             const jsonLine = output.split('\n').find(l => l.trim().startsWith('{'));
             if (jsonLine) {
                 const res = JSON.parse(jsonLine.trim());
                 if (res.status === 'ok') {
                     this.showToast(`✓ 已删除 ${fontId}`);
                     // 从本地数据中移除，立即刷新
+                    const deletingCurrent = this.currentFont === fontId;
                     const fonts = this.fonts.filter(f => f.id !== fontId);
-                    const current = this.currentFont === fontId ? 'default' : this.currentFont;
+                    const current = deletingCurrent ? 'default' : this.currentFont;
                     const totalBytes = fonts.reduce((sum, f) => sum + (parseInt(f.bytes) || 0), 0);
                     const formatSize = bytes => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
                     this.applyFontData({ current, fonts, stats: { count: fonts.length, totalSize: formatSize(totalBytes) } });
+                    await this.loadRebootStatus();
+                    if (deletingCurrent) this.showApplyDone('文字字体', '系统默认字体');
                 } else {
                     this.showToast(res.message || '删除失败');
                 }
@@ -845,13 +1188,60 @@ const App = {
             <div class="empty"><div class="empty-icon">⚠️</div><div class="empty-title">${this.escape(msg)}</div><div class="empty-desc">点击右上角刷新重试</div></div>`;
     },
 
-    async openFontsFolder() {
+    async openFontsFolder() { return this.openPublicFolder('fonts'); },
+
+    async generateReport() {
         try {
-            await this.execShell('[ -d /sdcard/Fonts ] || mkdir -p /sdcard/Fonts');
-            this.showToast('已创建 /sdcard/Fonts/ 目录，请将字体文件放入');
+            this.showToast('正在生成诊断报告…');
+            const output = await this.execShell(`${FONT_MANAGER} action report`);
+            const line = output.split('\n').find(v => v.trim().startsWith('{'));
+            const res = line ? JSON.parse(line.trim()) : null;
+            if (res?.status !== 'ok') throw new Error(res?.message || '生成失败');
+            await this.copyText(res.data?.path || '/sdcard/LuoShu/reports/', '报告已生成，路径已复制');
         } catch (e) {
-            this.showToast('无法创建目录');
+            this.showToast('报告失败: ' + ((e && e.message) || String(e)));
         }
+    },
+
+    async copyText(text, successMessage = '已复制') {
+        let copied = false;
+        try { await navigator.clipboard.writeText(text); copied = true; }
+        catch (_) {
+            const input = document.createElement('textarea');
+            input.value = text;
+            input.setAttribute('readonly', '');
+            input.style.cssText = 'position:fixed;left:-9999px;opacity:0';
+            document.body.appendChild(input);
+            input.select();
+            try { copied = document.execCommand('copy'); } catch (_) { copied = false; }
+            input.remove();
+        }
+        this.showToast(copied ? successMessage : '复制失败');
+        return copied;
+    },
+
+    async copyFontsPath(showFeedback = true) {
+        const path = '/sdcard/LuoShu/fonts/';
+        let copied = false;
+        try {
+            await navigator.clipboard.writeText(path);
+            copied = true;
+        } catch (_) {
+            const input = document.createElement('textarea');
+            input.value = path;
+            input.setAttribute('readonly', '');
+            input.style.cssText = 'position:fixed;left:-9999px;opacity:0';
+            document.body.appendChild(input);
+            input.select();
+            try { copied = document.execCommand('copy'); } catch (_) { copied = false; }
+            input.remove();
+        }
+        if (showFeedback) this.showToast(copied ? '已复制 /sdcard/LuoShu/fonts/' : '字体路径：/sdcard/LuoShu/fonts/');
+        return copied;
+    },
+
+    shellQuote(value) {
+        return "'" + String(value ?? '').replace(/'/g, "'\\''") + "'";
     },
 
     escape(str) {
@@ -859,4 +1249,5 @@ const App = {
     }
 };
 
+window.App = App;
 document.addEventListener('DOMContentLoaded', () => App.init());

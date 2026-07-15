@@ -3,7 +3,7 @@ set +e
 # ============================================================
 # 洛书 - 工具函数库 (util_functions.sh)
 # 作者：惜故里丶
-# 版本：v11.1
+# 版本：v13.3 Beta2
 # 功能：提供字体模块所需的所有通用工具函数
 # ============================================================
 
@@ -14,7 +14,27 @@ CONFIG_DIR="${MODULE_DIR}/config"
 FONT_DIR="${MODULE_DIR}/fonts"
 LOG_DIR="${MODULE_DIR}/logs"
 LOG_FILE="${LOG_DIR}/fontswitch.log"
-USER_FONTS_DIR="/sdcard/Fonts"
+LUOSHU_PUBLIC_DIR="/sdcard/LuoShu"
+USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
+USER_EMOJI_DIR="$LUOSHU_PUBLIC_DIR/emoji"
+USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
+LEGACY_FONTS_DIR="/sdcard/Fonts"
+
+
+# 创建公开目录并兼容迁移旧版 /sdcard/Fonts。迁移采用复制而不是移动，
+# 避免用户仍使用旧版模块时找不到原文件。
+ensure_public_storage() {
+    mkdir -p "$USER_FONTS_DIR" "$USER_EMOJI_DIR" "$USER_REPORT_DIR" 2>/dev/null || true
+    chmod 0775 "$LUOSHU_PUBLIC_DIR" "$USER_FONTS_DIR" "$USER_EMOJI_DIR" "$USER_REPORT_DIR" 2>/dev/null || true
+    if [ -d "$LEGACY_FONTS_DIR" ]; then
+        for _old in "$LEGACY_FONTS_DIR"/*.ttf "$LEGACY_FONTS_DIR"/*.otf "$LEGACY_FONTS_DIR"/*.ttc \
+                    "$LEGACY_FONTS_DIR"/*.TTF "$LEGACY_FONTS_DIR"/*.OTF "$LEGACY_FONTS_DIR"/*.TTC; do
+            [ -f "$_old" ] || continue
+            _name=$(basename "$_old")
+            [ -e "$USER_FONTS_DIR/$_name" ] || cp -f "$_old" "$USER_FONTS_DIR/$_name" 2>/dev/null || true
+        done
+    fi
+}
 
 # ---------- 颜色定义 ----------
 # Magisk ui_print 不支持 ANSI，只在终端使用
@@ -40,6 +60,7 @@ ANDROID_API=0
 # 初始化模块
 # ============================================================
 init_module() {
+    ensure_public_storage
     init_logging
     check_android_version
     check_magisk_version
@@ -133,7 +154,7 @@ check_magisk_version() {
 check_android_version() {
     ANDROID_API=0
     if [ -f /system/build.prop ]; then
-        ANDROID_API=$(grep "ro.build.version.sdk" /system/build.prop 2>/dev/null | cut -d'=' -f2 | tr -d '[:space:]')
+        ANDROID_API=$(grep -m1 '^ro.build.version.sdk=' /system/build.prop 2>/dev/null | cut -d'=' -f2 | tr -d '[:space:]')
     fi
     if [ -z "$ANDROID_API" ] || [ "$ANDROID_API" -eq 0 ] 2>/dev/null; then
         # fallback：通过 getprop
@@ -301,7 +322,7 @@ weight_sort_order() {
 scan_family_weights() {
     family="$1"
     weights=""
-    for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF; do
+    for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$f" ] || continue
         name=$(basename "$f")
         fam=$(detect_font_family "$name")
@@ -318,7 +339,7 @@ get_weight_file() {
     family="$1"
     target_w="$2"
     fallback_file=""
-    for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF; do
+    for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$f" ] || continue
         name=$(basename "$f")
         fam=$(detect_font_family "$name")
@@ -367,11 +388,11 @@ is_variable_font() {
     case "$basename" in
         *Variable*|*variable*|*VF*|*vf*|*VF*) return 0 ;;
     esac
-    # 通过文件头部检查（可变字体包含 'fvar' 表）
+    # 通过字体表检查（可变字体包含 fvar 表）；Android 环境没有 strings 时直接二进制搜索。
     if command -v strings >/dev/null 2>&1; then
-        if strings "$filepath" 2>/dev/null | grep -q "fvar"; then
-            return 0
-        fi
+        strings "$filepath" 2>/dev/null | grep -q "fvar" && return 0
+    else
+        grep -a -q "fvar" "$filepath" 2>/dev/null && return 0
     fi
     return 1
 }
@@ -396,7 +417,7 @@ read_font_config() {
     fi
 
     # 尝试从用户字体目录的配置读取
-    user_config="/sdcard/Fonts/$font_id.conf"
+    user_config="$USER_FONTS_DIR/$font_id.conf"
     if [ -f "$user_config" ]; then
         value=$(grep -E "^${key}=" "$user_config" 2>/dev/null | cut -d'=' -f2- | head -n1)
         if [ -n "$value" ]; then
@@ -458,11 +479,11 @@ read_font_config() {
 # ============================================================
 find_font_file() {
     font_id="$1"
-    search_dirs="/sdcard/Fonts $MODULE_DIR/system/fonts $MODULE_DIR/fonts"
+    search_dirs="$USER_FONTS_DIR $LEGACY_FONTS_DIR $MODULE_DIR/system/fonts $MODULE_DIR/fonts"
 
     for dir in $search_dirs; do
         [ -d "$dir" ] || continue
-        for f in "$dir"/*.ttf "$dir"/*.otf "$dir"/*.TTF "$dir"/*.OTF; do
+        for f in "$dir"/*.ttf "$dir"/*.otf "$dir"/*.ttc "$dir"/*.TTF "$dir"/*.OTF "$dir"/*.TTC; do
             [ -f "$f" ] || continue
             fam=$(detect_font_family "$(basename "$f")")
             if [ "$fam" = "$font_id" ]; then
@@ -481,7 +502,7 @@ scan_installed_families() {
     dir="${1:-$MODULE_DIR/system/fonts}"
     families=""
     if [ -d "$dir" ]; then
-        for f in "$dir"/*.ttf "$dir"/*.otf "$dir"/*.TTF "$dir"/*.OTF; do
+        for f in "$dir"/*.ttf "$dir"/*.otf "$dir"/*.ttc "$dir"/*.TTF "$dir"/*.OTF "$dir"/*.TTC; do
             [ -f "$f" ] || continue
             fam=$(detect_font_family "$(basename "$f")")
             case " $families " in
@@ -495,13 +516,13 @@ scan_installed_families() {
 }
 
 # ============================================================
-# 扫描用户字体（从 /sdcard/Fonts/）
+# 扫描用户字体（从 /sdcard/LuoShu/fonts/）
 # ============================================================
 scan_user_families() {
-    dir="/sdcard/Fonts"
+    dir="$USER_FONTS_DIR"
     families=""
     if [ -d "$dir" ]; then
-        for f in "$dir"/*.ttf "$dir"/*.otf "$dir"/*.TTF "$dir"/*.OTF; do
+        for f in "$dir"/*.ttf "$dir"/*.otf "$dir"/*.ttc "$dir"/*.TTF "$dir"/*.OTF "$dir"/*.TTC; do
             [ -f "$f" ] || continue
             fam=$(detect_font_family "$(basename "$f")")
             case " $families " in
@@ -594,14 +615,14 @@ get_current_font_id() {
     
     # 尝试读取配置文件
     if [ -f "$CONFIG_DIR/active_font.conf" ]; then
-        active=$(head -n1 "$CONFIG_DIR/active_font.conf" 2>/dev/null | tr -d '[:space:]')
+        active=$(head -n1 "$CONFIG_DIR/active_font.conf" 2>/dev/null | tr -d '\r\n')
     fi
     
     # 如果配置是 default 或空，推断实际字体
     if [ -z "$active" ] || [ "$active" = "default" ]; then
         installed=""
         if [ -d "$MODULE_DIR/system/fonts" ]; then
-            for f in "$MODULE_DIR/system/fonts"/*.ttf "$MODULE_DIR/system/fonts"/*.otf; do
+            for f in "$MODULE_DIR/system/fonts"/*.ttf "$MODULE_DIR/system/fonts"/*.otf "$MODULE_DIR/system/fonts"/*.ttc; do
                 [ -f "$f" ] || continue
                 name=$(basename "$f")
                 case "$name" in
@@ -611,9 +632,9 @@ get_current_font_id() {
                 break
             done
         fi
-        # system/fonts 没找到则扫描 /sdcard/Fonts/
+        # system/fonts 没找到则扫描公开字体目录
         if [ -z "$installed" ] && [ -d "$USER_FONTS_DIR" ]; then
-            for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf; do
+            for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
                 [ -f "$f" ] || continue
                 installed=$(detect_font_family "$(basename "$f")")
                 break
@@ -645,7 +666,7 @@ backup_original_fonts() {
     # 尝试从挂载点查找原始字体
     sys_fonts="/system/fonts"
     if [ -d "$sys_fonts" ]; then
-        for f in "$sys_fonts"/*.ttf "$sys_fonts"/*.otf; do
+        for f in "$sys_fonts"/*.ttf "$sys_fonts"/*.otf "$sys_fonts"/*.ttc; do
             [ -f "$f" ] || continue
             cp -f "$f" "$backup_dir/" 2>/dev/null || true
         done
@@ -666,7 +687,7 @@ set_font_permissions() {
     chmod 755 "$target_dir" 2>/dev/null || true
 
     # 设置字体文件权限
-    for f in "$target_dir"/*.ttf "$target_dir"/*.otf "$target_dir"/*.TTF "$target_dir"/*.OTF; do
+    for f in "$target_dir"/*.ttf "$target_dir"/*.otf "$target_dir"/*.ttc "$target_dir"/*.TTF "$target_dir"/*.OTF "$target_dir"/*.TTC; do
         [ -f "$f" ] || continue
         chown 0:0 "$f" 2>/dev/null || true
         chmod 644 "$f" 2>/dev/null || true
