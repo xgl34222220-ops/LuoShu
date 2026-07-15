@@ -1,0 +1,34 @@
+name: 兼容问题
+description: 报告字体未替换、乱码、闪退或 WebUI 问题
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 请先移除旧字体模块冲突，并对日志进行脱敏。
+  - type: input
+    id: device
+    attributes:
+      label: 设备与 ROM
+      placeholder: 一加 15 / ColorOS 16
+    validations:
+      required: true
+  - type: input
+    id: android
+    attributes:
+      label: Android 与 Root 环境
+      placeholder: Android 16 / KernelSU 版本
+    validations:
+      required: true
+  - type: textarea
+    id: issue
+    attributes:
+      label: 问题与复现步骤
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 脱敏日志
+      render: shell
+
