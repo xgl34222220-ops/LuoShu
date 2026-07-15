@@ -1,0 +1,145 @@
+#!/system/bin/sh
+# 洛书 v12.0 - Android 16 / GMS 动态字体桥接
+# 只做临时 bind mount，不删除也不改写 /data/fonts 中的原文件。
+
+set +e
+
+MODDIR="${MODDIR:-/data/adb/modules/LuoShu}"
+LOG_FILE="$MODDIR/logs/fontswitch.log"
+ACTION="${1:-now}"
+
+bridge_log() {
+    mkdir -p "$MODDIR/logs" 2>/dev/null || true
+    echo "[$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)] [GMS-BRIDGE] $*" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+font_size() {
+    wc -c < "$1" 2>/dev/null | tr -d '[:space:]'
+}
+
+valid_source() {
+    [ -f "$1" ] || return 1
+    _size=$(font_size "$1")
+    case "$_size" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$_size" -ge 1024 ]
+}
+
+is_variable_font() {
+    # OpenType 可变字体包含 fvar 表。grep 只检查二进制表标记，不修改文件。
+    grep -a -q 'fvar' "$1" 2>/dev/null
+}
+
+source_for_name() {
+    _name="$1"
+    _exact="$MODDIR/system/fonts/$_name"
+    if valid_source "$_exact"; then
+        echo "$_exact"
+        return 0
+    fi
+    case "$_name" in
+        *Bold*|*-700-*) _fallback="$MODDIR/system/fonts/Roboto-Bold.ttf" ;;
+        *Medium*|*-500-*) _fallback="$MODDIR/system/fonts/Roboto-Medium.ttf" ;;
+        *) _fallback="$MODDIR/system/fonts/Roboto-Regular.ttf" ;;
+    esac
+    valid_source "$_fallback" && echo "$_fallback"
+}
+
+namespace_pids() {
+    {
+        echo 1
+        pidof zygote64 zygote zygote_ocomp system_server 2>/dev/null
+        pidof com.android.vending 2>/dev/null
+        pidof com.google.android.gms com.google.android.gms.persistent com.google.android.gms.unstable 2>/dev/null
+    } | tr ' ' '\n' | awk '/^[0-9]+$/ && !seen[$0]++'
+}
+
+do_bind() {
+    _src="$1"
+    _target="$2"
+    _ok=0
+    # KernelSU/Zygisk Next 可能让 Play、GMS、zygote 处于不同挂载命名空间。
+    # 对已知关键进程逐个挂载，不能只改 PID 1。
+    if command -v nsenter >/dev/null 2>&1; then
+        for _pid in $(namespace_pids); do
+            nsenter -t "$_pid" -m -- mount --bind "$_src" "$_target" >/dev/null 2>&1 && _ok=1
+        done
+    fi
+    mount --bind "$_src" "$_target" >/dev/null 2>&1 && _ok=1
+    [ "$_ok" -eq 1 ]
+}
+
+do_umount() {
+    _target="$1"
+    if command -v nsenter >/dev/null 2>&1; then
+        _zygote=$(pidof zygote64 2>/dev/null | awk '{print $1}')
+        [ -z "$_zygote" ] && _zygote=$(pidof zygote 2>/dev/null | awk '{print $1}')
+        [ -n "$_zygote" ] && nsenter -t "$_zygote" -m -- umount "$_target" >/dev/null 2>&1 && return 0
+        nsenter -t 1 -m -- umount "$_target" >/dev/null 2>&1 && return 0
+    fi
+    umount "$_target" >/dev/null 2>&1
+}
+
+restore_mounts() {
+    _restored=0
+    for _target in /data/fonts/files/*/GoogleSans*.ttf; do
+        [ -f "$_target" ] || continue
+        do_umount "$_target" && _restored=$((_restored + 1))
+    done
+    for _target in /data/user/0/com.google.android.gms/files/fonts/opentype/Google_Sans*.ttf; do
+        [ -f "$_target" ] || continue
+        do_umount "$_target" && _restored=$((_restored + 1))
+    done
+    bridge_log "恢复动态 Google Sans 挂载：$_restored"
+}
+
+[ "$ACTION" = "restore" ] && { restore_mounts; exit 0; }
+
+_attempts=1
+[ "$ACTION" = "boot" ] && _attempts=9
+_attempt=1
+
+while [ "$_attempt" -le "$_attempts" ]; do
+    _found=0
+    _mounted=0
+    _skipped=0
+    _failed=0
+    for _target in \
+        /data/fonts/files/*/GoogleSans*.ttf \
+        /data/user/0/com.google.android.gms/files/fonts/opentype/Google_Sans*.ttf; do
+        [ -f "$_target" ] || continue
+        _found=$((_found + 1))
+        _name=$(basename "$_target")
+        _src=$(source_for_name "$_name")
+        if [ -z "$_src" ]; then
+            _failed=$((_failed + 1))
+            continue
+        fi
+        case "$_name" in
+            *Flex*|*Code*)
+                _skipped=$((_skipped + 1))
+                bridge_log "保留 $_name 原版：Flex/Code 不用静态正文字体冒充"
+                continue
+                ;;
+        esac
+        if do_bind "$_src" "$_target"; then
+            _mounted=$((_mounted + 1))
+        else
+            _failed=$((_failed + 1))
+        fi
+    done
+
+    if [ "$_found" -gt 0 ]; then
+        bridge_log "动态 Google Sans：发现=$_found 成功=$_mounted 跳过=$_skipped 失败=$_failed"
+        if [ "$_mounted" -gt 0 ]; then
+            cmd font system --update >/dev/null 2>&1 || true
+            am force-stop com.android.vending >/dev/null 2>&1 || true
+        fi
+        exit 0
+    fi
+
+    [ "$_attempt" -lt "$_attempts" ] && sleep 10
+    _attempt=$((_attempt + 1))
+done
+
+bridge_log "动态 Google Sans：两个已知目录均未发现目标文件"
+exit 0
