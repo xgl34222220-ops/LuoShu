@@ -18,13 +18,12 @@ jobs:
         with:
           node-version: 22
       - name: Check source
-        run: ./scripts/check.sh
+        run: sh ./scripts/check.sh
       - name: Build flashable module
-        run: ./scripts/build.sh
+        run: sh ./scripts/build.sh
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: LuoShu-module
           path: dist/*.zip
           if-no-files-found: error
-
