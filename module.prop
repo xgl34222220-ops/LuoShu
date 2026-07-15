@@ -1,0 +1,8 @@
+id=LuoShu
+name=洛书
+version=v12.8 MIUIX Layered
+versionCode=12080
+author=惜故里丶
+description=全局替换手机中文、英文和数字字体。兼容 Android 16、ColorOS 16 和 HyperOS 3。
+updateJson=
+webroot=webroot
