@@ -19,6 +19,7 @@ on:
       - magic
       - 兼容与目录说明.txt
       - CHANGELOG.md
+      - RELEASE_NOTES_v14.md
       - .github/workflows/release.yml
 
 permissions:
@@ -42,11 +43,15 @@ jobs:
           tag="$(printf '%s' "$version" | sed 's#[ /]#-#g')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          awk -v target="## $version" '
-            $0 == target { found=1; next }
-            found && /^## / { exit }
-            found { print }
-          ' CHANGELOG.md > release-notes.md
+          if [ "$version" = "v14" ] && [ -s RELEASE_NOTES_v14.md ]; then
+            cp RELEASE_NOTES_v14.md release-notes.md
+          else
+            awk -v target="## $version" '
+              $0 == target { found=1; next }
+              found && /^## / { exit }
+              found { print }
+            ' CHANGELOG.md > release-notes.md
+          fi
           test -s release-notes.md || printf '洛书 %s 自动构建发布。\n' "$version" > release-notes.md
       - name: Publish GitHub release
         env:
