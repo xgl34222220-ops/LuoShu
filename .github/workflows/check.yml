@@ -35,7 +35,12 @@ jobs:
         with:
           node-version: 22
       - name: Run source and stability checks
-        run: sh ./scripts/check.sh
+        shell: bash
+        run: |
+          if ! sh -x ./scripts/check.sh > /tmp/luoshu-check.log 2>&1; then
+            tail -n 50 /tmp/luoshu-check.log
+            exit 1
+          fi
       - name: Build test package
         run: sh ./scripts/build.sh
       - name: Inspect package
