@@ -35,7 +35,20 @@ jobs:
         with:
           node-version: 22
       - name: Run source and stability checks
-        run: sh ./scripts/check.sh
+        shell: bash
+        run: |
+          set +e
+          sh -x ./scripts/check.sh > check-output.txt 2>&1
+          status=$?
+          tail -n 160 check-output.txt
+          exit "$status"
+      - name: Upload check log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-check-log
+          path: check-output.txt
+          if-no-files-found: ignore
       - name: Build test package
         run: sh ./scripts/build.sh
       - name: Inspect package
@@ -44,24 +57,26 @@ jobs:
           asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
           test -n "$asset"
           unzip -t "$asset"
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "v13.5 Stable Hotfix5"
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "13505"
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "v13.6 Beta1"
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "13601"
           unzip -l "$asset" | grep -q 'common/stability.sh'
           unzip -l "$asset" | grep -q 'common/meta_overlay_compat'
           unzip -l "$asset" | grep -q 'common/font_report'
+          unzip -l "$asset" | grep -q 'common/db_engine'
+          unzip -l "$asset" | grep -q 'config/mount_mode.conf'
           ! unzip -l "$asset" | grep -qE 'common/(mount_compat|font_report|play_font_bridge|wechat_xweb_bridge)\.sh$'
           unzip -l "$asset" | grep -q 'webroot/stability.js'
-          unzip -p "$asset" webroot/index.html | grep -q 'stability.js?v=13505'
+          unzip -p "$asset" webroot/index.html | grep -q 'stability.js?v=13601'
           unzip -p "$asset" webroot/index.html | grep -q 'stability-critical-style'
           unzip -p "$asset" webroot/stability.js | grep -q 'data-stability-action="snapshot"'
           unzip -p "$asset" common/stability.sh | grep -q 'save_snapshot|manual_snapshot'
           unzip -p "$asset" common/font_manager.sh | grep -q 'common/meta_overlay_compat'
-          unzip -p "$asset" common/rom_adapters.sh | grep -q 'LUOSHU_HYBRID_STAGE_BUDGET'
-          ! unzip -p "$asset" common/rom_adapters.sh | grep -q 'LUOSHU_HYBRID_COMPACT_ALIASES'
-          ! unzip -p "$asset" common/font_manager.sh | grep -q 'luoshu_link_compact_alias'
+          unzip -p "$asset" common/rom_adapters.sh | grep -q 'luoshu_db_use_direct'
+          unzip -p "$asset" common/db_engine | grep -q 'nsenter -t 1 -m'
           test "$(unzip -p "$asset" common/font_manager.sh | grep -c 'luoshu_sync_meta_payload')" -ge 2
           unzip -p "$asset" post-fs-data.sh | grep -q 'luoshu_sync_meta_payload'
-          unzip -p "$asset" service.sh | grep -q 'luoshu_sync_meta_payload'
+          unzip -p "$asset" post-fs-data.sh | grep -q 'db_engine.*apply'
+          unzip -p "$asset" service.sh | grep -q 'db_engine.*verify'
           unzip -p "$asset" customize.sh | grep -q 'command mkdir'
           unzip -p "$asset" post-fs-data.sh | grep -q 'command mkdir'
           unzip -p "$asset" uninstall.sh | grep -q 'command mkdir'
@@ -72,7 +87,7 @@ jobs:
           rm -rf "$tmp"
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v13.5-Stable-Hotfix5-test
+          name: LuoShu-v13.6-Beta1-test
           path: |
             dist/*.zip
             dist/*.sha256
