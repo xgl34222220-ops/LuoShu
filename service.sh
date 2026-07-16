@@ -2,8 +2,8 @@
 # ============================================================
 # 洛书 - 服务脚本 (service.sh)
 # 作者：惜故里丶
-# 版本：v13.4 Beta2 Hotfix6
-# 功能：系统启动后刷新字体缓存并桥接 GMS 动态字体
+# 版本：v13.5 Stable
+# 功能：启动后建立稳定快照、刷新字体缓存并桥接 GMS 动态字体
 # ============================================================
 
 MODDIR="${0%/*}"
@@ -33,7 +33,16 @@ MODDIR="${0%/*}"
         fi
     }
 
-    log_service "INFO" "服务脚本开始执行 (v13.4 Beta2 Hotfix6)"
+    log_service "INFO" "服务脚本开始执行 (v13.5 Stable)"
+
+    # 系统完成启动后才把当前配置记为“稳定配置”。若配置与上次不同，
+    # 自动把旧配置轮换到 previous.state，供 WebUI 一键回滚。
+    if [ -x "$MODDIR/common/stability.sh" ]; then
+        SNAPSHOT_RESULT=$(MODDIR="$MODDIR" sh "$MODDIR/common/stability.sh" boot_snapshot 2>/dev/null)
+        log_service "INFO" "稳定快照：${SNAPSHOT_RESULT:-无返回}"
+    else
+        log_service "INFO" "稳定快照组件不可用"
+    fi
 
     # 恢复洛书保存的 Android 全局字重调节。系统更新或 ROM 启动流程可能会
     # 暂时重置 secure.font_weight_adjustment，因此每次开机只重写已保存值。
