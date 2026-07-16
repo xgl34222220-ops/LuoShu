@@ -1,6 +1,7 @@
 #!/system/bin/sh
-# 洛书 v13.6 Beta5 - Android 16 / GMS、Google 与 Gemini 动态字体桥接
-# 只做临时 bind mount，不删除也不改写 /data/fonts 中的原文件。
+# 洛书 v13.6 Beta6 - Android 16 / GMS、Google 与 Gemini 动态字体桥接
+# ColorOS 临时 bind 动态字体；HyperOS 关闭 GMS 动态字体提供器，
+# 让 Play 回退到已经替换的系统 sans-serif，不删除动态字体文件。
 
 set +e
 
@@ -8,10 +9,79 @@ MODDIR="${MODDIR:-/data/adb/modules/LuoShu}"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
 ACTION="${1:-now}"
 BRIDGE_DATA_DIR="${BRIDGE_DATA_DIR:-/data/fonts/luoshu}"
+GLOBAL_STATE_DIR="${GLOBAL_STATE_DIR:-/data/adb/luoshu}"
+COMPONENT_STATE_FILE="$GLOBAL_STATE_DIR/gms_font_components.conf"
+GMS_FONTS_PROVIDER="com.google.android.gms/com.google.android.gms.fonts.provider.FontsProvider"
+GMS_FONTS_UPDATER="com.google.android.gms/com.google.android.gms.fonts.update.UpdateSchedulerService"
 
 bridge_log() {
     mkdir -p "$MODDIR/logs" 2>/dev/null || true
     echo "[$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)] [GMS-BRIDGE] $*" >> "$LOG_FILE" 2>/dev/null || true
+}
+
+is_hyperos() {
+    [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)" ] || \
+        [ -n "$(getprop ro.miui.ui.version.name 2>/dev/null)" ]
+}
+
+normalize_component_state() {
+    _state=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | tail -n1)
+    case "$_state" in
+        *disabled-until-used*|*disabled_until_used*|4) echo disabled-until-used ;;
+        *disabled-user*|*disabled_user*|3) echo disabled-user ;;
+        *disabled*|2) echo disabled ;;
+        *enabled*|1) echo enabled ;;
+        *default*|0|'') echo default ;;
+        *) echo default ;;
+    esac
+}
+
+get_component_state() {
+    _component="$1"
+    _value=$(cmd package get-component-enabled-setting --user 0 "$_component" 2>/dev/null)
+    [ -n "$_value" ] || _value=$(pm get-component-enabled-setting --user 0 "$_component" 2>/dev/null)
+    normalize_component_state "$_value"
+}
+
+save_component_states_once() {
+    [ -f "$COMPONENT_STATE_FILE" ] && return 0
+    mkdir -p "$GLOBAL_STATE_DIR" 2>/dev/null || return 1
+    chmod 0700 "$GLOBAL_STATE_DIR" 2>/dev/null || true
+    {
+        echo "provider=$(get_component_state "$GMS_FONTS_PROVIDER")"
+        echo "updater=$(get_component_state "$GMS_FONTS_UPDATER")"
+    } > "$COMPONENT_STATE_FILE" 2>/dev/null || return 1
+    chmod 0600 "$COMPONENT_STATE_FILE" 2>/dev/null || true
+    bridge_log "已保存 GMS 字体组件原始状态"
+}
+
+disable_component() {
+    _component="$1"
+    pm disable --user 0 "$_component" >/dev/null 2>&1 && return 0
+    pm disable "$_component" >/dev/null 2>&1 && return 0
+    cmd package set-enabled-setting --user 0 "$_component" disabled >/dev/null 2>&1
+}
+
+restore_component() {
+    _component="$1"; _state="$2"
+    case "$_state" in
+        enabled) pm enable --user 0 "$_component" >/dev/null 2>&1 || pm enable "$_component" >/dev/null 2>&1 ;;
+        disabled) pm disable --user 0 "$_component" >/dev/null 2>&1 || pm disable "$_component" >/dev/null 2>&1 ;;
+        disabled-user) pm disable-user --user 0 "$_component" >/dev/null 2>&1 || pm disable-user "$_component" >/dev/null 2>&1 ;;
+        disabled-until-used) pm disable-until-used --user 0 "$_component" >/dev/null 2>&1 || pm disable-until-used "$_component" >/dev/null 2>&1 ;;
+        *) pm default-state --user 0 "$_component" >/dev/null 2>&1 || pm default-state "$_component" >/dev/null 2>&1 || pm enable --user 0 "$_component" >/dev/null 2>&1 ;;
+    esac
+}
+
+restore_gms_component_states() {
+    [ -f "$COMPONENT_STATE_FILE" ] || return 0
+    _provider_state=$(sed -n 's/^provider=//p' "$COMPONENT_STATE_FILE" 2>/dev/null | head -n1)
+    _updater_state=$(sed -n 's/^updater=//p' "$COMPONENT_STATE_FILE" 2>/dev/null | head -n1)
+    restore_component "$GMS_FONTS_PROVIDER" "${_provider_state:-default}"
+    restore_component "$GMS_FONTS_UPDATER" "${_updater_state:-default}"
+    rm -f "$COMPONENT_STATE_FILE" 2>/dev/null || true
+    rmdir "$GLOBAL_STATE_DIR" 2>/dev/null || true
+    bridge_log "已恢复 GMS 字体组件原始状态"
 }
 
 font_size() {
@@ -267,6 +337,10 @@ stop_watcher() {
 }
 
 watch_play_namespace() {
+    if is_hyperos; then
+        bridge_log "HyperOS 已使用系统字体回退模式，不启动命名空间守护"
+        exit 0
+    fi
     _watch_dir="$MODDIR/config/gms_bridge"
     _watch_pid_file="$_watch_dir/watch.pid"
     mkdir -p "$_watch_dir" 2>/dev/null || exit 0
@@ -310,6 +384,7 @@ restore_mounts() {
         do_umount "$_target" && _restored=$((_restored + 1))
     done
     rm -rf "$BRIDGE_DATA_DIR" 2>/dev/null || true
+    restore_gms_component_states
     bridge_log "恢复动态 Google Sans 挂载：$_restored"
 }
 
@@ -321,15 +396,43 @@ restart_hyperos_font_consumers_once() {
     _marker="$MODDIR/config/gms_bridge/restart.boot"
     [ "$(cat "$_marker" 2>/dev/null)" = "$_boot_id" ] && return 0
     printf '%s\n' "$_boot_id" > "$_marker" 2>/dev/null || true
-    # HyperOS 的 Play 通过 GMS FontsProvider 获取字体 FD。两者都需在
-    # 桥接成功后重建一次进程，否则会继续使用早先缓存的原版字体。
+    # FontsProvider 已禁用后，只需重建 Play 进程并关闭它持有的旧字体 FD。
+    # 不强停整个 GMS，避免影响账号、推送和其他核心服务。
     am force-stop com.android.vending >/dev/null 2>&1 || true
-    am force-stop com.google.android.gms >/dev/null 2>&1 || true
-    bridge_log "HyperOS 已单次重置 Play 与 GMS FontsProvider 字体缓存"
+    bridge_log "HyperOS 已单次重置 Play 字体进程"
+}
+
+apply_hyperos_system_fallback() {
+    mkdir -p "$MODDIR/config/gms_bridge" 2>/dev/null || true
+    save_component_states_once || bridge_log "GMS 字体组件原始状态保存失败，将按默认状态恢复"
+    _provider_ok=0
+    _updater_ok=0
+    disable_component "$GMS_FONTS_PROVIDER" && _provider_ok=1
+    disable_component "$GMS_FONTS_UPDATER" && _updater_ok=1
+    {
+        echo "mode=hyperos-system-fallback"
+        echo "provider_disabled=$_provider_ok"
+        echo "updater_disabled=$_updater_ok"
+    } > "$MODDIR/config/gms_bridge/runtime.status" 2>/dev/null || true
+    bridge_log "HyperOS Play 系统字体回退：FontsProvider=$_provider_ok UpdateScheduler=$_updater_ok"
+    if [ "$_provider_ok" -eq 1 ]; then
+        restart_hyperos_font_consumers_once
+        return 0
+    fi
+    bridge_log "FontsProvider 禁用失败，继续尝试动态字体 bind 兼容路径"
+    return 1
 }
 
 [ "$ACTION" = "restore" ] && { stop_watcher; restore_mounts; exit 0; }
 [ "$ACTION" = "watch" ] && { watch_play_namespace; exit 0; }
+
+# HyperOS 的 Play 通过 GMS FontsProvider 返回私有目录中的字体 FD。
+# 这些文件带有 GMS 专属 uid、0600 权限和 SELinux 类别；root 的 bind
+# 校验成功并不代表 FontsProvider 自身能读取替换后的 inode。禁用 provider
+# 与更新调度后，Play 会回退到洛书已经替换的系统 sans-serif 字体。
+if is_hyperos && apply_hyperos_system_fallback; then
+    exit 0
+fi
 
 if ! prepare_stable_sources; then
     bridge_log "稳定桥接源同步失败，回退到模块内源"

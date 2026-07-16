@@ -328,6 +328,9 @@ switch_font() {
     # 只删除洛书管理的文字目标，Emoji、符号与 ROM fallback 永远保留。
     clear_managed_text_fonts
     if [ "$font_id" = "default" ]; then
+        if [ -f "$MODULE_DIR/common/play_font_bridge" ]; then
+            MODDIR="$MODULE_DIR" sh "$MODULE_DIR/common/play_font_bridge" restore >/dev/null 2>&1 || true
+        fi
         echo "  [洛书] 已恢复 ROM 原始文字字体（Emoji 保持独立设置）"
     else
         apply_font_by_rom "$src_file" "$SYSTEM_FONTS_DIR" "quick" "$font_id" || {

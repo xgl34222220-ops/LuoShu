@@ -52,4 +52,49 @@ test -s "$BRIDGE_DATA_DIR/medium.font"
 test -s "$BRIDGE_DATA_DIR/bold.font"
 test -s "$BRIDGE_DATA_DIR/variable.font"
 
+# HyperOS 不再把 root 可读等同于 GMS 可读：禁用 FontsProvider 与更新器，
+# 让 Play 回退到已经替换的系统 sans-serif；恢复时还原组件原始状态。
+MOCK_BIN="$TMP/mock-bin"
+MOCK_LOG="$TMP/mock.log"
+GLOBAL_STATE_DIR="$TMP/global-state"
+mkdir -p "$MOCK_BIN"
+cat > "$MOCK_BIN/getprop" <<'EOF'
+#!/bin/sh
+[ "$1" = "ro.mi.os.version.name" ] && echo OS3.0
+EOF
+cat > "$MOCK_BIN/cmd" <<'EOF'
+#!/bin/sh
+case "$*" in
+    *get-component-enabled-setting*) echo default ;;
+esac
+exit 0
+EOF
+cat > "$MOCK_BIN/pm" <<'EOF'
+#!/bin/sh
+echo "pm $*" >> "$MOCK_LOG"
+exit 0
+EOF
+cat > "$MOCK_BIN/am" <<'EOF'
+#!/bin/sh
+echo "am $*" >> "$MOCK_LOG"
+exit 0
+EOF
+chmod 755 "$MOCK_BIN"/*
+export MOCK_LOG GLOBAL_STATE_DIR
+: > "$MOCK_LOG"
+PATH="$MOCK_BIN:$PATH" MODDIR="$MOD" GLOBAL_STATE_DIR="$GLOBAL_STATE_DIR" \
+    BRIDGE_DATA_DIR="$BRIDGE_DATA_DIR" sh "$MOD/common/play_font_bridge" boot
+grep -q 'pm disable --user 0 com.google.android.gms/com.google.android.gms.fonts.provider.FontsProvider' "$MOCK_LOG"
+grep -q 'pm disable --user 0 com.google.android.gms/com.google.android.gms.fonts.update.UpdateSchedulerService' "$MOCK_LOG"
+grep -q 'am force-stop com.android.vending' "$MOCK_LOG"
+! grep -q 'am force-stop com.google.android.gms' "$MOCK_LOG"
+grep -q '^mode=hyperos-system-fallback$' "$MOD/config/gms_bridge/runtime.status"
+test -s "$GLOBAL_STATE_DIR/gms_font_components.conf"
+
+PATH="$MOCK_BIN:$PATH" MODDIR="$MOD" GLOBAL_STATE_DIR="$GLOBAL_STATE_DIR" \
+    BRIDGE_DATA_DIR="$BRIDGE_DATA_DIR" sh "$MOD/common/play_font_bridge" restore
+grep -q 'pm default-state --user 0 com.google.android.gms/com.google.android.gms.fonts.provider.FontsProvider' "$MOCK_LOG"
+grep -q 'pm default-state --user 0 com.google.android.gms/com.google.android.gms.fonts.update.UpdateSchedulerService' "$MOCK_LOG"
+test ! -e "$GLOBAL_STATE_DIR/gms_font_components.conf"
+
 echo "GMS bridge tests passed."

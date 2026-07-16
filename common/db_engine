@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.6 Beta5 - direct file mapping engine
+# LuoShu v13.6 Beta6 - direct file mapping engine
 # This file intentionally has no .sh suffix so third-party module scanners do not
 # classify it as a custom shell hook.
 set +e

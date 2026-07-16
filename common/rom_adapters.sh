@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.6 Beta5 - ROM font target adapter
+# LuoShu v13.6 Beta6 - ROM font target adapter
 set +e
 
 MODULE_DIR="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"

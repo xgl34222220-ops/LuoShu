@@ -1,5 +1,11 @@
 # 更新日志
 
+## v13.6 Beta6
+
+- 修复 HyperOS 3 上 Play 商店始终使用默认字体：不再将 root 的 bind 校验结果误判为 GMS 可读，而是禁用 GMS FontsProvider 与字体更新调度器，让 Play 回退到已被洛书替换的系统字体
+- 仅 HyperOS 使用 FontsProvider 回退模式，ColorOS 已正常工作的 GMS 动态字体桥接保持不变
+- 首次启用时保存 GMS 字体组件原始状态；恢复默认或卸载洛书时自动还原，不删除 GMS 私有字体文件和 `/data/fonts`
+
 ## v13.6 Beta5
 
 - 修复 HyperOS 3 上 Play 商店仍显示默认字体：将 GMS 桥接源同步到 `/data/fonts/luoshu`，避免 Zygisk Next / KernelSU 应用命名空间隐藏模块目录
