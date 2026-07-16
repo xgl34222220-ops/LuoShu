@@ -1,0 +1,69 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-stability)
+trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+
+MODULE="$TMP/module"
+PUBLIC="$TMP/public"
+mkdir -p "$MODULE/common" "$MODULE/config" "$MODULE/logs" "$MODULE/webroot" "$MODULE/system/bin" \
+         "$PUBLIC/fonts" "$PUBLIC/emoji" "$PUBLIC/reports"
+cp "$ROOT/common/stability.sh" "$MODULE/common/stability.sh"
+printf '#!/bin/sh\nprintf '\''{"status":"ok"}\\n'\''\n' > "$MODULE/common/font_manager.sh"
+chmod 755 "$MODULE/common/stability.sh" "$MODULE/common/font_manager.sh"
+printf 'version=v13.5 Stable\nversionCode=13500\n' > "$MODULE/module.prop"
+printf 'Alpha\n' > "$MODULE/config/active_font.conf"
+printf 'default\n' > "$MODULE/config/active_emoji.conf"
+
+run_stability() {
+    MODDIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/stability.sh" "$@"
+}
+
+FIRST=$(run_stability boot_snapshot)
+printf '%s' "$FIRST" | grep -q '"status":"ok"'
+STATUS0=$(run_stability status)
+printf '%s' "$STATUS0" | grep -q '"fontFiles":0'
+
+printf 'dummy' > "$PUBLIC/fonts/one.ttf"
+STATUS1=$(run_stability status)
+printf '%s' "$STATUS1" | grep -q '"fontFiles":1'
+
+index=2
+while [ "$index" -le 20 ]; do
+    printf 'dummy' > "$PUBLIC/fonts/font-${index}.otf"
+    index=$((index + 1))
+done
+STATUS20=$(run_stability status)
+printf '%s' "$STATUS20" | grep -q '"fontFiles":20'
+
+printf 'Beta\n' > "$MODULE/config/active_font.conf"
+SECOND=$(run_stability boot_snapshot)
+printf '%s' "$SECOND" | grep -q '"status":"ok"'
+ROTATED=$(run_stability status)
+printf '%s' "$ROTATED" | grep -q '"currentFont":"Beta"'
+printf '%s' "$ROTATED" | grep -q '"previousFont":"Alpha"'
+
+mkdir -p "$MODULE/webroot/fonts" "$MODULE/webroot/emoji"
+printf cache > "$MODULE/config/webui_font_list.json"
+printf key > "$MODULE/config/webui_font_list.key"
+run_stability clear_cache >/dev/null
+test ! -e "$MODULE/config/webui_font_list.json"
+test ! -e "$MODULE/config/webui_font_list.key"
+
+SCAN=$(run_stability scan_test)
+printf '%s' "$SCAN" | grep -q '"status":"ok"'
+run_stability report | grep -q '"status":"ok"'
+find "$PUBLIC/reports" -type f -name 'LuoShu-recovery-*.txt' | grep -q .
+
+TMP_WEB="$TMP/patched-webroot"
+mkdir -p "$TMP_WEB"
+cp -R "$ROOT/webroot/." "$TMP_WEB/"
+sh "$ROOT/scripts/prepare_webui.sh" "$TMP_WEB"
+grep -q 'stability.js?v=13500' "$TMP_WEB/index.html"
+grep -q 'app.js?v=13500' "$TMP_WEB/index.html"
+grep -q 'style.css?v=13500' "$TMP_WEB/index.html"
+grep -q 'v13.5 Stable' "$ROOT/module.prop"
+grep -q '^versionCode=13500$' "$ROOT/module.prop"
+
+echo 'LuoShu stability checks passed.'
