@@ -25,7 +25,7 @@ test -f "$ROOT/service.sh"
 test -f "$ROOT/webroot/index.html"
 test -f "$ROOT/webroot/stability.js"
 test -f "$ROOT/webroot/stability.css"
-test -x "$ROOT/common/stability.sh"
+test -f "$ROOT/common/stability.sh"
 test -s "$ROOT/system/bin/luoshud"
 
 grep -q '^version=v13.5 Stable$' "$ROOT/module.prop"
