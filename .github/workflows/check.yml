@@ -44,23 +44,29 @@ jobs:
           asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
           test -n "$asset"
           unzip -t "$asset"
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "v13.5 Stable Hotfix2"
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "13502"
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "v13.5 Stable Hotfix3"
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "13503"
           unzip -l "$asset" | grep -q 'common/stability.sh'
-          unzip -l "$asset" | grep -q 'common/mount_compat.sh'
+          unzip -l "$asset" | grep -q 'common/meta_overlay_compat'
+          unzip -l "$asset" | grep -q 'common/font_report'
+          ! unzip -l "$asset" | grep -qE 'common/(mount_compat|font_report|play_font_bridge|wechat_xweb_bridge)\.sh$'
           unzip -l "$asset" | grep -q 'webroot/stability.js'
-          unzip -p "$asset" webroot/index.html | grep -q 'stability.js?v=13502'
+          unzip -p "$asset" webroot/index.html | grep -q 'stability.js?v=13503'
           unzip -p "$asset" webroot/index.html | grep -q 'stability-critical-style'
           unzip -p "$asset" webroot/stability.js | grep -q 'data-stability-action="snapshot"'
           unzip -p "$asset" common/stability.sh | grep -q 'save_snapshot|manual_snapshot'
-          unzip -p "$asset" common/font_manager.sh | grep -q 'common/mount_compat.sh'
-          test "$(unzip -p "$asset" common/font_manager.sh | grep -c 'luoshu_sync_mount_payload')" -ge 2
-          unzip -p "$asset" post-fs-data.sh | grep -q 'luoshu_sync_mount_payload'
-          unzip -p "$asset" service.sh | grep -q 'luoshu_sync_mount_payload'
+          unzip -p "$asset" common/font_manager.sh | grep -q 'common/meta_overlay_compat'
+          test "$(unzip -p "$asset" common/font_manager.sh | grep -c 'luoshu_sync_meta_payload')" -ge 2
+          unzip -p "$asset" post-fs-data.sh | grep -q 'luoshu_sync_meta_payload'
+          unzip -p "$asset" service.sh | grep -q 'luoshu_sync_meta_payload'
           ! unzip -l "$asset" | grep -qE '(^|/)skip_mount(ify)?$'
+          tmp="$(mktemp -d)"
+          unzip -q "$asset" -d "$tmp"
+          ! grep -R -n --include='*.sh' -E '(^|[;&|[:space:]])(mount|umount|mountpoint)([[:space:]]|$)|/proc/mounts' "$tmp"
+          rm -rf "$tmp"
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v13.5-Stable-Hotfix2-test
+          name: LuoShu-v13.5-Stable-Hotfix3-test
           path: |
             dist/*.zip
             dist/*.sha256
