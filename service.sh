@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.6 Beta2 - late boot service
+# LuoShu v13.6 Beta3 - late boot service
 set +e
 
 MODDIR="${0%/*}"
@@ -23,7 +23,7 @@ MODDIR="${0%/*}"
         echo "[$_time] [SERVICE] [$_level] $_msg" >> "$LOG_FILE" 2>/dev/null || true
     }
 
-    log_service INFO "服务脚本开始执行 (v13.6 Beta2)"
+    log_service INFO "服务脚本开始执行 (v13.6 Beta3)"
 
     if [ -f "$MODDIR/common/db_engine" ]; then
         DB_MODE=$(MODDIR="$MODDIR" sh "$MODDIR/common/db_engine" mode 2>/dev/null)

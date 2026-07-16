@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.6 Beta2 - early boot initialization
+# LuoShu v13.6 Beta3 - early boot initialization
 set +e
 
 MODDIR="${0%/*}"
@@ -14,7 +14,7 @@ type init_module >/dev/null 2>&1 && init_module
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
 command mkdir -p "$MODDIR/config" "$MODDIR/logs" "$MODDIR/webroot/fonts" "$MODDIR/webroot/emoji" 2>/dev/null || true
 
-log_message "INFO" "===== post-fs-data v13.6 Beta2 开始 ====="
+log_message "INFO" "===== post-fs-data v13.6 Beta3 开始 ====="
 
 # Keep original ROM XML/fallback/symbol resources untouched.
 rm -f "$MODDIR/system/etc/fonts.xml" "$MODDIR/system/etc/font_fallback.xml" 2>/dev/null || true

@@ -1,5 +1,11 @@
 # 更新日志
 
+## v13.6 Beta3
+
+- 修复 HyperOS 3 上 Google Play 仍显示默认字体：GMS 下载的 `Google_Sans_Flex` 现在会优先桥接真正的可变字体，没有可变字体时改用当前字体常规字重兼容覆盖，不再跳过
+- 保持 Direct Bind 无分区负载结构，避免为了在元模块列表中显示而重新引入空 Overlay、staging 或 `mount.error`
+- 新增静态字体覆盖 Google Sans Flex、可变字体优先和代码字体保留三项桥接测试
+
 ## v13.6 Beta2
 
 - 默认切换为通用 Direct Bind，不再依赖已知元模块名称或目录才能启用；标准 Magisk/KernelSU 与 Hybrid Mount、Mountify、meta-overlayfs 共用同一套文字字体映射

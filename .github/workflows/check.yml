@@ -57,8 +57,8 @@ jobs:
           asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
           test -n "$asset"
           unzip -t "$asset"
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "v13.6 Beta2"
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "13602"
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "v13.6 Beta3"
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "13603"
           unzip -l "$asset" | grep -q 'common/stability.sh'
           unzip -l "$asset" | grep -q 'common/meta_overlay_compat'
           unzip -l "$asset" | grep -q 'common/font_report'
@@ -66,7 +66,7 @@ jobs:
           unzip -l "$asset" | grep -q 'config/mount_mode.conf'
           ! unzip -l "$asset" | grep -qE 'common/(mount_compat|font_report|play_font_bridge|wechat_xweb_bridge)\.sh$'
           unzip -l "$asset" | grep -q 'webroot/stability.js'
-          unzip -p "$asset" webroot/index.html | grep -q 'stability.js?v=13602'
+          unzip -p "$asset" webroot/index.html | grep -q 'stability.js?v=13603'
           unzip -p "$asset" webroot/index.html | grep -q 'stability-critical-style'
           unzip -p "$asset" webroot/stability.js | grep -q 'data-stability-action="snapshot"'
           unzip -p "$asset" common/stability.sh | grep -q 'save_snapshot|manual_snapshot'
@@ -91,7 +91,7 @@ jobs:
           rm -rf "$tmp"
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v13.6-Beta2-test
+          name: LuoShu-v13.6-Beta3-test
           path: |
             dist/*.zip
             dist/*.sha256

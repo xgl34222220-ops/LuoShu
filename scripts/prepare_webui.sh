@@ -25,6 +25,7 @@ sed -i -E "s#const STYLE_VERSION = '[0-9]+';#const STYLE_VERSION = '${CACHE}';#"
 # 构建产物中的可见版本全部以 module.prop 为准。
 sed -i -E "s#v13\.4 Beta2 Hotfix[0-9]+#${VERSION}#g" "$INDEX"
 sed -i -E "s#v13\.5 Stable( Hotfix[0-9]+)?#${VERSION}#g" "$INDEX" "$WEBROOT/stability.js"
+sed -i -E "s#v13\.6 Beta[0-9]+#${VERSION}#g" "$INDEX" "$WEBROOT/stability.js"
 
 # 独立自救模块必须先于主 app.js 加载。即使 app.js 解析失败，
 # stability.js 仍能提供清缓存、修权限、回滚和报告功能。

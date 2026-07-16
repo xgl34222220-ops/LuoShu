@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v13.6 Beta2
-versionCode=13602
+version=v13.6 Beta3
+versionCode=13603
 author=惜故里丶
 description=Android 全局字体管理模块。默认使用 Direct Bind 映射系统中文、英文和数字，兼容 Hybrid Mount、Mountify、meta-overlayfs、ColorOS 16、HyperOS 3，以及 GMS/Play、Gemini 和微信 XWeb 字体环境。
 updateJson=

@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v13.3 Beta2 - Android 16 / GMS、Google 与 Gemini 动态字体桥接
+# 洛书 v13.6 Beta3 - Android 16 / GMS、Google 与 Gemini 动态字体桥接
 # 只做临时 bind mount，不删除也不改写 /data/fonts 中的原文件。
 
 set +e
@@ -32,18 +32,22 @@ is_variable_font() {
 source_for_name() {
     _name="$1"
     _exact="$MODDIR/system/fonts/$_name"
-    if valid_source "$_exact"; then
-        echo "$_exact"
-        return 0
-    fi
     case "$_name" in
         *Flex*)
+            # Android 16 的 HyperOS Play 会优先使用 GMS 下载的
+            # Google_Sans_Flex。先找真正的可变字体；用户字体是普通
+            # TTF/OTF 时则回退到常规字重，确保 Play 仍显示所选字形。
+            valid_source "$_exact" && is_variable_font "$_exact" && { echo "$_exact"; return 0; }
             _vf="$MODDIR/config/gms_bridge/variable.font"
             valid_source "$_vf" && is_variable_font "$_vf" && { echo "$_vf"; return 0; }
             _vf="$MODDIR/system/fonts/GoogleSansFlex-Regular.ttf"
             valid_source "$_vf" && is_variable_font "$_vf" && { echo "$_vf"; return 0; }
             _vf="$MODDIR/system/fonts/RobotoFlex-Regular.ttf"
             valid_source "$_vf" && is_variable_font "$_vf" && { echo "$_vf"; return 0; }
+            _fallback="$MODDIR/config/gms_bridge/regular.font"
+            valid_source "$_fallback" && { echo "$_fallback"; return 0; }
+            _fallback="$MODDIR/system/fonts/Roboto-Regular.ttf"
+            valid_source "$_fallback" && { echo "$_fallback"; return 0; }
             return 1
             ;;
         *Code*) return 1 ;;
@@ -51,6 +55,10 @@ source_for_name() {
         *Medium*|*-500-*) _bridge_weight=medium; _fallback="$MODDIR/system/fonts/Roboto-Medium.ttf" ;;
         *) _bridge_weight=regular; _fallback="$MODDIR/system/fonts/Roboto-Regular.ttf" ;;
     esac
+    if valid_source "$_exact"; then
+        echo "$_exact"
+        return 0
+    fi
     if valid_source "$_fallback"; then
         echo "$_fallback"
         return 0
@@ -145,10 +153,10 @@ while [ "$_attempt" -le "$_attempts" ]; do
                 continue
                 ;;
             *Flex*)
-                if ! is_variable_font "$_src"; then
-                    _skipped=$((_skipped + 1))
-                    bridge_log "保留 $_name 原版：未找到可变字体源"
-                    continue
+                if is_variable_font "$_src"; then
+                    bridge_log "桥接 $_name：使用可变字体源"
+                else
+                    bridge_log "桥接 $_name：使用常规字体兼容源"
                 fi
                 ;;
         esac

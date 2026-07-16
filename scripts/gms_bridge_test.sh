@@ -35,5 +35,12 @@ test -s "$MOD/config/gms_bridge/bold.font"
 test "$(MODDIR="$MOD" sh "$MOD/common/play_font_bridge" resolve GoogleSans-Regular.ttf)" = "$MOD/config/gms_bridge/regular.font"
 test "$(MODDIR="$MOD" sh "$MOD/common/play_font_bridge" resolve GoogleSans-Medium.ttf)" = "$MOD/config/gms_bridge/medium.font"
 test "$(MODDIR="$MOD" sh "$MOD/common/play_font_bridge" resolve GoogleSans-Bold.ttf)" = "$MOD/config/gms_bridge/bold.font"
+test "$(MODDIR="$MOD" sh "$MOD/common/play_font_bridge" resolve Google_Sans_Flex-400-100_0-0_0.ttf)" = "$MOD/config/gms_bridge/regular.font"
+
+# 真可变字体存在时仍优先使用 variable.font，而不是静态兼容源。
+cp "$MOD/source/regular.ttf" "$MOD/config/gms_bridge/variable.font"
+printf 'fvar' >> "$MOD/config/gms_bridge/variable.font"
+test "$(MODDIR="$MOD" sh "$MOD/common/play_font_bridge" resolve Google_Sans_Flex-400-100_0-0_0.ttf)" = "$MOD/config/gms_bridge/variable.font"
+test -z "$(MODDIR="$MOD" sh "$MOD/common/play_font_bridge" resolve Google_Sans_Code-400.ttf || true)"
 
 echo "GMS bridge tests passed."
