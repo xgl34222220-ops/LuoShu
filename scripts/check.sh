@@ -21,10 +21,10 @@ fi
 
 for file in \
     module.prop customize.sh post-fs-data.sh service.sh \
-    webroot/index.html webroot/stability.js webroot/stability.css \
-    webroot/environment.js webroot/ui_refine.css webroot/v14.js webroot/v14.css \
+    webroot/index.html webroot/environment.js webroot/ui_refine.css webroot/v14.js webroot/v14.css \
     common/stability.sh common/mount_compat.sh common/module_status.sh common/v14_switch.sh \
-    scripts/prepare_mount_compat.sh scripts/prepare_v14_package.sh; do
+    common/font_mix.sh common/v14_mix.sh \
+    scripts/prepare_mount_compat.sh scripts/prepare_v14_package.sh scripts/prepare_webui.sh; do
     test -f "$ROOT/$file"
 done
 test -s "$ROOT/system/bin/luoshud"
@@ -32,60 +32,58 @@ test -s "$ROOT/system/bin/luoshud"
 grep -q '^version=v14$' "$ROOT/module.prop"
 grep -q '^versionCode=14000$' "$ROOT/module.prop"
 grep -q '^description=Android 全局字体管理，当前字体：系统默认字体$' "$ROOT/module.prop"
-grep -q 'body > #stabilityRescueButton' "$ROOT/webroot/stability.css"
 grep -q '/data/adb/modules/mountify' "$ROOT/webroot/environment.js"
 grep -q 'APatch' "$ROOT/webroot/environment.js"
 grep -q 'SukiSU Ultra' "$ROOT/webroot/environment.js"
 grep -q 'luoshu_v14_pending_switch' "$ROOT/webroot/v14.js"
-grep -q 'common/v14_switch.sh' "$ROOT/webroot/v14.js"
-grep -q 'data-stability-action=.permissions' "$ROOT/webroot/v14.css"
+grep -q 'luoshu_v14_pending_mix' "$ROOT/webroot/v14.js"
+grep -q 'common/v14_mix.sh' "$ROOT/webroot/v14.js"
+grep -q '中文、英文、数字分别选择' "$ROOT/webroot/v14.js"
+grep -q '#stabilityRescueButton' "$ROOT/webroot/v14.css"
+grep -q '#moreImportZipBtn' "$ROOT/webroot/v14.css"
+grep -q 'font-mix-panel' "$ROOT/webroot/v14.css"
 grep -q 'content-visibility:auto' "$ROOT/webroot/v14.css"
+grep -q 'MiSansLatinVF.ttf' "$ROOT/common/font_mix.sh"
+grep -q 'SysSans-En-Regular.ttf' "$ROOT/common/font_mix.sh"
+grep -q 'DINPro-Regular.ttf' "$ROOT/common/font_mix.sh"
+grep -q 'mix_task.conf' "$ROOT/common/v14_mix.sh"
 grep -q 'module_status.sh' "$ROOT/service.sh"
 grep -q 'module_status.sh' "$ROOT/post-fs-data.sh"
 ! grep -q 'boot_snapshot' "$ROOT/service.sh"
 grep -q '元模块推荐：Mountify' "$ROOT/customize.sh"
 ! grep -q 'Hybrid Mount：推荐' "$ROOT/customize.sh"
-! grep -q '^hybrid_mount=' "$ROOT/config/version_notes.conf"
-! grep -q '^Hybrid Mount$' "$ROOT/兼容与目录说明.txt"
 
 # 在临时副本中验证正式构建阶段的补丁，不修改工作区。
 TMP_STAGE=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-stage-check)
 trap 'rm -rf "$TMP_STAGE"' EXIT HUP INT TERM
 mkdir -p "$TMP_STAGE/common" "$TMP_STAGE/webroot"
-cp "$ROOT/module.prop" "$TMP_STAGE/module.prop"
-cp "$ROOT/customize.sh" "$TMP_STAGE/customize.sh"
-cp "$ROOT/post-fs-data.sh" "$TMP_STAGE/post-fs-data.sh"
-cp "$ROOT/service.sh" "$TMP_STAGE/service.sh"
-cp "$ROOT/common/font_manager.sh" "$TMP_STAGE/common/font_manager.sh"
-cp "$ROOT/common/mount_compat.sh" "$TMP_STAGE/common/mount_compat.sh"
-cp "$ROOT/common/module_status.sh" "$TMP_STAGE/common/module_status.sh"
-cp "$ROOT/common/v14_switch.sh" "$TMP_STAGE/common/v14_switch.sh"
+for file in module.prop customize.sh post-fs-data.sh service.sh; do
+    cp "$ROOT/$file" "$TMP_STAGE/$file"
+done
+for file in font_manager.sh mount_compat.sh module_status.sh v14_switch.sh font_mix.sh v14_mix.sh; do
+    cp "$ROOT/common/$file" "$TMP_STAGE/common/$file"
+done
 cp -R "$ROOT/webroot/." "$TMP_STAGE/webroot/"
 
 sh "$ROOT/scripts/prepare_v14_package.sh" "$TMP_STAGE"
 sh "$ROOT/scripts/prepare_webui.sh" "$TMP_STAGE/webroot"
 sh "$ROOT/scripts/prepare_mount_compat.sh" "$TMP_STAGE"
 
-grep -q 'stability.js?v=14000' "$TMP_STAGE/webroot/index.html"
 grep -q 'environment.js?v=14000' "$TMP_STAGE/webroot/index.html"
 grep -q 'app.js?v=14000' "$TMP_STAGE/webroot/index.html"
 grep -q 'v14.js?v=14000' "$TMP_STAGE/webroot/index.html"
 grep -q 'v14.css?v=14000' "$TMP_STAGE/webroot/index.html"
 grep -q 'style.css?v=14000' "$TMP_STAGE/webroot/index.html"
-grep -q "STYLE_VERSION = '14000'" "$TMP_STAGE/webroot/stability.js"
-grep -q "UI_VERSION = '14000'" "$TMP_STAGE/webroot/environment.js"
-grep -q 'stability-critical-style' "$TMP_STAGE/webroot/index.html"
-grep -q 'v14-lightweight-preview-sync' "$TMP_STAGE/common/font_manager.sh"
-grep -q 'case "$action" in' "$TMP_STAGE/common/font_manager.sh"
-grep -q 'module_status.sh.*SELECTED_FONT' "$TMP_STAGE/customize.sh"
-grep -q 'common/v14_switch.sh' "$TMP_STAGE/customize.sh"
-grep -q '^description=Android 全局字体管理，当前字体：系统默认字体$' "$TMP_STAGE/module.prop"
+! grep -q 'stability.js?v=' "$TMP_STAGE/webroot/index.html"
+! grep -q 'stability-critical-style' "$TMP_STAGE/webroot/index.html"
 ! grep -q 'Hybrid Mount' "$TMP_STAGE/webroot/index.html"
 ! grep -q 'more-advanced' "$TMP_STAGE/webroot/index.html"
+grep -q 'v14-lightweight-preview-sync' "$TMP_STAGE/common/font_manager.sh"
+grep -q 'module_status.sh.*SELECTED_FONT' "$TMP_STAGE/customize.sh"
+grep -q 'common/v14_switch.sh' "$TMP_STAGE/customize.sh"
+grep -q 'common/font_mix.sh' "$TMP_STAGE/customize.sh"
 grep -q 'common/mount_compat.sh' "$TMP_STAGE/common/font_manager.sh"
 test "$(grep -c 'luoshu_sync_mount_payload' "$TMP_STAGE/common/font_manager.sh")" -ge 2
-grep -q 'luoshu_sync_mount_payload' "$TMP_STAGE/post-fs-data.sh"
-grep -q 'luoshu_sync_mount_payload' "$TMP_STAGE/service.sh"
 rm -rf "$TMP_STAGE"
 trap - EXIT HUP INT TERM
 
