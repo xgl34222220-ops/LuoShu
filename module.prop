@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v13.4 Beta2 Hotfix6
-versionCode=13426
+version=v13.5 Stable
+versionCode=13500
 author=惜故里丶
-description=通用 Android 全局字体管理：优化 MIUIX 玻璃 WebUI、长名称与多字重交互，增强旧 WebView、ColorOS 16、HyperOS 3、系统字重与 Hybrid Mount 兼容，并修复 WebUI 缓存与字体库启动阻塞，保留 ZIP 安全导入、Emoji/GMS/Gemini/XWeb 桥接。
+description=通用 Android 全局字体管理：新增独立 WebUI 自救中心、稳定配置快照与一键回滚、字体扫描耗时记录、ROM/Root/字体配置自动诊断、缓存与权限修复，并保留 ZIP 安全导入、Emoji、可变字体、静态多字重及 GMS/Gemini/XWeb 兼容。
 updateJson=
 webroot=webroot
