@@ -35,7 +35,7 @@ ZIP 字体包导入目录：/sdcard/LuoShu/import/
 只提取字体文件，不执行 ZIP 中的模块脚本；单包最多 128 个字体、解压后 512 MB。
 
 
-可变字体粗细（v13.4 Beta2 Hotfix2）
+可变字体粗细（v13.4 Beta2 Hotfix6）
 - 字体详情页会读取 wght 轴并实时预览。
 - 系统应用范围为 300–700，使用 Android secure.font_weight_adjustment。
 - 完整生效建议重启手机；不支持该接口的 ROM 仅提供预览。

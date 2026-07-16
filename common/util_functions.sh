@@ -3,7 +3,7 @@ set +e
 # ============================================================
 # 洛书 - 工具函数库 (util_functions.sh)
 # 作者：惜故里丶
-# 版本：v13.4 Beta2 Hotfix2
+# 版本：v13.4 Beta2 Hotfix6
 # 功能：提供字体模块所需的所有通用工具函数
 # ============================================================
 
@@ -14,12 +14,12 @@ CONFIG_DIR="${MODULE_DIR}/config"
 FONT_DIR="${MODULE_DIR}/fonts"
 LOG_DIR="${MODULE_DIR}/logs"
 LOG_FILE="${LOG_DIR}/fontswitch.log"
-LUOSHU_PUBLIC_DIR="/sdcard/LuoShu"
+LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
 USER_EMOJI_DIR="$LUOSHU_PUBLIC_DIR/emoji"
 USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
 USER_IMPORT_DIR="$LUOSHU_PUBLIC_DIR/import"
-LEGACY_FONTS_DIR="/sdcard/Fonts"
+LEGACY_FONTS_DIR="${LEGACY_FONTS_DIR:-/sdcard/Fonts}"
 
 
 # 创建公开目录并兼容迁移旧版 /sdcard/Fonts。迁移采用复制而不是移动，
@@ -288,7 +288,7 @@ detect_font_weight() {
         *medium*|*中等*) echo "medium" ;;
         *semibold*|*半粗*) echo "semibold" ;;
         *bold*|*粗体*) echo "bold" ;;
-        *black*|*heavy*|*特粗*|*重*) echo "black" ;;
+        *black*|*heavy*|*特粗*|*重体*) echo "black" ;;
         *) echo "regular" ;;
     esac
 }

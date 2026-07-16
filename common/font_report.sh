@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.4 Beta2 Hotfix2 - 设备与字体基础检测报告
+# LuoShu v13.4 Beta2 Hotfix6 - 设备与字体基础检测报告
 set +e
 MODDIR="${MODDIR:-/data/adb/modules/LuoShu}"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
@@ -7,7 +7,7 @@ FONT="$1"
 OUT="${2:-/sdcard/LuoShu/reports/LuoShu_Font_Report_$(date +%Y%m%d_%H%M%S).txt}"
 mkdir -p "${OUT%/*}" 2>/dev/null || true
 {
-    echo "LuoShu Font Report v13.4 Beta2 Hotfix2"
+    echo "LuoShu Font Report v13.4 Beta2 Hotfix6"
     echo "Generated: $(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
     echo "Device: $(getprop ro.product.manufacturer 2>/dev/null) $(getprop ro.product.model 2>/dev/null)"
     echo "Android: $(getprop ro.build.version.release 2>/dev/null) (SDK $(getprop ro.build.version.sdk 2>/dev/null))"

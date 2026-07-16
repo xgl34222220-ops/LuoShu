@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v13.4 Beta2 Hotfix2 - 安全 ZIP 字体包导入
+# 洛书 v13.4 Beta2 Hotfix6 - 安全 ZIP 字体包导入
 # 只解压字体文件，不执行压缩包中的任何脚本。
 
 IMPORT_MAX_ZIP_BYTES=268435456

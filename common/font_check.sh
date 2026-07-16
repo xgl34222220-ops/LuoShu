@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.4 Beta2 Hotfix2 - 字体文件真实格式与基础兼容性检测
+# LuoShu v13.4 Beta2 Hotfix6 - 字体文件真实格式与基础兼容性检测
 # 只读取文件，不修改字体。
 
 font_magic_hex() {

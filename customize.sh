@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.4 Beta2 Hotfix2 - 安装脚本
+# LuoShu v13.4 Beta2 Hotfix6 - 安装脚本
 
 MODPATH="${MODPATH:-$3}"
 set +e
@@ -27,7 +27,7 @@ check_hyperos
 
 ui_print ""
 ui_print "╔══════════════════════════════════╗"
-ui_print "║       洛 书  v13.4 Beta2 Hotfix2        ║"
+ui_print "║       洛 书  v13.4 Beta2 Hotfix6        ║"
 ui_print "║   文字与 Emoji 独立管理          ║"
 ui_print "╚══════════════════════════════════╝"
 ui_print ""

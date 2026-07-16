@@ -1,4 +1,4 @@
-/* 洛书 v13.4 Beta2 Hotfix2 · MIUIX Refined */
+/* 洛书 v13.4 Beta2 Hotfix6 · MIUIX Refined */
 :root{
   --bg:#f7f7f7;--card:#fff;--glass:rgba(255,255,255,.72);--primary:#3482ff;
   --primary-soft:rgba(52,130,255,.11);--text:#101010;--sub:#858585;--muted:#b5b5b5;
@@ -260,7 +260,7 @@ body.switching .font-list,body.switching .quick-actions{pointer-events:none;opac
 .variable-weight-note{margin-top:10px;color:var(--sub);font-size:8.5px;line-height:1.55}.variable-weight-actions{display:grid;grid-template-columns:1fr 1.2fr;gap:7px;margin-top:11px}.variable-weight-actions button{min-height:39px;border:1px solid var(--stroke);border-radius:13px;background:var(--card);color:var(--text);font-size:10px;font-weight:700}.variable-weight-actions button.primary{border-color:transparent;background:linear-gradient(135deg,#4f96ff,#347cf2);color:#fff;box-shadow:0 7px 16px rgba(52,130,255,.22)}.variable-weight-actions button:disabled{opacity:.55}
 .variable-weight-unavailable{display:flex;flex-direction:column;gap:3px;padding:11px;border-radius:13px;background:color-mix(in srgb,var(--warn) 9%,var(--card));color:var(--sub)}.variable-weight-unavailable strong{color:var(--text);font-size:10px}.variable-weight-unavailable small{font-size:8.5px;line-height:1.5}
 
-/* v13.4 Beta2 Hotfix2: 静态多字重家族选择 */
+/* v13.4 Beta2 Hotfix6: 静态多字重家族选择 */
 .family-adjust-badge{display:inline-flex;align-items:center;padding:2px 7px;border:1px solid color-mix(in srgb,var(--primary) 30%,transparent);border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:8px;font-weight:760}
 .static-family-control{margin:12px 0;padding:14px;border:1px solid color-mix(in srgb,var(--primary) 18%,var(--stroke));border-radius:18px;background:linear-gradient(145deg,color-mix(in srgb,var(--primary) 8%,var(--card)),var(--surface-soft));box-shadow:inset 0 1px 0 color-mix(in srgb,#fff 24%,transparent)}
 .static-family-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:11px}.static-family-head>div{display:flex;align-items:baseline;gap:8px}.static-family-head small{color:var(--sub);font-size:10px;font-weight:650}.static-family-head strong{font-size:21px;color:var(--primary)}.static-family-head>span{padding:5px 9px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:9px;font-weight:750}
@@ -268,7 +268,7 @@ body.switching .font-list,body.switching .quick-actions{pointer-events:none;opac
 .static-family-note{margin-top:10px;color:var(--sub);font-size:8.5px;line-height:1.55}
 
 
-/* v13.4 Beta2 Hotfix2 — UI 收口与 WebView 兼容 */
+/* v13.4 Beta2 Hotfix6 — UI 收口与 WebView 兼容 */
 :root{--app-vh:100vh;--dock-height:66px;color-scheme:light dark}
 html{scroll-padding-top:74px}
 body{min-height:var(--app-vh,100vh);padding-bottom:calc(var(--dock-height) + 34px + env(safe-area-inset-bottom,0px));overscroll-behavior-y:none;-webkit-text-size-adjust:100%}

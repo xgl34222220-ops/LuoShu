@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v13.4 Beta2 Hotfix2 - 字体管理核心（静态多字重调节 + 即时字重刷新）
+# 洛书 v13.4 Beta2 Hotfix6 - 字体管理核心（静态多字重调节 + 即时字重刷新）
 
 # 关键：禁用严格错误终止，避免任何命令失败导致脚本退出
 set +e
@@ -506,36 +506,13 @@ font_weight_normalize_int() {
     esac
 }
 
-font_weight_settings_get() {
-    command -v settings >/dev/null 2>&1 || return 1
-    _fw=$(settings --user current get secure font_weight_adjustment 2>/dev/null)
-    case "$_fw" in ''|null|undefined) _fw=$(settings get secure font_weight_adjustment 2>/dev/null) ;; esac
-    font_weight_normalize_int "$_fw"
-}
-
-font_weight_settings_put() {
-    _value="$1"
-    command -v settings >/dev/null 2>&1 || return 1
-    settings --user current put secure font_weight_adjustment "$_value" >/dev/null 2>&1 || \
-        settings put secure font_weight_adjustment "$_value" >/dev/null 2>&1
-}
-
-font_weight_is_supported() {
-    command -v settings >/dev/null 2>&1 || return 1
-    _sdk=$(getprop ro.build.version.sdk 2>/dev/null)
-    case "$_sdk" in ''|*[!0-9]*) _sdk=0 ;; esac
-    [ "$_sdk" -ge 31 ]
-}
-
-font_weight_refresh_runtime() {
-    command -v cmd >/dev/null 2>&1 && cmd font system --update >/dev/null 2>&1 || true
-    command -v cmd >/dev/null 2>&1 && cmd activity broadcast --user current -a android.intent.action.CONFIGURATION_CHANGED >/dev/null 2>&1 || true
-    command -v am >/dev/null 2>&1 && am broadcast --user current -a android.intent.action.CONFIGURATION_CHANGED >/dev/null 2>&1 || true
-}
-
 font_weight_get_system() {
-    _system_weight=$(font_weight_settings_get 2>/dev/null) || _system_weight=0
-    font_weight_normalize_int "$_system_weight"
+    if command -v settings >/dev/null 2>&1; then
+        _fw=$(settings get secure font_weight_adjustment 2>/dev/null)
+        font_weight_normalize_int "$_fw"
+    else
+        echo 0
+    fi
 }
 
 font_weight_get_saved() {
@@ -572,17 +549,10 @@ font_weight_set() {
     case "$_weight" in ''|*[!0-9]*) return 2 ;; esac
     [ "$_weight" -ge 300 ] 2>/dev/null || return 2
     [ "$_weight" -le 700 ] 2>/dev/null || return 2
-    font_weight_is_supported || return 5
+    command -v settings >/dev/null 2>&1 || return 5
     _adjustment=$((_weight - 400))
     font_weight_backup_original || return 1
-    font_weight_settings_put "$_adjustment" || return 4
-    _readback=$(font_weight_get_system)
-    if [ "$_readback" != "$_adjustment" ]; then
-        _rollback=$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null | head -n1)
-        _rollback=$(font_weight_normalize_int "$_rollback")
-        font_weight_settings_put "$_rollback" >/dev/null 2>&1 || true
-        return 6
-    fi
+    settings put secure font_weight_adjustment "$_adjustment" >/dev/null 2>&1 || return 4
     mkdir -p "$CONFIG_DIR" 2>/dev/null || true
     {
         printf 'weight=%s\n' "$_weight"
@@ -590,35 +560,36 @@ font_weight_set() {
         printf 'time=%s\n' "$(date +%s)"
     } > "$FONT_WEIGHT_CONF" 2>/dev/null || return 1
     chmod 0644 "$FONT_WEIGHT_CONF" 2>/dev/null || true
+    # 字重设置本身可运行时刷新，不再标记为“必须完整重启”。
     rm -f "$FONT_WEIGHT_REBOOT_REQUIRED" 2>/dev/null || true
-    font_weight_refresh_runtime
+    cmd font system --update >/dev/null 2>&1 || true
+    am broadcast -a android.intent.action.CONFIGURATION_CHANGED >/dev/null 2>&1 || true
     return 0
 }
 
 font_weight_reset() {
-    font_weight_is_supported || return 5
+    command -v settings >/dev/null 2>&1 || return 5
     _restore=0
     [ -f "$FONT_WEIGHT_ORIGINAL_CONF" ] && _restore=$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null | head -n1)
     _restore=$(font_weight_normalize_int "$_restore")
-    font_weight_settings_put "$_restore" || return 4
-    _readback=$(font_weight_get_system)
-    [ "$_readback" = "$_restore" ] || return 6
+    settings put secure font_weight_adjustment "$_restore" >/dev/null 2>&1 || return 4
     rm -f "$FONT_WEIGHT_CONF" 2>/dev/null || true
     rm -f "$FONT_WEIGHT_REBOOT_REQUIRED" 2>/dev/null || true
-    font_weight_refresh_runtime
+    cmd font system --update >/dev/null 2>&1 || true
+    am broadcast -a android.intent.action.CONFIGURATION_CHANGED >/dev/null 2>&1 || true
     return 0
 }
 
 font_weight_status_json() {
     _supported=false
-    font_weight_is_supported && _supported=true
+    command -v settings >/dev/null 2>&1 && _supported=true
     _system=$(font_weight_get_system)
     _saved=$(font_weight_get_saved)
     _desired=$(font_weight_get_desired)
     _original=0
     [ -f "$FONT_WEIGHT_ORIGINAL_CONF" ] && _original=$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null | head -n1)
     _original=$(font_weight_normalize_int "$_original")
-    printf '{"status":"ok","data":{"supported":%s,"weight":%s,"adjustment":%s,"systemAdjustment":%s,"originalAdjustment":%s,"min":300,"max":700,"step":10,"scope":"current-user"}}\n' \
+    printf '{"status":"ok","data":{"supported":%s,"weight":%s,"adjustment":%s,"systemAdjustment":%s,"originalAdjustment":%s,"min":300,"max":700,"step":10}}\n' \
         "$_supported" "$_desired" "$_saved" "$_system" "$_original"
 }
 
@@ -641,7 +612,7 @@ handle_action() {
             list_cache_json="$CONFIG_DIR/webui_font_list.json"
             list_cache_key="$CONFIG_DIR/webui_font_list.key"
             dir_stamp=$(stat -c '%Y:%s' "$USER_FONTS_DIR" 2>/dev/null || echo '0:0')
-            current_key="v13422|${current}|${dir_stamp}"
+            current_key="v13426|${current}|${dir_stamp}"
             cached_key=$(cat "$list_cache_key" 2>/dev/null)
             if [ "$param" != "refresh" ] && [ "$cached_key" = "$current_key" ] && [ -s "$list_cache_json" ] && grep -q '"status":"ok"' "$list_cache_json" 2>/dev/null; then
                 cat "$list_cache_json"
@@ -761,7 +732,6 @@ EOF_FONTS
                 case "$_rc" in
                     2) _msg="字重超出安全范围（仅支持 300–700）" ;;
                     5) _msg="当前系统不支持字体粗细调节" ;;
-                    6) _msg="系统拒绝保存字体粗细设置，已降级为仅预览" ;;
                     *) _msg="无法写入系统字体粗细设置" ;;
                 esac
                 printf '{"status":"error","message":"%s"}\n' "$(json_escape "$_msg")"
@@ -868,24 +838,9 @@ EOF_FONTS
             fi
             ;;
         restart_ui)
-            _restarted=false
-            if command -v pkill >/dev/null 2>&1; then
-                pkill -TERM -f com.android.systemui 2>/dev/null && _restarted=true
-                [ "$_restarted" = true ] || { pkill -TERM -f systemui 2>/dev/null && _restarted=true; }
-            fi
-            if [ "$_restarted" = false ] && command -v killall >/dev/null 2>&1; then
-                killall com.android.systemui 2>/dev/null && _restarted=true
-            fi
-            if [ "$_restarted" = false ] && command -v pidof >/dev/null 2>&1; then
-                _pids=$(pidof com.android.systemui 2>/dev/null)
-                [ -n "$_pids" ] && { kill -TERM $_pids 2>/dev/null || true; _restarted=true; }
-            fi
+            pkill -f com.android.systemui 2>/dev/null || pkill -f systemui 2>/dev/null || true
             cmd activity write-settings 2>/dev/null || true
-            if [ "$_restarted" = true ]; then
-                printf '{"status":"ok","data":{"message":"系统界面已安全重启"}}\n'
-            else
-                printf '{"status":"error","message":"未找到可重启的 SystemUI 进程"}\n'
-            fi
+            printf '{"status":"ok","data":{"message":"系统界面已重启"}}\n'
             ;;
         refresh)
             cmd font system --update 2>/dev/null || true
@@ -1195,7 +1150,7 @@ case "$1" in
         current=$(get_current_font_id)
         echo ""
         echo "╔══════════════════════════════════════╗"
-        echo "║        洛 书  v13.4 Beta2 Hotfix2                   ║"
+        echo "║        洛 书  v13.4 Beta2 Hotfix6                   ║"
         echo "║        演宇宙之理，塑文字之骨        ║"
         echo "╠══════════════════════════════════════╣"
         printf '║  当前字体：\033[1;36m%-24s\033[0m║\n' "$current"

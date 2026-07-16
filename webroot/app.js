@@ -1,5 +1,5 @@
 // 洛书 WebUI - 支持 Magisk / KernelSU / SukiSU
-// v13.4 Beta2 Hotfix2 — variable/static family weight control + ZIP package import
+// v13.4 Beta2 Hotfix6 — variable/static family weight control + ZIP package import
 
 import { exec } from './kernelsu.js';
 import { analyzeFontUrl, formatAnalysisReport } from './font_analyzer.js';
@@ -216,8 +216,6 @@ const App = {
         this.loadLastSwitchResult();
         this.bindEvents();
         this.bindScrollHeader();
-        this.bindViewportCompatibility();
-        this.bindModalCompatibility();
         const restored = this.restoreDataCache();
         if (!restored) this.showSkeleton();
         await this.loadData({ background: restored });
@@ -228,7 +226,7 @@ const App = {
     },
 
     async loadModuleInfo() {
-        let version = 'v13.4 Beta2 Hotfix2';
+        let version = 'v13.4 Beta2 Hotfix6';
         try {
             const prop = await this.execShell(`sed -n 's/^version=//p' ${MODULE_DIR}/module.prop | head -n 1`);
             const raw = (prop || '').trim();
@@ -1111,8 +1109,6 @@ const App = {
             deleteBtn.onclick = () => { document.getElementById('detailModal').classList.remove('show'); this.deleteTarget = fontId; document.getElementById('deleteTarget').textContent = this.escape(fontId); document.getElementById('deleteModal').classList.add('show'); };
         }
         document.getElementById('detailModal').classList.add('show');
-        const detailScroller = document.getElementById('detailContent');
-        if (detailScroller) detailScroller.scrollTop = 0;
         if (!font.variable && (font.weights || []).filter(w => w !== 'variable').length > 1) this.bindStaticFamilyControl(font);
         this.loadDetailAnalysis(font);
     },
@@ -1423,14 +1419,11 @@ const App = {
     },
 
     async restartUI() {
-        this.showToast('正在安全重启系统界面…');
+        this.showToast('正在重启系统界面...');
         try {
-            const output = await this.execShell(`${FONT_MANAGER} action restart_ui`);
-            const line = output.split('
-').find(v => v.trim().startsWith('{'));
-            const res = line ? JSON.parse(line.trim()) : null;
-            if (res && res.status !== 'ok') throw new Error(res.message || '系统界面重启失败');
-            this.showToast(res?.data?.message || '系统界面已重启');
+            await this.execShell('pkill -f com.android.systemui || pkill -f systemui');
+            await this.execShell('cmd activity write-settings');
+            this.showToast('系统界面已重启！');
         } catch (e) {
             this.showToast('重启失败: ' + ((e && e.message) || String(e)));
         }
