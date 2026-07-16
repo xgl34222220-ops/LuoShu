@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.6 Beta1 - early boot initialization
+# LuoShu v13.6 Beta2 - early boot initialization
 set +e
 
 MODDIR="${0%/*}"
@@ -12,13 +12,13 @@ MODULE_DIR="$MODDIR"
 
 type init_module >/dev/null 2>&1 && init_module
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
-command mkdir -p "$MODDIR/config" "$MODDIR/logs" "$MODDIR/system/fonts" "$MODDIR/webroot/fonts" "$MODDIR/webroot/emoji" 2>/dev/null || true
+command mkdir -p "$MODDIR/config" "$MODDIR/logs" "$MODDIR/webroot/fonts" "$MODDIR/webroot/emoji" 2>/dev/null || true
 
-log_message "INFO" "===== post-fs-data v13.6 Beta1 开始 ====="
+log_message "INFO" "===== post-fs-data v13.6 Beta2 开始 ====="
 
 # Keep original ROM XML/fallback/symbol resources untouched.
 rm -f "$MODDIR/system/etc/fonts.xml" "$MODDIR/system/etc/font_fallback.xml" 2>/dev/null || true
-set_perm_recursive "$MODDIR/system/fonts" 0 0 0755 0644 2>/dev/null || true
+[ ! -d "$MODDIR/system/fonts" ] || set_perm_recursive "$MODDIR/system/fonts" 0 0 0755 0644 2>/dev/null || true
 
 ACTIVE_TEXT=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
 [ -n "$ACTIVE_TEXT" ] || ACTIVE_TEXT=default
@@ -31,6 +31,7 @@ DB_MODE=module
 if [ "$DB_MODE" = direct ]; then
     if MODDIR="$MODDIR" sh "$MODDIR/common/db_engine" apply; then
         log_message "INFO" "DB 字体映射已应用"
+        type luoshu_clear_own_meta_errors >/dev/null 2>&1 && luoshu_clear_own_meta_errors 2>/dev/null || true
     else
         log_message "ERROR" "DB 字体映射部分失败，详见 direct_map.log"
     fi

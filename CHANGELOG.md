@@ -1,5 +1,15 @@
 # 更新日志
 
+## v13.6 Beta2
+
+- 默认切换为通用 Direct Bind，不再依赖已知元模块名称或目录才能启用；标准 Magisk/KernelSU 与 Hybrid Mount、Mountify、meta-overlayfs 共用同一套文字字体映射
+- 正式包将 `luoshud` 与“洛书”命令行工具移到模块私有 `bin/`，默认 Emoji 下不再保留任何 `system/` 分区负载
+- 修复安装和开机脚本重新创建空 `system/fonts`、`system_ext/fonts` 后仍触发元模块 Overlay/staging 的问题
+- 无分区负载时只清理旧 staging，不再创建空内容目录；自定义 Emoji 仍按小型分区负载兼容同步
+- 升级、Direct Bind 应用及校验成功后，仅清理洛书自身的 `mount.error`、`.mount.error` 与 `mount_error`，允许 Hybrid Mount 安全重试
+- 扩展 Hybrid Mount、Mountify 与 meta-overlayfs 自动检测，同时保留 `module` 传统模式作为手动回退
+- 新增“空负载不得生成 staging”“不得清理其他模块错误标记”“发布包不得包含 `system/`”构建测试
+
 ## v13.5 Stable Hotfix5
 
 - 紧急撤回 Hotfix4 的系统字体符号链接方案；部分 ROM 在字体路径中解析符号链接时会出现严重卡顿、SystemUI 无响应甚至系统假死

@@ -17,6 +17,15 @@ done
 sh "$ROOT/scripts/prepare_webui.sh" "$STAGE/webroot"
 sh "$ROOT/scripts/prepare_mount_compat.sh" "$STAGE"
 
+# 诊断工具不属于系统分区负载。放在模块私有 bin，避免 Hybrid Mount
+# 为它创建 Overlay/staging 并留下 mount.error。
+mkdir -p "$STAGE/bin"
+if [ -f "$STAGE/system/bin/luoshud" ]; then
+    mv "$STAGE/system/bin/luoshud" "$STAGE/bin/luoshud"
+fi
+rm -rf "$STAGE/system/bin"
+rmdir "$STAGE/system" 2>/dev/null || true
+
 find "$STAGE" -type f -name '*.log' -delete
 rm -rf "$STAGE/webroot/fonts" "$STAGE/webroot/emoji" "$STAGE/logs" "$STAGE/backup" "$STAGE/config/recovery" "$STAGE/direct_map"
 mkdir -p "$STAGE/webroot/fonts" "$STAGE/webroot/emoji" "$STAGE/config/recovery"
@@ -35,7 +44,7 @@ rm -f "$STAGE/config/webui_font_list.json" \
 
 chmod 755 "$STAGE/customize.sh" "$STAGE/post-fs-data.sh" "$STAGE/service.sh" "$STAGE/uninstall.sh"
 find "$STAGE/common" -type f -exec chmod 755 {} \;
-chmod 755 "$STAGE/system/bin/luoshud"
+chmod 755 "$STAGE/bin/luoshud"
 
 test ! -e "$STAGE/skip_mount"
 test ! -e "$STAGE/skip_mountify"
@@ -43,6 +52,9 @@ test -f "$STAGE/common/meta_overlay_compat"
 test -f "$STAGE/common/font_report"
 test -f "$STAGE/common/db_engine"
 test -f "$STAGE/config/mount_mode.conf"
+test -x "$STAGE/bin/luoshud"
+test ! -e "$STAGE/system"
+test ! -e "$STAGE/mount.error"
 test ! -e "$STAGE/common/mount_compat.sh"
 test ! -e "$STAGE/common/font_report.sh"
 test ! -e "$STAGE/common/play_font_bridge.sh"

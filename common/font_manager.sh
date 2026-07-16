@@ -39,7 +39,7 @@ EMOJI_REBOOT_REQUIRED="$CONFIG_DIR/emoji_reboot_required.conf"
 FONT_WEIGHT_REBOOT_REQUIRED="$CONFIG_DIR/font_weight_reboot_required.conf"
 SWITCH_TASK_FILE="$CONFIG_DIR/switch_task.conf"
 EMOJI_TASK_FILE="$CONFIG_DIR/emoji_task.conf"
-NATIVE_BIN="$MODULE_DIR/system/bin/luoshud"
+NATIVE_BIN="$MODULE_DIR/bin/luoshud"
 FONT_WEIGHT_CONF="$CONFIG_DIR/font_weight.conf"
 FONT_WEIGHT_ORIGINAL_CONF="$CONFIG_DIR/font_weight_original.conf"
 
@@ -299,7 +299,10 @@ switch_font() {
 
     font_id="$1"
     [ -z "$font_id" ] && { echo "错误：未指定字体" >&2; return 1; }
-    mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" 2>/dev/null || true
+    mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+    if ! type luoshu_db_use_direct >/dev/null 2>&1 || ! luoshu_db_use_direct; then
+        mkdir -p "$SYSTEM_FONTS_DIR" 2>/dev/null || true
+    fi
 
     if [ -f "$ACTIVE_FONT_CONF" ]; then
         current_backup=$(head -n1 "$ACTIVE_FONT_CONF" 2>/dev/null | tr -d '\r\n')
@@ -330,7 +333,7 @@ switch_font() {
             echo "错误：ROM 字体映射失败" >&2
             return 5
         }
-        if [ "$IS_COLOROS" = "true" ]; then
+        if [ "$IS_COLOROS" = "true" ] && { ! type luoshu_db_use_direct >/dev/null 2>&1 || ! luoshu_db_use_direct; }; then
             mkdir -p "$MODULE_DIR/system_ext/fonts" "$MODULE_DIR/product/fonts" 2>/dev/null || true
             for _n in $(get_all_coloros_names); do
                 _src="$SYSTEM_FONTS_DIR/${_n}.ttf"
@@ -343,6 +346,13 @@ switch_font() {
 
     echo "$font_id" > "$ACTIVE_FONT_CONF"
     chmod 644 "$ACTIVE_FONT_CONF" "$SYSTEM_FONTS_DIR"/* 2>/dev/null || true
+
+    # Direct Bind 的文字负载全部保存在 direct_map/config；清掉旧版本遗留的
+    # 空分区目录，避免 Hybrid Mount、Mountify 或 meta-overlayfs 再次 staging。
+    if type luoshu_db_use_direct >/dev/null 2>&1 && luoshu_db_use_direct; then
+        rm -rf "$MODULE_DIR/system_ext" "$MODULE_DIR/product" 2>/dev/null || true
+        rmdir "$SYSTEM_FONTS_DIR" "$MODULE_DIR/system" 2>/dev/null || true
+    fi
 
     if [ -n "$font_id" ] && [ "$font_id" != "default" ]; then
         recent_file="$CONFIG_DIR/recent_fonts.conf"

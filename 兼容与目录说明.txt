@@ -22,13 +22,13 @@
 - Emoji 默认保持系统原版，只有在 Emoji 页面单独选择后才替换 NotoColorEmoji。
 - 应用 APK、网页或游戏自带的字体无法由系统字体模块强制替换。
 
-Hybrid Mount
-- 推荐选择 Magic；模块根目录已包含 magic marker。
-- 不要选择 Ignore：Ignore 的含义是不让 Hybrid Mount 挂载该模块，system/fonts 将不会生效。
-- 模块只为 ROM 实际存在的字体目标创建别名，减少无效 staging 节点和 No space left on device 风险。
-- 遇到 failed to canonicalize source_path，通常是 Hybrid Mount 中残留了已删除模块路径，应清理其错误记录或旧配置。
+元模块兼容
+- 默认使用 Direct Bind，文字字体不生成 system/fonts 批量副本，也不需要固定 staging。
+- 兼容 Hybrid Mount、Mountify、meta-overlayfs 与遵循 Magisk 脚本生命周期的元模块。
+- Overlay 或 Magic 均可，保持元模块默认策略即可；不要选择 Ignore。
+- 升级时只清理洛书自身的 mount.error，不修改其他模块或元模块全局设置。
 
-原生扫描器：system/bin/luoshud 仅用于 ARM64 诊断回退；WebUI 默认使用安全 Shell 扫描。
+原生扫描器：bin/luoshud 仅用于 ARM64 诊断回退，不属于系统分区负载；WebUI 默认使用安全 Shell 扫描。
 可变字体：详情页会显示 fvar 轴范围；ROM 是否使用完整字重由系统映射决定。
 
 ZIP 字体包导入目录：/sdcard/LuoShu/import/

@@ -20,7 +20,8 @@ mkdir -p "${OUT%/*}" 2>/dev/null || true
     echo "Text reboot pending: $([ -f "$MODDIR/config/text_reboot_required.conf" ] && echo yes || echo no)"
     echo "Emoji reboot pending: $([ -f "$MODDIR/config/emoji_reboot_required.conf" ] && echo yes || echo no)"
     echo "Hybrid marker: $([ -f "$MODDIR/magic" ] && echo magic || echo missing)"
-    echo "Native scanner: $([ -x "$MODDIR/system/bin/luoshud" ] && echo available-arm64 || echo unavailable)"
+    echo "Native scanner: $([ -x "$MODDIR/bin/luoshud" ] && echo available-arm64 || echo unavailable)"
+    echo "Meta mount error: $([ -e "$MODDIR/mount.error" ] && echo present || echo clear)"
     echo "Public text dir: /sdcard/LuoShu/fonts"
     echo "Public Emoji dir: /sdcard/LuoShu/emoji"
     echo

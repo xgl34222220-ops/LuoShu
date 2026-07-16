@@ -18,7 +18,7 @@
 - 适配微信 XWeb/公众号字体命名空间
 - 支持 Magisk、KernelSU、SukiSU、APatch 常见模块环境
 
-正式构建包保留 ARM64 原生扫描器 `system/bin/luoshud`，用于旧目录诊断与故障回退；WebUI 默认仍使用安全 Shell 扫描，它不参与字体挂载核心流程。
+正式构建包把 ARM64 原生扫描器保留在模块私有目录 `bin/luoshud`，用于旧目录诊断与故障回退；它不会作为系统分区负载交给元模块挂载。WebUI 默认仍使用安全 Shell 扫描，扫描器不参与字体映射核心流程。
 
 ## v13.5 稳定性中心
 
@@ -55,9 +55,11 @@ v13.5 将恢复能力与主 WebUI 分离。构建包会在 `app.js` 之前加载
 
 ## Hybrid Mount
 
-- 推荐将洛书设置为 **Magic**。
+- v13.6 Beta2 默认使用 Direct Bind，未选择自定义 Emoji 时安装包和已安装模块都不保留 `system/` 分区负载，因此无需 Hybrid Mount 建立字体 staging。
+- 支持 Hybrid Mount、Mountify、meta-overlayfs 及其他遵循 Magisk 模块脚本生命周期的元模块；Overlay 或 Magic 均可，优先保持元模块默认策略。
 - 不要设置为 **Ignore**，否则模块文件不会参与挂载。
-- 洛书自己管理字体目标，避免与其他字体模块、字体元模块重复覆盖同一路径。
+- 升级时会清理且只清理洛书自身的 `mount.error`，不会修改其他模块或元模块全局配置。
+- 洛书自己管理字体目标，避免与其他字体模块重复覆盖同一路径。
 
 ## 字体粗细调节
 

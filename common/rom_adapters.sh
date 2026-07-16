@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.6 Beta1 - ROM font target adapter
+# LuoShu v13.6 Beta2 - ROM font target adapter
 set +e
 
 MODULE_DIR="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
@@ -211,13 +211,12 @@ apply_font_by_rom() {
     _src="$1"; _dest="$2"; _mode="${3:-full}"; _family="$4"
     if type luoshu_db_use_direct >/dev/null 2>&1 && luoshu_db_use_direct; then
         rm -rf "$_dest/.luoshu-font-store" 2>/dev/null || true
-        for _f in "$_dest"/*.ttf "$_dest"/*.otf "$_dest"/*.ttc; do [ -f "$_f" ] && rm -f "$_f" 2>/dev/null || true; done
         _prepare_gms_bridge_sources "$_src" "$_family" || return 1
         _prepare_db_font "$_src" "$_family" || {
             rm -rf "$MODULE_DIR/config/gms_bridge" 2>/dev/null || true
             return 1
         }
-        _log_step "兼容环境已启用 DB 模式：不生成批量系统字体副本"
+        _log_step "Direct Bind 已启用：不生成 system 字体副本"
         return 0
     fi
     if [ "$IS_HYPEROS" = true ]; then

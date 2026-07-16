@@ -258,7 +258,7 @@ repair_permissions() {
     chmod 755 "$MODULE_DIR" "$MODULE_DIR/common" "$MODULE_DIR/webroot" 2>/dev/null || true
     find "$MODULE_DIR/common" -maxdepth 1 -type f -exec chmod 755 {} \; 2>/dev/null || true
     find "$MODULE_DIR" -maxdepth 1 -type f -name '*.sh' -exec chmod 755 {} \; 2>/dev/null || true
-    [ -f "$MODULE_DIR/system/bin/luoshud" ] && chmod 755 "$MODULE_DIR/system/bin/luoshud" 2>/dev/null || true
+    [ -f "$MODULE_DIR/bin/luoshud" ] && chmod 755 "$MODULE_DIR/bin/luoshud" 2>/dev/null || true
     chmod 775 "$FONTS_DIR" "$EMOJI_DIR" "$REPORT_DIR" 2>/dev/null || true
     printf '{"status":"ok","message":"脚本与公开目录权限已修复"}\n'
 }

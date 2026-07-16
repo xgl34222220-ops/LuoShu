@@ -18,6 +18,9 @@ while [ "$(wc -c < "$TMP/source.ttf")" -lt 2048 ]; do
 done
 printf 'rom-target\n' > "$TMP/system/fonts/Roboto-Regular.ttf"
 
+test "$(MODDIR="$MOD" sh "$MOD/common/db_engine" mode)" = direct
+test "$(MODDIR="$MOD" LUOSHU_DB_MODE=module sh "$MOD/common/db_engine" mode)" = module
+
 MODDIR="$MOD" LUOSHU_DB_MODE=direct sh -c '
     . "$MODDIR/common/db_engine"
     luoshu_db_begin

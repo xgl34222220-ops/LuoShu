@@ -9,6 +9,7 @@ if [ -f "$MODPATH/common/util_functions.sh" ]; then . "$MODPATH/common/util_func
 if [ -f "$MODPATH/common/font_check.sh" ]; then . "$MODPATH/common/font_check.sh"; fi
 if [ -f "$MODPATH/common/rom_adapters.sh" ]; then . "$MODPATH/common/rom_adapters.sh"; fi
 if [ -f "$MODPATH/common/volume_key.sh" ]; then . "$MODPATH/common/volume_key.sh"; fi
+if [ -f "$MODPATH/common/meta_overlay_compat" ]; then . "$MODPATH/common/meta_overlay_compat"; fi
 
 # 最小降级保护
 if ! type detect_font_family >/dev/null 2>&1; then
@@ -42,7 +43,7 @@ ui_print "字体目录：/sdcard/LuoShu/fonts/"
 ui_print "Emoji目录：/sdcard/LuoShu/emoji/"
 ui_print ""
 
-mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot/fonts" "$MODPATH/webroot/emoji" 2>/dev/null || true
+mkdir -p "$MODPATH/system/fonts" "$MODPATH/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot/fonts" "$MODPATH/webroot/emoji" 2>/dev/null || true
 
 scan_fonts_lines() {
     for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
@@ -172,27 +173,45 @@ if [ -n "$ACTIVE_EMOJI" ] && [ "$ACTIVE_EMOJI" != "default" ]; then
     fi
 fi
 
-# 命令行入口
-cp -f "$MODPATH/common/font_manager.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
+# 命令行与原生扫描器仅放模块私有目录，避免元模块为诊断工具创建 system Overlay。
+cp -f "$MODPATH/common/font_manager.sh" "$MODPATH/bin/洛书" 2>/dev/null || true
+if [ -f "$MODPATH/system/bin/luoshud" ] && [ ! -f "$MODPATH/bin/luoshud" ]; then
+    mv -f "$MODPATH/system/bin/luoshud" "$MODPATH/bin/luoshud" 2>/dev/null || true
+fi
+
+# 升级后清理本模块旧的 mount.error，让 Hybrid Mount 可以重新判定。
+LUOSHU_META_OLD_MODDIR="$OLD_MOD"
+type luoshu_clear_own_meta_errors >/dev/null 2>&1 && luoshu_clear_own_meta_errors 2>/dev/null || true
+
+# Direct Bind 且未使用自定义 Emoji 时完全移除空的分区负载。
+# Overlay、Magic 与 Mountify 因此无需为洛书创建 staging。
+INSTALL_DB_MODE=module
+[ -f "$MODPATH/common/db_engine" ] && INSTALL_DB_MODE=$(MODDIR="$MODPATH" sh "$MODPATH/common/db_engine" mode 2>/dev/null)
+if [ "$INSTALL_DB_MODE" = direct ] && [ "$(head -n1 "$MODPATH/config/active_emoji.conf" 2>/dev/null)" = default ]; then
+    rm -rf "$MODPATH/system/fonts" "$MODPATH/system/bin" 2>/dev/null || true
+    rmdir "$MODPATH/system" "$MODPATH/system_ext" "$MODPATH/product" 2>/dev/null || true
+    ui_print "元模块兼容：Direct Bind 私有负载模式（无需 system Overlay）"
+fi
 
 # 权限
 chmod 755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/service.sh" "$MODPATH/uninstall.sh" 2>/dev/null || true
 chmod 755 "$MODPATH/common/font_manager.sh" "$MODPATH/common/font_check.sh" "$MODPATH/common/font_import.sh" "$MODPATH/common/font_report.sh" \
           "$MODPATH/common/util_functions.sh" "$MODPATH/common/rom_adapters.sh" "$MODPATH/common/volume_key.sh" \
           "$MODPATH/common/play_font_bridge" "$MODPATH/common/wechat_xweb_bridge" 2>/dev/null || true
-chmod 755 "$MODPATH/system/bin/洛书" 2>/dev/null || true
-[ ! -f "$MODPATH/system/bin/luoshud" ] || chmod 755 "$MODPATH/system/bin/luoshud" 2>/dev/null || true
-find "$MODPATH/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
+chmod 755 "$MODPATH/bin/洛书" 2>/dev/null || true
+[ ! -f "$MODPATH/bin/luoshud" ] || chmod 755 "$MODPATH/bin/luoshud" 2>/dev/null || true
+[ ! -d "$MODPATH/system/fonts" ] || find "$MODPATH/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
 find "$MODPATH/webroot" -type f -exec chmod 0644 {} \; 2>/dev/null || true
-chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot" 2>/dev/null || true
+chmod 0755 "$MODPATH/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot" 2>/dev/null || true
+[ ! -d "$MODPATH/system/fonts" ] || chmod 0755 "$MODPATH/system/fonts" 2>/dev/null || true
 
-# Hybrid Mount Nano 识别此 marker；Full/Lite 用户应在 WebUI 选择 Magic。
+# 兼容会读取 magic marker 的元模块；Direct Bind 本身不依赖 Overlay 策略。
 touch "$MODPATH/magic" 2>/dev/null || true
 
 ui_print ""
 ui_print "安装完成。"
 ui_print "请重启手机；切换字体后同样需要完整重启。"
-ui_print "Hybrid Mount：推荐 Magic，不能选 Ignore。"
-[ -x "$MODPATH/system/bin/luoshud" ] && ui_print "ARM64 原生扫描器：已保留（诊断回退）"
+ui_print "元模块：保持默认 Overlay/Magic 均可，不要选择 Ignore。"
+[ -x "$MODPATH/bin/luoshud" ] && ui_print "ARM64 原生扫描器：已保留在模块私有目录"
 ui_print ""
 exit 0

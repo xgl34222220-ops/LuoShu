@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v13.5 Stable Hotfix3 - 元模块内容目录兼容层
+# 洛书 v13.6 Beta2 - 元模块内容目录兼容层
 # 仅同步模块分区负载，不执行 mount/umount，避免 Hybrid Mount 将洛书误判为自定义挂载模块。
 set +e
 
@@ -33,6 +33,23 @@ luoshu_detect_meta_engine() {
     else
         echo "native"
     fi
+}
+
+# Hybrid Mount 会在模块根目录写入 mount.error，并在标记存在时拒绝重试。
+# 只清理洛书自己目录中的已知标记，不碰其他模块或元模块的全局状态。
+luoshu_clear_own_meta_errors() {
+    _cleared=0
+    for _dir in "$LUOSHU_META_MODDIR" "${LUOSHU_META_OLD_MODDIR:-}"; do
+        [ -n "$_dir" ] || continue
+        case "$_dir" in /data/adb/modules/LuoShu|/data/adb/modules_update/LuoShu|*/modules/LuoShu|*/modules_update/LuoShu) ;; *) continue ;; esac
+        for _marker in "$_dir/mount.error" "$_dir/.mount.error" "$_dir/mount_error"; do
+            if [ -e "$_marker" ]; then
+                rm -f "$_marker" 2>/dev/null && _cleared=$((_cleared + 1))
+            fi
+        done
+    done
+    [ "$_cleared" -gt 0 ] && luoshu_meta_log "已清理洛书旧挂载错误标记：$_cleared"
+    return 0
 }
 
 # 输出元模块可能读取的内容根目录，每行一个。
@@ -91,10 +108,30 @@ luoshu_sync_meta_payload() {
     _roots=""
     _synced=0
     _failed=0
+    _has_payload=0
+
+    for _part in system system_ext product vendor odm oem; do
+        _src="$LUOSHU_META_MODDIR/$_part"
+        [ -d "$_src" ] || continue
+        if find "$_src" -mindepth 1 -print -quit 2>/dev/null | grep -q .; then
+            _has_payload=1
+            break
+        fi
+    done
 
     for _root in $(luoshu_meta_content_roots); do
         [ -n "$_root" ] || continue
         _roots="${_roots}${_roots:+,}$_root"
+        # Direct Bind 默认没有分区负载。此时只清掉旧 staging，不创建新的
+        # 空内容目录，否则部分元模块仍会尝试 Overlay 并写 mount.error。
+        if [ "$_has_payload" -eq 0 ]; then
+            if [ -d "$_root" ]; then
+                for _part in system system_ext product vendor odm oem; do rm -rf "$_root/$_part" 2>/dev/null || true; done
+                rm -f "$_root/.luoshu-payload" 2>/dev/null || true
+                rmdir "$_root" 2>/dev/null || true
+            fi
+            continue
+        fi
         mkdir -p "$_root" 2>/dev/null || { _failed=$((_failed + 1)); continue; }
         for _part in system system_ext product vendor odm oem; do
             _src="$LUOSHU_META_MODDIR/$_part"

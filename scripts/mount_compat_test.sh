@@ -9,7 +9,7 @@ MODULE="$TMP/modules/LuoShu"
 META="$TMP/meta"
 mkdir -p "$MODULE/common" "$MODULE/system/fonts" "$MODULE/product/fonts" "$MODULE/config" "$MODULE/logs" "$META"
 cp "$ROOT/common/meta_overlay_compat" "$MODULE/common/meta_overlay_compat"
-printf 'id=LuoShu\nversion=v13.6 Beta1\nversionCode=13601\n' > "$MODULE/module.prop"
+printf 'id=LuoShu\nversion=v13.6 Beta2\nversionCode=13602\n' > "$MODULE/module.prop"
 printf 'font-a' > "$MODULE/system/fonts/Roboto-Regular.ttf"
 printf 'product-a' > "$MODULE/product/fonts/Test.ttf"
 
@@ -23,6 +23,23 @@ test -f "$META/LuoShu/product/fonts/Test.ttf"
 grep -q 'font-a' "$META/LuoShu/system/fonts/Roboto-Regular.ttf"
 grep -q '^engine=test-meta$' "$MODULE/config/meta_compat.conf"
 
+# Only LuoShu's own stale marker may be cleared. This lets Hybrid Mount retry
+# without modifying another module or the meta engine's global state.
+printf stale > "$MODULE/mount.error"
+MODDIR="$MODULE" MODULE_DIR="$MODULE" sh -c '
+    . "$MODDIR/common/meta_overlay_compat"
+    luoshu_clear_own_meta_errors
+'
+test ! -e "$MODULE/mount.error"
+OTHER="$TMP/modules/OtherModule"
+mkdir -p "$OTHER"
+printf keep > "$OTHER/mount.error"
+MODDIR="$OTHER" MODULE_DIR="$OTHER" sh -c '
+    . "$1/common/meta_overlay_compat"
+    luoshu_clear_own_meta_errors
+' sh "$MODULE"
+test -e "$OTHER/mount.error"
+
 rm -f "$MODULE/system/fonts/Roboto-Regular.ttf"
 printf stale > "$META/LuoShu/system/fonts/Old.ttf"
 MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ROOT="$META" sh -c '
@@ -31,6 +48,15 @@ MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ROOT="$META" sh -c '
 '
 test ! -e "$META/LuoShu/system/fonts/Old.ttf"
 test ! -e "$META/LuoShu/system/fonts/Roboto-Regular.ttf"
+
+# A Direct Bind module with no partition payload must remove old staging and
+# must not recreate an empty content directory.
+rm -rf "$MODULE/system" "$MODULE/product"
+MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ROOT="$META" sh -c '
+    . "$MODDIR/common/meta_overlay_compat"
+    luoshu_sync_meta_payload
+'
+test ! -e "$META/LuoShu"
 
 STAGE="$TMP/stage"
 mkdir -p "$STAGE/common" "$STAGE/config"
@@ -43,7 +69,7 @@ cp "$ROOT/service.sh" "$STAGE/service.sh"
 cp "$ROOT/customize.sh" "$STAGE/customize.sh"
 cp "$ROOT/uninstall.sh" "$STAGE/uninstall.sh"
 cp "$ROOT/common/stability.sh" "$STAGE/common/stability.sh"
-printf auto > "$STAGE/config/mount_mode.conf"
+printf direct > "$STAGE/config/mount_mode.conf"
 printf legacy > "$STAGE/common/play_font_bridge.sh"
 printf legacy > "$STAGE/common/wechat_xweb_bridge.sh"
 printf legacy > "$STAGE/common/mount_compat.sh"

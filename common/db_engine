@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.6 Beta1 - direct file mapping engine
+# LuoShu v13.6 Beta2 - direct file mapping engine
 # This file intentionally has no .sh suffix so third-party module scanners do not
 # classify it as a custom shell hook.
 set +e
@@ -17,13 +17,19 @@ _luoshu_db_log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$1" >> "$DB_LOG" 2>/dev/null || true
 }
 
-_luoshu_db_detect_hybrid() {
+_luoshu_db_detect_meta_engine() {
     [ "${LUOSHU_DB_TEST_HYBRID:-0}" = "1" ] && return 0
-    [ -d /data/adb/hybrid_mount ] || [ -d /data/adb/hybridmount ] || \
-    [ -e /data/adb/modules/.hybrid_mount ] || [ -d /data/adb/modules/HybridMount ] && return 0
+    [ -n "${MODULE_CONTENT_DIR:-}" ] || [ -n "${META_MODULE_CONTENT_DIR:-}" ] && return 0
+    for _root in \
+        /data/adb/hybrid_mount /data/adb/hybridmount \
+        /data/adb/metamodule /data/adb/mountify \
+        /data/adb/modules/.hybrid_mount /data/adb/modules/HybridMount \
+        /data/adb/modules/meta-overlay /data/adb/modules/meta-overlayfs; do
+        [ -e "$_root" ] && return 0
+    done
     for _p in /data/adb/modules/*/module.prop; do
         [ -f "$_p" ] || continue
-        if grep -Eiq '^(id|name)=.*hybrid[ _-]*mount' "$_p" 2>/dev/null; then return 0; fi
+        if grep -Eiq '^(id|name)=.*(hybrid[ _-]*mount|mountify|meta[ _-]*(overlay|module))' "$_p" 2>/dev/null; then return 0; fi
     done
     return 1
 }
@@ -34,7 +40,7 @@ luoshu_db_mode() {
     case "$_mode" in
         direct|module) printf '%s\n' "$_mode"; return 0 ;;
     esac
-    if _luoshu_db_detect_hybrid; then printf '%s\n' direct; else printf '%s\n' module; fi
+    if _luoshu_db_detect_meta_engine; then printf '%s\n' direct; else printf '%s\n' module; fi
 }
 
 luoshu_db_use_direct() { [ "$(luoshu_db_mode)" = "direct" ]; }
