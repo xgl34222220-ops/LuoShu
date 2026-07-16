@@ -12,7 +12,7 @@ mkdir -p "$MODULE/common" "$MODULE/config" "$MODULE/logs" "$MODULE/webroot" "$MO
 cp "$ROOT/common/stability.sh" "$MODULE/common/stability.sh"
 printf '#!/bin/sh\nprintf '\''{"status":"ok"}\\n'\''\n' > "$MODULE/common/font_manager.sh"
 chmod 755 "$MODULE/common/stability.sh" "$MODULE/common/font_manager.sh"
-printf 'version=v13.5 Stable Hotfix2\nversionCode=13502\n' > "$MODULE/module.prop"
+printf 'version=v13.5 Stable Hotfix3\nversionCode=13503\n' > "$MODULE/module.prop"
 printf 'Alpha\n' > "$MODULE/config/active_font.conf"
 printf 'default\n' > "$MODULE/config/active_emoji.conf"
 
@@ -41,12 +41,10 @@ done
 STATUS20=$(run_stability status)
 printf '%s' "$STATUS20" | grep -q '"fontFiles":20'
 
-# 配置变化但尚未保存时，状态必须明确标记不一致。
 printf 'Beta\n' > "$MODULE/config/active_font.conf"
 PENDING=$(run_stability status)
 printf '%s' "$PENDING" | grep -q '"snapshotMatchesCurrent":false'
 
-# 手动保存应把旧快照轮换为可回滚配置。
 SECOND=$(run_stability save_snapshot)
 printf '%s' "$SECOND" | grep -q '"status":"ok"'
 ROTATED=$(run_stability status)
@@ -57,7 +55,6 @@ printf '%s' "$ROTATED" | grep -q '"snapshotMatchesCurrent":true'
 printf '%s' "$ROTATED" | grep -q '"rollbackAvailable":true'
 printf '%s' "$ROTATED" | grep -q '"previousSavedAt":'
 
-# 开机快照仍需保留自动轮换能力。
 printf 'Gamma\n' > "$MODULE/config/active_font.conf"
 THIRD=$(run_stability boot_snapshot)
 printf '%s' "$THIRD" | grep -q '"status":"ok"'
@@ -83,12 +80,12 @@ mkdir -p "$TMP_STAGE/webroot"
 cp "$ROOT/module.prop" "$TMP_STAGE/module.prop"
 cp -R "$ROOT/webroot/." "$TMP_STAGE/webroot/"
 sh "$ROOT/scripts/prepare_webui.sh" "$TMP_STAGE/webroot"
-grep -q 'stability.js?v=13502' "$TMP_STAGE/webroot/index.html"
-grep -q 'app.js?v=13502' "$TMP_STAGE/webroot/index.html"
-grep -q 'style.css?v=13502' "$TMP_STAGE/webroot/index.html"
+grep -q 'stability.js?v=13503' "$TMP_STAGE/webroot/index.html"
+grep -q 'app.js?v=13503' "$TMP_STAGE/webroot/index.html"
+grep -q 'style.css?v=13503' "$TMP_STAGE/webroot/index.html"
 grep -q 'stability-critical-style' "$TMP_STAGE/webroot/index.html"
-grep -q 'v13.5 Stable Hotfix2' "$TMP_STAGE/webroot/index.html"
-grep -q '^versionCode=13502$' "$ROOT/module.prop"
+grep -q 'v13.5 Stable Hotfix3' "$TMP_STAGE/webroot/index.html"
+grep -q '^versionCode=13503$' "$ROOT/module.prop"
 grep -q 'data-stability-action="snapshot"' "$TMP_STAGE/webroot/stability.js"
 grep -q 'save_snapshot' "$ROOT/common/stability.sh"
 
