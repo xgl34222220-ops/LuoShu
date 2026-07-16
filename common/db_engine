@@ -72,7 +72,7 @@ _luoshu_db_payload() {
         chmod 0644 "$_dst" 2>/dev/null || true
         command -v chcon >/dev/null 2>&1 && chcon u:object_r:system_file:s0 "$_dst" 2>/dev/null || true
     fi
-    printf '%s\n' "$_dst"
+    printf '%s\n' "$DB_BUILD_ID/${_key}.font"
 }
 
 luoshu_db_add() {
@@ -82,8 +82,8 @@ luoshu_db_add() {
     _size=$(_luoshu_db_size "$_src")
     [ "$_size" -ge 1024 ] 2>/dev/null || return 1
     grep -Fq "|$_target" "$DB_BUILD_MAP" 2>/dev/null && return 0
-    _payload=$(_luoshu_db_payload "$_src") || return 1
-    printf '%s|%s\n' "$_payload" "$_target" >> "$DB_BUILD_MAP" || return 1
+    _rel=$(_luoshu_db_payload "$_src") || return 1
+    printf '%s|%s\n' "$_rel" "$_target" >> "$DB_BUILD_MAP" || return 1
     DB_BUILD_COUNT=$((DB_BUILD_COUNT + 1))
     export DB_BUILD_COUNT
 }
@@ -134,19 +134,16 @@ luoshu_db_apply() {
     luoshu_db_use_direct || return 0
     _active=$(head -n1 "$DB_CONFIG/active_font.conf" 2>/dev/null | tr -d '\r\n')
     if [ -z "$_active" ] || [ "$_active" = "default" ]; then
-        {
-            printf 'mode=direct\nstate=default\ntargets=0\napplied=0\nfailed=0\ntime=%s\n' "$(date +%s 2>/dev/null || echo 0)"
-        } > "$DB_STATUS" 2>/dev/null || true
+        printf 'mode=direct\nstate=default\ntargets=0\napplied=0\nfailed=0\ntime=%s\n' "$(date +%s 2>/dev/null || echo 0)" > "$DB_STATUS" 2>/dev/null || true
         return 0
     fi
     [ -s "$DB_MANIFEST" ] || { _luoshu_db_log "manifest missing for active=$_active"; return 1; }
     _total=0; _applied=0; _failed=0
-    while IFS='|' read -r _src _target; do
-        [ -n "$_src" ] && [ -n "$_target" ] || continue
+    while IFS='|' read -r _rel _target; do
+        [ -n "$_rel" ] && [ -n "$_target" ] || continue
+        _src="$DB_GENS/$_rel"
         _total=$((_total + 1))
-        if [ ! -s "$_src" ] || [ ! -f "$_target" ]; then
-            _failed=$((_failed + 1)); continue
-        fi
+        if [ ! -s "$_src" ] || [ ! -f "$_target" ]; then _failed=$((_failed + 1)); continue; fi
         if _luoshu_db_attach "$_src" "$_target"; then
             _applied=$((_applied + 1))
         else
@@ -154,10 +151,8 @@ luoshu_db_apply() {
             _luoshu_db_log "attach failed target=$_target"
         fi
     done < "$DB_MANIFEST"
-    {
-        printf 'mode=direct\nstate=%s\ntargets=%s\napplied=%s\nfailed=%s\ntime=%s\n' \
-            "$([ "$_failed" -eq 0 ] && echo active || echo partial)" "$_total" "$_applied" "$_failed" "$(date +%s 2>/dev/null || echo 0)"
-    } > "$DB_STATUS" 2>/dev/null || true
+    printf 'mode=direct\nstate=%s\ntargets=%s\napplied=%s\nfailed=%s\ntime=%s\n' \
+        "$([ "$_failed" -eq 0 ] && echo active || echo partial)" "$_total" "$_applied" "$_failed" "$(date +%s 2>/dev/null || echo 0)" > "$DB_STATUS" 2>/dev/null || true
     _luoshu_db_log "apply active=$_active targets=$_total applied=$_applied failed=$_failed"
     [ "$_failed" -eq 0 ]
 }
@@ -168,7 +163,7 @@ luoshu_db_verify() {
     [ -n "$_active" ] && [ "$_active" != "default" ] || return 0
     [ -s "$DB_MANIFEST" ] || return 1
     _bad=0
-    while IFS='|' read -r _src _target; do
+    while IFS='|' read -r _rel _target; do
         [ -n "$_target" ] || continue
         _luoshu_db_attached "$_target" || _bad=$((_bad + 1))
     done < "$DB_MANIFEST"
@@ -177,7 +172,10 @@ luoshu_db_verify() {
 
 luoshu_db_cleanup() {
     _keep=""
-    [ -s "$DB_MANIFEST" ] && _keep=$(head -n1 "$DB_MANIFEST" 2>/dev/null | cut -d/ -f7)
+    if [ -s "$DB_MANIFEST" ]; then
+        IFS='|' read -r _first _rest < "$DB_MANIFEST"
+        _keep="${_first%%/*}"
+    fi
     for _d in "$DB_GENS"/*; do
         [ -d "$_d" ] || continue
         [ "${_d##*/}" = "$_keep" ] && continue
