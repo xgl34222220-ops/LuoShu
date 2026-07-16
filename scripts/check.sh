@@ -50,6 +50,8 @@ grep -q 'nsenter -t 1 -m' "$ROOT/common/db_engine"
 grep -q '/proc/1/mountinfo' "$ROOT/common/db_engine"
 grep -q 'db_engine.*apply' "$ROOT/post-fs-data.sh"
 grep -q 'db_engine.*verify' "$ROOT/service.sh"
+grep -q 'config/gms_bridge' "$ROOT/common/play_font_bridge"
+grep -q '_prepare_gms_bridge_sources' "$ROOT/common/rom_adapters.sh"
 
 TMP_STAGE=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-stage-check)
 trap 'rm -rf "$TMP_STAGE"' EXIT HUP INT TERM
@@ -94,5 +96,6 @@ trap - EXIT HUP INT TERM
 sh "$ROOT/scripts/stability_test.sh"
 sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/direct_map_test.sh"
+sh "$ROOT/scripts/gms_bridge_test.sh"
 
 echo "LuoShu source checks passed."

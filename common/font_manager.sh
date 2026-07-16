@@ -207,6 +207,8 @@ clear_managed_text_fonts() {
         rm -f "$SYSTEM_FONTS_DIR/$_f" "$MODULE_DIR/system_ext/fonts/$_f" "$MODULE_DIR/product/fonts/$_f" 2>/dev/null || true
     done
     rm -rf "$SYSTEM_FONTS_DIR/.luoshu-font-store" 2>/dev/null || true
+    # Direct Bind 的 GMS 桥接源与当前正文字体绑定，切换或恢复默认时必须清理。
+    rm -rf "$CONFIG_DIR/gms_bridge" "$CONFIG_DIR"/.gms_bridge.* 2>/dev/null || true
 }
 
 get_current_emoji_id() {

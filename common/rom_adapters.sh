@@ -89,6 +89,45 @@ _source_for_target() {
     printf '%s\n' "$_regular"
 }
 
+# Direct Bind 不会在 system/fonts 中保留批量字体副本，但 GMS/Play 的
+# Google Sans 动态文件仍需要一个稳定、可跨挂载命名空间使用的 bind 源。
+# 这里只缓存三个正文字重；同一字重仅保存一份，不参与系统分区挂载。
+_prepare_gms_bridge_sources() {
+    _regular="$1"; _family="$2"
+    _bridge_dir="$MODULE_DIR/config/gms_bridge"
+    _bridge_tmp="$MODULE_DIR/config/.gms_bridge.$$"
+    rm -rf "$_bridge_tmp" 2>/dev/null || true
+    command mkdir -p "$_bridge_tmp" 2>/dev/null || return 1
+
+    for _weight in regular medium bold; do
+        _selected="$_regular"
+        if [ "$_weight" != regular ] && [ -n "$_family" ] && type get_weight_file >/dev/null 2>&1; then
+            _candidate=$(get_weight_file "$_family" "$_weight" 2>/dev/null)
+            [ -s "$_candidate" ] && _selected="$_candidate"
+        fi
+        cp -f "$_selected" "$_bridge_tmp/${_weight}.font" 2>/dev/null || {
+            rm -rf "$_bridge_tmp" 2>/dev/null || true
+            return 1
+        }
+        chmod 0644 "$_bridge_tmp/${_weight}.font" 2>/dev/null || true
+        command -v chcon >/dev/null 2>&1 && chcon u:object_r:system_file:s0 "$_bridge_tmp/${_weight}.font" 2>/dev/null || true
+    done
+
+    # 仅当选中的正文源本身是可变字体时，才允许桥接 Google Sans Flex。
+    if grep -a -q 'fvar' "$_regular" 2>/dev/null; then
+        cp -f "$_regular" "$_bridge_tmp/variable.font" 2>/dev/null || true
+        chmod 0644 "$_bridge_tmp/variable.font" 2>/dev/null || true
+        command -v chcon >/dev/null 2>&1 && chcon u:object_r:system_file:s0 "$_bridge_tmp/variable.font" 2>/dev/null || true
+    fi
+
+    rm -rf "$_bridge_dir" 2>/dev/null || true
+    mv -f "$_bridge_tmp" "$_bridge_dir" 2>/dev/null || {
+        rm -rf "$_bridge_tmp" 2>/dev/null || true
+        return 1
+    }
+    return 0
+}
+
 _db_add_existing() {
     _src="$1"; _file="$2"; _include_data="${3:-0}"
     for _root in /system/fonts /system_ext/fonts /product/fonts /my_product/fonts /vendor/fonts; do
@@ -173,7 +212,11 @@ apply_font_by_rom() {
     if type luoshu_db_use_direct >/dev/null 2>&1 && luoshu_db_use_direct; then
         rm -rf "$_dest/.luoshu-font-store" 2>/dev/null || true
         for _f in "$_dest"/*.ttf "$_dest"/*.otf "$_dest"/*.ttc; do [ -f "$_f" ] && rm -f "$_f" 2>/dev/null || true; done
-        _prepare_db_font "$_src" "$_family" || return 1
+        _prepare_gms_bridge_sources "$_src" "$_family" || return 1
+        _prepare_db_font "$_src" "$_family" || {
+            rm -rf "$MODULE_DIR/config/gms_bridge" 2>/dev/null || true
+            return 1
+        }
         _log_step "兼容环境已启用 DB 模式：不生成批量系统字体副本"
         return 0
     fi

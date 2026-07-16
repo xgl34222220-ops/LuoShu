@@ -37,12 +37,28 @@ source_for_name() {
         return 0
     fi
     case "$_name" in
-        *Bold*|*-700-*) _fallback="$MODDIR/system/fonts/Roboto-Bold.ttf" ;;
-        *Medium*|*-500-*) _fallback="$MODDIR/system/fonts/Roboto-Medium.ttf" ;;
-        *) _fallback="$MODDIR/system/fonts/Roboto-Regular.ttf" ;;
+        *Flex*)
+            _vf="$MODDIR/config/gms_bridge/variable.font"
+            valid_source "$_vf" && is_variable_font "$_vf" && { echo "$_vf"; return 0; }
+            return 1
+            ;;
+        *Code*) return 1 ;;
+        *Bold*|*-700-*) _bridge_weight=bold; _fallback="$MODDIR/system/fonts/Roboto-Bold.ttf" ;;
+        *Medium*|*-500-*) _bridge_weight=medium; _fallback="$MODDIR/system/fonts/Roboto-Medium.ttf" ;;
+        *) _bridge_weight=regular; _fallback="$MODDIR/system/fonts/Roboto-Regular.ttf" ;;
     esac
-    valid_source "$_fallback" && echo "$_fallback"
+    if valid_source "$_fallback"; then
+        echo "$_fallback"
+        return 0
+    fi
+    _bridge="$MODDIR/config/gms_bridge/${_bridge_weight}.font"
+    valid_source "$_bridge" && echo "$_bridge"
 }
+
+if [ "$ACTION" = "resolve" ]; then
+    source_for_name "$2"
+    exit $?
+fi
 
 namespace_pids() {
     {
