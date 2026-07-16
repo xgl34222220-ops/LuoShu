@@ -12,7 +12,7 @@ mkdir -p "$MODULE/common" "$MODULE/config" "$MODULE/logs" "$MODULE/webroot" "$MO
 cp "$ROOT/common/stability.sh" "$MODULE/common/stability.sh"
 printf '#!/bin/sh\nprintf '\''{"status":"ok"}\\n'\''\n' > "$MODULE/common/font_manager.sh"
 chmod 755 "$MODULE/common/stability.sh" "$MODULE/common/font_manager.sh"
-printf 'version=v13.5 Stable\nversionCode=13500\n' > "$MODULE/module.prop"
+printf 'version=v13.5 Stable Hotfix1\nversionCode=13501\n' > "$MODULE/module.prop"
 printf 'Alpha\n' > "$MODULE/config/active_font.conf"
 printf 'default\n' > "$MODULE/config/active_emoji.conf"
 
@@ -56,14 +56,16 @@ printf '%s' "$SCAN" | grep -q '"status":"ok"'
 run_stability report | grep -q '"status":"ok"'
 find "$PUBLIC/reports" -type f -name 'LuoShu-recovery-*.txt' | grep -q .
 
-TMP_WEB="$TMP/patched-webroot"
-mkdir -p "$TMP_WEB"
-cp -R "$ROOT/webroot/." "$TMP_WEB/"
-sh "$ROOT/scripts/prepare_webui.sh" "$TMP_WEB"
-grep -q 'stability.js?v=13500' "$TMP_WEB/index.html"
-grep -q 'app.js?v=13500' "$TMP_WEB/index.html"
-grep -q 'style.css?v=13500' "$TMP_WEB/index.html"
-grep -q 'v13.5 Stable' "$ROOT/module.prop"
-grep -q '^versionCode=13500$' "$ROOT/module.prop"
+TMP_STAGE="$TMP/stage"
+mkdir -p "$TMP_STAGE/webroot"
+cp "$ROOT/module.prop" "$TMP_STAGE/module.prop"
+cp -R "$ROOT/webroot/." "$TMP_STAGE/webroot/"
+sh "$ROOT/scripts/prepare_webui.sh" "$TMP_STAGE/webroot"
+grep -q 'stability.js?v=13501' "$TMP_STAGE/webroot/index.html"
+grep -q 'app.js?v=13501' "$TMP_STAGE/webroot/index.html"
+grep -q 'style.css?v=13501' "$TMP_STAGE/webroot/index.html"
+grep -q 'stability-critical-style' "$TMP_STAGE/webroot/index.html"
+grep -q 'v13.5 Stable Hotfix1' "$TMP_STAGE/webroot/index.html"
+grep -q '^versionCode=13501$' "$ROOT/module.prop"
 
 echo 'LuoShu stability checks passed.'
