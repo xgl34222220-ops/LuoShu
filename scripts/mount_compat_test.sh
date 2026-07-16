@@ -9,7 +9,7 @@ MODULE="$TMP/modules/LuoShu"
 META="$TMP/meta"
 mkdir -p "$MODULE/common" "$MODULE/system/fonts" "$MODULE/product/fonts" "$MODULE/config" "$MODULE/logs" "$META"
 cp "$ROOT/common/meta_overlay_compat" "$MODULE/common/meta_overlay_compat"
-printf 'id=LuoShu\nversion=v13.5 Stable Hotfix4\nversionCode=13504\n' > "$MODULE/module.prop"
+printf 'id=LuoShu\nversion=v13.5 Stable Hotfix5\nversionCode=13505\n' > "$MODULE/module.prop"
 printf 'font-a' > "$MODULE/system/fonts/Roboto-Regular.ttf"
 printf 'product-a' > "$MODULE/product/fonts/Test.ttf"
 
@@ -54,23 +54,39 @@ grep -q 'luoshu_sync_meta_payload' "$STAGE/service.sh"
 test ! -e "$STAGE/common/play_font_bridge.sh"
 test ! -e "$STAGE/common/wechat_xweb_bridge.sh"
 test ! -e "$STAGE/common/mount_compat.sh"
-grep -q 'LUOSHU_HYBRID_COMPACT_ALIASES' "$STAGE/common/rom_adapters.sh"
-grep -q 'luoshu_link_compact_alias' "$STAGE/common/font_manager.sh"
+grep -q 'LUOSHU_HYBRID_STAGE_BUDGET' "$STAGE/common/rom_adapters.sh"
+! grep -q 'LUOSHU_HYBRID_COMPACT_ALIASES' "$STAGE/common/rom_adapters.sh"
+! grep -q 'luoshu_link_compact_alias' "$STAGE/common/font_manager.sh"
 grep -q 'command mkdir' "$STAGE/customize.sh"
 grep -q 'command mkdir' "$STAGE/post-fs-data.sh"
 grep -q 'command mkdir' "$STAGE/uninstall.sh"
 
-# 验证同目录 ROM 别名是符号链接，不再被 Hybrid Mount ext4 staging 展开成大文件副本。
+# 使用极小测试预算验证：字体目标必须是普通文件/硬链接，绝不能再生成符号链接；
+# 第一个核心目标允许创建，达到预算后低优先级目标必须被跳过。
 mkdir -p "$STAGE/system/fonts/.luoshu-font-store" "$STAGE/system_ext/fonts"
 printf '0123456789font-data' > "$STAGE/system/fonts/.luoshu-font-store/regular.font"
-STAGE="$STAGE" sh -c '
+STAGE="$STAGE" LUOSHU_FONT_STAGE_BUDGET=48 sh -c '
     . "$STAGE/common/rom_adapters.sh"
-    _font_alias "$STAGE/system/fonts/.luoshu-font-store/regular.font" "$STAGE/system/fonts/SysFont-Regular.ttf"
-    test -L "$STAGE/system/fonts/SysFont-Regular.ttf"
-    test "$(readlink "$STAGE/system/fonts/SysFont-Regular.ttf")" = ".luoshu-font-store/regular.font"
-    link_or_copy_font "$STAGE/system/fonts/SysFont-Regular.ttf" "$STAGE/system_ext/fonts/SysFont-Regular.ttf"
-    test -L "$STAGE/system_ext/fonts/SysFont-Regular.ttf"
-    test "$(readlink "$STAGE/system_ext/fonts/SysFont-Regular.ttf")" = "/system/fonts/SysFont-Regular.ttf"
+    _font_store_reset "$STAGE/system/fonts"
+    printf "0123456789font-data" > "$STAGE/system/fonts/.luoshu-font-store/regular.font"
+    anchor="$STAGE/system/fonts/.luoshu-font-store/regular.font"
+
+    _font_alias "$anchor" "$STAGE/system/fonts/SysFont-Regular.ttf"
+    test -f "$STAGE/system/fonts/SysFont-Regular.ttf"
+    test ! -L "$STAGE/system/fonts/SysFont-Regular.ttf"
+    test "$(stat -c %i "$anchor")" = "$(stat -c %i "$STAGE/system/fonts/SysFont-Regular.ttf")"
+
+    if _font_alias "$anchor" "$STAGE/system/fonts/SysSans-En-Regular.ttf"; then
+        echo "第二个别名不应突破 staging 测试预算" >&2
+        exit 1
+    fi
+    test ! -e "$STAGE/system/fonts/SysSans-En-Regular.ttf"
+
+    if link_or_copy_font "$STAGE/system/fonts/SysFont-Regular.ttf" "$STAGE/system_ext/fonts/SysFont-Regular.ttf"; then
+        echo "跨分区别名不应突破 staging 测试预算" >&2
+        exit 1
+    fi
+    test ! -e "$STAGE/system_ext/fonts/SysFont-Regular.ttf"
 '
 
 sh -n "$STAGE/common/font_manager.sh"
