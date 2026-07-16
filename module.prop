@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v13.5 Stable Hotfix1
-versionCode=13501
+version=v13.5 Stable Hotfix2
+versionCode=13502
 author=惜故里丶
-description=通用 Android 全局字体管理：修复自救悬浮按钮被全局布局拉伸导致的 UI 错位；新增 meta-overlayfs 双目录负载同步与 Mountify/Hybrid Mount 识别，确保字体、Emoji 和恢复默认在不同元模块挂载方案下正确生效；保留稳定配置回滚、ZIP 安全导入、可变字体、静态多字重及 GMS/Gemini/XWeb 兼容。
+description=通用 Android 全局字体管理：基于 v13.5 Stable Hotfix1 稳定核心精修 WebUI，简化更多与自救界面，增强深色模式可读性；自动识别 Magisk、KernelSU、SukiSU Ultra、APatch，并保留 Mountify 稳定适配；保留稳定配置回滚、ZIP 安全导入、可变字体、静态多字重及 GMS/Gemini/XWeb 兼容。
 updateJson=
 webroot=webroot
