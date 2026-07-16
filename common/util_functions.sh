@@ -3,7 +3,7 @@ set +e
 # ============================================================
 # 洛书 - 工具函数库 (util_functions.sh)
 # 作者：惜故里丶
-# 版本：v13.3 Beta2
+# 版本：v13.4 Beta2 Hotfix2
 # 功能：提供字体模块所需的所有通用工具函数
 # ============================================================
 
@@ -18,14 +18,15 @@ LUOSHU_PUBLIC_DIR="/sdcard/LuoShu"
 USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
 USER_EMOJI_DIR="$LUOSHU_PUBLIC_DIR/emoji"
 USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
+USER_IMPORT_DIR="$LUOSHU_PUBLIC_DIR/import"
 LEGACY_FONTS_DIR="/sdcard/Fonts"
 
 
 # 创建公开目录并兼容迁移旧版 /sdcard/Fonts。迁移采用复制而不是移动，
 # 避免用户仍使用旧版模块时找不到原文件。
 ensure_public_storage() {
-    mkdir -p "$USER_FONTS_DIR" "$USER_EMOJI_DIR" "$USER_REPORT_DIR" 2>/dev/null || true
-    chmod 0775 "$LUOSHU_PUBLIC_DIR" "$USER_FONTS_DIR" "$USER_EMOJI_DIR" "$USER_REPORT_DIR" 2>/dev/null || true
+    mkdir -p "$USER_FONTS_DIR" "$USER_EMOJI_DIR" "$USER_REPORT_DIR" "$USER_IMPORT_DIR" 2>/dev/null || true
+    chmod 0775 "$LUOSHU_PUBLIC_DIR" "$USER_FONTS_DIR" "$USER_EMOJI_DIR" "$USER_REPORT_DIR" "$USER_IMPORT_DIR" 2>/dev/null || true
     if [ -d "$LEGACY_FONTS_DIR" ]; then
         for _old in "$LEGACY_FONTS_DIR"/*.ttf "$LEGACY_FONTS_DIR"/*.otf "$LEGACY_FONTS_DIR"/*.ttc \
                     "$LEGACY_FONTS_DIR"/*.TTF "$LEGACY_FONTS_DIR"/*.OTF "$LEGACY_FONTS_DIR"/*.TTC; do
@@ -331,7 +332,14 @@ scan_family_weights() {
         case ",$weights," in *",$w,"*) ;; *) weights="$weights,$w" ;; esac
     done
     case "$weights" in ,*) weights="${weights#,}" ;; esac
-    echo "$weights"
+    # 统一按从细到粗排序，避免文件名/目录顺序导致 WebUI 标签顺序混乱。
+    sorted=""
+    for _role in variable thin light regular medium semibold bold black; do
+        case ",$weights," in
+            *",$_role,"*) [ -n "$sorted" ] && sorted="$sorted,"; sorted="$sorted$_role" ;;
+        esac
+    done
+    echo "$sorted"
 }
 
 # 获取字体族中指定字重的文件路径

@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.3 Beta2 - 字体文件真实格式与基础兼容性检测
+# LuoShu v13.4 Beta2 Hotfix2 - 字体文件真实格式与基础兼容性检测
 # 只读取文件，不修改字体。
 
 font_magic_hex() {
@@ -19,7 +19,8 @@ font_detect_format() {
 }
 
 font_has_table() {
-    grep -a -q "$2" "$1" 2>/dev/null
+    # SFNT 表目录位于文件头部。只读取前 128 KiB，避免对几十个 10–30 MB 字体反复全文件 grep。
+    dd if="$1" bs=65536 count=2 2>/dev/null | grep -a -q "$2"
 }
 
 font_validate() {

@@ -1,5 +1,5 @@
 // 洛书 WebUI - 支持 Magisk / KernelSU / SukiSU
-// v13.3 Beta2 — safe reboot workflow + independent Emoji management
+// v13.4 Beta2 Hotfix2 — variable/static family weight control + ZIP package import
 
 import { exec } from './kernelsu.js';
 import { analyzeFontUrl, formatAnalysisReport } from './font_analyzer.js';
@@ -149,6 +149,9 @@ function getPinyinAbbr(str) {
 const PREVIEW_CHARS_SMALL = '天地玄黄 宇宙洪荒 日月盈昃 辰宿列张';
 const PREVIEW_CHARS_LARGE = 'Aa 洛书 123';
 
+const STATIC_WEIGHT_VALUES = { thin:300, light:350, regular:400, medium:500, semibold:600, bold:700, black:700 };
+const STATIC_WEIGHT_CSS = { thin:100, light:300, regular:400, medium:500, semibold:600, bold:700, black:900, variable:400 };
+
 const CARD_GRADIENTS = [
     'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
     'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
@@ -197,9 +200,13 @@ const App = {
     currentEmoji: 'default',
     textRebootRequired: false,
     emojiRebootRequired: false,
+    weightRebootRequired: false,
     pendingRiskFont: null,
     pendingEmoji: null,
     isEmojiSwitching: false,
+    importPackages: [],
+    isImporting: false,
+    fontWeightState: null,
 
     async init() {
         this.loadTheme();
@@ -209,6 +216,8 @@ const App = {
         this.loadLastSwitchResult();
         this.bindEvents();
         this.bindScrollHeader();
+        this.bindViewportCompatibility();
+        this.bindModalCompatibility();
         const restored = this.restoreDataCache();
         if (!restored) this.showSkeleton();
         await this.loadData({ background: restored });
@@ -219,7 +228,7 @@ const App = {
     },
 
     async loadModuleInfo() {
-        let version = 'v13.3 Beta2';
+        let version = 'v13.4 Beta2 Hotfix2';
         try {
             const prop = await this.execShell(`sed -n 's/^version=//p' ${MODULE_DIR}/module.prop | head -n 1`);
             const raw = (prop || '').trim();
@@ -351,7 +360,8 @@ const App = {
             ? `<div class="analysis-warnings">${assessment.warnings.map(w => `<span>⚠ ${this.escape(w)}</span>`).join('')}</div>`
             : '<div class="analysis-ok">✓ 未发现明显的字体文件风险</div>';
         const axes = result.variable?.axes || [];
-        const axesHtml = axes.length ? `<div class="variable-panel"><div class="variable-title">可变字体轴 · ${axes.length} 个</div>${axes.map(a => `<div class="variable-axis"><b>${this.escape(a.tag)}</b><span>${a.min} — ${a.max}</span><small>默认 ${a.default}</small></div>`).join('')}<div class="analysis-note">系统会保留字体原始轴；具体字重是否被应用取决于 ROM 和目标字体映射。</div></div>` : '';
+        const weightAxis = axes.find(a => String(a.tag || '').trim() === 'wght');
+        const axesHtml = axes.length ? `<div class="variable-panel"><div class="variable-title">可变字体轴 · ${axes.length} 个</div>${axes.map(a => `<div class="variable-axis"><b>${this.escape(a.tag)}</b><span>${a.min} — ${a.max}</span><small>默认 ${a.default}</small></div>`).join('')}<div class="analysis-note">预览会直接使用字体的可变轴；系统应用使用 Android 全局字重调节，完整生效建议重启。</div></div>${weightAxis ? '<div class="variable-weight-control" id="variableWeightControl"><div class="analysis-loading"><span></span>正在读取系统字重设置…</div></div>' : ''}` : '';
         container.innerHTML = `
             <div class="analysis-head"><div><small>字符抽样检测</small><strong>${assessment.label}</strong></div><span class="analysis-score ${assessment.level}">${assessment.score}</span></div>
             <div class="coverage-list">
@@ -367,6 +377,143 @@ const App = {
             <div class="analysis-note">抽样结果只反映字体自身字符映射；缺失字符仍可能由 Android fallback 字体补齐。</div>
             <button class="analysis-report-btn" id="copyAnalysisReportBtn" type="button">复制检测报告</button>`;
         document.getElementById('copyAnalysisReportBtn')?.addEventListener('click', () => this.copyText(formatAnalysisReport(font, result), '检测报告已复制'));
+        if (weightAxis) this.bindVariableWeightControl(font, weightAxis);
+    },
+    async loadFontWeightState(force = false) {
+        if (!force && this.fontWeightState) return this.fontWeightState;
+        const output = await this.execShell(`${FONT_MANAGER} action font_weight_status`);
+        const line = output.split('\n').find(v => v.trim().startsWith('{'));
+        const res = line ? JSON.parse(line.trim()) : null;
+        if (res?.status !== 'ok') throw new Error(res?.message || '无法读取系统字体粗细');
+        this.fontWeightState = res.data || {};
+        return this.fontWeightState;
+    },
+    applyVariablePreview(weight) {
+        const value = Number(weight) || 400;
+        ['detailPreview', 'detailName', 'detailSub', 'detailSmall', 'detailPreviewInput'].forEach(id => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.style.fontVariationSettings = `"wght" ${value}`;
+            el.style.fontWeight = String(value);
+        });
+    },
+    async bindVariableWeightControl(font, axis) {
+        const box = document.getElementById('variableWeightControl');
+        if (!box) return;
+        const axisMin = Math.ceil(Number(axis.min) || 100);
+        const axisMax = Math.floor(Number(axis.max) || 900);
+        const safeMin = Math.max(300, axisMin);
+        const safeMax = Math.min(700, axisMax);
+        if (safeMin > safeMax) {
+            box.innerHTML = '<div class="variable-weight-unavailable"><strong>此字体的 wght 轴不在系统安全调节范围内</strong><small>仍可保留字体自身的可变字重层级。</small></div>';
+            return;
+        }
+        try {
+            const state = await this.loadFontWeightState();
+            const initial = Math.min(safeMax, Math.max(safeMin, Number(state.weight) || Math.round(Number(axis.default) || 400)));
+            const presets = [300, 400, 500, 600, 700].filter(v => v >= safeMin && v <= safeMax);
+            box.innerHTML = `
+                <div class="variable-weight-head"><div><small>系统字体粗细</small><strong id="variableWeightValue">${initial}</strong></div><span id="variableWeightDelta">${initial === 400 ? '标准' : initial > 400 ? `+${initial - 400}` : `${initial - 400}`}</span></div>
+                <input class="variable-weight-slider" id="variableWeightSlider" type="range" min="${safeMin}" max="${safeMax}" step="10" value="${initial}" aria-label="字体粗细">
+                <div class="variable-weight-scale"><span>${safeMin}</span><span>400</span><span>${safeMax}</span></div>
+                <div class="variable-weight-presets">${presets.map(v => `<button type="button" data-variable-weight="${v}" class="${v === initial ? 'active' : ''}">${v}</button>`).join('')}</div>
+                <div class="variable-weight-note">字体轴范围 ${axisMin}–${axisMax}，系统安全应用范围 ${safeMin}–${safeMax}。预览立即变化；应用后即时写入系统，未更新的 App 重新打开即可，通常无需完整重启。</div>
+                <div class="variable-weight-actions"><button type="button" id="resetVariableWeightBtn">恢复系统原值</button><button type="button" class="primary" id="applyVariableWeightBtn">应用粗细</button></div>`;
+            const slider = document.getElementById('variableWeightSlider');
+            const valueEl = document.getElementById('variableWeightValue');
+            const deltaEl = document.getElementById('variableWeightDelta');
+            const sync = value => {
+                const v = Number(value) || 400;
+                slider.value = String(v);
+                valueEl.textContent = String(v);
+                deltaEl.textContent = v === 400 ? '标准' : v > 400 ? `+${v - 400}` : `${v - 400}`;
+                box.querySelectorAll('[data-variable-weight]').forEach(btn => btn.classList.toggle('active', Number(btn.dataset.variableWeight) === v));
+                this.applyVariablePreview(v);
+            };
+            slider.addEventListener('input', e => sync(e.target.value));
+            box.querySelectorAll('[data-variable-weight]').forEach(btn => btn.addEventListener('click', () => sync(btn.dataset.variableWeight)));
+            document.getElementById('applyVariableWeightBtn')?.addEventListener('click', async e => {
+                const btn = e.currentTarget;
+                const value = Number(slider.value) || 400;
+                btn.disabled = true; btn.textContent = '正在应用…';
+                try {
+                    const output = await this.execShell(`${FONT_MANAGER} action font_weight_set ${value}`);
+                    const line = output.split('\n').find(v => v.trim().startsWith('{'));
+                    const res = line ? JSON.parse(line.trim()) : null;
+                    if (res?.status !== 'ok') throw new Error(res?.message || '粗细应用失败');
+                    this.fontWeightState = { ...(this.fontWeightState || {}), ...(res.data || {}), supported: true };
+                    this.weightRebootRequired = false;
+                    this.updateRebootUI();
+                    this.showToast(res.data?.message || `字体粗细已设为 ${value}`);
+                } catch (err) { this.showToast((err && err.message) || String(err)); }
+                finally { btn.disabled = false; btn.textContent = '应用粗细'; }
+            });
+            document.getElementById('resetVariableWeightBtn')?.addEventListener('click', async e => {
+                const btn = e.currentTarget;
+                btn.disabled = true; btn.textContent = '正在恢复…';
+                try {
+                    const output = await this.execShell(`${FONT_MANAGER} action font_weight_reset`);
+                    const line = output.split('\n').find(v => v.trim().startsWith('{'));
+                    const res = line ? JSON.parse(line.trim()) : null;
+                    if (res?.status !== 'ok') throw new Error(res?.message || '恢复失败');
+                    this.fontWeightState = null;
+                    this.weightRebootRequired = false;
+                    this.updateRebootUI();
+                    sync(Math.min(safeMax, Math.max(safeMin, Number(res.data?.weight) || 400)));
+                    this.showToast(res.data?.message || '已恢复系统原始字体粗细');
+                } catch (err) { this.showToast((err && err.message) || String(err)); }
+                finally { btn.disabled = false; btn.textContent = '恢复系统原值'; }
+            });
+            sync(initial);
+            if (state.supported === false) {
+                box.querySelectorAll('button,input').forEach(el => { el.disabled = true; });
+                box.insertAdjacentHTML('beforeend', '<div class="variable-weight-unavailable"><small>当前系统未提供字体粗细设置接口，仅支持实时预览。</small></div>');
+            }
+        } catch (e) {
+            box.innerHTML = `<div class="variable-weight-unavailable"><strong>系统粗细读取失败</strong><small>${this.escape((e && e.message) || String(e))}</small></div>`;
+        }
+    },
+    applyStaticFamilyPreview(weight) {
+        const value = Number(weight) || 400;
+        ['detailPreview','detailName','detailSub','detailSmall','detailPreviewInput'].forEach(id => {
+            const el = document.getElementById(id); if (!el) return;
+            el.style.fontVariationSettings = 'normal';
+            el.style.fontWeight = String(value);
+        });
+    },
+    async bindStaticFamilyControl(font) {
+        const box = document.getElementById('staticFamilyControl');
+        if (!box) return;
+        const roles = (font.weights || []).filter(role => role !== 'variable' && STATIC_WEIGHT_VALUES[role]);
+        if (roles.length < 2) { box.remove(); return; }
+        try {
+            const state = await this.loadFontWeightState();
+            const current = Number(state.weight) || 400;
+            const available = roles.map(role => ({role,value:STATIC_WEIGHT_VALUES[role],css:STATIC_WEIGHT_CSS[role]||400,label:WEIGHT_LABELS[role]||role}));
+            let selected = available.reduce((best,item) => Math.abs(item.value-current) < Math.abs(best.value-current) ? item : best, available[0]);
+            box.innerHTML = `
+                <div class="static-family-head"><div><small>多字重静态家族</small><strong id="staticWeightName">${this.escape(selected.label)}</strong></div><span>${available.length} 档可选</span></div>
+                <div class="static-weight-presets">${available.map(item => `<button type="button" data-static-role="${item.role}" class="${item.role===selected.role?'active':''}"><b>${this.escape(item.label)}</b><small>${item.value}</small></button>`).join('')}</div>
+                <div class="static-family-note">这是多个独立固定字重文件，不是连续可变轴。系统仍会按正文、标题和粗体请求自动匹配各文件；这里调整整体粗细偏移。预览立即变化，应用后通常无需完整重启，未更新的 App 重新打开即可。</div>
+                <div class="variable-weight-actions"><button type="button" id="resetStaticWeightBtn">恢复系统原值</button><button type="button" class="primary" id="applyStaticWeightBtn">应用所选粗细</button></div>`;
+            const nameEl=document.getElementById('staticWeightName');
+            const choose=btn=>{ selected=available.find(x=>x.role===btn.dataset.staticRole)||selected; box.querySelectorAll('[data-static-role]').forEach(x=>x.classList.toggle('active',x===btn)); if(nameEl) nameEl.textContent=selected.label; this.applyStaticFamilyPreview(selected.css); };
+            box.querySelectorAll('[data-static-role]').forEach(btn=>btn.addEventListener('click',()=>choose(btn)));
+            document.getElementById('applyStaticWeightBtn')?.addEventListener('click',async e=>{
+                const btn=e.currentTarget; btn.disabled=true; btn.textContent='正在应用…';
+                try { const output=await this.execShell(`${FONT_MANAGER} action font_weight_set ${selected.value}`); const line=output.split('\n').find(v=>v.trim().startsWith('{')); const res=line?JSON.parse(line.trim()):null; if(res?.status!=='ok') throw new Error(res?.message||'粗细应用失败'); this.fontWeightState={...(this.fontWeightState||{}),...(res.data||{}),supported:true}; this.weightRebootRequired=false; this.updateRebootUI(); this.showToast(`已切换为${selected.label}偏移；未更新的应用请重新打开`); }
+                catch(err){ this.showToast((err&&err.message)||String(err)); }
+                finally{ btn.disabled=false; btn.textContent='应用所选粗细'; }
+            });
+            document.getElementById('resetStaticWeightBtn')?.addEventListener('click',async e=>{
+                const btn=e.currentTarget; btn.disabled=true; btn.textContent='正在恢复…';
+                try { const output=await this.execShell(`${FONT_MANAGER} action font_weight_reset`); const line=output.split('\n').find(v=>v.trim().startsWith('{')); const res=line?JSON.parse(line.trim()):null; if(res?.status!=='ok') throw new Error(res?.message||'恢复失败'); this.fontWeightState=null; this.weightRebootRequired=false; this.updateRebootUI(); const v=Number(res.data?.weight)||400; const target=available.reduce((best,item)=>Math.abs(item.value-v)<Math.abs(best.value-v)?item:best,available[0]); const targetBtn=box.querySelector(`[data-static-role="${target.role}"]`); if(targetBtn) choose(targetBtn); this.showToast('已恢复系统原始字体粗细'); }
+                catch(err){ this.showToast((err&&err.message)||String(err)); }
+                finally{ btn.disabled=false; btn.textContent='恢复系统原值'; }
+            });
+            const initialBtn=box.querySelector(`[data-static-role="${selected.role}"]`); if(initialBtn) choose(initialBtn);
+            if(state.supported===false){ box.querySelectorAll('button').forEach(el=>el.disabled=true); box.insertAdjacentHTML('beforeend','<div class="variable-weight-unavailable"><small>当前 ROM 未提供系统字重接口，仅支持详情页预览。</small></div>'); }
+        } catch(e) { box.innerHTML=`<div class="variable-weight-unavailable"><strong>字重状态读取失败</strong><small>${this.escape((e&&e.message)||String(e))}</small></div>`; }
     },
     async loadDetailAnalysis(font, force = false) {
         const container = document.getElementById('fontAnalysis');
@@ -389,6 +536,7 @@ const App = {
             if (res?.status === 'ok') {
                 this.textRebootRequired = Boolean(res.data?.text);
                 this.emojiRebootRequired = Boolean(res.data?.emoji);
+                this.weightRebootRequired = Boolean(res.data?.weight);
                 this.updateRebootUI();
             }
         } catch (e) {
@@ -397,14 +545,18 @@ const App = {
     },
 
     updateRebootUI() {
-        const pending = this.textRebootRequired || this.emojiRebootRequired;
+        const pending = this.textRebootRequired || this.emojiRebootRequired || this.weightRebootRequired;
         document.body.classList.toggle('reboot-required', pending);
         const btn = document.getElementById('rebootDeviceBtn');
         const hint = btn?.querySelector('.action-btn-hint');
         if (btn) btn.classList.toggle('pending', pending);
-        if (hint) hint.textContent = pending
-            ? `${this.textRebootRequired ? '文字' : ''}${this.textRebootRequired && this.emojiRebootRequired ? ' + ' : ''}${this.emojiRebootRequired ? 'Emoji' : ''}等待重启`
-            : '完成字体应用';
+        if (hint) {
+            const pendingItems = [];
+            if (this.textRebootRequired) pendingItems.push('文字');
+            if (this.emojiRebootRequired) pendingItems.push('Emoji');
+            if (this.weightRebootRequired) pendingItems.push('粗细');
+            hint.textContent = pending ? `${pendingItems.join(' + ')}等待重启` : '完成字体应用';
+        }
         const badge = document.querySelector('.current-badge');
         if (badge) badge.innerHTML = `<span class="pulse-dot"></span>${pending ? '配置待重启' : '正在使用'}`;
     },
@@ -549,9 +701,9 @@ const App = {
     },
 
     async openPublicFolder(kind = 'fonts') {
-        const safeKind = kind === 'emoji' ? 'emoji' : 'fonts';
+        const safeKind = kind === 'emoji' ? 'emoji' : (kind === 'import' ? 'import' : 'fonts');
         const path = `/sdcard/LuoShu/${safeKind}`;
-        const title = safeKind === 'emoji' ? 'Emoji' : '文字字体';
+        const title = safeKind === 'emoji' ? 'Emoji' : (safeKind === 'import' ? '字体包导入' : '文字字体');
         try { await this.execShell(`mkdir -p "${path}" && chmod 0777 "${path}" 2>/dev/null || true`); }
         catch (_) { this.showToast('无法创建目录'); return; }
         const docId = encodeURIComponent(`primary:LuoShu/${safeKind}`);
@@ -645,15 +797,23 @@ const App = {
         }
     },
 
-    // 只在需要预览时注入单个字体，避免进入页面就加载整个字体库。
+    // 只在需要预览时注入字体。静态多字重家族会为每个实际文件建立独立 face。
     injectFontFace(font) {
         if (!font?.file || !font?.id) return;
         const safeId = this.safeId(font.id);
         if (injectedFaces.has(safeId)) return;
         injectedFaces.add(safeId);
+        const cssUrl = value => String(value || '').replace(/(["\\])/g, '\\$1');
+        const family = `preview_${safeId}`;
+        const variants = font.variants && typeof font.variants === 'object' ? font.variants : {};
+        const entries = Object.entries(variants).filter(([, file]) => file);
+        let rules;
+        if (font.variable) rules = `@font-face{font-family:"${family}";src:url("${cssUrl(font.file)}");font-weight:100 900;font-style:normal;font-display:swap;}`;
+        else if (entries.length) rules = entries.map(([role,file]) => `@font-face{font-family:"${family}";src:url("${cssUrl(file)}");font-weight:${STATIC_WEIGHT_CSS[role] || 400};font-style:normal;font-display:swap;}`).join('');
+        else rules = `@font-face{font-family:"${family}";src:url("${cssUrl(font.file)}");font-weight:400;font-style:normal;font-display:swap;}`;
         const el = document.getElementById('dynamicFontStyles') || document.createElement('style');
         el.id = 'dynamicFontStyles';
-        el.textContent = (el.textContent || '') + `@font-face{font-family:"preview_${safeId}";src:url("${font.file}");font-display:swap;}`;
+        el.textContent = (el.textContent || '') + rules;
         if (!el.parentNode) document.head.appendChild(el);
     },
 
@@ -833,13 +993,13 @@ const App = {
                                 <div class="card-title">${titleHtml}</div>
                                 ${isInvalid ? '<span class="card-status invalid">无效文件</span>' : (isActive ? '<span class="card-status">✓ 使用中</span>' : '')}
                             </div>
-                            <div class="card-weights">${weightTags}</div>
+                            <div class="card-weights">${weightTags}${!font.variable && (font.weights || []).filter(w => w !== 'variable').length > 1 ? '<span class="family-adjust-badge">可调</span>' : ''}</div>
                             <div class="card-preview-row">
                                 <span class="card-preview-large" style="font-family:${previewFamily}">${PREVIEW_CHARS_LARGE}</span>
                                 <span class="card-preview-small" style="font-family:${previewFamily}">${PREVIEW_CHARS_SMALL}</span>
                             </div>
                             <div class="card-meta">
-                                ${isInvalid ? `<span class="card-hint danger">${this.escape(font.error || '文件格式无效')}</span>` : (isActive ? '<span class="card-hint">点击查看详情</span>' : '<span class="card-hint">点击切换字体</span>')}
+                                ${isInvalid ? `<span class="card-hint danger">${this.escape(font.error || '文件格式无效')}</span>` : (isActive ? `<span class="card-hint">${!font.variable && (font.weights || []).filter(w => w !== 'variable').length > 1 ? '点击详情调节字重' : '点击查看详情'}</span>` : '<span class="card-hint">点击切换字体</span>')}
                                 <span class="card-fileinfo">${this.usageCounts[font.id] ? `使用 ${this.usageCounts[font.id]} 次 · ` : ''}${font.size || ''}${font.size && font.date ? ' · ' : ''}${font.date || ''}</span>
                             </div>
                         </div>
@@ -903,11 +1063,12 @@ const App = {
                 <div class="detail-row"><span class="detail-label">格式</span><span class="detail-value">${font.format || 'TTF'}</span></div>
                 <div class="detail-row"><span class="detail-label">大小</span><span class="detail-value">${font.size || '未知'}</span></div>
                 <div class="detail-row"><span class="detail-label">日期</span><span class="detail-value">${font.date || '未知'}</span></div>
-                <div class="detail-row"><span class="detail-label">字重</span><span class="detail-value">${weightTags}</span></div>
-                <div class="detail-row"><span class="detail-label">可变字体</span><span class="detail-value">${font.variable ? '是（保留原始可变轴）' : '否'}</span></div>
+                <div class="detail-row"><span class="detail-label">字重类型</span><span class="detail-value">${font.variable ? '可变字体（连续调节）' : ((font.weights || []).length > 1 ? `静态多字重（${font.weights.length} 档）` : '单一字重')}</span></div>
+                <div class="detail-row"><span class="detail-label">可用字重</span><span class="detail-value">${weightTags}</span></div>
                 <div class="detail-row"><span class="detail-label">文件检测</span><span class="detail-value ${font.valid === false ? 'danger-text' : ''}">${font.valid === false ? this.escape(font.error || '未通过') : '通过'}</span></div>
                 <div class="detail-row"><span class="detail-label">使用次数</span><span class="detail-value">${Number(this.usageCounts[font.id]) || 0} 次</span></div>
             </div>
+            ${!font.variable && (font.weights || []).filter(w => w !== 'variable').length > 1 ? '<div class="static-family-control" id="staticFamilyControl"><div class="analysis-loading"><span></span>正在读取多字重状态…</div></div>' : ''}
             <div class="font-analysis" id="fontAnalysis"><div class="analysis-loading"><span></span>正在读取字体字符映射…</div></div>
         `;
 
@@ -950,6 +1111,9 @@ const App = {
             deleteBtn.onclick = () => { document.getElementById('detailModal').classList.remove('show'); this.deleteTarget = fontId; document.getElementById('deleteTarget').textContent = this.escape(fontId); document.getElementById('deleteModal').classList.add('show'); };
         }
         document.getElementById('detailModal').classList.add('show');
+        const detailScroller = document.getElementById('detailContent');
+        if (detailScroller) detailScroller.scrollTop = 0;
+        if (!font.variable && (font.weights || []).filter(w => w !== 'variable').length > 1) this.bindStaticFamilyControl(font);
         this.loadDetailAnalysis(font);
     },
 
@@ -1024,6 +1188,93 @@ const App = {
 
     // ── 上传字体功能已移除（仅保留本地字体切换/系统替换） ──
 
+    openImportModal() {
+        document.getElementById('helpModal')?.classList.remove('show');
+        document.getElementById('importModal')?.classList.add('show');
+        const result = document.getElementById('importResult');
+        if (result) { result.hidden = true; result.innerHTML = ''; }
+        this.loadImportPackages();
+    },
+
+    async loadImportPackages() {
+        const list = document.getElementById('importList');
+        if (list) list.innerHTML = '<div class="analysis-loading"><span></span>正在扫描 ZIP 字体包…</div>';
+        try {
+            const output = await this.execShell(`${FONT_MANAGER} action import_list`);
+            const line = output.split('\n').find(v => v.trim().startsWith('{'));
+            const res = line ? JSON.parse(line.trim()) : null;
+            if (res?.status !== 'ok') throw new Error(res?.message || '扫描失败');
+            this.importPackages = Array.isArray(res.data?.packages) ? res.data.packages : [];
+            this.renderImportPackages();
+        } catch (e) {
+            if (list) list.innerHTML = `<div class="import-empty"><strong>扫描失败</strong><small>${this.escape((e && e.message) || String(e))}</small></div>`;
+        }
+    },
+
+    renderImportPackages() {
+        const list = document.getElementById('importList');
+        if (!list) return;
+        if (!this.importPackages.length) {
+            list.innerHTML = `<div class="import-empty"><strong>没有找到 ZIP 字体包</strong><small>先把其他字体模块 ZIP 放入 /sdcard/LuoShu/import/，再点击刷新。</small><button class="btn-cancel" id="emptyOpenImportBtn" type="button">打开导入目录</button></div>`;
+            document.getElementById('emptyOpenImportBtn')?.addEventListener('click', () => this.openPublicFolder('import'));
+            return;
+        }
+        list.innerHTML = this.importPackages.map(item => `
+            <div class="import-package">
+                <span class="import-package-icon">ZIP</span>
+                <span class="import-package-copy"><strong>${this.escape(item.name || item.id)}</strong><small>${this.escape(item.size || '')}${item.date ? ` · ${this.escape(item.date)}` : ''}</small></span>
+                <button class="import-package-btn" type="button" data-import-zip="${this.escape(item.id)}">自动识别</button>
+            </div>`).join('');
+        list.querySelectorAll('[data-import-zip]').forEach(btn => {
+            btn.addEventListener('click', () => this.importZipPackage(btn.dataset.importZip, btn));
+        });
+    },
+
+    async importZipPackage(zipId, button) {
+        if (this.isImporting) { this.showToast('正在导入字体包'); return; }
+        this.isImporting = true;
+        const oldText = button?.textContent || '自动识别';
+        if (button) { button.disabled = true; button.textContent = '识别中…'; }
+        const resultBox = document.getElementById('importResult');
+        if (resultBox) {
+            resultBox.hidden = false;
+            resultBox.className = 'import-result running';
+            resultBox.innerHTML = '<strong>正在识别字体包…</strong><small>正在筛选中文主字体、可变字体和完整字重家族</small>';
+        }
+        // 先让 WebView 完成一次绘制，避免 Shell 桥接阻塞时按钮过很久才显示“识别中”。
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        await new Promise(resolve => setTimeout(resolve, 40));
+        try {
+            const output = await this.execShell(`${FONT_MANAGER} action import_zip ${this.shellQuote(zipId)}`);
+            const line = output.split('\n').find(v => v.trim().startsWith('{'));
+            const res = line ? JSON.parse(line.trim()) : null;
+            if (res?.status !== 'ok') throw new Error(res?.message || '导入失败');
+            const data = res.data || {};
+            const modeLabel = data.mode === 'variable' ? '可变字体' : (data.mode === 'deduplicated' ? '重复别名去重' : (data.mode === 'family' ? '完整字重家族' : '单字体'));
+            if (resultBox) {
+                resultBox.hidden = false;
+                resultBox.className = 'import-result success';
+                resultBox.innerHTML = `<strong>✓ ${this.escape(data.message || '导入完成')}</strong>
+                    <small>${this.escape(data.reason || '')}${data.source ? ` · 原文件 ${this.escape(data.source)}` : ''}</small>
+                    <small>识别方式：${this.escape(modeLabel)} · 文字 ${Number(data.importedText) || 0} 个${Number(data.importedEmoji) ? ` · Emoji ${Number(data.importedEmoji)} 个` : ''}</small>
+                    <small>通过检测 ${Number(data.valid) || 0} 个 · 无效 ${Number(data.invalid) || 0} 个 · 已忽略 ${Number(data.ignored) || 0} 个</small>`;
+            }
+            this.showToast(data.message || '字体包导入完成');
+            await Promise.all([this.loadData({ background: true, force: true }), this.loadEmojis()]);
+        } catch (e) {
+            const msg = (e && e.message) || String(e);
+            if (resultBox) {
+                resultBox.hidden = false;
+                resultBox.className = 'import-result failed';
+                resultBox.innerHTML = `<strong>导入失败</strong><small>${this.escape(msg)}</small>`;
+            }
+            this.showToast('导入失败: ' + msg);
+        } finally {
+            this.isImporting = false;
+            if (button) { button.disabled = false; button.textContent = oldText; }
+        }
+    },
+
     bindEvents() {
         // 主题切换
         document.getElementById('themeToggleBtn').addEventListener('click', () => this.toggleTheme());
@@ -1054,6 +1305,10 @@ const App = {
         document.getElementById('rebootDeviceBtn')?.addEventListener('click', () => document.getElementById('rebootDeviceModal')?.classList.add('show'));
         document.getElementById('openEmojiFolderBtn')?.addEventListener('click', () => this.openPublicFolder('emoji'));
         document.getElementById('moreOpenEmojiFolderBtn')?.addEventListener('click', () => this.openPublicFolder('emoji'));
+        document.getElementById('importZipBtn')?.addEventListener('click', () => this.openImportModal());
+        document.getElementById('moreImportZipBtn')?.addEventListener('click', () => this.openImportModal());
+        document.getElementById('openImportFolderBtn')?.addEventListener('click', () => this.openPublicFolder('import'));
+        document.getElementById('refreshImportBtn')?.addEventListener('click', () => this.loadImportPackages());
 
         // 弹窗事件委托
         const modalClose = (id) => document.getElementById(id)?.classList.remove('show');
@@ -1077,6 +1332,9 @@ const App = {
         document.getElementById('resetDefaultBtn').addEventListener('click', () => this.requestFontSwitch('default'));
         document.getElementById('detailCancelBtn').addEventListener('click', () => modalClose('detailModal'));
         document.getElementById('detailModal').addEventListener('click', (e) => { if (e.target.id === 'detailModal') modalClose('detailModal'); });
+        const closeImport = () => modalClose('importModal');
+        document.getElementById('closeImportBtn')?.addEventListener('click', closeImport);
+        document.getElementById('importModal')?.addEventListener('click', e => { if (e.target.id === 'importModal') closeImport(); });
         const closeHelp = () => { modalClose('helpModal'); this.updateDockFromScroll(); };
         document.getElementById('closeHelpBtn').addEventListener('click', closeHelp);
         document.getElementById('closeHelpTopBtn')?.addEventListener('click', closeHelp);
@@ -1165,11 +1423,14 @@ const App = {
     },
 
     async restartUI() {
-        this.showToast('正在重启系统界面...');
+        this.showToast('正在安全重启系统界面…');
         try {
-            await this.execShell('pkill -f com.android.systemui || pkill -f systemui');
-            await this.execShell('cmd activity write-settings');
-            this.showToast('系统界面已重启！');
+            const output = await this.execShell(`${FONT_MANAGER} action restart_ui`);
+            const line = output.split('
+').find(v => v.trim().startsWith('{'));
+            const res = line ? JSON.parse(line.trim()) : null;
+            if (res && res.status !== 'ok') throw new Error(res.message || '系统界面重启失败');
+            this.showToast(res?.data?.message || '系统界面已重启');
         } catch (e) {
             this.showToast('重启失败: ' + ((e && e.message) || String(e)));
         }

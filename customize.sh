@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.3 Beta2 - 安装脚本
+# LuoShu v13.4 Beta2 Hotfix2 - 安装脚本
 
 MODPATH="${MODPATH:-$3}"
 set +e
@@ -27,7 +27,7 @@ check_hyperos
 
 ui_print ""
 ui_print "╔══════════════════════════════════╗"
-ui_print "║       洛 书  v13.3 Beta2        ║"
+ui_print "║       洛 书  v13.4 Beta2 Hotfix2        ║"
 ui_print "║   文字与 Emoji 独立管理          ║"
 ui_print "╚══════════════════════════════════╝"
 ui_print ""
@@ -144,6 +144,11 @@ if [ -f "$OLD_MOD/config/active_emoji.conf" ]; then
     cp -f "$OLD_MOD/config/active_emoji.conf" "$MODPATH/config/active_emoji.conf" 2>/dev/null || true
 fi
 
+# 保留可变字体粗细偏好和首次调整前的系统原值，避免升级后无法恢复。
+for _fw_conf in font_weight.conf font_weight_original.conf; do
+    [ -f "$OLD_MOD/config/$_fw_conf" ] && cp -f "$OLD_MOD/config/$_fw_conf" "$MODPATH/config/$_fw_conf" 2>/dev/null || true
+done
+
 # 升级时恢复独立 Emoji 映射；找不到公开源文件时复用旧模块中的安全副本。
 ACTIVE_EMOJI=$(head -n1 "$MODPATH/config/active_emoji.conf" 2>/dev/null | tr -d '\r\n')
 if [ -n "$ACTIVE_EMOJI" ] && [ "$ACTIVE_EMOJI" != "default" ]; then
@@ -172,7 +177,7 @@ cp -f "$MODPATH/common/font_manager.sh" "$MODPATH/system/bin/洛书" 2>/dev/null
 
 # 权限
 chmod 755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/service.sh" "$MODPATH/uninstall.sh" 2>/dev/null || true
-chmod 755 "$MODPATH/common/font_manager.sh" "$MODPATH/common/font_check.sh" "$MODPATH/common/font_report.sh" \
+chmod 755 "$MODPATH/common/font_manager.sh" "$MODPATH/common/font_check.sh" "$MODPATH/common/font_import.sh" "$MODPATH/common/font_report.sh" \
           "$MODPATH/common/util_functions.sh" "$MODPATH/common/rom_adapters.sh" "$MODPATH/common/volume_key.sh" \
           "$MODPATH/common/play_font_bridge" "$MODPATH/common/wechat_xweb_bridge" 2>/dev/null || true
 chmod 755 "$MODPATH/system/bin/洛书" 2>/dev/null || true

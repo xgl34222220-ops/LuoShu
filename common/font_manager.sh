@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v13.3 Beta2 - 字体管理核心（任务状态 + 硬链接精简版）
+# 洛书 v13.4 Beta2 Hotfix2 - 字体管理核心（静态多字重调节 + 即时字重刷新）
 
 # 关键：禁用严格错误终止，避免任何命令失败导致脚本退出
 set +e
@@ -31,13 +31,17 @@ LUOSHU_PUBLIC_DIR="/sdcard/LuoShu"
 USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
 USER_EMOJI_DIR="$LUOSHU_PUBLIC_DIR/emoji"
 USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
+USER_IMPORT_DIR="$LUOSHU_PUBLIC_DIR/import"
 LEGACY_FONTS_DIR="/sdcard/Fonts"
 ACTIVE_EMOJI_CONF="$CONFIG_DIR/active_emoji.conf"
 TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
 EMOJI_REBOOT_REQUIRED="$CONFIG_DIR/emoji_reboot_required.conf"
+FONT_WEIGHT_REBOOT_REQUIRED="$CONFIG_DIR/font_weight_reboot_required.conf"
 SWITCH_TASK_FILE="$CONFIG_DIR/switch_task.conf"
 EMOJI_TASK_FILE="$CONFIG_DIR/emoji_task.conf"
 NATIVE_BIN="$MODULE_DIR/system/bin/luoshud"
+FONT_WEIGHT_CONF="$CONFIG_DIR/font_weight.conf"
+FONT_WEIGHT_ORIGINAL_CONF="$CONFIG_DIR/font_weight_original.conf"
 
 # ---------- 加载共享工具函数 ----------
 # detect_font_family 等基础函数统一由 util_functions.sh 提供
@@ -47,6 +51,9 @@ if [ -f "$MODULE_DIR/common/util_functions.sh" ]; then
 fi
 if [ -f "$MODULE_DIR/common/font_check.sh" ]; then
     . "$MODULE_DIR/common/font_check.sh"
+fi
+if [ -f "$MODULE_DIR/common/font_import.sh" ]; then
+    . "$MODULE_DIR/common/font_import.sh"
 fi
 if type ensure_public_storage >/dev/null 2>&1; then ensure_public_storage; fi
 
@@ -487,6 +494,134 @@ notify_user() {
     return 1
 }
 
+# ---------- Android 全局字重调节 ----------
+# Android 12+ 使用 secure.font_weight_adjustment 调整系统字体粗细。
+# 为保证 ColorOS / HyperOS 稳定，洛书只开放 AOSP 常用安全范围 -100..300，
+# 对应名义字重 300..700。设置写入后立即请求字体服务刷新；已打开应用可能需重新打开。
+font_weight_normalize_int() {
+    _v="$1"
+    case "$_v" in
+        ''|null|undefined|2147483647|-2147483648|*[!0-9-]*) echo 0 ;;
+        *) echo "$_v" ;;
+    esac
+}
+
+font_weight_settings_get() {
+    command -v settings >/dev/null 2>&1 || return 1
+    _fw=$(settings --user current get secure font_weight_adjustment 2>/dev/null)
+    case "$_fw" in ''|null|undefined) _fw=$(settings get secure font_weight_adjustment 2>/dev/null) ;; esac
+    font_weight_normalize_int "$_fw"
+}
+
+font_weight_settings_put() {
+    _value="$1"
+    command -v settings >/dev/null 2>&1 || return 1
+    settings --user current put secure font_weight_adjustment "$_value" >/dev/null 2>&1 || \
+        settings put secure font_weight_adjustment "$_value" >/dev/null 2>&1
+}
+
+font_weight_is_supported() {
+    command -v settings >/dev/null 2>&1 || return 1
+    _sdk=$(getprop ro.build.version.sdk 2>/dev/null)
+    case "$_sdk" in ''|*[!0-9]*) _sdk=0 ;; esac
+    [ "$_sdk" -ge 31 ]
+}
+
+font_weight_refresh_runtime() {
+    command -v cmd >/dev/null 2>&1 && cmd font system --update >/dev/null 2>&1 || true
+    command -v cmd >/dev/null 2>&1 && cmd activity broadcast --user current -a android.intent.action.CONFIGURATION_CHANGED >/dev/null 2>&1 || true
+    command -v am >/dev/null 2>&1 && am broadcast --user current -a android.intent.action.CONFIGURATION_CHANGED >/dev/null 2>&1 || true
+}
+
+font_weight_get_system() {
+    _system_weight=$(font_weight_settings_get 2>/dev/null) || _system_weight=0
+    font_weight_normalize_int "$_system_weight"
+}
+
+font_weight_get_saved() {
+    if [ -f "$FONT_WEIGHT_CONF" ]; then
+        _fw=$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_CONF" 2>/dev/null | head -n1)
+    else
+        _fw=$(font_weight_get_system)
+    fi
+    font_weight_normalize_int "$_fw"
+}
+
+font_weight_get_desired() {
+    if [ -f "$FONT_WEIGHT_CONF" ]; then
+        _fw=$(sed -n 's/^weight=//p' "$FONT_WEIGHT_CONF" 2>/dev/null | head -n1)
+    else
+        _fw=$((400 + $(font_weight_get_system)))
+    fi
+    case "$_fw" in ''|*[!0-9]*) _fw=400 ;; esac
+    [ "$_fw" -lt 300 ] 2>/dev/null && _fw=300
+    [ "$_fw" -gt 700 ] 2>/dev/null && _fw=700
+    echo "$_fw"
+}
+
+font_weight_backup_original() {
+    [ -s "$FONT_WEIGHT_ORIGINAL_CONF" ] && return 0
+    mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+    _original=$(font_weight_get_system)
+    printf 'adjustment=%s\n' "$_original" > "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null || return 1
+    chmod 0644 "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null || true
+}
+
+font_weight_set() {
+    _weight="$1"
+    case "$_weight" in ''|*[!0-9]*) return 2 ;; esac
+    [ "$_weight" -ge 300 ] 2>/dev/null || return 2
+    [ "$_weight" -le 700 ] 2>/dev/null || return 2
+    font_weight_is_supported || return 5
+    _adjustment=$((_weight - 400))
+    font_weight_backup_original || return 1
+    font_weight_settings_put "$_adjustment" || return 4
+    _readback=$(font_weight_get_system)
+    if [ "$_readback" != "$_adjustment" ]; then
+        _rollback=$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null | head -n1)
+        _rollback=$(font_weight_normalize_int "$_rollback")
+        font_weight_settings_put "$_rollback" >/dev/null 2>&1 || true
+        return 6
+    fi
+    mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+    {
+        printf 'weight=%s\n' "$_weight"
+        printf 'adjustment=%s\n' "$_adjustment"
+        printf 'time=%s\n' "$(date +%s)"
+    } > "$FONT_WEIGHT_CONF" 2>/dev/null || return 1
+    chmod 0644 "$FONT_WEIGHT_CONF" 2>/dev/null || true
+    rm -f "$FONT_WEIGHT_REBOOT_REQUIRED" 2>/dev/null || true
+    font_weight_refresh_runtime
+    return 0
+}
+
+font_weight_reset() {
+    font_weight_is_supported || return 5
+    _restore=0
+    [ -f "$FONT_WEIGHT_ORIGINAL_CONF" ] && _restore=$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null | head -n1)
+    _restore=$(font_weight_normalize_int "$_restore")
+    font_weight_settings_put "$_restore" || return 4
+    _readback=$(font_weight_get_system)
+    [ "$_readback" = "$_restore" ] || return 6
+    rm -f "$FONT_WEIGHT_CONF" 2>/dev/null || true
+    rm -f "$FONT_WEIGHT_REBOOT_REQUIRED" 2>/dev/null || true
+    font_weight_refresh_runtime
+    return 0
+}
+
+font_weight_status_json() {
+    _supported=false
+    font_weight_is_supported && _supported=true
+    _system=$(font_weight_get_system)
+    _saved=$(font_weight_get_saved)
+    _desired=$(font_weight_get_desired)
+    _original=0
+    [ -f "$FONT_WEIGHT_ORIGINAL_CONF" ] && _original=$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null | head -n1)
+    _original=$(font_weight_normalize_int "$_original")
+    printf '{"status":"ok","data":{"supported":%s,"weight":%s,"adjustment":%s,"systemAdjustment":%s,"originalAdjustment":%s,"min":300,"max":700,"step":10,"scope":"current-user"}}\n' \
+        "$_supported" "$_desired" "$_saved" "$_system" "$_original"
+}
+
 # ---------- WebUI 接口 ----------
 handle_action() {
     action="$1"
@@ -506,7 +641,7 @@ handle_action() {
             list_cache_json="$CONFIG_DIR/webui_font_list.json"
             list_cache_key="$CONFIG_DIR/webui_font_list.key"
             dir_stamp=$(stat -c '%Y:%s' "$USER_FONTS_DIR" 2>/dev/null || echo '0:0')
-            current_key="${current}|${dir_stamp}"
+            current_key="v13422|${current}|${dir_stamp}"
             cached_key=$(cat "$list_cache_key" 2>/dev/null)
             if [ "$param" != "refresh" ] && [ "$cached_key" = "$current_key" ] && [ -s "$list_cache_json" ] && grep -q '"status":"ok"' "$list_cache_json" 2>/dev/null; then
                 cat "$list_cache_json"
@@ -539,11 +674,20 @@ handle_action() {
                 [ "$first" = "true" ] || printf ','
                 fw=$(scan_family_weights "$fam")
                 weights_json=""
+                variants_json=""
+                weight_count=0
                 _old_ifs="$IFS"; IFS=','
                 for w in $fw; do
                     [ -n "$w" ] || continue
                     [ -n "$weights_json" ] && weights_json="$weights_json,"
                     weights_json="$weights_json\"$(json_escape "$w")\""
+                    weight_count=$((weight_count + 1))
+                    _variant_file=$(get_weight_file "$fam" "$w")
+                    if [ -f "$_variant_file" ]; then
+                        _variant_name=$(basename "$_variant_file")
+                        [ -n "$variants_json" ] && variants_json="$variants_json,"
+                        variants_json="$variants_json\"$(json_escape "$w")\":\"./fonts/$(json_escape "$_variant_name")\""
+                    fi
                 done
                 IFS="$_old_ifs"
                 wfile=$(get_weight_file "$fam" "regular")
@@ -575,16 +719,60 @@ EOF_FONTS
                 fi
                 fvariable=false
                 if type is_variable_font >/dev/null 2>&1 && is_variable_font "$wfile"; then fvariable=true; fi
+                family_type=single
+                [ "$weight_count" -ge 2 ] && family_type=static-family
+                [ "$fvariable" = true ] && family_type=variable
                 ftime=$(stat -c '%y' "$wfile" 2>/dev/null | cut -c1-10)
                 fname=$(basename "$wfile" 2>/dev/null)
-                printf '{"id":"%s","name":"%s","weights":[%s],"file":"./fonts/%s","size":"%s","bytes":%s,"format":"%s","valid":%s,"warning":"%s","error":"%s","variable":%s,"date":"%s"}' \
-                    "$(json_escape "$fam")" "$(json_escape "$fam")" "$weights_json" "$(json_escape "$fname")" "$(format_filesize "$fbytes")" "$fbytes" "$(json_escape "$fformat")" "$fvalid" "$(json_escape "$fwarning")" "$(json_escape "$ferror")" "$fvariable" "$(json_escape "$ftime")"
+                printf '{"id":"%s","name":"%s","weights":[%s],"variants":{%s},"familyType":"%s","file":"./fonts/%s","size":"%s","bytes":%s,"format":"%s","valid":%s,"warning":"%s","error":"%s","variable":%s,"date":"%s"}' \
+                    "$(json_escape "$fam")" "$(json_escape "$fam")" "$weights_json" "$variants_json" "$(json_escape "$family_type")" "$(json_escape "$fname")" "$(format_filesize "$fbytes")" "$fbytes" "$(json_escape "$fformat")" "$fvalid" "$(json_escape "$fwarning")" "$(json_escape "$ferror")" "$fvariable" "$(json_escape "$ftime")"
                 first="false"
             done < "$fam_list_file"
             printf ']}}\n'
             } | tee "$list_cache_json"
             rm -f "$fam_list_file" 2>/dev/null || true
             echo "$current_key" > "$list_cache_key" 2>/dev/null || true
+            ;;
+        import_list)
+            if type import_list_json >/dev/null 2>&1; then
+                import_list_json
+            else
+                printf '{"status":"error","message":"ZIP 导入组件不可用"}\n'
+            fi
+            ;;
+        import_zip)
+            if [ -z "$param" ]; then
+                printf '{"status":"error","message":"未指定 ZIP 字体包"}\n'
+            elif type import_zip_package >/dev/null 2>&1; then
+                import_zip_package "$param"
+            else
+                printf '{"status":"error","message":"ZIP 导入组件不可用"}\n'
+            fi
+            ;;
+        font_weight_status)
+            font_weight_status_json
+            ;;
+        font_weight_set)
+            if font_weight_set "$param"; then
+                _adj=$(font_weight_get_saved)
+                printf '{"status":"ok","data":{"weight":%s,"adjustment":%s,"message":"字体粗细已即时写入；未更新的应用请重新打开，必要时仅刷新系统界面"}}\n' "$(font_weight_get_desired)" "$_adj"
+            else
+                _rc=$?
+                case "$_rc" in
+                    2) _msg="字重超出安全范围（仅支持 300–700）" ;;
+                    5) _msg="当前系统不支持字体粗细调节" ;;
+                    6) _msg="系统拒绝保存字体粗细设置，已降级为仅预览" ;;
+                    *) _msg="无法写入系统字体粗细设置" ;;
+                esac
+                printf '{"status":"error","message":"%s"}\n' "$(json_escape "$_msg")"
+            fi
+            ;;
+        font_weight_reset)
+            if font_weight_reset; then
+                printf '{"status":"ok","data":{"weight":%s,"adjustment":%s,"message":"已恢复系统原始字体粗细"}}\n' "$(font_weight_get_desired)" "$(font_weight_get_system)"
+            else
+                printf '{"status":"error","message":"无法恢复系统字体粗细"}\n'
+            fi
             ;;
         native_status)
             _legacy_count=0
@@ -680,9 +868,24 @@ EOF_FONTS
             fi
             ;;
         restart_ui)
-            pkill -f com.android.systemui 2>/dev/null || pkill -f systemui 2>/dev/null || true
+            _restarted=false
+            if command -v pkill >/dev/null 2>&1; then
+                pkill -TERM -f com.android.systemui 2>/dev/null && _restarted=true
+                [ "$_restarted" = true ] || { pkill -TERM -f systemui 2>/dev/null && _restarted=true; }
+            fi
+            if [ "$_restarted" = false ] && command -v killall >/dev/null 2>&1; then
+                killall com.android.systemui 2>/dev/null && _restarted=true
+            fi
+            if [ "$_restarted" = false ] && command -v pidof >/dev/null 2>&1; then
+                _pids=$(pidof com.android.systemui 2>/dev/null)
+                [ -n "$_pids" ] && { kill -TERM $_pids 2>/dev/null || true; _restarted=true; }
+            fi
             cmd activity write-settings 2>/dev/null || true
-            printf '{"status":"ok","data":{"message":"系统界面已重启"}}\n'
+            if [ "$_restarted" = true ]; then
+                printf '{"status":"ok","data":{"message":"系统界面已安全重启"}}\n'
+            else
+                printf '{"status":"error","message":"未找到可重启的 SystemUI 进程"}\n'
+            fi
             ;;
         refresh)
             cmd font system --update 2>/dev/null || true
@@ -721,12 +924,14 @@ EOF_FONTS
             fi
             ;;
         reboot_required)
-            _text=false; _emoji=false
+            _text=false; _emoji=false; _weight=false
             [ -f "$TEXT_REBOOT_REQUIRED" ] && _text=true
             [ -f "$EMOJI_REBOOT_REQUIRED" ] && _emoji=true
+            # 清理旧版本遗留标记；字重调整不再要求完整重启。
+            rm -f "$FONT_WEIGHT_REBOOT_REQUIRED" 2>/dev/null || true
             _required=false
             if [ "$_text" = true ] || [ "$_emoji" = true ]; then _required=true; fi
-            printf '{"status":"ok","data":{"required":%s,"text":%s,"emoji":%s}}\n' "$_required" "$_text" "$_emoji"
+            printf '{"status":"ok","data":{"required":%s,"text":%s,"emoji":%s,"weight":%s}}\n' "$_required" "$_text" "$_emoji" "$_weight"
             ;;
         reboot_device)
             printf '{"status":"ok","data":{"message":"正在重启手机"}}\n'
@@ -990,7 +1195,7 @@ case "$1" in
         current=$(get_current_font_id)
         echo ""
         echo "╔══════════════════════════════════════╗"
-        echo "║        洛 书  v13.3 Beta2                   ║"
+        echo "║        洛 书  v13.4 Beta2 Hotfix2                   ║"
         echo "║        演宇宙之理，塑文字之骨        ║"
         echo "╠══════════════════════════════════════╣"
         printf '║  当前字体：\033[1;36m%-24s\033[0m║\n' "$current"

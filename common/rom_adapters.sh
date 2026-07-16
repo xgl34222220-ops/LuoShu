@@ -80,6 +80,14 @@ _rom_font_target_exists() {
     return 1
 }
 
+_rom_exact_target_exists() {
+    _file="$1"
+    for _root in /system/fonts /system_ext/fonts /product/fonts /my_product/fonts /vendor/fonts; do
+        [ -e "$_root/$_file" ] && return 0
+    done
+    return 1
+}
+
 # ============================================================
 # ColorOS（OPPO/一加/realme 同属 oplus 系）
 # ============================================================
@@ -153,6 +161,7 @@ copy_as_coloros() {
             w_anchor=$(_font_anchor "$w_file" "$dest_dir" "$w") || continue
             for base in $weight_base; do
                 dest_name="${base}-${w_cap}.ttf"
+                _rom_exact_target_exists "$dest_name" || continue
                 if _font_alias "$w_anchor" "$dest_dir/$dest_name"; then
                     weight_count=$((weight_count + 1))
                 fi
@@ -205,6 +214,7 @@ copy_as_hyperos() {
     _log_step "  正在应用用户字体（HyperOS/MIUI）..."
     bad_count=0
     for cfile in $(get_all_hyperos_files); do
+        _rom_exact_target_exists "$cfile" || continue
         if _font_alias "$regular_anchor" "$dest_dir/$cfile"; then
             if _verify_font_copy "$dest_dir/$cfile"; then
                 core_count=$((core_count + 1))
@@ -237,13 +247,14 @@ copy_as_hyperos() {
             esac
 
             w_anchor=$(_font_anchor "$w_file" "$dest_dir" "$w") || continue
-            if [ -n "$num" ]; then
+            if [ -n "$num" ] && _rom_exact_target_exists "${num}.ttf"; then
                 if _font_alias "$w_anchor" "$dest_dir/${num}.ttf"; then
                     weight_count=$((weight_count + 1))
                 fi
             fi
             if [ -n "$rb" ]; then
                 for dest_name in "Roboto-${rb}.ttf" "Roboto-${rb}Italic.ttf"; do
+                    _rom_exact_target_exists "$dest_name" || continue
                     if _font_alias "$w_anchor" "$dest_dir/$dest_name"; then
                         weight_count=$((weight_count + 1))
                     fi
@@ -280,6 +291,7 @@ copy_as_generic() {
     _log_step "  正在应用用户字体（通用 AOSP，未识别具体 ROM，效果不保证）..."
     bad_count=0
     for cfile in $(get_all_generic_files); do
+        _rom_exact_target_exists "$cfile" || continue
         if _font_alias "$regular_anchor" "$dest_dir/$cfile"; then
             if _verify_font_copy "$dest_dir/$cfile"; then
                 core_count=$((core_count + 1))
@@ -288,6 +300,12 @@ copy_as_generic() {
             fi
         fi
     done
+    if [ "$core_count" -eq 0 ]; then
+        for cfile in Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf NotoSans-Regular.ttf; do
+            _font_alias "$regular_anchor" "$dest_dir/$cfile" && core_count=$((core_count + 1))
+        done
+        _log_step "  未检测到标准目标，已使用最小 AOSP 兼容映射"
+    fi
     _log_step "  已覆盖 $core_count 个通用字体文件"
     [ "$bad_count" -gt 0 ] && _log_step "  ⚠ 其中 $bad_count 个校验异常，请检查源字体文件是否完整"
     return 0

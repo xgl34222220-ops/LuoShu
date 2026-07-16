@@ -22,7 +22,10 @@ rm -f "$STAGE/config/webui_font_list.json" \
       "$STAGE/config/recent_fonts.conf" \
       "$STAGE/config/previous_font.conf" \
       "$STAGE/config/switch_task.conf" \
-      "$STAGE/config/emoji_task.conf"
+      "$STAGE/config/emoji_task.conf" \
+      "$STAGE/config/font_weight.conf" \
+      "$STAGE/config/font_weight_original.conf" \
+      "$STAGE/config/font_weight_reboot_required.conf"
 
 chmod 755 "$STAGE/customize.sh" "$STAGE/post-fs-data.sh" \
           "$STAGE/service.sh" "$STAGE/uninstall.sh"

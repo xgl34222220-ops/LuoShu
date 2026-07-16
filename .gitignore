@@ -1,3 +1,8 @@
 dist/
 *.log
 .DS_Store
+config/font_weight.conf
+config/font_weight_original.conf
+config/*_reboot_required.conf
+config/*_task.conf
+config/webui_font_list.*

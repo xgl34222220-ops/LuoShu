@@ -2,7 +2,7 @@
 # ============================================================
 # 洛书 - 服务脚本 (service.sh)
 # 作者：惜故里丶
-# 版本：v13.3 Beta2
+# 版本：v13.4 Beta2 Hotfix2
 # 功能：系统启动后刷新字体缓存并桥接 GMS 动态字体
 # ============================================================
 
@@ -33,7 +33,23 @@ MODDIR="${0%/*}"
         fi
     }
 
-    log_service "INFO" "服务脚本开始执行 (v13.3 Beta2)"
+    log_service "INFO" "服务脚本开始执行 (v13.4 Beta2 Hotfix2)"
+
+    # 恢复洛书保存的 Android 全局字重调节。系统更新或 ROM 启动流程可能会
+    # 暂时重置 secure.font_weight_adjustment，因此每次开机只重写已保存值。
+    if [ -f "$MODDIR/config/font_weight.conf" ] && command -v settings >/dev/null 2>&1; then
+        FW_ADJ=$(sed -n 's/^adjustment=//p' "$MODDIR/config/font_weight.conf" 2>/dev/null | head -n1)
+        case "$FW_ADJ" in ''|*[!0-9-]*) FW_ADJ=0 ;; esac
+        if [ "$FW_ADJ" -ge -100 ] 2>/dev/null && [ "$FW_ADJ" -le 300 ] 2>/dev/null; then
+            if settings --user current put secure font_weight_adjustment "$FW_ADJ" >/dev/null 2>&1 || settings put secure font_weight_adjustment "$FW_ADJ" >/dev/null 2>&1; then
+                FW_NOW=$(settings --user current get secure font_weight_adjustment 2>/dev/null)
+                [ "$FW_NOW" = "$FW_ADJ" ] || FW_NOW=$(settings get secure font_weight_adjustment 2>/dev/null)
+                [ "$FW_NOW" = "$FW_ADJ" ] && log_service "INFO" "已恢复字体粗细调整：$FW_ADJ" || log_service "INFO" "字体粗细写入后未通过校验"
+            else
+                log_service "INFO" "字体粗细调整恢复失败"
+            fi
+        fi
+    fi
 
     # 刷新字体缓存
     if command -v cmd >/dev/null 2>&1; then

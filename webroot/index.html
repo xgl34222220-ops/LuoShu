@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>洛书 LuoShu</title>
-    <link rel="stylesheet" href="style.css?v=1331">
+    <link rel="stylesheet" href="style.css?v=13422">
 </head>
 <body>
     <!-- 背景装饰 -->
@@ -58,7 +58,7 @@
     <!-- 搜索栏 -->
     <div class="search-bar hidden" id="searchBar">
         <input type="text" id="searchInput" placeholder="搜索字体..." autocomplete="off">
-        <button class="search-close" id="searchCloseBtn">
+        <button class="search-close" id="searchCloseBtn" aria-label="关闭搜索">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
@@ -75,7 +75,7 @@
             </svg>
         </div>
         <div class="engine-copy">
-            <div class="engine-heading"><span>全局字体引擎</span><b id="engineVersion">v13.3 Beta2</b></div>
+            <div class="engine-heading"><span>全局字体引擎</span><b id="engineVersion">v13.4 Beta2 Hotfix2</b></div>
             <p>替换中文、英文和数字 · 兼容 ColorOS 16 / HyperOS 3</p>
         </div>
         <span class="engine-state" id="engineState"><i></i>运行中</span>
@@ -151,6 +151,9 @@
         <div class="section-header">
             <h2>字体库</h2>
             <div class="section-actions">
+                <button class="icon-btn small import-trigger" id="importZipBtn" title="导入字体包 ZIP" aria-label="导入字体包 ZIP">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>
+                </button>
                 <button class="icon-btn small" id="refreshBtn" title="刷新字体库" aria-label="刷新字体库">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.4 9A7 7 0 005.7 6.7L4 11m16 2l-1.7 4.3A7 7 0 015.6 15"/></svg>
                 </button>
@@ -174,7 +177,7 @@
 
     <!-- 底部信息 -->
     <footer class="footer">
-        <span>洛书 LuoShu <b data-module-version>v13.3 Beta2</b></span>
+        <span>洛书 LuoShu <b data-module-version>v13.4 Beta2 Hotfix2</b></span>
         <span>·</span>
         <span>惜故里丶</span>
     </footer>
@@ -237,6 +240,27 @@
         </div>
     </div>
 
+    <!-- ZIP 字体包导入 -->
+    <div class="modal" id="importModal">
+        <div class="modal-content import-sheet">
+            <div class="import-head">
+                <div class="import-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg>
+                </div>
+                <div><h3>导入字体包</h3><p>把其他字体模块的 ZIP 放入公开目录，洛书只读取字体文件，不会执行其中脚本。</p></div>
+            </div>
+            <div class="import-security"><span>安全导入</span><small>仅提取 TTF / OTF / TTC · 自动忽略模块脚本、图标字体与无效文件</small></div>
+            <div class="import-toolbar">
+                <button class="btn-cancel" id="openImportFolderBtn" type="button">打开导入目录</button>
+                <button class="btn-cancel" id="refreshImportBtn" type="button">刷新列表</button>
+            </div>
+            <div class="import-path">/sdcard/LuoShu/import/</div>
+            <div class="import-list" id="importList"><div class="analysis-loading"><span></span>正在扫描 ZIP 字体包…</div></div>
+            <div class="import-result" id="importResult" hidden></div>
+            <div class="help-footer import-footer"><button class="btn-confirm" id="closeImportBtn" type="button">完成</button></div>
+        </div>
+    </div>
+
     <!-- 更多设置 -->
     <div class="modal" id="helpModal">
         <div class="modal-content more-sheet">
@@ -245,7 +269,7 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7V4h16v3M9 20h6M12 4v16m-4-4h8"/></svg>
                 </div>
                 <div class="more-heading">
-                    <div class="more-title-row"><h2>更多</h2><span data-module-version>v13.3 Beta2</span></div>
+                    <div class="more-title-row"><h2>更多</h2><span data-module-version>v13.4 Beta2 Hotfix2</span></div>
                     <p>洛书全局字体管理 · 惜故里丶</p>
                 </div>
                 <button class="more-close" id="closeHelpTopBtn" type="button" aria-label="关闭">
@@ -265,6 +289,11 @@
                             <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.8A9 9 0 1111.2 3 7 7 0 0021 12.8z"/></svg>
                         </span>
                         <span class="setting-copy"><strong>外观模式</strong><small id="themeModeLabel">跟随系统</small></span>
+                        <svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                    </button>
+                    <button class="setting-row" id="moreImportZipBtn" type="button">
+                        <span class="setting-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg></span>
+                        <span class="setting-copy"><strong>导入字体包 ZIP</strong><small>自动识别可变字体、常规字重与 Emoji</small></span>
                         <svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
                     </button>
                     <button class="setting-row" id="moreOpenFolderBtn" type="button">
@@ -313,7 +342,7 @@
                         <code>su -c "洛书 切换 字体名"<br>su -c "洛书 回滚"<br>su -c "洛书 列表"<br>su -c "洛书 重启界面"</code>
                     </div>
                 </details>
-                <div class="more-meta">洛书 <span data-module-version>v13.3 Beta2</span> · 开源字体切换模块</div>
+                <div class="more-meta">洛书 <span data-module-version>v13.4 Beta2 Hotfix2</span> · 开源字体切换模块</div>
             </div>
             <div class="help-footer">
                 <button class="btn-confirm" id="closeHelpBtn" type="button">完成</button>
@@ -374,6 +403,6 @@
         </div>
     </div>
 
-    <script type="module" src="app.js?v=1331"></script>
+    <script type="module" src="app.js?v=1341"></script>
 </body>
 </html>

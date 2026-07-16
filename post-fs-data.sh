@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.3 Beta2 - 启动早期初始化
+# LuoShu v13.4 Beta2 Hotfix2 - 启动早期初始化
 set +e
 
 MODDIR="${0%/*}"
@@ -13,7 +13,7 @@ type init_module >/dev/null 2>&1 && init_module
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
 mkdir -p "$MODDIR/config" "$MODDIR/logs" "$MODDIR/system/fonts" "$MODDIR/webroot/fonts" "$MODDIR/webroot/emoji" 2>/dev/null || true
 
-log_message "INFO" "===== post-fs-data v13.3 Beta2 开始 ====="
+log_message "INFO" "===== post-fs-data v13.4 Beta2 Hotfix2 开始 ====="
 
 # 永远保留 ROM 自带 fonts.xml、fallback、symbols 与其他语言字体。
 rm -f "$MODDIR/system/etc/fonts.xml" "$MODDIR/system/etc/font_fallback.xml" 2>/dev/null || true
@@ -45,7 +45,7 @@ type sync_emoji_preview_fonts >/dev/null 2>&1 && sync_emoji_preview_fonts 2>/dev
 
 # 完整重启后解除“本次开机已切换”的保护，允许下一次切换。
 rm -f "$MODDIR/config/text_reboot_required.conf" "$MODDIR/config/emoji_reboot_required.conf" \
-      "$MODDIR/.font_switch.lock" 2>/dev/null || true
+      "$MODDIR/config/font_weight_reboot_required.conf" "$MODDIR/.font_switch.lock" 2>/dev/null || true
 
 log_message "INFO" "当前文字=$ACTIVE_TEXT | Emoji=$ACTIVE_EMOJI | 重启保护已复位"
 log_message "INFO" "===== post-fs-data 完成 ====="

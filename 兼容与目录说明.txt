@@ -30,3 +30,13 @@ Hybrid Mount
 
 原生扫描器：system/bin/luoshud 仅用于 ARM64 诊断回退；WebUI 默认使用安全 Shell 扫描。
 可变字体：详情页会显示 fvar 轴范围；ROM 是否使用完整字重由系统映射决定。
+
+ZIP 字体包导入目录：/sdcard/LuoShu/import/
+只提取字体文件，不执行 ZIP 中的模块脚本；单包最多 128 个字体、解压后 512 MB。
+
+
+可变字体粗细（v13.4 Beta2 Hotfix2）
+- 字体详情页会读取 wght 轴并实时预览。
+- 系统应用范围为 300–700，使用 Android secure.font_weight_adjustment。
+- 完整生效建议重启手机；不支持该接口的 ROM 仅提供预览。
+- 卸载模块时会恢复首次调节前的系统原值。

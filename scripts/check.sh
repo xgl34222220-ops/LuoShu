@@ -20,7 +20,7 @@ test -f "$ROOT/service.sh"
 test -f "$ROOT/webroot/index.html"
 test -s "$ROOT/system/bin/luoshud"
 
-grep -q '^version=v13.3 Beta2$' "$ROOT/module.prop"
-grep -q '^versionCode=13302$' "$ROOT/module.prop"
+grep -q '^version=v13.4 Beta2 Hotfix2$' "$ROOT/module.prop"
+grep -q '^versionCode=13422$' "$ROOT/module.prop"
 
 echo "LuoShu source checks passed."

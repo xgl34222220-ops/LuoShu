@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.3 Beta2 - 设备与字体基础检测报告
+# LuoShu v13.4 Beta2 Hotfix2 - 设备与字体基础检测报告
 set +e
 MODDIR="${MODDIR:-/data/adb/modules/LuoShu}"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
@@ -7,7 +7,7 @@ FONT="$1"
 OUT="${2:-/sdcard/LuoShu/reports/LuoShu_Font_Report_$(date +%Y%m%d_%H%M%S).txt}"
 mkdir -p "${OUT%/*}" 2>/dev/null || true
 {
-    echo "LuoShu Font Report v13.3 Beta2"
+    echo "LuoShu Font Report v13.4 Beta2 Hotfix2"
     echo "Generated: $(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
     echo "Device: $(getprop ro.product.manufacturer 2>/dev/null) $(getprop ro.product.model 2>/dev/null)"
     echo "Android: $(getprop ro.build.version.release 2>/dev/null) (SDK $(getprop ro.build.version.sdk 2>/dev/null))"
@@ -15,6 +15,8 @@ mkdir -p "${OUT%/*}" 2>/dev/null || true
     echo "Root: Magisk=${MAGISK_VER:-} KernelSU=${KSU_VER:-}"
     echo "Active text: $(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null)"
     echo "Active Emoji: $(head -n1 "$MODDIR/config/active_emoji.conf" 2>/dev/null)"
+    echo "Font weight desired: $(sed -n 's/^weight=//p' "$MODDIR/config/font_weight.conf" 2>/dev/null | head -n1)"
+    echo "Font weight adjustment: $(settings get secure font_weight_adjustment 2>/dev/null)"
     echo "Text reboot pending: $([ -f "$MODDIR/config/text_reboot_required.conf" ] && echo yes || echo no)"
     echo "Emoji reboot pending: $([ -f "$MODDIR/config/emoji_reboot_required.conf" ] && echo yes || echo no)"
     echo "Hybrid marker: $([ -f "$MODDIR/magic" ] && echo magic || echo missing)"
