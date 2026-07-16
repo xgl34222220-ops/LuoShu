@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v13.5 Stable Hotfix3
-versionCode=13503
+version=v13.5 Stable Hotfix4
+versionCode=13504
 author=惜故里丶
-description=通用 Android 全局字体管理：修复 Hybrid Mount 将旧版桥接脚本误判为自定义挂载模块的问题，移除发布包中未使用的旧 .sh 副本并将运行期桥接与元模块同步组件改为无扩展名工具；扩展 Hybrid Mount/meta-overlayfs 内容目录识别，同时保留稳定快照回滚、ZIP 安全导入、可变字体、静态多字重及 GMS/Gemini/XWeb 兼容。
+description=通用 Android 全局字体管理：按 Hybrid Mount 实际源码规则处理模块根目录脚本，避免正常 mkdir/touch 初始化被误判为自定义挂载；字体与 Emoji 的 ROM 别名改为紧凑符号链接，防止 ext4 staging 将同一大字体重复复制几十次并触发 No space left on device；保留稳定快照回滚、ZIP 安全导入、可变字体、静态多字重及 GMS/Gemini/XWeb 兼容。
 updateJson=
 webroot=webroot
