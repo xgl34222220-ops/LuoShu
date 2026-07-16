@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v13.5 Stable Hotfix3
-versionCode=13503
+version=v14
+versionCode=14000
 author=惜故里丶
-description=通用 Android 全局字体管理：基于 v13.5 Stable Hotfix1 稳定核心进一步修复设置页环境识别与移动端布局，精修深浅色 WebUI；适配 Magisk、KernelSU、SukiSU Ultra、APatch，元模块仅推荐 Mountify；保留稳定配置回滚、ZIP 安全导入、可变字体、静态多字重及 GMS/Gemini/XWeb 兼容。
+description=Android 全局字体管理，当前字体：系统默认字体
 updateJson=
 webroot=webroot
