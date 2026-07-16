@@ -1,5 +1,16 @@
 # 更新日志
 
+## v13.5 Stable Hotfix1
+
+- 修复“自救”悬浮按钮被主界面 `body > *` 宽度规则拉伸成整条横栏、遮挡字体列表和底部导航的问题
+- 自救按钮增加直属 ID 强制尺寸、旧 WebView 回退值和内联关键样式，独立 CSS 尚未加载时也不会错位
+- 新增 `common/mount_compat.sh`，识别 Magic Mount、Hybrid Mount、Mountify 与 meta-overlayfs
+- 针对 meta-overlayfs 的双目录架构，把 `system/`、`product/`、`system_ext/` 等负载同步到 `/data/adb/metamodule/mnt/LuoShu/`
+- 文字字体、Emoji、恢复系统默认都会同步元模块真实内容目录，避免 WebUI 显示切换成功但重启后仍使用旧字体
+- post-fs-data 与 service 增加负载补同步，处理元模块镜像内容落后、更新模块后首次启动不同步等情况
+- 构建包主动移除 `skip_mount` / `skip_mountify`，避免洛书被部分元模块直接跳过
+- 新增元模块镜像、旧字体清理、字体/Emoji 钩子、post-fs-data 与 service 注入测试
+
 ## v13.5 Stable
 
 - 新增独立 WebUI 自救中心：即使主 `app.js` 或字体列表异常，仍可清缓存、修权限、重建索引、导出报告和回滚配置
