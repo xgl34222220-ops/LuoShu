@@ -14,7 +14,6 @@ for path in common config fonts system webroot customize.sh module.prop post-fs-
     cp -R "$ROOT/$path" "$STAGE/"
 done
 
-# 只修改构建暂存目录：统一缓存号、可见版本、自救入口与元模块挂载钩子。
 sh "$ROOT/scripts/prepare_webui.sh" "$STAGE/webroot"
 sh "$ROOT/scripts/prepare_mount_compat.sh" "$STAGE"
 
@@ -30,18 +29,24 @@ rm -f "$STAGE/config/webui_font_list.json" \
       "$STAGE/config/font_weight.conf" \
       "$STAGE/config/font_weight_original.conf" \
       "$STAGE/config/font_weight_reboot_required.conf" \
-      "$STAGE/config/mount_compat.conf"
+      "$STAGE/config/mount_compat.conf" \
+      "$STAGE/config/meta_compat.conf"
 
-chmod 755 "$STAGE/customize.sh" "$STAGE/post-fs-data.sh" \
-          "$STAGE/service.sh" "$STAGE/uninstall.sh"
+chmod 755 "$STAGE/customize.sh" "$STAGE/post-fs-data.sh" "$STAGE/service.sh" "$STAGE/uninstall.sh"
 find "$STAGE/common" -type f -exec chmod 755 {} \;
 chmod 755 "$STAGE/system/bin/luoshud"
 
-# 防止元模块把洛书当成“明确跳过挂载”的模块。
 test ! -e "$STAGE/skip_mount"
 test ! -e "$STAGE/skip_mountify"
-grep -q 'common/mount_compat.sh' "$STAGE/common/font_manager.sh"
+test -f "$STAGE/common/meta_overlay_compat"
+test -f "$STAGE/common/font_report"
+test ! -e "$STAGE/common/mount_compat.sh"
+test ! -e "$STAGE/common/font_report.sh"
+test ! -e "$STAGE/common/play_font_bridge.sh"
+test ! -e "$STAGE/common/wechat_xweb_bridge.sh"
+grep -q 'common/meta_overlay_compat' "$STAGE/common/font_manager.sh"
 grep -q 'stability-critical-style' "$STAGE/webroot/index.html"
+! grep -R -n --include='*.sh' -E '(^|[;&|[:space:]])(mount|umount|mountpoint)([[:space:]]|$)|/proc/mounts' "$STAGE"
 
 rm -f "$ZIP"
 (cd "$STAGE" && zip -qr "$ZIP" .)
