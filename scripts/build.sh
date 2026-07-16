@@ -14,13 +14,14 @@ for path in common config fonts system webroot customize.sh module.prop post-fs-
     cp -R "$ROOT/$path" "$STAGE/"
 done
 
-# 只修改构建暂存目录：统一缓存号、可见版本、自救入口与元模块挂载钩子。
+# 只修改构建暂存目录：正式版安装信息、WebUI 缓存号与挂载钩子。
+sh "$ROOT/scripts/prepare_v14_package.sh" "$STAGE"
 sh "$ROOT/scripts/prepare_webui.sh" "$STAGE/webroot"
 sh "$ROOT/scripts/prepare_mount_compat.sh" "$STAGE"
 
 find "$STAGE" -type f -name '*.log' -delete
 rm -rf "$STAGE/webroot/fonts" "$STAGE/webroot/emoji" "$STAGE/logs" "$STAGE/backup" "$STAGE/config/recovery"
-mkdir -p "$STAGE/webroot/fonts" "$STAGE/webroot/emoji" "$STAGE/config/recovery"
+mkdir -p "$STAGE/webroot/fonts" "$STAGE/webroot/emoji"
 rm -f "$STAGE/config/webui_font_list.json" \
       "$STAGE/config/webui_font_list.key" \
       "$STAGE/config/recent_fonts.conf" \
@@ -37,11 +38,14 @@ chmod 755 "$STAGE/customize.sh" "$STAGE/post-fs-data.sh" \
 find "$STAGE/common" -type f -exec chmod 755 {} \;
 chmod 755 "$STAGE/system/bin/luoshud"
 
-# 防止元模块把洛书当成“明确跳过挂载”的模块。
 test ! -e "$STAGE/skip_mount"
 test ! -e "$STAGE/skip_mountify"
 grep -q 'common/mount_compat.sh' "$STAGE/common/font_manager.sh"
 grep -q 'stability-critical-style' "$STAGE/webroot/index.html"
+grep -q 'v14.js?v=14000' "$STAGE/webroot/index.html"
+grep -q 'v14.css?v=14000' "$STAGE/webroot/index.html"
+grep -q '^version=v14$' "$STAGE/module.prop"
+grep -q '^description=Android 全局字体管理，当前字体：系统默认字体$' "$STAGE/module.prop"
 
 rm -f "$ZIP"
 (cd "$STAGE" && zip -qr "$ZIP" .)
