@@ -1,5 +1,12 @@
 # 更新日志
 
+## v13.6 Beta4
+
+- 修复 HyperOS 3 + Zygisk Next 下 Play 启动后进入新挂载命名空间、开机时已经完成的 GMS 字体桥接随之丢失的问题
+- 新增 Play PID 命名空间守护：只在 Play PID 变化或定期校验时补挂载，不在守护流程中反复结束 Play 进程
+- 将 `zn-nsdaemon-zygote` 纳入桥接，并通过 `/proc/1/root` 从隔离命名空间访问洛书字体源
+- 每次 bind 后比较源与目标设备号/ inode，确认挂载真实可见并避免重复叠加挂载
+
 ## v13.6 Beta3
 
 - 修复 HyperOS 3 上 Google Play 仍显示默认字体：GMS 下载的 `Google_Sans_Flex` 现在会优先桥接真正的可变字体，没有可变字体时改用当前字体常规字重兼容覆盖，不再跳过

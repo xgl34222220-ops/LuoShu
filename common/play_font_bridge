@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v13.6 Beta3 - Android 16 / GMS、Google 与 Gemini 动态字体桥接
+# 洛书 v13.6 Beta4 - Android 16 / GMS、Google 与 Gemini 动态字体桥接
 # 只做临时 bind mount，不删除也不改写 /data/fonts 中的原文件。
 
 set +e
@@ -76,11 +76,42 @@ namespace_pids() {
     {
         echo 1
         pidof zygote64 zygote zygote_ocomp system_server 2>/dev/null
+        # HyperOS + Zygisk Next 会从独立 namespace daemon 派生/清理应用命名空间。
+        pidof zn-nsdaemon-zygote zn-nsdaemon 2>/dev/null
         pidof com.android.vending 2>/dev/null
         pidof com.google.android.gms com.google.android.gms.persistent com.google.android.gms.unstable 2>/dev/null
         pidof com.google.android.apps.bard com.google.android.googlequicksearchbox 2>/dev/null
         pidof com.android.chrome com.google.android.webview webview_zygote 2>/dev/null
     } | tr ' ' '\n' | awk '/^[0-9]+$/ && !seen[$0]++'
+}
+
+namespace_file_id() {
+    _ns_pid="$1"
+    _ns_path="$2"
+    if command -v nsenter >/dev/null 2>&1; then
+        nsenter -t "$_ns_pid" -m -- stat -c '%d:%i' "$_ns_path" 2>/dev/null
+    else
+        stat -c '%d:%i' "$_ns_path" 2>/dev/null
+    fi
+}
+
+namespace_source_path() {
+    _ns_pid="$1"
+    _ns_src="$2"
+    # KernelSU/Zygisk Next 的应用命名空间可能隐藏 /data/adb/modules。
+    # /proc/1/root 始终从 init 的挂载视图解析真实桥接源。
+    if [ "$_ns_pid" != 1 ] && [ -f "/proc/1/root$_ns_src" ]; then
+        printf '/proc/1/root%s\n' "$_ns_src"
+    else
+        printf '%s\n' "$_ns_src"
+    fi
+}
+
+namespace_has_source() {
+    _ns_pid="$1"; _ns_src="$2"; _ns_target="$3"
+    _ns_source_id=$(namespace_file_id "$_ns_pid" "$_ns_src")
+    _ns_target_id=$(namespace_file_id "$_ns_pid" "$_ns_target")
+    [ -n "$_ns_source_id" ] && [ "$_ns_source_id" = "$_ns_target_id" ]
 }
 
 do_bind() {
@@ -91,22 +122,77 @@ do_bind() {
     # 对已知关键进程逐个挂载，不能只改 PID 1。
     if command -v nsenter >/dev/null 2>&1; then
         for _pid in $(namespace_pids); do
-            nsenter -t "$_pid" -m -- mount --bind "$_src" "$_target" >/dev/null 2>&1 && _ok=1
+            _ns_src=$(namespace_source_path "$_pid" "$_src")
+            if namespace_has_source "$_pid" "$_ns_src" "$_target"; then
+                _ok=1
+                continue
+            fi
+            nsenter -t "$_pid" -m -- mount --bind "$_ns_src" "$_target" >/dev/null 2>&1 || \
+                nsenter -t "$_pid" -m -- /system/bin/mount -o bind "$_ns_src" "$_target" >/dev/null 2>&1
+            namespace_has_source "$_pid" "$_ns_src" "$_target" && _ok=1
         done
     fi
-    mount --bind "$_src" "$_target" >/dev/null 2>&1 && _ok=1
+    _self_id=$(stat -c '%d:%i' "$_src" 2>/dev/null)
+    _target_id=$(stat -c '%d:%i' "$_target" 2>/dev/null)
+    if [ -n "$_self_id" ] && [ "$_self_id" = "$_target_id" ]; then
+        _ok=1
+    else
+        mount --bind "$_src" "$_target" >/dev/null 2>&1 || /system/bin/mount -o bind "$_src" "$_target" >/dev/null 2>&1
+        _target_id=$(stat -c '%d:%i' "$_target" 2>/dev/null)
+        [ -n "$_self_id" ] && [ "$_self_id" = "$_target_id" ] && _ok=1
+    fi
     [ "$_ok" -eq 1 ]
 }
 
 do_umount() {
     _target="$1"
     if command -v nsenter >/dev/null 2>&1; then
-        _zygote=$(pidof zygote64 2>/dev/null | awk '{print $1}')
-        [ -z "$_zygote" ] && _zygote=$(pidof zygote 2>/dev/null | awk '{print $1}')
-        [ -n "$_zygote" ] && nsenter -t "$_zygote" -m -- umount "$_target" >/dev/null 2>&1 && return 0
-        nsenter -t 1 -m -- umount "$_target" >/dev/null 2>&1 && return 0
+        for _pid in $(namespace_pids); do
+            nsenter -t "$_pid" -m -- umount "$_target" >/dev/null 2>&1 || true
+        done
     fi
     umount "$_target" >/dev/null 2>&1
+}
+
+stop_watcher() {
+    _watch_pid_file="$MODDIR/config/gms_bridge/watch.pid"
+    _watch_pid=$(cat "$_watch_pid_file" 2>/dev/null)
+    case "$_watch_pid" in ''|*[!0-9]*) _watch_pid= ;; esac
+    if [ -n "$_watch_pid" ] && [ "$_watch_pid" != "$$" ]; then
+        kill "$_watch_pid" >/dev/null 2>&1 || true
+    fi
+    rm -f "$_watch_pid_file" 2>/dev/null || true
+}
+
+watch_play_namespace() {
+    _watch_dir="$MODDIR/config/gms_bridge"
+    _watch_pid_file="$_watch_dir/watch.pid"
+    mkdir -p "$_watch_dir" 2>/dev/null || exit 0
+    _old_pid=$(cat "$_watch_pid_file" 2>/dev/null)
+    case "$_old_pid" in ''|*[!0-9]*) _old_pid= ;; esac
+    if [ -n "$_old_pid" ] && kill -0 "$_old_pid" >/dev/null 2>&1; then
+        _old_cmd=$(tr '\000' ' ' < "/proc/$_old_pid/cmdline" 2>/dev/null)
+        case "$_old_cmd" in *play_font_bridge*watch*) exit 0 ;; esac
+    fi
+    printf '%s\n' "$$" > "$_watch_pid_file" 2>/dev/null || exit 0
+    trap 'rm -f "$MODDIR/config/gms_bridge/watch.pid" 2>/dev/null' EXIT
+    trap 'rm -f "$MODDIR/config/gms_bridge/watch.pid" 2>/dev/null; exit 0' HUP INT TERM
+    bridge_log "Play 命名空间守护已启动 pid=$$"
+    _last_play="__start__"
+    _watch_tick=60
+    while [ -f "$MODDIR/module.prop" ] && [ ! -e "$MODDIR/remove" ] && [ ! -e "$MODDIR/disable" ]; do
+        _play_pids=$(pidof com.android.vending 2>/dev/null | tr ' ' '\n' | awk '/^[0-9]+$/' | sort -n | tr '\n' ',')
+        _watch_tick=$((_watch_tick + 1))
+        if [ "$_play_pids" != "$_last_play" ] || [ "$_watch_tick" -ge 60 ]; then
+            if [ -n "$_play_pids" ]; then
+                bridge_log "检测到 Play 命名空间变化：${_last_play:-无} -> $_play_pids"
+                MODDIR="$MODDIR" sh "$0" now >/dev/null 2>&1 || true
+            fi
+            _last_play="$_play_pids"
+            _watch_tick=0
+        fi
+        sleep 5
+    done
 }
 
 restore_mounts() {
@@ -122,7 +208,8 @@ restore_mounts() {
     bridge_log "恢复动态 Google Sans 挂载：$_restored"
 }
 
-[ "$ACTION" = "restore" ] && { restore_mounts; exit 0; }
+[ "$ACTION" = "restore" ] && { stop_watcher; restore_mounts; exit 0; }
+[ "$ACTION" = "watch" ] && { watch_play_namespace; exit 0; }
 
 _attempts=1
 [ "$ACTION" = "boot" ] && _attempts=9
@@ -171,7 +258,8 @@ while [ "$_attempt" -le "$_attempts" ]; do
         bridge_log "动态 Google Sans：发现=$_found 成功=$_mounted 跳过=$_skipped 失败=$_failed"
         if [ "$_mounted" -gt 0 ]; then
             cmd font system --update >/dev/null 2>&1 || true
-            am force-stop com.android.vending >/dev/null 2>&1 || true
+            # 只在开机初次准备时结束旧 Play；守护补挂载不得反复杀进程。
+            [ "$ACTION" = "boot" ] && am force-stop com.android.vending >/dev/null 2>&1 || true
         fi
         exit 0
     fi
