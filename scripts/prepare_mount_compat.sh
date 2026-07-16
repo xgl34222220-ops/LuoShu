@@ -26,6 +26,10 @@ sed -i -e 's#common/font_report\.sh#common/font_report#g' "$MANAGER" "$CUSTOMIZE
 sed -i \
     -e 's/v13\.5 Stable Hotfix[0-9][0-9]*/v13.6 Beta1/g' \
     -e 's/v13\.5 Stable/v13.6 Beta1/g' "$STABILITY" "$SERVICE" 2>/dev/null || true
+sed -i \
+    -e 's/v13\.4 Beta2 Hotfix[0-9][0-9]*/v13.6 Beta1/g' \
+    -e 's/v13\.5 Stable Hotfix[0-9][0-9]*/v13.6 Beta1/g' \
+    -e 's/Hybrid Mount：推荐 Magic，不能选 Ignore。/Hybrid Mount：保持 Magic，洛书将自动使用 DB 兼容模式。/g' "$CUSTOMIZE" "$UNINSTALL" 2>/dev/null || true
 
 patch_manager() {
     src="$1"
@@ -103,6 +107,8 @@ test "$(grep -c 'luoshu_sync_meta_payload' "$MANAGER")" -ge 2
 grep -q 'luoshu_sync_meta_payload' "$POSTFS"
 grep -q 'luoshu_db_use_direct' "$ROM_ADAPTERS"
 grep -q 'nsenter -t 1 -m' "$DB_ENGINE"
+grep -q 'v13.6 Beta1' "$CUSTOMIZE"
+grep -q '自动使用 DB 兼容模式' "$CUSTOMIZE"
 
 SUSPICIOUS=$(scanner_lines)
 if [ -n "$SUSPICIOUS" ]; then
