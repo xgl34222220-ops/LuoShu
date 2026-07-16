@@ -30,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -64,6 +66,13 @@ jobs:
           checksum="${asset}.sha256"
           flags=()
           case "$VERSION" in *Beta*|*RC*) flags+=(--prerelease) ;; esac
+
+          # 同版本修正版必须同步移动标签，否则 Release 的源码包仍会指向旧提交。
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG" --force
+
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$asset" "$checksum" --clobber
             gh release edit "$TAG" --title "洛书 $VERSION" --notes-file release-notes.md "${flags[@]}"
