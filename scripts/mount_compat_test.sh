@@ -9,7 +9,7 @@ MODULE="$TMP/modules/LuoShu"
 META="$TMP/meta"
 mkdir -p "$MODULE/common" "$MODULE/system/fonts" "$MODULE/product/fonts" "$MODULE/config" "$MODULE/logs" "$META"
 cp "$ROOT/common/meta_overlay_compat" "$MODULE/common/meta_overlay_compat"
-printf 'id=LuoShu\nversion=v13.5 Stable Hotfix5\nversionCode=13505\n' > "$MODULE/module.prop"
+printf 'id=LuoShu\nversion=v13.6 Beta1\nversionCode=13601\n' > "$MODULE/module.prop"
 printf 'font-a' > "$MODULE/system/fonts/Roboto-Regular.ttf"
 printf 'product-a' > "$MODULE/product/fonts/Test.ttf"
 
@@ -33,15 +33,17 @@ test ! -e "$META/LuoShu/system/fonts/Old.ttf"
 test ! -e "$META/LuoShu/system/fonts/Roboto-Regular.ttf"
 
 STAGE="$TMP/stage"
-mkdir -p "$STAGE/common"
+mkdir -p "$STAGE/common" "$STAGE/config"
 cp "$ROOT/common/font_manager.sh" "$STAGE/common/font_manager.sh"
 cp "$ROOT/common/rom_adapters.sh" "$STAGE/common/rom_adapters.sh"
 cp "$ROOT/common/meta_overlay_compat" "$STAGE/common/meta_overlay_compat"
+cp "$ROOT/common/db_engine" "$STAGE/common/db_engine"
 cp "$ROOT/post-fs-data.sh" "$STAGE/post-fs-data.sh"
 cp "$ROOT/service.sh" "$STAGE/service.sh"
 cp "$ROOT/customize.sh" "$STAGE/customize.sh"
 cp "$ROOT/uninstall.sh" "$STAGE/uninstall.sh"
 cp "$ROOT/common/stability.sh" "$STAGE/common/stability.sh"
+printf auto > "$STAGE/config/mount_mode.conf"
 printf legacy > "$STAGE/common/play_font_bridge.sh"
 printf legacy > "$STAGE/common/wechat_xweb_bridge.sh"
 printf legacy > "$STAGE/common/mount_compat.sh"
@@ -50,51 +52,36 @@ sh "$ROOT/scripts/prepare_mount_compat.sh" "$STAGE"
 grep -q 'common/meta_overlay_compat' "$STAGE/common/font_manager.sh"
 test "$(grep -c 'luoshu_sync_meta_payload' "$STAGE/common/font_manager.sh")" -ge 2
 grep -q 'luoshu_sync_meta_payload' "$STAGE/post-fs-data.sh"
-grep -q 'luoshu_sync_meta_payload' "$STAGE/service.sh"
 test ! -e "$STAGE/common/play_font_bridge.sh"
 test ! -e "$STAGE/common/wechat_xweb_bridge.sh"
 test ! -e "$STAGE/common/mount_compat.sh"
-grep -q 'LUOSHU_HYBRID_STAGE_BUDGET' "$STAGE/common/rom_adapters.sh"
-! grep -q 'LUOSHU_HYBRID_COMPACT_ALIASES' "$STAGE/common/rom_adapters.sh"
-! grep -q 'luoshu_link_compact_alias' "$STAGE/common/font_manager.sh"
+grep -q 'luoshu_db_use_direct' "$STAGE/common/rom_adapters.sh"
+grep -q 'db_engine.*apply' "$STAGE/post-fs-data.sh"
+grep -q 'db_engine.*verify' "$STAGE/service.sh"
 grep -q 'command mkdir' "$STAGE/customize.sh"
 grep -q 'command mkdir' "$STAGE/post-fs-data.sh"
 grep -q 'command mkdir' "$STAGE/uninstall.sh"
 
-# 使用极小测试预算验证：字体目标必须是普通文件/硬链接，绝不能再生成符号链接；
-# 第一个核心目标允许创建，达到预算后低优先级目标必须被跳过。
-mkdir -p "$STAGE/system/fonts/.luoshu-font-store" "$STAGE/system_ext/fonts"
+# Traditional mode must remain safe: targets are ordinary files/hard links, never symbolic links.
+mkdir -p "$STAGE/system/fonts/.luoshu-font-store"
 printf '0123456789font-data' > "$STAGE/system/fonts/.luoshu-font-store/regular.font"
-STAGE="$STAGE" LUOSHU_FONT_STAGE_BUDGET=48 sh -c '
+STAGE="$STAGE" LUOSHU_DB_MODE=module sh -c '
+    MODULE_DIR="$STAGE"
     . "$STAGE/common/rom_adapters.sh"
-    _font_store_reset "$STAGE/system/fonts"
-    printf "0123456789font-data" > "$STAGE/system/fonts/.luoshu-font-store/regular.font"
     anchor="$STAGE/system/fonts/.luoshu-font-store/regular.font"
-
     _font_alias "$anchor" "$STAGE/system/fonts/SysFont-Regular.ttf"
     test -f "$STAGE/system/fonts/SysFont-Regular.ttf"
     test ! -L "$STAGE/system/fonts/SysFont-Regular.ttf"
     test "$(stat -c %i "$anchor")" = "$(stat -c %i "$STAGE/system/fonts/SysFont-Regular.ttf")"
-
-    if _font_alias "$anchor" "$STAGE/system/fonts/SysSans-En-Regular.ttf"; then
-        echo "第二个别名不应突破 staging 测试预算" >&2
-        exit 1
-    fi
-    test ! -e "$STAGE/system/fonts/SysSans-En-Regular.ttf"
-
-    if link_or_copy_font "$STAGE/system/fonts/SysFont-Regular.ttf" "$STAGE/system_ext/fonts/SysFont-Regular.ttf"; then
-        echo "跨分区别名不应突破 staging 测试预算" >&2
-        exit 1
-    fi
-    test ! -e "$STAGE/system_ext/fonts/SysFont-Regular.ttf"
 '
 
 sh -n "$STAGE/common/font_manager.sh"
 sh -n "$STAGE/common/rom_adapters.sh"
+sh -n "$STAGE/common/db_engine"
 sh -n "$STAGE/post-fs-data.sh"
 sh -n "$STAGE/service.sh"
 sh -n "$STAGE/customize.sh"
 sh -n "$STAGE/uninstall.sh"
 sh -n "$STAGE/common/meta_overlay_compat"
 
-echo 'LuoShu Hybrid Mount compatibility checks passed.'
+echo 'LuoShu compatibility checks passed.'
