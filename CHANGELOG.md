@@ -1,5 +1,16 @@
 # 更新日志
 
+## v13.5 Stable Hotfix3
+
+- 修复 Hybrid Mount 扫描到旧版 `play_font_bridge.sh` / `wechat_xweb_bridge.sh` 后，把洛书误显示为 v12.x 并提示“包含挂载相关命令”的问题
+- 发布包删除未使用的旧 `.sh` 桥接副本，保留实际使用的无扩展名 GMS/Gemini 与微信 XWeb 桥接工具
+- 将元模块负载同步组件改为无扩展名 `common/meta_overlay_compat`，避免被 Hybrid Mount 的 `.sh` 规则误判
+- 将诊断报告工具改为无扩展名 `common/font_report`，发布包内 `.sh` 不再包含 mount、umount、mountpoint 或 `/proc/mounts` 操作
+- 扩展 Hybrid Mount、meta-overlayfs、Mountify 常见内容目录识别，并取消对“目录必须已经是挂载点”的过严限制
+- 构建阶段自动清理旧桥接脚本、旧兼容脚本与 `skip_mount` / `skip_mountify`
+- 新增发布包扫描测试，防止旧 `.sh` 或实际挂载命令再次进入 Release
+- 截图中的 `/data/adb/modules/com.omarea.vtools` 属于其他模块的失效路径，洛书报告会继续提示清理 Hybrid Mount 的陈旧记录
+
 ## v13.5 Stable Hotfix2
 
 - 稳定性中心明确区分“当前配置”“当前稳定快照”和“可回滚配置”，避免首个快照已建立却被误认为未建立
