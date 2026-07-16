@@ -1,15 +1,17 @@
 # 更新日志
 
-## v13.5 Stable Hotfix2
+## v13.5 Stable Hotfix3
 
-- 以已发布并通过实机验证的 v13.5 Stable Hotfix1 为唯一基础，不合入后续实验挂载方案
-- 精修“更多”页面的信息层级、间距、卡片和深浅色对比度，减少重复装饰与视觉拥挤
-- 删除普通用户基本用不到的命令行“高级工具”展示，诊断和恢复功能统一收进洛书自救
-- 重做自救面板布局，修复深色模式按钮标题过暗、面板过长和操作层级不清的问题
-- 自救首页只保留重建索引、清理缓存、修复权限和稳定配置回滚四项常用操作
-- 新增运行环境卡片，自动识别 Magisk、KernelSU、SukiSU Ultra 与 APatch
-- 当前稳定元模块适配仅展示 Mountify；移除所有 Hybrid Mount 提示、推荐和操作引导
-- 保留 Hotfix1 已验证稳定的字体扫描、字体切换、Emoji、GMS/Gemini/XWeb、ZIP 导入和多字重核心
+- 严格基于已发布并通过实机验证的 v13.5 Stable Hotfix1，不合入后续实验挂载方案
+- 修复设置页 Root 管理器检测命令缺少分隔符导致的 `syntax error: unexpected then`
+- 修复运行环境卡片在手机窄屏下横向溢出、右侧内容被裁切的问题，小屏自动切换单列布局
+- 重做设置页、运行环境卡片和自救面板的圆角、间距、阴影、深浅色对比与安全区域适配
+- 自救悬浮按钮缩小为纯图标按钮，减少对设置列表和底部操作区的遮挡
+- Root 环境识别覆盖 Magisk、KernelSU、SukiSU Ultra 与 APatch
+- Mountify 检测改为识别官方模块目录 `/data/adb/modules/mountify`，并作为唯一推荐元模块
+- 安装界面、WebUI、诊断报告和说明文档不再显示其他元模块推荐或操作引导
+- 修复安装界面仍显示 v13.4 Beta2 Hotfix6 的旧版本信息，统一为 v13.5 Stable Hotfix3
+- 保留 Hotfix1 已验证稳定的字体扫描、切换、Emoji、GMS/Gemini/XWeb、ZIP 导入和多字重核心
 
 ## v13.5 Stable Hotfix1
 
