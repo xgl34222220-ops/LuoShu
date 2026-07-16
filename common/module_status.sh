@@ -18,6 +18,16 @@ ACTIVE="${1:-}"
 
 case "$ACTIVE" in
     default) DISPLAY="系统默认字体" ;;
+    mix)
+        CJK=$(sed -n 's/^cjk=//p' "$MODDIR/config/font_mix.conf" 2>/dev/null | head -n1 | tr -d '\r\n')
+        LATIN=$(sed -n 's/^latin=//p' "$MODDIR/config/font_mix.conf" 2>/dev/null | head -n1 | tr -d '\r\n')
+        DIGIT=$(sed -n 's/^digit=//p' "$MODDIR/config/font_mix.conf" 2>/dev/null | head -n1 | tr -d '\r\n')
+        if [ -n "$CJK$LATIN$DIGIT" ]; then
+            DISPLAY="组合：${CJK:-默认} / ${LATIN:-默认} / ${DIGIT:-默认}"
+        else
+            DISPLAY="组合字体"
+        fi
+        ;;
     *) DISPLAY=$(printf '%s' "$ACTIVE" | tr '\r\n' '  ') ;;
 esac
 
