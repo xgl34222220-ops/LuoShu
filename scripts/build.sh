@@ -14,9 +14,12 @@ for path in common config fonts system webroot customize.sh module.prop post-fs-
     cp -R "$ROOT/$path" "$STAGE/"
 done
 
+# 只修改构建暂存目录：统一缓存号、可见版本，并注入独立自救入口。
+sh "$ROOT/scripts/prepare_webui.sh" "$STAGE/webroot"
+
 find "$STAGE" -type f -name '*.log' -delete
-rm -rf "$STAGE/webroot/fonts" "$STAGE/webroot/emoji" "$STAGE/logs" "$STAGE/backup"
-mkdir -p "$STAGE/webroot/fonts" "$STAGE/webroot/emoji"
+rm -rf "$STAGE/webroot/fonts" "$STAGE/webroot/emoji" "$STAGE/logs" "$STAGE/backup" "$STAGE/config/recovery"
+mkdir -p "$STAGE/webroot/fonts" "$STAGE/webroot/emoji" "$STAGE/config/recovery"
 rm -f "$STAGE/config/webui_font_list.json" \
       "$STAGE/config/webui_font_list.key" \
       "$STAGE/config/recent_fonts.conf" \
