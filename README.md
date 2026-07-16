@@ -20,6 +20,22 @@
 
 正式构建包保留 ARM64 原生扫描器 `system/bin/luoshud`，用于旧目录诊断与故障回退；WebUI 默认仍使用安全 Shell 扫描，它不参与字体挂载核心流程。
 
+## v13.5 稳定性中心
+
+v13.5 将恢复能力与主 WebUI 分离。构建包会在 `app.js` 之前加载独立的 `stability.js`，因此即使字体列表或主界面脚本异常，右下角的“自救”入口仍可使用。
+
+自救中心提供：
+
+- 检查模块目录、脚本权限和公开字体目录
+- 自动识别 ROM、Android 版本、Root 管理器及实际存在的系统字体配置路径
+- 清除 WebUI 与模块字体列表缓存
+- 修复模块脚本和公开目录权限
+- 重建字体索引并记录真实扫描耗时、退出结果和完成时间
+- 生成独立自救报告到 `/sdcard/LuoShu/reports/`
+- 恢复上一个稳定的文字字体、Emoji 和字体粗细配置
+
+系统每次完整启动后会记录当前稳定配置。检测到配置发生变化时，旧配置自动轮换到 `config/recovery/previous.state`，供下一次故障时回滚。回滚仍遵循一次开机一次切换保护，完成后需要完整重启。
+
 ## 已测试设备
 
 - 一加 15（ColorOS 16）
@@ -52,12 +68,21 @@
 
 卸载模块时会恢复首次调整前的系统原值；ROM 不支持对应接口时自动降级为仅预览。
 
-## 构建
+## 构建与稳定性检查
 
 ```sh
 sh ./scripts/check.sh
 sh ./scripts/build.sh
 ```
+
+`check.sh` 会执行：
+
+- 全部 Shell 语法检查
+- `app.js`、字体分析器、KernelSU 桥接和独立自救脚本的 ES Module 语法检查
+- WebUI 资源缓存号和自救入口构建注入检查
+- 空字体库、1 个字体、20 个字体的状态测试
+- 稳定配置快照轮换测试
+- 缓存清理、扫描计时和自救报告生成测试
 
 产物位于 `dist/`。更新 `module.prop` 版本并推送到 `main` 后，GitHub Actions 会自动构建并创建对应 Release。
 
@@ -69,7 +94,7 @@ sh ./scripts/build.sh
 - Root 管理器和版本
 - 使用的字体格式（不要上传无授权字体文件）
 - 复现步骤
-- `/sdcard/LuoShu/reports/` 中的脱敏检测报告
+- `/sdcard/LuoShu/reports/` 中的脱敏检测报告或 `LuoShu-recovery-*.txt`
 
 ## 开源协议
 
