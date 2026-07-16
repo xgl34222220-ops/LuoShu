@@ -1,5 +1,16 @@
 # 更新日志
 
+## v13.5 Stable Hotfix4
+
+- 按 Hybrid Mount 公开源码中的真实扫描规则修复误报：它会扫描模块根目录 `.sh`，并把每行第一个单词为 `mkdir` / `touch`，或包含 `mount` / `bind` 的脚本标记为“建议 Ignore”
+- 洛书顶层脚本中的正常目录初始化改为 `command mkdir` / `command touch`，执行结果不变，但不再被误认为模块自行挂载
+- 文字字体的 ColorOS、HyperOS、AOSP 别名由硬链接改为相对符号链接，每个真实字重只保存一份
+- `system_ext` / `product` 字体别名改为指向 `/system/fonts/` 的符号链接，避免跨分区别名被重复复制
+- Emoji 的 `NotoColorEmoji.ttf` 与 Legacy 别名同样改为紧凑符号链接
+- 解决 Hybrid Mount ext4 staging 逐文件复制硬链接、把一份 20～50 MB 字体展开成几十份后触发 `No space left on device (os error 28)` 的问题
+- 新增与 Hybrid Mount `has_suspicious_shell_commands` 等价的构建扫描，今后若发布包仍会触发该提示将直接构建失败
+- 新增符号链接与跨分区别名测试，确保发布包不会再次退化为大量完整字体副本
+
 ## v13.5 Stable Hotfix3
 
 - 修复 Hybrid Mount 扫描到旧版 `play_font_bridge.sh` / `wechat_xweb_bridge.sh` 后，把洛书误显示为 v12.x 并提示“包含挂载相关命令”的问题
