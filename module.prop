@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v13.5 Stable Hotfix4
-versionCode=13504
+version=v13.5 Stable Hotfix5
+versionCode=13505
 author=惜故里丶
-description=通用 Android 全局字体管理：按 Hybrid Mount 实际源码规则处理模块根目录脚本，避免正常 mkdir/touch 初始化被误判为自定义挂载；字体与 Emoji 的 ROM 别名改为紧凑符号链接，防止 ext4 staging 将同一大字体重复复制几十次并触发 No space left on device；保留稳定快照回滚、ZIP 安全导入、可变字体、静态多字重及 GMS/Gemini/XWeb 兼容。
+description=通用 Android 全局字体管理：紧急撤回 Hotfix4 的系统字体符号链接方案，修复部分 ROM 字体生效后严重卡顿、SystemUI 无响应甚至假死；恢复稳定的普通文件/硬链接，并按 Hybrid Mount staging 的真实展开体积设置安全预算，优先保留中文核心字体目标、自动跳过低优先级别名，兼顾系统稳定与 ENOSPC 防护；保留稳定快照回滚、ZIP 安全导入、可变字体、静态多字重及 GMS/Gemini/XWeb 兼容。
 updateJson=
 webroot=webroot
