@@ -1,11 +1,22 @@
-/* 洛书 v13.5 Stable - 独立自救面板 */
+/* 洛书 v13.5 Stable Hotfix1 - 独立自救面板 */
+/* style.css 的 body > * 宽度规则优先级很高，必须用直属 ID 选择器锁定悬浮按钮尺寸。 */
+body > #stabilityRescueButton,
 .stability-rescue-button {
-    position: fixed;
-    right: max(18px, env(safe-area-inset-right));
-    bottom: calc(104px + env(safe-area-inset-bottom));
-    z-index: 9800;
-    width: 56px;
-    height: 56px;
+    position: fixed !important;
+    left: auto !important;
+    right: 18px !important;
+    right: max(18px, env(safe-area-inset-right, 0px)) !important;
+    bottom: 104px !important;
+    bottom: calc(104px + env(safe-area-inset-bottom, 0px)) !important;
+    z-index: 9800 !important;
+    width: 56px !important;
+    min-width: 56px !important;
+    max-width: 56px !important;
+    height: 56px !important;
+    min-height: 56px !important;
+    max-height: 56px !important;
+    margin: 0 !important;
+    padding: 0 !important;
     border: 1px solid rgba(77, 139, 255, .35);
     border-radius: 19px;
     background: linear-gradient(145deg, rgba(81, 142, 255, .96), rgba(73, 92, 220, .96));
@@ -17,6 +28,7 @@
     justify-content: center;
     gap: 1px;
     -webkit-tap-highlight-color: transparent;
+    transform: none;
 }
 .stability-rescue-button svg { width: 23px; height: 23px; }
 .stability-rescue-button span { font-size: 10px; font-weight: 700; }
@@ -48,7 +60,7 @@
     box-shadow: 0 -18px 55px rgba(12, 24, 50, .24);
     transform: translateY(28px);
     transition: transform .24s ease;
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 .stability-modal.show .stability-sheet { transform: translateY(0); }
 .stability-handle { width: 46px; height: 5px; border-radius: 8px; background: rgba(128,135,150,.42); margin: 10px auto 4px; }
@@ -90,7 +102,7 @@
 .stability-actions button small { font-size: 10px; color: var(--text-secondary, #778095); line-height: 1.45; }
 .stability-actions button:disabled { opacity: .62; }
 .stability-note { margin-top: 13px; padding: 12px 14px; border-radius: 16px; background: rgba(246,172,56,.1); color: #9b6c1f; font-size: 11px; line-height: 1.55; }
-.stability-toast { position: fixed; z-index: 13000; left: 50%; bottom: calc(128px + env(safe-area-inset-bottom)); transform: translate(-50%, 15px); max-width: min(88vw, 520px); padding: 11px 17px; border-radius: 14px; background: rgba(25,30,42,.92); color: #fff; font-size: 13px; opacity: 0; pointer-events: none; transition: .2s ease; box-shadow: 0 12px 34px rgba(0,0,0,.23); }
+.stability-toast { position: fixed; z-index: 13000; left: 50%; bottom: 128px; bottom: calc(128px + env(safe-area-inset-bottom, 0px)); transform: translate(-50%, 15px); max-width: min(88vw, 520px); padding: 11px 17px; border-radius: 14px; background: rgba(25,30,42,.92); color: #fff; font-size: 13px; opacity: 0; pointer-events: none; transition: .2s ease; box-shadow: 0 12px 34px rgba(0,0,0,.23); }
 .stability-toast.show { opacity: 1; transform: translate(-50%, 0); }
 .stability-toast[data-tone="ok"] { background: rgba(28,128,79,.94); }
 .stability-toast[data-tone="error"] { background: rgba(178,57,67,.95); }
@@ -100,6 +112,7 @@
 body.stability-open { overflow: hidden; }
 
 @media (max-width: 520px) {
+    body > #stabilityRescueButton { right: 14px !important; }
     .stability-health-grid, .stability-info-grid, .stability-actions { grid-template-columns: 1fr; }
     .stability-sheet { border-radius: 26px 26px 0 0; }
     .stability-content { padding-left: 14px; padding-right: 14px; }
