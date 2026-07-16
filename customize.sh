@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.5 Stable Hotfix3 - 安装脚本
+# LuoShu v14 - 安装脚本
 
 MODPATH="${MODPATH:-$3}"
 set +e
@@ -27,8 +27,8 @@ check_hyperos
 
 ui_print ""
 ui_print "╔══════════════════════════════════╗"
-ui_print "║       洛 书  v13.5 Stable Hotfix3       ║"
-ui_print "║      文字与 Emoji 独立管理       ║"
+ui_print "║       洛 书  v14       ║"
+ui_print "║      Android 全局字体管理       ║"
 ui_print "╚══════════════════════════════════╝"
 ui_print ""
 if [ "$IS_COLOROS" = "true" ]; then
@@ -198,6 +198,7 @@ chmod 755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/service.s
 chmod 755 "$MODPATH/common/font_manager.sh" "$MODPATH/common/font_check.sh" "$MODPATH/common/font_import.sh" "$MODPATH/common/font_report.sh" \
           "$MODPATH/common/util_functions.sh" "$MODPATH/common/rom_adapters.sh" "$MODPATH/common/volume_key.sh" \
           "$MODPATH/common/play_font_bridge" "$MODPATH/common/wechat_xweb_bridge" 2>/dev/null || true
+chmod 755 "$MODPATH/common/module_status.sh" "$MODPATH/common/v14_switch.sh" "$MODPATH/common/font_mix.sh" "$MODPATH/common/v14_mix.sh" 2>/dev/null || true
 chmod 755 "$MODPATH/system/bin/洛书" 2>/dev/null || true
 [ ! -f "$MODPATH/system/bin/luoshud" ] || chmod 755 "$MODPATH/system/bin/luoshud" 2>/dev/null || true
 find "$MODPATH/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
@@ -218,4 +219,5 @@ else
 fi
 ui_print "请完整重启手机以应用字体。"
 ui_print ""
+[ -f "$MODPATH/common/module_status.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/module_status.sh" "$SELECTED_FONT" >/dev/null 2>&1 || true
 exit 0

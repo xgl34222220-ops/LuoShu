@@ -18,7 +18,19 @@ jobs:
         with:
           node-version: 22
       - name: Check source
-        run: sh ./scripts/check.sh
+        shell: bash
+        run: |
+          if ! sh -x ./scripts/check.sh > /tmp/luoshu-check.log 2>&1; then
+            tail -n 12 /tmp/luoshu-check.log
+            exit 1
+          fi
+      - name: Upload check diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-check-diagnostics
+          path: /tmp/luoshu-check.log
+          if-no-files-found: ignore
       - name: Build flashable module
         run: sh ./scripts/build.sh
       - name: Upload artifact
