@@ -1,9 +1,9 @@
-// 洛书 v13.5 Stable - 独立自救面板
+// 洛书 v13.5 Stable Hotfix2 - 独立自救面板
 // 不依赖 app.js；主界面脚本异常时仍可清理缓存、修复权限和导出报告。
 import { exec } from './kernelsu.js';
 
 const SCRIPT = '/data/adb/modules/LuoShu/common/stability.sh';
-const STYLE_VERSION = '13500';
+const STYLE_VERSION = '13502';
 if (!document.querySelector('link[data-luoshu-stability]')) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
@@ -109,14 +109,15 @@ function injectUi() {
                     <div class="stability-loading"><i></i><span>正在检查模块状态…</span></div>
                 </section>
                 <section class="stability-actions">
+                    <button type="button" class="snapshot" data-stability-action="snapshot"><b>立即保存当前配置</b><small>把当前文字、Emoji 和字重设为稳定快照</small></button>
+                    <button type="button" class="rollback" data-stability-action="rollback"><b>恢复可回滚配置</b><small>暂无可回滚配置</small></button>
                     <button type="button" data-stability-action="scan"><b>重建字体索引</b><small>清理列表缓存并记录真实扫描耗时</small></button>
                     <button type="button" data-stability-action="cache"><b>清除 WebUI 缓存</b><small>处理一直加载、显示旧数据等问题</small></button>
                     <button type="button" data-stability-action="permissions"><b>修复脚本权限</b><small>恢复模块脚本与公开目录权限</small></button>
-                    <button type="button" class="rollback" data-stability-action="rollback"><b>恢复上一个稳定配置</b><small>恢复文字、Emoji 和字体粗细</small></button>
                     <button type="button" data-stability-action="report"><b>生成自救报告</b><small>保存 ROM、扫描和最近日志信息</small></button>
                     <button type="button" data-stability-action="refresh"><b>重新检测状态</b><small>刷新 ROM、路径和模块状态</small></button>
                 </section>
-                <div class="stability-note">回滚会调用正常的安全切换流程。若本次开机已经切换过字体，请先完整重启，再执行回滚。</div>
+                <div class="stability-note">稳定快照用于记录已确认正常的配置。恢复可回滚配置仍会调用安全切换流程；若本次开机已切换字体，请先完整重启。</div>
             </div>
         </div>`;
     document.body.appendChild(modal);
@@ -132,7 +133,7 @@ function injectUi() {
         row.className = 'setting-row';
         row.id = 'openStabilityBtn';
         row.type = 'button';
-        row.innerHTML = '<span class="setting-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3l7 3v5c0 4.7-2.8 8.1-7 10-4.2-1.9-7-5.3-7-10V6l7-3z"/><path d="M9 12l2 2 4-5"/></svg></span><span class="setting-copy"><strong>自救与稳定性</strong><small>缓存、权限、扫描测试和配置回滚</small></span><svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>';
+        row.innerHTML = '<span class="setting-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3l7 3v5c0 4.7-2.8 8.1-7 10-4.2-1.9-7-5.3-7-10V6l7-3z"/><path d="M9 12l2 2 4-5"/></svg></span><span class="setting-copy"><strong>自救与稳定性</strong><small>快照、回滚、缓存、权限和扫描测试</small></span><svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>';
         reportRow.insertAdjacentElement('afterend', row);
         row.addEventListener('click', () => {
             document.getElementById('helpModal')?.classList.remove('show');
@@ -158,12 +159,41 @@ function healthItem(ok, title, detail) {
     return `<div class="stability-health ${ok ? 'ok' : 'bad'}"><i>${ok ? '✓' : '!'}</i><span><b>${escapeHtml(title)}</b><small>${escapeHtml(detail)}</small></span></div>`;
 }
 
+function syncActionStates(data) {
+    const snapshotButton = document.querySelector('[data-stability-action="snapshot"]');
+    if (snapshotButton) {
+        const small = snapshotButton.querySelector('small');
+        if (small) small.textContent = data.snapshotExists
+            ? (data.snapshotMatchesCurrent ? `当前快照已保存于 ${formatTime(data.snapshotSavedAt)}` : '当前配置与快照不同，点击后立即保存')
+            : '尚无稳定快照，点击后立即建立';
+    }
+    const rollbackButton = document.querySelector('[data-stability-action="rollback"]');
+    if (rollbackButton) {
+        const available = Boolean(data.rollbackAvailable);
+        rollbackButton.disabled = !available;
+        rollbackButton.setAttribute('aria-disabled', String(!available));
+        const small = rollbackButton.querySelector('small');
+        if (small) small.textContent = available
+            ? `保存于 ${formatTime(data.previousSavedAt)}，恢复后需完整重启`
+            : '暂无可回滚配置；先保存新快照或切换后重启';
+    }
+}
+
 function renderStatus(data) {
     const box = document.getElementById('stabilitySummary');
     if (!box) return;
-    const previous = data.previousFont
-        ? `${data.previousFont}${data.previousEmoji && data.previousEmoji !== 'default' ? ` + ${data.previousEmoji}` : ''}`
+    const snapshot = data.snapshotExists
+        ? `${data.snapshotFont || 'default'}${data.snapshotEmoji && data.snapshotEmoji !== 'default' ? ` + ${data.snapshotEmoji}` : ''}`
         : '尚未建立';
+    const snapshotMeta = !data.snapshotExists
+        ? '点击“立即保存当前配置”建立'
+        : `${data.snapshotMatchesCurrent ? '与当前配置一致' : '当前配置有变化，尚未保存'} · ${formatTime(data.snapshotSavedAt)}`;
+    const previous = data.rollbackAvailable
+        ? `${data.previousFont || 'default'}${data.previousEmoji && data.previousEmoji !== 'default' ? ` + ${data.previousEmoji}` : ''}`
+        : '尚未建立';
+    const previousMeta = data.rollbackAvailable
+        ? `保存于 ${formatTime(data.previousSavedAt)} · 可以一键恢复`
+        : '保存第二份不同的稳定快照后自动建立';
     const shellScan = data.lastScanResult === 'ok'
         ? `${formatDuration(data.lastScanMs)} · ${formatTime(data.lastScanAt)}`
         : (data.lastScanResult === 'failed' ? `失败 · ${formatDuration(data.lastScanMs)}` : '尚未运行');
@@ -181,9 +211,11 @@ function renderStatus(data) {
             <div><small>自动识别 ROM</small><b>${escapeHtml(data.rom || '未知')}</b><span>Android ${escapeHtml(data.android || '?')} · SDK ${escapeHtml(data.sdk || '?')}</span></div>
             <div><small>Root 环境</small><b>${escapeHtml(data.root || '未知')}</b><span>检测到 ${configCount} 个系统字体配置</span></div>
             <div><small>当前配置</small><b>${escapeHtml(data.currentFont || 'default')}</b><span>Emoji：${escapeHtml(data.currentEmoji || 'default')} · 粗细偏移 ${escapeHtml(data.weight || '0')}</span></div>
-            <div><small>上一个稳定配置</small><b>${escapeHtml(previous)}</b><span>${data.previousFont ? '可以一键回滚' : '完成一次字体切换并重启后自动建立'}</span></div>
+            <div><small>当前稳定快照</small><b>${escapeHtml(snapshot)}</b><span>${escapeHtml(snapshotMeta)}</span></div>
+            <div><small>可回滚配置</small><b>${escapeHtml(previous)}</b><span>${escapeHtml(previousMeta)}</span></div>
         </div>
         <div class="stability-scan-meta"><span>WebUI 最近展示耗时</span><b>${uiScan ? formatDuration(uiScan.durationMs) : '无记录'}</b></div>`;
+    syncActionStates(data);
 }
 
 async function loadStatus() {
@@ -198,10 +230,12 @@ async function loadStatus() {
 }
 
 async function handleAction(action, button) {
-    if (panelBusy) return;
-    if (action === 'rollback' && !window.confirm('确定恢复上一个稳定配置？任务完成后需要完整重启手机。')) return;
+    if (panelBusy || button.disabled) return;
+    if (action === 'snapshot' && !window.confirm('立即把当前文字字体、Emoji 和字重保存为稳定快照？如果配置与原快照不同，原快照会成为可回滚配置。')) return;
+    if (action === 'rollback' && !window.confirm('确定恢复可回滚配置？任务完成后需要完整重启手机。')) return;
     panelBusy = true;
     const old = button.innerHTML;
+    let refreshStatus = false;
     button.disabled = true;
     button.classList.add('busy');
     button.innerHTML = '<b>正在处理…</b><small>请不要重复点击</small>';
@@ -212,14 +246,13 @@ async function handleAction(action, button) {
             result = await run('clear_cache');
         } else if (action === 'scan') result = await run('scan_test');
         else if (action === 'permissions') result = await run('repair_permissions');
+        else if (action === 'snapshot') result = await run('save_snapshot');
         else if (action === 'rollback') result = await run('rollback');
         else if (action === 'report') result = await run('report');
         else result = await run('status');
         notify(result.message || '操作完成', 'ok');
-        await loadStatus();
-        if (action === 'cache' || action === 'scan') {
-            setTimeout(() => window.location.reload(), 700);
-        }
+        refreshStatus = true;
+        if (action === 'cache' || action === 'scan') setTimeout(() => window.location.reload(), 700);
     } catch (error) {
         notify(error && error.message || String(error), 'error');
     } finally {
@@ -227,6 +260,7 @@ async function handleAction(action, button) {
         button.disabled = false;
         button.classList.remove('busy');
         button.innerHTML = old;
+        if (refreshStatus) await loadStatus();
     }
 }
 
@@ -265,9 +299,9 @@ function watchFontList() {
 function init() {
     injectUi();
     watchFontList();
-    document.querySelectorAll('[data-module-version]').forEach(item => { item.textContent = 'v13.5 Stable'; });
+    document.querySelectorAll('[data-module-version]').forEach(item => { item.textContent = 'v13.5 Stable Hotfix2'; });
     const badge = document.getElementById('engineVersion');
-    if (badge) badge.textContent = 'v13.5 Stable';
+    if (badge) badge.textContent = 'v13.5 Stable Hotfix2';
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init, { once: true });
