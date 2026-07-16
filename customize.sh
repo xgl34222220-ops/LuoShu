@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.4 Beta2 Hotfix6 - 安装脚本
+# LuoShu v13.5 Stable Hotfix3 - 安装脚本
 
 MODPATH="${MODPATH:-$3}"
 set +e
@@ -27,19 +27,45 @@ check_hyperos
 
 ui_print ""
 ui_print "╔══════════════════════════════════╗"
-ui_print "║       洛 书  v13.4 Beta2 Hotfix6        ║"
-ui_print "║   文字与 Emoji 独立管理          ║"
+ui_print "║       洛 书  v13.5 Stable Hotfix3       ║"
+ui_print "║      文字与 Emoji 独立管理       ║"
 ui_print "╚══════════════════════════════════╝"
 ui_print ""
 if [ "$IS_COLOROS" = "true" ]; then
-    ui_print "检测到：ColorOS ${COLOROS_VERSION:-未知}"
+    ui_print "✓ 系统环境：ColorOS ${COLOROS_VERSION:-未知}"
 elif [ "$IS_HYPEROS" = "true" ]; then
-    ui_print "检测到：HyperOS/MIUI ${HYPEROS_VERSION:-未知}"
+    ui_print "✓ 系统环境：HyperOS/MIUI ${HYPEROS_VERSION:-未知}"
 else
-    ui_print "检测到：通用 AOSP 方案"
+    ui_print "✓ 系统环境：通用 Android"
 fi
-ui_print "字体目录：/sdcard/LuoShu/fonts/"
-ui_print "Emoji目录：/sdcard/LuoShu/emoji/"
+
+ROOT_MANAGER="Root"
+if command -v apd >/dev/null 2>&1 || [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then
+    ROOT_MANAGER="APatch"
+elif command -v ksud >/dev/null 2>&1 || [ -d /data/adb/ksu ]; then
+    _ksu_info="$(ksud -V 2>/dev/null || ksud --version 2>/dev/null || true)"
+    case "$_ksu_info $(getprop ro.build.version.incremental 2>/dev/null)" in
+        *SukiSU*|*sukisu*|*SUKISU*) ROOT_MANAGER="SukiSU Ultra" ;;
+        *) ROOT_MANAGER="KernelSU" ;;
+    esac
+elif command -v magisk >/dev/null 2>&1 || [ -d /data/adb/magisk ]; then
+    ROOT_MANAGER="Magisk"
+fi
+ui_print "✓ Root 管理器：$ROOT_MANAGER"
+
+MOUNTIFY_ACTIVE=false
+if [ -d /data/adb/modules/mountify ] && [ ! -f /data/adb/modules/mountify/disable ] && [ ! -f /data/adb/modules/mountify/remove ]; then
+    MOUNTIFY_ACTIVE=true
+elif [ -d /data/adb/mountify ]; then
+    MOUNTIFY_ACTIVE=true
+fi
+if [ "$MOUNTIFY_ACTIVE" = "true" ]; then
+    ui_print "✓ Mountify：已检测并启用"
+else
+    ui_print "• 元模块推荐：Mountify（可选）"
+fi
+ui_print "✓ 字体目录：/sdcard/LuoShu/fonts/"
+ui_print "✓ Emoji 目录：/sdcard/LuoShu/emoji/"
 ui_print ""
 
 mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot/fonts" "$MODPATH/webroot/emoji" 2>/dev/null || true
@@ -132,24 +158,19 @@ else
     ui_print "安装后把字体放入公开目录，再从 WebUI 选择即可。"
 fi
 
-# 保留系统 fonts.xml / fallback / symbols / emoji；只覆盖 ROM 已知文字目标。
 rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" 2>/dev/null || true
 printf '%s\n' "$SELECTED_FONT" > "$MODPATH/config/active_font.conf"
 printf '%s\n' "default" > "$MODPATH/config/active_emoji.conf"
 cp -f "$FONT_LIST_TMP" "$MODPATH/config/font_list.conf" 2>/dev/null || : > "$MODPATH/config/font_list.conf"
 rm -f "$FONT_LIST_TMP" 2>/dev/null || true
 
-# 旧版本升级时尽量保留当前 Emoji 配置。
 if [ -f "$OLD_MOD/config/active_emoji.conf" ]; then
     cp -f "$OLD_MOD/config/active_emoji.conf" "$MODPATH/config/active_emoji.conf" 2>/dev/null || true
 fi
-
-# 保留可变字体粗细偏好和首次调整前的系统原值，避免升级后无法恢复。
 for _fw_conf in font_weight.conf font_weight_original.conf; do
     [ -f "$OLD_MOD/config/$_fw_conf" ] && cp -f "$OLD_MOD/config/$_fw_conf" "$MODPATH/config/$_fw_conf" 2>/dev/null || true
 done
 
-# 升级时恢复独立 Emoji 映射；找不到公开源文件时复用旧模块中的安全副本。
 ACTIVE_EMOJI=$(head -n1 "$MODPATH/config/active_emoji.conf" 2>/dev/null | tr -d '\r\n')
 if [ -n "$ACTIVE_EMOJI" ] && [ "$ACTIVE_EMOJI" != "default" ]; then
     EMOJI_SRC=""
@@ -172,10 +193,7 @@ if [ -n "$ACTIVE_EMOJI" ] && [ "$ACTIVE_EMOJI" != "default" ]; then
     fi
 fi
 
-# 命令行入口
 cp -f "$MODPATH/common/font_manager.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
-
-# 权限
 chmod 755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/service.sh" "$MODPATH/uninstall.sh" 2>/dev/null || true
 chmod 755 "$MODPATH/common/font_manager.sh" "$MODPATH/common/font_check.sh" "$MODPATH/common/font_import.sh" "$MODPATH/common/font_report.sh" \
           "$MODPATH/common/util_functions.sh" "$MODPATH/common/rom_adapters.sh" "$MODPATH/common/volume_key.sh" \
@@ -186,13 +204,18 @@ find "$MODPATH/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
 find "$MODPATH/webroot" -type f -exec chmod 0644 {} \; 2>/dev/null || true
 chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot" 2>/dev/null || true
 
-# Hybrid Mount Nano 识别此 marker；Full/Lite 用户应在 WebUI 选择 Magic。
 touch "$MODPATH/magic" 2>/dev/null || true
 
 ui_print ""
-ui_print "安装完成。"
-ui_print "请重启手机；切换字体后同样需要完整重启。"
-ui_print "Hybrid Mount：推荐 Magic，不能选 Ignore。"
-[ -x "$MODPATH/system/bin/luoshud" ] && ui_print "ARM64 原生扫描器：已保留（诊断回退）"
+ui_print "╭──────────────────────────────╮"
+ui_print "│          安装完成            │"
+ui_print "╰──────────────────────────────╯"
+ui_print "✓ 字体与 Emoji 配置已准备"
+if [ "$MOUNTIFY_ACTIVE" = "true" ]; then
+    ui_print "✓ Mountify 适配已启用"
+else
+    ui_print "• 如需元模块，推荐使用 Mountify"
+fi
+ui_print "请完整重启手机以应用字体。"
 ui_print ""
 exit 0

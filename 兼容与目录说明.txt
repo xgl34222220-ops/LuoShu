@@ -1,42 +1,31 @@
-洛书 LuoShu v13.3 Beta2
+洛书 LuoShu v14
 
 公开目录
 - 文字字体：/sdcard/LuoShu/fonts/
 - Emoji 字体：/sdcard/LuoShu/emoji/
+- ZIP 导入：/sdcard/LuoShu/import/
 - 检测报告：/sdcard/LuoShu/reports/
-- 旧目录 /sdcard/Fonts/ 的 TTF/OTF/TTC 会在首次运行时复制迁移，不会删除原文件。
 
 安全切换
-- 文字字体和 Emoji 可以分别选择，并共用一次完整重启。
-- 同一类别每次开机只允许修改一次；重启后可再次切换。
-- 默认不热重启 SystemUI，不在应用运行中反复覆盖字体，避免卡死、闪退或整机软死机。
+- 文字字体和 Emoji 分别选择，准备完成后完整重启。
+- 同一类别每次开机只允许修改一次，避免连续热切换造成系统异常。
+- 切换状态只读取轻量任务文件，不会在轮询时重复扫描字体。
+- WebUI 中途退出后，重新进入会自动确认后台任务结果。
 
-字体文件
-- 支持真实 TTF、OTF、TTC。
-- WOFF/WOFF2、ZIP 或其他文件不能仅靠修改扩展名变成 TTF。
-- WebUI 会检查真实文件头、基础字体表、可变字体和彩色 Emoji 表，并抽样分析字符覆盖。
-- 某些字体本身缺少中文、符号或私用区字形，可能出现漏字、图标异常或应用闪退；风险提示后仍可由用户决定是否应用。
+脚本运行
+- WebUI 使用 sh 调用脚本，不依赖文件可执行位。
+- 开机自动静默校正权限，无需手动修复。
 
-覆盖范围
-- 保留 ROM 原始 fonts.xml、fallback、符号字体、其他语言字体。
-- Emoji 默认保持系统原版，只有在 Emoji 页面单独选择后才替换 NotoColorEmoji。
-- 应用 APK、网页或游戏自带的字体无法由系统字体模块强制替换。
+字体与覆盖
+- 支持真实 TTF、OTF、TTC，并检测伪装格式和损坏文件。
+- 保留 ROM 原始 fonts.xml、fallback、符号字体和其他语言字体。
+- Emoji 仅在 Emoji 页面单独选择后替换。
+- 应用、网页或游戏自带字体无法由系统字体模块强制替换。
 
-Hybrid Mount
-- 推荐选择 Magic；模块根目录已包含 magic marker。
-- 不要选择 Ignore：Ignore 的含义是不让 Hybrid Mount 挂载该模块，system/fonts 将不会生效。
-- 模块只为 ROM 实际存在的字体目标创建别名，减少无效 staging 节点和 No space left on device 风险。
-- 遇到 failed to canonicalize source_path，通常是 Hybrid Mount 中残留了已删除模块路径，应清理其错误记录或旧配置。
+Root 与元模块
+- 支持 Magisk、KernelSU、SukiSU Ultra、APatch。
+- 需要元模块时仅推荐 Mountify；未安装时使用 Root 管理器原生挂载。
 
-原生扫描器：system/bin/luoshud 仅用于 ARM64 诊断回退；WebUI 默认使用安全 Shell 扫描。
-可变字体：详情页会显示 fvar 轴范围；ROM 是否使用完整字重由系统映射决定。
-
-ZIP 字体包导入目录：/sdcard/LuoShu/import/
-只提取字体文件，不执行 ZIP 中的模块脚本；单包最多 128 个字体、解压后 512 MB。
-
-
-可变字体粗细（v13.4 Beta2 Hotfix6）
-- 字体详情页会读取 wght 轴并实时预览。
-- 系统应用范围为 300–700，使用 Android secure.font_weight_adjustment。
-- 完整生效建议重启手机；不支持该接口的 ROM 仅提供预览。
-- 卸载模块时会恢复首次调节前的系统原值。
+其他
+- ZIP 导入只提取字体，不执行压缩包中的模块脚本。
+- 可变字体粗细使用 Android secure.font_weight_adjustment；不支持的 ROM 仅提供预览。
