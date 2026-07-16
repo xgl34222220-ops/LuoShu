@@ -44,20 +44,23 @@ jobs:
           asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
           test -n "$asset"
           unzip -t "$asset"
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "v13.5 Stable Hotfix2"
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "13502"
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "v13.5 Stable Hotfix3"
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "13503"
           unzip -l "$asset" | grep -q 'common/stability.sh'
           unzip -l "$asset" | grep -q 'common/mount_compat.sh'
           unzip -l "$asset" | grep -q 'webroot/stability.js'
           unzip -l "$asset" | grep -q 'webroot/environment.js'
           unzip -l "$asset" | grep -q 'webroot/ui_refine.css'
-          unzip -p "$asset" webroot/index.html | grep -q 'stability.js?v=13502'
-          unzip -p "$asset" webroot/index.html | grep -q 'environment.js?v=13502'
+          unzip -p "$asset" webroot/index.html | grep -q 'stability.js?v=13503'
+          unzip -p "$asset" webroot/index.html | grep -q 'environment.js?v=13503'
           unzip -p "$asset" webroot/index.html | grep -q 'stability-critical-style'
           ! unzip -p "$asset" webroot/index.html | grep -q 'Hybrid Mount'
           ! unzip -p "$asset" webroot/index.html | grep -q 'more-advanced'
-          unzip -p "$asset" webroot/environment.js | grep -q 'Mountify'
+          unzip -p "$asset" webroot/environment.js | grep -q '/data/adb/modules/mountify'
           unzip -p "$asset" webroot/environment.js | grep -q 'APatch'
+          unzip -p "$asset" customize.sh | grep -q '元模块推荐：Mountify'
+          ! unzip -p "$asset" customize.sh | grep -q 'Hybrid Mount：推荐'
+          ! unzip -p "$asset" config/version_notes.conf | grep -q '^hybrid_mount='
           unzip -p "$asset" common/font_manager.sh | grep -q 'common/mount_compat.sh'
           test "$(unzip -p "$asset" common/font_manager.sh | grep -c 'luoshu_sync_mount_payload')" -ge 2
           unzip -p "$asset" post-fs-data.sh | grep -q 'luoshu_sync_mount_payload'
@@ -65,7 +68,7 @@ jobs:
           ! unzip -l "$asset" | grep -qE '(^|/)skip_mount(ify)?$'
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v13.5-Stable-Hotfix2-test
+          name: LuoShu-v13.5-Stable-Hotfix3-test
           path: |
             dist/*.zip
             dist/*.sha256
