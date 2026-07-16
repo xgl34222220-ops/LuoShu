@@ -1,0 +1,57 @@
+name: Validate source
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - module.prop
+      - common/**
+      - config/**
+      - fonts/**
+      - system/**
+      - webroot/**
+      - scripts/**
+      - customize.sh
+      - post-fs-data.sh
+      - service.sh
+      - uninstall.sh
+      - magic
+      - 兼容与目录说明.txt
+      - README.md
+      - CHANGELOG.md
+      - .github/workflows/check.yml
+      - .github/workflows/release.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Run source and stability checks
+        run: sh ./scripts/check.sh
+      - name: Build test package
+        run: sh ./scripts/build.sh
+      - name: Inspect package
+        shell: bash
+        run: |
+          asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
+          test -n "$asset"
+          unzip -t "$asset"
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "v13.5 Stable"
+          unzip -l "$asset" | grep -q 'common/stability.sh'
+          unzip -l "$asset" | grep -q 'webroot/stability.js'
+          unzip -p "$asset" webroot/index.html | grep -q 'stability.js?v=13500'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-v13.5-Stable-test
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
