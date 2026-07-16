@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v13.5 Stable Hotfix5
-versionCode=13505
+version=v13.6 Beta1
+versionCode=13601
 author=惜故里丶
-description=通用 Android 全局字体管理：紧急撤回 Hotfix4 的系统字体符号链接方案，修复部分 ROM 字体生效后严重卡顿、SystemUI 无响应甚至假死；恢复稳定的普通文件/硬链接，并按 Hybrid Mount staging 的真实展开体积设置安全预算，优先保留中文核心字体目标、自动跳过低优先级别名，兼顾系统稳定与 ENOSPC 防护；保留稳定快照回滚、ZIP 安全导入、可变字体、静态多字重及 GMS/Gemini/XWeb 兼容。
+description=通用 Android 全局字体管理：新增 Hybrid Mount 自动兼容的 Direct Bind 架构，字体切换时只保存每个真实字重一份安全副本，并在开机早期直接映射到 ROM 已存在的字体目标，绕过固定 staging 容量、避免大量别名展开和危险符号链接；保留稳定快照回滚、ZIP 安全导入、可变字体、静态多字重、Emoji 及 GMS/Gemini/XWeb 兼容。
 updateJson=
 webroot=webroot
