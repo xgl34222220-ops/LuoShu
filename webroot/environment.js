@@ -1,7 +1,7 @@
-// 洛书 v13.5 Stable Hotfix2 - 环境识别与界面精简
+// 洛书 v13.5 Stable Hotfix3 - Root / Mountify 环境识别与 UI 精修
 import { exec } from './kernelsu.js';
 
-const UI_VERSION = '13502';
+const UI_VERSION = '13503';
 
 function installRefinedStyle() {
     if (document.querySelector('link[data-luoshu-refine]')) return;
@@ -17,7 +17,7 @@ function cleanLegacyHelp() {
     if (!help) return;
 
     help.querySelectorAll('.help-note').forEach(item => {
-        if (item.textContent.includes('Hybrid Mount')) item.remove();
+        if (/Hybrid Mount|Magic Mount|Ignore/i.test(item.textContent || '')) item.remove();
     });
     help.querySelector('.more-advanced')?.remove();
 
@@ -40,20 +40,28 @@ function createEnvironmentCard() {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 7h16v10H4z"/><path d="M8 17v3m8-3v3M8 4v3m8-3v3"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/></svg>
             </span>
             <span><strong>运行环境</strong><small>自动识别 Root 管理器与模块挂载环境</small></span>
+            <span class="runtime-state-dot" id="runtimeStateDot" aria-hidden="true"></span>
         </div>
         <div class="runtime-values">
-            <div><small>Root 管理器</small><b id="runtimeRootName">检测中…</b></div>
-            <div><small>挂载环境</small><b id="runtimeMountName">检测中…</b></div>
+            <div class="runtime-value">
+                <span class="runtime-value-mark root" aria-hidden="true">R</span>
+                <span><small>Root 管理器</small><b id="runtimeRootName">检测中…</b></span>
+            </div>
+            <div class="runtime-value">
+                <span class="runtime-value-mark mount" aria-hidden="true">M</span>
+                <span><small>挂载环境</small><b id="runtimeMountName">检测中…</b></span>
+            </div>
         </div>
-        <div class="runtime-support">Magisk · KernelSU · SukiSU Ultra · APatch</div>`;
+        <div class="runtime-support">已适配 Magisk · KernelSU · SukiSU Ultra · APatch</div>`;
 
     const compat = helpBody.querySelector('.compat-row');
     if (compat) compat.insertAdjacentElement('afterend', card);
     else helpBody.prepend(card);
 
     const note = document.createElement('div');
+    note.id = 'mountifyRecommendation';
     note.className = 'help-note mountify-note';
-    note.innerHTML = '<span class="note-icon">M</span><span><strong>Mountify</strong><small>已适配 Mountify。其他元模块不在当前稳定支持范围内，界面不再提供相关引导。</small></span>';
+    note.innerHTML = '<span class="note-icon">M</span><span><strong>Mountify · 推荐元模块</strong><small id="mountifyRecommendationText">正在检测 Mountify 状态…</small></span>';
     const googleNote = helpBody.querySelector('.help-note');
     if (googleNote) googleNote.insertAdjacentElement('afterend', note);
     else helpBody.appendChild(note);
@@ -63,30 +71,55 @@ function createEnvironmentCard() {
 async function detectEnvironment() {
     const rootEl = document.getElementById('runtimeRootName');
     const mountEl = document.getElementById('runtimeMountName');
+    const dotEl = document.getElementById('runtimeStateDot');
+    const mountifyText = document.getElementById('mountifyRecommendationText');
+    const mountifyNote = document.getElementById('mountifyRecommendation');
     if (!rootEl || !mountEl) return;
 
-    const command = [
-        'ROOT_NAME="Root"',
-        'if [ -d /data/adb/ap ] || [ -d /data/adb/apatch ] || command -v apd >/dev/null 2>&1; then ROOT_NAME="APatch";',
-        'elif [ -d /data/adb/ksu ]; then',
-        '  if grep -Rqi "sukisu" /data/adb/ksu 2>/dev/null; then ROOT_NAME="SukiSU Ultra"; else ROOT_NAME="KernelSU"; fi;',
-        'elif [ -d /data/adb/magisk ] || command -v magisk >/dev/null 2>&1; then ROOT_NAME="Magisk"; fi',
-        'MOUNT_NAME="原生模块挂载"',
-        '[ -d /data/adb/mountify ] && MOUNT_NAME="Mountify"',
-        'printf "%s|%s\\n" "$ROOT_NAME" "$MOUNT_NAME"'
-    ].join(' ');
+    const command = `
+ROOT_NAME="已授权 Root"
+if command -v apd >/dev/null 2>&1 || [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then
+  ROOT_NAME="APatch"
+elif command -v ksud >/dev/null 2>&1 || [ -d /data/adb/ksu ]; then
+  KSU_INFO="$(ksud -V 2>/dev/null || ksud --version 2>/dev/null || true)"
+  case "$KSU_INFO $(getprop ro.build.version.incremental 2>/dev/null)" in
+    *SukiSU*|*sukisu*|*SUKISU*) ROOT_NAME="SukiSU Ultra" ;;
+    *) ROOT_NAME="KernelSU" ;;
+  esac
+elif command -v magisk >/dev/null 2>&1 || [ -d /data/adb/magisk ]; then
+  ROOT_NAME="Magisk"
+fi
+MOUNT_NAME="原生模块挂载"
+MOUNTIFY_STATE="0"
+if [ -d /data/adb/modules/mountify ] && [ ! -f /data/adb/modules/mountify/disable ] && [ ! -f /data/adb/modules/mountify/remove ]; then
+  MOUNT_NAME="Mountify"
+  MOUNTIFY_STATE="1"
+elif [ -d /data/adb/mountify ]; then
+  MOUNT_NAME="Mountify"
+  MOUNTIFY_STATE="1"
+fi
+printf '%s|%s|%s\n' "$ROOT_NAME" "$MOUNT_NAME" "$MOUNTIFY_STATE"
+`;
 
     try {
         const result = await exec(command);
-        const output = String(result?.stdout || result?.stderr || '').trim().split('\n').pop() || '';
-        const [rootName, mountName] = output.split('|');
-        rootEl.textContent = rootName || 'Root';
+        const raw = `${result?.stdout || ''}\n${result?.stderr || ''}`.trim();
+        const output = raw.split('\n').map(line => line.trim()).filter(Boolean).reverse().find(line => line.split('|').length >= 3) || '';
+        const [rootName, mountName, mountifyState] = output.split('|');
+        rootEl.textContent = rootName || '已授权 Root';
         mountEl.textContent = mountName || '原生模块挂载';
+        if (dotEl) dotEl.classList.add('ready');
+        const mountifyEnabled = mountifyState === '1';
+        if (mountifyText) mountifyText.textContent = mountifyEnabled ? '已检测到 Mountify，当前为推荐且已启用的元模块环境。' : '需要元模块时，推荐使用 Mountify；当前使用原生模块挂载。';
+        mountifyNote?.classList.toggle('is-active', mountifyEnabled);
         document.documentElement.dataset.rootManager = (rootName || 'root').toLowerCase().replace(/\s+/g, '-');
-        document.documentElement.dataset.mountEngine = mountName === 'Mountify' ? 'mountify' : 'native';
-    } catch (_) {
+        document.documentElement.dataset.mountEngine = mountifyEnabled ? 'mountify' : 'native';
+    } catch (error) {
+        console.warn('[洛书] 环境识别失败', error);
         rootEl.textContent = '已授权 Root';
         mountEl.textContent = '原生模块挂载';
+        if (dotEl) dotEl.classList.add('warning');
+        if (mountifyText) mountifyText.textContent = '环境检测暂不可用；需要元模块时推荐使用 Mountify。';
     }
 }
 
