@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v13.5 Stable - 独立稳定性、自救与 ROM 诊断工具
+# 洛书 v13.5 Stable Hotfix2 - 独立稳定性、自救与 ROM 诊断工具
 # 该脚本不依赖 WebUI 主逻辑；即使字体列表加载失败，也可单独执行。
 
 set +e
@@ -97,6 +97,10 @@ state_signature() {
         "$(read_kv "$_file" weight 0)"
 }
 
+live_signature() {
+    printf '%s|%s|%s' "$(state_font)" "$(state_emoji)" "$(state_weight)"
+}
+
 detect_root_manager() {
     if [ -d /data/adb/ksu ]; then printf 'KernelSU'
     elif [ -d /data/adb/ap ]; then printf 'APatch'
@@ -160,9 +164,14 @@ save_rom_profile() {
     } > "$ROM_PROFILE.tmp" 2>/dev/null && mv -f "$ROM_PROFILE.tmp" "$ROM_PROFILE" 2>/dev/null
 }
 
-boot_snapshot() {
+save_snapshot_internal() {
+    _mode="${1:-boot}"
     save_rom_profile
     write_state_file "$RECOVERY_DIR/candidate.state"
+    if [ ! -s "$RECOVERY_DIR/candidate.state" ]; then
+        printf '{"status":"error","message":"稳定快照写入失败，请先修复脚本权限"}\n'
+        return 1
+    fi
     _candidate_sig=$(state_signature "$RECOVERY_DIR/candidate.state")
     _current_sig=$(state_signature "$CURRENT_STATE")
     if [ ! -s "$CURRENT_STATE" ]; then
@@ -173,12 +182,18 @@ boot_snapshot() {
     if [ "$_candidate_sig" != "$_current_sig" ]; then
         cp -f "$CURRENT_STATE" "$PREVIOUS_STATE" 2>/dev/null || true
         mv -f "$RECOVERY_DIR/candidate.state" "$CURRENT_STATE" 2>/dev/null
-        printf '{"status":"ok","message":"已保存上一个稳定配置"}\n'
+        printf '{"status":"ok","message":"已保存当前稳定快照，原快照已成为可回滚配置"}\n'
+    elif [ "$_mode" = "manual" ]; then
+        mv -f "$RECOVERY_DIR/candidate.state" "$CURRENT_STATE" 2>/dev/null
+        printf '{"status":"ok","message":"当前配置未变化，已刷新稳定快照保存时间"}\n'
     else
         rm -f "$RECOVERY_DIR/candidate.state" 2>/dev/null
         printf '{"status":"ok","message":"稳定配置未变化"}\n'
     fi
 }
+
+boot_snapshot() { save_snapshot_internal boot; }
+manual_snapshot() { save_snapshot_internal manual; }
 
 status_json() {
     save_rom_profile
@@ -189,9 +204,20 @@ status_json() {
     _current_font="$(state_font)"
     _current_emoji="$(state_emoji)"
     _weight="$(state_weight)"
+    _snapshot_font=$(read_kv "$CURRENT_STATE" font '')
+    _snapshot_emoji=$(read_kv "$CURRENT_STATE" emoji '')
+    _snapshot_weight=$(read_kv "$CURRENT_STATE" weight '')
+    _snapshot_saved_at=$(read_kv "$CURRENT_STATE" saved_at 0)
     _previous_font=$(read_kv "$PREVIOUS_STATE" font '')
     _previous_emoji=$(read_kv "$PREVIOUS_STATE" emoji '')
     _previous_weight=$(read_kv "$PREVIOUS_STATE" weight '')
+    _previous_saved_at=$(read_kv "$PREVIOUS_STATE" saved_at 0)
+    case "$_snapshot_saved_at" in ''|*[!0-9]*) _snapshot_saved_at=0 ;; esac
+    case "$_previous_saved_at" in ''|*[!0-9]*) _previous_saved_at=0 ;; esac
+    _snapshot_exists=false; [ -s "$CURRENT_STATE" ] && _snapshot_exists=true
+    _snapshot_matches=false
+    [ "$_snapshot_exists" = true ] && [ "$(live_signature)" = "$(state_signature "$CURRENT_STATE")" ] && _snapshot_matches=true
+    _rollback_available=false; [ -s "$PREVIOUS_STATE" ] && [ -n "$_previous_font" ] && _rollback_available=true
     _rom=$(read_kv "$ROM_PROFILE" rom "$(detect_rom)")
     _sdk=$(read_kv "$ROM_PROFILE" sdk "$(prop ro.build.version.sdk)")
     _android=$(read_kv "$ROM_PROFILE" android "$(prop ro.build.version.release)")
@@ -211,7 +237,9 @@ status_json() {
     printf '"fontsReadable":%s,' "$(bool_json "$_fonts_ok")"
     printf '"fontFiles":%s,"emojiFiles":%s,' "$_font_count" "$_emoji_count"
     printf '"currentFont":"%s","currentEmoji":"%s","weight":"%s",' "$(json_escape "$_current_font")" "$(json_escape "$_current_emoji")" "$(json_escape "$_weight")"
-    printf '"previousFont":"%s","previousEmoji":"%s","previousWeight":"%s",' "$(json_escape "$_previous_font")" "$(json_escape "$_previous_emoji")" "$(json_escape "$_previous_weight")"
+    printf '"snapshotFont":"%s","snapshotEmoji":"%s","snapshotWeight":"%s","snapshotSavedAt":%s,' "$(json_escape "$_snapshot_font")" "$(json_escape "$_snapshot_emoji")" "$(json_escape "$_snapshot_weight")" "$_snapshot_saved_at"
+    printf '"snapshotExists":%s,"snapshotMatchesCurrent":%s,' "$(bool_json "$_snapshot_exists")" "$(bool_json "$_snapshot_matches")"
+    printf '"previousFont":"%s","previousEmoji":"%s","previousWeight":"%s","previousSavedAt":%s,"rollbackAvailable":%s,' "$(json_escape "$_previous_font")" "$(json_escape "$_previous_emoji")" "$(json_escape "$_previous_weight")" "$_previous_saved_at" "$(bool_json "$_rollback_available")"
     printf '"rom":"%s","android":"%s","sdk":"%s","root":"%s","fontConfigs":"%s",' "$(json_escape "$_rom")" "$(json_escape "$_android")" "$(json_escape "$_sdk")" "$(json_escape "$_root")" "$(json_escape "$_configs")"
     printf '"lastScanMs":%s,"lastScanResult":"%s","lastScanAt":%s' "${_scan_ms:-0}" "$(json_escape "$_scan_result")" "${_scan_at:-0}"
     printf '}}\n'
@@ -271,7 +299,7 @@ scan_test() {
 
 rollback() {
     if [ ! -s "$PREVIOUS_STATE" ]; then
-        printf '{"status":"error","message":"暂无可回滚的上一个稳定配置"}\n'
+        printf '{"status":"error","message":"暂无可回滚配置；请先保存当前配置，或完成一次切换并完整重启"}\n'
         return 1
     fi
     if [ ! -x "$FONT_MANAGER" ]; then
@@ -288,7 +316,7 @@ rollback() {
     _weight_ok=true
     case "$_weight" in ''|*[!0-9-]*) _weight=0 ;; esac
     sh "$FONT_MANAGER" action font_weight_set "$((400 + _weight))" >/dev/null 2>&1 || _weight_ok=false
-    printf '{"status":"ok","data":{"font":"%s","emoji":"%s","weight":"%s","textStarted":%s,"emojiStarted":%s,"weightApplied":%s},"message":"已开始恢复上一个稳定配置；等待任务完成后请完整重启手机"}\n' \
+    printf '{"status":"ok","data":{"font":"%s","emoji":"%s","weight":"%s","textStarted":%s,"emojiStarted":%s,"weightApplied":%s},"message":"已开始恢复可回滚配置；等待任务完成后请完整重启手机"}\n' \
         "$(json_escape "$_font")" "$(json_escape "$_emoji")" "$(json_escape "$_weight")" \
         "$(bool_json "$_text_ok")" "$(bool_json "$_emoji_ok")" "$(bool_json "$_weight_ok")"
 }
@@ -297,7 +325,7 @@ generate_report() {
     _stamp=$(date '+%Y%m%d-%H%M%S' 2>/dev/null || echo unknown)
     _path="$REPORT_DIR/LuoShu-recovery-${_stamp}.txt"
     {
-        echo 'LuoShu v13.5 Stable Recovery Report'
+        echo 'LuoShu v13.5 Stable Hotfix2 Recovery Report'
         echo "generated_at=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)"
         echo "module=$MODULE_DIR"
         echo "version=$(sed -n 's/^version=//p' "$MODULE_DIR/module.prop" 2>/dev/null | head -n1)"
@@ -315,7 +343,10 @@ generate_report() {
         echo "current_font=$(state_font)"
         echo "current_emoji=$(state_emoji)"
         echo "font_weight=$(state_weight)"
+        echo "snapshot_font=$(read_kv "$CURRENT_STATE" font '')"
+        echo "snapshot_saved_at=$(read_kv "$CURRENT_STATE" saved_at 0)"
         echo "previous_font=$(read_kv "$PREVIOUS_STATE" font '')"
+        echo "previous_saved_at=$(read_kv "$PREVIOUS_STATE" saved_at 0)"
         echo "last_scan_ms=$(read_kv "$LAST_SCAN" duration_ms 0)"
         echo "last_scan_result=$(read_kv "$LAST_SCAN" result never)"
         echo
@@ -336,6 +367,7 @@ generate_report() {
 case "${1:-status}" in
     status) status_json ;;
     boot_snapshot|snapshot) boot_snapshot ;;
+    save_snapshot|manual_snapshot) manual_snapshot ;;
     clear_cache) clear_cache ;;
     repair_permissions) repair_permissions ;;
     scan_test|rebuild_index) clear_cache >/dev/null 2>&1; scan_test ;;
