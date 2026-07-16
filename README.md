@@ -55,7 +55,7 @@ v13.5 将恢复能力与主 WebUI 分离。构建包会在 `app.js` 之前加载
 
 ## Hybrid Mount
 
-- v13.6 Beta4 默认使用 Direct Bind，未选择自定义 Emoji 时安装包和已安装模块都不保留 `system/` 分区负载，因此无需 Hybrid Mount 建立字体 staging。
+- v13.6 Beta5 默认使用 Direct Bind，未选择自定义 Emoji 时安装包和已安装模块都不保留 `system/` 分区负载，因此无需 Hybrid Mount 建立字体 staging。HyperOS 的 Play/GMS 桥接使用独立稳定源，避免应用命名空间隔离。
 - 支持 Hybrid Mount、Mountify、meta-overlayfs 及其他遵循 Magisk 模块脚本生命周期的元模块；Overlay 或 Magic 均可，优先保持元模块默认策略。
 - 不要设置为 **Ignore**，否则模块文件不会参与挂载。
 - 升级时会清理且只清理洛书自身的 `mount.error`，不会修改其他模块或元模块全局配置。

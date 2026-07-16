@@ -9,7 +9,7 @@ MODULE="$TMP/modules/LuoShu"
 META="$TMP/meta"
 mkdir -p "$MODULE/common" "$MODULE/system/fonts" "$MODULE/product/fonts" "$MODULE/config" "$MODULE/logs" "$META"
 cp "$ROOT/common/meta_overlay_compat" "$MODULE/common/meta_overlay_compat"
-printf 'id=LuoShu\nversion=v13.6 Beta4\nversionCode=13604\n' > "$MODULE/module.prop"
+printf 'id=LuoShu\nversion=v13.6 Beta5\nversionCode=13605\n' > "$MODULE/module.prop"
 printf 'font-a' > "$MODULE/system/fonts/Roboto-Regular.ttf"
 printf 'product-a' > "$MODULE/product/fonts/Test.ttf"
 

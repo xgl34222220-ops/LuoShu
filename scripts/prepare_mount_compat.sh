@@ -24,13 +24,13 @@ for file in "$MANAGER" "$POSTFS" "$SERVICE"; do
 done
 sed -i -e 's#common/font_report\.sh#common/font_report#g' "$MANAGER" "$CUSTOMIZE"
 sed -i \
-    -e 's/v13\.5 Stable Hotfix[0-9][0-9]*/v13.6 Beta4/g' \
-    -e 's/v13\.5 Stable/v13.6 Beta4/g' \
-    -e 's/v13\.6 Beta[123]/v13.6 Beta4/g' "$STABILITY" "$SERVICE" 2>/dev/null || true
+    -e 's/v13\.5 Stable Hotfix[0-9][0-9]*/v13.6 Beta5/g' \
+    -e 's/v13\.5 Stable/v13.6 Beta5/g' \
+    -e 's/v13\.6 Beta[1234]/v13.6 Beta5/g' "$STABILITY" "$SERVICE" 2>/dev/null || true
 sed -i \
-    -e 's/v13\.4 Beta2 Hotfix[0-9][0-9]*/v13.6 Beta4/g' \
-    -e 's/v13\.5 Stable Hotfix[0-9][0-9]*/v13.6 Beta4/g' \
-    -e 's/v13\.6 Beta[123]/v13.6 Beta4/g' \
+    -e 's/v13\.4 Beta2 Hotfix[0-9][0-9]*/v13.6 Beta5/g' \
+    -e 's/v13\.5 Stable Hotfix[0-9][0-9]*/v13.6 Beta5/g' \
+    -e 's/v13\.6 Beta[1234]/v13.6 Beta5/g' \
     -e 's/Hybrid Mount：推荐 Magic，不能选 Ignore。/元模块：保持默认 Overlay\/Magic 均可，不要选择 Ignore。/g' \
     -e 's/Hybrid Mount：保持 Magic，洛书将自动使用 DB 兼容模式。/元模块：保持默认 Overlay\/Magic 均可，不要选择 Ignore。/g' "$CUSTOMIZE" "$UNINSTALL" 2>/dev/null || true
 
@@ -110,7 +110,7 @@ test "$(grep -c 'luoshu_sync_meta_payload' "$MANAGER")" -ge 2
 grep -q 'luoshu_sync_meta_payload' "$POSTFS"
 grep -q 'luoshu_db_use_direct' "$ROM_ADAPTERS"
 grep -q 'nsenter -t 1 -m' "$DB_ENGINE"
-grep -q 'v13.6 Beta4' "$CUSTOMIZE"
+grep -q 'v13.6 Beta5' "$CUSTOMIZE"
 grep -q '保持默认 Overlay/Magic' "$CUSTOMIZE"
 
 SUSPICIOUS=$(scanner_lines)

@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v13.6 Beta4 - 元模块内容目录兼容层
+# 洛书 v13.6 Beta5 - 元模块内容目录兼容层
 # 仅同步模块分区负载，不执行 mount/umount，避免 Hybrid Mount 将洛书误判为自定义挂载模块。
 set +e
 

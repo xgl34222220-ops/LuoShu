@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.4 Beta2 Hotfix6 - 设备与字体基础检测报告
+# LuoShu v13.6 Beta5 - 设备与字体基础检测报告
 set +e
 MODDIR="${MODDIR:-/data/adb/modules/LuoShu}"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
@@ -7,7 +7,7 @@ FONT="$1"
 OUT="${2:-/sdcard/LuoShu/reports/LuoShu_Font_Report_$(date +%Y%m%d_%H%M%S).txt}"
 mkdir -p "${OUT%/*}" 2>/dev/null || true
 {
-    echo "LuoShu Font Report v13.4 Beta2 Hotfix6"
+    echo "LuoShu Font Report v13.6 Beta5"
     echo "Generated: $(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
     echo "Device: $(getprop ro.product.manufacturer 2>/dev/null) $(getprop ro.product.model 2>/dev/null)"
     echo "Android: $(getprop ro.build.version.release 2>/dev/null) (SDK $(getprop ro.build.version.sdk 2>/dev/null))"
@@ -60,7 +60,10 @@ mkdir -p "${OUT%/*}" 2>/dev/null || true
     fi
     echo
     echo "Bridge status:"
-    grep -E 'GMS-BRIDGE|XWEB-BRIDGE' "$MODDIR/logs/fontswitch.log" 2>/dev/null | tail -n 12 || true
+    grep -E 'GMS-BRIDGE|XWEB-BRIDGE' "$MODDIR/logs/fontswitch.log" 2>/dev/null | tail -n 30 || true
+    echo
+    echo "GMS bridge runtime status:"
+    cat "$MODDIR/config/gms_bridge/runtime.status" 2>/dev/null || true
     echo
     echo "Recent log:"
     tail -n 100 "$MODDIR/logs/fontswitch.log" 2>/dev/null

@@ -1,5 +1,12 @@
 # 更新日志
 
+## v13.6 Beta5
+
+- 修复 HyperOS 3 上 Play 商店仍显示默认字体：将 GMS 桥接源同步到 `/data/fonts/luoshu`，避免 Zygisk Next / KernelSU 应用命名空间隐藏模块目录
+- 补齐 `com.google.android.gms:*` 与 `com.android.vending:*` 全进程扫描，不再只检查主进程
+- HyperOS 开机桥接成功后只重置一次 Play 和 GMS FontsProvider，清除早于挂载生成的原版字体缓存
+- 日志新增 Play/GMS 命名空间的独立验证数，不再用 PID 1 成功代表 Play 已生效
+
 ## v13.6 Beta4
 
 - 修复 HyperOS 3 + Zygisk Next 下 Play 启动后进入新挂载命名空间、开机时已经完成的 GMS 字体桥接随之丢失的问题

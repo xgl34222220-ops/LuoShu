@@ -9,6 +9,8 @@ mkdir -p "$MOD/common" "$MOD/config" "$MOD/source"
 cp "$ROOT/common/db_engine" "$MOD/common/db_engine"
 cp "$ROOT/common/rom_adapters.sh" "$MOD/common/rom_adapters.sh"
 cp "$ROOT/common/play_font_bridge" "$MOD/common/play_font_bridge"
+BRIDGE_DATA_DIR="$TMP/data-fonts-luoshu"
+export BRIDGE_DATA_DIR
 
 for weight in regular medium bold; do
     file="$MOD/source/${weight}.ttf"
@@ -42,5 +44,12 @@ cp "$MOD/source/regular.ttf" "$MOD/config/gms_bridge/variable.font"
 printf 'fvar' >> "$MOD/config/gms_bridge/variable.font"
 test "$(MODDIR="$MOD" sh "$MOD/common/play_font_bridge" resolve Google_Sans_Flex-400-100_0-0_0.ttf)" = "$MOD/config/gms_bridge/variable.font"
 test -z "$(MODDIR="$MOD" sh "$MOD/common/play_font_bridge" resolve Google_Sans_Code-400.ttf || true)"
+
+# 稳定桥接源必须位于模块目录之外，以绕过 HyperOS 应用命名空间隔离。
+MODDIR="$MOD" BRIDGE_DATA_DIR="$BRIDGE_DATA_DIR" sh "$MOD/common/play_font_bridge" now >/dev/null 2>&1 || true
+test -s "$BRIDGE_DATA_DIR/regular.font"
+test -s "$BRIDGE_DATA_DIR/medium.font"
+test -s "$BRIDGE_DATA_DIR/bold.font"
+test -s "$BRIDGE_DATA_DIR/variable.font"
 
 echo "GMS bridge tests passed."

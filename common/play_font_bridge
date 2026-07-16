@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v13.6 Beta4 - Android 16 / GMS、Google 与 Gemini 动态字体桥接
+# 洛书 v13.6 Beta5 - Android 16 / GMS、Google 与 Gemini 动态字体桥接
 # 只做临时 bind mount，不删除也不改写 /data/fonts 中的原文件。
 
 set +e
@@ -7,6 +7,7 @@ set +e
 MODDIR="${MODDIR:-/data/adb/modules/LuoShu}"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
 ACTION="${1:-now}"
+BRIDGE_DATA_DIR="${BRIDGE_DATA_DIR:-/data/fonts/luoshu}"
 
 bridge_log() {
     mkdir -p "$MODDIR/logs" 2>/dev/null || true
@@ -29,6 +30,56 @@ is_variable_font() {
     grep -a -q 'fvar' "$1" 2>/dev/null
 }
 
+same_file_content() {
+    [ -f "$1" ] && [ -f "$2" ] || return 1
+    _left_size=$(font_size "$1")
+    _right_size=$(font_size "$2")
+    [ -n "$_left_size" ] && [ "$_left_size" = "$_right_size" ] || return 1
+    _left_sum=$(cksum < "$1" 2>/dev/null | awk '{print $1}')
+    _right_sum=$(cksum < "$2" 2>/dev/null | awk '{print $1}')
+    [ -n "$_left_sum" ] && [ "$_left_sum" = "$_right_sum" ]
+}
+
+sync_stable_source() {
+    _stable_name="$1"; _stable_src="$2"
+    valid_source "$_stable_src" || return 1
+    _stable_dst="$BRIDGE_DATA_DIR/$_stable_name"
+    if ! same_file_content "$_stable_src" "$_stable_dst"; then
+        _stable_tmp="$BRIDGE_DATA_DIR/.${_stable_name}.$$"
+        cp -f "$_stable_src" "$_stable_tmp" 2>/dev/null || return 1
+        chmod 0644 "$_stable_tmp" 2>/dev/null || true
+        chown 0:0 "$_stable_tmp" 2>/dev/null || true
+        mv -f "$_stable_tmp" "$_stable_dst" 2>/dev/null || return 1
+    fi
+    chmod 0644 "$_stable_dst" 2>/dev/null || true
+    chown 0:0 "$_stable_dst" 2>/dev/null || true
+    return 0
+}
+
+prepare_stable_sources() {
+    # HyperOS/Zygisk Next 会在应用命名空间隐藏 /data/adb/modules。
+    # 只把 3 个字重（可选 1 个可变字体）同步到 Android 字体数据目录，
+    # 再从这个不会被元模块隔离的路径执行 bind。
+    mkdir -p "$BRIDGE_DATA_DIR" 2>/dev/null || return 1
+    chmod 0755 "$BRIDGE_DATA_DIR" 2>/dev/null || true
+    chown 0:0 "$BRIDGE_DATA_DIR" 2>/dev/null || true
+    sync_stable_source regular.font "$MODDIR/config/gms_bridge/regular.font" || return 1
+    sync_stable_source medium.font "$MODDIR/config/gms_bridge/medium.font" || return 1
+    sync_stable_source bold.font "$MODDIR/config/gms_bridge/bold.font" || return 1
+    if valid_source "$MODDIR/config/gms_bridge/variable.font" && is_variable_font "$MODDIR/config/gms_bridge/variable.font"; then
+        sync_stable_source variable.font "$MODDIR/config/gms_bridge/variable.font" || true
+    else
+        rm -f "$BRIDGE_DATA_DIR/variable.font" 2>/dev/null || true
+    fi
+    if command -v restorecon >/dev/null 2>&1; then
+        restorecon -RF "$BRIDGE_DATA_DIR" >/dev/null 2>&1 || true
+    elif command -v chcon >/dev/null 2>&1; then
+        chcon u:object_r:font_data_file:s0 "$BRIDGE_DATA_DIR" "$BRIDGE_DATA_DIR"/*.font >/dev/null 2>&1 || true
+    fi
+    bridge_log "稳定桥接源已同步：$BRIDGE_DATA_DIR"
+    return 0
+}
+
 source_for_name() {
     _name="$1"
     _exact="$MODDIR/system/fonts/$_name"
@@ -38,12 +89,16 @@ source_for_name() {
             # Google_Sans_Flex。先找真正的可变字体；用户字体是普通
             # TTF/OTF 时则回退到常规字重，确保 Play 仍显示所选字形。
             valid_source "$_exact" && is_variable_font "$_exact" && { echo "$_exact"; return 0; }
+            _vf="$BRIDGE_DATA_DIR/variable.font"
+            valid_source "$_vf" && is_variable_font "$_vf" && { echo "$_vf"; return 0; }
             _vf="$MODDIR/config/gms_bridge/variable.font"
             valid_source "$_vf" && is_variable_font "$_vf" && { echo "$_vf"; return 0; }
             _vf="$MODDIR/system/fonts/GoogleSansFlex-Regular.ttf"
             valid_source "$_vf" && is_variable_font "$_vf" && { echo "$_vf"; return 0; }
             _vf="$MODDIR/system/fonts/RobotoFlex-Regular.ttf"
             valid_source "$_vf" && is_variable_font "$_vf" && { echo "$_vf"; return 0; }
+            _fallback="$BRIDGE_DATA_DIR/regular.font"
+            valid_source "$_fallback" && { echo "$_fallback"; return 0; }
             _fallback="$MODDIR/config/gms_bridge/regular.font"
             valid_source "$_fallback" && { echo "$_fallback"; return 0; }
             _fallback="$MODDIR/system/fonts/Roboto-Regular.ttf"
@@ -55,6 +110,11 @@ source_for_name() {
         *Medium*|*-500-*) _bridge_weight=medium; _fallback="$MODDIR/system/fonts/Roboto-Medium.ttf" ;;
         *) _bridge_weight=regular; _fallback="$MODDIR/system/fonts/Roboto-Regular.ttf" ;;
     esac
+    _stable="$BRIDGE_DATA_DIR/${_bridge_weight}.font"
+    if valid_source "$_stable"; then
+        echo "$_stable"
+        return 0
+    fi
     if valid_source "$_exact"; then
         echo "$_exact"
         return 0
@@ -78,11 +138,41 @@ namespace_pids() {
         pidof zygote64 zygote zygote_ocomp system_server 2>/dev/null
         # HyperOS + Zygisk Next 会从独立 namespace daemon 派生/清理应用命名空间。
         pidof zn-nsdaemon-zygote zn-nsdaemon 2>/dev/null
-        pidof com.android.vending 2>/dev/null
-        pidof com.google.android.gms com.google.android.gms.persistent com.google.android.gms.unstable 2>/dev/null
+        package_pids com.android.vending
+        package_pids com.google.android.gms
         pidof com.google.android.apps.bard com.google.android.googlequicksearchbox 2>/dev/null
         pidof com.android.chrome com.google.android.webview webview_zygote 2>/dev/null
     } | tr ' ' '\n' | awk '/^[0-9]+$/ && !seen[$0]++'
+}
+
+package_pids() {
+    _pkg="$1"
+    for _cmdline in /proc/[0-9]*/cmdline; do
+        [ -r "$_cmdline" ] || continue
+        _proc_name=$(tr '\000' '\n' < "$_cmdline" 2>/dev/null | head -n1)
+        case "$_proc_name" in
+            "$_pkg"|"$_pkg":*) echo "${_cmdline#/proc/}" | cut -d/ -f1 ;;
+        esac
+    done
+}
+
+namespace_process_name() {
+    tr '\000' '\n' < "/proc/$1/cmdline" 2>/dev/null | head -n1
+}
+
+record_namespace_result() {
+    _result_pid="$1"; _result_ok="$2"
+    _result_name=$(namespace_process_name "$_result_pid")
+    case "$_result_name" in
+        com.android.vending|com.android.vending:*)
+            PLAY_NS_SEEN=$((PLAY_NS_SEEN + 1))
+            if [ "$_result_ok" -eq 1 ]; then PLAY_NS_OK=$((PLAY_NS_OK + 1)); else PLAY_NS_FAIL=$((PLAY_NS_FAIL + 1)); fi
+            ;;
+        com.google.android.gms|com.google.android.gms:*)
+            GMS_NS_SEEN=$((GMS_NS_SEEN + 1))
+            if [ "$_result_ok" -eq 1 ]; then GMS_NS_OK=$((GMS_NS_OK + 1)); else GMS_NS_FAIL=$((GMS_NS_FAIL + 1)); fi
+            ;;
+    esac
 }
 
 namespace_file_id() {
@@ -124,12 +214,24 @@ do_bind() {
         for _pid in $(namespace_pids); do
             _ns_src=$(namespace_source_path "$_pid" "$_src")
             if namespace_has_source "$_pid" "$_ns_src" "$_target"; then
+                record_namespace_result "$_pid" 1
                 _ok=1
                 continue
             fi
             nsenter -t "$_pid" -m -- mount --bind "$_ns_src" "$_target" >/dev/null 2>&1 || \
                 nsenter -t "$_pid" -m -- /system/bin/mount -o bind "$_ns_src" "$_target" >/dev/null 2>&1
-            namespace_has_source "$_pid" "$_ns_src" "$_target" && _ok=1
+            if namespace_has_source "$_pid" "$_ns_src" "$_target"; then
+                record_namespace_result "$_pid" 1
+                _ok=1
+            else
+                record_namespace_result "$_pid" 0
+                _proc_name=$(namespace_process_name "$_pid")
+                case "$_proc_name" in
+                    com.android.vending*|com.google.android.gms*)
+                        bridge_log "命名空间挂载失败 pid=$_pid process=$_proc_name target=${_target##*/} source=$_ns_src"
+                        ;;
+                esac
+            fi
         done
     fi
     _self_id=$(stat -c '%d:%i' "$_src" 2>/dev/null)
@@ -178,17 +280,19 @@ watch_play_namespace() {
     trap 'rm -f "$MODDIR/config/gms_bridge/watch.pid" 2>/dev/null' EXIT
     trap 'rm -f "$MODDIR/config/gms_bridge/watch.pid" 2>/dev/null; exit 0' HUP INT TERM
     bridge_log "Play 命名空间守护已启动 pid=$$"
-    _last_play="__start__"
+    _last_consumers="__start__"
     _watch_tick=60
     while [ -f "$MODDIR/module.prop" ] && [ ! -e "$MODDIR/remove" ] && [ ! -e "$MODDIR/disable" ]; do
-        _play_pids=$(pidof com.android.vending 2>/dev/null | tr ' ' '\n' | awk '/^[0-9]+$/' | sort -n | tr '\n' ',')
+        _play_pids=$(package_pids com.android.vending | sort -n | tr '\n' ',')
+        _gms_pids=$(package_pids com.google.android.gms | sort -n | tr '\n' ',')
+        _consumers="play=${_play_pids};gms=${_gms_pids}"
         _watch_tick=$((_watch_tick + 1))
-        if [ "$_play_pids" != "$_last_play" ] || [ "$_watch_tick" -ge 60 ]; then
-            if [ -n "$_play_pids" ]; then
-                bridge_log "检测到 Play 命名空间变化：${_last_play:-无} -> $_play_pids"
+        if [ "$_consumers" != "$_last_consumers" ] || [ "$_watch_tick" -ge 60 ]; then
+            if [ -n "$_play_pids$_gms_pids" ]; then
+                bridge_log "检测到 Play/GMS 命名空间变化：${_last_consumers:-无} -> $_consumers"
                 MODDIR="$MODDIR" sh "$0" now >/dev/null 2>&1 || true
             fi
-            _last_play="$_play_pids"
+            _last_consumers="$_consumers"
             _watch_tick=0
         fi
         sleep 5
@@ -205,11 +309,31 @@ restore_mounts() {
         [ -f "$_target" ] || continue
         do_umount "$_target" && _restored=$((_restored + 1))
     done
+    rm -rf "$BRIDGE_DATA_DIR" 2>/dev/null || true
     bridge_log "恢复动态 Google Sans 挂载：$_restored"
+}
+
+restart_hyperos_font_consumers_once() {
+    _miui=$(getprop ro.mi.os.version.name 2>/dev/null)
+    [ -n "$_miui" ] || return 0
+    _boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+    [ -n "$_boot_id" ] || _boot_id="$(date +%s 2>/dev/null)-$$"
+    _marker="$MODDIR/config/gms_bridge/restart.boot"
+    [ "$(cat "$_marker" 2>/dev/null)" = "$_boot_id" ] && return 0
+    printf '%s\n' "$_boot_id" > "$_marker" 2>/dev/null || true
+    # HyperOS 的 Play 通过 GMS FontsProvider 获取字体 FD。两者都需在
+    # 桥接成功后重建一次进程，否则会继续使用早先缓存的原版字体。
+    am force-stop com.android.vending >/dev/null 2>&1 || true
+    am force-stop com.google.android.gms >/dev/null 2>&1 || true
+    bridge_log "HyperOS 已单次重置 Play 与 GMS FontsProvider 字体缓存"
 }
 
 [ "$ACTION" = "restore" ] && { stop_watcher; restore_mounts; exit 0; }
 [ "$ACTION" = "watch" ] && { watch_play_namespace; exit 0; }
+
+if ! prepare_stable_sources; then
+    bridge_log "稳定桥接源同步失败，回退到模块内源"
+fi
 
 _attempts=1
 [ "$ACTION" = "boot" ] && _attempts=9
@@ -220,6 +344,8 @@ while [ "$_attempt" -le "$_attempts" ]; do
     _mounted=0
     _skipped=0
     _failed=0
+    PLAY_NS_SEEN=0; PLAY_NS_OK=0; PLAY_NS_FAIL=0
+    GMS_NS_SEEN=0; GMS_NS_OK=0; GMS_NS_FAIL=0
     for _target in \
         /data/fonts/files/*/GoogleSans*.ttf \
         /data/fonts/files/*/Google_Sans*.ttf \
@@ -256,10 +382,22 @@ while [ "$_attempt" -le "$_attempts" ]; do
 
     if [ "$_found" -gt 0 ]; then
         bridge_log "动态 Google Sans：发现=$_found 成功=$_mounted 跳过=$_skipped 失败=$_failed"
+        bridge_log "Play/GMS 命名空间验证：Play 实例=$PLAY_NS_SEEN 成功=$PLAY_NS_OK 失败=$PLAY_NS_FAIL；GMS 实例=$GMS_NS_SEEN 成功=$GMS_NS_OK 失败=$GMS_NS_FAIL"
+        {
+            echo "found=$_found"
+            echo "mounted=$_mounted"
+            echo "failed=$_failed"
+            echo "play_seen=$PLAY_NS_SEEN"
+            echo "play_ok=$PLAY_NS_OK"
+            echo "play_failed=$PLAY_NS_FAIL"
+            echo "gms_seen=$GMS_NS_SEEN"
+            echo "gms_ok=$GMS_NS_OK"
+            echo "gms_failed=$GMS_NS_FAIL"
+        } > "$MODDIR/config/gms_bridge/runtime.status" 2>/dev/null || true
         if [ "$_mounted" -gt 0 ]; then
             cmd font system --update >/dev/null 2>&1 || true
-            # 只在开机初次准备时结束旧 Play；守护补挂载不得反复杀进程。
-            [ "$ACTION" = "boot" ] && am force-stop com.android.vending >/dev/null 2>&1 || true
+            # 只在开机初次准备时重建一次缓存；守护补挂载不反复杀进程。
+            [ "$ACTION" = "boot" ] && restart_hyperos_font_consumers_once
         fi
         exit 0
     fi
