@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全问题私下报告
+    url: https://github.com/xgl34222220-ops/LuoShu/security/advisories/new
+    about: 请勿在公开 Issue 中披露可导致开机失败、命令执行或数据泄露的完整细节。
