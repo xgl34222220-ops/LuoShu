@@ -1,0 +1,232 @@
+name: Materialize GPL-3.0-only relicensing
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/materialize-gpl3.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: materialize-gpl3
+  cancel-in-progress: true
+
+jobs:
+  materialize:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.ref == 'license/gpl-3.0'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: license/gpl-3.0
+          fetch-depth: 0
+
+      - name: Apply GPL-3.0-only declaration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Preserve the license text that accompanied historical MIT releases.
+          mkdir -p licenses
+          cp LICENSE licenses/LuoShu-MIT-HISTORICAL.txt
+
+          # Use the unmodified official GNU GPLv3 text.
+          curl --fail --location --retry 4 --retry-delay 2 \
+            https://www.gnu.org/licenses/gpl-3.0.txt \
+            --output LICENSE
+          grep -q 'GNU GENERAL PUBLIC LICENSE' LICENSE
+          grep -q 'Version 3, 29 June 2007' LICENSE
+          grep -q 'END OF TERMS AND CONDITIONS' LICENSE
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def read(path):
+              return Path(path).read_text(encoding='utf-8')
+
+          def write(path, text):
+              Path(path).write_text(text, encoding='utf-8')
+
+          # README.md
+          p = Path('README.md')
+          s = read(p)
+          s = s.replace(
+              '[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)',
+              '[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)'
+          )
+          s = s.replace(
+              '用户自行放入的字体文件及生成结果不受洛书 MIT License 授权，其使用和分发责任由字体权利人及使用者承担。',
+              '用户自行放入的字体文件及生成结果不受洛书 GPL-3.0-only 授权，其使用和分发责任由字体权利人及使用者承担。'
+          )
+          marker = '## 许可证\n'
+          before, sep, _ = s.partition(marker)
+          if not sep:
+              raise SystemExit('README license section not found')
+          license_section = '''## 许可证
+
+洛书自身源码自本次许可证变更起采用 **GNU General Public License v3.0 only**（SPDX：`GPL-3.0-only`），完整条款见 [LICENSE](LICENSE)。
+
+这意味着在分发洛书或其修改版本时，需要按照 GPLv3 提供对应源代码、保留版权与许可证声明，并将基于洛书的整体修改版本继续置于 GPLv3 下。私人使用和不对外分发的修改不要求公开。
+
+历史标签和发行包继续适用它们发布时附带的许可证；本次变更不会撤回已经授予的 MIT 权利。历史 MIT 文本保存在 [`licenses/LuoShu-MIT-HISTORICAL.txt`](licenses/LuoShu-MIT-HISTORICAL.txt)。
+
+内置或构建时引入的第三方组件继续适用各自许可证，详情见：
+
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+- [`licenses/CPython-LICENSE.txt`](licenses/CPython-LICENSE.txt)
+- [`licenses/FontTools-LICENSE.txt`](licenses/FontTools-LICENSE.txt)
+- [`licenses/FontTools-LICENSE.external.txt`](licenses/FontTools-LICENSE.external.txt)
+
+GPL-3.0-only 不覆盖用户自行提供的字体、第三方模块、ROM 文件、商标或其中由第三方权利人拥有的字形数据。
+'''
+          write(p, before + marker + license_section[len(marker):])
+
+          # README.txt
+          p = Path('README.txt')
+          s = read(p)
+          s = s.replace(
+              '洛书自身源码采用 MIT License。CPython、FontTools 等第三方组件适用各自许可证，详见 licenses/ 与 THIRD_PARTY_NOTICES.md。用户自行提供的字体不受洛书许可证授权。',
+              '洛书自身源码采用 GPL-3.0-only。分发修改版本时必须遵守 GPLv3 的源代码、同许可证和声明保留要求。CPython、FontTools 等第三方组件适用各自许可证，详见 licenses/ 与 THIRD_PARTY_NOTICES.md。历史版本继续适用其发布时附带的许可证；用户自行提供的字体不受洛书许可证授权。'
+          )
+          write(p, s)
+
+          # NOTICE.md
+          write('NOTICE.md', '''# 许可证范围说明
+
+Copyright (C) 2026 惜故里丶 and LuoShu contributors
+
+洛书当前源码按照根目录 `LICENSE` 中的 **GNU General Public License v3.0 only**（`GPL-3.0-only`）提供。
+
+GPL-3.0-only 覆盖项目维护者和贡献者有权授权的洛书源码与文档，不自动覆盖：
+
+- CPython、FontTools 等第三方组件；
+- 用户自行提供或导入的字体；
+- ROM、系统、应用或其他模块中的文件；
+- 字体字形、字体名称、商标和保留字体名称；
+- 由第三方字体数据生成的复合字体输出中属于原权利人的部分。
+
+第三方组件继续适用其原许可证，详见 `THIRD_PARTY_NOTICES.md` 与 `licenses/`。
+
+历史标签和发行包继续适用其发布时附带的许可证。此前已按 MIT License 获得的副本和权利不会因本次许可证变更而被撤回；历史 MIT 正文保存在 `licenses/LuoShu-MIT-HISTORICAL.txt`。
+
+本项目按“原样”提供，不附带任何明示或默示担保。使用 Root 模块前请保留禁用模块和恢复系统的方式。
+''')
+
+          # THIRD_PARTY_NOTICES.md
+          p = Path('THIRD_PARTY_NOTICES.md')
+          s = read(p)
+          s = s.replace(
+              '洛书自身源码采用 MIT License，详见根目录 [`LICENSE`](LICENSE)。',
+              '洛书自身源码采用 GPL-3.0-only，详见根目录 [`LICENSE`](LICENSE)。历史 MIT 发行版本的许可证文本保存在 [`licenses/LuoShu-MIT-HISTORICAL.txt`](licenses/LuoShu-MIT-HISTORICAL.txt)。'
+          )
+          s = s.replace('以下内容不受洛书 MIT License 授权：', '以下内容不受洛书 GPL-3.0-only 授权：')
+          write(p, s)
+
+          # CONTRIBUTING.md
+          p = Path('CONTRIBUTING.md')
+          s = read(p)
+          block = '''
+## 贡献许可
+
+提交 Issue 不会转让任何代码权利。提交代码、文档或其他可版权化内容的 Pull Request，即表示你确认自己有权提交该内容，并同意该贡献按 **GPL-3.0-only** 与项目一起发布。
+
+不要提交许可证不兼容的代码，或你无权再许可的第三方内容。已有第三方组件必须继续保留原许可证与声明。
+'''
+          if '## 贡献许可' not in s:
+              s = s.replace('\n## PR 描述\n', block + '\n## PR 描述\n')
+          write(p, s)
+
+          # CHANGELOG.md
+          p = Path('CHANGELOG.md')
+          s = read(p)
+          needle = '## [Unreleased]\n\n'
+          if needle in s and 'GPL-3.0-only' not in s.partition('## [v14.1]')[0]:
+              s = s.replace(needle, needle + '- 将洛书当前源码许可证由 MIT 调整为 GPL-3.0-only；历史发行版本继续适用其原许可证。\n', 1)
+          write(p, s)
+
+          # Current RC notes, when present.
+          p = Path('RELEASE_NOTES_v14.1.1_RC2.md')
+          if p.exists():
+              s = read(p)
+              if 'GPL-3.0-only' not in s:
+                  s += '\n- 当前源码与后续发行版采用 GPL-3.0-only；历史版本继续适用其发布时附带的许可证。\n'
+              write(p, s)
+
+          # WebUI legal notice.
+          p = Path('webroot/index.html')
+          s = read(p)
+          s = s.replace(
+              '<span>惜故里丶</span>\n    </footer>',
+              '<span>惜故里丶</span>\n        <span>·</span>\n        <span>GPL-3.0-only</span>\n    </footer>'
+          )
+          s = s.replace(
+              '<div class="more-meta">洛书 <span data-module-version>v14.1</span> · 开源字体切换模块</div>',
+              '<div class="help-note"><span class="note-icon">L</span><span><strong>开源许可</strong><small>洛书自身源码采用 GPL-3.0-only，按原样提供且不附带担保；第三方组件适用各自许可证。</small></span></div>\n                <div class="more-meta">洛书 <span data-module-version>v14.1</span> · GPL-3.0-only</div>'
+          )
+          write(p, s)
+
+          # Build package must carry project license and notices.
+          p = Path('scripts/build.sh')
+          s = read(p)
+          s = s.replace(
+              'for path in common config fonts system webroot licenses customize.sh module.prop post-fs-data.sh service.sh uninstall.sh magic 兼容与目录说明.txt; do',
+              'for path in common config fonts system webroot licenses LICENSE NOTICE.md THIRD_PARTY_NOTICES.md README.md README.txt CHANGELOG.md customize.sh module.prop post-fs-data.sh service.sh uninstall.sh magic 兼容与目录说明.txt; do'
+          )
+          write(p, s)
+
+          # Source validation.
+          p = Path('scripts/check.sh')
+          s = read(p)
+          s = s.replace(
+              'scripts/build.sh scripts/prepare_composite_runtime.sh; do test -f "$ROOT/$file"; done',
+              'scripts/build.sh scripts/prepare_composite_runtime.sh LICENSE NOTICE.md THIRD_PARTY_NOTICES.md README.md README.txt CONTRIBUTING.md; do test -f "$ROOT/$file"; done'
+          )
+          license_checks = '''
+grep -q 'GNU GENERAL PUBLIC LICENSE' "$ROOT/LICENSE"
+grep -q 'Version 3, 29 June 2007' "$ROOT/LICENSE"
+grep -q 'END OF TERMS AND CONDITIONS' "$ROOT/LICENSE"
+grep -q 'GPL-3.0-only' "$ROOT/README.md"
+grep -q 'GPL-3.0-only' "$ROOT/README.txt"
+grep -q 'GPL-3.0-only' "$ROOT/NOTICE.md"
+grep -q 'GPL-3.0-only' "$ROOT/THIRD_PARTY_NOTICES.md"
+grep -q 'GPL-3.0-only' "$ROOT/CONTRIBUTING.md"
+! grep -q 'License-MIT' "$ROOT/README.md"
+test -f "$ROOT/licenses/LuoShu-MIT-HISTORICAL.txt"
+grep -q 'MIT License' "$ROOT/licenses/LuoShu-MIT-HISTORICAL.txt"
+'''
+          anchor = "grep -q '^version=v14.1$' \"$ROOT/module.prop\"\n"
+          if license_checks.strip() not in s:
+              s = s.replace(anchor, license_checks + anchor)
+          write(p, s)
+
+          # CI triggers and package inspection.
+          p = Path('.github/workflows/check.yml')
+          s = read(p)
+          s = s.replace(
+              '      - README.md\n      - CHANGELOG.md',
+              '      - README.md\n      - README.txt\n      - LICENSE\n      - NOTICE.md\n      - THIRD_PARTY_NOTICES.md\n      - CONTRIBUTING.md\n      - CHANGELOG.md'
+          )
+          inspect_anchor = "          grep -qx 'licenses/FontTools-LICENSE.txt' /tmp/luoshu-package-list.txt\n"
+          inspect = """          grep -qx 'LICENSE' /tmp/luoshu-package-list.txt
+          grep -qx 'NOTICE.md' /tmp/luoshu-package-list.txt
+          grep -qx 'THIRD_PARTY_NOTICES.md' /tmp/luoshu-package-list.txt
+          grep -qx 'README.txt' /tmp/luoshu-package-list.txt
+          unzip -p \"$asset\" LICENSE | grep -q 'GNU GENERAL PUBLIC LICENSE'
+          unzip -p \"$asset\" NOTICE.md | grep -q 'GPL-3.0-only'
+"""
+          if inspect.strip() not in s:
+              s = s.replace(inspect_anchor, inspect_anchor + inspect)
+          write(p, s)
+          PY
+
+          rm -f .github/workflows/materialize-gpl3.yml
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'license: relicense LuoShu under GPL-3.0-only'
+          git push origin HEAD:license/gpl-3.0
