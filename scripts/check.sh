@@ -19,7 +19,7 @@ fi
 
 for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
   README.md README.txt LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
-  licenses/CPython-LICENSE.txt licenses/FontTools-LICENSE.txt licenses/FontTools-LICENSE.external.txt \
+  licenses/LuoShu-MIT-HISTORICAL.txt licenses/CPython-LICENSE.txt licenses/FontTools-LICENSE.txt licenses/FontTools-LICENSE.external.txt \
   common/composite_font.py common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh \
   common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \
   scripts/build.sh scripts/prepare_composite_runtime.sh; do test -f "$ROOT/$file"; done
@@ -38,7 +38,16 @@ grep -q 'app.js?v=14120' "$ROOT/webroot/index.html"
 grep -q "UI_VERSION = '14120'" "$ROOT/webroot/environment.js"
 
 # Project license and third-party attribution must be complete and distinct.
-grep -q '^MIT License$' "$ROOT/LICENSE"
+grep -q 'GNU GENERAL PUBLIC LICENSE' "$ROOT/LICENSE"
+grep -q 'Version 3, 29 June 2007' "$ROOT/LICENSE"
+grep -q 'END OF TERMS AND CONDITIONS' "$ROOT/LICENSE"
+grep -q 'GPL-3.0-only' "$ROOT/README.md"
+grep -q 'GPL-3.0-only' "$ROOT/README.txt"
+grep -q 'GPL-3.0-only' "$ROOT/NOTICE.md"
+grep -q 'GPL-3.0-only' "$ROOT/THIRD_PARTY_NOTICES.md"
+grep -q 'GPL-3.0-only' "$ROOT/CONTRIBUTING.md"
+! grep -q 'License-MIT' "$ROOT/README.md"
+grep -q '^MIT License$' "$ROOT/licenses/LuoShu-MIT-HISTORICAL.txt"
 grep -q 'Python Software Foundation' "$ROOT/licenses/CPython-LICENSE.txt"
 grep -q '^MIT License$' "$ROOT/licenses/FontTools-LICENSE.txt"
 if cmp -s "$ROOT/licenses/CPython-LICENSE.txt" "$ROOT/licenses/FontTools-LICENSE.txt"; then
@@ -59,4 +68,4 @@ from fontTools.pens.boundsPen import BoundsPen
 print('Bundled FontTools import OK')
 PY
 
-echo 'LuoShu v14.1 source checks passed.'
+echo 'LuoShu v14.1 GPL-3.0-only source checks passed.'
