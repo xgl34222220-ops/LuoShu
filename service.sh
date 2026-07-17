@@ -16,14 +16,15 @@ MODDIR="${0%/*}"
     log(){ printf '[%s] [SERVICE] %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$1" >> "$LOG_FILE" 2>/dev/null || true; }
     log 'v14.1 服务开始'
 
-    chmod 0755 "$MODDIR" "$MODDIR/common" "$MODDIR/webroot" 2>/dev/null || true
+    chmod 0755 "$MODDIR" "$MODDIR/common" "$MODDIR/webroot" "$MODDIR/webroot_v141" 2>/dev/null || true
     chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/post-mount.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" 2>/dev/null || true
     find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
     chmod 0755 "$MODDIR/system/bin/洛书" "$MODDIR/system/bin/luoshud" 2>/dev/null || true
+    find "$MODDIR/webroot" "$MODDIR/webroot_v141" -type f -exec chmod 0644 {} \; 2>/dev/null || true
     rm -f "$MODDIR/remove" "$MODDIR/disable" "$MODDIR/skip_mount" "$MODDIR/skip_mountify" "$MODDIR/magic" 2>/dev/null || true
     rm -f "$MODDIR/config/active_emoji.conf" "$MODDIR/config/emoji_task.conf" "$MODDIR/config/emoji_reboot_required.conf" 2>/dev/null || true
     rm -f "$MODDIR/system/fonts/NotoColorEmoji.ttf" "$MODDIR/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
-    rm -rf "$MODDIR/system/fonts/.luoshu-emoji-store" "$MODDIR/webroot/emoji" 2>/dev/null || true
+    rm -rf "$MODDIR/system/fonts/.luoshu-emoji-store" "$MODDIR/webroot/emoji" "$MODDIR/webroot_v141/emoji" 2>/dev/null || true
 
     ACTIVE=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n'); [ -n "$ACTIVE" ] || ACTIVE=default
     [ -f "$MODDIR/common/module_status.sh" ] && MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" "$ACTIVE" >/dev/null 2>&1 || true
