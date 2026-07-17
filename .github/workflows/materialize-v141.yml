@@ -26,10 +26,16 @@ jobs:
           fetch-depth: 0
       - name: Materialize audited source
         run: |
-          set -euo pipefail
-          python3 scripts/patch_v141.py
-          chmod 0755 customize.sh post-fs-data.sh service.sh uninstall.sh common/*.sh common/*.py scripts/*.sh
-          rm -f scripts/patch_v141.py .github/workflows/materialize-v141.yml
+          set -u
+          rm -f materialize-result.txt
+          if python3 scripts/patch_v141.py > /tmp/materialize.log 2>&1; then
+            chmod 0755 customize.sh post-fs-data.sh service.sh uninstall.sh common/*.sh common/*.py scripts/*.sh
+            rm -f scripts/patch_v141.py .github/workflows/materialize-v141.yml
+            printf 'success\n' > materialize-result.txt
+          else
+            rc=$?
+            { printf 'failed rc=%s\n' "$rc"; cat /tmp/materialize.log; } > materialize-result.txt
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
@@ -38,3 +44,4 @@ jobs:
             git commit -m 'release: materialize audited LuoShu v14.1 source'
             git push origin HEAD:release/v14.1
           fi
+          grep -q '^success$' materialize-result.txt
