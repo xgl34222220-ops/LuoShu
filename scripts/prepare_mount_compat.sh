@@ -12,7 +12,7 @@ MOUNT="$STAGE/common/mount_compat.sh"
 for file in "$MANAGER" "$POSTFS" "$POSTMOUNT" "$SERVICE" "$SWITCH" "$MIX" "$MOUNT"; do test -f "$file"; done
 
 # 旧管理器只需要能加载兼容库；v14.1 的真实切换与组合引擎已经自行同步负载。
-if ! grep -q 'common/mount_compat.sh' "$MANAGER"; then
+if ! grep -q 'mount_compat.sh' "$MANAGER"; then
     _tmp="${MANAGER}.mount.$$"
     awk '
     BEGIN{inserted=0}
@@ -33,12 +33,12 @@ fi
 
 # APatch 的 post-fs-data 必须保持轻量，不在阻塞阶段做元模块镜像复制。
 ! grep -q 'luoshu_sync_mount_payload' "$POSTFS"
-grep -q 'common/mount_compat.sh' "$POSTMOUNT"
+grep -q 'mount_compat.sh' "$POSTMOUNT"
 grep -q 'luoshu_sync_mount_payload' "$POSTMOUNT"
-grep -q 'common/mount_compat.sh' "$SERVICE"
+grep -q 'mount_compat.sh' "$SERVICE"
 grep -q 'luoshu_sync_mount_payload' "$SERVICE"
-grep -q 'common/mount_compat.sh' "$SWITCH"
+grep -q 'mount_compat.sh' "$SWITCH"
 grep -q 'luoshu_sync_mount_payload' "$SWITCH"
-grep -q 'common/mount_compat.sh' "$MIX"
+grep -q 'mount_compat.sh' "$MIX"
 grep -q 'luoshu_sync_mount_payload' "$MIX"
 rm -f "$STAGE/magic" "$STAGE/skip_mount" "$STAGE/skip_mountify" "$STAGE/remove" "$STAGE/disable" 2>/dev/null || true
