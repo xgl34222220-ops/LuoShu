@@ -1,0 +1,189 @@
+name: Build Alpha7 Full Composite
+
+on:
+  push:
+    branches: [dev/alpha7-full-composite]
+    paths:
+      - '.github/workflows/build-alpha7.yml'
+      - 'common/composite_font.py'
+      - 'common/luoshu_composite.sh'
+      - 'scripts/patch_alpha7.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: alpha7-full-composite
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PY_VERSION: '3.14.6'
+      PY_ARCHIVE: python-3.14.6-aarch64-linux-android.tar.gz
+      PY_SHA256: 38bbe77d3167b5cd554e03b1021324926f09f3825202b065951dd7638e9c37e5
+      FONTTOOLS_VERSION: '4.63.0'
+      ASSET: LuoShu-v14.1-Test4-Alpha7-Full-Composite.zip
+      TAG: v14.1-test4-alpha7
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply Alpha7 source patch
+        run: |
+          set -euxo pipefail
+          python3 scripts/patch_alpha7.py
+          chmod 0755 common/composite_font.py common/luoshu_composite.sh customize.sh post-fs-data.sh service.sh uninstall.sh common/*.sh
+          sh -n common/font_mix.sh
+          sh -n service.sh
+          node --check webroot/v14.js
+          grep -q 'build_composite_anchor()' common/font_mix.sh
+          grep -q '^version=v14.1 Test4 Alpha7 Full Composite$' module.prop
+
+      - name: Prepare host tools
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unzip zip file binutils fonts-noto-cjk fonts-dejavu-core
+          python3 -m pip install --disable-pip-version-check --no-cache-dir "fonttools==${FONTTOOLS_VERSION}"
+
+      - name: Download official CPython Android runtime
+        run: |
+          set -euxo pipefail
+          mkdir -p work/runtime work/download
+          curl --fail --location --retry 4 --retry-delay 3 \
+            "https://www.python.org/ftp/python/${PY_VERSION}/${PY_ARCHIVE}" \
+            -o "work/download/${PY_ARCHIVE}"
+          echo "${PY_SHA256}  work/download/${PY_ARCHIVE}" | sha256sum -c -
+          tar -xzf "work/download/${PY_ARCHIVE}" -C work/runtime
+          test -d work/runtime/prefix/lib/python3.14
+          test -f work/runtime/prefix/lib/libpython3.14.so
+          test -d work/runtime/prefix/include/python3.14
+
+      - name: Build ARM64 embedded Python launcher
+        run: |
+          set -euxo pipefail
+          NDK="${ANDROID_NDK_LATEST_HOME:-}"
+          if [ -z "$NDK" ] || [ ! -d "$NDK" ]; then
+            NDK="$ANDROID_HOME/ndk/$(ls "$ANDROID_HOME/ndk" | sort -V | tail -1)"
+          fi
+          CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
+          test -x "$CC"
+          cat > work/luoshu_python.c <<'EOF'
+          #define PY_SSIZE_T_CLEAN
+          #include <Python.h>
+          #include <stdlib.h>
+          static void fail_status(PyStatus s) { if (PyStatus_Exception(s)) Py_ExitStatusException(s); }
+          int main(int argc, char **argv) {
+              PyStatus s; PyConfig c; const char *home = getenv("PYTHONHOME");
+              PyConfig_InitPythonConfig(&c);
+              c.parse_argv=1; c.install_signal_handlers=1; c.write_bytecode=0; c.user_site_directory=0;
+              s=PyConfig_SetBytesString(&c,&c.program_name,argv[0]); fail_status(s);
+              s=PyConfig_SetBytesString(&c,&c.executable,argv[0]); fail_status(s);
+              if(home&&*home){s=PyConfig_SetBytesString(&c,&c.home,home);fail_status(s);}
+              s=PyConfig_SetBytesArgv(&c,argc,argv); fail_status(s);
+              s=Py_InitializeFromConfig(&c); PyConfig_Clear(&c); fail_status(s);
+              return Py_RunMain();
+          }
+          EOF
+          "$CC" -O2 -fPIE -pie -Wl,--build-id=none -Wl,-z,relro,-z,now \
+            -Iwork/runtime/prefix/include/python3.14 work/luoshu_python.c \
+            -Lwork/runtime/prefix/lib -lpython3.14 -ldl -lm \
+            -Wl,-rpath,'$ORIGIN/../lib' \
+            -o work/runtime/prefix/bin/luoshu-python
+          "${CC%/aarch64-linux-android26-clang}/llvm-strip" work/runtime/prefix/bin/luoshu-python
+          file work/runtime/prefix/bin/luoshu-python
+          readelf -d work/runtime/prefix/bin/luoshu-python | grep libpython3.14.so
+
+      - name: Install pure-Python FontTools
+        run: |
+          set -euxo pipefail
+          mkdir -p work/wheels work/runtime/prefix/lib/python3.14/site-packages
+          python3 -m pip download --disable-pip-version-check --no-deps --only-binary=:all: \
+            "fonttools==${FONTTOOLS_VERSION}" -d work/wheels
+          WHEEL="$(find work/wheels -maxdepth 1 -name 'fonttools-*.whl' -print -quit)"
+          test -n "$WHEEL"
+          case "$(basename "$WHEEL")" in *-none-any.whl) ;; *) exit 1 ;; esac
+          unzip -q "$WHEEL" -d work/runtime/prefix/lib/python3.14/site-packages
+          test -f work/runtime/prefix/lib/python3.14/site-packages/fontTools/ttLib/__init__.py
+          ! find work/runtime/prefix/lib/python3.14/site-packages -type f -name '*.so' -print -quit | grep -q .
+
+      - name: Assemble and validate module
+        run: |
+          set -euxo pipefail
+          R=work/runtime/prefix
+          rm -rf "$R/include" "$R/share" "$R/lib/pkgconfig"
+          find "$R" -type d -name '__pycache__' -prune -exec rm -rf {} +
+          find "$R" -type f \( -name '*.a' -o -name '*.la' -o -name '*.pyc' \) -delete
+          mkdir -p common/python licenses work/pkg dist
+          cp -a "$R"/. common/python/
+          FT_LICENSE="$(find common/python/lib/python3.14/site-packages -path '*fonttools*.dist-info*' -type f -iname 'LICENSE*' -print -quit)"
+          test -n "$FT_LICENSE"
+          cp "$FT_LICENSE" licenses/FontTools-LICENSE.txt
+          CP_LICENSE="$(find work/runtime -maxdepth 2 -type f -iname 'LICENSE*' -print -quit)"
+          [ -z "$CP_LICENSE" ] || cp "$CP_LICENSE" licenses/CPython-LICENSE.txt
+          chmod 0755 common/python/bin/luoshu-python common/luoshu_composite.sh common/composite_font.py
+
+          ! find system/etc -type f \( -name fonts.xml -o -name font_fallback.xml \) -print -quit 2>/dev/null | grep -q .
+          for f in *.sh common/*.sh; do sh -n "$f"; done
+          for f in webroot/*.js; do node --check "$f"; done
+
+          CJK="$(find /usr/share/fonts -type f \( -iname '*NotoSansCJK*Regular*.ttc' -o -iname '*NotoSansCJK*Regular*.otf' \) -print -quit)"
+          LATIN="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
+          test -n "$CJK"; test -n "$LATIN"
+          python3 common/composite_font.py \
+            --cjk "$CJK" --latin "$LATIN" --digit "$LATIN" \
+            --output work/composite-smoke.otf > work/composite-smoke.json
+          python3 - <<'PY'
+          import json
+          from fontTools.ttLib import TTFont
+          font=TTFont('work/composite-smoke.otf')
+          cmap=font.getBestCmap() or {}
+          assert all(ord(x) in cmap for x in '中A1')
+          report=json.load(open('work/composite-smoke.json', encoding='utf-8'))
+          assert report['status']=='ok', report
+          assert report['replaced']['latin'] > 20, report
+          assert report['replaced']['digit'] >= 10, report
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          PY
+
+          for p in common config fonts system webroot customize.sh module.prop post-fs-data.sh service.sh uninstall.sh magic 兼容与目录说明.txt licenses; do
+            [ ! -e "$p" ] || cp -a "$p" work/pkg/
+          done
+          find work/pkg -type f -name '*.log' -delete
+          rm -rf work/pkg/webroot/fonts work/pkg/webroot/emoji work/pkg/logs work/pkg/backup work/pkg/config/recovery
+          mkdir -p work/pkg/webroot/fonts work/pkg/webroot/emoji
+          find work/pkg/common -maxdepth 1 -type f -exec chmod 0755 {} +
+          chmod 0755 work/pkg/*.sh work/pkg/system/bin/luoshud work/pkg/common/python/bin/luoshu-python
+          (cd work/pkg && zip -9 -r -q "../../dist/${ASSET}" .)
+          sha256sum "dist/${ASSET}" > "dist/${ASSET}.sha256"
+          unzip -t "dist/${ASSET}"
+          unzip -l "dist/${ASSET}" | grep -E 'common/python/bin/luoshu-python|common/composite_font.py|module.prop'
+          ls -lh dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-Alpha7-Full-Composite
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > /tmp/notes.md <<'EOF'
+          ## 洛书 v14.1 Test4 Alpha7 Full Composite
+          - 完整中文字体作为基底，只替换英文与数字字形
+          - 所有 ROM 物理字体槽使用同一份完整复合字体
+          - 不裁掉中文，不覆盖字体 XML，不在刷写或开机阶段处理字体
+          - 应用内置字体和网页网络字体不受系统模块控制
+          EOF
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" dist/* \
+            --target "$GITHUB_SHA" \
+            --title '洛书 v14.1 Test4 Alpha7 Full Composite' \
+            --notes-file /tmp/notes.md \
+            --prerelease
