@@ -18,13 +18,15 @@ if command -v node >/dev/null 2>&1; then
 fi
 
 for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
+  README.md README.txt LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
+  licenses/CPython-LICENSE.txt licenses/FontTools-LICENSE.txt licenses/FontTools-LICENSE.external.txt \
   common/composite_font.py common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh \
   common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \
   scripts/build.sh scripts/prepare_composite_runtime.sh; do test -f "$ROOT/$file"; done
 
 grep -q '^version=v14.1$' "$ROOT/module.prop"
 grep -q '^versionCode=14120$' "$ROOT/module.prop"
-grep -q '完整中英数字体复合' "$ROOT/module.prop"
+grep -q '^description=Android 全局文字字体复合模块' "$ROOT/module.prop"
 grep -q 'full-composite-v5' "$ROOT/common/font_mix.sh"
 grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
 grep -q 'font_mix.sh.*recover' "$ROOT/post-fs-data.sh"
@@ -34,6 +36,16 @@ grep -q 'font_mix.sh.*recover' "$ROOT/post-fs-data.sh"
 grep -q 'v14.js?v=14120' "$ROOT/webroot/index.html"
 grep -q 'app.js?v=14120' "$ROOT/webroot/index.html"
 grep -q "UI_VERSION = '14120'" "$ROOT/webroot/environment.js"
+
+# Project license and third-party attribution must be complete and distinct.
+grep -q '^MIT License$' "$ROOT/LICENSE"
+grep -q 'Python Software Foundation' "$ROOT/licenses/CPython-LICENSE.txt"
+grep -q '^MIT License$' "$ROOT/licenses/FontTools-LICENSE.txt"
+if cmp -s "$ROOT/licenses/CPython-LICENSE.txt" "$ROOT/licenses/FontTools-LICENSE.txt"; then
+  echo 'CPython and FontTools license files must not be identical.' >&2
+  exit 1
+fi
+! grep -q '/sdcard/LuoShu/emoji/' "$ROOT/README.md" "$ROOT/README.txt" "$ROOT/module.prop" "$ROOT/config/version_notes.conf"
 
 test -x "$ROOT/common/python/bin/luoshu-python"
 test -f "$ROOT/common/python/lib/libpython3.14.so"
