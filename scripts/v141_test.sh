@@ -23,6 +23,24 @@ if luoshu_txn_verify font; then echo 'tiny transaction should fail' >&2; exit 1;
 test -f "$MODDIR/system/fonts/new.ttf"
 luoshu_txn_abort
 
+# 模拟 APatch source customize.sh：安装脚本结束后外层安装器必须继续执行。
+APMOD="$TMP/apatch-module"
+mkdir -p "$APMOD/system/bin" "$APMOD/system/fonts" "$APMOD/webroot/fonts" "$APMOD/config" "$APMOD/logs"
+cp -R "$ROOT/common" "$APMOD/common"
+cp "$ROOT/module.prop" "$APMOD/module.prop"
+cp "$ROOT/customize.sh" "$APMOD/customize.sh"
+cp "$ROOT/post-fs-data.sh" "$ROOT/post-mount.sh" "$ROOT/service.sh" "$ROOT/uninstall.sh" "$APMOD/"
+sh -c '
+    ui_print(){ :; }
+    MODPATH="$1"; APATCH=true; KERNELPATCH=false
+    . "$MODPATH/customize.sh"
+    printf source-returned > "$MODPATH/source-returned"
+' sh "$APMOD"
+test -f "$APMOD/source-returned"
+test -f "$APMOD/config/install_environment.conf"
+test ! -e "$APMOD/magic"
+test ! -e "$APMOD/remove"
+
 grep -q 'APatch.*source' "$ROOT/customize.sh"
 ! grep -q '^exit 0$' "$ROOT/customize.sh"
 ! grep -q 'touch .*magic' "$ROOT/customize.sh"
