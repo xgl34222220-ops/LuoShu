@@ -1,4 +1,4 @@
-name: Materialize v14.1.1 RC1
+name: Build v14.1.1 RC1 candidate
 on:
   pull_request:
     branches: [main]
@@ -12,13 +12,17 @@ concurrency:
   group: materialize-v1411
   cancel-in-progress: true
 jobs:
-  materialize:
+  candidate:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           ref: hotfix/v14.1.1
           fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - name: Apply hotfix patches
         run: |
           set -euo pipefail
@@ -66,7 +70,9 @@ jobs:
           rm -rf "$tmp" common/__pycache__
           chmod 0755 common/font_mix.sh common/v14_mix.sh common/composite_font.py
           git diff --check
-      - name: Commit candidate source
+      - name: Prepare candidate commit
+        id: commit
+        continue-on-error: true
         run: |
           set -euo pipefail
           rm -f scripts/v1411-part1.patch scripts/v1411-part2.patch .github/workflows/materialize-v1411.yml
@@ -75,4 +81,40 @@ jobs:
           git add -A
           git diff --cached --check
           git commit -m 'fix: LuoShu v14.1.1 RC1 progress and transaction reliability'
-          git push origin HEAD:hotfix/v14.1.1
+      - name: Push candidate source
+        id: push
+        continue-on-error: true
+        run: git push origin HEAD:hotfix/v14.1.1
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - name: Prepare ARM64 composite runtime
+        run: sh ./scripts/prepare_composite_runtime.sh
+      - name: Composite smoke test
+        env:
+          PYTHONPATH: common/python/lib/python3.14/site-packages
+        run: |
+          CJK="$(find /usr/share/fonts -type f \( -iname '*NotoSansCJK*Regular*.ttc' -o -iname '*NotoSansCJK*Regular*.otf' \) -print -quit)"
+          LATIN="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
+          test -n "$CJK"; test -n "$LATIN"
+          python3 common/composite_font.py --cjk "$CJK" --latin "$LATIN" --digit "$LATIN" --output /tmp/luoshu-v1411.otf >/tmp/luoshu-v1411.json
+          python3 - <<'PY'
+          import json
+          from fontTools.ttLib import TTFont
+          report=json.load(open('/tmp/luoshu-v1411.json', encoding='utf-8'))
+          assert report['status']=='ok', report
+          font=TTFont('/tmp/luoshu-v1411.otf')
+          cmap=font.getBestCmap() or {}
+          assert all(ord(ch) in cmap for ch in '中Aa019')
+          assert report['replaced']['latin'] >= 52
+          assert report['replaced']['digit'] >= 10
+          PY
+      - name: Build flashable RC1
+        run: sh ./scripts/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-v14.1.1-RC1
+          path: dist/*.zip*
+          if-no-files-found: error
+          retention-days: 30
