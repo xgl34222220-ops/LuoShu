@@ -610,9 +610,9 @@ const App = {
     },
 
     async openPublicFolder(kind = 'fonts') {
-        const safeKind = kind === 'emoji' ? 'emoji' : (kind === 'import' ? 'import' : 'fonts');
+        const safeKind = kind === 'import' ? 'import' : 'fonts';
         const path = `/sdcard/LuoShu/${safeKind}`;
-        const title = safeKind === 'emoji' ? 'Emoji' : (safeKind === 'import' ? '字体包导入' : '文字字体');
+        const title = safeKind === 'import' ? '字体包导入' : '文字字体';
         try { await this.execShell(`mkdir -p "${path}" && chmod 0777 "${path}" 2>/dev/null || true`); }
         catch (_) { this.showToast('无法创建目录'); return; }
         const docId = encodeURIComponent(`primary:LuoShu/${safeKind}`);

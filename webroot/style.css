@@ -212,21 +212,6 @@ body.switching .font-list,body.switching .quick-actions{pointer-events:none;opac
 .coverage-list{display:flex;flex-direction:column;gap:8px}.coverage-row{display:grid;grid-template-columns:58px minmax(0,1fr) 34px;align-items:center;gap:8px;font-size:10px}.coverage-row>span{color:var(--sub)}.coverage-row>b{text-align:right;font-size:9px}.coverage-track{height:6px;border-radius:999px;background:var(--line);overflow:hidden}.coverage-track i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#438cff,#6b78ed)}.coverage-track i.warn{background:linear-gradient(90deg,#f7b34b,#f59e0b)}.coverage-track i.danger{background:linear-gradient(90deg,#f26b6b,#e34848)}.coverage-track i.muted{background:var(--muted)}
 .analysis-warnings,.analysis-ok{margin-top:12px;padding:9px 10px;border-radius:13px;display:flex;flex-direction:column;gap:4px;font-size:9px;line-height:1.45}.analysis-warnings{background:rgba(245,158,11,.09);color:color-mix(in srgb,var(--warn) 80%,var(--text))}.analysis-ok{background:rgba(54,168,82,.09);color:#2ca454}.analysis-note{margin-top:9px;color:var(--muted);font-size:8px;line-height:1.5}.analysis-report-btn,.analysis-error button{width:100%;margin-top:10px;padding:9px 11px;border:1px solid color-mix(in srgb,var(--primary) 18%,var(--stroke));border-radius:12px;background:var(--primary-soft);color:var(--primary);font-size:10px;font-weight:700}.analysis-error{min-height:90px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}.analysis-error strong{font-size:12px}.analysis-error span{margin-top:3px;color:var(--sub);font-size:9px}
 
-/* v13.3 Beta2 — Emoji 独立管理 / 重启工作流 */
-.emoji-section{margin:12px 0 16px;padding:15px;border:1px solid var(--stroke);border-radius:24px;background:var(--card);box-shadow:var(--shadow-sm)}
-.emoji-header{margin-bottom:11px}.emoji-header>div:first-child{display:flex;align-items:baseline;gap:8px}.emoji-header h2{margin:0}.emoji-header small{color:var(--sub);font-size:9px}
-.emoji-current{position:relative;display:flex;align-items:center;gap:12px;padding:12px;border-radius:18px;background:linear-gradient(145deg,var(--primary-soft),var(--surface-soft));border:1px solid color-mix(in srgb,var(--primary) 18%,var(--stroke));margin-bottom:10px;min-width:0}
-.emoji-sample,.emoji-card-icon{display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:46px;height:46px;border-radius:15px;background:var(--card);font-size:28px;box-shadow:var(--shadow-sm)}
-.emoji-current>div,.emoji-card-copy{min-width:0;display:flex;flex-direction:column;gap:3px}.emoji-current strong,.emoji-card-copy strong{font-size:12px;line-height:1.35;overflow-wrap:anywhere}.emoji-current small,.emoji-card-copy small{color:var(--sub);font-size:9px;overflow-wrap:anywhere}
-.emoji-active{margin-left:auto;padding:5px 8px;border-radius:999px;background:rgba(54,168,82,.13);color:#2ca454;font-size:9px;font-weight:750;white-space:nowrap}
-.emoji-list{display:grid;grid-template-columns:1fr;gap:8px}.emoji-card{width:100%;display:flex;align-items:center;gap:11px;padding:10px;border:1px solid var(--stroke);border-radius:17px;background:var(--surface-soft);color:var(--text);text-align:left}.emoji-card:not(:disabled):active{transform:scale(.985)}.emoji-card.active{border-color:color-mix(in srgb,var(--primary) 30%,var(--stroke));background:var(--primary-soft)}.emoji-card-icon{width:38px;height:38px;border-radius:13px;font-size:22px}.emoji-card-action{margin-left:auto;color:var(--primary);font-size:9px;font-weight:750}.emoji-card:disabled{opacity:.75}.emoji-empty{padding:12px;text-align:center;color:var(--sub);font-size:10px}
-.action-btn.pending{border-color:color-mix(in srgb,var(--warn) 38%,var(--stroke));background:linear-gradient(145deg,color-mix(in srgb,var(--warn) 10%,var(--card)),var(--card))}.action-btn.pending .action-btn-title,.action-btn.pending svg{color:var(--warn)}
-.reboot-required .switch-result.success::after{content:'等待重启';margin-left:auto;padding:4px 7px;border-radius:999px;background:rgba(245,158,11,.12);color:var(--warn);font-size:8px;font-weight:750;white-space:nowrap}
-.modal-icon.warn{background:rgba(245,158,11,.13);color:var(--warn)}.btn-confirm.warn{background:var(--warn);box-shadow:none}
-#riskMessage{line-height:1.65;text-align:left;overflow-wrap:anywhere}
-#applyDoneMessage{overflow-wrap:anywhere}
-@media(min-width:620px){.emoji-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.emoji-card.invalid{border-color:color-mix(in srgb,var(--danger) 24%,var(--stroke));opacity:.68}.emoji-card.invalid .emoji-card-action{color:var(--danger)}
 .setting-icon.orange{background:rgba(245,158,11,.13);color:var(--warn)}
 
 /* v13.3 Beta2 — invalid font files */
@@ -276,7 +261,7 @@ body.modal-open{overflow:hidden;touch-action:none}
 button,[role="button"]{touch-action:manipulation}
 .header-actions{width:min(324px,calc(100vw - 28px));height:var(--dock-height);bottom:calc(14px + env(safe-area-inset-bottom,0px));border-radius:24px;padding:6px}
 .nav-btn{height:52px;border-radius:18px}.nav-btn::before{inset:2px 4px;border-radius:16px}.nav-btn span{font-size:9.5px}
-.font-section,.emoji-section,.current-card,.engine-card{scroll-margin-top:74px}
+.font-section,.current-card,.engine-card{scroll-margin-top:74px}
 .font-list{gap:9px;padding:7px;border-radius:25px}
 .font-card{min-height:106px!important;padding:12px 13px;border-radius:21px}
 .card-left{gap:12px}.card-title-row{flex-wrap:wrap;gap:4px 7px}.card-title{flex:1 1 100%;font-size:clamp(13px,3.7vw,15px);line-height:1.38!important}
@@ -300,8 +285,8 @@ button,[role="button"]{touch-action:manipulation}
 }
 @supports not (height:100dvh){.import-list{max-height:42vh}.modal-content.detail,.import-sheet{max-height:92vh}}
 @supports not (color:color-mix(in srgb,#000 50%,#fff)){
-  .header-actions,.font-list,.font-card,.engine-card,.current-glass,.emoji-section,.modal-content{background:var(--card)}
-  .font-card.active,.emoji-card.active,.variable-weight-control,.static-family-control{background:var(--surface-soft);border-color:var(--primary)}
+  .header-actions,.font-list,.font-card,.engine-card,.current-glass,.modal-content{background:var(--card)}
+  .font-card.active,.variable-weight-control,.static-family-control{background:var(--surface-soft);border-color:var(--primary)}
   .switch-result.success{background:var(--card);border-color:var(--success)}.switch-result.failed{background:var(--card);border-color:var(--danger)}
   .analysis-warnings{color:var(--warn)}.import-result.running{background:var(--primary-soft)}
 }
