@@ -1,0 +1,68 @@
+name: Materialize v14.1.1 hotfix branch
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/materialize-v1411-hotfix.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: materialize-v1411-hotfix
+  cancel-in-progress: true
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hotfix/v14.1.1
+          fetch-depth: 0
+      - name: Apply audited hotfix to candidate branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check scripts/v1411-part1.patch
+          git apply --check scripts/v1411-part2.patch
+          git apply scripts/v1411-part1.patch
+          git apply scripts/v1411-part2.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/check.sh')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace("grep -q '^version=v14.1$'", "grep -q '^version=v14[.]1[.]1 RC1$'")
+          s=s.replace("grep -q '^versionCode=14120$'", "grep -q '^versionCode=14121$'")
+          s=s.replace("v14.js?v=14120", "v14.js?v=14121")
+          s=s.replace("app.js?v=14120", "app.js?v=14121")
+          s=s.replace("UI_VERSION = '14120'", "UI_VERSION = '14121'")
+          p.write_text(s, encoding='utf-8')
+
+          p=Path('.github/workflows/check.yml')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace("= 'v14.1'", "= 'v14.1.1 RC1'")
+          s=s.replace('14120', '14121')
+          s=s.replace('LuoShu-v14.1-validation', 'LuoShu-v14.1.1-RC1-validation')
+          p.write_text(s, encoding='utf-8')
+
+          p=Path('.github/workflows/build.yml')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('LuoShu-v14.1', 'LuoShu-v14.1.1-RC1')
+          p.write_text(s, encoding='utf-8')
+
+          Path('RELEASE_NOTES_v14.1.1.md').write_text('''# 洛书 v14.1.1 RC1\n\n- 修复复合字体进度文件未传递到 WebUI，新增真实百分比和进度条。\n- 缓存命中或任务瞬间完成时，仍会显示 100% 验证完成状态。\n- 防止多个 WebUI 重复启动同一复合任务。\n- 运行时自检同时校验启动器、libpython、复合引擎和 FontTools。\n- 清理旧版与孤立复合缓存文件。\n- 字体负载与配置文件共同参与事务回滚，降低中断后状态不一致风险。\n- 复合字形算法保持与 v14.1 / Alpha10 一致。\n''', encoding='utf-8')
+          PY
+          sh -n common/font_mix.sh
+          sh -n common/v14_mix.sh
+          python3 -m py_compile common/composite_font.py
+          tmp="$(mktemp -d)"
+          cp webroot/v14.js "$tmp/v14.mjs"
+          node --check "$tmp/v14.mjs"
+          rm -rf "$tmp" common/__pycache__
+          chmod 0755 common/font_mix.sh common/v14_mix.sh common/composite_font.py
+          rm -f scripts/v1411-part1.patch scripts/v1411-part2.patch .github/workflows/materialize-v1411.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix: LuoShu v14.1.1 RC1 progress and transaction reliability'
+          git push origin HEAD:hotfix/v14.1.1
