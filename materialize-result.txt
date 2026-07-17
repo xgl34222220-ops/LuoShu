@@ -1,0 +1,9 @@
+failed rc=1
+Traceback (most recent call last):
+  File "/home/runner/work/LuoShu/LuoShu/scripts/patch_v141.py", line 14, in <module>
+    raw = base64.b64decode(PAYLOAD)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/base64.py", line 88, in b64decode
+    return binascii.a2b_base64(s, strict_mode=validate)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+binascii.Error: Incorrect padding
