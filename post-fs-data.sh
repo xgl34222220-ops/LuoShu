@@ -11,6 +11,8 @@ rm -f "$MODDIR/remove" "$MODDIR/disable" "$MODDIR/skip_mount" "$MODDIR/skip_moun
 rm -f "$MODDIR/config/active_emoji.conf" "$MODDIR/config/emoji_task.conf" "$MODDIR/config/emoji_reboot_required.conf" 2>/dev/null || true
 rm -f "$MODDIR/system/fonts/NotoColorEmoji.ttf" "$MODDIR/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
 rm -rf "$MODDIR/system/fonts/.luoshu-emoji-store" 2>/dev/null || true
+WEBROOT_NAME=$(sed -n 's/^webroot=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
+for _old_root in webroot webroot_v141; do [ "$_old_root" = "$WEBROOT_NAME" ] || rm -rf "$MODDIR/$_old_root" 2>/dev/null || true; done
 rm -f "$MODDIR/config/text_reboot_required.conf" "$MODDIR/config/font_weight_reboot_required.conf" "$MODDIR/.font_switch.lock" 2>/dev/null || true
 [ -f "$MODDIR/common/font_transaction.sh" ] && . "$MODDIR/common/font_transaction.sh" && luoshu_txn_cleanup_stale
 printf '[%s] post-fs-data v14.1 minimal init\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" >> "$MODDIR/logs/fontswitch.log" 2>/dev/null || true
