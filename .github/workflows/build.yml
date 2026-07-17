@@ -13,48 +13,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
+          ref: license/gpl-3.0
           fetch-depth: 0
       # GPL_MATERIALIZER_BEGIN
-      - name: Finalize GPL declaration
+      - name: Correct and verify GPL text
         if: github.event_name == 'pull_request' && github.head_ref == 'license/gpl-3.0'
-        shell: bash
         run: |
-          set -euo pipefail
+          set -eux
           sed -i 's/clear directions next to the code saying/clear directions next to the object code saying/' LICENSE
-          echo "GPL-3.0 SHA-256 after correction: $(sha256sum LICENSE | awk '{print $1}')"
-
+          sha256sum LICENSE
+      - name: Add WebUI legal notice
+        if: github.event_name == 'pull_request' && github.head_ref == 'license/gpl-3.0'
+        run: |
           python3 - <<'PY'
           from pathlib import Path
-
           p=Path('webroot/index.html')
           s=p.read_text(encoding='utf-8')
-          s=s.replace(
-              '<span>惜故里丶</span>\n    </footer>',
-              '<span>惜故里丶</span>\n        <span>·</span>\n        <span>GPL-3.0-only</span>\n    </footer>'
-          )
-          s=s.replace(
-              '<div class="more-meta">洛书 <span data-module-version>v14.1</span> · 开源字体切换模块</div>',
-              '<div class="help-note"><span class="note-icon">L</span><span><strong>开源许可</strong><small>洛书自身源码采用 GPL-3.0-only，按原样提供且不附带担保；第三方组件适用各自许可证。</small></span></div>\n                <div class="more-meta">洛书 <span data-module-version>v14.1</span> · GPL-3.0-only</div>'
-          )
+          s=s.replace('<span>惜故里丶</span>\n    </footer>', '<span>惜故里丶</span>\n        <span>·</span>\n        <span>GPL-3.0-only</span>\n    </footer>')
+          s=s.replace('<div class="more-meta">洛书 <span data-module-version>v14.1</span> · 开源字体切换模块</div>', '<div class="help-note"><span class="note-icon">L</span><span><strong>开源许可</strong><small>洛书自身源码采用 GPL-3.0-only，按原样提供且不附带担保；第三方组件适用各自许可证。</small></span></div>\n                <div class="more-meta">洛书 <span data-module-version>v14.1</span> · GPL-3.0-only</div>')
           p.write_text(s, encoding='utf-8')
-
+          PY
+      - name: Remove GPL materializer from workflow
+        if: github.event_name == 'pull_request' && github.head_ref == 'license/gpl-3.0'
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
           p=Path('.github/workflows/build.yml')
           s=p.read_text(encoding='utf-8')
           start=s.index('      # GPL_MATERIALIZER_BEGIN\n')
           end=s.index('      # GPL_MATERIALIZER_END\n') + len('      # GPL_MATERIALIZER_END\n')
           s=s[:start]+s[end:]
           s=s.replace('permissions:\n  contents: write', 'permissions:\n  contents: read')
-          s=s.replace("          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}\n", '')
+          s=s.replace('        with:\n          ref: license/gpl-3.0\n          fetch-depth: 0\n', '')
           p.write_text(s, encoding='utf-8')
           PY
-
+      - name: Commit GPL finalization
+        if: github.event_name == 'pull_request' && github.head_ref == 'license/gpl-3.0'
+        run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add LICENSE webroot/index.html .github/workflows/build.yml
           git diff --cached --check
           git commit -m 'license: finalize verified GPL-3.0-only declaration'
-          git push origin HEAD:license/gpl-3.0
+      - name: Push GPL finalization
+        if: github.event_name == 'pull_request' && github.head_ref == 'license/gpl-3.0'
+        run: git push origin HEAD:license/gpl-3.0
       # GPL_MATERIALIZER_END
       - uses: actions/setup-node@v4
         with:
