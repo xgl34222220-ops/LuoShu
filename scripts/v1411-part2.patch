@@ -1,0 +1,175 @@
+--- a/webroot/environment.js
++++ b/webroot/environment.js
+@@ -1,7 +1,7 @@
+ // 洛书 v13.5 Stable Hotfix3 - Root / Mountify 环境识别与 UI 精修
+ import { exec } from './kernelsu.js';
+ 
+-const UI_VERSION = '14120';
++const UI_VERSION = '14121';
+ 
+ function installRefinedStyle() {
+     if (document.querySelector('link[data-luoshu-refine]')) return;
+--- a/webroot/index.html
++++ b/webroot/index.html
+@@ -7,8 +7,8 @@
+     <meta http-equiv="Pragma" content="no-cache">
+     <meta http-equiv="Expires" content="0">
+     <title>洛书 LuoShu</title>
+-    <link rel="stylesheet" href="style.css?v=14120">
+-    <link rel="stylesheet" href="v14.css?v=14120">
++    <link rel="stylesheet" href="style.css?v=14121">
++    <link rel="stylesheet" href="v14.css?v=14121">
+ </head>
+ <body>
+     <!-- 背景装饰 -->
+@@ -399,8 +399,8 @@
+         </div>
+     </div>
+ 
+-    <script type="module" src="environment.js?v=14120"></script>
+-    <script type="module" src="app.js?v=14120"></script>
+-    <script type="module" src="v14.js?v=14120"></script>
++    <script type="module" src="environment.js?v=14121"></script>
++    <script type="module" src="app.js?v=14121"></script>
++    <script type="module" src="v14.js?v=14121"></script>
+ </body>
+ </html>
+--- a/webroot/v14.css
++++ b/webroot/v14.css
+@@ -53,7 +53,7 @@
+ .mix-picker-modal{position:fixed;inset:0;z-index:10050;display:flex;align-items:flex-end;justify-content:center;padding:0;background:rgba(7,10,18,.56);opacity:0;pointer-events:none;transition:opacity .2s ease;backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px)}.mix-picker-modal.show{opacity:1;pointer-events:auto}.mix-picker-sheet{display:flex;width:min(440px,100%);height:min(78vh,720px);height:min(78dvh,720px);max-height:calc(100vh - 18px);max-height:calc(100dvh - 18px);flex-direction:column;border:1px solid var(--v14-border);border-bottom:0;border-radius:29px 29px 0 0;background:var(--card);box-shadow:0 -18px 60px rgba(8,15,34,.25);transform:translateY(100%);transition:transform .28s cubic-bezier(.2,.82,.2,1);overflow:hidden}.mix-picker-modal.show .mix-picker-sheet{transform:translateY(0)}.mix-picker-handle{flex:0 0 auto;width:52px;height:5px;margin:10px auto 2px;border-radius:999px;background:var(--muted);opacity:.55}.mix-picker-head{display:flex;flex:0 0 auto;align-items:center;justify-content:space-between;padding:12px 17px 10px}.mix-picker-head small{color:var(--primary);font-size:9px;font-weight:750}.mix-picker-head h3{margin-top:2px;font-size:24px;line-height:1.2;letter-spacing:-.6px}.mix-picker-head button{width:43px;height:43px;border:0;border-radius:15px;background:var(--surface-soft);color:var(--text);font-size:25px;line-height:1}.mix-picker-search{flex:0 0 auto;padding:0 15px 10px}.mix-picker-search input{width:100%;height:45px;padding:0 15px;border:1px solid var(--v14-border);border-radius:15px;outline:0;background:var(--surface-soft);color:var(--text);font-size:12px}.mix-picker-list{flex:1 1 auto;min-height:0;padding:0 12px calc(15px + env(safe-area-inset-bottom,0px));overflow-y:auto;overscroll-behavior:contain}.mix-picker-item{display:grid;width:100%;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;min-height:70px;margin-bottom:7px;padding:9px 11px;border:1px solid var(--v14-border);border-radius:18px;background:var(--v14-panel);color:var(--text);text-align:left}.mix-picker-item.active{border-color:color-mix(in srgb,var(--primary) 42%,var(--stroke));background:var(--primary-soft)}.mix-picker-preview{display:flex;width:43px;height:43px;align-items:center;justify-content:center;border-radius:14px;background:linear-gradient(145deg,rgba(52,130,255,.16),rgba(124,92,226,.14));color:var(--primary);font-size:13px;font-weight:780}.mix-picker-item>span:nth-child(2){display:flex;min-width:0;flex-direction:column}.mix-picker-item b{overflow:hidden;font-size:12px;line-height:1.35;text-overflow:ellipsis;white-space:nowrap}.mix-picker-item small{margin-top:3px;color:var(--sub);font-size:9px}.mix-picker-item i{color:var(--primary);font-size:16px;font-style:normal}.mix-picker-empty{padding:40px 16px;text-align:center;color:var(--sub);font-size:12px}body.mix-picker-open{overflow:hidden!important}
+ 
+ /* 切换进度改为小型浮层，避免遮挡底部导航。 */
+-.v14-switch-progress{position:fixed;z-index:10100;left:50%;bottom:calc(98px + env(safe-area-inset-bottom,0px));display:flex;width:min(330px,calc(100vw - 32px));align-items:center;gap:11px;padding:12px 14px;border:1px solid var(--v14-border);border-radius:19px;background:color-mix(in srgb,var(--card) 94%,transparent);color:var(--text);box-shadow:0 12px 30px rgba(20,30,52,.18);opacity:0;pointer-events:none;transform:translate(-50%,12px) scale(.98);transition:opacity .18s ease,transform .18s ease;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}.v14-switch-progress.show{opacity:1;transform:translate(-50%,0) scale(1)}.v14-switch-progress>i{width:25px;height:25px;flex:0 0 25px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--primary);animation:v14spin .8s linear infinite}.v14-switch-progress>span{display:flex;min-width:0;flex-direction:column}.v14-switch-progress b{font-size:13px;line-height:1.25}.v14-switch-progress small{margin-top:3px;overflow:hidden;color:var(--sub);font-size:9px;text-overflow:ellipsis;white-space:nowrap}@keyframes v14spin{to{transform:rotate(360deg)}}body.switching .font-list,body.switching .quick-actions,body.switching .font-mix-panel{pointer-events:none}
++.v14-switch-progress{position:fixed;z-index:10100;left:50%;bottom:calc(98px + env(safe-area-inset-bottom,0px));display:flex;width:min(350px,calc(100vw - 32px));align-items:center;gap:11px;padding:12px 14px;border:1px solid var(--v14-border);border-radius:19px;background:color-mix(in srgb,var(--card) 94%,transparent);color:var(--text);box-shadow:0 12px 30px rgba(20,30,52,.18);opacity:0;pointer-events:none;transform:translate(-50%,12px) scale(.98);transition:opacity .18s ease,transform .18s ease;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}.v14-switch-progress.show{opacity:1;transform:translate(-50%,0) scale(1)}.v14-switch-progress>i{width:25px;height:25px;flex:0 0 25px;border-radius:50%;border:3px solid var(--line);border-top-color:var(--primary);animation:v14spin .8s linear infinite}.v14-switch-progress[data-state="success"]>i{border-color:rgba(48,168,91,.25);border-top-color:#30a85b}.v14-switch-progress[data-state="failed"]>i{border-color:rgba(224,76,76,.25);border-top-color:#e04c4c}.v14-switch-progress>span{display:flex;min-width:0;flex:1;flex-direction:column}.v14-switch-progress b{font-size:13px;line-height:1.25}.v14-switch-progress small{margin-top:3px;overflow:hidden;color:var(--sub);font-size:9px;text-overflow:ellipsis;white-space:nowrap}.v14-switch-progress em{display:block;height:3px;margin-top:7px;border-radius:999px;background:var(--line);overflow:hidden}.v14-switch-progress em u{display:block;width:0;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--primary),#7c5ce2);transition:width .22s ease}.v14-switch-progress>strong{min-width:34px;color:var(--primary);font-size:11px;text-align:right;font-variant-numeric:tabular-nums}.v14-switch-progress[data-state="success"]>strong{color:#30a85b}.v14-switch-progress[data-state="failed"]>strong{color:#e04c4c}@keyframes v14spin{to{transform:rotate(360deg)}}body.switching .font-list,body.switching .quick-actions,body.switching .font-mix-panel{pointer-events:none}
+ 
+ /* 减少大字体库滚动时的重绘与模糊层。 */
+ .luoshu-v14 .font-card{content-visibility:auto;contain:layout paint style;contain-intrinsic-size:118px;box-shadow:0 5px 15px rgba(35,50,82,.045)!important}.luoshu-v14 .current-card,.luoshu-v14 .engine-card,.luoshu-v14 .font-mix-panel{backdrop-filter:none!important;-webkit-backdrop-filter:none!important}.luoshu-v14 .modal-content{will-change:transform}.luoshu-v14 .header-actions{backdrop-filter:blur(11px) saturate(125%)!important;-webkit-backdrop-filter:blur(11px) saturate(125%)!important}
+--- a/webroot/v14.js
++++ b/webroot/v14.js
+@@ -1,4 +1,4 @@
+-// 洛书 v14：稳定切换、精简设置与中文 / 英文 / 数字字体组合。
++// 洛书 v14.1.1：稳定切换、真实进度与中文 / 英文 / 数字字体组合。
+ import { exec } from './kernelsu.js';
+ 
+ const MODULE_DIR = '/data/adb/modules/LuoShu';
+@@ -10,6 +10,8 @@
+ const MIX_LOCAL_KEY = 'luoshu_v14_mix_selection';
+ 
+ const mixState = { enabled: false, cjk: '', latin: '', digit: '', selecting: '', initialized: false };
++let progressShownAt = 0;
++let progressPercent = 0;
+ 
+ function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+ function quote(value) { return "'" + String(value ?? '').replace(/'/g, "'\\''") + "'"; }
+@@ -43,16 +45,30 @@
+     box = document.createElement('div');
+     box.id = 'v14SwitchProgress';
+     box.className = 'v14-switch-progress';
+-    box.innerHTML = '<i></i><span><b>正在准备字体</b><small>请稍候，不需要离开页面</small></span>';
++    box.innerHTML = '<i></i><span><b>正在准备字体</b><small>请稍候，不需要离开页面</small><em><u></u></em></span><strong>0%</strong>';
+     document.body.appendChild(box);
+     return box;
+ }
+ 
+-function setProgress(show, title = '正在准备字体', detail = '请稍候，不需要离开页面') {
++function setProgress(show, title = '正在准备字体', detail = '请稍候，不需要离开页面', percent = null, state = 'running') {
+     const box = ensureProgress();
++    if (show && !box.classList.contains('show')) { progressShownAt = Date.now(); progressPercent = 0; }
++    if (Number.isFinite(Number(percent))) progressPercent = Math.max(progressPercent, Math.min(100, Math.max(0, Number(percent))));
+     box.querySelector('b').textContent = title;
+     box.querySelector('small').textContent = detail;
++    const value = Math.round(progressPercent);
++    const percentEl = box.querySelector('strong');
++    const bar = box.querySelector('u');
++    if (percentEl) percentEl.textContent = `${value}%`;
++    if (bar) bar.style.width = `${value}%`;
++    box.dataset.state = state;
+     box.classList.toggle('show', Boolean(show));
++    if (!show) setTimeout(() => { if (!box.classList.contains('show')) { progressPercent = 0; box.dataset.state = 'idle'; } }, 220);
++}
++
++async function holdProgress(minimumMs = 700) {
++    const remaining = minimumMs - (Date.now() - progressShownAt);
++    if (remaining > 0) await sleep(remaining);
+ }
+ 
+ function fontName(app, id) {
+@@ -230,14 +246,31 @@
+ 
+ async function waitForMixTask(taskId, timeoutMs = 540000) {
+     const started = Date.now();
+-    let interval = 850;
++    let interval = 0;
+     while (Date.now() - started < timeoutMs) {
+-        await sleep(interval);
+-        interval = Math.min(1700, interval + 120);
++        if (interval > 0) await sleep(interval);
++        interval = interval === 0 ? 220 : Math.min(1000, Math.round(interval * 1.25));
+         const result = parseJson(await rawShell(`sh ${quote(MIX_BRIDGE)} status ${quote(taskId)}`));
+         if (result.status !== 'ok' || !result.data) continue;
+-        if (result.data.progress?.message) setProgress(true, result.data.progress.message, `${Number(result.data.progress.percent || 0)}% · 耗时取决于中文字体体积`);
+-        if (result.data.state === 'success' || result.data.state === 'failed') return result.data;
++        const progress = result.data.progress;
++        if (progress?.message) {
++            const percent = Number(progress.percent || 0);
++            const elapsed = Math.max(0, Math.round((Date.now() - started) / 1000));
++            const detail = progress.stage === 'cache' ? '缓存命中 · 正在安全提交' : `${elapsed} 秒 · 请保持页面或稍后重新进入确认`;
++            setProgress(true, progress.message, detail, percent, progress.stage || 'running');
++        } else {
++            setProgress(true, result.data.message || '正在生成完整复合字体', '正在读取后台任务状态', Math.max(progressPercent, 1));
++        }
++        if (result.data.state === 'success') {
++            setProgress(true, result.data.message || '字体组合已准备', '100% · 已验证完成，重启后生效', 100, 'success');
++            await holdProgress(760);
++            return result.data;
++        }
++        if (result.data.state === 'failed') {
++            setProgress(true, result.data.message || '字体组合失败', '任务已安全停止，原字体保持不变', progress?.percent ?? progressPercent, 'failed');
++            await holdProgress(650);
++            return result.data;
++        }
+     }
+     throw new Error('字体组合确认超时，后台任务可能仍在继续');
+ }
+@@ -271,13 +304,16 @@
+     app.isSwitching = true;
+     document.body.classList.add('switching');
+     renderMixPanel(app);
+-    setProgress(true, '正在启动复合字体任务', '后台任务已启动，即将显示真实进度');
++    setProgress(true, '正在启动复合字体任务', '正在创建安全后台任务', 0);
+     try {
+         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+         const result = parseJson(await rawShell(`sh ${quote(MIX_BRIDGE)} start ${quote(mixState.cjk)} ${quote(mixState.latin)} ${quote(mixState.digit)}`));
+         if (result.status !== 'ok') throw new Error(result.message || '无法启动字体组合任务');
+         const taskId = result.data?.task;
+         if (!taskId) throw new Error('组合任务 ID 缺失');
++        if (result.data?.cjk) mixState.cjk = result.data.cjk;
++        if (result.data?.latin) mixState.latin = result.data.latin;
++        if (result.data?.digit) mixState.digit = result.data.digit;
+         localStorage.setItem(MIX_PENDING_KEY, JSON.stringify({ task: taskId, started: Date.now(), cjk: mixState.cjk, latin: mixState.latin, digit: mixState.digit }));
+         const status = await waitForMixTask(taskId);
+         if (status.state !== 'success') throw new Error(status.message || '字体组合失败');
+@@ -301,7 +337,7 @@
+     if (!pending?.task) return;
+     if (Date.now() - Number(pending.started || 0) > 900000) { localStorage.removeItem(MIX_PENDING_KEY); return; }
+     mixState.cjk = pending.cjk || mixState.cjk; mixState.latin = pending.latin || mixState.latin; mixState.digit = pending.digit || mixState.digit;
+-    setProgress(true, '正在确认字体组合', '后台任务已继续执行');
++    setProgress(true, '正在确认字体组合', '正在恢复后台任务进度', 0);
+     try {
+         const status = await waitForMixTask(pending.task, 240000);
+         if (status.state === 'success') finishMix(app, status, true);
+@@ -400,10 +436,10 @@
+ 
+     app.waitForSwitchTask = async function(taskId, timeoutMs = 60000) {
+         const started = Date.now();
+-        let interval = 850;
++        let interval = 0;
+         while (Date.now() - started < timeoutMs) {
+-            await sleep(interval);
+-            interval = Math.min(1600, interval + 120);
++            if (interval > 0) await sleep(interval);
++            interval = interval === 0 ? 280 : Math.min(1100, Math.round(interval * 1.3));
+             const result = parseJson(await rawShell(`sh ${quote(SWITCH_BRIDGE)} status ${quote(taskId)}`));
+             if (result.status !== 'ok' || !result.data) continue;
+             if (result.data.state === 'success' || result.data.state === 'failed') return result.data;
