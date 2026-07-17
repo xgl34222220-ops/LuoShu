@@ -29,6 +29,13 @@ jobs:
         run: |
           set -u
           rm -f materialize-final-result.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          for path in sorted(Path('scripts').glob('materialize_part*.py')):
+              text=path.read_text(encoding='utf-8')
+              text=text.replace('gzip.decompress(base64.b64decode(enc))', "gzip.decompress(base64.b64decode(enc + '=' * (-len(enc) % 4)))")
+              path.write_text(text, encoding='utf-8')
+          PY
           result=success
           for file in scripts/materialize_part1.py scripts/materialize_part2.py scripts/materialize_part3.py scripts/materialize_part4.py; do
             echo "== $file ==" >> materialize-final-result.txt
