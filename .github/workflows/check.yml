@@ -27,6 +27,7 @@ on:
       - CHANGELOG.md
       - RELEASE_NOTES_v14.1.md
       - RELEASE_NOTES_v14.1.1_RC2.md
+      - RELEASE_NOTES_v14.1.1_RC3.md
       - .github/workflows/check.yml
       - .github/workflows/release.yml
 permissions:
@@ -37,6 +38,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - name: RC3 legacy inventory
+        run: sh ./scripts/rc3_audit.sh
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -79,6 +82,7 @@ jobs:
           ! unzip -p "$asset" service.sh | grep -q 'oplus-font refresh'
           ! grep -qE '^system/etc/(fonts.xml|font_fallback.xml)$' /tmp/luoshu-package-list.txt
           ! grep -qE '(^|/)skip_mount(ify)?$' /tmp/luoshu-package-list.txt
+          ! grep -qEi '(^|/)(emoji|__pycache__)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' /tmp/luoshu-package-list.txt
       - uses: actions/upload-artifact@v4
         with:
           name: LuoShu-v14.1-validation
