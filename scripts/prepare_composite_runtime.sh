@@ -54,8 +54,9 @@ C
 "$STRIP" "$R/bin/luoshu-python"
 file "$R/bin/luoshu-python" | grep -q 'ARM aarch64'
 
-python3 -m pip install --disable-pip-version-check --no-cache-dir -q "fonttools==$FONTTOOLS_VERSION"
-FT_DIR=$(python3 - <<'PY'
+python3 -m venv "$WORK/host-venv"
+"$WORK/host-venv/bin/python" -m pip install --disable-pip-version-check --no-cache-dir -q "fonttools==$FONTTOOLS_VERSION"
+FT_DIR=$("$WORK/host-venv/bin/python" - <<'PY'
 import fontTools, os
 print(os.path.dirname(fontTools.__file__))
 PY
@@ -88,8 +89,8 @@ FT_LICENSE=$(find "$ROOT/common/python/lib/python3.14/site-packages" -path '*fon
 test -n "$FT_LICENSE"
 cp "$FT_LICENSE" "$ROOT/licenses/FontTools-LICENSE.txt"
 
-# Validate imports using the exact pruned payload.
-PYTHONPATH="$ROOT/common/python/lib/python3.14:$ROOT/common/python/lib/python3.14/site-packages" \
+# Validate pure-Python imports using the exact pruned payload.
+PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" \
   python3 -S - <<'PY'
 from fontTools.ttLib import TTFont, TTCollection
 from fontTools.pens.ttGlyphPen import TTGlyphPen
