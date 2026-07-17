@@ -30,8 +30,8 @@ rm -f "$MODPATH/remove" "$MODPATH/disable" "$MODPATH/skip_mount" "$MODPATH/skip_
 [ -f "$MODPATH/module.prop" ] || installer_fail "安装包缺少 module.prop"
 
 mkdir -p /sdcard/LuoShu/fonts /sdcard/LuoShu/import /sdcard/LuoShu/reports 2>/dev/null || true
-mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot/fonts" 2>/dev/null || true
-rm -rf "$MODPATH/webroot/emoji" "$MODPATH/system/fonts/.luoshu-emoji-store" 2>/dev/null || true
+mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot/fonts" "$MODPATH/webroot_v141/fonts" 2>/dev/null || true
+rm -rf "$MODPATH/webroot/emoji" "$MODPATH/webroot_v141/emoji" "$MODPATH/system/fonts/.luoshu-emoji-store" 2>/dev/null || true
 rm -f "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" \
       "$MODPATH/config/active_emoji.conf" "$MODPATH/config/emoji_task.conf" "$MODPATH/config/emoji_reboot_required.conf" 2>/dev/null || true
 
@@ -125,8 +125,30 @@ chmod 0755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/post-mou
 find "$MODPATH/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
 chmod 0755 "$MODPATH/system/bin/洛书" "$MODPATH/system/bin/luoshud" 2>/dev/null || true
 find "$MODPATH/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
-find "$MODPATH/webroot" -type f -exec chmod 0644 {} \; 2>/dev/null || true
+find "$MODPATH/webroot" "$MODPATH/webroot_v141" -type f -exec chmod 0644 {} \; 2>/dev/null || true
 chmod 0644 "$MODPATH/module.prop" "$MODPATH/config/active_font.conf" 2>/dev/null || true
+
+# 覆盖升级时，Root 管理器可能仍打开旧活动目录。同步两个前端目录并更新 module.prop，
+# 让重新打开页面立即切换到 webroot_v141，避免旧 HTML 与新 CSS/JS 混用。
+MOD_REAL=$(CDPATH= cd -- "$MODPATH" 2>/dev/null && pwd)
+OLD_REAL=$(CDPATH= cd -- "$OLD_MOD" 2>/dev/null && pwd)
+if [ -d "$OLD_MOD" ] && [ -n "$MOD_REAL" ] && [ -n "$OLD_REAL" ] && [ "$MOD_REAL" != "$OLD_REAL" ]; then
+    for _web in webroot webroot_v141; do
+        [ -d "$MODPATH/$_web" ] || continue
+        _tmp="$OLD_MOD/.${_web}.v141.$$"
+        rm -rf "$_tmp" 2>/dev/null || true
+        cp -a "$MODPATH/$_web" "$_tmp" 2>/dev/null || cp -R "$MODPATH/$_web" "$_tmp" 2>/dev/null || true
+        if [ -d "$_tmp" ]; then
+            rm -rf "$OLD_MOD/$_web" 2>/dev/null || true
+            mv -f "$_tmp" "$OLD_MOD/$_web" 2>/dev/null || true
+        fi
+    done
+    cp -f "$MODPATH/module.prop" "$OLD_MOD/module.prop" 2>/dev/null || true
+    rm -rf "$OLD_MOD/webroot/emoji" "$OLD_MOD/webroot_v141/emoji" 2>/dev/null || true
+    chmod 0644 "$OLD_MOD/module.prop" 2>/dev/null || true
+    find "$OLD_MOD/webroot" "$OLD_MOD/webroot_v141" -type f -exec chmod 0644 {} \; 2>/dev/null || true
+    ui_print "✓ 已刷新活动 WebUI，避免加载旧页面缓存"
+fi
 
 # APatch 在 customize.sh 返回后还要完成模块落盘；这里故意不使用 exit 0。
 [ "$APATCH_ENV" = true ] && printf 'apatch-compatible=1\ninstalled=%s\n' "$(date +%s)" > "$MODPATH/config/install_environment.conf" 2>/dev/null || true
