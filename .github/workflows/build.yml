@@ -18,10 +18,12 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-pip fonts-noto-cjk fonts-dejavu-core >/dev/null
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
       - name: Prepare ARM64 composite runtime
         run: sh ./scripts/prepare_composite_runtime.sh
       - name: Composite smoke tests
+        env:
+          PYTHONPATH: common/python/lib/python3.14/site-packages
         run: |
           CJK="$(find /usr/share/fonts -type f \( -iname '*NotoSansCJK*Regular*.ttc' -o -iname '*NotoSansCJK*Regular*.otf' \) -print -quit)"
           LATIN="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
