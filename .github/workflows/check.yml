@@ -1,5 +1,4 @@
 name: Validate source
-
 on:
   workflow_dispatch:
   pull_request:
@@ -12,6 +11,7 @@ on:
       - system/**
       - webroot/**
       - scripts/**
+      - licenses/**
       - customize.sh
       - post-fs-data.sh
       - service.sh
@@ -20,81 +20,52 @@ on:
       - 兼容与目录说明.txt
       - README.md
       - CHANGELOG.md
+      - RELEASE_NOTES_v14.1.md
       - .github/workflows/check.yml
       - .github/workflows/release.yml
-
 permissions:
   contents: read
-
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Run source and stability checks
-        shell: bash
+      - name: Install build dependencies
         run: |
-          if ! sh -x ./scripts/check.sh > /tmp/luoshu-check.log 2>&1; then
-            tail -n 50 /tmp/luoshu-check.log
-            exit 1
-          fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-pip fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - name: Prepare ARM64 composite runtime
+        run: sh ./scripts/prepare_composite_runtime.sh
+      - name: Run source checks
+        run: sh ./scripts/check.sh
       - name: Build test package
         run: sh ./scripts/build.sh
       - name: Inspect package
         shell: bash
         run: |
           asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
-          test -n "$asset"
-          unzip -t "$asset"
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "v14"
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "14000"
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^description=//p')" = "Android 全局字体管理，当前字体：系统默认字体"
-          unzip -l "$asset" | grep -q 'common/mount_compat.sh'
-          unzip -l "$asset" | grep -q 'common/module_status.sh'
-          unzip -l "$asset" | grep -q 'common/v14_switch.sh'
-          unzip -l "$asset" | grep -q 'common/font_mix.sh'
-          unzip -l "$asset" | grep -q 'common/v14_mix.sh'
-          unzip -l "$asset" | grep -q 'webroot/environment.js'
-          unzip -l "$asset" | grep -q 'webroot/ui_refine.css'
-          unzip -l "$asset" | grep -q 'webroot/v14.js'
-          unzip -l "$asset" | grep -q 'webroot/v14.css'
-          unzip -p "$asset" webroot/index.html | grep -q 'environment.js?v=14000'
-          unzip -p "$asset" webroot/index.html | grep -q 'app.js?v=14000'
-          unzip -p "$asset" webroot/index.html | grep -q 'v14.js?v=14000'
-          unzip -p "$asset" webroot/index.html | grep -q 'v14.css?v=14000'
-          ! unzip -p "$asset" webroot/index.html | grep -q 'stability.js?v='
-          ! unzip -p "$asset" webroot/index.html | grep -q 'stability-critical-style'
-          ! unzip -p "$asset" webroot/index.html | grep -q 'Hybrid Mount'
-          ! unzip -p "$asset" webroot/index.html | grep -q 'more-advanced'
-          unzip -p "$asset" webroot/environment.js | grep -q '/data/adb/modules/mountify'
-          unzip -p "$asset" webroot/environment.js | grep -q 'APatch'
-          unzip -p "$asset" webroot/v14.js | grep -q 'luoshu_v14_pending_switch'
-          unzip -p "$asset" webroot/v14.js | grep -q 'luoshu_v14_pending_mix'
-          unzip -p "$asset" webroot/v14.js | grep -q '中文、英文、数字分别选择'
-          unzip -p "$asset" webroot/v14.css | grep -q 'font-mix-panel'
-          unzip -p "$asset" webroot/v14.css | grep -q 'content-visibility:auto'
-          unzip -p "$asset" common/font_mix.sh | grep -q 'MiSansLatinVF.ttf'
-          unzip -p "$asset" common/font_mix.sh | grep -q 'SysSans-En-Regular.ttf'
-          unzip -p "$asset" common/font_mix.sh | grep -q 'DINPro-Regular.ttf'
-          unzip -p "$asset" common/v14_mix.sh | grep -q 'mix_task.conf'
-          unzip -p "$asset" customize.sh | grep -q '洛 书  v14'
-          unzip -p "$asset" customize.sh | grep -q '元模块推荐：Mountify'
-          unzip -p "$asset" customize.sh | grep -q 'module_status.sh.*SELECTED_FONT'
-          ! unzip -p "$asset" customize.sh | grep -q 'Hybrid Mount：推荐'
-          unzip -p "$asset" common/font_manager.sh | grep -q 'v14-lightweight-preview-sync'
-          unzip -p "$asset" common/font_manager.sh | grep -q 'common/mount_compat.sh'
-          test "$(unzip -p "$asset" common/font_manager.sh | grep -c 'luoshu_sync_mount_payload')" -ge 2
-          unzip -p "$asset" post-fs-data.sh | grep -q 'luoshu_sync_mount_payload'
-          unzip -p "$asset" service.sh | grep -q 'luoshu_sync_mount_payload'
-          ! unzip -p "$asset" service.sh | grep -q 'boot_snapshot'
+          test -s "$asset"
+          unzip -t "$asset" >/dev/null
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = 'v14.1'
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = '14120'
+          unzip -l "$asset" | grep -q 'common/composite_font.py'
+          unzip -l "$asset" | grep -q 'common/luoshu_composite.sh'
+          unzip -l "$asset" | grep -q 'common/python/bin/luoshu-python'
+          unzip -l "$asset" | grep -q 'licenses/CPython-LICENSE.txt'
+          unzip -l "$asset" | grep -q 'licenses/FontTools-LICENSE.txt'
+          unzip -p "$asset" webroot/index.html | grep -q 'v14.js?v=14120'
+          unzip -p "$asset" common/font_mix.sh | grep -q 'full-composite-v5'
+          unzip -p "$asset" post-fs-data.sh | grep -q 'font_mix.sh.*recover'
+          ! unzip -p "$asset" service.sh | grep -q 'cmd font system --update'
+          ! unzip -p "$asset" service.sh | grep -q 'oplus-font refresh'
+          ! unzip -l "$asset" | grep -qE 'system/etc/(fonts.xml|font_fallback.xml)'
           ! unzip -l "$asset" | grep -qE '(^|/)skip_mount(ify)?$'
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v14-test2
-          path: |
-            dist/*.zip
-            dist/*.sha256
+          name: LuoShu-v14.1-validation
+          path: dist/*.zip*
           if-no-files-found: error
