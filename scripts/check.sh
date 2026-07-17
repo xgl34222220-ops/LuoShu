@@ -13,16 +13,17 @@ for file in module.prop update.json customize.sh post-fs-data.sh post-mount.sh s
     webroot/index.html webroot/environment.js webroot/v14.js webroot/v14.css \
     scripts/build.sh scripts/prepare_v14_package.sh scripts/prepare_webui.sh scripts/v141_test.sh; do test -f "$ROOT/$file"; done
 
+test ! -e "$ROOT/webroot/v14_1.js"; test ! -e "$ROOT/webroot/v14_1.css"
 grep -q '^version=v14.1$' "$ROOT/module.prop"; grep -q '^versionCode=14100$' "$ROOT/module.prop"
 grep -q '^webroot=webroot_v141$' "$ROOT/module.prop"
 grep -q '^updateJson=https://raw.githubusercontent.com/' "$ROOT/module.prop"
 grep -q 'APatch.*source' "$ROOT/customize.sh"; ! grep -q '^exit 0$' "$ROOT/customize.sh"; ! grep -q 'touch .*magic' "$ROOT/customize.sh"
-grep -q '默认卸载模块' "$ROOT/customize.sh"
+grep -q '默认卸载模块' "$ROOT/customize.sh"; grep -q 'webroot_v141' "$ROOT/customize.sh"
 grep -q 'font_transaction.sh' "$ROOT/common/font_switch_v141.sh"; grep -q 'font_transaction.sh' "$ROOT/common/font_mix.sh"
 grep -q '原配置已保留\|原字体配置未被破坏' "$ROOT/common/font_switch_v141.sh"
 grep -q 'digitIndependent' "$ROOT/common/device_capabilities.sh"
 ! grep -q 'v14_1.js' "$ROOT/scripts/prepare_webui.sh"; ! grep -q 'v14_1.css' "$ROOT/scripts/prepare_webui.sh"
-! grep -q 'webroot/emoji' "$ROOT/scripts/build.sh"; ! grep -q ' magic ' "$ROOT/scripts/build.sh"
+grep -q 'webroot_v141' "$ROOT/scripts/build.sh"; ! grep -q ' magic ' "$ROOT/scripts/build.sh"
 
 TMP_STAGE=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-stage-check); trap 'rm -rf "$TMP_STAGE"' EXIT HUP INT TERM
 mkdir -p "$TMP_STAGE/common" "$TMP_STAGE/webroot" "$TMP_STAGE/system/bin" "$TMP_STAGE/config"
