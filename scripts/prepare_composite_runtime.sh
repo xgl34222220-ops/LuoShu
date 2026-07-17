@@ -83,8 +83,9 @@ find "$R/lib/python3.14/site-packages" -type f -name '*.so' -delete
 cp -a "$R"/. "$ROOT/common/python/"
 chmod 0755 "$ROOT/common/python/bin/luoshu-python"
 
-PY_LICENSE=$(find "$WORK/runtime" -maxdepth 2 -type f -iname 'LICENSE*' -print -quit)
-[ -z "$PY_LICENSE" ] || cp "$PY_LICENSE" "$ROOT/licenses/CPython-LICENSE.txt"
+PY_LICENSE=$(find "$WORK/runtime" -type f -iname 'LICENSE*' -print -quit)
+test -n "$PY_LICENSE"
+cp "$PY_LICENSE" "$ROOT/licenses/CPython-LICENSE.txt"
 FT_LICENSE=$(find "$ROOT/common/python/lib/python3.14/site-packages" -path '*fonttools*.dist-info*' -type f -iname 'LICENSE*' -print -quit)
 test -n "$FT_LICENSE"
 cp "$FT_LICENSE" "$ROOT/licenses/FontTools-LICENSE.txt"
