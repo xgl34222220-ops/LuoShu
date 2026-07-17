@@ -1,0 +1,9 @@
+LuoShu v14.1 bundles an official CPython Android ARM64 runtime and FontTools.
+
+Bundled runtime changes are packaging-only: development headers, tests, IDLE,
+ensurepip and other tools not used by LuoShu were removed to reduce module size.
+The interpreter and shared libraries are otherwise unmodified.
+
+Licenses:
+- CPython: licenses/CPython-LICENSE.txt
+- FontTools: licenses/FontTools-LICENSE.txt

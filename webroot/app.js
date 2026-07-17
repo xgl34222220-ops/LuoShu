@@ -1,5 +1,5 @@
 // 洛书 WebUI - 支持 Magisk / KernelSU / SukiSU
-// v13.4 Beta2 Hotfix6 — variable/static family weight control + ZIP package import
+// 洛书 v14.1 — 完整复合字体与安全切换
 
 import { exec } from './kernelsu.js';
 import { analyzeFontUrl, formatAnalysisReport } from './font_analyzer.js';
@@ -226,7 +226,7 @@ const App = {
     },
 
     async loadModuleInfo() {
-        let version = 'v13.4 Beta2 Hotfix6';
+        let version = 'v14.1';
         try {
             const prop = await this.execShell(`sed -n 's/^version=//p' ${MODULE_DIR}/module.prop | head -n 1`);
             const raw = (prop || '').trim();
