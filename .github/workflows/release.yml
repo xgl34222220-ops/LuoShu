@@ -1,5 +1,4 @@
 name: Publish release
-
 on:
   workflow_dispatch:
   push:
@@ -12,6 +11,7 @@ on:
       - system/**
       - webroot/**
       - scripts/**
+      - licenses/**
       - customize.sh
       - post-fs-data.sh
       - service.sh
@@ -19,15 +19,17 @@ on:
       - magic
       - 兼容与目录说明.txt
       - CHANGELOG.md
-      - RELEASE_NOTES_v14.md
+      - RELEASE_NOTES_v14.1.md
       - .github/workflows/release.yml
-
 permissions:
   contents: write
-
+concurrency:
+  group: luoshu-release
+  cancel-in-progress: false
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,26 +37,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Build module
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-pip fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - name: Prepare ARM64 composite runtime
+        run: sh ./scripts/prepare_composite_runtime.sh
+      - name: Build and verify module
         run: sh ./scripts/build.sh
       - name: Read release version
         id: version
         shell: bash
         run: |
-          version="$(sed -n 's/^version=//p' module.prop | head -n 1)"
+          version="$(sed -n 's/^version=//p' module.prop | head -n1)"
           tag="$(printf '%s' "$version" | sed 's#[ /]#-#g')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          if [ "$version" = "v14" ] && [ -s RELEASE_NOTES_v14.md ]; then
-            cp RELEASE_NOTES_v14.md release-notes.md
-          else
-            awk -v target="## $version" '
-              $0 == target { found=1; next }
-              found && /^## / { exit }
-              found { print }
-            ' CHANGELOG.md > release-notes.md
-          fi
-          test -s release-notes.md || printf '洛书 %s 自动构建发布。\n' "$version" > release-notes.md
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -64,21 +62,14 @@ jobs:
         run: |
           asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
           checksum="${asset}.sha256"
-          flags=()
-          case "$VERSION" in *Beta*|*RC*) flags+=(--prerelease) ;; esac
-
-          # 同版本修正版必须同步移动标签，否则 Release 的源码包仍会指向旧提交。
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          test -s "$asset"; test -s "$checksum"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git tag -f "$TAG" "$GITHUB_SHA"
           git push origin "refs/tags/$TAG" --force
-
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$asset" "$checksum" --clobber
-            gh release edit "$TAG" --title "洛书 $VERSION" --notes-file release-notes.md "${flags[@]}"
+            gh release edit "$TAG" --title "洛书 $VERSION" --notes-file RELEASE_NOTES_v14.1.md --latest
           else
-            gh release create "$TAG" "$asset" "$checksum" \
-              --title "洛书 $VERSION" \
-              --notes-file release-notes.md \
-              "${flags[@]}"
+            gh release create "$TAG" "$asset" "$checksum" --title "洛书 $VERSION" --notes-file RELEASE_NOTES_v14.1.md --latest
           fi
