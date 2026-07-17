@@ -1,0 +1,11 @@
+== scripts/materialize_part1.py ==
+materialized part1
+== scripts/materialize_part2.py ==
+Traceback (most recent call last):
+  File "/home/runner/work/LuoShu/LuoShu/scripts/materialize_part2.py", line 9, in <module>
+    p=root/rel; p.parent.mkdir(parents=True,exist_ok=True); p.write_bytes(gzip.decompress(base64.b64decode(enc)))
+                                                                                          ^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/base64.py", line 88, in b64decode
+    return binascii.a2b_base64(s, strict_mode=validate)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+binascii.Error: Incorrect padding

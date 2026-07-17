@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v13.4 Beta2 Hotfix6 - 安全卸载
+# LuoShu v14.1 - 安全卸载
 set +e
 MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
@@ -30,5 +30,5 @@ fi
 
 rm -f "$MODDIR/.first_boot" "$MODDIR/.font_switch.lock" 2>/dev/null || true
 mkdir -p "$MODDIR/logs" 2>/dev/null || true
-echo "[$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)] 洛书 v13.4 Beta2 Hotfix6 已卸载" >> "$MODDIR/logs/fontswitch.log" 2>/dev/null || true
+echo "[$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)] 洛书 v14.1 已卸载" >> "$MODDIR/logs/fontswitch.log" 2>/dev/null || true
 exit 0

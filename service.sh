@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # ============================================================
-# 洛书 v14 - 后台服务
-# 功能：静默校正运行权限、刷新字体状态并桥接 GMS / XWeb。
+# 洛书 v14.1 - 后台服务
+# 功能：启动完成后静默校正权限、恢复字重设置并维护日志。
 # ============================================================
 
 MODDIR="${0%/*}"
@@ -25,13 +25,23 @@ MODDIR="${0%/*}"
         echo "[$TIMESTAMP] [SERVICE] [$LEVEL] $MSG" >> "$LOG_FILE" 2>/dev/null || true
     }
 
-    log_service "INFO" "服务脚本开始执行 (v14)"
+    log_service "INFO" "服务脚本开始执行 (v14.1)"
+    if [ -f "$LOG_FILE" ]; then
+        _log_size=$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d '[:space:]')
+        case "$_log_size" in ''|*[!0-9]*) _log_size=0 ;; esac
+        if [ "$_log_size" -gt 1048576 ]; then
+            _trim="$LOG_FILE.trim.$$"
+            tail -n 1200 "$LOG_FILE" > "$_trim" 2>/dev/null && mv -f "$_trim" "$LOG_FILE" 2>/dev/null || true
+        fi
+    fi
+
 
     # 权限只在后台静默校正。WebUI 所有核心脚本同时使用 sh 调用，
     # 即使 Root 管理器解压时丢失可执行位，也不会再要求用户手动修复。
     chmod 0755 "$MODDIR" "$MODDIR/common" "$MODDIR/webroot" 2>/dev/null || true
     chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" 2>/dev/null || true
     find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
+    chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     chmod 0755 "$MODDIR/system/bin/洛书" "$MODDIR/system/bin/luoshud" 2>/dev/null || true
 
     # Root 管理器模块说明只显示当前字体，不再塞入更新日志。
@@ -52,21 +62,8 @@ MODDIR="${0%/*}"
         fi
     fi
 
-    if command -v cmd >/dev/null 2>&1; then
-        cmd font system --update >/dev/null 2>&1 && log_service "INFO" "字体缓存刷新成功" || true
-    fi
-
-    if [ -f /system/bin/oplus-font ]; then
-        oplus-font refresh >/dev/null 2>&1 && log_service "INFO" "ColorOS 字体刷新成功" || true
-    fi
-
-    if [ -f "$MODDIR/common/play_font_bridge" ]; then
-        MODDIR="$MODDIR" sh "$MODDIR/common/play_font_bridge" boot
-    fi
-
-    if [ -f "$MODDIR/common/wechat_xweb_bridge" ]; then
-        MODDIR="$MODDIR" sh "$MODDIR/common/wechat_xweb_bridge" &
-    fi
+    # v14.1 不在开机完成后刷新字体服务或重复桥接。
+    # 新复合字体只在 WebUI 主动生成，完整重启后由系统自然加载。
 
     rm -f "$MODDIR/.first_boot" 2>/dev/null || true
     log_service "INFO" "服务脚本执行完成"
