@@ -1,0 +1,22 @@
+FontTools upstream external notices
+===================================
+
+The official LuoShu build replaces this source-tree notice with the exact
+`LICENSE.external` file shipped by the pinned FontTools distribution.
+
+FontTools' upstream external notice covers components and test font projects
+under licenses including:
+
+- SIL Open Font License 1.1;
+- 3-clause BSD License for Adobe AGL / AGLFN;
+- Apache License 2.0 for cu2qu;
+- MIT License for code derived from PyFilesystem2.
+
+The exact full text is copied automatically by
+`scripts/prepare_composite_runtime.sh` from:
+
+`fonttools-<version>.dist-info/licenses/LICENSE.external`
+
+LuoShu removes runtime tests and does not distribute FontTools test fonts as
+project-provided user fonts. The notice is still preserved in official builds
+for complete upstream attribution.
