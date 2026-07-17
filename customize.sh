@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v14 - 安装脚本
+# LuoShu v14.1 - 安装脚本
 
 MODPATH="${MODPATH:-$3}"
 set +e
@@ -27,7 +27,7 @@ check_hyperos
 
 ui_print ""
 ui_print "╔══════════════════════════════════╗"
-ui_print "║       洛 书  v14       ║"
+ui_print "║          洛书 v14.1           ║"
 ui_print "║      Android 全局字体管理       ║"
 ui_print "╚══════════════════════════════════╝"
 ui_print ""
@@ -80,83 +80,32 @@ scan_fonts_lines() {
     done | awk '!seen[$0]++'
 }
 
-find_family_file() {
-    _want="$1"
-    for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
-              "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
-        [ -f "$_f" ] || continue
-        [ "$(detect_font_family "$(basename "$_f")")" = "$_want" ] && { echo "$_f"; return 0; }
-    done
-    return 1
-}
-
 FONT_LIST_TMP="$MODPATH/config/.install_fonts.$$"
 scan_fonts_lines > "$FONT_LIST_TMP" 2>/dev/null || : > "$FONT_LIST_TMP"
 FONT_COUNT=$(grep -c . "$FONT_LIST_TMP" 2>/dev/null)
 [ -n "$FONT_COUNT" ] || FONT_COUNT=0
 case "$FONT_COUNT" in ''|*[!0-9]*) FONT_COUNT=0 ;; esac
-SELECTED_FONT="default"
-SELECTED_FILE=""
-OLD_MOD="/data/adb/modules/LuoShu"
-OLD_ACTIVE_TEXT=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
-if [ -n "$OLD_ACTIVE_TEXT" ] && [ "$OLD_ACTIVE_TEXT" != "default" ]; then
-    _old_file=$(find_family_file "$OLD_ACTIVE_TEXT")
-    if [ -f "$_old_file" ]; then
-        SELECTED_FONT="$OLD_ACTIVE_TEXT"
-        SELECTED_FILE="$_old_file"
-        ui_print "升级保留当前文字字体：$SELECTED_FONT"
-    fi
-fi
 
-if [ "$FONT_COUNT" -gt 0 ]; then
-    if [ -n "$SELECTED_FILE" ]; then
-        :
-    elif [ "$FONT_COUNT" -gt 1 ] && type volume_key_menu >/dev/null 2>&1; then
-        _opts=""; _first=true
-        while IFS= read -r _fam; do
-            [ -n "$_fam" ] || continue
-            if [ "$_first" = true ]; then _opts="$_fam"; _first=false; else _opts="$_opts|$_fam"; fi
-        done < "$FONT_LIST_TMP"
-        ui_print "发现 $FONT_COUNT 款字体，可用音量键选择（超时默认第一款）"
-        volume_key_menu "$_opts" 5
-        _idx=0
-        while IFS= read -r _fam; do
-            [ -n "$_fam" ] || continue
-            if [ "$_idx" -eq "${VK_SELECTED:-0}" ]; then SELECTED_FONT="$_fam"; break; fi
-            _idx=$((_idx + 1))
-        done < "$FONT_LIST_TMP"
-    else
-        IFS= read -r SELECTED_FONT < "$FONT_LIST_TMP"
-    fi
-    [ -n "$SELECTED_FILE" ] || SELECTED_FILE=$(find_family_file "$SELECTED_FONT")
-    if [ ! -f "$SELECTED_FILE" ]; then
-        ui_print "错误：无法读取选中的字体文件"
-        exit 1
-    fi
-    if type font_validate >/dev/null 2>&1 && ! font_validate "$SELECTED_FILE" text; then
-        ui_print "错误：$FONT_CHECK_ERROR"
-        ui_print "请放入真实的 TTF/OTF/TTC 文件，不能只改扩展名。"
-        exit 1
-    fi
-    [ -n "$FONT_CHECK_WARNING" ] && ui_print "提示：$FONT_CHECK_WARNING"
-    ui_print "应用文字字体：$SELECTED_FONT（$FONT_CHECK_FORMAT）"
-    apply_font_by_rom "$SELECTED_FILE" "$MODPATH/system/fonts" full "$SELECTED_FONT" || {
-        ui_print "错误：ROM 字体映射失败"
-        exit 1
-    }
-    if [ "$IS_COLOROS" = "true" ]; then
-        mkdir -p "$MODPATH/system_ext/fonts" "$MODPATH/product/fonts" 2>/dev/null || true
-        for _n in $(get_all_coloros_names); do
-            _src="$MODPATH/system/fonts/${_n}.ttf"
-            [ -f "$_src" ] || continue
-            [ -e "/system_ext/fonts/${_n}.ttf" ] && link_or_copy_font "$_src" "$MODPATH/system_ext/fonts/${_n}.ttf" 2>/dev/null || true
-            [ -e "/product/fonts/${_n}.ttf" ] && link_or_copy_font "$_src" "$MODPATH/product/fonts/${_n}.ttf" 2>/dev/null || true
-        done
-    fi
-else
-    ui_print "未发现字体文件：模块将以系统默认字体安装。"
-    ui_print "安装后把字体放入公开目录，再从 WebUI 选择即可。"
+OLD_MOD="/data/adb/modules/LuoShu"
+# 停止旧版可能仍在运行的复合任务，避免升级期间继续占用内存。
+if [ -f "$OLD_MOD/config/mix_worker.pid" ]; then
+    _old_worker=$(cat "$OLD_MOD/config/mix_worker.pid" 2>/dev/null | tr -cd '0-9')
+    [ -z "$_old_worker" ] || kill "$_old_worker" 2>/dev/null || true
 fi
+if command -v pkill >/dev/null 2>&1; then
+    pkill -f "$OLD_MOD/common/composite_font.py" 2>/dev/null || true
+fi
+rm -f "$OLD_MOD/.font_switch.lock" "$OLD_MOD/config/mix_worker.pid" "$OLD_MOD/config/composite_progress.json" 2>/dev/null || true
+
+# 正式版刷写阶段只安装引擎，不扫描大字体、不生成复合字体、不继承旧文字负载。
+# 这样刷写速度稳定，任何字体组合都由开机后的 WebUI 主动、事务式完成。
+SELECTED_FONT="default"
+rm -rf "$MODPATH/system/fonts" "$MODPATH/system_ext/fonts" "$MODPATH/product/fonts" 2>/dev/null || true
+mkdir -p "$MODPATH/system/fonts" 2>/dev/null || true
+ui_print "✓ 已安装完整复合字体引擎"
+ui_print "• 检测到字体库：${FONT_COUNT} 款（刷写阶段不处理）"
+ui_print "• 首次启动保持系统默认字体"
+ui_print "• 重启后从 WebUI 选择中文、英文和数字字体"
 
 rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" 2>/dev/null || true
 printf '%s\n' "$SELECTED_FONT" > "$MODPATH/config/active_font.conf"
@@ -198,7 +147,8 @@ chmod 755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/service.s
 chmod 755 "$MODPATH/common/font_manager.sh" "$MODPATH/common/font_check.sh" "$MODPATH/common/font_import.sh" "$MODPATH/common/font_report.sh" \
           "$MODPATH/common/util_functions.sh" "$MODPATH/common/rom_adapters.sh" "$MODPATH/common/volume_key.sh" \
           "$MODPATH/common/play_font_bridge" "$MODPATH/common/wechat_xweb_bridge" 2>/dev/null || true
-chmod 755 "$MODPATH/common/module_status.sh" "$MODPATH/common/v14_switch.sh" "$MODPATH/common/font_mix.sh" "$MODPATH/common/v14_mix.sh" 2>/dev/null || true
+chmod 755 "$MODPATH/common/module_status.sh" "$MODPATH/common/v14_switch.sh" "$MODPATH/common/font_mix.sh" "$MODPATH/common/v14_mix.sh" "$MODPATH/common/luoshu_composite.sh" 2>/dev/null || true
+chmod 755 "$MODPATH/common/python/bin/luoshu-python" 2>/dev/null || true
 chmod 755 "$MODPATH/system/bin/洛书" 2>/dev/null || true
 [ ! -f "$MODPATH/system/bin/luoshud" ] || chmod 755 "$MODPATH/system/bin/luoshud" 2>/dev/null || true
 find "$MODPATH/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
@@ -211,7 +161,7 @@ ui_print ""
 ui_print "╭──────────────────────────────╮"
 ui_print "│          安装完成            │"
 ui_print "╰──────────────────────────────╯"
-ui_print "✓ 字体与 Emoji 配置已准备"
+ui_print "✓ 复合字体引擎已安装；当前保持系统默认字体"
 if [ "$MOUNTIFY_ACTIVE" = "true" ]; then
     ui_print "✓ Mountify 适配已启用"
 else

@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14 - 启动早期初始化
+# 洛书 v14.1 - 启动早期初始化
 set +e
 
 MODDIR="${0%/*}"
@@ -7,7 +7,6 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODDIR/common/rom_adapters.sh" ] && . "$MODDIR/common/rom_adapters.sh"
-[ -f "$MODDIR/common/font_manager.sh" ] && . "$MODDIR/common/font_manager.sh"
 
 type init_module >/dev/null 2>&1 && init_module
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
@@ -18,11 +17,13 @@ chmod 0755 "$MODDIR" "$MODDIR/common" "$MODDIR/webroot" 2>/dev/null || true
 chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" 2>/dev/null || true
 find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
 
-log_message "INFO" "===== post-fs-data v14 开始 ====="
+log_message "INFO" "===== post-fs-data v14.1 开始 ====="
 
 # 永远保留 ROM 自带 fonts.xml、fallback、symbols 与其他语言字体。
 rm -f "$MODDIR/system/etc/fonts.xml" "$MODDIR/system/etc/font_fallback.xml" 2>/dev/null || true
 set_perm_recursive "$MODDIR/system/fonts" 0 0 0755 0644 2>/dev/null || true
+chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
+[ -f "$MODDIR/common/font_mix.sh" ] && MODDIR="$MODDIR" sh "$MODDIR/common/font_mix.sh" recover >/dev/null 2>&1 || true
 
 ACTIVE_TEXT=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
 [ -n "$ACTIVE_TEXT" ] || ACTIVE_TEXT="default"
@@ -38,14 +39,13 @@ if [ "$IS_COLOROS" = "true" ] && [ -d /data/fonts ]; then
         if [ "$ACTIVE_TEXT" = "default" ]; then
             rm -f "$_dest" 2>/dev/null || true
         elif [ -f "$_src" ]; then
-            cp -f "$_src" "$_dest" 2>/dev/null && { chmod 0644 "$_dest" 2>/dev/null || true; _count=$((_count + 1)); }
+            link_or_copy_font "$_src" "$_dest" 2>/dev/null && { chmod 0644 "$_dest" 2>/dev/null || true; _count=$((_count + 1)); }
         fi
     done
     log_message "INFO" "ColorOS /data/fonts 安全同步：$_count 个文字目标"
 fi
 
-type sync_preview_fonts >/dev/null 2>&1 && sync_preview_fonts 2>/dev/null || true
-type sync_emoji_preview_fonts >/dev/null 2>&1 && sync_emoji_preview_fonts 2>/dev/null || true
+# 字体预览索引由 WebUI 按需刷新，启动早期不再扫描或复制大字体。
 
 # 完整重启后解除本次开机切换保护。
 rm -f "$MODDIR/config/text_reboot_required.conf" "$MODDIR/config/emoji_reboot_required.conf" \

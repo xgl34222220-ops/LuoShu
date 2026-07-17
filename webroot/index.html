@@ -7,7 +7,8 @@
     <meta http-equiv="Pragma" content="no-cache">
     <meta http-equiv="Expires" content="0">
     <title>洛书 LuoShu</title>
-    <link rel="stylesheet" href="style.css?v=13426">
+    <link rel="stylesheet" href="style.css?v=14120">
+    <link rel="stylesheet" href="v14.css?v=14120">
 </head>
 <body>
     <!-- 背景装饰 -->
@@ -78,7 +79,7 @@
             </svg>
         </div>
         <div class="engine-copy">
-            <div class="engine-heading"><span>全局字体引擎</span><b id="engineVersion">v13.4 Beta2 Hotfix6</b></div>
+            <div class="engine-heading"><span>全局字体引擎</span><b id="engineVersion">v14.1</b></div>
             <p>替换中文、英文和数字 · 兼容 ColorOS 16 / HyperOS 3</p>
         </div>
         <span class="engine-state" id="engineState"><i></i>运行中</span>
@@ -180,7 +181,7 @@
 
     <!-- 底部信息 -->
     <footer class="footer">
-        <span>洛书 LuoShu <b data-module-version>v13.4 Beta2 Hotfix6</b></span>
+        <span>洛书 LuoShu <b data-module-version>v14.1</b></span>
         <span>·</span>
         <span>惜故里丶</span>
     </footer>
@@ -272,7 +273,7 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7V4h16v3M9 20h6M12 4v16m-4-4h8"/></svg>
                 </div>
                 <div class="more-heading">
-                    <div class="more-title-row"><h2>更多</h2><span data-module-version>v13.4 Beta2 Hotfix6</span></div>
+                    <div class="more-title-row"><h2>更多</h2><span data-module-version>v14.1</span></div>
                     <p>洛书全局字体管理 · 惜故里丶</p>
                 </div>
                 <button class="more-close" id="closeHelpTopBtn" type="button" aria-label="关闭">
@@ -336,16 +337,8 @@
                 </section>
 
                 <div class="help-note"><span class="note-icon">G</span><span><strong>Google Play / GMS</strong><small>洛书会处理系统和 GMS 动态下载的 Google Sans；应用 APK 内置字体不属于系统字体。</small></span></div>
-                <div class="help-note warning"><span class="note-icon">M</span><span><strong>Hybrid Mount</strong><small>推荐把洛书设置为 Magic。不要选择 Ignore，否则 system/fonts 不会被挂载。模块已内置 magic marker。</small></span></div>
-
-                <details class="more-advanced">
-                    <summary><span>高级工具</span><small>命令行与模块说明</small><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg></summary>
-                    <div class="advanced-content">
-                        <p>替换系统中文、英文和数字字体，并适配 GMS 与微信 XWeb 字体环境。</p>
-                        <code>su -c "洛书 切换 字体名"<br>su -c "洛书 回滚"<br>su -c "洛书 列表"<br>su -c "洛书 重启界面"</code>
-                    </div>
-                </details>
-                <div class="more-meta">洛书 <span data-module-version>v13.4 Beta2 Hotfix6</span> · 开源字体切换模块</div>
+                <div class="help-note warning"><span class="note-icon">M</span><span><small>推荐把洛书设置为 Magic。不要选择 Ignore，否则 system/fonts 不会被挂载。模块已内置 magic marker。</small></span></div>
+<div class="more-meta">洛书 <span data-module-version>v14.1</span> · 开源字体切换模块</div>
             </div>
             <div class="help-footer">
                 <button class="btn-confirm" id="closeHelpBtn" type="button">完成</button>
@@ -406,6 +399,8 @@
         </div>
     </div>
 
-    <script type="module" src="app.js?v=13426"></script>
+    <script type="module" src="environment.js?v=14120"></script>
+    <script type="module" src="app.js?v=14120"></script>
+    <script type="module" src="v14.js?v=14120"></script>
 </body>
 </html>

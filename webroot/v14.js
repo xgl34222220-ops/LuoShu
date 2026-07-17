@@ -67,7 +67,7 @@ function mixSummary(app, separator = ' · ') {
 function updateEngineCopy(app) {
     const paragraph = document.querySelector('.engine-copy p');
     if (!paragraph) return;
-    if (app.currentFont === 'mix') paragraph.textContent = '当前字体：组合字体';
+    if (app.currentFont === 'mix') paragraph.textContent = '当前字体：完整复合字体';
     else paragraph.textContent = `当前字体：${fontName(app, app.currentFont)}`;
 }
 
@@ -80,12 +80,12 @@ function renderMixedCurrent(app) {
     const formatEl = document.getElementById('currentFormat');
     const sizeEl = document.getElementById('currentFontSize');
     const weightsEl = document.getElementById('currentWeights');
-    if (nameEl) nameEl.textContent = '组合字体';
+    if (nameEl) nameEl.textContent = '完整复合字体';
     if (descEl) descEl.textContent = mixSummary(app);
     if (mainEl) { mainEl.textContent = '中文 Aa 123'; mainEl.style.fontFamily = ''; }
-    if (fullEl) { fullEl.textContent = '中文、English 与 123 分别映射'; fullEl.style.fontFamily = ''; }
-    if (formatEl) formatEl.textContent = 'MIX';
-    if (sizeEl) sizeEl.textContent = '3 槽';
+    if (fullEl) { fullEl.textContent = '中文、English 与 123 来自同一份完整复合字体'; fullEl.style.fontFamily = ''; }
+    if (formatEl) formatEl.textContent = 'COMPOSITE';
+    if (sizeEl) sizeEl.textContent = '完整字体';
     if (weightsEl) weightsEl.innerHTML = '<span class="weight-tag regular">中文</span><span class="weight-tag medium">英文</span><span class="weight-tag bold">数字</span>';
     return true;
 }
@@ -124,7 +124,7 @@ function injectMixPanel(app) {
         panel.className = 'font-mix-panel';
         panel.innerHTML = `
             <div class="mix-head">
-                <div><span class="mix-kicker">字体组合</span><h2>中文、英文、数字分别选择</h2><p>不再单独管理 Emoji。选择三款字体后，一次生成完整组合。</p></div>
+                <div><span class="mix-kicker">字体组合</span><h2>中文为完整基底，英文与数字替换字形</h2><p>三款字体合成为同一份完整字体；所有系统槽使用相同文件，不依赖缺字回退。</p></div>
                 <span class="mix-status" id="mixStatus">未启用</span>
             </div>
             <div class="mix-slots">
@@ -132,7 +132,7 @@ function injectMixPanel(app) {
                 <button class="mix-slot latin" type="button" data-mix-slot="latin"><span class="mix-slot-mark">Aa</span><span><small>英文字体</small><b id="mixLatinName">请选择</b><em>英文、Google Sans 与拉丁入口</em></span><i>›</i></button>
                 <button class="mix-slot digit" type="button" data-mix-slot="digit"><span class="mix-slot-mark">123</span><span><small>数字字体</small><b id="mixDigitName">请选择</b><em>时钟、DIN 与 ROM 数字入口</em></span><i>›</i></button>
             </div>
-            <div class="mix-foot"><p>数字槽优先映射系统专用数字文件；普通应用没有独立数字入口时会跟随英文字体。</p><button id="applyFontMixBtn" type="button">应用字体组合</button></div>`;
+            <div class="mix-foot"><p>中文覆盖始终来自中文基底；英文与数字只导入对应字形，不会携带源字体中的中文字形。</p><button id="applyFontMixBtn" type="button">应用字体组合</button></div>`;
         document.getElementById('listSection')?.insertAdjacentElement('beforebegin', panel);
         panel.querySelectorAll('[data-mix-slot]').forEach(button => button.addEventListener('click', () => openMixPicker(app, button.dataset.mixSlot)));
         panel.querySelector('#applyFontMixBtn')?.addEventListener('click', () => applyFontMix(app));
@@ -228,7 +228,7 @@ async function loadMixConfig(app) {
     if (app.currentFont === 'mix') { renderMixedCurrent(app); updateEngineCopy(app); }
 }
 
-async function waitForMixTask(taskId, timeoutMs = 70000) {
+async function waitForMixTask(taskId, timeoutMs = 540000) {
     const started = Date.now();
     let interval = 850;
     while (Date.now() - started < timeoutMs) {
@@ -236,6 +236,7 @@ async function waitForMixTask(taskId, timeoutMs = 70000) {
         interval = Math.min(1700, interval + 120);
         const result = parseJson(await rawShell(`sh ${quote(MIX_BRIDGE)} status ${quote(taskId)}`));
         if (result.status !== 'ok' || !result.data) continue;
+        if (result.data.progress?.message) setProgress(true, result.data.progress.message, `${Number(result.data.progress.percent || 0)}% · 耗时取决于中文字体体积`);
         if (result.data.state === 'success' || result.data.state === 'failed') return result.data;
     }
     throw new Error('字体组合确认超时，后台任务可能仍在继续');
@@ -249,7 +250,7 @@ function finishMix(app, status, recovered = false) {
     if (status?.digit) mixState.digit = status.digit;
     saveMixLocal();
     app.applyFontData({ current: 'mix', fonts: app.fonts, stats: app.stats });
-    app.saveLastSwitchResult({ status: 'success', font: '组合字体', time: Date.now(), message: status?.message || '' });
+    app.saveLastSwitchResult({ status: 'success', font: '完整复合字体', time: Date.now(), message: status?.message || '' });
     app.textRebootRequired = true;
     app.pendingFont = null;
     app.updateRebootUI();
@@ -270,7 +271,7 @@ async function applyFontMix(app) {
     app.isSwitching = true;
     document.body.classList.add('switching');
     renderMixPanel(app);
-    setProgress(true, '正在生成字体组合', '正在分别映射中文、英文和数字入口');
+    setProgress(true, '正在启动复合字体任务', '后台任务已启动，即将显示真实进度');
     try {
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         const result = parseJson(await rawShell(`sh ${quote(MIX_BRIDGE)} start ${quote(mixState.cjk)} ${quote(mixState.latin)} ${quote(mixState.digit)}`));
@@ -285,7 +286,7 @@ async function applyFontMix(app) {
         const message = String(error?.message || error);
         setProgress(false);
         if (/超时|后台任务/.test(message) && localStorage.getItem(MIX_PENDING_KEY)) app.showToast('组合仍在后台处理，重新进入 WebUI 会自动确认');
-        else { localStorage.removeItem(MIX_PENDING_KEY); app.saveLastSwitchResult({ status: 'failed', font: '组合字体', time: Date.now(), message }); app.showToast('组合失败: ' + message); }
+        else { localStorage.removeItem(MIX_PENDING_KEY); app.saveLastSwitchResult({ status: 'failed', font: '完整复合字体', time: Date.now(), message }); app.showToast('组合失败: ' + message); }
     } finally {
         app.isSwitching = false;
         document.body.classList.remove('switching');
@@ -298,11 +299,11 @@ async function recoverPendingMix(app) {
     try { pending = JSON.parse(localStorage.getItem(MIX_PENDING_KEY) || 'null'); }
     catch (_) { localStorage.removeItem(MIX_PENDING_KEY); return; }
     if (!pending?.task) return;
-    if (Date.now() - Number(pending.started || 0) > 180000) { localStorage.removeItem(MIX_PENDING_KEY); return; }
+    if (Date.now() - Number(pending.started || 0) > 900000) { localStorage.removeItem(MIX_PENDING_KEY); return; }
     mixState.cjk = pending.cjk || mixState.cjk; mixState.latin = pending.latin || mixState.latin; mixState.digit = pending.digit || mixState.digit;
     setProgress(true, '正在确认字体组合', '后台任务已继续执行');
     try {
-        const status = await waitForMixTask(pending.task, 45000);
+        const status = await waitForMixTask(pending.task, 240000);
         if (status.state === 'success') finishMix(app, status, true);
         else throw new Error(status.message || '字体组合失败');
     } catch (error) {
@@ -335,10 +336,10 @@ async function recoverPending(app) {
     try { pending = JSON.parse(localStorage.getItem(PENDING_KEY) || 'null'); }
     catch (_) { localStorage.removeItem(PENDING_KEY); return; }
     if (!pending?.task || !pending?.fontId) return;
-    if (Date.now() - Number(pending.started || 0) > 180000) { localStorage.removeItem(PENDING_KEY); return; }
+    if (Date.now() - Number(pending.started || 0) > 900000) { localStorage.removeItem(PENDING_KEY); return; }
     setProgress(true, '正在确认上次切换', '字体任务已在后台继续执行');
     try {
-        const status = await app.waitForSwitchTask(pending.task, 45000);
+        const status = await app.waitForSwitchTask(pending.task, 240000);
         if (status.state === 'success') finishSwitch(app, pending.fontId, status, true);
         else throw new Error(status.message || '字体应用失败');
     } catch (error) {
@@ -362,7 +363,7 @@ function simplifyUi(app) {
     if (settings && !document.getElementById('openFontMixBtn')) {
         const row = document.createElement('button');
         row.id = 'openFontMixBtn'; row.type = 'button'; row.className = 'setting-row mix-setting-row';
-        row.innerHTML = '<span class="setting-icon mix"><b>中</b><i>Aa</i></span><span class="setting-copy"><strong>字体组合</strong><small>中文、英文、数字分别选择</small></span><svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>';
+        row.innerHTML = '<span class="setting-icon mix"><b>中</b><i>Aa</i></span><span class="setting-copy"><strong>字体组合</strong><small>中文为完整基底，英文与数字替换字形</small></span><svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>';
         document.getElementById('themeToggleBtn')?.insertAdjacentElement('afterend', row);
         row.addEventListener('click', () => {
             document.getElementById('helpModal')?.classList.remove('show');
