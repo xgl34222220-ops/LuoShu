@@ -40,7 +40,7 @@ jobs:
 
       - name: Apply Alpha7 source patch
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           python3 scripts/patch_alpha7.py
           chmod 0755 common/composite_font.py common/luoshu_composite.sh customize.sh post-fs-data.sh service.sh uninstall.sh common/*.sh
           sh -n common/font_mix.sh
@@ -51,27 +51,26 @@ jobs:
 
       - name: Prepare host tools
         run: |
-          set -euxo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends unzip zip file binutils fonts-noto-cjk fonts-dejavu-core
-          python3 -m pip install --disable-pip-version-check --no-cache-dir "fonttools==${FONTTOOLS_VERSION}"
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends unzip zip file binutils fonts-noto-cjk fonts-dejavu-core >/dev/null
+          python3 -m pip install -q --disable-pip-version-check --no-cache-dir "fonttools==${FONTTOOLS_VERSION}"
 
       - name: Download official CPython Android runtime
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           mkdir -p work/runtime work/download
-          curl --fail --location --retry 4 --retry-delay 3 \
+          curl --silent --show-error --fail --location --retry 4 --retry-delay 3 \
             "https://www.python.org/ftp/python/${PY_VERSION}/${PY_ARCHIVE}" \
             -o "work/download/${PY_ARCHIVE}"
           echo "${PY_SHA256}  work/download/${PY_ARCHIVE}" | sha256sum -c -
           tar -xzf "work/download/${PY_ARCHIVE}" -C work/runtime
           test -d work/runtime/prefix/lib/python3.14
           test -f work/runtime/prefix/lib/libpython3.14.so
-          test -d work/runtime/prefix/include/python3.14
 
       - name: Build ARM64 embedded Python launcher
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           NDK="${ANDROID_NDK_LATEST_HOME:-}"
           if [ -z "$NDK" ] || [ ! -d "$NDK" ]; then
             NDK="$ANDROID_HOME/ndk/$(ls "$ANDROID_HOME/ndk" | sort -V | tail -1)"
@@ -79,36 +78,47 @@ jobs:
           CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
           test -x "$CC"
           cat > work/luoshu_python.c <<'EOF'
-          #define PY_SSIZE_T_CLEAN
-          #include <Python.h>
+          #include <dlfcn.h>
+          #include <stdio.h>
           #include <stdlib.h>
-          static void fail_status(PyStatus s) { if (PyStatus_Exception(s)) Py_ExitStatusException(s); }
+          #include <string.h>
+          typedef int (*py_bytes_main_fn)(int, char **);
           int main(int argc, char **argv) {
-              PyStatus s; PyConfig c; const char *home = getenv("PYTHONHOME");
-              PyConfig_InitPythonConfig(&c);
-              c.parse_argv=1; c.install_signal_handlers=1; c.write_bytecode=0; c.user_site_directory=0;
-              s=PyConfig_SetBytesString(&c,&c.program_name,argv[0]); fail_status(s);
-              s=PyConfig_SetBytesString(&c,&c.executable,argv[0]); fail_status(s);
-              if(home&&*home){s=PyConfig_SetBytesString(&c,&c.home,home);fail_status(s);}
-              s=PyConfig_SetBytesArgv(&c,argc,argv); fail_status(s);
-              s=Py_InitializeFromConfig(&c); PyConfig_Clear(&c); fail_status(s);
-              return Py_RunMain();
+              void *handle = dlopen("libpython3.14.so", RTLD_NOW | RTLD_GLOBAL);
+              if (!handle) {
+                  const char *home = getenv("PYTHONHOME");
+                  if (home && *home) {
+                      char path[4096];
+                      snprintf(path, sizeof(path), "%s/lib/libpython3.14.so", home);
+                      handle = dlopen(path, RTLD_NOW | RTLD_GLOBAL);
+                  }
+              }
+              if (!handle) {
+                  fprintf(stderr, "LuoShu: cannot load libpython3.14.so: %s\n", dlerror());
+                  return 126;
+              }
+              dlerror();
+              py_bytes_main_fn run = (py_bytes_main_fn)dlsym(handle, "Py_BytesMain");
+              const char *error = dlerror();
+              if (error || !run) {
+                  fprintf(stderr, "LuoShu: cannot resolve Py_BytesMain: %s\n", error ? error : "unknown");
+                  return 127;
+              }
+              return run(argc, argv);
           }
           EOF
           "$CC" -O2 -fPIE -pie -Wl,--build-id=none -Wl,-z,relro,-z,now \
-            -Iwork/runtime/prefix/include/python3.14 work/luoshu_python.c \
-            -Lwork/runtime/prefix/lib -lpython3.14 -ldl -lm \
-            -Wl,-rpath,'$ORIGIN/../lib' \
-            -o work/runtime/prefix/bin/luoshu-python
-          "${CC%/aarch64-linux-android26-clang}/llvm-strip" work/runtime/prefix/bin/luoshu-python
+            work/luoshu_python.c -ldl -o work/runtime/prefix/bin/luoshu-python
+          STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          "$STRIP" work/runtime/prefix/bin/luoshu-python
           file work/runtime/prefix/bin/luoshu-python
-          readelf -d work/runtime/prefix/bin/luoshu-python | grep libpython3.14.so
+          readelf -d work/runtime/prefix/bin/luoshu-python | grep 'libdl.so'
 
       - name: Install pure-Python FontTools
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           mkdir -p work/wheels work/runtime/prefix/lib/python3.14/site-packages
-          python3 -m pip download --disable-pip-version-check --no-deps --only-binary=:all: \
+          python3 -m pip download -q --disable-pip-version-check --no-deps --only-binary=:all: \
             "fonttools==${FONTTOOLS_VERSION}" -d work/wheels
           WHEEL="$(find work/wheels -maxdepth 1 -name 'fonttools-*.whl' -print -quit)"
           test -n "$WHEEL"
@@ -119,7 +129,7 @@ jobs:
 
       - name: Assemble and validate module
         run: |
-          set -euxo pipefail
+          set -euo pipefail
           R=work/runtime/prefix
           rm -rf "$R/include" "$R/share" "$R/lib/pkgconfig"
           find "$R" -type d -name '__pycache__' -prune -exec rm -rf {} +
