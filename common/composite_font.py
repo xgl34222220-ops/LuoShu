@@ -10,9 +10,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import gc
 import os
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -24,14 +26,13 @@ from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
-from fontTools.varLib.instancer import instantiateVariableFont
 
 LATIN_CODEPOINTS = (
     set(range(0x0020, 0x0030))
     | set(range(0x003A, 0x007F))
     | set(range(0x00A0, 0x0250))
-    | set(range(0x1D00, 0x1DC0))
-    | set(range(0x1E00, 0x2000))
+    | set(range(0x0300, 0x0370))
+    | set(range(0x1E00, 0x1F00))
     | set(range(0x2000, 0x2070))
     | set(range(0x20A0, 0x20D0))
     | set(range(0x2100, 0x2150))
@@ -48,6 +49,19 @@ LATIN_CODEPOINTS -= DIGIT_CODEPOINTS
 CJK_PROBES = tuple(map(ord, "中文字体系统默认洛书汉字国一的。"))
 LATIN_PROBES = tuple(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
 DIGIT_PROBES = tuple(map(ord, "0123456789"))
+REQUIRED_LATIN = set(LATIN_PROBES)
+REQUIRED_DIGITS = set(DIGIT_PROBES)
+
+
+def _progress(path: str | None, stage: str, message: str, percent: int) -> None:
+    if not path:
+        return
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp = target.with_name(target.name + f".{os.getpid()}.tmp")
+    payload = {"stage": stage, "message": message, "percent": int(percent), "time": int(time.time())}
+    temp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    os.replace(temp, target)
 
 
 class CompositeError(RuntimeError):
@@ -107,29 +121,23 @@ def _pick_face(path: Path, role: str, target_weight: int, requested: int | None)
     return best[1]
 
 
-def _load_font(path: Path, role: str, target_weight: int, requested_face: int | None) -> tuple[TTFont, int]:
+def _load_font(
+    path: Path, role: str, target_weight: int, requested_face: int | None
+) -> tuple[TTFont, int, dict[str, float] | None]:
     face = _pick_face(path, role, target_weight, requested_face)
-    kwargs = {"lazy": False, "recalcTimestamp": False, "recalcBBoxes": True}
+    kwargs = {"lazy": True, "recalcTimestamp": False, "recalcBBoxes": False}
     if face >= 0:
         kwargs["fontNumber"] = face
     font = TTFont(str(path), **kwargs)
+    location: dict[str, float] | None = None
     if "fvar" in font:
         location = {}
         for axis in font["fvar"].axes:
             value = axis.defaultValue
             if axis.axisTag == "wght":
                 value = max(axis.minValue, min(axis.maxValue, target_weight))
-            location[axis.axisTag] = value
-        font = instantiateVariableFont(
-            font,
-            location,
-            inplace=False,
-            optimize=True,
-            updateFontNames=False,
-            downgradeCFF2=True,
-            static=True,
-        )
-    return font, face
+            location[axis.axisTag] = float(value)
+    return font, face, location
 
 
 def _outline_kind(font: TTFont) -> str:
@@ -142,14 +150,13 @@ def _outline_kind(font: TTFont) -> str:
     raise CompositeError("字体不包含受支持的 glyf、CFF 或 CFF2 轮廓")
 
 
-def _draw_decomposed(src: TTFont, glyph_name: str, destination_pen, scale: float) -> None:
-    glyph_set = src.getGlyphSet()
+def _draw_decomposed(glyph_set, glyph_name: str, destination_pen, scale: float) -> None:
     recorder = DecomposingRecordingPen(glyph_set)
     glyph_set[glyph_name].draw(recorder)
     recorder.replay(TransformPen(destination_pen, (scale, 0, 0, scale, 0, 0)))
 
 
-def _replace_glyf(base: TTFont, src: TTFont, base_name: str, src_name: str, scale: float) -> None:
+def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float) -> None:
     pen = TTGlyphPen(None)
     source_kind = _outline_kind(src)
     output_pen = Cu2QuPen(
@@ -157,13 +164,17 @@ def _replace_glyf(base: TTFont, src: TTFont, base_name: str, src_name: str, scal
         max_err=max(0.5, base["head"].unitsPerEm / 2000),
         reverse_direction=source_kind in {"cff", "cff2"},
     )
-    _draw_decomposed(src, src_name, output_pen, scale)
-    base["glyf"][base_name] = pen.glyph()
+    _draw_decomposed(src_glyph_set, src_name, output_pen, scale)
+    glyph = pen.glyph()
+    base["glyf"][base_name] = glyph
+    glyph.recalcBounds(base["glyf"])
+    if not hasattr(glyph, "xMin"):
+        glyph.xMin = glyph.yMin = glyph.xMax = glyph.yMax = 0
     if "gvar" in base:
         base["gvar"].variations.pop(base_name, None)
 
 
-def _replace_cff(base: TTFont, src: TTFont, base_name: str, src_name: str, scale: float, width: int) -> None:
+def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float, width: int) -> None:
     tag = "CFF " if "CFF " in base else "CFF2"
     cff = base[tag].cff
     top = cff.topDictIndex[0]
@@ -172,7 +183,8 @@ def _replace_cff(base: TTFont, src: TTFont, base_name: str, src_name: str, scale
         private = top.FDArray[selector or 0].Private
     else:
         private = top.Private
-    pen = T2CharStringPen(width, None)
+    is_cff2 = tag == "CFF2"
+    pen = T2CharStringPen(None if is_cff2 else width, None, CFF2=is_cff2)
     source_kind = _outline_kind(src)
     output_pen = Qu2CuPen(
         pen,
@@ -180,16 +192,18 @@ def _replace_cff(base: TTFont, src: TTFont, base_name: str, src_name: str, scale
         all_cubic=True,
         reverse_direction=source_kind == "glyf",
     )
-    _draw_decomposed(src, src_name, output_pen, scale)
+    _draw_decomposed(src_glyph_set, src_name, output_pen, scale)
     char_string = pen.getCharString(private=private, globalSubrs=cff.GlobalSubrs)
     if selector is not None:
         char_string.fdSelectIndex = selector
     top.CharStrings[base_name] = char_string
 
 
-def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int]) -> tuple[int, list[int]]:
+def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], location: dict[str, float] | None = None, required: set[int] | None = None) -> tuple[int, list[int]]:
+    required = required or set()
     base_cmap = base.getBestCmap() or {}
     src_cmap = src.getBestCmap() or {}
+    src_glyph_set = src.getGlyphSet(location=location) if location else src.getGlyphSet()
     base_kind = _outline_kind(base)
     base_upem = base["head"].unitsPerEm
     src_upem = src["head"].unitsPerEm
@@ -201,6 +215,8 @@ def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int]) ->
         base_name = base_cmap.get(cp)
         src_name = src_cmap.get(cp)
         if not base_name or not src_name:
+            if cp in required:
+                raise CompositeError(f"源字体或中文基底缺少必要字符 U+{cp:04X}")
             missing.append(cp)
             continue
         key = f"{base_name}:{src_name}"
@@ -209,16 +225,25 @@ def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int]) ->
         already.add(key)
         try:
             advance, lsb = src["hmtx"].metrics[src_name]
-        except KeyError:
+            variable_width = getattr(src_glyph_set[src_name], "width", None)
+            if isinstance(variable_width, (int, float)):
+                advance = variable_width
+        except (KeyError, TypeError):
             missing.append(cp)
             continue
-        advance = int(round(advance * scale))
-        lsb = int(round(lsb * scale))
+        advance = int(round(float(advance) * scale))
+        lsb = int(round(float(lsb) * scale))
+        try:
+            if base_kind == "glyf":
+                _replace_glyf(base, src, src_glyph_set, base_name, src_name, scale)
+            else:
+                _replace_cff(base, src, src_glyph_set, base_name, src_name, scale, advance)
+        except Exception as exc:
+            if cp in required:
+                raise CompositeError(f"必要字符 U+{cp:04X} 的字形转换失败：{exc}") from exc
+            missing.append(cp)
+            continue
         base["hmtx"].metrics[base_name] = (advance, lsb)
-        if base_kind == "glyf":
-            _replace_glyf(base, src, base_name, src_name, scale)
-        else:
-            _replace_cff(base, src, base_name, src_name, scale, advance)
         replaced += 1
     return replaced, missing
 
@@ -270,14 +295,21 @@ def build(args: argparse.Namespace) -> dict[str, object]:
     for path, label in ((cjk_path, "中文"), (latin_path, "英文"), (digit_path, "数字")):
         if not path.is_file() or path.stat().st_size < 12:
             raise CompositeError(f"{label}字体文件不可用：{path}")
-    base, cjk_face = _load_font(cjk_path, "cjk", args.weight, args.cjk_face)
-    latin, latin_face = _load_font(latin_path, "latin", args.weight, args.latin_face)
-    digit, digit_face = _load_font(digit_path, "digit", args.weight, args.digit_face)
+    _progress(args.progress, "load-cjk", "正在读取中文基底", 5)
+    base, cjk_face, _cjk_location = _load_font(cjk_path, "cjk", args.weight, args.cjk_face)
+    latin = digit = None
+    latin_face = digit_face = -1
     try:
         if not all(cp in (base.getBestCmap() or {}) for cp in (ord("中"), ord("A"), ord("1"))):
             raise CompositeError("中文基础字体必须同时包含中文、英文字母和数字，才能安全生成完整复合字体")
-        latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS)
-        digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS)
+        _progress(args.progress, "latin", "正在导入英文字形", 20)
+        latin, latin_face, latin_location = _load_font(latin_path, "latin", args.weight, args.latin_face)
+        latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS, latin_location, REQUIRED_LATIN)
+        latin.close(); latin = None; gc.collect()
+        _progress(args.progress, "digit", "正在导入数字字形", 52)
+        digit, digit_face, digit_location = _load_font(digit_path, "digit", args.weight, args.digit_face)
+        digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, digit_location, REQUIRED_DIGITS)
+        digit.close(); digit = None; gc.collect()
         if latin_replaced < 52:
             raise CompositeError(f"英文替换数量异常（仅 {latin_replaced} 个）")
         if digit_replaced < 10:
@@ -286,14 +318,17 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             if tag in base:
                 del base[tag]
         _set_names(base)
+        _progress(args.progress, "save", "正在写入完整复合字体", 68)
         output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(prefix=output.name + ".", suffix=".tmp", dir=output.parent, delete=False) as temp:
             temp_path = Path(temp.name)
         try:
-            base.save(str(temp_path), reorderTables=True)
+            base.save(str(temp_path), reorderTables=False)
+            _progress(args.progress, "validate", "正在验证复合字体", 90)
             validation = _validate_output(temp_path)
             os.chmod(temp_path, 0o644)
             os.replace(temp_path, output)
+            _progress(args.progress, "done", "完整复合字体已生成", 100)
         finally:
             temp_path.unlink(missing_ok=True)
         return {
@@ -307,7 +342,9 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             "validation": validation,
         }
     finally:
-        base.close(); latin.close(); digit.close()
+        base.close()
+        if latin is not None: latin.close()
+        if digit is not None: digit.close()
 
 
 def parse_args() -> argparse.Namespace:
@@ -320,6 +357,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cjk-face", type=int)
     parser.add_argument("--latin-face", type=int)
     parser.add_argument("--digit-face", type=int)
+    parser.add_argument("--progress")
     return parser.parse_args()
 
 
@@ -328,8 +366,11 @@ def main() -> int:
         result = build(parse_args())
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         return 0
+    except MemoryError:
+        print(json.dumps({"status": "error", "message": "生成复合字体时内存不足，请更换体积较小的中文字体后重试"}, ensure_ascii=False, separators=(",", ":")), file=sys.stderr)
+        return 12
     except Exception as exc:
-        print(json.dumps({"status": "error", "message": str(exc)}, ensure_ascii=False, separators=(",", ":")), file=sys.stderr)
+        print(json.dumps({"status": "error", "message": str(exc) or exc.__class__.__name__}, ensure_ascii=False, separators=(",", ":")), file=sys.stderr)
         return 1
 
 
