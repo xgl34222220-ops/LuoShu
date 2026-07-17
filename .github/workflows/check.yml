@@ -40,7 +40,7 @@ jobs:
         shell: bash
         run: |
           if ! sh -x ./scripts/check.sh > /tmp/luoshu-check.log 2>&1; then
-            tail -n 80 /tmp/luoshu-check.log
+            tail -n 100 /tmp/luoshu-check.log
             exit 1
           fi
       - name: Build test package
@@ -53,36 +53,41 @@ jobs:
           unzip -t "$asset"
           test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "v14.1"
           test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "14100"
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^webroot=//p')" = "webroot_v141"
           test "$(unzip -p "$asset" module.prop | sed -n 's/^description=//p')" = "Android 全局字体管理，当前字体：系统默认字体"
           unzip -l "$asset" | grep -q 'post-mount.sh'
           unzip -l "$asset" | grep -q 'common/font_transaction.sh'
           unzip -l "$asset" | grep -q 'common/font_switch_v141.sh'
           unzip -l "$asset" | grep -q 'common/device_capabilities.sh'
           unzip -l "$asset" | grep -q 'common/font_mix.sh'
-          unzip -l "$asset" | grep -q 'webroot/v14_1.js'
-          unzip -l "$asset" | grep -q 'webroot/v14_1.css'
+          unzip -l "$asset" | grep -q 'webroot/index.html'
+          unzip -l "$asset" | grep -q 'webroot_v141/index.html'
+          ! unzip -l "$asset" | grep -q 'webroot/v14_1.js'
+          ! unzip -l "$asset" | grep -q 'webroot/v14_1.css'
           unzip -p "$asset" webroot/index.html | grep -q 'environment.js?v=14100'
           unzip -p "$asset" webroot/index.html | grep -q 'app.js?v=14100'
           unzip -p "$asset" webroot/index.html | grep -q 'v14.js?v=14100'
-          unzip -p "$asset" webroot/index.html | grep -q 'v14_1.js?v=14100'
-          unzip -p "$asset" webroot/index.html | grep -q 'v14_1.css?v=14100'
-          ! unzip -p "$asset" webroot/index.html | grep -q 'id="emojiSection"'
-          ! unzip -p "$asset" webroot/index.html | grep -q 'moreOpenEmojiFolderBtn'
+          unzip -p "$asset" webroot/index.html | grep -q 'v14.css?v=14100'
+          unzip -p "$asset" webroot_v141/index.html | grep -q 'v14.js?v=14100'
+          unzip -p "$asset" webroot_v141/index.html | grep -q 'v14.css?v=14100'
+          unzip -p "$asset" webroot/index.html | grep -q 'id="emojiSection"'
+          unzip -p "$asset" webroot/v14.css | grep -q '#emojiSection'
+          ! unzip -p "$asset" webroot/index.html | grep -q 'v14_1.js?v='
+          ! unzip -p "$asset" webroot/index.html | grep -q 'v14_1.css?v='
           ! unzip -p "$asset" webroot/index.html | grep -q 'Hybrid Mount'
-          ! unzip -l "$asset" | grep -qE '(^|/)webroot/emoji/'
+          ! unzip -l "$asset" | grep -qE '(^|/)webroot(_v141)?/emoji/'
           ! unzip -l "$asset" | grep -qE '(^|/)(magic|remove|disable|skip_mount|skip_mountify)$'
           ! unzip -p "$asset" customize.sh | grep -q '^exit 0$'
           unzip -p "$asset" customize.sh | grep -q 'APatch.*source'
           unzip -p "$asset" customize.sh | grep -q '默认卸载模块'
+          unzip -p "$asset" customize.sh | grep -q 'webroot_v141'
           unzip -p "$asset" post-fs-data.sh | grep -q '阻塞阶段'
           unzip -p "$asset" common/font_switch_v141.sh | grep -q 'font_transaction.sh'
           unzip -p "$asset" common/font_mix.sh | grep -q 'font_transaction.sh'
-          unzip -p "$asset" common/device_capabilities.sh | grep -q 'digitIndependent'
-          unzip -p "$asset" webroot/v14_1.js | grep -q '默认卸载模块'
           ! unzip -p "$asset" common/util_functions.sh | grep -q 'mkdir -p.*USER_EMOJI_DIR'
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v14.1-test
+          name: LuoShu-v14.1-test2
           path: |
             dist/*.zip
             dist/*.sha256
