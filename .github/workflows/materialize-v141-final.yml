@@ -35,7 +35,9 @@ jobs:
             scripts/materialize_font_mix.py \
             scripts/materialize_composite_py.py \
             scripts/materialize_composite_sh.py \
-            scripts/materialize_part3.py \
+            scripts/materialize_v14_js.py \
+            scripts/materialize_index.py \
+            scripts/materialize_environment.py \
             scripts/materialize_part4.py; do
             echo "== $file ==" >> materialize-final-result.txt
             if ! python3 "$file" >> materialize-final-result.txt 2>&1; then
