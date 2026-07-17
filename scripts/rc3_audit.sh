@@ -14,12 +14,20 @@ if [ -n "$HITS" ]; then
   exit 86
 fi
 
+# WebUI 不再保留隐藏页面、死样式、兼容桩或相关文案。
+UI_HITS=$(grep -RInEi --exclude='*.map' 'emoji|stability' "$ROOT/webroot" 2>/dev/null || true)
+if [ -n "$UI_HITS" ]; then
+  echo '=== RC3 WebUI legacy inventory ===' >&2
+  printf '%s\n' "$UI_HITS" >&2
+  exit 85
+fi
+
 for FILE in common/stability.sh webroot/stability.js webroot/stability.css common/fonts_xml_template.sh common/play_font_bridge.sh common/wechat_xweb_bridge.sh config/active_emoji.conf; do
   [ ! -e "$ROOT/$FILE" ] || { echo "obsolete file still exists: $FILE" >&2; exit 87; }
 done
 
-# 允许导入过滤器识别彩色/图标字体，但禁止模块内出现可挂载的 Emoji 负载。
+# 允许后端导入过滤器识别彩色/图标字体，但禁止模块内出现可挂载的彩色表情负载。
 find "$ROOT/system" -type f -iname '*emoji*' -print -quit 2>/dev/null | grep -q . && {
-  echo 'Emoji payload exists under system/' >&2
+  echo 'colored emoji payload exists under system/' >&2
   exit 88
 } || true
