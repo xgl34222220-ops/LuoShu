@@ -37,7 +37,6 @@ grep -q 'v14.js?v=14120' "$ROOT/webroot/index.html"
 grep -q 'app.js?v=14120' "$ROOT/webroot/index.html"
 grep -q "UI_VERSION = '14120'" "$ROOT/webroot/environment.js"
 
-# Project license and third-party attribution must be complete and distinct.
 test "$(sha256sum "$ROOT/LICENSE" | awk '{print $1}')" = '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986'
 grep -q 'GNU GENERAL PUBLIC LICENSE' "$ROOT/LICENSE"
 grep -q 'Version 3, 29 June 2007' "$ROOT/LICENSE"
@@ -57,6 +56,8 @@ if cmp -s "$ROOT/licenses/CPython-LICENSE.txt" "$ROOT/licenses/FontTools-LICENSE
 fi
 ! grep -q '/sdcard/LuoShu/emoji/' "$ROOT/README.md" "$ROOT/README.txt" "$ROOT/module.prop" "$ROOT/config/version_notes.conf"
 
+sh "$ROOT/scripts/rc3_audit.sh"
+
 test -x "$ROOT/common/python/bin/luoshu-python"
 test -f "$ROOT/common/python/lib/libpython3.14.so"
 test -f "$ROOT/common/python/lib/python3.14/site-packages/fontTools/ttLib/__init__.py"
@@ -69,4 +70,4 @@ from fontTools.pens.boundsPen import BoundsPen
 print('Bundled FontTools import OK')
 PY
 
-echo 'LuoShu v14.1 GPL-3.0-only source checks passed.'
+echo 'LuoShu v14.1.1 RC3 clean-baseline checks passed.'
