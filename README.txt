@@ -24,4 +24,4 @@ Android 全局文字字体复合与安全切换模块。
 Magisk、KernelSU、SukiSU Ultra、APatch、Mountify。
 
 许可证：
-洛书自身源码采用 MIT License。CPython、FontTools 等第三方组件适用各自许可证，详见 licenses/ 与 THIRD_PARTY_NOTICES.md。用户自行提供的字体不受洛书许可证授权。
+洛书当前源码采用 GPL-3.0-only。分发修改版本时必须遵守 GPLv3 的对应源代码、同许可证和声明保留要求。CPython、FontTools 等第三方组件适用各自许可证，详见 licenses/ 与 THIRD_PARTY_NOTICES.md。历史版本继续适用其发布时附带的许可证；用户自行提供的字体不受洛书许可证授权。

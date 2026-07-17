@@ -1,6 +1,6 @@
 # 第三方组件与许可证
 
-洛书自身源码采用 MIT License，详见根目录 [`LICENSE`](LICENSE)。
+洛书当前源码采用 GPL-3.0-only，详见根目录 [`LICENSE`](LICENSE)。历史 MIT 发行版本的许可证文本保存在 [`licenses/LuoShu-MIT-HISTORICAL.txt`](licenses/LuoShu-MIT-HISTORICAL.txt)。
 
 发布包会包含或在构建过程中引入以下第三方组件。它们不因被洛书打包而改变原许可证。
 
@@ -24,7 +24,7 @@
 
 ## 用户字体与第三方模块
 
-洛书不会在仓库或发布包中附带商业字体。以下内容不受洛书 MIT License 授权：
+洛书不会在仓库或发布包中附带商业字体。以下内容不受洛书 GPL-3.0-only 授权：
 
 - 用户自行放入 `/sdcard/LuoShu/fonts/` 的字体；
 - 从其他模块 ZIP 中读取的字体；

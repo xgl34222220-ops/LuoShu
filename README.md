@@ -4,7 +4,7 @@
 
 [![Release](https://img.shields.io/github/v/release/xgl34222220-ops/LuoShu?display_name=tag&sort=semver)](https://github.com/xgl34222220-ops/LuoShu/releases)
 [![Build](https://github.com/xgl34222220-ops/LuoShu/actions/workflows/build.yml/badge.svg)](https://github.com/xgl34222220-ops/LuoShu/actions/workflows/build.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 洛书以用户选择的中文字体作为完整基底，将英文字体和数字字体中的对应字形与度量写入同一份复合字体，再映射到系统文字字体槽。这样既保留完整中文覆盖，也避免英文或数字源字体自带中文时抢占中文显示。
 
@@ -91,7 +91,7 @@
 - 文件扩展名必须与真实字体格式一致；
 - 不要上传或分发无授权字体。
 
-洛书不会随仓库或发布包附带商业字体。用户自行放入的字体文件及生成结果不受洛书 MIT License 授权，其使用和分发责任由字体权利人及使用者承担。
+洛书不会随仓库或发布包附带商业字体。用户自行放入的字体文件及生成结果不受洛书 GPL-3.0-only 授权，其使用和分发责任由字体权利人及使用者承担。
 
 ## 目录
 
@@ -108,7 +108,7 @@
 common/         # 字体检查、复合、事务与 ROM 适配
 webroot/        # WebUI
 scripts/        # 校验、构建和运行时准备
-licenses/       # 第三方许可证
+licenses/       # 第三方及历史许可证
 config/         # 运行状态与任务记录
 ```
 
@@ -161,7 +161,11 @@ sh ./scripts/build.sh
 
 ## 许可证
 
-洛书自身源码采用 [MIT License](LICENSE)。
+洛书自身源码自本次许可证变更起采用 **GNU General Public License v3.0 only**（SPDX：`GPL-3.0-only`），完整条款见 [LICENSE](LICENSE)。
+
+分发洛书或其修改版本时，需要按照 GPLv3 提供对应源代码、保留版权与许可证声明，并将基于洛书的整体修改版本继续置于 GPLv3 下。私人使用和不对外分发的修改不要求公开。
+
+历史标签和发行包继续适用它们发布时附带的许可证；本次变更不会撤回已经授予的 MIT 权利。历史 MIT 文本保存在 [`licenses/LuoShu-MIT-HISTORICAL.txt`](licenses/LuoShu-MIT-HISTORICAL.txt)。
 
 内置或构建时引入的第三方组件继续适用各自许可证，详情见：
 
@@ -170,4 +174,4 @@ sh ./scripts/build.sh
 - [`licenses/FontTools-LICENSE.txt`](licenses/FontTools-LICENSE.txt)
 - [`licenses/FontTools-LICENSE.external.txt`](licenses/FontTools-LICENSE.external.txt)
 
-MIT License 不覆盖用户自行提供的字体、第三方模块、ROM 文件或其衍生物。
+GPL-3.0-only 不覆盖用户自行提供的字体、第三方模块、ROM 文件、商标或其中由第三方权利人拥有的字形数据。

@@ -9,7 +9,7 @@ ZIP="$OUT/LuoShu-${VERSION}.zip"
 sh "$ROOT/scripts/check.sh"
 rm -rf "$STAGE"
 mkdir -p "$STAGE" "$OUT"
-for path in common config fonts system webroot licenses customize.sh module.prop post-fs-data.sh service.sh uninstall.sh magic 兼容与目录说明.txt; do
+for path in common config fonts system webroot licenses LICENSE NOTICE.md THIRD_PARTY_NOTICES.md README.md README.txt CHANGELOG.md customize.sh module.prop post-fs-data.sh service.sh uninstall.sh magic 兼容与目录说明.txt; do
   [ ! -e "$ROOT/$path" ] || cp -a "$ROOT/$path" "$STAGE/"
 done
 find "$STAGE" -type f -name '*.log' -delete
