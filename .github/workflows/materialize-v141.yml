@@ -28,13 +28,21 @@ jobs:
         run: |
           set -u
           rm -f materialize-result.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          path=Path('scripts/patch_v141.py')
+          text=path.read_text(encoding='utf-8')
+          text=text.replace('raw = base64.b64decode(PAYLOAD)', "_encoded=''.join(PAYLOAD.split())\n_encoded += '=' * (-len(_encoded) % 4)\nraw = base64.b64decode(_encoded)")
+          path.write_text(text, encoding='utf-8')
+          PY
           if python3 scripts/patch_v141.py > /tmp/materialize.log 2>&1; then
             chmod 0755 customize.sh post-fs-data.sh service.sh uninstall.sh common/*.sh common/*.py scripts/*.sh
-            rm -f scripts/patch_v141.py .github/workflows/materialize-v141.yml
-            printf 'success\n' > materialize-result.txt
+            rm -f scripts/patch_v141.py .github/workflows/materialize-v141.yml materialize-result.txt
+            result=success
           else
             rc=$?
             { printf 'failed rc=%s\n' "$rc"; cat /tmp/materialize.log; } > materialize-result.txt
+            result=failed
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -44,4 +52,4 @@ jobs:
             git commit -m 'release: materialize audited LuoShu v14.1 source'
             git push origin HEAD:release/v14.1
           fi
-          grep -q '^success$' materialize-result.txt
+          test "$result" = success
