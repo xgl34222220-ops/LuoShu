@@ -13,19 +13,40 @@ for path in common config fonts system webroot licenses LICENSE NOTICE.md THIRD_
   [ ! -e "$ROOT/$path" ] || cp -a "$ROOT/$path" "$STAGE/"
 done
 find "$STAGE" -type f -name '*.log' -delete
-rm -rf "$STAGE/webroot/fonts" "$STAGE/webroot/emoji" "$STAGE/logs" "$STAGE/backup" "$STAGE/config/recovery"
-mkdir -p "$STAGE/webroot/fonts" "$STAGE/webroot/emoji"
+find "$STAGE" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
+find "$STAGE" -type f -name '*.pyc' -delete
+rm -rf "$STAGE/webroot/fonts" "$STAGE/logs" "$STAGE/backup" "$STAGE/config/recovery"
+mkdir -p "$STAGE/webroot/fonts"
+rm -rf "$STAGE/webroot/emoji"
 rm -f "$STAGE/config/webui_font_list.json" "$STAGE/config/webui_font_list.key" \
   "$STAGE/config/recent_fonts.conf" "$STAGE/config/previous_font.conf" \
   "$STAGE/config/switch_task.conf" "$STAGE/config/mix_task.conf" \
-  "$STAGE/config/font_mix.conf" "$STAGE/config/emoji_task.conf" \
+  "$STAGE/config/font_mix.conf" "$STAGE/config/active_emoji.conf" \
+  "$STAGE/config/emoji_task.conf" "$STAGE/config/emoji_reboot_required.conf" \
   "$STAGE/config/font_weight_reboot_required.conf" "$STAGE/config/mount_compat.conf"
+rm -f "$STAGE/system/fonts/NotoColorEmoji.ttf" "$STAGE/system/fonts/NotoColorEmojiLegacy.ttf"
+rm -f "$STAGE/common/stability.sh" "$STAGE/webroot/stability.js" "$STAGE/webroot/stability.css" \
+  "$STAGE/common/fonts_xml_template.sh" "$STAGE/common/play_font_bridge.sh" "$STAGE/common/wechat_xweb_bridge.sh"
 find "$STAGE/common" -maxdepth 1 -type f -exec chmod 0755 {} +
 chmod 0755 "$STAGE"/*.sh "$STAGE/system/bin/luoshud" "$STAGE/common/python/bin/luoshu-python"
 find "$STAGE/webroot" -type f -exec chmod 0644 {} +
 find "$STAGE/system/fonts" -type f -exec chmod 0644 {} + 2>/dev/null || true
+
+# 成品目录门禁：旧功能即使被其他构建步骤重新带回，也禁止生成 ZIP。
+for forbidden in \
+  webroot/emoji config/active_emoji.conf config/emoji_task.conf config/emoji_reboot_required.conf \
+  system/fonts/NotoColorEmoji.ttf system/fonts/NotoColorEmojiLegacy.ttf \
+  common/stability.sh webroot/stability.js webroot/stability.css common/fonts_xml_template.sh \
+  common/play_font_bridge.sh common/wechat_xweb_bridge.sh; do
+  [ ! -e "$STAGE/$forbidden" ] || { echo "forbidden payload: $forbidden" >&2; exit 88; }
+done
+
 rm -f "$ZIP" "$ZIP.sha256"
 (cd "$STAGE" && zip -9 -r -q "$ZIP" .)
 sha256sum "$ZIP" > "$ZIP.sha256"
 unzip -t "$ZIP" >/dev/null
+unzip -Z1 "$ZIP" | grep -Eq '(^|/)(__pycache__|emoji)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' && {
+  echo 'forbidden legacy path found in final ZIP' >&2
+  exit 89
+} || true
 printf 'Built: %s\n' "$ZIP"
