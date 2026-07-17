@@ -36,6 +36,12 @@ MODDIR="${0%/*}"
     command -v cmd >/dev/null 2>&1 && cmd font system --update >/dev/null 2>&1 || true
     [ ! -f /system/bin/oplus-font ] || oplus-font refresh >/dev/null 2>&1 || true
 
+    # 元模块镜像必须在系统启动完成后同步，不能塞进 APatch 的阻塞阶段。
+    if [ -f "$MODDIR/common/mount_compat.sh" ]; then
+        MODULE_DIR="$MODDIR" . "$MODDIR/common/mount_compat.sh"
+        luoshu_sync_mount_payload 2>/dev/null || true
+    fi
+
     # 开机完成后再做字体预览同步，避免 APatch 阻塞阶段访问共享存储。
     [ ! -f "$MODDIR/common/font_manager.sh" ] || MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list refresh >/dev/null 2>&1 || true
     [ ! -f "$MODDIR/common/play_font_bridge" ] || MODDIR="$MODDIR" sh "$MODDIR/common/play_font_bridge" boot >/dev/null 2>&1 || true
