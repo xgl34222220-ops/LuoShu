@@ -24,6 +24,22 @@ jobs:
         with:
           ref: hotfix/v14.1.1
           fetch-depth: 0
+      - name: Diagnose patch context
+        shell: bash
+        run: |
+          set +e
+          : > materialize-v1411-diagnostic.txt
+          for patch in scripts/v1411-part1.patch scripts/v1411-part2.patch; do
+            echo "===== $patch =====" >> materialize-v1411-diagnostic.txt
+            git apply --check --verbose "$patch" >> materialize-v1411-diagnostic.txt 2>&1
+            echo "rc=$?" >> materialize-v1411-diagnostic.txt
+          done
+          cat materialize-v1411-diagnostic.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: materialize-v1411-diagnostic
+          path: materialize-v1411-diagnostic.txt
+          if-no-files-found: error
       - name: Apply audited hotfix
         shell: bash
         run: |
@@ -64,7 +80,7 @@ jobs:
           tmp="$(mktemp -d)"
           cp webroot/v14.js "$tmp/v14.mjs"
           node --check "$tmp/v14.mjs"
-          rm -rf "$tmp" common/__pycache__
+          rm -rf "$tmp" common/__pycache__ materialize-v1411-diagnostic.txt
           chmod 0755 common/font_mix.sh common/v14_mix.sh common/composite_font.py
           rm -f scripts/v1411-part1.patch scripts/v1411-part2.patch .github/workflows/materialize-v1411.yml
           git config user.name 'github-actions[bot]'
