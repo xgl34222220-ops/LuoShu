@@ -1,4 +1,4 @@
-name: Materialize RC3 deep cleanup
+name: Materialize RC3 shell cleanup
 on:
   pull_request_target:
     types: [reopened]
@@ -14,32 +14,57 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
-          path: helper
-      - uses: actions/checkout@v4
-        with:
           ref: hotfix/v14.1.1-rc3-clean-baseline
           path: target
           fetch-depth: 0
-      - name: Apply trusted deep-clean patch
-        run: python3 helper/scripts/rc3_deep_clean.py target
-      - name: Validate WebUI
+      - name: Remove confirmed dead shell code
         working-directory: target
         run: |
-          cp webroot/app.js /tmp/app.mjs
-          cp webroot/font_analyzer.js /tmp/font_analyzer.mjs
-          cp webroot/v14.js /tmp/v14.mjs
-          node --check /tmp/app.mjs
-          node --check /tmp/font_analyzer.mjs
-          node --check /tmp/v14.mjs
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('common/font_manager.sh')
+          text = path.read_text(encoding='utf-8')
+
+          unused_var = 'FONT_LIST_CONF="$CONFIG_DIR/font_list.conf"\n'
+          if unused_var not in text:
+              raise SystemExit('FONT_LIST_CONF marker not found')
+          text = text.replace(unused_var, '', 1)
+
+          start_marker = '# 获取所有字体的统计信息\nget_font_stats() {'
+          end_marker = '# 扫描用户字体族（基础版，去重）'
+          start = text.find(start_marker)
+          end = text.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit('get_font_stats block markers not found')
+          text = text[:start] + text[end:]
+
+          old_banner = '║        洛 书  v13.4 Beta2 Hotfix6                   ║'
+          new_banner = '║             洛 书  v14.1.1 RC3                      ║'
+          if old_banner not in text:
+              raise SystemExit('legacy CLI banner not found')
+          text = text.replace(old_banner, new_banner, 1)
+
+          if 'get_font_stats()' in text or 'FONT_LIST_CONF=' in text or 'v13.4 Beta2 Hotfix6' in text:
+              raise SystemExit('legacy shell residue remains')
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Validate shell cleanup
+        working-directory: target
+        run: |
+          sh -n common/font_manager.sh
           sh scripts/rc3_audit.sh
+          ! grep -q 'get_font_stats()' common/font_manager.sh
+          ! grep -q 'FONT_LIST_CONF=' common/font_manager.sh
+          ! grep -q 'v13.4 Beta2 Hotfix6' common/font_manager.sh
+          grep -q 'v14.1.1 RC3' common/font_manager.sh
           git diff --check
       - name: Commit and push
         working-directory: target
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add webroot/app.js webroot/v14.css webroot/style.css webroot/ui_refine.css webroot/font_analyzer.js
+          git add common/font_manager.sh
           git diff --cached --quiet && exit 0
-          git commit -m 'cleanup: remove dead Emoji and stability WebUI assets'
+          git commit -m 'cleanup: remove unused font manager legacy code'
           git push origin HEAD:hotfix/v14.1.1-rc3-clean-baseline
