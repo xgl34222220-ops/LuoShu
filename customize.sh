@@ -1,11 +1,13 @@
 #!/system/bin/sh
-# 洛书 v14.1 - Magisk / KernelSU / SukiSU Ultra / APatch 安装脚本
+# 洛书 v14.1 Test3 - Magisk / KernelSU / SukiSU Ultra / APatch 安装脚本
 # 注意：APatch 会 source 本文件，因此成功路径不能使用 exit。
 set +e
 
 MODPATH="${MODPATH:-$3}"
 [ -n "$MODPATH" ] || MODPATH="/data/adb/modules_update/LuoShu"
 MODULE_DIR="$MODPATH"
+WEBROOT_NAME=$(sed -n 's/^webroot=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
+[ -n "$WEBROOT_NAME" ] || WEBROOT_NAME=webroot_v14103
 
 for _lib in util_functions.sh font_check.sh rom_adapters.sh volume_key.sh mount_compat.sh; do
     [ -f "$MODPATH/common/$_lib" ] && . "$MODPATH/common/$_lib"
@@ -14,7 +16,6 @@ if ! type detect_font_family >/dev/null 2>&1; then detect_font_family(){ _n="${1
 if ! type check_coloros >/dev/null 2>&1; then check_coloros(){ IS_COLOROS=false; }; fi
 if ! type check_hyperos >/dev/null 2>&1; then check_hyperos(){ IS_HYPEROS=false; }; fi
 
-# 失败路径允许终止安装器；只有成功路径必须自然返回给 APatch。
 installer_fail(){
     ui_print "! $1"
     if type abort >/dev/null 2>&1; then abort "$1"; else exit 1; fi
@@ -25,13 +26,12 @@ case "${APATCH:-false}:${KERNELPATCH:-false}" in true:*|*:true) APATCH_ENV=true 
 command -v apd >/dev/null 2>&1 && APATCH_ENV=true
 if [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then APATCH_ENV=true; fi
 
-# 删除会导致模块被跳过、禁用或在下次重启被移除的遗留标记。
 rm -f "$MODPATH/remove" "$MODPATH/disable" "$MODPATH/skip_mount" "$MODPATH/skip_mountify" "$MODPATH/magic" 2>/dev/null || true
 [ -f "$MODPATH/module.prop" ] || installer_fail "安装包缺少 module.prop"
 
 mkdir -p /sdcard/LuoShu/fonts /sdcard/LuoShu/import /sdcard/LuoShu/reports 2>/dev/null || true
-mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot/fonts" "$MODPATH/webroot_v141/fonts" 2>/dev/null || true
-rm -rf "$MODPATH/webroot/emoji" "$MODPATH/webroot_v141/emoji" "$MODPATH/system/fonts/.luoshu-emoji-store" 2>/dev/null || true
+mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/$WEBROOT_NAME/fonts" 2>/dev/null || true
+rm -rf "$MODPATH/webroot" "$MODPATH/webroot_v141" "$MODPATH/$WEBROOT_NAME/emoji" "$MODPATH/system/fonts/.luoshu-emoji-store" 2>/dev/null || true
 rm -f "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" \
       "$MODPATH/config/active_emoji.conf" "$MODPATH/config/emoji_task.conf" "$MODPATH/config/emoji_reboot_required.conf" 2>/dev/null || true
 
@@ -47,7 +47,7 @@ fi
 
 ui_print ""
 ui_print "╔══════════════════════════════════╗"
-ui_print "║          洛 书  v14.1            ║"
+ui_print "║       洛 书  v14.1 Test3         ║"
 ui_print "║       Android 全局字体管理       ║"
 ui_print "╚══════════════════════════════════╝"
 ui_print ""
@@ -65,7 +65,6 @@ OLD_MOD="/data/adb/modules/LuoShu"
 OLD_ACTIVE=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
 SELECTED_FONT="default"
 
-# 升级时优先保留已经验证可用的当前配置。组合字体直接保留旧映射，避免重新识别失败。
 if [ "$OLD_ACTIVE" = mix ] && [ -s "$OLD_MOD/config/font_mix.conf" ] && [ -d "$OLD_MOD/system/fonts" ]; then
     rm -rf "$MODPATH/system/fonts" 2>/dev/null || true
     mkdir -p "$MODPATH/system" 2>/dev/null || true
@@ -106,7 +105,6 @@ else
     printf '%s\n' "$SELECTED_FONT" > "$MODPATH/config/active_font.conf"
 fi
 
-# ColorOS 的额外分区目录只复制真实存在的目标。
 if [ "$IS_COLOROS" = true ]; then
     mkdir -p "$MODPATH/system_ext/fonts" "$MODPATH/product/fonts" 2>/dev/null || true
     for _src in "$MODPATH/system/fonts"/*; do
@@ -125,39 +123,36 @@ chmod 0755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/post-mou
 find "$MODPATH/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
 chmod 0755 "$MODPATH/system/bin/洛书" "$MODPATH/system/bin/luoshud" 2>/dev/null || true
 find "$MODPATH/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
-find "$MODPATH/webroot" "$MODPATH/webroot_v141" -type f -exec chmod 0644 {} \; 2>/dev/null || true
+find "$MODPATH/$WEBROOT_NAME" -type f -exec chmod 0644 {} \; 2>/dev/null || true
 chmod 0644 "$MODPATH/module.prop" "$MODPATH/config/active_font.conf" 2>/dev/null || true
 
-# 覆盖升级时，Root 管理器可能仍打开旧活动目录。同步两个前端目录并更新 module.prop，
-# 让重新打开页面立即切换到 webroot_v141，避免旧 HTML 与新 CSS/JS 混用。
 MOD_REAL=$(CDPATH= cd -- "$MODPATH" 2>/dev/null && pwd)
 OLD_REAL=$(CDPATH= cd -- "$OLD_MOD" 2>/dev/null && pwd)
 if [ -d "$OLD_MOD" ] && [ -n "$MOD_REAL" ] && [ -n "$OLD_REAL" ] && [ "$MOD_REAL" != "$OLD_REAL" ]; then
-    for _web in webroot webroot_v141; do
-        [ -d "$MODPATH/$_web" ] || continue
-        _tmp="$OLD_MOD/.${_web}.v141.$$"
+    if [ -d "$MODPATH/$WEBROOT_NAME" ]; then
+        _tmp="$OLD_MOD/.${WEBROOT_NAME}.$$"
         rm -rf "$_tmp" 2>/dev/null || true
-        cp -a "$MODPATH/$_web" "$_tmp" 2>/dev/null || cp -R "$MODPATH/$_web" "$_tmp" 2>/dev/null || true
+        cp -a "$MODPATH/$WEBROOT_NAME" "$_tmp" 2>/dev/null || cp -R "$MODPATH/$WEBROOT_NAME" "$_tmp" 2>/dev/null || true
         if [ -d "$_tmp" ]; then
-            rm -rf "$OLD_MOD/$_web" 2>/dev/null || true
-            mv -f "$_tmp" "$OLD_MOD/$_web" 2>/dev/null || true
+            rm -rf "$OLD_MOD/$WEBROOT_NAME" 2>/dev/null || true
+            mv -f "$_tmp" "$OLD_MOD/$WEBROOT_NAME" 2>/dev/null || true
         fi
-    done
+    fi
     cp -f "$MODPATH/module.prop" "$OLD_MOD/module.prop" 2>/dev/null || true
-    rm -rf "$OLD_MOD/webroot/emoji" "$OLD_MOD/webroot_v141/emoji" 2>/dev/null || true
+    rm -rf "$OLD_MOD/webroot" "$OLD_MOD/webroot_v141" "$OLD_MOD/$WEBROOT_NAME/emoji" 2>/dev/null || true
     chmod 0644 "$OLD_MOD/module.prop" 2>/dev/null || true
-    find "$OLD_MOD/webroot" "$OLD_MOD/webroot_v141" -type f -exec chmod 0644 {} \; 2>/dev/null || true
-    ui_print "✓ 已刷新活动 WebUI，避免加载旧页面缓存"
+    find "$OLD_MOD/$WEBROOT_NAME" -type f -exec chmod 0644 {} \; 2>/dev/null || true
+    ui_print "✓ 已切换到全新 WebUI 目录，旧缓存已清理"
 fi
 
-# APatch 在 customize.sh 返回后还要完成模块落盘；这里故意不使用 exit 0。
 [ "$APATCH_ENV" = true ] && printf 'apatch-compatible=1\ninstalled=%s\n' "$(date +%s)" > "$MODPATH/config/install_environment.conf" 2>/dev/null || true
+[ -f "$MODPATH/common/preview_cache.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/preview_cache.sh" prune >/dev/null 2>&1 || true
 [ -f "$MODPATH/common/module_status.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/module_status.sh" "$SELECTED_FONT" >/dev/null 2>&1 || true
 ui_print ""
 ui_print "╭──────────────────────────────╮"
 ui_print "│          安装完成            │"
 ui_print "╰──────────────────────────────╯"
-ui_print "✓ v14.1 已完成字体配置与 APatch 持久化处理"
+ui_print "✓ v14.1 Test3 已完成字体配置与缓存优化"
 ui_print "⚠ 请关闭 Root 管理器中的『默认卸载模块』"
 ui_print "请完整重启手机。"
 ui_print ""

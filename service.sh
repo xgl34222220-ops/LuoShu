@@ -16,15 +16,19 @@ MODDIR="${0%/*}"
     log(){ printf '[%s] [SERVICE] %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$1" >> "$LOG_FILE" 2>/dev/null || true; }
     log 'v14.1 服务开始'
 
-    chmod 0755 "$MODDIR" "$MODDIR/common" "$MODDIR/webroot" "$MODDIR/webroot_v141" 2>/dev/null || true
+    WEBROOT_NAME=$(sed -n 's/^webroot=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
+    [ -n "$WEBROOT_NAME" ] || WEBROOT_NAME=webroot
+    ACTIVE_WEBROOT="$MODDIR/$WEBROOT_NAME"
+    chmod 0755 "$MODDIR" "$MODDIR/common" "$ACTIVE_WEBROOT" 2>/dev/null || true
     chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/post-mount.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" 2>/dev/null || true
     find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
     chmod 0755 "$MODDIR/system/bin/洛书" "$MODDIR/system/bin/luoshud" 2>/dev/null || true
-    find "$MODDIR/webroot" "$MODDIR/webroot_v141" -type f -exec chmod 0644 {} \; 2>/dev/null || true
+    find "$ACTIVE_WEBROOT" -type f -exec chmod 0644 {} \; 2>/dev/null || true
     rm -f "$MODDIR/remove" "$MODDIR/disable" "$MODDIR/skip_mount" "$MODDIR/skip_mountify" "$MODDIR/magic" 2>/dev/null || true
     rm -f "$MODDIR/config/active_emoji.conf" "$MODDIR/config/emoji_task.conf" "$MODDIR/config/emoji_reboot_required.conf" 2>/dev/null || true
     rm -f "$MODDIR/system/fonts/NotoColorEmoji.ttf" "$MODDIR/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
-    rm -rf "$MODDIR/system/fonts/.luoshu-emoji-store" "$MODDIR/webroot/emoji" "$MODDIR/webroot_v141/emoji" 2>/dev/null || true
+    rm -rf "$MODDIR/system/fonts/.luoshu-emoji-store" "$ACTIVE_WEBROOT/emoji" 2>/dev/null || true
+    for _old_root in webroot webroot_v141; do [ "$_old_root" = "$WEBROOT_NAME" ] || rm -rf "$MODDIR/$_old_root" 2>/dev/null || true; done
 
     ACTIVE=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n'); [ -n "$ACTIVE" ] || ACTIVE=default
     [ -f "$MODDIR/common/module_status.sh" ] && MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" "$ACTIVE" >/dev/null 2>&1 || true
@@ -37,14 +41,13 @@ MODDIR="${0%/*}"
     command -v cmd >/dev/null 2>&1 && cmd font system --update >/dev/null 2>&1 || true
     [ ! -f /system/bin/oplus-font ] || oplus-font refresh >/dev/null 2>&1 || true
 
-    # 元模块镜像必须在系统启动完成后同步，不能塞进 APatch 的阻塞阶段。
     if [ -f "$MODDIR/common/mount_compat.sh" ]; then
         MODULE_DIR="$MODDIR" . "$MODDIR/common/mount_compat.sh"
         luoshu_sync_mount_payload 2>/dev/null || true
     fi
 
-    # 开机完成后再做字体预览同步，避免 APatch 阻塞阶段访问共享存储。
     [ ! -f "$MODDIR/common/font_manager.sh" ] || MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list refresh >/dev/null 2>&1 || true
+    [ ! -f "$MODDIR/common/preview_cache.sh" ] || MODDIR="$MODDIR" sh "$MODDIR/common/preview_cache.sh" prune >/dev/null 2>&1 || true
     [ ! -f "$MODDIR/common/play_font_bridge" ] || MODDIR="$MODDIR" sh "$MODDIR/common/play_font_bridge" boot >/dev/null 2>&1 || true
     [ ! -f "$MODDIR/common/wechat_xweb_bridge" ] || MODDIR="$MODDIR" sh "$MODDIR/common/wechat_xweb_bridge" >/dev/null 2>&1 &
 
