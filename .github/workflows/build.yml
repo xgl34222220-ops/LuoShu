@@ -21,7 +21,7 @@ jobs:
         shell: bash
         run: |
           if ! sh -x ./scripts/check.sh > /tmp/luoshu-check.log 2>&1; then
-            tail -n 12 /tmp/luoshu-check.log
+            tail -n 80 /tmp/luoshu-check.log
             exit 1
           fi
       - name: Upload check diagnostics
@@ -36,6 +36,8 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-module
-          path: dist/*.zip
+          name: LuoShu-v14.1-module
+          path: |
+            dist/*.zip
+            dist/*.sha256
           if-no-files-found: error
