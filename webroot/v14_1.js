@@ -4,6 +4,9 @@ import { exec } from './kernelsu.js';
 const MODULE_DIR = '/data/adb/modules/LuoShu';
 const CAPABILITY = `${MODULE_DIR}/common/device_capabilities.sh`;
 const GUIDE_KEY = 'luoshu_v141_onboarding_done';
+let capabilityData = null;
+let capabilityLoading = false;
+let capabilityAppliedToMix = false;
 
 function escapeHtml(value) {
     return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -57,16 +60,24 @@ function guideModal() {
         setTimeout(() => modal.remove(), 260);
     });
 }
+function applyDigitCapability(data) {
+    const digitSlot = document.querySelector('[data-mix-slot="digit"]');
+    if (!digitSlot || data.digitIndependent) return;
+    digitSlot.setAttribute('aria-disabled', 'true');
+    const em = digitSlot.querySelector('em');
+    if (em) em.textContent = '此设备没有稳定的独立数字入口，将跟随英文字体';
+    capabilityAppliedToMix = true;
+}
 function renderCapability(data) {
     let card = document.getElementById('v141Capability');
     if (!card) {
+        const anchor = document.getElementById('fontMixPanel') || document.getElementById('listSection');
+        if (!anchor) return false;
         card = document.createElement('section');
         card.id = 'v141Capability';
         card.className = 'v141-capability';
-        const anchor = document.getElementById('fontMixPanel') || document.getElementById('listSection');
-        anchor?.insertAdjacentElement('beforebegin', card);
+        anchor.insertAdjacentElement('beforebegin', card);
     }
-    if (!card) return;
     const digit = data.digitIndependent ? '独立映射' : '跟随英文';
     const persistClass = data.persistent ? 'ok' : 'bad';
     card.innerHTML = `
@@ -79,19 +90,26 @@ function renderCapability(data) {
       </div>
       <p class="v141-persist ${persistClass}">${data.persistent ? '模块持久化状态正常' : escapeHtml(data.persistentMessage || '模块持久化异常')}</p>`;
     document.documentElement.classList.toggle('digit-follows-latin', !data.digitIndependent);
-    const digitSlot = document.querySelector('[data-mix-slot="digit"]');
-    if (digitSlot && !data.digitIndependent) {
-        digitSlot.setAttribute('aria-disabled', 'true');
-        const em = digitSlot.querySelector('em');
-        if (em) em.textContent = '此设备没有稳定的独立数字入口，将跟随英文字体';
-    }
+    applyDigitCapability(data);
+    return true;
 }
 async function loadCapability() {
+    if (capabilityData) {
+        renderCapability(capabilityData);
+        return;
+    }
+    if (capabilityLoading) return;
+    capabilityLoading = true;
     try {
         const result = parseJson(await shell(`sh '${CAPABILITY}'`));
-        if (result?.status === 'ok' && result.data) renderCapability(result.data);
+        if (result?.status === 'ok' && result.data) {
+            capabilityData = result.data;
+            renderCapability(capabilityData);
+        }
     } catch (error) {
         console.warn('[洛书] 设备能力读取失败', error);
+    } finally {
+        capabilityLoading = false;
     }
 }
 function start() {
@@ -100,7 +118,8 @@ function start() {
     loadCapability();
     const observer = new MutationObserver(() => {
         removeLegacyUi();
-        if (!document.getElementById('v141Capability') || document.querySelector('[data-mix-slot="digit"]')) loadCapability();
+        if (capabilityData && !document.getElementById('v141Capability')) renderCapability(capabilityData);
+        if (capabilityData && !capabilityAppliedToMix) applyDigitCapability(capabilityData);
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
     setTimeout(() => observer.disconnect(), 8000);
