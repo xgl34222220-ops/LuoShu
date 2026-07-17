@@ -3,12 +3,12 @@ on:
   push:
     branches: [release/v14.1]
     paths:
-      - scripts/materialize_part*.py
+      - scripts/materialize_*.py
       - .github/workflows/materialize-v141-final.yml
   pull_request:
     branches: [main]
     paths:
-      - scripts/materialize_part*.py
+      - scripts/materialize_*.py
       - .github/workflows/materialize-v141-final.yml
   workflow_dispatch:
 permissions:
@@ -29,15 +29,14 @@ jobs:
         run: |
           set -u
           rm -f materialize-final-result.txt
-          python3 - <<'PY'
-          from pathlib import Path
-          for path in sorted(Path('scripts').glob('materialize_part*.py')):
-              text=path.read_text(encoding='utf-8')
-              text=text.replace('gzip.decompress(base64.b64decode(enc))', "gzip.decompress(base64.b64decode(enc + '=' * (-len(enc) % 4)))")
-              path.write_text(text, encoding='utf-8')
-          PY
           result=success
-          for file in scripts/materialize_part1.py scripts/materialize_part2.py scripts/materialize_part3.py scripts/materialize_part4.py; do
+          for file in \
+            scripts/materialize_part1.py \
+            scripts/materialize_font_mix.py \
+            scripts/materialize_composite_py.py \
+            scripts/materialize_composite_sh.py \
+            scripts/materialize_part3.py \
+            scripts/materialize_part4.py; do
             echo "== $file ==" >> materialize-final-result.txt
             if ! python3 "$file" >> materialize-final-result.txt 2>&1; then
               result=failed
@@ -46,7 +45,7 @@ jobs:
           done
           if [ "$result" = success ]; then
             chmod 0755 customize.sh post-fs-data.sh service.sh uninstall.sh common/*.sh common/*.py scripts/*.sh
-            rm -f scripts/materialize_part*.py .github/workflows/materialize-v141-final.yml materialize-final-result.txt
+            rm -f scripts/materialize_*.py .github/workflows/materialize-v141-final.yml materialize-final-result.txt
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
