@@ -27,15 +27,26 @@ jobs:
       - name: Apply audited source files
         shell: bash
         run: |
-          set -euo pipefail
+          set -u
+          rm -f materialize-final-result.txt
+          result=success
           for file in scripts/materialize_part1.py scripts/materialize_part2.py scripts/materialize_part3.py scripts/materialize_part4.py; do
-            python3 "$file"
+            echo "== $file ==" >> materialize-final-result.txt
+            if ! python3 "$file" >> materialize-final-result.txt 2>&1; then
+              result=failed
+              break
+            fi
           done
-          chmod 0755 customize.sh post-fs-data.sh service.sh uninstall.sh common/*.sh common/*.py scripts/*.sh
-          rm -f scripts/materialize_part*.py .github/workflows/materialize-v141-final.yml
+          if [ "$result" = success ]; then
+            chmod 0755 customize.sh post-fs-data.sh service.sh uninstall.sh common/*.sh common/*.py scripts/*.sh
+            rm -f scripts/materialize_part*.py .github/workflows/materialize-v141-final.yml materialize-final-result.txt
+          fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git diff --cached --check
-          git commit -m 'release: materialize audited LuoShu v14.1 source'
-          git push origin HEAD:release/v14.1
+          if ! git diff --cached --quiet; then
+            git commit -m 'release: materialize audited LuoShu v14.1 source'
+            git push origin HEAD:release/v14.1
+          fi
+          test "$result" = success
