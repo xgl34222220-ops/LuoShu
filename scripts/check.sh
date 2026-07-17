@@ -35,5 +35,5 @@ grep -q 'v14_1.css?v=14100' "$TMP_STAGE/webroot/index.html"; ! grep -q 'id="emoj
 for flag in magic skip_mount skip_mountify remove disable; do test ! -e "$TMP_STAGE/$flag"; done
 rm -rf "$TMP_STAGE"; trap - EXIT HUP INT TERM
 sh "$ROOT/scripts/v141_test.sh"
-sh "$ROOT/scripts/mount_compat_test.sh"
+sh -x "$ROOT/scripts/mount_compat_test.sh"
 echo 'LuoShu v14.1 source checks passed.'
