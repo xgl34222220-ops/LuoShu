@@ -1,0 +1,10 @@
+#!/usr/bin/env python3
+from pathlib import Path
+import base64,gzip
+root=Path(__file__).resolve().parents[1]
+enc='H4sIADs0WmoC/41Sy27TQBTd+ysuQ8ijMJkmRFnYSkVKkBKpeSgKi6hCkWtPsBXbY3nGJVHiBQskFgFVKlXXSN0CQkIsoIifaUI/g4mTtiRQCW88vvfMOcf3nrt3CB9xQV1yYHuEWwqnAjANlXqzUqm1SygxXp5UnEg/rrTKnWoJDBMwBtnavke2IpLNIsjvEJMeEi90HEgmwX9hZiKktJ82OrX6E8myJCEGc13mEX8kLOYhpdXdrTVkd4WLPTgh41aIryD7gIdSKkYieAaTCYyBGhaD1BhxoYuQIxXRIGABeoBcyrn+nMrK7OzN7Oj17MPpxY/jy59Hl++n89Ovv86/zc4+oygFO8m8BnRoC8hvaxAphs6plEmHnu5SwO7aD0lNEYQ0g8D2QNcDwyoWJnrgFgsZ0DTYyvyXoY/T+cmXP23Nzk/mx28vvr+av/s0n76EcrteLGyYyy0EKNcNhQ59FghodTvVZqPajKe6mhtab8ZLuhmqYx+sBv4wmyuot9QJtwXFvm4MpF1+zbhX6e3Vdtvldrf3N+2tXPITmyPPYbqZGG9QqPfVxEYpupbr1Fur1C1PMnVXydENixLh+hLsDkw7AOzLhS1h6F/rUuw+7C9SmlNxhKAECGNOnT4WlAsZJQ2ERT0F5EOH1LgJGTYgZbuxnz7zRIcxh2vgB7Yn0ogNUCal9G1l/c5mwuXLZ4uR9hYUWX+0gDxCym+TMQovcAMAAA=='
+data=gzip.decompress(base64.b64decode(enc))
+p=root/'common/luoshu_composite.sh'
+p.parent.mkdir(parents=True,exist_ok=True)
+p.write_bytes(data)
+print("materialized common/luoshu_composite.sh")
