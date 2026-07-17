@@ -8,13 +8,20 @@ on:
       - 'common/composite_font.py'
       - 'common/luoshu_composite.sh'
       - 'scripts/patch_alpha7.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-alpha7.yml'
+      - 'common/composite_font.py'
+      - 'common/luoshu_composite.sh'
+      - 'scripts/patch_alpha7.py'
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: alpha7-full-composite
+  group: alpha7-full-composite-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -171,6 +178,7 @@ jobs:
           retention-days: 30
 
       - name: Publish prerelease
+        if: github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
