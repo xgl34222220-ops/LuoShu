@@ -10,7 +10,7 @@ python3 -m py_compile "$ROOT/common/composite_font.py"
 if command -v node >/dev/null 2>&1; then
   TMP=$(mktemp -d)
   trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-  for file in app.js font_analyzer.js kernelsu.js stability.js environment.js v14.js; do
+  for file in app.js font_analyzer.js kernelsu.js environment.js v14.js; do
     cp "$ROOT/webroot/$file" "$TMP/${file%.js}.mjs"
     node --check "$TMP/${file%.js}.mjs"
   done

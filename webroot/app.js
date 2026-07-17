@@ -196,14 +196,9 @@ const App = {
     dataSignature: '',
     dockActive: '',
     searchTimer: null,
-    emojis: [],
-    currentEmoji: 'default',
     textRebootRequired: false,
-    emojiRebootRequired: false,
     weightRebootRequired: false,
     pendingRiskFont: null,
-    pendingEmoji: null,
-    isEmojiSwitching: false,
     importPackages: [],
     isImporting: false,
     fontWeightState: null,
@@ -219,7 +214,7 @@ const App = {
         const restored = this.restoreDataCache();
         if (!restored) this.showSkeleton();
         await this.loadData({ background: restored });
-        await Promise.all([this.loadEmojis(), this.loadRebootStatus()]);
+        await this.loadRebootStatus();
         // 字体列表完成后再低优先级读取状态，避免多个 Root 命令争用启动时间。
         setTimeout(() => this.loadModuleInfo(), 0);
         this.renderSwitchResult();
@@ -533,7 +528,6 @@ const App = {
             const res = line ? JSON.parse(line.trim()) : null;
             if (res?.status === 'ok') {
                 this.textRebootRequired = Boolean(res.data?.text);
-                this.emojiRebootRequired = Boolean(res.data?.emoji);
                 this.weightRebootRequired = Boolean(res.data?.weight);
                 this.updateRebootUI();
             }
@@ -543,7 +537,7 @@ const App = {
     },
 
     updateRebootUI() {
-        const pending = this.textRebootRequired || this.emojiRebootRequired || this.weightRebootRequired;
+        const pending = this.textRebootRequired || this.weightRebootRequired;
         document.body.classList.toggle('reboot-required', pending);
         const btn = document.getElementById('rebootDeviceBtn');
         const hint = btn?.querySelector('.action-btn-hint');
@@ -551,94 +545,11 @@ const App = {
         if (hint) {
             const pendingItems = [];
             if (this.textRebootRequired) pendingItems.push('文字');
-            if (this.emojiRebootRequired) pendingItems.push('Emoji');
             if (this.weightRebootRequired) pendingItems.push('粗细');
             hint.textContent = pending ? `${pendingItems.join(' + ')}等待重启` : '完成字体应用';
         }
         const badge = document.querySelector('.current-badge');
         if (badge) badge.innerHTML = `<span class="pulse-dot"></span>${pending ? '配置待重启' : '正在使用'}`;
-    },
-
-    async loadEmojis() {
-        const container = document.getElementById('emojiList');
-        try {
-            const output = await this.execShell(`${FONT_MANAGER} action emoji_list`);
-            const line = output.split('\n').find(v => v.trim().startsWith('{'));
-            const res = line ? JSON.parse(line.trim()) : null;
-            if (res?.status !== 'ok') throw new Error(res?.message || 'Emoji 列表读取失败');
-            this.currentEmoji = res.data?.current || 'default';
-            this.emojis = Array.isArray(res.data?.emojis) ? res.data.emojis : [];
-            this.renderEmojis();
-        } catch (e) {
-            if (container) container.innerHTML = `<div class="emoji-empty">${this.escape((e && e.message) || String(e))}</div>`;
-        }
-    },
-
-    renderEmojis() {
-        const current = document.getElementById('emojiCurrent');
-        const list = document.getElementById('emojiList');
-        if (!current || !list) return;
-        const active = this.currentEmoji === 'default'
-            ? { name: '系统默认 Emoji', size: '保留 ROM 原始表情' }
-            : (this.emojis.find(v => v.id === this.currentEmoji) || { name: this.currentEmoji, size: '自定义 Emoji' });
-        current.innerHTML = `<span class="emoji-sample">😀</span><div><strong>${this.escape(active.name || active.id)}</strong><small>${this.escape(active.size || '/sdcard/LuoShu/emoji/')}</small></div><span class="emoji-active">使用中</span>`;
-        const items = [{ id:'default', name:'系统默认 Emoji', size:'不替换 NotoColorEmoji' }, ...this.emojis];
-        list.innerHTML = items.map(item => {
-            const isActive = item.id === this.currentEmoji;
-            const invalid = item.id !== 'default' && item.valid === false;
-            const note = invalid ? (item.error || '文件无效') : (item.warning || (item.format ? `${item.format} · ${item.size || ''}` : (item.size || '')));
-            return `<button class="emoji-card ${isActive ? 'active' : ''} ${invalid ? 'invalid' : ''}" data-emoji="${this.escape(item.id)}" type="button" ${isActive || invalid ? 'disabled' : ''}>
-                <span class="emoji-card-icon">${item.id === 'default' ? '🙂' : '😀'}</span>
-                <span class="emoji-card-copy"><strong>${this.escape(item.name || item.id)}</strong><small>${this.escape(note)}</small></span>
-                <span class="emoji-card-action">${invalid ? '无效' : (isActive ? '当前' : '选择')}</span>
-            </button>`;
-        }).join('');
-        list.querySelectorAll('[data-emoji]').forEach(btn => btn.addEventListener('click', () => this.switchEmoji(btn.dataset.emoji)));
-    },
-
-    async waitForEmojiTask(taskId, timeoutMs = 70000) {
-        const started = Date.now();
-        while (Date.now() - started < timeoutMs) {
-            await new Promise(resolve => setTimeout(resolve, 650));
-            const output = await this.execShell(`${FONT_MANAGER} action emoji_status ${this.shellQuote(taskId)}`);
-            const line = output.split('\n').find(v => v.trim().startsWith('{'));
-            if (!line) continue;
-            const res = JSON.parse(line.trim());
-            if (res.status !== 'ok' || !res.data) continue;
-            if (res.data.state === 'success' || res.data.state === 'failed') return res.data;
-        }
-        throw new Error('Emoji 任务超时，请查看日志');
-    },
-
-    async switchEmoji(emojiId, force = false) {
-        if (this.emojiRebootRequired) { this.showToast('本次开机已更改 Emoji，请先重启手机'); return; }
-        const targetEmoji = this.emojis.find(v => v.id === emojiId);
-        if (!force && emojiId !== 'default' && targetEmoji && targetEmoji.color === false) {
-            this.pendingEmoji = emojiId;
-            document.getElementById('riskMessage').innerHTML = `<strong>${this.escape(targetEmoji.name || emojiId)}</strong><br>• 未检测到常见彩色 Emoji 表，可能显示为单色或无法正常渲染`;
-            document.getElementById('riskModal').classList.add('show');
-            return;
-        }
-        if (this.isEmojiSwitching) { this.showToast('Emoji 正在处理'); return; }
-        this.isEmojiSwitching = true;
-        this.showToast('正在准备 Emoji…');
-        try {
-            const output = await this.execShell(`${FONT_MANAGER} action emoji_switch_async ${this.shellQuote(emojiId)}`);
-            const line = output.split('\n').find(v => v.trim().startsWith('{'));
-            const res = line ? JSON.parse(line.trim()) : null;
-            if (res?.status !== 'ok') throw new Error(res?.message || '无法启动 Emoji 任务');
-            const status = await this.waitForEmojiTask(res.data?.task);
-            if (status.state !== 'success') throw new Error(status.message || 'Emoji 应用失败');
-            this.currentEmoji = emojiId;
-            this.emojiRebootRequired = true;
-            this.renderEmojis();
-            this.updateRebootUI();
-            this.showApplyDone('Emoji', emojiId === 'default' ? '系统默认 Emoji' : emojiId);
-        } catch (e) {
-            this.showToast('Emoji 失败: ' + ((e && e.message) || String(e)));
-        } finally {
-            this.isEmojiSwitching = false;
-        }
     },
 
     async requestFontSwitch(fontId) {
@@ -1252,11 +1163,11 @@ const App = {
                 resultBox.className = 'import-result success';
                 resultBox.innerHTML = `<strong>✓ ${this.escape(data.message || '导入完成')}</strong>
                     <small>${this.escape(data.reason || '')}${data.source ? ` · 原文件 ${this.escape(data.source)}` : ''}</small>
-                    <small>识别方式：${this.escape(modeLabel)} · 文字 ${Number(data.importedText) || 0} 个${Number(data.importedEmoji) ? ` · Emoji ${Number(data.importedEmoji)} 个` : ''}</small>
+                    <small>识别方式：${this.escape(modeLabel)} · 文字 ${Number(data.importedText) || 0} 个</small>
                     <small>通过检测 ${Number(data.valid) || 0} 个 · 无效 ${Number(data.invalid) || 0} 个 · 已忽略 ${Number(data.ignored) || 0} 个</small>`;
             }
             this.showToast(data.message || '字体包导入完成');
-            await Promise.all([this.loadData({ background: true, force: true }), this.loadEmojis()]);
+            await this.loadData({ background: true, force: true });
         } catch (e) {
             const msg = (e && e.message) || String(e);
             if (resultBox) {
@@ -1299,8 +1210,6 @@ const App = {
         });
         document.getElementById('sortBtn')?.addEventListener('click', () => this.cycleSort());
         document.getElementById('rebootDeviceBtn')?.addEventListener('click', () => document.getElementById('rebootDeviceModal')?.classList.add('show'));
-        document.getElementById('openEmojiFolderBtn')?.addEventListener('click', () => this.openPublicFolder('emoji'));
-        document.getElementById('moreOpenEmojiFolderBtn')?.addEventListener('click', () => this.openPublicFolder('emoji'));
         document.getElementById('importZipBtn')?.addEventListener('click', () => this.openImportModal());
         document.getElementById('moreImportZipBtn')?.addEventListener('click', () => this.openImportModal());
         document.getElementById('openImportFolderBtn')?.addEventListener('click', () => this.openPublicFolder('import'));
@@ -1308,8 +1217,8 @@ const App = {
 
         // 弹窗事件委托
         const modalClose = (id) => document.getElementById(id)?.classList.remove('show');
-        document.getElementById('confirmRiskBtn')?.addEventListener('click', () => { const id = this.pendingRiskFont; const emoji = this.pendingEmoji; this.pendingRiskFont = null; this.pendingEmoji = null; modalClose('riskModal'); if (id) this.switchFont(id); else if (emoji) this.switchEmoji(emoji, true); });
-        document.getElementById('cancelRiskBtn')?.addEventListener('click', () => { this.pendingRiskFont = null; this.pendingEmoji = null; modalClose('riskModal'); });
+        document.getElementById('confirmRiskBtn')?.addEventListener('click', () => { const id = this.pendingRiskFont; this.pendingRiskFont = null; modalClose('riskModal'); if (id) this.switchFont(id); });
+        document.getElementById('cancelRiskBtn')?.addEventListener('click', () => { this.pendingRiskFont = null; modalClose('riskModal'); });
         document.getElementById('riskModal')?.addEventListener('click', e => { if (e.target.id === 'riskModal') modalClose('riskModal'); });
         document.getElementById('rebootLaterBtn')?.addEventListener('click', () => modalClose('applyDoneModal'));
         document.getElementById('rebootNowBtn')?.addEventListener('click', () => { modalClose('applyDoneModal'); this.rebootDevice(); });

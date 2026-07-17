@@ -4,7 +4,6 @@
 @media(prefers-color-scheme:dark){:root:not([data-theme]){--v14-panel:#1c1e22;--v14-soft:#17191d;--v14-border:rgba(255,255,255,.075);--v14-shadow:0 10px 28px rgba(0,0,0,.22)}}
 
 /* 移除不再公开的 Emoji 与自救弹窗，避免多个底部弹层相互叠加。 */
-#emojiSection,#openEmojiFolderBtn,#moreOpenEmojiFolderBtn,#stabilityRescueButton,#stabilityModal,#openStabilityBtn{display:none!important}
 #moreImportZipBtn,#moreOpenFolderBtn,#generateReportBtn,#copyFontPathBtn{display:none!important}
 body.stability-open{overflow:auto!important}
 

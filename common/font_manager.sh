@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v13.4 Beta2 Hotfix6 - 字体管理核心（静态多字重调节 + 即时字重刷新）
+# 洛书 v14.1.1 RC3 - 字体管理核心
 
 # 关键：禁用严格错误终止，避免任何命令失败导致脚本退出
 set +e
@@ -29,16 +29,12 @@ ACTIVE_FONT_CONF="$CONFIG_DIR/active_font.conf"
 FONT_LIST_CONF="$CONFIG_DIR/font_list.conf"
 LUOSHU_PUBLIC_DIR="/sdcard/LuoShu"
 USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
-USER_EMOJI_DIR="$LUOSHU_PUBLIC_DIR/emoji"
 USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
 USER_IMPORT_DIR="$LUOSHU_PUBLIC_DIR/import"
 LEGACY_FONTS_DIR="/sdcard/Fonts"
-ACTIVE_EMOJI_CONF="$CONFIG_DIR/active_emoji.conf"
 TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
-EMOJI_REBOOT_REQUIRED="$CONFIG_DIR/emoji_reboot_required.conf"
 FONT_WEIGHT_REBOOT_REQUIRED="$CONFIG_DIR/font_weight_reboot_required.conf"
 SWITCH_TASK_FILE="$CONFIG_DIR/switch_task.conf"
-EMOJI_TASK_FILE="$CONFIG_DIR/emoji_task.conf"
 NATIVE_BIN="$MODULE_DIR/system/bin/luoshud"
 FONT_WEIGHT_CONF="$CONFIG_DIR/font_weight.conf"
 FONT_WEIGHT_ORIGINAL_CONF="$CONFIG_DIR/font_weight_original.conf"
@@ -191,7 +187,7 @@ if ! type apply_font_by_rom >/dev/null 2>&1; then
     }
 fi
 
-# ---------- 安全覆盖范围 / 重启保护 / Emoji ----------
+# ---------- 安全覆盖范围 / 重启保护 ----------
 get_managed_text_files() {
     if [ "$IS_COLOROS" = "true" ]; then
         for _n in $(get_all_coloros_names); do printf '%s.ttf\n' "$_n"; done
@@ -207,62 +203,6 @@ clear_managed_text_fonts() {
         rm -f "$SYSTEM_FONTS_DIR/$_f" "$MODULE_DIR/system_ext/fonts/$_f" "$MODULE_DIR/product/fonts/$_f" 2>/dev/null || true
     done
     rm -rf "$SYSTEM_FONTS_DIR/.luoshu-font-store" 2>/dev/null || true
-}
-
-get_current_emoji_id() {
-    _active="default"
-    [ -f "$ACTIVE_EMOJI_CONF" ] && _active=$(head -n1 "$ACTIVE_EMOJI_CONF" 2>/dev/null | tr -d '\r\n')
-    [ -z "$_active" ] && _active="default"
-    echo "$_active"
-}
-
-find_emoji_file() {
-    _id="$1"
-    for _f in "$USER_EMOJI_DIR"/*.ttf "$USER_EMOJI_DIR"/*.otf "$USER_EMOJI_DIR"/*.ttc \
-              "$USER_EMOJI_DIR"/*.TTF "$USER_EMOJI_DIR"/*.OTF "$USER_EMOJI_DIR"/*.TTC; do
-        [ -f "$_f" ] || continue
-        _base=$(basename "$_f")
-        _name="${_base%.*}"
-        [ "$_name" = "$_id" ] && { echo "$_f"; return 0; }
-    done
-    return 1
-}
-
-clear_managed_emoji_fonts() {
-    rm -f "$SYSTEM_FONTS_DIR/NotoColorEmoji.ttf" "$SYSTEM_FONTS_DIR/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
-    rm -rf "$SYSTEM_FONTS_DIR/.luoshu-emoji-store" 2>/dev/null || true
-}
-
-switch_emoji() {
-    _id="$1"
-    [ -z "$_id" ] && { echo "错误：未指定 Emoji 字体" >&2; return 1; }
-    if [ -f "$EMOJI_REBOOT_REQUIRED" ]; then
-        echo "错误：本次开机已更改 Emoji，请先重启手机后再切换" >&2
-        return 3
-    fi
-    mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" "$USER_EMOJI_DIR" 2>/dev/null || true
-    clear_managed_emoji_fonts
-    if [ "$_id" != "default" ]; then
-        _src=$(find_emoji_file "$_id")
-        [ -f "$_src" ] || { echo "错误：Emoji 字体 $_id 不存在" >&2; return 1; }
-        if type font_validate >/dev/null 2>&1 && ! font_validate "$_src" emoji; then
-            echo "错误：$FONT_CHECK_ERROR" >&2
-            return 4
-        fi
-        mkdir -p "$SYSTEM_FONTS_DIR/.luoshu-emoji-store" 2>/dev/null || true
-        _anchor="$SYSTEM_FONTS_DIR/.luoshu-emoji-store/current.font"
-        cp -f "$_src" "$_anchor" 2>/dev/null || return 1
-        chmod 644 "$_anchor" 2>/dev/null || true
-        ln "$_anchor" "$SYSTEM_FONTS_DIR/NotoColorEmoji.ttf" 2>/dev/null || cp -f "$_anchor" "$SYSTEM_FONTS_DIR/NotoColorEmoji.ttf" 2>/dev/null || return 1
-        if [ -e /system/fonts/NotoColorEmojiLegacy.ttf ]; then
-            ln "$_anchor" "$SYSTEM_FONTS_DIR/NotoColorEmojiLegacy.ttf" 2>/dev/null || cp -f "$_anchor" "$SYSTEM_FONTS_DIR/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
-        fi
-        chmod 644 "$SYSTEM_FONTS_DIR"/NotoColorEmoji*.ttf 2>/dev/null || true
-    fi
-    echo "$_id" > "$ACTIVE_EMOJI_CONF"
-    printf 'emoji=%s\ntime=%s\n' "$_id" "$(date +%s)" > "$EMOJI_REBOOT_REQUIRED"
-    chmod 644 "$ACTIVE_EMOJI_CONF" "$EMOJI_REBOOT_REQUIRED" 2>/dev/null || true
-    return 0
 }
 
 find_text_font_file() {
@@ -319,10 +259,10 @@ switch_font() {
         fi
     fi
 
-    # 只删除洛书管理的文字目标，Emoji、符号与 ROM fallback 永远保留。
+    # 只删除洛书管理的文字目标，ROM fallback、彩色字体与符号字体永远保留。
     clear_managed_text_fonts
     if [ "$font_id" = "default" ]; then
-        echo "  [洛书] 已恢复 ROM 原始文字字体（Emoji 保持独立设置）"
+        echo "  [洛书] 已恢复 ROM 原始文字字体"
     else
         apply_font_by_rom "$src_file" "$SYSTEM_FONTS_DIR" "quick" "$font_id" || {
             echo "错误：ROM 字体映射失败" >&2
@@ -424,34 +364,6 @@ sync_preview_fonts() {
     echo "$latest_mtime" > "$cache_file" 2>/dev/null
 }
 
-
-sync_emoji_preview_fonts() {
-    _preview_dir="$MODULE_DIR/webroot/emoji"
-    mkdir -p "$_preview_dir" "$USER_EMOJI_DIR" 2>/dev/null || true
-    rm -f "$_preview_dir"/*.ttf "$_preview_dir"/*.otf "$_preview_dir"/*.ttc 2>/dev/null || true
-    for _src in "$USER_EMOJI_DIR"/*.ttf "$USER_EMOJI_DIR"/*.otf "$USER_EMOJI_DIR"/*.ttc \
-                "$USER_EMOJI_DIR"/*.TTF "$USER_EMOJI_DIR"/*.OTF "$USER_EMOJI_DIR"/*.TTC; do
-        [ -f "$_src" ] || continue
-        _name=$(basename "$_src")
-        ln -f "$_src" "$_preview_dir/$_name" 2>/dev/null || cp -f "$_src" "$_preview_dir/$_name" 2>/dev/null || true
-        chmod 644 "$_preview_dir/$_name" 2>/dev/null || true
-    done
-}
-
-write_emoji_task() {
-    _task="$1"; _state="$2"; _emoji="$3"; _message="$4"; _started="$5"; _finished="$6"
-    _tmp="${EMOJI_TASK_FILE}.tmp.$$"
-    {
-        printf 'task=%s\n' "$_task"
-        printf 'state=%s\n' "$_state"
-        printf 'emoji=%s\n' "$_emoji"
-        printf 'message=%s\n' "$_message"
-        printf 'started=%s\n' "$_started"
-        printf 'finished=%s\n' "$_finished"
-    } > "$_tmp"
-    mv -f "$_tmp" "$EMOJI_TASK_FILE" 2>/dev/null || true
-    chmod 644 "$EMOJI_TASK_FILE" 2>/dev/null || true
-}
 
 # ---------- 异步切换任务状态 ----------
 json_escape() {
@@ -601,7 +513,6 @@ handle_action() {
 
     # 同步预览字体到 webroot/fonts/（供 WebUI 用相对路径加载，避免 file:// CORS 限制）
     sync_preview_fonts 2>/dev/null || true
-    sync_emoji_preview_fonts 2>/dev/null || true
 
     # WebUI 列表统一走受控 Shell 扫描，避免旧原生工具执行过时路径或清理逻辑。
 
@@ -879,79 +790,15 @@ EOF_FONTS
             fi
             ;;
         reboot_required)
-            _text=false; _emoji=false; _weight=false
+            _text=false
             [ -f "$TEXT_REBOOT_REQUIRED" ] && _text=true
-            [ -f "$EMOJI_REBOOT_REQUIRED" ] && _emoji=true
-            # 清理旧版本遗留标记；字重调整不再要求完整重启。
             rm -f "$FONT_WEIGHT_REBOOT_REQUIRED" 2>/dev/null || true
-            _required=false
-            if [ "$_text" = true ] || [ "$_emoji" = true ]; then _required=true; fi
-            printf '{"status":"ok","data":{"required":%s,"text":%s,"emoji":%s,"weight":%s}}\n' "$_required" "$_text" "$_emoji" "$_weight"
+            printf '{"status":"ok","data":{"required":%s,"text":%s,"weight":false}}
+' "$_text" "$_text"
             ;;
         reboot_device)
             printf '{"status":"ok","data":{"message":"正在重启手机"}}\n'
             (sleep 1; svc power reboot 2>/dev/null || reboot 2>/dev/null) &
-            ;;
-        emoji_list)
-            _current=$(get_current_emoji_id)
-            _first=true
-            printf '{"status":"ok","data":{"current":"%s","path":"%s","emojis":[' "$(json_escape "$_current")" "$(json_escape "$USER_EMOJI_DIR")"
-            for _f in "$USER_EMOJI_DIR"/*.ttf "$USER_EMOJI_DIR"/*.otf "$USER_EMOJI_DIR"/*.ttc \
-                      "$USER_EMOJI_DIR"/*.TTF "$USER_EMOJI_DIR"/*.OTF "$USER_EMOJI_DIR"/*.TTC; do
-                [ -f "$_f" ] || continue
-                _base=$(basename "$_f")
-                _id="${_base%.*}"
-                _bytes=$(wc -c < "$_f" 2>/dev/null | tr -d '[:space:]')
-                case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
-                _fmt=$(font_detect_format "$_f" 2>/dev/null || echo UNKNOWN)
-                _valid=false; _color=false; _warning=""; _error=""
-                if font_validate "$_f" emoji 2>/dev/null; then
-                    _valid=true; _color="$FONT_CHECK_COLOR"; _warning="$FONT_CHECK_WARNING"
-                else
-                    _error="$FONT_CHECK_ERROR"
-                fi
-                [ "$_first" = true ] || printf ','
-                printf '{"id":"%s","name":"%s","file":"./emoji/%s","size":"%s","bytes":%s,"format":"%s","valid":%s,"color":%s,"warning":"%s","error":"%s"}' \
-                    "$(json_escape "$_id")" "$(json_escape "$_id")" "$(json_escape "$_base")" "$(format_filesize "$_bytes")" "$_bytes" "$(json_escape "$_fmt")" "$_valid" "$_color" "$(json_escape "$_warning")" "$(json_escape "$_error")"
-                _first=false
-            done
-            printf ']}}\n'
-            ;;
-        emoji_switch_async)
-            if [ -z "$param" ]; then
-                printf '{"status":"error","message":"未指定 Emoji 字体"}\n'
-            elif [ -f "$EMOJI_REBOOT_REQUIRED" ]; then
-                printf '{"status":"error","message":"本次开机已更改 Emoji，请先重启手机"}\n'
-            else
-                _task="emoji-$(date +%s)-$$"; _started=$(date +%s)
-                write_emoji_task "$_task" running "$param" "正在应用 Emoji" "$_started" ""
-                (
-                    if switch_emoji "$param" >> "$MODULE_DIR/logs/fontswitch.log" 2>&1; then
-                        write_emoji_task "$_task" success "$param" "Emoji 已准备，重启后生效" "$_started" "$(date +%s)"
-                        notify_user "洛书" "Emoji 已准备：$param。请完整重启手机。" "luoshu-emoji" || true
-                    else
-                        _rc=$?
-                        write_emoji_task "$_task" failed "$param" "Emoji 应用失败（代码 $_rc）" "$_started" "$(date +%s)"
-                    fi
-                ) &
-                printf '{"status":"ok","data":{"task":"%s","emoji":"%s"}}\n' "$(json_escape "$_task")" "$(json_escape "$param")"
-            fi
-            ;;
-        emoji_status)
-            if [ ! -s "$EMOJI_TASK_FILE" ]; then
-                printf '{"status":"error","message":"暂无 Emoji 任务"}\n'
-            else
-                _saved=$(sed -n 's/^task=//p' "$EMOJI_TASK_FILE" | head -n1)
-                if [ -n "$param" ] && [ "$param" != "$_saved" ]; then
-                    printf '{"status":"error","message":"Emoji 任务不存在"}\n'
-                else
-                    _state=$(sed -n 's/^state=//p' "$EMOJI_TASK_FILE" | head -n1)
-                    _emoji=$(sed -n 's/^emoji=//p' "$EMOJI_TASK_FILE" | head -n1)
-                    _msg=$(sed -n 's/^message=//p' "$EMOJI_TASK_FILE" | head -n1)
-                    printf '{"status":"ok","data":{"task":"%s","state":"%s","emoji":"%s","message":"%s"}}\n' \
-                        "$(json_escape "$_saved")" "$(json_escape "$_state")" "$(json_escape "$_emoji")" "$(json_escape "$_msg")"
-                fi
-            fi
             ;;
         delete)
             if [ -z "$param" ]; then

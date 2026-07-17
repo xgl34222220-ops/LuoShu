@@ -137,18 +137,6 @@
 
     <section class="switch-result" id="switchResult" hidden aria-live="polite"></section>
 
-    <section class="emoji-section" id="emojiSection" aria-label="Emoji 字体">
-        <div class="section-header emoji-header">
-            <div><h2>Emoji</h2><small>与文字字体独立挂载</small></div>
-            <div class="section-actions">
-                <button class="icon-btn small" id="openEmojiFolderBtn" title="打开 Emoji 文件夹" aria-label="打开 Emoji 文件夹">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>
-                </button>
-            </div>
-        </div>
-        <div class="emoji-current" id="emojiCurrent"><span class="emoji-sample">😀</span><div><strong>系统默认 Emoji</strong><small>/sdcard/LuoShu/emoji/</small></div></div>
-        <div class="emoji-list" id="emojiList"></div>
-    </section>
 
     <!-- 字体列表（本地） -->
     <section class="font-section" id="listSection">
@@ -299,17 +287,12 @@
                     </button>
                     <button class="setting-row" id="moreImportZipBtn" type="button">
                         <span class="setting-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 3v12"/><path d="M7 10l5 5 5-5"/><path d="M4 19h16"/></svg></span>
-                        <span class="setting-copy"><strong>导入字体包 ZIP</strong><small>自动识别可变字体、常规字重与 Emoji</small></span>
+                        <span class="setting-copy"><strong>导入字体包 ZIP</strong><small>自动识别可变字体与常规字重，忽略彩色、图标和符号字体</small></span>
                         <svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
                     </button>
                     <button class="setting-row" id="moreOpenFolderBtn" type="button">
                         <span class="setting-icon violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M3 7a2 2 0 012-2h5l2 2h7a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg></span>
                         <span class="setting-copy"><strong>打开文字字体文件夹</strong><small>/sdcard/LuoShu/fonts/</small></span>
-                        <svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
-                    </button>
-                    <button class="setting-row" id="moreOpenEmojiFolderBtn" type="button">
-                        <span class="setting-icon violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/></svg></span>
-                        <span class="setting-copy"><strong>打开 Emoji 文件夹</strong><small>/sdcard/LuoShu/emoji/</small></span>
                         <svg class="setting-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
                     </button>
                     <button class="setting-row" id="restartUIBtn" type="button">
@@ -333,7 +316,7 @@
                     <div class="more-group-label">使用方法</div>
                     <div class="guide-grid">
                         <div class="guide-item"><b>1</b><span><strong>放入字体</strong><small>支持真实 TTF / OTF / TTC；不能只改扩展名</small></span></div>
-                        <div class="guide-item"><b>2</b><span><strong>选择并切换</strong><small>文字和 Emoji 可分别选择</small></span></div>
+                        <div class="guide-item"><b>2</b><span><strong>选择并切换</strong><small>中文、英文和数字可分别选择</small></span></div>
                         <div class="guide-item"><b>3</b><span><strong>完整重启</strong><small>切换后必须完整重启</small></span></div>
                     </div>
                 </section>
