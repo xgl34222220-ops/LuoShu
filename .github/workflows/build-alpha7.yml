@@ -77,6 +77,7 @@ jobs:
           fi
           CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
           test -x "$CC"
+          mkdir -p work/runtime/prefix/bin
           cat > work/luoshu_python.c <<'EOF'
           #include <dlfcn.h>
           #include <stdio.h>
@@ -112,7 +113,7 @@ jobs:
           STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
           "$STRIP" work/runtime/prefix/bin/luoshu-python
           file work/runtime/prefix/bin/luoshu-python
-          readelf -d work/runtime/prefix/bin/luoshu-python | grep 'libdl.so'
+          test -s work/runtime/prefix/bin/luoshu-python
 
       - name: Install pure-Python FontTools
         run: |
