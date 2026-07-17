@@ -20,6 +20,7 @@ tar -xzf "$WORK/download/$PY_ARCHIVE" -C "$WORK/runtime"
 R="$WORK/runtime/prefix"
 test -d "$R/lib/python3.14"
 test -f "$R/lib/libpython3.14.so"
+test -f "$R/lib/python3.14/LICENSE.txt"
 mkdir -p "$R/bin" "$R/lib/python3.14/site-packages"
 
 if [ -z "$NDK" ] || [ ! -d "$NDK" ]; then
@@ -65,6 +66,7 @@ HOST_SITE=$(dirname "$FT_DIR")
 cp -a "$FT_DIR" "$R/lib/python3.14/site-packages/fontTools"
 DIST=$(find "$HOST_SITE" -maxdepth 1 -type d -iname 'fonttools-*.dist-info' -print -quit)
 test -n "$DIST"
+R_DIST="$R/lib/python3.14/site-packages/$(basename "$DIST")"
 cp -a "$DIST" "$R/lib/python3.14/site-packages/"
 
 # Remove files not needed by LuoShu's offline font builder.
@@ -83,12 +85,23 @@ find "$R/lib/python3.14/site-packages" -type f -name '*.so' -delete
 cp -a "$R"/. "$ROOT/common/python/"
 chmod 0755 "$ROOT/common/python/bin/luoshu-python"
 
-PY_LICENSE=$(find "$WORK/runtime" -type f -iname 'LICENSE*' -print -quit)
-test -n "$PY_LICENSE"
-cp "$PY_LICENSE" "$ROOT/licenses/CPython-LICENSE.txt"
-FT_LICENSE=$(find "$ROOT/common/python/lib/python3.14/site-packages" -path '*fonttools*.dist-info*' -type f -iname 'LICENSE*' -print -quit)
-test -n "$FT_LICENSE"
-cp "$FT_LICENSE" "$ROOT/licenses/FontTools-LICENSE.txt"
+# Copy exact upstream license files. Do not use a broad find over the combined
+# runtime tree: after FontTools is installed, that can select the wrong file.
+cp "$R/lib/python3.14/LICENSE.txt" "$ROOT/licenses/CPython-LICENSE.txt"
+test -f "$R_DIST/licenses/LICENSE"
+cp "$R_DIST/licenses/LICENSE" "$ROOT/licenses/FontTools-LICENSE.txt"
+if [ -f "$R_DIST/licenses/LICENSE.external" ]; then
+  cp "$R_DIST/licenses/LICENSE.external" "$ROOT/licenses/FontTools-LICENSE.external.txt"
+else
+  rm -f "$ROOT/licenses/FontTools-LICENSE.external.txt"
+fi
+
+grep -q 'Python Software Foundation' "$ROOT/licenses/CPython-LICENSE.txt"
+grep -q 'MIT License' "$ROOT/licenses/FontTools-LICENSE.txt"
+if cmp -s "$ROOT/licenses/CPython-LICENSE.txt" "$ROOT/licenses/FontTools-LICENSE.txt"; then
+  echo 'License packaging error: CPython and FontTools license files are identical.' >&2
+  exit 1
+fi
 
 # Validate pure-Python imports using the exact pruned payload.
 PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" \
