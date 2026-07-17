@@ -5,4 +5,4 @@ versionCode=14100
 author=惜故里丶
 description=Android 全局字体管理，当前字体：系统默认字体
 updateJson=https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/main/update.json
-webroot=webroot
+webroot=webroot_v141
