@@ -1,13 +1,17 @@
 #!/bin/sh
 set -eu
 STAGE="$1"; CUSTOMIZE="$STAGE/customize.sh"; PROP="$STAGE/module.prop"; MANAGER="$STAGE/common/font_manager.sh"
-for file in "$CUSTOMIZE" "$PROP" "$MANAGER" "$STAGE/common/module_status.sh" "$STAGE/common/v14_switch.sh" "$STAGE/common/font_mix.sh" "$STAGE/common/v14_mix.sh"; do test -f "$file"; done
-sed -i -E 's/v13\.5 Stable Hotfix3/v14/g; s/文字与 Emoji 独立管理/Android 全局字体管理/g' "$CUSTOMIZE"
-if ! grep -q 'module_status.sh.*SELECTED_FONT' "$CUSTOMIZE"; then sed -i '/^exit 0$/i\[ -f "$MODPATH/common/module_status.sh" ] \&\& MODDIR="$MODPATH" sh "$MODPATH/common/module_status.sh" "$SELECTED_FONT" >\/dev\/null 2>\&1 || true' "$CUSTOMIZE"; fi
-if ! grep -q 'common/v14_switch.sh' "$CUSTOMIZE"; then sed -i '/chmod 755 "$MODPATH\/system\/bin\/洛书"/i\chmod 755 "$MODPATH/common/module_status.sh" "$MODPATH/common/v14_switch.sh" 2>/dev/null || true' "$CUSTOMIZE"; fi
-if ! grep -q 'common/font_mix.sh' "$CUSTOMIZE"; then sed -i '/chmod 755 "$MODPATH\/system\/bin\/洛书"/i\chmod 755 "$MODPATH/common/font_mix.sh" "$MODPATH/common/v14_mix.sh" 2>/dev/null || true' "$CUSTOMIZE"; fi
-if ! grep -q 'v14-lightweight-preview-sync' "$MANAGER"; then
-    sed -i '/    sync_preview_fonts 2>\/dev\/null || true/,/    sync_emoji_preview_fonts 2>\/dev\/null || true/c\    # v14-lightweight-preview-sync\n    case "$action" in\n        list|emoji_list|import_list|import_zip|delete)\n            sync_preview_fonts 2>/dev/null || true\n            sync_emoji_preview_fonts 2>/dev/null || true\n            ;;\n    esac' "$MANAGER"
+for file in "$CUSTOMIZE" "$PROP" "$MANAGER" "$STAGE/common/module_status.sh" "$STAGE/common/v14_switch.sh" "$STAGE/common/font_switch_v141.sh" "$STAGE/common/font_transaction.sh" "$STAGE/common/font_mix.sh" "$STAGE/common/v14_mix.sh" "$STAGE/common/device_capabilities.sh" "$STAGE/common/luoshu_cli.sh"; do test -f "$file"; done
+
+# 列表请求只同步文字预览；Emoji 功能从 v14.1 正式运行路径移除。
+if ! grep -q 'v141-text-preview-only' "$MANAGER"; then
+    sed -i '/    sync_preview_fonts 2>\/dev\/null || true/,/    sync_emoji_preview_fonts 2>\/dev\/null || true/c\    # v141-text-preview-only\n    case "$action" in\n        list|import_list|import_zip|delete) sync_preview_fonts 2>/dev/null || true ;;\n    esac' "$MANAGER"
 fi
+sed -i -E 's/v13\.4 Beta2 Hotfix6/v14.1/g; s/v13426/v14100/g' "$MANAGER"
 sed -i -E 's#^description=.*#description=Android 全局字体管理，当前字体：系统默认字体#' "$PROP"
-chmod 0755 "$CUSTOMIZE" "$STAGE/common/module_status.sh" "$STAGE/common/v14_switch.sh" "$STAGE/common/font_mix.sh" "$STAGE/common/v14_mix.sh" 2>/dev/null || true
+rm -f "$STAGE/magic" "$STAGE/skip_mount" "$STAGE/skip_mountify" "$STAGE/remove" "$STAGE/disable" 2>/dev/null || true
+rm -rf "$STAGE/webroot/emoji" "$STAGE/system/fonts/.luoshu-emoji-store" 2>/dev/null || true
+rm -f "$STAGE/system/fonts/NotoColorEmoji.ttf" "$STAGE/system/fonts/NotoColorEmojiLegacy.ttf" \
+      "$STAGE/config/active_emoji.conf" "$STAGE/config/emoji_task.conf" "$STAGE/config/emoji_reboot_required.conf" 2>/dev/null || true
+chmod 0755 "$CUSTOMIZE" "$STAGE/post-fs-data.sh" "$STAGE/post-mount.sh" "$STAGE/service.sh" "$STAGE/uninstall.sh" 2>/dev/null || true
+find "$STAGE/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
