@@ -95,16 +95,12 @@ jobs:
       - name: Copy pure Python FontTools
         run: |
           set -euo pipefail
-          HOST_SITE="$(python3 - <<'PY'
-          import site
-          print(site.getsitepackages()[0])
-          PY
-          )"
           FT_DIR="$(python3 - <<'PY'
           import fontTools, os
           print(os.path.dirname(fontTools.__file__))
           PY
           )"
+          HOST_SITE="$(dirname "$FT_DIR")"
           cp -a "$FT_DIR" work/runtime/prefix/lib/python3.14/site-packages/fontTools
           DIST="$(find "$HOST_SITE" -maxdepth 1 -type d -iname 'fonttools-*.dist-info' -print -quit)"
           test -n "$DIST"
