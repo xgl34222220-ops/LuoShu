@@ -50,20 +50,21 @@ jobs:
           asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
           test -s "$asset"
           unzip -t "$asset" >/dev/null
+          unzip -Z1 "$asset" > /tmp/luoshu-package-list.txt
           test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = 'v14.1'
           test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = '14120'
-          unzip -l "$asset" | grep -q 'common/composite_font.py'
-          unzip -l "$asset" | grep -q 'common/luoshu_composite.sh'
-          unzip -l "$asset" | grep -q 'common/python/bin/luoshu-python'
-          unzip -l "$asset" | grep -q 'licenses/CPython-LICENSE.txt'
-          unzip -l "$asset" | grep -q 'licenses/FontTools-LICENSE.txt'
+          grep -qx 'common/composite_font.py' /tmp/luoshu-package-list.txt
+          grep -qx 'common/luoshu_composite.sh' /tmp/luoshu-package-list.txt
+          grep -qx 'common/python/bin/luoshu-python' /tmp/luoshu-package-list.txt
+          grep -qx 'licenses/CPython-LICENSE.txt' /tmp/luoshu-package-list.txt
+          grep -qx 'licenses/FontTools-LICENSE.txt' /tmp/luoshu-package-list.txt
           unzip -p "$asset" webroot/index.html | grep -q 'v14.js?v=14120'
           unzip -p "$asset" common/font_mix.sh | grep -q 'full-composite-v5'
           unzip -p "$asset" post-fs-data.sh | grep -q 'font_mix.sh.*recover'
           ! unzip -p "$asset" service.sh | grep -q 'cmd font system --update'
           ! unzip -p "$asset" service.sh | grep -q 'oplus-font refresh'
-          ! unzip -l "$asset" | grep -qE 'system/etc/(fonts.xml|font_fallback.xml)'
-          ! unzip -l "$asset" | grep -qE '(^|/)skip_mount(ify)?$'
+          ! grep -qE '^system/etc/(fonts.xml|font_fallback.xml)$' /tmp/luoshu-package-list.txt
+          ! grep -qE '(^|/)skip_mount(ify)?$' /tmp/luoshu-package-list.txt
       - uses: actions/upload-artifact@v4
         with:
           name: LuoShu-v14.1-validation
