@@ -38,6 +38,7 @@ grep -q 'app.js?v=14120' "$ROOT/webroot/index.html"
 grep -q "UI_VERSION = '14120'" "$ROOT/webroot/environment.js"
 
 # Project license and third-party attribution must be complete and distinct.
+test "$(sha256sum "$ROOT/LICENSE" | awk '{print $1}')" = '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986'
 grep -q 'GNU GENERAL PUBLIC LICENSE' "$ROOT/LICENSE"
 grep -q 'Version 3, 29 June 2007' "$ROOT/LICENSE"
 grep -q 'END OF TERMS AND CONDITIONS' "$ROOT/LICENSE"
