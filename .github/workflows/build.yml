@@ -1,41 +1,48 @@
 name: Build module
-
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Check source
-        shell: bash
+      - name: Install build dependencies
         run: |
-          if ! sh -x ./scripts/check.sh > /tmp/luoshu-check.log 2>&1; then
-            tail -n 12 /tmp/luoshu-check.log
-            exit 1
-          fi
-      - name: Upload check diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: LuoShu-check-diagnostics
-          path: /tmp/luoshu-check.log
-          if-no-files-found: ignore
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-pip fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - name: Prepare ARM64 composite runtime
+        run: sh ./scripts/prepare_composite_runtime.sh
+      - name: Composite smoke tests
+        run: |
+          CJK="$(find /usr/share/fonts -type f \( -iname '*NotoSansCJK*Regular*.ttc' -o -iname '*NotoSansCJK*Regular*.otf' \) -print -quit)"
+          LATIN="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
+          test -n "$CJK"; test -n "$LATIN"
+          python3 common/composite_font.py --cjk "$CJK" --latin "$LATIN" --digit "$LATIN" --output /tmp/luoshu-composite.otf >/tmp/luoshu-composite.json
+          python3 - <<'PY'
+          import json
+          from fontTools.ttLib import TTFont
+          report=json.load(open('/tmp/luoshu-composite.json', encoding='utf-8'))
+          assert report['status']=='ok', report
+          font=TTFont('/tmp/luoshu-composite.otf')
+          cmap=font.getBestCmap() or {}
+          assert all(ord(ch) in cmap for ch in '中Aa019')
+          assert report['replaced']['latin'] >= 52
+          assert report['replaced']['digit'] >= 10
+          PY
       - name: Build flashable module
         run: sh ./scripts/build.sh
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-module
-          path: dist/*.zip
+          name: LuoShu-v14.1
+          path: dist/*.zip*
           if-no-files-found: error
+          retention-days: 30
