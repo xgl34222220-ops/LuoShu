@@ -26,7 +26,6 @@ BACKUP_DIR="$MODULE_DIR/backup"
 SYSTEM_FONTS_DIR="$MODULE_DIR/system/fonts"
 SYSTEM_ETC_DIR="$MODULE_DIR/system/etc"
 ACTIVE_FONT_CONF="$CONFIG_DIR/active_font.conf"
-FONT_LIST_CONF="$CONFIG_DIR/font_list.conf"
 LUOSHU_PUBLIC_DIR="/sdcard/LuoShu"
 USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
 USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
@@ -106,30 +105,6 @@ format_filesize() {
         gb_frac=$(((bytes % 1073741824) / 107374182))
         echo "${gb_int}.${gb_frac} GB"
     fi
-}
-
-# 获取所有字体的统计信息
-get_font_stats() {
-    total_count=0
-    total_bytes=0
-    weight_dist=""
-    for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
-        [ -f "$f" ] || continue
-        name=$(basename "$f")
-        case "$name" in SysFont*|SysSans*) continue ;; esac
-        fam=$(detect_font_family "$name")
-        w=$(detect_font_weight "$name")
-        total_count=$((total_count + 1))
-        # 用 ls -l + awk 获取大小（比 set -- 更可靠，不受文件名空格影响）
-        fbytes=$(ls -l "$f" 2>/dev/null | awk '{print $5}')
-        case "$fbytes" in ''|*[!0-9]*) fbytes=0 ;; esac
-        total_bytes=$((total_bytes + fbytes))
-        # 统计字重分布
-        case ",$weight_dist," in *",$fam:$w,"*) ;; *) weight_dist="$weight_dist,$fam:$w" ;; esac
-    done
-    # 去掉 weight_dist 开头的逗号（纯 shell，不用 sed）
-    case "$weight_dist" in ,*) weight_dist="${weight_dist#,}" ;; esac
-    printf '{"totalFiles":%d,"totalSize":"%s","weightDist":"%s"}' "$total_count" "$(format_filesize "$total_bytes")" "$weight_dist"
 }
 
 # 扫描用户字体族（基础版，去重）
@@ -997,7 +972,7 @@ case "$1" in
         current=$(get_current_font_id)
         echo ""
         echo "╔══════════════════════════════════════╗"
-        echo "║        洛 书  v13.4 Beta2 Hotfix6                   ║"
+        echo "║             洛 书  v14.1.1 RC3                      ║"
         echo "║        演宇宙之理，塑文字之骨        ║"
         echo "╠══════════════════════════════════════╣"
         printf '║  当前字体：\033[1;36m%-24s\033[0m║\n' "$current"
