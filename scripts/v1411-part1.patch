@@ -1,0 +1,377 @@
+--- a/common/composite_font.py
++++ b/common/composite_font.py
+@@ -299,18 +299,18 @@
+     for path, label in ((cjk_path, "中文"), (latin_path, "英文"), (digit_path, "数字")):
+         if not path.is_file() or path.stat().st_size < 12:
+             raise CompositeError(f"{label}字体文件不可用：{path}")
+-    _progress(args.progress, "load-cjk", "正在读取中文基底", 5)
++    _progress(args.progress, "load-cjk", "正在读取中文基底", 15)
+     base, cjk_face, _cjk_location = _load_font(cjk_path, "cjk", args.weight, args.cjk_face)
+     latin = digit = None
+     latin_face = digit_face = -1
+     try:
+         if not all(cp in (base.getBestCmap() or {}) for cp in (ord("中"), ord("A"), ord("1"))):
+             raise CompositeError("中文基础字体必须同时包含中文、英文字母和数字，才能安全生成完整复合字体")
+-        _progress(args.progress, "latin", "正在导入英文字形", 20)
++        _progress(args.progress, "latin", "正在导入英文字形", 30)
+         latin, latin_face, latin_location = _load_font(latin_path, "latin", args.weight, args.latin_face)
+         latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS, latin_location, REQUIRED_LATIN)
+         latin.close(); latin = None; gc.collect()
+-        _progress(args.progress, "digit", "正在导入数字字形", 52)
++        _progress(args.progress, "digit", "正在导入数字字形", 55)
+         digit, digit_face, digit_location = _load_font(digit_path, "digit", args.weight, args.digit_face)
+         digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, digit_location, REQUIRED_DIGITS)
+         digit.close(); digit = None; gc.collect()
+@@ -322,17 +322,17 @@
+             if tag in base:
+                 del base[tag]
+         _set_names(base)
+-        _progress(args.progress, "save", "正在写入完整复合字体", 68)
++        _progress(args.progress, "save", "正在写入完整复合字体", 70)
+         output.parent.mkdir(parents=True, exist_ok=True)
+         with tempfile.NamedTemporaryFile(prefix=output.name + ".", suffix=".tmp", dir=output.parent, delete=False) as temp:
+             temp_path = Path(temp.name)
+         try:
+             base.save(str(temp_path), reorderTables=False)
+-            _progress(args.progress, "validate", "正在验证复合字体", 90)
++            _progress(args.progress, "validate", "正在验证复合字体", 84)
+             validation = _validate_output(temp_path)
+             os.chmod(temp_path, 0o644)
+             os.replace(temp_path, output)
+-            _progress(args.progress, "done", "完整复合字体已生成", 100)
++            _progress(args.progress, "done", "完整复合字体已生成", 88)
+         finally:
+             temp_path.unlink(missing_ok=True)
+         return {
+--- a/common/font_mix.sh
++++ b/common/font_mix.sh
+@@ -1,5 +1,5 @@
+ #!/system/bin/sh
+-# 洛书 v14.1：完整复合字体引擎。
++# 洛书 v14.1.1：完整复合字体引擎与可恢复事务。
+ # 中文字体保留为完整基底，仅把英文与数字的对应字形写入同一份字体。
+ # 不裁剪 ROM 字体槽、不覆盖 fonts.xml / font_fallback.xml。
+ set +e
+@@ -27,6 +27,8 @@
+ PAYLOAD_BACKUP=""
+ PAYLOAD_ACTIVATED=0
+ PAYLOAD_COMMIT_MARKER="$MODDIR/.font-payload-commit.ok"
++CONFIG_BACKUP_DIR="$MODDIR/.font-config-backup"
++CONFIG_BACKED_UP=0
+ COMPOSITE_RESULT=""
+ COMPOSITE_REPORT=""
+ COMPOSITE_CACHE_HIT=false
+@@ -144,9 +146,44 @@
+     return 0
+ }
+ 
++backup_config_state() {
++    rm -rf "$CONFIG_BACKUP_DIR" 2>/dev/null || true
++    mkdir -p "$CONFIG_BACKUP_DIR" 2>/dev/null || return 1
++    for _name in font_mix.conf active_font.conf text_reboot_required.conf; do
++        _src="$CONFIG_DIR/$_name"
++        if [ -e "$_src" ]; then
++            cp -af "$_src" "$CONFIG_BACKUP_DIR/$_name" 2>/dev/null || return 1
++        else
++            : > "$CONFIG_BACKUP_DIR/$_name.missing" || return 1
++        fi
++    done
++    CONFIG_BACKED_UP=1
++    return 0
++}
++
++restore_config_state() {
++    [ -d "$CONFIG_BACKUP_DIR" ] || { CONFIG_BACKED_UP=0; return 0; }
++    for _name in font_mix.conf active_font.conf text_reboot_required.conf; do
++        _dest="$CONFIG_DIR/$_name"
++        if [ -f "$CONFIG_BACKUP_DIR/$_name.missing" ]; then
++            rm -f "$_dest" 2>/dev/null || true
++        elif [ -e "$CONFIG_BACKUP_DIR/$_name" ]; then
++            cp -af "$CONFIG_BACKUP_DIR/$_name" "$_dest" 2>/dev/null || true
++        fi
++    done
++    rm -rf "$CONFIG_BACKUP_DIR" 2>/dev/null || true
++    CONFIG_BACKED_UP=0
++}
++
++discard_config_backup() {
++    rm -rf "$CONFIG_BACKUP_DIR" 2>/dev/null || true
++    CONFIG_BACKED_UP=0
++}
++
+ recover_interrupted_payload() {
+     if [ -f "$PAYLOAD_COMMIT_MARKER" ]; then
+         rm -rf "$MODDIR"/.font-payload-backup.* "$MODDIR"/.font-payload-stage.* 2>/dev/null || true
++        discard_config_backup
+         rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
+         return 0
+     fi
+@@ -156,6 +193,7 @@
+         mv "$_backup" "$SYSTEM_FONTS_DIR" 2>/dev/null || true
+         break
+     done
++    restore_config_state
+     rm -rf "$MODDIR"/.font-payload-backup.* "$MODDIR"/.font-payload-stage.* 2>/dev/null || true
+ }
+ 
+@@ -196,9 +234,11 @@
+ }
+ 
+ payload_stage_rollback() {
+-    [ "$PAYLOAD_ACTIVATED" -eq 1 ] || return 0
+-    rm -rf "$SYSTEM_FONTS_DIR" 2>/dev/null || true
+-    mv "$PAYLOAD_BACKUP" "$SYSTEM_FONTS_DIR" 2>/dev/null || true
++    if [ "$PAYLOAD_ACTIVATED" -eq 1 ]; then
++        rm -rf "$SYSTEM_FONTS_DIR" 2>/dev/null || true
++        mv "$PAYLOAD_BACKUP" "$SYSTEM_FONTS_DIR" 2>/dev/null || true
++    fi
++    restore_config_state
+     rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
+     PAYLOAD_BACKUP=""
+     PAYLOAD_ACTIVATED=0
+@@ -207,6 +247,7 @@
+ payload_stage_finalize() {
+     [ "$PAYLOAD_ACTIVATED" -eq 1 ] || return 0
+     rm -rf "$PAYLOAD_BACKUP" 2>/dev/null || true
++    discard_config_backup
+     rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
+     PAYLOAD_BACKUP=""
+     PAYLOAD_ACTIVATED=0
+@@ -315,7 +356,8 @@
+ check_composite_runtime() {
+     _runner="$MODDIR/common/luoshu_composite.sh"
+     mkdir -p "$MODDIR/cache" 2>/dev/null || { set_mix_error "无法创建运行时自检目录"; return 1; }
+-    _runtime_key=$(composite_hash_file "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null)
++    _runtime_material="$(composite_hash_file "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null)-$(composite_hash_file "$MODDIR/common/python/lib/libpython3.14.so" 2>/dev/null)-$(composite_hash_file "$MODDIR/common/composite_font.py" 2>/dev/null)-$(composite_hash_file "$MODDIR/common/python/lib/python3.14/site-packages/fontTools/__init__.py" 2>/dev/null)"
++    _runtime_key=$(printf '%s' "$_runtime_material" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; elif command -v toybox >/dev/null 2>&1; then toybox sha256sum; else cksum; fi; } | awk '{print $1}')
+     [ -n "$_runtime_key" ] || _runtime_key=unknown
+     _ok="$MODDIR/cache/runtime_probe.${_runtime_key}.ok"
+     [ -s "$_ok" ] && return 0
+@@ -349,7 +391,14 @@
+         _base=${_old%.otf}
+         rm -f "$_old" "${_base}.json" 2>/dev/null || true
+     done
+-    rm -f "$_cache"/.*.tmp.* 2>/dev/null || true
++    for _report in "$_cache"/*.json; do
++        [ -f "$_report" ] || continue
++        [ -f "${_report%.json}.otf" ] || rm -f "$_report" 2>/dev/null || true
++    done
++    rm -f "$_cache"/.*.tmp.* "$_cache"/*.tmp.err 2>/dev/null || true
++    for _legacy in "$MODDIR/cache"/full-composite-v1 "$MODDIR/cache"/full-composite-v2 "$MODDIR/cache"/full-composite-v3 "$MODDIR/cache"/full-composite-v4; do
++        [ "$_legacy" = "$_cache" ] || rm -rf "$_legacy" 2>/dev/null || true
++    done
+ }
+ 
+ build_composite_file() {
+@@ -358,7 +407,9 @@
+     _runner="$MODDIR/common/luoshu_composite.sh"
+     [ -f "$MODDIR/common/composite_font.py" ] && [ -f "$_runner" ] || { set_mix_error '完整复合字体引擎缺失'; return 1; }
+     [ -x "$MODDIR/common/python/bin/luoshu-python" ] || chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
++    write_progress runtime '正在检查复合字体运行时' 8
+     check_composite_runtime || return 1
++    write_progress hash '正在计算字体指纹与缓存' 10
+     _cache="$MODDIR/cache/full-composite-v5"
+     mkdir -p "$_cache" "$MODDIR/cache/tmp" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
+     _key_src="$(composite_hash_file "$_cjk_src")-$(composite_hash_file "$_latin_src")-$(composite_hash_file "$_digit_src")-full-composite-v5"
+@@ -368,7 +419,7 @@
+     if [ -s "$_cached" ]; then
+         COMPOSITE_CACHE_HIT=true
+         touch "$_cached" "$_report" 2>/dev/null || true
+-        write_progress cache '已验证并使用现有复合字体缓存' 100
++        write_progress cache '已验证并使用现有复合字体缓存' 88
+     else
+         _tmp="$_cache/.${_key}.$$.tmp.otf"; _tmp_report="$_cache/.${_key}.$$.tmp.json"; _tmp_error="$_cache/.${_key}.$$.tmp.err"
+         rm -f "$_tmp" "$_tmp_report" "$_tmp_error" "$_progress" 2>/dev/null || true
+@@ -399,7 +450,7 @@
+         mv -f "$_tmp" "$_cached" || { set_mix_error '无法保存复合字体缓存'; return 1; }
+         mv -f "$_tmp_report" "$_report" 2>/dev/null || true
+         rm -f "$_tmp_error" 2>/dev/null || true
+-        write_progress done '复合字体已生成并通过验证' 100
++        write_progress composite-done '复合字体已生成并通过验证' 88
+     fi
+     prune_composite_cache "$_cache"
+     COMPOSITE_RESULT="$_cached"; COMPOSITE_REPORT="$_report"
+@@ -426,16 +477,18 @@
+ }
+ 
+ commit_mix_config() {
+-    mv -f "$MIX_CONF_TMP" "$MIX_CONF" 2>/dev/null || return 1
+-    mv -f "$ACTIVE_CONF_TMP" "$ACTIVE_FONT_CONF" 2>/dev/null || return 1
+-    mv -f "$REBOOT_CONF_TMP" "$TEXT_REBOOT_REQUIRED" 2>/dev/null || return 1
+-    printf 'time=%s\n' "$(date +%s)" > "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || return 1
++    backup_config_state || return 1
++    mv -f "$MIX_CONF_TMP" "$MIX_CONF" 2>/dev/null || { restore_config_state; return 1; }
++    mv -f "$ACTIVE_CONF_TMP" "$ACTIVE_FONT_CONF" 2>/dev/null || { restore_config_state; return 1; }
++    mv -f "$REBOOT_CONF_TMP" "$TEXT_REBOOT_REQUIRED" 2>/dev/null || { restore_config_state; return 1; }
++    printf 'time=%s\n' "$(date +%s)" > "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || { restore_config_state; return 1; }
+     chmod 0644 "$MIX_CONF" "$ACTIVE_FONT_CONF" "$TEXT_REBOOT_REQUIRED" 2>/dev/null || true
+     return 0
+ }
+ 
+ apply_mix() {
+     _cjk="$1"; _latin="$2"; _digit="$3"
++    write_progress prepare '正在准备字体组合任务' 2
+     [ -n "$_cjk" ] && [ -n "$_latin" ] && [ -n "$_digit" ] || { set_mix_error '组合配置不完整'; return 1; }
+     recover_interrupted_payload
+     if [ -e "$LOCK_FILE" ]; then
+@@ -453,9 +506,11 @@
+     validate_source "$_cjk_src" 中文 || { set_mix_error "中文字体源文件不可用：${FONT_CHECK_ERROR:-找不到文件}"; return 4; }
+     validate_source "$_latin_src" 英文 || { set_mix_error "英文字体源文件不可用：${FONT_CHECK_ERROR:-找不到文件}"; return 4; }
+     validate_source "$_digit_src" 数字 || { set_mix_error "数字字体源文件不可用：${FONT_CHECK_ERROR:-找不到文件}"; return 4; }
++    write_progress source '三份源字体校验完成' 6
+ 
+     mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" "$MODDIR/logs" 2>/dev/null || { set_mix_error '无法创建模块工作目录'; return 4; }
+     build_composite_file "$_cjk_src" "$_latin_src" "$_digit_src" || return 5
++    write_progress payload '正在生成系统字体负载' 91
+     payload_stage_begin || { set_mix_error '无法创建字体负载暂存区'; return 5; }
+     if [ "$IS_HYPEROS" = "true" ]; then
+         populate_hyperos_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成 HyperOS 字体负载失败'; return 5; }
+@@ -464,7 +519,9 @@
+     else
+         populate_generic_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成通用 Android 字体负载失败'; return 5; }
+     fi
++    write_progress config '正在准备安全切换状态' 95
+     prepare_mix_config "$_cjk" "$_latin" "$_digit" || { set_mix_error '无法准备字体组合状态'; return 6; }
++    write_progress commit '正在原子提交字体负载' 97
+     payload_stage_activate || { set_mix_error '无法原子替换字体负载'; return 6; }
+     if ! commit_mix_config; then
+         set_mix_error '无法提交字体组合状态，已恢复旧字体负载'
+@@ -473,6 +530,7 @@
+     payload_stage_finalize
+     chmod 0755 "$SYSTEM_FONTS_DIR" 2>/dev/null || true
+     chmod 0644 "$SYSTEM_FONTS_DIR"/* 2>/dev/null || true
++    write_progress sync '正在同步系统挂载负载' 99
+     if [ "$IS_COLOROS" = "true" ]; then
+         sync_secondary_coloros_dirs || echo '警告：ColorOS 辅助分区字体同步未完全成功，主字体负载已保留' >&2
+     fi
+@@ -504,9 +562,24 @@
+             exit 0
+         fi
+         mkdir -p "$CONFIG_DIR" "$MODDIR/logs" 2>/dev/null || true
++        _worker=$(cat "$CONFIG_DIR/mix_worker.pid" 2>/dev/null | tr -d '\r\n')
++        if [ -n "$_worker" ] && kill -0 "$_worker" 2>/dev/null; then
++            _existing_task=$(sed -n 's/^task=//p' "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n')
++            _existing_state=$(sed -n 's/^state=//p' "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n')
++            if [ "$_existing_state" = running ] && [ -n "$_existing_task" ]; then
++                _existing_cjk=$(sed -n 's/^cjk=//p' "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n')
++                _existing_latin=$(sed -n 's/^latin=//p' "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n')
++                _existing_digit=$(sed -n 's/^digit=//p' "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n')
++                printf '{"status":"ok","data":{"task":"%s","resumed":true,"cjk":"%s","latin":"%s","digit":"%s"}}\n' \
++                    "$(json_escape "$_existing_task")" "$(json_escape "$_existing_cjk")" "$(json_escape "$_existing_latin")" "$(json_escape "$_existing_digit")"
++                exit 0
++            fi
++        fi
++        rm -f "$CONFIG_DIR/mix_worker.pid" 2>/dev/null || true
+         rotate_mix_log
+-        rm -f "$CONFIG_DIR/mix_last_error.txt" "$CONFIG_DIR/composite_progress.json" 2>/dev/null || true
++        rm -f "$CONFIG_DIR/mix_last_error.txt" "$CONFIG_DIR/composite_progress.json" "$CONFIG_DIR/mix_status_notified.conf" 2>/dev/null || true
+         _task="mix-$(date +%s)-$$"; _started=$(date +%s)
++        write_progress queued '任务已创建，正在启动后台引擎' 1
+         write_task "$_task" running '正在生成完整复合字体' "$_cjk" "$_latin" "$_digit" "$_started" ''
+         (
+             echo "[$(date '+%Y-%m-%d %H:%M:%S')] mix start: cjk=$_cjk latin=$_latin digit=$_digit task=$_task"
+@@ -514,6 +587,7 @@
+                 _finished=$(date +%s)
+                 _message='完整复合字体已准备，完整重启后生效'
+                 [ "$COMPOSITE_CACHE_HIT" = true ] && _message='已使用验证缓存准备字体组合，完整重启后生效'
++                write_progress success "$_message" 100
+                 write_task "$_task" success "$_message" "$_cjk" "$_latin" "$_digit" "$_started" "$_finished"
+                 command -v cmd >/dev/null 2>&1 && cmd notification post -t 洛书 luoshu-mix "字体组合已准备，请完整重启手机。" >/dev/null 2>&1 || true
+             else
+@@ -521,6 +595,9 @@
+                 _failure="${LAST_MIX_ERROR:-}"
+                 [ -n "$_failure" ] || _failure=$(tail -n1 "$CONFIG_DIR/mix_last_error.txt" 2>/dev/null | tr -d '\r')
+                 [ -n "$_failure" ] || _failure="字体组合失败（阶段代码 $_rc）"
++                _failed_percent=$(sed -n 's/^.*"percent":\([0-9][0-9]*\).*$/\1/p' "$CONFIG_DIR/composite_progress.json" 2>/dev/null | tail -n1)
++                case "$_failed_percent" in ''|*[!0-9]*) _failed_percent=0 ;; esac
++                write_progress failed "$_failure" "$_failed_percent"
+                 write_task "$_task" failed "$_failure" "$_cjk" "$_latin" "$_digit" "$_started" "$_finished"
+             fi
+             rm -f "$CONFIG_DIR/mix_worker.pid" 2>/dev/null || true
+--- a/common/v14_mix.sh
++++ b/common/v14_mix.sh
+@@ -1,5 +1,5 @@
+ #!/system/bin/sh
+-# 洛书 v14：字体组合轻量桥，轮询仅读取任务文件。
++# 洛书 v14.1.1：字体组合轻量桥，轮询只读取任务与进度文件。
+ set +e
+ MODDIR="${MODDIR:-}"
+ if [ -z "$MODDIR" ]; then
+@@ -7,9 +7,16 @@
+ fi
+ ENGINE="$MODDIR/common/font_mix.sh"
+ TASK_FILE="$MODDIR/config/mix_task.conf"
++PROGRESS_FILE="$MODDIR/config/composite_progress.json"
+ STATUS_SCRIPT="$MODDIR/common/module_status.sh"
++STATUS_MARKER="$MODDIR/config/mix_status_notified.conf"
+ json_escape(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
+ read_value(){ sed -n "s/^${1}=//p" "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n'; }
++progress_json(){
++    _raw=""
++    [ -s "$PROGRESS_FILE" ] && _raw=$(head -c 4096 "$PROGRESS_FILE" 2>/dev/null | tr -d '\r\n')
++    case "$_raw" in \{*\}) printf '%s' "$_raw" ;; *) printf 'null' ;; esac
++}
+ case "${1:-status}" in
+     start) sh "$ENGINE" start "$2" "$3" "$4" ;;
+     config) sh "$ENGINE" status ;;
+@@ -18,11 +25,17 @@
+         [ -s "$TASK_FILE" ] || { printf '{"status":"error","message":"暂无组合任务"}\n'; exit 0; }
+         _task=$(read_value task); _state=$(read_value state); _message=$(read_value message)
+         _cjk=$(read_value cjk); _latin=$(read_value latin); _digit=$(read_value digit)
+-        _started=$(read_value started); _finished=$(read_value finished)
++        _started=$(read_value started); _finished=$(read_value finished); _progress=$(progress_json)
+         [ -z "$_wanted" ] || [ "$_wanted" = "$_task" ] || { printf '{"status":"error","message":"任务不存在或已被新任务替换"}\n'; exit 0; }
+-        if [ "$_state" = success ] && [ -f "$STATUS_SCRIPT" ]; then MODDIR="$MODDIR" sh "$STATUS_SCRIPT" mix >/dev/null 2>&1 || true; fi
+-        printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","started":%s,"finished":%s}}\n' \
+-            "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_message")" "$(json_escape "$_cjk")" "$(json_escape "$_latin")" "$(json_escape "$_digit")" "${_started:-0}" "${_finished:-0}"
++        if [ "$_state" = success ] && [ -f "$STATUS_SCRIPT" ]; then
++            _notified=$(head -n1 "$STATUS_MARKER" 2>/dev/null | tr -d '\r\n')
++            if [ "$_notified" != "$_task" ]; then
++                MODDIR="$MODDIR" sh "$STATUS_SCRIPT" mix >/dev/null 2>&1 || true
++                printf '%s\n' "$_task" > "$STATUS_MARKER" 2>/dev/null || true
++            fi
++        fi
++        printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","started":%s,"finished":%s,"progress":%s}}\n' \
++            "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_message")" "$(json_escape "$_cjk")" "$(json_escape "$_latin")" "$(json_escape "$_digit")" "${_started:-0}" "${_finished:-0}" "$_progress"
+         ;;
+     *) printf '{"status":"error","message":"未知组合桥命令"}\n' ;;
+ esac
+--- a/config/version_notes.conf
++++ b/config/version_notes.conf
+@@ -1,3 +1,3 @@
+-version=v14.1
+-summary=完整复合字体正式版
+-notes=中文字体保持完整，英文与数字只替换对应字形；不覆盖字体 XML；支持任务进度、缓存复用、失败回滚和 Mountify 同步。
++version=v14.1.1 RC1
++summary=进度与事务可靠性候选版
++notes=修复复合字体真实进度传递，加入可见百分比、缓存命中提示、重复任务保护、运行时自检完整校验、缓存清理和配置事务回滚。
+--- a/module.prop
++++ b/module.prop
+@@ -1,7 +1,7 @@
+ id=LuoShu
+ name=洛书
+-version=v14.1
+-versionCode=14120
++version=v14.1.1 RC1
++versionCode=14121
+ author=惜故里丶
+ description=Android 全局字体管理，支持完整中英数字体复合与安全切换
+ updateJson=
+--- a/webroot/app.js
++++ b/webroot/app.js
+@@ -1,5 +1,5 @@
+ // 洛书 WebUI - 支持 Magisk / KernelSU / SukiSU
+-// 洛书 v14.1 — 完整复合字体与安全切换
++// 洛书 v14.1.1 RC1 — 完整复合字体与安全切换
+ 
+ import { exec } from './kernelsu.js';
+ import { analyzeFontUrl, formatAnalysisReport } from './font_analyzer.js';
+@@ -226,7 +226,7 @@
+     },
+ 
+     async loadModuleInfo() {
+-        let version = 'v14.1';
++        let version = 'v14.1.1 RC1';
+         try {
+             const prop = await this.execShell(`sed -n 's/^version=//p' ${MODULE_DIR}/module.prop | head -n 1`);
+             const raw = (prop || '').trim();
