@@ -1,5 +1,7 @@
 # 许可证范围说明
 
+SPDX-License-Identifier: GPL-3.0-only
+
 Copyright (C) 2026 惜故里丶 and LuoShu contributors
 
 洛书当前源码按照根目录 `LICENSE` 中的 **GNU General Public License v3.0 only**（`GPL-3.0-only`）提供。
