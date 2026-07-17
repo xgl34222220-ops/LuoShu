@@ -25,8 +25,10 @@ luoshu_txn_abort
 
 # 模拟 APatch source customize.sh：安装脚本结束后外层安装器必须继续执行。
 APMOD="$TMP/apatch-module"
-mkdir -p "$APMOD/system/bin" "$APMOD/system/fonts" "$APMOD/webroot/fonts" "$APMOD/config" "$APMOD/logs"
+mkdir -p "$APMOD/system/bin" "$APMOD/system/fonts" "$APMOD/webroot/fonts" "$APMOD/webroot_v141/fonts" "$APMOD/config" "$APMOD/logs"
 cp -R "$ROOT/common" "$APMOD/common"
+cp -R "$ROOT/webroot/." "$APMOD/webroot/"
+cp -R "$ROOT/webroot/." "$APMOD/webroot_v141/"
 cp "$ROOT/module.prop" "$APMOD/module.prop"
 cp "$ROOT/customize.sh" "$APMOD/customize.sh"
 cp "$ROOT/post-fs-data.sh" "$ROOT/post-mount.sh" "$ROOT/service.sh" "$ROOT/uninstall.sh" "$APMOD/"
@@ -47,6 +49,9 @@ grep -q 'APatch.*source' "$ROOT/customize.sh"
 grep -q 'post-fs-data.*阻塞' "$ROOT/post-fs-data.sh"
 grep -q 'font_transaction.sh' "$ROOT/common/font_switch_v141.sh"
 grep -q 'font_transaction.sh' "$ROOT/common/font_mix.sh"
-grep -q '默认卸载模块' "$ROOT/webroot/v14_1.js"
+grep -q '默认卸载模块' "$ROOT/customize.sh"
+grep -q '^webroot=webroot_v141$' "$ROOT/module.prop"
+test ! -e "$ROOT/webroot/v14_1.js"
+test ! -e "$ROOT/webroot/v14_1.css"
 grep -q 'digitIndependent' "$ROOT/common/device_capabilities.sh"
 echo 'LuoShu v14.1 behavior checks passed.'
