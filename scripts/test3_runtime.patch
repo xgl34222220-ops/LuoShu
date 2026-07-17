@@ -1,0 +1,354 @@
+--- a/common/font_manager.sh
++++ b/common/font_manager.sh
+@@ -40,6 +40,7 @@
+ SWITCH_TASK_FILE="$CONFIG_DIR/switch_task.conf"
+ EMOJI_TASK_FILE="$CONFIG_DIR/emoji_task.conf"
+ NATIVE_BIN="$MODULE_DIR/system/bin/luoshud"
++PREVIEW_CACHE_SCRIPT="$MODULE_DIR/common/preview_cache.sh"
+ FONT_WEIGHT_CONF="$CONFIG_DIR/font_weight.conf"
+ FONT_WEIGHT_ORIGINAL_CONF="$CONFIG_DIR/font_weight_original.conf"
+ 
+@@ -375,56 +376,10 @@
+ # 将用户字体文件同步到 webroot/fonts/ 目录，供 WebUI 预览用
+ # 使用缓存检查，只在文件变化时才同步，避免每次请求都重建
+ sync_preview_fonts() {
+-    webroot="${MODULE_DIR}/webroot"
+-    preview_dir="${webroot}/fonts"
+-    cache_file="${preview_dir}/.sync_cache"
+-    
+-    mkdir -p "$preview_dir" 2>/dev/null
+-    
+-    # 检查是否需要同步（用户字体目录有更新）
+-    need_sync="false"
+-    latest_mtime=0
+-    
+-    # 获取用户字体目录最新修改时间
+-    for src in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+-        [ -f "$src" ] || continue
+-        mtime=$(stat -c %Y "$src" 2>/dev/null || echo 0)
+-        [ "$mtime" -gt "$latest_mtime" ] && latest_mtime="$mtime"
+-    done
+-    
+-    # 没有字体文件，清理预览目录
+-    if [ "$latest_mtime" -eq 0 ]; then
+-        for f in "$preview_dir"/*.ttf "$preview_dir"/*.otf "$preview_dir"/*.ttc "$preview_dir"/*.TTF "$preview_dir"/*.OTF "$preview_dir"/*.TTC; do
+-            [ -f "$f" ] && rm -f "$f" 2>/dev/null
+-        done
+-        rm -f "$cache_file" 2>/dev/null
+-        return 0
+-    fi
+-    
+-    # 检查缓存
+-    if [ -f "$cache_file" ]; then
+-        cached_mtime=$(cat "$cache_file" 2>/dev/null || echo 0)
+-        # 如果缓存时间 >= 最新文件时间，跳过同步
+-        if [ "$cached_mtime" -ge "$latest_mtime" ]; then
+-            return 0
+-        fi
+-    fi
+-    
+-    # 需要同步：清除旧文件，创建新链接
+-    for f in "$preview_dir"/*.ttf "$preview_dir"/*.otf "$preview_dir"/*.ttc "$preview_dir"/*.TTF "$preview_dir"/*.OTF "$preview_dir"/*.TTC; do
+-        [ -f "$f" ] && rm -f "$f" 2>/dev/null
+-    done
+-    
+-    for src in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+-        [ -f "$src" ] || continue
+-        name=$(basename "$src")
+-        case "$name" in SysFont*|SysSans*) continue ;; esac
+-        ln -f "$src" "$preview_dir/$name" 2>/dev/null || cp -f "$src" "$preview_dir/$name" 2>/dev/null
+-        chmod 644 "$preview_dir/$name" 2>/dev/null
+-    done
+-    
+-    # 写入缓存时间
+-    echo "$latest_mtime" > "$cache_file" 2>/dev/null
++    # v14.1 测试版 3：不再把整个 /sdcard 字体库复制进模块。
++    # 字体详情需要预览时由 preview_cache.sh 按需缓存，最多保留 3 个字体家族。
++    [ -f "$PREVIEW_CACHE_SCRIPT" ] && MODDIR="$MODULE_DIR" sh "$PREVIEW_CACHE_SCRIPT" prune >/dev/null 2>&1 || true
++    return 0
+ }
+ 
+ 
+@@ -602,11 +557,7 @@
+     param="$2"
+     current=$(get_current_font_id 2>/dev/null)
+ 
+-    # 同步预览字体到 webroot/fonts/（供 WebUI 用相对路径加载，避免 file:// CORS 限制）
+-    # v141-text-preview-only
+-    case "$action" in
+-        list|import_list|import_zip|delete) sync_preview_fonts 2>/dev/null || true ;;
+-    esac
++    # 列表接口只扫描元数据，不复制字体文件。预览由 preview_prepare 按需生成。
+ 
+     # WebUI 列表统一走受控 Shell 扫描，避免旧原生工具执行过时路径或清理逻辑。
+ 
+@@ -617,7 +568,7 @@
+             list_cache_json="$CONFIG_DIR/webui_font_list.json"
+             list_cache_key="$CONFIG_DIR/webui_font_list.key"
+             dir_stamp=$(stat -c '%Y:%s' "$USER_FONTS_DIR" 2>/dev/null || echo '0:0')
+-            current_key="v14100|${current}|${dir_stamp}"
++            current_key="v14103|${current}|${dir_stamp}"
+             cached_key=$(cat "$list_cache_key" 2>/dev/null)
+             if [ "$param" != "refresh" ] && [ "$cached_key" = "$current_key" ] && [ -s "$list_cache_json" ] && grep -q '"status":"ok"' "$list_cache_json" 2>/dev/null; then
+                 cat "$list_cache_json"
+@@ -700,8 +651,8 @@
+                 [ "$fvariable" = true ] && family_type=variable
+                 ftime=$(stat -c '%y' "$wfile" 2>/dev/null | cut -c1-10)
+                 fname=$(basename "$wfile" 2>/dev/null)
+-                printf '{"id":"%s","name":"%s","weights":[%s],"variants":{%s},"familyType":"%s","file":"./fonts/%s","size":"%s","bytes":%s,"format":"%s","valid":%s,"warning":"%s","error":"%s","variable":%s,"date":"%s"}' \
+-                    "$(json_escape "$fam")" "$(json_escape "$fam")" "$weights_json" "$variants_json" "$(json_escape "$family_type")" "$(json_escape "$fname")" "$(format_filesize "$fbytes")" "$fbytes" "$(json_escape "$fformat")" "$fvalid" "$(json_escape "$fwarning")" "$(json_escape "$ferror")" "$fvariable" "$(json_escape "$ftime")"
++                printf '{"id":"%s","name":"%s","weights":[%s],"variants":{},"familyType":"%s","file":"","source":"%s","size":"%s","bytes":%s,"format":"%s","valid":%s,"warning":"%s","error":"%s","variable":%s,"date":"%s"}' \
++                    "$(json_escape "$fam")" "$(json_escape "$fam")" "$weights_json" "$(json_escape "$family_type")" "$(json_escape "$wfile")" "$(format_filesize "$fbytes")" "$fbytes" "$(json_escape "$fformat")" "$fvalid" "$(json_escape "$fwarning")" "$(json_escape "$ferror")" "$fvariable" "$(json_escape "$ftime")"
+                 first="false"
+             done < "$fam_list_file"
+             printf ']}}\n'
+@@ -725,6 +676,21 @@
+                 printf '{"status":"error","message":"ZIP 导入组件不可用"}\n'
+             fi
+             ;;
++        preview_prepare)
++            if [ -f "$PREVIEW_CACHE_SCRIPT" ]; then
++                MODDIR="$MODULE_DIR" sh "$PREVIEW_CACHE_SCRIPT" prepare "$param"
++            else
++                printf '{"status":"error","message":"预览缓存组件不可用"}\n'
++            fi
++            ;;
++        preview_cleanup)
++            if [ -f "$PREVIEW_CACHE_SCRIPT" ]; then MODDIR="$MODULE_DIR" sh "$PREVIEW_CACHE_SCRIPT" cleanup
++            else printf '{"status":"ok"}\n'; fi
++            ;;
++        storage)
++            if [ -f "$PREVIEW_CACHE_SCRIPT" ]; then MODDIR="$MODULE_DIR" sh "$PREVIEW_CACHE_SCRIPT" storage
++            else printf '{"status":"error","message":"存储统计组件不可用"}\n'; fi
++            ;;
+         font_weight_status)
+             font_weight_status_json
+             ;;
+@@ -982,6 +948,7 @@
+                 done
+                 if [ "$del_count" -gt 0 ]; then
+                     rm -f "$CONFIG_DIR/webui_font_list.key" "$CONFIG_DIR/webui_font_list.json" 2>/dev/null || true
++                    [ -f "$PREVIEW_CACHE_SCRIPT" ] && MODDIR="$MODULE_DIR" sh "$PREVIEW_CACHE_SCRIPT" cleanup >/dev/null 2>&1 || true
+                     printf '{"status":"ok","data":{"deleted":%d,"message":"已删除 %d 个文件"}}\n' "$del_count" "$del_count"
+                 else
+                     printf '{"status":"error","message":"未找到字体文件"}\n'
+--- a/webroot/app.js
++++ b/webroot/app.js
+@@ -784,6 +784,9 @@
+             const res = JSON.parse(jsonLine.trim());
+             if (res.status === 'ok' && res.data) {
+                 this.applyFontData(res.data);
++                if (this.currentFont && this.currentFont !== 'default' && this.currentFont !== 'mix') {
++                    this.prepareFontPreview(this.currentFont).then(() => this.renderCurrent()).catch(() => {});
++                }
+             } else {
+                 if (!background) this.showError(res.message || '加载失败');
+             }
+@@ -795,6 +798,29 @@
+         }
+     },
+ 
++    // v14.1 测试版 3：字体预览按需生成，最多缓存 3 个家族，不再复制整个字体库。
++    async prepareFontPreview(fontId) {
++        const font = this.fonts.find(item => item.id === fontId);
++        if (!font || font.id === 'default') return font;
++        if (font.file) return font;
++        this.previewPromises = this.previewPromises || {};
++        if (this.previewPromises[fontId]) return this.previewPromises[fontId];
++        this.previewPromises[fontId] = (async () => {
++            const output = await this.execShell(`${FONT_MANAGER} action preview_prepare ${this.shellQuote(fontId)}`);
++            const line = output.split('\n').find(value => value.trim().startsWith('{'));
++            const res = line ? JSON.parse(line.trim()) : null;
++            if (res?.status !== 'ok' || !res.data?.file) throw new Error(res?.message || '无法生成字体预览');
++            font.file = res.data.file;
++            font.variants = res.data.variants || {};
++            if (res.data.source) font.source = res.data.source;
++            if (res.data.bytes) font.bytes = Number(res.data.bytes) || font.bytes;
++            injectedFaces.delete(this.safeId(font.id));
++            return font;
++        })();
++        try { return await this.previewPromises[fontId]; }
++        finally { delete this.previewPromises[fontId]; }
++    },
++
+     // 只在需要预览时注入字体。静态多字重家族会为每个实际文件建立独立 face。
+     injectFontFace(font) {
+         if (!font?.file || !font?.id) return;
+@@ -877,11 +903,14 @@
+             ).join('');
+         }
+ 
+-        if (font && font.id) {
++        if (font && font.id && font.file) {
+             const safe = this.safeId(font.id);
+             mainEl.style.fontFamily = `'preview_${safe}', sans-serif`;
+             fullEl.style.fontFamily = `'preview_${safe}', sans-serif`;
+             this.scheduleFontFace(font);
++        } else {
++            mainEl.style.fontFamily = '';
++            fullEl.style.fontFamily = '';
+         }
+     },
+ 
+@@ -1039,9 +1068,15 @@
+         };
+     },
+ 
+-    showDetail(fontId) {
+-        const font = this.fonts.find(f => f.id === fontId);
++    async showDetail(fontId) {
++        let font = this.fonts.find(f => f.id === fontId);
+         if (!font) return;
++        const detailModal = document.getElementById('detailModal');
++        const detailContent = document.getElementById('detailContent');
++        if (detailContent) detailContent.innerHTML = '<div class="analysis-loading"><span></span>正在准备单字体预览…</div>';
++        detailModal?.classList.add('show');
++        try { font = await this.prepareFontPreview(fontId) || font; }
++        catch (error) { this.showToast('预览准备失败，将使用系统字体显示'); }
+         this.injectFontFace(font);
+         const isActive = fontId === this.currentFont;
+         const safe = this.safeId(font.id);
+--- a/webroot/v14.js
++++ b/webroot/v14.js
+@@ -60,6 +60,79 @@
+     return app.fonts?.find(item => item.id === id)?.name || id;
+ }
+ 
++function fontObject(app, id) { return app.fonts?.find(item => item.id === id) || null; }
++function fontSource(app, id) { return fontObject(app, id)?.source || ''; }
++
++async function analyzeMixRoles(app) {
++    const plan = [
++        { slot: 'cjk', id: mixState.cjk, label: '中文', cjkMin: 70 },
++        { slot: 'latin', id: mixState.latin, label: '英文', latinMin: 90, cjkMax: 35 },
++        { slot: 'digit', id: mixState.digit, label: '数字', digitMin: 100, cjkMax: 35 }
++    ];
++    const warnings = [];
++    const cache = new Map();
++    for (const item of plan) {
++        const font = fontObject(app, item.id);
++        if (!font) continue;
++        let result = cache.get(item.id);
++        if (!result) {
++            const prepared = await app.prepareFontPreview(item.id);
++            result = await app.analyzeFont(prepared || font);
++            cache.set(item.id, result);
++        }
++        const c = result?.coverage || {};
++        if (item.cjkMin && Number(c.cjk?.percent || 0) < item.cjkMin) warnings.push(`${item.label}字体“${fontName(app, item.id)}”中文覆盖仅 ${c.cjk?.percent || 0}%`);
++        if (item.latinMin && Number(c.latin?.percent || 0) < item.latinMin) warnings.push(`${item.label}字体“${fontName(app, item.id)}”英文字母覆盖仅 ${c.latin?.percent || 0}%`);
++        if (item.digitMin && Number(c.digits?.percent || 0) < item.digitMin) warnings.push(`${item.label}字体“${fontName(app, item.id)}”数字覆盖仅 ${c.digits?.percent || 0}%`);
++        if (item.cjkMax && item.id !== mixState.cjk && Number(c.cjk?.percent || 0) >= item.cjkMax) {
++            warnings.push(`${item.label}字体“${fontName(app, item.id)}”包含 ${c.cjk.percent}% 中文字形，部分界面可能抢占中文槽`);
++        }
++    }
++    return warnings;
++}
++
++function confirmMixRisks(warnings) {
++    if (!warnings.length) return Promise.resolve(true);
++    return new Promise(resolve => {
++        document.getElementById('v14MixRiskConfirm')?.remove();
++        const modal = document.createElement('div');
++        modal.id = 'v14MixRiskConfirm';
++        modal.className = 'v14-mix-risk show';
++        modal.innerHTML = `<div class="v14-mix-risk-sheet" role="dialog" aria-modal="true"><small>字体角色检测</small><h3>这组字体可能互相抢占</h3><div>${warnings.map(item => `<p>⚠ ${escapeHtml(item)}</p>`).join('')}</div><span>建议更换为不含中文字形的英文/数字字体。继续应用不一定出问题，但重启后部分中文可能跟随英文或数字字体。</span><footer><button data-risk-cancel type="button">返回调整</button><button data-risk-continue type="button">仍然应用</button></footer></div>`;
++        document.body.appendChild(modal);
++        const done = value => { modal.classList.remove('show'); setTimeout(() => modal.remove(), 180); resolve(value); };
++        modal.querySelector('[data-risk-cancel]')?.addEventListener('click', () => done(false));
++        modal.querySelector('[data-risk-continue]')?.addEventListener('click', () => done(true));
++        modal.addEventListener('click', event => { if (event.target === modal) done(false); });
++    });
++}
++
++async function loadStorageSummary(app) {
++    const panel = document.getElementById('fontMixPanel');
++    if (!panel) return;
++    let box = document.getElementById('v14StorageSummary');
++    if (!box) {
++        box = document.createElement('div');
++        box.id = 'v14StorageSummary';
++        box.className = 'v14-storage-summary';
++        panel.appendChild(box);
++    }
++    box.innerHTML = '<span>正在统计模块存储…</span>';
++    try {
++        const result = parseJson(await rawShell(`sh ${quote(FONT_MANAGER)} action storage`));
++        const data = result?.data || {};
++        box.innerHTML = `<div><small>模块实际占用</small><strong>${escapeHtml(data.actual || '未知')}</strong><em>管理器文件合计 ${escapeHtml(data.apparent || '未知')}</em></div><p>当前字体 ${escapeHtml(data.font || '0 B')} · 预览缓存 ${escapeHtml(data.preview || '0 B')} · 分区映射 ${escapeHtml(data.secondary || '0 B')} · 日志 ${escapeHtml(data.logs || '0 B')}</p><button id="v14ClearPreviewBtn" type="button">清理预览缓存</button>`;
++        box.querySelector('#v14ClearPreviewBtn')?.addEventListener('click', async event => {
++            const button = event.currentTarget; button.disabled = true; button.textContent = '清理中…';
++            try { await rawShell(`sh ${quote(FONT_MANAGER)} action preview_cleanup`); app.fonts?.forEach(font => { font.file = ''; font.variants = {}; }); app.showToast('预览缓存已清理'); }
++            catch (error) { app.showToast('清理失败: ' + String(error?.message || error)); }
++            await loadStorageSummary(app);
++        });
++    } catch (error) {
++        box.innerHTML = `<span>存储统计失败：${escapeHtml(error?.message || error)}</span>`;
++    }
++}
++
+ function mixSummary(app, separator = ' · ') {
+     return `中文 ${fontName(app, mixState.cjk)}${separator}英文 ${fontName(app, mixState.latin)}${separator}数字 ${fontName(app, mixState.digit)}`;
+ }
+@@ -136,6 +209,7 @@
+         document.getElementById('listSection')?.insertAdjacentElement('beforebegin', panel);
+         panel.querySelectorAll('[data-mix-slot]').forEach(button => button.addEventListener('click', () => openMixPicker(app, button.dataset.mixSlot)));
+         panel.querySelector('#applyFontMixBtn')?.addEventListener('click', () => applyFontMix(app));
++        setTimeout(() => loadStorageSummary(app), 120);
+     }
+     ensureMixPicker(app);
+     renderMixPanel(app);
+@@ -260,6 +334,7 @@
+     setProgress(false);
+     app.showToast(recovered ? '✓ 已确认字体组合' : '✓ 字体组合已准备，重启后生效');
+     app.showApplyDone('字体组合', mixSummary(app, ' / '));
++    setTimeout(() => loadStorageSummary(app), 220);
+ }
+ 
+ async function applyFontMix(app) {
+@@ -270,10 +345,23 @@
+     app.isSwitching = true;
+     document.body.classList.add('switching');
+     renderMixPanel(app);
+-    setProgress(true, '正在生成字体组合', '正在分别映射中文、英文和数字入口');
++    setProgress(true, '正在检查字体角色', '检测中文、英文和数字字符覆盖');
+     try {
+         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+-        const result = parseJson(await rawShell(`sh ${quote(MIX_BRIDGE)} start ${quote(mixState.cjk)} ${quote(mixState.latin)} ${quote(mixState.digit)}`));
++        let warnings = [];
++        try {
++            warnings = await analyzeMixRoles(app);
++        } catch (analysisError) {
++            console.warn('[洛书] 字体角色检测失败', analysisError);
++            warnings = ['无法完成字体角色覆盖检测；仍可继续应用，但建议确认英文/数字字体不包含大量中文字形'];
++        }
++        setProgress(false);
++        if (!(await confirmMixRisks(warnings))) return;
++        setProgress(true, '正在生成字体组合', '只更新所选角色并保留未修改槽位的精确源文件');
++        const cjkPath = fontSource(app, mixState.cjk);
++        const latinPath = fontSource(app, mixState.latin);
++        const digitPath = fontSource(app, mixState.digit);
++        const result = parseJson(await rawShell(`sh ${quote(MIX_BRIDGE)} start ${quote(mixState.cjk)} ${quote(mixState.latin)} ${quote(mixState.digit)} ${quote(cjkPath)} ${quote(latinPath)} ${quote(digitPath)}`));
+         if (result.status !== 'ok') throw new Error(result.message || '无法启动字体组合任务');
+         const taskId = result.data?.task;
+         if (!taskId) throw new Error('组合任务 ID 缺失');
+@@ -444,6 +532,7 @@
+         simplifyUi(this);
+         await loadMixConfig(this);
+         updateEngineCopy(this);
++        setTimeout(() => loadStorageSummary(this), 260);
+         setTimeout(() => recoverPending(this), 160);
+         setTimeout(() => recoverPendingMix(this), 260);
+     };
+--- a/webroot/v14.css
++++ b/webroot/v14.css
+@@ -66,3 +66,9 @@
+ }
+ @media(max-width:360px){.mix-head{flex-direction:column}.mix-status{align-self:flex-start}.mix-picker-head h3{font-size:21px}}
+ @media(prefers-reduced-motion:reduce){.mix-picker-sheet,.mix-picker-modal,.v14-switch-progress,.mix-slot{transition:none!important}}
++
++/* v14.1 测试版 3：字体角色风险与存储明细 */
++.v14-storage-summary{margin:14px 18px 18px;padding:14px 15px;border:1px solid var(--v14-border);border-radius:18px;background:var(--v14-soft);display:grid;gap:9px}
++.v14-storage-summary>div{display:grid;grid-template-columns:auto 1fr;align-items:end;column-gap:10px}.v14-storage-summary small{grid-column:1/-1;font-size:11px;opacity:.58}.v14-storage-summary strong{font-size:20px}.v14-storage-summary em{justify-self:end;font-size:11px;font-style:normal;opacity:.58}.v14-storage-summary p{margin:0;font-size:11px;line-height:1.6;opacity:.7}.v14-storage-summary button{justify-self:start;border:0;border-radius:12px;padding:8px 11px;background:color-mix(in srgb,var(--primary) 13%,transparent);color:var(--primary);font-weight:700}.v14-storage-summary>span{font-size:12px;opacity:.66}
++.v14-mix-risk{position:fixed;inset:0;z-index:100000;display:flex;align-items:flex-end;justify-content:center;padding:14px;background:rgba(7,10,18,.56);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);opacity:0;pointer-events:none;transition:opacity .18s ease}.v14-mix-risk.show{opacity:1;pointer-events:auto}.v14-mix-risk-sheet{width:min(100%,480px);max-height:min(78vh,680px);overflow:auto;box-sizing:border-box;padding:20px;border-radius:28px;background:var(--v14-panel);box-shadow:0 24px 70px rgba(0,0,0,.28)}.v14-mix-risk-sheet>small{font-size:11px;letter-spacing:.12em;opacity:.55}.v14-mix-risk-sheet h3{margin:5px 0 13px;font-size:22px}.v14-mix-risk-sheet>div{display:grid;gap:8px}.v14-mix-risk-sheet p{margin:0;padding:10px 11px;border-radius:14px;background:rgba(245,158,11,.11);font-size:12px;line-height:1.55}.v14-mix-risk-sheet>span{display:block;margin-top:12px;font-size:12px;line-height:1.65;opacity:.68}.v14-mix-risk-sheet footer{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:17px}.v14-mix-risk-sheet button{height:46px;border:0;border-radius:15px;font-weight:750;background:color-mix(in srgb,currentColor 7%,transparent)}.v14-mix-risk-sheet [data-risk-continue]{color:#fff;background:var(--primary)}
++@media(max-width:520px){.v14-storage-summary{margin:12px 12px 16px}.v14-mix-risk{padding:8px}.v14-mix-risk-sheet{padding:18px;border-radius:24px}}
