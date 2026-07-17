@@ -1,0 +1,35 @@
+name: Materialize v14.1 source
+on:
+  push:
+    branches: [release/v14.1]
+    paths:
+      - scripts/patch_v141.py
+      - .github/workflows/materialize-v141.yml
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: materialize-v141
+  cancel-in-progress: true
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: release/v14.1
+          fetch-depth: 0
+      - name: Materialize audited source
+        run: |
+          set -euo pipefail
+          python3 scripts/patch_v141.py
+          chmod 0755 customize.sh post-fs-data.sh service.sh uninstall.sh common/*.sh common/*.py scripts/*.sh
+          rm -f scripts/patch_v141.py .github/workflows/materialize-v141.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          if ! git diff --cached --quiet; then
+            git commit -m 'release: materialize audited LuoShu v14.1 source'
+            git push origin HEAD:release/v14.1
+          fi
