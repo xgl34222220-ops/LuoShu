@@ -14,21 +14,20 @@ if ! type detect_font_family >/dev/null 2>&1; then detect_font_family(){ _n="${1
 if ! type check_coloros >/dev/null 2>&1; then check_coloros(){ IS_COLOROS=false; }; fi
 if ! type check_hyperos >/dev/null 2>&1; then check_hyperos(){ IS_HYPEROS=false; }; fi
 
+# 失败路径允许终止安装器；只有成功路径必须自然返回给 APatch。
 installer_fail(){
     ui_print "! $1"
-    if type abort >/dev/null 2>&1; then abort "$1"; fi
-    return 1
+    if type abort >/dev/null 2>&1; then abort "$1"; else exit 1; fi
 }
-installer_return_error(){ return 1 2>/dev/null || exit 1; }
 
 APATCH_ENV=false
 case "${APATCH:-false}:${KERNELPATCH:-false}" in true:*|*:true) APATCH_ENV=true ;; esac
 command -v apd >/dev/null 2>&1 && APATCH_ENV=true
-[ -d /data/adb/ap ] || [ -d /data/adb/apatch ] && APATCH_ENV=true
+if [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then APATCH_ENV=true; fi
 
 # 删除会导致模块被跳过、禁用或在下次重启被移除的遗留标记。
 rm -f "$MODPATH/remove" "$MODPATH/disable" "$MODPATH/skip_mount" "$MODPATH/skip_mountify" "$MODPATH/magic" 2>/dev/null || true
-[ -f "$MODPATH/module.prop" ] || { installer_fail "安装包缺少 module.prop"; installer_return_error; }
+[ -f "$MODPATH/module.prop" ] || installer_fail "安装包缺少 module.prop"
 
 mkdir -p /sdcard/LuoShu/fonts /sdcard/LuoShu/import /sdcard/LuoShu/reports 2>/dev/null || true
 mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot/fonts" 2>/dev/null || true
@@ -97,8 +96,8 @@ else
     rm -rf "$MODPATH/system/fonts/.luoshu-font-store" 2>/dev/null || true
     find "$MODPATH/system/fonts" -mindepth 1 -maxdepth 1 -type f -delete 2>/dev/null || true
     if [ -f "$SELECTED_FILE" ]; then
-        if type font_validate >/dev/null 2>&1 && ! font_validate "$SELECTED_FILE" text; then installer_fail "$FONT_CHECK_ERROR"; installer_return_error; fi
-        apply_font_by_rom "$SELECTED_FILE" "$MODPATH/system/fonts" full "$SELECTED_FONT" || { installer_fail "ROM 字体映射失败"; installer_return_error; }
+        if type font_validate >/dev/null 2>&1 && ! font_validate "$SELECTED_FILE" text; then installer_fail "$FONT_CHECK_ERROR"; fi
+        apply_font_by_rom "$SELECTED_FILE" "$MODPATH/system/fonts" full "$SELECTED_FONT" || installer_fail "ROM 字体映射失败"
         ui_print "✓ 已准备文字字体：$SELECTED_FONT"
     else
         SELECTED_FONT="default"
