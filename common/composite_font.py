@@ -165,10 +165,14 @@ def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_
         reverse_direction=source_kind in {"cff", "cff2"},
     )
     _draw_decomposed(src_glyph_set, src_name, output_pen, scale)
+    # TTGlyphPen 生成的新 glyph 默认没有 xMin/yMin/xMax/yMax。
+    # 当 TTFont 以 recalcBBoxes=False 保存时，FontTools 会直接读取这些字段；
+    # glyf 中文基底因此会在保存阶段抛出 KeyError("xMin")。
     glyph = pen.glyph()
     base["glyf"][base_name] = glyph
     glyph.recalcBounds(base["glyf"])
     if not hasattr(glyph, "xMin"):
+        # 空格等空轮廓不会产生边界，显式补零以保证序列化安全。
         glyph.xMin = glyph.yMin = glyph.xMax = glyph.yMax = 0
     if "gvar" in base:
         base["gvar"].variations.pop(base_name, None)
