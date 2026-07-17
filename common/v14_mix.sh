@@ -11,7 +11,7 @@ STATUS_SCRIPT="$MODDIR/common/module_status.sh"
 json_escape(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
 read_value(){ sed -n "s/^${1}=//p" "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n'; }
 case "${1:-status}" in
-    start) sh "$ENGINE" start "$2" "$3" "$4" ;;
+    start) sh "$ENGINE" start "$2" "$3" "$4" "$5" "$6" "$7" ;;
     config) sh "$ENGINE" status ;;
     status)
         _wanted="$2"

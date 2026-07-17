@@ -1,31 +1,31 @@
-洛书 LuoShu v14
+洛书 LuoShu v14.1
 
 公开目录
-- 文字字体：/sdcard/LuoShu/fonts/
-- Emoji 字体：/sdcard/LuoShu/emoji/
+- 字体文件：/sdcard/LuoShu/fonts/
 - ZIP 导入：/sdcard/LuoShu/import/
 - 检测报告：/sdcard/LuoShu/reports/
 
+安装前必看
+- 请关闭 Root 管理器中的“默认卸载模块”，否则重启后模块可能被移除。
+- 需要元模块时仅推荐 Mountify。
+- 不要同时启用其他覆盖相同字体路径的字体模块。
+
 安全切换
-- 文字字体和 Emoji 分别选择，准备完成后完整重启。
-- 同一类别每次开机只允许修改一次，避免连续热切换造成系统异常。
-- 切换状态只读取轻量任务文件，不会在轮询时重复扫描字体。
+- 支持整套切换，以及中文、英文、数字独立组合。
+- 新字体先在临时事务目录完整生成并校验，成功后才替换当前配置。
+- 生成或提交失败时保留当前有效字体目录。
+- 同一次开机只允许准备一次文字字体，完成后需要完整重启。
 - WebUI 中途退出后，重新进入会自动确认后台任务结果。
 
-脚本运行
-- WebUI 使用 sh 调用脚本，不依赖文件可执行位。
-- 开机自动静默校正权限，无需手动修复。
+APatch
+- 安装脚本兼容 APatch source 方式，成功路径不调用 exit 0。
+- 安装包不携带 magic、remove、disable、skip_mount、skip_mountify 标记。
+- post-fs-data 只做轻量初始化，避免超过 APatch 阻塞阶段时限。
+- post-mount 阶段再同步 ColorOS 额外字体目录。
 
 字体与覆盖
 - 支持真实 TTF、OTF、TTC，并检测伪装格式和损坏文件。
 - 保留 ROM 原始 fonts.xml、fallback、符号字体和其他语言字体。
-- Emoji 仅在 Emoji 页面单独选择后替换。
+- 通用 Android 没有稳定的独立数字入口时，数字会跟随英文字体。
+- 洛书 v14.1 不再管理或替换 Emoji。
 - 应用、网页或游戏自带字体无法由系统字体模块强制替换。
-
-Root 与元模块
-- 支持 Magisk、KernelSU、SukiSU Ultra、APatch。
-- 需要元模块时仅推荐 Mountify；未安装时使用 Root 管理器原生挂载。
-
-其他
-- ZIP 导入只提取字体，不执行压缩包中的模块脚本。
-- 可变字体粗细使用 Android secure.font_weight_adjustment；不支持的 ROM 仅提供预览。

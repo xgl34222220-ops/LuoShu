@@ -1,223 +1,159 @@
 #!/system/bin/sh
-# LuoShu v14 - 安装脚本
-
-MODPATH="${MODPATH:-$3}"
+# 洛书 v14.1 Test3 - Magisk / KernelSU / SukiSU Ultra / APatch 安装脚本
+# 注意：APatch 会 source 本文件，因此成功路径不能使用 exit。
 set +e
 
+MODPATH="${MODPATH:-$3}"
+[ -n "$MODPATH" ] || MODPATH="/data/adb/modules_update/LuoShu"
 MODULE_DIR="$MODPATH"
-if [ -f "$MODPATH/common/util_functions.sh" ]; then . "$MODPATH/common/util_functions.sh"; fi
-if [ -f "$MODPATH/common/font_check.sh" ]; then . "$MODPATH/common/font_check.sh"; fi
-if [ -f "$MODPATH/common/rom_adapters.sh" ]; then . "$MODPATH/common/rom_adapters.sh"; fi
-if [ -f "$MODPATH/common/volume_key.sh" ]; then . "$MODPATH/common/volume_key.sh"; fi
+WEBROOT_NAME=$(sed -n 's/^webroot=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n')
+[ -n "$WEBROOT_NAME" ] || WEBROOT_NAME=webroot_v14103
 
-# 最小降级保护
-if ! type detect_font_family >/dev/null 2>&1; then
-    detect_font_family() { _n="${1%.*}"; echo "${_n%-*}"; }
-fi
-if ! type check_coloros >/dev/null 2>&1; then check_coloros() { IS_COLOROS=false; }; fi
-if ! type check_hyperos >/dev/null 2>&1; then check_hyperos() { IS_HYPEROS=false; }; fi
-if ! type ensure_public_storage >/dev/null 2>&1; then
-    LUOSHU_PUBLIC_DIR="/sdcard/LuoShu"; USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"; USER_EMOJI_DIR="$LUOSHU_PUBLIC_DIR/emoji"; USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
-    ensure_public_storage() { mkdir -p "$USER_FONTS_DIR" "$USER_EMOJI_DIR" "$USER_REPORT_DIR" 2>/dev/null || true; }
-fi
+for _lib in util_functions.sh font_check.sh rom_adapters.sh volume_key.sh mount_compat.sh; do
+    [ -f "$MODPATH/common/$_lib" ] && . "$MODPATH/common/$_lib"
+done
+if ! type detect_font_family >/dev/null 2>&1; then detect_font_family(){ _n="${1%.*}"; printf '%s\n' "${_n%-*}"; }; fi
+if ! type check_coloros >/dev/null 2>&1; then check_coloros(){ IS_COLOROS=false; }; fi
+if ! type check_hyperos >/dev/null 2>&1; then check_hyperos(){ IS_HYPEROS=false; }; fi
 
-ensure_public_storage
+installer_fail(){
+    ui_print "! $1"
+    if type abort >/dev/null 2>&1; then abort "$1"; else exit 1; fi
+}
+
+APATCH_ENV=false
+case "${APATCH:-false}:${KERNELPATCH:-false}" in true:*|*:true) APATCH_ENV=true ;; esac
+command -v apd >/dev/null 2>&1 && APATCH_ENV=true
+if [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then APATCH_ENV=true; fi
+
+rm -f "$MODPATH/remove" "$MODPATH/disable" "$MODPATH/skip_mount" "$MODPATH/skip_mountify" "$MODPATH/magic" 2>/dev/null || true
+[ -f "$MODPATH/module.prop" ] || installer_fail "安装包缺少 module.prop"
+
+mkdir -p /sdcard/LuoShu/fonts /sdcard/LuoShu/import /sdcard/LuoShu/reports 2>/dev/null || true
+mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/$WEBROOT_NAME/fonts" 2>/dev/null || true
+rm -rf "$MODPATH/webroot" "$MODPATH/webroot_v141" "$MODPATH/$WEBROOT_NAME/emoji" "$MODPATH/system/fonts/.luoshu-emoji-store" 2>/dev/null || true
+rm -f "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" \
+      "$MODPATH/config/active_emoji.conf" "$MODPATH/config/emoji_task.conf" "$MODPATH/config/emoji_reboot_required.conf" 2>/dev/null || true
+
 check_coloros
 check_hyperos
+ROOT_MANAGER="Root"
+if [ "$APATCH_ENV" = true ]; then ROOT_MANAGER="APatch"
+elif command -v ksud >/dev/null 2>&1 || [ -d /data/adb/ksu ]; then
+    _ksu_info="$(ksud -V 2>/dev/null || ksud --version 2>/dev/null || true)"
+    case "$_ksu_info $(getprop ro.build.version.incremental 2>/dev/null)" in *SukiSU*|*sukisu*|*SUKISU*) ROOT_MANAGER="SukiSU Ultra" ;; *) ROOT_MANAGER="KernelSU" ;; esac
+elif command -v magisk >/dev/null 2>&1 || [ -d /data/adb/magisk ]; then ROOT_MANAGER="Magisk"
+fi
 
 ui_print ""
 ui_print "╔══════════════════════════════════╗"
-ui_print "║       洛 书  v14       ║"
-ui_print "║      Android 全局字体管理       ║"
+ui_print "║       洛 书  v14.1 Test3         ║"
+ui_print "║       Android 全局字体管理       ║"
 ui_print "╚══════════════════════════════════╝"
 ui_print ""
-if [ "$IS_COLOROS" = "true" ]; then
-    ui_print "✓ 系统环境：ColorOS ${COLOROS_VERSION:-未知}"
-elif [ "$IS_HYPEROS" = "true" ]; then
-    ui_print "✓ 系统环境：HyperOS/MIUI ${HYPEROS_VERSION:-未知}"
-else
-    ui_print "✓ 系统环境：通用 Android"
-fi
-
-ROOT_MANAGER="Root"
-if command -v apd >/dev/null 2>&1 || [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then
-    ROOT_MANAGER="APatch"
-elif command -v ksud >/dev/null 2>&1 || [ -d /data/adb/ksu ]; then
-    _ksu_info="$(ksud -V 2>/dev/null || ksud --version 2>/dev/null || true)"
-    case "$_ksu_info $(getprop ro.build.version.incremental 2>/dev/null)" in
-        *SukiSU*|*sukisu*|*SUKISU*) ROOT_MANAGER="SukiSU Ultra" ;;
-        *) ROOT_MANAGER="KernelSU" ;;
-    esac
-elif command -v magisk >/dev/null 2>&1 || [ -d /data/adb/magisk ]; then
-    ROOT_MANAGER="Magisk"
-fi
 ui_print "✓ Root 管理器：$ROOT_MANAGER"
-
-MOUNTIFY_ACTIVE=false
-if [ -d /data/adb/modules/mountify ] && [ ! -f /data/adb/modules/mountify/disable ] && [ ! -f /data/adb/modules/mountify/remove ]; then
-    MOUNTIFY_ACTIVE=true
-elif [ -d /data/adb/mountify ]; then
-    MOUNTIFY_ACTIVE=true
-fi
-if [ "$MOUNTIFY_ACTIVE" = "true" ]; then
-    ui_print "✓ Mountify：已检测并启用"
-else
-    ui_print "• 元模块推荐：Mountify（可选）"
-fi
+if [ "$IS_COLOROS" = true ]; then ui_print "✓ 系统环境：ColorOS ${COLOROS_VERSION:-未知}"
+elif [ "$IS_HYPEROS" = true ]; then ui_print "✓ 系统环境：HyperOS/MIUI ${HYPEROS_VERSION:-未知}"
+else ui_print "✓ 系统环境：通用 Android"; fi
+if [ -d /data/adb/modules/mountify ] && [ ! -f /data/adb/modules/mountify/disable ] && [ ! -f /data/adb/modules/mountify/remove ]; then ui_print "✓ Mountify：已启用"
+else ui_print "• 元模块推荐：Mountify（可选）"; fi
+[ "$APATCH_ENV" = true ] && ui_print "✓ APatch 安装模式：已启用持久化兼容处理"
 ui_print "✓ 字体目录：/sdcard/LuoShu/fonts/"
-ui_print "✓ Emoji 目录：/sdcard/LuoShu/emoji/"
 ui_print ""
 
-mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot/fonts" "$MODPATH/webroot/emoji" 2>/dev/null || true
-
-scan_fonts_lines() {
-    for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
-              "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
-        [ -f "$_f" ] || continue
-        _fam=$(detect_font_family "$(basename "$_f")")
-        case "$_fam" in SysFont*|SysSans*|'') continue ;; esac
-        printf '%s\n' "$_fam"
-    done | awk '!seen[$0]++'
-}
-
-find_family_file() {
-    _want="$1"
-    for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
-              "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
-        [ -f "$_f" ] || continue
-        [ "$(detect_font_family "$(basename "$_f")")" = "$_want" ] && { echo "$_f"; return 0; }
-    done
-    return 1
-}
-
-FONT_LIST_TMP="$MODPATH/config/.install_fonts.$$"
-scan_fonts_lines > "$FONT_LIST_TMP" 2>/dev/null || : > "$FONT_LIST_TMP"
-FONT_COUNT=$(grep -c . "$FONT_LIST_TMP" 2>/dev/null)
-[ -n "$FONT_COUNT" ] || FONT_COUNT=0
-case "$FONT_COUNT" in ''|*[!0-9]*) FONT_COUNT=0 ;; esac
-SELECTED_FONT="default"
-SELECTED_FILE=""
 OLD_MOD="/data/adb/modules/LuoShu"
-OLD_ACTIVE_TEXT=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
-if [ -n "$OLD_ACTIVE_TEXT" ] && [ "$OLD_ACTIVE_TEXT" != "default" ]; then
-    _old_file=$(find_family_file "$OLD_ACTIVE_TEXT")
-    if [ -f "$_old_file" ]; then
-        SELECTED_FONT="$OLD_ACTIVE_TEXT"
-        SELECTED_FILE="$_old_file"
-        ui_print "升级保留当前文字字体：$SELECTED_FONT"
-    fi
-fi
+OLD_ACTIVE=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+SELECTED_FONT="default"
 
-if [ "$FONT_COUNT" -gt 0 ]; then
-    if [ -n "$SELECTED_FILE" ]; then
-        :
-    elif [ "$FONT_COUNT" -gt 1 ] && type volume_key_menu >/dev/null 2>&1; then
-        _opts=""; _first=true
-        while IFS= read -r _fam; do
-            [ -n "$_fam" ] || continue
-            if [ "$_first" = true ]; then _opts="$_fam"; _first=false; else _opts="$_opts|$_fam"; fi
-        done < "$FONT_LIST_TMP"
-        ui_print "发现 $FONT_COUNT 款字体，可用音量键选择（超时默认第一款）"
-        volume_key_menu "$_opts" 5
-        _idx=0
-        while IFS= read -r _fam; do
-            [ -n "$_fam" ] || continue
-            if [ "$_idx" -eq "${VK_SELECTED:-0}" ]; then SELECTED_FONT="$_fam"; break; fi
-            _idx=$((_idx + 1))
-        done < "$FONT_LIST_TMP"
-    else
-        IFS= read -r SELECTED_FONT < "$FONT_LIST_TMP"
-    fi
-    [ -n "$SELECTED_FILE" ] || SELECTED_FILE=$(find_family_file "$SELECTED_FONT")
-    if [ ! -f "$SELECTED_FILE" ]; then
-        ui_print "错误：无法读取选中的字体文件"
-        exit 1
-    fi
-    if type font_validate >/dev/null 2>&1 && ! font_validate "$SELECTED_FILE" text; then
-        ui_print "错误：$FONT_CHECK_ERROR"
-        ui_print "请放入真实的 TTF/OTF/TTC 文件，不能只改扩展名。"
-        exit 1
-    fi
-    [ -n "$FONT_CHECK_WARNING" ] && ui_print "提示：$FONT_CHECK_WARNING"
-    ui_print "应用文字字体：$SELECTED_FONT（$FONT_CHECK_FORMAT）"
-    apply_font_by_rom "$SELECTED_FILE" "$MODPATH/system/fonts" full "$SELECTED_FONT" || {
-        ui_print "错误：ROM 字体映射失败"
-        exit 1
+if [ "$OLD_ACTIVE" = mix ] && [ -s "$OLD_MOD/config/font_mix.conf" ] && [ -d "$OLD_MOD/system/fonts" ]; then
+    rm -rf "$MODPATH/system/fonts" 2>/dev/null || true
+    mkdir -p "$MODPATH/system" 2>/dev/null || true
+    cp -a "$OLD_MOD/system/fonts" "$MODPATH/system/fonts" 2>/dev/null || cp -R "$OLD_MOD/system/fonts" "$MODPATH/system/fonts" 2>/dev/null || true
+    cp -f "$OLD_MOD/config/font_mix.conf" "$MODPATH/config/font_mix.conf" 2>/dev/null || true
+    printf 'mix\n' > "$MODPATH/config/active_font.conf"
+    SELECTED_FONT="mix"
+    ui_print "✓ 升级保留当前字体组合"
+else
+    find_font_for_family(){
+        _want="$1"
+        for _f in /sdcard/LuoShu/fonts/*.ttf /sdcard/LuoShu/fonts/*.otf /sdcard/LuoShu/fonts/*.ttc \
+                  /sdcard/LuoShu/fonts/*.TTF /sdcard/LuoShu/fonts/*.OTF /sdcard/LuoShu/fonts/*.TTC; do
+            [ -f "$_f" ] || continue
+            [ "$(detect_font_family "$(basename "$_f")")" = "$_want" ] && { printf '%s\n' "$_f"; return 0; }
+        done
+        return 1
     }
-    if [ "$IS_COLOROS" = "true" ]; then
-        mkdir -p "$MODPATH/system_ext/fonts" "$MODPATH/product/fonts" 2>/dev/null || true
-        for _n in $(get_all_coloros_names); do
-            _src="$MODPATH/system/fonts/${_n}.ttf"
-            [ -f "$_src" ] || continue
-            [ -e "/system_ext/fonts/${_n}.ttf" ] && link_or_copy_font "$_src" "$MODPATH/system_ext/fonts/${_n}.ttf" 2>/dev/null || true
-            [ -e "/product/fonts/${_n}.ttf" ] && link_or_copy_font "$_src" "$MODPATH/product/fonts/${_n}.ttf" 2>/dev/null || true
+    SELECTED_FILE=""
+    if [ -n "$OLD_ACTIVE" ] && [ "$OLD_ACTIVE" != default ]; then SELECTED_FILE=$(find_font_for_family "$OLD_ACTIVE"); [ -f "$SELECTED_FILE" ] && SELECTED_FONT="$OLD_ACTIVE"; fi
+    if [ ! -f "$SELECTED_FILE" ]; then
+        for _f in /sdcard/LuoShu/fonts/*.ttf /sdcard/LuoShu/fonts/*.otf /sdcard/LuoShu/fonts/*.ttc \
+                  /sdcard/LuoShu/fonts/*.TTF /sdcard/LuoShu/fonts/*.OTF /sdcard/LuoShu/fonts/*.TTC; do
+            [ -f "$_f" ] || continue
+            SELECTED_FILE="$_f"; SELECTED_FONT=$(detect_font_family "$(basename "$_f")"); break
         done
     fi
-else
-    ui_print "未发现字体文件：模块将以系统默认字体安装。"
-    ui_print "安装后把字体放入公开目录，再从 WebUI 选择即可。"
-fi
-
-rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" 2>/dev/null || true
-printf '%s\n' "$SELECTED_FONT" > "$MODPATH/config/active_font.conf"
-printf '%s\n' "default" > "$MODPATH/config/active_emoji.conf"
-cp -f "$FONT_LIST_TMP" "$MODPATH/config/font_list.conf" 2>/dev/null || : > "$MODPATH/config/font_list.conf"
-rm -f "$FONT_LIST_TMP" 2>/dev/null || true
-
-if [ -f "$OLD_MOD/config/active_emoji.conf" ]; then
-    cp -f "$OLD_MOD/config/active_emoji.conf" "$MODPATH/config/active_emoji.conf" 2>/dev/null || true
-fi
-for _fw_conf in font_weight.conf font_weight_original.conf; do
-    [ -f "$OLD_MOD/config/$_fw_conf" ] && cp -f "$OLD_MOD/config/$_fw_conf" "$MODPATH/config/$_fw_conf" 2>/dev/null || true
-done
-
-ACTIVE_EMOJI=$(head -n1 "$MODPATH/config/active_emoji.conf" 2>/dev/null | tr -d '\r\n')
-if [ -n "$ACTIVE_EMOJI" ] && [ "$ACTIVE_EMOJI" != "default" ]; then
-    EMOJI_SRC=""
-    for _ef in "$USER_EMOJI_DIR"/*.ttf "$USER_EMOJI_DIR"/*.otf "$USER_EMOJI_DIR"/*.ttc \
-               "$USER_EMOJI_DIR"/*.TTF "$USER_EMOJI_DIR"/*.OTF "$USER_EMOJI_DIR"/*.TTC; do
-        [ -f "$_ef" ] || continue
-        [ "${_ef##*/}" = "$ACTIVE_EMOJI.ttf" ] || [ "${_ef##*/}" = "$ACTIVE_EMOJI.otf" ] || [ "${_ef##*/}" = "$ACTIVE_EMOJI.ttc" ] || \
-        [ "${_ef##*/}" = "$ACTIVE_EMOJI.TTF" ] || [ "${_ef##*/}" = "$ACTIVE_EMOJI.OTF" ] || [ "${_ef##*/}" = "$ACTIVE_EMOJI.TTC" ] || continue
-        EMOJI_SRC="$_ef"; break
-    done
-    [ -f "$EMOJI_SRC" ] || [ ! -f "$OLD_MOD/system/fonts/NotoColorEmoji.ttf" ] || EMOJI_SRC="$OLD_MOD/system/fonts/NotoColorEmoji.ttf"
-    if [ -f "$EMOJI_SRC" ] && { ! type font_validate >/dev/null 2>&1 || font_validate "$EMOJI_SRC" emoji; }; then
-        cp -f "$EMOJI_SRC" "$MODPATH/system/fonts/NotoColorEmoji.ttf" 2>/dev/null || true
-        [ -e /system/fonts/NotoColorEmojiLegacy.ttf ] && cp -f "$EMOJI_SRC" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
-        chmod 0644 "$MODPATH/system/fonts"/NotoColorEmoji*.ttf 2>/dev/null || true
-        ui_print "升级保留 Emoji：$ACTIVE_EMOJI"
+    rm -rf "$MODPATH/system/fonts/.luoshu-font-store" 2>/dev/null || true
+    find "$MODPATH/system/fonts" -mindepth 1 -maxdepth 1 -type f -delete 2>/dev/null || true
+    if [ -f "$SELECTED_FILE" ]; then
+        if type font_validate >/dev/null 2>&1 && ! font_validate "$SELECTED_FILE" text; then installer_fail "$FONT_CHECK_ERROR"; fi
+        apply_font_by_rom "$SELECTED_FILE" "$MODPATH/system/fonts" full "$SELECTED_FONT" || installer_fail "ROM 字体映射失败"
+        ui_print "✓ 已准备文字字体：$SELECTED_FONT"
     else
-        printf '%s\n' "default" > "$MODPATH/config/active_emoji.conf"
-        ui_print "提示：旧 Emoji 源文件不可用，已保留系统默认 Emoji"
+        SELECTED_FONT="default"
+        ui_print "• 未发现字体文件，安装后从 WebUI 选择"
     fi
+    printf '%s\n' "$SELECTED_FONT" > "$MODPATH/config/active_font.conf"
 fi
 
-cp -f "$MODPATH/common/font_manager.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
-chmod 755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/service.sh" "$MODPATH/uninstall.sh" 2>/dev/null || true
-chmod 755 "$MODPATH/common/font_manager.sh" "$MODPATH/common/font_check.sh" "$MODPATH/common/font_import.sh" "$MODPATH/common/font_report.sh" \
-          "$MODPATH/common/util_functions.sh" "$MODPATH/common/rom_adapters.sh" "$MODPATH/common/volume_key.sh" \
-          "$MODPATH/common/play_font_bridge" "$MODPATH/common/wechat_xweb_bridge" 2>/dev/null || true
-chmod 755 "$MODPATH/common/module_status.sh" "$MODPATH/common/v14_switch.sh" "$MODPATH/common/font_mix.sh" "$MODPATH/common/v14_mix.sh" 2>/dev/null || true
-chmod 755 "$MODPATH/system/bin/洛书" 2>/dev/null || true
-[ ! -f "$MODPATH/system/bin/luoshud" ] || chmod 755 "$MODPATH/system/bin/luoshud" 2>/dev/null || true
+if [ "$IS_COLOROS" = true ]; then
+    mkdir -p "$MODPATH/system_ext/fonts" "$MODPATH/product/fonts" 2>/dev/null || true
+    for _src in "$MODPATH/system/fonts"/*; do
+        [ -f "$_src" ] || continue; _file=$(basename "$_src")
+        [ -e "/system_ext/fonts/$_file" ] && link_or_copy_font "$_src" "$MODPATH/system_ext/fonts/$_file" 2>/dev/null || true
+        [ -e "/product/fonts/$_file" ] && link_or_copy_font "$_src" "$MODPATH/product/fonts/$_file" 2>/dev/null || true
+    done
+fi
+
+for _conf in font_weight.conf font_weight_original.conf recent_fonts.conf; do [ -f "$OLD_MOD/config/$_conf" ] && cp -f "$OLD_MOD/config/$_conf" "$MODPATH/config/$_conf" 2>/dev/null || true; done
+rm -f "$MODPATH/config/text_reboot_required.conf" "$MODPATH/config/switch_task.conf" "$MODPATH/config/mix_task.conf" "$MODPATH/.font_switch.lock" 2>/dev/null || true
+rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" 2>/dev/null || true
+
+cp -f "$MODPATH/common/luoshu_cli.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
+chmod 0755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/post-mount.sh" "$MODPATH/service.sh" "$MODPATH/uninstall.sh" 2>/dev/null || true
+find "$MODPATH/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
+chmod 0755 "$MODPATH/system/bin/洛书" "$MODPATH/system/bin/luoshud" 2>/dev/null || true
 find "$MODPATH/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
-find "$MODPATH/webroot" -type f -exec chmod 0644 {} \; 2>/dev/null || true
-chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot" 2>/dev/null || true
+find "$MODPATH/$WEBROOT_NAME" -type f -exec chmod 0644 {} \; 2>/dev/null || true
+chmod 0644 "$MODPATH/module.prop" "$MODPATH/config/active_font.conf" 2>/dev/null || true
 
-touch "$MODPATH/magic" 2>/dev/null || true
+MOD_REAL=$(CDPATH= cd -- "$MODPATH" 2>/dev/null && pwd)
+OLD_REAL=$(CDPATH= cd -- "$OLD_MOD" 2>/dev/null && pwd)
+if [ -d "$OLD_MOD" ] && [ -n "$MOD_REAL" ] && [ -n "$OLD_REAL" ] && [ "$MOD_REAL" != "$OLD_REAL" ]; then
+    if [ -d "$MODPATH/$WEBROOT_NAME" ]; then
+        _tmp="$OLD_MOD/.${WEBROOT_NAME}.$$"
+        rm -rf "$_tmp" 2>/dev/null || true
+        cp -a "$MODPATH/$WEBROOT_NAME" "$_tmp" 2>/dev/null || cp -R "$MODPATH/$WEBROOT_NAME" "$_tmp" 2>/dev/null || true
+        if [ -d "$_tmp" ]; then
+            rm -rf "$OLD_MOD/$WEBROOT_NAME" 2>/dev/null || true
+            mv -f "$_tmp" "$OLD_MOD/$WEBROOT_NAME" 2>/dev/null || true
+        fi
+    fi
+    cp -f "$MODPATH/module.prop" "$OLD_MOD/module.prop" 2>/dev/null || true
+    rm -rf "$OLD_MOD/webroot" "$OLD_MOD/webroot_v141" "$OLD_MOD/$WEBROOT_NAME/emoji" 2>/dev/null || true
+    chmod 0644 "$OLD_MOD/module.prop" 2>/dev/null || true
+    find "$OLD_MOD/$WEBROOT_NAME" -type f -exec chmod 0644 {} \; 2>/dev/null || true
+    ui_print "✓ 已切换到全新 WebUI 目录，旧缓存已清理"
+fi
 
+[ "$APATCH_ENV" = true ] && printf 'apatch-compatible=1\ninstalled=%s\n' "$(date +%s)" > "$MODPATH/config/install_environment.conf" 2>/dev/null || true
+[ -f "$MODPATH/common/preview_cache.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/preview_cache.sh" prune >/dev/null 2>&1 || true
+[ -f "$MODPATH/common/module_status.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/module_status.sh" "$SELECTED_FONT" >/dev/null 2>&1 || true
 ui_print ""
 ui_print "╭──────────────────────────────╮"
 ui_print "│          安装完成            │"
 ui_print "╰──────────────────────────────╯"
-ui_print "✓ 字体与 Emoji 配置已准备"
-if [ "$MOUNTIFY_ACTIVE" = "true" ]; then
-    ui_print "✓ Mountify 适配已启用"
-else
-    ui_print "• 如需元模块，推荐使用 Mountify"
-fi
-ui_print "请完整重启手机以应用字体。"
+ui_print "✓ v14.1 Test3 已完成字体配置与缓存优化"
+ui_print "⚠ 请关闭 Root 管理器中的『默认卸载模块』"
+ui_print "请完整重启手机。"
 ui_print ""
-[ -f "$MODPATH/common/module_status.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/module_status.sh" "$SELECTED_FONT" >/dev/null 2>&1 || true
-exit 0
+true

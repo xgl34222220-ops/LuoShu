@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - module.prop
+      - update.json
       - common/**
       - config/**
       - fonts/**
@@ -14,12 +15,12 @@ on:
       - scripts/**
       - customize.sh
       - post-fs-data.sh
+      - post-mount.sh
       - service.sh
       - uninstall.sh
-      - magic
       - 兼容与目录说明.txt
+      - README.md
       - CHANGELOG.md
-      - RELEASE_NOTES_v14.md
       - .github/workflows/release.yml
 
 permissions:
@@ -45,17 +46,13 @@ jobs:
           tag="$(printf '%s' "$version" | sed 's#[ /]#-#g')"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          if [ "$version" = "v14" ] && [ -s RELEASE_NOTES_v14.md ]; then
-            cp RELEASE_NOTES_v14.md release-notes.md
-          else
-            awk -v target="## $version" '
-              $0 == target { found=1; next }
-              found && /^## / { exit }
-              found { print }
-            ' CHANGELOG.md > release-notes.md
-          fi
+          awk -v target="## $version" '
+            $0 == target { found=1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
           test -s release-notes.md || printf '洛书 %s 自动构建发布。\n' "$version" > release-notes.md
-      - name: Publish GitHub release
+      - name: Publish immutable GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
@@ -66,19 +63,12 @@ jobs:
           checksum="${asset}.sha256"
           flags=()
           case "$VERSION" in *Beta*|*RC*) flags+=(--prerelease) ;; esac
-
-          # 同版本修正版必须同步移动标签，否则 Release 的源码包仍会指向旧提交。
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -f "$TAG" "$GITHUB_SHA"
-          git push origin "refs/tags/$TAG" --force
-
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$asset" "$checksum" --clobber
-            gh release edit "$TAG" --title "洛书 $VERSION" --notes-file release-notes.md "${flags[@]}"
-          else
-            gh release create "$TAG" "$asset" "$checksum" \
-              --title "洛书 $VERSION" \
-              --notes-file release-notes.md \
-              "${flags[@]}"
+          if git rev-parse "refs/tags/$TAG" >/dev/null 2>&1 || gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG 已存在。请提升 version/versionCode，不允许覆盖旧版本。" >&2
+            exit 1
           fi
+          gh release create "$TAG" "$asset" "$checksum" \
+            --target "$GITHUB_SHA" \
+            --title "洛书 $VERSION" \
+            --notes-file release-notes.md \
+            "${flags[@]}"
