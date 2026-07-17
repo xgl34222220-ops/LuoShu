@@ -40,7 +40,7 @@ test -f "$ROOT/common/python/lib/libpython3.14.so"
 test -f "$ROOT/common/python/lib/python3.14/site-packages/fontTools/ttLib/__init__.py"
 file "$ROOT/common/python/bin/luoshu-python" | grep -q 'ARM aarch64'
 
-PYTHONPATH="$ROOT/common/python/lib/python3.14:$ROOT/common/python/lib/python3.14/site-packages" \
+PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" \
   python3 -S - <<'PY'
 from fontTools.ttLib import TTFont, TTCollection
 from fontTools.pens.boundsPen import BoundsPen
