@@ -13,6 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
           fetch-depth: 0
       # GPL_MATERIALIZER_BEGIN
       - name: Finalize GPL declaration
@@ -21,7 +22,9 @@ jobs:
         run: |
           set -euo pipefail
           sed -i 's/clear directions next to the code saying/clear directions next to the object code saying/' LICENSE
-          test "$(sha256sum LICENSE | awk '{print $1}')" = '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986'
+          actual="$(sha256sum LICENSE | awk '{print $1}')"
+          echo "GPL-3.0 SHA-256: $actual"
+          test "$actual" = '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986'
 
           python3 - <<'PY'
           from pathlib import Path
@@ -44,6 +47,7 @@ jobs:
           end=s.index('      # GPL_MATERIALIZER_END\n') + len('      # GPL_MATERIALIZER_END\n')
           s=s[:start]+s[end:]
           s=s.replace('permissions:\n  contents: write', 'permissions:\n  contents: read')
+          s=s.replace("          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}\n", '')
           p.write_text(s, encoding='utf-8')
           PY
 
