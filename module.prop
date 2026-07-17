@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v14
-versionCode=14000
+version=v14.1
+versionCode=14120
 author=惜故里丶
-description=Android 全局字体管理，当前字体：系统默认字体
+description=Android 全局字体管理，支持完整中英数字体复合与安全切换
 updateJson=
 webroot=webroot
