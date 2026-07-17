@@ -38,8 +38,23 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - name: RC3 legacy inventory
-        run: sh ./scripts/rc3_audit.sh
+      - name: Collect RC3 legacy inventory
+        shell: bash
+        run: |
+          set +e
+          sh ./scripts/rc3_audit.sh > rc3-legacy-inventory.txt 2>&1
+          echo $? > rc3-legacy-inventory.exit
+          cat rc3-legacy-inventory.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-RC3-legacy-inventory
+          path: |
+            rc3-legacy-inventory.txt
+            rc3-legacy-inventory.exit
+          if-no-files-found: error
+      - name: Enforce RC3 legacy inventory
+        run: test "$(cat rc3-legacy-inventory.exit)" = 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
