@@ -5,6 +5,11 @@ on:
     paths:
       - scripts/v1411-part*.patch
       - .github/workflows/materialize-v1411.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/v1411-part*.patch
+      - .github/workflows/materialize-v1411.yml
   workflow_dispatch:
 permissions:
   contents: write
