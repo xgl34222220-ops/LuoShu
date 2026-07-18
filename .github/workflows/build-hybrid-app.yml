@@ -1,4 +1,4 @@
-name: Build Alpha6 integrated artifacts
+name: Build RC1 integrated artifacts
 
 on:
   workflow_dispatch:
@@ -85,15 +85,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-Alpha6-Gradle-Log
+          name: LuoShu-RC1-Gradle-Log
           path: android-app/gradle-build.log
           if-no-files-found: warn
           retention-days: 3
 
-      - name: Upload Alpha6 artifacts
+      - name: Upload RC1 artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-Alpha6-Full-Lite
+          name: EXTRACT-FIRST-LuoShu-RC1-Full-Lite
           path: dist/*
           if-no-files-found: error
           retention-days: 14

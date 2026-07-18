@@ -18,7 +18,7 @@
 ## 发布步骤
 
 1. 合并通过真机回归的版本。
-2. 按 `module.prop` 创建唯一 Tag，例如 `v14.2-Alpha6`。
+2. 按 `module.prop` 创建唯一 Tag，例如 `v14.2-RC1`。
 3. 推送 Tag；`Publish signed release` 会验证 Tag、固定签名和三个产物。
 4. 已存在的 Tag 或 Release 不会被覆盖。修订内容必须提升版本号并创建新 Tag。
 

@@ -56,7 +56,7 @@ jobs:
         run: LUOSHU_VARIANT=lite sh ./scripts/build.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-Alpha6-Lite-module
+          name: LuoShu-RC1-Lite-module
           path: dist/*.zip*
           if-no-files-found: error
           retention-days: 30

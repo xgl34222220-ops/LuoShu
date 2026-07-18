@@ -1,10 +1,10 @@
-// 洛书 v14.2 Alpha6 - Root / Mountify 环境识别与 UI 精修
+// 洛书 v14.2 RC1 - Root / Mountify 环境识别与 UI 精修
 import { exec } from './kernelsu.js';
-import './mix_state_guard.js?v=14206';
-import './workbench_bridge.js?v=14206';
-import './workbench.js?v=14206';
+import './mix_state_guard.js?v=14210';
+import './workbench_bridge.js?v=14210';
+import './workbench.js?v=14210';
 
-const UI_VERSION = '14206';
+const UI_VERSION = '14210';
 
 function installRefinedStyle() {
     if (document.querySelector('link[data-luoshu-refine]')) return;

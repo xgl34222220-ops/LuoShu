@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing immutable tag to publish (for example v14.2-Alpha6)
+        description: Existing immutable tag to publish (for example v14.2-RC1)
         required: true
         type: string
 
@@ -149,5 +149,5 @@ jobs:
           gh release create "$TAG" dist/* \
             --verify-tag \
             --title "洛书 $VERSION" \
-            --notes-file RELEASE_NOTES_v14.2_ALPHA6.md \
+            --notes-file RELEASE_NOTES_v14.2_RC1.md \
             "${prerelease[@]}"

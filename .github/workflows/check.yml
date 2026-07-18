@@ -131,6 +131,6 @@ jobs:
           ! grep -qEi '(^|/)(emoji|__pycache__)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' /tmp/luoshu-package-list.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-Alpha6-Lite-validation
+          name: LuoShu-RC1-Lite-validation
           path: dist/*.zip*
           if-no-files-found: error
