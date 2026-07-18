@@ -1,0 +1,71 @@
+name: Run v14.3 App materializer PR
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  materialize:
+    if: github.event.pull_request.number == 25
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v14.3-app-auto-multiweight-import
+          fetch-depth: 0
+
+      - name: Apply App-only implementation
+        run: |
+          set -euo pipefail
+          python3 scripts/materialize_app_only_features.py
+          chmod 0755 common/app_multiweight_mix.sh scripts/check_app_only_features.sh
+          git diff --check
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Verify App-only boundary
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if git diff --name-only origin/main...HEAD | grep -q '^webroot/'; then
+            echo 'WebUI files changed even though these features are App-only.' >&2
+            exit 1
+          fi
+          sh scripts/check_app_only_features.sh
+
+      - name: Compile debug APK
+        run: gradle -p android-app --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Commit feature implementation
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A android-app common scripts
+          git commit -m 'feat(app): default multiweight and private font import'
+          git push origin HEAD:feature/v14.3-app-auto-multiweight-import
+
+      - name: Report result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: '25'
+          RESULT: ${{ job.status }}
+        run: |
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "V14_3_APP_PULL_REQUEST_RESULT: **$RESULT**
+
+run=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
