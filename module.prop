@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v14.2 Alpha1
-versionCode=14201
+version=v14.2 Alpha2
+versionCode=14202
 author=惜故里丶
-description=Android 全局文字字体复合模块：中文为完整基底，独立替换英文字形与数字字形，支持安全事务切换
+description=Android 全局文字字体复合模块：中文、英文和数字支持独立字重组合，保留安全事务切换与回滚
 updateJson=
 webroot=webroot
