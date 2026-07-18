@@ -43,7 +43,19 @@ jobs:
 
       - name: Build debug APK
         working-directory: android-app
-        run: gradle --no-daemon --stacktrace :app:assembleDebug
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee gradle-build.log
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-Hybrid-Gradle-Log
+          path: android-app/gradle-build.log
+          if-no-files-found: warn
+          retention-days: 3
 
       - name: Verify APK
         run: |
