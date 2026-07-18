@@ -20,24 +20,31 @@ jobs:
           fetch-depth: 0
 
       - uses: actions/setup-java@v4
+        if: github.event.workflow_run.conclusion == 'success'
         with:
           distribution: temurin
           java-version: '17'
 
       - uses: android-actions/setup-android@v3
+        if: github.event.workflow_run.conclusion == 'success'
 
-      - name: Require successful release workflow
+      - name: Record signed release workflow failure
+        if: github.event.workflow_run.conclusion != 'success'
         env:
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
+        shell: bash
         run: |
           set -euo pipefail
-          [[ "$CONCLUSION" == success ]] || {
-            echo "Signed release workflow failed: $RUN_URL" >&2
-            exit 1
-          }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          printf 'conclusion=%s\nrun=%s\n' "$CONCLUSION" "$RUN_URL" > RC1_RELEASE_FAILED.txt
+          git add RC1_RELEASE_FAILED.txt
+          git commit -m 'ci: v14.2 RC1 signed release failed'
+          git push origin HEAD:main
 
       - name: Verify prerelease and all published files
+        if: github.event.workflow_run.conclusion == 'success'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v14.2-RC1
@@ -74,6 +81,7 @@ jobs:
           "$build_tools/apksigner" verify --verbose --print-certs embedded.apk
 
       - name: Remove one-shot verifier after success
+        if: github.event.workflow_run.conclusion == 'success'
         shell: bash
         run: |
           set -euo pipefail
