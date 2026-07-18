@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 Hybrid App 原生核心桥：状态、字体库、原生预览、单字体切换、复合字体与任务接口。
+# 洛书 Hybrid App 原生核心桥：状态、字体库、原生预览、轴能力、字体切换与复合任务接口。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -12,6 +12,9 @@ if [ -z "$MODDIR" ]; then
 fi
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
 MIX_ENGINE="$MODDIR/common/v142_weighted_mix.sh"
+AXIS_INFO="$MODDIR/common/font_axis_info.py"
+PYROOT="$MODDIR/common/python"
+PYBIN="$PYROOT/bin/luoshu-python"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 
@@ -118,6 +121,17 @@ preview_export() {
     printf '{"status":"ok","data":{"path":"%s"}}\n' "$(json_escape "$_dest")"
 }
 
+weight_axis_info() {
+    _family="$1"
+    _src="$(find_preview_source "$_family")"
+    [ -f "$_src" ] || { printf '{"status":"error","message":"找不到字体轴来源"}\n'; return 1; }
+    [ -f "$AXIS_INFO" ] && [ -x "$PYBIN" ] || { printf '{"status":"error","message":"字体轴分析器不可用"}\n'; return 1; }
+    export PYTHONHOME="$PYROOT"
+    export PYTHONPATH="$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages"
+    export LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    "$PYBIN" "$AXIS_INFO" "$_src"
+}
+
 case "${1:-status}" in
     status)
         status_json
@@ -132,6 +146,9 @@ case "${1:-status}" in
         ;;
     preview_export)
         preview_export "${2:-}" "${3:-}"
+        ;;
+    weight_axis)
+        weight_axis_info "${2:-}"
         ;;
     validate)
         manager_ready || exit 1
