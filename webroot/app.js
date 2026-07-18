@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 23294)
-Total output lines: 1416
-
 // 洛书 WebUI - 支持 Magisk / KernelSU / SukiSU
 // 洛书 v14.2 RC1 — 完整复合字体与安全切换
 
@@ -504,7 +501,258 @@ const App = {
             document.getElementById('resetStaticWeightBtn')?.addEventListener('click',async e=>{
                 const btn=e.currentTarget; btn.disabled=true; btn.textContent='正在恢复…';
                 try { const output=await this.execShell(`${FONT_MANAGER} action font_weight_reset`); const line=output.split('\n').find(v=>v.trim().startsWith('{')); const res=line?JSON.parse(line.trim()):null; if(res?.status!=='ok') throw new Error(res?.message||'恢复失败'); this.fontWeightState=null; this.weightRebootRequired=false; this.updateRebootUI(); const v=Number(res.data?.weight)||400; const target=available.reduce((best,item)=>Math.abs(item.value-v)<Math.abs(best.value-v)?item:best,available[0]); const targetBtn=box.querySelector(`[data-static-role="${target.role}"]`); if(targetBtn) choose(targetBtn); this.showToast('已恢复系统原始字体粗细'); }
-                catch(err){ this.showToast((err&&…3294 tokens truncated…'currentFontDesc');
+                catch(err){ this.showToast((err&&err.message)||String(err)); }
+                finally{ btn.disabled=false; btn.textContent='恢复系统原值'; }
+            });
+            const initialBtn=box.querySelector(`[data-static-role="${selected.role}"]`); if(initialBtn) choose(initialBtn);
+            if(state.supported===false){ box.querySelectorAll('button').forEach(el=>el.disabled=true); box.insertAdjacentHTML('beforeend','<div class="variable-weight-unavailable"><small>当前 ROM 未提供系统字重接口，仅支持详情页预览。</small></div>'); }
+        } catch(e) { box.innerHTML=`<div class="variable-weight-unavailable"><strong>字重状态读取失败</strong><small>${this.escape((e&&e.message)||String(e))}</small></div>`; }
+    },
+    async loadDetailAnalysis(font, force = false) {
+        const container = document.getElementById('fontAnalysis');
+        if (!container) return;
+        container.innerHTML = '<div class="analysis-loading"><span></span>正在读取字体字符映射…</div>';
+        try {
+            const result = await this.analyzeFont(font, force);
+            this.renderAnalysis(container, font, result);
+        } catch (e) {
+            container.innerHTML = `<div class="analysis-error"><strong>检测失败</strong><span>${this.escape((e && e.message) || String(e))}</span><button id="retryAnalysisBtn" type="button">重新检测</button></div>`;
+            document.getElementById('retryAnalysisBtn')?.addEventListener('click', () => this.loadDetailAnalysis(font, true));
+        }
+    },
+
+    async loadRebootStatus() {
+        try {
+            const output = await this.execShell(`${FONT_MANAGER} action reboot_required`);
+            const line = output.split('\n').find(v => v.trim().startsWith('{'));
+            const res = line ? JSON.parse(line.trim()) : null;
+            if (res?.status === 'ok') {
+                this.textRebootRequired = Boolean(res.data?.text);
+                this.weightRebootRequired = Boolean(res.data?.weight);
+                this.updateRebootUI();
+            }
+        } catch (e) {
+            console.warn('[洛书] 无法读取重启状态', e);
+        }
+    },
+
+    updateRebootUI() {
+        const pending = this.textRebootRequired || this.weightRebootRequired;
+        document.body.classList.toggle('reboot-required', pending);
+        const btn = document.getElementById('rebootDeviceBtn');
+        const hint = btn?.querySelector('.action-btn-hint');
+        if (btn) btn.classList.toggle('pending', pending);
+        if (hint) {
+            const pendingItems = [];
+            if (this.textRebootRequired) pendingItems.push('文字');
+            if (this.weightRebootRequired) pendingItems.push('粗细');
+            hint.textContent = pending ? `${pendingItems.join(' + ')}等待重启` : '完成字体应用';
+        }
+        const badge = document.querySelector('.current-badge');
+        if (badge) badge.innerHTML = `<span class="pulse-dot"></span>${pending ? '配置待重启' : '正在使用'}`;
+    },
+
+    async requestFontSwitch(fontId) {
+        if (this.textRebootRequired) { this.showToast('本次开机已更改文字字体，请先重启手机'); return; }
+        this.pendingFont = fontId;
+        if (fontId === 'default') {
+            document.getElementById('targetFont').textContent = '系统默认字体';
+            document.getElementById('modal').classList.add('show');
+            return;
+        }
+        const font = this.fonts.find(v => v.id === fontId);
+        if (!font) { this.showToast('字体不存在'); return; }
+        let validation;
+        try {
+            const validationOutput = await this.execShell(`${FONT_MANAGER} action validate ${this.shellQuote(fontId)}`);
+            const validationLine = validationOutput.split('\n').find(v => v.trim().startsWith('{'));
+            validation = validationLine ? JSON.parse(validationLine.trim()) : null;
+            if (validation?.status !== 'ok' || validation.data?.valid === false) {
+                throw new Error(validation?.message || validation?.data?.error || '字体文件未通过格式检测');
+            }
+        } catch (e) {
+            this.showToast('无法应用: ' + ((e && e.message) || String(e)));
+            return;
+        }
+        const risks = [];
+        if (validation.data?.warning) risks.push(validation.data.warning);
+        try {
+            const result = await this.analyzeFont(font);
+            risks.push(...(result.assessment?.warnings || []));
+            if ((result.coverage?.cjk?.percent || 0) < 55) risks.unshift('常用中文覆盖较低，可能出现漏字');
+            if ((result.coverage?.pua?.percent || 0) >= 22) risks.push('私用区字形较多，部分 ROM 图标可能异常');
+        } catch (_) {
+            risks.push('无法读取详细字符覆盖，请确认字体在当前 ROM 上可用');
+        }
+        if (risks.length) {
+            this.pendingRiskFont = fontId;
+            document.getElementById('riskMessage').innerHTML = `<strong>${this.escape(font.name || font.id)}</strong><br>${risks.slice(0,4).map(v => `• ${this.escape(v)}`).join('<br>')}`;
+            document.getElementById('riskModal').classList.add('show');
+            return;
+        }
+        document.getElementById('targetFont').textContent = font.name || font.id;
+        document.getElementById('modal').classList.add('show');
+    },
+
+    showApplyDone(kind, name) {
+        const message = document.getElementById('applyDoneMessage');
+        if (message) message.textContent = `${kind}「${name}」已准备，将在完整重启后安全生效。`;
+        document.getElementById('applyDoneModal')?.classList.add('show');
+    },
+
+    async rebootDevice() {
+        try {
+            this.showToast('正在重启手机…');
+            await this.execShell(`${FONT_MANAGER} action reboot_device`);
+        } catch (e) {
+            this.showToast('重启失败: ' + ((e && e.message) || String(e)));
+        }
+    },
+
+    async openPublicFolder(kind = 'fonts') {
+        const safeKind = kind === 'import' ? 'import' : 'fonts';
+        const path = `/sdcard/LuoShu/${safeKind}`;
+        const title = safeKind === 'import' ? '字体包导入' : '文字字体';
+        try { await this.execShell(`mkdir -p "${path}" && chmod 0777 "${path}" 2>/dev/null || true`); }
+        catch (_) { this.showToast('无法创建目录'); return; }
+        const docId = encodeURIComponent(`primary:LuoShu/${safeKind}`);
+        const intents = [
+            `am start --user 0 -a android.intent.action.OPEN_DOCUMENT_TREE --eu android.provider.extra.INITIAL_URI 'content://com.android.externalstorage.documents/document/${docId}' --activity-new-task`,
+            `am start --user 0 -a android.intent.action.VIEW -d 'content://com.android.externalstorage.documents/document/${docId}' -t 'vnd.android.document/directory' --activity-new-task`,
+            `am start --user 0 -a android.intent.action.VIEW -d 'file://${path}' -t 'resource/folder' --activity-new-task`
+        ];
+        for (const intent of intents) {
+            try {
+                const output = await this.execShell(`result=$(${intent} 2>&1); echo "$result"; echo "$result" | grep -Eqi 'Error|Exception|unable to resolve|not found' && exit 1 || exit 0`);
+                if (!/Error|Exception|unable to resolve|not found/i.test(output || '')) { this.showToast(`已打开${title}文件夹`); return; }
+            } catch (_) { /* try next */ }
+        }
+        await this.copyText(`${path}/`, `${title}路径已复制`);
+    },
+
+    async execShell(cmd) {
+        const { errno, stdout, stderr } = await exec(cmd);
+        if (errno !== 0) {
+            console.error('[洛书] exec error:', stderr);
+            throw new Error(stderr || '命令执行失败');
+        }
+        return stdout;
+    },
+
+    // 骨架屏
+    showSkeleton() {
+        const container = document.getElementById('fontList');
+        container.innerHTML = Array(4).fill(0).map(() => `
+            <div class="font-card skeleton">
+                <div class="card-left">
+                    <div class="card-cover" style="background: var(--line);"></div>
+                    <div class="card-body" style="flex:1">
+                        <div style="height:16px;width:80px;background:var(--line);border-radius:4px;margin-bottom:8px"></div>
+                        <div style="height:12px;width:160px;background:var(--line);border-radius:4px;margin-bottom:8px"></div>
+                        <div style="height:12px;width:120px;background:var(--line);border-radius:4px"></div>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    },
+
+    restoreDataCache() {
+        try {
+            const cached = JSON.parse(localStorage.getItem(DATA_CACHE_KEY) || 'null');
+            if (!cached || !cached.data || !Array.isArray(cached.data.fonts)) return false;
+            this.applyFontData(cached.data, false);
+            return true;
+        } catch (_) {
+            localStorage.removeItem(DATA_CACHE_KEY);
+            return false;
+        }
+    },
+
+    applyFontData(data, persist = true) {
+        const signature = JSON.stringify(data);
+        const changed = signature !== this.dataSignature;
+        this.currentFont = data.current || '';
+        this.fonts = data.fonts || [];
+        this.stats = data.stats || { count: 0, totalSize: '0' };
+        this.dataSignature = signature;
+        if (persist) {
+            try { localStorage.setItem(DATA_CACHE_KEY, JSON.stringify({ savedAt: Date.now(), data })); } catch (_) { /* 缓存空间不足不影响使用 */ }
+        }
+        if (changed) {
+            this.renderCurrent();
+            this.renderStats();
+            this.renderList();
+        }
+    },
+
+    async loadData({ background = false, force = false } = {}) {
+        if (this.isLoading) return;
+        this.isLoading = true;
+        try {
+            const output = await this.execShell(`${FONT_MANAGER} action list${force ? ' refresh' : ''}`);
+            const jsonLine = output.split('\n').find(l => l.trim().startsWith('{'));
+            if (!jsonLine) { this.showError('无法获取字体列表'); return; }
+            const res = JSON.parse(jsonLine.trim());
+            if (res.status === 'ok' && res.data) {
+                this.applyFontData(res.data);
+            } else {
+                if (!background) this.showError(res.message || '加载失败');
+            }
+        } catch (e) {
+            console.error('[洛书] load error:', e);
+            if (!background) this.showError('加载失败: ' + ((e && e.message) || String(e)));
+        } finally {
+            this.isLoading = false;
+        }
+    },
+
+    // 只在需要预览时注入字体。静态多字重家族会为每个实际文件建立独立 face。
+    injectFontFace(font) {
+        if (!font?.file || !font?.id) return;
+        const safeId = this.safeId(font.id);
+        if (injectedFaces.has(safeId)) return;
+        injectedFaces.add(safeId);
+        const cssUrl = value => String(value || '').replace(/(["\\])/g, '\\$1');
+        const family = `preview_${safeId}`;
+        const variants = font.variants && typeof font.variants === 'object' ? font.variants : {};
+        const entries = Object.entries(variants).filter(([, file]) => file);
+        let rules;
+        if (font.variable) rules = `@font-face{font-family:"${family}";src:url("${cssUrl(font.file)}");font-weight:100 900;font-style:normal;font-display:swap;}`;
+        else if (entries.length) rules = entries.map(([role,file]) => `@font-face{font-family:"${family}";src:url("${cssUrl(file)}");font-weight:${STATIC_WEIGHT_CSS[role] || 400};font-style:normal;font-display:swap;}`).join('');
+        else rules = `@font-face{font-family:"${family}";src:url("${cssUrl(font.file)}");font-weight:400;font-style:normal;font-display:swap;}`;
+        const el = document.getElementById('dynamicFontStyles') || document.createElement('style');
+        el.id = 'dynamicFontStyles';
+        el.textContent = (el.textContent || '') + rules;
+        if (!el.parentNode) document.head.appendChild(el);
+    },
+
+    scheduleFontFace(font) {
+        if (!font || injectedFaces.has(this.safeId(font.id))) return;
+        const run = () => this.injectFontFace(font);
+        if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 900 });
+        else setTimeout(run, 180);
+    },
+
+    safeId(id) {
+        return this.escape(id).replace(/[^a-zA-Z0-9]/g, '_');
+    },
+
+    renderStats() {
+        const el = document.getElementById('statsPanel');
+        if (!el) return;
+        const count = this.stats?.count || 0;
+        const totalSize = this.stats?.totalSize || '0';
+        el.innerHTML = `
+            <div class="stat-item"><div class="stat-value">${count}</div><div class="stat-label">字体</div></div>
+            <div class="stat-divider"></div>
+            <div class="stat-item"><div class="stat-value">${totalSize}</div><div class="stat-label">总大小</div></div>
+        `;
+        el.style.display = count > 0 ? 'flex' : 'none';
+    },
+
+    renderCurrent() {
+        const nameEl = document.getElementById('currentFontName');
+        const descEl = document.getElementById('currentFontDesc');
         const mainEl = document.getElementById('previewMain');
         const fullEl = document.getElementById('previewFull');
         const formatEl = document.getElementById('currentFormat');
