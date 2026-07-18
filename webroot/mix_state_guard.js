@@ -14,11 +14,13 @@ Storage.prototype.setItem = function guardedSetItem(key, rawValue) {
     const current = parse(this.getItem(KEY));
     const incoming = parse(rawValue);
     const merged = { ...current, ...incoming };
+    let fontChangedAny = false;
     SLOTS.forEach(slot => {
         const axesKey = `${slot}Axes`;
         const weightKey = `${slot}Weight`;
         const fontChanged = Object.prototype.hasOwnProperty.call(incoming, slot) && String(incoming[slot] || '') !== String(current[slot] || '');
         if (fontChanged && !Object.prototype.hasOwnProperty.call(incoming, axesKey)) {
+            fontChangedAny = true;
             merged[axesKey] = {};
             delete merged[weightKey];
         } else {
@@ -30,6 +32,6 @@ Storage.prototype.setItem = function guardedSetItem(key, rawValue) {
     try { return originalSetItem.call(this, key, JSON.stringify(merged)); }
     finally {
         insideGuard = false;
-        queueMicrotask(() => window.dispatchEvent(new CustomEvent('luoshu-mix-storage-change', { detail: merged })));
+        if (fontChangedAny) queueMicrotask(() => window.dispatchEvent(new CustomEvent('luoshu-mix-storage-change', { detail: merged })));
     }
 };
