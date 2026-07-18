@@ -1,0 +1,27 @@
+name: Report v14.2 RC1 release status
+
+on:
+  pull_request_target:
+    types: [ready_for_review]
+
+permissions:
+  actions: read
+  pull-requests: write
+  contents: read
+
+jobs:
+  report:
+    if: github.event.pull_request.number == 17
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report signed release run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: 511e527a8298e5dea1916b68dd848f3645c91243
+          PR_NUMBER: '17'
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --limit 10 --json databaseId,status,conclusion,event,headBranch,headSha,url,createdAt --jq "map(select(.headSha == \"$TARGET_SHA\" or .headBranch == \"v14.2-RC1\")) | first")"
+          [[ -n "$status" && "$status" != null ]] || status='{"error":"release run not found"}'
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "RC1_RELEASE_STATUS\n\n\`\`\`json\n$status\n\`\`\`"
