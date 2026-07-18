@@ -1,0 +1,123 @@
+name: Integrate v14.2 Alpha1
+on:
+  push:
+    branches: [feature/v14.2-font-workbench]
+    paths:
+      - .github/workflows/v142-self-materialize.yml
+permissions:
+  contents: write
+jobs:
+  integrate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v14.2-font-workbench
+          fetch-depth: 0
+      - name: Connect workbench and synchronize version
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=-1):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'missing token in {path}: {old[:100]}')
+              p.write_text(text.replace(old, new, count), encoding='utf-8')
+
+          replace('module.prop', 'version=v14.1.1 RC3', 'version=v14.2 Alpha1')
+          replace('module.prop', 'versionCode=14123', 'versionCode=14201')
+          replace('webroot/environment.js', '// 洛书 v13.5 Stable Hotfix3 - Root / Mountify 环境识别与 UI 精修', '// 洛书 v14.2 Alpha1 - Root / Mountify 环境识别与 UI 精修')
+          replace('webroot/environment.js', "const UI_VERSION = '14120';", "const UI_VERSION = '14201';")
+          replace('webroot/app.js', '// 洛书 v14.1 — 完整复合字体与安全切换', '// 洛书 v14.2 Alpha1 — 完整复合字体与字体工作台')
+          replace('webroot/index.html', '?v=14120', '?v=14201')
+          replace('webroot/index.html', '<b id="engineVersion">v14.1</b>', '<b id="engineVersion">v14.2 Alpha1</b>')
+          replace('webroot/index.html', '<b data-module-version>v14.1</b>', '<b data-module-version>v14.2 Alpha1</b>')
+          replace('webroot/index.html', '<span data-module-version>v14.1</span>', '<span data-module-version>v14.2 Alpha1</span>')
+          replace('webroot/v14.js', '// 洛书 v14：稳定切换、精简设置与中文 / 英文 / 数字字体组合。', '// 洛书 v14.2 Alpha1：稳定切换、完整复合字体与字体工作台。')
+          replace('webroot/v14.js', "import { exec } from './kernelsu.js';", "import { exec } from './kernelsu.js';\nimport './workbench.js';", 1)
+          api_block = r'''
+// v14.2 工作台桥接：只暴露受控的组合状态与现有生成入口。
+window.LuoShuV14 = Object.freeze({
+    getMixState() {
+        const app = window.App;
+        if (app) ensureMixDefaults(app);
+        return { enabled: Boolean(mixState.enabled), cjk: mixState.cjk, latin: mixState.latin, digit: mixState.digit };
+    },
+    setMixSelection(selection = {}) {
+        const app = window.App;
+        if (!app) return false;
+        const next = { cjk: String(selection.cjk || ''), latin: String(selection.latin || ''), digit: String(selection.digit || '') };
+        if (validMixId(app, next.cjk)) mixState.cjk = next.cjk;
+        if (validMixId(app, next.latin)) mixState.latin = next.latin;
+        if (validMixId(app, next.digit)) mixState.digit = next.digit;
+        ensureMixDefaults(app);
+        saveMixLocal();
+        renderMixPanel(app);
+        return Boolean(mixState.cjk && mixState.latin && mixState.digit);
+    },
+    applyMix() {
+        const app = window.App;
+        if (!app) return Promise.reject(new Error('字体组合引擎尚未就绪'));
+        return applyFontMix(app);
+    },
+    refreshMixPanel() {
+        const app = window.App;
+        if (!app) return false;
+        renderMixPanel(app);
+        return true;
+    },
+});
+
+'''
+          replace('webroot/v14.js', 'function patchApp() {', api_block + 'function patchApp() {', 1)
+          replace('scripts/check.sh', 'for file in app.js font_analyzer.js kernelsu.js environment.js v14.js; do', 'for file in app.js font_analyzer.js kernelsu.js environment.js v14.js workbench.js; do')
+          replace('scripts/check.sh', 'common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \\\n', 'common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js webroot/workbench.js webroot/workbench.css \\\n')
+          replace('scripts/check.sh', "grep -q '^version=v14.1.1 RC3$'", "grep -q '^version=v14.2 Alpha1$'")
+          replace('scripts/check.sh', "grep -q '^versionCode=14123$'", "grep -q '^versionCode=14201$'")
+          replace('scripts/check.sh', "grep -q 'v14.js?v=14120'", "grep -q 'v14.js?v=14201'")
+          replace('scripts/check.sh', "grep -q 'app.js?v=14120'", "grep -q 'app.js?v=14201'")
+          replace('scripts/check.sh', "grep -q \"UI_VERSION = '14120'\"", "grep -q \"UI_VERSION = '14201'\"")
+          replace('scripts/check.sh', "echo 'LuoShu v14.1.1 RC3 clean-baseline checks passed.'", "echo 'LuoShu v14.2 Alpha1 font-workbench checks passed.'")
+          replace('.github/workflows/check.yml', '      - RELEASE_NOTES_v14.1.1_RC3.md\n', '      - RELEASE_NOTES_v14.1.1_RC3.md\n      - RELEASE_NOTES_v14.2_ALPHA1.md\n')
+          replace('.github/workflows/check.yml', "= 'v14.1'", "= 'v14.2 Alpha1'")
+          replace('.github/workflows/check.yml', "= '14120'", "= '14201'")
+          replace('.github/workflows/check.yml', "grep -q 'v14.js?v=14120'", "grep -q 'v14.js?v=14201'")
+          replace('.github/workflows/check.yml', 'name: LuoShu-v14.1-validation', 'name: LuoShu-v14.2-Alpha1-validation')
+          for path in ('customize.sh', 'post-fs-data.sh', 'common/font_manager.sh'):
+              p = Path(path)
+              p.write_text(p.read_text(encoding='utf-8').replace('v14.1.1 RC3', 'v14.2 Alpha1'), encoding='utf-8')
+          p = Path('service.sh')
+          p.write_text(p.read_text(encoding='utf-8').replace('v14.1 - 后台服务', 'v14.2 Alpha1 - 后台服务').replace('服务脚本开始执行 (v14.1)', '服务脚本开始执行 (v14.2 Alpha1)'), encoding='utf-8')
+          PY
+          cat > RELEASE_NOTES_v14.2_ALPHA1.md <<'EOF'
+          # 洛书 v14.2 Alpha1
+
+          本版本从 v14.1.1 RC3 可信清理基线开始开发，首批加入“字体工作台”。
+
+          - 字体组合预设：保存、载入、同步并调用现有完整复合字体引擎。
+          - 可变字体轴滑块：读取全部 fvar 轴，支持实时预览与参数复制。
+          - 字体对比实验室：同文字、同字号进行 A/B 对比。
+          - 字体健康评分：读取真实 cmap 抽样、结构警告与覆盖热力图。
+          - 字形来源信息：显示文件来源、格式、体积、字重结构和可变轴数量。
+          - 新增独立工作台导航及移动端玻璃化界面。
+
+          Alpha1 的可变轴功能仅用于实时预览和参数导出；除现有系统字重功能外，其他轴暂不写入最终复合字体。底层挂载、ROM 映射、事务提交与回滚逻辑保持不变。
+          EOF
+          node --check webroot/workbench.js
+          cp webroot/v14.js /tmp/v14.mjs && node --check /tmp/v14.mjs
+          cp webroot/app.js /tmp/app.mjs && node --check /tmp/app.mjs
+          sh -n customize.sh
+          sh -n post-fs-data.sh
+          sh -n service.sh
+          sh -n common/font_manager.sh
+          git diff --check
+      - name: Commit and push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add module.prop webroot/index.html webroot/environment.js webroot/app.js webroot/v14.js webroot/workbench.js webroot/workbench.css scripts/check.sh .github/workflows/check.yml customize.sh post-fs-data.sh service.sh common/font_manager.sh RELEASE_NOTES_v14.2_ALPHA1.md
+          git diff --cached --quiet && exit 0
+          git commit -m 'feat: integrate v14.2 Alpha1 font workbench'
+          git push origin HEAD:feature/v14.2-font-workbench
