@@ -22,6 +22,7 @@ USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODDIR/common/app_font_import.sh" ] && . "$MODDIR/common/app_font_import.sh"
 [ -f "$MODDIR/common/app_library_compat.sh" ] && . "$MODDIR/common/app_library_compat.sh"
+[ -f "$MODDIR/common/app_font_index.sh" ] && . "$MODDIR/common/app_font_index.sh"
 
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
 read_prop() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'; }
@@ -105,8 +106,12 @@ case "${1:-status}" in
     status) status_json ;;
     fonts)
         manager_ready || exit 1
-        type app_prepare_font_library >/dev/null 2>&1 && app_prepare_font_library >/dev/null 2>&1 || true
-        [ "${2:-}" = refresh ] && sh "$FONT_MANAGER" action list refresh || sh "$FONT_MANAGER" action list
+        type app_prepare_font_library >/dev/null 2>&1 && app_prepare_font_library "${2:-}" >/dev/null 2>&1 || true
+        if type app_fonts_json >/dev/null 2>&1; then
+            app_fonts_json "${2:-}"
+        else
+            [ "${2:-}" = refresh ] && sh "$FONT_MANAGER" action list refresh || sh "$FONT_MANAGER" action list
+        fi
         ;;
     preview_export) preview_export "${2:-}" "${3:-}" ;;
     weight_axis) weight_axis_info "${2:-}" ;;
