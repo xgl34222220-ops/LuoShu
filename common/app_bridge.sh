@@ -12,11 +12,14 @@ if [ -z "$MODDIR" ]; then
 fi
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
 MIX_ENGINE="$MODDIR/common/v142_weighted_mix.sh"
+APP_MULTI_ENGINE="$MODDIR/common/app_multiweight_mix.sh"
+APP_MODE_CONF="$MODDIR/config/app_weight_mode.conf"
 AXIS_INFO="$MODDIR/common/font_axis_info.py"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
+[ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -62,8 +65,14 @@ status_json() {
     _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
     [ -n "$_active" ] || _active='default'
 
-    _task_file="$MODDIR/config/v143_axes_task.conf"
-    [ -s "$_task_file" ] || _task_file="$MODDIR/config/mix_task.conf"
+    _task_file=""
+    _task_mtime=-1
+    for _candidate in "$MODDIR/config/app_multiweight_task.conf" "$MODDIR/config/v143_axes_task.conf" "$MODDIR/config/mix_task.conf"; do
+        [ -s "$_candidate" ] || continue
+        _mtime=$(stat -c %Y "$_candidate" 2>/dev/null || echo 0)
+        case "$_mtime" in ''|*[!0-9]*) _mtime=0 ;; esac
+        if [ "$_mtime" -gt "$_task_mtime" ] 2>/dev/null; then _task_file="$_candidate"; _task_mtime="$_mtime"; fi
+    done
     _task_state="$(read_prop "$_task_file" state)"
     _task_message="$(read_prop "$_task_file" message)"
     [ -n "$_task_state" ] || _task_state='idle'
@@ -133,6 +142,69 @@ weight_axis_info() {
     "$PYBIN" "$AXIS_INFO" "$_src"
 }
 
+app_cache_path_allowed() {
+    case "$1" in
+        /data/user/0/io.github.xgl34222220.luoshu/cache/font-import/*|/data/data/io.github.xgl34222220.luoshu/cache/font-import/*|\
+        /data/user/0/io.github.xgl34222220.luoshu.debug/cache/font-import/*|/data/data/io.github.xgl34222220.luoshu.debug/cache/font-import/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+import_font() {
+    _src="$1"
+    _requested=$(printf '%s' "$2" | tr -d '\r\n')
+    app_cache_path_allowed "$_src" || { printf '{"status":"error","message":"字体来源不是受信任的 App 私有缓存"}\n'; return 1; }
+    [ -f "$_src" ] || { printf '{"status":"error","message":"所选字体缓存不存在"}\n'; return 1; }
+    _name=$(basename "$_requested")
+    [ -n "$_name" ] || _name=$(basename "$_src")
+    case "$_name" in ''|.|..|*/*|*\\*) printf '{"status":"error","message":"字体文件名无效"}\n'; return 1 ;; esac
+    _ext=${_name##*.}
+    case "$_ext" in ttf|TTF|otf|OTF|ttc|TTC) ;; *) printf '{"status":"error","message":"仅支持 TTF、OTF 或 TTC 字体"}\n'; return 1 ;; esac
+    _size=$(wc -c <"$_src" 2>/dev/null | tr -d '[:space:]')
+    case "$_size" in ''|*[!0-9]*) _size=0 ;; esac
+    [ "$_size" -ge 12 ] 2>/dev/null && [ "$_size" -le 134217728 ] 2>/dev/null || { printf '{"status":"error","message":"字体文件大小异常或超过 128 MB"}\n'; return 1; }
+    type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
+    mkdir -p "$USER_FONTS_DIR" 2>/dev/null || { printf '{"status":"error","message":"无法创建用户字体目录"}\n'; return 1; }
+    _stem=${_name%.*}; _dest="$USER_FONTS_DIR/$_name"
+    if [ -f "$_dest" ]; then
+        if cmp -s "$_src" "$_dest" 2>/dev/null; then
+            _family=$(detect_font_family "$_name")
+            printf '{"status":"ok","data":{"imported":false,"duplicate":true,"file":"%s","family":"%s"}}\n' "$(json_escape "$_name")" "$(json_escape "$_family")"
+            return 0
+        fi
+        _index=2
+        while [ -e "$_dest" ]; do
+            _name="${_stem}-${_index}.${_ext}"; _dest="$USER_FONTS_DIR/$_name"; _index=$((_index + 1))
+        done
+    fi
+    _tmp="$USER_FONTS_DIR/.app-import-$$-${_name}"
+    rm -f "$_tmp" 2>/dev/null || true
+    cp -f "$_src" "$_tmp" 2>/dev/null || { printf '{"status":"error","message":"无法复制字体到用户目录"}\n'; return 1; }
+    chmod 0644 "$_tmp" 2>/dev/null || true
+    if type font_validate >/dev/null 2>&1 && ! font_validate "$_tmp" text; then
+        _error=${FONT_CHECK_ERROR:-字体文件校验失败}
+        rm -f "$_tmp" 2>/dev/null || true
+        printf '{"status":"error","message":"%s"}\n' "$(json_escape "$_error")"
+        return 1
+    fi
+    mv -f "$_tmp" "$_dest" 2>/dev/null || { rm -f "$_tmp"; printf '{"status":"error","message":"无法提交字体文件"}\n'; return 1; }
+    chmod 0644 "$_dest" 2>/dev/null || true
+    rm -f "$MODDIR/config/webui_font_list.json" "$MODDIR/config/webui_font_list.key" 2>/dev/null || true
+    _family=$(detect_font_family "$_name")
+    printf '{"status":"ok","data":{"imported":true,"duplicate":false,"file":"%s","family":"%s","size":%s}}\n' "$(json_escape "$_name")" "$(json_escape "$_family")" "$_size"
+}
+
+spec_auto() { [ "$1" = auto ]; }
+write_app_weight_mode() {
+    _ca=false; spec_auto "$1" && _ca=true
+    _la=false; spec_auto "$2" && _la=true
+    _da=false; spec_auto "$3" && _da=true
+    mkdir -p "${APP_MODE_CONF%/*}" 2>/dev/null || true
+    _tmp="${APP_MODE_CONF}.tmp.$$"
+    printf 'cjkAuto=%s\nlatinAuto=%s\ndigitAuto=%s\n' "$_ca" "$_la" "$_da" >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$APP_MODE_CONF" 2>/dev/null
+    chmod 0644 "$APP_MODE_CONF" 2>/dev/null || true
+}
+
 case "${1:-status}" in
     status)
         status_json
@@ -167,17 +239,22 @@ case "${1:-status}" in
         manager_ready || exit 1
         sh "$FONT_MANAGER" action delete "${2:-}"
         ;;
+    import)
+        import_font "${2:-}" "${3:-}"
+        ;;
     mix_config)
-        mix_ready || exit 1
-        sh "$MIX_ENGINE" config
+        if [ -f "$APP_MULTI_ENGINE" ]; then sh "$APP_MULTI_ENGINE" config; else mix_ready || exit 1; sh "$MIX_ENGINE" config; fi
         ;;
     mix_start)
-        mix_ready || exit 1
-        sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}"
+        _ca="${5:-auto}"; _la="${6:-auto}"; _da="${7:-auto}"
+        write_app_weight_mode "$_ca" "$_la" "$_da"
+        case "$_ca $_la $_da" in
+            *auto*) [ -f "$APP_MULTI_ENGINE" ] || { printf '{"status":"error","message":"APP 多字重引擎不存在"}\n'; exit 1; }; sh "$APP_MULTI_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "$_ca" "$_la" "$_da" ;;
+            *) mix_ready || exit 1; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "$_ca" "$_la" "$_da" ;;
+        esac
         ;;
     mix_status)
-        mix_ready || exit 1
-        sh "$MIX_ENGINE" status "${2:-}"
+        case "${2:-}" in appmw-*) [ -f "$APP_MULTI_ENGINE" ] || exit 1; sh "$APP_MULTI_ENGINE" status "${2:-}" ;; *) mix_ready || exit 1; sh "$MIX_ENGINE" status "${2:-}" ;; esac
         ;;
     reboot)
         manager_ready || exit 1

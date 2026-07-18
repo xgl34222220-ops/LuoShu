@@ -1,0 +1,4 @@
+io.github.xgl34222220.luoshu
+drawable ic_luoshu
+string app_name
+style Theme_LuoShuHybrid

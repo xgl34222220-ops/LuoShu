@@ -279,8 +279,10 @@ copy_as_generic() {
     src="$1"
     dest_dir="$2"
     mode="${3:-full}"
+    font_family="${4:-}"
     sys_count=0
     core_count=0
+    weight_count=0
 
     for cfile in $(get_all_generic_files); do
         rm -f "$dest_dir/$cfile" 2>/dev/null
@@ -308,6 +310,30 @@ copy_as_generic() {
     fi
     _log_step "  已覆盖 $core_count 个通用字体文件"
     [ "$bad_count" -gt 0 ] && _log_step "  ⚠ 其中 $bad_count 个校验异常，请检查源字体文件是否完整"
+
+    if [ -n "$font_family" ] && type scan_family_weights >/dev/null 2>&1; then
+        weights=$(scan_family_weights "$font_family")
+        for w in $(echo "$weights" | tr ',' ' '); do
+            [ "$w" = regular ] && continue
+            w_file=$(get_weight_file "$font_family" "$w")
+            [ -f "$w_file" ] || continue
+            w_anchor=$(_font_anchor "$w_file" "$dest_dir" "$w") || continue
+            case "$w" in
+                thin) targets="Roboto-Thin.ttf" ;;
+                light) targets="Roboto-Light.ttf" ;;
+                medium) targets="Roboto-Medium.ttf GoogleSans-Medium.ttf GoogleSansText-Medium.ttf" ;;
+                semibold) targets="Roboto-SemiBold.ttf" ;;
+                bold) targets="Roboto-Bold.ttf DroidSans-Bold.ttf GoogleSans-Bold.ttf GoogleSansText-Bold.ttf" ;;
+                black) targets="Roboto-Black.ttf" ;;
+                *) targets="" ;;
+            esac
+            for dest_name in $targets; do
+                _rom_exact_target_exists "$dest_name" || continue
+                _font_alias "$w_anchor" "$dest_dir/$dest_name" && weight_count=$((weight_count + 1))
+            done
+        done
+        [ "$weight_count" -gt 0 ] && _log_step "  已创建 $weight_count 个通用 Android 字重变体文件"
+    fi
     return 0
 }
 
@@ -328,7 +354,7 @@ apply_font_by_rom() {
     elif [ "$IS_COLOROS" = "true" ]; then
         copy_as_coloros "$src" "$dest_dir" "$mode" "$font_family"
     else
-        copy_as_generic "$src" "$dest_dir" "$mode"
+        copy_as_generic "$src" "$dest_dir" "$mode" "$font_family"
     fi
 }
 

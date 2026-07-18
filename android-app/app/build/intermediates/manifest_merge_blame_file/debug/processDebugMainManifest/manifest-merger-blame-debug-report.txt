@@ -1,0 +1,144 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="io.github.xgl34222220.luoshu.debug"
+4    android:versionCode="1421001"
+5    android:versionName="14.2-rc1-debug" >
+6
+7    <uses-sdk
+7-->INJECTED
+8        android:minSdkVersion="28"
+8-->INJECTED
+9        android:targetSdkVersion="36" />
+9-->INJECTED
+10
+11    <permission
+11-->[androidx.core:core:1.18.0] /home/runner/.gradle/caches/9.5.0/transforms/7d507d82ed2272ec9ed0810e4aae2753/transformed/core-1.18.0/AndroidManifest.xml:22:5-24:47
+12        android:name="io.github.xgl34222220.luoshu.debug.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+12-->[androidx.core:core:1.18.0] /home/runner/.gradle/caches/9.5.0/transforms/7d507d82ed2272ec9ed0810e4aae2753/transformed/core-1.18.0/AndroidManifest.xml:23:9-81
+13        android:protectionLevel="signature" />
+13-->[androidx.core:core:1.18.0] /home/runner/.gradle/caches/9.5.0/transforms/7d507d82ed2272ec9ed0810e4aae2753/transformed/core-1.18.0/AndroidManifest.xml:24:9-44
+14
+15    <uses-permission android:name="io.github.xgl34222220.luoshu.debug.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+15-->[androidx.core:core:1.18.0] /home/runner/.gradle/caches/9.5.0/transforms/7d507d82ed2272ec9ed0810e4aae2753/transformed/core-1.18.0/AndroidManifest.xml:26:5-97
+15-->[androidx.core:core:1.18.0] /home/runner/.gradle/caches/9.5.0/transforms/7d507d82ed2272ec9ed0810e4aae2753/transformed/core-1.18.0/AndroidManifest.xml:26:22-94
+16
+17    <application
+17-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:4:5-21:19
+18        android:allowBackup="false"
+18-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:5:9-36
+19        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+19-->[androidx.core:core:1.18.0] /home/runner/.gradle/caches/9.5.0/transforms/7d507d82ed2272ec9ed0810e4aae2753/transformed/core-1.18.0/AndroidManifest.xml:28:18-86
+20        android:debuggable="true"
+21        android:extractNativeLibs="false"
+21-->INJECTED
+22        android:hardwareAccelerated="true"
+22-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:6:9-43
+23        android:icon="@drawable/ic_luoshu"
+23-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:7:9-43
+24        android:label="@string/app_name"
+24-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:8:9-41
+25        android:supportsRtl="true"
+25-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:9:9-35
+26        android:theme="@style/Theme.LuoShuHybrid"
+26-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:10:9-50
+27        android:usesCleartextTraffic="false" >
+27-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:11:9-45
+28        <activity
+28-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:13:9-20:20
+29            android:name="io.github.xgl34222220.luoshu.MainActivity"
+29-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:14:13-41
+30            android:exported="true" >
+30-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:15:13-36
+31            <intent-filter>
+31-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:16:13-19:29
+32                <action android:name="android.intent.action.MAIN" />
+32-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:17:17-69
+32-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:17:25-66
+33
+34                <category android:name="android.intent.category.LAUNCHER" />
+34-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:18:17-77
+34-->/home/runner/work/LuoShu/LuoShu/android-app/app/src/main/AndroidManifest.xml:18:27-74
+35            </intent-filter>
+36        </activity>
+37
+38        <provider
+38-->[androidx.emoji2:emoji2:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/7e55e88a45bb0c4a269b2c74dcffd4ce/transformed/emoji2-1.4.0/AndroidManifest.xml:24:9-32:20
+39            android:name="androidx.startup.InitializationProvider"
+39-->[androidx.emoji2:emoji2:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/7e55e88a45bb0c4a269b2c74dcffd4ce/transformed/emoji2-1.4.0/AndroidManifest.xml:25:13-67
+40            android:authorities="io.github.xgl34222220.luoshu.debug.androidx-startup"
+40-->[androidx.emoji2:emoji2:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/7e55e88a45bb0c4a269b2c74dcffd4ce/transformed/emoji2-1.4.0/AndroidManifest.xml:26:13-68
+41            android:exported="false" >
+41-->[androidx.emoji2:emoji2:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/7e55e88a45bb0c4a269b2c74dcffd4ce/transformed/emoji2-1.4.0/AndroidManifest.xml:27:13-37
+42            <meta-data
+42-->[androidx.emoji2:emoji2:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/7e55e88a45bb0c4a269b2c74dcffd4ce/transformed/emoji2-1.4.0/AndroidManifest.xml:29:13-31:52
+43                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+43-->[androidx.emoji2:emoji2:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/7e55e88a45bb0c4a269b2c74dcffd4ce/transformed/emoji2-1.4.0/AndroidManifest.xml:30:17-75
+44                android:value="androidx.startup" />
+44-->[androidx.emoji2:emoji2:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/7e55e88a45bb0c4a269b2c74dcffd4ce/transformed/emoji2-1.4.0/AndroidManifest.xml:31:17-49
+45            <meta-data
+45-->[androidx.lifecycle:lifecycle-process:2.10.0] /home/runner/.gradle/caches/9.5.0/transforms/955e888e6754cefb5bc9b76f0df76145/transformed/lifecycle-process-2.10.0/AndroidManifest.xml:29:13-31:52
+46                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+46-->[androidx.lifecycle:lifecycle-process:2.10.0] /home/runner/.gradle/caches/9.5.0/transforms/955e888e6754cefb5bc9b76f0df76145/transformed/lifecycle-process-2.10.0/AndroidManifest.xml:30:17-78
+47                android:value="androidx.startup" />
+47-->[androidx.lifecycle:lifecycle-process:2.10.0] /home/runner/.gradle/caches/9.5.0/transforms/955e888e6754cefb5bc9b76f0df76145/transformed/lifecycle-process-2.10.0/AndroidManifest.xml:31:17-49
+48            <meta-data
+48-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:29:13-31:52
+49                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+49-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:30:17-85
+50                android:value="androidx.startup" />
+50-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:31:17-49
+51        </provider>
+52
+53        <uses-library
+53-->[androidx.window:window:1.5.0] /home/runner/.gradle/caches/9.5.0/transforms/a331068784eeed87e5a6d4997dfce877/transformed/window-1.5.0/AndroidManifest.xml:23:9-25:40
+54            android:name="androidx.window.extensions"
+54-->[androidx.window:window:1.5.0] /home/runner/.gradle/caches/9.5.0/transforms/a331068784eeed87e5a6d4997dfce877/transformed/window-1.5.0/AndroidManifest.xml:24:13-54
+55            android:required="false" />
+55-->[androidx.window:window:1.5.0] /home/runner/.gradle/caches/9.5.0/transforms/a331068784eeed87e5a6d4997dfce877/transformed/window-1.5.0/AndroidManifest.xml:25:13-37
+56        <uses-library
+56-->[androidx.window:window:1.5.0] /home/runner/.gradle/caches/9.5.0/transforms/a331068784eeed87e5a6d4997dfce877/transformed/window-1.5.0/AndroidManifest.xml:26:9-28:40
+57            android:name="androidx.window.sidecar"
+57-->[androidx.window:window:1.5.0] /home/runner/.gradle/caches/9.5.0/transforms/a331068784eeed87e5a6d4997dfce877/transformed/window-1.5.0/AndroidManifest.xml:27:13-51
+58            android:required="false" />
+58-->[androidx.window:window:1.5.0] /home/runner/.gradle/caches/9.5.0/transforms/a331068784eeed87e5a6d4997dfce877/transformed/window-1.5.0/AndroidManifest.xml:28:13-37
+59
+60        <receiver
+60-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:34:9-52:20
+61            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+61-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:35:13-76
+62            android:directBootAware="false"
+62-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:36:13-44
+63            android:enabled="true"
+63-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:37:13-35
+64            android:exported="true"
+64-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:38:13-36
+65            android:permission="android.permission.DUMP" >
+65-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:39:13-57
+66            <intent-filter>
+66-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:40:13-42:29
+67                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+67-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:41:17-91
+67-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:41:25-88
+68            </intent-filter>
+69            <intent-filter>
+69-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:43:13-45:29
+70                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+70-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:44:17-85
+70-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:44:25-82
+71            </intent-filter>
+72            <intent-filter>
+72-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:46:13-48:29
+73                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+73-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:47:17-88
+73-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:47:25-85
+74            </intent-filter>
+75            <intent-filter>
+75-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:49:13-51:29
+76                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+76-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:50:17-95
+76-->[androidx.profileinstaller:profileinstaller:1.4.0] /home/runner/.gradle/caches/9.5.0/transforms/27540cc7da8f5ed1d1822def07d1a557/transformed/profileinstaller-1.4.0/AndroidManifest.xml:50:25-92
+77            </intent-filter>
+78        </receiver>
+79    </application>
+80
+81</manifest>

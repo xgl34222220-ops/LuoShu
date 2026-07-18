@@ -1,5 +1,7 @@
 package io.github.xgl34222220.luoshu
 
+import android.content.Context
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -71,6 +73,9 @@ internal data class MixState(
     val cjkWeight: Int = 400,
     val latinWeight: Int = 400,
     val digitWeight: Int = 400,
+    val cjkAuto: Boolean = true,
+    val latinAuto: Boolean = true,
+    val digitAuto: Boolean = true,
     val enabled: Boolean = false,
     val busy: Boolean = false,
     val taskId: String = "",
@@ -204,6 +209,9 @@ internal class LuoShuViewModel : ViewModel() {
                     cjkWeight = data.optInt("cjkWeight", mixState.cjkWeight).coerceIn(100, 900),
                     latinWeight = data.optInt("latinWeight", mixState.latinWeight).coerceIn(100, 900),
                     digitWeight = data.optInt("digitWeight", mixState.digitWeight).coerceIn(100, 900),
+                    cjkAuto = data.optBoolean("cjkAuto", true),
+                    latinAuto = data.optBoolean("latinAuto", true),
+                    digitAuto = data.optBoolean("digitAuto", true),
                     message = if (data.optBoolean("enabled", false)) "当前正在使用复合字体" else "可直接生成新的复合字体",
                     error = "",
                 )
@@ -231,6 +239,20 @@ internal class LuoShuViewModel : ViewModel() {
         }
     }
 
+    fun mixWeightAuto(slot: MixSlot): Boolean = when (slot) {
+        MixSlot.Cjk -> mixState.cjkAuto
+        MixSlot.Latin -> mixState.latinAuto
+        MixSlot.Digit -> mixState.digitAuto
+    }
+
+    fun updateMixWeightAuto(slot: MixSlot, auto: Boolean) {
+        mixState = when (slot) {
+            MixSlot.Cjk -> mixState.copy(cjkAuto = auto)
+            MixSlot.Latin -> mixState.copy(latinAuto = auto)
+            MixSlot.Digit -> mixState.copy(digitAuto = auto)
+        }
+    }
+
     fun startMix() {
         if (mixState.busy || operationBusy) return
         val cjk = mixState.cjk
@@ -255,9 +277,9 @@ internal class LuoShuViewModel : ViewModel() {
                     append(RootShell.quote(cjk)).append(' ')
                     append(RootShell.quote(latin)).append(' ')
                     append(RootShell.quote(digit)).append(' ')
-                    append(RootShell.quote("wght=${mixState.cjkWeight}")).append(' ')
-                    append(RootShell.quote("wght=${mixState.latinWeight}")).append(' ')
-                    append(RootShell.quote("wght=${mixState.digitWeight}"))
+                    append(RootShell.quote(if (mixState.cjkAuto) "auto" else "wght=${mixState.cjkWeight}")).append(' ')
+                    append(RootShell.quote(if (mixState.latinAuto) "auto" else "wght=${mixState.latinWeight}")).append(' ')
+                    append(RootShell.quote(if (mixState.digitAuto) "auto" else "wght=${mixState.digitWeight}"))
                 }
                 val start = RootShell.exec(command, timeoutMs = 20_000L)
                 if (start.code != 0) error(start.stderr.ifBlank { "无法启动复合字体任务" })
@@ -335,6 +357,52 @@ internal class LuoShuViewModel : ViewModel() {
                 snapshot = snapshot.copy(taskState = "failed", taskMessage = operationMessage)
             } finally {
                 operationBusy = false
+            }
+        }
+    }
+
+    fun importFonts(context: Context, uris: List<Uri>) {
+        if (operationBusy || mixState.busy) return
+        val selected = uris.distinctBy(Uri::toString)
+        if (selected.isEmpty()) return
+        operationBusy = true
+        operationMessage = "正在读取所选字体…"
+        viewModelScope.launch {
+            var staged = emptyList<StagedFontImport>()
+            var refreshAfter = false
+            try {
+                staged = stageFontImports(context, selected)
+                var imported = 0
+                var duplicates = 0
+                val failures = mutableListOf<String>()
+                staged.forEachIndexed { index, item ->
+                    operationMessage = "正在导入 ${index + 1}/${staged.size}：${item.displayName}"
+                    try {
+                        val result = RootShell.exec(
+                            "sh ${RootShell.quote(bridge)} import ${RootShell.quote(item.file.absolutePath)} ${RootShell.quote(item.displayName)}",
+                            timeoutMs = 45_000L,
+                        )
+                        if (result.code != 0) error(result.stderr.ifBlank { "导入失败" })
+                        val root = firstJson(result.stdout)
+                        if (root.optString("status") != "ok") error(root.optString("message", "导入失败"))
+                        val data = root.optJSONObject("data")
+                        if (data?.optBoolean("imported", true) == false) duplicates += 1 else imported += 1
+                    } catch (error: Throwable) {
+                        failures += "${item.displayName}：${error.message ?: "导入失败"}"
+                    }
+                }
+                refreshAfter = imported > 0
+                operationMessage = buildString {
+                    append("字体导入完成：新增 $imported 个")
+                    if (duplicates > 0) append("，跳过重复 $duplicates 个")
+                    if (failures.isNotEmpty()) append("，失败 ${failures.size} 个（${failures.first()}）")
+                }
+            } catch (error: Throwable) {
+                operationMessage = error.message ?: "字体导入失败"
+            } finally {
+                cleanupFontImports(staged)
+                operationBusy = false
+                if (refreshAfter) refreshFonts(force = true)
             }
         }
     }

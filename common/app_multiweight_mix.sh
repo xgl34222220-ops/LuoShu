@@ -22,6 +22,7 @@ COMPOSITE_RUNNER="$MODDIR/common/luoshu_composite.sh"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 TASK_FILE="$CONFIG_DIR/app_multiweight_task.conf"
+APP_MODE_CONF="$CONFIG_DIR/app_weight_mode.conf"
 MIX_CONF="$CONFIG_DIR/font_mix.conf"
 AXIS_CONF="$CONFIG_DIR/v143_axes_mix.conf"
 ACTIVE_CONF="$CONFIG_DIR/active_font.conf"
@@ -203,6 +204,11 @@ write_mix_config() {
         printf 'appOnly=true\nmultiWeight=true\nmultiWeightSet=300,400,500,600,700\n'
         [ ! -f "$MIX_CONF" ] || grep -v -E '^(cjk|latin|digit|cjkWeight|latinWeight|digitWeight|cjkAxes|latinAxes|digitAxes|appOnly|multiWeight|multiWeightSet)=' "$MIX_CONF" 2>/dev/null
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$MIX_CONF" 2>/dev/null || return 1
+    _cauto=false; is_auto "$_ca" && _cauto=true
+    _lauto=false; is_auto "$_la" && _lauto=true
+    _dauto=false; is_auto "$_da" && _dauto=true
+    _mode_tmp="$APP_MODE_CONF.tmp.$$"
+    printf 'cjkAuto=%s\nlatinAuto=%s\ndigitAuto=%s\n' "$_cauto" "$_lauto" "$_dauto" >"$_mode_tmp" 2>/dev/null && mv -f "$_mode_tmp" "$APP_MODE_CONF" 2>/dev/null || return 1
     cp -f "$MIX_CONF" "$AXIS_CONF" 2>/dev/null || true
     printf 'mix\n' >"$ACTIVE_CONF" 2>/dev/null || return 1
     chmod 0644 "$MIX_CONF" "$AXIS_CONF" "$ACTIVE_CONF" 2>/dev/null || true
@@ -275,7 +281,14 @@ config_json() {
     [ -n "$_ca" ] || _ca="wght=$(read_value "$_source" cjkWeight)"
     [ -n "$_la" ] || _la="wght=$(read_value "$_source" latinWeight)"
     [ -n "$_da" ] || _da="wght=$(read_value "$_source" digitWeight)"
-    _cauto=false; is_auto "$_ca" && _cauto=true; _lauto=false; is_auto "$_la" && _lauto=true; _dauto=false; is_auto "$_da" && _dauto=true
+    if [ -s "$APP_MODE_CONF" ]; then
+        _cauto=$(read_value "$APP_MODE_CONF" cjkAuto); _lauto=$(read_value "$APP_MODE_CONF" latinAuto); _dauto=$(read_value "$APP_MODE_CONF" digitAuto)
+    else
+        _cauto=true; _lauto=true; _dauto=true
+    fi
+    case "$_cauto" in true|false) ;; *) _cauto=true ;; esac
+    case "$_lauto" in true|false) ;; *) _lauto=true ;; esac
+    case "$_dauto" in true|false) ;; *) _dauto=true ;; esac
     _active=$(head -n1 "$ACTIVE_CONF" 2>/dev/null | tr -d '\r\n'); _enabled=false; [ "$_active" = mix ] && _enabled=true
     printf '{"status":"ok","data":{"enabled":%s,"cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAuto":%s,"latinAuto":%s,"digitAuto":%s,"multiWeightSet":[300,400,500,600,700]}}\n' \
         "$_enabled" "$(json_escape "$_cjk")" "$(json_escape "$_latin")" "$(json_escape "$_digit")" "$(clamp_weight "$_ca")" "$(clamp_weight "$_la")" "$(clamp_weight "$_da")" "$_cauto" "$_lauto" "$_dauto"

@@ -26,7 +26,7 @@ BACKUP_DIR="$MODULE_DIR/backup"
 SYSTEM_FONTS_DIR="$MODULE_DIR/system/fonts"
 SYSTEM_ETC_DIR="$MODULE_DIR/system/etc"
 ACTIVE_FONT_CONF="$CONFIG_DIR/active_font.conf"
-LUOSHU_PUBLIC_DIR="/sdcard/LuoShu"
+LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
 USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
 USER_IMPORT_DIR="$LUOSHU_PUBLIC_DIR/import"
@@ -182,6 +182,10 @@ clear_managed_text_fonts() {
 
 find_text_font_file() {
     _font_id="$1"
+    if type get_weight_file >/dev/null 2>&1; then
+        _regular=$(get_weight_file "$_font_id" regular)
+        [ -f "$_regular" ] && { echo "$_regular"; return 0; }
+    fi
     for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
               "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$_f" ] || continue
@@ -489,8 +493,10 @@ handle_action() {
     param="$2"
     current=$(get_current_font_id 2>/dev/null)
 
-    # 同步预览字体到 webroot/fonts/（供 WebUI 用相对路径加载，避免 file:// CORS 限制）
-    sync_preview_fonts 2>/dev/null || true
+    # App 私有临时字体族不得同步到 WebUI 预览目录。
+    if [ "${LUOSHU_PRIVATE_LIBRARY:-0}" != 1 ]; then
+        sync_preview_fonts 2>/dev/null || true
+    fi
 
     # WebUI 列表统一走受控 Shell 扫描，避免旧原生工具执行过时路径或清理逻辑。
 

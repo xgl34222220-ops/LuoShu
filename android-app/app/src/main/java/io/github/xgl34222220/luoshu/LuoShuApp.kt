@@ -1,6 +1,8 @@
 package io.github.xgl34222220.luoshu
 
 import android.view.Gravity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -34,6 +36,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Layers
@@ -76,6 +79,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -121,6 +125,12 @@ internal fun LuoShuApp(viewModel: LuoShuViewModel = viewModel()) {
     var pendingDelete by remember { mutableStateOf<FontItem?>(null) }
     var restoreDefault by remember { mutableStateOf(false) }
     var pickerSlot by remember { mutableStateOf<MixSlot?>(null) }
+    val context = LocalContext.current
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris ->
+        viewModel.importFonts(context, uris)
+    }
 
     LaunchedEffect(Unit) { viewModel.refresh() }
     LaunchedEffect(page) {
@@ -164,6 +174,19 @@ internal fun LuoShuApp(viewModel: LuoShuViewModel = viewModel()) {
                         onApply = { pendingApply = it },
                         onDelete = { pendingDelete = it },
                         onRestoreDefault = { restoreDefault = true },
+                        onImport = {
+                            importLauncher.launch(
+                                arrayOf(
+                                    "font/ttf",
+                                    "font/otf",
+                                    "font/collection",
+                                    "application/x-font-ttf",
+                                    "application/x-font-opentype",
+                                    "application/vnd.ms-opentype",
+                                    "application/octet-stream",
+                                ),
+                            )
+                        },
                         modifier = Modifier.padding(padding),
                     )
                     AppPage.Mix -> MixPage(
@@ -232,7 +255,9 @@ internal fun LuoShuApp(viewModel: LuoShuViewModel = viewModel()) {
                 onDismiss = { pickerSlot = null },
                 onChoose = { font ->
                     viewModel.updateMixFont(slot, font.id)
-                    viewModel.updateMixWeight(slot, normalizedWeight(font, selectedWeight(viewModel.mixState, slot)))
+                    if (!viewModel.mixWeightAuto(slot)) {
+                        viewModel.updateMixWeight(slot, normalizedWeight(font, selectedWeight(viewModel.mixState, slot)))
+                    }
                     pickerSlot = null
                 },
             )
@@ -477,10 +502,35 @@ private fun LibraryPage(
     onApply: (FontItem) -> Unit,
     onDelete: (FontItem) -> Unit,
     onRestoreDefault: () -> Unit,
+    onImport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize()) {
         PageHeader("FONT LIBRARY", "字体库", "真实字体预览 · 懒加载", { viewModel.refreshFonts(force = true) })
+        GlassSurface(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 2.dp), RoundedCornerShape(26.dp)) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(46.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.FileUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    }
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("APP 专属导入", fontWeight = FontWeight.Black, fontSize = 15.sp)
+                    Text("从系统文件选择器导入 TTF / OTF / TTC；可多选，同字体族会自动归组。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, lineHeight = 15.sp)
+                }
+                Spacer(Modifier.width(10.dp))
+                Button(
+                    onClick = onImport,
+                    enabled = !viewModel.operationBusy && !viewModel.mixState.busy,
+                    shape = RoundedCornerShape(16.dp),
+                ) { Text("选择字体") }
+            }
+        }
         GlassSurface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), RoundedCornerShape(24.dp)) {
             OutlinedTextField(
                 value = viewModel.searchQuery,
@@ -508,7 +558,7 @@ private fun LibraryPage(
                     GlassSurface(Modifier.fillMaxWidth(), RoundedCornerShape(30.dp)) {
                         Column(Modifier.fillMaxWidth().padding(34.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("没有找到字体", fontSize = 19.sp, fontWeight = FontWeight.Black)
-                            Text("请将字体放入 /sdcard/LuoShu/fonts/", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                            Text("点击上方“选择字体”导入，或手动放入 /sdcard/LuoShu/fonts/", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                         }
                     }
                 }
@@ -614,7 +664,7 @@ private fun MixPage(viewModel: LuoShuViewModel, onPick: (MixSlot) -> Unit, modif
         contentPadding = PaddingValues(bottom = 22.dp),
         verticalArrangement = Arrangement.spacedBy(13.dp),
     ) {
-        item { PageHeader("FONT MIX", "字体组合", "只有真实支持的字重能力才会显示", viewModel::refreshMixConfig) }
+        item { PageHeader("FONT MIX", "字体组合", "APP 默认多字重 · 可手动固定单档", viewModel::refreshMixConfig) }
         if (viewModel.fontLoading || state.loading) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         if (state.error.isNotBlank()) item { ErrorGlass(state.error) }
         if (state.busy || state.taskState == "success") item {
@@ -639,7 +689,7 @@ private fun MixPage(viewModel: LuoShuViewModel, onPick: (MixSlot) -> Unit, modif
                 Column(Modifier.fillMaxWidth().padding(18.dp)) {
                     Text("生成说明", fontWeight = FontWeight.Black)
                     Text(
-                        "可变字体显示连续字重滑块；静态多字重只显示真实存在的档位；单一字体固定字重，不再伪造滑块。",
+                        "默认使用 APP 专属多字重，自动生成 300 / 400 / 500 / 600 / 700 五档；需要固定粗细时再切换到手动字重。WebUI 不提供这些入口。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
                         lineHeight = 17.sp,
@@ -681,7 +731,14 @@ private fun MixSlotCard(viewModel: LuoShuViewModel, slot: MixSlot, title: String
                     Text(title, fontWeight = FontWeight.Black, fontSize = 17.sp)
                     Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                 }
-                CapabilityPill(font?.let(::capabilityLabel) ?: "未选择", accentFor(title))
+                CapabilityPill(
+                    when {
+                        font == null -> "未选择"
+                        selectedAuto(state, slot) -> "默认多字重"
+                        else -> capabilityLabel(font)
+                    },
+                    accentFor(title),
+                )
             }
             Spacer(Modifier.height(14.dp))
             Surface(
@@ -709,7 +766,9 @@ private fun MixSlotCard(viewModel: LuoShuViewModel, slot: MixSlot, title: String
                 WeightControl(
                     font = font,
                     value = weight,
+                    auto = selectedAuto(state, slot),
                     enabled = !state.busy,
+                    onAuto = { viewModel.updateMixWeightAuto(slot, it) },
                     onValue = { viewModel.updateMixWeight(slot, it) },
                 )
             }
@@ -718,92 +777,142 @@ private fun MixSlotCard(viewModel: LuoShuViewModel, slot: MixSlot, title: String
 }
 
 @Composable
-private fun WeightControl(font: FontItem, value: Int, enabled: Boolean, onValue: (Int) -> Unit) {
-    val axisInfo = rememberWeightAxisInfo(font)
-    when {
-        font.variable && axisInfo.loading -> {
-  Row(verticalAlignment = Alignment.CenterVertically) {
-      CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-      Spacer(Modifier.width(9.dp))
-      Text("正在读取真实字重轴…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-  }
-        }
-        font.variable && axisInfo.hasWeight -> {
-  val minimum = axisInfo.min.coerceAtMost(axisInfo.max)
-  val maximum = axisInfo.max.coerceAtLeast(axisInfo.min + 1)
-  val safeValue = value.coerceIn(minimum, maximum)
-  val stepCount = (((maximum - minimum) / 10) - 1).coerceAtLeast(0)
-  Column {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-          Text("可变字重 · wght", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-          Spacer(Modifier.weight(1f))
-          Text(safeValue.toString(), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
-      }
-      Slider(
-          value = safeValue.toFloat(),
-          onValueChange = { onValue((it / 10f).toInt() * 10) },
-          enabled = enabled,
-          valueRange = minimum.toFloat()..maximum.toFloat(),
-          steps = stepCount,
-      )
-      Text(
-          "真实范围 $minimum–$maximum；该数值会实例化进最终组合字体。",
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          fontSize = 10.sp,
-      )
-  }
-        }
-        font.variable -> {
-  Row(verticalAlignment = Alignment.CenterVertically) {
-      Column(Modifier.weight(1f)) {
-          Text("可变字体，但没有 wght 轴", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-          Text(
-              axisInfo.error.ifBlank { "该字体可能只有 wdth、opsz 等轴，不能调节真实字重。" },
-              color = MaterialTheme.colorScheme.onSurfaceVariant,
-              fontSize = 10.sp,
-          )
-      }
-      CapabilityPill("固定字重", Color(0xFF8A6CE8))
-  }
-        }
-        staticWeights(font).size >= 2 -> {
-  Column {
-      Text("真实字重档位", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-      Spacer(Modifier.height(9.dp))
-      Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          staticWeights(font).forEach { option ->
-              val selected = option == value
-              Surface(
-                  modifier = Modifier.clip(RoundedCornerShape(999.dp)).clickable(enabled = enabled) { onValue(option) },
-                  shape = RoundedCornerShape(999.dp),
-                  color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface.copy(alpha = 0.66f),
-                  border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)),
-              ) {
-                  Text(
-                      weightName(option),
-                      modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
-                      color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                      fontSize = 11.sp,
-                      fontWeight = FontWeight.Bold,
-                  )
-              }
-          }
-      }
-      Spacer(Modifier.height(8.dp))
-      Text("静态家族只能选择字体文件真实存在的档位。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-  }
-        }
-        else -> {
-  Row(verticalAlignment = Alignment.CenterVertically) {
-      Column(Modifier.weight(1f)) {
-          Text("固定字重", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-          Text("该字体没有可调轴，也没有其他静态字重文件。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-      }
-      CapabilityPill(weightName(fixedWeight(font)), Color(0xFF8A6CE8))
-  }
+private fun WeightModeChip(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        modifier = modifier.clip(RoundedCornerShape(18.dp)).clickable(enabled = enabled, onClick = onClick),
+        shape = RoundedCornerShape(18.dp),
+        color = if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f) else MaterialTheme.colorScheme.surface.copy(alpha = 0.62f),
+        border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.52f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.16f)),
+    ) {
+        Column(Modifier.padding(horizontal = 13.dp, vertical = 10.dp)) {
+            Text(title, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Black, fontSize = 12.sp)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
         }
     }
 }
+
+@Composable
+private fun WeightControl(
+    font: FontItem,
+    value: Int,
+    auto: Boolean,
+    enabled: Boolean,
+    onAuto: (Boolean) -> Unit,
+    onValue: (Int) -> Unit,
+) {
+    val axisInfo = rememberWeightAxisInfo(font)
+    Column {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+            WeightModeChip("默认多字重", "300 · 400 · 500 · 600 · 700", auto, enabled, { onAuto(true) }, Modifier.weight(1f))
+            WeightModeChip("手动字重", "固定为单一粗细", !auto, enabled, { onAuto(false) }, Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(10.dp))
+        if (auto) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)),
+            ) {
+                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("按系统字重自动适配", fontWeight = FontWeight.Black, fontSize = 12.sp)
+                        Text(
+                            when {
+                                font.variable -> "读取真实 wght 轴并生成五个常用字重，系统会按文字样式自动选择。"
+                                staticWeights(font).size >= 2 -> "按字体族真实静态文件就近匹配五个常用字重，不伪造不存在的轮廓。"
+                                else -> "该字体只有一个真实字重；仍建立五档系统映射，但各档复用同一轮廓。"
+                            },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 10.sp,
+                            lineHeight = 15.sp,
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    CapabilityPill("APP 专属", Color(0xFF4679F5))
+                }
+            }
+        } else {
+            when {
+                font.variable && axisInfo.loading -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(9.dp))
+                        Text("正在读取真实字重轴…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    }
+                }
+                font.variable && axisInfo.hasWeight -> {
+                    val minimum = axisInfo.min.coerceAtMost(axisInfo.max)
+                    val maximum = axisInfo.max.coerceAtLeast(axisInfo.min + 1)
+                    val safeValue = value.coerceIn(minimum, maximum)
+                    val stepCount = (((maximum - minimum) / 10) - 1).coerceAtLeast(0)
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("可变字重 · wght", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Spacer(Modifier.weight(1f))
+                            Text(safeValue.toString(), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+                        }
+                        Slider(
+                            value = safeValue.toFloat(),
+                            onValueChange = { onValue((it / 10f).toInt() * 10) },
+                            enabled = enabled,
+                            valueRange = minimum.toFloat()..maximum.toFloat(),
+                            steps = stepCount,
+                        )
+                        Text("真实范围 $minimum–$maximum；手动模式只生成当前选定字重。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                    }
+                }
+                font.variable -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("可变字体，但没有 wght 轴", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text(axisInfo.error.ifBlank { "该字体可能只有 wdth、opsz 等轴，不能手动调节真实字重。" }, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                        }
+                        CapabilityPill("固定字重", Color(0xFF8A6CE8))
+                    }
+                }
+                staticWeights(font).size >= 2 -> {
+                    Column {
+                        Text("真实字重档位", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        Spacer(Modifier.height(9.dp))
+                        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            staticWeights(font).forEach { option ->
+                                val selected = option == value
+                                Surface(
+                                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).clickable(enabled = enabled) { onValue(option) },
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface.copy(alpha = 0.66f),
+                                    border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)),
+                                ) {
+                                    Text(weightName(option), modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp), color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text("手动模式只使用所选真实静态字重。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                    }
+                }
+                else -> {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text("固定字重", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("该字体没有可调轴，也没有其他静态字重文件。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                        }
+                        CapabilityPill(weightName(fixedWeight(font)), Color(0xFF8A6CE8))
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun FontPickerDialog(
     slot: MixSlot,
@@ -947,6 +1056,12 @@ private fun selectedWeight(state: MixState, slot: MixSlot): Int = when (slot) {
     MixSlot.Cjk -> state.cjkWeight
     MixSlot.Latin -> state.latinWeight
     MixSlot.Digit -> state.digitWeight
+}
+
+private fun selectedAuto(state: MixState, slot: MixSlot): Boolean = when (slot) {
+    MixSlot.Cjk -> state.cjkAuto
+    MixSlot.Latin -> state.latinAuto
+    MixSlot.Digit -> state.digitAuto
 }
 
 private fun staticWeights(font: FontItem): List<Int> = font.weights
