@@ -1,7 +1,9 @@
 name: Build module
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - feature/v14.3-alpha1-native-import
   pull_request:
   workflow_dispatch:
 permissions:
@@ -56,7 +58,7 @@ jobs:
         run: LUOSHU_VARIANT=lite sh ./scripts/build.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-RC1-Lite-module
+          name: LuoShu-module-${{ github.sha }}
           path: dist/*.zip*
           if-no-files-found: error
           retention-days: 30
