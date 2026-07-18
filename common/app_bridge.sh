@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14.2 RC2 原生 App 核心桥：状态、字体库、原生预览、轴能力、字体切换与复合任务接口。
+# 洛书 v14.3 Alpha1 原生 App 核心桥：状态、字体库、文件导入、预览、切换与复合任务接口。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -12,6 +12,7 @@ if [ -z "$MODDIR" ]; then
 fi
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
 MIX_ENGINE="$MODDIR/common/v14_mix.sh"
+NATIVE_IMPORT="$MODDIR/common/native_import.sh"
 AXIS_INFO="$MODDIR/common/font_axis_info.py"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
@@ -182,6 +183,13 @@ case "${1:-status}" in
         manager_ready || exit 1
         if [ "${2:-}" = refresh ]; then sh "$FONT_MANAGER" action list refresh
         else sh "$FONT_MANAGER" action list
+        fi
+        ;;
+    import_file)
+        if [ -f "$NATIVE_IMPORT" ]; then
+            MODDIR="$MODDIR" sh "$NATIVE_IMPORT" "${2:-}" "${3:-}"
+        else
+            printf '{"status":"error","message":"原生导入组件不可用"}\n'
         fi
         ;;
     preview_export) preview_export "${2:-}" "${3:-}" ;;
