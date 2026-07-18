@@ -17,7 +17,7 @@ _font_filename_family() {
         case "$_r" in *-"$_s") _r=${_r%-"$_s"} ;; *_"$_s") _r=${_r%_"$_s"} ;; esac
     done
     while :; do case "$_r" in *-) _r=${_r%-} ;; *_) _r=${_r%_} ;; *' ') _r=${_r%?} ;; *) break ;; esac; done
-    [ -n "$_r" ] || _r="UnknownFont"
+    [ -n "$_r" ] || _r=UnknownFont
     printf '%s\n' "$_r"
 }
 
@@ -99,7 +99,7 @@ font_metadata_conf() {
         *black*|*heavy*|*w900*) FONT_META_WEIGHT=900 ;; *bold*|*w700*) FONT_META_WEIGHT=700 ;; *) FONT_META_WEIGHT=400 ;;
     esac
     FONT_META_WEIGHTS=$FONT_META_WEIGHT
-    grep -a -q 'fvar' "$_file" 2>/dev/null && FONT_META_VARIABLE=true
+    grep -a -q fvar "$_file" 2>/dev/null && FONT_META_VARIABLE=true
     return 0
 }
 
@@ -112,7 +112,6 @@ font_file_axis_default() { font_metadata_conf "$1" >/dev/null 2>&1; printf '%s\n
 font_file_axis_max() { font_metadata_conf "$1" >/dev/null 2>&1; printf '%s\n' "$FONT_META_AXIS_MAX"; }
 is_variable_font() { font_file_is_variable "$1"; }
 
-# Compatibility names used throughout older LuoShu scripts. They now resolve internal metadata first.
 detect_font_family() {
     _f=$(_font_find_argument_file "$1")
     [ -f "$_f" ] && font_family_for_file "$_f" || _font_filename_family "$1"
@@ -132,7 +131,6 @@ capitalize_first() {
         medium) echo Medium ;; semibold) echo SemiBold ;; bold) echo Bold ;; extrabold) echo ExtraBold ;;
         black) echo Black ;; variable) echo Variable ;; *) echo "$1" ;; esac
 }
-
 weight_sort_order() { font_role_number "$1"; }
 
 family_files_lines() {
@@ -151,7 +149,7 @@ family_weight_numbers() {
         _oldifs="$IFS"; IFS=','
         for _n in $_fw; do
             case "$_n" in ''|*[!0-9]*) continue ;; esac
-            case ",$__dummy,$_values," in *,$_n,*) ;; *) _values="${_values:+$_values,}$_n" ;; esac
+            case ",$_values," in *,$_n,*) ;; *) _values="${_values:+$_values,}$_n" ;; esac
         done
         IFS="$_oldifs"
     done <<EOF
