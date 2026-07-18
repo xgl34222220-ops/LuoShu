@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v14.2 Alpha1 - 安装脚本
+# LuoShu v14.2 Alpha2 - 安装脚本
 
 MODPATH="${MODPATH:-$3}"
 set +e
@@ -30,7 +30,7 @@ check_hyperos
 
 ui_print ""
 ui_print "╔══════════════════════════════════╗"
-ui_print "║       洛书 v14.2 Alpha1       ║"
+ui_print "║       洛书 v14.2 Alpha2       ║"
 ui_print "║      Android 全局字体管理       ║"
 ui_print "╚══════════════════════════════════╝"
 ui_print ""
@@ -89,26 +89,28 @@ FONT_COUNT=$(grep -c . "$FONT_LIST_TMP" 2>/dev/null)
 case "$FONT_COUNT" in ''|*[!0-9]*) FONT_COUNT=0 ;; esac
 
 OLD_MOD="/data/adb/modules/LuoShu"
-# 停止旧版可能仍在运行的复合任务，避免升级期间继续占用内存。
+# 停止旧版可能仍在运行的复合或字重实例化任务，避免升级期间继续占用内存。
 if [ -f "$OLD_MOD/config/mix_worker.pid" ]; then
     _old_worker=$(cat "$OLD_MOD/config/mix_worker.pid" 2>/dev/null | tr -cd '0-9')
     [ -z "$_old_worker" ] || kill "$_old_worker" 2>/dev/null || true
 fi
 if command -v pkill >/dev/null 2>&1; then
     pkill -f "$OLD_MOD/common/composite_font.py" 2>/dev/null || true
+    pkill -f "$OLD_MOD/common/font_instance.py" 2>/dev/null || true
 fi
 rm -f "$OLD_MOD/.font_switch.lock" "$OLD_MOD/config/mix_worker.pid" "$OLD_MOD/config/composite_progress.json" 2>/dev/null || true
+rm -rf "$OLD_MOD/cache/weighted-mix" 2>/dev/null || true
 
 # 刷写阶段只安装引擎，不扫描大字体、不生成复合字体、不继承旧文字负载。
 SELECTED_FONT="default"
 rm -rf "$MODPATH/system/fonts" "$MODPATH/system_ext/fonts" "$MODPATH/product/fonts" 2>/dev/null || true
 mkdir -p "$MODPATH/system/fonts" 2>/dev/null || true
-ui_print "✓ 已安装完整复合字体引擎"
+ui_print "✓ 已安装独立字重复合字体引擎"
 ui_print "• 检测到字体库：${FONT_COUNT} 款（刷写阶段不处理）"
 ui_print "• 首次启动保持系统默认字体"
-ui_print "• 重启后从 WebUI 选择中文、英文和数字字体"
+ui_print "• 重启后可分别选择中文、英文、数字及各自字重"
 
-# v14.2 Alpha1 不管理 Emoji、图标或符号字体；清理旧包内部状态，但不删除用户公开目录中的个人文件。
+# v14.2 Alpha2 不管理 Emoji、图标或符号字体；清理旧包内部状态，但不删除用户公开目录中的个人文件。
 rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" 2>/dev/null || true
 rm -f "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
 rm -f "$MODPATH/config/active_emoji.conf" "$MODPATH/config/emoji_task.conf" "$MODPATH/config/emoji_reboot_required.conf" 2>/dev/null || true
@@ -117,7 +119,7 @@ printf '%s\n' "$SELECTED_FONT" > "$MODPATH/config/active_font.conf"
 cp -f "$FONT_LIST_TMP" "$MODPATH/config/font_list.conf" 2>/dev/null || : > "$MODPATH/config/font_list.conf"
 rm -f "$FONT_LIST_TMP" 2>/dev/null || true
 
-for _fw_conf in font_weight.conf font_weight_original.conf; do
+for _fw_conf in font_weight.conf font_weight_original.conf v142_weighted_mix.conf; do
     [ -f "$OLD_MOD/config/$_fw_conf" ] && cp -f "$OLD_MOD/config/$_fw_conf" "$MODPATH/config/$_fw_conf" 2>/dev/null || true
 done
 
@@ -126,7 +128,9 @@ chmod 755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/service.s
 chmod 755 "$MODPATH/common/font_manager.sh" "$MODPATH/common/font_check.sh" "$MODPATH/common/font_import.sh" "$MODPATH/common/font_report.sh" \
           "$MODPATH/common/util_functions.sh" "$MODPATH/common/rom_adapters.sh" "$MODPATH/common/volume_key.sh" \
           "$MODPATH/common/play_font_bridge" "$MODPATH/common/wechat_xweb_bridge" 2>/dev/null || true
-chmod 755 "$MODPATH/common/module_status.sh" "$MODPATH/common/v14_switch.sh" "$MODPATH/common/font_mix.sh" "$MODPATH/common/v14_mix.sh" "$MODPATH/common/luoshu_composite.sh" 2>/dev/null || true
+chmod 755 "$MODPATH/common/module_status.sh" "$MODPATH/common/v14_switch.sh" "$MODPATH/common/font_mix.sh" "$MODPATH/common/v14_mix.sh" \
+          "$MODPATH/common/v142_weighted_mix.sh" "$MODPATH/common/luoshu_composite.sh" 2>/dev/null || true
+chmod 0644 "$MODPATH/common/font_instance.py" "$MODPATH/common/composite_font.py" 2>/dev/null || true
 chmod 755 "$MODPATH/common/python/bin/luoshu-python" 2>/dev/null || true
 chmod 755 "$MODPATH/system/bin/洛书" 2>/dev/null || true
 [ ! -f "$MODPATH/system/bin/luoshud" ] || chmod 755 "$MODPATH/system/bin/luoshud" 2>/dev/null || true
@@ -140,13 +144,13 @@ ui_print ""
 ui_print "╭──────────────────────────────╮"
 ui_print "│          安装完成            │"
 ui_print "╰──────────────────────────────╯"
-ui_print "✓ 复合字体引擎已安装；当前保持系统默认字体"
+ui_print "✓ 独立字重组合引擎已安装；当前保持系统默认字体"
 if [ "$MOUNTIFY_ACTIVE" = "true" ]; then
     ui_print "✓ Mountify 适配已启用"
 else
     ui_print "• 如需元模块，推荐使用 Mountify"
 fi
-ui_print "请完整重启手机以应用字体。"
+ui_print "请完整重启手机后进入 WebUI 配置字体。"
 ui_print ""
 [ -f "$MODPATH/common/module_status.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/module_status.sh" "$SELECTED_FONT" >/dev/null 2>&1 || true
 exit 0
