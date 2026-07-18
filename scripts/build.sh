@@ -5,6 +5,7 @@ VERSION=$(sed -n 's/^version=//p' "$ROOT/module.prop" | head -n1 | sed 's#[ /]#-
 OUT="$ROOT/dist"
 STAGE="$OUT/LuoShu"
 ZIP="$OUT/LuoShu-${VERSION}.zip"
+ZIP_NAME=$(basename "$ZIP")
 APP_APK="${LUOSHU_APP_APK:-$ROOT/android-app/app/build/outputs/apk/debug/app-debug.apk}"
 
 sh "$ROOT/scripts/check.sh"
@@ -50,7 +51,7 @@ done
 
 rm -f "$ZIP" "$ZIP.sha256"
 (cd "$STAGE" && zip -9 -r -q "$ZIP" .)
-sha256sum "$ZIP" > "$ZIP.sha256"
+(cd "$OUT" && sha256sum "$ZIP_NAME" > "$ZIP_NAME.sha256")
 unzip -t "$ZIP" >/dev/null
 unzip -Z1 "$ZIP" | grep -Eq '(^|/)(__pycache__|emoji)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' && {
   echo 'forbidden legacy path found in final ZIP' >&2

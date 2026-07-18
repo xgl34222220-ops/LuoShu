@@ -89,12 +89,14 @@ jobs:
           standalone='dist/LuoShu-App-v14.2-Alpha5.apk'
           mkdir -p dist
           cp -f "$apk" "$standalone"
-          sha256sum "$standalone" > "$standalone.sha256"
+          (cd dist && sha256sum LuoShu-App-v14.2-Alpha5.apk > LuoShu-App-v14.2-Alpha5.apk.sha256)
           LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
           module="$(find dist -maxdepth 1 -type f -name 'LuoShu-v14.2-Alpha5.zip' -print -quit)"
           test -s "$module"
           unzip -t "$module" >/dev/null
           test -s "$module.sha256"
+          (cd dist && sha256sum -c LuoShu-v14.2-Alpha5.zip.sha256)
+          (cd dist && sha256sum -c LuoShu-App-v14.2-Alpha5.apk.sha256)
           test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v14.2 Alpha5'
           unzip -Z1 "$module" | grep -qx 'bundled/LuoShu-App.apk'
           unzip -p "$module" bundled/LuoShu-App.apk > /tmp/LuoShu-App.apk
