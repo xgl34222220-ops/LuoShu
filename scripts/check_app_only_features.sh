@@ -25,6 +25,7 @@ python3 -m py_compile \
 grep -q 'OpenMultipleDocuments' android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt
 grep -q 'application/zip' android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt
 grep -q '扫描模块' android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt
+grep -q 'supportedImportExtensions = setOf("ttf", "otf", "ttc", "zip")' android-app/app/src/main/java/io/github/xgl34222220/luoshu/AppFontImport.kt
 grep -q 'importInstalledFontModules' android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt
 grep -q 'import_package' common/app_bridge.sh
 grep -q 'import_modules' common/app_bridge.sh
@@ -32,7 +33,9 @@ grep -q 'font_metadata_runtime.sh' common/font_check.sh
 grep -q 'family_weight_numbers' common/app_multiweight_real.sh
 grep -q 'font_file_is_variable' common/app_multiweight_real.sh
 grep -q 'modulePackage' common/font_package_import.py
+grep -q 'MAX_FONT_FILES = 300' common/font_package_import.py
 grep -q '/data/adb/modules' common/app_font_import.sh
+grep -q '/data/adb/modules_update' common/app_font_import.sh
 grep -q 'LUOSHU_PRIVATE_LIBRARY' common/font_manager.sh
 
 if grep -q 'AUTO_SET=' common/app_multiweight_real.sh; then
