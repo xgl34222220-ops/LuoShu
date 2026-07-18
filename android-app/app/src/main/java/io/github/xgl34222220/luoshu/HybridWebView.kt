@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
-import android.net.Uri
 import android.util.Base64
 import android.view.View
 import android.webkit.JavascriptInterface
@@ -94,9 +93,10 @@ internal fun HybridWebView(reloadKey: Int = 0, modifier: Modifier = Modifier) {
                               body>*:not(#fontWorkbenchModal):not(.toast){display:none!important}
                               #fontWorkbenchModal{display:block!important;position:static!important;inset:auto!important;background:transparent!important;backdrop-filter:none!important;-webkit-backdrop-filter:none!important;opacity:1!important;visibility:visible!important;padding:0!important;min-height:100vh!important}
                               #fontWorkbenchModal .workbench-sheet{position:static!important;width:100%!important;max-width:none!important;height:auto!important;min-height:100vh!important;max-height:none!important;margin:0!important;border:0!important;border-radius:0!important;box-shadow:none!important;transform:none!important;background:#f7f8fb!important;overflow:visible!important}
+                              #fontWorkbenchModal .workbench-hero{display:none!important}
                               #fontWorkbenchModal .workbench-close,.workbench-version{display:none!important}
-                              #fontWorkbenchModal .workbench-hero{padding-top:22px!important}
-                              #fontWorkbenchModal .workbench-body{min-height:calc(100vh - 180px)!important;overflow:visible!important}
+                              #fontWorkbenchModal .workbench-tabs{position:sticky!important;top:0!important;z-index:10!important;background:rgba(247,248,251,.96)!important;backdrop-filter:blur(16px)!important;-webkit-backdrop-filter:blur(16px)!important}
+                              #fontWorkbenchModal .workbench-body{min-height:calc(100vh - 90px)!important;overflow:visible!important}
                               .modal.show{animation:none!important}
                             `;
                             document.head.appendChild(style);
