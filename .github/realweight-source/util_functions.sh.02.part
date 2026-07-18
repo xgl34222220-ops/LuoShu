@@ -1,0 +1,178 @@
+        PYTHONHOME="$_pyroot" \
+        PYTHONPATH="$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$_pyroot/lib:$_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$_pybin" "$_tool" --input "$_src" --output "$_tmp" --role "$_role" --weight "$_target" --axes "wght=$_target" >/dev/null 2>&1 || { rm -f "$_tmp"; return 1; }
+        [ -s "$_tmp" ] || { rm -f "$_tmp"; return 1; }
+        chmod 0644 "$_tmp" 2>/dev/null || true
+        mv -f "$_tmp" "$_dest" 2>/dev/null || return 1
+    fi
+    printf '%s\n' "$_dest"
+}
+
+# 兼容现有 App/WebUI 的字重标签，同时保持真实字重数量，不再伪造五档。
+scan_family_weights() {
+    _family="$1"; _result=""
+    for _num in $(font_family_weight_numbers "$_family" | tr ',' ' '); do
+        _role=$(weight_number_to_role "$_num")
+        [ -n "$_result" ] && _result="$_result,"
+        _result="$_result$_role"
+    done
+    printf '%s\n' "$_result"
+}
+
+get_weight_file() {
+    _family="$1"; _target=$(weight_role_to_number "$2")
+    get_weight_file_by_number "$_family" "$_target" nearest
+}
+
+# ============================================================
+# 字体覆盖清单（唯一来源）
+# ============================================================
+# 这些列表必须只在本文件维护。刷入时的 customize.sh 和运行时的
+# font_manager.sh 都通过 rom_adapters.sh 间接读取这里，避免两套清单漂移。
+
+# ColorOS 系字体文件名（不含扩展名）。已按 ColorOS16 真机清单补齐
+# Opposans 系列与系统常见拉丁别名，保证刷入和热切换使用同一集合。
+get_all_coloros_names() {
+    echo "OplusSans3VF OplusSansVF OplusSans-Regular OplusSansSC-Regular OplusSansTC-Regular OplusSansUI OplusSansText SysSans-En-Regular SysSans-Hans-Regular SysSans-Hant-Regular SysFont-Regular SysFont-Static-Regular SysFont-Hans-Regular SysFont-Hant-Regular SysSans-En-Bold SysSans-En-Light SysSans-En-Medium SysSans-En-Thin SysSans-En-Black SysFont-Bold SysFont-Light SysFont-Medium SysFont-Thin SysFont-Black SysFont-Hans-Bold SysFont-Hans-Light SysFont-Hans-Medium SysFont-Hans-Thin SysFont-Hant-Bold SysFont-Hant-Light SysFont-Hant-Medium SysFont-Hant-Thin SysSans-Hant-Bold SysSans-Hant-Light SysSans-Hant-Medium SysSans-Hans-Bold SysSans-Hans-Light SysSans-Hans-Medium SysFont-Static-Bold SysFont-Static-Light SysFont-Static-Medium DINCondensedBold DINPro-Bold DINPro-Medium DINPro-Regular OPPODIN-Bold OPPODIN-Medium OPPODIN-Regular OPPODINCondensed-Bold OPPODINCondensed-Medium OPPODINCondensed-Regular Opposans-En-Regular Opposans-Hans-Regular Opposans-En-Bold Opposans-Hans-Bold Opposans-En-Medium Opposans-Hans-Medium Opposans-En-Light Opposans-Hans-Light OPSans-En-Regular Roboto-Regular Roboto-Medium Roboto-Bold Roboto-Light Roboto-Thin RobotoFlex-Regular RobotoStatic-Regular GoogleSans-Regular GoogleSans-Medium GoogleSans-Bold GoogleSansText-Regular GoogleSansText-Medium GoogleSansText-Bold GoogleSansFlex-Regular SourceSansPro-Regular SourceSansPro-SemiBold SourceSansPro-Bold"
+}
+
+# Android 原生 / AOSP 常见物理字体文件（带扩展名）。ROM 适配层会根据
+# 系统实际存在的目标做命中裁剪，不会盲目创建所有别名。
+get_all_aosp_files() {
+    echo "Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf Roboto-Light.ttf Roboto-Thin.ttf Roboto-Black.ttf RobotoCondensed-Regular.ttf RobotoCondensed-Medium.ttf RobotoCondensed-Bold.ttf RobotoCondensed-Light.ttf RobotoCondensed-Thin.ttf RobotoCondensed-Black.ttf NotoSansCJK-Regular.ttc NotoSansCJK-Medium.ttc NotoSansCJK-Bold.ttc NotoSansCJK-Light.ttc NotoSansCJK-Thin.ttc NotoSansSC-Regular.otf NotoSansSC-Medium.otf NotoSansSC-Bold.otf NotoSansSC-Light.otf NotoSansSC-Thin.otf NotoSerifCJK-Regular.ttc DroidSansFallback.ttf"
+}
+
+# HyperOS 在 AOSP 别名之外还有主题层/MIUI 动态字体入口与数字字重入口。
+# 这里保留完整目标清单，实际覆盖时只处理系统真正存在的路径。
+get_all_hyperos_files() {
+    echo "mipro.ttf harmonyos.ttf miui.ttf miuiex.ttf MiLanProVF.ttf MiLanPro-Regular.ttf MitypeClock.ttf MiSansVF.ttf MiSansVF-en.ttf MiSansVF-na.ttf MiSansLatinVF.ttf miui-bold.ttf miui-medium.ttf 100.ttf 300.ttf 400.ttf 600.ttf 700.ttf 900.ttf $(get_all_aosp_files)"
+}
+
+# 获取所有 ROM 支持的目标相对路径。customize.sh 用它建立 Hybrid Mount
+# staging；运行时覆盖仍由 rom_adapters.sh 根据当前 ROM 选择精确集合。
+get_all_font_targets() {
+    for name in $(get_all_coloros_names); do
+        echo "$name.ttf"
+    done
+    get_all_hyperos_files
+}
+
+# 只判断 ROM 是否具有额外的 system_ext / product 字体目标。核心 system/fonts
+# 的切换不能因为这些可选分区不存在而被误判为只读。
+rom_has_optional_font_targets() {
+    for root in /system_ext/fonts /product/fonts /my_product/fonts /vendor/fonts; do
+        [ -d "$root" ] && return 0
+    done
+    return 1
+}
+
+# 获取模块内实际挂载的字体目标目录（供运行时切换/恢复使用）。
+# system/fonts 始终是主目录；可选分区仅在已经存在并可写时加入。
+get_module_font_dirs() {
+    echo "$MODULE_DIR/system/fonts"
+    for rel in system_ext/fonts product/fonts my_product/fonts vendor/fonts; do
+        dir="$MODULE_DIR/$rel"
+        [ -d "$dir" ] && echo "$dir"
+    done
+}
+
+# 获取系统字体目录的当前可见路径（诊断使用）。
+get_system_font_dirs() {
+    echo "/system/fonts"
+    for dir in /system_ext/fonts /product/fonts /my_product/fonts /vendor/fonts; do
+        [ -d "$dir" ] && echo "$dir"
+    done
+}
+
+# 确保模块字体目录可写。模块目录本身位于 /data/adb/modules，正常情况下
+# 不依赖 /system 的只读状态；若被某些挂载引擎锁定则返回失败。
+ensure_module_font_dirs_writable() {
+    ok=0
+    for dir in $(get_module_font_dirs); do
+        mkdir -p "$dir" 2>/dev/null || continue
+        testfile="$dir/.luoshu-write-test.$$"
+        if : > "$testfile" 2>/dev/null; then
+            rm -f "$testfile" 2>/dev/null
+            ok=$((ok + 1))
+        fi
+    done
+    [ "$ok" -gt 0 ]
+}
+
+# 原子写入配置键。若 key 已存在则替换，否则追加。
+set_conf_value() {
+    file="$1"
+    key="$2"
+    value="$3"
+    ensure_module_dirs
+    tmp="${file}.tmp.$$"
+    if [ -f "$file" ]; then
+        awk -v k="$key" -v v="$value" 'BEGIN{done=0} $0 ~ "^" k "=" { if(!done){print k "=" v; done=1}; next } {print} END{if(!done) print k "=" v}' "$file" > "$tmp" 2>/dev/null || return 1
+    else
+        printf '%s=%s\n' "$key" "$value" > "$tmp" 2>/dev/null || return 1
+    fi
+    chmod 644 "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$file" 2>/dev/null
+}
+
+# 获取配置布尔值，非法值返回默认。
+get_conf_bool() {
+    file="$1"
+    key="$2"
+    default="$3"
+    value="$(read_conf_value "$file" "$key")"
+    case "$value" in
+        true|1|yes|on) echo true ;;
+        false|0|no|off) echo false ;;
+        *) echo "$default" ;;
+    esac
+}
+
+# 记录一次字体切换结果，供 App / WebUI 状态页读取。
+write_switch_result() {
+    state="$1"
+    message="$2"
+    active="$3"
+    reboot_required="$4"
+    root_manager="$(get_root_manager)"
+    mount_engine="$(get_mount_engine)"
+    tmp="$CONFIG_DIR/last_switch.conf.tmp.$$"
+    {
+        printf 'state=%s\n' "$state"
+        printf 'message=%s\n' "$message"
+        printf 'active=%s\n' "$active"
+        printf 'rebootRequired=%s\n' "$reboot_required"
+        printf 'rootManager=%s\n' "$root_manager"
+        printf 'mountEngine=%s\n' "$mount_engine"
+        printf 'timestamp=%s\n' "$(date +%s)"
+    } > "$tmp" 2>/dev/null || return 1
+    chmod 644 "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$CONFIG_DIR/last_switch.conf" 2>/dev/null
+}
+
+# 将当前字体状态转成 JSON 片段。
+current_status_json() {
+    active="$(get_active_font)"
+    version="$(get_module_version)"
+    root_manager="$(get_root_manager)"
+    mount_engine="$(get_mount_engine)"
+    rom="$(get_rom_family)"
+    reboot_required=false
+    [ -f "$CONFIG_DIR/reboot_required.conf" ] && reboot_required=true
+    text_reboot_required=false
+    [ -f "$CONFIG_DIR/text_reboot_required.conf" ] && text_reboot_required=true
+    printf '{"activeFont":"%s","moduleVersion":"%s","rootManager":"%s","mountEngine":"%s","rom":"%s","rebootRequired":%s,"textRebootRequired":%s}' \
+        "$(json_escape "$active")" \
+        "$(json_escape "$version")" \
+        "$(json_escape "$root_manager")" \
+        "$(json_escape "$mount_engine")" \
+        "$(json_escape "$rom")" \
+        "$reboot_required" \
+        "$text_reboot_required"
+}
+
+# 读取 UTF-8 文本文件的首行并去除换行。
+read_first_line() {
+    head -n1 "$1" 2>/dev/null | tr -d '\r\n'
+}
