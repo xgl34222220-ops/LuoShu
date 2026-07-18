@@ -1,9 +1,7 @@
 package io.github.xgl34222220.luoshu
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateDpAsState
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,108 +15,210 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Build
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.Extension
+import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.TextFields
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import kotlinx.coroutines.launch
 
-private enum class AppPage(val title: String, val subtitle: String, val mark: String) {
-    Overview("概览", "原生状态", "概"),
-    Workbench("工作台", "现有 WebUI", "工"),
-    Logs("日志", "原生诊断", "志"),
-}
+private enum class AppPage { Overview, Workbench, Logs }
 
 private val LuoShuLight = lightColorScheme(
-    primary = Color(0xFF4D78F6),
+    primary = Color(0xFF3167E3),
     onPrimary = Color.White,
-    secondary = Color(0xFF7658D9),
-    tertiary = Color(0xFFF07A54),
-    background = Color(0xFFF5F7FC),
-    surface = Color(0xFFFFFFFF),
-    surfaceVariant = Color(0xFFEEF2FA),
-    onSurface = Color(0xFF172033),
-    onSurfaceVariant = Color(0xFF667086),
+    secondary = Color(0xFF7055C8),
+    background = Color(0xFFF6F7FB),
+    surface = Color.White,
+    surfaceVariant = Color(0xFFF0F2F8),
+    onSurface = Color(0xFF181B24),
+    onSurfaceVariant = Color(0xFF666B7A),
 )
 
 private val LuoShuDark = darkColorScheme(
-    primary = Color(0xFF9DB4FF),
-    onPrimary = Color(0xFF0D2C72),
-    secondary = Color(0xFFC8B8FF),
-    tertiary = Color(0xFFFFB59E),
-    background = Color(0xFF10131B),
-    surface = Color(0xFF171B25),
-    surfaceVariant = Color(0xFF222837),
-    onSurface = Color(0xFFF1F3FA),
-    onSurfaceVariant = Color(0xFFAEB7CB),
+    primary = Color(0xFFA9BEFF),
+    onPrimary = Color(0xFF08265F),
+    secondary = Color(0xFFD0BCFF),
+    background = Color(0xFF0F1117),
+    surface = Color(0xFF171A22),
+    surfaceVariant = Color(0xFF232733),
+    onSurface = Color(0xFFF1F2F6),
+    onSurfaceVariant = Color(0xFFB4B8C5),
 )
 
 @Composable
 internal fun LuoShuApp(viewModel: LuoShuViewModel = viewModel()) {
-    val pagerState = rememberPagerState(pageCount = { AppPage.entries.size })
-    val scope = rememberCoroutineScope()
+    var page by rememberSaveable { mutableStateOf(AppPage.Overview) }
+    var workbenchReload by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(Unit) {
-        viewModel.refresh()
-    }
+    LaunchedEffect(Unit) { viewModel.refresh() }
+    BackHandler(enabled = page == AppPage.Workbench) { page = AppPage.Overview }
 
-    MaterialTheme(colorScheme = if (androidx.compose.foundation.isSystemInDarkTheme()) LuoShuDark else LuoShuLight) {
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
-            bottomBar = {
-                HybridBottomBar(
-                    selected = AppPage.entries[pagerState.currentPage],
-                    onSelect = { page -> scope.launch { pagerState.animateScrollToPage(page.ordinal) } },
-                )
-            },
-        ) { innerPadding ->
-            HorizontalPager(
-                state = pagerState,
-                userScrollEnabled = false,
-                beyondViewportPageCount = 2,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-            ) { index ->
-                when (AppPage.entries[index]) {
-                    AppPage.Overview -> OverviewPage(
-                        snapshot = viewModel.snapshot,
-                        onRefresh = viewModel::refresh,
-                        onOpenWorkbench = { scope.launch { pagerState.animateScrollToPage(AppPage.Workbench.ordinal) } },
-                    )
-                    AppPage.Workbench -> HybridWebView(modifier = Modifier.fillMaxSize())
-                    AppPage.Logs -> LogsPage(logs = viewModel.logs, onRefresh = viewModel::refreshLogs)
-                }
-            }
+    MaterialTheme(
+        colorScheme = if (androidx.compose.foundation.isSystemInDarkTheme()) LuoShuDark else LuoShuLight,
+    ) {
+        when (page) {
+            AppPage.Workbench -> WorkbenchHost(
+                reloadKey = workbenchReload,
+                onBack = { page = AppPage.Overview },
+                onReload = { workbenchReload += 1 },
+            )
+            AppPage.Overview, AppPage.Logs -> NativeShell(
+                page = page,
+                snapshot = viewModel.snapshot,
+                logs = viewModel.logs,
+                onPage = { page = it },
+                onRefresh = viewModel::refresh,
+                onRefreshLogs = viewModel::refreshLogs,
+                onOpenWorkbench = { page = AppPage.Workbench },
+            )
         }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NativeShell(
+    page: AppPage,
+    snapshot: ModuleSnapshot,
+    logs: String,
+    onPage: (AppPage) -> Unit,
+    onRefresh: () -> Unit,
+    onRefreshLogs: () -> Unit,
+    onOpenWorkbench: () -> Unit,
+) {
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(if (page == AppPage.Overview) "洛书" else "运行日志", fontWeight = FontWeight.Black)
+                        Text(
+                            if (page == AppPage.Overview) "字体引擎控制台" else "模块诊断记录",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp,
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = if (page == AppPage.Overview) onRefresh else onRefreshLogs) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
+                    }
+                },
+            )
+        },
+        bottomBar = {
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+                NavigationBarItem(
+                    selected = page == AppPage.Overview,
+                    onClick = { onPage(AppPage.Overview) },
+                    icon = { Icon(Icons.Rounded.Home, contentDescription = null) },
+                    label = { Text("概览") },
+                )
+                NavigationBarItem(
+                    selected = false,
+                    onClick = onOpenWorkbench,
+                    icon = { Icon(Icons.Rounded.Build, contentDescription = null) },
+                    label = { Text("工作台") },
+                )
+                NavigationBarItem(
+                    selected = page == AppPage.Logs,
+                    onClick = { onPage(AppPage.Logs) },
+                    icon = { Icon(Icons.Rounded.Description, contentDescription = null) },
+                    label = { Text("日志") },
+                )
+            }
+        },
+    ) { padding ->
+        when (page) {
+            AppPage.Overview -> OverviewPage(
+                snapshot = snapshot,
+                onRefresh = onRefresh,
+                onOpenWorkbench = onOpenWorkbench,
+                modifier = Modifier.padding(padding),
+            )
+            AppPage.Logs -> LogsPage(logs, Modifier.padding(padding))
+            AppPage.Workbench -> Unit
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun WorkbenchHost(reloadKey: Int, onBack: () -> Unit, onReload: () -> Unit) {
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("字体工作台", fontWeight = FontWeight.Black, fontSize = 17.sp)
+                        Text("组合 · 多轴 · 对比 · 健康", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Rounded.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onReload) {
+                        Icon(Icons.Rounded.Refresh, contentDescription = "重新载入")
+                    }
+                },
+            )
+        },
+    ) { padding ->
+        HybridWebView(
+            reloadKey = reloadKey,
+            modifier = Modifier.fillMaxSize().padding(padding),
+        )
     }
 }
 
@@ -127,314 +227,165 @@ private fun OverviewPage(
     snapshot: ModuleSnapshot,
     onRefresh: () -> Unit,
     onOpenWorkbench: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
             Surface(
-                shape = RoundedCornerShape(30.dp),
+                shape = RoundedCornerShape(28.dp),
                 color = Color.Transparent,
-                shadowElevation = 10.dp,
+                shadowElevation = 4.dp,
             ) {
                 Column(
                     modifier = Modifier
+                        .fillMaxWidth()
                         .background(
                             Brush.linearGradient(
-                                listOf(Color(0xFF4D82F7), Color(0xFF685EE7), Color(0xFF8D5BD5)),
+                                listOf(Color(0xFF2F6BE6), Color(0xFF5C62E6), Color(0xFF805BC7)),
                             ),
                         )
                         .padding(20.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
-                            modifier = Modifier.size(54.dp),
-                            shape = RoundedCornerShape(18.dp),
+                            modifier = Modifier.size(50.dp),
+                            shape = RoundedCornerShape(17.dp),
                             color = Color.White.copy(alpha = 0.18f),
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Text("洛", color = Color.White, fontWeight = FontWeight.Black, fontSize = 24.sp)
+                                Text("洛", color = Color.White, fontWeight = FontWeight.Black, fontSize = 22.sp)
                             }
                         }
                         Spacer(Modifier.width(13.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("洛书 Hybrid", color = Color.White, fontWeight = FontWeight.Black, fontSize = 23.sp)
-                            Text("原生控制台 + 字体工作台 WebUI", color = Color.White.copy(alpha = 0.78f), fontSize = 12.sp)
-                        }
-                        if (snapshot.loading) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(22.dp),
-                                color = Color.White,
-                                strokeWidth = 2.5.dp,
+                        Column(Modifier.weight(1f)) {
+                            Text(snapshot.version, color = Color.White, fontWeight = FontWeight.Black, fontSize = 20.sp)
+                            Text(
+                                if (snapshot.installed) "模块与 App 已连接" else "等待连接洛书模块",
+                                color = Color.White.copy(alpha = 0.78f),
+                                fontSize = 11.sp,
                             )
                         }
+                        if (snapshot.loading) CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            color = Color.White,
+                            strokeWidth = 2.5.dp,
+                        ) else Icon(
+                            if (snapshot.installed) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                            contentDescription = null,
+                            tint = Color.White,
+                        )
                     }
                     Spacer(Modifier.height(18.dp))
+                    Text(snapshot.activeLabel, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     Text(
-                        snapshot.version,
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                    )
-                    Text(
-                        if (snapshot.installed) "模块已连接，底层引擎继续由 /data/adb/modules/LuoShu 提供" else "未检测到洛书模块",
-                        color = Color.White.copy(alpha = 0.78f),
+                        if (snapshot.activeFont == "mix") "中文为完整基底，英文与数字按组合替换" else snapshot.activeFont,
+                        color = Color.White.copy(alpha = 0.75f),
                         fontSize = 11.sp,
-                        lineHeight = 17.sp,
                     )
                 }
             }
         }
 
-        if (snapshot.error.isNotBlank()) {
-            item {
-                Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.errorContainer,
-                ) {
-                    Column(Modifier.padding(15.dp)) {
-                        Text("连接异常", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onErrorContainer)
-                        Text(snapshot.error, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
-                    }
-                }
-            }
-        }
-
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                NativeInfoCard(
-                    modifier = Modifier.weight(1f),
-                    mark = "R",
-                    label = "Root 授权",
-                    value = if (snapshot.rootGranted) "已授权" else "未授权",
-                    detail = snapshot.rootManager,
-                    positive = snapshot.rootGranted,
-                )
-                NativeInfoCard(
-                    modifier = Modifier.weight(1f),
-                    mark = "M",
-                    label = "模块状态",
-                    value = if (snapshot.installed) "已连接" else "未安装",
-                    detail = "Code ${snapshot.versionCode}",
-                    positive = snapshot.installed,
-                )
-            }
-        }
-
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                NativeInfoCard(
-                    modifier = Modifier.weight(1f),
-                    mark = "挂",
-                    label = "挂载环境",
-                    value = snapshot.mountEngine,
-                    detail = "自动识别",
-                    positive = true,
-                )
-                NativeInfoCard(
-                    modifier = Modifier.weight(1f),
-                    mark = "字",
-                    label = "当前文字字体",
-                    value = snapshot.activeLabel,
-                    detail = snapshot.activeFont,
-                    positive = snapshot.activeFont != "default",
-                )
-            }
-        }
-
-        item {
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = MaterialTheme.colorScheme.surface,
-                shadowElevation = 2.dp,
+        if (snapshot.error.isNotBlank()) item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                shape = RoundedCornerShape(20.dp),
             ) {
-                Column(Modifier.padding(17.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)) {
-                            Text("进", modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
-                        }
-                        Spacer(Modifier.width(11.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("后台任务", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text(snapshot.taskState, color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        snapshot.taskMessage,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                    )
+                Column(Modifier.padding(16.dp)) {
+                    Text("连接异常", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onErrorContainer)
+                    Text(snapshot.error, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
                 }
             }
         }
 
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Button(
-                    onClick = onOpenWorkbench,
-                    enabled = snapshot.rootGranted && snapshot.installed,
-                    modifier = Modifier.weight(1f).height(50.dp),
-                    shape = RoundedCornerShape(17.dp),
-                ) {
-                    Text("打开字体工作台", fontWeight = FontWeight.Bold)
+                StatusCard(Modifier.weight(1f), Icons.Rounded.Security, "Root", if (snapshot.rootGranted) "已授权" else "未授权", snapshot.rootManager)
+                StatusCard(Modifier.weight(1f), Icons.Rounded.Extension, "模块", if (snapshot.installed) "已连接" else "未连接", "Code ${snapshot.versionCode}")
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatusCard(Modifier.weight(1f), Icons.Rounded.TextFields, "当前字体", snapshot.activeLabel, snapshot.activeFont)
+                StatusCard(Modifier.weight(1f), Icons.Rounded.Build, "挂载引擎", snapshot.mountEngine, "自动识别")
+            }
+        }
+
+        item {
+            Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.padding(17.dp)) {
+                    Text("后台任务", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Spacer(Modifier.height(5.dp))
+                    Text(snapshot.taskState, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text(snapshot.taskMessage, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 18.sp)
                 }
-                OutlinedButton(
-                    onClick = onRefresh,
-                    modifier = Modifier.height(50.dp),
-                    shape = RoundedCornerShape(17.dp),
-                ) {
-                    Text("刷新")
-                }
+            }
+        }
+
+        item {
+            Button(
+                onClick = onOpenWorkbench,
+                enabled = snapshot.rootGranted && snapshot.installed,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(18.dp),
+            ) {
+                Icon(Icons.Rounded.Build, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("进入字体工作台", fontWeight = FontWeight.Bold)
             }
         }
 
         item {
             Text(
-                "Hybrid Alpha1 先原生化状态、导航和日志；组合、多轴、对比与健康评分继续复用已经验证的 v14.2 Alpha3 WebUI。",
-                modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp),
+                "Hybrid Alpha2：原生页面不再与 WebUI 重复叠加；工作台使用独立全屏宿主。",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
                 lineHeight = 17.sp,
+                modifier = Modifier.padding(horizontal = 4.dp),
             )
         }
     }
 }
 
 @Composable
-private fun NativeInfoCard(
-    modifier: Modifier,
-    mark: String,
-    label: String,
-    value: String,
-    detail: String,
-    positive: Boolean,
-) {
-    Surface(
+private fun StatusCard(modifier: Modifier, icon: ImageVector, label: String, value: String, detail: String) {
+    Card(
         modifier = modifier,
-        shape = RoundedCornerShape(22.dp),
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 2.dp,
+        shape = RoundedCornerShape(21.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         Column(Modifier.padding(15.dp)) {
-            Surface(
-                shape = RoundedCornerShape(11.dp),
-                color = if (positive) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant,
-            ) {
-                Text(
-                    mark,
-                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 6.dp),
-                    color = if (positive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 11.sp,
-                )
+            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.11f)) {
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(8.dp).size(18.dp))
             }
-            Spacer(Modifier.height(13.dp))
+            Spacer(Modifier.height(12.dp))
             Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-            Text(
-                value,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
-            )
+            Text(value, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold, fontSize = 14.sp)
             Text(detail, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
         }
     }
 }
 
 @Composable
-private fun LogsPage(logs: String, onRefresh: () -> Unit) {
-    Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("运行日志", fontWeight = FontWeight.Black, fontSize = 23.sp)
-                Text("直接读取模块 fontswitch.log", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-            }
-            OutlinedButton(onClick = onRefresh, shape = RoundedCornerShape(15.dp)) {
-                Text("刷新")
-            }
-        }
-        Surface(
-            modifier = Modifier.fillMaxSize(),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            shadowElevation = 2.dp,
-        ) {
-            SelectionContainer {
-                Text(
-                    logs,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(16.dp),
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
-                    lineHeight = 15.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun HybridBottomBar(selected: AppPage, onSelect: (AppPage) -> Unit) {
+private fun LogsPage(logs: String, modifier: Modifier = Modifier) {
     Surface(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
-        shape = RoundedCornerShape(27.dp),
-        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.97f),
-        shadowElevation = 12.dp,
+        modifier = modifier.fillMaxSize().padding(16.dp),
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.surface,
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(7.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-        ) {
-            AppPage.entries.forEach { page ->
-                val active = page == selected
-                val background by animateColorAsState(
-                    if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.13f) else Color.Transparent,
-                    label = "navBackground",
-                )
-                val height by animateDpAsState(if (active) 52.dp else 48.dp, label = "navHeight")
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(height)
-                        .clip(RoundedCornerShape(19.dp))
-                        .background(background)
-                        .clickable { onSelect(page) }
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                    ) {
-                        Text(
-                            page.mark,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
-                            color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Black,
-                        )
-                    }
-                    if (active) {
-                        Spacer(Modifier.width(7.dp))
-                        Column {
-                            Text(page.title, fontWeight = FontWeight.Bold, fontSize = 11.sp, color = MaterialTheme.colorScheme.primary)
-                            Text(page.subtitle, fontSize = 8.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
-            }
+        SelectionContainer {
+            Text(
+                logs,
+                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 10.sp,
+                lineHeight = 15.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
