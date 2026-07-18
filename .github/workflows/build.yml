@@ -5,8 +5,50 @@ on:
   pull_request:
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
+  materialize-real-font-weights:
+    if: github.event_name == 'pull_request' && github.head_ref == 'trigger/app-realweight-materialize'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/v14.3-app-auto-multiweight-import
+          fetch-depth: 0
+      - name: Restore corrected files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in util_functions.sh app_multiweight_mix.sh font_manager.sh rom_adapters.sh; do
+            base64 -d ".github/realweight-fix/${name}.gz.b64" | gzip -dc > "common/${name}"
+            chmod 0755 "common/${name}"
+          done
+      - name: Verify corrected implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n common/util_functions.sh
+          sh -n common/app_multiweight_mix.sh
+          sh -n common/font_manager.sh
+          sh -n common/rom_adapters.sh
+          python3 -m py_compile common/font_metadata.py common/font_instance.py
+          ! grep -q 'AUTO_SET="300:Light 400:Regular 500:Medium 600:SemiBold 700:Bold"' common/app_multiweight_mix.sh
+          grep -q 'font_family_weight_numbers' common/app_multiweight_mix.sh
+          grep -q 'font_metadata_conf' common/util_functions.sh
+          grep -q 'font_family_has_weight' common/rom_adapters.sh
+          sh scripts/check_app_only_features.sh
+      - name: Commit corrected implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .github/realweight-fix
+          rm -f .github/workflows/app-realweight-materialize.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add common/util_functions.sh common/app_multiweight_mix.sh common/font_manager.sh common/rom_adapters.sh .github
+          git commit -m 'fix(app): map imported fonts by their real weights'
+          git push origin HEAD:feature/v14.3-app-auto-multiweight-import
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
