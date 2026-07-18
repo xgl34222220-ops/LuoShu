@@ -32,7 +32,7 @@ for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
   common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \
   webroot/workbench.js webroot/mix_state_guard.js webroot/workbench_bridge.js webroot/workbench.css \
   webroot/workbench_weight_extension.js webroot/workbench_weight_extension.css \
-  scripts/build.sh scripts/version.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/stability_test.sh \
+  scripts/build.sh scripts/version.sh scripts/prepare_webui.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/stability_test.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt; do test -f "$ROOT/$file"; done
@@ -57,20 +57,28 @@ grep -q 'v14_mix.sh.*recover' "$ROOT/post-fs-data.sh"
 ! grep -q 'cmd font system --update' "$ROOT/service.sh"
 ! grep -q 'oplus-font refresh' "$ROOT/service.sh"
 ! find "$ROOT/system/etc" -type f \( -name fonts.xml -o -name font_fallback.xml \) -print -quit 2>/dev/null | grep -q .
-grep -q "v14.js?v=$LUOSHU_VERSION_CODE" "$ROOT/webroot/index.html"
-grep -q "app.js?v=$LUOSHU_VERSION_CODE" "$ROOT/webroot/index.html"
-grep -q "UI_VERSION = '$LUOSHU_VERSION_CODE'" "$ROOT/webroot/environment.js"
-grep -q "mix_state_guard.js?v=$LUOSHU_VERSION_CODE" "$ROOT/webroot/environment.js"
-grep -q "workbench_bridge.js?v=$LUOSHU_VERSION_CODE" "$ROOT/webroot/environment.js"
-grep -q "workbench.js?v=$LUOSHU_VERSION_CODE" "$ROOT/webroot/environment.js"
-grep -q "workbench.css?v=$LUOSHU_VERSION_CODE" "$ROOT/webroot/workbench.js"
-grep -q "workbench_weight_extension.css?v=$LUOSHU_VERSION_CODE" "$ROOT/webroot/workbench_weight_extension.js"
 grep -q 'MODULE_VERSION=.*module.prop' "$ROOT/service.sh"
 grep -q 'MODULE_VERSION=.*module.prop' "$ROOT/post-fs-data.sh"
 ! grep -q 'v14.2 Alpha2' "$ROOT/service.sh" "$ROOT/post-fs-data.sh"
 grep -q 'workbench_weight_extension.js' "$ROOT/webroot/workbench_bridge.js"
 grep -q 'mix-axis-panel' "$ROOT/webroot/workbench_weight_extension.css"
 grep -q 'serializeAxes' "$ROOT/webroot/workbench_weight_extension.js"
+
+# 源码中的缓存键允许保持上个版本；构建前必须能由唯一版本源正确重写。
+WEB_TMP=$(mktemp -d)
+trap 'rm -rf "$WEB_TMP"' EXIT HUP INT TERM
+cp "$ROOT/module.prop" "$WEB_TMP/module.prop"
+cp -R "$ROOT/webroot" "$WEB_TMP/webroot"
+sh "$ROOT/scripts/prepare_webui.sh" "$WEB_TMP/webroot"
+grep -q "v14.js?v=$LUOSHU_VERSION_CODE" "$WEB_TMP/webroot/index.html"
+grep -q "app.js?v=$LUOSHU_VERSION_CODE" "$WEB_TMP/webroot/index.html"
+grep -q "UI_VERSION = '$LUOSHU_VERSION_CODE'" "$WEB_TMP/webroot/environment.js"
+grep -q "mix_state_guard.js?v=$LUOSHU_VERSION_CODE" "$WEB_TMP/webroot/environment.js"
+grep -q "workbench_bridge.js?v=$LUOSHU_VERSION_CODE" "$WEB_TMP/webroot/environment.js"
+grep -q "workbench.js?v=$LUOSHU_VERSION_CODE" "$WEB_TMP/webroot/environment.js"
+grep -q "workbench.css?v=$LUOSHU_VERSION_CODE" "$WEB_TMP/webroot/workbench.js"
+grep -q "workbench_weight_extension.css?v=$LUOSHU_VERSION_CODE" "$WEB_TMP/webroot/workbench_weight_extension.js"
+rm -rf "$WEB_TMP"; trap - EXIT HUP INT TERM
 
 test "$(sha256sum "$ROOT/LICENSE" | awk '{print $1}')" = '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986'
 grep -q 'GNU GENERAL PUBLIC LICENSE' "$ROOT/LICENSE"
