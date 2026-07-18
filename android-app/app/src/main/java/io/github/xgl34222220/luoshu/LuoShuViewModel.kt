@@ -49,14 +49,16 @@ internal data class FontItem(
             variable -> "可变字体"
             weights.isEmpty() -> "单字重"
             else -> weights.joinToString(" · ") { role ->
-                when (role) {
-                    "thin" -> "极细"
-                    "light" -> "细体"
-                    "regular" -> "常规"
-                    "medium" -> "中等"
-                    "semibold" -> "半粗"
-                    "bold" -> "粗体"
-                    "black" -> "特粗"
+                when (role.lowercase()) {
+                    "thin" -> "极细 100"
+                    "extralight", "ultralight" -> "超细 200"
+                    "light" -> "细体 300"
+                    "regular", "normal" -> "常规 400"
+                    "medium" -> "中等 500"
+                    "semibold", "demibold" -> "半粗 600"
+                    "bold" -> "粗体 700"
+                    "extrabold", "ultrabold" -> "特粗 800"
+                    "black", "heavy" -> "黑体 900"
                     else -> role
                 }
             }
@@ -90,31 +92,22 @@ internal class LuoShuViewModel : ViewModel() {
 
     var snapshot by mutableStateOf(ModuleSnapshot())
         private set
-
     var logs by mutableStateOf("尚未读取日志")
         private set
-
     var fonts by mutableStateOf<List<FontItem>>(emptyList())
         private set
-
     var fontLoading by mutableStateOf(false)
         private set
-
     var fontError by mutableStateOf("")
         private set
-
     private var _searchQuery by mutableStateOf("")
     val searchQuery: String get() = _searchQuery
-
     var operationBusy by mutableStateOf(false)
         private set
-
     var operationMessage by mutableStateOf("")
         private set
-
     var rebootRequired by mutableStateOf(false)
         private set
-
     var mixState by mutableStateOf(MixState())
         private set
 
@@ -129,9 +122,7 @@ internal class LuoShuViewModel : ViewModel() {
             }
         }
 
-    fun setSearchQuery(value: String) {
-        _searchQuery = value
-    }
+    fun setSearchQuery(value: String) { _searchQuery = value }
 
     fun refresh() {
         snapshot = snapshot.copy(loading = true, error = "")
@@ -142,20 +133,14 @@ internal class LuoShuViewModel : ViewModel() {
                 timeoutMs = 20_000L,
             )
             if (result.code != 0) {
-                snapshot = ModuleSnapshot(
-                    loading = false,
-                    rootGranted = false,
-                    error = result.stderr.ifBlank { "Root 授权失败或 su 不可用" },
-                )
+                snapshot = ModuleSnapshot(loading = false, rootGranted = false, error = result.stderr.ifBlank { "Root 授权失败或 su 不可用" })
                 return@launch
             }
             snapshot = parseSnapshot(result.stdout)
         }
     }
 
-    fun ensureFonts(force: Boolean = false) {
-        if (fonts.isEmpty() || force) refreshFonts(force)
-    }
+    fun ensureFonts(force: Boolean = false) { if (fonts.isEmpty() || force) refreshFonts(force) }
 
     fun refreshFonts(force: Boolean = false) {
         if (fontLoading) return
@@ -163,10 +148,7 @@ internal class LuoShuViewModel : ViewModel() {
         fontError = ""
         viewModelScope.launch {
             val suffix = if (force) " refresh" else ""
-            val result = RootShell.exec(
-                "sh ${RootShell.quote(bridge)} fonts$suffix",
-                timeoutMs = 60_000L,
-            )
+            val result = RootShell.exec("sh ${RootShell.quote(bridge)} fonts$suffix", timeoutMs = 90_000L)
             if (result.code != 0) {
                 fontError = result.stderr.ifBlank { "字体库读取失败" }
                 fontLoading = false
@@ -191,10 +173,7 @@ internal class LuoShuViewModel : ViewModel() {
         if (mixState.loading || mixState.busy) return
         mixState = mixState.copy(loading = true, error = "")
         viewModelScope.launch {
-            val result = RootShell.exec(
-                "sh ${RootShell.quote(bridge)} mix_config",
-                timeoutMs = 25_000L,
-            )
+            val result = RootShell.exec("sh ${RootShell.quote(bridge)} mix_config", timeoutMs = 25_000L)
             try {
                 if (result.code != 0) error(result.stderr.ifBlank { "组合配置读取失败" })
                 val root = firstJson(result.stdout)
@@ -262,14 +241,7 @@ internal class LuoShuViewModel : ViewModel() {
             mixState = mixState.copy(error = "请先选择中文、英文和数字字体")
             return
         }
-
-        mixState = mixState.copy(
-            busy = true,
-            taskState = "queued",
-            message = "正在提交复合字体任务…",
-            progress = 1,
-            error = "",
-        )
+        mixState = mixState.copy(busy = true, taskState = "queued", message = "正在提交复合字体任务…", progress = 1, error = "")
         viewModelScope.launch {
             try {
                 val command = buildString {
@@ -290,27 +262,11 @@ internal class LuoShuViewModel : ViewModel() {
                 mixState = mixState.copy(taskId = taskId, taskState = "running", message = "复合字体正在后台生成")
                 val final = waitForMixTask(taskId)
                 if (final.optString("state") != "success") error(final.optString("message", "复合字体生成失败"))
-                mixState = mixState.copy(
-                    busy = false,
-                    enabled = true,
-                    taskState = "success",
-                    message = final.optString("message", "复合字体已生成，重启后生效"),
-                    progress = 100,
-                )
-                snapshot = snapshot.copy(
-                    activeFont = "mix",
-                    taskState = "success",
-                    taskMessage = mixState.message,
-                )
+                mixState = mixState.copy(busy = false, enabled = true, taskState = "success", message = final.optString("message", "复合字体已生成，重启后生效"), progress = 100)
+                snapshot = snapshot.copy(activeFont = "mix", taskState = "success", taskMessage = mixState.message)
                 rebootRequired = true
             } catch (error: Throwable) {
-                mixState = mixState.copy(
-                    busy = false,
-                    taskState = "failed",
-                    message = error.message ?: "复合字体生成失败",
-                    error = error.message ?: "复合字体生成失败",
-                    progress = 100,
-                )
+                mixState = mixState.copy(busy = false, taskState = "failed", message = error.message ?: "复合字体生成失败", error = error.message ?: "复合字体生成失败", progress = 100)
             }
         }
     }
@@ -322,21 +278,14 @@ internal class LuoShuViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 if (fontId != "default") {
-                    val validation = RootShell.exec(
-                        "sh ${RootShell.quote(bridge)} validate ${RootShell.quote(fontId)}",
-                        timeoutMs = 35_000L,
-                    )
+                    val validation = RootShell.exec("sh ${RootShell.quote(bridge)} validate ${RootShell.quote(fontId)}", timeoutMs = 35_000L)
                     if (validation.code != 0) error(validation.stderr.ifBlank { "字体验证失败" })
                     val validationJson = firstJson(validation.stdout)
                     if (validationJson.optString("status") != "ok" || validationJson.optJSONObject("data")?.optBoolean("valid", true) == false) {
                         error(validationJson.optString("message", validationJson.optJSONObject("data")?.optString("error", "字体文件不可用") ?: "字体文件不可用"))
                     }
                 }
-
-                val start = RootShell.exec(
-                    "sh ${RootShell.quote(bridge)} switch_start ${RootShell.quote(fontId)}",
-                    timeoutMs = 20_000L,
-                )
+                val start = RootShell.exec("sh ${RootShell.quote(bridge)} switch_start ${RootShell.quote(fontId)}", timeoutMs = 20_000L)
                 if (start.code != 0) error(start.stderr.ifBlank { "无法启动字体切换" })
                 val startJson = firstJson(start.stdout)
                 if (startJson.optString("status") != "ok") error(startJson.optString("message", "无法启动字体切换"))
@@ -344,12 +293,7 @@ internal class LuoShuViewModel : ViewModel() {
                 if (taskId.isBlank()) error("字体任务 ID 缺失")
                 val result = waitForSwitchTask(taskId)
                 if (result.optString("state") != "success") error(result.optString("message", "字体应用失败"))
-
-                snapshot = snapshot.copy(
-                    activeFont = fontId,
-                    taskState = "success",
-                    taskMessage = result.optString("message", "字体已准备完成"),
-                )
+                snapshot = snapshot.copy(activeFont = fontId, taskState = "success", taskMessage = result.optString("message", "字体已准备完成"))
                 operationMessage = if (fontId == "default") "已准备恢复系统字体，重启后生效" else "字体已准备完成，重启后全局生效"
                 rebootRequired = true
             } catch (error: Throwable) {
@@ -366,7 +310,7 @@ internal class LuoShuViewModel : ViewModel() {
         val selected = uris.distinctBy(Uri::toString)
         if (selected.isEmpty()) return
         operationBusy = true
-        operationMessage = "正在读取所选字体…"
+        operationMessage = "正在读取所选字体或模块包…"
         viewModelScope.launch {
             var staged = emptyList<StagedFontImport>()
             var refreshAfter = false
@@ -374,28 +318,39 @@ internal class LuoShuViewModel : ViewModel() {
                 staged = stageFontImports(context, selected)
                 var imported = 0
                 var duplicates = 0
-                val failures = mutableListOf<String>()
+                var failed = 0
+                val errors = mutableListOf<String>()
                 staged.forEachIndexed { index, item ->
-                    operationMessage = "正在导入 ${index + 1}/${staged.size}：${item.displayName}"
+                    operationMessage = if (item.isModulePackage) "正在解析字体模块 ${index + 1}/${staged.size}：${item.displayName}" else "正在导入 ${index + 1}/${staged.size}：${item.displayName}"
                     try {
+                        val action = if (item.isModulePackage) "import_package" else "import"
                         val result = RootShell.exec(
-                            "sh ${RootShell.quote(bridge)} import ${RootShell.quote(item.file.absolutePath)} ${RootShell.quote(item.displayName)}",
-                            timeoutMs = 45_000L,
+                            "sh ${RootShell.quote(bridge)} $action ${RootShell.quote(item.file.absolutePath)} ${RootShell.quote(item.displayName)}",
+                            timeoutMs = if (item.isModulePackage) 180_000L else 45_000L,
                         )
                         if (result.code != 0) error(result.stderr.ifBlank { "导入失败" })
                         val root = firstJson(result.stdout)
                         if (root.optString("status") != "ok") error(root.optString("message", "导入失败"))
-                        val data = root.optJSONObject("data")
-                        if (data?.optBoolean("imported", true) == false) duplicates += 1 else imported += 1
+                        val data = root.optJSONObject("data") ?: JSONObject()
+                        if (item.isModulePackage) {
+                            imported += data.optInt("imported", 0)
+                            duplicates += data.optInt("duplicates", 0)
+                            failed += data.optInt("failed", 0)
+                            data.optString("firstError").takeIf(String::isNotBlank)?.let(errors::add)
+                        } else {
+                            if (data.optBoolean("imported", true)) imported += 1 else duplicates += 1
+                        }
                     } catch (error: Throwable) {
-                        failures += "${item.displayName}：${error.message ?: "导入失败"}"
+                        failed += 1
+                        errors += "${item.displayName}：${error.message ?: "导入失败"}"
                     }
                 }
-                refreshAfter = imported > 0
+                refreshAfter = imported > 0 || duplicates > 0
                 operationMessage = buildString {
-                    append("字体导入完成：新增 $imported 个")
+                    append("导入完成：新增 $imported 个")
                     if (duplicates > 0) append("，跳过重复 $duplicates 个")
-                    if (failures.isNotEmpty()) append("，失败 ${failures.size} 个（${failures.first()}）")
+                    if (failed > 0) append("，失败 $failed 个")
+                    if (errors.isNotEmpty()) append("（${errors.first()}）")
                 }
             } catch (error: Throwable) {
                 operationMessage = error.message ?: "字体导入失败"
@@ -407,16 +362,34 @@ internal class LuoShuViewModel : ViewModel() {
         }
     }
 
+    fun importInstalledFontModules() {
+        if (operationBusy || mixState.busy) return
+        operationBusy = true
+        operationMessage = "正在扫描已安装的字体模块…"
+        viewModelScope.launch {
+            try {
+                val result = RootShell.exec("sh ${RootShell.quote(bridge)} import_modules", timeoutMs = 240_000L)
+                if (result.code != 0) error(result.stderr.ifBlank { "字体模块扫描失败" })
+                val root = firstJson(result.stdout)
+                if (root.optString("status") != "ok") error(root.optString("message", "字体模块扫描失败"))
+                val data = root.optJSONObject("data") ?: JSONObject()
+                operationMessage = "识别 ${data.optInt("modules", 0)} 个字体模块：新增 ${data.optInt("imported", 0)} 个，重复 ${data.optInt("duplicates", 0)} 个，失败 ${data.optInt("failed", 0)} 个"
+                refreshFonts(force = true)
+            } catch (error: Throwable) {
+                operationMessage = error.message ?: "字体模块扫描失败"
+            } finally {
+                operationBusy = false
+            }
+        }
+    }
+
     fun deleteFont(fontId: String) {
         if (operationBusy || mixState.busy || fontId.isBlank() || fontId == "default") return
         operationBusy = true
         operationMessage = "正在删除字体…"
         viewModelScope.launch {
             try {
-                val result = RootShell.exec(
-                    "sh ${RootShell.quote(bridge)} delete ${RootShell.quote(fontId)}",
-                    timeoutMs = 35_000L,
-                )
+                val result = RootShell.exec("sh ${RootShell.quote(bridge)} delete ${RootShell.quote(fontId)}", timeoutMs = 35_000L)
                 if (result.code != 0) error(result.stderr.ifBlank { "字体删除失败" })
                 val root = firstJson(result.stdout)
                 if (root.optString("status") != "ok") error(root.optString("message", "字体删除失败"))
@@ -446,8 +419,7 @@ internal class LuoShuViewModel : ViewModel() {
     fun refreshLogs() {
         viewModelScope.launch {
             val result = RootShell.exec(
-                "if [ -f ${RootShell.quote(bridge)} ]; then sh ${RootShell.quote(bridge)} logs 180; " +
-                    "else tail -n 180 /data/adb/modules/LuoShu/logs/fontswitch.log 2>/dev/null; fi",
+                "if [ -f ${RootShell.quote(bridge)} ]; then sh ${RootShell.quote(bridge)} logs 180; else tail -n 180 /data/adb/modules/LuoShu/logs/fontswitch.log 2>/dev/null; fi",
                 timeoutMs = 20_000L,
             )
             logs = when {
@@ -473,10 +445,7 @@ internal class LuoShuViewModel : ViewModel() {
     private suspend fun waitForSwitchTask(taskId: String): JSONObject {
         repeat(120) {
             delay(650L)
-            val status = RootShell.exec(
-                "sh ${RootShell.quote(bridge)} switch_status ${RootShell.quote(taskId)}",
-                timeoutMs = 15_000L,
-            )
+            val status = RootShell.exec("sh ${RootShell.quote(bridge)} switch_status ${RootShell.quote(taskId)}", timeoutMs = 15_000L)
             if (status.code != 0) return@repeat
             val root = runCatching { firstJson(status.stdout) }.getOrNull() ?: return@repeat
             val data = root.optJSONObject("data") ?: return@repeat
@@ -491,21 +460,14 @@ internal class LuoShuViewModel : ViewModel() {
     private suspend fun waitForMixTask(taskId: String): JSONObject {
         repeat(420) {
             delay(1_000L)
-            val status = RootShell.exec(
-                "sh ${RootShell.quote(bridge)} mix_status ${RootShell.quote(taskId)}",
-                timeoutMs = 15_000L,
-            )
+            val status = RootShell.exec("sh ${RootShell.quote(bridge)} mix_status ${RootShell.quote(taskId)}", timeoutMs = 15_000L)
             if (status.code != 0) return@repeat
             val root = runCatching { firstJson(status.stdout) }.getOrNull() ?: return@repeat
             val data = root.optJSONObject("data") ?: return@repeat
             val state = data.optString("state")
             val progress = data.optJSONObject("progress")?.optInt("percent", data.optInt("percent", 0)) ?: data.optInt("percent", 0)
             val message = data.optString("message", "复合字体正在后台生成")
-            mixState = mixState.copy(
-                taskState = state.ifBlank { "running" },
-                message = message,
-                progress = progress.coerceIn(0, 100),
-            )
+            mixState = mixState.copy(taskState = state.ifBlank { "running" }, message = message, progress = progress.coerceIn(0, 100))
             snapshot = snapshot.copy(taskState = state.ifBlank { "running" }, taskMessage = message)
             if (state == "success" || state == "failed") return data
         }
@@ -515,13 +477,7 @@ internal class LuoShuViewModel : ViewModel() {
     private fun parseSnapshot(raw: String): ModuleSnapshot {
         return try {
             val root = firstJson(raw)
-            if (root.optString("status") != "ok") {
-                return ModuleSnapshot(
-                    loading = false,
-                    rootGranted = true,
-                    error = root.optString("message", "模块状态读取失败"),
-                )
-            }
+            if (root.optString("status") != "ok") return ModuleSnapshot(loading = false, rootGranted = true, error = root.optString("message", "模块状态读取失败"))
             val data = root.getJSONObject("data")
             ModuleSnapshot(
                 loading = false,
@@ -536,11 +492,7 @@ internal class LuoShuViewModel : ViewModel() {
                 mountEngine = data.optString("mountEngine", "原生模块挂载"),
             )
         } catch (error: Throwable) {
-            ModuleSnapshot(
-                loading = false,
-                rootGranted = true,
-                error = error.message ?: "模块状态解析失败",
-            )
+            ModuleSnapshot(loading = false, rootGranted = true, error = error.message ?: "模块状态解析失败")
         }
     }
 
