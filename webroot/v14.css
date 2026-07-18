@@ -1,12 +1,9 @@
-/* 洛书 v14 · 精简设置、稳定弹层与字体组合 */
+/* 洛书 v14 · 精简设置与字体组合 */
 :root{--v14-panel:color-mix(in srgb,var(--card) 94%,var(--primary) 2%);--v14-soft:color-mix(in srgb,var(--surface-soft) 90%,var(--primary) 3%);--v14-border:color-mix(in srgb,var(--stroke) 82%,transparent);--v14-shadow:0 10px 28px rgba(28,42,72,.075)}
 [data-theme="dark"]{--v14-panel:#1c1e22;--v14-soft:#17191d;--v14-border:rgba(255,255,255,.075);--v14-shadow:0 10px 28px rgba(0,0,0,.22)}
 @media(prefers-color-scheme:dark){:root:not([data-theme]){--v14-panel:#1c1e22;--v14-soft:#17191d;--v14-border:rgba(255,255,255,.075);--v14-shadow:0 10px 28px rgba(0,0,0,.22)}}
 
-/* 移除不再公开的 Emoji 与自救弹窗，避免多个底部弹层相互叠加。 */
-#emojiSection,#openEmojiFolderBtn,#moreOpenEmojiFolderBtn,#stabilityRescueButton,#stabilityModal,#openStabilityBtn{display:none!important}
 #moreImportZipBtn,#moreOpenFolderBtn,#generateReportBtn,#copyFontPathBtn{display:none!important}
-body.stability-open{overflow:auto!important}
 
 /* 设置页只保留外观、字体组合与重启 SystemUI。 */
 #helpModal{padding:0!important;align-items:flex-end!important;overflow:hidden!important;background:rgba(7,10,18,.54)!important;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}

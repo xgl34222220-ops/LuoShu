@@ -5,12 +5,12 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 find "$ROOT" -type f -name '*.sh' -print | while IFS= read -r file; do sh -n "$file"; done
 sh -n "$ROOT/common/play_font_bridge"
 sh -n "$ROOT/common/wechat_xweb_bridge"
-python3 -m py_compile "$ROOT/common/composite_font.py"
+python3 -m py_compile "$ROOT/common/composite_font.py" "$ROOT/common/font_instance.py"
 
 if command -v node >/dev/null 2>&1; then
   TMP=$(mktemp -d)
   trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-  for file in app.js font_analyzer.js kernelsu.js stability.js environment.js v14.js; do
+  for file in app.js font_analyzer.js kernelsu.js environment.js v14.js workbench.js mix_state_guard.js workbench_bridge.js workbench_weight_extension.js; do
     cp "$ROOT/webroot/$file" "$TMP/${file%.js}.mjs"
     node --check "$TMP/${file%.js}.mjs"
   done
@@ -19,25 +19,38 @@ fi
 
 for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
   README.md README.txt LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
+  RELEASE_NOTES_v14.2_ALPHA1.md RELEASE_NOTES_v14.2_ALPHA2.md RELEASE_NOTES_v14.2_ALPHA3.md \
   licenses/LuoShu-MIT-HISTORICAL.txt licenses/CPython-LICENSE.txt licenses/FontTools-LICENSE.txt licenses/FontTools-LICENSE.external.txt \
-  common/composite_font.py common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh \
+  common/composite_font.py common/font_instance.py common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh common/v142_weighted_mix.sh \
   common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \
+  webroot/workbench.js webroot/mix_state_guard.js webroot/workbench_bridge.js webroot/workbench.css \
+  webroot/workbench_weight_extension.js webroot/workbench_weight_extension.css \
   scripts/build.sh scripts/prepare_composite_runtime.sh; do test -f "$ROOT/$file"; done
 
-grep -q '^version=v14.1$' "$ROOT/module.prop"
-grep -q '^versionCode=14120$' "$ROOT/module.prop"
+grep -q '^version=v14.2 Alpha3$' "$ROOT/module.prop"
+grep -q '^versionCode=14203$' "$ROOT/module.prop"
 grep -q '^description=Android 全局文字字体复合模块' "$ROOT/module.prop"
 grep -q 'full-composite-v5' "$ROOT/common/font_mix.sh"
 grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
-grep -q 'font_mix.sh.*recover' "$ROOT/post-fs-data.sh"
+grep -q 'v142_weighted_mix.sh' "$ROOT/common/v14_mix.sh"
+grep -q 'instantiateVariableFont' "$ROOT/common/font_instance.py"
+grep -q -- '--axes' "$ROOT/common/font_instance.py"
+grep -q 'worker "$_request"' "$ROOT/common/v142_weighted_mix.sh"
+grep -q 'cjkAxes' "$ROOT/common/v142_weighted_mix.sh"
+grep -q 'v14_mix.sh.*recover' "$ROOT/post-fs-data.sh"
 ! grep -q 'cmd font system --update' "$ROOT/service.sh"
 ! grep -q 'oplus-font refresh' "$ROOT/service.sh"
 ! find "$ROOT/system/etc" -type f \( -name fonts.xml -o -name font_fallback.xml \) -print -quit 2>/dev/null | grep -q .
 grep -q 'v14.js?v=14120' "$ROOT/webroot/index.html"
 grep -q 'app.js?v=14120' "$ROOT/webroot/index.html"
-grep -q "UI_VERSION = '14120'" "$ROOT/webroot/environment.js"
+grep -q "UI_VERSION = '14203'" "$ROOT/webroot/environment.js"
+grep -q "mix_state_guard.js?v=14203" "$ROOT/webroot/environment.js"
+grep -q "workbench_bridge.js?v=14203" "$ROOT/webroot/environment.js"
+grep -q "workbench.js?v=14203" "$ROOT/webroot/environment.js"
+grep -q 'workbench_weight_extension.js' "$ROOT/webroot/workbench_bridge.js"
+grep -q 'mix-axis-panel' "$ROOT/webroot/workbench_weight_extension.css"
+grep -q 'serializeAxes' "$ROOT/webroot/workbench_weight_extension.js"
 
-# Project license and third-party attribution must be complete and distinct.
 test "$(sha256sum "$ROOT/LICENSE" | awk '{print $1}')" = '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986'
 grep -q 'GNU GENERAL PUBLIC LICENSE' "$ROOT/LICENSE"
 grep -q 'Version 3, 29 June 2007' "$ROOT/LICENSE"
@@ -57,16 +70,20 @@ if cmp -s "$ROOT/licenses/CPython-LICENSE.txt" "$ROOT/licenses/FontTools-LICENSE
 fi
 ! grep -q '/sdcard/LuoShu/emoji/' "$ROOT/README.md" "$ROOT/README.txt" "$ROOT/module.prop" "$ROOT/config/version_notes.conf"
 
+sh "$ROOT/scripts/rc3_audit.sh"
+
 test -x "$ROOT/common/python/bin/luoshu-python"
 test -f "$ROOT/common/python/lib/libpython3.14.so"
 test -f "$ROOT/common/python/lib/python3.14/site-packages/fontTools/ttLib/__init__.py"
+test -f "$ROOT/common/python/lib/python3.14/site-packages/fontTools/varLib/instancer/__init__.py"
 file "$ROOT/common/python/bin/luoshu-python" | grep -q 'ARM aarch64'
 
 PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" \
   python3 -S - <<'PY'
 from fontTools.ttLib import TTFont, TTCollection
 from fontTools.pens.boundsPen import BoundsPen
+from fontTools.varLib.instancer import instantiateVariableFont
 print('Bundled FontTools import OK')
 PY
 
-echo 'LuoShu v14.1 GPL-3.0-only source checks passed.'
+echo 'LuoShu v14.2 Alpha3 async full-axis checks passed.'
