@@ -61,8 +61,14 @@ _import_commit_file() {
     if type font_validate >/dev/null 2>&1 && ! font_validate "$_tmp" text; then
         IMPORT_ERROR=${FONT_CHECK_ERROR:-字体文件校验失败}; rm -f "$_tmp"; return 1
     fi
-    font_metadata_conf "$_tmp" >/dev/null 2>&1 || true
-    mv -f "$_tmp" "$_dest" 2>/dev/null || { rm -f "$_tmp"; IMPORT_ERROR="无法提交字体文件"; return 1; }
+    # font_metadata_conf uses shell-global scratch variables. Running it before the
+    # final move used to overwrite _tmp, so mv targeted a metadata-cache temp file.
+    if ! mv -f "$_tmp" "$_dest" 2>/dev/null; then
+        # Some shared-storage FUSE implementations reject rename. Fall back to a
+        # direct copy and keep the same validation/metadata path afterwards.
+        cp -f "$_src" "$_dest" 2>/dev/null || { rm -f "$_tmp" "$_dest"; IMPORT_ERROR="无法提交字体文件"; return 1; }
+        rm -f "$_tmp" 2>/dev/null || true
+    fi
     chmod 0644 "$_dest" 2>/dev/null || true
     font_metadata_conf "$_dest" >/dev/null 2>&1 || true
     IMPORT_STATE=imported; IMPORT_FILE="$_name"; IMPORT_FAMILY=${FONT_META_FAMILY:-$(_font_filename_family "$_dest")}
