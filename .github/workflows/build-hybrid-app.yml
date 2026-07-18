@@ -12,6 +12,7 @@ on:
   push:
     branches:
       - feature/v14.2-hybrid-app-alpha1
+      - feature/v14.2-hybrid-app-alpha2-redesign
     paths:
       - android-app/**
       - webroot/**
@@ -52,7 +53,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v14.2-Hybrid-Alpha1
+          name: LuoShu-v14.2-Hybrid-Alpha2
           path: |
             android-app/app/build/outputs/apk/debug/app-debug.apk
             android-app/app/build/outputs/apk/debug/app-debug.apk.sha256
