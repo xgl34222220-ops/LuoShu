@@ -3,6 +3,7 @@
 set +e
 
 MODULE_DIR="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+CONFIG_DIR="${CONFIG_DIR:-$MODULE_DIR/config}"
 LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 USER_FONTS_DIR="${USER_FONTS_DIR:-$LUOSHU_PUBLIC_DIR/fonts}"
 LEGACY_FONTS_DIR="${LEGACY_FONTS_DIR:-/sdcard/Fonts}"
@@ -42,11 +43,11 @@ _app_library_copy_one() {
 }
 
 app_prepare_font_library() {
-    mkdir -p "$USER_FONTS_DIR" 2>/dev/null || return 1
+    _apf_mode="${1:-}"
+    _apf_marker="$CONFIG_DIR/app_library_compat.done"
+    mkdir -p "$USER_FONTS_DIR" "$CONFIG_DIR" 2>/dev/null || return 1
+    if [ "$_apf_mode" != refresh ] && [ -f "$_apf_marker" ]; then return 0; fi
     chmod 0775 "$LUOSHU_PUBLIC_DIR" "$USER_FONTS_DIR" 2>/dev/null || true
-
-    # Alpha2's failed commit step left hidden staging fonts behind. They are never
-    # valid library items and may occupy considerable storage.
     find "$USER_FONTS_DIR" -maxdepth 1 -type f -name '.app-import-*' -delete 2>/dev/null || true
 
     if [ -d "$LEGACY_FONTS_DIR" ] && [ "$LEGACY_FONTS_DIR" != "$USER_FONTS_DIR" ]; then
@@ -64,6 +65,7 @@ EOF_LEGACY_FONTS
 $(find "$USER_FONTS_DIR" -mindepth 2 -maxdepth 4 -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) 2>/dev/null)
 EOF_NESTED_FONTS
 
-    rm -f "$MODULE_DIR/config/webui_font_list.json" "$MODULE_DIR/config/webui_font_list.key" 2>/dev/null || true
+    rm -f "$MODULE_DIR/config/webui_font_list.json" "$MODULE_DIR/config/webui_font_list.key" "$MODULE_DIR/config/app_font_index.json" "$MODULE_DIR/config/app_font_index.key" 2>/dev/null || true
+    date +%s >"$_apf_marker" 2>/dev/null || touch "$_apf_marker" 2>/dev/null || true
     return 0
 }
