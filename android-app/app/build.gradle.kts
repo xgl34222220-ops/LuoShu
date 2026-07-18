@@ -5,12 +5,12 @@ plugins {
 
 android {
     namespace = "io.github.xgl34222220.luoshu"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "io.github.xgl34222220.luoshu"
         minSdk = 28
-        targetSdk = 37
+        targetSdk = 36
         versionCode = 1420301
         versionName = "14.2-alpha03-hybrid01"
     }
@@ -39,7 +39,7 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
+    val composeBom = platform("androidx.compose:compose-bom:2026.03.00")
     implementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.13.0")
