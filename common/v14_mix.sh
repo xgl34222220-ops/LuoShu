@@ -23,15 +23,15 @@ precheck_mix() {
         return 1
     }
     MODDIR="$MODDIR" sh "$ROLE_CHECK" "$1" cjk >/dev/null 2>&1 || {
-        printf '{"status":"error","message":"中文基底缺少必要的中文、英文、数字或标点"}\n'
+        printf '{"status":"error","message":"中文基底缺少必要的中文、英文字母或数字字形"}\n'
         return 1
     }
     MODDIR="$MODDIR" sh "$ROLE_CHECK" "$2" latin >/dev/null 2>&1 || {
-        printf '{"status":"error","message":"英文字体缺少必要的拉丁字母或标点"}\n'
+        printf '{"status":"error","message":"英文字体缺少必要的大小写拉丁字母"}\n'
         return 1
     }
     MODDIR="$MODDIR" sh "$ROLE_CHECK" "$3" digit >/dev/null 2>&1 || {
-        printf '{"status":"error","message":"数字字体缺少必要的数字或标点"}\n'
+        printf '{"status":"error","message":"数字字体缺少必要的 0–9 数字字形"}\n'
         return 1
     }
 }
