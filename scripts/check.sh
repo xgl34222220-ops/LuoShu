@@ -10,7 +10,8 @@ python3 -m py_compile \
   "$ROOT/common/composite_font.py" \
   "$ROOT/common/font_instance.py" \
   "$ROOT/common/font_coverage.py" \
-  "$ROOT/common/font_axis_info.py"
+  "$ROOT/common/font_axis_info.py" \
+  "$ROOT/common/font_role_check.py"
 
 if command -v node >/dev/null 2>&1; then
   TMP=$(mktemp -d)
@@ -27,9 +28,9 @@ for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
   RELEASE_NOTES_v14.2_ALPHA1.md RELEASE_NOTES_v14.2_ALPHA2.md RELEASE_NOTES_v14.2_ALPHA3.md \
   RELEASE_NOTES_v14.2_HYBRID_ALPHA5.md RELEASE_NOTES_v14.2_ALPHA6.md RELEASE_NOTES_v14.2_RC1.md RELEASE_NOTES_v14.2_RC2.md \
   licenses/LuoShu-MIT-HISTORICAL.txt licenses/CPython-LICENSE.txt licenses/FontTools-LICENSE.txt licenses/FontTools-LICENSE.external.txt \
-  common/composite_font.py common/font_instance.py common/font_coverage.py common/font_axis_info.py common/luoshu_composite.sh \
-  common/font_mix.sh common/v14_mix.sh common/v142_weighted_mix.sh common/app_bridge.sh \
-  common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \
+  common/composite_font.py common/font_instance.py common/font_coverage.py common/font_axis_info.py common/font_role_check.py \
+  common/font_role_check.sh common/luoshu_cli.sh common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh \
+  common/v142_weighted_mix.sh common/app_bridge.sh common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \
   webroot/workbench.js webroot/mix_state_guard.js webroot/workbench_bridge.js webroot/workbench.css \
   webroot/workbench_weight_extension.js webroot/workbench_weight_extension.css \
   scripts/build.sh scripts/version.sh scripts/prepare_webui.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/stability_test.sh \
@@ -41,9 +42,15 @@ test "$LUOSHU_VERSION" = "$(sed -n 's/^version=//p' "$ROOT/module.prop" | head -
 test "$LUOSHU_VERSION_CODE" = "$(sed -n 's/^versionCode=//p' "$ROOT/module.prop" | head -n1)"
 test "$LUOSHU_VERSION" = "$(sed -n 's/^version=//p' "$ROOT/config/version_notes.conf" | head -n1)"
 grep -q '^description=Android 全局字体管理模块' "$ROOT/module.prop"
+grep -q 'MODULE_VERSION=.*module.prop' "$ROOT/customize.sh"
+grep -q 'luoshu_cli.sh.*system/bin/洛书' "$ROOT/customize.sh"
+! grep -q 'pm install' "$ROOT/customize.sh"
+! grep -q 'pkill' "$ROOT/customize.sh"
 grep -q 'full-composite-v5' "$ROOT/common/font_mix.sh"
 grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
 grep -q 'v142_weighted_mix.sh' "$ROOT/common/v14_mix.sh"
+grep -q 'font_role_check.sh' "$ROOT/common/v14_mix.sh"
+grep -q 'common/v14_mix.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'instantiateVariableFont' "$ROOT/common/font_instance.py"
 grep -q -- '--axes' "$ROOT/common/font_instance.py"
 grep -q 'worker "$_request"' "$ROOT/common/v142_weighted_mix.sh"
@@ -52,8 +59,11 @@ grep -q 'axes_task.conf' "$ROOT/common/v142_weighted_mix.sh"
 grep -q 'rebootRequired' "$ROOT/common/app_bridge.sh"
 grep -q 'taskId' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 grep -q 'coerceIn(1, 1000)' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
+grep -q 'restartUIBtn' "$ROOT/webroot/environment.js"
+grep -q 'restartUi.hidden = true' "$ROOT/webroot/environment.js"
 grep -q 'v14_mix.sh.*recover' "$ROOT/post-fs-data.sh"
 ! grep -RIn 'v143_axes' "$ROOT/common" "$ROOT/android-app" "$ROOT/webroot" >/dev/null 2>&1
+! grep -qE '回滚|重启界面|刷新字体缓存' "$ROOT/common/luoshu_cli.sh"
 ! grep -q 'cmd font system --update' "$ROOT/service.sh"
 ! grep -q 'oplus-font refresh' "$ROOT/service.sh"
 ! find "$ROOT/system/etc" -type f \( -name fonts.xml -o -name font_fallback.xml \) -print -quit 2>/dev/null | grep -q .
