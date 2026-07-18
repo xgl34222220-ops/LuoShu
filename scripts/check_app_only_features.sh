@@ -30,8 +30,10 @@ grep -q 'importInstalledFontModules' android-app/app/src/main/java/io/github/xgl
 grep -q 'import_package' common/app_bridge.sh
 grep -q 'import_modules' common/app_bridge.sh
 grep -q 'font_metadata_runtime.sh' common/font_check.sh
+grep -q 'font_family_for_file' common/font_metadata_runtime.sh
 grep -q 'family_weight_numbers' common/app_multiweight_real.sh
 grep -q 'font_file_is_variable' common/app_multiweight_real.sh
+grep -q 'detect_font_family "$(basename' common/font_manager.sh
 grep -q 'modulePackage' common/font_package_import.py
 grep -q 'MAX_FONT_FILES = 300' common/font_package_import.py
 grep -q '/data/adb/modules' common/app_font_import.sh
