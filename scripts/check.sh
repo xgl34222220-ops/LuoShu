@@ -6,7 +6,13 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 find "$ROOT" -type f -name '*.sh' -print | while IFS= read -r file; do sh -n "$file"; done
 sh -n "$ROOT/common/play_font_bridge"
 sh -n "$ROOT/common/wechat_xweb_bridge"
-python3 -m py_compile "$ROOT/common/composite_font.py" "$ROOT/common/font_instance.py" "$ROOT/common/font_coverage.py"
+python3 -m py_compile \
+  "$ROOT/common/composite_font.py" \
+  "$ROOT/common/font_instance.py" \
+  "$ROOT/common/font_coverage.py" \
+  "$ROOT/common/font_metadata.py" \
+  "$ROOT/common/font_package_import.py" \
+  "$ROOT/common/font_family_rewrite.py"
 
 if command -v node >/dev/null 2>&1; then
   TMP=$(mktemp -d)
@@ -23,10 +29,12 @@ for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
   RELEASE_NOTES_v14.2_ALPHA1.md RELEASE_NOTES_v14.2_ALPHA2.md RELEASE_NOTES_v14.2_ALPHA3.md RELEASE_NOTES_v14.2_HYBRID_ALPHA5.md RELEASE_NOTES_v14.2_ALPHA6.md RELEASE_NOTES_v14.2_RC1.md \
   licenses/LuoShu-MIT-HISTORICAL.txt licenses/CPython-LICENSE.txt licenses/FontTools-LICENSE.txt licenses/FontTools-LICENSE.external.txt \
   common/composite_font.py common/font_instance.py common/font_coverage.py common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh common/v142_weighted_mix.sh \
+  common/font_metadata.py common/font_metadata_runtime.sh common/font_package_import.py common/font_family_rewrite.py \
+  common/app_font_import.sh common/app_multiweight_mix.sh common/app_multiweight_real.sh common/app_bridge.sh \
   common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \
   webroot/workbench.js webroot/mix_state_guard.js webroot/workbench_bridge.js webroot/workbench.css \
   webroot/workbench_weight_extension.js webroot/workbench_weight_extension.css \
-  scripts/build.sh scripts/version.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/stability_test.sh \
+  scripts/build.sh scripts/version.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/stability_test.sh scripts/check_app_only_features.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md; do test -f "$ROOT/$file"; done
 
 test "$LUOSHU_VERSION" = "$(sed -n 's/^version=//p' "$ROOT/module.prop" | head -n1)"
@@ -78,6 +86,7 @@ if cmp -s "$ROOT/licenses/CPython-LICENSE.txt" "$ROOT/licenses/FontTools-LICENSE
 fi
 ! grep -q '/sdcard/LuoShu/emoji/' "$ROOT/README.md" "$ROOT/README.txt" "$ROOT/module.prop" "$ROOT/config/version_notes.conf"
 
+sh "$ROOT/scripts/check_app_only_features.sh"
 sh "$ROOT/scripts/rc3_audit.sh"
 sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/stability_test.sh"
