@@ -1,9 +1,11 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val moduleProperties = java.util.Properties().apply {
+val moduleProperties = Properties().apply {
     val moduleProp = rootProject.projectDir.parentFile.resolve("module.prop")
     moduleProp.inputStream().use { load(it) }
 }
