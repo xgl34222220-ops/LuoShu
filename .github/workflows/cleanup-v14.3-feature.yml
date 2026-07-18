@@ -1,0 +1,39 @@
+name: Cleanup v14.3 feature branch
+
+on:
+  pull_request:
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.event.pull_request.head.ref == 'ops/v14.3-app-features-trigger-final'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v14.3-app-auto-multiweight-import
+          fetch-depth: 0
+
+      - name: Remove generated Android outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -r --cached --ignore-unmatch android-app/.gradle android-app/app/build
+          rm -rf android-app/.gradle android-app/app/build
+          for pattern in 'android-app/.gradle/' 'android-app/**/build/'; do
+            grep -qxF "$pattern" .gitignore || printf '%s\n' "$pattern" >> .gitignore
+          done
+          git diff --check
+
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .gitignore
+          git commit -m 'chore(app): remove generated Android build outputs'
+          git push origin HEAD:feature/v14.3-app-auto-multiweight-import
