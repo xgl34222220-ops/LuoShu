@@ -27,114 +27,66 @@ jobs:
           from pathlib import Path
 
           path = Path('android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt')
-          text = path.read_text(encoding='utf-8')
+          lines = path.read_text(encoding='utf-8').splitlines()
 
+          # Allow selecting Magisk/KernelSU/APatch font-module ZIPs.
+          if not any('"application/zip"' in line for line in lines):
+              index = next(i for i, line in enumerate(lines) if '"application/vnd.ms-opentype"' in line)
+              indent = lines[index][: len(lines[index]) - len(lines[index].lstrip())]
+              lines.insert(index + 1, f'{indent}"application/zip",')
+
+          # Wire the installed-module scanner into the Library page call.
+          if not any('onScanModules = viewModel::importInstalledFontModules' in line for line in lines):
+              start = next(i for i, line in enumerate(lines) if 'AppPage.Library -> LibraryPage(' in line)
+              end = next(i for i in range(start, min(start + 80, len(lines))) if 'modifier = Modifier.padding(padding)' in lines[i])
+              indent = lines[end][: len(lines[end]) - len(lines[end].lstrip())]
+              lines.insert(end, f'{indent}onScanModules = viewModel::importInstalledFontModules,')
+
+          # Add the callback to LibraryPage's signature.
+          if not any('onScanModules: () -> Unit' in line for line in lines):
+              start = next(i for i, line in enumerate(lines) if line.strip() == 'private fun LibraryPage(')
+              index = next(i for i in range(start, start + 20) if lines[i].strip() == 'onImport: () -> Unit,')
+              indent = lines[index][: len(lines[index]) - len(lines[index].lstrip())]
+              lines.insert(index + 1, f'{indent}onScanModules: () -> Unit,')
+
+          # Replace the old single import button with file and installed-module actions.
+          if not any('Text("扫描模块")' in line for line in lines):
+              close = next(i for i, line in enumerate(lines) if ') { Text("选择字体") }' in line)
+              start = close
+              while start >= 0 and lines[start].strip() != 'Button(':
+                  start -= 1
+              if start < 0:
+                  raise SystemExit('cannot locate import button')
+              indent = lines[start][: len(lines[start]) - len(lines[start].lstrip())]
+              child = indent + '    '
+              replacement = [
+                  f'{indent}Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {{',
+                  f'{child}Button(',
+                  f'{child}    onClick = onImport,',
+                  f'{child}    enabled = !viewModel.operationBusy && !viewModel.mixState.busy,',
+                  f'{child}    shape = RoundedCornerShape(16.dp),',
+                  f'{child}) {{ Text("选择文件") }}',
+                  f'{child}OutlinedButton(',
+                  f'{child}    onClick = onScanModules,',
+                  f'{child}    enabled = !viewModel.operationBusy && !viewModel.mixState.busy,',
+                  f'{child}    shape = RoundedCornerShape(16.dp),',
+                  f'{child}) {{ Text("扫描模块") }}',
+                  f'{indent}}}',
+              ]
+              lines[start : close + 1] = replacement
+
+          text = '\n'.join(lines) + '\n'
           text = text.replace(
-              '''                    AppPage.Library -> LibraryPage(
-                          viewModel = viewModel,
-                          onApply = { pendingApply = it },
-                          onDelete = { pendingDelete = it },
-                          onRestoreDefault = { restoreDefault = true },
-                          onImport = {
-                              importLauncher.launch(
-                                  arrayOf(
-                                      "font/ttf",
-                                      "font/otf",
-                                      "font/collection",
-                                      "application/x-font-ttf",
-                                      "application/x-font-opentype",
-                                      "application/vnd.ms-opentype",
-                                      "application/octet-stream",
-                                  ),
-                              )
-                          },
-                          modifier = Modifier.padding(padding),
-                      )''',
-              '''                    AppPage.Library -> LibraryPage(
-                          viewModel = viewModel,
-                          onApply = { pendingApply = it },
-                          onDelete = { pendingDelete = it },
-                          onRestoreDefault = { restoreDefault = true },
-                          onImport = {
-                              importLauncher.launch(
-                                  arrayOf(
-                                      "font/ttf",
-                                      "font/otf",
-                                      "font/collection",
-                                      "application/x-font-ttf",
-                                      "application/x-font-opentype",
-                                      "application/vnd.ms-opentype",
-                                      "application/zip",
-                                      "application/octet-stream",
-                                  ),
-                              )
-                          },
-                          onScanModules = viewModel::importInstalledFontModules,
-                          modifier = Modifier.padding(padding),
-                      )''',
-              1,
+              '从系统文件选择器导入 TTF / OTF / TTC；可多选，同字体族会自动归组。',
+              '导入 TTF / OTF / TTC 或 Magisk 字体模块 ZIP；按内部字体族和真实字重自动归组。',
           )
-
           text = text.replace(
-              '''private fun LibraryPage(
-              viewModel: LuoShuViewModel,
-              onApply: (FontItem) -> Unit,
-              onDelete: (FontItem) -> Unit,
-              onRestoreDefault: () -> Unit,
-              onImport: () -> Unit,
-              modifier: Modifier = Modifier,
-          ) {''',
-              '''private fun LibraryPage(
-              viewModel: LuoShuViewModel,
-              onApply: (FontItem) -> Unit,
-              onDelete: (FontItem) -> Unit,
-              onRestoreDefault: () -> Unit,
-              onImport: () -> Unit,
-              onScanModules: () -> Unit,
-              modifier: Modifier = Modifier,
-          ) {''',
-              1,
+              '点击上方“选择字体”导入，或手动放入 /sdcard/LuoShu/fonts/',
+              '选择字体文件或 Magisk 模块 ZIP，也可扫描当前已安装的字体模块。',
           )
-
           text = text.replace(
-              'Text("从系统文件选择器导入 TTF / OTF / TTC；可多选，同字体族会自动归组。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, lineHeight = 15.sp)',
-              'Text("导入 TTF / OTF / TTC 或 Magisk 字体模块 ZIP；按内部字体族和真实字重自动归组。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, lineHeight = 15.sp)',
-              1,
-          )
-
-          text = text.replace(
-              '''                Spacer(Modifier.width(10.dp))
-                  Button(
-                      onClick = onImport,
-                      enabled = !viewModel.operationBusy && !viewModel.mixState.busy,
-                      shape = RoundedCornerShape(16.dp),
-                  ) { Text("选择字体") }''',
-              '''                Spacer(Modifier.width(10.dp))
-                  Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                      Button(
-                          onClick = onImport,
-                          enabled = !viewModel.operationBusy && !viewModel.mixState.busy,
-                          shape = RoundedCornerShape(16.dp),
-                      ) { Text("选择文件") }
-                      OutlinedButton(
-                          onClick = onScanModules,
-                          enabled = !viewModel.operationBusy && !viewModel.mixState.busy,
-                          shape = RoundedCornerShape(16.dp),
-                      ) { Text("扫描模块") }
-                  }''',
-              1,
-          )
-
-          text = text.replace(
-              'Text("点击上方“选择字体”导入，或手动放入 /sdcard/LuoShu/fonts/", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)',
-              'Text("选择字体文件或 Magisk 模块 ZIP，也可扫描当前已安装的字体模块。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)',
-              1,
-          )
-
-          text = text.replace(
-              '"默认使用 APP 专属多字重，自动生成 300 / 400 / 500 / 600 / 700 五档；需要固定粗细时再切换到手动字重。WebUI 不提供这些入口。",',
-              '"默认读取字体内部 OS/2 / fvar 信息：单字重只生成自身一档，静态家族使用实际文件档位，可变字体使用自身命名实例或轴范围；需要固定粗细时再切换到手动字重。WebUI 不提供这些入口。",',
-              1,
+              '默认使用 APP 专属多字重，自动生成 300 / 400 / 500 / 600 / 700 五档；需要固定粗细时再切换到手动字重。WebUI 不提供这些入口。',
+              '默认读取字体内部 OS/2 / fvar 信息：单字重只生成自身一档，静态家族使用实际文件档位，可变字体使用自身命名实例或轴范围；需要固定粗细时再切换到手动字重。WebUI 不提供这些入口。',
           )
 
           required = [
