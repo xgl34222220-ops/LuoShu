@@ -1,0 +1,155 @@
+#!/system/bin/sh
+# 洛书 - ROM 适配层 (rom_adapters.sh)
+# 统一维护各 ROM 的字体文件名表和覆盖逻辑，被 customize.sh 和 font_manager.sh 共同引用
+# 消除此前 copy_as_coloros() 在两个文件中重复定义、容易改一处漏一处的问题
+#
+# 新增 ROM 适配方法：
+#   1. 用诊断脚本在真机上采集 /system/etc/fonts.xml、font_fallback.xml、
+#      /system/fonts/ 目录清单
+#   2. 找出该 ROM 实际渲染系统文字用到的物理字体文件名（注意：不能只看 fonts.xml，
+#      HyperOS 等 ROM 有不经过 fonts.xml 的隐藏字体机制，要以 /system/fonts/ 实际
+#      文件名 + 系统显示效果验证为准）
+#   3. 在下面新增 get_all_<rom>_files() + copy_as_<rom>()，并在 apply_font_by_rom()
+#      里加一个分支
+
+# 校验字体文件复制是否成功（防御性检查）：确认目标文件存在且不是空文件/异常小文件。
+# 正常字体文件至少几十 KB 起步，如果复制后小于 1KB，大概率是复制失败或者源文件本身
+# 有问题——这种畸形字体文件如果被系统的 native 字体渲染引擎解析，容易直接把整个
+# 进程崩掉而不是优雅报错，所以在复制阶段就要能发现，而不是留到运行时才暴露，
+# 也方便以后遇到"应用闪退"这类反馈时，能直接从日志里判断是不是这一步出的问题
+_verify_font_copy() {
+    f="$1"
+    if [ ! -s "$f" ]; then
+        _log_step "  警告：$(basename "$f") 复制后为空或不存在，可能导致相关文字渲染异常"
+        return 1
+    fi
+    fsize=$(wc -c < "$f" 2>/dev/null | tr -d '[:space:]')
+    case "$fsize" in ''|*[!0-9]*) fsize=0 ;; esac
+    if [ "$fsize" -lt 1024 ]; then
+        _log_step "  警告：$(basename "$f") 只有 ${fsize} 字节，明显小于正常字体文件，可能已损坏"
+        return 1
+    fi
+    return 0
+}
+
+# 为同一份字体创建多个 ROM 别名时优先使用硬链接。几十个别名共享同一组
+# 数据块，既保持每个目标路径都是普通字体文件，也避免把 20MB 字体复制成
+# 1GB 以上。若文件系统不支持硬链接则自动退回普通复制，不牺牲兼容性。
+_font_store_reset() {
+    dest_dir="$1"
+    rm -rf "$dest_dir/.luoshu-font-store" 2>/dev/null || true
+    mkdir -p "$dest_dir/.luoshu-font-store" 2>/dev/null || true
+    chmod 755 "$dest_dir/.luoshu-font-store" 2>/dev/null || true
+}
+
+_font_anchor() {
+    src="$1"
+    dest_dir="$2"
+    key="$3"
+    anchor="$dest_dir/.luoshu-font-store/${key}.font"
+    cp -f "$src" "$anchor" 2>/dev/null || return 1
+    chmod 644 "$anchor" 2>/dev/null || true
+    echo "$anchor"
+}
+
+_font_alias() {
+    anchor="$1"
+    dest="$2"
+    rm -f "$dest" 2>/dev/null || true
+    ln "$anchor" "$dest" 2>/dev/null || cp -f "$anchor" "$dest" 2>/dev/null || return 1
+    chmod 644 "$dest" 2>/dev/null || true
+}
+
+# 用于 system/fonts -> system_ext/product 的跨目录别名。它们都位于模块目录的
+# 同一 /data 文件系统，通常可以共享 inode；不支持时仍安全退回复制。
+link_or_copy_font() {
+    src="$1"
+    dest="$2"
+    rm -f "$dest" 2>/dev/null || true
+    ln "$src" "$dest" 2>/dev/null || cp -f "$src" "$dest" 2>/dev/null || return 1
+    chmod 644 "$dest" 2>/dev/null || true
+}
+
+# 只为 ROM 真正存在的目标创建别名，避免 Hybrid Mount 为不存在的路径
+# 生成大量 staging 节点，降低 No space left on device / 挂载上限风险。
+_rom_font_target_exists() {
+    _name="$1"
+    for _root in /system/fonts /system_ext/fonts /product/fonts /my_product/fonts /vendor/fonts; do
+        [ -e "$_root/${_name}.ttf" ] || [ -e "$_root/${_name}.otf" ] || [ -e "$_root/${_name}.ttc" ] && return 0
+    done
+    return 1
+}
+
+_rom_exact_target_exists() {
+    _file="$1"
+    for _root in /system/fonts /system_ext/fonts /product/fonts /my_product/fonts /vendor/fonts; do
+        [ -e "$_root/$_file" ] && return 0
+    done
+    return 1
+}
+
+
+# 从 ROM 目标文件名解析其真实字重。仅在用户字体族确实提供该字重时才覆盖，
+# 不再用单字重文件伪造 Thin/Light/Medium/Bold 等多档系统映射。
+_target_weight_from_filename() {
+    _base="${1##*/}"; _base="${_base%.*}"
+    case "$_base" in
+        100|*-Thin|*-XThin) echo 100 ;;
+        200|*-ExtraLight) echo 200 ;;
+        300|*-Light) echo 300 ;;
+        350) echo 350 ;;
+        400|*-Regular|*-Static-Regular) echo 400 ;;
+        500|*-Medium) echo 500 ;;
+        600|*-SemiBold) echo 600 ;;
+        700|*-Bold) echo 700 ;;
+        800|*-ExtraBold) echo 800 ;;
+        900|*-Black|*-Heavy) echo 900 ;;
+        *) echo "" ;;
+    esac
+}
+
+_family_exact_source() {
+    _family="$1"; _weight="$2"; _role="${3:-global}"
+    [ -n "$_family" ] || return 1
+    type font_family_has_weight >/dev/null 2>&1 || return 1
+    font_family_has_weight "$_family" "$_weight" || return 1
+    if type materialize_family_weight >/dev/null 2>&1; then
+        materialize_family_weight "$_family" "$_weight" "$_role"
+    else
+        get_weight_file_by_number "$_family" "$_weight" exact
+    fi
+}
+
+# ============================================================
+# ColorOS（OPPO/一加/realme 同属 oplus 系）
+# ============================================================
+# 已通过真机数据（ColorOS16 / PLK110）核对，48/50 个文件命中
+# 未覆盖：Oplus-Serif.ttf / OplusOSUI-XThin.ttf（低优先级，影响面很小，暂不处理）
+# 注：get_all_coloros_names() 的定义保留在 util_functions.sh（唯一来源），
+# 这里不重复定义，避免两份列表将来改一处漏一处
+
+# ColorOS 里字重专属文件（用于第三步"额外覆盖"，Regular 已在基础8个里处理过）
+_coloros_extra_names() {
+    echo "SysSans-En-Bold SysSans-En-Light SysSans-En-Medium SysSans-En-Thin SysSans-En-Black SysFont-Bold SysFont-Light SysFont-Medium SysFont-Thin SysFont-Black SysFont-Hans-Bold SysFont-Hans-Light SysFont-Hans-Medium SysFont-Hans-Thin SysFont-Hant-Bold SysFont-Hant-Light SysFont-Hant-Medium SysFont-Hant-Thin SysSans-Hant-Bold SysSans-Hant-Light SysSans-Hant-Medium SysSans-Hans-Bold SysSans-Hans-Light SysSans-Hans-Medium SysFont-Static-Bold SysFont-Static-Light SysFont-Static-Medium DINCondensedBold DINPro-Bold DINPro-Medium DINPro-Regular OPPODIN-Bold OPPODIN-Medium OPPODIN-Regular OPPODINCondensed-Bold OPPODINCondensed-Medium OPPODINCondensed-Regular Opposans-En-Regular Opposans-Hans-Regular Opposans-En-Bold Opposans-Hans-Bold Opposans-En-Medium Opposans-Hans-Medium Opposans-En-Light Opposans-Hans-Light OPSans-En-Regular Roboto-Regular Roboto-Medium Roboto-Bold Roboto-Light Roboto-Thin RobotoFlex-Regular RobotoStatic-Regular GoogleSans-Regular GoogleSans-Medium GoogleSans-Bold GoogleSansText-Regular GoogleSansText-Medium GoogleSansText-Bold GoogleSansFlex-Regular SourceSansPro-Regular SourceSansPro-SemiBold SourceSansPro-Bold"
+}
+
+# copy_as_coloros: 把用户字体覆盖为 ColorOS 认识的文件名
+#   src        用户选择的字体文件
+#   dest_dir   目标目录（安装时是 $MODPATH/system/fonts，切换时是模块已挂载的 system/fonts）
+#   mode       full（刷入/首次安装） | quick（切换字体）；两种模式都只生成目标别名，
+#              原厂 fallback 由 Overlay 下层保留
+#   font_family 可选，若提供且用户字体族有多个字重文件，会额外生成字重变体
+copy_as_coloros() {
+    src="$1"
+    dest_dir="$2"
+    mode="${3:-full}"
+    font_family="${4:-}"
+    mapped=0
+    skipped=0
+
+    for cname in $(get_all_coloros_names); do rm -f "$dest_dir/${cname}.ttf" 2>/dev/null; done
+    _font_store_reset "$dest_dir"
+    base_anchor=$(_font_anchor "$src" "$dest_dir" "base") || return 1
+    _log_step "  正在按字体真实字重应用（ColorOS）..."
+
+    # 系统默认/Regular 入口必须有一个基础字体；这不是伪造多字重。
