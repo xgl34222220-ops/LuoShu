@@ -1,11 +1,8 @@
 name: Recreate and publish v14.2 RC1
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/recreate-v14.2-rc1.yml
+  pull_request_target:
+    types: [opened]
 
 permissions:
   contents: write
@@ -13,10 +10,14 @@ permissions:
 
 jobs:
   recreate:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'ops/v14.2-rc1-release-trigger'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - name: Replace stale RC1 tag and dispatch signed release
@@ -24,6 +25,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: v14.2-RC1
           TARGET_SHA: 511e527a8298e5dea1916b68dd848f3645c91243
+          TRIGGER_BRANCH: ops/v14.2-rc1-release-trigger
         shell: bash
         run: |
           set -euo pipefail
@@ -41,3 +43,4 @@ jobs:
           git tag "$TAG" "$TARGET_SHA"
           git push origin "refs/tags/$TAG"
           gh workflow run release.yml --ref "$TAG" -f tag="$TAG"
+          git push origin --delete "$TRIGGER_BRANCH"
