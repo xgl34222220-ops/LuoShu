@@ -1,9 +1,9 @@
 name: Finalize App Font Import UI
 
 on:
-  push:
+  pull_request:
     branches:
-      - feature/v14.3-app-auto-multiweight-import
+      - main
     paths:
       - '.github/workflows/app-realweight-materialize.yml'
 
@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   finalize:
+    if: github.head_ref == 'feature/v14.3-app-auto-multiweight-import'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
