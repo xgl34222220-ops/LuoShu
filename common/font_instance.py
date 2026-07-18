@@ -21,6 +21,7 @@ from fontTools.varLib.instancer import instantiateVariableFont
 CJK_PROBES = tuple(map(ord, "中文字体系统默认洛书汉字国一的。"))
 LATIN_PROBES = tuple(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
 DIGIT_PROBES = tuple(map(ord, "0123456789"))
+GLOBAL_PROBES = CJK_PROBES + LATIN_PROBES + DIGIT_PROBES
 AXIS_TAG_RE = re.compile(r"^[ -~]{1,4}$")
 
 
@@ -42,7 +43,7 @@ def font_weight(font: TTFont) -> int:
 
 def face_score(font: TTFont, role: str, weight: int) -> tuple[int, int]:
     cmap = font.getBestCmap() or {}
-    probes = CJK_PROBES if role == "cjk" else LATIN_PROBES if role == "latin" else DIGIT_PROBES
+    probes = CJK_PROBES if role == "cjk" else LATIN_PROBES if role == "latin" else DIGIT_PROBES if role == "digit" else GLOBAL_PROBES
     hits = sum(1 for codepoint in probes if codepoint in cmap)
     return hits, -abs(font_weight(font) - weight)
 
@@ -64,7 +65,9 @@ def pick_face(path: Path, role: str, weight: int) -> int:
             font.close()
         if best is None or score > best[0]:
             best = score, index
-    if best is None or best[0][0] == 0:
+    if best is None:
+        raise InstanceError(f"无法从 {path.name} 中找到适合的{role}字体面")
+    if best[0][0] == 0 and role != "global":
         raise InstanceError(f"无法从 {path.name} 中找到适合的{role}字体面")
     return best[1]
 
@@ -157,7 +160,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--role", choices=("cjk", "latin", "digit"), required=True)
+    parser.add_argument("--role", choices=("cjk", "latin", "digit", "global"), required=True)
     parser.add_argument("--weight", type=int, default=400)
     parser.add_argument("--axes", default="")
     return parser.parse_args()
