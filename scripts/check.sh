@@ -24,8 +24,8 @@ for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
   common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \
   scripts/build.sh scripts/prepare_composite_runtime.sh; do test -f "$ROOT/$file"; done
 
-grep -q '^version=v14.1$' "$ROOT/module.prop"
-grep -q '^versionCode=14120$' "$ROOT/module.prop"
+grep -q '^version=v14.1.1 RC3$' "$ROOT/module.prop"
+grep -q '^versionCode=14123$' "$ROOT/module.prop"
 grep -q '^description=Android 全局文字字体复合模块' "$ROOT/module.prop"
 grep -q 'full-composite-v5' "$ROOT/common/font_mix.sh"
 grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
