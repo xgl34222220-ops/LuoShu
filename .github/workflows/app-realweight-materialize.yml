@@ -1,0 +1,69 @@
+name: Materialize App Real Font Weights
+
+on:
+  push:
+    branches:
+      - feature/v14.3-app-auto-multiweight-import
+    paths:
+      - '.github/realweight-fix/**'
+      - '.github/workflows/app-realweight-materialize.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/realweight-fix/**'
+      - '.github/workflows/app-realweight-materialize.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    if: github.event_name == 'push' || github.head_ref == 'feature/v14.3-app-auto-multiweight-import'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/v14.3-app-auto-multiweight-import
+          fetch-depth: 0
+
+      - name: Restore corrected implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in util_functions.sh app_multiweight_mix.sh font_manager.sh rom_adapters.sh; do
+            base64 -d ".github/realweight-fix/${name}.gz.b64" | gzip -dc > "common/${name}"
+            chmod 0755 "common/${name}"
+          done
+
+      - name: Verify syntax and real-weight boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n common/util_functions.sh
+          sh -n common/app_multiweight_mix.sh
+          sh -n common/font_manager.sh
+          sh -n common/rom_adapters.sh
+          python3 -m py_compile common/font_metadata.py common/font_instance.py
+          ! grep -q 'AUTO_SET="300:Light 400:Regular 500:Medium 600:SemiBold 700:Bold"' common/app_multiweight_mix.sh
+          grep -q 'font_family_weight_numbers' common/app_multiweight_mix.sh
+          grep -q 'font_metadata_conf' common/util_functions.sh
+          grep -q 'font_family_has_weight' common/rom_adapters.sh
+          sh scripts/check_app_only_features.sh
+
+      - name: Commit corrected real-weight implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .github/realweight-fix
+          rm -f .github/workflows/app-realweight-materialize.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add common/util_functions.sh common/app_multiweight_mix.sh common/font_manager.sh common/rom_adapters.sh .github
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+            exit 0
+          fi
+          git commit -m 'fix(app): map imported fonts by their real weights'
+          git push origin HEAD:feature/v14.3-app-auto-multiweight-import
