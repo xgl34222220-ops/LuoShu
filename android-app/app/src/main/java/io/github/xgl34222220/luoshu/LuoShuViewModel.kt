@@ -79,8 +79,9 @@ internal class LuoShuViewModel : ViewModel() {
     var fontError by mutableStateOf("")
         private set
 
-    var searchQuery by mutableStateOf("")
-        private set
+    private var _searchQuery by mutableStateOf("")
+    val searchQuery: String
+        get() = _searchQuery
 
     var operationBusy by mutableStateOf(false)
         private set
@@ -103,7 +104,7 @@ internal class LuoShuViewModel : ViewModel() {
         }
 
     fun setSearchQuery(value: String) {
-        searchQuery = value
+        _searchQuery = value
     }
 
     fun refresh() {
