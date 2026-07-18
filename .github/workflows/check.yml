@@ -1,8 +1,13 @@
 name: Validate source
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - fix/v14.2-rc2-stabilization
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - baseline/v14.2-rc1-rebuild
     paths:
       - module.prop
       - common/**
