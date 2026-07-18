@@ -11,7 +11,7 @@ if [ -z "$MODDIR" ]; then
     fi
 fi
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
-MIX_ENGINE="$MODDIR/common/v142_weighted_mix.sh"
+MIX_ENGINE="$MODDIR/common/v14_mix.sh"
 AXIS_INFO="$MODDIR/common/font_axis_info.py"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
