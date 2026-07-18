@@ -1,2 +1,2 @@
 Validate and materialize the corrected App font weight implementation.
-Diagnostic pass 2.
+Diagnostic pass 3 with corrected payload sizes.
