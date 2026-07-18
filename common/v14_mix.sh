@@ -1,6 +1,5 @@
 #!/system/bin/sh
 # 洛书 v14.2 RC2：字体组合轻量桥。
-# 优先使用异步真实轴引擎；缺失时回退 v14 完整复合引擎。
 set +e
 MODDIR="${MODDIR:-}"
 if [ -z "$MODDIR" ]; then
@@ -12,14 +11,37 @@ if [ -z "$MODDIR" ]; then
 fi
 WEIGHTED="$MODDIR/common/v142_weighted_mix.sh"
 ENGINE="$MODDIR/common/font_mix.sh"
+ROLE_CHECK="$MODDIR/common/font_role_check.sh"
 TASK_FILE="$MODDIR/config/mix_task.conf"
 STATUS_SCRIPT="$MODDIR/common/module_status.sh"
 json_escape(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
 read_value(){ sed -n "s/^${1}=//p" "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n'; }
 
+precheck_mix() {
+    [ -n "${1:-}" ] && [ -n "${2:-}" ] && [ -n "${3:-}" ] || {
+        printf '{"status":"error","message":"请选择中文、英文和数字字体"}\n'
+        return 1
+    }
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$1" cjk >/dev/null 2>&1 || {
+        printf '{"status":"error","message":"中文基底缺少必要的中文、英文、数字或标点"}\n'
+        return 1
+    }
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$2" latin >/dev/null 2>&1 || {
+        printf '{"status":"error","message":"英文字体缺少必要的拉丁字母或标点"}\n'
+        return 1
+    }
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$3" digit >/dev/null 2>&1 || {
+        printf '{"status":"error","message":"数字字体缺少必要的数字或标点"}\n'
+        return 1
+    }
+}
+
 if [ -f "$WEIGHTED" ]; then
     case "${1:-config}" in
-        start) sh "$WEIGHTED" start "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" ;;
+        start)
+            precheck_mix "$2" "$3" "$4" || exit 0
+            sh "$WEIGHTED" start "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}"
+            ;;
         config) sh "$WEIGHTED" config ;;
         status) sh "$WEIGHTED" status "$2" ;;
         recover) sh "$WEIGHTED" recover ;;
@@ -29,7 +51,10 @@ if [ -f "$WEIGHTED" ]; then
 fi
 
 case "${1:-status}" in
-    start) sh "$ENGINE" start "$2" "$3" "$4" ;;
+    start)
+        precheck_mix "$2" "$3" "$4" || exit 0
+        sh "$ENGINE" start "$2" "$3" "$4"
+        ;;
     config) sh "$ENGINE" status ;;
     status)
         _wanted="$2"
