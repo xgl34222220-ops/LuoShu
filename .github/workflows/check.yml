@@ -30,6 +30,7 @@ on:
       - RELEASE_NOTES_v14.1.1_RC3.md
       - RELEASE_NOTES_v14.2_ALPHA1.md
       - RELEASE_NOTES_v14.2_ALPHA2.md
+      - RELEASE_NOTES_v14.2_ALPHA3.md
       - .github/workflows/check.yml
       - .github/workflows/release.yml
 permissions:
@@ -77,14 +78,15 @@ jobs:
           test -s "$asset"
           unzip -t "$asset" >/dev/null
           unzip -Z1 "$asset" > /tmp/luoshu-package-list.txt
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = 'v14.2 Alpha2'
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = '14202'
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = 'v14.2 Alpha3'
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = '14203'
           grep -qx 'common/composite_font.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_instance.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/v142_weighted_mix.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/luoshu_composite.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/python/bin/luoshu-python' /tmp/luoshu-package-list.txt
           grep -qx 'webroot/workbench.js' /tmp/luoshu-package-list.txt
+          grep -qx 'webroot/mix_state_guard.js' /tmp/luoshu-package-list.txt
           grep -qx 'webroot/workbench_bridge.js' /tmp/luoshu-package-list.txt
           grep -qx 'webroot/workbench.css' /tmp/luoshu-package-list.txt
           grep -qx 'webroot/workbench_weight_extension.js' /tmp/luoshu-package-list.txt
@@ -100,11 +102,14 @@ jobs:
           unzip -p "$asset" LICENSE | grep -q 'Version 3, 29 June 2007'
           unzip -p "$asset" NOTICE.md | grep -q 'GPL-3.0-only'
           unzip -p "$asset" webroot/index.html | grep -q 'v14.js?v=14120'
-          unzip -p "$asset" webroot/environment.js | grep -q "UI_VERSION = '14202'"
+          unzip -p "$asset" webroot/environment.js | grep -q "UI_VERSION = '14203'"
           unzip -p "$asset" common/font_mix.sh | grep -q 'full-composite-v5'
           unzip -p "$asset" common/v14_mix.sh | grep -q 'v142_weighted_mix.sh'
           unzip -p "$asset" common/font_instance.py | grep -q 'instantiateVariableFont'
-          unzip -p "$asset" post-fs-data.sh | grep -q 'font_mix.sh.*recover'
+          unzip -p "$asset" common/font_instance.py | grep -q -- '--axes'
+          unzip -p "$asset" common/v142_weighted_mix.sh | grep -q 'worker "$_request"'
+          unzip -p "$asset" webroot/workbench_weight_extension.css | grep -q 'mix-axis-panel'
+          unzip -p "$asset" post-fs-data.sh | grep -q 'v14_mix.sh.*recover'
           ! unzip -p "$asset" service.sh | grep -q 'cmd font system --update'
           ! unzip -p "$asset" service.sh | grep -q 'oplus-font refresh'
           ! grep -qE '^system/etc/(fonts.xml|font_fallback.xml)$' /tmp/luoshu-package-list.txt
@@ -112,6 +117,6 @@ jobs:
           ! grep -qEi '(^|/)(emoji|__pycache__)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' /tmp/luoshu-package-list.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v14.2-Alpha2-validation
+          name: LuoShu-v14.2-Alpha3-validation
           path: dist/*.zip*
           if-no-files-found: error
