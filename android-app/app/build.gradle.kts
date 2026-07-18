@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.xgl34222220.luoshu"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1420501
-        versionName = "14.2-alpha05-miuix"
+        versionCode = 1420502
+        versionName = "14.2-alpha05-miuix2"
     }
 
     buildFeatures {
@@ -45,5 +45,4 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-viewbinding")
 }
