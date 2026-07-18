@@ -121,7 +121,13 @@ async function waitForMixTask(taskId, timeoutMs = 600000) {
 function finishWeightedMix(selection, status, recovered = false) {
     const app = window.App;
     localStorage.removeItem(MIX_PENDING_KEY);
-    const finalSelection = normalizeSelection({ ...selection, ...status, enabled: true }, selection);
+    const finalSelection = normalizeSelection({
+        ...selection,
+        enabled: true,
+        cjkWeight: status?.cjkWeight ?? selection.cjkWeight,
+        latinWeight: status?.latinWeight ?? selection.latinWeight,
+        digitWeight: status?.digitWeight ?? selection.digitWeight,
+    }, selection);
     writeSelection(finalSelection);
     app?.applyFontData?.({ current: 'mix', fonts: app.fonts, stats: app.stats });
     app?.saveLastSwitchResult?.({ status: 'success', font: '完整复合字体', time: Date.now(), message: status?.message || '' });
