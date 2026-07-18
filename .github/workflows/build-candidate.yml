@@ -1,0 +1,93 @@
+name: Build candidate artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/v14.2-rc2-stabilization
+
+permissions:
+  contents: read
+
+concurrency:
+  group: luoshu-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Install module build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+
+      - name: Prepare ARM64 composite runtime
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
+
+      - name: Run complete candidate checks
+        run: sh ./scripts/check.sh
+
+      - name: Build debug App
+        working-directory: android-app
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+
+      - name: Build and verify Full/Lite packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./scripts/version.sh
+          apk='android-app/app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$apk"
+          mkdir -p dist
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
+          cp -f "$apk" "$app"
+          (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
+          LUOSHU_VARIANT=full LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
+          LUOSHU_VARIANT=lite sh ./scripts/build.sh
+          full="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Full.zip"
+          lite="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Lite.zip"
+          test -s "$full"; test -s "$lite"
+          unzip -t "$full" >/dev/null
+          unzip -t "$lite" >/dev/null
+          unzip -Z1 "$full" | grep -qx 'bundled/LuoShu-App.apk'
+          ! unzip -Z1 "$lite" | grep -qx 'bundled/LuoShu-App.apk'
+          unzip -p "$full" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
+          cmp -s "$apk" "$RUNNER_TEMP/embedded.apk"
+          (cd dist && sha256sum -c "$(basename "$full").sha256")
+          (cd dist && sha256sum -c "$(basename "$lite").sha256")
+          (cd dist && sha256sum -c "$(basename "$app").sha256")
+
+      - name: Upload candidate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: EXTRACT-FIRST-LuoShu-v14.2-RC2-Full-Lite-Debug
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
