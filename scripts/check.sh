@@ -27,14 +27,18 @@ for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
   README.md README.txt LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md action.sh \
   RELEASE_NOTES_v14.2_ALPHA1.md RELEASE_NOTES_v14.2_ALPHA2.md RELEASE_NOTES_v14.2_ALPHA3.md \
   RELEASE_NOTES_v14.2_HYBRID_ALPHA5.md RELEASE_NOTES_v14.2_ALPHA6.md RELEASE_NOTES_v14.2_RC1.md RELEASE_NOTES_v14.2_RC2.md \
+  RELEASE_NOTES_v14.3_ALPHA1.md \
   licenses/LuoShu-MIT-HISTORICAL.txt licenses/CPython-LICENSE.txt licenses/FontTools-LICENSE.txt licenses/FontTools-LICENSE.external.txt \
   common/composite_font.py common/font_instance.py common/font_coverage.py common/font_axis_info.py common/font_role_check.py \
-  common/font_role_check.sh common/luoshu_cli.sh common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh \
+  common/font_role_check.sh common/native_import.sh common/luoshu_cli.sh common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh \
   common/v142_weighted_mix.sh common/app_bridge.sh common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \
   webroot/workbench.js webroot/mix_state_guard.js webroot/workbench_bridge.js webroot/workbench.css \
   webroot/workbench_weight_extension.js webroot/workbench_weight_extension.css \
   scripts/build.sh scripts/version.sh scripts/prepare_webui.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/stability_test.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuHost.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt; do test -f "$ROOT/$file"; done
 
@@ -51,6 +55,14 @@ grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
 grep -q 'v142_weighted_mix.sh' "$ROOT/common/v14_mix.sh"
 grep -q 'font_role_check.sh' "$ROOT/common/v14_mix.sh"
 grep -q 'common/v14_mix.sh' "$ROOT/common/app_bridge.sh"
+grep -q 'native_import.sh' "$ROOT/common/app_bridge.sh"
+grep -q 'import_file)' "$ROOT/common/app_bridge.sh"
+grep -q 'trusted_source' "$ROOT/common/native_import.sh"
+grep -q 'MAX_BYTES=268435456' "$ROOT/common/native_import.sh"
+grep -q 'font_validate' "$ROOT/common/native_import.sh"
+grep -q 'OpenMultipleDocuments' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
+grep -q 'native_import' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
+grep -q 'LuoShuHost' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt"
 grep -q 'instantiateVariableFont' "$ROOT/common/font_instance.py"
 grep -q -- '--axes' "$ROOT/common/font_instance.py"
 grep -q 'worker "$_request"' "$ROOT/common/v142_weighted_mix.sh"
