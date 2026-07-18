@@ -11,7 +11,6 @@ from fontTools.ttLib import TTCollection, TTFont
 CJK = tuple(map(ord, "中文字体系统默认洛书汉字"))
 LATIN = tuple(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
 DIGITS = tuple(map(ord, "0123456789"))
-PUNCT = tuple(map(ord, " .,!?;:()[]+-/%"))
 
 
 class RoleCheckError(RuntimeError):
@@ -34,11 +33,14 @@ def faces(path: Path) -> range:
 
 
 def required(role: str) -> tuple[int, ...]:
+    # The CJK source is the complete cmap base. It must provide the slots that
+    # are mandatory for replacement, but punctuation replacement is optional
+    # in composite_font.py and must not reject otherwise usable fonts.
     if role == "cjk":
-        return CJK + LATIN + DIGITS + PUNCT
+        return CJK + LATIN + DIGITS
     if role == "latin":
-        return LATIN + PUNCT
-    return DIGITS + PUNCT
+        return LATIN
+    return DIGITS
 
 
 def inspect_face(path: Path, index: int, role: str) -> dict[str, object]:
