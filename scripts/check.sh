@@ -35,7 +35,7 @@ grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
 grep -q 'v142_weighted_mix.sh' "$ROOT/common/v14_mix.sh"
 grep -q 'instantiateVariableFont' "$ROOT/common/font_instance.py"
 grep -q 'cjkWeight' "$ROOT/common/v142_weighted_mix.sh"
-grep -q 'font_mix.sh.*recover' "$ROOT/post-fs-data.sh"
+grep -q 'v14_mix.sh.*recover' "$ROOT/post-fs-data.sh"
 ! grep -q 'cmd font system --update' "$ROOT/service.sh"
 ! grep -q 'oplus-font refresh' "$ROOT/service.sh"
 ! find "$ROOT/system/etc" -type f \( -name fonts.xml -o -name font_fallback.xml \) -print -quit 2>/dev/null | grep -q .
