@@ -53,6 +53,26 @@ mount_engine() {
     fi
 }
 
+select_task_file() {
+    _axes_state="$(read_prop "$AXES_TASK_FILE" state)"
+    _switch_state="$(read_prop "$SWITCH_TASK_FILE" state)"
+    case "$_axes_state" in queued|running) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
+    case "$_switch_state" in queued|running) printf 'switch|%s\n' "$SWITCH_TASK_FILE"; return ;; esac
+
+    _axes_finished="$(read_prop "$AXES_TASK_FILE" finished)"
+    _switch_finished="$(read_prop "$SWITCH_TASK_FILE" finished)"
+    case "$_axes_finished" in ''|*[!0-9]*) _axes_finished=0 ;; esac
+    case "$_switch_finished" in ''|*[!0-9]*) _switch_finished=0 ;; esac
+    if [ "$_axes_finished" -ge "$_switch_finished" ] 2>/dev/null; then
+        case "$_axes_state" in success|failed) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
+        case "$_switch_state" in success|failed) printf 'switch|%s\n' "$SWITCH_TASK_FILE"; return ;; esac
+    else
+        case "$_switch_state" in success|failed) printf 'switch|%s\n' "$SWITCH_TASK_FILE"; return ;; esac
+        case "$_axes_state" in success|failed) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
+    fi
+    printf 'none|\n'
+}
+
 status_json() {
     _installed=false
     _version='未安装'
@@ -65,19 +85,9 @@ status_json() {
     _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
     [ -n "$_active" ] || _active='default'
 
-    _task_type='none'
-    _task_file=''
-    _axes_state="$(read_prop "$AXES_TASK_FILE" state)"
-    case "$_axes_state" in
-        queued|running|success|failed) _task_type='mix'; _task_file="$AXES_TASK_FILE" ;;
-    esac
-    if [ -z "$_task_file" ]; then
-        _switch_state="$(read_prop "$SWITCH_TASK_FILE" state)"
-        case "$_switch_state" in
-            queued|running|success|failed) _task_type='switch'; _task_file="$SWITCH_TASK_FILE" ;;
-        esac
-    fi
-
+    _selected="$(select_task_file)"
+    _task_type="${_selected%%|*}"
+    _task_file="${_selected#*|}"
     _task_id=''
     _task_state='idle'
     _task_message='暂无后台任务'
