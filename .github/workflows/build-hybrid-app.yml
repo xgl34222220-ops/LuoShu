@@ -35,11 +35,6 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK
-        run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager 'platforms;android-37' 'build-tools;36.0.0' 'platform-tools'
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
