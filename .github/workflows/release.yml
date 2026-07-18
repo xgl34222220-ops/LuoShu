@@ -108,7 +108,7 @@ jobs:
           LUOSHU_KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
         run: gradle --no-daemon --stacktrace :app:assembleRelease
 
-      - name: Build Full and Lite packages
+      - name: Build and verify signed Full/Lite artifacts
         shell: bash
         run: |
           set -euo pipefail
@@ -124,10 +124,16 @@ jobs:
           full="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Full.zip"
           lite="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Lite.zip"
           test -s "$full"; test -s "$lite"
+          unzip -t "$full" >/dev/null
+          unzip -t "$lite" >/dev/null
           unzip -Z1 "$full" | grep -qx 'bundled/LuoShu-App.apk'
           ! unzip -Z1 "$lite" | grep -qx 'bundled/LuoShu-App.apk'
           unzip -p "$full" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
           cmp -s "$apk" "$RUNNER_TEMP/embedded.apk"
+          build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)"
+          test -x "$build_tools/apksigner"
+          "$build_tools/apksigner" verify --verbose --print-certs "$app"
+          "$build_tools/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/embedded.apk"
           (cd dist && sha256sum -c "$(basename "$full").sha256")
           (cd dist && sha256sum -c "$(basename "$lite").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
@@ -137,6 +143,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
+          ARTIFACT_VERSION: ${{ steps.version.outputs.artifact_version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -144,9 +151,20 @@ jobs:
             echo "Release $TAG already exists; immutable releases are never overwritten." >&2
             exit 4
           fi
+          assets=(
+            "dist/LuoShu-App-${ARTIFACT_VERSION}.apk"
+            "dist/LuoShu-App-${ARTIFACT_VERSION}.apk.sha256"
+            "dist/LuoShu-${ARTIFACT_VERSION}-Full.zip"
+            "dist/LuoShu-${ARTIFACT_VERSION}-Full.zip.sha256"
+            "dist/LuoShu-${ARTIFACT_VERSION}-Lite.zip"
+            "dist/LuoShu-${ARTIFACT_VERSION}-Lite.zip.sha256"
+          )
+          for asset in "${assets[@]}"; do
+            [[ -f "$asset" ]] || { echo "Missing regular release file: $asset" >&2; exit 5; }
+          done
           prerelease=()
           case "$VERSION" in *Alpha*|*Beta*|*RC*) prerelease=(--prerelease) ;; esac
-          gh release create "$TAG" dist/* \
+          gh release create "$TAG" "${assets[@]}" \
             --verify-tag \
             --title "洛书 $VERSION" \
             --notes-file RELEASE_NOTES_v14.2_RC1.md \
