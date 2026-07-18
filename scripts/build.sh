@@ -37,7 +37,7 @@ mkdir -p "$STAGE/webroot/fonts"
 rm -rf "$STAGE/webroot/emoji"
 rm -f "$STAGE/config/webui_font_list.json" "$STAGE/config/webui_font_list.key" \
   "$STAGE/config/recent_fonts.conf" "$STAGE/config/previous_font.conf" \
-  "$STAGE/config/switch_task.conf" "$STAGE/config/mix_task.conf" \
+  "$STAGE/config/switch_task.conf" "$STAGE/config/mix_task.conf" "$STAGE/config/axes_task.conf" \
   "$STAGE/config/font_mix.conf" "$STAGE/config/active_emoji.conf" \
   "$STAGE/config/emoji_task.conf" "$STAGE/config/emoji_reboot_required.conf" \
   "$STAGE/config/font_weight_reboot_required.conf" "$STAGE/config/mount_compat.conf"
@@ -69,3 +69,4 @@ unzip -Z1 "$ZIP" | grep -Eq '(^|/)(__pycache__|emoji)(/|$)|\.pyc$|NotoColorEmoji
 printf 'Built: %s\n' "$ZIP"
 [ ! -s "$STAGE/bundled/LuoShu-App.apk" ] || printf 'Bundled App: %s\n' "$STAGE/bundled/LuoShu-App.apk"
 [ "$VARIANT" != "lite" ] || printf 'Lite package: App is intentionally not bundled.\n'
+rm -rf "$STAGE"
