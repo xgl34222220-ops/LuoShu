@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.xgl34222220.luoshu"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1420303
-        versionName = "14.2-alpha03-hybrid03"
+        versionCode = 1420401
+        versionName = "14.2-alpha04-native-core"
     }
 
     buildFeatures {
@@ -23,10 +23,6 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    sourceSets.named("main") {
-        assets.srcDir("../../webroot")
     }
 
     packaging {
@@ -50,7 +46,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.webkit:webkit:1.16.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
