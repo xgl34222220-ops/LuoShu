@@ -113,6 +113,5 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           RESULT: ${{ job.status }}
         run: |
-          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "V14_3_APP_ENABLED_WORKFLOW_RESULT: **$RESULT**
-
-run=https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          body="$(printf 'V14_3_APP_ENABLED_WORKFLOW_RESULT: **%s**\n\nrun=https://github.com/%s/actions/runs/%s' "$RESULT" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")"
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$body"
