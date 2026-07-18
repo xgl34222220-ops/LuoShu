@@ -15,35 +15,42 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Home
+import androidx.compose.material.icons.rounded.List
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.TextFields
 import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -67,7 +74,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 
-private enum class AppPage { Overview, Workbench, Logs }
+private enum class AppPage(val title: String, val subtitle: String, val icon: ImageVector) {
+    Overview("概览", "字体引擎状态", Icons.Rounded.Home),
+    Library("字体库", "搜索、切换与管理", Icons.Rounded.List),
+    Workbench("工作台", "组合、多轴、对比与健康", Icons.Rounded.Build),
+    Logs("日志", "模块诊断记录", Icons.Rounded.Description),
+}
 
 private val LuoShuLight = lightColorScheme(
     primary = Color(0xFF3167E3),
@@ -91,155 +103,149 @@ private val LuoShuDark = darkColorScheme(
     onSurfaceVariant = Color(0xFFB4B8C5),
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LuoShuApp(viewModel: LuoShuViewModel = viewModel()) {
     var page by rememberSaveable { mutableStateOf(AppPage.Overview) }
     var workbenchReload by remember { mutableIntStateOf(0) }
+    var pendingApply by remember { mutableStateOf<FontItem?>(null) }
+    var restoreDefault by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<FontItem?>(null) }
 
     LaunchedEffect(Unit) { viewModel.refresh() }
-    BackHandler(enabled = page == AppPage.Workbench) { page = AppPage.Overview }
+    BackHandler(enabled = page != AppPage.Overview) { page = AppPage.Overview }
 
     MaterialTheme(
         colorScheme = if (androidx.compose.foundation.isSystemInDarkTheme()) LuoShuDark else LuoShuLight,
     ) {
-        when (page) {
-            AppPage.Workbench -> WorkbenchHost(
-                reloadKey = workbenchReload,
-                onBack = { page = AppPage.Overview },
-                onReload = { workbenchReload += 1 },
-            )
-            AppPage.Overview, AppPage.Logs -> NativeShell(
-                page = page,
-                snapshot = viewModel.snapshot,
-                logs = viewModel.logs,
-                onPage = { page = it },
-                onRefresh = viewModel::refresh,
-                onRefreshLogs = viewModel::refreshLogs,
-                onOpenWorkbench = { page = AppPage.Workbench },
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun NativeShell(
-    page: AppPage,
-    snapshot: ModuleSnapshot,
-    logs: String,
-    onPage: (AppPage) -> Unit,
-    onRefresh: () -> Unit,
-    onRefreshLogs: () -> Unit,
-    onOpenWorkbench: () -> Unit,
-) {
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text(if (page == AppPage.Overview) "洛书" else "运行日志", fontWeight = FontWeight.Black)
-                        Text(
-                            if (page == AppPage.Overview) "字体引擎控制台" else "模块诊断记录",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.sp,
+        Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(page.title, fontWeight = FontWeight.Black)
+                            Text(page.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                        }
+                    },
+                    actions = {
+                        IconButton(
+                            onClick = {
+                                when (page) {
+                                    AppPage.Overview -> viewModel.refresh()
+                                    AppPage.Library -> viewModel.refreshFonts(force = true)
+                                    AppPage.Workbench -> workbenchReload += 1
+                                    AppPage.Logs -> viewModel.refreshLogs()
+                                }
+                            },
+                        ) {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
+                        }
+                    },
+                )
+            },
+            bottomBar = {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+                    AppPage.entries.forEach { target ->
+                        NavigationBarItem(
+                            selected = page == target,
+                            onClick = { page = target },
+                            icon = { Icon(target.icon, contentDescription = null) },
+                            label = { Text(target.title) },
                         )
                     }
-                },
-                actions = {
-                    IconButton(onClick = if (page == AppPage.Overview) onRefresh else onRefreshLogs) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新")
-                    }
-                },
-            )
-        },
-        bottomBar = {
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-                NavigationBarItem(
-                    selected = page == AppPage.Overview,
-                    onClick = { onPage(AppPage.Overview) },
-                    icon = { Icon(Icons.Rounded.Home, contentDescription = null) },
-                    label = { Text("概览") },
+                }
+            },
+        ) { padding ->
+            when (page) {
+                AppPage.Overview -> OverviewPage(
+                    viewModel = viewModel,
+                    onOpenLibrary = { page = AppPage.Library },
+                    onOpenWorkbench = { page = AppPage.Workbench },
+                    onRestoreDefault = { restoreDefault = true },
+                    modifier = Modifier.padding(padding),
                 )
-                NavigationBarItem(
-                    selected = false,
-                    onClick = onOpenWorkbench,
-                    icon = { Icon(Icons.Rounded.Build, contentDescription = null) },
-                    label = { Text("工作台") },
+                AppPage.Library -> LibraryPage(
+                    viewModel = viewModel,
+                    onApply = { pendingApply = it },
+                    onDelete = { pendingDelete = it },
+                    onRestoreDefault = { restoreDefault = true },
+                    modifier = Modifier.padding(padding),
                 )
-                NavigationBarItem(
-                    selected = page == AppPage.Logs,
-                    onClick = { onPage(AppPage.Logs) },
-                    icon = { Icon(Icons.Rounded.Description, contentDescription = null) },
-                    label = { Text("日志") },
+                AppPage.Workbench -> HybridWebView(
+                    reloadKey = workbenchReload,
+                    modifier = Modifier.fillMaxSize().padding(padding),
+                )
+                AppPage.Logs -> LogsPage(
+                    logs = viewModel.logs,
+                    modifier = Modifier.padding(padding),
                 )
             }
-        },
-    ) { padding ->
-        when (page) {
-            AppPage.Overview -> OverviewPage(
-                snapshot = snapshot,
-                onRefresh = onRefresh,
-                onOpenWorkbench = onOpenWorkbench,
-                modifier = Modifier.padding(padding),
-            )
-            AppPage.Logs -> LogsPage(logs, Modifier.padding(padding))
-            AppPage.Workbench -> Unit
         }
-    }
-}
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun WorkbenchHost(reloadKey: Int, onBack: () -> Unit, onReload: () -> Unit) {
-    Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            CenterAlignedTopAppBar(
-                title = {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("字体工作台", fontWeight = FontWeight.Black, fontSize = 17.sp)
-                        Text("组合 · 多轴 · 对比 · 健康", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-                    }
+        pendingApply?.let { font ->
+            AlertDialog(
+                onDismissRequest = { pendingApply = null },
+                title = { Text("应用字体") },
+                text = { Text("确定切换到「${font.name}」吗？完成后需要完整重启手机。") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingApply = null
+                        viewModel.applyFont(font.id)
+                    }) { Text("应用") }
                 },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Rounded.ArrowBack, contentDescription = "返回")
-                    }
-                },
-                actions = {
-                    IconButton(onClick = onReload) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "重新载入")
-                    }
-                },
+                dismissButton = { TextButton(onClick = { pendingApply = null }) { Text("取消") } },
             )
-        },
-    ) { padding ->
-        HybridWebView(
-            reloadKey = reloadKey,
-            modifier = Modifier.fillMaxSize().padding(padding),
-        )
+        }
+
+        if (restoreDefault) {
+            AlertDialog(
+                onDismissRequest = { restoreDefault = false },
+                title = { Text("恢复系统字体") },
+                text = { Text("确定恢复系统默认字体吗？完成后需要完整重启手机。") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        restoreDefault = false
+                        viewModel.applyFont("default")
+                    }) { Text("恢复") }
+                },
+                dismissButton = { TextButton(onClick = { restoreDefault = false }) { Text("取消") } },
+            )
+        }
+
+        pendingDelete?.let { font ->
+            AlertDialog(
+                onDismissRequest = { pendingDelete = null },
+                title = { Text("删除字体") },
+                text = { Text("确定删除「${font.name}」吗？此操作不可撤销。") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        pendingDelete = null
+                        viewModel.deleteFont(font.id)
+                    }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("取消") } },
+            )
+        }
     }
 }
 
 @Composable
 private fun OverviewPage(
-    snapshot: ModuleSnapshot,
-    onRefresh: () -> Unit,
+    viewModel: LuoShuViewModel,
+    onOpenLibrary: () -> Unit,
     onOpenWorkbench: () -> Unit,
+    onRestoreDefault: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val snapshot = viewModel.snapshot
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
-            Surface(
-                shape = RoundedCornerShape(28.dp),
-                color = Color.Transparent,
-                shadowElevation = 4.dp,
-            ) {
+            Surface(shape = RoundedCornerShape(28.dp), color = Color.Transparent, shadowElevation = 4.dp) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -282,7 +288,7 @@ private fun OverviewPage(
                     Spacer(Modifier.height(18.dp))
                     Text(snapshot.activeLabel, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     Text(
-                        if (snapshot.activeFont == "mix") "中文为完整基底，英文与数字按组合替换" else snapshot.activeFont,
+                        "字体库 ${viewModel.fonts.size} 款 · ${snapshot.mountEngine}",
                         color = Color.White.copy(alpha = 0.75f),
                         fontSize = 11.sp,
                     )
@@ -291,15 +297,11 @@ private fun OverviewPage(
         }
 
         if (snapshot.error.isNotBlank()) item {
-            Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                shape = RoundedCornerShape(20.dp),
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("连接异常", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onErrorContainer)
-                    Text(snapshot.error, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
-                }
-            }
+            ErrorCard(snapshot.error)
+        }
+
+        if (viewModel.operationMessage.isNotBlank()) item {
+            OperationCard(viewModel)
         }
 
         item {
@@ -311,61 +313,250 @@ private fun OverviewPage(
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 StatusCard(Modifier.weight(1f), Icons.Rounded.TextFields, "当前字体", snapshot.activeLabel, snapshot.activeFont)
-                StatusCard(Modifier.weight(1f), Icons.Rounded.Build, "挂载引擎", snapshot.mountEngine, "自动识别")
+                StatusCard(Modifier.weight(1f), Icons.Rounded.Build, "后台任务", snapshot.taskState, snapshot.taskMessage)
             }
         }
 
         item {
-            Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(Modifier.padding(17.dp)) {
-                    Text("后台任务", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    Spacer(Modifier.height(5.dp))
-                    Text(snapshot.taskState, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                    Text(snapshot.taskMessage, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 18.sp)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = onOpenLibrary,
+                    enabled = snapshot.rootGranted && snapshot.installed,
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    shape = RoundedCornerShape(17.dp),
+                ) {
+                    Icon(Icons.Rounded.List, contentDescription = null)
+                    Spacer(Modifier.width(7.dp))
+                    Text("字体库", fontWeight = FontWeight.Bold)
+                }
+                OutlinedButton(
+                    onClick = onOpenWorkbench,
+                    enabled = snapshot.rootGranted && snapshot.installed,
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    shape = RoundedCornerShape(17.dp),
+                ) {
+                    Icon(Icons.Rounded.Build, contentDescription = null)
+                    Spacer(Modifier.width(7.dp))
+                    Text("工作台", fontWeight = FontWeight.Bold)
                 }
             }
         }
 
         item {
-            Button(
-                onClick = onOpenWorkbench,
-                enabled = snapshot.rootGranted && snapshot.installed,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
-                shape = RoundedCornerShape(18.dp),
-            ) {
-                Icon(Icons.Rounded.Build, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text("进入字体工作台", fontWeight = FontWeight.Bold)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    onClick = onRestoreDefault,
+                    enabled = !viewModel.operationBusy,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) { Text("恢复系统字体") }
+                Button(
+                    onClick = viewModel::rebootDevice,
+                    enabled = viewModel.rebootRequired && !viewModel.operationBusy,
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) { Text("立即重启") }
             }
         }
+    }
+}
 
-        item {
+@Composable
+private fun LibraryPage(
+    viewModel: LuoShuViewModel,
+    onApply: (FontItem) -> Unit,
+    onDelete: (FontItem) -> Unit,
+    onRestoreDefault: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxSize()) {
+        if (viewModel.fontLoading || viewModel.operationBusy) {
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+        }
+        OutlinedTextField(
+            value = viewModel.searchQuery,
+            onValueChange = viewModel::setSearchQuery,
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            singleLine = true,
+            shape = RoundedCornerShape(18.dp),
+            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+            placeholder = { Text("搜索字体名称或格式") },
+        )
+
+        if (viewModel.fontError.isNotBlank()) {
+            ErrorCard(viewModel.fontError, Modifier.padding(horizontal = 16.dp))
+        }
+        if (viewModel.operationMessage.isNotBlank()) {
+            OperationCard(viewModel, Modifier.padding(horizontal = 16.dp, vertical = 6.dp))
+        }
+
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item {
+                SystemFontCard(
+                    active = viewModel.snapshot.activeFont == "default",
+                    busy = viewModel.operationBusy,
+                    onRestoreDefault = onRestoreDefault,
+                )
+            }
+
+            if (!viewModel.fontLoading && viewModel.filteredFonts.isEmpty()) {
+                item {
+                    Card(shape = RoundedCornerShape(22.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(28.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("没有找到字体", fontWeight = FontWeight.Bold)
+                            Text(
+                                if (viewModel.searchQuery.isBlank()) "请先把字体放入 /sdcard/LuoShu/fonts/" else "换一个关键词试试",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+                }
+            }
+
+            items(viewModel.filteredFonts, key = { it.id }) { font ->
+                FontCard(
+                    font = font,
+                    active = viewModel.snapshot.activeFont == font.id,
+                    busy = viewModel.operationBusy,
+                    onApply = { onApply(font) },
+                    onDelete = { onDelete(font) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SystemFontCard(active: Boolean, busy: Boolean, onRestoreDefault: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface,
+        ),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                Text("系", modifier = Modifier.padding(horizontal = 15.dp, vertical = 13.dp), fontWeight = FontWeight.Black)
+            }
+            Spacer(Modifier.width(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text("系统默认字体", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("恢复 ROM 自带字体配置", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+            }
+            if (active) Text("使用中", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            else Button(onClick = onRestoreDefault, enabled = !busy, shape = RoundedCornerShape(14.dp)) { Text("恢复") }
+        }
+    }
+}
+
+@Composable
+private fun FontCard(font: FontItem, active: Boolean, busy: Boolean, onApply: () -> Unit, onDelete: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f) else MaterialTheme.colorScheme.surface,
+        ),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(50.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (font.valid) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.errorContainer,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("Aa", color = if (font.valid) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error, fontWeight = FontWeight.Black)
+                    }
+                }
+                Spacer(Modifier.width(13.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(font.name, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        "${font.format}${font.size.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""}${font.date.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""}",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (!active) {
+                    IconButton(onClick = onDelete, enabled = !busy) {
+                        Icon(Icons.Rounded.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text("洛书字体预览 · Hello 0123456789", fontSize = 20.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(7.dp))
             Text(
-                "Hybrid Alpha2：原生页面不再与 WebUI 重复叠加；工作台使用独立全屏宿主。",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                if (font.valid) font.weightLabel else font.error.ifBlank { "字体文件无效" },
+                color = if (font.valid) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
                 fontSize = 11.sp,
-                lineHeight = 17.sp,
-                modifier = Modifier.padding(horizontal = 4.dp),
             )
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (font.variable) {
+                    Surface(shape = RoundedCornerShape(999.dp), color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)) {
+                        Text("可变", modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp), color = MaterialTheme.colorScheme.secondary, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                if (active) {
+                    Text("当前使用", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                } else {
+                    Button(onClick = onApply, enabled = font.valid && !busy, shape = RoundedCornerShape(14.dp)) {
+                        Text("应用字体")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OperationCard(viewModel: LuoShuViewModel, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (viewModel.operationBusy) CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+            else Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(10.dp))
+            Text(viewModel.operationMessage, modifier = Modifier.weight(1f), fontSize = 12.sp, lineHeight = 17.sp)
+        }
+    }
+}
+
+@Composable
+private fun ErrorCard(message: String, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        shape = RoundedCornerShape(20.dp),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text("连接异常", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onErrorContainer)
+            Text(message, fontSize = 12.sp, color = MaterialTheme.colorScheme.onErrorContainer)
         }
     }
 }
 
 @Composable
 private fun StatusCard(modifier: Modifier, icon: ImageVector, label: String, value: String, detail: String) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(21.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
+    Card(modifier = modifier, shape = RoundedCornerShape(22.dp)) {
         Column(Modifier.padding(15.dp)) {
-            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.11f)) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(8.dp).size(18.dp))
-            }
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
             Spacer(Modifier.height(12.dp))
             Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
-            Text(value, maxLines = 1, overflow = TextOverflow.Ellipsis, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-            Text(detail, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
+            Text(value, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -374,7 +565,7 @@ private fun StatusCard(modifier: Modifier, icon: ImageVector, label: String, val
 private fun LogsPage(logs: String, modifier: Modifier = Modifier) {
     Surface(
         modifier = modifier.fillMaxSize().padding(16.dp),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surface,
     ) {
         SelectionContainer {
