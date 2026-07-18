@@ -11,11 +11,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 
 private const val APP_BRIDGE = "/data/adb/modules/LuoShu/common/app_bridge.sh"
+private const val PREVIEW_CACHE_MAX_FILES = 6
+private const val PREVIEW_CACHE_MAX_BYTES = 96L * 1024L * 1024L
 
 internal data class WeightAxisInfo(
     val loading: Boolean = true,
@@ -77,22 +81,29 @@ internal fun NativeFontPreview(
 ) {
     val context = LocalContext.current.applicationContext
     val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
-    val typeface by produceState<Typeface?>(initialValue = null, key1 = font?.id) {
-        value = font?.takeIf { it.valid }?.let { item ->
-            runCatching {
-                val cacheDir = File(context.cacheDir, "native-font-preview").apply { mkdirs() }
-                val extension = item.format.lowercase().takeIf { it in setOf("ttf", "otf", "ttc") } ?: "ttf"
-                val target = File(cacheDir, "${stableKey(item.id)}.$extension")
-                if (!target.isFile || target.length() == 0L) {
-                    val command = "sh ${RootShell.quote(APP_BRIDGE)} preview_export " +
-                        "${RootShell.quote(item.id)} ${RootShell.quote(target.absolutePath)}"
-                    val result = RootShell.exec(command, timeoutMs = 25_000L)
-                    if (result.code != 0 || !target.isFile || target.length() == 0L) {
-                        error(result.stderr.ifBlank { "预览字体导出失败" })
+    val previewRevision = font?.let { "${it.id}|${it.size}|${it.date}" }
+    val typeface by produceState<Typeface?>(initialValue = null, key1 = previewRevision) {
+        value = withContext(Dispatchers.IO) {
+            font?.takeIf { it.valid }?.let { item ->
+                runCatching {
+                    val cacheDir = File(context.cacheDir, "native-font-preview").apply { mkdirs() }
+                    val extension = item.format.lowercase().takeIf { it in setOf("ttf", "otf", "ttc") } ?: "ttf"
+                    val revision = "${item.id}|${item.size}|${item.date}"
+                    val target = File(cacheDir, "${stableKey(revision)}.$extension")
+                    if (!target.isFile || target.length() == 0L) {
+                        val command = "sh ${RootShell.quote(APP_BRIDGE)} preview_export " +
+                            "${RootShell.quote(item.id)} ${RootShell.quote(target.absolutePath)}"
+                        val result = RootShell.exec(command, timeoutMs = 25_000L)
+                        if (result.code != 0 || !target.isFile || target.length() == 0L) {
+                            error(result.stderr.ifBlank { "预览字体导出失败" })
+                        }
                     }
-                }
-                Typeface.createFromFile(target)
-            }.getOrNull()
+                    target.setLastModified(System.currentTimeMillis())
+                    val loaded = Typeface.createFromFile(target)
+                    trimPreviewCache(cacheDir, target)
+                    loaded
+                }.getOrNull()
+            }
         }
     }
 
@@ -122,4 +133,24 @@ internal fun NativeFontPreview(
 private fun stableKey(value: String): String {
     val bytes = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
     return bytes.take(12).joinToString("") { byte -> "%02x".format(byte) }
+}
+
+private fun trimPreviewCache(directory: File, keep: File) {
+    val files = directory.listFiles()
+        ?.filter { it.isFile }
+        ?.sortedByDescending { it.lastModified() }
+        .orEmpty()
+    var keptFiles = 0
+    var keptBytes = 0L
+    files.forEach { file ->
+        val required = file.absolutePath == keep.absolutePath
+        val fits = keptFiles < PREVIEW_CACHE_MAX_FILES &&
+            keptBytes + file.length() <= PREVIEW_CACHE_MAX_BYTES
+        if (required || fits) {
+            keptFiles += 1
+            keptBytes += file.length()
+        } else {
+            file.delete()
+        }
+    }
 }

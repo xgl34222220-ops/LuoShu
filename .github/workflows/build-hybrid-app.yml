@@ -6,7 +6,12 @@ on:
     branches: [main]
     paths:
       - android-app/**
-      - common/app_bridge.sh
+      - common/**
+      - scripts/**
+      - webroot/**
+      - module.prop
+      - customize.sh
+      - action.sh
       - .github/workflows/build-hybrid-app.yml
   push:
     branches:
@@ -17,7 +22,12 @@ on:
       - feature/v14.2-hybrid-app-alpha5-miuix
     paths:
       - android-app/**
-      - common/app_bridge.sh
+      - common/**
+      - scripts/**
+      - webroot/**
+      - module.prop
+      - customize.sh
+      - action.sh
       - .github/workflows/build-hybrid-app.yml
 
 permissions:
@@ -26,7 +36,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
 
@@ -35,11 +45,23 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - uses: android-actions/setup-android@v3
 
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
+
+      - name: Install module build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+
+      - name: Prepare ARM64 composite runtime
+        run: sh ./scripts/prepare_composite_runtime.sh
 
       - name: Build debug APK
         working-directory: android-app
@@ -57,18 +79,34 @@ jobs:
           if-no-files-found: warn
           retention-days: 3
 
-      - name: Verify APK
+      - name: Build integrated module and verify artifacts
+        shell: bash
         run: |
+          set -euo pipefail
           apk='android-app/app/build/outputs/apk/debug/app-debug.apk'
           test -s "$apk"
           unzip -t "$apk" >/dev/null
-          sha256sum "$apk" > "$apk.sha256"
+          standalone='dist/LuoShu-App-v14.2-Alpha5.apk'
+          mkdir -p dist
+          cp -f "$apk" "$standalone"
+          sha256sum "$standalone" > "$standalone.sha256"
+          LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
+          module="$(find dist -maxdepth 1 -type f -name 'LuoShu-v14.2-Alpha5.zip' -print -quit)"
+          test -s "$module"
+          unzip -t "$module" >/dev/null
+          test -s "$module.sha256"
+          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v14.2 Alpha5'
+          unzip -Z1 "$module" | grep -qx 'bundled/LuoShu-App.apk'
+          unzip -p "$module" bundled/LuoShu-App.apk > /tmp/LuoShu-App.apk
+          cmp -s "$apk" /tmp/LuoShu-App.apk
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v14.2-Hybrid-Alpha5-MIUIx
+          name: LuoShu-v14.2-Alpha5-Integrated
           path: |
-            android-app/app/build/outputs/apk/debug/app-debug.apk
-            android-app/app/build/outputs/apk/debug/app-debug.apk.sha256
+            dist/LuoShu-v14.2-Alpha5.zip
+            dist/LuoShu-v14.2-Alpha5.zip.sha256
+            dist/LuoShu-App-v14.2-Alpha5.apk
+            dist/LuoShu-App-v14.2-Alpha5.apk.sha256
           if-no-files-found: error
           retention-days: 14

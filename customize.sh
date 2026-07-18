@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v14.2 Alpha2 - 安装脚本
+# LuoShu v14.2 Alpha5 - 安装脚本
 
 MODPATH="${MODPATH:-$3}"
 set +e
@@ -30,7 +30,7 @@ check_hyperos
 
 ui_print ""
 ui_print "╔══════════════════════════════════╗"
-ui_print "║       洛书 v14.2 Alpha2       ║"
+ui_print "║       洛书 v14.2 Alpha5       ║"
 ui_print "║      Android 全局字体管理       ║"
 ui_print "╚══════════════════════════════════╝"
 ui_print ""
@@ -110,7 +110,7 @@ ui_print "• 检测到字体库：${FONT_COUNT} 款（刷写阶段不处理）"
 ui_print "• 首次启动保持系统默认字体"
 ui_print "• 重启后可分别选择中文、英文、数字及各自字重"
 
-# v14.2 Alpha2 不管理 Emoji、图标或符号字体；清理旧包内部状态，但不删除用户公开目录中的个人文件。
+# v14.2 Alpha5 不管理 Emoji、图标或符号字体；清理旧包内部状态，但不删除用户公开目录中的个人文件。
 rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" 2>/dev/null || true
 rm -f "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
 rm -f "$MODPATH/config/active_emoji.conf" "$MODPATH/config/emoji_task.conf" "$MODPATH/config/emoji_reboot_required.conf" 2>/dev/null || true
@@ -124,7 +124,7 @@ for _fw_conf in font_weight.conf font_weight_original.conf v142_weighted_mix.con
 done
 
 cp -f "$MODPATH/common/font_manager.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
-chmod 755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/service.sh" "$MODPATH/uninstall.sh" 2>/dev/null || true
+chmod 755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/service.sh" "$MODPATH/uninstall.sh" "$MODPATH/action.sh" 2>/dev/null || true
 chmod 755 "$MODPATH/common/font_manager.sh" "$MODPATH/common/font_check.sh" "$MODPATH/common/font_import.sh" "$MODPATH/common/font_report.sh" \
           "$MODPATH/common/util_functions.sh" "$MODPATH/common/rom_adapters.sh" "$MODPATH/common/volume_key.sh" \
           "$MODPATH/common/play_font_bridge" "$MODPATH/common/wechat_xweb_bridge" 2>/dev/null || true
@@ -137,8 +137,28 @@ chmod 755 "$MODPATH/system/bin/洛书" 2>/dev/null || true
 find "$MODPATH/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
 find "$MODPATH/webroot" -type f -exec chmod 0644 {} \; 2>/dev/null || true
 chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot" 2>/dev/null || true
+[ ! -f "$MODPATH/bundled/LuoShu-App.apk" ] || chmod 0644 "$MODPATH/bundled/LuoShu-App.apk" 2>/dev/null || true
 
 touch "$MODPATH/magic" 2>/dev/null || true
+
+# 完整包会内置原生 App。Android 正常运行时直接安装；恢复环境或安装失败时，
+# 保留 APK，并允许用户重启后点击 Root 管理器中的模块“操作”按钮再次安装。
+if [ -s "$MODPATH/bundled/LuoShu-App.apk" ]; then
+    if command -v pm >/dev/null 2>&1 && [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ]; then
+        _app_result="$(pm install -r -d --user 0 "$MODPATH/bundled/LuoShu-App.apk" 2>&1)"
+        _app_code=$?
+        printf '%s\n' "$_app_result" > "$MODPATH/logs/app-install.log" 2>/dev/null || true
+        if [ "$_app_code" -eq 0 ] && printf '%s' "$_app_result" | grep -q 'Success'; then
+            ui_print "✓ 洛书 App 已安装或更新"
+        else
+            ui_print "! App 自动安装未完成，重启后点击模块“操作”按钮重试"
+        fi
+    else
+        ui_print "• 洛书 App 已内置，重启后点击模块“操作”按钮安装"
+    fi
+else
+    ui_print "• 当前为纯模块包，未内置洛书 App"
+fi
 
 ui_print ""
 ui_print "╭──────────────────────────────╮"

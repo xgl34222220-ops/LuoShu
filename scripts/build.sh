@@ -5,13 +5,20 @@ VERSION=$(sed -n 's/^version=//p' "$ROOT/module.prop" | head -n1 | sed 's#[ /]#-
 OUT="$ROOT/dist"
 STAGE="$OUT/LuoShu"
 ZIP="$OUT/LuoShu-${VERSION}.zip"
+APP_APK="${LUOSHU_APP_APK:-$ROOT/android-app/app/build/outputs/apk/debug/app-debug.apk}"
 
 sh "$ROOT/scripts/check.sh"
 rm -rf "$STAGE"
 mkdir -p "$STAGE" "$OUT"
-for path in common config fonts system webroot licenses LICENSE NOTICE.md THIRD_PARTY_NOTICES.md README.md README.txt CHANGELOG.md customize.sh module.prop post-fs-data.sh service.sh uninstall.sh magic 兼容与目录说明.txt; do
+for path in common config fonts system webroot licenses LICENSE NOTICE.md THIRD_PARTY_NOTICES.md README.md README.txt CHANGELOG.md customize.sh module.prop post-fs-data.sh service.sh uninstall.sh action.sh magic 兼容与目录说明.txt; do
   [ ! -e "$ROOT/$path" ] || cp -a "$ROOT/$path" "$STAGE/"
 done
+
+if [ -s "$APP_APK" ]; then
+  mkdir -p "$STAGE/bundled"
+  cp -f "$APP_APK" "$STAGE/bundled/LuoShu-App.apk"
+  chmod 0644 "$STAGE/bundled/LuoShu-App.apk"
+fi
 find "$STAGE" -type f -name '*.log' -delete
 find "$STAGE" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
 find "$STAGE" -type f -name '*.pyc' -delete
@@ -50,3 +57,4 @@ unzip -Z1 "$ZIP" | grep -Eq '(^|/)(__pycache__|emoji)(/|$)|\.pyc$|NotoColorEmoji
   exit 89
 } || true
 printf 'Built: %s\n' "$ZIP"
+[ ! -s "$STAGE/bundled/LuoShu-App.apk" ] || printf 'Bundled App: %s\n' "$STAGE/bundled/LuoShu-App.apk"

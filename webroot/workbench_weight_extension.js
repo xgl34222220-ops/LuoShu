@@ -1,4 +1,4 @@
-// 洛书 v14.2 Alpha3 — 工作台与概览共用的完整可变轴控件
+// 洛书 v14.2 Alpha5 — 工作台与概览共用的完整可变轴控件
 // 可变字体显示全部 fvar 轴；静态多字重只显示真实档位；单字重明确固定状态。
 
 const MIX_LOCAL_KEY = 'luoshu_v14_mix_selection';
@@ -229,7 +229,7 @@ function scheduleRender() {
     renderScheduled = true;
     requestAnimationFrame(async () => {
         renderScheduled = false;
-        document.querySelectorAll('.workbench-version').forEach(element => { element.textContent = 'v14.2 Alpha3'; });
+        document.querySelectorAll('.workbench-version').forEach(element => { element.textContent = 'v14.2 Alpha5'; });
         ensureOverviewPanel();
         const token = ++renderToken;
         Object.entries(SLOT_CONFIG).forEach(([slot, config]) => {
@@ -285,7 +285,7 @@ function bindDelegatedEvents() {
 }
 function installStyles() {
     if (document.getElementById('workbenchWeightStyles')) return;
-    const link = document.createElement('link'); link.id = 'workbenchWeightStyles'; link.rel = 'stylesheet'; link.href = './workbench_weight_extension.css?v=14203'; document.head.appendChild(link);
+    const link = document.createElement('link'); link.id = 'workbenchWeightStyles'; link.rel = 'stylesheet'; link.href = './workbench_weight_extension.css?v=14205'; document.head.appendChild(link);
 }
 function initialize() {
     installStyles(); bindDelegatedEvents();

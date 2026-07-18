@@ -16,6 +16,8 @@ on:
       - post-fs-data.sh
       - service.sh
       - uninstall.sh
+      - action.sh
+      - android-app/**
       - magic
       - 兼容与目录说明.txt
       - README.md
@@ -31,6 +33,7 @@ on:
       - RELEASE_NOTES_v14.2_ALPHA1.md
       - RELEASE_NOTES_v14.2_ALPHA2.md
       - RELEASE_NOTES_v14.2_ALPHA3.md
+      - RELEASE_NOTES_v14.2_HYBRID_ALPHA5.md
       - .github/workflows/check.yml
       - .github/workflows/release.yml
 permissions:
@@ -78,8 +81,9 @@ jobs:
           test -s "$asset"
           unzip -t "$asset" >/dev/null
           unzip -Z1 "$asset" > /tmp/luoshu-package-list.txt
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = 'v14.2 Alpha3'
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = '14203'
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = 'v14.2 Alpha5'
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = '14205'
+          grep -qx 'action.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/composite_font.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_instance.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/v142_weighted_mix.sh' /tmp/luoshu-package-list.txt
@@ -101,8 +105,8 @@ jobs:
           unzip -p "$asset" LICENSE | grep -q 'GNU GENERAL PUBLIC LICENSE'
           unzip -p "$asset" LICENSE | grep -q 'Version 3, 29 June 2007'
           unzip -p "$asset" NOTICE.md | grep -q 'GPL-3.0-only'
-          unzip -p "$asset" webroot/index.html | grep -q 'v14.js?v=14120'
-          unzip -p "$asset" webroot/environment.js | grep -q "UI_VERSION = '14203'"
+          unzip -p "$asset" webroot/index.html | grep -q 'v14.js?v=14205'
+          unzip -p "$asset" webroot/environment.js | grep -q "UI_VERSION = '14205'"
           unzip -p "$asset" common/font_mix.sh | grep -q 'full-composite-v5'
           unzip -p "$asset" common/v14_mix.sh | grep -q 'v142_weighted_mix.sh'
           unzip -p "$asset" common/font_instance.py | grep -q 'instantiateVariableFont'
@@ -117,6 +121,6 @@ jobs:
           ! grep -qEi '(^|/)(emoji|__pycache__)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' /tmp/luoshu-package-list.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v14.2-Alpha3-validation
+          name: LuoShu-v14.2-Alpha5-validation
           path: dist/*.zip*
           if-no-files-found: error

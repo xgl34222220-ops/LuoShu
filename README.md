@@ -32,6 +32,7 @@
 - 支持 Magisk、KernelSU、SukiSU Ultra、APatch。
 - 支持 Mountify 元模块同步。
 - 提供诊断报告、字体覆盖分析和可变字体信息展示。
+- 提供原生 Android 管理 App；完整模块包内置 APK，也可从 Releases 单独下载安装。
 
 ## 功能边界
 
@@ -69,13 +70,14 @@
 
 ## 安装
 
-1. 从 Releases 下载 ZIP，并核对随附 SHA-256。
-2. 通过 Root 管理器刷入模块。
-3. 完整重启手机。
-4. 将文字字体放入 `/sdcard/LuoShu/fonts/`。
-5. 打开洛书 WebUI，分别选择中文、英文和数字字体。
-6. 点击“应用字体组合”，等待进度达到 100%。
-7. 完整重启后生效。
+1. 从 Releases 下载模块 ZIP，并核对随附 SHA-256。
+2. 通过 Root 管理器刷入模块；安装器会尝试同时安装内置的洛书 App。
+3. 如果 App 未自动安装，重启后点击模块“操作”按钮，或下载 Release 中的独立 APK。
+4. 完整重启手机。
+5. 将文字字体放入 `/sdcard/LuoShu/fonts/`。
+6. 打开洛书 App 或 WebUI，分别选择中文、英文和数字字体。
+7. 点击“应用字体组合”，等待进度达到 100%。
+8. 完整重启后生效。
 
 覆盖升级时，安装脚本不会在刷写阶段重新生成字体。升级后的首次启动保持系统默认字体，需要在 WebUI 中重新应用一次组合。
 
@@ -107,6 +109,7 @@
 ```text
 common/         # 字体检查、复合、事务与 ROM 适配
 webroot/        # WebUI
+android-app/    # 原生 Android 管理端源码
 scripts/        # 校验、构建和运行时准备
 licenses/       # 第三方及历史许可证
 config/         # 运行状态与任务记录

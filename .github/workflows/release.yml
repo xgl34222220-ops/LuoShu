@@ -16,10 +16,13 @@ on:
       - post-fs-data.sh
       - service.sh
       - uninstall.sh
+      - action.sh
+      - android-app/**
       - magic
       - 兼容与目录说明.txt
       - CHANGELOG.md
       - RELEASE_NOTES_v14.1.md
+      - RELEASE_NOTES_v14.2_HYBRID_ALPHA5.md
       - .github/workflows/release.yml
 permissions:
   contents: write
@@ -37,14 +40,32 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
       - name: Prepare ARM64 composite runtime
         run: sh ./scripts/prepare_composite_runtime.sh
+      - name: Build installable App
+        working-directory: android-app
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
       - name: Build and verify module
-        run: sh ./scripts/build.sh
+        run: |
+          apk='android-app/app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$apk"
+          mkdir -p dist
+          cp -f "$apk" dist/LuoShu-App-v14.2-Alpha5.apk
+          sha256sum dist/LuoShu-App-v14.2-Alpha5.apk > dist/LuoShu-App-v14.2-Alpha5.apk.sha256
+          LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
+          unzip -Z1 dist/LuoShu-v14.2-Alpha5.zip | grep -qx 'bundled/LuoShu-App.apk'
       - name: Read release version
         id: version
         shell: bash
@@ -62,14 +83,17 @@ jobs:
         run: |
           asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
           checksum="${asset}.sha256"
+          apk='dist/LuoShu-App-v14.2-Alpha5.apk'
+          apk_checksum="${apk}.sha256"
           test -s "$asset"; test -s "$checksum"
+          test -s "$apk"; test -s "$apk_checksum"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git tag -f "$TAG" "$GITHUB_SHA"
           git push origin "refs/tags/$TAG" --force
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release upload "$TAG" "$asset" "$checksum" --clobber
-            gh release edit "$TAG" --title "洛书 $VERSION" --notes-file RELEASE_NOTES_v14.1.md --latest
+            gh release upload "$TAG" "$asset" "$checksum" "$apk" "$apk_checksum" --clobber
+            gh release edit "$TAG" --title "洛书 $VERSION" --notes-file RELEASE_NOTES_v14.2_HYBRID_ALPHA5.md --latest
           else
-            gh release create "$TAG" "$asset" "$checksum" --title "洛书 $VERSION" --notes-file RELEASE_NOTES_v14.1.md --latest
+            gh release create "$TAG" "$asset" "$checksum" "$apk" "$apk_checksum" --title "洛书 $VERSION" --notes-file RELEASE_NOTES_v14.2_HYBRID_ALPHA5.md --latest
           fi

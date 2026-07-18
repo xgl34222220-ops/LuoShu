@@ -44,7 +44,7 @@ jobs:
         run: sh ./scripts/build.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v14.1
+          name: LuoShu-v14.2-Alpha5-module
           path: dist/*.zip*
           if-no-files-found: error
           retention-days: 30

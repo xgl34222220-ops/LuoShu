@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.xgl34222220.luoshu"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1420502
-        versionName = "14.2-alpha05-miuix2"
+        versionCode = 1420503
+        versionName = "14.2-alpha05-miuix3"
     }
 
     buildFeatures {

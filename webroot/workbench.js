@@ -1,4 +1,4 @@
-// 洛书 v14.2 Alpha1 — 字体工作台
+// 洛书 v14.2 Alpha5 — 字体工作台
 // 纯前端实验层：复用 v14 完整复合引擎，不改动底层挂载与事务切换。
 
 const PRESET_KEY = 'luoshu_v142_mix_presets';
@@ -79,7 +79,7 @@ function ensureModal() {
             <header class="workbench-hero">
                 <div class="workbench-emblem" aria-hidden="true"><span>中</span><i>Aa</i><b>123</b></div>
                 <div class="workbench-heading"><small>LUOSHU LAB</small><h2>字体工作台</h2><p>组合预设、可变轴、字体对比与健康分析</p></div>
-                <span class="workbench-version">v14.2 Alpha1</span>
+                <span class="workbench-version">v14.2 Alpha5</span>
                 <button class="workbench-close" id="closeWorkbenchBtn" type="button" aria-label="关闭">×</button>
             </header>
             <nav class="workbench-tabs" aria-label="工作台功能">
