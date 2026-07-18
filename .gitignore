@@ -14,3 +14,5 @@ config/webui_font_list.*
 *.keystore
 *.p12
 keystore.properties
+android-app/.gradle/
+android-app/**/build/

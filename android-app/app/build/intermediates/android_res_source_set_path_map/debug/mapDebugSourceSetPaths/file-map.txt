@@ -1,8 +1,0 @@
-io.github.xgl34222220.luoshu.app-pngs-0 /home/runner/work/LuoShu/LuoShu/android-app/app/build/generated/res/pngs/debug
-io.github.xgl34222220.luoshu.app-updated_navigation_xml-1 /home/runner/work/LuoShu/LuoShu/android-app/app/build/generated/updated_navigation_xml/debug
-io.github.xgl34222220.luoshu.app-packageDebugResources-2 /home/runner/work/LuoShu/LuoShu/android-app/app/build/intermediates/incremental/debug/packageDebugResources/merged.dir
-io.github.xgl34222220.luoshu.app-packageDebugResources-3 /home/runner/work/LuoShu/LuoShu/android-app/app/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
-io.github.xgl34222220.luoshu.app-debug-4 /home/runner/work/LuoShu/LuoShu/android-app/app/build/intermediates/merged_res/debug/mergeDebugResources
-io.github.xgl34222220.luoshu.app-debug-5 /home/runner/work/LuoShu/LuoShu/android-app/app/src/debug/res
-io.github.xgl34222220.luoshu.app-main-6 /home/runner/work/LuoShu/LuoShu/android-app/app/src/main/res
-gradleHome-0 /home/runner/.gradle

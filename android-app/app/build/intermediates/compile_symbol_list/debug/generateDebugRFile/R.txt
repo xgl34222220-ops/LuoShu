@@ -1,3 +1,0 @@
-int drawable ic_luoshu 0x0
-int string app_name 0x0
-int style Theme_LuoShuHybrid 0x0
