@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 Hybrid App 原生核心桥：状态、字体库、单字体切换、复合字体与任务接口。
+# 洛书 Hybrid App 原生核心桥：状态、字体库、原生预览、单字体切换、复合字体与任务接口。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -12,6 +12,8 @@ if [ -z "$MODDIR" ]; then
 fi
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
 MIX_ENGINE="$MODDIR/common/v142_weighted_mix.sh"
+USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
+[ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -86,6 +88,36 @@ mix_ready() {
     return 0
 }
 
+find_preview_source() {
+    _family="$1"
+    for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
+              "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+        [ -f "$_f" ] || continue
+        if type detect_font_family >/dev/null 2>&1; then
+            _detected="$(detect_font_family "$(basename "$_f")")"
+        else
+            _detected="$(basename "$_f")"; _detected="${_detected%.*}"; _detected="${_detected%-Regular}"
+        fi
+        [ "$_detected" = "$_family" ] && { printf '%s\n' "$_f"; return 0; }
+    done
+    return 1
+}
+
+preview_export() {
+    _family="$1"
+    _dest="$2"
+    case "$_dest" in
+        /data/user/0/io.github.xgl34222220.luoshu/cache/*|/data/data/io.github.xgl34222220.luoshu/cache/*) ;;
+        *) printf '{"status":"error","message":"预览目标目录不受信任"}\n'; return 1 ;;
+    esac
+    _src="$(find_preview_source "$_family")"
+    [ -f "$_src" ] || { printf '{"status":"error","message":"找不到预览字体"}\n'; return 1; }
+    mkdir -p "${_dest%/*}" 2>/dev/null || true
+    cp -f "$_src" "$_dest" 2>/dev/null || { printf '{"status":"error","message":"无法导出预览字体"}\n'; return 1; }
+    chmod 0644 "$_dest" 2>/dev/null || true
+    printf '{"status":"ok","data":{"path":"%s"}}\n' "$(json_escape "$_dest")"
+}
+
 case "${1:-status}" in
     status)
         status_json
@@ -97,6 +129,9 @@ case "${1:-status}" in
         else
             sh "$FONT_MANAGER" action list
         fi
+        ;;
+    preview_export)
+        preview_export "${2:-}" "${3:-}"
         ;;
     validate)
         manager_ready || exit 1
