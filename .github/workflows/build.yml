@@ -8,7 +8,7 @@ permissions:
   contents: write
 jobs:
   materialize-real-font-weights:
-    if: github.event_name == 'pull_request' && github.head_ref == 'trigger/app-realweight-materialize'
+    if: github.event_name == 'pull_request' && github.head_ref == 'ops/v14.3-realweight-materializer-2'
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout feature branch
