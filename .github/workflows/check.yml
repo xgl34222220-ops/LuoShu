@@ -27,6 +27,8 @@ on:
       - CHANGELOG.md
       - RELEASE_NOTES_v14.1.md
       - RELEASE_NOTES_v14.1.1_RC2.md
+      - RELEASE_NOTES_v14.1.1_RC3.md
+      - RELEASE_NOTES_v14.2_ALPHA1.md
       - .github/workflows/check.yml
       - .github/workflows/release.yml
 permissions:
@@ -37,6 +39,23 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - name: Collect RC3 legacy inventory
+        shell: bash
+        run: |
+          set +e
+          sh ./scripts/rc3_audit.sh > rc3-legacy-inventory.txt 2>&1
+          echo $? > rc3-legacy-inventory.exit
+          cat rc3-legacy-inventory.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-RC3-legacy-inventory
+          path: |
+            rc3-legacy-inventory.txt
+            rc3-legacy-inventory.exit
+          if-no-files-found: error
+      - name: Enforce RC3 legacy inventory
+        run: test "$(cat rc3-legacy-inventory.exit)" = 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -57,11 +76,14 @@ jobs:
           test -s "$asset"
           unzip -t "$asset" >/dev/null
           unzip -Z1 "$asset" > /tmp/luoshu-package-list.txt
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = 'v14.1'
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = '14120'
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = 'v14.2 Alpha1'
+          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = '14201'
           grep -qx 'common/composite_font.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/luoshu_composite.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/python/bin/luoshu-python' /tmp/luoshu-package-list.txt
+          grep -qx 'webroot/workbench.js' /tmp/luoshu-package-list.txt
+          grep -qx 'webroot/workbench_bridge.js' /tmp/luoshu-package-list.txt
+          grep -qx 'webroot/workbench.css' /tmp/luoshu-package-list.txt
           grep -qx 'licenses/CPython-LICENSE.txt' /tmp/luoshu-package-list.txt
           grep -qx 'licenses/FontTools-LICENSE.txt' /tmp/luoshu-package-list.txt
           grep -qx 'licenses/LuoShu-MIT-HISTORICAL.txt' /tmp/luoshu-package-list.txt
@@ -73,14 +95,16 @@ jobs:
           unzip -p "$asset" LICENSE | grep -q 'Version 3, 29 June 2007'
           unzip -p "$asset" NOTICE.md | grep -q 'GPL-3.0-only'
           unzip -p "$asset" webroot/index.html | grep -q 'v14.js?v=14120'
+          unzip -p "$asset" webroot/environment.js | grep -q "UI_VERSION = '14201'"
           unzip -p "$asset" common/font_mix.sh | grep -q 'full-composite-v5'
           unzip -p "$asset" post-fs-data.sh | grep -q 'font_mix.sh.*recover'
           ! unzip -p "$asset" service.sh | grep -q 'cmd font system --update'
           ! unzip -p "$asset" service.sh | grep -q 'oplus-font refresh'
           ! grep -qE '^system/etc/(fonts.xml|font_fallback.xml)$' /tmp/luoshu-package-list.txt
           ! grep -qE '(^|/)skip_mount(ify)?$' /tmp/luoshu-package-list.txt
+          ! grep -qEi '(^|/)(emoji|__pycache__)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' /tmp/luoshu-package-list.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v14.1-validation
+          name: LuoShu-v14.2-Alpha1-validation
           path: dist/*.zip*
           if-no-files-found: error

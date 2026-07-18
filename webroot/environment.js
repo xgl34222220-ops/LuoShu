@@ -1,7 +1,9 @@
-// 洛书 v13.5 Stable Hotfix3 - Root / Mountify 环境识别与 UI 精修
+// 洛书 v14.2 Alpha1 - Root / Mountify 环境识别与 UI 精修
 import { exec } from './kernelsu.js';
+import './workbench_bridge.js';
+import './workbench.js';
 
-const UI_VERSION = '14120';
+const UI_VERSION = '14201';
 
 function installRefinedStyle() {
     if (document.querySelector('link[data-luoshu-refine]')) return;

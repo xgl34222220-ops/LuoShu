@@ -16,7 +16,6 @@ LOG_DIR="${MODULE_DIR}/logs"
 LOG_FILE="${LOG_DIR}/fontswitch.log"
 LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
-USER_EMOJI_DIR="$LUOSHU_PUBLIC_DIR/emoji"
 USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
 USER_IMPORT_DIR="$LUOSHU_PUBLIC_DIR/import"
 LEGACY_FONTS_DIR="${LEGACY_FONTS_DIR:-/sdcard/Fonts}"
@@ -25,8 +24,8 @@ LEGACY_FONTS_DIR="${LEGACY_FONTS_DIR:-/sdcard/Fonts}"
 # 创建公开目录并兼容迁移旧版 /sdcard/Fonts。迁移采用复制而不是移动，
 # 避免用户仍使用旧版模块时找不到原文件。
 ensure_public_storage() {
-    mkdir -p "$USER_FONTS_DIR" "$USER_EMOJI_DIR" "$USER_REPORT_DIR" "$USER_IMPORT_DIR" 2>/dev/null || true
-    chmod 0775 "$LUOSHU_PUBLIC_DIR" "$USER_FONTS_DIR" "$USER_EMOJI_DIR" "$USER_REPORT_DIR" "$USER_IMPORT_DIR" 2>/dev/null || true
+    mkdir -p "$USER_FONTS_DIR" "$USER_REPORT_DIR" "$USER_IMPORT_DIR" 2>/dev/null || true
+    chmod 0775 "$LUOSHU_PUBLIC_DIR" "$USER_FONTS_DIR" "$USER_REPORT_DIR" "$USER_IMPORT_DIR" 2>/dev/null || true
     if [ -d "$LEGACY_FONTS_DIR" ]; then
         for _old in "$LEGACY_FONTS_DIR"/*.ttf "$LEGACY_FONTS_DIR"/*.otf "$LEGACY_FONTS_DIR"/*.ttc \
                     "$LEGACY_FONTS_DIR"/*.TTF "$LEGACY_FONTS_DIR"/*.OTF "$LEGACY_FONTS_DIR"/*.TTC; do
