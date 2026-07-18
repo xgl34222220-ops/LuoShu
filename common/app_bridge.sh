@@ -105,7 +105,9 @@ find_preview_source() {
     for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
               "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$_f" ] || continue
-        if type detect_font_family >/dev/null 2>&1; then
+        if type font_family_for_file >/dev/null 2>&1; then
+            _detected="$(font_family_for_file "$_f")"
+        elif type detect_font_family >/dev/null 2>&1; then
             _detected="$(detect_font_family "$(basename "$_f")")"
         else
             _detected="$(basename "$_f")"; _detected="${_detected%.*}"; _detected="${_detected%-Regular}"
@@ -168,8 +170,11 @@ import_font() {
     _stem=${_name%.*}; _dest="$USER_FONTS_DIR/$_name"
     if [ -f "$_dest" ]; then
         if cmp -s "$_src" "$_dest" 2>/dev/null; then
-            _family=$(detect_font_family "$_name")
-            printf '{"status":"ok","data":{"imported":false,"duplicate":true,"file":"%s","family":"%s"}}\n' "$(json_escape "$_name")" "$(json_escape "$_family")"
+            _family=$(font_family_for_file "$_dest")
+            _weights=$(font_weight_numbers_for_file "$_dest")
+            _variable=false; font_file_is_variable "$_dest" && _variable=true
+            printf '{"status":"ok","data":{"imported":false,"duplicate":true,"file":"%s","family":"%s","weights":[%s],"variable":%s}}\n' \
+                "$(json_escape "$_name")" "$(json_escape "$_family")" "$(printf '%s' "$_weights" | sed 's/,/,/g')" "$_variable"
             return 0
         fi
         _index=2
@@ -189,9 +194,14 @@ import_font() {
     fi
     mv -f "$_tmp" "$_dest" 2>/dev/null || { rm -f "$_tmp"; printf '{"status":"error","message":"无法提交字体文件"}\n'; return 1; }
     chmod 0644 "$_dest" 2>/dev/null || true
+    # 立即读取内部 name / OS/2 / fvar，导入后无需依赖文件名即可归并真实字体族与字重。
+    font_metadata_conf "$_dest" >/dev/null 2>&1 || true
     rm -f "$MODDIR/config/webui_font_list.json" "$MODDIR/config/webui_font_list.key" 2>/dev/null || true
-    _family=$(detect_font_family "$_name")
-    printf '{"status":"ok","data":{"imported":true,"duplicate":false,"file":"%s","family":"%s","size":%s}}\n' "$(json_escape "$_name")" "$(json_escape "$_family")" "$_size"
+    _family=$(font_family_for_file "$_dest")
+    _weights=$(font_weight_numbers_for_file "$_dest")
+    _variable=false; font_file_is_variable "$_dest" && _variable=true
+    printf '{"status":"ok","data":{"imported":true,"duplicate":false,"file":"%s","family":"%s","size":%s,"weights":[%s],"variable":%s}}\n' \
+        "$(json_escape "$_name")" "$(json_escape "$_family")" "$_size" "$(printf '%s' "$_weights" | sed 's/,/,/g')" "$_variable"
 }
 
 spec_auto() { [ "$1" = auto ]; }
