@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14.1.1 RC3 - 启动早期初始化
+# 洛书 v14.2 Alpha1 - 启动早期初始化
 set +e
 
 MODDIR="${0%/*}"
@@ -17,7 +17,7 @@ chmod 0755 "$MODDIR" "$MODDIR/common" "$MODDIR/webroot" 2>/dev/null || true
 chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" 2>/dev/null || true
 find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
 
-log_message "INFO" "===== post-fs-data v14.1.1 RC3 开始 ====="
+log_message "INFO" "===== post-fs-data v14.2 Alpha1 开始 ====="
 
 # 永远保留 ROM 自带 fonts.xml、fallback、Emoji、symbols 与其他语言字体。
 rm -f "$MODDIR/system/etc/fonts.xml" "$MODDIR/system/etc/font_fallback.xml" 2>/dev/null || true
