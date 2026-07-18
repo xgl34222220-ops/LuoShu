@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 Hybrid App 统一只读桥：为原生页面提供稳定 JSON 状态与日志接口。
+# 洛书 Hybrid App 统一桥：为原生页面提供稳定 JSON 状态、字体库和任务接口。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -10,6 +10,7 @@ if [ -z "$MODDIR" ]; then
         MODDIR="/data/adb/modules/LuoShu"
     fi
 fi
+FONT_MANAGER="$MODDIR/common/font_manager.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -68,9 +69,45 @@ status_json() {
         "$(json_escape "$(mount_engine)")" "$(json_escape "$MODDIR")"
 }
 
+manager_ready() {
+    [ -x "$FONT_MANAGER" ] || [ -f "$FONT_MANAGER" ] || {
+        printf '{"status":"error","message":"字体管理器不存在"}\n'
+        return 1
+    }
+    return 0
+}
+
 case "${1:-status}" in
     status)
         status_json
+        ;;
+    fonts)
+        manager_ready || exit 1
+        if [ "${2:-}" = refresh ]; then
+            sh "$FONT_MANAGER" action list refresh
+        else
+            sh "$FONT_MANAGER" action list
+        fi
+        ;;
+    validate)
+        manager_ready || exit 1
+        sh "$FONT_MANAGER" action validate "${2:-}"
+        ;;
+    switch_start)
+        manager_ready || exit 1
+        sh "$FONT_MANAGER" action switch_async "${2:-default}"
+        ;;
+    switch_status)
+        manager_ready || exit 1
+        sh "$FONT_MANAGER" action switch_status "${2:-}"
+        ;;
+    delete)
+        manager_ready || exit 1
+        sh "$FONT_MANAGER" action delete "${2:-}"
+        ;;
+    reboot)
+        manager_ready || exit 1
+        sh "$FONT_MANAGER" action reboot_device
         ;;
     logs)
         _lines="${2:-160}"
