@@ -61,7 +61,9 @@ function readState() {
 function writeState(next = {}) {
     const current = readState();
     const merged = normalizeState({ ...current, ...next });
-    localStorage.setItem(MIX_LOCAL_KEY, JSON.stringify(merged));
+    const serialized = JSON.stringify(merged);
+    if (localStorage.getItem(MIX_LOCAL_KEY) === serialized) return merged;
+    localStorage.setItem(MIX_LOCAL_KEY, serialized);
     window.dispatchEvent(new CustomEvent('luoshu-axis-state-change', { detail: merged }));
     return merged;
 }
@@ -227,6 +229,7 @@ function scheduleRender() {
     renderScheduled = true;
     requestAnimationFrame(async () => {
         renderScheduled = false;
+        document.querySelectorAll('.workbench-version').forEach(element => { element.textContent = 'v14.2 Alpha3'; });
         ensureOverviewPanel();
         const token = ++renderToken;
         Object.entries(SLOT_CONFIG).forEach(([slot, config]) => {
@@ -286,9 +289,15 @@ function installStyles() {
 }
 function initialize() {
     installStyles(); bindDelegatedEvents();
-    const observer = new MutationObserver(scheduleRender);
-    observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
-    ['luoshu-mix-selection-change', 'luoshu-font-slot-change', 'luoshu-axis-state-change'].forEach(name => window.addEventListener(name, scheduleRender));
+    const observer = new MutationObserver(mutations => {
+        const relevant = mutations.some(mutation => {
+            const target = mutation.target?.nodeType === 1 ? mutation.target : mutation.target?.parentElement;
+            return !target?.closest?.('[data-axis-control], #mixAxisPanel');
+        });
+        if (relevant) scheduleRender();
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+    ['luoshu-mix-selection-change', 'luoshu-font-slot-change', 'luoshu-mix-storage-change'].forEach(name => window.addEventListener(name, scheduleRender));
     scheduleRender();
 }
 window.LuoShuAxisUI = Object.freeze({ readState, writeState, parseAxisSpec, serializeAxes, scheduleRender });
