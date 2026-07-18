@@ -1,0 +1,58 @@
+name: Sync RC3 version metadata
+on:
+  pull_request_target:
+    types: [reopened]
+permissions:
+  contents: write
+jobs:
+  sync:
+    if: >-
+      github.event.pull_request.number == 14 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'hotfix/v14.1.1-rc3-clean-baseline'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hotfix/v14.1.1-rc3-clean-baseline
+          fetch-depth: 0
+      - name: Synchronize version identifiers
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          replacements = {
+              'scripts/check.sh': [
+                  ("^version=v14.1$", "^version=v14.1.1 RC3$"),
+                  ("^versionCode=14120$", "^versionCode=14123$"),
+                  ("v14.js?v=14120", "v14.js?v=14123"),
+                  ("app.js?v=14120", "app.js?v=14123"),
+                  ("UI_VERSION = '14120'", "UI_VERSION = '14123'"),
+              ],
+              'webroot/index.html': [
+                  ('?v=14120', '?v=14123'),
+                  ('<b id="engineVersion">v14.1</b>', '<b id="engineVersion">v14.1.1 RC3</b>'),
+                  ('<b data-module-version>v14.1</b>', '<b data-module-version>v14.1.1 RC3</b>'),
+              ],
+              'webroot/environment.js': [
+                  ("UI_VERSION = '14120'", "UI_VERSION = '14123'"),
+              ],
+          }
+          for name, pairs in replacements.items():
+              p = Path(name)
+              text = p.read_text(encoding='utf-8')
+              for old, new in pairs:
+                  if old not in text:
+                      raise SystemExit(f'missing expected token in {name}: {old}')
+                  text = text.replace(old, new)
+              p.write_text(text, encoding='utf-8')
+          PY
+          sh scripts/check.sh
+          git diff --check
+      - name: Commit and push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/check.sh webroot/index.html webroot/environment.js
+          git diff --cached --quiet && exit 0
+          git commit -m 'release: sync v14.1.1 RC3 version metadata'
+          git push origin HEAD:hotfix/v14.1.1-rc3-clean-baseline
