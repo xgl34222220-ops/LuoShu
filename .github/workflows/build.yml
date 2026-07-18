@@ -15,15 +15,27 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: feature/v14.3-app-auto-multiweight-import
-          fetch-depth: 0
+          fetch-depth: 1
+          show-progress: false
       - name: Restore corrected files
         shell: bash
         run: |
           set -euo pipefail
-          for name in util_functions.sh app_multiweight_mix.sh font_manager.sh rom_adapters.sh; do
-            base64 -d ".github/realweight-fix/${name}.gz.b64" | gzip -dc > "common/${name}"
+          restore() {
+            name="$1"; expected="$2"
+            payload=".github/realweight-fix/${name}.gz.b64"
+            actual="$(wc -c < "$payload" | tr -d ' ')"
+            echo "RESTORE ${name}: ${actual}/${expected} bytes"
+            test "$actual" = "$expected"
+            base64 -d "$payload" > "/tmp/${name}.gz"
+            gzip -t "/tmp/${name}.gz"
+            gzip -dc "/tmp/${name}.gz" > "common/${name}"
             chmod 0755 "common/${name}"
-          done
+          }
+          restore util_functions.sh 13736
+          restore app_multiweight_mix.sh 12076
+          restore font_manager.sh 15888
+          restore rom_adapters.sh 7384
       - name: Verify corrected implementation
         shell: bash
         run: |
