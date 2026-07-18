@@ -17,25 +17,34 @@ jobs:
           ref: feature/v14.3-app-auto-multiweight-import
           fetch-depth: 1
           show-progress: false
-      - name: Restore corrected files
+      - name: Restore util_functions.sh
         shell: bash
         run: |
           set -euo pipefail
-          restore() {
-            name="$1"; expected="$2"
-            payload=".github/realweight-fix/${name}.gz.b64"
-            actual="$(wc -c < "$payload" | tr -d ' ')"
-            echo "RESTORE ${name}: ${actual}/${expected} bytes"
-            test "$actual" = "$expected"
-            base64 -d "$payload" > "/tmp/${name}.gz"
-            gzip -t "/tmp/${name}.gz"
-            gzip -dc "/tmp/${name}.gz" > "common/${name}"
-            chmod 0755 "common/${name}"
-          }
-          restore util_functions.sh 13736
-          restore app_multiweight_mix.sh 12076
-          restore font_manager.sh 15888
-          restore rom_adapters.sh 7384
+          test "$(wc -c < .github/realweight-fix/util_functions.sh.gz.b64 | tr -d ' ')" = 13736
+          base64 -d .github/realweight-fix/util_functions.sh.gz.b64 | gzip -dc > common/util_functions.sh
+          chmod 0755 common/util_functions.sh
+      - name: Restore app_multiweight_mix.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(wc -c < .github/realweight-fix/app_multiweight_mix.sh.gz.b64 | tr -d ' ')" = 12076
+          base64 -d .github/realweight-fix/app_multiweight_mix.sh.gz.b64 | gzip -dc > common/app_multiweight_mix.sh
+          chmod 0755 common/app_multiweight_mix.sh
+      - name: Restore font_manager.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(wc -c < .github/realweight-fix/font_manager.sh.gz.b64 | tr -d ' ')" = 15888
+          base64 -d .github/realweight-fix/font_manager.sh.gz.b64 | gzip -dc > common/font_manager.sh
+          chmod 0755 common/font_manager.sh
+      - name: Restore rom_adapters.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(wc -c < .github/realweight-fix/rom_adapters.sh.gz.b64 | tr -d ' ')" = 7384
+          base64 -d .github/realweight-fix/rom_adapters.sh.gz.b64 | gzip -dc > common/rom_adapters.sh
+          chmod 0755 common/rom_adapters.sh
       - name: Verify corrected implementation
         shell: bash
         run: |
