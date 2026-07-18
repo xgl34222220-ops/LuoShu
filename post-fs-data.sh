@@ -1,8 +1,10 @@
 #!/system/bin/sh
-# 洛书 v14.2 Alpha2 - 启动早期初始化
+# 洛书 - 启动早期初始化（版本以 module.prop 为准）
 set +e
 
 MODDIR="${0%/*}"
+MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1)
+[ -n "$MODULE_VERSION" ] || MODULE_VERSION="unknown"
 MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
@@ -18,7 +20,7 @@ chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh"
 find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
 chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" 2>/dev/null || true
 
-log_message "INFO" "===== post-fs-data v14.2 Alpha2 开始 ====="
+log_message "INFO" "===== post-fs-data $MODULE_VERSION 开始 ====="
 
 # 永远保留 ROM 自带 fonts.xml、fallback、Emoji、symbols 与其他语言字体。
 rm -f "$MODDIR/system/etc/fonts.xml" "$MODDIR/system/etc/font_fallback.xml" 2>/dev/null || true
@@ -27,7 +29,7 @@ rm -f "$MODDIR/config/active_emoji.conf" "$MODDIR/config/emoji_task.conf" "$MODD
 rm -rf "$MODDIR/webroot/emoji" 2>/dev/null || true
 set_perm_recursive "$MODDIR/system/fonts" 0 0 0755 0644 2>/dev/null || true
 chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
-# Alpha2 通过统一桥恢复中断的原子负载，并清理独立字重暂存任务。
+# 通过统一桥恢复中断的原子负载，并清理独立字重暂存任务。
 if [ -f "$MODDIR/common/v14_mix.sh" ]; then
     MODDIR="$MODDIR" sh "$MODDIR/common/v14_mix.sh" recover >/dev/null 2>&1 || true
 elif [ -f "$MODDIR/common/font_mix.sh" ]; then

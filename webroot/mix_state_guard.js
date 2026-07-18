@@ -1,4 +1,4 @@
-// 洛书 v14.2 Alpha5：保护组合字体的多轴状态不被旧版三字段保存逻辑覆盖。
+// 洛书 v14.2 Alpha6：保护组合字体的多轴状态不被旧版三字段保存逻辑覆盖。
 const KEY = 'luoshu_v14_mix_selection';
 const SLOTS = ['cjk', 'latin', 'digit'];
 const originalSetItem = Storage.prototype.setItem;

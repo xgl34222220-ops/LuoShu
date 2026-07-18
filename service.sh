@@ -1,10 +1,12 @@
 #!/system/bin/sh
 # ============================================================
-# 洛书 v14.2 Alpha2 - 后台服务
+# 洛书 - 后台服务（版本以 module.prop 为准）
 # 功能：启动完成后静默校正权限、恢复字重设置并维护日志。
 # ============================================================
 
 MODDIR="${0%/*}"
+MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1)
+[ -n "$MODULE_VERSION" ] || MODULE_VERSION="unknown"
 
 (
     WAITED=0
@@ -25,7 +27,7 @@ MODDIR="${0%/*}"
         echo "[$TIMESTAMP] [SERVICE] [$LEVEL] $MSG" >> "$LOG_FILE" 2>/dev/null || true
     }
 
-    log_service "INFO" "服务脚本开始执行 (v14.2 Alpha2)"
+    log_service "INFO" "服务脚本开始执行 ($MODULE_VERSION)"
     if [ -f "$LOG_FILE" ]; then
         _log_size=$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d '[:space:]')
         case "$_log_size" in ''|*[!0-9]*) _log_size=0 ;; esac
@@ -63,7 +65,7 @@ MODDIR="${0%/*}"
         fi
     fi
 
-    # v14.2 Alpha2 不在开机完成后刷新字体服务或重复桥接。
+    # 不在开机完成后刷新字体服务或重复桥接。
     # 新复合字体只在 WebUI 主动生成，完整重启后由系统自然加载。
 
     rm -f "$MODDIR/.first_boot" 2>/dev/null || true

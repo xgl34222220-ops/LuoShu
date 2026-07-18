@@ -70,9 +70,11 @@
 
 ## 安装
 
-1. 从 Releases 下载模块 ZIP，并核对随附 SHA-256。
+1. 从 Releases 下载模块 ZIP，并核对随附 SHA-256。Full 包内置 App，Lite 包不内置 App、字体功能保持完整。
 2. 通过 Root 管理器刷入模块；安装器会尝试同时安装内置的洛书 App。
 3. 如果 App 未自动安装，重启后点击模块“操作”按钮，或下载 Release 中的独立 APK。
+
+维护者发布步骤见 [docs/RELEASING.md](docs/RELEASING.md)，候选版本验证范围见 [docs/TEST_MATRIX.md](docs/TEST_MATRIX.md)。
 4. 完整重启手机。
 5. 将文字字体放入 `/sdcard/LuoShu/fonts/`。
 6. 打开洛书 App 或 WebUI，分别选择中文、英文和数字字体。

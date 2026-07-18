@@ -33,20 +33,23 @@ MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ROOT="$META" sh -c '
 test ! -e "$META/LuoShu/system/fonts/Old.ttf"
 test ! -e "$META/LuoShu/system/fonts/Roboto-Regular.ttf"
 
-# 验证构建阶段能把钩子注入字体切换、Emoji、post-fs-data 与 service。
+# 当前安全架构只允许在字体事务成功后同步元模块镜像。
+# 禁止重新向 post-fs-data/service 注入早期全量同步，避免半成品字体在开机阶段
+# 被元模块挂载后造成 SystemUI 黑屏或应用批量崩溃。
+grep -q 'common/mount_compat.sh' "$ROOT/common/font_mix.sh"
+grep -q 'luoshu_sync_mount_payload' "$ROOT/common/font_mix.sh"
+! grep -q 'luoshu_sync_mount_payload' "$ROOT/post-fs-data.sh"
+! grep -q 'luoshu_sync_mount_payload' "$ROOT/service.sh"
+! grep -q 'prepare_mount_compat.sh' "$ROOT/scripts/build.sh"
+
+# 发布包不得携带会让 Mountify/Hybrid Mount 跳过模块的标记。
 STAGE="$TMP/stage"
-mkdir -p "$STAGE/common"
-cp "$ROOT/common/font_manager.sh" "$STAGE/common/font_manager.sh"
-cp "$ROOT/common/mount_compat.sh" "$STAGE/common/mount_compat.sh"
-cp "$ROOT/post-fs-data.sh" "$STAGE/post-fs-data.sh"
-cp "$ROOT/service.sh" "$STAGE/service.sh"
-sh "$ROOT/scripts/prepare_mount_compat.sh" "$STAGE"
-grep -q 'common/mount_compat.sh' "$STAGE/common/font_manager.sh"
-test "$(grep -c 'luoshu_sync_mount_payload' "$STAGE/common/font_manager.sh")" -ge 2
-grep -q 'luoshu_sync_mount_payload' "$STAGE/post-fs-data.sh"
-grep -q 'luoshu_sync_mount_payload' "$STAGE/service.sh"
-sh -n "$STAGE/common/font_manager.sh"
-sh -n "$STAGE/post-fs-data.sh"
-sh -n "$STAGE/service.sh"
+mkdir -p "$STAGE"
+cp -R "$ROOT/." "$STAGE/"
+rm -rf "$STAGE/.git" "$STAGE/dist" "$STAGE/common/python" 2>/dev/null || true
+! find "$STAGE" -type f \( -name skip_mount -o -name skip_mountify \) | grep -q .
+sh -n "$ROOT/common/font_mix.sh"
+sh -n "$ROOT/post-fs-data.sh"
+sh -n "$ROOT/service.sh"
 
 echo 'LuoShu mount compatibility checks passed.'

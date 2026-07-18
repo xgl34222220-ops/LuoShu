@@ -1,4 +1,4 @@
-// 洛书 v14.2 Alpha5 — 字体工作台
+// 洛书 v14.2 Alpha6 — 字体工作台
 // 纯前端实验层：复用 v14 完整复合引擎，不改动底层挂载与事务切换。
 
 const PRESET_KEY = 'luoshu_v142_mix_presets';
@@ -51,7 +51,7 @@ function ensureStylesheet() {
     const link = document.createElement('link');
     link.id = 'workbenchStyles';
     link.rel = 'stylesheet';
-    link.href = './workbench.css?v=14201';
+    link.href = './workbench.css?v=14206';
     document.head.appendChild(link);
 }
 function ensureDockButton() {
@@ -79,7 +79,7 @@ function ensureModal() {
             <header class="workbench-hero">
                 <div class="workbench-emblem" aria-hidden="true"><span>中</span><i>Aa</i><b>123</b></div>
                 <div class="workbench-heading"><small>LUOSHU LAB</small><h2>字体工作台</h2><p>组合预设、可变轴、字体对比与健康分析</p></div>
-                <span class="workbench-version">v14.2 Alpha5</span>
+                <span class="workbench-version">v14.2 Alpha6</span>
                 <button class="workbench-close" id="closeWorkbenchBtn" type="button" aria-label="关闭">×</button>
             </header>
             <nav class="workbench-tabs" aria-label="工作台功能">
@@ -282,7 +282,7 @@ function renderAxisControls(font, axes) {
             return `<label class="axis-control"><span><b>${escapeHtml(tag)}</b><small>${escapeHtml(axisName(tag))}</small><output id="axisValue_${escapeHtml(tag)}">${formatAxisValue(value)}</output></span><input type="range" data-axis-tag="${escapeHtml(tag)}" min="${Number(axis.min)}" max="${Number(axis.max)}" step="${step}" value="${value}"><i><em>${formatAxisValue(axis.min)}</em><em>默认 ${formatAxisValue(axis.default)}</em><em>${formatAxisValue(axis.max)}</em></i></label>`;
         }).join('')}</div>
         <div class="workbench-actions"><button id="resetAxesBtn" type="button">恢复默认轴</button><button id="copyAxesBtn" class="primary" type="button">复制轴参数</button></div>
-        <p class="workbench-note">Alpha1 先提供完整轴的实时预览与参数导出；真正写入复合字体将在后续版本接入生成引擎。</p>`;
+        <p class="workbench-note">可变轴参数会由复合字体引擎校验并写入；切换完成后请按提示完整重启。</p>`;
     const sync = () => {
         const settings = Object.entries(state.axisValues).map(([tag, value]) => `"${tag}" ${Number(value)}`).join(', ');
         ['axisPreview', 'axisPreviewMain', 'axisPreviewSub', 'axisPreviewInput'].forEach(id => {

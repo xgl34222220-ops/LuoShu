@@ -1,10 +1,17 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-VERSION=$(sed -n 's/^version=//p' "$ROOT/module.prop" | head -n1 | sed 's#[ /]#-#g')
+. "$ROOT/scripts/version.sh"
+VERSION="$LUOSHU_ARTIFACT_VERSION"
+VARIANT=$(printf '%s' "${LUOSHU_VARIANT:-full}" | tr '[:upper:]' '[:lower:]')
+case "$VARIANT" in
+  full) VARIANT_LABEL="Full" ;;
+  lite) VARIANT_LABEL="Lite" ;;
+  *) echo "Unknown LUOSHU_VARIANT: $VARIANT (expected full or lite)" >&2; exit 64 ;;
+esac
 OUT="$ROOT/dist"
-STAGE="$OUT/LuoShu"
-ZIP="$OUT/LuoShu-${VERSION}.zip"
+STAGE="$OUT/LuoShu-${VARIANT_LABEL}"
+ZIP="$OUT/LuoShu-${VERSION}-${VARIANT_LABEL}.zip"
 ZIP_NAME=$(basename "$ZIP")
 APP_APK="${LUOSHU_APP_APK:-$ROOT/android-app/app/build/outputs/apk/debug/app-debug.apk}"
 
@@ -14,8 +21,10 @@ mkdir -p "$STAGE" "$OUT"
 for path in common config fonts system webroot licenses LICENSE NOTICE.md THIRD_PARTY_NOTICES.md README.md README.txt CHANGELOG.md customize.sh module.prop post-fs-data.sh service.sh uninstall.sh action.sh magic 兼容与目录说明.txt; do
   [ ! -e "$ROOT/$path" ] || cp -a "$ROOT/$path" "$STAGE/"
 done
+sh "$ROOT/scripts/prepare_webui.sh" "$STAGE/webroot"
+[ ! -f "$STAGE/config/version_notes.conf" ] || sed -i "s/^version=.*/version=$LUOSHU_VERSION/" "$STAGE/config/version_notes.conf"
 
-if [ -s "$APP_APK" ]; then
+if [ "$VARIANT" = "full" ] && [ -s "$APP_APK" ]; then
   mkdir -p "$STAGE/bundled"
   cp -f "$APP_APK" "$STAGE/bundled/LuoShu-App.apk"
   chmod 0644 "$STAGE/bundled/LuoShu-App.apk"
@@ -59,3 +68,4 @@ unzip -Z1 "$ZIP" | grep -Eq '(^|/)(__pycache__|emoji)(/|$)|\.pyc$|NotoColorEmoji
 } || true
 printf 'Built: %s\n' "$ZIP"
 [ ! -s "$STAGE/bundled/LuoShu-App.apk" ] || printf 'Bundled App: %s\n' "$STAGE/bundled/LuoShu-App.apk"
+[ "$VARIANT" != "lite" ] || printf 'Lite package: App is intentionally not bundled.\n'

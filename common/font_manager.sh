@@ -228,7 +228,10 @@ switch_font() {
             echo "错误：字体 $font_id 不存在于 $USER_FONTS_DIR" >&2
             return 1
         fi
-        if type font_validate >/dev/null 2>&1 && ! font_validate "$src_file" text; then
+        if type font_validate_global >/dev/null 2>&1 && ! font_validate_global "$src_file"; then
+            echo "错误：$FONT_CHECK_ERROR" >&2
+            return 4
+        elif ! type font_validate_global >/dev/null 2>&1 && type font_validate >/dev/null 2>&1 && ! font_validate "$src_file" text; then
             echo "错误：$FONT_CHECK_ERROR" >&2
             return 4
         fi

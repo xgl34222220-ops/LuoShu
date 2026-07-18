@@ -1,34 +1,12 @@
-name: Build hybrid app
+name: Build Alpha6 integrated artifacts
 
 on:
   workflow_dispatch:
   pull_request:
     branches: [main]
-    paths:
-      - android-app/**
-      - common/**
-      - scripts/**
-      - webroot/**
-      - module.prop
-      - customize.sh
-      - action.sh
-      - .github/workflows/build-hybrid-app.yml
   push:
     branches:
-      - feature/v14.2-hybrid-app-alpha1
-      - feature/v14.2-hybrid-app-alpha2-redesign
-      - feature/v14.2-hybrid-app-alpha3-full
-      - feature/v14.2-hybrid-app-alpha4-native-core
       - feature/v14.2-hybrid-app-alpha5-miuix
-    paths:
-      - android-app/**
-      - common/**
-      - scripts/**
-      - webroot/**
-      - module.prop
-      - customize.sh
-      - action.sh
-      - .github/workflows/build-hybrid-app.yml
 
 permissions:
   contents: read
@@ -60,55 +38,62 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
 
-      - name: Prepare ARM64 composite runtime
-        run: sh ./scripts/prepare_composite_runtime.sh
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
 
-      - name: Build debug APK
-        working-directory: android-app
+      - name: Prepare ARM64 composite runtime
         shell: bash
         run: |
-          set -o pipefail
-          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee gradle-build.log
+          if [[ ! -x common/python/bin/luoshu-python ]]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
+
+      - name: Build isolated debug App
+        working-directory: android-app
+        shell: bash
+        run: gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee gradle-build.log
+
+      - name: Build and verify Full/Lite packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./scripts/version.sh
+          apk='android-app/app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$apk"
+          mkdir -p dist
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
+          cp -f "$apk" "$app"
+          (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
+          LUOSHU_VARIANT=full LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
+          LUOSHU_VARIANT=lite sh ./scripts/build.sh
+          full="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Full.zip"
+          lite="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Lite.zip"
+          test -s "$full"; test -s "$lite"
+          unzip -t "$full" >/dev/null
+          unzip -t "$lite" >/dev/null
+          unzip -Z1 "$full" | grep -qx 'bundled/LuoShu-App.apk'
+          ! unzip -Z1 "$lite" | grep -qx 'bundled/LuoShu-App.apk'
+          unzip -p "$full" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
+          cmp -s "$apk" "$RUNNER_TEMP/embedded.apk"
+          (cd dist && sha256sum -c "$(basename "$full").sha256")
+          (cd dist && sha256sum -c "$(basename "$lite").sha256")
+          (cd dist && sha256sum -c "$(basename "$app").sha256")
 
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-Alpha5-MIUIx-Gradle-Log
+          name: LuoShu-Alpha6-Gradle-Log
           path: android-app/gradle-build.log
           if-no-files-found: warn
           retention-days: 3
 
-      - name: Build integrated module and verify artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          apk='android-app/app/build/outputs/apk/debug/app-debug.apk'
-          test -s "$apk"
-          unzip -t "$apk" >/dev/null
-          standalone='dist/LuoShu-App-v14.2-Alpha5.apk'
-          mkdir -p dist
-          cp -f "$apk" "$standalone"
-          (cd dist && sha256sum LuoShu-App-v14.2-Alpha5.apk > LuoShu-App-v14.2-Alpha5.apk.sha256)
-          LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
-          module="$(find dist -maxdepth 1 -type f -name 'LuoShu-v14.2-Alpha5.zip' -print -quit)"
-          test -s "$module"
-          unzip -t "$module" >/dev/null
-          test -s "$module.sha256"
-          (cd dist && sha256sum -c LuoShu-v14.2-Alpha5.zip.sha256)
-          (cd dist && sha256sum -c LuoShu-App-v14.2-Alpha5.apk.sha256)
-          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v14.2 Alpha5'
-          unzip -Z1 "$module" | grep -qx 'bundled/LuoShu-App.apk'
-          unzip -p "$module" bundled/LuoShu-App.apk > /tmp/LuoShu-App.apk
-          cmp -s "$apk" /tmp/LuoShu-App.apk
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload Alpha6 artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v14.2-Alpha5-Integrated
-          path: |
-            dist/LuoShu-v14.2-Alpha5.zip
-            dist/LuoShu-v14.2-Alpha5.zip.sha256
-            dist/LuoShu-App-v14.2-Alpha5.apk
-            dist/LuoShu-App-v14.2-Alpha5.apk.sha256
+          name: LuoShu-Alpha6-Full-Lite
+          path: dist/*
           if-no-files-found: error
           retention-days: 14

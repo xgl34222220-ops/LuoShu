@@ -1,4 +1,4 @@
-// 洛书 v14.2 Alpha5 — 工作台/概览统一多轴组合桥
+// 洛书 v14.2 Alpha6 — 工作台/概览统一多轴组合桥
 // 不再模拟点击旧选择器；直接启动异步多轴引擎并轮询包装任务。
 import { exec } from './kernelsu.js';
 import './workbench_weight_extension.js';
@@ -177,8 +177,8 @@ document.addEventListener('click', event => {
 }, true);
 
 function markVersion() {
-    document.querySelectorAll('[data-module-version]').forEach(element => { element.textContent = 'v14.2 Alpha5'; });
-    const engine = document.getElementById('engineVersion'); if (engine) engine.textContent = 'v14.2 Alpha5';
+    document.querySelectorAll('[data-module-version]').forEach(element => { element.textContent = 'v14.2 Alpha6'; });
+    const engine = document.getElementById('engineVersion'); if (engine) engine.textContent = 'v14.2 Alpha6';
 }
 function initialize() {
     markVersion(); updateVisibleNames();

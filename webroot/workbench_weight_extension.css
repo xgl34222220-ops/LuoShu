@@ -1,4 +1,4 @@
-/* v14.2 Alpha5：工作台全宽卡片 + 概览多轴面板 */
+/* v14.2 Alpha6：工作台全宽卡片 + 概览多轴面板 */
 .preset-slots{grid-template-columns:1fr!important;gap:12px!important}
 .preset-slots>label{grid-template-columns:auto minmax(0,1fr)!important;gap:4px 10px!important;padding:14px!important;border-radius:22px!important;align-items:center!important}
 .preset-slots>label>select{grid-column:2!important;margin-top:0!important;min-height:42px!important;font-size:11px!important}

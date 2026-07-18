@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v14.2 Alpha5 - 安装脚本
+# LuoShu v14.2 Alpha6 - 安装脚本
 
 MODPATH="${MODPATH:-$3}"
 set +e
@@ -30,7 +30,7 @@ check_hyperos
 
 ui_print ""
 ui_print "╔══════════════════════════════════╗"
-ui_print "║       洛书 v14.2 Alpha5       ║"
+ui_print "║       洛书 v14.2 Alpha6       ║"
 ui_print "║      Android 全局字体管理       ║"
 ui_print "╚══════════════════════════════════╝"
 ui_print ""
@@ -110,7 +110,7 @@ ui_print "• 检测到字体库：${FONT_COUNT} 款（刷写阶段不处理）"
 ui_print "• 首次启动保持系统默认字体"
 ui_print "• 重启后可分别选择中文、英文、数字及各自字重"
 
-# v14.2 Alpha5 不管理 Emoji、图标或符号字体；清理旧包内部状态，但不删除用户公开目录中的个人文件。
+# v14.2 Alpha6 不管理 Emoji、图标或符号字体；清理旧包内部状态，但不删除用户公开目录中的个人文件。
 rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" 2>/dev/null || true
 rm -f "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
 rm -f "$MODPATH/config/active_emoji.conf" "$MODPATH/config/emoji_task.conf" "$MODPATH/config/emoji_reboot_required.conf" 2>/dev/null || true
