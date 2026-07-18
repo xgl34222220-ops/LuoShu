@@ -183,10 +183,12 @@ internal fun LuoShuApp(viewModel: LuoShuViewModel = viewModel()) {
                                     "application/x-font-ttf",
                                     "application/x-font-opentype",
                                     "application/vnd.ms-opentype",
+                                    "application/zip",
                                     "application/octet-stream",
                                 ),
                             )
                         },
+                        onScanModules = viewModel::importInstalledFontModules,
                         modifier = Modifier.padding(padding),
                     )
                     AppPage.Mix -> MixPage(
@@ -503,6 +505,7 @@ private fun LibraryPage(
     onDelete: (FontItem) -> Unit,
     onRestoreDefault: () -> Unit,
     onImport: () -> Unit,
+    onScanModules: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxSize()) {
@@ -521,14 +524,21 @@ private fun LibraryPage(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text("APP 专属导入", fontWeight = FontWeight.Black, fontSize = 15.sp)
-                    Text("从系统文件选择器导入 TTF / OTF / TTC；可多选，同字体族会自动归组。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, lineHeight = 15.sp)
+                    Text("导入 TTF / OTF / TTC 或 Magisk 字体模块 ZIP；按内部字体族和真实字重自动归组。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, lineHeight = 15.sp)
                 }
                 Spacer(Modifier.width(10.dp))
-                Button(
-                    onClick = onImport,
-                    enabled = !viewModel.operationBusy && !viewModel.mixState.busy,
-                    shape = RoundedCornerShape(16.dp),
-                ) { Text("选择字体") }
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = onImport,
+                        enabled = !viewModel.operationBusy && !viewModel.mixState.busy,
+                        shape = RoundedCornerShape(16.dp),
+                    ) { Text("选择文件") }
+                    OutlinedButton(
+                        onClick = onScanModules,
+                        enabled = !viewModel.operationBusy && !viewModel.mixState.busy,
+                        shape = RoundedCornerShape(16.dp),
+                    ) { Text("扫描模块") }
+                }
             }
         }
         GlassSurface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), RoundedCornerShape(24.dp)) {
@@ -558,7 +568,7 @@ private fun LibraryPage(
                     GlassSurface(Modifier.fillMaxWidth(), RoundedCornerShape(30.dp)) {
                         Column(Modifier.fillMaxWidth().padding(34.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("没有找到字体", fontSize = 19.sp, fontWeight = FontWeight.Black)
-                            Text("点击上方“选择字体”导入，或手动放入 /sdcard/LuoShu/fonts/", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                            Text("选择字体文件或 Magisk 模块 ZIP，也可扫描当前已安装的字体模块。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                         }
                     }
                 }
@@ -689,7 +699,7 @@ private fun MixPage(viewModel: LuoShuViewModel, onPick: (MixSlot) -> Unit, modif
                 Column(Modifier.fillMaxWidth().padding(18.dp)) {
                     Text("生成说明", fontWeight = FontWeight.Black)
                     Text(
-                        "默认使用 APP 专属多字重，自动生成 300 / 400 / 500 / 600 / 700 五档；需要固定粗细时再切换到手动字重。WebUI 不提供这些入口。",
+                        "默认读取字体内部 OS/2 / fvar 信息：单字重只生成自身一档，静态家族使用实际文件档位，可变字体使用自身命名实例或轴范围；需要固定粗细时再切换到手动字重。WebUI 不提供这些入口。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
                         lineHeight = 17.sp,
