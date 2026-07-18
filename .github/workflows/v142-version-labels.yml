@@ -1,0 +1,58 @@
+name: Sync v14.2 visible labels
+on:
+  pull_request_target:
+    types: [reopened]
+permissions:
+  contents: write
+jobs:
+  sync:
+    if: >-
+      github.event.pull_request.number == 15 &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feature/v14.2-font-workbench'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v14.2-font-workbench
+          fetch-depth: 0
+      - name: Synchronize visible version labels
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          replacements = {
+              'customize.sh': [
+                  ('v14.1.1 RC3', 'v14.2 Alpha1'),
+                  ('# RC3 不管理', '# v14.2 Alpha1 不管理'),
+              ],
+              'post-fs-data.sh': [('v14.1.1 RC3', 'v14.2 Alpha1')],
+              'service.sh': [
+                  ('v14.1 - 后台服务', 'v14.2 Alpha1 - 后台服务'),
+                  ('服务脚本开始执行 (v14.1)', '服务脚本开始执行 (v14.2 Alpha1)'),
+                  ('# v14.1 不在开机完成后', '# v14.2 Alpha1 不在开机完成后'),
+              ],
+              'common/font_manager.sh': [('v14.1.1 RC3', 'v14.2 Alpha1')],
+          }
+          for name, pairs in replacements.items():
+              path = Path(name)
+              text = path.read_text(encoding='utf-8')
+              for old, new in pairs:
+                  if old not in text:
+                      raise SystemExit(f'missing token in {name}: {old}')
+                  text = text.replace(old, new)
+              path.write_text(text, encoding='utf-8')
+          PY
+          sh -n customize.sh
+          sh -n post-fs-data.sh
+          sh -n service.sh
+          sh -n common/font_manager.sh
+          sh scripts/check.sh
+          git diff --check
+      - name: Commit and push
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add customize.sh post-fs-data.sh service.sh common/font_manager.sh
+          git diff --cached --quiet && exit 0
+          git commit -m 'release: sync v14.2 Alpha1 visible labels'
+          git push origin HEAD:feature/v14.2-font-workbench
