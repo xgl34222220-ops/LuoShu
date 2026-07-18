@@ -1,69 +1,117 @@
-name: Materialize App Real Font Weights
+name: Finalize App Font Import UI
 
 on:
   push:
     branches:
       - feature/v14.3-app-auto-multiweight-import
     paths:
-      - '.github/realweight-fix/**'
-      - '.github/workflows/app-realweight-materialize.yml'
-  pull_request:
-    branches:
-      - main
-    paths:
-      - '.github/realweight-fix/**'
       - '.github/workflows/app-realweight-materialize.yml'
 
 permissions:
   contents: write
 
 jobs:
-  materialize:
-    if: github.event_name == 'push' || github.head_ref == 'feature/v14.3-app-auto-multiweight-import'
-    runs-on: ubuntu-latest
+  finalize:
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout feature branch
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           ref: feature/v14.3-app-auto-multiweight-import
           fetch-depth: 0
 
-      - name: Restore corrected implementation
+      - name: Patch App import UI
         shell: bash
         run: |
           set -euo pipefail
-          for name in util_functions.sh app_multiweight_mix.sh font_manager.sh rom_adapters.sh; do
-            base64 -d ".github/realweight-fix/${name}.gz.b64" | gzip -dc > "common/${name}"
-            chmod 0755 "common/${name}"
-          done
+          python3 - <<'PY'
+          from pathlib import Path
 
-      - name: Verify syntax and real-weight boundary
+          path = Path('android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = [
+              (
+                  '                                    "application/vnd.ms-opentype",\n                                    "application/octet-stream",',
+                  '                                    "application/vnd.ms-opentype",\n                                    "application/zip",\n                                    "application/octet-stream",',
+              ),
+              (
+                  '                        },\n                        modifier = Modifier.padding(padding),\n                    )\n                    AppPage.Mix',
+                  '                        },\n                        onScanModules = viewModel::importInstalledFontModules,\n                        modifier = Modifier.padding(padding),\n                    )\n                    AppPage.Mix',
+              ),
+              (
+                  '    onImport: () -> Unit,\n    modifier: Modifier = Modifier,',
+                  '    onImport: () -> Unit,\n    onScanModules: () -> Unit,\n    modifier: Modifier = Modifier,',
+              ),
+              (
+                  '从系统文件选择器导入 TTF / OTF / TTC；可多选，同字体族会自动归组。',
+                  '导入 TTF / OTF / TTC 或 Magisk 字体模块 ZIP；按内部字体族和真实字重自动归组。',
+              ),
+              (
+                  '''                Spacer(Modifier.width(10.dp))
+                Button(
+                    onClick = onImport,
+                    enabled = !viewModel.operationBusy && !viewModel.mixState.busy,
+                    shape = RoundedCornerShape(16.dp),
+                ) { Text("选择字体") }''',
+                  '''                Spacer(Modifier.width(10.dp))
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = onImport,
+                        enabled = !viewModel.operationBusy && !viewModel.mixState.busy,
+                        shape = RoundedCornerShape(16.dp),
+                    ) { Text("选择文件") }
+                    OutlinedButton(
+                        onClick = onScanModules,
+                        enabled = !viewModel.operationBusy && !viewModel.mixState.busy,
+                        shape = RoundedCornerShape(16.dp),
+                    ) { Text("扫描模块") }
+                }''',
+              ),
+              (
+                  '点击上方“选择字体”导入，或手动放入 /sdcard/LuoShu/fonts/',
+                  '选择字体文件或 Magisk 模块 ZIP，也可扫描当前已安装的字体模块。',
+              ),
+              (
+                  '默认使用 APP 专属多字重，自动生成 300 / 400 / 500 / 600 / 700 五档；需要固定粗细时再切换到手动字重。WebUI 不提供这些入口。',
+                  '默认读取字体内部 OS/2 / fvar 信息：单字重只生成自身一档，静态家族使用实际文件档位，可变字体使用自身命名实例或轴范围；需要固定粗细时再切换到手动字重。WebUI 不提供这些入口。',
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'missing UI patch target: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify implementation
         shell: bash
         run: |
           set -euo pipefail
-          sh -n common/util_functions.sh
+          sh -n common/app_bridge.sh
+          sh -n common/app_font_import.sh
           sh -n common/app_multiweight_mix.sh
-          sh -n common/font_manager.sh
+          sh -n common/app_multiweight_real.sh
+          sh -n common/font_check.sh
+          sh -n common/font_metadata_runtime.sh
           sh -n common/rom_adapters.sh
-          python3 -m py_compile common/font_metadata.py common/font_instance.py
-          ! grep -q 'AUTO_SET="300:Light 400:Regular 500:Medium 600:SemiBold 700:Bold"' common/app_multiweight_mix.sh
-          grep -q 'font_family_weight_numbers' common/app_multiweight_mix.sh
-          grep -q 'font_metadata_conf' common/util_functions.sh
-          grep -q 'font_family_has_weight' common/rom_adapters.sh
-          sh scripts/check_app_only_features.sh
+          python3 -m py_compile common/font_metadata.py common/font_package_import.py common/font_family_rewrite.py common/font_instance.py
+          grep -q 'application/zip' android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt
+          grep -q '扫描模块' android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt
+          grep -q 'importInstalledFontModules' android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt
+          grep -q 'import_package' common/app_bridge.sh
+          grep -q 'import_modules' common/app_bridge.sh
+          ! grep -q 'AUTO_SET=' common/app_multiweight_real.sh
 
-      - name: Commit corrected real-weight implementation
+      - name: Commit final implementation and cleanup
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .github/realweight-fix
+          rm -rf .github/realweight-fix .github/realweight-source
           rm -f .github/workflows/app-realweight-materialize.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add common/util_functions.sh common/app_multiweight_mix.sh common/font_manager.sh common/rom_adapters.sh .github
-          if git diff --cached --quiet; then
-            echo 'No changes to commit'
-            exit 0
-          fi
-          git commit -m 'fix(app): map imported fonts by their real weights'
+          git add -A
+          git commit -m 'feat(app): recognize fonts inside Magisk modules'
           git push origin HEAD:feature/v14.3-app-auto-multiweight-import
