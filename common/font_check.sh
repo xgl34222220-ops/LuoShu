@@ -93,6 +93,33 @@ font_validate() {
     return 0
 }
 
+# 用作“全局字体”前额外检查常用中文、英文、数字和标点。这个门禁只读取
+# cmap，不修改字体；复合字体的中文/英文/数字分槽校验仍由复合引擎负责。
+font_validate_global() {
+    _file="$1"
+    font_validate "$_file" text || return 1
+    _module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+    _python="$_module/common/python/bin/luoshu-python"
+    _checker="$_module/common/font_coverage.py"
+    FONT_CHECK_COVERAGE=""
+    if [ ! -x "$_python" ] || [ ! -f "$_checker" ]; then
+        FONT_CHECK_WARNING="${FONT_CHECK_WARNING:+$FONT_CHECK_WARNING；}未运行字形覆盖门禁"
+        return 0
+    fi
+    _pyroot="$_module/common/python"
+    FONT_CHECK_COVERAGE=$(PYTHONHOME="$_pyroot" \
+        PYTHONPATH="$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$_pyroot/lib:$_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$_python" "$_checker" --brief "$_file" 2>/dev/null)
+    _coverage_code=$?
+    if [ "$_coverage_code" -ne 0 ]; then
+        [ -n "$FONT_CHECK_COVERAGE" ] || FONT_CHECK_COVERAGE="字体缺少全局替换所需字形"
+        FONT_CHECK_ERROR="$FONT_CHECK_COVERAGE；请改用复合字体功能或更完整的字体"
+        return 1
+    fi
+    return 0
+}
+
 font_check_json() {
     _file="$1"
     _purpose="${2:-text}"

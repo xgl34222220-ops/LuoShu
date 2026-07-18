@@ -19,8 +19,15 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
       - name: Prepare ARM64 composite runtime
-        run: sh ./scripts/prepare_composite_runtime.sh
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
       - name: Composite smoke tests
         env:
           PYTHONPATH: common/python/lib/python3.14/site-packages
@@ -40,11 +47,16 @@ jobs:
           assert report['replaced']['latin'] >= 52
           assert report['replaced']['digit'] >= 10
           PY
+          python3 common/font_coverage.py /tmp/luoshu-composite.otf --brief
+          if python3 common/font_coverage.py "$LATIN" --brief; then
+            echo 'Latin-only font unexpectedly passed the global coverage gate' >&2
+            exit 1
+          fi
       - name: Build flashable module
-        run: sh ./scripts/build.sh
+        run: LUOSHU_VARIANT=lite sh ./scripts/build.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v14.1
+          name: LuoShu-RC1-Lite-module
           path: dist/*.zip*
           if-no-files-found: error
           retention-days: 30

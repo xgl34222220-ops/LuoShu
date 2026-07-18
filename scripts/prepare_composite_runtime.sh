@@ -16,7 +16,7 @@ curl --silent --show-error --fail --location --retry 4 --retry-delay 3 \
   "https://www.python.org/ftp/python/$PY_VERSION/$PY_ARCHIVE" \
   -o "$WORK/download/$PY_ARCHIVE"
 printf '%s  %s\n' "$PY_SHA256" "$WORK/download/$PY_ARCHIVE" | sha256sum -c -
-tar -xzf "$WORK/download/$PY_ARCHIVE" -C "$WORK/runtime"
+tar --no-same-owner -xzf "$WORK/download/$PY_ARCHIVE" -C "$WORK/runtime"
 R="$WORK/runtime/prefix"
 test -d "$R/lib/python3.14"
 test -f "$R/lib/libpython3.14.so"

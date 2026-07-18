@@ -9,7 +9,6 @@ const SAMPLE_SETS = {
     symbols: [0x00A5,0x20AC,0x00A3,0x00A9,0x00AE,0x2122,0x2190,0x2191,0x2192,0x2193,0x21D2,0x221A,0x221E,0x2260,0x2264,0x2265,0x25A0,0x25A1,0x25B2,0x25BC,0x2605,0x2606,0x2713,0x2715,0x271A,0x2764],
     kana: Array.from('あいうえおかきくけこアイウエオカキクケコ').map(ch => ch.codePointAt(0)),
     hangul: Array.from('가나다라마바사아자차카타파하').map(ch => ch.codePointAt(0)),
-    emoji: [0x1F600,0x1F602,0x1F60D,0x1F618,0x1F622,0x1F44D,0x1F44F,0x1F64F,0x1F389,0x1F525,0x1F680,0x1F4A1,0x1F4F1,0x1F496,0x1F31F,0x1F308,0x1F431,0x1F436,0x1F34E,0x1F37A],
     pua: Array.from({ length: 72 }, (_, i) => 0xE000 + i * 0x58)
 };
 
@@ -233,7 +232,7 @@ export function analyzeFontBuffer(buffer) {
         coverage: {}
     };
     for (const [name, points] of Object.entries(SAMPLE_SETS)) result.coverage[name] = coverage(cmap, points);
-    result.hasColorEmoji = Object.values(result.colorTables).some(Boolean);
+    result.hasColorTables = Object.values(result.colorTables).some(Boolean);
     result.assessment = buildAssessment(result);
     return result;
 }
@@ -262,7 +261,6 @@ export function formatAnalysisReport(font, result) {
         `符号：${c.symbols.percent}%`,
         `日文假名：${c.kana.percent}%`,
         `韩文：${c.hangul.percent}%`,
-        `Emoji 字形：${c.emoji.percent}%${result.hasColorEmoji ? '（检测到彩色表）' : ''}`,
         `私用区抽样：${c.pua.percent}%`,
         `可变字体：${result.variable?.axes?.length ? '是' : '否'}`,
         ...(result.variable?.axes?.length ? [`可变轴：${result.variable.axes.map(a => `${a.tag} ${a.min}–${a.max}（默认 ${a.default}）`).join('；')}`, `命名实例：${result.variable.instanceCount || 0}`] : []),
