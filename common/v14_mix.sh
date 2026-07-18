@@ -1,10 +1,14 @@
 #!/system/bin/sh
-# 洛书 v14.2：字体组合轻量桥。
-# Alpha3 优先使用异步完整多轴引擎；缺失时回退 v14 原始组合引擎。
+# 洛书 v14.2 RC2：字体组合轻量桥。
+# 优先使用异步真实轴引擎；缺失时回退 v14 完整复合引擎。
 set +e
 MODDIR="${MODDIR:-}"
 if [ -z "$MODDIR" ]; then
-    if [ -f "${0%/*}/../module.prop" ]; then MODDIR="$(CDPATH= cd -- "${0%/*}/.." 2>/dev/null && pwd)"; else MODDIR="/data/adb/modules/LuoShu"; fi
+    if [ -f "${0%/*}/../module.prop" ]; then
+        MODDIR="$(CDPATH= cd -- "${0%/*}/.." 2>/dev/null && pwd)"
+    else
+        MODDIR="/data/adb/modules/LuoShu"
+    fi
 fi
 WEIGHTED="$MODDIR/common/v142_weighted_mix.sh"
 ENGINE="$MODDIR/common/font_mix.sh"
