@@ -99,6 +99,23 @@ jobs:
       - name: Run source checks
         run: sh ./scripts/check.sh
 
+      - name: Check composite role coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+          CJK="$(find /usr/share/fonts -type f \( -iname 'NotoSansCJK-Regular.ttc' -o -iname 'NotoSansCJK-Regular.otf' \) -print -quit)"
+          LATIN="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
+          test -s "$CJK"
+          test -s "$LATIN"
+          export PYTHONPATH="$PWD/common/python/lib/python3.14/site-packages"
+          python3 common/font_role_check.py "$CJK" cjk
+          python3 common/font_role_check.py "$LATIN" latin
+          python3 common/font_role_check.py "$LATIN" digit
+          if python3 common/font_role_check.py "$LATIN" cjk; then
+            echo 'Latin-only font unexpectedly passed the CJK role gate' >&2
+            exit 1
+          fi
+
       - name: Compile and test native App
         working-directory: android-app
         run: gradle --no-daemon --stacktrace :app:compileDebugKotlin :app:testDebugUnitTest
@@ -121,6 +138,9 @@ jobs:
           grep -qx 'common/composite_font.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_instance.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_coverage.py' /tmp/luoshu-package-list.txt
+          grep -qx 'common/font_role_check.py' /tmp/luoshu-package-list.txt
+          grep -qx 'common/font_role_check.sh' /tmp/luoshu-package-list.txt
+          grep -qx 'common/luoshu_cli.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/v142_weighted_mix.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/luoshu_composite.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/python/bin/luoshu-python' /tmp/luoshu-package-list.txt
@@ -142,15 +162,20 @@ jobs:
           unzip -p "$asset" NOTICE.md | grep -q 'GPL-3.0-only'
           unzip -p "$asset" webroot/index.html | grep -q "v14.js?v=$LUOSHU_VERSION_CODE"
           unzip -p "$asset" webroot/environment.js | grep -q "UI_VERSION = '$LUOSHU_VERSION_CODE'"
+          unzip -p "$asset" webroot/environment.js | grep -q 'restartUi.hidden = true'
           unzip -p "$asset" common/font_mix.sh | grep -q 'full-composite-v5'
-          unzip -p "$asset" common/v14_mix.sh | grep -q 'v142_weighted_mix.sh'
+          unzip -p "$asset" common/v14_mix.sh | grep -q 'font_role_check.sh'
+          unzip -p "$asset" common/app_bridge.sh | grep -q 'common/v14_mix.sh'
           unzip -p "$asset" common/font_instance.py | grep -q 'instantiateVariableFont'
           unzip -p "$asset" common/font_instance.py | grep -q -- '--axes'
           unzip -p "$asset" common/v142_weighted_mix.sh | grep -q 'axes_task.conf'
           unzip -p "$asset" common/app_bridge.sh | grep -q 'rebootRequired'
+          unzip -p "$asset" customize.sh | grep -q 'luoshu_cli.sh.*system/bin/洛书'
           unzip -p "$asset" post-fs-data.sh | grep -q 'v14_mix.sh.*recover'
           ! unzip -p "$asset" common/v142_weighted_mix.sh | grep -q 'v143_axes'
           ! unzip -p "$asset" common/app_bridge.sh | grep -q 'v143_axes'
+          ! unzip -p "$asset" customize.sh | grep -q 'pm install'
+          ! unzip -p "$asset" common/luoshu_cli.sh | grep -qE '回滚|重启界面|刷新字体缓存'
           ! unzip -p "$asset" service.sh | grep -q 'cmd font system --update'
           ! unzip -p "$asset" service.sh | grep -q 'oplus-font refresh'
           ! grep -qE '^system/etc/(fonts.xml|font_fallback.xml)$' /tmp/luoshu-package-list.txt
