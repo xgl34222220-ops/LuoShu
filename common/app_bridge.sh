@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 Hybrid App 统一桥：为原生页面提供稳定 JSON 状态、字体库和任务接口。
+# 洛书 Hybrid App 原生核心桥：状态、字体库、单字体切换、复合字体与任务接口。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -11,6 +11,7 @@ if [ -z "$MODDIR" ]; then
     fi
 fi
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
+MIX_ENGINE="$MODDIR/common/v142_weighted_mix.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -56,7 +57,7 @@ status_json() {
     _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
     [ -n "$_active" ] || _active='default'
 
-    _task_file="$MODDIR/config/v143_axis_task.conf"
+    _task_file="$MODDIR/config/v143_axes_task.conf"
     [ -s "$_task_file" ] || _task_file="$MODDIR/config/mix_task.conf"
     _task_state="$(read_prop "$_task_file" state)"
     _task_message="$(read_prop "$_task_file" message)"
@@ -72,6 +73,14 @@ status_json() {
 manager_ready() {
     [ -x "$FONT_MANAGER" ] || [ -f "$FONT_MANAGER" ] || {
         printf '{"status":"error","message":"字体管理器不存在"}\n'
+        return 1
+    }
+    return 0
+}
+
+mix_ready() {
+    [ -x "$MIX_ENGINE" ] || [ -f "$MIX_ENGINE" ] || {
+        printf '{"status":"error","message":"复合字体引擎不存在"}\n'
         return 1
     }
     return 0
@@ -105,6 +114,18 @@ case "${1:-status}" in
         manager_ready || exit 1
         sh "$FONT_MANAGER" action delete "${2:-}"
         ;;
+    mix_config)
+        mix_ready || exit 1
+        sh "$MIX_ENGINE" config
+        ;;
+    mix_start)
+        mix_ready || exit 1
+        sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}"
+        ;;
+    mix_status)
+        mix_ready || exit 1
+        sh "$MIX_ENGINE" status "${2:-}"
+        ;;
     reboot)
         manager_ready || exit 1
         sh "$FONT_MANAGER" action reboot_device
@@ -114,9 +135,6 @@ case "${1:-status}" in
         case "$_lines" in ''|*[!0-9]*) _lines=160 ;; esac
         [ "$_lines" -le 500 ] 2>/dev/null || _lines=500
         tail -n "$_lines" "$MODDIR/logs/fontswitch.log" 2>/dev/null
-        ;;
-    webroot)
-        printf '%s\n' "$MODDIR/webroot/index.html"
         ;;
     *)
         printf '{"status":"error","message":"未知 App 桥命令"}\n'
