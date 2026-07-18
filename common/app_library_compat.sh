@@ -45,6 +45,10 @@ app_prepare_font_library() {
     mkdir -p "$USER_FONTS_DIR" 2>/dev/null || return 1
     chmod 0775 "$LUOSHU_PUBLIC_DIR" "$USER_FONTS_DIR" 2>/dev/null || true
 
+    # Alpha2's failed commit step left hidden staging fonts behind. They are never
+    # valid library items and may occupy considerable storage.
+    find "$USER_FONTS_DIR" -maxdepth 1 -type f -name '.app-import-*' -delete 2>/dev/null || true
+
     if [ -d "$LEGACY_FONTS_DIR" ] && [ "$LEGACY_FONTS_DIR" != "$USER_FONTS_DIR" ]; then
         while IFS= read -r _apf_file; do
             _app_library_copy_one "$_apf_file" || true
