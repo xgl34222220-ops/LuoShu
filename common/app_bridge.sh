@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 Hybrid App 原生核心桥：状态、字体库、原生预览、轴能力、字体切换与复合任务接口。
+# 洛书 v14.2 RC2 原生 App 核心桥：状态、字体库、原生预览、轴能力、字体切换与复合任务接口。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -11,11 +11,14 @@ if [ -z "$MODDIR" ]; then
     fi
 fi
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
-MIX_ENGINE="$MODDIR/common/v142_weighted_mix.sh"
+MIX_ENGINE="$MODDIR/common/v14_mix.sh"
 AXIS_INFO="$MODDIR/common/font_axis_info.py"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
+AXES_TASK_FILE="$MODDIR/config/axes_task.conf"
+SWITCH_TASK_FILE="$MODDIR/config/switch_task.conf"
+TEXT_REBOOT_REQUIRED="$MODDIR/config/text_reboot_required.conf"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 
 json_escape() {
@@ -50,6 +53,26 @@ mount_engine() {
     fi
 }
 
+select_task_file() {
+    _axes_state="$(read_prop "$AXES_TASK_FILE" state)"
+    _switch_state="$(read_prop "$SWITCH_TASK_FILE" state)"
+    case "$_axes_state" in queued|running) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
+    case "$_switch_state" in queued|running) printf 'switch|%s\n' "$SWITCH_TASK_FILE"; return ;; esac
+
+    _axes_finished="$(read_prop "$AXES_TASK_FILE" finished)"
+    _switch_finished="$(read_prop "$SWITCH_TASK_FILE" finished)"
+    case "$_axes_finished" in ''|*[!0-9]*) _axes_finished=0 ;; esac
+    case "$_switch_finished" in ''|*[!0-9]*) _switch_finished=0 ;; esac
+    if [ "$_axes_finished" -ge "$_switch_finished" ] 2>/dev/null; then
+        case "$_axes_state" in success|failed) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
+        case "$_switch_state" in success|failed) printf 'switch|%s\n' "$SWITCH_TASK_FILE"; return ;; esac
+    else
+        case "$_switch_state" in success|failed) printf 'switch|%s\n' "$SWITCH_TASK_FILE"; return ;; esac
+        case "$_axes_state" in success|failed) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
+    fi
+    printf 'none|\n'
+}
+
 status_json() {
     _installed=false
     _version='未安装'
@@ -62,17 +85,37 @@ status_json() {
     _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
     [ -n "$_active" ] || _active='default'
 
-    _task_file="$MODDIR/config/v143_axes_task.conf"
-    [ -s "$_task_file" ] || _task_file="$MODDIR/config/mix_task.conf"
-    _task_state="$(read_prop "$_task_file" state)"
-    _task_message="$(read_prop "$_task_file" message)"
+    _selected="$(select_task_file)"
+    _task_type="${_selected%%|*}"
+    _task_file="${_selected#*|}"
+    _task_id=''
+    _task_state='idle'
+    _task_message='暂无后台任务'
+    _task_progress=0
+    if [ -n "$_task_file" ]; then
+        _task_id="$(read_prop "$_task_file" task)"
+        _task_state="$(read_prop "$_task_file" state)"
+        _task_message="$(read_prop "$_task_file" message)"
+        if [ "$_task_type" = mix ]; then
+            _task_progress="$(read_prop "$_task_file" percent)"
+        elif [ "$_task_state" = success ] || [ "$_task_state" = failed ]; then
+            _task_progress=100
+        else
+            _task_progress=10
+        fi
+    fi
+    case "$_task_progress" in ''|*[!0-9]*) _task_progress=0 ;; esac
     [ -n "$_task_state" ] || _task_state='idle'
     [ -n "$_task_message" ] || _task_message='暂无后台任务'
 
-    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","taskState":"%s","taskMessage":"%s","rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
+    _reboot_required=false
+    [ -f "$TEXT_REBOOT_REQUIRED" ] && _reboot_required=true
+
+    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
         "$_installed" "$(json_escape "$_version")" "${_version_code:-0}" "$(json_escape "$_active")" \
-        "$(json_escape "$_task_state")" "$(json_escape "$_task_message")" "$(json_escape "$(root_manager)")" \
-        "$(json_escape "$(mount_engine)")" "$(json_escape "$MODDIR")"
+        "$(json_escape "$_task_type")" "$(json_escape "$_task_id")" "$(json_escape "$_task_state")" \
+        "$(json_escape "$_task_message")" "$_task_progress" "$_reboot_required" \
+        "$(json_escape "$(root_manager)")" "$(json_escape "$(mount_engine)")" "$(json_escape "$MODDIR")"
 }
 
 manager_ready() {
@@ -134,63 +177,29 @@ weight_axis_info() {
 }
 
 case "${1:-status}" in
-    status)
-        status_json
-        ;;
+    status) status_json ;;
     fonts)
         manager_ready || exit 1
-        if [ "${2:-}" = refresh ]; then
-            sh "$FONT_MANAGER" action list refresh
-        else
-            sh "$FONT_MANAGER" action list
+        if [ "${2:-}" = refresh ]; then sh "$FONT_MANAGER" action list refresh
+        else sh "$FONT_MANAGER" action list
         fi
         ;;
-    preview_export)
-        preview_export "${2:-}" "${3:-}"
-        ;;
-    weight_axis)
-        weight_axis_info "${2:-}"
-        ;;
-    validate)
-        manager_ready || exit 1
-        sh "$FONT_MANAGER" action validate "${2:-}"
-        ;;
-    switch_start)
-        manager_ready || exit 1
-        sh "$FONT_MANAGER" action switch_async "${2:-default}"
-        ;;
-    switch_status)
-        manager_ready || exit 1
-        sh "$FONT_MANAGER" action switch_status "${2:-}"
-        ;;
-    delete)
-        manager_ready || exit 1
-        sh "$FONT_MANAGER" action delete "${2:-}"
-        ;;
-    mix_config)
-        mix_ready || exit 1
-        sh "$MIX_ENGINE" config
-        ;;
-    mix_start)
-        mix_ready || exit 1
-        sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}"
-        ;;
-    mix_status)
-        mix_ready || exit 1
-        sh "$MIX_ENGINE" status "${2:-}"
-        ;;
-    reboot)
-        manager_ready || exit 1
-        sh "$FONT_MANAGER" action reboot_device
-        ;;
+    preview_export) preview_export "${2:-}" "${3:-}" ;;
+    weight_axis) weight_axis_info "${2:-}" ;;
+    validate) manager_ready || exit 1; sh "$FONT_MANAGER" action validate "${2:-}" ;;
+    switch_start) manager_ready || exit 1; sh "$FONT_MANAGER" action switch_async "${2:-default}" ;;
+    switch_status) manager_ready || exit 1; sh "$FONT_MANAGER" action switch_status "${2:-}" ;;
+    delete) manager_ready || exit 1; sh "$FONT_MANAGER" action delete "${2:-}" ;;
+    mix_config) mix_ready || exit 1; sh "$MIX_ENGINE" config ;;
+    mix_start) mix_ready || exit 1; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" ;;
+    mix_status) mix_ready || exit 1; sh "$MIX_ENGINE" status "${2:-}" ;;
+    reboot) manager_ready || exit 1; sh "$FONT_MANAGER" action reboot_device ;;
     logs)
         _lines="${2:-160}"
         case "$_lines" in ''|*[!0-9]*) _lines=160 ;; esac
         [ "$_lines" -le 500 ] 2>/dev/null || _lines=500
         tail -n "$_lines" "$MODDIR/logs/fontswitch.log" 2>/dev/null
         ;;
-    *)
-        printf '{"status":"error","message":"未知 App 桥命令"}\n'
-        ;;
+    *) printf '{"status":"error","message":"未知 App 桥命令"}\n' ;;
 esac
 exit 0
