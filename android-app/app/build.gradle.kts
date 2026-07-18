@@ -11,8 +11,8 @@ android {
         applicationId = "io.github.xgl34222220.luoshu"
         minSdk = 28
         targetSdk = 36
-        versionCode = 1420301
-        versionName = "14.2-alpha03-hybrid01"
+        versionCode = 1420302
+        versionName = "14.2-alpha03-hybrid02"
     }
 
     buildFeatures {
@@ -47,6 +47,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.webkit:webkit:1.16.0")
