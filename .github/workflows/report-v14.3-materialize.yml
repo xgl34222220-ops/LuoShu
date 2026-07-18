@@ -1,0 +1,29 @@
+name: Report v14.3 App feature materializer
+
+on:
+  pull_request_target:
+    types: [ready_for_review]
+
+permissions:
+  actions: read
+  pull-requests: write
+
+jobs:
+  report:
+    if: github.event.pull_request.number == 24
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report materializer run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: '24'
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow materialize-v14.3-app-features.yml --limit 5 --json databaseId,status,conclusion,event,headBranch,headSha,url,createdAt --jq 'first')"
+          [[ -n "$status" && "$status" != null ]] || status='{"error":"materializer run not found"}'
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "V14_3_APP_MATERIALIZER_STATUS
+
+\`\`\`json
+$status
+\`\`\`"
