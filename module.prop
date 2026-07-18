@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v14.2 RC2
-versionCode=14220
+version=v14.2 RC2.1
+versionCode=14221
 author=惜故里丶
 description=Android 全局字体管理模块：支持中文、英文和数字复合、真实可变轴、原生 App 与安全事务
 updateJson=
