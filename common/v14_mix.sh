@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # 洛书 v14.2：字体组合轻量桥。
-# Alpha2 优先使用独立字重兼容引擎；缺失时回退 v14 原始组合引擎。
+# Alpha3 优先使用异步完整多轴引擎；缺失时回退 v14 原始组合引擎。
 set +e
 MODDIR="${MODDIR:-}"
 if [ -z "$MODDIR" ]; then
@@ -15,7 +15,7 @@ read_value(){ sed -n "s/^${1}=//p" "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '
 
 if [ -f "$WEIGHTED" ]; then
     case "${1:-config}" in
-        start) sh "$WEIGHTED" start "$2" "$3" "$4" "${5:-400}" "${6:-400}" "${7:-400}" ;;
+        start) sh "$WEIGHTED" start "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" ;;
         config) sh "$WEIGHTED" config ;;
         status) sh "$WEIGHTED" status "$2" ;;
         recover) sh "$WEIGHTED" recover ;;
@@ -35,10 +35,10 @@ case "${1:-status}" in
         _started=$(read_value started); _finished=$(read_value finished)
         [ -z "$_wanted" ] || [ "$_wanted" = "$_task" ] || { printf '{"status":"error","message":"任务不存在或已被新任务替换"}\n'; exit 0; }
         if [ "$_state" = success ] && [ -f "$STATUS_SCRIPT" ]; then MODDIR="$MODDIR" sh "$STATUS_SCRIPT" mix >/dev/null 2>&1 || true; fi
-        printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":400,"latinWeight":400,"digitWeight":400,"started":%s,"finished":%s}}\n' \
+        printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":400,"latinWeight":400,"digitWeight":400,"cjkAxes":"wght=400","latinAxes":"wght=400","digitAxes":"wght=400","started":%s,"finished":%s}}\n' \
             "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_message")" "$(json_escape "$_cjk")" "$(json_escape "$_latin")" "$(json_escape "$_digit")" "${_started:-0}" "${_finished:-0}"
         ;;
     recover) sh "$ENGINE" recover ;;
-    *) printf '{"status":"error","message":"未知组合桥命令"}\n' ;;
+    *) printf '{"status":"error","message":"未知组合命令"}\n' ;;
 esac
 exit 0
