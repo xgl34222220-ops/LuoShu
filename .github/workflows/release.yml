@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing immutable tag to publish (for example v14.2-RC1)
+        description: Existing immutable tag to publish (for example v14.2-RC2)
         required: true
         type: string
 
@@ -21,7 +21,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,9 +63,12 @@ jobs:
             echo "Tag $tag does not match module.prop ($expected_tag)" >&2
             exit 2
           }
+          notes_file="RELEASE_NOTES_${LUOSHU_VERSION// /_}.md"
+          [[ -s "$notes_file" ]] || { echo "Missing release notes: $notes_file" >&2; exit 2; }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$LUOSHU_VERSION" >> "$GITHUB_OUTPUT"
           echo "artifact_version=$LUOSHU_ARTIFACT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
 
       - name: Require signing secrets
         shell: bash
@@ -99,14 +102,30 @@ jobs:
             sh ./scripts/prepare_composite_runtime.sh
           fi
 
-      - name: Build signed release App
+      - name: Run complete source and module checks
+        shell: bash
+        run: sh ./scripts/check.sh
+
+      - name: Lint, test and build signed release App
         working-directory: android-app
         env:
           LUOSHU_KEYSTORE_FILE: ${{ runner.temp }}/luoshu-release.jks
           LUOSHU_KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
           LUOSHU_KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
           LUOSHU_KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
-        run: gradle --no-daemon --stacktrace :app:assembleRelease
+        run: gradle --no-daemon --stacktrace :app:lintRelease :app:testReleaseUnitTest :app:assembleRelease
+
+      - name: Verify APK signature certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk='android-app/app/build/outputs/apk/release/app-release.apk'
+          test -s "$apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+          test -x "$apksigner"
+          "$apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/apk-signature.txt"
+          grep -q 'Verified using v2 scheme' "$RUNNER_TEMP/apk-signature.txt"
+          grep -q 'Signer #1 certificate SHA-256 digest:' "$RUNNER_TEMP/apk-signature.txt"
 
       - name: Build Full and Lite packages
         shell: bash
@@ -124,6 +143,8 @@ jobs:
           full="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Full.zip"
           lite="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Lite.zip"
           test -s "$full"; test -s "$lite"
+          unzip -t "$full" >/dev/null
+          unzip -t "$lite" >/dev/null
           unzip -Z1 "$full" | grep -qx 'bundled/LuoShu-App.apk'
           ! unzip -Z1 "$lite" | grep -qx 'bundled/LuoShu-App.apk'
           unzip -p "$full" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
@@ -137,6 +158,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
+          NOTES_FILE: ${{ steps.version.outputs.notes_file }}
         shell: bash
         run: |
           set -euo pipefail
@@ -149,5 +171,5 @@ jobs:
           gh release create "$TAG" dist/* \
             --verify-tag \
             --title "洛书 $VERSION" \
-            --notes-file RELEASE_NOTES_v14.2_RC1.md \
+            --notes-file "$NOTES_FILE" \
             "${prerelease[@]}"
