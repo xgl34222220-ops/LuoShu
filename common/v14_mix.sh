@@ -1,15 +1,29 @@
 #!/system/bin/sh
-# 洛书 v14：字体组合轻量桥，轮询仅读取任务文件。
+# 洛书 v14.2：字体组合轻量桥。
+# Alpha2 优先使用独立字重兼容引擎；缺失时回退 v14 原始组合引擎。
 set +e
 MODDIR="${MODDIR:-}"
 if [ -z "$MODDIR" ]; then
     if [ -f "${0%/*}/../module.prop" ]; then MODDIR="$(CDPATH= cd -- "${0%/*}/.." 2>/dev/null && pwd)"; else MODDIR="/data/adb/modules/LuoShu"; fi
 fi
+WEIGHTED="$MODDIR/common/v142_weighted_mix.sh"
 ENGINE="$MODDIR/common/font_mix.sh"
 TASK_FILE="$MODDIR/config/mix_task.conf"
 STATUS_SCRIPT="$MODDIR/common/module_status.sh"
 json_escape(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
 read_value(){ sed -n "s/^${1}=//p" "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n'; }
+
+if [ -f "$WEIGHTED" ]; then
+    case "${1:-config}" in
+        start) sh "$WEIGHTED" start "$2" "$3" "$4" "${5:-400}" "${6:-400}" "${7:-400}" ;;
+        config) sh "$WEIGHTED" config ;;
+        status) sh "$WEIGHTED" status "$2" ;;
+        recover) sh "$WEIGHTED" recover ;;
+        *) printf '{"status":"error","message":"未知组合桥命令"}\n' ;;
+    esac
+    exit 0
+fi
+
 case "${1:-status}" in
     start) sh "$ENGINE" start "$2" "$3" "$4" ;;
     config) sh "$ENGINE" status ;;
@@ -21,9 +35,10 @@ case "${1:-status}" in
         _started=$(read_value started); _finished=$(read_value finished)
         [ -z "$_wanted" ] || [ "$_wanted" = "$_task" ] || { printf '{"status":"error","message":"任务不存在或已被新任务替换"}\n'; exit 0; }
         if [ "$_state" = success ] && [ -f "$STATUS_SCRIPT" ]; then MODDIR="$MODDIR" sh "$STATUS_SCRIPT" mix >/dev/null 2>&1 || true; fi
-        printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","started":%s,"finished":%s}}\n' \
+        printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":400,"latinWeight":400,"digitWeight":400,"started":%s,"finished":%s}}\n' \
             "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_message")" "$(json_escape "$_cjk")" "$(json_escape "$_latin")" "$(json_escape "$_digit")" "${_started:-0}" "${_finished:-0}"
         ;;
+    recover) sh "$ENGINE" recover ;;
     *) printf '{"status":"error","message":"未知组合桥命令"}\n' ;;
 esac
 exit 0

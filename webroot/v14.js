@@ -351,7 +351,6 @@ async function recoverPending(app) {
 
 function simplifyUi(app) {
     document.documentElement.classList.add('luoshu-v14');
-    document.querySelectorAll('#stabilityRescueButton,#stabilityModal,#openStabilityBtn').forEach(node => node.remove());
     const subtitle = document.querySelector('#helpModal .more-heading > p');
     if (subtitle) subtitle.textContent = '外观、字体组合与系统界面';
     const guide = document.querySelector('.guide-group');
@@ -378,10 +377,6 @@ function patchApp() {
     const app = window.App;
     if (!app || app.__v14Patched) return false;
     app.__v14Patched = true;
-
-    // v14 不再提供 Emoji 前端入口，启动时也不扫描 Emoji 目录。
-    app.loadEmojis = async function() { this.currentEmoji = 'default'; this.emojis = []; };
-    app.renderEmojis = function() {};
 
     const originalExecShell = app.execShell.bind(app);
     app.execShell = function(command) { return originalExecShell(normalizeManagerCommand(command)); };
@@ -452,14 +447,8 @@ function patchApp() {
     return true;
 }
 
-function removeLateStabilityUi() {
-    const observer = new MutationObserver(() => document.querySelectorAll('#stabilityRescueButton,#stabilityModal,#openStabilityBtn').forEach(node => node.remove()));
-    observer.observe(document.documentElement, { childList: true, subtree: true });
-    setTimeout(() => observer.disconnect(), 6000);
-}
 
 if (!patchApp()) {
     const timer = setInterval(() => { if (patchApp()) clearInterval(timer); }, 20);
     setTimeout(() => clearInterval(timer), 3000);
 }
-removeLateStabilityUi();

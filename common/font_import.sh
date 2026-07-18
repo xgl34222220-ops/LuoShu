@@ -92,7 +92,7 @@ import_is_icon_name() {
     return 1
 }
 
-import_is_emoji_name() {
+import_is_color_font_name() {
     _lower=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
     case "$_lower" in *emoji*|*emojione*|*twemoji*|*noto-color*) return 0 ;; esac
     return 1
@@ -228,7 +228,7 @@ import_zip_package() {
 
     _tmp="$IMPORT_CACHE_DIR/$(date +%s)-$$"
     rm -rf "$_tmp" 2>/dev/null || true
-    mkdir -p "$_tmp" "$USER_FONTS_DIR" "$USER_EMOJI_DIR" 2>/dev/null || { printf '{"status":"error","message":"无法创建导入临时目录"}\n'; return 0; }
+    mkdir -p "$_tmp" "$USER_FONTS_DIR" 2>/dev/null || { printf '{"status":"error","message":"无法创建导入临时目录"}\n'; return 0; }
     for _pat in '*.ttf' '*.otf' '*.ttc' '*.TTF' '*.OTF' '*.TTC'; do
         import_unzip -j -o "$_zip" "$_pat" -d "$_tmp" >/dev/null 2>&1 || true
     done
@@ -242,13 +242,14 @@ import_zip_package() {
         case "$_base" in *'|'*) _ignored=$((_ignored + 1)); continue ;; esac
         if import_is_icon_name "$_base"; then _ignored=$((_ignored + 1)); continue; fi
         if ! font_validate "$_f" text 2>/dev/null; then _invalid=$((_invalid + 1)); continue; fi
+        if import_is_color_font_name "$_base" || [ "$FONT_CHECK_COLOR" = true ]; then _ignored=$((_ignored + 1)); continue; fi
         _valid=$((_valid + 1))
         _family=$(import_detect_family "$_base")
-        _variable="$FONT_CHECK_VARIABLE"; _kind=text
-        if import_is_emoji_name "$_base" || [ "$FONT_CHECK_COLOR" = true ]; then _kind=emoji; fi
+        _variable="$FONT_CHECK_VARIABLE"
         _size=$(wc -c < "$_f" 2>/dev/null | tr -d '[:space:]'); case "$_size" in ''|*[!0-9]*) _size=0 ;; esac
         _class=$(import_name_class "$_base"); _role=$(import_weight_role "$_base")
-        printf '%s|%s|%s|%s|%s|%s|%s|%s\n' "$_family" "$_variable" "$_kind" "$_size" "$_base" "$_f" "$_class" "$_role" >> "$_manifest"
+        printf '%s|%s|text|%s|%s|%s|%s|%s
+' "$_family" "$_variable" "$_size" "$_base" "$_f" "$_class" "$_role" >> "$_manifest"
     done
 
     if [ "$_valid" -le 0 ]; then rm -rf "$_tmp"; printf '{"status":"error","message":"没有字体通过真实格式检测"}\n'; return 0; fi
@@ -270,10 +271,10 @@ import_zip_package() {
         fi
     done < "$_manifest"
 
-    if [ ! -f "$_best_path" ]; then rm -rf "$_tmp"; printf '{"status":"error","message":"字体包中只有 Emoji 或图标字体，没有可用文字字体"}\n'; return 0; fi
+    if [ ! -f "$_best_path" ]; then rm -rf "$_tmp"; printf '{"status":"error","message":"字体包中没有可用文字字体；彩色、图标和符号字体已忽略"}\n'; return 0; fi
 
     _family_count=$(awk -F'|' -v f="$_best_family" '$1==f && $3=="text"{n++} END{print n+0}' "$_manifest")
-    _imported_text=0; _imported_emoji=0; _mode=single; _target_name=""
+    _imported_text=0; _mode=single; _target_name=""
 
     if [ "$_best_variable" = true ]; then
         _mode=variable; _ext=$(import_real_extension "$_best_path"); _target_name="${_package_label}-Variable.${_ext}"
@@ -302,16 +303,6 @@ import_zip_package() {
         _copied=$(import_copy_unique "$_best_path" "$USER_FONTS_DIR" "$_target_name") && { _target_name=$(basename "$_copied"); _imported_text=1; }
     fi
 
-    _emoji_best=""; _emoji_size=0; _emoji_name=""
-    while IFS='|' read -r _family _variable _kind _size _base _path _class _role; do
-        [ "$_kind" = emoji ] || continue
-        if [ "$_size" -gt "$_emoji_size" ]; then _emoji_best=$_path; _emoji_size=$_size; _emoji_name=$_base; fi
-    done < "$_manifest"
-    if [ -f "$_emoji_best" ]; then
-        _emoji_ext=$(import_real_extension "$_emoji_best"); _emoji_stem="${_emoji_name%.*}"
-        import_copy_unique "$_emoji_best" "$USER_EMOJI_DIR" "${_emoji_stem}.${_emoji_ext}" >/dev/null && _imported_emoji=1
-    fi
-
     if [ "$_imported_text" -gt 0 ]; then
         _font_id=$(detect_font_family "$_target_name")
         case "$_best_class" in cjk|cjk_traditional|east_asian) _supports_cjk=true ;; *) _supports_cjk=false ;; esac
@@ -324,7 +315,7 @@ import_zip_package() {
 
     case "$_best_class" in cjk) _reason="检测到简体中文主字体" ;; cjk_traditional) _reason="检测到繁体中文主字体" ;; east_asian) _reason="检测到东亚文字字体" ;; latin) _reason="未找到明确中文命名，已按覆盖候选规则选择" ;; *) _reason="已按字体族完整度与文件体积选择" ;; esac
     _message="已导入：$_display_name"
-    printf '{"status":"ok","data":{"package":"%s","displayName":"%s","selected":"%s","source":"%s","family":"%s","mode":"%s","reason":"%s","familyFiles":%d,"importedText":%d,"importedEmoji":%d,"valid":%d,"invalid":%d,"ignored":%d,"message":"%s"}}\n' \
+    printf '{"status":"ok","data":{"package":"%s","displayName":"%s","selected":"%s","source":"%s","family":"%s","mode":"%s","reason":"%s","familyFiles":%d,"importedText":%d,"valid":%d,"invalid":%d,"ignored":%d,"message":"%s"}}\n' \
         "$(json_escape "$_zip_name")" "$(json_escape "$_display_name")" "$(json_escape "$_target_name")" "$(json_escape "$_best_name")" "$(json_escape "$_best_family")" "$(json_escape "$_mode")" "$(json_escape "$_reason")" \
-        "$_family_count" "$_imported_text" "$_imported_emoji" "$_valid" "$_invalid" "$_ignored" "$(json_escape "$_message")"
+        "$_family_count" "$_imported_text" "$_valid" "$_invalid" "$_ignored" "$(json_escape "$_message")"
 }
