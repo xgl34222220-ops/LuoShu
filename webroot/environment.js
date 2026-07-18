@@ -1,4 +1,4 @@
-// 洛书 v14.2 RC1 - Root / Mountify 环境识别与 UI 精修
+// 洛书 v14.2 RC2 - Root / Mountify 环境识别与 UI 精修
 import { exec } from './kernelsu.js';
 import './mix_state_guard.js?v=14210';
 import './workbench_bridge.js?v=14210';
@@ -23,6 +23,15 @@ function cleanLegacyHelp() {
         if (/Hybrid Mount|Magic Mount|Ignore/i.test(item.textContent || '')) item.remove();
     });
     help.querySelector('.more-advanced')?.remove();
+
+    // RC2 只允许完整重启完成字体切换。保留节点以兼容旧事件绑定，但不再展示热重启入口。
+    const restartUi = help.querySelector('#restartUIBtn');
+    if (restartUi) {
+        restartUi.hidden = true;
+        restartUi.style.display = 'none';
+        restartUi.setAttribute('aria-hidden', 'true');
+        restartUi.tabIndex = -1;
+    }
 
     const title = help.querySelector('.more-title-row h2');
     if (title) title.textContent = '设置';
