@@ -15,6 +15,9 @@ MODULE_DIR="$MODDIR"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
 USER_IMPORT_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/import"
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
+PYROOT="$MODDIR/common/python"
+PYBIN="$PYROOT/bin/luoshu-python"
+FACE_EXTRACTOR="$MODDIR/common/font_extract_faces.py"
 MAX_BYTES=268435456
 
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
@@ -79,6 +82,33 @@ find_duplicate() {
     return 1
 }
 
+extract_collection_faces() {
+    _src="$1"
+    _display="$2"
+    [ -x "$PYBIN" ] && [ -f "$FACE_EXTRACTOR" ] || {
+        fail_json "TTC 字体面拆分组件不可用"
+        return
+    }
+    mkdir -p "$USER_FONTS_DIR" 2>/dev/null || { fail_json "无法创建字体目录"; return; }
+    _result=$(
+        PYTHONHOME="$PYROOT" \
+        PYTHONPATH="$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$PYBIN" "$FACE_EXTRACTOR" \
+            --input "$_src" \
+            --output-dir "$USER_FONTS_DIR" \
+            --label "$(safe_stem "$_display")" 2>/dev/null
+    )
+    _rc=$?
+    _json=$(printf '%s\n' "$_result" | sed -n '/^[[:space:]]*{/p' | tail -n1)
+    if [ "$_rc" -eq 0 ] && [ -n "$_json" ]; then
+        invalidate_font_cache
+        printf '%s\n' "$_json"
+    else
+        fail_json "TTC 字体面拆分失败"
+    fi
+}
+
 import_font_file() {
     _src="$1"
     _display="$2"
@@ -95,6 +125,11 @@ import_font_file() {
 
     if type font_validate >/dev/null 2>&1 && ! font_validate "$_src" text >/dev/null 2>&1; then
         fail_json "${FONT_CHECK_ERROR:-字体文件校验失败}"
+        return
+    fi
+
+    if [ "$_format" = TTC ]; then
+        extract_collection_faces "$_src" "$_display"
         return
     fi
 
