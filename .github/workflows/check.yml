@@ -41,7 +41,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 55
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
 
@@ -116,21 +116,45 @@ jobs:
             exit 1
           fi
 
-      - name: Compile and test native App
+      - name: Compile, test and build native App
         working-directory: android-app
-        run: gradle --no-daemon --stacktrace :app:compileDebugKotlin :app:testDebugUnitTest
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug
 
-      - name: Build test package
-        run: LUOSHU_VARIANT=lite sh ./scripts/build.sh
-
-      - name: Inspect package
+      - name: Build RC2 App, Full and Lite candidates
         shell: bash
         run: |
           set -euo pipefail
           . ./scripts/version.sh
-          asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
-          test -s "$asset"
-          unzip -t "$asset" >/dev/null
+          apk='android-app/app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$apk"
+          rm -rf dist
+          mkdir -p dist
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
+          cp -f "$apk" "$app"
+          (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
+          LUOSHU_VARIANT=full LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
+          LUOSHU_VARIANT=lite sh ./scripts/build.sh
+
+      - name: Inspect candidate artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./scripts/version.sh
+          full="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Full.zip"
+          lite="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Lite.zip"
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
+          test -s "$full"; test -s "$lite"; test -s "$app"
+          unzip -t "$full" >/dev/null
+          unzip -t "$lite" >/dev/null
+          unzip -Z1 "$full" | grep -qx 'bundled/LuoShu-App.apk'
+          ! unzip -Z1 "$lite" | grep -qx 'bundled/LuoShu-App.apk'
+          unzip -p "$full" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
+          cmp -s "$app" "$RUNNER_TEMP/embedded.apk"
+          (cd dist && sha256sum -c "$(basename "$full").sha256")
+          (cd dist && sha256sum -c "$(basename "$lite").sha256")
+          (cd dist && sha256sum -c "$(basename "$app").sha256")
+
+          asset="$lite"
           unzip -Z1 "$asset" > /tmp/luoshu-package-list.txt
           test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "$LUOSHU_VERSION"
           test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "$LUOSHU_VERSION_CODE"
@@ -184,6 +208,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-RC2-Lite-validation
-          path: dist/*.zip*
+          name: EXTRACT-FIRST-LuoShu-v14.2-RC2-Full-Lite-Debug
+          path: dist/*
           if-no-files-found: error
+          retention-days: 14
