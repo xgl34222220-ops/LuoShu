@@ -1,4 +1,4 @@
-name: Build candidate artifacts
+name: Build RC2 candidate artifacts
 
 on:
   workflow_dispatch:
