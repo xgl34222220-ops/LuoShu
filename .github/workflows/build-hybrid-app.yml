@@ -14,6 +14,7 @@ on:
       - feature/v14.2-hybrid-app-alpha2-redesign
       - feature/v14.2-hybrid-app-alpha3-full
       - feature/v14.2-hybrid-app-alpha4-native-core
+      - feature/v14.2-hybrid-app-alpha5-miuix
     paths:
       - android-app/**
       - common/app_bridge.sh
@@ -51,7 +52,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-Native-Core-Gradle-Log
+          name: LuoShu-Alpha5-MIUIx-Gradle-Log
           path: android-app/gradle-build.log
           if-no-files-found: warn
           retention-days: 3
@@ -65,7 +66,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-v14.2-Hybrid-Alpha4-Native-Core
+          name: LuoShu-v14.2-Hybrid-Alpha5-MIUIx
           path: |
             android-app/app/build/outputs/apk/debug/app-debug.apk
             android-app/app/build/outputs/apk/debug/app-debug.apk.sha256
