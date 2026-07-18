@@ -1,0 +1,82 @@
+
+copy_as_aosp() {
+    src="$1"
+    dest_dir="$2"
+    mode="${3:-full}"
+    font_family="${4:-}"
+    mapped=0
+    skipped=0
+    for fname in $(get_all_aosp_files); do rm -f "$dest_dir/$fname" 2>/dev/null; done
+    _font_store_reset "$dest_dir"
+
+    base_weight=400
+    if [ -n "$font_family" ] && type font_family_default_weight >/dev/null 2>&1; then
+        base_weight=$(font_family_default_weight "$font_family")
+    fi
+    base_source="$src"
+    if [ -n "$font_family" ]; then
+        _resolved=$(_family_exact_source "$font_family" "$base_weight" global)
+        [ -f "$_resolved" ] && base_source="$_resolved"
+    fi
+    base_anchor=$(_font_anchor "$base_source" "$dest_dir" "base-${base_weight}") || return 1
+    _log_step "  正在按字体真实字重应用（AOSP）..."
+
+    for fname in $(get_all_aosp_files); do
+        _rom_exact_target_exists "$fname" || { skipped=$((skipped + 1)); continue; }
+        _weight=$(_aosp_weight_for_file "$fname")
+        _source_anchor="$base_anchor"
+        if [ -n "$_weight" ] && [ "$_weight" != "$base_weight" ]; then
+            [ -n "$font_family" ] || continue
+            wsrc=$(_family_exact_source "$font_family" "$_weight" global)
+            [ -f "$wsrc" ] || continue
+            _source_anchor=$(_font_anchor "$wsrc" "$dest_dir" "w${_weight}") || continue
+        fi
+        _font_alias "$_source_anchor" "$dest_dir/$fname" || continue
+        mapped=$((mapped + 1))
+    done
+    _log_step "  AOSP 已映射 $mapped 个真实字重入口，跳过 $skipped 个原系统不存在的路径"
+}
+
+# ============================================================
+# 统一 ROM 分发入口
+# ============================================================
+# 调用方只需要：apply_font_by_rom <src> <dest_dir> <mode> [font_family]
+#   mode: full（安装）| quick（切换），目前两种模式都只生成目标别名
+#   font_family: 可选，用于查找真实多字重文件
+apply_font_by_rom() {
+    src="$1"
+    dest_dir="$2"
+    mode="${3:-full}"
+    font_family="${4:-}"
+
+    manufacturer=$(getprop ro.product.manufacturer 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    brand=$(getprop ro.product.brand 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    display=$(getprop ro.build.display.id 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    osname=$(getprop ro.build.version.oplusrom 2>/dev/null | tr '[:upper:]' '[:lower:]')
+
+    case "$manufacturer $brand $display $osname" in
+        *oppo*|*oneplus*|*realme*|*oplus*|*coloros*)
+            copy_as_coloros "$src" "$dest_dir" "$mode" "$font_family"
+            ;;
+        *xiaomi*|*redmi*|*poco*|*hyperos*|*miui*)
+            copy_as_hyperos "$src" "$dest_dir" "$mode" "$font_family"
+            ;;
+        *)
+            copy_as_aosp "$src" "$dest_dir" "$mode" "$font_family"
+            ;;
+    esac
+}
+
+# 获取当前 ROM 类型（供 UI / 日志显示）
+get_rom_type() {
+    manufacturer=$(getprop ro.product.manufacturer 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    brand=$(getprop ro.product.brand 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    display=$(getprop ro.build.display.id 2>/dev/null | tr '[:upper:]' '[:lower:]')
+    osname=$(getprop ro.build.version.oplusrom 2>/dev/null | tr '[:upper:]' '[:lower:]')
+
+    case "$manufacturer $brand $display $osname" in
+        *oppo*|*oneplus*|*realme*|*oplus*|*coloros*) echo "coloros" ;;
+        *xiaomi*|*redmi*|*poco*|*hyperos*|*miui*) echo "hyperos" ;;
+        *) echo "aosp" ;;
+    esac
+}
