@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # ============================================================
 # 洛书 - 后台服务（版本以 module.prop 为准）
-# 功能：启动完成后静默校正权限、补装 Full 内置 App、预热字体索引、恢复字重设置并维护日志。
+# 功能：启动完成后校正权限、补装内置 App、预热字体索引、恢复字重并维护日志。
 # ============================================================
 
 MODDIR="${0%/*}"
@@ -37,17 +37,16 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
         fi
     fi
 
-    # 权限只在后台静默校正。WebUI 所有核心脚本同时使用 sh 调用，
-    # 即使 Root 管理器解压时丢失可执行位，也不会再要求用户手动修复。
-    chmod 0755 "$MODDIR" "$MODDIR/common" "$MODDIR/webroot" 2>/dev/null || true
+    # 原生 App 后端统一通过 sh 调用，仍校正权限以兼容不同 Root 管理器的解压行为。
+    chmod 0755 "$MODDIR" "$MODDIR/common" 2>/dev/null || true
     chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" "$MODDIR/action.sh" 2>/dev/null || true
     find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
     chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" 2>/dev/null || true
     chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     chmod 0755 "$MODDIR/system/bin/洛书" "$MODDIR/system/bin/luoshud" 2>/dev/null || true
 
-    # Full 模块在刷写阶段无法调用 pm 时，只在首次开机后自动重试一次。
-    # 成功覆盖安装会保留 App 数据、字体缓存和双皮肤外观设置。
+    # 刷写阶段无法调用 pm 时，只在首次完整开机后自动重试一次。
+    # 成功覆盖安装会保留 App 数据、字体索引和外观设置。
     if [ -s "$MODDIR/bundled/LuoShu-App.apk" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
         if [ -f "$MODDIR/config/app_install_pending" ] || [ ! -f "$MODDIR/config/app_install_state.conf" ]; then
             _app_result=$(MODDIR="$MODDIR" APP_INSTALL_LOG="$MODDIR/logs/app-install.log" sh "$MODDIR/common/app_installer.sh" first-boot 2>/dev/null)
@@ -76,24 +75,21 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
         MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" >/dev/null 2>&1 || true
     fi
 
-    # 字体列表在后台预热。轻量指纹未变化时完全跳过字体解析；
-    # 只有新增、修改或删除字体后才重建模块 JSON，原生 App 首次读取可直接命中缓存。
+    # 字体列表在后台预热。轻量指纹未变化时跳过轮廓解析；变化后重建原生索引。
     if [ -f "$MODDIR/common/font_library_cache.sh" ] && [ -f "$MODDIR/common/font_manager.sh" ]; then
         _font_fp=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_library_cache.sh" value 2>/dev/null)
         _font_fp_old=$(cat "$MODDIR/config/native_font_index.key" 2>/dev/null)
-        if [ -n "$_font_fp" ] && { [ "$_font_fp" != "$_font_fp_old" ] || [ ! -s "$MODDIR/config/webui_font_list.json" ]; }; then
+        case "$_font_fp_old" in native-v1\|*) _font_fp_old="${_font_fp_old##*|}" ;; esac
+        if [ -n "$_font_fp" ] && { [ "$_font_fp" != "$_font_fp_old" ] || [ ! -s "$MODDIR/config/native_font_index.json" ]; }; then
             if MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list refresh >/dev/null 2>&1; then
-                printf '%s\n' "$_font_fp" > "$MODDIR/config/native_font_index.key" 2>/dev/null || true
-                chmod 0644 "$MODDIR/config/native_font_index.key" 2>/dev/null || true
-                log_service "INFO" "字体索引后台预热完成"
+                log_service "INFO" "原生字体索引后台预热完成"
             else
                 log_service "INFO" "字体索引后台预热失败，App 将继续使用已有本地索引"
             fi
         fi
     fi
 
-    # 恢复用户保存的 Android 全局字重调节。这与组合槽的独立字重互不覆盖：
-    # 组合字重已经固化到字体轮廓，这里只恢复系统级整体微调。
+    # 恢复用户保存的 Android 全局字重调节；组合槽字重已固化到字体轮廓。
     if [ -f "$MODDIR/config/font_weight.conf" ] && command -v settings >/dev/null 2>&1; then
         FW_ADJ=$(sed -n 's/^adjustment=//p' "$MODDIR/config/font_weight.conf" 2>/dev/null | head -n1)
         case "$FW_ADJ" in ''|*[!0-9-]*) FW_ADJ=0 ;; esac
@@ -106,9 +102,7 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
         fi
     fi
 
-    # 不在开机完成后刷新字体服务或重复桥接。
-    # 新复合字体只在 WebUI 主动生成，完整重启后由系统自然加载。
-
+    # 新字体只由原生 App 主动提交，完整重启后由系统自然加载。
     rm -f "$MODDIR/.first_boot" 2>/dev/null || true
     log_service "INFO" "服务脚本执行完成"
 ) &
