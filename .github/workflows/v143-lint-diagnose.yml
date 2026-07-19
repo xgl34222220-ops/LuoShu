@@ -1,0 +1,62 @@
+name: v14.3 Release Lint Diagnose
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/v143-lint-diagnose.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Run release lint and print only blocking issues
+        working-directory: android-app
+        shell: bash
+        run: |
+          set +e
+          gradle --no-daemon --stacktrace :app:lintRelease > "$RUNNER_TEMP/lint-gradle.log" 2>&1
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 0 ]]; then
+            echo 'lintRelease passed; no blocking issue found.'
+            exit 0
+          fi
+          echo 'lintRelease failed. Blocking issues:'
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          report = Path('app/build/reports/lint-results-release.xml')
+          if not report.is_file():
+              print('Lint XML report was not generated. Gradle tail:')
+              print(Path('/home/runner/work/_temp/lint-gradle.log').read_text(errors='replace')[-8000:])
+              raise SystemExit(1)
+          root = ET.parse(report).getroot()
+          count = 0
+          for issue in root.findall('issue'):
+              if issue.get('severity') not in {'Error', 'Fatal'}:
+                  continue
+              count += 1
+              loc = issue.find('location')
+              file = (loc.get('file') if loc is not None else '') or ''
+              line = (loc.get('line') if loc is not None else '1') or '1'
+              ident = issue.get('id', 'Lint')
+              msg = issue.get('message', '').replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+              print(f'::error file={file},line={line}::[{ident}] {msg}')
+          print(f'BLOCKING_LINT_ISSUES={count}')
+          raise SystemExit(1)
+          PY
