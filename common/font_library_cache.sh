@@ -50,3 +50,19 @@ font_library_fingerprint_json() {
     printf '{"status":"ok","data":{"fingerprint":"%s","current":"%s","count":%s,"bytes":%s}}\n' \
         "$(json_escape "$_fingerprint")" "$(json_escape "$_current")" "$_count" "$_bytes"
 }
+
+# 直接执行时提供给原生 App 使用；被 font_manager.sh source 时只定义函数。
+if [ "${0##*/}" = "font_library_cache.sh" ]; then
+    MODDIR="${MODDIR:-$(CDPATH= cd -- "${0%/*}/.." 2>/dev/null && pwd)}"
+    USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
+    CONFIG_DIR="$MODDIR/config"
+    ACTIVE_FONT_CONF="$CONFIG_DIR/active_font.conf"
+    json_escape() {
+        printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
+    }
+    case "${1:-fingerprint}" in
+        fingerprint) font_library_fingerprint_json ;;
+        value) font_library_fingerprint_value ;;
+        *) printf '{"status":"error","message":"未知字体索引命令"}\n' ;;
+    esac
+fi
