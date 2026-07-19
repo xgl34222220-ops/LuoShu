@@ -15,6 +15,7 @@ jobs:
       - name: Execute staged upgrade
         shell: bash
         run: |
+          set +e
           python3 - <<'PY' > /tmp/alpha13-materializer.log 2>&1
           from pathlib import Path
           workflow = Path('.github/workflows/alpha13-weight-import.yml').read_text(encoding='utf-8')
@@ -23,6 +24,7 @@ jobs:
           exec(compile(body, 'alpha13-weight-import', 'exec'), {'__name__': '__main__'})
           PY
           rc=$?
+          set -e
           if [ "$rc" -ne 0 ]; then
             git reset --hard HEAD
             cp /tmp/alpha13-materializer.log .alpha13-error.log
