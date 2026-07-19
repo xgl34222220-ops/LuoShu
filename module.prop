@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v14.3 Alpha1.6
-versionCode=14316
+version=v14.3 Alpha1.7
+versionCode=14317
 author=惜故里丶
-description=Android 全局字体管理模块：原生 App 统一采用白泽 Miuix 视觉系统，保留真实多轴预览、同字体直应用、系统粗细微调和字形覆盖诊断
+description=Android 全局字体管理模块：原生 App 支持 Material 3 Glass 与 Miuix 双皮肤实时切换，保留真实多轴预览、同字体直应用、系统粗细微调和字形覆盖诊断
 updateJson=
 webroot=webroot
