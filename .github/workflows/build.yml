@@ -13,29 +13,21 @@ jobs:
           ref: feature/v14.3-alpha1-native-import
           fetch-depth: 0
           show-progress: false
-      - name: Execute staged upgrade
+      - name: Generate Alpha1.3 implementation
         shell: bash
         run: |
-          set +e
-          python3 - <<'PY' > /tmp/alpha13-materializer.log 2>&1
+          python3 - <<'PY' > /tmp/alpha13-generate.log 2>&1
           from pathlib import Path
           workflow = Path('.github/workflows/alpha13-weight-import.yml').read_text(encoding='utf-8')
           body = workflow.split("python3 - <<'PY'\n", 1)[1].rsplit("\n          PY\n", 1)[0]
           body = '\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())
           exec(compile(body, 'alpha13-weight-import', 'exec'), {'__name__': '__main__'})
           PY
-          rc=$?
-          set -e
-          if [ "$rc" -ne 0 ]; then
-            git reset --hard HEAD
-            cp /tmp/alpha13-materializer.log .alpha13-error.log
-            git config user.name github-actions[bot]
-            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-            git add .alpha13-error.log
-            git commit -m "chore: record Alpha1.3 materializer error" || true
-            git push origin HEAD:feature/v14.3-alpha1-native-import || true
-            exit "$rc"
-          fi
+      - name: Restore workflow and commit implementation
+        shell: bash
+        run: |
+          exec > /tmp/alpha13-commit.log 2>&1
+          set -euxo pipefail
           cat > .github/workflows/build.yml <<'YAML'
           name: Build module
           on:
@@ -106,6 +98,8 @@ jobs:
           YAML
           rm -f .alpha13-trigger .alpha13-trigger2 .alpha13-error.log
           chmod 0755 common/font_import_probe.py scripts/native_zip_import_test.sh
+          git status --short
+          git diff --stat
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
@@ -116,6 +110,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: alpha13-materializer-log
-          path: /tmp/alpha13-materializer.log
+          path: |
+            /tmp/alpha13-generate.log
+            /tmp/alpha13-commit.log
           if-no-files-found: warn
           retention-days: 2
