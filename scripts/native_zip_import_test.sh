@@ -35,6 +35,9 @@ OUTPUT=$(sh -c '
     MODDIR="$1"; MODULE_DIR="$1"; CONFIG_DIR="$2/config"
     LUOSHU_PUBLIC_DIR="$2/public"; USER_FONTS_DIR="$2/public/fonts"
     USER_IMPORT_DIR="$2/public/import"; IMPORT_CACHE_DIR="$2/cache"
+    json_escape() {
+        printf "%s" "$1" | sed "s/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g" | tr "\n\r" "  "
+    }
     . "$1/common/util_functions.sh"
     . "$1/common/font_check.sh"
     . "$1/common/font_import.sh"
