@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -21,10 +22,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -81,32 +82,17 @@ private fun AppearanceSettingsMaterial(
         item { SettingsHeader("Material 3 Glass") }
         item {
             MaterialSettingCard("界面风格", "切换后整个 App 立即换皮") {
-                ChoiceRow(
-                    entries = UiStyle.entries,
-                    selected = settings.uiStyle,
-                    label = { it.label },
-                    onSelected = actions.setUiStyle,
-                )
+                ChoiceRow(UiStyle.entries, settings.uiStyle, { it.label }, actions.setUiStyle)
             }
         }
         item {
             MaterialSettingCard("深色模式", "跟随系统、浅色或深色") {
-                ChoiceRow(
-                    entries = ThemeMode.entries,
-                    selected = settings.themeMode,
-                    label = { it.label },
-                    onSelected = actions.setThemeMode,
-                )
+                ChoiceRow(ThemeMode.entries, settings.themeMode, { it.label }, actions.setThemeMode)
             }
         }
         item {
             MaterialSettingCard("取色风格", "MaterialKolor 算法色板") {
-                ChoiceRow(
-                    entries = KolorStyle.entries,
-                    selected = settings.kolorStyle,
-                    label = { it.label },
-                    onSelected = actions.setKolorStyle,
-                )
+                ChoiceRow(KolorStyle.entries, settings.kolorStyle, { it.label }, actions.setKolorStyle)
             }
         }
         item {
@@ -119,12 +105,7 @@ private fun AppearanceSettingsMaterial(
                 MaterialSwitchRow("Monet 动态取色", settings.monetEnabled, actions.setMonetEnabled)
                 MaterialSwitchRow("纯黑深色模式", settings.amoledBlack, actions.setAmoledBlack)
                 MaterialSwitchRow("玻璃半透明", settings.glassEnabled, actions.setGlassEnabled)
-                MaterialSwitchRow(
-                    "背景模糊",
-                    settings.blurEnabled,
-                    actions.setBlurEnabled,
-                    enabled = settings.glassEnabled,
-                )
+                MaterialSwitchRow("背景模糊", settings.blurEnabled, actions.setBlurEnabled, settings.glassEnabled)
                 MaterialSwitchRow("悬浮底栏", settings.floatingDock, actions.setFloatingDock)
             }
         }
@@ -145,37 +126,16 @@ private fun AppearanceSettingsMiuix(
         item { SettingsHeader("Miuix · HyperOS") }
         item {
             MiuixSettingGroup("界面风格", "切换后整个 App 立即换皮") {
-                ChoiceRow(
-                    entries = UiStyle.entries,
-                    selected = settings.uiStyle,
-                    label = { it.label },
-                    onSelected = actions.setUiStyle,
-                )
+                ChoiceRow(UiStyle.entries, settings.uiStyle, { it.label }, actions.setUiStyle)
             }
         }
         item {
             MiuixSettingGroup("颜色与模式", "两套皮肤共用同一色彩配置") {
-                MiuixChoiceLine(
-                    title = "深色模式",
-                    value = settings.themeMode.label,
-                ) {
-                    ChoiceRow(
-                        entries = ThemeMode.entries,
-                        selected = settings.themeMode,
-                        label = { it.label },
-                        onSelected = actions.setThemeMode,
-                    )
+                MiuixChoiceLine("深色模式", settings.themeMode.label) {
+                    ChoiceRow(ThemeMode.entries, settings.themeMode, { it.label }, actions.setThemeMode)
                 }
-                MiuixChoiceLine(
-                    title = "取色风格",
-                    value = settings.kolorStyle.label,
-                ) {
-                    ChoiceRow(
-                        entries = KolorStyle.entries,
-                        selected = settings.kolorStyle,
-                        label = { it.label },
-                        onSelected = actions.setKolorStyle,
-                    )
+                MiuixChoiceLine("取色风格", settings.kolorStyle.label) {
+                    ChoiceRow(KolorStyle.entries, settings.kolorStyle, { it.label }, actions.setKolorStyle)
                 }
                 Spacer(Modifier.height(10.dp))
                 AccentSelector(settings, actions.setSeedArgb)
@@ -191,13 +151,7 @@ private fun AppearanceSettingsMiuix(
                     MiuixSwitchRow("Monet 动态取色", "跟随系统壁纸强调色", settings.monetEnabled, actions.setMonetEnabled)
                     MiuixSwitchRow("纯黑深色模式", "深色时使用 AMOLED 黑色背景", settings.amoledBlack, actions.setAmoledBlack)
                     MiuixSwitchRow("玻璃半透明", "控制悬浮层透明质感", settings.glassEnabled, actions.setGlassEnabled)
-                    MiuixSwitchRow(
-                        "背景模糊",
-                        "使用 Haze 模糊悬浮底栏背景",
-                        settings.blurEnabled,
-                        actions.setBlurEnabled,
-                        enabled = settings.glassEnabled,
-                    )
+                    MiuixSwitchRow("背景模糊", "使用 Haze 模糊悬浮底栏背景", settings.blurEnabled, actions.setBlurEnabled, settings.glassEnabled)
                     MiuixSwitchRow("悬浮底栏", "关闭后底栏贴合屏幕底部", settings.floatingDock, actions.setFloatingDock)
                 }
             }
@@ -226,7 +180,7 @@ private fun SettingsHeader(subtitle: String) {
             color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
         ) {
             Box(contentAlignment = Alignment.Center) {
-                androidx.compose.material3.Icon(Icons.Rounded.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Rounded.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             }
         }
     }
@@ -236,7 +190,7 @@ private fun SettingsHeader(subtitle: String) {
 private fun MaterialSettingCard(
     title: String,
     subtitle: String,
-    content: @Composable Column.() -> Unit,
+    content: @Composable () -> Unit,
 ) {
     Card(
         shape = MaterialTheme.shapes.extraLarge,
@@ -257,7 +211,7 @@ private fun MaterialSettingCard(
 private fun MiuixSettingGroup(
     title: String,
     subtitle: String,
-    content: @Composable Column.() -> Unit,
+    content: @Composable () -> Unit,
 ) {
     val tokens = LocalMiuixTokens.current
     Card(
@@ -320,13 +274,18 @@ private fun AccentSelector(settings: AppearanceSettings, onSelected: (Int) -> Un
                     modifier = Modifier
                         .size(if (active) 42.dp else 36.dp)
                         .clip(CircleShape)
-                        .background(Color(option.argb))
-                        .then(
-                            if (active) Modifier.padding(4.dp).clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.onPrimary.copy(alpha = .24f))
-                            else Modifier
-                        ),
-                )
+                        .background(Color(option.argb)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (active) {
+                        Box(
+                            Modifier
+                                .size(14.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = .78f)),
+                        )
+                    }
+                }
                 Spacer(Modifier.height(5.dp))
                 Text(option.label, fontSize = 9.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal)
             }
@@ -411,10 +370,8 @@ private fun MiuixSuperSwitch(
     ) {
         Box(
             modifier = Modifier
-                .padding(top = 3.dp)
-                .width(24.dp)
-                .height(24.dp)
-                .padding(start = thumbOffset)
+                .offset(x = thumbOffset, y = 3.dp)
+                .size(24.dp)
                 .clip(RoundedCornerShape(9.dp))
                 .background(if (checked) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.surface),
         )
