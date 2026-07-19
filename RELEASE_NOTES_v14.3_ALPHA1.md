@@ -1,12 +1,13 @@
-# 洛书 v14.3 Alpha1.3
+# 洛书 v14.3 Alpha1.4
 
-## 多字重导入升级
+## 原生 App 工作台实时预览
 
-- 字体模块 ZIP 中的静态字体优先读取内部 `OS/2.usWeightClass`，文件名仅作为失败兜底。
-- 使用字体内部 Family 将命名混乱的多字重文件正确归为同一字体族。
-- 支持完整九档角色：Thin、ExtraLight、Light、Regular、Medium、SemiBold、Bold、ExtraBold、Black。
-- 使用字体内部斜体标记过滤 Italic/Oblique，不再只依赖文件名。
-- 新增真实回归测试：两个文件名完全不含字重的字体，内部字重分别为 200 与 800，导入后必须生成 ExtraLight 与 ExtraBold。
-- 保留 Alpha1.2 的预览真实源绑定、失败显式提示，以及 Alpha1.1 的字体模块 ZIP 安全导入修复。
+- App 的可变字体预览不再固定加载默认实例，现通过 Android `Typeface.Builder.setFontVariationSettings()` 实时应用真实 fvar 轴。
+- 原生 App 会显示字体全部真实可变轴，包括 wght、wdth、opsz、slnt、ital 以及字体自定义轴，与 WebUI 工作台使用同一组参数。
+- 静态多字重切换档位时，预览桥会加载对应的真实字体文件，不再永远显示 Regular。
+- 轴参数会完整传给最终复合字体实例化任务，不再只提交 wght。
+- 拖动滑块只更新实时预览，不会反复改写系统文件；点击“生成并应用到系统”后才执行实例化和模块更新。
+- 已打开的应用会缓存 Typeface，应用到系统后仍需重新启动对应应用；系统界面和大多数全局字体变更通常需要完整重启。
+- 保留 Alpha1.3 的内部 OS/2 多字重识别与 HyperOS 100–900 九档映射。
 
 本版本为开发测试版，不建议作为最终稳定版本长期使用。

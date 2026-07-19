@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14.3 Alpha1.2 原生 App 核心桥：状态、字体库、文件导入、预览、切换与复合任务接口。
+# 洛书 v14.3 Alpha1.4 原生 App 核心桥：状态、字体库、文件导入、预览、切换与复合任务接口。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -144,11 +144,21 @@ font_file_sha256() {
     fi
 }
 
+preview_role_number() {
+    case "$1" in
+        thin) echo 100 ;; extralight) echo 200 ;; light) echo 300 ;; regular|normal) echo 400 ;;
+        medium) echo 500 ;; semibold) echo 600 ;; bold) echo 700 ;; extrabold) echo 800 ;;
+        black|heavy) echo 900 ;; *) echo 400 ;;
+    esac
+}
+
 find_preview_source() {
     _family="$1"
-    _regular=''
+    _target="${2:-400}"
+    case "$_target" in ''|*[!0-9]*) _target=400 ;; esac
     _variable=''
-    _fallback=''
+    _best=''
+    _best_score=99999
     for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
               "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$_f" ] || continue
@@ -158,25 +168,27 @@ find_preview_source() {
             _detected="$(basename "$_f")"; _detected="${_detected%.*}"; _detected="${_detected%-Regular}"
         fi
         [ "$_detected" = "$_family" ] || continue
-        [ -n "$_fallback" ] || _fallback="$_f"
-        if type detect_font_weight >/dev/null 2>&1; then
-            _role="$(detect_font_weight "$(basename "$_f")")"
-            case "$_role" in
-                regular|normal) [ -n "$_regular" ] || _regular="$_f" ;;
-                variable) [ -n "$_variable" ] || _variable="$_f" ;;
-            esac
+        if type is_variable_font >/dev/null 2>&1 && is_variable_font "$_f" 2>/dev/null; then
+            [ -n "$_variable" ] || _variable="$_f"
+            continue
+        fi
+        _role=regular
+        type detect_font_weight >/dev/null 2>&1 && _role="$(detect_font_weight "$(basename "$_f")")"
+        _number="$(preview_role_number "$_role")"
+        _score=$((_number - _target)); [ "$_score" -ge 0 ] 2>/dev/null || _score=$((-_score))
+        if [ -z "$_best" ] || [ "$_score" -lt "$_best_score" ] 2>/dev/null; then
+            _best="$_f"; _best_score="$_score"
         fi
     done
-    if [ -n "$_regular" ]; then printf '%s\n' "$_regular"
-    elif [ -n "$_variable" ]; then printf '%s\n' "$_variable"
-    elif [ -n "$_fallback" ]; then printf '%s\n' "$_fallback"
+    if [ -n "$_variable" ]; then printf '%s\n' "$_variable"
+    elif [ -n "$_best" ]; then printf '%s\n' "$_best"
     else return 1
     fi
 }
 
 preview_source_json() {
     _family="$1"
-    _src="$(find_preview_source "$_family")"
+    _src="$(find_preview_source "$_family" "${2:-400}")"
     [ -f "$_src" ] || { printf '{"status":"error","message":"找不到预览字体"}\n'; return 1; }
     _bytes="$(wc -c < "$_src" 2>/dev/null | tr -d '[:space:]')"
     case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
@@ -188,12 +200,13 @@ preview_source_json() {
 preview_export() {
     _family="$1"
     _dest="$2"
+    _weight="${3:-400}"
     case "$_dest" in
         /data/user/0/io.github.xgl34222220.luoshu/cache/*|/data/data/io.github.xgl34222220.luoshu/cache/*|\
         /data/user/0/io.github.xgl34222220.luoshu.debug/cache/*|/data/data/io.github.xgl34222220.luoshu.debug/cache/*) ;;
         *) printf '{"status":"error","message":"预览目标目录不受信任"}\n'; return 1 ;;
     esac
-    _src="$(find_preview_source "$_family")"
+    _src="$(find_preview_source "$_family" "$_weight")"
     [ -f "$_src" ] || { printf '{"status":"error","message":"找不到预览字体"}\n'; return 1; }
     mkdir -p "${_dest%/*}" 2>/dev/null || true
     cp -f "$_src" "$_dest" 2>/dev/null || { printf '{"status":"error","message":"无法导出预览字体"}\n'; return 1; }
@@ -229,8 +242,8 @@ case "${1:-status}" in
             printf '{"status":"error","message":"原生导入组件不可用"}\n'
         fi
         ;;
-    preview_source) preview_source_json "${2:-}" ;;
-    preview_export) preview_export "${2:-}" "${3:-}" ;;
+    preview_source) preview_source_json "${2:-}" "${3:-400}" ;;
+    preview_export) preview_export "${2:-}" "${3:-}" "${4:-400}" ;;
     weight_axis) weight_axis_info "${2:-}" ;;
     validate) manager_ready || exit 1; sh "$FONT_MANAGER" action validate "${2:-}" ;;
     switch_start) manager_ready || exit 1; sh "$FONT_MANAGER" action switch_async "${2:-default}" ;;

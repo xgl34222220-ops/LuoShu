@@ -9,6 +9,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.roundToInt
 
 internal data class ModuleSnapshot(
     val loading: Boolean = true,
@@ -77,6 +78,9 @@ internal data class MixState(
     val cjkWeight: Int = 400,
     val latinWeight: Int = 400,
     val digitWeight: Int = 400,
+    val cjkAxes: Map<String, Float> = mapOf("wght" to 400f),
+    val latinAxes: Map<String, Float> = mapOf("wght" to 400f),
+    val digitAxes: Map<String, Float> = mapOf("wght" to 400f),
     val enabled: Boolean = false,
     val busy: Boolean = false,
     val taskId: String = "",
@@ -205,15 +209,21 @@ internal class LuoShuViewModel : ViewModel() {
                 val root = firstJson(result.stdout)
                 if (root.optString("status") != "ok") error(root.optString("message", "组合配置读取失败"))
                 val data = root.getJSONObject("data")
+                        val cjkWeight = data.optInt("cjkWeight", mixState.cjkWeight).coerceIn(1, 1000)
+                val latinWeight = data.optInt("latinWeight", mixState.latinWeight).coerceIn(1, 1000)
+                val digitWeight = data.optInt("digitWeight", mixState.digitWeight).coerceIn(1, 1000)
                 mixState = mixState.copy(
                     loading = false,
                     enabled = data.optBoolean("enabled", false),
                     cjk = data.optString("cjk", mixState.cjk),
                     latin = data.optString("latin", mixState.latin),
                     digit = data.optString("digit", mixState.digit),
-                    cjkWeight = data.optInt("cjkWeight", mixState.cjkWeight).coerceIn(1, 1000),
-                    latinWeight = data.optInt("latinWeight", mixState.latinWeight).coerceIn(1, 1000),
-                    digitWeight = data.optInt("digitWeight", mixState.digitWeight).coerceIn(1, 1000),
+                    cjkWeight = cjkWeight,
+                    latinWeight = latinWeight,
+                    digitWeight = digitWeight,
+                    cjkAxes = parseAxes(data.optString("cjkAxes"), cjkWeight),
+                    latinAxes = parseAxes(data.optString("latinAxes"), latinWeight),
+                    digitAxes = parseAxes(data.optString("digitAxes"), digitWeight),
                     message = if (data.optBoolean("enabled", false)) "当前正在使用复合字体" else "可直接生成新的复合字体",
                     error = "",
                 )
@@ -226,18 +236,33 @@ internal class LuoShuViewModel : ViewModel() {
 
     fun updateMixFont(slot: MixSlot, fontId: String) {
         mixState = when (slot) {
-            MixSlot.Cjk -> mixState.copy(cjk = fontId)
-            MixSlot.Latin -> mixState.copy(latin = fontId)
-            MixSlot.Digit -> mixState.copy(digit = fontId)
+            MixSlot.Cjk -> mixState.copy(cjk = fontId, cjkAxes = mapOf("wght" to mixState.cjkWeight.toFloat()))
+            MixSlot.Latin -> mixState.copy(latin = fontId, latinAxes = mapOf("wght" to mixState.latinWeight.toFloat()))
+            MixSlot.Digit -> mixState.copy(digit = fontId, digitAxes = mapOf("wght" to mixState.digitWeight.toFloat()))
         }
     }
 
     fun updateMixWeight(slot: MixSlot, weight: Int) {
-        val safe = weight.coerceIn(1, 1000)
+        updateMixAxis(slot, "wght", weight.coerceIn(1, 1000).toFloat())
+    }
+
+    fun updateMixAxis(slot: MixSlot, tag: String, value: Float) {
+        val cleanTag = tag.trim()
+        if (cleanTag.length != 4 || !value.isFinite()) return
+        val safe = if (cleanTag == "wght") value.coerceIn(1f, 1000f) else value
         mixState = when (slot) {
-            MixSlot.Cjk -> mixState.copy(cjkWeight = safe)
-            MixSlot.Latin -> mixState.copy(latinWeight = safe)
-            MixSlot.Digit -> mixState.copy(digitWeight = safe)
+            MixSlot.Cjk -> mixState.copy(
+                cjkWeight = if (cleanTag == "wght") safe.roundToInt() else mixState.cjkWeight,
+                cjkAxes = mixState.cjkAxes + (cleanTag to safe),
+            )
+            MixSlot.Latin -> mixState.copy(
+                latinWeight = if (cleanTag == "wght") safe.roundToInt() else mixState.latinWeight,
+                latinAxes = mixState.latinAxes + (cleanTag to safe),
+            )
+            MixSlot.Digit -> mixState.copy(
+                digitWeight = if (cleanTag == "wght") safe.roundToInt() else mixState.digitWeight,
+                digitAxes = mixState.digitAxes + (cleanTag to safe),
+            )
         }
     }
 
@@ -251,6 +276,9 @@ internal class LuoShuViewModel : ViewModel() {
             return
         }
 
+            val cjkAxes = serializeAxes(mixState.cjkAxes, mixState.cjkWeight)
+        val latinAxes = serializeAxes(mixState.latinAxes, mixState.latinWeight)
+        val digitAxes = serializeAxes(mixState.digitAxes, mixState.digitWeight)
         mixState = mixState.copy(
             busy = true,
             taskState = "queued",
@@ -265,9 +293,9 @@ internal class LuoShuViewModel : ViewModel() {
                     append(RootShell.quote(cjk)).append(' ')
                     append(RootShell.quote(latin)).append(' ')
                     append(RootShell.quote(digit)).append(' ')
-                    append(RootShell.quote("wght=${mixState.cjkWeight}")).append(' ')
-                    append(RootShell.quote("wght=${mixState.latinWeight}")).append(' ')
-                    append(RootShell.quote("wght=${mixState.digitWeight}"))
+                            append(RootShell.quote(cjkAxes)).append(' ')
+                    append(RootShell.quote(latinAxes)).append(' ')
+                    append(RootShell.quote(digitAxes))
                 }
                 val start = RootShell.exec(command, timeoutMs = 20_000L)
                 if (start.code != 0) error(start.stderr.ifBlank { "无法启动复合字体任务" })
@@ -639,6 +667,28 @@ internal class LuoShuViewModel : ViewModel() {
                     weights = weights,
                 ),
             )
+        }
+    }
+
+    private fun parseAxes(raw: String, fallbackWeight: Int): Map<String, Float> {
+        val axes = linkedMapOf<String, Float>()
+        raw.split(',').forEach { item ->
+            val parts = item.split('=', limit = 2)
+            if (parts.size != 2) return@forEach
+            val tag = parts[0].trim()
+            val value = parts[1].trim().toFloatOrNull()
+            if (tag.length == 4 && value != null && value.isFinite()) axes[tag] = value
+        }
+        if ("wght" !in axes) axes["wght"] = fallbackWeight.toFloat()
+        return axes.toMap()
+    }
+
+    private fun serializeAxes(axes: Map<String, Float>, fallbackWeight: Int): String {
+        val normalized = axes.filter { (tag, value) -> tag.length == 4 && value.isFinite() }.toMutableMap()
+        if ("wght" !in normalized) normalized["wght"] = fallbackWeight.toFloat()
+        return normalized.toSortedMap().entries.joinToString(",") { (tag, value) ->
+            val number = if (value % 1f == 0f) value.roundToInt().toString() else value.toString().trimEnd('0').trimEnd('.')
+            "$tag=$number"
         }
     }
 

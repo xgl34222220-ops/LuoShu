@@ -84,6 +84,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 private enum class AppPage(val title: String, val subtitle: String, val icon: ImageVector) {
     Overview("概览", "模块与任务", Icons.Rounded.Home),
@@ -639,7 +640,7 @@ private fun MixPage(viewModel: LuoShuViewModel, onPick: (MixSlot) -> Unit, modif
                 Column(Modifier.fillMaxWidth().padding(18.dp)) {
                     Text("生成说明", fontWeight = FontWeight.Black)
                     Text(
-                        "可变字体显示连续字重滑块；静态多字重只显示真实存在的档位；单一字体固定字重，不再伪造滑块。",
+                        "下方预览会随每个真实可变轴或静态字重档位即时变化；只有点击生成并应用后才会写入系统字体。已打开的应用仍需重新启动进程，系统界面通常需要完整重启。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
                         lineHeight = 17.sp,
@@ -654,7 +655,7 @@ private fun MixPage(viewModel: LuoShuViewModel, onPick: (MixSlot) -> Unit, modif
                     ) {
                         Icon(Icons.Rounded.AutoAwesome, contentDescription = null)
                         Spacer(Modifier.width(8.dp))
-                        Text("生成并应用复合字体", fontWeight = FontWeight.Black)
+                        Text("生成并应用到系统", fontWeight = FontWeight.Black)
                     }
                 }
             }
@@ -668,6 +669,7 @@ private fun MixSlotCard(viewModel: LuoShuViewModel, slot: MixSlot, title: String
     val fontId = selectedFontId(state, slot)
     val font = viewModel.fonts.firstOrNull { it.id == fontId }
     val weight = selectedWeight(state, slot)
+    val axes = selectedAxes(state, slot)
     GlassSurface(Modifier.fillMaxWidth().padding(horizontal = 18.dp), RoundedCornerShape(32.dp), shadow = 12.dp) {
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -697,20 +699,23 @@ private fun MixSlotCard(viewModel: LuoShuViewModel, slot: MixSlot, title: String
             }
             if (font != null) {
                 Spacer(Modifier.height(12.dp))
-                NativeFontPreview(
-                    font = font,
-                    text = if (slot == MixSlot.Cjk) "洛书中文基底" else if (slot == MixSlot.Latin) "LuoShu Typography" else "0123456789",
+                    NativeFontPreview(
+                font = font,
+                text = if (slot == MixSlot.Cjk) "洛书中文  Aa  0123" else if (slot == MixSlot.Latin) "LuoShu Typography 0123" else "0123456789 Aa",
+                axes = axes,
                     modifier = Modifier.fillMaxWidth().height(62.dp).padding(horizontal = 4.dp),
                     textSizeSp = 25f,
                     gravity = Gravity.CENTER,
                     maxLines = 1,
                 )
                 Spacer(Modifier.height(12.dp))
-                WeightControl(
+                        WeightControl(
                     font = font,
                     value = weight,
+                    axes = axes,
                     enabled = !state.busy,
                     onValue = { viewModel.updateMixWeight(slot, it) },
+                    onAxis = { tag, axisValue -> viewModel.updateMixAxis(slot, tag, axisValue) },
                 )
             }
         }
@@ -718,57 +723,88 @@ private fun MixSlotCard(viewModel: LuoShuViewModel, slot: MixSlot, title: String
 }
 
 @Composable
-private fun WeightControl(font: FontItem, value: Int, enabled: Boolean, onValue: (Int) -> Unit) {
+private fun WeightControl(
+    font: FontItem,
+    value: Int,
+    axes: Map<String, Float>,
+    enabled: Boolean,
+    onValue: (Int) -> Unit,
+    onAxis: (String, Float) -> Unit,
+) {
     val axisInfo = rememberWeightAxisInfo(font)
     when {
         font.variable && axisInfo.loading -> {
   Row(verticalAlignment = Alignment.CenterVertically) {
       CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
       Spacer(Modifier.width(9.dp))
-      Text("正在读取真实字重轴…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+      Text("正在读取真实可变轴…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
   }
         }
-        font.variable && axisInfo.hasWeight -> {
-  val minimum = axisInfo.min.coerceAtMost(axisInfo.max)
-  val maximum = axisInfo.max.coerceAtLeast(axisInfo.min + 1)
-  val safeValue = value.coerceIn(minimum, maximum)
-  val stepCount = (((maximum - minimum) / 10) - 1).coerceAtLeast(0)
-  Column {
+        font.variable && axisInfo.axes.isNotEmpty() -> {
+  Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
       Row(verticalAlignment = Alignment.CenterVertically) {
-          Text("可变字重 · wght", fontWeight = FontWeight.Bold, fontSize = 12.sp)
-          Spacer(Modifier.weight(1f))
-          Text(safeValue.toString(), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+          Column(Modifier.weight(1f)) {
+              Text("真实可变轴 · 实时预览", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+              Text("与 WebUI 工作台使用同一组轴参数", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+          }
+          CapabilityPill("${axisInfo.axes.size} 个轴", Color(0xFF8A6CE8))
       }
-      Slider(
-          value = safeValue.toFloat(),
-          onValueChange = { onValue((it / 10f).toInt() * 10) },
-          enabled = enabled,
-          valueRange = minimum.toFloat()..maximum.toFloat(),
-          steps = stepCount,
-      )
-      Text(
-          "真实范围 $minimum–$maximum；该数值会实例化进最终组合字体。",
-          color = MaterialTheme.colorScheme.onSurfaceVariant,
-          fontSize = 10.sp,
-      )
+      axisInfo.axes.forEach { axis ->
+          val minimum = axis.min.coerceAtMost(axis.max)
+          val maximum = axis.max.coerceAtLeast(axis.min)
+          val current = (axes[axis.tag] ?: axis.default).coerceIn(minimum, maximum)
+          val isWeight = axis.tag == "wght"
+          val stepCount = if (isWeight && maximum > minimum) {
+              (((maximum - minimum) / 10f).roundToInt() - 1).coerceAtLeast(0)
+          } else {
+              0
+          }
+          Column {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                  Text("${axis.tag} · ${axisDisplayName(axis.tag)}", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                  Spacer(Modifier.weight(1f))
+                  Text(axisValueLabel(current), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+              }
+              Slider(
+                  value = current,
+                  onValueChange = { raw ->
+                      val next = if (isWeight) ((raw / 10f).roundToInt() * 10).toFloat().coerceIn(minimum, maximum) else raw.coerceIn(minimum, maximum)
+                      onAxis(axis.tag, next)
+                  },
+                  enabled = enabled,
+                  valueRange = minimum..maximum,
+                  steps = stepCount,
+              )
+              Text(
+                  "${axisValueLabel(minimum)} · 默认 ${axisValueLabel(axis.default)} · ${axisValueLabel(maximum)}",
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                  fontSize = 9.sp,
+              )
+          }
+      }
+      Text("拖动时只刷新上方真实字体预览，不会反复改写系统文件。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
   }
         }
         font.variable -> {
   Row(verticalAlignment = Alignment.CenterVertically) {
       Column(Modifier.weight(1f)) {
-          Text("可变字体，但没有 wght 轴", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+          Text("可变字体轴读取失败", fontWeight = FontWeight.Bold, fontSize = 12.sp)
           Text(
-              axisInfo.error.ifBlank { "该字体可能只有 wdth、opsz 等轴，不能调节真实字重。" },
+              axisInfo.error.ifBlank { "字体没有可用的 fvar 轴。" },
               color = MaterialTheme.colorScheme.onSurfaceVariant,
               fontSize = 10.sp,
           )
       }
-      CapabilityPill("固定字重", Color(0xFF8A6CE8))
+      CapabilityPill("固定预览", Color(0xFF8A6CE8))
   }
         }
         staticWeights(font).size >= 2 -> {
   Column {
-      Text("真实字重档位", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+      Row(verticalAlignment = Alignment.CenterVertically) {
+          Text("真实静态字重 · 实时预览", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+          Spacer(Modifier.weight(1f))
+          Text(value.toString(), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+      }
       Spacer(Modifier.height(9.dp))
       Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           staticWeights(font).forEach { option ->
@@ -790,7 +826,7 @@ private fun WeightControl(font: FontItem, value: Int, enabled: Boolean, onValue:
           }
       }
       Spacer(Modifier.height(8.dp))
-      Text("静态家族只能选择字体文件真实存在的档位。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+      Text("切换档位会重新加载该字体族对应的真实文件，不再固定预览 Regular。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
   }
         }
         else -> {
@@ -944,10 +980,16 @@ private fun selectedFontId(state: MixState, slot: MixSlot): String = when (slot)
 }
 
 private fun selectedWeight(state: MixState, slot: MixSlot): Int = when (slot) {
-    MixSlot.Cjk -> state.cjkWeight
-    MixSlot.Latin -> state.latinWeight
-    MixSlot.Digit -> state.digitWeight
-}
+        MixSlot.Cjk -> state.cjkWeight
+        MixSlot.Latin -> state.latinWeight
+        MixSlot.Digit -> state.digitWeight
+    }
+
+    private fun selectedAxes(state: MixState, slot: MixSlot): Map<String, Float> = when (slot) {
+        MixSlot.Cjk -> state.cjkAxes
+        MixSlot.Latin -> state.latinAxes
+        MixSlot.Digit -> state.digitAxes
+    }
 
 private fun staticWeights(font: FontItem): List<Int> = font.weights
     .filterNot { it == "variable" }
@@ -982,7 +1024,29 @@ private fun roleWeight(role: String): Int = when (role.lowercase()) {
     else -> 400
 }
 
-private fun weightName(weight: Int): String = when (weight) {
+private fun axisDisplayName(tag: String): String = when (tag) {
+        "wght" -> "字重"
+        "wdth" -> "字宽"
+        "slnt" -> "倾斜"
+        "ital" -> "斜体开关"
+        "opsz" -> "光学尺寸"
+        "GRAD" -> "笔画等级"
+        "XTRA" -> "横向扩展"
+        "YTAS" -> "上升部"
+        "YTDE" -> "下降部"
+        "YTFI" -> "数字高度"
+        "YTLC" -> "小写高度"
+        "YTUC" -> "大写高度"
+        else -> "自定义轴"
+    }
+
+    private fun axisValueLabel(value: Float): String = if (value % 1f == 0f) {
+        value.roundToInt().toString()
+    } else {
+        String.format(java.util.Locale.US, "%.2f", value).trimEnd('0').trimEnd('.')
+    }
+
+    private fun weightName(weight: Int): String = when (weight) {
     in 0..149 -> "极细 100"
     in 150..249 -> "超细 200"
     in 250..349 -> "细体 300"

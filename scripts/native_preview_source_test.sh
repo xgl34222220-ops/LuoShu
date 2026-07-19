@@ -3,18 +3,25 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-mkdir -p "$TMP/public/fonts"
+mkdir -p "$TMP/public/fonts" "$TMP/export"
 
-# 同一字体族存在多档时，预览必须稳定选择 Regular，不能依赖目录遍历顺序。
 printf regular > "$TMP/public/fonts/Demo-Regular.ttf"
 printf bold > "$TMP/public/fonts/Demo-Bold.ttf"
-OUTPUT=$(LUOSHU_PUBLIC_DIR="$TMP/public" MODDIR="$ROOT" sh "$ROOT/common/app_bridge.sh" preview_source Demo)
+printf extra > "$TMP/public/fonts/Demo-ExtraBold.ttf"
+
+OUTPUT=$(LUOSHU_PUBLIC_DIR="$TMP/public" MODDIR="$ROOT" sh "$ROOT/common/app_bridge.sh" preview_source Demo 400)
 printf '%s\n' "$OUTPUT" | grep -q '"status":"ok"'
 printf '%s\n' "$OUTPUT" | grep -q '"file":"Demo-Regular.ttf"'
 
-# 没有 Regular 时才允许使用可用的其他档位。
+OUTPUT=$(LUOSHU_PUBLIC_DIR="$TMP/public" MODDIR="$ROOT" sh "$ROOT/common/app_bridge.sh" preview_source Demo 700)
+printf '%s\n' "$OUTPUT" | grep -q '"file":"Demo-Bold.ttf"'
+
+OUTPUT=$(LUOSHU_PUBLIC_DIR="$TMP/public" MODDIR="$ROOT" sh "$ROOT/common/app_bridge.sh" preview_source Demo 800)
+printf '%s\n' "$OUTPUT" | grep -q '"file":"Demo-ExtraBold.ttf"'
+
+
 printf only-bold > "$TMP/public/fonts/Only-Bold.ttf"
-OUTPUT=$(LUOSHU_PUBLIC_DIR="$TMP/public" MODDIR="$ROOT" sh "$ROOT/common/app_bridge.sh" preview_source Only)
+OUTPUT=$(LUOSHU_PUBLIC_DIR="$TMP/public" MODDIR="$ROOT" sh "$ROOT/common/app_bridge.sh" preview_source Only 400)
 printf '%s\n' "$OUTPUT" | grep -q '"file":"Only-Bold.ttf"'
 
-echo 'Native preview source regression test passed.'
+echo 'Native weighted preview source regression test passed.'
