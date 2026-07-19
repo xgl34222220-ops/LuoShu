@@ -63,4 +63,7 @@ grep -q "UI_VERSION = '$CACHE'" "$TMP_STAGE/webroot/environment.js"
 ! grep -q 'stability.js?v=' "$TMP_STAGE/webroot/index.html"
 ! grep -q 'stability-critical-style' "$TMP_STAGE/webroot/index.html"
 
+# Full 模块内置 App 安装器必须正确处理当前版本、覆盖更新、延迟安装和签名失败。
+sh "$ROOT/scripts/app_installer_test.sh"
+
 echo 'LuoShu stability checks passed.'
