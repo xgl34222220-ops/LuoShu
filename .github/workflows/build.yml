@@ -15,14 +15,24 @@ jobs:
       - name: Execute staged upgrade
         shell: bash
         run: |
-          cp .github/workflows/build.yml /tmp/alpha13-materializer.yml
-          python3 - <<'PY'
+          python3 - <<'PY' > /tmp/alpha13-materializer.log 2>&1
           from pathlib import Path
           workflow = Path('.github/workflows/alpha13-weight-import.yml').read_text(encoding='utf-8')
           body = workflow.split("python3 - <<'PY'\n", 1)[1].split("\n          PY\n", 1)[0]
           body = '\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())
           exec(compile(body, 'alpha13-weight-import', 'exec'), {'__name__': '__main__'})
           PY
+          rc=$?
+          if [ "$rc" -ne 0 ]; then
+            git reset --hard HEAD
+            cp /tmp/alpha13-materializer.log .alpha13-error.log
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add .alpha13-error.log
+            git commit -m "chore: record Alpha1.3 materializer error"
+            git push origin HEAD:feature/v14.3-alpha1-native-import
+            exit "$rc"
+          fi
           cat > .github/workflows/build.yml <<'YAML'
           name: Build module
           on:
@@ -91,7 +101,7 @@ jobs:
                     if-no-files-found: error
                     retention-days: 30
           YAML
-          rm -f .alpha13-trigger .alpha13-trigger2
+          rm -f .alpha13-trigger .alpha13-trigger2 .alpha13-error.log
           chmod 0755 common/font_import_probe.py scripts/native_zip_import_test.sh
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
