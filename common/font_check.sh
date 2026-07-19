@@ -133,20 +133,27 @@ font_check_json() {
     fi
 }
 
-# CLI
-if [ "$1" = "--json" ]; then
-    font_check_json "$2" "${3:-text}"
-elif [ -n "$1" ] && [ -f "$1" ]; then
-    if font_validate "$1" "${2:-text}"; then
-        echo "状态: 通过"
-        echo "真实格式: $FONT_CHECK_FORMAT"
-        echo "文件大小: $FONT_CHECK_SIZE bytes"
-        echo "可变字体: $FONT_CHECK_VARIABLE"
-        echo "彩色字体表: $FONT_CHECK_COLOR"
-        [ -n "$FONT_CHECK_WARNING" ] && echo "提示: $FONT_CHECK_WARNING"
-    else
-        echo "状态: 失败"
-        echo "原因: $FONT_CHECK_ERROR"
-        exit 1
+font_check_cli() {
+    if [ "${1:-}" = "--json" ]; then
+        font_check_json "${2:-}" "${3:-text}"
+    elif [ -n "${1:-}" ] && [ -f "${1:-}" ]; then
+        if font_validate "$1" "${2:-text}"; then
+            echo "状态: 通过"
+            echo "真实格式: $FONT_CHECK_FORMAT"
+            echo "文件大小: $FONT_CHECK_SIZE bytes"
+            echo "可变字体: $FONT_CHECK_VARIABLE"
+            echo "彩色字体表: $FONT_CHECK_COLOR"
+            [ -n "$FONT_CHECK_WARNING" ] && echo "提示: $FONT_CHECK_WARNING"
+        else
+            echo "状态: 失败"
+            echo "原因: $FONT_CHECK_ERROR"
+            return 1
+        fi
     fi
-fi
+}
+
+# 只有直接执行 font_check.sh 时才进入 CLI。被 font_manager/native_import 等脚本
+# source 时，必须只定义函数，不能消费父脚本的位置参数，更不能 exit 父进程。
+case "${0##*/}" in
+    font_check.sh) font_check_cli "$@" ;;
+esac
