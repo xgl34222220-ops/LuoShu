@@ -131,25 +131,7 @@ jobs:
 
       - name: Compile, test and build native App
         working-directory: android-app
-        shell: bash
-        run: |
-          set +e
-          gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug > ../android-compiler.log 2>&1
-          rc=$?
-          printf '%s\n' "$rc" > ../android-compiler.exit
-          tail -n 260 ../android-compiler.log
-          exit 0
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LuoShu-android-compiler-diagnostic
-          path: |
-            android-compiler.log
-            android-compiler.exit
-          if-no-files-found: error
-
-      - name: Enforce native App build
-        run: test "$(cat android-compiler.exit)" = 0
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug
 
       - name: Build App, Full and Lite candidates
         shell: bash
