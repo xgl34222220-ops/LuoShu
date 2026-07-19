@@ -1,0 +1,52 @@
+#!/system/bin/sh
+# 洛书字体库轻量指纹与缓存辅助。
+# 只读取文件名、大小和修改时间，不解析字体轮廓，可用于 App 后台快速判断是否需要重建索引。
+
+font_library_fingerprint_value() {
+    _font_dir="${USER_FONTS_DIR:-/sdcard/LuoShu/fonts}"
+    _config_dir="${CONFIG_DIR:-/data/adb/modules/LuoShu/config}"
+    mkdir -p "$_config_dir" 2>/dev/null || true
+    _tmp="$_config_dir/.font-fingerprint.$$"
+    : > "$_tmp" 2>/dev/null || return 1
+    _count=0
+    _bytes=0
+
+    for _font_file in "$_font_dir"/*.ttf "$_font_dir"/*.otf "$_font_dir"/*.ttc \
+        "$_font_dir"/*.TTF "$_font_dir"/*.OTF "$_font_dir"/*.TTC; do
+        [ -f "$_font_file" ] || continue
+        _name=$(basename "$_font_file" 2>/dev/null)
+        case "$_name" in SysFont*|SysSans*) continue ;; esac
+        _size=$(stat -c %s "$_font_file" 2>/dev/null)
+        _mtime=$(stat -c %Y "$_font_file" 2>/dev/null)
+        case "$_size" in ''|*[!0-9]*) _size=0 ;; esac
+        case "$_mtime" in ''|*[!0-9]*) _mtime=0 ;; esac
+        printf '%s|%s|%s\n' "$_name" "$_size" "$_mtime" >> "$_tmp"
+        _count=$((_count + 1))
+        _bytes=$((_bytes + _size))
+    done
+
+    LC_ALL=C sort -o "$_tmp" "$_tmp" 2>/dev/null || true
+    if command -v sha256sum >/dev/null 2>&1; then
+        _digest=$(sha256sum "$_tmp" 2>/dev/null | awk '{print $1}')
+    elif command -v busybox >/dev/null 2>&1; then
+        _digest=$(busybox sha256sum "$_tmp" 2>/dev/null | awk '{print $1}')
+    else
+        _digest=$(cksum "$_tmp" 2>/dev/null | awk '{print $1 "-" $2}')
+    fi
+    rm -f "$_tmp" 2>/dev/null || true
+    [ -n "$_digest" ] || _digest="empty"
+    printf 'v2:%s:%s:%s\n' "$_digest" "$_count" "$_bytes"
+}
+
+font_library_fingerprint_json() {
+    _fingerprint=$(font_library_fingerprint_value)
+    _current="default"
+    [ -f "${ACTIVE_FONT_CONF:-}" ] && _current=$(head -n1 "$ACTIVE_FONT_CONF" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_current" ] || _current="default"
+    _count=$(printf '%s' "$_fingerprint" | awk -F: '{print $(NF-1)}')
+    _bytes=$(printf '%s' "$_fingerprint" | awk -F: '{print $NF}')
+    case "$_count" in ''|*[!0-9]*) _count=0 ;; esac
+    case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
+    printf '{"status":"ok","data":{"fingerprint":"%s","current":"%s","count":%s,"bytes":%s}}\n' \
+        "$(json_escape "$_fingerprint")" "$(json_escape "$_current")" "$_count" "$_bytes"
+}
