@@ -66,4 +66,7 @@ grep -q "UI_VERSION = '$CACHE'" "$TMP_STAGE/webroot/environment.js"
 # Full 模块内置 App 安装器必须正确处理当前版本、覆盖更新、延迟安装和签名失败。
 sh "$ROOT/scripts/app_installer_test.sh"
 
+# 原生 App 字体索引只在文件集合实际变化时失效。
+sh "$ROOT/scripts/font_library_cache_test.sh"
+
 echo 'LuoShu stability checks passed.'
