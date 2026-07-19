@@ -17,7 +17,7 @@ internal fun LuoShuHost() {
     val features: Alpha15FeatureViewModel = viewModel()
     val appearance: AppearanceViewModel = viewModel()
     Box(Modifier.fillMaxSize()) {
-        LuoShuDualSkinApp(model, features, appearance)
+        LuoShuStage2App(model, features, appearance)
         NativeImportOverlay(
             viewModel = model,
             modifier = Modifier
