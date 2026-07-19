@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14.3 Alpha1：原生 App 文件选择器导入桥。
+# 洛书 v14.3 Alpha1.1：原生 App 文件选择器导入桥。
 # 只接受 App 私有缓存中的 TTF/OTF/TTC/ZIP；ZIP 继续交由安全字体包导入器处理。
 set +e
 
@@ -173,14 +173,22 @@ import_zip_file() {
     [ ! -e "$_target" ] || _target="$USER_IMPORT_DIR/${_stem}-$(printf '%s' "$_hash" | cut -c1-10).zip"
     cp -f "$_src" "$_target" 2>/dev/null || { fail_json "无法复制 ZIP 到安全导入目录"; return; }
     chmod 0644 "$_target" 2>/dev/null || true
-    _result=$(sh "$FONT_MANAGER" action import_zip "$(basename "$_target")" 2>/dev/null)
-    rm -f "$_target" 2>/dev/null || true
+
+    _error_file="$MODDIR/cache/native-import-zip-error.$$"
+    mkdir -p "${_error_file%/*}" 2>/dev/null || true
+    _result=$(MODDIR="$MODDIR" sh "$FONT_MANAGER" action import_zip "$(basename "$_target")" 2>"$_error_file")
+    _rc=$?
+    _stderr=$(tail -n 6 "$_error_file" 2>/dev/null | tr '\n\r' '  ')
+    rm -f "$_error_file" "$_target" 2>/dev/null || true
     invalidate_font_cache
+
     _json=$(printf '%s\n' "$_result" | sed -n '/^[[:space:]]*{/p' | tail -n1)
     if [ -n "$_json" ]; then
         printf '%s\n' "$_json"
     else
-        fail_json "字体模块 ZIP 导入失败"
+        _detail=$(printf '%s' "${_stderr:-$_result}" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-180)
+        [ -n "$_detail" ] || _detail="底层导入器没有返回结果（代码 $_rc）"
+        fail_json "字体模块 ZIP 导入失败：$_detail"
     fi
 }
 
