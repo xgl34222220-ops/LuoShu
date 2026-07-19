@@ -1,38 +1,66 @@
-name: Materialize Alpha1.3 weight upgrade
+name: Build module
 on:
+  push:
+    branches:
+      - main
+      - feature/v14.3-alpha1-native-import
   pull_request:
+  workflow_dispatch:
 permissions:
-  contents: write
+  contents: read
 jobs:
-  materialize:
-    if: github.event_name == 'pull_request' && github.head_ref == 'trigger/alpha13-weight-materialize'
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          ref: feature/v14.3-alpha1-native-import
-          fetch-depth: 0
-          show-progress: false
-      - name: Generate and commit Alpha1.3 implementation
-        shell: bash
+          node-version: 22
+      - name: Install build dependencies
         run: |
-          set -euxo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+      - name: Prepare ARM64 composite runtime
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
+      - name: Composite smoke tests
+        env:
+          PYTHONPATH: common/python/lib/python3.14/site-packages
+        run: |
+          CJK="$(find /usr/share/fonts -type f \( -iname '*NotoSansCJK*Regular*.ttc' -o -iname '*NotoSansCJK*Regular*.otf' \) -print -quit)"
+          LATIN="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
+          test -n "$CJK"; test -n "$LATIN"
+          python3 common/composite_font.py --cjk "$CJK" --latin "$LATIN" --digit "$LATIN" --output /tmp/luoshu-composite.otf >/tmp/luoshu-composite.json
           python3 - <<'PY'
-          from pathlib import Path
-          workflow = Path('.github/workflows/alpha13-weight-import.yml').read_text(encoding='utf-8')
-          body = workflow.split("python3 - <<'PY'\n", 1)[1].rsplit("\n          PY\n", 1)[0]
-          body = '\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())
-          exec(compile(body, 'alpha13-weight-import', 'exec'), {'__name__': '__main__'})
+          import json
+          from fontTools.ttLib import TTFont
+          report=json.load(open('/tmp/luoshu-composite.json', encoding='utf-8'))
+          assert report['status']=='ok', report
+          font=TTFont('/tmp/luoshu-composite.otf')
+          cmap=font.getBestCmap() or {}
+          assert all(ord(ch) in cmap for ch in '中Aa019')
+          assert report['replaced']['latin'] >= 52
+          assert report['replaced']['digit'] >= 10
           PY
-
-          # GitHub Actions 的 GITHUB_TOKEN 没有 workflows 权限，功能提交不得包含工作流改动。
-          # 临时工作流会在功能提交完成后由仓库接口单独恢复和删除。
-          git checkout HEAD -- .github/workflows/build.yml .github/workflows/alpha13-weight-import.yml
-          rm -f .alpha13-trigger .alpha13-trigger2 .alpha13-error.log
-          chmod 0755 common/font_import_probe.py scripts/native_zip_import_test.sh
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git reset .github/workflows/build.yml .github/workflows/alpha13-weight-import.yml
-          git commit -m "feat: read real internal weights for multi-weight imports"
-          git push origin HEAD:feature/v14.3-alpha1-native-import
+          python3 common/font_coverage.py /tmp/luoshu-composite.otf --brief
+          if python3 common/font_coverage.py "$LATIN" --brief; then
+            echo 'Latin-only font unexpectedly passed the global coverage gate' >&2
+            exit 1
+          fi
+      - name: TTC face extraction smoke test
+        run: sh ./scripts/ttc_face_test.sh
+      - name: Build flashable module
+        run: LUOSHU_VARIANT=lite sh ./scripts/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-module-${{ github.sha }}
+          path: dist/*.zip*
+          if-no-files-found: error
+          retention-days: 30
