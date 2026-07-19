@@ -48,36 +48,31 @@ elif [ -d /data/adb/mountify ]; then
 fi
 [ "$MOUNTIFY_ACTIVE" = true ] && ui_print "✓ Mountify：已启用" || ui_print "• 元模块推荐：Mountify（可选）"
 
-mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot/fonts" 2>/dev/null || true
+mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" 2>/dev/null || true
 OLD_MOD="/data/adb/modules/LuoShu"
 
-# 仅保留用户偏好，不继承旧字体负载、历史任务和待重启状态。
+# 仅迁移用户偏好；历史任务和待重启状态不进入新安装。
 for _config in font_weight.conf font_weight_original.conf axes_mix.conf font_mix.conf; do
     [ -f "$OLD_MOD/config/$_config" ] && cp -f "$OLD_MOD/config/$_config" "$MODPATH/config/$_config" 2>/dev/null || true
 done
-rm -rf "$MODPATH/system/fonts" "$MODPATH/system_ext/fonts" "$MODPATH/product/fonts" "$MODPATH/cache/weighted-mix" "$MODPATH/cache/axes-mix" 2>/dev/null || true
-mkdir -p "$MODPATH/system/fonts" 2>/dev/null || true
-rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" 2>/dev/null || true
-rm -f "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
-rm -f "$MODPATH/config/previous_font.conf" "$MODPATH/config/switch_task.conf" "$MODPATH/config/mix_task.conf" \
-      "$MODPATH/config/axes_task.conf" "$MODPATH/config/text_reboot_required.conf" \
-      "$MODPATH/config/font_weight_reboot_required.conf" "$MODPATH/config/active_emoji.conf" \
-      "$MODPATH/config/emoji_task.conf" "$MODPATH/config/emoji_reboot_required.conf" \
-      "$MODPATH/config/app_install_pending" "$MODPATH/config/app_install_state.conf" \
-      "$MODPATH/config/app_install_manual" \
-      "$MODPATH/config"/v*_axes_task.conf "$MODPATH/config"/v*_axes_mix.conf "$MODPATH/config"/v*_axes_worker.pid 2>/dev/null || true
-rm -rf "$MODPATH/webroot/emoji" 2>/dev/null || true
+for _state in previous_font.conf switch_task.conf mix_task.conf axes_task.conf text_reboot_required.conf \
+              font_weight_reboot_required.conf active_emoji.conf emoji_task.conf emoji_reboot_required.conf \
+              webui_font_list.json webui_font_list.key native_font_index.json native_font_index.key \
+              app_install_pending app_install_state.conf app_install_manual; do
+    rm -f "$MODPATH/config/$_state" 2>/dev/null || true
+done
+rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" \
+      "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
 printf 'default\n' > "$MODPATH/config/active_font.conf"
 
-# 安装安全 CLI，不再暴露旧回滚、热刷新或重启 SystemUI 命令。
+# 安装安全 CLI，不暴露上一字体回滚、热刷新或重启 SystemUI 命令。
 cp -f "$MODPATH/common/luoshu_cli.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
 chmod 0755 "$MODPATH"/*.sh "$MODPATH/common"/*.sh "$MODPATH/common/play_font_bridge" "$MODPATH/common/wechat_xweb_bridge" 2>/dev/null || true
 chmod 0644 "$MODPATH/common"/*.py 2>/dev/null || true
 chmod 0755 "$MODPATH/common/python/bin/luoshu-python" "$MODPATH/system/bin/洛书" 2>/dev/null || true
 [ ! -f "$MODPATH/system/bin/luoshud" ] || chmod 0755 "$MODPATH/system/bin/luoshud" 2>/dev/null || true
 find "$MODPATH/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
-find "$MODPATH/webroot" -type f -exec chmod 0644 {} \; 2>/dev/null || true
-chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot" 2>/dev/null || true
+chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" 2>/dev/null || true
 [ ! -f "$MODPATH/bundled/LuoShu-App.apk" ] || chmod 0644 "$MODPATH/bundled/LuoShu-App.apk" "$MODPATH/bundled/app.prop" 2>/dev/null || true
 touch "$MODPATH/magic" 2>/dev/null || true
 
@@ -89,12 +84,8 @@ if [ -s "$MODPATH/bundled/LuoShu-App.apk" ] && [ -f "$MODPATH/common/app_install
     _app_result=$(MODDIR="$MODPATH" APP_INSTALL_LOG="$MODPATH/logs/app-install.log" sh "$MODPATH/common/app_installer.sh" flash 2>/dev/null)
     _app_code=$?
     case "$_app_result" in
-        installed)
-            ui_print "✓ 洛书 App 已随 Full 模块自动安装或更新"
-            ;;
-        already-current)
-            ui_print "✓ 洛书 App 已是当前版本，无需重复安装"
-            ;;
+        installed) ui_print "✓ 洛书 App 已自动安装或更新" ;;
+        already-current) ui_print "✓ 洛书 App 已是当前版本，无需重复安装" ;;
         *)
             ui_print "• 当前刷写环境无法完成 App 更新，将在首次开机后自动补装"
             ui_print "• 也可以重启后点击模块“操作”按钮手动重试"
@@ -102,9 +93,9 @@ if [ -s "$MODPATH/bundled/LuoShu-App.apk" ] && [ -f "$MODPATH/common/app_install
             ;;
     esac
 else
-    ui_print "• 当前为 Lite 包，不内置 App"
+    ui_print "✗ 模块内置 App 或安装器缺失，请重新下载洛书模块包"
 fi
-ui_print "请完整重启后进入洛书 App 或 WebUI 配置字体。"
+ui_print "请完整重启后进入洛书 App 配置字体。"
 ui_print ""
 [ -f "$MODPATH/common/module_status.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/module_status.sh" default >/dev/null 2>&1 || true
 exit 0
