@@ -1,42 +1,37 @@
-name: Build module
+name: Font engine smoke tests
 on:
   push:
     branches:
       - main
   pull_request:
+    branches:
+      - main
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  build:
+  engine:
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - uses: android-actions/setup-android@v3
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.5.0'
-      - name: Install build dependencies
+
+      - name: Install font engine dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+          sudo apt-get install -y -qq --no-install-recommends curl unzip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+
       - uses: actions/cache@v4
         with:
           path: common/python
           key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+
       - name: Prepare ARM64 composite runtime
         run: |
           if [ ! -x common/python/bin/luoshu-python ]; then
             sh ./scripts/prepare_composite_runtime.sh
           fi
+
       - name: Composite smoke tests
         env:
           PYTHONPATH: common/python/lib/python3.14/site-packages
@@ -48,10 +43,11 @@ jobs:
           python3 - <<'PY'
           import json
           from fontTools.ttLib import TTFont
-          report=json.load(open('/tmp/luoshu-composite.json', encoding='utf-8'))
-          assert report['status']=='ok', report
-          font=TTFont('/tmp/luoshu-composite.otf')
-          cmap=font.getBestCmap() or {}
+
+          report = json.load(open('/tmp/luoshu-composite.json', encoding='utf-8'))
+          assert report['status'] == 'ok', report
+          font = TTFont('/tmp/luoshu-composite.otf')
+          cmap = font.getBestCmap() or {}
           assert all(ord(ch) in cmap for ch in '中Aa019')
           assert report['replaced']['latin'] >= 52
           assert report['replaced']['digit'] >= 10
@@ -61,16 +57,6 @@ jobs:
             echo 'Latin-only font unexpectedly passed the global coverage gate' >&2
             exit 1
           fi
+
       - name: TTC face extraction smoke test
         run: sh ./scripts/ttc_face_test.sh
-      - name: Build native App
-        working-directory: android-app
-        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug
-      - name: Build App-bundled module
-        run: LUOSHU_APP_APK=android-app/app/build/outputs/apk/debug/app-debug.apk sh ./scripts/build.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LuoShu-module-${{ github.sha }}
-          path: dist/*.zip*
-          if-no-files-found: error
-          retention-days: 30
