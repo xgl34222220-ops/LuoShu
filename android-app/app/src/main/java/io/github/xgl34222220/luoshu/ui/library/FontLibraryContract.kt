@@ -41,7 +41,7 @@ internal data class FontLibraryActions(
     val apply: (FontItem) -> Unit,
     val delete: (FontItem) -> Unit,
     val restoreDefault: () -> Unit,
-    val details: (FontItem) -> Unit,
+    val details: (FontItem) -> Unit = {},
     val setFilter: (FontLibraryFilter) -> Unit = {},
     val setSort: (FontLibrarySort) -> Unit = {},
 )
@@ -61,16 +61,16 @@ internal fun FontLibraryUiState.forDisplay(
     val sorted = when (selectedSort) {
         FontLibrarySort.ACTIVE_FIRST -> filtered.sortedWith(
             compareByDescending<FontItem> { it.id == activeFontId }
-                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name }
+                .thenBy { it.name.lowercase() }
                 .thenBy { it.id },
         )
         FontLibrarySort.NAME -> filtered.sortedWith(
-            compareBy<FontItem, String>(String.CASE_INSENSITIVE_ORDER) { it.name }
+            compareBy<FontItem> { it.name.lowercase() }
                 .thenBy { it.id },
         )
         FontLibrarySort.NEWEST -> filtered.sortedWith(
             compareByDescending<FontItem> { it.date }
-                .thenBy(String.CASE_INSENSITIVE_ORDER) { it.name }
+                .thenBy { it.name.lowercase() }
                 .thenBy { it.id },
         )
     }
