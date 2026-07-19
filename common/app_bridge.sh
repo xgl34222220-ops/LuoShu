@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14.3 Alpha1 原生 App 核心桥：状态、字体库、文件导入、预览、切换与复合任务接口。
+# 洛书 v14.3 Alpha1.2 原生 App 核心桥：状态、字体库、文件导入、预览、切换与复合任务接口。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -135,8 +135,20 @@ mix_ready() {
     return 0
 }
 
+font_file_sha256() {
+    _file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$_file" 2>/dev/null | awk '{print $1}'
+    elif command -v busybox >/dev/null 2>&1; then
+        busybox sha256sum "$_file" 2>/dev/null | awk '{print $1}'
+    fi
+}
+
 find_preview_source() {
     _family="$1"
+    _regular=''
+    _variable=''
+    _fallback=''
     for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
               "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$_f" ] || continue
@@ -145,9 +157,32 @@ find_preview_source() {
         else
             _detected="$(basename "$_f")"; _detected="${_detected%.*}"; _detected="${_detected%-Regular}"
         fi
-        [ "$_detected" = "$_family" ] && { printf '%s\n' "$_f"; return 0; }
+        [ "$_detected" = "$_family" ] || continue
+        [ -n "$_fallback" ] || _fallback="$_f"
+        if type detect_font_weight >/dev/null 2>&1; then
+            _role="$(detect_font_weight "$(basename "$_f")")"
+            case "$_role" in
+                regular|normal) [ -n "$_regular" ] || _regular="$_f" ;;
+                variable) [ -n "$_variable" ] || _variable="$_f" ;;
+            esac
+        fi
     done
-    return 1
+    if [ -n "$_regular" ]; then printf '%s\n' "$_regular"
+    elif [ -n "$_variable" ]; then printf '%s\n' "$_variable"
+    elif [ -n "$_fallback" ]; then printf '%s\n' "$_fallback"
+    else return 1
+    fi
+}
+
+preview_source_json() {
+    _family="$1"
+    _src="$(find_preview_source "$_family")"
+    [ -f "$_src" ] || { printf '{"status":"error","message":"找不到预览字体"}\n'; return 1; }
+    _bytes="$(wc -c < "$_src" 2>/dev/null | tr -d '[:space:]')"
+    case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
+    _sha="$(font_file_sha256 "$_src")"
+    printf '{"status":"ok","data":{"family":"%s","file":"%s","bytes":%s,"sha256":"%s"}}\n' \
+        "$(json_escape "$_family")" "$(json_escape "$(basename "$_src")")" "$_bytes" "$(json_escape "$_sha")"
 }
 
 preview_export() {
@@ -163,7 +198,9 @@ preview_export() {
     mkdir -p "${_dest%/*}" 2>/dev/null || true
     cp -f "$_src" "$_dest" 2>/dev/null || { printf '{"status":"error","message":"无法导出预览字体"}\n'; return 1; }
     chmod 0644 "$_dest" 2>/dev/null || true
-    printf '{"status":"ok","data":{"path":"%s"}}\n' "$(json_escape "$_dest")"
+    _sha="$(font_file_sha256 "$_src")"
+    printf '{"status":"ok","data":{"path":"%s","source":"%s","sha256":"%s"}}\n' \
+        "$(json_escape "$_dest")" "$(json_escape "$(basename "$_src")")" "$(json_escape "$_sha")"
 }
 
 weight_axis_info() {
@@ -192,6 +229,7 @@ case "${1:-status}" in
             printf '{"status":"error","message":"原生导入组件不可用"}\n'
         fi
         ;;
+    preview_source) preview_source_json "${2:-}" ;;
     preview_export) preview_export "${2:-}" "${3:-}" ;;
     weight_axis) weight_axis_info "${2:-}" ;;
     validate) manager_ready || exit 1; sh "$FONT_MANAGER" action validate "${2:-}" ;;
