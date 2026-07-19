@@ -10,8 +10,10 @@ import java.util.Base64
 import java.util.Properties
 
 internal enum class ImportQueueItemStatus {
-    PENDING, RUNNING, IMPORTED, DUPLICATE, FAILED;
-    val terminal: Boolean get() = this == IMPORTED || this == DUPLICATE || this == FAILED
+    PENDING, RUNNING, IMPORTED, DUPLICATE, FAILED, CANCELLED;
+
+    val terminal: Boolean
+        get() = this == IMPORTED || this == DUPLICATE || this == FAILED || this == CANCELLED
 }
 
 internal data class ImportQueueItem(
@@ -34,6 +36,7 @@ internal data class ImportQueueTask(
     val processed: Int get() = items.count { it.status.terminal }
     val imported: Int get() = items.count { it.status == ImportQueueItemStatus.IMPORTED }
     val duplicates: Int get() = items.count { it.status == ImportQueueItemStatus.DUPLICATE }
+    val cancelled: Int get() = items.count { it.status == ImportQueueItemStatus.CANCELLED }
     val failures: List<String> get() = items.filter { it.status == ImportQueueItemStatus.FAILED }.map {
         "${it.displayName}：${it.error.ifBlank { "导入失败" }}"
     }
@@ -44,7 +47,48 @@ internal data class ImportQueueTask(
         message = "检测到未完成导入任务，正在恢复队列",
         recovered = true,
         items = items.map {
-            if (it.status == ImportQueueItemStatus.RUNNING) it.copy(status = ImportQueueItemStatus.PENDING, error = "") else it
+            if (it.status == ImportQueueItemStatus.RUNNING) {
+                it.copy(status = ImportQueueItemStatus.PENDING, error = "")
+            } else {
+                it
+            }
+        },
+    )
+
+    fun forManualResume(): ImportQueueTask = copy(
+        phase = NativeImportPhase.QUEUED,
+        message = "继续导入剩余 ${items.count { !it.status.terminal }} 个文件",
+        items = items.map {
+            if (it.status == ImportQueueItemStatus.RUNNING) {
+                it.copy(status = ImportQueueItemStatus.PENDING, error = "")
+            } else {
+                it
+            }
+        },
+    )
+
+    fun forRetryFailures(): ImportQueueTask = copy(
+        phase = NativeImportPhase.QUEUED,
+        message = "准备重试 ${items.count { it.status == ImportQueueItemStatus.FAILED }} 个失败文件",
+        recovered = false,
+        items = items.map {
+            if (it.status == ImportQueueItemStatus.FAILED) {
+                it.copy(status = ImportQueueItemStatus.PENDING, error = "")
+            } else {
+                it
+            }
+        },
+    )
+
+    fun cancelRemaining(): ImportQueueTask = copy(
+        phase = NativeImportPhase.CANCELLED,
+        message = "字体导入已取消，剩余文件未处理",
+        items = items.map {
+            if (it.status == ImportQueueItemStatus.PENDING || it.status == ImportQueueItemStatus.RUNNING) {
+                it.copy(status = ImportQueueItemStatus.CANCELLED, error = "")
+            } else {
+                it
+            }
         },
     )
 
@@ -55,6 +99,7 @@ internal data class ImportQueueTask(
         processed = processed,
         imported = imported,
         duplicates = duplicates,
+        cancelled = cancelled,
         failed = failures,
         currentFile = items.firstOrNull { it.status == ImportQueueItemStatus.RUNNING }?.displayName.orEmpty(),
         message = message,
@@ -133,7 +178,9 @@ internal class NativeImportQueueStore(context: Context) {
 
     fun load(): ImportQueueTask? = if (stateFile.isFile) {
         decodeImportQueue(runCatching { stateFile.readText() }.getOrDefault(""))
-    } else null
+    } else {
+        null
+    }
 
     fun save(task: ImportQueueTask) {
         root.mkdirs()
@@ -149,6 +196,11 @@ internal class NativeImportQueueStore(context: Context) {
             }
             temporary.delete()
         }
+    }
+
+    fun clear() {
+        runCatching { stateFile.delete() }
+        runCatching { File(root, "task.properties.tmp").delete() }
     }
 
     fun stagedFile(taskId: String, index: Int, displayName: String): File {
