@@ -1,0 +1,72 @@
+name: Apply Alpha1.3 HyperOS weight mapping
+on:
+  push:
+    branches:
+      - feature/v14.3-alpha1-native-import
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v14.3-alpha1-native-import
+          fetch-depth: 0
+      - name: Map all nine imported weight roles
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('common/rom_adapters.sh')
+          text = path.read_text(encoding='utf-8')
+          old = '''            case "$w" in
+                  thin) num=100; rb="Thin" ;;
+                  light) num=300; rb="Light" ;;
+                  medium) num=500; rb="Medium" ;;
+                  semibold) num=600; rb="SemiBold" ;;
+                  bold) num=700; rb="Bold" ;;
+                  black) num=900; rb="ExtraBold" ;;  # HyperOS Roboto 系列没有 Black，用 ExtraBold 顶替
+                  *) num=""; rb="" ;;
+              esac
+          '''
+          new = '''            case "$w" in
+                  thin) num=100; rb="Thin" ;;
+                  extralight) num=200; rb="ExtraLight" ;;
+                  light) num=300; rb="Light" ;;
+                  medium) num=500; rb="Medium" ;;
+                  semibold) num=600; rb="SemiBold" ;;
+                  bold) num=700; rb="Bold" ;;
+                  extrabold) num=800; rb="ExtraBold" ;;
+                  black) num=900; rb="ExtraBold" ;;  # HyperOS Roboto 系列没有 Black，用 ExtraBold 顶替
+                  *) num=""; rb="" ;;
+              esac
+          '''
+          if old not in text:
+              raise SystemExit('HyperOS weight mapping anchor not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          module = Path('module.prop')
+          value = module.read_text(encoding='utf-8')
+          lines = []
+          for line in value.splitlines():
+              if line.startswith('description='):
+                  line = 'description=Android 全局字体管理模块：多字重模块读取内部真实字重，支持九档映射、安全导入、TTC 字体面和真实可变轴'
+              lines.append(line)
+          module.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+
+          check = Path('scripts/check.sh')
+          value = check.read_text(encoding='utf-8')
+          anchor = "grep -q 'import_probe_metadata' \"$ROOT/common/font_import.sh\"\n"
+          addition = anchor + "grep -q 'extralight) num=200' \"$ROOT/common/rom_adapters.sh\"\ngrep -q 'extrabold) num=800' \"$ROOT/common/rom_adapters.sh\"\n"
+          if anchor not in value:
+              raise SystemExit('check anchor not found')
+          check.write_text(value.replace(anchor, addition, 1), encoding='utf-8')
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add common/rom_adapters.sh module.prop scripts/check.sh
+          git commit -m "fix: map imported 200 and 800 weights on HyperOS"
+          git push origin HEAD:feature/v14.3-alpha1-native-import
