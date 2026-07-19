@@ -227,6 +227,10 @@ check_hyperos() {
 detect_font_family() {
     result="${1%.*}"
     case "$result" in *"-Regular") result="${result%-Regular}" ;; esac
+    case "$result" in *"-ExtraBold") result="${result%-ExtraBold}" ;; esac
+    case "$result" in *"-UltraBold") result="${result%-UltraBold}" ;; esac
+    case "$result" in *"-ExtraLight") result="${result%-ExtraLight}" ;; esac
+    case "$result" in *"-UltraLight") result="${result%-UltraLight}" ;; esac
     case "$result" in *"-Bold") result="${result%-Bold}" ;; esac
     case "$result" in *"-Light") result="${result%-Light}" ;; esac
     case "$result" in *"-Medium") result="${result%-Medium}" ;; esac
@@ -239,6 +243,10 @@ detect_font_family() {
     case "$result" in *"-Condensed") result="${result%-Condensed}" ;; esac
     case "$result" in *"-Extended") result="${result%-Extended}" ;; esac
     case "$result" in *"-regular") result="${result%-regular}" ;; esac
+    case "$result" in *"-extrabold") result="${result%-extrabold}" ;; esac
+    case "$result" in *"-ultrabold") result="${result%-ultrabold}" ;; esac
+    case "$result" in *"-extralight") result="${result%-extralight}" ;; esac
+    case "$result" in *"-ultralight") result="${result%-ultralight}" ;; esac
     case "$result" in *"-bold") result="${result%-bold}" ;; esac
     case "$result" in *"-light") result="${result%-light}" ;; esac
     case "$result" in *"-medium") result="${result%-medium}" ;; esac
@@ -282,12 +290,14 @@ detect_font_weight() {
     esac
 
     case "$lower" in
-        *thin*|*极细*) echo "thin" ;;
-        *light*|*细体*) echo "light" ;;
-        *medium*|*中等*) echo "medium" ;;
-        *semibold*|*半粗*) echo "semibold" ;;
-        *bold*|*粗体*) echo "bold" ;;
-        *black*|*heavy*|*特粗*|*重体*) echo "black" ;;
+        *thin*|*-100.*|*_100.*|*极细*) echo "thin" ;;
+        *extralight*|*ultralight*|*extra-light*|*ultra-light*|*-200.*|*_200.*) echo "extralight" ;;
+        *light*|*-300.*|*_300.*|*细体*) echo "light" ;;
+        *medium*|*-500.*|*_500.*|*中等*) echo "medium" ;;
+        *semibold*|*demibold*|*-600.*|*_600.*|*半粗*) echo "semibold" ;;
+        *extrabold*|*ultrabold*|*extra-bold*|*ultra-bold*|*-800.*|*_800.*) echo "extrabold" ;;
+        *bold*|*-700.*|*_700.*|*粗体*) echo "bold" ;;
+        *black*|*heavy*|*-900.*|*_900.*|*特粗*|*重体*) echo "black" ;;
         *) echo "regular" ;;
     esac
 }
@@ -295,9 +305,10 @@ detect_font_weight() {
 # 字重名首字母大写（纯 shell，不用 sed）
 capitalize_first() {
     case "$1" in
-        thin) echo "Thin" ;; light) echo "Light" ;; regular) echo "Regular" ;;
-        medium) echo "Medium" ;; semibold) echo "SemiBold" ;; bold) echo "Bold" ;;
-        black) echo "Black" ;; variable) echo "Variable" ;; *) echo "$1" ;;
+        thin) echo "Thin" ;; extralight) echo "ExtraLight" ;; light) echo "Light" ;;
+        regular) echo "Regular" ;; medium) echo "Medium" ;; semibold) echo "SemiBold" ;;
+        bold) echo "Bold" ;; extrabold) echo "ExtraBold" ;; black) echo "Black" ;;
+        variable) echo "Variable" ;; *) echo "$1" ;;
     esac
 }
 
@@ -305,12 +316,14 @@ capitalize_first() {
 weight_sort_order() {
     case "$1" in
         thin) echo 1 ;;
-        light) echo 2 ;;
-        regular) echo 3 ;;
-        medium) echo 4 ;;
-        semibold) echo 5 ;;
-        bold) echo 6 ;;
-        black) echo 7 ;;
+        extralight) echo 2 ;;
+        light) echo 3 ;;
+        regular) echo 4 ;;
+        medium) echo 5 ;;
+        semibold) echo 6 ;;
+        bold) echo 7 ;;
+        extrabold) echo 8 ;;
+        black) echo 9 ;;
         variable) echo 0 ;;
         *) echo 9 ;;
     esac
@@ -333,7 +346,7 @@ scan_family_weights() {
     case "$weights" in ,*) weights="${weights#,}" ;; esac
     # 统一按从细到粗排序，避免文件名/目录顺序导致 WebUI 标签顺序混乱。
     sorted=""
-    for _role in variable thin light regular medium semibold bold black; do
+    for _role in variable thin extralight light regular medium semibold bold extrabold black; do
         case ",$weights," in
             *",$_role,"*) [ -n "$sorted" ] && sorted="$sorted,"; sorted="$sorted$_role" ;;
         esac

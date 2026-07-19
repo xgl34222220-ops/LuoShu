@@ -18,7 +18,7 @@ mkdir -p "$MODDIR/config" "$MODDIR/logs" "$MODDIR/system/fonts" "$MODDIR/webroot
 chmod 0755 "$MODDIR" "$MODDIR/common" "$MODDIR/webroot" 2>/dev/null || true
 chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" 2>/dev/null || true
 find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
-chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" 2>/dev/null || true
+chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" "$MODDIR/common/font_axis_info.py" 2>/dev/null || true
 
 log_message "INFO" "===== post-fs-data $MODULE_VERSION 开始 ====="
 
@@ -27,8 +27,12 @@ rm -f "$MODDIR/system/etc/fonts.xml" "$MODDIR/system/etc/font_fallback.xml" 2>/d
 rm -f "$MODDIR/system/fonts/NotoColorEmoji.ttf" "$MODDIR/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
 rm -f "$MODDIR/config/active_emoji.conf" "$MODDIR/config/emoji_task.conf" "$MODDIR/config/emoji_reboot_required.conf" 2>/dev/null || true
 rm -rf "$MODDIR/webroot/emoji" 2>/dev/null || true
+
+# RC2 使用统一的 axes_task.conf；升级时清理实验版本遗留状态，避免 App 接管错误任务。
+rm -f "$MODDIR/config"/v*_axes_task.conf "$MODDIR/config"/v*_axes_mix.conf "$MODDIR/config"/v*_axes_worker.pid 2>/dev/null || true
 set_perm_recursive "$MODDIR/system/fonts" 0 0 0755 0644 2>/dev/null || true
 chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
+
 # 通过统一桥恢复中断的原子负载，并清理独立字重暂存任务。
 if [ -f "$MODDIR/common/v14_mix.sh" ]; then
     MODDIR="$MODDIR" sh "$MODDIR/common/v14_mix.sh" recover >/dev/null 2>&1 || true
@@ -54,7 +58,7 @@ if [ "$IS_COLOROS" = "true" ] && [ -d /data/fonts ]; then
     log_message "INFO" "ColorOS /data/fonts 安全同步：$_count 个文字目标"
 fi
 
-# 字体预览索引由 WebUI 按需刷新，启动早期不扫描或复制大字体。
+# 字体预览索引由 App/WebUI 按需刷新，启动早期不扫描或复制大字体。
 
 # 完整重启后解除本次开机切换保护。
 rm -f "$MODDIR/config/text_reboot_required.conf" "$MODDIR/config/font_weight_reboot_required.conf" \

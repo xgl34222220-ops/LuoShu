@@ -1,60 +1,44 @@
 #!/system/bin/sh
-# LuoShu v14.2 RC1 - 安装脚本
-
-MODPATH="${MODPATH:-$3}"
+# 洛书安全安装脚本。版本以 module.prop 为唯一来源。
 set +e
 
+MODPATH="${MODPATH:-$3}"
+MODULE_VERSION=$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1)
+[ -n "$MODULE_VERSION" ] || MODULE_VERSION="unknown"
 MODULE_DIR="$MODPATH"
-if [ -f "$MODPATH/common/util_functions.sh" ]; then . "$MODPATH/common/util_functions.sh"; fi
-if [ -f "$MODPATH/common/font_check.sh" ]; then . "$MODPATH/common/font_check.sh"; fi
-if [ -f "$MODPATH/common/rom_adapters.sh" ]; then . "$MODPATH/common/rom_adapters.sh"; fi
-if [ -f "$MODPATH/common/volume_key.sh" ]; then . "$MODPATH/common/volume_key.sh"; fi
+[ -f "$MODPATH/common/util_functions.sh" ] && . "$MODPATH/common/util_functions.sh"
+[ -f "$MODPATH/common/rom_adapters.sh" ] && . "$MODPATH/common/rom_adapters.sh"
 
-# 最小降级保护
-if ! type detect_font_family >/dev/null 2>&1; then
-    detect_font_family() { _n="${1%.*}"; echo "${_n%-*}"; }
+if type ensure_public_storage >/dev/null 2>&1; then
+    ensure_public_storage
+else
+    mkdir -p /sdcard/LuoShu/fonts /sdcard/LuoShu/import /sdcard/LuoShu/reports 2>/dev/null || true
 fi
-if ! type check_coloros >/dev/null 2>&1; then check_coloros() { IS_COLOROS=false; }; fi
-if ! type check_hyperos >/dev/null 2>&1; then check_hyperos() { IS_HYPEROS=false; }; fi
-if ! type ensure_public_storage >/dev/null 2>&1; then
-    LUOSHU_PUBLIC_DIR="/sdcard/LuoShu"
-    USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
-    USER_IMPORT_DIR="$LUOSHU_PUBLIC_DIR/import"
-    USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
-    ensure_public_storage() { mkdir -p "$USER_FONTS_DIR" "$USER_IMPORT_DIR" "$USER_REPORT_DIR" 2>/dev/null || true; }
-fi
-
-ensure_public_storage
-check_coloros
-check_hyperos
+type check_coloros >/dev/null 2>&1 && check_coloros
+type check_hyperos >/dev/null 2>&1 && check_hyperos
 
 ui_print ""
 ui_print "╔══════════════════════════════════╗"
-ui_print "║        洛书 v14.2 RC1         ║"
-ui_print "║      Android 全局字体管理       ║"
+ui_print "║  洛书 $MODULE_VERSION"
+ui_print "║  Android 全局字体管理"
 ui_print "╚══════════════════════════════════╝"
-ui_print ""
-if [ "$IS_COLOROS" = "true" ]; then
-    ui_print "✓ 系统环境：ColorOS ${COLOROS_VERSION:-未知}"
-elif [ "$IS_HYPEROS" = "true" ]; then
-    ui_print "✓ 系统环境：HyperOS/MIUI ${HYPEROS_VERSION:-未知}"
+if [ "${IS_COLOROS:-false}" = true ]; then
+    ui_print "✓ 系统：ColorOS ${COLOROS_VERSION:-未知}"
+elif [ "${IS_HYPEROS:-false}" = true ]; then
+    ui_print "✓ 系统：HyperOS/MIUI ${HYPEROS_VERSION:-未知}"
 else
-    ui_print "✓ 系统环境：通用 Android"
+    ui_print "✓ 系统：通用 Android"
 fi
 
 ROOT_MANAGER="Root"
-if command -v apd >/dev/null 2>&1 || [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then
+if command -v apd >/dev/null 2>&1 || [ -d /data/adb/apatch ]; then
     ROOT_MANAGER="APatch"
 elif command -v ksud >/dev/null 2>&1 || [ -d /data/adb/ksu ]; then
-    _ksu_info="$(ksud -V 2>/dev/null || ksud --version 2>/dev/null || true)"
-    case "$_ksu_info $(getprop ro.build.version.incremental 2>/dev/null)" in
-        *SukiSU*|*sukisu*|*SUKISU*) ROOT_MANAGER="SukiSU Ultra" ;;
-        *) ROOT_MANAGER="KernelSU" ;;
-    esac
+    ROOT_MANAGER="KernelSU / SukiSU Ultra"
 elif command -v magisk >/dev/null 2>&1 || [ -d /data/adb/magisk ]; then
     ROOT_MANAGER="Magisk"
 fi
-ui_print "✓ Root 管理器：$ROOT_MANAGER"
+ui_print "✓ Root：$ROOT_MANAGER"
 
 MOUNTIFY_ACTIVE=false
 if [ -d /data/adb/modules/mountify ] && [ ! -f /data/adb/modules/mountify/disable ] && [ ! -f /data/adb/modules/mountify/remove ]; then
@@ -62,115 +46,65 @@ if [ -d /data/adb/modules/mountify ] && [ ! -f /data/adb/modules/mountify/disabl
 elif [ -d /data/adb/mountify ]; then
     MOUNTIFY_ACTIVE=true
 fi
-if [ "$MOUNTIFY_ACTIVE" = "true" ]; then
-    ui_print "✓ Mountify：已检测并启用"
-else
-    ui_print "• 元模块推荐：Mountify（可选）"
-fi
-ui_print "✓ 字体目录：/sdcard/LuoShu/fonts/"
-ui_print ""
+[ "$MOUNTIFY_ACTIVE" = true ] && ui_print "✓ Mountify：已启用" || ui_print "• 元模块推荐：Mountify（可选）"
 
 mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot/fonts" 2>/dev/null || true
-
-scan_fonts_lines() {
-    for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
-              "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
-        [ -f "$_f" ] || continue
-        _fam=$(detect_font_family "$(basename "$_f")")
-        case "$_fam" in SysFont*|SysSans*|'') continue ;; esac
-        printf '%s\n' "$_fam"
-    done | awk '!seen[$0]++'
-}
-
-FONT_LIST_TMP="$MODPATH/config/.install_fonts.$$"
-scan_fonts_lines > "$FONT_LIST_TMP" 2>/dev/null || : > "$FONT_LIST_TMP"
-FONT_COUNT=$(grep -c . "$FONT_LIST_TMP" 2>/dev/null)
-[ -n "$FONT_COUNT" ] || FONT_COUNT=0
-case "$FONT_COUNT" in ''|*[!0-9]*) FONT_COUNT=0 ;; esac
-
 OLD_MOD="/data/adb/modules/LuoShu"
-# 停止旧版可能仍在运行的复合或字重实例化任务，避免升级期间继续占用内存。
-if [ -f "$OLD_MOD/config/mix_worker.pid" ]; then
-    _old_worker=$(cat "$OLD_MOD/config/mix_worker.pid" 2>/dev/null | tr -cd '0-9')
-    [ -z "$_old_worker" ] || kill "$_old_worker" 2>/dev/null || true
-fi
-if command -v pkill >/dev/null 2>&1; then
-    pkill -f "$OLD_MOD/common/composite_font.py" 2>/dev/null || true
-    pkill -f "$OLD_MOD/common/font_instance.py" 2>/dev/null || true
-fi
-rm -f "$OLD_MOD/.font_switch.lock" "$OLD_MOD/config/mix_worker.pid" "$OLD_MOD/config/composite_progress.json" 2>/dev/null || true
-rm -rf "$OLD_MOD/cache/weighted-mix" 2>/dev/null || true
 
-# 刷写阶段只安装引擎，不扫描大字体、不生成复合字体、不继承旧文字负载。
-SELECTED_FONT="default"
-rm -rf "$MODPATH/system/fonts" "$MODPATH/system_ext/fonts" "$MODPATH/product/fonts" 2>/dev/null || true
+# 仅保留用户偏好，不继承旧字体负载、历史任务和待重启状态。
+for _config in font_weight.conf font_weight_original.conf axes_mix.conf font_mix.conf; do
+    [ -f "$OLD_MOD/config/$_config" ] && cp -f "$OLD_MOD/config/$_config" "$MODPATH/config/$_config" 2>/dev/null || true
+done
+rm -rf "$MODPATH/system/fonts" "$MODPATH/system_ext/fonts" "$MODPATH/product/fonts" "$MODPATH/cache/weighted-mix" "$MODPATH/cache/axes-mix" 2>/dev/null || true
 mkdir -p "$MODPATH/system/fonts" 2>/dev/null || true
-ui_print "✓ 已安装独立字重复合字体引擎"
-ui_print "• 检测到字体库：${FONT_COUNT} 款（刷写阶段不处理）"
-ui_print "• 首次启动保持系统默认字体"
-ui_print "• 重启后可分别选择中文、英文、数字及各自字重"
-
-# v14.2 RC1 不管理 Emoji、图标或符号字体；清理旧包内部状态，但不删除用户公开目录中的个人文件。
 rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" 2>/dev/null || true
 rm -f "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
-rm -f "$MODPATH/config/active_emoji.conf" "$MODPATH/config/emoji_task.conf" "$MODPATH/config/emoji_reboot_required.conf" 2>/dev/null || true
+rm -f "$MODPATH/config/previous_font.conf" "$MODPATH/config/switch_task.conf" "$MODPATH/config/mix_task.conf" \
+      "$MODPATH/config/axes_task.conf" "$MODPATH/config/text_reboot_required.conf" \
+      "$MODPATH/config/font_weight_reboot_required.conf" "$MODPATH/config/active_emoji.conf" \
+      "$MODPATH/config/emoji_task.conf" "$MODPATH/config/emoji_reboot_required.conf" \
+      "$MODPATH/config/app_install_pending" "$MODPATH/config/app_install_state.conf" \
+      "$MODPATH/config/app_install_manual" \
+      "$MODPATH/config"/v*_axes_task.conf "$MODPATH/config"/v*_axes_mix.conf "$MODPATH/config"/v*_axes_worker.pid 2>/dev/null || true
 rm -rf "$MODPATH/webroot/emoji" 2>/dev/null || true
-printf '%s\n' "$SELECTED_FONT" > "$MODPATH/config/active_font.conf"
-cp -f "$FONT_LIST_TMP" "$MODPATH/config/font_list.conf" 2>/dev/null || : > "$MODPATH/config/font_list.conf"
-rm -f "$FONT_LIST_TMP" 2>/dev/null || true
+printf 'default\n' > "$MODPATH/config/active_font.conf"
 
-for _fw_conf in font_weight.conf font_weight_original.conf v142_weighted_mix.conf; do
-    [ -f "$OLD_MOD/config/$_fw_conf" ] && cp -f "$OLD_MOD/config/$_fw_conf" "$MODPATH/config/$_fw_conf" 2>/dev/null || true
-done
-
-cp -f "$MODPATH/common/font_manager.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
-chmod 755 "$MODPATH/customize.sh" "$MODPATH/post-fs-data.sh" "$MODPATH/service.sh" "$MODPATH/uninstall.sh" "$MODPATH/action.sh" 2>/dev/null || true
-chmod 755 "$MODPATH/common/font_manager.sh" "$MODPATH/common/font_check.sh" "$MODPATH/common/font_import.sh" "$MODPATH/common/font_report.sh" \
-          "$MODPATH/common/util_functions.sh" "$MODPATH/common/rom_adapters.sh" "$MODPATH/common/volume_key.sh" \
-          "$MODPATH/common/play_font_bridge" "$MODPATH/common/wechat_xweb_bridge" 2>/dev/null || true
-chmod 755 "$MODPATH/common/module_status.sh" "$MODPATH/common/v14_switch.sh" "$MODPATH/common/font_mix.sh" "$MODPATH/common/v14_mix.sh" \
-          "$MODPATH/common/v142_weighted_mix.sh" "$MODPATH/common/luoshu_composite.sh" 2>/dev/null || true
-chmod 0644 "$MODPATH/common/font_instance.py" "$MODPATH/common/composite_font.py" 2>/dev/null || true
-chmod 755 "$MODPATH/common/python/bin/luoshu-python" 2>/dev/null || true
-chmod 755 "$MODPATH/system/bin/洛书" 2>/dev/null || true
-[ ! -f "$MODPATH/system/bin/luoshud" ] || chmod 755 "$MODPATH/system/bin/luoshud" 2>/dev/null || true
+# 安装安全 CLI，不再暴露旧回滚、热刷新或重启 SystemUI 命令。
+cp -f "$MODPATH/common/luoshu_cli.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
+chmod 0755 "$MODPATH"/*.sh "$MODPATH/common"/*.sh "$MODPATH/common/play_font_bridge" "$MODPATH/common/wechat_xweb_bridge" 2>/dev/null || true
+chmod 0644 "$MODPATH/common"/*.py 2>/dev/null || true
+chmod 0755 "$MODPATH/common/python/bin/luoshu-python" "$MODPATH/system/bin/洛书" 2>/dev/null || true
+[ ! -f "$MODPATH/system/bin/luoshud" ] || chmod 0755 "$MODPATH/system/bin/luoshud" 2>/dev/null || true
 find "$MODPATH/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
 find "$MODPATH/webroot" -type f -exec chmod 0644 {} \; 2>/dev/null || true
 chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" "$MODPATH/webroot" 2>/dev/null || true
-[ ! -f "$MODPATH/bundled/LuoShu-App.apk" ] || chmod 0644 "$MODPATH/bundled/LuoShu-App.apk" 2>/dev/null || true
-
+[ ! -f "$MODPATH/bundled/LuoShu-App.apk" ] || chmod 0644 "$MODPATH/bundled/LuoShu-App.apk" "$MODPATH/bundled/app.prop" 2>/dev/null || true
 touch "$MODPATH/magic" 2>/dev/null || true
 
-# 完整包会内置原生 App。Android 正常运行时直接安装；恢复环境或安装失败时，
-# 保留 APK，并允许用户重启后点击 Root 管理器中的模块“操作”按钮再次安装。
-if [ -s "$MODPATH/bundled/LuoShu-App.apk" ]; then
-    if command -v pm >/dev/null 2>&1 && [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ]; then
-        _app_result="$(pm install -r -d --user 0 "$MODPATH/bundled/LuoShu-App.apk" 2>&1)"
-        _app_code=$?
-        printf '%s\n' "$_app_result" > "$MODPATH/logs/app-install.log" 2>/dev/null || true
-        if [ "$_app_code" -eq 0 ] && printf '%s' "$_app_result" | grep -q 'Success'; then
-            ui_print "✓ 洛书 App 已安装或更新"
-        else
-            ui_print "! App 自动安装未完成，重启后点击模块“操作”按钮重试"
-        fi
-    else
-        ui_print "• 洛书 App 已内置，重启后点击模块“操作”按钮安装"
-    fi
-else
-    ui_print "• 当前为纯模块包，未内置洛书 App"
-fi
+ui_print "✓ 已部署真实字重与复合字体引擎"
+ui_print "✓ 当前保持系统默认字体"
+ui_print "• 刷写阶段不扫描、不生成大字体"
 
-ui_print ""
-ui_print "╭──────────────────────────────╮"
-ui_print "│          安装完成            │"
-ui_print "╰──────────────────────────────╯"
-ui_print "✓ 独立字重组合引擎已安装；当前保持系统默认字体"
-if [ "$MOUNTIFY_ACTIVE" = "true" ]; then
-    ui_print "✓ Mountify 适配已启用"
+if [ -s "$MODPATH/bundled/LuoShu-App.apk" ] && [ -f "$MODPATH/common/app_installer.sh" ]; then
+    _app_result=$(MODDIR="$MODPATH" APP_INSTALL_LOG="$MODPATH/logs/app-install.log" sh "$MODPATH/common/app_installer.sh" flash 2>/dev/null)
+    _app_code=$?
+    case "$_app_result" in
+        installed)
+            ui_print "✓ 洛书 App 已随 Full 模块自动安装或更新"
+            ;;
+        already-current)
+            ui_print "✓ 洛书 App 已是当前版本，无需重复安装"
+            ;;
+        *)
+            ui_print "• 当前刷写环境无法完成 App 更新，将在首次开机后自动补装"
+            ui_print "• 也可以重启后点击模块“操作”按钮手动重试"
+            [ "$_app_code" -eq 0 ] || true
+            ;;
+    esac
 else
-    ui_print "• 如需元模块，推荐使用 Mountify"
+    ui_print "• 当前为 Lite 包，不内置 App"
 fi
-ui_print "请完整重启手机后进入 WebUI 配置字体。"
+ui_print "请完整重启后进入洛书 App 或 WebUI 配置字体。"
 ui_print ""
-[ -f "$MODPATH/common/module_status.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/module_status.sh" "$SELECTED_FONT" >/dev/null 2>&1 || true
+[ -f "$MODPATH/common/module_status.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/module_status.sh" default >/dev/null 2>&1 || true
 exit 0

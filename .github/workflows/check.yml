@@ -1,8 +1,15 @@
 name: Validate source
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - fix/v14.2-rc2-stabilization
+      - feature/v14.3-alpha1-native-import
   pull_request:
-    branches: [main]
+    branches:
+      - main
+      - baseline/v14.2-rc1-rebuild
+      - fix/v14.2-rc2-stabilization
     paths:
       - module.prop
       - common/**
@@ -12,6 +19,7 @@ on:
       - webroot/**
       - scripts/**
       - licenses/**
+      - docs/**
       - customize.sh
       - post-fs-data.sh
       - service.sh
@@ -27,14 +35,7 @@ on:
       - THIRD_PARTY_NOTICES.md
       - CONTRIBUTING.md
       - CHANGELOG.md
-      - RELEASE_NOTES_v14.1.md
-      - RELEASE_NOTES_v14.1.1_RC2.md
-      - RELEASE_NOTES_v14.1.1_RC3.md
-      - RELEASE_NOTES_v14.2_ALPHA1.md
-      - RELEASE_NOTES_v14.2_ALPHA2.md
-      - RELEASE_NOTES_v14.2_ALPHA3.md
-      - RELEASE_NOTES_v14.2_HYBRID_ALPHA5.md
-      - RELEASE_NOTES_v14.2_ALPHA6.md
+      - RELEASE_NOTES_*.md
       - .github/workflows/check.yml
       - .github/workflows/release.yml
 permissions:
@@ -42,53 +43,131 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 65
     steps:
       - uses: actions/checkout@v4
-      - name: Collect RC3 legacy inventory
+
+      - name: Collect legacy inventory
         shell: bash
         run: |
           set +e
-          sh ./scripts/rc3_audit.sh > rc3-legacy-inventory.txt 2>&1
-          echo $? > rc3-legacy-inventory.exit
-          cat rc3-legacy-inventory.txt
+          sh ./scripts/rc3_audit.sh > legacy-inventory.txt 2>&1
+          echo $? > legacy-inventory.exit
+          cat legacy-inventory.txt
           exit 0
+
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-RC3-legacy-inventory
+          name: LuoShu-legacy-inventory
           path: |
-            rc3-legacy-inventory.txt
-            rc3-legacy-inventory.exit
+            legacy-inventory.txt
+            legacy-inventory.exit
           if-no-files-found: error
-      - name: Enforce RC3 legacy inventory
-        run: test "$(cat rc3-legacy-inventory.exit)" = 0
+
+      - name: Enforce legacy inventory
+        run: test "$(cat legacy-inventory.exit)" = 0
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+
       - uses: actions/cache@v4
         with:
           path: common/python
           key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+
       - name: Prepare ARM64 composite runtime
         run: |
           if [ ! -x common/python/bin/luoshu-python ]; then
             sh ./scripts/prepare_composite_runtime.sh
           fi
+
       - name: Run source checks
         run: sh ./scripts/check.sh
-      - name: Build test package
-        run: LUOSHU_VARIANT=lite sh ./scripts/build.sh
-      - name: Inspect package
+
+      - name: Check composite role coverage
         shell: bash
         run: |
+          set -euo pipefail
+          CJK="$(find /usr/share/fonts -type f \( -iname 'NotoSansCJK-Regular.ttc' -o -iname 'NotoSansCJK-Regular.otf' \) -print -quit)"
+          LATIN="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
+          test -s "$CJK"
+          test -s "$LATIN"
+          export PYTHONPATH="$PWD/common/python/lib/python3.14/site-packages"
+          python3 common/font_role_check.py "$CJK" cjk
+          python3 common/font_role_check.py "$LATIN" latin
+          python3 common/font_role_check.py "$LATIN" digit
+          if python3 common/font_role_check.py "$LATIN" cjk; then
+            echo 'Latin-only font unexpectedly passed the CJK role gate' >&2
+            exit 1
+          fi
+          python3 - <<'PY'
+          import sys
+          sys.path.insert(0, 'common')
+          import font_role_check as gate
+
+          optional_punctuation = set(map(ord, ' .,!?;:()[]+-/%'))
+          for role in ('cjk', 'latin', 'digit'):
+              assert not (optional_punctuation & set(gate.required(role))), role
+          assert set(gate.LATIN) <= set(gate.required('cjk'))
+          assert set(gate.DIGITS) <= set(gate.required('cjk'))
+          PY
+
+      - name: Compile, test and build native App
+        working-directory: android-app
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug
+
+      - name: Build App, Full and Lite candidates
+        shell: bash
+        run: |
+          set -euo pipefail
           . ./scripts/version.sh
-          asset="$(find dist -maxdepth 1 -type f -name '*.zip' -print -quit)"
-          test -s "$asset"
-          unzip -t "$asset" >/dev/null
+          apk='android-app/app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$apk"
+          rm -rf dist
+          mkdir -p dist
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
+          cp -f "$apk" "$app"
+          (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
+          LUOSHU_VARIANT=full LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
+          LUOSHU_VARIANT=lite sh ./scripts/build.sh
+
+      - name: Inspect candidate artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./scripts/version.sh
+          full="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Full.zip"
+          lite="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Lite.zip"
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
+          test -s "$full"; test -s "$lite"; test -s "$app"
+          unzip -t "$full" >/dev/null
+          unzip -t "$lite" >/dev/null
+          unzip -Z1 "$full" | grep -qx 'bundled/LuoShu-App.apk'
+          ! unzip -Z1 "$lite" | grep -qx 'bundled/LuoShu-App.apk'
+          unzip -p "$full" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
+          cmp -s "$app" "$RUNNER_TEMP/embedded.apk"
+          (cd dist && sha256sum -c "$(basename "$full").sha256")
+          (cd dist && sha256sum -c "$(basename "$lite").sha256")
+          (cd dist && sha256sum -c "$(basename "$app").sha256")
+
+          asset="$lite"
           unzip -Z1 "$asset" > /tmp/luoshu-package-list.txt
           test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "$LUOSHU_VERSION"
           test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "$LUOSHU_VERSION_CODE"
@@ -96,6 +175,10 @@ jobs:
           grep -qx 'common/composite_font.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_instance.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_coverage.py' /tmp/luoshu-package-list.txt
+          grep -qx 'common/font_role_check.py' /tmp/luoshu-package-list.txt
+          grep -qx 'common/font_role_check.sh' /tmp/luoshu-package-list.txt
+          grep -qx 'common/native_import.sh' /tmp/luoshu-package-list.txt
+          grep -qx 'common/luoshu_cli.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/v142_weighted_mix.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/luoshu_composite.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/python/bin/luoshu-python' /tmp/luoshu-package-list.txt
@@ -117,20 +200,31 @@ jobs:
           unzip -p "$asset" NOTICE.md | grep -q 'GPL-3.0-only'
           unzip -p "$asset" webroot/index.html | grep -q "v14.js?v=$LUOSHU_VERSION_CODE"
           unzip -p "$asset" webroot/environment.js | grep -q "UI_VERSION = '$LUOSHU_VERSION_CODE'"
+          unzip -p "$asset" webroot/environment.js | grep -q 'restartUi.hidden = true'
           unzip -p "$asset" common/font_mix.sh | grep -q 'full-composite-v5'
-          unzip -p "$asset" common/v14_mix.sh | grep -q 'v142_weighted_mix.sh'
+          unzip -p "$asset" common/v14_mix.sh | grep -q 'font_role_check.sh'
+          unzip -p "$asset" common/app_bridge.sh | grep -q 'common/v14_mix.sh'
+          unzip -p "$asset" common/app_bridge.sh | grep -q 'native_import.sh'
+          unzip -p "$asset" common/native_import.sh | grep -q 'trusted_source'
           unzip -p "$asset" common/font_instance.py | grep -q 'instantiateVariableFont'
           unzip -p "$asset" common/font_instance.py | grep -q -- '--axes'
-          unzip -p "$asset" common/v142_weighted_mix.sh | grep -q 'worker "$_request"'
-          unzip -p "$asset" webroot/workbench_weight_extension.css | grep -q 'mix-axis-panel'
+          unzip -p "$asset" common/v142_weighted_mix.sh | grep -q 'axes_task.conf'
+          unzip -p "$asset" common/app_bridge.sh | grep -q 'rebootRequired'
+          unzip -p "$asset" customize.sh | grep -q 'luoshu_cli.sh.*system/bin/洛书'
           unzip -p "$asset" post-fs-data.sh | grep -q 'v14_mix.sh.*recover'
+          ! unzip -p "$asset" common/v142_weighted_mix.sh | grep -q 'v143_axes'
+          ! unzip -p "$asset" common/app_bridge.sh | grep -q 'v143_axes'
+          ! unzip -p "$asset" customize.sh | grep -q 'pm install'
+          ! unzip -p "$asset" common/luoshu_cli.sh | grep -qE '回滚|重启界面|刷新字体缓存'
           ! unzip -p "$asset" service.sh | grep -q 'cmd font system --update'
           ! unzip -p "$asset" service.sh | grep -q 'oplus-font refresh'
           ! grep -qE '^system/etc/(fonts.xml|font_fallback.xml)$' /tmp/luoshu-package-list.txt
           ! grep -qE '(^|/)skip_mount(ify)?$' /tmp/luoshu-package-list.txt
           ! grep -qEi '(^|/)(emoji|__pycache__)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' /tmp/luoshu-package-list.txt
+
       - uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-RC1-Lite-validation
-          path: dist/*.zip*
+          name: EXTRACT-FIRST-LuoShu-v14.3-Alpha1-Full-Lite-Debug
+          path: dist/*
           if-no-files-found: error
+          retention-days: 14
