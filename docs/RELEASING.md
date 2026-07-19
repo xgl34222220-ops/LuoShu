@@ -1,6 +1,6 @@
 # 发布洛书
 
-`module.prop` 是模块、App、WebUI、缓存键与产物名称的唯一版本源。修改版本后，验证工作流会编译原生 App、运行模块检查并生成测试模块；它不会自动创建 Release。
+`module.prop` 是模块、App、WebUI、缓存键与产物名称的唯一版本源。修改版本后，验证工作流会编译原生 App、运行模块检查并生成测试模块；它不会自动创建测试版 Release。
 
 ## 首次配置固定 App 签名
 
@@ -24,10 +24,11 @@
 ## 发布步骤
 
 1. 将通过自动化和真机回归的候选版本整理到发布分支。
-2. 确认存在与版本完全匹配的发布说明，例如 `RELEASE_NOTES_v14.2_RC2.md`。
-3. 按 `module.prop` 创建唯一 Tag，例如 `v14.2-RC2`。
-4. 推送 Tag；`Publish signed release` 会重新运行完整源码检查、App lint/单元测试、签名构建、APK 证书校验与 Full/Lite 成品校验。
-5. 已存在的 Tag 或 Release不会被覆盖。修订内容必须提升版本号并创建新 Tag。
+2. 确认存在与版本完全匹配的发布说明，例如 `RELEASE_NOTES_v14.3.md`。
+3. 稳定版必须使用不含 Alpha、Beta、RC 的版本名，并提升 `versionCode`。
+4. 将稳定版本合并到 `main`；`Publish signed release` 会从 `module.prop` 创建唯一 Tag，例如 `v14.3`。
+5. 工作流重新运行完整源码检查、App lint/单元测试、固定签名构建、APK 证书校验与 Full/Lite 成品校验，然后创建不可覆盖的 GitHub Release。
+6. 预发行版仍可手动创建唯一 Tag；已存在的 Tag 或 Release 不会被覆盖，修订内容必须提升版本号。
 
 正式 Release 包含：
 
@@ -36,4 +37,4 @@
 - 独立正式 APK；
 - 每个产物对应的 SHA-256 文件。
 
-Full 包刷写阶段不会直接安装 App。完整重启后，通过 Root 管理器中的模块“操作”按钮安装或更新内置 App。
+Full 包会在刷写阶段优先自动覆盖更新 App；刷写环境无法调用 Android 包管理器时，会在首次完整开机后自动补装一次。若自动安装失败，可通过 Root 管理器中的模块“操作”按钮重试。
