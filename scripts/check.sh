@@ -41,10 +41,15 @@ for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuHost.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt \
-  android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt; do test -f "$ROOT/$file"; done
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/dialogs/FontActionDialog.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/dialogs/FontPickerDialog.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/StudioAxisControls.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/appearance/AppearanceSettings.kt \
+  android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/appearance/AppearanceSettingsTest.kt; do test -f "$ROOT/$file"; done
 
 test "$LUOSHU_VERSION" = "$(sed -n 's/^version=//p' "$ROOT/module.prop" | head -n1)"
 test "$LUOSHU_VERSION_CODE" = "$(sed -n 's/^versionCode=//p' "$ROOT/module.prop" | head -n1)"
@@ -68,7 +73,13 @@ grep -q 'sha256' "$ROOT/common/app_bridge.sh"
 grep -q '预览失败' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
 grep -q 'setFontVariationSettings' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
 grep -q 'updateMixAxis' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
-grep -q 'axisInfo.axes.forEach' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt"
+grep -q 'axisInfo.axes.forEach' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/StudioAxisControls.kt"
+grep -q 'LuoShuAppShell' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuHost.kt"
+grep -q 'FontActionDialogRoute' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
+grep -q 'FontPickerDialogRoute' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
+grep -q 'AppearanceSettings.normalized' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/appearance/AppearanceSettings.kt" || \
+  grep -q 'fun normalized()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/appearance/AppearanceSettings.kt"
+grep -q 'testImplementation("junit:junit:4.13.2")' "$ROOT/android-app/app/build.gradle.kts"
 ! grep -q 'getOrNull()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
 grep -q 'trusted_source' "$ROOT/common/native_import.sh"
 grep -q 'MAX_BYTES=268435456' "$ROOT/common/native_import.sh"
@@ -114,6 +125,16 @@ grep -q 'MODULE_VERSION=.*module.prop' "$ROOT/post-fs-data.sh"
 grep -q 'workbench_weight_extension.js' "$ROOT/webroot/workbench_bridge.js"
 grep -q 'mix-axis-panel' "$ROOT/webroot/workbench_weight_extension.css"
 grep -q 'serializeAxes' "$ROOT/webroot/workbench_weight_extension.js"
+
+for removed in \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/Alpha15App.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/Alpha16App.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuDualSkinApp.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuStage2App.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/DualSkinDockScope.kt; do
+  test ! -e "$ROOT/$removed"
+done
 
 # 源码中的缓存键允许保持上个版本；构建前必须能由唯一版本源正确重写。
 WEB_TMP=$(mktemp -d)
