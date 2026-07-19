@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # ============================================================
 # 洛书 - 后台服务（版本以 module.prop 为准）
-# 功能：启动完成后静默校正权限、补装 Full 内置 App、恢复字重设置并维护日志。
+# 功能：启动完成后静默校正权限、补装 Full 内置 App、预热字体索引、恢复字重设置并维护日志。
 # ============================================================
 
 MODDIR="${0%/*}"
@@ -74,6 +74,22 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
     # Root 管理器模块说明只显示当前字体，不再塞入更新日志。
     if [ -f "$MODDIR/common/module_status.sh" ]; then
         MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" >/dev/null 2>&1 || true
+    fi
+
+    # 字体列表在后台预热。轻量指纹未变化时完全跳过字体解析；
+    # 只有新增、修改或删除字体后才重建模块 JSON，原生 App 首次读取可直接命中缓存。
+    if [ -f "$MODDIR/common/font_library_cache.sh" ] && [ -f "$MODDIR/common/font_manager.sh" ]; then
+        _font_fp=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_library_cache.sh" value 2>/dev/null)
+        _font_fp_old=$(cat "$MODDIR/config/native_font_index.key" 2>/dev/null)
+        if [ -n "$_font_fp" ] && { [ "$_font_fp" != "$_font_fp_old" ] || [ ! -s "$MODDIR/config/webui_font_list.json" ]; }; then
+            if MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list refresh >/dev/null 2>&1; then
+                printf '%s\n' "$_font_fp" > "$MODDIR/config/native_font_index.key" 2>/dev/null || true
+                chmod 0644 "$MODDIR/config/native_font_index.key" 2>/dev/null || true
+                log_service "INFO" "字体索引后台预热完成"
+            else
+                log_service "INFO" "字体索引后台预热失败，App 将继续使用已有本地索引"
+            fi
+        fi
     fi
 
     # 恢复用户保存的 Android 全局字重调节。这与组合槽的独立字重互不覆盖：
