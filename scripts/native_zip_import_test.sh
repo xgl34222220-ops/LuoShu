@@ -54,7 +54,8 @@ OUTPUT=$(sh -c '
     LUOSHU_PUBLIC_DIR="$2/public"; USER_FONTS_DIR="$2/public/fonts"
     USER_IMPORT_DIR="$2/public/import"; IMPORT_CACHE_DIR="$2/cache"
     LUOSHU_IMPORT_PYTHON=python3
-    export LUOSHU_IMPORT_PYTHON
+    PYTHONPATH="$1/common/python/lib/python3.14/site-packages"
+    export LUOSHU_IMPORT_PYTHON PYTHONPATH
     json_escape() {
         printf "%s" "$1" | sed "s/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g" | tr "\n\r" "  "
     }
