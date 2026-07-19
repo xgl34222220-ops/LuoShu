@@ -13,7 +13,7 @@ permissions:
 jobs:
   diagnose:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -24,39 +24,52 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.5.0'
-      - name: Run release lint and print only blocking issues
+      - name: Diagnose release lint, tests and assemble
         working-directory: android-app
         shell: bash
         run: |
           set +e
-          gradle --no-daemon --stacktrace :app:lintRelease > "$RUNNER_TEMP/lint-gradle.log" 2>&1
-          rc=$?
+          gradle --no-daemon --stacktrace :app:lintRelease > "$RUNNER_TEMP/lint.log" 2>&1
+          lint_rc=$?
+          gradle --no-daemon --stacktrace :app:testReleaseUnitTest > "$RUNNER_TEMP/test.log" 2>&1
+          test_rc=$?
+          gradle --no-daemon --stacktrace :app:assembleRelease > "$RUNNER_TEMP/assemble.log" 2>&1
+          assemble_rc=$?
           set -e
-          if [[ "$rc" -eq 0 ]]; then
-            echo 'lintRelease passed; no blocking issue found.'
-            exit 0
-          fi
-          echo 'lintRelease failed. Blocking issues:'
-          python3 - <<'PY'
+
+          echo "DIAGNOSTIC_STATUS lint=$lint_rc test=$test_rc assemble=$assemble_rc"
+
+          if [[ "$lint_rc" -ne 0 ]]; then
+            python3 - <<'PY'
           from pathlib import Path
           import xml.etree.ElementTree as ET
           report = Path('app/build/reports/lint-results-release.xml')
-          if not report.is_file():
-              print('Lint XML report was not generated. Gradle tail:')
-              print(Path('/home/runner/work/_temp/lint-gradle.log').read_text(errors='replace')[-8000:])
-              raise SystemExit(1)
-          root = ET.parse(report).getroot()
-          count = 0
-          for issue in root.findall('issue'):
-              if issue.get('severity') not in {'Error', 'Fatal'}:
-                  continue
-              count += 1
-              loc = issue.find('location')
-              file = (loc.get('file') if loc is not None else '') or ''
-              line = (loc.get('line') if loc is not None else '1') or '1'
-              ident = issue.get('id', 'Lint')
-              msg = issue.get('message', '').replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-              print(f'::error file={file},line={line}::[{ident}] {msg}')
-          print(f'BLOCKING_LINT_ISSUES={count}')
-          raise SystemExit(1)
+          if report.is_file():
+              root = ET.parse(report).getroot()
+              for issue in root.findall('issue'):
+                  if issue.get('severity') not in {'Error', 'Fatal'}:
+                      continue
+                  loc = issue.find('location')
+                  file = (loc.get('file') if loc is not None else '') or ''
+                  line = (loc.get('line') if loc is not None else '1') or '1'
+                  ident = issue.get('id', 'Lint')
+                  msg = issue.get('message', '').replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+                  print(f'::error file={file},line={line}::[{ident}] {msg}')
+          else:
+              print('::error::lintRelease failed without an XML report')
           PY
+            tail -n 120 "$RUNNER_TEMP/lint.log" || true
+          fi
+
+          if [[ "$test_rc" -ne 0 ]]; then
+            echo '::error::testReleaseUnitTest failed'
+            tail -n 120 "$RUNNER_TEMP/test.log" || true
+          fi
+
+          if [[ "$assemble_rc" -ne 0 ]]; then
+            echo '::error::assembleRelease failed'
+            tail -n 180 "$RUNNER_TEMP/assemble.log" || true
+          fi
+
+          echo "::error::RELEASE_DIAGNOSTIC_DONE lint=$lint_rc test=$test_rc assemble=$assemble_rc"
+          exit 1
