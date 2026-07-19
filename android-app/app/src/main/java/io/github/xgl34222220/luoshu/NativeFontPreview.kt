@@ -30,6 +30,12 @@ internal data class WeightAxisInfo(
     val error: String = "",
 )
 
+private data class PreviewTypefaceState(
+    val typeface: Typeface? = null,
+    val source: String = "",
+    val error: String = "",
+)
+
 @Composable
 internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
     val info by produceState(
@@ -42,7 +48,7 @@ internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
             else -> runCatching {
                 val command = "sh ${RootShell.quote(APP_BRIDGE)} weight_axis ${RootShell.quote(font.id)}"
                 val result = RootShell.exec(command, timeoutMs = 25_000L)
-                if (result.code != 0) error(result.stderr.ifBlank { "字重轴读取失败" })
+                if (result.code != 0) error(result.stderr.ifBlank { bridgeError(result.stdout, "字重轴读取失败") })
                 val jsonLine = result.stdout.lineSequence().firstOrNull { it.trimStart().startsWith("{") }
                     ?: error("未收到字重轴数据")
                 val root = JSONObject(jsonLine.trim())
@@ -81,28 +87,39 @@ internal fun NativeFontPreview(
 ) {
     val context = LocalContext.current.applicationContext
     val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
+    val errorColor = MaterialTheme.colorScheme.error.toArgb()
     val previewRevision = font?.let { "${it.id}|${it.size}|${it.date}" }
-    val typeface by produceState<Typeface?>(initialValue = null, key1 = previewRevision) {
+    val preview by produceState(initialValue = PreviewTypefaceState(), key1 = previewRevision) {
         value = withContext(Dispatchers.IO) {
-            font?.takeIf { it.valid }?.let { item ->
-                runCatching {
+            when {
+                font == null -> PreviewTypefaceState(error = "未选择字体")
+                !font.valid -> PreviewTypefaceState(error = font.error.ifBlank { "字体无效" })
+                else -> runCatching {
                     val cacheDir = File(context.cacheDir, "native-font-preview").apply { mkdirs() }
-                    val extension = item.format.lowercase().takeIf { it in setOf("ttf", "otf", "ttc") } ?: "ttf"
-                    val revision = "${item.id}|${item.size}|${item.date}"
+                    val extension = font.format.lowercase().takeIf { it in setOf("ttf", "otf", "ttc") } ?: "ttf"
+                    val revision = "${font.id}|${font.size}|${font.date}"
                     val target = File(cacheDir, "${stableKey(revision)}.$extension")
-                    if (!target.isFile || target.length() == 0L) {
-                        val command = "sh ${RootShell.quote(APP_BRIDGE)} preview_export " +
-                            "${RootShell.quote(item.id)} ${RootShell.quote(target.absolutePath)}"
-                        val result = RootShell.exec(command, timeoutMs = 25_000L)
-                        if (result.code != 0 || !target.isFile || target.length() == 0L) {
-                            error(result.stderr.ifBlank { "预览字体导出失败" })
-                        }
+                    val command = "sh ${RootShell.quote(APP_BRIDGE)} preview_export " +
+                        "${RootShell.quote(font.id)} ${RootShell.quote(target.absolutePath)}"
+                    val result = RootShell.exec(command, timeoutMs = 25_000L)
+                    val jsonLine = result.stdout.lineSequence().firstOrNull { it.trimStart().startsWith("{") }
+                    val root = jsonLine?.let { JSONObject(it.trim()) }
+                    if (result.code != 0 || root?.optString("status") != "ok") {
+                        error(root?.optString("message").orEmpty().ifBlank {
+                            result.stderr.ifBlank { "预览字体导出失败" }
+                        })
                     }
-                    target.setLastModified(System.currentTimeMillis())
+                    if (!target.isFile || target.length() == 0L) error("预览字体文件为空")
                     val loaded = Typeface.createFromFile(target)
+                    target.setLastModified(System.currentTimeMillis())
                     trimPreviewCache(cacheDir, target)
-                    loaded
-                }.getOrNull()
+                    PreviewTypefaceState(
+                        typeface = loaded,
+                        source = root.optJSONObject("data")?.optString("source").orEmpty(),
+                    )
+                }.getOrElse { error ->
+                    PreviewTypefaceState(error = error.message ?: "预览字体加载失败")
+                }
             }
         }
     }
@@ -115,19 +132,27 @@ internal fun NativeFontPreview(
                 setSingleLine(false)
                 this.gravity = gravity
                 this.maxLines = maxLines
-                setTextColor(textColor)
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp)
             }
         },
         update = { view ->
-            view.text = text
-            view.typeface = typeface ?: Typeface.DEFAULT
+            val failed = preview.error.isNotBlank()
+            view.text = if (failed) "预览失败 · ${preview.error}" else text
+            view.typeface = preview.typeface ?: Typeface.DEFAULT
             view.gravity = gravity
             view.maxLines = maxLines
-            view.setTextColor(textColor)
-            view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp)
+            view.setTextColor(if (failed) errorColor else textColor)
+            view.setTextSize(
+                android.util.TypedValue.COMPLEX_UNIT_SP,
+                if (failed) minOf(textSizeSp, 12f) else textSizeSp,
+            )
         },
     )
+}
+
+private fun bridgeError(raw: String, fallback: String): String {
+    val line = raw.lineSequence().firstOrNull { it.trimStart().startsWith("{") } ?: return fallback
+    return runCatching { JSONObject(line.trim()).optString("message", fallback) }.getOrDefault(fallback)
 }
 
 private fun stableKey(value: String): String {
