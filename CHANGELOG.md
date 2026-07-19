@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### v14.3 Alpha1.7
+
+- 新增 Material 3 Glass 与 Miuix 双皮肤架构，界面风格通过 DataStore 持久化并支持运行时即时切换。
+- 新增跟随系统、浅色、深色三态，纯黑 AMOLED 模式、Monet 动态取色、种子色和柔和/鲜艳/中性 MaterialKolor 色板。
+- 首页概览与界面设置页完成独立 Material / Miuix 两份 Compose 实现，只共用 UiState、Actions 和业务 ViewModel。
+- Material 皮肤新增渐变高光状态卡和可关闭的 Haze 玻璃悬浮底栏；Miuix 皮肤保留超椭圆卡片、紧凑列表、大号状态和液态导航。
+- 字体库、字体组合和日志本阶段继续使用共享业务层与过渡 UI，后续按首页模板逐页拆分。
+- 系统全局粗细微调在两套首页中均完整保留。
+
 ### v14.3 Alpha1.6
 
 - 原生 App 统一采用白泽当前的 Miuix 视觉系统，本版本只调整 UI，不新增字体功能或修改底层执行逻辑。
