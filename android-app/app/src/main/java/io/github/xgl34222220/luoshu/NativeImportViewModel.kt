@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.compose.runtime.Immutable
@@ -43,6 +44,7 @@ internal data class NativeImportState(
     val message: String = "尚未开始导入",
     val resultVisible: Boolean = false,
     val refreshToken: Long = 0L,
+    val recovered: Boolean = false,
 ) {
     val busy: Boolean
         get() = phase == NativeImportPhase.QUEUED || phase == NativeImportPhase.RUNNING
@@ -56,6 +58,7 @@ internal data class NativeImportState(
 
     val title: String
         get() = when {
+            busy && recovered -> "正在恢复字体导入"
             busy -> "正在导入字体"
             failed.isEmpty() -> "导入完成"
             imported > 0 || duplicates > 0 -> "导入部分完成"
@@ -77,79 +80,141 @@ internal data class NativeImportState(
 private enum class ImportOutcome { IMPORTED, DUPLICATE }
 
 internal class NativeImportViewModel(application: Application) : AndroidViewModel(application) {
+    private val queueStore = NativeImportQueueStore(application.applicationContext)
+
     var state by mutableStateOf(NativeImportState())
         private set
 
     private var importJob: Job? = null
+
+    init {
+        restoreSavedTask()
+    }
 
     fun startImport(uris: List<Uri>) {
         if (state.busy || importJob?.isActive == true) return
         val selected = uris.take(32)
         if (selected.isEmpty()) return
 
-        val taskId = "import-${System.currentTimeMillis()}"
-        state = NativeImportState(
-            taskId = taskId,
-            phase = NativeImportPhase.QUEUED,
-            total = selected.size,
-            message = "已选择 ${selected.size} 个文件，准备开始导入",
-        )
         importJob = viewModelScope.launch {
-            val context = getApplication<Application>().applicationContext
-            var imported = 0
-            var duplicates = 0
-            val failed = mutableListOf<String>()
-
-            selected.forEachIndexed { index, uri ->
-                val displayName = queryDisplayName(context, uri) ?: "font-${index + 1}"
-                state = state.copy(
-                    phase = NativeImportPhase.RUNNING,
-                    processed = index,
-                    imported = imported,
-                    duplicates = duplicates,
-                    failed = failed.toList(),
-                    currentFile = displayName,
-                    message = "正在导入 ${index + 1}/${selected.size}：$displayName",
-                )
-                try {
-                    when (withContext(Dispatchers.IO) { importOne(context, uri, displayName) }) {
-                        ImportOutcome.IMPORTED -> imported += 1
-                        ImportOutcome.DUPLICATE -> duplicates += 1
+            try {
+                val context = getApplication<Application>().applicationContext
+                val items = withContext(Dispatchers.IO) {
+                    selected.mapIndexed { index, uri ->
+                        val name = queryDisplayName(context, uri) ?: "font-${index + 1}"
+                        val persisted = runCatching {
+                            context.contentResolver.takePersistableUriPermission(
+                                uri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                            )
+                            true
+                        }.getOrDefault(false)
+                        ImportQueueItem(
+                            uri = uri.toString(),
+                            displayName = name,
+                            persistedPermission = persisted,
+                        )
                     }
-                } catch (error: Throwable) {
-                    failed += "$displayName：${error.message ?: "导入失败"}"
                 }
-                state = state.copy(
-                    processed = index + 1,
-                    imported = imported,
-                    duplicates = duplicates,
-                    failed = failed.toList(),
+                val task = ImportQueueTask(
+                    taskId = "import-${System.currentTimeMillis()}",
+                    phase = NativeImportPhase.QUEUED,
+                    createdAt = System.currentTimeMillis(),
+                    message = "已保存 ${items.size} 个文件的导入队列",
+                    items = items,
                 )
+                runQueue(task)
+            } finally {
+                importJob = null
             }
-
-            val phase = if (failed.isEmpty()) NativeImportPhase.SUCCESS else NativeImportPhase.FAILED
-            val message = when {
-                failed.isEmpty() -> "字体导入完成，共处理 ${selected.size} 个文件"
-                imported > 0 || duplicates > 0 -> "字体导入部分完成，${failed.size} 个文件失败"
-                else -> "字体导入失败，未成功处理任何文件"
-            }
-            state = state.copy(
-                phase = phase,
-                processed = selected.size,
-                imported = imported,
-                duplicates = duplicates,
-                failed = failed.toList(),
-                currentFile = "",
-                message = message,
-                resultVisible = true,
-                refreshToken = System.currentTimeMillis(),
-            )
-            importJob = null
         }
     }
 
     fun dismissResult() {
         state = state.copy(resultVisible = false)
+    }
+
+    private fun restoreSavedTask() {
+        importJob = viewModelScope.launch {
+            try {
+                val saved = withContext(Dispatchers.IO) { queueStore.load() } ?: return@launch
+                val active = saved.phase == NativeImportPhase.QUEUED || saved.phase == NativeImportPhase.RUNNING
+                if (active || saved.unfinished) {
+                    runQueue(saved.forResume())
+                } else {
+                    state = saved.toUiState(resultVisible = false)
+                }
+            } finally {
+                importJob = null
+            }
+        }
+    }
+
+    private suspend fun runQueue(initial: ImportQueueTask) {
+        val context = getApplication<Application>().applicationContext
+        var task = initial
+        persistAndPublish(task)
+
+        task.items.indices.forEach { index ->
+            val item = task.items[index]
+            if (item.status.terminal) return@forEach
+
+            task = task.replaceItem(
+                index,
+                item.copy(status = ImportQueueItemStatus.RUNNING, error = ""),
+            ).copy(
+                phase = NativeImportPhase.RUNNING,
+                message = "正在导入 ${task.processed + 1}/${task.total}：${item.displayName}",
+            )
+            persistAndPublish(task)
+
+            val resultItem = try {
+                when (withContext(Dispatchers.IO) { importOne(context, Uri.parse(item.uri), item.displayName) }) {
+                    ImportOutcome.IMPORTED -> item.copy(status = ImportQueueItemStatus.IMPORTED, error = "")
+                    ImportOutcome.DUPLICATE -> item.copy(status = ImportQueueItemStatus.DUPLICATE, error = "")
+                }
+            } catch (error: Throwable) {
+                item.copy(
+                    status = ImportQueueItemStatus.FAILED,
+                    error = error.message ?: "导入失败",
+                )
+            }
+            task = task.replaceItem(index, resultItem)
+            persistAndPublish(task)
+        }
+
+        val phase = if (task.failures.isEmpty()) NativeImportPhase.SUCCESS else NativeImportPhase.FAILED
+        val message = when {
+            task.failures.isEmpty() -> "字体导入完成，共处理 ${task.total} 个文件"
+            task.imported > 0 || task.duplicates > 0 -> "字体导入部分完成，${task.failures.size} 个文件失败"
+            else -> "字体导入失败，未成功处理任何文件"
+        }
+        task = task.copy(phase = phase, message = message)
+        persistAndPublish(task, resultVisible = true, refreshToken = System.currentTimeMillis())
+        withContext(Dispatchers.IO) { releasePermissions(context, task) }
+    }
+
+    private suspend fun persistAndPublish(
+        task: ImportQueueTask,
+        resultVisible: Boolean = false,
+        refreshToken: Long = 0L,
+    ) {
+        withContext(Dispatchers.IO) { queueStore.save(task) }
+        state = task.toUiState(resultVisible = resultVisible, refreshToken = refreshToken)
+    }
+
+    private fun ImportQueueTask.replaceItem(index: Int, replacement: ImportQueueItem): ImportQueueTask =
+        copy(items = items.mapIndexed { itemIndex, item -> if (itemIndex == index) replacement else item })
+
+    private fun releasePermissions(context: android.content.Context, task: ImportQueueTask) {
+        task.items.filter { it.persistedPermission }.forEach { item ->
+            runCatching {
+                context.contentResolver.releasePersistableUriPermission(
+                    Uri.parse(item.uri),
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                )
+            }
+        }
     }
 }
 
