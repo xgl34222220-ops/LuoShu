@@ -115,7 +115,7 @@ internal fun NativeFontPreview(
                     trimPreviewCache(cacheDir, target)
                     PreviewTypefaceState(
                         typeface = loaded,
-                        source = root.optJSONObject("data")?.optString("source").orEmpty(),
+                        source = root?.optJSONObject("data")?.optString("source").orEmpty(),
                     )
                 }.getOrElse { error ->
                     PreviewTypefaceState(error = error.message ?: "预览字体加载失败")
