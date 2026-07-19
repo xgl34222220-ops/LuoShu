@@ -72,6 +72,8 @@ jobs:
 
           echo '--- gradle failure summary ---' >> "$result"
           grep -E '(^|> )Task .* FAILED|FAILURE:|Execution failed for task|Lint found|error:' "$RUNNER_TEMP/release-gradle.log" | tail -n 120 >> "$result" || true
+          echo '--- gradle log tail ---' >> "$result"
+          tail -n 320 "$RUNNER_TEMP/release-gradle.log" >> "$result" || true
           cat "$result"
       - name: Upload concise diagnosis
         if: always()
