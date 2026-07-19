@@ -23,8 +23,10 @@ PROP
 # 回归真机问题：font_check.sh 被 source 时，即使父脚本的位置参数是 ZIP，
 # 也只能定义函数，不能把 ZIP 当成 CLI 字体检查后退出父进程。
 SOURCE_RESULT=$(sh -c '
-    set -- "$1"
-    . "$2"
+    zip_path="$1"
+    checker="$2"
+    set -- "$zip_path"
+    . "$checker"
     printf sourced-ok
 ' sh "$TMP/public/import/regression.zip" "$ROOT/common/font_check.sh")
 test "$SOURCE_RESULT" = sourced-ok
