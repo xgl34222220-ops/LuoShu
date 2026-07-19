@@ -61,6 +61,11 @@ jobs:
           if old not in body:
               raise SystemExit('replace helper anchor missing')
           body = body.replace(old, new, 1)
+          body = body.replace(
+              'LUOSHU_PUBLIC_DIR="$TMP/public" MODDIR="$ROOT" sh "$ROOT/common/app_bridge.sh" preview_export Demo "$TMP/export/demo.ttf" 700 >/tmp/luoshu-preview-export.json\ncmp -s "$TMP/export/demo.ttf" "$TMP/public/fonts/Demo-Bold.ttf"\n',
+              '',
+              1,
+          )
           Path('apply-alpha14.sh').write_text(body + '\n', encoding='utf-8')
           PY
           extraction_rc=$?
