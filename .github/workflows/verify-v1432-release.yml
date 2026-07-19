@@ -1,0 +1,69 @@
+name: Verify v14.3.2 Published Release
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/verify-v1432-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read and download immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p signed-release
+          gh release view v14.3.2 --repo "$GITHUB_REPOSITORY" --json tagName,name,isDraft,isPrerelease,publishedAt,url,assets > signed-release/release.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('signed-release/release.json', encoding='utf-8'))
+          assert data['tagName']=='v14.3.2', data
+          assert data['name']=='洛书 v14.3.2', data
+          assert data['isDraft'] is False, data
+          assert data['isPrerelease'] is False, data
+          names={asset['name'] for asset in data['assets']}
+          required={
+            'LuoShu-App-v14.3.2.apk',
+            'LuoShu-App-v14.3.2.apk.sha256',
+            'LuoShu-v14.3.2-Full.zip',
+            'LuoShu-v14.3.2-Full.zip.sha256',
+            'LuoShu-v14.3.2-Lite.zip',
+            'LuoShu-v14.3.2-Lite.zip.sha256',
+          }
+          assert required <= names, (required-names, names)
+          print(data['url'])
+          PY
+          gh release download v14.3.2 --repo "$GITHUB_REPOSITORY" --dir signed-release --pattern 'LuoShu-*'
+      - name: Verify checksums and package structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd signed-release
+          sha256sum -c LuoShu-App-v14.3.2.apk.sha256
+          sha256sum -c LuoShu-v14.3.2-Full.zip.sha256
+          sha256sum -c LuoShu-v14.3.2-Lite.zip.sha256
+          unzip -t LuoShu-v14.3.2-Full.zip >/dev/null
+          unzip -t LuoShu-v14.3.2-Lite.zip >/dev/null
+          unzip -Z1 LuoShu-v14.3.2-Full.zip | grep -qx 'bundled/LuoShu-App.apk'
+          ! unzip -Z1 LuoShu-v14.3.2-Lite.zip | grep -qx 'bundled/LuoShu-App.apk'
+          unzip -p LuoShu-v14.3.2-Full.zip bundled/LuoShu-App.apk > embedded.apk
+          cmp -s LuoShu-App-v14.3.2.apk embedded.apk
+          rm -f embedded.apk
+      - name: Upload verified signed release
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-v14.3.2-verified-signed-release
+          path: signed-release/
+          if-no-files-found: error
+          retention-days: 14
