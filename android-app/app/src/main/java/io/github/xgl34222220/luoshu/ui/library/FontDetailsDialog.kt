@@ -1,6 +1,5 @@
 package io.github.xgl34222220.luoshu.ui.library
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,7 +13,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -46,7 +44,6 @@ internal fun FontDetailsDialogRoute(
     busy: Boolean,
     onDismiss: () -> Unit,
     onApply: () -> Unit,
-    onDelete: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalMiuixTokens.current
@@ -149,17 +146,8 @@ internal fun FontDetailsDialogRoute(
             }
         },
         dismissButton = {
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (!active) {
-                    TextButton(onClick = onDelete, enabled = !busy) {
-                        Icon(Icons.Rounded.Delete, contentDescription = null)
-                        Spacer(Modifier.width(5.dp))
-                        Text("删除")
-                    }
-                }
-                TextButton(onClick = onDismiss) {
-                    Text("关闭")
-                }
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
             }
         },
     )
