@@ -1,4 +1,4 @@
-name: Diagnose Alpha1.4 native App
+name: Fix and diagnose Alpha1.4 native App
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
       - feature/v14.3-alpha1-native-import
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   diagnose:
@@ -16,6 +16,48 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: feature/v14.3-alpha1-native-import
+          fetch-depth: 0
+      - name: Fix delegated preview file smart cast
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt')
+          text = path.read_text(encoding='utf-8')
+          old = '''    val variationResult = remember(preview.file?.absolutePath, axisKey, font?.variable) {
+              if (font?.variable != true || preview.file == null || cleanAxes.isEmpty()) {
+          Result.success(preview.typeface)
+              } else {
+          runCatching {
+              Typeface.Builder(preview.file)
+                  .setFontVariationSettings(toAndroidVariationSettings(cleanAxes))
+                  .build()
+          }
+              }
+          }
+          '''
+          new = '''    val previewFile = preview.file
+          val variationResult = remember(previewFile?.absolutePath, axisKey, font?.variable) {
+              if (font?.variable != true || previewFile == null || cleanAxes.isEmpty()) {
+                  Result.success(preview.typeface)
+              } else {
+                  runCatching {
+                      Typeface.Builder(previewFile)
+                          .setFontVariationSettings(toAndroidVariationSettings(cleanAxes))
+                          .build()
+                  }
+              }
+          }
+          '''
+          if old not in text:
+              raise SystemExit('native preview smart-cast anchor missing')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt
+          git commit -m "fix(app): stabilize variable preview file reference"
+          git push origin HEAD:feature/v14.3-alpha1-native-import
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
