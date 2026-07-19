@@ -238,10 +238,12 @@ copy_as_hyperos() {
 
             case "$w" in
                 thin) num=100; rb="Thin" ;;
+                extralight) num=200; rb="ExtraLight" ;;
                 light) num=300; rb="Light" ;;
                 medium) num=500; rb="Medium" ;;
                 semibold) num=600; rb="SemiBold" ;;
                 bold) num=700; rb="Bold" ;;
+                extrabold) num=800; rb="ExtraBold" ;;
                 black) num=900; rb="ExtraBold" ;;  # HyperOS Roboto 系列没有 Black，用 ExtraBold 顶替
                 *) num=""; rb="" ;;
             esac
