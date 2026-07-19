@@ -36,7 +36,7 @@ for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
   common/v142_weighted_mix.sh common/app_bridge.sh common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \
   webroot/workbench.js webroot/mix_state_guard.js webroot/workbench_bridge.js webroot/workbench.css \
   webroot/workbench_weight_extension.js webroot/workbench_weight_extension.css \
-  scripts/build.sh scripts/version.sh scripts/prepare_webui.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/stability_test.sh \
+  scripts/build.sh scripts/version.sh scripts/prepare_webui.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/stability_test.sh scripts/native_zip_import_test.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuHost.kt \
@@ -63,6 +63,9 @@ grep -q 'trusted_source' "$ROOT/common/native_import.sh"
 grep -q 'MAX_BYTES=268435456' "$ROOT/common/native_import.sh"
 grep -q 'font_validate' "$ROOT/common/native_import.sh"
 grep -q 'font_extract_faces.py' "$ROOT/common/native_import.sh"
+grep -q 'native-import-zip-error' "$ROOT/common/native_import.sh"
+grep -q 'font_check_cli' "$ROOT/common/font_check.sh"
+grep -q 'source 时，必须只定义函数' "$ROOT/common/font_check.sh"
 grep -q 'sourceUid' "$ROOT/common/font_extract_faces.py"
 grep -q 'TTCFace' "$ROOT/common/font_extract_faces.py"
 grep -q 'sha256:' "$ROOT/common/font_metadata.py"
@@ -132,6 +135,7 @@ if cmp -s "$ROOT/licenses/CPython-LICENSE.txt" "$ROOT/licenses/FontTools-LICENSE
 fi
 ! grep -q '/sdcard/LuoShu/emoji/' "$ROOT/README.md" "$ROOT/README.txt" "$ROOT/module.prop" "$ROOT/config/version_notes.conf"
 
+sh "$ROOT/scripts/native_zip_import_test.sh"
 sh "$ROOT/scripts/rc3_audit.sh"
 sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/stability_test.sh"
