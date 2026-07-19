@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v14.3 Alpha1.9
-versionCode=14319
+version=v14.3 Alpha1.10
+versionCode=14320
 author=惜故里丶
-description=Android 全局字体管理模块：Material 3 Glass 与 Miuix 双皮肤覆盖全部页面、确认弹层、字体选择和安全导入，并清理旧 UI 运行链路
+description=Android 全局字体管理模块：Full 模块内置 App 支持刷写阶段自动覆盖更新与首次开机补装，Material 3 Glass 与 Miuix 双皮肤及字体能力保持不变
 updateJson=
 webroot=webroot
