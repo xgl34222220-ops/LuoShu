@@ -27,6 +27,41 @@ jobs:
           source = Path('.github/workflows/alpha14-native-live-preview.yml').read_text(encoding='utf-8')
           body = source.split('        run: |\n', 1)[1]
           body = '\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())
+          old = '''def replace(path: str, old: str, new: str) -> None:
+              file = root / path
+              text = file.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'missing patch anchor in {path}: {old[:120]!r}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+          '''
+          new = '''def replace(path: str, old: str, new: str) -> None:
+              file = root / path
+              text = file.read_text(encoding='utf-8')
+              if old in text:
+                  file.write_text(text.replace(old, new, 1), encoding='utf-8')
+                  return
+              old_lines = old.splitlines()
+              text_lines = text.splitlines(keepends=True)
+              wanted = [line.lstrip() for line in old_lines]
+              for start in range(0, len(text_lines) - len(wanted) + 1):
+                  block = text_lines[start:start + len(wanted)]
+                  if [line.rstrip('\\r\\n').lstrip() for line in block] != wanted:
+                      continue
+                  first_indent = block[0][:-len(block[0].lstrip())]
+                  new_lines = new.splitlines()
+                  nonempty = [len(line) - len(line.lstrip()) for line in new_lines if line.strip()]
+                  common = min(nonempty) if nonempty else 0
+                  rendered = []
+                  for line in new_lines:
+                      rendered.append((first_indent + line[common:] if line.strip() else '') + '\\n')
+                  text_lines[start:start + len(wanted)] = rendered
+                  file.write_text(''.join(text_lines), encoding='utf-8')
+                  return
+              raise SystemExit(f'missing patch anchor in {path}: {old[:120]!r}')
+          '''
+          if old not in body:
+              raise SystemExit('replace helper anchor missing')
+          body = body.replace(old, new, 1)
           Path('/tmp/apply-alpha14.sh').write_text(body + '\n', encoding='utf-8')
           PY
             bash /tmp/apply-alpha14.sh
