@@ -20,7 +20,7 @@ jobs:
           python3 - <<'PY' > /tmp/alpha13-materializer.log 2>&1
           from pathlib import Path
           workflow = Path('.github/workflows/alpha13-weight-import.yml').read_text(encoding='utf-8')
-          body = workflow.split("python3 - <<'PY'\n", 1)[1].split("\n          PY\n", 1)[0]
+          body = workflow.split("python3 - <<'PY'\n", 1)[1].rsplit("\n          PY\n", 1)[0]
           body = '\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())
           exec(compile(body, 'alpha13-weight-import', 'exec'), {'__name__': '__main__'})
           PY
