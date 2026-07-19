@@ -55,16 +55,25 @@ internal fun NativeImportOverlay(
         importViewModel.startImport(uris)
     }
 
-    ImportActionButton(
-        style = style,
-        state = state,
-        enabled = viewModel.snapshot.installed &&
-            !state.busy &&
-            !viewModel.operationBusy &&
-            !viewModel.mixState.busy,
-        onImport = { launcher.launch(arrayOf("*/*")) },
+    Column(
         modifier = modifier,
-    )
+        horizontalAlignment = Alignment.End,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        FontMetadataInspector(
+            viewModel = viewModel,
+            style = style,
+        )
+        ImportActionButton(
+            style = style,
+            state = state,
+            enabled = viewModel.snapshot.installed &&
+                !state.busy &&
+                !viewModel.operationBusy &&
+                !viewModel.mixState.busy,
+            onImport = { launcher.launch(arrayOf("*/*")) },
+        )
+    }
 
     if (state.resultVisible) {
         ImportResultDialog(
@@ -81,12 +90,10 @@ private fun ImportActionButton(
     state: NativeImportState,
     enabled: Boolean,
     onImport: () -> Unit,
-    modifier: Modifier,
 ) {
     Surface(
         onClick = onImport,
         enabled = enabled,
-        modifier = modifier,
         shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 24.dp else 22.dp),
         color = MaterialTheme.colorScheme.primary,
         contentColor = MaterialTheme.colorScheme.onPrimary,
