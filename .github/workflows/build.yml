@@ -1,13 +1,11 @@
 name: Materialize Alpha1.3 weight upgrade
 on:
-  push:
-    branches:
-      - feature/v14.3-alpha1-native-import
+  pull_request:
 permissions:
   contents: write
 jobs:
   materialize:
-    if: github.actor != 'github-actions[bot]'
+    if: github.event_name == 'pull_request' && github.head_ref == 'trigger/alpha13-weight-materialize'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
