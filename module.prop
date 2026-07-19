@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v14.3 Alpha1.5
-versionCode=14315
+version=v14.3 Alpha1.6
+versionCode=14316
 author=惜故里丶
-description=Android 全局字体管理模块：区分字体原始默认与系统 Regular，支持同字体直应用、系统粗细即时微调、真实多轴预览和字形覆盖诊断
+description=Android 全局字体管理模块：原生 App 统一采用白泽 Miuix 视觉系统，保留真实多轴预览、同字体直应用、系统粗细微调和字形覆盖诊断
 updateJson=
 webroot=webroot
