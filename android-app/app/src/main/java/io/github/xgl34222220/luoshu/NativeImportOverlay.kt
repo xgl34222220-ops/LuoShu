@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -72,6 +73,7 @@ private data class ImportSummary(
     val failed: List<String>,
 ) {
     val title: String get() = if (failed.isEmpty()) "导入完成" else "导入结果"
+
     val message: String
         get() = buildString {
             append("成功导入 ").append(imported).append(" 个文件")
@@ -151,9 +153,7 @@ internal fun NativeImportOverlay(
         )
     }
 
-    if (detailsBusy) {
-        AnalysisLoadingDialog(style)
-    }
+    if (detailsBusy) AnalysisLoadingDialog(style)
 
     details?.let { result ->
         FontDetailsDialog(style, result) { details = null }
@@ -225,10 +225,7 @@ private fun ImportActions(
                     Icon(Icons.Rounded.Add, contentDescription = null)
                 }
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    if (importBusy) "导入中" else "导入字体",
-                    fontWeight = FontWeight.Black,
-                )
+                Text(if (importBusy) "导入中" else "导入字体", fontWeight = FontWeight.Black)
             }
         }
     }
@@ -295,10 +292,14 @@ private fun FontDetailsPickerDialog(
     var query by remember { mutableStateOf("") }
     val filtered = remember(fonts, query) {
         val needle = query.trim()
-        if (needle.isBlank()) fonts else fonts.filter { font ->
-            font.name.contains(needle, ignoreCase = true) ||
-                font.format.contains(needle, ignoreCase = true) ||
-                font.weightLabel.contains(needle, ignoreCase = true)
+        if (needle.isBlank()) {
+            fonts
+        } else {
+            fonts.filter { font ->
+                font.name.contains(needle, ignoreCase = true) ||
+                    font.format.contains(needle, ignoreCase = true) ||
+                    font.weightLabel.contains(needle, ignoreCase = true)
+            }
         }
     }
     val body: @Composable () -> Unit = {
@@ -449,6 +450,7 @@ private fun FontDetailsDialog(
             }
         }
     }
+
     if (style == UiStyle.MATERIAL) {
         AlertDialog(
             onDismissRequest = onDismiss,
@@ -478,7 +480,7 @@ private fun MiuixDialogFrame(
     eyebrow: String,
     title: String,
     onDismiss: () -> Unit,
-    content: @Composable Column.() -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
     val tokens = LocalMiuixTokens.current
     Dialog(onDismissRequest = onDismiss) {
@@ -545,6 +547,7 @@ private suspend fun importDocuments(context: Context, uris: List<Uri>): ImportSu
             temp?.delete()
         }
     }
+
     cacheDir.listFiles()?.filter { it.isFile }?.forEach { file ->
         if (System.currentTimeMillis() - file.lastModified() > 3_600_000L) file.delete()
     }
