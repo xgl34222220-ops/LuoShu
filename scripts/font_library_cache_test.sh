@@ -22,7 +22,7 @@ printf 'One\n' > "$ACTIVE_FONT_CONF"
 FIRST=$(font_library_fingerprint_value)
 SECOND=$(font_library_fingerprint_value)
 test "$FIRST" = "$SECOND"
-printf '%s' "$FIRST" | grep -q '^v2:'
+printf '%s' "$FIRST" | grep -q '^v3:'
 printf '%s' "$FIRST" | grep -q ':2:'
 
 JSON=$(font_library_fingerprint_json)
@@ -30,7 +30,6 @@ printf '%s' "$JSON" | grep -q '"status":"ok"'
 printf '%s' "$JSON" | grep -q '"current":"One"'
 printf '%s' "$JSON" | grep -q '"count":2'
 
-sleep 1
 printf 'font-one-modified' > "$USER_FONTS_DIR/One-Regular.ttf"
 MODIFIED=$(font_library_fingerprint_value)
 test "$MODIFIED" != "$FIRST"
