@@ -36,11 +36,12 @@ for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
   common/v142_weighted_mix.sh common/app_bridge.sh common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \
   webroot/workbench.js webroot/mix_state_guard.js webroot/workbench_bridge.js webroot/workbench.css \
   webroot/workbench_weight_extension.js webroot/workbench_weight_extension.css \
-  scripts/build.sh scripts/version.sh scripts/prepare_webui.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/stability_test.sh scripts/native_zip_import_test.sh \
+  scripts/build.sh scripts/version.sh scripts/prepare_webui.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuHost.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt; do test -f "$ROOT/$file"; done
 
@@ -59,6 +60,12 @@ grep -q 'font_role_check.sh' "$ROOT/common/v14_mix.sh"
 grep -q 'common/v14_mix.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'native_import.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'import_file)' "$ROOT/common/app_bridge.sh"
+grep -q 'preview_source)' "$ROOT/common/app_bridge.sh"
+grep -q 'find_preview_source' "$ROOT/common/app_bridge.sh"
+grep -q 'regular|normal' "$ROOT/common/app_bridge.sh"
+grep -q 'sha256' "$ROOT/common/app_bridge.sh"
+grep -q '预览失败' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
+! grep -q 'getOrNull()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
 grep -q 'trusted_source' "$ROOT/common/native_import.sh"
 grep -q 'MAX_BYTES=268435456' "$ROOT/common/native_import.sh"
 grep -q 'font_validate' "$ROOT/common/native_import.sh"
@@ -135,6 +142,7 @@ if cmp -s "$ROOT/licenses/CPython-LICENSE.txt" "$ROOT/licenses/FontTools-LICENSE
 fi
 ! grep -q '/sdcard/LuoShu/emoji/' "$ROOT/README.md" "$ROOT/README.txt" "$ROOT/module.prop" "$ROOT/config/version_notes.conf"
 
+sh "$ROOT/scripts/native_preview_source_test.sh"
 sh "$ROOT/scripts/native_zip_import_test.sh"
 sh "$ROOT/scripts/rc3_audit.sh"
 sh "$ROOT/scripts/mount_compat_test.sh"
