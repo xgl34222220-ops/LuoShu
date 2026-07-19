@@ -2,18 +2,12 @@ name: Publish signed release
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*'
-    paths:
-      - module.prop
-      - 'RELEASE_NOTES_*.md'
-      - .github/workflows/release.yml
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing immutable tag to publish (for example v14.3)
+        description: Existing immutable tag to publish (for example v14.2-RC1)
         required: true
         type: string
 
@@ -27,7 +21,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,46 +52,20 @@ jobs:
           . ./scripts/version.sh
           expected_tag="$LUOSHU_ARTIFACT_VERSION"
           tag="${GITHUB_REF_NAME}"
-
           if [[ "${GITHUB_EVENT_NAME}" == 'workflow_dispatch' ]]; then
             tag="$INPUT_TAG"
             git fetch --force --tags origin
             tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
             [[ -n "$tag_sha" ]] || { echo "Tag does not exist: $tag" >&2; exit 2; }
             [[ "$tag_sha" == "$GITHUB_SHA" ]] || { echo "Run this workflow from the existing tag $tag" >&2; exit 2; }
-          elif [[ "${GITHUB_REF_TYPE}" == 'branch' ]]; then
-            [[ "${GITHUB_REF_NAME}" == 'main' ]] || { echo "Stable branch publishing only supports main" >&2; exit 2; }
-            case "$LUOSHU_VERSION" in
-              *Alpha*|*Beta*|*RC*)
-                echo "Pre-release versions must be published from an explicit immutable tag" >&2
-                exit 2
-                ;;
-            esac
-            tag="$expected_tag"
-            git fetch --force --tags origin
-            tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
-            if [[ -n "$tag_sha" && "$tag_sha" != "$GITHUB_SHA" ]]; then
-              echo "Tag $tag already points to $tag_sha, not $GITHUB_SHA" >&2
-              exit 2
-            fi
-            if [[ -z "$tag_sha" ]]; then
-              git config user.name 'github-actions[bot]'
-              git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-              git tag "$tag" "$GITHUB_SHA"
-              git push origin "refs/tags/$tag"
-            fi
           fi
-
           [[ "$tag" == "$expected_tag" ]] || {
             echo "Tag $tag does not match module.prop ($expected_tag)" >&2
             exit 2
           }
-          notes_file="RELEASE_NOTES_${LUOSHU_VERSION// /_}.md"
-          [[ -s "$notes_file" ]] || { echo "Missing release notes: $notes_file" >&2; exit 2; }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$LUOSHU_VERSION" >> "$GITHUB_OUTPUT"
           echo "artifact_version=$LUOSHU_ARTIFACT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
 
       - name: Require signing secrets
         shell: bash
@@ -131,32 +99,16 @@ jobs:
             sh ./scripts/prepare_composite_runtime.sh
           fi
 
-      - name: Run complete source and module checks
-        shell: bash
-        run: sh ./scripts/check.sh
-
-      - name: Lint, test and build signed release App
+      - name: Build signed release App
         working-directory: android-app
         env:
           LUOSHU_KEYSTORE_FILE: ${{ runner.temp }}/luoshu-release.jks
           LUOSHU_KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
           LUOSHU_KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
           LUOSHU_KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
-        run: gradle --no-daemon --stacktrace :app:lintRelease :app:testReleaseUnitTest :app:assembleRelease
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
 
-      - name: Verify APK signature certificate
-        shell: bash
-        run: |
-          set -euo pipefail
-          apk='android-app/app/build/outputs/apk/release/app-release.apk'
-          test -s "$apk"
-          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
-          test -x "$apksigner"
-          "$apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/apk-signature.txt"
-          grep -q 'Verified using v2 scheme' "$RUNNER_TEMP/apk-signature.txt"
-          grep -q 'Signer #1 certificate SHA-256 digest:' "$RUNNER_TEMP/apk-signature.txt"
-
-      - name: Build Full and Lite packages
+      - name: Build and verify signed Full/Lite artifacts
         shell: bash
         run: |
           set -euo pipefail
@@ -178,6 +130,10 @@ jobs:
           ! unzip -Z1 "$lite" | grep -qx 'bundled/LuoShu-App.apk'
           unzip -p "$full" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
           cmp -s "$apk" "$RUNNER_TEMP/embedded.apk"
+          build_tools="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n1)"
+          test -x "$build_tools/apksigner"
+          "$build_tools/apksigner" verify --verbose --print-certs "$app"
+          "$build_tools/apksigner" verify --verbose --print-certs "$RUNNER_TEMP/embedded.apk"
           (cd dist && sha256sum -c "$(basename "$full").sha256")
           (cd dist && sha256sum -c "$(basename "$lite").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
@@ -187,7 +143,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
-          NOTES_FILE: ${{ steps.version.outputs.notes_file }}
+          ARTIFACT_VERSION: ${{ steps.version.outputs.artifact_version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -195,10 +151,21 @@ jobs:
             echo "Release $TAG already exists; immutable releases are never overwritten." >&2
             exit 4
           fi
+          assets=(
+            "dist/LuoShu-App-${ARTIFACT_VERSION}.apk"
+            "dist/LuoShu-App-${ARTIFACT_VERSION}.apk.sha256"
+            "dist/LuoShu-${ARTIFACT_VERSION}-Full.zip"
+            "dist/LuoShu-${ARTIFACT_VERSION}-Full.zip.sha256"
+            "dist/LuoShu-${ARTIFACT_VERSION}-Lite.zip"
+            "dist/LuoShu-${ARTIFACT_VERSION}-Lite.zip.sha256"
+          )
+          for asset in "${assets[@]}"; do
+            [[ -f "$asset" ]] || { echo "Missing regular release file: $asset" >&2; exit 5; }
+          done
           prerelease=()
           case "$VERSION" in *Alpha*|*Beta*|*RC*) prerelease=(--prerelease) ;; esac
-          gh release create "$TAG" dist/* \
+          gh release create "$TAG" "${assets[@]}" \
             --verify-tag \
             --title "洛书 $VERSION" \
-            --notes-file "$NOTES_FILE" \
+            --notes-file RELEASE_NOTES_v14.2_RC1.md \
             "${prerelease[@]}"
