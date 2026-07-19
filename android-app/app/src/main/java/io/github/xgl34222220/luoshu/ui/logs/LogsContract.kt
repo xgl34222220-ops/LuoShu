@@ -160,18 +160,29 @@ internal fun LogsUiState.withNativeImport(state: NativeImportState): LogsUiState
         NativeImportPhase.IDLE -> TaskPhase.INFO
         NativeImportPhase.QUEUED -> TaskPhase.QUEUED
         NativeImportPhase.RUNNING -> TaskPhase.RUNNING
+        NativeImportPhase.PAUSED -> TaskPhase.INFO
         NativeImportPhase.SUCCESS -> TaskPhase.SUCCESS
         NativeImportPhase.FAILED -> TaskPhase.FAILED
+        NativeImportPhase.CANCELLED -> TaskPhase.INFO
+    }
+    val title = when (state.phase) {
+        NativeImportPhase.PAUSED -> "字体导入已暂停"
+        NativeImportPhase.CANCELLED -> "字体导入已取消"
+        else -> taskTitle(TaskKind.IMPORT, phase)
     }
     val item = TaskCenterItem(
         id = state.taskId.ifBlank { "native-import" },
         kind = TaskKind.IMPORT,
         phase = phase,
-        title = taskTitle(TaskKind.IMPORT, phase),
+        title = title,
         message = state.message,
         progress = state.progress,
-        timeLabel = if (state.busy) "当前" else "最近",
-        current = state.busy,
+        timeLabel = when {
+            state.paused -> "已暂停"
+            state.busy -> "当前"
+            else -> "最近"
+        },
+        current = state.busy || state.paused,
     )
     val merged = mergeTaskItems(listOf(item), tasks)
     return copy(
