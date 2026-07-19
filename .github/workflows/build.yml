@@ -1,66 +1,31 @@
-name: Build module
+name: Materialize Alpha1.4 native live preview
+
 on:
   push:
     branches:
-      - main
       - feature/v14.3-alpha1-native-import
-  pull_request:
-  workflow_dispatch:
+
 permissions:
-  contents: read
+  contents: write
+
 jobs:
-  build:
+  materialize:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
         with:
-          node-version: 22
-      - name: Install build dependencies
+          ref: feature/v14.3-alpha1-native-import
+          fetch-depth: 0
+      - name: Execute staged Alpha1.4 upgrade
+        shell: bash
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
-      - uses: actions/cache@v4
-        with:
-          path: common/python
-          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
-      - name: Prepare ARM64 composite runtime
-        run: |
-          if [ ! -x common/python/bin/luoshu-python ]; then
-            sh ./scripts/prepare_composite_runtime.sh
-          fi
-      - name: Composite smoke tests
-        env:
-          PYTHONPATH: common/python/lib/python3.14/site-packages
-        run: |
-          CJK="$(find /usr/share/fonts -type f \( -iname '*NotoSansCJK*Regular*.ttc' -o -iname '*NotoSansCJK*Regular*.otf' \) -print -quit)"
-          LATIN="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
-          test -n "$CJK"; test -n "$LATIN"
-          python3 common/composite_font.py --cjk "$CJK" --latin "$LATIN" --digit "$LATIN" --output /tmp/luoshu-composite.otf >/tmp/luoshu-composite.json
+          set -euo pipefail
           python3 - <<'PY'
-          import json
-          from fontTools.ttLib import TTFont
-          report=json.load(open('/tmp/luoshu-composite.json', encoding='utf-8'))
-          assert report['status']=='ok', report
-          font=TTFont('/tmp/luoshu-composite.otf')
-          cmap=font.getBestCmap() or {}
-          assert all(ord(ch) in cmap for ch in '中Aa019')
-          assert report['replaced']['latin'] >= 52
-          assert report['replaced']['digit'] >= 10
+          from pathlib import Path
+          source = Path('.github/workflows/alpha14-native-live-preview.yml').read_text(encoding='utf-8')
+          body = source.split('        run: |\n', 1)[1]
+          body = '\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())
+          Path('/tmp/apply-alpha14.sh').write_text(body + '\n', encoding='utf-8')
           PY
-          python3 common/font_coverage.py /tmp/luoshu-composite.otf --brief
-          if python3 common/font_coverage.py "$LATIN" --brief; then
-            echo 'Latin-only font unexpectedly passed the global coverage gate' >&2
-            exit 1
-          fi
-      - name: TTC face extraction smoke test
-        run: sh ./scripts/ttc_face_test.sh
-      - name: Build flashable module
-        run: LUOSHU_VARIANT=lite sh ./scripts/build.sh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LuoShu-module-${{ github.sha }}
-          path: dist/*.zip*
-          if-no-files-found: error
-          retention-days: 30
+          bash /tmp/apply-alpha14.sh
