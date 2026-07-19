@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
@@ -41,6 +42,9 @@ internal fun LuoShuHost() {
         val useDarkSystemBars = pageBackground.luminance() < .5f
         val context = LocalContext.current
         val view = LocalView.current
+        val contentInsets = WindowInsets.safeDrawing.only(
+            WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
+        )
 
         SideEffect {
             val window = (context as? Activity)?.window ?: return@SideEffect
@@ -58,11 +62,8 @@ internal fun LuoShuHost() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .windowInsetsPadding(
-                        WindowInsets.safeDrawing.only(
-                            WindowInsetsSides.Top + WindowInsetsSides.Horizontal,
-                        ),
-                    ),
+                    .windowInsetsPadding(contentInsets)
+                    .consumeWindowInsets(contentInsets),
             ) {
                 LuoShuAppShell(model, features, appearanceViewModel)
             }
