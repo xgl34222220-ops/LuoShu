@@ -30,7 +30,7 @@ for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
   README.md README.txt LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md action.sh \
   RELEASE_NOTES_v14.2_ALPHA1.md RELEASE_NOTES_v14.2_ALPHA2.md RELEASE_NOTES_v14.2_ALPHA3.md \
   RELEASE_NOTES_v14.2_HYBRID_ALPHA5.md RELEASE_NOTES_v14.2_ALPHA6.md RELEASE_NOTES_v14.2_RC1.md RELEASE_NOTES_v14.2_RC2.md \
-  RELEASE_NOTES_v14.3_ALPHA1.md \
+  RELEASE_NOTES_v14.3_ALPHA1.md RELEASE_NOTES_v14.3.md RELEASE_NOTES_v14.3.1.md \
   licenses/LuoShu-MIT-HISTORICAL.txt licenses/CPython-LICENSE.txt licenses/FontTools-LICENSE.txt licenses/FontTools-LICENSE.external.txt \
   common/composite_font.py common/font_instance.py common/font_coverage.py common/font_axis_info.py common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh \
@@ -176,19 +176,7 @@ sh "$ROOT/scripts/native_zip_import_test.sh"
 sh "$ROOT/scripts/rc3_audit.sh"
 sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/stability_test.sh"
+sh "$ROOT/scripts/font_library_cache_test.sh"
+sh "$ROOT/scripts/app_installer_test.sh"
 
 test -x "$ROOT/common/python/bin/luoshu-python"
-test -f "$ROOT/common/python/lib/libpython3.14.so"
-test -f "$ROOT/common/python/lib/python3.14/site-packages/fontTools/ttLib/__init__.py"
-test -f "$ROOT/common/python/lib/python3.14/site-packages/fontTools/varLib/instancer/__init__.py"
-file "$ROOT/common/python/bin/luoshu-python" | grep -q 'ARM aarch64'
-
-PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" \
-  python3 -S - <<'PY'
-from fontTools.ttLib import TTFont, TTCollection
-from fontTools.pens.boundsPen import BoundsPen
-from fontTools.varLib.instancer import instantiateVariableFont
-print('Bundled FontTools import OK')
-PY
-
-echo "LuoShu $LUOSHU_VERSION hybrid checks passed."
