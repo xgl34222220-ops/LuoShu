@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # ============================================================
 # 洛书 - 后台服务（版本以 module.prop 为准）
-# 功能：启动完成后静默校正权限、恢复字重设置并维护日志。
+# 功能：启动完成后静默校正权限、补装 Full 内置 App、恢复字重设置并维护日志。
 # ============================================================
 
 MODDIR="${0%/*}"
@@ -40,11 +40,36 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
     # 权限只在后台静默校正。WebUI 所有核心脚本同时使用 sh 调用，
     # 即使 Root 管理器解压时丢失可执行位，也不会再要求用户手动修复。
     chmod 0755 "$MODDIR" "$MODDIR/common" "$MODDIR/webroot" 2>/dev/null || true
-    chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" 2>/dev/null || true
+    chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" "$MODDIR/action.sh" 2>/dev/null || true
     find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
     chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" 2>/dev/null || true
     chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     chmod 0755 "$MODDIR/system/bin/洛书" "$MODDIR/system/bin/luoshud" 2>/dev/null || true
+
+    # Full 模块在刷写阶段无法调用 pm 时，只在首次开机后自动重试一次。
+    # 成功覆盖安装会保留 App 数据、字体缓存和双皮肤外观设置。
+    if [ -s "$MODDIR/bundled/LuoShu-App.apk" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
+        if [ -f "$MODDIR/config/app_install_pending" ] || [ ! -f "$MODDIR/config/app_install_state.conf" ]; then
+            _app_result=$(MODDIR="$MODDIR" APP_INSTALL_LOG="$MODDIR/logs/app-install.log" sh "$MODDIR/common/app_installer.sh" first-boot 2>/dev/null)
+            _app_code=$?
+            case "$_app_result" in
+                installed)
+                    rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
+                    log_service "INFO" "已在首次开机自动安装或更新洛书 App"
+                    ;;
+                already-current)
+                    rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
+                    log_service "INFO" "洛书 App 已是模块内置版本"
+                    ;;
+                *)
+                    # 首次开机只自动尝试一次，避免签名冲突时每次开机重复失败。
+                    rm -f "$MODDIR/config/app_install_pending" 2>/dev/null || true
+                    touch "$MODDIR/config/app_install_manual" 2>/dev/null || true
+                    log_service "INFO" "App 自动更新未完成（code=$_app_code），请使用模块操作按钮重试；详情见 app-install.log"
+                    ;;
+            esac
+        fi
+    fi
 
     # Root 管理器模块说明只显示当前字体，不再塞入更新日志。
     if [ -f "$MODDIR/common/module_status.sh" ]; then
