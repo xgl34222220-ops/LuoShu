@@ -1,0 +1,84 @@
+name: v14.3.3 Signature Diagnose
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/v1433-signature-diagnose.yml
+      - android-app/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Require signing secrets
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.LUOSHU_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          result="$RUNNER_TEMP/signature-diagnostic.txt"
+          : > "$result"
+          for value in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -n "${!value}" ]]; then
+              echo "$value=present" >> "$result"
+            else
+              echo "$value=missing" >> "$result"
+            fi
+          done
+          if [[ -z "$KEYSTORE_BASE64" || -z "$KEYSTORE_PASSWORD" || -z "$KEY_ALIAS" || -z "$KEY_PASSWORD" ]]; then
+            exit 3
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/luoshu-release.jks"
+          keytool -list -keystore "$RUNNER_TEMP/luoshu-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+      - name: Build fixed-signature release APK
+        working-directory: android-app
+        env:
+          LUOSHU_KEYSTORE_FILE: ${{ runner.temp }}/luoshu-release.jks
+          LUOSHU_KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
+          LUOSHU_KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
+          LUOSHU_KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
+      - name: Capture exact APK signature result
+        shell: bash
+        run: |
+          set +e
+          result="$RUNNER_TEMP/signature-diagnostic.txt"
+          apk='android-app/app/build/outputs/apk/release/app-release.apk'
+          echo "apk_exists=$([[ -s "$apk" ]] && echo yes || echo no)" >> "$result"
+          find android-app/app/build/outputs/apk/release -maxdepth 1 -type f -printf 'apk_output=%f size=%s\n' >> "$result" 2>/dev/null || true
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+          echo "apksigner=$apksigner" >> "$result"
+          "$apksigner" verify --verbose --print-certs "$apk" > "$RUNNER_TEMP/apksigner.txt" 2>&1
+          rc=$?
+          echo "apksigner_rc=$rc" >> "$result"
+          cat "$RUNNER_TEMP/apksigner.txt" >> "$result"
+          sha256sum "$apk" >> "$result" 2>/dev/null || true
+          cat "$result"
+          exit 0
+      - name: Upload signature diagnosis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v1433-signature-diagnostic
+          path: ${{ runner.temp }}/signature-diagnostic.txt
+          if-no-files-found: error
+          retention-days: 3
