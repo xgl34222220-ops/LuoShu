@@ -43,7 +43,7 @@ class AppearanceRepository(private val context: Context) {
                 blurEnabled = preferences[Keys.blurEnabled] ?: true,
                 glassEnabled = preferences[Keys.glassEnabled] ?: true,
                 floatingDock = preferences[Keys.floatingDock] ?: true,
-            )
+            ).normalized()
         }
 
     suspend fun setUiStyle(value: UiStyle) = edit { it[Keys.uiStyle] = value.name }
@@ -52,7 +52,9 @@ class AppearanceRepository(private val context: Context) {
     suspend fun setKolorStyle(value: KolorStyle) = edit { it[Keys.kolorStyle] = value.name }
     suspend fun setMonetEnabled(enabled: Boolean) = edit { it[Keys.monetEnabled] = enabled }
     suspend fun setAmoledBlack(enabled: Boolean) = edit { it[Keys.amoledBlack] = enabled }
-    suspend fun setBlurEnabled(enabled: Boolean) = edit { it[Keys.blurEnabled] = enabled }
+    suspend fun setBlurEnabled(enabled: Boolean) = edit { preferences ->
+        preferences[Keys.blurEnabled] = enabled && (preferences[Keys.glassEnabled] ?: true)
+    }
 
     suspend fun setGlassEnabled(enabled: Boolean) {
         edit { preferences ->
