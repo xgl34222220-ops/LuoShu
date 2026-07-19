@@ -6,6 +6,12 @@
 
 - 暂无。
 
+## [v14.3.1] - 2026-07-19
+
+- 修复正式签名发布工作流错误调用不存在的 `testReleaseUnitTest`，改为执行项目实际存在并由日常 CI 使用的 `testDebugUnitTest`。
+- 保留 `lintRelease`、固定签名 `assembleRelease`、APK 证书校验、Full/Lite 成品校验与不可变 GitHub Release 门禁。
+- 功能代码与 v14.3 保持一致；版本号提升至 14323，使用新的不可变 `v14.3.1` 标签发布。
+
 ## [v14.3] - 2026-07-19
 
 - 发布 Material 3 Glass 与 Miuix 双皮肤原生 App，所有核心页面、设置和操作弹层均拥有独立实现。
