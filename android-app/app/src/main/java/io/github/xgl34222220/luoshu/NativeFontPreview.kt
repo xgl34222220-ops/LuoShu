@@ -43,7 +43,6 @@ internal data class WeightAxisInfo(
 private data class PreviewTypefaceState(
     val typeface: Typeface? = null,
     val file: File? = null,
-    val source: String = "",
     val error: String = "",
 )
 
@@ -54,54 +53,69 @@ internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
         key1 = font?.id,
     ) {
         value = when {
-  font == null -> WeightAxisInfo(loading = false, error = "未选择字体")
-  !font.variable -> WeightAxisInfo(loading = false, hasWeight = false)
-  else -> runCatching {
-      val command = "sh ${RootShell.quote(APP_BRIDGE)} weight_axis ${RootShell.quote(font.id)}"
-      val result = RootShell.exec(command, timeoutMs = 25_000L)
-      if (result.code != 0) error(result.stderr.ifBlank { bridgeError(result.stdout, "字体轴读取失败") })
-      val jsonLine = result.stdout.lineSequence().firstOrNull { it.trimStart().startsWith("{") }
-          ?: error("未收到字体轴数据")
-      val root = JSONObject(jsonLine.trim())
-      if (root.optString("status") != "ok") error(root.optString("message", "字体轴读取失败"))
-      val rawAxes = root.optJSONArray("axes")
-      val axes = buildList {
-          if (rawAxes != null) {
-              for (index in 0 until rawAxes.length()) {
-                  val axis = rawAxes.optJSONObject(index) ?: continue
-                  val tag = axis.optString("tag").trim()
-                  val minimum = axis.optDouble("min", Double.NaN).toFloat()
-                  val maximum = axis.optDouble("max", Double.NaN).toFloat()
-                  val defaultValue = axis.optDouble("default", Double.NaN).toFloat()
-                  if (tag.length == 4 && minimum.isFinite() && maximum.isFinite() && defaultValue.isFinite() && maximum >= minimum) {
-                      add(
-                          VariableAxisInfo(
-                              tag = tag,
-                              min = minimum,
-                              default = defaultValue.coerceIn(minimum, maximum),
-                              max = maximum,
-                          ),
-                      )
-                  }
-              }
-          }
-      }
-      val weight = axes.firstOrNull { it.tag == "wght" }
-      if (weight == null) {
-          WeightAxisInfo(loading = false, hasWeight = false, axes = axes)
-      } else {
-          WeightAxisInfo(
-              loading = false,
-              hasWeight = true,
-              min = weight.min.roundToInt(),
-              default = weight.default.roundToInt(),
-              max = weight.max.roundToInt(),
-              axes = axes,
-          )
-      }
-  }.getOrElse { error ->
-      WeightAxisInfo(loading = false, hasWeight = false, error = error.message ?: "字体轴读取失败")
-  }
+            font == null -> WeightAxisInfo(loading = false, error = "未选择字体")
+            !font.variable -> WeightAxisInfo(loading = false, hasWeight = false)
+            else -> runCatching {
+                val command = "sh ${RootShell.quote(APP_BRIDGE)} weight_axis ${RootShell.quote(font.id)}"
+                val result = RootShell.exec(command, timeoutMs = 25_000L)
+                if (result.code != 0) {
+                    error(result.stderr.ifBlank { bridgeError(result.stdout, "字体轴读取失败") })
+                }
+                val jsonLine = result.stdout.lineSequence()
+                    .firstOrNull { it.trimStart().startsWith("{") }
+                    ?: error("未收到字体轴数据")
+                val root = JSONObject(jsonLine.trim())
+                if (root.optString("status") != "ok") {
+                    error(root.optString("message", "字体轴读取失败"))
+                }
+                val rawAxes = root.optJSONArray("axes")
+                val axes = buildList {
+                    if (rawAxes != null) {
+                        for (index in 0 until rawAxes.length()) {
+                            val axis = rawAxes.optJSONObject(index) ?: continue
+                            val tag = axis.optString("tag").trim()
+                            val minimum = axis.optDouble("min", Double.NaN).toFloat()
+                            val maximum = axis.optDouble("max", Double.NaN).toFloat()
+                            val defaultValue = axis.optDouble("default", Double.NaN).toFloat()
+                            if (
+                                tag.length == 4 &&
+                                minimum.isFinite() &&
+                                maximum.isFinite() &&
+                                defaultValue.isFinite() &&
+                                maximum >= minimum
+                            ) {
+                                add(
+                                    VariableAxisInfo(
+                                        tag = tag,
+                                        min = minimum,
+                                        default = defaultValue.coerceIn(minimum, maximum),
+                                        max = maximum,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+                val weight = axes.firstOrNull { it.tag == "wght" }
+                if (weight == null) {
+                    WeightAxisInfo(loading = false, hasWeight = false, axes = axes)
+                } else {
+                    WeightAxisInfo(
+                        loading = false,
+                        hasWeight = true,
+                        min = weight.min.roundToInt(),
+                        default = weight.default.roundToInt(),
+                        max = weight.max.roundToInt(),
+                        axes = axes,
+                    )
+                }
+            }.getOrElse { error ->
+                WeightAxisInfo(
+                    loading = false,
+                    hasWeight = false,
+                    error = error.message ?: "字体轴读取失败",
+                )
+            }
         }
     }
     return info
@@ -121,58 +135,68 @@ internal fun NativeFontPreview(
     val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
     val errorColor = MaterialTheme.colorScheme.error.toArgb()
     val cleanAxes = normalizePreviewAxes(axes)
-    val axisKey = cleanAxes.entries.sortedBy { it.key }.joinToString(",") { "${it.key}=${formatAxisValue(it.value)}" }
+    val axisKey = cleanAxes.entries
+        .sortedBy { it.key }
+        .joinToString(",") { "${it.key}=${formatAxisValue(it.value)}" }
     val requestedWeight = (cleanAxes["wght"] ?: 400f).roundToInt().coerceIn(1, 1000)
     val sourceRevision = font?.let {
         val staticRevision = if (it.variable) "" else "|wght=$requestedWeight"
         "${it.id}|${it.size}|${it.date}$staticRevision"
     }
-    val preview by produceState(initialValue = PreviewTypefaceState(), key1 = sourceRevision) {
+
+    val preview by produceState(
+        initialValue = PreviewTypefaceState(),
+        key1 = sourceRevision,
+    ) {
         value = withContext(Dispatchers.IO) {
-  when {
-      font == null -> PreviewTypefaceState(error = "未选择字体")
-      !font.valid -> PreviewTypefaceState(error = font.error.ifBlank { "字体无效" })
-      else -> runCatching {
-          val cacheDir = File(context.cacheDir, "native-font-preview").apply { mkdirs() }
-          val extension = font.format.lowercase().takeIf { it in setOf("ttf", "otf", "ttc") } ?: "ttf"
-          val target = File(cacheDir, "${stableKey(sourceRevision.orEmpty())}.$extension")
-          if (!target.isFile || target.length() == 0L) {
-              val command = "sh ${RootShell.quote(APP_BRIDGE)} preview_export " +
-                  "${RootShell.quote(font.id)} ${RootShell.quote(target.absolutePath)} $requestedWeight"
-              val result = RootShell.exec(command, timeoutMs = 25_000L)
-              val jsonLine = result.stdout.lineSequence().firstOrNull { it.trimStart().startsWith("{") }
-              val root = jsonLine?.let { JSONObject(it.trim()) }
-              if (result.code != 0 || root?.optString("status") != "ok") {
-                  error(root?.optString("message").orEmpty().ifBlank {
-                      result.stderr.ifBlank { "预览字体导出失败" }
-                  })
-              }
-              if (!target.isFile || target.length() == 0L) error("预览字体文件为空")
-          }
-          val loaded = Typeface.createFromFile(target)
-          target.setLastModified(System.currentTimeMillis())
-          trimPreviewCache(cacheDir, target)
-          PreviewTypefaceState(
-              typeface = loaded,
-              file = target,
-              source = target.name,
-          )
-      }.getOrElse { error ->
-          PreviewTypefaceState(error = error.message ?: "预览字体加载失败")
-      }
-  }
+            when {
+                font == null -> PreviewTypefaceState(error = "未选择字体")
+                !font.valid -> PreviewTypefaceState(error = font.error.ifBlank { "字体无效" })
+                else -> runCatching {
+                    val cacheDir = File(context.cacheDir, "native-font-preview").apply { mkdirs() }
+                    val extension = font.format.lowercase()
+                        .takeIf { it in setOf("ttf", "otf", "ttc") }
+                        ?: "ttf"
+                    val target = File(cacheDir, "${stableKey(sourceRevision.orEmpty())}.$extension")
+                    if (!target.isFile || target.length() == 0L) {
+                        val command = "sh ${RootShell.quote(APP_BRIDGE)} preview_export " +
+                            "${RootShell.quote(font.id)} ${RootShell.quote(target.absolutePath)} $requestedWeight"
+                        val result = RootShell.exec(command, timeoutMs = 25_000L)
+                        val jsonLine = result.stdout.lineSequence()
+                            .firstOrNull { it.trimStart().startsWith("{") }
+                        val root = jsonLine?.let { JSONObject(it.trim()) }
+                        if (result.code != 0 || root?.optString("status") != "ok") {
+                            error(
+                                root?.optString("message").orEmpty().ifBlank {
+                                    result.stderr.ifBlank { "预览字体导出失败" }
+                                },
+                            )
+                        }
+                        if (!target.isFile || target.length() == 0L) {
+                            error("预览字体文件为空")
+                        }
+                    }
+                    val loaded = Typeface.createFromFile(target)
+                    target.setLastModified(System.currentTimeMillis())
+                    trimPreviewCache(cacheDir, target)
+                    PreviewTypefaceState(typeface = loaded, file = target)
+                }.getOrElse { error ->
+                    PreviewTypefaceState(error = error.message ?: "预览字体加载失败")
+                }
+            }
         }
     }
 
-    val variationResult = remember(preview.file?.absolutePath, axisKey, font?.variable) {
-        if (font?.variable != true || preview.file == null || cleanAxes.isEmpty()) {
-  Result.success(preview.typeface)
+    val previewFile = preview.file
+    val variationResult = remember(previewFile?.absolutePath, axisKey, font?.variable) {
+        if (font?.variable != true || previewFile == null || cleanAxes.isEmpty()) {
+            Result.success(preview.typeface)
         } else {
-  runCatching {
-      Typeface.Builder(preview.file)
-          .setFontVariationSettings(toAndroidVariationSettings(cleanAxes))
-          .build()
-  }
+            runCatching {
+                Typeface.Builder(previewFile)
+                    .setFontVariationSettings(toAndroidVariationSettings(cleanAxes))
+                    .build()
+            }
         }
     }
     val variationError = variationResult.exceptionOrNull()?.message.orEmpty()
@@ -181,32 +205,32 @@ internal fun NativeFontPreview(
     AndroidView(
         modifier = modifier,
         factory = { viewContext ->
-  TextView(viewContext).apply {
-      includeFontPadding = false
-      setSingleLine(false)
-      this.gravity = gravity
-      this.maxLines = maxLines
-      setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp)
-  }
+            TextView(viewContext).apply {
+                includeFontPadding = false
+                setSingleLine(false)
+                this.gravity = gravity
+                this.maxLines = maxLines
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp)
+            }
         },
         update = { view ->
-  val failure = preview.error.ifBlank { variationError }
-  val failed = failure.isNotBlank()
-  view.text = if (failed) "预览失败 · $failure" else text
-  view.typeface = renderedTypeface ?: Typeface.DEFAULT
-  view.gravity = gravity
-  view.maxLines = maxLines
-  view.setTextColor(if (failed) errorColor else textColor)
-  view.setTextSize(
-      android.util.TypedValue.COMPLEX_UNIT_SP,
-      if (failed) minOf(textSizeSp, 12f) else textSizeSp,
-  )
+            val failure = preview.error.ifBlank { variationError }
+            val failed = failure.isNotBlank()
+            view.text = if (failed) "预览失败 · $failure" else text
+            view.typeface = renderedTypeface ?: Typeface.DEFAULT
+            view.gravity = gravity
+            view.maxLines = maxLines
+            view.setTextColor(if (failed) errorColor else textColor)
+            view.setTextSize(
+                android.util.TypedValue.COMPLEX_UNIT_SP,
+                if (failed) minOf(textSizeSp, 12f) else textSizeSp,
+            )
         },
     )
 }
 
-private fun normalizePreviewAxes(axes: Map<String, Float>): Map<String, Float> = axes
-    .filter { (tag, value) -> tag.length == 4 && value.isFinite() }
+private fun normalizePreviewAxes(axes: Map<String, Float>): Map<String, Float> =
+    axes.filter { (tag, value) -> tag.length == 4 && value.isFinite() }
 
 private fun toAndroidVariationSettings(axes: Map<String, Float>): String = axes.entries
     .sortedBy { it.key }
@@ -219,8 +243,10 @@ private fun formatAxisValue(value: Float): String = if (value % 1f == 0f) {
 }
 
 private fun bridgeError(raw: String, fallback: String): String {
-    val line = raw.lineSequence().firstOrNull { it.trimStart().startsWith("{") } ?: return fallback
-    return runCatching { JSONObject(line.trim()).optString("message", fallback) }.getOrDefault(fallback)
+    val line = raw.lineSequence().firstOrNull { it.trimStart().startsWith("{") }
+        ?: return fallback
+    return runCatching { JSONObject(line.trim()).optString("message", fallback) }
+        .getOrDefault(fallback)
 }
 
 private fun stableKey(value: String): String {
@@ -238,12 +264,12 @@ private fun trimPreviewCache(directory: File, keep: File) {
     files.forEach { file ->
         val required = file.absolutePath == keep.absolutePath
         val fits = keptFiles < PREVIEW_CACHE_MAX_FILES &&
-  keptBytes + file.length() <= PREVIEW_CACHE_MAX_BYTES
+            keptBytes + file.length() <= PREVIEW_CACHE_MAX_BYTES
         if (required || fits) {
-  keptFiles += 1
-  keptBytes += file.length()
+            keptFiles += 1
+            keptBytes += file.length()
         } else {
-  file.delete()
+            file.delete()
         }
     }
 }
