@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing immutable tag to publish (for example v14.3)
+        description: Existing immutable tag to publish (for example v14.3.1)
         required: true
         type: string
 
@@ -142,7 +142,7 @@ jobs:
           LUOSHU_KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
           LUOSHU_KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
           LUOSHU_KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
-        run: gradle --no-daemon --stacktrace :app:lintRelease :app:testReleaseUnitTest :app:assembleRelease
+        run: gradle --no-daemon --stacktrace :app:lintRelease :app:testDebugUnitTest :app:assembleRelease
 
       - name: Verify APK signature certificate
         shell: bash
