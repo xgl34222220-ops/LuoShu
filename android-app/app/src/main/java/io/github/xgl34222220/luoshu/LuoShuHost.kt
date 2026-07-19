@@ -13,8 +13,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 @Composable
 internal fun LuoShuHost() {
     val model: LuoShuViewModel = viewModel()
+    val features: Alpha15FeatureViewModel = viewModel()
     Box(Modifier.fillMaxSize()) {
-        LuoShuApp(model)
+        LuoShuAlpha15App(model, features)
         NativeImportOverlay(
             viewModel = model,
             modifier = Modifier
