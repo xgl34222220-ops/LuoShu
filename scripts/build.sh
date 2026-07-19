@@ -18,10 +18,9 @@ APP_APK="${LUOSHU_APP_APK:-$ROOT/android-app/app/build/outputs/apk/debug/app-deb
 sh "$ROOT/scripts/check.sh"
 rm -rf "$STAGE"
 mkdir -p "$STAGE" "$OUT"
-for path in common config fonts system webroot licenses LICENSE NOTICE.md THIRD_PARTY_NOTICES.md README.md README.txt CHANGELOG.md customize.sh module.prop post-fs-data.sh service.sh uninstall.sh action.sh magic 兼容与目录说明.txt; do
+for path in common config fonts system licenses LICENSE NOTICE.md THIRD_PARTY_NOTICES.md README.md README.txt CHANGELOG.md customize.sh module.prop post-fs-data.sh service.sh uninstall.sh action.sh magic 兼容与目录说明.txt; do
   [ ! -e "$ROOT/$path" ] || cp -a "$ROOT/$path" "$STAGE/"
 done
-sh "$ROOT/scripts/prepare_webui.sh" "$STAGE/webroot"
 [ ! -f "$STAGE/config/version_notes.conf" ] || sed -i "s/^version=.*/version=$LUOSHU_VERSION/" "$STAGE/config/version_notes.conf"
 
 if [ "$VARIANT" = "full" ] && [ -s "$APP_APK" ]; then
@@ -55,9 +54,7 @@ fi
 find "$STAGE" -type f -name '*.log' -delete
 find "$STAGE" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null || true
 find "$STAGE" -type f -name '*.pyc' -delete
-rm -rf "$STAGE/webroot/fonts" "$STAGE/logs" "$STAGE/backup" "$STAGE/config/recovery"
-mkdir -p "$STAGE/webroot/fonts"
-rm -rf "$STAGE/webroot/emoji"
+rm -rf "$STAGE/webroot" "$STAGE/logs" "$STAGE/backup" "$STAGE/config/recovery"
 rm -f "$STAGE/config/webui_font_list.json" "$STAGE/config/webui_font_list.key" \
   "$STAGE/config/recent_fonts.conf" "$STAGE/config/previous_font.conf" \
   "$STAGE/config/switch_task.conf" "$STAGE/config/mix_task.conf" "$STAGE/config/axes_task.conf" \
@@ -66,19 +63,21 @@ rm -f "$STAGE/config/webui_font_list.json" "$STAGE/config/webui_font_list.key" \
   "$STAGE/config/font_weight_reboot_required.conf" "$STAGE/config/mount_compat.conf" \
   "$STAGE/config/app_install_pending" "$STAGE/config/app_install_state.conf"
 rm -f "$STAGE/system/fonts/NotoColorEmoji.ttf" "$STAGE/system/fonts/NotoColorEmojiLegacy.ttf"
-rm -f "$STAGE/common/stability.sh" "$STAGE/webroot/stability.js" "$STAGE/webroot/stability.css" \
-  "$STAGE/common/fonts_xml_template.sh" "$STAGE/common/play_font_bridge.sh" "$STAGE/common/wechat_xweb_bridge.sh"
+rm -f "$STAGE/common/stability.sh" "$STAGE/common/fonts_xml_template.sh" \
+  "$STAGE/common/play_font_bridge.sh" "$STAGE/common/wechat_xweb_bridge.sh"
 find "$STAGE/common" -maxdepth 1 -type f -exec chmod 0755 {} +
 chmod 0755 "$STAGE"/*.sh "$STAGE/system/bin/luoshud" "$STAGE/common/python/bin/luoshu-python"
-find "$STAGE/webroot" -type f -exec chmod 0644 {} +
 find "$STAGE/system/fonts" -type f -exec chmod 0644 {} + 2>/dev/null || true
+
+# App-only 成品门禁：模块 ZIP 不再包含或声明 WebUI。
+test ! -e "$STAGE/webroot"
+! grep -q '^webroot=' "$STAGE/module.prop"
 
 # 成品目录门禁：旧功能即使被其他构建步骤重新带回，也禁止生成 ZIP。
 for forbidden in \
-  webroot/emoji config/active_emoji.conf config/emoji_task.conf config/emoji_reboot_required.conf \
+  webroot config/active_emoji.conf config/emoji_task.conf config/emoji_reboot_required.conf \
   system/fonts/NotoColorEmoji.ttf system/fonts/NotoColorEmojiLegacy.ttf \
-  common/stability.sh webroot/stability.js webroot/stability.css common/fonts_xml_template.sh \
-  common/play_font_bridge.sh common/wechat_xweb_bridge.sh; do
+  common/stability.sh common/fonts_xml_template.sh common/play_font_bridge.sh common/wechat_xweb_bridge.sh; do
   [ ! -e "$STAGE/$forbidden" ] || { echo "forbidden payload: $forbidden" >&2; exit 88; }
 done
 
@@ -94,8 +93,8 @@ rm -f "$ZIP" "$ZIP.sha256"
 (cd "$STAGE" && zip -9 -r -q "$ZIP" .)
 (cd "$OUT" && sha256sum "$ZIP_NAME" > "$ZIP_NAME.sha256")
 unzip -t "$ZIP" >/dev/null
-unzip -Z1 "$ZIP" | grep -Eq '(^|/)(__pycache__|emoji)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' && {
-  echo 'forbidden legacy path found in final ZIP' >&2
+unzip -Z1 "$ZIP" | grep -Eq '(^|/)webroot(/|$)|(^|/)(__pycache__|emoji)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' && {
+  echo 'forbidden legacy or WebUI path found in final ZIP' >&2
   exit 89
 } || true
 printf 'Built: %s\n' "$ZIP"
