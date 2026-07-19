@@ -1,0 +1,883 @@
+name: Apply Alpha1.4 native live preview
+
+on:
+  push:
+    branches:
+      - feature/v14.3-alpha1-native-import
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/v14.3-alpha1-native-import
+          fetch-depth: 0
+
+      - name: Apply native live preview and full-axis state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('.')
+
+          def replace(path: str, old: str, new: str) -> None:
+              file = root / path
+              text = file.read_text(encoding='utf-8')
+              if old not in text:
+                  raise SystemExit(f'missing patch anchor in {path}: {old[:120]!r}')
+              file.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          native_preview = r'''package io.github.xgl34222220.luoshu
+
+          import android.graphics.Typeface
+          import android.view.Gravity
+          import android.widget.TextView
+          import androidx.compose.material3.MaterialTheme
+          import androidx.compose.runtime.Composable
+          import androidx.compose.runtime.getValue
+          import androidx.compose.runtime.produceState
+          import androidx.compose.runtime.remember
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.graphics.toArgb
+          import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.viewinterop.AndroidView
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.withContext
+          import org.json.JSONObject
+          import java.io.File
+          import java.security.MessageDigest
+          import kotlin.math.roundToInt
+
+          private const val APP_BRIDGE = "/data/adb/modules/LuoShu/common/app_bridge.sh"
+          private const val PREVIEW_CACHE_MAX_FILES = 12
+          private const val PREVIEW_CACHE_MAX_BYTES = 160L * 1024L * 1024L
+
+          internal data class VariableAxisInfo(
+              val tag: String,
+              val min: Float,
+              val default: Float,
+              val max: Float,
+          )
+
+          internal data class WeightAxisInfo(
+              val loading: Boolean = true,
+              val hasWeight: Boolean = false,
+              val min: Int = 100,
+              val default: Int = 400,
+              val max: Int = 900,
+              val axes: List<VariableAxisInfo> = emptyList(),
+              val error: String = "",
+          )
+
+          private data class PreviewTypefaceState(
+              val typeface: Typeface? = null,
+              val file: File? = null,
+              val source: String = "",
+              val error: String = "",
+          )
+
+          @Composable
+          internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
+              val info by produceState(
+                  initialValue = WeightAxisInfo(loading = font?.variable == true),
+                  key1 = font?.id,
+              ) {
+                  value = when {
+                      font == null -> WeightAxisInfo(loading = false, error = "未选择字体")
+                      !font.variable -> WeightAxisInfo(loading = false, hasWeight = false)
+                      else -> runCatching {
+                          val command = "sh ${RootShell.quote(APP_BRIDGE)} weight_axis ${RootShell.quote(font.id)}"
+                          val result = RootShell.exec(command, timeoutMs = 25_000L)
+                          if (result.code != 0) error(result.stderr.ifBlank { bridgeError(result.stdout, "字体轴读取失败") })
+                          val jsonLine = result.stdout.lineSequence().firstOrNull { it.trimStart().startsWith("{") }
+                              ?: error("未收到字体轴数据")
+                          val root = JSONObject(jsonLine.trim())
+                          if (root.optString("status") != "ok") error(root.optString("message", "字体轴读取失败"))
+                          val rawAxes = root.optJSONArray("axes")
+                          val axes = buildList {
+                              if (rawAxes != null) {
+                                  for (index in 0 until rawAxes.length()) {
+                                      val axis = rawAxes.optJSONObject(index) ?: continue
+                                      val tag = axis.optString("tag").trim()
+                                      val minimum = axis.optDouble("min", Double.NaN).toFloat()
+                                      val maximum = axis.optDouble("max", Double.NaN).toFloat()
+                                      val defaultValue = axis.optDouble("default", Double.NaN).toFloat()
+                                      if (tag.length == 4 && minimum.isFinite() && maximum.isFinite() && defaultValue.isFinite() && maximum >= minimum) {
+                                          add(
+                                              VariableAxisInfo(
+                                                  tag = tag,
+                                                  min = minimum,
+                                                  default = defaultValue.coerceIn(minimum, maximum),
+                                                  max = maximum,
+                                              ),
+                                          )
+                                      }
+                                  }
+                              }
+                          }
+                          val weight = axes.firstOrNull { it.tag == "wght" }
+                          if (weight == null) {
+                              WeightAxisInfo(loading = false, hasWeight = false, axes = axes)
+                          } else {
+                              WeightAxisInfo(
+                                  loading = false,
+                                  hasWeight = true,
+                                  min = weight.min.roundToInt(),
+                                  default = weight.default.roundToInt(),
+                                  max = weight.max.roundToInt(),
+                                  axes = axes,
+                              )
+                          }
+                      }.getOrElse { error ->
+                          WeightAxisInfo(loading = false, hasWeight = false, error = error.message ?: "字体轴读取失败")
+                      }
+                  }
+              }
+              return info
+          }
+
+          @Composable
+          internal fun NativeFontPreview(
+              font: FontItem?,
+              text: String,
+              axes: Map<String, Float> = emptyMap(),
+              modifier: Modifier = Modifier,
+              textSizeSp: Float = 25f,
+              gravity: Int = Gravity.START or Gravity.CENTER_VERTICAL,
+              maxLines: Int = 2,
+          ) {
+              val context = LocalContext.current.applicationContext
+              val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
+              val errorColor = MaterialTheme.colorScheme.error.toArgb()
+              val cleanAxes = normalizePreviewAxes(axes)
+              val axisKey = cleanAxes.entries.sortedBy { it.key }.joinToString(",") { "${it.key}=${formatAxisValue(it.value)}" }
+              val requestedWeight = (cleanAxes["wght"] ?: 400f).roundToInt().coerceIn(1, 1000)
+              val sourceRevision = font?.let {
+                  val staticRevision = if (it.variable) "" else "|wght=$requestedWeight"
+                  "${it.id}|${it.size}|${it.date}$staticRevision"
+              }
+              val preview by produceState(initialValue = PreviewTypefaceState(), key1 = sourceRevision) {
+                  value = withContext(Dispatchers.IO) {
+                      when {
+                          font == null -> PreviewTypefaceState(error = "未选择字体")
+                          !font.valid -> PreviewTypefaceState(error = font.error.ifBlank { "字体无效" })
+                          else -> runCatching {
+                              val cacheDir = File(context.cacheDir, "native-font-preview").apply { mkdirs() }
+                              val extension = font.format.lowercase().takeIf { it in setOf("ttf", "otf", "ttc") } ?: "ttf"
+                              val target = File(cacheDir, "${stableKey(sourceRevision.orEmpty())}.$extension")
+                              if (!target.isFile || target.length() == 0L) {
+                                  val command = "sh ${RootShell.quote(APP_BRIDGE)} preview_export " +
+                                      "${RootShell.quote(font.id)} ${RootShell.quote(target.absolutePath)} $requestedWeight"
+                                  val result = RootShell.exec(command, timeoutMs = 25_000L)
+                                  val jsonLine = result.stdout.lineSequence().firstOrNull { it.trimStart().startsWith("{") }
+                                  val root = jsonLine?.let { JSONObject(it.trim()) }
+                                  if (result.code != 0 || root?.optString("status") != "ok") {
+                                      error(root?.optString("message").orEmpty().ifBlank {
+                                          result.stderr.ifBlank { "预览字体导出失败" }
+                                      })
+                                  }
+                                  if (!target.isFile || target.length() == 0L) error("预览字体文件为空")
+                              }
+                              val loaded = Typeface.createFromFile(target)
+                              target.setLastModified(System.currentTimeMillis())
+                              trimPreviewCache(cacheDir, target)
+                              PreviewTypefaceState(
+                                  typeface = loaded,
+                                  file = target,
+                                  source = target.name,
+                              )
+                          }.getOrElse { error ->
+                              PreviewTypefaceState(error = error.message ?: "预览字体加载失败")
+                          }
+                      }
+                  }
+              }
+
+              val variationResult = remember(preview.file?.absolutePath, axisKey, font?.variable) {
+                  if (font?.variable != true || preview.file == null || cleanAxes.isEmpty()) {
+                      Result.success(preview.typeface)
+                  } else {
+                      runCatching {
+                          Typeface.Builder(preview.file)
+                              .setFontVariationSettings(toAndroidVariationSettings(cleanAxes))
+                              .build()
+                      }
+                  }
+              }
+              val variationError = variationResult.exceptionOrNull()?.message.orEmpty()
+              val renderedTypeface = variationResult.getOrNull() ?: preview.typeface
+
+              AndroidView(
+                  modifier = modifier,
+                  factory = { viewContext ->
+                      TextView(viewContext).apply {
+                          includeFontPadding = false
+                          setSingleLine(false)
+                          this.gravity = gravity
+                          this.maxLines = maxLines
+                          setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp)
+                      }
+                  },
+                  update = { view ->
+                      val failure = preview.error.ifBlank { variationError }
+                      val failed = failure.isNotBlank()
+                      view.text = if (failed) "预览失败 · $failure" else text
+                      view.typeface = renderedTypeface ?: Typeface.DEFAULT
+                      view.gravity = gravity
+                      view.maxLines = maxLines
+                      view.setTextColor(if (failed) errorColor else textColor)
+                      view.setTextSize(
+                          android.util.TypedValue.COMPLEX_UNIT_SP,
+                          if (failed) minOf(textSizeSp, 12f) else textSizeSp,
+                      )
+                  },
+              )
+          }
+
+          private fun normalizePreviewAxes(axes: Map<String, Float>): Map<String, Float> = axes
+              .filter { (tag, value) -> tag.length == 4 && value.isFinite() }
+
+          private fun toAndroidVariationSettings(axes: Map<String, Float>): String = axes.entries
+              .sortedBy { it.key }
+              .joinToString(", ") { (tag, value) -> "'$tag' ${formatAxisValue(value)}" }
+
+          private fun formatAxisValue(value: Float): String = if (value % 1f == 0f) {
+              value.roundToInt().toString()
+          } else {
+              value.toString().trimEnd('0').trimEnd('.')
+          }
+
+          private fun bridgeError(raw: String, fallback: String): String {
+              val line = raw.lineSequence().firstOrNull { it.trimStart().startsWith("{") } ?: return fallback
+              return runCatching { JSONObject(line.trim()).optString("message", fallback) }.getOrDefault(fallback)
+          }
+
+          private fun stableKey(value: String): String {
+              val bytes = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+              return bytes.take(12).joinToString("") { byte -> "%02x".format(byte) }
+          }
+
+          private fun trimPreviewCache(directory: File, keep: File) {
+              val files = directory.listFiles()
+                  ?.filter { it.isFile }
+                  ?.sortedByDescending { it.lastModified() }
+                  .orEmpty()
+              var keptFiles = 0
+              var keptBytes = 0L
+              files.forEach { file ->
+                  val required = file.absolutePath == keep.absolutePath
+                  val fits = keptFiles < PREVIEW_CACHE_MAX_FILES &&
+                      keptBytes + file.length() <= PREVIEW_CACHE_MAX_BYTES
+                  if (required || fits) {
+                      keptFiles += 1
+                      keptBytes += file.length()
+                  } else {
+                      file.delete()
+                  }
+              }
+          }
+          '''
+          native_preview = '\n'.join(line[10:] if line.startswith('          ') else line for line in native_preview.splitlines()) + '\n'
+          (root / 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt').write_text(native_preview, encoding='utf-8')
+
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt',
+              'import org.json.JSONObject\n',
+              'import org.json.JSONObject\nimport kotlin.math.roundToInt\n',
+          )
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt',
+              '''    val cjkWeight: Int = 400,
+              val latinWeight: Int = 400,
+              val digitWeight: Int = 400,
+              val enabled: Boolean = false,
+          ''',
+              '''    val cjkWeight: Int = 400,
+              val latinWeight: Int = 400,
+              val digitWeight: Int = 400,
+              val cjkAxes: Map<String, Float> = mapOf("wght" to 400f),
+              val latinAxes: Map<String, Float> = mapOf("wght" to 400f),
+              val digitAxes: Map<String, Float> = mapOf("wght" to 400f),
+              val enabled: Boolean = false,
+          ''',
+          )
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt',
+              '''                mixState = mixState.copy(
+                      loading = false,
+                      enabled = data.optBoolean("enabled", false),
+                      cjk = data.optString("cjk", mixState.cjk),
+                      latin = data.optString("latin", mixState.latin),
+                      digit = data.optString("digit", mixState.digit),
+                      cjkWeight = data.optInt("cjkWeight", mixState.cjkWeight).coerceIn(1, 1000),
+                      latinWeight = data.optInt("latinWeight", mixState.latinWeight).coerceIn(1, 1000),
+                      digitWeight = data.optInt("digitWeight", mixState.digitWeight).coerceIn(1, 1000),
+                      message = if (data.optBoolean("enabled", false)) "当前正在使用复合字体" else "可直接生成新的复合字体",
+                      error = "",
+                  )
+          ''',
+              '''                val cjkWeight = data.optInt("cjkWeight", mixState.cjkWeight).coerceIn(1, 1000)
+                  val latinWeight = data.optInt("latinWeight", mixState.latinWeight).coerceIn(1, 1000)
+                  val digitWeight = data.optInt("digitWeight", mixState.digitWeight).coerceIn(1, 1000)
+                  mixState = mixState.copy(
+                      loading = false,
+                      enabled = data.optBoolean("enabled", false),
+                      cjk = data.optString("cjk", mixState.cjk),
+                      latin = data.optString("latin", mixState.latin),
+                      digit = data.optString("digit", mixState.digit),
+                      cjkWeight = cjkWeight,
+                      latinWeight = latinWeight,
+                      digitWeight = digitWeight,
+                      cjkAxes = parseAxes(data.optString("cjkAxes"), cjkWeight),
+                      latinAxes = parseAxes(data.optString("latinAxes"), latinWeight),
+                      digitAxes = parseAxes(data.optString("digitAxes"), digitWeight),
+                      message = if (data.optBoolean("enabled", false)) "当前正在使用复合字体" else "可直接生成新的复合字体",
+                      error = "",
+                  )
+          ''',
+          )
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt',
+              '''    fun updateMixFont(slot: MixSlot, fontId: String) {
+                  mixState = when (slot) {
+                      MixSlot.Cjk -> mixState.copy(cjk = fontId)
+                      MixSlot.Latin -> mixState.copy(latin = fontId)
+                      MixSlot.Digit -> mixState.copy(digit = fontId)
+                  }
+              }
+
+              fun updateMixWeight(slot: MixSlot, weight: Int) {
+                  val safe = weight.coerceIn(1, 1000)
+                  mixState = when (slot) {
+                      MixSlot.Cjk -> mixState.copy(cjkWeight = safe)
+                      MixSlot.Latin -> mixState.copy(latinWeight = safe)
+                      MixSlot.Digit -> mixState.copy(digitWeight = safe)
+                  }
+              }
+          ''',
+              '''    fun updateMixFont(slot: MixSlot, fontId: String) {
+                  mixState = when (slot) {
+                      MixSlot.Cjk -> mixState.copy(cjk = fontId, cjkAxes = mapOf("wght" to mixState.cjkWeight.toFloat()))
+                      MixSlot.Latin -> mixState.copy(latin = fontId, latinAxes = mapOf("wght" to mixState.latinWeight.toFloat()))
+                      MixSlot.Digit -> mixState.copy(digit = fontId, digitAxes = mapOf("wght" to mixState.digitWeight.toFloat()))
+                  }
+              }
+
+              fun updateMixWeight(slot: MixSlot, weight: Int) {
+                  updateMixAxis(slot, "wght", weight.coerceIn(1, 1000).toFloat())
+              }
+
+              fun updateMixAxis(slot: MixSlot, tag: String, value: Float) {
+                  val cleanTag = tag.trim()
+                  if (cleanTag.length != 4 || !value.isFinite()) return
+                  val safe = if (cleanTag == "wght") value.coerceIn(1f, 1000f) else value
+                  mixState = when (slot) {
+                      MixSlot.Cjk -> mixState.copy(
+                          cjkWeight = if (cleanTag == "wght") safe.roundToInt() else mixState.cjkWeight,
+                          cjkAxes = mixState.cjkAxes + (cleanTag to safe),
+                      )
+                      MixSlot.Latin -> mixState.copy(
+                          latinWeight = if (cleanTag == "wght") safe.roundToInt() else mixState.latinWeight,
+                          latinAxes = mixState.latinAxes + (cleanTag to safe),
+                      )
+                      MixSlot.Digit -> mixState.copy(
+                          digitWeight = if (cleanTag == "wght") safe.roundToInt() else mixState.digitWeight,
+                          digitAxes = mixState.digitAxes + (cleanTag to safe),
+                      )
+                  }
+              }
+          ''',
+          )
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt',
+              '''        mixState = mixState.copy(
+                  busy = true,
+                  taskState = "queued",
+                  message = "正在提交复合字体任务…",
+                  progress = 1,
+                  error = "",
+              )
+              viewModelScope.launch {
+          ''',
+              '''        val cjkAxes = serializeAxes(mixState.cjkAxes, mixState.cjkWeight)
+              val latinAxes = serializeAxes(mixState.latinAxes, mixState.latinWeight)
+              val digitAxes = serializeAxes(mixState.digitAxes, mixState.digitWeight)
+              mixState = mixState.copy(
+                  busy = true,
+                  taskState = "queued",
+                  message = "正在提交复合字体任务…",
+                  progress = 1,
+                  error = "",
+              )
+              viewModelScope.launch {
+          ''',
+          )
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt',
+              '''                    append(RootShell.quote("wght=${mixState.cjkWeight}")).append(' ')
+                      append(RootShell.quote("wght=${mixState.latinWeight}")).append(' ')
+                      append(RootShell.quote("wght=${mixState.digitWeight}"))
+          ''',
+              '''                    append(RootShell.quote(cjkAxes)).append(' ')
+                      append(RootShell.quote(latinAxes)).append(' ')
+                      append(RootShell.quote(digitAxes))
+          ''',
+          )
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt',
+              '''    private fun firstJson(raw: String): JSONObject {
+          ''',
+              '''    private fun parseAxes(raw: String, fallbackWeight: Int): Map<String, Float> {
+                  val axes = linkedMapOf<String, Float>()
+                  raw.split(',').forEach { item ->
+                      val parts = item.split('=', limit = 2)
+                      if (parts.size != 2) return@forEach
+                      val tag = parts[0].trim()
+                      val value = parts[1].trim().toFloatOrNull()
+                      if (tag.length == 4 && value != null && value.isFinite()) axes[tag] = value
+                  }
+                  if ("wght" !in axes) axes["wght"] = fallbackWeight.toFloat()
+                  return axes.toMap()
+              }
+
+              private fun serializeAxes(axes: Map<String, Float>, fallbackWeight: Int): String {
+                  val normalized = axes.filter { (tag, value) -> tag.length == 4 && value.isFinite() }.toMutableMap()
+                  if ("wght" !in normalized) normalized["wght"] = fallbackWeight.toFloat()
+                  return normalized.toSortedMap().entries.joinToString(",") { (tag, value) ->
+                      val number = if (value % 1f == 0f) value.roundToInt().toString() else value.toString().trimEnd('0').trimEnd('.')
+                      "$tag=$number"
+                  }
+              }
+
+              private fun firstJson(raw: String): JSONObject {
+          ''',
+          )
+
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt',
+              'import kotlin.math.abs\n',
+              'import kotlin.math.abs\nimport kotlin.math.roundToInt\n',
+          )
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt',
+              '''                        "可变字体显示连续字重滑块；静态多字重只显示真实存在的档位；单一字体固定字重，不再伪造滑块。",
+          ''',
+              '''                        "下方预览会随每个真实可变轴或静态字重档位即时变化；只有点击生成并应用后才会写入系统字体。已打开的应用仍需重新启动进程，系统界面通常需要完整重启。",
+          ''',
+          )
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt',
+              'Text("生成并应用复合字体", fontWeight = FontWeight.Black)',
+              'Text("生成并应用到系统", fontWeight = FontWeight.Black)',
+          )
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt',
+              '''    val font = viewModel.fonts.firstOrNull { it.id == fontId }
+              val weight = selectedWeight(state, slot)
+          ''',
+              '''    val font = viewModel.fonts.firstOrNull { it.id == fontId }
+              val weight = selectedWeight(state, slot)
+              val axes = selectedAxes(state, slot)
+          ''',
+          )
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt',
+              '''                NativeFontPreview(
+                      font = font,
+                      text = if (slot == MixSlot.Cjk) "洛书中文基底" else if (slot == MixSlot.Latin) "LuoShu Typography" else "0123456789",
+          ''',
+              '''                NativeFontPreview(
+                      font = font,
+                      text = if (slot == MixSlot.Cjk) "洛书中文  Aa  0123" else if (slot == MixSlot.Latin) "LuoShu Typography 0123" else "0123456789 Aa",
+                      axes = axes,
+          ''',
+          )
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt',
+              '''                WeightControl(
+                      font = font,
+                      value = weight,
+                      enabled = !state.busy,
+                      onValue = { viewModel.updateMixWeight(slot, it) },
+                  )
+          ''',
+              '''                WeightControl(
+                      font = font,
+                      value = weight,
+                      axes = axes,
+                      enabled = !state.busy,
+                      onValue = { viewModel.updateMixWeight(slot, it) },
+                      onAxis = { tag, axisValue -> viewModel.updateMixAxis(slot, tag, axisValue) },
+                  )
+          ''',
+          )
+
+          app_file = root / 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt'
+          app_text = app_file.read_text(encoding='utf-8')
+          start = app_text.index('@Composable\nprivate fun WeightControl(')
+          end = app_text.index('@Composable\nprivate fun FontPickerDialog(', start)
+          weight_control = r'''@Composable
+          private fun WeightControl(
+              font: FontItem,
+              value: Int,
+              axes: Map<String, Float>,
+              enabled: Boolean,
+              onValue: (Int) -> Unit,
+              onAxis: (String, Float) -> Unit,
+          ) {
+              val axisInfo = rememberWeightAxisInfo(font)
+              when {
+                  font.variable && axisInfo.loading -> {
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                          CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                          Spacer(Modifier.width(9.dp))
+                          Text("正在读取真实可变轴…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                      }
+                  }
+                  font.variable && axisInfo.axes.isNotEmpty() -> {
+                      Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
+                          Row(verticalAlignment = Alignment.CenterVertically) {
+                              Column(Modifier.weight(1f)) {
+                                  Text("真实可变轴 · 实时预览", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                  Text("与 WebUI 工作台使用同一组轴参数", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                              }
+                              CapabilityPill("${axisInfo.axes.size} 个轴", Color(0xFF8A6CE8))
+                          }
+                          axisInfo.axes.forEach { axis ->
+                              val minimum = axis.min.coerceAtMost(axis.max)
+                              val maximum = axis.max.coerceAtLeast(axis.min)
+                              val current = (axes[axis.tag] ?: axis.default).coerceIn(minimum, maximum)
+                              val isWeight = axis.tag == "wght"
+                              val stepCount = if (isWeight && maximum > minimum) {
+                                  (((maximum - minimum) / 10f).roundToInt() - 1).coerceAtLeast(0)
+                              } else {
+                                  0
+                              }
+                              Column {
+                                  Row(verticalAlignment = Alignment.CenterVertically) {
+                                      Text("${axis.tag} · ${axisDisplayName(axis.tag)}", fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                      Spacer(Modifier.weight(1f))
+                                      Text(axisValueLabel(current), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+                                  }
+                                  Slider(
+                                      value = current,
+                                      onValueChange = { raw ->
+                                          val next = if (isWeight) ((raw / 10f).roundToInt() * 10).toFloat().coerceIn(minimum, maximum) else raw.coerceIn(minimum, maximum)
+                                          onAxis(axis.tag, next)
+                                      },
+                                      enabled = enabled,
+                                      valueRange = minimum..maximum,
+                                      steps = stepCount,
+                                  )
+                                  Text(
+                                      "${axisValueLabel(minimum)} · 默认 ${axisValueLabel(axis.default)} · ${axisValueLabel(maximum)}",
+                                      color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                      fontSize = 9.sp,
+                                  )
+                              }
+                          }
+                          Text("拖动时只刷新上方真实字体预览，不会反复改写系统文件。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                      }
+                  }
+                  font.variable -> {
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                          Column(Modifier.weight(1f)) {
+                              Text("可变字体轴读取失败", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                              Text(
+                                  axisInfo.error.ifBlank { "字体没有可用的 fvar 轴。" },
+                                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                  fontSize = 10.sp,
+                              )
+                          }
+                          CapabilityPill("固定预览", Color(0xFF8A6CE8))
+                      }
+                  }
+                  staticWeights(font).size >= 2 -> {
+                      Column {
+                          Row(verticalAlignment = Alignment.CenterVertically) {
+                              Text("真实静态字重 · 实时预览", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                              Spacer(Modifier.weight(1f))
+                              Text(value.toString(), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+                          }
+                          Spacer(Modifier.height(9.dp))
+                          Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                              staticWeights(font).forEach { option ->
+                                  val selected = option == value
+                                  Surface(
+                                      modifier = Modifier.clip(RoundedCornerShape(999.dp)).clickable(enabled = enabled) { onValue(option) },
+                                      shape = RoundedCornerShape(999.dp),
+                                      color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface.copy(alpha = 0.66f),
+                                      border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)),
+                                  ) {
+                                      Text(
+                                          weightName(option),
+                                          modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
+                                          color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                          fontSize = 11.sp,
+                                          fontWeight = FontWeight.Bold,
+                                      )
+                                  }
+                              }
+                          }
+                          Spacer(Modifier.height(8.dp))
+                          Text("切换档位会重新加载该字体族对应的真实文件，不再固定预览 Regular。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                      }
+                  }
+                  else -> {
+                      Row(verticalAlignment = Alignment.CenterVertically) {
+                          Column(Modifier.weight(1f)) {
+                              Text("固定字重", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                              Text("该字体没有可调轴，也没有其他静态字重文件。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                          }
+                          CapabilityPill(weightName(fixedWeight(font)), Color(0xFF8A6CE8))
+                      }
+                  }
+              }
+          }
+
+          '''
+          weight_control = '\n'.join(line[10:] if line.startswith('          ') else line for line in weight_control.splitlines())
+          app_file.write_text(app_text[:start] + weight_control + app_text[end:], encoding='utf-8')
+
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt',
+              '''private fun selectedWeight(state: MixState, slot: MixSlot): Int = when (slot) {
+                  MixSlot.Cjk -> state.cjkWeight
+                  MixSlot.Latin -> state.latinWeight
+                  MixSlot.Digit -> state.digitWeight
+              }
+
+          ''',
+              '''private fun selectedWeight(state: MixState, slot: MixSlot): Int = when (slot) {
+                  MixSlot.Cjk -> state.cjkWeight
+                  MixSlot.Latin -> state.latinWeight
+                  MixSlot.Digit -> state.digitWeight
+              }
+
+              private fun selectedAxes(state: MixState, slot: MixSlot): Map<String, Float> = when (slot) {
+                  MixSlot.Cjk -> state.cjkAxes
+                  MixSlot.Latin -> state.latinAxes
+                  MixSlot.Digit -> state.digitAxes
+              }
+
+          ''',
+          )
+          replace(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt',
+              '''private fun weightName(weight: Int): String = when (weight) {
+          ''',
+              '''private fun axisDisplayName(tag: String): String = when (tag) {
+                  "wght" -> "字重"
+                  "wdth" -> "字宽"
+                  "slnt" -> "倾斜"
+                  "ital" -> "斜体开关"
+                  "opsz" -> "光学尺寸"
+                  "GRAD" -> "笔画等级"
+                  "XTRA" -> "横向扩展"
+                  "YTAS" -> "上升部"
+                  "YTDE" -> "下降部"
+                  "YTFI" -> "数字高度"
+                  "YTLC" -> "小写高度"
+                  "YTUC" -> "大写高度"
+                  else -> "自定义轴"
+              }
+
+              private fun axisValueLabel(value: Float): String = if (value % 1f == 0f) {
+                  value.roundToInt().toString()
+              } else {
+                  String.format(java.util.Locale.US, "%.2f", value).trimEnd('0').trimEnd('.')
+              }
+
+              private fun weightName(weight: Int): String = when (weight) {
+          ''',
+          )
+
+          app_bridge = root / 'common/app_bridge.sh'
+          bridge_text = app_bridge.read_text(encoding='utf-8')
+          old_find = '''find_preview_source() {
+              _family="$1"
+              _regular=''
+              _variable=''
+              _fallback=''
+              for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \\
+                        "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+                  [ -f "$_f" ] || continue
+                  if type detect_font_family >/dev/null 2>&1; then
+                      _detected="$(detect_font_family "$(basename "$_f")")"
+                  else
+                      _detected="$(basename "$_f")"; _detected="${_detected%.*}"; _detected="${_detected%-Regular}"
+                  fi
+                  [ "$_detected" = "$_family" ] || continue
+                  [ -n "$_fallback" ] || _fallback="$_f"
+                  if type detect_font_weight >/dev/null 2>&1; then
+                      _role="$(detect_font_weight "$(basename "$_f")")"
+                      case "$_role" in
+                          regular|normal) [ -n "$_regular" ] || _regular="$_f" ;;
+                          variable) [ -n "$_variable" ] || _variable="$_f" ;;
+                      esac
+                  fi
+              done
+              if [ -n "$_regular" ]; then printf '%s\\n' "$_regular"
+              elif [ -n "$_variable" ]; then printf '%s\\n' "$_variable"
+              elif [ -n "$_fallback" ]; then printf '%s\\n' "$_fallback"
+              else return 1
+              fi
+          }
+          '''
+          new_find = '''preview_role_number() {
+              case "$1" in
+                  thin) echo 100 ;; extralight) echo 200 ;; light) echo 300 ;; regular|normal) echo 400 ;;
+                  medium) echo 500 ;; semibold) echo 600 ;; bold) echo 700 ;; extrabold) echo 800 ;;
+                  black|heavy) echo 900 ;; *) echo 400 ;;
+              esac
+          }
+
+          find_preview_source() {
+              _family="$1"
+              _target="${2:-400}"
+              case "$_target" in ''|*[!0-9]*) _target=400 ;; esac
+              _variable=''
+              _best=''
+              _best_score=99999
+              for _f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \\
+                        "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+                  [ -f "$_f" ] || continue
+                  if type detect_font_family >/dev/null 2>&1; then
+                      _detected="$(detect_font_family "$(basename "$_f")")"
+                  else
+                      _detected="$(basename "$_f")"; _detected="${_detected%.*}"; _detected="${_detected%-Regular}"
+                  fi
+                  [ "$_detected" = "$_family" ] || continue
+                  if type is_variable_font >/dev/null 2>&1 && is_variable_font "$_f" 2>/dev/null; then
+                      [ -n "$_variable" ] || _variable="$_f"
+                      continue
+                  fi
+                  _role=regular
+                  type detect_font_weight >/dev/null 2>&1 && _role="$(detect_font_weight "$(basename "$_f")")"
+                  _number="$(preview_role_number "$_role")"
+                  _score=$((_number - _target)); [ "$_score" -ge 0 ] 2>/dev/null || _score=$((-_score))
+                  if [ -z "$_best" ] || [ "$_score" -lt "$_best_score" ] 2>/dev/null; then
+                      _best="$_f"; _best_score="$_score"
+                  fi
+              done
+              if [ -n "$_variable" ]; then printf '%s\\n' "$_variable"
+              elif [ -n "$_best" ]; then printf '%s\\n' "$_best"
+              else return 1
+              fi
+          }
+          '''
+          if old_find not in bridge_text:
+              raise SystemExit('missing find_preview_source anchor')
+          bridge_text = bridge_text.replace(old_find, new_find, 1)
+          bridge_text = bridge_text.replace('_src="$(find_preview_source "$_family")"', '_src="$(find_preview_source "$_family" "${2:-400}")"', 1)
+          bridge_text = bridge_text.replace('''preview_export() {
+              _family="$1"
+              _dest="$2"
+          ''', '''preview_export() {
+              _family="$1"
+              _dest="$2"
+              _weight="${3:-400}"
+          ''', 1)
+          second = '_src="$(find_preview_source "$_family")"'
+          if second not in bridge_text:
+              raise SystemExit('missing preview_export source anchor')
+          bridge_text = bridge_text.replace(second, '_src="$(find_preview_source "$_family" "$_weight")"', 1)
+          bridge_text = bridge_text.replace('preview_source) preview_source_json "${2:-}" ;;', 'preview_source) preview_source_json "${2:-}" "${3:-400}" ;;', 1)
+          bridge_text = bridge_text.replace('preview_export) preview_export "${2:-}" "${3:-}" ;;', 'preview_export) preview_export "${2:-}" "${3:-}" "${4:-400}" ;;', 1)
+          bridge_text = bridge_text.replace('洛书 v14.3 Alpha1.2 原生 App 核心桥', '洛书 v14.3 Alpha1.4 原生 App 核心桥', 1)
+          app_bridge.write_text(bridge_text, encoding='utf-8')
+
+          preview_test = r'''#!/bin/sh
+          set -eu
+          ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+          TMP=$(mktemp -d)
+          trap 'rm -rf "$TMP"' EXIT HUP INT TERM
+          mkdir -p "$TMP/public/fonts" "$TMP/export"
+
+          printf regular > "$TMP/public/fonts/Demo-Regular.ttf"
+          printf bold > "$TMP/public/fonts/Demo-Bold.ttf"
+          printf extra > "$TMP/public/fonts/Demo-ExtraBold.ttf"
+
+          OUTPUT=$(LUOSHU_PUBLIC_DIR="$TMP/public" MODDIR="$ROOT" sh "$ROOT/common/app_bridge.sh" preview_source Demo 400)
+          printf '%s\n' "$OUTPUT" | grep -q '"status":"ok"'
+          printf '%s\n' "$OUTPUT" | grep -q '"file":"Demo-Regular.ttf"'
+
+          OUTPUT=$(LUOSHU_PUBLIC_DIR="$TMP/public" MODDIR="$ROOT" sh "$ROOT/common/app_bridge.sh" preview_source Demo 700)
+          printf '%s\n' "$OUTPUT" | grep -q '"file":"Demo-Bold.ttf"'
+
+          OUTPUT=$(LUOSHU_PUBLIC_DIR="$TMP/public" MODDIR="$ROOT" sh "$ROOT/common/app_bridge.sh" preview_source Demo 800)
+          printf '%s\n' "$OUTPUT" | grep -q '"file":"Demo-ExtraBold.ttf"'
+
+          LUOSHU_PUBLIC_DIR="$TMP/public" MODDIR="$ROOT" sh "$ROOT/common/app_bridge.sh" preview_export Demo "$TMP/export/demo.ttf" 700 >/tmp/luoshu-preview-export.json
+          cmp -s "$TMP/export/demo.ttf" "$TMP/public/fonts/Demo-Bold.ttf"
+
+          printf only-bold > "$TMP/public/fonts/Only-Bold.ttf"
+          OUTPUT=$(LUOSHU_PUBLIC_DIR="$TMP/public" MODDIR="$ROOT" sh "$ROOT/common/app_bridge.sh" preview_source Only 400)
+          printf '%s\n' "$OUTPUT" | grep -q '"file":"Only-Bold.ttf"'
+
+          echo 'Native weighted preview source regression test passed.'
+          '''
+          preview_test = '\n'.join(line[10:] if line.startswith('          ') else line for line in preview_test.splitlines()) + '\n'
+          (root / 'scripts/native_preview_source_test.sh').write_text(preview_test, encoding='utf-8')
+
+          replace('module.prop', 'version=v14.3 Alpha1.3\nversionCode=14313\n', 'version=v14.3 Alpha1.4\nversionCode=14314\n')
+          replace(
+              'module.prop',
+              'description=Android 全局字体管理模块：多字重模块读取内部真实字重，支持九档映射、安全导入、TTC 字体面和真实可变轴\n',
+              'description=Android 全局字体管理模块：App 原生工作台支持真实多轴与静态多字重实时预览，兼容安全导入、TTC 字体面和九档映射\n',
+          )
+          (root / 'config/version_notes.conf').write_text(
+              'version=v14.3 Alpha1.4\n'
+              'summary=App 原生工作台接通真实多轴实时预览\n'
+              'notes=可变字体的 wght、wdth、opsz、slnt 等轴会即时作用于原生预览；静态多字重会加载所选档位的真实字体文件。拖动只预览，点击生成并应用后才写入系统。\n',
+              encoding='utf-8',
+          )
+          (root / 'RELEASE_NOTES_v14.3_ALPHA1.md').write_text(
+              '''# 洛书 v14.3 Alpha1.4
+
+          ## 原生 App 工作台实时预览
+
+          - App 的可变字体预览不再固定加载默认实例，现通过 Android `Typeface.Builder.setFontVariationSettings()` 实时应用真实 fvar 轴。
+          - 原生 App 会显示字体全部真实可变轴，包括 wght、wdth、opsz、slnt、ital 以及字体自定义轴，与 WebUI 工作台使用同一组参数。
+          - 静态多字重切换档位时，预览桥会加载对应的真实字体文件，不再永远显示 Regular。
+          - 轴参数会完整传给最终复合字体实例化任务，不再只提交 wght。
+          - 拖动滑块只更新实时预览，不会反复改写系统文件；点击“生成并应用到系统”后才执行实例化和模块更新。
+          - 已打开的应用会缓存 Typeface，应用到系统后仍需重新启动对应应用；系统界面和大多数全局字体变更通常需要完整重启。
+          - 保留 Alpha1.3 的内部 OS/2 多字重识别与 HyperOS 100–900 九档映射。
+
+          本版本为开发测试版，不建议作为最终稳定版本长期使用。
+          '''.replace('          ', ''),
+              encoding='utf-8',
+          )
+
+          check = root / 'scripts/check.sh'
+          check_text = check.read_text(encoding='utf-8')
+          anchor = "grep -q '预览失败' \"$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt\"\n"
+          addition = anchor + \
+              "grep -q 'setFontVariationSettings' \"$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt\"\n" + \
+              "grep -q 'updateMixAxis' \"$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt\"\n" + \
+              "grep -q 'axisInfo.axes.forEach' \"$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuApp.kt\"\n"
+          if anchor not in check_text:
+              raise SystemExit('missing check anchor')
+          check.write_text(check_text.replace(anchor, addition, 1), encoding='utf-8')
+          PY
+
+          chmod 0755 scripts/native_preview_source_test.sh common/app_bridge.sh
+          sh -n common/app_bridge.sh
+          sh -n scripts/native_preview_source_test.sh
+          sh scripts/native_preview_source_test.sh
+          python3 -m py_compile common/font_axis_info.py
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add android-app common scripts module.prop config/version_notes.conf RELEASE_NOTES_v14.3_ALPHA1.md
+          git reset .github/workflows/alpha14-native-live-preview.yml || true
+          git commit -m "feat(app): add real-time variable-axis and static-weight preview"
+          git push origin HEAD:feature/v14.3-alpha1-native-import
