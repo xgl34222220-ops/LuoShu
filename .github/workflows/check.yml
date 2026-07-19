@@ -1,15 +1,9 @@
-name: Validate source
+name: Validate App-only source
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - fix/v14.2-rc2-stabilization
-      - feature/v14.3-alpha1-native-import
   pull_request:
     branches:
       - main
-      - baseline/v14.2-rc1-rebuild
-      - fix/v14.2-rc2-stabilization
     paths:
       - module.prop
       - common/**
@@ -47,34 +41,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Collect legacy inventory
-        shell: bash
-        run: |
-          set +e
-          sh ./scripts/rc3_audit.sh > legacy-inventory.txt 2>&1
-          echo $? > legacy-inventory.exit
-          cat legacy-inventory.txt
-          exit 0
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LuoShu-legacy-inventory
-          path: |
-            legacy-inventory.txt
-            legacy-inventory.exit
-          if-no-files-found: error
-
-      - name: Enforce legacy inventory
-        run: test "$(cat legacy-inventory.exit)" = 0
+      - name: Enforce App-only inventory
+        run: sh ./scripts/rc3_audit.sh
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
 
       - uses: android-actions/setup-android@v3
 
@@ -129,9 +102,9 @@ jobs:
           assert set(gate.DIGITS) <= set(gate.required('cjk'))
           PY
 
-      - name: Compile, test and build native App
+      - name: Lint, test and build native App
         working-directory: android-app
-        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug
+        run: gradle --no-daemon --stacktrace :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
 
       - name: Build App and single module candidate
         shell: bash
@@ -145,7 +118,7 @@ jobs:
           app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
           cp -f "$apk" "$app"
           (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
-          LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
+          LUOSHU_APP_APK="$apk" LUOSHU_ALLOW_DEBUG_APP=1 sh ./scripts/build.sh
 
       - name: Inspect candidate artifacts
         shell: bash
@@ -167,6 +140,8 @@ jobs:
 
           test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = "$LUOSHU_VERSION"
           test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = "$LUOSHU_VERSION_CODE"
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^package=//p')" = 'io.github.xgl34222220.luoshu.debug'
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = "$((LUOSHU_VERSION_CODE * 100 + 1))"
           grep -qx 'action.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/composite_font.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_instance.py' /tmp/luoshu-package-list.txt
@@ -203,6 +178,7 @@ jobs:
           ! unzip -p "$module" common/app_bridge.sh | grep -q 'v143_axes'
           ! unzip -p "$module" customize.sh | grep -q 'pm install'
           ! unzip -p "$module" common/luoshu_cli.sh | grep -qE '回滚|重启界面|刷新字体缓存'
+          ! unzip -p "$module" common/font_manager.sh | grep -qE 'webroot|restart_ui|previous_font|action refresh'
           ! unzip -p "$module" service.sh | grep -q 'cmd font system --update'
           ! unzip -p "$module" service.sh | grep -q 'oplus-font refresh'
           ! grep -qE '^system/etc/(fonts.xml|font_fallback.xml)$' /tmp/luoshu-package-list.txt
