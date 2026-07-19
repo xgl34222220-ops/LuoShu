@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Error
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -68,10 +70,16 @@ internal fun NativeImportOverlay(
             style = style,
             state = state,
             enabled = viewModel.snapshot.installed &&
-                !state.busy &&
                 !viewModel.operationBusy &&
-                !viewModel.mixState.busy,
-            onImport = { launcher.launch(arrayOf("*/*")) },
+                !viewModel.mixState.busy &&
+                (!state.busy || state.paused),
+            onImport = {
+                if (state.paused) {
+                    importViewModel.resumeImport()
+                } else {
+                    launcher.launch(arrayOf("*/*"))
+                }
+            },
         )
     }
 
@@ -109,22 +117,26 @@ private fun ImportActionButton(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (state.busy) {
-                    CircularProgressIndicator(
+                when {
+                    state.busy -> CircularProgressIndicator(
                         modifier = Modifier.size(19.dp),
                         strokeWidth = 2.dp,
                         color = MaterialTheme.colorScheme.onPrimary,
                     )
-                } else {
-                    Icon(Icons.Rounded.Add, contentDescription = null)
+                    state.paused -> Icon(Icons.Rounded.PlayArrow, contentDescription = null)
+                    else -> Icon(Icons.Rounded.Add, contentDescription = null)
                 }
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    if (state.busy) "导入 ${state.processed}/${state.total}" else "导入字体",
+                    when {
+                        state.busy -> "导入 ${state.processed}/${state.total}"
+                        state.paused -> "继续 ${state.processed}/${state.total}"
+                        else -> "导入字体"
+                    },
                     fontWeight = FontWeight.Black,
                 )
             }
-            if (state.busy) {
+            if (state.busy || state.paused) {
                 LinearProgressIndicator(
                     progress = { state.progress / 100f },
                     modifier = Modifier.fillMaxWidth(),
@@ -143,15 +155,23 @@ private fun ImportResultDialog(
     onDismiss: () -> Unit,
 ) {
     val failed = state.failed.isNotEmpty()
+    val cancelled = state.phase == NativeImportPhase.CANCELLED
+    val icon = when {
+        cancelled -> Icons.Rounded.Cancel
+        failed -> Icons.Rounded.Error
+        else -> Icons.Rounded.CheckCircle
+    }
+    val accent = when {
+        failed -> MaterialTheme.colorScheme.error
+        cancelled -> MaterialTheme.colorScheme.secondary
+        else -> MaterialTheme.colorScheme.primary
+    }
+
     if (style == UiStyle.MATERIAL) {
         AlertDialog(
             onDismissRequest = onDismiss,
             icon = {
-                Icon(
-                    if (failed) Icons.Rounded.Error else Icons.Rounded.CheckCircle,
-                    contentDescription = null,
-                    tint = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                )
+                Icon(icon, contentDescription = null, tint = accent)
             },
             title = { Text(state.title, fontWeight = FontWeight.Black) },
             text = {
@@ -182,7 +202,7 @@ private fun ImportResultDialog(
                 ) {
                     Text(
                         "IMPORT RESULT",
-                        color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                        color = accent,
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 2.sp,
@@ -196,7 +216,7 @@ private fun ImportResultDialog(
                     )
                     Text(state.summary, color = tokens.textPrimary, lineHeight = 20.sp)
                     Text(
-                        "ZIP 仅安全提取字体，不执行包内脚本。导入历史可在任务中心查看。",
+                        "ZIP 仅安全提取字体，不执行包内脚本。导入记录可在任务中心控制。",
                         color = tokens.textSecondary,
                         fontSize = 11.sp,
                     )
