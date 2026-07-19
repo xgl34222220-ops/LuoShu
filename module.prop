@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v14.3.2
-versionCode=14324
+version=v14.3.3
+versionCode=14325
 author=惜故里丶
-description=Android 全局字体管理模块：修复 Monet 动态色配置更新，原生 App 支持双皮肤、字体库秒开、真实可变轴、复合字体与安全导入
+description=Android 全局字体管理模块：修复正式 APK v3 签名验证，原生 App 支持双皮肤、字体库秒开、真实可变轴、复合字体与安全导入
 updateJson=
 webroot=webroot
