@@ -1,4 +1,4 @@
-name: Build RC1 integrated artifacts
+name: Build App-only integrated artifacts
 
 on:
   workflow_dispatch:
@@ -55,7 +55,7 @@ jobs:
         shell: bash
         run: gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee gradle-build.log
 
-      - name: Build and verify Full/Lite packages
+      - name: Build and verify single App-only package
         shell: bash
         run: |
           set -euo pipefail
@@ -66,34 +66,30 @@ jobs:
           app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
           cp -f "$apk" "$app"
           (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
-          LUOSHU_VARIANT=full LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
-          LUOSHU_VARIANT=lite sh ./scripts/build.sh
-          full="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Full.zip"
-          lite="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Lite.zip"
-          test -s "$full"; test -s "$lite"
-          unzip -t "$full" >/dev/null
-          unzip -t "$lite" >/dev/null
-          unzip -Z1 "$full" | grep -qx 'bundled/LuoShu-App.apk'
-          ! unzip -Z1 "$lite" | grep -qx 'bundled/LuoShu-App.apk'
-          unzip -p "$full" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
+          LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
+          module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
+          test -s "$module"
+          unzip -t "$module" >/dev/null
+          unzip -Z1 "$module" | grep -qx 'bundled/LuoShu-App.apk'
+          ! unzip -Z1 "$module" | grep -qE '(^|/)webroot(/|$)'
+          unzip -p "$module" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
           cmp -s "$apk" "$RUNNER_TEMP/embedded.apk"
-          (cd dist && sha256sum -c "$(basename "$full").sha256")
-          (cd dist && sha256sum -c "$(basename "$lite").sha256")
+          (cd dist && sha256sum -c "$(basename "$module").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
 
       - name: Upload build log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-RC1-Gradle-Log
+          name: LuoShu-App-Only-Gradle-Log
           path: android-app/gradle-build.log
           if-no-files-found: warn
           retention-days: 3
 
-      - name: Upload RC1 artifacts
+      - name: Upload App-only artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: EXTRACT-FIRST-LuoShu-RC1-Full-Lite
+          name: EXTRACT-FIRST-LuoShu-App-Only
           path: dist/*
           if-no-files-found: error
           retention-days: 14
