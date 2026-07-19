@@ -2,12 +2,18 @@ name: Publish signed release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+    paths:
+      - module.prop
+      - 'RELEASE_NOTES_*.md'
+      - .github/workflows/release.yml
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing immutable tag to publish (for example v14.2-RC2)
+        description: Existing immutable tag to publish (for example v14.3)
         required: true
         type: string
 
@@ -52,13 +58,36 @@ jobs:
           . ./scripts/version.sh
           expected_tag="$LUOSHU_ARTIFACT_VERSION"
           tag="${GITHUB_REF_NAME}"
+
           if [[ "${GITHUB_EVENT_NAME}" == 'workflow_dispatch' ]]; then
             tag="$INPUT_TAG"
             git fetch --force --tags origin
             tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
             [[ -n "$tag_sha" ]] || { echo "Tag does not exist: $tag" >&2; exit 2; }
             [[ "$tag_sha" == "$GITHUB_SHA" ]] || { echo "Run this workflow from the existing tag $tag" >&2; exit 2; }
+          elif [[ "${GITHUB_REF_TYPE}" == 'branch' ]]; then
+            [[ "${GITHUB_REF_NAME}" == 'main' ]] || { echo "Stable branch publishing only supports main" >&2; exit 2; }
+            case "$LUOSHU_VERSION" in
+              *Alpha*|*Beta*|*RC*)
+                echo "Pre-release versions must be published from an explicit immutable tag" >&2
+                exit 2
+                ;;
+            esac
+            tag="$expected_tag"
+            git fetch --force --tags origin
+            tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
+            if [[ -n "$tag_sha" && "$tag_sha" != "$GITHUB_SHA" ]]; then
+              echo "Tag $tag already points to $tag_sha, not $GITHUB_SHA" >&2
+              exit 2
+            fi
+            if [[ -z "$tag_sha" ]]; then
+              git config user.name 'github-actions[bot]'
+              git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+              git tag "$tag" "$GITHUB_SHA"
+              git push origin "refs/tags/$tag"
+            fi
           fi
+
           [[ "$tag" == "$expected_tag" ]] || {
             echo "Tag $tag does not match module.prop ($expected_tag)" >&2
             exit 2
