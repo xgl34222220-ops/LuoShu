@@ -12,14 +12,16 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
   exit 85
 }
 
-# 运行时脚本不得创建或依赖 webroot，也不得重新暴露已移除的热刷新/回滚入口。
+# 运行时脚本不得创建或依赖 webroot，也不得重新暴露热刷新入口。
 RUNTIME_FILES="$ROOT/customize.sh $ROOT/post-fs-data.sh $ROOT/service.sh $ROOT/action.sh $ROOT/common/font_manager.sh $ROOT/common/app_bridge.sh $ROOT/common/luoshu_cli.sh"
-HITS=$(grep -InE 'webroot|restart_ui|sync_preview_fonts|previous_font\.conf|重启界面|刷新字体缓存|回滚上一字体' $RUNTIME_FILES 2>/dev/null || true)
+HITS=$(grep -InE 'webroot|restart_ui|sync_preview_fonts|重启界面|刷新字体缓存|回滚上一字体' $RUNTIME_FILES 2>/dev/null || true)
 if [ -n "$HITS" ]; then
   echo '=== App-only forbidden runtime inventory ===' >&2
   printf '%s\n' "$HITS" >&2
   exit 86
 fi
+# 安装脚本可以单向删除旧 previous_font.conf，但字体管理器不能再读取或生成它。
+! grep -q 'previous_font\.conf' "$ROOT/common/font_manager.sh"
 
 # 已废弃的 Emoji、稳定性自救和旧桥接负载不得重新出现。
 PATTERN='USER_EMOJI_DIR|/sdcard/LuoShu/emoji/|emojiSection|emojiCurrent|emojiList|openEmojiFolder|moreOpenEmoji|sync_emoji_preview|importedEmoji|find_emoji_file|switch_emoji|emoji_switch|emoji_status|emoji_list|stability\.(js|css)|common/stability\.sh|fonts_xml_template|common/play_font_bridge\.sh|common/wechat_xweb_bridge\.sh'
