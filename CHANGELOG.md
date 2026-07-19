@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### v14.3 Alpha1.8
+
+- 字体库、字体组合和运行日志完成独立 Material / Miuix 两份 Compose 页面实现，不再进入共享过渡页面。
+- 字体库分别实现 Material 资源概览与预览卡、Miuix 紧凑统计与超椭圆分组列表。
+- 字体组合分别实现三个槽位、真实可变轴、静态多字重、覆盖诊断、任务进度和最终应用操作。
+- 运行日志分别实现 Material 深色终端诊断页与 Miuix 白泽式日志分组页，并保留文本选择能力。
+- 新增 Stage 2 App Shell；两套页面只共享 FontItem、MixState、业务 ViewModel 和纯数据换算，字体底层逻辑保持不变。
+- 版本号提升至 14318，作为完整双皮肤页面真机测试版本。
+
 ### v14.3 Alpha1.7
 
 - 新增 Material 3 Glass 与 Miuix 双皮肤架构，界面风格通过 DataStore 持久化并支持运行时即时切换。
