@@ -1,11 +1,13 @@
 name: v14.3 Release Lint Diagnose
 
 on:
-  push:
+  pull_request:
     branches:
       - main
     paths:
       - .github/workflows/v143-lint-diagnose.yml
+      - android-app/**
+  workflow_dispatch:
 
 permissions:
   contents: read
