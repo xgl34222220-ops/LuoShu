@@ -33,6 +33,7 @@ for file in \
   scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/rc3_audit.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
+  .github/workflows/release.yml \
   android-app/app/build.gradle.kts \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuHost.kt \
@@ -60,6 +61,24 @@ grep -q 'LUOSHU_ALLOW_DEBUG_APP' "$ROOT/scripts/build.sh"
 grep -q 'io.github.xgl34222220.luoshu.debug' "$ROOT/scripts/build.sh"
 grep -q 'LuoShu-${VERSION}.zip' "$ROOT/scripts/build.sh"
 ! grep -RIn 'LUOSHU_VARIANT' "$ROOT/scripts" "$ROOT/.github/workflows" >/dev/null 2>&1
+
+# 正式发布只能手动运行；先验证全部候选，再由一次 Release 操作创建 Tag。
+release_workflow="$ROOT/.github/workflows/release.yml"
+grep -q '^  workflow_dispatch:' "$release_workflow"
+! grep -q '^  push:' "$release_workflow"
+grep -q 'LUOSHU_RELEASE_CERT_SHA256' "$release_workflow"
+grep -q 'Build and verify the four release assets' "$release_workflow"
+grep -q 'Recheck immutable publication target' "$release_workflow"
+grep -q 'gh release create' "$release_workflow"
+grep -q -- '--target "$RELEASE_SHA"' "$release_workflow"
+! grep -qE 'git tag |git push origin.*refs/tags' "$release_workflow"
+! grep -q 'gh release create.*dist/\*' "$release_workflow"
+build_line=$(grep -n 'Build and verify the four release assets' "$release_workflow" | head -n1 | cut -d: -f1)
+publish_line=$(grep -n 'gh release create' "$release_workflow" | head -n1 | cut -d: -f1)
+case "$build_line:$publish_line" in *[!0-9:]*|:*|*:) exit 1 ;; esac
+[ "$publish_line" -gt "$build_line" ]
+grep -q '工作流不再提前执行 `git tag`' "$ROOT/docs/RELEASING.md"
+grep -q 'LUOSHU_RELEASE_CERT_SHA256' "$ROOT/docs/RELEASING.md"
 
 # 安装与运行时只面向原生 App，不得重新创建或依赖 webroot。
 grep -q 'luoshu_cli.sh.*system/bin/洛书' "$ROOT/customize.sh"
