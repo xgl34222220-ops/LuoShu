@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v14.3 Alpha1
-versionCode=14310
+version=v14.3 Alpha1.1
+versionCode=14311
 author=惜故里丶
-description=Android 全局字体管理模块：新增原生多文件导入，支持中文、英文和数字复合、真实可变轴与安全事务
+description=Android 全局字体管理模块：修复字体模块 ZIP 原生导入，支持中文、英文和数字复合、真实可变轴与安全事务
 updateJson=
 webroot=webroot
