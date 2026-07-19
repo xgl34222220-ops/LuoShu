@@ -13,7 +13,8 @@ python3 -m py_compile \
   "$ROOT/common/font_axis_info.py" \
   "$ROOT/common/font_role_check.py" \
   "$ROOT/common/font_metadata.py" \
-  "$ROOT/common/font_extract_faces.py"
+  "$ROOT/common/font_extract_faces.py" \
+  "$ROOT/common/font_import_probe.py"
 
 if command -v node >/dev/null 2>&1; then
   TMP=$(mktemp -d)
@@ -31,7 +32,7 @@ for file in module.prop customize.sh post-fs-data.sh service.sh uninstall.sh \
   RELEASE_NOTES_v14.2_HYBRID_ALPHA5.md RELEASE_NOTES_v14.2_ALPHA6.md RELEASE_NOTES_v14.2_RC1.md RELEASE_NOTES_v14.2_RC2.md \
   RELEASE_NOTES_v14.3_ALPHA1.md \
   licenses/LuoShu-MIT-HISTORICAL.txt licenses/CPython-LICENSE.txt licenses/FontTools-LICENSE.txt licenses/FontTools-LICENSE.external.txt \
-  common/composite_font.py common/font_instance.py common/font_coverage.py common/font_axis_info.py common/font_role_check.py common/font_metadata.py common/font_extract_faces.py \
+  common/composite_font.py common/font_instance.py common/font_coverage.py common/font_axis_info.py common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh \
   common/v142_weighted_mix.sh common/app_bridge.sh common/mount_compat.sh common/font_manager.sh webroot/index.html webroot/v14.js \
   webroot/workbench.js webroot/mix_state_guard.js webroot/workbench_bridge.js webroot/workbench.css \
@@ -76,6 +77,8 @@ grep -q 'source 时，必须只定义函数' "$ROOT/common/font_check.sh"
 grep -q 'sourceUid' "$ROOT/common/font_extract_faces.py"
 grep -q 'TTCFace' "$ROOT/common/font_extract_faces.py"
 grep -q 'sha256:' "$ROOT/common/font_metadata.py"
+grep -q 'usWeightClass' "$ROOT/common/font_import_probe.py"
+grep -q 'import_probe_metadata' "$ROOT/common/font_import.sh"
 grep -q 'faceIndex' "$ROOT/common/font_metadata.py"
 grep -q 'TTCollection' "$ROOT/common/font_metadata.py"
 grep -q 'font_metadata.py' "$ROOT/common/font_details.sh"

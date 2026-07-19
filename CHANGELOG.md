@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### v14.3 Alpha1.3
+
+- 多字重模块优先读取字体内部 `OS/2.usWeightClass`，文件名仅在内部元数据不可读时作为兜底。
+- 使用内部 Family、Italic 与 Variable 信息归类字体；无字重文件名也可正确识别 100–900。
+- 新增 ExtraLight 与 ExtraBold 两档，形成九档静态字重链路。
+- 新增内部 200/800、文件名无字重提示的真实 ZIP 导入回归测试。
+
 ### v14.3 Alpha1.2
 
 - 原生 App 预览不再依赖字体目录遍历顺序，稳定优先选择对应字体族的 Regular，其次 Variable，最后才回退其他档位。

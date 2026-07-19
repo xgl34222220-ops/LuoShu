@@ -7,6 +7,9 @@ IMPORT_MAX_FILES=128
 IMPORT_MAX_EXTRACT_BYTES=536870912
 USER_IMPORT_DIR="${USER_IMPORT_DIR:-${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/import}"
 IMPORT_CACHE_DIR="${IMPORT_CACHE_DIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}/cache/import}"
+IMPORT_PROBE="${IMPORT_PROBE:-${MODULE_DIR:-/data/adb/modules/LuoShu}/common/font_import_probe.py}"
+IMPORT_PYROOT="${IMPORT_PYROOT:-${MODULE_DIR:-/data/adb/modules/LuoShu}/common/python}"
+IMPORT_PYBIN="${IMPORT_PYBIN:-$IMPORT_PYROOT/bin/luoshu-python}"
 
 import_unzip() {
     if command -v unzip >/dev/null 2>&1; then unzip "$@"
@@ -20,6 +23,27 @@ import_file_hash() {
     elif command -v md5sum >/dev/null 2>&1; then md5sum "$1" 2>/dev/null | awk '{print $1}'
     else wc -c < "$1" 2>/dev/null | tr -d '[:space:]'
     fi
+}
+
+# 优先读取字体内部 name / OS/2 / head / fvar 表。Android 使用模块内 Python，
+# CI 可通过 LUOSHU_IMPORT_PYTHON=python3 使用宿主 Python。
+import_probe_metadata() {
+    _probe_file="$1"
+    [ -f "$IMPORT_PROBE" ] || return 1
+    _probe_output=""
+    if [ -n "${LUOSHU_IMPORT_PYTHON:-}" ]; then
+        _probe_output=$("$LUOSHU_IMPORT_PYTHON" "$IMPORT_PROBE" "$_probe_file" 2>/dev/null)
+    elif [ -x "$IMPORT_PYBIN" ]; then
+        _probe_output=$(PYTHONHOME="$IMPORT_PYROOT" \
+            PYTHONPATH="$IMPORT_PYROOT/lib/python3.14:$IMPORT_PYROOT/lib/python3.14/site-packages" \
+            LD_LIBRARY_PATH="$IMPORT_PYROOT/lib:$IMPORT_PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$IMPORT_PYBIN" "$IMPORT_PROBE" "$_probe_file" 2>/dev/null)
+    elif command -v python3 >/dev/null 2>&1; then
+        _probe_output=$(python3 "$IMPORT_PROBE" "$_probe_file" 2>/dev/null)
+    fi
+    case "$_probe_output" in *'|'*'|'*'|'*'|'*) printf '%s
+' "$_probe_output"; return 0 ;; esac
+    return 1
 }
 
 import_safe_basename() {
@@ -132,20 +156,38 @@ import_weight_role() {
     _lower=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
     case "$_lower" in
         *thin*|*-w1.*|*_w1.*|*-100.*|*_100.*) echo thin ;;
-        *extralight*|*ultralight*|*light*|*-w2.*|*_w2.*|*-200.*|*_200.*) echo light ;;
-        *regular*|*book*|*normal*|*-w3.*|*_w3.*|*-300.*|*_300.*|*-400.*|*_400.*) echo regular ;;
-        *medium*|*-w4.*|*_w4.*|*-500.*|*_500.*) echo medium ;;
-        *semibold*|*demibold*|*-w5.*|*_w5.*|*-600.*|*_600.*) echo semibold ;;
-        *extrabold*|*ultrabold*|*bold*|*-w6.*|*_w6.*|*-700.*|*_700.*) echo bold ;;
-        *black*|*heavy*|*-w7.*|*_w7.*|*-w8.*|*_w8.*|*-w9.*|*_w9.*|*-800.*|*_800.*|*-900.*|*_900.*) echo black ;;
+        *extralight*|*ultralight*|*extra-light*|*ultra-light*|*-w2.*|*_w2.*|*-200.*|*_200.*) echo extralight ;;
+        *light*|*-w3.*|*_w3.*|*-300.*|*_300.*) echo light ;;
+        *regular*|*book*|*normal*|*-w4.*|*_w4.*|*-400.*|*_400.*) echo regular ;;
+        *medium*|*-w5.*|*_w5.*|*-500.*|*_500.*) echo medium ;;
+        *semibold*|*demibold*|*-w6.*|*_w6.*|*-600.*|*_600.*) echo semibold ;;
+        *extrabold*|*ultrabold*|*extra-bold*|*ultra-bold*|*-w8.*|*_w8.*|*-800.*|*_800.*) echo extrabold ;;
+        *bold*|*-w7.*|*_w7.*|*-700.*|*_700.*) echo bold ;;
+        *black*|*heavy*|*-w9.*|*_w9.*|*-900.*|*_900.*) echo black ;;
         *) echo regular ;;
     esac
 }
 
+import_weight_role_from_class() {
+    _weight="$1"; _fallback="$2"
+    case "$_weight" in ''|*[!0-9]*) import_weight_role "$_fallback"; return ;; esac
+    if [ "$_weight" -lt 150 ]; then echo thin
+    elif [ "$_weight" -lt 250 ]; then echo extralight
+    elif [ "$_weight" -lt 350 ]; then echo light
+    elif [ "$_weight" -lt 450 ]; then echo regular
+    elif [ "$_weight" -lt 550 ]; then echo medium
+    elif [ "$_weight" -lt 650 ]; then echo semibold
+    elif [ "$_weight" -lt 750 ]; then echo bold
+    elif [ "$_weight" -lt 850 ]; then echo extrabold
+    else echo black
+    fi
+}
+
 import_weight_label() {
     case "$1" in
-        thin) echo Thin ;; light) echo Light ;; regular) echo Regular ;; medium) echo Medium ;;
-        semibold) echo SemiBold ;; bold) echo Bold ;; black) echo Black ;; *) echo Regular ;;
+        thin) echo Thin ;; extralight) echo ExtraLight ;; light) echo Light ;;
+        regular) echo Regular ;; medium) echo Medium ;; semibold) echo SemiBold ;;
+        bold) echo Bold ;; extrabold) echo ExtraBold ;; black) echo Black ;; *) echo Regular ;;
     esac
 }
 
@@ -244,20 +286,30 @@ import_zip_package() {
         if ! font_validate "$_f" text 2>/dev/null; then _invalid=$((_invalid + 1)); continue; fi
         if import_is_color_font_name "$_base" || [ "$FONT_CHECK_COLOR" = true ]; then _ignored=$((_ignored + 1)); continue; fi
         _valid=$((_valid + 1))
-        _family=$(import_detect_family "$_base")
-        _variable="$FONT_CHECK_VARIABLE"
+        _probe=$(import_probe_metadata "$_f" 2>/dev/null)
+        _probe_family=""; _probe_subfamily=""; _probe_weight=""; _probe_italic=""; _probe_variable=""
+        if [ -n "$_probe" ]; then
+            IFS='|' read -r _probe_family _probe_subfamily _probe_weight _probe_italic _probe_variable <<EOF_PROBE
+$_probe
+EOF_PROBE
+        fi
+        _family="${_probe_family:-$(import_detect_family "$_base")}"
+        _variable="${_probe_variable:-$FONT_CHECK_VARIABLE}"
         _size=$(wc -c < "$_f" 2>/dev/null | tr -d '[:space:]'); case "$_size" in ''|*[!0-9]*) _size=0 ;; esac
-        _class=$(import_name_class "$_base"); _role=$(import_weight_role "$_base")
-        printf '%s|%s|text|%s|%s|%s|%s|%s
-' "$_family" "$_variable" "$_size" "$_base" "$_f" "$_class" "$_role" >> "$_manifest"
+        _class=$(import_name_class "$_base")
+        _role=$(import_weight_role_from_class "$_probe_weight" "$_base")
+        _italic="${_probe_italic:-false}"
+        printf '%s|%s|text|%s|%s|%s|%s|%s|%s|%s
+'             "$_family" "$_variable" "$_size" "$_base" "$_f" "$_class" "$_role" "${_probe_weight:-0}" "$_italic" >> "$_manifest"
     done
 
     if [ "$_valid" -le 0 ]; then rm -rf "$_tmp"; printf '{"status":"error","message":"没有字体通过真实格式检测"}\n'; return 0; fi
 
     # 预选主文字字体：中文名称、字体族完整度和文件体积优先；VF 仅加分，不再无条件压过中文静态字重。
     _best_score=-999999; _best_path=""; _best_family=""; _best_variable=false; _best_name=""; _best_class=neutral; _best_role=regular; _best_size=0
-    while IFS='|' read -r _family _variable _kind _size _base _path _class _role; do
+    while IFS='|' read -r _family _variable _kind _size _base _path _class _role _weight_class _italic; do
         [ "$_kind" = text ] || continue
+        [ "$_italic" = true ] && continue
         import_is_italic_name "$_base" && continue
         _family_count=$(awk -F'|' -v f="$_family" '$1==f && $3=="text"{n++} END{print n+0}' "$_manifest")
         _mb=$((_size / 1048576)); [ "$_mb" -gt 64 ] && _mb=64
@@ -281,8 +333,9 @@ import_zip_package() {
         _copied=$(import_copy_unique "$_best_path" "$USER_FONTS_DIR" "$_target_name") && { _target_name=$(basename "$_copied"); _imported_text=1; }
     elif [ "$_family_count" -ge 2 ]; then
         _mode=family
-        while IFS='|' read -r _family _variable _kind _size _base _path _class _role; do
+        while IFS='|' read -r _family _variable _kind _size _base _path _class _role _weight_class _italic; do
             [ "$_kind" = text ] || continue; [ "$_family" = "$_best_family" ] || continue
+            [ "$_italic" = true ] && continue
             import_is_italic_name "$_base" && continue
             _label=$(import_weight_label "$_role"); _ext=$(import_real_extension "$_path"); _name="${_package_label}-${_label}.${_ext}"
             _copied=$(import_copy_unique "$_path" "$USER_FONTS_DIR" "$_name") || continue
@@ -294,7 +347,7 @@ import_zip_package() {
     else
         # 单文件模块若存在多个系统别名，只对最终候选做 cmp，不再对全部文件反复 SHA-256。
         _same=0
-        while IFS='|' read -r _family _variable _kind _size _base _path _class _role; do
+        while IFS='|' read -r _family _variable _kind _size _base _path _class _role _weight_class _italic; do
             [ "$_kind" = text ] || continue; [ "$_size" = "$_best_size" ] || continue
             cmp -s "$_best_path" "$_path" 2>/dev/null && _same=$((_same + 1))
         done < "$_manifest"

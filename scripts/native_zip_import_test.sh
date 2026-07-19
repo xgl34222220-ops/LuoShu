@@ -10,7 +10,26 @@ if [ ! -s "$FONT" ]; then
     exit 0
 fi
 mkdir -p "$TMP/pkg" "$TMP/public/import" "$TMP/public/fonts" "$TMP/cache" "$TMP/config"
-cp -f "$FONT" "$TMP/pkg/Regression-Regular.ttf"
+
+# 文件名故意不含任何字重提示；导入器必须读取 OS/2.usWeightClass。
+PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" python3 -S - "$FONT" "$TMP/pkg/Mystery-A.ttf" 200 <<'PY'
+import sys
+from fontTools.ttLib import TTFont
+font = TTFont(sys.argv[1])
+font['OS/2'].usWeightClass = int(sys.argv[3])
+font.save(sys.argv[2])
+PY
+PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" python3 -S - "$FONT" "$TMP/pkg/Mystery-B.ttf" 800 <<'PY'
+import sys
+from fontTools.ttLib import TTFont
+font = TTFont(sys.argv[1])
+font['OS/2'].usWeightClass = int(sys.argv[3])
+font.save(sys.argv[2])
+PY
+
+test "$(PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" python3 -S "$ROOT/common/font_import_probe.py" "$TMP/pkg/Mystery-A.ttf" | cut -d'|' -f3)" = 200
+test "$(PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" python3 -S "$ROOT/common/font_import_probe.py" "$TMP/pkg/Mystery-B.ttf" | cut -d'|' -f3)" = 800
+
 cat > "$TMP/pkg/module.prop" <<'PROP'
 id=luoshu_zip_regression
 name=洛书 ZIP 回归字体
@@ -20,8 +39,6 @@ author=LuoShu CI
 PROP
 (cd "$TMP/pkg" && zip -q -r "$TMP/public/import/regression.zip" .)
 
-# 回归真机问题：font_check.sh 被 source 时，即使父脚本的位置参数是 ZIP，
-# 也只能定义函数，不能把 ZIP 当成 CLI 字体检查后退出父进程。
 SOURCE_RESULT=$(sh -c '
     zip_path="$1"
     checker="$2"
@@ -31,12 +48,13 @@ SOURCE_RESULT=$(sh -c '
 ' sh "$TMP/public/import/regression.zip" "$ROOT/common/font_check.sh")
 test "$SOURCE_RESULT" = sourced-ok
 
-# 使用与模块相同的函数装配方式运行安全 ZIP 导入器。
 OUTPUT=$(sh -c '
     set -eu
     MODDIR="$1"; MODULE_DIR="$1"; CONFIG_DIR="$2/config"
     LUOSHU_PUBLIC_DIR="$2/public"; USER_FONTS_DIR="$2/public/fonts"
     USER_IMPORT_DIR="$2/public/import"; IMPORT_CACHE_DIR="$2/cache"
+    LUOSHU_IMPORT_PYTHON=python3
+    export LUOSHU_IMPORT_PYTHON
     json_escape() {
         printf "%s" "$1" | sed "s/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g" | tr "\n\r" "  "
     }
@@ -46,5 +64,8 @@ OUTPUT=$(sh -c '
     import_zip_package regression.zip
 ' sh "$ROOT" "$TMP")
 printf '%s\n' "$OUTPUT" | grep -q '"status":"ok"'
-find "$TMP/public/fonts" -maxdepth 1 -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) -print -quit | grep -q .
-echo 'Native font-module ZIP import regression test passed.'
+printf '%s\n' "$OUTPUT" | grep -q '"mode":"family"'
+printf '%s\n' "$OUTPUT" | grep -q '"importedText":2'
+find "$TMP/public/fonts" -maxdepth 1 -type f -name '*-ExtraLight.ttf' -print -quit | grep -q .
+find "$TMP/public/fonts" -maxdepth 1 -type f -name '*-ExtraBold.ttf' -print -quit | grep -q .
+echo 'Native font-module ZIP import and internal-weight regression test passed.'
