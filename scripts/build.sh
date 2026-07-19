@@ -7,14 +7,54 @@ OUT="$ROOT/dist"
 STAGE="$OUT/LuoShu"
 ZIP="$OUT/LuoShu-${VERSION}.zip"
 ZIP_NAME=$(basename "$ZIP")
-APP_APK="${LUOSHU_APP_APK:-$ROOT/android-app/app/build/outputs/apk/debug/app-debug.apk}"
+APP_APK="${LUOSHU_APP_APK:-}"
+ALLOW_DEBUG_APP="${LUOSHU_ALLOW_DEBUG_APP:-0}"
+EXPECTED_VERSION_CODE=$((LUOSHU_VERSION_CODE * 100 + 1))
 
 sh "$ROOT/scripts/check.sh"
-[ -s "$APP_APK" ] || {
-  echo "Missing native App APK: $APP_APK" >&2
-  echo "The App-only module no longer supports an App-less/Lite package." >&2
+[ -n "$APP_APK" ] || {
+  echo 'LUOSHU_APP_APK is required for the App-only module.' >&2
   exit 65
 }
+[ -s "$APP_APK" ] || {
+  echo "Missing native App APK: $APP_APK" >&2
+  exit 65
+}
+
+APP_PACKAGE="${LUOSHU_APP_PACKAGE:-}"
+APP_VERSION_CODE="${LUOSHU_APP_VERSION_CODE:-}"
+if command -v apkanalyzer >/dev/null 2>&1; then
+  [ -n "$APP_PACKAGE" ] || APP_PACKAGE=$(apkanalyzer manifest application-id "$APP_APK" 2>/dev/null || true)
+  [ -n "$APP_VERSION_CODE" ] || APP_VERSION_CODE=$(apkanalyzer manifest version-code "$APP_APK" 2>/dev/null || true)
+fi
+[ -n "$APP_PACKAGE" ] || {
+  echo 'Unable to read APK package name. Install apkanalyzer or set LUOSHU_APP_PACKAGE.' >&2
+  exit 66
+}
+case "$APP_VERSION_CODE" in
+  ''|*[!0-9]*)
+    echo 'Unable to read APK versionCode. Install apkanalyzer or set LUOSHU_APP_VERSION_CODE.' >&2
+    exit 66
+    ;;
+esac
+[ "$APP_VERSION_CODE" -eq "$EXPECTED_VERSION_CODE" ] || {
+  echo "APK versionCode mismatch: expected $EXPECTED_VERSION_CODE, got $APP_VERSION_CODE" >&2
+  exit 67
+}
+case "$APP_PACKAGE" in
+  io.github.xgl34222220.luoshu)
+    ;;
+  io.github.xgl34222220.luoshu.debug)
+    [ "$ALLOW_DEBUG_APP" = "1" ] || {
+      echo 'Debug App packaging requires LUOSHU_ALLOW_DEBUG_APP=1.' >&2
+      exit 68
+    }
+    ;;
+  *)
+    echo "Unexpected APK package: $APP_PACKAGE" >&2
+    exit 68
+    ;;
+esac
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE" "$OUT"
@@ -25,22 +65,6 @@ done
 
 mkdir -p "$STAGE/bundled"
 cp -f "$APP_APK" "$STAGE/bundled/LuoShu-App.apk"
-
-APP_PACKAGE="${LUOSHU_APP_PACKAGE:-}"
-APP_VERSION_CODE="${LUOSHU_APP_VERSION_CODE:-}"
-if command -v apkanalyzer >/dev/null 2>&1; then
-  [ -n "$APP_PACKAGE" ] || APP_PACKAGE=$(apkanalyzer manifest application-id "$APP_APK" 2>/dev/null || true)
-  [ -n "$APP_VERSION_CODE" ] || APP_VERSION_CODE=$(apkanalyzer manifest version-code "$APP_APK" 2>/dev/null || true)
-fi
-if [ -z "$APP_PACKAGE" ]; then
-  case "$(basename "$APP_APK" | tr '[:upper:]' '[:lower:]')" in
-    *debug*.apk) APP_PACKAGE="io.github.xgl34222220.luoshu.debug" ;;
-    *) APP_PACKAGE="io.github.xgl34222220.luoshu" ;;
-  esac
-fi
-case "$APP_VERSION_CODE" in
-  ''|*[!0-9]*) APP_VERSION_CODE=$((LUOSHU_VERSION_CODE * 100 + 1)) ;;
-esac
 APP_SHA256=$(sha256sum "$STAGE/bundled/LuoShu-App.apk" | awk '{print $1}')
 {
   printf 'package=%s\n' "$APP_PACKAGE"
@@ -55,6 +79,7 @@ find "$STAGE" -type d -name '__pycache__' -prune -exec rm -rf {} + 2>/dev/null |
 find "$STAGE" -type f -name '*.pyc' -delete
 rm -rf "$STAGE/webroot" "$STAGE/logs" "$STAGE/backup" "$STAGE/config/recovery"
 rm -f "$STAGE/config/webui_font_list.json" "$STAGE/config/webui_font_list.key" \
+  "$STAGE/config/native_font_index.json" "$STAGE/config/native_font_index.key" \
   "$STAGE/config/recent_fonts.conf" "$STAGE/config/previous_font.conf" \
   "$STAGE/config/switch_task.conf" "$STAGE/config/mix_task.conf" "$STAGE/config/axes_task.conf" \
   "$STAGE/config/font_mix.conf" "$STAGE/config/active_emoji.conf" \
@@ -73,8 +98,8 @@ test ! -e "$STAGE/webroot"
 ! grep -q '^webroot=' "$STAGE/module.prop"
 test -s "$STAGE/bundled/LuoShu-App.apk"
 test -s "$STAGE/bundled/app.prop"
-grep -q '^package=io.github.xgl34222220.luoshu' "$STAGE/bundled/app.prop"
-grep -Eq '^versionCode=[0-9]+$' "$STAGE/bundled/app.prop"
+grep -qx "package=$APP_PACKAGE" "$STAGE/bundled/app.prop"
+grep -qx "versionCode=$EXPECTED_VERSION_CODE" "$STAGE/bundled/app.prop"
 grep -Eq '^sha256=[0-9a-f]{64}$' "$STAGE/bundled/app.prop"
 
 # Final payload gate: obsolete or WebUI paths must never return.
@@ -95,5 +120,5 @@ unzip -Z1 "$ZIP" | grep -Eq '(^|/)webroot(/|$)|(^|/)(__pycache__|emoji)(/|$)|\.p
 } || true
 unzip -Z1 "$ZIP" | grep -qx 'bundled/LuoShu-App.apk'
 printf 'Built: %s\n' "$ZIP"
-printf 'Bundled App: %s (%s)\n' "$STAGE/bundled/LuoShu-App.apk" "$(sed -n 's/^package=//p' "$STAGE/bundled/app.prop")"
+printf 'Bundled App: %s (%s)\n' "$STAGE/bundled/LuoShu-App.apk" "$APP_PACKAGE"
 rm -rf "$STAGE"
