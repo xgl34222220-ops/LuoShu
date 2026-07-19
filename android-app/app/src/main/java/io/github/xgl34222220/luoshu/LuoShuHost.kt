@@ -9,19 +9,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.xgl34222220.luoshu.ui.appearance.AppearanceViewModel
 
 @Composable
 internal fun LuoShuHost() {
     val model: LuoShuViewModel = viewModel()
     val features: Alpha15FeatureViewModel = viewModel()
+    val appearance: AppearanceViewModel = viewModel()
     Box(Modifier.fillMaxSize()) {
-        LuoShuAlpha16App(model, features)
+        LuoShuDualSkinApp(model, features, appearance)
         NativeImportOverlay(
             viewModel = model,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
-                .padding(end = 18.dp, bottom = 96.dp),
+                .padding(end = 18.dp, bottom = 98.dp),
         )
     }
 }
