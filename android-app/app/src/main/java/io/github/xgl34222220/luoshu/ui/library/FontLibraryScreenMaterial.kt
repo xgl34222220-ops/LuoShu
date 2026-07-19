@@ -1,6 +1,8 @@
 package io.github.xgl34222220.luoshu.ui.library
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,10 +14,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -37,6 +39,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,14 +68,10 @@ internal fun FontLibraryScreenMaterial(
     ) {
         item { MaterialLibraryHeader(state, actions.refresh) }
         item { MaterialLibraryOverview(state) }
-        item { MaterialLibrarySearch(state.query, actions.setQuery) }
+        item { MaterialBrowsePanel(state, actions) }
 
         if (state.loading || state.operationBusy) {
-            item {
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth().height(4.dp),
-                )
-            }
+            item { LinearProgressIndicator(Modifier.fillMaxWidth().height(4.dp)) }
         }
         if (state.error.isNotBlank()) {
             item { MaterialLibraryMessage(state.error, error = true) }
@@ -88,16 +87,15 @@ internal fun FontLibraryScreenMaterial(
                 onRestore = actions.restoreDefault,
             )
         }
-
         if (!state.loading && state.fonts.isEmpty()) {
-            item { MaterialLibraryEmpty(query = state.query) }
+            item { MaterialLibraryEmpty(state) }
         }
-
         items(state.fonts, key = { it.id }) { font ->
             MaterialFontCard(
                 font = font,
                 active = state.activeFontId == font.id,
                 busy = state.operationBusy,
+                onDetails = { actions.details(font) },
                 onApply = { actions.apply(font) },
                 onDelete = { actions.delete(font) },
             )
@@ -108,7 +106,7 @@ internal fun FontLibraryScreenMaterial(
 @Composable
 private fun MaterialLibraryHeader(state: FontLibraryUiState, onRefresh: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -180,7 +178,7 @@ private fun MaterialLibraryOverview(state: FontLibraryUiState) {
                 )
                 Spacer(Modifier.height(18.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                    MaterialOverviewMetric("全部", state.totalCount.toString(), Modifier.weight(1f))
+                    MaterialOverviewMetric("结果", state.visibleCount.toString(), Modifier.weight(1f))
                     MaterialOverviewMetric("可变", state.variableCount.toString(), Modifier.weight(1f))
                     MaterialOverviewMetric("多字重", state.multiWeightCount.toString(), Modifier.weight(1f))
                 }
@@ -205,21 +203,70 @@ private fun MaterialOverviewMetric(label: String, value: String, modifier: Modif
 }
 
 @Composable
-private fun MaterialLibrarySearch(query: String, onQuery: (String) -> Unit) {
+private fun MaterialBrowsePanel(state: FontLibraryUiState, actions: FontLibraryActions) {
     Card(
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .84f),
         ),
     ) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = onQuery,
-            modifier = Modifier.fillMaxWidth().padding(10.dp),
-            singleLine = true,
-            shape = MaterialTheme.shapes.large,
-            leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
-            placeholder = { Text("搜索字体名称、ID 或格式") },
+        Column(Modifier.padding(10.dp)) {
+            OutlinedTextField(
+                value = state.query,
+                onValueChange = actions.setQuery,
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                shape = MaterialTheme.shapes.large,
+                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                placeholder = { Text("搜索名称、ID 或格式") },
+            )
+            Spacer(Modifier.height(12.dp))
+            Text("筛选", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(7.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FontLibraryFilter.entries.forEach { option ->
+                    MaterialChoicePill(
+                        label = option.label,
+                        active = state.filter == option,
+                        onClick = { actions.setFilter(option) },
+                    )
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+            Text("排序", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(7.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FontLibrarySort.entries.forEach { option ->
+                    MaterialChoicePill(
+                        label = option.label,
+                        active = state.sort == option,
+                        onClick = { actions.setSort(option) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MaterialChoicePill(label: String, active: Boolean, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier.clickable(onClick = onClick),
+        shape = CircleShape,
+        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
         )
     }
 }
@@ -264,6 +311,7 @@ private fun MaterialFontCard(
     font: FontItem,
     active: Boolean,
     busy: Boolean,
+    onDetails: () -> Unit,
     onApply: () -> Unit,
     onDelete: () -> Unit,
 ) {
@@ -280,7 +328,7 @@ private fun MaterialFontCard(
         Column(Modifier.padding(18.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    modifier = Modifier.size(52.dp),
+                    modifier = Modifier.size(52.dp).clickable(onClick = onDetails),
                     shape = MaterialTheme.shapes.large,
                     color = MaterialTheme.colorScheme.primaryContainer,
                 ) {
@@ -289,7 +337,7 @@ private fun MaterialFontCard(
                     }
                 }
                 Spacer(Modifier.width(13.dp))
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f).clickable(onClick = onDetails)) {
                     Text(
                         font.name,
                         fontSize = 17.sp,
@@ -314,7 +362,7 @@ private fun MaterialFontCard(
 
             Spacer(Modifier.height(14.dp))
             Surface(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails),
                 shape = MaterialTheme.shapes.large,
                 color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .62f),
             ) {
@@ -333,16 +381,17 @@ private fun MaterialFontCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(17.dp))
                     Spacer(Modifier.width(7.dp))
-                    Text(font.error, color = MaterialTheme.colorScheme.error, fontSize = 10.sp)
+                    Text(font.error, color = MaterialTheme.colorScheme.error, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
             }
 
             Spacer(Modifier.height(12.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 MaterialLibraryPill(fontCapabilityLabel(font), MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.weight(1f))
+                TextButton(onClick = onDetails) { Text("详情") }
                 if (active) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
@@ -387,7 +436,8 @@ private fun MaterialLibraryMessage(message: String, error: Boolean, busy: Boolea
 }
 
 @Composable
-private fun MaterialLibraryEmpty(query: String) {
+private fun MaterialLibraryEmpty(state: FontLibraryUiState) {
+    val filtered = state.filter != FontLibraryFilter.ALL
     Card(
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .84f)),
@@ -398,9 +448,21 @@ private fun MaterialLibraryEmpty(query: String) {
         ) {
             Icon(Icons.Rounded.FontDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(42.dp))
             Spacer(Modifier.height(13.dp))
-            Text(if (query.isBlank()) "还没有导入字体" else "没有匹配的字体", fontSize = 20.sp, fontWeight = FontWeight.Black)
             Text(
-                if (query.isBlank()) "使用右下角导入按钮选择 TTF、OTF、TTC 或模块 ZIP" else "换一个关键词，或者清空搜索条件",
+                when {
+                    state.query.isNotBlank() -> "没有匹配的字体"
+                    filtered -> "当前筛选没有结果"
+                    else -> "还没有导入字体"
+                },
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Black,
+            )
+            Text(
+                when {
+                    state.query.isNotBlank() -> "换一个关键词，或者清空搜索条件"
+                    filtered -> "切换到“全部”查看其他字体"
+                    else -> "使用右下角导入按钮选择 TTF、OTF、TTC 或模块 ZIP"
+                },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
                 textAlign = TextAlign.Center,
