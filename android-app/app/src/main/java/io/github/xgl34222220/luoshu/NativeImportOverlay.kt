@@ -5,25 +5,31 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -34,6 +40,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -95,7 +102,9 @@ internal fun NativeImportOverlay(
         if (uris.isEmpty() || importBusy) return@rememberLauncherForActivityResult
         importBusy = true
         scope.launch {
-            importSummary = withContext(Dispatchers.IO) { importDocuments(context.applicationContext, uris) }
+            importSummary = withContext(Dispatchers.IO) {
+                importDocuments(context.applicationContext, uris)
+            }
             importBusy = false
             viewModel.refreshFonts(force = true)
         }
@@ -104,31 +113,56 @@ internal fun NativeImportOverlay(
     Column(
         modifier = modifier,
         horizontalAlignment = Alignment.End,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        OutlinedButton(
+        Surface(
             onClick = { showDetailsPicker = true },
             enabled = viewModel.snapshot.installed && viewModel.fonts.isNotEmpty() && !detailsBusy,
-            shape = RoundedCornerShape(17.dp),
+            modifier = Modifier.size(52.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surface.copy(alpha = .98f),
+            contentColor = MaterialTheme.colorScheme.primary,
+            shadowElevation = 12.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .10f)),
         ) {
-            Text(if (detailsBusy) "分析中" else "字体详情", fontWeight = FontWeight.Bold)
-        }
-        Button(
-            onClick = { launcher.launch(arrayOf("*/*")) },
-            enabled = viewModel.snapshot.installed && !importBusy && !viewModel.operationBusy && !viewModel.mixState.busy,
-            shape = RoundedCornerShape(18.dp),
-        ) {
-            if (importBusy) {
-                CircularProgressIndicator(
-                    modifier = Modifier.width(18.dp).height(18.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.onPrimary,
-                )
-            } else {
-                Icon(Icons.Rounded.Add, contentDescription = null)
+            Box(contentAlignment = Alignment.Center) {
+                if (detailsBusy) {
+                    CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp)
+                } else {
+                    Icon(Icons.Rounded.Info, contentDescription = "字体详情")
+                }
             }
-            Spacer(Modifier.width(7.dp))
-            Text(if (importBusy) "导入中" else "导入字体", fontWeight = FontWeight.Bold)
+        }
+        Surface(
+            onClick = { launcher.launch(arrayOf("*/*")) },
+            enabled = viewModel.snapshot.installed &&
+                !importBusy &&
+                !viewModel.operationBusy &&
+                !viewModel.mixState.busy,
+            shape = RoundedCornerShape(22.dp),
+            color = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            shadowElevation = 14.dp,
+        ) {
+            Row(
+                Modifier.padding(horizontal = 18.dp, vertical = 15.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (importBusy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(19.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Icon(Icons.Rounded.Add, contentDescription = null)
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (importBusy) "导入中" else "导入字体",
+                    fontWeight = FontWeight.Black,
+                )
+            }
         }
     }
 
@@ -157,9 +191,14 @@ internal fun NativeImportOverlay(
             onDismissRequest = { showDetailsPicker = false },
             title = { Text("选择字体", fontWeight = FontWeight.Black) },
             text = {
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
+                LazyColumn(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     items(viewModel.fonts, key = { it.id }) { font ->
-                        TextButton(
+                        Surface(
                             onClick = {
                                 showDetailsPicker = false
                                 detailsBusy = true
@@ -169,16 +208,20 @@ internal fun NativeImportOverlay(
                                 }
                             },
                             modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(20.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .55f),
                         ) {
-                            Column(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                                 Text(
                                     font.name,
                                     fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
+                                    maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
                                 Text(
-                                    listOf(font.format, font.size, font.weightLabel).filter { it.isNotBlank() }.joinToString(" · "),
+                                    listOf(font.format, font.size, font.weightLabel)
+                                        .filter { it.isNotBlank() }
+                                        .joinToString(" · "),
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     style = MaterialTheme.typography.bodySmall,
                                     maxLines = 1,
@@ -210,7 +253,11 @@ internal fun NativeImportOverlay(
             title = { Text(result.title, fontWeight = FontWeight.Black, maxLines = 2) },
             text = {
                 SelectionContainer {
-                    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 500.dp)) {
+                    LazyColumn(
+                        Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 500.dp),
+                    ) {
                         item {
                             Text(
                                 result.text,
@@ -338,7 +385,13 @@ private suspend fun loadFontDetails(font: FontItem): FontDetails {
 }
 
 private fun queryDisplayName(context: Context, uri: Uri): String? {
-    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+    context.contentResolver.query(
+        uri,
+        arrayOf(OpenableColumns.DISPLAY_NAME),
+        null,
+        null,
+        null,
+    )?.use { cursor ->
         if (cursor.moveToFirst()) {
             val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
             if (index >= 0) return cursor.getString(index)?.substringAfterLast('/')
@@ -380,5 +433,9 @@ private fun formatBytes(bytes: Long): String = when {
 
 private fun trimNumber(value: Double): String {
     val rounded = value.toLong()
-    return if (value == rounded.toDouble()) rounded.toString() else "%.2f".format(value).trimEnd('0').trimEnd('.')
+    return if (value == rounded.toDouble()) {
+        rounded.toString()
+    } else {
+        "%.2f".format(value).trimEnd('0').trimEnd('.')
+    }
 }
