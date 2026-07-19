@@ -9,11 +9,9 @@ import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -147,14 +145,11 @@ private fun LuoShuMiuixTheme(settings: AppearanceSettings, content: @Composable 
 
 @Composable
 private fun resolveSeedColor(settings: AppearanceSettings): Color {
-    val context = LocalContext.current
-    val configuration = LocalConfiguration.current
-    return remember(settings.monetEnabled, settings.seedArgb, configuration) {
-        if (settings.monetEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            Color(context.getColor(android.R.color.system_accent1_500))
-        } else {
-            Color(settings.seedArgb)
-        }
+    val resources = LocalResources.current
+    return if (settings.monetEnabled && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        Color(resources.getColor(android.R.color.system_accent1_500, null))
+    } else {
+        Color(settings.seedArgb)
     }
 }
 

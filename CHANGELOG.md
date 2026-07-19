@@ -6,6 +6,13 @@
 
 - 暂无。
 
+## [v14.3.2] - 2026-07-19
+
+- 修复主题层使用 `LocalContext.current.getColor()` 查询 Monet 色值导致配置变化后可能继续使用旧颜色的问题。
+- 改为使用 Compose `LocalResources.current` 读取系统强调色，使配置更新能够正确触发主题重组。
+- 分别验证 `lintRelease`、`testDebugUnitTest` 与 `assembleRelease` 全部通过，阻断 Lint 为 0。
+- 功能代码保持不变，版本提升至 14324，并使用新的不可变 `v14.3.2` 标签发布。
+
 ## [v14.3.1] - 2026-07-19
 
 - 修复正式签名发布工作流错误调用不存在的 `testReleaseUnitTest`，改为执行项目实际存在并由日常 CI 使用的 `testDebugUnitTest`。
