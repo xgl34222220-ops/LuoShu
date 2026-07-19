@@ -17,9 +17,9 @@ font_library_fingerprint_value() {
         _name=$(basename "$_font_file" 2>/dev/null)
         case "$_name" in SysFont*|SysSans*) continue ;; esac
         _size=$(stat -c %s "$_font_file" 2>/dev/null)
-        _mtime=$(stat -c %Y "$_font_file" 2>/dev/null)
+        _mtime=$(stat -c '%Y:%y' "$_font_file" 2>/dev/null)
         case "$_size" in ''|*[!0-9]*) _size=0 ;; esac
-        case "$_mtime" in ''|*[!0-9]*) _mtime=0 ;; esac
+        [ -n "$_mtime" ] || _mtime=0
         printf '%s|%s|%s\n' "$_name" "$_size" "$_mtime" >> "$_tmp"
         _count=$((_count + 1))
         _bytes=$((_bytes + _size))
@@ -35,7 +35,7 @@ font_library_fingerprint_value() {
     fi
     rm -f "$_tmp" 2>/dev/null || true
     [ -n "$_digest" ] || _digest="empty"
-    printf 'v2:%s:%s:%s\n' "$_digest" "$_count" "$_bytes"
+    printf 'v3:%s:%s:%s\n' "$_digest" "$_count" "$_bytes"
 }
 
 font_library_fingerprint_json() {
