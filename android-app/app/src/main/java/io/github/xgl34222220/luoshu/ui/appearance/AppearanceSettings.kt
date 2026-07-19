@@ -70,4 +70,10 @@ data class AppearanceSettings(
 ) {
     val accent: AccentOption
         get() = accentOptionFor(seedArgb)
+
+    /** Repairs stale or manually edited preferences before they reach Compose. */
+    fun normalized(): AppearanceSettings = copy(
+        seedArgb = accentOptionFor(seedArgb).argb,
+        blurEnabled = blurEnabled && glassEnabled,
+    )
 }
