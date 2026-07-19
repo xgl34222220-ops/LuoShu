@@ -39,14 +39,14 @@ resolve_tool() {
 
 write_state() {
     _status="$1"
-    _detail="$2"
+    _detail=$(printf '%s' "$2" | tr '\r\n' '  ')
     {
         printf 'status=%s\n' "$_status"
         printf 'package=%s\n' "$APP_PACKAGE"
         printf 'versionCode=%s\n' "$APP_VERSION_CODE"
         printf 'apkSha256=%s\n' "$APK_SHA256"
         printf 'mode=%s\n' "$MODE"
-        printf 'detail=%s\n' "$_detail" | tr '\n' ' '
+        printf 'detail=%s\n' "$_detail"
         printf 'updatedAt=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo unknown)"
     } > "$STATE" 2>/dev/null || true
 }
@@ -81,12 +81,19 @@ case "$APP_VERSION_CODE" in
         ;;
 esac
 
-if [ -z "$APK_SHA256" ]; then
-    if command -v sha256sum >/dev/null 2>&1; then
-        APK_SHA256=$(sha256sum "$APK" 2>/dev/null | awk '{print $1}')
-    else
-        APK_SHA256="unknown"
+if command -v sha256sum >/dev/null 2>&1; then
+    ACTUAL_SHA256=$(sha256sum "$APK" 2>/dev/null | awk '{print $1}')
+    if [ -n "$APK_SHA256" ] && [ "$APK_SHA256" != "unknown" ] && [ "$ACTUAL_SHA256" != "$APK_SHA256" ]; then
+        touch "$PENDING" 2>/dev/null || true
+        APK_SHA256="$ACTUAL_SHA256"
+        write_state failed "模块内置 APK 的 SHA-256 与元数据不一致"
+        log_app ERROR "内置 APK 校验失败，拒绝安装"
+        printf 'invalid-apk\n'
+        exit 22
     fi
+    [ -n "$APK_SHA256" ] || APK_SHA256="$ACTUAL_SHA256"
+else
+    [ -n "$APK_SHA256" ] || APK_SHA256="unknown"
 fi
 
 PM_BIN=$(resolve_tool "${APP_INSTALL_PM_BIN:-}" pm)
