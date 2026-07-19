@@ -1,8 +1,8 @@
 id=LuoShu
 name=洛书
-version=v14.3 Alpha1.4
-versionCode=14314
+version=v14.3 Alpha1.5
+versionCode=14315
 author=惜故里丶
-description=Android 全局字体管理模块：App 原生工作台支持真实多轴与静态多字重实时预览，兼容安全导入、TTC 字体面和九档映射
+description=Android 全局字体管理模块：区分字体原始默认与系统 Regular，支持同字体直应用、系统粗细即时微调、真实多轴预览和字形覆盖诊断
 updateJson=
 webroot=webroot
