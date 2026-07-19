@@ -28,4 +28,17 @@ jobs:
           body = '\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())
           Path('/tmp/apply-alpha14.sh').write_text(body + '\n', encoding='utf-8')
           PY
-          bash /tmp/apply-alpha14.sh
+          set +e
+          bash /tmp/apply-alpha14.sh > /tmp/alpha14-materializer.log 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -ne 0 ]; then
+            git reset --hard origin/feature/v14.3-alpha1-native-import
+            cp /tmp/alpha14-materializer.log .alpha14-error.log
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add .alpha14-error.log
+            git commit -m "chore: record Alpha1.4 materializer error"
+            git push origin HEAD:feature/v14.3-alpha1-native-import
+            exit "$rc"
+          fi
