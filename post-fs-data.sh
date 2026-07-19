@@ -12,11 +12,11 @@ MODULE_DIR="$MODDIR"
 
 type init_module >/dev/null 2>&1 && init_module
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
-mkdir -p "$MODDIR/config" "$MODDIR/logs" "$MODDIR/system/fonts" "$MODDIR/webroot/fonts" 2>/dev/null || true
+mkdir -p "$MODDIR/config" "$MODDIR/logs" "$MODDIR/system/fonts" 2>/dev/null || true
 
-# 每次启动自动静默校正权限，WebUI 统一使用 sh 调用。
-chmod 0755 "$MODDIR" "$MODDIR/common" "$MODDIR/webroot" 2>/dev/null || true
-chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" 2>/dev/null || true
+# 每次启动静默校正原生 App 后端脚本权限。
+chmod 0755 "$MODDIR" "$MODDIR/common" 2>/dev/null || true
+chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" "$MODDIR/action.sh" 2>/dev/null || true
 find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
 chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" "$MODDIR/common/font_axis_info.py" 2>/dev/null || true
 
@@ -26,9 +26,8 @@ log_message "INFO" "===== post-fs-data $MODULE_VERSION 开始 ====="
 rm -f "$MODDIR/system/etc/fonts.xml" "$MODDIR/system/etc/font_fallback.xml" 2>/dev/null || true
 rm -f "$MODDIR/system/fonts/NotoColorEmoji.ttf" "$MODDIR/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
 rm -f "$MODDIR/config/active_emoji.conf" "$MODDIR/config/emoji_task.conf" "$MODDIR/config/emoji_reboot_required.conf" 2>/dev/null || true
-rm -rf "$MODDIR/webroot/emoji" 2>/dev/null || true
 
-# RC2 使用统一的 axes_task.conf；升级时清理实验版本遗留状态，避免 App 接管错误任务。
+# 升级时清理实验版本遗留任务，避免原生 App 接管错误状态。
 rm -f "$MODDIR/config"/v*_axes_task.conf "$MODDIR/config"/v*_axes_mix.conf "$MODDIR/config"/v*_axes_worker.pid 2>/dev/null || true
 set_perm_recursive "$MODDIR/system/fonts" 0 0 0755 0644 2>/dev/null || true
 chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
@@ -44,7 +43,7 @@ ACTIVE_TEXT=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r
 [ -n "$ACTIVE_TEXT" ] || ACTIVE_TEXT="default"
 
 # ColorOS 的 /data/fonts 只同步洛书管理的已知文字文件。
-if [ "$IS_COLOROS" = "true" ] && [ -d /data/fonts ]; then
+if [ "${IS_COLOROS:-false}" = "true" ] && [ -d /data/fonts ]; then
     _count=0
     for _name in $(get_all_coloros_names); do
         _dest="/data/fonts/${_name}.ttf"
@@ -58,7 +57,7 @@ if [ "$IS_COLOROS" = "true" ] && [ -d /data/fonts ]; then
     log_message "INFO" "ColorOS /data/fonts 安全同步：$_count 个文字目标"
 fi
 
-# 字体预览索引由 App/WebUI 按需刷新，启动早期不扫描或复制大字体。
+# 字体索引由原生 App 按需刷新，启动早期不扫描或复制大字体。
 
 # 完整重启后解除本次开机切换保护。
 rm -f "$MODDIR/config/text_reboot_required.conf" "$MODDIR/config/font_weight_reboot_required.conf" \
