@@ -90,12 +90,12 @@ internal class FontIndexStore(context: Context) {
                 },
             )
 
-        var output = atomicFile.startWrite()
+        val output = atomicFile.startWrite()
         try {
-            output.bufferedWriter().use { writer ->
-                writer.write(root.toString())
-                writer.flush()
-            }
+            val bytes = root.toString().toByteArray(Charsets.UTF_8)
+            output.write(bytes)
+            output.flush()
+            output.fd.sync()
             atomicFile.finishWrite(output)
         } catch (error: Throwable) {
             atomicFile.failWrite(output)
