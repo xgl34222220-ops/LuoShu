@@ -34,6 +34,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -96,8 +97,11 @@ private fun AppearanceSettingsMaterial(
             }
         }
         item {
-            MaterialSettingCard("种子色", "Material 与 Miuix 共用") {
-                AccentSelector(settings, actions.setSeedArgb)
+            MaterialSettingCard(
+                title = "种子色",
+                subtitle = if (settings.monetEnabled) "当前颜色由系统壁纸控制" else "Material 与 Miuix 共用",
+            ) {
+                AccentSelector(settings, actions.setSeedArgb, enabled = !settings.monetEnabled)
             }
         }
         item {
@@ -130,7 +134,10 @@ private fun AppearanceSettingsMiuix(
             }
         }
         item {
-            MiuixSettingGroup("颜色与模式", "两套皮肤共用同一色彩配置") {
+            MiuixSettingGroup(
+                title = "颜色与模式",
+                subtitle = if (settings.monetEnabled) "壁纸动态色已接管页面、卡片与底栏" else "两套皮肤共用同一色彩配置",
+            ) {
                 MiuixChoiceLine("深色模式", settings.themeMode.label) {
                     ChoiceRow(ThemeMode.entries, settings.themeMode, { it.label }, actions.setThemeMode)
                 }
@@ -138,7 +145,7 @@ private fun AppearanceSettingsMiuix(
                     ChoiceRow(KolorStyle.entries, settings.kolorStyle, { it.label }, actions.setKolorStyle)
                 }
                 Spacer(Modifier.height(10.dp))
-                AccentSelector(settings, actions.setSeedArgb)
+                AccentSelector(settings, actions.setSeedArgb, enabled = !settings.monetEnabled)
             }
         }
         item {
@@ -259,35 +266,63 @@ private fun <T> ChoiceRow(
 }
 
 @Composable
-private fun AccentSelector(settings: AppearanceSettings, onSelected: (Int) -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        AccentOptions.forEach { option ->
-            val active = settings.seedArgb == option.argb
-            Column(
-                modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable { onSelected(option.argb) }.padding(6.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
+private fun AccentSelector(
+    settings: AppearanceSettings,
+    onSelected: (Int) -> Unit,
+    enabled: Boolean = true,
+) {
+    Column {
+        if (!enabled) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = .09f),
             ) {
-                Box(
+                Text(
+                    text = "当前颜色由系统壁纸控制，关闭 Monet 后可选择种子色",
+                    modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+            Spacer(Modifier.height(10.dp))
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(if (enabled) 1f else .42f)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            AccentOptions.forEach { option ->
+                val active = settings.seedArgb == option.argb
+                Column(
                     modifier = Modifier
-                        .size(if (active) 42.dp else 36.dp)
-                        .clip(CircleShape)
-                        .background(Color(option.argb)),
-                    contentAlignment = Alignment.Center,
+                        .clip(RoundedCornerShape(18.dp))
+                        .clickable(enabled = enabled) { onSelected(option.argb) }
+                        .padding(6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    if (active) {
-                        Box(
-                            Modifier
-                                .size(14.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = .78f)),
-                        )
+                    Box(
+                        modifier = Modifier
+                            .size(if (active && enabled) 42.dp else 36.dp)
+                            .clip(CircleShape)
+                            .background(Color(option.argb)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (active && enabled) {
+                            Box(
+                                Modifier
+                                    .size(14.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = .78f)),
+                            )
+                        }
                     }
+                    Spacer(Modifier.height(5.dp))
+                    Text(option.label, fontSize = 9.sp, fontWeight = if (active && enabled) FontWeight.Bold else FontWeight.Normal)
                 }
-                Spacer(Modifier.height(5.dp))
-                Text(option.label, fontSize = 9.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Normal)
             }
         }
     }
