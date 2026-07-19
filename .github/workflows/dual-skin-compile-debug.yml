@@ -24,11 +24,9 @@ jobs:
         shell: bash
         run: |
           set +e
-          cd android-app
-          chmod +x gradlew
-          ./gradlew :app:compileDebugKotlin --stacktrace --no-daemon > ../dual-skin-compile.log 2>&1
+          gradle -p android-app :app:compileDebugKotlin --stacktrace --no-daemon > dual-skin-compile.log 2>&1
           status=$?
-          echo "gradle_exit=$status" >> ../dual-skin-compile.log
+          echo "gradle_exit=$status" >> dual-skin-compile.log
           exit 0
       - uses: actions/upload-artifact@v4
         with:
