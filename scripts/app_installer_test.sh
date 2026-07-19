@@ -12,7 +12,7 @@ printf 'fake-apk\n' > "$MOD/bundled/LuoShu-App.apk"
 cat > "$MOD/bundled/app.prop" <<'EOF'
 package=io.github.xgl34222220.luoshu.debug
 versionCode=1432001
-sha256=test-sha
+sha256=unknown
 EOF
 cat > "$MOD/module.prop" <<'EOF'
 version=v14.3 Alpha1.10
