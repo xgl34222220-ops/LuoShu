@@ -12,6 +12,7 @@ jobs:
         with:
           ref: feature/v14.3-alpha1-native-import
           fetch-depth: 0
+          show-progress: false
       - name: Execute staged upgrade
         shell: bash
         run: |
@@ -31,8 +32,8 @@ jobs:
             git config user.name github-actions[bot]
             git config user.email 41898282+github-actions[bot]@users.noreply.github.com
             git add .alpha13-error.log
-            git commit -m "chore: record Alpha1.3 materializer error"
-            git push origin HEAD:feature/v14.3-alpha1-native-import
+            git commit -m "chore: record Alpha1.3 materializer error" || true
+            git push origin HEAD:feature/v14.3-alpha1-native-import || true
             exit "$rc"
           fi
           cat > .github/workflows/build.yml <<'YAML'
@@ -110,3 +111,11 @@ jobs:
           git add -A
           git commit -m "feat: read real internal weights for multi-weight imports"
           git push origin HEAD:feature/v14.3-alpha1-native-import
+      - name: Upload materializer diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: alpha13-materializer-log
+          path: /tmp/alpha13-materializer.log
+          if-no-files-found: warn
+          retention-days: 2
