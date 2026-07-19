@@ -20,16 +20,17 @@ jobs:
       - name: Execute staged Alpha1.4 upgrade
         shell: bash
         run: |
-          set -euo pipefail
-          python3 - <<'PY'
+          set +e
+          {
+            python3 - <<'PY'
           from pathlib import Path
           source = Path('.github/workflows/alpha14-native-live-preview.yml').read_text(encoding='utf-8')
           body = source.split('        run: |\n', 1)[1]
           body = '\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())
           Path('/tmp/apply-alpha14.sh').write_text(body + '\n', encoding='utf-8')
           PY
-          set +e
-          bash /tmp/apply-alpha14.sh > /tmp/alpha14-materializer.log 2>&1
+            bash /tmp/apply-alpha14.sh
+          } > /tmp/alpha14-materializer.log 2>&1
           rc=$?
           set -e
           if [ "$rc" -ne 0 ]; then
