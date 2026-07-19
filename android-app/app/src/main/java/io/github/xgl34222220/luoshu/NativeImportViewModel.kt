@@ -27,8 +27,10 @@ internal enum class NativeImportPhase(val wireName: String) {
     IDLE("idle"),
     QUEUED("queued"),
     RUNNING("running"),
+    PAUSED("paused"),
     SUCCESS("success"),
     FAILED("failed"),
+    CANCELLED("cancelled"),
 }
 
 @Immutable
@@ -39,6 +41,7 @@ internal data class NativeImportState(
     val processed: Int = 0,
     val imported: Int = 0,
     val duplicates: Int = 0,
+    val cancelled: Int = 0,
     val failed: List<String> = emptyList(),
     val currentFile: String = "",
     val message: String = "尚未开始导入",
@@ -49,6 +52,20 @@ internal data class NativeImportState(
     val busy: Boolean
         get() = phase == NativeImportPhase.QUEUED || phase == NativeImportPhase.RUNNING
 
+    val paused: Boolean
+        get() = phase == NativeImportPhase.PAUSED
+
+    val terminal: Boolean
+        get() = phase == NativeImportPhase.SUCCESS ||
+            phase == NativeImportPhase.FAILED ||
+            phase == NativeImportPhase.CANCELLED
+
+    val canPause: Boolean get() = busy
+    val canResume: Boolean get() = paused
+    val canCancel: Boolean get() = busy || paused
+    val canRetryFailed: Boolean get() = terminal && failed.isNotEmpty()
+    val canClear: Boolean get() = !busy && phase != NativeImportPhase.IDLE
+
     val progress: Int
         get() = when {
             total <= 0 -> 0
@@ -58,6 +75,8 @@ internal data class NativeImportState(
 
     val title: String
         get() = when {
+            paused -> "字体导入已暂停"
+            phase == NativeImportPhase.CANCELLED -> "字体导入已取消"
             busy && recovered -> "正在恢复字体导入"
             busy -> "正在导入字体"
             failed.isEmpty() -> "导入完成"
@@ -67,8 +86,13 @@ internal data class NativeImportState(
 
     val summary: String
         get() = buildString {
-            append("成功导入 ").append(imported).append(" 个文件")
+            if (phase == NativeImportPhase.CANCELLED) {
+                append("已处理 ").append(processed - cancelled).append('/').append(total).append(" 个文件")
+            } else {
+                append("成功导入 ").append(imported).append(" 个文件")
+            }
             if (duplicates > 0) append("，跳过 ").append(duplicates).append(" 个重复字体")
+            if (cancelled > 0) append("，取消 ").append(cancelled).append(" 个待处理文件")
             if (failed.isNotEmpty()) {
                 append("\n\n失败：\n")
                 failed.take(6).forEach { append("• ").append(it).append('\n') }
@@ -87,18 +111,25 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
 
     private var importJob: Job? = null
 
+    @Volatile
+    private var pauseRequested = false
+
+    @Volatile
+    private var cancelRequested = false
+
     init {
         restoreSavedTask()
     }
 
     fun startImport(uris: List<Uri>) {
-        if (state.busy || importJob?.isActive == true) return
+        if (state.busy || state.paused || importJob?.isActive == true) return
         val selected = uris.take(32)
         if (selected.isEmpty()) return
 
         importJob = viewModelScope.launch {
             try {
                 val context = getApplication<Application>().applicationContext
+                withContext(Dispatchers.IO) { discardPreviousRecord(context) }
                 val items = withContext(Dispatchers.IO) {
                     selected.mapIndexed { index, uri ->
                         val name = queryDisplayName(context, uri) ?: "font-${index + 1}"
@@ -116,6 +147,8 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
                         )
                     }
                 }
+                pauseRequested = false
+                cancelRequested = false
                 val task = ImportQueueTask(
                     taskId = "import-${System.currentTimeMillis()}",
                     phase = NativeImportPhase.QUEUED,
@@ -130,6 +163,84 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
         }
     }
 
+    fun pauseImport() {
+        if (!state.canPause) return
+        pauseRequested = true
+        state = state.copy(
+            message = if (state.phase == NativeImportPhase.RUNNING) {
+                "当前文件完成后暂停导入队列"
+            } else {
+                "正在暂停导入队列"
+            },
+        )
+    }
+
+    fun resumeImport() {
+        if (!state.canResume || importJob?.isActive == true) return
+        importJob = viewModelScope.launch {
+            try {
+                val saved = withContext(Dispatchers.IO) { queueStore.load() } ?: return@launch
+                pauseRequested = false
+                cancelRequested = false
+                runQueue(saved.forManualResume())
+            } finally {
+                importJob = null
+            }
+        }
+    }
+
+    fun cancelImport() {
+        if (!state.canCancel) return
+        if (state.paused && importJob?.isActive != true) {
+            importJob = viewModelScope.launch {
+                try {
+                    val saved = withContext(Dispatchers.IO) { queueStore.load() } ?: return@launch
+                    finishCancelled(saved)
+                } finally {
+                    importJob = null
+                }
+            }
+            return
+        }
+        cancelRequested = true
+        pauseRequested = false
+        state = state.copy(message = "当前文件完成后取消剩余导入")
+    }
+
+    fun retryFailed() {
+        if (!state.canRetryFailed || importJob?.isActive == true) return
+        importJob = viewModelScope.launch {
+            try {
+                val saved = withContext(Dispatchers.IO) { queueStore.load() } ?: return@launch
+                if (saved.failures.isEmpty()) return@launch
+                pauseRequested = false
+                cancelRequested = false
+                runQueue(saved.forRetryFailures())
+            } finally {
+                importJob = null
+            }
+        }
+    }
+
+    fun clearRecord() {
+        if (!state.canClear || importJob?.isActive == true) return
+        importJob = viewModelScope.launch {
+            try {
+                val context = getApplication<Application>().applicationContext
+                val saved = withContext(Dispatchers.IO) { queueStore.load() }
+                withContext(Dispatchers.IO) {
+                    if (saved != null) releasePermissions(context, saved, includeFailures = true)
+                    queueStore.clear()
+                }
+                pauseRequested = false
+                cancelRequested = false
+                state = NativeImportState()
+            } finally {
+                importJob = null
+            }
+        }
+    }
+
     fun dismissResult() {
         state = state.copy(resultVisible = false)
     }
@@ -138,11 +249,13 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
         importJob = viewModelScope.launch {
             try {
                 val saved = withContext(Dispatchers.IO) { queueStore.load() } ?: return@launch
-                val active = saved.phase == NativeImportPhase.QUEUED || saved.phase == NativeImportPhase.RUNNING
-                if (active || saved.unfinished) {
-                    runQueue(saved.forResume())
-                } else {
-                    state = saved.toUiState(resultVisible = false)
+                when {
+                    saved.phase == NativeImportPhase.PAUSED -> state = saved.toUiState(resultVisible = false)
+                    saved.phase == NativeImportPhase.SUCCESS ||
+                        saved.phase == NativeImportPhase.FAILED ||
+                        saved.phase == NativeImportPhase.CANCELLED -> state = saved.toUiState(resultVisible = false)
+                    saved.unfinished -> runQueue(saved.forResume())
+                    else -> state = saved.toUiState(resultVisible = false)
                 }
             } finally {
                 importJob = null
@@ -151,11 +264,19 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
     }
 
     private suspend fun runQueue(initial: ImportQueueTask) {
-        val context = getApplication<Application>().applicationContext
         var task = initial
         persistAndPublish(task)
 
         task.items.indices.forEach { index ->
+            if (cancelRequested) {
+                if (task.unfinished) finishCancelled(task) else finishCompleted(task)
+                return
+            }
+            if (pauseRequested) {
+                if (task.unfinished) finishPaused(task) else finishCompleted(task)
+                return
+            }
+
             val item = task.items[index]
             if (item.status.terminal) return@forEach
 
@@ -168,6 +289,7 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
             )
             persistAndPublish(task)
 
+            val context = getApplication<Application>().applicationContext
             val resultItem = try {
                 when (withContext(Dispatchers.IO) { importOne(context, Uri.parse(item.uri), item.displayName) }) {
                     ImportOutcome.IMPORTED -> item.copy(status = ImportQueueItemStatus.IMPORTED, error = "")
@@ -181,17 +303,55 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
             }
             task = task.replaceItem(index, resultItem)
             persistAndPublish(task)
+
+            if (cancelRequested) {
+                if (task.unfinished) finishCancelled(task) else finishCompleted(task)
+                return
+            }
+            if (pauseRequested) {
+                if (task.unfinished) finishPaused(task) else finishCompleted(task)
+                return
+            }
         }
 
+        finishCompleted(task)
+    }
+
+    private suspend fun finishPaused(task: ImportQueueTask) {
+        pauseRequested = false
+        val paused = task.copy(
+            phase = NativeImportPhase.PAUSED,
+            message = "导入已暂停，已处理 ${task.processed}/${task.total} 个文件",
+        )
+        persistAndPublish(paused)
+    }
+
+    private suspend fun finishCancelled(task: ImportQueueTask) {
+        cancelRequested = false
+        pauseRequested = false
+        val cancelled = task.cancelRemaining()
+        persistAndPublish(
+            cancelled,
+            resultVisible = true,
+            refreshToken = if (cancelled.imported > 0) System.currentTimeMillis() else 0L,
+        )
+        val context = getApplication<Application>().applicationContext
+        withContext(Dispatchers.IO) { releasePermissions(context, cancelled, includeFailures = false) }
+    }
+
+    private suspend fun finishCompleted(task: ImportQueueTask) {
+        pauseRequested = false
+        cancelRequested = false
         val phase = if (task.failures.isEmpty()) NativeImportPhase.SUCCESS else NativeImportPhase.FAILED
         val message = when {
             task.failures.isEmpty() -> "字体导入完成，共处理 ${task.total} 个文件"
             task.imported > 0 || task.duplicates > 0 -> "字体导入部分完成，${task.failures.size} 个文件失败"
             else -> "字体导入失败，未成功处理任何文件"
         }
-        task = task.copy(phase = phase, message = message)
-        persistAndPublish(task, resultVisible = true, refreshToken = System.currentTimeMillis())
-        withContext(Dispatchers.IO) { releasePermissions(context, task) }
+        val completed = task.copy(phase = phase, message = message)
+        persistAndPublish(completed, resultVisible = true, refreshToken = System.currentTimeMillis())
+        val context = getApplication<Application>().applicationContext
+        withContext(Dispatchers.IO) { releasePermissions(context, completed, includeFailures = false) }
     }
 
     private suspend fun persistAndPublish(
@@ -206,8 +366,26 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
     private fun ImportQueueTask.replaceItem(index: Int, replacement: ImportQueueItem): ImportQueueTask =
         copy(items = items.mapIndexed { itemIndex, item -> if (itemIndex == index) replacement else item })
 
-    private fun releasePermissions(context: android.content.Context, task: ImportQueueTask) {
-        task.items.filter { it.persistedPermission }.forEach { item ->
+    private fun discardPreviousRecord(context: android.content.Context) {
+        queueStore.load()?.let { releasePermissions(context, it, includeFailures = true) }
+        queueStore.clear()
+    }
+
+    private fun releasePermissions(
+        context: android.content.Context,
+        task: ImportQueueTask,
+        includeFailures: Boolean,
+    ) {
+        task.items.filter { item ->
+            item.persistedPermission && when (item.status) {
+                ImportQueueItemStatus.IMPORTED,
+                ImportQueueItemStatus.DUPLICATE,
+                ImportQueueItemStatus.CANCELLED -> true
+                ImportQueueItemStatus.FAILED -> includeFailures
+                ImportQueueItemStatus.PENDING,
+                ImportQueueItemStatus.RUNNING -> false
+            }
+        }.forEach { item ->
             runCatching {
                 context.contentResolver.releasePersistableUriPermission(
                     Uri.parse(item.uri),
