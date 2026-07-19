@@ -20,31 +20,15 @@ jobs:
 
           path = Path('common/rom_adapters.sh')
           text = path.read_text(encoding='utf-8')
-          old = '''            case "$w" in
-                  thin) num=100; rb="Thin" ;;
-                  light) num=300; rb="Light" ;;
-                  medium) num=500; rb="Medium" ;;
-                  semibold) num=600; rb="SemiBold" ;;
-                  bold) num=700; rb="Bold" ;;
-                  black) num=900; rb="ExtraBold" ;;  # HyperOS Roboto 系列没有 Black，用 ExtraBold 顶替
-                  *) num=""; rb="" ;;
-              esac
-          '''
-          new = '''            case "$w" in
-                  thin) num=100; rb="Thin" ;;
-                  extralight) num=200; rb="ExtraLight" ;;
-                  light) num=300; rb="Light" ;;
-                  medium) num=500; rb="Medium" ;;
-                  semibold) num=600; rb="SemiBold" ;;
-                  bold) num=700; rb="Bold" ;;
-                  extrabold) num=800; rb="ExtraBold" ;;
-                  black) num=900; rb="ExtraBold" ;;  # HyperOS Roboto 系列没有 Black，用 ExtraBold 顶替
-                  *) num=""; rb="" ;;
-              esac
-          '''
-          if old not in text:
-              raise SystemExit('HyperOS weight mapping anchor not found')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          thin = '                thin) num=100; rb="Thin" ;;\n'
+          bold = '                bold) num=700; rb="Bold" ;;\n'
+          if thin not in text or bold not in text:
+              raise SystemExit('HyperOS weight mapping lines not found')
+          if 'extralight) num=200' not in text:
+              text = text.replace(thin, thin + '                extralight) num=200; rb="ExtraLight" ;;\n', 1)
+          if 'extrabold) num=800' not in text:
+              text = text.replace(bold, bold + '                extrabold) num=800; rb="ExtraBold" ;;\n', 1)
+          path.write_text(text, encoding='utf-8')
 
           module = Path('module.prop')
           value = module.read_text(encoding='utf-8')
@@ -58,10 +42,11 @@ jobs:
           check = Path('scripts/check.sh')
           value = check.read_text(encoding='utf-8')
           anchor = "grep -q 'import_probe_metadata' \"$ROOT/common/font_import.sh\"\n"
-          addition = anchor + "grep -q 'extralight) num=200' \"$ROOT/common/rom_adapters.sh\"\ngrep -q 'extrabold) num=800' \"$ROOT/common/rom_adapters.sh\"\n"
           if anchor not in value:
               raise SystemExit('check anchor not found')
-          check.write_text(value.replace(anchor, addition, 1), encoding='utf-8')
+          if "extralight) num=200" not in value:
+              value = value.replace(anchor, anchor + "grep -q 'extralight) num=200' \"$ROOT/common/rom_adapters.sh\"\ngrep -q 'extrabold) num=800' \"$ROOT/common/rom_adapters.sh\"\n", 1)
+          check.write_text(value, encoding='utf-8')
           PY
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
