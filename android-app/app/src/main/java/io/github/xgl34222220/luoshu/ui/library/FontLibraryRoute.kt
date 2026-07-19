@@ -43,7 +43,6 @@ internal fun FontLibraryRoute(
                 detailFont = null
                 actions.apply(font)
             },
-            onDelete = { detailFont = null },
         )
     }
 }
