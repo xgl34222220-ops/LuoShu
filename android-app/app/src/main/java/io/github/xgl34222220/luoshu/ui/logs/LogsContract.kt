@@ -2,6 +2,8 @@ package io.github.xgl34222220.luoshu.ui.logs
 
 import androidx.compose.runtime.Immutable
 import io.github.xgl34222220.luoshu.LuoShuViewModel
+import io.github.xgl34222220.luoshu.NativeImportPhase
+import io.github.xgl34222220.luoshu.NativeImportState
 
 @Immutable
 internal data class LogsUiState(
@@ -149,5 +151,33 @@ internal fun LuoShuViewModel.toLogsUiState(): LogsUiState {
         completedTaskCount = tasks.count { it.completed },
         failedTaskCount = tasks.count { it.phase == TaskPhase.FAILED },
         rebootRequired = rebootRequired || snapshot.rebootRequired,
+    )
+}
+
+internal fun LogsUiState.withNativeImport(state: NativeImportState): LogsUiState {
+    if (state.phase == NativeImportPhase.IDLE) return this
+    val phase = when (state.phase) {
+        NativeImportPhase.IDLE -> TaskPhase.INFO
+        NativeImportPhase.QUEUED -> TaskPhase.QUEUED
+        NativeImportPhase.RUNNING -> TaskPhase.RUNNING
+        NativeImportPhase.SUCCESS -> TaskPhase.SUCCESS
+        NativeImportPhase.FAILED -> TaskPhase.FAILED
+    }
+    val item = TaskCenterItem(
+        id = state.taskId.ifBlank { "native-import" },
+        kind = TaskKind.IMPORT,
+        phase = phase,
+        title = taskTitle(TaskKind.IMPORT, phase),
+        message = state.message,
+        progress = state.progress,
+        timeLabel = if (state.busy) "当前" else "最近",
+        current = state.busy,
+    )
+    val merged = mergeTaskItems(listOf(item), tasks)
+    return copy(
+        tasks = merged,
+        activeTaskCount = merged.count { it.active },
+        completedTaskCount = merged.count { it.completed },
+        failedTaskCount = merged.count { it.phase == TaskPhase.FAILED },
     )
 }
