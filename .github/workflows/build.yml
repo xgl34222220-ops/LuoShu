@@ -13,105 +13,26 @@ jobs:
           ref: feature/v14.3-alpha1-native-import
           fetch-depth: 0
           show-progress: false
-      - name: Generate Alpha1.3 implementation
+      - name: Generate and commit Alpha1.3 implementation
         shell: bash
         run: |
-          python3 - <<'PY' > /tmp/alpha13-generate.log 2>&1
+          set -euxo pipefail
+          python3 - <<'PY'
           from pathlib import Path
           workflow = Path('.github/workflows/alpha13-weight-import.yml').read_text(encoding='utf-8')
           body = workflow.split("python3 - <<'PY'\n", 1)[1].rsplit("\n          PY\n", 1)[0]
           body = '\n'.join(line[10:] if line.startswith('          ') else line for line in body.splitlines())
           exec(compile(body, 'alpha13-weight-import', 'exec'), {'__name__': '__main__'})
           PY
-      - name: Restore workflow and commit implementation
-        shell: bash
-        run: |
-          exec > /tmp/alpha13-commit.log 2>&1
-          set -euxo pipefail
-          cat > .github/workflows/build.yml <<'YAML'
-          name: Build module
-          on:
-            push:
-              branches:
-                - main
-                - feature/v14.3-alpha1-native-import
-            pull_request:
-            workflow_dispatch:
-          permissions:
-            contents: read
-          jobs:
-            build:
-              runs-on: ubuntu-24.04
-              timeout-minutes: 40
-              steps:
-                - uses: actions/checkout@v4
-                - uses: actions/setup-node@v4
-                  with:
-                    node-version: 22
-                - name: Install build dependencies
-                  run: |
-                    sudo apt-get update -qq
-                    sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
-                - uses: actions/cache@v4
-                  with:
-                    path: common/python
-                    key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
-                - name: Prepare ARM64 composite runtime
-                  run: |
-                    if [ ! -x common/python/bin/luoshu-python ]; then
-                      sh ./scripts/prepare_composite_runtime.sh
-                    fi
-                - name: Composite smoke tests
-                  env:
-                    PYTHONPATH: common/python/lib/python3.14/site-packages
-                  run: |
-                    CJK="$(find /usr/share/fonts -type f \( -iname '*NotoSansCJK*Regular*.ttc' -o -iname '*NotoSansCJK*Regular*.otf' \) -print -quit)"
-                    LATIN="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
-                    test -n "$CJK"; test -n "$LATIN"
-                    python3 common/composite_font.py --cjk "$CJK" --latin "$LATIN" --digit "$LATIN" --output /tmp/luoshu-composite.otf >/tmp/luoshu-composite.json
-                    python3 - <<'PY'
-                    import json
-                    from fontTools.ttLib import TTFont
-                    report=json.load(open('/tmp/luoshu-composite.json', encoding='utf-8'))
-                    assert report['status']=='ok', report
-                    font=TTFont('/tmp/luoshu-composite.otf')
-                    cmap=font.getBestCmap() or {}
-                    assert all(ord(ch) in cmap for ch in '中Aa019')
-                    assert report['replaced']['latin'] >= 52
-                    assert report['replaced']['digit'] >= 10
-                    PY
-                    python3 common/font_coverage.py /tmp/luoshu-composite.otf --brief
-                    if python3 common/font_coverage.py "$LATIN" --brief; then
-                      echo 'Latin-only font unexpectedly passed the global coverage gate' >&2
-                      exit 1
-                    fi
-                - name: TTC face extraction smoke test
-                  run: sh ./scripts/ttc_face_test.sh
-                - name: Build flashable module
-                  run: LUOSHU_VARIANT=lite sh ./scripts/build.sh
-                - uses: actions/upload-artifact@v4
-                  with:
-                    name: LuoShu-module-${{ github.sha }}
-                    path: dist/*.zip*
-                    if-no-files-found: error
-                    retention-days: 30
-          YAML
+
+          # GitHub Actions 的 GITHUB_TOKEN 没有 workflows 权限，功能提交不得包含工作流改动。
+          # 临时工作流会在功能提交完成后由仓库接口单独恢复和删除。
+          git checkout HEAD -- .github/workflows/build.yml .github/workflows/alpha13-weight-import.yml
           rm -f .alpha13-trigger .alpha13-trigger2 .alpha13-error.log
           chmod 0755 common/font_import_probe.py scripts/native_zip_import_test.sh
-          git status --short
-          git diff --stat
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
+          git reset .github/workflows/build.yml .github/workflows/alpha13-weight-import.yml
           git commit -m "feat: read real internal weights for multi-weight imports"
           git push origin HEAD:feature/v14.3-alpha1-native-import
-      - name: Upload materializer diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: alpha13-materializer-log
-          path: |
-            /tmp/alpha13-generate.log
-            /tmp/alpha13-commit.log
-          if-no-files-found: warn
-          retention-days: 2
