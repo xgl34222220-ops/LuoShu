@@ -38,9 +38,19 @@ for file in \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuHost.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportViewModel.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportQueueStore.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontMetadataInspector.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/appearance/AppearanceSettings.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/TaskCenterModel.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsContract.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt \
+  android-app/app/src/test/java/io/github/xgl34222220/luoshu/NativeImportStateTest.kt \
+  android-app/app/src/test/java/io/github/xgl34222220/luoshu/NativeImportQueueStoreTest.kt \
+  android-app/app/src/test/java/io/github/xgl34222220/luoshu/NativeImportTaskCenterTest.kt \
+  android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/logs/TaskCenterModelTest.kt \
   android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/appearance/AppearanceSettingsTest.kt; do
   test -f "$ROOT/$file"
 done
@@ -95,6 +105,10 @@ grep -q -- '--axes' "$ROOT/common/font_instance.py"
 grep -q 'worker "$_request"' "$ROOT/common/v142_weighted_mix.sh"
 grep -q 'axes_task.conf' "$ROOT/common/v142_weighted_mix.sh"
 grep -q 'OpenMultipleDocuments' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
+grep -q 'takePersistableUriPermission' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportViewModel.kt"
+grep -q 'forResume' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportQueueStore.kt"
+grep -q 'encodeImportQueue' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportQueueStore.kt"
+grep -q 'viewModel<NativeImportViewModel>()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuHost.kt"
 grep -q 'setFontVariationSettings' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
 grep -q 'updateMixAxis' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 grep -q 'testImplementation("junit:junit:4.13.2")' "$ROOT/android-app/app/build.gradle.kts"
