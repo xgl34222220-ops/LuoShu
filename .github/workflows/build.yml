@@ -1,7 +1,7 @@
 name: Materialize Alpha1.4 native live preview
 
 on:
-  push:
+  pull_request:
     branches:
       - feature/v14.3-alpha1-native-import
 
@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   materialize:
-    if: github.actor != 'github-actions[bot]'
+    if: github.event_name == 'pull_request' && github.head_ref == 'trigger/alpha14-native-preview'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
