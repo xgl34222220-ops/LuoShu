@@ -92,7 +92,7 @@ luoshu_copy_partition_atomic() {
 }
 
 # 将洛书的分区负载镜像到元模块真实内容目录。
-# 整目录镜像可同时清理旧字体，避免恢复默认后 ext4 镜像仍残留上一次字体。
+# 整目录镜像可同时清理旧字体，避免恢复默认后 ext4 镜仍残留上一次字体。
 luoshu_sync_mount_payload() {
     _id=$(luoshu_module_id)
     _engine=$(luoshu_detect_mount_engine)
@@ -153,3 +153,8 @@ luoshu_mount_status_json() {
     printf '{"engine":"%s","roots":"%s","lastEngine":"%s","synced":%s,"failed":%s,"time":%s}' \
         "$_engine" "$_roots" "${_last_engine:-$_engine}" "${_last_synced:-0}" "${_last_failed:-0}" "${_last_time:-0}"
 }
+
+# font_mix.sh 在 rom_adapters.sh 之后加载本文件；这里覆盖 HyperOS 的旧映射实现，
+# 保证复合字体与直接应用共用真实分区和原厂度量策略。
+_hyperos_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/hyperos_global.sh"
+[ -f "$_hyperos_helper" ] && . "$_hyperos_helper"
