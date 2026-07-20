@@ -9,6 +9,7 @@ LOG_FILE="${PLAY_FONT_LOG:-$MODDIR/logs/play-font-bridge.log}"
 DATA_ROOT="${LUOSHU_DATA_ROOT:-/data}"
 PM_BIN="${LUOSHU_PM:-pm}"
 CMD_BIN="${LUOSHU_CMD:-cmd}"
+DUMPSYS_BIN="${LUOSHU_DUMPSYS:-dumpsys}"
 
 GMS_PACKAGE='com.google.android.gms'
 PROVIDER_COMPONENT='com.google.android.gms/com.google.android.gms.fonts.provider.FontsProvider'
@@ -46,16 +47,6 @@ _list_users() {
     } | awk '/^[0-9]+$/ && !seen[$0]++ { print $0 }'
 }
 
-_component_state() {
-    _user="$1"
-    _component="$2"
-    _state=$(_pm get-component-enabled-setting --user "$_user" "$_component" 2>/dev/null | tail -n1 | tr -d '\r')
-    case "$_state" in
-        enabled|disabled|default|disabled-user|disabled-until-used) printf '%s\n' "$_state" ;;
-        *) printf 'default\n' ;;
-    esac
-}
-
 _state_has_entry() {
     _user="$1"
     _component="$2"
@@ -63,21 +54,30 @@ _state_has_entry() {
     grep -F "$_user|$_component|" "$STATE_FILE" 2>/dev/null | grep -q .
 }
 
-_record_original_state() {
+_record_disabled_component() {
     _user="$1"
     _component="$2"
     _state_has_entry "$_user" "$_component" && return 0
     mkdir -p "${STATE_FILE%/*}" 2>/dev/null || true
-    [ -f "$STATE_FILE" ] || printf 'version=1\n' > "$STATE_FILE"
-    printf '%s|%s|%s\n' "$_user" "$_component" "$(_component_state "$_user" "$_component")" >> "$STATE_FILE"
+    [ -f "$STATE_FILE" ] || printf 'version=2\n' > "$STATE_FILE"
+    printf '%s|%s|default\n' "$_user" "$_component" >> "$STATE_FILE"
 }
 
 _disable_component() {
     _user="$1"
     _component="$2"
-    _record_original_state "$_user" "$_component"
-    _pm disable --user "$_user" "$_component" >/dev/null 2>&1 || \
-        _pm disable-user --user "$_user" "$_component" >/dev/null 2>&1
+    _output=$(_pm disable --user "$_user" "$_component" 2>&1)
+    _code=$?
+    if [ "$_code" -ne 0 ]; then
+        _output=$(_pm disable-user --user "$_user" "$_component" 2>&1)
+        _code=$?
+    fi
+    if [ "$_code" -eq 0 ] && printf '%s\n' "$_output" | grep -qiE 'new state: (disabled|disabled-user)|^Success$'; then
+        _record_disabled_component "$_user" "$_component"
+        return 0
+    fi
+    _bridge_log "禁用失败 user=$_user component=$_component result=${_output:-unknown}"
+    return 1
 }
 
 _clear_user_cache() {
@@ -113,26 +113,15 @@ _apply() {
         _clear_user_cache "$_user"
     done
     sync 2>/dev/null || true
-    _bridge_log "已处理 $_users 个用户，禁用 $_disabled 个 GMS 字体组件并清理下载字体缓存"
+    _bridge_log "已处理 $_users 个用户，成功禁用 $_disabled 个 GMS 字体组件并清理下载字体缓存"
     printf 'applied users=%s disabled=%s\n' "$_users" "$_disabled"
 }
 
 _restore_component() {
     _user="$1"
     _component="$2"
-    _state="$3"
-    case "$_state" in
-        enabled)
-            _pm enable --user "$_user" "$_component" >/dev/null 2>&1 || true
-            ;;
-        disabled|disabled-user|disabled-until-used)
-            # 用户或系统原本已禁用，保持原状态。
-            ;;
-        *)
-            _pm default-state --user "$_user" "$_component" >/dev/null 2>&1 || \
-                _pm enable --user "$_user" "$_component" >/dev/null 2>&1 || true
-            ;;
-    esac
+    _pm default-state --user "$_user" "$_component" >/dev/null 2>&1 || \
+        _pm enable --user "$_user" "$_component" >/dev/null 2>&1 || true
 }
 
 _restore() {
@@ -144,23 +133,27 @@ _restore() {
     while IFS='|' read -r _user _component _state; do
         case "$_user" in version=*) continue ;; esac
         [ -n "$_user" ] && [ -n "$_component" ] || continue
-        _restore_component "$_user" "$_component" "$_state"
+        _restore_component "$_user" "$_component"
         _restored=$((_restored + 1))
     done < "$STATE_FILE"
     rm -f "$STATE_FILE" 2>/dev/null || true
-    _bridge_log "已恢复 $_restored 个 GMS 字体组件状态"
+    _bridge_log "已恢复 $_restored 个由洛书禁用的 GMS 字体组件"
     printf 'restored=%s\n' "$_restored"
 }
 
 _status() {
     printf 'installed=%s\n' "$(_gms_installed && echo true || echo false)"
     printf 'stateFile=%s\n' "$([ -f "$STATE_FILE" ] && echo true || echo false)"
-    for _user in $(_list_users); do
-        printf 'user=%s provider=%s updater=%s\n' \
-            "$_user" \
-            "$(_component_state "$_user" "$PROVIDER_COMPONENT")" \
-            "$(_component_state "$_user" "$UPDATER_COMPONENT")"
-    done
+    printf 'providerComponent=%s\n' "$PROVIDER_COMPONENT"
+    printf 'updaterComponent=%s\n' "$UPDATER_COMPONENT"
+    if [ -f "$STATE_FILE" ]; then
+        printf 'disabledByLuoShu:\n'
+        sed -n '/^[0-9][0-9]*|/p' "$STATE_FILE" 2>/dev/null | sed 's/^/  /'
+    fi
+    if command -v "$DUMPSYS_BIN" >/dev/null 2>&1; then
+        printf 'dumpsysFontEntries:\n'
+        "$DUMPSYS_BIN" package "$GMS_PACKAGE" 2>/dev/null | grep -i 'fonts' | head -n 80 | sed 's/^/  /'
+    fi
 }
 
 case "${1:-status}" in
