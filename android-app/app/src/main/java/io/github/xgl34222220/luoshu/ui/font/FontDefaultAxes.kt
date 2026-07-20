@@ -3,6 +3,35 @@ package io.github.xgl34222220.luoshu.ui.font
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.RootShell
 import org.json.JSONObject
+import kotlin.math.roundToInt
+
+private val defaultAxisCache = mutableMapOf<String, Map<String, Float>>()
+private val defaultAxisLock = Any()
+
+internal fun cacheFontDefaultAxes(fontId: String, axes: Map<String, Float>) {
+    if (fontId.isBlank()) return
+    val clean = axes.filter { (tag, value) -> tag.length == 4 && value.isFinite() }
+        .ifEmpty { mapOf("wght" to 400f) }
+    synchronized(defaultAxisLock) {
+        defaultAxisCache[fontId] = clean
+    }
+}
+
+internal fun cachedFontDefaultAxes(fontId: String): Map<String, Float>? = synchronized(defaultAxisLock) {
+    defaultAxisCache[fontId]
+}
+
+internal fun cachedFontDefaultWeight(fontId: String): Int? = cachedFontDefaultAxes(fontId)
+    ?.get("wght")
+    ?.takeIf { it.isFinite() }
+    ?.roundToInt()
+    ?.coerceIn(1, 1000)
+
+internal suspend fun resolveAndCacheFontDefaultAxes(font: FontItem): Map<String, Float> {
+    val cached = cachedFontDefaultAxes(font.id)
+    if (cached != null) return cached
+    return resolveFontDefaultAxes(font).also { cacheFontDefaultAxes(font.id, it) }
+}
 
 internal suspend fun resolveFontDefaultAxes(font: FontItem): Map<String, Float> {
     if (!font.variable) {
