@@ -7,7 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import io.github.xgl34222220.luoshu.NativeImportViewModel
+import io.github.xgl34222220.luoshu.rememberNativeImportViewModel
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 
 @Composable
@@ -16,7 +16,7 @@ internal fun LogsRoute(
     state: LogsUiState,
     actions: LogsActions,
 ) {
-    val importViewModel: NativeImportViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val importViewModel = rememberNativeImportViewModel()
     val importState = importViewModel.state
     val displayState = state.withNativeImport(importState)
 
