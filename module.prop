@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v14.3.8
-versionCode=14330
+version=v14.3.9
+versionCode=14331
 author=惜故里丶
-description=Android 全局字体管理模块：HyperOS 全局映射与组合页字体原生默认轴
+description=Android 全局字体管理模块：组合页默认自动多字重与 HyperOS 全局映射
 updateJson=
