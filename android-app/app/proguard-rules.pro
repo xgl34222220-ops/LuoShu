@@ -2,6 +2,8 @@
 # intentionally minimal; Android/Compose consumer rules are supplied by their
 # dependencies.
 
-# Vector/LSPosed instantiates this class by its fully-qualified name from assets/xposed_init.
+# Vector/LSPosed instantiates these classes by their fully-qualified names from assets/xposed_init.
 -keep class io.github.xgl34222220.luoshu.hook.AppBundledFontHook { *; }
 -keepnames class io.github.xgl34222220.luoshu.hook.AppBundledFontHook
+-keep class io.github.xgl34222220.luoshu.hook.ColorOsPlayFontHook { *; }
+-keepnames class io.github.xgl34222220.luoshu.hook.ColorOsPlayFontHook
