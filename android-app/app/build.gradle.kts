@@ -125,5 +125,8 @@ dependencies {
     implementation("dev.chrisbanes.haze:haze:1.6.10")
     implementation("dev.chrisbanes.haze:haze-materials:1.6.10")
 
+    // The framework supplies these classes inside hooked processes. They must never be packaged into LuoShu.apk.
+    compileOnly("de.robv.android.xposed:api:82")
+
     testImplementation("junit:junit:4.13.2")
 }
