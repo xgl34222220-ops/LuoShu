@@ -134,7 +134,12 @@ find_duplicate() {
 record_import_hash() {
     _hash="$1"
     _path="$2"
-    ensure_hash_index >/dev/null 2>&1 || rebuild_hash_index >/dev/null 2>&1 || return 0
+    # 新文件复制完成后目录 mtime 已变化。此处不能再调用 ensure_hash_index，
+    # 否则每导入一个字体都会重新哈希整个目录，批量导入会退化成 O(n²)。
+    if [ ! -f "$HASH_INDEX" ]; then
+        rebuild_hash_index >/dev/null 2>&1 || true
+        return 0
+    fi
     printf '%s\t%s\n' "$_hash" "$_path" >> "$HASH_INDEX" 2>/dev/null || return 0
     refresh_hash_index_header
 }
