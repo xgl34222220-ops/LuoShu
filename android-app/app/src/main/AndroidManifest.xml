@@ -24,6 +24,10 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".TaskCenterActivity"
+            android:exported="false" />
+
         <service
             android:name=".NativeImportForegroundService"
             android:exported="false"
