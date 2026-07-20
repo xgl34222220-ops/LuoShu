@@ -2,12 +2,8 @@ package io.github.xgl34222220.luoshu
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,9 +11,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -41,7 +39,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
@@ -90,7 +87,6 @@ internal fun NativeImportOverlay(
         FontMetadataInspector(
             viewModel = viewModel,
             style = style,
-            modifier = Modifier.alpha(.82f),
         )
         ImportActionButton(
             style = style,
@@ -130,7 +126,23 @@ private fun ImportActionButton(
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalMiuixTokens.current
     val dark = scheme.background.luminance() < .5f
-    val shape = RoundedCornerShape(if (expanded) 28.dp else 27.dp)
+    val taskVisible = state.busy || state.paused
+    val targetWidth = when {
+        !expanded -> 54.dp
+        taskVisible -> 166.dp
+        else -> 132.dp
+    }
+    val targetHeight = if (taskVisible) 68.dp else 54.dp
+    val width by animateDpAsState(
+        targetValue = targetWidth,
+        animationSpec = spring(dampingRatio = .78f, stiffness = 430f),
+        label = "nativeImportGlassWidth",
+    )
+    val height by animateDpAsState(
+        targetValue = targetHeight,
+        animationSpec = spring(dampingRatio = .82f, stiffness = 470f),
+        label = "nativeImportGlassHeight",
+    )
     val glassColor = when {
         style == UiStyle.MIUIX -> tokens.elevatedCardBackground.copy(alpha = if (dark) .76f else .72f)
         dark -> scheme.surfaceContainerHigh.copy(alpha = .72f)
@@ -142,13 +154,11 @@ private fun ImportActionButton(
     Surface(
         onClick = onImport,
         enabled = enabled,
-        modifier = Modifier
-            .then(if (expanded) Modifier else Modifier.size(54.dp))
-            .animateContentSize(),
-        shape = shape,
+        modifier = Modifier.width(width).height(height),
+        shape = CircleShape,
         color = glassColor,
         contentColor = scheme.primary,
-        shadowElevation = if (style == UiStyle.MIUIX) 18.dp else 15.dp,
+        shadowElevation = if (style == UiStyle.MIUIX) 14.dp else 12.dp,
         border = BorderStroke(1.dp, borderColor),
     ) {
         if (!expanded) {
@@ -157,9 +167,9 @@ private fun ImportActionButton(
             }
         } else {
             Column(
-                modifier = Modifier.padding(horizontal = 17.dp, vertical = 12.dp),
+                modifier = Modifier.padding(horizontal = 17.dp, vertical = if (taskVisible) 10.dp else 12.dp),
                 horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(7.dp),
+                verticalArrangement = Arrangement.Center,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     when {
@@ -171,26 +181,19 @@ private fun ImportActionButton(
                         state.paused -> Icon(Icons.Rounded.PlayArrow, contentDescription = null)
                         else -> Icon(Icons.Rounded.Add, contentDescription = null)
                     }
-                    AnimatedVisibility(
-                        visible = expanded,
-                        enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
-                        exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start),
-                    ) {
-                        Row {
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                when {
-                                    state.busy -> "导入 ${state.processed}/${state.total}"
-                                    state.paused -> "继续 ${state.processed}/${state.total}"
-                                    else -> "导入字体"
-                                },
-                                color = textColor,
-                                fontWeight = FontWeight.Black,
-                            )
-                        }
-                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        when {
+                            state.busy -> "导入 ${state.processed}/${state.total}"
+                            state.paused -> "继续 ${state.processed}/${state.total}"
+                            else -> "导入字体"
+                        },
+                        color = textColor,
+                        fontWeight = FontWeight.Black,
+                    )
                 }
-                if (state.busy || state.paused) {
+                if (taskVisible) {
+                    Spacer(Modifier.height(7.dp))
                     LinearProgressIndicator(
                         progress = { state.progress / 100f },
                         modifier = Modifier.fillMaxWidth(),
