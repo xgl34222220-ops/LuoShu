@@ -4,8 +4,10 @@ import android.content.Context
 import android.content.res.AssetFileDescriptor
 import android.content.res.AssetManager
 import android.content.res.Resources
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.ParcelFileDescriptor
+import android.widget.TextView
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -39,6 +41,14 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             .onFailure { log(packageName, "Resources font hook failed", it) }
         runCatching { hookAndroidXResourcesCompat(packageName, lpparam.classLoader) }
             .onFailure { log(packageName, "ResourcesCompat hook skipped", it) }
+
+        // HyperOS Clock mixes normal TextView text, Compose/TextPaint and several custom-drawn
+        // Mitype/MiSansRCF number faces. Catch the final Typeface assignment only inside the clock
+        // process so every visible text route uses one LuoShu family while icon/emoji families stay.
+        if (packageName in CLOCK_PACKAGES) {
+            runCatching { hookClockFinalTypefaceSinks(packageName) }
+                .onFailure { log(packageName, "Clock final typeface hook failed", it) }
+        }
 
         XposedBridge.log("LuoShu AppFontHook active: $packageName")
     }
@@ -107,6 +117,18 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             File::class.java,
             replaceResultFromRequest(packageName, "Typeface.createFromFile") { param ->
                 (param.args.getOrNull(0) as? File)?.path
+            },
+        )
+
+        // HyperOS Clock resolves several bundled families by alias instead of opening their asset
+        // path directly. Test6 did not cover this route, leaving alarm/timer numbers on Mitype.
+        XposedHelpers.findAndHookMethod(
+            Typeface::class.java,
+            "create",
+            String::class.java,
+            Int::class.javaPrimitiveType,
+            replaceResultFromRequest(packageName, "Typeface.create(family)") { param ->
+                param.args.getOrNull(0) as? String
             },
         )
     }
@@ -276,6 +298,56 @@ class AppBundledFontHook : IXposedHookLoadPackage {
         )
     }
 
+    /**
+     * Clock-only final sinks. This deliberately sits after every family/asset resolver because the
+     * screenshots show that the app mixes several independent font stacks in one screen.
+     *
+     * TextView covers legacy XML views. Paint covers TextPaint, Compose paragraphs and custom-drawn
+     * stopwatch/timer/world-clock digits. The hook is never installed outside the clock package.
+     */
+    private fun hookClockFinalTypefaceSinks(packageName: String) {
+        XposedBridge.hookAllMethods(
+            TextView::class.java,
+            "setTypeface",
+            object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (CLOCK_FORCE_GUARD.get() == true || param.args.isEmpty()) return
+                    val original = param.args.getOrNull(0) as? Typeface
+                    if (isExcludedTypeface(original)) return
+                    val explicitStyle = param.args.getOrNull(1) as? Int
+                    val replacement = forcedClockTypeface(original, explicitStyle) ?: return
+                    param.args[0] = replacement
+                    logReplacementOnce(
+                        packageName,
+                        "TextView.setTypeface(force)",
+                        "style=${explicitStyle ?: original?.style ?: Typeface.NORMAL}",
+                        sourceForForcedStyle(explicitStyle ?: original?.style ?: Typeface.NORMAL).orEmpty(),
+                    )
+                }
+            },
+        )
+
+        XposedBridge.hookAllMethods(
+            Paint::class.java,
+            "setTypeface",
+            object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (CLOCK_FORCE_GUARD.get() == true || param.args.isEmpty()) return
+                    val original = param.args.getOrNull(0) as? Typeface
+                    if (isExcludedTypeface(original)) return
+                    val replacement = forcedClockTypeface(original, null) ?: return
+                    param.args[0] = replacement
+                    logReplacementOnce(
+                        packageName,
+                        "Paint.setTypeface(force)",
+                        "style=${original?.style ?: Typeface.NORMAL}",
+                        sourceForForcedStyle(original?.style ?: Typeface.NORMAL).orEmpty(),
+                    )
+                }
+            },
+        )
+    }
+
     private fun replaceResultFromRequest(
         packageName: String,
         route: String,
@@ -311,12 +383,36 @@ class AppBundledFontHook : IXposedHookLoadPackage {
 
     private fun replacementTypeface(request: String, original: Typeface?): Typeface? {
         val source = sourceForRequest(request) ?: return null
-        val base = TYPEFACE_CACHE[source] ?: runCatching {
-            Typeface.createFromFile(source)
-        }.getOrNull()?.also { TYPEFACE_CACHE[source] = it } ?: return null
-
+        val base = loadTypeface(source) ?: return null
         val style = original?.style ?: Typeface.NORMAL
-        return if (style == Typeface.NORMAL) base else Typeface.create(base, style)
+        return styledTypeface(base, style)
+    }
+
+    private fun forcedClockTypeface(original: Typeface?, explicitStyle: Int?): Typeface? {
+        val style = explicitStyle ?: original?.style ?: Typeface.NORMAL
+        val source = sourceForForcedStyle(style) ?: return null
+        val base = loadTypeface(source) ?: return null
+        return styledTypeface(base, style)
+    }
+
+    private fun loadTypeface(source: String): Typeface? {
+        TYPEFACE_CACHE[source]?.let { return it }
+        return runCatching {
+            CLOCK_FORCE_GUARD.set(true)
+            Typeface.createFromFile(source)
+        }.getOrNull().also {
+            CLOCK_FORCE_GUARD.remove()
+        }?.also { TYPEFACE_CACHE[source] = it }
+    }
+
+    private fun styledTypeface(base: Typeface, style: Int): Typeface {
+        if (style == Typeface.NORMAL) return base
+        return runCatching {
+            CLOCK_FORCE_GUARD.set(true)
+            Typeface.create(base, style)
+        }.getOrDefault(base).also {
+            CLOCK_FORCE_GUARD.remove()
+        }
     }
 
     private fun sourceForRequest(request: String): String? {
@@ -340,6 +436,25 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             add("/system/fonts/MiSansVF.ttf")
         }
         return candidates.firstOrNull { File(it).canRead() }
+    }
+
+    private fun sourceForForcedStyle(style: Int): String? {
+        val weight = if (style and Typeface.BOLD != 0) 700 else 400
+        val candidates = listOf(
+            "/system/fonts/${nearestWeight(weight)}.ttf",
+            "/system/fonts/400.ttf",
+            "/system/fonts/Roboto-Regular.ttf",
+            "/system/fonts/MiSansVF.ttf",
+        )
+        return candidates.firstOrNull { File(it).canRead() }
+    }
+
+    private fun isExcludedTypeface(typeface: Typeface?): Boolean {
+        typeface ?: return false
+        val family = runCatching {
+            XposedHelpers.getObjectField(typeface, "mSystemFontFamilyName") as? String
+        }.getOrNull()?.lowercase() ?: return false
+        return EXCLUDED_MARKERS.any(family::contains)
     }
 
     private fun nearestWeight(weight: Int): Int {
@@ -387,7 +502,9 @@ class AppBundledFontHook : IXposedHookLoadPackage {
         val TYPEFACE_CACHE = ConcurrentHashMap<String, Typeface>()
         val LOGGED_REPLACEMENTS = ConcurrentHashMap<String, Boolean>()
         val MODERN_FONT_GUARD = ThreadLocal<Boolean>()
+        val CLOCK_FORCE_GUARD = ThreadLocal<Boolean>()
         val AVAILABLE_WEIGHTS = listOf(100, 200, 300, 350, 400, 500, 600, 700, 800, 900)
+        val CLOCK_PACKAGES = setOf("com.android.deskclock", "com.miui.clock")
 
         val INCLUDED_MARKERS = listOf(
             "productsans",
