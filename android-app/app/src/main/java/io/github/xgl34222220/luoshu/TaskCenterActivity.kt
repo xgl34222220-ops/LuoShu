@@ -43,7 +43,7 @@ internal class TaskCenterActivity : ComponentActivity() {
 }
 
 @Composable
-private fun TaskCenterHost() {
+internal fun TaskCenterHost() {
     val model: LuoShuViewModel = viewModel()
     val appearanceViewModel: AppearanceViewModel = viewModel()
     val appearance by appearanceViewModel.settings.collectAsStateWithLifecycle()
