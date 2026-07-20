@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets
 import java.util.Base64
 import java.util.Properties
 
+internal const val MAX_IMPORT_QUEUE_ITEMS = 256
+
 internal enum class ImportQueueItemStatus {
     PENDING, RUNNING, IMPORTED, DUPLICATE, FAILED, CANCELLED;
 
@@ -111,14 +113,14 @@ internal data class ImportQueueTask(
 
 internal fun encodeImportQueue(task: ImportQueueTask): String {
     val properties = Properties()
-    properties.setProperty("schema", "1")
+    properties.setProperty("schema", "2")
     properties.setProperty("taskId", task.taskId)
     properties.setProperty("phase", task.phase.wireName)
     properties.setProperty("createdAt", task.createdAt.toString())
     properties.setProperty("message", encodeField(task.message))
     properties.setProperty("recovered", task.recovered.toString())
-    properties.setProperty("count", task.items.size.toString())
-    task.items.forEachIndexed { index, item ->
+    properties.setProperty("count", task.items.size.coerceAtMost(MAX_IMPORT_QUEUE_ITEMS).toString())
+    task.items.take(MAX_IMPORT_QUEUE_ITEMS).forEachIndexed { index, item ->
         properties.setProperty("$index.uri", encodeField(item.uri))
         properties.setProperty("$index.name", encodeField(item.displayName))
         properties.setProperty("$index.status", item.status.name)
@@ -130,12 +132,12 @@ internal fun encodeImportQueue(task: ImportQueueTask): String {
 
 internal fun decodeImportQueue(raw: String): ImportQueueTask? = runCatching {
     val properties = Properties().apply { load(StringReader(raw)) }
-    require(properties.getProperty("schema") == "1")
+    require(properties.getProperty("schema") in setOf("1", "2"))
     val taskId = properties.getProperty("taskId").orEmpty()
     require(taskId.matches(Regex("[A-Za-z0-9._-]{1,96}")))
     val phase = NativeImportPhase.entries.firstOrNull { it.wireName == properties.getProperty("phase") }
         ?: NativeImportPhase.IDLE
-    val count = properties.getProperty("count")?.toIntOrNull()?.coerceIn(1, 32) ?: 1
+    val count = properties.getProperty("count")?.toIntOrNull()?.coerceIn(1, MAX_IMPORT_QUEUE_ITEMS) ?: 1
     val items = buildList {
         repeat(count) { index ->
             val uri = decodeField(properties.getProperty("$index.uri").orEmpty())
