@@ -68,4 +68,6 @@ test "$(cat "$MODULE_DIR/system_ext/fonts/GoogleSans-Bold.ttf")" = 'bold-source'
 test ! -e "$MODULE_DIR/system/fonts/MiSansVF.ttf"
 test ! -e "$MODULE_DIR/product/fonts/Roboto-Regular.ttf"
 test ! -e "$MODULE_DIR/system_ext/fonts/Roboto-Regular.ttf"
+
+sh "$REPO_ROOT/scripts/play_font_bridge_test.sh"
 printf 'HyperOS global mapping tests passed.\n'
