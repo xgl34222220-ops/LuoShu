@@ -22,13 +22,13 @@ _hyperos_weight_files() {
     printf '%s\n' '100.ttf 200.ttf 300.ttf 350.ttf 400.ttf 500.ttf 600.ttf 700.ttf 800.ttf 900.ttf'
 }
 
-_hyperos_metric_shell_files() {
+_hyperos_app_font_files() {
     printf '%s\n' 'Roboto-Thin.ttf Roboto-ThinItalic.ttf Roboto-ExtraLight.ttf Roboto-ExtraLightItalic.ttf Roboto-Light.ttf Roboto-LightItalic.ttf Roboto-Regular.ttf Roboto-Italic.ttf Roboto-Medium.ttf Roboto-MediumItalic.ttf Roboto-SemiBold.ttf Roboto-SemiBoldItalic.ttf Roboto-Bold.ttf Roboto-BoldItalic.ttf Roboto-ExtraBold.ttf Roboto-ExtraBoldItalic.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-Bold.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-Bold.ttf GoogleSansFlex-Regular.ttf'
 }
 
-# 返回完整清理清单。Roboto/GoogleSans 仅用于清除旧版本残留，不会在新映射中重新创建。
+# 返回完整清理清单。每次提交先清除旧分区负载，再按 ROM 中的真实路径重建。
 get_all_hyperos_files() {
-    printf '%s %s %s\n' "$(_hyperos_core_files)" "$(_hyperos_weight_files)" "$(_hyperos_metric_shell_files)"
+    printf '%s %s %s\n' "$(_hyperos_core_files)" "$(_hyperos_weight_files)" "$(_hyperos_app_font_files)"
 }
 
 _hyperos_remove_overlay_file() {
@@ -109,6 +109,19 @@ _hyperos_weight_role() {
     esac
 }
 
+_hyperos_app_font_weight() {
+    case "$1" in
+        *ExtraBold*) printf '800\n' ;;
+        *ExtraLight*) printf '200\n' ;;
+        *SemiBold*) printf '600\n' ;;
+        *Thin*) printf '100\n' ;;
+        *Light*) printf '300\n' ;;
+        *Medium*) printf '500\n' ;;
+        *Bold*) printf '700\n' ;;
+        *) printf '400\n' ;;
+    esac
+}
+
 _hyperos_materialize_variable_weight() {
     _source="$1"
     _output="$2"
@@ -146,8 +159,9 @@ _hyperos_weight_anchor() {
     _font_anchor "$_source" "$_dest_dir" "wght-${_weight}"
 }
 
-# HyperOS 的 Roboto/GoogleSans 是紧凑控件的度量外壳。新实现保留这些原厂文件，
-# 只覆盖真正承载字形的 MiSans 核心文件和数字字重文件，并写入它们真实所在分区。
+# HyperOS 3 的 framework、系统 App 与 Google App 并不只走 MiSans：
+# 部分组件会直接请求 Roboto/GoogleSans。这里只覆盖 ROM 中真实存在的目标，
+# 并按 100~900 字重锚点映射，避免全部退化成 Regular。
 copy_as_hyperos() {
     src="$1"
     dest_dir="$2"
@@ -187,7 +201,17 @@ copy_as_hyperos() {
         weight_count=$((weight_count + _added))
     done
 
-    _log_step "  已按真实分区覆盖 $core_count 个 MiSans 核心目标、$weight_count 个字重目标"
-    _log_step '  已保留原厂 Roboto/GoogleSans 度量外壳，避免小标签与紧凑控件裁字'
+    app_count=0
+    for _file in $(_hyperos_app_font_files); do
+        _weight=$(_hyperos_app_font_weight "$_file")
+        _anchor="$_module/system/fonts/.luoshu-font-store/wght-${_weight}.font"
+        [ -s "$_anchor" ] || _anchor="$regular_anchor"
+        _added=$(_hyperos_alias_existing_targets "$_anchor" "$_file")
+        case "$_added" in ''|*[!0-9]*) _added=0 ;; esac
+        app_count=$((app_count + _added))
+    done
+
+    _log_step "  已按真实分区覆盖 $core_count 个 MiSans 核心目标、$weight_count 个数字字重目标"
+    _log_step "  已按真实字重覆盖 $app_count 个 Roboto/GoogleSans 应用字体目标"
     return 0
 }
