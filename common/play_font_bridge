@@ -1,164 +1,171 @@
 #!/system/bin/sh
-# 洛书 v13.3 Beta2 - Android 16 / GMS、Google 与 Gemini 动态字体桥接
-# 只做临时 bind mount，不删除也不改写 /data/fonts 中的原文件。
-
+# 洛书 Google Play 服务字体提供器桥接。
+# HyperOS 上部分 Google/Compose 应用会通过 GMS 下载字体，绕过系统字体槽。
 set +e
 
-MODDIR="${MODDIR:-/data/adb/modules/LuoShu}"
-LOG_FILE="$MODDIR/logs/fontswitch.log"
-ACTION="${1:-now}"
+MODDIR="${MODDIR:-${0%/*}/..}"
+STATE_FILE="${PLAY_FONT_STATE:-$MODDIR/config/play_font_bridge.conf}"
+LOG_FILE="${PLAY_FONT_LOG:-$MODDIR/logs/play-font-bridge.log}"
+DATA_ROOT="${LUOSHU_DATA_ROOT:-/data}"
+PM_BIN="${LUOSHU_PM:-pm}"
+CMD_BIN="${LUOSHU_CMD:-cmd}"
 
-bridge_log() {
-    mkdir -p "$MODDIR/logs" 2>/dev/null || true
-    echo "[$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)] [GMS-BRIDGE] $*" >> "$LOG_FILE" 2>/dev/null || true
+GMS_PACKAGE='com.google.android.gms'
+PROVIDER_COMPONENT='com.google.android.gms/com.google.android.gms.fonts.provider.FontsProvider'
+UPDATER_COMPONENT='com.google.android.gms/com.google.android.gms.fonts.update.UpdateSchedulerService'
+
+_bridge_log() {
+    mkdir -p "${LOG_FILE%/*}" 2>/dev/null || true
+    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$1" >> "$LOG_FILE" 2>/dev/null || true
 }
 
-font_size() {
-    wc -c < "$1" 2>/dev/null | tr -d '[:space:]'
+_pm() {
+    "$PM_BIN" "$@"
 }
 
-valid_source() {
-    [ -f "$1" ] || return 1
-    _size=$(font_size "$1")
-    case "$_size" in ''|*[!0-9]*) return 1 ;; esac
-    [ "$_size" -ge 1024 ]
+_gms_installed() {
+    _pm path "$GMS_PACKAGE" >/dev/null 2>&1
 }
 
-is_variable_font() {
-    # OpenType 可变字体包含 fvar 表。grep 只检查二进制表标记，不修改文件。
-    grep -a -q 'fvar' "$1" 2>/dev/null
-}
-
-source_for_name() {
-    _name="$1"
-    _exact="$MODDIR/system/fonts/$_name"
-    if valid_source "$_exact"; then
-        echo "$_exact"
+_list_users() {
+    if [ -n "${LUOSHU_USER_LIST:-}" ]; then
+        printf '%s\n' $LUOSHU_USER_LIST
         return 0
     fi
-    case "$_name" in
-        *Flex*)
-            _vf="$MODDIR/system/fonts/GoogleSansFlex-Regular.ttf"
-            valid_source "$_vf" && is_variable_font "$_vf" && { echo "$_vf"; return 0; }
-            _vf="$MODDIR/system/fonts/RobotoFlex-Regular.ttf"
-            valid_source "$_vf" && is_variable_font "$_vf" && { echo "$_vf"; return 0; }
-            return 1
-            ;;
-        *Code*) return 1 ;;
-        *Bold*|*-700-*) _fallback="$MODDIR/system/fonts/Roboto-Bold.ttf" ;;
-        *Medium*|*-500-*) _fallback="$MODDIR/system/fonts/Roboto-Medium.ttf" ;;
-        *) _fallback="$MODDIR/system/fonts/Roboto-Regular.ttf" ;;
-    esac
-    valid_source "$_fallback" && echo "$_fallback"
-}
 
-namespace_pids() {
     {
-        echo 1
-        pidof zygote64 zygote zygote_ocomp system_server 2>/dev/null
-        pidof com.android.vending 2>/dev/null
-        pidof com.google.android.gms com.google.android.gms.persistent com.google.android.gms.unstable 2>/dev/null
-        pidof com.google.android.apps.bard com.google.android.googlequicksearchbox 2>/dev/null
-        pidof com.android.chrome com.google.android.webview webview_zygote 2>/dev/null
-    } | tr ' ' '\n' | awk '/^[0-9]+$/ && !seen[$0]++'
+        if command -v "$CMD_BIN" >/dev/null 2>&1; then
+            "$CMD_BIN" user list 2>/dev/null | sed -n 's/.*UserInfo{\([0-9][0-9]*\):.*/\1/p'
+        fi
+        if [ -d "$DATA_ROOT/user" ]; then
+            for _dir in "$DATA_ROOT"/user/[0-9]*; do
+                [ -d "$_dir" ] && basename "$_dir"
+            done
+        fi
+        printf '0\n'
+    } | awk '/^[0-9]+$/ && !seen[$0]++ { print $0 }'
 }
 
-do_bind() {
-    _src="$1"
-    _target="$2"
-    _ok=0
-    # KernelSU/Zygisk Next 可能让 Play、GMS、zygote 处于不同挂载命名空间。
-    # 对已知关键进程逐个挂载，不能只改 PID 1。
-    if command -v nsenter >/dev/null 2>&1; then
-        for _pid in $(namespace_pids); do
-            nsenter -t "$_pid" -m -- mount --bind "$_src" "$_target" >/dev/null 2>&1 && _ok=1
-        done
-    fi
-    mount --bind "$_src" "$_target" >/dev/null 2>&1 && _ok=1
-    [ "$_ok" -eq 1 ]
+_component_state() {
+    _user="$1"
+    _component="$2"
+    _state=$(_pm get-component-enabled-setting --user "$_user" "$_component" 2>/dev/null | tail -n1 | tr -d '\r')
+    case "$_state" in
+        enabled|disabled|default|disabled-user|disabled-until-used) printf '%s\n' "$_state" ;;
+        *) printf 'default\n' ;;
+    esac
 }
 
-do_umount() {
-    _target="$1"
-    if command -v nsenter >/dev/null 2>&1; then
-        _zygote=$(pidof zygote64 2>/dev/null | awk '{print $1}')
-        [ -z "$_zygote" ] && _zygote=$(pidof zygote 2>/dev/null | awk '{print $1}')
-        [ -n "$_zygote" ] && nsenter -t "$_zygote" -m -- umount "$_target" >/dev/null 2>&1 && return 0
-        nsenter -t 1 -m -- umount "$_target" >/dev/null 2>&1 && return 0
-    fi
-    umount "$_target" >/dev/null 2>&1
+_state_has_entry() {
+    _user="$1"
+    _component="$2"
+    [ -f "$STATE_FILE" ] || return 1
+    grep -F "$_user|$_component|" "$STATE_FILE" 2>/dev/null | grep -q .
 }
 
-restore_mounts() {
+_record_original_state() {
+    _user="$1"
+    _component="$2"
+    _state_has_entry "$_user" "$_component" && return 0
+    mkdir -p "${STATE_FILE%/*}" 2>/dev/null || true
+    [ -f "$STATE_FILE" ] || printf 'version=1\n' > "$STATE_FILE"
+    printf '%s|%s|%s\n' "$_user" "$_component" "$(_component_state "$_user" "$_component")" >> "$STATE_FILE"
+}
+
+_disable_component() {
+    _user="$1"
+    _component="$2"
+    _record_original_state "$_user" "$_component"
+    _pm disable --user "$_user" "$_component" >/dev/null 2>&1 || \
+        _pm disable-user --user "$_user" "$_component" >/dev/null 2>&1
+}
+
+_clear_user_cache() {
+    _user="$1"
+    for _path in \
+        "$DATA_ROOT/user/$_user/$GMS_PACKAGE/files/fonts" \
+        "$DATA_ROOT/user_de/$_user/$GMS_PACKAGE/files/fonts" \
+        "$DATA_ROOT/data/$GMS_PACKAGE/files/fonts" \
+        "$DATA_ROOT/data_mirror/data_ce/null/$_user/$GMS_PACKAGE/files/fonts" \
+        "$DATA_ROOT/data_mirror/data_de/null/$_user/$GMS_PACKAGE/files/fonts"; do
+        [ -e "$_path" ] || continue
+        rm -rf "$_path" 2>/dev/null || true
+    done
+}
+
+_apply() {
+    _gms_installed || {
+        _bridge_log '未检测到 Google Play 服务，跳过 GMS 字体桥接'
+        printf 'not-installed\n'
+        return 0
+    }
+
+    _users=0
+    _disabled=0
+    for _user in $(_list_users); do
+        _users=$((_users + 1))
+        if _disable_component "$_user" "$PROVIDER_COMPONENT"; then
+            _disabled=$((_disabled + 1))
+        fi
+        if _disable_component "$_user" "$UPDATER_COMPONENT"; then
+            _disabled=$((_disabled + 1))
+        fi
+        _clear_user_cache "$_user"
+    done
+    sync 2>/dev/null || true
+    _bridge_log "已处理 $_users 个用户，禁用 $_disabled 个 GMS 字体组件并清理下载字体缓存"
+    printf 'applied users=%s disabled=%s\n' "$_users" "$_disabled"
+}
+
+_restore_component() {
+    _user="$1"
+    _component="$2"
+    _state="$3"
+    case "$_state" in
+        enabled)
+            _pm enable --user "$_user" "$_component" >/dev/null 2>&1 || true
+            ;;
+        disabled|disabled-user|disabled-until-used)
+            # 用户或系统原本已禁用，保持原状态。
+            ;;
+        *)
+            _pm default-state --user "$_user" "$_component" >/dev/null 2>&1 || \
+                _pm enable --user "$_user" "$_component" >/dev/null 2>&1 || true
+            ;;
+    esac
+}
+
+_restore() {
+    [ -f "$STATE_FILE" ] || {
+        printf 'nothing-to-restore\n'
+        return 0
+    }
     _restored=0
-    for _target in /data/fonts/files/*/GoogleSans*.ttf; do
-        [ -f "$_target" ] || continue
-        do_umount "$_target" && _restored=$((_restored + 1))
-    done
-    for _target in /data/user/*/com.google.android.gms/files/fonts/opentype/Google_Sans*.ttf; do
-        [ -f "$_target" ] || continue
-        do_umount "$_target" && _restored=$((_restored + 1))
-    done
-    bridge_log "恢复动态 Google Sans 挂载：$_restored"
+    while IFS='|' read -r _user _component _state; do
+        case "$_user" in version=*) continue ;; esac
+        [ -n "$_user" ] && [ -n "$_component" ] || continue
+        _restore_component "$_user" "$_component" "$_state"
+        _restored=$((_restored + 1))
+    done < "$STATE_FILE"
+    rm -f "$STATE_FILE" 2>/dev/null || true
+    _bridge_log "已恢复 $_restored 个 GMS 字体组件状态"
+    printf 'restored=%s\n' "$_restored"
 }
 
-[ "$ACTION" = "restore" ] && { restore_mounts; exit 0; }
-
-_attempts=1
-[ "$ACTION" = "boot" ] && _attempts=9
-_attempt=1
-
-while [ "$_attempt" -le "$_attempts" ]; do
-    _found=0
-    _mounted=0
-    _skipped=0
-    _failed=0
-    for _target in \
-        /data/fonts/files/*/GoogleSans*.ttf \
-        /data/fonts/files/*/Google_Sans*.ttf \
-        /data/user/*/com.google.android.gms/files/fonts/opentype/Google_Sans*.ttf \
-        /data/user/*/com.google.android.gms/files/fonts/opentype/GoogleSans*.ttf; do
-        [ -f "$_target" ] || continue
-        _found=$((_found + 1))
-        _name=$(basename "$_target")
-        _src=$(source_for_name "$_name")
-        if [ -z "$_src" ]; then
-            _failed=$((_failed + 1))
-            continue
-        fi
-        case "$_name" in
-            *Code*)
-                _skipped=$((_skipped + 1))
-                bridge_log "保留 $_name 原版：代码字体不使用正文字体替换"
-                continue
-                ;;
-            *Flex*)
-                if ! is_variable_font "$_src"; then
-                    _skipped=$((_skipped + 1))
-                    bridge_log "保留 $_name 原版：未找到可变字体源"
-                    continue
-                fi
-                ;;
-        esac
-        if do_bind "$_src" "$_target"; then
-            _mounted=$((_mounted + 1))
-        else
-            _failed=$((_failed + 1))
-        fi
+_status() {
+    printf 'installed=%s\n' "$(_gms_installed && echo true || echo false)"
+    printf 'stateFile=%s\n' "$([ -f "$STATE_FILE" ] && echo true || echo false)"
+    for _user in $(_list_users); do
+        printf 'user=%s provider=%s updater=%s\n' \
+            "$_user" \
+            "$(_component_state "$_user" "$PROVIDER_COMPONENT")" \
+            "$(_component_state "$_user" "$UPDATER_COMPONENT")"
     done
+}
 
-    if [ "$_found" -gt 0 ]; then
-        bridge_log "动态 Google Sans：发现=$_found 成功=$_mounted 跳过=$_skipped 失败=$_failed"
-        if [ "$_mounted" -gt 0 ]; then
-            cmd font system --update >/dev/null 2>&1 || true
-            am force-stop com.android.vending >/dev/null 2>&1 || true
-        fi
-        exit 0
-    fi
-
-    [ "$_attempt" -lt "$_attempts" ] && sleep 10
-    _attempt=$((_attempt + 1))
-done
-
-bridge_log "动态 Google Sans：两个已知目录均未发现目标文件"
-exit 0
+case "${1:-status}" in
+    apply) _apply ;;
+    restore) _restore ;;
+    status) _status ;;
+    *) echo 'usage: play_font_bridge apply|restore|status' >&2; exit 2 ;;
+esac
