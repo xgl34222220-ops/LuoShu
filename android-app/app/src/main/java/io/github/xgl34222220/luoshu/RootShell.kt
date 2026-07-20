@@ -19,24 +19,25 @@ internal object RootShell {
     suspend fun exec(command: String, timeoutMs: Long = 600_000L): ShellResult = withContext(Dispatchers.IO) {
         var process: Process? = null
         try {
-            process = ProcessBuilder("su", "-c", command)
+            val activeProcess = ProcessBuilder("su", "-c", command)
                 .redirectErrorStream(false)
                 .start()
+            process = activeProcess
 
             coroutineScope {
                 val stdout = async(Dispatchers.IO) {
-                    process.inputStream.bufferedReader().use { it.readText() }
+                    activeProcess.inputStream.bufferedReader().use { it.readText() }
                 }
                 val stderr = async(Dispatchers.IO) {
-                    process.errorStream.bufferedReader().use { it.readText() }
+                    activeProcess.errorStream.bufferedReader().use { it.readText() }
                 }
 
-                val finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+                val finished = activeProcess.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
                 if (!finished) {
-                    process.destroyForcibly()
+                    activeProcess.destroyForcibly()
                     ShellResult(124, stdout.await(), "命令执行超时\n${stderr.await()}".trim())
                 } else {
-                    ShellResult(process.exitValue(), stdout.await(), stderr.await())
+                    ShellResult(activeProcess.exitValue(), stdout.await(), stderr.await())
                 }
             }
         } catch (cancelled: CancellationException) {
