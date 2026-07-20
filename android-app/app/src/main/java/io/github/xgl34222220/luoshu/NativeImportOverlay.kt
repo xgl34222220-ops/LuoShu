@@ -44,7 +44,7 @@ internal fun NativeImportOverlay(
     style: UiStyle,
     modifier: Modifier = Modifier,
 ) {
-    val importViewModel: NativeImportViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val importViewModel = rememberNativeImportViewModel()
     val state = importViewModel.state
 
     LaunchedEffect(state.refreshToken) {
