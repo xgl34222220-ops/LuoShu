@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v14.3.4
-versionCode=14326
+version=v14.3.5
+versionCode=14327
 author=惜故里丶
-description=Android 全局字体管理模块：原生 App-only、字体库详情与筛选、任务中心、可恢复导入及后台通知
+description=Android 全局字体管理模块：原生 App-only、液态玻璃操作组、任务中心与可恢复后台导入
 updateJson=
