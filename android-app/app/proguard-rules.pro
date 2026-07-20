@@ -7,3 +7,5 @@
 -keepnames class io.github.xgl34222220.luoshu.hook.AppBundledFontHook
 -keep class io.github.xgl34222220.luoshu.hook.ColorOsPlayFontHook { *; }
 -keepnames class io.github.xgl34222220.luoshu.hook.ColorOsPlayFontHook
+-keep class io.github.xgl34222220.luoshu.hook.ColorOsPlayDownloadedFontHook { *; }
+-keepnames class io.github.xgl34222220.luoshu.hook.ColorOsPlayDownloadedFontHook
