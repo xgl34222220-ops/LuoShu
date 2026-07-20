@@ -43,6 +43,7 @@ for file in \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontMetadataInspector.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/appearance/AppearanceSettings.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/TaskCenterModel.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsContract.kt \
@@ -119,6 +120,9 @@ grep -q 'encodeImportQueue' "$ROOT/android-app/app/src/main/java/io/github/xgl34
 grep -q 'viewModel<NativeImportViewModel>()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuHost.kt"
 grep -q 'setFontVariationSettings' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
 grep -q 'updateMixAxis' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
+grep -q 'resolveAndCacheFontDefaultAxes' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/dialogs/FontPickerDialog.kt"
+grep -q 'cachedFontDefaultWeight' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt"
+grep -q 'optDouble("default"' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt"
 grep -q 'testImplementation("junit:junit:4.13.2")' "$ROOT/android-app/app/build.gradle.kts"
 
 # HyperOS 必须保留紧凑控件的原厂度量壳，并按真实分区写入 MiSans 与数字字重目标。
