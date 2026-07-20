@@ -2,6 +2,12 @@ package io.github.xgl34222220.luoshu
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -29,14 +35,22 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import kotlinx.coroutines.delay
 
 @Composable
 internal fun NativeImportOverlay(
@@ -46,6 +60,17 @@ internal fun NativeImportOverlay(
 ) {
     val importViewModel = rememberNativeImportViewModel()
     val state = importViewModel.state
+    var expanded by remember { mutableStateOf(true) }
+
+    LaunchedEffect(state.busy, state.paused, state.processed, state.total) {
+        if (state.busy || state.paused) {
+            expanded = true
+        } else {
+            expanded = true
+            delay(2_400L)
+            expanded = false
+        }
+    }
 
     LaunchedEffect(state.refreshToken) {
         if (state.refreshToken > 0L) viewModel.refreshFonts(force = true)
@@ -57,18 +82,20 @@ internal fun NativeImportOverlay(
         importViewModel.startImport(uris)
     }
 
-    Column(
+    Row(
         modifier = modifier,
-        horizontalAlignment = Alignment.End,
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         FontMetadataInspector(
             viewModel = viewModel,
             style = style,
+            modifier = Modifier.alpha(.82f),
         )
         ImportActionButton(
             style = style,
             state = state,
+            expanded = expanded || state.busy || state.paused,
             enabled = viewModel.snapshot.installed &&
                 !viewModel.operationBusy &&
                 !viewModel.mixState.busy &&
@@ -96,53 +123,81 @@ internal fun NativeImportOverlay(
 private fun ImportActionButton(
     style: UiStyle,
     state: NativeImportState,
+    expanded: Boolean,
     enabled: Boolean,
     onImport: () -> Unit,
 ) {
+    val scheme = MaterialTheme.colorScheme
+    val tokens = LocalMiuixTokens.current
+    val dark = scheme.background.luminance() < .5f
+    val shape = RoundedCornerShape(if (expanded) 28.dp else 27.dp)
+    val glassColor = when {
+        style == UiStyle.MIUIX -> tokens.elevatedCardBackground.copy(alpha = if (dark) .76f else .72f)
+        dark -> scheme.surfaceContainerHigh.copy(alpha = .72f)
+        else -> Color.White.copy(alpha = .70f)
+    }
+    val borderColor = if (dark) Color.White.copy(alpha = .14f) else Color.White.copy(alpha = .82f)
+    val textColor = if (style == UiStyle.MIUIX) tokens.textPrimary else scheme.onSurface
+
     Surface(
         onClick = onImport,
         enabled = enabled,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 24.dp else 22.dp),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-        shadowElevation = if (style == UiStyle.MIUIX) 18.dp else 14.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .10f)),
+        modifier = Modifier
+            .then(if (expanded) Modifier else Modifier.size(54.dp))
+            .animateContentSize(),
+        shape = shape,
+        color = glassColor,
+        contentColor = scheme.primary,
+        shadowElevation = if (style == UiStyle.MIUIX) 18.dp else 15.dp,
+        border = BorderStroke(1.dp, borderColor),
     ) {
-        Column(
-            modifier = Modifier.padding(
-                horizontal = if (style == UiStyle.MIUIX) 19.dp else 18.dp,
-                vertical = if (style == UiStyle.MIUIX) 14.dp else 13.dp,
-            ),
-            horizontalAlignment = Alignment.End,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                when {
-                    state.busy -> CircularProgressIndicator(
-                        modifier = Modifier.size(19.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                    state.paused -> Icon(Icons.Rounded.PlayArrow, contentDescription = null)
-                    else -> Icon(Icons.Rounded.Add, contentDescription = null)
-                }
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    when {
-                        state.busy -> "导入 ${state.processed}/${state.total}"
-                        state.paused -> "继续 ${state.processed}/${state.total}"
-                        else -> "导入字体"
-                    },
-                    fontWeight = FontWeight.Black,
-                )
+        if (!expanded) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(Icons.Rounded.Add, contentDescription = "导入字体", modifier = Modifier.size(24.dp))
             }
-            if (state.busy || state.paused) {
-                LinearProgressIndicator(
-                    progress = { state.progress / 100f },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = MaterialTheme.colorScheme.onPrimary,
-                    trackColor = MaterialTheme.colorScheme.onPrimary.copy(alpha = .24f),
-                )
+        } else {
+            Column(
+                modifier = Modifier.padding(horizontal = 17.dp, vertical = 12.dp),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    when {
+                        state.busy -> CircularProgressIndicator(
+                            modifier = Modifier.size(19.dp),
+                            strokeWidth = 2.dp,
+                            color = scheme.primary,
+                        )
+                        state.paused -> Icon(Icons.Rounded.PlayArrow, contentDescription = null)
+                        else -> Icon(Icons.Rounded.Add, contentDescription = null)
+                    }
+                    AnimatedVisibility(
+                        visible = expanded,
+                        enter = fadeIn() + expandHorizontally(expandFrom = Alignment.Start),
+                        exit = fadeOut() + shrinkHorizontally(shrinkTowards = Alignment.Start),
+                    ) {
+                        Row {
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                when {
+                                    state.busy -> "导入 ${state.processed}/${state.total}"
+                                    state.paused -> "继续 ${state.processed}/${state.total}"
+                                    else -> "导入字体"
+                                },
+                                color = textColor,
+                                fontWeight = FontWeight.Black,
+                            )
+                        }
+                    }
+                }
+                if (state.busy || state.paused) {
+                    LinearProgressIndicator(
+                        progress = { state.progress / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = scheme.primary,
+                        trackColor = scheme.primary.copy(alpha = .18f),
+                    )
+                }
             }
         }
     }
