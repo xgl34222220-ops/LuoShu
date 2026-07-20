@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/v14.3.10-performance
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -14,6 +17,7 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.ref == 'feature/v14.3.10-performance'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
