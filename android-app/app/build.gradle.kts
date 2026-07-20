@@ -64,9 +64,10 @@ android {
 
     buildTypes {
         getByName("debug") {
-            applicationIdSuffix = ".debug"
+            // CI test modules must replace the installed LuoShu App so Vector/LSPosed can discover
+            // the Xposed metadata. A .debug applicationId would be skipped by the production-package
+            // installer and leave the old non-hook App installed.
             versionNameSuffix = "-debug"
-            // Test packages remain installable over the existing debug app, but execute with release-like optimization.
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
