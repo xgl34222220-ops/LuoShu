@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v14.3.10
-versionCode=14332
+version=v14.4.0
+versionCode=14400
 author=惜故里丶
-description=Android 全局字体管理模块：Miuix UI 性能优化
+description=Android 全局字体管理模块：App-only、全局映射、自动多字重与 Miuix 性能优化
 updateJson=
