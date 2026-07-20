@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import io.github.xgl34222220.luoshu.FontItem
@@ -18,14 +19,22 @@ internal fun FontLibraryRoute(
     var filter by rememberSaveable { mutableStateOf(FontLibraryFilter.ALL) }
     var sort by rememberSaveable { mutableStateOf(FontLibrarySort.ACTIVE_FIRST) }
     var detailFont by remember { mutableStateOf<FontItem?>(null) }
+    val latestActions by rememberUpdatedState(actions)
     val displayState = remember(state, filter, sort) {
         state.forDisplay(filter, sort)
     }
-    val displayActions = actions.copy(
-        details = { detailFont = it },
-        setFilter = { filter = it },
-        setSort = { sort = it },
-    )
+    val displayActions = remember {
+        FontLibraryActions(
+            refresh = { latestActions.refresh() },
+            setQuery = { latestActions.setQuery(it) },
+            apply = { latestActions.apply(it) },
+            delete = { latestActions.delete(it) },
+            restoreDefault = { latestActions.restoreDefault() },
+            details = { detailFont = it },
+            setFilter = { filter = it },
+            setSort = { sort = it },
+        )
+    }
 
     when (style) {
         UiStyle.MATERIAL -> FontLibraryScreenMaterial(displayState, displayActions)
@@ -41,7 +50,7 @@ internal fun FontLibraryRoute(
             onDismiss = { detailFont = null },
             onApply = {
                 detailFont = null
-                actions.apply(font)
+                latestActions.apply(font)
             },
         )
     }
