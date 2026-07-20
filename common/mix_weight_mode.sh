@@ -21,7 +21,9 @@ mix_axis_weight() {
 
 mix_find_family_source() {
     _family="$1"
-    _variable=''; _regular=''; _first=''
+    _variable=''
+    _regular=''
+    _first=''
     for _font in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
                  "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$_font" ] || continue
@@ -31,8 +33,8 @@ mix_find_family_source() {
             [ -n "$_variable" ] || _variable="$_font"
             continue
         fi
-        if [ "$(detect_font_weight "$(basename "$_font")")" = regular ]; then
-            [ -n "$_regular" ] || _regular="$_font"
+        if [ "$(detect_font_weight "$(basename "$_font")")" = regular ] && [ -z "$_regular" ]; then
+            _regular="$_font"
         fi
     done
     for _candidate in "$_variable" "$_regular" "$_first"; do
@@ -41,23 +43,25 @@ mix_find_family_source() {
     return 1
 }
 
+# 输出 wght 的 fvar 默认值；没有 wght 轴时输出空字符串。
 mix_variable_default_weight() {
     _source="$1"
     _pyroot="${MODDIR:-/data/adb/modules/LuoShu}/common/python"
     _python="$_pyroot/bin/luoshu-python"
-    [ -x "$_python" ] || { echo 400; return; }
+    [ -x "$_python" ] || return 0
     PYTHONHOME="$_pyroot" \
     PYTHONPATH="$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \
     LD_LIBRARY_PATH="$_pyroot/lib:$_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         "$_python" -c 'import sys
 from fontTools.ttLib import TTFont
 font=TTFont(sys.argv[1], lazy=True)
-value=400
+value=None
 if "fvar" in font:
     for axis in font["fvar"].axes:
         if axis.axisTag == "wght":
             value=round(float(axis.defaultValue)); break
-print(max(1,min(1000,int(value))))' "$_source" 2>/dev/null || echo 400
+if value is not None:
+    print(max(1,min(1000,int(value))))' "$_source" 2>/dev/null || true
 }
 
 mix_static_default_weight() {
@@ -69,13 +73,14 @@ mix_static_default_weight() {
 }
 
 infer_mix_weight_mode() {
-    _family="$1"; _axes="$2"
+    _family="$1"
+    _axes="$2"
     _source=$(mix_find_family_source "$_family")
     [ -f "$_source" ] || { echo fixed; return; }
     _current=$(mix_axis_weight "$_axes")
     if is_variable_font "$_source" 2>/dev/null; then
         _default=$(mix_variable_default_weight "$_source")
-        [ "$_current" = "$_default" ] && echo auto || echo fixed
+        [ -n "$_default" ] && [ "$_current" = "$_default" ] && echo auto || echo fixed
         return
     fi
     _weights=$(scan_family_weights "$_family" 2>/dev/null)
