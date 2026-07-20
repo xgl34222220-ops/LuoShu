@@ -21,8 +21,15 @@ cat > "$FAKE_PM" <<'EOF_PM'
 printf '%s\n' "$*" >> "$LUOSHU_PM_LOG"
 case "$1" in
     path) printf 'package:/system/priv-app/GmsCore/GmsCore.apk\n' ;;
-    get-component-enabled-setting) printf 'default\n' ;;
-    disable|disable-user|default-state|enable) exit 0 ;;
+    disable|disable-user)
+        printf 'Component %s new state: disabled\n' "${4:-unknown}"
+        ;;
+    default-state)
+        printf 'Component %s new state: default\n' "${4:-unknown}"
+        ;;
+    enable)
+        printf 'Component %s new state: enabled\n' "${4:-unknown}"
+        ;;
     *) exit 0 ;;
 esac
 EOF_PM
@@ -32,6 +39,7 @@ MODDIR="$MODDIR" \
 LUOSHU_DATA_ROOT="$DATA_ROOT" \
 LUOSHU_USER_LIST='0 10' \
 LUOSHU_PM="$FAKE_PM" \
+LUOSHU_DUMPSYS=/bin/false \
 LUOSHU_PM_LOG="$PM_LOG" \
 sh "$REPO_ROOT/common/play_font_bridge" apply >/dev/null
 
@@ -40,12 +48,14 @@ test ! -d "$DATA_ROOT/user/10/com.google.android.gms/files/fonts"
 test ! -d "$DATA_ROOT/user_de/10/com.google.android.gms/files/fonts"
 test -f "$MODDIR/config/play_font_bridge.conf"
 test "$(grep -c 'disable --user' "$PM_LOG")" -eq 4
+test "$(grep -c '|default$' "$MODDIR/config/play_font_bridge.conf")" -eq 4
 ! grep -q '/data/fonts' "$REPO_ROOT/common/play_font_bridge"
 
 MODDIR="$MODDIR" \
 LUOSHU_DATA_ROOT="$DATA_ROOT" \
 LUOSHU_USER_LIST='0 10' \
 LUOSHU_PM="$FAKE_PM" \
+LUOSHU_DUMPSYS=/bin/false \
 LUOSHU_PM_LOG="$PM_LOG" \
 sh "$REPO_ROOT/common/play_font_bridge" restore >/dev/null
 
