@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v14.3.9
-versionCode=14331
+version=v14.3.10
+versionCode=14332
 author=惜故里丶
-description=Android 全局字体管理模块：组合页默认自动多字重与 HyperOS 全局映射
+description=Android 全局字体管理模块：Miuix UI 性能优化
 updateJson=
