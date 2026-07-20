@@ -1,19 +1,10 @@
 name: Publish signed release
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - 'v*'
-    paths:
-      - module.prop
-      - 'RELEASE_NOTES_*.md'
-      - .github/workflows/release.yml
   workflow_dispatch:
     inputs:
-      tag:
-        description: Existing immutable tag to publish (for example v14.3.3)
+      confirm_tag:
+        description: Confirm the exact tag from module.prop (for example v14.3.4)
         required: true
         type: string
 
@@ -21,26 +12,66 @@ permissions:
   contents: write
 
 concurrency:
-  group: luoshu-release-${{ github.ref }}
+  group: luoshu-immutable-release
   cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      - name: Read and verify release identity
+        id: version
+        shell: bash
+        env:
+          CONFIRM_TAG: ${{ inputs.confirm_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]] || {
+            echo 'Publish signed release must be started from the main branch.' >&2
+            exit 2
+          }
+          . ./scripts/version.sh
+          expected_tag="$LUOSHU_ARTIFACT_VERSION"
+          [[ "$CONFIRM_TAG" == "$expected_tag" ]] || {
+            echo "Confirmation tag $CONFIRM_TAG does not match module.prop ($expected_tag)." >&2
+            exit 2
+          }
+          notes_file="RELEASE_NOTES_${LUOSHU_VERSION// /_}.md"
+          [[ -s "$notes_file" ]] || {
+            echo "Missing release notes: $notes_file" >&2
+            exit 2
+          }
+          git fetch --force origin main --tags
+          release_sha="$(git rev-parse HEAD)"
+          main_sha="$(git rev-parse origin/main)"
+          [[ "$release_sha" == "$main_sha" ]] || {
+            echo "Checked-out commit $release_sha is not current origin/main $main_sha." >&2
+            exit 2
+          }
+          if git ls-remote --exit-code --tags origin "refs/tags/$expected_tag" >/dev/null 2>&1; then
+            echo "Tag already exists and will not be moved: $expected_tag" >&2
+            exit 2
+          fi
+          if gh release view "$expected_tag" >/dev/null 2>&1; then
+            echo "Release already exists and will not be overwritten: $expected_tag" >&2
+            exit 2
+          fi
+          echo "tag=$expected_tag" >> "$GITHUB_OUTPUT"
+          echo "version=$LUOSHU_VERSION" >> "$GITHUB_OUTPUT"
+          echo "artifact_version=$LUOSHU_ARTIFACT_VERSION" >> "$GITHUB_OUTPUT"
+          echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
 
       - uses: android-actions/setup-android@v3
 
@@ -48,71 +79,31 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
-      - name: Read and verify release version
-        id: version
-        shell: bash
-        env:
-          INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          . ./scripts/version.sh
-          expected_tag="$LUOSHU_ARTIFACT_VERSION"
-          tag="${GITHUB_REF_NAME}"
-
-          if [[ "${GITHUB_EVENT_NAME}" == 'workflow_dispatch' ]]; then
-            tag="$INPUT_TAG"
-            git fetch --force --tags origin
-            tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
-            [[ -n "$tag_sha" ]] || { echo "Tag does not exist: $tag" >&2; exit 2; }
-            [[ "$tag_sha" == "$GITHUB_SHA" ]] || { echo "Run this workflow from the existing tag $tag" >&2; exit 2; }
-          elif [[ "${GITHUB_REF_TYPE}" == 'branch' ]]; then
-            [[ "${GITHUB_REF_NAME}" == 'main' ]] || { echo "Stable branch publishing only supports main" >&2; exit 2; }
-            case "$LUOSHU_VERSION" in
-              *Alpha*|*Beta*|*RC*)
-                echo "Pre-release versions must be published from an explicit immutable tag" >&2
-                exit 2
-                ;;
-            esac
-            tag="$expected_tag"
-            git fetch --force --tags origin
-            tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
-            if [[ -n "$tag_sha" && "$tag_sha" != "$GITHUB_SHA" ]]; then
-              echo "Tag $tag already points to $tag_sha, not $GITHUB_SHA" >&2
-              exit 2
-            fi
-            if [[ -z "$tag_sha" ]]; then
-              git config user.name 'github-actions[bot]'
-              git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-              git tag "$tag" "$GITHUB_SHA"
-              git push origin "refs/tags/$tag"
-            fi
-          fi
-
-          [[ "$tag" == "$expected_tag" ]] || {
-            echo "Tag $tag does not match module.prop ($expected_tag)" >&2
-            exit 2
-          }
-          notes_file="RELEASE_NOTES_${LUOSHU_VERSION// /_}.md"
-          [[ -s "$notes_file" ]] || { echo "Missing release notes: $notes_file" >&2; exit 2; }
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=$LUOSHU_VERSION" >> "$GITHUB_OUTPUT"
-          echo "artifact_version=$LUOSHU_ARTIFACT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
-
-      - name: Require signing secrets
+      - name: Require fixed signing identity
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.LUOSHU_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
+          RELEASE_CERT_SHA256: ${{ secrets.LUOSHU_RELEASE_CERT_SHA256 }}
         run: |
           set -euo pipefail
-          for value in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
-            [[ -n "${!value}" ]] || { echo "Missing repository secret: LUOSHU_${value}" >&2; exit 3; }
+          for value in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD RELEASE_CERT_SHA256; do
+            [[ -n "${!value}" ]] || {
+              echo "Missing release signing secret: $value" >&2
+              exit 3
+            }
           done
+          expected_cert="$(printf '%s' "$RELEASE_CERT_SHA256" | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          [[ "$expected_cert" =~ ^[0-9a-f]{64}$ ]] || {
+            echo 'LUOSHU_RELEASE_CERT_SHA256 must contain one SHA-256 certificate fingerprint.' >&2
+            exit 3
+          }
+          echo "::add-mask::$expected_cert"
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/luoshu-release.jks"
-          keytool -list -keystore "$RUNNER_TEMP/luoshu-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+          keytool -list -keystore "$RUNNER_TEMP/luoshu-release.jks" \
+            -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
 
       - name: Install module build dependencies
         run: |
@@ -131,7 +122,7 @@ jobs:
             sh ./scripts/prepare_composite_runtime.sh
           fi
 
-      - name: Run complete source and module checks
+      - name: Run complete App-only source checks
         shell: bash
         run: sh ./scripts/check.sh
 
@@ -144,8 +135,10 @@ jobs:
           LUOSHU_KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
         run: gradle --no-daemon --stacktrace :app:lintRelease :app:testDebugUnitTest :app:assembleRelease
 
-      - name: Verify APK signature certificate
+      - name: Verify exact APK signing certificate
         shell: bash
+        env:
+          RELEASE_CERT_SHA256: ${{ secrets.LUOSHU_RELEASE_CERT_SHA256 }}
         run: |
           set -euo pipefail
           apk='android-app/app/build/outputs/apk/release/app-release.apk'
@@ -154,48 +147,122 @@ jobs:
           test -x "$apksigner"
           "$apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/apk-signature.txt"
           grep -Eq '^Verified using v(2|3|3\.1|3\.2) scheme.*: true$' "$RUNNER_TEMP/apk-signature.txt"
-          grep -Eq '^Number of signers: [1-9][0-9]*$' "$RUNNER_TEMP/apk-signature.txt"
-          grep -Eq 'certificate SHA-256 digest:' "$RUNNER_TEMP/apk-signature.txt"
+          grep -qx 'Number of signers: 1' "$RUNNER_TEMP/apk-signature.txt"
+          actual_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-signature.txt" | head -n1 | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          expected_cert="$(printf '%s' "$RELEASE_CERT_SHA256" | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          [[ "$actual_cert" =~ ^[0-9a-f]{64}$ ]] || {
+            echo 'Unable to read the APK signer SHA-256 fingerprint.' >&2
+            exit 4
+          }
+          [[ "$actual_cert" == "$expected_cert" ]] || {
+            echo 'APK certificate does not match LUOSHU_RELEASE_CERT_SHA256.' >&2
+            exit 4
+          }
 
-      - name: Build App and single module package
+      - name: Build and verify the four release assets
+        id: assets
         shell: bash
         run: |
           set -euo pipefail
           . ./scripts/version.sh
           apk='android-app/app/build/outputs/apk/release/app-release.apk'
-          test -s "$apk"
+          rm -rf dist
           mkdir -p dist
           app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}.apk"
+          module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
           cp -f "$apk" "$app"
           (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
           LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
-          module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
           test -s "$module"
+          test -s "$module.sha256"
+          test -s "$app"
+          test -s "$app.sha256"
           unzip -t "$module" >/dev/null
-          unzip -Z1 "$module" | grep -qx 'bundled/LuoShu-App.apk'
-          ! unzip -Z1 "$module" | grep -qE '(^|/)webroot(/|$)'
+          unzip -Z1 "$module" > "$RUNNER_TEMP/module-files.txt"
+          grep -qx 'bundled/LuoShu-App.apk' "$RUNNER_TEMP/module-files.txt"
+          ! grep -qE '(^|/)webroot(/|$)' "$RUNNER_TEMP/module-files.txt"
+          ! unzip -p "$module" module.prop | grep -q '^webroot='
           unzip -p "$module" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
           cmp -s "$apk" "$RUNNER_TEMP/embedded.apk"
           (cd dist && sha256sum -c "$(basename "$module").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
+          mapfile -t actual_files < <(find dist -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+          expected_files=(
+            "LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
+            "LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip.sha256"
+            "LuoShu-App-${LUOSHU_ARTIFACT_VERSION}.apk"
+            "LuoShu-App-${LUOSHU_ARTIFACT_VERSION}.apk.sha256"
+          )
+          mapfile -t expected_files < <(printf '%s\n' "${expected_files[@]}" | LC_ALL=C sort)
+          [[ "${actual_files[*]}" == "${expected_files[*]}" ]] || {
+            printf 'Unexpected release asset set:\n' >&2
+            printf '  %s\n' "${actual_files[@]}" >&2
+            exit 5
+          }
+          echo "module=$module" >> "$GITHUB_OUTPUT"
+          echo "module_sha=$module.sha256" >> "$GITHUB_OUTPUT"
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "app_sha=$app.sha256" >> "$GITHUB_OUTPUT"
 
-      - name: Publish immutable GitHub release
+      - name: Preserve verified release candidates
+        uses: actions/upload-artifact@v4
+        with:
+          name: VERIFIED-LuoShu-${{ steps.version.outputs.tag }}
+          path: |
+            ${{ steps.assets.outputs.module }}
+            ${{ steps.assets.outputs.module_sha }}
+            ${{ steps.assets.outputs.app }}
+            ${{ steps.assets.outputs.app_sha }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Recheck immutable publication target
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          RELEASE_SHA: ${{ steps.version.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin main --tags
+          [[ "$(git rev-parse origin/main)" == "$RELEASE_SHA" ]] || {
+            echo 'main changed while release candidates were building; restart the release workflow.' >&2
+            exit 6
+          }
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            echo "Tag appeared during the build and will not be overwritten: $TAG" >&2
+            exit 6
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release appeared during the build and will not be overwritten: $TAG" >&2
+            exit 6
+          fi
+
+      - name: Create immutable Tag and GitHub Release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           VERSION: ${{ steps.version.outputs.version }}
           NOTES_FILE: ${{ steps.version.outputs.notes_file }}
-        shell: bash
+          RELEASE_SHA: ${{ steps.version.outputs.release_sha }}
+          MODULE: ${{ steps.assets.outputs.module }}
+          MODULE_SHA: ${{ steps.assets.outputs.module_sha }}
+          APP: ${{ steps.assets.outputs.app }}
+          APP_SHA: ${{ steps.assets.outputs.app_sha }}
         run: |
           set -euo pipefail
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; immutable releases are never overwritten." >&2
-            exit 4
-          fi
           prerelease=()
           case "$VERSION" in *Alpha*|*Beta*|*RC*) prerelease=(--prerelease) ;; esac
-          gh release create "$TAG" dist/* \
-            --verify-tag \
+          gh release create "$TAG" "$MODULE" "$MODULE_SHA" "$APP" "$APP_SHA" \
+            --target "$RELEASE_SHA" \
             --title "洛书 $VERSION" \
             --notes-file "$NOTES_FILE" \
             "${prerelease[@]}"
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          [[ "$(git rev-list -n1 "$TAG")" == "$RELEASE_SHA" ]] || {
+            echo "Published tag $TAG does not point to the verified commit." >&2
+            exit 7
+          }
+          gh release view "$TAG" --json tagName,isDraft --jq \
+            'select(.tagName == env.TAG and .isDraft == false) | .tagName' | grep -qx "$TAG"
