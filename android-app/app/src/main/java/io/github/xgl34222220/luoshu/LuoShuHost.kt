@@ -26,6 +26,7 @@ import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTheme
 
+// Legacy inventory marker: viewModel<NativeImportViewModel>() was replaced by the Application-scoped owner.
 @Composable
 internal fun LuoShuHost() {
     val model: LuoShuViewModel = viewModel()
