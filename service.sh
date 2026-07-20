@@ -45,6 +45,28 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
     chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     chmod 0755 "$MODDIR/system/bin/洛书" "$MODDIR/system/bin/luoshud" 2>/dev/null || true
 
+    # HyperOS 3 的部分系统/Google App 会通过 GMS 可下载字体提供器绕过系统字体槽。
+    # 只在已应用自定义字体的 HyperOS/MIUI 上启用；恢复默认字体或卸载时还原组件状态。
+    ACTIVE_TEXT=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    [ -n "$ACTIVE_TEXT" ] || ACTIVE_TEXT="default"
+    _mi_os=$(getprop ro.mi.os.version.name 2>/dev/null)
+    _miui_code=$(getprop ro.miui.ui.version.code 2>/dev/null)
+    if [ -f "$MODDIR/common/play_font_bridge" ]; then
+        if { [ -n "$_mi_os" ] || [ -n "$_miui_code" ]; } && [ "$ACTIVE_TEXT" != "default" ]; then
+            _bridge_result=$(MODDIR="$MODDIR" sh "$MODDIR/common/play_font_bridge" apply 2>/dev/null)
+            log_service "INFO" "GMS 字体提供器桥接：${_bridge_result:-unknown}"
+        elif [ "$ACTIVE_TEXT" = "default" ]; then
+            _bridge_result=$(MODDIR="$MODDIR" sh "$MODDIR/common/play_font_bridge" restore 2>/dev/null)
+            log_service "INFO" "默认字体状态已恢复 GMS 字体组件：${_bridge_result:-unknown}"
+        fi
+    fi
+
+    # 保存本机真实字体配置、物理字体槽和目标 App 内置字体清单，便于跨机型适配。
+    if [ -f "$MODDIR/common/font_runtime_probe.sh" ]; then
+        MODDIR="$MODDIR" sh "$MODDIR/common/font_runtime_probe.sh" >/dev/null 2>&1 || true
+        log_service "INFO" "字体运行时探测已写入 logs/font-runtime-probe.txt"
+    fi
+
     # 刷写阶段无法调用 pm 时，只在首次完整开机后自动重试一次。
     # 成功覆盖安装会保留 App 数据、字体索引和外观设置。
     if [ -s "$MODDIR/bundled/LuoShu-App.apk" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
