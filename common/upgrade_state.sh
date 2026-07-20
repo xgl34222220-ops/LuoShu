@@ -1,7 +1,6 @@
 #!/system/bin/sh
 # 洛书模块升级状态迁移。
 # 仅继承用户偏好和当前文字字体负载，不继承任务、锁、Emoji、图标或系统 XML。
-set +e
 
 LUOSHU_UPGRADE_ACTIVE_FONT="default"
 LUOSHU_UPGRADE_PAYLOAD_COUNT=0
@@ -40,7 +39,9 @@ _luoshu_copy_payload_tree() {
         _luoshu_safe_text_payload "$_file" || continue
         _tail=${_file#"$_source"/}
         [ "$_tail" != "$_file" ] || continue
-        mkdir -p "$_target/${_tail%/*}" 2>/dev/null || continue
+        _parent=${_tail%/*}
+        [ "$_parent" != "$_tail" ] || _parent='.'
+        mkdir -p "$_target/$_parent" 2>/dev/null || continue
         cp -f "$_file" "$_target/$_tail" 2>/dev/null || continue
         printf '.\n'
     done
