@@ -12,20 +12,19 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 internal const val EXTRA_OPEN_TASK_CENTER = "io.github.xgl34222220.luoshu.OPEN_TASK_CENTER"
 
 private const val IMPORT_NOTIFICATION_CHANNEL = "font_import"
 private const val IMPORT_NOTIFICATION_ID = 14331
-private const val EXTRA_PHASE = "phase"
-private const val EXTRA_TOTAL = "total"
-private const val EXTRA_PROCESSED = "processed"
-private const val EXTRA_IMPORTED = "imported"
-private const val EXTRA_DUPLICATES = "duplicates"
-private const val EXTRA_CANCELLED = "cancelled"
-private const val EXTRA_FAILED_COUNT = "failed_count"
-private const val EXTRA_MESSAGE = "message"
-private const val EXTRA_CURRENT_FILE = "current_file"
 
 internal enum class NativeImportNotificationAction(
     val intentAction: String,
@@ -49,18 +48,9 @@ internal data class NativeImportNotificationSpec(
 
 internal fun nativeImportNotificationSpec(state: NativeImportState): NativeImportNotificationSpec {
     val actions = when {
-        state.busy -> listOf(
-            NativeImportNotificationAction.PAUSE,
-            NativeImportNotificationAction.CANCEL,
-        )
-        state.paused -> listOf(
-            NativeImportNotificationAction.RESUME,
-            NativeImportNotificationAction.CANCEL,
-        )
-        state.canRetryFailed -> listOf(
-            NativeImportNotificationAction.RETRY,
-            NativeImportNotificationAction.CLEAR,
-        )
+        state.busy -> listOf(NativeImportNotificationAction.PAUSE, NativeImportNotificationAction.CANCEL)
+        state.paused -> listOf(NativeImportNotificationAction.RESUME, NativeImportNotificationAction.CANCEL)
+        state.canRetryFailed -> listOf(NativeImportNotificationAction.RETRY, NativeImportNotificationAction.CLEAR)
         state.canClear -> listOf(NativeImportNotificationAction.CLEAR)
         else -> emptyList()
     }
@@ -75,25 +65,14 @@ internal fun nativeImportNotificationSpec(state: NativeImportState): NativeImpor
 }
 
 internal object NativeImportNotificationController {
-    fun sync(context: Context, state: NativeImportState) {
+    fun start(context: Context) {
         ensureChannel(context)
-        if (state.phase == NativeImportPhase.IDLE) {
-            context.stopService(Intent(context, NativeImportForegroundService::class.java))
-            notificationManager(context).cancel(IMPORT_NOTIFICATION_ID)
-            return
-        }
-        val intent = Intent(context, NativeImportForegroundService::class.java).apply {
-            putExtra(EXTRA_PHASE, state.phase.wireName)
-            putExtra(EXTRA_TOTAL, state.total)
-            putExtra(EXTRA_PROCESSED, state.processed)
-            putExtra(EXTRA_IMPORTED, state.imported)
-            putExtra(EXTRA_DUPLICATES, state.duplicates)
-            putExtra(EXTRA_CANCELLED, state.cancelled)
-            putExtra(EXTRA_FAILED_COUNT, state.failed.size)
-            putExtra(EXTRA_MESSAGE, state.message)
-            putExtra(EXTRA_CURRENT_FILE, state.currentFile)
-        }
-        ContextCompat.startForegroundService(context, intent)
+        ContextCompat.startForegroundService(context, Intent(context, NativeImportForegroundService::class.java))
+    }
+
+    fun cancel(context: Context) {
+        context.stopService(Intent(context, NativeImportForegroundService::class.java))
+        notificationManager(context).cancel(IMPORT_NOTIFICATION_ID)
     }
 
     fun ensureChannel(context: Context) {
@@ -152,6 +131,10 @@ internal object NativeImportNotificationController {
         return builder.build()
     }
 
+    fun notify(context: Context, state: NativeImportState) {
+        notificationManager(context).notify(IMPORT_NOTIFICATION_ID, buildNotification(context, state))
+    }
+
     private fun notificationActionIcon(action: NativeImportNotificationAction): Int = when (action) {
         NativeImportNotificationAction.PAUSE -> android.R.drawable.ic_media_pause
         NativeImportNotificationAction.RESUME -> android.R.drawable.ic_media_play
@@ -165,6 +148,9 @@ internal object NativeImportNotificationController {
 }
 
 internal class NativeImportForegroundService : Service() {
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var observerJob: Job? = null
+
     private val importViewModel: NativeImportViewModel
         get() = (application as LuoShuApplication).nativeImportViewModel
 
@@ -175,30 +161,53 @@ internal class NativeImportForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val state = intent?.toImportState() ?: importViewModel.state.takeIf {
-            it.phase != NativeImportPhase.IDLE
-        } ?: NativeImportState(
-            phase = NativeImportPhase.QUEUED,
-            message = "正在恢复字体导入任务",
-        )
+        val initial = importViewModel.state.takeIf { it.phase != NativeImportPhase.IDLE }
+            ?: NativeImportState(phase = NativeImportPhase.QUEUED, message = "正在准备字体导入任务")
+        startAsForeground(initial)
+        observeImportState(startId)
+        return START_STICKY
+    }
+
+    private fun observeImportState(startId: Int) {
+        observerJob?.cancel()
+        observerJob = serviceScope.launch {
+            var idleChecks = 0
+            while (isActive) {
+                val state = importViewModel.state
+                if (state.phase == NativeImportPhase.IDLE) {
+                    idleChecks += 1
+                    if (idleChecks >= 20) {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf(startId)
+                        return@launch
+                    }
+                } else {
+                    idleChecks = 0
+                    NativeImportNotificationController.notify(this@NativeImportForegroundService, state)
+                    if (!state.busy) {
+                        stopForeground(STOP_FOREGROUND_DETACH)
+                        stopSelf(startId)
+                        return@launch
+                    }
+                }
+                delay(250L)
+            }
+        }
+    }
+
+    private fun startAsForeground(state: NativeImportState) {
         val notification = NativeImportNotificationController.buildNotification(this, state)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                IMPORT_NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
-            )
+            startForeground(IMPORT_NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
         } else {
             startForeground(IMPORT_NOTIFICATION_ID, notification)
         }
+    }
 
-        return if (state.busy) {
-            START_STICKY
-        } else {
-            stopForeground(STOP_FOREGROUND_DETACH)
-            stopSelf(startId)
-            START_NOT_STICKY
-        }
+    override fun onDestroy() {
+        observerJob?.cancel()
+        serviceScope.cancel()
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -206,25 +215,43 @@ internal class NativeImportForegroundService : Service() {
 
 internal class NativeImportActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        val action = NativeImportNotificationAction.entries.firstOrNull { it.intentAction == intent.action } ?: return
         val application = context.applicationContext as? LuoShuApplication ?: return
-        application.nativeImportViewModel.handleExternalAction(intent.action.orEmpty())
+        val result = goAsync()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        scope.launch {
+            try {
+                val viewModel = application.nativeImportViewModel
+                if (action == NativeImportNotificationAction.RESUME || action == NativeImportNotificationAction.RETRY) {
+                    runCatching { NativeImportNotificationController.start(application) }
+                }
+                var attempts = 0
+                while (!actionReady(action, viewModel.state) && attempts < 60) {
+                    delay(100L)
+                    attempts += 1
+                }
+                when (action) {
+                    NativeImportNotificationAction.PAUSE -> viewModel.pauseImport()
+                    NativeImportNotificationAction.RESUME -> viewModel.resumeImport()
+                    NativeImportNotificationAction.CANCEL -> viewModel.cancelImport()
+                    NativeImportNotificationAction.RETRY -> viewModel.retryFailed()
+                    NativeImportNotificationAction.CLEAR -> {
+                        viewModel.clearRecord()
+                        NativeImportNotificationController.cancel(application)
+                    }
+                }
+            } finally {
+                result.finish()
+                scope.cancel()
+            }
+        }
     }
-}
 
-private fun Intent.toImportState(): NativeImportState {
-    val phaseWire = getStringExtra(EXTRA_PHASE).orEmpty()
-    val phase = NativeImportPhase.entries.firstOrNull { it.wireName == phaseWire }
-        ?: NativeImportPhase.IDLE
-    val failedCount = getIntExtra(EXTRA_FAILED_COUNT, 0).coerceAtLeast(0)
-    return NativeImportState(
-        phase = phase,
-        total = getIntExtra(EXTRA_TOTAL, 0),
-        processed = getIntExtra(EXTRA_PROCESSED, 0),
-        imported = getIntExtra(EXTRA_IMPORTED, 0),
-        duplicates = getIntExtra(EXTRA_DUPLICATES, 0),
-        cancelled = getIntExtra(EXTRA_CANCELLED, 0),
-        failed = List(failedCount) { "导入失败" },
-        message = getStringExtra(EXTRA_MESSAGE).orEmpty().ifBlank { "字体导入任务" },
-        currentFile = getStringExtra(EXTRA_CURRENT_FILE).orEmpty(),
-    )
+    private fun actionReady(action: NativeImportNotificationAction, state: NativeImportState): Boolean = when (action) {
+        NativeImportNotificationAction.PAUSE -> state.canPause
+        NativeImportNotificationAction.RESUME -> state.canResume
+        NativeImportNotificationAction.CANCEL -> state.canCancel
+        NativeImportNotificationAction.RETRY -> state.canRetryFailed
+        NativeImportNotificationAction.CLEAR -> state.canClear
+    }
 }
