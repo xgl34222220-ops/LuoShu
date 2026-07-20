@@ -125,20 +125,20 @@ installed_apk_sha256() {
 
 INSTALLED_VERSION=$(installed_version_code)
 INSTALLED_SHA256=$(installed_apk_sha256)
-if [ "$INSTALLED_VERSION" = "$APP_VERSION_CODE" ] && [ -n "$INSTALLED_SHA256" ] && [ "$INSTALLED_SHA256" = "$APK_SHA256" ]; then
-    rm -f "$PENDING" 2>/dev/null || true
-    write_state up_to_date "已安装 APK 与模块内置 App 的版本和哈希均一致"
-    log_app INFO "$APP_PACKAGE 已是目标版本 $APP_VERSION_CODE 且 APK 哈希一致，跳过覆盖安装"
-    printf 'already-current\n'
-    exit 0
-fi
-
 if [ "$INSTALLED_VERSION" = "$APP_VERSION_CODE" ]; then
-    if [ -n "$INSTALLED_SHA256" ]; then
-        log_app INFO "$APP_PACKAGE 版本号相同但 APK 哈希不同，执行热修复覆盖安装"
-    else
-        log_app INFO "$APP_PACKAGE 版本号相同但无法读取已安装 APK 哈希，执行一次覆盖安装以确保内置功能生效"
+    if [ -z "$INSTALLED_SHA256" ] || [ "$INSTALLED_SHA256" = "$APK_SHA256" ]; then
+        rm -f "$PENDING" 2>/dev/null || true
+        if [ -n "$INSTALLED_SHA256" ]; then
+            write_state up_to_date "已安装 APK 与模块内置 App 的版本和哈希均一致"
+            log_app INFO "$APP_PACKAGE 已是目标版本 $APP_VERSION_CODE 且 APK 哈希一致，跳过覆盖安装"
+        else
+            write_state up_to_date "已安装版本与模块内置 App 一致；当前系统无法读取已安装 APK 哈希"
+            log_app INFO "$APP_PACKAGE 已是目标版本 $APP_VERSION_CODE，无法读取已安装 APK 哈希，按版本号跳过覆盖安装"
+        fi
+        printf 'already-current\n'
+        exit 0
     fi
+    log_app INFO "$APP_PACKAGE 版本号相同但 APK 哈希不同，执行热修复覆盖安装"
 fi
 
 if [ -z "$PM_BIN" ]; then
