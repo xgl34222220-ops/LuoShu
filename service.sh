@@ -45,20 +45,11 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
     chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     chmod 0755 "$MODDIR/system/bin/洛书" "$MODDIR/system/bin/luoshud" 2>/dev/null || true
 
-    # HyperOS 3 的部分系统/Google App 会通过 GMS 可下载字体提供器绕过系统字体槽。
-    # 只在已应用自定义字体的 HyperOS/MIUI 上启用；恢复默认字体或卸载时还原组件状态。
-    ACTIVE_TEXT=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
-    [ -n "$ACTIVE_TEXT" ] || ACTIVE_TEXT="default"
-    _mi_os=$(getprop ro.mi.os.version.name 2>/dev/null)
-    _miui_code=$(getprop ro.miui.ui.version.code 2>/dev/null)
+    # Test2/Test3 曾临时禁用 GMS 字体组件；最终方案只使用系统映射与应用内 Hook，
+    # 因此每次开机都执行安全恢复。没有旧状态文件时不会修改任何组件。
     if [ -f "$MODDIR/common/play_font_bridge" ]; then
-        if { [ -n "$_mi_os" ] || [ -n "$_miui_code" ]; } && [ "$ACTIVE_TEXT" != "default" ]; then
-            _bridge_result=$(MODDIR="$MODDIR" sh "$MODDIR/common/play_font_bridge" apply 2>/dev/null)
-            log_service "INFO" "GMS 字体提供器桥接：${_bridge_result:-unknown}"
-        elif [ "$ACTIVE_TEXT" = "default" ]; then
-            _bridge_result=$(MODDIR="$MODDIR" sh "$MODDIR/common/play_font_bridge" restore 2>/dev/null)
-            log_service "INFO" "默认字体状态已恢复 GMS 字体组件：${_bridge_result:-unknown}"
-        fi
+        _bridge_result=$(MODDIR="$MODDIR" sh "$MODDIR/common/play_font_bridge" restore 2>/dev/null)
+        log_service "INFO" "GMS 字体组件安全恢复：${_bridge_result:-unknown}"
     fi
 
     # 保存本机真实字体配置、物理字体槽和目标 App 内置字体清单，便于跨机型适配。
@@ -67,29 +58,27 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
         log_service "INFO" "字体运行时探测已写入 logs/font-runtime-probe.txt"
     fi
 
-    # 刷写阶段无法调用 pm 时，只在首次完整开机后自动重试一次。
-    # 成功覆盖安装会保留 App 数据、字体索引和外观设置。
+    # 每次完整开机都核对模块内置 APK。安装器会同时比较包名、版本和 APK 哈希：
+    # 已安装且一致时立即跳过；未安装、包名变化或同版本热修复时执行覆盖安装。
+    # 这可以确保独立的 Debug Hook App 不会被旧 app_install_state.conf 错误跳过。
     if [ -s "$MODDIR/bundled/LuoShu-App.apk" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
-        if [ -f "$MODDIR/config/app_install_pending" ] || [ ! -f "$MODDIR/config/app_install_state.conf" ]; then
-            _app_result=$(MODDIR="$MODDIR" APP_INSTALL_LOG="$MODDIR/logs/app-install.log" sh "$MODDIR/common/app_installer.sh" first-boot 2>/dev/null)
-            _app_code=$?
-            case "$_app_result" in
-                installed)
-                    rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
-                    log_service "INFO" "已在首次开机自动安装或更新洛书 App"
-                    ;;
-                already-current)
-                    rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
-                    log_service "INFO" "洛书 App 已是模块内置版本"
-                    ;;
-                *)
-                    # 首次开机只自动尝试一次，避免签名冲突时每次开机重复失败。
-                    rm -f "$MODDIR/config/app_install_pending" 2>/dev/null || true
-                    touch "$MODDIR/config/app_install_manual" 2>/dev/null || true
-                    log_service "INFO" "App 自动更新未完成（code=$_app_code），请使用模块操作按钮重试；详情见 app-install.log"
-                    ;;
-            esac
-        fi
+        _app_result=$(MODDIR="$MODDIR" APP_INSTALL_LOG="$MODDIR/logs/app-install.log" sh "$MODDIR/common/app_installer.sh" boot-verify 2>/dev/null)
+        _app_code=$?
+        case "$_app_result" in
+            installed)
+                rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
+                log_service "INFO" "已自动安装或更新洛书 App"
+                ;;
+            already-current)
+                rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
+                log_service "INFO" "洛书 App 已与模块内置 APK 一致"
+                ;;
+            *)
+                rm -f "$MODDIR/config/app_install_pending" 2>/dev/null || true
+                touch "$MODDIR/config/app_install_manual" 2>/dev/null || true
+                log_service "INFO" "App 自动安装未完成（code=$_app_code），请使用模块操作按钮重试；详情见 app-install.log"
+                ;;
+        esac
     fi
 
     # Root 管理器模块说明只显示当前字体，不再塞入更新日志。
