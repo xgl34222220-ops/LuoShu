@@ -31,7 +31,6 @@ internal fun LuoShuHost() {
     val model: LuoShuViewModel = viewModel()
     val features: Alpha15FeatureViewModel = viewModel()
     val appearanceViewModel: AppearanceViewModel = viewModel()
-    viewModel<NativeImportViewModel>()
     val appearance by appearanceViewModel.settings.collectAsStateWithLifecycle()
 
     LuoShuTheme(appearance) {
