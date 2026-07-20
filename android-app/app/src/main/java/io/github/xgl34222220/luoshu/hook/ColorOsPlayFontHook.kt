@@ -13,9 +13,8 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Safe ColorOS / OPlus compatibility bridge for Google Play downloadable fonts.
  *
- * Test8 hooked Paint.setTypeface(), which is a very hot Compose rendering path and can stall Play's
- * main thread. This implementation only intercepts Typeface factory calls whose family is explicitly
- * identified as Google Sans / Product Sans / Roboto. It never hooks TextView or Paint rendering sinks.
+ * This class hooks only low-frequency Typeface factories. It never hooks TextView or Paint rendering
+ * sinks, so it avoids the Compose main-thread stall introduced by the old Test8 implementation.
  */
 class ColorOsPlayFontHook : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -25,6 +24,8 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
             .onFailure { log("named family hook failed", it) }
         runCatching { hookDerivedTypefaceFactory() }
             .onFailure { log("derived typeface hook failed", it) }
+        runCatching { hookWeightedTypefaceFactory() }
+            .onFailure { log("weighted typeface hook failed", it) }
 
         XposedBridge.log("LuoShu ColorOS PlayFontHook active (factory-only): ${lpparam.packageName}")
     }
@@ -50,11 +51,6 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
         )
     }
 
-    /**
-     * A downloaded Google Sans Typeface may already exist before Play derives a bold/italic face.
-     * This factory call is infrequent compared with Paint.setTypeface(), so it covers that route
-     * without adding work to every Compose text draw.
-     */
     private fun hookDerivedTypefaceFactory() {
         XposedHelpers.findAndHookMethod(
             Typeface::class.java,
@@ -69,7 +65,7 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
                     if (!isReplaceableFamily(family)) return
                     val style = param.args.getOrNull(1) as? Int ?: original.style
                     replacementForStyle(style)?.let { replacement ->
-                        logReplacementOnce("Typeface.create(Typeface)", family, replacement.second)
+                        logReplacementOnce("Typeface.create(Typeface,style)", family, replacement.second)
                         param.result = replacement.first
                     }
                 }
@@ -77,41 +73,74 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
         )
     }
 
-    private fun replacementForStyle(style: Int): Pair<Typeface, String>? {
-        val source = sourceForStyle(style) ?: return null
+    /** Compose commonly derives an exact 400/500 weight through the API 28 overload. */
+    private fun hookWeightedTypefaceFactory() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
+        XposedHelpers.findAndHookMethod(
+            Typeface::class.java,
+            "create",
+            Typeface::class.java,
+            Int::class.javaPrimitiveType,
+            Boolean::class.javaPrimitiveType,
+            object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (HOOK_GUARD.get() == true) return
+                    val original = param.args.getOrNull(0) as? Typeface ?: return
+                    val family = familyName(original) ?: return
+                    if (!isReplaceableFamily(family)) return
+                    val weight = (param.args.getOrNull(1) as? Int ?: original.weight).coerceIn(1, 1000)
+                    val italic = param.args.getOrNull(2) as? Boolean ?: original.isItalic
+                    replacementForWeight(weight, italic)?.let { replacement ->
+                        logReplacementOnce("Typeface.create(Typeface,weight)", family, replacement.second)
+                        param.result = replacement.first
+                    }
+                }
+            },
+        )
+    }
+
+    private fun replacementForStyle(style: Int): Pair<Typeface, String>? = replacementForWeight(
+        weight = if (style and Typeface.BOLD != 0) 700 else 400,
+        italic = style and Typeface.ITALIC != 0,
+    )
+
+    private fun replacementForWeight(weight: Int, italic: Boolean): Pair<Typeface, String>? {
+        val source = sourceForWeight(weight) ?: return null
         val base = loadTypeface(source) ?: return null
-        val replacement = if (style == Typeface.NORMAL) {
-            base
-        } else {
-            runCatching {
-                HOOK_GUARD.set(true)
-                Typeface.create(base, style)
-            }.getOrDefault(base).also { HOOK_GUARD.remove() }
-        }
+        val replacement = runCatching {
+            HOOK_GUARD.set(true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                Typeface.create(base, weight.coerceIn(1, 1000), italic)
+            } else {
+                Typeface.create(
+                    base,
+                    (if (weight >= 650) Typeface.BOLD else Typeface.NORMAL) or
+                        (if (italic) Typeface.ITALIC else Typeface.NORMAL),
+                )
+            }
+        }.getOrDefault(base).also { HOOK_GUARD.remove() }
         return replacement to source
     }
 
-    private fun sourceForStyle(style: Int): String? {
-        val bold = style and Typeface.BOLD != 0
-        val candidates = if (bold) {
-            listOf(
-                "/system/fonts/SourceSansPro-Bold.ttf",
-                "/system/fonts/SysFont-Bold.ttf",
-                "/system/fonts/GoogleSans-Bold.ttf",
-                "/system/fonts/Roboto-Bold.ttf",
-                "/system/fonts/SysFont-Regular.ttf",
-                "/system/fonts/Roboto-Regular.ttf",
-            )
-        } else {
-            listOf(
-                "/system/fonts/SysFont-Regular.ttf",
-                "/system/fonts/SysSans-En-Regular.ttf",
-                "/system/fonts/OPSans-En-Regular.ttf",
-                "/system/fonts/GoogleSans-Regular.ttf",
-                "/system/fonts/Roboto-Regular.ttf",
-                "/system/fonts/SourceSansPro-Regular.ttf",
-            )
-        }
+    private fun sourceForWeight(weight: Int): String? {
+        val nearest = AVAILABLE_WEIGHTS.minByOrNull { kotlin.math.abs(it - weight) } ?: 400
+        val candidates = listOf(
+            "/system/fonts/$nearest.ttf",
+            when {
+                weight >= 650 -> "/system/fonts/SourceSansPro-Bold.ttf"
+                weight >= 500 -> "/system/fonts/SysFont-Medium.ttf"
+                else -> "/system/fonts/SysFont-Regular.ttf"
+            },
+            when {
+                weight >= 650 -> "/system/fonts/GoogleSans-Bold.ttf"
+                weight >= 500 -> "/system/fonts/GoogleSans-Medium.ttf"
+                else -> "/system/fonts/GoogleSansText-Regular.ttf"
+            },
+            "/system/fonts/SysSans-En-Regular.ttf",
+            "/system/fonts/OPSans-En-Regular.ttf",
+            "/system/fonts/Roboto-Regular.ttf",
+            "/system/fonts/SourceSansPro-Regular.ttf",
+        )
         return candidates.firstOrNull { File(it).canRead() }
     }
 
@@ -124,9 +153,19 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
     }
 
     private fun familyName(typeface: Typeface): String? {
-        return runCatching {
-            XposedHelpers.getObjectField(typeface, "mSystemFontFamilyName") as? String
-        }.getOrNull()
+        if (Build.VERSION.SDK_INT >= 34) {
+            runCatching { typeface.systemFontFamilyName }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { return it }
+        }
+        for (field in FAMILY_NAME_FIELDS) {
+            val value = runCatching {
+                XposedHelpers.getObjectField(typeface, field) as? String
+            }.getOrNull()
+            if (!value.isNullOrBlank()) return value
+        }
+        return null
     }
 
     private fun isReplaceableFamily(value: String): Boolean {
@@ -168,6 +207,12 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
         val HOOK_GUARD = ThreadLocal<Boolean>()
         val TYPEFACE_CACHE = ConcurrentHashMap<String, Typeface>()
         val LOGGED_REPLACEMENTS = ConcurrentHashMap<String, Boolean>()
+        val AVAILABLE_WEIGHTS = listOf(100, 200, 300, 350, 400, 500, 600, 700, 800, 900)
+        val FAMILY_NAME_FIELDS = listOf(
+            "mSystemFontFamilyName",
+            "mFontFamilyName",
+            "mFamilyName",
+        )
 
         val OPLUS_MARKERS = listOf("oppo", "oneplus", "realme", "oplus")
         val REPLACEABLE_NORMALIZED = listOf(
