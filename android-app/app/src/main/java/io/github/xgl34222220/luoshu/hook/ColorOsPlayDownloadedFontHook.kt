@@ -101,7 +101,7 @@ class ColorOsPlayDownloadedFontHook : IXposedHookLoadPackage {
         )
     }
 
-    private fun requestFromArgs(args: Array<Any?>): String? {
+    private fun requestFromArgs(args: Array<out Any?>): String? {
         args.firstOrNull { it is File }?.let { return (it as File).path }
         args.firstOrNull { it is ParcelFileDescriptor }?.let {
             return parcelFilePath(it as ParcelFileDescriptor)
@@ -141,11 +141,11 @@ class ColorOsPlayDownloadedFontHook : IXposedHookLoadPackage {
         return when {
             "black" in lower || "900" in lower -> 900
             "extrabold" in lower || "800" in lower -> 800
-            "bold" in lower || "700" in lower -> 700
             "semibold" in lower || "demibold" in lower || "600" in lower -> 600
+            "bold" in lower || "700" in lower -> 700
             "medium" in lower || "500" in lower -> 500
-            "light" in lower || "300" in lower -> 300
             "extralight" in lower || "200" in lower -> 200
+            "light" in lower || "300" in lower -> 300
             "thin" in lower || "100" in lower -> 100
             else -> 400
         }
