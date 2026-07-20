@@ -1,9 +1,7 @@
 package io.github.xgl34222220.luoshu.hook
 
-import android.graphics.Paint
 import android.graphics.Typeface
 import android.os.Build
-import android.widget.TextView
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -13,25 +11,25 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * ColorOS / OPlus compatibility bridge for Google Play downloadable fonts.
+ * Safe ColorOS / OPlus compatibility bridge for Google Play downloadable fonts.
  *
- * Some OPlus devices resolve Google Sans through Android's downloadable font database rather than
- * opening assets/ProductSans-Regular.ttf in the Play process. The generic asset hook cannot see
- * that route, so this class catches both hyphenated family aliases and final text assignments.
+ * Test8 hooked Paint.setTypeface(), which is a very hot Compose rendering path and can stall Play's
+ * main thread. This implementation only intercepts Typeface factory calls whose family is explicitly
+ * identified as Google Sans / Product Sans / Roboto. It never hooks TextView or Paint rendering sinks.
  */
 class ColorOsPlayFontHook : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != PLAY_PACKAGE || !isOplusFamily()) return
 
-        runCatching { hookFamilyAlias() }
-            .onFailure { log("family alias hook failed", it) }
-        runCatching { hookFinalTypefaceSinks() }
-            .onFailure { log("final typeface hook failed", it) }
+        runCatching { hookNamedFamilyFactory() }
+            .onFailure { log("named family hook failed", it) }
+        runCatching { hookDerivedTypefaceFactory() }
+            .onFailure { log("derived typeface hook failed", it) }
 
-        XposedBridge.log("LuoShu ColorOS PlayFontHook active: ${lpparam.packageName}")
+        XposedBridge.log("LuoShu ColorOS PlayFontHook active (factory-only): ${lpparam.packageName}")
     }
 
-    private fun hookFamilyAlias() {
+    private fun hookNamedFamilyFactory() {
         XposedHelpers.findAndHookMethod(
             Typeface::class.java,
             "create",
@@ -53,49 +51,26 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
     }
 
     /**
-     * Downloadable fonts may already be constructed by the framework before Play receives them.
-     * Catch TextView, Compose/TextPaint and custom text at their final Typeface assignment while
-     * retaining icon, symbol, emoji, barcode and monospace families.
+     * A downloaded Google Sans Typeface may already exist before Play derives a bold/italic face.
+     * This factory call is infrequent compared with Paint.setTypeface(), so it covers that route
+     * without adding work to every Compose text draw.
      */
-    private fun hookFinalTypefaceSinks() {
-        XposedBridge.hookAllMethods(
-            TextView::class.java,
-            "setTypeface",
+    private fun hookDerivedTypefaceFactory() {
+        XposedHelpers.findAndHookMethod(
+            Typeface::class.java,
+            "create",
+            Typeface::class.java,
+            Int::class.javaPrimitiveType,
             object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (HOOK_GUARD.get() == true || param.args.isEmpty()) return
-                    val original = param.args.getOrNull(0) as? Typeface
-                    if (isExcludedTypeface(original)) return
-                    val explicitStyle = param.args.getOrNull(1) as? Int
-                    val style = explicitStyle ?: original?.style ?: Typeface.NORMAL
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (HOOK_GUARD.get() == true) return
+                    val original = param.args.getOrNull(0) as? Typeface ?: return
+                    val family = familyName(original) ?: return
+                    if (!isReplaceableFamily(family)) return
+                    val style = param.args.getOrNull(1) as? Int ?: original.style
                     replacementForStyle(style)?.let { replacement ->
-                        param.args[0] = replacement.first
-                        logReplacementOnce(
-                            "TextView.setTypeface",
-                            familyName(original).orEmpty(),
-                            replacement.second,
-                        )
-                    }
-                }
-            },
-        )
-
-        XposedBridge.hookAllMethods(
-            Paint::class.java,
-            "setTypeface",
-            object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (HOOK_GUARD.get() == true || param.args.isEmpty()) return
-                    val original = param.args.getOrNull(0) as? Typeface
-                    if (isExcludedTypeface(original)) return
-                    val style = original?.style ?: Typeface.NORMAL
-                    replacementForStyle(style)?.let { replacement ->
-                        param.args[0] = replacement.first
-                        logReplacementOnce(
-                            "Paint.setTypeface",
-                            familyName(original).orEmpty(),
-                            replacement.second,
-                        )
+                        logReplacementOnce("Typeface.create(Typeface)", family, replacement.second)
+                        param.result = replacement.first
                     }
                 }
             },
@@ -148,8 +123,7 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
         }.getOrNull().also { HOOK_GUARD.remove() }?.also { TYPEFACE_CACHE[source] = it }
     }
 
-    private fun familyName(typeface: Typeface?): String? {
-        typeface ?: return null
+    private fun familyName(typeface: Typeface): String? {
         return runCatching {
             XposedHelpers.getObjectField(typeface, "mSystemFontFamilyName") as? String
         }.getOrNull()
@@ -159,12 +133,6 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
         val normalized = normalize(value)
         if (EXCLUDED_NORMALIZED.any(normalized::contains)) return false
         return REPLACEABLE_NORMALIZED.any(normalized::contains)
-    }
-
-    private fun isExcludedTypeface(typeface: Typeface?): Boolean {
-        val family = familyName(typeface) ?: return false
-        val normalized = normalize(family)
-        return EXCLUDED_NORMALIZED.any(normalized::contains)
     }
 
     private fun normalize(value: String): String = buildString(value.length) {
@@ -183,7 +151,7 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
         if (LOGGED_REPLACEMENTS.putIfAbsent(key, true) == null) {
             XposedBridge.log(
                 "LuoShu ColorOS PlayFontHook replaced [com.android.vending] via $route: " +
-                    "${family.ifBlank { "default" }} -> $source",
+                    "$family -> $source",
             )
         }
     }
@@ -208,10 +176,6 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
             "googlesansflex",
             "productsans",
             "roboto",
-            "sourcesans",
-            "sysfont",
-            "syssans",
-            "opsans",
         )
         val EXCLUDED_NORMALIZED = listOf(
             "emoji",
