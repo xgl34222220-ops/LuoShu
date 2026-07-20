@@ -51,6 +51,11 @@ font_library_fingerprint_json() {
         "$(json_escape "$_fingerprint")" "$(json_escape "$_current")" "$_count" "$_bytes"
 }
 
+# font_manager.sh 在 rom_adapters.sh 之后加载本文件，因此这里接入 HyperOS 增强层，
+# 让直接应用字体使用真实分区映射与原厂度量外壳。
+_hyperos_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/hyperos_global.sh"
+[ -f "$_hyperos_helper" ] && . "$_hyperos_helper"
+
 # 直接执行时提供给原生 App 使用；被 font_manager.sh source 时只定义函数。
 if [ "${0##*/}" = "font_library_cache.sh" ]; then
     MODDIR="${MODDIR:-$(CDPATH= cd -- "${0%/*}/.." 2>/dev/null && pwd)}"
