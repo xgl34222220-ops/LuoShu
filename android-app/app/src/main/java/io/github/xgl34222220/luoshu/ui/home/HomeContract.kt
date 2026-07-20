@@ -35,6 +35,7 @@ data class HomeUiState(
     val systemWeight: HomeWeightUiState = HomeWeightUiState(),
 )
 
+@Immutable
 data class HomeActions(
     val refresh: () -> Unit,
     val openFontLibrary: () -> Unit,
