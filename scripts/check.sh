@@ -28,10 +28,10 @@ for file in \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh common/v142_weighted_mix.sh \
   common/app_bridge.sh common/font_manager.sh common/font_library_cache.sh common/app_installer.sh \
-  common/mount_compat.sh common/rom_adapters.sh common/util_functions.sh \
+  common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
   scripts/build.sh scripts/version.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh \
   scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh \
-  scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/rc3_audit.sh \
+  scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/rc3_audit.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/build.gradle.kts \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
@@ -121,6 +121,14 @@ grep -q 'setFontVariationSettings' "$ROOT/android-app/app/src/main/java/io/githu
 grep -q 'updateMixAxis' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 grep -q 'testImplementation("junit:junit:4.13.2")' "$ROOT/android-app/app/build.gradle.kts"
 
+# HyperOS 必须保留紧凑控件的原厂度量壳，并按真实分区写入 MiSans 与数字字重目标。
+grep -q '_hyperos_metric_shell_files' "$ROOT/common/hyperos_global.sh"
+grep -q 'LUOSHU_PRODUCT_FONTS_ROOT' "$ROOT/common/hyperos_global.sh"
+grep -q 'font_instance.py' "$ROOT/common/hyperos_global.sh"
+grep -q 'hyperos_global.sh' "$ROOT/common/font_library_cache.sh"
+grep -q 'hyperos_global.sh' "$ROOT/common/mount_compat.sh"
+! grep -q '_font_alias.*Roboto' "$ROOT/common/hyperos_global.sh"
+
 # 禁止重新引入高风险热刷新和系统字体 XML 覆盖。
 ! grep -q 'cmd font system --update' "$ROOT/service.sh"
 ! grep -q 'oplus-font refresh' "$ROOT/service.sh"
@@ -147,6 +155,7 @@ sh "$ROOT/scripts/native_preview_source_test.sh"
 sh "$ROOT/scripts/native_zip_import_test.sh"
 sh "$ROOT/scripts/rc3_audit.sh"
 sh "$ROOT/scripts/mount_compat_test.sh"
+sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
 sh "$ROOT/scripts/stability_test.sh"
 sh "$ROOT/scripts/font_library_cache_test.sh"
 sh "$ROOT/scripts/app_installer_test.sh"
