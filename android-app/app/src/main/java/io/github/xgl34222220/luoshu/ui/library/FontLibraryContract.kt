@@ -35,6 +35,7 @@ internal data class FontLibraryUiState(
     val sort: FontLibrarySort = FontLibrarySort.ACTIVE_FIRST,
 )
 
+@Immutable
 internal data class FontLibraryActions(
     val refresh: () -> Unit,
     val setQuery: (String) -> Unit,
@@ -82,17 +83,21 @@ internal fun FontLibraryUiState.forDisplay(
     )
 }
 
-internal fun LuoShuViewModel.toFontLibraryUiState(): FontLibraryUiState = FontLibraryUiState(
-    loading = fontLoading,
-    operationBusy = operationBusy || mixState.busy,
-    query = searchQuery,
-    error = fontError,
-    operationMessage = operationMessage,
-    activeFontId = snapshot.activeFont,
-    fonts = filteredFonts,
-    totalCount = fonts.size,
-    validCount = fonts.count { it.valid },
-    variableCount = fonts.count { it.variable },
-    multiWeightCount = fonts.count { !it.variable && it.weights.size >= 2 },
-    visibleCount = filteredFonts.size,
-)
+internal fun LuoShuViewModel.toFontLibraryUiState(): FontLibraryUiState {
+    val allFonts = fonts
+    val visibleFonts = filteredFonts
+    return FontLibraryUiState(
+        loading = fontLoading,
+        operationBusy = operationBusy || mixState.busy,
+        query = searchQuery,
+        error = fontError,
+        operationMessage = operationMessage,
+        activeFontId = snapshot.activeFont,
+        fonts = visibleFonts,
+        totalCount = allFonts.size,
+        validCount = allFonts.count { it.valid },
+        variableCount = allFonts.count { it.variable },
+        multiWeightCount = allFonts.count { !it.variable && it.weights.size >= 2 },
+        visibleCount = visibleFonts.size,
+    )
+}
