@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ROOT=$(mktemp -d)
 trap 'rm -rf "$ROOT"' EXIT HUP INT TERM
 
@@ -46,7 +47,7 @@ detect_font_weight() {
 is_variable_font() { return 1; }
 _log_step() { :; }
 
-. "$PWD/common/hyperos_global.sh"
+. "$REPO_ROOT/common/hyperos_global.sh"
 copy_as_hyperos "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/system/fonts" quick Demo
 
 test "$(cat "$MODULE_DIR/product/fonts/MiSansVF.ttf")" = 'regular-source'
