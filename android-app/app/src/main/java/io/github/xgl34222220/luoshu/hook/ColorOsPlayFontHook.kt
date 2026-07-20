@@ -13,26 +13,25 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * OPlus / ColorOS compatibility bridge for Google Play's downloadable Google Sans families.
+ * ColorOS / OPlus compatibility bridge for Google Play downloadable fonts.
  *
- * On some ColorOS 16 devices Play resolves Google Sans through Android's downloadable font
- * database instead of opening assets/ProductSans-Regular.ttf. The generic asset hook therefore
- * never sees the request. This hook handles the hyphenated family aliases and the final text
- * sinks inside com.android.vending without modifying /data/fonts or disabling GMS FontProvider.
+ * Some OPlus devices resolve Google Sans through Android's downloadable font database rather than
+ * opening assets/ProductSans-Regular.ttf in the Play process. The generic asset hook cannot see
+ * that route, so this class catches both hyphenated family aliases and final text assignments.
  */
 class ColorOsPlayFontHook : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != PLAY_PACKAGE || !isOplusFamily()) return
 
-        runCatching { hookFamilyFactories() }
-            .onFailure { log("family factory hook failed", it) }
+        runCatching { hookFamilyAlias() }
+            .onFailure { log("family alias hook failed", it) }
         runCatching { hookFinalTypefaceSinks() }
             .onFailure { log("final typeface hook failed", it) }
 
         XposedBridge.log("LuoShu ColorOS PlayFontHook active: ${lpparam.packageName}")
     }
 
-    private fun hookFamilyFactories() {
+    private fun hookFamilyAlias() {
         XposedHelpers.findAndHookMethod(
             Typeface::class.java,
             "create",
@@ -44,65 +43,19 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
                     val family = param.args.getOrNull(0) as? String ?: return
                     if (!isReplaceableFamily(family)) return
                     val style = param.args.getOrNull(1) as? Int ?: Typeface.NORMAL
-                    replacementForStyle(style)?.let {
-                        logReplacementOnce("Typeface.create(String)", family, it.second)
-                        param.result = it.first
+                    replacementForStyle(style)?.let { replacement ->
+                        logReplacementOnce("Typeface.create(String)", family, replacement.second)
+                        param.result = replacement.first
                     }
                 }
             },
         )
-
-        XposedHelpers.findAndHookMethod(
-            Typeface::class.java,
-            "create",
-            Typeface::class.java,
-            Int::class.javaPrimitiveType,
-            object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    if (HOOK_GUARD.get() == true) return
-                    val original = param.args.getOrNull(0) as? Typeface ?: return
-                    val family = familyName(original) ?: return
-                    if (!isReplaceableFamily(family)) return
-                    val style = param.args.getOrNull(1) as? Int ?: original.style
-                    replacementForStyle(style)?.let {
-                        logReplacementOnce("Typeface.create(Typeface)", family, it.second)
-                        param.result = it.first
-                    }
-                }
-            },
-        )
-
-        // API 28+: Typeface.create(Typeface, weight, italic). Compose and newer Play builds may
-        // use this overload after resolving a downloadable Google Sans family.
-        runCatching {
-            XposedHelpers.findAndHookMethod(
-                Typeface::class.java,
-                "create",
-                Typeface::class.java,
-                Int::class.javaPrimitiveType,
-                Boolean::class.javaPrimitiveType,
-                object : XC_MethodHook() {
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        if (HOOK_GUARD.get() == true) return
-                        val original = param.args.getOrNull(0) as? Typeface ?: return
-                        val family = familyName(original) ?: return
-                        if (!isReplaceableFamily(family)) return
-                        val weight = param.args.getOrNull(1) as? Int ?: 400
-                        val italic = param.args.getOrNull(2) as? Boolean ?: false
-                        replacementForWeight(weight, italic)?.let {
-                            logReplacementOnce("Typeface.create(weight)", family, it.second)
-                            param.result = it.first
-                        }
-                    }
-                },
-            )
-        }
     }
 
     /**
-     * ColorOS Play can receive a fully constructed downloadable Typeface from the framework, so
-     * no asset/file constructor runs in the app. Catch the last assignment while excluding icon,
-     * emoji, symbol and code families.
+     * Downloadable fonts may already be constructed by the framework before Play receives them.
+     * Catch TextView, Compose/TextPaint and custom text at their final Typeface assignment while
+     * retaining icon, symbol, emoji, barcode and monospace families.
      */
     private fun hookFinalTypefaceSinks() {
         XposedBridge.hookAllMethods(
@@ -115,9 +68,13 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
                     if (isExcludedTypeface(original)) return
                     val explicitStyle = param.args.getOrNull(1) as? Int
                     val style = explicitStyle ?: original?.style ?: Typeface.NORMAL
-                    replacementForStyle(style)?.let {
-                        param.args[0] = it.first
-                        logReplacementOnce("TextView.setTypeface", familyName(original).orEmpty(), it.second)
+                    replacementForStyle(style)?.let { replacement ->
+                        param.args[0] = replacement.first
+                        logReplacementOnce(
+                            "TextView.setTypeface",
+                            familyName(original).orEmpty(),
+                            replacement.second,
+                        )
                     }
                 }
             },
@@ -132,9 +89,13 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
                     val original = param.args.getOrNull(0) as? Typeface
                     if (isExcludedTypeface(original)) return
                     val style = original?.style ?: Typeface.NORMAL
-                    replacementForStyle(style)?.let {
-                        param.args[0] = it.first
-                        logReplacementOnce("Paint.setTypeface", familyName(original).orEmpty(), it.second)
+                    replacementForStyle(style)?.let { replacement ->
+                        param.args[0] = replacement.first
+                        logReplacementOnce(
+                            "Paint.setTypeface",
+                            familyName(original).orEmpty(),
+                            replacement.second,
+                        )
                     }
                 }
             },
@@ -142,30 +103,23 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
     }
 
     private fun replacementForStyle(style: Int): Pair<Typeface, String>? {
-        val weight = if (style and Typeface.BOLD != 0) 700 else 400
-        val italic = style and Typeface.ITALIC != 0
-        return replacementForWeight(weight, italic)
-    }
-
-    private fun replacementForWeight(weight: Int, italic: Boolean): Pair<Typeface, String>? {
-        val source = sourceForWeight(weight) ?: return null
+        val source = sourceForStyle(style) ?: return null
         val base = loadTypeface(source) ?: return null
-        val replacement = runCatching {
-            HOOK_GUARD.set(true)
-            if (Build.VERSION.SDK_INT >= 28) {
-                Typeface.create(base, weight.coerceIn(1, 1000), italic)
-            } else {
-                val style = (if (weight >= 600) Typeface.BOLD else Typeface.NORMAL) or
-                    (if (italic) Typeface.ITALIC else Typeface.NORMAL)
+        val replacement = if (style == Typeface.NORMAL) {
+            base
+        } else {
+            runCatching {
+                HOOK_GUARD.set(true)
                 Typeface.create(base, style)
-            }
-        }.getOrDefault(base).also { HOOK_GUARD.remove() }
+            }.getOrDefault(base).also { HOOK_GUARD.remove() }
+        }
         return replacement to source
     }
 
-    private fun sourceForWeight(weight: Int): String? {
-        val candidates = when {
-            weight >= 650 -> listOf(
+    private fun sourceForStyle(style: Int): String? {
+        val bold = style and Typeface.BOLD != 0
+        val candidates = if (bold) {
+            listOf(
                 "/system/fonts/SourceSansPro-Bold.ttf",
                 "/system/fonts/SysFont-Bold.ttf",
                 "/system/fonts/GoogleSans-Bold.ttf",
@@ -173,15 +127,8 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
                 "/system/fonts/SysFont-Regular.ttf",
                 "/system/fonts/Roboto-Regular.ttf",
             )
-            weight >= 500 -> listOf(
-                "/system/fonts/SourceSansPro-SemiBold.ttf",
-                "/system/fonts/SysFont-Medium.ttf",
-                "/system/fonts/GoogleSans-Medium.ttf",
-                "/system/fonts/Roboto-Medium.ttf",
-                "/system/fonts/SysFont-Regular.ttf",
-                "/system/fonts/Roboto-Regular.ttf",
-            )
-            else -> listOf(
+        } else {
+            listOf(
                 "/system/fonts/SysFont-Regular.ttf",
                 "/system/fonts/SysSans-En-Regular.ttf",
                 "/system/fonts/OPSans-En-Regular.ttf",
@@ -220,20 +167,15 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
         return EXCLUDED_NORMALIZED.any(normalized::contains)
     }
 
-    private fun normalize(value: String): String = value.lowercase().filter(Char::isLetterOrDigit)
+    private fun normalize(value: String): String = buildString(value.length) {
+        value.lowercase().forEach { character ->
+            if (character.isLetterOrDigit()) append(character)
+        }
+    }
 
     private fun isOplusFamily(): Boolean {
         val identity = "${Build.MANUFACTURER} ${Build.BRAND}".lowercase()
-        if (OPLUS_MARKERS.any(identity::contains)) return true
-        val version = runCatching {
-            XposedHelpers.callStaticMethod(
-                XposedHelpers.findClass("android.os.SystemProperties", null),
-                "get",
-                "ro.build.version.oplusrom",
-                "",
-            ) as? String
-        }.getOrNull()
-        return !version.isNullOrBlank()
+        return OPLUS_MARKERS.any(identity::contains)
     }
 
     private fun logReplacementOnce(route: String, family: String, source: String) {
