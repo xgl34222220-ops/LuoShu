@@ -65,8 +65,10 @@ luoshu_migrate_upgrade_state() {
 
     _active=$(head -n1 "$_old/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
     [ -n "$_active" ] || _active="default"
+    # 字体族名称允许中文、空格和常规符号；这里只拒绝空值与路径分隔符，
+    # 避免把配置值误当作文件路径，同时保持 POSIX sh / Android Toybox 兼容。
     case "$_active" in
-        *[!A-Za-z0-9._+@()\ -]*|'') _active="default" ;;
+        ''|*/*|*\\*) _active="default" ;;
     esac
 
     if [ "$_active" != "default" ]; then
