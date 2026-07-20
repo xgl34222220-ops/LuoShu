@@ -27,8 +27,13 @@ mix_find_family_source() {
         [ -f "$_font" ] || continue
         [ "$(detect_font_family "$(basename "$_font")")" = "$_family" ] || continue
         [ -n "$_first" ] || _first="$_font"
-        if is_variable_font "$_font" 2>/dev/null; then [ -n "$_variable" ] || _variable="$_font"; continue; fi
-        [ "$(detect_font_weight "$(basename "$_font")")" = regular ] && [ -n "$_regular" ] || _regular="$_font"
+        if is_variable_font "$_font" 2>/dev/null; then
+            [ -n "$_variable" ] || _variable="$_font"
+            continue
+        fi
+        if [ "$(detect_font_weight "$(basename "$_font")")" = regular ]; then
+            [ -n "$_regular" ] || _regular="$_font"
+        fi
     done
     for _candidate in "$_variable" "$_regular" "$_first"; do
         [ -f "$_candidate" ] && { printf '%s\n' "$_candidate"; return 0; }
