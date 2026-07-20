@@ -1,14 +1,13 @@
 #!/system/bin/sh
-# 洛书 Google Play 服务字体提供器桥接。
-# HyperOS 上部分 Google/Compose 应用会通过 GMS 下载字体，绕过系统字体槽。
+# 洛书 GMS 字体组件恢复器。
+# 旧测试版曾临时禁用 GMS FontsProvider；真机确认目标应用使用 APK 内置字体后，
+# 新版只负责恢复旧状态，不再修改 GMS 字体服务。
 set +e
 
 MODDIR="${MODDIR:-${0%/*}/..}"
 STATE_FILE="${PLAY_FONT_STATE:-$MODDIR/config/play_font_bridge.conf}"
 LOG_FILE="${PLAY_FONT_LOG:-$MODDIR/logs/play-font-bridge.log}"
-DATA_ROOT="${LUOSHU_DATA_ROOT:-/data}"
 PM_BIN="${LUOSHU_PM:-pm}"
-CMD_BIN="${LUOSHU_CMD:-cmd}"
 DUMPSYS_BIN="${LUOSHU_DUMPSYS:-dumpsys}"
 
 GMS_PACKAGE='com.google.android.gms'
@@ -28,95 +27,6 @@ _gms_installed() {
     _pm path "$GMS_PACKAGE" >/dev/null 2>&1
 }
 
-_list_users() {
-    if [ -n "${LUOSHU_USER_LIST:-}" ]; then
-        printf '%s\n' $LUOSHU_USER_LIST
-        return 0
-    fi
-
-    {
-        if command -v "$CMD_BIN" >/dev/null 2>&1; then
-            "$CMD_BIN" user list 2>/dev/null | sed -n 's/.*UserInfo{\([0-9][0-9]*\):.*/\1/p'
-        fi
-        if [ -d "$DATA_ROOT/user" ]; then
-            for _dir in "$DATA_ROOT"/user/[0-9]*; do
-                [ -d "$_dir" ] && basename "$_dir"
-            done
-        fi
-        printf '0\n'
-    } | awk '/^[0-9]+$/ && !seen[$0]++ { print $0 }'
-}
-
-_state_has_entry() {
-    _user="$1"
-    _component="$2"
-    [ -f "$STATE_FILE" ] || return 1
-    grep -F "$_user|$_component|" "$STATE_FILE" 2>/dev/null | grep -q .
-}
-
-_record_disabled_component() {
-    _user="$1"
-    _component="$2"
-    _state_has_entry "$_user" "$_component" && return 0
-    mkdir -p "${STATE_FILE%/*}" 2>/dev/null || true
-    [ -f "$STATE_FILE" ] || printf 'version=2\n' > "$STATE_FILE"
-    printf '%s|%s|default\n' "$_user" "$_component" >> "$STATE_FILE"
-}
-
-_disable_component() {
-    _user="$1"
-    _component="$2"
-    _output=$(_pm disable --user "$_user" "$_component" 2>&1)
-    _code=$?
-    if [ "$_code" -ne 0 ]; then
-        _output=$(_pm disable-user --user "$_user" "$_component" 2>&1)
-        _code=$?
-    fi
-    if [ "$_code" -eq 0 ] && printf '%s\n' "$_output" | grep -qiE 'new state: (disabled|disabled-user)|^Success$'; then
-        _record_disabled_component "$_user" "$_component"
-        return 0
-    fi
-    _bridge_log "禁用失败 user=$_user component=$_component result=${_output:-unknown}"
-    return 1
-}
-
-_clear_user_cache() {
-    _user="$1"
-    for _path in \
-        "$DATA_ROOT/user/$_user/$GMS_PACKAGE/files/fonts" \
-        "$DATA_ROOT/user_de/$_user/$GMS_PACKAGE/files/fonts" \
-        "$DATA_ROOT/data/$GMS_PACKAGE/files/fonts" \
-        "$DATA_ROOT/data_mirror/data_ce/null/$_user/$GMS_PACKAGE/files/fonts" \
-        "$DATA_ROOT/data_mirror/data_de/null/$_user/$GMS_PACKAGE/files/fonts"; do
-        [ -e "$_path" ] || continue
-        rm -rf "$_path" 2>/dev/null || true
-    done
-}
-
-_apply() {
-    _gms_installed || {
-        _bridge_log '未检测到 Google Play 服务，跳过 GMS 字体桥接'
-        printf 'not-installed\n'
-        return 0
-    }
-
-    _users=0
-    _disabled=0
-    for _user in $(_list_users); do
-        _users=$((_users + 1))
-        if _disable_component "$_user" "$PROVIDER_COMPONENT"; then
-            _disabled=$((_disabled + 1))
-        fi
-        if _disable_component "$_user" "$UPDATER_COMPONENT"; then
-            _disabled=$((_disabled + 1))
-        fi
-        _clear_user_cache "$_user"
-    done
-    sync 2>/dev/null || true
-    _bridge_log "已处理 $_users 个用户，成功禁用 $_disabled 个 GMS 字体组件并清理下载字体缓存"
-    printf 'applied users=%s disabled=%s\n' "$_users" "$_disabled"
-}
-
 _restore_component() {
     _user="$1"
     _component="$2"
@@ -126,9 +36,11 @@ _restore_component() {
 
 _restore() {
     [ -f "$STATE_FILE" ] || {
-        printf 'nothing-to-restore\n'
+        _bridge_log 'GMS 字体组件保持系统默认状态'
+        printf 'provider-preserved\n'
         return 0
     }
+
     _restored=0
     while IFS='|' read -r _user _component _state; do
         case "$_user" in version=*) continue ;; esac
@@ -136,8 +48,9 @@ _restore() {
         _restore_component "$_user" "$_component"
         _restored=$((_restored + 1))
     done < "$STATE_FILE"
+
     rm -f "$STATE_FILE" 2>/dev/null || true
-    _bridge_log "已恢复 $_restored 个由洛书禁用的 GMS 字体组件"
+    _bridge_log "已恢复 $_restored 个旧测试版修改的 GMS 字体组件；应用内置字体改由运行时 Hook 处理"
     printf 'restored=%s\n' "$_restored"
 }
 
@@ -146,8 +59,9 @@ _status() {
     printf 'stateFile=%s\n' "$([ -f "$STATE_FILE" ] && echo true || echo false)"
     printf 'providerComponent=%s\n' "$PROVIDER_COMPONENT"
     printf 'updaterComponent=%s\n' "$UPDATER_COMPONENT"
+    printf 'mode=preserve-provider\n'
     if [ -f "$STATE_FILE" ]; then
-        printf 'disabledByLuoShu:\n'
+        printf 'pendingRestore:\n'
         sed -n '/^[0-9][0-9]*|/p' "$STATE_FILE" 2>/dev/null | sed 's/^/  /'
     fi
     if command -v "$DUMPSYS_BIN" >/dev/null 2>&1; then
@@ -157,8 +71,7 @@ _status() {
 }
 
 case "${1:-status}" in
-    apply) _apply ;;
-    restore) _restore ;;
+    apply|restore) _restore ;;
     status) _status ;;
     *) echo 'usage: play_font_bridge apply|restore|status' >&2; exit 2 ;;
 esac
