@@ -132,18 +132,68 @@ internal fun LuoShuAppShell(
     }
     BackHandler(enabled = page != AppPage.Home) { page = AppPage.Home }
 
+    val homeActions = remember(viewModel, features) {
+        HomeActions(
+            refresh = {
+                viewModel.refresh()
+                features.refreshSystemWeight()
+            },
+            openFontLibrary = { page = AppPage.Library },
+            openFontStudio = { page = AppPage.Studio },
+            openLogs = { page = AppPage.Logs },
+            restoreDefault = { restoreDefault = true },
+            reboot = viewModel::rebootDevice,
+            previewSystemWeight = features::previewSystemWeight,
+            resetSystemWeight = features::resetSystemWeight,
+        )
+    }
+    val libraryActions = remember(viewModel) {
+        FontLibraryActions(
+            refresh = { viewModel.refreshFonts(force = true) },
+            setQuery = viewModel::setSearchQuery,
+            apply = { pendingApply = it },
+            delete = { pendingDelete = it },
+            restoreDefault = { restoreDefault = true },
+        )
+    }
+    val studioActions = remember(viewModel, features) {
+        FontStudioActions(
+            refresh = viewModel::refreshMixConfig,
+            pickSlot = { pickerSlot = it },
+            updateWeight = viewModel::updateMixWeight,
+            updateAxis = viewModel::updateMixAxis,
+            inspectCoverage = features::inspectCoverage,
+            startMix = viewModel::startMix,
+            applyDirect = viewModel::applyFont,
+        )
+    }
+    val logsActions = remember(viewModel) { LogsActions(refresh = viewModel::refreshLogs) }
+    val appearanceActions = remember(appearanceViewModel) {
+        AppearanceActions(
+            setUiStyle = appearanceViewModel::setUiStyle,
+            setThemeMode = appearanceViewModel::setThemeMode,
+            setSeedArgb = appearanceViewModel::setSeedArgb,
+            setKolorStyle = appearanceViewModel::setKolorStyle,
+            setMonetEnabled = appearanceViewModel::setMonetEnabled,
+            setAmoledBlack = appearanceViewModel::setAmoledBlack,
+            setBlurEnabled = appearanceViewModel::setBlurEnabled,
+            setGlassEnabled = appearanceViewModel::setGlassEnabled,
+            setFloatingDock = appearanceViewModel::setFloatingDock,
+        )
+    }
+    val validFonts = remember(viewModel.fonts) { viewModel.fonts.filter { it.valid } }
+
     LuoShuTheme(appearance) {
         val dark = MaterialTheme.colorScheme.background.luminance() < .5f
-        val hazeState = rememberHazeState(
-            blurEnabled = appearance.blurEnabled && appearance.glassEnabled,
-        )
+        val materialHazeActive = appearance.uiStyle == UiStyle.MATERIAL &&
+            appearance.blurEnabled && appearance.glassEnabled
+        val hazeState = rememberHazeState(blurEnabled = materialHazeActive)
+        val contentModifier = Modifier
+            .fillMaxSize()
+            .then(if (materialHazeActive) Modifier.hazeSource(state = hazeState) else Modifier)
 
         Box(Modifier.fillMaxSize()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .hazeSource(state = hazeState),
-            ) {
+            Box(modifier = contentModifier) {
                 AppBackdrop(appearance, dark)
                 AnimatedContent(
                     targetState = page,
@@ -167,66 +217,26 @@ internal fun LuoShuAppShell(
                         AppPage.Home -> HomeRoute(
                             style = appearance.uiStyle,
                             state = viewModel.snapshot.toHomeUiState(features.systemWeight),
-                            actions = HomeActions(
-                                refresh = {
-                                    viewModel.refresh()
-                                    features.refreshSystemWeight()
-                                },
-                                openFontLibrary = { page = AppPage.Library },
-                                openFontStudio = { page = AppPage.Studio },
-                                openLogs = { page = AppPage.Logs },
-                                restoreDefault = { restoreDefault = true },
-                                reboot = viewModel::rebootDevice,
-                                previewSystemWeight = features::previewSystemWeight,
-                                resetSystemWeight = features::resetSystemWeight,
-                            ),
+                            actions = homeActions,
                         )
-
                         AppPage.Library -> FontLibraryRoute(
                             style = appearance.uiStyle,
                             state = viewModel.toFontLibraryUiState(),
-                            actions = FontLibraryActions(
-                                refresh = { viewModel.refreshFonts(force = true) },
-                                setQuery = viewModel::setSearchQuery,
-                                apply = { pendingApply = it },
-                                delete = { pendingDelete = it },
-                                restoreDefault = { restoreDefault = true },
-                            ),
+                            actions = libraryActions,
                         )
-
                         AppPage.Studio -> FontStudioRoute(
                             style = appearance.uiStyle,
                             state = viewModel.toFontStudioUiState(features),
-                            actions = FontStudioActions(
-                                refresh = viewModel::refreshMixConfig,
-                                pickSlot = { pickerSlot = it },
-                                updateWeight = viewModel::updateMixWeight,
-                                updateAxis = viewModel::updateMixAxis,
-                                inspectCoverage = features::inspectCoverage,
-                                startMix = viewModel::startMix,
-                                applyDirect = viewModel::applyFont,
-                            ),
+                            actions = studioActions,
                         )
-
                         AppPage.Logs -> LogsRoute(
                             style = appearance.uiStyle,
                             state = viewModel.toLogsUiState(),
-                            actions = LogsActions(refresh = viewModel::refreshLogs),
+                            actions = logsActions,
                         )
-
                         AppPage.Settings -> AppearanceSettingsRoute(
                             settings = appearance,
-                            actions = AppearanceActions(
-                                setUiStyle = appearanceViewModel::setUiStyle,
-                                setThemeMode = appearanceViewModel::setThemeMode,
-                                setSeedArgb = appearanceViewModel::setSeedArgb,
-                                setKolorStyle = appearanceViewModel::setKolorStyle,
-                                setMonetEnabled = appearanceViewModel::setMonetEnabled,
-                                setAmoledBlack = appearanceViewModel::setAmoledBlack,
-                                setBlurEnabled = appearanceViewModel::setBlurEnabled,
-                                setGlassEnabled = appearanceViewModel::setGlassEnabled,
-                                setFloatingDock = appearanceViewModel::setFloatingDock,
-                            ),
+                            actions = appearanceActions,
                         )
                     }
                 }
@@ -304,7 +314,7 @@ internal fun LuoShuAppShell(
             FontPickerDialogRoute(
                 style = appearance.uiStyle,
                 slot = slot,
-                fonts = viewModel.fonts.filter { it.valid },
+                fonts = validFonts,
                 selected = selectedFontId(viewModel.mixState, slot),
                 onDismiss = { pickerSlot = null },
                 onChoose = { font ->

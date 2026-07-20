@@ -28,6 +28,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,7 +41,9 @@ import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.font.resolveAndCacheFontDefaultAxes
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun FontPickerDialogRoute(
@@ -51,9 +54,21 @@ internal fun FontPickerDialogRoute(
     onDismiss: () -> Unit,
     onChoose: (FontItem) -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
+    var resolvingId by remember(slot) { mutableStateOf<String?>(null) }
+    val choose: (FontItem) -> Unit = { font ->
+        if (resolvingId == null) {
+            resolvingId = font.id
+            scope.launch {
+                resolveAndCacheFontDefaultAxes(font)
+                resolvingId = null
+                onChoose(font)
+            }
+        }
+    }
     when (style) {
-        UiStyle.MATERIAL -> MaterialFontPickerDialog(slot, fonts, selected, onDismiss, onChoose)
-        UiStyle.MIUIX -> MiuixFontPickerDialog(slot, fonts, selected, onDismiss, onChoose)
+        UiStyle.MATERIAL -> MaterialFontPickerDialog(slot, fonts, selected, onDismiss, choose)
+        UiStyle.MIUIX -> MiuixFontPickerDialog(slot, fonts, selected, onDismiss, choose)
     }
 }
 

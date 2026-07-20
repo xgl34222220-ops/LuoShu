@@ -37,6 +37,7 @@ internal data class FontStudioUiState(
     val hasFonts: Boolean = false,
 )
 
+@Immutable
 internal data class FontStudioActions(
     val refresh: () -> Unit,
     val pickSlot: (MixSlot) -> Unit,

@@ -18,13 +18,13 @@ print_line() {
 
 if [ ! -s "$APK" ]; then
     print_line "未找到模块内置的洛书 App。"
-    print_line "请重新下载带 App 的 Full 模块包。"
+    print_line "请重新下载并刷入完整的洛书模块包。"
     exit 1
 fi
 
 if [ ! -f "$HELPER" ]; then
     print_line "模块内置 App 安装器缺失。"
-    print_line "请重新刷入完整模块包。"
+    print_line "请重新刷入洛书模块包。"
     exit 1
 fi
 

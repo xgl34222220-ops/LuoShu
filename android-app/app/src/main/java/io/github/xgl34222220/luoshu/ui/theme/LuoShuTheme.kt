@@ -123,18 +123,18 @@ private fun LuoShuMiuixTheme(settings: AppearanceSettings, content: @Composable 
         val tokens = MiuixTokens(
             pageBackground = when {
                 pureBlack -> Color.Black
-                dark -> Color(0xFF101114)
-                else -> Color(0xFFF4F4F6)
+                dark -> scheme.surfaceContainerLowest
+                else -> scheme.surfaceContainerLow
             },
             cardBackground = when {
                 pureBlack -> Color(0xFF080808)
-                dark -> Color(0xFF1C1D21)
-                else -> Color.White
+                dark -> scheme.surfaceContainer
+                else -> scheme.surfaceContainerLowest
             },
             elevatedCardBackground = when {
                 pureBlack -> Color(0xFF111111)
-                dark -> Color(0xFF24252A)
-                else -> Color(0xFFFDFDFE)
+                dark -> scheme.surfaceContainerHigh
+                else -> scheme.surfaceContainer
             },
             textPrimary = scheme.onSurface,
             textSecondary = scheme.onSurfaceVariant,

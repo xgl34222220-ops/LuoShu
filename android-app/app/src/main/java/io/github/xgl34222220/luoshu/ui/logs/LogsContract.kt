@@ -2,6 +2,8 @@ package io.github.xgl34222220.luoshu.ui.logs
 
 import androidx.compose.runtime.Immutable
 import io.github.xgl34222220.luoshu.LuoShuViewModel
+import io.github.xgl34222220.luoshu.NativeImportPhase
+import io.github.xgl34222220.luoshu.NativeImportState
 
 @Immutable
 internal data class LogsUiState(
@@ -9,9 +11,11 @@ internal data class LogsUiState(
     val lineCount: Int = 0,
     val errorCount: Int = 0,
     val warningCount: Int = 0,
-    val taskState: String = "idle",
-    val taskMessage: String = "暂无后台任务",
-    val taskProgress: Int = 0,
+    val tasks: List<TaskCenterItem> = emptyList(),
+    val activeTaskCount: Int = 0,
+    val completedTaskCount: Int = 0,
+    val failedTaskCount: Int = 0,
+    val rebootRequired: Boolean = false,
 )
 
 internal data class LogsActions(
@@ -21,6 +25,115 @@ internal data class LogsActions(
 internal fun LuoShuViewModel.toLogsUiState(): LogsUiState {
     val normalized = logs.ifBlank { "尚未读取日志" }
     val lines = normalized.lineSequence().toList()
+    val current = buildList {
+        if (fontLoading || fontRefreshing) {
+            add(
+                TaskCenterItem(
+                    id = "current-font-scan",
+                    kind = TaskKind.SCAN,
+                    phase = TaskPhase.RUNNING,
+                    title = if (fontRefreshing) "正在更新字体索引" else "正在扫描字体库",
+                    message = if (fontRefreshing) "正在检查字体目录变化并更新本地缓存" else "正在读取已导入字体与可用字重",
+                    progress = -1,
+                    timeLabel = "当前",
+                    current = true,
+                ),
+            )
+        } else if (fontError.isNotBlank()) {
+            add(
+                TaskCenterItem(
+                    id = "current-font-scan-error",
+                    kind = TaskKind.SCAN,
+                    phase = TaskPhase.FAILED,
+                    title = "字体扫描失败",
+                    message = fontError,
+                    progress = 100,
+                    timeLabel = "最近",
+                    current = true,
+                ),
+            )
+        }
+
+        val snapshotPhase = taskPhaseFor("", snapshot.taskMessage, snapshot.taskState)
+        if (snapshot.taskState != "idle" && snapshot.taskType != "none") {
+            val kind = taskKindFor(snapshot.taskMessage, snapshot.taskType)
+            add(
+                TaskCenterItem(
+                    id = snapshot.taskId.ifBlank { "current-${snapshot.taskType}" },
+                    kind = kind,
+                    phase = snapshotPhase,
+                    title = taskTitle(kind, snapshotPhase),
+                    message = snapshot.taskMessage,
+                    progress = snapshot.taskProgress,
+                    timeLabel = "当前",
+                    current = true,
+                ),
+            )
+        }
+
+        if (mixState.busy && snapshot.taskType != "mix") {
+            add(
+                TaskCenterItem(
+                    id = mixState.taskId.ifBlank { "current-mix" },
+                    kind = TaskKind.MIX,
+                    phase = taskPhaseFor("", mixState.message, mixState.taskState),
+                    title = "字体组合进行中",
+                    message = mixState.message,
+                    progress = mixState.progress,
+                    timeLabel = "当前",
+                    current = true,
+                ),
+            )
+        }
+
+        if (operationBusy && snapshot.taskType != "switch") {
+            val kind = taskKindFor(operationMessage)
+            add(
+                TaskCenterItem(
+                    id = "current-operation",
+                    kind = kind,
+                    phase = TaskPhase.RUNNING,
+                    title = taskTitle(kind, TaskPhase.RUNNING),
+                    message = operationMessage.ifBlank { "正在处理字体任务" },
+                    progress = -1,
+                    timeLabel = "当前",
+                    current = true,
+                ),
+            )
+        } else if (!operationBusy && operationMessage.isNotBlank()) {
+            val kind = taskKindFor(operationMessage)
+            val phase = taskPhaseFor("", operationMessage)
+            add(
+                TaskCenterItem(
+                    id = "latest-operation-${operationMessage.hashCode()}",
+                    kind = kind,
+                    phase = phase,
+                    title = taskTitle(kind, phase),
+                    message = operationMessage,
+                    progress = if (phase == TaskPhase.INFO) -1 else 100,
+                    timeLabel = "最近",
+                    current = true,
+                ),
+            )
+        }
+
+        if (rebootRequired || snapshot.rebootRequired) {
+            add(
+                TaskCenterItem(
+                    id = "waiting-reboot",
+                    kind = TaskKind.REBOOT,
+                    phase = TaskPhase.WAITING_REBOOT,
+                    title = "等待完整重启",
+                    message = "字体文件已经准备完成，完整重启手机后全局生效",
+                    progress = 100,
+                    timeLabel = "待处理",
+                    current = true,
+                ),
+            )
+        }
+    }
+    val tasks = mergeTaskItems(current, parseTaskLogItems(normalized))
+
     return LogsUiState(
         content = normalized,
         lineCount = lines.count { it.isNotBlank() },
@@ -33,8 +146,49 @@ internal fun LuoShuViewModel.toLogsUiState(): LogsUiState {
         warningCount = lines.count { line ->
             line.contains("warn", ignoreCase = true) || line.contains("警告")
         },
-        taskState = snapshot.taskState,
-        taskMessage = snapshot.taskMessage,
-        taskProgress = snapshot.taskProgress,
+        tasks = tasks,
+        activeTaskCount = tasks.count { it.active },
+        completedTaskCount = tasks.count { it.completed },
+        failedTaskCount = tasks.count { it.phase == TaskPhase.FAILED },
+        rebootRequired = rebootRequired || snapshot.rebootRequired,
+    )
+}
+
+internal fun LogsUiState.withNativeImport(state: NativeImportState): LogsUiState {
+    if (state.phase == NativeImportPhase.IDLE) return this
+    val phase = when (state.phase) {
+        NativeImportPhase.IDLE -> TaskPhase.INFO
+        NativeImportPhase.QUEUED -> TaskPhase.QUEUED
+        NativeImportPhase.RUNNING -> TaskPhase.RUNNING
+        NativeImportPhase.PAUSED -> TaskPhase.INFO
+        NativeImportPhase.SUCCESS -> TaskPhase.SUCCESS
+        NativeImportPhase.FAILED -> TaskPhase.FAILED
+        NativeImportPhase.CANCELLED -> TaskPhase.INFO
+    }
+    val title = when (state.phase) {
+        NativeImportPhase.PAUSED -> "字体导入已暂停"
+        NativeImportPhase.CANCELLED -> "字体导入已取消"
+        else -> taskTitle(TaskKind.IMPORT, phase)
+    }
+    val item = TaskCenterItem(
+        id = state.taskId.ifBlank { "native-import" },
+        kind = TaskKind.IMPORT,
+        phase = phase,
+        title = title,
+        message = state.message,
+        progress = state.progress,
+        timeLabel = when {
+            state.paused -> "已暂停"
+            state.busy -> "当前"
+            else -> "最近"
+        },
+        current = state.busy || state.paused,
+    )
+    val merged = mergeTaskItems(listOf(item), tasks)
+    return copy(
+        tasks = merged,
+        activeTaskCount = merged.count { it.active },
+        completedTaskCount = merged.count { it.completed },
+        failedTaskCount = merged.count { it.phase == TaskPhase.FAILED },
     )
 }

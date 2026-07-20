@@ -1,22 +1,15 @@
-name: Validate source
+name: Validate App-only source
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - fix/v14.2-rc2-stabilization
-      - feature/v14.3-alpha1-native-import
   pull_request:
     branches:
       - main
-      - baseline/v14.2-rc1-rebuild
-      - fix/v14.2-rc2-stabilization
     paths:
       - module.prop
       - common/**
       - config/**
       - fonts/**
       - system/**
-      - webroot/**
       - scripts/**
       - licenses/**
       - docs/**
@@ -37,6 +30,7 @@ on:
       - CHANGELOG.md
       - RELEASE_NOTES_*.md
       - .github/workflows/check.yml
+      - .github/workflows/build.yml
       - .github/workflows/release.yml
 permissions:
   contents: read
@@ -47,34 +41,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Collect legacy inventory
-        shell: bash
-        run: |
-          set +e
-          sh ./scripts/rc3_audit.sh > legacy-inventory.txt 2>&1
-          echo $? > legacy-inventory.exit
-          cat legacy-inventory.txt
-          exit 0
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LuoShu-legacy-inventory
-          path: |
-            legacy-inventory.txt
-            legacy-inventory.exit
-          if-no-files-found: error
-
-      - name: Enforce legacy inventory
-        run: test "$(cat legacy-inventory.exit)" = 0
+      - name: Enforce App-only inventory
+        run: sh ./scripts/rc3_audit.sh
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
 
       - uses: android-actions/setup-android@v3
 
@@ -129,11 +102,11 @@ jobs:
           assert set(gate.DIGITS) <= set(gate.required('cjk'))
           PY
 
-      - name: Compile, test and build native App
+      - name: Lint, test and build native App
         working-directory: android-app
-        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug
+        run: gradle --no-daemon --stacktrace :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
 
-      - name: Build App, Full and Lite candidates
+      - name: Build App and single module candidate
         shell: bash
         run: |
           set -euo pipefail
@@ -145,32 +118,30 @@ jobs:
           app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
           cp -f "$apk" "$app"
           (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
-          LUOSHU_VARIANT=full LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
-          LUOSHU_VARIANT=lite sh ./scripts/build.sh
+          LUOSHU_APP_APK="$apk" LUOSHU_ALLOW_DEBUG_APP=1 sh ./scripts/build.sh
 
       - name: Inspect candidate artifacts
         shell: bash
         run: |
           set -euo pipefail
           . ./scripts/version.sh
-          full="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Full.zip"
-          lite="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}-Lite.zip"
+          module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
           app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
-          test -s "$full"; test -s "$lite"; test -s "$app"
-          unzip -t "$full" >/dev/null
-          unzip -t "$lite" >/dev/null
-          unzip -Z1 "$full" | grep -qx 'bundled/LuoShu-App.apk'
-          ! unzip -Z1 "$lite" | grep -qx 'bundled/LuoShu-App.apk'
-          unzip -p "$full" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
+          test -s "$module"; test -s "$app"
+          unzip -t "$module" >/dev/null
+          unzip -Z1 "$module" > /tmp/luoshu-package-list.txt
+          grep -qx 'bundled/LuoShu-App.apk' /tmp/luoshu-package-list.txt
+          ! grep -qE '(^|/)webroot(/|$)' /tmp/luoshu-package-list.txt
+          ! unzip -p "$module" module.prop | grep -q '^webroot='
+          unzip -p "$module" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
           cmp -s "$app" "$RUNNER_TEMP/embedded.apk"
-          (cd dist && sha256sum -c "$(basename "$full").sha256")
-          (cd dist && sha256sum -c "$(basename "$lite").sha256")
+          (cd dist && sha256sum -c "$(basename "$module").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
 
-          asset="$lite"
-          unzip -Z1 "$asset" > /tmp/luoshu-package-list.txt
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^version=//p')" = "$LUOSHU_VERSION"
-          test "$(unzip -p "$asset" module.prop | sed -n 's/^versionCode=//p')" = "$LUOSHU_VERSION_CODE"
+          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = "$LUOSHU_VERSION"
+          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = "$LUOSHU_VERSION_CODE"
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^package=//p')" = 'io.github.xgl34222220.luoshu.debug'
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = "$((LUOSHU_VERSION_CODE * 100 + 1))"
           grep -qx 'action.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/composite_font.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_instance.py' /tmp/luoshu-package-list.txt
@@ -182,12 +153,6 @@ jobs:
           grep -qx 'common/v142_weighted_mix.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/luoshu_composite.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/python/bin/luoshu-python' /tmp/luoshu-package-list.txt
-          grep -qx 'webroot/workbench.js' /tmp/luoshu-package-list.txt
-          grep -qx 'webroot/mix_state_guard.js' /tmp/luoshu-package-list.txt
-          grep -qx 'webroot/workbench_bridge.js' /tmp/luoshu-package-list.txt
-          grep -qx 'webroot/workbench.css' /tmp/luoshu-package-list.txt
-          grep -qx 'webroot/workbench_weight_extension.js' /tmp/luoshu-package-list.txt
-          grep -qx 'webroot/workbench_weight_extension.css' /tmp/luoshu-package-list.txt
           grep -qx 'licenses/CPython-LICENSE.txt' /tmp/luoshu-package-list.txt
           grep -qx 'licenses/FontTools-LICENSE.txt' /tmp/luoshu-package-list.txt
           grep -qx 'licenses/LuoShu-MIT-HISTORICAL.txt' /tmp/luoshu-package-list.txt
@@ -195,36 +160,34 @@ jobs:
           grep -qx 'NOTICE.md' /tmp/luoshu-package-list.txt
           grep -qx 'THIRD_PARTY_NOTICES.md' /tmp/luoshu-package-list.txt
           grep -qx 'README.txt' /tmp/luoshu-package-list.txt
-          unzip -p "$asset" LICENSE | grep -q 'GNU GENERAL PUBLIC LICENSE'
-          unzip -p "$asset" LICENSE | grep -q 'Version 3, 29 June 2007'
-          unzip -p "$asset" NOTICE.md | grep -q 'GPL-3.0-only'
-          unzip -p "$asset" webroot/index.html | grep -q "v14.js?v=$LUOSHU_VERSION_CODE"
-          unzip -p "$asset" webroot/environment.js | grep -q "UI_VERSION = '$LUOSHU_VERSION_CODE'"
-          unzip -p "$asset" webroot/environment.js | grep -q 'restartUi.hidden = true'
-          unzip -p "$asset" common/font_mix.sh | grep -q 'full-composite-v5'
-          unzip -p "$asset" common/v14_mix.sh | grep -q 'font_role_check.sh'
-          unzip -p "$asset" common/app_bridge.sh | grep -q 'common/v14_mix.sh'
-          unzip -p "$asset" common/app_bridge.sh | grep -q 'native_import.sh'
-          unzip -p "$asset" common/native_import.sh | grep -q 'trusted_source'
-          unzip -p "$asset" common/font_instance.py | grep -q 'instantiateVariableFont'
-          unzip -p "$asset" common/font_instance.py | grep -q -- '--axes'
-          unzip -p "$asset" common/v142_weighted_mix.sh | grep -q 'axes_task.conf'
-          unzip -p "$asset" common/app_bridge.sh | grep -q 'rebootRequired'
-          unzip -p "$asset" customize.sh | grep -q 'luoshu_cli.sh.*system/bin/洛书'
-          unzip -p "$asset" post-fs-data.sh | grep -q 'v14_mix.sh.*recover'
-          ! unzip -p "$asset" common/v142_weighted_mix.sh | grep -q 'v143_axes'
-          ! unzip -p "$asset" common/app_bridge.sh | grep -q 'v143_axes'
-          ! unzip -p "$asset" customize.sh | grep -q 'pm install'
-          ! unzip -p "$asset" common/luoshu_cli.sh | grep -qE '回滚|重启界面|刷新字体缓存'
-          ! unzip -p "$asset" service.sh | grep -q 'cmd font system --update'
-          ! unzip -p "$asset" service.sh | grep -q 'oplus-font refresh'
+          unzip -p "$module" LICENSE | grep -q 'GNU GENERAL PUBLIC LICENSE'
+          unzip -p "$module" LICENSE | grep -q 'Version 3, 29 June 2007'
+          unzip -p "$module" NOTICE.md | grep -q 'GPL-3.0-only'
+          unzip -p "$module" common/font_mix.sh | grep -q 'full-composite-v5'
+          unzip -p "$module" common/v14_mix.sh | grep -q 'font_role_check.sh'
+          unzip -p "$module" common/app_bridge.sh | grep -q 'common/v14_mix.sh'
+          unzip -p "$module" common/app_bridge.sh | grep -q 'native_import.sh'
+          unzip -p "$module" common/native_import.sh | grep -q 'trusted_source'
+          unzip -p "$module" common/font_instance.py | grep -q 'instantiateVariableFont'
+          unzip -p "$module" common/font_instance.py | grep -q -- '--axes'
+          unzip -p "$module" common/v142_weighted_mix.sh | grep -q 'axes_task.conf'
+          unzip -p "$module" common/app_bridge.sh | grep -q 'rebootRequired'
+          unzip -p "$module" customize.sh | grep -q 'luoshu_cli.sh.*system/bin/洛书'
+          unzip -p "$module" post-fs-data.sh | grep -q 'v14_mix.sh.*recover'
+          ! unzip -p "$module" common/v142_weighted_mix.sh | grep -q 'v143_axes'
+          ! unzip -p "$module" common/app_bridge.sh | grep -q 'v143_axes'
+          ! unzip -p "$module" customize.sh | grep -q 'pm install'
+          ! unzip -p "$module" common/luoshu_cli.sh | grep -qE '回滚|重启界面|刷新字体缓存'
+          ! unzip -p "$module" common/font_manager.sh | grep -qE 'webroot|restart_ui|previous_font|action refresh'
+          ! unzip -p "$module" service.sh | grep -q 'cmd font system --update'
+          ! unzip -p "$module" service.sh | grep -q 'oplus-font refresh'
           ! grep -qE '^system/etc/(fonts.xml|font_fallback.xml)$' /tmp/luoshu-package-list.txt
           ! grep -qE '(^|/)skip_mount(ify)?$' /tmp/luoshu-package-list.txt
           ! grep -qEi '(^|/)(emoji|__pycache__)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' /tmp/luoshu-package-list.txt
 
       - uses: actions/upload-artifact@v4
         with:
-          name: EXTRACT-FIRST-LuoShu-v14.3-Alpha1-Full-Lite-Debug
+          name: EXTRACT-FIRST-LuoShu-App-Only-Debug
           path: dist/*
           if-no-files-found: error
           retention-days: 14

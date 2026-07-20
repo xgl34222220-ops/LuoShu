@@ -1,0 +1,185 @@
+package io.github.xgl34222220.luoshu.ui.library
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.FontItem
+import io.github.xgl34222220.luoshu.NativeFontPreview
+import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+
+@Composable
+internal fun FontDetailsDialogRoute(
+    style: UiStyle,
+    font: FontItem,
+    active: Boolean,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onApply: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val tokens = LocalMiuixTokens.current
+    val miuix = style == UiStyle.MIUIX
+    val container = if (miuix) tokens.elevatedCardBackground else scheme.surfaceContainerHigh
+    val primaryText = if (miuix) tokens.textPrimary else scheme.onSurface
+    val secondaryText = if (miuix) tokens.textSecondary else scheme.onSurfaceVariant
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        shape = RoundedCornerShape(if (miuix) 34.dp else 28.dp),
+        containerColor = container,
+        title = {
+            Column {
+                Text(
+                    text = font.name,
+                    color = primaryText,
+                    fontSize = 23.sp,
+                    lineHeight = 28.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(5.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = if (font.valid) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                        contentDescription = null,
+                        tint = if (font.valid) tokens.success else scheme.error,
+                    )
+                    Spacer(Modifier.width(7.dp))
+                    Text(
+                        text = when {
+                            active -> "当前正在使用"
+                            font.valid -> "字体检查通过"
+                            else -> "字体需要检查"
+                        },
+                        color = if (font.valid) tokens.success else scheme.error,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(if (miuix) 25.dp else 20.dp),
+                    color = if (miuix) tokens.cardBackground else scheme.surfaceContainer,
+                ) {
+                    NativeFontPreview(
+                        font = font,
+                        text = "洛书字体详情预览\nHello 0123456789",
+                        axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(112.dp)
+                            .padding(horizontal = 17.dp, vertical = 14.dp),
+                        textSizeSp = 25f,
+                        maxLines = 2,
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                FontDetailLine("能力", fontCapabilityLabel(font), primaryText, secondaryText)
+                FontDetailLine("格式", font.format.ifBlank { "未知" }, primaryText, secondaryText)
+                FontDetailLine("大小", font.size.ifBlank { "未知" }, primaryText, secondaryText)
+                FontDetailLine("导入时间", font.date.ifBlank { "未知" }, primaryText, secondaryText)
+                FontDetailLine("字重", font.weightLabel, primaryText, secondaryText)
+                FontDetailLine("字体 ID", font.id, primaryText, secondaryText)
+                if (!font.valid && font.error.isNotBlank()) {
+                    Spacer(Modifier.height(11.dp))
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = scheme.errorContainer,
+                    ) {
+                        Text(
+                            text = font.error,
+                            modifier = Modifier.padding(13.dp),
+                            color = scheme.onErrorContainer,
+                            fontSize = 12.sp,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (!active) {
+                Button(
+                    onClick = onApply,
+                    enabled = font.valid && !busy,
+                ) {
+                    Text("应用字体", fontWeight = FontWeight.Bold)
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("关闭")
+            }
+        },
+    )
+}
+
+@Composable
+private fun FontDetailLine(
+    label: String,
+    value: String,
+    primaryText: Color,
+    secondaryText: Color,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 9.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.width(76.dp),
+            color = secondaryText,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            text = value,
+            modifier = Modifier.weight(1f),
+            color = primaryText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f))
+}

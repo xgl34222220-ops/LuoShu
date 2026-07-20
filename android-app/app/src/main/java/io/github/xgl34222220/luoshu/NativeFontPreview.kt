@@ -1,7 +1,9 @@
 package io.github.xgl34222220.luoshu
 
+import android.content.Context
 import android.graphics.Typeface
 import android.util.LruCache
+import android.util.TypedValue
 import android.view.Gravity
 import android.widget.TextView
 import androidx.compose.material3.MaterialTheme
@@ -13,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -59,15 +62,71 @@ private data class PreviewMemoryEntry(
     val file: File,
 )
 
+private class PreviewTextView(context: Context) : TextView(context) {
+    private var lastText: String? = null
+    private var lastTypeface: Typeface? = null
+    private var lastGravity: Int = Int.MIN_VALUE
+    private var lastMaxLines: Int = Int.MIN_VALUE
+    private var lastColor: Int = Int.MIN_VALUE
+    private var lastSizeSp: Float = Float.NaN
+
+    init {
+        includeFontPadding = false
+        setSingleLine(false)
+    }
+
+    fun render(
+        value: String,
+        font: Typeface,
+        gravityValue: Int,
+        maxLinesValue: Int,
+        color: Int,
+        sizeSp: Float,
+    ) {
+        if (lastText != value) {
+            text = value
+            lastText = value
+        }
+        if (lastTypeface !== font) {
+            typeface = font
+            lastTypeface = font
+        }
+        if (lastGravity != gravityValue) {
+            gravity = gravityValue
+            lastGravity = gravityValue
+        }
+        if (lastMaxLines != maxLinesValue) {
+            maxLines = maxLinesValue
+            lastMaxLines = maxLinesValue
+        }
+        if (lastColor != color) {
+            setTextColor(color)
+            lastColor = color
+        }
+        if (lastSizeSp != sizeSp) {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, sizeSp)
+            lastSizeSp = sizeSp
+        }
+    }
+}
+
 private val previewMemoryCache = object : LruCache<String, PreviewMemoryEntry>(PREVIEW_MEMORY_MAX_ENTRIES) {}
 private val previewLocks = ConcurrentHashMap<String, Mutex>()
 private val previewExportSemaphore = Semaphore(PREVIEW_EXPORT_CONCURRENCY)
 private val axisInfoCache = ConcurrentHashMap<String, WeightAxisInfo>()
 private val axisInfoLocks = ConcurrentHashMap<String, Mutex>()
 
+private fun previewMemoryGet(key: String): PreviewMemoryEntry? = synchronized(previewMemoryCache) {
+    previewMemoryCache.get(key)
+}
+
+private fun previewMemoryPut(key: String, entry: PreviewMemoryEntry) = synchronized(previewMemoryCache) {
+    previewMemoryCache.put(key, entry)
+}
+
 @Composable
 internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
-    val cached = font?.id?.let(axisInfoCache::get)
+    val cached = remember(font?.id) { font?.id?.let(axisInfoCache::get) }
     val info by produceState(
         initialValue = cached ?: WeightAxisInfo(loading = font?.variable == true),
         key1 = font?.id,
@@ -90,7 +149,7 @@ internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
     return info
 }
 
-private suspend fun loadWeightAxisInfo(font: FontItem): WeightAxisInfo = runCatching {
+private suspend fun loadWeightAxisInfo(font: FontItem): WeightAxisInfo = try {
     val command = "sh ${RootShell.quote(APP_BRIDGE)} weight_axis ${RootShell.quote(font.id)}"
     val result = RootShell.exec(command, timeoutMs = 25_000L)
     if (result.code != 0) {
@@ -144,7 +203,9 @@ private suspend fun loadWeightAxisInfo(font: FontItem): WeightAxisInfo = runCatc
             axes = axes,
         )
     }
-}.getOrElse { error ->
+} catch (cancelled: CancellationException) {
+    throw cancelled
+} catch (error: Throwable) {
     WeightAxisInfo(
         loading = false,
         hasWeight = false,
@@ -165,30 +226,41 @@ internal fun NativeFontPreview(
     val context = LocalContext.current.applicationContext
     val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
     val errorColor = MaterialTheme.colorScheme.error.toArgb()
-    val cleanAxes = normalizePreviewAxes(axes)
-    val axisKey = cleanAxes.entries
-        .sortedBy { it.key }
-        .joinToString(",") { "${it.key}=${formatAxisValue(it.value)}" }
-    val requestedWeight = (cleanAxes["wght"] ?: 400f).roundToInt().coerceIn(1, 1000)
-    val sourceRevision = font?.let {
-        val staticRevision = if (it.variable) "" else "|wght=$requestedWeight"
-        "${it.id}|${it.size}|${it.date}$staticRevision"
+    val cleanAxes = remember(axes) { normalizePreviewAxes(axes) }
+    val axisKey = remember(cleanAxes) {
+        cleanAxes.entries
+            .sortedBy { it.key }
+            .joinToString(",") { "${it.key}=${formatAxisValue(it.value)}" }
     }
-    val extension = font?.format?.lowercase()
-        ?.takeIf { it in setOf("ttf", "otf", "ttc") }
-        ?: "ttf"
+    val requestedWeight = remember(cleanAxes) {
+        (cleanAxes["wght"] ?: 400f).roundToInt().coerceIn(1, 1000)
+    }
+    val sourceRevision = remember(font, requestedWeight) {
+        font?.let {
+            val staticRevision = if (it.variable) "" else "|wght=$requestedWeight"
+            "${it.id}|${it.size}|${it.date}$staticRevision"
+        }
+    }
+    val extension = remember(font?.format) {
+        font?.format?.lowercase()
+            ?.takeIf { it in setOf("ttf", "otf", "ttc") }
+            ?: "ttf"
+    }
     val cacheDir = remember(context.cacheDir) {
         File(context.cacheDir, "native-font-preview").apply { mkdirs() }
     }
     val target = remember(sourceRevision, extension) {
         sourceRevision?.let { File(cacheDir, "${stableKey(it)}.$extension") }
     }
-    val memoryEntry = sourceRevision?.let(previewMemoryCache::get)
+    val memoryEntry = remember(sourceRevision) { sourceRevision?.let(::previewMemoryGet) }
+    val previewKey = remember(sourceRevision, font?.valid, font?.error) {
+        "${sourceRevision.orEmpty()}|${font?.valid}|${font?.error.orEmpty()}"
+    }
 
     val preview by produceState(
         initialValue = memoryEntry?.let { PreviewTypefaceState(it.typeface, it.file) }
             ?: PreviewTypefaceState(),
-        key1 = sourceRevision,
+        key1 = previewKey,
     ) {
         value = withContext(Dispatchers.IO) {
             when {
@@ -198,11 +270,11 @@ internal fun NativeFontPreview(
                 else -> {
                     val lock = previewLocks.computeIfAbsent(sourceRevision) { Mutex() }
                     lock.withLock {
-                        previewMemoryCache[sourceRevision]?.let { cachedEntry ->
+                        previewMemoryGet(sourceRevision)?.let { cachedEntry ->
                             return@withLock PreviewTypefaceState(cachedEntry.typeface, cachedEntry.file)
                         }
                         previewExportSemaphore.withPermit {
-                            runCatching {
+                            try {
                                 var exported = false
                                 if (!target.isFile || target.length() == 0L) {
                                     val command = "sh ${RootShell.quote(APP_BRIDGE)} preview_export " +
@@ -226,12 +298,14 @@ internal fun NativeFontPreview(
                                 val loaded = Typeface.createFromFile(target)
                                 target.setLastModified(System.currentTimeMillis())
                                 if (exported) trimPreviewCache(cacheDir, target)
-                                previewMemoryCache.put(
+                                previewMemoryPut(
                                     sourceRevision,
                                     PreviewMemoryEntry(typeface = loaded, file = target),
                                 )
                                 PreviewTypefaceState(typeface = loaded, file = target)
-                            }.getOrElse { error ->
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Throwable) {
                                 PreviewTypefaceState(error = error.message ?: "预览字体加载失败")
                             }
                         }
@@ -242,13 +316,16 @@ internal fun NativeFontPreview(
     }
 
     val previewFile = preview.file
-    val variationResult = remember(previewFile?.absolutePath, axisKey, font?.variable) {
-        if (font?.variable != true || previewFile == null || cleanAxes.isEmpty()) {
+    val variationSettings = remember(axisKey) {
+        cleanAxes.takeIf { it.isNotEmpty() }?.let(::toAndroidVariationSettings).orEmpty()
+    }
+    val variationResult = remember(previewFile?.absolutePath, variationSettings, font?.variable, preview.typeface) {
+        if (font?.variable != true || previewFile == null || variationSettings.isEmpty()) {
             Result.success(preview.typeface)
         } else {
             runCatching {
                 Typeface.Builder(previewFile)
-                    .setFontVariationSettings(toAndroidVariationSettings(cleanAxes))
+                    .setFontVariationSettings(variationSettings)
                     .build()
             }
         }
@@ -257,30 +334,24 @@ internal fun NativeFontPreview(
     val renderedTypeface = variationResult.fold(
         onSuccess = { it },
         onFailure = { preview.typeface },
-    )
+    ) ?: Typeface.DEFAULT
+    val failure = preview.error.ifBlank { variationError }
+    val failed = failure.isNotBlank()
+    val renderedText = if (failed) "预览失败 · $failure" else text
+    val renderedColor = if (failed) errorColor else textColor
+    val renderedSize = if (failed) minOf(textSizeSp, 12f) else textSizeSp
 
     AndroidView(
         modifier = modifier,
-        factory = { viewContext ->
-            TextView(viewContext).apply {
-                includeFontPadding = false
-                setSingleLine(false)
-                this.gravity = gravity
-                this.maxLines = maxLines
-                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, textSizeSp)
-            }
-        },
+        factory = { viewContext -> PreviewTextView(viewContext) },
         update = { view ->
-            val failure = preview.error.ifBlank { variationError }
-            val failed = failure.isNotBlank()
-            view.text = if (failed) "预览失败 · $failure" else text
-            view.typeface = renderedTypeface ?: Typeface.DEFAULT
-            view.gravity = gravity
-            view.maxLines = maxLines
-            view.setTextColor(if (failed) errorColor else textColor)
-            view.setTextSize(
-                android.util.TypedValue.COMPLEX_UNIT_SP,
-                if (failed) minOf(textSizeSp, 12f) else textSizeSp,
+            view.render(
+                value = renderedText,
+                font = renderedTypeface,
+                gravityValue = gravity,
+                maxLinesValue = maxLines,
+                color = renderedColor,
+                sizeSp = renderedSize,
             )
         },
     )

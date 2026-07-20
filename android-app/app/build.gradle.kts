@@ -37,8 +37,7 @@ android {
         applicationId = "io.github.xgl34222220.luoshu"
         minSdk = 28
         targetSdk = 36
-        // module.prop is the only version source shared by the module, App,
-        // WebUI packaging and GitHub Actions.
+        // module.prop is the only version source shared by the module, native App and CI artifacts.
         versionCode = moduleVersionCode * 100 + 1
         versionName = appVersionName
     }
@@ -67,6 +66,17 @@ android {
         getByName("debug") {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            // Test packages remain installable over the existing debug app, but execute with release-like optimization.
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
         getByName("release") {
             isMinifyEnabled = true
