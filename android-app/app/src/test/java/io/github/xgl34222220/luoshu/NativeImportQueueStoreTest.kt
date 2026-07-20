@@ -42,6 +42,30 @@ class NativeImportQueueStoreTest {
     }
 
     @Test
+    fun largeQueueRoundTripPreservesOneHundredItems() {
+        val task = ImportQueueTask(
+            taskId = "import-100",
+            phase = NativeImportPhase.QUEUED,
+            createdAt = 100L,
+            message = "批量导入 100 个字体",
+            items = List(100) { index ->
+                ImportQueueItem(
+                    uri = "content://documents/font-$index.ttf",
+                    displayName = "font-$index.ttf",
+                    persistedPermission = true,
+                )
+            },
+        )
+
+        val decoded = decodeImportQueue(encodeImportQueue(task))
+
+        assertNotNull(decoded)
+        assertEquals(100, decoded?.items?.size)
+        assertEquals("font-99.ttf", decoded?.items?.last()?.displayName)
+        assertEquals(MAX_IMPORT_QUEUE_ITEMS, 256)
+    }
+
+    @Test
     fun resumeOnlyResetsInterruptedItem() {
         val task = ImportQueueTask(
             taskId = "import-67890",
