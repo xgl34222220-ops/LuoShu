@@ -15,19 +15,19 @@ internal object SfntFontIdentity {
     private const val MAX_NAME_RECORDS = 512
     private const val MAX_NAME_BYTES = 4096
 
-    private val cache = ConcurrentHashMap<String, String?>()
+    private val cache = ConcurrentHashMap<String, String>()
 
     fun fromFile(file: File?): String? {
         if (file == null || !file.isFile || !file.canRead()) return null
         val key = "${file.path}|${file.length()}|${file.lastModified()}"
-        if (cache.containsKey(key)) return cache[key]
+        cache[key]?.let { return it.ifEmpty { null } }
         val value = runCatching {
             FileInputStream(file).channel.use { channel ->
                 if (channel.size() <= 0L || channel.size() > Int.MAX_VALUE.toLong()) return@use null
                 parse(channel.map(java.nio.channels.FileChannel.MapMode.READ_ONLY, 0L, channel.size()))
             }
         }.getOrNull()
-        cache[key] = value
+        cache[key] = value.orEmpty()
         return value
     }
 
