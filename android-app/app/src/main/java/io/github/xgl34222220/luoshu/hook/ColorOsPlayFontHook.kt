@@ -75,7 +75,6 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
 
     /** Compose commonly derives an exact 400/500 weight through the API 28 overload. */
     private fun hookWeightedTypefaceFactory() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return
         XposedHelpers.findAndHookMethod(
             Typeface::class.java,
             "create",
@@ -109,15 +108,7 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
         val base = loadTypeface(source) ?: return null
         val replacement = runCatching {
             HOOK_GUARD.set(true)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                Typeface.create(base, weight.coerceIn(1, 1000), italic)
-            } else {
-                Typeface.create(
-                    base,
-                    (if (weight >= 650) Typeface.BOLD else Typeface.NORMAL) or
-                        (if (italic) Typeface.ITALIC else Typeface.NORMAL),
-                )
-            }
+            Typeface.create(base, weight.coerceIn(1, 1000), italic)
         }.getOrDefault(base).also { HOOK_GUARD.remove() }
         return replacement to source
     }
@@ -154,10 +145,10 @@ class ColorOsPlayFontHook : IXposedHookLoadPackage {
 
     private fun familyName(typeface: Typeface): String? {
         if (Build.VERSION.SDK_INT >= 34) {
-            runCatching { typeface.systemFontFamilyName }
-                .getOrNull()
-                ?.takeIf { it.isNotBlank() }
-                ?.let { return it }
+            val publicName = runCatching {
+                XposedHelpers.callMethod(typeface, "getSystemFontFamilyName") as? String
+            }.getOrNull()
+            if (!publicName.isNullOrBlank()) return publicName
         }
         for (field in FAMILY_NAME_FIELDS) {
             val value = runCatching {
