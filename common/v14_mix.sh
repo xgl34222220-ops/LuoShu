@@ -47,7 +47,9 @@ if [ -f "$WEIGHTED" ]; then
     case "${1:-config}" in
         start)
             precheck_mix "$2" "$3" "$4" || exit 0
-            _cjk_mode=fixed; _latin_mode=fixed; _digit_mode=fixed
+            _cjk_mode=fixed
+            _latin_mode=fixed
+            _digit_mode=fixed
             if type infer_mix_weight_mode >/dev/null 2>&1; then
                 _cjk_mode=$(infer_mix_weight_mode "$2" "${5:-wght=400}")
                 _latin_mode=$(infer_mix_weight_mode "$3" "${6:-wght=400}")
@@ -64,8 +66,16 @@ if [ -f "$WEIGHTED" ]; then
             else sh "$WEIGHTED" config
             fi
             ;;
-        status) sh "$WEIGHTED" status "$2" ;;
-        recover) sh "$WEIGHTED" recover ;;
+        status)
+            if [ -f "$AUTO_WEIGHTED" ]; then sh "$AUTO_WEIGHTED" status "$2"
+            else sh "$WEIGHTED" status "$2"
+            fi
+            ;;
+        recover)
+            if [ -f "$AUTO_WEIGHTED" ]; then sh "$AUTO_WEIGHTED" recover
+            else sh "$WEIGHTED" recover
+            fi
+            ;;
         *) printf '{"status":"error","message":"未知组合桥命令"}\n' ;;
     esac
     exit 0
