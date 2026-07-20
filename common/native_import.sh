@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14.3 Alpha1.1：原生 App 文件选择器导入桥。
+# 洛书原生 App 文件选择器导入桥。
 # 只接受 App 私有缓存中的 TTF/OTF/TTC/ZIP；ZIP 继续交由安全字体包导入器处理。
 set +e
 
@@ -18,6 +18,7 @@ FONT_MANAGER="$MODDIR/common/font_manager.sh"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 FACE_EXTRACTOR="$MODDIR/common/font_extract_faces.py"
+HASH_INDEX="$MODDIR/config/import_hash_index.tsv"
 MAX_BYTES=268435456
 
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
@@ -69,17 +70,73 @@ safe_stem() {
 invalidate_font_cache() {
     rm -f "$MODDIR/config/webui_font_list.json" \
           "$MODDIR/config/webui_font_list.key" \
+          "$MODDIR/config/native_font_index.json" \
+          "$MODDIR/config/native_font_index.key" \
           "$MODDIR/config/recent_fonts.conf" 2>/dev/null || true
+}
+
+font_dir_mtime() {
+    mkdir -p "$USER_FONTS_DIR" 2>/dev/null || true
+    if command -v stat >/dev/null 2>&1; then
+        stat -c '%Y' "$USER_FONTS_DIR" 2>/dev/null && return 0
+    fi
+    if command -v busybox >/dev/null 2>&1; then
+        busybox stat -c '%Y' "$USER_FONTS_DIR" 2>/dev/null && return 0
+    fi
+    printf '0\n'
+}
+
+rebuild_hash_index() {
+    mkdir -p "$USER_FONTS_DIR" "$MODDIR/config" 2>/dev/null || return 1
+    _tmp="$HASH_INDEX.tmp.$$"
+    {
+        printf '#mtime=%s\n' "$(font_dir_mtime)"
+        for _file in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
+                     "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+            [ -f "$_file" ] || continue
+            _hash=$(file_hash "$_file")
+            [ -n "$_hash" ] || continue
+            printf '%s\t%s\n' "$_hash" "$_file"
+        done
+    } > "$_tmp" 2>/dev/null || { rm -f "$_tmp" 2>/dev/null; return 1; }
+    mv -f "$_tmp" "$HASH_INDEX" 2>/dev/null || return 1
+    chmod 0600 "$HASH_INDEX" 2>/dev/null || true
+}
+
+ensure_hash_index() {
+    _current=$(font_dir_mtime)
+    _saved=$(sed -n 's/^#mtime=//p' "$HASH_INDEX" 2>/dev/null | head -n1)
+    if [ ! -f "$HASH_INDEX" ] || [ -z "$_saved" ] || [ "$_saved" != "$_current" ]; then
+        rebuild_hash_index
+    fi
+}
+
+refresh_hash_index_header() {
+    [ -f "$HASH_INDEX" ] || return 0
+    _tmp="$HASH_INDEX.header.$$"
+    {
+        printf '#mtime=%s\n' "$(font_dir_mtime)"
+        sed '1d' "$HASH_INDEX" 2>/dev/null
+    } > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$HASH_INDEX" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
 }
 
 find_duplicate() {
     _hash="$1"
-    for _file in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
-                 "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
-        [ -f "$_file" ] || continue
-        [ "$(file_hash "$_file")" = "$_hash" ] && { printf '%s\n' "$_file"; return 0; }
-    done
-    return 1
+    ensure_hash_index >/dev/null 2>&1 || return 1
+    _tab=$(printf '\t')
+    _entry=$(grep -F "${_hash}${_tab}" "$HASH_INDEX" 2>/dev/null | head -n1)
+    [ -n "$_entry" ] || return 1
+    _path=${_entry#*"$_tab"}
+    [ -f "$_path" ] || { rm -f "$HASH_INDEX" 2>/dev/null; return 1; }
+    printf '%s\n' "$_path"
+}
+
+record_import_hash() {
+    _hash="$1"
+    _path="$2"
+    ensure_hash_index >/dev/null 2>&1 || rebuild_hash_index >/dev/null 2>&1 || return 0
+    printf '%s\t%s\n' "$_hash" "$_path" >> "$HASH_INDEX" 2>/dev/null || return 0
+    refresh_hash_index_header
 }
 
 extract_collection_faces() {
@@ -102,6 +159,7 @@ extract_collection_faces() {
     _rc=$?
     _json=$(printf '%s\n' "$_result" | sed -n '/^[[:space:]]*{/p' | tail -n1)
     if [ "$_rc" -eq 0 ] && [ -n "$_json" ]; then
+        rm -f "$HASH_INDEX" 2>/dev/null || true
         invalidate_font_cache
         printf '%s\n' "$_json"
     else
@@ -152,6 +210,7 @@ import_font_file() {
     fi
     cp -f "$_src" "$_target" 2>/dev/null || { fail_json "无法复制字体到 /sdcard/LuoShu/fonts"; return; }
     chmod 0644 "$_target" 2>/dev/null || true
+    record_import_hash "$_hash" "$_target"
     invalidate_font_cache
     _family=$(detect_font_family "$(basename "$_target")")
     printf '{"status":"ok","data":{"kind":"font","id":"%s","name":"%s","format":"%s","duplicate":false,"message":"字体已导入"}}\n' \
@@ -180,6 +239,7 @@ import_zip_file() {
     _rc=$?
     _stderr=$(tail -n 6 "$_error_file" 2>/dev/null | tr '\n\r' '  ')
     rm -f "$_error_file" "$_target" 2>/dev/null || true
+    rm -f "$HASH_INDEX" 2>/dev/null || true
     invalidate_font_cache
 
     _json=$(printf '%s\n' "$_result" | sed -n '/^[[:space:]]*{/p' | tail -n1)
