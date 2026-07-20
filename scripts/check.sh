@@ -27,11 +27,13 @@ for file in \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh common/v142_weighted_mix.sh \
+  common/v143_auto_multiweight_mix.sh common/mix_weight_mode.sh \
   common/app_bridge.sh common/font_manager.sh common/font_library_cache.sh common/app_installer.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
   scripts/build.sh scripts/version.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh \
   scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh \
-  scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/rc3_audit.sh \
+  scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh \
+  scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/rc3_audit.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/build.gradle.kts \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
@@ -90,7 +92,14 @@ grep -q 'native_font_index.json' "$ROOT/service.sh"
 grep -q 'full-composite-v5' "$ROOT/common/font_mix.sh"
 grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
 grep -q 'v142_weighted_mix.sh' "$ROOT/common/v14_mix.sh"
+grep -q 'v143_auto_multiweight_mix.sh' "$ROOT/common/v14_mix.sh"
+grep -q 'infer_mix_weight_mode' "$ROOT/common/v14_mix.sh"
 grep -q 'font_role_check.sh' "$ROOT/common/v14_mix.sh"
+grep -q 'for _weight in 100 200 300 400 500 600 700 800 900' "$ROOT/common/v143_auto_multiweight_mix.sh"
+grep -q 'build_composite_cached' "$ROOT/common/v143_auto_multiweight_mix.sh"
+grep -q 'LuoShuAutoMix' "$ROOT/common/v143_auto_multiweight_mix.sh"
+grep -q 'cjkMode=%s' "$ROOT/common/v143_auto_multiweight_mix.sh"
+grep -q 'mix_variable_default_weight' "$ROOT/common/mix_weight_mode.sh"
 grep -q 'common/v14_mix.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'native_import.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'preview_source)' "$ROOT/common/app_bridge.sh"
@@ -160,6 +169,8 @@ sh "$ROOT/scripts/native_zip_import_test.sh"
 sh "$ROOT/scripts/rc3_audit.sh"
 sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
+sh "$ROOT/scripts/auto_multiweight_mode_test.sh"
+sh "$ROOT/scripts/auto_multiweight_engine_test.sh"
 sh "$ROOT/scripts/stability_test.sh"
 sh "$ROOT/scripts/font_library_cache_test.sh"
 sh "$ROOT/scripts/app_installer_test.sh"
