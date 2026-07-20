@@ -1,8 +1,11 @@
 package io.github.xgl34222220.luoshu
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import java.util.concurrent.TimeUnit
 
@@ -14,8 +17,9 @@ internal data class ShellResult(
 
 internal object RootShell {
     suspend fun exec(command: String, timeoutMs: Long = 600_000L): ShellResult = withContext(Dispatchers.IO) {
+        var process: Process? = null
         try {
-            val process = ProcessBuilder("su", "-c", command)
+            process = ProcessBuilder("su", "-c", command)
                 .redirectErrorStream(false)
                 .start()
 
@@ -35,8 +39,17 @@ internal object RootShell {
                     ShellResult(process.exitValue(), stdout.await(), stderr.await())
                 }
             }
+        } catch (cancelled: CancellationException) {
+            process?.destroyForcibly()
+            throw cancelled
+        } catch (interrupted: InterruptedException) {
+            process?.destroyForcibly()
+            throw CancellationException("Command cancelled").also { it.initCause(interrupted) }
         } catch (error: Throwable) {
+            process?.destroyForcibly()
             ShellResult(127, "", error.message ?: error.javaClass.simpleName)
+        } finally {
+            if (!currentCoroutineContext().isActive) process?.destroyForcibly()
         }
     }
 
