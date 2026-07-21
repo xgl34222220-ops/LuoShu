@@ -6,10 +6,12 @@ on:
       - main
     paths:
       - common/font_config_overlay.py
+      - common/font_config_targets.py
       - common/font_config_runtime.sh
       - common/font_config_partitions.sh
       - common/font_config_weights.sh
       - common/font_name_normalize.py
+      - common/font_safety.sh
       - common/font_manager.sh
       - common/font_library_cache.sh
       - common/hyperos_global.sh
@@ -18,12 +20,16 @@ on:
       - common/font_mix.sh
       - common/python/**
       - post-fs-data.sh
+      - service.sh
       - scripts/build.sh
       - scripts/prepare_composite_runtime.sh
       - scripts/font_config_overlay_test.py
+      - scripts/font_config_targets_test.py
       - scripts/font_config_runtime_test.sh
       - scripts/font_config_weights_test.sh
       - scripts/font_name_normalize_test.py
+      - scripts/font_safety_test.sh
+      - scripts/meta_module_sync_test.sh
       - scripts/no_hook_bootstrap_test.sh
       - scripts/prune_python_runtime.sh
       - scripts/python_runtime_prune_test.sh
@@ -51,6 +57,12 @@ jobs:
           fi
       - name: Run XML structure tests
         run: python3 scripts/font_config_overlay_test.py
+      - name: Run dynamic target discovery tests
+        run: python3 scripts/font_config_targets_test.py
+      - name: Run payload transaction and boot guard tests
+        run: sh -x scripts/font_safety_test.sh
+      - name: Run meta-module synchronization tests
+        run: sh -x scripts/meta_module_sync_test.sh
       - name: Run static font identity tests
         shell: bash
         run: |
@@ -74,9 +86,15 @@ jobs:
           ! grep -RInE 'IXposedHookLoadPackage|XposedBridge|LSPosed|lspatch' android-app/app/src common system 2>/dev/null
           ! grep -RInE '(^|[[:space:]])(cp|ln|rm)[[:space:]].*/data/fonts|_dest="/data/fonts/' post-fs-data.sh common 2>/dev/null
           grep -q 'font_config_boot_guard' post-fs-data.sh
+          grep -q 'font_config_mark_boot_success' service.sh
           grep -q 'font_config_partitions.sh' post-fs-data.sh
           grep -q 'font_config_enable_for_payload' common/hyperos_global.sh
           grep -q 'font_config_enable_for_payload' common/font_mix.sh
+          grep -q 'luoshu_payload_transaction_begin' common/font_manager.sh
+          grep -q 'luoshu_payload_transaction_begin' common/font_mix.sh
+          grep -q 'luoshu_payload_transaction_commit' common/font_manager.sh
+          grep -q 'luoshu_payload_transaction_commit' common/font_mix.sh
+          grep -q 'font_config_targets.py' common/font_safety.sh
           grep -q 'font_config_disable' common/font_manager.sh
           grep -q 'mi_fonts_customization.xml' common/font_config_partitions.sh
           grep -q 'my_product' common/font_config_partitions.sh
