@@ -58,6 +58,35 @@ grep -q 'native_font_index.key' "$ROOT/common/font_manager.sh"
 test ! -d "$ROOT/webroot"
 test ! -e "$ROOT/scripts/prepare_webui.sh"
 
+# 字体完整性校验必须一次读取表目录，并让后续标签查询复用结果。
+# 旧实现会为 cmap/head/maxp/fvar/COLR/CBDT/sbix/SVG 分别 dd，字体库刷新时非常慢。
+FONT=$(find /usr/share/fonts -type f \( -iname 'DejaVuSans.ttf' -o -iname 'LiberationSans-Regular.ttf' \) -print -quit 2>/dev/null || true)
+if [ -s "$FONT" ]; then
+    mkdir -p "$TMP/bin"
+    REAL_DD=$(command -v dd)
+    cat > "$TMP/bin/dd" <<'EOS'
+#!/bin/sh
+_count=$(cat "$LUOSHU_DD_COUNT" 2>/dev/null || printf '0')
+case "$_count" in ''|*[!0-9]*) _count=0 ;; esac
+printf '%s\n' "$((_count + 1))" > "$LUOSHU_DD_COUNT"
+exec "$LUOSHU_REAL_DD" "$@"
+EOS
+    chmod 0755 "$TMP/bin/dd"
+    printf '0\n' > "$TMP/dd-count"
+    PATH="$TMP/bin:$PATH" LUOSHU_REAL_DD="$REAL_DD" LUOSHU_DD_COUNT="$TMP/dd-count" \
+        sh -c '
+            . "$1/common/font_check.sh"
+            font_validate "$2" text
+            test "$FONT_CHECK_FORMAT" = TTF
+            font_has_table "$2" cmap
+            font_has_table "$2" head
+            font_has_table "$2" maxp
+            font_has_table "$2" fvar || true
+        ' sh "$ROOT" "$FONT"
+    DD_CALLS=$(cat "$TMP/dd-count")
+    test "$DD_CALLS" -le 2
+fi
+
 # 单包内置 App 安装器必须正确处理当前版本、覆盖更新、延迟安装和签名失败。
 sh "$ROOT/scripts/app_installer_test.sh"
 
