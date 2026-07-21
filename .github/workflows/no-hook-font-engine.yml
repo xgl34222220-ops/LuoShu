@@ -9,6 +9,7 @@ on:
       - common/font_config_runtime.sh
       - common/font_config_weights.sh
       - common/font_name_normalize.py
+      - common/font_manager.sh
       - common/hyperos_global.sh
       - common/rom_adapters.sh
       - common/font_mix.sh
@@ -47,6 +48,7 @@ jobs:
           ! find android-app/app/src -type f \( -name 'xposed_init' -o -name 'scope.list' \) -print -quit | grep -q .
           ! grep -RInE 'IXposedHookLoadPackage|XposedBridge|LSPosed|lspatch' android-app/app/src common system 2>/dev/null
           grep -q 'font_config_boot_guard' post-fs-data.sh
-          grep -q 'font_config_generate' common/hyperos_global.sh
           grep -q 'font_config_enable_for_payload' common/hyperos_global.sh
+          grep -q 'font_config_enable_for_payload' common/font_mix.sh
+          grep -q 'font_config_disable' common/font_manager.sh
           grep -q 'product/mi_fonts_customization.xml' common/font_config_runtime.sh
