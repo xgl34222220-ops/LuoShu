@@ -358,7 +358,7 @@ build_font_index_json() {
     _refresh="$1"
     _current="$(get_current_font_id)"
     _fingerprint="$(font_index_fingerprint)"
-    _cache_key="native-v1|${_current}|${_fingerprint}"
+    _cache_key="native-v2|${_current}|${_fingerprint}"
     _saved_key="$(cat "$FONT_INDEX_KEY" 2>/dev/null)"
     if [ "$_refresh" != refresh ] && [ "$_saved_key" = "$_cache_key" ] && [ -s "$FONT_INDEX_JSON" ] && grep -q '"status":"ok"' "$FONT_INDEX_JSON" 2>/dev/null; then
         cat "$FONT_INDEX_JSON"

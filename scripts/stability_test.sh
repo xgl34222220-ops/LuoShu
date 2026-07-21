@@ -93,4 +93,11 @@ sh "$ROOT/scripts/app_installer_test.sh"
 # 原生 App 字体索引只在文件集合实际变化时失效。
 sh "$ROOT/scripts/font_library_cache_test.sh"
 
+# 字体导入必须同时淘汰模块端原生索引；App 索引版本升级后不得继续读取旧卡片元数据。
+grep -q 'native_font_index.json' "$ROOT/common/native_import.sh"
+grep -q 'native_font_index.key' "$ROOT/common/native_import.sh"
+grep -q 'native-v2|' "$ROOT/common/font_manager.sh"
+grep -q 'font-index-v2.json' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt"
+grep -q 'fontPreviewWeight' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
+
 echo 'LuoShu App-only stability checks passed.'

@@ -232,8 +232,11 @@ internal fun NativeFontPreview(
             .sortedBy { it.key }
             .joinToString(",") { "${it.key}=${formatAxisValue(it.value)}" }
     }
-    val requestedWeight = remember(cleanAxes) {
-        (cleanAxes["wght"] ?: 400f).roundToInt().coerceIn(1, 1000)
+    val requestedWeight = remember(cleanAxes, font?.id, font?.weights) {
+        val fallback = font?.let {
+            io.github.xgl34222220.luoshu.ui.font.fontPreviewWeight(it).toFloat()
+        } ?: 400f
+        (cleanAxes["wght"] ?: fallback).roundToInt().coerceIn(1, 1000)
     }
     val sourceRevision = remember(font, requestedWeight) {
         font?.let {
