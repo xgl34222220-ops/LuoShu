@@ -66,3 +66,8 @@ _luoshu_font_config_specs() {
 $(_luoshu_font_config_partition_rows)
 EOF_LUOSHU_PARTITIONS
 }
+
+# ColorOS uses product/system_ext named families (notably google-sans-text) for some app controls.
+# Load the partition-aware adapter after the generic ROM adapter so its copy_as_coloros wins.
+_luoshu_coloros_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/coloros_global.sh"
+[ -f "$_luoshu_coloros_helper" ] && . "$_luoshu_coloros_helper"
