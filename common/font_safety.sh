@@ -34,6 +34,17 @@ _luoshu_checksum() {
     fi
 }
 
+_luoshu_filesize() {
+    _lfs_file="$1"
+    if command -v stat >/dev/null 2>&1; then
+        stat -c '%s' "$_lfs_file" 2>/dev/null && return 0
+    fi
+    if command -v toybox >/dev/null 2>&1; then
+        toybox stat -c '%s' "$_lfs_file" 2>/dev/null && return 0
+    fi
+    wc -c < "$_lfs_file" 2>/dev/null | tr -d '[:space:]'
+}
+
 luoshu_dynamic_targets_clear() {
     _ldt_module="$(_luoshu_safety_module)"
     _ldt_manifest="$(_luoshu_safety_config)/font-target-aliases.conf"
@@ -216,7 +227,7 @@ luoshu_payload_build_manifest() {
     chmod 0644 "$_lpm_config/font-payload-manifest.conf" 2>/dev/null || true
 }
 
-luoshu_payload_validate_manifest() {
+luoshu_payload_validate_manifest_full() {
     _lpvm_module="$(_luoshu_safety_module)"
     _lpvm_manifest="$(_luoshu_safety_config)/font-payload-manifest.conf"
     [ -s "$_lpvm_manifest" ] || return 1
@@ -230,6 +241,34 @@ luoshu_payload_validate_manifest() {
         _lpvm_seen=$((_lpvm_seen + 1))
     done < "$_lpvm_manifest"
     [ "$_lpvm_seen" -gt 0 ]
+}
+
+# Early boot only checks font size metadata and tiny XML checksums. Full file checksums are generated
+# during the App-side transaction, never before Zygote.
+luoshu_payload_validate_manifest_fast() {
+    _lpvf_module="$(_luoshu_safety_module)"
+    _lpvf_manifest="$(_luoshu_safety_config)/font-payload-manifest.conf"
+    [ -s "$_lpvf_manifest" ] || return 1
+    _lpvf_seen=0
+    while IFS='|' read -r _lpvf_rel _lpvf_sum _lpvf_size; do
+        case "$_lpvf_size" in ''|*[!0-9]*) return 1 ;; esac
+        _lpvf_file="$_lpvf_module/$_lpvf_rel"
+        [ -f "$_lpvf_file" ] || return 1
+        case "$_lpvf_rel" in
+            */fonts/*)
+                _lpvf_now=$(_luoshu_filesize "$_lpvf_file")
+                case "$_lpvf_now" in ''|*[!0-9]*) return 1 ;; esac
+                [ "$_lpvf_now" -ge 1024 ] && [ "$_lpvf_now" = "$_lpvf_size" ] || return 1
+                ;;
+            */etc/*.xml)
+                _lpvf_now=$(_luoshu_checksum "$_lpvf_file")
+                [ "$_lpvf_now" = "$_lpvf_sum|$_lpvf_size" ] || return 1
+                ;;
+            *) return 1 ;;
+        esac
+        _lpvf_seen=$((_lpvf_seen + 1))
+    done < "$_lpvf_manifest"
+    [ "$_lpvf_seen" -gt 0 ]
 }
 
 luoshu_payload_arm() {
@@ -265,6 +304,7 @@ luoshu_payload_transaction_begin() {
             _lpt_src="$_lpt_module/$_lpt_rel"
             if [ -d "$_lpt_src" ]; then
                 mkdir -p "$LUOSHU_PAYLOAD_TXN/tree/$_lpt_part" 2>/dev/null || return 1
+                cp -al "$_lpt_src" "$LUOSHU_PAYLOAD_TXN/tree/$_lpt_rel" 2>/dev/null ||
                 cp -af "$_lpt_src" "$LUOSHU_PAYLOAD_TXN/tree/$_lpt_rel" 2>/dev/null || {
                     mkdir -p "$LUOSHU_PAYLOAD_TXN/tree/$_lpt_rel" 2>/dev/null || return 1
                     cp -rfp "$_lpt_src/." "$LUOSHU_PAYLOAD_TXN/tree/$_lpt_rel/" 2>/dev/null || return 1
@@ -308,7 +348,15 @@ luoshu_payload_transaction_rollback() {
 }
 
 luoshu_payload_transaction_abort() {
-    [ -z "$LUOSHU_PAYLOAD_TXN" ] || luoshu_payload_transaction_rollback
+    _lpta_had=0
+    if [ -n "$LUOSHU_PAYLOAD_TXN" ]; then
+        _lpta_had=1
+        luoshu_payload_transaction_rollback
+    fi
+    if [ "$_lpta_had" -eq 1 ] && type luoshu_sync_mount_payload >/dev/null 2>&1; then
+        luoshu_sync_mount_payload >/dev/null 2>&1 ||
+            _luoshu_safety_log ERROR '本地旧字体已恢复，但元模块旧负载回写失败；开机守卫将撤销覆盖'
+    fi
 }
 
 luoshu_payload_transaction_commit() {
@@ -370,24 +418,34 @@ font_config_boot_guard() {
         rm -f "$_lbg_config/font-payload-boot.conf" "$_lbg_config/font-payload-manifest.conf" 2>/dev/null || true
         return 0
     fi
-    if [ "$_lbg_state" = booting ]; then
-        luoshu_payload_quarantine
-        return 1
-    fi
-    if [ -z "$_lbg_state" ]; then
-        luoshu_payload_validate_current "$_lbg_active" || { luoshu_payload_quarantine; return 1; }
-        luoshu_payload_build_manifest || { luoshu_payload_quarantine; return 1; }
-    else
-        [ "$_lbg_state" = prepared ] || { luoshu_payload_quarantine; return 1; }
-        luoshu_payload_validate_manifest || { luoshu_payload_quarantine; return 1; }
-    fi
-    {
-        printf 'state=booting\n'
-        printf 'font=%s\n' "$_lbg_active"
-        printf 'time=%s\n' "$(date +%s)"
-    } > "$_lbg_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || { luoshu_payload_quarantine; return 1; }
-    mv -f "$_lbg_config/font-payload-boot.conf.tmp.$$" "$_lbg_config/font-payload-boot.conf" 2>/dev/null || { luoshu_payload_quarantine; return 1; }
-    _luoshu_safety_log INFO '字体负载轻量启动校验通过，等待系统完成开机确认'
+    case "$_lbg_state" in
+        booting)
+            luoshu_payload_quarantine
+            return 1
+            ;;
+        prepared)
+            luoshu_payload_validate_manifest_fast || { luoshu_payload_quarantine; return 1; }
+            {
+                printf 'state=booting
+'
+                printf 'font=%s
+' "$_lbg_active"
+                printf 'time=%s
+' "$(date +%s)"
+            } > "$_lbg_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || { luoshu_payload_quarantine; return 1; }
+            mv -f "$_lbg_config/font-payload-boot.conf.tmp.$$" "$_lbg_config/font-payload-boot.conf" 2>/dev/null || { luoshu_payload_quarantine; return 1; }
+            _luoshu_safety_log INFO '新字体负载轻量校验通过，等待 Android 完成开机确认'
+            ;;
+        confirmed)
+            luoshu_payload_validate_manifest_fast || { luoshu_payload_quarantine; return 1; }
+            ;;
+        *)
+            # An older engine has no trusted transaction manifest. Restore the ROM font once instead
+            # of parsing or hashing large payloads before Zygote.
+            luoshu_payload_quarantine
+            return 1
+            ;;
+    esac
     return 0
 }
 
@@ -395,8 +453,19 @@ font_config_mark_boot_success() {
     _lmbs_config="$(_luoshu_safety_config)"
     _lmbs_state=$(sed -n 's/^state=//p' "$_lmbs_config/font-payload-boot.conf" 2>/dev/null | head -n1)
     [ "$_lmbs_state" = booting ] || return 0
-    rm -f "$_lmbs_config/font-payload-boot.conf" "$_lmbs_config/font-boot-failures" 2>/dev/null || true
-    printf 'time=%s\n' "$(date +%s)" > "$_lmbs_config/font-last-boot-success.conf" 2>/dev/null || true
-    chmod 0644 "$_lmbs_config/font-last-boot-success.conf" 2>/dev/null || true
-    _luoshu_safety_log INFO '系统已完成开机，字体负载事务确认成功'
+    _lmbs_font=$(sed -n 's/^font=//p' "$_lmbs_config/font-payload-boot.conf" 2>/dev/null | head -n1)
+    {
+        printf 'state=confirmed
+'
+        printf 'font=%s
+' "${_lmbs_font:-unknown}"
+        printf 'time=%s
+' "$(date +%s)"
+    } > "$_lmbs_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || return 1
+    mv -f "$_lmbs_config/font-payload-boot.conf.tmp.$$" "$_lmbs_config/font-payload-boot.conf" 2>/dev/null || return 1
+    rm -f "$_lmbs_config/font-boot-failures" 2>/dev/null || true
+    printf 'time=%s
+' "$(date +%s)" > "$_lmbs_config/font-last-boot-success.conf" 2>/dev/null || true
+    chmod 0644 "$_lmbs_config/font-payload-boot.conf" "$_lmbs_config/font-last-boot-success.conf" 2>/dev/null || true
+    _luoshu_safety_log INFO 'Android 已完成开机，字体负载事务确认成功'
 }
