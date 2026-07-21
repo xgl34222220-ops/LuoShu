@@ -1,6 +1,6 @@
 #!/system/bin/sh
-# LuoShu meta-module / OverlayFS compatibility layer.
-# Synchronization runs only after an App-side payload transaction has validated successfully.
+# LuoShu metamodule compatibility adapters.
+# Each mount engine has a different content contract; never mirror into guessed runtime paths.
 set +e
 
 LUOSHU_MOUNT_MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
@@ -25,133 +25,185 @@ luoshu_payload_partitions() {
 }
 
 luoshu_detect_root_manager() {
-    if [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then
+    if [ -n "${APATCH:-}" ] || [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then
         printf 'APatch\n'
-    elif [ -d /data/adb/ksu ]; then
-        if [ -e /data/adb/ksu/.ksud ] || [ -d /data/adb/ksu/bin ]; then printf 'KernelSU\n'; else printf 'KernelSU-compatible\n'; fi
-    elif [ -d /data/adb/magisk ] || [ -x /data/adb/magisk/magisk ]; then
+    elif [ -n "${KSU:-}" ] || [ -d /data/adb/ksu ]; then
+        printf 'KernelSU\n'
+    elif [ -n "${MAGISK_VER_CODE:-}" ] || [ -d /data/adb/magisk ] || [ -x /data/adb/magisk/magisk ]; then
         printf 'Magisk\n'
     else
         printf 'unknown\n'
     fi
 }
 
+_luoshu_module_prop_id() {
+    sed -n 's/^id=//p' "$1/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
 luoshu_detect_mount_engine() {
-    _ldme_id=$(luoshu_module_id)
-    if [ -n "${LUOSHU_META_TEST_ROOT:-}" ]; then
-        printf 'test-meta\n'
-    elif [ -n "${MODULE_CONTENT_DIR:-}" ]; then
-        printf 'external-content-dir\n'
-    elif [ -d "/data/adb/metamodule/mnt/$_ldme_id" ] || \
-         [ -d "/data/adb/modules/meta-overlay/mnt/$_ldme_id" ] || \
-         [ -d "/data/adb/modules/meta-overlayfs/mnt/$_ldme_id" ]; then
-        printf 'meta-overlayfs\n'
-    elif [ -d /data/adb/mountify ] || [ -d /data/adb/modules/Mountify ]; then
-        printf 'mountify\n'
-    elif [ -e /data/adb/modules/.hybrid_mount ] || [ -d /data/adb/modules/HybridMount ]; then
-        printf 'hybrid-mount\n'
-    elif [ -f "$LUOSHU_MOUNT_MODDIR/magic" ]; then
-        printf 'magic-mount\n'
-    else
-        printf 'native-module-mount\n'
-    fi
-}
+    [ -z "${LUOSHU_META_TEST_ENGINE:-}" ] || { printf '%s\n' "$LUOSHU_META_TEST_ENGINE"; return 0; }
 
-luoshu_root_candidate() {
-    _lrc_base="$1"
-    _lrc_id="$2"
-    [ -n "$_lrc_base" ] || return 0
-    case "$_lrc_base" in
-        */"$_lrc_id") printf '%s\n' "$_lrc_base" ;;
-        *) printf '%s/%s\n' "${_lrc_base%/}" "$_lrc_id" ;;
+    _ldme_meta_id=$(_luoshu_module_prop_id /data/adb/metamodule)
+    case "$_ldme_meta_id" in
+        meta-overlay|meta-overlayfs|meta-overlayfsUltra) printf 'meta-overlayfs\n'; return 0 ;;
     esac
-}
-
-# Output the content roots actually consumed by meta-mount engines, one module root per line.
-luoshu_meta_content_roots() {
-    _lmcr_id=$(luoshu_module_id)
-    _lmcr_seen=''
-    _lmcr_candidates=''
-
-    if [ -n "${LUOSHU_META_TEST_ROOT:-}" ]; then
-        luoshu_root_candidate "$LUOSHU_META_TEST_ROOT" "$_lmcr_id"
+    if [ -n "${MODULE_CONTENT_DIR:-}" ] && [ -n "${MODULE_METADATA_DIR:-}" ]; then
+        printf 'dual-dir-metamodule\n'
+        return 0
+    fi
+    if [ -d /data/adb/metamodule/mnt ] && { [ -f /data/adb/metamodule/modules.img ] || [ -L /data/adb/metamodule ]; }; then
+        printf 'meta-overlayfs\n'
         return 0
     fi
 
-    for _lmcr_base in \
-        "${MODULE_CONTENT_DIR:-}" \
-        /data/adb/metamodule/mnt \
-        /data/adb/metamodule/modules \
-        /data/adb/modules/.metamodule/mnt \
-        /data/adb/modules/meta-overlay/mnt \
-        /data/adb/modules/meta-overlayfs/mnt \
-        /data/adb/mountify/mnt \
-        /data/adb/modules/Mountify/mnt \
-        /data/adb/modules/HybridMount/mnt \
-        /data/adb/ksu/metamodule/mnt \
-        /data/adb/ap/metamodule/mnt; do
-        [ -n "$_lmcr_base" ] || continue
-        _lmcr_candidate=$(luoshu_root_candidate "$_lmcr_base" "$_lmcr_id")
-        _lmcr_candidates="$_lmcr_candidates $_lmcr_candidate"
-    done
-
-    # New meta modules frequently move their staging root. Discover only paths that clearly belong to
-    # a mount/meta engine; never mirror into arbitrary directories named after the module.
-    if command -v find >/dev/null 2>&1 && [ -d /data/adb ]; then
-        for _lmcr_candidate in $(find /data/adb -maxdepth 6 -type d -name "$_lmcr_id" 2>/dev/null); do
-            case "$_lmcr_candidate" in
-                */mnt/"$_lmcr_id"|*/metamodule/*/"$_lmcr_id"|*/meta-overlay*/*/"$_lmcr_id"|*/mountify/*/"$_lmcr_id"|*/HybridMount/*/"$_lmcr_id")
-                    _lmcr_candidates="$_lmcr_candidates $_lmcr_candidate"
-                    ;;
-            esac
-        done
+    if [ -d /data/adb/mountify ] || [ -d /data/adb/modules/mountify ] || [ -d /data/adb/modules/Mountify ]; then
+        printf 'mountify\n'
+        return 0
     fi
+    if command -v hybrid-mount >/dev/null 2>&1 || [ -d /data/adb/hybrid-mount ] || \
+       [ -d /data/adb/modules/meta-hybrid_mount ] || [ -d /data/adb/modules/hybrid_mount ]; then
+        printf 'hybrid-mount\n'
+        return 0
+    fi
+    if [ -d /data/adb/modules/magic_mount_rs ] || [ -d /data/adb/modules/magic-mount-rs ]; then
+        printf 'magic-mount-rs\n'
+        return 0
+    fi
+    printf 'native-module-mount\n'
+}
 
-    for _lmcr_root in $_lmcr_candidates; do
-        [ -n "$_lmcr_root" ] || continue
-        [ "$_lmcr_root" != "$LUOSHU_MOUNT_MODDIR" ] || continue
-        case " $_lmcr_seen " in *" $_lmcr_root "*) continue ;; esac
-        _lmcr_seen="$_lmcr_seen $_lmcr_root"
-        _lmcr_parent=${_lmcr_root%/*}
-        [ -d "$_lmcr_root" ] || [ -d "$_lmcr_parent" ] || continue
-        [ -w "$_lmcr_root" ] || [ -w "$_lmcr_parent" ] || continue
-        printf '%s\n' "$_lmcr_root"
-    done
+luoshu_engine_partitions() {
+    case "${1:-$(luoshu_detect_mount_engine)}" in
+        meta-overlayfs|dual-dir-metamodule)
+            # Official meta-overlayfs relocates only these six partitions during installation.
+            printf '%s\n' 'system vendor product system_ext odm oem'
+            ;;
+        *)
+            luoshu_payload_partitions
+            ;;
+    esac
+}
+
+luoshu_dual_content_base() {
+    if [ -n "${LUOSHU_META_TEST_ROOT:-}" ]; then
+        printf '%s\n' "$LUOSHU_META_TEST_ROOT"
+    elif [ -n "${MODULE_CONTENT_DIR:-}" ]; then
+        printf '%s\n' "${MODULE_CONTENT_DIR%/}"
+    else
+        printf '/data/adb/metamodule/mnt\n'
+    fi
+}
+
+# Only dual-directory metamodules expose a second persistent module tree.
+# Mountify, Hybrid Mount and Magic Mount read /data/adb/modules directly and must never be mirrored.
+luoshu_meta_content_roots() {
+    _lmcr_engine=$(luoshu_detect_mount_engine)
+    case "$_lmcr_engine" in meta-overlayfs|dual-dir-metamodule) ;; *) return 0 ;; esac
+    _lmcr_base=$(luoshu_dual_content_base)
+    _lmcr_id=$(luoshu_module_id)
+    case "$_lmcr_base" in */"$_lmcr_id") _lmcr_root="$_lmcr_base" ;; *) _lmcr_root="$_lmcr_base/$_lmcr_id" ;; esac
+    [ "$_lmcr_root" != "$LUOSHU_MOUNT_MODDIR" ] || return 0
+    printf '%s\n' "$_lmcr_root"
 }
 
 luoshu_mount_lock_acquire() {
     if [ -f "$LUOSHU_MOUNT_LOCK" ]; then
         _lmla_pid=$(cat "$LUOSHU_MOUNT_LOCK" 2>/dev/null)
         if [ -n "$_lmla_pid" ] && kill -0 "$_lmla_pid" 2>/dev/null; then
-            luoshu_mount_log "拒绝并发元模块同步：pid=$_lmla_pid"
+            luoshu_mount_log "拒绝并发元模块更新：pid=$_lmla_pid"
             return 1
         fi
         rm -f "$LUOSHU_MOUNT_LOCK" 2>/dev/null || true
     fi
     printf '%s\n' "$$" > "$LUOSHU_MOUNT_LOCK" 2>/dev/null || return 1
-    return 0
 }
 
 luoshu_mount_lock_release() {
     rm -f "$LUOSHU_MOUNT_LOCK" 2>/dev/null || true
 }
 
-luoshu_tree_fingerprint() {
-    _ltf_root="$1"
-    [ -d "$_ltf_root" ] || { printf 'absent\n'; return 0; }
-    _ltf_tmp="${TMPDIR:-/data/local/tmp}/.luoshu-fingerprint.$$"
-    rm -f "$_ltf_tmp" 2>/dev/null || true
-    find "$_ltf_root" -type f 2>/dev/null | sort | while IFS= read -r _ltf_file; do
-        _ltf_rel=${_ltf_file#$_ltf_root/}
-        _ltf_sum=$(cksum "$_ltf_file" 2>/dev/null | awk '{print $1 ":" $2}')
-        printf '%s|%s\n' "$_ltf_rel" "$_ltf_sum"
-    done > "$_ltf_tmp" 2>/dev/null
-    if command -v cksum >/dev/null 2>&1; then
-        cksum "$_ltf_tmp" 2>/dev/null | awk '{print $1 ":" $2}'
-    else
-        wc -c < "$_ltf_tmp" 2>/dev/null
+luoshu_mountpoint_ready() {
+    _lmr_path="$1"
+    [ -n "${LUOSHU_META_TEST_ROOT:-}" ] && return 0
+    if command -v mountpoint >/dev/null 2>&1; then
+        mountpoint -q "$_lmr_path" 2>/dev/null && return 0
     fi
-    rm -f "$_ltf_tmp" 2>/dev/null || true
+    awk -v p="$_lmr_path" '$2 == p { found=1 } END { exit !found }' /proc/mounts 2>/dev/null
+}
+
+luoshu_mountify_value() {
+    _lmv_key="$1"
+    for _lmv_conf in /data/adb/mountify/config.sh /data/adb/modules/mountify/config.sh /data/adb/modules/Mountify/config.sh; do
+        [ -f "$_lmv_conf" ] || continue
+        sed -n "s/^[[:space:]]*${_lmv_key}[[:space:]]*=[[:space:]]*[\"']\{0,1\}\([^\"'#[:space:]]*\).*/\1/p" "$_lmv_conf" 2>/dev/null | tail -n1
+        return 0
+    done
+    return 1
+}
+
+luoshu_mountify_module_selected() {
+    _lmms_id=$(luoshu_module_id)
+    _lmms_mode=$(luoshu_mountify_value mountify_mounts)
+    [ -n "$_lmms_mode" ] || _lmms_mode=2
+    [ "$_lmms_mode" != 1 ] && return 0
+    for _lmms_list in /data/adb/mountify/modules.txt /data/adb/modules/mountify/modules.txt /data/adb/modules/Mountify/modules.txt; do
+        [ -f "$_lmms_list" ] || continue
+        grep -Fxq "$_lmms_id" "$_lmms_list" 2>/dev/null && return 0
+    done
+    return 1
+}
+
+LUOSHU_MOUNT_PREFLIGHT_ERROR=''
+luoshu_mount_preflight() {
+    LUOSHU_MOUNT_PREFLIGHT_ERROR=''
+    _lmp_engine=$(luoshu_detect_mount_engine)
+    _lmp_manager=$(luoshu_detect_root_manager)
+
+    for _lmp_marker in disable remove mount_error; do
+        if [ -e "$LUOSHU_MOUNT_MODDIR/$_lmp_marker" ]; then
+            LUOSHU_MOUNT_PREFLIGHT_ERROR="模块存在 $_lmp_marker 标记，元模块不会挂载洛书"
+            return 1
+        fi
+    done
+
+    case "$_lmp_engine" in
+        meta-overlayfs|dual-dir-metamodule|hybrid-mount|magic-mount-rs)
+            if [ -e "$LUOSHU_MOUNT_MODDIR/skip_mount" ]; then
+                LUOSHU_MOUNT_PREFLIGHT_ERROR='检测到 skip_mount，当前元模块会跳过洛书负载'
+                return 1
+            fi
+            ;;
+        mountify)
+            if [ "$_lmp_manager" = Magisk ]; then
+                if [ -e "$LUOSHU_MOUNT_MODDIR/skip_mountify" ]; then
+                    LUOSHU_MOUNT_PREFLIGHT_ERROR='检测到 skip_mountify，Mountify 已排除洛书'
+                    return 1
+                fi
+            elif [ -e "$LUOSHU_MOUNT_MODDIR/skip_mount" ]; then
+                LUOSHU_MOUNT_PREFLIGHT_ERROR='检测到 skip_mount，Mountify 已排除洛书'
+                return 1
+            fi
+            if ! luoshu_mountify_module_selected; then
+                LUOSHU_MOUNT_PREFLIGHT_ERROR='Mountify 当前为白名单模式，但 modules.txt 未包含 LuoShu'
+                return 1
+            fi
+            ;;
+    esac
+
+    case "$_lmp_engine" in
+        meta-overlayfs|dual-dir-metamodule)
+            _lmp_base=$(luoshu_dual_content_base)
+            if ! luoshu_mountpoint_ready "$_lmp_base"; then
+                LUOSHU_MOUNT_PREFLIGHT_ERROR="元模块内容镜像未挂载：$_lmp_base；请先完整重启或重装元模块"
+                return 1
+            fi
+            [ -w "$_lmp_base" ] || {
+                LUOSHU_MOUNT_PREFLIGHT_ERROR="元模块内容镜像不可写：$_lmp_base"
+                return 1
+            }
+            ;;
+    esac
+    return 0
 }
 
 luoshu_copy_tree_bounded() {
@@ -166,33 +218,21 @@ luoshu_copy_tree_bounded() {
     fi
     rm -rf "$_lctb_dst" 2>/dev/null || true
     mkdir -p "$_lctb_dst" 2>/dev/null || return 1
-    if command -v timeout >/dev/null 2>&1; then
-        timeout "$LUOSHU_MOUNT_TIMEOUT" cp -rfp "$_lctb_src/." "$_lctb_dst/" 2>/dev/null
-    elif command -v toybox >/dev/null 2>&1 && toybox timeout --help >/dev/null 2>&1; then
-        toybox timeout "$LUOSHU_MOUNT_TIMEOUT" cp -rfp "$_lctb_src/." "$_lctb_dst/" 2>/dev/null
-    else
-        cp -rfp "$_lctb_src/." "$_lctb_dst/" 2>/dev/null
-    fi
+    cp -rfp "$_lctb_src/." "$_lctb_dst/" 2>/dev/null
 }
 
 luoshu_copy_partition_atomic() {
     _lcpa_src="$1"
     _lcpa_dst="$2"
-    _lcpa_fingerprint="$3"
     _lcpa_parent=${_lcpa_dst%/*}
     _lcpa_name=${_lcpa_dst##*/}
     _lcpa_tmp="$_lcpa_parent/.${_lcpa_name}.luoshu.$$"
     _lcpa_backup="$_lcpa_parent/.${_lcpa_name}.luoshu-backup.$$"
-
     mkdir -p "$_lcpa_parent" 2>/dev/null || return 1
     rm -rf "$_lcpa_tmp" "$_lcpa_backup" 2>/dev/null || true
     luoshu_copy_tree_bounded "$_lcpa_src" "$_lcpa_tmp" || { rm -rf "$_lcpa_tmp"; return 1; }
-    printf '%s\n' "$_lcpa_fingerprint" > "$_lcpa_tmp/.luoshu-part-fingerprint" 2>/dev/null || { rm -rf "$_lcpa_tmp"; return 1; }
     chmod -R u=rwX,go=rX "$_lcpa_tmp" 2>/dev/null || true
-
-    if [ -e "$_lcpa_dst" ]; then
-        mv "$_lcpa_dst" "$_lcpa_backup" 2>/dev/null || { rm -rf "$_lcpa_tmp"; return 1; }
-    fi
+    [ ! -e "$_lcpa_dst" ] || mv "$_lcpa_dst" "$_lcpa_backup" 2>/dev/null || { rm -rf "$_lcpa_tmp"; return 1; }
     if mv "$_lcpa_tmp" "$_lcpa_dst" 2>/dev/null; then
         rm -rf "$_lcpa_backup" 2>/dev/null || true
         return 0
@@ -203,84 +243,171 @@ luoshu_copy_partition_atomic() {
     return 1
 }
 
+luoshu_write_mount_probe() {
+    _lwmp_active="${1:-unknown}"
+    _lwmp_engine=$(luoshu_detect_mount_engine)
+    _lwmp_id=$(luoshu_module_id)
+    _lwmp_nonce="$(date +%s 2>/dev/null || echo 0)-$$"
+    _lwmp_dir="$LUOSHU_MOUNT_MODDIR/system/etc/luoshu"
+    mkdir -p "$_lwmp_dir" "$LUOSHU_MOUNT_MODDIR/config" 2>/dev/null || return 1
+    {
+        printf 'id=%s\n' "$_lwmp_id"
+        printf 'font=%s\n' "$_lwmp_active"
+        printf 'engine=%s\n' "$_lwmp_engine"
+        printf 'nonce=%s\n' "$_lwmp_nonce"
+    } > "$_lwmp_dir/mount-probe.conf.tmp.$$" 2>/dev/null || return 1
+    mv -f "$_lwmp_dir/mount-probe.conf.tmp.$$" "$_lwmp_dir/mount-probe.conf" 2>/dev/null || return 1
+    cp -f "$_lwmp_dir/mount-probe.conf" "$LUOSHU_MOUNT_MODDIR/config/mount-probe-expected.conf" 2>/dev/null || return 1
+    chmod 0644 "$_lwmp_dir/mount-probe.conf" "$LUOSHU_MOUNT_MODDIR/config/mount-probe-expected.conf" 2>/dev/null || true
+}
+
+luoshu_mount_record() {
+    _lmr_state="$1"; _lmr_detail="$2"; _lmr_root="$3"; _lmr_synced="$4"; _lmr_failed="$5"
+    mkdir -p "$LUOSHU_MOUNT_MODDIR/config" 2>/dev/null || true
+    {
+        printf 'manager=%s\n' "$(luoshu_detect_root_manager)"
+        printf 'engine=%s\n' "$(luoshu_detect_mount_engine)"
+        printf 'state=%s\n' "$_lmr_state"
+        printf 'detail=%s\n' "$_lmr_detail"
+        printf 'contentRoot=%s\n' "$_lmr_root"
+        printf 'synced=%s\n' "$_lmr_synced"
+        printf 'failed=%s\n' "$_lmr_failed"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$LUOSHU_MOUNT_MODDIR/config/mount_compat.conf.tmp.$$" 2>/dev/null || return 0
+    mv -f "$LUOSHU_MOUNT_MODDIR/config/mount_compat.conf.tmp.$$" "$LUOSHU_MOUNT_MODDIR/config/mount_compat.conf" 2>/dev/null || true
+}
+
 luoshu_sync_mount_payload() {
+    _lsmp_active="${1:-$(head -n1 "$LUOSHU_MOUNT_MODDIR/config/active_font.conf" 2>/dev/null)}"
+    [ -n "$_lsmp_active" ] || _lsmp_active=default
     _lsmp_engine=$(luoshu_detect_mount_engine)
-    _lsmp_manager=$(luoshu_detect_root_manager)
-    _lsmp_roots=''
     _lsmp_synced=0
-    _lsmp_skipped=0
     _lsmp_failed=0
+    _lsmp_root=''
 
     luoshu_mount_lock_acquire || return 1
     trap 'luoshu_mount_lock_release' EXIT HUP INT TERM
+    if ! luoshu_mount_preflight; then
+        luoshu_mount_record failed "$LUOSHU_MOUNT_PREFLIGHT_ERROR" '' 0 1
+        luoshu_mount_log "元模块预检失败：engine=$_lsmp_engine error=$LUOSHU_MOUNT_PREFLIGHT_ERROR"
+        luoshu_mount_lock_release
+        trap - EXIT HUP INT TERM
+        return 1
+    fi
+    luoshu_write_mount_probe "$_lsmp_active" || {
+        luoshu_mount_record failed '无法生成挂载探针' '' 0 1
+        luoshu_mount_lock_release
+        trap - EXIT HUP INT TERM
+        return 1
+    }
 
-    for _lsmp_root in $(luoshu_meta_content_roots); do
-        [ -n "$_lsmp_root" ] || continue
-        _lsmp_roots="${_lsmp_roots}${_lsmp_roots:+,}$_lsmp_root"
-        mkdir -p "$_lsmp_root" 2>/dev/null || { _lsmp_failed=$((_lsmp_failed + 1)); continue; }
-        for _lsmp_part in $(luoshu_payload_partitions); do
-            _lsmp_src="$LUOSHU_MOUNT_MODDIR/$_lsmp_part"
-            _lsmp_dst="$_lsmp_root/$_lsmp_part"
-            if [ -d "$_lsmp_src" ]; then
-                _lsmp_fp=$(luoshu_tree_fingerprint "$_lsmp_src")
-                _lsmp_old=$(cat "$_lsmp_dst/.luoshu-part-fingerprint" 2>/dev/null)
-                if [ -n "$_lsmp_fp" ] && [ "$_lsmp_fp" = "$_lsmp_old" ]; then
-                    _lsmp_skipped=$((_lsmp_skipped + 1))
-                    continue
-                fi
-                if luoshu_copy_partition_atomic "$_lsmp_src" "$_lsmp_dst" "$_lsmp_fp"; then
-                    _lsmp_synced=$((_lsmp_synced + 1))
-                else
-                    _lsmp_failed=$((_lsmp_failed + 1))
-                fi
-            else
-                rm -rf "$_lsmp_dst" 2>/dev/null || _lsmp_failed=$((_lsmp_failed + 1))
+    case "$_lsmp_engine" in
+        meta-overlayfs|dual-dir-metamodule)
+            _lsmp_root=$(luoshu_meta_content_roots | head -n1)
+            [ -n "$_lsmp_root" ] || _lsmp_failed=1
+            if [ "$_lsmp_failed" -eq 0 ]; then
+                mkdir -p "$_lsmp_root" 2>/dev/null || _lsmp_failed=1
             fi
-        done
-        printf 'source=%s\ntime=%s\n' "$LUOSHU_MOUNT_MODDIR" "$(date +%s)" > "$_lsmp_root/.luoshu-payload" 2>/dev/null || true
-    done
-
-    mkdir -p "$LUOSHU_MOUNT_MODDIR/config" 2>/dev/null || true
-    {
-        printf 'manager=%s\n' "$_lsmp_manager"
-        printf 'engine=%s\n' "$_lsmp_engine"
-        printf 'roots=%s\n' "$_lsmp_roots"
-        printf 'synced=%s\n' "$_lsmp_synced"
-        printf 'skipped=%s\n' "$_lsmp_skipped"
-        printf 'failed=%s\n' "$_lsmp_failed"
-        printf 'time=%s\n' "$(date +%s)"
-    } > "$LUOSHU_MOUNT_MODDIR/config/mount_compat.conf.tmp.$$" 2>/dev/null || true
-    mv -f "$LUOSHU_MOUNT_MODDIR/config/mount_compat.conf.tmp.$$" "$LUOSHU_MOUNT_MODDIR/config/mount_compat.conf" 2>/dev/null || true
+            if [ "$_lsmp_failed" -eq 0 ]; then
+                for _lsmp_part in $(luoshu_engine_partitions "$_lsmp_engine"); do
+                    _lsmp_src="$LUOSHU_MOUNT_MODDIR/$_lsmp_part"
+                    _lsmp_dst="$_lsmp_root/$_lsmp_part"
+                    if [ -d "$_lsmp_src" ]; then
+                        if luoshu_copy_partition_atomic "$_lsmp_src" "$_lsmp_dst"; then
+                            _lsmp_synced=$((_lsmp_synced + 1))
+                        else
+                            _lsmp_failed=$((_lsmp_failed + 1))
+                            break
+                        fi
+                    else
+                        rm -rf "$_lsmp_dst" 2>/dev/null || _lsmp_failed=$((_lsmp_failed + 1))
+                    fi
+                done
+            fi
+            ;;
+        *)
+            # Direct-source engines rescan the canonical module tree on the next reboot.
+            _lsmp_synced=0
+            ;;
+    esac
 
     luoshu_mount_lock_release
     trap - EXIT HUP INT TERM
     if [ "$_lsmp_failed" -gt 0 ]; then
-        luoshu_mount_log "元模块同步失败并保持旧负载：manager=$_lsmp_manager engine=$_lsmp_engine roots=$_lsmp_roots synced=$_lsmp_synced skipped=$_lsmp_skipped failed=$_lsmp_failed"
+        luoshu_mount_record failed '元模块内容更新失败，已保留旧分区目录' "$_lsmp_root" "$_lsmp_synced" "$_lsmp_failed"
+        luoshu_mount_log "元模块更新失败：engine=$_lsmp_engine root=$_lsmp_root synced=$_lsmp_synced failed=$_lsmp_failed"
         return 1
     fi
-    if [ -n "$_lsmp_roots" ]; then
-        luoshu_mount_log "元模块同步完成：manager=$_lsmp_manager engine=$_lsmp_engine roots=$_lsmp_roots synced=$_lsmp_synced skipped=$_lsmp_skipped"
+    if [ "$_lsmp_engine" = meta-overlayfs ] || [ "$_lsmp_engine" = dual-dir-metamodule ]; then
+        luoshu_mount_record prepared '已写入元模块真实内容镜像，等待重启验证' "$_lsmp_root" "$_lsmp_synced" 0
     else
-        luoshu_mount_log "当前挂载引擎直接读取模块目录，无需镜像：manager=$_lsmp_manager engine=$_lsmp_engine"
+        luoshu_mount_record prepared '当前引擎直接读取标准模块目录，等待重启验证' '' 0 0
     fi
+    luoshu_mount_log "元模块适配完成：engine=$_lsmp_engine root=$_lsmp_root synced=$_lsmp_synced"
     return 0
 }
 
-luoshu_mount_status_json() {
-    _lmsj_engine=$(luoshu_detect_mount_engine)
-    _lmsj_manager=$(luoshu_detect_root_manager)
-    _lmsj_roots=''
-    for _lmsj_root in $(luoshu_meta_content_roots); do _lmsj_roots="${_lmsj_roots}${_lmsj_roots:+,}$_lmsj_root"; done
-    _lmsj_conf="$LUOSHU_MOUNT_MODDIR/config/mount_compat.conf"
-    _lmsj_synced=$(sed -n 's/^synced=//p' "$_lmsj_conf" 2>/dev/null | head -n1)
-    _lmsj_skipped=$(sed -n 's/^skipped=//p' "$_lmsj_conf" 2>/dev/null | head -n1)
-    _lmsj_failed=$(sed -n 's/^failed=//p' "$_lmsj_conf" 2>/dev/null | head -n1)
-    _lmsj_time=$(sed -n 's/^time=//p' "$_lmsj_conf" 2>/dev/null | head -n1)
-    printf '{"manager":"%s","engine":"%s","roots":"%s","synced":%s,"skipped":%s,"failed":%s,"time":%s}' \
-        "$_lmsj_manager" "$_lmsj_engine" "$_lmsj_roots" "${_lmsj_synced:-0}" "${_lmsj_skipped:-0}" "${_lmsj_failed:-0}" "${_lmsj_time:-0}"
+# Called after a payload transaction rollback. For dual-directory engines this writes the restored
+# canonical tree back to the real content image; direct-source engines need no extra copy.
+luoshu_restore_mount_payload() {
+    _lrmp_active=$(head -n1 "$LUOSHU_MOUNT_MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_lrmp_active" ] || _lrmp_active=default
+    luoshu_sync_mount_payload "$_lrmp_active"
 }
 
-# Keep enhanced ROM mapping and partition discovery in every caller that sources mount_compat.sh.
+luoshu_mount_verify_active() {
+    _lmva_active="${1:-$(head -n1 "$LUOSHU_MOUNT_MODDIR/config/active_font.conf" 2>/dev/null)}"
+    [ -n "$_lmva_active" ] || _lmva_active=default
+    [ "$_lmva_active" != default ] || { luoshu_mount_record verified '系统默认字体无需挂载验证' '' 0 0; return 0; }
+    _lmva_expected="$LUOSHU_MOUNT_MODDIR/config/mount-probe-expected.conf"
+    _lmva_visible="${LUOSHU_VISIBLE_PROBE:-/system/etc/luoshu/mount-probe.conf}"
+    _lmva_nonce=$(sed -n 's/^nonce=//p' "$_lmva_expected" 2>/dev/null | head -n1)
+    _lmva_seen=$(sed -n 's/^nonce=//p' "$_lmva_visible" 2>/dev/null | head -n1)
+    if [ -n "$_lmva_nonce" ] && [ "$_lmva_nonce" = "$_lmva_seen" ]; then
+        luoshu_mount_record verified '挂载探针已从系统分区读取，元模块生效' '' 0 0
+        return 0
+    fi
+    luoshu_mount_record unverified "系统未读取到洛书挂载探针：expected=$_lmva_nonce seen=$_lmva_seen" '' 0 1
+    luoshu_mount_log "挂载验证失败：engine=$(luoshu_detect_mount_engine) expected=$_lmva_nonce seen=$_lmva_seen"
+    return 1
+}
+
+# Override the base confirmation: a completed Android boot is not enough; the selected mount engine
+# must also expose LuoShu's probe from the real system partition before the payload is trusted.
+font_config_mark_boot_success() {
+    _lmbs_config="${CONFIG_DIR:-$LUOSHU_MOUNT_MODDIR/config}"
+    _lmbs_state=$(sed -n 's/^state=//p' "$_lmbs_config/font-payload-boot.conf" 2>/dev/null | head -n1)
+    [ "$_lmbs_state" = booting ] || return 0
+    _lmbs_font=$(sed -n 's/^font=//p' "$_lmbs_config/font-payload-boot.conf" 2>/dev/null | head -n1)
+    if ! luoshu_mount_verify_active "${_lmbs_font:-unknown}"; then
+        type _luoshu_safety_log >/dev/null 2>&1 && _luoshu_safety_log ERROR 'Android 已开机，但元模块未挂载洛书负载；本次事务不确认'
+        return 1
+    fi
+    {
+        printf 'state=confirmed\n'
+        printf 'font=%s\n' "${_lmbs_font:-unknown}"
+        printf 'time=%s\n' "$(date +%s)"
+    } > "$_lmbs_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || return 1
+    mv -f "$_lmbs_config/font-payload-boot.conf.tmp.$$" "$_lmbs_config/font-payload-boot.conf" 2>/dev/null || return 1
+    rm -f "$_lmbs_config/font-boot-failures" 2>/dev/null || true
+    printf 'time=%s\n' "$(date +%s)" > "$_lmbs_config/font-last-boot-success.conf" 2>/dev/null || true
+    chmod 0644 "$_lmbs_config/font-payload-boot.conf" "$_lmbs_config/font-last-boot-success.conf" 2>/dev/null || true
+    type _luoshu_safety_log >/dev/null 2>&1 && _luoshu_safety_log INFO 'Android 已完成开机且元模块挂载验证通过，字体负载事务确认成功'
+}
+
+luoshu_mount_status_json() {
+    _lmsj_conf="$LUOSHU_MOUNT_MODDIR/config/mount_compat.conf"
+    _lmsj_state=$(sed -n 's/^state=//p' "$_lmsj_conf" 2>/dev/null | head -n1)
+    _lmsj_detail=$(sed -n 's/^detail=//p' "$_lmsj_conf" 2>/dev/null | head -n1 | sed 's/\\/\\\\/g; s/"/\\"/g')
+    _lmsj_root=$(sed -n 's/^contentRoot=//p' "$_lmsj_conf" 2>/dev/null | head -n1 | sed 's/\\/\\\\/g; s/"/\\"/g')
+    _lmsj_synced=$(sed -n 's/^synced=//p' "$_lmsj_conf" 2>/dev/null | head -n1)
+    _lmsj_failed=$(sed -n 's/^failed=//p' "$_lmsj_conf" 2>/dev/null | head -n1)
+    _lmsj_time=$(sed -n 's/^time=//p' "$_lmsj_conf" 2>/dev/null | head -n1)
+    printf '{"manager":"%s","engine":"%s","state":"%s","detail":"%s","contentRoot":"%s","synced":%s,"failed":%s,"time":%s}' \
+        "$(luoshu_detect_root_manager)" "$(luoshu_detect_mount_engine)" "${_lmsj_state:-unknown}" "$_lmsj_detail" "$_lmsj_root" \
+        "${_lmsj_synced:-0}" "${_lmsj_failed:-0}" "${_lmsj_time:-0}"
+}
+
 _luoshu_hyperos_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/hyperos_global.sh"
 [ -f "$_luoshu_hyperos_helper" ] && . "$_luoshu_hyperos_helper"
 _luoshu_font_config_partitions="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/font_config_partitions.sh"
