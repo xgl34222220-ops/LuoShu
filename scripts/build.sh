@@ -11,7 +11,7 @@ SIZE_REPORT="$OUT/LuoShu-${VERSION}-size.txt"
 APP_APK="${LUOSHU_APP_APK:-}"
 ALLOW_DEBUG_APP="${LUOSHU_ALLOW_DEBUG_APP:-0}"
 EXPECTED_VERSION_CODE=$((LUOSHU_VERSION_CODE * 100 + 1))
-MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-18874368}"
+MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-14680064}"
 
 sh "$ROOT/scripts/check.sh"
 [ -n "$APP_APK" ] || {
@@ -91,6 +91,11 @@ rm -f "$STAGE/config/webui_font_list.json" "$STAGE/config/webui_font_list.key" \
 rm -f "$STAGE/system/fonts/NotoColorEmoji.ttf" "$STAGE/system/fonts/NotoColorEmojiLegacy.ttf"
 rm -f "$STAGE/common/stability.sh" "$STAGE/common/fonts_xml_template.sh" \
   "$STAGE/common/play_font_bridge.sh" "$STAGE/common/wechat_xweb_bridge.sh"
+
+# The repository keeps one reproducible ARM64 runtime; release artifacts carry only the subset used
+# by LuoShu's offline font tools. The pruning script has its own ELF dependency and size tests.
+sh "$ROOT/scripts/prune_python_runtime.sh" "$STAGE"
+
 find "$STAGE/common" -maxdepth 1 -type f -exec chmod 0755 {} +
 chmod 0755 "$STAGE"/*.sh "$STAGE/system/bin/luoshud" "$STAGE/common/python/bin/luoshu-python"
 find "$STAGE/system/fonts" -type f -exec chmod 0644 {} + 2>/dev/null || true
