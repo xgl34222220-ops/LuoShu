@@ -1,7 +1,6 @@
 package io.github.xgl34222220.luoshu
 
 import android.app.Activity
-import android.content.res.Configuration
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.view.Display
