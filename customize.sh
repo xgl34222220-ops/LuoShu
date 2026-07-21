@@ -74,6 +74,12 @@ if [ "$UPGRADE_MIGRATED" != true ]; then
     ACTIVE_TEXT="default"
 fi
 
+# 复合字体轮廓几何算法已升级。上一代 composites-v1 的键只包含三个源字体哈希，
+# 无法感知算法变化；必须淘汰旧成品，否则用户重新应用同一组合仍会复用旧轮廓。
+rm -rf "$OLD_MOD/cache/auto-multiweight-mix/composites-v1" \
+       "$MODPATH/cache/auto-multiweight-mix/composites-v1" 2>/dev/null || true
+printf 'geometry-v2\n' > "$MODPATH/config/composite_cache_version.conf" 2>/dev/null || true
+
 # 历史任务、锁、待重启状态和 App 安装状态不进入新安装。
 for _state in previous_font.conf switch_task.conf mix_task.conf axes_task.conf text_reboot_required.conf \
               font_weight_reboot_required.conf active_emoji.conf emoji_task.conf emoji_reboot_required.conf \
@@ -96,6 +102,7 @@ chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MOD
 touch "$MODPATH/magic" 2>/dev/null || true
 
 ui_print "✓ 已部署真实字重与复合字体引擎"
+ui_print "✓ 已淘汰旧版混排轮廓缓存，重新应用组合时将强制生成"
 if [ "$ACTIVE_TEXT" != "default" ] && [ "$UPGRADE_PAYLOAD_COUNT" -gt 0 ] 2>/dev/null; then
     ui_print "✓ 已继承上次字体：$ACTIVE_TEXT（$UPGRADE_PAYLOAD_COUNT 个映射文件）"
     ui_print "✓ 本次升级正常只需完整重启一次"
