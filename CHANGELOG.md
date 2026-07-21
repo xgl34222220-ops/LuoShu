@@ -6,6 +6,18 @@
 
 - 暂无。
 
+## [v2.0.0] - 2026-07-21
+
+- 全面重构为无 Hook 全局字体引擎，不再通过 Xposed、TextView、Canvas 或应用级字体工厂逐帧替换字体。
+- 在 Zygote 启动前读取并保真重写 Android 与 OEM 字体配置，覆盖 `fonts.xml`、`font_fallback.xml` 和 customization XML 中的安全 UI 家族。
+- 支持 HyperOS、ColorOS 和通用 AOSP 的系统字体文件槽、真实分区别名、九档静态字重与字体内部 Name Table 规范化。
+- 保留原 family alias、locale 和 fallback 顺序；Emoji、Symbol、图标、monospace、serif、数学及专用时钟字体默认不修改。
+- 新增 XML 原子生成、字体引用校验、开机守卫和失败自动撤销；配置失败时继续使用文件槽映射，避免带着损坏 XML 启动。
+- 复合字体、单字体切换和所有 ROM 入口统一接入同一事务提交链路。
+- App 在前台获得焦点、恢复和显示模式变化时重新请求当前分辨率支持的最高刷新率，后台、失焦和画中画时释放。
+- 清理无用 Python SSL、SQLite、网络、调试和测试运行时，同时保留 FontTools、复合字体、变量轴、真实字重和离线能力；模块体积由约 15.7 MB 降至约 11.2 MB。
+- 模块版本号改为 `v2.0.0 / 20000`，正式 App `versionCode` 为 `2000001`。
+
 ## [v14.3.2] - 2026-07-19
 
 - 修复主题层使用 `LocalContext.current.getColor()` 查询 Monet 色值导致配置变化后可能继续使用旧颜色的问题。
