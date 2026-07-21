@@ -80,11 +80,14 @@ _luoshu_config_normalize_weight() {
     rm -f "$_lcw_output" "$_lcw_raw" 2>/dev/null || true
     cp -f "$_lcw_source" "$_lcw_raw" 2>/dev/null || return 1
 
-    # TTC collections may contain locale-specific faces. Until the native backend can select the
-    # exact face deterministically, preserve the collection unchanged rather than guessing face 0.
+    # A TTC may contain locale-specific faces. The generated XML points to one deterministic static
+    # face and removes the ROM's old collection index, so carrying a whole TTC under a .ttf name could
+    # silently select the wrong language. Until the native backend extracts a requested face, reject
+    # TTC for XML and let the already-committed ROM file-slot mapping remain the compatibility path.
     _lcw_magic=$(dd if="$_lcw_raw" bs=4 count=1 2>/dev/null)
     if [ "$_lcw_magic" = ttcf ]; then
-        mv -f "$_lcw_raw" "$_lcw_output" 2>/dev/null || return 1
+        rm -f "$_lcw_raw" "$_lcw_output" 2>/dev/null || true
+        return 1
     elif [ -f "$_lcw_tool" ] && type _luoshu_font_config_exec >/dev/null 2>&1; then
         if ! _luoshu_font_config_exec "$_lcw_tool" --input "$_lcw_raw" --output "$_lcw_output" \
             --weight "$_lcw_weight" --family 'LuoShu UI' >/dev/null 2>&1; then
