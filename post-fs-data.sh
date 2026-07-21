@@ -11,6 +11,7 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/rom_adapters.sh" ] && . "$MODDIR/common/rom_adapters.sh"
 [ -f "$MODDIR/common/font_config_runtime.sh" ] && . "$MODDIR/common/font_config_runtime.sh"
 [ -f "$MODDIR/common/font_config_partitions.sh" ] && . "$MODDIR/common/font_config_partitions.sh"
+[ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
 
 type init_module >/dev/null 2>&1 && init_module
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
@@ -22,7 +23,7 @@ chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh"
 find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
 chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" \
     "$MODDIR/common/font_axis_info.py" "$MODDIR/common/font_config_overlay.py" \
-    "$MODDIR/common/font_name_normalize.py" 2>/dev/null || true
+    "$MODDIR/common/font_name_normalize.py" "$MODDIR/common/font_config_targets.py" 2>/dev/null || true
 
 log_message "INFO" "===== post-fs-data $MODULE_VERSION 开始 ====="
 
@@ -50,7 +51,7 @@ if type font_config_boot_guard >/dev/null 2>&1; then
     font_config_boot_guard "$ACTIVE_TEXT" || true
 fi
 
-for _partition in system product system_ext my_product vendor odm; do
+for _partition in system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust; do
     [ -d "$MODDIR/$_partition" ] || continue
     set_perm_recursive "$MODDIR/$_partition" 0 0 0755 0644 2>/dev/null || true
 done
@@ -65,7 +66,6 @@ log_message "INFO" "动态字体数据库保持原样；使用 systemless XML/�
 rm -f "$MODDIR/config/text_reboot_required.conf" "$MODDIR/config/font_weight_reboot_required.conf" \
       "$MODDIR/.font_switch.lock" 2>/dev/null || true
 
-[ -f "$MODDIR/common/module_status.sh" ] && MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" "$ACTIVE_TEXT" >/dev/null 2>&1 || true
 log_message "INFO" "当前文字=$ACTIVE_TEXT | 重启保护已复位"
 log_message "INFO" "===== post-fs-data 完成 ====="
 exit 0

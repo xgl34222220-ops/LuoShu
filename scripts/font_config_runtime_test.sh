@@ -17,6 +17,8 @@ mkdir -p "$MOD/common" "$MOD/config" "$MOD/system/fonts" \
 cp -f "$ROOT/common/font_config_overlay.py" "$MOD/common/font_config_overlay.py"
 cp -f "$ROOT/common/font_config_runtime.sh" "$MOD/common/font_config_runtime.sh"
 cp -f "$ROOT/common/font_config_partitions.sh" "$MOD/common/font_config_partitions.sh"
+cp -f "$ROOT/common/font_config_targets.py" "$MOD/common/font_config_targets.py"
+cp -f "$ROOT/common/font_safety.sh" "$MOD/common/font_safety.sh"
 
 cat > "$SYSTEM_ETC/fonts.xml" <<'XML'
 <familyset>
@@ -140,6 +142,10 @@ for overlay in \
 done
 
 # Regeneration repairs every partition alias from the validated system weight set.
+mkdir -p "$MOD/system/fonts"
+for weight in 100 200 300 400 500 600 700 800 900; do
+    dd if=/dev/zero of="$MOD/system/fonts/LuoShu-${weight}.ttf" bs=2048 count=1 2>/dev/null
+done
 font_config_generate DemoFamily
 test -s "$MOD/my_product/fonts/LuoShu-500.ttf"
 font_config_disable

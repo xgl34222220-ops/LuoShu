@@ -2,32 +2,6 @@
 # Extended Android/OEM font-configuration partition map. Source after font_config_runtime.sh.
 set +e
 
-# key | real XML | module overlay XML | font directory referenced by the generated document
-_luoshu_font_config_specs() {
-    _lfc_module="$(_luoshu_font_config_module)"
-    _lfc_system_etc="${LUOSHU_SYSTEM_ETC_ROOT:-/system/etc}"
-    _lfc_product_etc="${LUOSHU_PRODUCT_ETC_ROOT:-/product/etc}"
-    _lfc_system_ext_etc="${LUOSHU_SYSTEM_EXT_ETC_ROOT:-/system_ext/etc}"
-    _lfc_my_product_etc="${LUOSHU_MY_PRODUCT_ETC_ROOT:-/my_product/etc}"
-    _lfc_vendor_etc="${LUOSHU_VENDOR_ETC_ROOT:-/vendor/etc}"
-    _lfc_odm_etc="${LUOSHU_ODM_ETC_ROOT:-/odm/etc}"
-
-    _luoshu_font_config_emit_partition system "$_lfc_system_etc" "$_lfc_module/system" \
-        fonts.xml font_fallback.xml
-    _luoshu_font_config_emit_partition product "$_lfc_product_etc" "$_lfc_module/product" \
-        fonts.xml font_fallback.xml fonts_customization.xml font_customization.xml \
-        mi_fonts_customization.xml
-    _luoshu_font_config_emit_partition system_ext "$_lfc_system_ext_etc" "$_lfc_module/system_ext" \
-        fonts.xml font_fallback.xml fonts_customization.xml font_customization.xml
-    _luoshu_font_config_emit_partition my_product "$_lfc_my_product_etc" "$_lfc_module/my_product" \
-        fonts.xml font_fallback.xml fonts_customization.xml font_customization.xml \
-        oplus_fonts_customization.xml oplus_font_customization.xml
-    _luoshu_font_config_emit_partition vendor "$_lfc_vendor_etc" "$_lfc_module/vendor" \
-        fonts.xml font_fallback.xml fonts_customization.xml font_customization.xml
-    _luoshu_font_config_emit_partition odm "$_lfc_odm_etc" "$_lfc_module/odm" \
-        fonts.xml font_fallback.xml fonts_customization.xml font_customization.xml
-}
-
 _luoshu_font_config_emit_partition() {
     _lfcp_key="$1"
     _lfcp_real_etc="$2"
@@ -40,4 +14,55 @@ _luoshu_font_config_emit_partition() {
             "$_lfcp_overlay_root" "$_lfcp_name" \
             "$_lfcp_overlay_root"
     done
+}
+
+_luoshu_font_config_xml_names() {
+    printf '%s\n' 'fonts.xml font_fallback.xml fonts_customization.xml font_customization.xml mi_fonts_customization.xml oplus_fonts_customization.xml oplus_font_customization.xml oppo_fonts_customization.xml coloros_fonts_customization.xml fonts_vendor.xml fonts_overlay.xml'
+}
+
+_luoshu_font_config_resolve_etc() {
+    _lfcr_root="$1"
+    _lfcr_legacy="$2"
+    _lfcr_default="$3"
+    if [ -n "$_lfcr_root" ]; then
+        printf '%s/etc\n' "${_lfcr_root%/}"
+    elif [ -n "$_lfcr_legacy" ]; then
+        printf '%s\n' "${_lfcr_legacy%/}"
+    else
+        printf '%s\n' "$_lfcr_default"
+    fi
+}
+
+_luoshu_font_config_partition_rows() {
+    _lfcp_module="$(_luoshu_font_config_module)"
+    printf 'system|%s|%s/system\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_SYSTEM_ROOT:-}" "${LUOSHU_SYSTEM_ETC_ROOT:-}" /system/etc)" "$_lfcp_module"
+    printf 'system_ext|%s|%s/system_ext\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_SYSTEM_EXT_ROOT:-}" "${LUOSHU_SYSTEM_EXT_ETC_ROOT:-}" /system_ext/etc)" "$_lfcp_module"
+    printf 'product|%s|%s/product\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_PRODUCT_ROOT:-}" "${LUOSHU_PRODUCT_ETC_ROOT:-}" /product/etc)" "$_lfcp_module"
+    printf 'vendor|%s|%s/vendor\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_VENDOR_ROOT:-}" "${LUOSHU_VENDOR_ETC_ROOT:-}" /vendor/etc)" "$_lfcp_module"
+    printf 'odm|%s|%s/odm\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_ODM_ROOT:-}" "${LUOSHU_ODM_ETC_ROOT:-}" /odm/etc)" "$_lfcp_module"
+    printf 'oem|%s|%s/oem\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_OEM_ROOT:-}" "${LUOSHU_OEM_ETC_ROOT:-}" /oem/etc)" "$_lfcp_module"
+    printf 'my_product|%s|%s/my_product\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_MY_PRODUCT_ROOT:-}" "${LUOSHU_MY_PRODUCT_ETC_ROOT:-}" /my_product/etc)" "$_lfcp_module"
+    printf 'my_engineering|%s|%s/my_engineering\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_MY_ENGINEERING_ROOT:-}" "${LUOSHU_MY_ENGINEERING_ETC_ROOT:-}" /my_engineering/etc)" "$_lfcp_module"
+    printf 'my_company|%s|%s/my_company\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_MY_COMPANY_ROOT:-}" "${LUOSHU_MY_COMPANY_ETC_ROOT:-}" /my_company/etc)" "$_lfcp_module"
+    printf 'my_preload|%s|%s/my_preload\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_MY_PRELOAD_ROOT:-}" "${LUOSHU_MY_PRELOAD_ETC_ROOT:-}" /my_preload/etc)" "$_lfcp_module"
+    printf 'my_region|%s|%s/my_region\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_MY_REGION_ROOT:-}" "${LUOSHU_MY_REGION_ETC_ROOT:-}" /my_region/etc)" "$_lfcp_module"
+    printf 'my_stock|%s|%s/my_stock\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_MY_STOCK_ROOT:-}" "${LUOSHU_MY_STOCK_ETC_ROOT:-}" /my_stock/etc)" "$_lfcp_module"
+    printf 'oplus_product|%s|%s/oplus_product\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_OPLUS_PRODUCT_ROOT:-}" "${LUOSHU_OPLUS_PRODUCT_ETC_ROOT:-}" /oplus_product/etc)" "$_lfcp_module"
+    printf 'oplus_engineering|%s|%s/oplus_engineering\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_OPLUS_ENGINEERING_ROOT:-}" "${LUOSHU_OPLUS_ENGINEERING_ETC_ROOT:-}" /oplus_engineering/etc)" "$_lfcp_module"
+    printf 'oplus_version|%s|%s/oplus_version\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_OPLUS_VERSION_ROOT:-}" "${LUOSHU_OPLUS_VERSION_ETC_ROOT:-}" /oplus_version/etc)" "$_lfcp_module"
+    printf 'oplus_region|%s|%s/oplus_region\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_OPLUS_REGION_ROOT:-}" "${LUOSHU_OPLUS_REGION_ETC_ROOT:-}" /oplus_region/etc)" "$_lfcp_module"
+    printf 'mi_ext|%s|%s/mi_ext\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_MI_EXT_ROOT:-}" "${LUOSHU_MI_EXT_ETC_ROOT:-}" /mi_ext/etc)" "$_lfcp_module"
+    printf 'cust|%s|%s/cust\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_CUST_ROOT:-}" "${LUOSHU_CUST_ETC_ROOT:-}" /cust/etc)" "$_lfcp_module"
+}
+
+# key | real XML | module overlay XML | font directory referenced by that document
+_luoshu_font_config_specs() {
+    _lfcp_names="$(_luoshu_font_config_xml_names)"
+    while IFS='|' read -r _lfcp_key _lfcp_real_etc _lfcp_overlay; do
+        [ -n "$_lfcp_key" ] && [ -n "$_lfcp_real_etc" ] && [ -n "$_lfcp_overlay" ] || continue
+        # shellcheck disable=SC2086
+        _luoshu_font_config_emit_partition "$_lfcp_key" "$_lfcp_real_etc" "$_lfcp_overlay" $_lfcp_names
+    done <<EOF_LUOSHU_PARTITIONS
+$(_luoshu_font_config_partition_rows)
+EOF_LUOSHU_PARTITIONS
 }

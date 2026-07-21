@@ -16,44 +16,28 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 SAFE_EXACT_FAMILIES = {
-    "sans-serif",
-    "sans-serif-condensed",
-    "roboto",
-    "roboto-flex",
-    "google-sans",
-    "google-sans-text",
-    "source-sans-pro",
-    "miui",
-    "mipro",
-    "misans",
-    "mi-sans",
-    "sys-sans-en",
-    "op-sans-en",
+    "sans", "sans-serif", "sans-serif-condensed", "default", "default-sans",
+    "system-ui", "ui-sans-serif", "roboto", "roboto-flex", "roboto-static",
+    "google-sans", "google-sans-text", "google-sans-flex", "source-sans",
+    "source-sans-pro", "noto-sans", "noto-sans-cjk", "miui", "mipro",
+    "misans", "mi-sans", "sysfont", "sys-font", "sys-sans", "sys-sans-en",
+    "op-sans", "op-sans-en", "oplus-sans", "oppo-sans", "opposans",
+    "coloros-sans", "oneplus-sans", "realme-sans", "vivo-sans",
+    "origin-sans", "honor-sans", "harmonyos-sans",
 }
 SAFE_PREFIXES = (
-    "sans-serif-",
-    "roboto-",
-    "google-sans-",
-    "miui-",
-    "mipro-",
-    "misans-",
-    "mi-sans-",
-    "sys-sans-",
-    "op-sans-",
+    "sans-serif-", "roboto-", "google-sans-", "source-sans-", "noto-sans-",
+    "miui-", "mipro-", "misans-", "mi-sans-", "sysfont-", "sys-font-",
+    "sys-sans-", "op-sans-", "oplus-sans-", "oppo-sans-", "opposans-",
+    "coloros-sans-", "oneplus-sans-", "realme-sans-", "vivo-sans-",
+    "origin-sans-", "honor-sans-", "harmonyos-sans-",
 )
 PROTECTED_FAMILY_TOKENS = (
-    "emoji",
-    "symbol",
-    "icon",
-    "material",
-    "dingbat",
-    "mono",
-    "clock",
-    "mitype",
-    "math",
-    "barcode",
-    "qrcode",
+    "emoji", "symbol", "icon", "material", "dingbat", "mono",
+    "clock", "mitype", "math", "music", "braille", "barcode", "qrcode",
+    "fallback", "legacy",
 )
+# serif is protected at the file level, but the canonical UI family is named sans-serif.
 PROTECTED_FILE_TOKENS = PROTECTED_FAMILY_TOKENS + ("serif",)
 FONT_SUFFIXES = (".ttf", ".otf", ".ttc")
 WEIGHTS = (100, 200, 300, 400, 500, 600, 700, 800, 900)
@@ -74,6 +58,13 @@ def is_safe_family(name: str) -> bool:
         return False
     safe = normalized in SAFE_EXACT_FAMILIES or normalized.startswith(SAFE_PREFIXES)
     return safe and not any(token in normalized for token in PROTECTED_FAMILY_TOKENS)
+
+
+def is_locale_specific_family(family: ET.Element) -> bool:
+    return any(
+        family.attrib.get(key)
+        for key in ("lang", "variant", "fallbackFor", "fallbackfor")
+    )
 
 
 def is_protected_file(value: str) -> bool:
@@ -106,7 +97,7 @@ def rewrite_tree(tree: ET.ElementTree, prefix: str) -> dict[str, object]:
         if local_name(family.tag) != "family":
             continue
         family_name = family.attrib.get("name", "")
-        if not is_safe_family(family_name):
+        if is_locale_specific_family(family) or not is_safe_family(family_name):
             continue
 
         family_changes = 0

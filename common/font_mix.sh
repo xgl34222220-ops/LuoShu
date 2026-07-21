@@ -215,6 +215,7 @@ payload_stage_finalize() {
 cleanup_mix_process() {
     payload_stage_abort
     payload_stage_rollback
+    type luoshu_payload_transaction_abort >/dev/null 2>&1 && luoshu_payload_transaction_abort
     rm -f "$LOCK_FILE" 2>/dev/null || true
 }
 
@@ -444,8 +445,12 @@ apply_mix() {
         rm -f "$LOCK_FILE" 2>/dev/null || true
     fi
     [ ! -f "$TEXT_REBOOT_REQUIRED" ] || { set_mix_error '本次开机已更改文字字体，请先重启手机'; return 3; }
-    echo $$ > "$LOCK_FILE"
+    printf '%s\n' "$PPID" > "$LOCK_FILE"
     trap cleanup_mix_process EXIT INT TERM
+    if ! type luoshu_payload_transaction_begin >/dev/null 2>&1 || ! luoshu_payload_transaction_begin; then
+        set_mix_error '无法创建字体负载安全快照'
+        return 4
+    fi
 
     _cjk_src=$(find_family_file "$_cjk")
     _latin_src=$(find_family_file "$_latin")
@@ -483,7 +488,18 @@ apply_mix() {
             echo '警告：无 Hook XML 未安全启用，已保留文件槽映射' >&2
         fi
     fi
-    type luoshu_sync_mount_payload >/dev/null 2>&1 && luoshu_sync_mount_payload 2>/dev/null || true
+    if ! type luoshu_payload_validate_current >/dev/null 2>&1 || ! luoshu_payload_validate_current mix; then
+        set_mix_error '复合字体负载覆盖校验失败，已恢复旧字体'
+        return 7
+    fi
+    if type luoshu_sync_mount_payload >/dev/null 2>&1 && ! luoshu_sync_mount_payload; then
+        set_mix_error '元模块真实挂载目录同步失败，已恢复旧字体'
+        return 7
+    fi
+    if ! luoshu_payload_transaction_commit mix; then
+        set_mix_error '无法提交复合字体负载事务，已恢复旧字体'
+        return 7
+    fi
     rm -f "$LOCK_FILE" 2>/dev/null || true
     trap - EXIT INT TERM
     return 0

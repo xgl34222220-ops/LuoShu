@@ -32,6 +32,7 @@ FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 [ -f "$MODULE_DIR/common/font_library_cache.sh" ] && . "$MODULE_DIR/common/font_library_cache.sh"
 [ -f "$MODULE_DIR/common/font_config_runtime.sh" ] && . "$MODULE_DIR/common/font_config_runtime.sh"
 [ -f "$MODULE_DIR/common/font_config_weights.sh" ] && . "$MODULE_DIR/common/font_config_weights.sh"
+[ -f "$MODULE_DIR/common/mount_compat.sh" ] && . "$MODULE_DIR/common/mount_compat.sh"
 
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
 type check_coloros >/dev/null 2>&1 && check_coloros
@@ -161,7 +162,7 @@ switch_font() {
     fi
 
     printf '%s\n' "$$" > "$_lock" 2>/dev/null || return 1
-    trap 'rm -f "$MODULE_DIR/.font_switch.lock" 2>/dev/null' EXIT HUP INT TERM
+    trap 'type luoshu_payload_transaction_abort >/dev/null 2>&1 && luoshu_payload_transaction_abort; rm -f "$MODULE_DIR/.font_switch.lock" 2>/dev/null' EXIT HUP INT TERM
 
     _source=''
     if [ "$_font_id" != default ]; then
@@ -174,6 +175,10 @@ switch_font() {
         fi
     fi
 
+    if ! type luoshu_payload_transaction_begin >/dev/null 2>&1 || ! luoshu_payload_transaction_begin; then
+        echo '错误：无法创建字体负载安全快照' >&2
+        return 5
+    fi
     clear_managed_text_fonts
     if [ "$_font_id" != default ]; then
         apply_font_by_rom "$_source" "$SYSTEM_FONTS_DIR" quick "$_font_id" || {
@@ -191,8 +196,23 @@ switch_font() {
         fi
     fi
 
-    printf '%s\n' "$_font_id" > "$ACTIVE_FONT_CONF"
-    chmod 0644 "$ACTIVE_FONT_CONF" "$SYSTEM_FONTS_DIR"/* 2>/dev/null || true
+    if ! type luoshu_payload_validate_current >/dev/null 2>&1 || ! luoshu_payload_validate_current "$_font_id"; then
+    echo '错误：字体负载覆盖校验失败，已恢复上一个字体' >&2
+    return 6
+fi
+printf '%s\n' "$_font_id" > "$ACTIVE_FONT_CONF" || {
+    echo '错误：无法保存当前字体状态' >&2
+    return 7
+}
+chmod 0644 "$ACTIVE_FONT_CONF" "$SYSTEM_FONTS_DIR"/* 2>/dev/null || true
+if type luoshu_sync_mount_payload >/dev/null 2>&1 && ! luoshu_sync_mount_payload; then
+    echo '错误：元模块真实挂载目录同步失败，已恢复上一个字体' >&2
+    return 7
+fi
+if ! luoshu_payload_transaction_commit "$_font_id"; then
+    echo '错误：无法提交字体负载事务，已恢复上一个字体' >&2
+    return 7
+fi
     if [ "$_font_id" != default ]; then
         _recent="$CONFIG_DIR/recent_fonts.conf"
         _tmp="${_recent}.tmp.$$"

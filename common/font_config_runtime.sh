@@ -118,9 +118,15 @@ font_config_capture_original() {
         _lfc_found=$((_lfc_found + 1))
         _lfc_backup="$_lfc_backup_root/$_lfc_key"
         mkdir -p "${_lfc_backup%/*}" 2>/dev/null || continue
-        [ -s "$_lfc_backup" ] && _luoshu_font_config_validate "$_lfc_backup" && continue
-        # Never snapshot our own overlay as the device source of truth.
-        grep -q 'LuoShu-[1-9][0-9][0-9]\.ttf' "$_lfc_real" 2>/dev/null && continue
+        _lfc_backup_valid=0
+        if [ -s "$_lfc_backup" ] && _luoshu_font_config_validate "$_lfc_backup"; then
+            _lfc_backup_valid=1
+            command -v cmp >/dev/null 2>&1 && cmp -s "$_lfc_real" "$_lfc_backup" 2>/dev/null && continue
+        fi
+        # Never snapshot our own upper-layer document. Keep a valid previous source when mounted.
+        if grep -q 'LuoShu-[1-9][0-9][0-9]\.ttf' "$_lfc_real" 2>/dev/null; then
+            continue
+        fi
         _lfc_temp="${_lfc_backup}.tmp.$$"
         cp -f "$_lfc_real" "$_lfc_temp" 2>/dev/null || continue
         if _luoshu_font_config_validate "$_lfc_temp"; then
@@ -135,7 +141,7 @@ EOF_LUOSHU_FONT_CONFIG
     [ "$_lfc_found" -gt 0 ]
 }
 
-font_config_disable() {
+_luoshu_font_config_disable_base() {
     _lfc_module="$(_luoshu_font_config_module)"
     _lfc_state="${CONFIG_DIR:-$_lfc_module/config}/font-config-overlay.conf"
     _lfc_dirs=''
@@ -151,7 +157,7 @@ EOF_LUOSHU_FONT_CONFIG
     rm -f "$_lfc_state" 2>/dev/null || true
 }
 
-font_config_generate() {
+_luoshu_font_config_generate_base() {
     _lfc_family="$1"
     _lfc_module="$(_luoshu_font_config_module)"
     _lfc_config="${CONFIG_DIR:-$_lfc_module/config}"
@@ -182,7 +188,7 @@ EOF_LUOSHU_FONT_CONFIG
 
     if [ "$_lfc_changed" -eq 0 ] || [ "$_lfc_failed" -gt 0 ]; then
         rm -rf "$_lfc_stage" 2>/dev/null || true
-        font_config_disable
+        _luoshu_font_config_disable_base
         return 1
     fi
 
@@ -190,11 +196,11 @@ EOF_LUOSHU_FONT_CONFIG
     while IFS='|' read -r _lfc_key _lfc_real _lfc_overlay _lfc_fonts; do
         _lfc_ready="$_lfc_stage/$_lfc_key"
         if [ -s "$_lfc_ready" ]; then
-            mkdir -p "${_lfc_overlay%/*}" 2>/dev/null || { rm -rf "$_lfc_stage"; font_config_disable; return 1; }
+            mkdir -p "${_lfc_overlay%/*}" 2>/dev/null || { rm -rf "$_lfc_stage"; _luoshu_font_config_disable_base; return 1; }
             _lfc_temp="${_lfc_overlay}.tmp.$$"
-            cp -f "$_lfc_ready" "$_lfc_temp" 2>/dev/null || { rm -rf "$_lfc_stage"; font_config_disable; return 1; }
+            cp -f "$_lfc_ready" "$_lfc_temp" 2>/dev/null || { rm -rf "$_lfc_stage"; _luoshu_font_config_disable_base; return 1; }
             chmod 0644 "$_lfc_temp" 2>/dev/null || true
-            mv -f "$_lfc_temp" "$_lfc_overlay" 2>/dev/null || { rm -rf "$_lfc_stage"; font_config_disable; return 1; }
+            mv -f "$_lfc_temp" "$_lfc_overlay" 2>/dev/null || { rm -rf "$_lfc_stage"; _luoshu_font_config_disable_base; return 1; }
         elif [ -f "$_lfc_overlay" ] && grep -q 'LuoShu-' "$_lfc_overlay" 2>/dev/null; then
             rm -f "$_lfc_overlay" 2>/dev/null || true
         fi
@@ -211,7 +217,7 @@ EOF_LUOSHU_FONT_CONFIG
     return 0
 }
 
-font_config_boot_guard() {
+_luoshu_font_config_boot_guard_base() {
     _lfc_active="${1:-default}"
     _lfc_module="$(_luoshu_font_config_module)"
     font_config_capture_original >/dev/null 2>&1 || true
@@ -241,3 +247,7 @@ EOF_LUOSHU_FONT_CONFIG
     [ "$_lfc_seen" -eq 0 ] || _luoshu_font_config_log INFO "无 Hook 字体配置启动校验通过：$_lfc_seen 份 XML"
     return 0
 }
+
+# Load the fail-open transaction and boot-confirmation layer for every runtime caller.
+_luoshu_font_safety="$(_luoshu_font_config_module)/common/font_safety.sh"
+[ -f "$_luoshu_font_safety" ] && . "$_luoshu_font_safety"

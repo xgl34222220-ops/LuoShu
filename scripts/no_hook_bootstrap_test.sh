@@ -13,7 +13,7 @@ grep -q 'common/font_config_partitions.sh' "$ROOT/common/font_library_cache.sh"
 grep -q 'common/mount_compat.sh' "$ROOT/common/font_mix.sh"
 grep -q 'common/hyperos_global.sh' "$ROOT/common/mount_compat.sh"
 grep -q 'common/font_config_partitions.sh' "$ROOT/common/mount_compat.sh"
-grep -q 'system system_ext product my_product vendor odm oem' "$ROOT/common/mount_compat.sh"
+grep -q 'system system_ext product vendor odm oem my_product' "$ROOT/common/mount_compat.sh"
 
 # The dispatcher must load both the XML runtime and static-weight preparation layer, then invoke the
 # same transactional enable function for HyperOS and for ColorOS/generic Android.
