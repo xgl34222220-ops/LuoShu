@@ -70,10 +70,42 @@ _luoshu_config_weight_source() {
     return 1
 }
 
+_luoshu_config_normalize_weight() {
+    _lcw_source="$1"
+    _lcw_output="$2"
+    _lcw_weight="$3"
+    _lcw_module="$(_luoshu_config_weight_module)"
+    _lcw_tool="$_lcw_module/common/font_name_normalize.py"
+    _lcw_raw="${_lcw_output}.raw"
+    rm -f "$_lcw_output" "$_lcw_raw" 2>/dev/null || true
+    cp -f "$_lcw_source" "$_lcw_raw" 2>/dev/null || return 1
+
+    # TTC collections may contain locale-specific faces. Until the native backend can select the
+    # exact face deterministically, preserve the collection unchanged rather than guessing face 0.
+    _lcw_magic=$(dd if="$_lcw_raw" bs=4 count=1 2>/dev/null)
+    if [ "$_lcw_magic" = ttcf ]; then
+        mv -f "$_lcw_raw" "$_lcw_output" 2>/dev/null || return 1
+    elif [ -f "$_lcw_tool" ] && type _luoshu_font_config_exec >/dev/null 2>&1; then
+        if ! _luoshu_font_config_exec "$_lcw_tool" --input "$_lcw_raw" --output "$_lcw_output" \
+            --weight "$_lcw_weight" --family 'LuoShu UI' >/dev/null 2>&1; then
+            rm -f "$_lcw_raw" "$_lcw_output" 2>/dev/null || true
+            return 1
+        fi
+        rm -f "$_lcw_raw" 2>/dev/null || true
+    else
+        rm -f "$_lcw_raw" 2>/dev/null || true
+        return 1
+    fi
+    chmod 0644 "$_lcw_output" 2>/dev/null || true
+    _lcw_size=$(wc -c < "$_lcw_output" 2>/dev/null | tr -d '[:space:]')
+    case "$_lcw_size" in ''|*[!0-9]*) _lcw_size=0 ;; esac
+    [ "$_lcw_size" -ge 1024 ]
+}
+
 font_config_prepare_payload_weights() {
     _lcw_module="$(_luoshu_config_weight_module)"
     _lcw_fonts="$_lcw_module/system/fonts"
-    mkdir -p "$_lcw_fonts" 2>/dev/null || return 1
+    mkdir -p "$_lcw_fonts" "$_lcw_module/config" 2>/dev/null || return 1
 
     _lcw_stage="$_lcw_module/config/font-config-weights.$$"
     rm -rf "$_lcw_stage" 2>/dev/null || true
@@ -85,11 +117,10 @@ font_config_prepare_payload_weights() {
             return 1
         }
         _lcw_target="$_lcw_stage/LuoShu-${_lcw_weight}.ttf"
-        ln "$_lcw_source" "$_lcw_target" 2>/dev/null || cp -f "$_lcw_source" "$_lcw_target" 2>/dev/null || {
+        _luoshu_config_normalize_weight "$_lcw_source" "$_lcw_target" "$_lcw_weight" || {
             rm -rf "$_lcw_stage" 2>/dev/null || true
             return 1
         }
-        chmod 0644 "$_lcw_target" 2>/dev/null || true
     done
 
     for _lcw_weight in 100 200 300 400 500 600 700 800 900; do
