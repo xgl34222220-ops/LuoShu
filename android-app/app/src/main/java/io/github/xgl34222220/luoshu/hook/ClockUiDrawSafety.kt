@@ -24,6 +24,8 @@ private val CLOCK_TEXT_SCRIPTS = setOf(
     Character.UnicodeScript.HANGUL,
 )
 
+private const val CLOCK_MIN_HORIZONTAL_SCALE = 0.68f
+
 internal fun isClockCriticalUiClass(classNames: List<String>): Boolean {
     val names = classNames.joinToString("|").lowercase()
     return CLOCK_CRITICAL_UI_MARKERS.any(names::contains)
@@ -56,4 +58,31 @@ internal fun shouldReplaceClockDrawText(
     return text.any { character ->
         character.isLetterOrDigit() || Character.UnicodeScript.of(character.code) in CLOCK_TEXT_SCRIPTS
     }
+}
+
+/**
+ * Keeps a replacement face inside the width the Clock originally measured with its stock face.
+ *
+ * HyperOS NumberPicker/world-clock views calculate item bounds before drawing. Replacing only the
+ * Typeface at draw time can make the new glyph run wider than that precomputed bound, clipping the
+ * final digit. We never stretch a narrower replacement; wider faces are compressed only as much as
+ * required, with a conservative lower bound for pathological display fonts.
+ */
+internal fun fittedClockTextScaleX(
+    originalScaleX: Float,
+    originalWidthPx: Float,
+    replacementWidthPx: Float,
+): Float {
+    if (!originalScaleX.isFinite() || originalScaleX <= 0f) return 1f
+    if (
+        !originalWidthPx.isFinite() ||
+        !replacementWidthPx.isFinite() ||
+        originalWidthPx <= 0f ||
+        replacementWidthPx <= 0f ||
+        replacementWidthPx <= originalWidthPx
+    ) {
+        return originalScaleX
+    }
+    val ratio = (originalWidthPx / replacementWidthPx).coerceIn(CLOCK_MIN_HORIZONTAL_SCALE, 1f)
+    return originalScaleX * ratio
 }
