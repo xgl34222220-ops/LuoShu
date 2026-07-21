@@ -6,7 +6,6 @@ import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.view.View
-import android.widget.TextView
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -19,9 +18,10 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Clock font replacement restricted to visible, non-alarm UI drawing.
  *
- * No Typeface factory, Font.Builder, resource loader or global Paint mutation is used here. The
- * selected LuoShu Typeface is applied only while a safe Clock view is drawing and is restored before
- * returning to the app. Alarm alert/full-screen/snooze views and every child process are excluded.
+ * No Typeface factory, Font.Builder, resource loader or global persistent Paint mutation is used
+ * here. The selected LuoShu Typeface is applied only for one safe Canvas text call, horizontally
+ * fitted to the width HyperOS measured with its original Clock face, then fully restored. Alarm
+ * alert/full-screen/snooze views and every child process are excluded.
  */
 class ClockUiDrawFontHook : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -32,8 +32,6 @@ class ClockUiDrawFontHook : IXposedHookLoadPackage {
 
         runCatching { hookViewDrawScope(packageName, processName) }
             .onFailure { log(packageName, "view draw scope failed", it) }
-        runCatching { hookTextViewDraw(packageName) }
-            .onFailure { log(packageName, "TextView draw hook failed", it) }
         runCatching { hookCanvasText(packageName, "drawText") }
             .onFailure { log(packageName, "Canvas.drawText hook failed", it) }
         runCatching { hookCanvasText(packageName, "drawTextRun") }
@@ -79,43 +77,6 @@ class ClockUiDrawFontHook : IXposedHookLoadPackage {
         )
     }
 
-    private fun hookTextViewDraw(packageName: String) {
-        val captures = ThreadLocal<ArrayDeque<CapturedPaint>>()
-        XposedBridge.hookAllMethods(
-            TextView::class.java,
-            "onDraw",
-            object : XC_MethodHook(PRIORITY_TEXT) {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val stack = captures.get() ?: ArrayDeque<CapturedPaint>().also(captures::set)
-                    val view = param.thisObject as? TextView
-                    if (view == null || !insideSafeDrawScope()) {
-                        stack.addLast(CapturedPaint(null, null))
-                        return
-                    }
-                    val paint = view.paint
-                    val original = paint.typeface
-                    val family = typefaceFamilyName(original)
-                    if (!shouldReplaceClockDrawText(view.text, family)) {
-                        stack.addLast(CapturedPaint(null, null))
-                        return
-                    }
-                    val replacement = replacementTypeface(original)
-                    if (replacement == null || replacement === original) {
-                        stack.addLast(CapturedPaint(null, null))
-                        return
-                    }
-                    paint.typeface = replacement
-                    stack.addLast(CapturedPaint(paint, original))
-                    logReplacementOnce(packageName, "TextView.onDraw", view.text, family)
-                }
-
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    restoreCapture(captures)
-                }
-            },
-        )
-    }
-
     private fun hookCanvasText(packageName: String, methodName: String) {
         val captures = ThreadLocal<ArrayDeque<CapturedPaint>>()
         XposedBridge.hookAllMethods(
@@ -125,25 +86,49 @@ class ClockUiDrawFontHook : IXposedHookLoadPackage {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val stack = captures.get() ?: ArrayDeque<CapturedPaint>().also(captures::set)
                     if (!insideSafeDrawScope()) {
-                        stack.addLast(CapturedPaint(null, null))
+                        stack.addLast(CapturedPaint.EMPTY)
                         return
                     }
                     val paint = param.args.lastOrNull { it is Paint } as? Paint
                     val text = extractDrawText(param.args)
                     if (paint == null || !shouldReplaceClockDrawText(text, typefaceFamilyName(paint.typeface))) {
-                        stack.addLast(CapturedPaint(null, null))
+                        stack.addLast(CapturedPaint.EMPTY)
                         return
                     }
-                    val original = paint.typeface
-                    val family = typefaceFamilyName(original)
-                    val replacement = replacementTypeface(original)
-                    if (replacement == null || replacement === original) {
-                        stack.addLast(CapturedPaint(null, null))
+
+                    val originalTypeface = paint.typeface
+                    val originalScaleX = paint.textScaleX
+                    val originalWidth = measuredTextWidth(paint, text)
+                    val family = typefaceFamilyName(originalTypeface)
+                    val replacement = replacementTypeface(originalTypeface)
+                    if (replacement == null || replacement === originalTypeface) {
+                        stack.addLast(CapturedPaint.EMPTY)
                         return
                     }
+
                     paint.typeface = replacement
-                    stack.addLast(CapturedPaint(paint, original))
-                    logReplacementOnce(packageName, "Canvas.$methodName", text, family)
+                    val replacementWidth = measuredTextWidth(paint, text)
+                    paint.textScaleX = fittedClockTextScaleX(
+                        originalScaleX = originalScaleX,
+                        originalWidthPx = originalWidth,
+                        replacementWidthPx = replacementWidth,
+                    )
+                    stack.addLast(
+                        CapturedPaint(
+                            paint = paint,
+                            originalTypeface = originalTypeface,
+                            originalTextScaleX = originalScaleX,
+                        ),
+                    )
+                    logReplacementOnce(
+                        packageName = packageName,
+                        route = "Canvas.$methodName",
+                        text = text,
+                        familyName = family,
+                        originalWidth = originalWidth,
+                        replacementWidth = replacementWidth,
+                        fittedScaleX = paint.textScaleX,
+                    )
                 }
 
                 override fun afterHookedMethod(param: MethodHookParam) {
@@ -156,8 +141,9 @@ class ClockUiDrawFontHook : IXposedHookLoadPackage {
     private fun restoreCapture(captures: ThreadLocal<ArrayDeque<CapturedPaint>>) {
         val stack = captures.get() ?: return
         val capture = if (stack.isEmpty()) null else stack.removeLast()
-        if (capture?.paint != null) {
-            capture.paint.typeface = capture.original
+        capture?.paint?.let { paint ->
+            paint.typeface = capture.originalTypeface
+            paint.textScaleX = capture.originalTextScaleX
         }
         if (stack.isEmpty()) captures.remove()
     }
@@ -192,6 +178,11 @@ class ClockUiDrawFontHook : IXposedHookLoadPackage {
         val start = numbers.getOrNull(0)?.coerceIn(0, chars.size) ?: 0
         val count = numbers.getOrNull(1)?.coerceIn(0, chars.size - start) ?: (chars.size - start)
         return String(chars, start, count)
+    }
+
+    private fun measuredTextWidth(paint: Paint, text: CharSequence?): Float {
+        if (text.isNullOrEmpty()) return 0f
+        return runCatching { paint.measureText(text.toString()) }.getOrDefault(0f)
     }
 
     private fun replacementTypeface(original: Typeface?): Typeface? {
@@ -237,13 +228,18 @@ class ClockUiDrawFontHook : IXposedHookLoadPackage {
         route: String,
         text: CharSequence?,
         familyName: String?,
+        originalWidth: Float,
+        replacementWidth: Float,
+        fittedScaleX: Float,
     ) {
         val sample = text?.take(12)?.toString().orEmpty()
         val key = "$packageName|$route|$sample|${familyName.orEmpty()}"
         if (LOGGED_REPLACEMENTS.add(key)) {
             XposedBridge.log(
                 "LuoShu Clock UI draw replaced [$packageName] via $route: " +
-                    "text=$sample family=${familyName ?: "unknown"}",
+                    "text=$sample family=${familyName ?: "unknown"} " +
+                    "originalWidth=$originalWidth replacementWidth=$replacementWidth " +
+                    "scaleX=$fittedScaleX",
             )
         }
     }
@@ -257,8 +253,13 @@ class ClockUiDrawFontHook : IXposedHookLoadPackage {
 
     private data class CapturedPaint(
         val paint: Paint?,
-        val original: Typeface?,
-    )
+        val originalTypeface: Typeface?,
+        val originalTextScaleX: Float,
+    ) {
+        companion object {
+            val EMPTY = CapturedPaint(null, null, 1f)
+        }
+    }
 
     private companion object {
         const val PRIORITY_SCOPE = 10_000
