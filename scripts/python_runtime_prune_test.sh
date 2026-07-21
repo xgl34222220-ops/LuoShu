@@ -17,7 +17,7 @@ sh "$ROOT/scripts/prune_python_runtime.sh" "$STAGE"
 (cd "$STAGE" && zip -9 -r -q "$TMP/runtime-after.zip" common/python)
 _after_zip=$(wc -c < "$TMP/runtime-after.zip" | tr -d '[:space:]')
 _saved_zip=$((_before_zip - _after_zip))
-[ "$_saved_zip" -ge 3000000 ] || {
+[ "$_saved_zip" -ge 4200000 ] || {
     echo "runtime pruning saved too little in the release ZIP: $_saved_zip bytes" >&2
     exit 1
 }
@@ -32,20 +32,55 @@ test ! -e "$LIB/libssl.so"
 test ! -e "$LIB/libssl_python.so"
 test ! -e "$LIB/libsqlite3.so"
 test ! -e "$LIB/libsqlite3_python.so"
+test ! -e "$LIB/engines-3"
+test ! -e "$LIB/ossl-modules"
 test ! -e "$PYLIB/sqlite3"
+test ! -e "$PYLIB/compression/zstd"
+test ! -e "$PYLIB/asyncio"
+test ! -e "$PYLIB/concurrent"
+test ! -e "$PYLIB/multiprocessing"
+test ! -e "$PYLIB/email"
+test ! -e "$PYLIB/http"
+test ! -e "$PYLIB/urllib"
+test ! -e "$PYLIB/xmlrpc"
+test ! -e "$PYLIB/wsgiref"
+test ! -e "$PYLIB/unittest"
+test ! -e "$PYLIB/site-packages/fonttools-4.63.0.dist-info"
 test ! -e "$PYLIB/config-3.14-aarch64-linux-android"
 if find "$DYN" -maxdepth 1 -type f \( \
     -name '_ssl.*.so' -o \
     -name '_sqlite3.*.so' -o \
+    -name '_zstd.*.so' -o \
+    -name '_asyncio.*.so' -o \
+    -name '_remote_debugging.*.so' -o \
+    -name '_interpchannels.*.so' -o \
+    -name '_interpreters.*.so' -o \
     -name '_test*.so' -o \
     -name '_xxtest*.so' -o \
     -name '_ctypes_test*.so' -o \
     -name 'xxlimited*.so' -o \
     -name 'xxsubtype*.so' \
 \) -print -quit | grep -q .; then
-    echo 'CPython test or removed service extension remains in the pruned runtime' >&2
+    echo 'CPython test, debugging, compression or removed service extension remains' >&2
     exit 1
 fi
+
+# Font processing still needs CJK codecs, XML, hashing, compression used by sfnt readers and the
+# complete FontTools package. These checks prevent size work from silently deleting core support.
+test -s "$LIB/libpython3.14.so"
+test -s "$LIB/libcrypto_python.so"
+find "$DYN" -maxdepth 1 -type f -name '_hashlib.*.so' -print -quit | grep -q .
+find "$DYN" -maxdepth 1 -type f -name '_codecs_cn.*.so' -print -quit | grep -q .
+find "$DYN" -maxdepth 1 -type f -name '_codecs_jp.*.so' -print -quit | grep -q .
+find "$DYN" -maxdepth 1 -type f -name '_bz2.*.so' -print -quit | grep -q .
+find "$DYN" -maxdepth 1 -type f -name '_lzma.*.so' -print -quit | grep -q .
+test -d "$PYLIB/site-packages/fontTools/ttLib"
+test -d "$PYLIB/site-packages/fontTools/cffLib"
+test -d "$PYLIB/site-packages/fontTools/varLib/instancer"
+test -s "$PYLIB/xml/etree/ElementTree.py"
+test -s "$PYLIB/argparse.py"
+test -s "$PYLIB/hashlib.py"
+test -s "$PYLIB/tempfile.py"
 
 # Every retained extension that requests a private OpenSSL/SQLite soname must still find it in the
 # runtime library directory. System libraries such as libc/libm/libdl are intentionally ignored.
