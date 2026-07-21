@@ -35,6 +35,17 @@ private val CLOCK_ALARM_CRITICAL_CALL_MARKERS = listOf(
 internal fun shouldInstallClockUiFontHooks(packageName: String, processName: String): Boolean =
     packageName in CLOCK_PACKAGES && processName == packageName
 
+/**
+ * Generic bundled-font replacement must not overlap the dedicated QQ policy or functional clock
+ * processes. Keeping this as a pure function gives CI a direct regression gate for scope isolation.
+ */
+internal fun shouldInstallGenericBundledFontHook(packageName: String, processName: String): Boolean {
+    if (packageName.startsWith("io.github.xgl34222220.luoshu")) return false
+    if (packageName in QQ_PACKAGES) return false
+    if (packageName in CLOCK_PACKAGES) return shouldInstallClockUiFontHooks(packageName, processName)
+    return true
+}
+
 /** Returns true for call stacks belonging to alarm playback, alert or notification execution. */
 internal fun isClockAlarmCriticalCall(callerClassNames: List<String>): Boolean {
     val callers = callerClassNames.joinToString("|").lowercase()
