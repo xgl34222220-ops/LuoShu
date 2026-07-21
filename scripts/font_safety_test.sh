@@ -39,7 +39,9 @@ dd if=/dev/zero of="$MODDIR/system/fonts/Test.ttf" bs=2048 count=1 2>/dev/null
 luoshu_payload_arm Demo
 font_config_boot_guard Demo
 font_config_mark_boot_success
-[ ! -e "$MODDIR/config/font-payload-boot.conf" ]
+[ "$(sed -n 's/^state=//p' "$MODDIR/config/font-payload-boot.conf")" = confirmed ]
+font_config_boot_guard Demo
+[ "$(sed -n 's/^state=//p' "$MODDIR/config/font-payload-boot.conf")" = confirmed ]
 [ -s "$MODDIR/config/font-last-boot-success.conf" ]
 
 echo 'font safety tests passed'
