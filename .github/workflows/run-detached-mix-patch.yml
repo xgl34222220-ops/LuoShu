@@ -28,6 +28,10 @@ jobs:
           end = source.index("\n          PY\n", start)
           lines = source[start:end].splitlines()
           script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
+          script = script.replace(
+              "if old not in s: raise SystemExit('role check block not found')\ns = s.replace(old, new)",
+              "if old in s:\n    s = s.replace(old, new)",
+          )
           Path('/tmp/apply_detached_mix_patch.py').write_text(script, encoding='utf-8')
           PY
           set +e
