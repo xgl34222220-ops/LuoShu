@@ -16,32 +16,34 @@ import java.util.ArrayDeque
  *
  * AppBundledFontHook intentionally runs a broad final assignment hook for HyperOS Clock because
  * some timer/alarm digits bypass normal font factories. This layer captures the caller's original
- * Typeface before that broad hook and restores it afterwards for icon fonts and, more importantly,
- * for every alarm playback/alert execution path.
+ * Typeface before that broad hook and restores it afterwards for icon fonts and every alarm
+ * playback/alert execution path.
  *
- * Clock child processes are treated as functional runtime processes rather than UI processes. Their
- * Typeface arguments are always restored so font customization cannot affect ringtone lifetime,
- * alarm receivers, full-screen alerts or notification services.
+ * Clock child processes are functional runtime processes, not font UI processes. No hook from this
+ * class is installed there, so ringtone playback, receivers, full-screen alerts and notifications
+ * have zero additional TextView/Paint interception overhead.
  */
 class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         val packageName = lpparam.packageName ?: return
         if (packageName !in CLOCK_PACKAGES) return
         val processName = lpparam.processName ?: packageName
-        val restoreAll = !shouldInstallClockUiFontHooks(packageName, processName)
+        if (!shouldInstallClockUiFontHooks(packageName, processName)) {
+            XposedBridge.log("LuoShu Clock safety skipped runtime process: $processName")
+            return
+        }
 
-        runCatching { hookTextViewTypeface(packageName, processName, restoreAll) }
+        runCatching { hookTextViewTypeface(packageName, processName) }
             .onFailure { log(packageName, processName, "TextView safety hook failed", it) }
-        runCatching { hookPaintTypeface(packageName, processName, restoreAll) }
+        runCatching { hookPaintTypeface(packageName, processName) }
             .onFailure { log(packageName, processName, "Paint safety hook failed", it) }
 
         XposedBridge.log(
-            "LuoShu ClockIconTypefaceSafetyHook active: package=$packageName " +
-                "process=$processName restoreAll=$restoreAll",
+            "LuoShu ClockIconTypefaceSafetyHook active: package=$packageName process=$processName",
         )
     }
 
-    private fun hookTextViewTypeface(packageName: String, processName: String, restoreAll: Boolean) {
+    private fun hookTextViewTypeface(packageName: String, processName: String) {
         val stack = ThreadLocal<ArrayDeque<CapturedTypeface>>()
         XposedBridge.hookAllMethods(
             TextView::class.java,
@@ -57,15 +59,10 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
                     val original = stack.get()?.peekLast()?.value
                     val view = param.thisObject as? TextView ?: return
                     val family = typefaceFamilyName(original)
-                    val callers = if (restoreAll) emptyList() else currentCallerClassNames()
-                    val criticalAlarmCall = !restoreAll && isClockAlarmCriticalCall(callers)
-                    if (
-                        !restoreAll &&
-                        !criticalAlarmCall &&
-                        !shouldPreserveClockTextTypeface(view.text, family)
-                    ) {
-                        return
-                    }
+                    val callers = currentCallerClassNames()
+                    val criticalAlarmCall = isClockAlarmCriticalCall(callers)
+                    if (!criticalAlarmCall && !shouldPreserveClockTextTypeface(view.text, family)) return
+
                     param.args[0] = original
                     logPreservedOnce(
                         packageName = packageName,
@@ -74,18 +71,14 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
                         familyName = family,
                         text = view.text,
                         textSizeSp = null,
-                        reason = when {
-                            restoreAll -> "non-ui-process"
-                            criticalAlarmCall -> "alarm-runtime"
-                            else -> "icon-family"
-                        },
+                        reason = if (criticalAlarmCall) "alarm-runtime" else "icon-family",
                     )
                 }
             },
         )
     }
 
-    private fun hookPaintTypeface(packageName: String, processName: String, restoreAll: Boolean) {
+    private fun hookPaintTypeface(packageName: String, processName: String) {
         val stack = ThreadLocal<ArrayDeque<CapturedTypeface>>()
         XposedBridge.hookAllMethods(
             Paint::class.java,
@@ -102,10 +95,9 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
                     val paint = param.thisObject as? Paint ?: return
                     val family = typefaceFamilyName(original)
                     val textSizeSp = paintTextSizeSp(paint)
-                    val callers = if (restoreAll) emptyList() else currentCallerClassNames()
-                    val criticalAlarmCall = !restoreAll && isClockAlarmCriticalCall(callers)
+                    val callers = currentCallerClassNames()
+                    val criticalAlarmCall = isClockAlarmCriticalCall(callers)
                     if (
-                        !restoreAll &&
                         !criticalAlarmCall &&
                         !shouldPreserveClockPaintTypeface(
                             familyName = family,
@@ -116,6 +108,7 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
                     ) {
                         return
                     }
+
                     param.args[0] = original
                     logPreservedOnce(
                         packageName = packageName,
@@ -124,11 +117,7 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
                         familyName = family,
                         text = null,
                         textSizeSp = textSizeSp,
-                        reason = when {
-                            restoreAll -> "non-ui-process"
-                            criticalAlarmCall -> "alarm-runtime"
-                            else -> "icon-family"
-                        },
+                        reason = if (criticalAlarmCall) "alarm-runtime" else "icon-family",
                     )
                 }
             },
