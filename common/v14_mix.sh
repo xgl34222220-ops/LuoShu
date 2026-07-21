@@ -46,7 +46,7 @@ precheck_mix() {
 if [ -f "$WEIGHTED" ]; then
     case "${1:-config}" in
         start)
-            precheck_mix "$2" "$3" "$4" || exit 0
+            # 多字重引擎会在独立 Root Worker 内完成角色检查；这里必须立即入队返回。
             _cjk_mode=fixed
             _latin_mode=fixed
             _digit_mode=fixed
