@@ -3,14 +3,17 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
 # The native App's direct switch path loads font_library_cache after rom_adapters; that helper must
-# then load hyperos_global, which owns the unified HyperOS/ColorOS/AOSP dispatcher.
+# load the unified dispatcher and the extended partition map.
 grep -q 'common/font_library_cache.sh' "$ROOT/common/font_manager.sh"
 grep -q 'common/hyperos_global.sh' "$ROOT/common/font_library_cache.sh"
+grep -q 'common/font_config_partitions.sh' "$ROOT/common/font_library_cache.sh"
 
 # The composite path loads mount_compat after rom_adapters; mount_compat must load the same unified
-# dispatcher so composite and single-font payloads cannot diverge.
+# dispatcher and partition map so composite and single-font payloads cannot diverge.
 grep -q 'common/mount_compat.sh' "$ROOT/common/font_mix.sh"
 grep -q 'common/hyperos_global.sh' "$ROOT/common/mount_compat.sh"
+grep -q 'common/font_config_partitions.sh' "$ROOT/common/mount_compat.sh"
+grep -q 'system system_ext product my_product vendor odm oem' "$ROOT/common/mount_compat.sh"
 
 # The dispatcher must load both the XML runtime and static-weight preparation layer, then invoke the
 # same transactional enable function for HyperOS and for ColorOS/generic Android.
@@ -24,6 +27,20 @@ _count=$(grep -c 'font_config_enable_for_payload' "$ROOT/common/hyperos_global.s
 # failure therefore retains a bootable compatibility mapping instead of leaving an empty font map.
 grep -q 'payload_stage_activate' "$ROOT/common/font_mix.sh"
 grep -q 'font_config_enable_for_payload mix' "$ROOT/common/font_mix.sh"
+
+# The pre-Zygote guard must source the same extended specs used during generation, and the no-Hook
+# architecture must not mutate Android's /data/fonts database.
+grep -q 'common/font_config_runtime.sh' "$ROOT/post-fs-data.sh"
+grep -q 'common/font_config_partitions.sh' "$ROOT/post-fs-data.sh"
+grep -q 'font_config_boot_guard' "$ROOT/post-fs-data.sh"
+! grep -Eq '(^|[[:space:]])(cp|ln|rm)[[:space:]].*/data/fonts|_dest="/data/fonts/' "$ROOT/post-fs-data.sh"
+
+# Extended specs must include ColorOS/Oplus and OEM fallback partitions while preserving the same
+# transaction and rollback functions from font_config_runtime.sh.
+grep -q 'my_product' "$ROOT/common/font_config_partitions.sh"
+grep -q 'oplus_fonts_customization.xml' "$ROOT/common/font_config_partitions.sh"
+grep -q 'vendor' "$ROOT/common/font_config_partitions.sh"
+grep -q 'odm' "$ROOT/common/font_config_partitions.sh"
 
 # Restoring the system default must remove generated XML and partition aliases.
 grep -q 'font_config_disable' "$ROOT/common/font_manager.sh"
