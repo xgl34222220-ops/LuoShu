@@ -1,0 +1,33 @@
+name: Composite geometry tests
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - common/composite_font.py
+      - common/composite_aligned.py
+      - common/luoshu_composite.sh
+      - scripts/composite_alignment_test.py
+      - .github/workflows/composite-geometry.yml
+permissions:
+  contents: read
+jobs:
+  geometry:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install font test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends python3-fonttools fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - name: Run mixed-script geometry tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          CJK="$(find /usr/share/fonts -type f \( -iname 'NotoSansCJK-Regular.ttc' -o -iname 'NotoSansCJK-Regular.otf' \) -print -quit)"
+          LATIN="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
+          test -s "$CJK"
+          test -s "$LATIN"
+          python3 scripts/composite_alignment_test.py --cjk "$CJK" --latin "$LATIN"

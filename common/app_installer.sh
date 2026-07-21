@@ -62,7 +62,7 @@ APP_PACKAGE=$(read_prop package "$META")
 APP_VERSION_CODE=$(read_prop versionCode "$META")
 APK_SHA256=$(read_prop sha256 "$META")
 
-[ -n "$APP_PACKAGE" ] || APP_PACKAGE="io.github.xgl34222220.luoshu.debug"
+[ -n "$APP_PACKAGE" ] || APP_PACKAGE="io.github.xgl34222220.luoshu"
 case "$APP_PACKAGE" in
     io.github.xgl34222220.luoshu|io.github.xgl34222220.luoshu.debug) ;;
     *)
@@ -91,7 +91,7 @@ if command -v sha256sum >/dev/null 2>&1; then
         printf 'invalid-apk\n'
         exit 22
     fi
-    [ -n "$APK_SHA256" ] || APK_SHA256="$ACTUAL_SHA256"
+    [ -n "$APK_SHA256" ] && [ "$APK_SHA256" != "unknown" ] || APK_SHA256="$ACTUAL_SHA256"
 else
     [ -n "$APK_SHA256" ] || APK_SHA256="unknown"
 fi
@@ -111,13 +111,34 @@ installed_version_code() {
     printf '%s\n' "$_dump" | sed -n 's/.*versionCode=\([0-9][0-9]*\).*/\1/p' | head -n1
 }
 
+installed_apk_path() {
+    [ -n "$PM_BIN" ] || return 0
+    $PM_BIN path "$APP_PACKAGE" 2>/dev/null | sed -n 's/^package://p' | head -n1
+}
+
+installed_apk_sha256() {
+    _path=$(installed_apk_path)
+    [ -f "$_path" ] || return 0
+    command -v sha256sum >/dev/null 2>&1 || return 0
+    sha256sum "$_path" 2>/dev/null | awk '{print $1}'
+}
+
 INSTALLED_VERSION=$(installed_version_code)
+INSTALLED_SHA256=$(installed_apk_sha256)
 if [ "$INSTALLED_VERSION" = "$APP_VERSION_CODE" ]; then
-    rm -f "$PENDING" 2>/dev/null || true
-    write_state up_to_date "已安装版本与模块内置 App 一致"
-    log_app INFO "$APP_PACKAGE 已是目标版本 $APP_VERSION_CODE，跳过覆盖安装"
-    printf 'already-current\n'
-    exit 0
+    if [ -z "$INSTALLED_SHA256" ] || [ "$INSTALLED_SHA256" = "$APK_SHA256" ]; then
+        rm -f "$PENDING" 2>/dev/null || true
+        if [ -n "$INSTALLED_SHA256" ]; then
+            write_state up_to_date "已安装 APK 与模块内置 App 的版本和哈希均一致"
+            log_app INFO "$APP_PACKAGE 已是目标版本 $APP_VERSION_CODE 且 APK 哈希一致，跳过覆盖安装"
+        else
+            write_state up_to_date "已安装版本与模块内置 App 一致；当前系统无法读取已安装 APK 哈希"
+            log_app INFO "$APP_PACKAGE 已是目标版本 $APP_VERSION_CODE，无法读取已安装 APK 哈希，按版本号跳过覆盖安装"
+        fi
+        printf 'already-current\n'
+        exit 0
+    fi
+    log_app INFO "$APP_PACKAGE 版本号相同但 APK 哈希不同，执行热修复覆盖安装"
 fi
 
 if [ -z "$PM_BIN" ]; then

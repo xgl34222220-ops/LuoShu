@@ -3,6 +3,7 @@ package io.github.xgl34222220.luoshu
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.OpenableColumns
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
@@ -13,14 +14,20 @@ import androidx.lifecycle.viewModelScope
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 private const val IMPORT_BRIDGE = "/data/adb/modules/LuoShu/common/app_bridge.sh"
 private const val MAX_IMPORT_BYTES = 268_435_456L
+private const val IMPORT_CHECKPOINT_ITEMS = 5
+private const val IMPORT_CHECKPOINT_INTERVAL_MS = 1_500L
+private const val IMPORT_CACHE_MAX_AGE_MS = 3_600_000L
 private val ALLOWED_IMPORT_EXTENSIONS = setOf("ttf", "otf", "ttc", "zip")
 
 internal enum class NativeImportPhase(val wireName: String) {
@@ -110,6 +117,8 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
         private set
 
     private var importJob: Job? = null
+    private var lastCheckpointProcessed = -1
+    private var lastCheckpointAt = 0L
 
     @Volatile
     private var pauseRequested = false
@@ -123,15 +132,31 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
 
     fun startImport(uris: List<Uri>) {
         if (state.busy || state.paused || importJob?.isActive == true) return
-        val selected = uris.take(32)
+        val unique = uris.distinctBy(Uri::toString)
+        val selected = unique.take(MAX_IMPORT_QUEUE_ITEMS)
         if (selected.isEmpty()) return
+        val truncated = unique.size - selected.size
+        state = NativeImportState(
+            phase = NativeImportPhase.QUEUED,
+            total = selected.size,
+            message = if (truncated > 0) {
+                "正在准备 ${selected.size} 个文件；已忽略超出上限的 $truncated 个文件"
+            } else {
+                "正在准备 ${selected.size} 个文件的导入队列"
+            },
+        )
 
         importJob = viewModelScope.launch {
+            val context = getApplication<Application>().applicationContext
+            var preparedItems: List<ImportQueueItem> = emptyList()
             try {
-                val context = getApplication<Application>().applicationContext
-                withContext(Dispatchers.IO) { discardPreviousRecord(context) }
-                val items = withContext(Dispatchers.IO) {
+                withContext(Dispatchers.IO) {
+                    discardPreviousRecord(context)
+                    cleanupImportCache(context, includeRecent = false)
+                }
+                preparedItems = withContext(Dispatchers.IO) {
                     selected.mapIndexed { index, uri ->
+                        currentCoroutineContext().ensureActive()
                         val name = queryDisplayName(context, uri) ?: "font-${index + 1}"
                         val persisted = runCatching {
                             context.contentResolver.takePersistableUriPermission(
@@ -153,10 +178,39 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
                     taskId = "import-${System.currentTimeMillis()}",
                     phase = NativeImportPhase.QUEUED,
                     createdAt = System.currentTimeMillis(),
-                    message = "已保存 ${items.size} 个文件的导入队列",
-                    items = items,
+                    message = if (truncated > 0) {
+                        "已保存 ${preparedItems.size} 个文件；超出上限的 $truncated 个文件未加入"
+                    } else {
+                        "已保存 ${preparedItems.size} 个文件的导入队列"
+                    },
+                    items = preparedItems,
                 )
                 runQueue(task)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                if (preparedItems.isNotEmpty()) {
+                    withContext(Dispatchers.IO) {
+                        releasePermissions(
+                            context,
+                            ImportQueueTask(
+                                taskId = "prepare-failed",
+                                phase = NativeImportPhase.FAILED,
+                                createdAt = System.currentTimeMillis(),
+                                message = "准备导入失败",
+                                items = preparedItems,
+                            ),
+                            includeFailures = true,
+                        )
+                    }
+                }
+                state = NativeImportState(
+                    phase = NativeImportPhase.FAILED,
+                    total = selected.size,
+                    failed = listOf(error.message ?: "准备导入队列失败"),
+                    message = error.message ?: "准备导入队列失败",
+                    resultVisible = true,
+                )
             } finally {
                 importJob = null
             }
@@ -231,6 +285,7 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
                 withContext(Dispatchers.IO) {
                     if (saved != null) releasePermissions(context, saved, includeFailures = true)
                     queueStore.clear()
+                    cleanupImportCache(context, includeRecent = true)
                 }
                 pauseRequested = false
                 cancelRequested = false
@@ -265,9 +320,12 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
 
     private suspend fun runQueue(initial: ImportQueueTask) {
         var task = initial
-        persistAndPublish(task)
+        lastCheckpointProcessed = -1
+        lastCheckpointAt = 0L
+        persistAndPublish(task, forceCheckpoint = true)
 
         task.items.indices.forEach { index ->
+            currentCoroutineContext().ensureActive()
             if (cancelRequested) {
                 if (task.unfinished) finishCancelled(task) else finishCompleted(task)
                 return
@@ -287,7 +345,7 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
                 phase = NativeImportPhase.RUNNING,
                 message = "正在导入 ${task.processed + 1}/${task.total}：${item.displayName}",
             )
-            persistAndPublish(task)
+            publishOnly(task)
 
             val context = getApplication<Application>().applicationContext
             val resultItem = try {
@@ -295,13 +353,17 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
                     ImportOutcome.IMPORTED -> item.copy(status = ImportQueueItemStatus.IMPORTED, error = "")
                     ImportOutcome.DUPLICATE -> item.copy(status = ImportQueueItemStatus.DUPLICATE, error = "")
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
                 item.copy(
                     status = ImportQueueItemStatus.FAILED,
                     error = error.message ?: "导入失败",
                 )
             }
-            task = task.replaceItem(index, resultItem)
+            task = task.replaceItem(index, resultItem).copy(
+                message = "已处理 ${task.processed + 1}/${task.total}：${item.displayName}",
+            )
             persistAndPublish(task)
 
             if (cancelRequested) {
@@ -323,7 +385,7 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
             phase = NativeImportPhase.PAUSED,
             message = "导入已暂停，已处理 ${task.processed}/${task.total} 个文件",
         )
-        persistAndPublish(paused)
+        persistAndPublish(paused, forceCheckpoint = true)
     }
 
     private suspend fun finishCancelled(task: ImportQueueTask) {
@@ -334,9 +396,13 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
             cancelled,
             resultVisible = true,
             refreshToken = if (cancelled.imported > 0) System.currentTimeMillis() else 0L,
+            forceCheckpoint = true,
         )
         val context = getApplication<Application>().applicationContext
-        withContext(Dispatchers.IO) { releasePermissions(context, cancelled, includeFailures = false) }
+        withContext(Dispatchers.IO) {
+            releasePermissions(context, cancelled, includeFailures = false)
+            cleanupImportCache(context, includeRecent = true)
+        }
     }
 
     private suspend fun finishCompleted(task: ImportQueueTask) {
@@ -349,22 +415,46 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
             else -> "字体导入失败，未成功处理任何文件"
         }
         val completed = task.copy(phase = phase, message = message)
-        persistAndPublish(completed, resultVisible = true, refreshToken = System.currentTimeMillis())
+        persistAndPublish(
+            completed,
+            resultVisible = true,
+            refreshToken = System.currentTimeMillis(),
+            forceCheckpoint = true,
+        )
         val context = getApplication<Application>().applicationContext
-        withContext(Dispatchers.IO) { releasePermissions(context, completed, includeFailures = false) }
+        withContext(Dispatchers.IO) {
+            releasePermissions(context, completed, includeFailures = false)
+            cleanupImportCache(context, includeRecent = true)
+        }
     }
 
     private suspend fun persistAndPublish(
         task: ImportQueueTask,
         resultVisible: Boolean = false,
         refreshToken: Long = 0L,
+        forceCheckpoint: Boolean = false,
     ) {
-        withContext(Dispatchers.IO) { queueStore.save(task) }
         state = task.toUiState(resultVisible = resultVisible, refreshToken = refreshToken)
+        val now = SystemClock.elapsedRealtime()
+        val shouldCheckpoint = forceCheckpoint ||
+            task.phase != NativeImportPhase.RUNNING ||
+            task.processed - lastCheckpointProcessed >= IMPORT_CHECKPOINT_ITEMS ||
+            now - lastCheckpointAt >= IMPORT_CHECKPOINT_INTERVAL_MS
+        if (!shouldCheckpoint) return
+        withContext(Dispatchers.IO) { queueStore.save(task) }
+        lastCheckpointProcessed = task.processed
+        lastCheckpointAt = now
     }
 
-    private fun ImportQueueTask.replaceItem(index: Int, replacement: ImportQueueItem): ImportQueueTask =
-        copy(items = items.mapIndexed { itemIndex, item -> if (itemIndex == index) replacement else item })
+    private fun publishOnly(task: ImportQueueTask) {
+        state = task.toUiState()
+    }
+
+    private fun ImportQueueTask.replaceItem(index: Int, replacement: ImportQueueItem): ImportQueueTask {
+        val updated = items.toMutableList()
+        updated[index] = replacement
+        return copy(items = updated)
+    }
 
     private fun discardPreviousRecord(context: android.content.Context) {
         queueStore.load()?.let { releasePermissions(context, it, includeFailures = true) }
@@ -420,9 +510,6 @@ private suspend fun importOne(context: android.content.Context, uri: Uri, displa
         }
     } finally {
         temp.delete()
-        cacheDir.listFiles()?.filter { it.isFile }?.forEach { file ->
-            if (System.currentTimeMillis() - file.lastModified() > 3_600_000L) file.delete()
-        }
     }
 }
 
@@ -445,7 +532,7 @@ private fun queryDisplayName(context: android.content.Context, uri: Uri): String
 private fun copyUriWithLimit(context: android.content.Context, uri: Uri, target: File) {
     context.contentResolver.openInputStream(uri)?.use { input ->
         FileOutputStream(target).use { output ->
-            val buffer = ByteArray(128 * 1024)
+            val buffer = ByteArray(256 * 1024)
             var total = 0L
             while (true) {
                 val count = input.read(buffer)
@@ -455,9 +542,19 @@ private fun copyUriWithLimit(context: android.content.Context, uri: Uri, target:
                 output.write(buffer, 0, count)
             }
             require(total > 0L) { "文件为空" }
-            output.fd.sync()
+            output.flush()
         }
     } ?: error("无法读取所选文件")
+}
+
+private fun cleanupImportCache(context: android.content.Context, includeRecent: Boolean) {
+    val cacheDir = File(context.cacheDir, "native_import")
+    val now = System.currentTimeMillis()
+    cacheDir.listFiles()?.forEach { file ->
+        if (file.isFile && (includeRecent || now - file.lastModified() > IMPORT_CACHE_MAX_AGE_MS)) {
+            runCatching { file.delete() }
+        }
+    }
 }
 
 private fun firstImportJson(raw: String): JSONObject {

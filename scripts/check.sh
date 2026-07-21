@@ -27,13 +27,14 @@ for file in \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh common/v142_weighted_mix.sh \
-  common/v143_auto_multiweight_mix.sh common/mix_weight_mode.sh \
+  common/v143_auto_multiweight_mix.sh common/mix_weight_mode.sh common/upgrade_state.sh \
   common/app_bridge.sh common/font_manager.sh common/font_library_cache.sh common/app_installer.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
   scripts/build.sh scripts/version.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh \
   scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh \
   scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/rc3_audit.sh \
+  scripts/upgrade_state_test.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/build.gradle.kts \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
@@ -108,6 +109,8 @@ grep -q 'sha256' "$ROOT/common/app_bridge.sh"
 grep -q 'rebootRequired' "$ROOT/common/app_bridge.sh"
 grep -q 'trusted_source' "$ROOT/common/native_import.sh"
 grep -q 'MAX_BYTES=268435456' "$ROOT/common/native_import.sh"
+grep -q 'HASH_INDEX=' "$ROOT/common/native_import.sh"
+grep -q 'record_import_hash' "$ROOT/common/native_import.sh"
 grep -q 'font_validate' "$ROOT/common/native_import.sh"
 grep -q 'font_extract_faces.py' "$ROOT/common/native_import.sh"
 grep -q 'font_check_cli' "$ROOT/common/font_check.sh"
@@ -118,16 +121,26 @@ grep -q 'worker "$_request"' "$ROOT/common/v142_weighted_mix.sh"
 grep -q 'axes_task.conf' "$ROOT/common/v142_weighted_mix.sh"
 grep -q 'OpenMultipleDocuments' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 grep -q 'takePersistableUriPermission' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportViewModel.kt"
+grep -q 'IMPORT_CHECKPOINT_ITEMS = 5' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportViewModel.kt"
 grep -q 'fun pauseImport' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportViewModel.kt"
 grep -q 'fun cancelImport' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportViewModel.kt"
 grep -q 'fun retryFailed' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportViewModel.kt"
 grep -q 'fun clearRecord' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportViewModel.kt"
+grep -q 'MAX_IMPORT_QUEUE_ITEMS = 256' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportQueueStore.kt"
 grep -q 'forResume' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportQueueStore.kt"
 grep -q 'forRetryFailures' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportQueueStore.kt"
 grep -q 'cancelRemaining' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportQueueStore.kt"
 grep -q 'encodeImportQueue' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportQueueStore.kt"
 grep -q 'viewModel<NativeImportViewModel>()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuHost.kt"
 grep -q 'setFontVariationSettings' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
+grep -q 'PREVIEW_EXPORT_DEBOUNCE_MS' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
+grep -q 'PREVIEW_EXPORT_CONCURRENCY = 1' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
+grep -q 'setFrameRateBoostOnTouchEnabled' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt"
+grep -q 'preferredRefreshRate' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt"
+grep -q 'luoshu_migrate_upgrade_state' "$ROOT/customize.sh"
+grep -q 'LUOSHU_UPGRADE_PAYLOAD_COUNT' "$ROOT/common/upgrade_state.sh"
+grep -q 'font_runtime_probe.key' "$ROOT/service.sh"
+grep -q 'sleep 12' "$ROOT/service.sh"
 grep -q 'updateMixAxis' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 grep -q 'resolveAndCacheFontDefaultAxes' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/dialogs/FontPickerDialog.kt"
 grep -q 'cachedFontDefaultWeight' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt"
@@ -174,6 +187,7 @@ sh "$ROOT/scripts/auto_multiweight_engine_test.sh"
 sh "$ROOT/scripts/stability_test.sh"
 sh "$ROOT/scripts/font_library_cache_test.sh"
 sh "$ROOT/scripts/app_installer_test.sh"
+sh "$ROOT/scripts/upgrade_state_test.sh"
 
 test -x "$ROOT/common/python/bin/luoshu-python"
 echo 'LuoShu App-only source checks passed.'

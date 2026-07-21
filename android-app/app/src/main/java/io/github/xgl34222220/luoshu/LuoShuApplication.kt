@@ -65,7 +65,8 @@ internal class LuoShuApplication : Application(), ViewModelStoreOwner {
                     }
                 }
                 previousPhase = state.phase
-                delay(250L)
+                // 任务进度以文件为单位更新，不需要每秒轮询四次，降低常驻主线程唤醒。
+                delay(500L)
             }
         }
     }

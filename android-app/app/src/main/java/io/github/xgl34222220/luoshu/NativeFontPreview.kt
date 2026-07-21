@@ -15,24 +15,26 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import java.io.File
+import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.io.File
-import java.security.MessageDigest
-import java.util.concurrent.ConcurrentHashMap
-import kotlin.math.roundToInt
 
 private const val APP_BRIDGE = "/data/adb/modules/LuoShu/common/app_bridge.sh"
 private const val PREVIEW_CACHE_MAX_FILES = 32
-private const val PREVIEW_CACHE_MAX_BYTES = 384L * 1024L * 1024L
+private const val PREVIEW_CACHE_MAX_BYTES = 256L * 1024L * 1024L
 private const val PREVIEW_MEMORY_MAX_ENTRIES = 24
-private const val PREVIEW_EXPORT_CONCURRENCY = 2
+private const val PREVIEW_EXPORT_CONCURRENCY = 1
+private const val PREVIEW_EXPORT_DEBOUNCE_MS = 140L
 
 internal data class VariableAxisInfo(
     val tag: String,
@@ -138,10 +140,14 @@ internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
             cached != null -> cached
             else -> {
                 val lock = axisInfoLocks.computeIfAbsent(font.id) { Mutex() }
-                lock.withLock {
-                    axisInfoCache[font.id] ?: loadWeightAxisInfo(font).also { loaded ->
-                        axisInfoCache[font.id] = loaded
+                try {
+                    lock.withLock {
+                        axisInfoCache[font.id] ?: loadWeightAxisInfo(font).also { loaded ->
+                            axisInfoCache[font.id] = loaded
+                        }
                     }
+                } finally {
+                    axisInfoLocks.remove(font.id, lock)
                 }
             }
         }
@@ -262,6 +268,11 @@ internal fun NativeFontPreview(
             ?: PreviewTypefaceState(),
         key1 = previewKey,
     ) {
+        // 快速滚动时先等待一小段时间；离开可视区的卡片会被 Compose 取消，
+        // 避免为一闪而过的几十个字体启动 Root 导出和 Typeface 解析。
+        if (memoryEntry == null && (target == null || !target.isFile || target.length() == 0L)) {
+            delay(PREVIEW_EXPORT_DEBOUNCE_MS)
+        }
         value = withContext(Dispatchers.IO) {
             when {
                 font == null -> PreviewTypefaceState(error = "未选择字体")
@@ -269,46 +280,50 @@ internal fun NativeFontPreview(
                 sourceRevision == null || target == null -> PreviewTypefaceState(error = "字体索引无效")
                 else -> {
                     val lock = previewLocks.computeIfAbsent(sourceRevision) { Mutex() }
-                    lock.withLock {
-                        previewMemoryGet(sourceRevision)?.let { cachedEntry ->
-                            return@withLock PreviewTypefaceState(cachedEntry.typeface, cachedEntry.file)
-                        }
-                        previewExportSemaphore.withPermit {
-                            try {
-                                var exported = false
-                                if (!target.isFile || target.length() == 0L) {
-                                    val command = "sh ${RootShell.quote(APP_BRIDGE)} preview_export " +
-                                        "${RootShell.quote(font.id)} ${RootShell.quote(target.absolutePath)} $requestedWeight"
-                                    val result = RootShell.exec(command, timeoutMs = 25_000L)
-                                    val jsonLine = result.stdout.lineSequence()
-                                        .firstOrNull { it.trimStart().startsWith("{") }
-                                    val root = jsonLine?.let { JSONObject(it.trim()) }
-                                    if (result.code != 0 || root?.optString("status") != "ok") {
-                                        error(
-                                            root?.optString("message").orEmpty().ifBlank {
-                                                result.stderr.ifBlank { "预览字体导出失败" }
-                                            },
-                                        )
-                                    }
+                    try {
+                        lock.withLock {
+                            previewMemoryGet(sourceRevision)?.let { cachedEntry ->
+                                return@withLock PreviewTypefaceState(cachedEntry.typeface, cachedEntry.file)
+                            }
+                            previewExportSemaphore.withPermit {
+                                try {
+                                    var exported = false
                                     if (!target.isFile || target.length() == 0L) {
-                                        error("预览字体文件为空")
+                                        val command = "sh ${RootShell.quote(APP_BRIDGE)} preview_export " +
+                                            "${RootShell.quote(font.id)} ${RootShell.quote(target.absolutePath)} $requestedWeight"
+                                        val result = RootShell.exec(command, timeoutMs = 25_000L)
+                                        val jsonLine = result.stdout.lineSequence()
+                                            .firstOrNull { it.trimStart().startsWith("{") }
+                                        val root = jsonLine?.let { JSONObject(it.trim()) }
+                                        if (result.code != 0 || root?.optString("status") != "ok") {
+                                            error(
+                                                root?.optString("message").orEmpty().ifBlank {
+                                                    result.stderr.ifBlank { "预览字体导出失败" }
+                                                },
+                                            )
+                                        }
+                                        if (!target.isFile || target.length() == 0L) {
+                                            error("预览字体文件为空")
+                                        }
+                                        exported = true
                                     }
-                                    exported = true
+                                    val loaded = Typeface.createFromFile(target)
+                                    target.setLastModified(System.currentTimeMillis())
+                                    if (exported) trimPreviewCache(cacheDir, target)
+                                    previewMemoryPut(
+                                        sourceRevision,
+                                        PreviewMemoryEntry(typeface = loaded, file = target),
+                                    )
+                                    PreviewTypefaceState(typeface = loaded, file = target)
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (error: Throwable) {
+                                    PreviewTypefaceState(error = error.message ?: "预览字体加载失败")
                                 }
-                                val loaded = Typeface.createFromFile(target)
-                                target.setLastModified(System.currentTimeMillis())
-                                if (exported) trimPreviewCache(cacheDir, target)
-                                previewMemoryPut(
-                                    sourceRevision,
-                                    PreviewMemoryEntry(typeface = loaded, file = target),
-                                )
-                                PreviewTypefaceState(typeface = loaded, file = target)
-                            } catch (cancelled: CancellationException) {
-                                throw cancelled
-                            } catch (error: Throwable) {
-                                PreviewTypefaceState(error = error.message ?: "预览字体加载失败")
                             }
                         }
+                    } finally {
+                        previewLocks.remove(sourceRevision, lock)
                     }
                 }
             }

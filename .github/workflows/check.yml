@@ -104,7 +104,16 @@ jobs:
 
       - name: Lint, test and build native App
         working-directory: android-app
-        run: gradle --no-daemon --stacktrace :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+        shell: bash
+        run: |
+          set -uo pipefail
+          log="$RUNNER_TEMP/luoshu-gradle-check.log"
+          if ! gradle --no-daemon --stacktrace :app:lintDebug :app:testDebugUnitTest :app:assembleDebug >"$log" 2>&1; then
+            echo 'Gradle validation failed; showing the final 260 lines:' >&2
+            tail -n 260 "$log" >&2
+            exit 1
+          fi
+          cat "$log"
 
       - name: Build App and single module candidate
         shell: bash

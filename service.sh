@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # ============================================================
 # 洛书 - 后台服务（版本以 module.prop 为准）
-# 功能：启动完成后校正权限、补装内置 App、预热字体索引、恢复字重并维护日志。
+# 功能：启动完成后校正权限、补装内置 App、低优先级预热字体索引、恢复字重并维护日志。
 # ============================================================
 
 MODDIR="${0%/*}"
@@ -27,6 +27,14 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
         echo "[$TIMESTAMP] [SERVICE] [$LEVEL] $MSG" >> "$LOG_FILE" 2>/dev/null || true
     }
 
+    run_nice() {
+        if command -v nice >/dev/null 2>&1; then
+            nice -n 10 "$@"
+        else
+            "$@"
+        fi
+    }
+
     log_service "INFO" "服务脚本开始执行 ($MODULE_VERSION)"
     if [ -f "$LOG_FILE" ]; then
         _log_size=$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d '[:space:]')
@@ -45,48 +53,51 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
     chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     chmod 0755 "$MODDIR/system/bin/洛书" "$MODDIR/system/bin/luoshud" 2>/dev/null || true
 
-    # 刷写阶段无法调用 pm 时，只在首次完整开机后自动重试一次。
-    # 成功覆盖安装会保留 App 数据、字体索引和外观设置。
-    if [ -s "$MODDIR/bundled/LuoShu-App.apk" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
-        if [ -f "$MODDIR/config/app_install_pending" ] || [ ! -f "$MODDIR/config/app_install_state.conf" ]; then
-            _app_result=$(MODDIR="$MODDIR" APP_INSTALL_LOG="$MODDIR/logs/app-install.log" sh "$MODDIR/common/app_installer.sh" first-boot 2>/dev/null)
-            _app_code=$?
-            case "$_app_result" in
-                installed)
-                    rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
-                    log_service "INFO" "已在首次开机自动安装或更新洛书 App"
-                    ;;
-                already-current)
-                    rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
-                    log_service "INFO" "洛书 App 已是模块内置版本"
-                    ;;
-                *)
-                    # 首次开机只自动尝试一次，避免签名冲突时每次开机重复失败。
-                    rm -f "$MODDIR/config/app_install_pending" 2>/dev/null || true
-                    touch "$MODDIR/config/app_install_manual" 2>/dev/null || true
-                    log_service "INFO" "App 自动更新未完成（code=$_app_code），请使用模块操作按钮重试；详情见 app-install.log"
-                    ;;
-            esac
+    # 仅在旧测试包确实留下状态文件时恢复 GMS 组件，避免每次开机无意义调用 pm。
+    if [ -f "$MODDIR/config/play_font_bridge.conf" ] && [ -f "$MODDIR/common/play_font_bridge" ]; then
+        _bridge_result=$(MODDIR="$MODDIR" sh "$MODDIR/common/play_font_bridge" restore 2>/dev/null)
+        log_service "INFO" "GMS 字体组件安全恢复：${_bridge_result:-unknown}"
+    fi
+
+    # 真机字体探测改为“ROM/模块版本变化时运行一次”，也可通过 font_probe_requested 手动触发。
+    # 不再每次开机扫描多个分区和 APK，降低开机后的 I/O 与解压负载。
+    if [ -f "$MODDIR/common/font_runtime_probe.sh" ]; then
+        _probe_key="$MODULE_VERSION|$(getprop ro.build.fingerprint 2>/dev/null)"
+        _probe_old=$(cat "$MODDIR/config/font_runtime_probe.key" 2>/dev/null)
+        if [ "$_probe_key" != "$_probe_old" ] || [ -f "$MODDIR/config/font_probe_requested" ]; then
+            run_nice env MODDIR="$MODDIR" sh "$MODDIR/common/font_runtime_probe.sh" >/dev/null 2>&1 || true
+            printf '%s\n' "$_probe_key" > "$MODDIR/config/font_runtime_probe.key" 2>/dev/null || true
+            rm -f "$MODDIR/config/font_probe_requested" 2>/dev/null || true
+            log_service "INFO" "字体运行时探测已按版本刷新"
+        else
+            log_service "DEBUG" "字体运行时探测缓存未变化，跳过"
         fi
+    fi
+
+    # 每次完整开机核对模块内置 APK。安装器版本和哈希一致时会立即退出。
+    if [ -s "$MODDIR/bundled/LuoShu-App.apk" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
+        _app_result=$(MODDIR="$MODDIR" APP_INSTALL_LOG="$MODDIR/logs/app-install.log" sh "$MODDIR/common/app_installer.sh" boot-verify 2>/dev/null)
+        _app_code=$?
+        case "$_app_result" in
+            installed)
+                rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
+                log_service "INFO" "已自动安装或更新洛书 App"
+                ;;
+            already-current)
+                rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
+                log_service "INFO" "洛书 App 已与模块内置 APK 一致"
+                ;;
+            *)
+                rm -f "$MODDIR/config/app_install_pending" 2>/dev/null || true
+                touch "$MODDIR/config/app_install_manual" 2>/dev/null || true
+                log_service "INFO" "App 自动安装未完成（code=$_app_code），请使用模块操作按钮重试；详情见 app-install.log"
+                ;;
+        esac
     fi
 
     # Root 管理器模块说明只显示当前字体，不再塞入更新日志。
     if [ -f "$MODDIR/common/module_status.sh" ]; then
         MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" >/dev/null 2>&1 || true
-    fi
-
-    # 字体列表在后台预热。轻量指纹未变化时跳过轮廓解析；变化后重建原生索引。
-    if [ -f "$MODDIR/common/font_library_cache.sh" ] && [ -f "$MODDIR/common/font_manager.sh" ]; then
-        _font_fp=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_library_cache.sh" value 2>/dev/null)
-        _font_fp_old=$(cat "$MODDIR/config/native_font_index.key" 2>/dev/null)
-        case "$_font_fp_old" in native-v1\|*) _font_fp_old="${_font_fp_old##*|}" ;; esac
-        if [ -n "$_font_fp" ] && { [ "$_font_fp" != "$_font_fp_old" ] || [ ! -s "$MODDIR/config/native_font_index.json" ]; }; then
-            if MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list refresh >/dev/null 2>&1; then
-                log_service "INFO" "原生字体索引后台预热完成"
-            else
-                log_service "INFO" "字体索引后台预热失败，App 将继续使用已有本地索引"
-            fi
-        fi
     fi
 
     # 恢复用户保存的 Android 全局字重调节；组合槽字重已固化到字体轮廓。
@@ -102,7 +113,24 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
         fi
     fi
 
+    # 字体索引预热延后并降为低优先级，避免开机后与桌面、Play、系统服务争抢 CPU/I/O。
+    if [ -f "$MODDIR/common/font_library_cache.sh" ] && [ -f "$MODDIR/common/font_manager.sh" ]; then
+        (
+            sleep 12
+            _font_fp=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_library_cache.sh" value 2>/dev/null)
+            _font_fp_old=$(cat "$MODDIR/config/native_font_index.key" 2>/dev/null)
+            case "$_font_fp_old" in native-v1\|*) _font_fp_old="${_font_fp_old##*|}" ;; esac
+            if [ -n "$_font_fp" ] && { [ "$_font_fp" != "$_font_fp_old" ] || [ ! -s "$MODDIR/config/native_font_index.json" ]; }; then
+                if run_nice env MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list refresh >/dev/null 2>&1; then
+                    log_service "INFO" "原生字体索引低优先级预热完成"
+                else
+                    log_service "INFO" "字体索引后台预热失败，App 将继续使用已有本地索引"
+                fi
+            fi
+        ) &
+    fi
+
     # 新字体只由原生 App 主动提交，完整重启后由系统自然加载。
     rm -f "$MODDIR/.first_boot" 2>/dev/null || true
-    log_service "INFO" "服务脚本执行完成"
+    log_service "INFO" "服务脚本主流程执行完成"
 ) &

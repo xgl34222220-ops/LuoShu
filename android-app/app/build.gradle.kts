@@ -66,7 +66,7 @@ android {
         getByName("debug") {
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
-            // Test packages remain installable over the existing debug app, but execute with release-like optimization.
+            // Test packages remain installable alongside the production App, but execute with release-like optimization.
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
@@ -124,6 +124,9 @@ dependencies {
     implementation("com.materialkolor:material-kolor:2.0.0")
     implementation("dev.chrisbanes.haze:haze:1.6.10")
     implementation("dev.chrisbanes.haze:haze-materials:1.6.10")
+
+    // The framework supplies these classes inside hooked processes. They must never be packaged into LuoShu.apk.
+    compileOnly("de.robv.android.xposed:api:82")
 
     testImplementation("junit:junit:4.13.2")
 }
