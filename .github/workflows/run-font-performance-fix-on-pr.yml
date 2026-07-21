@@ -31,18 +31,34 @@ jobs:
           Path('/tmp/apply_font_performance_fix.py').write_text(script, encoding='utf-8')
           PY
           python3 /tmp/apply_font_performance_fix.py
-      - name: Validate patched sources
+      - name: Validate patched sources and save diagnostics
+        id: validate
+        continue-on-error: true
         shell: bash
         run: |
-          python3 -m py_compile common/font_import_probe.py
-          sh -n common/native_import.sh
-          sh -n common/font_import.sh
-          sh -n common/font_import_compat.sh
-          sh -n common/font_manager.sh
-          sh -n common/v143_auto_multiweight_mix.sh
-          sh scripts/native_zip_import_test.sh
-          sh scripts/auto_multiweight_engine_test.sh
-      - name: Commit the validated patch
+          set +e
+          : > .font-performance-validation.log
+          failed=0
+          run_check() {
+            name="$1"
+            shift
+            printf '\n===== %s =====\n' "$name" | tee -a .font-performance-validation.log
+            "$@" >> .font-performance-validation.log 2>&1
+            code=$?
+            printf 'exit=%s\n' "$code" | tee -a .font-performance-validation.log
+            [ "$code" -eq 0 ] || failed=1
+          }
+          run_check py_compile python3 -m py_compile common/font_import_probe.py
+          run_check native_import_syntax sh -n common/native_import.sh
+          run_check font_import_syntax sh -n common/font_import.sh
+          run_check compat_syntax sh -n common/font_import_compat.sh
+          run_check manager_syntax sh -n common/font_manager.sh
+          run_check mix_syntax sh -n common/v143_auto_multiweight_mix.sh
+          run_check zip_import_test sh scripts/native_zip_import_test.sh
+          run_check mix_contract_test sh scripts/auto_multiweight_engine_test.sh
+          exit "$failed"
+      - name: Commit generated patch and diagnostics
+        if: always()
         shell: bash
         run: |
           rm -f .github/workflows/apply-font-performance-fix.yml
