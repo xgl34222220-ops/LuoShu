@@ -55,6 +55,8 @@ font_library_fingerprint_json() {
 # 让直接应用字体使用真实分区映射与原厂度量外壳。
 _hyperos_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/hyperos_global.sh"
 [ -f "$_hyperos_helper" ] && . "$_hyperos_helper"
+_font_config_partitions="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/font_config_partitions.sh"
+[ -f "$_font_config_partitions" ] && . "$_font_config_partitions"
 
 # 直接执行时提供给原生 App 使用；被 font_manager.sh source 时只定义函数。
 if [ "${0##*/}" = "font_library_cache.sh" ]; then
