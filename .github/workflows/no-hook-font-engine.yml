@@ -10,13 +10,16 @@ on:
       - common/font_config_weights.sh
       - common/font_name_normalize.py
       - common/font_manager.sh
+      - common/font_library_cache.sh
       - common/hyperos_global.sh
+      - common/mount_compat.sh
       - common/rom_adapters.sh
       - common/font_mix.sh
       - post-fs-data.sh
       - scripts/font_config_overlay_test.py
       - scripts/font_config_runtime_test.sh
       - scripts/font_name_normalize_test.py
+      - scripts/no_hook_bootstrap_test.sh
       - .github/workflows/no-hook-font-engine.yml
 permissions:
   contents: read
@@ -41,6 +44,8 @@ jobs:
           python3 scripts/font_name_normalize_test.py --font "$FONT"
       - name: Run transactional runtime tests
         run: sh -x scripts/font_config_runtime_test.sh
+      - name: Verify every payload bootstrap chain
+        run: sh -x scripts/no_hook_bootstrap_test.sh
       - name: Enforce no-Hook source boundary
         shell: bash
         run: |
