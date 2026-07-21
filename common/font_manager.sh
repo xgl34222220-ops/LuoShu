@@ -30,6 +30,8 @@ FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 [ -f "$MODULE_DIR/common/font_check.sh" ] && . "$MODULE_DIR/common/font_check.sh"
 [ -f "$MODULE_DIR/common/rom_adapters.sh" ] && . "$MODULE_DIR/common/rom_adapters.sh"
 [ -f "$MODULE_DIR/common/font_library_cache.sh" ] && . "$MODULE_DIR/common/font_library_cache.sh"
+[ -f "$MODULE_DIR/common/font_config_runtime.sh" ] && . "$MODULE_DIR/common/font_config_runtime.sh"
+[ -f "$MODULE_DIR/common/font_config_weights.sh" ] && . "$MODULE_DIR/common/font_config_weights.sh"
 
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
 type check_coloros >/dev/null 2>&1 && check_coloros
@@ -132,6 +134,7 @@ clear_managed_text_fonts() {
         rm -f "$SYSTEM_FONTS_DIR/$_file" "$MODULE_DIR/system_ext/fonts/$_file" "$MODULE_DIR/product/fonts/$_file" 2>/dev/null || true
     done
     rm -rf "$SYSTEM_FONTS_DIR/.luoshu-font-store" 2>/dev/null || true
+    type font_config_disable >/dev/null 2>&1 && font_config_disable
 }
 
 invalidate_font_index_cache() {

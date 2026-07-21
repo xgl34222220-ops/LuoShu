@@ -78,8 +78,8 @@ for weight in 100 200 300 400 500 600 700 800 900; do
     test -s "$MOD/system_ext/fonts/LuoShu-${weight}.ttf"
 done
 
-# A missing or truncated referenced font must disable every generated XML before boot.
-: > "$MOD/product/fonts/LuoShu-500.ttf"
+# A missing partition alias must disable every generated XML before boot.
+rm -f "$MOD/product/fonts/LuoShu-500.ttf"
 if font_config_boot_guard DemoFamily; then
     echo 'boot guard unexpectedly accepted a truncated generated font' >&2
     exit 1
