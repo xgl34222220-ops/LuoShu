@@ -1,0 +1,22 @@
+name: Create no-hook refactor branch
+on:
+  push:
+    branches:
+      - fix/v14.4.1-hyperos-app-fonts
+    paths:
+      - .github/workflows/create-no-hook-refactor-branch.yml
+permissions:
+  contents: write
+jobs:
+  create:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Create clean refactor branch from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin HEAD:refs/heads/refactor/v14.5-no-hook-font-engine
