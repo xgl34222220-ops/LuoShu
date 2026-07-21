@@ -27,7 +27,21 @@ import java.util.concurrent.ConcurrentHashMap
 class AppBundledFontHook : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         val packageName = lpparam.packageName ?: return
+        val processName = lpparam.processName ?: packageName
         if (packageName.startsWith("io.github.xgl34222220.luoshu")) return
+
+        // QQ/TIM has a dedicated conservative compatibility entry. Installing this generic asset
+        // hook in the same process would create two independent replacement policies and reproduce
+        // the mixed font/baseline problem we are trying to remove.
+        if (packageName in QQ_PACKAGES) return
+
+        // Alarm receivers, ringtone playback and full-screen alert services often run in clock child
+        // processes. Font customization has no value there, so do not install any generic factory,
+        // asset or rendering hook in those functional processes.
+        if (packageName in CLOCK_PACKAGES && !shouldInstallClockUiFontHooks(packageName, processName)) {
+            XposedBridge.log("LuoShu AppFontHook skipped clock runtime process: $processName")
+            return
+        }
 
         runCatching { hookRawAssetReads(packageName) }
             .onFailure { log(packageName, "AssetManager font hook failed", it) }
@@ -44,13 +58,13 @@ class AppBundledFontHook : IXposedHookLoadPackage {
 
         // HyperOS Clock mixes normal TextView text, Compose/TextPaint and several custom-drawn
         // Mitype/MiSansRCF number faces. Catch the final Typeface assignment only inside the clock
-        // process so every visible text route uses one LuoShu family while icon/emoji families stay.
+        // main UI process so every visible text route uses one LuoShu family while icons stay.
         if (packageName in CLOCK_PACKAGES) {
             runCatching { hookClockFinalTypefaceSinks(packageName) }
                 .onFailure { log(packageName, "Clock final typeface hook failed", it) }
         }
 
-        XposedBridge.log("LuoShu AppFontHook active: $packageName")
+        XposedBridge.log("LuoShu AppFontHook active: package=$packageName process=$processName")
     }
 
     /**
@@ -63,6 +77,7 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             "open",
             object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (shouldSkipClockRuntimeReplacement(packageName)) return
                     val request = param.args.firstOrNull { it is String } as? String ?: return
                     val source = sourceForRequest(request) ?: return
                     val stream = runCatching { FileInputStream(source) }.getOrNull() ?: return
@@ -77,6 +92,7 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             "openFd",
             object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (shouldSkipClockRuntimeReplacement(packageName)) return
                     val request = param.args.firstOrNull { it is String } as? String ?: return
                     val source = sourceForRequest(request) ?: return
                     val file = File(source)
@@ -140,13 +156,13 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             builderClass,
             AssetManager::class.java,
             String::class.java,
-            rememberBuilderRequest { param -> param.args.getOrNull(1) as? String },
+            rememberBuilderRequest(packageName) { param -> param.args.getOrNull(1) as? String },
         )
         XposedHelpers.findAndHookConstructor(
             builderClass,
             Resources::class.java,
             Int::class.javaPrimitiveType,
-            rememberBuilderRequest { param ->
+            rememberBuilderRequest(packageName) { param ->
                 val resources = param.args.getOrNull(0) as? Resources ?: return@rememberBuilderRequest null
                 val id = param.args.getOrNull(1) as? Int ?: return@rememberBuilderRequest null
                 resourceRequest(resources, id)
@@ -155,12 +171,12 @@ class AppBundledFontHook : IXposedHookLoadPackage {
         XposedHelpers.findAndHookConstructor(
             builderClass,
             String::class.java,
-            rememberBuilderRequest { param -> param.args.getOrNull(0) as? String },
+            rememberBuilderRequest(packageName) { param -> param.args.getOrNull(0) as? String },
         )
         XposedHelpers.findAndHookConstructor(
             builderClass,
             File::class.java,
-            rememberBuilderRequest { param -> (param.args.getOrNull(0) as? File)?.path },
+            rememberBuilderRequest(packageName) { param -> (param.args.getOrNull(0) as? File)?.path },
         )
 
         XposedHelpers.findAndHookMethod(
@@ -168,6 +184,7 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             "build",
             object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (shouldSkipClockRuntimeReplacement(packageName)) return
                     val request = XposedHelpers.getAdditionalInstanceField(
                         param.thisObject,
                         BUILDER_REQUEST_KEY,
@@ -196,7 +213,7 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             builderClass,
             object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (MODERN_FONT_GUARD.get() == true) return
+                    if (MODERN_FONT_GUARD.get() == true || shouldSkipClockRuntimeReplacement(packageName)) return
                     val request = when {
                         param.args.size >= 2 && param.args[0] is AssetManager && param.args[1] is String -> {
                             param.args[1] as String
@@ -218,7 +235,7 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             "build",
             object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (MODERN_FONT_GUARD.get() == true) return
+                    if (MODERN_FONT_GUARD.get() == true || shouldSkipClockRuntimeReplacement(packageName)) return
                     val request = XposedHelpers.getAdditionalInstanceField(
                         param.thisObject,
                         MODERN_BUILDER_REQUEST_KEY,
@@ -259,6 +276,7 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             Int::class.javaPrimitiveType,
             object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (shouldSkipClockRuntimeReplacement(packageName)) return
                     val resources = param.thisObject as? Resources ?: return
                     val id = param.args.getOrNull(0) as? Int ?: return
                     val request = resourceRequest(resources, id) ?: return
@@ -285,6 +303,7 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             Int::class.javaPrimitiveType,
             object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (shouldSkipClockRuntimeReplacement(packageName)) return
                     val context = param.args.getOrNull(0) as? Context ?: return
                     val id = param.args.getOrNull(1) as? Int ?: return
                     val request = resourceRequest(context.resources, id) ?: return
@@ -303,7 +322,7 @@ class AppBundledFontHook : IXposedHookLoadPackage {
      * screenshots show that the app mixes several independent font stacks in one screen.
      *
      * TextView covers legacy XML views. Paint covers TextPaint, Compose paragraphs and custom-drawn
-     * stopwatch/timer/world-clock digits. The hook is never installed outside the clock package.
+     * stopwatch/timer/world-clock digits. The hook is never installed outside the clock main process.
      */
     private fun hookClockFinalTypefaceSinks(packageName: String) {
         XposedBridge.hookAllMethods(
@@ -311,7 +330,13 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             "setTypeface",
             object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (CLOCK_FORCE_GUARD.get() == true || param.args.isEmpty()) return
+                    if (
+                        CLOCK_FORCE_GUARD.get() == true ||
+                        param.args.isEmpty() ||
+                        shouldSkipClockRuntimeReplacement(packageName)
+                    ) {
+                        return
+                    }
                     val original = param.args.getOrNull(0) as? Typeface
                     if (isExcludedTypeface(original)) return
                     val explicitStyle = param.args.getOrNull(1) as? Int
@@ -332,7 +357,13 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             "setTypeface",
             object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (CLOCK_FORCE_GUARD.get() == true || param.args.isEmpty()) return
+                    if (
+                        CLOCK_FORCE_GUARD.get() == true ||
+                        param.args.isEmpty() ||
+                        shouldSkipClockRuntimeReplacement(packageName)
+                    ) {
+                        return
+                    }
                     val original = param.args.getOrNull(0) as? Typeface
                     if (isExcludedTypeface(original)) return
                     val replacement = forcedClockTypeface(original, null) ?: return
@@ -354,6 +385,7 @@ class AppBundledFontHook : IXposedHookLoadPackage {
         requestProvider: (XC_MethodHook.MethodHookParam) -> String?,
     ): XC_MethodHook = object : XC_MethodHook() {
         override fun afterHookedMethod(param: MethodHookParam) {
+            if (shouldSkipClockRuntimeReplacement(packageName)) return
             val request = requestProvider(param) ?: return
             val original = param.result as? Typeface
             replacementTypeface(request, original)?.let {
@@ -364,9 +396,11 @@ class AppBundledFontHook : IXposedHookLoadPackage {
     }
 
     private fun rememberBuilderRequest(
+        packageName: String,
         requestProvider: (XC_MethodHook.MethodHookParam) -> String?,
     ): XC_MethodHook = object : XC_MethodHook() {
         override fun afterHookedMethod(param: MethodHookParam) {
+            if (shouldSkipClockRuntimeReplacement(packageName)) return
             val request = requestProvider(param) ?: return
             if (!shouldReplace(request)) return
             XposedHelpers.setAdditionalInstanceField(param.thisObject, BUILDER_REQUEST_KEY, request)
@@ -457,6 +491,17 @@ class AppBundledFontHook : IXposedHookLoadPackage {
         return EXCLUDED_MARKERS.any(family::contains)
     }
 
+    private fun shouldSkipClockRuntimeReplacement(packageName: String): Boolean {
+        if (packageName !in CLOCK_PACKAGES || CLOCK_FORCE_GUARD.get() == true) return false
+        val callers = Thread.currentThread().stackTrace
+            .asSequence()
+            .drop(2)
+            .take(MAX_CLOCK_CALLER_FRAMES)
+            .map { it.className }
+            .toList()
+        return isClockAlarmCriticalCall(callers)
+    }
+
     private fun nearestWeight(weight: Int): Int {
         return AVAILABLE_WEIGHTS.minByOrNull { kotlin.math.abs(it - weight) } ?: 400
     }
@@ -498,13 +543,13 @@ class AppBundledFontHook : IXposedHookLoadPackage {
     private companion object {
         const val BUILDER_REQUEST_KEY = "luoshu_font_request"
         const val MODERN_BUILDER_REQUEST_KEY = "luoshu_modern_font_request"
+        const val MAX_CLOCK_CALLER_FRAMES = 32
 
         val TYPEFACE_CACHE = ConcurrentHashMap<String, Typeface>()
         val LOGGED_REPLACEMENTS = ConcurrentHashMap<String, Boolean>()
         val MODERN_FONT_GUARD = ThreadLocal<Boolean>()
         val CLOCK_FORCE_GUARD = ThreadLocal<Boolean>()
         val AVAILABLE_WEIGHTS = listOf(100, 200, 300, 350, 400, 500, 600, 700, 800, 900)
-        val CLOCK_PACKAGES = setOf("com.android.deskclock", "com.miui.clock")
 
         val INCLUDED_MARKERS = listOf(
             "productsans",
