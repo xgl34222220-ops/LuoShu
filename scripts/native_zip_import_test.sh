@@ -48,6 +48,11 @@ SOURCE_RESULT=$(sh -c '
 ' sh "$TMP/public/import/regression.zip" "$ROOT/common/font_check.sh")
 test "$SOURCE_RESULT" = sourced-ok
 
+# App 的原生导入桥必须直接装配安全 ZIP 导入器，不能再调用不存在的 font_manager action。
+grep -q 'common/font_import.sh' "$ROOT/common/native_import.sh"
+grep -q 'import_zip_package "$(basename "$_target")"' "$ROOT/common/native_import.sh"
+! grep -q 'action import_zip' "$ROOT/common/native_import.sh"
+
 OUTPUT=$(sh -c '
     set -eu
     MODDIR="$1"; MODULE_DIR="$1"; CONFIG_DIR="$2/config"
@@ -69,4 +74,4 @@ printf '%s\n' "$OUTPUT" | grep -q '"mode":"family"'
 printf '%s\n' "$OUTPUT" | grep -q '"importedText":2'
 find "$TMP/public/fonts" -maxdepth 1 -type f -name '*-ExtraLight.ttf' -print -quit | grep -q .
 find "$TMP/public/fonts" -maxdepth 1 -type f -name '*-ExtraBold.ttf' -print -quit | grep -q .
-echo 'Native font-module ZIP import and internal-weight regression test passed.'
+echo 'Native font-module ZIP import bridge and internal-weight regression test passed.'
