@@ -54,4 +54,17 @@ class QqFontCompatibilityTest {
         val target = fittedQqLabelTextSizePx(28f, 22, 28)
         assertEquals(23.52f, target ?: 0f, 0.05f)
     }
+
+    @Test
+    fun repeatedLayoutsReconstructOriginalMetricsInsteadOfShrinkingAgain() {
+        // 28px text with a 28px font box was previously fitted to 23.52px. Its current metrics are
+        // therefore about 24px; reconstructing the original must return 29px (rounding), not 24px.
+        assertEquals(29, originalQqLabelFontHeightPx(24, 23.52f, 28f))
+        val target = fittedQqLabelTextSizePx(
+            currentTextSizePx = 28f,
+            availableHeightPx = 22,
+            fontHeightPx = 29,
+        )
+        assertEquals(23.52f, target ?: 0f, 0.05f)
+    }
 }
