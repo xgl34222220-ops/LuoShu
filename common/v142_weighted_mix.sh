@@ -29,10 +29,12 @@ TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
 LOCK_FILE="$MODDIR/.font_switch.lock"
 WORKER_PID="$CONFIG_DIR/axes_worker.pid"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
+ROLE_CHECK="$MODDIR/common/font_role_check.sh"
 
 MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
+[ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -218,6 +220,7 @@ rewrite_public_config() {
 }
 
 worker() {
+    trap '' HUP
     _wanted="$1"
     [ "$(read_value "$TASK_FILE" task)" = "$_wanted" ] || exit 0
     _cjk=$(read_value "$TASK_FILE" cjk)
@@ -228,20 +231,26 @@ worker() {
     _digit_axes=$(read_value "$TASK_FILE" digitAxes)
     _root=$(read_value "$TASK_FILE" root)
 
+    if [ -f "$ROLE_CHECK" ]; then
+        MODDIR="$MODDIR" sh "$ROLE_CHECK" "$_cjk" cjk >/dev/null 2>&1 || { update_task "$_wanted" failed '中文基底缺少必要字形' 100 '' "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1; }
+        MODDIR="$MODDIR" sh "$ROLE_CHECK" "$_latin" latin >/dev/null 2>&1 || { update_task "$_wanted" failed '英文字体缺少必要字形' 100 '' "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1; }
+        MODDIR="$MODDIR" sh "$ROLE_CHECK" "$_digit" digit >/dev/null 2>&1 || { update_task "$_wanted" failed '数字字体缺少必要字形' 100 '' "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1; }
+    fi
+
     update_task "$_wanted" running '正在准备中文字体' 4 '' ''
     prepare_slot cjk "$_cjk" "$_cjk_axes" "$_root" LuoShuMixCJK || {
         update_task "$_wanted" failed '中文字体准备失败' 100 '' "$(date +%s)"
-        rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+        rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1
     }
     update_task "$_wanted" running '正在准备英文字体' 14 '' ''
     prepare_slot latin "$_latin" "$_latin_axes" "$_root" LuoShuMixLatin || {
         update_task "$_wanted" failed '英文字体准备失败' 100 '' "$(date +%s)"
-        rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+        rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1
     }
     update_task "$_wanted" running '正在准备数字字体' 24 '' ''
     prepare_slot digit "$_digit" "$_digit_axes" "$_root" LuoShuMixDigit || {
         update_task "$_wanted" failed '数字字体准备失败' 100 '' "$(date +%s)"
-        rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+        rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1
     }
 
     update_task "$_wanted" running '正在启动完整复合字体引擎' 34 '' ''
@@ -251,7 +260,7 @@ worker() {
         _message=$(printf '%s\n' "$_output" | sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' | tail -n1)
         [ -n "$_message" ] || _message='无法启动完整复合字体引擎'
         update_task "$_wanted" failed "$_message" 100 '' "$(date +%s)"
-        rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+        rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1
     fi
 
     update_task "$_wanted" running '完整复合字体正在后台生成' 36 "$_child" ''
@@ -273,11 +282,11 @@ worker() {
                 success)
                     update_task "$_wanted" success "$_base_message" 100 "$_child" "$(date +%s)"
                     rewrite_public_config
-                    rm -rf "$_root"; rm -f "$WORKER_PID"; exit 0
+                    rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 0
                     ;;
                 failed)
                     update_task "$_wanted" failed "$_base_message" 100 "$_child" "$(date +%s)"
-                    rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+                    rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1
                     ;;
                 *) update_task "$_wanted" running "$_base_message" "$_mapped" "$_child" '' ;;
             esac
@@ -287,7 +296,7 @@ worker() {
     done
 
     update_task "$_wanted" failed '完整复合字体生成超时' 100 "$_child" "$(date +%s)"
-    rm -rf "$_root"; rm -f "$WORKER_PID"
+    rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"
     exit 1
 }
 
@@ -372,9 +381,16 @@ start_mix() {
     }
     write_task "$_request" queued '任务已进入后台队列' "$_cjk" "$_latin" "$_digit" \
         "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_root" '' "$(date +%s)" '' 1
-    ( MODDIR="$MODDIR" sh "$0" worker "$_request" ) </dev/null >>"$LOG_FILE" 2>&1 &
-    _pid=$!
-    printf '%s\n' "$_pid" >"$WORKER_PID" 2>/dev/null || true
+    if type luoshu_start_detached >/dev/null 2>&1; then
+        luoshu_start_detached "$WORKER_PID" "$_request" "$LOG_FILE" sh "$0" worker "$_request" || {
+  update_task "$_request" failed '无法启动独立后台任务' 100 '' "$(date +%s)"
+  printf '{"status":"error","message":"无法启动独立后台任务"}\n'
+  return
+        }
+    else
+        ( trap '' HUP; MODDIR="$MODDIR" sh "$0" worker "$_request" ) </dev/null >>"$LOG_FILE" 2>&1 &
+        printf '%s\n' "$!" >"$WORKER_PID" 2>/dev/null || true
+    fi
     printf '{"status":"ok","data":{"task":"%s"}}\n' "$(json_escape "$_request")"
 }
 

@@ -15,6 +15,7 @@ USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 CHECKER="$MODDIR/common/font_role_check.py"
+ROLE_CACHE="$MODDIR/cache/font-role-v1"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 
 check_family_role() {
