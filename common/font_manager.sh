@@ -196,8 +196,23 @@ switch_font() {
         fi
     fi
 
-    printf '%s\n' "$_font_id" > "$ACTIVE_FONT_CONF"
-    chmod 0644 "$ACTIVE_FONT_CONF" "$SYSTEM_FONTS_DIR"/* 2>/dev/null || true
+    if ! type luoshu_payload_validate_current >/dev/null 2>&1 || ! luoshu_payload_validate_current "$_font_id"; then
+    echo '错误：字体负载覆盖校验失败，已恢复上一个字体' >&2
+    return 6
+fi
+printf '%s\n' "$_font_id" > "$ACTIVE_FONT_CONF" || {
+    echo '错误：无法保存当前字体状态' >&2
+    return 7
+}
+chmod 0644 "$ACTIVE_FONT_CONF" "$SYSTEM_FONTS_DIR"/* 2>/dev/null || true
+if type luoshu_sync_mount_payload >/dev/null 2>&1 && ! luoshu_sync_mount_payload; then
+    echo '错误：元模块真实挂载目录同步失败，已恢复上一个字体' >&2
+    return 7
+fi
+if ! luoshu_payload_transaction_commit "$_font_id"; then
+    echo '错误：无法提交字体负载事务，已恢复上一个字体' >&2
+    return 7
+fi
     if [ "$_font_id" != default ]; then
         _recent="$CONFIG_DIR/recent_fonts.conf"
         _tmp="${_recent}.tmp.$$"
