@@ -12,6 +12,7 @@ import de.robv.android.xposed.XposedHelpers
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.abs
 
 /**
  * QQ/TIM compatibility layer.
@@ -115,37 +116,78 @@ class QqFontCompatibilityHook : IXposedHookLoadPackage {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     if (LABEL_GUARD.get() == true) return
                     val view = param.thisObject as? TextView ?: return
-                    if (view is EditText || view.height <= 0 || view.text.isNullOrEmpty()) return
+                    if (view is EditText || view.height <= 0 || view.text.isNullOrEmpty()) {
+                        restoreRecycledLabelIfNeeded(view)
+                        return
+                    }
 
+                    val currentSizePx = view.textSize
+                    var state = XposedHelpers.getAdditionalInstanceField(
+                        view,
+                        LABEL_SIZE_STATE_KEY,
+                    ) as? LabelSizeState
+
+                    // If QQ itself changed the recycled view's size after our adjustment, discard the
+                    // stale state instead of restoring a size that belonged to an older chip.
+                    if (
+                        state != null &&
+                        abs(currentSizePx - state.appliedPx) > LABEL_SIZE_EPSILON_PX &&
+                        abs(currentSizePx - state.originalPx) > LABEL_SIZE_EPSILON_PX
+                    ) {
+                        XposedHelpers.removeAdditionalInstanceField(view, LABEL_SIZE_STATE_KEY)
+                        state = null
+                    }
+
+                    val originalSizePx = state?.originalPx ?: currentSizePx
                     val metrics = view.resources.displayMetrics
                     val density = metrics.density.takeIf { it.isFinite() && it > 0f } ?: return
                     val scaledDensity = metrics.scaledDensity.takeIf { it.isFinite() && it > 0f } ?: return
-                    val textSizeSp = view.textSize / scaledDensity
+                    val textSizeSp = originalSizePx / scaledDensity
                     val heightDp = view.height / density
-                    if (
-                        !isCompactQqLabelCandidate(
-                            textSizeSp = textSizeSp,
-                            heightDp = heightDp,
-                            lineCount = view.lineCount,
-                            textLength = view.text.length,
-                            editable = false,
-                        )
-                    ) {
+                    val candidate = isCompactQqLabelCandidate(
+                        textSizeSp = textSizeSp,
+                        heightDp = heightDp,
+                        lineCount = view.lineCount,
+                        textLength = view.text.length,
+                        editable = false,
+                    )
+                    if (!candidate) {
+                        restoreRecycledLabelIfNeeded(view, state)
                         return
                     }
 
                     val available = view.height - view.compoundPaddingTop - view.compoundPaddingBottom
                     val fontMetrics = view.paint.fontMetricsInt
-                    val fontHeight = if (view.includeFontPadding) {
+                    val currentFontHeight = if (view.includeFontPadding) {
                         fontMetrics.bottom - fontMetrics.top
                     } else {
                         fontMetrics.descent - fontMetrics.ascent
                     }
-                    val targetPx = fittedQqLabelTextSizePx(view.textSize, available, fontHeight) ?: return
+                    val originalFontHeight = originalQqLabelFontHeightPx(
+                        currentFontHeightPx = currentFontHeight,
+                        currentTextSizePx = currentSizePx,
+                        originalTextSizePx = originalSizePx,
+                    )
+                    val targetPx = fittedQqLabelTextSizePx(
+                        currentTextSizePx = originalSizePx,
+                        availableHeightPx = available,
+                        fontHeightPx = originalFontHeight,
+                    )
+
+                    if (targetPx == null) {
+                        restoreRecycledLabelIfNeeded(view, state)
+                        return
+                    }
+                    if (abs(currentSizePx - targetPx) <= LABEL_SIZE_EPSILON_PX) return
 
                     LABEL_GUARD.set(true)
                     try {
                         view.setTextSize(TypedValue.COMPLEX_UNIT_PX, targetPx)
+                        XposedHelpers.setAdditionalInstanceField(
+                            view,
+                            LABEL_SIZE_STATE_KEY,
+                            LabelSizeState(originalPx = originalSizePx, appliedPx = targetPx),
+                        )
                         view.requestLayout()
                     } finally {
                         LABEL_GUARD.remove()
@@ -154,6 +196,27 @@ class QqFontCompatibilityHook : IXposedHookLoadPackage {
                 }
             },
         )
+    }
+
+    private fun restoreRecycledLabelIfNeeded(
+        view: TextView,
+        knownState: LabelSizeState? = null,
+    ) {
+        val state = knownState ?: XposedHelpers.getAdditionalInstanceField(
+            view,
+            LABEL_SIZE_STATE_KEY,
+        ) as? LabelSizeState ?: return
+
+        XposedHelpers.removeAdditionalInstanceField(view, LABEL_SIZE_STATE_KEY)
+        if (abs(view.textSize - state.appliedPx) > LABEL_SIZE_EPSILON_PX) return
+
+        LABEL_GUARD.set(true)
+        try {
+            view.setTextSize(TypedValue.COMPLEX_UNIT_PX, state.originalPx)
+            view.requestLayout()
+        } finally {
+            LABEL_GUARD.remove()
+        }
     }
 
     private fun replacementTypeface(weight: Int, italic: Boolean): Typeface? {
@@ -225,7 +288,15 @@ class QqFontCompatibilityHook : IXposedHookLoadPackage {
         )
     }
 
+    private data class LabelSizeState(
+        val originalPx: Float,
+        val appliedPx: Float,
+    )
+
     private companion object {
+        const val LABEL_SIZE_STATE_KEY = "luoshu_qq_label_size_state"
+        const val LABEL_SIZE_EPSILON_PX = 0.5f
+
         val TYPEFACE_GUARD = ThreadLocal<Boolean>()
         val LABEL_GUARD = ThreadLocal<Boolean>()
         val TYPEFACE_CACHE = ConcurrentHashMap<String, Typeface>()
