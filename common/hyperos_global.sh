@@ -203,11 +203,11 @@ copy_as_hyperos() {
     done
 
     config_count=0
-    if [ "$config_weight_count" -eq 9 ] && type font_config_generate >/dev/null 2>&1; then
-        if font_config_generate "$font_family"; then
+    if [ "$config_weight_count" -eq 9 ] && type font_config_enable_for_payload >/dev/null 2>&1; then
+        if font_config_enable_for_payload "$font_family"; then
             config_count=1
         else
-            _log_step '  字体 XML 未安全启用，已继续使用 MiSans 文件槽回退'
+            _log_step '  字体身份或 XML 未安全启用，已继续使用 MiSans 文件槽回退'
         fi
     fi
 
