@@ -1,0 +1,55 @@
+name: Run font performance patch on PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'perf/font-import-refresh-mix-cache'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/font-import-refresh-mix-cache
+          fetch-depth: 0
+      - name: Extract and run the checked-in patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/apply-font-performance-fix.yml').read_text(encoding='utf-8')
+          start = source.index("          python3 - <<'PY'\n") + len("          python3 - <<'PY'\n")
+          end = source.index("\n          PY\n", start)
+          lines = source[start:end].splitlines()
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
+          Path('/tmp/apply_font_performance_fix.py').write_text(script, encoding='utf-8')
+          PY
+          python3 /tmp/apply_font_performance_fix.py
+      - name: Validate patched sources
+        shell: bash
+        run: |
+          python3 -m py_compile common/font_import_probe.py
+          sh -n common/native_import.sh
+          sh -n common/font_import.sh
+          sh -n common/font_import_compat.sh
+          sh -n common/font_manager.sh
+          sh -n common/v143_auto_multiweight_mix.sh
+          sh scripts/native_zip_import_test.sh
+          sh scripts/auto_multiweight_engine_test.sh
+      - name: Commit the validated patch
+        shell: bash
+        run: |
+          rm -f .github/workflows/apply-font-performance-fix.yml
+          rm -f .github/workflows/run-font-performance-fix-on-pr.yml
+          rm -f .font-performance-patch-trigger
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "perf: accelerate imports refresh and font synthesis"
+          git push origin HEAD:perf/font-import-refresh-mix-cache
