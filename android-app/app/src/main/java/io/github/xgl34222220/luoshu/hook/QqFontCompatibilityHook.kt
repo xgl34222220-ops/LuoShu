@@ -29,11 +29,13 @@ class QqFontCompatibilityHook : IXposedHookLoadPackage {
         val processName = lpparam.processName ?: packageName
         if (!isQqUiProcess(packageName, processName)) return
 
+        // Avoid hidden SystemProperties APIs inside third-party processes. Xiaomi/Redmi/POCO public
+        // Build identity is sufficient for deciding whether the HyperOS-only unification layer runs.
         val hyperOs = isHyperOsFamily(
             manufacturer = Build.MANUFACTURER,
             brand = Build.BRAND,
-            miOsVersionName = systemProperty("ro.mi.os.version.name"),
-            miuiVersionCode = systemProperty("ro.miui.ui.version.code"),
+            miOsVersionName = null,
+            miuiVersionCode = null,
         )
 
         if (hyperOs) {
@@ -200,13 +202,6 @@ class QqFontCompatibilityHook : IXposedHookLoadPackage {
         }
         return null
     }
-
-    private fun systemProperty(key: String): String? = runCatching {
-        val clazz = Class.forName("android.os.SystemProperties")
-        val method = clazz.getDeclaredMethod("get", String::class.java, String::class.java)
-        method.isAccessible = true
-        method.invoke(null, key, "") as? String
-    }.getOrNull()?.takeIf { it.isNotBlank() }
 
     private fun logReplacementOnce(packageName: String, route: String, family: String?, weight: Int) {
         val key = "$packageName|$route|${family.orEmpty()}|$weight"
