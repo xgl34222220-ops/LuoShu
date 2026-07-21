@@ -15,7 +15,7 @@ MODULE_DIR="$MODDIR"
 
 (
     WAITED=0
-    while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ] && [ "$WAITED" -lt 90 ]; do
+    while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ] && [ "$WAITED" -lt 600 ]; do
         sleep 3
         WAITED=$((WAITED + 3))
     done
