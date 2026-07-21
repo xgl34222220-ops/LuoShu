@@ -61,6 +61,28 @@ internal fun shouldReplaceClockDrawText(
 }
 
 /**
+ * TextView-only selection is intentionally narrower than the Canvas path.
+ *
+ * HyperOS renders alarm rows, world-clock values and the stopwatch counter through TextView/Layout
+ * paths that may bypass the hooked Canvas base methods. Only time-bearing TextViews are replaced so
+ * page titles and normal labels keep the already-correct global system font. Known clock-family
+ * separator-only views are included because some layouts place ':' in their own TextView.
+ */
+internal fun shouldReplaceClockTextViewText(
+    text: CharSequence?,
+    familyName: String?,
+): Boolean {
+    if (text.isNullOrEmpty() || containsPrivateUseGlyph(text)) return false
+    val family = familyName?.trim()?.lowercase().orEmpty()
+    if (family.isNotEmpty() && CLOCK_PROTECTED_FONT_MARKERS.any(family::contains)) return false
+    if (text.any(Char::isDigit)) return true
+    val separatorOnly = text.all { character ->
+        character.isWhitespace() || character == ':' || character == '.' || character == '·'
+    }
+    return separatorOnly && family.isNotEmpty() && CLOCK_TEXT_FONT_MARKERS.any(family::contains)
+}
+
+/**
  * Keeps a replacement face inside the width the Clock originally measured with its stock face.
  *
  * HyperOS NumberPicker/world-clock views calculate item bounds before drawing. Replacing only the
