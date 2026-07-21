@@ -11,13 +11,15 @@ DYN="$PYLIB/lib-dynload"
 [ -d "$PYLIB" ] || { echo "Python runtime not found: $PYLIB" >&2; exit 1; }
 
 # hashlib is used for font/cache identities and links to libcrypto_python.so. Keep that private
-# library, but remove the unused duplicate OpenSSL ABI and the complete SSL client stack.
+# library, but remove the unused duplicate OpenSSL ABI and the complete SSL client stack. LuoShu
+# only computes local hashes; it never opens TLS connections or loads legacy crypto providers.
 rm -f \
   "$LIB/libcrypto.so" \
   "$LIB/libssl.so" \
   "$LIB/libssl_python.so" \
   "$DYN"/_ssl.*.so \
   "$PYLIB/ssl.py"
+rm -rf "$LIB/engines-3" "$LIB/ossl-modules"
 
 # LuoShu stores its state in small text/JSON files. No font path imports sqlite3, so shipping three
 # SQLite library aliases plus the extension module wastes several compressed megabytes.
@@ -27,6 +29,47 @@ rm -f \
   "$LIB/libsqlite3_python.so" \
   "$DYN"/_sqlite3.*.so
 rm -rf "$PYLIB/sqlite3"
+
+# Android font input is restricted to TTF/OTF/TTC. Zstandard is a two-megabyte extension used only
+# for optional archive compression and is absent from every LuoShu/FontTools execution trace.
+rm -f "$DYN"/_zstd.*.so
+rm -rf "$PYLIB/compression/zstd"
+
+# The on-device tools are synchronous, offline command-line programs. Remove networking, servers,
+# multiprocessing and interpreter-debugging components that are unrelated to font parsing. The
+# retained runtime still includes threading, subprocess, XML, zlib/bz2/lzma and all codecs needed by
+# font name tables and FontTools.
+rm -rf \
+  "$PYLIB/asyncio" \
+  "$PYLIB/concurrent" \
+  "$PYLIB/multiprocessing" \
+  "$PYLIB/email" \
+  "$PYLIB/http" \
+  "$PYLIB/urllib" \
+  "$PYLIB/html" \
+  "$PYLIB/xmlrpc" \
+  "$PYLIB/wsgiref" \
+  "$PYLIB/unittest"
+rm -f \
+  "$DYN"/_asyncio.*.so \
+  "$DYN"/_remote_debugging.*.so \
+  "$DYN"/_interpchannels.*.so \
+  "$DYN"/_interpreters.*.so \
+  "$PYLIB/imaplib.py" \
+  "$PYLIB/ftplib.py" \
+  "$PYLIB/smtplib.py" \
+  "$PYLIB/mailbox.py" \
+  "$PYLIB/webbrowser.py" \
+  "$PYLIB/socketserver.py" \
+  "$PYLIB/ipaddress.py" \
+  "$PYLIB/doctest.py" \
+  "$PYLIB/trace.py" \
+  "$PYLIB/modulefinder.py" \
+  "$PYLIB/compileall.py"
+
+# Package metadata is only used by installers and importlib.metadata queries. LuoShu imports the
+# vendored FontTools package directly and never performs package discovery on-device.
+rm -rf "$PYLIB/site-packages/fonttools-4.63.0.dist-info"
 
 # CPython test/demo extensions and build metadata are never needed on-device. Match the complete
 # families instead of maintaining an error-prone list that misses new test modules between releases.
