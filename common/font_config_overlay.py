@@ -33,11 +33,12 @@ SAFE_PREFIXES = (
     "origin-sans-", "honor-sans-", "harmonyos-sans-",
 )
 PROTECTED_FAMILY_TOKENS = (
-    "emoji", "symbol", "icon", "material", "dingbat", "mono", "serif",
+    "emoji", "symbol", "icon", "material", "dingbat", "mono",
     "clock", "mitype", "math", "music", "braille", "barcode", "qrcode",
     "fallback", "legacy",
 )
-PROTECTED_FILE_TOKENS = PROTECTED_FAMILY_TOKENS
+# serif is protected at the file level, but the canonical UI family is named sans-serif.
+PROTECTED_FILE_TOKENS = PROTECTED_FAMILY_TOKENS + ("serif",)
 FONT_SUFFIXES = (".ttf", ".otf", ".ttc")
 WEIGHTS = (100, 200, 300, 400, 500, 600, 700, 800, 900)
 MIN_FONT_BYTES = 1024
