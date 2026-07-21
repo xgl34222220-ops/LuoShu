@@ -6,29 +6,34 @@ on:
     types: [synchronize]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   diagnose:
     if: github.head_ref == 'perf/font-import-refresh-mix-cache'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: perf/font-import-refresh-mix-cache
-          fetch-depth: 0
-      - name: Persist failing source gate
+      - name: Install matching dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - name: Prepare matching ARM64 runtime
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
+      - name: Capture full source trace
         shell: bash
         run: |
           set +e
-          sh -x scripts/check.sh > /tmp/luoshu-source-check.log 2>&1
+          sh -x scripts/check.sh > luoshu-source-check.log 2>&1
           code=$?
-          {
-            echo "source_check_exit=$code"
-            tail -n 160 /tmp/luoshu-source-check.log
-          } > .source-check-tail.log
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add .source-check-tail.log
-          git commit -m "test: capture source check failure"
-          git push origin HEAD:perf/font-import-refresh-mix-cache
+          echo "source_check_exit=$code" >> luoshu-source-check.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: font-source-check-trace
+          path: luoshu-source-check.log
+          if-no-files-found: error
+          retention-days: 2
