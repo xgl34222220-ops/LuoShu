@@ -3,6 +3,11 @@ package io.github.xgl34222220.luoshu.hook
 internal val CLOCK_PACKAGES = setOf("com.android.deskclock", "com.miui.clock")
 
 private val CLOCK_ALARM_CRITICAL_CALL_MARKERS = listOf(
+    // The legacy broad Clock hook remains in the generic entry for Play/other apps, but every Clock
+    // callback contains AppBundledFontHook in its stack. Treat it as critical so all old Clock
+    // factory/resource/Paint replacement paths become inert; ClockUiDrawFontHook is the only active
+    // Clock replacement policy.
+    "appbundledfonthook",
     "alarmalert",
     "alarmactivity",
     "alarmreceiver",
@@ -46,7 +51,7 @@ internal fun shouldInstallGenericBundledFontHook(packageName: String, processNam
     return true
 }
 
-/** Returns true for call stacks belonging to alarm playback, alert or notification execution. */
+/** Returns true for legacy Clock hooks or call stacks belonging to alarm playback/alert execution. */
 internal fun isClockAlarmCriticalCall(callerClassNames: List<String>): Boolean {
     val callers = callerClassNames.joinToString("|").lowercase()
     return CLOCK_ALARM_CRITICAL_CALL_MARKERS.any(callers::contains)
