@@ -43,8 +43,12 @@ class AppBundledFontHook : IXposedHookLoadPackage {
             return
         }
 
-        runCatching { hookRawAssetReads(packageName) }
-            .onFailure { log(packageName, "AssetManager font hook failed", it) }
+        // Clock no longer replaces raw AssetManager streams. Its factory/builder/final-sink hooks
+        // are sufficient for UI text and avoid changing asset descriptor semantics in alarm screens.
+        if (packageName !in CLOCK_PACKAGES) {
+            runCatching { hookRawAssetReads(packageName) }
+                .onFailure { log(packageName, "AssetManager font hook failed", it) }
+        }
         runCatching { hookTypefaceFactories(packageName) }
             .onFailure { log(packageName, "Typeface factory hook failed", it) }
         runCatching { hookTypefaceBuilder(packageName) }
