@@ -28,16 +28,15 @@ rm -f \
   "$DYN"/_sqlite3.*.so
 rm -rf "$PYLIB/sqlite3"
 
-# CPython test extensions and build metadata are never needed on-device and expose a large native
-# surface unrelated to font parsing or generation.
-rm -f \
-  "$DYN"/_testcapi.*.so \
-  "$DYN"/_testlimitedcapi.*.so \
-  "$DYN"/_testinternalcapi.*.so \
-  "$DYN"/_testclinic.*.so \
-  "$DYN"/_testbuffer.*.so \
-  "$DYN"/_testmultiphase.*.so \
-  "$DYN"/_testsinglephase.*.so
+# CPython test/demo extensions and build metadata are never needed on-device. Match the complete
+# families instead of maintaining an error-prone list that misses new test modules between releases.
+find "$DYN" -maxdepth 1 -type f \( \
+  -name '_test*.so' -o \
+  -name '_xxtest*.so' -o \
+  -name '_ctypes_test*.so' -o \
+  -name 'xxlimited*.so' -o \
+  -name 'xxsubtype*.so' \
+\) -delete 2>/dev/null || true
 rm -rf "$PYLIB/config-3.14-aarch64-linux-android"
 
 # Interactive demonstrations/debug helpers are pure development payload. Keep argparse, pathlib,
