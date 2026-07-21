@@ -22,6 +22,7 @@ MAX_BYTES=268435456
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODDIR/common/font_import.sh" ] && . "$MODDIR/common/font_import.sh"
+[ -f "$MODDIR/common/font_import_compat.sh" ] && . "$MODDIR/common/font_import_compat.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
