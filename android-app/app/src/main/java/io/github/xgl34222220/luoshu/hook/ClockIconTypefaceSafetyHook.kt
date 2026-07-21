@@ -15,25 +15,33 @@ import java.util.ArrayDeque
  * Safety layer for the clock-only final Typeface sinks.
  *
  * AppBundledFontHook intentionally runs a broad final assignment hook for HyperOS Clock because
- * some timer/alarm digits bypass normal font factories. A few clock builds also render navigation
- * and alarm icons with private-use glyph fonts whose hidden family name is unavailable. This hook
- * captures the caller's original Typeface before the broad hook and restores it afterwards only for
- * icon, emoji, symbol, monospace or likely icon-only anonymous Paint families.
+ * some timer/alarm digits bypass normal font factories. This layer captures the caller's original
+ * Typeface before that broad hook and restores it afterwards for icon fonts and, more importantly,
+ * for every alarm playback/alert execution path.
+ *
+ * Clock child processes are treated as functional runtime processes rather than UI processes. Their
+ * Typeface arguments are always restored so font customization cannot affect ringtone lifetime,
+ * alarm receivers, full-screen alerts or notification services.
  */
 class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         val packageName = lpparam.packageName ?: return
         if (packageName !in CLOCK_PACKAGES) return
+        val processName = lpparam.processName ?: packageName
+        val restoreAll = !shouldInstallClockUiFontHooks(packageName, processName)
 
-        runCatching { hookTextViewTypeface(packageName) }
-            .onFailure { log(packageName, "TextView icon safety hook failed", it) }
-        runCatching { hookPaintTypeface(packageName) }
-            .onFailure { log(packageName, "Paint icon safety hook failed", it) }
+        runCatching { hookTextViewTypeface(packageName, processName, restoreAll) }
+            .onFailure { log(packageName, processName, "TextView safety hook failed", it) }
+        runCatching { hookPaintTypeface(packageName, processName, restoreAll) }
+            .onFailure { log(packageName, processName, "Paint safety hook failed", it) }
 
-        XposedBridge.log("LuoShu ClockIconTypefaceSafetyHook active: $packageName")
+        XposedBridge.log(
+            "LuoShu ClockIconTypefaceSafetyHook active: package=$packageName " +
+                "process=$processName restoreAll=$restoreAll",
+        )
     }
 
-    private fun hookTextViewTypeface(packageName: String) {
+    private fun hookTextViewTypeface(packageName: String, processName: String, restoreAll: Boolean) {
         val stack = ThreadLocal<ArrayDeque<CapturedTypeface>>()
         XposedBridge.hookAllMethods(
             TextView::class.java,
@@ -49,15 +57,35 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
                     val original = stack.get()?.peekLast()?.value
                     val view = param.thisObject as? TextView ?: return
                     val family = typefaceFamilyName(original)
-                    if (!shouldPreserveClockTextTypeface(view.text, family)) return
+                    val callers = if (restoreAll) emptyList() else currentCallerClassNames()
+                    val criticalAlarmCall = !restoreAll && isClockAlarmCriticalCall(callers)
+                    if (
+                        !restoreAll &&
+                        !criticalAlarmCall &&
+                        !shouldPreserveClockTextTypeface(view.text, family)
+                    ) {
+                        return
+                    }
                     param.args[0] = original
-                    logPreservedOnce(packageName, "TextView", family, view.text, null)
+                    logPreservedOnce(
+                        packageName = packageName,
+                        processName = processName,
+                        route = "TextView",
+                        familyName = family,
+                        text = view.text,
+                        textSizeSp = null,
+                        reason = when {
+                            restoreAll -> "non-ui-process"
+                            criticalAlarmCall -> "alarm-runtime"
+                            else -> "icon-family"
+                        },
+                    )
                 }
             },
         )
     }
 
-    private fun hookPaintTypeface(packageName: String) {
+    private fun hookPaintTypeface(packageName: String, processName: String, restoreAll: Boolean) {
         val stack = ThreadLocal<ArrayDeque<CapturedTypeface>>()
         XposedBridge.hookAllMethods(
             Paint::class.java,
@@ -74,13 +102,11 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
                     val paint = param.thisObject as? Paint ?: return
                     val family = typefaceFamilyName(original)
                     val textSizeSp = paintTextSizeSp(paint)
-                    val callers = Thread.currentThread().stackTrace
-                        .asSequence()
-                        .drop(2)
-                        .take(MAX_CALLER_FRAMES)
-                        .map { it.className }
-                        .toList()
+                    val callers = if (restoreAll) emptyList() else currentCallerClassNames()
+                    val criticalAlarmCall = !restoreAll && isClockAlarmCriticalCall(callers)
                     if (
+                        !restoreAll &&
+                        !criticalAlarmCall &&
                         !shouldPreserveClockPaintTypeface(
                             familyName = family,
                             systemDefault = isSystemDefaultTypeface(original),
@@ -91,7 +117,19 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
                         return
                     }
                     param.args[0] = original
-                    logPreservedOnce(packageName, "Paint", family, null, textSizeSp)
+                    logPreservedOnce(
+                        packageName = packageName,
+                        processName = processName,
+                        route = "Paint",
+                        familyName = family,
+                        text = null,
+                        textSizeSp = textSizeSp,
+                        reason = when {
+                            restoreAll -> "non-ui-process"
+                            criticalAlarmCall -> "alarm-runtime"
+                            else -> "icon-family",
+                        },
+                    )
                 }
             },
         )
@@ -111,6 +149,13 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
             if (entries.isEmpty()) stack.remove()
         }
     }
+
+    private fun currentCallerClassNames(): List<String> = Thread.currentThread().stackTrace
+        .asSequence()
+        .drop(2)
+        .take(MAX_CALLER_FRAMES)
+        .map { it.className }
+        .toList()
 
     private fun typefaceFamilyName(typeface: Typeface?): String? {
         typeface ?: return null
@@ -139,25 +184,28 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
 
     private fun logPreservedOnce(
         packageName: String,
+        processName: String,
         route: String,
         familyName: String?,
         text: CharSequence?,
         textSizeSp: Float?,
+        reason: String,
     ) {
         val sample = text?.take(8)?.toString().orEmpty()
         val roundedSize = textSizeSp?.toInt()?.toString().orEmpty()
-        val key = "$packageName|$route|${familyName.orEmpty()}|$sample|$roundedSize"
+        val key = "$processName|$route|$reason|${familyName.orEmpty()}|$sample|$roundedSize"
         if (LOGGED_PRESERVATIONS.add(key)) {
             XposedBridge.log(
-                "LuoShu ClockIconTypefaceSafetyHook preserved [$packageName] " +
-                    "$route family=${familyName ?: "unknown"} sizeSp=${textSizeSp ?: -1f}",
+                "LuoShu Clock safety preserved [$packageName/$processName] " +
+                    "$route reason=$reason family=${familyName ?: "unknown"} " +
+                    "sizeSp=${textSizeSp ?: -1f}",
             )
         }
     }
 
-    private fun log(packageName: String, message: String, error: Throwable) {
+    private fun log(packageName: String, processName: String, message: String, error: Throwable) {
         XposedBridge.log(
-            "LuoShu ClockIconTypefaceSafetyHook [$packageName] $message: " +
+            "LuoShu ClockIconTypefaceSafetyHook [$packageName/$processName] $message: " +
                 "${error.javaClass.simpleName}: ${error.message}",
         )
     }
@@ -167,9 +215,8 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
     private companion object {
         const val PRIORITY_BEFORE_FONT_HOOK = 10_000
         const val PRIORITY_AFTER_FONT_HOOK = -10_000
-        const val MAX_CALLER_FRAMES = 20
+        const val MAX_CALLER_FRAMES = 28
 
-        val CLOCK_PACKAGES = setOf("com.android.deskclock", "com.miui.clock")
         val FAMILY_NAME_FIELDS = listOf(
             "mSystemFontFamilyName",
             "mFontFamilyName",
