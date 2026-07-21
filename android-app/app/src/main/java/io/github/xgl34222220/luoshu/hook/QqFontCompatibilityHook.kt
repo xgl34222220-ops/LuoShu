@@ -132,28 +132,22 @@ class QqFontCompatibilityHook : IXposedHookLoadPackage {
                         return
                     }
 
-                    if (!view.includeFontPadding) {
-                        LABEL_GUARD.set(true)
-                        runCatching {
-                            view.includeFontPadding = true
-                            view.requestLayout()
-                        }
-                        LABEL_GUARD.remove()
-                        logLabelAdjustmentOnce(packageName, view, "font-padding")
-                        return
-                    }
-
                     val available = view.height - view.compoundPaddingTop - view.compoundPaddingBottom
                     val fontMetrics = view.paint.fontMetricsInt
-                    val fontHeight = fontMetrics.bottom - fontMetrics.top
+                    val fontHeight = if (view.includeFontPadding) {
+                        fontMetrics.bottom - fontMetrics.top
+                    } else {
+                        fontMetrics.descent - fontMetrics.ascent
+                    }
                     val targetPx = fittedQqLabelTextSizePx(view.textSize, available, fontHeight) ?: return
 
                     LABEL_GUARD.set(true)
-                    runCatching {
+                    try {
                         view.setTextSize(TypedValue.COMPLEX_UNIT_PX, targetPx)
                         view.requestLayout()
+                    } finally {
+                        LABEL_GUARD.remove()
                     }
-                    LABEL_GUARD.remove()
                     logLabelAdjustmentOnce(packageName, view, "fit-metrics")
                 }
             },
