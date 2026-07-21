@@ -30,7 +30,18 @@ test ! -e "$LIB/libsqlite3.so"
 test ! -e "$LIB/libsqlite3_python.so"
 test ! -e "$PYLIB/sqlite3"
 test ! -e "$PYLIB/config-3.14-aarch64-linux-android"
-! find "$DYN" -maxdepth 1 -type f \( -name '_ssl.*.so' -o -name '_sqlite3.*.so' -o -name '_test*.so' \) -print -quit | grep -q .
+if find "$DYN" -maxdepth 1 -type f \( \
+    -name '_ssl.*.so' -o \
+    -name '_sqlite3.*.so' -o \
+    -name '_test*.so' -o \
+    -name '_xxtest*.so' -o \
+    -name '_ctypes_test*.so' -o \
+    -name 'xxlimited*.so' -o \
+    -name 'xxsubtype*.so' \
+\) -print -quit | grep -q .; then
+    echo 'CPython test or removed service extension remains in the pruned runtime' >&2
+    exit 1
+fi
 
 # Every retained extension that requests a private OpenSSL/SQLite soname must still find it in the
 # runtime library directory. System libraries such as libc/libm/libdl are intentionally ignored.
@@ -38,7 +49,7 @@ if command -v readelf >/dev/null 2>&1; then
     _needed="$TMP/needed.txt"
     : > "$_needed"
     find "$STAGE/common/python" -type f -name '*.so' | while IFS= read -r _so; do
-        readelf -d "$_so" 2>/dev/null | sed -n 's/^.*Shared library: \[\([^]]*\)\].*$/\1/p'
+        readelf -d "$_so" 2>/dev/null | sed -n 's/^.*Shared library: \[\([^]]*\)\].*$/\1/p' || true
     done | sort -u > "$_needed"
     while IFS= read -r _name; do
         case "$_name" in
