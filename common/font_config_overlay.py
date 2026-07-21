@@ -22,15 +22,20 @@ SAFE_EXACT_FAMILIES = {
     "source-sans-pro", "noto-sans", "noto-sans-cjk", "miui", "mipro",
     "misans", "mi-sans", "sysfont", "sys-font", "sys-sans", "sys-sans-en",
     "op-sans", "op-sans-en", "oplus-sans", "oppo-sans", "opposans",
-    "coloros-sans", "oneplus-sans", "realme-sans", "vivo-sans",
-    "origin-sans", "honor-sans", "harmonyos-sans",
+    "coloros-sans", "oneplus-sans", "realme-sans", "vivo-sans", "vivosans",
+    "vivo-sans-vf", "origin", "originos", "origin-sans", "originos-sans",
+    "iqoo-sans", "iqoosans", "flyme", "flyme-sans", "flyme-ui", "flymesans",
+    "flymefont", "meizu", "meizu-sans", "meizusans", "mflyme", "mflyme-sans",
+    "honor-sans", "harmonyos-sans",
 }
 SAFE_PREFIXES = (
     "sans-serif-", "roboto-", "google-sans-", "source-sans-", "noto-sans-",
     "miui-", "mipro-", "misans-", "mi-sans-", "sysfont-", "sys-font-",
     "sys-sans-", "op-sans-", "oplus-sans-", "oppo-sans-", "opposans-",
-    "coloros-sans-", "oneplus-sans-", "realme-sans-", "vivo-sans-",
-    "origin-sans-", "honor-sans-", "harmonyos-sans-",
+    "coloros-sans-", "oneplus-sans-", "realme-sans-", "vivo-sans-", "vivosans-",
+    "origin-sans-", "originos-sans-", "iqoo-sans-", "iqoosans-", "flyme-sans-",
+    "flymesans-", "flymefont-", "meizu-sans-", "meizusans-", "mflyme-",
+    "honor-sans-", "harmonyos-sans-",
 )
 PROTECTED_FAMILY_TOKENS = (
     "emoji", "symbol", "icon", "material", "dingbat", "mono",
@@ -49,7 +54,7 @@ def local_name(tag: str) -> str:
 
 
 def normalize_family(value: str) -> str:
-    return value.strip().lower().replace("_", "-")
+    return re.sub(r"[\s_-]+", "-", value.strip().lower()).strip("-")
 
 
 def is_safe_family(name: str) -> bool:
