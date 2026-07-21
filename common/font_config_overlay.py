@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Generate a boot-safe Android font configuration overlay without runtime hooks.
+"""Generate and validate boot-safe Android font configuration overlays.
 
-The input document remains the source of truth. LuoShu only redirects explicitly safe named UI
-families to pre-generated weighted font files. Locale fallback order, aliases, unnamed script
-fallbacks and protected font families are preserved verbatim at the XML-structure level.
+The device document remains the source of truth. LuoShu only redirects explicitly safe named UI
+families to pre-generated static weight files. Locale fallback order, aliases, unnamed script
+fallbacks, italic faces and protected font families remain untouched.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import re
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -56,6 +57,7 @@ PROTECTED_TOKENS = (
 )
 FONT_SUFFIXES = (".ttf", ".otf", ".ttc")
 WEIGHTS = (100, 200, 300, 400, 500, 600, 700, 800, 900)
+MIN_FONT_BYTES = 1024
 
 
 def local_name(tag: str) -> str:
@@ -108,6 +110,10 @@ def rewrite_tree(tree: ET.ElementTree, prefix: str) -> dict[str, object]:
         for font in list(family):
             if local_name(font.tag) != "font" or not font.text or is_protected_file(font.text):
                 continue
+            # Phase one deliberately keeps real italic/oblique faces. Replacing them with an upright
+            # file would silently destroy style semantics and can change text measurement.
+            if font.attrib.get("style", "normal").lower() in {"italic", "oblique"}:
+                continue
             weight = nearest_weight(font.attrib.get("weight"))
             font.text = f"{prefix}-{weight}.ttf"
             font.attrib.pop("index", None)
@@ -118,9 +124,8 @@ def rewrite_tree(tree: ET.ElementTree, prefix: str) -> dict[str, object]:
             family_changes += 1
 
         if family_changes:
-            # supportedAxes is valid only when the referenced file is itself variable. LuoShu emits
-            # deterministic static weight files so the framework never tries to instantiate axes
-            # that are not present in the output font.
+            # supportedAxes is valid only when every referenced face follows the original variable
+            # contract. LuoShu emits deterministic static weight files for the rewritten normal faces.
             family.attrib.pop("supportedAxes", None)
             changed_fonts += family_changes
             changed_families.append(family_name)
@@ -130,6 +135,29 @@ def rewrite_tree(tree: ET.ElementTree, prefix: str) -> dict[str, object]:
         "changed_fonts": changed_fonts,
         "changed_families": sorted(set(changed_families)),
     }
+
+
+def generated_references(tree: ET.ElementTree, prefix: str) -> list[str]:
+    pattern = re.compile(rf"^{re.escape(prefix)}-(?:100|200|300|400|500|600|700|800|900)\.ttf$")
+    references: list[str] = []
+    for element in tree.getroot().iter():
+        if local_name(element.tag) != "font" or not element.text:
+            continue
+        filename = element.text.strip()
+        if pattern.fullmatch(filename):
+            references.append(filename)
+    return sorted(set(references))
+
+
+def validate_generated_references(tree: ET.ElementTree, prefix: str, font_dir: Path) -> int:
+    references = generated_references(tree, prefix)
+    for filename in references:
+        path = font_dir / filename
+        if not path.is_file():
+            raise ValueError(f"missing generated font: {filename}")
+        if path.stat().st_size < MIN_FONT_BYTES:
+            raise ValueError(f"generated font is too small: {filename}")
+    return len(references)
 
 
 def atomic_write(tree: ET.ElementTree, output: Path) -> None:
@@ -151,22 +179,50 @@ def atomic_write(tree: ET.ElementTree, output: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--font-prefix", default="LuoShu")
+    parser.add_argument("--font-dir", type=Path)
+    parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args()
 
     try:
         tree = parse_xml(args.input)
+        if args.validate_only:
+            references = 0
+            if args.font_dir is not None:
+                references = validate_generated_references(tree, args.font_prefix, args.font_dir)
+            print(
+                json.dumps(
+                    {"status": "ok", "input": str(args.input), "generated_references": references},
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                )
+            )
+            return 0
+
+        if args.output is None:
+            raise ValueError("--output is required unless --validate-only is used")
         report = rewrite_tree(tree, args.font_prefix)
+        references = 0
+        if args.font_dir is not None:
+            references = validate_generated_references(tree, args.font_prefix, args.font_dir)
         if report["changed"]:
             atomic_write(tree, args.output)
         else:
             args.output.unlink(missing_ok=True)
-        report.update({"status": "ok", "input": str(args.input), "output": str(args.output)})
+        report.update(
+            {
+                "status": "ok",
+                "input": str(args.input),
+                "output": str(args.output),
+                "generated_references": references,
+            }
+        )
         print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
         return 0
     except (OSError, ET.ParseError, ValueError) as error:
-        args.output.unlink(missing_ok=True)
+        if args.output is not None:
+            args.output.unlink(missing_ok=True)
         print(
             json.dumps(
                 {"status": "error", "input": str(args.input), "message": str(error)},
