@@ -39,4 +39,9 @@ test "$LUOSHU_UPGRADE_ACTIVE_FONT" = default
 test "$LUOSHU_UPGRADE_PAYLOAD_COUNT" -eq 0
 test "$(cat "$EMPTY_NEW/config/active_font.conf")" = default
 
+# Geometry algorithm upgrades must invalidate the old source-hash-only composite cache. Otherwise
+# selecting the same three fonts after an update silently reuses the pre-fix output.
+grep -q 'cache/auto-multiweight-mix/composites-v1' "$ROOT/customize.sh"
+grep -q "printf 'geometry-v2" "$ROOT/customize.sh"
+
 printf 'Upgrade state migration tests passed.\n'
