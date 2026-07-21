@@ -67,10 +67,12 @@ class QqFontCompatibilityHook : IXposedHookLoadPackage {
                     if (!isReplaceableQqFamily(family)) return
 
                     val explicitStyle = param.args.getOrNull(1) as? Int
-                    val weight = when {
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && original != null -> original.weight
-                        (explicitStyle ?: original?.style ?: Typeface.NORMAL) and Typeface.BOLD != 0 -> 700
-                        else -> 400
+                    val weight = original?.weight ?: if (
+                        (explicitStyle ?: Typeface.NORMAL) and Typeface.BOLD != 0
+                    ) {
+                        700
+                    } else {
+                        400
                     }
                     val italic = when {
                         explicitStyle != null -> explicitStyle and Typeface.ITALIC != 0
@@ -155,24 +157,23 @@ class QqFontCompatibilityHook : IXposedHookLoadPackage {
     }
 
     private fun replacementTypeface(weight: Int, italic: Boolean): Typeface? {
-        val source = sourceForWeight(weight) ?: return null
+        val normalizedWeight = weight.coerceIn(1, 1000)
+        val styleKey = "$normalizedWeight|$italic"
+        STYLED_TYPEFACE_CACHE[styleKey]?.let { return it }
+
+        val source = sourceForWeight(normalizedWeight) ?: return null
         val base = TYPEFACE_CACHE[source] ?: runCatching {
             TYPEFACE_GUARD.set(true)
             Typeface.createFromFile(source)
         }.getOrNull().also { TYPEFACE_GUARD.remove() }?.also { TYPEFACE_CACHE[source] = it } ?: return null
 
-        return runCatching {
+        val styled = runCatching {
             TYPEFACE_GUARD.set(true)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                Typeface.create(base, weight.coerceIn(1, 1000), italic)
-            } else {
-                Typeface.create(
-                    base,
-                    (if (weight >= 650) Typeface.BOLD else Typeface.NORMAL) or
-                        (if (italic) Typeface.ITALIC else Typeface.NORMAL),
-                )
-            }
+            // LuoShu minSdk is API 28, so the exact-weight overload is always available.
+            Typeface.create(base, normalizedWeight, italic)
         }.getOrDefault(base).also { TYPEFACE_GUARD.remove() }
+        STYLED_TYPEFACE_CACHE.putIfAbsent(styleKey, styled)
+        return STYLED_TYPEFACE_CACHE[styleKey] ?: styled
     }
 
     private fun sourceForWeight(weight: Int): String? {
@@ -228,6 +229,7 @@ class QqFontCompatibilityHook : IXposedHookLoadPackage {
         val TYPEFACE_GUARD = ThreadLocal<Boolean>()
         val LABEL_GUARD = ThreadLocal<Boolean>()
         val TYPEFACE_CACHE = ConcurrentHashMap<String, Typeface>()
+        val STYLED_TYPEFACE_CACHE = ConcurrentHashMap<String, Typeface>()
         val LOGGED_REPLACEMENTS = ConcurrentHashMap.newKeySet<String>()
         val LOGGED_LABELS = ConcurrentHashMap.newKeySet<String>()
         val AVAILABLE_WEIGHTS = listOf(100, 200, 300, 350, 400, 500, 600, 700, 800, 900)
