@@ -17,7 +17,7 @@ _luoshu_font_config_emit_partition() {
 }
 
 _luoshu_font_config_xml_names() {
-    printf '%s\n' 'fonts.xml font_fallback.xml fonts_customization.xml font_customization.xml mi_fonts_customization.xml oplus_fonts_customization.xml oplus_font_customization.xml oppo_fonts_customization.xml coloros_fonts_customization.xml fonts_vendor.xml fonts_overlay.xml'
+    printf '%s\n' 'fonts.xml font_fallback.xml fonts_customization.xml font_customization.xml mi_fonts_customization.xml oplus_fonts_customization.xml oplus_font_customization.xml oppo_fonts_customization.xml coloros_fonts_customization.xml vivo_fonts.xml vivo_fonts_customization.xml vivo_font_customization.xml origin_fonts.xml originos_fonts.xml iqoo_fonts.xml flyme_fonts.xml flyme_fonts_customization.xml flyme_font_customization.xml meizu_fonts.xml meizu_fonts_customization.xml mz_fonts.xml fonts_vendor.xml fonts_overlay.xml'
 }
 
 _luoshu_font_config_resolve_etc() {
@@ -68,6 +68,9 @@ EOF_LUOSHU_PARTITIONS
 }
 
 # ColorOS uses product/system_ext named families (notably google-sans-text) for some app controls.
-# Load the partition-aware adapter after the generic ROM adapter so its copy_as_coloros wins.
 _luoshu_coloros_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/coloros_global.sh"
 [ -f "$_luoshu_coloros_helper" ] && . "$_luoshu_coloros_helper"
+
+# OriginOS and Flyme use OEM-named families, exact physical slots and (on Flyme) a persistent theme font.
+_luoshu_origin_flyme_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/origin_flyme_global.sh"
+[ -f "$_luoshu_origin_flyme_helper" ] && . "$_luoshu_origin_flyme_helper"
