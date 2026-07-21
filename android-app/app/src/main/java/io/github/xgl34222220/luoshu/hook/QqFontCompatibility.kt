@@ -1,5 +1,7 @@
 package io.github.xgl34222220.luoshu.hook
 
+import kotlin.math.roundToInt
+
 internal val QQ_PACKAGES = setOf("com.tencent.mobileqq", "com.tencent.tim")
 
 private val QQ_PROTECTED_FONT_MARKERS = listOf(
@@ -87,6 +89,26 @@ internal fun fittedQqLabelTextSizePx(
     val scale = ((availableHeightPx - 1f) / fontHeightPx.toFloat()).coerceIn(QQ_LABEL_MIN_SCALE, 1f)
     val target = currentTextSizePx * scale
     return target.takeIf { it < currentTextSizePx * 0.995f }
+}
+
+/** Estimates metrics at the original size after a recycled label has already been scaled once. */
+internal fun originalQqLabelFontHeightPx(
+    currentFontHeightPx: Int,
+    currentTextSizePx: Float,
+    originalTextSizePx: Float,
+): Int {
+    if (
+        currentFontHeightPx <= 0 ||
+        !currentTextSizePx.isFinite() ||
+        currentTextSizePx <= 0f ||
+        !originalTextSizePx.isFinite() ||
+        originalTextSizePx <= 0f
+    ) {
+        return currentFontHeightPx
+    }
+    return (currentFontHeightPx * (originalTextSizePx / currentTextSizePx))
+        .roundToInt()
+        .coerceAtLeast(1)
 }
 
 private fun normalizeQqFamily(value: String): String = buildString(value.length) {
