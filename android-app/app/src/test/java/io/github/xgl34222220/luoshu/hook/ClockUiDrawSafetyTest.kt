@@ -55,7 +55,9 @@ class ClockUiDrawSafetyTest {
     @Test
     fun timerDigitsAndLabelsReplaceButIconsStayOriginal() {
         assertTrue(shouldReplaceClockDrawText("00:05:00", "Mitype2019"))
+        assertTrue(shouldReplaceClockDrawText(":", "MitypeMono"))
         assertTrue(shouldReplaceClockDrawText("计时", "sans-serif"))
+        assertFalse(shouldReplaceClockDrawText(":", null))
         assertFalse(shouldReplaceClockDrawText("\uE8B6", null))
         assertFalse(shouldReplaceClockDrawText("图标", "MaterialIcons"))
         assertFalse(shouldReplaceClockDrawText("🙂", "NotoColorEmoji"))
