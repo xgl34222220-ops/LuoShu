@@ -26,11 +26,78 @@ class ClockTypefaceSafetyTest {
     }
 
     @Test
-    fun paintKeepsUnknownCustomFamiliesButAllowsTextFamilies() {
-        assertTrue(shouldPreserveClockPaintTypeface(null, systemDefault = false))
-        assertTrue(shouldPreserveClockPaintTypeface("clock_icon_font", systemDefault = false))
-        assertFalse(shouldPreserveClockPaintTypeface("MiSansRCF", systemDefault = false))
-        assertFalse(shouldPreserveClockPaintTypeface("sans-serif", systemDefault = false))
-        assertFalse(shouldPreserveClockPaintTypeface(null, systemDefault = true))
+    fun anonymousLargeTimerPaintIsReplacedButSmallUnknownIconPaintIsPreserved() {
+        assertFalse(
+            shouldPreserveClockPaintTypeface(
+                familyName = null,
+                systemDefault = false,
+                textSizeSp = 56f,
+                callerClassNames = emptyList(),
+            ),
+        )
+        assertTrue(
+            shouldPreserveClockPaintTypeface(
+                familyName = null,
+                systemDefault = false,
+                textSizeSp = 22f,
+                callerClassNames = emptyList(),
+            ),
+        )
+    }
+
+    @Test
+    fun callerHintsOverrideAmbiguousAnonymousPaints() {
+        assertFalse(
+            shouldPreserveClockPaintTypeface(
+                familyName = null,
+                systemDefault = false,
+                textSizeSp = 18f,
+                callerClassNames = listOf("miuix.pickerwidget.widget.NumberPicker"),
+            ),
+        )
+        assertTrue(
+            shouldPreserveClockPaintTypeface(
+                familyName = null,
+                systemDefault = false,
+                textSizeSp = 48f,
+                callerClassNames = listOf("com.google.android.material.navigation.NavigationBarItemView"),
+            ),
+        )
+    }
+
+    @Test
+    fun namedFamiliesStillUseExplicitRules() {
+        assertTrue(
+            shouldPreserveClockPaintTypeface(
+                familyName = "clock_icon_font",
+                systemDefault = false,
+                textSizeSp = 64f,
+                callerClassNames = emptyList(),
+            ),
+        )
+        assertFalse(
+            shouldPreserveClockPaintTypeface(
+                familyName = "MiSansRCF",
+                systemDefault = false,
+                textSizeSp = 20f,
+                callerClassNames = emptyList(),
+            ),
+        )
+        assertFalse(
+            shouldPreserveClockPaintTypeface(
+                familyName = "sans-serif",
+                systemDefault = false,
+                textSizeSp = 20f,
+                callerClassNames = emptyList(),
+            ),
+        )
+        assertFalse(
+            shouldPreserveClockPaintTypeface(
+                familyName = null,
+                systemDefault = true,
+                textSizeSp = 20f,
+                callerClassNames = emptyList(),
+            ),
+        )
     }
 }
