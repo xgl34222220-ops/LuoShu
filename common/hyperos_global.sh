@@ -1,6 +1,6 @@
 #!/system/bin/sh
-# 洛书 HyperOS 全局字体覆盖增强层。
-# 必须在 rom_adapters.sh 之后 source；这里重新定义 HyperOS 映射函数。
+# 洛书无 Hook 全局字体覆盖增强层。
+# 必须在 rom_adapters.sh 之后 source；这里重新定义 HyperOS 映射和统一 ROM 分发入口。
 set +e
 
 _luoshu_hyperos_module_dir() {
@@ -9,6 +9,8 @@ _luoshu_hyperos_module_dir() {
 
 _luoshu_font_config_runtime="$(_luoshu_hyperos_module_dir)/common/font_config_runtime.sh"
 [ -f "$_luoshu_font_config_runtime" ] && . "$_luoshu_font_config_runtime"
+_luoshu_font_config_weights="$(_luoshu_hyperos_module_dir)/common/font_config_weights.sh"
+[ -f "$_luoshu_font_config_weights" ] && . "$_luoshu_font_config_weights"
 
 _luoshu_hyperos_root_pairs() {
     _module="$(_luoshu_hyperos_module_dir)"
@@ -211,9 +213,37 @@ copy_as_hyperos() {
 
     _log_step "  已覆盖 $core_count 个 MiSans 核心目标、$weight_count 个 ROM 字重目标、$config_weight_count 个配置字重"
     if [ "$config_count" -eq 1 ]; then
-        _log_step '  系统字体 XML 已事务生成；测量与绘制统一使用洛书字体'
+        _log_step '  系统与 OEM 字体 XML 已事务生成；测量和绘制统一使用洛书字体'
     else
         _log_step '  已保留原厂 Roboto/GoogleSans 度量外壳，文件槽映射作为安全回退'
+    fi
+    return 0
+}
+
+# 统一分发入口。ColorOS 与通用 Android 也使用相同的 XML 事务层；若设备配置中没有
+# 可安全重写的命名 UI family，则保持原文件槽映射，不把 XML 失败升级为切换失败。
+apply_font_by_rom() {
+    src="$1"
+    dest_dir="$2"
+    mode="${3:-full}"
+    font_family="${4:-}"
+    [ -n "$font_family" ] || font_family=$(detect_font_family "$(basename "$src")")
+
+    if [ "${IS_HYPEROS:-false}" = true ]; then
+        copy_as_hyperos "$src" "$dest_dir" "$mode" "$font_family"
+        return $?
+    elif [ "${IS_COLOROS:-false}" = true ]; then
+        copy_as_coloros "$src" "$dest_dir" "$mode" "$font_family" || return $?
+    else
+        copy_as_generic "$src" "$dest_dir" "$mode" || return $?
+    fi
+
+    if type font_config_enable_for_payload >/dev/null 2>&1; then
+        if font_config_enable_for_payload "$font_family"; then
+            _log_step '  系统与 OEM 字体 XML 已事务生成（无 Hook）'
+        else
+            _log_step '  设备没有可安全启用的字体 XML，继续使用文件槽映射'
+        fi
     fi
     return 0
 }
