@@ -7,9 +7,11 @@ OUT="$ROOT/dist"
 STAGE="$OUT/LuoShu"
 ZIP="$OUT/LuoShu-${VERSION}.zip"
 ZIP_NAME=$(basename "$ZIP")
+SIZE_REPORT="$OUT/LuoShu-${VERSION}-size.txt"
 APP_APK="${LUOSHU_APP_APK:-}"
 ALLOW_DEBUG_APP="${LUOSHU_ALLOW_DEBUG_APP:-0}"
 EXPECTED_VERSION_CODE=$((LUOSHU_VERSION_CODE * 100 + 1))
+MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-18874368}"
 
 sh "$ROOT/scripts/check.sh"
 [ -n "$APP_APK" ] || {
@@ -110,7 +112,7 @@ for forbidden in \
   [ ! -e "$STAGE/$forbidden" ] || { echo "forbidden payload: $forbidden" >&2; exit 88; }
 done
 
-rm -f "$ZIP" "$ZIP.sha256"
+rm -f "$ZIP" "$ZIP.sha256" "$SIZE_REPORT"
 (cd "$STAGE" && zip -9 -r -q "$ZIP" .)
 (cd "$OUT" && sha256sum "$ZIP_NAME" > "$ZIP_NAME.sha256")
 unzip -t "$ZIP" >/dev/null
@@ -119,6 +121,38 @@ unzip -Z1 "$ZIP" | grep -Eq '(^|/)webroot(/|$)|(^|/)(__pycache__|emoji)(/|$)|\.p
   exit 89
 } || true
 unzip -Z1 "$ZIP" | grep -qx 'bundled/LuoShu-App.apk'
+
+python3 - "$ZIP" > "$SIZE_REPORT" <<'PY'
+import collections
+import os
+import sys
+import zipfile
+
+path = sys.argv[1]
+groups = collections.defaultdict(lambda: [0, 0, 0])
+with zipfile.ZipFile(path) as archive:
+    for item in archive.infolist():
+        group = item.filename.split('/', 1)[0] or '(root)'
+        groups[group][0] += item.file_size
+        groups[group][1] += item.compress_size
+        groups[group][2] += 1
+print(f"artifact={os.path.basename(path)}")
+print(f"zip_bytes={os.path.getsize(path)}")
+for name, (raw, compressed, count) in sorted(groups.items(), key=lambda entry: entry[1][1], reverse=True):
+    print(f"{name}\traw={raw}\tcompressed={compressed}\tfiles={count}")
+PY
+
+case "$MAX_ZIP_BYTES" in
+  ''|*[!0-9]*) echo 'LUOSHU_MAX_ZIP_BYTES must be an integer.' >&2; exit 90 ;;
+esac
+ZIP_BYTES=$(wc -c < "$ZIP" | tr -d '[:space:]')
+[ "$ZIP_BYTES" -le "$MAX_ZIP_BYTES" ] || {
+  echo "Module ZIP grew beyond budget: $ZIP_BYTES > $MAX_ZIP_BYTES bytes" >&2
+  cat "$SIZE_REPORT" >&2
+  exit 90
+}
+
 printf 'Built: %s\n' "$ZIP"
 printf 'Bundled App: %s (%s)\n' "$STAGE/bundled/LuoShu-App.apk" "$APP_PACKAGE"
+printf 'Size report: %s (%s / %s bytes budget)\n' "$SIZE_REPORT" "$ZIP_BYTES" "$MAX_ZIP_BYTES"
 rm -rf "$STAGE"
