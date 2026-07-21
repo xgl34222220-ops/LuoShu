@@ -26,6 +26,12 @@ def main() -> int:
           <family name="Honor-Sans">
             <font weight="500">HONORSans-Medium.ttf</font>
           </family>
+          <family name="vivo Sans">
+            <font weight="400">vivoSansVF.ttf</font>
+          </family>
+          <family name="FlymeFont">
+            <font weight="500">FlymeSans-Medium.ttf</font>
+          </family>
           <family name="sans-serif" lang="ja">
             <font weight="400">NotoSansCJKjp-Regular.otf</font>
           </family>
@@ -55,6 +61,8 @@ def main() -> int:
     assert lines["Roboto-Bold.ttf"].split("|")[1] == "700"
     assert lines["OPSans-Regular.ttf"].split("|")[1] == "300"
     assert lines["HONORSans-Medium.ttf"].split("|")[1] == "500"
+    assert lines["vivoSansVF.ttf"].split("|")[1] == "400"
+    assert lines["FlymeSans-Medium.ttf"].split("|")[1] == "500"
     for protected in (
         "Roboto-Italic.ttf",
         "NotoSansCJKjp-Regular.otf",
