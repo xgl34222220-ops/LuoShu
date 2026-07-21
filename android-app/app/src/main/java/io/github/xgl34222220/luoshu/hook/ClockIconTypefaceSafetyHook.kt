@@ -127,7 +127,7 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
                         reason = when {
                             restoreAll -> "non-ui-process"
                             criticalAlarmCall -> "alarm-runtime"
-                            else -> "icon-family",
+                            else -> "icon-family"
                         },
                     )
                 }
