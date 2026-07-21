@@ -19,6 +19,7 @@ on:
       - common/python/**
       - post-fs-data.sh
       - scripts/build.sh
+      - scripts/prepare_composite_runtime.sh
       - scripts/font_config_overlay_test.py
       - scripts/font_config_runtime_test.sh
       - scripts/font_config_weights_test.sh
@@ -32,13 +33,22 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Install font test dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends python3-fonttools fonts-dejavu-core binutils >/dev/null
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv python3-fonttools fonts-dejavu-core binutils >/dev/null
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+      - name: Prepare ARM64 font runtime
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
       - name: Run XML structure tests
         run: python3 scripts/font_config_overlay_test.py
       - name: Run static font identity tests
