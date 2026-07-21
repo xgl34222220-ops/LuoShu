@@ -41,20 +41,20 @@ SAFE_PREFIXES = (
     "sys-sans-",
     "op-sans-",
 )
-PROTECTED_TOKENS = (
+PROTECTED_FAMILY_TOKENS = (
     "emoji",
     "symbol",
     "icon",
     "material",
     "dingbat",
     "mono",
-    "serif",
     "clock",
     "mitype",
     "math",
     "barcode",
     "qrcode",
 )
+PROTECTED_FILE_TOKENS = PROTECTED_FAMILY_TOKENS + ("serif",)
 FONT_SUFFIXES = (".ttf", ".otf", ".ttc")
 WEIGHTS = (100, 200, 300, 400, 500, 600, 700, 800, 900)
 MIN_FONT_BYTES = 1024
@@ -70,14 +70,17 @@ def normalize_family(value: str) -> str:
 
 def is_safe_family(name: str) -> bool:
     normalized = normalize_family(name)
-    if not normalized or any(token in normalized for token in PROTECTED_TOKENS):
+    if not normalized:
         return False
-    return normalized in SAFE_EXACT_FAMILIES or normalized.startswith(SAFE_PREFIXES)
+    safe = normalized in SAFE_EXACT_FAMILIES or normalized.startswith(SAFE_PREFIXES)
+    return safe and not any(token in normalized for token in PROTECTED_FAMILY_TOKENS)
 
 
 def is_protected_file(value: str) -> bool:
     filename = os.path.basename(value.strip()).lower()
-    return not filename.endswith(FONT_SUFFIXES) or any(token in filename for token in PROTECTED_TOKENS)
+    return not filename.endswith(FONT_SUFFIXES) or any(
+        token in filename for token in PROTECTED_FILE_TOKENS
+    )
 
 
 def nearest_weight(raw: str | None) -> int:
