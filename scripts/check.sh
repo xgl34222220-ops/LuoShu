@@ -177,3 +177,9 @@ sh "$ROOT/scripts/app_installer_test.sh"
 
 test -x "$ROOT/common/python/bin/luoshu-python"
 echo 'LuoShu App-only source checks passed.'
+
+# Font refresh/import/mix performance contracts.
+grep -q 'native-v3' common/font_manager.sh
+grep -q 'manifest-fast' common/font_manager.sh
+grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
+grep -q 'prepared-v2' common/v143_auto_multiweight_mix.sh

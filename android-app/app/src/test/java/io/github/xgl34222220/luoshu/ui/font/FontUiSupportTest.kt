@@ -3,6 +3,7 @@ package io.github.xgl34222220.luoshu.ui.font
 import io.github.xgl34222220.luoshu.FontItem
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FontUiSupportTest {
@@ -16,13 +17,22 @@ class FontUiSupportTest {
     }
 
     @Test
+    fun latinOnlyFontExplainsWhyChineseLooksLikeSystemDefault() {
+        val font = font(weights = listOf("regular"), supportsCjk = false)
+
+        assertTrue(fontCapabilityLabel(font).startsWith("仅拉丁"))
+        assertTrue(fontPreviewText(font).startsWith("Hello"))
+        assertTrue(fontPreviewText(font, detailed = true).contains("中文将回退系统字体"))
+    }
+
+    @Test
     fun regularRemainsThePreferredStaticPreview() {
         val font = font(weights = listOf("thin", "regular", "black"))
 
         assertEquals(400, fontPreviewWeight(font))
     }
 
-    private fun font(weights: List<String>) = FontItem(
+    private fun font(weights: List<String>, supportsCjk: Boolean = true) = FontItem(
         id = "SuperHualunwan",
         name = "超级花轮丸",
         format = "TTF",
@@ -32,5 +42,6 @@ class FontUiSupportTest {
         valid = true,
         error = "",
         weights = weights,
+        supportsCjk = supportsCjk,
     )
 }

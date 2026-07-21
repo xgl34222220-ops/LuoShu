@@ -275,7 +275,11 @@ internal fun LuoShuAppShell(
             FontActionDialogRoute(
                 style = appearance.uiStyle,
                 kind = FontActionKind.APPLY,
-                message = "直接应用「${font.name}」。准备完成后需要完整重启手机。",
+                message = if (font.supportsCjk) {
+                    "直接应用「${font.name}」。准备完成后需要完整重启手机。"
+                } else {
+                    "「${font.name}」不包含完整中文字形。直接应用后中文会继续使用系统默认字体，看起来可能没有变化；建议在组合页把它作为英文字体使用。"
+                },
                 onDismiss = { pendingApply = null },
                 onConfirm = {
                     pendingApply = null

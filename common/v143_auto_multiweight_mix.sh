@@ -12,7 +12,9 @@ if [ -z "$MODDIR" ]; then
 fi
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/auto-multiweight-mix"
-COMPOSITE_CACHE="$CACHE_ROOT/composites-v1"
+COMPOSITE_CACHE="$CACHE_ROOT/composites-v2"
+PREPARED_CACHE="$CACHE_ROOT/prepared-v2"
+SOURCE_META_CACHE="$CACHE_ROOT/source-meta-v1"
 PUBLIC_ROOT="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 SOURCE_FONTS="$PUBLIC_ROOT/fonts"
 USER_FONTS_DIR="$SOURCE_FONTS"
@@ -192,6 +194,43 @@ run_instance() {
     chmod 0644 "$_destination" 2>/dev/null || true
 }
 
+source_signature() {
+    _source="$1"
+    _stat=$(stat -c '%d:%i:%s:%Y:%Z' "$_source" 2>/dev/null)
+    [ -n "$_stat" ] || _stat=$(stat -c '%s:%Y' "$_source" 2>/dev/null)
+    printf '%s|%s' "$_source" "$_stat" | hash_text
+}
+
+source_metadata() {
+    _source="$1"
+    _signature=$(source_signature "$_source")
+    [ -n "$_signature" ] || return 1
+    mkdir -p "$SOURCE_META_CACHE" 2>/dev/null || return 1
+    _meta="$SOURCE_META_CACHE/${_signature}.conf"
+    if [ -s "$_meta" ]; then
+        printf '%s\n' "$_signature|$_meta"
+        return 0
+    fi
+    font_validate "$_source" text || return 1
+    _tmp="${_meta}.tmp.$$"
+    {
+        printf 'format=%s\n' "${FONT_CHECK_FORMAT:-UNKNOWN}"
+        printf 'variable=%s\n' "${FONT_CHECK_VARIABLE:-false}"
+        printf 'size=%s\n' "${FONT_CHECK_SIZE:-0}"
+    } > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$_meta" 2>/dev/null || return 1
+    chmod 0644 "$_meta" 2>/dev/null || true
+    printf '%s\n' "$_signature|$_meta"
+}
+
+prune_prepared_cache() {
+    _count=0
+    for _old in $(ls -1t "$PREPARED_CACHE"/*.font 2>/dev/null); do
+        _count=$((_count + 1))
+        [ "$_count" -le 72 ] && continue
+        rm -f "$_old" 2>/dev/null || true
+    done
+}
+
 prepare_source() {
     _role="$1"
     _family="$2"
@@ -204,14 +243,33 @@ prepare_source() {
     _lookup=$(safe_weight "$_effective")
     _source=$(find_best_source "$_family" "$_lookup")
     [ -f "$_source" ] || return 1
-    font_validate "$_source" text || return 1
-    if [ "$FONT_CHECK_VARIABLE" = true ] || [ "$FONT_CHECK_FORMAT" = TTC ]; then
-        run_instance "$_source" "$_destination" "$_role" "$_effective"
+    _metadata=$(source_metadata "$_source") || return 1
+    _signature=${_metadata%%|*}
+    _meta=${_metadata#*|}
+    _format=$(sed -n 's/^format=//p' "$_meta" 2>/dev/null | head -n1)
+    _variable=$(sed -n 's/^variable=//p' "$_meta" 2>/dev/null | head -n1)
+    mkdir -p "${_destination%/*}" "$PREPARED_CACHE" 2>/dev/null || return 1
+
+    if [ "$_variable" = true ] || [ "$_format" = TTC ]; then
+        _prepared_key=$(printf '%s' "instance-v2|$_signature|$_role|$_effective" | hash_text)
+        [ -n "$_prepared_key" ] || return 1
+        _cached="$PREPARED_CACHE/${_prepared_key}.font"
+        if [ ! -s "$_cached" ]; then
+  _tmp="$PREPARED_CACHE/.${_prepared_key}.$$.tmp.font"
+  rm -f "$_tmp" 2>/dev/null || true
+  run_instance "$_source" "$_tmp" "$_role" "$_effective" || { rm -f "$_tmp"; return 1; }
+  mv -f "$_tmp" "$_cached" 2>/dev/null || return 1
+  chmod 0644 "$_cached" 2>/dev/null || true
+  prune_prepared_cache
+        fi
+        link_or_copy "$_cached" "$_destination" || return 1
+        _content_key="instance-v2|$_prepared_key"
     else
-        mkdir -p "${_destination%/*}" 2>/dev/null || return 1
-        cp -f "$_source" "$_destination" 2>/dev/null || return 1
-        chmod 0644 "$_destination" 2>/dev/null || true
+        link_or_copy "$_source" "$_destination" || return 1
+        _content_key="static-v1|$_signature"
     fi
+    printf '%s\n' "$_content_key" > "${_destination}.source-key" 2>/dev/null || return 1
+    chmod 0644 "$_destination" "${_destination}.source-key" 2>/dev/null || true
 }
 
 hash_file() {
@@ -255,13 +313,27 @@ build_composite_cached() {
     _output="$4"
     _progress="$5"
     mkdir -p "$COMPOSITE_CACHE" "${_output%/*}" 2>/dev/null || return 1
-    _key=$(printf '%s|%s|%s|auto-multiweight-v1' \
-        "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" | hash_text)
+    _cjk_key=$(cat "${_cjk}.source-key" 2>/dev/null)
+    _latin_key=$(cat "${_latin}.source-key" 2>/dev/null)
+    _digit_key=$(cat "${_digit}.source-key" 2>/dev/null)
+    if [ -n "$_cjk_key" ] && [ -n "$_latin_key" ] && [ -n "$_digit_key" ]; then
+        _key=$(printf '%s|%s|%s|auto-multiweight-v2' "$_cjk_key" "$_latin_key" "$_digit_key" | hash_text)
+    else
+        _key=$(printf '%s|%s|%s|auto-multiweight-v2' \
+  "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" | hash_text)
+    fi
     [ -n "$_key" ] || return 1
     _cached="$COMPOSITE_CACHE/${_key}.font"
     if [ -s "$_cached" ]; then
         link_or_copy "$_cached" "$_output" || return 1
         chmod 0644 "$_output" 2>/dev/null || true
+        return 0
+    fi
+    if [ -n "$_cjk_key" ] && [ "$_cjk_key" = "$_latin_key" ] && [ "$_cjk_key" = "$_digit_key" ]; then
+        link_or_copy "$_cjk" "$_cached" || return 1
+        link_or_copy "$_cached" "$_output" || return 1
+        chmod 0644 "$_cached" "$_output" 2>/dev/null || true
+        prune_composite_cache
         return 0
     fi
     _tmp="$COMPOSITE_CACHE/.${_key}.$$.tmp.font"
@@ -296,7 +368,7 @@ save_mix_config() {
         printf 'cjkWeight=%s\nlatinWeight=%s\ndigitWeight=%s\n' "$(safe_weight "$4")" "$(safe_weight "$5")" "$(safe_weight "$6")"
         printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$4" "$5" "$6"
         printf 'cjkMode=%s\nlatinMode=%s\ndigitMode=%s\n' "$7" "$8" "$9"
-        printf 'isolation=auto-multiweight-v1\ncharacterIsolation=true\ncomposite=true\nxmlOverlay=false\ntime=%s\n' "$(date +%s)"
+        printf 'isolation=auto-multiweight-v2\ncharacterIsolation=true\ncomposite=true\nxmlOverlay=false\ntime=%s\n' "$(date +%s)"
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$MIX_CONF" 2>/dev/null || return 1
     cp -f "$MIX_CONF" "$AXES_CONF" 2>/dev/null || true
     printf 'mix\n' >"$ACTIVE_CONF" 2>/dev/null || return 1
@@ -423,7 +495,7 @@ start_mix() {
         printf '{"status":"error","message":"字体正在切换中"}\n'
         return
     }
-    mkdir -p "$CONFIG_DIR" "$CACHE_ROOT" "$COMPOSITE_CACHE" "$MODDIR/logs" 2>/dev/null || {
+    mkdir -p "$CONFIG_DIR" "$CACHE_ROOT" "$COMPOSITE_CACHE" "$PREPARED_CACHE" "$SOURCE_META_CACHE" "$MODDIR/logs" 2>/dev/null || {
         printf '{"status":"error","message":"无法创建任务目录"}\n'
         return
     }

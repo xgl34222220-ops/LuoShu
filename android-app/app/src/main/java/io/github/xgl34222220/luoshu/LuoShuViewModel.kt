@@ -50,6 +50,7 @@ internal data class FontItem(
     val valid: Boolean,
     val error: String,
     val weights: List<String>,
+    val supportsCjk: Boolean = true,
 ) {
     val weightLabel: String
         get() = when {
@@ -803,6 +804,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                     valid = item.optBoolean("valid", true),
                     error = item.optString("error", ""),
                     weights = weights,
+                    supportsCjk = item.optBoolean("supportsCjk", true),
                 ),
             )
         }

@@ -8,6 +8,9 @@ from pathlib import Path
 from fontTools.ttLib import TTFont
 
 
+CJK_UI_PROBES = tuple(map(ord, "中文字体系统默认洛书汉字ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"))
+
+
 def clean(value: object, fallback: str = "") -> str:
     text = str(value or fallback).replace("|", " ").replace("\t", " ")
     return " ".join(text.replace("\r", " ").replace("\n", " ").split())
@@ -34,7 +37,7 @@ def best_subfamily(font: TTFont) -> str:
         return debug_name(font, 2, "Regular")
 
 
-def inspect(path: Path) -> tuple[str, str, int, bool, bool]:
+def inspect(path: Path) -> tuple[str, str, int, bool, bool, bool]:
     kwargs = {"lazy": True, "recalcTimestamp": False}
     with path.open("rb") as stream:
         if stream.read(4) == b"ttcf":
@@ -51,7 +54,9 @@ def inspect(path: Path) -> tuple[str, str, int, bool, bool]:
             italic = bool(int(font["head"].macStyle) & 0x02)
         except Exception:
             italic = "italic" in subfamily.lower() or "oblique" in subfamily.lower()
-        return best_family(font), subfamily, weight, italic, "fvar" in font
+        cmap = font.getBestCmap() or {}
+        supports_cjk = all(codepoint in cmap for codepoint in CJK_UI_PROBES)
+        return best_family(font), subfamily, weight, italic, "fvar" in font, supports_cjk
     finally:
         font.close()
 
@@ -60,8 +65,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("font")
     args = parser.parse_args()
-    family, subfamily, weight, italic, variable = inspect(Path(args.font))
-    print(f"{family}|{subfamily}|{weight}|{str(italic).lower()}|{str(variable).lower()}")
+    family, subfamily, weight, italic, variable, supports_cjk = inspect(Path(args.font))
+    print(
+        f"{family}|{subfamily}|{weight}|{str(italic).lower()}|"
+        f"{str(variable).lower()}|{str(supports_cjk).lower()}"
+    )
     return 0
 
 

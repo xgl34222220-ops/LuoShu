@@ -29,6 +29,7 @@ PY
 
 test "$(PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" python3 -S "$ROOT/common/font_import_probe.py" "$TMP/pkg/Mystery-A.ttf" | cut -d'|' -f3)" = 200
 test "$(PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" python3 -S "$ROOT/common/font_import_probe.py" "$TMP/pkg/Mystery-B.ttf" | cut -d'|' -f3)" = 800
+test "$(PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" python3 -S "$ROOT/common/font_import_probe.py" "$TMP/pkg/Mystery-B.ttf" | cut -d'|' -f6)" = false
 
 cat > "$TMP/pkg/module.prop" <<'PROP'
 id=luoshu_zip_regression
@@ -142,6 +143,8 @@ STYLE_OUTPUT=$(sh -c '
 printf '%s\n' "$STYLE_OUTPUT" | grep -q '"status":"ok"'
 printf '%s\n' "$STYLE_OUTPUT" | grep -q '"mode":"family"'
 printf '%s\n' "$STYLE_OUTPUT" | grep -q '"importedText":2'
+printf '%s\n' "$STYLE_OUTPUT" | grep -q '"id":"超级花轮丸"'
+printf '%s\n' "$STYLE_OUTPUT" | grep -q '"supportsCjk":false'
 THIN="$TMP/public/fonts/超级花轮丸-Thin.ttf"
 BLACK_ITALIC="$TMP/public/fonts/超级花轮丸-Italic-Black.ttf"
 test -s "$THIN"
@@ -156,5 +159,7 @@ FAMILY_RESULT=$(sh -c '
     printf "%s|%s\n" "$(detect_font_family "超级花轮丸-Italic-Black.ttf")" "$(scan_family_weights "超级花轮丸")"
 ' sh "$ROOT" "$TMP")
 test "$FAMILY_RESULT" = '超级花轮丸|thin,black'
+grep -q '^supports_cjk=false$' "$TMP/public/fonts/超级花轮丸.conf"
+grep -q '_candidate_size.*_source_size' "$ROOT/common/native_import.sh"
 
 echo 'Native font-module ZIP import bridge, internal-weight and italic-family regression tests passed.'
