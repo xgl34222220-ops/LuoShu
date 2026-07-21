@@ -14,6 +14,25 @@ class ClockRuntimeSafetyTest {
     }
 
     @Test
+    fun genericHookDoesNotOverlapQqOrClockRuntimeProcesses() {
+        assertTrue(shouldInstallGenericBundledFontHook("com.android.vending", "com.android.vending"))
+        assertTrue(shouldInstallGenericBundledFontHook("com.android.deskclock", "com.android.deskclock"))
+        assertFalse(
+            shouldInstallGenericBundledFontHook(
+                "com.android.deskclock",
+                "com.android.deskclock:alarm",
+            ),
+        )
+        assertFalse(shouldInstallGenericBundledFontHook("com.tencent.mobileqq", "com.tencent.mobileqq"))
+        assertFalse(
+            shouldInstallGenericBundledFontHook(
+                "io.github.xgl34222220.luoshu.debug",
+                "io.github.xgl34222220.luoshu.debug",
+            ),
+        )
+    }
+
+    @Test
     fun alarmPlaybackAndAlertCallersAreCritical() {
         assertTrue(
             isClockAlarmCriticalCall(
