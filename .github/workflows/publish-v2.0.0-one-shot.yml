@@ -1,4 +1,4 @@
-name: Publish LuoShu v2.0.0 one-shot
+name: Audit LuoShu v2.0.0 release
 
 on:
   pull_request:
@@ -9,27 +9,28 @@ on:
       - .github/workflows/publish-v2.0.0-one-shot.yml
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: luoshu-v2.0.0-one-shot
+  group: luoshu-v2.0.0-release-audit
   cancel-in-progress: false
 
 jobs:
-  publish:
+  audit:
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.head_ref == 'release/v2.0.0-publish'
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      - name: Lock release source to current main
-        id: identity
+      - uses: android-actions/setup-android@v3
+
+      - name: Lock audit to the released main commit
         env:
           GH_TOKEN: ${{ github.token }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -38,190 +39,109 @@ jobs:
           set -euo pipefail
           git fetch --force origin main --tags
           [[ "$(git rev-parse origin/main)" == "$BASE_SHA" ]] || {
-            echo "main changed after this release PR opened." >&2
+            echo 'main changed after the audit PR opened.' >&2
             exit 2
           }
-          mapfile -t changed < <(git diff --name-only "$BASE_SHA"...HEAD)
+          mapfile -t changed < <(git diff --name-only "$BASE_SHA" HEAD)
           [[ "${#changed[@]}" -eq 1 && "${changed[0]}" == '.github/workflows/publish-v2.0.0-one-shot.yml' ]] || {
-            printf 'One-shot branch contains unexpected changes:\n' >&2
+            printf 'Audit branch contains unexpected changes:\n' >&2
             printf '  %s\n' "${changed[@]}" >&2
             exit 2
           }
           . ./scripts/version.sh
           [[ "$LUOSHU_VERSION" == 'v2.0.0' && "$LUOSHU_VERSION_CODE" == '20000' ]] || {
-            echo "main is not LuoShu v2.0.0 / 20000." >&2
+            echo 'main does not contain v2.0.0 / 20000.' >&2
             exit 2
           }
-          [[ -s RELEASE_NOTES_v2.0.0.md ]] || { echo 'Missing v2.0.0 release notes.' >&2; exit 2; }
-          if git ls-remote --exit-code --tags origin refs/tags/v2.0.0 >/dev/null 2>&1; then
-            echo 'Tag v2.0.0 already exists and will not be moved.' >&2
+          tag_sha="$(git rev-list -n1 v2.0.0 2>/dev/null || true)"
+          [[ "$tag_sha" == "$BASE_SHA" ]] || {
+            echo "v2.0.0 tag target mismatch: $tag_sha != $BASE_SHA" >&2
             exit 2
-          fi
-          if gh release view v2.0.0 >/dev/null 2>&1; then
-            echo 'Release v2.0.0 already exists and will not be overwritten.' >&2
-            exit 2
-          fi
-          echo "release_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          }
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - uses: android-actions/setup-android@v3
-
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.5.0'
-
-      - name: Require fixed signing identity
+      - name: Inspect published release metadata and exact asset set
         env:
-          KEYSTORE_BASE64: ${{ secrets.LUOSHU_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view v2.0.0 --json tagName,isDraft,isPrerelease,targetCommitish,assets > "$RUNNER_TEMP/release.json"
+          python3 - "$RUNNER_TEMP/release.json" "$BASE_SHA" <<'PY'
+          import json
+          import sys
+
+          data = json.load(open(sys.argv[1], encoding='utf-8'))
+          expected = {
+              'LuoShu-v2.0.0.zip',
+              'LuoShu-v2.0.0.zip.sha256',
+              'LuoShu-App-v2.0.0.apk',
+              'LuoShu-App-v2.0.0.apk.sha256',
+          }
+          actual = {asset['name'] for asset in data.get('assets', [])}
+          assert data.get('tagName') == 'v2.0.0', data
+          assert data.get('isDraft') is False, data
+          assert data.get('isPrerelease') is False, data
+          assert data.get('targetCommitish') in {sys.argv[2], 'main'}, data
+          assert actual == expected, (actual, expected)
+          print('Release metadata and exact asset set verified.')
+          PY
+
+      - name: Download and verify published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          mkdir -p dist
+          gh release download v2.0.0 --dir dist
+          mapfile -t actual < <(find dist -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
+          expected=(
+            LuoShu-v2.0.0.zip
+            LuoShu-v2.0.0.zip.sha256
+            LuoShu-App-v2.0.0.apk
+            LuoShu-App-v2.0.0.apk.sha256
+          )
+          mapfile -t expected < <(printf '%s\n' "${expected[@]}" | LC_ALL=C sort)
+          [[ "${actual[*]}" == "${expected[*]}" ]]
+          (cd dist && sha256sum -c LuoShu-v2.0.0.zip.sha256)
+          (cd dist && sha256sum -c LuoShu-App-v2.0.0.apk.sha256)
+          unzip -t dist/LuoShu-v2.0.0.zip >/dev/null
+          unzip -p dist/LuoShu-v2.0.0.zip module.prop | grep -qx 'version=v2.0.0'
+          unzip -p dist/LuoShu-v2.0.0.zip module.prop | grep -qx 'versionCode=20000'
+          unzip -Z1 dist/LuoShu-v2.0.0.zip | grep -qx 'bundled/LuoShu-App.apk'
+          ! unzip -Z1 dist/LuoShu-v2.0.0.zip | grep -qE '(^|/)webroot(/|$)'
+          unzip -p dist/LuoShu-v2.0.0.zip bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
+          cmp -s dist/LuoShu-App-v2.0.0.apk "$RUNNER_TEMP/embedded.apk"
+
+      - name: Verify fixed APK signing certificate
+        env:
           RELEASE_CERT_SHA256: ${{ secrets.LUOSHU_RELEASE_CERT_SHA256 }}
         shell: bash
         run: |
           set -euo pipefail
-          for value in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD RELEASE_CERT_SHA256; do
-            [[ -n "${!value}" ]] || { echo "Missing fixed signing secret: $value" >&2; exit 3; }
-          done
           expected_cert="$(printf '%s' "$RELEASE_CERT_SHA256" | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
           [[ "$expected_cert" =~ ^[0-9a-f]{64}$ ]] || {
-            echo 'LUOSHU_RELEASE_CERT_SHA256 must contain one SHA-256 fingerprint.' >&2
+            echo 'Missing or invalid LUOSHU_RELEASE_CERT_SHA256.' >&2
             exit 3
           }
           echo "::add-mask::$expected_cert"
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/luoshu-release.jks"
-          keytool -list -keystore "$RUNNER_TEMP/luoshu-release.jks" \
-            -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
-
-      - name: Install release build dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core binutils >/dev/null
-
-      - uses: actions/cache@v4
-        with:
-          path: common/python
-          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
-
-      - name: Prepare ARM64 font runtime
-        run: |
-          if [[ ! -x common/python/bin/luoshu-python ]]; then
-            sh ./scripts/prepare_composite_runtime.sh
-          fi
-
-      - name: Run complete source checks
-        run: sh ./scripts/check.sh
-
-      - name: Build fixed-signature release App
-        working-directory: android-app
-        env:
-          LUOSHU_KEYSTORE_FILE: ${{ runner.temp }}/luoshu-release.jks
-          LUOSHU_KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
-          LUOSHU_KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
-          LUOSHU_KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
-        run: gradle --no-daemon --stacktrace :app:lintRelease :app:testDebugUnitTest :app:assembleRelease
-
-      - name: Verify exact APK signing certificate
-        env:
-          RELEASE_CERT_SHA256: ${{ secrets.LUOSHU_RELEASE_CERT_SHA256 }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          apk='android-app/app/build/outputs/apk/release/app-release.apk'
-          test -s "$apk"
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
           test -x "$apksigner"
-          "$apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/apk-signature.txt"
+          "$apksigner" verify --verbose --print-certs dist/LuoShu-App-v2.0.0.apk | tee "$RUNNER_TEMP/apk-signature.txt"
           grep -Eq '^Verified using v(2|3|3\.1|3\.2) scheme.*: true$' "$RUNNER_TEMP/apk-signature.txt"
           grep -qx 'Number of signers: 1' "$RUNNER_TEMP/apk-signature.txt"
           actual_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-signature.txt" | head -n1 | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
-          expected_cert="$(printf '%s' "$RELEASE_CERT_SHA256" | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
-          [[ "$actual_cert" =~ ^[0-9a-f]{64}$ && "$actual_cert" == "$expected_cert" ]] || {
-            echo 'APK certificate does not match the fixed release identity.' >&2
+          [[ "$actual_cert" == "$expected_cert" ]] || {
+            echo 'Published APK certificate does not match the fixed release identity.' >&2
             exit 4
           }
 
-      - name: Build and verify four release assets
-        id: assets
-        shell: bash
-        run: |
-          set -euo pipefail
-          . ./scripts/version.sh
-          apk='android-app/app/build/outputs/apk/release/app-release.apk'
-          rm -rf dist
-          mkdir -p dist
-          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}.apk"
-          module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
-          cp -f "$apk" "$app"
-          (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
-          LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
-          for file in "$module" "$module.sha256" "$app" "$app.sha256"; do test -s "$file"; done
-          unzip -t "$module" >/dev/null
-          unzip -Z1 "$module" | grep -qx 'bundled/LuoShu-App.apk'
-          ! unzip -Z1 "$module" | grep -qE '(^|/)webroot(/|$)'
-          unzip -p "$module" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
-          cmp -s "$apk" "$RUNNER_TEMP/embedded.apk"
-          (cd dist && sha256sum -c "$(basename "$module").sha256")
-          (cd dist && sha256sum -c "$(basename "$app").sha256")
-          mapfile -t actual < <(find dist -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)
-          expected=(
-            "LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
-            "LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip.sha256"
-            "LuoShu-App-${LUOSHU_ARTIFACT_VERSION}.apk"
-            "LuoShu-App-${LUOSHU_ARTIFACT_VERSION}.apk.sha256"
-          )
-          mapfile -t expected < <(printf '%s\n' "${expected[@]}" | LC_ALL=C sort)
-          [[ "${actual[*]}" == "${expected[*]}" ]] || {
-            printf 'Unexpected release asset set:\n' >&2
-            printf '  %s\n' "${actual[@]}" >&2
-            exit 5
-          }
-          echo "module=$module" >> "$GITHUB_OUTPUT"
-          echo "module_sha=$module.sha256" >> "$GITHUB_OUTPUT"
-          echo "app=$app" >> "$GITHUB_OUTPUT"
-          echo "app_sha=$app.sha256" >> "$GITHUB_OUTPUT"
-
-      - name: Preserve verified release candidates
+      - name: Preserve audited release assets
         uses: actions/upload-artifact@v4
         with:
-          name: VERIFIED-LuoShu-v2.0.0
-          path: |
-            ${{ steps.assets.outputs.module }}
-            ${{ steps.assets.outputs.module_sha }}
-            ${{ steps.assets.outputs.app }}
-            ${{ steps.assets.outputs.app_sha }}
+          name: AUDITED-LuoShu-v2.0.0
+          path: dist/*
           if-no-files-found: error
           retention-days: 30
-
-      - name: Create immutable v2.0.0 Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_SHA: ${{ steps.identity.outputs.release_sha }}
-          MODULE: ${{ steps.assets.outputs.module }}
-          MODULE_SHA: ${{ steps.assets.outputs.module_sha }}
-          APP: ${{ steps.assets.outputs.app }}
-          APP_SHA: ${{ steps.assets.outputs.app_sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --force origin main --tags
-          [[ "$(git rev-parse origin/main)" == "$RELEASE_SHA" ]] || {
-            echo 'main changed while release assets were building.' >&2
-            exit 6
-          }
-          [[ -z "$(git rev-list -n1 v2.0.0 2>/dev/null || true)" ]] || {
-            echo 'Tag v2.0.0 appeared during validation.' >&2
-            exit 6
-          }
-          ! gh release view v2.0.0 >/dev/null 2>&1 || {
-            echo 'Release v2.0.0 appeared during validation.' >&2
-            exit 6
-          }
-          gh release create v2.0.0 "$MODULE" "$MODULE_SHA" "$APP" "$APP_SHA" \
-            --target "$RELEASE_SHA" \
-            --title '洛书 v2.0.0' \
-            --notes-file RELEASE_NOTES_v2.0.0.md
