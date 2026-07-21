@@ -34,6 +34,7 @@ import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
+import io.github.xgl34222220.luoshu.ui.font.fontPreviewText
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 
 @Composable
@@ -102,7 +103,7 @@ internal fun FontDetailsDialogRoute(
                 ) {
                     NativeFontPreview(
                         font = font,
-                        text = "洛书字体详情预览\nHello 0123456789",
+                        text = fontPreviewText(font, detailed = true),
                         axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
                         modifier = Modifier
                             .fillMaxWidth()
@@ -118,6 +119,7 @@ internal fun FontDetailsDialogRoute(
                 FontDetailLine("大小", font.size.ifBlank { "未知" }, primaryText, secondaryText)
                 FontDetailLine("导入时间", font.date.ifBlank { "未知" }, primaryText, secondaryText)
                 FontDetailLine("字重", font.weightLabel, primaryText, secondaryText)
+                FontDetailLine("中文覆盖", if (font.supportsCjk) "完整" else "不完整，仅建议作为英文字体", primaryText, secondaryText)
                 FontDetailLine("字体 ID", font.id, primaryText, secondaryText)
                 if (!font.valid && font.error.isNotBlank()) {
                     Spacer(Modifier.height(11.dp))

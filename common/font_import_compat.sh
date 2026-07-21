@@ -40,7 +40,7 @@ import_probe_metadata() {
     fi
     case "$_probe_output" in *'|'*'|'*'|'*'|'*) ;; *) return 1 ;; esac
 
-    IFS='|' read -r _probe_family _probe_subfamily _probe_weight _probe_italic _probe_variable <<EOF_PROBE
+    IFS='|' read -r _probe_family _probe_subfamily _probe_weight _probe_italic _probe_variable _probe_supports_cjk <<EOF_PROBE
 $_probe_output
 EOF_PROBE
     _probe_base=$(basename "$_probe_file")
@@ -54,7 +54,7 @@ EOF_PROBE
             case "$_probe_lower" in *italic*|*oblique*) _probe_italic=italic ;; *) _probe_italic=false ;; esac
             ;;
     esac
-    printf '%s|%s|%s|%s|%s\n' "$_probe_family" "$_probe_subfamily" "$_probe_weight" "$_probe_italic" "$_probe_variable"
+    printf '%s|%s|%s|%s|%s|%s\n' "$_probe_family" "$_probe_subfamily" "$_probe_weight" "$_probe_italic" "$_probe_variable" "${_probe_supports_cjk:-false}"
 }
 
 # 斜体是有效的文字字体，不再作为噪声整体丢弃。真实图标、Emoji 和损坏字体
@@ -87,7 +87,7 @@ import_copy_unique() {
         *-Regular)
             _single_probe=$(import_probe_metadata "$_src" 2>/dev/null)
             if [ -n "$_single_probe" ]; then
-                IFS='|' read -r _single_family _single_subfamily _single_weight _single_italic _single_variable <<EOF_SINGLE
+                IFS='|' read -r _single_family _single_subfamily _single_weight _single_italic _single_variable _single_supports_cjk <<EOF_SINGLE
 $_single_probe
 EOF_SINGLE
                 _single_role=$(import_weight_role_from_class "$_single_weight" "$(basename "$_src")")

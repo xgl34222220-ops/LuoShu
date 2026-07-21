@@ -287,9 +287,9 @@ import_zip_package() {
         if import_is_color_font_name "$_base" || [ "$FONT_CHECK_COLOR" = true ]; then _ignored=$((_ignored + 1)); continue; fi
         _valid=$((_valid + 1))
         _probe=$(import_probe_metadata "$_f" 2>/dev/null)
-        _probe_family=""; _probe_subfamily=""; _probe_weight=""; _probe_italic=""; _probe_variable=""
+        _probe_family=""; _probe_subfamily=""; _probe_weight=""; _probe_italic=""; _probe_variable=""; _probe_supports_cjk=""
         if [ -n "$_probe" ]; then
-            IFS='|' read -r _probe_family _probe_subfamily _probe_weight _probe_italic _probe_variable <<EOF_PROBE
+            IFS='|' read -r _probe_family _probe_subfamily _probe_weight _probe_italic _probe_variable _probe_supports_cjk <<EOF_PROBE
 $_probe
 EOF_PROBE
         fi
@@ -299,27 +299,29 @@ EOF_PROBE
         _class=$(import_name_class "$_base")
         _role=$(import_weight_role_from_class "$_probe_weight" "$_base")
         _italic="${_probe_italic:-false}"
-        printf '%s|%s|text|%s|%s|%s|%s|%s|%s|%s
-'             "$_family" "$_variable" "$_size" "$_base" "$_f" "$_class" "$_role" "${_probe_weight:-0}" "$_italic" >> "$_manifest"
+        _supports_cjk="${_probe_supports_cjk:-false}"
+        printf '%s|%s|text|%s|%s|%s|%s|%s|%s|%s|%s
+'             "$_family" "$_variable" "$_size" "$_base" "$_f" "$_class" "$_role" "${_probe_weight:-0}" "$_italic" "$_supports_cjk" >> "$_manifest"
     done
 
     if [ "$_valid" -le 0 ]; then rm -rf "$_tmp"; printf '{"status":"error","message":"没有字体通过真实格式检测"}\n'; return 0; fi
 
     # 预选主文字字体：中文名称、字体族完整度和文件体积优先；VF 仅加分，不再无条件压过中文静态字重。
-    _best_score=-999999; _best_path=""; _best_family=""; _best_variable=false; _best_name=""; _best_class=neutral; _best_role=regular; _best_size=0
-    while IFS='|' read -r _family _variable _kind _size _base _path _class _role _weight_class _italic; do
+    _best_score=-999999; _best_path=""; _best_family=""; _best_variable=false; _best_name=""; _best_class=neutral; _best_role=regular; _best_size=0; _best_supports_cjk=false
+    while IFS='|' read -r _family _variable _kind _size _base _path _class _role _weight_class _italic _supports_cjk; do
         [ "$_kind" = text ] || continue
         [ "$_italic" = true ] && continue
         import_is_italic_name "$_base" && continue
         _family_count=$(awk -F'|' -v f="$_family" '$1==f && $3=="text"{n++} END{print n+0}' "$_manifest")
         _mb=$((_size / 1048576)); [ "$_mb" -gt 64 ] && _mb=64
         _score=$((_mb * 120 + _family_count * 260))
+        [ "$_supports_cjk" = true ] && _score=$((_score + 12000))
         case "$_class" in cjk) _score=$((_score + 7000)) ;; cjk_traditional) _score=$((_score + 4500)) ;; east_asian) _score=$((_score + 2500)) ;; latin) if [ "$_size" -lt 6291456 ]; then _score=$((_score - 5000)); else _score=$((_score - 1000)); fi ;; esac
         [ "$_variable" = true ] && _score=$((_score + 1500))
         case "$_role" in regular) _score=$((_score + 1400)) ;; medium) _score=$((_score + 900)) ;; semibold) _score=$((_score + 550)) ;; bold) _score=$((_score + 300)) ;; thin) _score=$((_score - 150)) ;; esac
         if [ "$_size" -lt 1048576 ]; then _score=$((_score - 5000)); elif [ "$_size" -lt 3145728 ]; then _score=$((_score - 2500)); elif [ "$_size" -lt 6291456 ]; then _score=$((_score - 800)); fi
         if [ "$_score" -gt "$_best_score" ]; then
-            _best_score=$_score; _best_path=$_path; _best_family=$_family; _best_variable=$_variable; _best_name=$_base; _best_class=$_class; _best_role=$_role; _best_size=$_size
+            _best_score=$_score; _best_path=$_path; _best_family=$_family; _best_variable=$_variable; _best_name=$_base; _best_class=$_class; _best_role=$_role; _best_size=$_size; _best_supports_cjk=$_supports_cjk
         fi
     done < "$_manifest"
 
@@ -333,7 +335,7 @@ EOF_PROBE
         _copied=$(import_copy_unique "$_best_path" "$USER_FONTS_DIR" "$_target_name") && { _target_name=$(basename "$_copied"); _imported_text=1; }
     elif [ "$_family_count" -ge 2 ]; then
         _mode=family
-        while IFS='|' read -r _family _variable _kind _size _base _path _class _role _weight_class _italic; do
+        while IFS='|' read -r _family _variable _kind _size _base _path _class _role _weight_class _italic _supports_cjk; do
             [ "$_kind" = text ] || continue; [ "$_family" = "$_best_family" ] || continue
             [ "$_italic" = true ] && continue
             import_is_italic_name "$_base" && continue
@@ -347,7 +349,7 @@ EOF_PROBE
     else
         # 单文件模块若存在多个系统别名，只对最终候选做 cmp，不再对全部文件反复 SHA-256。
         _same=0
-        while IFS='|' read -r _family _variable _kind _size _base _path _class _role _weight_class _italic; do
+        while IFS='|' read -r _family _variable _kind _size _base _path _class _role _weight_class _italic _supports_cjk; do
             [ "$_kind" = text ] || continue; [ "$_size" = "$_best_size" ] || continue
             cmp -s "$_best_path" "$_path" 2>/dev/null && _same=$((_same + 1))
         done < "$_manifest"
@@ -358,7 +360,7 @@ EOF_PROBE
 
     if [ "$_imported_text" -gt 0 ]; then
         _font_id=$(detect_font_family "$_target_name")
-        case "$_best_class" in cjk|cjk_traditional|east_asian) _supports_cjk=true ;; *) _supports_cjk=false ;; esac
+        _supports_cjk="${_best_supports_cjk:-false}"
         import_write_font_config "$_font_id" "$_display_name" "$_zip_name" "$_module_version" "$_module_author" "$_supports_cjk" "$_best_variable" || true
     fi
 
@@ -366,9 +368,13 @@ EOF_PROBE
     rm -rf "$_tmp" 2>/dev/null || true
     if [ "$_imported_text" -le 0 ]; then printf '{"status":"error","message":"字体复制失败，请检查存储空间和目录权限"}\n'; return 0; fi
 
-    case "$_best_class" in cjk) _reason="检测到简体中文主字体" ;; cjk_traditional) _reason="检测到繁体中文主字体" ;; east_asian) _reason="检测到东亚文字字体" ;; latin) _reason="未找到明确中文命名，已按覆盖候选规则选择" ;; *) _reason="已按字体族完整度与文件体积选择" ;; esac
+    if [ "${_best_supports_cjk:-false}" = true ]; then
+        _reason="字体 cmap 已确认完整中文、拉丁与数字覆盖"
+    else
+        case "$_best_class" in cjk) _reason="中文命名字体缺少部分必要字形" ;; cjk_traditional) _reason="繁体命名字体缺少部分必要字形" ;; east_asian) _reason="东亚字体缺少部分必要字形" ;; latin) _reason="该模块主字体仅适合作为拉丁字体" ;; *) _reason="未检测到完整中文覆盖" ;; esac
+    fi
     _message="已导入：$_display_name"
-    printf '{"status":"ok","data":{"package":"%s","displayName":"%s","selected":"%s","source":"%s","family":"%s","mode":"%s","reason":"%s","familyFiles":%d,"importedText":%d,"valid":%d,"invalid":%d,"ignored":%d,"message":"%s"}}\n' \
-        "$(json_escape "$_zip_name")" "$(json_escape "$_display_name")" "$(json_escape "$_target_name")" "$(json_escape "$_best_name")" "$(json_escape "$_best_family")" "$(json_escape "$_mode")" "$(json_escape "$_reason")" \
+    printf '{"status":"ok","data":{"package":"%s","id":"%s","displayName":"%s","selected":"%s","source":"%s","family":"%s","mode":"%s","supportsCjk":%s,"reason":"%s","familyFiles":%d,"importedText":%d,"valid":%d,"invalid":%d,"ignored":%d,"message":"%s"}}\n' \
+        "$(json_escape "$_zip_name")" "$(json_escape "$_font_id")" "$(json_escape "$_display_name")" "$(json_escape "$_target_name")" "$(json_escape "$_best_name")" "$(json_escape "$_best_family")" "$(json_escape "$_mode")" "${_supports_cjk:-false}" "$(json_escape "$_reason")" \
         "$_family_count" "$_imported_text" "$_valid" "$_invalid" "$_ignored" "$(json_escape "$_message")"
 }

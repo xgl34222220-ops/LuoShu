@@ -76,10 +76,15 @@ invalidate_font_cache() {
 }
 
 find_duplicate() {
-    _hash="$1"
+    _source="$1"
+    _hash="$2"
+    _source_size=$(stat -c %s "$_source" 2>/dev/null)
+    case "$_source_size" in ''|*[!0-9]*) _source_size=0 ;; esac
     for _file in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
                  "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
         [ -f "$_file" ] || continue
+        _candidate_size=$(stat -c %s "$_file" 2>/dev/null)
+        [ "$_candidate_size" = "$_source_size" ] || continue
         [ "$(file_hash "$_file")" = "$_hash" ] && { printf '%s\n' "$_file"; return 0; }
     done
     return 1
@@ -140,7 +145,7 @@ import_font_file() {
     [ -n "$_hash" ] || { fail_json "无法计算字体 SHA-256"; return; }
     mkdir -p "$USER_FONTS_DIR" 2>/dev/null || { fail_json "无法创建字体目录"; return; }
 
-    _duplicate=$(find_duplicate "$_hash")
+    _duplicate=$(find_duplicate "$_src" "$_hash")
     if [ -f "$_duplicate" ]; then
         _family=$(detect_font_family "$(basename "$_duplicate")")
         printf '{"status":"ok","data":{"kind":"font","id":"%s","name":"%s","format":"%s","duplicate":true,"message":"字体已存在，未重复导入"}}\n' \
@@ -157,8 +162,22 @@ import_font_file() {
     chmod 0644 "$_target" 2>/dev/null || true
     invalidate_font_cache
     _family=$(detect_font_family "$(basename "$_target")")
-    printf '{"status":"ok","data":{"kind":"font","id":"%s","name":"%s","format":"%s","duplicate":false,"message":"字体已导入"}}\n' \
-        "$(json_escape "$_family")" "$(json_escape "$_stem")" "$_format"
+    _supports_cjk=false
+    _probe=$(import_probe_metadata "$_target" 2>/dev/null)
+    if [ -n "$_probe" ]; then
+        IFS='|' read -r _probe_family _probe_subfamily _probe_weight _probe_italic _probe_variable _probe_supports_cjk <<EOF_RAW_PROBE
+$_probe
+EOF_RAW_PROBE
+        [ "$_probe_supports_cjk" = true ] && _supports_cjk=true
+    fi
+    {
+        printf 'name=%s\n' "$_stem"
+        printf 'description=直接导入字体文件\n'
+        printf 'supports_cjk=%s\n' "$_supports_cjk"
+        printf 'is_variable=%s\n' "${_probe_variable:-false}"
+    } > "$USER_FONTS_DIR/${_family}.conf" 2>/dev/null || true
+    printf '{"status":"ok","data":{"kind":"font","id":"%s","name":"%s","format":"%s","supportsCjk":%s,"duplicate":false,"message":"字体已导入"}}\n' \
+        "$(json_escape "$_family")" "$(json_escape "$_stem")" "$_format" "$_supports_cjk"
 }
 
 import_zip_file() {

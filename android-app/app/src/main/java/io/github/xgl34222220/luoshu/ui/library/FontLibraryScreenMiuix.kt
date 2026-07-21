@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
+import io.github.xgl34222220.luoshu.ui.font.fontPreviewText
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 
 @Composable
@@ -363,7 +364,7 @@ private fun MiuixFontCard(
             ) {
                 NativeFontPreview(
                     font = font,
-                    text = "洛书字体预览  Hello 0123456789",
+                    text = fontPreviewText(font),
                     axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
                     modifier = Modifier.fillMaxWidth().height(80.dp).padding(horizontal = 16.dp, vertical = 12.dp),
                     textSizeSp = 23f,

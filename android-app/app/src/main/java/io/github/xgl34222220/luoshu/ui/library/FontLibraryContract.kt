@@ -87,7 +87,7 @@ internal fun LuoShuViewModel.toFontLibraryUiState(): FontLibraryUiState {
     val allFonts = fonts
     val visibleFonts = filteredFonts
     return FontLibraryUiState(
-        loading = fontLoading,
+        loading = fontLoading || fontRefreshing,
         operationBusy = operationBusy || mixState.busy,
         query = searchQuery,
         error = fontError,

@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
+import io.github.xgl34222220.luoshu.ui.font.fontPreviewText
 
 @Composable
 internal fun FontLibraryScreenMaterial(
@@ -368,7 +369,7 @@ private fun MaterialFontCard(
             ) {
                 NativeFontPreview(
                     font = font,
-                    text = "洛书字体预览\nHello 0123456789",
+                    text = fontPreviewText(font, detailed = true),
                     axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
                     modifier = Modifier.fillMaxWidth().height(98.dp).padding(horizontal = 17.dp, vertical = 13.dp),
                     textSizeSp = 24f,

@@ -15,7 +15,7 @@ internal data class CachedFontIndex(
 
 internal class FontIndexStore(context: Context) {
     private val atomicFile = AtomicFile(
-        File(context.applicationContext.filesDir, "font-index-v2.json"),
+        File(context.applicationContext.filesDir, "font-index-v3.json"),
     )
     private val lock = Any()
 
@@ -51,6 +51,7 @@ internal class FontIndexStore(context: Context) {
                             valid = item.optBoolean("valid", true),
                             error = item.optString("error", ""),
                             weights = weights,
+                            supportsCjk = item.optBoolean("supportsCjk", true),
                         ),
                     )
                 }
@@ -84,7 +85,8 @@ internal class FontIndexStore(context: Context) {
                                 .put("variable", font.variable)
                                 .put("valid", font.valid)
                                 .put("error", font.error)
-                                .put("weights", JSONArray(font.weights)),
+                                .put("weights", JSONArray(font.weights))
+                                .put("supportsCjk", font.supportsCjk),
                         )
                     }
                 },
@@ -108,6 +110,6 @@ internal class FontIndexStore(context: Context) {
     }
 
     private companion object {
-        const val SCHEMA_VERSION = 2
+        const val SCHEMA_VERSION = 3
     }
 }

@@ -35,11 +35,21 @@ internal fun fontPreviewWeight(font: FontItem): Int {
     }
 }
 
-internal fun fontCapabilityLabel(font: FontItem): String = when {
-    font.variable -> "可变字体"
-    fontStaticWeights(font).size >= 2 ->
-        "多字重 · ${fontStaticWeights(font).joinToString(" / ")}"
-    else -> "固定 ${fontWeightName(fontFixedWeight(font))}"
+internal fun fontCapabilityLabel(font: FontItem): String {
+    val capability = when {
+        font.variable -> "可变字体"
+        fontStaticWeights(font).size >= 2 ->
+  "多字重 · ${fontStaticWeights(font).joinToString(" / ")}"
+        else -> "固定 ${fontWeightName(fontFixedWeight(font))}"
+    }
+    return if (font.supportsCjk) capability else "仅拉丁 · $capability"
+}
+
+internal fun fontPreviewText(font: FontItem, detailed: Boolean = false): String = when {
+    font.supportsCjk && detailed -> "洛书字体详情预览\nHello 0123456789"
+    font.supportsCjk -> "洛书字体预览  Hello 0123456789"
+    detailed -> "Hello 0123456789\nLatin font · 中文将回退系统字体"
+    else -> "Hello 0123456789  Latin font"
 }
 
 internal fun fontRoleWeight(role: String): Int = when (role.lowercase()) {
