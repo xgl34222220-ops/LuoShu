@@ -34,7 +34,7 @@ private val QQ_REPLACEABLE_FONT_MARKERS = listOf(
 private const val QQ_LABEL_MAX_TEXT_SIZE_SP = 14.5f
 private const val QQ_LABEL_MAX_HEIGHT_DP = 32f
 private const val QQ_LABEL_MAX_TEXT_LENGTH = 28
-private const val QQ_LABEL_MIN_SCALE = 0.84f
+private const val QQ_LABEL_MIN_SCALE = 0.72f
 
 internal fun isQqUiProcess(packageName: String, processName: String): Boolean =
     packageName in QQ_PACKAGES && processName == packageName
