@@ -21,6 +21,7 @@ on:
       - scripts/build.sh
       - scripts/font_config_overlay_test.py
       - scripts/font_config_runtime_test.sh
+      - scripts/font_config_weights_test.sh
       - scripts/font_name_normalize_test.py
       - scripts/no_hook_bootstrap_test.sh
       - scripts/prune_python_runtime.sh
@@ -47,6 +48,8 @@ jobs:
           FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
           test -s "$FONT"
           python3 scripts/font_name_normalize_test.py --font "$FONT"
+      - name: Run deterministic weight safety tests
+        run: sh -x scripts/font_config_weights_test.sh
       - name: Run transactional runtime tests
         run: sh -x scripts/font_config_runtime_test.sh
       - name: Verify every payload bootstrap chain
