@@ -1,0 +1,42 @@
+package io.github.xgl34222220.luoshu.hook
+
+internal val CLOCK_PACKAGES = setOf("com.android.deskclock", "com.miui.clock")
+
+private val CLOCK_ALARM_CRITICAL_CALL_MARKERS = listOf(
+    "alarmalert",
+    "alarmactivity",
+    "alarmreceiver",
+    "alarmservice",
+    "alarmstate",
+    "alarmklaxon",
+    "alarmprealarm",
+    "alarmnotification",
+    "ringactivity",
+    "ringing",
+    "ringtone",
+    "klaxon",
+    "fullscreenalarm",
+    "fullscreennotification",
+    "alertactivity",
+    "alertservice",
+    "notificationservice",
+    "mediaplayer",
+    "audiotrack",
+    "audiofocus",
+)
+
+/**
+ * Clock UI hooks are intentionally limited to the package's main process.
+ *
+ * OEM clock apps commonly move alarm receivers, ringtone playback and full-screen alerts into
+ * package-suffixed processes. Font replacement has no value there and must never be able to affect
+ * alarm lifetime, audio focus or notification delivery.
+ */
+internal fun shouldInstallClockUiFontHooks(packageName: String, processName: String): Boolean =
+    packageName in CLOCK_PACKAGES && processName == packageName
+
+/** Returns true for call stacks belonging to alarm playback, alert or notification execution. */
+internal fun isClockAlarmCriticalCall(callerClassNames: List<String>): Boolean {
+    val callers = callerClassNames.joinToString("|").lowercase()
+    return CLOCK_ALARM_CRITICAL_CALL_MARKERS.any(callers::contains)
+}
