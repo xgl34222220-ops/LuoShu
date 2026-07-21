@@ -94,7 +94,7 @@ internal class DisplayPerformanceController(
         val display = activity.window.decorView.display ?: return
         val currentMode = display.mode.toCandidate()
         val target = selectHighestSameResolutionMode(
-            modes = display.supportedModes.map(Display.Mode::toCandidate),
+            modes = display.supportedModes.map { mode -> mode.toCandidate() },
             current = currentMode,
         ) ?: return
         if (
