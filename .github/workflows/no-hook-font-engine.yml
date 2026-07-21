@@ -51,7 +51,7 @@ jobs:
       - name: Verify every payload bootstrap chain
         run: sh -x scripts/no_hook_bootstrap_test.sh
       - name: Verify pruned ARM64 Python runtime
-        run: sh -x scripts/python_runtime_prune_test.sh
+        run: sh scripts/python_runtime_prune_test.sh
       - name: Enforce no-Hook source boundary
         shell: bash
         run: |
