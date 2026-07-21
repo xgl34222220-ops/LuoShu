@@ -115,28 +115,35 @@ jobs:
           unzip -p dist/LuoShu-v2.0.0.zip bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
           cmp -s dist/LuoShu-App-v2.0.0.apk "$RUNNER_TEMP/embedded.apk"
 
-      - name: Verify fixed APK signing certificate
+      - name: Verify release signing continuity
         env:
-          RELEASE_CERT_SHA256: ${{ secrets.LUOSHU_RELEASE_CERT_SHA256 }}
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          expected_cert="$(printf '%s' "$RELEASE_CERT_SHA256" | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
-          [[ "$expected_cert" =~ ^[0-9a-f]{64}$ ]] || {
-            echo 'Missing or invalid LUOSHU_RELEASE_CERT_SHA256.' >&2
+          rm -rf previous
+          mkdir -p previous
+          gh release download v14.4.0 --pattern '*.apk' --dir previous
+          mapfile -t previous_apks < <(find previous -maxdepth 1 -type f -name '*.apk')
+          [[ "${#previous_apks[@]}" -eq 1 ]] || {
+            printf 'Expected one v14.4.0 APK, found %s.\n' "${#previous_apks[@]}" >&2
             exit 3
           }
-          echo "::add-mask::$expected_cert"
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
           test -x "$apksigner"
-          "$apksigner" verify --verbose --print-certs dist/LuoShu-App-v2.0.0.apk | tee "$RUNNER_TEMP/apk-signature.txt"
-          grep -Eq '^Verified using v(2|3|3\.1|3\.2) scheme.*: true$' "$RUNNER_TEMP/apk-signature.txt"
-          grep -qx 'Number of signers: 1' "$RUNNER_TEMP/apk-signature.txt"
-          actual_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apk-signature.txt" | head -n1 | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
-          [[ "$actual_cert" == "$expected_cert" ]] || {
-            echo 'Published APK certificate does not match the fixed release identity.' >&2
+          "$apksigner" verify --verbose --print-certs dist/LuoShu-App-v2.0.0.apk | tee "$RUNNER_TEMP/v2-signature.txt"
+          "$apksigner" verify --verbose --print-certs "${previous_apks[0]}" | tee "$RUNNER_TEMP/v14-signature.txt"
+          for report in "$RUNNER_TEMP/v2-signature.txt" "$RUNNER_TEMP/v14-signature.txt"; do
+            grep -Eq '^Verified using v(2|3|3\.1|3\.2) scheme.*: true$' "$report"
+            grep -qx 'Number of signers: 1' "$report"
+          done
+          current_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/v2-signature.txt" | head -n1 | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          previous_cert="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/v14-signature.txt" | head -n1 | tr -d '[:space:]:' | tr '[:upper:]' '[:lower:]')"
+          [[ "$current_cert" =~ ^[0-9a-f]{64}$ && "$current_cert" == "$previous_cert" ]] || {
+            echo 'v2.0.0 APK signer does not match the previous fixed-signature stable release.' >&2
             exit 4
           }
+          echo 'Release signing continuity verified against v14.4.0.'
 
       - name: Preserve audited release assets
         uses: actions/upload-artifact@v4
