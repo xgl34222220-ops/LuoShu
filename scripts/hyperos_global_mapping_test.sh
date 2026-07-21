@@ -59,3 +59,6 @@ test ! -e "$MODULE_DIR/system/fonts/Roboto-Regular.ttf"
 test ! -e "$MODULE_DIR/product/fonts/Roboto-Regular.ttf"
 test ! -e "$MODULE_DIR/system_ext/fonts/Roboto-Regular.ttf"
 printf 'HyperOS global mapping tests passed.\n'
+
+# Keep the ColorOS product/system_ext regression in the always-on source gate as well.
+sh "$REPO_ROOT/scripts/coloros_partition_mapping_test.sh"
