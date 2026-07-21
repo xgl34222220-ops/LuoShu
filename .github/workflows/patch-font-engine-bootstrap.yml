@@ -1,15 +1,14 @@
 name: Patch font engine bootstrap
 on:
-  pull_request:
+  push:
     branches:
-      - main
+      - refactor/v14.5-no-hook-font-engine
     paths:
       - .github/workflows/patch-font-engine-bootstrap.yml
 permissions:
   contents: write
 jobs:
   patch:
-    if: github.head_ref == 'refactor/v14.5-no-hook-font-engine'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -56,7 +55,7 @@ jobs:
             fi
         fi
 '''
-          if "font_config_enable_for_payload \"$_font_id\"" not in text:
+          if 'font_config_enable_for_payload "$_font_id"' not in text:
               if anchor not in text:
                   raise SystemExit('font_manager payload anchor missing')
               text = text.replace(anchor, addition, 1)
