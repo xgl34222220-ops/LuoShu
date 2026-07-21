@@ -5,6 +5,7 @@ import android.content.ContextWrapper
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.widget.TextView
+import androidx.annotation.Keep
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
@@ -21,6 +22,7 @@ import java.util.concurrent.ConcurrentHashMap
  * wheel. This hook only enters TextViews containing digits (or a known clock-family separator), fits
  * the replacement to the original measured width, and restores the Paint immediately after onDraw.
  */
+@Keep
 class ClockTextViewTimeFontHook : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         val packageName = lpparam.packageName ?: return
