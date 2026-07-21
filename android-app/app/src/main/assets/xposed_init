@@ -1,4 +1,4 @@
-io.github.xgl34222220.luoshu.hook.AppBundledFontHook
+io.github.xgl34222220.luoshu.hook.ScopedAppBundledFontHook
 io.github.xgl34222220.luoshu.hook.ClockUiDrawFontHook
 io.github.xgl34222220.luoshu.hook.QqFontCompatibilityHook
 io.github.xgl34222220.luoshu.hook.ColorOsPlayFontHook
