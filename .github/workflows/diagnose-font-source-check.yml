@@ -1,0 +1,25 @@
+name: Diagnose font source check
+
+on:
+  pull_request:
+    branches: [main]
+    types: [synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'perf/font-import-refresh-mix-cache'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show failing source gate
+        shell: bash
+        run: |
+          set +e
+          sh -x scripts/check.sh > /tmp/luoshu-source-check.log 2>&1
+          code=$?
+          echo "source_check_exit=$code"
+          tail -n 120 /tmp/luoshu-source-check.log
+          exit "$code"
