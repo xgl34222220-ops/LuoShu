@@ -65,6 +65,19 @@ class ClockUiDrawSafetyTest {
     }
 
     @Test
+    fun textViewPathTargetsTimeValuesWithoutReplacingPageTitles() {
+        assertTrue(shouldReplaceClockTextViewText("10:00", null))
+        assertTrue(shouldReplaceClockTextViewText("13:05:44", "Mitype2019"))
+        assertTrue(shouldReplaceClockTextViewText("7月21日", "sans-serif"))
+        assertTrue(shouldReplaceClockTextViewText(":", "MitypeMono"))
+        assertFalse(shouldReplaceClockTextViewText("世界时钟", "MiSans"))
+        assertFalse(shouldReplaceClockTextViewText("闹钟", "sans-serif"))
+        assertFalse(shouldReplaceClockTextViewText("\uE8B6", null))
+        assertFalse(shouldReplaceClockTextViewText("10:00", "MaterialIcons"))
+        assertFalse(shouldReplaceClockTextViewText("🙂", "NotoColorEmoji"))
+    }
+
+    @Test
     fun replacementWidthIsFittedWithoutStretchingNarrowerFonts() {
         assertEquals(1f, fittedClockTextScaleX(1f, 100f, 80f), 0.001f)
         assertEquals(0.8f, fittedClockTextScaleX(1f, 80f, 100f), 0.001f)
