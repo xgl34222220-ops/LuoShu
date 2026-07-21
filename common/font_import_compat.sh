@@ -81,6 +81,9 @@ import_copy_unique() {
     _src="$1"; _dest_dir="$2"; _dest_name="$3"
     _dest_stem="${_dest_name%.*}"; _dest_ext="${_dest_name##*.}"
     case "$_dest_stem" in
+        *-Italic-Regular|*-Oblique-Regular)
+            # family 模式已经带有样式前缀，不再做单文件 Regular 纠正。
+            ;;
         *-Regular)
             _single_probe=$(import_probe_metadata "$_src" 2>/dev/null)
             if [ -n "$_single_probe" ]; then
