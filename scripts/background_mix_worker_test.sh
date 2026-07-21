@@ -26,5 +26,8 @@ grep -q 'nohup setsid\|toybox nohup toybox setsid' "$ROOT/common/background_task
 grep -q 'luoshu_start_detached.*worker' "$ROOT/common/v142_weighted_mix.sh"
 grep -q 'luoshu_start_detached.*worker' "$ROOT/common/v143_auto_multiweight_mix.sh"
 grep -q 'luoshu_start_detached.*worker' "$ROOT/common/font_mix.sh"
-! sed -n '/if \[ -f "$WEIGHTED" \]/,/^fi$/p' "$ROOT/common/v14_mix.sh" | grep -q 'precheck_mix "$2" "$3" "$4"'
-echo 'Detached root font workers survive their submitting shell.'
+# precheck_mix 只能保留在无加权引擎的兼容回退路径；加权主路径必须立即返回任务 ID。
+_PRECHECK_COUNT=$(grep -Fc 'precheck_mix "$2" "$3" "$4"' "$ROOT/common/v14_mix.sh")
+[ "$_PRECHECK_COUNT" -eq 1 ]
+grep -q '多字重引擎会在独立 Root Worker 内完成角色检查' "$ROOT/common/v14_mix.sh"
+echo 'Detached root font workers survive their submitting shell and weighted jobs queue immediately.'
