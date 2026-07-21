@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - common/python/**
+      - scripts/prepare_composite_runtime.sh
       - scripts/prune_python_runtime.sh
       - scripts/python_runtime_prune_test.sh
       - scripts/build.sh
@@ -15,11 +16,22 @@ permissions:
 jobs:
   runtime:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install audit tools
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends zip binutils >/dev/null
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv binutils >/dev/null
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+      - name: Prepare ARM64 font runtime
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
       - name: Audit pruned runtime
         id: audit
         continue-on-error: true
