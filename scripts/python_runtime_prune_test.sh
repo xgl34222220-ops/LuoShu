@@ -9,12 +9,16 @@ STAGE="$TMP/module"
 mkdir -p "$STAGE/common"
 cp -a "$SOURCE" "$STAGE/common/python"
 
-_before=$(du -sb "$STAGE/common/python" | awk '{print $1}')
+# Hard links make du report one underlying inode, while the release ZIP stores each path as a separate
+# entry. Measure the actual distributable size instead of filesystem allocation.
+(cd "$STAGE" && zip -9 -r -q "$TMP/runtime-before.zip" common/python)
+_before_zip=$(wc -c < "$TMP/runtime-before.zip" | tr -d '[:space:]')
 sh "$ROOT/scripts/prune_python_runtime.sh" "$STAGE"
-_after=$(du -sb "$STAGE/common/python" | awk '{print $1}')
-_saved=$((_before - _after))
-[ "$_saved" -ge 10000000 ] || {
-    echo "runtime pruning saved too little: $_saved bytes" >&2
+(cd "$STAGE" && zip -9 -r -q "$TMP/runtime-after.zip" common/python)
+_after_zip=$(wc -c < "$TMP/runtime-after.zip" | tr -d '[:space:]')
+_saved_zip=$((_before_zip - _after_zip))
+[ "$_saved_zip" -ge 3000000 ] || {
+    echo "runtime pruning saved too little in the release ZIP: $_saved_zip bytes" >&2
     exit 1
 }
 
@@ -62,4 +66,4 @@ if command -v readelf >/dev/null 2>&1; then
     grep -qx 'libcrypto_python.so' "$_needed"
 fi
 
-printf 'Python runtime pruning tests passed; saved %s bytes raw.\n' "$_saved"
+printf 'Python runtime pruning tests passed; saved %s compressed bytes.\n' "$_saved_zip"
