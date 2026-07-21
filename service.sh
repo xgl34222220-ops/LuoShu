@@ -7,6 +7,11 @@
 MODDIR="${0%/*}"
 MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1)
 [ -n "$MODULE_VERSION" ] || MODULE_VERSION="unknown"
+MODULE_DIR="$MODDIR"
+[ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
+[ -f "$MODDIR/common/font_config_runtime.sh" ] && . "$MODDIR/common/font_config_runtime.sh"
+[ -f "$MODDIR/common/font_config_partitions.sh" ] && . "$MODDIR/common/font_config_partitions.sh"
+[ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
 
 (
     WAITED=0
@@ -14,6 +19,9 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
         sleep 3
         WAITED=$((WAITED + 3))
     done
+
+    # A timeout is not proof that Android completed boot; never confirm in that case.
+    [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ] || exit 0
 
     LOG_FILE="$MODDIR/logs/fontswitch.log"
     LOG_LEVEL="${LOG_LEVEL:-INFO}"
@@ -28,6 +36,7 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
     }
 
     log_service "INFO" "服务脚本开始执行 ($MODULE_VERSION)"
+    type font_config_mark_boot_success >/dev/null 2>&1 && font_config_mark_boot_success
     if [ -f "$LOG_FILE" ]; then
         _log_size=$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d '[:space:]')
         case "$_log_size" in ''|*[!0-9]*) _log_size=0 ;; esac

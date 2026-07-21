@@ -135,7 +135,7 @@ EOF_LUOSHU_FONT_CONFIG
     [ "$_lfc_found" -gt 0 ]
 }
 
-font_config_disable() {
+_luoshu_font_config_disable_base() {
     _lfc_module="$(_luoshu_font_config_module)"
     _lfc_state="${CONFIG_DIR:-$_lfc_module/config}/font-config-overlay.conf"
     _lfc_dirs=''
@@ -151,7 +151,7 @@ EOF_LUOSHU_FONT_CONFIG
     rm -f "$_lfc_state" 2>/dev/null || true
 }
 
-font_config_generate() {
+_luoshu_font_config_generate_base() {
     _lfc_family="$1"
     _lfc_module="$(_luoshu_font_config_module)"
     _lfc_config="${CONFIG_DIR:-$_lfc_module/config}"
@@ -211,7 +211,7 @@ EOF_LUOSHU_FONT_CONFIG
     return 0
 }
 
-font_config_boot_guard() {
+_luoshu_font_config_boot_guard_base() {
     _lfc_active="${1:-default}"
     _lfc_module="$(_luoshu_font_config_module)"
     font_config_capture_original >/dev/null 2>&1 || true
@@ -241,3 +241,7 @@ EOF_LUOSHU_FONT_CONFIG
     [ "$_lfc_seen" -eq 0 ] || _luoshu_font_config_log INFO "无 Hook 字体配置启动校验通过：$_lfc_seen 份 XML"
     return 0
 }
+
+# Load the fail-open transaction and boot-confirmation layer for every runtime caller.
+_luoshu_font_safety="$(_luoshu_font_config_module)/common/font_safety.sh"
+[ -f "$_luoshu_font_safety" ] && . "$_luoshu_font_safety"

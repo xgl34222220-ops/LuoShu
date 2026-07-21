@@ -32,6 +32,7 @@ FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 [ -f "$MODULE_DIR/common/font_library_cache.sh" ] && . "$MODULE_DIR/common/font_library_cache.sh"
 [ -f "$MODULE_DIR/common/font_config_runtime.sh" ] && . "$MODULE_DIR/common/font_config_runtime.sh"
 [ -f "$MODULE_DIR/common/font_config_weights.sh" ] && . "$MODULE_DIR/common/font_config_weights.sh"
+[ -f "$MODULE_DIR/common/mount_compat.sh" ] && . "$MODULE_DIR/common/mount_compat.sh"
 
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
 type check_coloros >/dev/null 2>&1 && check_coloros
@@ -161,7 +162,7 @@ switch_font() {
     fi
 
     printf '%s\n' "$$" > "$_lock" 2>/dev/null || return 1
-    trap 'rm -f "$MODULE_DIR/.font_switch.lock" 2>/dev/null' EXIT HUP INT TERM
+    trap 'type luoshu_payload_transaction_abort >/dev/null 2>&1 && luoshu_payload_transaction_abort; rm -f "$MODULE_DIR/.font_switch.lock" 2>/dev/null' EXIT HUP INT TERM
 
     _source=''
     if [ "$_font_id" != default ]; then
@@ -174,6 +175,10 @@ switch_font() {
         fi
     fi
 
+    if ! type luoshu_payload_transaction_begin >/dev/null 2>&1 || ! luoshu_payload_transaction_begin; then
+        echo '错误：无法创建字体负载安全快照' >&2
+        return 5
+    fi
     clear_managed_text_fonts
     if [ "$_font_id" != default ]; then
         apply_font_by_rom "$_source" "$SYSTEM_FONTS_DIR" quick "$_font_id" || {
