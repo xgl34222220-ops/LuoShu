@@ -68,7 +68,9 @@ safe_stem() {
 }
 
 invalidate_font_cache() {
-    rm -f "$MODDIR/config/webui_font_list.json" \
+    rm -f "$MODDIR/config/native_font_index.json" \
+          "$MODDIR/config/native_font_index.key" \
+          "$MODDIR/config/webui_font_list.json" \
           "$MODDIR/config/webui_font_list.key" \
           "$MODDIR/config/recent_fonts.conf" 2>/dev/null || true
 }

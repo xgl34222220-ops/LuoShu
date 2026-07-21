@@ -22,9 +22,23 @@ internal fun fontNormalizedWeight(font: FontItem, current: Int): Int =
         else -> fontFixedWeight(font)
     }
 
+internal fun fontPreviewWeight(font: FontItem): Int {
+    val weights = fontStaticWeights(font)
+    return when {
+        font.variable -> 400
+        400 in weights -> 400
+        500 in weights -> 500
+        weights.isEmpty() -> 400
+        else -> weights.minWithOrNull(
+            compareBy<Int> { abs(it - 500) }.thenByDescending { it },
+        ) ?: 400
+    }
+}
+
 internal fun fontCapabilityLabel(font: FontItem): String = when {
     font.variable -> "可变字体"
-    fontStaticWeights(font).size >= 2 -> "${fontStaticWeights(font).size} 档静态字重"
+    fontStaticWeights(font).size >= 2 ->
+        "多字重 · ${fontStaticWeights(font).joinToString(" / ")}"
     else -> "固定 ${fontWeightName(fontFixedWeight(font))}"
 }
 

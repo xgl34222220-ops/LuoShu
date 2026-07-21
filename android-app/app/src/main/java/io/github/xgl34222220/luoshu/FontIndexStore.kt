@@ -15,7 +15,7 @@ internal data class CachedFontIndex(
 
 internal class FontIndexStore(context: Context) {
     private val atomicFile = AtomicFile(
-        File(context.applicationContext.filesDir, "font-index-v1.json"),
+        File(context.applicationContext.filesDir, "font-index-v2.json"),
     )
     private val lock = Any()
 
@@ -108,6 +108,6 @@ internal class FontIndexStore(context: Context) {
     }
 
     private companion object {
-        const val SCHEMA_VERSION = 1
+        const val SCHEMA_VERSION = 2
     }
 }
