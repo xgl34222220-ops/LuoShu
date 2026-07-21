@@ -7,6 +7,7 @@ on:
     paths:
       - common/font_config_overlay.py
       - common/font_config_runtime.sh
+      - common/font_config_partitions.sh
       - common/font_config_weights.sh
       - common/font_name_normalize.py
       - common/font_manager.sh
@@ -58,9 +59,12 @@ jobs:
           set -euo pipefail
           ! find android-app/app/src -type f \( -name 'xposed_init' -o -name 'scope.list' \) -print -quit | grep -q .
           ! grep -RInE 'IXposedHookLoadPackage|XposedBridge|LSPosed|lspatch' android-app/app/src common system 2>/dev/null
+          ! grep -RInE '(^|[[:space:]])(cp|ln|rm)[[:space:]].*/data/fonts|_dest="/data/fonts/' post-fs-data.sh common 2>/dev/null
           grep -q 'font_config_boot_guard' post-fs-data.sh
+          grep -q 'font_config_partitions.sh' post-fs-data.sh
           grep -q 'font_config_enable_for_payload' common/hyperos_global.sh
           grep -q 'font_config_enable_for_payload' common/font_mix.sh
           grep -q 'font_config_disable' common/font_manager.sh
-          grep -q 'product/mi_fonts_customization.xml' common/font_config_runtime.sh
+          grep -q 'product/mi_fonts_customization.xml' common/font_config_partitions.sh
+          grep -q 'my_product' common/font_config_partitions.sh
           grep -q 'prune_python_runtime.sh' scripts/build.sh
