@@ -78,6 +78,6 @@ jobs:
           grep -q 'font_config_enable_for_payload' common/hyperos_global.sh
           grep -q 'font_config_enable_for_payload' common/font_mix.sh
           grep -q 'font_config_disable' common/font_manager.sh
-          grep -q 'product/mi_fonts_customization.xml' common/font_config_partitions.sh
+          grep -q 'mi_fonts_customization.xml' common/font_config_partitions.sh
           grep -q 'my_product' common/font_config_partitions.sh
           grep -q 'prune_python_runtime.sh' scripts/build.sh
