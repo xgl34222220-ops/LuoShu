@@ -166,6 +166,7 @@ grep -q '^MIT License$' "$ROOT/licenses/FontTools-LICENSE.txt"
 # 功能回归脚本。
 sh "$ROOT/scripts/native_preview_source_test.sh"
 sh "$ROOT/scripts/native_zip_import_test.sh"
+sh "$ROOT/scripts/font_index_delete_regression_test.sh"
 sh "$ROOT/scripts/rc3_audit.sh"
 sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/hyperos_global_mapping_test.sh"

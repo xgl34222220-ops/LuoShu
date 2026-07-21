@@ -363,7 +363,8 @@ font_index_manifest() {
         _name=$(basename "$_font_file" 2>/dev/null)
         _family=$(detect_font_family "$_name")
         case "$_family" in ''|SysFont*|SysSans*) continue ;; esac
-        case "$_name|$_family" in *'|'*) continue ;; esac
+        case "$_name" in *'|'*) continue ;; esac
+        case "$_family" in *'|'*) continue ;; esac
         _weight=$(detect_font_weight "$_name")
         _size=$(stat -c %s "$_font_file" 2>/dev/null)
         _mtime=$(stat -c %Y "$_font_file" 2>/dev/null)
