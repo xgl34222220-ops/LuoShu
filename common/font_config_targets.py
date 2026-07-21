@@ -31,11 +31,12 @@ SAFE_PREFIXES = (
     "coloros-sans-", "oneplus-sans-", "realme-sans-", "vivo-sans-",
     "origin-sans-", "honor-sans-", "harmonyos-sans-",
 )
-PROTECTED_TOKENS = (
-    "emoji", "symbol", "icon", "material", "dingbat", "mono", "serif",
+PROTECTED_FAMILY_TOKENS = (
+    "emoji", "symbol", "icon", "material", "dingbat", "mono",
     "clock", "mitype", "math", "music", "braille", "barcode", "qrcode",
     "fallback", "legacy",
 )
+PROTECTED_FILE_TOKENS = PROTECTED_FAMILY_TOKENS + ("serif",)
 FONT_SUFFIXES = (".ttf", ".otf", ".ttc")
 WEIGHTS = (100, 200, 300, 400, 500, 600, 700, 800, 900)
 
@@ -50,7 +51,7 @@ def normalize(value: str) -> str:
 
 def safe_family(element: ET.Element) -> bool:
     name = normalize(element.attrib.get("name", ""))
-    if not name or any(token in name for token in PROTECTED_TOKENS):
+    if not name or any(token in name for token in PROTECTED_FAMILY_TOKENS):
         return False
     # Families carrying a locale/script contract are fallbacks, not the global UI family.
     for key in ("lang", "variant", "fallbackFor", "fallbackfor"):
@@ -63,7 +64,7 @@ def protected_file(value: str) -> bool:
     filename = os.path.basename(value.strip()).lower()
     return (
         not filename.endswith(FONT_SUFFIXES)
-        or any(token in filename for token in PROTECTED_TOKENS)
+        or any(token in filename for token in PROTECTED_FILE_TOKENS)
     )
 
 
