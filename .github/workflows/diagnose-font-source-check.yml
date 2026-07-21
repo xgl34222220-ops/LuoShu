@@ -6,7 +6,7 @@ on:
     types: [synchronize]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   diagnose:
@@ -14,12 +14,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Show failing source gate
+        with:
+          ref: perf/font-import-refresh-mix-cache
+          fetch-depth: 0
+      - name: Persist failing source gate
         shell: bash
         run: |
           set +e
           sh -x scripts/check.sh > /tmp/luoshu-source-check.log 2>&1
           code=$?
-          echo "source_check_exit=$code"
-          tail -n 120 /tmp/luoshu-source-check.log
-          exit "$code"
+          {
+            echo "source_check_exit=$code"
+            tail -n 160 /tmp/luoshu-source-check.log
+          } > .source-check-tail.log
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add .source-check-tail.log
+          git commit -m "test: capture source check failure"
+          git push origin HEAD:perf/font-import-refresh-mix-cache
