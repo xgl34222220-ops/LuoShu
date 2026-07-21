@@ -30,7 +30,24 @@ jobs:
           script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
           Path('/tmp/apply_detached_mix_patch.py').write_text(script, encoding='utf-8')
           PY
-          python3 /tmp/apply_detached_mix_patch.py
+          set +e
+          python3 /tmp/apply_detached_mix_patch.py >/tmp/detached-patch.log 2>&1
+          code=$?
+          printf '%s\n' "$code" >/tmp/detached-patch.code
+          cat /tmp/detached-patch.log
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: detached-mix-patch-diagnostics
+          path: |
+            /tmp/detached-patch.log
+            /tmp/detached-patch.code
+            /tmp/apply_detached_mix_patch.py
+          if-no-files-found: error
+      - name: Require patch success
+        shell: bash
+        run: exit "$(cat /tmp/detached-patch.code)"
       - name: Validate patch
         shell: bash
         run: |
@@ -45,7 +62,7 @@ jobs:
       - name: Commit validated patch
         shell: bash
         run: |
-          rm -f .github/workflows/apply-detached-mix-worker.yml
+          rm -f .github/workflows/apply-detached-mix-worker.yml .detached-mix-patch-trigger
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
