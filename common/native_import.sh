@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # 洛书 v14.3 Alpha1.1：原生 App 文件选择器导入桥。
-# 只接受 App 私有缓存中的 TTF/OTF/TTC/ZIP；ZIP 继续交由安全字体包导入器处理。
+# 只接受 App 私有缓存中的 TTF/OTF/TTC/ZIP；ZIP 由安全字体包导入器处理。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -14,7 +14,6 @@ fi
 MODULE_DIR="$MODDIR"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
 USER_IMPORT_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/import"
-FONT_MANAGER="$MODDIR/common/font_manager.sh"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 FACE_EXTRACTOR="$MODDIR/common/font_extract_faces.py"
@@ -22,6 +21,7 @@ MAX_BYTES=268435456
 
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
+[ -f "$MODDIR/common/font_import.sh" ] && . "$MODDIR/common/font_import.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -165,6 +165,10 @@ import_zip_file() {
         fail_json "系统缺少 unzip，无法导入字体模块 ZIP"
         return
     }
+    type import_zip_package >/dev/null 2>&1 || {
+        fail_json "安全字体模块导入器不可用"
+        return
+    }
     mkdir -p "$USER_IMPORT_DIR" 2>/dev/null || { fail_json "无法创建导入目录"; return; }
     _hash=$(file_hash "$_src")
     [ -n "$_hash" ] || { fail_json "无法计算 ZIP SHA-256"; return; }
@@ -176,7 +180,7 @@ import_zip_file() {
 
     _error_file="$MODDIR/cache/native-import-zip-error.$$"
     mkdir -p "${_error_file%/*}" 2>/dev/null || true
-    _result=$(MODDIR="$MODDIR" sh "$FONT_MANAGER" action import_zip "$(basename "$_target")" 2>"$_error_file")
+    _result=$(import_zip_package "$(basename "$_target")" 2>"$_error_file")
     _rc=$?
     _stderr=$(tail -n 6 "$_error_file" 2>/dev/null | tr '\n\r' '  ')
     rm -f "$_error_file" "$_target" 2>/dev/null || true
@@ -187,7 +191,7 @@ import_zip_file() {
         printf '%s\n' "$_json"
     else
         _detail=$(printf '%s' "${_stderr:-$_result}" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' | cut -c1-180)
-        [ -n "$_detail" ] || _detail="底层导入器没有返回结果（代码 $_rc）"
+        [ -n "$_detail" ] || _detail="安全导入器没有返回结果（代码 $_rc）"
         fail_json "字体模块 ZIP 导入失败：$_detail"
     fi
 }
