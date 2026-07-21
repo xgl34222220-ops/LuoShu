@@ -1,5 +1,6 @@
 package io.github.xgl34222220.luoshu.hook
 
+import android.content.res.Resources
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.widget.TextView
@@ -17,7 +18,7 @@ import java.util.ArrayDeque
  * some timer/alarm digits bypass normal font factories. A few clock builds also render navigation
  * and alarm icons with private-use glyph fonts whose hidden family name is unavailable. This hook
  * captures the caller's original Typeface before the broad hook and restores it afterwards only for
- * icon, emoji, symbol, monospace or unknown custom Paint families.
+ * icon, emoji, symbol, monospace or likely icon-only anonymous Paint families.
  */
 class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
@@ -50,7 +51,7 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
                     val family = typefaceFamilyName(original)
                     if (!shouldPreserveClockTextTypeface(view.text, family)) return
                     param.args[0] = original
-                    logPreservedOnce(packageName, "TextView", family, view.text)
+                    logPreservedOnce(packageName, "TextView", family, view.text, null)
                 }
             },
         )
@@ -70,10 +71,27 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (param.args.isEmpty()) return
                     val original = stack.get()?.peekLast()?.value
+                    val paint = param.thisObject as? Paint ?: return
                     val family = typefaceFamilyName(original)
-                    if (!shouldPreserveClockPaintTypeface(family, isSystemDefaultTypeface(original))) return
+                    val textSizeSp = paintTextSizeSp(paint)
+                    val callers = Thread.currentThread().stackTrace
+                        .asSequence()
+                        .drop(2)
+                        .take(MAX_CALLER_FRAMES)
+                        .map { it.className }
+                        .toList()
+                    if (
+                        !shouldPreserveClockPaintTypeface(
+                            familyName = family,
+                            systemDefault = isSystemDefaultTypeface(original),
+                            textSizeSp = textSizeSp,
+                            callerClassNames = callers,
+                        )
+                    ) {
+                        return
+                    }
                     param.args[0] = original
-                    logPreservedOnce(packageName, "Paint", family, null)
+                    logPreservedOnce(packageName, "Paint", family, null, textSizeSp)
                 }
             },
         )
@@ -105,6 +123,13 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
         return null
     }
 
+    private fun paintTextSizeSp(paint: Paint): Float? {
+        val scaledDensity = Resources.getSystem().displayMetrics.scaledDensity
+        if (!scaledDensity.isFinite() || scaledDensity <= 0f) return null
+        val value = paint.textSize / scaledDensity
+        return value.takeIf { it.isFinite() && it >= 0f }
+    }
+
     private fun isSystemDefaultTypeface(typeface: Typeface?): Boolean =
         typeface == null ||
             typeface === Typeface.DEFAULT ||
@@ -117,13 +142,15 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
         route: String,
         familyName: String?,
         text: CharSequence?,
+        textSizeSp: Float?,
     ) {
         val sample = text?.take(8)?.toString().orEmpty()
-        val key = "$packageName|$route|${familyName.orEmpty()}|$sample"
+        val roundedSize = textSizeSp?.toInt()?.toString().orEmpty()
+        val key = "$packageName|$route|${familyName.orEmpty()}|$sample|$roundedSize"
         if (LOGGED_PRESERVATIONS.add(key)) {
             XposedBridge.log(
                 "LuoShu ClockIconTypefaceSafetyHook preserved [$packageName] " +
-                    "$route family=${familyName ?: "unknown"}",
+                    "$route family=${familyName ?: "unknown"} sizeSp=${textSizeSp ?: -1f}",
             )
         }
     }
@@ -140,6 +167,7 @@ class ClockIconTypefaceSafetyHook : IXposedHookLoadPackage {
     private companion object {
         const val PRIORITY_BEFORE_FONT_HOOK = 10_000
         const val PRIORITY_AFTER_FONT_HOOK = -10_000
+        const val MAX_CALLER_FRAMES = 20
 
         val CLOCK_PACKAGES = setOf("com.android.deskclock", "com.miui.clock")
         val FAMILY_NAME_FIELDS = listOf(
