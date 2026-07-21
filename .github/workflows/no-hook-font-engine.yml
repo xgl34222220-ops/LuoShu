@@ -1,0 +1,37 @@
+name: No-Hook font engine tests
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - common/font_config_overlay.py
+      - common/font_config_runtime.sh
+      - common/hyperos_global.sh
+      - common/rom_adapters.sh
+      - common/font_mix.sh
+      - post-fs-data.sh
+      - scripts/font_config_overlay_test.py
+      - scripts/font_config_runtime_test.sh
+      - .github/workflows/no-hook-font-engine.yml
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run XML structure tests
+        run: python3 scripts/font_config_overlay_test.py
+      - name: Run transactional runtime tests
+        run: sh scripts/font_config_runtime_test.sh
+      - name: Enforce no-Hook source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! find android-app/app/src -type f \( -name 'xposed_init' -o -name 'scope.list' \) -print -quit | grep -q .
+          ! grep -RInE 'IXposedHookLoadPackage|XposedBridge|LSPosed|lspatch' android-app/app/src common system 2>/dev/null
+          grep -q 'font_config_boot_guard' post-fs-data.sh
+          grep -q 'font_config_generate' common/hyperos_global.sh
+          grep -q 'product/mi_fonts_customization.xml' common/font_config_runtime.sh
