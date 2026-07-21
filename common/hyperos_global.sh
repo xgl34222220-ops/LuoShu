@@ -1,11 +1,16 @@
 #!/system/bin/sh
-# 洛书 HyperOS 全局字体覆盖增强层。
-# 必须在 rom_adapters.sh 之后 source；这里重新定义 HyperOS 映射函数。
+# 洛书无 Hook 全局字体覆盖增强层。
+# 必须在 rom_adapters.sh 之后 source；这里重新定义 HyperOS 映射和统一 ROM 分发入口。
 set +e
 
 _luoshu_hyperos_module_dir() {
     printf '%s\n' "${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
 }
+
+_luoshu_font_config_runtime="$(_luoshu_hyperos_module_dir)/common/font_config_runtime.sh"
+[ -f "$_luoshu_font_config_runtime" ] && . "$_luoshu_font_config_runtime"
+_luoshu_font_config_weights="$(_luoshu_hyperos_module_dir)/common/font_config_weights.sh"
+[ -f "$_luoshu_font_config_weights" ] && . "$_luoshu_font_config_weights"
 
 _luoshu_hyperos_root_pairs() {
     _module="$(_luoshu_hyperos_module_dir)"
@@ -26,7 +31,7 @@ _hyperos_metric_shell_files() {
     printf '%s\n' 'Roboto-Thin.ttf Roboto-ThinItalic.ttf Roboto-ExtraLight.ttf Roboto-ExtraLightItalic.ttf Roboto-Light.ttf Roboto-LightItalic.ttf Roboto-Regular.ttf Roboto-Italic.ttf Roboto-Medium.ttf Roboto-MediumItalic.ttf Roboto-SemiBold.ttf Roboto-SemiBoldItalic.ttf Roboto-Bold.ttf Roboto-BoldItalic.ttf Roboto-ExtraBold.ttf Roboto-ExtraBoldItalic.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-Bold.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-Bold.ttf GoogleSansFlex-Regular.ttf'
 }
 
-# 返回完整清理清单。Roboto/GoogleSans 仅用于清除旧版本残留，不会在新映射中重新创建。
+# 返回完整清理清单。Roboto/GoogleSans 仅用于清除旧版本残留，不会在文件槽映射中重新创建。
 get_all_hyperos_files() {
     printf '%s %s %s\n' "$(_hyperos_core_files)" "$(_hyperos_weight_files)" "$(_hyperos_metric_shell_files)"
 }
@@ -146,8 +151,12 @@ _hyperos_weight_anchor() {
     _font_anchor "$_source" "$_dest_dir" "wght-${_weight}"
 }
 
-# HyperOS 的 Roboto/GoogleSans 是紧凑控件的度量外壳。新实现保留这些原厂文件，
-# 只覆盖真正承载字形的 MiSans 核心文件和数字字重文件，并写入它们真实所在分区。
+_hyperos_is_config_weight() {
+    case "$1" in 100|200|300|400|500|600|700|800|900) return 0 ;; *) return 1 ;; esac
+}
+
+# 第一层仍保留 MiSans 文件槽作为厂商兼容回退；第二层生成系统字体 XML，
+# 让 framework 在测量与绘制时从一开始就使用洛书字重，不再依赖运行时控件 Hook。
 copy_as_hyperos() {
     src="$1"
     dest_dir="$2"
@@ -162,7 +171,7 @@ copy_as_hyperos() {
     _font_store_reset "$_module/system/fonts"
     regular_anchor=$(_font_anchor "$regular" "$_module/system/fonts" regular) || return 1
 
-    _log_step '  正在应用用户字体（HyperOS 全局映射）...'
+    _log_step '  正在应用用户字体（HyperOS 无 Hook 全局映射）...'
     core_count=0
     for _file in $(_hyperos_core_files); do
         _added=$(_hyperos_alias_existing_targets "$regular_anchor" "$_file")
@@ -178,6 +187,7 @@ copy_as_hyperos() {
     fi
 
     weight_count=0
+    config_weight_count=0
     for _file in $(_hyperos_weight_files); do
         _weight=${_file%.ttf}
         _anchor=$(_hyperos_weight_anchor "$regular" "$font_family" "$_weight" "$_module/system/fonts")
@@ -185,9 +195,55 @@ copy_as_hyperos() {
         _added=$(_hyperos_alias_existing_targets "$_anchor" "$_file")
         case "$_added" in ''|*[!0-9]*) _added=0 ;; esac
         weight_count=$((weight_count + _added))
+        if _hyperos_is_config_weight "$_weight"; then
+            if _font_alias "$_anchor" "$_module/system/fonts/LuoShu-${_weight}.ttf"; then
+                config_weight_count=$((config_weight_count + 1))
+            fi
+        fi
     done
 
-    _log_step "  已按真实分区覆盖 $core_count 个 MiSans 核心目标、$weight_count 个字重目标"
-    _log_step '  已保留原厂 Roboto/GoogleSans 度量外壳，避免小标签与紧凑控件裁字'
+    config_count=0
+    if [ "$config_weight_count" -eq 9 ] && type font_config_enable_for_payload >/dev/null 2>&1; then
+        if font_config_enable_for_payload "$font_family"; then
+            config_count=1
+        else
+            _log_step '  字体身份或 XML 未安全启用，已继续使用 MiSans 文件槽回退'
+        fi
+    fi
+
+    _log_step "  已覆盖 $core_count 个 MiSans 核心目标、$weight_count 个 ROM 字重目标、$config_weight_count 个配置字重"
+    if [ "$config_count" -eq 1 ]; then
+        _log_step '  系统与 OEM 字体 XML 已事务生成；测量和绘制统一使用洛书字体'
+    else
+        _log_step '  已保留原厂 Roboto/GoogleSans 度量外壳，文件槽映射作为安全回退'
+    fi
+    return 0
+}
+
+# 统一分发入口。ColorOS 与通用 Android 也使用相同的 XML 事务层；若设备配置中没有
+# 可安全重写的命名 UI family，则保持原文件槽映射，不把 XML 失败升级为切换失败。
+apply_font_by_rom() {
+    src="$1"
+    dest_dir="$2"
+    mode="${3:-full}"
+    font_family="${4:-}"
+    [ -n "$font_family" ] || font_family=$(detect_font_family "$(basename "$src")")
+
+    if [ "${IS_HYPEROS:-false}" = true ]; then
+        copy_as_hyperos "$src" "$dest_dir" "$mode" "$font_family"
+        return $?
+    elif [ "${IS_COLOROS:-false}" = true ]; then
+        copy_as_coloros "$src" "$dest_dir" "$mode" "$font_family" || return $?
+    else
+        copy_as_generic "$src" "$dest_dir" "$mode" || return $?
+    fi
+
+    if type font_config_enable_for_payload >/dev/null 2>&1; then
+        if font_config_enable_for_payload "$font_family"; then
+            _log_step '  系统与 OEM 字体 XML 已事务生成（无 Hook）'
+        else
+            _log_step '  设备没有可安全启用的字体 XML，继续使用文件槽映射'
+        fi
+    fi
     return 0
 }

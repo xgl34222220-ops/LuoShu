@@ -1,0 +1,83 @@
+name: No-Hook font engine tests
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - common/font_config_overlay.py
+      - common/font_config_runtime.sh
+      - common/font_config_partitions.sh
+      - common/font_config_weights.sh
+      - common/font_name_normalize.py
+      - common/font_manager.sh
+      - common/font_library_cache.sh
+      - common/hyperos_global.sh
+      - common/mount_compat.sh
+      - common/rom_adapters.sh
+      - common/font_mix.sh
+      - common/python/**
+      - post-fs-data.sh
+      - scripts/build.sh
+      - scripts/prepare_composite_runtime.sh
+      - scripts/font_config_overlay_test.py
+      - scripts/font_config_runtime_test.sh
+      - scripts/font_config_weights_test.sh
+      - scripts/font_name_normalize_test.py
+      - scripts/no_hook_bootstrap_test.sh
+      - scripts/prune_python_runtime.sh
+      - scripts/python_runtime_prune_test.sh
+      - .github/workflows/no-hook-font-engine.yml
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install font test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv python3-fonttools fonts-dejavu-core binutils >/dev/null
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+      - name: Prepare ARM64 font runtime
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
+      - name: Run XML structure tests
+        run: python3 scripts/font_config_overlay_test.py
+      - name: Run static font identity tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
+          test -s "$FONT"
+          python3 scripts/font_name_normalize_test.py --font "$FONT"
+      - name: Run deterministic weight safety tests
+        run: sh -x scripts/font_config_weights_test.sh
+      - name: Run transactional runtime tests
+        run: sh -x scripts/font_config_runtime_test.sh
+      - name: Verify every payload bootstrap chain
+        run: sh -x scripts/no_hook_bootstrap_test.sh
+      - name: Verify pruned ARM64 Python runtime
+        run: sh scripts/python_runtime_prune_test.sh
+      - name: Enforce no-Hook source boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! find android-app/app/src -type f \( -name 'xposed_init' -o -name 'scope.list' \) -print -quit | grep -q .
+          ! grep -RInE 'IXposedHookLoadPackage|XposedBridge|LSPosed|lspatch' android-app/app/src common system 2>/dev/null
+          ! grep -RInE '(^|[[:space:]])(cp|ln|rm)[[:space:]].*/data/fonts|_dest="/data/fonts/' post-fs-data.sh common 2>/dev/null
+          grep -q 'font_config_boot_guard' post-fs-data.sh
+          grep -q 'font_config_partitions.sh' post-fs-data.sh
+          grep -q 'font_config_enable_for_payload' common/hyperos_global.sh
+          grep -q 'font_config_enable_for_payload' common/font_mix.sh
+          grep -q 'font_config_disable' common/font_manager.sh
+          grep -q 'mi_fonts_customization.xml' common/font_config_partitions.sh
+          grep -q 'my_product' common/font_config_partitions.sh
+          grep -q 'prune_python_runtime.sh' scripts/build.sh

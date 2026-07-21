@@ -476,6 +476,13 @@ apply_mix() {
     if [ "$IS_COLOROS" = "true" ]; then
         sync_secondary_coloros_dirs || echo '警告：ColorOS 辅助分区字体同步未完全成功，主字体负载已保留' >&2
     fi
+    if type font_config_enable_for_payload >/dev/null 2>&1; then
+        if font_config_enable_for_payload mix; then
+            sed -i 's/^xmlOverlay=false$/xmlOverlay=true/' "$MIX_CONF" 2>/dev/null || true
+        else
+            echo '警告：无 Hook XML 未安全启用，已保留文件槽映射' >&2
+        fi
+    fi
     type luoshu_sync_mount_payload >/dev/null 2>&1 && luoshu_sync_mount_payload 2>/dev/null || true
     rm -f "$LOCK_FILE" 2>/dev/null || true
     trap - EXIT INT TERM

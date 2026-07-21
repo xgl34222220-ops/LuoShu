@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing immutable tag to publish (for example v14.3.3)
+        description: Existing immutable tag to publish (for example v2.0.0)
         required: true
         type: string
 
@@ -58,10 +58,12 @@ jobs:
           . ./scripts/version.sh
           expected_tag="$LUOSHU_ARTIFACT_VERSION"
           tag="${GITHUB_REF_NAME}"
+          mode="tag"
+          git fetch --force --tags origin
 
           if [[ "${GITHUB_EVENT_NAME}" == 'workflow_dispatch' ]]; then
             tag="$INPUT_TAG"
-            git fetch --force --tags origin
+            mode="existing-tag"
             tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
             [[ -n "$tag_sha" ]] || { echo "Tag does not exist: $tag" >&2; exit 2; }
             [[ "$tag_sha" == "$GITHUB_SHA" ]] || { echo "Run this workflow from the existing tag $tag" >&2; exit 2; }
@@ -74,18 +76,15 @@ jobs:
                 ;;
             esac
             tag="$expected_tag"
-            git fetch --force --tags origin
+            mode="create-tag"
             tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
-            if [[ -n "$tag_sha" && "$tag_sha" != "$GITHUB_SHA" ]]; then
-              echo "Tag $tag already points to $tag_sha, not $GITHUB_SHA" >&2
+            [[ -z "$tag_sha" ]] || { echo "Tag already exists before validation: $tag -> $tag_sha" >&2; exit 2; }
+          else
+            tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
+            [[ -n "$tag_sha" && "$tag_sha" == "$GITHUB_SHA" ]] || {
+              echo "Tag checkout does not match GITHUB_SHA: $tag" >&2
               exit 2
-            fi
-            if [[ -z "$tag_sha" ]]; then
-              git config user.name 'github-actions[bot]'
-              git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-              git tag "$tag" "$GITHUB_SHA"
-              git push origin "refs/tags/$tag"
-            fi
+            }
           fi
 
           [[ "$tag" == "$expected_tag" ]] || {
@@ -95,6 +94,7 @@ jobs:
           notes_file="RELEASE_NOTES_${LUOSHU_VERSION// /_}.md"
           [[ -s "$notes_file" ]] || { echo "Missing release notes: $notes_file" >&2; exit 2; }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "version=$LUOSHU_VERSION" >> "$GITHUB_OUTPUT"
           echo "artifact_version=$LUOSHU_ARTIFACT_VERSION" >> "$GITHUB_OUTPUT"
           echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
@@ -179,23 +179,61 @@ jobs:
           (cd dist && sha256sum -c "$(basename "$module").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
 
+      - name: Preserve verified release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-${{ steps.version.outputs.artifact_version }}-verified-release
+          path: |
+            dist/LuoShu-${{ steps.version.outputs.artifact_version }}.zip
+            dist/LuoShu-${{ steps.version.outputs.artifact_version }}.zip.sha256
+            dist/LuoShu-App-${{ steps.version.outputs.artifact_version }}.apk
+            dist/LuoShu-App-${{ steps.version.outputs.artifact_version }}.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Publish immutable GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
+          MODE: ${{ steps.version.outputs.mode }}
           VERSION: ${{ steps.version.outputs.version }}
+          ARTIFACT_VERSION: ${{ steps.version.outputs.artifact_version }}
           NOTES_FILE: ${{ steps.version.outputs.notes_file }}
         shell: bash
         run: |
           set -euo pipefail
+          git fetch --force --tags origin
+          if [[ "$MODE" == 'create-tag' ]]; then
+            git fetch origin main
+            main_sha="$(git rev-parse origin/main)"
+            [[ "$main_sha" == "$GITHUB_SHA" ]] || {
+              echo "main moved after validation: $main_sha != $GITHUB_SHA" >&2
+              exit 4
+            }
+            [[ -z "$(git rev-list -n1 "$TAG" 2>/dev/null || true)" ]] || {
+              echo "Tag appeared during validation: $TAG" >&2
+              exit 4
+            }
+          fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists; immutable releases are never overwritten." >&2
             exit 4
           fi
+
+          module="dist/LuoShu-${ARTIFACT_VERSION}.zip"
+          module_sha="${module}.sha256"
+          app="dist/LuoShu-App-${ARTIFACT_VERSION}.apk"
+          app_sha="${app}.sha256"
+          for file in "$module" "$module_sha" "$app" "$app_sha"; do test -s "$file"; done
+
           prerelease=()
           case "$VERSION" in *Alpha*|*Beta*|*RC*) prerelease=(--prerelease) ;; esac
-          gh release create "$TAG" dist/* \
-            --verify-tag \
+          tag_mode=(--verify-tag)
+          if [[ "$MODE" == 'create-tag' ]]; then
+            tag_mode=(--target "$GITHUB_SHA")
+          fi
+          gh release create "$TAG" "$module" "$module_sha" "$app" "$app_sha" \
+            "${tag_mode[@]}" \
             --title "洛书 $VERSION" \
             --notes-file "$NOTES_FILE" \
             "${prerelease[@]}"

@@ -67,7 +67,7 @@ test ! -e "$ROOT/scripts/prepare_webui.sh"
 test "$LUOSHU_VERSION" = "$(sed -n 's/^version=//p' "$ROOT/module.prop" | head -n1)"
 test "$LUOSHU_VERSION_CODE" = "$(sed -n 's/^versionCode=//p' "$ROOT/module.prop" | head -n1)"
 test "$LUOSHU_VERSION" = "$(sed -n 's/^version=//p' "$ROOT/config/version_notes.conf" | head -n1)"
-grep -q '^description=Android 全局字体管理模块' "$ROOT/module.prop"
+grep -q '^description=Android 无 Hook 全局字体引擎' "$ROOT/module.prop"
 
 # 单包构建必须显式传入 APK；Debug 包只能由测试工作流明确放行。
 grep -q "LUOSHU_APP_APK is required" "$ROOT/scripts/build.sh"
@@ -142,7 +142,7 @@ grep -q 'hyperos_global.sh' "$ROOT/common/font_library_cache.sh"
 grep -q 'hyperos_global.sh' "$ROOT/common/mount_compat.sh"
 ! grep -q '_font_alias.*Roboto' "$ROOT/common/hyperos_global.sh"
 
-# 禁止重新引入高风险热刷新和系统字体 XML 覆盖。
+# 禁止重新引入高风险热刷新；字体 XML 只能由运行时事务层生成，不能作为静态系统负载提交。
 ! grep -q 'cmd font system --update' "$ROOT/service.sh"
 ! grep -q 'oplus-font refresh' "$ROOT/service.sh"
 ! find "$ROOT/system/etc" -type f \( -name fonts.xml -o -name font_fallback.xml \) -print -quit 2>/dev/null | grep -q .

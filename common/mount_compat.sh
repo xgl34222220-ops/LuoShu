@@ -104,7 +104,7 @@ luoshu_sync_mount_payload() {
         [ -n "$_root" ] || continue
         _roots="${_roots}${_roots:+,}$_root"
         mkdir -p "$_root" 2>/dev/null || { _failed=$((_failed + 1)); continue; }
-        for _part in system system_ext product vendor odm oem; do
+        for _part in system system_ext product my_product vendor odm oem; do
             _src="$LUOSHU_MOUNT_MODDIR/$_part"
             _dst="$_root/$_part"
             if [ -d "$_src" ]; then
@@ -158,3 +158,5 @@ luoshu_mount_status_json() {
 # 保证复合字体与直接应用共用真实分区和原厂度量策略。
 _hyperos_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/hyperos_global.sh"
 [ -f "$_hyperos_helper" ] && . "$_hyperos_helper"
+_font_config_partitions="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/font_config_partitions.sh"
+[ -f "$_font_config_partitions" ] && . "$_font_config_partitions"
