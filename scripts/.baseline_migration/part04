@@ -98,11 +98,11 @@ def _draw_decomposed(glyph_set, glyph_name: str, destination_pen, scale: float, 
 
 def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float, y_shift: float) -> None:''',
 )
-replace_once(
-    'common/composite_font.py',
-    '_draw_decomposed(src_glyph_set, src_name, output_pen, scale)\n',
-    '_draw_decomposed(src_glyph_set, src_name, output_pen, scale, y_shift)\n',
-)
+text = read('common/composite_font.py')
+old_draw = '_draw_decomposed(src_glyph_set, src_name, output_pen, scale)\n'
+if text.count(old_draw) != 2:
+    raise SystemExit(f'common/composite_font.py: expected two draw calls, got {text.count(old_draw)}')
+write('common/composite_font.py', text.replace(old_draw, '_draw_decomposed(src_glyph_set, src_name, output_pen, scale, y_shift)\n', 1))
 replace_once(
     'common/composite_font.py',
     'def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float, width: int) -> None:',
