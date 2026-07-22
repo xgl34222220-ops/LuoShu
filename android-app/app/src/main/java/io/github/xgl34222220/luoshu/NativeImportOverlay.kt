@@ -80,14 +80,15 @@ internal fun NativeImportOverlay(
     }
 
     Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         FontMetadataInspector(
             viewModel = viewModel,
             style = style,
         )
+        Spacer(Modifier.width(10.dp))
         ImportActionButton(
             style = style,
             state = state,
@@ -129,8 +130,8 @@ private fun ImportActionButton(
     val taskVisible = state.busy || state.paused
     val targetWidth = when {
         !expanded -> 54.dp
-        taskVisible -> 166.dp
-        else -> 132.dp
+        taskVisible -> 180.dp
+        else -> 148.dp
     }
     val targetHeight = if (taskVisible) 68.dp else 54.dp
     val width by animateDpAsState(
@@ -167,7 +168,7 @@ private fun ImportActionButton(
             }
         } else {
             Column(
-                modifier = Modifier.padding(horizontal = 17.dp, vertical = if (taskVisible) 10.dp else 12.dp),
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = if (taskVisible) 10.dp else 12.dp),
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.Center,
             ) {
@@ -190,6 +191,9 @@ private fun ImportActionButton(
                         },
                         color = textColor,
                         fontWeight = FontWeight.Black,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        softWrap = false,
                     )
                 }
                 if (taskVisible) {

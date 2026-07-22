@@ -33,7 +33,7 @@ for file in \
   scripts/build.sh scripts/version.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh \
   scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh \
-  scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/rc3_audit.sh \
+  scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/mix_finalize_performance_test.sh scripts/rc3_audit.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/build.gradle.kts \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
@@ -173,6 +173,7 @@ sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
 sh "$ROOT/scripts/auto_multiweight_mode_test.sh"
 sh "$ROOT/scripts/auto_multiweight_engine_test.sh"
 sh "$ROOT/scripts/background_mix_worker_test.sh"
+sh "$ROOT/scripts/mix_finalize_performance_test.sh"
 sh "$ROOT/scripts/stability_test.sh"
 sh "$ROOT/scripts/font_library_cache_test.sh"
 sh "$ROOT/scripts/app_installer_test.sh"

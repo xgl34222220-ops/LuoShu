@@ -287,13 +287,25 @@ worker() {
         if [ "$_base_task" = "$_child" ]; then
             _base_message=$(read_value "$BASE_TASK_FILE" message)
             _base_percent=0
+            _progress_message=''
             if [ -s "$PROGRESS_FILE" ]; then
                 _base_percent=$(sed -n 's/^.*"percent":\([0-9][0-9]*\).*$/\1/p' "$PROGRESS_FILE" 2>/dev/null | head -n1)
+                _progress_message=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$PROGRESS_FILE" 2>/dev/null | head -n1)
             fi
             case "$_base_percent" in ''|*[!0-9]*) _base_percent=0 ;; esac
             _mapped=$((36 + (_base_percent * 64 / 100)))
             [ "$_mapped" -le 99 ] || _mapped=99
+            [ -z "$_progress_message" ] || _base_message="$_progress_message"
             [ -n "$_base_message" ] || _base_message='完整复合字体正在后台生成'
+            if [ "$_base_state" = running ] && [ "$_loops" -ge 3 ]; then
+                _inner_pid=$(cat "$CONFIG_DIR/mix_worker.pid" 2>/dev/null)
+                if [ -z "$_inner_pid" ] || ! kill -0 "$_inner_pid" 2>/dev/null; then
+                    _dead_message=$(tail -n1 "$CONFIG_DIR/mix_last_error.txt" 2>/dev/null | tr -d '\r')
+                    [ -n "$_dead_message" ] || _dead_message='完整复合字体后台进程已退出，请查看日志'
+                    update_task "$_wanted" failed "$_dead_message" 100 "$_child" "$(date +%s)"
+                    rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1
+                fi
+            fi
             case "$_base_state" in
                 success)
                     update_task "$_wanted" success "$_base_message" 100 "$_child" "$(date +%s)"

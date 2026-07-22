@@ -165,12 +165,10 @@ payload_stage_begin() {
     PAYLOAD_BACKUP="$MODDIR/.font-payload-backup.$$"
     PAYLOAD_ACTIVATED=0
     rm -rf "$PAYLOAD_STAGE" "$PAYLOAD_BACKUP" "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
+    # The active payload is already protected by the transaction snapshot and by PAYLOAD_BACKUP.
+    # Starting from an empty directory avoids copying dozens of large hard-linked aliases only to
+    # delete them immediately before generating the replacement payload.
     mkdir -p "$PAYLOAD_STAGE" 2>/dev/null || return 1
-    if [ -d "$SYSTEM_FONTS_DIR" ]; then
-        cp -af "$SYSTEM_FONTS_DIR/." "$PAYLOAD_STAGE/" 2>/dev/null || \
-            cp -rfp "$SYSTEM_FONTS_DIR/." "$PAYLOAD_STAGE/" 2>/dev/null || return 1
-    fi
-    clear_text_targets_in_dir "$PAYLOAD_STAGE"
     return 0
 }
 
@@ -343,6 +341,12 @@ write_progress() {
         "$(json_escape "$_stage")" "$(json_escape "$_message")" "$_percent" "$(date +%s)" > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$_progress" 2>/dev/null
 }
 
+mix_stage() {
+    write_progress "$1" "$2" "$3"
+    printf '[%s] mix stage=%s percent=%s message=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$1" "$3" "$2" >> "$LOG_FILE" 2>/dev/null || true
+}
+
 prune_composite_cache() {
     _cache="$1"; _keep=3; _count=0
     for _old in $(ls -1t "$_cache"/*.otf 2>/dev/null); do
@@ -370,7 +374,7 @@ build_composite_file() {
     if [ -s "$_cached" ]; then
         COMPOSITE_CACHE_HIT=true
         touch "$_cached" "$_report" 2>/dev/null || true
-        write_progress cache '已验证并使用现有复合字体缓存' 100
+        write_progress cache '已验证并使用现有复合字体缓存' 80
     else
         _tmp="$_cache/.${_key}.$$.tmp.otf"; _tmp_report="$_cache/.${_key}.$$.tmp.json"; _tmp_error="$_cache/.${_key}.$$.tmp.err"
         rm -f "$_tmp" "$_tmp_report" "$_tmp_error" "$_progress" 2>/dev/null || true
@@ -401,7 +405,7 @@ build_composite_file() {
         mv -f "$_tmp" "$_cached" || { set_mix_error '无法保存复合字体缓存'; return 1; }
         mv -f "$_tmp_report" "$_report" 2>/dev/null || true
         rm -f "$_tmp_error" 2>/dev/null || true
-        write_progress done '复合字体已生成并通过验证' 100
+        write_progress done '复合字体已生成并通过验证' 80
     fi
     prune_composite_cache "$_cache"
     COMPOSITE_RESULT="$_cached"; COMPOSITE_REPORT="$_report"
@@ -439,6 +443,7 @@ commit_mix_config() {
 apply_mix() {
     _cjk="$1"; _latin="$2"; _digit="$3"
     [ -n "$_cjk" ] && [ -n "$_latin" ] && [ -n "$_digit" ] || { set_mix_error '组合配置不完整'; return 1; }
+    mix_stage initialize '正在初始化字体组合任务' 1
     recover_interrupted_payload
     if [ -e "$LOCK_FILE" ]; then
         _pid=$(cat "$LOCK_FILE" 2>/dev/null)
@@ -448,6 +453,7 @@ apply_mix() {
     [ ! -f "$TEXT_REBOOT_REQUIRED" ] || { set_mix_error '本次开机已更改文字字体，请先重启手机'; return 3; }
     printf '%s\n' "$PPID" > "$LOCK_FILE"
     trap cleanup_mix_process EXIT INT TERM
+    mix_stage snapshot '正在创建字体负载回滚点' 3
     if ! type luoshu_payload_transaction_begin >/dev/null 2>&1 || ! luoshu_payload_transaction_begin; then
         set_mix_error '无法创建字体负载安全快照'
         return 4
@@ -462,6 +468,7 @@ apply_mix() {
 
     mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" "$MODDIR/logs" 2>/dev/null || { set_mix_error '无法创建模块工作目录'; return 4; }
     build_composite_file "$_cjk_src" "$_latin_src" "$_digit_src" || return 5
+    mix_stage payload '复合字形已完成，正在生成 ROM 字体负载' 82
     payload_stage_begin || { set_mix_error '无法创建字体负载暂存区'; return 5; }
     if [ "$IS_HYPEROS" = "true" ]; then
         populate_hyperos_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成 HyperOS 字体负载失败'; return 5; }
@@ -470,6 +477,7 @@ apply_mix() {
     else
         populate_generic_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成通用 Android 字体负载失败'; return 5; }
     fi
+    mix_stage activate '正在准备原子替换字体负载' 87
     prepare_mix_config "$_cjk" "$_latin" "$_digit" || { set_mix_error '无法准备字体组合状态'; return 6; }
     payload_stage_activate || { set_mix_error '无法原子替换字体负载'; return 6; }
     if ! commit_mix_config; then
@@ -482,6 +490,7 @@ apply_mix() {
     if [ "$IS_COLOROS" = "true" ]; then
         sync_secondary_coloros_dirs || echo '警告：ColorOS 辅助分区字体同步未完全成功，主字体负载已保留' >&2
     fi
+    mix_stage mapping '正在生成系统字体映射' 91
     if type font_config_enable_for_payload >/dev/null 2>&1; then
         if font_config_enable_for_payload mix; then
             sed -i 's/^xmlOverlay=false$/xmlOverlay=true/' "$MIX_CONF" 2>/dev/null || true
@@ -489,18 +498,22 @@ apply_mix() {
             echo '警告：无 Hook XML 未安全启用，已保留文件槽映射' >&2
         fi
     fi
+    mix_stage validate '正在校验完整字体负载' 94
     if ! type luoshu_payload_validate_current >/dev/null 2>&1 || ! luoshu_payload_validate_current mix; then
         set_mix_error '复合字体负载覆盖校验失败，已恢复旧字体'
         return 7
     fi
+    mix_stage mount-sync '正在同步元模块字体负载' 96
     if type luoshu_sync_mount_payload >/dev/null 2>&1 && ! luoshu_sync_mount_payload; then
         set_mix_error '元模块真实挂载目录同步失败，已恢复旧字体'
         return 7
     fi
+    mix_stage manifest '正在生成安全启动清单' 98
     if ! luoshu_payload_transaction_commit mix; then
         set_mix_error '无法提交复合字体负载事务，已恢复旧字体'
         return 7
     fi
+    mix_stage complete '完整复合字体负载已准备完成' 100
     rm -f "$LOCK_FILE" 2>/dev/null || true
     trap - EXIT INT TERM
     return 0

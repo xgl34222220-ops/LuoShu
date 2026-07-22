@@ -299,18 +299,18 @@ def build(args: argparse.Namespace) -> dict[str, object]:
     for path, label in ((cjk_path, "中文"), (latin_path, "英文"), (digit_path, "数字")):
         if not path.is_file() or path.stat().st_size < 12:
             raise CompositeError(f"{label}字体文件不可用：{path}")
-    _progress(args.progress, "load-cjk", "正在读取中文基底", 5)
+    _progress(args.progress, "load-cjk", "正在读取中文基底", 4)
     base, cjk_face, _cjk_location = _load_font(cjk_path, "cjk", args.weight, args.cjk_face)
     latin = digit = None
     latin_face = digit_face = -1
     try:
         if not all(cp in (base.getBestCmap() or {}) for cp in (ord("中"), ord("A"), ord("1"))):
             raise CompositeError("中文基础字体必须同时包含中文、英文字母和数字，才能安全生成完整复合字体")
-        _progress(args.progress, "latin", "正在导入英文字形", 20)
+        _progress(args.progress, "latin", "正在导入英文字形", 18)
         latin, latin_face, latin_location = _load_font(latin_path, "latin", args.weight, args.latin_face)
         latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS, latin_location, REQUIRED_LATIN)
         latin.close(); latin = None; gc.collect()
-        _progress(args.progress, "digit", "正在导入数字字形", 52)
+        _progress(args.progress, "digit", "正在导入数字字形", 42)
         digit, digit_face, digit_location = _load_font(digit_path, "digit", args.weight, args.digit_face)
         digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, digit_location, REQUIRED_DIGITS)
         digit.close(); digit = None; gc.collect()
@@ -322,17 +322,17 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             if tag in base:
                 del base[tag]
         _set_names(base)
-        _progress(args.progress, "save", "正在写入完整复合字体", 68)
+        _progress(args.progress, "save", "正在写入完整复合字体", 60)
         output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(prefix=output.name + ".", suffix=".tmp", dir=output.parent, delete=False) as temp:
             temp_path = Path(temp.name)
         try:
             base.save(str(temp_path), reorderTables=False)
-            _progress(args.progress, "validate", "正在验证复合字体", 90)
+            _progress(args.progress, "validate", "正在验证复合字体", 74)
             validation = _validate_output(temp_path)
             os.chmod(temp_path, 0o644)
             os.replace(temp_path, output)
-            _progress(args.progress, "done", "完整复合字体已生成", 100)
+            _progress(args.progress, "done", "完整复合字体已生成", 80)
         finally:
             temp_path.unlink(missing_ok=True)
         return {

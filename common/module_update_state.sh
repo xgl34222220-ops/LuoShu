@@ -6,7 +6,8 @@ luoshu_copy_update_tree() {
     _destination="$2"
     [ -d "$_source" ] || return 0
     mkdir -p "$_destination" 2>/dev/null || return 1
-    cp -af "$_source/." "$_destination/" 2>/dev/null || \
+    cp -al "$_source/." "$_destination/" 2>/dev/null || \
+        cp -af "$_source/." "$_destination/" 2>/dev/null || \
         cp -rfp "$_source/." "$_destination/" 2>/dev/null
 }
 
@@ -81,6 +82,27 @@ luoshu_migrate_update_config() {
     return 0
 }
 
+luoshu_migrate_update_cache() {
+    _old="$1"
+    _new="$2"
+    for _relative in \
+        cache/full-composite-v5 \
+        cache/auto-multiweight-mix/composites-v2 \
+        cache/auto-multiweight-mix/prepared-v2 \
+        cache/auto-multiweight-mix/source-meta-v1; do
+        [ -d "$_old/$_relative" ] || continue
+        rm -rf "$_new/$_relative" 2>/dev/null || true
+        mkdir -p "${_new}/${_relative%/*}" 2>/dev/null || continue
+        luoshu_copy_update_tree "$_old/$_relative" "$_new/$_relative" || true
+    done
+    mkdir -p "$_new/cache" 2>/dev/null || true
+    for _probe in "$_old/cache"/runtime_probe.*.ok; do
+        [ -f "$_probe" ] || continue
+        cp -al "$_probe" "$_new/cache/${_probe##*/}" 2>/dev/null || \
+            cp -af "$_probe" "$_new/cache/${_probe##*/}" 2>/dev/null || true
+    done
+}
+
 luoshu_migrate_active_install() {
     _old="$1"
     _new="$2"
@@ -103,6 +125,7 @@ luoshu_migrate_active_install() {
         luoshu_copy_update_tree "$_old/$_relative" "$_new/$_relative" || return 1
     done
 
+    luoshu_migrate_update_cache "$_old" "$_new"
     [ -s "$_new/config/active_font.conf" ] || printf '%s\n' "$_active" >"$_new/config/active_font.conf"
     luoshu_clear_update_volatile "$_new"
     chmod 0644 "$_new/config"/* 2>/dev/null || true

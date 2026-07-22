@@ -45,6 +45,30 @@ _luoshu_filesize() {
     wc -c < "$_lfs_file" 2>/dev/null | tr -d '[:space:]'
 }
 
+_luoshu_file_identity() {
+    _lfi_file="$1"
+    if command -v stat >/dev/null 2>&1; then
+        stat -c '%d:%i:%s:%Y:%Z' "$_lfi_file" 2>/dev/null && return 0
+    fi
+    if command -v toybox >/dev/null 2>&1; then
+        toybox stat -c '%d:%i:%s:%Y:%Z' "$_lfi_file" 2>/dev/null && return 0
+    fi
+    printf 'path:%s:%s\n' "$_lfi_file" "$(_luoshu_filesize "$_lfi_file")"
+}
+
+_luoshu_cached_checksum() {
+    _lcc_file="$1"
+    _lcc_cache="$2"
+    _lcc_identity=$(_luoshu_file_identity "$_lcc_file")
+    _lcc_value=$(awk -F'|' -v key="$_lcc_identity" '$1 == key { print $2 "|" $3; exit }' "$_lcc_cache" 2>/dev/null)
+    if [ -z "$_lcc_value" ]; then
+        _lcc_value=$(_luoshu_checksum "$_lcc_file")
+        [ -n "$_lcc_value" ] || return 1
+        printf '%s|%s\n' "$_lcc_identity" "$_lcc_value" >> "$_lcc_cache" 2>/dev/null || true
+    fi
+    printf '%s\n' "$_lcc_value"
+}
+
 luoshu_dynamic_targets_clear() {
     _ldt_module="$(_luoshu_safety_module)"
     _ldt_manifest="$(_luoshu_safety_config)/font-target-aliases.conf"
@@ -194,6 +218,7 @@ luoshu_payload_validate_current() {
     done <<EOF_LUOSHU_VALIDATE
 $(_luoshu_font_config_specs)
 EOF_LUOSHU_VALIDATE
+    LUOSHU_PAYLOAD_VALIDATED_ACTIVE="$_lpv_active"
     return 0
 }
 
@@ -201,14 +226,16 @@ luoshu_payload_build_manifest() {
     _lpm_module="$(_luoshu_safety_module)"
     _lpm_config="$(_luoshu_safety_config)"
     _lpm_tmp="$_lpm_config/font-payload-manifest.conf.tmp.$$"
+    _lpm_checksum_cache="$_lpm_config/.font-payload-checksums.$$"
     : > "$_lpm_tmp" 2>/dev/null || return 1
+    : > "$_lpm_checksum_cache" 2>/dev/null || { rm -f "$_lpm_tmp"; return 1; }
     for _lpm_part in $(_luoshu_payload_parts); do
         _lpm_fonts="$_lpm_module/$_lpm_part/fonts"
         if [ -d "$_lpm_fonts" ]; then
             find "$_lpm_fonts" -type f 2>/dev/null | while IFS= read -r _lpm_file; do
                 case "$_lpm_file" in *.ttf|*.otf|*.ttc|*.TTF|*.OTF|*.TTC) ;; *) continue ;; esac
                 _lpm_rel=${_lpm_file#$_lpm_module/}
-                _lpm_sum=$(_luoshu_checksum "$_lpm_file")
+                _lpm_sum=$(_luoshu_cached_checksum "$_lpm_file" "$_lpm_checksum_cache")
                 [ -n "$_lpm_sum" ] && printf '%s|%s\n' "$_lpm_rel" "$_lpm_sum"
             done >> "$_lpm_tmp"
         fi
@@ -217,11 +244,12 @@ luoshu_payload_build_manifest() {
             find "$_lpm_etc" -maxdepth 1 -type f -name '*.xml' 2>/dev/null | while IFS= read -r _lpm_file; do
                 grep -q 'LuoShu-[1-9][0-9][0-9]\.ttf' "$_lpm_file" 2>/dev/null || continue
                 _lpm_rel=${_lpm_file#$_lpm_module/}
-                _lpm_sum=$(_luoshu_checksum "$_lpm_file")
+                _lpm_sum=$(_luoshu_cached_checksum "$_lpm_file" "$_lpm_checksum_cache")
                 [ -n "$_lpm_sum" ] && printf '%s|%s\n' "$_lpm_rel" "$_lpm_sum"
             done >> "$_lpm_tmp"
         fi
     done
+    rm -f "$_lpm_checksum_cache" 2>/dev/null || true
     [ -s "$_lpm_tmp" ] || { rm -f "$_lpm_tmp" 2>/dev/null; return 1; }
     mv -f "$_lpm_tmp" "$_lpm_config/font-payload-manifest.conf" 2>/dev/null || return 1
     chmod 0644 "$_lpm_config/font-payload-manifest.conf" 2>/dev/null || true
@@ -290,8 +318,10 @@ luoshu_payload_arm() {
 }
 
 LUOSHU_PAYLOAD_TXN=''
+LUOSHU_PAYLOAD_VALIDATED_ACTIVE=''
 luoshu_payload_transaction_begin() {
     [ -z "$LUOSHU_PAYLOAD_TXN" ] || return 1
+    LUOSHU_PAYLOAD_VALIDATED_ACTIVE=''
     _lpt_module="$(_luoshu_safety_module)"
     _lpt_config="$(_luoshu_safety_config)"
     LUOSHU_PAYLOAD_TXN="$_lpt_config/.payload-transaction.$$"
@@ -362,7 +392,7 @@ luoshu_payload_transaction_abort() {
 luoshu_payload_transaction_commit() {
     _lptc_active="$1"
     [ -n "$LUOSHU_PAYLOAD_TXN" ] && [ -d "$LUOSHU_PAYLOAD_TXN" ] || return 1
-    if [ "$_lptc_active" != default ]; then
+    if [ "$_lptc_active" != default ] && [ "${LUOSHU_PAYLOAD_VALIDATED_ACTIVE:-}" != "$_lptc_active" ]; then
         luoshu_payload_validate_current "$_lptc_active" || return 1
     fi
     luoshu_payload_arm "$_lptc_active" || return 1
