@@ -8,8 +8,8 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MODULE="$TMP/module"
 mkdir -p "$MODULE/common" "$MODULE/config"
 cp "$ROOT/common/module_status.sh" "$MODULE/common/module_status.sh"
-cp "$ROOT/common/v14_switch.sh" "$MODULE/common/v14_switch.sh"
-cp "$ROOT/common/v14_mix.sh" "$MODULE/common/v14_mix.sh"
+cp "$ROOT/common/font_switch_task.sh" "$MODULE/common/font_switch_task.sh"
+cp "$ROOT/common/font_mix_controller.sh" "$MODULE/common/font_mix_controller.sh"
 cp "$ROOT/common/font_mix.sh" "$MODULE/common/font_mix.sh"
 cp "$ROOT/module.prop" "$MODULE/module.prop"
 
@@ -24,7 +24,7 @@ message=字体已准备
 started=100
 finished=101
 EOT
-TASK=$(MODDIR="$MODULE" sh "$MODULE/common/v14_switch.sh" status test-task)
+TASK=$(MODDIR="$MODULE" sh "$MODULE/common/font_switch_task.sh" status test-task)
 printf '%s' "$TASK" | grep -q '"state":"success"'
 test ! -e "$TMP/manager-called"
 grep -q '当前字体：Beta' "$MODULE/module.prop"
@@ -45,7 +45,7 @@ digit=DIN C
 started=100
 finished=101
 EOT
-MIX=$(MODDIR="$MODULE" sh "$MODULE/common/v14_mix.sh" status mix-task)
+MIX=$(MODDIR="$MODULE" sh "$MODULE/common/font_mix_controller.sh" status mix-task)
 printf '%s' "$MIX" | grep -q '"cjk":"中文甲"'
 test ! -e "$TMP/manager-called"
 grep -q '当前字体：组合：中文甲 / Latin B / DIN C' "$MODULE/module.prop"
@@ -109,7 +109,7 @@ grep -q 'native_font_index.key' "$ROOT/common/native_import.sh"
 grep -q 'native-v3|' "$ROOT/common/font_manager.sh"
 grep -q 'manifest-fast' "$ROOT/common/font_manager.sh"
 grep -q 'font-index-v3.json' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt"
-grep -q 'prepared-v2' "$ROOT/common/v143_auto_multiweight_mix.sh"
+grep -q 'prepared-v2' "$ROOT/common/multiweight_mix_task.sh"
 grep -q 'supportsCjk' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 grep -q 'fontPreviewWeight' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
 

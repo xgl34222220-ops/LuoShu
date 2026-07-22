@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14.3.9：组合页自动多字重复合引擎。
+# 洛书 v2.0.0：自动多字重复合任务。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -19,7 +19,7 @@ PUBLIC_ROOT="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 SOURCE_FONTS="$PUBLIC_ROOT/fonts"
 USER_FONTS_DIR="$SOURCE_FONTS"
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
-FALLBACK_ENGINE="$MODDIR/common/v142_weighted_mix.sh"
+FALLBACK_ENGINE="$MODDIR/common/weighted_mix_task.sh"
 MODE_HELPER="$MODDIR/common/mix_weight_mode.sh"
 ROLE_CHECK="$MODDIR/common/font_role_check.sh"
 INSTANCE_PY="$MODDIR/common/font_instance.py"

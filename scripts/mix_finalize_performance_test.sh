@@ -35,8 +35,8 @@ grep -q '完整复合字体已生成", 80' "$ROOT/common/composite_font.py"
 grep -q "mix_stage mount-sync '正在同步元模块字体负载' 96" "$ROOT/common/font_mix.sh"
 grep -q "mix_stage manifest '正在生成安全启动清单' 98" "$ROOT/common/font_mix.sh"
 ! grep -q 'cp -af "$SYSTEM_FONTS_DIR/." "$PAYLOAD_STAGE/"' "$ROOT/common/font_mix.sh"
-grep -q '_progress_message=' "$ROOT/common/v142_weighted_mix.sh"
-grep -q '完整复合字体后台进程已退出' "$ROOT/common/v142_weighted_mix.sh"
+grep -q '_progress_message=' "$ROOT/common/weighted_mix_task.sh"
+grep -q '完整复合字体后台进程已退出' "$ROOT/common/weighted_mix_task.sh"
 
 # The import action must fit the full Chinese label on one line.
 grep -q 'else -> 148.dp' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"

@@ -26,14 +26,14 @@ for file in \
   common/composite_font.py common/font_instance.py common/font_coverage.py common/font_axis_info.py \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
-  common/luoshu_composite.sh common/font_mix.sh common/v14_mix.sh common/v142_weighted_mix.sh \
-  common/v143_auto_multiweight_mix.sh common/mix_weight_mode.sh \
+  common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
+  common/multiweight_mix_task.sh common/mix_weight_mode.sh \
   common/app_bridge.sh common/font_manager.sh common/font_library_cache.sh common/app_installer.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
   scripts/build.sh scripts/version.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh \
   scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh \
-  scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/mix_finalize_performance_test.sh scripts/font_library_ui_layout_test.sh scripts/rc3_audit.sh \
+  scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/mix_finalize_performance_test.sh scripts/font_library_ui_layout_test.sh scripts/v2_source_audit.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/build.gradle.kts \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
@@ -91,16 +91,16 @@ grep -q 'native_font_index.json' "$ROOT/service.sh"
 # 字体处理、安全门禁和原生桥能力必须保留。
 grep -q 'full-composite-v5' "$ROOT/common/font_mix.sh"
 grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
-grep -q 'v142_weighted_mix.sh' "$ROOT/common/v14_mix.sh"
-grep -q 'v143_auto_multiweight_mix.sh' "$ROOT/common/v14_mix.sh"
-grep -q 'infer_mix_weight_mode' "$ROOT/common/v14_mix.sh"
-grep -q 'font_role_check.sh' "$ROOT/common/v14_mix.sh"
-grep -q 'for _weight in 100 200 300 400 500 600 700 800 900' "$ROOT/common/v143_auto_multiweight_mix.sh"
-grep -q 'build_composite_cached' "$ROOT/common/v143_auto_multiweight_mix.sh"
-grep -q 'LuoShuAutoMix' "$ROOT/common/v143_auto_multiweight_mix.sh"
-grep -q 'cjkMode=%s' "$ROOT/common/v143_auto_multiweight_mix.sh"
+grep -q 'weighted_mix_task.sh' "$ROOT/common/font_mix_controller.sh"
+grep -q 'multiweight_mix_task.sh' "$ROOT/common/font_mix_controller.sh"
+grep -q 'infer_mix_weight_mode' "$ROOT/common/font_mix_controller.sh"
+grep -q 'font_role_check.sh' "$ROOT/common/font_mix_controller.sh"
+grep -q 'for _weight in 100 200 300 400 500 600 700 800 900' "$ROOT/common/multiweight_mix_task.sh"
+grep -q 'build_composite_cached' "$ROOT/common/multiweight_mix_task.sh"
+grep -q 'LuoShuAutoMix' "$ROOT/common/multiweight_mix_task.sh"
+grep -q 'cjkMode=%s' "$ROOT/common/multiweight_mix_task.sh"
 grep -q 'mix_variable_default_weight' "$ROOT/common/mix_weight_mode.sh"
-grep -q 'common/v14_mix.sh' "$ROOT/common/app_bridge.sh"
+grep -q 'common/font_mix_controller.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'native_import.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'preview_source)' "$ROOT/common/app_bridge.sh"
 grep -q 'find_preview_source' "$ROOT/common/app_bridge.sh"
@@ -114,8 +114,8 @@ grep -q 'font_check_cli' "$ROOT/common/font_check.sh"
 grep -q 'source 时，必须只定义函数' "$ROOT/common/font_check.sh"
 grep -q 'instantiateVariableFont' "$ROOT/common/font_instance.py"
 grep -q -- '--axes' "$ROOT/common/font_instance.py"
-grep -q 'worker "$_request"' "$ROOT/common/v142_weighted_mix.sh"
-grep -q 'axes_task.conf' "$ROOT/common/v142_weighted_mix.sh"
+grep -q 'worker "$_request"' "$ROOT/common/weighted_mix_task.sh"
+grep -q 'axes_task.conf' "$ROOT/common/weighted_mix_task.sh"
 grep -q 'OpenMultipleDocuments' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 grep -q 'takePersistableUriPermission' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportViewModel.kt"
 grep -q 'fun pauseImport' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportViewModel.kt"
@@ -148,6 +148,23 @@ grep -q 'hyperos_global.sh' "$ROOT/common/mount_compat.sh"
 ! find "$ROOT/system/etc" -type f \( -name fonts.xml -o -name font_fallback.xml \) -print -quit 2>/dev/null | grep -q .
 ! grep -RIn 'v143_axes' "$ROOT/common" "$ROOT/android-app" >/dev/null 2>&1
 
+
+# v2 source namespace: old runtime filenames and obsolete bind-mount bridges must not return.
+for obsolete in \
+  common/v14_mix.sh common/v142_weighted_mix.sh common/v143_auto_multiweight_mix.sh common/v14_switch.sh \
+  common/play_font_bridge common/wechat_xweb_bridge common/volume_key.sh common/legacy_data_fonts_cleanup.sh; do
+  test ! -e "$ROOT/$obsolete"
+done
+for active in \
+  common/font_mix_controller.sh common/weighted_mix_task.sh common/multiweight_mix_task.sh common/font_switch_task.sh \
+  scripts/v2_source_audit.sh; do
+  test -f "$ROOT/$active"
+done
+! grep -RInE --exclude-dir=.git --exclude=check.sh --exclude=CHANGELOG.md --exclude='RELEASE_NOTES_*' \
+  'common/(v14_mix|v142_weighted_mix|v143_auto_multiweight_mix|v14_switch)\.sh' "$ROOT" >/dev/null 2>&1
+! grep -RInE --exclude-dir=python '洛书 v1[34]\.|LuoShu v1[34]\.' \
+  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data.sh" "$ROOT/service.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
+
 # 许可证与声明保持完整。
 test "$(sha256sum "$ROOT/LICENSE" | awk '{print $1}')" = '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986'
 grep -q 'GNU GENERAL PUBLIC LICENSE' "$ROOT/LICENSE"
@@ -167,7 +184,7 @@ grep -q '^MIT License$' "$ROOT/licenses/FontTools-LICENSE.txt"
 sh "$ROOT/scripts/native_preview_source_test.sh"
 sh "$ROOT/scripts/native_zip_import_test.sh"
 sh "$ROOT/scripts/font_index_delete_regression_test.sh"
-sh "$ROOT/scripts/rc3_audit.sh"
+sh "$ROOT/scripts/v2_source_audit.sh"
 sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
 sh "$ROOT/scripts/auto_multiweight_mode_test.sh"
@@ -186,4 +203,4 @@ echo 'LuoShu App-only source checks passed.'
 grep -q 'native-v3' common/font_manager.sh
 grep -q 'manifest-fast' common/font_manager.sh
 grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
-grep -q 'prepared-v2' common/v143_auto_multiweight_mix.sh
+grep -q 'prepared-v2' common/multiweight_mix_task.sh

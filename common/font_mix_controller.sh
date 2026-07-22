@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14.3.9：字体组合轻量桥。
+# 洛书 v2.0.0：字体组合控制器。
 set +e
 MODDIR="${MODDIR:-}"
 if [ -z "$MODDIR" ]; then
@@ -9,8 +9,8 @@ if [ -z "$MODDIR" ]; then
         MODDIR="/data/adb/modules/LuoShu"
     fi
 fi
-WEIGHTED="$MODDIR/common/v142_weighted_mix.sh"
-AUTO_WEIGHTED="$MODDIR/common/v143_auto_multiweight_mix.sh"
+WEIGHTED="$MODDIR/common/weighted_mix_task.sh"
+AUTO_WEIGHTED="$MODDIR/common/multiweight_mix_task.sh"
 MODE_HELPER="$MODDIR/common/mix_weight_mode.sh"
 ENGINE="$MODDIR/common/font_mix.sh"
 ROLE_CHECK="$MODDIR/common/font_role_check.sh"
