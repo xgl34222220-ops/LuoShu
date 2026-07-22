@@ -52,12 +52,24 @@ elif [ -d /data/adb/mountify ]; then
 fi
 [ "$MOUNTIFY_ACTIVE" = true ] && ui_print "✓ Mountify：已启用" || ui_print "• 元模块推荐：Mountify（可选）"
 
+OLD_MOD="${LUOSHU_OLD_MOD:-/data/adb/modules/LuoShu}"
 mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" 2>/dev/null || true
-# Installing/updating the module is an explicit enable action. Older LuoShu builds could leave a
-# self-created disable marker after two payload guard failures; never carry that fatal marker into
-# the freshly installed module.
-rm -f "$MODPATH/disable" "$MODPATH/remove" 2>/dev/null || true
-OLD_MOD="/data/adb/modules/LuoShu"
+# Flashing LuoShu is an explicit enable action.  Root managers install updates into MODPATH while
+# the currently active module remains in OLD_MOD until reboot, so both trees must be recovered.
+# v2.0.0 could create disable itself and then discard the failure counter during a later update,
+# which means the marker can no longer be distinguished from a manual one.  The explicit flash is
+# the authority to re-enable this module; never carry that stale marker into or through an update.
+UPDATE_REENABLED=false
+for _enable_dir in "$MODPATH" "$OLD_MOD"; do
+    [ -d "$_enable_dir" ] || continue
+    if [ -e "$_enable_dir/disable" ]; then
+        rm -f "$_enable_dir/disable" 2>/dev/null || true
+        [ -e "$_enable_dir/disable" ] || UPDATE_REENABLED=true
+    fi
+    rm -f "$_enable_dir/config/font-boot-failures" \
+          "$_enable_dir/config/font-payload-quarantine.conf" 2>/dev/null || true
+done
+rm -f "$MODPATH/remove" 2>/dev/null || true
 UPDATE_PRESERVED=false
 
 # 更新安装只迁移活动配置和旧负载；任何耗时字体生成都移到完整开机后的后台服务。
@@ -96,6 +108,7 @@ chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MOD
 touch "$MODPATH/magic" 2>/dev/null || true
 
 ui_print "✓ 模块文件已部署"
+[ "$UPDATE_REENABLED" = true ] && ui_print "✓ 已解除旧版误设的 disable 标记"
 if [ "$UPDATE_PRESERVED" = true ]; then
     _preserved_font=$(head -n1 "$MODPATH/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
     [ -n "$_preserved_font" ] || _preserved_font=default
