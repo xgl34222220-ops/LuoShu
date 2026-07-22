@@ -1,0 +1,40 @@
+name: Apply font library UI cleanup
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'fix/font-library-ui-cleanup'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/font-library-ui-cleanup
+          fetch-depth: 0
+      - name: Apply UI cleanup
+        run: |
+          if [ -f scripts/apply_font_library_ui_cleanup.py ]; then
+            python3 scripts/apply_font_library_ui_cleanup.py
+          fi
+      - name: Validate generated source
+        run: |
+          sh -n scripts/font_library_ui_layout_test.sh
+          sh scripts/font_library_ui_layout_test.sh
+          grep -q 'label = "应用字体"' android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/library/FontLibraryScreenMiuix.kt
+          grep -q 'embedded = true' android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt
+      - name: Commit UI cleanup to branch
+        run: |
+          if git diff --quiet && git diff --cached --quiet; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "refactor: rebuild font library card and action layout"
+          git push origin HEAD:fix/font-library-ui-cleanup
