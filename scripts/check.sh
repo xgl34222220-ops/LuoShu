@@ -30,6 +30,7 @@ for file in \
   common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
   common/multiweight_mix_task.sh common/mix_weight_mode.sh \
   common/app_bridge.sh common/font_manager.sh common/font_library_cache.sh common/app_installer.sh \
+  common/font_provider_cache.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
   scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
   scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh \
@@ -153,7 +154,7 @@ grep -q 'setFontVariationSettings' "$ROOT/android-app/app/src/main/java/io/githu
 grep -q 'updateMixAxis' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 grep -q 'resolveAndCacheFontDefaultAxes' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/dialogs/FontPickerDialog.kt"
 grep -q 'cachedFontDefaultWeight' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt"
-grep -q 'optDouble("default"' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt"
+grep -q 'optDouble("default")' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt"
 grep -q 'testImplementation("junit:junit:4.13.2")' "$ROOT/android-app/app/build.gradle.kts"
 
 # HyperOS 必须保留紧凑控件的原厂度量壳，并按真实分区写入 MiSans 与数字字重目标。
