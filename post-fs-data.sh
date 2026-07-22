@@ -46,9 +46,12 @@ fi
 ACTIVE_TEXT=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
 [ -n "$ACTIVE_TEXT" ] || ACTIVE_TEXT="default"
 
-# 在 Zygote 启动前，使用与生成阶段完全相同的扩展分区清单验证 XML、UI/Mono 九档与负载架构。
-# 任一文件、校验或架构版本不一致都会撤销上层 XML，安全回到 ROM 默认字体。
-if type font_config_boot_guard >/dev/null 2>&1; then
+# 架构升级负载会在 Android 完成启动后后台重建。第一次启动暂时沿用旧负载，
+# 避免在 post-fs-data 阶段执行分钟级字体生成或提前把待迁移配置隔离掉。
+if [ -f "$MODDIR/config/font-payload-rebuild-pending.conf" ]; then
+    log_message "INFO" "检测到待后台重建的字体负载；本次启动跳过架构隔离"
+elif type font_config_boot_guard >/dev/null 2>&1; then
+    # 常规启动仍严格验证 XML、UI/Mono 九档和负载架构。
     font_config_boot_guard "$ACTIVE_TEXT" || true
 fi
 
