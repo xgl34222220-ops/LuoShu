@@ -59,4 +59,17 @@ class TaskCenterModelTest {
         assertEquals(TaskPhase.RUNNING, task.phase)
         assertEquals(68, task.progress)
     }
+
+    @Test
+    fun internalMixStagesDoNotBecomeMultipleRunningTasks() {
+        val tasks = parseTaskLogItems(
+            """
+            [2026-07-22 19:02:40] mix stage=initialize percent=1 message=正在初始化字体组合任务
+            [2026-07-22 19:02:45] mix stage=mapping percent=91 message=正在生成系统字体映射
+            [2026-07-22 19:02:50] mix stage=mount-sync percent=96 message=正在同步元模块字体负载
+            """.trimIndent(),
+        )
+
+        assertTrue(tasks.isEmpty())
+    }
 }
