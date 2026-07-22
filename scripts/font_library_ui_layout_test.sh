@@ -20,21 +20,14 @@ grep -q 'if (page == AppPage.Studio)' "$SHELL"
 ! grep -q 'page == AppPage.Library || page == AppPage.Studio' "$SHELL"
 
 CARD=$(sed -n '/private fun MiuixFontCard/,/private fun MiuixLibraryNotice/p' "$MIUIX")
-printf '%s
-' "$CARD" | grep -q 'Arrangement.spacedBy(10.dp)'
-printf '%s
-' "$CARD" | grep -q 'Modifier.weight(1f)'
-printf '%s
-' "$CARD" | grep -q 'softWrap = false'
-printf '%s
-' "$CARD" | grep -q 'MiuixCapabilityStrip(fontCapabilityLabel(font))'
-! printf '%s
-' "$CARD" | grep -q 'Spacer(Modifier.weight(1f))'
+printf '%s\n' "$CARD" | grep -q 'Arrangement.spacedBy(10.dp)'
+printf '%s\n' "$CARD" | grep -q 'Modifier.weight(1f)'
+printf '%s\n' "$CARD" | grep -q 'softWrap = false'
+printf '%s\n' "$CARD" | grep -q 'MiuixCapabilityStrip(fontCapabilityLabel(font))'
+! printf '%s\n' "$CARD" | grep -q 'Spacer(Modifier.weight(1f))'
 
-DOCK=$(sed -n '/private fun MiuixAppDock/,/$p' "$SHELL")
-printf '%s
-' "$DOCK" | grep -q 'height(54.dp)'
-printf '%s
-' "$DOCK" | grep -q 'size(if (selected) 21.dp else 19.dp)'
+DOCK=$(sed -n '/private fun MiuixAppDock/,$p' "$SHELL")
+printf '%s\n' "$DOCK" | grep -q 'height(54.dp)'
+printf '%s\n' "$DOCK" | grep -q 'size(if (selected) 21.dp else 19.dp)'
 
 echo 'Font library UI layout regression passed.'
