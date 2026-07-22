@@ -139,8 +139,7 @@ clear_managed_text_fonts() {
 }
 
 invalidate_font_index_cache() {
-    rm -f "$FONT_INDEX_JSON" "$FONT_INDEX_KEY" \
-          "$CONFIG_DIR/webui_font_list.json" "$CONFIG_DIR/webui_font_list.key" 2>/dev/null || true
+    rm -f "$FONT_INDEX_JSON" "$FONT_INDEX_KEY" 2>/dev/null || true
 }
 
 switch_font() {

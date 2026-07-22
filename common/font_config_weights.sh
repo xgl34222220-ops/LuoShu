@@ -76,9 +76,23 @@ _luoshu_config_normalize_weight() {
     _lcw_weight="$3"
     _lcw_module="$(_luoshu_config_weight_module)"
     _lcw_tool="$_lcw_module/common/font_name_normalize.py"
+    _lcw_instance="$_lcw_module/common/font_instance.py"
     _lcw_raw="${_lcw_output}.raw"
     rm -f "$_lcw_output" "$_lcw_raw" 2>/dev/null || true
-    cp -f "$_lcw_source" "$_lcw_raw" 2>/dev/null || return 1
+
+    # A direct variable-font application must materialize real 100-900 outlines. Merely changing the
+    # OS/2 weight metadata leaves every Android weight visually identical and is a major source of
+    # inconsistent hierarchy between titles, body text, keyboards and app controls.
+    if type is_variable_font >/dev/null 2>&1 && is_variable_font "$_lcw_source" && \
+       [ -f "$_lcw_instance" ] && type _luoshu_font_config_exec >/dev/null 2>&1; then
+        _luoshu_font_config_exec "$_lcw_instance" --input "$_lcw_source" --output "$_lcw_raw" \
+            --role cjk --weight "$_lcw_weight" --axes "wght=$_lcw_weight" >/dev/null 2>&1 || {
+            rm -f "$_lcw_raw" "$_lcw_output" 2>/dev/null || true
+            return 1
+        }
+    else
+        cp -f "$_lcw_source" "$_lcw_raw" 2>/dev/null || return 1
+    fi
 
     # A TTC may contain locale-specific faces. The generated XML points to one deterministic static
     # face and removes the ROM's old collection index, so carrying a whole TTC under a .ttf name could

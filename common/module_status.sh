@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14：在 Root 管理器中显示简洁的当前字体状态。
+# 洛书 v2.0.0：在 Root 管理器中显示简洁的当前字体状态。
 set +e
 
 MODDIR="${MODDIR:-}"

@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v13.4 Beta2 Hotfix6 - 安全 ZIP 字体包导入
+# 洛书 v2.0.0 - 安全 ZIP 字体包导入
 # 只解压字体文件，不执行压缩包中的任何脚本。
 
 IMPORT_MAX_ZIP_BYTES=268435456
@@ -91,7 +91,7 @@ import_prop_value() {
     printf '%s\n' "$_text" | sed -n "s/^${_key}=//p" | head -n1 | tr -d '\r\n' | sed -E 's/[[:cntrl:]]//g; s/^[[:space:]]+//; s/[[:space:]]+$//'
 }
 
-# 为导入后的字体族写显示元数据。字体文件名用于稳定识别，WebUI 名称则使用原模块中文名。
+# 为导入后的字体族写显示元数据。字体文件名用于稳定识别，App 显示名称则使用原模块中文名。
 import_write_font_config() {
     _font_id="$1"; _display_name="$2"; _zip_name="$3"; _version="$4"; _author="$5"; _supports_cjk="$6"; _variable="$7"
     [ -n "$_font_id" ] || return 1
@@ -364,7 +364,7 @@ EOF_PROBE
         import_write_font_config "$_font_id" "$_display_name" "$_zip_name" "$_module_version" "$_module_author" "$_supports_cjk" "$_best_variable" || true
     fi
 
-    rm -f "$CONFIG_DIR/webui_font_list.key" "$CONFIG_DIR/webui_font_list.json" 2>/dev/null || true
+    rm -f
     rm -rf "$_tmp" 2>/dev/null || true
     if [ "$_imported_text" -le 0 ]; then printf '{"status":"error","message":"字体复制失败，请检查存储空间和目录权限"}\n'; return 0; fi
 

@@ -60,9 +60,14 @@ esac
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE" "$OUT"
-for path in common config fonts system licenses LICENSE NOTICE.md THIRD_PARTY_NOTICES.md README.md README.txt CHANGELOG.md customize.sh module.prop post-fs-data.sh service.sh uninstall.sh action.sh magic 兼容与目录说明.txt; do
-  [ ! -e "$ROOT/$path" ] || cp -a "$ROOT/$path" "$STAGE/"
-done
+PAYLOAD_MANIFEST="$ROOT/scripts/module_payload_manifest.txt"
+test -s "$PAYLOAD_MANIFEST"
+while IFS= read -r path || [ -n "$path" ]; do
+  case "$path" in ''|\#*) continue ;; esac
+  [ -e "$ROOT/$path" ] || { echo "Missing payload manifest entry: $path" >&2; exit 69; }
+  mkdir -p "$(dirname "$STAGE/$path")"
+  cp -a "$ROOT/$path" "$STAGE/$path"
+done < "$PAYLOAD_MANIFEST"
 [ ! -f "$STAGE/config/version_notes.conf" ] || sed -i "s/^version=.*/version=$LUOSHU_VERSION/" "$STAGE/config/version_notes.conf"
 
 mkdir -p "$STAGE/bundled"
