@@ -25,6 +25,8 @@ jobs:
         run: |
           set +e
           {
+            set -euo pipefail
+            python3 scripts/fix_payload_migration_source.py
             python3 scripts/payload_schema_migration.py
             python3 scripts/payload_schema_tests_migration.py
           } > /tmp/payload-schema-migration.log 2>&1
