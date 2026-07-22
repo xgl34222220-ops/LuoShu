@@ -150,6 +150,26 @@ def _normalize_monospace(font: TTFont, upem: int) -> dict[str, int]:
     return {"advance": advance, "glyphs": len(changed)}
 
 
+def _promote_os2_for_typo_metrics(os2) -> None:
+    """Promote legacy OS/2 tables to v4 without leaving required fields undefined."""
+    defaults = {
+        # Added in OS/2 v1.
+        "ulCodePageRange1": 0,
+        "ulCodePageRange2": 0,
+        # Added in OS/2 v2 and still required by v4.
+        "sxHeight": 0,
+        "sCapHeight": 0,
+        "usDefaultChar": 0,
+        "usBreakChar": 32,
+        "usMaxContext": 2,
+    }
+    for field, default in defaults.items():
+        if not hasattr(os2, field):
+            setattr(os2, field, default)
+    if int(getattr(os2, "version", 0)) < 4:
+        os2.version = 4
+
+
 def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, object]:
     if "head" not in font or "hhea" not in font or "OS/2" not in font:
         raise MetricsError("字体缺少 head、hhea 或 OS/2 度量表")
@@ -177,25 +197,21 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
     hhea.lineGap = 0
 
     os2 = font["OS/2"]
+    _promote_os2_for_typo_metrics(os2)
     os2.sTypoAscender = ascender
     os2.sTypoDescender = descender
     os2.sTypoLineGap = 0
-    # USE_TYPO_METRICS is defined from OS/2 v4 onward. v2/v3 share the same
-    # metric fields, so promoting them to v4 is safe and avoids an undefined flag.
-    if int(getattr(os2, "version", 0)) < 4:
-        os2.version = 4
     os2.fsSelection |= 1 << 7
     head = font["head"]
     os2.usWinAscent = _clamp_unsigned(max(ascender, int(getattr(head, "yMax", ascender))))
     os2.usWinDescent = _clamp_unsigned(max(descender_abs, -int(getattr(head, "yMin", descender))))
 
-    if int(getattr(os2, "version", 0)) >= 2:
-        cap_bounds = glyph_bounds(font, CAP_PROBES)
-        x_bounds = glyph_bounds(font, XHEIGHT_PROBES)
-        if cap_bounds:
-            os2.sCapHeight = _clamp_signed(int(round(_median((b[3] for b in cap_bounds.values()), ascender))))
-        if x_bounds:
-            os2.sxHeight = _clamp_signed(int(round(_median((b[3] for b in x_bounds.values()), upem * 0.5))))
+    cap_bounds = glyph_bounds(font, CAP_PROBES)
+    x_bounds = glyph_bounds(font, XHEIGHT_PROBES)
+    if cap_bounds:
+        os2.sCapHeight = _clamp_signed(int(round(_median((b[3] for b in cap_bounds.values()), ascender))))
+    if x_bounds:
+        os2.sxHeight = _clamp_signed(int(round(_median((b[3] for b in x_bounds.values()), upem * 0.5))))
 
     # A variable font's MVAR can restore the source's unbalanced vertical metrics after selection.
     if "MVAR" in font:
