@@ -24,7 +24,28 @@ jobs:
           python-version: '3.12'
 
       - name: Finish source hygiene
-        run: python scripts/font_consistency_followup.py
+        id: followup
+        shell: bash
+        run: |
+          set +e
+          python scripts/font_consistency_followup.py > /tmp/font-consistency-followup.log 2>&1
+          code=$?
+          grep -RInE 'WebUI|webui_font_list|v13\.|v14\.|Beta|Hotfix' common \
+            --exclude=module_update_state.sh --exclude-dir=python > /tmp/font-consistency-residue.txt 2>&1 || true
+          cat /tmp/font-consistency-followup.log
+          cat /tmp/font-consistency-residue.txt
+          exit "$code"
+
+      - name: Upload follow-up diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: font-consistency-followup-${{ github.run_id }}
+          path: |
+            /tmp/font-consistency-followup.log
+            /tmp/font-consistency-residue.txt
+          if-no-files-found: error
+          retention-days: 2
 
       - name: Validate consistency changes
         shell: bash
