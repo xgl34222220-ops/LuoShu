@@ -17,21 +17,32 @@ class FontUiSupportTest {
     }
 
     @Test
+    fun allCardsUseTheSameStablePreviewCopy() {
+        val cjk = font(weights = listOf("regular"), supportsCjk = true)
+        val latin = font(weights = listOf("regular"), supportsCjk = false)
+        val compact = "洛书字体 · Aa 0123456789"
+        val detailed = "洛书字体 · Aa 0123456789\n天地玄黄 · Hello"
+
+        assertEquals(compact, fontPreviewText(cjk))
+        assertEquals(compact, fontPreviewText(latin))
+        assertEquals(detailed, fontPreviewText(cjk, detailed = true))
+        assertEquals(detailed, fontPreviewText(latin, detailed = true))
+    }
+
+    @Test
     fun compactCardPreviewNeverWraps() {
         val font = font(weights = listOf("regular"))
 
-        assertEquals("洛书 Aa 0123456789", fontPreviewText(font))
         assertFalse(fontPreviewText(font).contains('\n'))
         assertTrue(fontPreviewText(font, detailed = true).contains('\n'))
     }
 
     @Test
-    fun latinOnlyFontExplainsWhyChineseLooksLikeSystemDefault() {
+    fun latinOnlyDifferenceIsExpressedByCapabilityLabel() {
         val font = font(weights = listOf("regular"), supportsCjk = false)
 
         assertTrue(fontCapabilityLabel(font).startsWith("仅拉丁"))
-        assertEquals("Aa Hello 0123456789", fontPreviewText(font))
-        assertTrue(fontPreviewText(font, detailed = true).contains("中文回退系统字体"))
+        assertEquals("洛书字体 · Aa 0123456789\n天地玄黄 · Hello", fontPreviewText(font, detailed = true))
     }
 
     @Test
