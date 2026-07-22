@@ -1,0 +1,170 @@
+    parser.add_argument("--input", required=True, type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--font-prefix", default="LuoShu")
+    parser.add_argument("--mono-font-prefix", default="LuoShuMono")
+    parser.add_argument("--font-dir", type=Path)
+    parser.add_argument("--validate-only", action="store_true")
+    args = parser.parse_args()
+    prefixes = (args.font_prefix, args.mono_font_prefix)
+
+    try:
+        tree = parse_xml(args.input)
+        if args.validate_only:
+            references = validate_generated_references(tree, prefixes, args.font_dir) if args.font_dir else 0
+            print(json.dumps({"status": "ok", "input": str(args.input), "generated_references": references}, ensure_ascii=False, separators=(",", ":")))
+            return 0
+        if args.output is None:
+            raise ValueError("--output is required unless --validate-only is used")
+        report = rewrite_tree(tree, args.font_prefix, args.mono_font_prefix)
+        references = validate_generated_references(tree, prefixes, args.font_dir) if args.font_dir else 0
+        if report["changed"]:
+            atomic_write(tree, args.output)
+        else:
+            args.output.unlink(missing_ok=True)
+        report.update({"status": "ok", "input": str(args.input), "output": str(args.output), "generated_references": references})
+        print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
+        return 0
+    except (OSError, ET.ParseError, ValueError) as error:
+        if args.output is not None:
+            args.output.unlink(missing_ok=True)
+        print(json.dumps({"status": "error", "input": str(args.input), "message": str(error)}, ensure_ascii=False, separators=(",", ":")))
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+write('common/font_config_overlay.py', OVERLAY)
+
+# Composite Latin/digit glyphs are aligned to the base font's own UI slots before replacement.
+replace_once(
+    'common/composite_font.py',
+    'import tempfile\nimport time\n',
+    'import tempfile\nimport time\nimport statistics\n',
+)
+replace_once(
+    'common/composite_font.py',
+    'from fontTools.ttLib import TTCollection, TTFont\n',
+    'from fontTools.ttLib import TTCollection, TTFont\n\nfrom font_metrics_normalize import normalize_font_metrics\n',
+)
+replace_once(
+    'common/composite_font.py',
+    '''def _draw_decomposed(glyph_set, glyph_name: str, destination_pen, scale: float) -> None:
+    recorder = DecomposingRecordingPen(glyph_set)
+    glyph_set[glyph_name].draw(recorder)
+    recorder.replay(TransformPen(destination_pen, (scale, 0, 0, scale, 0, 0)))
+
+
+def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float) -> None:''',
+    '''def _bounds_for_codepoint(font: TTFont, glyph_set, codepoint: int) -> tuple[float, float, float, float] | None:
+    glyph_name = (font.getBestCmap() or {}).get(codepoint)
+    if not glyph_name or glyph_name not in glyph_set:
+        return None
+    pen = BoundsPen(glyph_set)
+    glyph_set[glyph_name].draw(pen)
+    return None if pen.bounds is None else tuple(float(value) for value in pen.bounds)
+
+
+def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tuple[float, float]:
+    base_glyph_set = base.getGlyphSet()
+    probes = tuple(map(ord, "AHIOXEx" if role == "latin" else "0189"))
+    upem_scale = base["head"].unitsPerEm / src["head"].unitsPerEm
+    pairs: list[tuple[tuple[float, float, float, float], tuple[float, float, float, float]]] = []
+    for codepoint in probes:
+        base_bounds = _bounds_for_codepoint(base, base_glyph_set, codepoint)
+        src_bounds = _bounds_for_codepoint(src, src_glyph_set, codepoint)
+        if base_bounds and src_bounds and src_bounds[3] > src_bounds[1] and base_bounds[3] > base_bounds[1]:
+            pairs.append((base_bounds, src_bounds))
+    if not pairs:
+        return upem_scale, 0.0
+    ratios = [
+        (base_bounds[3] - base_bounds[1]) / ((src_bounds[3] - src_bounds[1]) * upem_scale)
+        for base_bounds, src_bounds in pairs
+    ]
+    shape_scale = max(0.82, min(1.18, float(statistics.median(ratios))))
+    scale = upem_scale * shape_scale
+    base_bottom = float(statistics.median(base_bounds[1] for base_bounds, _ in pairs))
+    source_bottom = float(statistics.median(src_bounds[1] for _, src_bounds in pairs))
+    shift = base_bottom - source_bottom * scale
+    limit = base["head"].unitsPerEm * 0.14
+    return scale, max(-limit, min(limit, shift))
+
+
+def _draw_decomposed(glyph_set, glyph_name: str, destination_pen, scale: float, y_shift: float) -> None:
+    recorder = DecomposingRecordingPen(glyph_set)
+    glyph_set[glyph_name].draw(recorder)
+    recorder.replay(TransformPen(destination_pen, (scale, 0, 0, scale, 0, y_shift)))
+
+
+def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float, y_shift: float) -> None:''',
+)
+replace_once(
+    'common/composite_font.py',
+    '_draw_decomposed(src_glyph_set, src_name, output_pen, scale)\n',
+    '_draw_decomposed(src_glyph_set, src_name, output_pen, scale, y_shift)\n',
+)
+replace_once(
+    'common/composite_font.py',
+    'def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float, width: int) -> None:',
+    'def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float, y_shift: float, width: int) -> None:',
+)
+# Replace the second call in CFF after the first glyf replacement was already changed.
+text = read('common/composite_font.py')
+old_call = '_draw_decomposed(src_glyph_set, src_name, output_pen, scale)'
+if text.count(old_call) != 1:
+    raise SystemExit(f'common/composite_font.py: expected remaining cff draw call, got {text.count(old_call)}')
+write('common/composite_font.py', text.replace(old_call, '_draw_decomposed(src_glyph_set, src_name, output_pen, scale, y_shift)', 1))
+replace_once(
+    'common/composite_font.py',
+    'def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], location: dict[str, float] | None = None, required: set[int] | None = None) -> tuple[int, list[int]]:',
+    'def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], role: str, location: dict[str, float] | None = None, required: set[int] | None = None) -> tuple[int, list[int]]:',
+)
+replace_once(
+    'common/composite_font.py',
+    '''    base_kind = _outline_kind(base)
+    base_upem = base["head"].unitsPerEm
+    src_upem = src["head"].unitsPerEm
+    scale = base_upem / src_upem
+''',
+    '''    base_kind = _outline_kind(base)
+    scale, y_shift = _role_transform(base, src, src_glyph_set, role)
+''',
+)
+replace_once(
+    'common/composite_font.py',
+    '_replace_glyf(base, src, src_glyph_set, base_name, src_name, scale)',
+    '_replace_glyf(base, src, src_glyph_set, base_name, src_name, scale, y_shift)',
+)
+replace_once(
+    'common/composite_font.py',
+    '_replace_cff(base, src, src_glyph_set, base_name, src_name, scale, advance)',
+    '_replace_cff(base, src, src_glyph_set, base_name, src_name, scale, y_shift, advance)',
+)
+replace_once(
+    'common/composite_font.py',
+    'latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS, latin_location, REQUIRED_LATIN)',
+    'latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS, "latin", latin_location, REQUIRED_LATIN)',
+)
+replace_once(
+    'common/composite_font.py',
+    'digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, digit_location, REQUIRED_DIGITS)',
+    'digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, "digit", digit_location, REQUIRED_DIGITS)',
+)
+replace_once(
+    'common/composite_font.py',
+    '''        _set_names(base)
+        _progress(args.progress, "save", "正在写入完整复合字体", 60)''',
+    '''        _set_names(base)
+        metrics = normalize_font_metrics(base)
+        _progress(args.progress, "save", "正在写入完整复合字体", 60)''',
+)
+replace_once(
+    'common/composite_font.py',
+    '            "missingCounts": {"latin": len(latin_missing), "digit": len(digit_missing)},\n            "validation": validation,',
+    '            "missingCounts": {"latin": len(latin_missing), "digit": len(digit_missing)},\n            "metrics": metrics,\n            "validation": validation,',
+)
+
+# Cache version must change because old composites have unbalanced outlines/metrics.
+text = read('common/font_mix.sh').replace('full-composite-v5', 'full-composite-v6')
+write('common/font_mix.sh', text)
+
