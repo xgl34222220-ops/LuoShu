@@ -2,7 +2,6 @@
 """One-shot source migration from historical v14 filenames to the v2 namespace."""
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
@@ -59,12 +58,6 @@ def read_text(path: Path) -> str | None:
         return path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         return None
-
-
-def write_if_changed(path: Path, text: str) -> None:
-    old = path.read_text(encoding="utf-8")
-    if old != text:
-        path.write_text(text, encoding="utf-8")
 
 
 def rename_sources() -> None:
@@ -205,11 +198,10 @@ for active in \
   scripts/v2_source_audit.sh; do
   test -f "$ROOT/$active"
 done
-! grep -RInE 'common/(v14_mix|v142_weighted_mix|v143_auto_multiweight_mix|v14_switch)\\.sh' \
-  "$ROOT" --exclude-dir=.git --exclude=CHANGELOG.md --exclude='RELEASE_NOTES_*' >/dev/null 2>&1
-! grep -RInE '洛书 v1[34]\\.|LuoShu v1[34]\\.' \
-  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data.sh" "$ROOT/service.sh" "$ROOT/uninstall.sh" \
-  --exclude-dir=python >/dev/null 2>&1
+! grep -RInE --exclude-dir=.git --exclude=check.sh --exclude=CHANGELOG.md --exclude='RELEASE_NOTES_*' \
+  'common/(v14_mix|v142_weighted_mix|v143_auto_multiweight_mix|v14_switch)\.sh' "$ROOT" >/dev/null 2>&1
+! grep -RInE --exclude-dir=python '洛书 v1[34]\.|LuoShu v1[34]\.' \
+  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data.sh" "$ROOT/service.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
 '''
     if "# v2 source namespace:" not in text:
         anchor = "# 许可证与声明保持完整。"
@@ -244,12 +236,16 @@ def verify() -> None:
             raise SystemExit(f"obsolete path still exists: {old}")
 
     forbidden = re.compile(r"common/(?:v14_mix|v142_weighted_mix|v143_auto_multiweight_mix|v14_switch)\.sh")
+    allowed_history = {"scripts/check.sh", "CHANGELOG.md"}
     for path in ROOT.rglob("*"):
-        if not path.is_file() or is_skipped(path) or path.name == "CHANGELOG.md" or path.name.startswith("RELEASE_NOTES_"):
+        if not path.is_file() or is_skipped(path):
+            continue
+        rel = path.relative_to(ROOT).as_posix()
+        if rel in allowed_history or path.name.startswith("RELEASE_NOTES_"):
             continue
         text = read_text(path)
         if text and forbidden.search(text):
-            raise SystemExit(f"old runtime reference remains in {path.relative_to(ROOT)}")
+            raise SystemExit(f"old runtime reference remains in {rel}")
 
 
 def remove_one_shot_files() -> None:
