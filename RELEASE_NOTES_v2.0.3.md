@@ -19,6 +19,7 @@
 - 模块版本：v2.0.3
 - 模块 versionCode：20003
 - 正式 App versionCode：2000301
+- 发布渠道：GitHub 预发行版
 
 ## 测试提示
 
