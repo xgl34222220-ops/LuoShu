@@ -42,6 +42,7 @@ internal data class TaskCenterItem(
 
 private val structuredLog = Regex("^\\[([^]]+)]\\s+\\[([^]]+)]\\s+(.*)$")
 private val percentPattern = Regex("(?:^|\\D)(\\d{1,3})%(?:\\D|$)")
+private val internalMixTelemetry = Regex("^\\[[^]]+]\\s+mix\\s+(?:stage=|start:)", RegexOption.IGNORE_CASE)
 
 internal fun taskKindFor(message: String, type: String = ""): TaskKind {
     val normalized = "$type $message".lowercase()
@@ -83,6 +84,10 @@ internal fun parseTaskLogItems(content: String, limit: Int = 18): List<TaskCente
     val candidates = content.lineSequence().mapIndexedNotNull { index, raw ->
         val line = raw.trim()
         if (line.isBlank()) return@mapIndexedNotNull null
+        // Stage telemetry describes one mix task. The persisted current task already exposes its
+        // latest stage, so treating every telemetry line as a task permanently inflates the active
+        // count (for example, nine stages became "9 个任务正在处理").
+        if (internalMixTelemetry.containsMatchIn(line)) return@mapIndexedNotNull null
         val match = structuredLog.matchEntire(line)
         val time = match?.groupValues?.getOrNull(1).orEmpty()
         val level = match?.groupValues?.getOrNull(2).orEmpty()

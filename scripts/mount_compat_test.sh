@@ -45,6 +45,17 @@ MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=mountify LUOSHU_ME
 test ! -e "$META/LuoShu"
 grep -q '^engine=mountify$' "$MODULE/config/mount_compat.conf"
 
+# Magic Mount RC/RS is a direct-source engine and explicit retries clear stale LuoShu markers.
+touch "$MODULE/skip_mount" "$MODULE/mount_error"
+MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=magic-mount LUOSHU_META_TEST_ROOT="$META" sh -c '
+    . "$MODDIR/common/mount_compat.sh"
+    luoshu_sync_mount_payload Demo
+'
+test ! -e "$MODULE/skip_mount"
+test ! -e "$MODULE/mount_error"
+test ! -e "$META/LuoShu"
+grep -q '^engine=magic-mount$' "$MODULE/config/mount_compat.conf"
+
 # Runtime syncing remains transaction-only. Never mirror from early boot scripts.
 grep -q 'common/mount_compat.sh' "$ROOT/common/font_mix.sh"
 grep -q 'luoshu_sync_mount_payload' "$ROOT/common/font_mix.sh"
@@ -59,6 +70,7 @@ cp -R "$ROOT/." "$STAGE/"
 rm -rf "$STAGE/.git" "$STAGE/dist" "$STAGE/common/python" 2>/dev/null || true
 ! find "$STAGE" -type f \( -name skip_mount -o -name skip_mountify \) | grep -q .
 sh -n "$ROOT/common/font_mix.sh"
+sh -n "$ROOT/common/app_bridge.sh"
 sh -n "$ROOT/post-fs-data.sh"
 sh -n "$ROOT/service.sh"
 

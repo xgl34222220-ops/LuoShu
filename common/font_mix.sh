@@ -505,7 +505,9 @@ apply_mix() {
     fi
     mix_stage mount-sync '正在同步元模块字体负载' 96
     if type luoshu_sync_mount_payload >/dev/null 2>&1 && ! luoshu_sync_mount_payload; then
-        set_mix_error '元模块真实挂载目录同步失败，已恢复旧字体'
+        _mount_detail=$(sed -n 's/^detail=//p' "$CONFIG_DIR/mount_compat.conf" 2>/dev/null | head -n1 | tr -d '\r')
+        [ -n "$_mount_detail" ] || _mount_detail='元模块真实挂载目录同步失败'
+        set_mix_error "${_mount_detail}，已恢复旧字体"
         return 7
     fi
     mix_stage manifest '正在生成安全启动清单' 98

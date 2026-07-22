@@ -40,6 +40,25 @@ _luoshu_module_prop_id() {
     sed -n 's/^id=//p' "$1/module.prop" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
 
+# Magic Mount has shipped under several module ids (including RC builds).  Detect it from
+# module metadata and its persistent configuration instead of relying on two directory names.
+luoshu_magic_mount_present() {
+    for _lmmp_prop in /data/adb/modules/*/module.prop; do
+        [ -f "$_lmmp_prop" ] || continue
+        _lmmp_dir=${_lmmp_prop%/*}
+        [ ! -e "$_lmmp_dir/disable" ] && [ ! -e "$_lmmp_dir/remove" ] || continue
+        _lmmp_meta=$(sed -n 's/^\(id\|name\|description\)=/\1=/p' "$_lmmp_prop" 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr '\n' ' ')
+        case "$_lmmp_meta" in
+            *magic_mount*|*magic-mount*|*magic\ mount*|*id=meta-mm*) return 0 ;;
+        esac
+    done
+    # Some RC packages keep the stable config path while changing their module id.
+    [ -f /data/adb/magic_mount/config.toml ] && {
+        [ -x /data/adb/metamodule/meta-mm ] || [ -x /data/adb/metamodule/meta-mm-rs ] || \
+        [ -x /data/adb/modules/magic_mount_rs/meta-mm ] || [ -x /data/adb/modules/meta-mm/meta-mm ]
+    }
+}
+
 luoshu_detect_mount_engine() {
     [ -z "${LUOSHU_META_TEST_ENGINE:-}" ] || { printf '%s\n' "$LUOSHU_META_TEST_ENGINE"; return 0; }
 
@@ -65,8 +84,8 @@ luoshu_detect_mount_engine() {
         printf 'hybrid-mount\n'
         return 0
     fi
-    if [ -d /data/adb/modules/magic_mount_rs ] || [ -d /data/adb/modules/magic-mount-rs ]; then
-        printf 'magic-mount-rs\n'
+    if luoshu_magic_mount_present; then
+        printf 'magic-mount\n'
         return 0
     fi
     printf 'native-module-mount\n'
@@ -154,10 +173,32 @@ luoshu_mountify_module_selected() {
 }
 
 LUOSHU_MOUNT_PREFLIGHT_ERROR=''
+luoshu_recover_magic_mount_markers() {
+    _lrmm_engine="$1"
+    [ "$_lrmm_engine" = magic-mount ] || [ "$_lrmm_engine" = magic-mount-rs ] || return 0
+
+    # A previous Mountify/native-mount attempt can leave these markers behind.  Starting an
+    # explicit LuoShu font transaction is an intentional retry, so clear only LuoShu's own
+    # recoverable mount markers.  disable/remove remain hard failures.
+    _lrmm_cleared=''
+    for _lrmm_marker in skip_mount mount_error; do
+        [ -e "$LUOSHU_MOUNT_MODDIR/$_lrmm_marker" ] || continue
+        rm -f "$LUOSHU_MOUNT_MODDIR/$_lrmm_marker" 2>/dev/null || {
+            LUOSHU_MOUNT_PREFLIGHT_ERROR="无法清理 Magic Mount 遗留标记：$_lrmm_marker"
+            return 1
+        }
+        _lrmm_cleared="${_lrmm_cleared}${_lrmm_cleared:+,}$_lrmm_marker"
+    done
+    [ -z "$_lrmm_cleared" ] || luoshu_mount_log "Magic Mount 重试已清理洛书遗留标记：$_lrmm_cleared"
+    return 0
+}
+
 luoshu_mount_preflight() {
     LUOSHU_MOUNT_PREFLIGHT_ERROR=''
     _lmp_engine=$(luoshu_detect_mount_engine)
     _lmp_manager=$(luoshu_detect_root_manager)
+
+    luoshu_recover_magic_mount_markers "$_lmp_engine" || return 1
 
     for _lmp_marker in disable remove mount_error; do
         if [ -e "$LUOSHU_MOUNT_MODDIR/$_lmp_marker" ]; then
@@ -167,7 +208,7 @@ luoshu_mount_preflight() {
     done
 
     case "$_lmp_engine" in
-        meta-overlayfs|dual-dir-metamodule|hybrid-mount|magic-mount-rs)
+        meta-overlayfs|dual-dir-metamodule|hybrid-mount|magic-mount|magic-mount-rs)
             if [ -e "$LUOSHU_MOUNT_MODDIR/skip_mount" ]; then
                 LUOSHU_MOUNT_PREFLIGHT_ERROR='检测到 skip_mount，当前元模块会跳过洛书负载'
                 return 1
