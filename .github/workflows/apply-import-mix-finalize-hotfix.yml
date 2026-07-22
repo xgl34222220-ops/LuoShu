@@ -18,7 +18,7 @@ jobs:
           ref: fix/import-fab-mix-finalize-speed
           fetch-depth: 0
       - name: Apply patch
-        run: python3 scripts/apply_import_mix_finalize_hotfix.py
+        run: python3 scripts/run_import_mix_finalize_hotfix.py
       - name: Validate generated source
         run: |
           sh -n common/font_mix.sh
