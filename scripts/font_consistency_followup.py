@@ -31,3 +31,5 @@ for path in (ROOT / "common").iterdir():
     for token in ("v13.", "v14.", "Beta", "Hotfix"):
         if token in value:
             raise SystemExit(f"historical runtime label remains in {path.relative_to(ROOT)}: {token}")
+
+print("Font consistency source hygiene follow-up passed.")
