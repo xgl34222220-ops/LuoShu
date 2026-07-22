@@ -513,7 +513,7 @@ private fun MiuixAppDock(
                     Icon(
                         page.icon,
                         contentDescription = page.label,
-                        modifier = Modifier.size(if (selected) 22.dp else 20.dp),
+                        modifier = Modifier.size(if (selected) 21.dp else 19.dp),
                         tint = if (selected) scheme.primary else scheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(3.dp))
