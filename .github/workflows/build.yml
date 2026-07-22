@@ -31,6 +31,16 @@ jobs:
         shell: bash
         run: |
           set +e
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/v2_source_consolidation.py')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace(
+              'for name in ("scripts/v2_source_consolidation.py", ".github/workflows/v2-source-consolidation.yml"):',
+              'for name in ("scripts/v2_source_consolidation.py",):',
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
           python scripts/v2_source_consolidation.py >migration-run.log 2>&1
           code=$?
           cat migration-run.log
@@ -69,7 +79,6 @@ jobs:
         shell: bash
         run: |
           set +e
-          git checkout origin/main -- .github/workflows/build.yml
           rm -f MIGRATION_FAILURE.txt COMMIT_FAILURE.txt migration-run.log commit-run.log
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
