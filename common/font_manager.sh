@@ -40,7 +40,7 @@ type check_hyperos >/dev/null 2>&1 && check_hyperos
 mkdir -p "$CONFIG_DIR" "$SYSTEM_FONTS_DIR" "$USER_FONTS_DIR" "$USER_REPORT_DIR" 2>/dev/null || true
 
 json_escape() {
-    printf '%s' "$1" | sed 's/\\/\\\\/g; s"/\\"/g' | tr '\n\r' '  '
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
 
 format_filesize() {
