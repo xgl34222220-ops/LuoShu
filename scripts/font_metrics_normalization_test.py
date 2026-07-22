@@ -43,7 +43,7 @@ def make_font(path: Path, latin_bottom: int, latin_top: int, digit_bottom: int, 
         glyphs[name] = rectangle(90, digit_bottom, 510, digit_top)
     for name in cjk_names.values():
         glyphs[name] = rectangle(40, -80, 960, 880)
-    cmap = {ord(character): name for character, name in {**letter_names, **digit_names, **cjk_names}.items()}
+    cmap = {ord(character): name for character, name in {**letter_names, **digit_names}.items()}
     fb = FontBuilder(1000, isTTF=True)
     fb.setupGlyphOrder(glyph_order)
     fb.setupCharacterMap(cmap)
@@ -71,8 +71,8 @@ with tempfile.TemporaryDirectory() as directory:
     normalize_path(source, normalized)
     font = TTFont(normalized)
     try:
-        assert font["hhea"].ascent == 880
-        assert font["hhea"].descent == -220
+        assert font["hhea"].ascent == 928
+        assert font["hhea"].descent == -244
         assert font["hhea"].lineGap == 0
         assert font["OS/2"].sTypoAscender == font["hhea"].ascent
         assert font["OS/2"].sTypoDescender == font["hhea"].descent
@@ -87,12 +87,14 @@ with tempfile.TemporaryDirectory() as directory:
     normalize_path(source_two, normalized_two)
     font_two = TTFont(normalized_two)
     try:
-        assert font_two["hhea"].ascent == 880
-        assert font_two["hhea"].descent == -220
-        assert font_two["OS/2"].sTypoAscender == 880
-        assert font_two["OS/2"].sTypoDescender == -220
-        assert font_two["OS/2"].usWinAscent >= 1040
-        assert font_two["OS/2"].usWinDescent >= 180
+        assert font_two["hhea"].ascent == 928
+        assert font_two["hhea"].descent == -244
+        assert font_two["OS/2"].sTypoAscender == 928
+        assert font_two["OS/2"].sTypoDescender == -244
+        # Win metrics must be capped at the line-box contract (0.98/0.35 em) so
+        # includeFontPadding cannot inflate line height with glyph extremes.
+        assert font_two["OS/2"].usWinAscent == 980
+        assert font_two["OS/2"].usWinDescent == 244
     finally:
         font_two.close()
 

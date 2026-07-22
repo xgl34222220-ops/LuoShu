@@ -28,6 +28,7 @@ common/font_metrics_normalize.py
 common/font_mix.sh
 common/font_mix_controller.sh
 common/font_name_normalize.py
+common/font_provider_cache.sh
 common/font_role_check.py
 common/font_role_check.sh
 common/font_safety.sh
