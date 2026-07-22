@@ -41,6 +41,24 @@ _font_store_reset() {
     chmod 755 "$dest_dir/.luoshu-font-store" 2>/dev/null || true
 }
 
+# 归一化结果缓存：以 源文件sha256+字重+归一化版本 为 key。
+# 同一字体重复切换时直接复用，跳过 fonttools 冷启动（手机端每字重数秒）。
+# 修改 font_metrics_normalize.py 的度量契约时递增版本号使旧缓存失效。
+LUOSHU_NORMALIZER_VERSION="2"
+
+_font_anchor_cache_lookup() {
+    _facl_src="$1"
+    _facl_key="$2"
+    command -v sha256sum >/dev/null 2>&1 || return 1
+    _facl_sha=$(sha256sum "$_facl_src" 2>/dev/null | awk '{print $1}')
+    [ -n "$_facl_sha" ] || return 1
+    _facl_cache="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/config/metrics_cache"
+    _facl_hit="$_facl_cache/${_facl_sha}_${_facl_key}_v${LUOSHU_NORMALIZER_VERSION}.font"
+    [ -f "$_facl_hit" ] || return 1
+    printf '%s\n' "$_facl_hit"
+    return 0
+}
+
 _font_anchor() {
     src="$1"
     dest_dir="$2"
@@ -49,6 +67,15 @@ _font_anchor() {
     module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
     normalizer="$module/common/font_metrics_normalize.py"
     rm -f "$anchor" 2>/dev/null || true
+
+    # 命中缓存则直接硬链接，跳过 Python 归一化
+    if _fa_cached=$(_font_anchor_cache_lookup "$src" "$key"); then
+        if ln "$_fa_cached" "$anchor" 2>/dev/null || cp -f "$_fa_cached" "$anchor" 2>/dev/null; then
+            chmod 644 "$anchor" 2>/dev/null || true
+            echo "$anchor"
+            return 0
+        fi
+    fi
 
     if [ -f "$normalizer" ]; then
         if type _luoshu_font_config_exec >/dev/null 2>&1; then
@@ -65,6 +92,16 @@ _font_anchor() {
         cp -f "$src" "$anchor" 2>/dev/null || return 1
     fi
     chmod 644 "$anchor" 2>/dev/null || true
+
+    # 写入归一化缓存，供下次切换同字体秒切
+    if command -v sha256sum >/dev/null 2>&1; then
+        _fa_sha=$(sha256sum "$src" 2>/dev/null | awk '{print $1}')
+        if [ -n "$_fa_sha" ]; then
+            _fa_cache="$module/config/metrics_cache"
+            mkdir -p "$_fa_cache" 2>/dev/null || true
+            ln "$anchor" "$_fa_cache/${_fa_sha}_${key}_v${LUOSHU_NORMALIZER_VERSION}.font" 2>/dev/null ||                 cp -f "$anchor" "$_fa_cache/${_fa_sha}_${key}_v${LUOSHU_NORMALIZER_VERSION}.font" 2>/dev/null || true
+        fi
+    fi
     echo "$anchor"
 }
 

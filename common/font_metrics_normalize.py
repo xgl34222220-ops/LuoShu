@@ -24,8 +24,16 @@ UI_PROBES = tuple(map(ord, "中文国永AaHhx0123456789gjpqy"))
 CAP_PROBES = tuple(map(ord, "AHIOX"))
 XHEIGHT_PROBES = (ord("x"),)
 ASCII_CODEPOINTS = tuple(range(0x20, 0x7F))
-TYPO_ASCENDER_RATIO = 0.88
-TYPO_DESCENDER_RATIO = 0.22
+# Keep the line box aligned with stock Roboto (hhea ascent 1900/2048, descent 500/2048).
+# Drifting away from these ratios makes custom faces and stock fallback faces sit on
+# different baselines, which shows up as shifted/raised text in mixed-font screens.
+TYPO_ASCENDER_RATIO = 0.928
+TYPO_DESCENDER_RATIO = 0.244
+# Android TextView defaults to includeFontPadding=true and reads top/bottom from the
+# OS/2 win metrics. CJK fonts often carry huge yMax/yMin extremes; trusting them adds
+# a large blank band above every line ("文字抬高/页面偏移"). Cap win metrics instead.
+WIN_ASCENT_CAP_RATIO = 0.98
+WIN_DESCENT_CAP_RATIO = 0.35
 
 
 class MetricsError(RuntimeError):
@@ -187,7 +195,8 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
     # Android control baselines are derived from hhea/OS/2 ratios. Deriving those values from each
     # font's extreme glyph bounds keeps bad source metrics alive and makes two selected fonts sit at
     # different heights. Use one stable em-relative contract for every direct, variable, weighted
-    # and composite output. usWinAscent/usWinDescent below still contain real outline extremes.
+    # and composite output. usWinAscent/usWinDescent below are capped so includeFontPadding
+    # cannot inflate line boxes with CJK outline extremes.
     ascender = int(round(upem * TYPO_ASCENDER_RATIO))
     descender_abs = int(round(upem * TYPO_DESCENDER_RATIO))
     ascender = _clamp_signed(ascender)
@@ -205,8 +214,12 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
     os2.sTypoLineGap = 0
     os2.fsSelection |= 1 << 7
     head = font["head"]
-    os2.usWinAscent = _clamp_unsigned(max(ascender, int(getattr(head, "yMax", ascender))))
-    os2.usWinDescent = _clamp_unsigned(max(descender_abs, -int(getattr(head, "yMin", descender))))
+    win_ascent_cap = int(round(upem * WIN_ASCENT_CAP_RATIO))
+    win_descent_cap = int(round(upem * WIN_DESCENT_CAP_RATIO))
+    y_max = int(getattr(head, "yMax", ascender))
+    y_min = int(getattr(head, "yMin", -descender_abs))
+    os2.usWinAscent = _clamp_unsigned(min(max(ascender, y_max), win_ascent_cap))
+    os2.usWinDescent = _clamp_unsigned(min(max(descender_abs, -y_min), win_descent_cap))
 
     cap_bounds = glyph_bounds(font, CAP_PROBES)
     x_bounds = glyph_bounds(font, XHEIGHT_PROBES)
@@ -261,12 +274,37 @@ def normalize_path(source: Path, output: Path, monospaced: bool = False) -> dict
     return report
 
 
+def run_batch(manifest: Path) -> int:
+    """Normalize many fonts in one process. Manifest lines: input<TAB>output[<TAB>mono]."""
+    failures = 0
+    for raw in manifest.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        source, output = Path(parts[0]), Path(parts[1])
+        monospaced = len(parts) > 2 and parts[2] == "mono"
+        try:
+            report = normalize_path(source, output, monospaced)
+            print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
+        except Exception as error:
+            failures += 1
+            output.unlink(missing_ok=True)
+            print(json.dumps({"status": "error", "input": str(source), "message": str(error) or error.__class__.__name__}, ensure_ascii=False, separators=(",", ":")), file=os.sys.stderr)
+    return 2 if failures else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--input", type=Path)
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--monospace", action="store_true")
+    parser.add_argument("--batch", type=Path, help="批量清单：每行 input<TAB>output[<TAB>mono]，单进程处理全部字重")
     args = parser.parse_args()
+    if args.batch:
+        return run_batch(args.batch)
+    if not args.input or not args.output:
+        parser.error("--input 与 --output 为必填（或使用 --batch）")
     try:
         print(json.dumps(normalize_path(args.input, args.output, args.monospace), ensure_ascii=False, separators=(",", ":")))
         return 0
