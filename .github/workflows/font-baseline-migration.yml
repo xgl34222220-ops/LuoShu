@@ -1,0 +1,85 @@
+name: Font baseline consistency migration
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    if: github.head_ref == 'agent/font-baseline-consistency-v2' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install font test dependencies
+        run: python -m pip install --disable-pip-version-check fonttools
+
+      - name: Apply baseline consistency migration
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat scripts/.baseline_migration/part00 \
+              scripts/.baseline_migration/part01 \
+              scripts/.baseline_migration/part02 \
+              scripts/.baseline_migration/part03 \
+              scripts/.baseline_migration/part04 \
+              scripts/.baseline_migration/part05 \
+              scripts/.baseline_migration/part06 \
+              > scripts/font_baseline_consistency_migration.py
+          python scripts/font_baseline_consistency_migration.py
+
+      - name: Validate generated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile \
+            common/font_metrics_normalize.py \
+            common/font_instance.py \
+            common/font_name_normalize.py \
+            common/font_config_overlay.py \
+            common/composite_font.py
+          sh -n common/rom_adapters.sh
+          sh -n common/font_config_weights.sh
+          sh -n common/font_mix.sh
+          python scripts/font_metrics_normalization_test.py
+          python scripts/font_config_monospace_test.py
+          sh scripts/font_config_variable_weight_test.sh
+          ! grep -RIn '天地玄黄' android-app common scripts --exclude-dir=.baseline_migration --exclude=font_baseline_consistency_migration.py
+
+      - name: Commit reviewed runtime changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add \
+            CHANGELOG.md \
+            common/font_metrics_normalize.py \
+            common/rom_adapters.sh \
+            common/font_instance.py \
+            common/font_name_normalize.py \
+            common/font_config_weights.sh \
+            common/font_config_overlay.py \
+            common/composite_font.py \
+            common/font_mix.sh \
+            scripts/module_payload_manifest.txt \
+            scripts/check.sh \
+            scripts/font_metrics_normalization_test.py \
+            scripts/font_config_monospace_test.py \
+            android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt \
+            android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupportTest.kt
+          git diff --cached --check
+          git commit -m 'fix: normalize mixed-script font baselines and metrics'
+          git push origin HEAD:${{ github.head_ref }}
