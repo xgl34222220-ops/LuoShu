@@ -364,7 +364,6 @@ EOF_PROBE
         import_write_font_config "$_font_id" "$_display_name" "$_zip_name" "$_module_version" "$_module_author" "$_supports_cjk" "$_best_variable" || true
     fi
 
-    rm -f
     rm -rf "$_tmp" 2>/dev/null || true
     if [ "$_imported_text" -le 0 ]; then printf '{"status":"error","message":"字体复制失败，请检查存储空间和目录权限"}\n'; return 0; fi
 
