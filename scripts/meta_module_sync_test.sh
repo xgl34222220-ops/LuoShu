@@ -41,8 +41,21 @@ export LUOSHU_META_TEST_ENGINE
 luoshu_sync_mount_payload Demo
 [ ! -e "$LUOSHU_META_TEST_ROOT/LuoShu" ]
 
+# Magic Mount reads the canonical module tree. An explicit font transaction must recover stale
+# skip_mount/mount_error markers left by a previous mount engine, then wait for reboot verification.
+touch "$MODDIR/skip_mount" "$MODDIR/mount_error"
+LUOSHU_META_TEST_ENGINE=magic-mount
+export LUOSHU_META_TEST_ENGINE
+luoshu_sync_mount_payload Demo
+[ ! -e "$MODDIR/skip_mount" ]
+[ ! -e "$MODDIR/mount_error" ]
+[ ! -e "$LUOSHU_META_TEST_ROOT/LuoShu" ]
+[ "$(sed -n 's/^engine=//p' "$MODDIR/config/mount_compat.conf")" = magic-mount ]
+
 # skip_mount is an actual compatibility failure for KernelSU metamodules.
 touch "$MODDIR/skip_mount"
+LUOSHU_META_TEST_ENGINE=meta-overlayfs
+export LUOSHU_META_TEST_ENGINE
 if luoshu_sync_mount_payload Demo; then
     echo 'skip_mount was not rejected' >&2
     exit 1
