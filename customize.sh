@@ -8,6 +8,7 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | he
 MODULE_DIR="$MODPATH"
 [ -f "$MODPATH/common/util_functions.sh" ] && . "$MODPATH/common/util_functions.sh"
 [ -f "$MODPATH/common/rom_adapters.sh" ] && . "$MODPATH/common/rom_adapters.sh"
+[ -f "$MODPATH/common/module_update_state.sh" ] && . "$MODPATH/common/module_update_state.sh"
 
 if type ensure_public_storage >/dev/null 2>&1; then
     ensure_public_storage
@@ -53,20 +54,30 @@ fi
 
 mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" 2>/dev/null || true
 OLD_MOD="/data/adb/modules/LuoShu"
+UPDATE_PRESERVED=false
 
-# 仅迁移用户偏好；历史任务和待重启状态不进入新安装。
-for _config in font_weight.conf font_weight_original.conf axes_mix.conf font_mix.conf; do
-    [ -f "$OLD_MOD/config/$_config" ] && cp -f "$OLD_MOD/config/$_config" "$MODPATH/config/$_config" 2>/dev/null || true
-done
-for _state in previous_font.conf switch_task.conf mix_task.conf axes_task.conf text_reboot_required.conf \
-              font_weight_reboot_required.conf active_emoji.conf emoji_task.conf emoji_reboot_required.conf \
-              webui_font_list.json webui_font_list.key native_font_index.json native_font_index.key \
-              app_install_pending app_install_state.conf app_install_manual; do
-    rm -f "$MODPATH/config/$_state" 2>/dev/null || true
-done
-rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" \
-      "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
-printf 'default\n' > "$MODPATH/config/active_font.conf"
+# 更新安装继承当前活动字体与各分区负载；只清理任务、缓存、PID 和旧待重启标记。
+if type luoshu_migrate_active_install >/dev/null 2>&1; then
+    if luoshu_migrate_active_install "$OLD_MOD" "$MODPATH"; then
+        UPDATE_PRESERVED=true
+    fi
+fi
+
+if [ "$UPDATE_PRESERVED" != true ]; then
+    # 全新安装或旧负载无效时，仅迁移可安全复用的用户偏好。
+    for _config in font_weight.conf font_weight_original.conf axes_mix.conf font_mix.conf; do
+        [ -f "$OLD_MOD/config/$_config" ] && cp -f "$OLD_MOD/config/$_config" "$MODPATH/config/$_config" 2>/dev/null || true
+    done
+    for _state in previous_font.conf switch_task.conf mix_task.conf axes_task.conf text_reboot_required.conf \
+                  font_weight_reboot_required.conf active_emoji.conf emoji_task.conf emoji_reboot_required.conf \
+                  webui_font_list.json webui_font_list.key native_font_index.json native_font_index.key \
+                  app_install_pending app_install_state.conf app_install_manual; do
+        rm -f "$MODPATH/config/$_state" 2>/dev/null || true
+    done
+    rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" \
+          "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
+    printf 'default\n' > "$MODPATH/config/active_font.conf"
+fi
 
 # 安装安全 CLI，不暴露上一字体回滚、热刷新或重启 SystemUI 命令。
 cp -f "$MODPATH/common/luoshu_cli.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
@@ -80,7 +91,14 @@ chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MOD
 touch "$MODPATH/magic" 2>/dev/null || true
 
 ui_print "✓ 模块文件已部署"
-ui_print "✓ 当前保持系统默认字体"
+if [ "$UPDATE_PRESERVED" = true ]; then
+    _preserved_font=$(head -n1 "$MODPATH/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_preserved_font" ] || _preserved_font=default
+    ui_print "✓ 已继承当前字体：$_preserved_font"
+    ui_print "✓ 更新后只需重启一次，无需重新应用字体"
+else
+    ui_print "✓ 当前保持系统默认字体"
+fi
 
 if [ -s "$MODPATH/bundled/LuoShu-App.apk" ] && [ -f "$MODPATH/common/app_installer.sh" ]; then
     _app_result=$(MODDIR="$MODPATH" APP_INSTALL_LOG="$MODPATH/logs/app-install.log" sh "$MODPATH/common/app_installer.sh" flash 2>/dev/null)
@@ -97,7 +115,11 @@ if [ -s "$MODPATH/bundled/LuoShu-App.apk" ] && [ -f "$MODPATH/common/app_install
 else
     ui_print "✗ 模块内置 App 或安装器缺失，请重新下载洛书模块包"
 fi
-ui_print "请完整重启后进入洛书 App 配置字体。"
+if [ "$UPDATE_PRESERVED" = true ]; then
+    ui_print "请完整重启一次，新版本会继续使用当前字体。"
+else
+    ui_print "请完整重启后进入洛书 App 配置字体。"
+fi
 ui_print ""
-[ -f "$MODPATH/common/module_status.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/module_status.sh" default >/dev/null 2>&1 || true
+[ -f "$MODPATH/common/module_status.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/module_status.sh" "$(head -n1 "$MODPATH/config/active_font.conf" 2>/dev/null)" >/dev/null 2>&1 || true
 exit 0
