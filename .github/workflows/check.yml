@@ -72,22 +72,7 @@ jobs:
           fi
 
       - name: Run source checks
-        shell: bash
-        run: |
-          set +e
-          sh -x ./scripts/check.sh >source-check.log 2>&1
-          code=$?
-          tail -n 500 source-check.log
-          exit "$code"
-
-      - name: Upload source check diagnostics
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: source-check-diagnostics-${{ github.run_id }}
-          path: source-check.log
-          if-no-files-found: error
-          retention-days: 2
+        run: sh ./scripts/check.sh
 
       - name: Check composite role coverage
         shell: bash
