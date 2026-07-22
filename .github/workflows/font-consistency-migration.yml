@@ -5,7 +5,7 @@ on:
     branches:
       - agent/font-consistency-cleanup
     paths:
-      - scripts/font_consistency_migration.py
+      - scripts/font_consistency_followup.py
       - .github/workflows/font-consistency-migration.yml
 
 permissions:
@@ -26,8 +26,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Apply consistency and source-hygiene migration
-        run: python scripts/font_consistency_migration.py
+      - name: Finish consistency source hygiene
+        run: python scripts/font_consistency_followup.py
 
       - name: Validate generated sources
         shell: bash
@@ -46,7 +46,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git reset -- .github/workflows/font-consistency-migration.yml scripts/font_consistency_migration.py
+          git reset -- .github/workflows/font-consistency-migration.yml scripts/font_consistency_migration.py scripts/font_consistency_followup.py
           git diff --cached --check
-          git commit -m 'fix: improve global font consistency and payload hygiene'
+          git commit -m 'fix: finish font consistency source hygiene'
           git push origin HEAD:agent/font-consistency-cleanup
