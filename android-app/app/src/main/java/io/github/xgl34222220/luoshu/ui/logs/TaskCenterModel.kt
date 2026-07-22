@@ -42,7 +42,7 @@ internal data class TaskCenterItem(
 
 private val structuredLog = Regex("^\\[([^]]+)]\\s+\\[([^]]+)]\\s+(.*)$")
 private val percentPattern = Regex("(?:^|\\D)(\\d{1,3})%(?:\\D|$)")
-private val internalMixTelemetry = Regex("^\\[[^]]+)]\\s+mix\\s+(?:stage=|start:)", RegexOption.IGNORE_CASE)
+private val internalMixTelemetry = Regex("^\\[[^]]+]\\s+mix\\s+(?:stage=|start:)", RegexOption.IGNORE_CASE)
 
 internal fun taskKindFor(message: String, type: String = ""): TaskKind {
     val normalized = "$type $message".lowercase()
