@@ -24,6 +24,8 @@ UI_PROBES = tuple(map(ord, "中文国永AaHhx0123456789gjpqy"))
 CAP_PROBES = tuple(map(ord, "AHIOX"))
 XHEIGHT_PROBES = (ord("x"),)
 ASCII_CODEPOINTS = tuple(range(0x20, 0x7F))
+TYPO_ASCENDER_RATIO = 0.88
+TYPO_DESCENDER_RATIO = 0.22
 
 
 class MetricsError(RuntimeError):
@@ -182,12 +184,12 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
     bottoms = [item[1] for item in ui_bounds.values()]
     ui_top = max(tops, default=upem * 0.82)
     ui_bottom = min(bottoms, default=-upem * 0.18)
-    margin = int(round(upem * 0.04))
-
-    ascender = max(int(round(upem * 0.88)), int(round(ui_top)) + margin)
-    descender_abs = max(int(round(upem * 0.22)), int(round(-ui_bottom)) + margin)
-    ascender = min(int(round(upem * 1.06)), ascender)
-    descender_abs = min(int(round(upem * 0.34)), descender_abs)
+    # Android control baselines are derived from hhea/OS/2 ratios. Deriving those values from each
+    # font's extreme glyph bounds keeps bad source metrics alive and makes two selected fonts sit at
+    # different heights. Use one stable em-relative contract for every direct, variable, weighted
+    # and composite output. usWinAscent/usWinDescent below still contain real outline extremes.
+    ascender = int(round(upem * TYPO_ASCENDER_RATIO))
+    descender_abs = int(round(upem * TYPO_DESCENDER_RATIO))
     ascender = _clamp_signed(ascender)
     descender = _clamp_signed(-descender_abs)
 

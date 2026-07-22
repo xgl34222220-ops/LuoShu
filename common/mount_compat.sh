@@ -173,6 +173,23 @@ luoshu_mountify_module_selected() {
 }
 
 LUOSHU_MOUNT_PREFLIGHT_ERROR=''
+luoshu_recover_safety_disable() {
+    [ -e "$LUOSHU_MOUNT_MODDIR/disable" ] || return 0
+    _lrsd_fail=$(cat "$LUOSHU_MOUNT_MODDIR/config/font-boot-failures" 2>/dev/null)
+    case "$_lrsd_fail" in ''|*[!0-9]*) _lrsd_fail=0 ;; esac
+    if [ "$_lrsd_fail" -lt 2 ] && [ ! -f "$LUOSHU_MOUNT_MODDIR/config/font-payload-quarantine.conf" ]; then
+        return 0
+    fi
+    rm -f "$LUOSHU_MOUNT_MODDIR/disable" 2>/dev/null || {
+        LUOSHU_MOUNT_PREFLIGHT_ERROR='无法清理洛书安全守卫遗留的 disable 标记'
+        return 1
+    }
+    rm -f "$LUOSHU_MOUNT_MODDIR/config/font-boot-failures" \
+          "$LUOSHU_MOUNT_MODDIR/config/font-payload-quarantine.conf" 2>/dev/null || true
+    luoshu_mount_log '已恢复洛书安全守卫误设的 disable 标记；允许用户主动重试字体事务'
+    return 0
+}
+
 luoshu_recover_magic_mount_markers() {
     _lrmm_engine="$1"
     [ "$_lrmm_engine" = magic-mount ] || [ "$_lrmm_engine" = magic-mount-rs ] || return 0
@@ -193,15 +210,89 @@ luoshu_recover_magic_mount_markers() {
     return 0
 }
 
+luoshu_magic_mount_ensure_partitions() {
+    _lmep_engine="$1"
+    [ "$_lmep_engine" = magic-mount ] || [ "$_lmep_engine" = magic-mount-rs ] || return 0
+    _lmep_config="${LUOSHU_MAGIC_MOUNT_CONFIG:-/data/adb/magic_mount/config.toml}"
+    [ -f "$_lmep_config" ] || return 0
+
+    _lmep_current=$(awk '
+        /^[[:space:]]*partitions[[:space:]]*=/ { capture=1 }
+        capture { printf "%s ", $0 }
+        capture && /]/ { exit }
+    ' "$_lmep_config" 2>/dev/null)
+    _lmep_list=''
+    for _lmep_item in $(printf '%s\n' "$_lmep_current" | awk -F'"' '{ for (i=2; i<=NF; i+=2) print $i }' 2>/dev/null); do
+        case "$_lmep_item" in ''|*[!A-Za-z0-9_]*) continue ;; esac
+        case " $_lmep_list " in *" $_lmep_item "*) ;; *) _lmep_list="${_lmep_list}${_lmep_list:+ }$_lmep_item" ;; esac
+    done
+
+    _lmep_added=''
+    for _lmep_part in system_ext product vendor odm oem my_product my_engineering my_company \
+        my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust; do
+        _lmep_dir="$LUOSHU_MOUNT_MODDIR/$_lmep_part"
+        [ -d "$_lmep_dir" ] || continue
+        find "$_lmep_dir" -type f -print -quit 2>/dev/null | grep -q . || continue
+        case " $_lmep_list " in
+            *" $_lmep_part "*) ;;
+            *)
+                _lmep_list="${_lmep_list}${_lmep_list:+ }$_lmep_part"
+                _lmep_added="${_lmep_added}${_lmep_added:+,}$_lmep_part"
+                ;;
+        esac
+    done
+    [ -n "$_lmep_added" ] || return 0
+
+    _lmep_array=''
+    for _lmep_item in $_lmep_list; do
+        _lmep_array="${_lmep_array}${_lmep_array:+, }\"$_lmep_item\""
+    done
+    _lmep_replacement="partitions = [$_lmep_array]"
+    _lmep_temp="${_lmep_config}.tmp.$$"
+    [ -f "${_lmep_config}.luoshu.bak" ] || cp -f "$_lmep_config" "${_lmep_config}.luoshu.bak" 2>/dev/null || true
+    awk -v replacement="$_lmep_replacement" '
+        BEGIN { replaced=0; skipping=0 }
+        skipping { if ($0 ~ /]/) skipping=0; next }
+        /^[[:space:]]*partitions[[:space:]]*=/ {
+            print replacement
+            replaced=1
+            if ($0 !~ /]/) skipping=1
+            next
+        }
+        { print }
+        END { if (!replaced) print replacement }
+    ' "$_lmep_config" > "$_lmep_temp" 2>/dev/null || {
+        rm -f "$_lmep_temp" 2>/dev/null || true
+        LUOSHU_MOUNT_PREFLIGHT_ERROR="无法更新 Magic Mount 分区配置：$_lmep_added"
+        return 1
+    }
+    chmod --reference="$_lmep_config" "$_lmep_temp" 2>/dev/null || chmod 0644 "$_lmep_temp" 2>/dev/null || true
+    mv -f "$_lmep_temp" "$_lmep_config" 2>/dev/null || {
+        rm -f "$_lmep_temp" 2>/dev/null || true
+        LUOSHU_MOUNT_PREFLIGHT_ERROR="无法提交 Magic Mount 分区配置：$_lmep_added"
+        return 1
+    }
+    luoshu_mount_log "已补齐 Magic Mount 字体负载分区：$_lmep_added"
+    return 0
+}
+
 luoshu_mount_preflight() {
+    _lmp_active="${1:-unknown}"
     LUOSHU_MOUNT_PREFLIGHT_ERROR=''
     _lmp_engine=$(luoshu_detect_mount_engine)
     _lmp_manager=$(luoshu_detect_root_manager)
 
-    luoshu_recover_magic_mount_markers "$_lmp_engine" || return 1
+    # Restoring the ROM default is a cleanup transaction. It must remain available even when
+    # the root manager currently ignores the module. Non-default retries only clear markers that
+    # can be proven to have been created by LuoShu's own legacy safety guard.
+    if [ "$_lmp_active" != default ]; then
+        luoshu_recover_safety_disable || return 1
+        luoshu_recover_magic_mount_markers "$_lmp_engine" || return 1
+    fi
 
     for _lmp_marker in disable remove mount_error; do
         if [ -e "$LUOSHU_MOUNT_MODDIR/$_lmp_marker" ]; then
+            [ "$_lmp_active" = default ] && continue
             LUOSHU_MOUNT_PREFLIGHT_ERROR="模块存在 $_lmp_marker 标记，元模块不会挂载洛书"
             return 1
         fi
@@ -209,27 +300,33 @@ luoshu_mount_preflight() {
 
     case "$_lmp_engine" in
         meta-overlayfs|dual-dir-metamodule|hybrid-mount|magic-mount|magic-mount-rs)
-            if [ -e "$LUOSHU_MOUNT_MODDIR/skip_mount" ]; then
+            if [ "$_lmp_active" != default ] && [ -e "$LUOSHU_MOUNT_MODDIR/skip_mount" ]; then
                 LUOSHU_MOUNT_PREFLIGHT_ERROR='检测到 skip_mount，当前元模块会跳过洛书负载'
                 return 1
             fi
             ;;
         mountify)
-            if [ "$_lmp_manager" = Magisk ]; then
-                if [ -e "$LUOSHU_MOUNT_MODDIR/skip_mountify" ]; then
-                    LUOSHU_MOUNT_PREFLIGHT_ERROR='检测到 skip_mountify，Mountify 已排除洛书'
+            if [ "$_lmp_active" != default ]; then
+                if [ "$_lmp_manager" = Magisk ]; then
+                    if [ -e "$LUOSHU_MOUNT_MODDIR/skip_mountify" ]; then
+                        LUOSHU_MOUNT_PREFLIGHT_ERROR='检测到 skip_mountify，Mountify 已排除洛书'
+                        return 1
+                    fi
+                elif [ -e "$LUOSHU_MOUNT_MODDIR/skip_mount" ]; then
+                    LUOSHU_MOUNT_PREFLIGHT_ERROR='检测到 skip_mount，Mountify 已排除洛书'
                     return 1
                 fi
-            elif [ -e "$LUOSHU_MOUNT_MODDIR/skip_mount" ]; then
-                LUOSHU_MOUNT_PREFLIGHT_ERROR='检测到 skip_mount，Mountify 已排除洛书'
-                return 1
-            fi
-            if ! luoshu_mountify_module_selected; then
-                LUOSHU_MOUNT_PREFLIGHT_ERROR='Mountify 当前为白名单模式，但 modules.txt 未包含 LuoShu'
-                return 1
+                if ! luoshu_mountify_module_selected; then
+                    LUOSHU_MOUNT_PREFLIGHT_ERROR='Mountify 当前为白名单模式，但 modules.txt 未包含 LuoShu'
+                    return 1
+                fi
             fi
             ;;
     esac
+
+    if [ "$_lmp_active" != default ]; then
+        luoshu_magic_mount_ensure_partitions "$_lmp_engine" || return 1
+    fi
 
     case "$_lmp_engine" in
         meta-overlayfs|dual-dir-metamodule)
@@ -328,7 +425,7 @@ luoshu_sync_mount_payload() {
 
     luoshu_mount_lock_acquire || return 1
     trap 'luoshu_mount_lock_release' EXIT HUP INT TERM
-    if ! luoshu_mount_preflight; then
+    if ! luoshu_mount_preflight "$_lsmp_active"; then
         luoshu_mount_record failed "$LUOSHU_MOUNT_PREFLIGHT_ERROR" '' 0 1
         luoshu_mount_log "元模块预检失败：engine=$_lsmp_engine error=$LUOSHU_MOUNT_PREFLIGHT_ERROR"
         luoshu_mount_lock_release
@@ -430,7 +527,7 @@ font_config_mark_boot_success() {
         printf 'time=%s\n' "$(date +%s)"
     } > "$_lmbs_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || return 1
     mv -f "$_lmbs_config/font-payload-boot.conf.tmp.$$" "$_lmbs_config/font-payload-boot.conf" 2>/dev/null || return 1
-    rm -f "$_lmbs_config/font-boot-failures" 2>/dev/null || true
+    rm -f "$_lmbs_config/font-boot-failures" "$_lmbs_config/font-payload-quarantine.conf" 2>/dev/null || true
     printf 'time=%s\n' "$(date +%s)" > "$_lmbs_config/font-last-boot-success.conf" 2>/dev/null || true
     chmod 0644 "$_lmbs_config/font-payload-boot.conf" "$_lmbs_config/font-last-boot-success.conf" 2>/dev/null || true
     type _luoshu_safety_log >/dev/null 2>&1 && _luoshu_safety_log INFO 'Android 已完成开机且元模块挂载验证通过，字体负载事务确认成功'

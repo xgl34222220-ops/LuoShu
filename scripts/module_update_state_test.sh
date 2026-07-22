@@ -4,7 +4,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-update-state)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-SCHEMA=baseline-v6-mono-v1
+SCHEMA=baseline-v7-mono-v2
 
 OLD="$TMP/old"
 NEW="$TMP/new"
@@ -21,6 +21,8 @@ printf 'old notes\n' >"$OLD/config/version_notes.conf"
 printf 'state=running\n' >"$OLD/config/switch_task.conf"
 printf 'font=Qsal\n' >"$OLD/config/text_reboot_required.conf"
 printf '123\n' >"$OLD/config/axes_worker.pid"
+printf '2\n' >"$OLD/config/font-boot-failures"
+printf 'state=quarantined\n' >"$OLD/config/font-payload-quarantine.conf"
 printf 'Qsal payload\n' >"$OLD/system/fonts/Qsal-Regular.ttf"
 printf 'anchor\n' >"$OLD/system/fonts/.luoshu-font-store/qsal.font"
 printf '<familyset/>\n' >"$OLD/system/etc/fonts.xml"
@@ -48,6 +50,8 @@ test -f "$NEW/system/bin/洛书"
 test ! -e "$NEW/config/switch_task.conf"
 test ! -e "$NEW/config/text_reboot_required.conf"
 test ! -e "$NEW/config/axes_worker.pid"
+test ! -e "$NEW/config/font-boot-failures"
+test ! -e "$NEW/config/font-payload-quarantine.conf"
 test "$LUOSHU_UPDATE_ACTIVE" = Qsal
 test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = true
 grep -q '^state=pending$' "$NEW/config/font-payload-rebuild-pending.conf"
@@ -58,20 +62,20 @@ grep -q "^newSchema=$SCHEMA$" "$NEW/config/font-payload-rebuild-pending.conf"
 CURRENT="$TMP/current"
 CURRENT_NEW="$TMP/current-new"
 mkdir -p "$CURRENT/config" "$CURRENT/system/fonts" \
-    "$CURRENT/cache/full-composite-v6" "$CURRENT/cache/auto-multiweight-mix/composites-v3" \
-    "$CURRENT/cache/auto-multiweight-mix/prepared-v3" "$CURRENT_NEW/config"
+    "$CURRENT/cache/full-composite-v7" "$CURRENT/cache/auto-multiweight-mix/composites-v4" \
+    "$CURRENT/cache/auto-multiweight-mix/prepared-v4" "$CURRENT_NEW/config"
 printf 'id=LuoShu\nversion=current\n' >"$CURRENT/module.prop"
 printf 'Qsal\n' >"$CURRENT/config/active_font.conf"
 printf 'schema=%s\nfont=Qsal\n' "$SCHEMA" >"$CURRENT/config/font-payload-schema.conf"
 printf 'payload\n' >"$CURRENT/system/fonts/Qsal-Regular.ttf"
-printf 'v6\n' >"$CURRENT/cache/full-composite-v6/current.font"
-printf 'v3\n' >"$CURRENT/cache/auto-multiweight-mix/composites-v3/current.font"
-printf 'prepared\n' >"$CURRENT/cache/auto-multiweight-mix/prepared-v3/current.font"
+printf 'v7\n' >"$CURRENT/cache/full-composite-v7/current.font"
+printf 'v4\n' >"$CURRENT/cache/auto-multiweight-mix/composites-v4/current.font"
+printf 'prepared\n' >"$CURRENT/cache/auto-multiweight-mix/prepared-v4/current.font"
 luoshu_migrate_active_install "$CURRENT" "$CURRENT_NEW"
 test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = false
-test -f "$CURRENT_NEW/cache/full-composite-v6/current.font"
-test -f "$CURRENT_NEW/cache/auto-multiweight-mix/composites-v3/current.font"
-test -f "$CURRENT_NEW/cache/auto-multiweight-mix/prepared-v3/current.font"
+test -f "$CURRENT_NEW/cache/full-composite-v7/current.font"
+test -f "$CURRENT_NEW/cache/auto-multiweight-mix/composites-v4/current.font"
+test -f "$CURRENT_NEW/cache/auto-multiweight-mix/prepared-v4/current.font"
 test ! -e "$CURRENT_NEW/config/font-payload-rebuild-pending.conf"
 
 # The installer-side direct-font rebuild waits for and accepts only the current schema.
@@ -82,7 +86,7 @@ printf 'state=pending\n' >"$REBUILD/config/font-payload-rebuild-pending.conf"
 cat >"$REBUILD/common/font_manager.sh" <<'EOS'
 #!/bin/sh
 mkdir -p "$MODDIR/config"
-printf 'schema=baseline-v6-mono-v1\nfont=FontA\n' >"$MODDIR/config/font-payload-schema.conf"
+printf 'schema=baseline-v7-mono-v2\nfont=FontA\n' >"$MODDIR/config/font-payload-schema.conf"
 printf '{"status":"ok"}\n'
 EOS
 chmod 0755 "$REBUILD/common/font_manager.sh"

@@ -47,12 +47,47 @@ grep -q '^engine=mountify$' "$MODULE/config/mount_compat.conf"
 
 # Magic Mount RC/RS is a direct-source engine and explicit retries clear stale LuoShu markers.
 touch "$MODULE/skip_mount" "$MODULE/mount_error"
-MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=magic-mount LUOSHU_META_TEST_ROOT="$META" sh -c '
+MAGIC_CONFIG="$TMP/magic-mount-config.toml"
+printf 'mountsource = "KSU"\numount = false\npartitions = [\n  "vendor", # keep existing\n]\n' > "$MAGIC_CONFIG"
+MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=magic-mount LUOSHU_META_TEST_ROOT="$META" \
+LUOSHU_MAGIC_MOUNT_CONFIG="$MAGIC_CONFIG" sh -c '
     . "$MODDIR/common/mount_compat.sh"
     luoshu_sync_mount_payload Demo
 '
 test ! -e "$MODULE/skip_mount"
 test ! -e "$MODULE/mount_error"
+grep -q '"vendor"' "$MAGIC_CONFIG"
+grep -q '"product"' "$MAGIC_CONFIG"
+! grep -q '"keep"' "$MAGIC_CONFIG"
+test "$(grep -c '^[[:space:]]*partitions[[:space:]]*=' "$MAGIC_CONFIG")" -eq 1
+test -s "$MAGIC_CONFIG.luoshu.bak"
+
+# Legacy LuoShu safety failures created disable itself. An explicit font retry must recover that
+# marker, while a user-created disable without safety evidence remains a hard stop.
+MODDIR="$MODULE"
+MODULE_DIR="$MODULE"
+LUOSHU_META_TEST_ENGINE=magic-mount
+LUOSHU_META_TEST_ROOT="$META"
+LUOSHU_MAGIC_MOUNT_CONFIG="$MAGIC_CONFIG"
+export MODDIR MODULE_DIR LUOSHU_META_TEST_ENGINE LUOSHU_META_TEST_ROOT LUOSHU_MAGIC_MOUNT_CONFIG
+. "$MODULE/common/mount_compat.sh"
+touch "$MODULE/disable"
+printf '2\n' > "$MODULE/config/font-boot-failures"
+luoshu_sync_mount_payload FontA
+test ! -e "$MODULE/disable"
+test ! -e "$MODULE/config/font-boot-failures"
+
+touch "$MODULE/disable"
+if luoshu_sync_mount_payload FontA; then
+    echo 'manual disable marker was unexpectedly cleared' >&2
+    exit 1
+fi
+test -e "$MODULE/disable"
+
+# Restoring the ROM default is cleanup and must not be blocked by any module-ignore marker.
+luoshu_sync_mount_payload default
+test -e "$MODULE/disable"
+rm -f "$MODULE/disable"
 test ! -e "$META/LuoShu"
 grep -q '^engine=magic-mount$' "$MODULE/config/mount_compat.conf"
 

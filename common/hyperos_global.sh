@@ -31,9 +31,29 @@ _hyperos_metric_shell_files() {
     printf '%s\n' 'Roboto-Thin.ttf Roboto-ThinItalic.ttf Roboto-ExtraLight.ttf Roboto-ExtraLightItalic.ttf Roboto-Light.ttf Roboto-LightItalic.ttf Roboto-Regular.ttf Roboto-Italic.ttf Roboto-Medium.ttf Roboto-MediumItalic.ttf Roboto-SemiBold.ttf Roboto-SemiBoldItalic.ttf Roboto-Bold.ttf Roboto-BoldItalic.ttf Roboto-ExtraBold.ttf Roboto-ExtraBoldItalic.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-Bold.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-Bold.ttf GoogleSansFlex-Regular.ttf'
 }
 
-# 返回完整清理清单。Roboto/GoogleSans 仅用于清除旧版本残留，不会在文件槽映射中重新创建。
+# Google Play、系统搜索框、安装器和部分 Launcher/设置页面会直接打开这些物理槽，
+# 并不总是经过 fonts.xml。只覆盖直立 UI 字体，斜体、等宽、图标和符号继续保留 ROM。
+_hyperos_upright_ui_files() {
+    {
+        printf '%s\n' 'Roboto-Thin.ttf Roboto-ExtraLight.ttf Roboto-Light.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf Roboto-ExtraBold.ttf Roboto-Black.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-SemiBold.ttf GoogleSans-Bold.ttf GoogleSans-Black.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-SemiBold.ttf GoogleSansText-Bold.ttf GoogleSansText-Black.ttf GoogleSansText-VF.ttf GoogleSansTextVF.ttf GoogleSans-VF.ttf GoogleSansFlex-Regular.ttf'
+        while IFS='|' read -r _real _overlay; do
+            [ -d "$_real" ] || continue
+            for _path in "$_real"/Roboto*.ttf "$_real"/GoogleSans*.ttf; do
+                [ -f "$_path" ] || continue
+                _name=${_path##*/}
+                case "$_name" in *Italic*|*Oblique*|*Mono*|*Emoji*|*Symbol*|*Icon*) continue ;; esac
+                printf '%s\n' "$_name"
+            done
+        done <<EOF_HYPEROS_UI_ROOTS
+$(_luoshu_hyperos_root_pairs)
+EOF_HYPEROS_UI_ROOTS
+    } | awk 'NF && !seen[$0]++'
+}
+
+# 返回完整清理清单；直立 Roboto/GoogleSans 会在下方按真实分区重新创建。
 get_all_hyperos_files() {
-    printf '%s %s %s\n' "$(_hyperos_core_files)" "$(_hyperos_weight_files)" "$(_hyperos_metric_shell_files)"
+    printf '%s %s %s %s\n' "$(_hyperos_core_files)" "$(_hyperos_weight_files)" \
+        "$(_hyperos_metric_shell_files)" "$(_hyperos_upright_ui_files)"
 }
 
 _hyperos_remove_overlay_file() {
@@ -111,6 +131,21 @@ _hyperos_weight_role() {
         800) printf 'extrabold\n' ;;
         900) printf 'black\n' ;;
         *) printf 'regular\n' ;;
+    esac
+}
+
+_hyperos_file_weight() {
+    _name=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+    case "$_name" in
+        *extrabold*|*extra-bold*) printf '800\n' ;;
+        *semibold*|*semi-bold*|*demibold*) printf '600\n' ;;
+        *extralight*|*extra-light*) printf '200\n' ;;
+        *medium*) printf '500\n' ;;
+        *black*|*heavy*) printf '900\n' ;;
+        *bold*) printf '700\n' ;;
+        *light*) printf '300\n' ;;
+        *thin*) printf '100\n' ;;
+        *) printf '400\n' ;;
     esac
 }
 
@@ -202,6 +237,19 @@ copy_as_hyperos() {
         fi
     done
 
+    # Physical Google/Roboto UI slots are required for Google Play, search fields, installers and
+    # OEM pages that bypass named XML families. Reuse the same normalized weight anchors as the
+    # main system family so Chinese, English and digits share the same baseline and hierarchy.
+    ui_slot_count=0
+    for _file in $(_hyperos_upright_ui_files); do
+        _weight=$(_hyperos_file_weight "$_file")
+        _anchor=$(_hyperos_weight_anchor "$regular" "$font_family" "$_weight" "$_module/system/fonts")
+        [ -s "$_anchor" ] || _anchor="$regular_anchor"
+        _added=$(_hyperos_alias_existing_targets "$_anchor" "$_file")
+        case "$_added" in ''|*[!0-9]*) _added=0 ;; esac
+        ui_slot_count=$((ui_slot_count + _added))
+    done
+
     config_count=0
     if [ "$config_weight_count" -eq 9 ] && type font_config_enable_for_payload >/dev/null 2>&1; then
         if font_config_enable_for_payload "$font_family"; then
@@ -211,7 +259,7 @@ copy_as_hyperos() {
         fi
     fi
 
-    _log_step "  已覆盖 $core_count 个 MiSans 核心目标、$weight_count 个 ROM 字重目标、$config_weight_count 个配置字重"
+    _log_step "  已覆盖 $core_count 个 MiSans 核心目标、$weight_count 个 ROM 字重目标、$ui_slot_count 个 Google/Roboto UI 目标、$config_weight_count 个配置字重"
     if [ "$config_count" -eq 1 ]; then
         _log_step '  系统与 OEM 字体 XML 已事务生成；测量和绘制统一使用洛书字体'
     else

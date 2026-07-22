@@ -23,6 +23,9 @@ def main() -> int:
           <family name="Oplus-Sans">
             <font weight="350">OPSans-Regular.ttf</font>
           </family>
+          <family name="OplusOSUI-Display">
+            <font weight="600">OplusOSUI-SemiBold.ttf</font>
+          </family>
           <family name="Honor-Sans">
             <font weight="500">HONORSans-Medium.ttf</font>
           </family>
@@ -60,6 +63,7 @@ def main() -> int:
     assert lines["Roboto-Regular.ttf"].split("|")[1] == "400"
     assert lines["Roboto-Bold.ttf"].split("|")[1] == "700"
     assert lines["OPSans-Regular.ttf"].split("|")[1] == "300"
+    assert lines["OplusOSUI-SemiBold.ttf"].split("|")[1] == "600"
     assert lines["HONORSans-Medium.ttf"].split("|")[1] == "500"
     assert lines["vivoSansVF.ttf"].split("|")[1] == "400"
     assert lines["FlymeSans-Medium.ttf"].split("|")[1] == "500"

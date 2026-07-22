@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # 模块更新状态迁移：继承当前字体负载，并在引擎架构变化时自动重建。
 
-LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v6-mono-v1}"
+LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v7-mono-v2}"
 LUOSHU_UPDATE_ACTIVE=default
 LUOSHU_UPDATE_OLD_SCHEMA=''
 LUOSHU_UPDATE_REBUILD_REQUIRED=false
@@ -33,7 +33,8 @@ luoshu_update_config_is_volatile() {
         text_reboot_required.conf|font_weight_reboot_required.conf|emoji_reboot_required.conf|\
         webui_font_list.json|webui_font_list.key|native_font_index.json|native_font_index.key|\
         composite_progress.json|mix_last_error.txt|app_install_pending|app_install_state.conf|\
-        app_install_manual|font-payload-rebuild-pending.conf|*.pid|*.pid.task|*.tmp|*.tmp.*)
+        app_install_manual|font-payload-rebuild-pending.conf|font-boot-failures|\
+        font-payload-quarantine.conf|*.pid|*.pid.task|*.tmp|*.tmp.*)
             return 0
             ;;
     esac
@@ -103,9 +104,9 @@ luoshu_migrate_update_cache() {
     _old="$1"
     _new="$2"
     for _relative in \
-        cache/full-composite-v6 \
-        cache/auto-multiweight-mix/composites-v3 \
-        cache/auto-multiweight-mix/prepared-v3 \
+        cache/full-composite-v7 \
+        cache/auto-multiweight-mix/composites-v4 \
+        cache/auto-multiweight-mix/prepared-v4 \
         cache/auto-multiweight-mix/source-meta-v1; do
         [ -d "$_old/$_relative" ] || continue
         rm -rf "$_new/$_relative" 2>/dev/null || true

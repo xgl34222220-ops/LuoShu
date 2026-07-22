@@ -71,8 +71,8 @@ with tempfile.TemporaryDirectory() as directory:
     normalize_path(source, normalized)
     font = TTFont(normalized)
     try:
-        assert 880 <= font["hhea"].ascent <= 1060
-        assert -340 <= font["hhea"].descent <= -220
+        assert font["hhea"].ascent == 880
+        assert font["hhea"].descent == -220
         assert font["hhea"].lineGap == 0
         assert font["OS/2"].sTypoAscender == font["hhea"].ascent
         assert font["OS/2"].sTypoDescender == font["hhea"].descent
@@ -80,6 +80,21 @@ with tempfile.TemporaryDirectory() as directory:
         assert font["OS/2"].fsSelection & (1 << 7)
     finally:
         font.close()
+
+    # Different glyph extremes must still emit exactly the same TextView/EditText baseline contract.
+    source_two = temp / "source-two.ttf"; normalized_two = temp / "normalized-two.ttf"
+    make_font(source_two, -180, 1040, -120, 960, extreme_metrics=False)
+    normalize_path(source_two, normalized_two)
+    font_two = TTFont(normalized_two)
+    try:
+        assert font_two["hhea"].ascent == 880
+        assert font_two["hhea"].descent == -220
+        assert font_two["OS/2"].sTypoAscender == 880
+        assert font_two["OS/2"].sTypoDescender == -220
+        assert font_two["OS/2"].usWinAscent >= 1040
+        assert font_two["OS/2"].usWinDescent >= 180
+    finally:
+        font_two.close()
 
     base = temp / "base.ttf"; latin = temp / "latin.ttf"; digit = temp / "digit.ttf"; output = temp / "composite.ttf"
     make_font(base, 0, 700, 0, 700)
