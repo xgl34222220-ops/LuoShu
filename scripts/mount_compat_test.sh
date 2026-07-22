@@ -62,8 +62,8 @@ grep -q '"product"' "$MAGIC_CONFIG"
 test "$(grep -c '^[[:space:]]*partitions[[:space:]]*=' "$MAGIC_CONFIG")" -eq 1
 test -s "$MAGIC_CONFIG.luoshu.bak"
 
-# Legacy LuoShu safety failures created disable itself. An explicit font retry must recover that
-# marker, while a user-created disable without safety evidence remains a hard stop.
+# Legacy LuoShu safety failures created disable itself and later updates could discard the failure
+# counter. Every explicit font transaction must therefore recover disable even without that state.
 MODDIR="$MODULE"
 MODULE_DIR="$MODULE"
 LUOSHU_META_TEST_ENGINE=magic-mount
@@ -78,18 +78,28 @@ test ! -e "$MODULE/disable"
 test ! -e "$MODULE/config/font-boot-failures"
 
 touch "$MODULE/disable"
-if luoshu_sync_mount_payload FontA; then
-    echo 'manual disable marker was unexpectedly cleared' >&2
-    exit 1
-fi
-test -e "$MODULE/disable"
+luoshu_sync_mount_payload FontA
+test ! -e "$MODULE/disable"
 
-# Restoring the ROM default is cleanup and must not be blocked by any module-ignore marker.
+# Restoring the ROM default is cleanup and must also leave the module enabled for the next action.
+touch "$MODULE/disable"
 luoshu_sync_mount_payload default
-test -e "$MODULE/disable"
-rm -f "$MODULE/disable"
+test ! -e "$MODULE/disable"
 test ! -e "$META/LuoShu"
 grep -q '^engine=magic-mount$' "$MODULE/config/mount_compat.conf"
+
+# A pending removal is not recoverable through a font transaction.
+touch "$MODULE/remove"
+if luoshu_sync_mount_payload FontA; then
+    echo 'remove marker was unexpectedly cleared' >&2
+    exit 1
+fi
+test -e "$MODULE/remove"
+rm -f "$MODULE/remove"
+
+# The flash installer must recover both the staging tree and the currently active module tree.
+grep -q 'for _enable_dir in "$MODPATH" "$OLD_MOD"' "$ROOT/customize.sh"
+grep -q 'rm -f "$_enable_dir/disable"' "$ROOT/customize.sh"
 
 # Runtime syncing remains transaction-only. Never mirror from early boot scripts.
 grep -q 'common/mount_compat.sh' "$ROOT/common/font_mix.sh"

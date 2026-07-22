@@ -173,20 +173,15 @@ luoshu_mountify_module_selected() {
 }
 
 LUOSHU_MOUNT_PREFLIGHT_ERROR=''
-luoshu_recover_safety_disable() {
+luoshu_recover_explicit_disable() {
     [ -e "$LUOSHU_MOUNT_MODDIR/disable" ] || return 0
-    _lrsd_fail=$(cat "$LUOSHU_MOUNT_MODDIR/config/font-boot-failures" 2>/dev/null)
-    case "$_lrsd_fail" in ''|*[!0-9]*) _lrsd_fail=0 ;; esac
-    if [ "$_lrsd_fail" -lt 2 ] && [ ! -f "$LUOSHU_MOUNT_MODDIR/config/font-payload-quarantine.conf" ]; then
-        return 0
-    fi
     rm -f "$LUOSHU_MOUNT_MODDIR/disable" 2>/dev/null || {
-        LUOSHU_MOUNT_PREFLIGHT_ERROR='无法清理洛书安全守卫遗留的 disable 标记'
+        LUOSHU_MOUNT_PREFLIGHT_ERROR='无法解除洛书模块的 disable 标记'
         return 1
     }
     rm -f "$LUOSHU_MOUNT_MODDIR/config/font-boot-failures" \
           "$LUOSHU_MOUNT_MODDIR/config/font-payload-quarantine.conf" 2>/dev/null || true
-    luoshu_mount_log '已恢复洛书安全守卫误设的 disable 标记；允许用户主动重试字体事务'
+    luoshu_mount_log '用户已明确发起字体事务；已解除洛书 disable 标记并恢复模块'
     return 0
 }
 
@@ -282,11 +277,11 @@ luoshu_mount_preflight() {
     _lmp_engine=$(luoshu_detect_mount_engine)
     _lmp_manager=$(luoshu_detect_root_manager)
 
-    # Restoring the ROM default is a cleanup transaction. It must remain available even when
-    # the root manager currently ignores the module. Non-default retries only clear markers that
-    # can be proven to have been created by LuoShu's own legacy safety guard.
+    # Applying a font or restoring the ROM default is an explicit module action. Older builds could
+    # leave disable behind but later discard the evidence that created it, so every explicit font
+    # transaction is also an explicit re-enable request. remove remains a hard failure.
+    luoshu_recover_explicit_disable || return 1
     if [ "$_lmp_active" != default ]; then
-        luoshu_recover_safety_disable || return 1
         luoshu_recover_magic_mount_markers "$_lmp_engine" || return 1
     fi
 
