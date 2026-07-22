@@ -99,6 +99,17 @@ jobs:
           fi
           exit "$code"
 
+      - name: Upload migration diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-migration-diagnostics-${{ github.run_id }}
+          path: |
+            migration-run.log
+            commit-run.log
+          if-no-files-found: warn
+          retention-days: 2
+
   engine:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
