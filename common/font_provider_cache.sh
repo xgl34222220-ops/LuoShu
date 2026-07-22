@@ -17,6 +17,35 @@ luoshu_provider_log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_lpl_msg" >> "$_lpl_mod/logs/provider_cache.log" 2>/dev/null || true
 }
 
+# 尽力识别 downloadable emoji 字体（如 NotoColorEmoji 的 provider 下载副本），
+# 它们绝不能被文字字体替换，否则使用 downloadable emoji 的应用会变方块。
+# 识别不了（无 Python 环境）时按文字字体处理——Play 商店链路本来就没有 emoji 缓存。
+_luoshu_provider_family_is_emoji() {
+    _lpie_file="$1"
+    _lpie_mod="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+    _lpie_py="$_lpie_mod/common/python/bin/luoshu-python"
+    [ -x "$_lpie_py" ] || return 1
+    _lpie_pyroot="$_lpie_mod/common/python"
+    _lpie_kind=$(PYTHONHOME="$_lpie_pyroot" \
+        PYTHONPATH="$_lpie_pyroot/lib/python3.14:$_lpie_pyroot/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$_lpie_pyroot/lib:$_lpie_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$_lpie_py" - "$_lpie_file" <<'PY_LUOSHU_EMOJI_PROBE' 2>/dev/null
+import sys
+from fontTools.ttLib import TTFont, TTCollection
+try:
+    src = sys.argv[1]
+    with open(src, "rb") as fh:
+        coll = fh.read(4) == b"ttcf"
+    font = (TTCollection(src, lazy=True).fonts[0] if coll else TTFont(src, lazy=True))
+    names = " ".join(r.toUnicode() for r in font["name"].names if r.nameID in (1, 4, 6, 16)).lower()
+    print("emoji" if "emoji" in names else "text")
+except Exception:
+    print("unknown")
+PY_LUOSHU_EMOJI_PROBE
+)
+    [ "$_lpie_kind" = "emoji" ]
+}
+
 # luoshu_provider_cache_sync <归一化后的字体文件>
 # 备份原始缓存（仅首次），再把缓存内所有 ttf/otf 替换为用户字体。
 luoshu_provider_cache_sync() {
@@ -34,6 +63,10 @@ luoshu_provider_cache_sync() {
             00010000|4f54544f|74746366) ;;  # ttf / otf / ttc
             *) continue ;;
         esac
+        if _luoshu_provider_family_is_emoji "$_lpcs_f"; then
+            luoshu_provider_log "跳过 downloadable emoji 字体：${_lpcs_f##*/}"
+            continue
+        fi
         if [ ! -f "${_lpcs_f}${LUOSHU_PROVIDER_BACKUP_SUFFIX}" ]; then
             cp -f "$_lpcs_f" "${_lpcs_f}${LUOSHU_PROVIDER_BACKUP_SUFFIX}" 2>/dev/null || true
         fi
