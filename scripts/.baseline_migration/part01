@@ -34,7 +34,10 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
     os2.sTypoAscender = ascender
     os2.sTypoDescender = descender
     os2.sTypoLineGap = 0
-    # USE_TYPO_METRICS keeps Android measurement consistent across TextView/EditText implementations.
+    # USE_TYPO_METRICS is defined from OS/2 v4 onward. v2/v3 share the same
+    # metric fields, so promoting them to v4 is safe and avoids an undefined flag.
+    if int(getattr(os2, "version", 0)) < 4:
+        os2.version = 4
     os2.fsSelection |= 1 << 7
     head = font["head"]
     os2.usWinAscent = _clamp_unsigned(max(ascender, int(getattr(head, "yMax", ascender))))
