@@ -67,13 +67,29 @@ jobs:
           retention-days: 2
 
       - name: Commit ordinary source changes
+        id: commit
         shell: bash
         run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git reset -- .github/workflows/font-consistency-migration.yml .github/workflows/font-consistency-followup.yml .github/workflows/pr-font-consistency-followup.yml scripts/font_consistency_migration.py scripts/font_consistency_followup.py
-          git diff --cached --check
-          git commit -m 'fix: finish font consistency source hygiene'
-          git push origin HEAD:${{ github.head_ref }}
+          set +e
+          {
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add -A
+            git reset -- .github/workflows/font-consistency-migration.yml .github/workflows/font-consistency-followup.yml .github/workflows/pr-font-consistency-followup.yml scripts/font_consistency_migration.py scripts/font_consistency_followup.py
+            git status --short
+            git diff --cached --check
+            git commit -m 'fix: finish font consistency source hygiene'
+            git push origin HEAD:${{ github.head_ref }}
+          } > /tmp/font-consistency-commit.log 2>&1
+          code=$?
+          cat /tmp/font-consistency-commit.log
+          exit "$code"
+
+      - name: Upload commit diagnostics
+        if: failure() && steps.commit.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: font-consistency-commit-${{ github.run_id }}
+          path: /tmp/font-consistency-commit.log
+          if-no-files-found: error
+          retention-days: 2
