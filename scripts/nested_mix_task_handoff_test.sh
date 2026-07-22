@@ -98,13 +98,23 @@ EOF_ENGINE
     test -n "$OUTER"
 
     COUNT=0
-    while [ "$COUNT" -lt 100 ]; do
+    while [ "$COUNT" -lt 30 ]; do
         STATE=$(sed -n 's/^state=//p' "$MODULE/config/axes_task.conf" 2>/dev/null | head -n1)
         case "$STATE" in success|failed) break ;; esac
-        sleep 0.1
+        sleep 1
         COUNT=$((COUNT + 1))
     done
-    test "$(sed -n 's/^state=//p' "$MODULE/config/axes_task.conf")" = success
+    STATE=$(sed -n 's/^state=//p' "$MODULE/config/axes_task.conf" 2>/dev/null | head -n1)
+    if [ "$STATE" != success ]; then
+        echo "nested handoff integration failed: state=${STATE:-missing}" >&2
+        echo '--- axes_task.conf ---' >&2
+        cat "$MODULE/config/axes_task.conf" >&2 2>/dev/null || true
+        echo '--- mix_task.conf ---' >&2
+        cat "$MODULE/config/mix_task.conf" >&2 2>/dev/null || true
+        echo '--- fontswitch.log ---' >&2
+        tail -n 80 "$MODULE/logs/fontswitch.log" >&2 2>/dev/null || true
+        exit 1
+    fi
     test "$(sed -n 's/^childTask=//p' "$MODULE/config/axes_task.conf")" = base-no-output
     ! grep -q '无法启动完整复合字体引擎' "$MODULE/config/axes_task.conf"
 fi
