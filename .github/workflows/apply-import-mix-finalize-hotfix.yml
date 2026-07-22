@@ -1,16 +1,16 @@
 name: Apply import and mix finalize hotfix
 
 on:
-  push:
+  pull_request:
     branches: [main]
-    paths:
-      - .github/workflows/apply-import-mix-finalize-hotfix.yml
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.head_ref == 'fix/import-fab-mix-finalize-speed'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
