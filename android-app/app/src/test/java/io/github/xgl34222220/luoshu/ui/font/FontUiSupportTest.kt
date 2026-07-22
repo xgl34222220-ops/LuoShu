@@ -20,8 +20,8 @@ class FontUiSupportTest {
     fun allCardsUseTheSameStablePreviewCopy() {
         val cjk = font(weights = listOf("regular"), supportsCjk = true)
         val latin = font(weights = listOf("regular"), supportsCjk = false)
-        val compact = "洛书字体 · Aa 0123456789"
-        val detailed = "洛书字体 · Aa 0123456789\n中文 English 0123456789"
+        val compact = "洛书字体 Aa 123"
+        val detailed = "洛书字体 Aa\n中文 ABC 123"
 
         assertEquals(compact, fontPreviewText(cjk))
         assertEquals(compact, fontPreviewText(latin))
@@ -34,7 +34,7 @@ class FontUiSupportTest {
         val font = font(weights = listOf("regular"))
 
         assertFalse(fontPreviewText(font).contains('\n'))
-        assertTrue(fontPreviewText(font, detailed = true).contains('\n'))
+        assertEquals(2, fontPreviewText(font, detailed = true).lines().size)
     }
 
     @Test
@@ -42,7 +42,7 @@ class FontUiSupportTest {
         val font = font(weights = listOf("regular"), supportsCjk = false)
 
         assertTrue(fontCapabilityLabel(font).startsWith("仅拉丁"))
-        assertEquals("洛书字体 · Aa 0123456789\n中文 English 0123456789", fontPreviewText(font, detailed = true))
+        assertEquals("洛书字体 Aa\n中文 ABC 123", fontPreviewText(font, detailed = true))
     }
 
     @Test
