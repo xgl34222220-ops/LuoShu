@@ -56,7 +56,7 @@ mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPA
 OLD_MOD="/data/adb/modules/LuoShu"
 UPDATE_PRESERVED=false
 
-# 更新安装先继承活动配置与旧负载作为事务回滚输入；架构过期时会在安装阶段重建。
+# 更新安装只迁移活动配置和旧负载；任何耗时字体生成都移到完整开机后的后台服务。
 if type luoshu_migrate_active_install >/dev/null 2>&1; then
     if luoshu_migrate_active_install "$OLD_MOD" "$MODPATH"; then
         UPDATE_PRESERVED=true
@@ -91,23 +91,15 @@ chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MOD
 [ ! -f "$MODPATH/bundled/LuoShu-App.apk" ] || chmod 0644 "$MODPATH/bundled/LuoShu-App.apk" "$MODPATH/bundled/app.prop" 2>/dev/null || true
 touch "$MODPATH/magic" 2>/dev/null || true
 
-if [ "$UPDATE_PRESERVED" = true ] && [ "${LUOSHU_UPDATE_REBUILD_REQUIRED:-false}" = true ]; then
-    ui_print "• 检测到旧版字体负载，正在使用新基线引擎重新生成"
-    if type luoshu_rebuild_preserved_payload >/dev/null 2>&1 && luoshu_rebuild_preserved_payload "$MODPATH"; then
-        ui_print "✓ 当前字体已按新架构重新生成"
-    else
-        LUOSHU_UPDATE_REBUILD_FAILED=true
-        ui_print "✗ 当前字体自动重建失败；重启时会安全恢复系统默认字体"
-        ui_print "• 重启后请在洛书 App 中重新应用一次字体"
-    fi
-fi
-
 ui_print "✓ 模块文件已部署"
 if [ "$UPDATE_PRESERVED" = true ]; then
     _preserved_font=$(head -n1 "$MODPATH/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
     [ -n "$_preserved_font" ] || _preserved_font=default
-    ui_print "✓ 已继承当前字体：$_preserved_font"
-    if [ "${LUOSHU_UPDATE_REBUILD_FAILED:-false}" != true ]; then
+    ui_print "✓ 已继承当前字体配置：$_preserved_font"
+    if [ "${LUOSHU_UPDATE_REBUILD_REQUIRED:-false}" = true ]; then
+        ui_print "• 旧版字体负载将在首次开机后后台重建"
+        ui_print "• 本次刷写不再等待字体生成"
+    else
         ui_print "✓ 更新后只需重启一次，无需重新应用字体"
     fi
 else
@@ -129,10 +121,10 @@ if [ -s "$MODPATH/bundled/LuoShu-App.apk" ] && [ -f "$MODPATH/common/app_install
 else
     ui_print "✗ 模块内置 App 或安装器缺失，请重新下载洛书模块包"
 fi
-if [ "$UPDATE_PRESERVED" = true ] && [ "${LUOSHU_UPDATE_REBUILD_FAILED:-false}" != true ]; then
-    ui_print "请完整重启一次，新版基线字体会直接生效。"
+if [ "$UPDATE_PRESERVED" = true ] && [ "${LUOSHU_UPDATE_REBUILD_REQUIRED:-false}" = true ]; then
+    ui_print "请先完整重启；后台重建完成后会通知再次重启。"
 elif [ "$UPDATE_PRESERVED" = true ]; then
-    ui_print "请重启后在洛书 App 中重新应用字体。"
+    ui_print "请完整重启一次，新版字体会直接生效。"
 else
     ui_print "请完整重启后进入洛书 App 配置字体。"
 fi

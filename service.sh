@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # ============================================================
 # 洛书 - 后台服务（版本以 module.prop 为准）
-# 功能：启动完成后校正权限、补装内置 App、预热字体索引、恢复字重并维护日志。
+# 功能：启动完成后校正权限、补装内置 App、重建旧字体负载、预热索引并恢复字重。
 # ============================================================
 
 MODDIR="${0%/*}"
@@ -12,6 +12,7 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/font_config_runtime.sh" ] && . "$MODDIR/common/font_config_runtime.sh"
 [ -f "$MODDIR/common/font_config_partitions.sh" ] && . "$MODDIR/common/font_config_partitions.sh"
 [ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
+[ -f "$MODDIR/common/module_update_state.sh" ] && . "$MODDIR/common/module_update_state.sh"
 
 (
     WAITED=0
@@ -35,6 +36,15 @@ MODULE_DIR="$MODDIR"
         echo "[$TIMESTAMP] [SERVICE] [$LEVEL] $MSG" >> "$LOG_FILE" 2>/dev/null || true
     }
 
+    notify_service() {
+        _title="$1"
+        _message="$2"
+        _tag="$3"
+        command -v cmd >/dev/null 2>&1 || return 0
+        cmd notification post -S bigtext -t "$_title" "$_tag" "$_message" >/dev/null 2>&1 || \
+            cmd notification post -t "$_title" "$_tag" "$_message" >/dev/null 2>&1 || true
+    }
+
     log_service "INFO" "服务脚本开始执行 ($MODULE_VERSION)"
     type font_config_mark_boot_success >/dev/null 2>&1 && font_config_mark_boot_success
     if [ -f "$LOG_FILE" ]; then
@@ -50,7 +60,7 @@ MODULE_DIR="$MODDIR"
     chmod 0755 "$MODDIR" "$MODDIR/common" 2>/dev/null || true
     chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" "$MODDIR/action.sh" 2>/dev/null || true
     find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
-    chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" 2>/dev/null || true
+    chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" "$MODDIR/common/font_metrics_normalize.py" 2>/dev/null || true
     chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     chmod 0755 "$MODDIR/system/bin/洛书" "$MODDIR/system/bin/luoshud" 2>/dev/null || true
 
@@ -76,6 +86,31 @@ MODULE_DIR="$MODDIR"
                     log_service "INFO" "App 自动更新未完成（code=$_app_code），请使用模块操作按钮重试；详情见 app-install.log"
                     ;;
             esac
+        fi
+    fi
+
+    # 架构升级时不再卡住刷写界面。Android 完成启动后再使用完整运行环境后台重建，
+    # 成功后通知用户重启一次加载新负载；失败则立即撤销覆盖并恢复系统默认字体。
+    if [ -f "$MODDIR/config/font-payload-rebuild-pending.conf" ]; then
+        _pending_font=$(sed -n 's/^font=//p' "$MODDIR/config/font-payload-rebuild-pending.conf" 2>/dev/null | head -n1 | tr -d '\r\n')
+        [ -n "$_pending_font" ] || _pending_font=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+        [ -n "$_pending_font" ] || _pending_font=default
+        LUOSHU_UPDATE_ACTIVE="$_pending_font"
+        export LUOSHU_UPDATE_ACTIVE
+        log_service "INFO" "开始后台重建旧字体负载：$_pending_font"
+        notify_service "洛书" "正在后台升级当前字体，无需停留在刷写页面。" luoshu-font-rebuild
+        if type luoshu_rebuild_preserved_payload >/dev/null 2>&1 && luoshu_rebuild_preserved_payload "$MODDIR"; then
+            log_service "INFO" "旧字体负载已按新架构重建：$_pending_font"
+            notify_service "洛书" "字体升级完成，请完整重启一次使新版字体生效。" luoshu-font-rebuild
+        else
+            log_service "ERROR" "旧字体负载后台重建失败，正在恢复系统默认字体"
+            if type luoshu_payload_quarantine >/dev/null 2>&1; then
+                luoshu_payload_quarantine
+            else
+                printf 'default\n' > "$MODDIR/config/active_font.conf" 2>/dev/null || true
+                rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" "$MODDIR/config/font-payload-schema.conf" 2>/dev/null || true
+            fi
+            notify_service "洛书" "字体升级失败，已安全恢复系统默认字体；请打开洛书重新应用。" luoshu-font-rebuild
         fi
     fi
 
@@ -111,7 +146,7 @@ MODULE_DIR="$MODDIR"
         fi
     fi
 
-    # 新字体只由原生 App 主动提交，完整重启后由系统自然加载。
+    # 新字体只由原生 App 或后台迁移任务提交，完整重启后由系统自然加载。
     rm -f "$MODDIR/.first_boot" 2>/dev/null || true
     log_service "INFO" "服务脚本执行完成"
 ) &

@@ -93,14 +93,18 @@ sh "$ROOT/scripts/app_installer_test.sh"
 # 原生 App 字体索引只在文件集合实际变化时失效。
 sh "$ROOT/scripts/font_library_cache_test.sh"
 
-# 模块更新必须继承当前字体负载，避免“更新重启一次、应用字体再重启一次”。
+# 模块刷写阶段严禁同步生成字体；旧负载只登记迁移，完整开机后由后台服务重建。
 grep -q 'module_update_state.sh' "$ROOT/customize.sh"
-grep -q '更新后只需重启一次' "$ROOT/customize.sh"
+! grep -q 'luoshu_rebuild_preserved_payload.*MODPATH' "$ROOT/customize.sh"
+grep -q 'font-payload-rebuild-pending.conf' "$ROOT/post-fs-data.sh"
+grep -q 'luoshu_rebuild_preserved_payload.*MODDIR' "$ROOT/service.sh"
+grep -q '后台重建完成后会通知再次重启' "$ROOT/customize.sh"
 sh "$ROOT/scripts/module_update_state_test.sh"
 
-# 所有字体卡片必须使用相同的双行样张；能力差异只在能力条表达。
-grep -q '洛书字体 · Aa 0123456789' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt"
-grep -q '中文 English 0123456789' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt"
+# 所有字体卡片必须使用同一套短双行样张，任何字体字宽都不得把第二行挤掉。
+grep -q '洛书字体 Aa' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt"
+grep -q '中文 ABC 123' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt"
+! grep -q '中文 English 0123456789' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt"
 # 导入按钮不得裁掉“体”，复合收尾不得对硬链接别名重复读取大字体。
 sh "$ROOT/scripts/mix_finalize_performance_test.sh"
 
