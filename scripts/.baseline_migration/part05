@@ -31,6 +31,12 @@ replace_once(
     'sh "$ROOT/scripts/font_config_variable_weight_test.sh"\npython3 "$ROOT/scripts/font_metrics_normalization_test.py"\npython3 "$ROOT/scripts/font_config_monospace_test.py"\n',
 )
 
+replace_once(
+    'scripts/stability_test.sh',
+    "grep -q '天地玄黄 · Hello' \"$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt\"",
+    "grep -q '中文 English 0123456789' \"$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt\"",
+)
+
 METRICS_TEST = r'''#!/usr/bin/env python3
 from __future__ import annotations
 
