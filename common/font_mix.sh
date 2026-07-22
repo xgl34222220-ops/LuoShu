@@ -365,9 +365,9 @@ build_composite_file() {
     [ -f "$MODDIR/common/composite_font.py" ] && [ -f "$_runner" ] || { set_mix_error '完整复合字体引擎缺失'; return 1; }
     [ -x "$MODDIR/common/python/bin/luoshu-python" ] || chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     check_composite_runtime || return 1
-    _cache="$MODDIR/cache/full-composite-v7"
+    _cache="$MODDIR/cache/full-composite-v8"
     mkdir -p "$_cache" "$MODDIR/cache/tmp" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
-    _key_src="$(composite_hash_file "$_cjk_src")-$(composite_hash_file "$_latin_src")-$(composite_hash_file "$_digit_src")-full-composite-v7"
+    _key_src="$(composite_hash_file "$_cjk_src")-$(composite_hash_file "$_latin_src")-$(composite_hash_file "$_digit_src")-full-composite-v8"
     _key=$(printf '%s' "$_key_src" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; elif command -v toybox >/dev/null 2>&1; then toybox sha256sum; else cksum; fi; } | awk '{print $1}')
     _cached="$_cache/${_key}.otf"; _report="$_cache/${_key}.json"; _progress="$CONFIG_DIR/composite_progress.json"
     rm -f "$_cache"/.*.tmp.* 2>/dev/null || true
@@ -418,7 +418,7 @@ prepare_mix_config() {
         printf 'cjk=%s\n' "$_cjk"
         printf 'latin=%s\n' "$_latin"
         printf 'digit=%s\n' "$_digit"
-        printf 'isolation=full-composite-v7\n'
+        printf 'isolation=full-composite-v8\n'
         printf 'characterIsolation=true\n'
         printf 'composite=true\n'
         printf 'xmlOverlay=false\n'
@@ -514,6 +514,14 @@ apply_mix() {
     if ! luoshu_payload_transaction_commit mix; then
         set_mix_error '无法提交复合字体负载事务，已恢复旧字体'
         return 7
+    fi
+    # Downloadable Fonts（GMS Fonts Provider）缓存劫持：Play 商店等 Google 系应用
+    # 不读系统分区字体，mix 链路同样需要同步 /data/fonts/files 才会应用。
+    # mix 负载的归一化锚点键是 mix-composite（不是单字体的 regular）。
+    if [ -f "$MODDIR/common/font_provider_cache.sh" ]; then
+        . "$MODDIR/common/font_provider_cache.sh"
+        MODULE_DIR="$MODDIR" luoshu_provider_cache_sync \
+            "$MODDIR/system/fonts/.luoshu-font-store/mix-composite.font" >/dev/null 2>&1 || true
     fi
     mix_stage complete '完整复合字体负载已准备完成' 100
     rm -f "$LOCK_FILE" 2>/dev/null || true
