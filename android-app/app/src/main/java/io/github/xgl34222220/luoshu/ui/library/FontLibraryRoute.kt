@@ -15,6 +15,7 @@ internal fun FontLibraryRoute(
     style: UiStyle,
     state: FontLibraryUiState,
     actions: FontLibraryActions,
+    topActions: @Composable () -> Unit = {},
 ) {
     var filter by rememberSaveable { mutableStateOf(FontLibraryFilter.ALL) }
     var sort by rememberSaveable { mutableStateOf(FontLibrarySort.ACTIVE_FIRST) }
@@ -37,8 +38,8 @@ internal fun FontLibraryRoute(
     }
 
     when (style) {
-        UiStyle.MATERIAL -> FontLibraryScreenMaterial(displayState, displayActions)
-        UiStyle.MIUIX -> FontLibraryScreenMiuix(displayState, displayActions)
+        UiStyle.MATERIAL -> FontLibraryScreenMaterial(displayState, displayActions, topActions)
+        UiStyle.MIUIX -> FontLibraryScreenMiuix(displayState, displayActions, topActions)
     }
 
     detailFont?.let { font ->

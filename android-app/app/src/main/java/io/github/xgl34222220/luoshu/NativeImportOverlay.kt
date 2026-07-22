@@ -54,13 +54,14 @@ internal fun NativeImportOverlay(
     viewModel: LuoShuViewModel,
     style: UiStyle,
     modifier: Modifier = Modifier,
+    embedded: Boolean = false,
 ) {
     val importViewModel = rememberNativeImportViewModel()
     val state = importViewModel.state
     var expanded by remember { mutableStateOf(true) }
 
-    LaunchedEffect(state.busy, state.paused, state.processed, state.total) {
-        if (state.busy || state.paused) {
+    LaunchedEffect(embedded, state.busy, state.paused, state.processed, state.total) {
+        if (embedded || state.busy || state.paused) {
             expanded = true
         } else {
             expanded = true
@@ -79,32 +80,66 @@ internal fun NativeImportOverlay(
         importViewModel.startImport(uris)
     }
 
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        FontMetadataInspector(
-            viewModel = viewModel,
-            style = style,
-        )
-        Spacer(Modifier.width(10.dp))
-        ImportActionButton(
-            style = style,
-            state = state,
-            expanded = expanded || state.busy || state.paused,
-            enabled = viewModel.snapshot.installed &&
-                !viewModel.operationBusy &&
-                !viewModel.mixState.busy &&
-                (!state.busy || state.paused),
-            onImport = {
-                if (state.paused) {
-                    importViewModel.resumeImport()
-                } else {
-                    launcher.launch(arrayOf("*/*"))
-                }
-            },
-        )
+    val importEnabled = viewModel.snapshot.installed &&
+        !viewModel.operationBusy &&
+        !viewModel.mixState.busy &&
+        (!state.busy || state.paused)
+    val onImport = {
+        if (state.paused) {
+            importViewModel.resumeImport()
+        } else {
+            launcher.launch(arrayOf("*/*"))
+        }
+    }
+
+    if (embedded) {
+        val tokens = LocalMiuixTokens.current
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(28.dp),
+            color = if (style == UiStyle.MIUIX) tokens.cardBackground else MaterialTheme.colorScheme.surfaceContainerLow,
+            shadowElevation = if (style == UiStyle.MIUIX) 4.dp else 2.dp,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .08f)),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FontMetadataInspector(
+                    viewModel = viewModel,
+                    style = style,
+                )
+                ImportActionButton(
+                    style = style,
+                    state = state,
+                    expanded = true,
+                    enabled = importEnabled,
+                    onImport = onImport,
+                    modifier = Modifier.weight(1f),
+                    embedded = true,
+                )
+            }
+        }
+    } else {
+        Row(
+            modifier = modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FontMetadataInspector(
+                viewModel = viewModel,
+                style = style,
+            )
+            Spacer(Modifier.width(10.dp))
+            ImportActionButton(
+                style = style,
+                state = state,
+                expanded = expanded || state.busy || state.paused,
+                enabled = importEnabled,
+                onImport = onImport,
+            )
+        }
     }
 
     if (state.resultVisible) {
@@ -123,6 +158,8 @@ private fun ImportActionButton(
     expanded: Boolean,
     enabled: Boolean,
     onImport: () -> Unit,
+    modifier: Modifier = Modifier,
+    embedded: Boolean = false,
 ) {
     val scheme = MaterialTheme.colorScheme
     val tokens = LocalMiuixTokens.current
@@ -133,7 +170,12 @@ private fun ImportActionButton(
         taskVisible -> 180.dp
         else -> 148.dp
     }
-    val targetHeight = if (taskVisible) 68.dp else 54.dp
+    val targetHeight = when {
+        embedded && taskVisible -> 68.dp
+        embedded -> 56.dp
+        taskVisible -> 68.dp
+        else -> 54.dp
+    }
     val width by animateDpAsState(
         targetValue = targetWidth,
         animationSpec = spring(dampingRatio = .78f, stiffness = 430f),
@@ -145,6 +187,8 @@ private fun ImportActionButton(
         label = "nativeImportGlassHeight",
     )
     val glassColor = when {
+        embedded && style == UiStyle.MIUIX -> scheme.primary.copy(alpha = if (dark) .18f else .10f)
+        embedded -> scheme.primaryContainer.copy(alpha = if (dark) .46f else .62f)
         style == UiStyle.MIUIX -> tokens.elevatedCardBackground.copy(alpha = if (dark) .76f else .72f)
         dark -> scheme.surfaceContainerHigh.copy(alpha = .72f)
         else -> Color.White.copy(alpha = .70f)
@@ -152,15 +196,20 @@ private fun ImportActionButton(
     val borderColor = if (dark) Color.White.copy(alpha = .14f) else Color.White.copy(alpha = .82f)
     val textColor = if (style == UiStyle.MIUIX) tokens.textPrimary else scheme.onSurface
 
+    val buttonModifier = if (embedded) {
+        modifier.fillMaxWidth().height(height)
+    } else {
+        modifier.width(width).height(height)
+    }
     Surface(
         onClick = onImport,
         enabled = enabled,
-        modifier = Modifier.width(width).height(height),
-        shape = CircleShape,
+        modifier = buttonModifier,
+        shape = if (embedded) RoundedCornerShape(20.dp) else CircleShape,
         color = glassColor,
         contentColor = scheme.primary,
-        shadowElevation = if (style == UiStyle.MIUIX) 14.dp else 12.dp,
-        border = BorderStroke(1.dp, borderColor),
+        shadowElevation = if (embedded) 0.dp else if (style == UiStyle.MIUIX) 14.dp else 12.dp,
+        border = BorderStroke(1.dp, if (embedded) scheme.primary.copy(alpha = .10f) else borderColor),
     ) {
         if (!expanded) {
             Box(contentAlignment = Alignment.Center) {
@@ -169,10 +218,13 @@ private fun ImportActionButton(
         } else {
             Column(
                 modifier = Modifier.padding(horizontal = 14.dp, vertical = if (taskVisible) 10.dp else 12.dp),
-                horizontalAlignment = Alignment.End,
+                horizontalAlignment = if (embedded) Alignment.CenterHorizontally else Alignment.End,
                 verticalArrangement = Arrangement.Center,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
                     when {
                         state.busy -> CircularProgressIndicator(
                             modifier = Modifier.size(19.dp),
@@ -191,7 +243,7 @@ private fun ImportActionButton(
                         },
                         color = textColor,
                         fontWeight = FontWeight.Black,
-                        fontSize = 15.sp,
+                        fontSize = if (embedded) 14.sp else 15.sp,
                         maxLines = 1,
                         softWrap = false,
                     )

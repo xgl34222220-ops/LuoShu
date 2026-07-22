@@ -6,11 +6,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -59,13 +61,15 @@ import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 internal fun FontLibraryScreenMiuix(
     state: FontLibraryUiState,
     actions: FontLibraryActions,
+    topActions: @Composable () -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 132.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item { MiuixLibraryHeader(state, actions.refresh) }
+        item { topActions() }
         item { MiuixBrowsePanel(state, actions) }
 
         if (state.loading || state.operationBusy) {
@@ -133,8 +137,8 @@ private fun MiuixLibraryHeader(state: FontLibraryUiState, onRefresh: () -> Unit)
             Text(
                 "字体库",
                 color = tokens.textPrimary,
-                fontSize = 42.sp,
-                lineHeight = 47.sp,
+                fontSize = 38.sp,
+                lineHeight = 43.sp,
                 fontWeight = FontWeight.Black,
             )
             Text(
@@ -163,9 +167,9 @@ private fun MiuixLibraryHeader(state: FontLibraryUiState, onRefresh: () -> Unit)
 private fun MiuixBrowsePanel(state: FontLibraryUiState, actions: FontLibraryActions) {
     val tokens = LocalMiuixTokens.current
     Card(
-        shape = RoundedCornerShape(34.dp),
+        shape = RoundedCornerShape(30.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 7.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
     ) {
         Column(Modifier.padding(12.dp)) {
             OutlinedTextField(
@@ -269,9 +273,9 @@ private fun MiuixSectionLabel(title: String, subtitle: String) {
 private fun MiuixSystemFontRow(active: Boolean, busy: Boolean, onRestore: () -> Unit) {
     val tokens = LocalMiuixTokens.current
     Card(
-        shape = RoundedCornerShape(32.dp),
+        shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(17.dp),
@@ -312,35 +316,43 @@ private fun MiuixFontCard(
     onDelete: () -> Unit,
 ) {
     val tokens = LocalMiuixTokens.current
-    val shape = RoundedCornerShape(34.dp)
+    val shape = RoundedCornerShape(28.dp)
     Card(
-        modifier = Modifier.fillMaxWidth().shadow(if (active) 10.dp else 6.dp, shape, clip = false),
+        modifier = Modifier.fillMaxWidth().shadow(if (active) 8.dp else 3.dp, shape, clip = false),
         shape = shape,
         colors = CardDefaults.cardColors(
-            containerColor = if (font.valid) tokens.cardBackground else MaterialTheme.colorScheme.errorContainer.copy(alpha = .48f),
+            containerColor = if (font.valid) tokens.cardBackground else MaterialTheme.colorScheme.errorContainer.copy(alpha = .42f),
         ),
     ) {
-        Column(Modifier.padding(horizontal = 16.dp, vertical = 15.dp)) {
+        Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    modifier = Modifier.size(48.dp).clickable(onClick = onDetails),
-                    shape = RoundedCornerShape(17.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
+                    modifier = Modifier.size(52.dp).clickable(onClick = onDetails),
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("Aa", color = MaterialTheme.colorScheme.primary, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                        Text("Aa", color = MaterialTheme.colorScheme.primary, fontSize = 17.sp, fontWeight = FontWeight.Black)
                     }
                 }
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f).clickable(onClick = onDetails)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 52.dp)
+                        .clickable(onClick = onDetails),
+                    verticalArrangement = Arrangement.Center,
+                ) {
                     Text(
                         font.name,
                         color = tokens.textPrimary,
-                        fontSize = 17.sp,
+                        fontSize = 18.sp,
+                        lineHeight = 22.sp,
                         fontWeight = FontWeight.Black,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    Spacer(Modifier.height(2.dp))
                     Text(
                         listOf(font.format, font.size, font.date).filter { it.isNotBlank() }.joinToString(" · "),
                         color = tokens.textSecondary,
@@ -350,77 +362,191 @@ private fun MiuixFontCard(
                     )
                 }
                 if (!active) {
-                    IconButton(onClick = onDelete, enabled = !busy) {
-                        Icon(Icons.Rounded.Delete, contentDescription = "删除字体", tint = tokens.textSecondary)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-            Surface(
-                modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails),
-                shape = RoundedCornerShape(24.dp),
-                color = tokens.textPrimary.copy(alpha = .038f),
-            ) {
-                NativeFontPreview(
-                    font = font,
-                    text = fontPreviewText(font),
-                    axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
-                    modifier = Modifier.fillMaxWidth().height(80.dp).padding(horizontal = 16.dp, vertical = 12.dp),
-                    textSizeSp = 23f,
-                    maxLines = 1,
-                )
-            }
-
-            if (!font.valid && font.error.isNotBlank()) {
-                Spacer(Modifier.height(9.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(font.error, color = MaterialTheme.colorScheme.error, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-            }
-
-            Spacer(Modifier.height(11.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f))
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                MiuixLibraryPill(fontCapabilityLabel(font), MaterialTheme.colorScheme.primary)
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onDetails) { Text("详情") }
-                if (active) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = tokens.success, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(5.dp))
-                        Text("当前使用", color = tokens.success, fontSize = 12.sp, fontWeight = FontWeight.Black)
-                    }
-                } else {
                     Surface(
-                        modifier = Modifier.clickable(enabled = font.valid && !busy, onClick = onApply),
-                        shape = RoundedCornerShape(17.dp),
-                        color = if (font.valid && !busy) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        onClick = onDelete,
+                        enabled = !busy,
+                        modifier = Modifier.size(40.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        color = tokens.textPrimary.copy(alpha = .055f),
+                        contentColor = tokens.textSecondary,
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 15.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "应用",
-                                color = if (font.valid && !busy) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 12.sp,
-                            )
-                            Spacer(Modifier.width(4.dp))
+                        Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                Icons.Rounded.ChevronRight,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                                tint = if (font.valid && !busy) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                Icons.Rounded.Delete,
+                                contentDescription = "删除字体",
+                                modifier = Modifier.size(20.dp),
                             )
                         }
                     }
                 }
             }
+
+            Spacer(Modifier.height(13.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails),
+                shape = RoundedCornerShape(22.dp),
+                color = tokens.textPrimary.copy(alpha = .035f),
+            ) {
+                NativeFontPreview(
+                    font = font,
+                    text = fontPreviewText(font),
+                    axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
+                    modifier = Modifier.fillMaxWidth().height(88.dp).padding(horizontal = 15.dp, vertical = 14.dp),
+                    textSizeSp = 22f,
+                    maxLines = 1,
+                )
+            }
+
+            if (!font.valid && font.error.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Rounded.Warning,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        font.error,
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 10.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .34f))
+            Spacer(Modifier.height(11.dp))
+            MiuixCapabilityStrip(fontCapabilityLabel(font))
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                MiuixCardAction(
+                    label = "查看详情",
+                    primary = false,
+                    enabled = true,
+                    onClick = onDetails,
+                    modifier = Modifier.weight(1f),
+                )
+                if (active) {
+                    MiuixCurrentAction(modifier = Modifier.weight(1f), color = tokens.success)
+                } else {
+                    MiuixCardAction(
+                        label = "应用字体",
+                        primary = true,
+                        enabled = font.valid && !busy,
+                        onClick = onApply,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiuixCapabilityStrip(text: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = .075f),
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+            color = MaterialTheme.colorScheme.primary,
+            fontSize = 10.sp,
+            lineHeight = 14.sp,
+            fontWeight = FontWeight.Black,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun MiuixCardAction(
+    label: String,
+    primary: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val container = when {
+        primary && enabled -> scheme.primary
+        primary -> scheme.surfaceVariant
+        else -> scheme.surfaceContainerHigh
+    }
+    val content = when {
+        primary && enabled -> scheme.onPrimary
+        primary -> scheme.onSurfaceVariant
+        else -> scheme.onSurface
+    }
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.defaultMinSize(minHeight = 44.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = container,
+        contentColor = content,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                label,
+                color = content,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                softWrap = false,
+            )
+            if (primary) {
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    Icons.Rounded.ChevronRight,
+                    contentDescription = null,
+                    modifier = Modifier.size(17.dp),
+                    tint = content,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiuixCurrentAction(modifier: Modifier = Modifier, color: Color) {
+    Surface(
+        modifier = modifier.defaultMinSize(minHeight = 44.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = color.copy(alpha = .11f),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = color, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(
+                "正在使用",
+                color = color,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                softWrap = false,
+            )
         }
     }
 }
@@ -510,6 +636,9 @@ private fun MiuixLibraryPill(text: String, color: Color) {
             color = color,
             fontSize = 10.sp,
             fontWeight = FontWeight.Black,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }

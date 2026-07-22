@@ -61,13 +61,15 @@ import io.github.xgl34222220.luoshu.ui.font.fontPreviewText
 internal fun FontLibraryScreenMaterial(
     state: FontLibraryUiState,
     actions: FontLibraryActions,
+    topActions: @Composable () -> Unit = {},
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 132.dp),
+        contentPadding = PaddingValues(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item { MaterialLibraryHeader(state, actions.refresh) }
+        item { topActions() }
         item { MaterialLibraryOverview(state) }
         item { MaterialBrowsePanel(state, actions) }
 
