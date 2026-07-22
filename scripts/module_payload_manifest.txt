@@ -16,6 +16,7 @@ common/font_coverage.sh
 common/font_coverage_info.py
 common/font_details.sh
 common/font_extract_faces.py
+common/font_finalize_hotfix.sh
 common/font_import.sh
 common/font_import_compat.sh
 common/font_import_probe.py
