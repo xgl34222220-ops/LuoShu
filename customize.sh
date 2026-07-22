@@ -56,7 +56,7 @@ mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPA
 OLD_MOD="/data/adb/modules/LuoShu"
 UPDATE_PRESERVED=false
 
-# 更新安装继承当前活动字体与各分区负载；只清理任务、缓存、PID 和旧待重启标记。
+# 更新安装先继承活动配置与旧负载作为事务回滚输入；架构过期时会在安装阶段重建。
 if type luoshu_migrate_active_install >/dev/null 2>&1; then
     if luoshu_migrate_active_install "$OLD_MOD" "$MODPATH"; then
         UPDATE_PRESERVED=true
@@ -71,7 +71,8 @@ if [ "$UPDATE_PRESERVED" != true ]; then
     for _state in previous_font.conf switch_task.conf mix_task.conf axes_task.conf text_reboot_required.conf \
                   font_weight_reboot_required.conf active_emoji.conf emoji_task.conf emoji_reboot_required.conf \
                   webui_font_list.json webui_font_list.key native_font_index.json native_font_index.key \
-                  app_install_pending app_install_state.conf app_install_manual; do
+                  app_install_pending app_install_state.conf app_install_manual font-payload-schema.conf \
+                  font-payload-rebuild-pending.conf font-payload-boot.conf font-payload-manifest.conf; do
         rm -f "$MODPATH/config/$_state" 2>/dev/null || true
     done
     rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" \
@@ -106,7 +107,9 @@ if [ "$UPDATE_PRESERVED" = true ]; then
     _preserved_font=$(head -n1 "$MODPATH/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
     [ -n "$_preserved_font" ] || _preserved_font=default
     ui_print "✓ 已继承当前字体：$_preserved_font"
-    ui_print "✓ 更新后只需重启一次，无需重新应用字体"
+    if [ "${LUOSHU_UPDATE_REBUILD_FAILED:-false}" != true ]; then
+        ui_print "✓ 更新后只需重启一次，无需重新应用字体"
+    fi
 else
     ui_print "✓ 当前保持系统默认字体"
 fi
