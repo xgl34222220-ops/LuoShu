@@ -35,6 +35,7 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
+[ -f "$MODDIR/common/mix_task_handoff.sh" ] && . "$MODDIR/common/mix_task_handoff.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -254,14 +255,29 @@ worker() {
     }
 
     update_task "$_wanted" running '正在启动完整复合字体引擎' 34 '' ''
-    _output=$(LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$BASE_ENGINE" start LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit 2>&1)
-    _child=$(printf '%s\n' "$_output" | sed -n 's/^.*"task":"\([^"]*\)".*$/\1/p' | tail -n1)
+    _previous_child=$(read_value "$BASE_TASK_FILE" task)
+    _response_file="$_root/base-engine-start.json"
+    : >"$_response_file" 2>/dev/null || true
+    LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$BASE_ENGINE" start \
+        LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit >"$_response_file" 2>&1
+    _child=""
+    if type luoshu_resolve_nested_mix_task >/dev/null 2>&1; then
+        _child=$(luoshu_resolve_nested_mix_task "$_response_file" "$BASE_TASK_FILE" "$_previous_child" \
+            LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit 2>/dev/null)
+    else
+        _child=$(sed -n 's/^.*"task":"\([^"]*\)".*$/\1/p' "$_response_file" 2>/dev/null | tail -n1)
+    fi
     if [ -z "$_child" ]; then
-        _message=$(printf '%s\n' "$_output" | sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' | tail -n1)
-        [ -n "$_message" ] || _message='无法启动完整复合字体引擎'
+        if type luoshu_mix_task_message_from_response >/dev/null 2>&1; then
+            _message=$(luoshu_mix_task_message_from_response "$_response_file" 2>/dev/null)
+        else
+            _message=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_response_file" 2>/dev/null | tail -n1)
+        fi
+        [ -n "$_message" ] || _message='完整复合字体任务未登记，启动输出为空'
         update_task "$_wanted" failed "$_message" 100 '' "$(date +%s)"
         rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1
     fi
+    rm -f "$_response_file" 2>/dev/null || true
 
     update_task "$_wanted" running '完整复合字体正在后台生成' 36 "$_child" ''
     _loops=0

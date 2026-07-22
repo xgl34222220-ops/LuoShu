@@ -30,4 +30,6 @@ grep -q 'luoshu_start_detached.*worker' "$ROOT/common/font_mix.sh"
 _PRECHECK_COUNT=$(grep -Fc 'precheck_mix "$2" "$3" "$4"' "$ROOT/common/v14_mix.sh")
 [ "$_PRECHECK_COUNT" -eq 1 ]
 grep -q '多字重引擎会在独立 Root Worker 内完成角色检查' "$ROOT/common/v14_mix.sh"
-echo 'Detached root font workers survive their submitting shell and weighted jobs queue immediately.'
+# 嵌套完整复合引擎即使丢失启动输出，也必须从持久化任务文件接管。
+sh "$ROOT/scripts/nested_mix_task_handoff_test.sh"
+echo 'Detached root font workers survive their submitting shell, nested handoff, and weighted jobs queue immediately.'
