@@ -105,6 +105,7 @@ jobs:
             common/font_mix.sh \
             scripts/module_payload_manifest.txt \
             scripts/check.sh \
+            scripts/stability_test.sh \
             scripts/font_metrics_normalization_test.py \
             scripts/font_config_monospace_test.py \
             android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt \
