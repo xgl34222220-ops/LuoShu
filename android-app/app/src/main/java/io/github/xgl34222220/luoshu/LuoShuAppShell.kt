@@ -188,6 +188,8 @@ internal fun LuoShuAppShell(
         val materialHazeActive = appearance.uiStyle == UiStyle.MATERIAL &&
             appearance.blurEnabled && appearance.glassEnabled
         val hazeState = rememberHazeState(blurEnabled = materialHazeActive)
+        val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val libraryDockClearance = navigationBottom + if (appearance.floatingDock) 84.dp else 68.dp
         val contentModifier = Modifier
             .fillMaxSize()
             .then(if (materialHazeActive) Modifier.hazeSource(state = hazeState) else Modifier)
@@ -219,11 +221,23 @@ internal fun LuoShuAppShell(
                             state = viewModel.snapshot.toHomeUiState(features.systemWeight),
                             actions = homeActions,
                         )
-                        AppPage.Library -> FontLibraryRoute(
-                            style = appearance.uiStyle,
-                            state = viewModel.toFontLibraryUiState(),
-                            actions = libraryActions,
-                        )
+                        AppPage.Library -> Box(
+                            modifier = Modifier.fillMaxSize().padding(bottom = libraryDockClearance),
+                        ) {
+                            FontLibraryRoute(
+                                style = appearance.uiStyle,
+                                state = viewModel.toFontLibraryUiState(),
+                                actions = libraryActions,
+                                topActions = {
+                                    NativeImportOverlay(
+                                        viewModel = viewModel,
+                                        style = appearance.uiStyle,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        embedded = true,
+                                    )
+                                },
+                            )
+                        }
                         AppPage.Studio -> FontStudioRoute(
                             style = appearance.uiStyle,
                             state = viewModel.toFontStudioUiState(features),
@@ -259,7 +273,7 @@ internal fun LuoShuAppShell(
                 )
             }
 
-            if (page == AppPage.Library || page == AppPage.Studio) {
+            if (page == AppPage.Studio) {
                 NativeImportOverlay(
                     viewModel = viewModel,
                     style = appearance.uiStyle,
@@ -458,16 +472,16 @@ private fun MiuixAppDock(
     val dark = scheme.background.luminance() < .5f
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val floating = appearance.floatingDock
-    val shape = if (floating) RoundedCornerShape(34.dp) else RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp)
+    val shape = if (floating) RoundedCornerShape(30.dp) else RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)
     BoxWithConstraints(
         modifier = modifier
-            .then(if (floating) Modifier.padding(horizontal = 16.dp).padding(bottom = bottomInset + 10.dp) else Modifier)
+            .then(if (floating) Modifier.padding(horizontal = 14.dp).padding(bottom = bottomInset + 8.dp) else Modifier)
             .fillMaxWidth()
-            .shadow(if (floating) 22.dp else 8.dp, shape, clip = false)
+            .shadow(if (floating) 14.dp else 6.dp, shape, clip = false)
             .clip(shape)
             .background(tokens.elevatedCardBackground.copy(alpha = .98f))
-            .border(1.dp, if (dark) Color.White.copy(alpha = .12f) else Color.White.copy(alpha = .82f), shape)
-            .padding(start = 6.dp, top = 7.dp, end = 6.dp, bottom = if (floating) 7.dp else bottomInset + 7.dp),
+            .border(1.dp, if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .62f), shape)
+            .padding(start = 5.dp, top = 5.dp, end = 5.dp, bottom = if (floating) 5.dp else bottomInset + 5.dp),
     ) {
         val itemWidth = maxWidth / AppPage.entries.size.toFloat()
         val targetIndex = current.ordinal.coerceIn(AppPage.entries.indices)
@@ -478,18 +492,11 @@ private fun MiuixAppDock(
         )
         Box(
             modifier = Modifier
-                .offset(x = indicatorX + 4.dp)
-                .width(itemWidth - 8.dp)
-                .height(58.dp)
-                .clip(RoundedCornerShape(24.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            scheme.primary.copy(alpha = if (dark) .28f else .20f),
-                            scheme.tertiary.copy(alpha = if (dark) .20f else .13f),
-                        ),
-                    ),
-                ),
+                .offset(x = indicatorX + 6.dp)
+                .width(itemWidth - 12.dp)
+                .height(54.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(scheme.primary.copy(alpha = if (dark) .20f else .12f)),
         )
         Row(Modifier.fillMaxWidth()) {
             AppPage.entries.forEach { page ->
@@ -497,8 +504,8 @@ private fun MiuixAppDock(
                 Column(
                     modifier = Modifier
                         .width(itemWidth)
-                        .height(58.dp)
-                        .clip(RoundedCornerShape(24.dp))
+                        .height(54.dp)
+                        .clip(RoundedCornerShape(20.dp))
                         .clickable { onSelect(page) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
@@ -506,7 +513,7 @@ private fun MiuixAppDock(
                     Icon(
                         page.icon,
                         contentDescription = page.label,
-                        modifier = Modifier.size(if (selected) 22.dp else 20.dp),
+                        modifier = Modifier.size(if (selected) 21.dp else 19.dp),
                         tint = if (selected) scheme.primary else scheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(3.dp))
