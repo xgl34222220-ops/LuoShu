@@ -109,7 +109,7 @@ grep -q 'native_font_index.json' "$ROOT/service.sh"
 ! grep -qE '重启界面|刷新字体缓存|回滚' "$ROOT/common/luoshu_cli.sh"
 
 # 字体处理、安全门禁和原生桥能力必须保留。
-grep -q 'full-composite-v6' "$ROOT/common/font_mix.sh"
+grep -q 'full-composite-v7' "$ROOT/common/font_mix.sh"
 grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
 grep -q 'weighted_mix_task.sh' "$ROOT/common/font_mix_controller.sh"
 grep -q 'multiweight_mix_task.sh' "$ROOT/common/font_mix_controller.sh"
@@ -229,4 +229,4 @@ echo 'LuoShu App-only source checks passed.'
 grep -q 'native-v3' common/font_manager.sh
 grep -q 'manifest-fast' common/font_manager.sh
 grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
-grep -q 'prepared-v3' common/multiweight_mix_task.sh
+grep -q 'prepared-v4' common/multiweight_mix_task.sh

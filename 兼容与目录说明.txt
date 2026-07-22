@@ -1,13 +1,13 @@
-洛书 v2.0.0
+洛书 v2.0.1
 
 Android 无 Hook 全局字体引擎：
 - 原生 Android App 负责字体导入、预览、组合、应用与任务恢复
 - 中文字体作为完整基底，英文与数字只替换对应字形和度量
-- 生成 100–900 九档静态字重，并保持 Emoji、图标、等宽和专用字体原样
+- 生成 100–900 九档静态字重与安全等宽派生族，并保持 Emoji、图标、衬线和专用字体原样
 - 基于设备原始 fonts.xml、font_fallback.xml 与 OEM 配置生成 systemless overlay
 - 不直接修改只读系统分区，也不读写 Android 动态字体数据库 /data/fonts
 - 字体负载经过生成、校验、暂存和原子提交，失败时保留旧有效配置
-- 支持 Magisk、KernelSU、SukiSU Ultra、APatch 与 Mountify
+- 支持 Magisk、KernelSU、SukiSU Ultra、APatch、Mountify 与 Magic Mount RC/RS
 
 用户字体目录：/sdcard/LuoShu/fonts
 安全导入目录：/sdcard/LuoShu/import

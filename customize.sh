@@ -53,6 +53,10 @@ fi
 [ "$MOUNTIFY_ACTIVE" = true ] && ui_print "✓ Mountify：已启用" || ui_print "• 元模块推荐：Mountify（可选）"
 
 mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" 2>/dev/null || true
+# Installing/updating the module is an explicit enable action. Older LuoShu builds could leave a
+# self-created disable marker after two payload guard failures; never carry that fatal marker into
+# the freshly installed module.
+rm -f "$MODPATH/disable" "$MODPATH/remove" 2>/dev/null || true
 OLD_MOD="/data/adb/modules/LuoShu"
 UPDATE_PRESERVED=false
 

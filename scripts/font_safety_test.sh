@@ -38,6 +38,16 @@ fi
 [ ! -d "$MODDIR/system/fonts" ]
 [ "$(cat "$MODDIR/config/active_font.conf")" = default ]
 [ ! -e "$MODDIR/config/font-payload-schema.conf" ]
+[ ! -e "$MODDIR/disable" ]
+[ -s "$MODDIR/config/font-payload-quarantine.conf" ]
+
+# Repeated recoverable font failures must never disable the entire module.
+mkdir -p "$MODDIR/system/fonts"
+dd if=/dev/zero of="$MODDIR/system/fonts/Test.ttf" bs=2048 count=1 2>/dev/null
+printf 'Demo\n' >"$MODDIR/config/active_font.conf"
+luoshu_payload_quarantine
+[ "$(cat "$MODDIR/config/font-boot-failures")" -ge 2 ]
+[ ! -e "$MODDIR/disable" ]
 
 # A completed boot keeps the current schema and resets failure history.
 mkdir -p "$MODDIR/system/fonts"

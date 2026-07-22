@@ -11,7 +11,7 @@ _luoshu_safety_config() {
     printf '%s/config\n' "$(_luoshu_safety_module)"
 }
 
-LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v6-mono-v1}"
+LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v7-mono-v2}"
 
 luoshu_payload_schema_current() {
     printf '%s\n' "$LUOSHU_PAYLOAD_SCHEMA_CURRENT"
@@ -463,7 +463,14 @@ luoshu_payload_quarantine() {
           "$_lpq_config/font-payload-schema.conf" "$_lpq_config/font-payload-rebuild-pending.conf" \
           "$_lpq_config/font-target-aliases.conf" "$_lpq_config/font-target-coverage.conf" \
           "$_lpq_config/font-config-overlay.conf" 2>/dev/null || true
-    [ "$_lpq_fail" -lt 2 ] || touch "$_lpq_module/disable" 2>/dev/null || true
+    # Quarantine only the generated font payload. Disabling the whole module makes both
+    # "restore default" and the next explicit font retry impossible, so a recoverable font
+    # validation failure must never create the root manager's disable marker.
+    {
+        printf 'state=quarantined\n'
+        printf 'failures=%s\n' "$_lpq_fail"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$_lpq_config/font-payload-quarantine.conf" 2>/dev/null || true
     _luoshu_safety_log ERROR "检测到上次字体负载未完成开机，已撤销全部字体覆盖（failure=$_lpq_fail）"
 }
 
@@ -526,7 +533,7 @@ font_config_mark_boot_success() {
 ' "$(date +%s)"
     } > "$_lmbs_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || return 1
     mv -f "$_lmbs_config/font-payload-boot.conf.tmp.$$" "$_lmbs_config/font-payload-boot.conf" 2>/dev/null || return 1
-    rm -f "$_lmbs_config/font-boot-failures" 2>/dev/null || true
+    rm -f "$_lmbs_config/font-boot-failures" "$_lmbs_config/font-payload-quarantine.conf" 2>/dev/null || true
     printf 'time=%s
 ' "$(date +%s)" > "$_lmbs_config/font-last-boot-success.conf" 2>/dev/null || true
     chmod 0644 "$_lmbs_config/font-payload-boot.conf" "$_lmbs_config/font-last-boot-success.conf" 2>/dev/null || true

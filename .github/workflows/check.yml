@@ -164,7 +164,7 @@ jobs:
           unzip -p "$module" LICENSE | grep -q 'GNU GENERAL PUBLIC LICENSE'
           unzip -p "$module" LICENSE | grep -q 'Version 3, 29 June 2007'
           unzip -p "$module" NOTICE.md | grep -q 'GPL-3.0-only'
-          unzip -p "$module" common/font_mix.sh | grep -q 'full-composite-v6'
+          unzip -p "$module" common/font_mix.sh | grep -q 'full-composite-v7'
           unzip -p "$module" common/font_mix_controller.sh | grep -q 'font_role_check.sh'
           unzip -p "$module" common/app_bridge.sh | grep -q 'common/font_mix_controller.sh'
           unzip -p "$module" common/app_bridge.sh | grep -q 'native_import.sh'

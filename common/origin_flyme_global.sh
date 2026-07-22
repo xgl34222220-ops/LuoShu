@@ -458,7 +458,13 @@ luoshu_payload_quarantine() {
     rm -f "$_lpq_config/font-payload-boot.conf" "$_lpq_config/font-payload-manifest.conf" \
           "$_lpq_config/font-target-aliases.conf" "$_lpq_config/font-target-coverage.conf" \
           "$_lpq_config/font-config-overlay.conf" "$_lpq_config/oem-font-targets.conf" 2>/dev/null || true
-    [ "$_lpq_fail" -lt 2 ] || touch "$_lpq_module/disable" 2>/dev/null || true
+    # A bad generated font payload is recoverable and must not disable the whole module.
+    # Keep the App and restore-default path available for an explicit retry.
+    {
+        printf 'state=quarantined\n'
+        printf 'failures=%s\n' "$_lpq_fail"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$_lpq_config/font-payload-quarantine.conf" 2>/dev/null || true
     type _luoshu_safety_log >/dev/null 2>&1 && _luoshu_safety_log ERROR "检测到上次字体负载未完成开机，已撤销全部字体覆盖（failure=$_lpq_fail）"
 }
 

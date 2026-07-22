@@ -15,12 +15,17 @@ export MODULE_DIR MODDIR USER_FONTS_DIR LUOSHU_SYSTEM_FONTS_ROOT LUOSHU_PRODUCT_
 mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/product/fonts" "$MODULE_DIR/system_ext/fonts" \
     "$USER_FONTS_DIR" "$LUOSHU_SYSTEM_FONTS_ROOT" "$LUOSHU_PRODUCT_FONTS_ROOT" "$LUOSHU_SYSTEM_EXT_FONTS_ROOT"
 printf 'regular-source\n' > "$USER_FONTS_DIR/Demo-Regular.ttf"
+printf 'medium-source\n' > "$USER_FONTS_DIR/Demo-Medium.ttf"
 printf 'bold-source\n' > "$USER_FONTS_DIR/Demo-Bold.ttf"
 printf 'stock-core\n' > "$LUOSHU_PRODUCT_FONTS_ROOT/MiSansVF.ttf"
 printf 'stock-overlay\n' > "$LUOSHU_SYSTEM_EXT_FONTS_ROOT/MiSansVF_Overlay.ttf"
 printf 'stock-400\n' > "$LUOSHU_SYSTEM_FONTS_ROOT/400.ttf"
 printf 'stock-700\n' > "$LUOSHU_PRODUCT_FONTS_ROOT/700.ttf"
 printf 'stock-metrics\n' > "$LUOSHU_SYSTEM_FONTS_ROOT/Roboto-Regular.ttf"
+printf 'stock-italic\n' > "$LUOSHU_SYSTEM_FONTS_ROOT/Roboto-Italic.ttf"
+printf 'stock-google-regular\n' > "$LUOSHU_PRODUCT_FONTS_ROOT/GoogleSansText-Regular.ttf"
+printf 'stock-google-medium\n' > "$LUOSHU_PRODUCT_FONTS_ROOT/GoogleSansText-Medium.ttf"
+printf 'stock-google-bold\n' > "$LUOSHU_PRODUCT_FONTS_ROOT/GoogleSansText-Bold.ttf"
 printf 'stale-overlay\n' > "$MODULE_DIR/system/fonts/Roboto-Regular.ttf"
 
 _font_store_reset() {
@@ -42,7 +47,7 @@ detect_font_family() {
     printf '%s\n' "$_name"
 }
 detect_font_weight() {
-    case "$1" in *-Bold.*) printf 'bold\n' ;; *) printf 'regular\n' ;; esac
+    case "$1" in *-Bold.*) printf 'bold\n' ;; *-Medium.*) printf 'medium\n' ;; *) printf 'regular\n' ;; esac
 }
 is_variable_font() { return 1; }
 _log_step() { :; }
@@ -55,9 +60,13 @@ test "$(cat "$MODULE_DIR/system_ext/fonts/MiSansVF_Overlay.ttf")" = 'regular-sou
 test "$(cat "$MODULE_DIR/system/fonts/400.ttf")" = 'regular-source'
 test "$(cat "$MODULE_DIR/product/fonts/700.ttf")" = 'bold-source'
 test ! -e "$MODULE_DIR/system/fonts/MiSansVF.ttf"
-test ! -e "$MODULE_DIR/system/fonts/Roboto-Regular.ttf"
+test "$(cat "$MODULE_DIR/system/fonts/Roboto-Regular.ttf")" = 'regular-source'
 test ! -e "$MODULE_DIR/product/fonts/Roboto-Regular.ttf"
 test ! -e "$MODULE_DIR/system_ext/fonts/Roboto-Regular.ttf"
+test ! -e "$MODULE_DIR/system/fonts/Roboto-Italic.ttf"
+test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Regular.ttf")" = 'regular-source'
+test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Medium.ttf")" = 'medium-source'
+test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Bold.ttf")" = 'bold-source'
 printf 'HyperOS global mapping tests passed.\n'
 
 # Keep OEM partition regressions in the always-on source gate.
