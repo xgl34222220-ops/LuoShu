@@ -1,0 +1,170 @@
+# Runtime payload and source gates.
+replace_once(
+    'scripts/module_payload_manifest.txt',
+    'common/font_metadata.py\ncommon/font_mix.sh',
+    'common/font_metadata.py\ncommon/font_metrics_normalize.py\ncommon/font_mix.sh',
+)
+replace_once(
+    'scripts/check.sh',
+    '  "$ROOT/common/font_instance.py" \\\n  "$ROOT/common/font_coverage.py"',
+    '  "$ROOT/common/font_instance.py" \\\n  "$ROOT/common/font_metrics_normalize.py" \\\n  "$ROOT/common/font_coverage.py"',
+)
+replace_once(
+    'scripts/check.sh',
+    '  common/composite_font.py common/font_instance.py common/font_coverage.py common/font_axis_info.py \\\n',
+    '  common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \\\n',
+)
+replace_once(
+    'scripts/check.sh',
+    '  scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh \\\n',
+    '  scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_config_monospace_test.py \\\n',
+)
+replace_once('scripts/check.sh', "grep -q 'full-composite-v5' \"$ROOT/common/font_mix.sh\"", "grep -q 'full-composite-v6' \"$ROOT/common/font_mix.sh\"")
+replace_once(
+    'scripts/check.sh',
+    'grep -q -- \'--axes\' "$ROOT/common/font_instance.py"\n',
+    'grep -q -- \'--axes\' "$ROOT/common/font_instance.py"\ngrep -q \'normalize_font_metrics\' "$ROOT/common/font_instance.py"\ngrep -q \'LuoShuMono\' "$ROOT/common/font_config_overlay.py"\n',
+)
+replace_once(
+    'scripts/check.sh',
+    'sh "$ROOT/scripts/font_config_variable_weight_test.sh"\n',
+    'sh "$ROOT/scripts/font_config_variable_weight_test.sh"\npython3 "$ROOT/scripts/font_metrics_normalization_test.py"\npython3 "$ROOT/scripts/font_config_monospace_test.py"\n',
+)
+
+METRICS_TEST = r'''#!/usr/bin/env python3
+from __future__ import annotations
+
+import sys
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+
+from fontTools.fontBuilder import FontBuilder
+from fontTools.pens.boundsPen import BoundsPen
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTFont
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "common"))
+from composite_font import build  # noqa: E402
+from font_metrics_normalize import normalize_path  # noqa: E402
+
+
+def rectangle(x0: int, y0: int, x1: int, y1: int):
+    pen = TTGlyphPen(None)
+    pen.moveTo((x0, y0)); pen.lineTo((x1, y0)); pen.lineTo((x1, y1)); pen.lineTo((x0, y1)); pen.closePath()
+    return pen.glyph()
+
+
+def make_font(path: Path, latin_bottom: int, latin_top: int, digit_bottom: int, digit_top: int, extreme_metrics: bool = False) -> None:
+    glyph_order = [".notdef", "space", "A", "H", "I", "O", "X", "E", "x", "g", "j", "p", "q", "y", "zero", "one", "eight", "nine", "uni4E2D", "uni56FD", "uni6C38"]
+    glyphs = {name: rectangle(50, 0, 550, 700) for name in glyph_order}
+    glyphs[".notdef"] = rectangle(50, 0, 550, 700)
+    glyphs["space"] = TTGlyphPen(None).glyph()
+    for name in ("A", "H", "I", "O", "X", "E", "x", "g", "j", "p", "q", "y"):
+        glyphs[name] = rectangle(70, latin_bottom, 530, latin_top)
+    for name in ("zero", "one", "eight", "nine"):
+        glyphs[name] = rectangle(90, digit_bottom, 510, digit_top)
+    for name in ("uni4E2D", "uni56FD", "uni6C38"):
+        glyphs[name] = rectangle(40, -80, 960, 880)
+    cmap = {ord("A"): "A", ord("H"): "H", ord("I"): "I", ord("O"): "O", ord("X"): "X", ord("E"): "E", ord("x"): "x", ord("g"): "g", ord("j"): "j", ord("p"): "p", ord("q"): "q", ord("y"): "y", ord("0"): "zero", ord("1"): "one", ord("8"): "eight", ord("9"): "nine", ord("中"): "uni4E2D", ord("国"): "uni56FD", ord("永"): "uni6C38"}
+    fb = FontBuilder(1000, isTTF=True)
+    fb.setupGlyphOrder(glyph_order)
+    fb.setupCharacterMap(cmap)
+    fb.setupGlyf(glyphs)
+    fb.setupHorizontalMetrics({name: (1000 if name.startswith("uni") else 620, 40) for name in glyph_order})
+    fb.setupHorizontalHeader(ascent=1200 if extreme_metrics else 900, descent=-40 if extreme_metrics else -220, lineGap=180 if extreme_metrics else 0)
+    fb.setupOS2(sTypoAscender=1200 if extreme_metrics else 900, sTypoDescender=-40 if extreme_metrics else -220, sTypoLineGap=180 if extreme_metrics else 0, usWinAscent=1300, usWinDescent=100)
+    fb.setupNameTable({"familyName": "MetricsTest", "styleName": "Regular", "uniqueFontIdentifier": "MetricsTest Regular", "fullName": "MetricsTest Regular", "psName": "MetricsTest-Regular"})
+    fb.setupPost()
+    fb.setupMaxp()
+    fb.save(path)
+
+
+def bounds(font: TTFont, character: str):
+    glyph_set = font.getGlyphSet(); glyph_name = font.getBestCmap()[ord(character)]
+    pen = BoundsPen(glyph_set); glyph_set[glyph_name].draw(pen)
+    assert pen.bounds is not None
+    return pen.bounds
+
+
+with tempfile.TemporaryDirectory() as directory:
+    temp = Path(directory)
+    source = temp / "source.ttf"; normalized = temp / "normalized.ttf"
+    make_font(source, 0, 700, 0, 700, extreme_metrics=True)
+    normalize_path(source, normalized)
+    font = TTFont(normalized)
+    try:
+        assert 880 <= font["hhea"].ascent <= 1060
+        assert -340 <= font["hhea"].descent <= -220
+        assert font["hhea"].lineGap == 0
+        assert font["OS/2"].sTypoAscender == font["hhea"].ascent
+        assert font["OS/2"].sTypoDescender == font["hhea"].descent
+        assert font["OS/2"].sTypoLineGap == 0
+        assert font["OS/2"].fsSelection & (1 << 7)
+    finally:
+        font.close()
+
+    base = temp / "base.ttf"; latin = temp / "latin.ttf"; digit = temp / "digit.ttf"; output = temp / "composite.ttf"
+    make_font(base, 0, 700, 0, 700)
+    make_font(latin, 180, 980, 180, 980)
+    make_font(digit, 150, 900, 150, 900)
+    build(SimpleNamespace(cjk=str(base), latin=str(latin), digit=str(digit), output=str(output), weight=400, cjk_face=None, latin_face=None, digit_face=None, progress=None))
+    composite = TTFont(output)
+    try:
+        a = bounds(composite, "A"); one = bounds(composite, "1")
+        assert abs(a[1]) <= 20, a
+        assert 650 <= a[3] - a[1] <= 760, a
+        assert abs(one[1]) <= 20, one
+        assert 650 <= one[3] - one[1] <= 760, one
+        assert composite["hhea"].lineGap == 0
+        assert composite["OS/2"].fsSelection & (1 << 7)
+    finally:
+        composite.close()
+
+print("Font metrics and mixed-script baseline normalization passed.")
+'''
+write('scripts/font_metrics_normalization_test.py', METRICS_TEST)
+
+MONO_TEST = r'''#!/usr/bin/env python3
+from __future__ import annotations
+
+import sys
+import tempfile
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "common"))
+from font_config_overlay import generated_references, rewrite_tree, validate_generated_references  # noqa: E402
+
+xml = ''' + '"""' + r'''<familyset>
+  <family name="sans-serif"><font weight="400">Roboto-Regular.ttf</font></family>
+  <family name="monospace"><font weight="400">RobotoMono-Regular.ttf</font></family>
+  <family name="emoji"><font weight="400">NotoColorEmoji.ttf</font></family>
+</familyset>''' + '"""' + r'''
+tree = ET.ElementTree(ET.fromstring(xml))
+report = rewrite_tree(tree, "LuoShu", "LuoShuMono")
+families = {family.attrib.get("name"): family.find("font").text for family in tree.getroot()}
+assert families["sans-serif"] == "LuoShu-400.ttf"
+assert families["monospace"] == "LuoShuMono-400.ttf"
+assert families["emoji"] == "NotoColorEmoji.ttf"
+assert report["changed_mono_families"] == ["monospace"]
+refs = generated_references(tree, ("LuoShu", "LuoShuMono"))
+assert refs == ["LuoShu-400.ttf", "LuoShuMono-400.ttf"]
+with tempfile.TemporaryDirectory() as directory:
+    font_dir = Path(directory)
+    for filename in refs:
+        (font_dir / filename).write_bytes(b"0" * 2048)
+    assert validate_generated_references(tree, ("LuoShu", "LuoShuMono"), font_dir) == 2
+print("Named UI and monospace family overlay mapping passed.")
+'''
+write('scripts/font_config_monospace_test.py', MONO_TEST)
+
+# Changelog documents the behavior rather than the screenshots.
+replace_once(
+    'CHANGELOG.md',
+    '## [Unreleased]\n\n',
+    '## [Unreleased]\n\n- 统一中文、英文与数字的字形基线和垂直度量，修复输入框文字偏高、标题/副标题重叠和桌面名称不齐。\n- 新增固定宽度洛书 Mono 派生族，使刷写日志等 monospace 页面中的英文与数字也跟随字体。\n- 字体库预览移除“天地玄黄”，统一为中英数字混排对齐样张。\n\n',
+)
+
