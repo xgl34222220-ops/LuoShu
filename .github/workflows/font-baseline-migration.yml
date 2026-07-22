@@ -54,22 +54,38 @@ jobs:
           retention-days: 2
 
       - name: Validate generated source
+        id: validate
         shell: bash
         run: |
-          set -euo pipefail
-          python -m py_compile \
-            common/font_metrics_normalize.py \
-            common/font_instance.py \
-            common/font_name_normalize.py \
-            common/font_config_overlay.py \
-            common/composite_font.py
-          sh -n common/rom_adapters.sh
-          sh -n common/font_config_weights.sh
-          sh -n common/font_mix.sh
-          python scripts/font_metrics_normalization_test.py
-          python scripts/font_config_monospace_test.py
-          sh scripts/font_config_variable_weight_test.sh
-          ! grep -RIn '天地玄黄' android-app common scripts --exclude-dir=.baseline_migration --exclude=font_baseline_consistency_migration.py
+          set +e
+          {
+            set -euo pipefail
+            python -m py_compile \
+              common/font_metrics_normalize.py \
+              common/font_instance.py \
+              common/font_name_normalize.py \
+              common/font_config_overlay.py \
+              common/composite_font.py
+            sh -n common/rom_adapters.sh
+            sh -n common/font_config_weights.sh
+            sh -n common/font_mix.sh
+            python scripts/font_metrics_normalization_test.py
+            python scripts/font_config_monospace_test.py
+            sh scripts/font_config_variable_weight_test.sh
+            ! grep -RIn '天地玄黄' android-app common scripts --exclude-dir=.baseline_migration --exclude=font_baseline_consistency_migration.py
+          } > /tmp/font-baseline-validation.log 2>&1
+          code=$?
+          cat /tmp/font-baseline-validation.log
+          exit "$code"
+
+      - name: Upload validation diagnostics
+        if: failure() && steps.validate.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: font-baseline-validation-${{ github.run_id }}
+          path: /tmp/font-baseline-validation.log
+          if-no-files-found: error
+          retention-days: 2
 
       - name: Commit reviewed runtime changes
         shell: bash
