@@ -3,6 +3,11 @@ from pathlib import Path
 
 path = Path(__file__).with_name("payload_schema_migration.py")
 text = path.read_text(encoding="utf-8")
+text = text.replace(
+    "    '''_luoshu_safety_config() {",
+    "    r'''_luoshu_safety_config() {",
+    1,
+)
 start_token = "state = state.replace(\n    '        \"$_module/config/app_install_manual\""
 end_token = "state = state.replace(\n    '''        cache/full-composite-v5"
 start = text.index(start_token)
@@ -18,4 +23,4 @@ replacement = (
     ")\n"
 )
 path.write_text(text[:start] + replacement + text[end:], encoding="utf-8")
-print("payload migration quoting fixed")
+print("payload migration source fixed")
