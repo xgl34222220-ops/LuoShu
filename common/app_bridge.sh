@@ -21,6 +21,7 @@ AXES_TASK_FILE="$MODDIR/config/axes_task.conf"
 SWITCH_TASK_FILE="$MODDIR/config/switch_task.conf"
 TEXT_REBOOT_REQUIRED="$MODDIR/config/text_reboot_required.conf"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
+[ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -47,11 +48,17 @@ root_manager() {
 }
 
 mount_engine() {
-    if { [ -d /data/adb/modules/mountify ] && [ ! -f /data/adb/modules/mountify/disable ] && [ ! -f /data/adb/modules/mountify/remove ]; } || [ -d /data/adb/mountify ]; then
-        printf 'Mountify'
-    else
-        printf '原生模块挂载'
+    if type luoshu_detect_mount_engine >/dev/null 2>&1; then
+        case "$(luoshu_detect_mount_engine)" in
+            magic-mount|magic-mount-rs) printf 'Magic Mount' ;;
+            mountify) printf 'Mountify' ;;
+            meta-overlayfs|dual-dir-metamodule) printf 'Meta OverlayFS' ;;
+            hybrid-mount) printf 'Hybrid Mount' ;;
+            *) printf '原生模块挂载' ;;
+        esac
+        return
     fi
+    printf '原生模块挂载'
 }
 
 select_task_file() {
