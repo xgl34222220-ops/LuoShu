@@ -16,6 +16,11 @@ on:
         description: Existing immutable tag to publish (for example v2.0.0)
         required: true
         type: string
+      prerelease:
+        description: Publish as a GitHub pre-release
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -53,12 +58,14 @@ jobs:
         shell: bash
         env:
           INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
           . ./scripts/version.sh
           expected_tag="$LUOSHU_ARTIFACT_VERSION"
           tag="${GITHUB_REF_NAME}"
           mode="tag"
+          source_sha="$GITHUB_SHA"
           git fetch --force --tags origin
 
           if [[ "${GITHUB_EVENT_NAME}" == 'workflow_dispatch' ]]; then
@@ -67,24 +74,34 @@ jobs:
             tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
             [[ -n "$tag_sha" ]] || { echo "Tag does not exist: $tag" >&2; exit 2; }
             [[ "$tag_sha" == "$GITHUB_SHA" ]] || { echo "Run this workflow from the existing tag $tag" >&2; exit 2; }
+            source_sha="$tag_sha"
           elif [[ "${GITHUB_REF_TYPE}" == 'branch' ]]; then
             [[ "${GITHUB_REF_NAME}" == 'main' ]] || { echo "Stable branch publishing only supports main" >&2; exit 2; }
-            case "$LUOSHU_VERSION" in
-              *Alpha*|*Beta*|*RC*)
-                echo "Pre-release versions must be published from an explicit immutable tag" >&2
-                exit 2
-                ;;
-            esac
             tag="$expected_tag"
-            mode="create-tag"
             tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
-            [[ -z "$tag_sha" ]] || { echo "Tag already exists before validation: $tag -> $tag_sha" >&2; exit 2; }
+            if [[ -z "$tag_sha" ]]; then
+              mode="create-tag"
+            else
+              git merge-base --is-ancestor "$tag_sha" "$GITHUB_SHA" || {
+                echo "Existing tag is not an ancestor of main: $tag -> $tag_sha" >&2
+                exit 2
+              }
+              disallowed_changes="$(git diff --name-only "$tag_sha" "$GITHUB_SHA" -- | grep -Ev '^(RELEASE_NOTES_.*\.md|\.github/workflows/release\.yml)$' || true)"
+              [[ -z "$disallowed_changes" ]] || {
+                echo "Existing tag differs from main by non-release files:" >&2
+                printf '%s\n' "$disallowed_changes" >&2
+                exit 2
+              }
+              mode="existing-tag"
+              source_sha="$tag_sha"
+            fi
           else
             tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
             [[ -n "$tag_sha" && "$tag_sha" == "$GITHUB_SHA" ]] || {
               echo "Tag checkout does not match GITHUB_SHA: $tag" >&2
               exit 2
             }
+            source_sha="$tag_sha"
           fi
 
           [[ "$tag" == "$expected_tag" ]] || {
@@ -93,11 +110,23 @@ jobs:
           }
           notes_file="RELEASE_NOTES_${LUOSHU_VERSION// /_}.md"
           [[ -s "$notes_file" ]] || { echo "Missing release notes: $notes_file" >&2; exit 2; }
+          notes_temp="$RUNNER_TEMP/$notes_file"
+          cp -f "$notes_file" "$notes_temp"
+          prerelease="${INPUT_PRERELEASE:-false}"
+          if grep -q '<!-- prerelease -->' "$notes_file"; then
+            prerelease="true"
+          fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "version=$LUOSHU_VERSION" >> "$GITHUB_OUTPUT"
           echo "artifact_version=$LUOSHU_ARTIFACT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "notes_file=$notes_file" >> "$GITHUB_OUTPUT"
+          echo "notes_file=$notes_temp" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+
+          if [[ "$source_sha" != "$GITHUB_SHA" ]]; then
+            git checkout --detach "$source_sha"
+          fi
 
       - name: Require signing secrets
         shell: bash
@@ -199,6 +228,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           ARTIFACT_VERSION: ${{ steps.version.outputs.artifact_version }}
           NOTES_FILE: ${{ steps.version.outputs.notes_file }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         shell: bash
         run: |
           set -euo pipefail
@@ -228,6 +258,9 @@ jobs:
 
           prerelease=()
           case "$VERSION" in *Alpha*|*Beta*|*RC*) prerelease=(--prerelease) ;; esac
+          if [[ "$PRERELEASE" == 'true' ]]; then
+            prerelease=(--prerelease)
+          fi
           tag_mode=(--verify-tag)
           if [[ "$MODE" == 'create-tag' ]]; then
             tag_mode=(--target "$GITHUB_SHA")
