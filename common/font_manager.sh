@@ -40,7 +40,7 @@ type check_hyperos >/dev/null 2>&1 && check_hyperos
 mkdir -p "$CONFIG_DIR" "$SYSTEM_FONTS_DIR" "$USER_FONTS_DIR" "$USER_REPORT_DIR" 2>/dev/null || true
 
 json_escape() {
-    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s"/\\"/g' | tr '\n\r' '  '
 }
 
 format_filesize() {
@@ -211,6 +211,16 @@ fi
 if ! luoshu_payload_transaction_commit "$_font_id"; then
     echo '错误：无法提交字体负载事务，已恢复上一个字体' >&2
     return 7
+fi
+# Downloadable Fonts（GMS Fonts Provider）缓存劫持：Play 商店等 Google 系应用
+# 不读系统分区字体，需同步 /data/fonts/files 并 force-stop 后才会应用。
+if [ -f "$MODULE_DIR/common/font_provider_cache.sh" ]; then
+    . "$MODULE_DIR/common/font_provider_cache.sh"
+    if [ "$_font_id" != default ]; then
+        luoshu_provider_cache_sync "$SYSTEM_FONTS_DIR/.luoshu-font-store/regular.font" >/dev/null 2>&1 || true
+    else
+        luoshu_provider_cache_restore >/dev/null 2>&1 || true
+    fi
 fi
     if [ "$_font_id" != default ]; then
         _recent="$CONFIG_DIR/recent_fonts.conf"
