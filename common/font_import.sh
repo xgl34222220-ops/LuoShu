@@ -251,7 +251,7 @@ import_zip_package() {
 
     _listing=$(import_unzip -l "$_zip" 2>/dev/null)
 
-    # 直接采用原模块 module.prop 的 name= 作为 WebUI 显示名称。
+    # 直接采用原模块 module.prop 的 name= 作为原生 App 显示名称。
     _module_prop=$(import_zip_module_prop "$_zip" "$_listing")
     _module_name=$(import_prop_value "$_module_prop" name)
     _module_version=$(import_prop_value "$_module_prop" version)

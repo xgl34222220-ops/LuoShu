@@ -344,7 +344,7 @@ scan_family_weights() {
         case ",$weights," in *",$w,"*) ;; *) weights="$weights,$w" ;; esac
     done
     case "$weights" in ,*) weights="${weights#,}" ;; esac
-    # 统一按从细到粗排序，避免文件名/目录顺序导致 WebUI 标签顺序混乱。
+    # 统一按从细到粗排序，避免文件名/目录顺序导致原生 App 标签顺序混乱。
     sorted=""
     for _role in variable thin extralight light regular medium semibold bold extrabold black; do
         case ",$weights," in
