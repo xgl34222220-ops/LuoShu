@@ -1,0 +1,37 @@
+name: Apply import and mix finalize hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-import-mix-finalize-hotfix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/import-fab-mix-finalize-speed
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 scripts/apply_import_mix_finalize_hotfix.py
+      - name: Validate generated source
+        run: |
+          sh -n common/font_mix.sh
+          sh -n common/font_safety.sh
+          sh -n common/v142_weighted_mix.sh
+          sh -n common/module_update_state.sh
+          python3 -m py_compile common/composite_font.py
+          sh scripts/mix_finalize_performance_test.sh
+          sh scripts/module_update_state_test.sh
+      - name: Commit patch to branch
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix: keep import label visible and speed mix finalization"
+          git push origin HEAD:fix/import-fab-mix-finalize-speed
