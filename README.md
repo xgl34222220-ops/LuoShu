@@ -139,3 +139,5 @@ sh ./scripts/build.sh
 分发洛书或其修改版本时，需要按照 GPLv3 提供对应源代码、保留版权与许可证声明，并将基于洛书的整体修改版本继续置于 GPLv3 下。私人使用且不对外分发的修改不要求公开。
 
 历史标签和发行包继续适用其发布时附带的许可证；历史 MIT 文本保存在 [`licenses/LuoShu-MIT-HISTORICAL.txt`](licenses/LuoShu-MIT-HISTORICAL.txt)。第三方组件适用各自许可证，详情见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 `licenses/`。
+
+- **应用内置字体边界**：输入法键帽、QQ/微信等应用自带字体、图片或贴纸文字、以及部分 WebView 页面不经过 Android 系统字体映射；无 Hook 模块无法强制替换这些资源。

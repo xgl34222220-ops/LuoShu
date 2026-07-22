@@ -30,9 +30,9 @@ for file in \
   common/multiweight_mix_task.sh common/mix_weight_mode.sh \
   common/app_bridge.sh common/font_manager.sh common/font_library_cache.sh common/app_installer.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
-  scripts/build.sh scripts/version.sh scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh \
+  scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh \
   scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh \
-  scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh \
+  scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh \
   scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/mix_finalize_performance_test.sh scripts/font_library_ui_layout_test.sh scripts/v2_source_audit.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/build.gradle.kts \
@@ -68,6 +68,25 @@ test "$LUOSHU_VERSION" = "$(sed -n 's/^version=//p' "$ROOT/module.prop" | head -
 test "$LUOSHU_VERSION_CODE" = "$(sed -n 's/^versionCode=//p' "$ROOT/module.prop" | head -n1)"
 test "$LUOSHU_VERSION" = "$(sed -n 's/^version=//p' "$ROOT/config/version_notes.conf" | head -n1)"
 grep -q '^description=Android 无 Hook 全局字体引擎' "$ROOT/module.prop"
+
+# 发布包使用显式清单。common/ 新增运行文件必须被审查后列入，不能再整目录复制。
+PAYLOAD_MANIFEST="$ROOT/scripts/module_payload_manifest.txt"
+test -s "$PAYLOAD_MANIFEST"
+awk 'NF && $1 !~ /^#/ { if (seen[$0]++) exit 1 }' "$PAYLOAD_MANIFEST"
+while IFS= read -r payload || [ -n "$payload" ]; do
+  case "$payload" in ''|\#*) continue ;; esac
+  test -e "$ROOT/$payload"
+done < "$PAYLOAD_MANIFEST"
+find "$ROOT/common" -maxdepth 1 -type f -printf 'common/%f\n' | sort > /tmp/luoshu-common-files.txt
+grep '^common/' "$PAYLOAD_MANIFEST" | grep -v '^common/python$' | sort > /tmp/luoshu-manifest-common.txt
+cmp -s /tmp/luoshu-common-files.txt /tmp/luoshu-manifest-common.txt
+
+# 活跃运行时代码不得再出现历史开发版本头、WebUI 函数或未使用的报告脚本。
+! grep -RInE --exclude-dir=python '(^|[^0-9])v1[34](\.|[^0-9])|Beta[[:space:]]*[0-9]|Hotfix' \
+  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data.sh" "$ROOT/service.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
+! grep -qE 'get_all_fonts_json|get_font_info_json|scan_installed_families|refresh_font_cache' "$ROOT/common/util_functions.sh"
+test ! -e "$ROOT/common/font_report.sh"
+! grep -RInE 'webui_font_list|WebUI' "$ROOT/common" --exclude=module_update_state.sh >/dev/null 2>&1
 
 # 单包构建必须显式传入 APK；Debug 包只能由测试工作流明确放行。
 grep -q "LUOSHU_APP_APK is required" "$ROOT/scripts/build.sh"
@@ -187,6 +206,8 @@ sh "$ROOT/scripts/font_index_delete_regression_test.sh"
 sh "$ROOT/scripts/v2_source_audit.sh"
 sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
+sh "$ROOT/scripts/coloros_consistency_mapping_test.sh"
+sh "$ROOT/scripts/font_config_variable_weight_test.sh"
 sh "$ROOT/scripts/auto_multiweight_mode_test.sh"
 sh "$ROOT/scripts/auto_multiweight_engine_test.sh"
 sh "$ROOT/scripts/background_mix_worker_test.sh"

@@ -33,12 +33,47 @@ _coloros_google_text_files() {
     printf '%s\n' 'GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-SemiBold.ttf GoogleSansText-Bold.ttf GoogleSansText-VF.ttf GoogleSansTextVF.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-SemiBold.ttf GoogleSans-Bold.ttf GoogleSans-VF.ttf GoogleSansFlex-Regular.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf Roboto-Light.ttf Roboto-Thin.ttf Roboto-ExtraLight.ttf Roboto-ExtraBold.ttf Roboto-Black.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf'
 }
 
+
+# ColorOS 16 and newer may request these physical UI slots directly instead of resolving a named XML
+# family. Every entry is still existence-gated, so adding future-compatible names does not create
+# unnecessary mount nodes on older devices.
+_coloros_oem_ui_files() {
+    printf '%s\n' 'OplusOSUI-XThin.ttf OplusOSUI-Thin.ttf OplusOSUI-ExtraLight.ttf OplusOSUI-Light.ttf OplusOSUI-Regular.ttf OplusOSUI-Medium.ttf OplusOSUI-SemiBold.ttf OplusOSUI-Bold.ttf OplusOSUI-ExtraBold.ttf OplusOSUI-Black.ttf OplusSans-Thin.ttf OplusSans-ExtraLight.ttf OplusSans-Light.ttf OplusSans-Regular.ttf OplusSans-Medium.ttf OplusSans-SemiBold.ttf OplusSans-Bold.ttf OplusSans-ExtraBold.ttf OplusSans-Black.ttf OppoSans-Thin.ttf OppoSans-Light.ttf OppoSans-Regular.ttf OppoSans-Medium.ttf OppoSans-SemiBold.ttf OppoSans-Bold.ttf OppoSans-ExtraBold.ttf OppoSans-Black.ttf'
+}
+
+# Discover safe upright UI slots from every real OPlus partition. This covers renamed files introduced
+# by an OTA without replacing serif, emoji, symbols, monospace, icons or true italic faces.
+_coloros_discovered_ui_files() {
+    while IFS='|' read -r _lcg_real _lcg_overlay; do
+        [ -d "$_lcg_real" ] || continue
+        for _lcg_path in "$_lcg_real"/*.ttf; do
+            [ -f "$_lcg_path" ] || continue
+            _lcg_name=${_lcg_path##*/}
+            case "$_lcg_name" in
+                *Italic*|*Oblique*|*Serif*|*Mono*|*Emoji*|*Symbol*|*Icon*|*Clock*) continue ;;
+            esac
+            case "$_lcg_name" in
+                SysFont*.ttf|SysSans*.ttf|OplusSans*.ttf|OplusOSUI*.ttf|OppoSans*.ttf|Opposans*.ttf|OPSans*.ttf|GoogleSans*.ttf|Roboto*.ttf|SourceSansPro*.ttf|DIN*.ttf|OPPODIN*.ttf)
+                    printf '%s\n' "$_lcg_name"
+                    ;;
+            esac
+        done
+    done <<EOF_LUOSHU_COLOROS_DISCOVERY
+$(_luoshu_coloros_root_pairs)
+EOF_LUOSHU_COLOROS_DISCOVERY
+}
+
 _coloros_vendor_files() {
     printf '%s\n' 'SysSans-En-Bold.ttf SysSans-En-Light.ttf SysSans-En-Medium.ttf SysSans-En-Thin.ttf SysSans-En-Black.ttf SysFont-Bold.ttf SysFont-Light.ttf SysFont-Medium.ttf SysFont-Thin.ttf SysFont-Black.ttf SysFont-Hans-Bold.ttf SysFont-Hans-Light.ttf SysFont-Hans-Medium.ttf SysFont-Hans-Thin.ttf SysFont-Hant-Bold.ttf SysFont-Hant-Light.ttf SysFont-Hant-Medium.ttf SysFont-Hant-Thin.ttf SysSans-Hant-Bold.ttf SysSans-Hant-Light.ttf SysSans-Hant-Medium.ttf SysSans-Hans-Bold.ttf SysSans-Hans-Light.ttf SysSans-Hans-Medium.ttf SysFont-Static-Bold.ttf SysFont-Static-Light.ttf SysFont-Static-Medium.ttf DINCondensedBold.ttf DINPro-Bold.ttf DINPro-Medium.ttf DINPro-Regular.ttf OPPODIN-Bold.ttf OPPODIN-Medium.ttf OPPODIN-Regular.ttf OPPODINCondensed-Bold.ttf OPPODINCondensed-Medium.ttf OPPODINCondensed-Regular.ttf Opposans-En-Regular.ttf Opposans-Hans-Regular.ttf Opposans-En-Bold.ttf Opposans-Hans-Bold.ttf Opposans-En-Medium.ttf Opposans-Hans-Medium.ttf Opposans-En-Light.ttf Opposans-Hans-Light.ttf OPSans-En-Regular.ttf OplusSans-Regular.ttf OplusSans-Medium.ttf OplusSans-Bold.ttf SourceSansPro-Regular.ttf SourceSansPro-SemiBold.ttf SourceSansPro-Bold.ttf'
 }
 
 get_all_coloros_files() {
-    printf '%s %s %s\n' "$(_coloros_core_files)" "$(_coloros_google_text_files)" "$(_coloros_vendor_files)"
+    {
+        for _lcg_list in "$(_coloros_core_files)" "$(_coloros_google_text_files)" "$(_coloros_vendor_files)" "$(_coloros_oem_ui_files)"; do
+            for _lcg_file in $_lcg_list; do printf '%s\n' "$_lcg_file"; done
+        done
+        _coloros_discovered_ui_files
+    } | awk 'NF && !seen[$0]++'
 }
 
 # Legacy callers use names without the .ttf suffix.

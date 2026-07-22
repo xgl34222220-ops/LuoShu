@@ -1,7 +1,6 @@
 #!/system/bin/sh
 # 洛书 - ROM 适配层 (rom_adapters.sh)
-# 统一维护各 ROM 的字体文件名表和覆盖逻辑，被 customize.sh 和 font_manager.sh 共同引用
-# 消除此前 copy_as_coloros() 在两个文件中重复定义、容易改一处漏一处的问题
+# 提供通用 ROM 回退映射；ColorOS、HyperOS、OriginOS 与 Flyme 的分区感知增强层会在运行时覆盖对应入口。
 #
 # 新增 ROM 适配方法：
 #   1. 用诊断脚本在真机上采集 /system/etc/fonts.xml、font_fallback.xml、
@@ -92,14 +91,18 @@ _rom_exact_target_exists() {
 # ColorOS（OPPO/一加/realme 同属 oplus 系）
 # ============================================================
 # 已通过真机数据（ColorOS16 / PLK110）核对，48/50 个文件命中
-# 未覆盖：Oplus-Serif.ttf / OplusOSUI-XThin.ttf（低优先级，影响面很小，暂不处理）
-# 注：get_all_coloros_names() 的定义保留在 util_functions.sh（唯一来源），
-# 这里不重复定义，避免两份列表将来改一处漏一处
+# 分区感知映射由 coloros_global.sh 负责；这里仅保留缺少增强层时的最小回退。
 
 # ColorOS 里字重专属文件（用于第三步"额外覆盖"，Regular 已在基础8个里处理过）
 _coloros_extra_names() {
     echo "SysSans-En-Bold SysSans-En-Light SysSans-En-Medium SysSans-En-Thin SysSans-En-Black SysFont-Bold SysFont-Light SysFont-Medium SysFont-Thin SysFont-Black SysFont-Hans-Bold SysFont-Hans-Light SysFont-Hans-Medium SysFont-Hans-Thin SysFont-Hant-Bold SysFont-Hant-Light SysFont-Hant-Medium SysFont-Hant-Thin SysSans-Hant-Bold SysSans-Hant-Light SysSans-Hant-Medium SysSans-Hans-Bold SysSans-Hans-Light SysSans-Hans-Medium SysFont-Static-Bold SysFont-Static-Light SysFont-Static-Medium DINCondensedBold DINPro-Bold DINPro-Medium DINPro-Regular OPPODIN-Bold OPPODIN-Medium OPPODIN-Regular OPPODINCondensed-Bold OPPODINCondensed-Medium OPPODINCondensed-Regular Opposans-En-Regular Opposans-Hans-Regular Opposans-En-Bold Opposans-Hans-Bold Opposans-En-Medium Opposans-Hans-Medium Opposans-En-Light Opposans-Hans-Light OPSans-En-Regular Roboto-Regular Roboto-Medium Roboto-Bold Roboto-Light Roboto-Thin RobotoFlex-Regular RobotoStatic-Regular GoogleSans-Regular GoogleSans-Medium GoogleSans-Bold GoogleSansText-Regular GoogleSansText-Medium GoogleSansText-Bold GoogleSansFlex-Regular SourceSansPro-Regular SourceSansPro-SemiBold SourceSansPro-Bold"
 }
+
+if ! type get_all_coloros_names >/dev/null 2>&1; then
+    get_all_coloros_names() {
+        printf '%s\n' "SysSans-Hant-Regular SysSans-Hans-Regular SysFont-Static-Regular SysFont-Hant-Regular SysFont-Hans-Regular SysFont-Regular SysSans-En-Regular $(_coloros_extra_names)"
+    }
+fi
 
 # copy_as_coloros: 把用户字体覆盖为 ColorOS 认识的文件名
 #   src        用户选择的字体文件

@@ -28,3 +28,5 @@ Magisk、KernelSU、SukiSU Ultra、APatch、Mountify。
 
 许可证：
 洛书当前源码采用 GPL-3.0-only。分发修改版本时必须遵守 GPLv3 的对应源代码、同许可证和声明保留要求。CPython、FontTools 等第三方组件适用各自许可证，详见 licenses/ 与 THIRD_PARTY_NOTICES.md。历史版本继续适用其发布时附带的许可证；用户自行提供的字体不受洛书许可证授权。
+
+- 应用内置字体边界：输入法键帽、应用自带字体、图片文字和部分 WebView 不经过系统字体映射，无 Hook 模块无法强制替换。
