@@ -6,13 +6,17 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
-from fontTools.fontBuilder import FontBuilder
-from fontTools.pens.boundsPen import BoundsPen
-from fontTools.pens.ttGlyphPen import TTGlyphPen
-from fontTools.ttLib import TTFont
-
 ROOT = Path(__file__).resolve().parents[1]
+EMBEDDED_FONTTOOLS = ROOT / "common/python/lib/python3.14/site-packages"
+if EMBEDDED_FONTTOOLS.is_dir():
+    sys.path.insert(0, str(EMBEDDED_FONTTOOLS))
 sys.path.insert(0, str(ROOT / "common"))
+
+from fontTools.fontBuilder import FontBuilder  # noqa: E402
+from fontTools.pens.boundsPen import BoundsPen  # noqa: E402
+from fontTools.pens.ttGlyphPen import TTGlyphPen  # noqa: E402
+from fontTools.ttLib import TTFont  # noqa: E402
+
 from composite_font import build  # noqa: E402
 from font_metrics_normalize import normalize_path  # noqa: E402
 
