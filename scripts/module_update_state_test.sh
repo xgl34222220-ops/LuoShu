@@ -9,6 +9,7 @@ OLD="$TMP/old"
 NEW="$TMP/new"
 mkdir -p \
     "$OLD/config" "$OLD/system/fonts/.luoshu-font-store" "$OLD/system/etc" "$OLD/product/fonts" \
+    "$OLD/cache/full-composite-v5" "$OLD/cache/auto-multiweight-mix/composites-v2" \
     "$NEW/config" "$NEW/system/bin"
 
 printf 'id=LuoShu\nversion=old\n' >"$OLD/module.prop"
@@ -23,6 +24,8 @@ printf 'Qsal payload\n' >"$OLD/system/fonts/Qsal-Regular.ttf"
 printf 'anchor\n' >"$OLD/system/fonts/.luoshu-font-store/qsal.font"
 printf '<familyset/>\n' >"$OLD/system/etc/fonts.xml"
 printf 'OEM payload\n' >"$OLD/product/fonts/OEM-Regular.ttf"
+printf 'cached composite\n' >"$OLD/cache/full-composite-v5/test.otf"
+printf 'cached auto composite\n' >"$OLD/cache/auto-multiweight-mix/composites-v2/test.font"
 
 printf 'new notes\n' >"$NEW/config/version_notes.conf"
 printf '#!/bin/sh\n' >"$NEW/system/bin/洛书"
@@ -38,6 +41,8 @@ test -f "$NEW/system/fonts/Qsal-Regular.ttf"
 test -f "$NEW/system/fonts/.luoshu-font-store/qsal.font"
 test -f "$NEW/system/etc/fonts.xml"
 test -f "$NEW/product/fonts/OEM-Regular.ttf"
+test -f "$NEW/cache/full-composite-v5/test.otf"
+test -f "$NEW/cache/auto-multiweight-mix/composites-v2/test.font"
 test -f "$NEW/system/bin/洛书"
 test ! -e "$NEW/config/switch_task.conf"
 test ! -e "$NEW/config/text_reboot_required.conf"

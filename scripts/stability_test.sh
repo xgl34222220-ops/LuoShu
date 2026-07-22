@@ -100,6 +100,8 @@ sh "$ROOT/scripts/module_update_state_test.sh"
 
 # 字体卡片必须使用紧凑单行样张，完整两行样张只出现在详情页。
 grep -q '"洛书 Aa 0123456789"' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt"
+# 导入按钮不得裁掉“体”，复合收尾不得对硬链接别名重复读取大字体。
+sh "$ROOT/scripts/mix_finalize_performance_test.sh"
 
 # 字体导入必须淘汰模块端原生索引；三级缓存版本不得回退。
 grep -q 'native_font_index.json' "$ROOT/common/native_import.sh"
