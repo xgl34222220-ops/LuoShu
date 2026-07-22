@@ -14,7 +14,7 @@ cp "$ROOT/common/font_mix.sh" "$MODULE/common/font_mix.sh"
 cp "$ROOT/module.prop" "$MODULE/module.prop"
 
 # 状态查询不得触发真正的字体切换。
-printf '#!/bin/sh\ntouch "%s/manager-called"\nprintf '\''{"status":"ok"}\\n'\''\n' "$TMP" > "$MODULE/common/font_manager.sh"
+printf '#!/bin/sh\ntouch "%s/manager-called"\nprintf '\''{"status":"ok"}\n'\''\n' "$TMP" > "$MODULE/common/font_manager.sh"
 chmod 0755 "$MODULE/common"/*
 cat > "$MODULE/config/switch_task.conf" <<'EOT'
 task=test-task
@@ -92,6 +92,14 @@ sh "$ROOT/scripts/app_installer_test.sh"
 
 # 原生 App 字体索引只在文件集合实际变化时失效。
 sh "$ROOT/scripts/font_library_cache_test.sh"
+
+# 模块更新必须继承当前字体负载，避免“更新重启一次、应用字体再重启一次”。
+grep -q 'module_update_state.sh' "$ROOT/customize.sh"
+grep -q '更新后只需重启一次' "$ROOT/customize.sh"
+sh "$ROOT/scripts/module_update_state_test.sh"
+
+# 字体卡片必须使用紧凑单行样张，完整两行样张只出现在详情页。
+grep -q '"洛书 Aa 0123456789"' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt"
 
 # 字体导入必须淘汰模块端原生索引；三级缓存版本不得回退。
 grep -q 'native_font_index.json' "$ROOT/common/native_import.sh"
