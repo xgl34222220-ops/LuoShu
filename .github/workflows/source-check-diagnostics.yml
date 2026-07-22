@@ -1,0 +1,47 @@
+name: Source check diagnostics
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'agent/font-baseline-consistency-v2'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+      - name: Prepare runtime
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
+      - name: Trace source checks
+        id: trace
+        shell: bash
+        run: |
+          set +e
+          sh -x ./scripts/check.sh > /tmp/source-check.log 2>&1
+          code=$?
+          tail -n 200 /tmp/source-check.log
+          exit "$code"
+      - name: Upload trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: source-check-trace-${{ github.run_id }}
+          path: /tmp/source-check.log
+          if-no-files-found: error
+          retention-days: 2
