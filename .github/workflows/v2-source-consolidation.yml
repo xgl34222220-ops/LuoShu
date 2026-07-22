@@ -1,5 +1,6 @@
 name: One-shot v2 source consolidation
 
+# This workflow exists only on the migration branch and deletes itself after a successful run.
 on:
   push:
     branches:
