@@ -45,12 +45,12 @@ internal fun fontCapabilityLabel(font: FontItem): String {
     return if (font.supportsCjk) capability else "仅拉丁 · $capability"
 }
 
-private const val FONT_PREVIEW_COMPACT = "洛书字体 · Aa 0123456789"
-private const val FONT_PREVIEW_DETAILED = "洛书字体 · Aa 0123456789\n中文 English 0123456789"
+private const val FONT_PREVIEW_COMPACT = "洛书字体 Aa 123"
+private const val FONT_PREVIEW_DETAILED = "洛书字体 Aa\n中文 ABC 123"
 
 internal fun fontPreviewText(font: FontItem, detailed: Boolean = false): String {
-    // 卡片样张必须保持完全一致，字体能力差异由下方能力条表达。
-    // 仅拉丁字体的中文会按 Android 正常 fallback 显示，但不再改变卡片文案和高度。
+    // 所有卡片固定使用同一套短样张，避免不同字宽把第一行挤成两行并裁掉第二行。
+    // 仅拉丁字体的中文按 Android 正常 fallback 显示，能力差异只在下方能力条表达。
     @Suppress("UNUSED_VARIABLE")
     val supportsCjk = font.supportsCjk
     return if (detailed) FONT_PREVIEW_DETAILED else FONT_PREVIEW_COMPACT
