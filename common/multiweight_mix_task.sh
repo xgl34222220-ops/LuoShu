@@ -75,7 +75,7 @@ safe_weight() {
     _weight=${_weight%%.*}
     case "$_weight" in ''|*[!0-9]*) _weight=400 ;; esac
     [ "$_weight" -ge 1 ] 2>/dev/null || _weight=1
-    [ "_weight" -le 1000 ] 2>/dev/null || _weight=1000
+    [ "$_weight" -le 1000 ] 2>/dev/null || _weight=1000
     printf '%s' "$_weight"
 }
 
@@ -424,7 +424,7 @@ worker() {
         }
         prepare_source digit "$_digit" "$_digit_axes" "$_digit_mode" "$_weight" "$_dir/digit.ttf" || {
             update_task "$_wanted" failed "数字字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
-            rm -rf "$_root"; luoshu_clear_task_pid "$_WORKER_PID" "$_wanted"; exit 1
+            rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1
         }
         if [ "$_weight" = 400 ]; then
             _output="$_root/fonts/${_family}-Regular.ttf"
@@ -433,7 +433,7 @@ worker() {
         fi
         build_composite_cached "$_dir/cjk.ttf" "$_dir/latin.ttf" "$_dir/digit.ttf" "$_output" "$_dir/progress.json" || {
             update_task "$_wanted" failed "${_weight} 字重复合失败" 100 "$(date +%s)"
-            rm -rf "$_root"; luoshu_clear_task_pid "$_WORKER_PID" "$_wanted"; exit 1
+            rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1
         }
         rm -rf "$_dir" 2>/dev/null || true
     done
