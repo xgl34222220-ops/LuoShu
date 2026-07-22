@@ -18,6 +18,8 @@ from pathlib import Path
 from fontTools.ttLib import TTCollection, TTFont
 from fontTools.varLib.instancer import instantiateVariableFont
 
+from font_metrics_normalize import normalize_font_metrics
+
 CJK_PROBES = tuple(map(ord, "中文字体系统默认洛书汉字国一的。"))
 LATIN_PROBES = tuple(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
 DIGIT_PROBES = tuple(map(ord, "0123456789"))
@@ -125,6 +127,7 @@ def materialize(source: Path, output: Path, role: str, requested_weight: int, re
         for tag in ("DSIG", "LTSH", "hdmx", "VDMX"):
             if tag in font:
                 del font[tag]
+        metrics = normalize_font_metrics(font)
 
         output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(prefix=output.name + ".", suffix=".tmp", dir=output.parent, delete=False) as handle:
@@ -147,6 +150,7 @@ def materialize(source: Path, output: Path, role: str, requested_weight: int, re
             "variable": variable,
             "location": location,
             "ignoredAxes": ignored_axes,
+            "metrics": metrics,
             "size": output.stat().st_size,
         }
     finally:

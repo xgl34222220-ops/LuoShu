@@ -119,6 +119,21 @@ _luoshu_config_normalize_weight() {
     [ "$_lcw_size" -ge 1024 ]
 }
 
+_luoshu_config_make_mono_weight() {
+    _lcw_source="$1"
+    _lcw_output="$2"
+    _lcw_weight="$3"
+    _lcw_module="$(_luoshu_config_weight_module)"
+    _lcw_tool="$_lcw_module/common/font_name_normalize.py"
+    [ -f "$_lcw_tool" ] && type _luoshu_font_config_exec >/dev/null 2>&1 || return 1
+    rm -f "$_lcw_output" 2>/dev/null || true
+    _luoshu_font_config_exec "$_lcw_tool" --input "$_lcw_source" --output "$_lcw_output"         --weight "$_lcw_weight" --family 'LuoShu Mono' --monospace >/dev/null 2>&1 || return 1
+    chmod 0644 "$_lcw_output" 2>/dev/null || true
+    _lcw_size=$(wc -c < "$_lcw_output" 2>/dev/null | tr -d '[:space:]')
+    case "$_lcw_size" in ''|*[!0-9]*) _lcw_size=0 ;; esac
+    [ "$_lcw_size" -ge 1024 ]
+}
+
 font_config_prepare_payload_weights() {
     _lcw_module="$(_luoshu_config_weight_module)"
     _lcw_fonts="$_lcw_module/system/fonts"
@@ -134,20 +149,27 @@ font_config_prepare_payload_weights() {
             return 1
         }
         _lcw_target="$_lcw_stage/LuoShu-${_lcw_weight}.ttf"
+        _lcw_mono="$_lcw_stage/LuoShuMono-${_lcw_weight}.ttf"
         _luoshu_config_normalize_weight "$_lcw_source" "$_lcw_target" "$_lcw_weight" || {
+            rm -rf "$_lcw_stage" 2>/dev/null || true
+            return 1
+        }
+        _luoshu_config_make_mono_weight "$_lcw_target" "$_lcw_mono" "$_lcw_weight" || {
             rm -rf "$_lcw_stage" 2>/dev/null || true
             return 1
         }
     done
 
     for _lcw_weight in 100 200 300 400 500 600 700 800 900; do
-        _lcw_ready="$_lcw_stage/LuoShu-${_lcw_weight}.ttf"
-        _lcw_dest="$_lcw_fonts/LuoShu-${_lcw_weight}.ttf"
-        rm -f "$_lcw_dest" 2>/dev/null || true
-        mv -f "$_lcw_ready" "$_lcw_dest" 2>/dev/null || {
-            rm -rf "$_lcw_stage" 2>/dev/null || true
-            return 1
-        }
+        for _lcw_prefix in LuoShu LuoShuMono; do
+            _lcw_ready="$_lcw_stage/${_lcw_prefix}-${_lcw_weight}.ttf"
+            _lcw_dest="$_lcw_fonts/${_lcw_prefix}-${_lcw_weight}.ttf"
+            rm -f "$_lcw_dest" 2>/dev/null || true
+            mv -f "$_lcw_ready" "$_lcw_dest" 2>/dev/null || {
+                rm -rf "$_lcw_stage" 2>/dev/null || true
+                return 1
+            }
+        done
     done
     rmdir "$_lcw_stage" 2>/dev/null || true
     return 0

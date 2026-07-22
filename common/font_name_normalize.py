@@ -16,6 +16,8 @@ from pathlib import Path
 
 from fontTools.ttLib import TTFont, TTLibError
 
+from font_metrics_normalize import normalize_font_metrics
+
 WEIGHT_NAMES = {
     100: "Thin",
     200: "ExtraLight",
@@ -56,7 +58,7 @@ def set_name(name_table, name_id: int, value: str) -> None:
     name_table.setName(value, name_id, 1, 0, 0)
 
 
-def normalize_font(font: TTFont, weight: int, family: str, source_digest: str) -> None:
+def normalize_font(font: TTFont, weight: int, family: str, source_digest: str, monospaced: bool = False) -> None:
     if "name" not in font:
         raise ValueError("font has no name table")
 
@@ -96,6 +98,8 @@ def normalize_font(font: TTFont, weight: int, family: str, source_digest: str) -
         top.Weight = role
         cff.fontNames = [values["postscript"]]
 
+    normalize_font_metrics(font, monospaced=monospaced)
+
 
 def atomic_save(font: TTFont, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -120,6 +124,7 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--weight", required=True, type=int)
     parser.add_argument("--family", default="LuoShu UI")
+    parser.add_argument("--monospace", action="store_true")
     args = parser.parse_args()
 
     weight = nearest_weight(args.weight)
@@ -127,7 +132,7 @@ def main() -> int:
         digest = hashlib.sha256(args.input.read_bytes()).hexdigest()
         font = TTFont(args.input, lazy=False, recalcTimestamp=False)
         try:
-            normalize_font(font, weight, args.family, digest)
+            normalize_font(font, weight, args.family, digest, monospaced=args.monospace)
             atomic_save(font, args.output)
         finally:
             font.close()

@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 import time
+import statistics
 from pathlib import Path
 from typing import Iterable
 
@@ -26,6 +27,8 @@ from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
+
+from font_metrics_normalize import normalize_font_metrics
 
 LATIN_CODEPOINTS = (
     set(range(0x0020, 0x0030))
@@ -150,13 +153,47 @@ def _outline_kind(font: TTFont) -> str:
     raise CompositeError("字体不包含受支持的 glyf、CFF 或 CFF2 轮廓")
 
 
-def _draw_decomposed(glyph_set, glyph_name: str, destination_pen, scale: float) -> None:
+def _bounds_for_codepoint(font: TTFont, glyph_set, codepoint: int) -> tuple[float, float, float, float] | None:
+    glyph_name = (font.getBestCmap() or {}).get(codepoint)
+    if not glyph_name or glyph_name not in glyph_set:
+        return None
+    pen = BoundsPen(glyph_set)
+    glyph_set[glyph_name].draw(pen)
+    return None if pen.bounds is None else tuple(float(value) for value in pen.bounds)
+
+
+def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tuple[float, float]:
+    base_glyph_set = base.getGlyphSet()
+    probes = tuple(map(ord, "AHIOXEx" if role == "latin" else "0189"))
+    upem_scale = base["head"].unitsPerEm / src["head"].unitsPerEm
+    pairs: list[tuple[tuple[float, float, float, float], tuple[float, float, float, float]]] = []
+    for codepoint in probes:
+        base_bounds = _bounds_for_codepoint(base, base_glyph_set, codepoint)
+        src_bounds = _bounds_for_codepoint(src, src_glyph_set, codepoint)
+        if base_bounds and src_bounds and src_bounds[3] > src_bounds[1] and base_bounds[3] > base_bounds[1]:
+            pairs.append((base_bounds, src_bounds))
+    if not pairs:
+        return upem_scale, 0.0
+    ratios = [
+        (base_bounds[3] - base_bounds[1]) / ((src_bounds[3] - src_bounds[1]) * upem_scale)
+        for base_bounds, src_bounds in pairs
+    ]
+    shape_scale = max(0.82, min(1.18, float(statistics.median(ratios))))
+    scale = upem_scale * shape_scale
+    base_bottom = float(statistics.median(base_bounds[1] for base_bounds, _ in pairs))
+    source_bottom = float(statistics.median(src_bounds[1] for _, src_bounds in pairs))
+    shift = base_bottom - source_bottom * scale
+    limit = base["head"].unitsPerEm * 0.14
+    return scale, max(-limit, min(limit, shift))
+
+
+def _draw_decomposed(glyph_set, glyph_name: str, destination_pen, scale: float, y_shift: float) -> None:
     recorder = DecomposingRecordingPen(glyph_set)
     glyph_set[glyph_name].draw(recorder)
-    recorder.replay(TransformPen(destination_pen, (scale, 0, 0, scale, 0, 0)))
+    recorder.replay(TransformPen(destination_pen, (scale, 0, 0, scale, 0, y_shift)))
 
 
-def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float) -> None:
+def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float, y_shift: float) -> None:
     pen = TTGlyphPen(None)
     source_kind = _outline_kind(src)
     output_pen = Cu2QuPen(
@@ -164,7 +201,7 @@ def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_
         max_err=max(0.5, base["head"].unitsPerEm / 2000),
         reverse_direction=source_kind in {"cff", "cff2"},
     )
-    _draw_decomposed(src_glyph_set, src_name, output_pen, scale)
+    _draw_decomposed(src_glyph_set, src_name, output_pen, scale, y_shift)
     # TTGlyphPen 生成的新 glyph 默认没有 xMin/yMin/xMax/yMax。
     # 当 TTFont 以 recalcBBoxes=False 保存时，FontTools 会直接读取这些字段；
     # glyf 中文基底因此会在保存阶段抛出 KeyError("xMin")。
@@ -178,7 +215,7 @@ def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_
         base["gvar"].variations.pop(base_name, None)
 
 
-def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float, width: int) -> None:
+def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float, y_shift: float, width: int) -> None:
     tag = "CFF " if "CFF " in base else "CFF2"
     cff = base[tag].cff
     top = cff.topDictIndex[0]
@@ -196,22 +233,20 @@ def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_n
         all_cubic=True,
         reverse_direction=source_kind == "glyf",
     )
-    _draw_decomposed(src_glyph_set, src_name, output_pen, scale)
+    _draw_decomposed(src_glyph_set, src_name, output_pen, scale, y_shift)
     char_string = pen.getCharString(private=private, globalSubrs=cff.GlobalSubrs)
     if selector is not None:
         char_string.fdSelectIndex = selector
     top.CharStrings[base_name] = char_string
 
 
-def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], location: dict[str, float] | None = None, required: set[int] | None = None) -> tuple[int, list[int]]:
+def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], role: str, location: dict[str, float] | None = None, required: set[int] | None = None) -> tuple[int, list[int]]:
     required = required or set()
     base_cmap = base.getBestCmap() or {}
     src_cmap = src.getBestCmap() or {}
     src_glyph_set = src.getGlyphSet(location=location) if location else src.getGlyphSet()
     base_kind = _outline_kind(base)
-    base_upem = base["head"].unitsPerEm
-    src_upem = src["head"].unitsPerEm
-    scale = base_upem / src_upem
+    scale, y_shift = _role_transform(base, src, src_glyph_set, role)
     replaced = 0
     missing: list[int] = []
     already: set[str] = set()
@@ -239,9 +274,9 @@ def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], lo
         lsb = int(round(float(lsb) * scale))
         try:
             if base_kind == "glyf":
-                _replace_glyf(base, src, src_glyph_set, base_name, src_name, scale)
+                _replace_glyf(base, src, src_glyph_set, base_name, src_name, scale, y_shift)
             else:
-                _replace_cff(base, src, src_glyph_set, base_name, src_name, scale, advance)
+                _replace_cff(base, src, src_glyph_set, base_name, src_name, scale, y_shift, advance)
         except Exception as exc:
             if cp in required:
                 raise CompositeError(f"必要字符 U+{cp:04X} 的字形转换失败：{exc}") from exc
@@ -308,11 +343,11 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             raise CompositeError("中文基础字体必须同时包含中文、英文字母和数字，才能安全生成完整复合字体")
         _progress(args.progress, "latin", "正在导入英文字形", 18)
         latin, latin_face, latin_location = _load_font(latin_path, "latin", args.weight, args.latin_face)
-        latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS, latin_location, REQUIRED_LATIN)
+        latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS, "latin", latin_location, REQUIRED_LATIN)
         latin.close(); latin = None; gc.collect()
         _progress(args.progress, "digit", "正在导入数字字形", 42)
         digit, digit_face, digit_location = _load_font(digit_path, "digit", args.weight, args.digit_face)
-        digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, digit_location, REQUIRED_DIGITS)
+        digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, "digit", digit_location, REQUIRED_DIGITS)
         digit.close(); digit = None; gc.collect()
         if latin_replaced < 52:
             raise CompositeError(f"英文替换数量异常（仅 {latin_replaced} 个）")
@@ -322,6 +357,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             if tag in base:
                 del base[tag]
         _set_names(base)
+        metrics = normalize_font_metrics(base)
         _progress(args.progress, "save", "正在写入完整复合字体", 60)
         output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(prefix=output.name + ".", suffix=".tmp", dir=output.parent, delete=False) as temp:
@@ -343,6 +379,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             "faces": {"cjk": cjk_face, "latin": latin_face, "digit": digit_face},
             "replaced": {"latin": latin_replaced, "digit": digit_replaced},
             "missingCounts": {"latin": len(latin_missing), "digit": len(digit_missing)},
+            "metrics": metrics,
             "validation": validation,
         }
     finally:

@@ -46,7 +46,24 @@ _font_anchor() {
     dest_dir="$2"
     key="$3"
     anchor="$dest_dir/.luoshu-font-store/${key}.font"
-    cp -f "$src" "$anchor" 2>/dev/null || return 1
+    module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+    normalizer="$module/common/font_metrics_normalize.py"
+    rm -f "$anchor" 2>/dev/null || true
+
+    if [ -f "$normalizer" ]; then
+        if type _luoshu_font_config_exec >/dev/null 2>&1; then
+            _luoshu_font_config_exec "$normalizer" --input "$src" --output "$anchor" >/dev/null 2>&1 || return 1
+        elif [ -x "$module/common/python/bin/luoshu-python" ]; then
+            pyroot="$module/common/python"
+            PYTHONHOME="$pyroot"             PYTHONPATH="$pyroot/lib/python3.14:$pyroot/lib/python3.14/site-packages"             LD_LIBRARY_PATH="$pyroot/lib:$pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"                 "$pyroot/bin/luoshu-python" "$normalizer" --input "$src" --output "$anchor" >/dev/null 2>&1 || return 1
+        elif command -v python3 >/dev/null 2>&1; then
+            python3 "$normalizer" --input "$src" --output "$anchor" >/dev/null 2>&1 || return 1
+        else
+            return 1
+        fi
+    else
+        cp -f "$src" "$anchor" 2>/dev/null || return 1
+    fi
     chmod 644 "$anchor" 2>/dev/null || true
     echo "$anchor"
 }

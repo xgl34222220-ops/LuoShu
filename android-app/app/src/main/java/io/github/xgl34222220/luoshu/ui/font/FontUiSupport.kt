@@ -46,7 +46,7 @@ internal fun fontCapabilityLabel(font: FontItem): String {
 }
 
 private const val FONT_PREVIEW_COMPACT = "洛书字体 · Aa 0123456789"
-private const val FONT_PREVIEW_DETAILED = "洛书字体 · Aa 0123456789\n天地玄黄 · Hello"
+private const val FONT_PREVIEW_DETAILED = "洛书字体 · Aa 0123456789\n中文 English 0123456789"
 
 internal fun fontPreviewText(font: FontItem, detailed: Boolean = false): String {
     // 卡片样张必须保持完全一致，字体能力差异由下方能力条表达。
