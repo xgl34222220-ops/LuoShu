@@ -12,6 +12,7 @@ done
 python3 -m py_compile \
   "$ROOT/common/composite_font.py" \
   "$ROOT/common/font_instance.py" \
+  "$ROOT/common/font_metrics_normalize.py" \
   "$ROOT/common/font_coverage.py" \
   "$ROOT/common/font_axis_info.py" \
   "$ROOT/common/font_role_check.py" \
@@ -23,7 +24,7 @@ python3 -m py_compile \
 for file in \
   module.prop customize.sh post-fs-data.sh service.sh uninstall.sh action.sh \
   README.md README.txt LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
-  common/composite_font.py common/font_instance.py common/font_coverage.py common/font_axis_info.py \
+  common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
@@ -32,7 +33,7 @@ for file in \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
   scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh \
   scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh \
-  scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh \
+  scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_config_monospace_test.py \
   scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/mix_finalize_performance_test.sh scripts/font_library_ui_layout_test.sh scripts/v2_source_audit.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
   android-app/app/build.gradle.kts \
@@ -108,7 +109,7 @@ grep -q 'native_font_index.json' "$ROOT/service.sh"
 ! grep -qE '重启界面|刷新字体缓存|回滚' "$ROOT/common/luoshu_cli.sh"
 
 # 字体处理、安全门禁和原生桥能力必须保留。
-grep -q 'full-composite-v5' "$ROOT/common/font_mix.sh"
+grep -q 'full-composite-v6' "$ROOT/common/font_mix.sh"
 grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
 grep -q 'weighted_mix_task.sh' "$ROOT/common/font_mix_controller.sh"
 grep -q 'multiweight_mix_task.sh' "$ROOT/common/font_mix_controller.sh"
@@ -133,6 +134,8 @@ grep -q 'font_check_cli' "$ROOT/common/font_check.sh"
 grep -q 'source 时，必须只定义函数' "$ROOT/common/font_check.sh"
 grep -q 'instantiateVariableFont' "$ROOT/common/font_instance.py"
 grep -q -- '--axes' "$ROOT/common/font_instance.py"
+grep -q 'normalize_font_metrics' "$ROOT/common/font_instance.py"
+grep -q 'LuoShuMono' "$ROOT/common/font_config_overlay.py"
 grep -q 'worker "$_request"' "$ROOT/common/weighted_mix_task.sh"
 grep -q 'axes_task.conf' "$ROOT/common/weighted_mix_task.sh"
 grep -q 'OpenMultipleDocuments' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
@@ -208,6 +211,8 @@ sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
 sh "$ROOT/scripts/coloros_consistency_mapping_test.sh"
 sh "$ROOT/scripts/font_config_variable_weight_test.sh"
+python3 "$ROOT/scripts/font_metrics_normalization_test.py"
+python3 "$ROOT/scripts/font_config_monospace_test.py"
 sh "$ROOT/scripts/auto_multiweight_mode_test.sh"
 sh "$ROOT/scripts/auto_multiweight_engine_test.sh"
 sh "$ROOT/scripts/background_mix_worker_test.sh"
@@ -224,4 +229,4 @@ echo 'LuoShu App-only source checks passed.'
 grep -q 'native-v3' common/font_manager.sh
 grep -q 'manifest-fast' common/font_manager.sh
 grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
-grep -q 'prepared-v2' common/multiweight_mix_task.sh
+grep -q 'prepared-v3' common/multiweight_mix_task.sh

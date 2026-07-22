@@ -35,8 +35,9 @@ def main() -> int:
         source = Path(directory) / "fonts.xml"
         source.write_text(SAMPLE, encoding="utf-8")
         tree = parse_xml(source)
-        report = rewrite_tree(tree, "LuoShu")
-        assert report["changed_fonts"] == 3, report
+        report = rewrite_tree(tree, "LuoShu", "LuoShuMono")
+        assert report["changed_fonts"] == 4, report
+        assert report["changed_mono_families"] == ["monospace"], report
 
         root = tree.getroot()
         families = {family.attrib.get("name", ""): family for family in root if family.tag == "family"}
@@ -47,7 +48,9 @@ def main() -> int:
         assert not list(list(sans)[0])
         assert child_text(families["sys-sans-en"]) == ["LuoShu-400.ttf"]
 
-        assert child_text(families["monospace"]) == ["DroidSansMono.ttf"]
+        # Named monospace families use the fixed-width derivative so terminal/install
+        # pages no longer mix LuoShu Chinese with ROM English and digits.
+        assert child_text(families["monospace"]) == ["LuoShuMono-400.ttf"]
         assert child_text(families["serif"]) == ["NotoSerif-Regular.ttf"]
         assert child_text(families["material-icons"]) == ["MaterialIcons.ttf"]
         assert child_text(families["mitype-clock"]) == ["Mitype2019.ttf"]

@@ -77,7 +77,7 @@ _luoshu_font_config_validate() {
     [ -f "$_lfc_xml" ] && [ -f "$_lfc_tool" ] || return 1
     if [ -n "$_lfc_fonts" ]; then
         _luoshu_font_config_exec "$_lfc_tool" --input "$_lfc_xml" --validate-only \
-            --font-prefix LuoShu --font-dir "$_lfc_fonts" >/dev/null 2>&1
+            --font-prefix LuoShu --mono-font-prefix LuoShuMono --font-dir "$_lfc_fonts" >/dev/null 2>&1
     else
         _luoshu_font_config_exec "$_lfc_tool" --input "$_lfc_xml" --validate-only >/dev/null 2>&1
     fi
@@ -88,23 +88,27 @@ _luoshu_font_config_alias_partition() {
     _lfc_module="$(_luoshu_font_config_module)"
     _lfc_system_fonts="$_lfc_module/system/fonts"
     mkdir -p "$_lfc_target" 2>/dev/null || return 1
-    for _lfc_weight in 100 200 300 400 500 600 700 800 900; do
-        _lfc_source="$_lfc_system_fonts/LuoShu-${_lfc_weight}.ttf"
-        _lfc_dest="$_lfc_target/LuoShu-${_lfc_weight}.ttf"
-        [ -s "$_lfc_source" ] || return 1
-        if [ "$_lfc_source" != "$_lfc_dest" ]; then
-            rm -f "$_lfc_dest" 2>/dev/null || true
-            ln "$_lfc_source" "$_lfc_dest" 2>/dev/null || cp -f "$_lfc_source" "$_lfc_dest" 2>/dev/null || return 1
-        fi
-        chmod 0644 "$_lfc_dest" 2>/dev/null || true
+    for _lfc_prefix in LuoShu LuoShuMono; do
+        for _lfc_weight in 100 200 300 400 500 600 700 800 900; do
+            _lfc_source="$_lfc_system_fonts/${_lfc_prefix}-${_lfc_weight}.ttf"
+            _lfc_dest="$_lfc_target/${_lfc_prefix}-${_lfc_weight}.ttf"
+            [ -s "$_lfc_source" ] || return 1
+            if [ "$_lfc_source" != "$_lfc_dest" ]; then
+                rm -f "$_lfc_dest" 2>/dev/null || true
+                ln "$_lfc_source" "$_lfc_dest" 2>/dev/null || cp -f "$_lfc_source" "$_lfc_dest" 2>/dev/null || return 1
+            fi
+            chmod 0644 "$_lfc_dest" 2>/dev/null || true
+        done
     done
     return 0
 }
 
 _luoshu_font_config_remove_aliases() {
     _lfc_dir="$1"
-    for _lfc_weight in 100 200 300 400 500 600 700 800 900; do
-        rm -f "$_lfc_dir/LuoShu-${_lfc_weight}.ttf" 2>/dev/null || true
+    for _lfc_prefix in LuoShu LuoShuMono; do
+        for _lfc_weight in 100 200 300 400 500 600 700 800 900; do
+            rm -f "$_lfc_dir/${_lfc_prefix}-${_lfc_weight}.ttf" 2>/dev/null || true
+        done
     done
 }
 
@@ -124,7 +128,7 @@ font_config_capture_original() {
             command -v cmp >/dev/null 2>&1 && cmp -s "$_lfc_real" "$_lfc_backup" 2>/dev/null && continue
         fi
         # Never snapshot our own upper-layer document. Keep a valid previous source when mounted.
-        if grep -q 'LuoShu-[1-9][0-9][0-9]\.ttf' "$_lfc_real" 2>/dev/null; then
+        if grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\.ttf' "$_lfc_real" 2>/dev/null; then
             continue
         fi
         _lfc_temp="${_lfc_backup}.tmp.$$"
@@ -146,7 +150,7 @@ _luoshu_font_config_disable_base() {
     _lfc_state="${CONFIG_DIR:-$_lfc_module/config}/font-config-overlay.conf"
     _lfc_dirs=''
     while IFS='|' read -r _lfc_key _lfc_real _lfc_overlay _lfc_fonts; do
-        if [ -f "$_lfc_overlay" ] && grep -q 'LuoShu-[1-9][0-9][0-9]\.ttf' "$_lfc_overlay" 2>/dev/null; then
+        if [ -f "$_lfc_overlay" ] && grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\.ttf' "$_lfc_overlay" 2>/dev/null; then
             rm -f "$_lfc_overlay" 2>/dev/null || true
         fi
         case " $_lfc_dirs " in *" $_lfc_fonts "*) ;; *) _lfc_dirs="$_lfc_dirs $_lfc_fonts" ;; esac
@@ -176,7 +180,7 @@ _luoshu_font_config_generate_base() {
         _lfc_output="$_lfc_stage/$_lfc_key"
         mkdir -p "${_lfc_output%/*}" 2>/dev/null || { _lfc_failed=$((_lfc_failed + 1)); continue; }
         if _luoshu_font_config_exec "$_lfc_tool" --input "$_lfc_input" --output "$_lfc_output" \
-            --font-prefix LuoShu --font-dir "$_lfc_fonts" >/dev/null 2>&1 && \
+            --font-prefix LuoShu --mono-font-prefix LuoShuMono --font-dir "$_lfc_fonts" >/dev/null 2>&1 && \
             [ -s "$_lfc_output" ] && _luoshu_font_config_validate "$_lfc_output" "$_lfc_fonts"; then
             _lfc_changed=$((_lfc_changed + 1))
         else
@@ -201,7 +205,7 @@ EOF_LUOSHU_FONT_CONFIG
             cp -f "$_lfc_ready" "$_lfc_temp" 2>/dev/null || { rm -rf "$_lfc_stage"; _luoshu_font_config_disable_base; return 1; }
             chmod 0644 "$_lfc_temp" 2>/dev/null || true
             mv -f "$_lfc_temp" "$_lfc_overlay" 2>/dev/null || { rm -rf "$_lfc_stage"; _luoshu_font_config_disable_base; return 1; }
-        elif [ -f "$_lfc_overlay" ] && grep -q 'LuoShu-' "$_lfc_overlay" 2>/dev/null; then
+        elif [ -f "$_lfc_overlay" ] && grep -Eq 'LuoShu(Mono)?-' "$_lfc_overlay" 2>/dev/null; then
             rm -f "$_lfc_overlay" 2>/dev/null || true
         fi
     done <<EOF_LUOSHU_FONT_CONFIG
@@ -226,7 +230,7 @@ _luoshu_font_config_boot_guard_base() {
     _lfc_bad=0
     while IFS='|' read -r _lfc_key _lfc_real _lfc_overlay _lfc_fonts; do
         [ -f "$_lfc_overlay" ] || continue
-        grep -q 'LuoShu-[1-9][0-9][0-9]\.ttf' "$_lfc_overlay" 2>/dev/null || continue
+        grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\.ttf' "$_lfc_overlay" 2>/dev/null || continue
         _lfc_seen=$((_lfc_seen + 1))
         _luoshu_font_config_validate "$_lfc_overlay" "$_lfc_fonts" || _lfc_bad=$((_lfc_bad + 1))
     done <<EOF_LUOSHU_FONT_CONFIG
@@ -236,7 +240,7 @@ EOF_LUOSHU_FONT_CONFIG
         # Removing the upper-layer XML reveals the untouched ROM document below. File-slot aliases
         # remain available as the compatibility fallback, so an invalid generated config never boots.
         while IFS='|' read -r _lfc_key _lfc_real _lfc_overlay _lfc_fonts; do
-            [ -f "$_lfc_overlay" ] && grep -q 'LuoShu-' "$_lfc_overlay" 2>/dev/null && rm -f "$_lfc_overlay" 2>/dev/null || true
+            [ -f "$_lfc_overlay" ] && grep -Eq 'LuoShu(Mono)?-' "$_lfc_overlay" 2>/dev/null && rm -f "$_lfc_overlay" 2>/dev/null || true
         done <<EOF_LUOSHU_FONT_CONFIG
 $(_luoshu_font_config_specs)
 EOF_LUOSHU_FONT_CONFIG

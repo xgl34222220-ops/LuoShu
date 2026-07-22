@@ -23,7 +23,8 @@ chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh"
 find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
 chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" \
     "$MODDIR/common/font_axis_info.py" "$MODDIR/common/font_config_overlay.py" \
-    "$MODDIR/common/font_name_normalize.py" "$MODDIR/common/font_config_targets.py" 2>/dev/null || true
+    "$MODDIR/common/font_name_normalize.py" "$MODDIR/common/font_metrics_normalize.py" \
+    "$MODDIR/common/font_config_targets.py" 2>/dev/null || true
 
 log_message "INFO" "===== post-fs-data $MODULE_VERSION 开始 ====="
 
@@ -45,8 +46,8 @@ fi
 ACTIVE_TEXT=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
 [ -n "$ACTIVE_TEXT" ] || ACTIVE_TEXT="default"
 
-# 在 Zygote 启动前，使用与生成阶段完全相同的扩展分区清单验证 XML 与九个静态字重。
-# 任何缺失都会撤销全部上层 XML，同时保留 ROM 文件槽作为安全回退。
+# 在 Zygote 启动前，使用与生成阶段完全相同的扩展分区清单验证 XML、UI/Mono 九档与负载架构。
+# 任一文件、校验或架构版本不一致都会撤销上层 XML，安全回到 ROM 默认字体。
 if type font_config_boot_guard >/dev/null 2>&1; then
     font_config_boot_guard "$ACTIVE_TEXT" || true
 fi

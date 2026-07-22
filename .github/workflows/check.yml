@@ -145,6 +145,7 @@ jobs:
           grep -qx 'action.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/composite_font.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_instance.py' /tmp/luoshu-package-list.txt
+          grep -qx 'common/font_metrics_normalize.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_coverage.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_role_check.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_role_check.sh' /tmp/luoshu-package-list.txt
@@ -163,13 +164,15 @@ jobs:
           unzip -p "$module" LICENSE | grep -q 'GNU GENERAL PUBLIC LICENSE'
           unzip -p "$module" LICENSE | grep -q 'Version 3, 29 June 2007'
           unzip -p "$module" NOTICE.md | grep -q 'GPL-3.0-only'
-          unzip -p "$module" common/font_mix.sh | grep -q 'full-composite-v5'
+          unzip -p "$module" common/font_mix.sh | grep -q 'full-composite-v6'
           unzip -p "$module" common/font_mix_controller.sh | grep -q 'font_role_check.sh'
           unzip -p "$module" common/app_bridge.sh | grep -q 'common/font_mix_controller.sh'
           unzip -p "$module" common/app_bridge.sh | grep -q 'native_import.sh'
           unzip -p "$module" common/native_import.sh | grep -q 'trusted_source'
           unzip -p "$module" common/font_instance.py | grep -q 'instantiateVariableFont'
           unzip -p "$module" common/font_instance.py | grep -q -- '--axes'
+          unzip -p "$module" common/font_instance.py | grep -q 'normalize_font_metrics'
+          unzip -p "$module" common/font_config_overlay.py | grep -q 'LuoShuMono'
           unzip -p "$module" common/weighted_mix_task.sh | grep -q 'axes_task.conf'
           unzip -p "$module" common/app_bridge.sh | grep -q 'rebootRequired'
           unzip -p "$module" customize.sh | grep -q 'luoshu_cli.sh.*system/bin/洛书'

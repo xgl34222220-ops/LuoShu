@@ -12,8 +12,8 @@ if [ -z "$MODDIR" ]; then
 fi
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/auto-multiweight-mix"
-COMPOSITE_CACHE="$CACHE_ROOT/composites-v2"
-PREPARED_CACHE="$CACHE_ROOT/prepared-v2"
+COMPOSITE_CACHE="$CACHE_ROOT/composites-v3"
+PREPARED_CACHE="$CACHE_ROOT/prepared-v3"
 SOURCE_META_CACHE="$CACHE_ROOT/source-meta-v1"
 PUBLIC_ROOT="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 SOURCE_FONTS="$PUBLIC_ROOT/fonts"
@@ -252,7 +252,7 @@ prepare_source() {
     mkdir -p "${_destination%/*}" "$PREPARED_CACHE" 2>/dev/null || return 1
 
     if [ "$_variable" = true ] || [ "$_format" = TTC ]; then
-        _prepared_key=$(printf '%s' "instance-v2|$_signature|$_role|$_effective" | hash_text)
+        _prepared_key=$(printf '%s' "instance-v3|$_signature|$_role|$_effective" | hash_text)
         [ -n "$_prepared_key" ] || return 1
         _cached="$PREPARED_CACHE/${_prepared_key}.font"
         if [ ! -s "$_cached" ]; then
@@ -264,10 +264,10 @@ prepare_source() {
   prune_prepared_cache
         fi
         link_or_copy "$_cached" "$_destination" || return 1
-        _content_key="instance-v2|$_prepared_key"
+        _content_key="instance-v3|$_prepared_key"
     else
         link_or_copy "$_source" "$_destination" || return 1
-        _content_key="static-v1|$_signature"
+        _content_key="static-v2|$_signature"
     fi
     printf '%s\n' "$_content_key" > "${_destination}.source-key" 2>/dev/null || return 1
     chmod 0644 "$_destination" "${_destination}.source-key" 2>/dev/null || true
@@ -318,9 +318,9 @@ build_composite_cached() {
     _latin_key=$(cat "${_latin}.source-key" 2>/dev/null)
     _digit_key=$(cat "${_digit}.source-key" 2>/dev/null)
     if [ -n "$_cjk_key" ] && [ -n "$_latin_key" ] && [ -n "$_digit_key" ]; then
-        _key=$(printf '%s|%s|%s|auto-multiweight-v2' "$_cjk_key" "$_latin_key" "$_digit_key" | hash_text)
+        _key=$(printf '%s|%s|%s|auto-multiweight-v3' "$_cjk_key" "$_latin_key" "$_digit_key" | hash_text)
     else
-        _key=$(printf '%s|%s|%s|auto-multiweight-v2' \
+        _key=$(printf '%s|%s|%s|auto-multiweight-v3' \
   "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" | hash_text)
     fi
     [ -n "$_key" ] || return 1
@@ -369,7 +369,7 @@ save_mix_config() {
         printf 'cjkWeight=%s\nlatinWeight=%s\ndigitWeight=%s\n' "$(safe_weight "$4")" "$(safe_weight "$5")" "$(safe_weight "$6")"
         printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$4" "$5" "$6"
         printf 'cjkMode=%s\nlatinMode=%s\ndigitMode=%s\n' "$7" "$8" "$9"
-        printf 'isolation=auto-multiweight-v2\ncharacterIsolation=true\ncomposite=true\nxmlOverlay=false\ntime=%s\n' "$(date +%s)"
+        printf 'isolation=auto-multiweight-v3\ncharacterIsolation=true\ncomposite=true\nxmlOverlay=false\ntime=%s\n' "$(date +%s)"
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$MIX_CONF" 2>/dev/null || return 1
     cp -f "$MIX_CONF" "$AXES_CONF" 2>/dev/null || true
     printf 'mix\n' >"$ACTIVE_CONF" 2>/dev/null || return 1

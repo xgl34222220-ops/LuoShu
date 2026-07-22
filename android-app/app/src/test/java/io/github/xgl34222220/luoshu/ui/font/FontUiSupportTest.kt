@@ -21,7 +21,7 @@ class FontUiSupportTest {
         val cjk = font(weights = listOf("regular"), supportsCjk = true)
         val latin = font(weights = listOf("regular"), supportsCjk = false)
         val compact = "洛书字体 · Aa 0123456789"
-        val detailed = "洛书字体 · Aa 0123456789\n天地玄黄 · Hello"
+        val detailed = "洛书字体 · Aa 0123456789\n中文 English 0123456789"
 
         assertEquals(compact, fontPreviewText(cjk))
         assertEquals(compact, fontPreviewText(latin))
@@ -42,7 +42,7 @@ class FontUiSupportTest {
         val font = font(weights = listOf("regular"), supportsCjk = false)
 
         assertTrue(fontCapabilityLabel(font).startsWith("仅拉丁"))
-        assertEquals("洛书字体 · Aa 0123456789\n天地玄黄 · Hello", fontPreviewText(font, detailed = true))
+        assertEquals("洛书字体 · Aa 0123456789\n中文 English 0123456789", fontPreviewText(font, detailed = true))
     }
 
     @Test
