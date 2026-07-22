@@ -79,6 +79,7 @@ jobs:
         shell: bash
         run: |
           set +e
+          git checkout HEAD -- .github/workflows
           rm -f MIGRATION_FAILURE.txt COMMIT_FAILURE.txt migration-run.log commit-run.log
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
