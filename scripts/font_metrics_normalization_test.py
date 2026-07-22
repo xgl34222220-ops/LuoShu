@@ -43,7 +43,7 @@ def make_font(path: Path, latin_bottom: int, latin_top: int, digit_bottom: int, 
         glyphs[name] = rectangle(90, digit_bottom, 510, digit_top)
     for name in cjk_names.values():
         glyphs[name] = rectangle(40, -80, 960, 880)
-    cmap = {ord(character): name for character, name in {**letter_names, **digit_names}.items()}
+    cmap = {ord(character): name for character, name in {**letter_names, **digit_names, **cjk_names}.items()}
     fb = FontBuilder(1000, isTTF=True)
     fb.setupGlyphOrder(glyph_order)
     fb.setupCharacterMap(cmap)
