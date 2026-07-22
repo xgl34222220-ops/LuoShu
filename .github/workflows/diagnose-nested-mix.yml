@@ -1,0 +1,35 @@
+name: Diagnose nested mix handoff
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run nested handoff regression with trace
+        id: regression
+        shell: bash
+        run: |
+          set +e
+          sh -x scripts/nested_mix_task_handoff_test.sh > nested-handoff.log 2>&1
+          rc=$?
+          printf '%s\n' "$rc" > nested-handoff.exit
+          cat nested-handoff.log
+          exit "$rc"
+      - name: Upload nested handoff diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nested-mix-handoff-diagnostics
+          path: |
+            nested-handoff.log
+            nested-handoff.exit
+          if-no-files-found: error
