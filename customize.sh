@@ -25,7 +25,7 @@ ui_print "║  Android 全局字体管理"
 ui_print "╚══════════════════════════════════╝"
 ui_print "• 用于管理和应用 Android 全局文字字体"
 ui_print "• 支持单字体、多字重以及中英数字复合字体"
-ui_print "• Emoji、图标和等宽字体默认保持系统原样"
+ui_print "• Emoji、图标、衬线与斜体保持系统原样"
 if [ "${IS_COLOROS:-false}" = true ]; then
     ui_print "✓ 系统：ColorOS ${COLOROS_VERSION:-未知}"
 elif [ "${IS_HYPEROS:-false}" = true ]; then
@@ -90,6 +90,17 @@ chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MOD
 [ ! -f "$MODPATH/bundled/LuoShu-App.apk" ] || chmod 0644 "$MODPATH/bundled/LuoShu-App.apk" "$MODPATH/bundled/app.prop" 2>/dev/null || true
 touch "$MODPATH/magic" 2>/dev/null || true
 
+if [ "$UPDATE_PRESERVED" = true ] && [ "${LUOSHU_UPDATE_REBUILD_REQUIRED:-false}" = true ]; then
+    ui_print "• 检测到旧版字体负载，正在使用新基线引擎重新生成"
+    if type luoshu_rebuild_preserved_payload >/dev/null 2>&1 && luoshu_rebuild_preserved_payload "$MODPATH"; then
+        ui_print "✓ 当前字体已按新架构重新生成"
+    else
+        LUOSHU_UPDATE_REBUILD_FAILED=true
+        ui_print "✗ 当前字体自动重建失败；重启时会安全恢复系统默认字体"
+        ui_print "• 重启后请在洛书 App 中重新应用一次字体"
+    fi
+fi
+
 ui_print "✓ 模块文件已部署"
 if [ "$UPDATE_PRESERVED" = true ]; then
     _preserved_font=$(head -n1 "$MODPATH/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
@@ -115,8 +126,10 @@ if [ -s "$MODPATH/bundled/LuoShu-App.apk" ] && [ -f "$MODPATH/common/app_install
 else
     ui_print "✗ 模块内置 App 或安装器缺失，请重新下载洛书模块包"
 fi
-if [ "$UPDATE_PRESERVED" = true ]; then
-    ui_print "请完整重启一次，新版本会继续使用当前字体。"
+if [ "$UPDATE_PRESERVED" = true ] && [ "${LUOSHU_UPDATE_REBUILD_FAILED:-false}" != true ]; then
+    ui_print "请完整重启一次，新版基线字体会直接生效。"
+elif [ "$UPDATE_PRESERVED" = true ]; then
+    ui_print "请重启后在洛书 App 中重新应用字体。"
 else
     ui_print "请完整重启后进入洛书 App 配置字体。"
 fi

@@ -229,4 +229,4 @@ echo 'LuoShu App-only source checks passed.'
 grep -q 'native-v3' common/font_manager.sh
 grep -q 'manifest-fast' common/font_manager.sh
 grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
-grep -q 'prepared-v2' common/multiweight_mix_task.sh
+grep -q 'prepared-v3' common/multiweight_mix_task.sh

@@ -110,7 +110,7 @@ grep -q 'native_font_index.key' "$ROOT/common/native_import.sh"
 grep -q 'native-v3|' "$ROOT/common/font_manager.sh"
 grep -q 'manifest-fast' "$ROOT/common/font_manager.sh"
 grep -q 'font-index-v3.json' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt"
-grep -q 'prepared-v2' "$ROOT/common/multiweight_mix_task.sh"
+grep -q 'prepared-v3' "$ROOT/common/multiweight_mix_task.sh"
 grep -q 'supportsCjk' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 grep -q 'fontPreviewWeight' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt"
 

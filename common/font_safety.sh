@@ -11,6 +11,30 @@ _luoshu_safety_config() {
     printf '%s/config\n' "$(_luoshu_safety_module)"
 }
 
+LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v6-mono-v1}"
+
+luoshu_payload_schema_current() {
+    printf '%s\n' "$LUOSHU_PAYLOAD_SCHEMA_CURRENT"
+}
+
+luoshu_payload_schema_read() {
+    sed -n 's/^schema=//p' "$(_luoshu_safety_config)/font-payload-schema.conf" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
+luoshu_payload_schema_write() {
+    _lpsw_active="${1:-default}"
+    _lpsw_config="$(_luoshu_safety_config)"
+    _lpsw_tmp="$_lpsw_config/font-payload-schema.conf.tmp.$$"
+    mkdir -p "$_lpsw_config" 2>/dev/null || return 1
+    {
+        printf 'schema=%s\n' "$LUOSHU_PAYLOAD_SCHEMA_CURRENT"
+        printf 'font=%s\n' "$_lpsw_active"
+        printf 'time=%s\n' "$(date +%s)"
+    } > "$_lpsw_tmp" 2>/dev/null || return 1
+    mv -f "$_lpsw_tmp" "$_lpsw_config/font-payload-schema.conf" 2>/dev/null || return 1
+    chmod 0644 "$_lpsw_config/font-payload-schema.conf" 2>/dev/null || true
+}
+
 _luoshu_payload_parts() {
     printf '%s\n' 'system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust'
 }
@@ -213,7 +237,7 @@ luoshu_payload_validate_current() {
 
     while IFS='|' read -r _lpv_key _lpv_real _lpv_overlay _lpv_font_dir; do
         [ -f "$_lpv_overlay" ] || continue
-        grep -q 'LuoShu-[1-9][0-9][0-9]\.ttf' "$_lpv_overlay" 2>/dev/null || continue
+        grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\.ttf' "$_lpv_overlay" 2>/dev/null || continue
         _luoshu_font_config_validate "$_lpv_overlay" "$_lpv_font_dir" || return 1
     done <<EOF_LUOSHU_VALIDATE
 $(_luoshu_font_config_specs)
@@ -242,7 +266,7 @@ luoshu_payload_build_manifest() {
         _lpm_etc="$_lpm_module/$_lpm_part/etc"
         if [ -d "$_lpm_etc" ]; then
             find "$_lpm_etc" -maxdepth 1 -type f -name '*.xml' 2>/dev/null | while IFS= read -r _lpm_file; do
-                grep -q 'LuoShu-[1-9][0-9][0-9]\.ttf' "$_lpm_file" 2>/dev/null || continue
+                grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\.ttf' "$_lpm_file" 2>/dev/null || continue
                 _lpm_rel=${_lpm_file#$_lpm_module/}
                 _lpm_sum=$(_luoshu_cached_checksum "$_lpm_file" "$_lpm_checksum_cache")
                 [ -n "$_lpm_sum" ] && printf '%s|%s\n' "$_lpm_rel" "$_lpm_sum"
@@ -305,7 +329,8 @@ luoshu_payload_arm() {
     mkdir -p "$_lpa_config" 2>/dev/null || return 1
     if [ "$_lpa_active" = default ]; then
         rm -f "$_lpa_config/font-payload-boot.conf" "$_lpa_config/font-payload-manifest.conf" 2>/dev/null || true
-        return 0
+        luoshu_payload_schema_write default
+        return $?
     fi
     luoshu_payload_build_manifest || return 1
     {
@@ -315,6 +340,7 @@ luoshu_payload_arm() {
     } > "$_lpa_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || return 1
     mv -f "$_lpa_config/font-payload-boot.conf.tmp.$$" "$_lpa_config/font-payload-boot.conf" 2>/dev/null || return 1
     chmod 0644 "$_lpa_config/font-payload-boot.conf" 2>/dev/null || true
+    luoshu_payload_schema_write "$_lpa_active"
 }
 
 LUOSHU_PAYLOAD_TXN=''
@@ -345,7 +371,7 @@ luoshu_payload_transaction_begin() {
             fi
         done
     done
-    for _lpt_name in active_font.conf font_mix.conf font-config-overlay.conf font-target-aliases.conf font-target-coverage.conf font-payload-manifest.conf font-payload-boot.conf text_reboot_required.conf; do
+    for _lpt_name in active_font.conf font_mix.conf font-config-overlay.conf font-target-aliases.conf font-target-coverage.conf font-payload-manifest.conf font-payload-boot.conf font-payload-schema.conf text_reboot_required.conf; do
         if [ -f "$_lpt_config/$_lpt_name" ]; then
             cp -fp "$_lpt_config/$_lpt_name" "$LUOSHU_PAYLOAD_TXN/config/$_lpt_name" 2>/dev/null || return 1
             printf 'present|config/%s\n' "$_lpt_name" >> "$LUOSHU_PAYLOAD_TXN/paths"
@@ -415,7 +441,7 @@ luoshu_payload_quarantine() {
         [ -d "$_lpq_etc" ] || continue
         for _lpq_xml in "$_lpq_etc"/*.xml; do
             [ -f "$_lpq_xml" ] || continue
-            grep -q 'LuoShu-' "$_lpq_xml" 2>/dev/null && rm -f "$_lpq_xml" 2>/dev/null || true
+            grep -Eq 'LuoShu(Mono)?-' "$_lpq_xml" 2>/dev/null && rm -f "$_lpq_xml" 2>/dev/null || true
         done
     done
     if type luoshu_meta_content_roots >/dev/null 2>&1; then
@@ -427,13 +453,14 @@ luoshu_payload_quarantine() {
                 [ -d "$_lpq_etc" ] || continue
                 for _lpq_xml in "$_lpq_etc"/*.xml; do
                     [ -f "$_lpq_xml" ] || continue
-                    grep -q 'LuoShu-' "$_lpq_xml" 2>/dev/null && rm -f "$_lpq_xml" 2>/dev/null || true
+                    grep -Eq 'LuoShu(Mono)?-' "$_lpq_xml" 2>/dev/null && rm -f "$_lpq_xml" 2>/dev/null || true
                 done
             done
         done
     fi
     printf 'default\n' > "$_lpq_config/active_font.conf" 2>/dev/null || true
     rm -f "$_lpq_config/font-payload-boot.conf" "$_lpq_config/font-payload-manifest.conf" \
+          "$_lpq_config/font-payload-schema.conf" "$_lpq_config/font-payload-rebuild-pending.conf" \
           "$_lpq_config/font-target-aliases.conf" "$_lpq_config/font-target-coverage.conf" \
           "$_lpq_config/font-config-overlay.conf" 2>/dev/null || true
     [ "$_lpq_fail" -lt 2 ] || touch "$_lpq_module/disable" 2>/dev/null || true
@@ -447,6 +474,12 @@ font_config_boot_guard() {
     if [ "$_lbg_active" = default ]; then
         rm -f "$_lbg_config/font-payload-boot.conf" "$_lbg_config/font-payload-manifest.conf" 2>/dev/null || true
         return 0
+    fi
+    _lbg_schema=$(luoshu_payload_schema_read)
+    if [ "$_lbg_schema" != "$LUOSHU_PAYLOAD_SCHEMA_CURRENT" ]; then
+        _luoshu_safety_log ERROR "字体负载架构过期：${_lbg_schema:-missing} != $LUOSHU_PAYLOAD_SCHEMA_CURRENT"
+        luoshu_payload_quarantine
+        return 1
     fi
     case "$_lbg_state" in
         booting)
