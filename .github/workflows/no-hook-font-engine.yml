@@ -5,6 +5,9 @@ on:
     branches:
       - main
     paths:
+      - common/composite_font.py
+      - common/font_instance.py
+      - common/font_metrics_normalize.py
       - common/font_config_overlay.py
       - common/font_config_targets.py
       - common/font_config_runtime.sh
@@ -24,6 +27,8 @@ on:
       - scripts/build.sh
       - scripts/prepare_composite_runtime.sh
       - scripts/font_config_overlay_test.py
+      - scripts/font_config_monospace_test.py
+      - scripts/font_metrics_normalization_test.py
       - scripts/font_config_targets_test.py
       - scripts/font_config_runtime_test.sh
       - scripts/font_config_weights_test.sh
@@ -57,6 +62,10 @@ jobs:
           fi
       - name: Run XML structure tests
         run: python3 scripts/font_config_overlay_test.py
+      - name: Run mixed-script metrics tests
+        run: |
+          python3 scripts/font_metrics_normalization_test.py
+          python3 scripts/font_config_monospace_test.py
       - name: Run dynamic target discovery tests
         run: python3 scripts/font_config_targets_test.py
       - name: Run payload transaction and boot guard tests
