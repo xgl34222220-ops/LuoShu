@@ -47,7 +47,8 @@ luoshu_resolve_nested_mix_task() {
     _latin="$5"
     _digit="$6"
 
-    _child=$(luoshu_mix_task_from_response "$_response" 2>/dev/null)
+    # “无启动输出”正是需要回退到持久化任务文件的正常场景；不得让 set -e 提前终止。
+    _child=$(luoshu_mix_task_from_response "$_response" 2>/dev/null || true)
     if [ -n "$_child" ]; then
         printf '%s\n' "$_child"
         return 0
