@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # 模块更新状态迁移：继承当前字体负载，并在引擎架构变化时自动重建。
 
-LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v7-mono-v2}"
+LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v7-mono-v3}"
 LUOSHU_UPDATE_ACTIVE=default
 LUOSHU_UPDATE_OLD_SCHEMA=''
 LUOSHU_UPDATE_REBUILD_REQUIRED=false
@@ -104,9 +104,9 @@ luoshu_migrate_update_cache() {
     _old="$1"
     _new="$2"
     for _relative in \
-        cache/full-composite-v7 \
-        cache/auto-multiweight-mix/composites-v4 \
-        cache/auto-multiweight-mix/prepared-v4 \
+        cache/full-composite-v8 \
+        cache/auto-multiweight-mix/composites-v5 \
+        cache/auto-multiweight-mix/prepared-v5 \
         cache/auto-multiweight-mix/source-meta-v1; do
         [ -d "$_old/$_relative" ] || continue
         rm -rf "$_new/$_relative" 2>/dev/null || true
