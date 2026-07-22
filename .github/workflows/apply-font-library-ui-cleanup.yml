@@ -18,23 +18,47 @@ jobs:
           ref: fix/font-library-ui-cleanup
           fetch-depth: 0
       - name: Apply UI cleanup
+        id: generate
+        shell: bash
         run: |
+          rm -f scripts/ui_cleanup_failure.log
           if [ -f scripts/apply_font_library_ui_cleanup.py ]; then
-            python3 scripts/apply_font_library_ui_cleanup.py
+            set +e
+            python3 scripts/apply_font_library_ui_cleanup.py > /tmp/ui-cleanup.log 2>&1
+            rc=$?
+            set -e
+            cat /tmp/ui-cleanup.log
+            if [ "$rc" -ne 0 ]; then
+              cp /tmp/ui-cleanup.log scripts/ui_cleanup_failure.log
+              echo "failed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "failed=false" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "failed=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Validate generated source
+        if: steps.generate.outputs.failed != 'true'
         run: |
           sh -n scripts/font_library_ui_layout_test.sh
           sh scripts/font_library_ui_layout_test.sh
           grep -q 'label = "应用字体"' android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/library/FontLibraryScreenMiuix.kt
           grep -q 'embedded = true' android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt
-      - name: Commit UI cleanup to branch
+      - name: Commit result to branch
+        if: always()
         run: |
           if git diff --quiet && git diff --cached --quiet; then
             exit 0
           fi
           git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git config user.email 41898218+github-actions[bot]@users.noreply.github.com
           git add -A
-          git commit -m "refactor: rebuild font library card and action layout"
+          if [ "${{ steps.generate.outputs.failed }}" = "true" ]; then
+            git commit -m "chore: record font library UI generator failure"
+          else
+            git commit -m "refactor: rebuild font library card and action layout"
+          fi
           git push origin HEAD:fix/font-library-ui-cleanup
+      - name: Fail after persisting diagnostic
+        if: steps.generate.outputs.failed == 'true'
+        run: exit 1
