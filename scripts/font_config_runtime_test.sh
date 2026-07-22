@@ -66,9 +66,11 @@ cat > "$ODM_ETC/fonts_customization.xml" <<'XML'
 </familyset>
 XML
 
-for weight in 100 200 300 400 500 600 700 800 900; do
-    dd if=/dev/zero of="$MOD/system/fonts/LuoShu-${weight}.ttf" bs=2048 count=1 2>/dev/null
-    chmod 0644 "$MOD/system/fonts/LuoShu-${weight}.ttf"
+for prefix in LuoShu LuoShuMono; do
+    for weight in 100 200 300 400 500 600 700 800 900; do
+        dd if=/dev/zero of="$MOD/system/fonts/${prefix}-${weight}.ttf" bs=2048 count=1 2>/dev/null
+        chmod 0644 "$MOD/system/fonts/${prefix}-${weight}.ttf"
+    done
 done
 
 export MODDIR="$MOD"
@@ -108,7 +110,8 @@ grep -q 'MaterialIcons.ttf' "$MOD/system_ext/etc/fonts_customization.xml"
 grep -q 'LuoShu-500.ttf' "$MOD/my_product/etc/oplus_fonts_customization.xml"
 grep -q 'MaterialIcons-Rounded.ttf' "$MOD/my_product/etc/oplus_fonts_customization.xml"
 grep -q 'LuoShu-600.ttf' "$MOD/vendor/etc/fonts.xml"
-grep -q 'VendorMono-Regular.ttf' "$MOD/vendor/etc/fonts.xml"
+grep -q 'LuoShuMono-400.ttf' "$MOD/vendor/etc/fonts.xml"
+! grep -q 'VendorMono-Regular.ttf' "$MOD/vendor/etc/fonts.xml"
 grep -q 'LuoShu-300.ttf' "$MOD/odm/etc/fonts_customization.xml"
 grep -q 'Mitype2019.ttf' "$MOD/odm/etc/fonts_customization.xml"
 
@@ -120,15 +123,17 @@ test -s "$MOD/config/font-config-source/vendor/fonts.xml"
 test -s "$MOD/config/font-config-source/odm/fonts_customization.xml"
 
 for partition in system product system_ext my_product vendor odm; do
-    for weight in 100 200 300 400 500 600 700 800 900; do
-        test -s "$MOD/$partition/fonts/LuoShu-${weight}.ttf"
+    for prefix in LuoShu LuoShuMono; do
+        for weight in 100 200 300 400 500 600 700 800 900; do
+            test -s "$MOD/$partition/fonts/${prefix}-${weight}.ttf"
+        done
     done
 done
 
-# A missing alias in any OEM partition must disable every generated XML before boot.
-rm -f "$MOD/my_product/fonts/LuoShu-500.ttf"
+# A missing mono alias in any OEM partition must disable every generated XML before boot.
+rm -f "$MOD/my_product/fonts/LuoShuMono-500.ttf"
 if font_config_boot_guard DemoFamily; then
-    echo 'boot guard unexpectedly accepted a missing my_product weight alias' >&2
+    echo 'boot guard unexpectedly accepted a missing my_product mono weight alias' >&2
     exit 1
 fi
 for overlay in \
@@ -141,16 +146,20 @@ for overlay in \
     test ! -e "$overlay"
 done
 
-# Regeneration repairs every partition alias from the validated system weight set.
+# Regeneration repairs every partition alias from the validated system UI + mono sets.
 mkdir -p "$MOD/system/fonts"
-for weight in 100 200 300 400 500 600 700 800 900; do
-    dd if=/dev/zero of="$MOD/system/fonts/LuoShu-${weight}.ttf" bs=2048 count=1 2>/dev/null
+for prefix in LuoShu LuoShuMono; do
+    for weight in 100 200 300 400 500 600 700 800 900; do
+        dd if=/dev/zero of="$MOD/system/fonts/${prefix}-${weight}.ttf" bs=2048 count=1 2>/dev/null
+    done
 done
 font_config_generate DemoFamily
 test -s "$MOD/my_product/fonts/LuoShu-500.ttf"
+test -s "$MOD/my_product/fonts/LuoShuMono-500.ttf"
 font_config_disable
 for partition in system product system_ext my_product vendor odm; do
     test ! -e "$MOD/$partition/fonts/LuoShu-400.ttf"
+    test ! -e "$MOD/$partition/fonts/LuoShuMono-400.ttf"
 done
 for overlay in \
     "$MOD/system/etc/fonts.xml" \
