@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14.3 Alpha1：按现有字体族 ID 返回稳定文件身份与 TTC 字体面详情。
+# 洛书 v2.0.0：按字体族 ID 返回稳定文件身份与 TTC 字体面详情。
 set +e
 
 MODDIR="${MODDIR:-}"

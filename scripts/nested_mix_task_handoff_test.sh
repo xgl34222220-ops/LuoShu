@@ -53,7 +53,7 @@ if [ -s "$FONT" ]; then
     MODULE="$TMP/module"
     PUBLIC="$TMP/public"
     mkdir -p "$MODULE/common" "$MODULE/config" "$MODULE/logs" "$PUBLIC/fonts"
-    cp "$ROOT/common/v142_weighted_mix.sh" "$MODULE/common/v142_weighted_mix.sh"
+    cp "$ROOT/common/weighted_mix_task.sh" "$MODULE/common/weighted_mix_task.sh"
     cp "$ROOT/common/util_functions.sh" "$MODULE/common/util_functions.sh"
     cp "$ROOT/common/font_check.sh" "$MODULE/common/font_check.sh"
     cp "$ROOT/common/background_task.sh" "$MODULE/common/background_task.sh"
@@ -92,7 +92,7 @@ EOF_ENGINE
     cp "$FONT" "$PUBLIC/fonts/Latin-Regular.ttf"
     cp "$FONT" "$PUBLIC/fonts/Digit-Regular.ttf"
 
-    START=$(MODDIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/v142_weighted_mix.sh" \
+    START=$(MODDIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/weighted_mix_task.sh" \
         start CJK Latin Digit wght=400 wght=400 wght=400)
     OUTER=$(printf '%s\n' "$START" | sed -n 's/^.*"task":"\([^"]*\)".*$/\1/p' | tail -n1)
     test -n "$OUTER"
@@ -119,9 +119,9 @@ EOF_ENGINE
     ! grep -q '无法启动完整复合字体引擎' "$MODULE/config/axes_task.conf"
 fi
 
-grep -q 'mix_task_handoff.sh' "$ROOT/common/v142_weighted_mix.sh"
-grep -q 'luoshu_resolve_nested_mix_task' "$ROOT/common/v142_weighted_mix.sh"
-grep -q '_response_file=' "$ROOT/common/v142_weighted_mix.sh"
-! grep -q '_output=$(LUOSHU_PUBLIC_DIR=' "$ROOT/common/v142_weighted_mix.sh"
+grep -q 'mix_task_handoff.sh' "$ROOT/common/weighted_mix_task.sh"
+grep -q 'luoshu_resolve_nested_mix_task' "$ROOT/common/weighted_mix_task.sh"
+grep -q '_response_file=' "$ROOT/common/weighted_mix_task.sh"
+! grep -q '_output=$(LUOSHU_PUBLIC_DIR=' "$ROOT/common/weighted_mix_task.sh"
 
 echo 'Nested mix task handoff survives missing startup output.'

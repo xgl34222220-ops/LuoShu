@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14.3 Alpha1.4 原生 App 核心桥：状态、字体库、文件导入、预览、切换与复合任务接口。
+# 洛书 v2.0.0 原生 App 核心桥：状态、字体库、导入、预览、切换与复合任务接口。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -11,7 +11,7 @@ if [ -z "$MODDIR" ]; then
     fi
 fi
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
-MIX_ENGINE="$MODDIR/common/v14_mix.sh"
+MIX_ENGINE="$MODDIR/common/font_mix_controller.sh"
 NATIVE_IMPORT="$MODDIR/common/native_import.sh"
 AXIS_INFO="$MODDIR/common/font_axis_info.py"
 PYROOT="$MODDIR/common/python"

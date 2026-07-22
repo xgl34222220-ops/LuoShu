@@ -45,11 +45,15 @@ internal fun fontCapabilityLabel(font: FontItem): String {
     return if (font.supportsCjk) capability else "仅拉丁 · $capability"
 }
 
-internal fun fontPreviewText(font: FontItem, detailed: Boolean = false): String = when {
-    font.supportsCjk && detailed -> "洛书字体 · Aa 0123456789\n天地玄黄 · Hello"
-    font.supportsCjk -> "洛书 Aa 0123456789"
-    detailed -> "Aa Hello 0123456789\n仅拉丁 · 中文回退系统字体"
-    else -> "Aa Hello 0123456789"
+private const val FONT_PREVIEW_COMPACT = "洛书字体 · Aa 0123456789"
+private const val FONT_PREVIEW_DETAILED = "洛书字体 · Aa 0123456789\n天地玄黄 · Hello"
+
+internal fun fontPreviewText(font: FontItem, detailed: Boolean = false): String {
+    // 卡片样张必须保持完全一致，字体能力差异由下方能力条表达。
+    // 仅拉丁字体的中文会按 Android 正常 fallback 显示，但不再改变卡片文案和高度。
+    @Suppress("UNUSED_VARIABLE")
+    val supportsCjk = font.supportsCjk
+    return if (detailed) FONT_PREVIEW_DETAILED else FONT_PREVIEW_COMPACT
 }
 
 internal fun fontRoleWeight(role: String): Int = when (role.lowercase()) {

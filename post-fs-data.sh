@@ -36,8 +36,8 @@ rm -f "$MODDIR/config"/v*_axes_task.conf "$MODDIR/config"/v*_axes_mix.conf "$MOD
 chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
 
 # 通过统一桥恢复中断的原子负载，并清理独立字重暂存任务。
-if [ -f "$MODDIR/common/v14_mix.sh" ]; then
-    MODDIR="$MODDIR" sh "$MODDIR/common/v14_mix.sh" recover >/dev/null 2>&1 || true
+if [ -f "$MODDIR/common/font_mix_controller.sh" ]; then
+    MODDIR="$MODDIR" sh "$MODDIR/common/font_mix_controller.sh" recover >/dev/null 2>&1 || true
 elif [ -f "$MODDIR/common/font_mix.sh" ]; then
     MODDIR="$MODDIR" sh "$MODDIR/common/font_mix.sh" recover >/dev/null 2>&1 || true
 fi

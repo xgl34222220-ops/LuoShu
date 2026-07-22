@@ -113,7 +113,7 @@ grep -Eq '^sha256=[0-9a-f]{64}$' "$STAGE/bundled/app.prop"
 for forbidden in \
   webroot config/active_emoji.conf config/emoji_task.conf config/emoji_reboot_required.conf \
   system/fonts/NotoColorEmoji.ttf system/fonts/NotoColorEmojiLegacy.ttf \
-  common/stability.sh common/fonts_xml_template.sh common/play_font_bridge.sh common/wechat_xweb_bridge.sh; do
+  common/stability.sh common/fonts_xml_template.sh common/play_font_bridge common/wechat_xweb_bridge common/volume_key.sh common/legacy_data_fonts_cleanup.sh; do
   [ ! -e "$STAGE/$forbidden" ] || { echo "forbidden payload: $forbidden" >&2; exit 88; }
 done
 

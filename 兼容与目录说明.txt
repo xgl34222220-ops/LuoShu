@@ -1,10 +1,14 @@
-洛书 v14.1
+洛书 v2.0.0
 
-完整复合字体正式版：
-- 中文字体作为完整基底，英文与数字仅替换对应字形
-- 所有系统文字槽使用同一份完整字体，避免缺字与字体抢占
-- 不覆盖 fonts.xml / font_fallback.xml
-- 刷写和开机阶段不处理大字体
-- WebUI 主动生成、显示真实进度，并支持验证缓存
-- 字体负载事务替换，失败自动保留旧配置
+Android 无 Hook 全局字体引擎：
+- 原生 Android App 负责字体导入、预览、组合、应用与任务恢复
+- 中文字体作为完整基底，英文与数字只替换对应字形和度量
+- 生成 100–900 九档静态字重，并保持 Emoji、图标、等宽和专用字体原样
+- 基于设备原始 fonts.xml、font_fallback.xml 与 OEM 配置生成 systemless overlay
+- 不直接修改只读系统分区，也不读写 Android 动态字体数据库 /data/fonts
+- 字体负载经过生成、校验、暂存和原子提交，失败时保留旧有效配置
 - 支持 Magisk、KernelSU、SukiSU Ultra、APatch 与 Mountify
+
+用户字体目录：/sdcard/LuoShu/fonts
+安全导入目录：/sdcard/LuoShu/import
+诊断报告目录：/sdcard/LuoShu/reports

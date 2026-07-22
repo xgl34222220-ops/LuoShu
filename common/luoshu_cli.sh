@@ -5,7 +5,7 @@ set +e
 MODDIR="${MODDIR:-/data/adb/modules/LuoShu}"
 [ -f "${0%/*}/../module.prop" ] && MODDIR="$(CDPATH= cd -- "${0%/*}/.." 2>/dev/null && pwd)"
 MANAGER="$MODDIR/common/font_manager.sh"
-SWITCH="$MODDIR/common/v14_switch.sh"
+SWITCH="$MODDIR/common/font_switch_task.sh"
 BRIDGE="$MODDIR/common/app_bridge.sh"
 
 help_text() {

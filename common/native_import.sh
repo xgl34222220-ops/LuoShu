@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v14.3 Alpha1.1：原生 App 文件选择器导入桥。
+# 洛书 v2.0.0：原生 App 文件选择器导入桥。
 # 只接受 App 私有缓存中的 TTF/OTF/TTC/ZIP；ZIP 由安全字体包导入器处理。
 set +e
 

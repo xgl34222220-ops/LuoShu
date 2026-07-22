@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize a font source at concrete variation-axis values for LuoShu v14.2.
+"""Materialize a font source at concrete variation-axis values for LuoShu v2.0.0.
 
 Variable fonts are pinned to every requested fvar axis. TTC/OTC collections are
 reduced to the face whose coverage and weight best match the requested role.

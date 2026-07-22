@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Enforce App-only inventory
-        run: sh ./scripts/rc3_audit.sh
+        run: sh ./scripts/v2_source_audit.sh
 
       - uses: actions/setup-java@v4
         with:
@@ -150,7 +150,7 @@ jobs:
           grep -qx 'common/font_role_check.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/native_import.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/luoshu_cli.sh' /tmp/luoshu-package-list.txt
-          grep -qx 'common/v142_weighted_mix.sh' /tmp/luoshu-package-list.txt
+          grep -qx 'common/weighted_mix_task.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/luoshu_composite.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/python/bin/luoshu-python' /tmp/luoshu-package-list.txt
           grep -qx 'licenses/CPython-LICENSE.txt' /tmp/luoshu-package-list.txt
@@ -164,17 +164,17 @@ jobs:
           unzip -p "$module" LICENSE | grep -q 'Version 3, 29 June 2007'
           unzip -p "$module" NOTICE.md | grep -q 'GPL-3.0-only'
           unzip -p "$module" common/font_mix.sh | grep -q 'full-composite-v5'
-          unzip -p "$module" common/v14_mix.sh | grep -q 'font_role_check.sh'
-          unzip -p "$module" common/app_bridge.sh | grep -q 'common/v14_mix.sh'
+          unzip -p "$module" common/font_mix_controller.sh | grep -q 'font_role_check.sh'
+          unzip -p "$module" common/app_bridge.sh | grep -q 'common/font_mix_controller.sh'
           unzip -p "$module" common/app_bridge.sh | grep -q 'native_import.sh'
           unzip -p "$module" common/native_import.sh | grep -q 'trusted_source'
           unzip -p "$module" common/font_instance.py | grep -q 'instantiateVariableFont'
           unzip -p "$module" common/font_instance.py | grep -q -- '--axes'
-          unzip -p "$module" common/v142_weighted_mix.sh | grep -q 'axes_task.conf'
+          unzip -p "$module" common/weighted_mix_task.sh | grep -q 'axes_task.conf'
           unzip -p "$module" common/app_bridge.sh | grep -q 'rebootRequired'
           unzip -p "$module" customize.sh | grep -q 'luoshu_cli.sh.*system/bin/洛书'
-          unzip -p "$module" post-fs-data.sh | grep -q 'v14_mix.sh.*recover'
-          ! unzip -p "$module" common/v142_weighted_mix.sh | grep -q 'v143_axes'
+          unzip -p "$module" post-fs-data.sh | grep -q 'font_mix_controller.sh.*recover'
+          ! unzip -p "$module" common/weighted_mix_task.sh | grep -q 'v143_axes'
           ! unzip -p "$module" common/app_bridge.sh | grep -q 'v143_axes'
           ! unzip -p "$module" customize.sh | grep -q 'pm install'
           ! unzip -p "$module" common/luoshu_cli.sh | grep -qE '回滚|重启界面|刷新字体缓存'
@@ -183,7 +183,7 @@ jobs:
           ! unzip -p "$module" service.sh | grep -q 'oplus-font refresh'
           ! grep -qE '^system/etc/(fonts.xml|font_fallback.xml)$' /tmp/luoshu-package-list.txt
           ! grep -qE '(^|/)skip_mount(ify)?$' /tmp/luoshu-package-list.txt
-          ! grep -qEi '(^|/)(emoji|__pycache__)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' /tmp/luoshu-package-list.txt
+          ! grep -qEi '(^|/)(emoji|__pycache__)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge|wechat_xweb_bridge|legacy_data_fonts_cleanup|volume_key\.sh' /tmp/luoshu-package-list.txt
 
       - uses: actions/upload-artifact@v4
         with:
