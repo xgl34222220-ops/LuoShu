@@ -24,7 +24,6 @@ jobs:
           python-version: '3.12'
 
       - name: Finish source hygiene
-        id: followup
         shell: bash
         run: |
           set +e
@@ -56,6 +55,16 @@ jobs:
           sh scripts/coloros_consistency_mapping_test.sh
           sh scripts/font_config_variable_weight_test.sh
           sh scripts/v2_source_audit.sh
+
+      - name: Export validated source changes
+        uses: actions/upload-artifact@v4
+        with:
+          name: font-consistency-patched-sources-${{ github.run_id }}
+          path: |
+            common/util_functions.sh
+            common/font_import.sh
+          if-no-files-found: error
+          retention-days: 2
 
       - name: Commit ordinary source changes
         shell: bash
