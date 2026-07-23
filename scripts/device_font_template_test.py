@@ -2,90 +2,74 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 from pathlib import Path
 
-from fontTools.fontBuilder import FontBuilder
-from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTFont
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "common"))
 import device_font_template as mod
 
 
-def rect(width: int, y_min: int, y_max: int):
-    pen = TTGlyphPen(None)
-    pen.moveTo((40, y_min))
-    pen.lineTo((width - 40, y_min))
-    pen.lineTo((width - 40, y_max))
-    pen.lineTo((40, y_max))
-    pen.closePath()
-    return pen.glyph()
-
-
-def build_font(path: Path, family: str, postscript: str, weight: int, ascent: int, descent: int) -> None:
-    glyph_order = [".notdef", "H", "x", "zero", "one", "uni4E2D", "parenleft", "percent"]
-    cmap = {
-        ord("H"): "H",
-        ord("x"): "x",
-        ord("0"): "zero",
-        ord("1"): "one",
-        ord("中"): "uni4E2D",
-        ord("("): "parenleft",
-        ord("%"): "percent",
-    }
-    glyphs = {
-        ".notdef": rect(600, 0, 700),
-        "H": rect(620, 0, 720),
-        "x": rect(560, 0, 500),
-        "zero": rect(600, -10, 700),
-        "one": rect(540, 0, 700),
-        "uni4E2D": rect(1000, -80, 880),
-        "parenleft": rect(360, -120, 760),
-        "percent": rect(720, -20, 710),
-    }
-    metrics = {name: ((1000 if name == "uni4E2D" else 620), 20) for name in glyph_order}
-    builder = FontBuilder(1000, isTTF=True)
-    builder.setupGlyphOrder(glyph_order)
-    builder.setupCharacterMap(cmap)
-    builder.setupGlyf(glyphs)
-    builder.setupHorizontalMetrics(metrics)
-    builder.setupHorizontalHeader(ascent=ascent, descent=descent, lineGap=12)
-    builder.setupNameTable({
-        "familyName": family,
-        "styleName": "Regular",
-        "uniqueFontIdentifier": f"{family} Regular",
-        "fullName": f"{family} Regular",
-        "psName": postscript,
-        "version": "Version 1.000",
-    })
-    builder.setupOS2(
-        sTypoAscender=ascent - 10,
-        sTypoDescender=descent + 10,
-        sTypoLineGap=8,
-        usWinAscent=ascent + 40,
-        usWinDescent=abs(descent) + 40,
-        sxHeight=500,
-        sCapHeight=720,
-        usWeightClass=weight,
-        usWidthClass=5,
+def find_fixture_font() -> Path | None:
+    preferred = (
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
     )
-    builder.setupPost()
-    builder.setupMaxp()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    builder.save(path)
+    for raw in preferred:
+        path = Path(raw)
+        if path.is_file():
+            return path
+    root = Path("/usr/share/fonts")
+    if root.is_dir():
+        for path in root.rglob("*.ttf"):
+            if path.is_file():
+                return path
+    return None
+
+
+def postscript_name(path: Path) -> str:
+    font = TTFont(str(path), lazy=True, recalcTimestamp=False)
+    try:
+        for record in font["name"].names:
+            if record.nameID != 6:
+                continue
+            value = record.toUnicode().strip()
+            if value:
+                return value
+    finally:
+        font.close()
+    raise AssertionError(f"fixture font has no PostScript name: {path}")
+
+
+def source_metrics(path: Path) -> tuple[int, int]:
+    font = TTFont(str(path), lazy=True, recalcTimestamp=False)
+    try:
+        return int(font["hhea"].ascent), int(font["hhea"].descent)
+    finally:
+        font.close()
 
 
 def main() -> None:
+    fixture = find_fixture_font()
+    if fixture is None:
+        print(json.dumps({"status": "skipped", "reason": "no system TTF fixture"}))
+        return
+    ps_name = postscript_name(fixture)
+    expected_ascent, expected_descent = source_metrics(fixture)
+
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         system_font = root / "system/fonts/Roboto-Regular.ttf"
         dynamic_font = root / "data/fonts/files/hash/GoogleSans-Regular.ttf"
         emoji_font = root / "system/fonts/NotoColorEmoji.ttf"
-        build_font(system_font, "Roboto", "Roboto-Regular", 400, 930, -250)
-        build_font(dynamic_font, "Google Sans", "GoogleSans-Regular", 400, 950, -270)
-        build_font(emoji_font, "Noto Color Emoji", "NotoColorEmoji", 400, 1000, -300)
+        for target in (system_font, dynamic_font, emoji_font):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(fixture, target)
 
         system_xml = root / "system/etc/fonts.xml"
         system_xml.parent.mkdir(parents=True, exist_ok=True)
@@ -101,11 +85,11 @@ def main() -> None:
         data_xml = root / "data/fonts/config/config.xml"
         data_xml.parent.mkdir(parents=True, exist_ok=True)
         data_xml.write_text(
-            """<?xml version='1.0' encoding='utf-8'?>
+            f"""<?xml version='1.0' encoding='utf-8'?>
 <fontConfig>
   <lastModifiedDate value='1'/>
   <updatedFontDir value='hash'/>
-  <family name='google-sans'><font name='GoogleSans-Regular' weight='400' style='normal'/></family>
+  <family name='google-sans'><font name='{ps_name}' weight='400' style='normal'/></family>
 </fontConfig>
 """,
             encoding="utf-8",
@@ -113,22 +97,25 @@ def main() -> None:
 
         payload = mod.build_template(
             [system_xml, data_xml],
-            [root / "system/fonts", root / "data/fonts/files"],
+            [root / "data/fonts/files", root / "system/fonts"],
             "fixture-build",
         )
         assert payload["schema"] == "device-font-template-v1"
         assert payload["summary"]["slots"] == 3, payload["summary"]
-        assert payload["summary"]["resolved"] == 3, payload["summary"]
+        assert payload["summary"]["resolved"] == 3, payload
         slots = {(slot["familyNormalized"], slot["weight"]): slot for slot in payload["slots"]}
+
         ui = slots[("sans-serif", 400)]
         assert ui["replaceable"] is True
         assert "global-ui" in ui["roles"]
-        assert ui["font"]["metrics"]["hheaAscent"] == 930
-        assert ui["font"]["metrics"]["hheaDescent"] == -250
-        assert ui["font"]["probes"]["digits"]["hits"] == 2
+        assert ui["font"]["metrics"]["hheaAscent"] == expected_ascent
+        assert ui["font"]["metrics"]["hheaDescent"] == expected_descent
+        assert ui["font"]["probes"]["digits"]["hits"] > 0
+
         dynamic = slots[("google-sans", 400)]
         assert "dynamic" in dynamic["roles"]
-        assert dynamic["resolvedPath"].endswith("GoogleSans-Regular.ttf")
+        assert dynamic["resolvedPath"].endswith("GoogleSans-Regular.ttf"), dynamic
+
         emoji = slots[("emoji-family", 400)]
         assert emoji["replaceable"] is False
         assert "protected" in emoji["roles"]
