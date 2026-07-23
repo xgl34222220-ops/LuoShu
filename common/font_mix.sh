@@ -248,7 +248,7 @@ sync_secondary_partition() {
     _part="$1"; _real_root="$2"; _dest="$MODDIR/$_part/fonts"
     _stage="$MODDIR/.${_part}-fonts-stage.$$"; _backup="$MODDIR/.${_part}-fonts-backup.$$"
     rm -rf "$_stage" "$_backup" 2>/dev/null || true
-    mkdir -p "$_stage" 2>/dev/null || return 1
+    mkdir -p "$_stage" 2>/dev/null || true
     if [ -d "$_dest" ]; then
         cp -af "$_dest/." "$_stage/" 2>/dev/null || cp -rfp "$_dest/." "$_stage/" 2>/dev/null || true
     fi
@@ -355,7 +355,7 @@ prune_composite_cache() {
         _base=${_old%.otf}
         rm -f "$_old" "${_base}.json" 2>/dev/null || true
     done
-    rm -f "$_cache"/.​*.tmp.* 2>/dev/null || true
+    rm -f "$_cache"/.*.tmp.* 2>/dev/null || true
 }
 
 build_composite_file() {
