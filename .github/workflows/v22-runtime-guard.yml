@@ -20,8 +20,19 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends fonts-dejavu-core >/dev/null
-      - name: Run payload runtime guard
+      - name: Capture payload runtime guard
         shell: bash
         run: |
-          set -o pipefail
-          sh -x scripts/device_font_payload_runtime_test.sh 2>&1 | tail -n 140
+          set +e
+          mkdir -p diagnostic
+          sh -x scripts/device_font_payload_runtime_test.sh > diagnostic/runtime.log 2>&1
+          printf '%s\n' "$?" > diagnostic/rc.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v22-runtime-guard
+          path: diagnostic
+          if-no-files-found: error
+      - name: Enforce payload runtime guard
+        run: test "$(cat diagnostic/rc.txt)" = 0
