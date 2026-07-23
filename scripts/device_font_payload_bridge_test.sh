@@ -100,6 +100,7 @@ grep -qx base-clear "$CALLS"
 
 # Boot quarantine must apply the pending Flyme restoration before returning to default.
 printf 'active\n' > "$MODULE/config/active_font.conf"
+printf '0\n' > "$MODULE/config/font-boot-failures"
 : > "$CALLS"
 luoshu_payload_quarantine
 grep -qx oem-clear "$CALLS"
