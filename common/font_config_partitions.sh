@@ -86,8 +86,9 @@ if ! type font_config_prepare_payload_weights >/dev/null 2>&1; then
 fi
 [ -f "$_luoshufp_module/common/font_finalize_hotfix.sh" ] && . "$_luoshufp_module/common/font_finalize_hotfix.sh"
 
-# v2.2 loads after every legacy adapter. The strict dynamic guard is sourced last so
-# stale target detection and read-only bind enforcement cannot be replaced later.
+# v2.2 loads after every legacy adapter. Dynamic and transaction guards are sourced
+# after the bridge so older compatibility helpers cannot replace them.
 [ -f "$_luoshufp_module/common/device_font_payload_bridge.sh" ] && . "$_luoshufp_module/common/device_font_payload_bridge.sh"
 [ -f "$_luoshufp_module/common/device_font_dynamic_guard.sh" ] && . "$_luoshufp_module/common/device_font_dynamic_guard.sh"
+[ -f "$_luoshufp_module/common/device_font_transaction_guard.sh" ] && . "$_luoshufp_module/common/device_font_transaction_guard.sh"
 unset _luoshufp_module
