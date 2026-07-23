@@ -248,7 +248,7 @@ sync_secondary_partition() {
     _part="$1"; _real_root="$2"; _dest="$MODDIR/$_part/fonts"
     _stage="$MODDIR/.${_part}-fonts-stage.$$"; _backup="$MODDIR/.${_part}-fonts-backup.$$"
     rm -rf "$_stage" "$_backup" 2>/dev/null || true
-    mkdir -p "$_stage" 2>/dev/null || true
+    mkdir -p "$_stage" 2>/dev/null || return 1
     if [ -d "$_dest" ]; then
         cp -af "$_dest/." "$_stage/" 2>/dev/null || cp -rfp "$_dest/." "$_stage/" 2>/dev/null || true
     fi
@@ -276,6 +276,16 @@ sync_secondary_coloros_dirs() {
     [ "$IS_COLOROS" = "true" ] || return 0
     sync_secondary_partition system_ext /system_ext/fonts || return 1
     sync_secondary_partition product /product/fonts || return 1
+    return 0
+}
+
+# HyperOS 的数字字重（100-900.ttf）与拉丁/核心 MiSans 文件在部分机型只存在于
+# /product 或 /system_ext 分区。mix 负载只写 system/fonts 时，中文变了但数字、
+# 英文继续显示原厂字体，必须像 ColorOS 一样按真实分区镜像。
+sync_secondary_hyperos_dirs() {
+    [ "$IS_HYPEROS" = "true" ] || return 0
+    sync_secondary_partition system_ext "${LUOSHU_SYSTEM_EXT_FONTS_ROOT:-/system_ext/fonts}" || return 1
+    sync_secondary_partition product "${LUOSHU_PRODUCT_FONTS_ROOT:-/product/fonts}" || return 1
     return 0
 }
 
@@ -489,6 +499,9 @@ apply_mix() {
     chmod 0644 "$SYSTEM_FONTS_DIR"/* 2>/dev/null || true
     if [ "$IS_COLOROS" = "true" ]; then
         sync_secondary_coloros_dirs || echo '警告：ColorOS 辅助分区字体同步未完全成功，主字体负载已保留' >&2
+    fi
+    if [ "$IS_HYPEROS" = "true" ]; then
+        sync_secondary_hyperos_dirs || echo '警告：HyperOS 辅助分区字体同步未完全成功，主字体负载已保留' >&2
     fi
     mix_stage mapping '正在生成系统字体映射' 91
     if type font_config_enable_for_payload >/dev/null 2>&1; then
