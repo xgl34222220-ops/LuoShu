@@ -70,7 +70,7 @@ build_plan() {
     }
 
     _bp_key=$(plan_key "$_bp_source")
-    _bp_old=$(cat "$KEY" 2>/dev/null)
+    _bp_old=$(head -n1 "$KEY" 2>/dev/null | tr -d '\r\n')
     if [ "$_bp_force" != 1 ] && [ -n "$_bp_key" ] && [ "$_bp_key" = "$_bp_old" ] && [ -s "$OUT" ]; then
         log_plan "字体 $_bp_font_id 的槽位计划未变化，跳过重建"
         return 0
@@ -103,7 +103,7 @@ build_plan() {
 }
 
 clear_plan() {
-    rm -f "$OUT" "$OUT.tmp" "$KEY" 2>/dev/null || true
+    rm -f "$OUT" "$OUT.tmp" "$OUT".tmp.* "$KEY" 2>/dev/null || true
     rmdir "$LOCK" 2>/dev/null || true
     return 0
 }
