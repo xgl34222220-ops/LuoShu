@@ -81,9 +81,8 @@ with tempfile.TemporaryDirectory() as directory:
     finally:
         font.close()
 
-    # Different glyph extremes must still emit exactly the same TextView/EditText baseline contract
-    # via typo metrics, while hhea encloses the real outline extremes so includeFontPadding=false
-    # apps neither clip glyph ink nor let it paint into the next line.
+    # Glyph extremes must be enclosed by both hhea and typo (USE_TYPO_METRICS makes engines
+    # read typo), while win metrics stay capped so includeFontPadding=true spacing is unchanged.
     source_two = temp / "source-two.ttf"; normalized_two = temp / "normalized-two.ttf"
     make_font(source_two, -180, 1040, -120, 960, extreme_metrics=False)
     normalize_path(source_two, normalized_two)
@@ -91,7 +90,7 @@ with tempfile.TemporaryDirectory() as directory:
     try:
         assert font_two["hhea"].ascent == 1040
         assert font_two["hhea"].descent == -244
-        assert font_two["OS/2"].sTypoAscender == 928
+        assert font_two["OS/2"].sTypoAscender == 1040
         assert font_two["OS/2"].sTypoDescender == -244
         # Win metrics must be capped at the line-box contract (0.98/0.35 em) so
         # includeFontPadding cannot inflate line height with glyph extremes.

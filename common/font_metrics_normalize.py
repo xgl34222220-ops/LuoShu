@@ -214,7 +214,8 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
     # box. When a CJK face's ink extends past the declared box, the overflow paints into the
     # next line (标题与热度重叠) or is clipped off (标签少一截). Enclose the real outline
     # extremes in hhea — floored at the stable contract so compact faces keep stock spacing —
-    # while typo/win stay on the contract, leaving includeFontPadding=true spacing unchanged.
+    # typo mirrors this enclosed box (see below); win stays capped on the contract, leaving
+    # includeFontPadding=true spacing unchanged.
     hhea_ascent = _clamp_signed(min(max(ascender, y_max), int(round(upem * HHEA_ASCENT_CAP_RATIO))))
     hhea_descent_abs = min(max(descender_abs, -y_min), int(round(upem * HHEA_DESCENT_CAP_RATIO)))
     hhea = font["hhea"]
@@ -224,8 +225,12 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
 
     os2 = font["OS/2"]
     _promote_os2_for_typo_metrics(os2)
-    os2.sTypoAscender = ascender
-    os2.sTypoDescender = descender
+    # fsSelection bit 7 (USE_TYPO_METRICS) makes engines lay out with the typo values,
+    # so a contract-only typo still lets CJK ink overflow the line box exactly as before
+    # (标题压热度 / 标签少一截). Keep typo identical to the enclosed hhea box; compact
+    # faces stay on the contract because hhea is floored at it.
+    os2.sTypoAscender = hhea_ascent
+    os2.sTypoDescender = _clamp_signed(-int(hhea_descent_abs))
     os2.sTypoLineGap = 0
     os2.fsSelection |= 1 << 7
     win_ascent_cap = int(round(upem * WIN_ASCENT_CAP_RATIO))
