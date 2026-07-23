@@ -1,7 +1,8 @@
 #!/system/bin/sh
 # LuoShu persistent per-device alignment cache.
-# Foreground application only activates a ready cache through hard links. Expensive
-# outline generation runs after boot from a pending request and never blocks the App.
+# Foreground application only activates a ready cache or writes a tiny pending request.
+# Expensive generation starts at low priority after active_font.conf is committed; boot
+# service resumes the same request when Android kills or reboots during the background job.
 set +e
 
 _dfcache_module() {
@@ -35,8 +36,8 @@ _dfcache_template_key() {
     printf '%s\n' "$_dfc_key"
 }
 
-# The source key is metadata-only so an App click never hashes a multi-megabyte CJK font.
-# Importing or rebuilding a font changes inode/size/mtime and therefore invalidates the cache.
+# Metadata-only identity keeps the App click fast. Reimporting or rebuilding a font changes
+# inode/size/mtime and automatically selects a different cache directory.
 _dfcache_source_key() {
     _dfc_module="$(_dfcache_module)"
     _dfc_store="$_dfc_module/system/fonts/.luoshu-font-store"
@@ -93,16 +94,46 @@ device_font_cache_lookup() {
     return 0
 }
 
+_dfcache_autostart_pending() {
+    _dfc_font="$1"
+    _dfc_module="$(_dfcache_module)"
+    _dfc_script="$_dfc_module/common/device_font_cache.sh"
+    [ "${LUOSHU_CACHE_AUTOSTART:-1}" != 0 ] || return 0
+    [ -f "$_dfc_script" ] || return 0
+    (
+        _dfc_waited=0
+        while [ "$_dfc_waited" -lt 60 ]; do
+            _dfc_active=$(head -n1 "$_dfc_module/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+            [ "$_dfc_active" = "$_dfc_font" ] && break
+            sleep 1
+            _dfc_waited=$((_dfc_waited + 1))
+        done
+        [ "$_dfc_active" = "$_dfc_font" ] || exit 0
+        sleep 2
+        MODDIR="$_dfc_module"
+        MODULE_DIR="$_dfc_module"
+        export MODDIR MODULE_DIR
+        if command -v ionice >/dev/null 2>&1 && command -v nice >/dev/null 2>&1; then
+            ionice -c 3 nice -n 10 sh "$_dfc_script" service >> "$_dfc_module/logs/device-font-cache.log" 2>&1
+        elif command -v nice >/dev/null 2>&1; then
+            nice -n 10 sh "$_dfc_script" service >> "$_dfc_module/logs/device-font-cache.log" 2>&1
+        else
+            sh "$_dfc_script" service >> "$_dfc_module/logs/device-font-cache.log" 2>&1
+        fi
+    ) &
+    return 0
+}
+
 device_font_cache_schedule() {
     _dfc_font="${1:-custom}"
     _dfc_module="$(_dfcache_module)"
     _dfc_pending="$_dfc_module/config/device-font-cache-pending.conf"
     _dfc_template_key=$(_dfcache_template_key) || {
-        _dfcache_log "无法安排对齐缓存：可信原厂模板尚未建立"
+        _dfcache_log '无法安排对齐缓存：可信原厂模板尚未建立'
         return 2
     }
     _dfc_source_key=$(_dfcache_source_key) || {
-        _dfcache_log "无法安排对齐缓存：当前字体源锚点不存在"
+        _dfcache_log '无法安排对齐缓存：当前字体源锚点不存在'
         return 2
     }
     _dfc_id=$(_dfcache_id "$_dfc_font" "$_dfc_template_key" "$_dfc_source_key") || return 1
@@ -118,6 +149,7 @@ device_font_cache_schedule() {
     mv -f "${_dfc_pending}.tmp.$$" "$_dfc_pending" 2>/dev/null || return 1
     chmod 0600 "$_dfc_pending" 2>/dev/null || true
     _dfcache_log "已安排后台生成设备对齐缓存：$_dfc_font"
+    _dfcache_autostart_pending "$_dfc_font"
     return 0
 }
 
@@ -309,7 +341,6 @@ device_font_cache_build_pending() {
     return 1
 }
 
-# Executed by the boot service after FontManagerService's temporary dynamic view is released.
 if [ "${0##*/}" = device_font_cache.sh ]; then
     case "${1:-service}" in
         service|build-pending) device_font_cache_build_pending ;;
