@@ -110,7 +110,7 @@ grep -q 'native_font_index.json' "$ROOT/service.sh"
 ! grep -qE '重启界面|刷新字体缓存|回滚' "$ROOT/common/luoshu_cli.sh"
 
 # 字体处理、安全门禁和原生桥能力必须保留。
-grep -q 'full-composite-v8' "$ROOT/common/font_mix.sh"
+grep -q 'full-composite-v9' "$ROOT/common/font_mix.sh"
 grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
 grep -q 'weighted_mix_task.sh' "$ROOT/common/font_mix_controller.sh"
 grep -q 'multiweight_mix_task.sh' "$ROOT/common/font_mix_controller.sh"
@@ -154,7 +154,7 @@ grep -q 'setFontVariationSettings' "$ROOT/android-app/app/src/main/java/io/githu
 grep -q 'updateMixAxis' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 grep -q 'resolveAndCacheFontDefaultAxes' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/dialogs/FontPickerDialog.kt"
 grep -q 'cachedFontDefaultWeight' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt"
-grep -q 'optDouble("default"' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt"
+grep -q 'optDouble("default")' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt"
 grep -q 'testImplementation("junit:junit:4.13.2")' "$ROOT/android-app/app/build.gradle.kts"
 
 # HyperOS 必须保留紧凑控件的原厂度量壳，并按真实分区写入 MiSans 与数字字重目标。
@@ -231,4 +231,4 @@ echo 'LuoShu App-only source checks passed.'
 grep -q 'native-v3' common/font_manager.sh
 grep -q 'manifest-fast' common/font_manager.sh
 grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
-grep -q 'prepared-v5' common/multiweight_mix_task.sh
+grep -q 'prepared-v6' common/multiweight_mix_task.sh
