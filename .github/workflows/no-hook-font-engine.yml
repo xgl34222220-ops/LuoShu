@@ -12,6 +12,8 @@ on:
       - common/device_font_slot_plan.sh
       - common/device_font_slot_build.py
       - common/device_font_cache.sh
+      - common/device_font_load_verify.py
+      - common/device_font_load_verify.sh
       - common/device_font_payload_build.py
       - common/device_font_payload_overlay.py
       - common/device_font_payload_runtime.sh
@@ -49,6 +51,7 @@ on:
       - scripts/device_font_slot_plan_runtime_test.sh
       - scripts/device_font_slot_build_test.py
       - scripts/device_font_cache_test.sh
+      - scripts/device_font_load_verify_test.py
       - scripts/device_font_payload_build_test.py
       - scripts/device_font_payload_overlay_test.py
       - scripts/device_font_payload_verify_test.py
@@ -101,6 +104,8 @@ jobs:
           test -s "$FONT"
           python3 scripts/device_font_slot_build_test.py --font "$FONT"
           sh scripts/device_font_cache_test.sh
+          python3 scripts/device_font_load_verify_test.py
+          sh -n common/device_font_load_verify.sh
           python3 scripts/device_font_payload_build_test.py --font "$FONT"
           python3 scripts/device_font_payload_overlay_test.py
           python3 scripts/device_font_payload_verify_test.py
@@ -148,6 +153,7 @@ jobs:
           grep -q 'device_font_dynamic_mount_apply' post-fs-data.sh
           grep -q 'device_font_dynamic_guard.sh' common/font_config_partitions.sh
           grep -q 'device_font_transaction_guard.sh' common/font_config_partitions.sh
+          grep -q 'device_font_load_verify.sh' common/font_config_partitions.sh
           grep -q 'device_font_runtime_report.sh' common/font_config_partitions.sh
           grep -q 'device_font_cache.sh' common/font_config_partitions.sh
           grep -q 'device_font_payload_policy.sh' common/font_config_partitions.sh
@@ -158,6 +164,7 @@ jobs:
           grep -q 'remount,bind,ro' common/device_font_dynamic_guard.sh
           grep -q '_dfpr_mark_dynamic_rebuild' common/device_font_dynamic_guard.sh
           grep -q 'targetSha256' common/device_font_dynamic_guard.sh
+          grep -q 'device_font_load_verify' common/device_font_dynamic_guard.sh
           grep -q 'device_font_payload_bridge.sh' common/font_config_partitions.sh
           grep -q 'copy_as_originos' common/device_font_payload_bridge.sh
           grep -q 'copy_as_flyme' common/device_font_payload_bridge.sh
