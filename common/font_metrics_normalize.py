@@ -34,6 +34,10 @@ TYPO_DESCENDER_RATIO = 0.244
 # a large blank band above every line ("文字抬高/页面偏移"). Cap win metrics instead.
 WIN_ASCENT_CAP_RATIO = 0.98
 WIN_DESCENT_CAP_RATIO = 0.35
+# hhea additionally encloses real outline extremes for includeFontPadding=false apps, but
+# pathological sources (symbol/emoji mashups) must not blow line boxes up without bound.
+HHEA_ASCENT_CAP_RATIO = 1.60
+HHEA_DESCENT_CAP_RATIO = 0.90
 
 
 class MetricsError(RuntimeError):
@@ -202,9 +206,20 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
     ascender = _clamp_signed(ascender)
     descender = _clamp_signed(-descender_abs)
 
+    head = font["head"]
+    y_max = int(getattr(head, "yMax", ascender))
+    y_min = int(getattr(head, "yMin", -descender_abs))
+
+    # Apps rendering with includeFontPadding=false lay out (and clip) against the hhea line
+    # box. When a CJK face's ink extends past the declared box, the overflow paints into the
+    # next line (标题与热度重叠) or is clipped off (标签少一截). Enclose the real outline
+    # extremes in hhea — floored at the stable contract so compact faces keep stock spacing —
+    # while typo/win stay on the contract, leaving includeFontPadding=true spacing unchanged.
+    hhea_ascent = _clamp_signed(min(max(ascender, y_max), int(round(upem * HHEA_ASCENT_CAP_RATIO))))
+    hhea_descent_abs = min(max(descender_abs, -y_min), int(round(upem * HHEA_DESCENT_CAP_RATIO)))
     hhea = font["hhea"]
-    hhea.ascent = ascender
-    hhea.descent = descender
+    hhea.ascent = hhea_ascent
+    hhea.descent = _clamp_signed(-int(hhea_descent_abs))
     hhea.lineGap = 0
 
     os2 = font["OS/2"]
@@ -213,11 +228,8 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
     os2.sTypoDescender = descender
     os2.sTypoLineGap = 0
     os2.fsSelection |= 1 << 7
-    head = font["head"]
     win_ascent_cap = int(round(upem * WIN_ASCENT_CAP_RATIO))
     win_descent_cap = int(round(upem * WIN_DESCENT_CAP_RATIO))
-    y_max = int(getattr(head, "yMax", ascender))
-    y_min = int(getattr(head, "yMin", -descender_abs))
     os2.usWinAscent = _clamp_unsigned(min(max(ascender, y_max), win_ascent_cap))
     os2.usWinDescent = _clamp_unsigned(min(max(descender_abs, -y_min), win_descent_cap))
 
@@ -240,7 +252,7 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
         "lineGap": 0,
         "uiTop": int(round(ui_top)),
         "uiBottom": int(round(ui_bottom)),
-        "monospace": bool(monospaced),
+        "monospaced": bool(monospaced),
         "monoAdvance": mono_report["advance"],
         "monoGlyphs": mono_report["glyphs"],
     }
