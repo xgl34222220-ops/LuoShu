@@ -4,8 +4,10 @@ common/app_installer.sh
 common/background_task.sh
 common/coloros_global.sh
 common/composite_font.py
+common/device_font_payload_bridge.sh
 common/device_font_payload_build.py
 common/device_font_payload_overlay.py
+common/device_font_payload_runtime.sh
 common/device_font_slot_build.py
 common/device_font_slot_plan.py
 common/device_font_slot_plan.sh
