@@ -1,7 +1,7 @@
 #!/system/bin/sh
-# LuoShu v2.2 automatic runtime proof collector.
+# LuoShu automatic runtime proof collector.
 # The authoritative report is always stored inside the module. Public storage export is
-# best-effort only and may fail on devices where /sdcard is not ready in the root service.
+# best-effort only and never controls font success or rollback.
 set +e
 
 _device_font_report_module() {
@@ -68,6 +68,11 @@ device_font_runtime_report_collect() {
     _dfr_active=$(head -n1 "$_dfr_config/active_font.conf" 2>/dev/null | tr -d '\r\n')
     [ -n "$_dfr_active" ] || _dfr_active=default
     _dfr_engine=$(sed -n 's/^state=//p' "$_dfr_config/device-font-engine.conf" 2>/dev/null | head -n1)
+    _dfr_template=$(sed -n 's/^state=//p' "$_dfr_config/device-font-template.state" 2>/dev/null | head -n1)
+    _dfr_alignment=$(sed -n 's/^state=//p' "$_dfr_config/device-font-load-verification.conf" 2>/dev/null | head -n1)
+    _dfr_mode=$(sed -n 's/^mode=//p' "$_dfr_config/device-font-load-verification.conf" 2>/dev/null | head -n1)
+    _dfr_cache_pending=no
+    [ -s "$_dfr_config/device-font-cache-pending.conf" ] && _dfr_cache_pending=yes
 
     _dfr_stage="${_dfr_root}.tmp.$$"
     rm -rf "$_dfr_stage" 2>/dev/null || true
@@ -77,12 +82,16 @@ device_font_runtime_report_collect() {
     }
 
     {
-        printf 'report=device-font-runtime-v2\n'
+        printf 'report=device-font-runtime-v3\n'
         printf 'time=%s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)"
         printf 'moduleVersion=%s\n' "$(sed -n 's/^version=//p' "$_dfr_module/module.prop" 2>/dev/null | head -n1)"
         printf 'moduleVersionCode=%s\n' "$(sed -n 's/^versionCode=//p' "$_dfr_module/module.prop" 2>/dev/null | head -n1)"
         printf 'activeFont=%s\n' "$_dfr_active"
         printf 'engineState=%s\n' "${_dfr_engine:-missing}"
+        printf 'templateState=%s\n' "${_dfr_template:-missing}"
+        printf 'alignmentState=%s\n' "${_dfr_alignment:-missing}"
+        printf 'alignmentMode=%s\n' "${_dfr_mode:-compatibility}"
+        printf 'cachePending=%s\n' "$_dfr_cache_pending"
         printf 'fingerprint=%s\n' "$(getprop ro.build.fingerprint 2>/dev/null)"
         printf 'incremental=%s\n' "$(getprop ro.build.version.incremental 2>/dev/null)"
         printf 'sdk=%s\n' "$(getprop ro.build.version.sdk 2>/dev/null)"
@@ -97,9 +106,16 @@ device_font_runtime_report_collect() {
     for _dfr_pair in \
         "device-font-template.json|device-font-template.json" \
         "device-font-template.key|device-font-template.key" \
+        "device-font-template.state|device-font-template.state" \
+        "device-font-template-pending.conf|device-font-template-pending.conf" \
         "device-font-engine.conf|device-font-engine.conf" \
         "device-font-installed.conf|device-font-installed.conf" \
         "device-font-dynamic-mount.conf|device-font-dynamic-mount.conf" \
+        "device-font-cache-pending.conf|device-font-cache-pending.conf" \
+        "device-font-load-verification.conf|device-font-load-verification.conf" \
+        "device-font-load-verification.json|device-font-load-verification.json" \
+        "device-font-manager-dump.txt|device-font-manager-dump.txt" \
+        "device-font-mount-evidence.txt|device-font-mount-evidence.txt" \
         "font-payload-boot.conf|font-payload-boot.conf" \
         "font-payload-schema.conf|font-payload-schema.conf" \
         "font-target-coverage.conf|font-target-coverage.conf"; do
@@ -107,19 +123,30 @@ device_font_runtime_report_collect() {
         _dfr_output=${_dfr_pair#*|}
         _device_font_report_copy "$_dfr_config/$_dfr_name" "$_dfr_stage/$_dfr_output" || true
     done
-    _device_font_report_copy "$_dfr_config/device-font-payload/manifest.json" \
-        "$_dfr_stage/device-font-payload-manifest.json" || true
-    _device_font_report_copy "$_dfr_config/device-font-overlay/overlay-manifest.json" \
-        "$_dfr_stage/device-font-overlay-manifest.json" || true
+
+    _dfr_cache_id=$(sed -n 's/^cacheId=//p' "$_dfr_config/device-font-engine.conf" 2>/dev/null | head -n1)
+    if [ -n "$_dfr_cache_id" ]; then
+        _dfr_cache="$_dfr_config/device-font-cache/$_dfr_cache_id"
+        _device_font_report_copy "$_dfr_cache/cache.conf" "$_dfr_stage/device-font-cache.conf" || true
+        _device_font_report_copy "$_dfr_cache/payload/manifest.json" "$_dfr_stage/device-font-payload-manifest.json" || true
+        _device_font_report_copy "$_dfr_cache/overlay/overlay-manifest.json" "$_dfr_stage/device-font-overlay-manifest.json" || true
+    else
+        _device_font_report_copy "$_dfr_config/device-font-payload/manifest.json" "$_dfr_stage/device-font-payload-manifest.json" || true
+        _device_font_report_copy "$_dfr_config/device-font-overlay/overlay-manifest.json" "$_dfr_stage/device-font-overlay-manifest.json" || true
+    fi
     _device_font_report_copy "$_dfr_module/system/etc/.luoshu-data-fonts-config.xml" \
         "$_dfr_stage/data-fonts-config-view.xml" || true
 
-    if command -v cmd >/dev/null 2>&1; then
-        cmd font dump > "$_dfr_stage/font-manager-dump.txt" 2>&1 || \
-            cmd font system > "$_dfr_stage/font-manager-dump.txt" 2>&1 || true
-    fi
-    if [ ! -s "$_dfr_stage/font-manager-dump.txt" ] && command -v dumpsys >/dev/null 2>&1; then
-        dumpsys font > "$_dfr_stage/font-manager-dump.txt" 2>&1 || true
+    if [ ! -s "$_dfr_stage/device-font-manager-dump.txt" ]; then
+        if command -v cmd >/dev/null 2>&1; then
+            cmd font dump > "$_dfr_stage/font-manager-dump.txt" 2>&1 || \
+                cmd font system > "$_dfr_stage/font-manager-dump.txt" 2>&1 || true
+        fi
+        if [ ! -s "$_dfr_stage/font-manager-dump.txt" ] && command -v dumpsys >/dev/null 2>&1; then
+            dumpsys font > "$_dfr_stage/font-manager-dump.txt" 2>&1 || true
+        fi
+    else
+        cp -f "$_dfr_stage/device-font-manager-dump.txt" "$_dfr_stage/font-manager-dump.txt" 2>/dev/null || true
     fi
     grep -E '/data/fonts|/(fonts|font_fallback)\.xml' /proc/self/mountinfo 2>/dev/null \
         > "$_dfr_stage/font-mounts.txt" || true
@@ -129,7 +156,7 @@ device_font_runtime_report_collect() {
         printf '%s\n' '--- current /data font config ---'
         sha256sum /data/fonts/config/config.xml 2>/dev/null || true
         printf '%s\n' '--- google/product named families ---'
-        grep -Ei 'google[-_ ]?sans|product[-_ ]?sans' "$_dfr_stage/font-manager-dump.txt" 2>/dev/null || true
+        grep -Ei 'google[-_ ]?sans|product[-_ ]?sans|LuoShuSlot' "$_dfr_stage/font-manager-dump.txt" 2>/dev/null || true
     } > "$_dfr_stage/dynamic-font-proof.txt"
 
     find "$_dfr_stage" -type f -exec chmod 0644 {} \; 2>/dev/null || true
