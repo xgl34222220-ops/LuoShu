@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
 
 def shifted_probe(probe: dict, *, shift_y: float = 0.0, advance_delta: float = 0.0) -> dict:
     result = copy.deepcopy(probe)
-    for key in ("yMin", "yMax"):
+    for key in ("yMin", "yMax", "centerY", "yMinP25", "yMaxP75"):
         if result.get(key) is not None:
             result[key] = float(result[key]) + shift_y
     if result.get("advance") is not None:
@@ -45,6 +45,7 @@ def main() -> None:
 
     template = {
         "schema": "device-font-template-v1",
+        "captureRevision": 2,
         "fingerprint": "clock-builder-fixture",
         "slots": [
             {
@@ -63,6 +64,7 @@ def main() -> None:
         ],
     }
     plan = planner.build_plan(template, source)
+    assert plan["schema"] == "device-font-slot-plan-v2"
     assert plan["summary"]["ready"] == 1, plan["summary"]
     slot = plan["slots"][0]
     assert slot["status"] == "ready", slot
@@ -70,6 +72,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         output = Path(temporary) / "Clockopia.ttf"
         report = builder.build_slot(args.font, -1, slot, output)
+        assert report["schema"] == "device-font-slot-build-v2"
         assert report["status"] == "ok", report
         assert report["transformed"]["probes"]["digits"] >= 10, report
         assert output.is_file() and output.stat().st_size > 1024
