@@ -21,4 +21,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends fonts-dejavu-core >/dev/null
       - name: Run payload runtime guard
-        run: sh -x scripts/device_font_payload_runtime_test.sh
+        shell: bash
+        run: |
+          set -o pipefail
+          sh -x scripts/device_font_payload_runtime_test.sh 2>&1 | tail -n 140
