@@ -16,7 +16,8 @@ chmod 0755 "$MODULE/common/device_font_template.sh"
 
 MODDIR="$MODULE"
 MODULE_DIR="$MODULE"
-export MODDIR MODULE_DIR
+LUOSHU_CACHE_AUTOSTART=0
+export MODDIR MODULE_DIR LUOSHU_CACHE_AUTOSTART
 INSTALLS="$TMP/installs"
 : > "$INSTALLS"
 _dfpr_install_overlay() { printf '%s\n' "$1" >> "$INSTALLS"; printf 'file|system/fonts/X.ttf|hash|1024\n' > "$MODULE/config/device-font-installed.conf"; }
