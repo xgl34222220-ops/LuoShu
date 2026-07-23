@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v2.0.6
-versionCode=20006
+version=v2.0.7
+versionCode=20007
 author=惜故里丶
 description=Android 无 Hook 全局字体引擎：系统字体配置、真实字重、复合字体、高刷新率与安全回退
 updateJson=
