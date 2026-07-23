@@ -9,6 +9,7 @@ on:
       - common/device_font_template.py
       - common/device_font_template.sh
       - common/device_font_slot_plan.py
+      - common/device_font_slot_plan.sh
       - common/font_instance.py
       - common/font_metrics_normalize.py
       - common/font_config_overlay.py
@@ -31,6 +32,7 @@ on:
       - scripts/prepare_composite_runtime.sh
       - scripts/device_font_template_test.py
       - scripts/device_font_slot_plan_test.py
+      - scripts/device_font_slot_plan_runtime_test.sh
       - scripts/font_config_overlay_test.py
       - scripts/font_config_monospace_test.py
       - scripts/font_metrics_normalization_test.py
@@ -69,6 +71,7 @@ jobs:
         run: |
           python3 scripts/device_font_template_test.py
           python3 scripts/device_font_slot_plan_test.py
+          sh scripts/device_font_slot_plan_runtime_test.sh
       - name: Run XML structure tests
         run: python3 scripts/font_config_overlay_test.py
       - name: Run mixed-script metrics tests
