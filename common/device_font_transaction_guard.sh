@@ -1,13 +1,10 @@
 #!/system/bin/sh
 # LuoShu v2.2 transaction guard.
 # Every font switch snapshots the complete current payload first, then removes the
-# previous device-specific files. If any later stage fails, font_safety.sh restores
-# the snapshot including v2 state and XML documents.
+# previous device-specific files. Pending cache work and load proof are transaction
+# state too: a failed switch must restore them, while a new switch must invalidate them.
 set +e
 
-# The installed manifest is the primary ownership record. A damaged/missing manifest
-# still must not strand v2 files, so the fallback removes only LuoShu's unique slot
-# namespace and XML documents that explicitly reference it.
 device_font_payload_clear() {
     _dfpc_module="$(_dfpr_module)"
     type _dfpr_remove_installed_files >/dev/null 2>&1 && _dfpr_remove_installed_files
@@ -30,6 +27,11 @@ device_font_payload_clear() {
     rm -f "$_dfpc_module/config/device-font-installed.conf" \
           "$_dfpc_module/config/device-font-engine.conf" \
           "$_dfpc_module/config/device-font-dynamic-mount.conf" \
+          "$_dfpc_module/config/device-font-cache-pending.conf" \
+          "$_dfpc_module/config/device-font-load-verification.conf" \
+          "$_dfpc_module/config/device-font-load-verification.json" \
+          "$_dfpc_module/config/device-font-manager-dump.txt" \
+          "$_dfpc_module/config/device-font-mount-evidence.txt" \
           "$_dfpc_module/system/etc/.luoshu-data-fonts-config.xml" 2>/dev/null || true
     return 0
 }
@@ -77,7 +79,10 @@ luoshu_payload_transaction_begin() {
         active_font.conf font_mix.conf font-config-overlay.conf font-target-aliases.conf \
         font-target-coverage.conf font-payload-manifest.conf font-payload-boot.conf \
         font-payload-schema.conf text_reboot_required.conf device-font-engine.conf \
-        device-font-installed.conf device-font-dynamic-mount.conf; do
+        device-font-installed.conf device-font-dynamic-mount.conf \
+        device-font-cache-pending.conf device-font-load-verification.conf \
+        device-font-load-verification.json device-font-manager-dump.txt \
+        device-font-mount-evidence.txt; do
         if [ -f "$_lpt_config/$_lpt_name" ]; then
             cp -fp "$_lpt_config/$_lpt_name" "$LUOSHU_PAYLOAD_TXN/config/$_lpt_name" 2>/dev/null || {
                 rm -rf "$LUOSHU_PAYLOAD_TXN" 2>/dev/null || true
@@ -90,8 +95,6 @@ luoshu_payload_transaction_begin() {
         fi
     done
 
-    # The old private device tree must not leak into a direct or composite rebuild.
-    # It is removed only after every path above has been snapshotted.
     if ! device_font_payload_clear; then
         rm -rf "$LUOSHU_PAYLOAD_TXN" 2>/dev/null || true
         LUOSHU_PAYLOAD_TXN=''
