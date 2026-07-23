@@ -58,12 +58,13 @@ _dfpr_template_ensure_after_release() {
             *) _dfpr_log WARN "原厂字体模板校验失败：code=$_dfpr_template_rc" ;;
         esac
     fi
+    if type device_font_load_verify >/dev/null 2>&1; then
+        device_font_load_verify >/dev/null 2>&1 || true
+    fi
     [ "$_dfpr_template_rc" -eq 0 ] && _dfpr_launch_pending_cache
     return 0
 }
 
-# Prepare a private sanitized config only when the real FontManagerService document is
-# readable. Missing/changed targets remove stale state instead of carrying it forward.
 _dfpr_prepare_dynamic_state() {
     _dfpr_overlay="$1"
     _dfpr_manifest_tmp="$2"
@@ -162,10 +163,6 @@ device_font_dynamic_mount_apply() {
     return 2
 }
 
-# FontManagerService has already built its serialized system font map by boot completion.
-# Release LuoShu's temporary read-only view so Android can persist later provider updates.
-# Once the original view is visible, the stock-template guard may capture only if the
-# active font is default and the module tree has no generated payload.
 device_font_dynamic_mount_release() {
     _dfpr_module_dir="$(_dfpr_module)"
     _dfpr_state="$_dfpr_module_dir/config/device-font-dynamic-mount.conf"
