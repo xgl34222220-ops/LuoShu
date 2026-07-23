@@ -68,11 +68,44 @@ if [ "${0##*/}" = "font_library_cache.sh" ]; then
         printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
     }
 
-    # v2.2 的逐设备模板在完整开机后的索引预热阶段异步采集。
-    # 它只读取 ROM XML/字体，不阻塞当前 App 字体列表，也不改写任何系统文件。
-    _device_template="$MODDIR/common/device_font_template.sh"
-    if [ -f "$_device_template" ] && [ "${1:-fingerprint}" = value ]; then
-        (MODDIR="$MODDIR" sh "$_device_template" ensure >/dev/null 2>&1) &
+    _prepare_device_font_plan() {
+        _pdfp_template="$MODDIR/common/device_font_template.sh"
+        _pdfp_planner="$MODDIR/common/device_font_slot_plan.sh"
+        [ -f "$_pdfp_template" ] || return 0
+        MODDIR="$MODDIR" sh "$_pdfp_template" ensure >/dev/null 2>&1 || return 0
+        [ -f "$_pdfp_planner" ] || return 0
+
+        _pdfp_current=$(head -n1 "$ACTIVE_FONT_CONF" 2>/dev/null | tr -d '\r\n')
+        [ -n "$_pdfp_current" ] || _pdfp_current=default
+        if [ "$_pdfp_current" = default ]; then
+            MODDIR="$MODDIR" sh "$_pdfp_planner" clear >/dev/null 2>&1 || true
+            return 0
+        fi
+
+        _pdfp_source=''
+        for _pdfp_file in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
+            "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+            [ -f "$_pdfp_file" ] || continue
+            _pdfp_name=$(basename "$_pdfp_file")
+            _pdfp_name="${_pdfp_name%.*}"
+            case "$_pdfp_name" in
+                *-Regular|*-Bold|*-Light|*-Medium|*-Thin|*-Black|*-Heavy|*-regular|*-bold|*-light|*-medium|*-thin|*-black|*-heavy)
+                    _pdfp_name="${_pdfp_name%-*}"
+                    ;;
+            esac
+            if [ "$_pdfp_name" = "$_pdfp_current" ]; then
+                _pdfp_source="$_pdfp_file"
+                break
+            fi
+        done
+        [ -f "$_pdfp_source" ] || return 0
+        MODDIR="$MODDIR" sh "$_pdfp_planner" build "$_pdfp_source" "$_pdfp_current" >/dev/null 2>&1 || true
+    }
+
+    # v2.2 模板和当前字体的逐槽位计划在完整开机后的索引预热阶段异步生成。
+    # 当前阶段只写模块私有 JSON，不阻塞字体列表，也不改写 Android 字体负载。
+    if [ "${1:-fingerprint}" = value ]; then
+        (_prepare_device_font_plan) &
     fi
 
     case "${1:-fingerprint}" in
