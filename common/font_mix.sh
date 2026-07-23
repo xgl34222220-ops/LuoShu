@@ -375,9 +375,9 @@ build_composite_file() {
     [ -f "$MODDIR/common/composite_font.py" ] && [ -f "$_runner" ] || { set_mix_error '完整复合字体引擎缺失'; return 1; }
     [ -x "$MODDIR/common/python/bin/luoshu-python" ] || chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     check_composite_runtime || return 1
-    _cache="$MODDIR/cache/full-composite-v10"
+    _cache="$MODDIR/cache/full-composite-v11"
     mkdir -p "$_cache" "$MODDIR/cache/tmp" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
-    _key_src="$(composite_hash_file "$_cjk_src")-$(composite_hash_file "$_latin_src")-$(composite_hash_file "$_digit_src")-full-composite-v10"
+    _key_src="$(composite_hash_file "$_cjk_src")-$(composite_hash_file "$_latin_src")-$(composite_hash_file "$_digit_src")-full-composite-v11"
     _key=$(printf '%s' "$_key_src" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; elif command -v toybox >/dev/null 2>&1; then toybox sha256sum; else cksum; fi; } | awk '{print $1}')
     _cached="$_cache/${_key}.otf"; _report="$_cache/${_key}.json"; _progress="$CONFIG_DIR/composite_progress.json"
     rm -f "$_cache"/.*.tmp.* 2>/dev/null || true
@@ -428,7 +428,7 @@ prepare_mix_config() {
         printf 'cjk=%s\n' "$_cjk"
         printf 'latin=%s\n' "$_latin"
         printf 'digit=%s\n' "$_digit"
-        printf 'isolation=full-composite-v10\n'
+        printf 'isolation=full-composite-v11\n'
         printf 'characterIsolation=true\n'
         printf 'composite=true\n'
         printf 'xmlOverlay=false\n'
