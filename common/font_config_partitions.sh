@@ -85,4 +85,8 @@ if ! type font_config_prepare_payload_weights >/dev/null 2>&1; then
     [ -f "$_luoshufp_module/common/font_config_weights.sh" ] && . "$_luoshufp_module/common/font_config_weights.sh"
 fi
 [ -f "$_luoshufp_module/common/font_finalize_hotfix.sh" ] && . "$_luoshufp_module/common/font_finalize_hotfix.sh"
+
+# v2.2 must load last so its transaction, validation and ROM dispatch overrides cannot
+# be replaced by older compatibility helpers sourced above.
+[ -f "$_luoshufp_module/common/device_font_payload_bridge.sh" ] && . "$_luoshufp_module/common/device_font_payload_bridge.sh"
 unset _luoshufp_module
