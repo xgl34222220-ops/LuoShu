@@ -1,0 +1,125 @@
+name: Build Test Candidate
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - module.prop
+      - config/version_notes.conf
+      - common/**
+      - scripts/**
+      - android-app/**
+      - customize.sh
+      - post-fs-data.sh
+      - service.sh
+      - uninstall.sh
+      - action.sh
+      - .github/workflows/test-candidate.yml
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+
+      - name: Prepare ARM64 runtime
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
+
+      - name: Run source checks
+        run: sh ./scripts/check.sh
+
+      - name: Build debug App
+        working-directory: android-app
+        run: gradle --no-daemon --stacktrace :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+
+      - name: Build module candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./scripts/version.sh
+          apk='android-app/app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$apk"
+          rm -rf dist
+          mkdir -p dist
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
+          cp -f "$apk" "$app"
+          (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
+          LUOSHU_APP_APK="$apk" LUOSHU_ALLOW_DEBUG_APP=1 sh ./scripts/build.sh
+
+      - name: Verify Alpha 3 candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./scripts/version.sh
+          module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
+          test -s "$module"
+          test -s "$app"
+          unzip -t "$module" >/dev/null
+          (cd dist && sha256sum -c "$(basename "$module").sha256")
+          (cd dist && sha256sum -c "$(basename "$app").sha256")
+          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0 Alpha 3'
+          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20193'
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2019301'
+          unzip -Z1 "$module" > /tmp/luoshu-alpha3-files.txt
+          for path in \
+            common/device_font_template.sh \
+            common/device_font_cache.sh \
+            common/device_font_load_verify.py \
+            common/device_font_load_verify.sh \
+            common/device_font_payload_policy.sh \
+            common/device_font_transaction_guard.sh \
+            common/device_font_dynamic_guard.sh \
+            common/device_font_runtime_report.sh; do
+            grep -qx "$path" /tmp/luoshu-alpha3-files.txt
+          done
+          unzip -p "$module" common/device_font_template.sh | grep -q 'CAPTURE_REVISION=2'
+          unzip -p "$module" common/device_font_cache.sh | grep -q 'alignment-cache-v2'
+          unzip -p "$module" common/device_font_cache.sh | grep -q '.font_switch.lock'
+          unzip -p "$module" common/device_font_load_verify.py | grep -q 'device-font-load-verification-v1'
+          unzip -p "$module" common/device_font_load_verify.sh | grep -q 'device_font_load_verify'
+          unzip -p "$module" common/device_font_payload_policy.sh | grep -q 'device_font_cache_schedule'
+          unzip -p "$module" service.sh | grep -q 'device_font_cache.sh'
+          unzip -p "$module" service.sh | grep -q 'device_font_load_verify'
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          unzip -q "$module" -d "$tmp"
+          sh -n "$tmp/common/device_font_template.sh"
+          sh -n "$tmp/common/device_font_cache.sh"
+          sh -n "$tmp/common/device_font_load_verify.sh"
+          sh -n "$tmp/common/device_font_payload_policy.sh"
+          sh -n "$tmp/service.sh"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-v2.2.0-Alpha-3-Device-Alignment-Test
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
