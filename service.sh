@@ -89,8 +89,30 @@ MODULE_DIR="$MODDIR"
         fi
     fi
 
+    # Root 管理器模块说明只显示当前字体，不再塞入更新日志。
+    if [ -f "$MODDIR/common/module_status.sh" ]; then
+        MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" >/dev/null 2>&1 || true
+    fi
+
+    # 字体列表在后台预热。轻量指纹未变化时跳过轮廓解析；变化后重建原生索引。
+    # 必须先于负载重建完成：重建任务要靠字体索引定位源文件，索引未就绪时
+    # 重建会在一秒内误报失败，进而误删用户正在正常使用的字体负载。
+    if [ -f "$MODDIR/common/font_library_cache.sh" ] && [ -f "$MODDIR/common/font_manager.sh" ]; then
+        _font_fp=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_library_cache.sh" value 2>/dev/null)
+        _font_fp_old=$(cat "$MODDIR/config/native_font_index.key" 2>/dev/null)
+        case "$_font_fp_old" in native-v1\|*) _font_fp_old="${_font_fp_old##*|}" ;; esac
+        if [ -n "$_font_fp" ] && { [ "$_font_fp" != "$_font_fp_old" ] || [ ! -s "$MODDIR/config/native_font_index.json" ]; }; then
+            if MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list refresh >/dev/null 2>&1; then
+                log_service "INFO" "原生字体索引后台预热完成"
+            else
+                log_service "INFO" "字体索引后台预热失败，App 将继续使用已有本地索引"
+            fi
+        fi
+    fi
+
     # 架构升级时不再卡住刷写界面。Android 完成启动后再使用完整运行环境后台重建，
-    # 成功后通知用户重启一次加载新负载；失败则立即撤销覆盖并恢复系统默认字体。
+    # 成功后通知用户重启一次加载新负载；失败则保留当前可用负载，下次开机重试，
+    # 连续失败达到上限才撤销覆盖并恢复系统默认字体。
     if [ -f "$MODDIR/config/font-payload-rebuild-pending.conf" ]; then
         _pending_font=$(sed -n 's/^font=//p' "$MODDIR/config/font-payload-rebuild-pending.conf" 2>/dev/null | head -n1 | tr -d '\r\n')
         [ -n "$_pending_font" ] || _pending_font=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
@@ -102,8 +124,13 @@ MODULE_DIR="$MODDIR"
         if type luoshu_rebuild_preserved_payload >/dev/null 2>&1 && luoshu_rebuild_preserved_payload "$MODDIR"; then
             log_service "INFO" "旧字体负载已按新架构重建：$_pending_font"
             notify_service "洛书" "字体升级完成，请完整重启一次使新版字体生效。" luoshu-font-rebuild
+        elif type luoshu_rebuild_failure_retry >/dev/null 2>&1 && luoshu_rebuild_failure_retry "$MODDIR" 3; then
+            _retry_count=$(cat "$MODDIR/config/font-payload-rebuild-failures" 2>/dev/null)
+            log_service "ERROR" "旧字体负载后台重建失败（第 ${_retry_count:-1} 次），保留当前字体并下次开机重试"
+            notify_service "洛书" "字体升级未完成，已保留当前字体，将在下次开机自动重试。" luoshu-font-rebuild
         else
-            log_service "ERROR" "旧字体负载后台重建失败，正在恢复系统默认字体"
+            log_service "ERROR" "旧字体负载连续重建失败，正在恢复系统默认字体"
+            rm -f "$MODDIR/config/font-payload-rebuild-failures" 2>/dev/null || true
             if type luoshu_payload_quarantine >/dev/null 2>&1; then
                 luoshu_payload_quarantine
             else
@@ -111,25 +138,6 @@ MODULE_DIR="$MODDIR"
                 rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" "$MODDIR/config/font-payload-schema.conf" 2>/dev/null || true
             fi
             notify_service "洛书" "字体升级失败，已安全恢复系统默认字体；请打开洛书重新应用。" luoshu-font-rebuild
-        fi
-    fi
-
-    # Root 管理器模块说明只显示当前字体，不再塞入更新日志。
-    if [ -f "$MODDIR/common/module_status.sh" ]; then
-        MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" >/dev/null 2>&1 || true
-    fi
-
-    # 字体列表在后台预热。轻量指纹未变化时跳过轮廓解析；变化后重建原生索引。
-    if [ -f "$MODDIR/common/font_library_cache.sh" ] && [ -f "$MODDIR/common/font_manager.sh" ]; then
-        _font_fp=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_library_cache.sh" value 2>/dev/null)
-        _font_fp_old=$(cat "$MODDIR/config/native_font_index.key" 2>/dev/null)
-        case "$_font_fp_old" in native-v1\|*) _font_fp_old="${_font_fp_old##*|}" ;; esac
-        if [ -n "$_font_fp" ] && { [ "$_font_fp" != "$_font_fp_old" ] || [ ! -s "$MODDIR/config/native_font_index.json" ]; }; then
-            if MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list refresh >/dev/null 2>&1; then
-                log_service "INFO" "原生字体索引后台预热完成"
-            else
-                log_service "INFO" "字体索引后台预热失败，App 将继续使用已有本地索引"
-            fi
         fi
     fi
 
