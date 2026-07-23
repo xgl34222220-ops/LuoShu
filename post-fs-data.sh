@@ -12,6 +12,7 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/font_config_runtime.sh" ] && . "$MODDIR/common/font_config_runtime.sh"
 [ -f "$MODDIR/common/font_config_partitions.sh" ] && . "$MODDIR/common/font_config_partitions.sh"
 [ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
+[ -f "$MODDIR/common/font_provider_cache.sh" ] && . "$MODDIR/common/font_provider_cache.sh"
 
 type init_module >/dev/null 2>&1 && init_module
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
@@ -55,14 +56,25 @@ elif type font_config_boot_guard >/dev/null 2>&1; then
     font_config_boot_guard "$ACTIVE_TEXT" || true
 fi
 
+# Android 12+ 的 FontManagerService 会在系统 XML 之后追加 /data/fonts 中的命名字体族，
+# Play 商店因此可能继续使用下载版 Google Sans。必须在 FontManagerService 初始化前：
+# 1. 保留所有签名字体文件、Emoji 与其他动态字体；
+# 2. 只隐藏 Google/Product Sans 的动态 family；
+# 3. 向当前 system fonts.xml 注入同名 family，指向洛书现有字体槽。
+if type luoshu_provider_cache_boot >/dev/null 2>&1; then
+    _provider_rc=0
+    luoshu_provider_cache_boot "$ACTIVE_TEXT" || _provider_rc=$?
+    case "$_provider_rc" in
+        0) log_message "INFO" "Android 动态 Google Sans 命名字体桥已准备完成" ;;
+        2) log_message "INFO" "设备没有动态 Google Sans 字体，无需额外处理" ;;
+        *) log_message "ERROR" "Android 动态字体命名覆盖准备失败（code=$_provider_rc），继续使用原配置" ;;
+    esac
+fi
+
 for _partition in system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust; do
     [ -d "$MODDIR/$_partition" ] || continue
     set_perm_recursive "$MODDIR/$_partition" 0 0 0755 0644 2>/dev/null || true
 done
-
-# 无 Hook 版不读写 /data/fonts。Android 的动态字体数据库由 FontManagerService、签名权限
-# 和 fs-verity 管理；洛书只使用启动前的 systemless 分区负载与字体配置。
-log_message "INFO" "动态字体数据库保持原样；使用 systemless XML/字体负载"
 
 # 字体索引由原生 App 按需刷新，启动早期不扫描或复制大字体。
 
