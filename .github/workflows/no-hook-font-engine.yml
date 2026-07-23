@@ -15,6 +15,7 @@ on:
       - common/device_font_payload_overlay.py
       - common/device_font_payload_runtime.sh
       - common/device_font_payload_bridge.sh
+      - common/device_font_payload_policy.sh
       - common/device_font_payload_verify.py
       - common/device_font_runtime_report.sh
       - common/device_font_dynamic_guard.sh
@@ -50,6 +51,7 @@ on:
       - scripts/device_font_payload_overlay_test.py
       - scripts/device_font_payload_verify_test.py
       - scripts/device_font_runtime_report_test.sh
+      - scripts/device_font_payload_policy_test.sh
       - scripts/device_font_payload_runtime_test.sh
       - scripts/device_font_payload_bridge_test.sh
       - scripts/device_font_transaction_guard_test.sh
@@ -100,6 +102,7 @@ jobs:
           python3 scripts/device_font_payload_overlay_test.py
           python3 scripts/device_font_payload_verify_test.py
           sh scripts/device_font_runtime_report_test.sh
+          sh scripts/device_font_payload_policy_test.sh
           sh scripts/device_font_payload_runtime_test.sh
           sh scripts/device_font_payload_bridge_test.sh
           sh scripts/device_font_transaction_guard_test.sh
@@ -143,6 +146,8 @@ jobs:
           grep -q 'device_font_dynamic_guard.sh' common/font_config_partitions.sh
           grep -q 'device_font_transaction_guard.sh' common/font_config_partitions.sh
           grep -q 'device_font_runtime_report.sh' common/font_config_partitions.sh
+          grep -q 'device_font_payload_policy.sh' common/font_config_partitions.sh
+          grep -q 'reports/v2.2-runtime-latest' common/device_font_runtime_report.sh
           grep -q 'font-manager-dump.txt' common/device_font_runtime_report.sh
           grep -q 'device_font_payload_clear' common/device_font_transaction_guard.sh
           grep -q 'mount -o bind' common/device_font_dynamic_guard.sh
