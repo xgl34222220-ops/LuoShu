@@ -428,6 +428,20 @@ private fun MaterialAppDock(
             .padding(start = 6.dp, top = 7.dp, end = 6.dp, bottom = if (floating) 7.dp else bottomInset + 7.dp),
     ) {
         val itemWidth = maxWidth / AppPage.entries.size.toFloat()
+        val targetIndex = current.ordinal.coerceIn(AppPage.entries.indices)
+        val indicatorX by animateDpAsState(
+            targetValue = itemWidth * targetIndex.toFloat(),
+            animationSpec = spring(dampingRatio = .72f, stiffness = Spring.StiffnessMediumLow),
+            label = "luoshuMaterialDockIndicator",
+        )
+        Box(
+            modifier = Modifier
+                .offset(x = indicatorX + 6.dp)
+                .width(itemWidth - 12.dp)
+                .height(58.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(scheme.primaryContainer.copy(alpha = .62f)),
+        )
         Row(Modifier.fillMaxWidth()) {
             AppPage.entries.forEach { page ->
                 val selected = current == page
@@ -436,7 +450,6 @@ private fun MaterialAppDock(
                         .width(itemWidth)
                         .height(58.dp)
                         .clip(RoundedCornerShape(22.dp))
-                        .background(if (selected) scheme.primaryContainer.copy(alpha = .62f) else Color.Transparent)
                         .clickable { onSelect(page) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
