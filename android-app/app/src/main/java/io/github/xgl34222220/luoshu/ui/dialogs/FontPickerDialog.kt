@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import android.view.Gravity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.FontItem
+import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.font.resolveAndCacheFontDefaultAxes
@@ -147,10 +149,22 @@ private fun MaterialFontPickerItem(
             Surface(
                 modifier = Modifier.size(44.dp),
                 shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.tertiaryContainer,
+                color = MaterialTheme.colorScheme.primaryContainer,
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text("Aa", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.tertiary)
+                    if (font.valid) {
+                        NativeFontPreview(
+                            font = font,
+                            text = "Aa",
+                            axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
+                            modifier = Modifier.size(44.dp).padding(5.dp),
+                            textSizeSp = 15f,
+                            gravity = Gravity.CENTER,
+                            maxLines = 1,
+                        )
+                    } else {
+                        Text("Aa", fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
             Spacer(Modifier.width(12.dp))
@@ -256,16 +270,29 @@ private fun MiuixFontPickerDialog(
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
-                                        Text(
-                                            when (slot) {
-                                                MixSlot.Cjk -> "中"
-                                                MixSlot.Latin -> "Aa"
-                                                MixSlot.Digit -> "123"
-                                            },
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.Black,
-                                            fontSize = if (slot == MixSlot.Digit) 11.sp else 16.sp,
-                                        )
+                                        val glyph = when (slot) {
+                                            MixSlot.Cjk -> "中"
+                                            MixSlot.Latin -> "Aa"
+                                            MixSlot.Digit -> "123"
+                                        }
+                                        if (font.valid) {
+                                            NativeFontPreview(
+                                                font = font,
+                                                text = glyph,
+                                                axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
+                                                modifier = Modifier.size(46.dp).padding(6.dp),
+                                                textSizeSp = if (slot == MixSlot.Digit) 11f else 16f,
+                                                gravity = Gravity.CENTER,
+                                                maxLines = 1,
+                                            )
+                                        } else {
+                                            Text(
+                                                glyph,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Black,
+                                                fontSize = if (slot == MixSlot.Digit) 11.sp else 16.sp,
+                                            )
+                                        }
                                     }
                                 }
                                 Spacer(Modifier.width(12.dp))
