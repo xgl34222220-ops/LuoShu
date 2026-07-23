@@ -158,25 +158,27 @@ _dfpr_prepare_dynamic_state() {
     _dfpr_dynamic_source="$_dfpr_overlay/dynamic/data-fonts-config.xml"
     _dfpr_dynamic_dest="$_dfpr_module_dir/system/etc/.luoshu-data-fonts-config.xml"
     _dfpr_dynamic_state="$_dfpr_module_dir/config/device-font-dynamic-mount.conf"
-    _dfpr_target="${LUOSHU_DATA_FONTS_CONFIG_TARGET:-/data/fonts/config/config.xml}"
+    # Keep the real target in a dedicated variable. _dfpr_link_or_copy uses shell-global
+    # scratch variables named _dfpr_source/_dfpr_target and must never overwrite this path.
+    _dfpr_dynamic_target="${LUOSHU_DATA_FONTS_CONFIG_TARGET:-/data/fonts/config/config.xml}"
     if [ ! -s "$_dfpr_dynamic_source" ]; then
         rm -f "$_dfpr_dynamic_dest" "$_dfpr_dynamic_state" 2>/dev/null || true
         return 0
     fi
-    [ -s "$_dfpr_target" ] || return 2
+    [ -s "$_dfpr_dynamic_target" ] || return 2
     _dfpr_link_or_copy "$_dfpr_dynamic_source" "$_dfpr_dynamic_dest" || return 1
     chmod 0600 "$_dfpr_dynamic_dest" 2>/dev/null || true
     if command -v chcon >/dev/null 2>&1; then
-        chcon --reference="$_dfpr_target" "$_dfpr_dynamic_dest" 2>/dev/null || true
+        chcon --reference="$_dfpr_dynamic_target" "$_dfpr_dynamic_dest" 2>/dev/null || true
     fi
-    _dfpr_target_hash="$(_dfpr_hash "$_dfpr_target")"
+    _dfpr_target_hash="$(_dfpr_hash "$_dfpr_dynamic_target")"
     _dfpr_source_hash="$(_dfpr_hash "$_dfpr_dynamic_dest")"
     [ -n "$_dfpr_target_hash" ] && [ -n "$_dfpr_source_hash" ] || return 1
     _dfpr_state_tmp="${_dfpr_dynamic_state}.tmp.$$"
     {
         printf 'state=prepared\n'
         printf 'source=system/etc/.luoshu-data-fonts-config.xml\n'
-        printf 'target=%s\n' "$_dfpr_target"
+        printf 'target=%s\n' "$_dfpr_dynamic_target"
         printf 'targetSha256=%s\n' "$_dfpr_target_hash"
         printf 'sourceSha256=%s\n' "$_dfpr_source_hash"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
