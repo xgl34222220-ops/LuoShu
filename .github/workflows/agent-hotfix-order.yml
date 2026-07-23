@@ -1,0 +1,62 @@
+name: Fix HyperOS cleanup order
+
+on:
+  push:
+    branches:
+      - fix/hyperos-font-coverage-v2.1.2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: contains(github.event.head_commit.message, 'bootstrap: fix HyperOS cleanup order')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/hyperos-font-coverage-v2.1.2
+          fetch-depth: 0
+
+      - name: Move cleanup before mapping
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('common/hyperos_global.sh')
+          text = path.read_text(encoding='utf-8')
+          old_start = '''    mkdir -p "$_module/system/fonts" "$_module/product/fonts" "$_module/system_ext/fonts" "$_module/mi_ext/fonts" 2>/dev/null || true
+              for _file in $(get_all_hyperos_files); do _hyperos_remove_overlay_file "$_file"; done
+          '''
+          new_start = '''    mkdir -p "$_module/system/fonts" "$_module/product/fonts" "$_module/system_ext/fonts" "$_module/mi_ext/fonts" 2>/dev/null || true
+              # 先清除旧版 XML/动态目标，再写入新物理槽，避免旧 manifest 删除刚生成的槽位。
+              type font_config_disable >/dev/null 2>&1 && font_config_disable >/dev/null 2>&1 || true
+              for _file in $(get_all_hyperos_files); do _hyperos_remove_overlay_file "$_file"; done
+          '''
+          old_end = '''    # HyperOS 的 XML family 经常只是度量外壳。这里保留 ROM XML，避免再次用旧度量
+              # 覆盖紧凑物理槽；MiSans、Roboto、GoogleSans、Mitype 与时钟槽已完整映射。
+              type font_config_disable >/dev/null 2>&1 && font_config_disable >/dev/null 2>&1 || true
+          '''
+          new_end = '''    # HyperOS 的 XML family 经常只是度量外壳。这里保留 ROM XML，避免再次用旧度量
+              # 覆盖紧凑物理槽；MiSans、Roboto、GoogleSans、Mitype 与时钟槽已完整映射。
+          '''
+          if old_start not in text:
+              raise SystemExit('start marker not found')
+          if old_end not in text:
+              raise SystemExit('end marker not found')
+          text = text.replace(old_start, new_start, 1).replace(old_end, new_end, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          sh -n common/hyperos_global.sh
+          sh scripts/hyperos_global_mapping_test.sh
+
+      - name: Commit cleanup-order fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/workflows/agent-hotfix-order.yml .github/workflows/agent-hyperos-patch.yml
+          git add common/hyperos_global.sh
+          git commit -m "fix(hyperos): clear stale mappings before writing new slots"
+          git push origin HEAD:fix/hyperos-font-coverage-v2.1.2
