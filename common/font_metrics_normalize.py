@@ -25,7 +25,7 @@ CAP_PROBES = tuple(map(ord, "AHIOX"))
 XHEIGHT_PROBES = (ord("x"),)
 ASCII_CODEPOINTS = tuple(range(0x20, 0x7F))
 # Keep the line box aligned with stock Roboto (hhea ascent 1900/2048, descent 500/2048).
-# Drifting away from these ratios makes custom faces and stock fallback faces sit on
+# Drifting away from these ratios makes custom faces and stock fallback faces sit at
 # different baselines, which shows up as shifted/raised text in mixed-font screens.
 TYPO_ASCENDER_RATIO = 0.928
 TYPO_DESCENDER_RATIO = 0.244
@@ -108,6 +108,36 @@ def glyph_bounds(font: TTFont, codepoints: Iterable[int]) -> dict[int, tuple[flo
         if pen.bounds is not None:
             result[codepoint] = tuple(float(value) for value in pen.bounds)
     return result
+
+
+def _outline_extremes(font: TTFont) -> tuple[float, float] | None:
+    """True outline ink extremes across every glyph, from the outlines themselves.
+
+    head.yMax/yMin is only a cached bounding box: composite builds import outlines and the
+    box is not recalculated until save time, and CFF sources may carry a stale box too.
+    Drawing every glyph through BoundsPen works for both glyf and CFF outlines.
+    """
+    try:
+        glyph_set = font.getGlyphSet()
+        order = font.getGlyphOrder()
+    except Exception:
+        return None
+    top: float | None = None
+    bottom: float | None = None
+    for name in order:
+        pen = BoundsPen(glyph_set)
+        try:
+            glyph_set[name].draw(pen)
+        except Exception:
+            continue
+        if pen.bounds is None:
+            continue
+        _x0, y0, _x1, y1 = pen.bounds
+        top = y1 if top is None else max(top, y1)
+        bottom = y0 if bottom is None else min(bottom, y0)
+    if top is None or bottom is None:
+        return None
+    return bottom, top
 
 
 def _median(values: Iterable[float], fallback: float) -> float:
@@ -209,6 +239,14 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
     head = font["head"]
     y_max = int(getattr(head, "yMax", ascender))
     y_min = int(getattr(head, "yMin", -descender_abs))
+    # head.yMax/yMin can be stale (composite builds recalc the box only at save time),
+    # so enclose the true outline extremes as well; otherwise hhea/typo stay contracted
+    # and ink still overflows the line box (标题压热度 / 标签少一截).
+    extremes = _outline_extremes(font)
+    if extremes is not None:
+        import math
+        y_min = min(y_min, int(math.floor(extremes[0])))
+        y_max = max(y_max, int(math.ceil(extremes[1])))
 
     # Apps rendering with includeFontPadding=false lay out (and clip) against the hhea line
     # box. When a CJK face's ink extends past the declared box, the overflow paints into the
