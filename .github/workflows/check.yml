@@ -146,6 +146,14 @@ jobs:
           grep -qx 'common/composite_font.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/device_font_template.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/device_font_template.sh' /tmp/luoshu-package-list.txt
+          grep -qx 'common/device_font_slot_plan.py' /tmp/luoshu-package-list.txt
+          grep -qx 'common/device_font_slot_plan.sh' /tmp/luoshu-package-list.txt
+          grep -qx 'common/device_font_slot_build.py' /tmp/luoshu-package-list.txt
+          grep -qx 'common/device_font_payload_build.py' /tmp/luoshu-package-list.txt
+          grep -qx 'common/device_font_payload_overlay.py' /tmp/luoshu-package-list.txt
+          grep -qx 'common/device_font_payload_runtime.sh' /tmp/luoshu-package-list.txt
+          grep -qx 'common/device_font_payload_bridge.sh' /tmp/luoshu-package-list.txt
+          grep -qx 'common/device_font_dynamic_guard.sh' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_instance.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_metrics_normalize.py' /tmp/luoshu-package-list.txt
           grep -qx 'common/font_coverage.py' /tmp/luoshu-package-list.txt
@@ -168,7 +176,19 @@ jobs:
           unzip -p "$module" NOTICE.md | grep -q 'GPL-3.0-only'
           unzip -p "$module" common/font_mix.sh | grep -q 'full-composite-v11'
           unzip -p "$module" common/device_font_template.py | grep -q 'device-font-template-v1'
-          unzip -p "$module" common/device_font_template.sh | grep -q 'device-font-template.json'
+          unzip -p "$module" common/device_font_template.sh | grep -q '/data/fonts/config/config.xml'
+          unzip -p "$module" common/device_font_slot_plan.py | grep -q 'device-font-slot-plan-v1'
+          unzip -p "$module" common/device_font_slot_build.py | grep -q 'device-font-slot-build-v1'
+          unzip -p "$module" common/device_font_payload_build.py | grep -q 'device-font-payload-v1'
+          unzip -p "$module" common/device_font_payload_overlay.py | grep -q 'device-font-overlay-v1'
+          unzip -p "$module" common/device_font_payload_overlay.py | grep -q 'data-fonts-config.xml'
+          unzip -p "$module" common/device_font_payload_runtime.sh | grep -q 'device-font-installed.conf'
+          unzip -p "$module" common/device_font_payload_bridge.sh | grep -q 'copy_as_originos'
+          unzip -p "$module" common/device_font_payload_bridge.sh | grep -q 'copy_as_flyme'
+          unzip -p "$module" common/device_font_dynamic_guard.sh | grep -q 'remount,bind,ro'
+          unzip -p "$module" common/device_font_dynamic_guard.sh | grep -q '_dfpr_mark_dynamic_rebuild'
+          unzip -p "$module" common/font_provider_cache.sh | grep -q 'never overwrites provider font files'
+          ! unzip -p "$module" common/font_provider_cache.sh | grep -q '_lpcs_f'
           unzip -p "$module" common/font_mix_controller.sh | grep -q 'font_role_check.sh'
           unzip -p "$module" common/app_bridge.sh | grep -q 'common/font_mix_controller.sh'
           unzip -p "$module" common/app_bridge.sh | grep -q 'native_import.sh'
@@ -181,6 +201,9 @@ jobs:
           unzip -p "$module" common/app_bridge.sh | grep -q 'rebootRequired'
           unzip -p "$module" customize.sh | grep -q 'luoshu_cli.sh.*system/bin/洛书'
           unzip -p "$module" post-fs-data.sh | grep -q 'font_mix_controller.sh.*recover'
+          unzip -p "$module" post-fs-data.sh | grep -q 'device_font_dynamic_mount_apply'
+          unzip -p "$module" uninstall.sh | grep -q 'device-font-dynamic-mount.conf'
+          unzip -p "$module" uninstall.sh | grep -q 'luoshu_flyme_pending_apply'
           ! unzip -p "$module" common/weighted_mix_task.sh | grep -q 'v143_axes'
           ! unzip -p "$module" common/app_bridge.sh | grep -q 'v143_axes'
           ! unzip -p "$module" customize.sh | grep -q 'pm install'
