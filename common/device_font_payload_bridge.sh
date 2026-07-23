@@ -41,21 +41,34 @@ _dfpr_anchor_lines() {
     fi
 }
 
-# Clear v2 paths before delegating to the legacy cleanup implementation.
+# Remove v2 files first, then preserve the OEM cleanup contract that was defined by
+# OriginOS/Flyme. During an active direct-font build the dispatcher sets the preserve
+# flag so XML fallback cannot delete freshly prepared physical slots.
 font_config_disable() {
     type device_font_payload_clear >/dev/null 2>&1 && device_font_payload_clear
-    type luoshu_dynamic_targets_clear >/dev/null 2>&1 && luoshu_dynamic_targets_clear
-    if type _luoshu_font_config_disable_base >/dev/null 2>&1; then
-        _luoshu_font_config_disable_base
+    if [ "${LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE:-0}" != 1 ]; then
+        type luoshu_oem_clear_managed_fonts >/dev/null 2>&1 && luoshu_oem_clear_managed_fonts
+        if type _luoshu_detect_flyme >/dev/null 2>&1 && _luoshu_detect_flyme; then
+            type _luoshu_flyme_prepare_data_restore >/dev/null 2>&1 && \
+                _luoshu_flyme_prepare_data_restore >/dev/null 2>&1 || true
+        fi
     fi
+    type luoshu_dynamic_targets_clear >/dev/null 2>&1 && luoshu_dynamic_targets_clear
+    type _luoshu_font_config_disable_base >/dev/null 2>&1 && _luoshu_font_config_disable_base
 }
 
 # Composite/finalize flows already prepare deterministic 100-900 sources. Prefer the
 # device engine; unsupported CFF/TTC sources fall back to the established XML path.
+LUOSHU_DEVICE_PAYLOAD_RESULT='idle'
 font_config_enable_for_payload() {
     _dfpb_family="${1:-unknown}"
-    type font_config_prepare_payload_weights >/dev/null 2>&1 || return 1
+    LUOSHU_DEVICE_PAYLOAD_RESULT='preparing'
+    type font_config_prepare_payload_weights >/dev/null 2>&1 || {
+        LUOSHU_DEVICE_PAYLOAD_RESULT='prepare-failed'
+        return 1
+    }
     font_config_prepare_payload_weights || {
+        LUOSHU_DEVICE_PAYLOAD_RESULT='prepare-failed'
         font_config_disable
         return 1
     }
@@ -63,43 +76,71 @@ font_config_enable_for_payload() {
         device_font_payload_build_install "$_dfpb_family"
         _dfpb_rc=$?
         case "$_dfpb_rc" in
-            0) return 0 ;;
-            1) font_config_disable; return 1 ;;
-            2) ;;
+            0)
+                LUOSHU_DEVICE_PAYLOAD_RESULT='device'
+                return 0
+                ;;
+            1)
+                LUOSHU_DEVICE_PAYLOAD_RESULT='device-failed'
+                font_config_disable
+                return 1
+                ;;
+            2) LUOSHU_DEVICE_PAYLOAD_RESULT='unsupported' ;;
         esac
     fi
-    type font_config_generate >/dev/null 2>&1 || return 1
-    font_config_generate "$_dfpb_family"
+    if type font_config_generate >/dev/null 2>&1 && font_config_generate "$_dfpb_family"; then
+        LUOSHU_DEVICE_PAYLOAD_RESULT='legacy'
+        return 0
+    fi
+    LUOSHU_DEVICE_PAYLOAD_RESULT='slot-only'
+    return 1
 }
 
-# Unified direct-font dispatch. The legacy adapter first prepares physical hidden
-# slots and source anchors; v2 then replaces every captured XML/dynamic family with
-# stock-aligned derivatives. A soft v2 refusal keeps the complete legacy mapping.
+# Unified direct-font dispatch. Keep every existing ROM adapter, including OriginOS
+# and Flyme persistent slots, then add v2.2 as the final configuration layer.
 apply_font_by_rom() {
     _dfpb_src="$1"
     _dfpb_dest="$2"
     _dfpb_mode="${3:-full}"
     _dfpb_family="${4:-}"
+    [ -n "$_dfpb_family" ] || _dfpb_family=$(detect_font_family "$(basename "$_dfpb_src")")
+    LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE=0
+    export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
+
     if [ "${IS_HYPEROS:-false}" = true ]; then
         copy_as_hyperos "$_dfpb_src" "$_dfpb_dest" "$_dfpb_mode" "$_dfpb_family"
     elif [ "${IS_COLOROS:-false}" = true ]; then
         copy_as_coloros "$_dfpb_src" "$_dfpb_dest" "$_dfpb_mode" "$_dfpb_family"
+    elif type _luoshu_detect_originos >/dev/null 2>&1 && _luoshu_detect_originos; then
+        copy_as_originos "$_dfpb_src" "$_dfpb_dest" "$_dfpb_mode" "$_dfpb_family"
+    elif type _luoshu_detect_flyme >/dev/null 2>&1 && _luoshu_detect_flyme; then
+        copy_as_flyme "$_dfpb_src" "$_dfpb_dest" "$_dfpb_mode" "$_dfpb_family"
     else
         copy_as_generic "$_dfpb_src" "$_dfpb_dest" "$_dfpb_mode"
     fi
     _dfpb_adapter_rc=$?
     [ "$_dfpb_adapter_rc" -eq 0 ] || return "$_dfpb_adapter_rc"
     [ "$_dfpb_mode" = quick ] || return 0
-    type device_font_payload_build_install >/dev/null 2>&1 || return 0
-    device_font_payload_build_install "${_dfpb_family:-direct}"
-    _dfpb_engine_rc=$?
-    case "$_dfpb_engine_rc" in
-        0)
+
+    LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE=1
+    export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
+    font_config_enable_for_payload "$_dfpb_family"
+    _dfpb_config_rc=$?
+    _dfpb_result="$LUOSHU_DEVICE_PAYLOAD_RESULT"
+    LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE=0
+    export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
+
+    case "$_dfpb_result:$_dfpb_config_rc" in
+        device:0)
             type _log_step >/dev/null 2>&1 && _log_step '  已生成并安装本机原厂槽位对齐负载'
             return 0
             ;;
-        2)
-            type _log_step >/dev/null 2>&1 && _log_step '  当前字体暂不支持逐槽位轮廓生成，保留完整兼容映射'
+        legacy:0)
+            type _log_step >/dev/null 2>&1 && _log_step '  当前字体暂不支持逐槽位轮廓生成，已保留兼容 XML 与物理槽映射'
+            return 0
+            ;;
+        slot-only:*)
+            type _log_step >/dev/null 2>&1 && _log_step '  设备没有可安全生成的字体 XML，继续使用完整物理槽映射'
             return 0
             ;;
         *)
@@ -234,7 +275,8 @@ luoshu_payload_transaction_begin() {
     return 0
 }
 
-# Quarantine must also remove the private /data/fonts config view and its state.
+# Quarantine v2 files while preserving OEM recovery semantics. Flyme's persistent
+# theme slot must be restored before the module returns to default.
 luoshu_payload_quarantine() {
     _lpq_module="$(_luoshu_safety_module)"
     _lpq_config="$(_luoshu_safety_config)"
@@ -242,7 +284,15 @@ luoshu_payload_quarantine() {
     case "$_lpq_fail" in ''|*[!0-9]*) _lpq_fail=0 ;; esac
     _lpq_fail=$((_lpq_fail + 1))
     printf '%s\n' "$_lpq_fail" > "$_lpq_config/font-boot-failures" 2>/dev/null || true
+
+    type luoshu_oem_clear_managed_fonts >/dev/null 2>&1 && luoshu_oem_clear_managed_fonts
+    if type _luoshu_detect_flyme >/dev/null 2>&1 && _luoshu_detect_flyme; then
+        type _luoshu_flyme_prepare_data_restore >/dev/null 2>&1 && \
+            _luoshu_flyme_prepare_data_restore >/dev/null 2>&1 || true
+        type luoshu_flyme_pending_apply >/dev/null 2>&1 && luoshu_flyme_pending_apply >/dev/null 2>&1 || true
+    fi
     type device_font_payload_clear >/dev/null 2>&1 && device_font_payload_clear
+
     for _lpq_part in $(_luoshu_payload_parts); do
         rm -rf "$_lpq_module/$_lpq_part/fonts" 2>/dev/null || true
         _lpq_etc="$_lpq_module/$_lpq_part/etc"
@@ -270,7 +320,7 @@ luoshu_payload_quarantine() {
     rm -f "$_lpq_config/font-payload-boot.conf" "$_lpq_config/font-payload-manifest.conf" \
           "$_lpq_config/font-payload-schema.conf" "$_lpq_config/font-payload-rebuild-pending.conf" \
           "$_lpq_config/font-target-aliases.conf" "$_lpq_config/font-target-coverage.conf" \
-          "$_lpq_config/font-config-overlay.conf" 2>/dev/null || true
+          "$_lpq_config/font-config-overlay.conf" "$_lpq_config/oem-font-targets.conf" 2>/dev/null || true
     {
         printf 'state=quarantined\n'
         printf 'failures=%s\n' "$_lpq_fail"
