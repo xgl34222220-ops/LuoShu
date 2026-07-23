@@ -4,6 +4,8 @@ common/app_installer.sh
 common/background_task.sh
 common/coloros_global.sh
 common/composite_font.py
+common/device_font_template.py
+common/device_font_template.sh
 common/font_axis_info.py
 common/font_check.sh
 common/font_config_overlay.py
