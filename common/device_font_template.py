@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
-"""Capture the device's real Android/OEM font slots as a reusable template.
+"""Capture Android/OEM stock font slots and script-specific visual contracts.
 
-The scanner is read-only. It parses system, OEM and updatable-font XML files,
-resolves referenced font files, and records the metrics/ink/advance contracts that
-future LuoShu payloads must preserve per slot. It intentionally does not mutate
-fonts or Android configuration.
+The scanner is read-only. A shell guard is responsible for invoking it only on a
+clean default-font boot. The JSON keeps the historical template schema for payload
+compatibility and carries captureRevision=2 to reject templates made from a mounted
+LuoShu payload.
 """
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import statistics
@@ -24,6 +25,8 @@ from fontTools.pens.boundsPen import BoundsPen
 from fontTools.ttLib import TTCollection, TTFont
 
 SCHEMA = "device-font-template-v1"
+CAPTURE_REVISION = 2
+PROBE_SCHEMA = "script-anchors-v2"
 FONT_SUFFIXES = (".ttf", ".otf", ".ttc", ".otc")
 WEIGHTS = (100, 200, 300, 400, 500, 600, 700, 800, 900)
 
@@ -57,14 +60,24 @@ MONO_TOKENS = ("mono", "monospace", "code")
 CLOCK_TOKENS = ("clock", "clockopia", "digit", "number", "numeric")
 DISPLAY_TOKENS = ("display", "headline", "title", "mitype")
 
+# Each group has one visual job. Separating punctuation is important: a full-width
+# Chinese comma, a baseline period and a centered plus sign do not share a baseline.
 PROBE_GROUPS: dict[str, tuple[int, ...]] = {
-    "latinCap": tuple(map(ord, "AHIOX")),
-    "latinX": tuple(map(ord, "xnoe")),
+    "latinCap": tuple(map(ord, "AHIOXEFMNSTUVWYZBCDGLPQRJK")),
+    "latinX": tuple(map(ord, "xnoeacmursvkwz")),
     "latinDescender": tuple(map(ord, "gjpqy")),
     "digits": tuple(map(ord, "0123456789")),
-    "cjk": tuple(map(ord, "中文字体系统默认洛书国永")),
-    "punctuation": tuple(map(ord, "()[]{}:;,.%+-/")),
+    "cjk": tuple(map(ord, "永国中日田目口回晶品林森木本未末上下左右天地人大小字体系统默认洛书高低正方圆")),
+    "punctuationBaseline": tuple(map(ord, ".,;:_!?")),
+    "punctuationCenter": tuple(map(ord, "()[]{}+-=/%<>")),
+    "punctuationFullwidth": tuple(map(ord, "，。！？；：（）【】《》、—…")),
 }
+# Compatibility aggregate for old fixtures and diagnostics.
+PROBE_GROUPS["punctuation"] = tuple(dict.fromkeys(
+    PROBE_GROUPS["punctuationBaseline"]
+    + PROBE_GROUPS["punctuationCenter"]
+    + PROBE_GROUPS["punctuationFullwidth"]
+))
 
 
 class TemplateError(RuntimeError):
@@ -195,7 +208,7 @@ def build_postscript_index(roots: Sequence[Path]) -> dict[str, tuple[Path, int]]
                 continue
         for face in range(face_count):
             try:
-                kwargs = {"lazy": True, "recalcTimestamp": False}
+                kwargs: dict[str, object] = {"lazy": True, "recalcTimestamp": False}
                 if is_collection:
                     kwargs["fontNumber"] = face
                 font = TTFont(str(path), **kwargs)
@@ -228,20 +241,18 @@ def parse_xml(path: Path) -> list[FontRef]:
                 index = int(child.attrib.get("index", "0") or "0")
             except ValueError:
                 index = 0
-            refs.append(
-                FontRef(
-                    family=family_name,
-                    family_attrs=family_attrs,
-                    declared=declared,
-                    postscript_name=postscript_name,
-                    weight=nearest_weight(child.attrib.get("weight")),
-                    style=child.attrib.get("style", "normal").lower(),
-                    index=max(0, index),
-                    axes=child.attrib.get("axis", child.attrib.get("axes", "")),
-                    source_xml=path,
-                    dynamic=dynamic,
-                )
-            )
+            refs.append(FontRef(
+                family=family_name,
+                family_attrs=family_attrs,
+                declared=declared,
+                postscript_name=postscript_name,
+                weight=nearest_weight(child.attrib.get("weight")),
+                style=child.attrib.get("style", "normal").lower(),
+                index=max(0, index),
+                axes=child.attrib.get("axis", child.attrib.get("axes", "")),
+                source_xml=path,
+                dynamic=dynamic,
+            ))
     return refs
 
 
@@ -265,9 +276,24 @@ def resolve_ref(ref: FontRef, postscript_index: dict[str, tuple[Path, int]]) -> 
     return None, ref.index
 
 
-def _median(values: Iterable[float]) -> float | None:
-    items = list(values)
+def median(values: Iterable[float]) -> float | None:
+    items = [float(value) for value in values if math.isfinite(float(value))]
     return float(statistics.median(items)) if items else None
+
+
+def percentile(values: Iterable[float], ratio: float) -> float | None:
+    items = sorted(float(value) for value in values if math.isfinite(float(value)))
+    if not items:
+        return None
+    if len(items) == 1:
+        return items[0]
+    position = max(0.0, min(1.0, ratio)) * (len(items) - 1)
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    if lower == upper:
+        return items[lower]
+    fraction = position - lower
+    return items[lower] * (1.0 - fraction) + items[upper] * fraction
 
 
 def glyph_group(font: TTFont, codepoints: Sequence[int]) -> dict[str, float | int | None]:
@@ -297,13 +323,18 @@ def glyph_group(font: TTFont, codepoints: Sequence[int]) -> dict[str, float | in
     y_maxs = [item[3] for item in bounds]
     heights = [item[3] - item[1] for item in bounds]
     widths = [item[2] - item[0] for item in bounds]
+    centers = [(item[1] + item[3]) / 2.0 for item in bounds]
     return {
         "hits": hits,
-        "yMin": _median(y_mins),
-        "yMax": _median(y_maxs),
-        "height": _median(heights),
-        "inkWidth": _median(widths),
-        "advance": _median(advances),
+        "boundsHits": len(bounds),
+        "yMin": median(y_mins),
+        "yMax": median(y_maxs),
+        "height": median(heights),
+        "inkWidth": median(widths),
+        "advance": median(advances),
+        "centerY": median(centers),
+        "yMinP25": percentile(y_mins, 0.25),
+        "yMaxP75": percentile(y_maxs, 0.75),
     }
 
 
@@ -349,6 +380,7 @@ def inspect_font(path: Path, face_index: int, hash_fonts: bool) -> dict[str, obj
             "mtimeNs": int(stat.st_mtime_ns),
             "names": sorted(font_names(font)),
             "metrics": metrics,
+            "probeSchema": PROBE_SCHEMA,
             "probes": {name: glyph_group(font, points) for name, points in PROBE_GROUPS.items()},
         }
         if hash_fonts:
@@ -367,10 +399,13 @@ def build_template(
     font_roots: Sequence[Path],
     fingerprint: str,
     hash_fonts: bool = False,
+    capture_revision: int = CAPTURE_REVISION,
 ) -> dict[str, object]:
     readable_xmls = [path for path in xml_paths if path.is_file()]
     if not readable_xmls:
         raise TemplateError("没有找到可读取的 Android 字体 XML")
+    if capture_revision != CAPTURE_REVISION:
+        raise TemplateError(f"不支持的模板采集修订：{capture_revision}")
     postscript_index = build_postscript_index(font_roots)
     slots: list[dict[str, object]] = []
     failures: list[dict[str, str]] = []
@@ -390,7 +425,8 @@ def build_template(
             seen.add(key)
             roles = classify_roles(ref, resolved)
             replaceable = "protected" not in roles and "fallback" not in roles and (
-                "global-ui" in roles or "mono" in roles or "clock" in roles or "display" in roles or "dynamic" in roles
+                "global-ui" in roles or "mono" in roles or "clock" in roles
+                or "display" in roles or "dynamic" in roles
             )
             slot: dict[str, object] = {
                 "family": ref.family,
@@ -431,6 +467,8 @@ def build_template(
             role_counts[role] = role_counts.get(role, 0) + 1
     return {
         "schema": SCHEMA,
+        "captureRevision": CAPTURE_REVISION,
+        "probeSchema": PROBE_SCHEMA,
         "fingerprint": fingerprint,
         "xml": [str(path) for path in readable_xmls],
         "fontRoots": [str(path) for path in font_roots if path.exists()],
@@ -463,6 +501,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--xml", action="append", default=[], type=Path)
     parser.add_argument("--font-root", action="append", default=[], type=Path)
     parser.add_argument("--fingerprint", default="")
+    parser.add_argument("--capture-revision", type=int, default=CAPTURE_REVISION)
     parser.add_argument("--hash-fonts", action="store_true")
     return parser.parse_args()
 
@@ -470,7 +509,13 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        payload = build_template(args.xml, args.font_root, args.fingerprint, args.hash_fonts)
+        payload = build_template(
+            args.xml,
+            args.font_root,
+            args.fingerprint,
+            args.hash_fonts,
+            args.capture_revision,
+        )
         atomic_json_write(payload, args.output)
         print(json.dumps({"status": "ok", **payload["summary"], "output": str(args.output)}, ensure_ascii=False, separators=(",", ":")))
         return 0
