@@ -114,10 +114,12 @@ python3 -m py_compile \
     "$ROOT/common/device_font_slot_plan.py" \
     "$ROOT/common/device_font_slot_build.py" \
     "$ROOT/common/device_font_payload_build.py" \
+    "$ROOT/common/device_font_payload_overlay.py" \
     "$ROOT/scripts/device_font_template_test.py" \
     "$ROOT/scripts/device_font_slot_plan_test.py" \
     "$ROOT/scripts/device_font_slot_build_test.py" \
-    "$ROOT/scripts/device_font_payload_build_test.py"
+    "$ROOT/scripts/device_font_payload_build_test.py" \
+    "$ROOT/scripts/device_font_payload_overlay_test.py"
 
 # 字体导入必须淘汰模块端原生索引；三级缓存版本不得回退。
 grep -q 'native_font_index.json' "$ROOT/common/native_import.sh"
