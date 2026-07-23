@@ -12,14 +12,14 @@ cp "$ROOT/common/device_font_payload_runtime.sh" "$MODULE/common/device_font_pay
 cp "$ROOT/common/device_font_transaction_guard.sh" "$MODULE/common/device_font_transaction_guard.sh"
 
 printf 'old-slot\n' > "$MODULE/system/fonts/LuoShuSlot-old-400.ttf"
-printf '<familyset old="true"/>\n' > "$MODULE/system/etc/font_fallback.xml"
+printf '<familyset old="true"><font>LuoShuSlot-old-400.ttf</font></familyset>\n' > "$MODULE/system/etc/font_fallback.xml"
 printf '<fontConfig sanitized="true"/>\n' > "$MODULE/system/etc/.luoshu-data-fonts-config.xml"
 printf 'old-font\n' > "$MODULE/config/active_font.conf"
 printf 'state=installed\nschema=device-font-payload-v1\nfont=old-font\n' > "$MODULE/config/device-font-engine.conf"
 printf 'state=prepared\nsource=system/etc/.luoshu-data-fonts-config.xml\ntarget=/data/fonts/config/config.xml\n' > "$MODULE/config/device-font-dynamic-mount.conf"
 cat > "$MODULE/config/device-font-installed.conf" <<'EOF_MANIFEST'
 file|system/fonts/LuoShuSlot-old-400.ttf|fixture|9
-file|system/etc/font_fallback.xml|fixture|24
+file|system/etc/font_fallback.xml|fixture|75
 file|system/etc/.luoshu-data-fonts-config.xml|fixture|37
 EOF_MANIFEST
 
@@ -57,8 +57,25 @@ grep -q '^font=old-font$' "$MODULE/config/device-font-engine.conf"
 test -s "$MODULE/config/device-font-installed.conf"
 test -s "$MODULE/config/device-font-dynamic-mount.conf"
 
+# If the ownership manifest itself is lost, the unique LuoShuSlot namespace still
+# provides a safe cleanup boundary. Unrelated ROM XML remains untouched.
+rm -f "$MODULE/config/device-font-installed.conf"
+mkdir -p "$MODULE/product/fonts" "$MODULE/product/etc"
+printf 'orphan-slot\n' > "$MODULE/product/fonts/LuoShuSlot-orphan-500.ttf"
+printf '<familyset><font>LuoShuSlot-orphan-500.ttf</font></familyset>\n' > "$MODULE/product/etc/fonts.xml"
+printf '<familyset rom="true"/>\n' > "$MODULE/product/etc/rom-fallback.xml"
+device_font_payload_clear
+test ! -e "$MODULE/system/fonts/LuoShuSlot-old-400.ttf"
+test ! -e "$MODULE/system/etc/font_fallback.xml"
+test ! -e "$MODULE/product/fonts/LuoShuSlot-orphan-500.ttf"
+test ! -e "$MODULE/product/etc/fonts.xml"
+test -e "$MODULE/product/etc/rom-fallback.xml"
+test ! -e "$MODULE/config/device-font-engine.conf"
+test ! -e "$MODULE/config/device-font-dynamic-mount.conf"
+
 sh -n "$ROOT/common/device_font_transaction_guard.sh"
 grep -q 'device_font_payload_clear' "$ROOT/common/device_font_transaction_guard.sh"
+grep -q 'LuoShuSlot-' "$ROOT/common/device_font_transaction_guard.sh"
 grep -q 'device-font-installed.conf' "$ROOT/common/device_font_transaction_guard.sh"
 
 echo 'Device font transaction guard snapshots, clears and restores v2 payload state.'
