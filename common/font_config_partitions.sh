@@ -92,6 +92,8 @@ fi
 [ -f "$_luoshufp_module/common/device_font_dynamic_guard.sh" ] && . "$_luoshufp_module/common/device_font_dynamic_guard.sh"
 [ -f "$_luoshufp_module/common/device_font_transaction_guard.sh" ] && . "$_luoshufp_module/common/device_font_transaction_guard.sh"
 [ -f "$_luoshufp_module/common/device_font_runtime_report.sh" ] && . "$_luoshufp_module/common/device_font_runtime_report.sh"
-# Keep foreground switching fast until the per-device generator has a real persistent cache.
+# Persistent cache is loaded before the foreground policy so a switch can activate a ready
+# aligned tree through hard links or schedule a background build without blocking the App.
+[ -f "$_luoshufp_module/common/device_font_cache.sh" ] && . "$_luoshufp_module/common/device_font_cache.sh"
 [ -f "$_luoshufp_module/common/device_font_payload_policy.sh" ] && . "$_luoshufp_module/common/device_font_payload_policy.sh"
 unset _luoshufp_module
