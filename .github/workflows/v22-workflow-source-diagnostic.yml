@@ -1,0 +1,31 @@
+name: v2.2 workflow source diagnostic
+
+on:
+  push:
+    branches:
+      - refactor/device-font-template-engine-v2.2.0
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect workflow checks
+        shell: bash
+        run: |
+          mkdir -p diagnostic/workflows
+          cp -a .github/workflows/. diagnostic/workflows/
+          grep -RIn -E 'Inspect candidate artifacts|unzip|module_payload_manifest|LuoShu-App|versionCode|MAX_ZIP|forbidden' \
+            .github/workflows > diagnostic/workflow-checks.txt || true
+          find .github/workflows -maxdepth 1 -type f -printf '%f\n' | sort > diagnostic/workflow-files.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v22-workflow-source
+          path: diagnostic
+          if-no-files-found: error
