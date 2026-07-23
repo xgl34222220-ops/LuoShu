@@ -62,6 +62,9 @@ mount_engine() {
 }
 
 select_task_file() {
+    # queued/running is only trustworthy while its matching worker still exists.
+    # The controller marks dead tasks failed after a short spawn grace period.
+    [ -f "$MIX_ENGINE" ] && MODDIR="$MODDIR" sh "$MIX_ENGINE" reconcile >/dev/null 2>&1 || true
     _axes_state="$(read_prop "$AXES_TASK_FILE" state)"
     _switch_state="$(read_prop "$SWITCH_TASK_FILE" state)"
     case "$_axes_state" in queued|running) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
