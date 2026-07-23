@@ -14,6 +14,21 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
 [ -f "$MODDIR/common/font_provider_cache.sh" ] && . "$MODDIR/common/font_provider_cache.sh"
 
+# Android toybox 的 chcon 不支持 GNU --reference；启动路径按目标文件实际标签复制。
+_luoshu_provider_match_metadata() {
+    _lpmm_source="$1"
+    _lpmm_target="$2"
+    _lpmm_uid=$(stat -c '%u' "$_lpmm_target" 2>/dev/null)
+    _lpmm_gid=$(stat -c '%g' "$_lpmm_target" 2>/dev/null)
+    _lpmm_mode=$(stat -c '%a' "$_lpmm_target" 2>/dev/null)
+    [ -n "$_lpmm_uid" ] && [ -n "$_lpmm_gid" ] && chown "$_lpmm_uid:$_lpmm_gid" "$_lpmm_source" 2>/dev/null || true
+    chmod "${_lpmm_mode:-644}" "$_lpmm_source" 2>/dev/null || true
+    if command -v chcon >/dev/null 2>&1; then
+        _lpmm_context=$(ls -Zd "$_lpmm_target" 2>/dev/null | awk '{print $1}')
+        case "$_lpmm_context" in *:*:*:*) chcon "$_lpmm_context" "$_lpmm_source" 2>/dev/null || true ;; esac
+    fi
+}
+
 type init_module >/dev/null 2>&1 && init_module
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
 mkdir -p "$MODDIR/config" "$MODDIR/logs" "$MODDIR/system/fonts" 2>/dev/null || true
