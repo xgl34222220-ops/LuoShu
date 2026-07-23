@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v2.0.0：安全卸载。只恢复洛书明确记录的系统设置，不触碰 /data/fonts。
+# 洛书 v2：安全卸载。恢复系统设置并解除动态字体配置桥。
 set +e
 MODDIR="${0%/*}"
 MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1)
@@ -15,15 +15,13 @@ if command -v settings >/dev/null 2>&1; then
         settings put secure font_weight_adjustment "$_fw_restore" >/dev/null 2>&1 || true
 fi
 
-# 还原 GMS Fonts Provider 缓存劫持（切换字体时写入 /data/fonts/files 的副本），
-# 否则卸载模块后 Play 商店等应用仍停留在用户字体。
+# 解除开机前 Google Sans 命名字体桥；完整重启后系统自然恢复原始字体表。
 if [ -f "$MODDIR/common/font_provider_cache.sh" ]; then
     MODULE_DIR="$MODDIR"
     . "$MODDIR/common/font_provider_cache.sh"
     luoshu_provider_cache_restore >/dev/null 2>&1 || true
 fi
 
-# v2 使用 systemless 字体与 XML 负载，不删除 Android/OEM 管理的动态字体数据库。
 rm -f "$MODDIR/.first_boot" "$MODDIR/.font_switch.lock" 2>/dev/null || true
 mkdir -p "$MODDIR/logs" 2>/dev/null || true
 echo "[$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)] 洛书 $MODULE_VERSION 已卸载" >> "$MODDIR/logs/fontswitch.log" 2>/dev/null || true
