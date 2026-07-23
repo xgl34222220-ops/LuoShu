@@ -29,9 +29,7 @@ _device_font_policy_trusted_template_key() {
     printf '%s\n' "$_dfpp_key"
 }
 
-# ColorOS target discovery used to rescan every font directory several times during one
-# switch. System partition filenames only change after an OTA, so cache the deduplicated
-# target list by build fingerprint. The explicit environment key keeps fixtures deterministic.
+# Cache ColorOS target discovery by build fingerprint; an OTA invalidates it automatically.
 get_all_coloros_files() {
     _dfpp_module="$(_device_font_policy_module)"
     _dfpp_cache="$_dfpp_module/config/coloros-font-targets.cache"
@@ -43,7 +41,6 @@ get_all_coloros_files() {
         sed -n '2,$p' "$_dfpp_cache" 2>/dev/null
         return 0
     fi
-
     _dfpp_tmp="${_dfpp_cache}.tmp.$$"
     mkdir -p "${_dfpp_cache%/*}" 2>/dev/null || true
     {
@@ -55,22 +52,12 @@ get_all_coloros_files() {
             if type _coloros_oem_ui_files >/dev/null 2>&1; then _coloros_oem_ui_files; fi
             if type _coloros_discovered_ui_files >/dev/null 2>&1; then _coloros_discovered_ui_files; fi
         } | tr ' ' '\n' | awk 'NF && !seen[$0]++'
-    } > "$_dfpp_tmp" 2>/dev/null || {
-        rm -f "$_dfpp_tmp" 2>/dev/null || true
-        return 1
-    }
-    mv -f "$_dfpp_tmp" "$_dfpp_cache" 2>/dev/null || {
-        rm -f "$_dfpp_tmp" 2>/dev/null || true
-        return 1
-    }
+    } > "$_dfpp_tmp" 2>/dev/null || { rm -f "$_dfpp_tmp" 2>/dev/null || true; return 1; }
+    mv -f "$_dfpp_tmp" "$_dfpp_cache" 2>/dev/null || { rm -f "$_dfpp_tmp" 2>/dev/null || true; return 1; }
     chmod 0644 "$_dfpp_cache" 2>/dev/null || true
     sed -n '2,$p' "$_dfpp_cache" 2>/dev/null
 }
 
-# font_manager.sh contains an old post-adapter compatibility loop that copies the same
-# ColorOS aliases to system_ext/product again. The partition-aware adapter has already
-# handled every real target before font_config_enable_for_payload is called, so suppress
-# only that second pass while leaving the initial cleanup list intact.
 get_all_coloros_names() {
     [ "${LUOSHU_COLOROS_TARGETS_MAPPED:-0}" != 1 ] || return 0
     for _dfpp_file in $(get_all_coloros_files); do
@@ -78,9 +65,8 @@ get_all_coloros_names() {
     done
 }
 
-# Return 0 only when an already-installed payload belongs to this exact font, was built
-# from the current trusted stock template and still passes its content manifest. Old Alpha
-# caches have no templateKey and are deliberately removed.
+# Return 0 when the active aligned tree is valid or a persistent ready cache can be
+# activated through hard links. A normal miss returns 2 and never performs font generation.
 device_font_payload_build_install() {
     _dfpp_font="${1:-custom}"
     _dfpp_module="$(_device_font_policy_module)"
@@ -95,16 +81,31 @@ device_font_payload_build_install() {
        [ "$_dfpp_installed_font" = "$_dfpp_font" ] && \
        [ "$_dfpp_installed_template" = "$_dfpp_template_key" ]; then
         if type device_font_payload_validate_installed >/dev/null 2>&1 && device_font_payload_validate_installed; then
-            _device_font_policy_log "复用可信原厂模板缓存：$_dfpp_font"
+            _device_font_policy_log "复用已激活的可信设备字体：$_dfpp_font"
             return 0
         fi
+    fi
+
+    if [ -n "$_dfpp_template_key" ] && type device_font_cache_activate >/dev/null 2>&1; then
+        device_font_cache_activate "$_dfpp_font"
+        _dfpp_cache_rc=$?
+        case "$_dfpp_cache_rc" in
+            0)
+                _device_font_policy_log "已从持久缓存快速激活设备对齐字体：$_dfpp_font"
+                return 0
+                ;;
+            1)
+                _device_font_policy_log "持久缓存存在但激活失败：$_dfpp_font"
+                return 1
+                ;;
+        esac
     fi
 
     if type device_font_payload_clear >/dev/null 2>&1; then
         device_font_payload_clear >/dev/null 2>&1 || true
     fi
     if [ -z "$_dfpp_template_key" ]; then
-        _device_font_policy_log "设备缓存禁用：尚未建立可信原厂模板"
+        _device_font_policy_log "设备对齐暂不可用：需要在系统默认字体状态重启一次建立原厂模板"
     elif [ -n "$_dfpp_installed_template" ] && [ "$_dfpp_installed_template" != "$_dfpp_template_key" ]; then
         _device_font_policy_log "设备缓存已过期：模板指纹变化"
     else
@@ -113,9 +114,6 @@ device_font_payload_build_install() {
     return 2
 }
 
-# This overrides the bridge function after all adapters have loaded. Cache eligibility is
-# checked before any nine-weight normalization. A miss preserves the physical ROM slots and
-# removes stale v2/XML state without doing full-font work in the foreground.
 font_config_enable_for_payload() {
     _dfpp_family="${1:-unknown}"
     LUOSHU_DEVICE_PAYLOAD_RESULT='preparing'
@@ -135,6 +133,7 @@ font_config_enable_for_payload() {
             ;;
     esac
 
+    # Keep the physical ROM aliases prepared by copy_as_* and remove only stale v2/XML state.
     _dfpp_preserve="${LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE:-0}"
     LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE=1
     export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
@@ -144,9 +143,13 @@ font_config_enable_for_payload() {
     LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE="$_dfpp_preserve"
     export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
 
+    # Scheduling is metadata-only. The expensive builder runs after the next completed boot.
+    if type device_font_cache_schedule >/dev/null 2>&1; then
+        device_font_cache_schedule "$_dfpp_family" >/dev/null 2>&1 || true
+    fi
     [ "${IS_COLOROS:-false}" != true ] || LUOSHU_COLOROS_TARGETS_MAPPED=1
     export LUOSHU_COLOROS_TARGETS_MAPPED
     LUOSHU_DEVICE_PAYLOAD_RESULT='slot-only'
-    _device_font_policy_log "前台跳过九字重、逐槽位重建和重复 ColorOS 别名同步：$_dfpp_family"
+    _device_font_policy_log "前台已完成快速物理槽映射；后台对齐缓存按条件安排：$_dfpp_family"
     return 0
 }
