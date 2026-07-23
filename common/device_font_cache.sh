@@ -1,8 +1,8 @@
 #!/system/bin/sh
 # LuoShu persistent per-device alignment cache.
 # Foreground application only activates a ready cache or writes a tiny pending request.
-# Expensive generation starts at low priority after active_font.conf is committed; boot
-# service resumes the same request when Android kills or reboots during the background job.
+# Expensive generation starts at low priority only after the foreground switch transaction
+# has fully exited; boot service resumes the same request after interruption or reboot.
 set +e
 
 _dfcache_module() {
@@ -94,6 +94,16 @@ device_font_cache_lookup() {
     return 0
 }
 
+_dfcache_foreground_idle() {
+    _dfc_module="$(_dfcache_module)"
+    [ ! -e "$_dfc_module/.font_switch.lock" ] || return 1
+    [ ! -e "$_dfc_module/.mount_compat.lock" ] || return 1
+    if find "$_dfc_module/config" -maxdepth 1 -type d -name '.payload-transaction.*' -print -quit 2>/dev/null | grep -q .; then
+        return 1
+    fi
+    return 0
+}
+
 _dfcache_autostart_pending() {
     _dfc_font="$1"
     _dfc_module="$(_dfcache_module)"
@@ -102,14 +112,19 @@ _dfcache_autostart_pending() {
     [ -f "$_dfc_script" ] || return 0
     (
         _dfc_waited=0
-        while [ "$_dfc_waited" -lt 60 ]; do
+        _dfc_active=''
+        while [ "$_dfc_waited" -lt 120 ]; do
             _dfc_active=$(head -n1 "$_dfc_module/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
-            [ "$_dfc_active" = "$_dfc_font" ] && break
+            _dfc_pending_font=$(sed -n 's/^font=//p' "$_dfc_module/config/device-font-cache-pending.conf" 2>/dev/null | head -n1)
+            if [ "$_dfc_active" = "$_dfc_font" ] && [ "$_dfc_pending_font" = "$_dfc_font" ] && _dfcache_foreground_idle; then
+                break
+            fi
             sleep 1
             _dfc_waited=$((_dfc_waited + 1))
         done
-        [ "$_dfc_active" = "$_dfc_font" ] || exit 0
+        [ "$_dfc_active" = "$_dfc_font" ] && [ "$_dfc_pending_font" = "$_dfc_font" ] && _dfcache_foreground_idle || exit 0
         sleep 2
+        _dfcache_foreground_idle || exit 0
         MODDIR="$_dfc_module"
         MODULE_DIR="$_dfc_module"
         export MODDIR MODULE_DIR
@@ -227,6 +242,10 @@ device_font_cache_build_pending() {
     _dfc_pending="$_dfc_module/config/device-font-cache-pending.conf"
     _dfc_lock="$_dfc_module/.device-font-cache.lock"
     [ -s "$_dfc_pending" ] || return 2
+    _dfcache_foreground_idle || {
+        _dfcache_log '前台字体事务尚未结束，后台缓存本轮跳过并保留待办'
+        return 2
+    }
     if ! mkdir "$_dfc_lock" 2>/dev/null; then
         _dfcache_log '后台对齐缓存任务已经在运行'
         return 2
@@ -319,6 +338,10 @@ device_font_cache_build_pending() {
         _dfcache_log "后台设备对齐缓存生成完成：font=$_dfc_font verify=$_dfc_verify_result"
     fi
 
+    _dfcache_foreground_idle || {
+        _dfcache_log '缓存已生成，但前台事务重新出现，延后激活并保留待办'
+        return 2
+    }
     _dfc_txn=0
     if type luoshu_payload_transaction_begin >/dev/null 2>&1; then
         luoshu_payload_transaction_begin || return 1
