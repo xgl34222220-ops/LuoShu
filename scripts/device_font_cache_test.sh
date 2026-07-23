@@ -25,6 +25,15 @@ device_font_payload_validate_installed() { return 0; }
 
 . "$ROOT/common/device_font_cache.sh"
 
+_dfcache_foreground_idle
+touch "$MODULE/.font_switch.lock"
+! _dfcache_foreground_idle
+rm -f "$MODULE/.font_switch.lock"
+mkdir "$MODULE/config/.payload-transaction.fixture"
+! _dfcache_foreground_idle
+rmdir "$MODULE/config/.payload-transaction.fixture"
+_dfcache_foreground_idle
+
 device_font_cache_schedule DemoFont
 PENDING="$MODULE/config/device-font-cache-pending.conf"
 grep -q '^state=pending$' "$PENDING"
