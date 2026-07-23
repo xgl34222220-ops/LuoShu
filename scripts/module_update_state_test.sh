@@ -4,7 +4,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-update-state)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-SCHEMA=baseline-v7-mono-v3
+SCHEMA=baseline-v7-mono-v4
 
 OLD="$TMP/old"
 NEW="$TMP/new"
@@ -62,20 +62,20 @@ grep -q "^newSchema=$SCHEMA$" "$NEW/config/font-payload-rebuild-pending.conf"
 CURRENT="$TMP/current"
 CURRENT_NEW="$TMP/current-new"
 mkdir -p "$CURRENT/config" "$CURRENT/system/fonts" \
-    "$CURRENT/cache/full-composite-v8" "$CURRENT/cache/auto-multiweight-mix/composites-v5" \
-    "$CURRENT/cache/auto-multiweight-mix/prepared-v5" "$CURRENT_NEW/config"
+    "$CURRENT/cache/full-composite-v9" "$CURRENT/cache/auto-multiweight-mix/composites-v6" \
+    "$CURRENT/cache/auto-multiweight-mix/prepared-v6" "$CURRENT_NEW/config"
 printf 'id=LuoShu\nversion=current\n' >"$CURRENT/module.prop"
 printf 'Qsal\n' >"$CURRENT/config/active_font.conf"
 printf 'schema=%s\nfont=Qsal\n' "$SCHEMA" >"$CURRENT/config/font-payload-schema.conf"
 printf 'payload\n' >"$CURRENT/system/fonts/Qsal-Regular.ttf"
-printf 'v8\n' >"$CURRENT/cache/full-composite-v8/current.font"
-printf 'v5\n' >"$CURRENT/cache/auto-multiweight-mix/composites-v5/current.font"
-printf 'prepared\n' >"$CURRENT/cache/auto-multiweight-mix/prepared-v5/current.font"
+printf 'v8\n' >"$CURRENT/cache/full-composite-v9/current.font"
+printf 'v5\n' >"$CURRENT/cache/auto-multiweight-mix/composites-v6/current.font"
+printf 'prepared\n' >"$CURRENT/cache/auto-multiweight-mix/prepared-v6/current.font"
 luoshu_migrate_active_install "$CURRENT" "$CURRENT_NEW"
 test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = false
-test -f "$CURRENT_NEW/cache/full-composite-v8/current.font"
-test -f "$CURRENT_NEW/cache/auto-multiweight-mix/composites-v5/current.font"
-test -f "$CURRENT_NEW/cache/auto-multiweight-mix/prepared-v5/current.font"
+test -f "$CURRENT_NEW/cache/full-composite-v9/current.font"
+test -f "$CURRENT_NEW/cache/auto-multiweight-mix/composites-v6/current.font"
+test -f "$CURRENT_NEW/cache/auto-multiweight-mix/prepared-v6/current.font"
 test ! -e "$CURRENT_NEW/config/font-payload-rebuild-pending.conf"
 
 # The installer-side direct-font rebuild waits for and accepts only the current schema.
@@ -86,7 +86,7 @@ printf 'state=pending\n' >"$REBUILD/config/font-payload-rebuild-pending.conf"
 cat >"$REBUILD/common/font_manager.sh" <<'EOS'
 #!/bin/sh
 mkdir -p "$MODDIR/config"
-printf 'schema=baseline-v7-mono-v3\nfont=FontA\n' >"$MODDIR/config/font-payload-schema.conf"
+printf 'schema=baseline-v7-mono-v4\nfont=FontA\n' >"$MODDIR/config/font-payload-schema.conf"
 printf '{"status":"ok"}\n'
 EOS
 chmod 0755 "$REBUILD/common/font_manager.sh"

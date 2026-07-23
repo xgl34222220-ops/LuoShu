@@ -81,13 +81,15 @@ with tempfile.TemporaryDirectory() as directory:
     finally:
         font.close()
 
-    # Different glyph extremes must still emit exactly the same TextView/EditText baseline contract.
+    # Different glyph extremes must still emit exactly the same TextView/EditText baseline contract
+    # via typo metrics, while hhea encloses the real outline extremes so includeFontPadding=false
+    # apps neither clip glyph ink nor let it paint into the next line.
     source_two = temp / "source-two.ttf"; normalized_two = temp / "normalized-two.ttf"
     make_font(source_two, -180, 1040, -120, 960, extreme_metrics=False)
     normalize_path(source_two, normalized_two)
     font_two = TTFont(normalized_two)
     try:
-        assert font_two["hhea"].ascent == 928
+        assert font_two["hhea"].ascent == 1040
         assert font_two["hhea"].descent == -244
         assert font_two["OS/2"].sTypoAscender == 928
         assert font_two["OS/2"].sTypoDescender == -244
