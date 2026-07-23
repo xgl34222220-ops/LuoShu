@@ -109,5 +109,24 @@ grep -qx flyme-apply "$CALLS"
 grep -qx device-clear "$CALLS"
 test "$(cat "$MODULE/config/active_font.conf")" = default
 
+# The foreground policy is loaded after the bridge in production. On a cache miss it must
+# finish with the physical ROM mapping and must never enter the 18-file weight preparation
+# or legacy XML generator that made a simple switch take minutes.
+. "$ROOT/common/device_font_payload_policy.sh"
+ROM=originos
+rm -f "$MODULE/config/device-font-engine.conf"
+: > "$CALLS"
+apply_font_by_rom "$TMP/source.ttf" "$MODULE/system/fonts" quick Fixture
+grep -qx originos "$CALLS"
+! grep -qx generic "$CALLS"
+! grep -qx prepare "$CALLS"
+! grep -qx legacy "$CALLS"
+grep -qx device-clear "$CALLS"
+grep -qx dynamic-clear "$CALLS"
+grep -qx base-clear "$CALLS"
+! grep -qx oem-clear "$CALLS"
+test "$LUOSHU_DEVICE_PAYLOAD_RESULT" = slot-only
+
 sh -n "$ROOT/common/device_font_payload_bridge.sh"
+sh -n "$ROOT/common/device_font_payload_policy.sh"
 echo 'Device font payload OEM bridge tests passed.'
