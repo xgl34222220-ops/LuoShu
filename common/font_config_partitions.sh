@@ -86,7 +86,8 @@ if ! type font_config_prepare_payload_weights >/dev/null 2>&1; then
 fi
 [ -f "$_luoshufp_module/common/font_finalize_hotfix.sh" ] && . "$_luoshufp_module/common/font_finalize_hotfix.sh"
 
-# v2.2 must load last so its transaction, validation and ROM dispatch overrides cannot
-# be replaced by older compatibility helpers sourced above.
+# v2.2 loads after every legacy adapter. The strict dynamic guard is sourced last so
+# stale target detection and read-only bind enforcement cannot be replaced later.
 [ -f "$_luoshufp_module/common/device_font_payload_bridge.sh" ] && . "$_luoshufp_module/common/device_font_payload_bridge.sh"
+[ -f "$_luoshufp_module/common/device_font_dynamic_guard.sh" ] && . "$_luoshufp_module/common/device_font_dynamic_guard.sh"
 unset _luoshufp_module
