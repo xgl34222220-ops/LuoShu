@@ -11,7 +11,7 @@ _luoshu_safety_config() {
     printf '%s/config\n' "$(_luoshu_safety_module)"
 }
 
-LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v7-mono-v4}"
+LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v7-mono-v5}"
 
 luoshu_payload_schema_current() {
     printf '%s\n' "$LUOSHU_PAYLOAD_SCHEMA_CURRENT"
@@ -329,7 +329,7 @@ luoshu_payload_arm() {
     mkdir -p "$_lpa_config" 2>/dev/null || return 1
     # 任何一次成功的字体应用都会按当前架构重建负载，升级遗留的"待后台重建"
     # 标记必须随之清除，否则下次开机会多重建一次，重建失败还会误删这份新负载。
-    rm -f "$_lpa_config/font-payload-rebuild-pending.conf" 2>/dev/null || true
+    rm -f "$_lpa_config/font-payload-rebuild-pending.conf" "$_lpa_config/font-payload-rebuild-failures" 2>/dev/null || true
     if [ "$_lpa_active" = default ]; then
         rm -f "$_lpa_config/font-payload-boot.conf" "$_lpa_config/font-payload-manifest.conf" 2>/dev/null || true
         luoshu_payload_schema_write default
