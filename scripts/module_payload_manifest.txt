@@ -10,6 +10,7 @@ common/device_font_payload_build.py
 common/device_font_payload_overlay.py
 common/device_font_payload_runtime.sh
 common/device_font_payload_verify.py
+common/device_font_runtime_report.sh
 common/device_font_transaction_guard.sh
 common/device_font_slot_build.py
 common/device_font_slot_plan.py
