@@ -170,16 +170,33 @@ private fun MiuixSlotSummary(slot: StudioSlotUiState, modifier: Modifier) {
         else MaterialTheme.colorScheme.primary.copy(alpha = .11f),
     ) {
         Column(Modifier.padding(horizontal = 11.dp, vertical = 12.dp)) {
-            Text(
-                when (slot.slot) {
-                    MixSlot.Cjk -> "中"
-                    MixSlot.Latin -> "Aa"
-                    MixSlot.Digit -> "123"
-                },
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Black,
-            )
+            val summaryFont = slot.font
+            if (summaryFont != null && summaryFont.valid) {
+                NativeFontPreview(
+                    font = summaryFont,
+                    text = when (slot.slot) {
+                        MixSlot.Cjk -> "中"
+                        MixSlot.Latin -> "Aa"
+                        MixSlot.Digit -> "123"
+                    },
+                    axes = if (summaryFont.variable) mapOf("wght" to 400f) else emptyMap(),
+                    modifier = Modifier.height(24.dp).width(44.dp),
+                    textSizeSp = 16f,
+                    gravity = Gravity.CENTER_VERTICAL,
+                    maxLines = 1,
+                )
+            } else {
+                Text(
+                    when (slot.slot) {
+                        MixSlot.Cjk -> "中"
+                        MixSlot.Latin -> "Aa"
+                        MixSlot.Digit -> "123"
+                    },
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Black,
+                )
+            }
             Spacer(Modifier.height(5.dp))
             Text(slot.title, color = tokens.textPrimary, fontSize = 10.sp, fontWeight = FontWeight.Black)
             Text(
@@ -255,15 +272,31 @@ private fun MiuixSlotCard(
                     color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            when (slotState.slot) {
-                                MixSlot.Cjk -> "中"
-                                MixSlot.Latin -> "Aa"
-                                MixSlot.Digit -> "123"
-                            },
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Black,
-                        )
+                        if (font != null && font.valid) {
+                            NativeFontPreview(
+                                font = font,
+                                text = when (slotState.slot) {
+                                    MixSlot.Cjk -> "中"
+                                    MixSlot.Latin -> "Aa"
+                                    MixSlot.Digit -> "123"
+                                },
+                                axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
+                                modifier = Modifier.size(48.dp).padding(6.dp),
+                                textSizeSp = 16f,
+                                gravity = Gravity.CENTER,
+                                maxLines = 1,
+                            )
+                        } else {
+                            Text(
+                                when (slotState.slot) {
+                                    MixSlot.Cjk -> "中"
+                                    MixSlot.Latin -> "Aa"
+                                    MixSlot.Digit -> "123"
+                                },
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Black,
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.width(12.dp))
