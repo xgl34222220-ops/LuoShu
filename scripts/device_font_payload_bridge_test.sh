@@ -127,6 +127,30 @@ grep -qx base-clear "$CALLS"
 ! grep -qx oem-clear "$CALLS"
 test "$LUOSHU_DEVICE_PAYLOAD_RESULT" = slot-only
 
+# ColorOS discovery is cached by ROM fingerprint and the old post-adapter alias pass is
+# suppressed only after the partition-aware adapter has completed.
+_coloros_core_files() { printf '%s\n' 'Core-Regular.ttf Core-Medium.ttf'; }
+_coloros_google_text_files() { printf '%s\n' 'GoogleSansText-Regular.ttf'; }
+_coloros_vendor_files() { printf '%s\n' 'Vendor-Regular.ttf'; }
+_coloros_oem_ui_files() { printf '%s\n' 'OplusSans-Regular.ttf'; }
+_coloros_discovered_ui_files() { printf '%s\n' 'Discovered-Regular.ttf Core-Regular.ttf'; }
+LUOSHU_COLOROS_CACHE_KEY=fixture-rom
+export LUOSHU_COLOROS_CACHE_KEY
+rm -f "$MODULE/config/coloros-font-targets.cache"
+get_all_coloros_files > "$TMP/coloros-first"
+grep -qx Core-Regular.ttf "$TMP/coloros-first"
+grep -qx GoogleSansText-Regular.ttf "$TMP/coloros-first"
+test "$(grep -c '^Core-Regular.ttf$' "$TMP/coloros-first")" -eq 1
+_coloros_discovered_ui_files() { printf '%s\n' 'Should-Not-Appear.ttf'; }
+get_all_coloros_files > "$TMP/coloros-second"
+cmp "$TMP/coloros-first" "$TMP/coloros-second"
+LUOSHU_COLOROS_TARGETS_MAPPED=1
+export LUOSHU_COLOROS_TARGETS_MAPPED
+test -z "$(get_all_coloros_names)"
+LUOSHU_COLOROS_TARGETS_MAPPED=0
+export LUOSHU_COLOROS_TARGETS_MAPPED
+grep -qx Core-Regular "$(get_all_coloros_names > "$TMP/coloros-names"; printf '%s' "$TMP/coloros-names")"
+
 sh -n "$ROOT/common/device_font_payload_bridge.sh"
 sh -n "$ROOT/common/device_font_payload_policy.sh"
 echo 'Device font payload OEM bridge tests passed.'
