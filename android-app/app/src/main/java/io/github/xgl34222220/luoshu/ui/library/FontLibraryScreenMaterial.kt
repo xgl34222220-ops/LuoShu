@@ -427,17 +427,17 @@ private fun MaterialFontCard(
     onDelete: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(28.dp)
+    val container = if (font.valid) {
+        scheme.surfaceContainerLow
+    } else {
+        scheme.errorContainer.copy(alpha = .54f)
+    }
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(28.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (font.valid) {
-                scheme.surfaceContainerLow
-            } else {
-                scheme.errorContainer.copy(alpha = .55f)
-            },
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (active) 5.dp else 2.dp),
+        shape = shape,
+        colors = CardDefaults.cardColors(containerColor = container),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (active) 6.dp else 2.dp),
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -497,14 +497,14 @@ private fun MaterialFontCard(
                 }
                 Spacer(Modifier.width(6.dp))
                 if (active) {
-                    MaterialLibraryPill("使用中", Color(0xFF21966C))
+                    MaterialLibraryPill("使用中", scheme.primary)
                 } else {
                     Surface(
                         onClick = onDelete,
                         enabled = !busy,
                         modifier = Modifier.size(40.dp),
-                        shape = CircleShape,
-                        color = scheme.surfaceContainerHigh,
+                        shape = RoundedCornerShape(14.dp),
+                        color = scheme.onSurface.copy(alpha = .055f),
                         contentColor = scheme.onSurfaceVariant,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -522,7 +522,7 @@ private fun MaterialFontCard(
             Surface(
                 modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails),
                 shape = RoundedCornerShape(22.dp),
-                color = scheme.surfaceContainerHighest.copy(alpha = .60f),
+                color = scheme.surfaceContainerHigh.copy(alpha = .72f),
             ) {
                 NativeFontPreview(
                     font = font,
@@ -531,7 +531,7 @@ private fun MaterialFontCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(102.dp)
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                        .padding(horizontal = 17.dp, vertical = 14.dp),
                     textSizeSp = 23f,
                     maxLines = 2,
                 )
