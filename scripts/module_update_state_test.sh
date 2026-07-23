@@ -4,7 +4,9 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-update-state)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-SCHEMA=baseline-v7-mono-v6
+SCHEMA=device-template-v1-baseline-v7-mono-v6
+LUOSHU_PAYLOAD_SCHEMA_CURRENT="$SCHEMA"
+export LUOSHU_PAYLOAD_SCHEMA_CURRENT
 
 OLD="$TMP/old"
 NEW="$TMP/new"
@@ -83,11 +85,11 @@ REBUILD="$TMP/rebuild"
 mkdir -p "$REBUILD/common" "$REBUILD/config" "$REBUILD/logs"
 printf 'FontA\n' >"$REBUILD/config/active_font.conf"
 printf 'state=pending\n' >"$REBUILD/config/font-payload-rebuild-pending.conf"
-cat >"$REBUILD/common/font_manager.sh" <<'EOS'
+cat >"$REBUILD/common/font_manager.sh" <<EOS
 #!/bin/sh
-mkdir -p "$MODDIR/config"
-printf 'schema=baseline-v7-mono-v6\nfont=FontA\n' >"$MODDIR/config/font-payload-schema.conf"
-printf '{"status":"ok"}\n'
+mkdir -p "\$MODDIR/config"
+printf 'schema=$SCHEMA\\nfont=FontA\\n' >"\$MODDIR/config/font-payload-schema.conf"
+printf '{"status":"ok"}\\n'
 EOS
 chmod 0755 "$REBUILD/common/font_manager.sh"
 LUOSHU_UPDATE_ACTIVE=FontA
