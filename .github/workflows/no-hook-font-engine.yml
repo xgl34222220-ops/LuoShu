@@ -16,6 +16,7 @@ on:
       - common/device_font_payload_runtime.sh
       - common/device_font_payload_bridge.sh
       - common/font_provider_cache.sh
+      - common/origin_flyme_global.sh
       - common/font_instance.py
       - common/font_metrics_normalize.py
       - common/font_config_overlay.py
@@ -43,6 +44,7 @@ on:
       - scripts/device_font_payload_build_test.py
       - scripts/device_font_payload_overlay_test.py
       - scripts/device_font_payload_runtime_test.sh
+      - scripts/device_font_payload_bridge_test.sh
       - scripts/font_config_overlay_test.py
       - scripts/font_config_monospace_test.py
       - scripts/font_metrics_normalization_test.py
@@ -88,6 +90,7 @@ jobs:
           python3 scripts/device_font_payload_build_test.py --font "$FONT"
           python3 scripts/device_font_payload_overlay_test.py
           sh scripts/device_font_payload_runtime_test.sh
+          sh scripts/device_font_payload_bridge_test.sh
       - name: Run XML structure tests
         run: python3 scripts/font_config_overlay_test.py
       - name: Run mixed-script metrics tests
@@ -127,6 +130,9 @@ jobs:
           grep -q 'mount -o bind' common/device_font_payload_runtime.sh
           grep -q 'targetSha256' common/device_font_payload_runtime.sh
           grep -q 'device_font_payload_bridge.sh' common/font_config_partitions.sh
+          grep -q 'copy_as_originos' common/device_font_payload_bridge.sh
+          grep -q 'copy_as_flyme' common/device_font_payload_bridge.sh
+          grep -q '_luoshu_flyme_prepare_data_restore' common/device_font_payload_bridge.sh
           grep -q 'font_config_mark_boot_success' service.sh
           grep -q 'font_config_partitions.sh' post-fs-data.sh
           grep -q 'font_config_enable_for_payload' common/hyperos_global.sh
