@@ -182,6 +182,10 @@ PY_COMPACT
 _hyperos_compact_anchor() {
     _source="$1"; _dest_dir="$2"; _key="$3"
     _output="$_dest_dir/.luoshu-font-store/compact-${_key}.font"
+    if [ -s "$_output" ]; then
+        printf '%s\n' "$_output"
+        return 0
+    fi
     rm -f "$_output" 2>/dev/null || true
     if _hyperos_compact_normalize "$_source" "$_output" && [ -s "$_output" ]; then
         chmod 0644 "$_output" 2>/dev/null || true
@@ -193,6 +197,7 @@ _hyperos_compact_anchor() {
 
 _hyperos_materialize_variable_weight() {
     _source="$1"; _output="$2"; _weight="$3"
+    [ -s "$_output" ] && return 0
     _module="$(_luoshu_hyperos_module_dir)"
     _pyroot="$_module/common/python"; _python="$_pyroot/bin/luoshu-python"
     _instancer="$_module/common/font_instance.py"; _raw="${_output}.raw"
