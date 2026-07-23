@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<fontConfig>
+  <family name="google-sans"><font weight="400" style="normal">/data/fonts/files/hash/GoogleSans-Regular.ttf</font></family>
+  <family name="google-sans-medium"><font weight="500" style="normal">/data/fonts/files/hash/GoogleSans-Medium.ttf</font></family>
+  <family name="emoji-family"><font weight="400" style="normal">/data/fonts/files/hash/NotoColorEmoji.ttf</font></family>
+</fontConfig>
