@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from fontTools.misc.transform import Transform
-from fontTools.pens.boundsPen import BoundsPen
 from fontTools.pens.recordingPen import DecomposingRecordingPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
@@ -26,17 +25,9 @@ from fontTools.ttLib import TTFont
 from fontTools.ttLib.scaleUpem import scale_upem
 from fontTools.varLib.instancer import instantiateVariableFont
 
-import device_font_template as template_engine
-
 SCHEMA = "device-font-slot-build-v1"
 PLAN_SCHEMA = "device-font-slot-plan-v1"
-
-DROP_AFTER_OUTLINE_CHANGE = (
-    "DSIG",
-    "LTSH",
-    "VDMX",
-    "hdmx",
-)
+DROP_AFTER_OUTLINE_CHANGE = ("DSIG", "LTSH", "VDMX", "hdmx")
 
 
 class BuildError(RuntimeError):
@@ -67,7 +58,8 @@ def is_cjk(codepoint: int) -> bool:
 
 def is_latin(codepoint: int) -> bool:
     return (
-        0x0041 <= codepoint <= 0x007A
+        0x0041 <= codepoint <= 0x005A
+        or 0x0061 <= codepoint <= 0x007A
         or 0x00C0 <= codepoint <= 0x024F
         or 0x1E00 <= codepoint <= 0x1EFF
         or 0xAB30 <= codepoint <= 0xAB6F
@@ -82,8 +74,8 @@ def is_punctuation(codepoint: int) -> bool:
     if 0x3000 <= codepoint <= 0x303F or 0xFF00 <= codepoint <= 0xFF65:
         return True
     try:
-        return unicodedata.category(chr(codepoint)).startswith(("P", "S"))
-    except ValueError:
+        return unicodedata.category(chr(codepoint))[0] in ("P", "S")
+    except (ValueError, IndexError):
         return False
 
 
@@ -95,10 +87,10 @@ def probe_for_codepoint(codepoint: int) -> str | None:
     if is_latin(codepoint):
         char = chr(codepoint)
         category = unicodedata.category(char)
-        if char.lower() in "gjpqy" and category.startswith("L"):
-            return "latinDescender"
         if category == "Lu":
             return "latinCap"
+        if category == "Ll" and char.lower() in "gjpqy":
+            return "latinDescender"
         return "latinX"
     if is_punctuation(codepoint):
         return "punctuation"
@@ -139,10 +131,9 @@ def static_instance(font: TTFont, weight: int) -> TTFont:
         else:
             location[axis.axisTag] = float(axis.defaultValue)
     try:
-        instantiated = instantiateVariableFont(font, location, inplace=False, optimize=True)
+        return instantiateVariableFont(font, location, inplace=False, optimize=True)
     except Exception as exc:
         raise BuildError(f"可变字体静态实例化失败：{exc}") from exc
-    return instantiated
 
 
 def read_source(path: Path, face_index: int, weight: int) -> TTFont:
@@ -185,10 +176,7 @@ def record_target_glyphs(font: TTFont, names: Iterable[str]) -> dict[str, Decomp
     return recordings
 
 
-def replay_glyph(
-    recording: DecomposingRecordingPen,
-    transform: Transform,
-) -> Any:
+def replay_glyph(recording: DecomposingRecordingPen, transform: Transform) -> Any:
     pen = TTGlyphPen(None)
     recording.replay(TransformPen(pen, transform))
     return pen.glyph()
@@ -207,7 +195,7 @@ def glyph_bounds(glyph: Any, glyf_table: Any) -> tuple[int, int, int, int] | Non
 def transform_for_probe(slot: dict[str, Any], probe: str) -> dict[str, Any] | None:
     transforms = slot.get("transforms") if isinstance(slot.get("transforms"), dict) else {}
     transform = transforms.get(probe)
-    if not isinstance(transform, dict) or transform.get("status") not in ("ready",):
+    if not isinstance(transform, dict) or transform.get("status") != "ready":
         return None
     return transform
 
@@ -228,6 +216,7 @@ def apply_outline_transforms(font: TTFont, slot: dict[str, Any]) -> dict[str, An
         transform_data = transform_for_probe(slot, probe)
         if recording is None or transform_data is None or glyph_name not in hmtx:
             continue
+
         scale_y = finite(transform_data.get("relativeScaleY")) or 1.0
         shift_y = finite(transform_data.get("shiftY")) or 0.0
         scale_x = 1.0
@@ -244,8 +233,7 @@ def apply_outline_transforms(font: TTFont, slot: dict[str, Any]) -> dict[str, An
         new_advance = int(round(target_advance if exact_advance else old_advance * relative_advance))
         new_advance = max(1, min(65535, new_advance))
 
-        base_transform = Transform(scale_x, 0, 0, scale_y, 0, shift_y)
-        provisional = replay_glyph(recording, base_transform)
+        provisional = replay_glyph(recording, Transform(scale_x, 0, 0, scale_y, 0, shift_y))
         bounds = glyph_bounds(provisional, glyf)
         shift_x = 0.0
         new_lsb = int(old_lsb)
@@ -258,8 +246,7 @@ def apply_outline_transforms(font: TTFont, slot: dict[str, Any]) -> dict[str, An
         elif scale_x != 1.0:
             new_lsb = int(round(old_lsb * scale_x))
 
-        final_transform = Transform(scale_x, 0, 0, scale_y, shift_x, shift_y)
-        glyph = replay_glyph(recording, final_transform)
+        glyph = replay_glyph(recording, Transform(scale_x, 0, 0, scale_y, shift_x, shift_y))
         glyf[glyph_name] = glyph
         if glyph_bounds(glyph, glyf) is not None and exact_advance:
             new_lsb = int(glyph.xMin)
