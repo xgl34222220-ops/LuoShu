@@ -7,7 +7,10 @@ on:
       - common/device_font_payload_runtime.sh
       - common/device_font_payload_bridge.sh
       - common/font_provider_cache.sh
+      - common/module_update_state.sh
+      - customize.sh
       - scripts/device_font_payload_runtime_test.sh
+      - scripts/module_update_state_test.sh
       - .github/workflows/v22-runtime-guard.yml
 permissions:
   contents: read
@@ -20,13 +23,15 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends fonts-dejavu-core >/dev/null
-      - name: Capture payload runtime guard
+      - name: Capture payload and migration guards
         shell: bash
         run: |
           set +e
           mkdir -p diagnostic
           sh -x scripts/device_font_payload_runtime_test.sh > diagnostic/runtime.log 2>&1
-          printf '%s\n' "$?" > diagnostic/rc.txt
+          printf '%s\n' "$?" > diagnostic/runtime-rc.txt
+          sh -x scripts/module_update_state_test.sh > diagnostic/update.log 2>&1
+          printf '%s\n' "$?" > diagnostic/update-rc.txt
           exit 0
       - uses: actions/upload-artifact@v4
         if: always()
@@ -34,5 +39,7 @@ jobs:
           name: v22-runtime-guard
           path: diagnostic
           if-no-files-found: error
-      - name: Enforce payload runtime guard
-        run: test "$(cat diagnostic/rc.txt)" = 0
+      - name: Enforce payload and migration guards
+        run: |
+          test "$(cat diagnostic/runtime-rc.txt)" = 0
+          test "$(cat diagnostic/update-rc.txt)" = 0
