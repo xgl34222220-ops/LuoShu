@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - refactor/device-font-template-engine-v2.2.0
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
