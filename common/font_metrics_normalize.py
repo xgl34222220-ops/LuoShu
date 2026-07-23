@@ -252,7 +252,7 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
         "lineGap": 0,
         "uiTop": int(round(ui_top)),
         "uiBottom": int(round(ui_bottom)),
-        "monospaced": bool(monospaced),
+        "monospace": bool(monospaced),
         "monoAdvance": mono_report["advance"],
         "monoGlyphs": mono_report["glyphs"],
     }
