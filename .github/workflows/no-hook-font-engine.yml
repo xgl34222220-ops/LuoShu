@@ -11,6 +11,7 @@ on:
       - common/device_font_slot_plan.py
       - common/device_font_slot_plan.sh
       - common/device_font_slot_build.py
+      - common/device_font_cache.sh
       - common/device_font_payload_build.py
       - common/device_font_payload_overlay.py
       - common/device_font_payload_runtime.sh
@@ -47,6 +48,7 @@ on:
       - scripts/device_font_slot_plan_test.py
       - scripts/device_font_slot_plan_runtime_test.sh
       - scripts/device_font_slot_build_test.py
+      - scripts/device_font_cache_test.sh
       - scripts/device_font_payload_build_test.py
       - scripts/device_font_payload_overlay_test.py
       - scripts/device_font_payload_verify_test.py
@@ -98,6 +100,7 @@ jobs:
           FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
           test -s "$FONT"
           python3 scripts/device_font_slot_build_test.py --font "$FONT"
+          sh scripts/device_font_cache_test.sh
           python3 scripts/device_font_payload_build_test.py --font "$FONT"
           python3 scripts/device_font_payload_overlay_test.py
           python3 scripts/device_font_payload_verify_test.py
@@ -146,6 +149,7 @@ jobs:
           grep -q 'device_font_dynamic_guard.sh' common/font_config_partitions.sh
           grep -q 'device_font_transaction_guard.sh' common/font_config_partitions.sh
           grep -q 'device_font_runtime_report.sh' common/font_config_partitions.sh
+          grep -q 'device_font_cache.sh' common/font_config_partitions.sh
           grep -q 'device_font_payload_policy.sh' common/font_config_partitions.sh
           grep -q 'reports/v2.2-runtime-latest' common/device_font_runtime_report.sh
           grep -q 'font-manager-dump.txt' common/device_font_runtime_report.sh
