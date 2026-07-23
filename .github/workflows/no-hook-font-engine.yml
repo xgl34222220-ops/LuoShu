@@ -15,6 +15,7 @@ on:
       - common/device_font_payload_overlay.py
       - common/device_font_payload_runtime.sh
       - common/device_font_payload_bridge.sh
+      - common/device_font_payload_verify.py
       - common/device_font_dynamic_guard.sh
       - common/device_font_transaction_guard.sh
       - common/font_provider_cache.sh
@@ -46,6 +47,7 @@ on:
       - scripts/device_font_slot_build_test.py
       - scripts/device_font_payload_build_test.py
       - scripts/device_font_payload_overlay_test.py
+      - scripts/device_font_payload_verify_test.py
       - scripts/device_font_payload_runtime_test.sh
       - scripts/device_font_payload_bridge_test.sh
       - scripts/device_font_transaction_guard_test.sh
@@ -94,6 +96,7 @@ jobs:
           python3 scripts/device_font_slot_build_test.py --font "$FONT"
           python3 scripts/device_font_payload_build_test.py --font "$FONT"
           python3 scripts/device_font_payload_overlay_test.py
+          python3 scripts/device_font_payload_verify_test.py
           sh scripts/device_font_payload_runtime_test.sh
           sh scripts/device_font_payload_bridge_test.sh
           sh scripts/device_font_transaction_guard_test.sh
