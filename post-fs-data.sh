@@ -14,6 +14,116 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
 [ -f "$MODDIR/common/font_provider_cache.sh" ] && . "$MODDIR/common/font_provider_cache.sh"
 
+# Bind mount 的 mountinfo 根路径会省略 /data 前缀，不能用绝对源路径字符串判断。
+# 同时确认目标是独立挂载点且内容与洛书生成文件一致，避免误卸载其他模块的挂载。
+_luoshu_provider_mount_is_ours() {
+    _lpmi_target="$1"
+    _lpmi_source="$2"
+    [ -r /proc/self/mountinfo ] && [ -f "$_lpmi_source" ] || return 1
+    awk -v target="$_lpmi_target" '$5 == target { found=1 } END { exit !found }' \
+        /proc/self/mountinfo 2>/dev/null || return 1
+    cmp -s "$_lpmi_source" "$_lpmi_target" 2>/dev/null
+}
+
+# post-fs-data 专用启动实现：用 XML 节点校验，而不是搜索整个文件文本。
+# /data/fonts/config/config.xml 仍会保留 GoogleSans 文件目录，只有同名 family 必须移除。
+luoshu_provider_cache_boot() {
+    _lpcb_active="${1:-default}"
+    _lpcb_cfg="$(_luoshu_provider_config)"
+
+    if [ "$_lpcb_active" = default ] || [ -z "$_lpcb_active" ]; then
+        luoshu_provider_cache_restore
+        return 0
+    fi
+
+    _luoshu_provider_restore_legacy_files
+    _luoshu_provider_dynamic_google_present || return 2
+    [ -s "$LUOSHU_PROVIDER_CONFIG_XML" ] && [ -s "$LUOSHU_PROVIDER_SYSTEM_XML" ] || return 2
+    _luoshu_provider_select_fonts || {
+        luoshu_provider_log "未找到可供 Google Sans family 使用的洛书系统字体"
+        return 1
+    }
+
+    mkdir -p "$LUOSHU_PROVIDER_OVERLAY_DIR" "$_lpcb_cfg" 2>/dev/null || return 1
+    _luoshu_provider_unmount_all
+
+    _luoshu_provider_generate_overlays \
+        "$LUOSHU_PROVIDER_CONFIG_XML" "$LUOSHU_PROVIDER_CONFIG_OVERLAY" \
+        "$LUOSHU_PROVIDER_SYSTEM_XML" "$LUOSHU_PROVIDER_SYSTEM_OVERLAY" \
+        "$LUOSHU_PROVIDER_REPORT"
+    _lpcb_rc=$?
+    if [ "$_lpcb_rc" -ne 0 ]; then
+        rm -f "$LUOSHU_PROVIDER_CONFIG_OVERLAY" "$LUOSHU_PROVIDER_SYSTEM_OVERLAY" \
+            "$LUOSHU_PROVIDER_REPORT" 2>/dev/null || true
+        luoshu_provider_log "动态字体命名字体桥生成失败：code=$_lpcb_rc"
+        return 1
+    fi
+
+    _luoshu_provider_python - \
+        "$LUOSHU_PROVIDER_CONFIG_OVERLAY" "$LUOSHU_PROVIDER_SYSTEM_OVERLAY" <<'PY_LUOSHU_PROVIDER_VALIDATE' >/dev/null 2>&1
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+blocked = re.compile(r"(google[-_\s]*sans|product[-_\s]*sans)", re.I)
+
+def local_name(tag):
+    return tag.rsplit("}", 1)[-1]
+
+provider = ET.parse(sys.argv[1]).getroot()
+for node in provider.iter():
+    if local_name(node.tag) == "family" and blocked.search(node.attrib.get("name", "")):
+        raise SystemExit(2)
+
+system = ET.parse(sys.argv[2]).getroot()
+seen = set()
+for node in system.iter():
+    if local_name(node.tag) == "family":
+        seen.add(node.attrib.get("name", "").strip().lower())
+required = {"google-sans", "google-sans-text", "google-sans-medium", "google-sans-bold"}
+if not required.issubset(seen):
+    raise SystemExit(3)
+PY_LUOSHU_PROVIDER_VALIDATE
+    _lpcb_rc=$?
+    if [ "$_lpcb_rc" -ne 0 ]; then
+        rm -f "$LUOSHU_PROVIDER_CONFIG_OVERLAY" "$LUOSHU_PROVIDER_SYSTEM_OVERLAY" \
+            "$LUOSHU_PROVIDER_REPORT" 2>/dev/null || true
+        luoshu_provider_log "动态字体 XML 节点校验失败：code=$_lpcb_rc"
+        return 1
+    fi
+
+    _luoshu_provider_match_metadata "$LUOSHU_PROVIDER_SYSTEM_OVERLAY" "$LUOSHU_PROVIDER_SYSTEM_XML"
+    _luoshu_provider_match_metadata "$LUOSHU_PROVIDER_CONFIG_OVERLAY" "$LUOSHU_PROVIDER_CONFIG_XML"
+
+    if ! _luoshu_provider_bind_one "$LUOSHU_PROVIDER_SYSTEM_OVERLAY" "$LUOSHU_PROVIDER_SYSTEM_XML"; then
+        rm -f "$LUOSHU_PROVIDER_CONFIG_OVERLAY" "$LUOSHU_PROVIDER_SYSTEM_OVERLAY" \
+            "$LUOSHU_PROVIDER_REPORT" 2>/dev/null || true
+        luoshu_provider_log "无法挂载系统 Google Sans 命名字体配置"
+        return 1
+    fi
+    if ! _luoshu_provider_bind_one "$LUOSHU_PROVIDER_CONFIG_OVERLAY" "$LUOSHU_PROVIDER_CONFIG_XML"; then
+        _luoshu_provider_unmount_one "$LUOSHU_PROVIDER_SYSTEM_XML" "$LUOSHU_PROVIDER_SYSTEM_OVERLAY" || true
+        rm -f "$LUOSHU_PROVIDER_CONFIG_OVERLAY" "$LUOSHU_PROVIDER_SYSTEM_OVERLAY" \
+            "$LUOSHU_PROVIDER_REPORT" 2>/dev/null || true
+        luoshu_provider_log "无法挂载动态字体配置隔离层"
+        return 1
+    fi
+
+    _lpcb_removed=$(sed -n 's/^removed=//p' "$LUOSHU_PROVIDER_REPORT" 2>/dev/null | head -n1)
+    {
+        printf 'mode=mounted\n'
+        printf 'font=%s\n' "$_lpcb_active"
+        printf 'removed=%s\n' "${_lpcb_removed:-0}"
+        printf 'regular=%s\n' "$LUOSHU_PROVIDER_REGULAR"
+        printf 'medium=%s\n' "$LUOSHU_PROVIDER_MEDIUM"
+        printf 'bold=%s\n' "$LUOSHU_PROVIDER_BOLD"
+        printf 'time=%s\n' "$(date +%s)"
+    } > "$LUOSHU_PROVIDER_STATE" 2>/dev/null || true
+    chmod 0644 "$LUOSHU_PROVIDER_STATE" "$LUOSHU_PROVIDER_REPORT" 2>/dev/null || true
+    luoshu_provider_log "动态 Google Sans 命名字体桥已启用：移除 ${_lpcb_removed:-0} 个动态 family"
+    return 0
+}
+
 type init_module >/dev/null 2>&1 && init_module
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
 mkdir -p "$MODDIR/config" "$MODDIR/logs" "$MODDIR/system/fonts" 2>/dev/null || true
