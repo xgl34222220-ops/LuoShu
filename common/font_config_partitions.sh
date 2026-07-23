@@ -92,4 +92,6 @@ fi
 [ -f "$_luoshufp_module/common/device_font_dynamic_guard.sh" ] && . "$_luoshufp_module/common/device_font_dynamic_guard.sh"
 [ -f "$_luoshufp_module/common/device_font_transaction_guard.sh" ] && . "$_luoshufp_module/common/device_font_transaction_guard.sh"
 [ -f "$_luoshufp_module/common/device_font_runtime_report.sh" ] && . "$_luoshufp_module/common/device_font_runtime_report.sh"
+# Keep foreground switching fast until the per-device generator has a real persistent cache.
+[ -f "$_luoshufp_module/common/device_font_payload_policy.sh" ] && . "$_luoshufp_module/common/device_font_payload_policy.sh"
 unset _luoshufp_module
