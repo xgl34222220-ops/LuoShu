@@ -40,6 +40,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import android.view.Gravity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -408,12 +409,24 @@ private fun MiuixFontCard(
                     color = scheme.primary.copy(alpha = .105f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            "Aa",
-                            color = scheme.primary,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Black,
-                        )
+                        if (font.valid) {
+                            NativeFontPreview(
+                                font = font,
+                                text = "Aa",
+                                axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
+                                modifier = Modifier.size(56.dp).padding(7.dp),
+                                textSizeSp = 19f,
+                                gravity = Gravity.CENTER,
+                                maxLines = 1,
+                            )
+                        } else {
+                            Text(
+                                "Aa",
+                                color = scheme.primary,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Black,
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.width(13.dp))
