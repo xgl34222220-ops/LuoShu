@@ -236,6 +236,9 @@ copy_as_hyperos() {
     regular="$(_hyperos_pick_regular_source "$font_family" "$src")" || return 1
 
     mkdir -p "$_module/system/fonts" "$_module/product/fonts" "$_module/system_ext/fonts" "$_module/mi_ext/fonts" 2>/dev/null || true
+    # 先清除旧版生成的 XML/动态目标，再写入新的物理槽；禁止在映射完成后清理，
+    # 否则旧 manifest 可能把刚生成的 Roboto/GoogleSans 目标一并删除。
+    type font_config_disable >/dev/null 2>&1 && font_config_disable >/dev/null 2>&1 || true
     for _file in $(get_all_hyperos_files); do _hyperos_remove_overlay_file "$_file"; done
     _font_store_reset "$_module/system/fonts"
     regular_anchor=$(_hyperos_compact_anchor "$regular" "$_module/system/fonts" regular) || return 1
@@ -286,7 +289,6 @@ copy_as_hyperos() {
 
     # HyperOS 的 XML family 经常只是度量外壳。这里保留 ROM XML，避免再次用旧度量
     # 覆盖紧凑物理槽；MiSans、Roboto、GoogleSans、Mitype 与时钟槽已完整映射。
-    type font_config_disable >/dev/null 2>&1 && font_config_disable >/dev/null 2>&1 || true
     _log_step "  已覆盖 $core_count 个 MiSans 核心、$weight_count 个数字字重、$ui_slot_count 个 Google/Roboto、$clock_slot_count 个时钟/Mitype 目标"
     _log_step '  已启用固定紧凑行框，QQ/酷安/标签控件不再随字体极端轮廓漂移'
     return 0
