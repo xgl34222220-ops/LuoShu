@@ -24,7 +24,9 @@ find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || 
 chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" \
     "$MODDIR/common/font_axis_info.py" "$MODDIR/common/font_config_overlay.py" \
     "$MODDIR/common/font_name_normalize.py" "$MODDIR/common/font_metrics_normalize.py" \
-    "$MODDIR/common/font_config_targets.py" 2>/dev/null || true
+    "$MODDIR/common/font_config_targets.py" "$MODDIR/common/device_font_template.py" \
+    "$MODDIR/common/device_font_slot_plan.py" "$MODDIR/common/device_font_slot_build.py" \
+    "$MODDIR/common/device_font_payload_build.py" "$MODDIR/common/device_font_payload_overlay.py" 2>/dev/null || true
 
 log_message "INFO" "===== post-fs-data $MODULE_VERSION 开始 ====="
 
@@ -45,24 +47,44 @@ fi
 
 ACTIVE_TEXT=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
 [ -n "$ACTIVE_TEXT" ] || ACTIVE_TEXT="default"
+BOOT_GUARD_OK=1
+DYNAMIC_VIEW_ALLOWED=0
 
 # 架构升级负载会在 Android 完成启动后后台重建。第一次启动暂时沿用旧负载，
 # 避免在 post-fs-data 阶段执行分钟级字体生成或提前把待迁移配置隔离掉。
 if [ -f "$MODDIR/config/font-payload-rebuild-pending.conf" ]; then
     log_message "INFO" "检测到待后台重建的字体负载；本次启动跳过架构隔离"
 elif type font_config_boot_guard >/dev/null 2>&1; then
-    # 常规启动仍严格验证 XML、UI/Mono 九档和负载架构。
-    font_config_boot_guard "$ACTIVE_TEXT" || true
+    # 常规启动严格验证 XML、逐槽位字体和负载架构。
+    if font_config_boot_guard "$ACTIVE_TEXT"; then
+        DYNAMIC_VIEW_ALLOWED=1
+    else
+        BOOT_GUARD_OK=0
+        type device_font_payload_clear >/dev/null 2>&1 && device_font_payload_clear
+    fi
+fi
+
+# /data/fonts/files 仍由 FontManagerService、签名权限和 fs-verity 管理。洛书只在
+# v2.2 负载完整校验通过后，将预先生成的只读 config.xml 视图 bind 到原路径，
+# 且必须发生在 system_server/FontManagerService 初始化之前。哈希或挂载不匹配时
+# 直接保留 ROM 原配置，不写入动态字体文件。
+if [ "$BOOT_GUARD_OK" -eq 1 ] && [ "$DYNAMIC_VIEW_ALLOWED" -eq 1 ] && [ "$ACTIVE_TEXT" != default ] && \
+   type device_font_dynamic_mount_apply >/dev/null 2>&1; then
+    device_font_dynamic_mount_apply
+    _dynamic_rc=$?
+    case "$_dynamic_rc" in
+        0) log_message "INFO" "动态命名字体只读视图已挂载" ;;
+        2) log_message "INFO" "本次启动未挂载动态字体视图，继续使用 ROM 配置" ;;
+        *) log_message "ERROR" "动态字体视图状态异常，已拒绝挂载" ;;
+    esac
+else
+    log_message "INFO" "动态字体数据库保持原样；当前启动不需要配置视图"
 fi
 
 for _partition in system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust; do
     [ -d "$MODDIR/$_partition" ] || continue
     set_perm_recursive "$MODDIR/$_partition" 0 0 0755 0644 2>/dev/null || true
 done
-
-# 无 Hook 版不读写 /data/fonts。Android 的动态字体数据库由 FontManagerService、签名权限
-# 和 fs-verity 管理；洛书只使用启动前的 systemless 分区负载与字体配置。
-log_message "INFO" "动态字体数据库保持原样；使用 systemless XML/字体负载"
 
 # 字体索引由原生 App 按需刷新，启动早期不扫描或复制大字体。
 
