@@ -26,17 +26,39 @@ _dfpr_mark_dynamic_rebuild() {
     return 0
 }
 
+_dfpr_launch_pending_cache() {
+    _dfpr_module_dir="$(_dfpr_module)"
+    _dfpr_pending="$_dfpr_module_dir/config/device-font-cache-pending.conf"
+    _dfpr_cache="$_dfpr_module_dir/common/device_font_cache.sh"
+    [ -s "$_dfpr_pending" ] && [ -f "$_dfpr_cache" ] || return 0
+    if [ -d "$_dfpr_module_dir/.device-font-cache.lock" ]; then
+        _dfpr_log INFO '设备对齐缓存后台任务已经在运行'
+        return 0
+    fi
+    (
+        MODDIR="$_dfpr_module_dir"
+        MODULE_DIR="$_dfpr_module_dir"
+        export MODDIR MODULE_DIR
+        sh "$_dfpr_cache" service >> "$_dfpr_module_dir/logs/device-font-cache.log" 2>&1
+    ) &
+    _dfpr_log INFO '已启动设备对齐缓存后台任务'
+    return 0
+}
+
 _dfpr_template_ensure_after_release() {
     _dfpr_module_dir="$(_dfpr_module)"
     _dfpr_template="$_dfpr_module_dir/common/device_font_template.sh"
-    [ -f "$_dfpr_template" ] || return 0
-    MODDIR="$_dfpr_module_dir" sh "$_dfpr_template" ensure >/dev/null 2>&1
-    _dfpr_template_rc=$?
-    case "$_dfpr_template_rc" in
-        0) _dfpr_log INFO '可信原厂字体模板已校验或完成冻结' ;;
-        2) _dfpr_log INFO '原厂字体模板等待恢复默认字体并重启后采集' ;;
-        *) _dfpr_log WARN "原厂字体模板校验失败：code=$_dfpr_template_rc" ;;
-    esac
+    _dfpr_template_rc=2
+    if [ -f "$_dfpr_template" ]; then
+        MODDIR="$_dfpr_module_dir" sh "$_dfpr_template" ensure >/dev/null 2>&1
+        _dfpr_template_rc=$?
+        case "$_dfpr_template_rc" in
+            0) _dfpr_log INFO '可信原厂字体模板已校验或完成冻结' ;;
+            2) _dfpr_log INFO '原厂字体模板等待恢复默认字体并重启后采集' ;;
+            *) _dfpr_log WARN "原厂字体模板校验失败：code=$_dfpr_template_rc" ;;
+        esac
+    fi
+    [ "$_dfpr_template_rc" -eq 0 ] && _dfpr_launch_pending_cache
     return 0
 }
 
