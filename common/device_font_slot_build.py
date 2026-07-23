@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Generate one stock-aligned LuoShu font for a captured device slot.
-
-This is the first writing stage of the v2.2 engine. It only supports TrueType
-outlines (including variable TrueType after static instancing). Unsupported CFF
-sources fail closed instead of silently falling back to metric-only replacement.
-"""
+"""Generate one stock-aligned LuoShu font for a captured device slot."""
 from __future__ import annotations
 
 import argparse
@@ -25,9 +20,14 @@ from fontTools.ttLib import TTFont
 from fontTools.ttLib.scaleUpem import scale_upem
 from fontTools.varLib.instancer import instantiateVariableFont
 
-SCHEMA = "device-font-slot-build-v1"
-PLAN_SCHEMA = "device-font-slot-plan-v1"
+SCHEMA = "device-font-slot-build-v2"
+PLAN_SCHEMA = "device-font-slot-plan-v2"
 DROP_AFTER_OUTLINE_CHANGE = ("DSIG", "LTSH", "VDMX", "hdmx")
+PUNCTUATION_FALLBACK = {
+    "punctuationBaseline": "punctuation",
+    "punctuationCenter": "punctuation",
+    "punctuationFullwidth": "punctuation",
+}
 
 
 class BuildError(RuntimeError):
@@ -52,7 +52,7 @@ def is_cjk(codepoint: int) -> bool:
         0x3400 <= codepoint <= 0x4DBF
         or 0x4E00 <= codepoint <= 0x9FFF
         or 0xF900 <= codepoint <= 0xFAFF
-        or 0x20000 <= codepoint <= 0x3134F
+        or 0x20000 <= codepoint <= 0x323AF
     )
 
 
@@ -70,13 +70,22 @@ def is_digit(codepoint: int) -> bool:
     return 0x30 <= codepoint <= 0x39 or 0xFF10 <= codepoint <= 0xFF19
 
 
-def is_punctuation(codepoint: int) -> bool:
+def punctuation_probe(codepoint: int) -> str | None:
     if 0x3000 <= codepoint <= 0x303F or 0xFF00 <= codepoint <= 0xFF65:
-        return True
+        return "punctuationFullwidth"
+    if codepoint in map(ord, ".,;:_!?"):
+        return "punctuationBaseline"
+    if codepoint in map(ord, "()[]{}+-=/%<>"):
+        return "punctuationCenter"
     try:
-        return unicodedata.category(chr(codepoint))[0] in ("P", "S")
+        category = unicodedata.category(chr(codepoint))
     except (ValueError, IndexError):
-        return False
+        return None
+    if category.startswith("S"):
+        return "punctuationCenter"
+    if category.startswith("P"):
+        return "punctuationBaseline"
+    return None
 
 
 def probe_for_codepoint(codepoint: int) -> str | None:
@@ -92,9 +101,7 @@ def probe_for_codepoint(codepoint: int) -> str | None:
         if category == "Ll" and char.lower() in "gjpqy":
             return "latinDescender"
         return "latinX"
-    if is_punctuation(codepoint):
-        return "punctuation"
-    return None
+    return punctuation_probe(codepoint)
 
 
 PROBE_PRIORITY = {
@@ -103,7 +110,9 @@ PROBE_PRIORITY = {
     "latinCap": 2,
     "latinDescender": 3,
     "latinX": 4,
-    "punctuation": 5,
+    "punctuationFullwidth": 5,
+    "punctuationCenter": 6,
+    "punctuationBaseline": 7,
 }
 
 
@@ -139,11 +148,7 @@ def static_instance(font: TTFont, weight: int) -> TTFont:
 def read_source(path: Path, face_index: int, weight: int) -> TTFont:
     if not path.is_file() or path.stat().st_size < 12:
         raise BuildError(f"源字体不可用：{path}")
-    kwargs: dict[str, Any] = {
-        "lazy": False,
-        "recalcTimestamp": False,
-        "recalcBBoxes": True,
-    }
+    kwargs: dict[str, Any] = {"lazy": False, "recalcTimestamp": False, "recalcBBoxes": True}
     with path.open("rb") as stream:
         collection = stream.read(4) == b"ttcf"
     if collection:
@@ -151,7 +156,7 @@ def read_source(path: Path, face_index: int, weight: int) -> TTFont:
     font = TTFont(str(path), **kwargs)
     if "glyf" not in font:
         font.close()
-        raise BuildError("当前阶段仅支持 TrueType glyf 轮廓；CFF/CFF2 将在后续阶段单独实现")
+        raise BuildError("当前阶段仅支持 TrueType glyf 轮廓；CFF/CFF2 不伪装支持")
     result = static_instance(font, weight)
     if result is not font:
         font.close()
@@ -195,6 +200,9 @@ def glyph_bounds(glyph: Any, glyf_table: Any) -> tuple[int, int, int, int] | Non
 def transform_for_probe(slot: dict[str, Any], probe: str) -> dict[str, Any] | None:
     transforms = slot.get("transforms") if isinstance(slot.get("transforms"), dict) else {}
     transform = transforms.get(probe)
+    if not isinstance(transform, dict):
+        fallback = PUNCTUATION_FALLBACK.get(probe)
+        transform = transforms.get(fallback) if fallback else None
     if not isinstance(transform, dict) or transform.get("status") != "ready":
         return None
     return transform
@@ -219,18 +227,15 @@ def apply_outline_transforms(font: TTFont, slot: dict[str, Any]) -> dict[str, An
 
         scale_y = finite(transform_data.get("relativeScaleY")) or 1.0
         shift_y = finite(transform_data.get("shiftY")) or 0.0
+        exact_advance = bool(roles.intersection(("clock", "mono")))
         scale_x = 1.0
-        if ("clock" in roles or "mono" in roles) and transform_data.get("relativeInkScaleX") is not None:
+        if exact_advance and transform_data.get("relativeInkScaleX") is not None:
             scale_x = finite(transform_data.get("relativeInkScaleX")) or 1.0
 
         old_advance, old_lsb = hmtx[glyph_name]
         relative_advance = finite(transform_data.get("relativeAdvanceScale")) or 1.0
         target_advance = finite(transform_data.get("targetAdvance"))
-        exact_advance = (
-            target_advance is not None
-            and (("clock" in roles and probe in ("digits", "punctuation")) or "mono" in roles)
-        )
-        new_advance = int(round(target_advance if exact_advance else old_advance * relative_advance))
+        new_advance = int(round(target_advance if exact_advance and target_advance is not None else old_advance * relative_advance))
         new_advance = max(1, min(65535, new_advance))
 
         provisional = replay_glyph(recording, Transform(scale_x, 0, 0, scale_y, 0, shift_y))
@@ -248,8 +253,9 @@ def apply_outline_transforms(font: TTFont, slot: dict[str, Any]) -> dict[str, An
 
         glyph = replay_glyph(recording, Transform(scale_x, 0, 0, scale_y, shift_x, shift_y))
         glyf[glyph_name] = glyph
-        if glyph_bounds(glyph, glyf) is not None and exact_advance:
-            new_lsb = int(glyph.xMin)
+        bounds_after = glyph_bounds(glyph, glyf)
+        if bounds_after is not None and exact_advance:
+            new_lsb = int(bounds_after[0])
         hmtx[glyph_name] = (new_advance, new_lsb)
         changed += 1
         advances += int(new_advance != old_advance)
@@ -345,6 +351,8 @@ def build_slot(source: Path, source_index: int, slot: dict[str, Any], output: Pa
     try:
         apply_line_contract(font, slot)
         transform_report = apply_outline_transforms(font, slot)
+        if transform_report["glyphs"] <= 0:
+            raise BuildError("没有任何脚本字形通过安全对齐")
         set_slot_identity(font, slot)
         for tag in DROP_AFTER_OUTLINE_CHANGE:
             if tag in font:
