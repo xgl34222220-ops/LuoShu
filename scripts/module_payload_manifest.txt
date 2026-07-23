@@ -8,6 +8,7 @@ common/device_font_dynamic_guard.sh
 common/device_font_payload_bridge.sh
 common/device_font_payload_build.py
 common/device_font_payload_overlay.py
+common/device_font_payload_policy.sh
 common/device_font_payload_runtime.sh
 common/device_font_payload_verify.py
 common/device_font_runtime_report.sh
