@@ -1,23 +1,39 @@
 #!/system/bin/sh
 # Verify the active aligned payload after Android has completed boot.
-# The result is authoritative for UI status: only state=verified may be described as
-# device-aligned. Missing FontManager evidence remains compatibility/unverified.
+# Only state=verified may be described as device-aligned. Visible files use bounded
+# first/last-block fingerprints so verification never rereads every full CJK font.
 set +e
 
 _dfload_module() {
     printf '%s\n' "${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
 }
 
-_dfload_hash() {
-    if type _dfpr_hash >/dev/null 2>&1; then
-        _dfpr_hash "$1"
-    elif command -v sha256sum >/dev/null 2>&1; then
-        sha256sum "$1" 2>/dev/null | awk '{print $1}'
+_dfload_hash_stream() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum 2>/dev/null | awk '{print $1}'
     elif command -v busybox >/dev/null 2>&1; then
-        busybox sha256sum "$1" 2>/dev/null | awk '{print $1}'
+        busybox sha256sum 2>/dev/null | awk '{print $1}'
     else
-        cksum "$1" 2>/dev/null | awk '{print $1 ":" $2}'
+        cksum 2>/dev/null | awk '{print $1 ":" $2}'
     fi
+}
+
+_dfload_size() {
+    stat -c '%s' "$1" 2>/dev/null || wc -c < "$1" 2>/dev/null | tr -d '[:space:]'
+}
+
+_dfload_quick_fingerprint() {
+    _dfload_file="$1"
+    [ -f "$_dfload_file" ] || return 1
+    _dfload_bytes=$(_dfload_size "$_dfload_file")
+    case "$_dfload_bytes" in ''|*[!0-9]*) return 1 ;; esac
+    {
+        printf 'bytes=%s\n' "$_dfload_bytes"
+        head -c 65536 "$_dfload_file" 2>/dev/null || true
+        if [ "$_dfload_bytes" -gt 65536 ] 2>/dev/null; then
+            tail -c 65536 "$_dfload_file" 2>/dev/null || true
+        fi
+    } | _dfload_hash_stream
 }
 
 _dfload_log() {
@@ -93,20 +109,24 @@ _dfload_mount_evidence() {
     _dfload_installed="$_dfload_module_dir/config/device-font-installed.conf"
     : > "$_dfload_output" 2>/dev/null || return 1
     [ -s "$_dfload_installed" ] || return 0
-    while IFS='|' read -r _dfload_kind _dfload_rel _dfload_expected_hash _dfload_expected_size; do
+    while IFS='|' read -r _dfload_kind _dfload_rel _dfload_manifest_hash _dfload_expected_size; do
         [ "$_dfload_kind" = file ] || continue
         case "$_dfload_rel" in */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;; *) continue ;; esac
         _dfload_module_file="$_dfload_module_dir/$_dfload_rel"
         _dfload_visible="/$_dfload_rel"
         _dfload_status=missing
-        _dfload_actual_hash=''
+        _dfload_expected_fingerprint=''
+        _dfload_actual_fingerprint=''
         _dfload_size=0
+        if [ -f "$_dfload_module_file" ]; then
+            _dfload_expected_fingerprint=$(_dfload_quick_fingerprint "$_dfload_module_file")
+        fi
         if [ -f "$_dfload_visible" ]; then
-            _dfload_size=$(stat -c '%s' "$_dfload_visible" 2>/dev/null || wc -c < "$_dfload_visible" 2>/dev/null | tr -d '[:space:]')
-            _dfload_actual_hash=$(_dfload_hash "$_dfload_visible")
-            if [ -f "$_dfload_module_file" ] && \
+            _dfload_size=$(_dfload_size "$_dfload_visible")
+            _dfload_actual_fingerprint=$(_dfload_quick_fingerprint "$_dfload_visible")
+            if [ -n "$_dfload_expected_fingerprint" ] && \
                [ "$_dfload_size" = "$_dfload_expected_size" ] && \
-               [ "$_dfload_actual_hash" = "$_dfload_expected_hash" ]; then
+               [ "$_dfload_actual_fingerprint" = "$_dfload_expected_fingerprint" ]; then
                 _dfload_status=ok
             else
                 _dfload_status=mismatch
@@ -114,7 +134,7 @@ _dfload_mount_evidence() {
         fi
         printf '%s|%s|%s|%s|%s|%s\n' \
             "$_dfload_rel" "$_dfload_visible" "$_dfload_status" \
-            "$_dfload_expected_hash" "$_dfload_actual_hash" "${_dfload_size:-0}" >> "$_dfload_output"
+            "$_dfload_expected_fingerprint" "$_dfload_actual_fingerprint" "${_dfload_size:-0}" >> "$_dfload_output"
     done < "$_dfload_installed"
     chmod 0600 "$_dfload_output" 2>/dev/null || true
 }
