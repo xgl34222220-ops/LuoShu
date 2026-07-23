@@ -15,6 +15,7 @@ on:
       - common/device_font_payload_overlay.py
       - common/device_font_payload_runtime.sh
       - common/device_font_payload_bridge.sh
+      - common/device_font_dynamic_guard.sh
       - common/font_provider_cache.sh
       - common/origin_flyme_global.sh
       - common/font_instance.py
@@ -127,8 +128,11 @@ jobs:
           ! grep -RInE '(^|[[:space:]])(cp|ln|rm)[[:space:]].*/data/fonts|_dest="/data/fonts/' post-fs-data.sh common 2>/dev/null
           grep -q 'font_config_boot_guard' post-fs-data.sh
           grep -q 'device_font_dynamic_mount_apply' post-fs-data.sh
-          grep -q 'mount -o bind' common/device_font_payload_runtime.sh
-          grep -q 'targetSha256' common/device_font_payload_runtime.sh
+          grep -q 'device_font_dynamic_guard.sh' common/font_config_partitions.sh
+          grep -q 'mount -o bind' common/device_font_dynamic_guard.sh
+          grep -q 'remount,bind,ro' common/device_font_dynamic_guard.sh
+          grep -q '_dfpr_mark_dynamic_rebuild' common/device_font_dynamic_guard.sh
+          grep -q 'targetSha256' common/device_font_dynamic_guard.sh
           grep -q 'device_font_payload_bridge.sh' common/font_config_partitions.sh
           grep -q 'copy_as_originos' common/device_font_payload_bridge.sh
           grep -q 'copy_as_flyme' common/device_font_payload_bridge.sh
