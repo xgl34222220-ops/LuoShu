@@ -12,8 +12,8 @@ if [ -z "$MODDIR" ]; then
 fi
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/auto-multiweight-mix"
-COMPOSITE_CACHE="$CACHE_ROOT/composites-v6"
-PREPARED_CACHE="$CACHE_ROOT/prepared-v6"
+COMPOSITE_CACHE="$CACHE_ROOT/composites-v7"
+PREPARED_CACHE="$CACHE_ROOT/prepared-v7"
 SOURCE_META_CACHE="$CACHE_ROOT/source-meta-v1"
 PUBLIC_ROOT="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 SOURCE_FONTS="$PUBLIC_ROOT/fonts"
