@@ -65,6 +65,186 @@ get_all_coloros_names() {
     done
 }
 
+# Legacy quick mode used wc and Python normalization for every alias. These overrides make
+# foreground switching metadata-only: one source inode, stat-based checks and hard-link aliases.
+_device_font_fast_size() {
+    _dffs_file="$1"
+    if command -v stat >/dev/null 2>&1; then
+        stat -c '%s' "$_dffs_file" 2>/dev/null && return 0
+    fi
+    if command -v toybox >/dev/null 2>&1; then
+        toybox stat -c '%s' "$_dffs_file" 2>/dev/null && return 0
+    fi
+    wc -c < "$_dffs_file" 2>/dev/null | tr -d '[:space:]'
+}
+
+_verify_font_copy() {
+    _dfvf_file="$1"
+    [ -s "$_dfvf_file" ] || return 1
+    _dfvf_size=$(_device_font_fast_size "$_dfvf_file")
+    case "$_dfvf_size" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$_dfvf_size" -ge 1024 ]
+}
+
+_font_anchor() {
+    _dffa_src="$1"
+    _dffa_dest="$2"
+    _dffa_key="$3"
+    _dffa_anchor="$_dffa_dest/.luoshu-font-store/${_dffa_key}.font"
+    mkdir -p "$_dffa_dest/.luoshu-font-store" 2>/dev/null || return 1
+    rm -f "$_dffa_anchor" 2>/dev/null || true
+    ln "$_dffa_src" "$_dffa_anchor" 2>/dev/null || cp -f "$_dffa_src" "$_dffa_anchor" 2>/dev/null || return 1
+    chmod 0644 "$_dffa_anchor" 2>/dev/null || true
+    printf '%s\n' "$_dffa_anchor"
+}
+
+_device_font_fast_alias_roots() {
+    _dffar_anchor="$1"
+    _dffar_file="$2"
+    _dffar_module="$(_device_font_policy_module)"
+    _dffar_count=0
+    while IFS='|' read -r _dffar_real _dffar_overlay; do
+        [ -e "$_dffar_real/$_dffar_file" ] || continue
+        mkdir -p "$_dffar_overlay" 2>/dev/null || continue
+        rm -f "$_dffar_overlay/$_dffar_file" 2>/dev/null || true
+        if ln "$_dffar_anchor" "$_dffar_overlay/$_dffar_file" 2>/dev/null || \
+           cp -f "$_dffar_anchor" "$_dffar_overlay/$_dffar_file" 2>/dev/null; then
+            chmod 0644 "$_dffar_overlay/$_dffar_file" 2>/dev/null || true
+            _dffar_count=$((_dffar_count + 1))
+        fi
+    done <<EOF_DFFAR_ROOTS
+/system/fonts|$_dffar_module/system/fonts
+/system_ext/fonts|$_dffar_module/system_ext/fonts
+/product/fonts|$_dffar_module/product/fonts
+/mi_ext/fonts|$_dffar_module/mi_ext/fonts
+/my_product/fonts|$_dffar_module/my_product/fonts
+/vendor/fonts|$_dffar_module/vendor/fonts
+EOF_DFFAR_ROOTS
+    printf '%s\n' "$_dffar_count"
+}
+
+_device_font_fast_map() {
+    _dffm_src="$1"
+    _dffm_family="$2"
+    _dffm_module="$(_device_font_policy_module)"
+    _dffm_dest="$_dffm_module/system/fonts"
+    mkdir -p "$_dffm_dest" 2>/dev/null || return 1
+
+    _dffm_preserve="${LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE:-0}"
+    LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE=1
+    export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
+    type font_config_disable >/dev/null 2>&1 && font_config_disable >/dev/null 2>&1 || true
+    LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE="$_dffm_preserve"
+    export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
+
+    type _font_store_reset >/dev/null 2>&1 && _font_store_reset "$_dffm_dest"
+    _dffm_anchor=$(_font_anchor "$_dffm_src" "$_dffm_dest" regular) || return 1
+    _dffm_total=0
+
+    if [ "${IS_HYPEROS:-false}" = true ]; then
+        _dffm_files=$(get_all_hyperos_files)
+    elif [ "${IS_COLOROS:-false}" = true ]; then
+        _dffm_files=$(get_all_coloros_files)
+    elif type get_all_generic_files >/dev/null 2>&1; then
+        _dffm_files=$(get_all_generic_files)
+    else
+        _dffm_files='Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf NotoSans-Regular.ttf'
+    fi
+
+    for _dffm_file in $_dffm_files; do
+        _dffm_added=$(_device_font_fast_alias_roots "$_dffm_anchor" "$_dffm_file")
+        case "$_dffm_added" in ''|*[!0-9]*) _dffm_added=0 ;; esac
+        _dffm_total=$((_dffm_total + _dffm_added))
+    done
+
+    if [ "$_dffm_total" -eq 0 ]; then
+        for _dffm_file in MiSansVF.ttf Roboto-Regular.ttf NotoSans-Regular.ttf; do
+            rm -f "$_dffm_dest/$_dffm_file" 2>/dev/null || true
+            ln "$_dffm_anchor" "$_dffm_dest/$_dffm_file" 2>/dev/null || \
+                cp -f "$_dffm_anchor" "$_dffm_dest/$_dffm_file" 2>/dev/null || continue
+            chmod 0644 "$_dffm_dest/$_dffm_file" 2>/dev/null || true
+            _dffm_total=$((_dffm_total + 1))
+            break
+        done
+    fi
+
+    for _dffm_weight in 100 200 300 400 500 600 700 800 900; do
+        for _dffm_prefix in LuoShu LuoShuMono; do
+            _dffm_out="$_dffm_dest/${_dffm_prefix}-${_dffm_weight}.ttf"
+            rm -f "$_dffm_out" 2>/dev/null || true
+            ln "$_dffm_anchor" "$_dffm_out" 2>/dev/null || cp -f "$_dffm_anchor" "$_dffm_out" 2>/dev/null || return 1
+            chmod 0644 "$_dffm_out" 2>/dev/null || true
+        done
+    done
+
+    _device_font_policy_log "前台快速映射完成：font=$_dffm_family aliases=$_dffm_total"
+    return 0
+}
+
+# Override the ROM dispatcher after all OEM adapters have been sourced. Quick mode never enters
+# compact normalization, variable-font instancing or per-weight generation.
+apply_font_by_rom() {
+    _dfabr_src="$1"
+    _dfabr_dest="$2"
+    _dfabr_mode="${3:-full}"
+    _dfabr_family="${4:-}"
+    [ -n "$_dfabr_family" ] || _dfabr_family=$(detect_font_family "$(basename "$_dfabr_src")")
+
+    if [ "$_dfabr_mode" = quick ]; then
+        _device_font_fast_map "$_dfabr_src" "$_dfabr_family" || return 1
+        if type font_config_enable_for_payload >/dev/null 2>&1; then
+            font_config_enable_for_payload "$_dfabr_family" || return 1
+        fi
+        return 0
+    fi
+
+    if [ "${IS_HYPEROS:-false}" = true ]; then
+        copy_as_hyperos "$_dfabr_src" "$_dfabr_dest" "$_dfabr_mode" "$_dfabr_family"
+    elif [ "${IS_COLOROS:-false}" = true ]; then
+        copy_as_coloros "$_dfabr_src" "$_dfabr_dest" "$_dfabr_mode" "$_dfabr_family"
+    else
+        copy_as_generic "$_dfabr_src" "$_dfabr_dest" "$_dfabr_mode"
+    fi
+}
+
+# Keep the safety contract, but use stat for font aliases instead of reading the same inode dozens
+# of times through wc. XML structure validation remains unchanged.
+luoshu_payload_validate_current() {
+    _lpv_active="${1:-unknown}"
+    _lpv_module="$(_luoshu_safety_module)"
+    _lpv_config="$(_luoshu_safety_config)"
+    [ "$_lpv_active" != default ] || return 0
+    _lpv_fonts=0
+    for _lpv_part in $(_luoshu_payload_parts); do
+        _lpv_dir="$_lpv_module/$_lpv_part/fonts"
+        [ -d "$_lpv_dir" ] || continue
+        for _lpv_file in "$_lpv_dir"/*.ttf "$_lpv_dir"/*.otf "$_lpv_dir"/*.ttc; do
+            [ -f "$_lpv_file" ] || continue
+            _lpv_size=$(_device_font_fast_size "$_lpv_file")
+            case "$_lpv_size" in ''|*[!0-9]*) _lpv_size=0 ;; esac
+            [ "$_lpv_size" -ge 1024 ] || return 1
+            _lpv_fonts=$((_lpv_fonts + 1))
+        done
+    done
+    [ "$_lpv_fonts" -gt 0 ] || return 1
+
+    _lpv_targets=$(sed -n 's/^targets=//p' "$_lpv_config/font-target-coverage.conf" 2>/dev/null | head -n1)
+    _lpv_mapped=$(sed -n 's/^mapped=//p' "$_lpv_config/font-target-coverage.conf" 2>/dev/null | head -n1)
+    case "$_lpv_targets" in ''|*[!0-9]*) _lpv_targets=0 ;; esac
+    case "$_lpv_mapped" in ''|*[!0-9]*) _lpv_mapped=0 ;; esac
+    [ "$_lpv_targets" -eq "$_lpv_mapped" ] || return 1
+
+    while IFS='|' read -r _lpv_key _lpv_real _lpv_overlay _lpv_font_dir; do
+        [ -f "$_lpv_overlay" ] || continue
+        grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\.ttf' "$_lpv_overlay" 2>/dev/null || continue
+        _luoshu_font_config_validate "$_lpv_overlay" "$_lpv_font_dir" || return 1
+    done <<EOF_LUOSHU_VALIDATE
+$(_luoshu_font_config_specs)
+EOF_LUOSHU_VALIDATE
+    LUOSHU_PAYLOAD_VALIDATED_ACTIVE="$_lpv_active"
+    return 0
+}
+
 # Return 0 when the active aligned tree is valid or a persistent ready cache can be
 # activated through hard links. A normal miss returns 2 and never performs font generation.
 device_font_payload_build_install() {
@@ -133,7 +313,7 @@ font_config_enable_for_payload() {
             ;;
     esac
 
-    # Keep the physical ROM aliases prepared by copy_as_* and remove only stale v2/XML state.
+    # Keep the physical ROM aliases prepared by the quick mapper and remove only stale v2/XML state.
     _dfpp_preserve="${LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE:-0}"
     LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE=1
     export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
@@ -143,13 +323,13 @@ font_config_enable_for_payload() {
     LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE="$_dfpp_preserve"
     export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
 
-    # Scheduling is metadata-only. The expensive builder runs after the next completed boot.
+    # Scheduling is metadata-only. The expensive builder runs after the foreground transaction.
     if type device_font_cache_schedule >/dev/null 2>&1; then
         device_font_cache_schedule "$_dfpp_family" >/dev/null 2>&1 || true
     fi
     [ "${IS_COLOROS:-false}" != true ] || LUOSHU_COLOROS_TARGETS_MAPPED=1
     export LUOSHU_COLOROS_TARGETS_MAPPED
     LUOSHU_DEVICE_PAYLOAD_RESULT='slot-only'
-    _device_font_policy_log "前台已完成快速物理槽映射；后台对齐缓存按条件安排：$_dfpp_family"
+    _device_font_policy_log "前台已完成常量时间物理槽映射；后台对齐缓存按条件安排：$_dfpp_family"
     return 0
 }
