@@ -1,0 +1,88 @@
+name: v2.2 candidate diagnostics
+
+on:
+  push:
+    branches:
+      - refactor/device-font-template-engine-v2.2.0
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-report:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zip unzip python3-fonttools
+
+      - name: Prepare ARM64 runtime
+        run: sh scripts/prepare_composite_runtime.sh
+
+      - name: Build debug App
+        working-directory: android-app
+        run: ./gradlew --no-daemon :app:assembleDebug
+
+      - name: Build candidate and write report
+        shell: bash
+        run: |
+          set +e
+          mkdir -p diagnostic
+          APK="$GITHUB_WORKSPACE/android-app/app/build/outputs/apk/debug/app-debug.apk"
+          {
+            echo "head=$GITHUB_SHA"
+            echo "apk=$APK"
+            ls -l "$APK"
+          } > diagnostic/summary.txt 2>&1
+
+          LUOSHU_APP_APK="$APK" \
+          LUOSHU_ALLOW_DEBUG_APP=1 \
+          sh scripts/build.sh > diagnostic/build.log 2>&1
+          BUILD_RC=$?
+          echo "build_rc=$BUILD_RC" >> diagnostic/summary.txt
+
+          ZIP=$(find dist -maxdepth 1 -type f -name 'LuoShu-*.zip' -print -quit 2>/dev/null)
+          echo "zip=$ZIP" >> diagnostic/summary.txt
+          if [ -n "$ZIP" ] && [ -f "$ZIP" ]; then
+            stat -c 'zip_bytes=%s' "$ZIP" >> diagnostic/summary.txt
+            unzip -t "$ZIP" >> diagnostic/summary.txt 2>&1
+            unzip -Z1 "$ZIP" > diagnostic/zip-files.txt
+            grep -E 'device_font_template|bundled/LuoShu-App|module.prop|common/python' \
+              diagnostic/zip-files.txt > diagnostic/relevant-files.txt || true
+            python3 - "$ZIP" > diagnostic/zip-groups.txt <<'PY'
+          import collections
+          import os
+          import sys
+          import zipfile
+
+          path = sys.argv[1]
+          groups = collections.defaultdict(lambda: [0, 0, 0])
+          with zipfile.ZipFile(path) as archive:
+              for item in archive.infolist():
+                  group = item.filename.split('/', 1)[0] or '(root)'
+                  groups[group][0] += item.file_size
+                  groups[group][1] += item.compress_size
+                  groups[group][2] += 1
+          print(f"artifact={os.path.basename(path)}")
+          print(f"zip_bytes={os.path.getsize(path)}")
+          for name, (raw, compressed, count) in sorted(groups.items(), key=lambda item: item[1][1], reverse=True):
+              print(f"{name}\traw={raw}\tcompressed={compressed}\tfiles={count}")
+          PY
+          fi
+          exit 0
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v22-candidate-diagnostic
+          path: diagnostic
+          if-no-files-found: error
