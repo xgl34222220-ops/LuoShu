@@ -67,6 +67,14 @@ if [ "${0##*/}" = "font_library_cache.sh" ]; then
     json_escape() {
         printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
     }
+
+    # v2.2 的逐设备模板在完整开机后的索引预热阶段异步采集。
+    # 它只读取 ROM XML/字体，不阻塞当前 App 字体列表，也不改写任何系统文件。
+    _device_template="$MODDIR/common/device_font_template.sh"
+    if [ -f "$_device_template" ] && [ "${1:-fingerprint}" = value ]; then
+        (MODDIR="$MODDIR" sh "$_device_template" ensure >/dev/null 2>&1) &
+    fi
+
     case "${1:-fingerprint}" in
         fingerprint) font_library_fingerprint_json ;;
         value) font_library_fingerprint_value ;;
