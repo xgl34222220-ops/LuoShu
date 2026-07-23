@@ -158,6 +158,7 @@ def main() -> None:
 
     template = {
         "schema": "device-font-template-v1",
+        "captureRevision": 2,
         "fingerprint": "fixture-rom",
         "slots": [
             slot("sans-serif", ["global-ui"], stock_ui),
@@ -166,7 +167,7 @@ def main() -> None:
         ],
     }
     result = planner.build_plan(template, source)
-    assert result["schema"] == "device-font-slot-plan-v1"
+    assert result["schema"] == "device-font-slot-plan-v2"
     assert result["summary"] == {
         "slots": 3,
         "ready": 2,
@@ -184,14 +185,17 @@ def main() -> None:
     assert ui["transforms"]["latinCap"]["outlineScaleY"] == 2.0
     assert ui["transforms"]["latinCap"]["relativeScaleY"] == 1.0
     assert ui["transforms"]["latinCap"]["shiftY"] == 20.0
-    assert ui["transforms"]["digits"]["advanceScale"] == 2.0
+    assert ui["transforms"]["latinCap"]["alignmentAnchor"] == "baseline-bottom"
+    assert ui["transforms"]["digits"]["relativeAdvanceScale"] == 1.0
+    assert ui["targetAdvancePolicy"] == "source-spacing"
 
     clock = plans["clock-family"]
     assert clock["status"] == "ready"
-    assert set(clock["transforms"]) == {"digits", "punctuation", "latinCap"}
+    assert set(clock["transforms"]) == {"digits", "punctuationCenter", "punctuationBaseline", "latinCap"}
     assert clock["transforms"]["digits"]["outlineScaleY"] == round(620 / 700, 8)
     assert clock["transforms"]["digits"]["shiftY"] == 68.8571
     assert clock["transforms"]["digits"]["targetAdvance"] == 600.0
+    assert clock["transforms"]["digits"]["alignmentAnchor"] == "visual-center"
 
     emoji = plans["emoji-family"]
     assert emoji["status"] == "skipped"
