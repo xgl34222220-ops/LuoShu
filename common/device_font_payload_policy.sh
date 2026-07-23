@@ -1,8 +1,7 @@
 #!/system/bin/sh
 # LuoShu v2.2 foreground runtime policy.
 # Never build or normalize large per-slot/per-weight font payloads in the App switch path.
-# Reuse a verified cache for the same font; otherwise keep the ROM physical-slot mapping
-# that was already prepared by the adapter and remove stale XML/device payload state.
+# Reuse is allowed only when the cache was built from the current trusted stock template.
 set +e
 
 _device_font_policy_module() {
@@ -14,6 +13,20 @@ _device_font_policy_log() {
     mkdir -p "$_dfpp_module/logs" 2>/dev/null || true
     printf '[%s] [POLICY] %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$*" \
         >> "$_dfpp_module/logs/device-font-payload.log" 2>/dev/null || true
+}
+
+_device_font_policy_trusted_template_key() {
+    if [ -n "${LUOSHU_TRUSTED_TEMPLATE_KEY:-}" ]; then
+        printf '%s\n' "$LUOSHU_TRUSTED_TEMPLATE_KEY"
+        return 0
+    fi
+    _dfpp_module="$(_device_font_policy_module)"
+    _dfpp_template_script="$_dfpp_module/common/device_font_template.sh"
+    [ -f "$_dfpp_template_script" ] || return 1
+    MODDIR="$_dfpp_module" sh "$_dfpp_template_script" trusted >/dev/null 2>&1 || return 1
+    _dfpp_key=$(cat "$_dfpp_module/config/device-font-template.key" 2>/dev/null)
+    [ -n "$_dfpp_key" ] || return 1
+    printf '%s\n' "$_dfpp_key"
 }
 
 # ColorOS target discovery used to rescan every font directory several times during one
@@ -65,19 +78,24 @@ get_all_coloros_names() {
     done
 }
 
-# Return 0 only when an already-installed payload belongs to this exact font and still
-# passes its manifest validation. Return 2 for a normal cache miss so the caller can use
-# the fast physical-slot path. A stale payload for another font is removed first.
+# Return 0 only when an already-installed payload belongs to this exact font, was built
+# from the current trusted stock template and still passes its content manifest. Old Alpha
+# caches have no templateKey and are deliberately removed.
 device_font_payload_build_install() {
     _dfpp_font="${1:-custom}"
     _dfpp_module="$(_device_font_policy_module)"
     _dfpp_state="$_dfpp_module/config/device-font-engine.conf"
     _dfpp_installed_state=$(sed -n 's/^state=//p' "$_dfpp_state" 2>/dev/null | head -n1)
     _dfpp_installed_font=$(sed -n 's/^font=//p' "$_dfpp_state" 2>/dev/null | head -n1)
+    _dfpp_installed_template=$(sed -n 's/^templateKey=//p' "$_dfpp_state" 2>/dev/null | head -n1)
+    _dfpp_template_key=$(_device_font_policy_trusted_template_key 2>/dev/null)
 
-    if [ "$_dfpp_installed_state" = installed ] && [ "$_dfpp_installed_font" = "$_dfpp_font" ]; then
+    if [ -n "$_dfpp_template_key" ] && \
+       [ "$_dfpp_installed_state" = installed ] && \
+       [ "$_dfpp_installed_font" = "$_dfpp_font" ] && \
+       [ "$_dfpp_installed_template" = "$_dfpp_template_key" ]; then
         if type device_font_payload_validate_installed >/dev/null 2>&1 && device_font_payload_validate_installed; then
-            _device_font_policy_log "复用已验证的设备字体缓存：$_dfpp_font"
+            _device_font_policy_log "复用可信原厂模板缓存：$_dfpp_font"
             return 0
         fi
     fi
@@ -85,13 +103,19 @@ device_font_payload_build_install() {
     if type device_font_payload_clear >/dev/null 2>&1; then
         device_font_payload_clear >/dev/null 2>&1 || true
     fi
-    _device_font_policy_log "设备缓存未命中：$_dfpp_font"
+    if [ -z "$_dfpp_template_key" ]; then
+        _device_font_policy_log "设备缓存禁用：尚未建立可信原厂模板"
+    elif [ -n "$_dfpp_installed_template" ] && [ "$_dfpp_installed_template" != "$_dfpp_template_key" ]; then
+        _device_font_policy_log "设备缓存已过期：模板指纹变化"
+    else
+        _device_font_policy_log "设备缓存未命中：$_dfpp_font"
+    fi
     return 2
 }
 
-# This overrides the bridge function after all adapters have loaded. The old order called
-# font_config_prepare_payload_weights first, causing 9 UI + 9 Mono full-font rewrites even
-# when the device engine was going to be skipped. Cache eligibility is now checked first.
+# This overrides the bridge function after all adapters have loaded. Cache eligibility is
+# checked before any nine-weight normalization. A miss preserves the physical ROM slots and
+# removes stale v2/XML state without doing full-font work in the foreground.
 font_config_enable_for_payload() {
     _dfpp_family="${1:-unknown}"
     LUOSHU_DEVICE_PAYLOAD_RESULT='preparing'
@@ -111,9 +135,6 @@ font_config_enable_for_payload() {
             ;;
     esac
 
-    # Preserve the physical files that copy_as_* just prepared, while removing stale v2,
-    # dynamic-target and XML overlay state from the previous font. Most importantly, do
-    # not call font_config_prepare_payload_weights or font_config_generate here.
     _dfpp_preserve="${LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE:-0}"
     LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE=1
     export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
