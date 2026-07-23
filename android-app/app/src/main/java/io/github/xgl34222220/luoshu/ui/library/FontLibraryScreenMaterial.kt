@@ -42,6 +42,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import android.view.Gravity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -426,17 +427,17 @@ private fun MaterialFontCard(
     onDelete: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(28.dp)
-    val container = if (font.valid) {
-        scheme.surfaceContainerLow
-    } else {
-        scheme.errorContainer.copy(alpha = .54f)
-    }
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = shape,
-        colors = CardDefaults.cardColors(containerColor = container),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (active) 6.dp else 2.dp),
+        shape = RoundedCornerShape(28.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (font.valid) {
+                scheme.surfaceContainerLow
+            } else {
+                scheme.errorContainer.copy(alpha = .55f)
+            },
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (active) 5.dp else 2.dp),
     ) {
         Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -446,12 +447,24 @@ private fun MaterialFontCard(
                     color = scheme.primaryContainer,
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text(
-                            "Aa",
-                            color = scheme.primary,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Black,
-                        )
+                        if (font.valid) {
+                            NativeFontPreview(
+                                font = font,
+                                text = "Aa",
+                                axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
+                                modifier = Modifier.size(56.dp).padding(7.dp),
+                                textSizeSp = 19f,
+                                gravity = Gravity.CENTER,
+                                maxLines = 1,
+                            )
+                        } else {
+                            Text(
+                                "Aa",
+                                color = scheme.primary,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Black,
+                            )
+                        }
                     }
                 }
                 Spacer(Modifier.width(13.dp))
@@ -484,14 +497,14 @@ private fun MaterialFontCard(
                 }
                 Spacer(Modifier.width(6.dp))
                 if (active) {
-                    MaterialLibraryPill("使用中", scheme.primary)
+                    MaterialLibraryPill("使用中", Color(0xFF21966C))
                 } else {
                     Surface(
                         onClick = onDelete,
                         enabled = !busy,
                         modifier = Modifier.size(40.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        color = scheme.onSurface.copy(alpha = .055f),
+                        shape = CircleShape,
+                        color = scheme.surfaceContainerHigh,
                         contentColor = scheme.onSurfaceVariant,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -509,7 +522,7 @@ private fun MaterialFontCard(
             Surface(
                 modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails),
                 shape = RoundedCornerShape(22.dp),
-                color = scheme.surfaceContainerHigh.copy(alpha = .72f),
+                color = scheme.surfaceContainerHighest.copy(alpha = .60f),
             ) {
                 NativeFontPreview(
                     font = font,
@@ -518,7 +531,7 @@ private fun MaterialFontCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(102.dp)
-                        .padding(horizontal = 17.dp, vertical = 14.dp),
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                     textSizeSp = 23f,
                     maxLines = 2,
                 )
