@@ -36,11 +36,15 @@ private val MaterialTypography = Typography(
     displaySmall = TextStyle(fontSize = 38.sp, lineHeight = 43.sp, fontWeight = FontWeight.Black),
     headlineLarge = TextStyle(fontSize = 32.sp, lineHeight = 37.sp, fontWeight = FontWeight.Black),
     headlineMedium = TextStyle(fontSize = 26.sp, lineHeight = 31.sp, fontWeight = FontWeight.Bold),
+    headlineSmall = TextStyle(fontSize = 22.sp, lineHeight = 27.sp, fontWeight = FontWeight.Bold),
     titleLarge = TextStyle(fontSize = 21.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold),
     titleMedium = TextStyle(fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
+    titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold),
     bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 23.sp),
     bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
+    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
     labelLarge = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold),
+    labelSmall = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, letterSpacing = .4.sp),
 )
 
 private val MiuixShapes = Shapes(
@@ -55,10 +59,15 @@ private val MiuixTypography = Typography(
     displaySmall = TextStyle(fontSize = 42.sp, lineHeight = 47.sp, fontWeight = FontWeight.Black),
     headlineLarge = TextStyle(fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.Black),
     headlineMedium = TextStyle(fontSize = 27.sp, lineHeight = 32.sp, fontWeight = FontWeight.Black),
+    headlineSmall = TextStyle(fontSize = 23.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold),
     titleLarge = TextStyle(fontSize = 20.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold),
     titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold),
+    titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.Bold),
+    bodyLarge = TextStyle(fontSize = 15.sp, lineHeight = 21.sp),
     bodyMedium = TextStyle(fontSize = 13.sp, lineHeight = 18.sp),
+    bodySmall = TextStyle(fontSize = 11.sp, lineHeight = 16.sp),
     labelLarge = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold),
+    labelSmall = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, letterSpacing = .4.sp),
 )
 
 @Immutable
