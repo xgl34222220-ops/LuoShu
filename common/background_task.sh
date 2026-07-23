@@ -11,8 +11,15 @@ luoshu_task_pid_alive() {
     _pid=$(luoshu_pid_value "$_pid_file")
     [ -n "$_pid" ] || return 1
     kill -0 "$_pid" 2>/dev/null || return 1
-    if [ -n "$_task" ] && [ -s "${_pid_file}.task" ]; then
+    if [ -n "$_task" ]; then
+        # A numeric PID can be recycled by Android. The task sidecar and, when available,
+        # the worker command line must both still belong to the same LuoShu task.
+        [ -s "${_pid_file}.task" ] || return 1
         [ "$(cat "${_pid_file}.task" 2>/dev/null)" = "$_task" ] || return 1
+        if [ -r "/proc/$_pid/cmdline" ]; then
+            _cmdline=$(tr '\000' ' ' < "/proc/$_pid/cmdline" 2>/dev/null)
+            case "$_cmdline" in *"$_task"*) ;; *) return 1 ;; esac
+        fi
     fi
     return 0
 }
