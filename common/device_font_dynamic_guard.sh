@@ -26,6 +26,20 @@ _dfpr_mark_dynamic_rebuild() {
     return 0
 }
 
+_dfpr_template_ensure_after_release() {
+    _dfpr_module_dir="$(_dfpr_module)"
+    _dfpr_template="$_dfpr_module_dir/common/device_font_template.sh"
+    [ -f "$_dfpr_template" ] || return 0
+    MODDIR="$_dfpr_module_dir" sh "$_dfpr_template" ensure >/dev/null 2>&1
+    _dfpr_template_rc=$?
+    case "$_dfpr_template_rc" in
+        0) _dfpr_log INFO '可信原厂字体模板已校验或完成冻结' ;;
+        2) _dfpr_log INFO '原厂字体模板等待恢复默认字体并重启后采集' ;;
+        *) _dfpr_log WARN "原厂字体模板校验失败：code=$_dfpr_template_rc" ;;
+    esac
+    return 0
+}
+
 # Prepare a private sanitized config only when the real FontManagerService document is
 # readable. Missing/changed targets remove stale state instead of carrying it forward.
 _dfpr_prepare_dynamic_state() {
@@ -128,10 +142,15 @@ device_font_dynamic_mount_apply() {
 
 # FontManagerService has already built its serialized system font map by boot completion.
 # Release LuoShu's temporary read-only view so Android can persist later provider updates.
+# Once the original view is visible, the stock-template guard may capture only if the
+# active font is default and the module tree has no generated payload.
 device_font_dynamic_mount_release() {
     _dfpr_module_dir="$(_dfpr_module)"
     _dfpr_state="$_dfpr_module_dir/config/device-font-dynamic-mount.conf"
-    [ -s "$_dfpr_state" ] || return 2
+    if [ ! -s "$_dfpr_state" ]; then
+        _dfpr_template_ensure_after_release
+        return 2
+    fi
     _dfpr_source_rel=$(sed -n 's/^source=//p' "$_dfpr_state" 2>/dev/null | head -n1)
     _dfpr_target=$(sed -n 's/^target=//p' "$_dfpr_state" 2>/dev/null | head -n1)
     _dfpr_source_hash=$(sed -n 's/^sourceSha256=//p' "$_dfpr_state" 2>/dev/null | head -n1)
@@ -139,7 +158,10 @@ device_font_dynamic_mount_release() {
     [ "$_dfpr_target" = "${LUOSHU_DATA_FONTS_CONFIG_TARGET:-/data/fonts/config/config.xml}" ] || return 1
     _dfpr_source="$_dfpr_module_dir/$_dfpr_source_rel"
     [ -s "$_dfpr_source" ] && [ -s "$_dfpr_target" ] || return 2
-    _dfpr_dynamic_mount_exists "$_dfpr_target" || return 2
+    if ! _dfpr_dynamic_mount_exists "$_dfpr_target"; then
+        _dfpr_template_ensure_after_release
+        return 2
+    fi
     [ "$(_dfpr_hash "$_dfpr_source")" = "$_dfpr_source_hash" ] || return 1
     [ "$(_dfpr_hash "$_dfpr_target")" = "$_dfpr_source_hash" ] || return 1
     umount "$_dfpr_target" 2>/dev/null || {
@@ -151,5 +173,6 @@ device_font_dynamic_mount_release() {
         return 1
     fi
     _dfpr_log INFO 'FontManagerService 初始化完成，已释放动态字体临时视图'
+    _dfpr_template_ensure_after_release
     return 0
 }
