@@ -149,7 +149,8 @@ export LUOSHU_COLOROS_TARGETS_MAPPED
 test -z "$(get_all_coloros_names)"
 LUOSHU_COLOROS_TARGETS_MAPPED=0
 export LUOSHU_COLOROS_TARGETS_MAPPED
-grep -qx Core-Regular "$(get_all_coloros_names > "$TMP/coloros-names"; printf '%s' "$TMP/coloros-names")"
+get_all_coloros_names > "$TMP/coloros-names"
+grep -qx Core-Regular "$TMP/coloros-names"
 
 sh -n "$ROOT/common/device_font_payload_bridge.sh"
 sh -n "$ROOT/common/device_font_payload_policy.sh"
