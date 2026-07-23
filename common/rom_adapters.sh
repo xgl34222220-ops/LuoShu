@@ -44,7 +44,7 @@ _font_store_reset() {
 # 归一化结果缓存：以 源文件sha256+字重+归一化版本 为 key。
 # 同一字体重复切换时直接复用，跳过 fonttools 冷启动（手机端每字重数秒）。
 # 修改 font_metrics_normalize.py 的度量契约时递增版本号使旧缓存失效。
-LUOSHU_NORMALIZER_VERSION="2"
+LUOSHU_NORMALIZER_VERSION="3"
 
 _font_anchor_cache_lookup() {
     _facl_src="$1"
