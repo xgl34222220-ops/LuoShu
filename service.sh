@@ -64,6 +64,36 @@ MODULE_DIR="$MODDIR"
     chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     chmod 0755 "$MODDIR/system/bin/洛书" "$MODDIR/system/bin/luoshud" 2>/dev/null || true
 
+    # The sanitized /data/fonts config is only an early-boot input to FontManagerService.
+    # Once Android reports boot complete, release LuoShu's verified bind so future provider
+    # updates can persist normally. Template refresh is allowed only after that original
+    # document is visible again.
+    _dynamic_template_safe=1
+    if type device_font_dynamic_mount_release >/dev/null 2>&1; then
+        device_font_dynamic_mount_release
+        _dynamic_release_rc=$?
+        case "$_dynamic_release_rc" in
+            0) log_service "INFO" "已释放启动期动态字体临时视图" ;;
+            2) log_service "DEBUG" "本次启动没有洛书动态字体临时视图" ;;
+            *)
+                _dynamic_template_safe=0
+                log_service "ERROR" "动态字体临时视图无法安全释放，本次跳过原厂模板刷新"
+                ;;
+        esac
+    fi
+
+    _active_for_template=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_active_for_template" ] || _active_for_template=default
+    if [ "$_dynamic_template_safe" -eq 1 ] && \
+       { [ "$_active_for_template" != default ] || [ -f "$MODDIR/config/font-payload-rebuild-pending.conf" ]; } && \
+       [ -f "$MODDIR/common/device_font_template.sh" ]; then
+        if MODDIR="$MODDIR" sh "$MODDIR/common/device_font_template.sh" ensure >/dev/null 2>&1; then
+            log_service "INFO" "原厂字体槽位模板已按当前 ROM 配置校验"
+        else
+            log_service "ERROR" "原厂字体槽位模板刷新失败，后台重建将保留现有负载"
+        fi
+    fi
+
     # 刷写阶段无法调用 pm 时，只在首次完整开机后自动重试一次。
     # 成功覆盖安装会保留 App 数据、字体索引和外观设置。
     if [ -s "$MODDIR/bundled/LuoShu-App.apk" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
