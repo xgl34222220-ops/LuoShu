@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v2.2.0 Alpha 1
-versionCode=20191
+version=v2.2.0 Alpha 2
+versionCode=20192
 author=惜故里丶
 description=Android 无 Hook 全局字体引擎：逐设备原厂槽位对齐、动态命名字体与安全回退
 updateJson=
