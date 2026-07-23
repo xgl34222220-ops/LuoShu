@@ -39,7 +39,7 @@ jobs:
         run: |
           set +e
           mkdir -p diagnostic
-          (cd android-app && ./gradlew --no-daemon :app:assembleDebug) > diagnostic/gradle.log 2>&1
+          gradle --no-daemon -p android-app :app:assembleDebug > diagnostic/gradle.log 2>&1
           echo "gradle_rc=$?" > diagnostic/summary.txt
           exit 0
 
