@@ -66,12 +66,24 @@ _dfpr_prepare_dynamic_state() {
     return 0
 }
 
+_dfpr_mountinfo() {
+    printf '%s\n' "${LUOSHU_MOUNTINFO:-/proc/self/mountinfo}"
+}
+
+_dfpr_dynamic_mount_exists() {
+    _dfpr_mount_target="$1"
+    _dfpr_mountinfo_file="$(_dfpr_mountinfo)"
+    awk -v path="$_dfpr_mount_target" '$5 == path { found=1 } END { exit !found }' \
+        "$_dfpr_mountinfo_file" 2>/dev/null
+}
+
 _dfpr_dynamic_mount_is_readonly() {
     _dfpr_mount_target="$1"
+    _dfpr_mountinfo_file="$(_dfpr_mountinfo)"
     awk -v path="$_dfpr_mount_target" '
         $5 == path && $6 ~ /(^|,)ro(,|$)/ { found=1 }
         END { exit !found }
-    ' /proc/self/mountinfo 2>/dev/null
+    ' "$_dfpr_mountinfo_file" 2>/dev/null
 }
 
 device_font_dynamic_mount_apply() {
@@ -112,4 +124,32 @@ device_font_dynamic_mount_apply() {
     umount "$_dfpr_target" 2>/dev/null || true
     _dfpr_log WARN '动态字体配置只读验证失败，已撤销并保留 ROM 原配置'
     return 2
+}
+
+# FontManagerService has already built its serialized system font map by boot completion.
+# Release LuoShu's temporary read-only view so Android can persist later provider updates.
+device_font_dynamic_mount_release() {
+    _dfpr_module_dir="$(_dfpr_module)"
+    _dfpr_state="$_dfpr_module_dir/config/device-font-dynamic-mount.conf"
+    [ -s "$_dfpr_state" ] || return 2
+    _dfpr_source_rel=$(sed -n 's/^source=//p' "$_dfpr_state" 2>/dev/null | head -n1)
+    _dfpr_target=$(sed -n 's/^target=//p' "$_dfpr_state" 2>/dev/null | head -n1)
+    _dfpr_source_hash=$(sed -n 's/^sourceSha256=//p' "$_dfpr_state" 2>/dev/null | head -n1)
+    case "$_dfpr_source_rel" in system/etc/.luoshu-data-fonts-config.xml) ;; *) return 1 ;; esac
+    [ "$_dfpr_target" = "${LUOSHU_DATA_FONTS_CONFIG_TARGET:-/data/fonts/config/config.xml}" ] || return 1
+    _dfpr_source="$_dfpr_module_dir/$_dfpr_source_rel"
+    [ -s "$_dfpr_source" ] && [ -s "$_dfpr_target" ] || return 2
+    _dfpr_dynamic_mount_exists "$_dfpr_target" || return 2
+    [ "$(_dfpr_hash "$_dfpr_source")" = "$_dfpr_source_hash" ] || return 1
+    [ "$(_dfpr_hash "$_dfpr_target")" = "$_dfpr_source_hash" ] || return 1
+    umount "$_dfpr_target" 2>/dev/null || {
+        _dfpr_log WARN '启动完成后无法撤销动态字体临时视图'
+        return 1
+    }
+    if _dfpr_dynamic_mount_exists "$_dfpr_target"; then
+        _dfpr_log WARN '动态字体临时视图仍处于挂载状态'
+        return 1
+    fi
+    _dfpr_log INFO 'FontManagerService 初始化完成，已释放动态字体临时视图'
+    return 0
 }
