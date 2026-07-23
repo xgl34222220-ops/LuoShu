@@ -57,12 +57,14 @@ def main() -> None:
     ui_profile["path"] = "/system/fonts/Roboto-Regular.ttf"
     clock_profile = copy.deepcopy(source_profile)
     clock_profile["path"] = "/system/fonts/Clockopia.ttf"
-    for key in ("yMin", "yMax"):
-        clock_profile["probes"]["digits"][key] += 36.0
+    for key in ("yMin", "yMax", "centerY", "yMinP25", "yMaxP75"):
+        if clock_profile["probes"]["digits"].get(key) is not None:
+            clock_profile["probes"]["digits"][key] += 36.0
     clock_profile["probes"]["digits"]["advance"] += 20.0
 
     template = {
         "schema": "device-font-template-v1",
+        "captureRevision": 2,
         "fingerprint": "payload-fixture-rom",
         "slots": [
             slot("sans-serif", "/system/etc/fonts.xml", ui_profile),
