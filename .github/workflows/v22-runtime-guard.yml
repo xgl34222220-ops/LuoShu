@@ -1,0 +1,24 @@
+name: v2.2 payload runtime guard
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - common/device_font_payload_runtime.sh
+      - common/device_font_payload_bridge.sh
+      - common/font_provider_cache.sh
+      - scripts/device_font_payload_runtime_test.sh
+      - .github/workflows/v22-runtime-guard.yml
+permissions:
+  contents: read
+jobs:
+  runtime-guard:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install fixture font
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends fonts-dejavu-core >/dev/null
+      - name: Run payload runtime guard
+        run: sh -x scripts/device_font_payload_runtime_test.sh
