@@ -17,6 +17,11 @@ printf '<fontConfig sanitized="true"/>\n' > "$MODULE/system/etc/.luoshu-data-fon
 printf 'old-font\n' > "$MODULE/config/active_font.conf"
 printf 'state=installed\nschema=device-font-payload-v1\nfont=old-font\n' > "$MODULE/config/device-font-engine.conf"
 printf 'state=prepared\nsource=system/etc/.luoshu-data-fonts-config.xml\ntarget=/data/fonts/config/config.xml\n' > "$MODULE/config/device-font-dynamic-mount.conf"
+printf 'state=pending\nfont=old-font\n' > "$MODULE/config/device-font-cache-pending.conf"
+printf 'state=verified\nmode=aligned\nactiveFont=old-font\n' > "$MODULE/config/device-font-load-verification.conf"
+printf '{"state":"verified"}\n' > "$MODULE/config/device-font-load-verification.json"
+printf 'LuoShuSlot-old-400\n' > "$MODULE/config/device-font-manager-dump.txt"
+printf 'system/fonts/LuoShuSlot-old-400.ttf|/system/fonts/LuoShuSlot-old-400.ttf|ok|a|a|9\n' > "$MODULE/config/device-font-mount-evidence.txt"
 cat > "$MODULE/config/device-font-installed.conf" <<'EOF_MANIFEST'
 file|system/fonts/LuoShuSlot-old-400.ttf|fixture|9
 file|system/etc/font_fallback.xml|fixture|75
@@ -39,6 +44,9 @@ test ! -e "$MODULE/system/etc/.luoshu-data-fonts-config.xml"
 test ! -e "$MODULE/config/device-font-engine.conf"
 test ! -e "$MODULE/config/device-font-installed.conf"
 test ! -e "$MODULE/config/device-font-dynamic-mount.conf"
+test ! -e "$MODULE/config/device-font-cache-pending.conf"
+test ! -e "$MODULE/config/device-font-load-verification.conf"
+test ! -e "$MODULE/config/device-font-load-verification.json"
 
 # Simulate a later direct/composite stage that partially writes a replacement and fails.
 printf 'new-slot\n' > "$MODULE/system/fonts/LuoShuSlot-new-400.ttf"
@@ -56,6 +64,11 @@ test "$(cat "$MODULE/config/active_font.conf")" = old-font
 grep -q '^font=old-font$' "$MODULE/config/device-font-engine.conf"
 test -s "$MODULE/config/device-font-installed.conf"
 test -s "$MODULE/config/device-font-dynamic-mount.conf"
+grep -q '^font=old-font$' "$MODULE/config/device-font-cache-pending.conf"
+grep -q '^state=verified$' "$MODULE/config/device-font-load-verification.conf"
+grep -q 'verified' "$MODULE/config/device-font-load-verification.json"
+test -s "$MODULE/config/device-font-manager-dump.txt"
+test -s "$MODULE/config/device-font-mount-evidence.txt"
 
 # If the ownership manifest itself is lost, the unique LuoShuSlot namespace still
 # provides a safe cleanup boundary. Unrelated ROM XML remains untouched.
@@ -72,10 +85,13 @@ test ! -e "$MODULE/product/etc/fonts.xml"
 test -e "$MODULE/product/etc/rom-fallback.xml"
 test ! -e "$MODULE/config/device-font-engine.conf"
 test ! -e "$MODULE/config/device-font-dynamic-mount.conf"
+test ! -e "$MODULE/config/device-font-cache-pending.conf"
+test ! -e "$MODULE/config/device-font-load-verification.conf"
 
 sh -n "$ROOT/common/device_font_transaction_guard.sh"
 grep -q 'device_font_payload_clear' "$ROOT/common/device_font_transaction_guard.sh"
 grep -q 'LuoShuSlot-' "$ROOT/common/device_font_transaction_guard.sh"
-grep -q 'device-font-installed.conf' "$ROOT/common/device_font_transaction_guard.sh"
+grep -q 'device-font-cache-pending.conf' "$ROOT/common/device_font_transaction_guard.sh"
+grep -q 'device-font-load-verification.conf' "$ROOT/common/device_font_transaction_guard.sh"
 
 echo 'Device font transaction guard snapshots, clears and restores v2 payload state.'
