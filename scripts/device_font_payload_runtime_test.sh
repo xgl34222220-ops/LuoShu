@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eu
+set -eux
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-device-runtime)
@@ -43,6 +43,7 @@ MODULE_DIR="$MODULE"
 LUOSHU_DATA_FONTS_CONFIG_TARGET="$TARGET"
 export MODDIR MODULE_DIR LUOSHU_DATA_FONTS_CONFIG_TARGET
 . "$MODULE/common/device_font_payload_runtime.sh"
+set -eux
 
 _dfpr_install_overlay "$OVERLAY"
 test -s "$MODULE/system/fonts/LuoShuSlot-fixture-400.ttf"
