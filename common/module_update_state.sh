@@ -241,6 +241,20 @@ luoshu_rebuild_preserved_payload() {
     fi
 
     rm -f "$_lur_module/config/font-payload-rebuild-pending.conf" 2>/dev/null || true
+    rm -f "$_lur_module/config/font-payload-rebuild-failures" 2>/dev/null || true
     LUOSHU_UPDATE_REBUILT=true
     return 0
+}
+
+# 重建失败时的重试记账：旧负载仍按原架构挂载并可正常使用，直接隔离会把用户
+# 正在用的字体误删。先保留负载并留下待重建标记，下次开机重试；连续失败达到
+# 上限后才允许调用方走隔离兜底。
+luoshu_rebuild_failure_retry() {
+    _lrfr_module="$1"
+    _lrfr_limit="${2:-3}"
+    _lrfr_count=$(cat "$_lrfr_module/config/font-payload-rebuild-failures" 2>/dev/null)
+    case "$_lrfr_count" in ''|*[!0-9]*) _lrfr_count=0 ;; esac
+    _lrfr_count=$((_lrfr_count + 1))
+    printf '%s\n' "$_lrfr_count" > "$_lrfr_module/config/font-payload-rebuild-failures" 2>/dev/null || true
+    [ "$_lrfr_count" -lt "$_lrfr_limit" ]
 }
