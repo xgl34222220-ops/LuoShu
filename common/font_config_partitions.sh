@@ -91,4 +91,5 @@ fi
 [ -f "$_luoshufp_module/common/device_font_payload_bridge.sh" ] && . "$_luoshufp_module/common/device_font_payload_bridge.sh"
 [ -f "$_luoshufp_module/common/device_font_dynamic_guard.sh" ] && . "$_luoshufp_module/common/device_font_dynamic_guard.sh"
 [ -f "$_luoshufp_module/common/device_font_transaction_guard.sh" ] && . "$_luoshufp_module/common/device_font_transaction_guard.sh"
+[ -f "$_luoshufp_module/common/device_font_runtime_report.sh" ] && . "$_luoshufp_module/common/device_font_runtime_report.sh"
 unset _luoshufp_module
