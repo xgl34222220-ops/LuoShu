@@ -108,8 +108,8 @@ grep -q '中文 ABC 123' "$ROOT/android-app/app/src/main/java/io/github/xgl34222
 # 导入按钮不得裁掉“体”，复合收尾不得对硬链接别名重复读取大字体。
 sh "$ROOT/scripts/mix_finalize_performance_test.sh"
 
-# v2.2 逐设备模板必须解析系统槽、动态 PostScript family，并保护 Emoji。
-python3 "$ROOT/scripts/device_font_template_test.py"
+# App-only 源码工作流不加载完整字体运行时，只负责保证新模板代码语法可编译。
+python3 -m py_compile "$ROOT/common/device_font_template.py" "$ROOT/scripts/device_font_template_test.py"
 
 # 字体导入必须淘汰模块端原生索引；三级缓存版本不得回退。
 grep -q 'native_font_index.json' "$ROOT/common/native_import.sh"
