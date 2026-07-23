@@ -76,7 +76,7 @@ jobs:
       - name: Verify Alpha 3 candidate
         shell: bash
         run: |
-          set -euo pipefail
+          set -euxo pipefail
           . ./scripts/version.sh
           module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
           app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
@@ -106,8 +106,8 @@ jobs:
           unzip -p "$module" common/device_font_load_verify.py | grep -q 'device-font-load-verification-v1'
           unzip -p "$module" common/device_font_load_verify.sh | grep -q 'device_font_load_verify'
           unzip -p "$module" common/device_font_payload_policy.sh | grep -q 'device_font_cache_schedule'
-          unzip -p "$module" service.sh | grep -q 'device_font_cache.sh'
-          unzip -p "$module" service.sh | grep -q 'device_font_load_verify'
+          unzip -p "$module" common/device_font_dynamic_guard.sh | grep -q '_dfpr_launch_pending_cache'
+          unzip -p "$module" common/device_font_dynamic_guard.sh | grep -q 'device_font_load_verify'
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           unzip -q "$module" -d "$tmp"
@@ -118,6 +118,7 @@ jobs:
           sh -n "$tmp/service.sh"
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: LuoShu-v2.2.0-Alpha-3-Device-Alignment-Test
           path: dist/*
