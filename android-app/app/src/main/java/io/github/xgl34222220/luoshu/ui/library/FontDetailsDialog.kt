@@ -7,15 +7,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -23,9 +26,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,6 +61,14 @@ internal fun FontDetailsDialogRoute(
     val container = if (miuix) tokens.elevatedCardBackground else scheme.surfaceContainerHigh
     val primaryText = if (miuix) tokens.textPrimary else scheme.onSurface
     val secondaryText = if (miuix) tokens.textSecondary else scheme.onSurfaceVariant
+    var deepMetadata by remember(font.id) { mutableStateOf<FontDeepMetadata?>(null) }
+    var deepLoading by remember(font.id) { mutableStateOf(true) }
+
+    LaunchedEffect(font.id) {
+        deepLoading = true
+        deepMetadata = loadFontDeepMetadata(font)
+        deepLoading = false
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -93,7 +110,7 @@ internal fun FontDetailsDialogRoute(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 520.dp)
+                    .heightIn(max = 560.dp)
                     .verticalScroll(rememberScrollState()),
             ) {
                 Surface(
@@ -133,6 +150,65 @@ internal fun FontDetailsDialogRoute(
                             color = scheme.onErrorContainer,
                             fontSize = 12.sp,
                         )
+                    }
+                }
+
+                Spacer(Modifier.height(18.dp))
+                Text(
+                    "字体内部信息",
+                    color = primaryText,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Black,
+                )
+                Text(
+                    "自动读取字体面、内部名称、SHA-256、字形覆盖、推荐角色和可变轴。",
+                    color = secondaryText,
+                    fontSize = 10.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(if (miuix) 22.dp else 18.dp),
+                    color = if (miuix) tokens.cardBackground else scheme.surfaceContainer,
+                ) {
+                    when {
+                        deepLoading -> {
+                            Row(
+                                modifier = Modifier.padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(11.dp))
+                                Text("正在分析字体内部结构…", color = secondaryText, fontSize = 12.sp)
+                            }
+                        }
+                        deepMetadata?.error?.isNotBlank() == true -> {
+                            Row(
+                                modifier = Modifier.padding(15.dp),
+                                verticalAlignment = Alignment.Top,
+                            ) {
+                                Icon(Icons.Rounded.Warning, contentDescription = null, tint = scheme.error)
+                                Spacer(Modifier.width(9.dp))
+                                Text(
+                                    deepMetadata?.error.orEmpty(),
+                                    modifier = Modifier.weight(1f),
+                                    color = scheme.error,
+                                    fontSize = 11.sp,
+                                )
+                            }
+                        }
+                        else -> {
+                            SelectionContainer {
+                                Text(
+                                    text = deepMetadata?.text.orEmpty(),
+                                    modifier = Modifier.padding(15.dp),
+                                    color = primaryText,
+                                    fontSize = 10.sp,
+                                    lineHeight = 16.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
+                        }
                     }
                 }
             }
