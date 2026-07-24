@@ -9,7 +9,9 @@ export MODDIR="$TMP/module"
 export LUOSHU_SWITCH_TASK_FILE="$MODDIR/config/switch_task.conf"
 export LUOSHU_SWITCH_LOG="$MODDIR/logs/fontswitch.log"
 export LUOSHU_SWITCH_TIMEOUT_SECONDS=5
+export LUOSHU_SWITCH_WORKER_PID_FILE="$MODDIR/config/switch_task_worker.pid"
 mkdir -p "$MODDIR/common" "$MODDIR/config" "$MODDIR/logs"
+cp "$ROOT/common/background_task.sh" "$MODDIR/common/background_task.sh"
 
 MANAGER="$TMP/fake-manager.sh"
 cat > "$MANAGER" <<'EOF_MANAGER'
@@ -33,7 +35,7 @@ wait_state() {
     wanted="$1"
     i=0
     state=''
-    while [ "$i" -lt 120 ]; do
+    while [ "$i" -lt 160 ]; do
         state="$(sed -n 's/^state=//p' "$LUOSHU_SWITCH_TASK_FILE" 2>/dev/null | head -n1)"
         [ "$state" = "$wanted" ] && return 0
         sleep 0.1
@@ -47,7 +49,9 @@ wait_state() {
 start_output="$(sh "$ROOT/common/font_switch_task.sh" start good)"
 printf '%s\n' "$start_output" | grep -q '"status":"ok"'
 wait_state success
-grep -q '^message=字体已快速映射' "$LUOSHU_SWITCH_TASK_FILE"
+grep -q '^message=字体已准备完成' "$LUOSHU_SWITCH_TASK_FILE"
+grep -q '^state=pending$' "$MODDIR/config/device-font-load-verification.conf"
+grep -q '^reason=awaiting-full-reboot$' "$MODDIR/config/device-font-load-verification.conf"
 
 start_output="$(sh "$ROOT/common/font_switch_task.sh" start bad)"
 printf '%s\n' "$start_output" | grep -q '"status":"ok"'
@@ -61,5 +65,6 @@ grep -q '超过 5 秒' "$LUOSHU_SWITCH_TASK_FILE"
 
 status_output="$(sh "$ROOT/common/font_switch_task.sh" status)"
 printf '%s\n' "$status_output" | grep -q '"state":"failed"'
+grep -q 'luoshu_start_detached' "$ROOT/common/font_switch_task.sh"
 
 echo 'font_switch_task_test: PASS'
