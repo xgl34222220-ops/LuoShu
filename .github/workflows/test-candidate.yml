@@ -53,7 +53,16 @@ jobs:
           fi
 
       - name: Run source checks
-        run: sh ./scripts/check.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/luoshu-source-check.log"
+          if ! sh ./scripts/check.sh >"$log" 2>&1; then
+            echo '源码门禁失败，输出最后 180 行：' >&2
+            tail -n 180 "$log" >&2
+            exit 1
+          fi
+          cat "$log"
 
       - name: Run supplemental candidate gates
         continue-on-error: true
