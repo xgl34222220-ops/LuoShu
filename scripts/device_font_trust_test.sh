@@ -8,7 +8,7 @@ cat > "$TMP/payload.json" <<'EOF_PAYLOAD'
 {"schema":"device-font-payload-v1","slots":[{"family":"sans-serif","familyNormalized":"sans-serif","weight":400,"generatedFile":"LuoShuSlot.ttf"}]}
 EOF_PAYLOAD
 cat > "$TMP/overlay.json" <<'EOF_OVERLAY'
-{"schema":"device-font-overlay-v1","copiedFonts":[{"path":"system/fonts/Roboto-Regular.ttf"}],"dynamic":[],"summary":{"mappedSlots":1}}
+{"schema":"device-font-overlay-v1","copiedFonts":[{"path":"system/fonts/Roboto-Regular.ttf"}],"dynamic":[{"removedFamilies":["OEM Dynamic Sans"]}],"summary":{"mappedSlots":1}}
 EOF_OVERLAY
 : > "$TMP/font-dump.txt"
 printf '%s\n' 'system/fonts/Roboto-Regular.ttf|/system/fonts/Roboto-Regular.ttf|ok|abc|abc|8192' > "$TMP/mounts.conf"
@@ -27,6 +27,7 @@ payload = json.load(open(sys.argv[1], encoding="utf-8"))
 assert payload["state"] == "verified", payload
 assert payload["mode"] == "mount-verified", payload
 assert "verified-by-visible-mounts" in payload["reasons"], payload
+assert "dynamic-family-unconfirmed" in payload["reasons"], payload
 PY
 
 # The post-fs scheduler must run the verifier only after boot and must not block startup.
