@@ -100,10 +100,11 @@ if [ "$UPDATE_PRESERVED" != true ]; then
     printf 'default\n' > "$MODPATH/config/active_font.conf"
 fi
 
-# 必须在新模块覆盖挂载系统字体之前读取原厂槽位。相同系统指纹会复用旧清单；
-# OTA 指纹变化时重新扫描。若旧版自定义字体仍在活动且找不到原厂 mirror，扫描会
-# 明确失败，运行时自动回退到静态 ROM 清单，绝不把洛书自己的覆盖文件当原厂数据。
-FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory.py"
+# 必须在新模块覆盖挂载系统字体之前读取原厂槽位。v2 扫描器会分别统计全部原厂
+# 字体文件和可替换 UI 槽位，并读取 system、system_ext、product、my_product、vendor
+# 各分区的 fonts*.xml。相同系统指纹复用；旧扫描器生成的清单会自动升级重扫。
+FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory_scan.py"
+[ -f "$FONT_INVENTORY_SCRIPT" ] || FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory.py"
 FONT_INVENTORY_PYTHON="$MODPATH/common/python/bin/luoshu-python"
 FONT_INVENTORY_OUTPUT="$MODPATH/config/device_font_inventory.json"
 FONT_INVENTORY_LOG="$MODPATH/logs/font-inventory.log"
@@ -112,11 +113,11 @@ if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_invent
 fi
 chmod 0755 "$FONT_INVENTORY_PYTHON" 2>/dev/null || true
 if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
-    ui_print "• 正在读取本机原厂字体槽位与基线..."
+    ui_print "• 正在读取本机全部原厂字体与 UI 映射..."
     _inventory_pyroot="$MODPATH/common/python"
     _inventory_result=$(
         PYTHONHOME="$_inventory_pyroot" \
-        PYTHONPATH="$_inventory_pyroot/lib/python3.14:$_inventory_pyroot/lib/python3.14/site-packages" \
+        PYTHONPATH="$_inventory_pyroot/lib/python3.14:$_inventory_pyroot/lib/python3.14/site-packages:$MODPATH/common" \
         LD_LIBRARY_PATH="$_inventory_pyroot/lib:$_inventory_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
             "$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan \
                 --output "$FONT_INVENTORY_OUTPUT" \
@@ -126,9 +127,18 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
     _inventory_rc=$?
     printf '%s\n' "$_inventory_result" >> "$FONT_INVENTORY_LOG" 2>/dev/null || true
     if [ "$_inventory_rc" -eq 0 ]; then
-        _inventory_count=$(printf '%s' "$_inventory_result" | sed -n 's/.*"slotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
-        [ -n "$_inventory_count" ] || _inventory_count="未知数量"
-        ui_print "✓ 已建立本机字体清单：$_inventory_count 个真实 UI 槽位"
+        _inventory_files=$(printf '%s' "$_inventory_result" | sed -n 's/.*"stockFontFileCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        _inventory_slots=$(printf '%s' "$_inventory_result" | sed -n 's/.*"slotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        _inventory_xml=$(printf '%s' "$_inventory_result" | sed -n 's/.*"xmlSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        _inventory_heuristic=$(printf '%s' "$_inventory_result" | sed -n 's/.*"heuristicSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        _inventory_rom=$(printf '%s' "$_inventory_result" | sed -n 's/.*"romKind"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | tail -n1)
+        [ -n "$_inventory_files" ] || _inventory_files="未知"
+        [ -n "$_inventory_slots" ] || _inventory_slots="未知"
+        [ -n "$_inventory_xml" ] || _inventory_xml="未知"
+        [ -n "$_inventory_heuristic" ] || _inventory_heuristic="未知"
+        [ -n "$_inventory_rom" ] || _inventory_rom="generic"
+        ui_print "✓ 原厂字体文件：$_inventory_files 个（ROM：$_inventory_rom）"
+        ui_print "✓ 可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / OEM 探测 $_inventory_heuristic）"
     else
         ui_print "• 原厂字体清单扫描不可用，本机将自动使用旧静态适配清单"
     fi
