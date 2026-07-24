@@ -50,7 +50,7 @@ internal data class DeviceTrustState(
     val level: DeviceTrustLevel
         get() = when {
             error.isNotBlank() || alignment == "failed" -> DeviceTrustLevel.ISSUE
-            alignment == "verified" && mode == "aligned" -> DeviceTrustLevel.VERIFIED
+            alignment == "verified" && mode in setOf("aligned", "mount-verified") -> DeviceTrustLevel.VERIFIED
             inventory == "available" && engine !in setOf("missing", "failed", "unknown") -> DeviceTrustLevel.READY
             else -> DeviceTrustLevel.PENDING
         }
@@ -212,10 +212,16 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
     val scheme = MaterialTheme.colorScheme
     return when {
         state.loading -> DeviceTrustPresentation("正在检查设备字体", "读取清单、模板与加载验证", Icons.Rounded.Info, scheme.primary)
+        state.level == DeviceTrustLevel.VERIFIED && state.mode == "mount-verified" -> DeviceTrustPresentation(
+            "设备字体挂载已验证",
+            "系统可见字体与洛书负载一致",
+            Icons.Rounded.CheckCircle,
+            scheme.primary,
+        )
         state.level == DeviceTrustLevel.VERIFIED -> DeviceTrustPresentation("设备字体已验证", "原厂模板与开机加载证据一致", Icons.Rounded.CheckCircle, scheme.primary)
         state.level == DeviceTrustLevel.READY -> DeviceTrustPresentation("设备字体引擎已就绪", "已发现原厂清单，等待完整加载验证", Icons.Rounded.Info, scheme.tertiary)
         state.level == DeviceTrustLevel.ISSUE -> DeviceTrustPresentation("设备字体需要检查", "加载验证失败或状态读取异常", Icons.Rounded.Warning, scheme.error)
-        else -> DeviceTrustPresentation("设备字体尚未验证", "应用字体并完整重启后再次检查", Icons.Rounded.Info, scheme.secondary)
+        else -> DeviceTrustPresentation("设备字体尚未验证", "完整重启后将自动检查，无需重复应用", Icons.Rounded.Info, scheme.secondary)
     }
 }
 
@@ -228,7 +234,10 @@ private fun friendlyTrustValue(value: String): String = when (value) {
     "verified" -> "验证通过"
     "failed" -> "失败"
     "pending" -> "待验证"
+    "unverified" -> "证据不足"
+    "not-applicable" -> "不适用"
     "aligned" -> "设备对齐"
+    "mount-verified" -> "挂载证据"
     "compatibility" -> "兼容模式"
     "unknown", "" -> "未知"
     else -> value
