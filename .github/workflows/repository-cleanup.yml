@@ -1,0 +1,126 @@
+name: One-time repository cleanup
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/repository-cleanup.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Remove prereleases, prerelease tags and stale branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          urlencode() {
+            python3 - "$1" <<'PY'
+          import sys
+          import urllib.parse
+          print(urllib.parse.quote(sys.argv[1], safe=''))
+          PY
+          }
+
+          deleted_releases=0
+          deleted_tags=0
+          deleted_branches=0
+
+          : > "$RUNNER_TEMP/deleted-prereleases.txt"
+          : > "$RUNNER_TEMP/deleted-tags.txt"
+          : > "$RUNNER_TEMP/deleted-branches.txt"
+
+          while IFS=$'\t' read -r release_id tag; do
+            [[ -n "${release_id:-}" ]] || continue
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$release_id" >/dev/null
+            printf '%s\n' "$tag" >> "$RUNNER_TEMP/deleted-prereleases.txt"
+            deleted_releases=$((deleted_releases + 1))
+
+            if [[ -n "${tag:-}" ]]; then
+              encoded_tag="$(urlencode "$tag")"
+              if gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$encoded_tag" >/dev/null 2>&1; then
+                printf '%s\n' "$tag" >> "$RUNNER_TEMP/deleted-tags.txt"
+                deleted_tags=$((deleted_tags + 1))
+              fi
+            fi
+          done < <(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[] | select(.prerelease == true) | [.id, .tag_name] | @tsv'
+          )
+
+          while IFS= read -r tag; do
+            [[ -n "$tag" ]] || continue
+            case "$tag" in
+              *[Aa]lpha*|*[Bb]eta*|*[Rr][Cc]*|*[Pp]re-[Rr]elease*|*[Pp]rerelease*|*[Cc]andidate*)
+                encoded_tag="$(urlencode "$tag")"
+                if gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$encoded_tag" >/dev/null 2>&1; then
+                  if ! grep -Fxq "$tag" "$RUNNER_TEMP/deleted-tags.txt"; then
+                    printf '%s\n' "$tag" >> "$RUNNER_TEMP/deleted-tags.txt"
+                    deleted_tags=$((deleted_tags + 1))
+                  fi
+                fi
+                ;;
+            esac
+          done < <(gh api --paginate "repos/$GITHUB_REPOSITORY/tags?per_page=100" --jq '.[].name')
+
+          gh api --paginate "repos/$GITHUB_REPOSITORY/pulls?state=open&per_page=100" \
+            --jq '.[] | select(.head.repo.full_name == env.GITHUB_REPOSITORY) | .head.ref' \
+            > "$RUNNER_TEMP/open-pr-heads.txt"
+
+          while IFS=$'\t' read -r branch protected; do
+            [[ -n "$branch" ]] || continue
+            case "$branch" in
+              main|gh-pages) continue ;;
+            esac
+            [[ "$protected" == "false" ]] || continue
+            grep -Fxq "$branch" "$RUNNER_TEMP/open-pr-heads.txt" && continue
+
+            encoded_branch="$(urlencode "$branch")"
+            if gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$encoded_branch" >/dev/null 2>&1; then
+              printf '%s\n' "$branch" >> "$RUNNER_TEMP/deleted-branches.txt"
+              deleted_branches=$((deleted_branches + 1))
+            fi
+          done < <(
+            gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" \
+              --jq '.[] | [.name, (.protected | tostring)] | @tsv'
+          )
+
+          description='洛书：适用于 Magisk、KernelSU、SukiSU Ultra、APatch 与 Mountify 的 Android 无 Hook 全局字体复合与安全切换模块'
+          if gh api -X PATCH "repos/$GITHUB_REPOSITORY" -f "description=$description" >/dev/null 2>&1; then
+            description_result='已更新'
+          else
+            description_result='当前 GITHUB_TOKEN 无仓库 Administration 权限，未自动更新'
+          fi
+
+          {
+            echo '## 仓库清理结果'
+            echo
+            echo "- 删除预发行 Release：$deleted_releases"
+            echo "- 删除预发行 Tag：$deleted_tags"
+            echo "- 删除无保护、无开放 PR 的旧分支：$deleted_branches"
+            echo "- 仓库简介：$description_result"
+            echo
+            echo '### 已删除的预发行 Release'
+            if [[ -s "$RUNNER_TEMP/deleted-prereleases.txt" ]]; then
+              sed 's/^/- `/' "$RUNNER_TEMP/deleted-prereleases.txt" | sed 's/$/`/'
+            else
+              echo '- 无'
+            fi
+            echo
+            echo '### 已删除的旧分支'
+            if [[ -s "$RUNNER_TEMP/deleted-branches.txt" ]]; then
+              sed 's/^/- `/' "$RUNNER_TEMP/deleted-branches.txt" | sed 's/$/`/'
+            else
+              echo '- 无'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
