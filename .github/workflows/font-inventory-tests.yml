@@ -45,7 +45,7 @@ jobs:
           sh -n common/device_font_payload_policy.sh
           grep -q 'FONT_INVENTORY_SCRIPT=.*font_inventory_scan.py' customize.sh
           grep -q 'stockFontFileCount' customize.sh
-          grep -q 'FONT_INVENTORY_PYTHON.*FONT_INVENTORY_SCRIPT.*--scan' customize.sh
+          grep -q '"$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan' customize.sh
           grep -q '_copy_as_inventory' common/rom_adapters.sh
           grep -q '_copy_as_inventory.*_dfabr' common/device_font_payload_policy.sh || grep -q '_copy_as_inventory' common/device_font_payload_policy.sh
           grep -q 'device_font_inventory.json' common/font_metrics_normalize.py
