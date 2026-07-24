@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
@@ -23,7 +22,6 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -45,11 +43,7 @@ import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.BuildConfig
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
-import io.github.xgl34222220.luoshu.ui.studio.FontStudioActions
-import io.github.xgl34222220.luoshu.ui.studio.FontStudioUiState
-import io.github.xgl34222220.luoshu.ui.studio.StudioProfile
-import io.github.xgl34222220.luoshu.ui.studio.applyStudioProfile
-import io.github.xgl34222220.luoshu.ui.studio.encodeStudioProfile
+import io.github.xgl34222220.luoshu.ui.studio.StudioProfileBridgeStore
 import io.github.xgl34222220.luoshu.ui.studio.parseStudioProfile
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -92,11 +86,12 @@ internal data class FontMigrationReport(
 @Immutable
 internal data class FontLibraryBackupParseResult(
     val collections: FontLibraryCollections? = null,
-    val profile: StudioProfile? = null,
+    val profileRaw: String = "",
     val errors: List<String> = emptyList(),
     val warnings: List<String> = emptyList(),
 ) {
     val valid: Boolean get() = collections != null && errors.isEmpty()
+    val hasProfile: Boolean get() = profileRaw.isNotBlank()
 }
 
 internal fun pruneFontLibraryCollections(
@@ -113,7 +108,7 @@ internal fun pruneFontLibraryCollections(
 internal fun buildFontMigrationReport(
     fonts: List<FontItem>,
     collections: FontLibraryCollections,
-    studioState: FontStudioUiState,
+    currentProfileRaw: String,
     watchConfigured: Boolean,
     watchPermission: Boolean,
 ): FontMigrationReport {
@@ -122,8 +117,8 @@ internal fun buildFontMigrationReport(
     val staleTagIds = collections.tags.keys - availableIds
     val staleCount = (staleFavorites + staleTagIds).size
     val invalidCount = fonts.count { !it.valid }
-    val selected = studioState.slots.mapNotNull { it.font }
-    val selectedValid = selected.size == studioState.slots.size && selected.all { it.valid }
+    val profile = currentProfileRaw.takeIf { it.isNotBlank() }?.let { parseStudioProfile(it, fonts) }
+    val profileReady = profile?.valid == true
     val conflicts = analyzeFontLibraryConflicts(fonts)
 
     val checks = buildList {
@@ -148,8 +143,12 @@ internal fun buildFontMigrationReport(
             FontMigrationCheck(
                 id = "studio",
                 title = "组合方案完整性",
-                detail = if (selectedValid) "中文、英文和数字槽位均已选择有效字体" else "组合方案存在缺失或未通过验证的槽位",
-                severity = if (selectedValid) FontMigrationSeverity.READY else FontMigrationSeverity.BLOCKER,
+                detail = when {
+                    currentProfileRaw.isBlank() -> "尚未保存完整组合方案，请进入组合页确认三个槽位"
+                    profileReady -> "中文、英文和数字槽位均指向有效字体"
+                    else -> "已保存方案存在缺失 Family 或无效槽位"
+                },
+                severity = if (profileReady) FontMigrationSeverity.READY else FontMigrationSeverity.BLOCKER,
             ),
         )
         add(
@@ -184,7 +183,7 @@ internal fun buildFontMigrationReport(
 
 internal fun encodeFontLibraryBackup(
     collections: FontLibraryCollections,
-    studioState: FontStudioUiState,
+    studioProfileRaw: String,
     fonts: List<FontItem>,
 ): String {
     val collectionsObject = JSONObject()
@@ -202,13 +201,15 @@ internal fun encodeFontLibraryBackup(
             put(JSONObject().put("id", font.id).put("name", font.name).put("valid", font.valid))
         }
     }
+    val profileObject = studioProfileRaw.takeIf { it.isNotBlank() }
+        ?.let { raw -> runCatching { JSONObject(raw) }.getOrNull() }
     return JSONObject()
         .put("schema", LIBRARY_BACKUP_SCHEMA)
         .put("type", LIBRARY_BACKUP_TYPE)
         .put("appVersion", BuildConfig.VERSION_NAME)
         .put("createdAt", LocalDateTime.now().toString())
         .put("collections", collectionsObject)
-        .put("studioProfile", JSONObject(encodeStudioProfile(studioState)))
+        .put("studioProfile", profileObject ?: JSONObject.NULL)
         .put("fontInventory", inventory)
         .put("includesFontFiles", false)
         .toString(2)
@@ -258,11 +259,12 @@ internal fun parseFontLibraryBackup(
     if (missingIds.isNotEmpty()) warnings += "本机缺少 ${missingIds.size} 个 Family，相关收藏和标签已跳过"
 
     val profileObject = root.optJSONObject("studioProfile")
-    val profileResult = if (profileObject == null) null else parseStudioProfile(profileObject.toString(), availableFonts)
-    val profile = profileResult?.profile?.takeIf { profileResult.valid }
+    val profileRaw = profileObject?.toString().orEmpty()
+    val profileResult = profileRaw.takeIf { it.isNotBlank() }?.let { parseStudioProfile(it, availableFonts) }
+    val validProfileRaw = if (profileResult?.valid == true) profileRaw else ""
     if (profileObject == null) {
         warnings += "备份没有组合方案"
-    } else if (profile == null) {
+    } else if (validProfileRaw.isBlank()) {
         warnings += "组合方案未恢复：${profileResult?.errors?.joinToString("；").orEmpty().ifBlank { "配置无效" }}"
     }
     warnings += profileResult?.warnings.orEmpty()
@@ -272,7 +274,7 @@ internal fun parseFontLibraryBackup(
 
     return FontLibraryBackupParseResult(
         collections = collections,
-        profile = profile,
+        profileRaw = validProfileRaw,
         warnings = warnings.distinct(),
     )
 }
@@ -282,8 +284,6 @@ internal fun FontLibraryUtilitiesBar(
     style: UiStyle,
     fonts: List<FontItem>,
     collections: FontLibraryCollections,
-    studioState: FontStudioUiState,
-    studioActions: FontStudioActions,
     enabled: Boolean,
     onCollectionsChange: (FontLibraryCollections) -> Unit,
 ) {
@@ -297,8 +297,6 @@ internal fun FontLibraryUtilitiesBar(
             style = style,
             fonts = fonts,
             collections = collections,
-            studioState = studioState,
-            studioActions = studioActions,
             enabled = enabled,
             onCollectionsChange = onCollectionsChange,
             modifier = Modifier.weight(1f),
@@ -311,25 +309,27 @@ private fun FontLibraryBackupTool(
     style: UiStyle,
     fonts: List<FontItem>,
     collections: FontLibraryCollections,
-    studioState: FontStudioUiState,
-    studioActions: FontStudioActions,
     enabled: Boolean,
     onCollectionsChange: (FontLibraryCollections) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val profileBridge = remember(context.applicationContext) {
+        StudioProfileBridgeStore(context.applicationContext)
+    }
     var showDialog by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
     var pending by remember { mutableStateOf<FontLibraryBackupParseResult?>(null) }
     val watchStore = remember(context.applicationContext) { FontDirectoryWatchStore(context.applicationContext) }
     val watchConfig = remember(showDialog) { watchStore.load() }
-    val migration = remember(fonts, collections, studioState, watchConfig, showDialog) {
+    val currentProfileRaw = remember(showDialog, fonts) { profileBridge.loadCurrent() }
+    val migration = remember(fonts, collections, currentProfileRaw, watchConfig, showDialog) {
         buildFontMigrationReport(
             fonts = fonts,
             collections = collections,
-            studioState = studioState,
+            currentProfileRaw = currentProfileRaw,
             watchConfigured = watchConfig.configured,
             watchPermission = hasPersistedFontDirectoryPermission(context, watchConfig),
         )
@@ -343,7 +343,7 @@ private fun FontLibraryBackupTool(
             val result = runCatching {
                 withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri, "wt")?.bufferedWriter()?.use { writer ->
-                        writer.write(encodeFontLibraryBackup(collections, studioState, fonts))
+                        writer.write(encodeFontLibraryBackup(collections, profileBridge.loadCurrent(), fonts))
                     } ?: error("无法打开目标文件")
                 }
             }
@@ -374,7 +374,7 @@ private fun FontLibraryBackupTool(
                     errorMessage = ""
                     status = buildString {
                         append("备份可恢复：收藏 ${parsed.collections?.favoriteIds?.size ?: 0} 项")
-                        if (parsed.profile != null) append(" · 含组合方案")
+                        if (parsed.hasProfile) append(" · 含组合方案")
                         if (parsed.warnings.isNotEmpty()) append("\n${parsed.warnings.joinToString("\n")}")
                     }
                 }
@@ -426,9 +426,7 @@ private fun FontLibraryBackupTool(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 10.sp,
                     )
-                    migration.checks.forEach { check ->
-                        MigrationCheckRow(check)
-                    }
+                    migration.checks.forEach { check -> MigrationCheckRow(check) }
                     if (migration.checks.any { it.repairable }) {
                         OutlinedButton(
                             onClick = {
@@ -486,10 +484,10 @@ private fun FontLibraryBackupTool(
                     TextButton(
                         onClick = {
                             parsed.collections?.let(onCollectionsChange)
-                            parsed.profile?.let { applyStudioProfile(it, studioActions) }
+                            if (parsed.profileRaw.isNotBlank()) profileBridge.savePending(parsed.profileRaw)
                             pending = null
-                            status = if (parsed.profile != null) {
-                                "收藏、标签和组合方案已恢复；生成前仍可继续调整"
+                            status = if (parsed.hasProfile) {
+                                "收藏和标签已恢复；打开组合页后将校验并载入组合方案"
                             } else {
                                 "收藏和标签已恢复；组合方案因缺失 Family 未写入"
                             }
