@@ -24,6 +24,7 @@ luoshu_copy_tree_bounded() {
     _lmfs_dst="$2"
     [ -d "$_lmfs_src" ] || return 1
     rm -rf "$_lmfs_dst" 2>/dev/null || true
+    mkdir -p "${_lmfs_dst%/*}" 2>/dev/null || return 1
 
     if _lmfs_timeout_run cp -al "$_lmfs_src" "$_lmfs_dst" >/dev/null 2>&1; then
         return 0
