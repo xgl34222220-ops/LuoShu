@@ -82,7 +82,9 @@ internal fun glyphPage(text: String, page: Int, pageSize: Int = GLYPH_PAGE_SIZE)
     val points = glyphCodePoints(text)
     val from = (page.coerceAtLeast(0) * pageSize).coerceAtMost(points.size)
     val to = (from + pageSize).coerceAtMost(points.size)
-    return buildString { points.subList(from, to).forEach(::appendCodePoint) }
+    return buildString {
+        points.subList(from, to).forEach { point -> appendCodePoint(point) }
+    }
 }
 
 @Composable
@@ -104,7 +106,7 @@ internal fun StudioGlyphBrowserDialog(
     val visible = remember(source, safePage) { glyphPage(source, safePage) }
     val rows = remember(visible) {
         glyphCodePoints(visible).chunked(8).map { chunk ->
-            buildString { chunk.forEach(::appendCodePoint) }
+            buildString { chunk.forEach { point -> appendCodePoint(point) } }
         }
     }
 
