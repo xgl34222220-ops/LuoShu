@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # 洛书前台字体切换守卫。
-# App 只观察这一项任务；实际切换有硬超时，超时会终止 font_manager 进程，
+# App 只观察这一项任务；实际切换在独立 Root 会话中执行，超时会终止 font_manager，
 # 由 switch_font 的事务 trap 恢复上一套可用负载。
 set +e
 
@@ -17,11 +17,17 @@ MANAGER="${LUOSHU_FONT_MANAGER:-$MODDIR/common/font_manager.sh}"
 TASK_FILE="${LUOSHU_SWITCH_TASK_FILE:-$MODDIR/config/switch_task.conf}"
 LOG_FILE="${LUOSHU_SWITCH_LOG:-$MODDIR/logs/fontswitch.log}"
 STATUS_SCRIPT="$MODDIR/common/module_status.sh"
-# 单字体切换继续以 45 秒作为硬性能与安全门槛；正常目标为约 10–20 秒。
-# 超时仍会终止任务，并由事务层恢复上一套有效字体。
-TIMEOUT_SECONDS="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-45}"
-case "$TIMEOUT_SECONDS" in ''|*[!0-9]*) TIMEOUT_SECONDS=45 ;; esac
+BACKGROUND_TASK="$MODDIR/common/background_task.sh"
+WORKER_PID_FILE="${LUOSHU_SWITCH_WORKER_PID_FILE:-$MODDIR/config/switch_task_worker.pid}"
+LOAD_VERIFY_STATE="$MODDIR/config/device-font-load-verification.conf"
+[ -f "$BACKGROUND_TASK" ] && . "$BACKGROUND_TASK"
+
+# 大型 CJK 字体在部分低速存储设备上会超过旧版 45 秒。任务已脱离 App 会话，
+# 因此给完整验证、事务快照、槽位映射和挂载同步共 110 秒，同时仍早于 App 的 120 秒观察上限结束。
+TIMEOUT_SECONDS="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-110}"
+case "$TIMEOUT_SECONDS" in ''|*[!0-9]*) TIMEOUT_SECONDS=110 ;; esac
 [ "$TIMEOUT_SECONDS" -ge 5 ] 2>/dev/null || TIMEOUT_SECONDS=5
+[ "$TIMEOUT_SECONDS" -le 600 ] 2>/dev/null || TIMEOUT_SECONDS=600
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -55,6 +61,21 @@ write_task() {
     chmod 0644 "$TASK_FILE" 2>/dev/null || true
 }
 
+mark_load_verification_pending() {
+    _font="$1"
+    _tmp="${LOAD_VERIFY_STATE}.tmp.$$"
+    mkdir -p "${LOAD_VERIFY_STATE%/*}" 2>/dev/null || return 1
+    {
+        printf 'state=pending\n'
+        printf 'mode=compatibility\n'
+        printf 'activeFont=%s\n' "$_font"
+        printf 'reason=awaiting-full-reboot\n'
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$_tmp" 2>/dev/null || return 1
+    mv -f "$_tmp" "$LOAD_VERIFY_STATE" 2>/dev/null || return 1
+    chmod 0600 "$LOAD_VERIFY_STATE" 2>/dev/null || true
+}
+
 task_pid_alive() {
     _pid="$1"
     case "$_pid" in ''|*[!0-9]*) return 1 ;; esac
@@ -71,6 +92,7 @@ reconcile_task() {
     _font="$(read_value font)"
     _started="$(read_value started)"
     write_task "$_task" failed "$_font" '字体切换进程异常结束，已保留上一套字体' "$_started" "$(date +%s 2>/dev/null || echo 0)" ''
+    type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$WORKER_PID_FILE" "$_task"
 }
 
 terminate_child_tree() {
@@ -124,8 +146,9 @@ run_worker() {
     _font="$2"
     _started="$3"
     _output="${TASK_FILE}.output.${_task}"
+    trap 'type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$WORKER_PID_FILE" "$_task"' EXIT HUP INT TERM
     mkdir -p "${LOG_FILE%/*}" 2>/dev/null || true
-    write_task "$_task" running "$_font" '正在验证并快速映射系统字体槽' "$_started" '' "$$" || exit 1
+    write_task "$_task" running "$_font" '正在完整验证并映射系统字体槽' "$_started" '' "$$" || exit 1
     printf '[%s] bounded switch start: %s task=%s timeout=%ss\n' \
         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_font" "$_task" "$TIMEOUT_SECONDS" >> "$LOG_FILE" 2>/dev/null || true
 
@@ -134,7 +157,8 @@ run_worker() {
     _finished="$(date +%s 2>/dev/null || echo 0)"
     if [ "$_rc" -eq 0 ] && grep -q '"status":"ok"' "$_output" 2>/dev/null; then
         cat "$_output" >> "$LOG_FILE" 2>/dev/null || true
-        write_task "$_task" success "$_font" '字体已快速映射；设备对齐缓存在后台生成，重启后生效' "$_started" "$_finished" ''
+        mark_load_verification_pending "$_font" || true
+        write_task "$_task" success "$_font" '字体已准备完成；完整重启后自动验证实际加载状态' "$_started" "$_finished" ''
     elif [ "$_rc" -eq 124 ] || [ "$_rc" -eq 137 ]; then
         cat "$_output" >> "$LOG_FILE" 2>/dev/null || true
         write_task "$_task" failed "$_font" "字体切换超过 ${TIMEOUT_SECONDS} 秒，已终止并回滚" "$_started" "$_finished" ''
@@ -165,11 +189,26 @@ start_task() {
         printf '{"status":"error","message":"无法创建字体切换任务"}\n'
         return 0
     }
-    MODDIR="$MODDIR" LUOSHU_FONT_MANAGER="$MANAGER" LUOSHU_SWITCH_TASK_FILE="$TASK_FILE" \
+
+    export MODDIR LUOSHU_FONT_MANAGER="$MANAGER" LUOSHU_SWITCH_TASK_FILE="$TASK_FILE" \
         LUOSHU_SWITCH_LOG="$LOG_FILE" LUOSHU_SWITCH_TIMEOUT_SECONDS="$TIMEOUT_SECONDS" \
-        sh "$0" run "$_task" "$_font" "$_started" >> "$LOG_FILE" 2>&1 &
-    _worker=$!
-    write_task "$_task" running "$_font" '正在验证并快速映射系统字体槽' "$_started" '' "$_worker" || true
+        LUOSHU_SWITCH_WORKER_PID_FILE="$WORKER_PID_FILE"
+
+    if type luoshu_start_detached >/dev/null 2>&1; then
+        luoshu_start_detached "$WORKER_PID_FILE" "$_task" "$LOG_FILE" sh "$0" run "$_task" "$_font" "$_started"
+        _start_rc=$?
+        if [ "$_start_rc" -ne 0 ] && [ "$_start_rc" -ne 3 ]; then
+            write_task "$_task" failed "$_font" '无法启动独立字体切换任务' "$_started" "$(date +%s 2>/dev/null || echo 0)" ''
+            printf '{"status":"error","message":"无法启动独立字体切换任务"}\n'
+            return 0
+        fi
+        _worker=$(head -n1 "$WORKER_PID_FILE" 2>/dev/null)
+    else
+        ( trap '' HUP; exec sh "$0" run "$_task" "$_font" "$_started" ) </dev/null >> "$LOG_FILE" 2>&1 &
+        _worker=$!
+    fi
+    case "$_worker" in ''|*[!0-9]*) _worker='' ;; esac
+    write_task "$_task" running "$_font" '正在完整验证并映射系统字体槽' "$_started" '' "$_worker" || true
     printf '{"status":"ok","data":{"font":"%s","task":"%s","message":"任务已开始"}}\n' \
         "$(json_escape "$_font")" "$(json_escape "$_task")"
 }
