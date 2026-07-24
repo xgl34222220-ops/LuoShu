@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v2.2.0 Alpha 6
-versionCode=20196
+version=v2.2.0 Alpha 7
+versionCode=20197
 author=惜故里丶
-description=Android 无 Hook 全局字体引擎：单字重快速切换、组合任务守护、设备字体清单与后台逐槽位对齐
+description=Android 无 Hook 全局字体引擎：组合任务守护、分区级原厂字体清单、真实本机度量与后台逐槽位对齐
 updateJson=
