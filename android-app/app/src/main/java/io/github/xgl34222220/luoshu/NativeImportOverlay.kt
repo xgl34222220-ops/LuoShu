@@ -47,7 +47,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
-import kotlinx.coroutines.delay
 
 @Composable
 internal fun NativeImportOverlay(
@@ -58,16 +57,10 @@ internal fun NativeImportOverlay(
 ) {
     val importViewModel = rememberNativeImportViewModel()
     val state = importViewModel.state
-    var expanded by remember { mutableStateOf(true) }
+    var expanded by remember { mutableStateOf(false) }
 
-    LaunchedEffect(embedded, state.busy, state.paused, state.processed, state.total) {
-        if (embedded || state.busy || state.paused) {
-            expanded = true
-        } else {
-            expanded = true
-            delay(2_400L)
-            expanded = false
-        }
+    LaunchedEffect(embedded, state.busy, state.paused) {
+        expanded = embedded || state.busy || state.paused
     }
 
     LaunchedEffect(state.refreshToken) {
@@ -127,15 +120,10 @@ internal fun NativeImportOverlay(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            FontMetadataInspector(
-                viewModel = viewModel,
-                style = style,
-            )
-            Spacer(Modifier.width(10.dp))
             ImportActionButton(
                 style = style,
                 state = state,
-                expanded = expanded || state.busy || state.paused,
+                expanded = expanded,
                 enabled = importEnabled,
                 onImport = onImport,
             )
@@ -168,7 +156,7 @@ private fun ImportActionButton(
     val targetWidth = when {
         !expanded -> 54.dp
         taskVisible -> 180.dp
-        else -> 148.dp
+        else -> 132.dp
     }
     val targetHeight = when {
         embedded && taskVisible -> 68.dp
@@ -208,7 +196,7 @@ private fun ImportActionButton(
         shape = if (embedded) RoundedCornerShape(20.dp) else CircleShape,
         color = glassColor,
         contentColor = scheme.primary,
-        shadowElevation = if (embedded) 0.dp else if (style == UiStyle.MIUIX) 14.dp else 12.dp,
+        shadowElevation = if (embedded) 0.dp else if (style == UiStyle.MIUIX) 10.dp else 8.dp,
         border = BorderStroke(1.dp, if (embedded) scheme.primary.copy(alpha = .10f) else borderColor),
     ) {
         if (!expanded) {
@@ -243,7 +231,7 @@ private fun ImportActionButton(
                         },
                         color = textColor,
                         fontWeight = FontWeight.Black,
-                        fontSize = if (embedded) 14.sp else 15.sp,
+                        fontSize = if (embedded) 14.sp else 14.sp,
                         maxLines = 1,
                         softWrap = false,
                     )
