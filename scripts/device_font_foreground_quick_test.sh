@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
@@ -9,8 +9,11 @@ export MODDIR="$TMP/module"
 export MODULE_DIR="$MODDIR"
 mkdir -p "$MODDIR/common" "$MODDIR/config" "$MODDIR/system/fonts"
 
+# Runtime files intentionally use permissive Android sh semantics. Re-enable errexit after
+# sourcing so every assertion below remains a hard test failure without imposing bash nounset.
 # shellcheck disable=SC1090
 . "$ROOT/common/device_font_payload_policy.sh"
+set -e
 
 IS_HYPEROS=true
 IS_COLOROS=false
