@@ -1,12 +1,12 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -e
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# shellcheck disable=SC1090
 . "$ROOT/common/mount_fast_sync.sh"
+set -e
 
 SRC="$TMP/source/system"
 DST="$TMP/content/system"
