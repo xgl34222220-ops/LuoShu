@@ -1,6 +1,8 @@
 package io.github.xgl34222220.luoshu.ui.library
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -16,12 +18,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.studio.FontStudioActions
+import io.github.xgl34222220.luoshu.ui.studio.FontStudioUiState
 
 @Composable
 internal fun FontLibraryRoute(
     style: UiStyle,
     state: FontLibraryUiState,
     actions: FontLibraryActions,
+    studioState: FontStudioUiState,
+    studioActions: FontStudioActions,
     topActions: @Composable () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -56,10 +62,30 @@ internal fun FontLibraryRoute(
         )
     }
 
+    fun persistCollections(next: FontLibraryCollections) {
+        collections = next
+        collectionStore.save(next)
+    }
+
+    val combinedTopActions: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            topActions()
+            FontLibraryUtilitiesBar(
+                style = style,
+                fonts = studioState.fonts,
+                collections = collections,
+                studioState = studioState,
+                studioActions = studioActions,
+                enabled = !state.loading && !state.operationBusy,
+                onCollectionsChange = ::persistCollections,
+            )
+        }
+    }
+
     Box(Modifier.fillMaxSize()) {
         when (style) {
-            UiStyle.MATERIAL -> FontLibraryScreenMaterial(displayState, displayActions, topActions)
-            UiStyle.MIUIX -> FontLibraryScreenMiuix(displayState, displayActions, topActions)
+            UiStyle.MATERIAL -> FontLibraryScreenMaterial(displayState, displayActions, combinedTopActions)
+            UiStyle.MIUIX -> FontLibraryScreenMiuix(displayState, displayActions, combinedTopActions)
         }
         FontLibraryManagementButton(
             style = style,
@@ -86,8 +112,7 @@ internal fun FontLibraryRoute(
                     favoriteIds = (collections.favoriteIds - visibleIds) + visibleNext.favoriteIds,
                     tags = collections.tags.filterKeys { it !in visibleIds } + visibleNext.tags,
                 )
-                collections = merged
-                collectionStore.save(merged)
+                persistCollections(merged)
             },
             onOpenDetails = { font ->
                 showManagement = false
