@@ -22,8 +22,9 @@ is_variable_font() { case "$1" in *Variable.ttf) return 0 ;; *) return 1 ;; esac
 scan_family_weights() {
   case "$1" in Family) echo regular,bold ;; Single) echo regular ;; *) echo '' ;; esac
 }
-mix_variable_default_weight() { echo 400; }
 . "$ROOT/common/mix_weight_mode.sh"
+# 单元测试不解析真实 fvar，仅固定模拟默认轴位置。
+mix_variable_default_weight() { echo 400; }
 
 # 静态多字重默认走当前所选字重的快速组合，不再静默生成九档字体。
 [ "$(infer_mix_weight_mode Family wght=400)" = fixed ]
