@@ -1,0 +1,59 @@
+name: Diagnose switch performance stage two
+
+on:
+  push:
+    branches:
+      - fix/v2.2.1-switch-timeout-status
+    paths:
+      - .github/workflows/diagnose-switch-performance-stage2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v2.2.1-switch-timeout-status
+          fetch-depth: 0
+      - name: Run and persist diagnostics
+        shell: bash
+        run: |
+          set +e
+          mkdir -p docs
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/apply-switch-performance-stage2.yml').read_text().splitlines()
+          collecting = False
+          lines = []
+          for line in source:
+              stripped = line.strip()
+              if not collecting and stripped.startswith("python3 - <<'PY'"):
+                  collecting = True
+                  continue
+              if collecting and stripped == 'PY':
+                  break
+              if collecting:
+                  lines.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/stage2.py').write_text('\n'.join(lines) + '\n')
+          PY
+          {
+            echo '== patch =='
+            python3 /tmp/stage2.py
+            echo "patch_rc=$?"
+            echo '== syntax =='
+            sh -n common/font_validation_cache.sh; echo "validation_cache_syntax=$?"
+            sh -n common/font_manager.sh; echo "font_manager_syntax=$?"
+            sh -n common/rom_adapters.sh; echo "rom_adapters_syntax=$?"
+            sh -n customize.sh; echo "customize_syntax=$?"
+            echo '== tests =='
+            sh scripts/font_validation_cache_test.sh; echo "validation_cache_test=$?"
+            sh scripts/font_switch_performance_test.sh; echo "switch_performance_test=$?"
+          } > docs/switch-performance-stage2-diagnostic.log 2>&1
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/switch-performance-stage2-diagnostic.log
+          git commit -m 'chore: record switch performance stage-two diagnostic'
+          git push origin HEAD:fix/v2.2.1-switch-timeout-status
