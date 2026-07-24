@@ -1,0 +1,145 @@
+name: Integrate font validation cache
+
+on:
+  push:
+    branches:
+      - fix/v2.2.1-switch-timeout-status
+    paths:
+      - .github/workflows/apply-font-validation-cache.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v2.2.1-switch-timeout-status
+          fetch-depth: 0
+      - name: Integrate cache
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          manager = Path('common/font_manager.sh')
+          text = manager.read_text()
+          marker = '[ -f "$MODULE_DIR/common/font_check.sh" ] && . "$MODULE_DIR/common/font_check.sh"\n'
+          cache_source = '[ -f "$MODULE_DIR/common/font_validation_cache.sh" ] && . "$MODULE_DIR/common/font_validation_cache.sh"\n'
+          if cache_source not in text:
+              assert text.count(marker) == 1
+              text = text.replace(marker, marker + cache_source, 1)
+
+          old = '''        if type font_validate_global >/dev/null 2>&1; then
+              font_validate_global "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+          elif type font_validate >/dev/null 2>&1; then
+              font_validate "$_source" text || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+          fi
+          '''.replace('          ', '')
+          new = '''        if type luoshu_font_validate_global_cached >/dev/null 2>&1; then
+              luoshu_font_validate_global_cached "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+          elif type font_validate_global >/dev/null 2>&1; then
+              font_validate_global "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+          elif type font_validate >/dev/null 2>&1; then
+              font_validate "$_source" text || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+          fi
+          '''.replace('          ', '')
+          assert text.count(old) == 1, text.count(old)
+          text = text.replace(old, new, 1)
+
+          func = '''validate_font_json() {
+              _font_id="$1"
+              _file="$(find_text_font_file "$_font_id")"
+              [ -f "$_file" ] || { printf '{"status":"error","message":"未找到字体"}\\n'; return 0; }
+              if type luoshu_font_validate_global_cached >/dev/null 2>&1; then
+                  if luoshu_font_validate_global_cached "$_file"; then
+                      printf '{"status":"ok","data":{"valid":true,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":%s,"warning":"%s"}}\\n' \\
+                          "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" \\
+                          "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" "$(json_escape "$FONT_CHECK_WARNING")"
+                  else
+                      printf '{"status":"ok","data":{"valid":false,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":false,"error":"%s"}}\\n' \\
+                          "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_ERROR")"
+                  fi
+              elif type font_validate_global >/dev/null 2>&1; then
+                  if font_validate_global "$_file"; then
+                      printf '{"status":"ok","data":{"valid":true,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":false,"warning":"%s"}}\\n' \\
+                          "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_WARNING")"
+                  else
+                      printf '{"status":"ok","data":{"valid":false,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":false,"error":"%s"}}\\n' \\
+                          "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_ERROR")"
+                  fi
+              elif type font_check_json >/dev/null 2>&1; then
+                  _check="$(font_check_json "$_file" text 2>/dev/null | tr -d '\\n')"
+                  [ -n "$_check" ] || _check='{"valid":false,"error":"字体验证器未返回结果"}'
+                  printf '{"status":"ok","data":%s}\\n' "$_check"
+              else
+                  printf '{"status":"error","message":"字体验证器不可用"}\\n'
+              fi
+          }
+          '''.replace('          ', '')
+          text, count = re.subn(r'validate_font_json\(\) \{.*?\n\}\n\nstart_switch_task\(\)', func + '\nstart_switch_task()', text, count=1, flags=re.S)
+          assert count == 1, count
+          manager.write_text(text)
+
+          test = Path('scripts/font_validation_cache_test.sh')
+          test.write_text('''#!/bin/sh
+          set -eu
+          ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+          TMP="$(mktemp -d)"
+          trap 'rm -rf "$TMP"' EXIT
+          export MODULE_DIR="$TMP/module"
+          export MODDIR="$MODULE_DIR"
+          export CONFIG_DIR="$MODULE_DIR/config"
+          mkdir -p "$CONFIG_DIR"
+          . "$ROOT/common/font_validation_cache.sh"
+          calls="$TMP/calls"
+          font_validate_global() {
+              printf 'call\n' >> "$calls"
+              FONT_CHECK_FORMAT=TTF
+              FONT_CHECK_SIZE=8192
+              FONT_CHECK_VARIABLE=false
+              FONT_CHECK_COLOR=false
+              FONT_CHECK_WARNING=''
+              FONT_CHECK_COVERAGE=ok
+              FONT_CHECK_ERROR=''
+              return 0
+          }
+          font="$TMP/font.ttf"
+          dd if=/dev/zero of="$font" bs=4096 count=2 status=none
+          luoshu_font_validate_global_cached "$font"
+          [ "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" = false ]
+          luoshu_font_validate_global_cached "$font"
+          [ "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" = true ]
+          [ "$(wc -l < "$calls" | tr -d ' ')" -eq 1 ]
+          printf x >> "$font"
+          luoshu_font_validate_global_cached "$font"
+          [ "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" = false ]
+          [ "$(wc -l < "$calls" | tr -d ' ')" -eq 2 ]
+          grep -q 'luoshu_font_validate_global_cached "$_source"' "$ROOT/common/font_manager.sh"
+          echo 'font_validation_cache_test: PASS'
+          '''.replace('          ', ''))
+
+          check = Path('scripts/check.sh')
+          check_text = check.read_text()
+          if 'common/font_validation_cache.sh' not in check_text:
+              check_text = check_text.replace('  common/font_provider_cache.sh \\\n', '  common/font_provider_cache.sh common/font_validation_cache.sh \\\n', 1)
+          if 'sh "$ROOT/scripts/font_validation_cache_test.sh"' not in check_text:
+              check_text = check_text.replace('sh "$ROOT/scripts/font_switch_performance_test.sh"\n', 'sh "$ROOT/scripts/font_switch_performance_test.sh"\nsh "$ROOT/scripts/font_validation_cache_test.sh"\n', 1)
+          check.write_text(check_text)
+          PY
+          chmod 0755 scripts/font_validation_cache_test.sh
+          sh -n common/font_manager.sh
+          sh -n common/font_validation_cache.sh
+          sh scripts/font_validation_cache_test.sh
+      - name: Commit integration
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add common/font_manager.sh scripts/font_validation_cache_test.sh scripts/check.sh
+          git commit -m 'perf: reuse App font validation in switch worker'
+          git push origin HEAD:fix/v2.2.1-switch-timeout-status
