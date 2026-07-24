@@ -8,14 +8,16 @@
 
 [![Release](https://img.shields.io/github/v/release/xgl34222220-ops/LuoShu?display_name=tag&sort=semver&label=正式版)](https://github.com/xgl34222220-ops/LuoShu/releases/latest)
 [![Build](https://github.com/xgl34222220-ops/LuoShu/actions/workflows/build.yml/badge.svg)](https://github.com/xgl34222220-ops/LuoShu/actions/workflows/build.yml)
-[![Android](https://img.shields.io/badge/重点适配-Android%2016-3ddc84?logo=android)](docs/TEST_MATRIX.md)
+[![ROM](https://img.shields.io/badge/ROM-设备原厂清单自适应-3ddc84?logo=android)](docs/USER_GUIDE.md#10-设备自适应原厂字体清单)
 [![License](https://img.shields.io/badge/license-GPL--3.0--only-orange)](LICENSE)
 
-[下载最新正式版](https://github.com/xgl34222220-ops/LuoShu/releases/latest) · [完整使用教程](docs/USER_GUIDE.md) · [兼容性记录](docs/TEST_MATRIX.md) · [问题反馈](https://github.com/xgl34222220-ops/LuoShu/issues)
+[下载最新正式版](https://github.com/xgl34222220-ops/LuoShu/releases/latest) · [完整使用教程](docs/USER_GUIDE.md) · [真机验证状态](docs/TEST_MATRIX.md) · [问题反馈](https://github.com/xgl34222220-ops/LuoShu/issues)
 
 </div>
 
 洛书以用户选择的**中文字体作为完整基底**，把英文字体和数字字体中的目标字形与度量写入同一份复合字体，再按当前设备的原厂字体配置安全映射到系统文字字体槽。这样可以分别控制中文、英文和数字风格，同时避免缺字回退、字体抢占和直接修改系统分区。
+
+**洛书不是给所有设备套一份“通用 ROM 字体清单”。** 模块安装时会先扫描当前手机真实存在的字体目录和字体配置，生成这台设备独有的原厂字体清单；以后应用字体时优先按照这份清单覆盖真实 UI 字体槽位。ColorOS、HyperOS 等名称只表示已有真机验证和额外的故障回退适配，不是使用限制。
 
 模块包始终内置原生 Android 管理 App，也提供相同正式签名的独立 APK。项目不再使用 WebUI。
 
@@ -32,8 +34,9 @@
 ## 核心能力
 
 - **中文、英文、数字独立选择**：中文保持完整覆盖，英文与数字只替换各自负责的字符。
-- **设备自适应原厂清单**：安装阶段读取当前设备的 `fonts.xml`、`font_fallback.xml` 与 OEM 字体配置，记录真实路径、分区、TTC 索引和字体度量。
-- **多 ROM 安全映射**：重点适配 ColorOS 16、HyperOS 3，并为其他 Android ROM 保留通用扫描与回退路径。
+- **设备自适应原厂清单**：安装阶段读取当前设备的 `fonts.xml`、`font_fallback.xml`、OEM 字体配置和真实字体目录，记录路径、分区、TTC 索引与字体度量。
+- **所有 ROM 优先走真机清单**：无论系统品牌，运行时首先按当前设备扫描出的真实 UI 字体槽位映射；只有清单缺失、过期、损坏或没有发现可用槽位时，才降级到静态 ROM/AOSP 回退规则。
+- **已验证 ROM 增强回退**：ColorOS、HyperOS 等已有真机数据的系统额外保留厂商隐藏字体机制和异常场景回退，但不会覆盖或替代设备清单。
 - **真实字重与可变字体**：静态字体只显示实际存在的字重；可变字体读取真实设计轴范围。
 - **快速当前字重组合**：静态多字重字体默认只生成用户当前选择的字重，避免无提示生成整套 100–900 输出。
 - **完整格式支持**：支持常见 TrueType `glyf`、CFF、CFF2、TTF、OTF、TTC 和可变字体。
@@ -81,15 +84,33 @@
 
 洛书不会随仓库或发布包附带商业字体。用户自行提供字体及生成结果的使用和分发责任由字体权利人及使用者承担。
 
-## 兼容性
+## ROM 与机型兼容机制
 
-重点回归环境：
+### 机制支持
+
+洛书的正常路径不依赖预先写死手机型号。只要设备把系统 UI 文字字体暴露在可读取的字体配置或受支持字体分区中，安装扫描器就可以建立设备清单，随后直接按照该清单生成 systemless 覆盖。因此，其他品牌、其他机型和其他 ROM 也可以扫描并应用字体，并不只限于 ColorOS 和 HyperOS。
+
+当前可建立运行时映射的主要分区包括：
+
+```text
+/system/fonts
+/system_ext/fonts
+/product/fonts
+/my_product/fonts
+/vendor/fonts
+```
+
+`/odm`、`/oem`、`/my_region`、`/hw_product` 等目录也会参与原厂字体诊断和 ROM 特征识别。若某个厂商把核心字体完全隐藏在私有 framework、主题服务或其他非标准动态加载机制中，扫描器可能只能识别部分槽位；这类设备需要补充真机日志后增加专用增强适配。
+
+### 真机验证状态
+
+目前重点回归设备：
 
 - 一加 15：ColorOS 16 / Android 16；
 - Redmi K80 至尊版：HyperOS 3 / Android 16；
 - Magisk、KernelSU、SukiSU Ultra、APatch、Mountify。
 
-未在 [测试矩阵](docs/TEST_MATRIX.md) 标记为通过的设备与 ROM 仍属于待验证范围。扫描引擎可以在不同 ROM 上共用，但生成的原厂字体清单、真实路径、XML 来源、字体度量与最终映射均按每台设备独立生成。
+[测试矩阵](docs/TEST_MATRIX.md) 只记录哪些环境已经完成真机回归，不是 ROM 白名单。没有列出的设备仍会执行完整原厂字体扫描和设备清单映射，只是尚未由项目维护者确认所有页面、回滚和特殊字体机制都正常。
 
 ## 功能边界
 
@@ -120,7 +141,7 @@
 ## 文档
 
 - [完整使用教程](docs/USER_GUIDE.md)
-- [兼容性与真机测试矩阵](docs/TEST_MATRIX.md)
+- [真机验证状态与发布测试矩阵](docs/TEST_MATRIX.md)
 - [设备字体模板引擎说明](docs/DEVICE_FONT_TEMPLATE_ENGINE.md)
 - [发布流程](docs/RELEASING.md)
 - [参与贡献](CONTRIBUTING.md)
