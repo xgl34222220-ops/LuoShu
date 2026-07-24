@@ -1,5 +1,6 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,7 +35,7 @@ internal fun StudioToolLauncherRow(
 ) {
     Row(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         StudioToolButton(style, "预览", Icons.Rounded.AutoAwesome, enabled, onPreview, Modifier.weight(1f))
         StudioToolButton(style, "方案", Icons.Rounded.Description, enabled, onProfile, Modifier.weight(1f))
@@ -51,23 +52,32 @@ private fun StudioToolButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val background = if (enabled) {
+        MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (style == UiStyle.MIUIX) .76f else .88f)
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .62f)
+    }
     Surface(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 21.dp else 18.dp),
-        color = if (enabled) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 19.dp else 17.dp),
+        color = background,
         contentColor = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        shadowElevation = if (enabled && style == UiStyle.MIUIX) 4.dp else 0.dp,
+        shadowElevation = if (enabled && style == UiStyle.MIUIX) 3.dp else 1.dp,
+        border = BorderStroke(
+            1.dp,
+            MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) .10f else .05f),
+        ),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.size(5.dp))
-            Text(label, fontSize = 11.sp, fontWeight = FontWeight.Black)
+            Icon(icon, contentDescription = null, modifier = Modifier.size(17.dp))
+            Spacer(Modifier.size(4.dp))
+            Text(label, fontSize = 10.sp, fontWeight = FontWeight.Black)
         }
     }
 }
