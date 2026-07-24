@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v2.2.0 Alpha 8
-versionCode=20198
+version=v2.2.0 Alpha 9
+versionCode=20199
 author=惜故里丶
-description=Android 无 Hook 全局字体引擎：组合任务守护、全机原厂字体清单、主题覆盖诊断与后台逐槽位对齐
+description=Android 无 Hook 全局字体引擎：快速当前字重组合、全机原厂字体清单、主题覆盖诊断与后台逐槽位对齐
 updateJson=
