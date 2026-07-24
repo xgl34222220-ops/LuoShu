@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -22,12 +23,15 @@ fun HomeRoute(
 ) {
     var trustState by remember { mutableStateOf(DeviceTrustState()) }
     var showTrustDetails by remember { mutableStateOf(false) }
+    var showAcceptanceGuide by remember { mutableStateOf(false) }
+    var trustRefreshGeneration by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(
         state.moduleInstalled,
         state.currentFont,
         state.rebootRequired,
         state.taskRunning,
+        trustRefreshGeneration,
     ) {
         trustState = if (state.moduleInstalled) {
             loadDeviceTrustState()
@@ -58,6 +62,20 @@ fun HomeRoute(
             style = style,
             state = trustState,
             onDismiss = { showTrustDetails = false },
+            onOpenAcceptance = { showAcceptanceGuide = true },
+        )
+    }
+    if (showAcceptanceGuide) {
+        DeviceAcceptanceGuideDialog(
+            style = style,
+            state = state,
+            trust = trustState,
+            onRefresh = {
+                actions.refresh()
+                trustRefreshGeneration += 1
+            },
+            onReboot = actions.reboot,
+            onDismiss = { showAcceptanceGuide = false },
         )
     }
 }
