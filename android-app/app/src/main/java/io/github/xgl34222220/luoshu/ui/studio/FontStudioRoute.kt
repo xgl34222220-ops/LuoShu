@@ -1,11 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
@@ -18,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -75,30 +72,23 @@ internal fun FontStudioRoute(
         }
     }
 
-    BoxWithConstraints(
-        Modifier
-            .fillMaxSize()
-            .navigationBarsPadding()
-            .padding(bottom = 154.dp),
-    ) {
-        val toolAreaHeight = 72.dp
-        val contentHeight = (maxHeight - toolAreaHeight).coerceAtLeast(240.dp)
-        Column(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxWidth().height(contentHeight)) {
-                when (style) {
-                    UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
-                    UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
-                }
-            }
-            StudioToolLauncherRow(
-                style = style,
-                enabled = state.hasFonts && !state.loading,
-                onPreview = { showCompositePreview = true },
-                onProfile = { showProfileTransfer = true },
-                onGlyphs = { showGlyphBrowser = true },
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
-            )
+    Box(Modifier.fillMaxSize()) {
+        when (style) {
+            UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
+            UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
         }
+
+        StudioToolLauncherRow(
+            style = style,
+            enabled = state.hasFonts && !state.loading,
+            onPreview = { showCompositePreview = true },
+            onProfile = { showProfileTransfer = true },
+            onGlyphs = { showGlyphBrowser = true },
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .navigationBarsPadding()
+                .padding(start = 16.dp, end = 86.dp, bottom = 98.dp),
+        )
     }
 
     if (showCompositePreview) {
