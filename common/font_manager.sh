@@ -28,6 +28,7 @@ FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 
 [ -f "$MODULE_DIR/common/util_functions.sh" ] && . "$MODULE_DIR/common/util_functions.sh"
 [ -f "$MODULE_DIR/common/font_check.sh" ] && . "$MODULE_DIR/common/font_check.sh"
+[ -f "$MODULE_DIR/common/font_validation_cache.sh" ] && . "$MODULE_DIR/common/font_validation_cache.sh"
 [ -f "$MODULE_DIR/common/rom_adapters.sh" ] && . "$MODULE_DIR/common/rom_adapters.sh"
 [ -f "$MODULE_DIR/common/font_library_cache.sh" ] && . "$MODULE_DIR/common/font_library_cache.sh"
 [ -f "$MODULE_DIR/common/font_config_runtime.sh" ] && . "$MODULE_DIR/common/font_config_runtime.sh"
@@ -41,6 +42,24 @@ mkdir -p "$CONFIG_DIR" "$SYSTEM_FONTS_DIR" "$USER_FONTS_DIR" "$USER_REPORT_DIR" 
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
+}
+
+luoshu_switch_perf_begin() {
+    LUOSHU_SWITCH_PERF_START="$(date +%s 2>/dev/null || echo 0)"
+    LUOSHU_SWITCH_PERF_MARK="$LUOSHU_SWITCH_PERF_START"
+}
+
+luoshu_switch_perf_mark() {
+    _lsp_stage="$1"
+    _lsp_now="$(date +%s 2>/dev/null || echo 0)"
+    case "$LUOSHU_SWITCH_PERF_START:$LUOSHU_SWITCH_PERF_MARK:$_lsp_now" in
+        *[!0-9:]*|'') return 0 ;;
+    esac
+    _lsp_stage_seconds=$((_lsp_now - LUOSHU_SWITCH_PERF_MARK))
+    _lsp_total_seconds=$((_lsp_now - LUOSHU_SWITCH_PERF_START))
+    printf '[PERF] switch stage=%s stageSeconds=%s totalSeconds=%s
+'         "$_lsp_stage" "$_lsp_stage_seconds" "$_lsp_total_seconds"
+    LUOSHU_SWITCH_PERF_MARK="$_lsp_now"
 }
 
 format_filesize() {
@@ -162,22 +181,27 @@ switch_font() {
 
     printf '%s\n' "$$" > "$_lock" 2>/dev/null || return 1
     trap 'type luoshu_payload_transaction_abort >/dev/null 2>&1 && luoshu_payload_transaction_abort; rm -f "$MODULE_DIR/.font_switch.lock" 2>/dev/null' EXIT HUP INT TERM
+    luoshu_switch_perf_begin
 
     _source=''
     if [ "$_font_id" != default ]; then
         _source="$(find_text_font_file "$_font_id")"
         [ -f "$_source" ] || { echo "错误：字体 $_font_id 不存在" >&2; return 1; }
-        if type font_validate_global >/dev/null 2>&1; then
-            font_validate_global "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+                if type luoshu_font_validate_global_cached >/dev/null 2>&1; then
+    luoshu_font_validate_global_cached "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+        elif type font_validate_global >/dev/null 2>&1; then
+    font_validate_global "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
         elif type font_validate >/dev/null 2>&1; then
-            font_validate "$_source" text || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+    font_validate "$_source" text || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
         fi
     fi
+    luoshu_switch_perf_mark validation
 
     if ! type luoshu_payload_transaction_begin >/dev/null 2>&1 || ! luoshu_payload_transaction_begin; then
         echo '错误：无法创建字体负载安全快照' >&2
         return 5
     fi
+    luoshu_switch_perf_mark transaction_snapshot
     clear_managed_text_fonts
     if [ "$_font_id" != default ]; then
         apply_font_by_rom "$_source" "$SYSTEM_FONTS_DIR" quick "$_font_id" || {
@@ -195,10 +219,12 @@ switch_font() {
         fi
     fi
 
+    luoshu_switch_perf_mark map_slots
     if ! type luoshu_payload_validate_current >/dev/null 2>&1 || ! luoshu_payload_validate_current "$_font_id"; then
     echo '错误：字体负载覆盖校验失败，已恢复上一个字体' >&2
     return 6
 fi
+luoshu_switch_perf_mark payload_validate
 printf '%s\n' "$_font_id" > "$ACTIVE_FONT_CONF" || {
     echo '错误：无法保存当前字体状态' >&2
     return 7
@@ -208,10 +234,12 @@ if type luoshu_sync_mount_payload >/dev/null 2>&1 && ! luoshu_sync_mount_payload
     echo '错误：元模块真实挂载目录同步失败，已恢复上一个字体' >&2
     return 7
 fi
+luoshu_switch_perf_mark mount_sync
 if ! luoshu_payload_transaction_commit "$_font_id"; then
     echo '错误：无法提交字体负载事务，已恢复上一个字体' >&2
     return 7
 fi
+luoshu_switch_perf_mark transaction_commit
 # Downloadable Fonts（GMS Fonts Provider）缓存劫持：Play 商店等 Google 系应用
 # 不读系统分区字体，需同步 /data/fonts/files 并 force-stop 后才会应用。
 if [ -f "$MODULE_DIR/common/font_provider_cache.sh" ]; then
@@ -238,6 +266,7 @@ fi
     date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
     chmod 0644 "$TEXT_REBOOT_REQUIRED" 2>/dev/null || true
     invalidate_font_index_cache
+    luoshu_switch_perf_mark complete
     return 0
 }
 
@@ -518,21 +547,38 @@ EOF_RECORD
 validate_font_json() {
     _font_id="$1"
     _file="$(find_text_font_file "$_font_id")"
-    [ -f "$_file" ] || { printf '{"status":"error","message":"未找到字体"}\n'; return 0; }
-    if type font_validate_global >/dev/null 2>&1; then
-        if font_validate_global "$_file"; then
-            printf '{"status":"ok","data":{"valid":true,"format":"%s","bytes":%s,"variable":%s,"color":%s,"warning":"%s"}}\n' \
-                "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_WARNING")"
+    [ -f "$_file" ] || { printf '{"status":"error","message":"未找到字体"}
+'; return 0; }
+    if type luoshu_font_validate_global_cached >/dev/null 2>&1; then
+        if luoshu_font_validate_global_cached "$_file"; then
+  printf '{"status":"ok","data":{"valid":true,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":%s,"warning":"%s"}}
+' \
+      "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" \
+      "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" "$(json_escape "$FONT_CHECK_WARNING")"
         else
-            printf '{"status":"ok","data":{"valid":false,"format":"%s","bytes":%s,"variable":%s,"color":%s,"error":"%s"}}\n' \
-                "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_ERROR")"
+  printf '{"status":"ok","data":{"valid":false,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":false,"error":"%s"}}
+' \
+      "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_ERROR")"
+        fi
+    elif type font_validate_global >/dev/null 2>&1; then
+        if font_validate_global "$_file"; then
+  printf '{"status":"ok","data":{"valid":true,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":false,"warning":"%s"}}
+' \
+      "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_WARNING")"
+        else
+  printf '{"status":"ok","data":{"valid":false,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":false,"error":"%s"}}
+' \
+      "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_ERROR")"
         fi
     elif type font_check_json >/dev/null 2>&1; then
-        _check="$(font_check_json "$_file" text 2>/dev/null | tr -d '\n')"
+        _check="$(font_check_json "$_file" text 2>/dev/null | tr -d '
+')"
         [ -n "$_check" ] || _check='{"valid":false,"error":"字体验证器未返回结果"}'
-        printf '{"status":"ok","data":%s}\n' "$_check"
+        printf '{"status":"ok","data":%s}
+' "$_check"
     else
-        printf '{"status":"error","message":"字体验证器不可用"}\n'
+        printf '{"status":"error","message":"字体验证器不可用"}
+'
     fi
 }
 

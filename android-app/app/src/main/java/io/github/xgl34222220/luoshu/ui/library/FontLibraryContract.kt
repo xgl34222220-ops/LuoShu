@@ -86,12 +86,15 @@ internal fun FontLibraryUiState.forDisplay(
 internal fun LuoShuViewModel.toFontLibraryUiState(): FontLibraryUiState {
     val allFonts = fonts
     val visibleFonts = filteredFonts
+    val failedSwitchMessage = snapshot.taskMessage.takeIf {
+        snapshot.taskType == "switch" && snapshot.taskState == "failed" && it.isNotBlank()
+    }.orEmpty()
     return FontLibraryUiState(
         loading = fontLoading || fontRefreshing,
         operationBusy = operationBusy || mixState.busy,
         query = searchQuery,
-        error = fontError,
-        operationMessage = operationMessage,
+        error = fontError.ifBlank { failedSwitchMessage },
+        operationMessage = if (failedSwitchMessage.isBlank()) operationMessage else "",
         activeFontId = snapshot.activeFont,
         fonts = visibleFonts,
         totalCount = allFonts.size,

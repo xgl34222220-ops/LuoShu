@@ -16,13 +16,24 @@
 # 有问题——这种畸形字体文件如果被系统的 native 字体渲染引擎解析，容易直接把整个
 # 进程崩掉而不是优雅报错，所以在复制阶段就要能发现，而不是留到运行时才暴露，
 # 也方便以后遇到"应用闪退"这类反馈时，能直接从日志里判断是不是这一步出的问题
+_font_file_size_fast() {
+    _ffsf_file="$1"
+    if command -v stat >/dev/null 2>&1; then
+        stat -c '%s' "$_ffsf_file" 2>/dev/null && return 0
+    fi
+    if command -v toybox >/dev/null 2>&1; then
+        toybox stat -c '%s' "$_ffsf_file" 2>/dev/null && return 0
+    fi
+    wc -c < "$_ffsf_file" 2>/dev/null | tr -d '[:space:]'
+}
+
 _verify_font_copy() {
     f="$1"
     if [ ! -s "$f" ]; then
         _log_step "  警告：$(basename "$f") 复制后为空或不存在，可能导致相关文字渲染异常"
         return 1
     fi
-    fsize=$(wc -c < "$f" 2>/dev/null | tr -d '[:space:]')
+    fsize="$(_font_file_size_fast "$f")"
     case "$fsize" in ''|*[!0-9]*) fsize=0 ;; esac
     if [ "$fsize" -lt 1024 ]; then
         _log_step "  警告：$(basename "$f") 只有 ${fsize} 字节，明显小于正常字体文件，可能已损坏"

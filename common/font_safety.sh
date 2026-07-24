@@ -151,7 +151,7 @@ luoshu_dynamic_targets_apply() {
             rm -f "$_ldt_dest" 2>/dev/null || true
             if ln "$_ldt_source" "$_ldt_dest" 2>/dev/null || cp -f "$_ldt_source" "$_ldt_dest" 2>/dev/null; then
                 chmod 0644 "$_ldt_dest" 2>/dev/null || true
-                _ldt_size=$(wc -c < "$_ldt_dest" 2>/dev/null | tr -d '[:space:]')
+                _ldt_size=$(_luoshu_filesize "$_ldt_dest")
                 case "$_ldt_size" in ''|*[!0-9]*) _ldt_size=0 ;; esac
                 if [ "$_ldt_size" -ge 1024 ]; then
                     printf '%s|%s|%s|%s\n' "$_ldt_rel" "$_ldt_key" "$_ldt_weight" "$_ldt_family" >> "$_ldt_manifest_tmp"
@@ -221,7 +221,7 @@ luoshu_payload_validate_current() {
         [ -d "$_lpv_dir" ] || continue
         for _lpv_file in "$_lpv_dir"/*.ttf "$_lpv_dir"/*.otf "$_lpv_dir"/*.ttc; do
             [ -f "$_lpv_file" ] || continue
-            _lpv_size=$(wc -c < "$_lpv_file" 2>/dev/null | tr -d '[:space:]')
+            _lpv_size=$(_luoshu_filesize "$_lpv_file")
             case "$_lpv_size" in ''|*[!0-9]*) _lpv_size=0 ;; esac
             [ "$_lpv_size" -ge 1024 ] || return 1
             _lpv_fonts=$((_lpv_fonts + 1))
