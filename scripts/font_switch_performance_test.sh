@@ -15,10 +15,13 @@ grep -q 'LUOSHU_SWITCH_TIMEOUT_SECONDS:-110' "$ROOT/common/font_switch_task.sh"
 grep -q 'luoshu_start_detached' "$ROOT/common/font_switch_task.sh"
 grep -q 'mark_load_verification_pending' "$ROOT/common/font_switch_task.sh"
 grep -q 'luoshu_switch_perf_mark complete' "$ROOT/common/font_manager.sh"
-grep -q 'top = if (style == UiStyle.MIUIX) 25.dp else 14.dp' \
+grep -q 'top = if (style == UiStyle.MIUIX) 38.dp else 14.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
-grep -q 'mode in setOf("aligned", "mount-verified")' \
+grep -q 'DeviceTrustLevel.SYSTEM' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceTrustUi.kt"
+grep -q 'DeviceTrustLevel.COMPATIBILITY' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceTrustUi.kt"
+grep -q 'LUOSHU_BOOT_VERIFY_RETRY_LIMIT:-3' "$ROOT/common/device_font_boot_verify.sh"
 
 sh "$ROOT/scripts/font_switch_task_test.sh"
 sh "$ROOT/scripts/device_font_trust_test.sh"
