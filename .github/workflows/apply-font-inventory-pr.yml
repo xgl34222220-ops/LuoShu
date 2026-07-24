@@ -17,18 +17,14 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - name: Apply atomic source archive
+      - name: Apply runtime and tests
         shell: bash
         run: |
           set -euo pipefail
           test -s .font-inventory-implementation.tar.gz
-          tar -xzf .font-inventory-implementation.tar.gz -C .
-          rm -f \
-            .font-inventory-implementation.tar.gz \
-            .github/workflows/font-inventory-source-snapshot.yml \
-            .github/workflows/font-inventory-tree-sha.yml \
-            .github/workflows/apply-font-inventory-implementation.yml \
-            .github/workflows/apply-font-inventory-pr.yml
+          tar -xzf .font-inventory-implementation.tar.gz -C . \
+            --exclude='.github/workflows/font-inventory-tests.yml'
+          rm -f .font-inventory-implementation.tar.gz
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
