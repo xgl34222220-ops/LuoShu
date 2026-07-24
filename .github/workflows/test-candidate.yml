@@ -60,6 +60,8 @@ jobs:
           if ! sh ./scripts/check.sh >"$log" 2>&1; then
             echo '源码门禁失败，输出最后 180 行：' >&2
             tail -n 180 "$log" >&2
+            mkdir -p dist
+            cp -f "$log" dist/source-check.log
             exit 1
           fi
           cat "$log"
