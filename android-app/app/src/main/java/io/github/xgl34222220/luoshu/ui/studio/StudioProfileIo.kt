@@ -114,12 +114,8 @@ internal fun parseStudioProfile(
     val root = runCatching { JSONObject(raw) }.getOrElse {
         return StudioProfileParseResult(errors = listOf("JSON 格式无效：${it.message ?: "无法解析"}"))
     }
-    if (root.optInt("schema", -1) != STUDIO_PROFILE_SCHEMA) {
-        errors += "不支持的方案版本"
-    }
-    if (root.optString("type") != STUDIO_PROFILE_TYPE) {
-        errors += "这不是洛书组合方案文件"
-    }
+    if (root.optInt("schema", -1) != STUDIO_PROFILE_SCHEMA) errors += "不支持的方案版本"
+    if (root.optString("type") != STUDIO_PROFILE_TYPE) errors += "这不是洛书组合方案文件"
     val slotsObject = root.optJSONObject("slots")
     if (slotsObject == null) errors += "方案缺少 slots 配置"
     val fontMap = availableFonts.associateBy { it.id }
@@ -155,9 +151,7 @@ internal fun parseStudioProfile(
         }
         axes["wght"] = (axes["wght"] ?: weight.toFloat()).coerceIn(1f, 1000f)
         val savedName = item.optString("fontName").trim()
-        if (savedName.isNotBlank() && savedName != font.name) {
-            warnings += "$savedName 在本机显示为 ${font.name}"
-        }
+        if (savedName.isNotBlank() && savedName != font.name) warnings += "$savedName 在本机显示为 ${font.name}"
         parsedSlots[slot] = StudioProfileSlot(
             fontId = font.id,
             fontName = font.name,
@@ -198,7 +192,7 @@ internal fun StudioProfileTransferDialog(
     val scope = rememberCoroutineScope()
     var pendingProfile by remember { mutableStateOf<StudioProfile?>(null) }
     var status by remember { mutableStateOf("") }
-    var error by remember { mutableStateOf("") }
+    var errorMessage by remember { mutableStateOf("") }
 
     val exportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
@@ -209,10 +203,10 @@ internal fun StudioProfileTransferDialog(
                 withContext(Dispatchers.IO) {
                     context.contentResolver.openOutputStream(uri, "wt")?.bufferedWriter()?.use { writer ->
                         writer.write(encodeStudioProfile(state))
-                    } ?: error("无法打开目标文件")
+                    } ?: throw IllegalStateException("无法打开目标文件")
                 }
             }
-            error = result.exceptionOrNull()?.message.orEmpty()
+            errorMessage = result.exceptionOrNull()?.message.orEmpty()
             status = if (result.isSuccess) "方案 JSON 已导出" else ""
         }
     }
@@ -229,16 +223,16 @@ internal fun StudioProfileTransferDialog(
                 result.isFailure -> {
                     pendingProfile = null
                     status = ""
-                    error = result.exceptionOrNull()?.message ?: "方案读取失败"
+                    errorMessage = result.exceptionOrNull()?.message ?: "方案读取失败"
                 }
                 parsed == null || !parsed.valid -> {
                     pendingProfile = null
                     status = ""
-                    error = parsed?.errors?.joinToString("\n") ?: "方案读取失败"
+                    errorMessage = parsed?.errors?.joinToString("\n") ?: "方案读取失败"
                 }
                 else -> {
                     pendingProfile = parsed.profile
-                    error = ""
+                    errorMessage = ""
                     status = buildString {
                         append("已读取：${parsed.profile?.name}")
                         if (parsed.warnings.isNotEmpty()) append("\n${parsed.warnings.joinToString("\n")}")
@@ -280,22 +274,16 @@ internal fun StudioProfileTransferDialog(
                     }
                 }
                 if (status.isNotBlank()) {
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
-                    ) {
+                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                         Text(status, modifier = Modifier.fillMaxWidth().padding(11.dp), fontSize = 10.sp)
                     }
                 }
-                if (error.isNotBlank()) {
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.errorContainer,
-                    ) {
+                if (errorMessage.isNotBlank()) {
+                    Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.errorContainer) {
                         Row(Modifier.fillMaxWidth().padding(11.dp), verticalAlignment = Alignment.Top) {
                             Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
                             Spacer(Modifier.size(7.dp))
-                            Text(error, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer, fontSize = 10.sp)
+                            Text(errorMessage, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer, fontSize = 10.sp)
                         }
                     }
                 }
@@ -337,12 +325,12 @@ private fun readProfileText(contentResolver: android.content.ContentResolver, ur
                 val count = reader.read(buffer)
                 if (count < 0) break
                 output.append(buffer, 0, count)
-                if (output.length > STUDIO_PROFILE_MAX_CHARS) error("方案文件过大")
+                if (output.length > STUDIO_PROFILE_MAX_CHARS) throw IllegalArgumentException("方案文件过大")
             }
             return output.toString()
         }
     }
-    error("无法打开方案文件")
+    throw IllegalStateException("无法打开方案文件")
 }
 
 private fun profileFileName(): String {
