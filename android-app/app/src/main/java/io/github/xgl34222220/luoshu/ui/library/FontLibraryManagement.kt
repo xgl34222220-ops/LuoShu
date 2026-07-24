@@ -58,14 +58,7 @@ internal val fontLibraryTagOptions = listOf("正文", "标题", "英文", "数�
 internal data class FontLibraryCollections(
     val favoriteIds: Set<String> = emptySet(),
     val tags: Map<String, Set<String>> = emptyMap(),
-) {
-    fun clean(validIds: Set<String>): FontLibraryCollections = copy(
-        favoriteIds = favoriteIds.intersect(validIds),
-        tags = tags.mapNotNull { (fontId, values) ->
-            if (fontId !in validIds) null else fontId to values.intersect(fontLibraryTagOptions.toSet())
-        }.filterValues { it.isNotEmpty() }.toMap(),
-    )
-}
+)
 
 internal class FontLibraryCollectionStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(
@@ -271,10 +264,6 @@ internal fun FontLibraryManagementDialog(
     val sections = remember(fonts) { groupFontFamilies(fonts) }
     val allIds = remember(fonts) { fonts.map { it.id }.toSet() }
 
-    fun updateCollections(next: FontLibraryCollections) {
-        onCollectionsChange(next.clean(allIds))
-    }
-
     Dialog(onDismissRequest = onDismiss) {
         Surface(
             modifier = Modifier.fillMaxWidth().heightIn(max = 760.dp),
@@ -314,8 +303,8 @@ internal fun FontLibraryManagementDialog(
                     collections = collections,
                     onSelectAll = { selectedIds = if (selectedIds.size == allIds.size) emptySet() else allIds },
                     onClear = { selectedIds = emptySet() },
-                    onToggleFavorite = { updateCollections(toggleFontFavorite(collections, selectedIds)) },
-                    onToggleTag = { tag -> updateCollections(toggleFontTag(collections, selectedIds, tag)) },
+                    onToggleFavorite = { onCollectionsChange(toggleFontFavorite(collections, selectedIds)) },
+                    onToggleTag = { tag -> onCollectionsChange(toggleFontTag(collections, selectedIds, tag)) },
                 )
                 Spacer(Modifier.size(10.dp))
 
@@ -343,7 +332,7 @@ internal fun FontLibraryManagementDialog(
                                     selectedIds = if (font.id in selectedIds) selectedIds - font.id else selectedIds + font.id
                                 },
                                 onFavorite = {
-                                    updateCollections(toggleFontFavorite(collections, setOf(font.id)))
+                                    onCollectionsChange(toggleFontFavorite(collections, setOf(font.id)))
                                 },
                                 onDetails = { onOpenDetails(font) },
                             )
