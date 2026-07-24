@@ -1,0 +1,52 @@
+name: Pre-release Readiness
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Target release line
+        required: true
+        default: v2.2.2
+        type: string
+      enforce:
+        description: Fail when blockers remain
+        required: true
+        default: false
+        type: boolean
+  pull_request:
+    branches:
+      - main
+    paths:
+      - module.prop
+      - config/version_notes.conf
+      - common/**
+      - scripts/**
+      - android-app/**
+      - .github/workflows/pre-release-readiness.yml
+permissions:
+  contents: read
+jobs:
+  report:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate readiness report
+        shell: bash
+        run: |
+          set -euo pipefail
+          target='${{ inputs.target }}'
+          [ -n "$target" ] || target='v2.2.2'
+          args=(--target "$target")
+          if [ '${{ inputs.enforce }}' = 'true' ]; then
+            args+=(--enforce)
+          fi
+          sh ./scripts/pre_release_readiness.sh "${args[@]}"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LuoShu-Pre-release-Readiness
+          path: dist/pre-release-readiness/*
+          if-no-files-found: error
+          retention-days: 30

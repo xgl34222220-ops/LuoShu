@@ -126,4 +126,5 @@ dependencies {
     implementation("dev.chrisbanes.haze:haze-materials:1.6.10")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20251224")
 }

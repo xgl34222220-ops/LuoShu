@@ -7,6 +7,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 internal data class ShellResult(
@@ -48,7 +49,16 @@ internal object RootShell {
             throw CancellationException("Command cancelled").also { it.initCause(interrupted) }
         } catch (error: Throwable) {
             process?.destroyForcibly()
-            ShellResult(127, "", error.message ?: error.javaClass.simpleName)
+            val raw = error.message.orEmpty()
+            val message = if (
+                error is IOException &&
+                (raw.contains("Cannot run program \"su\"") || raw.contains("No such file or directory"))
+            ) {
+                "未找到 Root 命令 su。请先在 Root 管理器中完成待生效变更并完整重启，然后为洛书授予 Root 权限。"
+            } else {
+                raw.ifBlank { error.javaClass.simpleName }
+            }
+            ShellResult(127, "", message)
         } finally {
             if (!currentCoroutineContext().isActive) process?.destroyForcibly()
         }

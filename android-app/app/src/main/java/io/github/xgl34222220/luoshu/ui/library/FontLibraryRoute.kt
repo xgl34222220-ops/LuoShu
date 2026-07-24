@@ -1,5 +1,8 @@
 package io.github.xgl34222220.luoshu.ui.library
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -7,6 +10,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 
@@ -17,12 +23,24 @@ internal fun FontLibraryRoute(
     actions: FontLibraryActions,
     topActions: @Composable () -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val collectionStore = remember(context.applicationContext) {
+        FontLibraryCollectionStore(context.applicationContext)
+    }
+    var collections by remember { mutableStateOf(collectionStore.load()) }
     var filter by rememberSaveable { mutableStateOf(FontLibraryFilter.ALL) }
     var sort by rememberSaveable { mutableStateOf(FontLibrarySort.ACTIVE_FIRST) }
     var detailFont by remember { mutableStateOf<FontItem?>(null) }
+    var showManagement by rememberSaveable { mutableStateOf(false) }
     val latestActions by rememberUpdatedState(actions)
-    val displayState = remember(state, filter, sort) {
-        state.forDisplay(filter, sort)
+    val conflicts = remember(state.fonts) { analyzeFontLibraryConflicts(state.fonts) }
+    val displayState = remember(state, filter, sort, collections.favoriteIds, conflicts.issueIds) {
+        state.forDisplay(
+            selectedFilter = filter,
+            selectedSort = sort,
+            favoriteIds = collections.favoriteIds,
+            issueIds = conflicts.issueIds,
+        )
     }
     val displayActions = remember {
         FontLibraryActions(
@@ -37,9 +55,65 @@ internal fun FontLibraryRoute(
         )
     }
 
+    fun persistCollections(next: FontLibraryCollections) {
+        collections = next
+        collectionStore.save(next)
+    }
+
+    val combinedTopActions: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            topActions()
+            FontLibraryUtilitiesBar(
+                style = style,
+                fonts = state.allFonts,
+                collections = collections,
+                enabled = !state.loading && !state.operationBusy,
+                onCollectionsChange = ::persistCollections,
+            )
+            FontArchiveExportTool(
+                style = style,
+                fonts = state.allFonts,
+                collections = collections,
+                enabled = !state.loading && !state.operationBusy,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            FontLibraryManagementButton(
+                style = style,
+                favoriteCount = collections.favoriteIds.size,
+                issueCount = conflicts.issueIds.size,
+                loading = state.loading,
+                onClick = { showManagement = true },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+
     when (style) {
-        UiStyle.MATERIAL -> FontLibraryScreenMaterial(displayState, displayActions, topActions)
-        UiStyle.MIUIX -> FontLibraryScreenMiuix(displayState, displayActions, topActions)
+        UiStyle.MATERIAL -> FontLibraryScreenMaterial(displayState, displayActions, combinedTopActions)
+        UiStyle.MIUIX -> FontLibraryScreenMiuix(displayState, displayActions, combinedTopActions)
+    }
+
+    if (showManagement) {
+        FontLibraryManagementDialog(
+            style = style,
+            fonts = state.fonts,
+            activeFontId = state.activeFontId,
+            collections = collections,
+            conflicts = conflicts,
+            onCollectionsChange = { visibleNext ->
+                val visibleIds = state.fonts.map { it.id }.toSet()
+                val merged = FontLibraryCollections(
+                    favoriteIds = (collections.favoriteIds - visibleIds) + visibleNext.favoriteIds,
+                    tags = collections.tags.filterKeys { it !in visibleIds } + visibleNext.tags,
+                )
+                persistCollections(merged)
+            },
+            onOpenDetails = { font ->
+                showManagement = false
+                detailFont = font
+            },
+            onDismiss = { showManagement = false },
+        )
     }
 
     detailFont?.let { font ->

@@ -53,7 +53,18 @@ jobs:
           fi
 
       - name: Run source checks
-        run: sh ./scripts/check.sh
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/luoshu-source-check.log"
+          if ! sh ./scripts/check.sh >"$log" 2>&1; then
+            echo '源码门禁失败，输出最后 180 行：' >&2
+            tail -n 180 "$log" >&2
+            mkdir -p dist
+            cp -f "$log" dist/source-check.log
+            exit 1
+          fi
+          cat "$log"
 
       - name: Run supplemental candidate gates
         continue-on-error: true
@@ -62,6 +73,7 @@ jobs:
           sh -x scripts/device_font_foreground_quick_test.sh
           sh -x scripts/font_switch_task_test.sh
           sh -x scripts/mount_fast_sync_test.sh
+          sh scripts/pre_release_readiness.sh --target v2.2.2 --output "$RUNNER_TEMP/pre-release-readiness"
           FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
           test -s "$FONT"
           python3 scripts/font_inventory_scan_v3_test.py --font "$FONT"
@@ -94,7 +106,7 @@ jobs:
           (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
           LUOSHU_APP_APK="$apk" LUOSHU_ALLOW_DEBUG_APP=1 sh ./scripts/build.sh
 
-      - name: Verify v2.2.0 candidate
+      - name: Verify current candidate
         shell: bash
         run: |
           set -euxo pipefail
@@ -106,10 +118,10 @@ jobs:
           unzip -t "$module" >/dev/null
           (cd dist && sha256sum -c "$(basename "$module").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
-          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0'
-          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20200'
-          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2020001'
-          unzip -Z1 "$module" > /tmp/luoshu-v220-files.txt
+          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = "$LUOSHU_VERSION"
+          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = "$LUOSHU_VERSION_CODE"
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = "$LUOSHU_APP_VERSION_CODE"
+          unzip -Z1 "$module" > /tmp/luoshu-candidate-files.txt
           for path in \
             common/background_task.sh \
             common/device_font_template.sh \
@@ -120,13 +132,14 @@ jobs:
             common/device_font_transaction_guard.sh \
             common/device_font_dynamic_guard.sh \
             common/device_font_runtime_report.sh \
+            common/font_archive_export.sh \
             common/font_inventory.py \
             common/font_inventory_scan.py \
             common/font_inventory_scan_v3.py \
             common/font_switch_task.sh \
             common/mix_weight_mode.sh \
             common/mount_fast_sync.sh; do
-            grep -qx "$path" /tmp/luoshu-v220-files.txt
+            grep -qx "$path" /tmp/luoshu-candidate-files.txt
           done
           unzip -p "$module" common/background_task.sh | grep -q '_lsd_task'
           unzip -p "$module" common/background_task.sh | grep -q 'every new worker wrote an empty .task sidecar'
@@ -139,6 +152,8 @@ jobs:
           unzip -p "$module" common/device_font_payload_policy.sh | grep -q 'device_font_cache_schedule'
           unzip -p "$module" common/device_font_dynamic_guard.sh | grep -q '_dfpr_launch_pending_cache'
           unzip -p "$module" common/device_font_dynamic_guard.sh | grep -q 'device_font_load_verify'
+          unzip -p "$module" common/font_archive_export.sh | grep -q '归档目标目录不受信任'
+          unzip -p "$module" common/font_archive_export.sh | grep -q '1073741824'
           unzip -p "$module" common/font_inventory.py | grep -q 'device_font_inventory.json'
           unzip -p "$module" common/font_inventory_scan.py | grep -q 'font_inventory_scan_v3'
           unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'SCANNER_REVISION = 3'
@@ -161,15 +176,17 @@ jobs:
           sh -n "$tmp/common/device_font_cache.sh"
           sh -n "$tmp/common/device_font_load_verify.sh"
           sh -n "$tmp/common/device_font_payload_policy.sh"
+          sh -n "$tmp/common/font_archive_export.sh"
           sh -n "$tmp/common/font_switch_task.sh"
           sh -n "$tmp/common/mix_weight_mode.sh"
           sh -n "$tmp/common/mount_fast_sync.sh"
           sh -n "$tmp/service.sh"
+          sh -n scripts/pre_release_readiness.sh
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LuoShu-v2.2.0-Stable-Candidate
+          name: LuoShu-Test-Candidate
           path: dist/*
           if-no-files-found: error
           retention-days: 14

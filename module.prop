@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v2.2.1
-versionCode=20201
+version=v2.2.2
+versionCode=20202
 author=惜故里丶
 description=Android 无 Hook 全局字体引擎：真机字体清单、快速单字体切换、组合字体与安全事务回滚
-updateJson=
+updateJson=https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/main/update.json
