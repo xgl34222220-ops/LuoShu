@@ -57,6 +57,7 @@ jobs:
 
       - name: Run quick-switch gates
         run: |
+          sh -x scripts/background_task_test.sh
           sh -x scripts/device_font_foreground_quick_test.sh
           sh -x scripts/font_switch_task_test.sh
           sh -x scripts/mount_fast_sync_test.sh
@@ -79,7 +80,7 @@ jobs:
           (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
           LUOSHU_APP_APK="$apk" LUOSHU_ALLOW_DEBUG_APP=1 sh ./scripts/build.sh
 
-      - name: Verify Alpha 5 candidate
+      - name: Verify Alpha 6 candidate
         shell: bash
         run: |
           set -euxo pipefail
@@ -91,11 +92,12 @@ jobs:
           unzip -t "$module" >/dev/null
           (cd dist && sha256sum -c "$(basename "$module").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
-          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0 Alpha 5'
-          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20195'
-          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2019501'
-          unzip -Z1 "$module" > /tmp/luoshu-alpha5-files.txt
+          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0 Alpha 6'
+          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20196'
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2019601'
+          unzip -Z1 "$module" > /tmp/luoshu-alpha6-files.txt
           for path in \
+            common/background_task.sh \
             common/device_font_template.sh \
             common/device_font_cache.sh \
             common/device_font_load_verify.py \
@@ -107,8 +109,10 @@ jobs:
             common/font_inventory.py \
             common/font_switch_task.sh \
             common/mount_fast_sync.sh; do
-            grep -qx "$path" /tmp/luoshu-alpha5-files.txt
+            grep -qx "$path" /tmp/luoshu-alpha6-files.txt
           done
+          unzip -p "$module" common/background_task.sh | grep -q '_lsd_task'
+          unzip -p "$module" common/background_task.sh | grep -q 'every new worker wrote an empty .task sidecar'
           unzip -p "$module" common/device_font_template.sh | grep -q 'CAPTURE_REVISION=2'
           unzip -p "$module" common/device_font_cache.sh | grep -q 'alignment-cache-v2'
           unzip -p "$module" common/device_font_cache.sh | grep -q '.font_switch.lock'
@@ -127,6 +131,7 @@ jobs:
           trap 'rm -rf "$tmp"' EXIT
           unzip -q "$module" -d "$tmp"
           python3 -m py_compile "$tmp/common/font_inventory.py"
+          sh -n "$tmp/common/background_task.sh"
           sh -n "$tmp/common/device_font_template.sh"
           sh -n "$tmp/common/device_font_cache.sh"
           sh -n "$tmp/common/device_font_load_verify.sh"
@@ -138,7 +143,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LuoShu-v2.2.0-Alpha-5-Device-Inventory-Test
+          name: LuoShu-v2.2.0-Alpha-6-Combination-Task-Hotfix
           path: dist/*
           if-no-files-found: error
           retention-days: 14
