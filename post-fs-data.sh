@@ -92,6 +92,11 @@ done
 rm -f "$MODDIR/config/text_reboot_required.conf" "$MODDIR/config/font_weight_reboot_required.conf" \
       "$MODDIR/.font_switch.lock" 2>/dev/null || true
 
+# 加载验证必须发生在 Android 完成启动后；这里只提交独立任务，不阻塞 post-fs-data。
+if [ -f "$MODDIR/common/device_font_boot_verify.sh" ]; then
+    MODDIR="$MODDIR" sh "$MODDIR/common/device_font_boot_verify.sh" schedule >/dev/null 2>&1 || true
+fi
+
 log_message "INFO" "当前文字=$ACTIVE_TEXT | 重启保护已复位"
 log_message "INFO" "===== post-fs-data 完成 ====="
 exit 0

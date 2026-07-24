@@ -86,9 +86,11 @@ def main() -> None:
         "DemoFont",
         {"state": "installed"},
     )
-    assert unavailable_dump["state"] == "failed", unavailable_dump
+    assert unavailable_dump["state"] == "verified", unavailable_dump
+    assert unavailable_dump["mode"] == "mount-verified", unavailable_dump
     assert "font-manager-dump-unavailable" in unavailable_dump["reasons"]
-    assert "dynamic-family-not-loaded" in unavailable_dump["reasons"]
+    assert "dynamic-family-unconfirmed" in unavailable_dump["reasons"]
+    assert "verified-by-visible-mounts" in unavailable_dump["reasons"]
 
     bad_mounts = [dict(mounts[0], status="mismatch")]
     mismatch = verifier.verify(

@@ -3,7 +3,7 @@
 
 Generation success is not enough. This verifier combines visible mount evidence,
 the payload/overlay manifests and FontManagerService's dump. It deliberately emits
-`unverified` instead of pretending success when a ROM's dump format lacks evidence.
+`unverified` instead of pretending success when neither runtime source provides evidence.
 """
 from __future__ import annotations
 
@@ -115,29 +115,55 @@ def verify(
 
     reasons: list[str] = []
     state = "verified"
+    mode = "aligned"
     if missing_mounts:
         state = "failed"
+        mode = "compatibility"
         reasons.append("visible-mount-evidence-missing")
     if bad_mounts:
         state = "failed"
+        mode = "compatibility"
         reasons.append("visible-font-hash-mismatch")
+
+    font_manager_confirmed = bool(file_hits or slot_hits)
+    mount_confirmed = bool(expected_paths) and not missing_mounts and not bad_mounts
     if not font_dump.strip():
-        if state != "failed":
-            state = "unverified"
         reasons.append("font-manager-dump-unavailable")
-    elif not file_hits and not slot_hits:
-        if state != "failed":
-            state = "unverified"
+    elif not font_manager_confirmed:
         reasons.append("generated-font-not-found-in-font-manager-dump")
+
     if dynamic_missing:
-        state = "failed"
-        reasons.append("dynamic-family-not-loaded")
+        if font_dump.strip() and font_manager_confirmed:
+            state = "failed"
+            mode = "compatibility"
+            reasons.append("dynamic-family-not-loaded")
+        elif mount_confirmed:
+            # A redacted/empty OEM dump cannot prove named dynamic families either way. Keep
+            # that limitation visible, but do not turn byte-identical visible mounts into a
+            # permanent failure state.
+            reasons.append("dynamic-family-unconfirmed")
+        else:
+            state = "unverified"
+            mode = "compatibility"
+            reasons.append("dynamic-family-unconfirmed")
+    if state != "failed" and not font_manager_confirmed:
+        if mount_confirmed:
+            # Some OEM builds redact generated family/file names from `cmd font dump`.
+            # At boot-complete, byte-identical files at every expected visible mount are
+            # still strong runtime evidence; expose that separately instead of leaving
+            # users permanently stuck at "pending".
+            state = "verified"
+            mode = "mount-verified"
+            reasons.append("verified-by-visible-mounts")
+        else:
+            state = "unverified"
+            mode = "compatibility"
 
     summary = overlay.get("summary") if isinstance(overlay.get("summary"), dict) else {}
     return {
         "schema": SCHEMA,
         "state": state,
-        "mode": "aligned" if state == "verified" else "compatibility",
+        "mode": mode,
         "activeFont": active_font,
         "time": int(time.time()),
         "engine": engine,

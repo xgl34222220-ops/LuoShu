@@ -52,7 +52,10 @@ internal fun LogsRoute(
             },
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(top = 14.dp, end = 82.dp),
+                .padding(
+                    top = if (style == UiStyle.MIUIX) 25.dp else 14.dp,
+                    end = 82.dp,
+                ),
         )
         ImportTaskControls(
             style = style,
