@@ -57,6 +57,7 @@ fi
 
 OLD_MOD="${LUOSHU_OLD_MOD:-/data/adb/modules/LuoShu}"
 mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" 2>/dev/null || true
+
 # Flashing LuoShu is an explicit enable action. Root managers install updates into MODPATH while
 # the currently active module remains in OLD_MOD until reboot, so both trees must be recovered.
 # v2.0.0 could create disable itself and then discard the failure counter during a later update,
@@ -99,6 +100,41 @@ if [ "$UPDATE_PRESERVED" != true ]; then
     printf 'default\n' > "$MODPATH/config/active_font.conf"
 fi
 
+# 必须在新模块覆盖挂载系统字体之前读取原厂槽位。相同系统指纹会复用旧清单；
+# OTA 指纹变化时重新扫描。若旧版自定义字体仍在活动且找不到原厂 mirror，扫描会
+# 明确失败，运行时自动回退到静态 ROM 清单，绝不把洛书自己的覆盖文件当原厂数据。
+FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory.py"
+FONT_INVENTORY_PYTHON="$MODPATH/common/python/bin/luoshu-python"
+FONT_INVENTORY_OUTPUT="$MODPATH/config/device_font_inventory.json"
+FONT_INVENTORY_LOG="$MODPATH/logs/font-inventory.log"
+if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_inventory.json" ]; then
+    cp -f "$OLD_MOD/config/device_font_inventory.json" "$FONT_INVENTORY_OUTPUT" 2>/dev/null || true
+fi
+chmod 0755 "$FONT_INVENTORY_PYTHON" 2>/dev/null || true
+if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
+    ui_print "• 正在读取本机原厂字体槽位与基线..."
+    _inventory_pyroot="$MODPATH/common/python"
+    _inventory_result=$(
+        PYTHONHOME="$_inventory_pyroot" \
+        PYTHONPATH="$_inventory_pyroot/lib/python3.14:$_inventory_pyroot/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$_inventory_pyroot/lib:$_inventory_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan \
+                --output "$FONT_INVENTORY_OUTPUT" \
+                --font-check "$MODPATH/common/font_check.sh" \
+                --overlay-module "$OLD_MOD" 2>> "$FONT_INVENTORY_LOG"
+    )
+    _inventory_rc=$?
+    printf '%s\n' "$_inventory_result" >> "$FONT_INVENTORY_LOG" 2>/dev/null || true
+    if [ "$_inventory_rc" -eq 0 ]; then
+        _inventory_count=$(printf '%s' "$_inventory_result" | sed -n 's/.*"slotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        [ -n "$_inventory_count" ] || _inventory_count="未知数量"
+        ui_print "✓ 已建立本机字体清单：$_inventory_count 个真实 UI 槽位"
+    else
+        ui_print "• 原厂字体清单扫描不可用，本机将自动使用旧静态适配清单"
+    fi
+else
+    ui_print "• 字体清单扫描器不可用，本机将自动使用旧静态适配清单"
+fi
 # 安装安全 CLI，不暴露上一字体回滚、热刷新或重启 SystemUI 命令。
 cp -f "$MODPATH/common/luoshu_cli.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
 chmod 0755 "$MODPATH"/*.sh "$MODPATH/common"/*.sh 2>/dev/null || true

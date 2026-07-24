@@ -191,10 +191,29 @@ apply_font_by_rom() {
     [ -n "$_dfabr_family" ] || _dfabr_family=$(detect_font_family "$(basename "$_dfabr_src")")
 
     if [ "$_dfabr_mode" = quick ]; then
-        _device_font_fast_map "$_dfabr_src" "$_dfabr_family" || return 1
+        _dfabr_inventory_mapped=0
+        if type _copy_as_inventory >/dev/null 2>&1; then
+            _dfabr_preserve="${LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE:-0}"
+            LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE=1
+            export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
+            type font_config_disable >/dev/null 2>&1 && font_config_disable >/dev/null 2>&1 || true
+            LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE="$_dfabr_preserve"
+            export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
+            if _copy_as_inventory "$_dfabr_src" "$_dfabr_dest" quick "$_dfabr_family"; then
+                _dfabr_inventory_mapped=1
+                _device_font_policy_log "前台已按设备清单完成真实槽位硬链接映射：$_dfabr_family"
+            fi
+        fi
+        [ "$_dfabr_inventory_mapped" -eq 1 ] || _device_font_fast_map "$_dfabr_src" "$_dfabr_family" || return 1
         if type font_config_enable_for_payload >/dev/null 2>&1; then
             font_config_enable_for_payload "$_dfabr_family" || return 1
         fi
+        return 0
+    fi
+
+    if type _copy_as_inventory >/dev/null 2>&1 && \
+       _copy_as_inventory "$_dfabr_src" "$_dfabr_dest" "$_dfabr_mode" "$_dfabr_family"; then
+        _device_font_policy_log "已按设备清单完成真实槽位映射：$_dfabr_family mode=$_dfabr_mode"
         return 0
     fi
 

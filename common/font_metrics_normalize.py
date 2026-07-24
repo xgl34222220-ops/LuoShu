@@ -12,9 +12,10 @@ import argparse
 import json
 import os
 import statistics
+import subprocess
 import tempfile
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from fontTools.pens.boundsPen import BoundsPen
 from fontTools.ttLib import TTCollection, TTFont
@@ -24,9 +25,8 @@ UI_PROBES = tuple(map(ord, "中文国永AaHhx0123456789gjpqy"))
 CAP_PROBES = tuple(map(ord, "AHIOX"))
 XHEIGHT_PROBES = (ord("x"),)
 ASCII_CODEPOINTS = tuple(range(0x20, 0x7F))
-# Keep the line box aligned with stock Roboto (hhea ascent 1900/2048, descent 500/2048).
-# Drifting away from these ratios makes custom faces and stock fallback faces sit at
-# different baselines, which shows up as shifted/raised text in mixed-font screens.
+# Historical fallback used when no valid per-device inventory exists. Normal operation reads the
+# main stock UI slot's real hhea ratios from config/device_font_inventory.json.
 TYPO_ASCENDER_RATIO = 0.928
 TYPO_DESCENDER_RATIO = 0.244
 # Android TextView defaults to includeFontPadding=true and reads top/bottom from the
@@ -38,10 +38,92 @@ WIN_DESCENT_CAP_RATIO = 0.35
 # pathological sources (symbol/emoji mashups) must not blow line boxes up without bound.
 HHEA_ASCENT_CAP_RATIO = 1.60
 HHEA_DESCENT_CAP_RATIO = 0.90
+INVENTORY_SCHEMA = "device-font-inventory-v1"
 
 
 class MetricsError(RuntimeError):
     pass
+
+
+def default_inventory_path() -> Path:
+    override = os.environ.get("LUOSHU_FONT_INVENTORY", "").strip()
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent.parent / "config/device_font_inventory.json"
+
+
+def _device_build_key() -> str:
+    override = os.environ.get("LUOSHU_BUILD_KEY", "").strip()
+    if override:
+        return override
+    for prop in ("ro.build.fingerprint", "ro.build.display.id"):
+        try:
+            result = subprocess.run(
+                ["getprop", prop],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        value = result.stdout.strip()
+        if value:
+            return value
+    return ""
+
+
+def load_inventory_contract(path: Path | None = None) -> dict[str, Any] | None:
+    inventory = path or default_inventory_path()
+    try:
+        payload = json.loads(inventory.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("schema") != INVENTORY_SCHEMA or payload.get("state") != "ready":
+        return None
+    try:
+        revision = int(payload.get("inventoryRevision", 0))
+    except (TypeError, ValueError):
+        return None
+    if revision != 1:
+        return None
+    current_key = _device_build_key()
+    recorded_key = str(payload.get("buildKey", ""))
+    if current_key and recorded_key != current_key:
+        return None
+    main_slot = payload.get("mainSlot")
+    if not isinstance(main_slot, dict):
+        return None
+    metrics = main_slot.get("metrics")
+    if not isinstance(metrics, dict):
+        return None
+    hhea = metrics.get("hhea")
+    if not isinstance(hhea, dict):
+        return None
+    try:
+        upem = int(metrics.get("upem", 0))
+        ascent = int(hhea.get("ascent", 0))
+        descent = int(hhea.get("descent", 0))
+    except (TypeError, ValueError):
+        return None
+    if upem <= 0 or ascent <= 0 or descent >= 0:
+        return None
+    ascent_ratio = ascent / upem
+    descent_ratio = abs(descent) / upem
+    if not (0.40 <= ascent_ratio <= 1.60 and 0.05 <= descent_ratio <= 0.90):
+        return None
+    return {
+        "source": "inventory",
+        "inventory": str(inventory),
+        "buildKey": str(payload.get("buildKey", "")),
+        "slot": str(main_slot.get("slotName", main_slot.get("path", ""))),
+        "upem": upem,
+        "ascent": ascent,
+        "descent": descent,
+        "ascentRatio": ascent_ratio,
+        "descentRatio": descent_ratio,
+    }
 
 
 def _is_collection(path: Path) -> bool:
@@ -214,7 +296,11 @@ def _promote_os2_for_typo_metrics(os2) -> None:
         os2.version = 4
 
 
-def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, object]:
+def normalize_font_metrics(
+    font: TTFont,
+    monospaced: bool = False,
+    target_contract: dict[str, Any] | None = None,
+) -> dict[str, object]:
     if "head" not in font or "hhea" not in font or "OS/2" not in font:
         raise MetricsError("字体缺少 head、hhea 或 OS/2 度量表")
     upem = int(font["head"].unitsPerEm)
@@ -226,13 +312,19 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
     bottoms = [item[1] for item in ui_bounds.values()]
     ui_top = max(tops, default=upem * 0.82)
     ui_bottom = min(bottoms, default=-upem * 0.18)
-    # Android control baselines are derived from hhea/OS/2 ratios. Deriving those values from each
-    # font's extreme glyph bounds keeps bad source metrics alive and makes two selected fonts sit at
-    # different heights. Use one stable em-relative contract for every direct, variable, weighted
-    # and composite output. usWinAscent/usWinDescent below are capped so includeFontPadding
-    # cannot inflate line boxes with CJK outline extremes.
-    ascender = int(round(upem * TYPO_ASCENDER_RATIO))
-    descender_abs = int(round(upem * TYPO_DESCENDER_RATIO))
+    # Android control baselines are derived from hhea/OS/2 ratios. Prefer the main stock UI slot
+    # discovered on this ROM; only fall back to the historical Roboto contract when the inventory
+    # is missing, stale or malformed. The hhea/typo enclosure logic below is intentionally unchanged.
+    if target_contract is not None:
+        ascender_ratio = float(target_contract["ascentRatio"])
+        descender_ratio = float(target_contract["descentRatio"])
+        metrics_source = "inventory"
+    else:
+        ascender_ratio = TYPO_ASCENDER_RATIO
+        descender_ratio = TYPO_DESCENDER_RATIO
+        metrics_source = "fixed-fallback"
+    ascender = int(round(upem * ascender_ratio))
+    descender_abs = int(round(upem * descender_ratio))
     ascender = _clamp_signed(ascender)
     descender = _clamp_signed(-descender_abs)
 
@@ -298,6 +390,12 @@ def normalize_font_metrics(font: TTFont, monospaced: bool = False) -> dict[str, 
         "monospace": bool(monospaced),
         "monoAdvance": mono_report["advance"],
         "monoGlyphs": mono_report["glyphs"],
+        "metricsSource": metrics_source,
+        "targetSlot": target_contract.get("slot", "") if target_contract else "",
+        "targetBuildKey": target_contract.get("buildKey", "") if target_contract else "",
+        "targetUpem": int(target_contract.get("upem", 0)) if target_contract else 0,
+        "targetAscent": int(target_contract.get("ascent", 0)) if target_contract else 0,
+        "targetDescent": int(target_contract.get("descent", 0)) if target_contract else 0,
     }
 
 
@@ -318,10 +416,17 @@ def atomic_save(font: TTFont, output: Path) -> None:
             pass
 
 
-def normalize_path(source: Path, output: Path, monospaced: bool = False) -> dict[str, object]:
+def normalize_path(
+    source: Path,
+    output: Path,
+    monospaced: bool = False,
+    inventory: Path | None = None,
+    target_contract: dict[str, Any] | None = None,
+) -> dict[str, object]:
+    contract = target_contract if target_contract is not None else load_inventory_contract(inventory)
     font, face = load_font(source)
     try:
-        report = normalize_font_metrics(font, monospaced=monospaced)
+        report = normalize_font_metrics(font, monospaced=monospaced, target_contract=contract)
         atomic_save(font, output)
     finally:
         font.close()
@@ -329,9 +434,10 @@ def normalize_path(source: Path, output: Path, monospaced: bool = False) -> dict
     return report
 
 
-def run_batch(manifest: Path) -> int:
+def run_batch(manifest: Path, inventory: Path | None = None) -> int:
     """Normalize many fonts in one process. Manifest lines: input<TAB>output[<TAB>mono]."""
     failures = 0
+    contract = load_inventory_contract(inventory)
     for raw in manifest.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -340,7 +446,7 @@ def run_batch(manifest: Path) -> int:
         source, output = Path(parts[0]), Path(parts[1])
         monospaced = len(parts) > 2 and parts[2] == "mono"
         try:
-            report = normalize_path(source, output, monospaced)
+            report = normalize_path(source, output, monospaced, inventory=inventory, target_contract=contract)
             print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
         except Exception as error:
             failures += 1
@@ -355,13 +461,14 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--monospace", action="store_true")
     parser.add_argument("--batch", type=Path, help="批量清单：每行 input<TAB>output[<TAB>mono]，单进程处理全部字重")
+    parser.add_argument("--inventory", type=Path, default=default_inventory_path(), help="设备原厂字体清单")
     args = parser.parse_args()
     if args.batch:
-        return run_batch(args.batch)
+        return run_batch(args.batch, args.inventory)
     if not args.input or not args.output:
         parser.error("--input 与 --output 为必填（或使用 --batch）")
     try:
-        print(json.dumps(normalize_path(args.input, args.output, args.monospace), ensure_ascii=False, separators=(",", ":")))
+        print(json.dumps(normalize_path(args.input, args.output, args.monospace, inventory=args.inventory), ensure_ascii=False, separators=(",", ":")))
         return 0
     except Exception as error:
         args.output.unlink(missing_ok=True)
