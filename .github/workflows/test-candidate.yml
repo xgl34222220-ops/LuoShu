@@ -70,7 +70,15 @@ jobs:
 
       - name: Build debug App
         working-directory: android-app
-        run: gradle --no-daemon --stacktrace :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/luoshu-gradle-debug.log"
+          if ! gradle --no-daemon --stacktrace :app:lintDebug :app:testDebugUnitTest :app:assembleDebug >"$log" 2>&1; then
+            echo 'Gradle 构建失败，输出最后 180 行：' >&2
+            tail -n 180 "$log" >&2
+            exit 1
+          fi
 
       - name: Build module candidate
         shell: bash
@@ -86,7 +94,7 @@ jobs:
           (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
           LUOSHU_APP_APK="$apk" LUOSHU_ALLOW_DEBUG_APP=1 sh ./scripts/build.sh
 
-      - name: Verify Alpha 9 candidate
+      - name: Verify v2.2.0 candidate
         shell: bash
         run: |
           set -euxo pipefail
@@ -98,10 +106,10 @@ jobs:
           unzip -t "$module" >/dev/null
           (cd dist && sha256sum -c "$(basename "$module").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
-          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0 Alpha 9'
-          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20199'
-          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2019901'
-          unzip -Z1 "$module" > /tmp/luoshu-alpha9-files.txt
+          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0'
+          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20200'
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2020001'
+          unzip -Z1 "$module" > /tmp/luoshu-v220-files.txt
           for path in \
             common/background_task.sh \
             common/device_font_template.sh \
@@ -118,7 +126,7 @@ jobs:
             common/font_switch_task.sh \
             common/mix_weight_mode.sh \
             common/mount_fast_sync.sh; do
-            grep -qx "$path" /tmp/luoshu-alpha9-files.txt
+            grep -qx "$path" /tmp/luoshu-v220-files.txt
           done
           unzip -p "$module" common/background_task.sh | grep -q '_lsd_task'
           unzip -p "$module" common/background_task.sh | grep -q 'every new worker wrote an empty .task sidecar'
@@ -161,7 +169,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LuoShu-v2.2.0-Alpha-9-Fast-Current-Weight-Mix
+          name: LuoShu-v2.2.0-Stable-Candidate
           path: dist/*
           if-no-files-found: error
           retention-days: 14
