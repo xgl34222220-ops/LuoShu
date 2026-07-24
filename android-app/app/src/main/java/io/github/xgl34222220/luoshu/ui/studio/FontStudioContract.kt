@@ -32,6 +32,7 @@ internal data class FontStudioUiState(
     val progress: Int = 0,
     val error: String = "",
     val slots: List<StudioSlotUiState> = emptyList(),
+    val fonts: List<FontItem> = emptyList(),
     val coverage: CoverageProbeState = CoverageProbeState(),
     val directApplyFontId: String? = null,
     val hasFonts: Boolean = false,
@@ -41,6 +42,7 @@ internal data class FontStudioUiState(
 internal data class FontStudioActions(
     val refresh: () -> Unit,
     val pickSlot: (MixSlot) -> Unit,
+    val updateFont: (MixSlot, String) -> Unit,
     val updateWeight: (MixSlot, Int) -> Unit,
     val updateAxis: (MixSlot, String, Float) -> Unit,
     val inspectCoverage: (String) -> Unit,
@@ -81,6 +83,7 @@ internal fun LuoShuViewModel.toFontStudioUiState(features: Alpha15FeatureViewMod
             slotState(MixSlot.Latin, "英文字形", "替换拉丁字母与英文标点轮廓", "LuoShu Typography 0123"),
             slotState(MixSlot.Digit, "数字字形", "替换数字与相关半角标点", "0123456789 Aa"),
         ),
+        fonts = fonts,
         coverage = features.coverage,
         directApplyFontId = directApplyFontId(current),
         hasFonts = fonts.isNotEmpty(),
