@@ -65,6 +65,8 @@ jobs:
           FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
           test -s "$FONT"
           python3 scripts/font_inventory_scan_v3_test.py --font "$FONT"
+          grep -q '多字重 · ${weights.size} 档' android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt
+          grep -q '静态字体现在始终按当前所选字重走快速单文件组合' common/mix_weight_mode.sh
 
       - name: Build debug App
         working-directory: android-app
@@ -84,7 +86,7 @@ jobs:
           (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
           LUOSHU_APP_APK="$apk" LUOSHU_ALLOW_DEBUG_APP=1 sh ./scripts/build.sh
 
-      - name: Verify Alpha 8 candidate
+      - name: Verify Alpha 9 candidate
         shell: bash
         run: |
           set -euxo pipefail
@@ -96,10 +98,10 @@ jobs:
           unzip -t "$module" >/dev/null
           (cd dist && sha256sum -c "$(basename "$module").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
-          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0 Alpha 8'
-          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20198'
-          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2019801'
-          unzip -Z1 "$module" > /tmp/luoshu-alpha8-files.txt
+          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0 Alpha 9'
+          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20199'
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2019901'
+          unzip -Z1 "$module" > /tmp/luoshu-alpha9-files.txt
           for path in \
             common/background_task.sh \
             common/device_font_template.sh \
@@ -114,8 +116,9 @@ jobs:
             common/font_inventory_scan.py \
             common/font_inventory_scan_v3.py \
             common/font_switch_task.sh \
+            common/mix_weight_mode.sh \
             common/mount_fast_sync.sh; do
-            grep -qx "$path" /tmp/luoshu-alpha8-files.txt
+            grep -qx "$path" /tmp/luoshu-alpha9-files.txt
           done
           unzip -p "$module" common/background_task.sh | grep -q '_lsd_task'
           unzip -p "$module" common/background_task.sh | grep -q 'every new worker wrote an empty .task sidecar'
@@ -133,6 +136,7 @@ jobs:
           unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'SCANNER_REVISION = 3'
           unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'stockFontUniqueFileCount'
           unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'themeOverrideRoots'
+          unzip -p "$module" common/mix_weight_mode.sh | grep -q '快速单文件组合'
           unzip -p "$module" customize.sh | grep -q '原厂字体文件'
           unzip -p "$module" customize.sh | grep -q 'XML .* OEM 探测'
           unzip -p "$module" common/font_switch_task.sh | grep -q 'TIMEOUT_SECONDS'
@@ -150,13 +154,14 @@ jobs:
           sh -n "$tmp/common/device_font_load_verify.sh"
           sh -n "$tmp/common/device_font_payload_policy.sh"
           sh -n "$tmp/common/font_switch_task.sh"
+          sh -n "$tmp/common/mix_weight_mode.sh"
           sh -n "$tmp/common/mount_fast_sync.sh"
           sh -n "$tmp/service.sh"
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LuoShu-v2.2.0-Alpha-8-Full-Device-Font-Probe
+          name: LuoShu-v2.2.0-Alpha-9-Fast-Current-Weight-Mix
           path: dist/*
           if-no-files-found: error
           retention-days: 14
