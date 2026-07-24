@@ -42,7 +42,7 @@ internal data class FontStudioUiState(
 internal data class FontStudioActions(
     val refresh: () -> Unit,
     val pickSlot: (MixSlot) -> Unit,
-    val updateFont: (MixSlot, String) -> Unit,
+    val updateFont: (MixSlot, String) -> Unit = { _, _ -> },
     val updateWeight: (MixSlot, Int) -> Unit,
     val updateAxis: (MixSlot, String, Float) -> Unit,
     val inspectCoverage: (String) -> Unit,
