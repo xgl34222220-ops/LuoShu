@@ -36,13 +36,15 @@ internal fun fontPreviewWeight(font: FontItem): Int {
 }
 
 internal fun fontCapabilityLabel(font: FontItem): String {
+    val weights = fontStaticWeights(font)
     val capability = when {
-        font.variable -> "可变字体"
-        fontStaticWeights(font).size >= 2 ->
-            "多字重 · ${fontStaticWeights(font).joinToString(" / ")}"
-        else -> "固定 ${fontWeightName(fontFixedWeight(font))}"
+        font.variable -> "可变字重"
+        weights.size >= 2 -> "多字重 · ${weights.size} 档"
+        else -> "固定 · ${fontWeightName(fontFixedWeight(font))}"
     }
-    return if (font.supportsCjk) capability else "仅拉丁 · $capability"
+    // 卡片标题与能力标签位于同一行。完整字重列表已经由下方字重控件展示，
+    // 此处必须保持紧凑，避免长标签先占满 Row 后把标题挤成单字竖排。
+    return if (font.supportsCjk) capability else "拉丁 · $capability"
 }
 
 private const val FONT_PREVIEW_COMPACT = "洛书字体 Aa 123"
