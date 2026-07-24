@@ -36,6 +36,14 @@ jobs:
           code=$?
           echo "code=$code" >> "$GITHUB_OUTPUT"
           exit "$code"
+      - name: Upload Android diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-Android-Diagnostic-Log
+          path: ${{ runner.temp }}/luoshu-android-diagnostic.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Post failed test details to PR
         if: failure() && steps.gradle.outputs.code != '0'
         env:
