@@ -3,6 +3,7 @@ package io.github.xgl34222220.luoshu.ui.studio
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,10 +32,13 @@ internal fun StudioToolLauncherRow(
     onGlyphs: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        StudioToolButton(style, "预览", Icons.Rounded.AutoAwesome, enabled, onPreview)
-        StudioToolButton(style, "方案", Icons.Rounded.Description, enabled, onProfile)
-        StudioToolButton(style, "字形", Icons.Rounded.ListAlt, enabled, onGlyphs)
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        StudioToolButton(style, "预览", Icons.Rounded.AutoAwesome, enabled, onPreview, Modifier.weight(1f))
+        StudioToolButton(style, "方案", Icons.Rounded.Description, enabled, onProfile, Modifier.weight(1f))
+        StudioToolButton(style, "字形", Icons.Rounded.ListAlt, enabled, onGlyphs, Modifier.weight(1f))
     }
 }
 
@@ -45,22 +49,25 @@ private fun StudioToolButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     enabled: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Surface(
         onClick = onClick,
         enabled = enabled,
+        modifier = modifier,
         shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 21.dp else 18.dp),
-        color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = if (enabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-        shadowElevation = if (enabled) 8.dp else 0.dp,
+        color = if (enabled) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        shadowElevation = if (enabled && style == UiStyle.MIUIX) 4.dp else 0.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.size(5.dp))
-            Text(label, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            Text(label, fontSize = 11.sp, fontWeight = FontWeight.Black)
         }
     }
 }
