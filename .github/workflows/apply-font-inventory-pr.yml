@@ -5,6 +5,7 @@ on:
       - main
     paths:
       - .font-inventory-implementation.tar.gz
+      - .font-inventory-parts/**
       - .github/workflows/apply-font-inventory-pr.yml
 permissions:
   contents: write
@@ -17,35 +18,42 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - name: Export source archive for diagnosis
-        uses: actions/upload-artifact@v4
-        with:
-          name: font-inventory-source-archive
-          path: .font-inventory-implementation.tar.gz
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 2
-      - name: Verify source archive
+      - name: Reconstruct and verify source archive
+        shell: bash
         run: |
-          test -s .font-inventory-implementation.tar.gz
-          echo '28b487b9ad4863b855e621a58cbea7346e410e59eae1ef63f30071b875bff86c  .font-inventory-implementation.tar.gz' | sha256sum -c -
-          gzip -t .font-inventory-implementation.tar.gz
-          tar -tzf .font-inventory-implementation.tar.gz >/tmp/font-inventory-files.txt
+          set -euo pipefail
+          test "$(find .font-inventory-parts -maxdepth 1 -type f -name 'part??' | wc -l)" -eq 7
+          cat .font-inventory-parts/part?? | tr -d '\r\n' | base64 -d > /tmp/font-inventory-implementation.tar.gz
+          echo '28b487b9ad4863b855e621a58cbea7346e410e59eae1ef63f30071b875bff86c  /tmp/font-inventory-implementation.tar.gz' | sha256sum -c -
+          gzip -t /tmp/font-inventory-implementation.tar.gz
+          tar -tzf /tmp/font-inventory-implementation.tar.gz >/tmp/font-inventory-files.txt
           grep -qx 'common/font_inventory.py' /tmp/font-inventory-files.txt
           grep -qx 'scripts/font_inventory_test.py' /tmp/font-inventory-files.txt
+          grep -qx 'scripts/rom_adapter_inventory_test.sh' /tmp/font-inventory-files.txt
       - name: Extract runtime and tests
+        shell: bash
         run: |
+          set -euo pipefail
           tar --exclude='.github/workflows/font-inventory-tests.yml' \
-            -xzf .font-inventory-implementation.tar.gz -C .
+            -xzf /tmp/font-inventory-implementation.tar.gz -C .
           rm -f .font-inventory-implementation.tar.gz
+          rm -rf .font-inventory-parts
       - name: Validate source diff
+        shell: bash
         run: |
+          set -euo pipefail
           git add -A
           git diff --cached --stat
           git diff --cached --check
           test -n "$(git diff --cached --name-only)"
+          test -f common/font_inventory.py
+          test -f scripts/font_inventory_test.py
+          test ! -e .font-inventory-implementation.tar.gz
+          test ! -e .font-inventory-parts
       - name: Commit source changes
+        shell: bash
         run: |
+          set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git commit -m 'refactor: discover device font inventory before overlay'
