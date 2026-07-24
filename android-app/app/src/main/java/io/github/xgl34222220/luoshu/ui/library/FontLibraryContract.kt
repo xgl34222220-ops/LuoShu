@@ -6,13 +6,16 @@ import io.github.xgl34222220.luoshu.LuoShuViewModel
 
 internal enum class FontLibraryFilter(val label: String) {
     ALL("全部"),
+    FAVORITE("收藏"),
     VARIABLE("可变字体"),
     MULTI_WEIGHT("多字重"),
+    CONFLICT("重复 / 冲突"),
     INVALID("需检查"),
 }
 
 internal enum class FontLibrarySort(val label: String) {
     ACTIVE_FIRST("使用优先"),
+    FAVORITE_FIRST("收藏优先"),
     NAME("名称"),
     NEWEST("最近导入"),
 }
@@ -50,18 +53,29 @@ internal data class FontLibraryActions(
 internal fun FontLibraryUiState.forDisplay(
     selectedFilter: FontLibraryFilter,
     selectedSort: FontLibrarySort,
+    favoriteIds: Set<String> = emptySet(),
+    issueIds: Set<String> = emptySet(),
 ): FontLibraryUiState {
     val filtered = fonts.filter { font ->
         when (selectedFilter) {
             FontLibraryFilter.ALL -> true
+            FontLibraryFilter.FAVORITE -> font.id in favoriteIds
             FontLibraryFilter.VARIABLE -> font.valid && font.variable
             FontLibraryFilter.MULTI_WEIGHT -> font.valid && !font.variable && font.weights.size >= 2
+            FontLibraryFilter.CONFLICT -> font.id in issueIds
             FontLibraryFilter.INVALID -> !font.valid
         }
     }
     val sorted = when (selectedSort) {
         FontLibrarySort.ACTIVE_FIRST -> filtered.sortedWith(
             compareByDescending<FontItem> { it.id == activeFontId }
+                .thenByDescending { it.id in favoriteIds }
+                .thenBy { it.name.lowercase() }
+                .thenBy { it.id },
+        )
+        FontLibrarySort.FAVORITE_FIRST -> filtered.sortedWith(
+            compareByDescending<FontItem> { it.id in favoriteIds }
+                .thenByDescending { it.id == activeFontId }
                 .thenBy { it.name.lowercase() }
                 .thenBy { it.id },
         )
@@ -71,6 +85,7 @@ internal fun FontLibraryUiState.forDisplay(
         )
         FontLibrarySort.NEWEST -> filtered.sortedWith(
             compareByDescending<FontItem> { it.date }
+                .thenByDescending { it.id in favoriteIds }
                 .thenBy { it.name.lowercase() }
                 .thenBy { it.id },
         )
