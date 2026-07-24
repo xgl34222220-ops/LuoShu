@@ -1,8 +1,9 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -13,7 +14,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -71,10 +71,10 @@ internal fun FontStudioRoute(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()) {
         when (style) {
-            UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
-            UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
+            UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions, Modifier.weight(1f))
+            UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions, Modifier.weight(1f))
         }
         StudioToolLauncherRow(
             style = style,
@@ -82,9 +82,7 @@ internal fun FontStudioRoute(
             onPreview = { showCompositePreview = true },
             onProfile = { showProfileTransfer = true },
             onGlyphs = { showGlyphBrowser = true },
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 18.dp, vertical = 96.dp),
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 10.dp),
         )
     }
 
