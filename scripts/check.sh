@@ -31,7 +31,7 @@ for file in \
   common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
   common/multiweight_mix_task.sh common/mix_weight_mode.sh \
   common/app_bridge.sh common/font_manager.sh common/font_library_cache.sh common/app_installer.sh \
-  common/font_provider_cache.sh \
+  common/font_provider_cache.sh common/font_validation_cache.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
   scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
   scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh \
@@ -225,6 +225,7 @@ sh "$ROOT/scripts/auto_multiweight_engine_test.sh"
 sh "$ROOT/scripts/background_mix_worker_test.sh"
 sh "$ROOT/scripts/mix_finalize_performance_test.sh"
 sh "$ROOT/scripts/font_switch_performance_test.sh"
+sh "$ROOT/scripts/font_validation_cache_test.sh"
 sh "$ROOT/scripts/font_library_ui_layout_test.sh"
 sh "$ROOT/scripts/stability_test.sh"
 sh "$ROOT/scripts/font_library_cache_test.sh"

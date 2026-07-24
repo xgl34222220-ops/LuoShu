@@ -28,6 +28,7 @@ FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 
 [ -f "$MODULE_DIR/common/util_functions.sh" ] && . "$MODULE_DIR/common/util_functions.sh"
 [ -f "$MODULE_DIR/common/font_check.sh" ] && . "$MODULE_DIR/common/font_check.sh"
+[ -f "$MODULE_DIR/common/font_validation_cache.sh" ] && . "$MODULE_DIR/common/font_validation_cache.sh"
 [ -f "$MODULE_DIR/common/rom_adapters.sh" ] && . "$MODULE_DIR/common/rom_adapters.sh"
 [ -f "$MODULE_DIR/common/font_library_cache.sh" ] && . "$MODULE_DIR/common/font_library_cache.sh"
 [ -f "$MODULE_DIR/common/font_config_runtime.sh" ] && . "$MODULE_DIR/common/font_config_runtime.sh"
@@ -186,10 +187,12 @@ switch_font() {
     if [ "$_font_id" != default ]; then
         _source="$(find_text_font_file "$_font_id")"
         [ -f "$_source" ] || { echo "错误：字体 $_font_id 不存在" >&2; return 1; }
-        if type font_validate_global >/dev/null 2>&1; then
-            font_validate_global "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+                if type luoshu_font_validate_global_cached >/dev/null 2>&1; then
+    luoshu_font_validate_global_cached "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+        elif type font_validate_global >/dev/null 2>&1; then
+    font_validate_global "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
         elif type font_validate >/dev/null 2>&1; then
-            font_validate "$_source" text || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+    font_validate "$_source" text || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
         fi
     fi
     luoshu_switch_perf_mark validation
@@ -544,21 +547,38 @@ EOF_RECORD
 validate_font_json() {
     _font_id="$1"
     _file="$(find_text_font_file "$_font_id")"
-    [ -f "$_file" ] || { printf '{"status":"error","message":"未找到字体"}\n'; return 0; }
-    if type font_validate_global >/dev/null 2>&1; then
-        if font_validate_global "$_file"; then
-            printf '{"status":"ok","data":{"valid":true,"format":"%s","bytes":%s,"variable":%s,"color":%s,"warning":"%s"}}\n' \
-                "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_WARNING")"
+    [ -f "$_file" ] || { printf '{"status":"error","message":"未找到字体"}
+'; return 0; }
+    if type luoshu_font_validate_global_cached >/dev/null 2>&1; then
+        if luoshu_font_validate_global_cached "$_file"; then
+  printf '{"status":"ok","data":{"valid":true,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":%s,"warning":"%s"}}
+' \
+      "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" \
+      "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" "$(json_escape "$FONT_CHECK_WARNING")"
         else
-            printf '{"status":"ok","data":{"valid":false,"format":"%s","bytes":%s,"variable":%s,"color":%s,"error":"%s"}}\n' \
-                "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_ERROR")"
+  printf '{"status":"ok","data":{"valid":false,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":false,"error":"%s"}}
+' \
+      "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_ERROR")"
+        fi
+    elif type font_validate_global >/dev/null 2>&1; then
+        if font_validate_global "$_file"; then
+  printf '{"status":"ok","data":{"valid":true,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":false,"warning":"%s"}}
+' \
+      "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_WARNING")"
+        else
+  printf '{"status":"ok","data":{"valid":false,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":false,"error":"%s"}}
+' \
+      "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_ERROR")"
         fi
     elif type font_check_json >/dev/null 2>&1; then
-        _check="$(font_check_json "$_file" text 2>/dev/null | tr -d '\n')"
+        _check="$(font_check_json "$_file" text 2>/dev/null | tr -d '
+')"
         [ -n "$_check" ] || _check='{"valid":false,"error":"字体验证器未返回结果"}'
-        printf '{"status":"ok","data":%s}\n' "$_check"
+        printf '{"status":"ok","data":%s}
+' "$_check"
     else
-        printf '{"status":"error","message":"字体验证器不可用"}\n'
+        printf '{"status":"error","message":"字体验证器不可用"}
+'
     fi
 }
 
