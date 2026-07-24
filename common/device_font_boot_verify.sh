@@ -20,14 +20,17 @@ STATE_FILE="$MODDIR/config/device-font-load-verification.conf"
 [ -f "$BACKGROUND_TASK" ] && . "$BACKGROUND_TASK"
 
 BOOT_WAIT_LIMIT="${LUOSHU_BOOT_VERIFY_BOOT_WAIT_LIMIT:-600}"
-SETTLE_SECONDS="${LUOSHU_BOOT_VERIFY_SETTLE_SECONDS:-12}"
+SETTLE_SECONDS="${LUOSHU_BOOT_VERIFY_SETTLE_SECONDS:-30}"
 IDLE_WAIT_LIMIT="${LUOSHU_BOOT_VERIFY_IDLE_WAIT_LIMIT:-300}"
 POLL_SECONDS="${LUOSHU_BOOT_VERIFY_POLL_SECONDS:-3}"
-for _numeric_name in BOOT_WAIT_LIMIT SETTLE_SECONDS IDLE_WAIT_LIMIT POLL_SECONDS; do
+RETRY_LIMIT="${LUOSHU_BOOT_VERIFY_RETRY_LIMIT:-3}"
+RETRY_DELAY="${LUOSHU_BOOT_VERIFY_RETRY_DELAY:-15}"
+for _numeric_name in BOOT_WAIT_LIMIT SETTLE_SECONDS IDLE_WAIT_LIMIT POLL_SECONDS RETRY_LIMIT RETRY_DELAY; do
     eval "_numeric_value=\${$_numeric_name}"
     case "$_numeric_value" in ''|*[!0-9]*) eval "$_numeric_name=0" ;; esac
 done
 [ "$POLL_SECONDS" -ge 1 ] 2>/dev/null || POLL_SECONDS=1
+[ "$RETRY_LIMIT" -ge 1 ] 2>/dev/null || RETRY_LIMIT=1
 
 _boot_verify_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
@@ -61,6 +64,20 @@ _boot_verify_busy() {
     return 1
 }
 
+_boot_verify_wait_idle() {
+    _idle_wait=0
+    while _boot_verify_busy && [ "$_idle_wait" -lt "$IDLE_WAIT_LIMIT" ]; do
+        sleep "$POLL_SECONDS"
+        _idle_wait=$((_idle_wait + POLL_SECONDS))
+    done
+    ! _boot_verify_busy
+}
+
+_boot_verify_finish() {
+    _task="$1"
+    type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$PID_FILE" "$_task"
+}
+
 _boot_verify_worker() {
     _task="$1"
     _waited=0
@@ -70,34 +87,62 @@ _boot_verify_worker() {
     done
     if [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; then
         _boot_verify_write_pending boot-not-completed
-        type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$PID_FILE" "$_task"
+        _boot_verify_finish "$_task"
         return 2
     fi
 
-    # Let service.sh finish template refresh/index warm-up, then wait for active transactions.
+    # service.sh may still be refreshing the device template, index or an upgraded payload.
+    # Wait longer than the old 12-second window and retry transient verification failures.
     [ "$SETTLE_SECONDS" -eq 0 ] 2>/dev/null || sleep "$SETTLE_SECONDS"
-    _idle_wait=0
-    while _boot_verify_busy && [ "$_idle_wait" -lt "$IDLE_WAIT_LIMIT" ]; do
-        sleep "$POLL_SECONDS"
-        _idle_wait=$((_idle_wait + POLL_SECONDS))
-    done
-    if _boot_verify_busy; then
-        _boot_verify_write_pending background-task-still-running
-        printf '[%s] [LOAD-VERIFY] 后台字体任务仍在运行，本次延后验证\n' \
-            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" >> "$LOG_FILE" 2>/dev/null || true
-        type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$PID_FILE" "$_task"
-        return 2
-    fi
+    _attempt=1
+    while [ "$_attempt" -le "$RETRY_LIMIT" ]; do
+        if ! _boot_verify_wait_idle; then
+            _boot_verify_write_pending background-task-still-running
+            printf '[%s] [LOAD-VERIFY] 后台字体任务仍在运行，第 %s/%s 次验证延后\n' \
+                "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_attempt" "$RETRY_LIMIT" \
+                >> "$LOG_FILE" 2>/dev/null || true
+            _rc=2
+        elif [ -f "$VERIFY_SCRIPT" ]; then
+            MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$VERIFY_SCRIPT"
+            _rc=$?
+        else
+            _boot_verify_write_pending verifier-missing
+            _rc=1
+        fi
 
-    if [ -f "$VERIFY_SCRIPT" ]; then
-        MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$VERIFY_SCRIPT"
-        _rc=$?
-    else
-        _boot_verify_write_pending verifier-missing
-        _rc=1
+        _state=$(_boot_verify_value "$STATE_FILE" state)
+        case "$_state" in
+            verified|not-applicable)
+                _boot_verify_finish "$_task"
+                return 0
+                ;;
+            compatibility)
+                # Compatibility mapping is a final, truthful state; reboot retries cannot turn
+                # a payload that was never generated into a device-aligned payload.
+                _boot_verify_finish "$_task"
+                return 2
+                ;;
+        esac
+        [ "$_rc" -eq 0 ] && {
+            _boot_verify_finish "$_task"
+            return 0
+        }
+        if [ "$_attempt" -lt "$RETRY_LIMIT" ]; then
+            printf '[%s] [LOAD-VERIFY] 第 %s/%s 次验证未完成，%s 秒后重试（state=%s rc=%s）\n' \
+                "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_attempt" "$RETRY_LIMIT" \
+                "$RETRY_DELAY" "${_state:-missing}" "$_rc" >> "$LOG_FILE" 2>/dev/null || true
+            [ "$RETRY_DELAY" -eq 0 ] 2>/dev/null || sleep "$RETRY_DELAY"
+        fi
+        _attempt=$((_attempt + 1))
+    done
+
+    if [ ! -s "$STATE_FILE" ] || [ "$(_boot_verify_value "$STATE_FILE" state)" = pending ]; then
+        _boot_verify_write_pending verification-retry-exhausted
     fi
-    type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$PID_FILE" "$_task"
-    return "$_rc"
+    printf '[%s] [LOAD-VERIFY] 自动验证重试结束，保留真实状态供 App 诊断\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" >> "$LOG_FILE" 2>/dev/null || true
+    _boot_verify_finish "$_task"
+    return 2
 }
 
 _boot_verify_schedule() {

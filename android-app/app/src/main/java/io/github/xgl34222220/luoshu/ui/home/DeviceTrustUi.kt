@@ -31,27 +31,33 @@ import io.github.xgl34222220.luoshu.RootShell
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 
 internal enum class DeviceTrustLevel {
+    SYSTEM,
     VERIFIED,
-    READY,
+    COMPATIBILITY,
     PENDING,
     ISSUE,
 }
 
 internal data class DeviceTrustState(
     val loading: Boolean = true,
+    val activeFont: String = "unknown",
     val inventory: String = "unknown",
     val engine: String = "unknown",
     val template: String = "unknown",
     val alignment: String = "unknown",
     val mode: String = "unknown",
+    val reason: String = "",
     val cachePending: Boolean = false,
     val error: String = "",
 ) {
     val level: DeviceTrustLevel
         get() = when {
-            error.isNotBlank() || alignment == "failed" -> DeviceTrustLevel.ISSUE
+            error.isNotBlank() -> DeviceTrustLevel.ISSUE
+            activeFont in setOf("", "default") || alignment == "not-applicable" -> DeviceTrustLevel.SYSTEM
+            alignment == "failed" -> DeviceTrustLevel.ISSUE
             alignment == "verified" && mode in setOf("aligned", "mount-verified") -> DeviceTrustLevel.VERIFIED
-            inventory == "available" && engine !in setOf("missing", "failed", "unknown") -> DeviceTrustLevel.READY
+            engine == "installed" -> DeviceTrustLevel.PENDING
+            inventory == "available" -> DeviceTrustLevel.COMPATIBILITY
             else -> DeviceTrustLevel.PENDING
         }
 }
@@ -63,17 +69,20 @@ internal suspend fun loadDeviceTrustState(): DeviceTrustState {
         read_value() {
             sed -n "s/^${'$'}2=//p" "${'$'}1" 2>/dev/null | head -n1 | tr -d '\r\n'
         }
+        active="${'$'}(head -n1 "${'$'}CFG/active_font.conf" 2>/dev/null | tr -d '\r\n')"
+        [ -n "${'$'}active" ] || active=default
         inventory=missing
         [ -s "${'$'}CFG/device_font_inventory.json" ] && inventory=available
         engine="${'$'}(read_value "${'$'}CFG/device-font-engine.conf" state)"
         template="${'$'}(read_value "${'$'}CFG/device-font-template.state" state)"
         alignment="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" state)"
         mode="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" mode)"
+        reason="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" reason)"
         cachePending=no
         [ -s "${'$'}CFG/device-font-cache-pending.conf" ] && cachePending=yes
-        printf 'inventory=%s\nengine=%s\ntemplate=%s\nalignment=%s\nmode=%s\ncachePending=%s\n' \
-            "${'$'}inventory" "${'$'}{engine:-missing}" "${'$'}{template:-missing}" \
-            "${'$'}{alignment:-pending}" "${'$'}{mode:-compatibility}" "${'$'}cachePending"
+        printf 'activeFont=%s\ninventory=%s\nengine=%s\ntemplate=%s\nalignment=%s\nmode=%s\nreason=%s\ncachePending=%s\n' \
+            "${'$'}active" "${'$'}inventory" "${'$'}{engine:-missing}" "${'$'}{template:-missing}" \
+            "${'$'}{alignment:-pending}" "${'$'}{mode:-compatibility}" "${'$'}reason" "${'$'}cachePending"
     """.trimIndent()
     val result = RootShell.exec(command, timeoutMs = 12_000L)
     if (result.code != 0) {
@@ -95,11 +104,13 @@ internal fun parseDeviceTrustOutput(raw: String): DeviceTrustState {
     }
     return DeviceTrustState(
         loading = false,
+        activeFont = values["activeFont"].orEmpty().ifBlank { "default" },
         inventory = values["inventory"].orEmpty().ifBlank { "unknown" },
         engine = values["engine"].orEmpty().ifBlank { "unknown" },
         template = values["template"].orEmpty().ifBlank { "unknown" },
         alignment = values["alignment"].orEmpty().ifBlank { "unknown" },
         mode = values["mode"].orEmpty().ifBlank { "unknown" },
+        reason = values["reason"].orEmpty(),
         cachePending = values["cachePending"] == "yes",
     )
 }
@@ -159,11 +170,15 @@ internal fun DeviceTrustDialog(
                     fontSize = 12.sp,
                 )
                 Spacer(Modifier.size(12.dp))
+                DeviceTrustRow("当前字体", friendlyActiveFont(state.activeFont))
                 DeviceTrustRow("原厂字体清单", friendlyTrustValue(state.inventory))
                 DeviceTrustRow("设备字体引擎", friendlyTrustValue(state.engine))
                 DeviceTrustRow("原厂模板", friendlyTrustValue(state.template))
                 DeviceTrustRow("开机加载验证", friendlyTrustValue(state.alignment))
                 DeviceTrustRow("加载模式", friendlyTrustValue(state.mode))
+                if (state.reason.isNotBlank()) {
+                    DeviceTrustRow("验证说明", friendlyTrustReason(state.reason))
+                }
                 DeviceTrustRow("后台对齐缓存", if (state.cachePending) "等待生成" else "无待处理任务")
                 if (state.error.isNotBlank()) {
                     Spacer(Modifier.size(8.dp))
@@ -212,17 +227,61 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
     val scheme = MaterialTheme.colorScheme
     return when {
         state.loading -> DeviceTrustPresentation("正在检查设备字体", "读取清单、模板与加载验证", Icons.Rounded.Info, scheme.primary)
+        state.level == DeviceTrustLevel.SYSTEM -> DeviceTrustPresentation(
+            "当前为系统字体",
+            "没有启用洛书字体，无需进行加载验证",
+            Icons.Rounded.CheckCircle,
+            scheme.primary,
+        )
         state.level == DeviceTrustLevel.VERIFIED && state.mode == "mount-verified" -> DeviceTrustPresentation(
             "设备字体挂载已验证",
             "系统可见字体与洛书负载一致",
             Icons.Rounded.CheckCircle,
             scheme.primary,
         )
-        state.level == DeviceTrustLevel.VERIFIED -> DeviceTrustPresentation("设备字体已验证", "原厂模板与开机加载证据一致", Icons.Rounded.CheckCircle, scheme.primary)
-        state.level == DeviceTrustLevel.READY -> DeviceTrustPresentation("设备字体引擎已就绪", "已发现原厂清单，等待完整加载验证", Icons.Rounded.Info, scheme.tertiary)
-        state.level == DeviceTrustLevel.ISSUE -> DeviceTrustPresentation("设备字体需要检查", "加载验证失败或状态读取异常", Icons.Rounded.Warning, scheme.error)
-        else -> DeviceTrustPresentation("设备字体尚未验证", "完整重启后将自动检查，无需重复应用", Icons.Rounded.Info, scheme.secondary)
+        state.level == DeviceTrustLevel.VERIFIED -> DeviceTrustPresentation(
+            "设备字体已验证",
+            "原厂模板与开机加载证据一致",
+            Icons.Rounded.CheckCircle,
+            scheme.primary,
+        )
+        state.level == DeviceTrustLevel.COMPATIBILITY -> DeviceTrustPresentation(
+            "当前使用兼容字体映射",
+            "字体可正常使用，但没有设备专属加载证据",
+            Icons.Rounded.Info,
+            scheme.tertiary,
+        )
+        state.level == DeviceTrustLevel.ISSUE -> DeviceTrustPresentation(
+            "设备字体需要检查",
+            "加载验证失败或状态读取异常",
+            Icons.Rounded.Warning,
+            scheme.error,
+        )
+        else -> DeviceTrustPresentation(
+            "设备字体等待验证",
+            if (state.reason == "awaiting-full-reboot") "完整重启后将自动检查" else "开机验证尚未完成，可查看验证说明",
+            Icons.Rounded.Info,
+            scheme.secondary,
+        )
     }
+}
+
+private fun friendlyActiveFont(value: String): String = when (value) {
+    "", "default" -> "系统默认"
+    "mix" -> "组合字体"
+    else -> "自定义字体"
+}
+
+private fun friendlyTrustReason(value: String): String = when (value) {
+    "default-font" -> "系统字体无需验证"
+    "awaiting-full-reboot" -> "等待完整重启"
+    "boot-not-completed" -> "Android 尚未完成启动"
+    "background-task-still-running" -> "后台字体任务尚未结束"
+    "aligned-payload-not-active" -> "当前字体使用兼容映射"
+    "aligned-manifest-missing" -> "设备专属负载清单缺失"
+    "verifier-output-missing" -> "验证器没有返回结果"
+    "verification-retry-exhausted" -> "多次自动验证仍未完成"
+    else -> value
 }
 
 private fun friendlyTrustValue(value: String): String = when (value) {
@@ -238,7 +297,7 @@ private fun friendlyTrustValue(value: String): String = when (value) {
     "not-applicable" -> "不适用"
     "aligned" -> "设备对齐"
     "mount-verified" -> "挂载证据"
-    "compatibility" -> "兼容模式"
+    "compatibility" -> "兼容映射"
     "unknown", "" -> "未知"
     else -> value
 }

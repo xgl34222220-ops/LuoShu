@@ -193,6 +193,23 @@ MODULE_DIR="$MODDIR"
         fi
     fi
 
+    # post-fs-data 提交的 detached worker 在部分 Root/SELinux 组合上可能被回收。
+    # late_start service 是更可靠的执行上下文；在模板、索引和负载维护完成后再做一次
+    # 最终验证，保证系统字体写入 not-applicable，设备负载写入真实 verified/compatibility。
+    if [ -f "$MODDIR/common/device_font_load_verify.sh" ] && \
+       [ ! -f "$MODDIR/config/font-payload-rebuild-pending.conf" ] && \
+       [ ! -e "$MODDIR/.font_switch.lock" ]; then
+        MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$MODDIR/common/device_font_load_verify.sh" >/dev/null 2>&1
+        _load_verify_rc=$?
+        _load_verify_state=$(sed -n 's/^state=//p' "$MODDIR/config/device-font-load-verification.conf" 2>/dev/null | head -n1)
+        case "$_load_verify_state" in
+            verified) log_service "INFO" "设备字体加载验证完成" ;;
+            not-applicable) log_service "INFO" "当前为系统字体，无需设备加载验证" ;;
+            compatibility) log_service "INFO" "当前字体使用兼容映射，不标记设备已验证" ;;
+            *) log_service "INFO" "设备字体加载验证未完成（state=${_load_verify_state:-missing}, code=$_load_verify_rc）" ;;
+        esac
+    fi
+
     # 新字体只由原生 App 或后台迁移任务提交，完整重启后由系统自然加载。
     rm -f "$MODDIR/.first_boot" 2>/dev/null || true
     log_service "INFO" "服务脚本执行完成"

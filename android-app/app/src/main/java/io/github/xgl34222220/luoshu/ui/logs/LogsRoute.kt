@@ -53,7 +53,10 @@ internal fun LogsRoute(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(
-                    top = if (style == UiStyle.MIUIX) 25.dp else 14.dp,
+                    // The MIUIx refresh action is vertically centered against the complete
+                    // three-line title block. Device photos showed that 25.dp still placed the
+                    // diagnostic action above that visual center, so use the measured offset.
+                    top = if (style == UiStyle.MIUIX) 38.dp else 14.dp,
                     end = 82.dp,
                 ),
         )
