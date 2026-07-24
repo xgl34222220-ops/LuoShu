@@ -3,6 +3,7 @@ package io.github.xgl34222220.luoshu.ui.studio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.AlertDialog
@@ -72,7 +73,12 @@ internal fun FontStudioRoute(
         }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .navigationBarsPadding()
+            .padding(bottom = 154.dp),
+    ) {
         Box(Modifier.weight(1f)) {
             when (style) {
                 UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
