@@ -2,6 +2,7 @@ package io.github.xgl34222220.luoshu.ui.home
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -52,7 +53,8 @@ fun HomeRoute(
                 onClick = { showTrustDetails = true },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(horizontal = 18.dp, vertical = 96.dp),
+                    .navigationBarsPadding()
+                    .padding(horizontal = 18.dp, bottom = 108.dp),
             )
         }
     }
