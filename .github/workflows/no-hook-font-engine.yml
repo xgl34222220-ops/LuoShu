@@ -109,8 +109,6 @@ jobs:
           test -s "$FONT"
           python3 scripts/device_font_slot_build_test.py --font "$FONT"
           sh scripts/device_font_cache_test.sh
-          sh scripts/device_font_foreground_quick_test.sh
-          sh scripts/font_switch_task_test.sh
           python3 scripts/device_font_load_verify_test.py
           sh -n common/device_font_load_verify.sh
           python3 scripts/device_font_payload_build_test.py --font "$FONT"
@@ -122,6 +120,10 @@ jobs:
           sh scripts/device_font_payload_bridge_test.sh
           sh scripts/device_font_transaction_guard_test.sh
           sh scripts/uninstall_safety_test.sh
+      - name: Verify constant-time single-weight foreground path
+        run: sh -x scripts/device_font_foreground_quick_test.sh
+      - name: Verify bounded foreground switch watchdog
+        run: sh -x scripts/font_switch_task_test.sh
       - name: Run XML structure tests
         run: python3 scripts/font_config_overlay_test.py
       - name: Run mixed-script metrics tests
