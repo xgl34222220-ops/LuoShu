@@ -189,25 +189,28 @@ internal fun FontDirectoryMonitorTool(
     var errorMessage by remember { mutableStateOf("") }
     var showDialog by remember { mutableStateOf(false) }
 
+    suspend fun scanNow(target: FontDirectoryWatchConfig) {
+        if (!target.configured || scanning) return
+        scanning = true
+        errorMessage = ""
+        val result = runCatching {
+            withContext(Dispatchers.IO) {
+                val documents = scanFontDirectory(context, Uri.parse(target.treeUri))
+                FontDirectoryScan(documents, diffFontDirectorySnapshots(target.snapshot, documents))
+            }
+        }
+        scan = result.getOrNull()
+        errorMessage = result.exceptionOrNull()?.message.orEmpty()
+        scanning = false
+    }
+
     fun requestScan(target: FontDirectoryWatchConfig = config) {
         if (!target.configured || scanning) return
-        scope.launch {
-            scanning = true
-            errorMessage = ""
-            val result = runCatching {
-                withContext(Dispatchers.IO) {
-                    val documents = scanFontDirectory(context, Uri.parse(target.treeUri))
-                    FontDirectoryScan(documents, diffFontDirectorySnapshots(target.snapshot, documents))
-                }
-            }
-            scan = result.getOrNull()
-            errorMessage = result.exceptionOrNull()?.message.orEmpty()
-            scanning = false
-        }
+        scope.launch { scanNow(target) }
     }
 
     LaunchedEffect(config.treeUri) {
-        if (config.configured) requestScan(config)
+        if (config.configured) scanNow(config)
     }
 
     val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -321,11 +324,8 @@ private fun FontDirectoryMonitorButton(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (scanning) {
-                CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp)
-            } else {
-                Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(20.dp))
-            }
+            if (scanning) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp)
+            else Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
                 Text("监视字体目录", fontSize = 11.sp, fontWeight = FontWeight.Black)
@@ -381,11 +381,7 @@ private fun FontDirectoryMonitorDialog(
                     Spacer(Modifier.size(11.dp))
                     Column(Modifier.weight(1f)) {
                         Text("SAF 字体目录监视", fontSize = 19.sp, fontWeight = FontWeight.Black)
-                        Text(
-                            "进入字体库时扫描，不在后台常驻",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 10.sp,
-                        )
+                        Text("进入字体库时扫描，不在后台常驻", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                     }
                     IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, contentDescription = "关闭") }
                 }
@@ -454,9 +450,7 @@ private fun FontDirectoryMonitorDialog(
                         lineHeight = 14.sp,
                     )
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onUseBaseline, modifier = Modifier.weight(1f)) {
-                            Text("仅记录基线")
-                        }
+                        OutlinedButton(onClick = onUseBaseline, modifier = Modifier.weight(1f)) { Text("仅记录基线") }
                         OutlinedButton(
                             onClick = { onImport(diff.actionable) },
                             enabled = diff.actionable.isNotEmpty() && !importViewModel.state.busy && !importViewModel.state.paused,
