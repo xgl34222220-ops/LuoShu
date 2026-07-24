@@ -1,0 +1,54 @@
+name: Android build diagnostic
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - android-app/**
+      - module.prop
+      - .github/workflows/android-build-diagnostic.yml
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Compile and test App
+        id: gradle
+        working-directory: android-app
+        shell: bash
+        run: |
+          set +e
+          log="$RUNNER_TEMP/luoshu-android-diagnostic.log"
+          gradle --no-daemon --stacktrace :app:lintDebug :app:testDebugUnitTest :app:assembleDebug >"$log" 2>&1
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          exit "$code"
+      - name: Post failure tail to PR
+        if: failure() && steps.gradle.outputs.code != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          log="$RUNNER_TEMP/luoshu-android-diagnostic.log"
+          {
+            echo '### Android 构建失败诊断'
+            echo
+            echo '```text'
+            tail -n 160 "$log"
+            echo '```'
+          } > "$RUNNER_TEMP/gradle-comment.md"
+          gh pr comment "$PR_NUMBER" --body-file "$RUNNER_TEMP/gradle-comment.md"
