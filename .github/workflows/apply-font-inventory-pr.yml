@@ -17,18 +17,27 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      - name: Apply runtime and tests
-        shell: bash
+      - name: Verify source archive
         run: |
-          set -euo pipefail
           test -s .font-inventory-implementation.tar.gz
-          tar -xzf .font-inventory-implementation.tar.gz -C . \
-            --exclude='.github/workflows/font-inventory-tests.yml'
+          tar -tzf .font-inventory-implementation.tar.gz >/tmp/font-inventory-files.txt
+          grep -qx 'common/font_inventory.py' /tmp/font-inventory-files.txt
+          grep -qx 'scripts/font_inventory_test.py' /tmp/font-inventory-files.txt
+      - name: Extract runtime and tests
+        run: |
+          tar --exclude='.github/workflows/font-inventory-tests.yml' \
+            -xzf .font-inventory-implementation.tar.gz -C .
           rm -f .font-inventory-implementation.tar.gz
+      - name: Validate source diff
+        run: |
+          git add -A
+          git diff --cached --stat
+          git diff --cached --check
+          test -n "$(git diff --cached --name-only)"
+      - name: Commit source changes
+        run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git diff --cached --check
-          git diff --cached --quiet && exit 0
           git commit -m 'refactor: discover device font inventory before overlay'
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+      - name: Push source changes
+        run: git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
