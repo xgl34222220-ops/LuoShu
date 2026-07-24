@@ -54,7 +54,7 @@ fun HomeRoute(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
-                    .padding(horizontal = 18.dp, bottom = 108.dp),
+                    .padding(start = 18.dp, end = 18.dp, bottom = 108.dp),
             )
         }
     }
