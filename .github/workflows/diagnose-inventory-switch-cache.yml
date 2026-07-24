@@ -1,0 +1,56 @@
+name: Diagnose inventory switch cache
+
+on:
+  push:
+    branches:
+      - fix/v2.2.1-switch-timeout-status
+    paths:
+      - .github/workflows/diagnose-inventory-switch-cache.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v2.2.1-switch-timeout-status
+          fetch-depth: 0
+      - name: Persist patch output
+        shell: bash
+        run: |
+          set +e
+          mkdir -p docs
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/apply-inventory-switch-cache.yml').read_text().splitlines()
+          collecting = False
+          lines = []
+          for line in source:
+              stripped = line.strip()
+              if not collecting and stripped.startswith("python3 - <<'PY'"):
+                  collecting = True
+                  continue
+              if collecting and stripped == 'PY':
+                  break
+              if collecting:
+                  lines.append(line[10:] if line.startswith('          ') else line)
+          Path('/tmp/inventory-patch.py').write_text('\n'.join(lines) + '\n')
+          PY
+          {
+            echo '== patch =='
+            python3 /tmp/inventory-patch.py
+            echo "patch_rc=$?"
+            echo '== syntax =='
+            sh -n common/rom_adapters.sh; echo "rom_syntax=$?"
+            sh -n customize.sh; echo "customize_syntax=$?"
+            echo '== test =='
+            sh scripts/font_inventory_switch_cache_test.sh; echo "test_rc=$?"
+          } > docs/inventory-switch-cache-diagnostic.log 2>&1
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/inventory-switch-cache-diagnostic.log
+          git commit -m 'chore: record inventory switch cache diagnostic'
+          git push origin HEAD:fix/v2.2.1-switch-timeout-status
