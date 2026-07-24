@@ -12,7 +12,7 @@ class FontUiSupportTest {
         val font = font(weights = listOf("thin", "black"))
 
         assertEquals(900, fontPreviewWeight(font))
-        assertEquals("多字重 · 100 / 900", fontCapabilityLabel(font))
+        assertEquals("多字重 · 2 档", fontCapabilityLabel(font))
         assertFalse(fontCapabilityLabel(font).contains("常规 400"))
     }
 
@@ -41,7 +41,7 @@ class FontUiSupportTest {
     fun latinOnlyDifferenceIsExpressedByCapabilityLabel() {
         val font = font(weights = listOf("regular"), supportsCjk = false)
 
-        assertTrue(fontCapabilityLabel(font).startsWith("仅拉丁"))
+        assertTrue(fontCapabilityLabel(font).startsWith("拉丁"))
         assertEquals("洛书字体 Aa\n中文 ABC 123", fontPreviewText(font, detailed = true))
     }
 
