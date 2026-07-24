@@ -14,7 +14,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-      - name: Print head tree
+      - name: Capture head tree
         run: |
-          echo "HEAD_SHA=$(git rev-parse HEAD)"
-          echo "TREE_SHA=$(git rev-parse 'HEAD^{tree}')"
+          {
+            echo "HEAD_SHA=$(git rev-parse HEAD)"
+            echo "TREE_SHA=$(git rev-parse 'HEAD^{tree}')"
+          } | tee /tmp/font-inventory-tree.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: font-inventory-tree-sha
+          path: /tmp/font-inventory-tree.txt
+          if-no-files-found: error
+          retention-days: 2
