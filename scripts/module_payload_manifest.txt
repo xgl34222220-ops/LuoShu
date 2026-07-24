@@ -38,6 +38,7 @@ common/font_import.sh
 common/font_import_compat.sh
 common/font_import_probe.py
 common/font_inventory.py
+common/font_inventory_scan.py
 common/font_instance.py
 common/font_library_cache.sh
 common/font_manager.sh
