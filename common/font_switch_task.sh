@@ -17,10 +17,10 @@ MANAGER="${LUOSHU_FONT_MANAGER:-$MODDIR/common/font_manager.sh}"
 TASK_FILE="${LUOSHU_SWITCH_TASK_FILE:-$MODDIR/config/switch_task.conf}"
 LOG_FILE="${LUOSHU_SWITCH_LOG:-$MODDIR/logs/fontswitch.log}"
 STATUS_SCRIPT="$MODDIR/common/module_status.sh"
-# 首次处理大型 CJK 字体时，度量归一化和本机清单映射可能合理超过 45 秒。
-# 保留硬超时保护，但给真实准备流程留出足够时间；App 观察窗口仍为 120 秒。
-TIMEOUT_SECONDS="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-105}"
-case "$TIMEOUT_SECONDS" in ''|*[!0-9]*) TIMEOUT_SECONDS=105 ;; esac
+# 单字体切换继续以 45 秒作为硬性能与安全门槛；正常目标为约 10–20 秒。
+# 超时仍会终止任务，并由事务层恢复上一套有效字体。
+TIMEOUT_SECONDS="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-45}"
+case "$TIMEOUT_SECONDS" in ''|*[!0-9]*) TIMEOUT_SECONDS=45 ;; esac
 [ "$TIMEOUT_SECONDS" -ge 5 ] 2>/dev/null || TIMEOUT_SECONDS=5
 
 json_escape() {
@@ -125,7 +125,7 @@ run_worker() {
     _started="$3"
     _output="${TASK_FILE}.output.${_task}"
     mkdir -p "${LOG_FILE%/*}" 2>/dev/null || true
-    write_task "$_task" running "$_font" '正在校准并映射系统字体槽，首次应用可能较慢' "$_started" '' "$$" || exit 1
+    write_task "$_task" running "$_font" '正在验证并快速映射系统字体槽' "$_started" '' "$$" || exit 1
     printf '[%s] bounded switch start: %s task=%s timeout=%ss\n' \
         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_font" "$_task" "$TIMEOUT_SECONDS" >> "$LOG_FILE" 2>/dev/null || true
 
@@ -169,7 +169,7 @@ start_task() {
         LUOSHU_SWITCH_LOG="$LOG_FILE" LUOSHU_SWITCH_TIMEOUT_SECONDS="$TIMEOUT_SECONDS" \
         sh "$0" run "$_task" "$_font" "$_started" >> "$LOG_FILE" 2>&1 &
     _worker=$!
-    write_task "$_task" running "$_font" '正在校准并映射系统字体槽，首次应用可能较慢' "$_started" '' "$_worker" || true
+    write_task "$_task" running "$_font" '正在验证并快速映射系统字体槽' "$_started" '' "$_worker" || true
     printf '{"status":"ok","data":{"font":"%s","task":"%s","message":"任务已开始"}}\n' \
         "$(json_escape "$_font")" "$(json_escape "$_task")"
 }
