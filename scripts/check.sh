@@ -18,14 +18,15 @@ python3 -m py_compile \
   "$ROOT/common/font_role_check.py" \
   "$ROOT/common/font_metadata.py" \
   "$ROOT/common/font_extract_faces.py" \
-  "$ROOT/common/font_import_probe.py"
+  "$ROOT/common/font_import_probe.py" \
+  "$ROOT/common/font_inventory.py"
 
 # App-only 活跃源码清单。WebUI 前端及其准备脚本必须彻底不存在。
 for file in \
   module.prop customize.sh post-fs-data.sh service.sh uninstall.sh action.sh \
   README.md README.txt LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
   common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \
-  common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py \
+  common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py common/font_inventory.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
   common/multiweight_mix_task.sh common/mix_weight_mode.sh \
@@ -212,6 +213,10 @@ sh "$ROOT/scripts/customize_reenable_test.sh"
 sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
 sh "$ROOT/scripts/coloros_consistency_mapping_test.sh"
+FONT_INVENTORY_TEST_FONT=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit 2>/dev/null || true)
+[ -s "$FONT_INVENTORY_TEST_FONT" ]
+python3 "$ROOT/scripts/font_inventory_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+sh "$ROOT/scripts/rom_adapter_inventory_test.sh" "$FONT_INVENTORY_TEST_FONT"
 sh "$ROOT/scripts/font_config_variable_weight_test.sh"
 python3 "$ROOT/scripts/font_metrics_normalization_test.py"
 python3 "$ROOT/scripts/font_config_monospace_test.py"

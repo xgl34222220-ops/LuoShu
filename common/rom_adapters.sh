@@ -44,7 +44,35 @@ _font_store_reset() {
 # 归一化结果缓存：以 源文件sha256+字重+归一化版本 为 key。
 # 同一字体重复切换时直接复用，跳过 fonttools 冷启动（手机端每字重数秒）。
 # 修改 font_metrics_normalize.py 的度量契约时递增版本号使旧缓存失效。
-LUOSHU_NORMALIZER_VERSION="5"
+LUOSHU_NORMALIZER_VERSION="6"
+
+_font_inventory_cache_token() {
+    _fict_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+    _fict_inventory="$_fict_module/config/device_font_inventory.json"
+    _fict_current=''
+    if command -v getprop >/dev/null 2>&1; then
+        _fict_current=$(getprop ro.build.fingerprint 2>/dev/null || true)
+        [ -n "$_fict_current" ] || _fict_current=$(getprop ro.build.display.id 2>/dev/null || true)
+    fi
+    _fict_recorded=$(sed -n 's/^[[:space:]]*"buildKey":[[:space:]]*"\([^"]*\)".*/\1/p' "$_fict_inventory" 2>/dev/null | head -n1)
+    if [ -n "$_fict_current" ] && [ "$_fict_current" != "$_fict_recorded" ]; then
+        printf '%s\n' fallback
+        return 0
+    fi
+    if [ -s "$_fict_inventory" ] && \
+       grep -q '"schema": "device-font-inventory-v1"' "$_fict_inventory" 2>/dev/null && \
+       grep -q '"state": "ready"' "$_fict_inventory" 2>/dev/null && \
+       command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$_fict_inventory" 2>/dev/null | awk '{print substr($1,1,16)}'
+    elif [ -s "$_fict_inventory" ] && \
+         grep -q '"schema": "device-font-inventory-v1"' "$_fict_inventory" 2>/dev/null && \
+         grep -q '"state": "ready"' "$_fict_inventory" 2>/dev/null && \
+         command -v busybox >/dev/null 2>&1; then
+        busybox sha256sum "$_fict_inventory" 2>/dev/null | awk '{print substr($1,1,16)}'
+    else
+        printf '%s\n' fallback
+    fi
+}
 
 _font_anchor_cache_lookup() {
     _facl_src="$1"
@@ -52,8 +80,10 @@ _font_anchor_cache_lookup() {
     command -v sha256sum >/dev/null 2>&1 || return 1
     _facl_sha=$(sha256sum "$_facl_src" 2>/dev/null | awk '{print $1}')
     [ -n "$_facl_sha" ] || return 1
+    _facl_inventory=$(_font_inventory_cache_token)
+    [ -n "$_facl_inventory" ] || _facl_inventory=fallback
     _facl_cache="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/config/metrics_cache"
-    _facl_hit="$_facl_cache/${_facl_sha}_${_facl_key}_v${LUOSHU_NORMALIZER_VERSION}.font"
+    _facl_hit="$_facl_cache/${_facl_sha}_${_facl_key}_v${LUOSHU_NORMALIZER_VERSION}_${_facl_inventory}.font"
     [ -f "$_facl_hit" ] || return 1
     printf '%s\n' "$_facl_hit"
     return 0
@@ -79,12 +109,15 @@ _font_anchor() {
 
     if [ -f "$normalizer" ]; then
         if type _luoshu_font_config_exec >/dev/null 2>&1; then
-            _luoshu_font_config_exec "$normalizer" --input "$src" --output "$anchor" >/dev/null 2>&1 || return 1
+            _luoshu_font_config_exec "$normalizer" --input "$src" --output "$anchor" \
+                --inventory "$module/config/device_font_inventory.json" >/dev/null 2>&1 || return 1
         elif [ -x "$module/common/python/bin/luoshu-python" ]; then
             pyroot="$module/common/python"
-            PYTHONHOME="$pyroot"             PYTHONPATH="$pyroot/lib/python3.14:$pyroot/lib/python3.14/site-packages"             LD_LIBRARY_PATH="$pyroot/lib:$pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"                 "$pyroot/bin/luoshu-python" "$normalizer" --input "$src" --output "$anchor" >/dev/null 2>&1 || return 1
+            PYTHONHOME="$pyroot"             PYTHONPATH="$pyroot/lib/python3.14:$pyroot/lib/python3.14/site-packages"             LD_LIBRARY_PATH="$pyroot/lib:$pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"                 "$pyroot/bin/luoshu-python" "$normalizer" --input "$src" --output "$anchor" \
+                    --inventory "$module/config/device_font_inventory.json" >/dev/null 2>&1 || return 1
         elif command -v python3 >/dev/null 2>&1; then
-            python3 "$normalizer" --input "$src" --output "$anchor" >/dev/null 2>&1 || return 1
+            python3 "$normalizer" --input "$src" --output "$anchor" \
+                --inventory "$module/config/device_font_inventory.json" >/dev/null 2>&1 || return 1
         else
             return 1
         fi
@@ -99,7 +132,10 @@ _font_anchor() {
         if [ -n "$_fa_sha" ]; then
             _fa_cache="$module/config/metrics_cache"
             mkdir -p "$_fa_cache" 2>/dev/null || true
-            ln "$anchor" "$_fa_cache/${_fa_sha}_${key}_v${LUOSHU_NORMALIZER_VERSION}.font" 2>/dev/null ||                 cp -f "$anchor" "$_fa_cache/${_fa_sha}_${key}_v${LUOSHU_NORMALIZER_VERSION}.font" 2>/dev/null || true
+            _fa_inventory=$(_font_inventory_cache_token)
+            [ -n "$_fa_inventory" ] || _fa_inventory=fallback
+            _fa_cached="$_fa_cache/${_fa_sha}_${key}_v${LUOSHU_NORMALIZER_VERSION}_${_fa_inventory}.font"
+            ln "$anchor" "$_fa_cached" 2>/dev/null || cp -f "$anchor" "$_fa_cached" 2>/dev/null || true
         fi
     fi
     echo "$anchor"
@@ -139,6 +175,131 @@ _rom_exact_target_exists() {
         [ -e "$_root/$_file" ] && return 0
     done
     return 1
+}
+
+_device_font_inventory_module() {
+    printf '%s\n' "${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+}
+
+_device_font_inventory_exec() {
+    _dfie_module="$(_device_font_inventory_module)"
+    _dfie_script="$_dfie_module/common/font_inventory.py"
+    [ -f "$_dfie_script" ] || return 1
+    if type _luoshu_font_config_exec >/dev/null 2>&1; then
+        _luoshu_font_config_exec "$_dfie_script" "$@"
+        return $?
+    fi
+    _dfie_python="$_dfie_module/common/python/bin/luoshu-python"
+    if [ -x "$_dfie_python" ]; then
+        _dfie_pyroot="$_dfie_module/common/python"
+        PYTHONHOME="$_dfie_pyroot" \
+        PYTHONPATH="$_dfie_pyroot/lib/python3.14:$_dfie_pyroot/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$_dfie_pyroot/lib:$_dfie_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$_dfie_python" "$_dfie_script" "$@"
+        return $?
+    fi
+    command -v python3 >/dev/null 2>&1 || return 1
+    python3 "$_dfie_script" "$@"
+}
+
+_device_font_inventory_entries() {
+    _dfie_module="$(_device_font_inventory_module)"
+    _device_font_inventory_exec --list --output "$_dfie_module/config/device_font_inventory.json" 2>/dev/null
+}
+
+_device_font_inventory_target() {
+    _dfit_path="$1"
+    _dfit_module="$(_device_font_inventory_module)"
+    case "$_dfit_path" in
+        /system/fonts/*) printf '%s/system/fonts/%s\n' "$_dfit_module" "${_dfit_path#/system/fonts/}" ;;
+        /system_ext/fonts/*) printf '%s/system_ext/fonts/%s\n' "$_dfit_module" "${_dfit_path#/system_ext/fonts/}" ;;
+        /product/fonts/*) printf '%s/product/fonts/%s\n' "$_dfit_module" "${_dfit_path#/product/fonts/}" ;;
+        /my_product/fonts/*) printf '%s/my_product/fonts/%s\n' "$_dfit_module" "${_dfit_path#/my_product/fonts/}" ;;
+        /vendor/fonts/*) printf '%s/vendor/fonts/%s\n' "$_dfit_module" "${_dfit_path#/vendor/fonts/}" ;;
+        *) return 1 ;;
+    esac
+}
+
+_device_font_inventory_role() {
+    case "$1" in
+        100) printf '%s\n' thin ;;
+        200) printf '%s\n' extralight ;;
+        300|350) printf '%s\n' light ;;
+        500) printf '%s\n' medium ;;
+        600) printf '%s\n' semibold ;;
+        700) printf '%s\n' bold ;;
+        800) printf '%s\n' extrabold ;;
+        900) printf '%s\n' black ;;
+        *) printf '%s\n' regular ;;
+    esac
+}
+
+_device_font_inventory_anchor() {
+    _dfia_regular="$1"
+    _dfia_dest="$2"
+    _dfia_family="$3"
+    _dfia_mode="$4"
+    _dfia_weight="$5"
+    _dfia_role=regular
+    _dfia_source="$_dfia_regular"
+    if [ "$_dfia_mode" != quick ] && [ -n "$_dfia_family" ] && type get_weight_file >/dev/null 2>&1; then
+        _dfia_role=$(_device_font_inventory_role "$_dfia_weight")
+        if [ "$_dfia_role" != regular ]; then
+            _dfia_weight_file=$(get_weight_file "$_dfia_family" "$_dfia_role" 2>/dev/null)
+            if [ -f "$_dfia_weight_file" ]; then
+                _dfia_source="$_dfia_weight_file"
+            else
+                _dfia_role=regular
+            fi
+        fi
+    fi
+    _dfia_anchor="$_dfia_dest/.luoshu-font-store/${_dfia_role}.font"
+    if [ ! -s "$_dfia_anchor" ]; then
+        _dfia_anchor=$(_font_anchor "$_dfia_source" "$_dfia_dest" "$_dfia_role") || return 1
+    fi
+    printf '%s\n' "$_dfia_anchor"
+}
+
+# Inventory-first mapper. A valid inventory contains only UI text slots discovered from this ROM.
+# Any missing, stale or malformed inventory returns non-zero so the legacy static lists remain the
+# compatibility fallback for untested devices.
+_copy_as_inventory() {
+    _dfii_src="$1"
+    _dfii_dest="$2"
+    _dfii_mode="${3:-full}"
+    _dfii_family="${4:-}"
+    _dfii_entries=$(_device_font_inventory_entries) || return 2
+    [ -n "$_dfii_entries" ] || return 2
+    mkdir -p "$_dfii_dest" 2>/dev/null || return 1
+    _font_store_reset "$_dfii_dest"
+    _dfii_regular=$(_font_anchor "$_dfii_src" "$_dfii_dest" regular) || return 1
+    _dfii_count=0
+    _dfii_bad=0
+    _dfii_tab=$(printf '\t')
+    while IFS="$_dfii_tab" read -r _dfii_logical _dfii_name _dfii_partition _dfii_format _dfii_weight _dfii_style _dfii_source; do
+        [ -n "$_dfii_logical" ] && [ -n "$_dfii_name" ] || continue
+        _dfii_target=$(_device_font_inventory_target "$_dfii_logical") || continue
+        mkdir -p "${_dfii_target%/*}" 2>/dev/null || continue
+        _dfii_anchor="$_dfii_regular"
+        if [ "$_dfii_mode" != quick ] && [ "$_dfii_weight" != 400 ]; then
+            _dfii_anchor=$(_device_font_inventory_anchor "$_dfii_src" "$_dfii_dest" "$_dfii_family" "$_dfii_mode" "$_dfii_weight") || _dfii_anchor="$_dfii_regular"
+        fi
+        if _font_alias "$_dfii_anchor" "$_dfii_target"; then
+            if _verify_font_copy "$_dfii_target"; then
+                _dfii_count=$((_dfii_count + 1))
+            else
+                _dfii_bad=$((_dfii_bad + 1))
+            fi
+        fi
+    done <<EOF_LUOSHU_FONT_INVENTORY
+$_dfii_entries
+EOF_LUOSHU_FONT_INVENTORY
+    [ "$_dfii_count" -gt 0 ] || return 2
+    LUOSHU_INVENTORY_TARGETS_MAPPED=1
+    export LUOSHU_INVENTORY_TARGETS_MAPPED
+    _log_step "  已按设备原厂清单覆盖 $_dfii_count 个真实字体槽位"
+    [ "$_dfii_bad" -eq 0 ] || _log_step "  ⚠ $_dfii_bad 个清单槽位写入后校验异常"
+    return 0
 }
 
 # ============================================================
@@ -380,6 +541,12 @@ apply_font_by_rom() {
     dest_dir="$2"
     mode="${3:-full}"
     font_family="${4:-}"
+
+    # 优先使用安装阶段读取的本机原厂清单；清单缺失、过期或异常时自动回退静态适配。
+    if _copy_as_inventory "$src" "$dest_dir" "$mode" "$font_family"; then
+        return 0
+    fi
+    _log_step "  设备字体清单不可用，已降级到静态 ROM 适配清单"
 
     # HyperOS 优先：避免兼容属性同时存在时误走 ColorOS 文件映射。
     if [ "$IS_HYPEROS" = "true" ]; then

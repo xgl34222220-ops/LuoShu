@@ -1,0 +1,175 @@
+name: Build Test Candidate
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - module.prop
+      - config/version_notes.conf
+      - common/**
+      - scripts/**
+      - android-app/**
+      - customize.sh
+      - post-fs-data.sh
+      - service.sh
+      - uninstall.sh
+      - action.sh
+      - .github/workflows/test-candidate.yml
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+
+      - name: Prepare ARM64 runtime
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
+
+      - name: Run source checks
+        run: sh ./scripts/check.sh
+
+      - name: Run supplemental candidate gates
+        continue-on-error: true
+        run: |
+          sh -x scripts/background_task_test.sh
+          sh -x scripts/device_font_foreground_quick_test.sh
+          sh -x scripts/font_switch_task_test.sh
+          sh -x scripts/mount_fast_sync_test.sh
+          FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
+          test -s "$FONT"
+          python3 scripts/font_inventory_scan_v3_test.py --font "$FONT"
+          grep -q '多字重 · ${weights.size} 档' android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt
+          grep -q '静态字体现在始终按当前所选字重走快速单文件组合' common/mix_weight_mode.sh
+
+      - name: Build debug App
+        working-directory: android-app
+        shell: bash
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/luoshu-gradle-debug.log"
+          if ! gradle --no-daemon --stacktrace :app:lintDebug :app:testDebugUnitTest :app:assembleDebug >"$log" 2>&1; then
+            echo 'Gradle 构建失败，输出最后 180 行：' >&2
+            tail -n 180 "$log" >&2
+            exit 1
+          fi
+
+      - name: Build module candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./scripts/version.sh
+          apk='android-app/app/build/outputs/apk/debug/app-debug.apk'
+          test -s "$apk"
+          rm -rf dist
+          mkdir -p dist
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
+          cp -f "$apk" "$app"
+          (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
+          LUOSHU_APP_APK="$apk" LUOSHU_ALLOW_DEBUG_APP=1 sh ./scripts/build.sh
+
+      - name: Verify v2.2.0 candidate
+        shell: bash
+        run: |
+          set -euxo pipefail
+          . ./scripts/version.sh
+          module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
+          test -s "$module"
+          test -s "$app"
+          unzip -t "$module" >/dev/null
+          (cd dist && sha256sum -c "$(basename "$module").sha256")
+          (cd dist && sha256sum -c "$(basename "$app").sha256")
+          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0'
+          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20200'
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2020001'
+          unzip -Z1 "$module" > /tmp/luoshu-v220-files.txt
+          for path in \
+            common/background_task.sh \
+            common/device_font_template.sh \
+            common/device_font_cache.sh \
+            common/device_font_load_verify.py \
+            common/device_font_load_verify.sh \
+            common/device_font_payload_policy.sh \
+            common/device_font_transaction_guard.sh \
+            common/device_font_dynamic_guard.sh \
+            common/device_font_runtime_report.sh \
+            common/font_inventory.py \
+            common/font_inventory_scan.py \
+            common/font_inventory_scan_v3.py \
+            common/font_switch_task.sh \
+            common/mix_weight_mode.sh \
+            common/mount_fast_sync.sh; do
+            grep -qx "$path" /tmp/luoshu-v220-files.txt
+          done
+          unzip -p "$module" common/background_task.sh | grep -q '_lsd_task'
+          unzip -p "$module" common/background_task.sh | grep -q 'every new worker wrote an empty .task sidecar'
+          unzip -p "$module" common/device_font_template.sh | grep -q 'CAPTURE_REVISION=2'
+          unzip -p "$module" common/device_font_cache.sh | grep -q 'alignment-cache-v2'
+          unzip -p "$module" common/device_font_cache.sh | grep -q '.font_switch.lock'
+          unzip -p "$module" common/device_font_load_verify.py | grep -q 'device-font-load-verification-v1'
+          unzip -p "$module" common/device_font_load_verify.sh | grep -q 'device_font_load_verify'
+          unzip -p "$module" common/device_font_payload_policy.sh | grep -q '_device_font_fast_map'
+          unzip -p "$module" common/device_font_payload_policy.sh | grep -q 'device_font_cache_schedule'
+          unzip -p "$module" common/device_font_dynamic_guard.sh | grep -q '_dfpr_launch_pending_cache'
+          unzip -p "$module" common/device_font_dynamic_guard.sh | grep -q 'device_font_load_verify'
+          unzip -p "$module" common/font_inventory.py | grep -q 'device_font_inventory.json'
+          unzip -p "$module" common/font_inventory_scan.py | grep -q 'font_inventory_scan_v3'
+          unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'SCANNER_REVISION = 3'
+          unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'stockFontUniqueFileCount'
+          unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'themeOverrideRoots'
+          unzip -p "$module" common/mix_weight_mode.sh | grep -q '快速单文件组合'
+          unzip -p "$module" customize.sh | grep -q '原厂字体文件'
+          unzip -p "$module" customize.sh | grep -q 'XML .* OEM 探测'
+          unzip -p "$module" common/font_switch_task.sh | grep -q 'TIMEOUT_SECONDS'
+          unzip -p "$module" common/font_switch_task.sh | grep -q '已终止并回滚'
+          unzip -p "$module" common/mount_fast_sync.sh | grep -q 'cp -al'
+          unzip -p "$module" common/app_bridge.sh | grep -q 'FONT_SWITCH_TASK'
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          unzip -q "$module" -d "$tmp"
+          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py" "$tmp/common/font_inventory_scan_v3.py"
+          sh -n "$tmp/customize.sh"
+          sh -n "$tmp/common/background_task.sh"
+          sh -n "$tmp/common/device_font_template.sh"
+          sh -n "$tmp/common/device_font_cache.sh"
+          sh -n "$tmp/common/device_font_load_verify.sh"
+          sh -n "$tmp/common/device_font_payload_policy.sh"
+          sh -n "$tmp/common/font_switch_task.sh"
+          sh -n "$tmp/common/mix_weight_mode.sh"
+          sh -n "$tmp/common/mount_fast_sync.sh"
+          sh -n "$tmp/service.sh"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: LuoShu-v2.2.0-Stable-Candidate
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14

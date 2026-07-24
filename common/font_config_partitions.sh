@@ -67,16 +67,11 @@ $(_luoshu_font_config_partition_rows)
 EOF_LUOSHU_PARTITIONS
 }
 
-# ColorOS uses product/system_ext named families (notably google-sans-text) for some app controls.
 _luoshu_coloros_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/coloros_global.sh"
 [ -f "$_luoshu_coloros_helper" ] && . "$_luoshu_coloros_helper"
-
-# OriginOS and Flyme use OEM-named families, exact physical slots and (on Flyme) a persistent theme font.
 _luoshu_origin_flyme_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/origin_flyme_global.sh"
 [ -f "$_luoshu_origin_flyme_helper" ] && . "$_luoshu_origin_flyme_helper"
 
-# font_mix.sh 通过 mount_compat.sh 间接加载本文件。组合 Worker 是独立 shell，不能依赖
-# 调用方已经 source 的函数；缺失时在这里补齐运行时与九档准备层，再加载收尾性能修复。
 _luoshufp_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
 if ! type luoshu_payload_validate_current >/dev/null 2>&1; then
     [ -f "$_luoshufp_module/common/font_config_runtime.sh" ] && . "$_luoshufp_module/common/font_config_runtime.sh"
@@ -85,4 +80,13 @@ if ! type font_config_prepare_payload_weights >/dev/null 2>&1; then
     [ -f "$_luoshufp_module/common/font_config_weights.sh" ] && . "$_luoshufp_module/common/font_config_weights.sh"
 fi
 [ -f "$_luoshufp_module/common/font_finalize_hotfix.sh" ] && . "$_luoshufp_module/common/font_finalize_hotfix.sh"
+
+[ -f "$_luoshufp_module/common/device_font_payload_bridge.sh" ] && . "$_luoshufp_module/common/device_font_payload_bridge.sh"
+[ -f "$_luoshufp_module/common/device_font_dynamic_guard.sh" ] && . "$_luoshufp_module/common/device_font_dynamic_guard.sh"
+[ -f "$_luoshufp_module/common/device_font_transaction_guard.sh" ] && . "$_luoshufp_module/common/device_font_transaction_guard.sh"
+[ -f "$_luoshufp_module/common/device_font_load_verify.sh" ] && . "$_luoshufp_module/common/device_font_load_verify.sh"
+[ -f "$_luoshufp_module/common/device_font_runtime_report.sh" ] && . "$_luoshufp_module/common/device_font_runtime_report.sh"
+[ -f "$_luoshufp_module/common/device_font_cache.sh" ] && . "$_luoshufp_module/common/device_font_cache.sh"
+[ -f "$_luoshufp_module/common/mount_fast_sync.sh" ] && . "$_luoshufp_module/common/mount_fast_sync.sh"
+[ -f "$_luoshufp_module/common/device_font_payload_policy.sh" ] && . "$_luoshufp_module/common/device_font_payload_policy.sh"
 unset _luoshufp_module

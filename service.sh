@@ -64,6 +64,39 @@ MODULE_DIR="$MODDIR"
     chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     chmod 0755 "$MODDIR/system/bin/洛书" "$MODDIR/system/bin/luoshud" 2>/dev/null || true
 
+    # The sanitized /data/fonts config is only an early-boot input to FontManagerService.
+    # Once Android reports boot complete, release LuoShu's verified bind so future provider
+    # updates can persist normally. Template refresh is allowed only after that original
+    # document is visible again.
+    _dynamic_template_safe=1
+    _device_template_ready=1
+    if type device_font_dynamic_mount_release >/dev/null 2>&1; then
+        device_font_dynamic_mount_release
+        _dynamic_release_rc=$?
+        case "$_dynamic_release_rc" in
+            0) log_service "INFO" "已释放启动期动态字体临时视图" ;;
+            2) log_service "DEBUG" "本次启动没有洛书动态字体临时视图" ;;
+            *)
+                _dynamic_template_safe=0
+                _device_template_ready=0
+                log_service "ERROR" "动态字体临时视图无法安全释放，本次跳过原厂模板刷新"
+                ;;
+        esac
+    fi
+
+    _active_for_template=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_active_for_template" ] || _active_for_template=default
+    if [ "$_dynamic_template_safe" -eq 1 ] && \
+       { [ "$_active_for_template" != default ] || [ -f "$MODDIR/config/font-payload-rebuild-pending.conf" ]; } && \
+       [ -f "$MODDIR/common/device_font_template.sh" ]; then
+        if MODDIR="$MODDIR" sh "$MODDIR/common/device_font_template.sh" ensure >/dev/null 2>&1; then
+            log_service "INFO" "原厂字体槽位模板已按当前 ROM 配置校验"
+        else
+            _device_template_ready=0
+            log_service "ERROR" "原厂字体槽位模板刷新失败，本次禁止使用旧模板重建"
+        fi
+    fi
+
     # 刷写阶段无法调用 pm 时，只在首次完整开机后自动重试一次。
     # 成功覆盖安装会保留 App 数据、字体索引和外观设置。
     if [ -s "$MODDIR/bundled/LuoShu-App.apk" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
@@ -121,12 +154,18 @@ MODULE_DIR="$MODDIR"
         export LUOSHU_UPDATE_ACTIVE
         log_service "INFO" "开始后台重建旧字体负载：$_pending_font"
         notify_service "洛书" "正在后台升级当前字体，无需停留在刷写页面。" luoshu-font-rebuild
-        if type luoshu_rebuild_preserved_payload >/dev/null 2>&1 && luoshu_rebuild_preserved_payload "$MODDIR"; then
+        if [ "$_device_template_ready" -eq 1 ] && \
+           type luoshu_rebuild_preserved_payload >/dev/null 2>&1 && \
+           luoshu_rebuild_preserved_payload "$MODDIR"; then
             log_service "INFO" "旧字体负载已按新架构重建：$_pending_font"
             notify_service "洛书" "字体升级完成，请完整重启一次使新版字体生效。" luoshu-font-rebuild
         elif type luoshu_rebuild_failure_retry >/dev/null 2>&1 && luoshu_rebuild_failure_retry "$MODDIR" 3; then
             _retry_count=$(cat "$MODDIR/config/font-payload-rebuild-failures" 2>/dev/null)
-            log_service "ERROR" "旧字体负载后台重建失败（第 ${_retry_count:-1} 次），保留当前字体并下次开机重试"
+            if [ "$_device_template_ready" -eq 1 ]; then
+                log_service "ERROR" "旧字体负载后台重建失败（第 ${_retry_count:-1} 次），保留当前字体并下次开机重试"
+            else
+                log_service "ERROR" "原厂模板未就绪（第 ${_retry_count:-1} 次），保留当前字体并下次开机重试"
+            fi
             notify_service "洛书" "字体升级未完成，已保留当前字体，将在下次开机自动重试。" luoshu-font-rebuild
         else
             log_service "ERROR" "旧字体负载连续重建失败，正在恢复系统默认字体"

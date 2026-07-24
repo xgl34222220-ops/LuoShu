@@ -83,10 +83,10 @@ infer_mix_weight_mode() {
         [ -n "$_default" ] && [ "$_current" = "$_default" ] && echo auto || echo fixed
         return
     fi
-    _weights=$(scan_family_weights "$_family" 2>/dev/null)
-    _count=$(printf '%s' "$_weights" | tr ',' '\n' | grep -c . 2>/dev/null)
-    case "$_count" in ''|*[!0-9]*) _count=0 ;; esac
-    [ "$_count" -ge 2 ] 2>/dev/null || { echo fixed; return; }
-    _default=$(mix_static_default_weight "$_family")
-    [ "$_current" = "$_default" ] && echo auto || echo fixed
+
+    # 静态多字重家族过去会在默认 400 时被自动展开为 100–900 九个复合文件。
+    # 用户只选择了当前字重，却被迫等待整套家族生成；六档静态字体通常要重复执行
+    # 六次大体积 CJK 合并。静态字体现在始终按当前所选字重走快速单文件组合。
+    # 多个静态字重仍可在界面中逐档选择，但不会再被无提示地扩展成九档任务。
+    echo fixed
 }

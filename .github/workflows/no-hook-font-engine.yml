@@ -6,6 +6,25 @@ on:
       - main
     paths:
       - common/composite_font.py
+      - common/device_font_template.py
+      - common/device_font_template.sh
+      - common/device_font_slot_plan.py
+      - common/device_font_slot_plan.sh
+      - common/device_font_slot_build.py
+      - common/device_font_cache.sh
+      - common/device_font_load_verify.py
+      - common/device_font_load_verify.sh
+      - common/device_font_payload_build.py
+      - common/device_font_payload_overlay.py
+      - common/device_font_payload_runtime.sh
+      - common/device_font_payload_bridge.sh
+      - common/device_font_payload_policy.sh
+      - common/device_font_payload_verify.py
+      - common/device_font_runtime_report.sh
+      - common/device_font_dynamic_guard.sh
+      - common/device_font_transaction_guard.sh
+      - common/font_provider_cache.sh
+      - common/origin_flyme_global.sh
       - common/font_instance.py
       - common/font_metrics_normalize.py
       - common/font_config_overlay.py
@@ -16,16 +35,36 @@ on:
       - common/font_name_normalize.py
       - common/font_safety.sh
       - common/font_manager.sh
+      - common/font_switch_task.sh
       - common/font_library_cache.sh
       - common/hyperos_global.sh
       - common/mount_compat.sh
+      - common/mount_fast_sync.sh
       - common/rom_adapters.sh
       - common/font_mix.sh
       - common/python/**
       - post-fs-data.sh
       - service.sh
+      - uninstall.sh
       - scripts/build.sh
       - scripts/prepare_composite_runtime.sh
+      - scripts/device_font_template_test.py
+      - scripts/device_font_slot_plan_test.py
+      - scripts/device_font_slot_plan_runtime_test.sh
+      - scripts/device_font_slot_build_test.py
+      - scripts/device_font_cache_test.sh
+      - scripts/device_font_foreground_quick_test.sh
+      - scripts/device_font_load_verify_test.py
+      - scripts/device_font_payload_build_test.py
+      - scripts/device_font_payload_overlay_test.py
+      - scripts/device_font_payload_verify_test.py
+      - scripts/device_font_runtime_report_test.sh
+      - scripts/device_font_payload_policy_test.sh
+      - scripts/device_font_payload_runtime_test.sh
+      - scripts/device_font_payload_bridge_test.sh
+      - scripts/device_font_transaction_guard_test.sh
+      - scripts/font_switch_task_test.sh
+      - scripts/uninstall_safety_test.sh
       - scripts/font_config_overlay_test.py
       - scripts/font_config_monospace_test.py
       - scripts/font_metrics_normalization_test.py
@@ -35,6 +74,7 @@ on:
       - scripts/font_name_normalize_test.py
       - scripts/font_safety_test.sh
       - scripts/meta_module_sync_test.sh
+      - scripts/mount_fast_sync_test.sh
       - scripts/no_hook_bootstrap_test.sh
       - scripts/prune_python_runtime.sh
       - scripts/python_runtime_prune_test.sh
@@ -60,6 +100,30 @@ jobs:
           if [ ! -x common/python/bin/luoshu-python ]; then
             sh ./scripts/prepare_composite_runtime.sh
           fi
+      - name: Run device template and payload tests
+        run: |
+          python3 scripts/device_font_template_test.py
+          python3 scripts/device_font_slot_plan_test.py
+          sh scripts/device_font_slot_plan_runtime_test.sh
+          FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
+          test -s "$FONT"
+          python3 scripts/device_font_slot_build_test.py --font "$FONT"
+          sh scripts/device_font_cache_test.sh
+          python3 scripts/device_font_load_verify_test.py
+          sh -n common/device_font_load_verify.sh
+          python3 scripts/device_font_payload_build_test.py --font "$FONT"
+          python3 scripts/device_font_payload_overlay_test.py
+          python3 scripts/device_font_payload_verify_test.py
+          sh scripts/device_font_runtime_report_test.sh
+          sh scripts/device_font_payload_policy_test.sh
+          sh scripts/device_font_payload_runtime_test.sh
+          sh scripts/device_font_payload_bridge_test.sh
+          sh scripts/device_font_transaction_guard_test.sh
+          sh scripts/uninstall_safety_test.sh
+      - name: Verify constant-time single-weight foreground path
+        run: sh -x scripts/device_font_foreground_quick_test.sh
+      - name: Verify bounded foreground switch watchdog
+        run: sh -x scripts/font_switch_task_test.sh
       - name: Run XML structure tests
         run: python3 scripts/font_config_overlay_test.py
       - name: Run mixed-script metrics tests
@@ -71,7 +135,9 @@ jobs:
       - name: Run payload transaction and boot guard tests
         run: sh -x scripts/font_safety_test.sh
       - name: Run meta-module synchronization tests
-        run: sh -x scripts/meta_module_sync_test.sh
+        run: |
+          sh -x scripts/meta_module_sync_test.sh
+          sh -x scripts/mount_fast_sync_test.sh
       - name: Run static font identity tests
         shell: bash
         run: |
@@ -95,6 +161,31 @@ jobs:
           ! grep -RInE 'IXposedHookLoadPackage|XposedBridge|LSPosed|lspatch' android-app/app/src common system 2>/dev/null
           ! grep -RInE '(^|[[:space:]])(cp|ln|rm)[[:space:]].*/data/fonts|_dest="/data/fonts/' post-fs-data.sh common 2>/dev/null
           grep -q 'font_config_boot_guard' post-fs-data.sh
+          grep -q 'device_font_dynamic_mount_apply' post-fs-data.sh
+          grep -q 'device_font_dynamic_guard.sh' common/font_config_partitions.sh
+          grep -q 'device_font_transaction_guard.sh' common/font_config_partitions.sh
+          grep -q 'device_font_load_verify.sh' common/font_config_partitions.sh
+          grep -q 'device_font_runtime_report.sh' common/font_config_partitions.sh
+          grep -q 'device_font_cache.sh' common/font_config_partitions.sh
+          grep -q 'mount_fast_sync.sh' common/font_config_partitions.sh
+          grep -q 'device_font_payload_policy.sh' common/font_config_partitions.sh
+          grep -q 'cp -al' common/mount_fast_sync.sh
+          grep -q 'TIMEOUT_SECONDS' common/font_switch_task.sh
+          grep -q 'FONT_SWITCH_TASK' common/app_bridge.sh
+          grep -q 'reports/v2.2-runtime-latest' common/device_font_runtime_report.sh
+          grep -q 'font-manager-dump.txt' common/device_font_runtime_report.sh
+          grep -q 'device_font_payload_clear' common/device_font_transaction_guard.sh
+          grep -q 'mount -o bind' common/device_font_dynamic_guard.sh
+          grep -q 'remount,bind,ro' common/device_font_dynamic_guard.sh
+          grep -q '_dfpr_mark_dynamic_rebuild' common/device_font_dynamic_guard.sh
+          grep -q 'targetSha256' common/device_font_dynamic_guard.sh
+          grep -q 'device_font_load_verify' common/device_font_dynamic_guard.sh
+          grep -q 'device_font_payload_bridge.sh' common/font_config_partitions.sh
+          grep -q 'copy_as_originos' common/device_font_payload_bridge.sh
+          grep -q 'copy_as_flyme' common/device_font_payload_bridge.sh
+          grep -q '_luoshu_flyme_prepare_data_restore' common/device_font_payload_bridge.sh
+          grep -q 'device-font-dynamic-mount.conf' uninstall.sh
+          grep -q 'luoshu_flyme_pending_apply' uninstall.sh
           grep -q 'font_config_mark_boot_success' service.sh
           grep -q 'font_config_partitions.sh' post-fs-data.sh
           grep -q 'font_config_enable_for_payload' common/hyperos_global.sh

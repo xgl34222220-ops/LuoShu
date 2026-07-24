@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -80,6 +82,60 @@ with tempfile.TemporaryDirectory() as directory:
         assert font["OS/2"].fsSelection & (1 << 7)
     finally:
         font.close()
+
+    # A valid device inventory replaces the historical fixed Roboto ratios with this ROM's
+    # actual main-slot hhea baseline. The existing hhea/typo enclosure behavior remains unchanged.
+    inventory = temp / "device_font_inventory.json"
+    inventory.write_text(
+        json.dumps(
+            {
+                "schema": "device-font-inventory-v1",
+                "inventoryRevision": 1,
+                "state": "ready",
+                "buildKey": "test-rom",
+                "slots": {
+                    "/system/fonts/MiSansVF.ttf": {
+                        "slotName": "MiSansVF.ttf",
+                        "path": "/system/fonts/MiSansVF.ttf",
+                        "format": "TTF",
+                        "metrics": {"upem": 1000, "hhea": {"ascent": 1100, "descent": -300}},
+                    }
+                },
+                "mainSlot": {
+                    "slotName": "MiSansVF.ttf",
+                    "path": "/system/fonts/MiSansVF.ttf",
+                    "format": "TTF",
+                    "metrics": {"upem": 1000, "hhea": {"ascent": 1100, "descent": -300}},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    inventory_normalized = temp / "inventory-normalized.ttf"
+    inventory_report = normalize_path(source, inventory_normalized, inventory=inventory)
+    inventory_font = TTFont(inventory_normalized)
+    try:
+        assert inventory_font["hhea"].ascent == 1100
+        assert inventory_font["hhea"].descent == -300
+        assert inventory_font["OS/2"].sTypoAscender == 1100
+        assert inventory_font["OS/2"].sTypoDescender == -300
+        assert inventory_report["metricsSource"] == "inventory"
+        assert inventory_report["targetSlot"] == "MiSansVF.ttf"
+    finally:
+        inventory_font.close()
+
+
+    os.environ["LUOSHU_BUILD_KEY"] = "different-rom"
+    stale_normalized = temp / "stale-inventory-normalized.ttf"
+    stale_report = normalize_path(source, stale_normalized, inventory=inventory)
+    stale_font = TTFont(stale_normalized)
+    try:
+        assert stale_font["hhea"].ascent == 928
+        assert stale_font["hhea"].descent == -244
+        assert stale_report["metricsSource"] == "fixed-fallback"
+    finally:
+        stale_font.close()
+        os.environ.pop("LUOSHU_BUILD_KEY", None)
 
     # Glyph extremes must be enclosed by both hhea and typo (USE_TYPO_METRICS makes engines
     # read typo), while win metrics stay capped so includeFontPadding=true spacing is unchanged.

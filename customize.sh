@@ -8,6 +8,9 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | he
 MODULE_DIR="$MODPATH"
 [ -f "$MODPATH/common/util_functions.sh" ] && . "$MODPATH/common/util_functions.sh"
 [ -f "$MODPATH/common/rom_adapters.sh" ] && . "$MODPATH/common/rom_adapters.sh"
+# customize.sh runs before the normal font runtime bridge is loaded. Set the v2.2
+# schema first so a v2.1 payload is always scheduled for a device-template rebuild.
+LUOSHU_PAYLOAD_SCHEMA_CURRENT=device-template-v1-baseline-v7-mono-v6
 [ -f "$MODPATH/common/module_update_state.sh" ] && . "$MODPATH/common/module_update_state.sh"
 
 if type ensure_public_storage >/dev/null 2>&1; then
@@ -54,10 +57,11 @@ fi
 
 OLD_MOD="${LUOSHU_OLD_MOD:-/data/adb/modules/LuoShu}"
 mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" 2>/dev/null || true
-# Flashing LuoShu is an explicit enable action.  Root managers install updates into MODPATH while
+
+# Flashing LuoShu is an explicit enable action. Root managers install updates into MODPATH while
 # the currently active module remains in OLD_MOD until reboot, so both trees must be recovered.
 # v2.0.0 could create disable itself and then discard the failure counter during a later update,
-# which means the marker can no longer be distinguished from a manual one.  The explicit flash is
+# which means the marker can no longer be distinguished from a manual one. The explicit flash is
 # the authority to re-enable this module; never carry that stale marker into or through an update.
 UPDATE_REENABLED=false
 for _enable_dir in "$MODPATH" "$OLD_MOD"; do
@@ -96,6 +100,51 @@ if [ "$UPDATE_PRESERVED" != true ]; then
     printf 'default\n' > "$MODPATH/config/active_font.conf"
 fi
 
+# 必须在新模块覆盖挂载系统字体之前读取原厂槽位。v2 扫描器会分别统计全部原厂
+# 字体文件和可替换 UI 槽位，并读取 system、system_ext、product、my_product、vendor
+# 各分区的 fonts*.xml。相同系统指纹复用；旧扫描器生成的清单会自动升级重扫。
+FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory_scan.py"
+[ -f "$FONT_INVENTORY_SCRIPT" ] || FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory.py"
+FONT_INVENTORY_PYTHON="$MODPATH/common/python/bin/luoshu-python"
+FONT_INVENTORY_OUTPUT="$MODPATH/config/device_font_inventory.json"
+FONT_INVENTORY_LOG="$MODPATH/logs/font-inventory.log"
+if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_inventory.json" ]; then
+    cp -f "$OLD_MOD/config/device_font_inventory.json" "$FONT_INVENTORY_OUTPUT" 2>/dev/null || true
+fi
+chmod 0755 "$FONT_INVENTORY_PYTHON" 2>/dev/null || true
+if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
+    ui_print "• 正在读取本机全部原厂字体与 UI 映射..."
+    _inventory_pyroot="$MODPATH/common/python"
+    _inventory_result=$(
+        PYTHONHOME="$_inventory_pyroot" \
+        PYTHONPATH="$_inventory_pyroot/lib/python3.14:$_inventory_pyroot/lib/python3.14/site-packages:$MODPATH/common" \
+        LD_LIBRARY_PATH="$_inventory_pyroot/lib:$_inventory_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan \
+                --output "$FONT_INVENTORY_OUTPUT" \
+                --font-check "$MODPATH/common/font_check.sh" \
+                --overlay-module "$OLD_MOD" 2>> "$FONT_INVENTORY_LOG"
+    )
+    _inventory_rc=$?
+    printf '%s\n' "$_inventory_result" >> "$FONT_INVENTORY_LOG" 2>/dev/null || true
+    if [ "$_inventory_rc" -eq 0 ]; then
+        _inventory_files=$(printf '%s' "$_inventory_result" | sed -n 's/.*"stockFontFileCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        _inventory_slots=$(printf '%s' "$_inventory_result" | sed -n 's/.*"slotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        _inventory_xml=$(printf '%s' "$_inventory_result" | sed -n 's/.*"xmlSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        _inventory_heuristic=$(printf '%s' "$_inventory_result" | sed -n 's/.*"heuristicSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        _inventory_rom=$(printf '%s' "$_inventory_result" | sed -n 's/.*"romKind"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | tail -n1)
+        [ -n "$_inventory_files" ] || _inventory_files="未知"
+        [ -n "$_inventory_slots" ] || _inventory_slots="未知"
+        [ -n "$_inventory_xml" ] || _inventory_xml="未知"
+        [ -n "$_inventory_heuristic" ] || _inventory_heuristic="未知"
+        [ -n "$_inventory_rom" ] || _inventory_rom="generic"
+        ui_print "✓ 原厂字体文件：$_inventory_files 个（ROM：$_inventory_rom）"
+        ui_print "✓ 可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / OEM 探测 $_inventory_heuristic）"
+    else
+        ui_print "• 原厂字体清单扫描不可用，本机将自动使用旧静态适配清单"
+    fi
+else
+    ui_print "• 字体清单扫描器不可用，本机将自动使用旧静态适配清单"
+fi
 # 安装安全 CLI，不暴露上一字体回滚、热刷新或重启 SystemUI 命令。
 cp -f "$MODPATH/common/luoshu_cli.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
 chmod 0755 "$MODPATH"/*.sh "$MODPATH/common"/*.sh 2>/dev/null || true
