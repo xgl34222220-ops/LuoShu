@@ -79,7 +79,7 @@ jobs:
           (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
           LUOSHU_APP_APK="$apk" LUOSHU_ALLOW_DEBUG_APP=1 sh ./scripts/build.sh
 
-      - name: Verify Alpha 4 candidate
+      - name: Verify Alpha 5 candidate
         shell: bash
         run: |
           set -euxo pipefail
@@ -91,10 +91,10 @@ jobs:
           unzip -t "$module" >/dev/null
           (cd dist && sha256sum -c "$(basename "$module").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
-          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0 Alpha 4'
-          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20194'
-          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2019401'
-          unzip -Z1 "$module" > /tmp/luoshu-alpha4-files.txt
+          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0 Alpha 5'
+          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20195'
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2019501'
+          unzip -Z1 "$module" > /tmp/luoshu-alpha5-files.txt
           for path in \
             common/device_font_template.sh \
             common/device_font_cache.sh \
@@ -104,9 +104,10 @@ jobs:
             common/device_font_transaction_guard.sh \
             common/device_font_dynamic_guard.sh \
             common/device_font_runtime_report.sh \
+            common/font_inventory.py \
             common/font_switch_task.sh \
             common/mount_fast_sync.sh; do
-            grep -qx "$path" /tmp/luoshu-alpha4-files.txt
+            grep -qx "$path" /tmp/luoshu-alpha5-files.txt
           done
           unzip -p "$module" common/device_font_template.sh | grep -q 'CAPTURE_REVISION=2'
           unzip -p "$module" common/device_font_cache.sh | grep -q 'alignment-cache-v2'
@@ -117,6 +118,7 @@ jobs:
           unzip -p "$module" common/device_font_payload_policy.sh | grep -q 'device_font_cache_schedule'
           unzip -p "$module" common/device_font_dynamic_guard.sh | grep -q '_dfpr_launch_pending_cache'
           unzip -p "$module" common/device_font_dynamic_guard.sh | grep -q 'device_font_load_verify'
+          unzip -p "$module" common/font_inventory.py | grep -q 'device_font_inventory.json'
           unzip -p "$module" common/font_switch_task.sh | grep -q 'TIMEOUT_SECONDS'
           unzip -p "$module" common/font_switch_task.sh | grep -q '已终止并回滚'
           unzip -p "$module" common/mount_fast_sync.sh | grep -q 'cp -al'
@@ -124,6 +126,7 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           unzip -q "$module" -d "$tmp"
+          python3 -m py_compile "$tmp/common/font_inventory.py"
           sh -n "$tmp/common/device_font_template.sh"
           sh -n "$tmp/common/device_font_cache.sh"
           sh -n "$tmp/common/device_font_load_verify.sh"
@@ -135,7 +138,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LuoShu-v2.2.0-Alpha-4-Foreground-Quick-Test
+          name: LuoShu-v2.2.0-Alpha-5-Device-Inventory-Test
           path: dist/*
           if-no-files-found: error
           retention-days: 14
