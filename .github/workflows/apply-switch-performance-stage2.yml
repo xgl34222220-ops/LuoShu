@@ -1,0 +1,341 @@
+name: Apply switch performance stage two
+
+on:
+  push:
+    branches:
+      - fix/v2.2.1-switch-timeout-status
+    paths:
+      - .github/workflows/apply-switch-performance-stage2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v2.2.1-switch-timeout-status
+          fetch-depth: 0
+
+      - name: Patch validation and inventory caches
+        id: patch
+        continue-on-error: true
+        shell: bash
+        run: |
+          python3 - <<'PY' 2> /tmp/perf-stage2-error.log
+          from pathlib import Path
+          import re
+
+          def sub_once(text: str, pattern: str, replacement: str, name: str, flags: int = 0) -> str:
+              result, count = re.subn(pattern, replacement, text, count=1, flags=flags)
+              if count != 1:
+                  raise RuntimeError(f"{name}: expected one match, got {count}")
+              return result
+
+          manager = Path('common/font_manager.sh')
+          text = manager.read_text()
+          source_line = '[ -f "$MODULE_DIR/common/font_validation_cache.sh" ] && . "$MODULE_DIR/common/font_validation_cache.sh"\n'
+          if source_line not in text:
+              marker = '[ -f "$MODULE_DIR/common/font_check.sh" ] && . "$MODULE_DIR/common/font_check.sh"\n'
+              if text.count(marker) != 1:
+                  raise RuntimeError('font manager source marker missing')
+              text = text.replace(marker, marker + source_line, 1)
+
+          old_switch_validation = '''        if type font_validate_global >/dev/null 2>&1; then
+              font_validate_global "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+          elif type font_validate >/dev/null 2>&1; then
+              font_validate "$_source" text || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+          fi
+          '''
+          old_switch_validation = '\n'.join(line[10:] if line.startswith('          ') else line for line in old_switch_validation.splitlines()) + '\n'
+          new_switch_validation = '''        if type luoshu_font_validate_global_cached >/dev/null 2>&1; then
+              luoshu_font_validate_global_cached "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+          elif type font_validate_global >/dev/null 2>&1; then
+              font_validate_global "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+          elif type font_validate >/dev/null 2>&1; then
+              font_validate "$_source" text || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
+          fi
+          '''
+          new_switch_validation = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_switch_validation.splitlines()) + '\n'
+          if old_switch_validation not in text:
+              raise RuntimeError('switch validation block missing')
+          text = text.replace(old_switch_validation, new_switch_validation, 1)
+
+          validate_function = '''validate_font_json() {
+              _font_id="$1"
+              _file="$(find_text_font_file "$_font_id")"
+              [ -f "$_file" ] || { printf '{"status":"error","message":"未找到字体"}\\n'; return 0; }
+              if type luoshu_font_validate_global_cached >/dev/null 2>&1; then
+                  if luoshu_font_validate_global_cached "$_file"; then
+                      printf '{"status":"ok","data":{"valid":true,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":%s,"warning":"%s"}}\\n' \\
+                          "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" \\
+                          "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" "$(json_escape "$FONT_CHECK_WARNING")"
+                  else
+                      printf '{"status":"ok","data":{"valid":false,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":false,"error":"%s"}}\\n' \\
+                          "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_ERROR")"
+                  fi
+              elif type font_validate_global >/dev/null 2>&1; then
+                  if font_validate_global "$_file"; then
+                      printf '{"status":"ok","data":{"valid":true,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":false,"warning":"%s"}}\\n' \\
+                          "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_WARNING")"
+                  else
+                      printf '{"status":"ok","data":{"valid":false,"format":"%s","bytes":%s,"variable":%s,"color":%s,"cached":false,"error":"%s"}}\\n' \\
+                          "$(json_escape "$FONT_CHECK_FORMAT")" "${FONT_CHECK_SIZE:-0}" "${FONT_CHECK_VARIABLE:-false}" "${FONT_CHECK_COLOR:-false}" "$(json_escape "$FONT_CHECK_ERROR")"
+                  fi
+              elif type font_check_json >/dev/null 2>&1; then
+                  _check="$(font_check_json "$_file" text 2>/dev/null | tr -d '\\n')"
+                  [ -n "$_check" ] || _check='{"valid":false,"error":"字体验证器未返回结果"}'
+                  printf '{"status":"ok","data":%s}\\n' "$_check"
+              else
+                  printf '{"status":"error","message":"字体验证器不可用"}\\n'
+              fi
+          }
+          '''
+          validate_function = '\n'.join(line[10:] if line.startswith('          ') else line for line in validate_function.splitlines()) + '\n'
+          text = sub_once(
+              text,
+              r'validate_font_json\(\) \{.*?\n\}\n\nstart_switch_task\(\)',
+              validate_function + '\nstart_switch_task()',
+              'validate_font_json',
+              re.S,
+          )
+          manager.write_text(text)
+
+          rom = Path('common/rom_adapters.sh')
+          text = rom.read_text()
+          token_function = '''_font_inventory_cache_token() {
+              _fict_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+              _fict_inventory="$_fict_module/config/device_font_inventory.json"
+              _fict_current=''
+              if command -v getprop >/dev/null 2>&1; then
+                  _fict_current=$(getprop ro.build.fingerprint 2>/dev/null || true)
+                  [ -n "$_fict_current" ] || _fict_current=$(getprop ro.build.display.id 2>/dev/null || true)
+              fi
+              _fict_recorded=$(sed -n 's/^[[:space:]]*"buildKey":[[:space:]]*"\\([^"]*\\)".*/\\1/p' "$_fict_inventory" 2>/dev/null | head -n1)
+              if [ -n "$_fict_current" ] && [ "$_fict_current" != "$_fict_recorded" ]; then
+                  printf '%s\\n' fallback
+                  return 0
+              fi
+              if [ -s "$_fict_inventory" ] && \\
+                 grep -q '"schema": "device-font-inventory-v1"' "$_fict_inventory" 2>/dev/null && \\
+                 grep -q '"state": "ready"' "$_fict_inventory" 2>/dev/null; then
+                  _fict_token=''
+                  if command -v stat >/dev/null 2>&1; then
+                      _fict_token=$(stat -c '%s-%Y' "$_fict_inventory" 2>/dev/null)
+                  elif command -v toybox >/dev/null 2>&1; then
+                      _fict_token=$(toybox stat -c '%s-%Y' "$_fict_inventory" 2>/dev/null)
+                  fi
+                  [ -n "$_fict_token" ] && { printf '%s\\n' "$_fict_token"; return 0; }
+              fi
+              printf '%s\\n' fallback
+          }
+          '''
+          token_function = '\n'.join(line[10:] if line.startswith('          ') else line for line in token_function.splitlines()) + '\n'
+          text = sub_once(text, r'_font_inventory_cache_token\(\) \{.*?\n\}\n\n_font_anchor_cache_lookup', token_function + '\n_font_anchor_cache_lookup', 'inventory token', re.S)
+
+          lookup_function = '''_font_anchor_cache_lookup() {
+              _facl_src="$1"
+              _facl_key="$2"
+              _facl_sha="${3:-}"
+              if [ -z "$_facl_sha" ]; then
+                  if command -v sha256sum >/dev/null 2>&1; then
+                      _facl_sha=$(sha256sum "$_facl_src" 2>/dev/null | awk '{print $1}')
+                  elif command -v busybox >/dev/null 2>&1; then
+                      _facl_sha=$(busybox sha256sum "$_facl_src" 2>/dev/null | awk '{print $1}')
+                  fi
+              fi
+              [ -n "$_facl_sha" ] || return 1
+              _facl_inventory=$(_font_inventory_cache_token)
+              [ -n "$_facl_inventory" ] || _facl_inventory=fallback
+              _facl_cache="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/config/metrics_cache"
+              _facl_hit="$_facl_cache/${_facl_sha}_${_facl_key}_v${LUOSHU_NORMALIZER_VERSION}_${_facl_inventory}.font"
+              [ -f "$_facl_hit" ] || return 1
+              printf '%s\\n' "$_facl_hit"
+              return 0
+          }
+          '''
+          lookup_function = '\n'.join(line[10:] if line.startswith('          ') else line for line in lookup_function.splitlines()) + '\n'
+          text = sub_once(text, r'_font_anchor_cache_lookup\(\) \{.*?\n\}\n\n_font_anchor\(\)', lookup_function + '\n_font_anchor()', 'anchor lookup', re.S)
+
+          text = sub_once(
+              text,
+              r'(    normalizer="\$module/common/font_metrics_normalize.py"\n)(    rm -f "\$anchor")',
+              r'''\1    _fa_sha=''
+              if command -v sha256sum >/dev/null 2>&1; then
+                  _fa_sha=$(sha256sum "$src" 2>/dev/null | awk '{print $1}')
+              elif command -v busybox >/dev/null 2>&1; then
+                  _fa_sha=$(busybox sha256sum "$src" 2>/dev/null | awk '{print $1}')
+              fi
+          \2'''.replace('          ', ''),
+              'anchor sha preload',
+          )
+          if text.count('_font_anchor_cache_lookup "$src" "$key"') != 1:
+              raise RuntimeError('anchor lookup call missing')
+          text = text.replace('_font_anchor_cache_lookup "$src" "$key"', '_font_anchor_cache_lookup "$src" "$key" "$_fa_sha"', 1)
+          text = sub_once(
+              text,
+              r'    # 写入归一化缓存，供下次切换同字体秒切\n    if command -v sha256sum >/dev/null 2>&1; then\n        _fa_sha=\$\(sha256sum "\$src" 2>/dev/null \| awk \'\{print \$1\}\'\)\n        if \[ -n "\$_fa_sha" \]; then\n(.*?)\n        fi\n    fi',
+              r'''    # 写入归一化缓存，供下次切换同字体秒切；复用本次已计算的源 SHA。
+              if [ -n "$_fa_sha" ]; then
+          \1
+              fi'''.replace('          ', ''),
+              'anchor cache write',
+              re.S,
+          )
+
+          entries_function = '''_device_font_inventory_entries() {
+              _dfie_module="$(_device_font_inventory_module)"
+              _dfie_json="$_dfie_module/config/device_font_inventory.json"
+              _dfie_cache="$_dfie_module/config/device_font_inventory.tsv"
+              _dfie_json_mtime=0
+              _dfie_cache_mtime=0
+              if command -v stat >/dev/null 2>&1; then
+                  _dfie_json_mtime=$(stat -c '%Y' "$_dfie_json" 2>/dev/null || echo 0)
+                  _dfie_cache_mtime=$(stat -c '%Y' "$_dfie_cache" 2>/dev/null || echo 0)
+              elif command -v toybox >/dev/null 2>&1; then
+                  _dfie_json_mtime=$(toybox stat -c '%Y' "$_dfie_json" 2>/dev/null || echo 0)
+                  _dfie_cache_mtime=$(toybox stat -c '%Y' "$_dfie_cache" 2>/dev/null || echo 0)
+              fi
+              case "$_dfie_json_mtime" in ''|*[!0-9]*) _dfie_json_mtime=0 ;; esac
+              case "$_dfie_cache_mtime" in ''|*[!0-9]*) _dfie_cache_mtime=0 ;; esac
+              if [ -s "$_dfie_cache" ] && [ "$_dfie_cache_mtime" -ge "$_dfie_json_mtime" ] 2>/dev/null; then
+                  cat "$_dfie_cache"
+                  return 0
+              fi
+              _dfie_tmp="${_dfie_cache}.tmp.$$"
+              if _device_font_inventory_exec --list --output "$_dfie_json" > "$_dfie_tmp" 2>/dev/null && [ -s "$_dfie_tmp" ]; then
+                  mv -f "$_dfie_tmp" "$_dfie_cache" 2>/dev/null || { rm -f "$_dfie_tmp"; return 1; }
+                  chmod 0644 "$_dfie_cache" 2>/dev/null || true
+                  cat "$_dfie_cache"
+                  return 0
+              fi
+              rm -f "$_dfie_tmp" 2>/dev/null || true
+              return 1
+          }
+          '''
+          entries_function = '\n'.join(line[10:] if line.startswith('          ') else line for line in entries_function.splitlines()) + '\n'
+          text = sub_once(text, r'_device_font_inventory_entries\(\) \{.*?\n\}\n\n_device_font_inventory_target', entries_function + '\n_device_font_inventory_target', 'inventory entries', re.S)
+          rom.write_text(text)
+
+          customize = Path('customize.sh')
+          text = customize.read_text()
+          copy_marker = '''if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_inventory.json" ]; then
+              cp -f "$OLD_MOD/config/device_font_inventory.json" "$FONT_INVENTORY_OUTPUT" 2>/dev/null || true
+          fi
+          '''
+          copy_marker = '\n'.join(line[10:] if line.startswith('          ') else line for line in copy_marker.splitlines()) + '\n'
+          copy_replacement = '''if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_inventory.json" ]; then
+              cp -f "$OLD_MOD/config/device_font_inventory.json" "$FONT_INVENTORY_OUTPUT" 2>/dev/null || true
+              [ ! -s "$OLD_MOD/config/device_font_inventory.tsv" ] || \\
+                  cp -f "$OLD_MOD/config/device_font_inventory.tsv" "$MODPATH/config/device_font_inventory.tsv" 2>/dev/null || true
+          fi
+          '''
+          copy_replacement = '\n'.join(line[10:] if line.startswith('          ') else line for line in copy_replacement.splitlines()) + '\n'
+          if copy_marker not in text:
+              raise RuntimeError('customize inventory copy marker missing')
+          text = text.replace(copy_marker, copy_replacement, 1)
+
+          success_marker = '    if [ "$_inventory_rc" -eq 0 ]; then\n        _inventory_files='
+          if success_marker not in text:
+              raise RuntimeError('customize inventory success marker missing')
+          prebuild = '''    if [ "$_inventory_rc" -eq 0 ]; then
+              _inventory_list_script="$MODPATH/common/font_inventory.py"
+              _inventory_list_output="$MODPATH/config/device_font_inventory.tsv"
+              _inventory_list_tmp="${_inventory_list_output}.tmp.$$"
+              if [ -f "$_inventory_list_script" ]; then
+                  PYTHONHOME="$_inventory_pyroot" \\
+                  PYTHONPATH="$_inventory_pyroot/lib/python3.14:$_inventory_pyroot/lib/python3.14/site-packages:$MODPATH/common" \\
+                  LD_LIBRARY_PATH="$_inventory_pyroot/lib:$_inventory_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \\
+                      "$FONT_INVENTORY_PYTHON" "$_inventory_list_script" --list --output "$FONT_INVENTORY_OUTPUT" \\
+                      > "$_inventory_list_tmp" 2>> "$FONT_INVENTORY_LOG" && [ -s "$_inventory_list_tmp" ] && \\
+                      mv -f "$_inventory_list_tmp" "$_inventory_list_output" 2>/dev/null || rm -f "$_inventory_list_tmp" 2>/dev/null
+                  chmod 0644 "$_inventory_list_output" 2>/dev/null || true
+              fi
+              _inventory_files='''
+          prebuild = '\n'.join(line[10:] if line.startswith('          ') else line for line in prebuild.splitlines())
+          text = text.replace(success_marker, prebuild, 1)
+          customize.write_text(text)
+
+          test = Path('scripts/font_validation_cache_test.sh')
+          test.write_text('''#!/bin/sh
+          set -eu
+          ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+          TMP="$(mktemp -d)"
+          trap 'rm -rf "$TMP"' EXIT
+
+          export MODULE_DIR="$TMP/module"
+          export MODDIR="$MODULE_DIR"
+          export CONFIG_DIR="$MODULE_DIR/config"
+          mkdir -p "$CONFIG_DIR"
+          . "$ROOT/common/font_validation_cache.sh"
+
+          calls="$TMP/calls"
+          font_validate_global() {
+              printf 'call\n' >> "$calls"
+              FONT_CHECK_FORMAT=TTF
+              FONT_CHECK_SIZE=8192
+              FONT_CHECK_VARIABLE=false
+              FONT_CHECK_COLOR=false
+              FONT_CHECK_WARNING=''
+              FONT_CHECK_COVERAGE=ok
+              FONT_CHECK_ERROR=''
+              return 0
+          }
+          font="$TMP/font.ttf"
+          dd if=/dev/zero of="$font" bs=4096 count=2 status=none
+          luoshu_font_validate_global_cached "$font"
+          [ "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" = false ]
+          luoshu_font_validate_global_cached "$font"
+          [ "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" = true ]
+          [ "$(wc -l < "$calls" | tr -d ' ')" -eq 1 ]
+          printf x >> "$font"
+          luoshu_font_validate_global_cached "$font"
+          [ "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" = false ]
+          [ "$(wc -l < "$calls" | tr -d ' ')" -eq 2 ]
+          grep -q 'font_validation_cache.sh' "$ROOT/common/font_manager.sh"
+          grep -q 'device_font_inventory.tsv' "$ROOT/common/rom_adapters.sh"
+          echo 'font_validation_cache_test: PASS'
+          '''.replace('          ', ''))
+
+          check = Path('scripts/check.sh')
+          text = check.read_text()
+          if 'common/font_validation_cache.sh' not in text:
+              text = text.replace('  common/font_provider_cache.sh \\\n', '  common/font_provider_cache.sh common/font_validation_cache.sh \\\n', 1)
+          if 'sh "$ROOT/scripts/font_validation_cache_test.sh"' not in text:
+              text = text.replace('sh "$ROOT/scripts/font_switch_performance_test.sh"\n', 'sh "$ROOT/scripts/font_switch_performance_test.sh"\nsh "$ROOT/scripts/font_validation_cache_test.sh"\n', 1)
+          check.write_text(text)
+          PY
+
+          chmod 0755 common/font_validation_cache.sh scripts/font_validation_cache_test.sh
+          sh -n common/font_validation_cache.sh
+          sh -n common/font_manager.sh
+          sh -n common/rom_adapters.sh
+          sh -n customize.sh
+          sh scripts/font_validation_cache_test.sh
+          sh scripts/font_switch_performance_test.sh
+
+      - name: Commit patch or diagnostic
+        if: always()
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          mkdir -p docs
+          if [ "${{ steps.patch.outcome }}" != success ]; then
+            {
+              echo 'stage2 patch failed'
+              echo
+              cat /tmp/perf-stage2-error.log 2>/dev/null || true
+            } > docs/switch-performance-stage2-error.log
+            git add docs/switch-performance-stage2-error.log
+            git commit -m 'chore: record switch performance stage-two error'
+          else
+            rm -f docs/switch-performance-stage2-error.log
+            git add common/font_manager.sh common/rom_adapters.sh customize.sh scripts/font_validation_cache_test.sh scripts/check.sh
+            git add -u docs/switch-performance-stage2-error.log 2>/dev/null || true
+            git commit -m 'perf: reuse validated fonts and cached inventory mapping'
+          fi
+          git push origin HEAD:fix/v2.2.1-switch-timeout-status
