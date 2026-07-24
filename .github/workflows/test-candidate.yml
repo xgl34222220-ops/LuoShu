@@ -63,7 +63,7 @@ jobs:
           sh -x scripts/mount_fast_sync_test.sh
           FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
           test -s "$FONT"
-          python3 scripts/font_inventory_scan_test.py --font "$FONT"
+          python3 scripts/font_inventory_scan_v3_test.py --font "$FONT"
 
       - name: Build debug App
         working-directory: android-app
@@ -83,7 +83,7 @@ jobs:
           (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
           LUOSHU_APP_APK="$apk" LUOSHU_ALLOW_DEBUG_APP=1 sh ./scripts/build.sh
 
-      - name: Verify Alpha 7 candidate
+      - name: Verify Alpha 8 candidate
         shell: bash
         run: |
           set -euxo pipefail
@@ -95,10 +95,10 @@ jobs:
           unzip -t "$module" >/dev/null
           (cd dist && sha256sum -c "$(basename "$module").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
-          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0 Alpha 7'
-          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20197'
-          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2019701'
-          unzip -Z1 "$module" > /tmp/luoshu-alpha7-files.txt
+          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0 Alpha 8'
+          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20198'
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2019801'
+          unzip -Z1 "$module" > /tmp/luoshu-alpha8-files.txt
           for path in \
             common/background_task.sh \
             common/device_font_template.sh \
@@ -111,9 +111,10 @@ jobs:
             common/device_font_runtime_report.sh \
             common/font_inventory.py \
             common/font_inventory_scan.py \
+            common/font_inventory_scan_v3.py \
             common/font_switch_task.sh \
             common/mount_fast_sync.sh; do
-            grep -qx "$path" /tmp/luoshu-alpha7-files.txt
+            grep -qx "$path" /tmp/luoshu-alpha8-files.txt
           done
           unzip -p "$module" common/background_task.sh | grep -q '_lsd_task'
           unzip -p "$module" common/background_task.sh | grep -q 'every new worker wrote an empty .task sidecar'
@@ -127,8 +128,10 @@ jobs:
           unzip -p "$module" common/device_font_dynamic_guard.sh | grep -q '_dfpr_launch_pending_cache'
           unzip -p "$module" common/device_font_dynamic_guard.sh | grep -q 'device_font_load_verify'
           unzip -p "$module" common/font_inventory.py | grep -q 'device_font_inventory.json'
-          unzip -p "$module" common/font_inventory_scan.py | grep -q 'SCANNER_REVISION = 2'
-          unzip -p "$module" common/font_inventory_scan.py | grep -q 'stockFontFileCount'
+          unzip -p "$module" common/font_inventory_scan.py | grep -q 'font_inventory_scan_v3'
+          unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'SCANNER_REVISION = 3'
+          unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'stockFontUniqueFileCount'
+          unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'themeOverrideRoots'
           unzip -p "$module" customize.sh | grep -q '原厂字体文件'
           unzip -p "$module" customize.sh | grep -q 'XML .* OEM 探测'
           unzip -p "$module" common/font_switch_task.sh | grep -q 'TIMEOUT_SECONDS'
@@ -138,7 +141,7 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           unzip -q "$module" -d "$tmp"
-          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py"
+          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py" "$tmp/common/font_inventory_scan_v3.py"
           sh -n "$tmp/customize.sh"
           sh -n "$tmp/common/background_task.sh"
           sh -n "$tmp/common/device_font_template.sh"
@@ -152,7 +155,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LuoShu-v2.2.0-Alpha-7-Partition-Inventory-Test
+          name: LuoShu-v2.2.0-Alpha-8-Full-Device-Font-Probe
           path: dist/*
           if-no-files-found: error
           retention-days: 14
