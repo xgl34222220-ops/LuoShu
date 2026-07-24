@@ -1,0 +1,102 @@
+name: Apply v2.2.1 switch hotfix
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-switch-hotfix-main.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v2.2.1-switch-timeout-status
+          fetch-depth: 0
+
+      - name: Patch timeout and failed-state presentation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              if new in text:
+                  return
+              if old not in text:
+                  raise SystemExit(f"expected text missing in {path}")
+              file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace(
+              "common/font_switch_task.sh",
+              'TIMEOUT_SECONDS="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-45}"\ncase "$TIMEOUT_SECONDS" in \'\'|*[!0-9]*) TIMEOUT_SECONDS=45 ;; esac',
+              '# First-time CJK normalization and per-device inventory mapping can legitimately\n'
+              '# exceed 45 seconds on-device. Keep a hard guard, but allow the real preparation\n'
+              '# pipeline to finish before treating it as a hang.\n'
+              'TIMEOUT_SECONDS="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-180}"\n'
+              'case "$TIMEOUT_SECONDS" in \'\'|*[!0-9]*) TIMEOUT_SECONDS=180 ;; esac',
+          )
+
+          replace(
+              "android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt",
+              'waitForTask("switch_status", taskId, timeoutSeconds = 120)',
+              'waitForTask("switch_status", taskId, timeoutSeconds = 300)',
+          )
+
+          contract = Path("android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/library/FontLibraryContract.kt")
+          text = contract.read_text(encoding="utf-8")
+          old = '''internal fun LuoShuViewModel.toFontLibraryUiState(): FontLibraryUiState {
+    val allFonts = fonts
+    val visibleFonts = filteredFonts
+    return FontLibraryUiState(
+        loading = fontLoading || fontRefreshing,
+        operationBusy = operationBusy || mixState.busy,
+        query = searchQuery,
+        error = fontError,
+        operationMessage = operationMessage,
+'''
+          new = '''internal fun LuoShuViewModel.toFontLibraryUiState(): FontLibraryUiState {
+    val allFonts = fonts
+    val visibleFonts = filteredFonts
+    val failedSwitchMessage = snapshot.taskMessage.takeIf {
+        snapshot.taskType == "switch" && snapshot.taskState == "failed" && it.isNotBlank()
+    }.orEmpty()
+    return FontLibraryUiState(
+        loading = fontLoading || fontRefreshing,
+        operationBusy = operationBusy || mixState.busy,
+        query = searchQuery,
+        error = fontError.ifBlank { failedSwitchMessage },
+        operationMessage = if (failedSwitchMessage.isBlank()) operationMessage else "",
+'''
+          if new not in text:
+              if old not in text:
+                  raise SystemExit("FontLibraryContract mapping block changed unexpectedly")
+              contract.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+
+          sh -n common/font_switch_task.sh
+          grep -q 'LUOSHU_SWITCH_TIMEOUT_SECONDS:-180' common/font_switch_task.sh
+          grep -q 'timeoutSeconds = 300' android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt
+          grep -q 'failedSwitchMessage' android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/library/FontLibraryContract.kt
+
+      - name: Commit hotfix branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add common/font_switch_task.sh \
+            android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt \
+            android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/library/FontLibraryContract.kt
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix: avoid false 45-second rollback and show switch failures correctly'
+            git push origin HEAD:fix/v2.2.1-switch-timeout-status
+          fi
