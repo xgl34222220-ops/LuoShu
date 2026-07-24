@@ -34,6 +34,7 @@ mkdir -p "$OUTPUT_DIR"
 REPORT_MD="$OUTPUT_DIR/readiness.md"
 REPORT_JSON="$OUTPUT_DIR/readiness.json"
 CHECKS_TSV="$OUTPUT_DIR/checks.tsv"
+TAB="$(printf '\t')"
 : > "$CHECKS_TSV"
 
 blockers=0
@@ -215,7 +216,7 @@ status='ready'
     echo
     echo '| 状态 | 检查 | 说明 |'
     echo '|---|---|---|'
-    while IFS='\t' read -r severity id title detail; do
+    while IFS="$TAB" read -r severity id title detail; do
         case "$severity" in ready) label='通过' ;; warning) label='提示' ;; blocker) label='阻断' ;; esac
         safe_detail="$(printf '%s' "$detail" | sed 's/|/\\|/g')"
         echo "| $label | $title | $safe_detail |"
@@ -238,7 +239,7 @@ status='ready'
     printf '  "checks": [\n'
     index=0
     total="$(wc -l < "$CHECKS_TSV" | tr -d '[:space:]')"
-    while IFS='\t' read -r severity id title detail; do
+    while IFS="$TAB" read -r severity id title detail; do
         index=$((index + 1))
         printf '    {"severity":"%s","id":"%s","title":"%s","detail":"%s"}' \
             "$(json_escape "$severity")" "$(json_escape "$id")" "$(json_escape "$title")" "$(json_escape "$detail")"
