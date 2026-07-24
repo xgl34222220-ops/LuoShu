@@ -1,11 +1,8 @@
 package io.github.xgl34222220.luoshu.ui.library
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -13,7 +10,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -81,24 +77,20 @@ internal fun FontLibraryRoute(
                 enabled = !state.loading && !state.operationBusy,
                 modifier = Modifier.fillMaxWidth(),
             )
+            FontLibraryManagementButton(
+                style = style,
+                favoriteCount = collections.favoriteIds.size,
+                issueCount = conflicts.issueIds.size,
+                loading = state.loading,
+                onClick = { showManagement = true },
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        when (style) {
-            UiStyle.MATERIAL -> FontLibraryScreenMaterial(displayState, displayActions, combinedTopActions)
-            UiStyle.MIUIX -> FontLibraryScreenMiuix(displayState, displayActions, combinedTopActions)
-        }
-        FontLibraryManagementButton(
-            style = style,
-            favoriteCount = collections.favoriteIds.size,
-            issueCount = conflicts.issueIds.size,
-            loading = state.loading,
-            onClick = { showManagement = true },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 18.dp, bottom = 18.dp),
-        )
+    when (style) {
+        UiStyle.MATERIAL -> FontLibraryScreenMaterial(displayState, displayActions, combinedTopActions)
+        UiStyle.MIUIX -> FontLibraryScreenMiuix(displayState, displayActions, combinedTopActions)
     }
 
     if (showManagement) {
