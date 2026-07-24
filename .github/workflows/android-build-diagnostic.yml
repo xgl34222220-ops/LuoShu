@@ -82,6 +82,10 @@ jobs:
             echo '```text'
             cat "$RUNNER_TEMP/test-failures.txt"
             echo
+            echo 'Kotlin / Java 编译错误摘要：'
+            grep -E '(^e: |^error: |Unresolved reference|Type mismatch|Cannot infer|No value passed|Overload resolution ambiguity|Compilation error)' \
+              "$RUNNER_TEMP/luoshu-android-diagnostic.log" | tail -n 120 || true
+            echo
             echo 'Gradle 输出末尾：'
             tail -n 60 "$RUNNER_TEMP/luoshu-android-diagnostic.log"
             echo '```'
