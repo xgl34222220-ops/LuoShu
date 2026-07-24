@@ -157,6 +157,7 @@ internal fun DeviceAcceptanceGuideDialog(
     val recordKey = "${state.version}|${state.currentFont}"
     var completedManual by remember(recordKey) { mutableStateOf(store.load(recordKey)) }
     var copied by remember { mutableStateOf(false) }
+    var showTestMatrix by remember { mutableStateOf(false) }
     val automatic = deviceAcceptanceAutoChecks(state, trust)
     val manual = manualAcceptanceChecks.map { it.copy(passed = it.id in completedManual) }
     val allChecks = automatic + manual
@@ -233,6 +234,19 @@ internal fun DeviceAcceptanceGuideDialog(
                 }
 
                 Spacer(Modifier.size(10.dp))
+                OutlinedButton(
+                    onClick = { showTestMatrix = true },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Icon(
+                        if (complete) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(17.dp),
+                    )
+                    Spacer(Modifier.size(6.dp))
+                    Text("测试矩阵与 v2.2.2 预发行门禁")
+                }
+                Spacer(Modifier.size(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = onRefresh, modifier = Modifier.weight(1f)) {
                         Icon(Icons.Rounded.Refresh, contentDescription = null, modifier = Modifier.size(17.dp))
@@ -262,6 +276,16 @@ internal fun DeviceAcceptanceGuideDialog(
                 }
             }
         }
+    }
+
+    if (showTestMatrix) {
+        DeviceTestMatrixDialog(
+            style = style,
+            state = state,
+            trust = trust,
+            checks = allChecks,
+            onDismiss = { showTestMatrix = false },
+        )
     }
 }
 
