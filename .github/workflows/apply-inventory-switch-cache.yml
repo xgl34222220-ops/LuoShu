@@ -1,0 +1,248 @@
+name: Cache inventory mapping for font switches
+
+on:
+  push:
+    branches:
+      - fix/v2.2.1-switch-timeout-status
+    paths:
+      - .github/workflows/apply-inventory-switch-cache.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v2.2.1-switch-timeout-status
+          fetch-depth: 0
+      - name: Cache inventory and source hash
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_function(text, name, next_name, body):
+              pattern = rf'{re.escape(name)}\(\) \{{.*?\n\}}\n\n{re.escape(next_name)}'
+              result, count = re.subn(pattern, body.rstrip() + '\n\n' + next_name, text, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(f'{name}: replacement count={count}')
+              return result
+
+          rom = Path('common/rom_adapters.sh')
+          text = rom.read_text()
+          token = '''_font_inventory_cache_token() {
+              _fict_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+              _fict_inventory="$_fict_module/config/device_font_inventory.json"
+              _fict_current=''
+              if command -v getprop >/dev/null 2>&1; then
+                  _fict_current=$(getprop ro.build.fingerprint 2>/dev/null || true)
+                  [ -n "$_fict_current" ] || _fict_current=$(getprop ro.build.display.id 2>/dev/null || true)
+              fi
+              _fict_recorded=$(sed -n 's/^[[:space:]]*"buildKey":[[:space:]]*"\\([^"]*\\)".*/\\1/p' "$_fict_inventory" 2>/dev/null | head -n1)
+              if [ -n "$_fict_current" ] && [ "$_fict_current" != "$_fict_recorded" ]; then
+                  printf '%s\\n' fallback
+                  return 0
+              fi
+              if [ -s "$_fict_inventory" ] && \\
+                 grep -q '"schema": "device-font-inventory-v1"' "$_fict_inventory" 2>/dev/null && \\
+                 grep -q '"state": "ready"' "$_fict_inventory" 2>/dev/null; then
+                  _fict_token=''
+                  if command -v stat >/dev/null 2>&1; then
+                      _fict_token=$(stat -c '%s-%Y' "$_fict_inventory" 2>/dev/null)
+                  elif command -v toybox >/dev/null 2>&1; then
+                      _fict_token=$(toybox stat -c '%s-%Y' "$_fict_inventory" 2>/dev/null)
+                  fi
+                  [ -n "$_fict_token" ] && { printf '%s\\n' "$_fict_token"; return 0; }
+              fi
+              printf '%s\\n' fallback
+          }'''
+          token = '\n'.join(line[10:] if line.startswith('          ') else line for line in token.splitlines())
+          text = replace_function(text, '_font_inventory_cache_token', '_font_anchor_cache_lookup() {', token)
+
+          lookup = '''_font_anchor_cache_lookup() {
+              _facl_src="$1"
+              _facl_key="$2"
+              _facl_sha="${3:-}"
+              if [ -z "$_facl_sha" ]; then
+                  if command -v sha256sum >/dev/null 2>&1; then
+                      _facl_sha=$(sha256sum "$_facl_src" 2>/dev/null | awk '{print $1}')
+                  elif command -v busybox >/dev/null 2>&1; then
+                      _facl_sha=$(busybox sha256sum "$_facl_src" 2>/dev/null | awk '{print $1}')
+                  fi
+              fi
+              [ -n "$_facl_sha" ] || return 1
+              _facl_inventory=$(_font_inventory_cache_token)
+              [ -n "$_facl_inventory" ] || _facl_inventory=fallback
+              _facl_cache="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/config/metrics_cache"
+              _facl_hit="$_facl_cache/${_facl_sha}_${_facl_key}_v${LUOSHU_NORMALIZER_VERSION}_${_facl_inventory}.font"
+              [ -f "$_facl_hit" ] || return 1
+              printf '%s\\n' "$_facl_hit"
+              return 0
+          }'''
+          lookup = '\n'.join(line[10:] if line.startswith('          ') else line for line in lookup.splitlines())
+          text = replace_function(text, '_font_anchor_cache_lookup', '_font_anchor() {', lookup)
+
+          anchor_marker = '    normalizer="$module/common/font_metrics_normalize.py"\n    rm -f "$anchor" 2>/dev/null || true\n'
+          anchor_insert = '''    normalizer="$module/common/font_metrics_normalize.py"
+              _fa_sha=''
+              if command -v sha256sum >/dev/null 2>&1; then
+                  _fa_sha=$(sha256sum "$src" 2>/dev/null | awk '{print $1}')
+              elif command -v busybox >/dev/null 2>&1; then
+                  _fa_sha=$(busybox sha256sum "$src" 2>/dev/null | awk '{print $1}')
+              fi
+              rm -f "$anchor" 2>/dev/null || true
+          '''
+          anchor_insert = '\n'.join(line[10:] if line.startswith('          ') else line for line in anchor_insert.splitlines()) + '\n'
+          if text.count(anchor_marker) != 1:
+              raise SystemExit(f'anchor marker count={text.count(anchor_marker)}')
+          text = text.replace(anchor_marker, anchor_insert, 1)
+          if text.count('_font_anchor_cache_lookup "$src" "$key"') != 1:
+              raise SystemExit('anchor lookup call missing')
+          text = text.replace('_font_anchor_cache_lookup "$src" "$key"', '_font_anchor_cache_lookup "$src" "$key" "$_fa_sha"', 1)
+
+          old_cache = '''    # 写入归一化缓存，供下次切换同字体秒切
+              if command -v sha256sum >/dev/null 2>&1; then
+                  _fa_sha=$(sha256sum "$src" 2>/dev/null | awk '{print $1}')
+                  if [ -n "$_fa_sha" ]; then
+                      _fa_cache="$module/config/metrics_cache"
+                      mkdir -p "$_fa_cache" 2>/dev/null || true
+                      _fa_inventory=$(_font_inventory_cache_token)
+                      [ -n "$_fa_inventory" ] || _fa_inventory=fallback
+                      _fa_cached="$_fa_cache/${_fa_sha}_${key}_v${LUOSHU_NORMALIZER_VERSION}_${_fa_inventory}.font"
+                      ln "$anchor" "$_fa_cached" 2>/dev/null || cp -f "$anchor" "$_fa_cached" 2>/dev/null || true
+                  fi
+              fi
+          '''
+          old_cache = '\n'.join(line[10:] if line.startswith('          ') else line for line in old_cache.splitlines()) + '\n'
+          new_cache = '''    # 写入归一化缓存，供下次切换同字体秒切；复用本次已计算的源 SHA。
+              if [ -n "$_fa_sha" ]; then
+                  _fa_cache="$module/config/metrics_cache"
+                  mkdir -p "$_fa_cache" 2>/dev/null || true
+                  _fa_inventory=$(_font_inventory_cache_token)
+                  [ -n "$_fa_inventory" ] || _fa_inventory=fallback
+                  _fa_cached="$_fa_cache/${_fa_sha}_${key}_v${LUOSHU_NORMALIZER_VERSION}_${_fa_inventory}.font"
+                  ln "$anchor" "$_fa_cached" 2>/dev/null || cp -f "$anchor" "$_fa_cached" 2>/dev/null || true
+              fi
+          '''
+          new_cache = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_cache.splitlines()) + '\n'
+          if old_cache not in text:
+              raise SystemExit('anchor cache block missing')
+          text = text.replace(old_cache, new_cache, 1)
+
+          entries = '''_device_font_inventory_entries() {
+              _dfie_module="$(_device_font_inventory_module)"
+              _dfie_json="$_dfie_module/config/device_font_inventory.json"
+              _dfie_cache="$_dfie_module/config/device_font_inventory.tsv"
+              _dfie_json_mtime=0
+              _dfie_cache_mtime=0
+              if command -v stat >/dev/null 2>&1; then
+                  _dfie_json_mtime=$(stat -c '%Y' "$_dfie_json" 2>/dev/null || echo 0)
+                  _dfie_cache_mtime=$(stat -c '%Y' "$_dfie_cache" 2>/dev/null || echo 0)
+              elif command -v toybox >/dev/null 2>&1; then
+                  _dfie_json_mtime=$(toybox stat -c '%Y' "$_dfie_json" 2>/dev/null || echo 0)
+                  _dfie_cache_mtime=$(toybox stat -c '%Y' "$_dfie_cache" 2>/dev/null || echo 0)
+              fi
+              case "$_dfie_json_mtime" in ''|*[!0-9]*) _dfie_json_mtime=0 ;; esac
+              case "$_dfie_cache_mtime" in ''|*[!0-9]*) _dfie_cache_mtime=0 ;; esac
+              if [ -s "$_dfie_cache" ] && [ "$_dfie_cache_mtime" -ge "$_dfie_json_mtime" ] 2>/dev/null; then
+                  cat "$_dfie_cache"
+                  return 0
+              fi
+              _dfie_tmp="${_dfie_cache}.tmp.$$"
+              if _device_font_inventory_exec --list --output "$_dfie_json" > "$_dfie_tmp" 2>/dev/null && [ -s "$_dfie_tmp" ]; then
+                  mv -f "$_dfie_tmp" "$_dfie_cache" 2>/dev/null || { rm -f "$_dfie_tmp"; return 1; }
+                  chmod 0644 "$_dfie_cache" 2>/dev/null || true
+                  cat "$_dfie_cache"
+                  return 0
+              fi
+              rm -f "$_dfie_tmp" 2>/dev/null || true
+              return 1
+          }'''
+          entries = '\n'.join(line[10:] if line.startswith('          ') else line for line in entries.splitlines())
+          text = replace_function(text, '_device_font_inventory_entries', '_device_font_inventory_target() {', entries)
+          rom.write_text(text)
+
+          customize = Path('customize.sh')
+          ctext = customize.read_text()
+          old_copy = '''if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_inventory.json" ]; then
+              cp -f "$OLD_MOD/config/device_font_inventory.json" "$FONT_INVENTORY_OUTPUT" 2>/dev/null || true
+          fi
+          '''
+          old_copy = '\n'.join(line[10:] if line.startswith('          ') else line for line in old_copy.splitlines()) + '\n'
+          new_copy = '''if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_inventory.json" ]; then
+              cp -f "$OLD_MOD/config/device_font_inventory.json" "$FONT_INVENTORY_OUTPUT" 2>/dev/null || true
+              [ ! -s "$OLD_MOD/config/device_font_inventory.tsv" ] || \\
+                  cp -f "$OLD_MOD/config/device_font_inventory.tsv" "$MODPATH/config/device_font_inventory.tsv" 2>/dev/null || true
+          fi
+          '''
+          new_copy = '\n'.join(line[10:] if line.startswith('          ') else line for line in new_copy.splitlines()) + '\n'
+          if old_copy not in ctext:
+              raise SystemExit('inventory migration block missing')
+          ctext = ctext.replace(old_copy, new_copy, 1)
+          marker = '    if [ "$_inventory_rc" -eq 0 ]; then\n        _inventory_files='
+          if marker not in ctext:
+              raise SystemExit('inventory success marker missing')
+          prebuild = '''    if [ "$_inventory_rc" -eq 0 ]; then
+              _inventory_list_script="$MODPATH/common/font_inventory.py"
+              _inventory_list_output="$MODPATH/config/device_font_inventory.tsv"
+              _inventory_list_tmp="${_inventory_list_output}.tmp.$$"
+              if [ -f "$_inventory_list_script" ]; then
+                  PYTHONHOME="$_inventory_pyroot" \\
+                  PYTHONPATH="$_inventory_pyroot/lib/python3.14:$_inventory_pyroot/lib/python3.14/site-packages:$MODPATH/common" \\
+                  LD_LIBRARY_PATH="$_inventory_pyroot/lib:$_inventory_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \\
+                      "$FONT_INVENTORY_PYTHON" "$_inventory_list_script" --list --output "$FONT_INVENTORY_OUTPUT" \\
+                      > "$_inventory_list_tmp" 2>> "$FONT_INVENTORY_LOG" && [ -s "$_inventory_list_tmp" ] && \\
+                      mv -f "$_inventory_list_tmp" "$_inventory_list_output" 2>/dev/null || rm -f "$_inventory_list_tmp" 2>/dev/null
+                  chmod 0644 "$_inventory_list_output" 2>/dev/null || true
+              fi
+              _inventory_files='''
+          prebuild = '\n'.join(line[10:] if line.startswith('          ') else line for line in prebuild.splitlines())
+          ctext = ctext.replace(marker, prebuild, 1)
+          customize.write_text(ctext)
+
+          test = Path('scripts/font_inventory_switch_cache_test.sh')
+          test.write_text('''#!/bin/sh
+          set -eu
+          ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+          TMP="$(mktemp -d)"
+          trap 'rm -rf "$TMP"' EXIT
+          export MODULE_DIR="$TMP/module"
+          export MODDIR="$MODULE_DIR"
+          mkdir -p "$MODULE_DIR/config"
+          . "$ROOT/common/rom_adapters.sh"
+          printf '{"schema": "device-font-inventory-v1", "state": "ready"}\n' > "$MODULE_DIR/config/device_font_inventory.json"
+          sleep 1
+          printf '/system/fonts/Roboto-Regular.ttf\tRoboto-Regular.ttf\tsystem\tTTF\t400\tnormal\txml\n' > "$MODULE_DIR/config/device_font_inventory.tsv"
+          calls="$TMP/calls"
+          _device_font_inventory_exec() { printf call >> "$calls"; return 1; }
+          result="$(_device_font_inventory_entries)"
+          printf '%s\n' "$result" | grep -q 'Roboto-Regular.ttf'
+          [ ! -e "$calls" ]
+          anchor_body="$(awk '/^_font_anchor\\(\\)/,/^}/' "$ROOT/common/rom_adapters.sh")"
+          [ "$(printf '%s\n' "$anchor_body" | grep -c 'sha256sum "$src"')" -eq 1 ]
+          grep -q 'device_font_inventory.tsv' "$ROOT/customize.sh"
+          echo 'font_inventory_switch_cache_test: PASS'
+          '''.replace('          ', ''))
+          check = Path('scripts/check.sh')
+          check_text = check.read_text()
+          if 'sh "$ROOT/scripts/font_inventory_switch_cache_test.sh"' not in check_text:
+              check_text = check_text.replace('sh "$ROOT/scripts/font_validation_cache_test.sh"\n', 'sh "$ROOT/scripts/font_validation_cache_test.sh"\nsh "$ROOT/scripts/font_inventory_switch_cache_test.sh"\n', 1)
+          check.write_text(check_text)
+          PY
+          chmod 0755 scripts/font_inventory_switch_cache_test.sh
+          sh -n common/rom_adapters.sh
+          sh -n customize.sh
+          sh scripts/font_inventory_switch_cache_test.sh
+      - name: Commit cache changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add common/rom_adapters.sh customize.sh scripts/font_inventory_switch_cache_test.sh scripts/check.sh
+          git commit -m 'perf: cache inventory mapping and source font hash'
+          git push origin HEAD:fix/v2.2.1-switch-timeout-status
