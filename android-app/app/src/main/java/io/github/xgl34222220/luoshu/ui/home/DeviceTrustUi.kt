@@ -143,6 +143,7 @@ internal fun DeviceTrustDialog(
     style: UiStyle,
     state: DeviceTrustState,
     onDismiss: () -> Unit,
+    onOpenAcceptance: () -> Unit = {},
 ) {
     val presentation = deviceTrustPresentation(state)
     AlertDialog(
@@ -171,6 +172,14 @@ internal fun DeviceTrustDialog(
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("完成") } },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    onDismiss()
+                    onOpenAcceptance()
+                },
+            ) { Text("真机验收", fontWeight = FontWeight.Black) }
+        },
     )
 }
 
