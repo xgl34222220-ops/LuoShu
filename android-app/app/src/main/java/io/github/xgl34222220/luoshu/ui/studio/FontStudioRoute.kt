@@ -96,7 +96,7 @@ internal fun FontStudioRoute(
     }
 
     if (showCompositePreview) {
-        StudioCompositePreviewDialog(
+        StudioCompositePreviewDialogCompact(
             style = style,
             state = state,
             onApplyPreset = { preset ->
