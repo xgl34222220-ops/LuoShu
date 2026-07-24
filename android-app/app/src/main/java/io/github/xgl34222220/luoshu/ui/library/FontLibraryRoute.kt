@@ -1,5 +1,8 @@
 package io.github.xgl34222220.luoshu.ui.library
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -7,6 +10,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 
@@ -17,12 +24,24 @@ internal fun FontLibraryRoute(
     actions: FontLibraryActions,
     topActions: @Composable () -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val collectionStore = remember(context.applicationContext) {
+        FontLibraryCollectionStore(context.applicationContext)
+    }
+    var collections by remember { mutableStateOf(collectionStore.load()) }
     var filter by rememberSaveable { mutableStateOf(FontLibraryFilter.ALL) }
     var sort by rememberSaveable { mutableStateOf(FontLibrarySort.ACTIVE_FIRST) }
     var detailFont by remember { mutableStateOf<FontItem?>(null) }
+    var showManagement by rememberSaveable { mutableStateOf(false) }
     val latestActions by rememberUpdatedState(actions)
-    val displayState = remember(state, filter, sort) {
-        state.forDisplay(filter, sort)
+    val conflicts = remember(state.fonts) { analyzeFontLibraryConflicts(state.fonts) }
+    val displayState = remember(state, filter, sort, collections.favoriteIds, conflicts.issueIds) {
+        state.forDisplay(
+            selectedFilter = filter,
+            selectedSort = sort,
+            favoriteIds = collections.favoriteIds,
+            issueIds = conflicts.issueIds,
+        )
     }
     val displayActions = remember {
         FontLibraryActions(
@@ -37,9 +56,40 @@ internal fun FontLibraryRoute(
         )
     }
 
-    when (style) {
-        UiStyle.MATERIAL -> FontLibraryScreenMaterial(displayState, displayActions, topActions)
-        UiStyle.MIUIX -> FontLibraryScreenMiuix(displayState, displayActions, topActions)
+    Box(Modifier.fillMaxSize()) {
+        when (style) {
+            UiStyle.MATERIAL -> FontLibraryScreenMaterial(displayState, displayActions, topActions)
+            UiStyle.MIUIX -> FontLibraryScreenMiuix(displayState, displayActions, topActions)
+        }
+        FontLibraryManagementButton(
+            style = style,
+            favoriteCount = collections.favoriteIds.size,
+            issueCount = conflicts.issueIds.size,
+            loading = state.loading,
+            onClick = { showManagement = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 18.dp, bottom = 18.dp),
+        )
+    }
+
+    if (showManagement) {
+        FontLibraryManagementDialog(
+            style = style,
+            fonts = state.fonts,
+            activeFontId = state.activeFontId,
+            collections = collections,
+            conflicts = conflicts,
+            onCollectionsChange = { next ->
+                collections = next
+                collectionStore.save(next)
+            },
+            onOpenDetails = { font ->
+                showManagement = false
+                detailFont = font
+            },
+            onDismiss = { showManagement = false },
+        )
     }
 
     detailFont?.let { font ->
