@@ -45,8 +45,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 private const val STUDIO_PROFILE_SCHEMA = 1
 private const val STUDIO_PROFILE_TYPE = "luoshu-studio-profile"
@@ -99,7 +100,7 @@ internal fun encodeStudioProfile(state: FontStudioUiState): String {
         .put("schema", STUDIO_PROFILE_SCHEMA)
         .put("type", STUDIO_PROFILE_TYPE)
         .put("name", "洛书组合方案")
-        .put("createdAt", LocalDateTime.now().toString())
+        .put("createdAt", System.currentTimeMillis())
         .put("slots", slots)
         .toString(2)
 }
@@ -222,7 +223,7 @@ internal fun StudioProfileTransferDialog(
         scope.launch {
             val result = runCatching {
                 withContext(Dispatchers.IO) { readProfileText(context.contentResolver, uri) }
-            }.mapCatching { raw -> parseStudioProfile(raw, state.slots.mapNotNull { it.font }) }
+            }.mapCatching { raw -> parseStudioProfile(raw, state.fonts) }
             val parsed = result.getOrNull()
             when {
                 result.isFailure -> {
@@ -345,7 +346,7 @@ private fun readProfileText(contentResolver: android.content.ContentResolver, ur
 }
 
 private fun profileFileName(): String {
-    val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+    val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
     return "LuoShu-profile-$timestamp.json"
 }
 
