@@ -35,6 +35,7 @@ on:
       - common/font_name_normalize.py
       - common/font_safety.sh
       - common/font_manager.sh
+      - common/font_switch_task.sh
       - common/font_library_cache.sh
       - common/hyperos_global.sh
       - common/mount_compat.sh
@@ -62,6 +63,7 @@ on:
       - scripts/device_font_payload_runtime_test.sh
       - scripts/device_font_payload_bridge_test.sh
       - scripts/device_font_transaction_guard_test.sh
+      - scripts/font_switch_task_test.sh
       - scripts/uninstall_safety_test.sh
       - scripts/font_config_overlay_test.py
       - scripts/font_config_monospace_test.py
@@ -108,6 +110,7 @@ jobs:
           python3 scripts/device_font_slot_build_test.py --font "$FONT"
           sh scripts/device_font_cache_test.sh
           sh scripts/device_font_foreground_quick_test.sh
+          sh scripts/font_switch_task_test.sh
           python3 scripts/device_font_load_verify_test.py
           sh -n common/device_font_load_verify.sh
           python3 scripts/device_font_payload_build_test.py --font "$FONT"
@@ -165,6 +168,8 @@ jobs:
           grep -q 'mount_fast_sync.sh' common/font_config_partitions.sh
           grep -q 'device_font_payload_policy.sh' common/font_config_partitions.sh
           grep -q 'cp -al' common/mount_fast_sync.sh
+          grep -q 'TIMEOUT_SECONDS' common/font_switch_task.sh
+          grep -q 'FONT_SWITCH_TASK' common/app_bridge.sh
           grep -q 'reports/v2.2-runtime-latest' common/device_font_runtime_report.sh
           grep -q 'font-manager-dump.txt' common/device_font_runtime_report.sh
           grep -q 'device_font_payload_clear' common/device_font_transaction_guard.sh
