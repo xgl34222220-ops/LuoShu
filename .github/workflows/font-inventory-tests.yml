@@ -1,0 +1,48 @@
+name: Device font inventory tests
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - common/font_inventory.py
+      - common/font_metrics_normalize.py
+      - common/rom_adapters.sh
+      - common/device_font_payload_policy.sh
+      - customize.sh
+      - scripts/font_inventory_test.py
+      - scripts/rom_adapter_inventory_test.sh
+      - scripts/font_metrics_normalization_test.py
+      - scripts/module_payload_manifest.txt
+      - .github/workflows/font-inventory-tests.yml
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install font test dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends python3-fonttools fonts-dejavu-core >/dev/null
+      - name: Validate inventory scanner and runtime mapper
+        run: |
+          set -eu
+          python3 -m py_compile common/font_inventory.py common/font_metrics_normalize.py
+          FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
+          test -s "$FONT"
+          python3 scripts/font_inventory_test.py --font "$FONT"
+          sh scripts/rom_adapter_inventory_test.sh "$FONT"
+          python3 scripts/font_metrics_normalization_test.py
+      - name: Validate install-stage and fallback contracts
+        run: |
+          sh -n customize.sh
+          sh -n common/rom_adapters.sh
+          sh -n common/device_font_payload_policy.sh
+          grep -q 'FONT_INVENTORY_SCRIPT=.*font_inventory.py' customize.sh
+          grep -q 'FONT_INVENTORY_PYTHON.*FONT_INVENTORY_SCRIPT.*--scan' customize.sh
+          grep -q '_copy_as_inventory' common/rom_adapters.sh
+          grep -q '_copy_as_inventory.*_dfabr' common/device_font_payload_policy.sh || grep -q '_copy_as_inventory' common/device_font_payload_policy.sh
+          grep -q 'device_font_inventory.json' common/font_metrics_normalize.py
+          grep -qx 'common/font_inventory.py' scripts/module_payload_manifest.txt
