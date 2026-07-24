@@ -1,56 +1,54 @@
 package io.github.xgl34222220.luoshu.ui.logs
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import io.github.xgl34222220.luoshu.rememberNativeImportViewModel
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
-import io.github.xgl34222220.luoshu.ui.navigation.LuoShuTab
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun LogsRoute(
     style: UiStyle,
     state: LogsUiState,
     actions: LogsActions,
-    importState: NativeImportTaskCenterState = NativeImportTaskCenterState(),
-    importActions: NativeImportTaskCenterActions = NativeImportTaskCenterActions(),
-    onNavigate: (LuoShuTab) -> Unit,
 ) {
+    val importViewModel = rememberNativeImportViewModel()
+    val importState = importViewModel.state
+    val displayState = state.withNativeImport(importState)
+    val scope = rememberCoroutineScope()
     var diagnosticState by remember { mutableStateOf(DiagnosticExportState()) }
-    LaunchedEffect(state.logs) {
-        if (state.logs == "尚未读取日志") actions.refresh()
-    }
-    Box {
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .navigationBarsPadding()
+            .padding(bottom = 96.dp),
+    ) {
         when (style) {
-            UiStyle.MATERIAL -> LogsScreenMaterial(
-                state = state,
-                actions = actions,
-                importState = importState,
-                importActions = importActions,
-                onNavigate = onNavigate,
-            )
-            UiStyle.MIUIX -> LogsScreenMiuix(
-                state = state,
-                actions = actions,
-                importState = importState,
-                importActions = importActions,
-                onNavigate = onNavigate,
-            )
+            UiStyle.MATERIAL -> LogsScreenMaterial(displayState, actions)
+            UiStyle.MIUIX -> LogsScreenMiuix(displayState, actions)
         }
-        // MIUIx 标题区本身高于普通工具栏；让诊断与刷新按钮共用同一视觉中线。
         DiagnosticExportButton(
             style = style,
             state = diagnosticState,
             onClick = {
-                if (diagnosticState.busy) return@DiagnosticExportButton
-                diagnosticState = DiagnosticExportState(busy = true)
+                if (!diagnosticState.busy) {
+                    diagnosticState = DiagnosticExportState(busy = true)
+                    scope.launch {
+                        diagnosticState = exportSanitizedDiagnostic()
+                    }
+                }
             },
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -59,11 +57,20 @@ internal fun LogsRoute(
                     end = 82.dp,
                 ),
         )
+        ImportTaskControls(
+            style = style,
+            state = importState,
+            onPause = importViewModel::pauseImport,
+            onResume = importViewModel::resumeImport,
+            onCancel = importViewModel::cancelImport,
+            onRetry = importViewModel::retryFailed,
+            onClear = importViewModel::clearRecord,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(horizontal = 14.dp, vertical = 12.dp),
+        )
     }
-    LaunchedEffect(diagnosticState.busy) {
-        if (!diagnosticState.busy) return@LaunchedEffect
-        diagnosticState = exportSanitizedDiagnostic()
-    }
+
     if (diagnosticState.resultVisible) {
         DiagnosticExportDialog(
             style = style,
