@@ -2,6 +2,7 @@ package io.github.xgl34222220.luoshu.ui.logs
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -28,7 +29,12 @@ internal fun LogsRoute(
     val scope = rememberCoroutineScope()
     var diagnosticState by remember { mutableStateOf(DiagnosticExportState()) }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .navigationBarsPadding()
+            .padding(bottom = 96.dp),
+    ) {
         when (style) {
             UiStyle.MATERIAL -> LogsScreenMaterial(displayState, actions)
             UiStyle.MIUIX -> LogsScreenMiuix(displayState, actions)
@@ -58,7 +64,7 @@ internal fun LogsRoute(
             onClear = importViewModel::clearRecord,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(horizontal = 14.dp, vertical = 94.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
         )
     }
 
