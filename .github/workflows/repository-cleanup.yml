@@ -12,11 +12,19 @@ permissions:
   contents: write
   pull-requests: read
 
+concurrency:
+  group: luoshu-one-time-repository-cleanup
+  cancel-in-progress: false
+
 jobs:
   cleanup:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Remove prereleases, prerelease tags and stale branches
         env:
           GH_TOKEN: ${{ github.token }}
@@ -102,25 +110,42 @@ jobs:
             description_result='当前 GITHUB_TOKEN 无仓库 Administration 权限，未自动更新'
           fi
 
+          remaining_prereleases="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '[.[] | select(.prerelease == true)] | length' | awk '{s+=$1} END {print s+0}')"
+          remaining_old_branches="$(gh api --paginate "repos/$GITHUB_REPOSITORY/branches?per_page=100" --jq '[.[] | select(.name != "main" and .name != "gh-pages" and .protected == false)] | length' | awk '{s+=$1} END {print s+0}')"
+
           {
             echo '## 仓库清理结果'
             echo
-            echo "- 删除预发行 Release：$deleted_releases"
-            echo "- 删除预发行 Tag：$deleted_tags"
-            echo "- 删除无保护、无开放 PR 的旧分支：$deleted_branches"
+            echo "- 本次删除预发行 Release：$deleted_releases"
+            echo "- 本次删除预发行 Tag：$deleted_tags"
+            echo "- 本次删除无保护、无开放 PR 的旧分支：$deleted_branches"
+            echo "- 清理后剩余预发行 Release：$remaining_prereleases"
+            echo "- 清理后剩余普通旧分支：$remaining_old_branches"
             echo "- 仓库简介：$description_result"
+          } > "$RUNNER_TEMP/cleanup-summary.md"
+
+          cat "$RUNNER_TEMP/cleanup-summary.md" >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo '# 仓库清理验证报告'
             echo
-            echo '### 已删除的预发行 Release'
-            if [[ -s "$RUNNER_TEMP/deleted-prereleases.txt" ]]; then
-              sed 's/^/- `/' "$RUNNER_TEMP/deleted-prereleases.txt" | sed 's/$/`/'
-            else
-              echo '- 无'
-            fi
+            echo '> 此文件由一次性清理工作流生成，用于确认预发行版本与旧分支清理结果。'
             echo
-            echo '### 已删除的旧分支'
-            if [[ -s "$RUNNER_TEMP/deleted-branches.txt" ]]; then
-              sed 's/^/- `/' "$RUNNER_TEMP/deleted-branches.txt" | sed 's/$/`/'
-            else
-              echo '- 无'
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+            cat "$RUNNER_TEMP/cleanup-summary.md"
+            echo
+            echo '## 保留规则'
+            echo
+            echo '- 保留正式 Release；'
+            echo '- 保留 `main`；'
+            echo '- 保留 `gh-pages`（存在时）；'
+            echo '- 保留受保护分支；'
+            echo '- 保留仍被开放 Pull Request 使用的分支。'
+          } > docs/REPOSITORY_CLEANUP_REPORT.md
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/REPOSITORY_CLEANUP_REPORT.md
+          if ! git diff --cached --quiet; then
+            git commit -m 'chore: record repository cleanup result'
+            git push origin HEAD:main
+          fi
