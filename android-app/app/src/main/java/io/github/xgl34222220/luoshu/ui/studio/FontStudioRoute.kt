@@ -78,16 +78,16 @@ internal fun FontStudioRoute(
             UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
         }
 
-        StudioToolLauncherRow(
+        StudioToolLauncher(
             style = style,
             enabled = state.hasFonts && !state.loading,
             onPreview = { showCompositePreview = true },
             onProfile = { showProfileTransfer = true },
             onGlyphs = { showGlyphBrowser = true },
             modifier = Modifier
-                .align(Alignment.BottomStart)
+                .align(Alignment.BottomEnd)
                 .navigationBarsPadding()
-                .padding(start = 16.dp, end = 86.dp, bottom = 98.dp),
+                .padding(end = 82.dp, bottom = 98.dp),
         )
     }
 
