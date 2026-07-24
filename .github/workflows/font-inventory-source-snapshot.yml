@@ -1,0 +1,36 @@
+name: Font inventory source snapshot
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/font-inventory-source-snapshot.yml
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect source files
+        run: |
+          mkdir -p /tmp/font-inventory-source
+          for path in \
+            common/rom_adapters.sh \
+            common/font_metrics_normalize.py \
+            common/device_font_payload_policy.sh \
+            customize.sh \
+            scripts/module_payload_manifest.txt \
+            scripts/font_metrics_normalization_test.py \
+            scripts/check.sh \
+            .github/workflows/no-hook-font-engine.yml \
+            .github/workflows/test-candidate.yml; do
+            mkdir -p "/tmp/font-inventory-source/$(dirname "$path")"
+            cp -a "$path" "/tmp/font-inventory-source/$path"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: font-inventory-source-snapshot
+          path: /tmp/font-inventory-source
+          if-no-files-found: error
+          retention-days: 2
