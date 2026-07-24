@@ -133,10 +133,20 @@ def verify(
         reasons.append("generated-font-not-found-in-font-manager-dump")
 
     if dynamic_missing:
-        state = "failed"
-        mode = "compatibility"
-        reasons.append("dynamic-family-not-loaded")
-    elif state != "failed" and not font_manager_confirmed:
+        if font_dump.strip() and font_manager_confirmed:
+            state = "failed"
+            mode = "compatibility"
+            reasons.append("dynamic-family-not-loaded")
+        elif mount_confirmed:
+            # A redacted/empty OEM dump cannot prove named dynamic families either way. Keep
+            # that limitation visible, but do not turn byte-identical visible mounts into a
+            # permanent failure state.
+            reasons.append("dynamic-family-unconfirmed")
+        else:
+            state = "unverified"
+            mode = "compatibility"
+            reasons.append("dynamic-family-unconfirmed")
+    if state != "failed" and not font_manager_confirmed:
         if mount_confirmed:
             # Some OEM builds redact generated family/file names from `cmd font dump`.
             # At boot-complete, byte-identical files at every expected visible mount are
