@@ -18,16 +18,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
-import io.github.xgl34222220.luoshu.ui.studio.FontStudioActions
-import io.github.xgl34222220.luoshu.ui.studio.FontStudioUiState
 
 @Composable
 internal fun FontLibraryRoute(
     style: UiStyle,
     state: FontLibraryUiState,
     actions: FontLibraryActions,
-    studioState: FontStudioUiState,
-    studioActions: FontStudioActions,
     topActions: @Composable () -> Unit = {},
 ) {
     val context = LocalContext.current
@@ -72,10 +68,8 @@ internal fun FontLibraryRoute(
             topActions()
             FontLibraryUtilitiesBar(
                 style = style,
-                fonts = studioState.fonts,
+                fonts = state.allFonts,
                 collections = collections,
-                studioState = studioState,
-                studioActions = studioActions,
                 enabled = !state.loading && !state.operationBusy,
                 onCollectionsChange = ::persistCollections,
             )
