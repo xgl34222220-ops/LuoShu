@@ -11,6 +11,7 @@ if [ -z "$MODDIR" ]; then
     fi
 fi
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
+FONT_SWITCH_TASK="$MODDIR/common/font_switch_task.sh"
 MIX_ENGINE="$MODDIR/common/font_mix_controller.sh"
 NATIVE_IMPORT="$MODDIR/common/native_import.sh"
 AXIS_INFO="$MODDIR/common/font_axis_info.py"
@@ -63,8 +64,9 @@ mount_engine() {
 
 select_task_file() {
     # queued/running is only trustworthy while its matching worker still exists.
-    # The controller marks dead tasks failed after a short spawn grace period.
+    # Reconcile both controllers before selecting the one visible to the App.
     [ -f "$MIX_ENGINE" ] && MODDIR="$MODDIR" sh "$MIX_ENGINE" reconcile >/dev/null 2>&1 || true
+    [ -f "$FONT_SWITCH_TASK" ] && MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" reconcile >/dev/null 2>&1 || true
     _axes_state="$(read_prop "$AXES_TASK_FILE" state)"
     _switch_state="$(read_prop "$SWITCH_TASK_FILE" state)"
     case "$_axes_state" in queued|running) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
@@ -132,6 +134,14 @@ status_json() {
 manager_ready() {
     [ -x "$FONT_MANAGER" ] || [ -f "$FONT_MANAGER" ] || {
         printf '{"status":"error","message":"字体管理器不存在"}\n'
+        return 1
+    }
+    return 0
+}
+
+switch_task_ready() {
+    [ -x "$FONT_SWITCH_TASK" ] || [ -f "$FONT_SWITCH_TASK" ] || {
+        printf '{"status":"error","message":"字体切换守卫不存在"}\n'
         return 1
     }
     return 0
@@ -256,8 +266,8 @@ case "${1:-status}" in
     preview_export) preview_export "${2:-}" "${3:-}" "${4:-400}" ;;
     weight_axis) weight_axis_info "${2:-}" ;;
     validate) manager_ready || exit 1; sh "$FONT_MANAGER" action validate "${2:-}" ;;
-    switch_start) manager_ready || exit 1; sh "$FONT_MANAGER" action switch_async "${2:-default}" ;;
-    switch_status) manager_ready || exit 1; sh "$FONT_MANAGER" action switch_status "${2:-}" ;;
+    switch_start) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "${2:-default}" ;;
+    switch_status) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" status "${2:-}" ;;
     delete) manager_ready || exit 1; sh "$FONT_MANAGER" action delete "${2:-}" ;;
     mix_config) mix_ready || exit 1; sh "$MIX_ENGINE" config ;;
     mix_start) mix_ready || exit 1; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" ;;
