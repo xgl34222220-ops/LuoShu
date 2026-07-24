@@ -21,6 +21,7 @@ common/device_font_slot_plan.py
 common/device_font_slot_plan.sh
 common/device_font_template.py
 common/device_font_template.sh
+common/font_archive_export.sh
 common/font_axis_info.py
 common/font_check.sh
 common/font_config_overlay.py
