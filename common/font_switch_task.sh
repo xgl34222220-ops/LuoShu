@@ -16,6 +16,7 @@ fi
 MANAGER="${LUOSHU_FONT_MANAGER:-$MODDIR/common/font_manager.sh}"
 TASK_FILE="${LUOSHU_SWITCH_TASK_FILE:-$MODDIR/config/switch_task.conf}"
 LOG_FILE="${LUOSHU_SWITCH_LOG:-$MODDIR/logs/fontswitch.log}"
+STATUS_SCRIPT="$MODDIR/common/module_status.sh"
 TIMEOUT_SECONDS="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-45}"
 case "$TIMEOUT_SECONDS" in ''|*[!0-9]*) TIMEOUT_SECONDS=45 ;; esac
 [ "$TIMEOUT_SECONDS" -ge 5 ] 2>/dev/null || TIMEOUT_SECONDS=5
@@ -185,6 +186,9 @@ status_task() {
     _message="$(read_value message)"
     _started="$(read_value started)"
     _finished="$(read_value finished)"
+    if [ "$_state" = success ] && [ -f "$STATUS_SCRIPT" ]; then
+        MODDIR="$MODDIR" sh "$STATUS_SCRIPT" "$_font" >/dev/null 2>&1 || true
+    fi
     printf '{"status":"ok","data":{"task":"%s","state":"%s","font":"%s","message":"%s","started":%s,"finished":%s}}\n' \
         "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_font")" "$(json_escape "$_message")" \
         "${_started:-0}" "${_finished:-0}"
