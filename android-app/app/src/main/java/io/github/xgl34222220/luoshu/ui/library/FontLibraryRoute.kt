@@ -80,9 +80,14 @@ internal fun FontLibraryRoute(
             activeFontId = state.activeFontId,
             collections = collections,
             conflicts = conflicts,
-            onCollectionsChange = { next ->
-                collections = next
-                collectionStore.save(next)
+            onCollectionsChange = { visibleNext ->
+                val visibleIds = state.fonts.map { it.id }.toSet()
+                val merged = FontLibraryCollections(
+                    favoriteIds = (collections.favoriteIds - visibleIds) + visibleNext.favoriteIds,
+                    tags = collections.tags.filterKeys { it !in visibleIds } + visibleNext.tags,
+                )
+                collections = merged
+                collectionStore.save(merged)
             },
             onOpenDetails = { font ->
                 showManagement = false
