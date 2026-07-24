@@ -1,0 +1,45 @@
+name: Source check diagnostic
+on:
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - common/**
+      - scripts/**
+      - android-app/**
+      - .github/workflows/source-check-diagnostic.yml
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - name: Prepare ARM64 runtime
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
+      - name: Capture source check trace
+        shell: bash
+        run: |
+          set +e
+          sh -x scripts/check.sh > /tmp/source-check.log 2>&1
+          printf '%s\n' "$?" > /tmp/source-check.rc
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-check-diagnostic
+          path: |
+            /tmp/source-check.log
+            /tmp/source-check.rc
+          if-no-files-found: error
+          retention-days: 2
+      - name: Enforce result
+        if: always()
+        run: test "$(cat /tmp/source-check.rc)" = 0
