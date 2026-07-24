@@ -132,7 +132,14 @@ internal fun LuoShuViewModel.toLogsUiState(): LogsUiState {
             )
         }
     }
-    val tasks = mergeTaskItems(current, parseTaskLogItems(normalized))
+    val activeKinds = current.asSequence()
+        .filter { it.active }
+        .map { it.kind }
+        .toSet()
+    val history = parseTaskLogItems(normalized).filterNot { item ->
+        item.active && item.kind in activeKinds
+    }
+    val tasks = mergeTaskItems(current, history)
 
     return LogsUiState(
         content = normalized,
