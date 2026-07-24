@@ -156,7 +156,7 @@ private fun ImportActionButton(
     val targetWidth = when {
         !expanded -> 54.dp
         taskVisible -> 180.dp
-        else -> 132.dp
+        else -> 148.dp
     }
     val targetHeight = when {
         embedded && taskVisible -> 68.dp
@@ -231,7 +231,7 @@ private fun ImportActionButton(
                         },
                         color = textColor,
                         fontWeight = FontWeight.Black,
-                        fontSize = if (embedded) 14.sp else 14.sp,
+                        fontSize = 14.sp,
                         maxLines = 1,
                         softWrap = false,
                     )
