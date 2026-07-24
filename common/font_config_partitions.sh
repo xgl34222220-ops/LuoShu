@@ -87,5 +87,6 @@ fi
 [ -f "$_luoshufp_module/common/device_font_load_verify.sh" ] && . "$_luoshufp_module/common/device_font_load_verify.sh"
 [ -f "$_luoshufp_module/common/device_font_runtime_report.sh" ] && . "$_luoshufp_module/common/device_font_runtime_report.sh"
 [ -f "$_luoshufp_module/common/device_font_cache.sh" ] && . "$_luoshufp_module/common/device_font_cache.sh"
+[ -f "$_luoshufp_module/common/mount_fast_sync.sh" ] && . "$_luoshufp_module/common/mount_fast_sync.sh"
 [ -f "$_luoshufp_module/common/device_font_payload_policy.sh" ] && . "$_luoshufp_module/common/device_font_payload_policy.sh"
 unset _luoshufp_module
