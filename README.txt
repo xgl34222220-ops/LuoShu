@@ -18,7 +18,10 @@ https://github.com/xgl34222220-ops/LuoShu/blob/main/docs/USER_GUIDE.md
 - 数字字体仅替换对应数字字形
 - 所有系统文字槽使用完整复合字体
 - 不依赖缺字回退，不直接修改系统字体 XML
-- 安装阶段读取当前设备原厂字体配置并生成设备独立清单
+- 安装阶段扫描当前设备真实字体目录与配置，生成这台设备独有的原厂字体清单
+- 应用字体时优先按照本机清单覆盖真实 UI 字体槽位
+- ColorOS、HyperOS 等名称只代表已有真机验证和额外回退，不是 ROM 白名单
+- 其他品牌、机型和 ROM 同样会先扫描本机；只有清单不可用时才降级到静态 ROM/AOSP 回退
 - 静态多字重字体默认只组合当前选择的字重
 - 可变字体读取真实设计轴范围
 - 原生 Android App 显示任务阶段、百分比、日志与缓存状态
@@ -33,6 +36,12 @@ https://github.com/xgl34222220-ops/LuoShu/blob/main/docs/USER_GUIDE.md
 4. 导入字体并分别选择中文、英文和数字字体
 5. 点击“生成并应用复合字体”
 6. 任务完成后再次完整重启
+
+本机扫描说明：
+- 主要映射 /system/fonts、/system_ext/fonts、/product/fonts、/my_product/fonts、/vendor/fonts
+- 同时检查 odm、oem、my_region、hw_product 等扩展目录用于诊断和 ROM 特征识别
+- 不同 ROM 显示相同槽位数量，不代表使用同一份文件清单
+- 实际路径、分区、XML 来源、TTC 索引和字体度量按每台设备独立生成
 
 用户目录：
 - /sdcard/LuoShu/fonts/   用户文字字体
