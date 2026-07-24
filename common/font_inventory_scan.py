@@ -314,4 +314,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    from font_inventory_scan_v3 import main as v3_main
+
+    raise SystemExit(v3_main())
