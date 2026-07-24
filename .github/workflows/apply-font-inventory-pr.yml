@@ -17,9 +17,18 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+      - name: Export source archive for diagnosis
+        uses: actions/upload-artifact@v4
+        with:
+          name: font-inventory-source-archive
+          path: .font-inventory-implementation.tar.gz
+          if-no-files-found: error
+          retention-days: 2
       - name: Verify source archive
         run: |
           test -s .font-inventory-implementation.tar.gz
+          echo '28b487b9ad4863b855e621a58cbea7346e410e59eae1ef63f30071b875bff86c  .font-inventory-implementation.tar.gz' | sha256sum -c -
+          gzip -t .font-inventory-implementation.tar.gz
           tar -tzf .font-inventory-implementation.tar.gz >/tmp/font-inventory-files.txt
           grep -qx 'common/font_inventory.py' /tmp/font-inventory-files.txt
           grep -qx 'scripts/font_inventory_test.py' /tmp/font-inventory-files.txt
