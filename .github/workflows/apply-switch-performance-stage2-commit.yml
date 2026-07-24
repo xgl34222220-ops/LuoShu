@@ -1,0 +1,62 @@
+name: Commit switch performance stage two
+
+on:
+  push:
+    branches:
+      - fix/v2.2.1-switch-timeout-status
+    paths:
+      - .github/workflows/apply-switch-performance-stage2-commit.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v2.2.1-switch-timeout-status
+          fetch-depth: 0
+
+      - name: Extract and run reviewed stage-two patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/apply-switch-performance-stage2.yml').read_text().splitlines()
+          collecting = False
+          lines = []
+          for line in source:
+              stripped = line.strip()
+              if not collecting and stripped.startswith("python3 - <<'PY'"):
+                  collecting = True
+                  continue
+              if collecting and stripped == 'PY':
+                  break
+              if collecting:
+                  lines.append(line[10:] if line.startswith('          ') else line)
+          if not lines:
+              raise SystemExit('embedded stage-two patch was not found')
+          Path('/tmp/stage2.py').write_text('\n'.join(lines) + '\n')
+          PY
+          python3 /tmp/stage2.py
+          chmod 0755 common/font_validation_cache.sh scripts/font_validation_cache_test.sh
+          sh -n common/font_validation_cache.sh
+          sh -n common/font_manager.sh
+          sh -n common/rom_adapters.sh
+          sh -n customize.sh
+          sh scripts/font_validation_cache_test.sh
+          sh scripts/font_switch_performance_test.sh
+
+      - name: Commit performance changes
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f docs/switch-performance-stage2-error.log
+          git add common/font_manager.sh common/rom_adapters.sh customize.sh scripts/font_validation_cache_test.sh scripts/check.sh
+          git add -u docs/switch-performance-stage2-error.log 2>/dev/null || true
+          git commit -m 'perf: reuse validated fonts and cached inventory mapping'
+          git push origin HEAD:fix/v2.2.1-switch-timeout-status
