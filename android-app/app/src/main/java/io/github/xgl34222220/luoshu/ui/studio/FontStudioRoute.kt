@@ -1,5 +1,6 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -72,9 +73,11 @@ internal fun FontStudioRoute(
     }
 
     Column(Modifier.fillMaxSize()) {
-        when (style) {
-            UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions, Modifier.weight(1f))
-            UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions, Modifier.weight(1f))
+        Box(Modifier.weight(1f)) {
+            when (style) {
+                UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
+                UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
+            }
         }
         StudioToolLauncherRow(
             style = style,
