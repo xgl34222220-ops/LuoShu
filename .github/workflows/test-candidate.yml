@@ -94,7 +94,7 @@ jobs:
           (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
           LUOSHU_APP_APK="$apk" LUOSHU_ALLOW_DEBUG_APP=1 sh ./scripts/build.sh
 
-      - name: Verify v2.2.0 candidate
+      - name: Verify current candidate
         shell: bash
         run: |
           set -euxo pipefail
@@ -106,10 +106,10 @@ jobs:
           unzip -t "$module" >/dev/null
           (cd dist && sha256sum -c "$(basename "$module").sha256")
           (cd dist && sha256sum -c "$(basename "$app").sha256")
-          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = 'v2.2.0'
-          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = '20200'
-          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = '2020001'
-          unzip -Z1 "$module" > /tmp/luoshu-v220-files.txt
+          test "$(unzip -p "$module" module.prop | sed -n 's/^version=//p')" = "$LUOSHU_VERSION"
+          test "$(unzip -p "$module" module.prop | sed -n 's/^versionCode=//p')" = "$LUOSHU_VERSION_CODE"
+          test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^versionCode=//p')" = "$LUOSHU_APP_VERSION_CODE"
+          unzip -Z1 "$module" > /tmp/luoshu-candidate-files.txt
           for path in \
             common/background_task.sh \
             common/device_font_template.sh \
@@ -126,7 +126,7 @@ jobs:
             common/font_switch_task.sh \
             common/mix_weight_mode.sh \
             common/mount_fast_sync.sh; do
-            grep -qx "$path" /tmp/luoshu-v220-files.txt
+            grep -qx "$path" /tmp/luoshu-candidate-files.txt
           done
           unzip -p "$module" common/background_task.sh | grep -q '_lsd_task'
           unzip -p "$module" common/background_task.sh | grep -q 'every new worker wrote an empty .task sidecar'
@@ -169,7 +169,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LuoShu-v2.2.0-Stable-Candidate
+          name: LuoShu-Test-Candidate
           path: dist/*
           if-no-files-found: error
           retention-days: 14
