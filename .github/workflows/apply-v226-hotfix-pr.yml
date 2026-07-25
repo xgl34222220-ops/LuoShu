@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'hotfix/v2.2.6-trust-log'
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'hotfix/v2.2.6-trust-log' && github.event.pull_request.head.sha != ''
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -23,7 +23,23 @@ jobs:
 
       - name: Apply validated source payload
         shell: bash
-        run: python3 .github/apply_v226_payload.py
+        run: |
+          set -euo pipefail
+          if ! python3 .github/apply_v226_payload.py > /tmp/v226.out 2> /tmp/v226.err; then
+            {
+              echo 'STDOUT:'
+              cat /tmp/v226.out
+              echo
+              echo 'STDERR:'
+              cat /tmp/v226.err
+            } > .github/v226-payload-error.txt
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add .github/v226-payload-error.txt
+            git commit -m 'debug: capture v2.2.6 payload failure' || true
+            git push origin HEAD:hotfix/v2.2.6-trust-log || true
+            exit 1
+          fi
 
       - name: Validate and commit
         shell: bash
