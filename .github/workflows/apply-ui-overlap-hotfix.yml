@@ -1,4 +1,5 @@
 name: Apply UI overlap hotfix
+# Registered on the previous commit; this update intentionally triggers the workflow.
 
 on:
   push:
