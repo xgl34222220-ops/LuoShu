@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # LuoShu mount compatibility loader.
 # The v2.2.7 implementation remains in mount_compat_base.sh; this loader always
-# applies the non-invasive self-mount compatibility overrides afterwards.
+# applies the non-invasive self-mount compatibility and final engine policy afterwards.
 # hyperos_global.sh remains loaded by the base implementation.
 set +e
 
@@ -12,6 +12,7 @@ fi
 [ -n "$_lmcl_module" ] || _lmcl_module=/data/adb/modules/LuoShu
 _lmcl_base="$_lmcl_module/common/mount_compat_base.sh"
 _lmcl_fallback="$_lmcl_module/common/mount_self_fallback.sh"
+_lmcl_policy="$_lmcl_module/common/mount_compat_policy.sh"
 
 # When invoked as a CLI, source the base in a child shell whose $0 is not
 # mount_compat.sh so the legacy CLI footer cannot run before the overrides.
@@ -22,7 +23,8 @@ if [ "${0##*/}" = mount_compat.sh ]; then
     sh -c '
         . "$1" || exit 1
         [ ! -f "$2" ] || . "$2"
-        case "$3" in
+        [ ! -f "$3" ] || . "$3"
+        case "$4" in
             status)
                 luoshu_mount_status_json
                 printf "\n"
@@ -33,17 +35,18 @@ if [ "${0##*/}" = mount_compat.sh ]; then
                 printf "warning=%s\n" "$(luoshu_mount_detection_warning)"
                 ;;
             verify)
-                luoshu_mount_verify_active "$4"
+                luoshu_mount_verify_active "$5"
                 ;;
             *)
                 printf "usage: %s {status|detect|verify [font]}\n" "$0" >&2
                 exit 2
                 ;;
         esac
-    ' sh "$_lmcl_base" "$_lmcl_fallback" "$_lmcl_command" "$_lmcl_argument"
+    ' sh "$_lmcl_base" "$_lmcl_fallback" "$_lmcl_policy" "$_lmcl_command" "$_lmcl_argument"
     exit $?
 fi
 
 [ -f "$_lmcl_base" ] && . "$_lmcl_base"
 [ -f "$_lmcl_fallback" ] && . "$_lmcl_fallback"
-unset _lmcl_module _lmcl_base _lmcl_fallback _lmcl_command _lmcl_argument
+[ -f "$_lmcl_policy" ] && . "$_lmcl_policy"
+unset _lmcl_module _lmcl_base _lmcl_fallback _lmcl_policy _lmcl_command _lmcl_argument
