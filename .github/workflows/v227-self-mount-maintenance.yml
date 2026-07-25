@@ -10,7 +10,11 @@ on:
       - common/mount_compat_policy.sh
       - common/mount_self_backend.sh
       - common/mount_self_fallback.sh
+      - common/private_payload.sh
+      - common/private_mount_policy.sh
       - common/font_config_partitions.sh
+      - customize.sh
+      - post-fs-data.sh
       - post-mount.sh
       - uninstall.sh
       - scripts/module_payload_manifest.txt
@@ -37,6 +41,10 @@ jobs:
           sh -n common/mount_compat_policy.sh
           sh -n common/mount_self_fallback.sh
           sh -n common/mount_self_backend.sh
+          sh -n common/private_payload.sh
+          sh -n common/private_mount_policy.sh
+          sh -n customize.sh
+          sh -n post-fs-data.sh
           sh -n post-mount.sh
           sh -n uninstall.sh
       - name: Self-mount simulation
@@ -67,12 +75,17 @@ jobs:
           grep -qx 'common/mount_compat_policy.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/mount_self_backend.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/mount_self_fallback.sh' scripts/module_payload_manifest.txt
+          grep -qx 'common/private_payload.sh' scripts/module_payload_manifest.txt
+          grep -qx 'common/private_mount_policy.sh' scripts/module_payload_manifest.txt
+          grep -qx '.luoshu-runtime' scripts/module_payload_manifest.txt
           grep -qx 'post-mount.sh' scripts/module_payload_manifest.txt
       - name: Loader and backend contracts
         run: |
           grep -q 'mount_self_fallback.sh' common/mount_compat.sh
           grep -q 'mount_compat_policy.sh' common/mount_compat.sh
-          grep -q 'mount_self_backend.sh' post-mount.sh
+          grep -q 'private_mount_policy.sh' common/mount_compat.sh
+          grep -q 'private_payload.sh' post-mount.sh
+          grep -q 'luoshu_private_self_mount_ensure' post-mount.sh
           grep -q -- '-t overlay KSU' common/mount_self_backend.sh
 
   build-test-module:
@@ -92,6 +105,8 @@ jobs:
             sh scripts/prepare_composite_runtime.sh
           fi
       - name: Run complete source checks
+        id: source_check
+        continue-on-error: true
         shell: bash
         run: |
           set +e
@@ -103,6 +118,17 @@ jobs:
             exit $rc
           fi
           tail -n 30 "$RUNNER_TEMP/source-check.log"
+      - name: Upload source-check log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-v2.2.7-source-check-log
+          path: ${{ runner.temp }}/source-check.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Enforce source checks
+        if: steps.source_check.outcome == 'failure'
+        run: exit 1
       - name: Reuse signed v2.2.7 App and build test module
         shell: bash
         run: |
@@ -132,6 +158,9 @@ jobs:
           unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/mount_compat_policy.sh'
           unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/mount_self_backend.sh'
           unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/mount_self_fallback.sh'
+          unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/private_payload.sh'
+          unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/private_mount_policy.sh'
+          unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx '.luoshu-runtime/customize-v227.sh'
       - name: Upload v2.2.7 self-mount test module
         uses: actions/upload-artifact@v4
         with:
