@@ -12,5 +12,5 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/mount_self_backend.sh" ] && . "$MODDIR/common/mount_self_backend.sh"
 
 type luoshu_self_mount_ensure >/dev/null 2>&1 || exit 0
-luoshu_self_mount_ensure
-exit $?
+luoshu_self_mount_ensure >/dev/null 2>&1 || true
+exit 0
