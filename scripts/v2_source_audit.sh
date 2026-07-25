@@ -13,7 +13,7 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 }
 
 # 运行时脚本不得创建或依赖 webroot，也不得重新暴露热刷新入口。
-RUNTIME_FILES="$ROOT/customize.sh $ROOT/post-fs-data.sh $ROOT/service.sh $ROOT/action.sh $ROOT/common/font_manager.sh $ROOT/common/app_bridge.sh $ROOT/common/luoshu_cli.sh"
+RUNTIME_FILES="$ROOT/customize.sh $ROOT/post-fs-data.sh $ROOT/post-mount.sh $ROOT/service.sh $ROOT/action.sh $ROOT/common/font_manager.sh $ROOT/common/app_bridge.sh $ROOT/common/luoshu_cli.sh"
 HITS=$(grep -InE 'webroot|restart_ui|sync_preview_fonts|重启界面|刷新字体缓存|回滚上一字体' $RUNTIME_FILES 2>/dev/null || true)
 if [ -n "$HITS" ]; then
   echo '=== App-only forbidden runtime inventory ===' >&2
@@ -54,3 +54,4 @@ grep -q 'native_font_index.json' "$ROOT/service.sh"
 ! grep -q 'mkdir -p .*MODDIR.*/logs' "$ROOT/uninstall.sh"
 ! grep -q 'MODDIR/logs/.*>>' "$ROOT/uninstall.sh"
 sh "$ROOT/scripts/uninstall_cleanup_test.sh"
+sh "$ROOT/scripts/self_mount_test.sh"
