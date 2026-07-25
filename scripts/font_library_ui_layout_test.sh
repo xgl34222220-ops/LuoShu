@@ -19,6 +19,8 @@ STUDIO_MATERIAL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luosh
 OVERLAY="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 SHELL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
 SETTINGS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/settings/AppearanceSettingsScreen.kt"
+UTIL="$ROOT/common/util_functions.sh"
+CACHE="$ROOT/common/device_font_cache.sh"
 
 # Legacy style screens stay available as a rollback path while the routes use the
 # shared compact hierarchy.
@@ -45,15 +47,29 @@ grep -q '打开任务中心查看错误原因' "$HOME_COMPACT"
 ! grep -q 'QUICK ACCESS' "$HOME_COMPACT"
 ! grep -q 'bottom = 108.dp' "$HOME_ROUTE"
 
-# Acceptance guidance follows the installed version and explains the real next
-# action instead of keeping the obsolete v2.2.2 release target in production UI.
+# Acceptance guidance follows the installed version and distinguishes a usable
+# compatibility mapping, an informational wait, and a real blocking failure.
 grep -q "targetVersion: String = state.version.substringBefore('-').substringBefore('+')" "$MATRIX"
 grep -q '真机测试矩阵 · ${report.targetVersion}' "$MATRIX"
 grep -q '测试矩阵与当前版本预发行门禁' "$ACCEPTANCE"
-grep -q '等待逐分区开机挂载验证' "$ACCEPTANCE"
-grep -q '应用字体后会在后台自动建立' "$ACCEPTANCE"
+grep -q 'val blocking: Boolean = true' "$ACCEPTANCE"
+grep -q '设备专属对齐属于可选增强，不影响正常使用' "$ACCEPTANCE"
+grep -q '设备对齐缓存会在后台继续准备，不作为失败项' "$ACCEPTANCE"
+grep -q '加载验证失败，请打开问题页查看具体失败分区' "$ACCEPTANCE"
 ! grep -q 'v2.2.2' "$MATRIX"
 ! grep -q 'v2.2.2' "$ACCEPTANCE"
+
+# ROM detection is a state fact, not a polling log. Existing duplicate records
+# are compacted once and new entries are emitted only when the detected version changes.
+grep -q 'compact_rom_detection_logs' "$UTIL"
+grep -q 'log_rom_detection_once coloros' "$UTIL"
+grep -q 'log_rom_detection_once hyperos' "$UTIL"
+
+# A detached background cache worker must load the transaction and mount layers
+# itself before activating a generated payload.
+grep -q 'device_font_transaction_guard.sh' "$CACHE"
+grep -q 'mount_compat.sh' "$CACHE"
+grep -q 'type luoshu_sync_mount_payload' "$CACHE"
 
 # Task center separates user-facing tasks/issues from raw logs and its two header
 # actions have the same 50 dp visual size.
