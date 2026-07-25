@@ -2,6 +2,8 @@
 # LuoShu early-boot wrapper around the verified v2.2.7 initializer.
 # Delegated core consumes font-payload-rebuild-pending.conf before the payload is hidden.
 # Delegated boot verifier invocation: device_font_boot_verify.sh" schedule
+# Delegated recovery contract: font_mix_controller.sh recover
+# Delegated dynamic view contract: device_font_dynamic_mount_apply
 set +e
 MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
