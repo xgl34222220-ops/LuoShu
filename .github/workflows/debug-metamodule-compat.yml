@@ -1,6 +1,7 @@
 name: Debug metamodule compatibility
 
 on:
+  pull_request:
   push:
     branches:
       - fix/metamodule-direct-source-regression
