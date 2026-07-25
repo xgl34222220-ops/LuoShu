@@ -2,6 +2,7 @@ package io.github.xgl34222220.luoshu.ui.studio
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.AlertDialog
@@ -73,9 +74,16 @@ internal fun FontStudioRoute(
     }
 
     Box(Modifier.fillMaxSize()) {
-        when (style) {
-            UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
-            UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .navigationBarsPadding()
+                .padding(bottom = 86.dp),
+        ) {
+            when (style) {
+                UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
+                UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
+            }
         }
 
         StudioToolLauncher(
@@ -87,7 +95,7 @@ internal fun FontStudioRoute(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
-                .padding(end = 82.dp, top = 12.dp),
+                .padding(end = 82.dp, top = 24.dp),
         )
     }
 
