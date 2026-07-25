@@ -11,20 +11,30 @@ MODULE_DIR="$MODDIR"
 LUOSHU_META_TEST_ENGINE=meta-overlayfs
 LUOSHU_META_TEST_ROOT="$TMP/meta-content"
 export MODDIR MODULE_DIR LUOSHU_META_TEST_ENGINE LUOSHU_META_TEST_ROOT
-mkdir -p "$MODDIR/common" "$MODDIR/system/fonts" "$MODDIR/my_product/fonts" "$LUOSHU_META_TEST_ROOT"
+mkdir -p "$MODDIR/common" "$MODDIR/system/fonts" "$LUOSHU_META_TEST_ROOT"
 cp "$ROOT/common/mount_compat.sh" "$MODDIR/common/mount_compat.sh"
 cp "$ROOT/common/mount_compat_base.sh" "$MODDIR/common/mount_compat_base.sh"
 cp "$ROOT/common/mount_self_fallback.sh" "$MODDIR/common/mount_self_fallback.sh"
+cp "$ROOT/common/mount_compat_policy.sh" "$MODDIR/common/mount_compat_policy.sh"
 printf 'id=LuoShu\n' > "$MODDIR/module.prop"
 printf 'font-one' > "$MODDIR/system/fonts/Test.ttf"
-printf 'unsupported-partition' > "$MODDIR/my_product/fonts/Oplus.ttf"
 . "$MODDIR/common/mount_compat.sh"
 
 luoshu_sync_mount_payload Demo
 [ "$(cat "$LUOSHU_META_TEST_ROOT/LuoShu/system/fonts/Test.ttf")" = font-one ]
-[ ! -e "$LUOSHU_META_TEST_ROOT/LuoShu/my_product" ]
 [ -s "$MODDIR/system/etc/luoshu/mount-probe.conf" ]
 [ "$(sed -n 's/^state=//p' "$MODDIR/config/mount_compat.conf")" = prepared ]
+
+# A real dual-directory engine must reject undeclared OEM partitions instead of
+# silently pretending that every payload partition was mirrored.
+mkdir -p "$MODDIR/my_product/fonts"
+printf 'unsupported-partition' > "$MODDIR/my_product/fonts/Oplus.ttf"
+if luoshu_sync_mount_payload Demo; then
+    echo 'undeclared dual-directory partition unexpectedly succeeded' >&2
+    exit 1
+fi
+grep -q 'my_product' "$MODDIR/config/mount_compat.conf"
+rm -rf "$MODDIR/my_product"
 
 printf 'font-two' > "$MODDIR/system/fonts/Test.ttf"
 luoshu_sync_mount_payload Demo
@@ -36,7 +46,7 @@ LUOSHU_META_TEST_ENGINE=mountify
 export LUOSHU_META_TEST_ENGINE
 luoshu_sync_mount_payload Demo
 [ ! -e "$LUOSHU_META_TEST_ROOT/LuoShu" ]
-[ "$(sed -n 's/^detail=//p' "$MODDIR/config/mount_compat.conf")" = '当前引擎直接读取标准模块目录，等待重启验证' ]
+grep -q '^detail=当前引擎直接读取标准模块目录' "$MODDIR/config/mount_compat.conf"
 grep -q '^system|' "$MODDIR/config/mount-probes-expected.conf"
 ! grep -q '^my_product|' "$MODDIR/config/mount-probes-expected.conf"
 
@@ -65,6 +75,7 @@ if luoshu_sync_mount_payload Demo; then
     exit 1
 fi
 rm -f "$MODDIR/skip_mount"
+luoshu_sync_mount_payload Demo
 
 # After reboot, every dual-directory partition probe must match the expected transaction probe.
 VISIBLE_ROOT="$TMP/visible"
