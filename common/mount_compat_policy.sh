@@ -4,6 +4,28 @@
 # metamodules retain strict marker, mountpoint and supported-partition validation.
 set +e
 
+# Keep every v2.2.7 probe injection contract working. New self-mount tests use
+# LUOSHU_SELF_MOUNT_VISIBLE_ROOT, while the existing runtime/tests use the older
+# LUOSHU_VISIBLE_PROBE_ROOT or a direct LUOSHU_VISIBLE_PROBE file.
+_luoshu_self_visible_root() {
+    printf '%s\n' "${LUOSHU_SELF_MOUNT_VISIBLE_ROOT:-${LUOSHU_VISIBLE_PROBE_ROOT:-}}"
+}
+
+_luoshu_visible_path() {
+    _lmcvp_path="$1"
+    if [ "$_lmcvp_path" = /system/etc/luoshu/mount-probe.conf ] && \
+       [ -n "${LUOSHU_VISIBLE_PROBE:-}" ]; then
+        printf '%s\n' "$LUOSHU_VISIBLE_PROBE"
+        return 0
+    fi
+    _lmcvp_root=$(_luoshu_self_visible_root)
+    if [ -n "$_lmcvp_root" ]; then
+        printf '%s%s\n' "${_lmcvp_root%/}" "$_lmcvp_path"
+    else
+        printf '%s\n' "$_lmcvp_path"
+    fi
+}
+
 luoshu_mount_preflight() {
     _lmcp_active="${1:-unknown}"
     _lmcp_engine="${2:-$(luoshu_detect_mount_engine)}"
