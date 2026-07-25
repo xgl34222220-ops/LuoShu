@@ -1,4 +1,5 @@
 # Explicit release payload. New runtime files must be reviewed and listed here.
+# Standard partition payloads are migrated into .luoshu-payload during installation.
 common/app_bridge.sh
 common/app_installer.sh
 common/background_task.sh
