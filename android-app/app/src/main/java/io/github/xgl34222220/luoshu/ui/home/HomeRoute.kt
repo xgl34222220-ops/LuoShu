@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import kotlinx.coroutines.delay
 
 @Composable
 fun HomeRoute(
@@ -34,10 +35,22 @@ fun HomeRoute(
         state.taskRunning,
         trustRefreshGeneration,
     ) {
-        trustState = if (state.moduleInstalled) {
-            loadDeviceTrustState()
-        } else {
-            DeviceTrustState(loading = false, error = "请先安装洛书模块")
+        if (!state.moduleInstalled) {
+            trustState = DeviceTrustState(loading = false, error = "请先安装洛书模块")
+            return@LaunchedEffect
+        }
+
+        var latest = loadDeviceTrustState()
+        trustState = latest
+        // The late-start verifier can finish shortly after the App becomes interactive.
+        // Refresh a bounded number of times so Home does not keep a stale pending chip until
+        // the user manually leaves the page or presses refresh.
+        var attempt = 0
+        while (latest.level == DeviceTrustLevel.PENDING && attempt < 9 && !state.taskRunning) {
+            delay(5_000L)
+            latest = loadDeviceTrustState()
+            trustState = latest
+            attempt += 1
         }
     }
 

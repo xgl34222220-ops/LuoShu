@@ -28,6 +28,14 @@ internal fun LogsRoute(
     val displayState = state.withNativeImport(importState)
     val scope = rememberCoroutineScope()
     var diagnosticState by remember { mutableStateOf(DiagnosticExportState()) }
+    val onDiagnostic = {
+        if (!diagnosticState.busy) {
+            diagnosticState = DiagnosticExportState(busy = true)
+            scope.launch {
+                diagnosticState = exportSanitizedDiagnostic()
+            }
+        }
+    }
 
     Box(
         Modifier
@@ -36,27 +44,24 @@ internal fun LogsRoute(
             .padding(bottom = 96.dp),
     ) {
         when (style) {
-            UiStyle.MATERIAL -> LogsScreenMaterial(displayState, actions)
-            UiStyle.MIUIX -> LogsScreenMiuix(displayState, actions)
+            UiStyle.MATERIAL -> {
+                LogsScreenMaterial(displayState, actions)
+                DiagnosticExportButton(
+                    style = style,
+                    state = diagnosticState,
+                    onClick = onDiagnostic,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 14.dp, end = 82.dp),
+                )
+            }
+            UiStyle.MIUIX -> LogsScreenMiuix(
+                state = displayState,
+                actions = actions,
+                diagnosticState = diagnosticState,
+                onDiagnostic = onDiagnostic,
+            )
         }
-        DiagnosticExportButton(
-            style = style,
-            state = diagnosticState,
-            onClick = {
-                if (!diagnosticState.busy) {
-                    diagnosticState = DiagnosticExportState(busy = true)
-                    scope.launch {
-                        diagnosticState = exportSanitizedDiagnostic()
-                    }
-                }
-            },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(
-                    top = if (style == UiStyle.MIUIX) 25.dp else 14.dp,
-                    end = 82.dp,
-                ),
-        )
         ImportTaskControls(
             style = style,
             state = importState,

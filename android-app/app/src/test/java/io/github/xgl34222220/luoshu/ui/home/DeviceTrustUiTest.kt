@@ -10,11 +10,13 @@ class DeviceTrustUiTest {
     fun verifiedDeviceStateIsRecognized() {
         val state = parseDeviceTrustOutput(
             """
+                activeFont=custom-font
                 inventory=available
                 engine=installed
                 template=trusted
                 alignment=verified
                 mode=aligned
+                reason=
                 cachePending=no
             """.trimIndent(),
         )
@@ -26,14 +28,53 @@ class DeviceTrustUiTest {
     }
 
     @Test
-    fun failedAlignmentTakesPriority() {
+    fun restoredSystemFontDoesNotPretendVerificationIsPending() {
         val state = parseDeviceTrustOutput(
             """
+                activeFont=default
+                inventory=available
+                engine=installed
+                template=trusted
+                alignment=not-applicable
+                mode=compatibility
+                reason=default-font
+                cachePending=no
+            """.trimIndent(),
+        )
+
+        assertEquals(DeviceTrustLevel.SYSTEM, state.level)
+        assertEquals("default-font", state.reason)
+    }
+
+    @Test
+    fun compatibilityMappingIsNotPresentedAsWaitingForReboot() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+                engine=ready
+                template=trusted
+                alignment=compatibility
+                mode=compatibility
+                reason=aligned-payload-not-active
+                cachePending=no
+            """.trimIndent(),
+        )
+
+        assertEquals(DeviceTrustLevel.COMPATIBILITY, state.level)
+    }
+
+    @Test
+    fun failedAlignmentTakesPriorityForCustomFont() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
                 inventory=available
                 engine=installed
                 template=trusted
                 alignment=failed
                 mode=compatibility
+                reason=aligned-manifest-missing
                 cachePending=yes
             """.trimIndent(),
         )
