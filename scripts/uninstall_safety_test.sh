@@ -11,12 +11,15 @@ PROVIDER="$TMP/provider"
 BIN="$TMP/bin"
 TARGET="$TMP/data-fonts-config.xml"
 MOUNTINFO="$TMP/mountinfo"
-mkdir -p "$MODULE/common" "$MODULE/config/flyme-data-original" "$MODULE/system/etc" \
+mkdir -p "$MODULE/common" "$MODULE/.luoshu-runtime" \
+    "$MODULE/config/flyme-data-original" "$MODULE/system/etc" \
     "$DATA" "$PROVIDER" "$BIN"
 cp "$ROOT/uninstall.sh" "$MODULE/uninstall.sh"
+cp "$ROOT/.luoshu-runtime/uninstall-v227.sh" "$MODULE/.luoshu-runtime/uninstall-v227.sh"
+cp "$ROOT/common/private_payload.sh" "$MODULE/common/private_payload.sh"
 cp "$ROOT/common/origin_flyme_global.sh" "$MODULE/common/origin_flyme_global.sh"
 cp "$ROOT/common/font_provider_cache.sh" "$MODULE/common/font_provider_cache.sh"
-printf 'id=LuoShu\nversion=v2.2-test\n' > "$MODULE/module.prop"
+printf 'id=LuoShu\nversion=v2.3-test\n' > "$MODULE/module.prop"
 
 # Simulate LuoShu's private dynamic view mounted on the original config path.
 printf '<fontConfig sanitized="true"/>\n' > "$MODULE/system/etc/.luoshu-data-fonts-config.xml"
@@ -32,7 +35,7 @@ EOF_STATE
 printf '101 1 0:42 / %s rw,relatime - tmpfs tmpfs rw\n' "$TARGET" > "$MOUNTINFO"
 cat > "$BIN/umount" <<'EOF_UMOUNT'
 #!/bin/sh
-printf '%s\n' "$1" > "$LUOSHU_UMOUNT_LOG"
+printf '%s\n' "$1" >> "$LUOSHU_UMOUNT_LOG"
 exit 0
 EOF_UMOUNT
 chmod 0755 "$BIN/umount"
@@ -53,18 +56,27 @@ LUOSHU_MOUNTINFO="$MOUNTINFO" \
 LUOSHU_PROVIDER_DIR="$PROVIDER" \
 LUOSHU_TEST_ROM=flyme \
 LUOSHU_FLYME_DATA_FONT_ROOT="$DATA" \
+LUOSHU_MODULES_DIR="$TMP/modules" \
+LUOSHU_MODULES_UPDATE_DIR="$TMP/modules-update" \
+LUOSHU_METAMODULE_MNT="$TMP/metamodule" \
+LUOSHU_SELF_MOUNT_STATE="$TMP/luoshu/self-mount" \
     sh "$MODULE/uninstall.sh"
 
-test "$(cat "$TMP/umount.log")" = "$TARGET"
+grep -qx "$TARGET" "$TMP/umount.log"
 test "$(cat "$PROVIDER/GoogleSans-Regular.ttf")" = old-provider
 test ! -e "$PROVIDER/GoogleSans-Regular.ttf.luoshu-bak"
 test "$(sha256sum "$DATA/flymeFont.ttf" | awk '{print $1}')" = "$ORIGINAL_HASH"
 test ! -e "$MODULE/config/flyme-data-original"
 test ! -e "$MODULE/config/flyme-data-pending.conf"
 
+CORE="$ROOT/.luoshu-runtime/uninstall-v227.sh"
 sh -n "$ROOT/uninstall.sh"
-grep -q 'device-font-dynamic-mount.conf' "$ROOT/uninstall.sh"
-grep -q '_luoshu_flyme_prepare_data_restore' "$ROOT/uninstall.sh"
-grep -q 'luoshu_flyme_pending_apply' "$ROOT/uninstall.sh"
+sh -n "$CORE"
+grep -q 'private_payload.sh' "$ROOT/uninstall.sh"
+grep -q 'uninstall-v227.sh' "$ROOT/uninstall.sh"
+grep -q 'device-font-dynamic-mount.conf' "$CORE"
+grep -q '_luoshu_flyme_prepare_data_restore' "$CORE"
+grep -q 'luoshu_flyme_pending_apply' "$CORE"
+grep -q '_luoshu_cleanup_self_mount' "$CORE"
 
-echo 'LuoShu uninstall restores only its dynamic bind, provider backup and Flyme persistent font.'
+echo 'LuoShu uninstall restores recorded state through the v2.3 private self-mount wrapper.'

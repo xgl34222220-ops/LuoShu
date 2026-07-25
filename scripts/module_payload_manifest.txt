@@ -1,4 +1,6 @@
 # Explicit release payload. New runtime files must be reviewed and listed here.
+# Standard partition payloads are migrated into .luoshu-payload during installation.
+# Thin wrappers preserve the verified v2.2.7 cores under .luoshu-runtime.
 common/app_bridge.sh
 common/app_installer.sh
 common/background_task.sh
@@ -63,9 +65,14 @@ common/mix_task_handoff.sh
 common/mix_weight_mode.sh
 common/module_status.sh
 common/module_update_state.sh
+common/private_payload.sh
+common/private_mount_policy.sh
 common/mount_compat.sh
-common/mount_compat_direct_source.sh
+common/mount_compat_base.sh
+common/mount_compat_policy.sh
 common/mount_fast_sync.sh
+common/mount_self_backend.sh
+common/mount_self_fallback.sh
 common/multiweight_mix_task.sh
 common/native_import.sh
 common/origin_flyme_global.sh
@@ -73,6 +80,7 @@ common/rom_adapters.sh
 common/util_functions.sh
 common/weighted_mix_task.sh
 common/python
+.luoshu-runtime
 config
 fonts
 system
@@ -86,6 +94,7 @@ CHANGELOG.md
 customize.sh
 module.prop
 post-fs-data.sh
+post-mount.sh
 service.sh
 uninstall.sh
 action.sh

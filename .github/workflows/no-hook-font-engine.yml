@@ -39,13 +39,17 @@ on:
       - common/font_library_cache.sh
       - common/hyperos_global.sh
       - common/mount_compat.sh
+      - common/mount_compat_base.sh
+      - common/private_payload.sh
       - common/mount_fast_sync.sh
       - common/rom_adapters.sh
       - common/font_mix.sh
       - common/python/**
       - post-fs-data.sh
+      - .luoshu-runtime/post-fs-data-v227.sh
       - service.sh
       - uninstall.sh
+      - .luoshu-runtime/uninstall-v227.sh
       - scripts/build.sh
       - scripts/prepare_composite_runtime.sh
       - scripts/device_font_template_test.py
@@ -157,11 +161,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          BOOT_WRAPPER='post-fs-data.sh'
+          BOOT_CORE='.luoshu-runtime/post-fs-data-v227.sh'
+          UNINSTALL_WRAPPER='uninstall.sh'
+          UNINSTALL_CORE='.luoshu-runtime/uninstall-v227.sh'
+          test -f "$BOOT_CORE"
+          test -f "$UNINSTALL_CORE"
           ! find android-app/app/src -type f \( -name 'xposed_init' -o -name 'scope.list' \) -print -quit | grep -q .
           ! grep -RInE 'IXposedHookLoadPackage|XposedBridge|LSPosed|lspatch' android-app/app/src common system 2>/dev/null
-          ! grep -RInE '(^|[[:space:]])(cp|ln|rm)[[:space:]].*/data/fonts|_dest="/data/fonts/' post-fs-data.sh common 2>/dev/null
-          grep -q 'font_config_boot_guard' post-fs-data.sh
-          grep -q 'device_font_dynamic_mount_apply' post-fs-data.sh
+          ! grep -RInE '(^|[[:space:]])(cp|ln|rm)[[:space:]].*/data/fonts|_dest="/data/fonts/' "$BOOT_WRAPPER" "$BOOT_CORE" common 2>/dev/null
+          grep -q 'private_payload.sh' "$BOOT_WRAPPER"
+          grep -q 'post-fs-data-v227.sh' "$BOOT_WRAPPER"
+          grep -q 'font_config_boot_guard' "$BOOT_CORE"
+          grep -q 'device_font_dynamic_mount_apply' "$BOOT_CORE"
           grep -q 'device_font_dynamic_guard.sh' common/font_config_partitions.sh
           grep -q 'device_font_transaction_guard.sh' common/font_config_partitions.sh
           grep -q 'device_font_load_verify.sh' common/font_config_partitions.sh
@@ -184,10 +196,13 @@ jobs:
           grep -q 'copy_as_originos' common/device_font_payload_bridge.sh
           grep -q 'copy_as_flyme' common/device_font_payload_bridge.sh
           grep -q '_luoshu_flyme_prepare_data_restore' common/device_font_payload_bridge.sh
-          grep -q 'device-font-dynamic-mount.conf' uninstall.sh
-          grep -q 'luoshu_flyme_pending_apply' uninstall.sh
+          grep -q 'private_payload.sh' "$UNINSTALL_WRAPPER"
+          grep -q 'uninstall-v227.sh' "$UNINSTALL_WRAPPER"
+          grep -q 'device-font-dynamic-mount.conf' "$UNINSTALL_CORE"
+          grep -q 'luoshu_flyme_pending_apply' "$UNINSTALL_CORE"
+          grep -q '_luoshu_cleanup_self_mount' "$UNINSTALL_CORE"
           grep -q 'font_config_mark_boot_success' service.sh
-          grep -q 'font_config_partitions.sh' post-fs-data.sh
+          grep -q 'font_config_partitions.sh' "$BOOT_CORE"
           grep -q 'font_config_enable_for_payload' common/hyperos_global.sh
           grep -q 'font_config_enable_for_payload' common/font_mix.sh
           grep -q 'luoshu_payload_transaction_begin' common/font_manager.sh
