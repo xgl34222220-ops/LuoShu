@@ -40,6 +40,7 @@ jobs:
           rm -rf build-src
           mkdir -p build-src
           base64 -d source.tar.gz.b64 | tar -xz -C build-src
+          cp ic_launcher_round.xml build-src/app/src/main/res/drawable/ic_launcher_round.xml
       - name: Build unsigned release APK
         working-directory: tools/xuanwu-tombstone-app/build-src
         run: |
