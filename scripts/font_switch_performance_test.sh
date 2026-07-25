@@ -29,6 +29,8 @@ grep -q 'DeviceTrustLevel.SYSTEM' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceTrustUi.kt"
 grep -q 'DeviceTrustLevel.COMPATIBILITY' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceTrustUi.kt"
+grep -q 'attempt < 9' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/HomeRoute.kt"
 grep -q 'LUOSHU_BOOT_VERIFY_RETRY_LIMIT:-3' "$ROOT/common/device_font_boot_verify.sh"
 
 sh "$ROOT/scripts/font_switch_task_test.sh"
