@@ -65,6 +65,7 @@ common/module_status.sh
 common/module_update_state.sh
 common/mount_compat.sh
 common/mount_fast_sync.sh
+common/mount_self_backend.sh
 common/mount_self_fallback.sh
 common/multiweight_mix_task.sh
 common/native_import.sh
