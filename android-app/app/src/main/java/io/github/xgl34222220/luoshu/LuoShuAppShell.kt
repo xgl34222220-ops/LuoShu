@@ -198,7 +198,7 @@ internal fun LuoShuAppShell(
         val blurActive = appearance.blurEnabled && appearance.glassEnabled
         val hazeState = rememberHazeState(blurEnabled = blurActive)
         val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val libraryDockClearance = navigationBottom + if (appearance.floatingDock) 84.dp else 68.dp
+        val dockClearance = navigationBottom + if (appearance.floatingDock) 84.dp else 68.dp
         val contentModifier = Modifier
             .fillMaxSize()
             .then(if (blurActive) Modifier.hazeSource(state = hazeState) else Modifier)
@@ -231,7 +231,7 @@ internal fun LuoShuAppShell(
                             actions = homeActions,
                         )
                         AppPage.Library -> Box(
-                            modifier = Modifier.fillMaxSize().padding(bottom = libraryDockClearance),
+                            modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
                         ) {
                             FontLibraryRoute(
                                 style = appearance.uiStyle,
@@ -247,11 +247,15 @@ internal fun LuoShuAppShell(
                                 },
                             )
                         }
-                        AppPage.Studio -> FontStudioRoute(
-                            style = appearance.uiStyle,
-                            state = viewModel.toFontStudioUiState(features),
-                            actions = studioActions,
-                        )
+                        AppPage.Studio -> Box(
+                            modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
+                        ) {
+                            FontStudioRoute(
+                                style = appearance.uiStyle,
+                                state = viewModel.toFontStudioUiState(features),
+                                actions = studioActions,
+                            )
+                        }
                         AppPage.Logs -> LogsRoute(
                             style = appearance.uiStyle,
                             state = viewModel.toLogsUiState(),

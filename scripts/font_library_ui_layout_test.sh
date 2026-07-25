@@ -57,8 +57,6 @@ grep -q 'Modifier.size(50.dp)' "$LOGS_COMPACT"
 # than a faceted floating circle, and the page reserves a dock-safe bottom area.
 grep -q 'MiuixFinalAction(state, actions)' "$STUDIO_MIUIX"
 grep -q 'MaterialFinalAction(state, actions)' "$STUDIO_MATERIAL"
-grep -q 'align(Alignment.TopEnd)' "$STUDIO_ROUTE"
-grep -q 'statusBarsPadding()' "$STUDIO_ROUTE"
 grep -q 'navigationBarsPadding()' "$STUDIO_ROUTE"
 grep -q 'padding(bottom = 86.dp)' "$STUDIO_ROUTE"
 grep -q 'padding(end = 82.dp, top = 24.dp)' "$STUDIO_ROUTE"
@@ -89,5 +87,20 @@ grep -q 'embedded: Boolean = false' "$OVERLAY"
 grep -q 'embedded = true' "$SHELL"
 grep -q 'libraryDockClearance' "$SHELL"
 ! grep -q 'if (page == AppPage.Studio)' "$SHELL"
+
+# Final screenshot regression: header actions share one Row and Studio content
+# is laid out above the floating dock.
+grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MIUIX"
+grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MATERIAL"
+grep -q 'topAction()' "$STUDIO_MIUIX"
+grep -q 'topAction()' "$STUDIO_MATERIAL"
+grep -q 'bottom = 24.dp' "$STUDIO_MIUIX"
+grep -q 'bottom = 24.dp' "$STUDIO_MATERIAL"
+! grep -q 'align(Alignment.TopEnd)' "$STUDIO_ROUTE"
+! grep -q 'statusBarsPadding()' "$STUDIO_ROUTE"
+! grep -q 'navigationBarsPadding()' "$STUDIO_ROUTE"
+grep -q 'RoundedCornerShape(18.dp)' "$STUDIO_TOOLS"
+! grep -q 'shape = CircleShape' "$STUDIO_TOOLS"
+grep -q 'padding(bottom = dockClearance)' "$SHELL"
 
 echo 'LuoShu compact UI layout regression passed.'

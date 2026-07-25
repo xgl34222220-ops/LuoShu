@@ -73,30 +73,18 @@ internal fun FontStudioRoute(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .navigationBarsPadding()
-                .padding(bottom = 86.dp),
-        ) {
-            when (style) {
-                UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
-                UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
-            }
-        }
-
+    val studioTools: @Composable () -> Unit = {
         StudioToolLauncher(
             style = style,
             enabled = state.hasFonts && !state.loading,
             onPreview = { showCompositePreview = true },
             onProfile = { showProfileTransfer = true },
             onGlyphs = { showGlyphBrowser = true },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .statusBarsPadding()
-                .padding(end = 82.dp, top = 24.dp),
         )
+    }
+    when (style) {
+        UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions, studioTools)
+        UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions, studioTools)
     }
 
     if (showCompositePreview) {

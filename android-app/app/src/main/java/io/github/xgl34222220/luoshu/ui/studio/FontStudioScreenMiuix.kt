@@ -58,13 +58,14 @@ import kotlin.math.roundToInt
 internal fun FontStudioScreenMiuix(
     state: FontStudioUiState,
     actions: FontStudioActions,
+    topAction: @Composable () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 132.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { MiuixStudioHeader(state.loading, actions.refresh) }
+        item { MiuixStudioHeader(state.loading, actions.refresh, topAction) }
         item { MiuixCompositionMap(state) }
 
         if (state.loading) {
@@ -89,7 +90,7 @@ internal fun FontStudioScreenMiuix(
 }
 
 @Composable
-private fun MiuixStudioHeader(loading: Boolean, onRefresh: () -> Unit) {
+private fun MiuixStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAction: @Composable () -> Unit) {
     val tokens = LocalMiuixTokens.current
     Row(
         modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 4.dp),
@@ -113,6 +114,8 @@ private fun MiuixStudioHeader(loading: Boolean, onRefresh: () -> Unit) {
             )
             Text("中文、英文、数字与真实设计轴", color = tokens.textSecondary, fontSize = 12.sp)
         }
+        topAction()
+        Spacer(Modifier.width(10.dp))
         Card(
             shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = tokens.elevatedCardBackground),
