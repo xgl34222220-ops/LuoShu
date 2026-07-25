@@ -26,7 +26,9 @@ jobs:
           sh scripts/mount_compat_direct_source_test.sh > direct-source-test.log 2>&1 || status=1
           sh scripts/mount_compat_test.sh > existing-mount-test.log 2>&1 || status=1
           sh scripts/v2_source_audit.sh > v2-source-audit.log 2>&1 || status=1
-          for log in direct-source-test.log existing-mount-test.log v2-source-audit.log; do
+          find scripts .github/workflows -maxdepth 1 -type f -printf '%m %p\n' | sort > source-file-list.log
+          grep -RIn -A40 -B10 'Run source checks' .github/workflows > workflow-source-checks.log 2>&1 || true
+          for log in direct-source-test.log existing-mount-test.log v2-source-audit.log source-file-list.log workflow-source-checks.log; do
             echo "===== $log ====="
             cat "$log"
           done
@@ -42,6 +44,8 @@ jobs:
             direct-source-test.log
             existing-mount-test.log
             v2-source-audit.log
+            source-file-list.log
+            workflow-source-checks.log
           if-no-files-found: error
 
       - name: Fail when source checks failed
