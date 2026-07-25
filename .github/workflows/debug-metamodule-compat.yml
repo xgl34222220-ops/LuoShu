@@ -17,25 +17,33 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Run direct-source regression test
+      - name: Run metamodule source checks
         id: regression
         shell: bash
         run: |
           set +e
-          sh scripts/mount_compat_direct_source_test.sh > direct-source-test.log 2>&1
-          status=$?
-          cat direct-source-test.log
+          status=0
+          sh scripts/mount_compat_direct_source_test.sh > direct-source-test.log 2>&1 || status=1
+          sh scripts/mount_compat_test.sh > existing-mount-test.log 2>&1 || status=1
+          sh scripts/v2_source_audit.sh > v2-source-audit.log 2>&1 || status=1
+          for log in direct-source-test.log existing-mount-test.log v2-source-audit.log; do
+            echo "===== $log ====="
+            cat "$log"
+          done
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
-      - name: Upload direct-source trace
+      - name: Upload metamodule traces
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: direct-source-test-trace
-          path: direct-source-test.log
+          name: metamodule-source-traces
+          path: |
+            direct-source-test.log
+            existing-mount-test.log
+            v2-source-audit.log
           if-no-files-found: error
 
-      - name: Fail when regression test failed
+      - name: Fail when source checks failed
         if: steps.regression.outputs.status != '0'
         run: exit 1
