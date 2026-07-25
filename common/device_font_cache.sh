@@ -209,11 +209,24 @@ device_font_cache_activate() {
 }
 
 _dfcache_runtime_ready() {
-    type _dfpr_exec >/dev/null 2>&1 && type _dfpr_prepare_sources >/dev/null 2>&1 && type _dfpr_install_overlay >/dev/null 2>&1 && return 0
     _dfc_module="$(_dfcache_module)"
-    [ -f "$_dfc_module/common/device_font_payload_runtime.sh" ] || return 1
-    . "$_dfc_module/common/device_font_payload_runtime.sh"
-    type _dfpr_exec >/dev/null 2>&1 && type _dfpr_prepare_sources >/dev/null 2>&1 && type _dfpr_install_overlay >/dev/null 2>&1
+    if ! type _dfpr_exec >/dev/null 2>&1 || ! type _dfpr_prepare_sources >/dev/null 2>&1 || ! type _dfpr_install_overlay >/dev/null 2>&1; then
+        [ -f "$_dfc_module/common/device_font_payload_runtime.sh" ] || return 1
+        . "$_dfc_module/common/device_font_payload_runtime.sh"
+    fi
+    if ! type luoshu_payload_transaction_begin >/dev/null 2>&1 || ! type luoshu_payload_transaction_commit >/dev/null 2>&1; then
+        [ -f "$_dfc_module/common/device_font_transaction_guard.sh" ] && . "$_dfc_module/common/device_font_transaction_guard.sh"
+    fi
+    if ! type luoshu_sync_mount_payload >/dev/null 2>&1; then
+        [ -f "$_dfc_module/common/mount_compat.sh" ] && . "$_dfc_module/common/mount_compat.sh"
+    fi
+    type _dfpr_exec >/dev/null 2>&1 &&
+        type _dfpr_prepare_sources >/dev/null 2>&1 &&
+        type _dfpr_install_overlay >/dev/null 2>&1 &&
+        type luoshu_payload_transaction_begin >/dev/null 2>&1 &&
+        type luoshu_payload_transaction_commit >/dev/null 2>&1 &&
+        type luoshu_payload_transaction_abort >/dev/null 2>&1 &&
+        type luoshu_sync_mount_payload >/dev/null 2>&1
 }
 
 _dfcache_notify() {

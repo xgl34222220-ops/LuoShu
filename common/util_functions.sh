@@ -97,6 +97,50 @@ log_message() {
     fi
 }
 
+compact_rom_detection_logs() {
+    [ -f "$LOG_FILE" ] || return 0
+    _rom_compact_marker="$CONFIG_DIR/rom-log-compacted-v1"
+    [ ! -e "$_rom_compact_marker" ] || return 0
+    mkdir -p "$CONFIG_DIR" 2>/dev/null || true
+    _rom_tmp="${LOG_FILE}.rom.$$"
+    awk '
+        /检测到 ColorOS 版本:/ {
+            line=$0
+            sub(/^.*检测到 ColorOS 版本:[[:space:]]*/, "", line)
+            key="coloros|" line
+            if (seen[key]++) next
+        }
+        /检测到 HyperOS\/MIUI 版本:/ {
+            line=$0
+            sub(/^.*检测到 HyperOS\/MIUI 版本:[[:space:]]*/, "", line)
+            key="hyperos|" line
+            if (seen[key]++) next
+        }
+        { print }
+    ' "$LOG_FILE" > "$_rom_tmp" 2>/dev/null && mv -f "$_rom_tmp" "$LOG_FILE" 2>/dev/null || {
+        rm -f "$_rom_tmp" 2>/dev/null || true
+    }
+    : > "$_rom_compact_marker" 2>/dev/null || true
+}
+
+log_rom_detection_once() {
+    _rom_kind="$1"
+    _rom_version="$2"
+    _rom_message="$3"
+    mkdir -p "$CONFIG_DIR" "$LOG_DIR" 2>/dev/null || true
+    compact_rom_detection_logs
+    _rom_state="$CONFIG_DIR/rom-detection-${_rom_kind}.conf"
+    _rom_signature="${_rom_kind}|${_rom_version}"
+    [ "$(cat "$_rom_state" 2>/dev/null)" != "$_rom_signature" ] || return 0
+    if grep -Fq "$_rom_message" "$LOG_FILE" 2>/dev/null; then
+        printf '%s\n' "$_rom_signature" > "$_rom_state" 2>/dev/null || true
+        return 0
+    fi
+    _rom_tmp="${_rom_state}.tmp.$$"
+    printf '%s\n' "$_rom_signature" > "$_rom_tmp" 2>/dev/null && mv -f "$_rom_tmp" "$_rom_state" 2>/dev/null || true
+    log_message "INFO" "$_rom_message"
+}
+
 # ============================================================
 # 检查 Root 管理器（Magisk / KernelSU / SukiSU）
 # ============================================================
@@ -194,7 +238,7 @@ check_coloros() {
     fi
 
     if [ "$IS_COLOROS" = "true" ]; then
-        log_message "INFO" "检测到 ColorOS 版本: $COLOROS_VERSION"
+        log_rom_detection_once coloros "$COLOROS_VERSION" "检测到 ColorOS 版本: $COLOROS_VERSION"
     fi
 }
 
@@ -216,7 +260,7 @@ check_hyperos() {
     fi
 
     if [ "$IS_HYPEROS" = "true" ]; then
-        log_message "INFO" "检测到 HyperOS/MIUI 版本: $HYPEROS_VERSION"
+        log_rom_detection_once hyperos "$HYPEROS_VERSION" "检测到 HyperOS/MIUI 版本: $HYPEROS_VERSION"
     fi
 }
 
