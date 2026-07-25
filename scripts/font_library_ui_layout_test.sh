@@ -9,7 +9,10 @@ HOME_ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/
 HOME_COMPACT="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/HomeScreenCompact.kt"
 LOGS_ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
 LOGS_COMPACT="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenCompact.kt"
+DIAGNOSTIC="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
 STUDIO_ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioRoute.kt"
+STUDIO_MIUIX="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMiuix.kt"
+STUDIO_MATERIAL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMaterial.kt"
 OVERLAY="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 SHELL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
 SETTINGS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/settings/AppearanceSettingsScreen.kt"
@@ -39,17 +42,25 @@ grep -q '打开任务中心查看错误原因' "$HOME_COMPACT"
 ! grep -q 'QUICK ACCESS' "$HOME_COMPACT"
 ! grep -q 'bottom = 108.dp' "$HOME_ROUTE"
 
-# Task center separates user-facing tasks/issues from raw logs.
+# Task center separates user-facing tasks/issues from raw logs and its two header
+# actions have the same 50 dp visual size.
 grep -q 'enum class LogsTab' "$LOGS_COMPACT"
 grep -q 'TASKS("任务")' "$LOGS_COMPACT"
 grep -q 'ISSUES("问题")' "$LOGS_COMPACT"
 grep -q 'LOGS("日志")' "$LOGS_COMPACT"
 grep -q 'TaskPhase.FAILED' "$LOGS_COMPACT"
+grep -q 'modifier = modifier.size(50.dp)' "$DIAGNOSTIC"
+grep -q 'Modifier.size(50.dp)' "$LOGS_COMPACT"
 
-# Studio keeps the primary generate action reachable without scrolling.
-grep -q '生成并应用复合字体' "$STUDIO_ROUTE"
-grep -q 'align(Alignment.BottomCenter)' "$STUDIO_ROUTE"
-grep -q 'padding(start = 16.dp, end = 16.dp, bottom = 94.dp)' "$STUDIO_ROUTE"
+# Studio uses one in-flow final action. Tools sit beside refresh and neither the
+# tool launcher, import button nor a duplicate CTA may float over slot cards.
+grep -q 'MiuixFinalAction(state, actions)' "$STUDIO_MIUIX"
+grep -q 'MaterialFinalAction(state, actions)' "$STUDIO_MATERIAL"
+grep -q 'align(Alignment.TopEnd)' "$STUDIO_ROUTE"
+grep -q 'statusBarsPadding()' "$STUDIO_ROUTE"
+! grep -q 'align(Alignment.BottomStart)' "$STUDIO_ROUTE"
+! grep -q 'align(Alignment.BottomCenter)' "$STUDIO_ROUTE"
+! grep -q 'bottom = 94.dp' "$STUDIO_ROUTE"
 
 # Four-item dock, larger labels, hidden settings dock, Haze sampling and a real
 # liquid-glass surface with refraction highlights instead of an opaque white card.
@@ -64,18 +75,13 @@ printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 36.dp'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'activeGlass'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorBorderColor'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'scheme.primary.copy(alpha = if (dark) .30f else .20f)'
 grep -q '底栏液态玻璃效果' "$SETTINGS"
 grep -q '真实背景采样、折射高光与透明质感' "$SETTINGS"
 grep -q 'embedded: Boolean = false' "$OVERLAY"
 grep -q 'embedded = true' "$SHELL"
 grep -q 'libraryDockClearance' "$SHELL"
 ! grep -q 'if (page == AppPage.Studio)' "$SHELL"
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'scheme.primary.copy(alpha = if (dark) .30f else .20f)'
-grep -q 'align(Alignment.TopEnd)' "$STUDIO_ROUTE"
-grep -q 'statusBarsPadding()' "$STUDIO_ROUTE"
-! grep -q 'align(Alignment.BottomStart)' "$STUDIO_ROUTE"
-! grep -q 'padding(start = 16.dp, end = 16.dp, bottom = 94.dp)' "$STUDIO_ROUTE"
-grep -q 'modifier = modifier.size(50.dp)' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
 
 echo 'LuoShu compact UI layout regression passed.'
