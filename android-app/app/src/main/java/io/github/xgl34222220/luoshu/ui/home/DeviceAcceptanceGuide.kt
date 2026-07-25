@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Checkbox
@@ -55,13 +56,14 @@ internal data class DeviceAcceptanceCheck(
     val detail: String,
     val passed: Boolean,
     val automatic: Boolean,
+    val blocking: Boolean = true,
 )
 
 private val manualAcceptanceChecks = listOf(
-    DeviceAcceptanceCheck("system-ui", "系统界面", "检查设置、状态栏、通知、锁屏和桌面是否无方框、截断或错位", false, false),
-    DeviceAcceptanceCheck("input", "输入与编辑", "检查输入法候选、光标、选择菜单、中英文混排和密码框", false, false),
-    DeviceAcceptanceCheck("apps", "常用应用", "检查浏览器、社交、阅读和 Google 应用中的字体回退", false, false),
-    DeviceAcceptanceCheck("numbers", "数字场景", "检查时间、电量、金额、验证码、表格和等宽数字是否清晰", false, false),
+    DeviceAcceptanceCheck("system-ui", "系统界面", "检查设置、状态栏、通知、锁屏和桌面是否无方框、截断或错位", false, false, false),
+    DeviceAcceptanceCheck("input", "输入与编辑", "检查输入法候选、光标、选择菜单、中英文混排和密码框", false, false, false),
+    DeviceAcceptanceCheck("apps", "常用应用", "检查浏览器、社交、阅读和 Google 应用中的字体回退", false, false, false),
+    DeviceAcceptanceCheck("numbers", "数字场景", "检查时间、电量、金额、验证码、表格和等宽数字是否清晰", false, false, false),
 )
 
 internal fun deviceAcceptanceAutoChecks(
@@ -81,6 +83,7 @@ internal fun deviceAcceptanceAutoChecks(
         detail = if (state.taskRunning) state.taskMessage else "当前没有执行中的字体任务",
         passed = !state.taskRunning,
         automatic = true,
+        blocking = false,
     ),
     DeviceAcceptanceCheck(
         id = "reboot",
@@ -88,6 +91,7 @@ internal fun deviceAcceptanceAutoChecks(
         detail = if (state.rebootRequired) "当前字体仍等待完整重启" else "没有待重启的字体变更",
         passed = !state.rebootRequired,
         automatic = true,
+        blocking = false,
     ),
     DeviceAcceptanceCheck(
         id = "inventory",
@@ -98,21 +102,35 @@ internal fun deviceAcceptanceAutoChecks(
     ),
     DeviceAcceptanceCheck(
         id = "alignment",
-        title = "开机加载证据",
-        detail = if (trust.alignment == "verified" && trust.mode == "aligned") {
-            "开机加载验证通过，当前为设备对齐模式"
-        } else {
-            "等待逐分区开机挂载验证；应用字体并完整重启后重新检测"
+        title = "字体加载模式",
+        detail = when {
+            trust.alignment == "verified" && trust.mode in setOf("aligned", "mount-verified") ->
+                "逐分区开机加载验证通过，当前为设备对齐模式"
+            trust.level == DeviceTrustLevel.COMPATIBILITY || trust.mode == "compatibility" ->
+                "当前字体已通过兼容映射生效；设备专属对齐属于可选增强，不影响正常使用"
+            trust.alignment == "failed" || trust.error.isNotBlank() ->
+                "加载验证失败，请打开问题页查看具体失败分区"
+            state.taskRunning -> "字体任务完成后会自动刷新加载状态"
+            state.rebootRequired -> "当前字体等待完整重启后验证"
+            else -> "加载证据正在后台刷新，不需要反复重启"
         },
-        passed = trust.alignment == "verified" && trust.mode == "aligned",
+        passed = (trust.alignment == "verified" && trust.mode in setOf("aligned", "mount-verified")) ||
+            trust.level == DeviceTrustLevel.COMPATIBILITY || trust.mode == "compatibility",
         automatic = true,
+        blocking = trust.alignment == "failed" || trust.error.isNotBlank(),
     ),
     DeviceAcceptanceCheck(
         id = "cache",
-        title = "后台对齐缓存",
-        detail = if (trust.cachePending) "对齐缓存尚未生成；应用字体后会在后台自动建立" else "没有待处理的对齐缓存",
-        passed = !trust.cachePending,
+        title = "设备对齐缓存",
+        detail = when {
+            !trust.cachePending -> "没有待处理的设备对齐缓存"
+            trust.level == DeviceTrustLevel.COMPATIBILITY || trust.mode == "compatibility" ->
+                "兼容映射已正常生效；设备对齐缓存会在后台继续准备，不作为失败项"
+            else -> "设备对齐缓存正在后台生成，不需要停留在此页面"
+        },
+        passed = !trust.cachePending || trust.level == DeviceTrustLevel.COMPATIBILITY || trust.mode == "compatibility",
         automatic = true,
+        blocking = false,
     ),
 )
 
@@ -163,6 +181,7 @@ internal fun DeviceAcceptanceGuideDialog(
     val allChecks = automatic + manual
     val passedCount = allChecks.count { it.passed }
     val complete = passedCount == allChecks.size
+    val hasBlockingFailure = automatic.any { !it.passed && it.blocking }
 
     fun toggleManual(id: String) {
         completedManual = if (id in completedManual) completedManual - id else completedManual + id
@@ -181,13 +200,25 @@ internal fun DeviceAcceptanceGuideDialog(
                     Surface(
                         modifier = Modifier.size(48.dp),
                         shape = RoundedCornerShape(17.dp),
-                        color = if (complete) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer,
+                        color = when {
+                            complete -> MaterialTheme.colorScheme.primaryContainer
+                            hasBlockingFailure -> MaterialTheme.colorScheme.errorContainer
+                            else -> MaterialTheme.colorScheme.secondaryContainer
+                        },
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                if (complete) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                                when {
+                                    complete -> Icons.Rounded.CheckCircle
+                                    hasBlockingFailure -> Icons.Rounded.Warning
+                                    else -> Icons.Rounded.Info
+                                },
                                 contentDescription = null,
-                                tint = if (complete) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                                tint = when {
+                                    complete -> MaterialTheme.colorScheme.primary
+                                    hasBlockingFailure -> MaterialTheme.colorScheme.error
+                                    else -> MaterialTheme.colorScheme.secondary
+                                },
                             )
                         }
                     }
@@ -239,7 +270,7 @@ internal fun DeviceAcceptanceGuideDialog(
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Icon(
-                        if (complete) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                        if (complete) Icons.Rounded.CheckCircle else if (hasBlockingFailure) Icons.Rounded.Warning else Icons.Rounded.Info,
                         contentDescription = null,
                         modifier = Modifier.size(17.dp),
                     )
@@ -297,10 +328,10 @@ private fun DeviceAcceptanceRow(
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
-        color = if (check.passed) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = .48f)
-        } else {
-            MaterialTheme.colorScheme.surfaceContainerLow
+        color = when {
+            check.passed -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = .48f)
+            check.blocking -> MaterialTheme.colorScheme.errorContainer.copy(alpha = .38f)
+            else -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = .34f)
         },
     ) {
         Row(
@@ -309,9 +340,17 @@ private fun DeviceAcceptanceRow(
         ) {
             if (check.automatic) {
                 Icon(
-                    if (check.passed) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
+                    when {
+                        check.passed -> Icons.Rounded.CheckCircle
+                        check.blocking -> Icons.Rounded.Warning
+                        else -> Icons.Rounded.Info
+                    },
                     contentDescription = null,
-                    tint = if (check.passed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                    tint = when {
+                        check.passed -> MaterialTheme.colorScheme.primary
+                        check.blocking -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.secondary
+                    },
                     modifier = Modifier.size(22.dp),
                 )
             } else {
@@ -337,7 +376,7 @@ private fun deviceAcceptanceSummary(
     appendLine("可信级别：${trust.level.name.lowercase()}")
     appendLine("完成度：${checks.count { it.passed }}/${checks.size}")
     appendLine()
-    checks.forEach { check -> appendLine("[${if (check.passed) "通过" else "待确认"}] ${check.title}：${check.detail}") }
+    checks.forEach { check -> appendLine("[${if (check.passed) "通过" else if (check.blocking) "失败" else "等待"}] ${check.title}：${check.detail}") }
     appendLine()
     append("摘要不包含设备指纹、序列号、型号或字体文件路径。")
 }

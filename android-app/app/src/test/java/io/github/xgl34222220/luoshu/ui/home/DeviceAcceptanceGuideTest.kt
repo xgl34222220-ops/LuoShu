@@ -31,7 +31,7 @@ class DeviceAcceptanceGuideTest {
     }
 
     @Test
-    fun pendingRebootBlocksAcceptance() {
+    fun pendingRebootIsInformationalWhileCompatibilityRemainsUsable() {
         val checks = deviceAcceptanceAutoChecks(
             state = HomeUiState(
                 rootGranted = true,
@@ -47,8 +47,15 @@ class DeviceAcceptanceGuideTest {
             ),
         )
 
-        assertFalse(checks.first { it.id == "reboot" }.passed)
-        assertFalse(checks.first { it.id == "alignment" }.passed)
-        assertFalse(checks.first { it.id == "cache" }.passed)
+        val reboot = checks.first { it.id == "reboot" }
+        val alignment = checks.first { it.id == "alignment" }
+        val cache = checks.first { it.id == "cache" }
+
+        assertFalse(reboot.passed)
+        assertFalse(reboot.blocking)
+        assertTrue(alignment.passed)
+        assertFalse(alignment.blocking)
+        assertTrue(cache.passed)
+        assertFalse(cache.blocking)
     }
 }
