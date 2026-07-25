@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
@@ -33,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 
 @Composable
 internal fun StudioToolLauncher(
@@ -45,27 +45,28 @@ internal fun StudioToolLauncher(
 ) {
     var menuVisible by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
-    val background = if (enabled) {
-        scheme.surfaceContainerHigh.copy(alpha = if (style == UiStyle.MIUIX) .78f else .90f)
-    } else {
-        scheme.surfaceVariant.copy(alpha = .64f)
+    val tokens = LocalMiuixTokens.current
+    val background = when {
+        style == UiStyle.MIUIX -> tokens.elevatedCardBackground
+        enabled -> scheme.surfaceContainerHigh
+        else -> scheme.surfaceVariant
     }
 
     Surface(
         onClick = { menuVisible = true },
         enabled = enabled,
         modifier = modifier.size(56.dp),
-        shape = CircleShape,
+        shape = RoundedCornerShape(18.dp),
         color = background,
         contentColor = if (enabled) scheme.primary else scheme.onSurfaceVariant,
-        shadowElevation = if (enabled && style == UiStyle.MIUIX) 6.dp else 3.dp,
-        border = BorderStroke(1.dp, scheme.primary.copy(alpha = if (enabled) .13f else .05f)),
+        tonalElevation = if (style == UiStyle.MATERIAL) 2.dp else 0.dp,
+        shadowElevation = if (style == UiStyle.MIUIX) 7.dp else 3.dp,
     ) {
         androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) {
             Icon(
                 Icons.Rounded.AutoAwesome,
                 contentDescription = "组合工具",
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(23.dp),
             )
         }
     }
