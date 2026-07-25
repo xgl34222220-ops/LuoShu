@@ -7,6 +7,7 @@ on:
     paths:
       - common/mount_compat.sh
       - common/mount_compat_base.sh
+      - common/mount_compat_policy.sh
       - common/mount_self_backend.sh
       - common/mount_self_fallback.sh
       - common/font_config_partitions.sh
@@ -33,6 +34,7 @@ jobs:
         run: |
           sh -n common/mount_compat.sh
           sh -n common/mount_compat_base.sh
+          sh -n common/mount_compat_policy.sh
           sh -n common/mount_self_fallback.sh
           sh -n common/mount_self_backend.sh
           sh -n post-mount.sh
@@ -48,12 +50,14 @@ jobs:
       - name: Release payload manifest
         run: |
           grep -qx 'common/mount_compat_base.sh' scripts/module_payload_manifest.txt
+          grep -qx 'common/mount_compat_policy.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/mount_self_backend.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/mount_self_fallback.sh' scripts/module_payload_manifest.txt
           grep -qx 'post-mount.sh' scripts/module_payload_manifest.txt
       - name: Loader and backend contracts
         run: |
           grep -q 'mount_self_fallback.sh' common/mount_compat.sh
+          grep -q 'mount_compat_policy.sh' common/mount_compat.sh
           grep -q 'mount_self_backend.sh' post-mount.sh
           grep -q -- '-t overlay KSU' common/mount_self_backend.sh
 
@@ -111,6 +115,7 @@ jobs:
             > dist/LuoShu-v2.2.7-self-mount-test.zip.sha256
           unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'post-mount.sh'
           unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/mount_compat_base.sh'
+          unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/mount_compat_policy.sh'
           unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/mount_self_backend.sh'
           unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/mount_self_fallback.sh'
       - name: Upload v2.2.7 self-mount test module
