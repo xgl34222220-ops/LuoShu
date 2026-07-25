@@ -51,7 +51,8 @@ grep -q '生成并应用复合字体' "$STUDIO_ROUTE"
 grep -q 'align(Alignment.BottomCenter)' "$STUDIO_ROUTE"
 grep -q 'padding(start = 16.dp, end = 16.dp, bottom = 94.dp)' "$STUDIO_ROUTE"
 
-# Four-item dock, larger labels, hidden on settings, and real MIUIx Haze.
+# Four-item dock, larger labels, hidden settings dock, Haze sampling and a real
+# liquid-glass surface with refraction highlights instead of an opaque white card.
 grep -q 'private val dockPages' "$SHELL"
 [ "$(sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -c 'AppPage\.')" -eq 4 ]
 grep -q 'if (page != AppPage.Settings)' "$SHELL"
