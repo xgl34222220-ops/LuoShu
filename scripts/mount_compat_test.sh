@@ -10,7 +10,9 @@ META="$TMP/meta"
 VISIBLE="$TMP/visible"
 mkdir -p "$MODULE/common" "$MODULE/system/fonts" "$MODULE/product/fonts" "$MODULE/config" "$MODULE/logs" "$META" "$VISIBLE"
 cp "$ROOT/common/mount_compat.sh" "$MODULE/common/mount_compat.sh"
-printf 'id=LuoShu\nversion=v2.2.5\nversionCode=20205\n' > "$MODULE/module.prop"
+cp "$ROOT/common/mount_compat_base.sh" "$MODULE/common/mount_compat_base.sh"
+cp "$ROOT/common/mount_self_fallback.sh" "$MODULE/common/mount_self_fallback.sh"
+printf 'id=LuoShu\nversion=v2.2.7\nversionCode=20207\n' > "$MODULE/module.prop"
 printf 'font-a' > "$MODULE/system/fonts/Roboto-Regular.ttf"
 printf 'product-a' > "$MODULE/product/fonts/Test.ttf"
 
@@ -38,7 +40,7 @@ test ! -e "$META/LuoShu/system/fonts/Old.ttf"
 test ! -e "$META/LuoShu/system/fonts/Roboto-Regular.ttf"
 test -s "$META/LuoShu/system/etc/luoshu/mount-probe.conf"
 
-# Verify every used partition, not merely /system.
+# Verify every used partition, not merely /system, for a real dual-directory engine.
 mkdir -p "$VISIBLE/system/etc/luoshu" "$VISIBLE/product/etc/luoshu"
 cp "$MODULE/system/etc/luoshu/mount-probe.conf" "$VISIBLE/system/etc/luoshu/mount-probe.conf"
 cp "$MODULE/product/etc/luoshu/mount-probe.conf" "$VISIBLE/product/etc/luoshu/mount-probe.conf"
@@ -85,6 +87,8 @@ MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=mountify LUOSHU_ME
 '
 test ! -e "$META/LuoShu"
 grep -q '^engine=mountify$' "$MODULE/config/mount_compat.conf"
+grep -q '^system|' "$MODULE/config/mount-probes-expected.conf"
+! grep -q '^product|' "$MODULE/config/mount-probes-expected.conf"
 
 # Hybrid Mount records the selected backend for diagnostics.
 MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=hybrid-mount LUOSHU_META_TEST_BACKEND=kasumi sh -c '
@@ -94,20 +98,21 @@ MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=hybrid-mount LUOSH
 grep -q '^engine=hybrid-mount$' "$MODULE/config/mount_compat.conf"
 grep -q '^backend=kasumi$' "$MODULE/config/mount_compat.conf"
 
-# Magic Mount retries clear recoverable markers and update partitions under a config lock.
+# Magic Mount retries clear only LuoShu-local stale markers and never rewrite external configuration.
 touch "$MODULE/skip_mount" "$MODULE/mount_error"
 MAGIC_CONFIG="$TMP/magic-mount-config.toml"
 printf 'mountsource = "KSU"\numount = false\npartitions = [\n  "vendor", # keep existing\n]\n' > "$MAGIC_CONFIG"
+MAGIC_BEFORE=$(cksum "$MAGIC_CONFIG")
 MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=magic-mount LUOSHU_MAGIC_MOUNT_CONFIG="$MAGIC_CONFIG" sh -c '
     . "$MODDIR/common/mount_compat.sh"
     luoshu_sync_mount_payload Demo
 '
 test ! -e "$MODULE/skip_mount"
 test ! -e "$MODULE/mount_error"
+test "$(cksum "$MAGIC_CONFIG")" = "$MAGIC_BEFORE"
 grep -q '"vendor"' "$MAGIC_CONFIG"
-grep -q '"product"' "$MAGIC_CONFIG"
-test "$(grep -c '^[[:space:]]*partitions[[:space:]]*=' "$MAGIC_CONFIG")" -eq 1
-test -s "$MAGIC_CONFIG.luoshu.bak"
+! grep -q '"product"' "$MAGIC_CONFIG"
+test ! -e "$MAGIC_CONFIG.luoshu.bak"
 test ! -e "$MAGIC_CONFIG.luoshu.lock"
 
 # Explicit font transactions recover an old LuoShu disable marker, but never remove remove.
@@ -180,6 +185,8 @@ cp -R "$ROOT/." "$STAGE/"
 rm -rf "$STAGE/.git" "$STAGE/dist" "$STAGE/common/python" 2>/dev/null || true
 ! find "$STAGE" -type f \( -name skip_mount -o -name skip_mountify \) | grep -q .
 sh -n "$ROOT/common/mount_compat.sh"
+sh -n "$ROOT/common/mount_compat_base.sh"
+sh -n "$ROOT/common/mount_self_fallback.sh"
 sh -n "$ROOT/common/font_mix.sh"
 sh -n "$ROOT/common/app_bridge.sh"
 sh -n "$ROOT/post-fs-data.sh"
