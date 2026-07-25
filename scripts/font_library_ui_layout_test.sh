@@ -11,6 +11,7 @@ LOGS_ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/
 LOGS_COMPACT="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenCompact.kt"
 DIAGNOSTIC="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
 STUDIO_ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioRoute.kt"
+STUDIO_TOOLS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/StudioToolLauncher.kt"
 STUDIO_MIUIX="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMiuix.kt"
 STUDIO_MATERIAL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMaterial.kt"
 OVERLAY="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
@@ -52,12 +53,17 @@ grep -q 'TaskPhase.FAILED' "$LOGS_COMPACT"
 grep -q 'modifier = modifier.size(50.dp)' "$DIAGNOSTIC"
 grep -q 'Modifier.size(50.dp)' "$LOGS_COMPACT"
 
-# Studio uses one in-flow final action. Tools sit beside refresh and neither the
-# tool launcher, import button nor a duplicate CTA may float over slot cards.
+# Studio uses one in-flow final action. The header tool is a rounded square rather
+# than a faceted floating circle, and the page reserves a dock-safe bottom area.
 grep -q 'MiuixFinalAction(state, actions)' "$STUDIO_MIUIX"
 grep -q 'MaterialFinalAction(state, actions)' "$STUDIO_MATERIAL"
 grep -q 'align(Alignment.TopEnd)' "$STUDIO_ROUTE"
 grep -q 'statusBarsPadding()' "$STUDIO_ROUTE"
+grep -q 'navigationBarsPadding()' "$STUDIO_ROUTE"
+grep -q 'padding(bottom = 86.dp)' "$STUDIO_ROUTE"
+grep -q 'padding(end = 82.dp, top = 24.dp)' "$STUDIO_ROUTE"
+grep -q 'shape = RoundedCornerShape(18.dp)' "$STUDIO_TOOLS"
+! grep -q 'CircleShape' "$STUDIO_TOOLS"
 ! grep -q 'align(Alignment.BottomStart)' "$STUDIO_ROUTE"
 ! grep -q 'align(Alignment.BottomCenter)' "$STUDIO_ROUTE"
 ! grep -q 'bottom = 94.dp' "$STUDIO_ROUTE"
