@@ -13,6 +13,8 @@ LUOSHU_META_TEST_ROOT="$TMP/meta-content"
 export MODDIR MODULE_DIR LUOSHU_META_TEST_ENGINE LUOSHU_META_TEST_ROOT
 mkdir -p "$MODDIR/common" "$MODDIR/system/fonts" "$MODDIR/my_product/fonts" "$LUOSHU_META_TEST_ROOT"
 cp "$ROOT/common/mount_compat.sh" "$MODDIR/common/mount_compat.sh"
+cp "$ROOT/common/mount_compat_base.sh" "$MODDIR/common/mount_compat_base.sh"
+cp "$ROOT/common/mount_self_fallback.sh" "$MODDIR/common/mount_self_fallback.sh"
 printf 'id=LuoShu\n' > "$MODDIR/module.prop"
 printf 'font-one' > "$MODDIR/system/fonts/Test.ttf"
 printf 'unsupported-partition' > "$MODDIR/my_product/fonts/Oplus.ttf"
@@ -35,14 +37,16 @@ export LUOSHU_META_TEST_ENGINE
 luoshu_sync_mount_payload Demo
 [ ! -e "$LUOSHU_META_TEST_ROOT/LuoShu" ]
 [ "$(sed -n 's/^detail=//p' "$MODDIR/config/mount_compat.conf")" = '当前引擎直接读取标准模块目录，等待重启验证' ]
+grep -q '^system|' "$MODDIR/config/mount-probes-expected.conf"
+! grep -q '^my_product|' "$MODDIR/config/mount-probes-expected.conf"
 
 LUOSHU_META_TEST_ENGINE=hybrid-mount
 export LUOSHU_META_TEST_ENGINE
 luoshu_sync_mount_payload Demo
 [ ! -e "$LUOSHU_META_TEST_ROOT/LuoShu" ]
 
-# Magic Mount reads the canonical module tree. An explicit font transaction must recover stale
-# skip_mount/mount_error markers left by a previous mount engine, then wait for reboot verification.
+# Magic Mount reads the canonical module tree. An explicit font transaction only recovers
+# LuoShu-local stale markers and never creates a guessed mirror or rewrites external config.
 touch "$MODDIR/skip_mount" "$MODDIR/mount_error"
 LUOSHU_META_TEST_ENGINE=magic-mount
 export LUOSHU_META_TEST_ENGINE
@@ -52,7 +56,7 @@ luoshu_sync_mount_payload Demo
 [ ! -e "$LUOSHU_META_TEST_ROOT/LuoShu" ]
 [ "$(sed -n 's/^engine=//p' "$MODDIR/config/mount_compat.conf")" = magic-mount ]
 
-# skip_mount is an actual compatibility failure for KernelSU metamodules.
+# skip_mount remains an actual compatibility failure for a true dual-directory metamodule.
 touch "$MODDIR/skip_mount"
 LUOSHU_META_TEST_ENGINE=meta-overlayfs
 export LUOSHU_META_TEST_ENGINE
@@ -62,14 +66,15 @@ if luoshu_sync_mount_payload Demo; then
 fi
 rm -f "$MODDIR/skip_mount"
 
-# After reboot, the visible system probe must match the expected transaction probe.
-VISIBLE="$TMP/visible-probe.conf"
-cp "$MODDIR/system/etc/luoshu/mount-probe.conf" "$VISIBLE"
-LUOSHU_VISIBLE_PROBE="$VISIBLE"
-export LUOSHU_VISIBLE_PROBE
+# After reboot, every dual-directory partition probe must match the expected transaction probe.
+VISIBLE_ROOT="$TMP/visible"
+mkdir -p "$VISIBLE_ROOT/system/etc/luoshu"
+cp "$MODDIR/system/etc/luoshu/mount-probe.conf" "$VISIBLE_ROOT/system/etc/luoshu/mount-probe.conf"
+LUOSHU_VISIBLE_PROBE_ROOT="$VISIBLE_ROOT"
+export LUOSHU_VISIBLE_PROBE_ROOT
 luoshu_mount_verify_active Demo
 [ "$(sed -n 's/^state=//p' "$MODDIR/config/mount_compat.conf")" = verified ]
-printf 'nonce=wrong\n' > "$VISIBLE"
+printf 'nonce=wrong\n' > "$VISIBLE_ROOT/system/etc/luoshu/mount-probe.conf"
 if luoshu_mount_verify_active Demo; then
     echo 'mismatched mount probe was accepted' >&2
     exit 1
