@@ -9,6 +9,7 @@ MODULES_UPDATE="$TMP/modules_update"
 META_MNT="$TMP/metamodule/mnt"
 CONTENT_BASE="$TMP/content"
 MAGIC_CONFIG="$TMP/magic_mount/config.toml"
+SELF_STATE="$TMP/luoshu/self-mount"
 MODDIR="$MODULES/LuoShu"
 
 mkdir -p \
@@ -18,6 +19,7 @@ mkdir -p \
   "$MODULES_UPDATE/LuoShu/system/fonts" \
   "$META_MNT/LuoShu/product/fonts" \
   "$CONTENT_BASE/LuoShu/system/fonts" \
+  "$SELF_STATE/lower/system-fonts" \
   "${MAGIC_CONFIG%/*}"
 
 cp "$ROOT/uninstall.sh" "$MODDIR/uninstall.sh"
@@ -28,11 +30,15 @@ printf '%s\n' 'partitions = ["system", "product"]' > "$MAGIC_CONFIG"
 printf '%s\n' 'backup' > "$MAGIC_CONFIG.luoshu.bak"
 printf '%s\n' '999999' > "$MAGIC_CONFIG.luoshu.lock"
 printf '%s\n' 'temp' > "$MAGIC_CONFIG.luoshu.123"
+printf '%s\n' \
+  "$SELF_STATE/lower/system-fonts" \
+  '/system/fonts' > "$SELF_STATE/mounts.list"
 
 LUOSHU_MODULES_DIR="$MODULES" \
 LUOSHU_MODULES_UPDATE_DIR="$MODULES_UPDATE" \
 LUOSHU_METAMODULE_MNT="$META_MNT" \
 LUOSHU_MAGIC_MOUNT_CONFIG="$MAGIC_CONFIG" \
+LUOSHU_SELF_MOUNT_STATE="$SELF_STATE" \
 MODULE_CONTENT_DIR="$CONTENT_BASE" \
 sh "$MODDIR/uninstall.sh"
 
@@ -40,6 +46,7 @@ sh "$MODDIR/uninstall.sh"
 [ ! -e "$MODULES_UPDATE/LuoShu" ]
 [ ! -e "$META_MNT/LuoShu" ]
 [ ! -e "$CONTENT_BASE/LuoShu" ]
+[ ! -e "$SELF_STATE" ]
 [ -f "$MODULES/OtherModule/module.prop" ]
 [ -f "$MAGIC_CONFIG" ]
 [ ! -e "$MAGIC_CONFIG.luoshu.bak" ]
