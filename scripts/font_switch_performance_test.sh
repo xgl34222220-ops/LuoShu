@@ -23,6 +23,7 @@ grep -q 'horizontalArrangement = Arrangement.spacedBy(10.dp)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
 ! grep -q 'top = if (style == UiStyle.MIUIX)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
+# Compact task-center header actions intentionally share one 50 dp visual box.
 grep -q 'modifier = modifier.size(50.dp)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
 grep -q 'IconButton(onClick = actions.refresh, modifier = Modifier.size(50.dp))' \
