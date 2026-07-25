@@ -1,10 +1,19 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -72,6 +81,16 @@ internal fun FontStudioRoute(
         }
     }
 
+    val ready = state.slots.isNotEmpty() && state.slots.all { it.font != null }
+    val canGenerate = ready && !state.loading && !state.busy && !state.operationBusy
+    val primaryLabel = when {
+        state.busy -> "正在生成 ${state.progress.coerceIn(0, 100)}%"
+        state.loading -> "正在读取组合配置"
+        !ready -> "请先选择中文、英文和数字字体"
+        state.error.isNotBlank() -> "检查配置后重新生成"
+        else -> "生成并应用复合字体"
+    }
+
     Box(Modifier.fillMaxSize()) {
         when (style) {
             UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
@@ -85,10 +104,44 @@ internal fun FontStudioRoute(
             onProfile = { showProfileTransfer = true },
             onGlyphs = { showGlyphBrowser = true },
             modifier = Modifier
-                .align(Alignment.BottomEnd)
+                .align(Alignment.BottomStart)
                 .navigationBarsPadding()
-                .padding(end = 82.dp, bottom = 98.dp),
+                .padding(start = 18.dp, bottom = 168.dp),
         )
+
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, bottom = 94.dp)
+                .fillMaxWidth(),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp,
+            shadowElevation = 8.dp,
+        ) {
+            Button(
+                onClick = stableActions.startMix,
+                enabled = canGenerate,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .padding(horizontal = 5.dp, vertical = 4.dp),
+                shape = MaterialTheme.shapes.large,
+            ) {
+                if (state.busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.height(20.dp).width(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(primaryLabel, fontWeight = FontWeight.Black)
+                }
+            }
+        }
     }
 
     if (showCompositePreview) {

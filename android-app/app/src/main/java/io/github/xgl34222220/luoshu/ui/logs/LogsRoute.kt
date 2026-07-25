@@ -43,25 +43,13 @@ internal fun LogsRoute(
             .navigationBarsPadding()
             .padding(bottom = 96.dp),
     ) {
-        when (style) {
-            UiStyle.MATERIAL -> {
-                LogsScreenMaterial(displayState, actions)
-                DiagnosticExportButton(
-                    style = style,
-                    state = diagnosticState,
-                    onClick = onDiagnostic,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 14.dp, end = 82.dp),
-                )
-            }
-            UiStyle.MIUIX -> LogsScreenMiuix(
-                state = displayState,
-                actions = actions,
-                diagnosticState = diagnosticState,
-                onDiagnostic = onDiagnostic,
-            )
-        }
+        LogsScreenCompact(
+            style = style,
+            state = displayState,
+            actions = actions,
+            diagnosticState = diagnosticState,
+            onDiagnostic = onDiagnostic,
+        )
         ImportTaskControls(
             style = style,
             state = importState,

@@ -41,6 +41,7 @@ data class HomeActions(
     val openFontLibrary: () -> Unit,
     val openFontStudio: () -> Unit,
     val openLogs: () -> Unit,
+    val openSettings: () -> Unit = {},
     val restoreDefault: () -> Unit,
     val reboot: () -> Unit,
     val previewSystemWeight: (Float) -> Unit,

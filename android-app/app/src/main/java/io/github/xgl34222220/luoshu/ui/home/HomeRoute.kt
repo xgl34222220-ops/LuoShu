@@ -1,9 +1,5 @@
 package io.github.xgl34222220.luoshu.ui.home
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -11,9 +7,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import kotlinx.coroutines.delay
 
@@ -42,9 +35,6 @@ fun HomeRoute(
 
         var latest = loadDeviceTrustState()
         trustState = latest
-        // The late-start verifier can finish shortly after the App becomes interactive.
-        // Refresh a bounded number of times so Home does not keep a stale pending chip until
-        // the user manually leaves the page or presses refresh.
         var attempt = 0
         while (latest.level == DeviceTrustLevel.PENDING && attempt < 9 && !state.taskRunning) {
             delay(5_000L)
@@ -54,23 +44,20 @@ fun HomeRoute(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        when (style) {
-            UiStyle.MATERIAL -> HomeScreenMaterial(state, actions)
-            UiStyle.MIUIX -> HomeScreenMiuix(state, actions)
-        }
-        if (state.moduleInstalled) {
-            DeviceTrustChip(
-                style = style,
-                state = trustState,
-                onClick = { showTrustDetails = true },
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(start = 18.dp, end = 18.dp, bottom = 108.dp),
-            )
-        }
-    }
+    HomeScreenCompact(
+        style = style,
+        state = state,
+        actions = actions,
+        trustContent = {
+            if (state.moduleInstalled) {
+                DeviceTrustChip(
+                    style = style,
+                    state = trustState,
+                    onClick = { showTrustDetails = true },
+                )
+            }
+        },
+    )
 
     if (showTrustDetails) {
         DeviceTrustDialog(

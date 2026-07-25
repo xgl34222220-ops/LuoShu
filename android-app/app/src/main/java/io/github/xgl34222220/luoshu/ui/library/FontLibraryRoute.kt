@@ -60,7 +60,7 @@ internal fun FontLibraryRoute(
         collectionStore.save(next)
     }
 
-    val combinedTopActions: @Composable () -> Unit = {
+    val managementTools: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             topActions()
             FontLibraryUtilitiesBar(
@@ -88,10 +88,12 @@ internal fun FontLibraryRoute(
         }
     }
 
-    when (style) {
-        UiStyle.MATERIAL -> FontLibraryScreenMaterial(displayState, displayActions, combinedTopActions)
-        UiStyle.MIUIX -> FontLibraryScreenMiuix(displayState, displayActions, combinedTopActions)
-    }
+    FontLibraryScreenCompact(
+        style = style,
+        state = displayState,
+        actions = displayActions,
+        tools = managementTools,
+    )
 
     if (showManagement) {
         FontLibraryManagementDialog(
