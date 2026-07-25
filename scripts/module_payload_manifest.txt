@@ -64,6 +64,7 @@ common/mix_weight_mode.sh
 common/module_status.sh
 common/module_update_state.sh
 common/mount_compat.sh
+common/mount_compat_base.sh
 common/mount_fast_sync.sh
 common/mount_self_backend.sh
 common/mount_self_fallback.sh
