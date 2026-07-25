@@ -1,0 +1,89 @@
+name: Cleanup non-stable refs
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/cleanup-nonstable.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Remove non-stable releases, tags and branches
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          current_tag="$(curl -fsSL "https://raw.githubusercontent.com/${REPO}/main/module.prop" | sed -n 's/^version=//p' | head -n1)"
+          [[ -n "$current_tag" ]] || { echo 'Cannot read current version from module.prop' >&2; exit 2; }
+
+          gh api --paginate "repos/${REPO}/releases?per_page=100" \
+            --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+            | sort -u > /tmp/stable-tags.txt
+
+          grep -Fxq "$current_tag" /tmp/stable-tags.txt || {
+            echo "Current formal release is missing or not stable: $current_tag" >&2
+            exit 3
+          }
+
+          echo 'Stable release tags to keep:'
+          cat /tmp/stable-tags.txt
+
+          gh api --paginate "repos/${REPO}/releases?per_page=100" \
+            --jq '.[] | select(.draft == true or .prerelease == true) | [.id, .tag_name] | @tsv' \
+            > /tmp/nonstable-releases.tsv
+          while IFS=$'\t' read -r release_id tag_name; do
+            [[ -n "${release_id:-}" ]] || continue
+            echo "Deleting non-stable release: ${tag_name:-untagged} (${release_id})"
+            gh api --method DELETE "repos/${REPO}/releases/${release_id}"
+          done < /tmp/nonstable-releases.tsv
+
+          gh api --paginate "repos/${REPO}/tags?per_page=100" --jq '.[].name' > /tmp/all-tags.txt
+          while IFS= read -r tag_name; do
+            [[ -n "$tag_name" ]] || continue
+            if grep -Fxq "$tag_name" /tmp/stable-tags.txt; then
+              continue
+            fi
+            encoded="$(jq -rn --arg value "$tag_name" '$value|@uri')"
+            echo "Deleting non-stable/orphan tag: $tag_name"
+            gh api --method DELETE "repos/${REPO}/git/refs/tags/${encoded}" || true
+          done < /tmp/all-tags.txt
+
+          gh api --paginate "repos/${REPO}/branches?per_page=100" --jq '.[].name' > /tmp/all-branches.txt
+          while IFS= read -r branch_name; do
+            [[ -n "$branch_name" ]] || continue
+            [[ "$branch_name" == main ]] && continue
+            encoded="$(jq -rn --arg value "$branch_name" '$value|@uri')"
+            echo "Deleting branch: $branch_name"
+            gh api --method DELETE "repos/${REPO}/git/refs/heads/${encoded}" || true
+          done < /tmp/all-branches.txt
+
+          echo 'Remaining branches:'
+          gh api --paginate "repos/${REPO}/branches?per_page=100" --jq '.[].name'
+          echo 'Remaining tags:'
+          gh api --paginate "repos/${REPO}/tags?per_page=100" --jq '.[].name'
+
+      - name: Remove one-time cleanup workflow
+        if: ${{ success() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          path='.github/workflows/cleanup-nonstable.yml'
+          sha="$(gh api "repos/${REPO}/contents/${path}?ref=main" --jq .sha)"
+          gh api --method DELETE "repos/${REPO}/contents/${path}" \
+            -f message='chore: remove one-time cleanup workflow' \
+            -f sha="$sha" \
+            -f branch='main'
