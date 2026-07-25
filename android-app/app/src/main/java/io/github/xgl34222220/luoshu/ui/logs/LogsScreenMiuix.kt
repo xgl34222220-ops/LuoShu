@@ -49,16 +49,28 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 
 @Composable
-internal fun LogsScreenMiuix(state: LogsUiState, actions: LogsActions) {
+internal fun LogsScreenMiuix(
+    state: LogsUiState,
+    actions: LogsActions,
+    diagnosticState: DiagnosticExportState,
+    onDiagnostic: () -> Unit,
+) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 132.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        item { MiuixTaskCenterHeader(actions.refresh) }
+        item {
+            MiuixTaskCenterHeader(
+                onRefresh = actions.refresh,
+                diagnosticState = diagnosticState,
+                onDiagnostic = onDiagnostic,
+            )
+        }
         item { MiuixTaskOverview(state) }
         item { MiuixSectionTitle("任务时间线", "最近 ${state.tasks.size} 条状态") }
 
@@ -77,7 +89,11 @@ internal fun LogsScreenMiuix(state: LogsUiState, actions: LogsActions) {
 }
 
 @Composable
-private fun MiuixTaskCenterHeader(onRefresh: () -> Unit) {
+private fun MiuixTaskCenterHeader(
+    onRefresh: () -> Unit,
+    diagnosticState: DiagnosticExportState,
+    onDiagnostic: () -> Unit,
+) {
     val tokens = LocalMiuixTokens.current
     Row(
         modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -101,13 +117,23 @@ private fun MiuixTaskCenterHeader(onRefresh: () -> Unit) {
             )
             Text("扫描、导入、应用、组合与重启状态", color = tokens.textSecondary, fontSize = 12.sp)
         }
-        Card(
-            shape = RoundedCornerShape(18.dp),
-            colors = CardDefaults.cardColors(containerColor = tokens.elevatedCardBackground),
-            elevation = CardDefaults.cardElevation(defaultElevation = 7.dp),
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onRefresh, modifier = Modifier.size(56.dp)) {
-                Icon(Icons.Rounded.Refresh, contentDescription = "刷新任务和日志")
+            DiagnosticExportButton(
+                style = UiStyle.MIUIX,
+                state = diagnosticState,
+                onClick = onDiagnostic,
+            )
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = tokens.elevatedCardBackground),
+                elevation = CardDefaults.cardElevation(defaultElevation = 7.dp),
+            ) {
+                IconButton(onClick = onRefresh, modifier = Modifier.size(56.dp)) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = "刷新任务和日志")
+                }
             }
         }
     }
