@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# LuoShu v2.2.7 installer wrapper: run the verified installer, then hide every
+# LuoShu v2.3.0 installer wrapper: run the verified installer, then hide every
 # standard partition payload before the first boot.
 # Delegated core contract: module_update_state.sh records upgrade migration.
 # User contract retained by the delegated core: 后台重建完成后会通知再次重启。
@@ -15,7 +15,7 @@ _lc_temp="$MODPATH/.customize-v227.$$.sh"
 [ -f "$_lc_helper" ] && . "$_lc_helper"
 
 # Existing private-payload installations are exposed only for the duration of
-# the old v2.2.7 update migrator, then hidden again.
+# the verified update migrator, then hidden again.
 if [ -d "$LUOSHU_OLD_MOD/.luoshu-payload" ]; then
     luoshu_private_mount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1 || \
         abort '无法读取旧版洛书私有字体负载'
@@ -24,8 +24,8 @@ fi
 # Static regression contracts retained from the verified installer:
 # for _enable_dir in "$MODPATH" "$OLD_MOD"
 # rm -f "$_enable_dir/disable"
-# luoshu_cli.sh is deployed to system/bin/洛书 by the verified v2.2.7 installer.
-[ -f "$_lc_base" ] || abort '缺少洛书 v2.2.7 安装核心'
+# luoshu_cli.sh is deployed to system/bin/洛书 by the verified installer.
+[ -f "$_lc_base" ] || abort '缺少洛书安装核心'
 sed '$d' "$_lc_base" > "$_lc_temp" 2>/dev/null || abort '安装入口准备失败'
 . "$_lc_temp"
 _lc_rc=$?
@@ -36,6 +36,6 @@ luoshu_private_unmount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1 || true
 if ! luoshu_private_install_migrate "$MODPATH"; then
     abort '洛书私有挂载树部署失败'
 fi
-ui_print '✓ 字体负载已转入洛书私有挂载树'
-ui_print '✓ 所有元模块将忽略洛书，由洛书自行挂载'
+ui_print '✓ 私有字体负载已部署'
+ui_print '✓ 洛书将独立完成字体挂载'
 exit 0
