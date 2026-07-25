@@ -1,0 +1,44 @@
+name: v2.2.7 self-mount maintenance
+
+on:
+  pull_request:
+    branches:
+      - maintenance/v2.2.7
+    paths:
+      - common/mount_compat.sh
+      - common/mount_self_backend.sh
+      - common/mount_self_fallback.sh
+      - common/font_config_partitions.sh
+      - post-mount.sh
+      - uninstall.sh
+      - scripts/module_payload_manifest.txt
+      - scripts/self_mount_test.sh
+      - scripts/uninstall_cleanup_test.sh
+      - scripts/v2_source_audit.sh
+      - .github/workflows/v227-self-mount-maintenance.yml
+
+permissions:
+  contents: read
+
+jobs:
+  shell-regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate self-mount maintenance patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n common/mount_self_fallback.sh
+          sh -n common/mount_self_backend.sh
+          sh -n post-mount.sh
+          sh -n uninstall.sh
+          sh scripts/self_mount_test.sh
+          sh scripts/uninstall_cleanup_test.sh
+          grep -qx 'common/mount_self_backend.sh' scripts/module_payload_manifest.txt
+          grep -qx 'common/mount_self_fallback.sh' scripts/module_payload_manifest.txt
+          grep -qx 'post-mount.sh' scripts/module_payload_manifest.txt
+          grep -q 'mount_self_fallback.sh' common/font_config_partitions.sh
+          grep -q 'mount_self_backend.sh' post-mount.sh
+          grep -q -- '-t overlay KSU' common/mount_self_backend.sh
