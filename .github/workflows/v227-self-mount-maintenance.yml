@@ -27,7 +27,7 @@ permissions:
 jobs:
   shell-regression:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 14
     steps:
       - uses: actions/checkout@v4
       - name: Shell syntax
@@ -43,8 +43,14 @@ jobs:
         run: sh scripts/self_mount_test.sh
       - name: Uninstall cleanup simulation
         run: sh scripts/uninstall_cleanup_test.sh
-      - name: Dual-directory mount regression
-        run: sh scripts/mount_compat_test.sh dual
+      - name: Dual-directory initial sync
+        run: sh scripts/mount_compat_test.sh dual-sync
+      - name: Dual-directory atomic replacement
+        run: sh scripts/mount_compat_test.sh dual-replace
+      - name: Dual-directory probe verification
+        run: sh scripts/mount_compat_test.sh dual-verify
+      - name: Dual-directory unsupported partition policy
+        run: sh scripts/mount_compat_test.sh dual-unsupported
       - name: Direct-source mount regression
         run: sh scripts/mount_compat_test.sh direct
       - name: Mount copy timeout regression
