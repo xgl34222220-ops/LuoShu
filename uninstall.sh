@@ -42,6 +42,9 @@ _luoshu_remove_tree() {
 
 _luoshu_self_mount_target_allowed() {
     case "$1" in
+        "${LUOSHU_SELF_MOUNT_STATE%/}"/lower/*)
+            return 0
+            ;;
         /system/fonts|/system/fonts/*|/system/etc|/system/etc/*|\
         /system_ext/fonts|/system_ext/fonts/*|/system_ext/etc|/system_ext/etc/*|\
         /product/fonts|/product/fonts/*|/product/etc|/product/etc/*|\
