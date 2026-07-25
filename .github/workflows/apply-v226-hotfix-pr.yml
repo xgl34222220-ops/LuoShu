@@ -1,0 +1,59 @@
+name: Apply v2.2.6 hotfix from PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'hotfix/v2.2.6-trust-log'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: hotfix/v2.2.6-trust-log
+          fetch-depth: 0
+
+      - name: Extract and run applicator
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path('.github/workflows/apply-v226-hotfix.yml').read_text(encoding='utf-8')
+          start_marker = "      - name: Apply source fixes\n        shell: bash\n        run: |\n"
+          start = source.index(start_marker) + len(start_marker)
+          end = source.index("\n      - name: Validate patch structure", start)
+          block = source[start:end]
+          lines = []
+          for line in block.splitlines():
+              if line.startswith('          '):
+                  lines.append(line[10:])
+              else:
+                  lines.append(line)
+          Path('/tmp/apply-v226.sh').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+          bash /tmp/apply-v226.sh
+
+      - name: Validate and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n common/util_functions.sh
+          sh -n common/device_font_cache.sh
+          grep -q 'log_rom_detection_once hyperos' common/util_functions.sh
+          grep -q 'compatibilityMappingIsAcceptedWithoutRedFailure' android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/home/DeviceTestMatrixTest.kt
+          grep -q 'type luoshu_sync_mount_payload' common/device_font_cache.sh
+          rm -f .github/workflows/apply-v226-hotfix-pr.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'fix: correct trust states and deduplicate ROM logs'
+          git push origin HEAD:hotfix/v2.2.6-trust-log
