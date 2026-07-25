@@ -96,6 +96,48 @@ class DeviceTestMatrixTest {
         assertFalse(raw.contains("/data/"))
     }
 
+    @Test
+    fun compatibilityMappingIsAcceptedWithoutRedFailure() {
+        val checks = deviceAcceptanceAutoChecks(
+            state = readyState(),
+            trust = DeviceTrustState(
+                loading = false,
+                inventory = "available",
+                engine = "missing",
+                alignment = "pending",
+                mode = "compatibility",
+                cachePending = true,
+            ),
+        )
+
+        val alignment = checks.single { it.id == "alignment" }
+        val cache = checks.single { it.id == "cache" }
+        assertTrue(alignment.passed)
+        assertFalse(alignment.blocking)
+        assertTrue(cache.passed)
+        assertFalse(cache.blocking)
+    }
+
+    @Test
+    fun pendingTaskRebootAndCacheRemainInformational() {
+        val checks = deviceAcceptanceAutoChecks(
+            state = readyState().copy(taskRunning = true, rebootRequired = true),
+            trust = DeviceTrustState(
+                loading = false,
+                inventory = "available",
+                engine = "installed",
+                alignment = "pending",
+                mode = "aligned",
+                cachePending = true,
+            ),
+        )
+
+        assertFalse(checks.single { it.id == "task" }.blocking)
+        assertFalse(checks.single { it.id == "reboot" }.blocking)
+        assertFalse(checks.single { it.id == "alignment" }.blocking)
+        assertFalse(checks.single { it.id == "cache" }.blocking)
+    }
+
     private fun readyState(
         version: String = "v2.2.4-alpha1",
         currentFont: String = "自定义字体",
