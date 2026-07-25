@@ -65,6 +65,7 @@ common/module_status.sh
 common/module_update_state.sh
 common/mount_compat.sh
 common/mount_fast_sync.sh
+common/mount_self_fallback.sh
 common/multiweight_mix_task.sh
 common/native_import.sh
 common/origin_flyme_global.sh
@@ -85,6 +86,7 @@ CHANGELOG.md
 customize.sh
 module.prop
 post-fs-data.sh
+post-mount.sh
 service.sh
 uninstall.sh
 action.sh
