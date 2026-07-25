@@ -1,5 +1,7 @@
 #!/system/bin/sh
 # Remove the private module view before the verified v2.2.7 cleanup runs.
+# Delegated dynamic cleanup contract: device-font-dynamic-mount.conf
+# Delegated Flyme restore contract: luoshu_flyme_pending_apply
 set +e
 MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
