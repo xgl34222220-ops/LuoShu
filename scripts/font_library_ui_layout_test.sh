@@ -7,6 +7,8 @@ ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/libra
 COMPACT="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/library/FontLibraryScreenCompact.kt"
 HOME_ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/HomeRoute.kt"
 HOME_COMPACT="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/HomeScreenCompact.kt"
+ACCEPTANCE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceAcceptanceGuide.kt"
+MATRIX="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceTestMatrix.kt"
 LOGS_ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
 LOGS_COMPACT="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenCompact.kt"
 DIAGNOSTIC="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
@@ -42,6 +44,16 @@ grep -q '继续调整当前字体' "$HOME_COMPACT"
 grep -q '打开任务中心查看错误原因' "$HOME_COMPACT"
 ! grep -q 'QUICK ACCESS' "$HOME_COMPACT"
 ! grep -q 'bottom = 108.dp' "$HOME_ROUTE"
+
+# Acceptance guidance follows the installed version and explains the real next
+# action instead of keeping the obsolete v2.2.2 release target in production UI.
+grep -q "targetVersion: String = state.version.substringBefore('-').substringBefore('+')" "$MATRIX"
+grep -q '真机测试矩阵 · ${report.targetVersion}' "$MATRIX"
+grep -q '测试矩阵与当前版本预发行门禁' "$ACCEPTANCE"
+grep -q '等待逐分区开机挂载验证' "$ACCEPTANCE"
+grep -q '应用字体后会在后台自动建立' "$ACCEPTANCE"
+! grep -q 'v2.2.2' "$MATRIX"
+! grep -q 'v2.2.2' "$ACCEPTANCE"
 
 # Task center separates user-facing tasks/issues from raw logs and its two header
 # actions have the same 50 dp visual size.
