@@ -26,6 +26,61 @@ _luoshu_visible_path() {
     fi
 }
 
+# Hybrid Mount v4 uses default_mode globally and per module. The v2.2.7 base
+# parser only knew older backend/mode keys, so keep reporting and diagnostics in
+# sync with current Full/Lite/Nano configuration without editing Hybrid's files.
+_luoshu_hybrid_mode_from_file() {
+    _lhmff_file="$1"
+    [ -f "$_lhmff_file" ] || return 1
+    awk '
+        function clean(v) {
+            sub(/[[:space:]]*#.*/, "", v)
+            sub(/^[^=]*=[[:space:]]*/, "", v)
+            gsub(/["\047[:space:]]/, "", v)
+            return tolower(v)
+        }
+        /^[[:space:]]*\[/ {
+            section=$0
+            sub(/[[:space:]]*#.*/, "", section)
+            gsub(/["\047[:space:]]/, "", section)
+            section=tolower(section)
+            in_luoshu=(section=="[rules.luoshu]")
+            next
+        }
+        /^[[:space:]]*default_mode[[:space:]]*=/ {
+            value=clean($0)
+            if (in_luoshu) module_value=value
+            else if (global_value=="") global_value=value
+        }
+        END {
+            if (module_value!="") print module_value
+            else if (global_value!="") print global_value
+        }
+    ' "$_lhmff_file" 2>/dev/null | tail -n1
+}
+
+luoshu_hybrid_backend() {
+    if [ -n "${LUOSHU_META_TEST_BACKEND:-}" ]; then
+        printf '%s\n' "$LUOSHU_META_TEST_BACKEND"
+        return 0
+    fi
+
+    for _lhb_file in \
+        /data/adb/hybrid-mount/config.toml \
+        /data/adb/metamodule/config.toml \
+        /data/adb/modules/hybrid_mount/config.toml \
+        /data/adb/modules/meta-hybrid_mount/config.toml \
+        /data/adb/modules/hybrid-mount/config.toml; do
+        _lhb_value=$(_luoshu_hybrid_mode_from_file "$_lhb_file")
+        case "$_lhb_value" in
+            overlay|overlayfs) printf 'overlayfs\n'; return 0 ;;
+            magic|magic-mount|magic_mount) printf 'magic-mount\n'; return 0 ;;
+            kasumi) printf 'kasumi\n'; return 0 ;;
+        esac
+    done
+    printf 'unknown\n'
+}
+
 luoshu_mount_preflight() {
     _lmcp_active="${1:-unknown}"
     _lmcp_engine="${2:-$(luoshu_detect_mount_engine)}"
