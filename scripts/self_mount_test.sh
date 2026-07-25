@@ -18,6 +18,7 @@ mkdir -p \
 
 printf 'new-font\n' > "$MODULE/system/fonts/Roboto-Regular.ttf"
 printf 'stock-font\n' > "$VISIBLE/system/fonts/Roboto-Regular.ttf"
+printf 'stock-emoji\n' > "$VISIBLE/system/fonts/NotoColorEmoji.ttf"
 printf 'Demo\n' > "$MODULE/config/active_font.conf"
 printf 'id=LuoShu\nfont=Demo\nengine=mountify\npartition=system\nnonce=test-system\n' \
     > "$MODULE/system/etc/luoshu/mount-probe.conf"
@@ -33,18 +34,28 @@ case "$1" in
         src="$3"
         dst="$4"
         if [ -d "$src" ]; then
+            rm -rf "$dst"
             mkdir -p "$dst"
+            cp -a "$src/." "$dst/"
         else
             cp -f "$src" "$dst"
         fi
         ;;
     -t)
+        [ "$2" = overlay ]
+        [ "$3" = KSU ]
+        [ "$4" = -o ]
         opts="$5"
         target="$6"
-        upper=$(printf '%s' "$opts" | sed -n 's/.*upperdir=\([^,]*\).*/\1/p')
-        [ -n "$upper" ]
+        layers=$(printf '%s' "$opts" | sed -n 's/^lowerdir=//p')
+        source=${layers%%:*}
+        stock=${layers#*:}
+        [ -d "$source" ]
+        [ -d "$stock" ]
+        rm -rf "$target"
         mkdir -p "$target"
-        cp -a "$upper/." "$target/"
+        cp -a "$stock/." "$target/"
+        cp -a "$source/." "$target/"
         ;;
     *) exit 2 ;;
 esac
@@ -63,6 +74,7 @@ sh -c '
     _luoshu_now() { printf "1\n"; }
     luoshu_mount_record() { :; }
     . "$1/common/mount_self_fallback.sh"
+    . "$1/common/mount_self_backend.sh"
 
     touch "$MODDIR/skip_mount" "$MODDIR/skip_mountify" "$MODDIR/mount_error"
     luoshu_self_mount_ensure
@@ -72,8 +84,11 @@ sh -c '
     [ "$(sed -n "s/^state=//p" "$MODDIR/config/self-mount.conf")" = mounted ]
     [ "$(sed -n "s/^backend=//p" "$MODDIR/config/self-mount.conf")" = self-overlay ]
     [ "$(cat "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system/fonts/Roboto-Regular.ttf")" = new-font ]
+    [ "$(cat "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system/fonts/NotoColorEmoji.ttf")" = stock-emoji ]
     _luoshu_system_probe_visible
+    grep -qx "$LUOSHU_SELF_MOUNT_STATE_ROOT/lower/system-fonts" "$LUOSHU_SELF_MOUNT_STATE_ROOT/mounts.list"
     grep -qx "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system/fonts" "$LUOSHU_SELF_MOUNT_STATE_ROOT/mounts.list"
+    grep -qx "$LUOSHU_SELF_MOUNT_STATE_ROOT/lower/system-etc" "$LUOSHU_SELF_MOUNT_STATE_ROOT/mounts.list"
     grep -qx "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system/etc" "$LUOSHU_SELF_MOUNT_STATE_ROOT/mounts.list"
 
     luoshu_self_mount_ensure
@@ -81,5 +96,6 @@ sh -c '
 ' sh "$ROOT"
 
 sh -n "$ROOT/common/mount_self_fallback.sh"
+sh -n "$ROOT/common/mount_self_backend.sh"
 sh -n "$ROOT/post-mount.sh"
 echo 'LuoShu post-mount self-mount regression checks passed.'
