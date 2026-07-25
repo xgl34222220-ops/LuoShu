@@ -285,16 +285,6 @@ internal fun LuoShuAppShell(
                 }
             }
 
-            if (page == AppPage.Studio) {
-                NativeImportOverlay(
-                    viewModel = viewModel,
-                    style = appearance.uiStyle,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .navigationBarsPadding()
-                        .padding(end = 18.dp, bottom = 166.dp),
-                )
-            }
         }
 
         pendingApply?.let { font ->
@@ -558,17 +548,19 @@ private fun MiuixAppDock(
                 shape,
             )
             .padding(start = 5.dp, top = 5.dp, end = 5.dp, bottom = if (floating) 5.dp else bottomInset + 5.dp),
-        indicatorColor = if (activeGlass) {
-            Color.White.copy(alpha = if (dark) .12f else .34f)
-        } else {
-            scheme.primary.copy(alpha = if (dark) .20f else .12f)
-        },
+        indicatorColor = scheme.primary.copy(
+            alpha = if (activeGlass) {
+                if (dark) .18f else .12f
+            } else {
+                if (dark) .20f else .12f
+            },
+        ),
         indicatorBorderColor = if (activeGlass) {
-            Color.White.copy(alpha = if (dark) .24f else .72f)
+            scheme.primary.copy(alpha = if (dark) .30f else .20f)
         } else {
             Color.Transparent
         },
-        indicatorShadow = if (activeGlass) 6.dp else 0.dp,
+        indicatorShadow = 0.dp,
         selectedColor = scheme.primary,
         unselectedColor = scheme.onSurfaceVariant.copy(alpha = .82f),
         label = "luoshuMiuixDockIndicator",

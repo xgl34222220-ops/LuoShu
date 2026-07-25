@@ -69,6 +69,13 @@ grep -q '真实背景采样、折射高光与透明质感' "$SETTINGS"
 grep -q 'embedded: Boolean = false' "$OVERLAY"
 grep -q 'embedded = true' "$SHELL"
 grep -q 'libraryDockClearance' "$SHELL"
-grep -q 'if (page == AppPage.Studio)' "$SHELL"
+! grep -q 'if (page == AppPage.Studio)' "$SHELL"
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'scheme.primary.copy(alpha = if (dark) .30f else .20f)'
+grep -q 'align(Alignment.TopEnd)' "$STUDIO_ROUTE"
+grep -q 'statusBarsPadding()' "$STUDIO_ROUTE"
+! grep -q 'align(Alignment.BottomStart)' "$STUDIO_ROUTE"
+! grep -q 'padding(start = 16.dp, end = 16.dp, bottom = 94.dp)' "$STUDIO_ROUTE"
+grep -q 'modifier = modifier.size(50.dp)' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
 
 echo 'LuoShu compact UI layout regression passed.'

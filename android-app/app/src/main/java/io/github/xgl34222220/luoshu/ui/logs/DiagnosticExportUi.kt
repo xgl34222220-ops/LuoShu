@@ -127,8 +127,8 @@ internal fun DiagnosticExportButton(
     Surface(
         onClick = onClick,
         enabled = !state.busy,
-        modifier = modifier.size(if (style == UiStyle.MIUIX) 56.dp else 52.dp),
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 18.dp else 17.dp),
+        modifier = modifier.size(50.dp),
+        shape = RoundedCornerShape(17.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         contentColor = MaterialTheme.colorScheme.primary,
         shadowElevation = 6.dp,
