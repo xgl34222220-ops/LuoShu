@@ -10,6 +10,7 @@ LUOSHU_MODULES_DIR="${LUOSHU_MODULES_DIR:-/data/adb/modules}"
 LUOSHU_MODULES_UPDATE_DIR="${LUOSHU_MODULES_UPDATE_DIR:-/data/adb/modules_update}"
 LUOSHU_METAMODULE_MNT="${LUOSHU_METAMODULE_MNT:-/data/adb/metamodule/mnt}"
 LUOSHU_MAGIC_MOUNT_CONFIG="${LUOSHU_MAGIC_MOUNT_CONFIG:-/data/adb/magic_mount/config.toml}"
+LUOSHU_SELF_MOUNT_STATE="${LUOSHU_SELF_MOUNT_STATE:-/data/adb/luoshu/self-mount}"
 
 _luoshu_uninstall_hash() {
     _luh_file="$1"
@@ -37,6 +38,53 @@ _luoshu_remove_tree() {
     [ "$_lurt_path" != / ] || return 1
     [ "${_lurt_path##*/}" = LuoShu ] || return 1
     rm -rf "$_lurt_path" 2>/dev/null || true
+}
+
+_luoshu_self_mount_target_allowed() {
+    case "$1" in
+        /system/fonts|/system/fonts/*|/system/etc|/system/etc/*|\
+        /system_ext/fonts|/system_ext/fonts/*|/system_ext/etc|/system_ext/etc/*|\
+        /product/fonts|/product/fonts/*|/product/etc|/product/etc/*|\
+        /vendor/fonts|/vendor/fonts/*|/vendor/etc|/vendor/etc/*|\
+        /odm/fonts|/odm/fonts/*|/odm/etc|/odm/etc/*|\
+        /oem/fonts|/oem/fonts/*|/oem/etc|/oem/etc/*|\
+        /my_product/fonts|/my_product/fonts/*|/my_product/etc|/my_product/etc/*|\
+        /my_engineering/fonts|/my_engineering/fonts/*|/my_engineering/etc|/my_engineering/etc/*|\
+        /my_company/fonts|/my_company/fonts/*|/my_company/etc|/my_company/etc/*|\
+        /my_preload/fonts|/my_preload/fonts/*|/my_preload/etc|/my_preload/etc/*|\
+        /my_region/fonts|/my_region/fonts/*|/my_region/etc|/my_region/etc/*|\
+        /my_stock/fonts|/my_stock/fonts/*|/my_stock/etc|/my_stock/etc/*|\
+        /oplus_product/fonts|/oplus_product/fonts/*|/oplus_product/etc|/oplus_product/etc/*|\
+        /oplus_engineering/fonts|/oplus_engineering/fonts/*|/oplus_engineering/etc|/oplus_engineering/etc/*|\
+        /oplus_version/fonts|/oplus_version/fonts/*|/oplus_version/etc|/oplus_version/etc/*|\
+        /oplus_region/fonts|/oplus_region/fonts/*|/oplus_region/etc|/oplus_region/etc/*|\
+        /mi_ext/fonts|/mi_ext/fonts/*|/mi_ext/etc|/mi_ext/etc/*|\
+        /cust/fonts|/cust/fonts/*|/cust/etc|/cust/etc/*|\
+        /system/system_ext/fonts|/system/system_ext/fonts/*|/system/system_ext/etc|/system/system_ext/etc/*|\
+        /system/product/fonts|/system/product/fonts/*|/system/product/etc|/system/product/etc/*|\
+        /system/vendor/fonts|/system/vendor/fonts/*|/system/vendor/etc|/system/vendor/etc/*)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+_luoshu_cleanup_self_mount() {
+    _lucsm_state=${LUOSHU_SELF_MOUNT_STATE%/}
+    [ "${_lucsm_state##*/}" = self-mount ] || return 0
+    _lucsm_parent=${_lucsm_state%/*}
+    [ "${_lucsm_parent##*/}" = luoshu ] || return 0
+    _lucsm_list="$_lucsm_state/mounts.list"
+    if [ -s "$_lucsm_list" ]; then
+        awk '{ line[NR]=$0 } END { for (i=NR; i>=1; i--) print line[i] }' "$_lucsm_list" 2>/dev/null | \
+        while IFS= read -r _lucsm_target; do
+            [ -n "$_lucsm_target" ] || continue
+            _luoshu_self_mount_target_allowed "$_lucsm_target" || continue
+            umount "$_lucsm_target" 2>/dev/null || true
+        done
+    fi
+    rm -rf "$_lucsm_state" 2>/dev/null || true
+    rmdir "$_lucsm_parent" 2>/dev/null || true
 }
 
 # 恢复安装洛书前记录的 Android 全局字体粗细设置。
@@ -84,6 +132,9 @@ if [ -f "$MODDIR/common/origin_flyme_global.sh" ]; then
             luoshu_flyme_pending_apply >/dev/null 2>&1 || true
     fi
 fi
+
+# 先解除洛书自己的 post-mount 兜底挂载，再删除模块负载。
+_luoshu_cleanup_self_mount
 
 # 清理洛书写入 Magic Mount 配置旁的锁、备份和临时文件。不会回滚整个
 # Magic Mount 配置，避免覆盖用户卸载前自行完成的其他配置修改。
