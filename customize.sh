@@ -1,6 +1,8 @@
 #!/system/bin/sh
 # LuoShu v2.2.7 installer wrapper: run the verified installer, then hide every
 # standard partition payload before the first boot.
+# Delegated core contract: module_update_state.sh records upgrade migration.
+# User contract retained by the delegated core: 后台重建完成后会通知再次重启。
 set +e
 MODPATH="${MODPATH:-$3}"
 LUOSHU_OLD_MOD="${LUOSHU_OLD_MOD:-/data/adb/modules/LuoShu}"
