@@ -1,0 +1,211 @@
+name: Apply UI overlap hotfix
+
+on:
+  push:
+    branches:
+      - agent/ui-interaction-v226
+    paths:
+      - .github/workflows/apply-ui-overlap-hotfix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ui-interaction-v226
+          fetch-depth: 0
+
+      - name: Fix overlapping controls and dock indicator
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = root / path
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one occurrence, found {count}: {old[:80]!r}')
+              file.write_text(text.replace(old, new, 1))
+
+          # Task center header actions must use one visual size.
+          replace_once(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt',
+              'modifier = modifier.size(if (style == UiStyle.MIUIX) 56.dp else 52.dp),\n        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 18.dp else 17.dp),',
+              'modifier = modifier.size(52.dp),\n        shape = RoundedCornerShape(18.dp),',
+          )
+          replace_once(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenCompact.kt',
+              'shape = RoundedCornerShape(17.dp),\n                    color = elevatedColor,\n                    tonalElevation = 2.dp,\n                    shadowElevation = 3.dp,\n                ) {\n                    IconButton(onClick = actions.refresh, modifier = Modifier.size(50.dp)) {',
+              'shape = RoundedCornerShape(18.dp),\n                    color = elevatedColor,\n                    tonalElevation = 2.dp,\n                    shadowElevation = 3.dp,\n                ) {\n                    IconButton(onClick = actions.refresh, modifier = Modifier.size(52.dp)) {',
+          )
+
+          # Studio content should reserve space for the bottom CTA instead of being covered by it.
+          route_path = root / 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioRoute.kt'
+          route = route_path.read_text()
+          route = route.replace(
+              'import androidx.compose.foundation.layout.Box\n',
+              'import androidx.compose.foundation.layout.Box\nimport androidx.compose.foundation.layout.Column\n',
+              1,
+          )
+          route = route.replace(
+              'import androidx.compose.foundation.layout.padding\n',
+              'import androidx.compose.foundation.layout.padding\nimport androidx.compose.foundation.layout.statusBarsPadding\nimport androidx.compose.foundation.layout.weight\n',
+              1,
+          )
+          pattern = re.compile(r'    Box\(Modifier\.fillMaxSize\(\)\) \{.*?\n    \}\n\n    if \(showCompositePreview\)', re.S)
+          replacement = '''    Column(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f)) {
+            when (style) {
+                UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
+                UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
+            }
+
+            StudioToolLauncher(
+                style = style,
+                enabled = state.hasFonts && !state.loading,
+                onPreview = { showCompositePreview = true },
+                onProfile = { showProfileTransfer = true },
+                onGlyphs = { showGlyphBrowser = true },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .statusBarsPadding()
+                    .padding(end = 82.dp, top = 12.dp),
+            )
+        }
+
+        Surface(
+            modifier = Modifier
+                .navigationBarsPadding()
+                .padding(start = 16.dp, end = 16.dp, bottom = 94.dp)
+                .fillMaxWidth(),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp,
+            shadowElevation = 8.dp,
+        ) {
+            Button(
+                onClick = stableActions.startMix,
+                enabled = canGenerate,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .padding(horizontal = 5.dp, vertical = 4.dp),
+                shape = MaterialTheme.shapes.large,
+            ) {
+                if (state.busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.height(20.dp).width(20.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(primaryLabel, fontWeight = FontWeight.Black)
+                }
+            }
+        }
+    }
+
+    if (showCompositePreview)'''
+          route, count = pattern.subn(replacement, route, count=1)
+          if count != 1:
+              raise SystemExit('FontStudioRoute.kt: failed to replace overlay layout')
+          route_path.write_text(route)
+
+          # Remove duplicate in-list final buttons and reduce obsolete bottom padding.
+          replace_once(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMiuix.kt',
+              'contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 132.dp),',
+              'contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp),',
+          )
+          replace_once(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMiuix.kt',
+              '        item { MiuixCoverageGroup(state, actions) }\n        item { MiuixFinalAction(state, actions) }',
+              '        item { MiuixCoverageGroup(state, actions) }',
+          )
+          replace_once(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMaterial.kt',
+              'contentPadding = PaddingValues(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 132.dp),',
+              'contentPadding = PaddingValues(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 24.dp),',
+          )
+          replace_once(
+              'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMaterial.kt',
+              '        item { MaterialCoverageCard(state, actions) }\n        item { MaterialFinalAction(state, actions) }',
+              '        item { MaterialCoverageCard(state, actions) }',
+          )
+
+          # The library already owns font import. The studio must not draw another floating import control.
+          shell_path = root / 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt'
+          shell = shell_path.read_text()
+          native_overlay = re.compile(
+              r'\n            if \(page == AppPage\.Studio\) \{\n                NativeImportOverlay\(.*?\n                \)\n            \}\n',
+              re.S,
+          )
+          shell, count = native_overlay.subn('\n', shell, count=1)
+          if count != 1:
+              raise SystemExit('LuoShuAppShell.kt: failed to remove Studio NativeImportOverlay')
+
+          # Avoid the opaque white block inside the selected glass item.
+          old_indicator = '''        indicatorColor = if (activeGlass) {
+            Color.White.copy(alpha = if (dark) .12f else .34f)
+        } else {
+            scheme.primary.copy(alpha = if (dark) .20f else .12f)
+        },
+        indicatorBorderColor = if (activeGlass) {
+            Color.White.copy(alpha = if (dark) .24f else .72f)
+        } else {
+            Color.Transparent
+        },
+        indicatorShadow = if (activeGlass) 6.dp else 0.dp,'''
+          new_indicator = '''        indicatorColor = scheme.primary.copy(
+            alpha = if (activeGlass) {
+                if (dark) .18f else .12f
+            } else {
+                if (dark) .20f else .12f
+            },
+        ),
+        indicatorBorderColor = if (activeGlass) {
+            scheme.primary.copy(alpha = if (dark) .30f else .20f)
+        } else {
+            Color.Transparent
+        },
+        indicatorShadow = 0.dp,'''
+          if shell.count(old_indicator) != 1:
+              raise SystemExit('LuoShuAppShell.kt: selected indicator block not found')
+          shell_path.write_text(shell.replace(old_indicator, new_indicator, 1))
+
+          # Extend the regression contract for the exact screenshot failures.
+          test_path = root / 'scripts/font_library_ui_layout_test.sh'
+          test = test_path.read_text()
+          anchor = "grep -q 'if (page == AppPage.Studio)' \"$SHELL\"\n"
+          replacement = '''! grep -q 'if (page == AppPage.Studio)' "$SHELL"
+printf '%s\\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
+printf '%s\\n' "$MIUIX_DOCK" | grep -q 'scheme.primary.copy(alpha = if (dark) .30f else .20f)'
+grep -q 'align(Alignment.TopEnd)' "$STUDIO_ROUTE"
+grep -q 'statusBarsPadding()' "$STUDIO_ROUTE"
+! grep -q 'align(Alignment.BottomStart)' "$STUDIO_ROUTE"
+! grep -q 'item { MiuixFinalAction' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMiuix.kt"
+! grep -q 'item { MaterialFinalAction' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMaterial.kt"
+grep -q 'modifier = modifier.size(52.dp)' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
+'''
+          if anchor not in test:
+              raise SystemExit('font_library_ui_layout_test.sh: old Studio overlay assertion not found')
+          test_path.write_text(test.replace(anchor, replacement, 1))
+          PY
+
+          rm -f .github/workflows/apply-ui-overlap-hotfix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(ui): remove overlapping studio controls and dock artifact"
+          git push origin HEAD:agent/ui-interaction-v226
