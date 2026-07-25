@@ -1,0 +1,40 @@
+name: Debug metamodule compatibility
+
+on:
+  push:
+    branches:
+      - fix/metamodule-direct-source-regression
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run direct-source regression test
+        id: regression
+        shell: bash
+        run: |
+          set +e
+          sh scripts/mount_compat_direct_source_test.sh > direct-source-test.log 2>&1
+          status=$?
+          cat direct-source-test.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload direct-source trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: direct-source-test-trace
+          path: direct-source-test.log
+          if-no-files-found: error
+
+      - name: Fail when regression test failed
+        if: steps.regression.outputs.status != '0'
+        run: exit 1
