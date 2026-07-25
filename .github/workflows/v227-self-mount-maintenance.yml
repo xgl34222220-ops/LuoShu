@@ -14,6 +14,7 @@ on:
       - uninstall.sh
       - scripts/module_payload_manifest.txt
       - scripts/mount_compat_test.sh
+      - scripts/meta_module_sync_test.sh
       - scripts/self_mount_test.sh
       - scripts/uninstall_cleanup_test.sh
       - scripts/v2_source_audit.sh
@@ -28,23 +29,30 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Validate self-mount maintenance patch
-        shell: bash
+      - name: Shell syntax
         run: |
-          set -euo pipefail
           sh -n common/mount_compat.sh
           sh -n common/mount_compat_base.sh
           sh -n common/mount_self_fallback.sh
           sh -n common/mount_self_backend.sh
           sh -n post-mount.sh
           sh -n uninstall.sh
-          sh scripts/self_mount_test.sh
-          sh scripts/uninstall_cleanup_test.sh
-          sh scripts/mount_compat_test.sh
+      - name: Self-mount simulation
+        run: sh scripts/self_mount_test.sh
+      - name: Uninstall cleanup simulation
+        run: sh scripts/uninstall_cleanup_test.sh
+      - name: Mount compatibility regression
+        run: sh scripts/mount_compat_test.sh
+      - name: Standalone meta sync regression
+        run: sh scripts/meta_module_sync_test.sh
+      - name: Release payload manifest
+        run: |
           grep -qx 'common/mount_compat_base.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/mount_self_backend.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/mount_self_fallback.sh' scripts/module_payload_manifest.txt
           grep -qx 'post-mount.sh' scripts/module_payload_manifest.txt
+      - name: Loader and backend contracts
+        run: |
           grep -q 'mount_self_fallback.sh' common/mount_compat.sh
           grep -q 'mount_self_backend.sh' post-mount.sh
           grep -q -- '-t overlay KSU' common/mount_self_backend.sh
