@@ -95,7 +95,48 @@ sh -c '
     [ "$(sed -n "s/^backend=//p" "$MODDIR/config/self-mount.conf")" = external-mount ]
 ' sh "$ROOT"
 
+# The boot entry point must never call the self-mount backend when any external
+# metamodule owns mounting. This protects Mountify/Hybrid/Magic Mount from a
+# recursive OverlayFS stack during Android second-stage boot.
+POST_MODULE="$TMP/post-module"
+POST_CALLED="$TMP/post-mount-called"
+POST_FAKE_MOUNT="$TMP/post-fake-mount.sh"
+mkdir -p "$POST_MODULE/config" "$POST_MODULE/logs"
+ln -s "$ROOT/common" "$POST_MODULE/common"
+cp -f "$ROOT/post-mount.sh" "$POST_MODULE/post-mount.sh"
+printf 'Demo\n' > "$POST_MODULE/config/active_font.conf"
+cat > "$POST_FAKE_MOUNT" <<EOF_POST_FAKE
+#!/bin/sh
+printf 'called\n' > "$POST_CALLED"
+exit 1
+EOF_POST_FAKE
+chmod 0755 "$POST_FAKE_MOUNT"
+
+for engine in mountify hybrid-mount magic-mount meta-overlayfs; do
+    rm -f "$POST_CALLED" "$POST_MODULE/config/self-mount.conf"
+    KSU=1 LUOSHU_META_TEST_ENGINE="$engine" \
+    LUOSHU_SELF_MOUNT_COMMAND="$POST_FAKE_MOUNT" \
+    LUOSHU_SELF_MOUNT_STATE_ROOT="$TMP/post-state" \
+        sh "$POST_MODULE/post-mount.sh"
+    [ ! -e "$POST_CALLED" ]
+    [ "$(sed -n 's/^state=//p' "$POST_MODULE/config/self-mount.conf")" = delegated ]
+    [ "$(sed -n 's/^backend=//p' "$POST_MODULE/config/self-mount.conf")" = "external-$engine" ]
+done
+
+# Hybrid Mount v4 uses default_mode and allows a LuoShu-specific rule to override
+# the global mode. Validate the non-invasive parser used only for diagnostics.
+HYBRID_CFG="$TMP/hybrid-config.toml"
+cat > "$HYBRID_CFG" <<'EOF_HYBRID_CFG'
+default_mode = "overlay"
+
+[rules.LuoShu]
+default_mode = "magic"
+EOF_HYBRID_CFG
+HYBRID_MODE=$(sh -c '. "$1/common/mount_compat_policy.sh"; _luoshu_hybrid_mode_from_file "$2"' sh "$ROOT" "$HYBRID_CFG")
+[ "$HYBRID_MODE" = magic ]
+
 sh -n "$ROOT/common/mount_self_fallback.sh"
 sh -n "$ROOT/common/mount_self_backend.sh"
+sh -n "$ROOT/common/mount_compat_policy.sh"
 sh -n "$ROOT/post-mount.sh"
 echo 'LuoShu post-mount self-mount regression checks passed.'
