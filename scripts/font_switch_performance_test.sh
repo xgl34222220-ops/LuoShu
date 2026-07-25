@@ -15,8 +15,16 @@ grep -q 'LUOSHU_SWITCH_TIMEOUT_SECONDS:-110' "$ROOT/common/font_switch_task.sh"
 grep -q 'luoshu_start_detached' "$ROOT/common/font_switch_task.sh"
 grep -q 'mark_load_verification_pending' "$ROOT/common/font_switch_task.sh"
 grep -q 'luoshu_switch_perf_mark complete' "$ROOT/common/font_manager.sh"
-grep -q 'top = if (style == UiStyle.MIUIX) 38.dp else 14.dp' \
+grep -q 'MiuixTaskCenterHeader(' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
+grep -q 'DiagnosticExportButton(' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
+grep -q 'horizontalArrangement = Arrangement.spacedBy(10.dp)' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
+! grep -q 'top = if (style == UiStyle.MIUIX)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
+grep -q 'modifier.size(if (style == UiStyle.MIUIX) 56.dp else 52.dp)' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
 grep -q 'DeviceTrustLevel.SYSTEM' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceTrustUi.kt"
 grep -q 'DeviceTrustLevel.COMPATIBILITY' \
