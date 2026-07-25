@@ -46,14 +46,7 @@ elif command -v magisk >/dev/null 2>&1 || [ -d /data/adb/magisk ]; then
     ROOT_MANAGER="Magisk"
 fi
 ui_print "✓ Root：$ROOT_MANAGER"
-
-MOUNTIFY_ACTIVE=false
-if [ -d /data/adb/modules/mountify ] && [ ! -f /data/adb/modules/mountify/disable ] && [ ! -f /data/adb/modules/mountify/remove ]; then
-    MOUNTIFY_ACTIVE=true
-elif [ -d /data/adb/mountify ]; then
-    MOUNTIFY_ACTIVE=true
-fi
-[ "$MOUNTIFY_ACTIVE" = true ] && ui_print "✓ Mountify：已启用" || ui_print "• 元模块推荐：Mountify（可选）"
+ui_print "✓ 挂载：洛书私有自挂载"
 
 OLD_MOD="${LUOSHU_OLD_MOD:-/data/adb/modules/LuoShu}"
 mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" 2>/dev/null || true
