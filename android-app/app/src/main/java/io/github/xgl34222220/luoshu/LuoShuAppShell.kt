@@ -53,8 +53,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -379,21 +381,43 @@ private fun AppBackdrop(appearance: AppearanceSettings, dark: Boolean) {
             .fillMaxSize()
             .background(Brush.verticalGradient(base))
             .drawBehind {
-                if (miuix) return@drawBehind
-                drawRect(
-                    Brush.radialGradient(
-                        listOf(scheme.secondary.copy(alpha = if (dark) .13f else .20f), Color.Transparent),
-                        center = Offset(size.width * .9f, size.height * .06f),
-                        radius = size.width * .72f,
-                    ),
-                )
-                drawRect(
-                    Brush.radialGradient(
-                        listOf(scheme.primary.copy(alpha = if (dark) .10f else .16f), Color.Transparent),
-                        center = Offset(size.width * .02f, size.height * .54f),
-                        radius = size.width * .82f,
-                    ),
-                )
+                if (miuix) {
+                    // A subtle accent field behind the floating dock gives Haze real pixels to
+                    // sample instead of blurring a perfectly flat page background.
+                    drawRect(
+                        Brush.radialGradient(
+                            listOf(
+                                scheme.primary.copy(alpha = if (dark) .13f else .11f),
+                                scheme.secondary.copy(alpha = if (dark) .06f else .05f),
+                                Color.Transparent,
+                            ),
+                            center = Offset(size.width * .52f, size.height * 1.03f),
+                            radius = size.width * .88f,
+                        ),
+                    )
+                    drawRect(
+                        Brush.radialGradient(
+                            listOf(scheme.primary.copy(alpha = if (dark) .055f else .045f), Color.Transparent),
+                            center = Offset(size.width * .92f, size.height * .08f),
+                            radius = size.width * .58f,
+                        ),
+                    )
+                } else {
+                    drawRect(
+                        Brush.radialGradient(
+                            listOf(scheme.secondary.copy(alpha = if (dark) .13f else .20f), Color.Transparent),
+                            center = Offset(size.width * .9f, size.height * .06f),
+                            radius = size.width * .72f,
+                        ),
+                    )
+                    drawRect(
+                        Brush.radialGradient(
+                            listOf(scheme.primary.copy(alpha = if (dark) .10f else .16f), Color.Transparent),
+                            center = Offset(size.width * .02f, size.height * .54f),
+                            radius = size.width * .82f,
+                        ),
+                    )
+                }
             },
     )
 }
@@ -462,13 +486,33 @@ private fun MiuixAppDock(
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val floating = appearance.floatingDock
     val shape = if (floating) RoundedCornerShape(29.dp) else RoundedCornerShape(topStart = 29.dp, topEnd = 29.dp)
-    val activeHaze = appearance.blurEnabled && appearance.glassEnabled
+    val activeGlass = appearance.glassEnabled
+    val activeHaze = activeGlass && appearance.blurEnabled
     val hazeModifier = if (activeHaze) {
         Modifier.hazeEffect(state = hazeState, style = HazeMaterials.ultraThin()) {
-            blurRadius = 24.dp
-            noiseFactor = .035f
+            blurRadius = 36.dp
+            noiseFactor = .06f
         }
     } else Modifier
+    val glassBrush = when {
+        activeGlass && dark -> Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = .16f),
+                tokens.elevatedCardBackground.copy(alpha = .22f),
+                scheme.primary.copy(alpha = .10f),
+            ),
+        )
+        activeGlass -> Brush.verticalGradient(
+            listOf(
+                Color.White.copy(alpha = .72f),
+                Color.White.copy(alpha = .30f),
+                scheme.primary.copy(alpha = .10f),
+            ),
+        )
+        else -> Brush.verticalGradient(
+            listOf(tokens.elevatedCardBackground.copy(alpha = .98f), tokens.elevatedCardBackground.copy(alpha = .98f)),
+        )
+    }
 
     AppDockLayout(
         pages = dockPages,
@@ -478,16 +522,53 @@ private fun MiuixAppDock(
         modifier = modifier
             .then(if (floating) Modifier.padding(horizontal = 14.dp).padding(bottom = bottomInset + 8.dp) else Modifier)
             .fillMaxWidth()
-            .shadow(if (floating) 12.dp else 5.dp, shape, clip = false)
+            .shadow(if (floating) if (activeGlass) 20.dp else 12.dp else 5.dp, shape, clip = false)
             .clip(shape)
             .then(hazeModifier)
-            .background(
-                if (activeHaze) tokens.elevatedCardBackground.copy(alpha = if (dark) .48f else .66f)
-                else tokens.elevatedCardBackground.copy(alpha = .98f),
+            .background(glassBrush)
+            .drawBehind {
+                if (activeGlass) {
+                    val radius = 29.dp.toPx()
+                    drawRoundRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = if (dark) .34f else .90f),
+                                Color.Transparent,
+                                scheme.primary.copy(alpha = if (dark) .16f else .13f),
+                            ),
+                            start = Offset.Zero,
+                            end = Offset(size.width, size.height),
+                        ),
+                        cornerRadius = CornerRadius(radius, radius),
+                        style = Stroke(width = 1.2.dp.toPx()),
+                    )
+                    drawLine(
+                        color = Color.White.copy(alpha = if (dark) .24f else .68f),
+                        start = Offset(radius * .78f, 1.4.dp.toPx()),
+                        end = Offset(size.width - radius * .78f, 1.4.dp.toPx()),
+                        strokeWidth = .9.dp.toPx(),
+                    )
+                }
+            }
+            .border(
+                if (activeGlass) .7.dp else 1.dp,
+                if (activeGlass) {
+                    if (dark) Color.White.copy(alpha = .18f) else Color.White.copy(alpha = .76f)
+                } else if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .58f),
+                shape,
             )
-            .border(1.dp, if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .58f), shape)
             .padding(start = 5.dp, top = 5.dp, end = 5.dp, bottom = if (floating) 5.dp else bottomInset + 5.dp),
-        indicatorColor = scheme.primary.copy(alpha = if (dark) .20f else .12f),
+        indicatorColor = if (activeGlass) {
+            Color.White.copy(alpha = if (dark) .12f else .34f)
+        } else {
+            scheme.primary.copy(alpha = if (dark) .20f else .12f)
+        },
+        indicatorBorderColor = if (activeGlass) {
+            Color.White.copy(alpha = if (dark) .24f else .72f)
+        } else {
+            Color.Transparent
+        },
+        indicatorShadow = if (activeGlass) 6.dp else 0.dp,
         selectedColor = scheme.primary,
         unselectedColor = scheme.onSurfaceVariant.copy(alpha = .82f),
         label = "luoshuMiuixDockIndicator",
@@ -502,6 +583,8 @@ private fun AppDockLayout(
     itemHeight: androidx.compose.ui.unit.Dp,
     modifier: Modifier,
     indicatorColor: Color,
+    indicatorBorderColor: Color = Color.Transparent,
+    indicatorShadow: androidx.compose.ui.unit.Dp = 0.dp,
     selectedColor: Color,
     unselectedColor: Color,
     label: String,
@@ -519,8 +602,10 @@ private fun AppDockLayout(
                 .offset(x = indicatorX + 5.dp)
                 .width(itemWidth - 10.dp)
                 .height(itemHeight)
+                .shadow(indicatorShadow, RoundedCornerShape(20.dp), clip = false)
                 .clip(RoundedCornerShape(20.dp))
-                .background(indicatorColor),
+                .background(indicatorColor)
+                .border(1.dp, indicatorBorderColor, RoundedCornerShape(20.dp)),
         )
         Row(Modifier.fillMaxWidth()) {
             pages.forEach { page ->

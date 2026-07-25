@@ -12,6 +12,7 @@ LOGS_COMPACT="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/u
 STUDIO_ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioRoute.kt"
 OVERLAY="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 SHELL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
+SETTINGS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/settings/AppearanceSettingsScreen.kt"
 
 # Legacy style screens stay available as a rollback path while the routes use the
 # shared compact hierarchy.
@@ -58,7 +59,12 @@ grep -q 'fontSize = 11.sp' "$SHELL"
 grep -q 'private fun MiuixAppDock' "$SHELL"
 MIUIX_DOCK=$(sed -n '/private fun MiuixAppDock/,/private fun AppDockLayout/p' "$SHELL")
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'hazeEffect'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 24.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 36.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'activeGlass'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorBorderColor'
+grep -q '底栏液态玻璃效果' "$SETTINGS"
+grep -q '真实背景采样、折射高光与透明质感' "$SETTINGS"
 grep -q 'embedded: Boolean = false' "$OVERLAY"
 grep -q 'embedded = true' "$SHELL"
 grep -q 'libraryDockClearance' "$SHELL"
