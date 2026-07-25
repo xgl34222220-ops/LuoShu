@@ -14,11 +14,9 @@ def write(path: str, text: str) -> None:
 route_path = 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioRoute.kt'
 miuix_path = 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMiuix.kt'
 material_path = 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMaterial.kt'
-launcher_path = 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/StudioToolLauncher.kt'
 shell_path = 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt'
 test_path = 'scripts/font_library_ui_layout_test.sh'
 
-# Studio tools are a real child of the title header, never an overlay.
 route = read(route_path)
 old = '''    Box(Modifier.fillMaxSize()) {
         when (style) {
@@ -85,40 +83,7 @@ for path, screen, header, refresh_marker in [
     text = text.replace('bottom = 132.dp)', 'bottom = 24.dp)', 1)
     write(path, text)
 
-launcher = read(launcher_path)
-if 'io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens' not in launcher:
-    launcher = launcher.replace(
-        'import io.github.xgl34222220.luoshu.ui.appearance.UiStyle\n',
-        'import io.github.xgl34222220.luoshu.ui.appearance.UiStyle\nimport io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens\n',
-        1,
-    )
-old_bg = '''    val scheme = MaterialTheme.colorScheme
-    val background = if (enabled) {
-        scheme.surfaceContainerHigh.copy(alpha = if (style == UiStyle.MIUIX) .78f else .90f)
-    } else {
-        scheme.surfaceVariant.copy(alpha = .64f)
-    }
-'''
-new_bg = '''    val scheme = MaterialTheme.colorScheme
-    val tokens = LocalMiuixTokens.current
-    val background = when {
-        !enabled -> scheme.surfaceVariant.copy(alpha = .64f)
-        style == UiStyle.MIUIX -> tokens.elevatedCardBackground
-        else -> scheme.surfaceContainerHigh.copy(alpha = .84f)
-    }
-'''
-if old_bg not in launcher:
-    raise SystemExit('StudioToolLauncher.kt: background block not found')
-launcher = launcher.replace(old_bg, new_bg, 1)
-launcher = launcher.replace('shape = CircleShape,', 'shape = RoundedCornerShape(18.dp),', 1)
-old_shadow = '''        shadowElevation = if (enabled && style == UiStyle.MIUIX) 6.dp else 3.dp,
-        border = BorderStroke(1.dp, scheme.primary.copy(alpha = if (enabled) .13f else .05f)),'''
-if old_shadow not in launcher:
-    raise SystemExit('StudioToolLauncher.kt: shadow block not found')
-launcher = launcher.replace(old_shadow, '        shadowElevation = 7.dp,', 1)
-write(launcher_path, launcher)
-
-# Reserve a real viewport above the floating dock; padding inside LazyColumn is not enough.
+# The Studio viewport ends above the floating dock; no card is painted underneath it.
 shell = read(shell_path).replace('libraryDockClearance', 'dockClearance')
 old_studio = '''                        AppPage.Studio -> FontStudioRoute(
                             style = appearance.uiStyle,
@@ -138,7 +103,7 @@ if old_studio not in shell:
     raise SystemExit('LuoShuAppShell.kt: Studio route block not found')
 write(shell_path, shell.replace(old_studio, new_studio, 1))
 
-# Regression checks for the exact real-device layout failures.
+# Exact real-device regression contract.
 test = read(test_path)
 if 'STUDIO_TOOLS=' not in test:
     test = test.replace(
@@ -153,7 +118,7 @@ remove = (
     "! grep -q 'statusBarsPadding()'",
 )
 test = '\n'.join(line for line in test.splitlines() if not any(x in line for x in remove)) + '\n'
-checks = '''# Final screenshot regression: the two header actions share one Row and content
+checks = '''# Final screenshot regression: header actions share one Row and Studio content
 # is laid out above the floating dock.
 grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MIUIX"
 grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MATERIAL"
