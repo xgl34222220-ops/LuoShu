@@ -27,7 +27,7 @@ permissions:
 jobs:
   shell-regression:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
       - name: Shell syntax
@@ -43,8 +43,16 @@ jobs:
         run: sh scripts/self_mount_test.sh
       - name: Uninstall cleanup simulation
         run: sh scripts/uninstall_cleanup_test.sh
-      - name: Mount compatibility regression
-        run: sh scripts/mount_compat_test.sh
+      - name: Dual-directory mount regression
+        run: sh scripts/mount_compat_test.sh dual
+      - name: Direct-source mount regression
+        run: sh scripts/mount_compat_test.sh direct
+      - name: Mount copy timeout regression
+        run: sh scripts/mount_compat_test.sh timeout
+      - name: Mount conflict diagnostics
+        run: sh scripts/mount_compat_test.sh diagnostics
+      - name: Mount static contracts
+        run: sh scripts/mount_compat_test.sh static
       - name: Standalone meta sync regression
         run: sh scripts/meta_module_sync_test.sh
       - name: Release payload manifest
