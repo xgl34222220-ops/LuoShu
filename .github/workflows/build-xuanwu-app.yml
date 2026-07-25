@@ -6,6 +6,12 @@ on:
     paths:
       - 'tools/xuanwu-tombstone-app/**'
       - '.github/workflows/build-xuanwu-app.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'tools/xuanwu-tombstone-app/**'
+      - '.github/workflows/build-xuanwu-app.yml'
   workflow_dispatch:
 
 permissions:
