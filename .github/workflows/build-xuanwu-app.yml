@@ -42,9 +42,21 @@ jobs:
           base64 -d source.tar.gz.b64 | tar -xz -C build-src
       - name: Build unsigned release APK
         working-directory: tools/xuanwu-tombstone-app/build-src
-        run: gradle :app:assembleRelease --no-daemon --console=plain --quiet
+        run: |
+          set +e
+          gradle :app:assembleRelease --no-daemon --console=plain > build.log 2>&1
+          code=$?
+          echo "$code" > build.exit
+          tail -n 220 build.log
+          exit 0
       - uses: actions/upload-artifact@v4
         with:
-          name: xuanwu-tombstone-unsigned
-          path: tools/xuanwu-tombstone-app/build-src/app/build/outputs/apk/release/app-release-unsigned.apk
-          if-no-files-found: error
+          name: xuanwu-build-output
+          path: |
+            tools/xuanwu-tombstone-app/build-src/build.log
+            tools/xuanwu-tombstone-app/build-src/build.exit
+            tools/xuanwu-tombstone-app/build-src/app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: warn
+      - name: Check build result
+        working-directory: tools/xuanwu-tombstone-app/build-src
+        run: test "$(cat build.exit)" = '0'
