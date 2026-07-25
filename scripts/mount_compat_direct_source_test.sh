@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eux
+set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-direct-mount)
