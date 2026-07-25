@@ -17,11 +17,19 @@ material_path = 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/s
 shell_path = 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt'
 test_path = 'scripts/font_library_ui_layout_test.sh'
 
+# Remove the two-layer floating layout and pass the tools into the header itself.
 route = read(route_path)
 old = '''    Box(Modifier.fillMaxSize()) {
-        when (style) {
-            UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
-            UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .navigationBarsPadding()
+                .padding(bottom = 86.dp),
+        ) {
+            when (style) {
+                UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
+                UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
+            }
         }
 
         StudioToolLauncher(
@@ -33,7 +41,7 @@ old = '''    Box(Modifier.fillMaxSize()) {
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
-                .padding(end = 82.dp, top = 12.dp),
+                .padding(end = 82.dp, top = 24.dp),
         )
     }
 '''
@@ -52,7 +60,7 @@ new = '''    val studioTools: @Composable () -> Unit = {
     }
 '''
 if old not in route:
-    raise SystemExit('FontStudioRoute.kt: floating launcher block not found')
+    raise SystemExit('FontStudioRoute.kt: current floating layout block not found')
 write(route_path, route.replace(old, new, 1))
 
 for path, screen, header, refresh_marker in [
@@ -83,7 +91,7 @@ for path, screen, header, refresh_marker in [
     text = text.replace('bottom = 132.dp)', 'bottom = 24.dp)', 1)
     write(path, text)
 
-# The Studio viewport ends above the floating dock; no card is painted underneath it.
+# Give Studio a real viewport above the dock, just like the font library.
 shell = read(shell_path).replace('libraryDockClearance', 'dockClearance')
 old_studio = '''                        AppPage.Studio -> FontStudioRoute(
                             style = appearance.uiStyle,
@@ -103,7 +111,7 @@ if old_studio not in shell:
     raise SystemExit('LuoShuAppShell.kt: Studio route block not found')
 write(shell_path, shell.replace(old_studio, new_studio, 1))
 
-# Exact real-device regression contract.
+# Structural regression checks for the exact screenshots.
 test = read(test_path)
 if 'STUDIO_TOOLS=' not in test:
     test = test.replace(
@@ -128,6 +136,7 @@ grep -q 'bottom = 24.dp' "$STUDIO_MIUIX"
 grep -q 'bottom = 24.dp' "$STUDIO_MATERIAL"
 ! grep -q 'align(Alignment.TopEnd)' "$STUDIO_ROUTE"
 ! grep -q 'statusBarsPadding()' "$STUDIO_ROUTE"
+! grep -q 'navigationBarsPadding()' "$STUDIO_ROUTE"
 grep -q 'RoundedCornerShape(18.dp)' "$STUDIO_TOOLS"
 ! grep -q 'shape = CircleShape' "$STUDIO_TOOLS"
 grep -q 'padding(bottom = dockClearance)' "$SHELL"
