@@ -49,3 +49,8 @@ find "$ROOT/system" -type f -iname '*emoji*' -print -quit 2>/dev/null | grep -q 
 ! grep -q '^webroot=' "$ROOT/module.prop"
 grep -q 'native_font_index.json' "$ROOT/common/font_manager.sh"
 grep -q 'native_font_index.json' "$ROOT/service.sh"
+
+# 卸载脚本不能在删除阶段重新创建模块日志目录或写回持久文件。
+! grep -q 'mkdir -p .*MODDIR.*/logs' "$ROOT/uninstall.sh"
+! grep -q 'MODDIR/logs/.*>>' "$ROOT/uninstall.sh"
+sh "$ROOT/scripts/uninstall_cleanup_test.sh"
