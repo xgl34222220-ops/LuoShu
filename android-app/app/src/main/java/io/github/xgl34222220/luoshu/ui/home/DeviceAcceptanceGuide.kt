@@ -102,7 +102,7 @@ internal fun deviceAcceptanceAutoChecks(
         detail = if (trust.alignment == "verified" && trust.mode == "aligned") {
             "开机加载验证通过，当前为设备对齐模式"
         } else {
-            "等待开机加载验证；兼容模式不能视为真机验收完成"
+            "等待逐分区开机挂载验证；应用字体并完整重启后重新检测"
         },
         passed = trust.alignment == "verified" && trust.mode == "aligned",
         automatic = true,
@@ -110,7 +110,7 @@ internal fun deviceAcceptanceAutoChecks(
     DeviceAcceptanceCheck(
         id = "cache",
         title = "后台对齐缓存",
-        detail = if (trust.cachePending) "仍有对齐缓存等待生成" else "没有待处理的对齐缓存",
+        detail = if (trust.cachePending) "对齐缓存尚未生成；应用字体后会在后台自动建立" else "没有待处理的对齐缓存",
         passed = !trust.cachePending,
         automatic = true,
     ),
@@ -244,7 +244,7 @@ internal fun DeviceAcceptanceGuideDialog(
                         modifier = Modifier.size(17.dp),
                     )
                     Spacer(Modifier.size(6.dp))
-                    Text("测试矩阵与 v2.2.2 预发行门禁")
+                    Text("测试矩阵与当前版本预发行门禁")
                 }
                 Spacer(Modifier.size(8.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
