@@ -13,6 +13,7 @@ fi
 _lmcl_base="$_lmcl_module/common/mount_compat_base.sh"
 _lmcl_fallback="$_lmcl_module/common/mount_self_fallback.sh"
 _lmcl_policy="$_lmcl_module/common/mount_compat_policy.sh"
+_lmcl_private_policy="$_lmcl_module/common/private_mount_policy.sh"
 
 # When invoked as a CLI, source the base in a child shell whose $0 is not
 # mount_compat.sh so the legacy CLI footer cannot run before the overrides.
@@ -24,7 +25,8 @@ if [ "${0##*/}" = mount_compat.sh ]; then
         . "$1" || exit 1
         [ ! -f "$2" ] || . "$2"
         [ ! -f "$3" ] || . "$3"
-        case "$4" in
+        [ ! -f "$4" ] || . "$4"
+        case "$5" in
             status)
                 luoshu_mount_status_json
                 printf "\n"
@@ -35,18 +37,19 @@ if [ "${0##*/}" = mount_compat.sh ]; then
                 printf "warning=%s\n" "$(luoshu_mount_detection_warning)"
                 ;;
             verify)
-                luoshu_mount_verify_active "$5"
+                luoshu_mount_verify_active "$6"
                 ;;
             *)
                 printf "usage: %s {status|detect|verify [font]}\n" "$0" >&2
                 exit 2
                 ;;
         esac
-    ' sh "$_lmcl_base" "$_lmcl_fallback" "$_lmcl_policy" "$_lmcl_command" "$_lmcl_argument"
+    ' sh "$_lmcl_base" "$_lmcl_fallback" "$_lmcl_policy" "$_lmcl_private_policy" "$_lmcl_command" "$_lmcl_argument"
     exit $?
 fi
 
 [ -f "$_lmcl_base" ] && . "$_lmcl_base"
 [ -f "$_lmcl_fallback" ] && . "$_lmcl_fallback"
 [ -f "$_lmcl_policy" ] && . "$_lmcl_policy"
-unset _lmcl_module _lmcl_base _lmcl_fallback _lmcl_policy _lmcl_command _lmcl_argument
+[ -f "$_lmcl_private_policy" ] && . "$_lmcl_private_policy"
+unset _lmcl_module _lmcl_base _lmcl_fallback _lmcl_policy _lmcl_private_policy _lmcl_command _lmcl_argument
