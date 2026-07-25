@@ -1,0 +1,64 @@
+name: Apply acceptance guide cleanup
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/apply-acceptance-version-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ui-metamodule-integration-test
+          fetch-depth: 0
+      - name: Remove stale version labels and improve pending guidance
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          matrix = Path('android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceTestMatrix.kt')
+          text = matrix.read_text()
+          replacements = [
+              ('private const val DEVICE_MATRIX_TARGET_VERSION = "v2.2.2"\n', ''),
+              ('targetVersion: String = DEVICE_MATRIX_TARGET_VERSION,', "targetVersion: String = state.version.substringBefore('-').substringBefore('+'),"),
+              ('title = { Text("真机测试矩阵 · v2.2.2", fontWeight = FontWeight.Black) },', 'title = { Text("真机测试矩阵 · ${report.targetVersion}", fontWeight = FontWeight.Black) },'),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'DeviceTestMatrix.kt: expected one match: {old!r}')
+              text = text.replace(old, new, 1)
+          matrix.write_text(text)
+
+          guide = Path('android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceAcceptanceGuide.kt')
+          text = guide.read_text()
+          replacements = [
+              ('"等待开机加载验证；兼容模式不能视为真机验收完成"', '"等待逐分区开机挂载验证；应用字体并完整重启后重新检测"'),
+              ('detail = if (trust.cachePending) "仍有对齐缓存等待生成" else "没有待处理的对齐缓存",', 'detail = if (trust.cachePending) "对齐缓存尚未生成；应用字体后会在后台自动建立" else "没有待处理的对齐缓存",'),
+              ('Text("测试矩阵与 v2.2.2 预发行门禁")', 'Text("测试矩阵与当前版本预发行门禁")'),
+          ]
+          for old, new in replacements:
+              if text.count(old) != 1:
+                  raise SystemExit(f'DeviceAcceptanceGuide.kt: expected one match: {old!r}')
+              text = text.replace(old, new, 1)
+          guide.write_text(text)
+          PY
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/locate-stale-version.yml
+          rm -f .github/workflows/apply-acceptance-version-fix.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(ui): make acceptance gate version-aware"
+          git push origin HEAD:agent/ui-metamodule-integration-test
