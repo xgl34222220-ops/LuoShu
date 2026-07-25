@@ -1,3 +1,4 @@
+# One-time cleanup run. This file deletes itself after success.
 name: Cleanup non-stable refs
 
 on:
