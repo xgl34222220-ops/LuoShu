@@ -42,3 +42,47 @@ jobs:
           grep -q 'mount_self_fallback.sh' common/font_config_partitions.sh
           grep -q 'mount_self_backend.sh' post-mount.sh
           grep -q -- '-t overlay KSU' common/mount_self_backend.sh
+
+  build-test-module:
+    needs: shell-regression
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install module build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - name: Prepare ARM64 composite runtime
+        shell: bash
+        run: |
+          if [[ ! -x common/python/bin/luoshu-python ]]; then
+            sh scripts/prepare_composite_runtime.sh
+          fi
+      - name: Reuse signed v2.2.7 App and build test module
+        shell: bash
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/LuoShu-App-v2.2.7.apk"
+          curl -fL --retry 3 \
+            'https://github.com/xgl34222220-ops/LuoShu/releases/download/v2.2.7/LuoShu-App-v2.2.7.apk' \
+            -o "$app"
+          LUOSHU_APP_APK="$app" \
+          LUOSHU_APP_PACKAGE='io.github.xgl34222220.luoshu' \
+          LUOSHU_APP_VERSION_CODE='2020701' \
+            sh scripts/build.sh
+          cp -f dist/LuoShu-v2.2.7.zip dist/LuoShu-v2.2.7-self-mount-test.zip
+          sha256sum dist/LuoShu-v2.2.7-self-mount-test.zip \
+            > dist/LuoShu-v2.2.7-self-mount-test.zip.sha256
+          unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'post-mount.sh'
+          unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/mount_self_backend.sh'
+          unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/mount_self_fallback.sh'
+      - name: Upload v2.2.7 self-mount test module
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-v2.2.7-self-mount-test
+          path: |
+            dist/LuoShu-v2.2.7-self-mount-test.zip
+            dist/LuoShu-v2.2.7-self-mount-test.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
