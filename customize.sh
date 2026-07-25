@@ -4,9 +4,13 @@
 set +e
 MODPATH="${MODPATH:-$3}"
 LUOSHU_OLD_MOD="${LUOSHU_OLD_MOD:-/data/adb/modules/LuoShu}"
+_lc_source_dir=$(CDPATH= cd -- "${0%/*}" 2>/dev/null && pwd)
 _lc_base="$MODPATH/.luoshu-runtime/customize-v227.sh"
+_lc_helper="$MODPATH/common/private_payload.sh"
+[ -f "$_lc_base" ] || _lc_base="$_lc_source_dir/.luoshu-runtime/customize-v227.sh"
+[ -f "$_lc_helper" ] || _lc_helper="$_lc_source_dir/common/private_payload.sh"
 _lc_temp="$MODPATH/.customize-v227.$$.sh"
-[ -f "$MODPATH/common/private_payload.sh" ] && . "$MODPATH/common/private_payload.sh"
+[ -f "$_lc_helper" ] && . "$_lc_helper"
 
 # Existing private-payload installations are exposed only for the duration of
 # the old v2.2.7 update migrator, then hidden again.
@@ -18,6 +22,8 @@ fi
 # Static regression contracts retained from the verified installer:
 # for _enable_dir in "$MODPATH" "$OLD_MOD"
 # rm -f "$_enable_dir/disable"
+# luoshu_cli.sh is deployed to system/bin/洛书 by the verified v2.2.7 installer.
+[ -f "$_lc_base" ] || abort '缺少洛书 v2.2.7 安装核心'
 sed '$d' "$_lc_base" > "$_lc_temp" 2>/dev/null || abort '安装入口准备失败'
 . "$_lc_temp"
 _lc_rc=$?
