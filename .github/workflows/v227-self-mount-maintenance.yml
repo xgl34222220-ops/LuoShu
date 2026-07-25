@@ -104,6 +104,16 @@ jobs:
           if [[ ! -x common/python/bin/luoshu-python ]]; then
             sh scripts/prepare_composite_runtime.sh
           fi
+      - name: Font validation cache regression
+        run: sh scripts/font_validation_cache_test.sh
+      - name: Font library layout regression
+        run: sh scripts/font_library_ui_layout_test.sh
+      - name: Stability regression
+        run: sh scripts/stability_test.sh
+      - name: Font library cache regression
+        run: sh scripts/font_library_cache_test.sh
+      - name: Bundled App installer regression
+        run: sh scripts/app_installer_test.sh
       - name: Run complete source checks
         id: source_check
         continue-on-error: true
