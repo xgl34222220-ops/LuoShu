@@ -1,5 +1,6 @@
 #!/system/bin/sh
 # LuoShu early-boot wrapper around the verified v2.2.7 initializer.
+# Delegated core consumes font-payload-rebuild-pending.conf before the payload is hidden.
 set +e
 MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
