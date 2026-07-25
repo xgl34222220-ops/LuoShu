@@ -11,6 +11,7 @@ on:
       - common/rom_adapters.sh
       - common/device_font_payload_policy.sh
       - customize.sh
+      - .luoshu-runtime/customize-v227.sh
       - scripts/font_inventory_test.py
       - scripts/font_inventory_scan_test.py
       - scripts/font_inventory_scan_v3_test.py
@@ -42,12 +43,16 @@ jobs:
           python3 scripts/font_metrics_normalization_test.py
       - name: Validate install-stage and fallback contracts
         run: |
+          set -eu
+          INSTALLER='.luoshu-runtime/customize-v227.sh'
           sh -n customize.sh
+          sh -n "$INSTALLER"
           sh -n common/rom_adapters.sh
           sh -n common/device_font_payload_policy.sh
-          grep -q 'FONT_INVENTORY_SCRIPT=.*font_inventory_scan.py' customize.sh
-          grep -q 'stockFontFileCount' customize.sh
-          grep -q '"$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan' customize.sh
+          grep -q 'luoshu_private_install_migrate' customize.sh
+          grep -q 'FONT_INVENTORY_SCRIPT=.*font_inventory_scan.py' "$INSTALLER"
+          grep -q 'stockFontFileCount' "$INSTALLER"
+          grep -q '"$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan' "$INSTALLER"
           grep -q 'font_inventory_scan_v3' common/font_inventory_scan.py
           grep -q '_copy_as_inventory' common/rom_adapters.sh
           grep -q '_copy_as_inventory.*_dfabr' common/device_font_payload_policy.sh || grep -q '_copy_as_inventory' common/device_font_payload_policy.sh
@@ -55,3 +60,4 @@ jobs:
           grep -qx 'common/font_inventory.py' scripts/module_payload_manifest.txt
           grep -qx 'common/font_inventory_scan.py' scripts/module_payload_manifest.txt
           grep -qx 'common/font_inventory_scan_v3.py' scripts/module_payload_manifest.txt
+          grep -qx '.luoshu-runtime' scripts/module_payload_manifest.txt
