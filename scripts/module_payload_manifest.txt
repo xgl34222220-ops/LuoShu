@@ -1,5 +1,6 @@
 # Explicit release payload. New runtime files must be reviewed and listed here.
 # Standard partition payloads are migrated into .luoshu-payload during installation.
+# Thin wrappers preserve the verified v2.2.7 cores under .luoshu-runtime.
 common/app_bridge.sh
 common/app_installer.sh
 common/background_task.sh
