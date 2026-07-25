@@ -6,12 +6,14 @@ on:
       - maintenance/v2.2.7
     paths:
       - common/mount_compat.sh
+      - common/mount_compat_base.sh
       - common/mount_self_backend.sh
       - common/mount_self_fallback.sh
       - common/font_config_partitions.sh
       - post-mount.sh
       - uninstall.sh
       - scripts/module_payload_manifest.txt
+      - scripts/mount_compat_test.sh
       - scripts/self_mount_test.sh
       - scripts/uninstall_cleanup_test.sh
       - scripts/v2_source_audit.sh
@@ -30,16 +32,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sh -n common/mount_compat.sh
+          sh -n common/mount_compat_base.sh
           sh -n common/mount_self_fallback.sh
           sh -n common/mount_self_backend.sh
           sh -n post-mount.sh
           sh -n uninstall.sh
           sh scripts/self_mount_test.sh
           sh scripts/uninstall_cleanup_test.sh
+          sh scripts/mount_compat_test.sh
+          grep -qx 'common/mount_compat_base.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/mount_self_backend.sh' scripts/module_payload_manifest.txt
           grep -qx 'common/mount_self_fallback.sh' scripts/module_payload_manifest.txt
           grep -qx 'post-mount.sh' scripts/module_payload_manifest.txt
-          grep -q 'mount_self_fallback.sh' common/font_config_partitions.sh
+          grep -q 'mount_self_fallback.sh' common/mount_compat.sh
           grep -q 'mount_self_backend.sh' post-mount.sh
           grep -q -- '-t overlay KSU' common/mount_self_backend.sh
 
@@ -59,6 +65,18 @@ jobs:
           if [[ ! -x common/python/bin/luoshu-python ]]; then
             sh scripts/prepare_composite_runtime.sh
           fi
+      - name: Run complete source checks
+        shell: bash
+        run: |
+          set +e
+          sh scripts/check.sh > "$RUNNER_TEMP/source-check.log" 2>&1
+          rc=$?
+          if [[ $rc -ne 0 ]]; then
+            echo '=== source check failure ==='
+            tail -n 160 "$RUNNER_TEMP/source-check.log"
+            exit $rc
+          fi
+          tail -n 30 "$RUNNER_TEMP/source-check.log"
       - name: Reuse signed v2.2.7 App and build test module
         shell: bash
         run: |
@@ -67,14 +85,24 @@ jobs:
           curl -fL --retry 3 \
             'https://github.com/xgl34222220-ops/LuoShu/releases/download/v2.2.7/LuoShu-App-v2.2.7.apk' \
             -o "$app"
+          set +e
           LUOSHU_APP_APK="$app" \
           LUOSHU_APP_PACKAGE='io.github.xgl34222220.luoshu' \
           LUOSHU_APP_VERSION_CODE='2020701' \
-            sh scripts/build.sh
+            sh scripts/build.sh > "$RUNNER_TEMP/module-build.log" 2>&1
+          rc=$?
+          if [[ $rc -ne 0 ]]; then
+            echo '=== module build failure ==='
+            tail -n 160 "$RUNNER_TEMP/module-build.log"
+            exit $rc
+          fi
+          set -e
+          tail -n 30 "$RUNNER_TEMP/module-build.log"
           cp -f dist/LuoShu-v2.2.7.zip dist/LuoShu-v2.2.7-self-mount-test.zip
           sha256sum dist/LuoShu-v2.2.7-self-mount-test.zip \
             > dist/LuoShu-v2.2.7-self-mount-test.zip.sha256
           unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'post-mount.sh'
+          unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/mount_compat_base.sh'
           unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/mount_self_backend.sh'
           unzip -Z1 dist/LuoShu-v2.2.7-self-mount-test.zip | grep -qx 'common/mount_self_fallback.sh'
       - name: Upload v2.2.7 self-mount test module
