@@ -21,14 +21,17 @@ new_module() {
     printf 'product-a' > "$MODULE/product/fonts/Test.ttf"
 }
 
-case_dual_directory() {
-    new_module dual
-
+sync_dual() {
     MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=meta-overlayfs \
     LUOSHU_META_TEST_ROOT="$META" sh -c '
         . "$MODDIR/common/mount_compat.sh"
         luoshu_sync_mount_payload Demo
     '
+}
+
+case_dual_sync() {
+    new_module dual-sync
+    sync_dual
     test -f "$META/LuoShu/system/fonts/Roboto-Regular.ttf"
     test -f "$META/LuoShu/product/fonts/Test.ttf"
     test -f "$META/LuoShu/system/etc/luoshu/mount-probe.conf"
@@ -36,18 +39,22 @@ case_dual_directory() {
     grep -q '^engine=meta-overlayfs$' "$MODULE/config/mount_compat.conf"
     grep -q '^state=prepared$' "$MODULE/config/mount_compat.conf"
     grep -q '^partitions=system,product$' "$MODULE/config/mount_compat.conf"
+}
 
+case_dual_replace() {
+    new_module dual-replace
+    sync_dual
     rm -f "$MODULE/system/fonts/Roboto-Regular.ttf"
     printf stale > "$META/LuoShu/system/fonts/Old.ttf"
-    MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=meta-overlayfs \
-    LUOSHU_META_TEST_ROOT="$META" sh -c '
-        . "$MODDIR/common/mount_compat.sh"
-        luoshu_sync_mount_payload Demo
-    '
+    sync_dual
     test ! -e "$META/LuoShu/system/fonts/Old.ttf"
     test ! -e "$META/LuoShu/system/fonts/Roboto-Regular.ttf"
     test -s "$META/LuoShu/system/etc/luoshu/mount-probe.conf"
+}
 
+case_dual_verify() {
+    new_module dual-verify
+    sync_dual
     mkdir -p "$VISIBLE/system/etc/luoshu" "$VISIBLE/product/etc/luoshu"
     cp "$MODULE/system/etc/luoshu/mount-probe.conf" "$VISIBLE/system/etc/luoshu/mount-probe.conf"
     cp "$MODULE/product/etc/luoshu/mount-probe.conf" "$VISIBLE/product/etc/luoshu/mount-probe.conf"
@@ -69,14 +76,13 @@ case_dual_directory() {
     fi
     grep -q '^state=unverified$' "$MODULE/config/mount_compat.conf"
     grep -q '^failedPartitions=product$' "$MODULE/config/mount_compat.conf"
+}
 
+case_dual_unsupported() {
+    new_module dual-unsupported
     mkdir -p "$MODULE/my_product/fonts"
     printf vendor-font > "$MODULE/my_product/fonts/Oem.ttf"
-    if MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=meta-overlayfs \
-       LUOSHU_META_TEST_ROOT="$META" sh -c '
-        . "$MODDIR/common/mount_compat.sh"
-        luoshu_sync_mount_payload Demo
-    '; then
+    if sync_dual; then
         echo 'unsupported meta-overlayfs partition unexpectedly succeeded' >&2
         exit 1
     fi
@@ -213,7 +219,10 @@ case_static_contracts() {
 
 run_case() {
     case "$1" in
-        dual) case_dual_directory ;;
+        dual-sync) case_dual_sync ;;
+        dual-replace) case_dual_replace ;;
+        dual-verify) case_dual_verify ;;
+        dual-unsupported) case_dual_unsupported ;;
         direct) case_direct_source ;;
         timeout) case_timeout ;;
         diagnostics) case_diagnostics ;;
@@ -224,7 +233,7 @@ run_case() {
 }
 
 if [ "$CASE_NAME" = all ]; then
-    for _case in dual direct timeout diagnostics static; do
+    for _case in dual-sync dual-replace dual-verify dual-unsupported direct timeout diagnostics static; do
         run_case "$_case"
     done
 else
