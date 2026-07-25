@@ -157,8 +157,8 @@ private fun AppearanceSettingsMiuix(
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
                     MiuixSwitchRow("Monet 动态取色", "跟随系统壁纸强调色", settings.monetEnabled, actions.setMonetEnabled)
                     MiuixSwitchRow("纯黑深色模式", "深色时使用 AMOLED 黑色背景", settings.amoledBlack, actions.setAmoledBlack)
-                    MiuixSwitchRow("玻璃半透明", "控制悬浮层透明质感", settings.glassEnabled, actions.setGlassEnabled)
-                    MiuixSwitchRow("背景模糊", "使用 Haze 模糊悬浮底栏背景", settings.blurEnabled, actions.setBlurEnabled, settings.glassEnabled)
+                    MiuixSwitchRow("底栏液态玻璃效果", "真实背景采样、折射高光与透明质感", settings.glassEnabled, actions.setGlassEnabled)
+                    MiuixSwitchRow("背景模糊", "模糊液态玻璃后方的页面内容", settings.blurEnabled, actions.setBlurEnabled, settings.glassEnabled)
                     MiuixSwitchRow("悬浮底栏", "关闭后底栏贴合屏幕底部", settings.floatingDock, actions.setFloatingDock)
                 }
             }

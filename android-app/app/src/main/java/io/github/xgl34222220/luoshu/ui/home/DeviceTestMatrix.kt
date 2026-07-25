@@ -54,7 +54,6 @@ import org.json.JSONObject
 
 private const val DEVICE_MATRIX_SCHEMA = 1
 private const val DEVICE_MATRIX_TYPE = "luoshu-device-test-matrix"
-private const val DEVICE_MATRIX_TARGET_VERSION = "v2.2.2"
 private const val DEVICE_MATRIX_MAX_RECORDS = 24
 private const val DEVICE_MATRIX_MAX_NOTE = 200
 
@@ -154,7 +153,7 @@ internal fun buildPreReleaseReadinessReport(
     trust: DeviceTrustState,
     checks: List<DeviceAcceptanceCheck>,
     records: List<DeviceTestMatrixRecord>,
-    targetVersion: String = DEVICE_MATRIX_TARGET_VERSION,
+    targetVersion: String = state.version.substringBefore('-').substringBefore('+'),
     now: Long = System.currentTimeMillis(),
 ): PreReleaseReadinessReport {
     val acceptanceReady = checks.isNotEmpty() && checks.all { it.passed }
@@ -338,7 +337,7 @@ internal fun DeviceTestMatrixDialog(
                 tint = if (report.ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
             )
         },
-        title = { Text("真机测试矩阵 · v2.2.2", fontWeight = FontWeight.Black) },
+        title = { Text("真机测试矩阵 · ${report.targetVersion}", fontWeight = FontWeight.Black) },
         text = {
             LazyColumn(
                 modifier = Modifier.fillMaxWidth().heightIn(max = 650.dp),

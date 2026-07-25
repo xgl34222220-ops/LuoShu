@@ -53,13 +53,14 @@ import kotlin.math.roundToInt
 internal fun FontStudioScreenMaterial(
     state: FontStudioUiState,
     actions: FontStudioActions,
+    topAction: @Composable () -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 132.dp),
+        contentPadding = PaddingValues(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item { MaterialStudioHeader(state.loading, actions.refresh) }
+        item { MaterialStudioHeader(state.loading, actions.refresh, topAction) }
         item { MaterialCompositionOverview(state) }
 
         if (state.loading) {
@@ -84,7 +85,7 @@ internal fun FontStudioScreenMaterial(
 }
 
 @Composable
-private fun MaterialStudioHeader(loading: Boolean, onRefresh: () -> Unit) {
+private fun MaterialStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAction: @Composable () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -101,6 +102,8 @@ private fun MaterialStudioHeader(loading: Boolean, onRefresh: () -> Unit) {
             Text("字体组合", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
             Text("中文、英文、数字与完整设计轴", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
+        topAction()
+        Spacer(Modifier.width(10.dp))
         Surface(
             shape = MaterialTheme.shapes.large,
             color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .84f),

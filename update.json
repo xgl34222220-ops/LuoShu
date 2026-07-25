@@ -1,6 +1,6 @@
 {
-  "version": "v2.2.4",
-  "versionCode": 20204,
-  "zipUrl": "https://github.com/xgl34222220-ops/LuoShu/releases/download/v2.2.4/LuoShu-v2.2.4.zip",
-  "changelog": "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/main/CHANGELOG.md"
+  "version": "v2.2.5",
+  "versionCode": 20205,
+  "zipUrl": "https://github.com/xgl34222220-ops/LuoShu/releases/download/v2.2.5/LuoShu-v2.2.5.zip",
+  "changelog": "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/main/RELEASE_NOTES_v2.2.5.md"
 }

@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -72,23 +73,18 @@ internal fun FontStudioRoute(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        when (style) {
-            UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
-            UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
-        }
-
+    val studioTools: @Composable () -> Unit = {
         StudioToolLauncher(
             style = style,
             enabled = state.hasFonts && !state.loading,
             onPreview = { showCompositePreview = true },
             onProfile = { showProfileTransfer = true },
             onGlyphs = { showGlyphBrowser = true },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .navigationBarsPadding()
-                .padding(end = 82.dp, bottom = 98.dp),
         )
+    }
+    when (style) {
+        UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions, studioTools)
+        UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions, studioTools)
     }
 
     if (showCompositePreview) {

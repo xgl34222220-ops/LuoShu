@@ -51,19 +51,20 @@ class DeviceTestMatrixTest {
     }
 
     @Test
-    fun prereleaseReportBlocksOldVersionAndAcceptsTargetCandidate() {
+    fun prereleaseReportSupportsExplicitAndCurrentCandidateTargets() {
         val oldState = readyState(version = "v2.2.1")
         val oldReport = buildPreReleaseReadinessReport(
             state = oldState,
             trust = trust,
             checks = passedChecks,
             records = emptyList(),
+            targetVersion = "v2.2.2",
             now = 2000L,
         )
         assertFalse(oldReport.ready)
         assertTrue(oldReport.checks.any { it.id == "version" && it.severity == PreReleaseGateSeverity.BLOCKER })
 
-        val candidateState = readyState(version = "v2.2.2-alpha1")
+        val candidateState = readyState(version = "v2.2.4-alpha1")
         val record = buildDeviceTestMatrixRecord(candidateState, trust, passedChecks, "", 1000L, 36)
         val readyReport = buildPreReleaseReadinessReport(
             state = candidateState,
@@ -73,6 +74,7 @@ class DeviceTestMatrixTest {
             now = 2000L,
         )
 
+        assertEquals("v2.2.4", readyReport.targetVersion)
         assertTrue(readyReport.ready)
         assertEquals(0, readyReport.blockerCount)
         assertTrue(readyReport.warningCount >= 1)
@@ -95,7 +97,7 @@ class DeviceTestMatrixTest {
     }
 
     private fun readyState(
-        version: String = "v2.2.2-alpha1",
+        version: String = "v2.2.4-alpha1",
         currentFont: String = "自定义字体",
     ): HomeUiState = HomeUiState(
         version = version,
