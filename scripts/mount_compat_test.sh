@@ -12,6 +12,7 @@ mkdir -p "$MODULE/common" "$MODULE/system/fonts" "$MODULE/product/fonts" "$MODUL
 cp "$ROOT/common/mount_compat.sh" "$MODULE/common/mount_compat.sh"
 cp "$ROOT/common/mount_compat_base.sh" "$MODULE/common/mount_compat_base.sh"
 cp "$ROOT/common/mount_self_fallback.sh" "$MODULE/common/mount_self_fallback.sh"
+cp "$ROOT/common/mount_compat_policy.sh" "$MODULE/common/mount_compat_policy.sh"
 printf 'id=LuoShu\nversion=v2.2.7\nversionCode=20207\n' > "$MODULE/module.prop"
 printf 'font-a' > "$MODULE/system/fonts/Roboto-Regular.ttf"
 printf 'product-a' > "$MODULE/product/fonts/Test.ttf"
@@ -186,6 +187,7 @@ rm -rf "$STAGE/.git" "$STAGE/dist" "$STAGE/common/python" 2>/dev/null || true
 ! find "$STAGE" -type f \( -name skip_mount -o -name skip_mountify \) | grep -q .
 sh -n "$ROOT/common/mount_compat.sh"
 sh -n "$ROOT/common/mount_compat_base.sh"
+sh -n "$ROOT/common/mount_compat_policy.sh"
 sh -n "$ROOT/common/mount_self_fallback.sh"
 sh -n "$ROOT/common/font_mix.sh"
 sh -n "$ROOT/common/app_bridge.sh"
