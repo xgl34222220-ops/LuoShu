@@ -1,0 +1,242 @@
+name: Apply final real-layout UI fix
+
+on:
+  push:
+    branches:
+      - agent/ui-interaction-v226
+    paths:
+      - .github/workflows/apply-ui-layout-final.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ui-interaction-v226
+          fetch-depth: 0
+
+      - name: Integrate studio controls and reserve dock space
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          root = Path('.')
+
+          def read(path):
+              return (root / path).read_text()
+
+          def write(path, text):
+              (root / path).write_text(text)
+
+          def replace_once(path, old, new):
+              text = read(path)
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}: {old[:100]!r}')
+              write(path, text.replace(old, new, 1))
+
+          route_path = 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioRoute.kt'
+          miuix_path = 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMiuix.kt'
+          material_path = 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMaterial.kt'
+          launcher_path = 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/StudioToolLauncher.kt'
+          shell_path = 'android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt'
+          test_path = 'scripts/font_library_ui_layout_test.sh'
+
+          # 1) The tool button must be part of the same header Row as refresh.
+          route = read(route_path)
+          old_route = '''    Box(Modifier.fillMaxSize()) {
+              when (style) {
+                  UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
+                  UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions)
+              }
+
+              StudioToolLauncher(
+                  style = style,
+                  enabled = state.hasFonts && !state.loading,
+                  onPreview = { showCompositePreview = true },
+                  onProfile = { showProfileTransfer = true },
+                  onGlyphs = { showGlyphBrowser = true },
+                  modifier = Modifier
+                      .align(Alignment.TopEnd)
+                      .statusBarsPadding()
+                      .padding(end = 82.dp, top = 12.dp),
+              )
+          }
+          '''
+          new_route = '''    val studioTools: @Composable () -> Unit = {
+              StudioToolLauncher(
+                  style = style,
+                  enabled = state.hasFonts && !state.loading,
+                  onPreview = { showCompositePreview = true },
+                  onProfile = { showProfileTransfer = true },
+                  onGlyphs = { showGlyphBrowser = true },
+              )
+          }
+          when (style) {
+              UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions, studioTools)
+              UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions, studioTools)
+          }
+          '''
+          if old_route not in route:
+              raise SystemExit('FontStudioRoute.kt: floating launcher block not found')
+          write(route_path, route.replace(old_route, new_route, 1))
+
+          # 2) Both headers own the tool action and refresh button in one Row.
+          for path, screen_name, header_name in [
+              (miuix_path, 'FontStudioScreenMiuix', 'MiuixStudioHeader'),
+              (material_path, 'FontStudioScreenMaterial', 'MaterialStudioHeader'),
+          ]:
+              text = read(path)
+              text = text.replace(
+                  f'''internal fun {screen_name}(\n    state: FontStudioUiState,\n    actions: FontStudioActions,\n) {{''',
+                  f'''internal fun {screen_name}(\n    state: FontStudioUiState,\n    actions: FontStudioActions,\n    topAction: @Composable () -> Unit,\n) {{''',
+                  1,
+              )
+              text = text.replace(
+                  f'item {{ {header_name}(state.loading, actions.refresh) }}',
+                  f'item {{ {header_name}(state.loading, actions.refresh, topAction) }}',
+                  1,
+              )
+              text = text.replace(
+                  f'private fun {header_name}(loading: Boolean, onRefresh: () -> Unit) {{',
+                  f'private fun {header_name}(loading: Boolean, onRefresh: () -> Unit, topAction: @Composable () -> Unit) {{',
+                  1,
+              )
+              marker = '        Column(Modifier.weight(1f)) {'
+              if marker not in text:
+                  raise SystemExit(f'{path}: header title column not found')
+              # Insert the action immediately before the refresh surface/card.
+              refresh_marker = '        Card(\n' if path == miuix_path else '        Surface(\n'
+              idx = text.find(refresh_marker, text.find(f'private fun {header_name}'))
+              if idx < 0:
+                  raise SystemExit(f'{path}: refresh control not found')
+              text = text[:idx] + '        topAction()\n        Spacer(Modifier.width(10.dp))\n' + text[idx:]
+              text = text.replace('bottom = 132.dp)', 'bottom = 24.dp)', 1)
+              write(path, text)
+
+          # 3) Match the tool launcher to the refresh control; no floating circle or extra border.
+          launcher = read(launcher_path)
+          if 'io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens' not in launcher:
+              launcher = launcher.replace(
+                  'import io.github.xgl34222220.luoshu.ui.appearance.UiStyle\n',
+                  'import io.github.xgl34222220.luoshu.ui.appearance.UiStyle\nimport io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens\n',
+                  1,
+              )
+          launcher = launcher.replace(
+              '''    val scheme = MaterialTheme.colorScheme
+              val background = if (enabled) {
+                  scheme.surfaceContainerHigh.copy(alpha = if (style == UiStyle.MIUIX) .78f else .90f)
+              } else {
+                  scheme.surfaceVariant.copy(alpha = .64f)
+              }
+          ''',
+              '''    val scheme = MaterialTheme.colorScheme
+              val tokens = LocalMiuixTokens.current
+              val background = when {
+                  !enabled -> scheme.surfaceVariant.copy(alpha = .64f)
+                  style == UiStyle.MIUIX -> tokens.elevatedCardBackground
+                  else -> scheme.surfaceContainerHigh.copy(alpha = .84f)
+              }
+          ''',
+              1,
+          )
+          launcher = launcher.replace('shape = CircleShape,', 'shape = RoundedCornerShape(18.dp),', 1)
+          launcher = launcher.replace(
+              'shadowElevation = if (enabled && style == UiStyle.MIUIX) 6.dp else 3.dp,\n        border = BorderStroke(1.dp, scheme.primary.copy(alpha = if (enabled) .13f else .05f)),',
+              'shadowElevation = 7.dp,',
+              1,
+          )
+          write(launcher_path, launcher)
+
+          # 4) The page viewport itself ends above the floating dock; content is never drawn under it.
+          shell = read(shell_path)
+          shell = shell.replace('libraryDockClearance', 'dockClearance')
+          old_studio = '''                        AppPage.Studio -> FontStudioRoute(
+                              style = appearance.uiStyle,
+                              state = viewModel.toFontStudioUiState(features),
+                              actions = studioActions,
+                          )'''
+          new_studio = '''                        AppPage.Studio -> Box(
+                              modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
+                          ) {
+                              FontStudioRoute(
+                                  style = appearance.uiStyle,
+                                  state = viewModel.toFontStudioUiState(features),
+                                  actions = studioActions,
+                              )
+                          }'''
+          if old_studio not in shell:
+              raise SystemExit('LuoShuAppShell.kt: Studio route block not found')
+          write(shell_path, shell.replace(old_studio, new_studio, 1))
+
+          # 5) Remove stale acceptance-wizard wording and make pending states actionable.
+          replacements = {
+              '测试矩阵与 v2.2.2 预发行门禁': '测试矩阵与当前版本预发行门禁',
+              '等待开机加载验证；兼容模式不能视为真机验收完成': '等待逐分区开机挂载验证；应用字体并完整重启后重新检测',
+              '仍有对齐缓存等待生成': '对齐缓存尚未生成；应用字体后将自动建立',
+          }
+          found = {key: 0 for key in replacements}
+          for path in (root / 'android-app').rglob('*.kt'):
+              text = path.read_text()
+              original = text
+              for old, new in replacements.items():
+                  count = text.count(old)
+                  found[old] += count
+                  text = text.replace(old, new)
+              if text != original:
+                  path.write_text(text)
+          if found['测试矩阵与 v2.2.2 预发行门禁'] < 1:
+              raise SystemExit('stale v2.2.2 acceptance label not found')
+
+          # 6) Replace obsolete screenshot regression assertions with structural checks.
+          test = read(test_path)
+          if 'STUDIO_TOOLS=' not in test:
+              test = test.replace(
+                  'STUDIO_MATERIAL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMaterial.kt"\n',
+                  'STUDIO_MATERIAL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMaterial.kt"\nSTUDIO_TOOLS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/StudioToolLauncher.kt"\n',
+                  1,
+              )
+          lines = []
+          obsolete = (
+              "grep -q 'align(Alignment.TopEnd)'",
+              "grep -q 'statusBarsPadding()'",
+              "! grep -q 'align(Alignment.TopEnd)'",
+              "! grep -q 'statusBarsPadding()'",
+          )
+          for line in test.splitlines():
+              if any(token in line for token in obsolete):
+                  continue
+              lines.append(line)
+          test = '\n'.join(lines) + '\n'
+          checks = '''# Final screenshot regression: controls share one header Row and the Studio viewport
+          # ends above the floating dock instead of merely adding scroll padding.
+          grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MIUIX"
+          grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MATERIAL"
+          grep -q 'topAction()' "$STUDIO_MIUIX"
+          grep -q 'topAction()' "$STUDIO_MATERIAL"
+          grep -q 'bottom = 24.dp' "$STUDIO_MIUIX"
+          grep -q 'bottom = 24.dp' "$STUDIO_MATERIAL"
+          ! grep -q 'align(Alignment.TopEnd)' "$STUDIO_ROUTE"
+          ! grep -q 'statusBarsPadding()' "$STUDIO_ROUTE"
+          grep -q 'RoundedCornerShape(18.dp)' "$STUDIO_TOOLS"
+          ! grep -q 'shape = CircleShape' "$STUDIO_TOOLS"
+          grep -q 'padding(bottom = dockClearance)' "$SHELL"
+          grep -R -q '测试矩阵与当前版本预发行门禁' "$ROOT/android-app/app/src/main/java"
+          ! grep -R -q '测试矩阵与 v2.2.2 预发行门禁' "$ROOT/android-app/app/src/main/java"
+          '''
+          test = test.replace("echo 'LuoShu compact UI layout regression passed.'\n", checks + "\necho 'LuoShu compact UI layout regression passed.'\n", 1)
+          write(test_path, test)
+          PY
+
+          rm -f .github/workflows/apply-ui-layout-final.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "fix(ui): integrate studio header and reserve dock viewport"
+          git push origin HEAD:agent/ui-interaction-v226
