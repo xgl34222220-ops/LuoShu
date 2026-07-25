@@ -72,16 +72,6 @@ internal fun FontStudioRoute(
         }
     }
 
-    val ready = state.slots.isNotEmpty() && state.slots.all { it.font != null }
-    val canGenerate = ready && !state.loading && !state.busy && !state.operationBusy
-    val primaryLabel = when {
-        state.busy -> "正在生成 ${state.progress.coerceIn(0, 100)}%"
-        state.loading -> "正在读取组合配置"
-        !ready -> "请先选择中文、英文和数字字体"
-        state.error.isNotBlank() -> "检查配置后重新生成"
-        else -> "生成并应用复合字体"
-    }
-
     Box(Modifier.fillMaxSize()) {
         when (style) {
             UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions)
