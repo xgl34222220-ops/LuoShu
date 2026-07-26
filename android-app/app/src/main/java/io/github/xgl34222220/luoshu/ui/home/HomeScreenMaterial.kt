@@ -98,7 +98,7 @@ fun HomeScreenMaterial(
                     icon = Icons.Rounded.Layers,
                     label = "挂载引擎",
                     value = state.mountEngine,
-                    positive = state.moduleInstalled,
+                    positive = state.mountHealthy,
                 )
             }
         }
