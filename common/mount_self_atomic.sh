@@ -35,6 +35,52 @@ _luoshu_atomic_missing_target_allowed() {
     [ "$_lsamta_mode" = bind ]
 }
 
+_luoshu_atomic_real_target() {
+    _lsart_path="$1"
+    _lsart_real=''
+    if command -v readlink >/dev/null 2>&1; then
+        _lsart_real=$(readlink -f "$_lsart_path" 2>/dev/null)
+    elif command -v busybox >/dev/null 2>&1; then
+        _lsart_real=$(busybox readlink -f "$_lsart_path" 2>/dev/null)
+    fi
+    [ -n "$_lsart_real" ] || _lsart_real="$_lsart_path"
+    printf '%s\n' "$_lsart_real"
+}
+
+_luoshu_atomic_target_seen() {
+    _lsats_file="$1"
+    _lsats_target="$2"
+    [ -s "$_lsats_file" ] || return 1
+    while IFS= read -r _lsats_seen; do
+        [ "$_lsats_seen" = "$_lsats_target" ] && return 0
+    done < "$_lsats_file"
+    return 1
+}
+
+# Process real files before symlink aliases. Several OEM ROMs expose many font
+# names as symlinks to one canonical variable font; binding an alias first would
+# otherwise choose an arbitrary role for that shared mount target.
+_luoshu_atomic_bind_file_order() {
+    _lsabfo_source="$1"
+    _lsabfo_target="$2"
+    _lsabfo_output="$3"
+    _lsabfo_all="${_lsabfo_output}.all"
+    find "$_lsabfo_source" -type f 2>/dev/null > "$_lsabfo_all" || return 1
+    : > "$_lsabfo_output" 2>/dev/null || return 1
+    while IFS= read -r _lsabfo_src; do
+        [ -n "$_lsabfo_src" ] || continue
+        _lsabfo_rel=${_lsabfo_src#$_lsabfo_source/}
+        [ -L "$_lsabfo_target/$_lsabfo_rel" ] || printf '%s\n' "$_lsabfo_src" >> "$_lsabfo_output"
+    done < "$_lsabfo_all"
+    while IFS= read -r _lsabfo_src; do
+        [ -n "$_lsabfo_src" ] || continue
+        _lsabfo_rel=${_lsabfo_src#$_lsabfo_source/}
+        [ ! -L "$_lsabfo_target/$_lsabfo_rel" ] || printf '%s\n' "$_lsabfo_src" >> "$_lsabfo_output"
+    done < "$_lsabfo_all"
+    rm -f "$_lsabfo_all" 2>/dev/null || true
+    return 0
+}
+
 _luoshu_atomic_hash_stream() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum 2>/dev/null | awk '{print $1}'
@@ -119,10 +165,16 @@ _luoshu_atomic_tree_visible() {
     _lsatv_mode="${3:-overlay}"
     _lsatv_state=$(_luoshu_self_state_root)
     _lsatv_files="$_lsatv_state/verify-files.$$"
+    _lsatv_seen="$_lsatv_state/verify-targets.$$"
     _lsatv_failed=0
     _lsatv_total=0
     mkdir -p "$_lsatv_state" 2>/dev/null || return 1
-    find "$_lsatv_source" -type f 2>/dev/null > "$_lsatv_files" || return 1
+    : > "$_lsatv_seen" 2>/dev/null || return 1
+    if [ "$_lsatv_mode" = bind ]; then
+        _luoshu_atomic_bind_file_order "$_lsatv_source" "$_lsatv_target" "$_lsatv_files" || return 1
+    else
+        find "$_lsatv_source" -type f 2>/dev/null > "$_lsatv_files" || return 1
+    fi
     while IFS= read -r _lsatv_src; do
         [ -n "$_lsatv_src" ] || continue
         _lsatv_rel=${_lsatv_src#$_lsatv_source/}
@@ -134,13 +186,23 @@ _luoshu_atomic_tree_visible() {
             _lsatv_failed=1
             break
         fi
+        if [ "$_lsatv_mode" = bind ]; then
+            _lsatv_dst=$(_luoshu_atomic_real_target "$_lsatv_dst")
+            if _luoshu_atomic_target_seen "$_lsatv_seen" "$_lsatv_dst"; then
+                continue
+            fi
+            printf '%s\n' "$_lsatv_dst" >> "$_lsatv_seen" 2>/dev/null || {
+                _lsatv_failed=1
+                break
+            }
+        fi
         _lsatv_total=$((_lsatv_total + 1))
         _luoshu_atomic_files_equal "$_lsatv_src" "$_lsatv_dst" || {
             _lsatv_failed=1
             break
         }
     done < "$_lsatv_files"
-    rm -f "$_lsatv_files" 2>/dev/null || true
+    rm -f "$_lsatv_files" "$_lsatv_seen" 2>/dev/null || true
     [ "$_lsatv_total" -gt 0 ] 2>/dev/null && [ "$_lsatv_failed" -eq 0 ]
 }
 
@@ -149,11 +211,13 @@ _luoshu_atomic_bind_tree() {
     _lsabt_target="$2"
     _lsabt_state=$(_luoshu_self_state_root)
     _lsabt_files="$_lsabt_state/bind-files.$$"
+    _lsabt_seen="$_lsabt_state/bind-targets.$$"
     _lsabt_expected=0
     _lsabt_mounted=0
     _lsabt_failed=0
     mkdir -p "$_lsabt_state" 2>/dev/null || return 1
-    find "$_lsabt_source" -type f 2>/dev/null > "$_lsabt_files" || return 1
+    : > "$_lsabt_seen" 2>/dev/null || return 1
+    _luoshu_atomic_bind_file_order "$_lsabt_source" "$_lsabt_target" "$_lsabt_files" || return 1
     while IFS= read -r _lsabt_src; do
         [ -n "$_lsabt_src" ] || continue
         _lsabt_rel=${_lsabt_src#$_lsabt_source/}
@@ -162,8 +226,16 @@ _luoshu_atomic_bind_tree() {
            _luoshu_atomic_missing_target_allowed "$_lsabt_rel" bind; then
             continue
         fi
-        _lsabt_expected=$((_lsabt_expected + 1))
         [ -f "$_lsabt_dst" ] || {
+            _lsabt_failed=1
+            break
+        }
+        _lsabt_dst=$(_luoshu_atomic_real_target "$_lsabt_dst")
+        if _luoshu_atomic_target_seen "$_lsabt_seen" "$_lsabt_dst"; then
+            continue
+        fi
+        _lsabt_expected=$((_lsabt_expected + 1))
+        printf '%s\n' "$_lsabt_dst" >> "$_lsabt_seen" 2>/dev/null || {
             _lsabt_failed=1
             break
         }
@@ -178,7 +250,7 @@ _luoshu_atomic_bind_tree() {
             break
         fi
     done < "$_lsabt_files"
-    rm -f "$_lsabt_files" 2>/dev/null || true
+    rm -f "$_lsabt_files" "$_lsabt_seen" 2>/dev/null || true
     [ "$_lsabt_failed" -eq 0 ] && \
         [ "$_lsabt_mounted" -gt 0 ] 2>/dev/null && \
         [ "$_lsabt_mounted" -eq "$_lsabt_expected" ]
