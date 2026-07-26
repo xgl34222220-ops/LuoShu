@@ -1,0 +1,41 @@
+name: Cleanup non-main branches
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/cleanup-non-main-branches.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete every branch except main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t branches < <(
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/branches?per_page=100" \
+              --jq '.[].name'
+          )
+
+          deleted=0
+          for branch in "${branches[@]}"; do
+            if [[ "$branch" == "main" ]]; then
+              continue
+            fi
+
+            encoded_branch="$(jq -rn --arg value "$branch" '$value | @uri')"
+            echo "Deleting branch: $branch"
+            gh api --method DELETE \
+              "repos/${GITHUB_REPOSITORY}/git/refs/heads/${encoded_branch}"
+            deleted=$((deleted + 1))
+          done
+
+          echo "Deleted $deleted branch(es); retained main."
