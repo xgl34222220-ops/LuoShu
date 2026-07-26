@@ -4,13 +4,13 @@ on:
     inputs:
       target:
         description: Target release line
-        required: true
-        default: v2.2.2
+        required: false
+        default: ''
         type: string
       enforce:
         description: Fail when blockers remain
         required: true
-        default: false
+        default: true
         type: boolean
   pull_request:
     branches:
@@ -36,9 +36,9 @@ jobs:
         run: |
           set -euo pipefail
           target='${{ inputs.target }}'
-          [ -n "$target" ] || target='v2.2.2'
-          args=(--target "$target")
-          if [ '${{ inputs.enforce }}' = 'true' ]; then
+          args=()
+          [ -z "$target" ] || args+=(--target "$target")
+          if [ '${{ inputs.enforce }}' != 'false' ]; then
             args+=(--enforce)
           fi
           sh ./scripts/pre_release_readiness.sh "${args[@]}"

@@ -65,7 +65,8 @@ cmp -s "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/my_product/fonts/Opposans-En
 # A product-only slot must not be misplaced into system/fonts; that was the regression that left
 # Google Play text fields on the stock GoogleSansText family.
 test ! -e "$MODULE_DIR/system/fonts/GoogleSansText-Regular.ttf"
-get_all_coloros_names | grep -qx 'GoogleSansText-Regular'
-get_all_coloros_names | grep -qx 'SysFont-Regular'
+COLOROS_NAMES=$(get_all_coloros_names)
+printf '%s\n' "$COLOROS_NAMES" | grep -qx 'GoogleSansText-Regular'
+printf '%s\n' "$COLOROS_NAMES" | grep -qx 'SysFont-Regular'
 
 printf 'ColorOS Play input partition mapping tests passed.\n'

@@ -97,7 +97,7 @@ class DeviceTestMatrixTest {
     }
 
     @Test
-    fun compatibilityMappingIsAcceptedWithoutRedFailure() {
+    fun compatibilityMappingWithoutLoadEvidenceStaysInformationalButDoesNotPass() {
         val checks = deviceAcceptanceAutoChecks(
             state = readyState(),
             trust = DeviceTrustState(
@@ -112,9 +112,9 @@ class DeviceTestMatrixTest {
 
         val alignment = checks.single { it.id == "alignment" }
         val cache = checks.single { it.id == "cache" }
-        assertTrue(alignment.passed)
+        assertFalse(alignment.passed)
         assertFalse(alignment.blocking)
-        assertTrue(cache.passed)
+        assertFalse(cache.passed)
         assertFalse(cache.blocking)
     }
 

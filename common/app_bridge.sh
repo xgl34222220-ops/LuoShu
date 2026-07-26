@@ -97,6 +97,15 @@ status_json() {
     fi
     _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
     [ -n "$_active" ] || _active='default'
+    _verification_file="$MODDIR/config/device-font-load-verification.conf"
+    _verification_state="$(read_prop "$_verification_file" state)"
+    _verification_mode="$(read_prop "$_verification_file" mode)"
+    _verification_reason="$(read_prop "$_verification_file" reason)"
+    _verification_active="$(read_prop "$_verification_file" activeFont)"
+    _mount_state="$(read_prop "$MODDIR/config/self-mount.conf" state)"
+    [ -n "$_verification_state" ] || _verification_state='pending'
+    [ -n "$_verification_mode" ] || _verification_mode='unknown'
+    [ -n "$_mount_state" ] || _mount_state='unknown'
 
     _selected="$(select_task_file)"
     _task_type="${_selected%%|*}"
@@ -124,8 +133,39 @@ status_json() {
     _reboot_required=false
     [ -f "$TEXT_REBOOT_REQUIRED" ] && _reboot_required=true
 
-    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
+    _effective_active='unknown'
+    _font_effect_state='pending'
+    if [ "$_active" = default ]; then
+        _effective_active=default
+        _font_effect_state=system
+    elif [ "$_reboot_required" = true ]; then
+        _font_effect_state=pending-reboot
+    elif [ -n "$_verification_active" ] && [ "$_verification_active" != "$_active" ]; then
+        _verification_state=pending
+        _verification_mode=unknown
+        _verification_reason=stale-verification
+    elif [ "$_verification_state" = failed ] || [ "$_mount_state" = failed ]; then
+        # The atomic self-mount transaction rolls every LuoShu layer back on
+        # failure, so the only safe effective-font claim is the ROM default.
+        _effective_active=default
+        _font_effect_state=failed
+    elif [ "$_verification_state" = verified ]; then
+        case "$_verification_mode" in
+            aligned|mount-verified)
+                _effective_active="$_active"
+                _font_effect_state=verified
+                ;;
+            *) _font_effect_state=unverified ;;
+        esac
+    else
+        _font_effect_state=unverified
+    fi
+
+    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
         "$_installed" "$(json_escape "$_version")" "${_version_code:-0}" "$(json_escape "$_active")" \
+        "$(json_escape "$_effective_active")" "$(json_escape "$_font_effect_state")" \
+        "$(json_escape "$_verification_state")" "$(json_escape "$_verification_mode")" \
+        "$(json_escape "$_verification_reason")" "$(json_escape "$_mount_state")" \
         "$(json_escape "$_task_type")" "$(json_escape "$_task_id")" "$(json_escape "$_task_state")" \
         "$(json_escape "$_task_message")" "$_task_progress" "$_reboot_required" \
         "$(json_escape "$(root_manager)")" "$(json_escape "$(mount_engine)")" "$(json_escape "$MODDIR")"

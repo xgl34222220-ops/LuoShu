@@ -58,7 +58,7 @@
 └── vendor/
 ```
 
-标准的 `system/`、`product/`、`vendor/` 等模块目录只保留空壳，避免 Root 管理器或其他挂载组件重复接管。KernelSU/SukiSU Ultra 在 `post-mount` 阶段由洛书挂载；Magisk/APatch 在 `post-fs-data` 阶段由洛书挂载。挂载失败保持 fail-open，不阻断系统启动。
+标准的 `system/`、`product/`、`vendor/` 等模块目录只保留空壳，避免 Root 管理器或其他挂载组件重复接管。KernelSU、SukiSU Ultra 和 APatch 在 `post-mount` 阶段由洛书挂载；Magisk 在 `post-fs-data` 阶段由洛书挂载。挂载失败保持 fail-open，不阻断系统启动；App 和模块状态只会在设备加载验证通过后显示所选字体已生效。
 
 ## 使用方式
 

@@ -126,6 +126,7 @@ sh -c '
     luoshu_private_mount_module_view "$MODDIR"
     . "$MODDIR/common/mount_compat.sh"
     . "$MODDIR/common/mount_self_backend.sh"
+    set -eu
 
     touch "$MODDIR/mount_error"
     luoshu_private_self_mount_ensure
@@ -137,15 +138,63 @@ sh -c '
     [ "$(cat "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system/fonts/Roboto-Regular.ttf")" = new-font ]
     [ "$(cat "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system/fonts/NotoColorEmoji.ttf")" = stock-emoji ]
     _luoshu_atomic_verify_manifest "$MODDIR/config/self-mount-required.conf"
-    before=$(wc -l < "$STATE/mounts.list" | tr -d "[:space:]")
+    mount_list="$LUOSHU_SELF_MOUNT_STATE_ROOT/mounts.list"
+    [ -s "$mount_list" ]
+    before=$(wc -l < "$mount_list" | tr -d "[:space:]")
+    case "$before" in ""|*[!0-9]*) exit 1 ;; esac
+    [ "$before" -gt 0 ]
 
     luoshu_private_self_mount_ensure
     [ "$(sed -n "s/^state=//p" "$MODDIR/config/self-mount.conf")" = mounted ]
     [ "$(sed -n "s/^backend=//p" "$MODDIR/config/self-mount.conf")" = self-overlay ]
     _luoshu_atomic_verify_manifest "$MODDIR/config/self-mount-required.conf"
-    after=$(wc -l < "$STATE/mounts.list" | tr -d "[:space:]")
+    after=$(wc -l < "$mount_list" | tr -d "[:space:]")
+    case "$after" in ""|*[!0-9]*) exit 1 ;; esac
+    [ "$after" -gt 0 ]
     [ "$before" = "$after" ]
 ' sh "$ROOT"
+
+# APatch and KernelSU-family managers must wait until their native OverlayFS
+# stage. Magisk retains the early path because it has no module post-mount hook.
+sh -c '
+    . "$1/common/mount_self_backend.sh"
+    set -e
+    [ "$(luoshu_self_mount_stage_for_manager APatch)" = post-mount ]
+    [ "$(luoshu_self_mount_stage_for_manager KernelSU)" = post-mount ]
+    [ "$(luoshu_self_mount_stage_for_manager SukiSU-Ultra)" = post-mount ]
+    [ "$(luoshu_self_mount_stage_for_manager Magisk)" = post-fs-data ]
+    [ "$(luoshu_self_mount_stage_for_manager unknown)" = post-fs-data ]
+' sh "$ROOT"
+grep -q 'luoshu_self_mount_stage_for_manager' "$ROOT/post-fs-data.sh"
+
+# Exercise the production wrapper too: APatch must leave post-fs-data without
+# mounting and wait for post-mount, while Magisk must still mount early.
+STAGE_MODULE="$TMP/stage-module"
+STAGE_LOG="$TMP/stage.log"
+mkdir -p "$STAGE_MODULE/common" "$STAGE_MODULE/.luoshu-runtime"
+cp "$ROOT/post-fs-data.sh" "$STAGE_MODULE/post-fs-data.sh"
+cp "$ROOT/common/mount_self_backend.sh" "$STAGE_MODULE/common/mount_self_backend.sh"
+cat >"$STAGE_MODULE/common/private_payload.sh" <<'EOF_PRIVATE_STAGE'
+luoshu_private_mount_module_view() { printf 'view\n' >>"$LUOSHU_STAGE_LOG"; }
+luoshu_private_unmount_module_view() { printf 'unmount\n' >>"$LUOSHU_STAGE_LOG"; }
+EOF_PRIVATE_STAGE
+cat >"$STAGE_MODULE/.luoshu-runtime/post-fs-data-v227.sh" <<'EOF_BOOT_STAGE'
+luoshu_detect_root_manager() { printf '%s\n' "$LUOSHU_TEST_ROOT_MANAGER"; }
+luoshu_private_self_mount_ensure() { printf 'ensure\n' >>"$LUOSHU_STAGE_LOG"; }
+exit 0
+EOF_BOOT_STAGE
+
+: >"$STAGE_LOG"
+LUOSHU_STAGE_LOG="$STAGE_LOG" LUOSHU_TEST_ROOT_MANAGER=APatch sh "$STAGE_MODULE/post-fs-data.sh"
+grep -qx view "$STAGE_LOG"
+grep -qx unmount "$STAGE_LOG"
+! grep -qx ensure "$STAGE_LOG"
+
+: >"$STAGE_LOG"
+LUOSHU_STAGE_LOG="$STAGE_LOG" LUOSHU_TEST_ROOT_MANAGER=Magisk sh "$STAGE_MODULE/post-fs-data.sh"
+grep -qx view "$STAGE_LOG"
+grep -qx ensure "$STAGE_LOG"
+! grep -qx unmount "$STAGE_LOG"
 
 # Production policy never detects or configures a metamodule. Engine injection is
 # retained only for legacy regression fixtures.

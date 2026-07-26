@@ -27,7 +27,19 @@ EOT
 TASK=$(MODDIR="$MODULE" sh "$MODULE/common/font_switch_task.sh" status test-task)
 printf '%s' "$TASK" | grep -q '"state":"success"'
 test ! -e "$TMP/manager-called"
-grep -q '当前字体：Beta' "$MODULE/module.prop"
+grep -q '当前字体：已配置：Beta' "$MODULE/module.prop"
+grep -q 'Beta（待验证）' "$MODULE/module.prop"
+
+printf 'state=failed\nbackend=rollback\n' >"$MODULE/config/self-mount.conf"
+printf 'state=verified\nmode=mount-verified\nactiveFont=Beta\n' \
+    >"$MODULE/config/device-font-load-verification.conf"
+MODDIR="$MODULE" sh "$MODULE/common/module_status.sh" Beta >/dev/null
+grep -q '系统默认字体（Beta 未生效）' "$MODULE/module.prop"
+
+printf 'state=mounted\nbackend=self-overlay\n' >"$MODULE/config/self-mount.conf"
+MODDIR="$MODULE" sh "$MODULE/common/module_status.sh" Beta >/dev/null
+grep -q '当前字体：Beta$' "$MODULE/module.prop"
+rm -f "$MODULE/config/self-mount.conf" "$MODULE/config/device-font-load-verification.conf"
 
 # 当完整多轴引擎不可用时，组合桥仍应正确返回历史任务状态。
 cat > "$MODULE/config/font_mix.conf" <<'EOT'
@@ -48,7 +60,8 @@ EOT
 MIX=$(MODDIR="$MODULE" sh "$MODULE/common/font_mix_controller.sh" status mix-task)
 printf '%s' "$MIX" | grep -q '"cjk":"中文甲"'
 test ! -e "$TMP/manager-called"
-grep -q '当前字体：组合：中文甲 / Latin B / DIN C' "$MODULE/module.prop"
+grep -q '当前字体：已配置：组合：中文甲 / Latin B / DIN C' "$MODULE/module.prop"
+grep -q 'DIN C（待验证）' "$MODULE/module.prop"
 
 # 原生 App 字体管理器必须使用原生索引，且不再携带 WebUI 预览、热刷新或回滚入口。
 grep -q 'native_font_index.json' "$ROOT/common/font_manager.sh"

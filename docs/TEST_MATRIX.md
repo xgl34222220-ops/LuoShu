@@ -15,18 +15,22 @@
 - 应用字体时必须优先使用有效的设备原厂清单；
 - OTA 或系统指纹变化后必须使旧清单失效并重新扫描。
 
-## v2.3.0 私有自挂载门禁
+## v2.3.x 私有原子自挂载门禁
 
 - 真实分区负载必须位于 `.luoshu-payload/<partition>`；
 - 安装后的标准 `system`、`system_ext`、`product`、`my_product`、`vendor` 目录必须为空；
 - 模块必须保留 `skip_mount` 与 `skip_mountify`，阻止外部挂载组件接管标准模块树；
 - 生产路径固定使用 `self-mount`，不得读取或修改任何元模块配置；
 - Mountify、Hybrid Mount、Magic Mount、meta-overlayfs 存在与否不得改变洛书挂载策略；
-- KernelSU/SukiSU Ultra 必须在 `post-mount` 阶段自挂载；
-- Magisk/APatch 必须在 `post-fs-data` 阶段自挂载；
+- KernelSU、SukiSU Ultra 与 APatch 必须在各自 OverlayFS 完成后的 `post-mount` 阶段自挂载；
+- Magisk 必须在 `post-fs-data` 阶段自挂载；
 - 自挂载只能覆盖洛书实际包含负载的 `fonts` / `etc`，必须保留 ROM Emoji 与 fallback；
+- 实际包含负载的全部分区和目录必须一次性提交，任意组件失败都必须逆序回滚，禁止 `degraded` 半挂载；
+- 提交前必须从 PID 1 主命名空间逐文件验证字体与配置负载；
 - 重复执行不得叠加第二层挂载；
 - 挂载失败必须 fail-open，不得阻断系统启动；
+- 覆盖升级必须保留全部受支持 OEM 分区，旧启动挂载状态和验证结果不得迁移；
+- App 和 Root 管理器只能在加载验证通过后把所选字体描述为当前已生效字体；
 - 卸载必须逆序解除洛书记录的挂载并清理私有负载。
 
 ## 自动化门禁

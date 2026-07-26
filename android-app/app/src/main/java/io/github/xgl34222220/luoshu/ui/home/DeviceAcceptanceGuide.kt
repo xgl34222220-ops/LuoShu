@@ -107,15 +107,14 @@ internal fun deviceAcceptanceAutoChecks(
             trust.alignment == "verified" && trust.mode in setOf("aligned", "mount-verified") ->
                 "逐分区开机加载验证通过，当前为设备对齐模式"
             trust.level == DeviceTrustLevel.COMPATIBILITY || trust.mode == "compatibility" ->
-                "当前字体已通过兼容映射生效；设备专属对齐属于可选增强，不影响正常使用"
+                "兼容映射已生成，但尚无系统实际加载证据，不能判定字体已经生效"
             trust.alignment == "failed" || trust.error.isNotBlank() ->
                 "加载验证失败，请打开问题页查看具体失败分区"
             state.taskRunning -> "字体任务完成后会自动刷新加载状态"
             state.rebootRequired -> "当前字体等待完整重启后验证"
             else -> "加载证据正在后台刷新，不需要反复重启"
         },
-        passed = (trust.alignment == "verified" && trust.mode in setOf("aligned", "mount-verified")) ||
-            trust.level == DeviceTrustLevel.COMPATIBILITY || trust.mode == "compatibility",
+        passed = trust.alignment == "verified" && trust.mode in setOf("aligned", "mount-verified"),
         automatic = true,
         blocking = trust.alignment == "failed" || trust.error.isNotBlank(),
     ),
@@ -125,10 +124,10 @@ internal fun deviceAcceptanceAutoChecks(
         detail = when {
             !trust.cachePending -> "没有待处理的设备对齐缓存"
             trust.level == DeviceTrustLevel.COMPATIBILITY || trust.mode == "compatibility" ->
-                "兼容映射已正常生效；设备对齐缓存会在后台继续准备，不作为失败项"
+                "兼容映射尚未获得加载证据；设备对齐缓存仍在后台准备"
             else -> "设备对齐缓存正在后台生成，不需要停留在此页面"
         },
-        passed = !trust.cachePending || trust.level == DeviceTrustLevel.COMPATIBILITY || trust.mode == "compatibility",
+        passed = !trust.cachePending,
         automatic = true,
         blocking = false,
     ),

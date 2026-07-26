@@ -7,6 +7,7 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 SCHEMA=device-template-v1-baseline-v7-mono-v6
 LUOSHU_PAYLOAD_SCHEMA_CURRENT="$SCHEMA"
 export LUOSHU_PAYLOAD_SCHEMA_CURRENT
+OEM_PARTITIONS='my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product'
 
 OLD="$TMP/old"
 NEW="$TMP/new"
@@ -14,6 +15,10 @@ mkdir -p \
     "$OLD/config" "$OLD/system/fonts/.luoshu-font-store" "$OLD/system/etc" "$OLD/product/fonts" \
     "$OLD/cache/full-composite-v5" "$OLD/cache/auto-multiweight-mix/composites-v2" \
     "$NEW/config" "$NEW/system/bin"
+for partition in $OEM_PARTITIONS; do
+    mkdir -p "$OLD/$partition/fonts"
+    printf '%s payload\n' "$partition" >"$OLD/$partition/fonts/LuoShu-OEM.ttf"
+done
 
 printf 'id=LuoShu\nversion=old\n' >"$OLD/module.prop"
 printf 'Qsal\n' >"$OLD/config/active_font.conf"
@@ -25,6 +30,9 @@ printf 'font=Qsal\n' >"$OLD/config/text_reboot_required.conf"
 printf '123\n' >"$OLD/config/axes_worker.pid"
 printf '2\n' >"$OLD/config/font-boot-failures"
 printf 'state=quarantined\n' >"$OLD/config/font-payload-quarantine.conf"
+printf 'state=degraded\n' >"$OLD/config/self-mount.conf"
+printf '/old/source|/system/fonts|overlay\n' >"$OLD/config/self-mount-required.conf"
+printf 'state=verified\nactiveFont=Qsal\n' >"$OLD/config/device-font-load-verification.conf"
 printf 'Qsal payload\n' >"$OLD/system/fonts/Qsal-Regular.ttf"
 printf 'anchor\n' >"$OLD/system/fonts/.luoshu-font-store/qsal.font"
 printf '<familyset/>\n' >"$OLD/system/etc/fonts.xml"
@@ -46,6 +54,9 @@ test -f "$NEW/system/fonts/Qsal-Regular.ttf"
 test -f "$NEW/system/fonts/.luoshu-font-store/qsal.font"
 test -f "$NEW/system/etc/fonts.xml"
 test -f "$NEW/product/fonts/OEM-Regular.ttf"
+for partition in $OEM_PARTITIONS; do
+    test -f "$NEW/$partition/fonts/LuoShu-OEM.ttf"
+done
 test ! -e "$NEW/cache/full-composite-v5/test.otf"
 test ! -e "$NEW/cache/auto-multiweight-mix/composites-v2/test.font"
 test -f "$NEW/system/bin/洛书"
@@ -54,6 +65,9 @@ test ! -e "$NEW/config/text_reboot_required.conf"
 test ! -e "$NEW/config/axes_worker.pid"
 test ! -e "$NEW/config/font-boot-failures"
 test ! -e "$NEW/config/font-payload-quarantine.conf"
+test ! -e "$NEW/config/self-mount.conf"
+test ! -e "$NEW/config/self-mount-required.conf"
+test ! -e "$NEW/config/device-font-load-verification.conf"
 test "$LUOSHU_UPDATE_ACTIVE" = Qsal
 test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = true
 grep -q '^state=pending$' "$NEW/config/font-payload-rebuild-pending.conf"
@@ -79,6 +93,19 @@ test -f "$CURRENT_NEW/cache/full-composite-v11/current.font"
 test -f "$CURRENT_NEW/cache/auto-multiweight-mix/composites-v8/current.font"
 test -f "$CURRENT_NEW/cache/auto-multiweight-mix/prepared-v8/current.font"
 test ! -e "$CURRENT_NEW/config/font-payload-rebuild-pending.conf"
+
+# A valid active payload may live only in an OEM partition. It must still be
+# recognized and preserved instead of silently resetting the selected font.
+OPLUS_ONLY="$TMP/oplus-only"
+OPLUS_ONLY_NEW="$TMP/oplus-only-new"
+mkdir -p "$OPLUS_ONLY/config" "$OPLUS_ONLY/oplus_product/fonts" "$OPLUS_ONLY_NEW/config"
+printf 'id=LuoShu\nversion=oplus-only\n' >"$OPLUS_ONLY/module.prop"
+printf 'Qsal\n' >"$OPLUS_ONLY/config/active_font.conf"
+printf 'schema=%s\nfont=Qsal\n' "$SCHEMA" >"$OPLUS_ONLY/config/font-payload-schema.conf"
+printf 'oplus-only payload\n' >"$OPLUS_ONLY/oplus_product/fonts/OPPOSans-Regular.ttf"
+luoshu_migrate_active_install "$OPLUS_ONLY" "$OPLUS_ONLY_NEW"
+test -f "$OPLUS_ONLY_NEW/oplus_product/fonts/OPPOSans-Regular.ttf"
+test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = false
 
 # The installer-side direct-font rebuild waits for and accepts only the current schema.
 REBUILD="$TMP/rebuild"

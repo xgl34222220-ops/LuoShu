@@ -15,6 +15,7 @@ on:
       - docs/**
       - customize.sh
       - post-fs-data.sh
+      - post-mount.sh
       - service.sh
       - uninstall.sh
       - action.sh

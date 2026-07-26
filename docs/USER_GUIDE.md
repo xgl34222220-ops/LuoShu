@@ -1,6 +1,6 @@
 # 洛书完整使用教程
 
-本文说明洛书 v2.3.0 的下载、刷入、App 安装、字体导入、单字体应用、组合字体、恢复、卸载和故障排查。
+本文说明洛书 v2.3.x 的下载、刷入、App 安装、字体导入、单字体应用、组合字体、恢复、卸载和故障排查。
 
 ## 1. 下载正确文件
 
@@ -34,7 +34,7 @@ LuoShu-App-<版本>.apk.sha256   App 校验文件
 
 刷入阶段会部署文件、扫描本机原厂字体配置并迁移旧字体状态，但不会在安装脚本中生成大型复合字体。
 
-## 3. v2.3.0 私有自挂载
+## 3. v2.3.x 私有自挂载
 
 真实字体负载保存于：
 
@@ -44,10 +44,12 @@ LuoShu-App-<版本>.apk.sha256   App 校验文件
 
 标准模块分区目录保持为空，其他挂载组件无法重复接管洛书负载。洛书根据 Root 环境自行完成挂载：
 
-- KernelSU / SukiSU Ultra：在 `post-mount` 阶段挂载；
-- Magisk / APatch：在 `post-fs-data` 阶段挂载。
+- KernelSU / SukiSU Ultra / APatch：在 `post-mount` 阶段挂载；
+- Magisk：在 `post-fs-data` 阶段挂载。
 
 无需选择 OverlayFS、Magic Mount、Kasumi 或其他后端。洛书不会修改 Mountify、Hybrid Mount、Magic Mount 等外部组件的配置。
+
+App 首页显示的“当前生效”以设备实际加载验证为准。配置已经生成但挂载失败、尚未重启或验证证据过期时，App 会明确显示未生效或等待验证，不再把已选择字体误报为已生效。
 
 ## 4. 安装或更新 App
 

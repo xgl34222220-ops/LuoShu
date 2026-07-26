@@ -31,7 +31,7 @@ class DeviceAcceptanceGuideTest {
     }
 
     @Test
-    fun pendingRebootIsInformationalWhileCompatibilityRemainsUsable() {
+    fun compatibilityWithoutLoadEvidenceDoesNotPassAcceptance() {
         val checks = deviceAcceptanceAutoChecks(
             state = HomeUiState(
                 rootGranted = true,
@@ -53,9 +53,9 @@ class DeviceAcceptanceGuideTest {
 
         assertFalse(reboot.passed)
         assertFalse(reboot.blocking)
-        assertTrue(alignment.passed)
+        assertFalse(alignment.passed)
         assertFalse(alignment.blocking)
-        assertTrue(cache.passed)
+        assertFalse(cache.passed)
         assertFalse(cache.blocking)
     }
 }

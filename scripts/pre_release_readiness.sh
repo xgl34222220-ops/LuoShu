@@ -3,7 +3,7 @@
 set -eu
 
 ROOT="${ROOT:-${GITHUB_WORKSPACE:-$(pwd)}}"
-TARGET_VERSION="v2.2.2"
+TARGET_VERSION=''
 ENFORCE=0
 OUTPUT_DIR="${LUOSHU_READINESS_DIR:-$ROOT/dist/pre-release-readiness}"
 
@@ -64,7 +64,7 @@ prop_get() {
 }
 
 base_version() {
-    printf '%s' "$1" | sed 's/^[vV]//; s/[-+].*$//'
+    printf '%s' "$1" | sed 's/^[vV]//; s/[[:space:]].*$//; s/[-+].*$//'
 }
 
 expected_code() {
@@ -99,6 +99,8 @@ if [ -f "$MODULE_PROP" ]; then
 else
     add_check blocker module-prop '模块版本源' 'module.prop 不存在'
 fi
+
+[ -n "$TARGET_VERSION" ] || TARGET_VERSION="${current_version:-unknown}"
 
 if [ -n "$current_version" ] && [ "$(base_version "$current_version")" = "$(base_version "$TARGET_VERSION")" ]; then
     add_check ready target-version '候选版本号' "当前版本 $current_version 已进入 $TARGET_VERSION 候选线"

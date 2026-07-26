@@ -31,7 +31,28 @@ case "$ACTIVE" in
     *) DISPLAY=$(printf '%s' "$ACTIVE" | tr '\r\n' '  ') ;;
 esac
 
-DESCRIPTION="Android 全局字体管理，当前字体：$DISPLAY"
+EFFECTIVE_DISPLAY="$DISPLAY"
+if [ "$ACTIVE" != default ]; then
+    VERIFY="$MODDIR/config/device-font-load-verification.conf"
+    VERIFY_STATE=$(sed -n 's/^state=//p' "$VERIFY" 2>/dev/null | head -n1)
+    VERIFY_MODE=$(sed -n 's/^mode=//p' "$VERIFY" 2>/dev/null | head -n1)
+    VERIFY_ACTIVE=$(sed -n 's/^activeFont=//p' "$VERIFY" 2>/dev/null | head -n1)
+    MOUNT_STATE=$(sed -n 's/^state=//p' "$MODDIR/config/self-mount.conf" 2>/dev/null | head -n1)
+    if [ -f "$MODDIR/config/text_reboot_required.conf" ]; then
+        EFFECTIVE_DISPLAY="已配置：$DISPLAY（等待重启）"
+    elif [ "$MOUNT_STATE" = failed ] || [ "$VERIFY_STATE" = failed ]; then
+        EFFECTIVE_DISPLAY="系统默认字体（$DISPLAY 未生效）"
+    elif [ "$VERIFY_ACTIVE" = "$ACTIVE" ] && [ "$VERIFY_STATE" = verified ]; then
+        case "$VERIFY_MODE" in
+            aligned|mount-verified) EFFECTIVE_DISPLAY="$DISPLAY" ;;
+            *) EFFECTIVE_DISPLAY="已配置：$DISPLAY（待验证）" ;;
+        esac
+    else
+        EFFECTIVE_DISPLAY="已配置：$DISPLAY（待验证）"
+    fi
+fi
+
+DESCRIPTION="Android 全局字体管理，当前字体：$EFFECTIVE_DISPLAY"
 [ -f "$PROP" ] || exit 0
 TMP="$PROP.tmp.$$"
 awk -v description="$DESCRIPTION" '

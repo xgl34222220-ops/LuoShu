@@ -22,6 +22,12 @@ internal data class ModuleSnapshot(
     val version: String = "检测中…",
     val versionCode: Int = 0,
     val activeFont: String = "default",
+    val effectiveFont: String = "unknown",
+    val fontEffectState: String = "unknown",
+    val verificationState: String = "unknown",
+    val verificationMode: String = "unknown",
+    val verificationReason: String = "",
+    val mountState: String = "unknown",
     val taskType: String = "none",
     val taskId: String = "",
     val taskState: String = "idle",
@@ -37,6 +43,25 @@ internal data class ModuleSnapshot(
             "mix" -> "完整复合字体"
             "default", "" -> "系统默认字体"
             else -> activeFont
+        }
+
+    val effectiveLabel: String
+        get() = when {
+            activeFont in setOf("", "default") || fontEffectState == "system" -> "系统默认字体"
+            fontEffectState == "verified" && effectiveFont == activeFont -> activeLabel
+            fontEffectState == "failed" -> "系统默认字体（${activeLabel}未生效）"
+            fontEffectState == "pending-reboot" -> "${activeLabel}（等待重启）"
+            else -> "${activeLabel}（待验证）"
+        }
+
+    val effectFailed: Boolean
+        get() = activeFont !in setOf("", "default") && fontEffectState == "failed"
+
+    val effectFailureMessage: String
+        get() = when (verificationReason) {
+            "self-mount-not-visible" -> "开机挂载未完整生效，系统已安全使用默认字体"
+            "aligned-manifest-missing" -> "字体负载清单缺失，系统已安全使用默认字体"
+            else -> "开机字体验证失败，系统已安全使用默认字体"
         }
 }
 
@@ -762,6 +787,12 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 version = data.optString("version", "未知版本"),
                 versionCode = data.optInt("versionCode", 0),
                 activeFont = data.optString("active", "default"),
+                effectiveFont = data.optString("effectiveActive", "unknown"),
+                fontEffectState = data.optString("fontEffectState", "unknown"),
+                verificationState = data.optString("verificationState", "unknown"),
+                verificationMode = data.optString("verificationMode", "unknown"),
+                verificationReason = data.optString("verificationReason", ""),
+                mountState = data.optString("mountState", "unknown"),
                 taskType = data.optString("taskType", "none"),
                 taskId = data.optString("taskId", ""),
                 taskState = data.optString("taskState", "idle"),

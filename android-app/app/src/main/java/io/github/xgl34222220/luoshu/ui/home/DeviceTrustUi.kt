@@ -47,6 +47,7 @@ internal data class DeviceTrustState(
     val alignment: String = "unknown",
     val mode: String = "unknown",
     val reason: String = "",
+    val mountState: String = "unknown",
     val cachePending: Boolean = false,
     val error: String = "",
 ) {
@@ -54,8 +55,10 @@ internal data class DeviceTrustState(
         get() = when {
             error.isNotBlank() -> DeviceTrustLevel.ISSUE
             activeFont in setOf("", "default") || alignment == "not-applicable" -> DeviceTrustLevel.SYSTEM
+            mountState == "failed" -> DeviceTrustLevel.ISSUE
             alignment == "failed" -> DeviceTrustLevel.ISSUE
             alignment == "verified" && mode in setOf("aligned", "mount-verified") -> DeviceTrustLevel.VERIFIED
+            alignment == "compatibility" || mode == "compatibility" -> DeviceTrustLevel.COMPATIBILITY
             engine == "installed" -> DeviceTrustLevel.PENDING
             inventory == "available" -> DeviceTrustLevel.COMPATIBILITY
             else -> DeviceTrustLevel.PENDING
@@ -78,11 +81,25 @@ internal suspend fun loadDeviceTrustState(): DeviceTrustState {
         alignment="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" state)"
         mode="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" mode)"
         reason="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" reason)"
+        verifiedActive="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" activeFont)"
+        mountState="${'$'}(read_value "${'$'}CFG/self-mount.conf" state)"
+        if [ "${'$'}active" != default ]; then
+            if [ "${'$'}mountState" = failed ]; then
+                alignment=failed
+                mode=compatibility
+                reason=self-mount-not-visible
+            elif [ -n "${'$'}verifiedActive" ] && [ "${'$'}verifiedActive" != "${'$'}active" ]; then
+                alignment=pending
+                mode=unknown
+                reason=stale-verification
+            fi
+        fi
         cachePending=no
         [ -s "${'$'}CFG/device-font-cache-pending.conf" ] && cachePending=yes
-        printf 'activeFont=%s\ninventory=%s\nengine=%s\ntemplate=%s\nalignment=%s\nmode=%s\nreason=%s\ncachePending=%s\n' \
+        printf 'activeFont=%s\ninventory=%s\nengine=%s\ntemplate=%s\nalignment=%s\nmode=%s\nreason=%s\nmountState=%s\ncachePending=%s\n' \
             "${'$'}active" "${'$'}inventory" "${'$'}{engine:-missing}" "${'$'}{template:-missing}" \
-            "${'$'}{alignment:-pending}" "${'$'}{mode:-compatibility}" "${'$'}reason" "${'$'}cachePending"
+            "${'$'}{alignment:-pending}" "${'$'}{mode:-compatibility}" "${'$'}reason" \
+            "${'$'}{mountState:-missing}" "${'$'}cachePending"
     """.trimIndent()
     val result = RootShell.exec(command, timeoutMs = 12_000L)
     if (result.code != 0) {
@@ -111,6 +128,7 @@ internal fun parseDeviceTrustOutput(raw: String): DeviceTrustState {
         alignment = values["alignment"].orEmpty().ifBlank { "unknown" },
         mode = values["mode"].orEmpty().ifBlank { "unknown" },
         reason = values["reason"].orEmpty(),
+        mountState = values["mountState"].orEmpty().ifBlank { "unknown" },
         cachePending = values["cachePending"] == "yes",
     )
 }
@@ -176,6 +194,7 @@ internal fun DeviceTrustDialog(
                 DeviceTrustRow("原厂模板", friendlyTrustValue(state.template))
                 DeviceTrustRow("开机加载验证", friendlyTrustValue(state.alignment))
                 DeviceTrustRow("加载模式", friendlyTrustValue(state.mode))
+                DeviceTrustRow("自挂载事务", friendlyTrustValue(state.mountState))
                 if (state.reason.isNotBlank()) {
                     DeviceTrustRow("验证说明", friendlyTrustReason(state.reason))
                 }
@@ -246,8 +265,8 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
             scheme.primary,
         )
         state.level == DeviceTrustLevel.COMPATIBILITY -> DeviceTrustPresentation(
-            "当前使用兼容字体映射",
-            "字体可正常使用，但没有设备专属加载证据",
+            "字体效果尚未确认",
+            "已生成兼容映射，但没有系统实际加载证据",
             Icons.Rounded.Info,
             scheme.tertiary,
         )
@@ -281,6 +300,8 @@ private fun friendlyTrustReason(value: String): String = when (value) {
     "aligned-manifest-missing" -> "设备专属负载清单缺失"
     "verifier-output-missing" -> "验证器没有返回结果"
     "verification-retry-exhausted" -> "多次自动验证仍未完成"
+    "self-mount-not-visible" -> "开机挂载未完整生效，当前使用系统默认字体"
+    "stale-verification" -> "验证记录与当前选择的字体不一致"
     else -> value
 }
 
@@ -298,6 +319,8 @@ private fun friendlyTrustValue(value: String): String = when (value) {
     "aligned" -> "设备对齐"
     "mount-verified" -> "挂载证据"
     "compatibility" -> "兼容映射"
+    "mounted" -> "完整挂载"
+    "idle" -> "未启用"
     "unknown", "" -> "未知"
     else -> value
 }

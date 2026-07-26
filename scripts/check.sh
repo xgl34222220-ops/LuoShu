@@ -34,7 +34,7 @@ for file in \
   common/font_provider_cache.sh common/font_validation_cache.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
   scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
-  scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh \
+  scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh scripts/app_bridge_status_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_config_monospace_test.py \
   scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/mix_finalize_performance_test.sh scripts/font_library_ui_layout_test.sh scripts/v2_source_audit.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
@@ -59,6 +59,7 @@ for file in \
   android-app/app/src/test/java/io/github/xgl34222220/luoshu/NativeImportTaskCenterTest.kt \
   android-app/app/src/test/java/io/github/xgl34222220/luoshu/NativeImportControlsTest.kt \
   android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/logs/TaskCenterModelTest.kt \
+  android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/home/HomeContractTest.kt \
   android-app/app/src/test/java/io/github/xgl34222220/luoshu/ui/appearance/AppearanceSettingsTest.kt; do
   test -f "$ROOT/$file"
 done
@@ -128,6 +129,8 @@ grep -q 'preview_source)' "$ROOT/common/app_bridge.sh"
 grep -q 'find_preview_source' "$ROOT/common/app_bridge.sh"
 grep -q 'sha256' "$ROOT/common/app_bridge.sh"
 grep -q 'rebootRequired' "$ROOT/common/app_bridge.sh"
+grep -q 'effectiveActive' "$ROOT/common/app_bridge.sh"
+grep -q 'fontEffectState' "$ROOT/common/app_bridge.sh"
 grep -q 'trusted_source' "$ROOT/common/native_import.sh"
 grep -q 'MAX_BYTES=268435456' "$ROOT/common/native_import.sh"
 grep -q 'font_validate' "$ROOT/common/native_import.sh"
@@ -206,6 +209,7 @@ grep -q '^MIT License$' "$ROOT/licenses/FontTools-LICENSE.txt"
 
 # 功能回归脚本。
 sh "$ROOT/scripts/native_preview_source_test.sh"
+sh "$ROOT/scripts/app_bridge_status_test.sh"
 sh "$ROOT/scripts/native_zip_import_test.sh"
 sh "$ROOT/scripts/font_index_delete_regression_test.sh"
 sh "$ROOT/scripts/v2_source_audit.sh"
