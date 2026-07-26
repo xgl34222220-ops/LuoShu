@@ -1,0 +1,138 @@
+#!/bin/sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "${0%/*}" 2>/dev/null && pwd)
+REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd)
+ATOMIC_SCRIPT=${ATOMIC_SCRIPT:-$REPO_ROOT/common/mount_self_atomic.sh}
+TEST_ROOT=$(mktemp -d)
+trap 'rm -rf "$TEST_ROOT"' EXIT INT TERM
+
+fail() {
+    echo "self-mount atomic test failed: $*" >&2
+    exit 1
+}
+
+setup_case() {
+    CASE_ROOT="$TEST_ROOT/$1"
+    MODULE_DIR="$CASE_ROOT/module"
+    LUOSHU_MOUNT_MODDIR="$MODULE_DIR"
+    LUOSHU_SELF_MOUNT_STATE_ROOT="$CASE_ROOT/state"
+    LUOSHU_SELF_MOUNT_VISIBLE_ROOT="$CASE_ROOT/root"
+    LUOSHU_SELF_PID1_ROOT=/
+    export MODULE_DIR LUOSHU_MOUNT_MODDIR LUOSHU_SELF_MOUNT_STATE_ROOT \
+        LUOSHU_SELF_MOUNT_VISIBLE_ROOT LUOSHU_SELF_PID1_ROOT
+    mkdir -p "$MODULE_DIR/config" "$MODULE_DIR/logs" "$CASE_ROOT/root/system/fonts" \
+        "$CASE_ROOT/root/system/etc" "$CASE_ROOT/state"
+    printf 'custom\n' > "$MODULE_DIR/config/active_font.conf"
+    : > "$CASE_ROOT/unmount.log"
+    FAIL_OVERLAY=''
+    FAIL_BIND=''
+}
+
+_luoshu_self_module() { printf '%s\n' "$MODULE_DIR"; }
+_luoshu_self_state_root() { printf '%s\n' "$LUOSHU_SELF_MOUNT_STATE_ROOT"; }
+_luoshu_self_log() { printf '%s\n' "$*" >> "$MODULE_DIR/logs/self-mount.log"; }
+_luoshu_self_state_write() {
+    {
+        printf 'state=%s\n' "$1"
+        printf 'backend=%s\n' "$2"
+        printf 'mounted=%s\n' "$3"
+        printf 'failed=%s\n' "$4"
+    } > "$MODULE_DIR/config/self-mount.conf"
+}
+_luoshu_self_state_value() {
+    sed -n "s/^${1}=//p" "$MODULE_DIR/config/self-mount.conf" 2>/dev/null | head -n1
+}
+luoshu_payload_partitions() { printf '%s\n' 'system product'; }
+_luoshu_partition_root() {
+    case "$1" in
+        system)
+            test -d "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system" || return 1
+            printf '%s/system\n' "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT"
+            ;;
+        product)
+            test -d "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/product" || return 1
+            printf '%s/product\n' "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT"
+            ;;
+        *) return 1 ;;
+    esac
+}
+_luoshu_overlay_mount_dir() {
+    test "${FAIL_OVERLAY:-}" != "$3" || return 1
+    cp -R "$1/." "$2/"
+}
+_luoshu_mount_cmd() {
+    test "$1" = -o && test "$2" = bind || return 1
+    test "${FAIL_BIND:-}" != "$4" || return 1
+    cp -f "$3" "$4"
+}
+_luoshu_umount_cmd() {
+    printf '%s\n' "$1" >> "$CASE_ROOT/unmount.log"
+    return 0
+}
+luoshu_mount_record() {
+    printf '%s|%s\n' "$1" "$2" > "$MODULE_DIR/config/mount-record.txt"
+}
+
+. "$ATOMIC_SCRIPT"
+
+setup_case success
+mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/system/etc"
+printf 'new-font\n' > "$MODULE_DIR/system/fonts/Roboto.ttf"
+printf 'new-xml\n' > "$MODULE_DIR/system/etc/fonts.xml"
+printf 'stock-font\n' > "$CASE_ROOT/root/system/fonts/Roboto.ttf"
+printf 'stock-xml\n' > "$CASE_ROOT/root/system/etc/fonts.xml"
+luoshu_self_mount_ensure || fail 'complete overlay transaction returned failure'
+grep -q '^state=mounted$' "$MODULE_DIR/config/self-mount.conf" || fail 'success was not recorded as mounted'
+test "$(wc -l < "$MODULE_DIR/config/self-mount-required.conf" | tr -d ' ')" -eq 2 || fail 'required manifest is incomplete'
+luoshu_mount_verify_active custom || fail 'strict verifier rejected a complete transaction'
+grep -q '^verified|' "$MODULE_DIR/config/mount-record.txt" || fail 'verified record missing'
+printf 'state=degraded\nbackend=legacy\nmounted=system/fonts\nfailed=system/etc\n' > "$MODULE_DIR/config/self-mount.conf"
+if luoshu_mount_verify_active custom; then
+    fail 'legacy degraded state was accepted'
+fi
+
+setup_case rollback
+mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/system/etc" "$MODULE_DIR/product/etc" \
+    "$CASE_ROOT/root/product/etc"
+printf 'new-font\n' > "$MODULE_DIR/system/fonts/Roboto.ttf"
+printf 'new-xml\n' > "$MODULE_DIR/system/etc/fonts.xml"
+printf 'product-xml\n' > "$MODULE_DIR/product/etc/fonts.xml"
+printf 'stock-font\n' > "$CASE_ROOT/root/system/fonts/Roboto.ttf"
+printf 'stock-xml\n' > "$CASE_ROOT/root/system/etc/fonts.xml"
+printf 'stock-product\n' > "$CASE_ROOT/root/product/etc/fonts.xml"
+FAIL_OVERLAY=product-etc
+FAIL_BIND="$CASE_ROOT/root/product/etc/fonts.xml"
+if luoshu_self_mount_ensure; then
+    fail 'partial product/etc failure was accepted'
+fi
+grep -q '^state=failed$' "$MODULE_DIR/config/self-mount.conf" || fail 'rollback failure state missing'
+grep -q 'product/etc-bind-incomplete' "$MODULE_DIR/config/self-mount.conf" || fail 'failed component not recorded'
+test ! -e "$MODULE_DIR/config/self-mount-required.conf" || fail 'failed manifest was committed'
+test -s "$CASE_ROOT/unmount.log" || fail 'partial mounts were not rolled back'
+if grep -q '^state=degraded$' "$MODULE_DIR/config/self-mount.conf"; then
+    fail 'degraded state survived atomic policy'
+fi
+
+setup_case missing-root
+mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/product/etc"
+printf 'new-font\n' > "$MODULE_DIR/system/fonts/Roboto.ttf"
+printf 'stock-font\n' > "$CASE_ROOT/root/system/fonts/Roboto.ttf"
+printf 'product-xml\n' > "$MODULE_DIR/product/etc/fonts.xml"
+if luoshu_self_mount_ensure; then
+    fail 'missing payload partition root was silently skipped'
+fi
+grep -q 'product/root-unavailable' "$MODULE_DIR/config/self-mount.conf" || fail 'missing partition root reason absent'
+
+setup_case bind-incomplete
+mkdir -p "$MODULE_DIR/system/fonts"
+printf 'font-a\n' > "$MODULE_DIR/system/fonts/A.ttf"
+printf 'font-b\n' > "$MODULE_DIR/system/fonts/B.ttf"
+printf 'stock-a\n' > "$CASE_ROOT/root/system/fonts/A.ttf"
+FAIL_OVERLAY=system-fonts
+if luoshu_self_mount_ensure; then
+    fail 'incomplete per-file bind was accepted'
+fi
+grep -q 'system/fonts-bind-incomplete' "$MODULE_DIR/config/self-mount.conf" || fail 'incomplete bind reason absent'
+
+echo 'self-mount atomic transaction tests passed'
