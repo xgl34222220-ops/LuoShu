@@ -4,6 +4,13 @@
 # succeeds together, otherwise every mount created by this attempt is rolled back.
 set +e
 
+# Legacy injected metamodule fixtures keep their strict per-partition verifier.
+# Production never sets LUOSHU_META_TEST_ENGINE and always uses this atomic path.
+case "${LUOSHU_META_TEST_ENGINE:-}" in
+    ''|self-mount) ;;
+    *) return 0 2>/dev/null || exit 0 ;;
+esac
+
 _luoshu_atomic_manifest() {
     _lsam_module=$(_luoshu_self_module)
     printf '%s/config/self-mount-required.conf\n' "$_lsam_module"
@@ -67,6 +74,31 @@ _luoshu_atomic_pid1_target() {
     else
         printf '%s\n' "$_lsapt_target"
     fi
+}
+
+_luoshu_atomic_boot_id() {
+    _lsabi_value=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
+    [ -n "$_lsabi_value" ] || _lsabi_value=unknown
+    printf '%s\n' "$_lsabi_value"
+}
+
+# Return success only when the mount journal belongs to this boot. A journal
+# from an older boot must be cleared without unmounting generic system targets,
+# because another module may own those targets now.
+_luoshu_atomic_prepare_boot_state() {
+    _lsapbs_list="$1"
+    _lsapbs_state=$(_luoshu_self_state_root)
+    _lsapbs_file="$_lsapbs_state/boot-id"
+    _lsapbs_current=$(_luoshu_atomic_boot_id)
+    _lsapbs_saved=$(cat "$_lsapbs_file" 2>/dev/null | tr -d '\r\n')
+    if [ -n "$_lsapbs_saved" ] && [ "$_lsapbs_saved" = "$_lsapbs_current" ]; then
+        return 0
+    fi
+    : > "$_lsapbs_list" 2>/dev/null || true
+    rm -rf "$_lsapbs_state/lower" "$_lsapbs_state/work" 2>/dev/null || true
+    printf '%s\n' "$_lsapbs_current" > "${_lsapbs_file}.tmp.$$" 2>/dev/null && \
+        mv -f "${_lsapbs_file}.tmp.$$" "$_lsapbs_file" 2>/dev/null || true
+    return 1
 }
 
 _luoshu_atomic_tree_visible() {
@@ -190,21 +222,25 @@ luoshu_self_mount_ensure() {
     _lsme_manifest=$(_luoshu_atomic_manifest)
     _lsme_manifest_temp="${_lsme_manifest}.tmp.$$"
     mkdir -p "$_lsme_state_root" "$_lsme_module/config" 2>/dev/null || return 1
+    _lsme_same_boot=0
+    _luoshu_atomic_prepare_boot_state "$_lsme_mount_list" && _lsme_same_boot=1
 
     if [ "$_lsme_active" = default ]; then
-        _luoshu_atomic_rollback "$_lsme_mount_list"
+        [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list"
+        : > "$_lsme_mount_list" 2>/dev/null || true
         rm -f "$_lsme_manifest" "$_lsme_manifest_temp" 2>/dev/null || true
         _luoshu_self_state_write idle none '' ''
         return 0
     fi
 
-    if [ "$(_luoshu_self_state_value state)" = mounted ] && \
+    if [ "$_lsme_same_boot" -eq 1 ] && \
+       [ "$(_luoshu_self_state_value state)" = mounted ] && \
        _luoshu_atomic_verify_manifest "$_lsme_manifest"; then
         _luoshu_self_log '自挂载已完整存在，跳过重复挂载'
         return 0
     fi
 
-    _luoshu_atomic_rollback "$_lsme_mount_list"
+    [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list"
     : > "$_lsme_mount_list" 2>/dev/null || return 1
     : > "$_lsme_manifest_temp" 2>/dev/null || return 1
     _lsme_mounted=''
