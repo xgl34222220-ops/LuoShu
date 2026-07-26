@@ -158,6 +158,18 @@ _dfload_write_conf_from_json() {
     chmod 0600 "$_dfload_conf" 2>/dev/null || true
 }
 
+_dfload_mount_guard() {
+    _dfload_guard_active="$1"
+    _dfload_guard_module="$(_dfload_module)"
+    _dfload_guard_compat="$_dfload_guard_module/common/mount_compat.sh"
+    [ -f "$_dfload_guard_compat" ] || return 1
+    MODDIR="$_dfload_guard_module"
+    MODULE_DIR="$_dfload_guard_module"
+    . "$_dfload_guard_compat"
+    type luoshu_mount_verify_active >/dev/null 2>&1 || return 1
+    luoshu_mount_verify_active "$_dfload_guard_active"
+}
+
 device_font_load_verify() {
     _dfload_module_dir="$(_dfload_module)"
     _dfload_config="$_dfload_module_dir/config"
@@ -166,6 +178,11 @@ device_font_load_verify() {
     if [ "$_dfload_active" = default ]; then
         _dfload_write_simple not-applicable default-font "$_dfload_active"
         return 2
+    fi
+    if ! _dfload_mount_guard "$_dfload_active"; then
+        _dfload_write_simple failed self-mount-not-visible "$_dfload_active"
+        _dfload_log '自挂载未完整提交或未进入系统主命名空间，禁止标记字体已生效'
+        return 1
     fi
     _dfload_engine_state="$_dfload_config/device-font-engine.conf"
     if ! grep -q '^state=installed$' "$_dfload_engine_state" 2>/dev/null; then
