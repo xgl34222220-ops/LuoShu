@@ -26,6 +26,7 @@ data class HomeUiState(
     val rootManager: String = "未授权",
     val moduleInstalled: Boolean = false,
     val mountEngine: String = "未知",
+    val mountHealthy: Boolean = false,
     val taskRunning: Boolean = false,
     val taskTitle: String = "字体引擎等待中",
     val taskMessage: String = "暂无后台字体任务",
@@ -58,6 +59,8 @@ internal fun ModuleSnapshot.toHomeUiState(weight: SystemWeightState): HomeUiStat
         rootManager = rootManager,
         moduleInstalled = installed,
         mountEngine = mountEngine,
+        mountHealthy = installed && mountState != "failed" &&
+            (activeFont in setOf("", "default") || rebootRequired || mountState == "mounted"),
         taskRunning = running,
         taskTitle = when {
             running -> "字体任务执行中"

@@ -140,15 +140,27 @@ if luoshu_self_mount_ensure; then
 fi
 grep -q 'product/root-unavailable' "$MODULE_DIR/config/self-mount.conf" || fail 'missing partition root reason absent'
 
-setup_case bind-incomplete
+setup_case bind-compatible-alias
 mkdir -p "$MODULE_DIR/system/fonts"
 printf 'font-a\n' > "$MODULE_DIR/system/fonts/A.ttf"
 printf 'font-b\n' > "$MODULE_DIR/system/fonts/B.ttf"
 printf 'stock-a\n' > "$CASE_ROOT/root/system/fonts/A.ttf"
 FAIL_OVERLAY=system-fonts
+luoshu_self_mount_ensure || fail 'bind fallback rejected a device-compatible existing target'
+grep -q '^state=mounted$' "$MODULE_DIR/config/self-mount.conf" || fail 'bind fallback success was not recorded'
+grep -q '^backend=self-overlay-bind$' "$MODULE_DIR/config/self-mount.conf" || fail 'bind fallback backend missing'
+test "$(cat "$CASE_ROOT/root/system/fonts/A.ttf")" = 'font-a' || fail 'existing bind target was not replaced'
+test ! -e "$CASE_ROOT/root/system/fonts/B.ttf" || fail 'bind fallback created an additive ROM alias'
+luoshu_mount_verify_active custom || fail 'strict verifier rejected compatible bind fallback'
+
+setup_case bind-no-compatible-target
+mkdir -p "$MODULE_DIR/system/fonts"
+printf 'font-a\n' > "$MODULE_DIR/system/fonts/A.ttf"
+printf 'font-b\n' > "$MODULE_DIR/system/fonts/B.ttf"
+FAIL_OVERLAY=system-fonts
 if luoshu_self_mount_ensure; then
-    fail 'incomplete per-file bind was accepted'
+    fail 'bind fallback with no device-compatible target was accepted'
 fi
-grep -q 'system/fonts-bind-incomplete' "$MODULE_DIR/config/self-mount.conf" || fail 'incomplete bind reason absent'
+grep -q 'system/fonts-bind-incomplete' "$MODULE_DIR/config/self-mount.conf" || fail 'empty bind reason absent'
 
 echo 'self-mount atomic transaction tests passed'

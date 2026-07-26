@@ -23,6 +23,18 @@ _luoshu_atomic_file_optional() {
     esac
 }
 
+_luoshu_atomic_missing_target_allowed() {
+    _lsamta_rel="$1"
+    _lsamta_mode="${2:-overlay}"
+    _luoshu_atomic_file_optional "$_lsamta_rel" && return 0
+    # A per-file bind can only replace an inode that already exists in the ROM
+    # view. Payloads intentionally contain additive aliases for several ROM
+    # families, so an alias absent on this device is not a failed replacement.
+    # The caller still requires at least one real target per component, keeping
+    # the transaction fail-closed when nothing on the device can be mounted.
+    [ "$_lsamta_mode" = bind ]
+}
+
 _luoshu_atomic_hash_stream() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum 2>/dev/null | awk '{print $1}'
@@ -113,16 +125,16 @@ _luoshu_atomic_tree_visible() {
     find "$_lsatv_source" -type f 2>/dev/null > "$_lsatv_files" || return 1
     while IFS= read -r _lsatv_src; do
         [ -n "$_lsatv_src" ] || continue
-        _lsatv_total=$((_lsatv_total + 1))
         _lsatv_rel=${_lsatv_src#$_lsatv_source/}
         _lsatv_dst="$_lsatv_target/$_lsatv_rel"
         if [ ! -f "$_lsatv_dst" ]; then
-            if [ "$_lsatv_mode" = bind ] && _luoshu_atomic_file_optional "$_lsatv_rel"; then
+            if _luoshu_atomic_missing_target_allowed "$_lsatv_rel" "$_lsatv_mode"; then
                 continue
             fi
             _lsatv_failed=1
             break
         fi
+        _lsatv_total=$((_lsatv_total + 1))
         _luoshu_atomic_files_equal "$_lsatv_src" "$_lsatv_dst" || {
             _lsatv_failed=1
             break
@@ -146,7 +158,8 @@ _luoshu_atomic_bind_tree() {
         [ -n "$_lsabt_src" ] || continue
         _lsabt_rel=${_lsabt_src#$_lsabt_source/}
         _lsabt_dst="$_lsabt_target/$_lsabt_rel"
-        if [ ! -f "$_lsabt_dst" ] && _luoshu_atomic_file_optional "$_lsabt_rel"; then
+        if [ ! -f "$_lsabt_dst" ] && \
+           _luoshu_atomic_missing_target_allowed "$_lsabt_rel" bind; then
             continue
         fi
         _lsabt_expected=$((_lsabt_expected + 1))
@@ -166,7 +179,9 @@ _luoshu_atomic_bind_tree() {
         fi
     done < "$_lsabt_files"
     rm -f "$_lsabt_files" 2>/dev/null || true
-    [ "$_lsabt_failed" -eq 0 ] && [ "$_lsabt_mounted" -eq "$_lsabt_expected" ]
+    [ "$_lsabt_failed" -eq 0 ] && \
+        [ "$_lsabt_mounted" -gt 0 ] 2>/dev/null && \
+        [ "$_lsabt_mounted" -eq "$_lsabt_expected" ]
 }
 
 _luoshu_atomic_rollback() {

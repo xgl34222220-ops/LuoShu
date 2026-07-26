@@ -243,7 +243,7 @@ internal fun HomeScreenCompact(
                     icon = Icons.Rounded.Layers,
                     title = "挂载引擎",
                     value = state.mountEngine,
-                    healthy = state.moduleInstalled,
+                    healthy = state.mountHealthy,
                     cardColor = cardColor,
                     textPrimary = textPrimary,
                     textSecondary = textSecondary,
