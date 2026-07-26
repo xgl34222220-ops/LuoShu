@@ -71,6 +71,7 @@ common/mount_compat.sh
 common/mount_compat_base.sh
 common/mount_compat_policy.sh
 common/mount_fast_sync.sh
+common/mount_self_atomic.sh
 common/mount_self_backend.sh
 common/mount_self_fallback.sh
 common/multiweight_mix_task.sh
