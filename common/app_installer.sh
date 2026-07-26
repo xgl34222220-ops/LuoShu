@@ -113,11 +113,15 @@ installed_version_code() {
 
 INSTALLED_VERSION=$(installed_version_code)
 if [ "$INSTALLED_VERSION" = "$APP_VERSION_CODE" ]; then
-    rm -f "$PENDING" 2>/dev/null || true
-    write_state up_to_date "已安装版本与模块内置 App 一致"
-    log_app INFO "$APP_PACKAGE 已是目标版本 $APP_VERSION_CODE，跳过覆盖安装"
-    printf 'already-current\n'
-    exit 0
+    PREVIOUS_APK_SHA256=$(read_prop apkSha256 "$STATE")
+    if [ "$APK_SHA256" = unknown ] || [ "$PREVIOUS_APK_SHA256" = "$APK_SHA256" ]; then
+        rm -f "$PENDING" 2>/dev/null || true
+        write_state up_to_date "已安装版本与模块内置 App 一致"
+        log_app INFO "$APP_PACKAGE 已是目标版本 $APP_VERSION_CODE，跳过覆盖安装"
+        printf 'already-current\n'
+        exit 0
+    fi
+    log_app INFO "$APP_PACKAGE versionCode 相同但 APK 指纹已更新，执行正式构建覆盖安装"
 fi
 
 if [ -z "$PM_BIN" ]; then

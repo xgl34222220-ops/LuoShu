@@ -12,7 +12,8 @@
 - 修复 OEM 分区遗漏、跨 ROM 缺失别名、符号链接共享真实目标及非核心附加组件零 bind 目标造成的回滚。
 - 严格自挂载守卫确认全部必需文件均在 PID 1 根命名空间可见后，记录为 `verified + mount-verified`，不再把已经实际显示的字体误报为“待验证”。
 - 首页、真机验收与发布门禁统一接受可靠挂载证据；缺失、部分挂载或可见性不一致仍保持失败并完整回滚。
-- 模块正式版 versionCode 为 `20307`，App versionCode 为 `2030701`。
+- 同 versionCode 的 Alpha5 App 会按 APK SHA-256 识别正式构建并执行一次覆盖更新。
+- 模块正式版 versionCode 为 `20305`，App versionCode 为 `2030501`。
 
 ## [v2.3.5 Alpha5] - 2026-07-26
 

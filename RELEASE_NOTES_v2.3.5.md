@@ -22,6 +22,7 @@ v2.3.5 是经过多轮 Android 16 与 KernelSU 真机验证后的正式稳定版
 5. 首页显示“设备字体挂载已验证”即代表当前字体负载已经通过系统可见性校验。
 
 模块 ZIP 已内置同版本正式签名 App；也可以单独安装发布页中的 APK。覆盖更新会保留字体库、组合方案和现有配置。
+从 Alpha5 覆盖正式版时，模块会比较内置 APK 的 SHA-256；即使 versionCode 相同，也会将 Alpha5 App 更新为正式构建。
 
 ## 安全约束
 
@@ -33,7 +34,7 @@ v2.3.5 是经过多轮 Android 16 与 KernelSU 真机验证后的正式稳定版
 ## 版本信息
 
 - 模块版本：`v2.3.5`
-- 模块 versionCode：`20307`
+- 模块 versionCode：`20305`
 - App versionName：`2.3.5`
-- App versionCode：`2030701`
+- App versionCode：`2030501`
 - 发布类型：正式稳定版
