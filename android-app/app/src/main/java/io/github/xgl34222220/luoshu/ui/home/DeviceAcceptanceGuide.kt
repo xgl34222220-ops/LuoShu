@@ -104,8 +104,10 @@ internal fun deviceAcceptanceAutoChecks(
         id = "alignment",
         title = "字体加载模式",
         detail = when {
-            trust.alignment == "verified" && trust.mode in setOf("aligned", "mount-verified") ->
+            trust.alignment == "verified" && trust.mode == "aligned" ->
                 "逐分区开机加载验证通过，当前为设备对齐模式"
+            trust.alignment == "verified" && trust.mode == "mount-verified" ->
+                "逐分区系统可见性验证通过，当前字体负载已生效"
             trust.level == DeviceTrustLevel.COMPATIBILITY || trust.mode == "compatibility" ->
                 "兼容映射已生成，但尚无系统实际加载证据，不能判定字体已经生效"
             trust.alignment == "failed" || trust.error.isNotBlank() ->

@@ -158,7 +158,7 @@ internal fun buildPreReleaseReadinessReport(
 ): PreReleaseReadinessReport {
     val acceptanceReady = checks.isNotEmpty() && checks.all { it.passed }
     val versionReady = state.version.lowercase().startsWith(targetVersion.lowercase())
-    val trustReady = trust.alignment == "verified" && trust.mode == "aligned"
+    val trustReady = trust.alignment == "verified" && trust.mode in setOf("aligned", "mount-verified")
     val runtimeReady = !state.taskRunning && !state.rebootRequired
     val passingForCurrentVersion = records.filter {
         it.moduleVersion == state.version && it.result == DeviceTestResult.PASS
@@ -186,7 +186,14 @@ internal fun buildPreReleaseReadinessReport(
             PreReleaseGateCheck(
                 id = "trust",
                 title = "设备加载证据",
-                detail = if (trustReady) "开机加载验证通过，设备处于对齐模式" else "需要 verified + aligned，兼容或未知模式不能作为发布证据",
+                detail = when {
+                    trust.alignment == "verified" && trust.mode == "aligned" ->
+                        "开机加载验证通过，设备处于对齐模式"
+                    trust.alignment == "verified" && trust.mode == "mount-verified" ->
+                        "系统主命名空间挂载验证通过，字体负载已生效"
+                    else ->
+                        "需要 verified + aligned/mount-verified，缺少加载证据的兼容或未知模式不能作为发布证据"
+                },
                 severity = if (trustReady) PreReleaseGateSeverity.READY else PreReleaseGateSeverity.BLOCKER,
             ),
             PreReleaseGateCheck(

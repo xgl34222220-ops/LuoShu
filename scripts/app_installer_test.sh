@@ -9,11 +9,13 @@ CALLS="$TMP/pm.calls"
 mkdir -p "$MOD/bundled" "$MOD/common" "$MOD/config" "$MOD/logs" "$BIN"
 cp "$ROOT/common/app_installer.sh" "$MOD/common/app_installer.sh"
 printf 'fake-apk\n' > "$MOD/bundled/LuoShu-App.apk"
+APK_HASH=$(sha256sum "$MOD/bundled/LuoShu-App.apk" | awk '{print $1}')
 cat > "$MOD/bundled/app.prop" <<'EOF'
 package=io.github.xgl34222220.luoshu.debug
 versionCode=1432001
-sha256=unknown
+sha256=APP_HASH
 EOF
+sed -i "s/APP_HASH/$APK_HASH/" "$MOD/bundled/app.prop"
 cat > "$MOD/module.prop" <<'EOF'
 version=v14.3 Alpha1.10
 versionCode=14320
@@ -44,6 +46,13 @@ esac
 EOF
 chmod 0755 "$BIN/pm"
 
+cat > "$MOD/config/app_install_state.conf" <<EOF
+status=installed
+package=io.github.xgl34222220.luoshu.debug
+versionCode=1432001
+apkSha256=$APK_HASH
+EOF
+
 rm -f "$CALLS"
 MOCK_VERSION=1432001 MOCK_PM_CALLS="$CALLS" \
 APP_INSTALL_PM_BIN="$BIN/pm" APP_INSTALL_DUMPSYS_BIN="$BIN/dumpsys" \
@@ -51,6 +60,20 @@ MODDIR="$MOD" sh "$MOD/common/app_installer.sh" test-current > "$TMP/current.out
 grep -qx 'already-current' "$TMP/current.out"
 grep -q '^status=up_to_date$' "$MOD/config/app_install_state.conf"
 test ! -e "$CALLS"
+
+cat > "$MOD/config/app_install_state.conf" <<'EOF'
+status=installed
+package=io.github.xgl34222220.luoshu.debug
+versionCode=1432001
+apkSha256=old-alpha-build
+EOF
+MOCK_VERSION=1432001 MOCK_PM_CALLS="$CALLS" \
+APP_INSTALL_PM_BIN="$BIN/pm" APP_INSTALL_DUMPSYS_BIN="$BIN/dumpsys" \
+MODDIR="$MOD" sh "$MOD/common/app_installer.sh" test-same-version-new-build > "$TMP/same-version.out"
+grep -qx 'installed' "$TMP/same-version.out"
+grep -q 'install -r -d --user 0' "$CALLS"
+grep -q '^status=installed$' "$MOD/config/app_install_state.conf"
+grep -q "^apkSha256=$APK_HASH$" "$MOD/config/app_install_state.conf"
 
 rm -f "$CALLS" "$MOD/config/app_install_pending"
 MOCK_VERSION=1431901 MOCK_PM_CALLS="$CALLS" \

@@ -47,12 +47,13 @@ _dfload_write_simple() {
     _dfload_state="$1"
     _dfload_reason="$2"
     _dfload_active="$3"
+    _dfload_mode="${4:-compatibility}"
     _dfload_module_dir="$(_dfload_module)"
     _dfload_conf="$_dfload_module_dir/config/device-font-load-verification.conf"
     mkdir -p "${_dfload_conf%/*}" 2>/dev/null || return 1
     {
         printf 'state=%s\n' "$_dfload_state"
-        printf 'mode=compatibility\n'
+        printf 'mode=%s\n' "$_dfload_mode"
         printf 'activeFont=%s\n' "$_dfload_active"
         printf 'reason=%s\n' "$_dfload_reason"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
@@ -186,9 +187,14 @@ device_font_load_verify() {
     fi
     _dfload_engine_state="$_dfload_config/device-font-engine.conf"
     if ! grep -q '^state=installed$' "$_dfload_engine_state" 2>/dev/null; then
-        _dfload_write_simple compatibility aligned-payload-not-active "$_dfload_active"
-        _dfload_log "当前字体仅使用兼容映射：$_dfload_active"
-        return 2
+        # Compatibility payloads do not have aligned manifests, but the strict mount
+        # guard above already compared every required font/config file with the view
+        # visible from PID 1. That is the same runtime evidence used by the aligned
+        # verifier's mount-only fallback, so expose it as mount-verified instead of
+        # leaving a visibly active font permanently stuck at "pending".
+        _dfload_write_simple verified verified-by-visible-mounts "$_dfload_active" mount-verified
+        _dfload_log "兼容字体负载已通过系统主命名空间挂载验证：$_dfload_active"
+        return 0
     fi
 
     _dfload_paths=$(_dfload_manifest_paths)

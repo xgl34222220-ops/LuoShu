@@ -119,6 +119,26 @@ class DeviceTestMatrixTest {
     }
 
     @Test
+    fun verifiedCompatibilityMountIsValidReleaseEvidence() {
+        val candidateState = readyState(version = "v2.2.4-alpha1")
+        val mountTrust = trust.copy(mode = "mount-verified")
+        val record = buildDeviceTestMatrixRecord(candidateState, mountTrust, passedChecks, "", 1000L, 36)
+        val report = buildPreReleaseReadinessReport(
+            state = candidateState,
+            trust = mountTrust,
+            checks = passedChecks,
+            records = listOf(record),
+            now = 2000L,
+        )
+
+        assertEquals(
+            PreReleaseGateSeverity.READY,
+            report.checks.first { it.id == "trust" }.severity,
+        )
+        assertTrue(report.ready)
+    }
+
+    @Test
     fun pendingTaskRebootAndCacheRemainInformational() {
         val checks = deviceAcceptanceAutoChecks(
             state = readyState().copy(taskRunning = true, rebootRequired = true),

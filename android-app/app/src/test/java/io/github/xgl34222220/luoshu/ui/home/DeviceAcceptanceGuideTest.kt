@@ -58,4 +58,28 @@ class DeviceAcceptanceGuideTest {
         assertFalse(cache.passed)
         assertFalse(cache.blocking)
     }
+
+    @Test
+    fun compatibilityPayloadWithPid1MountEvidencePassesAcceptance() {
+        val checks = deviceAcceptanceAutoChecks(
+            state = HomeUiState(
+                rootGranted = true,
+                moduleInstalled = true,
+                taskRunning = false,
+                rebootRequired = false,
+            ),
+            trust = DeviceTrustState(
+                loading = false,
+                inventory = "available",
+                engine = "missing",
+                template = "trusted",
+                alignment = "verified",
+                mode = "mount-verified",
+                cachePending = false,
+            ),
+        )
+
+        assertTrue(checks.all { it.automatic && it.passed })
+        assertTrue(checks.first { it.id == "alignment" }.detail.contains("字体负载已生效"))
+    }
 }

@@ -64,6 +64,7 @@ on:
       - scripts/device_font_cache_test.sh
       - scripts/device_font_foreground_quick_test.sh
       - scripts/device_font_load_verify_test.py
+      - scripts/device_font_trust_test.sh
       - scripts/device_font_payload_build_test.py
       - scripts/device_font_payload_overlay_test.py
       - scripts/device_font_payload_verify_test.py
@@ -123,6 +124,7 @@ jobs:
           python3 scripts/device_font_slot_build_test.py --font "$FONT"
           sh scripts/device_font_cache_test.sh
           python3 scripts/device_font_load_verify_test.py
+          sh scripts/device_font_trust_test.sh
           sh -n common/device_font_load_verify.sh
           python3 scripts/device_font_payload_build_test.py --font "$FONT"
           python3 scripts/device_font_payload_overlay_test.py
