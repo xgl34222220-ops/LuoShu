@@ -103,10 +103,12 @@ sh -c '
 ' sh "$ROOT"
 
 # After all metamodules finish, LuoShu restores its private module view and mounts
-# the payload itself. Skip markers remain, and ROM Emoji survives.
+# the payload itself. Skip markers remain, ROM Emoji survives, and a repeated
+# call verifies and reuses the same atomic transaction without stacking mounts.
 MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_MOUNT_MODDIR="$MODULE" \
 LUOSHU_SELF_MOUNT_VISIBLE_ROOT="$VISIBLE" \
 LUOSHU_SELF_MOUNT_STATE_ROOT="$STATE" \
+LUOSHU_SELF_PID1_ROOT=/ \
 LUOSHU_SELF_MOUNT_COMMAND="$FAKE_MOUNT" \
 LUOSHU_SELF_UMOUNT_COMMAND="$FAKE_UMOUNT" \
 LUOSHU_PRIVATE_STATE_ROOT="$PRIVATE_STATE" \
@@ -134,10 +136,15 @@ sh -c '
     [ "$(sed -n "s/^backend=//p" "$MODDIR/config/self-mount.conf")" = self-overlay ]
     [ "$(cat "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system/fonts/Roboto-Regular.ttf")" = new-font ]
     [ "$(cat "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system/fonts/NotoColorEmoji.ttf")" = stock-emoji ]
-    _luoshu_system_probe_visible
+    _luoshu_atomic_verify_manifest "$MODDIR/config/self-mount-required.conf"
+    before=$(wc -l < "$STATE/mounts.list" | tr -d "[:space:]")
 
     luoshu_private_self_mount_ensure
-    [ "$(sed -n "s/^backend=//p" "$MODDIR/config/self-mount.conf")" = self-existing ]
+    [ "$(sed -n "s/^state=//p" "$MODDIR/config/self-mount.conf")" = mounted ]
+    [ "$(sed -n "s/^backend=//p" "$MODDIR/config/self-mount.conf")" = self-overlay ]
+    _luoshu_atomic_verify_manifest "$MODDIR/config/self-mount-required.conf"
+    after=$(wc -l < "$STATE/mounts.list" | tr -d "[:space:]")
+    [ "$before" = "$after" ]
 ' sh "$ROOT"
 
 # Production policy never detects or configures a metamodule. Engine injection is
@@ -152,6 +159,7 @@ grep -q 'External metamodules are intentionally ignored' "$ROOT/post-mount.sh"
 sh -n "$ROOT/common/private_payload.sh"
 sh -n "$ROOT/common/mount_self_fallback.sh"
 sh -n "$ROOT/common/mount_self_backend.sh"
+sh -n "$ROOT/common/mount_self_atomic.sh"
 sh -n "$ROOT/common/mount_compat_policy.sh"
 sh -n "$ROOT/common/private_mount_policy.sh"
 sh -n "$ROOT/common/mount_compat.sh"
