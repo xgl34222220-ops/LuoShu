@@ -302,6 +302,7 @@ private fun friendlyTrustReason(value: String): String = when (value) {
     "verification-retry-exhausted" -> "多次自动验证仍未完成"
     "self-mount-not-visible" -> "开机挂载未完整生效，当前使用系统默认字体"
     "stale-verification" -> "验证记录与当前选择的字体不一致"
+    "verified-by-visible-mounts" -> "系统可见字体文件与洛书负载一致"
     else -> value
 }
 

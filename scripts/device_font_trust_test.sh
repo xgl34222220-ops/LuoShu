@@ -30,6 +30,37 @@ assert "verified-by-visible-mounts" in payload["reasons"], payload
 assert "dynamic-family-unconfirmed" in payload["reasons"], payload
 PY
 
+# A compatibility payload has no aligned engine manifest. Once the strict mount
+# guard proves every required file is visible from PID 1, it is nevertheless a
+# verified active font and must not remain permanently stuck at "pending".
+COMPAT_MOD="$TMP/compat-module"
+mkdir -p "$COMPAT_MOD/common" "$COMPAT_MOD/config" "$COMPAT_MOD/logs"
+cp "$ROOT/common/device_font_load_verify.sh" "$COMPAT_MOD/common/"
+cat > "$COMPAT_MOD/common/mount_compat.sh" <<'EOF_MOUNT_OK'
+luoshu_mount_verify_active() { return 0; }
+EOF_MOUNT_OK
+printf 'Composite Font\n' > "$COMPAT_MOD/config/active_font.conf"
+MODDIR="$COMPAT_MOD" MODULE_DIR="$COMPAT_MOD" \
+    sh "$COMPAT_MOD/common/device_font_load_verify.sh"
+grep -q '^state=verified$' "$COMPAT_MOD/config/device-font-load-verification.conf"
+grep -q '^mode=mount-verified$' "$COMPAT_MOD/config/device-font-load-verification.conf"
+grep -q '^reason=verified-by-visible-mounts$' "$COMPAT_MOD/config/device-font-load-verification.conf"
+
+# A missing/partial PID 1 mount remains a hard failure and must never inherit
+# the compatibility success state.
+cat > "$COMPAT_MOD/common/mount_compat.sh" <<'EOF_MOUNT_FAIL'
+luoshu_mount_verify_active() { return 1; }
+EOF_MOUNT_FAIL
+set +e
+MODDIR="$COMPAT_MOD" MODULE_DIR="$COMPAT_MOD" \
+    sh "$COMPAT_MOD/common/device_font_load_verify.sh"
+VERIFY_RC=$?
+set -e
+test "$VERIFY_RC" -eq 1
+grep -q '^state=failed$' "$COMPAT_MOD/config/device-font-load-verification.conf"
+grep -q '^mode=compatibility$' "$COMPAT_MOD/config/device-font-load-verification.conf"
+grep -q '^reason=self-mount-not-visible$' "$COMPAT_MOD/config/device-font-load-verification.conf"
+
 # The post-fs scheduler must run the verifier only after boot and must not block startup.
 MOD="$TMP/module"
 mkdir -p "$MOD/common" "$MOD/config" "$MOD/logs" "$TMP/bin"
