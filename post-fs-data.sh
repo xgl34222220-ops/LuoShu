@@ -20,14 +20,16 @@ rm -f "$_lpf_temp" 2>/dev/null || true
 
 [ -f "$MODDIR/common/mount_self_backend.sh" ] && . "$MODDIR/common/mount_self_backend.sh"
 _lpf_root=$(luoshu_detect_root_manager 2>/dev/null | head -n1)
-case "$_lpf_root" in
-    KernelSU|KernelSU*|SukiSU|SukiSU*)
-        # KernelSU-family managers provide post-mount. Keep the private payload
-        # hidden until that globally visible stage instead of mounting too early.
+_lpf_stage=$(luoshu_self_mount_stage_for_manager "$_lpf_root" 2>/dev/null)
+case "$_lpf_stage" in
+    post-mount)
+        # APatch and KernelSU-family managers provide post-mount after their
+        # OverlayFS stage. Keep the payload hidden until that globally visible
+        # stage instead of racing module mounts in blocking post-fs-data.
         luoshu_private_unmount_module_view "$MODDIR" >/dev/null 2>&1 || true
         ;;
     *)
-        # Magisk/APatch have no KernelSU post-mount stage.
+        # Magisk has no module post-mount stage.
         type luoshu_private_self_mount_ensure >/dev/null 2>&1 && \
             luoshu_private_self_mount_ensure >/dev/null 2>&1 || true
         ;;

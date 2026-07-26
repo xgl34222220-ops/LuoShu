@@ -209,6 +209,9 @@ MODULE_DIR="$MODDIR"
             *) log_service "INFO" "设备字体加载验证未完成（state=${_load_verify_state:-missing}, code=$_load_verify_rc）" ;;
         esac
     fi
+    if [ -f "$MODDIR/common/module_status.sh" ]; then
+        MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" >/dev/null 2>&1 || true
+    fi
 
     # 新字体只由原生 App 或后台迁移任务提交，完整重启后由系统自然加载。
     rm -f "$MODDIR/.first_boot" 2>/dev/null || true

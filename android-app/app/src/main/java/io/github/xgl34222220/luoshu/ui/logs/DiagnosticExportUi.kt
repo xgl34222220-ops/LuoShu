@@ -62,10 +62,14 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
         template="${'$'}(read_value "${'$'}CFG/device-font-template.state" state)"
         alignment="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" state)"
         alignmentMode="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" mode)"
+        alignmentReason="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" reason)"
+        selfMountState="${'$'}(read_value "${'$'}CFG/self-mount.conf" state)"
+        selfMountBackend="${'$'}(read_value "${'$'}CFG/self-mount.conf" backend)"
+        selfMountFailed="${'$'}(read_value "${'$'}CFG/self-mount.conf" failed)"
         cachePending=no
         [ -s "${'$'}CFG/device-font-cache-pending.conf" ] && cachePending=yes
         rootManager=Root
-        if command -v apd >/dev/null 2>&1 || [ -d /data/adb/apatch ]; then
+        if command -v apd >/dev/null 2>&1 || [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then
             rootManager=APatch
         elif command -v ksud >/dev/null 2>&1 || [ -d /data/adb/ksu ]; then
             rootManager=KernelSU
@@ -94,6 +98,10 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
             printf 'templateState=%s\n' "${'$'}{template:-missing}"
             printf 'alignmentState=%s\n' "${'$'}{alignment:-pending}"
             printf 'alignmentMode=%s\n' "${'$'}{alignmentMode:-compatibility}"
+            printf 'alignmentReason=%s\n' "${'$'}{alignmentReason:-none}"
+            printf 'selfMountState=%s\n' "${'$'}{selfMountState:-missing}"
+            printf 'selfMountBackend=%s\n' "${'$'}{selfMountBackend:-missing}"
+            printf 'selfMountFailed=%s\n' "${'$'}{selfMountFailed:-none}"
             printf 'cachePending=%s\n' "${'$'}cachePending"
             printf 'rootManager=%s\n' "${'$'}rootManager"
             printf 'mountEngine=%s\n' "${'$'}mountEngine"

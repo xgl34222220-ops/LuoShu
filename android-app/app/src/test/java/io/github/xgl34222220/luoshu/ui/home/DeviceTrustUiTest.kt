@@ -65,6 +65,24 @@ class DeviceTrustUiTest {
     }
 
     @Test
+    fun installedEngineWithoutLoadEvidenceIsStillCompatibilityOnly() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+                engine=installed
+                template=trusted
+                alignment=compatibility
+                mode=compatibility
+                reason=aligned-payload-not-active
+                cachePending=no
+            """.trimIndent(),
+        )
+
+        assertEquals(DeviceTrustLevel.COMPATIBILITY, state.level)
+    }
+
+    @Test
     fun failedAlignmentTakesPriorityForCustomFont() {
         val state = parseDeviceTrustOutput(
             """
@@ -81,6 +99,25 @@ class DeviceTrustUiTest {
 
         assertEquals(DeviceTrustLevel.ISSUE, state.level)
         assertTrue(state.cachePending)
+    }
+
+    @Test
+    fun failedAtomicMountCannotBePresentedAsVerified() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+                engine=installed
+                template=trusted
+                alignment=verified
+                mode=mount-verified
+                reason=
+                mountState=failed
+                cachePending=no
+            """.trimIndent(),
+        )
+
+        assertEquals(DeviceTrustLevel.ISSUE, state.level)
     }
 
     @Test

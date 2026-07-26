@@ -47,14 +47,15 @@ grep -q '打开任务中心查看错误原因' "$HOME_COMPACT"
 ! grep -q 'QUICK ACCESS' "$HOME_COMPACT"
 ! grep -q 'bottom = 108.dp' "$HOME_ROUTE"
 
-# Acceptance guidance follows the installed version and distinguishes a usable
-# compatibility mapping, an informational wait, and a real blocking failure.
+# Acceptance guidance follows the installed version and never treats an
+# unverified compatibility mapping as proof that the font is effective.
 grep -q "targetVersion: String = state.version.substringBefore('-').substringBefore('+')" "$MATRIX"
 grep -q '真机测试矩阵 · ${report.targetVersion}' "$MATRIX"
 grep -q '测试矩阵与当前版本预发行门禁' "$ACCEPTANCE"
 grep -q 'val blocking: Boolean = true' "$ACCEPTANCE"
-grep -q '设备专属对齐属于可选增强，不影响正常使用' "$ACCEPTANCE"
-grep -q '设备对齐缓存会在后台继续准备，不作为失败项' "$ACCEPTANCE"
+grep -q '尚无系统实际加载证据，不能判定字体已经生效' "$ACCEPTANCE"
+! grep -q '不影响正常使用' "$ACCEPTANCE"
+grep -q '兼容映射尚未获得加载证据；设备对齐缓存仍在后台准备' "$ACCEPTANCE"
 grep -q '加载验证失败，请打开问题页查看具体失败分区' "$ACCEPTANCE"
 ! grep -q 'v2.2.2' "$MATRIX"
 ! grep -q 'v2.2.2' "$ACCEPTANCE"

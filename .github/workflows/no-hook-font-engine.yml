@@ -40,12 +40,17 @@ on:
       - common/hyperos_global.sh
       - common/mount_compat.sh
       - common/mount_compat_base.sh
+      - common/mount_self_atomic.sh
+      - common/mount_self_backend.sh
       - common/private_payload.sh
+      - common/private_mount_policy.sh
+      - common/module_update_state.sh
       - common/mount_fast_sync.sh
       - common/rom_adapters.sh
       - common/font_mix.sh
       - common/python/**
       - post-fs-data.sh
+      - post-mount.sh
       - .luoshu-runtime/post-fs-data-v227.sh
       - service.sh
       - uninstall.sh
@@ -79,9 +84,13 @@ on:
       - scripts/font_safety_test.sh
       - scripts/meta_module_sync_test.sh
       - scripts/mount_fast_sync_test.sh
+      - scripts/module_update_state_test.sh
       - scripts/no_hook_bootstrap_test.sh
       - scripts/prune_python_runtime.sh
       - scripts/python_runtime_prune_test.sh
+      - scripts/self_mount_atomic_test.sh
+      - scripts/self_mount_test.sh
+      - scripts/app_bridge_status_test.sh
       - .github/workflows/no-hook-font-engine.yml
 permissions:
   contents: read
@@ -155,6 +164,12 @@ jobs:
         run: sh -x scripts/font_config_runtime_test.sh
       - name: Verify every payload bootstrap chain
         run: sh -x scripts/no_hook_bootstrap_test.sh
+      - name: Verify private mount stages, atomic reuse and upgrade migration
+        run: |
+          sh scripts/self_mount_atomic_test.sh
+          sh scripts/self_mount_test.sh
+          sh scripts/module_update_state_test.sh
+          sh scripts/app_bridge_status_test.sh
       - name: Verify pruned ARM64 Python runtime
         run: sh scripts/python_runtime_prune_test.sh
       - name: Enforce no-Hook source boundary

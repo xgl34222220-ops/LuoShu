@@ -53,7 +53,7 @@ internal fun ModuleSnapshot.toHomeUiState(weight: SystemWeightState): HomeUiStat
     return HomeUiState(
         loading = loading,
         version = version,
-        currentFont = activeLabel,
+        currentFont = effectiveLabel,
         rootGranted = rootGranted,
         rootManager = rootManager,
         moduleInstalled = installed,
@@ -61,11 +61,12 @@ internal fun ModuleSnapshot.toHomeUiState(weight: SystemWeightState): HomeUiStat
         taskRunning = running,
         taskTitle = when {
             running -> "字体任务执行中"
+            effectFailed -> "字体未生效"
             installed && rootGranted -> "字体引擎已就绪"
             installed -> "模块已连接"
             else -> "正在等待模块连接"
         },
-        taskMessage = taskMessage,
+        taskMessage = if (effectFailed) effectFailureMessage else taskMessage,
         taskProgress = taskProgress,
         rebootRequired = rebootRequired,
         error = error,

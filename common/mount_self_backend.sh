@@ -4,6 +4,19 @@
 # module content first, captured stock tree last, and source name KSU for unified cleanup.
 set +e
 
+luoshu_self_mount_stage_for_manager() {
+    case "${1:-unknown}" in
+        APatch|KernelSU|KernelSU*|SukiSU|SukiSU*)
+            printf 'post-mount\n'
+            ;;
+        *)
+            # Magisk does not provide a module post-mount hook. Unknown legacy
+            # managers retain the existing early path for compatibility.
+            printf 'post-fs-data\n'
+            ;;
+    esac
+}
+
 _luoshu_overlay_mount_dir() {
     _lsomb_source="$1"
     _lsomb_target="$2"

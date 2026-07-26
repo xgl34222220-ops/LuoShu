@@ -54,8 +54,23 @@ internal fun LuoShuViewModel.toLogsUiState(): LogsUiState {
             )
         }
 
+        if (snapshot.effectFailed) {
+            add(
+                TaskCenterItem(
+                    id = "effective-font-failure",
+                    kind = TaskKind.APPLY,
+                    phase = TaskPhase.FAILED,
+                    title = "字体未生效",
+                    message = snapshot.effectFailureMessage,
+                    progress = 100,
+                    timeLabel = "当前",
+                    current = true,
+                ),
+            )
+        }
+
         val snapshotPhase = taskPhaseFor("", snapshot.taskMessage, snapshot.taskState)
-        if (snapshot.taskState != "idle" && snapshot.taskType != "none") {
+        if (!snapshot.effectFailed && snapshot.taskState != "idle" && snapshot.taskType != "none") {
             val kind = taskKindFor(snapshot.taskMessage, snapshot.taskType)
             add(
                 TaskCenterItem(

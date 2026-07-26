@@ -34,23 +34,32 @@ luoshu_update_config_is_volatile() {
         webui_font_list.json|webui_font_list.key|native_font_index.json|native_font_index.key|\
         composite_progress.json|mix_last_error.txt|app_install_pending|app_install_state.conf|\
         app_install_manual|font-payload-rebuild-pending.conf|font-boot-failures|\
-        font-payload-quarantine.conf|*.pid|*.pid.task|*.tmp|*.tmp.*)
+        font-payload-quarantine.conf|mount_compat.conf|self-mount.conf|\
+        self-mount-required.conf|device-font-load-verification.conf|\
+        device-font-load-verification.json|device-font-manager-dump.txt|\
+        device-font-mount-evidence.txt|*.pid|*.pid.task|*.tmp|*.tmp.*)
             return 0
             ;;
     esac
     return 1
 }
 
+luoshu_update_payload_partitions() {
+    if type luoshu_private_partitions >/dev/null 2>&1; then
+        luoshu_private_partitions
+        return
+    fi
+    printf '%s\n' \
+        'system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product'
+}
+
 luoshu_update_has_font_payload() {
     _module="$1"
-    for _directory in \
-        "$_module/system/fonts" \
-        "$_module/system_ext" \
-        "$_module/product" \
-        "$_module/vendor" \
-        "$_module/odm" \
-        "$_module/oem" \
-        "$_module/my_product"; do
+    for _partition in $(luoshu_update_payload_partitions); do
+        case "$_partition" in
+            system) _directory="$_module/system/fonts" ;;
+            *) _directory="$_module/$_partition" ;;
+        esac
         [ -d "$_directory" ] || continue
         find "$_directory" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) \
             -print -quit 2>/dev/null | grep -q . && return 0
@@ -78,6 +87,13 @@ luoshu_clear_update_volatile() {
         "$_module/config/app_install_state.conf" \
         "$_module/config/app_install_manual" \
         "$_module/config/font-payload-rebuild-pending.conf" \
+        "$_module/config/mount_compat.conf" \
+        "$_module/config/self-mount.conf" \
+        "$_module/config/self-mount-required.conf" \
+        "$_module/config/device-font-load-verification.conf" \
+        "$_module/config/device-font-load-verification.json" \
+        "$_module/config/device-font-manager-dump.txt" \
+        "$_module/config/device-font-mount-evidence.txt" \
         "$_module/.font_switch.lock" \
         "$_module/.font-payload-commit.ok" 2>/dev/null || true
     rm -f "$_module/config"/*.pid "$_module/config"/*.pid.task \
@@ -141,11 +157,20 @@ luoshu_migrate_active_install() {
     mkdir -p "$_new/config" "$_new/system/fonts" 2>/dev/null || return 1
     luoshu_migrate_update_config "$_old" "$_new" || return 1
 
-    for _relative in system/fonts system/etc system_ext product vendor odm oem my_product; do
+    # Keep the new release's system/bin runtime, but migrate both system font
+    # trees and every supported OEM partition from the active installation.
+    for _relative in system/fonts system/etc; do
         [ -d "$_old/$_relative" ] || continue
         rm -rf "$_new/$_relative" 2>/dev/null || return 1
         mkdir -p "${_new}/${_relative%/*}" 2>/dev/null || return 1
         luoshu_copy_update_tree "$_old/$_relative" "$_new/$_relative" || return 1
+    done
+    for _partition in $(luoshu_update_payload_partitions); do
+        [ "$_partition" != system ] || continue
+        [ -d "$_old/$_partition" ] || continue
+        rm -rf "$_new/$_partition" 2>/dev/null || return 1
+        mkdir -p "$_new" 2>/dev/null || return 1
+        luoshu_copy_update_tree "$_old/$_partition" "$_new/$_partition" || return 1
     done
 
     luoshu_migrate_update_cache "$_old" "$_new"
