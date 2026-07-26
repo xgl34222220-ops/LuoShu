@@ -251,9 +251,13 @@ _luoshu_atomic_bind_tree() {
         fi
     done < "$_lsabt_files"
     rm -f "$_lsabt_files" "$_lsabt_seen" 2>/dev/null || true
-    [ "$_lsabt_failed" -eq 0 ] && \
-        [ "$_lsabt_mounted" -gt 0 ] 2>/dev/null && \
-        [ "$_lsabt_mounted" -eq "$_lsabt_expected" ]
+    [ "$_lsabt_failed" -eq 0 ] || return 1
+    [ "$_lsabt_mounted" -eq "$_lsabt_expected" ] || return 1
+    # Distinguish an actual bind failure from an additive-only component whose
+    # files have no pre-existing ROM inode. The caller may skip the latter for
+    # non-core components, but system/fonts remains mandatory.
+    [ "$_lsabt_mounted" -gt 0 ] 2>/dev/null || return 2
+    return 0
 }
 
 _luoshu_atomic_rollback() {
@@ -371,8 +375,19 @@ luoshu_self_mount_ensure() {
                 if _luoshu_atomic_bind_tree "$_lsme_source" "$_lsme_target"; then
                     _lsme_bind_count=$((_lsme_bind_count + 1))
                 else
-                    _lsme_failed="$_lsme_partition/$_lsme_subdir-bind-incomplete"
-                    break
+                    _lsme_bind_rc=$?
+                    if [ "$_lsme_bind_rc" -eq 2 ] 2>/dev/null; then
+                        if [ "$_lsme_partition/$_lsme_subdir" = system/fonts ]; then
+                            _lsme_failed=system/fonts-bind-empty
+                            break
+                        fi
+                        _luoshu_self_log \
+                            "自挂载跳过无本机 bind 目标的附加组件：$_lsme_partition/$_lsme_subdir"
+                        continue
+                    else
+                        _lsme_failed="$_lsme_partition/$_lsme_subdir-bind-incomplete"
+                        break
+                    fi
                 fi
             fi
             _luoshu_atomic_tree_visible "$_lsme_source" "$_lsme_target" "$_lsme_mode" || {

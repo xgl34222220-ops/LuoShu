@@ -58,7 +58,7 @@ _luoshu_partition_root() {
     esac
 }
 _luoshu_overlay_mount_dir() {
-    test "${FAIL_OVERLAY:-}" != "$3" || return 1
+    test "${FAIL_OVERLAY:-}" != all && test "${FAIL_OVERLAY:-}" != "$3" || return 1
     cp -R "$1/." "$2/"
 }
 _luoshu_mount_cmd() {
@@ -166,6 +166,20 @@ test "$(cat "$CASE_ROOT/root/system/fonts/Canonical.ttf")" = 'font-canonical' ||
 test "$(cat "$CASE_ROOT/root/system/fonts/Alias.ttf")" = 'font-canonical' || fail 'ROM alias does not expose the canonical bound font'
 luoshu_mount_verify_active custom || fail 'strict verifier rejected a deduplicated symlink bind'
 
+setup_case bind-additive-etc
+mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/system/etc/luoshu"
+printf 'font-a\n' > "$MODULE_DIR/system/fonts/A.ttf"
+printf 'dynamic-config\n' > "$MODULE_DIR/system/etc/.luoshu-data-fonts-config.xml"
+printf 'probe\n' > "$MODULE_DIR/system/etc/luoshu/mount-probe.conf"
+printf 'stock-a\n' > "$CASE_ROOT/root/system/fonts/A.ttf"
+FAIL_OVERLAY=all
+luoshu_self_mount_ensure || fail 'additive-only system/etc rejected an otherwise complete font bind'
+grep -q '^state=mounted$' "$MODULE_DIR/config/self-mount.conf" || fail 'additive-only etc skip was not committed'
+test "$(wc -l < "$MODULE_DIR/config/self-mount-required.conf" | tr -d ' ')" -eq 1 || fail 'skipped additive component entered the required manifest'
+test "$(cat "$CASE_ROOT/root/system/fonts/A.ttf")" = 'font-a' || fail 'font bind was lost while skipping additive etc'
+test ! -e "$CASE_ROOT/root/system/etc/.luoshu-data-fonts-config.xml" || fail 'bind fallback created a missing dynamic config target'
+luoshu_mount_verify_active custom || fail 'strict verifier rejected the font-only compatible bind'
+
 setup_case bind-no-compatible-target
 mkdir -p "$MODULE_DIR/system/fonts"
 printf 'font-a\n' > "$MODULE_DIR/system/fonts/A.ttf"
@@ -174,6 +188,6 @@ FAIL_OVERLAY=system-fonts
 if luoshu_self_mount_ensure; then
     fail 'bind fallback with no device-compatible target was accepted'
 fi
-grep -q 'system/fonts-bind-incomplete' "$MODULE_DIR/config/self-mount.conf" || fail 'empty bind reason absent'
+grep -q 'system/fonts-bind-empty' "$MODULE_DIR/config/self-mount.conf" || fail 'empty bind reason absent'
 
 echo 'self-mount atomic transaction tests passed'
