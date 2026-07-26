@@ -75,6 +75,8 @@ luoshu_mount_record() {
 }
 
 . "$ATOMIC_SCRIPT"
+CURRENT_BOOT_ID=test-boot
+_luoshu_atomic_boot_id() { printf '%s\n' "$CURRENT_BOOT_ID"; }
 
 setup_case success
 mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/system/etc"
@@ -91,6 +93,20 @@ printf 'state=degraded\nbackend=legacy\nmounted=system/fonts\nfailed=system/etc\
 if luoshu_mount_verify_active custom; then
     fail 'legacy degraded state was accepted'
 fi
+
+setup_case stale-journal
+printf 'default\n' > "$MODULE_DIR/config/active_font.conf"
+printf 'old-boot\n' > "$CASE_ROOT/state/boot-id"
+printf '%s\n' "$CASE_ROOT/root/system/fonts" > "$CASE_ROOT/state/mounts.list"
+luoshu_self_mount_ensure || fail 'default-font stale-journal cleanup failed'
+test ! -s "$CASE_ROOT/unmount.log" || fail 'stale boot journal unmounted a potentially foreign target'
+
+setup_case same-boot-journal
+printf 'default\n' > "$MODULE_DIR/config/active_font.conf"
+printf '%s\n' "$CURRENT_BOOT_ID" > "$CASE_ROOT/state/boot-id"
+printf '%s\n' "$CASE_ROOT/root/system/fonts" > "$CASE_ROOT/state/mounts.list"
+luoshu_self_mount_ensure || fail 'same-boot journal cleanup failed'
+test -s "$CASE_ROOT/unmount.log" || fail 'same-boot LuoShu mount was not rolled back'
 
 setup_case rollback
 mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/system/etc" "$MODULE_DIR/product/etc" \
