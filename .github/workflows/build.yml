@@ -21,6 +21,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends curl unzip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
 
+      - name: Atomic self-mount transaction tests
+        run: sh ./scripts/self_mount_atomic_test.sh
+
       - uses: actions/cache@v4
         with:
           path: common/python
