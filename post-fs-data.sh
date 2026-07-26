@@ -21,8 +21,9 @@ rm -f "$_lpf_temp" 2>/dev/null || true
 [ -f "$MODDIR/common/mount_self_backend.sh" ] && . "$MODDIR/common/mount_self_backend.sh"
 _lpf_root=$(luoshu_detect_root_manager 2>/dev/null | head -n1)
 case "$_lpf_root" in
-    KernelSU)
-        # KernelSU runs metamodules next. They must only see empty partition shells.
+    KernelSU|KernelSU*|SukiSU|SukiSU*)
+        # KernelSU-family managers provide post-mount. Keep the private payload
+        # hidden until that globally visible stage instead of mounting too early.
         luoshu_private_unmount_module_view "$MODDIR" >/dev/null 2>&1 || true
         ;;
     *)
