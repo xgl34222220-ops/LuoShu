@@ -153,6 +153,19 @@ test "$(cat "$CASE_ROOT/root/system/fonts/A.ttf")" = 'font-a' || fail 'existing 
 test ! -e "$CASE_ROOT/root/system/fonts/B.ttf" || fail 'bind fallback created an additive ROM alias'
 luoshu_mount_verify_active custom || fail 'strict verifier rejected compatible bind fallback'
 
+setup_case bind-symlink-alias
+mkdir -p "$MODULE_DIR/system/fonts"
+printf 'font-alias\n' > "$MODULE_DIR/system/fonts/Alias.ttf"
+printf 'font-canonical\n' > "$MODULE_DIR/system/fonts/Canonical.ttf"
+printf 'stock-canonical\n' > "$CASE_ROOT/root/system/fonts/Canonical.ttf"
+ln -s Canonical.ttf "$CASE_ROOT/root/system/fonts/Alias.ttf"
+FAIL_OVERLAY=system-fonts
+luoshu_self_mount_ensure || fail 'bind fallback rejected aliases sharing one real ROM target'
+grep -q '^state=mounted$' "$MODULE_DIR/config/self-mount.conf" || fail 'symlink bind fallback was not committed'
+test "$(cat "$CASE_ROOT/root/system/fonts/Canonical.ttf")" = 'font-canonical' || fail 'canonical bind target was overwritten by its alias'
+test "$(cat "$CASE_ROOT/root/system/fonts/Alias.ttf")" = 'font-canonical' || fail 'ROM alias does not expose the canonical bound font'
+luoshu_mount_verify_active custom || fail 'strict verifier rejected a deduplicated symlink bind'
+
 setup_case bind-no-compatible-target
 mkdir -p "$MODULE_DIR/system/fonts"
 printf 'font-a\n' > "$MODULE_DIR/system/fonts/A.ttf"
