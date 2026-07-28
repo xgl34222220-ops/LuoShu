@@ -618,7 +618,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         watchedTaskId = taskId
         operationBusy = true
         try {
-            val result = waitForTask("switch_status", taskId, timeoutSeconds = 120) { data ->
+            val result = waitForTask("switch_status", taskId, timeoutSeconds = 390) { data ->
                 operationMessage = data.optString("message", "正在处理字体…")
                 snapshot = snapshot.copy(
                     taskType = "switch",
@@ -717,7 +717,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     ): JSONObject {
         var elapsed = 0
         var failures = 0
-        while (elapsed < timeoutSeconds) {
+        var deadlineSeconds = timeoutSeconds
+        while (elapsed < deadlineSeconds) {
             val interval = if (elapsed < 30) 1 else 2
             delay(interval * 1_000L)
             elapsed += interval
@@ -738,6 +739,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 continue
             }
             failures = 0
+            val advertisedTimeout = data.optInt("timeout", 0)
+            if (advertisedTimeout > 0) deadlineSeconds = maxOf(deadlineSeconds, advertisedTimeout + 30)
             onProgress(data)
             when (data.optString("state")) {
                 "success", "failed" -> return data

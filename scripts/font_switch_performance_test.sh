@@ -11,9 +11,11 @@ payload_body="$(awk '/^luoshu_payload_validate_current\(\)/,/^}/' "$ROOT/common/
 dynamic_body="$(awk '/^luoshu_dynamic_targets_apply\(\)/,/^}/' "$ROOT/common/font_safety.sh")"
 ! printf '%s\n' "$dynamic_body" | grep -q 'wc -c'
 
-grep -q 'LUOSHU_SWITCH_TIMEOUT_SECONDS:-110' "$ROOT/common/font_switch_task.sh"
+grep -q 'LUOSHU_SWITCH_TIMEOUT_SECONDS:-360' "$ROOT/common/font_switch_task.sh"
 grep -q 'luoshu_start_detached' "$ROOT/common/font_switch_task.sh"
 grep -q 'mark_load_verification_pending' "$ROOT/common/font_switch_task.sh"
+grep -q 'heartbeat=%s' "$ROOT/common/font_switch_task.sh"
+grep -q 'timeout=%s' "$ROOT/common/font_switch_task.sh"
 grep -q 'luoshu_switch_perf_mark complete' "$ROOT/common/font_manager.sh"
 grep -q 'MiuixTaskCenterHeader(' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
@@ -26,8 +28,12 @@ grep -q 'horizontalArrangement = Arrangement.spacedBy(10.dp)' \
 # Compact task-center header actions intentionally share one 50 dp visual box.
 grep -q 'modifier = modifier.size(50.dp)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
-grep -q 'IconButton(onClick = actions.refresh, modifier = Modifier.size(50.dp))' \
-    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenCompact.kt"
+grep -q 'modifier = Modifier.size(50.dp)' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
+grep -q 'timeoutSeconds = 390' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
+grep -q 'advertisedTimeout' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 grep -q 'DeviceTrustLevel.SYSTEM' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceTrustUi.kt"
 grep -q 'DeviceTrustLevel.COMPATIBILITY' \
