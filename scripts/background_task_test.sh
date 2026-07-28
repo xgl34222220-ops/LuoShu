@@ -28,11 +28,22 @@ luoshu_start_detached "$PID_FILE" "$TASK" "$LOG_FILE" sh "$WORKER" worker "$TASK
 
 test -s "$PID_FILE"
 test -s "${PID_FILE}.task"
+test -s "${PID_FILE}.boot"
 test "$(cat "${PID_FILE}.task")" = "$TASK"
+test "$(cat "${PID_FILE}.boot")" = "$(luoshu_current_boot_id)"
+luoshu_task_pid_alive "$PID_FILE" "$TASK"
+
+printf 'different-boot\n' > "${PID_FILE}.boot"
+if luoshu_task_pid_alive "$PID_FILE" "$TASK"; then
+    echo 'boot-id mismatch must invalidate detached task' >&2
+    exit 1
+fi
+luoshu_current_boot_id > "${PID_FILE}.boot"
 luoshu_task_pid_alive "$PID_FILE" "$TASK"
 
 luoshu_stop_task_pid "$PID_FILE"
 test ! -e "$PID_FILE"
 test ! -e "${PID_FILE}.task"
+test ! -e "${PID_FILE}.boot"
 
 echo 'background_task_test: PASS'

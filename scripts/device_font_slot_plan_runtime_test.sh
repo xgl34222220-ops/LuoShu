@@ -25,24 +25,23 @@ chmod 0755 "$MODULE/common"/*.sh
 
 printf 'Alpha\n' > "$MODULE/config/active_font.conf"
 printf 'fixture-font\n' > "$PUBLIC/fonts/Alpha-Regular.ttf"
-MODDIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/font_library_cache.sh" value >/dev/null
 
-_count=0
-while [ "$_count" -lt 50 ] && ! grep -q '^plan:build|' "$CALLS" 2>/dev/null; do
-    sleep 0.02
-    _count=$((_count + 1))
-done
+# 指纹查询必须是纯读取，不能在开机服务中隐式启动规划进程。
+MODDIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/font_library_cache.sh" value >/dev/null
+sleep 0.1
+test ! -e "$CALLS"
+
+MODDIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/font_library_cache.sh" prepare-plan >/dev/null
 grep -q '^template:ensure$' "$CALLS"
 grep -Fq "plan:build|$PUBLIC/fonts/Alpha-Regular.ttf|Alpha" "$CALLS"
 
 : > "$CALLS"
 printf 'default\n' > "$MODULE/config/active_font.conf"
 MODDIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/font_library_cache.sh" value >/dev/null
-_count=0
-while [ "$_count" -lt 50 ] && ! grep -q '^plan:clear|' "$CALLS" 2>/dev/null; do
-    sleep 0.02
-    _count=$((_count + 1))
-done
+sleep 0.1
+test ! -s "$CALLS"
+
+MODDIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/font_library_cache.sh" prepare-plan >/dev/null
 grep -q '^template:ensure$' "$CALLS"
 grep -q '^plan:clear||$' "$CALLS"
 
