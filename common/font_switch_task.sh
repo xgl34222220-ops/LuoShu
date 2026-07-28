@@ -22,12 +22,16 @@ WORKER_PID_FILE="${LUOSHU_SWITCH_WORKER_PID_FILE:-$MODDIR/config/switch_task_wor
 LOAD_VERIFY_STATE="$MODDIR/config/device-font-load-verification.conf"
 [ -f "$BACKGROUND_TASK" ] && . "$BACKGROUND_TASK"
 
-# 大型 CJK 字体在部分低速存储设备上会超过旧版 45 秒。任务已脱离 App 会话，
-# 因此给完整验证、事务快照、槽位映射和挂载同步共 110 秒，同时仍早于 App 的 120 秒观察上限结束。
-TIMEOUT_SECONDS="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-110}"
-case "$TIMEOUT_SECONDS" in ''|*[!0-9]*) TIMEOUT_SECONDS=110 ;; esac
+# 大型 CJK、TTC、可变字体和复合槽位在低速存储或多 OEM 分区设备上可能超过两分钟。
+# 后台任务与 App 都读取同一超时字段；默认给完整验证、事务快照、槽位映射和挂载同步 360 秒。
+TIMEOUT_SECONDS="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-360}"
+case "$TIMEOUT_SECONDS" in ''|*[!0-9]*) TIMEOUT_SECONDS=360 ;; esac
 [ "$TIMEOUT_SECONDS" -ge 5 ] 2>/dev/null || TIMEOUT_SECONDS=5
-[ "$TIMEOUT_SECONDS" -le 600 ] 2>/dev/null || TIMEOUT_SECONDS=600
+[ "$TIMEOUT_SECONDS" -le 900 ] 2>/dev/null || TIMEOUT_SECONDS=900
+HEARTBEAT_INTERVAL="${LUOSHU_SWITCH_HEARTBEAT_INTERVAL:-5}"
+case "$HEARTBEAT_INTERVAL" in ''|*[!0-9]*) HEARTBEAT_INTERVAL=5 ;; esac
+[ "$HEARTBEAT_INTERVAL" -ge 1 ] 2>/dev/null || HEARTBEAT_INTERVAL=1
+[ "$HEARTBEAT_INTERVAL" -le 30 ] 2>/dev/null || HEARTBEAT_INTERVAL=30
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -46,6 +50,9 @@ write_task() {
     _started="$5"
     _finished="$6"
     _pid="$7"
+    _heartbeat="${8:-$(date +%s 2>/dev/null || echo 0)}"
+    _timeout="${9:-$TIMEOUT_SECONDS}"
+    _elapsed="${10:-0}"
     mkdir -p "${TASK_FILE%/*}" 2>/dev/null || return 1
     _tmp="${TASK_FILE}.tmp.$$"
     {
@@ -56,6 +63,9 @@ write_task() {
         printf 'started=%s\n' "$_started"
         printf 'finished=%s\n' "$_finished"
         printf 'pid=%s\n' "$_pid"
+        printf 'heartbeat=%s\n' "$_heartbeat"
+        printf 'timeout=%s\n' "$_timeout"
+        printf 'elapsed=%s\n' "$_elapsed"
     } > "$_tmp" 2>/dev/null || return 1
     mv -f "$_tmp" "$TASK_FILE" 2>/dev/null || return 1
     chmod 0644 "$TASK_FILE" 2>/dev/null || true
@@ -117,27 +127,28 @@ terminate_child_tree() {
 run_bounded() {
     _font="$1"
     _output="$2"
-    if command -v timeout >/dev/null 2>&1; then
-        timeout "$TIMEOUT_SECONDS" sh "$MANAGER" action switch "$_font" > "$_output" 2>&1
-        return $?
-    fi
-    if command -v toybox >/dev/null 2>&1 && toybox timeout --help >/dev/null 2>&1; then
-        toybox timeout "$TIMEOUT_SECONDS" sh "$MANAGER" action switch "$_font" > "$_output" 2>&1
-        return $?
-    fi
+    _task="$3"
+    _started="$4"
 
     sh "$MANAGER" action switch "$_font" > "$_output" 2>&1 &
     _child=$!
     _elapsed=0
-    while task_pid_alive "$_child" && [ "$_elapsed" -lt "$TIMEOUT_SECONDS" ]; do
+    _next_heartbeat=0
+    while task_pid_alive "$_child"; do
+        if [ "$_elapsed" -ge "$TIMEOUT_SECONDS" ]; then
+            terminate_child_tree "$_child"
+            wait "$_child" 2>/dev/null || true
+            return 124
+        fi
+        if [ "$_elapsed" -ge "$_next_heartbeat" ]; then
+            _heartbeat=$(date +%s 2>/dev/null || echo 0)
+            write_task "$_task" running "$_font" "正在验证并应用字体（已用 ${_elapsed} 秒）" \
+                "$_started" '' "$$" "$_heartbeat" "$TIMEOUT_SECONDS" "$_elapsed" || true
+            _next_heartbeat=$((_elapsed + HEARTBEAT_INTERVAL))
+        fi
         sleep 1
         _elapsed=$((_elapsed + 1))
     done
-    if task_pid_alive "$_child"; then
-        terminate_child_tree "$_child"
-        wait "$_child" 2>/dev/null || true
-        return 124
-    fi
     wait "$_child"
 }
 
@@ -152,7 +163,7 @@ run_worker() {
     printf '[%s] bounded switch start: %s task=%s timeout=%ss\n' \
         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_font" "$_task" "$TIMEOUT_SECONDS" >> "$LOG_FILE" 2>/dev/null || true
 
-    run_bounded "$_font" "$_output"
+    run_bounded "$_font" "$_output" "$_task" "$_started"
     _rc=$?
     _finished="$(date +%s 2>/dev/null || echo 0)"
     if [ "$_rc" -eq 0 ] && grep -q '"status":"ok"' "$_output" 2>/dev/null; then
@@ -192,7 +203,7 @@ start_task() {
 
     export MODDIR LUOSHU_FONT_MANAGER="$MANAGER" LUOSHU_SWITCH_TASK_FILE="$TASK_FILE" \
         LUOSHU_SWITCH_LOG="$LOG_FILE" LUOSHU_SWITCH_TIMEOUT_SECONDS="$TIMEOUT_SECONDS" \
-        LUOSHU_SWITCH_WORKER_PID_FILE="$WORKER_PID_FILE"
+        LUOSHU_SWITCH_HEARTBEAT_INTERVAL="$HEARTBEAT_INTERVAL" LUOSHU_SWITCH_WORKER_PID_FILE="$WORKER_PID_FILE"
 
     if type luoshu_start_detached >/dev/null 2>&1; then
         luoshu_start_detached "$WORKER_PID_FILE" "$_task" "$LOG_FILE" sh "$0" run "$_task" "$_font" "$_started"
@@ -227,12 +238,15 @@ status_task() {
     _message="$(read_value message)"
     _started="$(read_value started)"
     _finished="$(read_value finished)"
+    _heartbeat="$(read_value heartbeat)"
+    _timeout="$(read_value timeout)"
+    _elapsed="$(read_value elapsed)"
     if [ "$_state" = success ] && [ -f "$STATUS_SCRIPT" ]; then
         MODDIR="$MODDIR" sh "$STATUS_SCRIPT" "$_font" >/dev/null 2>&1 || true
     fi
-    printf '{"status":"ok","data":{"task":"%s","state":"%s","font":"%s","message":"%s","started":%s,"finished":%s}}\n' \
+    printf '{"status":"ok","data":{"task":"%s","state":"%s","font":"%s","message":"%s","started":%s,"finished":%s,"heartbeat":%s,"timeout":%s,"elapsed":%s}}\n' \
         "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_font")" "$(json_escape "$_message")" \
-        "${_started:-0}" "${_finished:-0}"
+        "${_started:-0}" "${_finished:-0}" "${_heartbeat:-0}" "${_timeout:-$TIMEOUT_SECONDS}" "${_elapsed:-0}"
 }
 
 case "${1:-status}" in

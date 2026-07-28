@@ -1,6 +1,5 @@
 package io.github.xgl34222220.luoshu.ui.logs
 
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,6 +15,7 @@ import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -66,6 +66,12 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
         selfMountState="${'$'}(read_value "${'$'}CFG/self-mount.conf" state)"
         selfMountBackend="${'$'}(read_value "${'$'}CFG/self-mount.conf" backend)"
         selfMountFailed="${'$'}(read_value "${'$'}CFG/self-mount.conf" failed)"
+        moduleDirectory=missing
+        [ -d "${'$'}MOD" ] && moduleDirectory=present
+        pendingModuleDirectory=missing
+        [ -d /data/adb/modules_update/LuoShu ] && pendingModuleDirectory=present
+        postMountScript=missing
+        [ -f "${'$'}MOD/post-mount.sh" ] && postMountScript=present
         cachePending=no
         [ -s "${'$'}CFG/device-font-cache-pending.conf" ] && cachePending=yes
         rootManager=Root
@@ -102,6 +108,9 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
             printf 'selfMountState=%s\n' "${'$'}{selfMountState:-missing}"
             printf 'selfMountBackend=%s\n' "${'$'}{selfMountBackend:-missing}"
             printf 'selfMountFailed=%s\n' "${'$'}{selfMountFailed:-none}"
+            printf 'moduleDirectory=%s\n' "${'$'}moduleDirectory"
+            printf 'pendingModuleDirectory=%s\n' "${'$'}pendingModuleDirectory"
+            printf 'postMountScript=%s\n' "${'$'}postMountScript"
             printf 'cachePending=%s\n' "${'$'}cachePending"
             printf 'rootManager=%s\n' "${'$'}rootManager"
             printf 'mountEngine=%s\n' "${'$'}mountEngine"
@@ -133,19 +142,26 @@ internal fun DiagnosticExportButton(
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        onClick = onClick,
-        enabled = !state.busy,
         modifier = modifier.size(50.dp),
         shape = RoundedCornerShape(17.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         contentColor = MaterialTheme.colorScheme.primary,
-        shadowElevation = 6.dp,
+        tonalElevation = 2.dp,
+        shadowElevation = 3.dp,
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        IconButton(
+            onClick = onClick,
+            enabled = !state.busy,
+            modifier = Modifier.size(50.dp),
+        ) {
             if (state.busy) {
                 CircularProgressIndicator(Modifier.size(21.dp), strokeWidth = 2.dp)
             } else {
-                Icon(Icons.Rounded.Description, contentDescription = "生成脱敏诊断报告")
+                Icon(
+                    Icons.Rounded.Description,
+                    contentDescription = "生成脱敏诊断报告",
+                    modifier = Modifier.size(24.dp),
+                )
             }
         }
     }

@@ -97,27 +97,42 @@ MODULE_DIR="$MODDIR"
         fi
     fi
 
-    # 刷写阶段无法调用 pm 时，只在首次完整开机后自动重试一次。
-    # 成功覆盖安装会保留 App 数据、字体索引和外观设置。
+    # 刷写阶段无法调用 pm，或系统包管理器在开机初期尚未稳定时，最多跨三次完整开机重试。
+    # 签名冲突、损坏 APK 等永久错误立即转为手动处理，避免每次开机重复失败。
     if [ -s "$MODDIR/bundled/LuoShu-App.apk" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
         if [ -f "$MODDIR/config/app_install_pending" ] || [ ! -f "$MODDIR/config/app_install_state.conf" ]; then
+            _app_retry_file="$MODDIR/config/app_install_retry_count"
+            _app_retry_limit="${LUOSHU_APP_INSTALL_RETRY_LIMIT:-3}"
+            case "$_app_retry_limit" in ''|*[!0-9]*) _app_retry_limit=3 ;; esac
+            [ "$_app_retry_limit" -ge 1 ] 2>/dev/null || _app_retry_limit=1
             _app_result=$(MODDIR="$MODDIR" APP_INSTALL_LOG="$MODDIR/logs/app-install.log" sh "$MODDIR/common/app_installer.sh" first-boot 2>/dev/null)
             _app_code=$?
             case "$_app_result" in
-                installed)
-                    rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
-                    log_service "INFO" "已在首次开机自动安装或更新洛书 App"
-                    ;;
-                already-current)
-                    rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
-                    log_service "INFO" "洛书 App 已是模块内置版本"
-                    ;;
-                *)
-                    # 首次开机只自动尝试一次，避免签名冲突时每次开机重复失败。
-                    rm -f "$MODDIR/config/app_install_pending" 2>/dev/null || true
-                    touch "$MODDIR/config/app_install_manual" 2>/dev/null || true
-                    log_service "INFO" "App 自动更新未完成（code=$_app_code），请使用模块操作按钮重试；详情见 app-install.log"
-                    ;;
+  installed|already-current)
+      rm -f "$MODDIR/config/app_install_manual" "$_app_retry_file" 2>/dev/null || true
+      log_service "INFO" "洛书 App 已安装并与模块内置版本一致"
+      ;;
+  permanent-failure|invalid-package|invalid-apk)
+      rm -f "$MODDIR/config/app_install_pending" "$_app_retry_file" 2>/dev/null || true
+      touch "$MODDIR/config/app_install_manual" 2>/dev/null || true
+      log_service "ERROR" "App 自动更新被永久错误阻断（result=$_app_result, code=$_app_code），请使用模块操作按钮处理；详情见 app-install.log"
+      ;;
+  *)
+      _app_retry_count=$(cat "$_app_retry_file" 2>/dev/null)
+      case "$_app_retry_count" in ''|*[!0-9]*) _app_retry_count=0 ;; esac
+      _app_retry_count=$((_app_retry_count + 1))
+      printf '%s
+' "$_app_retry_count" > "$_app_retry_file" 2>/dev/null || true
+      if [ "$_app_retry_count" -lt "$_app_retry_limit" ]; then
+          touch "$MODDIR/config/app_install_pending" 2>/dev/null || true
+          rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
+          log_service "INFO" "App 自动更新暂未完成（第 $_app_retry_count/$_app_retry_limit 次，result=$_app_result, code=$_app_code），下次完整开机继续重试"
+      else
+          rm -f "$MODDIR/config/app_install_pending" 2>/dev/null || true
+          touch "$MODDIR/config/app_install_manual" 2>/dev/null || true
+          log_service "ERROR" "App 自动更新连续 $_app_retry_count 次未完成，已停止自动重试；请使用模块操作按钮重试"
+      fi
+      ;;
             esac
         fi
     fi

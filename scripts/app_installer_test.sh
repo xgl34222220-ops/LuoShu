@@ -35,10 +35,16 @@ case "$1" in
     ;;
   install)
     printf '%s\n' "$*" >> "$MOCK_PM_CALLS"
-    if [ "${MOCK_PM_FAIL:-0}" = 1 ]; then
-      echo 'Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]'
-      exit 1
-    fi
+    case "${MOCK_PM_FAIL:-0}" in
+      1)
+        echo 'Failure [INSTALL_FAILED_UPDATE_INCOMPATIBLE]'
+        exit 1
+        ;;
+      2)
+        echo 'Failure [INSTALL_FAILED_INTERNAL_ERROR]'
+        exit 1
+        ;;
+    esac
     echo 'Success'
     ;;
   *) exit 1 ;;
@@ -96,15 +102,27 @@ grep -q '^status=deferred$' "$MOD/config/app_install_state.conf"
 
 rm -f "$MOD/config/app_install_pending"
 set +e
-MOCK_VERSION=1431901 MOCK_PM_FAIL=1 MOCK_PM_CALLS="$CALLS" \
+MOCK_VERSION=1431901 MOCK_PM_FAIL=2 MOCK_PM_CALLS="$CALLS" \
 APP_INSTALL_PM_BIN="$BIN/pm" APP_INSTALL_DUMPSYS_BIN="$BIN/dumpsys" \
-MODDIR="$MOD" sh "$MOD/common/app_installer.sh" test-failure > "$TMP/failure.out"
-FAIL_CODE=$?
+MODDIR="$MOD" sh "$MOD/common/app_installer.sh" test-transient-failure > "$TMP/transient.out"
+TRANSIENT_CODE=$?
 set -e
-test "$FAIL_CODE" -eq 11
-grep -qx 'failed' "$TMP/failure.out"
+test "$TRANSIENT_CODE" -eq 11
+grep -qx 'failed' "$TMP/transient.out"
 test -f "$MOD/config/app_install_pending"
 grep -q '^status=failed$' "$MOD/config/app_install_state.conf"
+
+rm -f "$MOD/config/app_install_pending"
+set +e
+MOCK_VERSION=1431901 MOCK_PM_FAIL=1 MOCK_PM_CALLS="$CALLS" \
+APP_INSTALL_PM_BIN="$BIN/pm" APP_INSTALL_DUMPSYS_BIN="$BIN/dumpsys" \
+MODDIR="$MOD" sh "$MOD/common/app_installer.sh" test-permanent-failure > "$TMP/permanent.out"
+PERMANENT_CODE=$?
+set -e
+test "$PERMANENT_CODE" -eq 12
+grep -qx 'permanent-failure' "$TMP/permanent.out"
+test -f "$MOD/config/app_install_pending"
+grep -q '^status=blocked$' "$MOD/config/app_install_state.conf"
 grep -q 'INSTALL_FAILED_UPDATE_INCOMPATIBLE' "$MOD/logs/app-install.log"
 
 printf 'Bundled App installer tests passed.\n'

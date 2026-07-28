@@ -8,6 +8,7 @@ APK="$MODDIR/bundled/LuoShu-App.apk"
 META="$MODDIR/bundled/app.prop"
 PENDING="$MODDIR/config/app_install_pending"
 STATE="$MODDIR/config/app_install_state.conf"
+RETRY_STATE="$MODDIR/config/app_install_retry_count"
 LOG="${APP_INSTALL_LOG:-$MODDIR/logs/app-install.log}"
 MODE="${1:-auto}"
 
@@ -115,7 +116,7 @@ INSTALLED_VERSION=$(installed_version_code)
 if [ "$INSTALLED_VERSION" = "$APP_VERSION_CODE" ]; then
     PREVIOUS_APK_SHA256=$(read_prop apkSha256 "$STATE")
     if [ "$APK_SHA256" = unknown ] || [ "$PREVIOUS_APK_SHA256" = "$APK_SHA256" ]; then
-        rm -f "$PENDING" 2>/dev/null || true
+        rm -f "$PENDING" "$RETRY_STATE" 2>/dev/null || true
         write_state up_to_date "已安装版本与模块内置 App 一致"
         log_app INFO "$APP_PACKAGE 已是目标版本 $APP_VERSION_CODE，跳过覆盖安装"
         printf 'already-current\n'
@@ -143,7 +144,7 @@ fi
 
 printf '%s\n' "$INSTALL_RESULT" >> "$LOG" 2>/dev/null || true
 if [ "$INSTALL_CODE" -eq 0 ] && printf '%s' "$INSTALL_RESULT" | grep -q 'Success'; then
-    rm -f "$PENDING" 2>/dev/null || true
+    rm -f "$PENDING" "$RETRY_STATE" 2>/dev/null || true
     write_state installed "覆盖安装成功"
     log_app INFO "洛书 App 已安装或更新到 $APP_VERSION_CODE"
     printf 'installed\n'
@@ -151,7 +152,21 @@ if [ "$INSTALL_CODE" -eq 0 ] && printf '%s' "$INSTALL_RESULT" | grep -q 'Success
 fi
 
 touch "$PENDING" 2>/dev/null || true
+if [ "$INSTALL_CODE" -eq 124 ] || [ "$INSTALL_CODE" -eq 137 ]; then
+    write_state deferred "App 安装命令超时，等待下次开机重试"
+    log_app INFO "App 安装超时，保留自动重试标记"
+    printf 'deferred\n'
+    exit 10
+fi
+case "$INSTALL_RESULT" in
+    *INSTALL_FAILED_UPDATE_INCOMPATIBLE*|*INSTALL_PARSE_FAILED_INCONSISTENT_CERTIFICATES*|*INSTALL_FAILED_SHARED_USER_INCOMPATIBLE*|*INSTALL_FAILED_INVALID_APK*|*INSTALL_PARSE_FAILED_*)
+        write_state blocked "${INSTALL_RESULT:-安装包或签名不兼容}"
+        log_app ERROR "App 安装存在永久阻断，需要用户手动处理旧签名或损坏安装包"
+        printf 'permanent-failure\n'
+        exit 12
+        ;;
+esac
 write_state failed "${INSTALL_RESULT:-安装命令失败}"
-log_app ERROR "App 安装失败，保留首次开机重试标记"
+log_app ERROR "App 安装暂时失败，保留首次开机重试标记"
 printf 'failed\n'
 exit 11

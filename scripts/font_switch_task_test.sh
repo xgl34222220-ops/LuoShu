@@ -52,6 +52,9 @@ wait_state success
 grep -q '^message=字体已准备完成' "$LUOSHU_SWITCH_TASK_FILE"
 grep -q '^state=pending$' "$MODDIR/config/device-font-load-verification.conf"
 grep -q '^reason=awaiting-full-reboot$' "$MODDIR/config/device-font-load-verification.conf"
+grep -q '^heartbeat=[0-9][0-9]*$' "$LUOSHU_SWITCH_TASK_FILE"
+grep -q '^timeout=5$' "$LUOSHU_SWITCH_TASK_FILE"
+grep -q '^elapsed=[0-9][0-9]*$' "$LUOSHU_SWITCH_TASK_FILE"
 
 start_output="$(sh "$ROOT/common/font_switch_task.sh" start bad)"
 printf '%s\n' "$start_output" | grep -q '"status":"ok"'
