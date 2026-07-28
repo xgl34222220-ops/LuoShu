@@ -45,9 +45,35 @@ REMOVED=$(font_library_fingerprint_value)
 test "$REMOVED" != "$ADDED"
 printf '%s' "$REMOVED" | grep -q ':2:'
 
-# ROM 内部映射字体不属于用户字体库索引。
 printf 'internal' > "$USER_FONTS_DIR/SysFont-Regular.ttf"
 INTERNAL=$(font_library_fingerprint_value)
 test "$INTERNAL" = "$REMOVED"
+
+DIRECT_MOD="$TMP/direct-module"
+DIRECT_PUBLIC="$TMP/direct-public"
+PLAN_MARKER="$TMP/plan-called"
+mkdir -p "$DIRECT_MOD/common" "$DIRECT_MOD/config" "$DIRECT_PUBLIC/fonts"
+cp "$ROOT/common/font_library_cache.sh" "$DIRECT_MOD/common/font_library_cache.sh"
+printf 'One\n' > "$DIRECT_MOD/config/active_font.conf"
+printf 'font-one' > "$DIRECT_PUBLIC/fonts/One-Regular.ttf"
+cat > "$DIRECT_MOD/common/device_font_template.sh" <<'EOF_TEMPLATE'
+#!/bin/sh
+exit 0
+EOF_TEMPLATE
+cat > "$DIRECT_MOD/common/device_font_slot_plan.sh" <<EOF_PLANNER
+#!/bin/sh
+printf 'called\n' > "$PLAN_MARKER"
+exit 0
+EOF_PLANNER
+chmod +x "$DIRECT_MOD/common/device_font_template.sh" "$DIRECT_MOD/common/device_font_slot_plan.sh"
+
+MODDIR="$DIRECT_MOD" LUOSHU_PUBLIC_DIR="$DIRECT_PUBLIC" sh "$DIRECT_MOD/common/font_library_cache.sh" value >/dev/null
+sleep 0.2
+test ! -e "$PLAN_MARKER"
+MODDIR="$DIRECT_MOD" LUOSHU_PUBLIC_DIR="$DIRECT_PUBLIC" sh "$DIRECT_MOD/common/font_library_cache.sh" fingerprint >/dev/null
+sleep 0.2
+test ! -e "$PLAN_MARKER"
+MODDIR="$DIRECT_MOD" LUOSHU_PUBLIC_DIR="$DIRECT_PUBLIC" sh "$DIRECT_MOD/common/font_library_cache.sh" prepare-plan >/dev/null
+test -e "$PLAN_MARKER"
 
 printf 'Font library fingerprint tests passed.\n'

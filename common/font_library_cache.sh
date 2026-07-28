@@ -102,15 +102,12 @@ if [ "${0##*/}" = "font_library_cache.sh" ]; then
         MODDIR="$MODDIR" sh "$_pdfp_planner" build "$_pdfp_source" "$_pdfp_current" >/dev/null 2>&1 || true
     }
 
-    # v2.2 模板和当前字体的逐槽位计划在完整开机后的索引预热阶段异步生成。
-    # 当前阶段只写模块私有 JSON，不阻塞字体列表，也不改写 Android 字体负载。
-    if [ "${1:-fingerprint}" = value ]; then
-        (_prepare_device_font_plan) &
-    fi
-
+    # 指纹查询必须保持纯读取。旧逻辑在 value 后隐式派生 Python 槽位规划任务，
+    # 导致每次完整开机都可能重新出现高 CPU 后台进程。
     case "${1:-fingerprint}" in
         fingerprint) font_library_fingerprint_json ;;
         value) font_library_fingerprint_value ;;
+        prepare-plan) _prepare_device_font_plan ;;
         *) printf '{"status":"error","message":"未知字体索引命令"}\n' ;;
     esac
 fi

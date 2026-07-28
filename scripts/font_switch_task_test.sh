@@ -55,6 +55,7 @@ grep -q '^reason=awaiting-full-reboot$' "$MODDIR/config/device-font-load-verific
 grep -q '^heartbeat=[0-9][0-9]*$' "$LUOSHU_SWITCH_TASK_FILE"
 grep -q '^timeout=5$' "$LUOSHU_SWITCH_TASK_FILE"
 grep -q '^elapsed=[0-9][0-9]*$' "$LUOSHU_SWITCH_TASK_FILE"
+grep -q '^bootId=.' "$LUOSHU_SWITCH_TASK_FILE"
 
 start_output="$(sh "$ROOT/common/font_switch_task.sh" start bad)"
 printf '%s\n' "$start_output" | grep -q '"status":"ok"'
@@ -66,8 +67,26 @@ printf '%s\n' "$start_output" | grep -q '"status":"ok"'
 wait_state failed
 grep -q '超过 5 秒' "$LUOSHU_SWITCH_TASK_FILE"
 
+cat > "$LUOSHU_SWITCH_TASK_FILE" <<'EOF_STALE'
+task=old-boot-task
+state=running
+font=stale-font
+message=running
+started=1
+finished=
+pid=1
+heartbeat=1
+timeout=360
+elapsed=1
+bootId=different-boot-id
+EOF_STALE
+sh "$ROOT/common/font_switch_task.sh" reconcile
+grep -q '^state=failed$' "$LUOSHU_SWITCH_TASK_FILE"
+grep -q '^message=设备已重启，上一字体切换任务已结束$' "$LUOSHU_SWITCH_TASK_FILE"
+
 status_output="$(sh "$ROOT/common/font_switch_task.sh" status)"
 printf '%s\n' "$status_output" | grep -q '"state":"failed"'
+printf '%s\n' "$status_output" | grep -q '"bootId":"'
 grep -q 'luoshu_start_detached' "$ROOT/common/font_switch_task.sh"
 
 echo 'font_switch_task_test: PASS'

@@ -22,8 +22,6 @@ WORKER_PID_FILE="${LUOSHU_SWITCH_WORKER_PID_FILE:-$MODDIR/config/switch_task_wor
 LOAD_VERIFY_STATE="$MODDIR/config/device-font-load-verification.conf"
 [ -f "$BACKGROUND_TASK" ] && . "$BACKGROUND_TASK"
 
-# 大型 CJK、TTC、可变字体和复合槽位在低速存储或多 OEM 分区设备上可能超过两分钟。
-# 后台任务与 App 都读取同一超时字段；默认给完整验证、事务快照、槽位映射和挂载同步 360 秒。
 TIMEOUT_SECONDS="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-360}"
 case "$TIMEOUT_SECONDS" in ''|*[!0-9]*) TIMEOUT_SECONDS=360 ;; esac
 [ "$TIMEOUT_SECONDS" -ge 5 ] 2>/dev/null || TIMEOUT_SECONDS=5
@@ -35,6 +33,17 @@ case "$HEARTBEAT_INTERVAL" in ''|*[!0-9]*) HEARTBEAT_INTERVAL=5 ;; esac
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
+}
+
+current_boot_id() {
+    if type luoshu_current_boot_id >/dev/null 2>&1; then
+        luoshu_current_boot_id
+        return
+    fi
+    _cbi=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
+    [ -n "$_cbi" ] || _cbi=$(getprop ro.runtime.firstboot 2>/dev/null | tr -d '\r\n')
+    [ -n "$_cbi" ] || _cbi=unknown
+    printf '%s\n' "$_cbi"
 }
 
 read_value() {
@@ -53,6 +62,7 @@ write_task() {
     _heartbeat="${8:-$(date +%s 2>/dev/null || echo 0)}"
     _timeout="${9:-$TIMEOUT_SECONDS}"
     _elapsed="${10:-0}"
+    _boot_id="${11:-$(current_boot_id)}"
     mkdir -p "${TASK_FILE%/*}" 2>/dev/null || return 1
     _tmp="${TASK_FILE}.tmp.$$"
     {
@@ -66,6 +76,7 @@ write_task() {
         printf 'heartbeat=%s\n' "$_heartbeat"
         printf 'timeout=%s\n' "$_timeout"
         printf 'elapsed=%s\n' "$_elapsed"
+        printf 'bootId=%s\n' "$_boot_id"
     } > "$_tmp" 2>/dev/null || return 1
     mv -f "$_tmp" "$TASK_FILE" 2>/dev/null || return 1
     chmod 0644 "$TASK_FILE" 2>/dev/null || true
@@ -96,11 +107,19 @@ reconcile_task() {
     [ -s "$TASK_FILE" ] || return 0
     _state="$(read_value state)"
     case "$_state" in queued|running) ;; *) return 0 ;; esac
-    _pid="$(read_value pid)"
-    task_pid_alive "$_pid" && return 0
     _task="$(read_value task)"
     _font="$(read_value font)"
     _started="$(read_value started)"
+    _task_boot="$(read_value bootId)"
+    _now_boot="$(current_boot_id)"
+    if [ -n "$_task_boot" ] && [ -n "$_now_boot" ] && [ "$_task_boot" != "$_now_boot" ]; then
+        write_task "$_task" failed "$_font" '设备已重启，上一字体切换任务已结束' \
+            "$_started" "$(date +%s 2>/dev/null || echo 0)" '' '' '' 0 "$_now_boot"
+        type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$WORKER_PID_FILE" "$_task"
+        return 0
+    fi
+    _pid="$(read_value pid)"
+    task_pid_alive "$_pid" && return 0
     write_task "$_task" failed "$_font" '字体切换进程异常结束，已保留上一套字体' "$_started" "$(date +%s 2>/dev/null || echo 0)" ''
     type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$WORKER_PID_FILE" "$_task"
 }
@@ -241,12 +260,13 @@ status_task() {
     _heartbeat="$(read_value heartbeat)"
     _timeout="$(read_value timeout)"
     _elapsed="$(read_value elapsed)"
+    _boot_id="$(read_value bootId)"
     if [ "$_state" = success ] && [ -f "$STATUS_SCRIPT" ]; then
         MODDIR="$MODDIR" sh "$STATUS_SCRIPT" "$_font" >/dev/null 2>&1 || true
     fi
-    printf '{"status":"ok","data":{"task":"%s","state":"%s","font":"%s","message":"%s","started":%s,"finished":%s,"heartbeat":%s,"timeout":%s,"elapsed":%s}}\n' \
+    printf '{"status":"ok","data":{"task":"%s","state":"%s","font":"%s","message":"%s","started":%s,"finished":%s,"heartbeat":%s,"timeout":%s,"elapsed":%s,"bootId":"%s"}}\n' \
         "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_font")" "$(json_escape "$_message")" \
-        "${_started:-0}" "${_finished:-0}" "${_heartbeat:-0}" "${_timeout:-$TIMEOUT_SECONDS}" "${_elapsed:-0}"
+        "${_started:-0}" "${_finished:-0}" "${_heartbeat:-0}" "${_timeout:-$TIMEOUT_SECONDS}" "${_elapsed:-0}" "$(json_escape "$_boot_id")"
 }
 
 case "${1:-status}" in
