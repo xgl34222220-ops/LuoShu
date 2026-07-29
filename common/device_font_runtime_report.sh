@@ -71,6 +71,11 @@ device_font_runtime_report_collect() {
     _dfr_template=$(sed -n 's/^state=//p' "$_dfr_config/device-font-template.state" 2>/dev/null | head -n1)
     _dfr_alignment=$(sed -n 's/^state=//p' "$_dfr_config/device-font-load-verification.conf" 2>/dev/null | head -n1)
     _dfr_mode=$(sed -n 's/^mode=//p' "$_dfr_config/device-font-load-verification.conf" 2>/dev/null | head -n1)
+    _dfr_self_mount=$(sed -n 's/^state=//p' "$_dfr_config/self-mount.conf" 2>/dev/null | head -n1)
+    _dfr_self_backend=$(sed -n 's/^backend=//p' "$_dfr_config/self-mount.conf" 2>/dev/null | head -n1)
+    _dfr_self_failed=$(sed -n 's/^failed=//p' "$_dfr_config/self-mount.conf" 2>/dev/null | head -n1)
+    _dfr_post_mount=$(sed -n 's/^state=//p' "$_dfr_config/post-mount-hook.conf" 2>/dev/null | head -n1)
+    _dfr_dynamic_runtime=$(sed -n 's/^state=//p' "$_dfr_config/device-font-dynamic-runtime.conf" 2>/dev/null | head -n1)
     _dfr_cache_pending=no
     [ -s "$_dfr_config/device-font-cache-pending.conf" ] && _dfr_cache_pending=yes
 
@@ -91,6 +96,11 @@ device_font_runtime_report_collect() {
         printf 'templateState=%s\n' "${_dfr_template:-missing}"
         printf 'alignmentState=%s\n' "${_dfr_alignment:-missing}"
         printf 'alignmentMode=%s\n' "${_dfr_mode:-compatibility}"
+        printf 'selfMountState=%s\n' "${_dfr_self_mount:-missing}"
+        printf 'selfMountBackend=%s\n' "${_dfr_self_backend:-missing}"
+        printf 'selfMountFailure=%s\n' "${_dfr_self_failed:-none}"
+        printf 'postMountHook=%s\n' "${_dfr_post_mount:-missing}"
+        printf 'dynamicRuntime=%s\n' "${_dfr_dynamic_runtime:-not-applicable}"
         printf 'cachePending=%s\n' "$_dfr_cache_pending"
         printf 'fingerprint=%s\n' "$(getprop ro.build.fingerprint 2>/dev/null)"
         printf 'incremental=%s\n' "$(getprop ro.build.version.incremental 2>/dev/null)"
@@ -111,6 +121,10 @@ device_font_runtime_report_collect() {
         "device-font-engine.conf|device-font-engine.conf" \
         "device-font-installed.conf|device-font-installed.conf" \
         "device-font-dynamic-mount.conf|device-font-dynamic-mount.conf" \
+        "device-font-dynamic-runtime.conf|device-font-dynamic-runtime.conf" \
+        "self-mount.conf|self-mount.conf" \
+        "self-mount-required.conf|self-mount-required.conf" \
+        "post-mount-hook.conf|post-mount-hook.conf" \
         "device-font-cache-pending.conf|device-font-cache-pending.conf" \
         "device-font-load-verification.conf|device-font-load-verification.conf" \
         "device-font-load-verification.json|device-font-load-verification.json" \
