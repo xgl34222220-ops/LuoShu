@@ -30,9 +30,20 @@ assert "verified-by-visible-mounts" in payload["reasons"], payload
 assert "dynamic-family-unconfirmed" in payload["reasons"], payload
 PY
 
-# A compatibility payload has no aligned engine manifest. Once the strict mount
-# guard proves every required file is visible from PID 1, it is nevertheless a
-# verified active font and must not remain permanently stuck at "pending".
+# Normal boot status must not invoke mount traversal or Python. A confirmed transaction
+# is enough to expose the active font after the reboot requested by the switch task.
+AUTO_MOD="$TMP/auto-module"
+mkdir -p "$AUTO_MOD/common" "$AUTO_MOD/config" "$AUTO_MOD/logs"
+cp "$ROOT/common/device_font_load_verify.sh" "$AUTO_MOD/common/"
+printf 'Composite Font\n' > "$AUTO_MOD/config/active_font.conf"
+printf 'state=confirmed\nfont=Composite Font\n' > "$AUTO_MOD/config/font-payload-boot.conf"
+MODDIR="$AUTO_MOD" MODULE_DIR="$AUTO_MOD" \
+    sh "$AUTO_MOD/common/device_font_load_verify.sh"
+grep -q '^state=verified$' "$AUTO_MOD/config/device-font-load-verification.conf"
+grep -q '^mode=mount-verified$' "$AUTO_MOD/config/device-font-load-verification.conf"
+grep -q '^reason=boot-transaction-confirmed$' "$AUTO_MOD/config/device-font-load-verification.conf"
+
+# The expensive verifier remains available only as an explicit diagnostic command.
 COMPAT_MOD="$TMP/compat-module"
 mkdir -p "$COMPAT_MOD/common" "$COMPAT_MOD/config" "$COMPAT_MOD/logs"
 cp "$ROOT/common/device_font_load_verify.sh" "$COMPAT_MOD/common/"
@@ -41,19 +52,18 @@ luoshu_mount_verify_active() { return 0; }
 EOF_MOUNT_OK
 printf 'Composite Font\n' > "$COMPAT_MOD/config/active_font.conf"
 MODDIR="$COMPAT_MOD" MODULE_DIR="$COMPAT_MOD" \
-    sh "$COMPAT_MOD/common/device_font_load_verify.sh"
+    sh "$COMPAT_MOD/common/device_font_load_verify.sh" verify
 grep -q '^state=verified$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 grep -q '^mode=mount-verified$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 grep -q '^reason=verified-by-visible-mounts$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 
-# A missing/partial PID 1 mount remains a hard failure and must never inherit
-# the compatibility success state.
+# A missing/partial PID 1 mount remains a hard failure in explicit diagnostics.
 cat > "$COMPAT_MOD/common/mount_compat.sh" <<'EOF_MOUNT_FAIL'
 luoshu_mount_verify_active() { return 1; }
 EOF_MOUNT_FAIL
 set +e
 MODDIR="$COMPAT_MOD" MODULE_DIR="$COMPAT_MOD" \
-    sh "$COMPAT_MOD/common/device_font_load_verify.sh"
+    sh "$COMPAT_MOD/common/device_font_load_verify.sh" verify
 VERIFY_RC=$?
 set -e
 test "$VERIFY_RC" -eq 1
@@ -61,14 +71,14 @@ grep -q '^state=failed$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 grep -q '^mode=compatibility$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 grep -q '^reason=self-mount-not-visible$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 
-# The post-fs scheduler must run the verifier only after boot and must not block startup.
+# The post-fs scheduler now receives the lightweight default path after boot.
 MOD="$TMP/module"
 mkdir -p "$MOD/common" "$MOD/config" "$MOD/logs" "$TMP/bin"
 cp "$ROOT/common/device_font_boot_verify.sh" "$MOD/common/"
 cp "$ROOT/common/background_task.sh" "$MOD/common/"
 cat > "$MOD/common/device_font_load_verify.sh" <<'EOF_VERIFY'
 #!/bin/sh
-printf 'state=verified\nmode=aligned\nactiveFont=test\n' > "$MODDIR/config/device-font-load-verification.conf"
+printf 'state=verified\nmode=mount-verified\nactiveFont=test\n' > "$MODDIR/config/device-font-load-verification.conf"
 exit 0
 EOF_VERIFY
 chmod +x "$MOD/common/"*.sh
