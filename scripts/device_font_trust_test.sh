@@ -71,7 +71,7 @@ grep -q '^state=failed$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 grep -q '^mode=compatibility$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 grep -q '^reason=self-mount-not-visible$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 
-# The post-fs scheduler now receives the lightweight default path after boot.
+# The legacy worker remains callable for manual diagnostics, but boot scripts must not schedule it.
 MOD="$TMP/module"
 mkdir -p "$MOD/common" "$MOD/config" "$MOD/logs" "$TMP/bin"
 cp "$ROOT/common/device_font_boot_verify.sh" "$MOD/common/"
@@ -93,6 +93,6 @@ PATH="$TMP/bin:$PATH" MODDIR="$MOD" \
     LUOSHU_BOOT_VERIFY_POLL_SECONDS=1 \
     sh "$MOD/common/device_font_boot_verify.sh" run trust-test
 grep -q '^state=verified$' "$MOD/config/device-font-load-verification.conf"
-grep -q 'device_font_boot_verify.sh" schedule' "$ROOT/post-fs-data.sh"
+! grep -q 'device_font_boot_verify.sh.*schedule' "$ROOT/post-fs-data.sh" "$ROOT/.luoshu-runtime/post-fs-data-v227.sh"
 
 echo 'device_font_trust_test: PASS'
