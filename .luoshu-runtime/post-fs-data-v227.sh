@@ -36,6 +36,8 @@ rm -f "$MODDIR/config/active_emoji.conf" "$MODDIR/config/emoji_task.conf" "$MODD
 
 # 升级时清理实验版本遗留任务，避免原生 App 接管错误状态。
 rm -f "$MODDIR/config"/v*_axes_task.conf "$MODDIR/config"/v*_axes_mix.conf "$MODDIR/config"/v*_axes_worker.pid 2>/dev/null || true
+rm -f "$MODDIR/config/device-font-boot-verify.pid" "$MODDIR/config/device-font-boot-verify.pid.task" \
+      "$MODDIR/config/device-font-boot-verify.pid.boot" 2>/dev/null || true
 chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
 
 # 通过统一桥恢复中断的原子负载，并清理独立字重暂存任务。
@@ -92,11 +94,8 @@ done
 rm -f "$MODDIR/config/text_reboot_required.conf" "$MODDIR/config/font_weight_reboot_required.conf" \
       "$MODDIR/.font_switch.lock" 2>/dev/null || true
 
-# 加载验证必须发生在 Android 完成启动后；这里只提交独立任务，不阻塞 post-fs-data。
-if [ -f "$MODDIR/common/device_font_boot_verify.sh" ]; then
-    MODDIR="$MODDIR" sh "$MODDIR/common/device_font_boot_verify.sh" schedule >/dev/null 2>&1 || true
-fi
-
+# 不再提交开机深度字体加载验证。切换事务和启动守卫已经完成必要安全校验；
+# Android 启动完成后只由 service.sh 写入轻量应用状态。
 log_message "INFO" "当前文字=$ACTIVE_TEXT | 重启保护已复位"
 log_message "INFO" "===== post-fs-data 完成 ====="
 exit 0
