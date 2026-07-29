@@ -17,6 +17,19 @@ _luoshu_self_visible_root() {
     printf '%s\n' "${LUOSHU_SELF_MOUNT_VISIBLE_ROOT:-}"
 }
 
+_luoshu_self_boot_id() {
+    if [ -n "${LUOSHU_BOOT_ID:-}" ]; then
+        printf '%s\n' "$LUOSHU_BOOT_ID"
+        return 0
+    fi
+    _lsbi_value=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
+    if [ -z "$_lsbi_value" ] && command -v getprop >/dev/null 2>&1; then
+        _lsbi_value=$(getprop ro.runtime.firstboot 2>/dev/null | tr -d '\r\n')
+    fi
+    [ -n "$_lsbi_value" ] || _lsbi_value=unknown
+    printf '%s\n' "$_lsbi_value"
+}
+
 _luoshu_self_log() {
     _lsml_module=$(_luoshu_self_module)
     mkdir -p "$_lsml_module/logs" 2>/dev/null || true
@@ -390,6 +403,7 @@ _luoshu_self_state_write() {
         printf 'backend=%s\n' "$_lssw_backend"
         printf 'mounted=%s\n' "$_lssw_mounted"
         printf 'failed=%s\n' "$_lssw_failed"
+        printf 'bootId=%s\n' "$(_luoshu_self_boot_id)"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$_lssw_module/config/self-mount.conf.tmp.$$" 2>/dev/null && \
         mv -f "$_lssw_module/config/self-mount.conf.tmp.$$" \

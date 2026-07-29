@@ -7,6 +7,23 @@ _dfload_module() {
     printf '%s\n' "${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
 }
 
+_dfload_boot_id() {
+    if [ -n "${LUOSHU_BOOT_ID:-}" ]; then
+        printf '%s\n' "$LUOSHU_BOOT_ID"
+        return 0
+    fi
+    _dfload_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
+    if [ -z "$_dfload_boot" ] && command -v getprop >/dev/null 2>&1; then
+        _dfload_boot=$(getprop ro.runtime.firstboot 2>/dev/null | tr -d '\r\n')
+    fi
+    [ -n "$_dfload_boot" ] || _dfload_boot=unknown
+    printf '%s\n' "$_dfload_boot"
+}
+
+_dfload_value() {
+    sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
 _dfload_hash_stream() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum 2>/dev/null | awk '{print $1}'
@@ -55,6 +72,7 @@ _dfload_write_simple() {
         printf 'mode=%s\n' "$_dfload_mode"
         printf 'activeFont=%s\n' "$_dfload_active"
         printf 'reason=%s\n' "$_dfload_reason"
+        printf 'bootId=%s\n' "$(_dfload_boot_id)"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "${_dfload_conf}.tmp.$$" 2>/dev/null || return 1
     mv -f "${_dfload_conf}.tmp.$$" "$_dfload_conf" 2>/dev/null || return 1
@@ -63,9 +81,8 @@ _dfload_write_simple() {
 }
 
 # Normal boot path: switching already completed transaction, payload and mount checks.
-# Do not traverse or hash the font tree again. A confirmed boot transaction or mounted
-# self-mount is sufficient for the App's applied state; explicit deep verification remains
-# available for diagnostics.
+# Do not traverse or hash the font tree again. Only current-boot atomic mount evidence,
+# a matching boot transaction and any required dynamic-font view may mark the font applied.
 device_font_load_status() {
     _dfload_module_dir="$(_dfload_module)"
     _dfload_config="$_dfload_module_dir/config"
@@ -76,23 +93,82 @@ device_font_load_status() {
         return 0
     fi
 
-    _dfload_mount_state=$(sed -n 's/^state=//p' "$_dfload_config/self-mount.conf" 2>/dev/null | head -n1)
-    _dfload_boot_state=$(sed -n 's/^state=//p' "$_dfload_config/font-payload-boot.conf" 2>/dev/null | head -n1)
-    if [ "$_dfload_mount_state" = failed ]; then
+    _dfload_current_boot=$(_dfload_boot_id)
+    _dfload_mount_file="$_dfload_config/self-mount.conf"
+    _dfload_mount_state=$(_dfload_value "$_dfload_mount_file" state)
+    _dfload_mount_backend=$(_dfload_value "$_dfload_mount_file" backend)
+    _dfload_mount_failed=$(_dfload_value "$_dfload_mount_file" failed)
+    _dfload_mount_boot=$(_dfload_value "$_dfload_mount_file" bootId)
+    _dfload_required="$_dfload_config/self-mount-required.conf"
+    _dfload_boot_file="$_dfload_config/font-payload-boot.conf"
+    _dfload_boot_state=$(_dfload_value "$_dfload_boot_file" state)
+    _dfload_boot_font=$(_dfload_value "$_dfload_boot_file" font)
+
+    if [ "$_dfload_mount_state" = failed ] || [ -n "$_dfload_mount_failed" ]; then
         _dfload_write_simple failed self-mount-failed "$_dfload_active" compatibility
-        _dfload_log "字体自挂载状态失败：$_dfload_active"
+        _dfload_log "字体自挂载状态失败：$_dfload_active (${_dfload_mount_failed:-unknown})"
         return 1
     fi
-    case "$_dfload_mount_state:$_dfload_boot_state" in
-        mounted:*|*:confirmed)
-            _dfload_write_simple verified boot-transaction-confirmed "$_dfload_active" mount-verified
-            _dfload_log "字体已按正常切换流程生效：$_dfload_active"
-            return 0
-            ;;
+    if [ "$_dfload_mount_state" != mounted ]; then
+        _dfload_write_simple pending self-mount-not-confirmed "$_dfload_active" compatibility
+        return 2
+    fi
+    case "$_dfload_mount_backend" in ''|none|rollback|verification)
+        _dfload_write_simple failed self-mount-invalid-backend "$_dfload_active" compatibility
+        return 1
+        ;;
     esac
+    if [ "$_dfload_current_boot" = unknown ] || [ -z "$_dfload_mount_boot" ] || \
+       [ "$_dfload_mount_boot" != "$_dfload_current_boot" ]; then
+        _dfload_write_simple pending stale-self-mount "$_dfload_active" compatibility
+        return 2
+    fi
+    if [ ! -s "$_dfload_required" ]; then
+        _dfload_write_simple failed self-mount-manifest-missing "$_dfload_active" compatibility
+        _dfload_log '自挂载状态为 mounted，但本次启动缺少必需挂载清单'
+        return 1
+    fi
+    if [ "$_dfload_boot_state" != confirmed ]; then
+        _dfload_write_simple pending awaiting-boot-transaction "$_dfload_active" compatibility
+        return 2
+    fi
+    if [ -n "$_dfload_boot_font" ] && [ "$_dfload_boot_font" != "$_dfload_active" ]; then
+        _dfload_write_simple pending stale-boot-transaction "$_dfload_active" compatibility
+        return 2
+    fi
 
-    _dfload_write_simple pending awaiting-boot-transaction "$_dfload_active" compatibility
-    return 2
+    _dfload_dynamic_contract="$_dfload_config/device-font-dynamic-mount.conf"
+    if [ -s "$_dfload_dynamic_contract" ]; then
+        _dfload_dynamic_runtime="$_dfload_config/device-font-dynamic-runtime.conf"
+        _dfload_dynamic_state=$(_dfload_value "$_dfload_dynamic_runtime" state)
+        _dfload_dynamic_reason=$(_dfload_value "$_dfload_dynamic_runtime" reason)
+        _dfload_dynamic_boot=$(_dfload_value "$_dfload_dynamic_runtime" bootId)
+        if [ -z "$_dfload_dynamic_boot" ] || [ "$_dfload_dynamic_boot" != "$_dfload_current_boot" ]; then
+            _dfload_write_simple pending dynamic-config-unconfirmed "$_dfload_active" compatibility
+            return 2
+        fi
+        case "$_dfload_dynamic_state" in
+            mounted|released) ;;
+            overridden)
+                _dfload_write_simple failed dynamic-config-overridden "$_dfload_active" compatibility
+                _dfload_log "OEM 动态字体配置覆盖了洛书启动视图：${_dfload_dynamic_reason:-unknown}"
+                return 1
+                ;;
+            failed)
+                _dfload_write_simple failed dynamic-config-mount-failed "$_dfload_active" compatibility
+                _dfload_log "动态字体配置挂载失败：${_dfload_dynamic_reason:-unknown}"
+                return 1
+                ;;
+            *)
+                _dfload_write_simple pending dynamic-config-unconfirmed "$_dfload_active" compatibility
+                return 2
+                ;;
+        esac
+    fi
+
+    _dfload_write_simple verified current-boot-mount-confirmed "$_dfload_active" mount-verified
+    _dfload_log "本次启动字体事务与完整自挂载均已确认：$_dfload_active"
+    return 0
 }
 
 _dfload_python() {
