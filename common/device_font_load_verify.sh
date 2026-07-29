@@ -1,7 +1,6 @@
 #!/system/bin/sh
-# Verify the active aligned payload after Android has completed boot.
-# Only state=verified may be described as device-aligned. Visible files use bounded
-# first/last-block fingerprints so verification never rereads every full CJK font.
+# Record the active font after Android boot without rescanning the complete payload.
+# The expensive FontManager/hash verifier is retained only behind the explicit `verify` command.
 set +e
 
 _dfload_module() {
@@ -61,6 +60,39 @@ _dfload_write_simple() {
     mv -f "${_dfload_conf}.tmp.$$" "$_dfload_conf" 2>/dev/null || return 1
     chmod 0600 "$_dfload_conf" 2>/dev/null || true
     return 0
+}
+
+# Normal boot path: switching already completed transaction, payload and mount checks.
+# Do not traverse or hash the font tree again. A confirmed boot transaction or mounted
+# self-mount is sufficient for the App's applied state; explicit deep verification remains
+# available for diagnostics.
+device_font_load_status() {
+    _dfload_module_dir="$(_dfload_module)"
+    _dfload_config="$_dfload_module_dir/config"
+    _dfload_active=$(head -n1 "$_dfload_config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_dfload_active" ] || _dfload_active=default
+    if [ "$_dfload_active" = default ]; then
+        _dfload_write_simple not-applicable default-font "$_dfload_active" system
+        return 0
+    fi
+
+    _dfload_mount_state=$(sed -n 's/^state=//p' "$_dfload_config/self-mount.conf" 2>/dev/null | head -n1)
+    _dfload_boot_state=$(sed -n 's/^state=//p' "$_dfload_config/font-payload-boot.conf" 2>/dev/null | head -n1)
+    if [ "$_dfload_mount_state" = failed ]; then
+        _dfload_write_simple failed self-mount-failed "$_dfload_active" compatibility
+        _dfload_log "字体自挂载状态失败：$_dfload_active"
+        return 1
+    fi
+    case "$_dfload_mount_state:$_dfload_boot_state" in
+        mounted:*|*:confirmed)
+            _dfload_write_simple verified boot-transaction-confirmed "$_dfload_active" mount-verified
+            _dfload_log "字体已按正常切换流程生效：$_dfload_active"
+            return 0
+            ;;
+    esac
+
+    _dfload_write_simple pending awaiting-boot-transaction "$_dfload_active" compatibility
+    return 2
 }
 
 _dfload_python() {
@@ -187,11 +219,6 @@ device_font_load_verify() {
     fi
     _dfload_engine_state="$_dfload_config/device-font-engine.conf"
     if ! grep -q '^state=installed$' "$_dfload_engine_state" 2>/dev/null; then
-        # Compatibility payloads do not have aligned manifests, but the strict mount
-        # guard above already compared every required font/config file with the view
-        # visible from PID 1. That is the same runtime evidence used by the aligned
-        # verifier's mount-only fallback, so expose it as mount-verified instead of
-        # leaving a visibly active font permanently stuck at "pending".
         _dfload_write_simple verified verified-by-visible-mounts "$_dfload_active" mount-verified
         _dfload_log "兼容字体负载已通过系统主命名空间挂载验证：$_dfload_active"
         return 0
@@ -235,5 +262,9 @@ device_font_load_verify() {
 }
 
 if [ "${0##*/}" = device_font_load_verify.sh ]; then
-    device_font_load_verify
+    case "${1:-status}" in
+        status|auto) device_font_load_status ;;
+        verify|deep) device_font_load_verify ;;
+        *) printf 'usage: %s {status|verify}\n' "$0" >&2; exit 2 ;;
+    esac
 fi
