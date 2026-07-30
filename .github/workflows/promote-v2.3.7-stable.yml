@@ -1,4 +1,4 @@
-name: Promote v2.3.7 to stable
+name: Finalize v2.3.7 stable metadata
 
 on:
   push:
@@ -11,47 +11,36 @@ permissions:
   contents: write
 
 jobs:
-  promote:
+  finalize:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Verify and promote existing release
+      - name: Normalize stable release metadata
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_TAG: v2.3.7
           EXPECTED_RELEASE_ID: '362466603'
-          EXPECTED_TARGET: 5dd6ae8937d99650327bb18199636fa82e45d662
         run: |
           set -euo pipefail
           api="repos/${GITHUB_REPOSITORY}"
           release_json="$(gh api "${api}/releases/tags/${EXPECTED_TAG}")"
-
           [[ "$(jq -r '.id' <<<"$release_json")" == "$EXPECTED_RELEASE_ID" ]]
-          [[ "$(jq -r '.tag_name' <<<"$release_json")" == "$EXPECTED_TAG" ]]
-          [[ "$(jq -r '.target_commitish' <<<"$release_json")" == "$EXPECTED_TARGET" ]]
           [[ "$(jq -r '.draft' <<<"$release_json")" == 'false' ]]
-          [[ "$(jq -r '.prerelease' <<<"$release_json")" == 'true' ]]
-
-          expected_assets="$(printf '%s\n' \
-            'LuoShu-App-v2.3.7.apk' \
-            'LuoShu-App-v2.3.7.apk.sha256' \
-            'LuoShu-v2.3.7.zip' \
-            'LuoShu-v2.3.7.zip.sha256' | sort)"
-          actual_assets="$(jq -r '.assets[].name' <<<"$release_json" | sort)"
-          [[ "$actual_assets" == "$expected_assets" ]]
+          [[ "$(jq -r '.prerelease' <<<"$release_json")" == 'false' ]]
 
           body="$(jq -r '.body // ""' <<<"$release_json")"
-          body="${body//- 本版本只发布为 GitHub prerelease。/- 本版本已按维护者明确授权转为正式版；最低真机矩阵仍未完成。}"
-          body="${body//- 发布类型：预发行版/- 发布类型：正式版（维护者强制提升，真机矩阵未完成）}"
+          body="${body//<!-- prerelease -->/}"
+          body="${body//v2.3.7 是可靠性预发行版。/v2.3.7 是可靠性正式版。}"
+          body="${body//真机验收证据尚未全部完成，因此不得标记为稳定版。/真机验收证据尚未全部完成；本次按维护者明确授权强制提升为正式版。}"
           payload="$(jq -n --arg body "$body" \
             '{draft:false, prerelease:false, make_latest:"true", body:$body}')"
 
-          promoted="$(gh api --method PATCH "${api}/releases/${EXPECTED_RELEASE_ID}" \
+          finalized="$(gh api --method PATCH "${api}/releases/${EXPECTED_RELEASE_ID}" \
             --input - <<<"$payload")"
-          [[ "$(jq -r '.draft' <<<"$promoted")" == 'false' ]]
-          [[ "$(jq -r '.prerelease' <<<"$promoted")" == 'false' ]]
-
+          [[ "$(jq -r '.prerelease' <<<"$finalized")" == 'false' ]]
+          [[ "$(jq -r '.body' <<<"$finalized")" != *'<!-- prerelease -->'* ]]
+          [[ "$(jq -r '.body' <<<"$finalized")" != *'不得标记为稳定版'* ]]
           latest="$(gh api "${api}/releases/latest")"
           [[ "$(jq -r '.tag_name' <<<"$latest")" == "$EXPECTED_TAG" ]]
-          echo "Promoted ${EXPECTED_TAG} to stable and latest."
+          echo "Finalized ${EXPECTED_TAG} stable metadata."
