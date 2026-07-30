@@ -75,6 +75,7 @@
 ## 发布规则
 
 - Alpha/Beta/RC 只发布为 GitHub prerelease；
+- 稳定版必须同步更新 `docs/device_validation.json`，最低要求 ColorOS 16 + KernelSU、HyperOS 3 + KernelSU、通用 Magisk、通用 APatch 四项均为 `passed`，并包含测试时间与验收证据；
 - 正式版必须使用固定签名，并保留同一签名的历史 APK；
 - 标签只创建一次，禁止移动或覆盖；
 - 任一系统出现黑屏、二屏卡死、SystemUI 重启、批量闪退或方框乱码，立即停止发布并恢复上一可用模块包。

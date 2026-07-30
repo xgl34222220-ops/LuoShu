@@ -5,6 +5,7 @@ set -eu
 ROOT="${ROOT:-${GITHUB_WORKSPACE:-$(pwd)}}"
 TARGET_VERSION=''
 ENFORCE=0
+STABLE=0
 OUTPUT_DIR="${LUOSHU_READINESS_DIR:-$ROOT/dist/pre-release-readiness}"
 
 while [ "$#" -gt 0 ]; do
@@ -16,6 +17,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --enforce)
             ENFORCE=1
+            shift
+            ;;
+        --stable)
+            STABLE=1
             shift
             ;;
         --output)
@@ -202,6 +207,20 @@ else
     add_check warning source-revision '源码修订' '本地报告未绑定 GITHUB_SHA，归档时应同时记录提交哈希'
 fi
 
+DEVICE_MATRIX="$ROOT/docs/device_validation.json"
+DEVICE_GATE_REPORT="$OUTPUT_DIR/device-matrix.txt"
+if python3 "$ROOT/scripts/device_validation_gate.py" --matrix "$DEVICE_MATRIX" > "$DEVICE_GATE_REPORT" 2>&1; then
+    add_check ready device-matrix '最低真机矩阵' 'ColorOS、HyperOS、Magisk 与 APatch 均有带时间和证据的通过记录'
+    rm -f "$DEVICE_GATE_REPORT"
+else
+    device_detail="$(tr '\n\t' '  ' < "$DEVICE_GATE_REPORT" | sed 's/[[:space:]][[:space:]]*/ /g')"
+    if [ "$STABLE" -eq 1 ]; then
+        add_check blocker device-matrix '最低真机矩阵' "$device_detail"
+    else
+        add_check warning device-matrix '最低真机矩阵' "预发行允许待测；稳定发布将阻断。$device_detail"
+    fi
+fi
+
 status='ready'
 [ "$blockers" -gt 0 ] && status='blocked'
 
@@ -234,6 +253,7 @@ status='ready'
     printf '  "targetVersion": "%s",\n' "$(json_escape "$TARGET_VERSION")"
     printf '  "currentVersion": "%s",\n' "$(json_escape "${current_version:-unknown}")"
     printf '  "status": "%s",\n' "$status"
+    printf '  "stable": %s,\n' "$([ "$STABLE" -eq 1 ] && printf true || printf false)"
     printf '  "blockers": %s,\n' "$blockers"
     printf '  "warnings": %s,\n' "$warnings"
     printf '  "readyChecks": %s,\n' "$ready"

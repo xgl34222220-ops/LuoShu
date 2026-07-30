@@ -12,6 +12,11 @@ on:
         required: true
         default: true
         type: boolean
+      stable:
+        description: Enforce the minimum real-device matrix for a stable release
+        required: true
+        default: false
+        type: boolean
   pull_request:
     branches:
       - main
@@ -21,6 +26,7 @@ on:
       - common/**
       - scripts/**
       - android-app/**
+      - docs/device_validation.json
       - .github/workflows/pre-release-readiness.yml
 permissions:
   contents: read
@@ -40,6 +46,9 @@ jobs:
           [ -z "$target" ] || args+=(--target "$target")
           if [ '${{ inputs.enforce }}' != 'false' ]; then
             args+=(--enforce)
+          fi
+          if [ '${{ inputs.stable }}' == 'true' ]; then
+            args+=(--stable)
           fi
           sh ./scripts/pre_release_readiness.sh "${args[@]}"
 

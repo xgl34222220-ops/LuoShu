@@ -121,6 +121,38 @@ _luoshu_atomic_files_equal() {
     [ -n "$_lsafe_left_fingerprint" ] && [ "$_lsafe_left_fingerprint" = "$_lsafe_right_fingerprint" ]
 }
 
+_luoshu_atomic_file_identity() {
+    stat -c '%d:%i' "$1" 2>/dev/null
+}
+
+_luoshu_atomic_same_identity() {
+    _lsasi_left=$(_luoshu_atomic_file_identity "$1")
+    _lsasi_right=$(_luoshu_atomic_file_identity "$2")
+    [ -n "$_lsasi_left" ] && [ "$_lsasi_left" = "$_lsasi_right" ]
+}
+
+_luoshu_atomic_namespace_target() {
+    _lsant_path="$1"
+    _lsant_root="${LUOSHU_SELF_PID1_ROOT:-/proc/1/root}"
+    case "$_lsant_root" in
+        /|'') printf '%s\n' "$_lsant_path" ;;
+        *)
+            case "$_lsant_path" in
+                "$_lsant_root"/*) printf '/%s\n' "${_lsant_path#"$_lsant_root"/}" ;;
+                *) printf '%s\n' "$_lsant_path" ;;
+            esac
+            ;;
+    esac
+}
+
+_luoshu_atomic_mountinfo_has_target() {
+    _lsamht_target=$(_luoshu_atomic_namespace_target "$1")
+    _lsamht_file="${LUOSHU_SELF_MOUNTINFO:-/proc/1/mountinfo}"
+    [ -r "$_lsamht_file" ] || return 1
+    awk -v target="$_lsamht_target" '$5 == target { found=1 } END { exit !found }' \
+        "$_lsamht_file" 2>/dev/null
+}
+
 _luoshu_atomic_pid1_target() {
     _lsapt_target="$1"
     _lsapt_root="${LUOSHU_SELF_PID1_ROOT:-/proc/1/root}"
@@ -192,6 +224,11 @@ _luoshu_atomic_tree_visible() {
                 continue
             fi
             printf '%s\n' "$_lsatv_dst" >> "$_lsatv_seen" 2>/dev/null || {
+                _lsatv_failed=1
+                break
+            }
+            _luoshu_atomic_mountinfo_has_target "$_lsatv_dst" && \
+                _luoshu_atomic_same_identity "$_lsatv_src" "$_lsatv_dst" || {
                 _lsatv_failed=1
                 break
             }
@@ -279,6 +316,9 @@ _luoshu_atomic_verify_manifest() {
     [ -s "$_lsavm_manifest" ] || return 1
     while IFS='|' read -r _lsavm_source _lsavm_target _lsavm_mode; do
         [ -n "$_lsavm_source" ] && [ -n "$_lsavm_target" ] || return 1
+        if [ "${_lsavm_mode:-overlay}" = overlay ]; then
+            _luoshu_atomic_mountinfo_has_target "$_lsavm_target" || return 1
+        fi
         _lsavm_visible=$(_luoshu_atomic_pid1_target "$_lsavm_target")
         _luoshu_atomic_tree_visible "$_lsavm_source" "$_lsavm_visible" "${_lsavm_mode:-overlay}" || return 1
     done < "$_lsavm_manifest"

@@ -14,11 +14,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import io.github.xgl34222220.luoshu.ui.appearance.AppearanceRepository
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private var openTaskCenter by mutableStateOf(false)
     private val displayPerformanceController by lazy(LazyThreadSafetyMode.NONE) {
         DisplayPerformanceController(this)
+    }
+    private val appearanceRepository by lazy(LazyThreadSafetyMode.NONE) {
+        AppearanceRepository(applicationContext)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -26,6 +36,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         openTaskCenter = intent.getBooleanExtra(EXTRA_OPEN_TASK_CENTER, false)
         requestImportNotificationPermission()
+        observeDisplayPreference()
         setContent {
             if (openTaskCenter) TaskCenterHost() else LuoShuHost()
         }
@@ -80,6 +91,17 @@ class MainActivity : ComponentActivity() {
                 arrayOf(Manifest.permission.POST_NOTIFICATIONS),
                 14331,
             )
+        }
+    }
+
+    private fun observeDisplayPreference() {
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                appearanceRepository.settings
+                    .map { settings -> settings.highRefreshRate }
+                    .distinctUntilChanged()
+                    .collect(displayPerformanceController::setHighRefreshEnabled)
+            }
         }
     }
 }

@@ -57,6 +57,7 @@ data class AppearanceActions(
     val setBlurEnabled: (Boolean) -> Unit,
     val setGlassEnabled: (Boolean) -> Unit,
     val setFloatingDock: (Boolean) -> Unit,
+    val setHighRefreshRate: (Boolean) -> Unit,
 )
 
 @Composable
@@ -111,6 +112,7 @@ private fun AppearanceSettingsMaterial(
                 MaterialSwitchRow("玻璃半透明", settings.glassEnabled, actions.setGlassEnabled)
                 MaterialSwitchRow("背景模糊", settings.blurEnabled, actions.setBlurEnabled, settings.glassEnabled)
                 MaterialSwitchRow("悬浮底栏", settings.floatingDock, actions.setFloatingDock)
+                MaterialSwitchRow("高刷新率", settings.highRefreshRate, actions.setHighRefreshRate)
             }
         }
     }
@@ -160,6 +162,12 @@ private fun AppearanceSettingsMiuix(
                     MiuixSwitchRow("底栏液态玻璃效果", "真实背景采样、折射高光与透明质感", settings.glassEnabled, actions.setGlassEnabled)
                     MiuixSwitchRow("背景模糊", "模糊液态玻璃后方的页面内容", settings.blurEnabled, actions.setBlurEnabled, settings.glassEnabled)
                     MiuixSwitchRow("悬浮底栏", "关闭后底栏贴合屏幕底部", settings.floatingDock, actions.setFloatingDock)
+                    MiuixSwitchRow(
+                        "高刷新率",
+                        "默认跟随系统；开启后优先同分辨率高刷新率，省电模式下自动停用",
+                        settings.highRefreshRate,
+                        actions.setHighRefreshRate,
+                    )
                 }
             }
         }

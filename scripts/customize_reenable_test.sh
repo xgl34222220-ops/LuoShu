@@ -22,4 +22,13 @@ test ! -e "$NEW/disable"
 test ! -e "$OLD/config/font-boot-failures"
 test ! -e "$OLD/config/font-payload-quarantine.conf"
 
-echo 'Module flash re-enable checks passed.'
+# APatch sources customize.sh. The wrapper must return to the manager instead of
+# exiting its parent shell before the staged module is committed.
+SOURCED_MARKER="$TMP/source-continued"
+MODPATH="$NEW" LUOSHU_OLD_MOD="$OLD" sh -c '
+    . "$1" >/dev/null 2>&1
+    printf "continued\n" > "$2"
+' sh "$ROOT/customize.sh" "$SOURCED_MARKER"
+test "$(cat "$SOURCED_MARKER")" = continued
+
+echo 'Module flash re-enable and APatch source-safety checks passed.'

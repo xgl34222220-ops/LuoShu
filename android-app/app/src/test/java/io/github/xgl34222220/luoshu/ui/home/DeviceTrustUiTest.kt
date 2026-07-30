@@ -121,6 +121,44 @@ class DeviceTrustUiTest {
     }
 
     @Test
+    fun currentBootPendingReasonIsNotDowngradedToCompatibility() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+                engine=installed
+                template=trusted
+                alignment=pending
+                mode=compatibility
+                reason=stale-self-mount
+                mountState=mounted
+                cachePending=no
+            """.trimIndent(),
+        )
+
+        assertEquals(DeviceTrustLevel.PENDING, state.level)
+    }
+
+    @Test
+    fun dynamicConfigOverrideIsAlwaysAnIssue() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+                engine=installed
+                template=trusted
+                alignment=failed
+                mode=compatibility
+                reason=dynamic-config-overridden
+                mountState=mounted
+                cachePending=no
+            """.trimIndent(),
+        )
+
+        assertEquals(DeviceTrustLevel.ISSUE, state.level)
+    }
+
+    @Test
     fun emptyBridgeOutputReturnsReadableError() {
         val state = parseDeviceTrustOutput("")
 

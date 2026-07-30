@@ -35,6 +35,7 @@ class AppearanceSettingsTest {
         val normalized = AppearanceSettings(seedArgb = 0x12345678).normalized()
         assertEquals(AccentOptions.first().argb, normalized.seedArgb)
         assertEquals("luoshu", normalized.accent.id)
+        assertFalse(normalized.highRefreshRate)
     }
 
     @Test

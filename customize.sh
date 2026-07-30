@@ -33,11 +33,18 @@ sed '$d' "$_lc_base" > "$_lc_temp" 2>/dev/null || abort '安装入口准备失�
 _lc_rc=$?
 rm -f "$_lc_temp" 2>/dev/null || true
 luoshu_private_unmount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1 || true
-[ "$_lc_rc" -eq 0 ] || exit "$_lc_rc"
+if [ "$_lc_rc" -ne 0 ]; then
+    # APatch sources customize.sh into its installer process. Returning here keeps
+    # the manager's commit phase alive; direct execution still exits with the
+    # delegated installer's status.
+    return "$_lc_rc" 2>/dev/null || exit "$_lc_rc"
+fi
 
 if ! luoshu_private_install_migrate "$MODPATH"; then
     abort '洛书私有挂载树部署失败'
 fi
 ui_print '✓ 私有字体负载已部署'
 ui_print '✓ 洛书将独立完成字体挂载'
-exit 0
+# Magisk commonly executes this file, while APatch may source it. A plain exit
+# would terminate APatch's parent installer before it commits the staged module.
+return 0 2>/dev/null || exit 0

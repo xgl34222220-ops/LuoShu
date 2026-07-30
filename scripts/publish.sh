@@ -18,17 +18,22 @@ case "$REMOTE" in
     ;;
 esac
 
+APP_APK="${LUOSHU_APP_APK:-}"
+[ -n "$APP_APK" ] && [ -s "$APP_APK" ] || {
+  echo '本地候选构建需要 LUOSHU_APP_APK 指向已签名的正式 APK。' >&2
+  echo '推荐直接使用 GitHub Actions 的 Publish signed release 工作流。' >&2
+  exit 65
+}
+
 sh scripts/check.sh
-sh scripts/build.sh
+LUOSHU_APP_APK="$APP_APK" \
+LUOSHU_APP_PACKAGE="${LUOSHU_APP_PACKAGE:-}" \
+LUOSHU_APP_VERSION_CODE="${LUOSHU_APP_VERSION_CODE:-}" \
+  sh scripts/build.sh
 
 VERSION=$(sed -n 's/^version=//p' module.prop | head -n 1)
-git add -A
-if git diff --cached --quiet; then
-  echo "没有需要提交的变更。"
-  exit 0
-fi
+sh scripts/pre_release_readiness.sh --target "$VERSION" --enforce
 
-git commit -m "release: ${VERSION}"
-git push origin HEAD:main
-
-echo "源码已推送。GitHub Actions 将自动构建并发布 ${VERSION}。"
+echo "本地候选 ${VERSION} 已构建并通过预发行门禁。"
+echo '为防止绕过 PR、固定签名和真机矩阵，本脚本不会直接推送 main 或创建 Release。'
+echo '请通过 Publish signed release 工作流发布；稳定版还会强制检查真机证据。'

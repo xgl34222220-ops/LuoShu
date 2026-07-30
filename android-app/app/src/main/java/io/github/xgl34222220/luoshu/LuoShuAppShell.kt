@@ -189,6 +189,7 @@ internal fun LuoShuAppShell(
             setBlurEnabled = appearanceViewModel::setBlurEnabled,
             setGlassEnabled = appearanceViewModel::setGlassEnabled,
             setFloatingDock = appearanceViewModel::setFloatingDock,
+            setHighRefreshRate = appearanceViewModel::setHighRefreshRate,
         )
     }
     val validFonts = remember(viewModel.fonts) { viewModel.fonts.filter { it.valid } }

@@ -26,6 +26,7 @@ class AppearanceViewModel(application: Application) : AndroidViewModel(applicati
     fun setBlurEnabled(enabled: Boolean) = launch { repository.setBlurEnabled(enabled) }
     fun setGlassEnabled(enabled: Boolean) = launch { repository.setGlassEnabled(enabled) }
     fun setFloatingDock(enabled: Boolean) = launch { repository.setFloatingDock(enabled) }
+    fun setHighRefreshRate(enabled: Boolean) = launch { repository.setHighRefreshRate(enabled) }
 
     private fun launch(block: suspend () -> Unit) {
         viewModelScope.launch { block() }
