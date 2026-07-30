@@ -67,6 +67,7 @@ data class AppearanceSettings(
     val blurEnabled: Boolean = true,
     val glassEnabled: Boolean = true,
     val floatingDock: Boolean = true,
+    val highRefreshRate: Boolean = false,
 ) {
     val accent: AccentOption
         get() = accentOptionFor(seedArgb)

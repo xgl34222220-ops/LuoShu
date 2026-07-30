@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "updatedAt": null,
+  "devices": [
+    {
+      "id": "coloros16-kernelsu",
+      "system": "ColorOS 16 / Android 16",
+      "rootManager": "KernelSU / SukiSU Ultra",
+      "status": "pending",
+      "testedAt": null,
+      "evidence": []
+    },
+    {
+      "id": "hyperos3-kernelsu",
+      "system": "HyperOS 3 / Android 16",
+      "rootManager": "KernelSU / SukiSU Ultra",
+      "status": "pending",
+      "testedAt": null,
+      "evidence": []
+    },
+    {
+      "id": "generic-magisk",
+      "system": "通用 Android",
+      "rootManager": "Magisk",
+      "status": "pending",
+      "testedAt": null,
+      "evidence": []
+    },
+    {
+      "id": "generic-apatch",
+      "system": "通用 Android",
+      "rootManager": "APatch",
+      "status": "pending",
+      "testedAt": null,
+      "evidence": []
+    }
+  ]
+}

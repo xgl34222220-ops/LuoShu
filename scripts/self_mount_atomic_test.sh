@@ -19,12 +19,14 @@ setup_case() {
     LUOSHU_SELF_MOUNT_STATE_ROOT="$CASE_ROOT/state"
     LUOSHU_SELF_MOUNT_VISIBLE_ROOT="$CASE_ROOT/root"
     LUOSHU_SELF_PID1_ROOT=/
+    LUOSHU_SELF_MOUNTINFO="$CASE_ROOT/mountinfo"
     export MODULE_DIR LUOSHU_MOUNT_MODDIR LUOSHU_SELF_MOUNT_STATE_ROOT \
-        LUOSHU_SELF_MOUNT_VISIBLE_ROOT LUOSHU_SELF_PID1_ROOT
+        LUOSHU_SELF_MOUNT_VISIBLE_ROOT LUOSHU_SELF_PID1_ROOT LUOSHU_SELF_MOUNTINFO
     mkdir -p "$MODULE_DIR/config" "$MODULE_DIR/logs" "$CASE_ROOT/root/system/fonts" \
         "$CASE_ROOT/root/system/etc" "$CASE_ROOT/state"
     printf 'custom\n' > "$MODULE_DIR/config/active_font.conf"
     : > "$CASE_ROOT/unmount.log"
+    : > "$LUOSHU_SELF_MOUNTINFO"
     FAIL_OVERLAY=''
     FAIL_BIND=''
 }
@@ -59,12 +61,14 @@ _luoshu_partition_root() {
 }
 _luoshu_overlay_mount_dir() {
     test "${FAIL_OVERLAY:-}" != all && test "${FAIL_OVERLAY:-}" != "$3" || return 1
-    cp -R "$1/." "$2/"
+    cp -R "$1/." "$2/" || return 1
+    printf '1 0 0:1 / %s rw - overlay overlay rw\n' "$2" >> "$LUOSHU_SELF_MOUNTINFO"
 }
 _luoshu_mount_cmd() {
     test "$1" = -o && test "$2" = bind || return 1
     test "${FAIL_BIND:-}" != "$4" || return 1
-    cp -f "$3" "$4"
+    ln -f "$3" "$4" || return 1
+    printf '2 0 0:2 / %s rw - bind bind rw\n' "$4" >> "$LUOSHU_SELF_MOUNTINFO"
 }
 _luoshu_umount_cmd() {
     printf '%s\n' "$1" >> "$CASE_ROOT/unmount.log"

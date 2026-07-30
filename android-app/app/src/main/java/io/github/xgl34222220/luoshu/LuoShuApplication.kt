@@ -1,9 +1,9 @@
 package io.github.xgl34222220.luoshu
 
 import android.app.Application
-import android.os.SystemClock
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
@@ -12,8 +12,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 internal class LuoShuApplication : Application(), ViewModelStoreOwner {
@@ -36,36 +35,41 @@ internal class LuoShuApplication : Application(), ViewModelStoreOwner {
     private fun superviseNativeImport() {
         val model = nativeImportViewModel
         applicationScope.launch {
-            var lastServiceStart = 0L
+            var foregroundServiceExpected = false
             var lastPassiveSignature = ""
             var previousPhase = NativeImportPhase.IDLE
-            while (isActive) {
-                val state = model.state
+            snapshotFlow { model.state }
+                .distinctUntilChanged()
+                .collect { state ->
                 when {
                     state.busy -> {
-                        val now = SystemClock.elapsedRealtime()
-                        if (now - lastServiceStart >= 5_000L) {
-                            runCatching { NativeImportNotificationController.start(this@LuoShuApplication) }
-                            lastServiceStart = now
+                        if (!foregroundServiceExpected) {
+                            foregroundServiceExpected = runCatching {
+                                NativeImportNotificationController.start(this@LuoShuApplication)
+                            }.isSuccess
                         }
                         lastPassiveSignature = ""
                     }
                     state.phase != NativeImportPhase.IDLE -> {
-                        val signature = "${state.phase}:${state.processed}:${state.message}"
-                        if (signature != lastPassiveSignature) {
-                            NativeImportNotificationController.notify(this@LuoShuApplication, state)
-                            lastPassiveSignature = signature
+                        // A running service publishes the transition before it exits.
+                        // Restored paused/terminal records have no service, so the
+                        // application publishes them once.
+                        if (!foregroundServiceExpected) {
+                            val signature = "${state.phase}:${state.processed}:${state.message}"
+                            if (signature != lastPassiveSignature) {
+                                NativeImportNotificationController.notify(this@LuoShuApplication, state)
+                                lastPassiveSignature = signature
+                            }
                         }
-                        lastServiceStart = 0L
+                        foregroundServiceExpected = false
                     }
                     previousPhase != NativeImportPhase.IDLE -> {
                         NativeImportNotificationController.cancel(this@LuoShuApplication)
                         lastPassiveSignature = ""
-                        lastServiceStart = 0L
+                        foregroundServiceExpected = false
                     }
                 }
                 previousPhase = state.phase
-                delay(250L)
             }
         }
     }

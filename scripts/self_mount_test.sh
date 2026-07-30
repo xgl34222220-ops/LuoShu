@@ -12,6 +12,7 @@ PRIVATE_STATE="$TMP/private-state"
 FAKE_MOUNT="$TMP/fake-mount.sh"
 FAKE_UMOUNT="$TMP/fake-umount.sh"
 MOUNTINFO="$TMP/mounts"
+ATOMIC_MOUNTINFO="$TMP/atomic-mountinfo"
 mkdir -p \
     "$MODULE/system/fonts" \
     "$MODULE/system/etc/luoshu" \
@@ -29,11 +30,13 @@ printf 'id=LuoShu\nfont=Demo\nengine=self-mount\npartition=system\nnonce=test-sy
 printf 'system|test-system|/system/etc/luoshu/mount-probe.conf\n' \
     > "$MODULE/config/mount-probes-expected.conf"
 : > "$MOUNTINFO"
+: > "$ATOMIC_MOUNTINFO"
 
 cat > "$FAKE_MOUNT" <<'EOF_FAKE_MOUNT'
 #!/bin/sh
 set -eu
 mountinfo=${LUOSHU_TEST_MOUNTINFO:?}
+atomic_mountinfo=${LUOSHU_TEST_ATOMIC_MOUNTINFO:-}
 case "$1" in
     -o)
         [ "$2" = bind ]
@@ -45,6 +48,8 @@ case "$1" in
         mkdir -p "$dst"
         cp -a "$src/." "$dst/"
         printf 'bind %s %s %s\n' "$src" "$dst" "$backup" >> "$mountinfo"
+        [ -z "$atomic_mountinfo" ] || \
+            printf '1 0 0:1 / %s rw - bind bind rw\n' "$dst" >> "$atomic_mountinfo"
         ;;
     -t)
         [ "$2" = overlay ]
@@ -62,6 +67,8 @@ case "$1" in
         cp -a "$stock/." "$target/"
         cp -a "$source/." "$target/"
         printf 'overlay %s %s %s\n' "$source" "$target" "$backup" >> "$mountinfo"
+        [ -z "$atomic_mountinfo" ] || \
+            printf '2 0 0:2 / %s rw - overlay overlay rw\n' "$target" >> "$atomic_mountinfo"
         ;;
     *) exit 2 ;;
 esac
@@ -85,6 +92,7 @@ LUOSHU_PRIVATE_MOUNTINFO="$MOUNTINFO" \
 LUOSHU_PRIVATE_MOUNT_COMMAND="$FAKE_MOUNT" \
 LUOSHU_PRIVATE_UMOUNT_COMMAND="$FAKE_UMOUNT" \
 LUOSHU_TEST_MOUNTINFO="$MOUNTINFO" \
+LUOSHU_TEST_ATOMIC_MOUNTINFO="$ATOMIC_MOUNTINFO" \
 sh -c '
     . "$1/common/private_payload.sh"
     luoshu_private_install_migrate "$MODDIR"
@@ -109,6 +117,7 @@ MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_MOUNT_MODDIR="$MODULE" \
 LUOSHU_SELF_MOUNT_VISIBLE_ROOT="$VISIBLE" \
 LUOSHU_SELF_MOUNT_STATE_ROOT="$STATE" \
 LUOSHU_SELF_PID1_ROOT=/ \
+LUOSHU_SELF_MOUNTINFO="$ATOMIC_MOUNTINFO" \
 LUOSHU_SELF_MOUNT_COMMAND="$FAKE_MOUNT" \
 LUOSHU_SELF_UMOUNT_COMMAND="$FAKE_UMOUNT" \
 LUOSHU_PRIVATE_STATE_ROOT="$PRIVATE_STATE" \
@@ -116,6 +125,7 @@ LUOSHU_PRIVATE_MOUNTINFO="$MOUNTINFO" \
 LUOSHU_PRIVATE_MOUNT_COMMAND="$FAKE_MOUNT" \
 LUOSHU_PRIVATE_UMOUNT_COMMAND="$FAKE_UMOUNT" \
 LUOSHU_TEST_MOUNTINFO="$MOUNTINFO" \
+LUOSHU_TEST_ATOMIC_MOUNTINFO="$ATOMIC_MOUNTINFO" \
 sh -c '
     luoshu_payload_partitions() { printf "system\n"; }
     luoshu_module_id() { printf "LuoShu\n"; }

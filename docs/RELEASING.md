@@ -12,6 +12,9 @@
 - `LUOSHU_KEY_PASSWORD`：签名私钥密码。
 
 密钥库和密码不可提交到仓库。正式 App 必须长期使用同一把密钥，否则 Android 会拒绝覆盖安装。
+发布工作流还会把最终 APK 的证书 SHA-256 与 v2.3.6 正式证书
+`e0043b560a10111d3ffddd3a7afba680b854e14ed793c7a3fdb7f8b7aa95ff27`
+精确比较，并要求仅有一个 signer；换错或替换密钥库会直接阻断发布。
 
 ## 候选版本门禁
 
@@ -19,7 +22,7 @@
 2. `Validate source` 必须通过源码检查、角色覆盖门禁、App 编译与单元测试、单模块包构建和成品检查。
 3. `Build module` 必须通过复合字体烟雾测试并生成可解压的模块 ZIP。
 4. 模块成品必须内置与独立 APK 字节一致的原生 App，不得包含 `webroot/`，`module.prop` 不得声明 `webroot=`。
-5. 按 `docs/TEST_MATRIX.md` 完成真机回归；未验证项目保持“待测”。
+5. 按 `docs/TEST_MATRIX.md` 完成真机回归，并把通过时间与 App 导出的验收证据记录到 `docs/device_validation.json`；未验证项目保持“待测”。
 6. 任一设备出现黑屏、SystemUI 重启、批量闪退或乱码，停止发布并恢复可用模块包。
 
 ## 发布步骤
@@ -27,9 +30,9 @@
 1. 将通过自动化和真机回归的候选版本整理到发布分支。
 2. 确认存在与版本完全匹配的发布说明，例如 `RELEASE_NOTES_v14.3.md`。
 3. 稳定版必须使用不含 Alpha、Beta、RC 的版本名，并提升 `versionCode`。
-4. 将稳定版本合并到 `main`；`Publish signed release` 会从 `module.prop` 创建唯一 Tag，例如 `v14.3`。
+4. 将稳定版本合并到 `main`；`Publish signed release` 只有在 ColorOS、HyperOS、Magisk 与 APatch 最低真机矩阵全部有证据时，才会从 `module.prop` 创建唯一 Tag。
 5. 工作流重新运行完整源码检查、App lint/单元测试、固定签名构建、APK 证书校验与单模块成品校验，然后创建不可覆盖的 GitHub Release。
-6. 预发行版仍可手动创建唯一 Tag；已存在的 Tag 或 Release 不会被覆盖，修订内容必须提升版本号。
+6. 预发行版允许真机矩阵保持待测，但必须发布为 prerelease；已存在的 Tag 或 Release 不会被覆盖，修订内容必须提升版本号。
 
 正式 Release 只包含两类可安装产物：
 

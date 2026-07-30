@@ -26,6 +26,7 @@ class AppearanceRepository(private val context: Context) {
         val blurEnabled = booleanPreferencesKey("theme_blur_enabled")
         val glassEnabled = booleanPreferencesKey("theme_glass_enabled")
         val floatingDock = booleanPreferencesKey("theme_floating_dock")
+        val highRefreshRate = booleanPreferencesKey("display_high_refresh_rate")
     }
 
     val settings: Flow<AppearanceSettings> = context.appearanceDataStore.data
@@ -43,6 +44,7 @@ class AppearanceRepository(private val context: Context) {
                 blurEnabled = preferences[Keys.blurEnabled] ?: true,
                 glassEnabled = preferences[Keys.glassEnabled] ?: true,
                 floatingDock = preferences[Keys.floatingDock] ?: true,
+                highRefreshRate = preferences[Keys.highRefreshRate] ?: false,
             ).normalized()
         }
 
@@ -64,6 +66,7 @@ class AppearanceRepository(private val context: Context) {
     }
 
     suspend fun setFloatingDock(enabled: Boolean) = edit { it[Keys.floatingDock] = enabled }
+    suspend fun setHighRefreshRate(enabled: Boolean) = edit { it[Keys.highRefreshRate] = enabled }
 
     private suspend inline fun edit(crossinline block: (MutablePreferences) -> Unit) {
         context.appearanceDataStore.edit { preferences -> block(preferences) }

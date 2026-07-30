@@ -11,6 +11,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import androidx.compose.runtime.snapshotFlow
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,7 +19,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 internal const val EXTRA_OPEN_TASK_CENTER = "io.github.xgl34222220.luoshu.OPEN_TASK_CENTER"
@@ -165,32 +166,27 @@ internal class NativeImportForegroundService : Service() {
             ?: NativeImportState(phase = NativeImportPhase.QUEUED, message = "正在准备字体导入任务")
         startAsForeground(initial)
         observeImportState(startId)
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun observeImportState(startId: Int) {
         observerJob?.cancel()
         observerJob = serviceScope.launch {
-            var idleChecks = 0
-            while (isActive) {
-                val state = importViewModel.state
+            snapshotFlow { importViewModel.state }
+                .distinctUntilChanged()
+                .collect { state ->
                 if (state.phase == NativeImportPhase.IDLE) {
-                    idleChecks += 1
-                    if (idleChecks >= 20) {
-                        stopForeground(STOP_FOREGROUND_REMOVE)
-                        stopSelf(startId)
-                        return@launch
-                    }
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelfResult(startId)
+                    return@collect
                 } else {
-                    idleChecks = 0
                     NativeImportNotificationController.notify(this@NativeImportForegroundService, state)
                     if (!state.busy) {
                         stopForeground(STOP_FOREGROUND_DETACH)
-                        stopSelf(startId)
-                        return@launch
+                        stopSelfResult(startId)
+                        return@collect
                     }
                 }
-                delay(250L)
             }
         }
     }

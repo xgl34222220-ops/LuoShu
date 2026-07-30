@@ -1,7 +1,9 @@
 package io.github.xgl34222220.luoshu
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DisplayPerformanceControllerTest {
@@ -54,5 +56,39 @@ class DisplayPerformanceControllerTest {
             current = DisplayModeCandidate(2, 1080, 2400, 60f),
         )
         assertNull(selected)
+    }
+
+    @Test
+    fun highRefreshDefaultsToSystemAndRespectsPowerSaver() {
+        assertFalse(
+            shouldRequestHighRefresh(
+                enabled = false,
+                powerSaveMode = false,
+                resumed = true,
+                focused = true,
+                pictureInPicture = false,
+                finishing = false,
+            ),
+        )
+        assertFalse(
+            shouldRequestHighRefresh(
+                enabled = true,
+                powerSaveMode = true,
+                resumed = true,
+                focused = true,
+                pictureInPicture = false,
+                finishing = false,
+            ),
+        )
+        assertTrue(
+            shouldRequestHighRefresh(
+                enabled = true,
+                powerSaveMode = false,
+                resumed = true,
+                focused = true,
+                pictureInPicture = false,
+                finishing = false,
+            ),
+        )
     }
 }

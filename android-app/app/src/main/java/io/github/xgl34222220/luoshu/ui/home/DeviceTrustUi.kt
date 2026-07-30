@@ -38,6 +38,29 @@ internal enum class DeviceTrustLevel {
     ISSUE,
 }
 
+private val pendingTrustReasons = setOf(
+    "awaiting-full-reboot",
+    "boot-not-completed",
+    "background-task-still-running",
+    "stale-verification",
+    "stale-self-mount",
+    "awaiting-boot-transaction",
+    "stale-boot-transaction",
+    "dynamic-config-unconfirmed",
+)
+
+private val failedTrustReasons = setOf(
+    "self-mount-not-visible",
+    "self-mount-failed",
+    "self-mount-invalid-backend",
+    "self-mount-manifest-missing",
+    "aligned-manifest-missing",
+    "dynamic-config-overridden",
+    "dynamic-config-mount-failed",
+    "verifier-output-missing",
+    "verification-retry-exhausted",
+)
+
 internal data class DeviceTrustState(
     val loading: Boolean = true,
     val activeFont: String = "unknown",
@@ -56,8 +79,9 @@ internal data class DeviceTrustState(
             error.isNotBlank() -> DeviceTrustLevel.ISSUE
             activeFont in setOf("", "default") || alignment == "not-applicable" -> DeviceTrustLevel.SYSTEM
             mountState == "failed" -> DeviceTrustLevel.ISSUE
-            alignment == "failed" -> DeviceTrustLevel.ISSUE
+            alignment == "failed" || reason in failedTrustReasons -> DeviceTrustLevel.ISSUE
             alignment == "verified" && mode in setOf("aligned", "mount-verified") -> DeviceTrustLevel.VERIFIED
+            alignment == "pending" || reason in pendingTrustReasons -> DeviceTrustLevel.PENDING
             alignment == "compatibility" || mode == "compatibility" -> DeviceTrustLevel.COMPATIBILITY
             engine == "installed" -> DeviceTrustLevel.PENDING
             inventory == "available" -> DeviceTrustLevel.COMPATIBILITY
@@ -87,7 +111,7 @@ internal suspend fun loadDeviceTrustState(): DeviceTrustState {
             if [ "${'$'}mountState" = failed ]; then
                 alignment=failed
                 mode=compatibility
-                reason=self-mount-not-visible
+                [ -n "${'$'}reason" ] || reason=self-mount-failed
             elif [ -n "${'$'}verifiedActive" ] && [ "${'$'}verifiedActive" != "${'$'}active" ]; then
                 alignment=pending
                 mode=unknown
@@ -253,14 +277,14 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
             scheme.primary,
         )
         state.level == DeviceTrustLevel.VERIFIED && state.mode == "mount-verified" -> DeviceTrustPresentation(
-            "设备字体挂载已验证",
-            "系统可见字体与洛书负载一致",
+            "本次启动字体已验证",
+            "PID 1 可见字体、配置与洛书负载一致",
             Icons.Rounded.CheckCircle,
             scheme.primary,
         )
         state.level == DeviceTrustLevel.VERIFIED -> DeviceTrustPresentation(
-            "设备字体已验证",
-            "原厂模板与开机加载证据一致",
+            "本次启动字体已验证",
+            "原厂模板、字体事务与本次启动证据一致",
             Icons.Rounded.CheckCircle,
             scheme.primary,
         )
@@ -271,14 +295,14 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
             scheme.tertiary,
         )
         state.level == DeviceTrustLevel.ISSUE -> DeviceTrustPresentation(
-            "设备字体需要检查",
-            "加载验证失败或状态读取异常",
+            "字体应用失败",
+            friendlyTrustReason(state.reason).ifBlank { "加载验证失败，请根据说明修复后重新应用" },
             Icons.Rounded.Warning,
             scheme.error,
         )
         else -> DeviceTrustPresentation(
-            "设备字体等待验证",
-            if (state.reason == "awaiting-full-reboot") "完整重启后将自动检查" else "开机验证尚未完成，可查看验证说明",
+            if (state.reason == "awaiting-full-reboot") "字体已准备，等待重启" else "等待本次启动验证",
+            friendlyTrustReason(state.reason).ifBlank { "开机验证尚未完成，可查看验证说明" },
             Icons.Rounded.Info,
             scheme.secondary,
         )
@@ -301,7 +325,19 @@ private fun friendlyTrustReason(value: String): String = when (value) {
     "verifier-output-missing" -> "验证器没有返回结果"
     "verification-retry-exhausted" -> "多次自动验证仍未完成"
     "self-mount-not-visible" -> "开机挂载未完整生效，当前使用系统默认字体"
+    "self-mount-failed" -> "本次启动原子挂载失败，字体与配置已完整回滚"
+    "self-mount-invalid-backend" -> "挂载后端不受支持，洛书没有提交字体负载"
+    "self-mount-manifest-missing" -> "本次启动挂载清单缺失，字体与配置没有生效"
+    "stale-self-mount" -> "挂载记录属于上一次启动，等待本次启动重新确认"
+    "awaiting-boot-transaction" -> "等待本次启动的字体事务完成确认"
+    "stale-boot-transaction" -> "字体事务记录属于上一次启动，需要重新应用字体"
+    "dynamic-config-unconfirmed" -> "系统动态字体配置尚未确认"
+    "dynamic-config-overridden" -> "系统动态字体配置覆盖了洛书负载，当前使用系统字体"
+    "dynamic-config-mount-failed" -> "系统动态字体配置挂载失败，已完整回滚"
     "stale-verification" -> "验证记录与当前选择的字体不一致"
+    "self-mount-not-confirmed" -> "本次启动的自挂载事务尚未确认"
+    "current-boot-mount-confirmed" -> "本次启动的字体、配置与挂载事务均已确认"
+    "dynamic-config-changed" -> "系统在启动后改写了动态字体配置"
     "verified-by-visible-mounts" -> "系统可见字体文件与洛书负载一致"
     else -> value
 }

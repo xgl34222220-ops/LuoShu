@@ -56,6 +56,21 @@ class HomeContractTest {
             rebootRequired = true,
         ).toHomeUiState(SystemWeightState())
 
-        assertEquals("DemoFont（等待重启）", state.currentFont)
+        assertEquals("DemoFont（等待完整重启）", state.currentFont)
+    }
+
+    @Test
+    fun dynamicConfigFailureProvidesAnActionableReason() {
+        val state = ModuleSnapshot(
+            loading = false,
+            activeFont = "DemoFont",
+            effectiveFont = "default",
+            fontEffectState = "failed",
+            verificationReason = "dynamic-config-overridden",
+            mountState = "mounted",
+        ).toHomeUiState(SystemWeightState())
+
+        assertTrue(state.taskMessage.contains("动态字体配置"))
+        assertTrue(state.taskMessage.contains("系统字体"))
     }
 }
