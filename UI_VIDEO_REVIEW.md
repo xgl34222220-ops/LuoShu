@@ -10,4 +10,5 @@ Acceptance points:
 - Font-library tools use neutral grouped surfaces instead of colored dashboard tiles.
 - Studio utility and refresh actions use the exact same component.
 - The floating dock is thinner, lighter and leaves content clearance.
+- Kotlin compile repairs are included and the full Android validation is rerun from a repository-owner commit.
 - This branch must remain unmerged until a real-device screenshot is reviewed.
