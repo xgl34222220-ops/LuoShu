@@ -1,8 +1,8 @@
 name: Apply unified UI rebuild once
 
 on:
-  push:
-    branches: [ui-rebuild]
+  pull_request:
+    branches: [main]
     paths:
       - .github/workflows/apply-ui-rebuild-once.yml
       - .github/ui-rebuild.patch.gz.b64
@@ -12,10 +12,12 @@ permissions:
 
 jobs:
   apply:
+    if: github.head_ref == 'ui-rebuild'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
       - name: Apply and validate UI rebuild
         shell: bash
