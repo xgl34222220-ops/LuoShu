@@ -1,0 +1,36 @@
+name: Apply unified UI rebuild once
+
+on:
+  push:
+    branches: [ui-rebuild]
+    paths:
+      - .github/workflows/apply-ui-rebuild-once.yml
+      - .github/ui-rebuild.patch.gz.b64
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply and validate UI rebuild
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d .github/ui-rebuild.patch.gz.b64 | gzip -dc > /tmp/luoshu-ui.patch
+          patch -p3 --forward < /tmp/luoshu-ui.patch
+          sh -n scripts/font_library_ui_layout_test.sh
+          sh scripts/font_library_ui_layout_test.sh
+          rm -f \
+            .github/ui-rebuild.patch.gz.b64 \
+            .github/workflows/apply-ui-rebuild-once.yml \
+            .github/workflows/export-source-on-pr.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor: rebuild LuoShu UI with unified V1.1 design system'
+          git push origin HEAD:ui-rebuild
