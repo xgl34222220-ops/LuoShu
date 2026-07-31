@@ -141,3 +141,5 @@ grep -q '打开任务中心查看原因和诊断信息' "$HOME_COMPACT"
           git add android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt scripts/font_library_ui_layout_test.sh
           git commit -m "refactor(ui): shrink floating dock and lock lightweight home hierarchy"
           git push origin HEAD:ui-video-home-v3-clean
+
+# registration trigger 2
