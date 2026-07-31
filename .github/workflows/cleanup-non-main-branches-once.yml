@@ -1,0 +1,33 @@
+name: Cleanup non-main branches once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/cleanup-non-main-branches-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete every remote branch except main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t branches < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/branches?per_page=100" --jq '.[].name')
+          failures=0
+          for branch in "${branches[@]}"; do
+            [[ "$branch" == "main" ]] && continue
+            echo "Deleting branch: $branch"
+            if ! gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}"; then
+              echo "Failed to delete: $branch" >&2
+              failures=$((failures + 1))
+            fi
+          done
+          [[ "$failures" -eq 0 ]]
