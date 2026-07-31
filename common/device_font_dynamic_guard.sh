@@ -3,35 +3,6 @@
 # Loaded after device_font_payload_runtime.sh and overrides only the dynamic view stage.
 set +e
 
-_dfpr_dynamic_boot_id() {
-    if [ -n "${LUOSHU_BOOT_ID:-}" ]; then
-        printf '%s\n' "$LUOSHU_BOOT_ID"
-        return 0
-    fi
-    _dfpr_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
-    if [ -z "$_dfpr_boot" ] && command -v getprop >/dev/null 2>&1; then
-        _dfpr_boot=$(getprop ro.runtime.firstboot 2>/dev/null | tr -d '\r\n')
-    fi
-    [ -n "$_dfpr_boot" ] || _dfpr_boot=unknown
-    printf '%s\n' "$_dfpr_boot"
-}
-
-_dfpr_dynamic_runtime_write() {
-    _dfpr_runtime_state="$1"
-    _dfpr_runtime_reason="$2"
-    _dfpr_runtime_module="$(_dfpr_module)"
-    _dfpr_runtime_file="$_dfpr_runtime_module/config/device-font-dynamic-runtime.conf"
-    mkdir -p "${_dfpr_runtime_file%/*}" 2>/dev/null || return 1
-    {
-        printf 'state=%s\n' "$_dfpr_runtime_state"
-        printf 'reason=%s\n' "$_dfpr_runtime_reason"
-        printf 'bootId=%s\n' "$(_dfpr_dynamic_boot_id)"
-        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
-    } > "${_dfpr_runtime_file}.tmp.$$" 2>/dev/null || return 1
-    mv -f "${_dfpr_runtime_file}.tmp.$$" "$_dfpr_runtime_file" 2>/dev/null || return 1
-    chmod 0600 "$_dfpr_runtime_file" 2>/dev/null || true
-}
-
 _dfpr_mark_dynamic_rebuild() {
     _dfpr_reason="${1:-dynamic-config-changed}"
     _dfpr_module_dir="$(_dfpr_module)"
@@ -87,10 +58,8 @@ _dfpr_template_ensure_after_release() {
             *) _dfpr_log WARN "原厂字体模板校验失败：code=$_dfpr_template_rc" ;;
         esac
     fi
-    # device_font_load_verify remains manual-only; boot release refreshes only the
-    # constant-time status and never launches FontManager dumps, hashing or Python.
-    if type device_font_load_status >/dev/null 2>&1; then
-        device_font_load_status >/dev/null 2>&1 || true
+    if type device_font_load_verify >/dev/null 2>&1; then
+        device_font_load_verify >/dev/null 2>&1 || true
     fi
     [ "$_dfpr_template_rc" -eq 0 ] && _dfpr_launch_pending_cache
     return 0
@@ -105,8 +74,7 @@ _dfpr_prepare_dynamic_state() {
     _dfpr_dynamic_state="$_dfpr_module_dir/config/device-font-dynamic-mount.conf"
     _dfpr_dynamic_target="${LUOSHU_DATA_FONTS_CONFIG_TARGET:-/data/fonts/config/config.xml}"
     if [ ! -s "$_dfpr_dynamic_source" ] || [ ! -s "$_dfpr_dynamic_target" ]; then
-        rm -f "$_dfpr_dynamic_dest" "$_dfpr_dynamic_state" \
-            "$_dfpr_module_dir/config/device-font-dynamic-runtime.conf" 2>/dev/null || true
+        rm -f "$_dfpr_dynamic_dest" "$_dfpr_dynamic_state" 2>/dev/null || true
         return 2
     fi
     _dfpr_link_or_copy "$_dfpr_dynamic_source" "$_dfpr_dynamic_dest" || return 1
@@ -163,111 +131,66 @@ device_font_dynamic_mount_apply() {
     _dfpr_target=$(sed -n 's/^target=//p' "$_dfpr_state" 2>/dev/null | head -n1)
     _dfpr_target_hash=$(sed -n 's/^targetSha256=//p' "$_dfpr_state" 2>/dev/null | head -n1)
     _dfpr_source_hash=$(sed -n 's/^sourceSha256=//p' "$_dfpr_state" 2>/dev/null | head -n1)
-    case "$_dfpr_source_rel" in
-        system/etc/.luoshu-data-fonts-config.xml) ;;
-        *) _dfpr_dynamic_runtime_write failed invalid-source; return 1 ;;
-    esac
-    if [ "$_dfpr_target" != "${LUOSHU_DATA_FONTS_CONFIG_TARGET:-/data/fonts/config/config.xml}" ]; then
-        _dfpr_dynamic_runtime_write failed invalid-target
-        return 1
-    fi
+    case "$_dfpr_source_rel" in system/etc/.luoshu-data-fonts-config.xml) ;; *) return 1 ;; esac
+    [ "$_dfpr_target" = "${LUOSHU_DATA_FONTS_CONFIG_TARGET:-/data/fonts/config/config.xml}" ] || return 1
     _dfpr_source="$_dfpr_module_dir/$_dfpr_source_rel"
-    if [ ! -s "$_dfpr_source" ] || [ ! -s "$_dfpr_target" ]; then
-        _dfpr_dynamic_runtime_write failed source-or-target-missing
-        return 1
-    fi
-    if [ "$(_dfpr_hash "$_dfpr_source")" != "$_dfpr_source_hash" ]; then
-        _dfpr_dynamic_runtime_write failed source-hash-mismatch
-        return 1
-    fi
-    if _dfpr_dynamic_mount_is_readonly "$_dfpr_target"; then
-        if [ "$(_dfpr_hash "$_dfpr_target")" = "$_dfpr_source_hash" ]; then
-            _dfpr_dynamic_runtime_write mounted readonly-view-present
-            return 0
-        fi
-        _dfpr_dynamic_runtime_write overridden readonly-view-mismatch
-        return 2
-    fi
+    [ -s "$_dfpr_source" ] && [ -s "$_dfpr_target" ] || return 2
+    [ "$(_dfpr_hash "$_dfpr_source")" = "$_dfpr_source_hash" ] || return 1
     if [ "$(_dfpr_hash "$_dfpr_target")" != "$_dfpr_target_hash" ]; then
         _dfpr_mark_dynamic_rebuild dynamic-config-changed >/dev/null 2>&1 || true
-        _dfpr_dynamic_runtime_write overridden dynamic-config-changed
         _dfpr_log WARN '动态字体配置已被系统更新，已登记后台重建并保留 ROM 原配置'
         return 2
     fi
+    _dfpr_dynamic_mount_is_readonly "$_dfpr_target" && return 0
     mount -o bind "$_dfpr_source" "$_dfpr_target" 2>/dev/null || \
         mount --bind "$_dfpr_source" "$_dfpr_target" 2>/dev/null || {
-            _dfpr_dynamic_runtime_write failed bind-failed
             _dfpr_log WARN '动态字体配置只读视图挂载失败，保留 ROM 原配置'
-            return 1
+            return 2
         }
     if ! mount -o remount,bind,ro "$_dfpr_target" 2>/dev/null && \
        ! mount -o bind,remount,ro "$_dfpr_target" 2>/dev/null && \
        ! mount -o remount,ro,bind "$_dfpr_target" 2>/dev/null; then
         umount "$_dfpr_target" 2>/dev/null || true
-        _dfpr_dynamic_runtime_write failed readonly-remount-failed
         _dfpr_log WARN '动态字体配置无法切换为只读 bind，已撤销挂载'
-        return 1
+        return 2
     fi
-    if _dfpr_dynamic_mount_is_readonly "$_dfpr_target" && \
-       [ "$(_dfpr_hash "$_dfpr_target")" = "$_dfpr_source_hash" ]; then
-        _dfpr_dynamic_runtime_write mounted readonly-view-confirmed
+    if _dfpr_dynamic_mount_is_readonly "$_dfpr_target"; then
         _dfpr_log INFO '动态字体配置只读视图已在 FontManagerService 初始化前挂载'
         return 0
     fi
     umount "$_dfpr_target" 2>/dev/null || true
-    _dfpr_dynamic_runtime_write failed readonly-verification-failed
     _dfpr_log WARN '动态字体配置只读验证失败，已撤销并保留 ROM 原配置'
-    return 1
+    return 2
 }
 
 device_font_dynamic_mount_release() {
     _dfpr_module_dir="$(_dfpr_module)"
     _dfpr_state="$_dfpr_module_dir/config/device-font-dynamic-mount.conf"
     if [ ! -s "$_dfpr_state" ]; then
-        rm -f "$_dfpr_module_dir/config/device-font-dynamic-runtime.conf" 2>/dev/null || true
         _dfpr_template_ensure_after_release
         return 2
     fi
     _dfpr_source_rel=$(sed -n 's/^source=//p' "$_dfpr_state" 2>/dev/null | head -n1)
     _dfpr_target=$(sed -n 's/^target=//p' "$_dfpr_state" 2>/dev/null | head -n1)
     _dfpr_source_hash=$(sed -n 's/^sourceSha256=//p' "$_dfpr_state" 2>/dev/null | head -n1)
-    case "$_dfpr_source_rel" in
-        system/etc/.luoshu-data-fonts-config.xml) ;;
-        *) _dfpr_dynamic_runtime_write failed invalid-source; return 1 ;;
-    esac
-    if [ "$_dfpr_target" != "${LUOSHU_DATA_FONTS_CONFIG_TARGET:-/data/fonts/config/config.xml}" ]; then
-        _dfpr_dynamic_runtime_write failed invalid-target
-        return 1
-    fi
+    case "$_dfpr_source_rel" in system/etc/.luoshu-data-fonts-config.xml) ;; *) return 1 ;; esac
+    [ "$_dfpr_target" = "${LUOSHU_DATA_FONTS_CONFIG_TARGET:-/data/fonts/config/config.xml}" ] || return 1
     _dfpr_source="$_dfpr_module_dir/$_dfpr_source_rel"
-    if [ ! -s "$_dfpr_source" ] || [ ! -s "$_dfpr_target" ]; then
-        _dfpr_dynamic_runtime_write failed source-or-target-missing
-        return 1
-    fi
+    [ -s "$_dfpr_source" ] && [ -s "$_dfpr_target" ] || return 2
     if ! _dfpr_dynamic_mount_exists "$_dfpr_target"; then
-        _dfpr_dynamic_runtime_write unconfirmed dynamic-view-not-mounted
         _dfpr_template_ensure_after_release
         return 2
     fi
-    if [ "$(_dfpr_hash "$_dfpr_source")" != "$_dfpr_source_hash" ]; then
-        _dfpr_dynamic_runtime_write failed source-hash-mismatch
-        return 1
-    fi
-    if [ "$(_dfpr_hash "$_dfpr_target")" != "$_dfpr_source_hash" ]; then
-        _dfpr_dynamic_runtime_write overridden mounted-view-mismatch
-        return 2
-    fi
+    [ "$(_dfpr_hash "$_dfpr_source")" = "$_dfpr_source_hash" ] || return 1
+    [ "$(_dfpr_hash "$_dfpr_target")" = "$_dfpr_source_hash" ] || return 1
     umount "$_dfpr_target" 2>/dev/null || {
-        _dfpr_dynamic_runtime_write failed release-unmount-failed
         _dfpr_log WARN '启动完成后无法撤销动态字体临时视图'
         return 1
     }
     if _dfpr_dynamic_mount_exists "$_dfpr_target"; then
-        _dfpr_dynamic_runtime_write failed release-still-mounted
         _dfpr_log WARN '动态字体临时视图仍处于挂载状态'
         return 1
     fi
-    _dfpr_dynamic_runtime_write released font-manager-initialized
     _dfpr_log INFO 'FontManagerService 初始化完成，已释放动态字体临时视图'
     _dfpr_template_ensure_after_release
     return 0

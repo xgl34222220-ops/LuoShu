@@ -35,10 +35,9 @@ luoshu_update_config_is_volatile() {
         composite_progress.json|mix_last_error.txt|app_install_pending|app_install_state.conf|\
         app_install_manual|font-payload-rebuild-pending.conf|font-boot-failures|\
         font-payload-quarantine.conf|mount_compat.conf|self-mount.conf|\
-        self-mount-required.conf|post-mount-hook.conf|device-font-dynamic-runtime.conf|\
-        device-font-load-verification.conf|device-font-load-verification.json|\
-        device-font-manager-dump.txt|device-font-mount-evidence.txt|\
-        *.pid|*.pid.task|*.tmp|*.tmp.*)
+        self-mount-required.conf|device-font-load-verification.conf|\
+        device-font-load-verification.json|device-font-manager-dump.txt|\
+        device-font-mount-evidence.txt|*.pid|*.pid.task|*.tmp|*.tmp.*)
             return 0
             ;;
     esac
@@ -91,8 +90,6 @@ luoshu_clear_update_volatile() {
         "$_module/config/mount_compat.conf" \
         "$_module/config/self-mount.conf" \
         "$_module/config/self-mount-required.conf" \
-        "$_module/config/post-mount-hook.conf" \
-        "$_module/config/device-font-dynamic-runtime.conf" \
         "$_module/config/device-font-load-verification.conf" \
         "$_module/config/device-font-load-verification.json" \
         "$_module/config/device-font-manager-dump.txt" \
