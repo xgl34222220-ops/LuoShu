@@ -1,0 +1,28 @@
+name: Cleanup merged UI branches once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/cleanup-ui-branches-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete every remote branch except main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t branches < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/branches?per_page=100" --jq '.[].name')
+          for branch in "${branches[@]}"; do
+            [[ "$branch" == "main" ]] && continue
+            echo "Deleting branch: $branch"
+            encoded=$(jq -rn --arg value "$branch" '$value|@uri')
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${encoded}"
+          done
