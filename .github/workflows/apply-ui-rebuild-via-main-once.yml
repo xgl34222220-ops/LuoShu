@@ -1,30 +1,31 @@
 name: Apply LuoShu UI rebuild once
 
 on:
-  push:
+  pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened]
     paths:
-      - .github/workflows/apply-ui-rebuild-via-main-once.yml
+      - .github/ui-patch.part??
+      - .github/ui-rebuild.trigger
 
 permissions:
   contents: write
 
 jobs:
   apply:
+    if: github.head_ref == 'ui-rebuild'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
-      - name: Apply rebuild to PR branch and self-delete
+      - name: Apply rebuild to PR branch
         shell: bash
         run: |
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git fetch origin ui-rebuild
-          git switch -C ui-rebuild origin/ui-rebuild
           cat .github/ui-patch.part?? > /tmp/luoshu-ui.patch.gz.b64
           test "$(wc -c < /tmp/luoshu-ui.patch.gz.b64)" -eq 27876
           echo '62d0ea1b0a14b3c3f05a91edbef60b71874d8249fa902f3f44508e76314d1e88  /tmp/luoshu-ui.patch.gz.b64' | sha256sum -c -
@@ -35,14 +36,9 @@ jobs:
           rm -f \
             .github/ui-rebuild.patch.gz.b64 \
             .github/ui-patch.part?? \
+            .github/ui-rebuild.trigger \
             .github/workflows/apply-ui-rebuild-once.yml \
             .github/workflows/export-source-on-pr.yml
           git add -A
           git commit -m 'refactor: rebuild LuoShu UI with unified V1.1 design system'
           git push origin HEAD:ui-rebuild
-          git switch main
-          git pull --ff-only origin main
-          rm -f .github/workflows/apply-ui-rebuild-via-main-once.yml
-          git add -A
-          git commit -m 'ops: remove one-shot UI rebuild dispatcher [skip ci]'
-          git push origin HEAD:main
