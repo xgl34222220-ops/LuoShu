@@ -50,9 +50,9 @@ import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalLuoShuTokens
 
 private val PagePadding = 12.dp
-private val CardRadius = 18.dp
-private val InnerRadius = 14.dp
-private val SectionGap = 8.dp
+private val CardRadius = 17.dp
+private val InnerRadius = 13.dp
+private val SectionGap = 7.dp
 
 @Composable
 internal fun HomeScreenCompact(
@@ -66,26 +66,26 @@ internal fun HomeScreenCompact(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = PagePadding,
-            top = 10.dp,
+            top = 6.dp,
             end = PagePadding,
-            bottom = 104.dp,
+            bottom = 120.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(SectionGap),
     ) {
         item {
-            Column(modifier = Modifier.padding(horizontal = 2.dp, vertical = 2.dp)) {
+            Column(modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp)) {
                 Text(
                     text = "洛书",
                     color = tokens.textPrimary,
-                    fontSize = 26.sp,
-                    lineHeight = 30.sp,
+                    fontSize = 23.sp,
+                    lineHeight = 27.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
                     text = "无 Hook 全局字体引擎 · ${state.version}",
                     color = tokens.textSecondary,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
+                    fontSize = 10.5.sp,
+                    lineHeight = 14.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -93,7 +93,7 @@ internal fun HomeScreenCompact(
         }
         item { EngineOverview(state = state, actions = actions) }
         item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 CompactShortcut(
                     modifier = Modifier.weight(1f),
                     icon = Icons.Rounded.FontDownload,
@@ -152,28 +152,28 @@ private fun EngineOverview(state: HomeUiState, actions: HomeActions) {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(CardRadius),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .72f),
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .08f)),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .56f),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .07f)),
         ) {
-            Box(modifier = Modifier.fillMaxWidth().padding(14.dp)) {
-                Column(modifier = Modifier.fillMaxWidth().padding(end = 74.dp)) {
+            Box(modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 12.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(end = 64.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(7.dp).background(statusColor, CircleShape))
+                        Box(Modifier.size(6.dp).background(statusColor, CircleShape))
                         Spacer(Modifier.width(7.dp))
                         Text(
                             text = statusText,
                             color = statusColor,
-                            fontSize = 14.sp,
-                            lineHeight = 18.sp,
+                            fontSize = 12.sp,
+                            lineHeight = 15.sp,
                             fontWeight = FontWeight.SemiBold,
                         )
                     }
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(6.dp))
                     Text(
                         text = state.currentFont,
                         color = tokens.textPrimary,
-                        fontSize = 22.sp,
-                        lineHeight = 27.sp,
+                        fontSize = 19.sp,
+                        lineHeight = 23.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -181,33 +181,33 @@ private fun EngineOverview(state: HomeUiState, actions: HomeActions) {
                     Text(
                         text = state.taskMessage.ifBlank { if (state.taskRunning) state.taskTitle else "暂无后台任务" },
                         color = tokens.textSecondary,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp,
+                        fontSize = 9.5.sp,
+                        lineHeight = 13.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     if (state.taskRunning) {
-                        Spacer(Modifier.height(9.dp))
+                        Spacer(Modifier.height(7.dp))
                         LinearProgressIndicator(
                             progress = { state.taskProgress.coerceIn(0, 100) / 100f },
-                            modifier = Modifier.fillMaxWidth().height(4.dp),
+                            modifier = Modifier.fillMaxWidth().height(3.dp),
                             color = statusColor,
                             trackColor = statusColor.copy(alpha = .12f),
                         )
                     }
                 }
                 Surface(
-                    modifier = Modifier.align(Alignment.CenterEnd).size(62.dp),
+                    modifier = Modifier.align(Alignment.CenterEnd).size(54.dp),
                     shape = CircleShape,
-                    color = statusColor.copy(alpha = .08f),
-                    border = BorderStroke(3.dp, statusColor.copy(alpha = .72f)),
+                    color = statusColor.copy(alpha = .07f),
+                    border = BorderStroke(2.5.dp, statusColor.copy(alpha = .68f)),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         if (state.taskRunning) {
                             Text(
                                 text = "${state.taskProgress}%",
                                 color = statusColor,
-                                fontSize = 12.sp,
+                                fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold,
                             )
                         } else {
@@ -215,7 +215,7 @@ private fun EngineOverview(state: HomeUiState, actions: HomeActions) {
                                 imageVector = if (state.error.isBlank()) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
                                 contentDescription = null,
                                 tint = statusColor,
-                                modifier = Modifier.size(34.dp),
+                                modifier = Modifier.size(29.dp),
                             )
                         }
                     }
@@ -226,9 +226,9 @@ private fun EngineOverview(state: HomeUiState, actions: HomeActions) {
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(InnerRadius),
             color = MaterialTheme.colorScheme.surfaceContainerLow,
-            border = BorderStroke(1.dp, tokens.outline.copy(alpha = .18f)),
+            border = BorderStroke(1.dp, tokens.outline.copy(alpha = .16f)),
         ) {
-            Row(modifier = Modifier.fillMaxWidth().height(42.dp)) {
+            Row(modifier = Modifier.fillMaxWidth().height(40.dp)) {
                 SegmentedAction(
                     modifier = Modifier.weight(1f),
                     icon = Icons.Rounded.Refresh,
@@ -269,21 +269,21 @@ private fun SegmentedAction(
     enabled: Boolean = true,
 ) {
     Row(
-        modifier = modifier.clickable(enabled = enabled, onClick = onClick).padding(horizontal = 6.dp),
+        modifier = modifier.clickable(enabled = enabled, onClick = onClick).padding(horizontal = 5.dp),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, tint = tint.copy(alpha = if (enabled) 1f else .38f), modifier = Modifier.size(17.dp))
+        Icon(icon, null, tint = tint.copy(alpha = if (enabled) 1f else .38f), modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(5.dp))
-        Text(label, color = tint.copy(alpha = if (enabled) 1f else .38f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text(label, color = tint.copy(alpha = if (enabled) 1f else .38f), fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
 @Composable
 private fun VerticalRule() {
     Box(
-        modifier = Modifier.padding(vertical = 10.dp).width(1.dp).height(22.dp)
-            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f)),
+        modifier = Modifier.padding(vertical = 9.dp).width(1.dp).height(22.dp)
+            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = .48f)),
     )
 }
 
@@ -297,17 +297,17 @@ private fun CompactShortcut(
 ) {
     val tokens = LocalLuoShuTokens.current
     Surface(
-        modifier = modifier.height(58.dp).clickable(onClick = onClick),
+        modifier = modifier.height(52.dp).clickable(onClick = onClick),
         shape = RoundedCornerShape(InnerRadius),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, tokens.outline.copy(alpha = .16f)),
+        border = BorderStroke(1.dp, tokens.outline.copy(alpha = .14f)),
     ) {
-        Row(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(9.dp))
+        Row(modifier = Modifier.fillMaxSize().padding(horizontal = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = tokens.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                Text(subtitle, color = tokens.textSecondary, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, color = tokens.textPrimary, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(subtitle, color = tokens.textSecondary, fontSize = 8.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -326,16 +326,17 @@ private fun CompactMessageCard(
     Surface(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(InnerRadius),
-        color = tint.copy(alpha = .08f),
+        color = tint.copy(alpha = .07f),
+        border = BorderStroke(1.dp, tint.copy(alpha = .10f)),
     ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(10.dp))
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(9.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = tokens.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                Text(message, color = tokens.textSecondary, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(title, color = tokens.textPrimary, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold)
+                Text(message, color = tokens.textSecondary, fontSize = 8.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Text(actionLabel, color = tint, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(actionLabel, color = tint, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -344,10 +345,10 @@ private fun CompactMessageCard(
 private fun CompactSectionTitle(title: String) {
     Text(
         text = title,
-        modifier = Modifier.padding(start = 2.dp, top = 5.dp, bottom = 1.dp),
+        modifier = Modifier.padding(start = 2.dp, top = 4.dp, bottom = 0.dp),
         color = LocalLuoShuTokens.current.textPrimary,
-        fontSize = 16.sp,
-        lineHeight = 20.sp,
+        fontSize = 14.sp,
+        lineHeight = 18.sp,
         fontWeight = FontWeight.Bold,
     )
 }
@@ -359,32 +360,56 @@ private fun StatusGrid(state: HomeUiState) {
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(CardRadius),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, tokens.outline.copy(alpha = .14f)),
+        border = BorderStroke(1.dp, tokens.outline.copy(alpha = .13f)),
     ) {
-        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatusCell(Modifier.weight(1f), Icons.Rounded.Security, "Root", if (state.rootGranted) state.rootManager else "未授权", if (state.rootGranted) tokens.success else tokens.danger)
-                StatusCell(Modifier.weight(1f), Icons.Rounded.Layers, "挂载引擎", state.mountEngine, if (state.mountHealthy) tokens.success else tokens.warning)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                StatusCell(Modifier.weight(1f), Icons.Rounded.TaskAlt, "当前任务", if (state.taskRunning) "${state.taskProgress}%" else "空闲", if (state.taskRunning) MaterialTheme.colorScheme.primary else tokens.success)
-                StatusCell(Modifier.weight(1f), Icons.Rounded.RestartAlt, "重启状态", if (state.rebootRequired) "等待重启" else "无需重启", if (state.rebootRequired) tokens.warning else tokens.success)
-            }
+        Column(modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp)) {
+            StatusPairRow(
+                first = StatusData(Icons.Rounded.Security, "Root", if (state.rootGranted) state.rootManager else "未授权", if (state.rootGranted) tokens.success else tokens.danger),
+                second = StatusData(Icons.Rounded.Layers, "挂载引擎", state.mountEngine, if (state.mountHealthy) tokens.success else tokens.warning),
+            )
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).height(1.dp)
+                    .background(tokens.outline.copy(alpha = .10f)),
+            )
+            StatusPairRow(
+                first = StatusData(Icons.Rounded.TaskAlt, "当前任务", if (state.taskRunning) "${state.taskProgress}%" else "空闲", if (state.taskRunning) MaterialTheme.colorScheme.primary else tokens.success),
+                second = StatusData(Icons.Rounded.RestartAlt, "重启状态", if (state.rebootRequired) "等待重启" else "无需重启", if (state.rebootRequired) tokens.warning else tokens.success),
+            )
         }
     }
 }
 
+private data class StatusData(
+    val icon: ImageVector,
+    val title: String,
+    val value: String,
+    val tint: Color,
+)
+
 @Composable
-private fun StatusCell(modifier: Modifier, icon: ImageVector, title: String, value: String, tint: Color) {
+private fun StatusPairRow(first: StatusData, second: StatusData) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        StatusItem(modifier = Modifier.weight(1f), data = first)
+        Box(
+            modifier = Modifier.width(1.dp).height(26.dp)
+                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = .40f)),
+        )
+        StatusItem(modifier = Modifier.weight(1f), data = second)
+    }
+}
+
+@Composable
+private fun StatusItem(modifier: Modifier, data: StatusData) {
     val tokens = LocalLuoShuTokens.current
-    Surface(modifier = modifier.height(62.dp), shape = RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
-        Row(modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, null, tint = tint, modifier = Modifier.size(19.dp))
-            Spacer(Modifier.width(8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = tokens.textSecondary, fontSize = 10.sp, maxLines = 1)
-                Text(value, color = tokens.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
+    Row(
+        modifier = modifier.height(42.dp).padding(horizontal = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(data.icon, null, tint = data.tint, modifier = Modifier.size(17.dp))
+        Spacer(Modifier.width(7.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(data.title, color = tokens.textSecondary, fontSize = 8.5.sp, lineHeight = 11.sp, maxLines = 1)
+            Text(data.value, color = tokens.textPrimary, fontSize = 11.5.sp, lineHeight = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -405,21 +430,21 @@ private fun NextStepCard(next: HomeNextStep) {
         modifier = Modifier.fillMaxWidth().clickable(enabled = next.enabled, onClick = next.onClick),
         shape = RoundedCornerShape(CardRadius),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, tokens.outline.copy(alpha = .14f)),
+        border = BorderStroke(1.dp, tokens.outline.copy(alpha = .13f)),
     ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-            Surface(modifier = Modifier.size(36.dp), shape = RoundedCornerShape(11.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .10f)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+            Surface(modifier = Modifier.size(32.dp), shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .09f)) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(next.icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+                    Icon(next.icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                 }
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(9.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(next.title, color = tokens.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                Text(next.description, color = tokens.textSecondary, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(next.title, color = tokens.textPrimary, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(next.description, color = tokens.textSecondary, fontSize = 8.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Spacer(Modifier.width(8.dp))
-            Text(next.actionLabel, color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.width(7.dp))
+            Text(next.actionLabel, color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -440,34 +465,34 @@ private fun SystemWeightCard(weight: HomeWeightUiState, actions: HomeActions) {
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(CardRadius),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        border = BorderStroke(1.dp, tokens.outline.copy(alpha = .14f)),
+        border = BorderStroke(1.dp, tokens.outline.copy(alpha = .13f)),
     ) {
-        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 11.dp, vertical = 9.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Speed, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
-                Spacer(Modifier.width(9.dp))
+                Icon(Icons.Rounded.Speed, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("系统字体粗细", color = tokens.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    Text("只调整系统渲染参数", color = tokens.textSecondary, fontSize = 9.sp)
+                    Text("系统字体粗细", color = tokens.textPrimary, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold)
+                    Text("只调整系统渲染参数", color = tokens.textSecondary, fontSize = 8.5.sp)
                 }
-                Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .09f)) {
+                Surface(shape = RoundedCornerShape(9.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .08f)) {
                     Text(
                         text = if (weight.loading) "读取中" else weight.weight.toString(),
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                         color = MaterialTheme.colorScheme.primary,
-                        fontSize = 12.sp,
+                        fontSize = 10.5.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
             }
             when {
                 weight.loading -> {
-                    Spacer(Modifier.height(9.dp))
+                    Spacer(Modifier.height(8.dp))
                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(3.dp))
                 }
                 !weight.supported -> {
-                    Spacer(Modifier.height(8.dp))
-                    Text(weight.error.ifBlank { "当前系统不支持全局粗细微调" }, color = tokens.danger, fontSize = 10.sp)
+                    Spacer(Modifier.height(7.dp))
+                    Text(weight.error.ifBlank { "当前系统不支持全局粗细微调" }, color = tokens.danger, fontSize = 9.sp)
                 }
                 else -> {
                     Slider(
@@ -482,11 +507,11 @@ private fun SystemWeightCard(weight: HomeWeightUiState, actions: HomeActions) {
                             text = weight.error.ifBlank { weight.message },
                             modifier = Modifier.weight(1f),
                             color = if (weight.error.isNotBlank()) tokens.danger else tokens.textSecondary,
-                            fontSize = 9.sp,
+                            fontSize = 8.5.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        TextButton(onClick = actions.resetSystemWeight, enabled = !weight.applying) { Text("恢复", fontSize = 11.sp) }
+                        TextButton(onClick = actions.resetSystemWeight, enabled = !weight.applying) { Text("恢复", fontSize = 10.sp) }
                     }
                 }
             }
