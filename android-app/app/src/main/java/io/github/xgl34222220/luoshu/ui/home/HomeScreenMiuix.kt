@@ -62,7 +62,7 @@ internal fun HomeScreenMiuix(
                 Text(
                     text = "无 Hook 全局字体引擎 · ${state.version}",
                     fontSize = 14.sp,
-                    color = colors.onSurfaceVariant,
+                    color = colors.onSurfaceSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
