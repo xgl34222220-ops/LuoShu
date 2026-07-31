@@ -108,6 +108,7 @@ android {
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.03.00")
     val miuixVersion = "0.9.3"
+    val material3AdaptiveVersion = "1.2.0"
     implementation(composeBom)
 
     implementation("androidx.activity:activity-compose:1.13.0")
@@ -116,11 +117,24 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.datastore:datastore-preferences:1.2.1")
     implementation("androidx.compose.foundation:foundation")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
+
+    // Complete Material 2 + Material 3 visual stack, version-aligned by the Compose BOM.
+    implementation("androidx.compose.material:material")
+    implementation("androidx.compose.material:material-ripple")
+    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material3:material3-window-size-class")
+    implementation("androidx.compose.material3:material3-adaptive-navigation-suite")
+
+    // Complete Material 3 adaptive stack for phones, tablets, foldables and Navigation 3.
+    implementation("androidx.compose.material3.adaptive:adaptive:$material3AdaptiveVersion")
+    implementation("androidx.compose.material3.adaptive:adaptive-layout:$material3AdaptiveVersion")
+    implementation("androidx.compose.material3.adaptive:adaptive-navigation:$material3AdaptiveVersion")
+    implementation("androidx.compose.material3.adaptive:adaptive-navigation3:$material3AdaptiveVersion")
 
     // Complete Miuix visual stack. Keep every module on the exact same version.
     implementation("top.yukonga.miuix.kmp:miuix-core:$miuixVersion")
@@ -132,6 +146,7 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-shader:$miuixVersion")
     implementation("top.yukonga.miuix.kmp:miuix-squircle:$miuixVersion")
 
+    // Dynamic color and glass layers shared by Material and Miuix themes.
     implementation("com.materialkolor:material-kolor:2.0.0")
     implementation("dev.chrisbanes.haze:haze:1.6.10")
     implementation("dev.chrisbanes.haze:haze-materials:1.6.10")
