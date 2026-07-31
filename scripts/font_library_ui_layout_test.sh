@@ -24,14 +24,12 @@ COMPONENTS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/
 UTIL="$ROOT/common/util_functions.sh"
 CACHE="$ROOT/common/device_font_cache.sh"
 
-# Legacy screens remain available while active routes use compact pages.
 grep -q 'private fun MiuixCapabilityStrip' "$MIUIX"
 grep -q 'private fun MaterialCapabilityStrip' "$MATERIAL"
 grep -q 'FontLibraryScreenCompact' "$ROUTE"
 grep -q 'HomeScreenCompact' "$HOME_ROUTE"
 grep -q 'LogsScreenCompact' "$LOGS_ROUTE"
 
-# Font library compact hierarchy.
 grep -q 'var showTools' "$COMPACT"
 grep -q '导入与管理' "$COMPACT"
 grep -q 'CompactFontRow' "$COMPACT"
@@ -39,9 +37,6 @@ grep -q 'NativeFontPreview' "$COMPACT"
 grep -q 'clickable(onClick = onDetails)' "$COMPACT"
 ! grep -q 'height(102.dp)' "$COMPACT"
 
-# Home second pass is locked to the first real-device screenshot. The first pass
-# was still oversized on the user's active font, so the card radius, rhythm,
-# status orb and segmented bar are reduced while the dock clearance increases.
 grep -q 'private val PagePadding = 12.dp' "$HOME_COMPACT"
 grep -q 'private val CardRadius = 17.dp' "$HOME_COMPACT"
 grep -q 'private val SectionGap = 7.dp' "$HOME_COMPACT"
@@ -63,8 +58,6 @@ grep -q '打开任务中心查看错误与诊断信息' "$HOME_COMPACT"
 ! grep -q 'size(88.dp)' "$HOME_COMPACT"
 ! grep -q 'QUICK ACCESS' "$HOME_COMPACT"
 
-# The boot verification prompt must be an in-flow full-width row. The old
-# floating chip produced a dark blurred blob and clipped subtitle on-device.
 grep -q 'private fun HomeTrustRow' "$HOME_ROUTE"
 grep -q 'modifier = Modifier.fillMaxWidth()' "$HOME_ROUTE"
 grep -q 'shadowElevation = 0.dp' "$HOME_ROUTE"
@@ -72,8 +65,6 @@ grep -q 'fontSize = 10.5.sp' "$HOME_ROUTE"
 ! grep -q 'DeviceTrustChip(' "$HOME_ROUTE"
 ! grep -q 'bottom = 108.dp' "$HOME_ROUTE"
 
-# Acceptance guidance follows the installed version and does not treat an
-# unverified compatibility mapping as proof that the font is effective.
 grep -q "targetVersion: String = state.version.substringBefore('-').substringBefore('+')" "$MATRIX"
 grep -q '真机测试矩阵 · ${report.targetVersion}' "$MATRIX"
 grep -q '测试矩阵与当前版本预发行门禁' "$ACCEPTANCE"
@@ -85,7 +76,6 @@ grep -q '加载验证失败，请打开问题页查看具体失败分区' "$ACCE
 ! grep -q 'v2.2.2' "$MATRIX"
 ! grep -q 'v2.2.2' "$ACCEPTANCE"
 
-# ROM detection and detached cache worker contracts.
 grep -q 'compact_rom_detection_logs' "$UTIL"
 grep -q 'log_rom_detection_once coloros' "$UTIL"
 grep -q 'log_rom_detection_once hyperos' "$UTIL"
@@ -93,7 +83,6 @@ grep -q 'device_font_transaction_guard.sh' "$CACHE"
 grep -q 'mount_compat.sh' "$CACHE"
 grep -q 'type luoshu_sync_mount_payload' "$CACHE"
 
-# Task center is a right-side rounded sheet.
 grep -q 'enum class LogsTab' "$LOGS_COMPACT"
 grep -q 'TASKS("任务")' "$LOGS_COMPACT"
 grep -q 'ISSUES("问题")' "$LOGS_COMPACT"
@@ -105,7 +94,6 @@ grep -q 'onClose: (() -> Unit)? = null' "$LOGS_ROUTE"
 grep -q 'LuoShuSideSheet' "$SHELL"
 grep -q 'logsSheetVisible' "$SHELL"
 
-# Studio keeps one in-flow final action and clears the floating dock.
 grep -q 'MiuixFinalAction(state, actions)' "$STUDIO_MIUIX"
 grep -q 'MaterialFinalAction(state, actions)' "$STUDIO_MATERIAL"
 grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MIUIX"
@@ -125,7 +113,6 @@ grep -q 'padding(bottom = dockClearance)' "$SHELL"
 grep -q 'RoundedCornerShape(22.dp)' "$STUDIO_MIUIX"
 grep -q 'RoundedCornerShape(22.dp)' "$STUDIO_MATERIAL"
 
-# Shared tokens and components remain available to the remaining pages.
 grep -q 'data class LuoShuTokens' "$THEME"
 grep -q 'pageBackground = Color(0xFFECEBFA)' "$THEME"
 grep -q 'dark -> Color(0xFF11131A)' "$THEME"
@@ -144,7 +131,6 @@ grep -q 'LuoShuPageHeader' "$COMPACT"
 grep -q 'LuoShuPageHeader' "$STUDIO_MIUIX"
 grep -q 'LuoShuPageHeader' "$STUDIO_MATERIAL"
 
-# Four stable primary destinations and glass dock behavior.
 grep -q 'private val dockPages' "$SHELL"
 [ "$(sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -c 'AppPage\.')" -eq 4 ]
 grep -q 'Settings("设置", Icons.Rounded.Settings)' "$SHELL"
@@ -162,7 +148,6 @@ printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorBorderColor'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'scheme.primary.copy(alpha = if (dark) .30f else .20f)'
 
-# Settings and native import hierarchy remain intact.
 grep -q 'showThemeSettings: Boolean = false' "$SETTINGS"
 grep -q 'ThemeSettingsPage' "$SETTINGS"
 grep -q 'title = "主题设置"' "$SETTINGS"
