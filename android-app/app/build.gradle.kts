@@ -31,7 +31,7 @@ val hasReleaseSigning = listOf(
 
 android {
     namespace = "io.github.xgl34222220.luoshu"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.github.xgl34222220.luoshu"
