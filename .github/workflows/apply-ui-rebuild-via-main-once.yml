@@ -1,0 +1,44 @@
+name: Apply LuoShu UI rebuild once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-ui-rebuild-via-main-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Apply rebuild to PR branch and self-delete
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin ui-rebuild
+          git switch -C ui-rebuild origin/ui-rebuild
+          base64 -d .github/ui-rebuild.patch.gz.b64 | gzip -dc > /tmp/luoshu-ui.patch
+          patch -p3 --forward < /tmp/luoshu-ui.patch
+          sh -n scripts/font_library_ui_layout_test.sh
+          sh scripts/font_library_ui_layout_test.sh
+          rm -f \
+            .github/ui-rebuild.patch.gz.b64 \
+            .github/workflows/apply-ui-rebuild-once.yml \
+            .github/workflows/export-source-on-pr.yml
+          git add -A
+          git commit -m 'refactor: rebuild LuoShu UI with unified V1.1 design system'
+          git push origin HEAD:ui-rebuild
+          git switch main
+          git pull --ff-only origin main
+          rm -f .github/workflows/apply-ui-rebuild-via-main-once.yml
+          git add -A
+          git commit -m 'ops: remove one-shot UI rebuild dispatcher [skip ci]'
+          git push origin HEAD:main
