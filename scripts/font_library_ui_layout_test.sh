@@ -19,6 +19,8 @@ STUDIO_MATERIAL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luosh
 OVERLAY="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 SHELL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
 SETTINGS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/settings/AppearanceSettingsScreen.kt"
+THEME="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuTheme.kt"
+COMPONENTS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/design/LuoShuComponents.kt"
 UTIL="$ROOT/common/util_functions.sh"
 CACHE="$ROOT/common/device_font_cache.sh"
 
@@ -72,18 +74,21 @@ grep -q 'device_font_transaction_guard.sh' "$CACHE"
 grep -q 'mount_compat.sh' "$CACHE"
 grep -q 'type luoshu_sync_mount_payload' "$CACHE"
 
-# Task center separates user-facing tasks/issues from raw logs and its two header
-# actions have the same 50 dp visual size.
+# Task center separates user-facing tasks/issues from raw logs. It is opened as
+# a right-side rounded sheet and uses the common 48 dp icon-button hit target.
 grep -q 'enum class LogsTab' "$LOGS_COMPACT"
 grep -q 'TASKS("任务")' "$LOGS_COMPACT"
 grep -q 'ISSUES("问题")' "$LOGS_COMPACT"
 grep -q 'LOGS("日志")' "$LOGS_COMPACT"
 grep -q 'TaskPhase.FAILED' "$LOGS_COMPACT"
 grep -q 'modifier = modifier.size(50.dp)' "$DIAGNOSTIC"
-grep -q 'Modifier.size(50.dp)' "$LOGS_COMPACT"
+grep -q 'LuoShuIconButton' "$LOGS_COMPACT"
+grep -q 'onClose: (() -> Unit)? = null' "$LOGS_ROUTE"
+grep -q 'LuoShuSideSheet' "$SHELL"
+grep -q 'logsSheetVisible' "$SHELL"
 
 # Studio uses one in-flow final action. Both title actions share one Row and the
-# Studio viewport ends above the floating dock instead of drawing cards under it.
+# viewport ends above the floating dock instead of drawing cards under it.
 grep -q 'MiuixFinalAction(state, actions)' "$STUDIO_MIUIX"
 grep -q 'MaterialFinalAction(state, actions)' "$STUDIO_MATERIAL"
 grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MIUIX"
@@ -100,12 +105,38 @@ grep -q 'shape = RoundedCornerShape(18.dp)' "$STUDIO_TOOLS"
 ! grep -q 'align(Alignment.BottomStart)' "$STUDIO_ROUTE"
 ! grep -q 'align(Alignment.BottomCenter)' "$STUDIO_ROUTE"
 grep -q 'padding(bottom = dockClearance)' "$SHELL"
+grep -q 'RoundedCornerShape(22.dp)' "$STUDIO_MIUIX"
+grep -q 'RoundedCornerShape(22.dp)' "$STUDIO_MATERIAL"
 
-# Four-item dock, larger labels, hidden settings dock, Haze sampling and a real
-# liquid-glass surface with refraction highlights instead of an opaque white card.
+# Unified design system: business pages consume semantic tokens and shared
+# components instead of maintaining separate visual constants.
+grep -q 'data class LuoShuTokens' "$THEME"
+grep -q 'pageBackground = Color(0xFFECEBFA)' "$THEME"
+grep -q 'dark -> Color(0xFF11131A)' "$THEME"
+grep -q 'pureBlack -> Color.Black' "$THEME"
+grep -q 'val pagePadding: Dp = 12.dp' "$THEME"
+grep -q 'val groupRadius: Dp = 18.dp' "$THEME"
+grep -q 'val dockRadius: Dp = 32.dp' "$THEME"
+grep -q 'fun LuoShuPageHeader' "$COMPONENTS"
+grep -q 'fun LuoShuGroupCard' "$COMPONENTS"
+grep -q 'fun LuoShuSettingRow' "$COMPONENTS"
+grep -q 'fun LuoShuSideSheet' "$COMPONENTS"
+grep -q 'val sheetWidth = maxWidth \* .94f' "$COMPONENTS"
+grep -q 'topStart = tokens.sideSheetRadius' "$COMPONENTS"
+grep -q 'tween(300, easing = LuoShuEnterEasing)' "$COMPONENTS"
+grep -q 'LuoShuPageHeader' "$HOME_COMPACT"
+grep -q 'LuoShuPageHeader' "$COMPACT"
+grep -q 'LuoShuPageHeader' "$STUDIO_MIUIX"
+grep -q 'LuoShuPageHeader' "$STUDIO_MATERIAL"
+
+# Four stable primary destinations. Settings stays in the dock; task/log details
+# and nested theme settings temporarily hide it and preserve the underlay.
 grep -q 'private val dockPages' "$SHELL"
 [ "$(sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -c 'AppPage\.')" -eq 4 ]
-grep -q 'if (page != AppPage.Settings)' "$SHELL"
+grep -q 'Settings("设置", Icons.Rounded.Settings)' "$SHELL"
+! grep -q 'Logs("' "$SHELL"
+grep -q 'if (!logsSheetVisible && !settingsThemeOpen)' "$SHELL"
+grep -q 'targetValue = if (logsSheetVisible) (-12).dp else 0.dp' "$SHELL"
 grep -q 'fontSize = 11.sp' "$SHELL"
 grep -q 'private fun MiuixAppDock' "$SHELL"
 MIUIX_DOCK=$(sed -n '/private fun MiuixAppDock/,/private fun AppDockLayout/p' "$SHELL")
@@ -116,11 +147,21 @@ printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorBorderColor'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'scheme.primary.copy(alpha = if (dark) .30f else .20f)'
-grep -q '底栏液态玻璃效果' "$SETTINGS"
-grep -q '真实背景采样、折射高光与透明质感' "$SETTINGS"
+
+# Settings is a grouped overview plus a nested animated theme page. All style,
+# Monet, dark, pure-black and glass options stay in one shared page hierarchy.
+grep -q 'showThemeSettings: Boolean = false' "$SETTINGS"
+grep -q 'ThemeSettingsPage' "$SETTINGS"
+grep -q 'title = "主题设置"' "$SETTINGS"
+grep -q 'title = "任务中心"' "$SETTINGS"
+grep -q 'title = "使用 Monet 取色"' "$SETTINGS"
+grep -q 'title = "纯黑模式"' "$SETTINGS"
+grep -q 'title = "玻璃效果"' "$SETTINGS"
+grep -q 'title = "悬浮玻璃底栏"' "$SETTINGS"
+grep -q 'MIUIX × Material 3 × Monet × Glass' "$SETTINGS"
 grep -q 'embedded: Boolean = false' "$OVERLAY"
 grep -q 'embedded = true' "$SHELL"
 grep -q 'dockClearance' "$SHELL"
 ! grep -q 'if (page == AppPage.Studio)' "$SHELL"
 
-echo 'LuoShu compact UI layout regression passed.'
+echo 'LuoShu unified V1.1 UI layout regression passed.'

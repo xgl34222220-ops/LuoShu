@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Refresh
@@ -44,6 +45,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.design.LuoShuIconButton
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 
 private enum class LogsTab(val label: String) {
@@ -59,6 +61,7 @@ internal fun LogsScreenCompact(
     actions: LogsActions,
     diagnosticState: DiagnosticExportState,
     onDiagnostic: () -> Unit,
+    onClose: (() -> Unit)? = null,
 ) {
     val miuix = style == UiStyle.MIUIX
     val tokens = LocalMiuixTokens.current
@@ -70,34 +73,32 @@ internal fun LogsScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 132.dp),
+        contentPadding = PaddingValues(start = 12.dp, top = 4.dp, end = 12.dp, bottom = 116.dp),
         verticalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         item {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "TASK CENTER",
-                        color = MaterialTheme.colorScheme.primary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.2.sp,
+                if (onClose != null) {
+                    LuoShuIconButton(
+                        icon = Icons.Rounded.ArrowBack,
+                        contentDescription = "关闭任务中心",
+                        onClick = onClose,
                     )
-                    Spacer(Modifier.height(3.dp))
+                    Spacer(Modifier.size(8.dp))
+                }
+                Column(Modifier.weight(1f)) {
                     Text(
                         "任务中心",
                         color = textPrimary,
-                        fontSize = 34.sp,
-                        lineHeight = 39.sp,
-                        fontWeight = FontWeight.Black,
+                        style = MaterialTheme.typography.headlineMedium,
                     )
                     Text(
-                        "任务、问题和原始日志分开查看",
+                        "任务、问题和原始日志",
                         color = textSecondary,
-                        fontSize = 12.sp,
+                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
                 DiagnosticExportButton(
@@ -105,17 +106,13 @@ internal fun LogsScreenCompact(
                     state = diagnosticState,
                     onClick = onDiagnostic,
                 )
-                Spacer(Modifier.size(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(17.dp),
-                    color = elevatedColor,
-                    tonalElevation = 2.dp,
-                    shadowElevation = 3.dp,
-                ) {
-                    IconButton(onClick = actions.refresh, modifier = Modifier.size(50.dp)) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新任务和日志")
-                    }
-                }
+                Spacer(Modifier.size(6.dp))
+                LuoShuIconButton(
+                    icon = Icons.Rounded.Refresh,
+                    contentDescription = "刷新任务和日志",
+                    onClick = actions.refresh,
+                    containerColor = elevatedColor,
+                )
             }
         }
 
@@ -131,7 +128,7 @@ internal fun LogsScreenCompact(
                             .clickable { tab = option },
                         shape = RoundedCornerShape(16.dp),
                         color = if (tab == option) {
-                            MaterialTheme.colorScheme.primary
+                            MaterialTheme.colorScheme.primaryContainer
                         } else {
                             MaterialTheme.colorScheme.surfaceContainerHigh
                         },
@@ -140,7 +137,7 @@ internal fun LogsScreenCompact(
                             option.label,
                             modifier = Modifier.padding(vertical = 11.dp),
                             color = if (tab == option) {
-                                MaterialTheme.colorScheme.onPrimary
+                                MaterialTheme.colorScheme.primary
                             } else {
                                 MaterialTheme.colorScheme.onSurface
                             },

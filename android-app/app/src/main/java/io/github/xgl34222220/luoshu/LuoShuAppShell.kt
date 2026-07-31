@@ -2,9 +2,7 @@ package io.github.xgl34222220.luoshu
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -92,6 +90,9 @@ import io.github.xgl34222220.luoshu.ui.settings.AppearanceSettingsRoute
 import io.github.xgl34222220.luoshu.ui.studio.FontStudioActions
 import io.github.xgl34222220.luoshu.ui.studio.FontStudioRoute
 import io.github.xgl34222220.luoshu.ui.studio.toFontStudioUiState
+import io.github.xgl34222220.luoshu.ui.design.LuoShuSideSheet
+import io.github.xgl34222220.luoshu.ui.design.LuoShuStandardEasing
+import io.github.xgl34222220.luoshu.ui.theme.LocalLuoShuTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTheme
 
@@ -99,7 +100,6 @@ internal enum class AppPage(val label: String, val icon: ImageVector) {
     Home("首页", Icons.Rounded.Home),
     Library("字体库", Icons.Rounded.ListAlt),
     Studio("组合", Icons.Rounded.Layers),
-    Logs("任务", Icons.Rounded.Description),
     Settings("设置", Icons.Rounded.Settings),
 }
 
@@ -107,7 +107,7 @@ private val dockPages = listOf(
     AppPage.Home,
     AppPage.Library,
     AppPage.Studio,
-    AppPage.Logs,
+    AppPage.Settings,
 )
 
 @Composable
@@ -118,6 +118,8 @@ internal fun LuoShuAppShell(
 ) {
     val appearance by appearanceViewModel.settings.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(AppPage.Home) }
+    var logsSheetVisible by rememberSaveable { mutableStateOf(false) }
+    var settingsThemeOpen by rememberSaveable { mutableStateOf(false) }
     var pendingApply by remember { mutableStateOf<FontItem?>(null) }
     var pendingDelete by remember { mutableStateOf<FontItem?>(null) }
     var restoreDefault by remember { mutableStateOf(false) }
@@ -135,11 +137,16 @@ internal fun LuoShuAppShell(
                 viewModel.ensureFonts()
                 viewModel.refreshMixConfig()
             }
-            AppPage.Logs -> viewModel.refreshLogs()
             AppPage.Settings -> Unit
         }
     }
-    BackHandler(enabled = page != AppPage.Home) { page = AppPage.Home }
+    BackHandler(enabled = logsSheetVisible || settingsThemeOpen || page != AppPage.Home) {
+        when {
+            logsSheetVisible -> logsSheetVisible = false
+            settingsThemeOpen -> settingsThemeOpen = false
+            else -> page = AppPage.Home
+        }
+    }
 
     val homeActions = remember(viewModel, features) {
         HomeActions(
@@ -149,7 +156,10 @@ internal fun LuoShuAppShell(
             },
             openFontLibrary = { page = AppPage.Library },
             openFontStudio = { page = AppPage.Studio },
-            openLogs = { page = AppPage.Logs },
+            openLogs = {
+                viewModel.refreshLogs()
+                logsSheetVisible = true
+            },
             openSettings = { page = AppPage.Settings },
             restoreDefault = { restoreDefault = true },
             reboot = viewModel::rebootDevice,
@@ -190,6 +200,10 @@ internal fun LuoShuAppShell(
             setGlassEnabled = appearanceViewModel::setGlassEnabled,
             setFloatingDock = appearanceViewModel::setFloatingDock,
             setHighRefreshRate = appearanceViewModel::setHighRefreshRate,
+            openTaskCenter = {
+                viewModel.refreshLogs()
+                logsSheetVisible = true
+            },
         )
     }
     val validFonts = remember(viewModel.fonts) { viewModel.fonts.filter { it.valid } }
@@ -200,8 +214,14 @@ internal fun LuoShuAppShell(
         val hazeState = rememberHazeState(blurEnabled = blurActive)
         val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val dockClearance = navigationBottom + if (appearance.floatingDock) 84.dp else 68.dp
+        val underlayOffset by animateDpAsState(
+            targetValue = if (logsSheetVisible) (-12).dp else 0.dp,
+            animationSpec = tween(300, easing = LuoShuStandardEasing),
+            label = "luoshuSideSheetUnderlayOffset",
+        )
         val contentModifier = Modifier
             .fillMaxSize()
+            .offset(x = underlayOffset)
             .then(if (blurActive) Modifier.hazeSource(state = hazeState) else Modifier)
 
         Box(Modifier.fillMaxSize()) {
@@ -257,20 +277,18 @@ internal fun LuoShuAppShell(
                                 actions = studioActions,
                             )
                         }
-                        AppPage.Logs -> LogsRoute(
-                            style = appearance.uiStyle,
-                            state = viewModel.toLogsUiState(),
-                            actions = logsActions,
-                        )
                         AppPage.Settings -> AppearanceSettingsRoute(
                             settings = appearance,
                             actions = appearanceActions,
+                            showThemeSettings = settingsThemeOpen,
+                            onOpenThemeSettings = { settingsThemeOpen = true },
+                            onCloseThemeSettings = { settingsThemeOpen = false },
                         )
                     }
                 }
             }
 
-            if (page != AppPage.Settings) {
+            if (!logsSheetVisible && !settingsThemeOpen) {
                 if (appearance.uiStyle == UiStyle.MATERIAL) {
                     MaterialAppDock(
                         current = page,
@@ -290,6 +308,18 @@ internal fun LuoShuAppShell(
                 }
             }
 
+            LuoShuSideSheet(
+                visible = logsSheetVisible,
+                onDismiss = { logsSheetVisible = false },
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                LogsRoute(
+                    style = appearance.uiStyle,
+                    state = viewModel.toLogsUiState(),
+                    actions = logsActions,
+                    onClose = { logsSheetVisible = false },
+                )
+            }
         }
 
         pendingApply?.let { font ->
@@ -366,11 +396,8 @@ internal fun LuoShuAppShell(
 private fun AppBackdrop(appearance: AppearanceSettings, dark: Boolean) {
     val scheme = MaterialTheme.colorScheme
     val miuix = appearance.uiStyle == UiStyle.MIUIX
-    val base = when {
-        miuix -> listOf(LocalMiuixTokens.current.pageBackground, LocalMiuixTokens.current.pageBackground)
-        dark -> listOf(scheme.background, scheme.surfaceContainerLow, scheme.background)
-        else -> listOf(scheme.background, scheme.surfaceContainerLowest, scheme.background)
-    }
+    val unified = LocalLuoShuTokens.current
+    val base = listOf(unified.pageBackground, unified.pageBackground)
     Box(
         Modifier
             .fillMaxSize()
@@ -591,7 +618,7 @@ private fun AppDockLayout(
         val targetIndex = pages.indexOf(current).coerceAtLeast(0)
         val indicatorX by animateDpAsState(
             targetValue = itemWidth * targetIndex.toFloat(),
-            animationSpec = spring(dampingRatio = .76f, stiffness = Spring.StiffnessMediumLow),
+            animationSpec = tween(240, easing = LuoShuStandardEasing),
             label = label,
         )
         Box(
