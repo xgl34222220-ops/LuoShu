@@ -24,16 +24,14 @@ COMPONENTS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/
 UTIL="$ROOT/common/util_functions.sh"
 CACHE="$ROOT/common/device_font_cache.sh"
 
-# Legacy style screens stay available as a rollback path while the routes use the
-# shared compact hierarchy.
+# Legacy screens remain available while active routes use compact pages.
 grep -q 'private fun MiuixCapabilityStrip' "$MIUIX"
 grep -q 'private fun MaterialCapabilityStrip' "$MATERIAL"
 grep -q 'FontLibraryScreenCompact' "$ROUTE"
 grep -q 'HomeScreenCompact' "$HOME_ROUTE"
 grep -q 'LogsScreenCompact' "$LOGS_ROUTE"
 
-# Font library: management tools are collapsed, the card itself opens details,
-# and the default row is compact rather than a 102 dp showcase card.
+# Font library compact hierarchy.
 grep -q 'var showTools' "$COMPACT"
 grep -q '导入与管理' "$COMPACT"
 grep -q 'CompactFontRow' "$COMPACT"
@@ -41,15 +39,29 @@ grep -q 'NativeFontPreview' "$COMPACT"
 grep -q 'clickable(onClick = onDetails)' "$COMPACT"
 ! grep -q 'height(102.dp)' "$COMPACT"
 
-# Home: one dynamic next action replaces duplicate navigation shortcuts and the
-# trust chip participates in normal layout rather than using a fixed 108 dp offset.
+# Home is measured from the uploaded reference video: 360 dp viewport, 12 dp
+# margins, 8 dp rhythm, 18 dp cards, 42 dp segmented actions and 104 dp dock
+# clearance. Giant page headers and standalone square icon buttons are forbidden.
+grep -q 'private val PagePadding = 12.dp' "$HOME_COMPACT"
+grep -q 'private val CardRadius = 18.dp' "$HOME_COMPACT"
+grep -q 'private val SectionGap = 8.dp' "$HOME_COMPACT"
+grep -q 'bottom = 104.dp' "$HOME_COMPACT"
+grep -q 'private fun EngineOverview' "$HOME_COMPACT"
+grep -q 'private fun SegmentedAction' "$HOME_COMPACT"
+grep -q 'fillMaxWidth().height(42.dp)' "$HOME_COMPACT"
+grep -q 'size(62.dp)' "$HOME_COMPACT"
+grep -q 'private fun CompactShortcut' "$HOME_COMPACT"
+grep -q 'private fun StatusGrid' "$HOME_COMPACT"
 grep -q 'HomeNextStep' "$HOME_COMPACT"
 grep -q '继续调整当前字体' "$HOME_COMPACT"
-grep -q '打开任务中心查看错误原因' "$HOME_COMPACT"
+grep -q '打开任务中心查看错误与诊断信息' "$HOME_COMPACT"
+! grep -q 'LuoShuPageHeader' "$HOME_COMPACT"
+! grep -q 'LuoShuIconButton' "$HOME_COMPACT"
+! grep -q 'size(88.dp)' "$HOME_COMPACT"
 ! grep -q 'QUICK ACCESS' "$HOME_COMPACT"
 ! grep -q 'bottom = 108.dp' "$HOME_ROUTE"
 
-# Acceptance guidance follows the installed version and never treats an
+# Acceptance guidance follows the installed version and does not treat an
 # unverified compatibility mapping as proof that the font is effective.
 grep -q "targetVersion: String = state.version.substringBefore('-').substringBefore('+')" "$MATRIX"
 grep -q '真机测试矩阵 · ${report.targetVersion}' "$MATRIX"
@@ -62,20 +74,15 @@ grep -q '加载验证失败，请打开问题页查看具体失败分区' "$ACCE
 ! grep -q 'v2.2.2' "$MATRIX"
 ! grep -q 'v2.2.2' "$ACCEPTANCE"
 
-# ROM detection is a state fact, not a polling log. Existing duplicate records
-# are compacted once and new entries are emitted only when the detected version changes.
+# ROM detection and detached cache worker contracts.
 grep -q 'compact_rom_detection_logs' "$UTIL"
 grep -q 'log_rom_detection_once coloros' "$UTIL"
 grep -q 'log_rom_detection_once hyperos' "$UTIL"
-
-# A detached background cache worker must load the transaction and mount layers
-# itself before activating a generated payload.
 grep -q 'device_font_transaction_guard.sh' "$CACHE"
 grep -q 'mount_compat.sh' "$CACHE"
 grep -q 'type luoshu_sync_mount_payload' "$CACHE"
 
-# Task center separates user-facing tasks/issues from raw logs. It is opened as
-# a right-side rounded sheet and uses the common 48 dp icon-button hit target.
+# Task center is a right-side rounded sheet.
 grep -q 'enum class LogsTab' "$LOGS_COMPACT"
 grep -q 'TASKS("任务")' "$LOGS_COMPACT"
 grep -q 'ISSUES("问题")' "$LOGS_COMPACT"
@@ -87,8 +94,7 @@ grep -q 'onClose: (() -> Unit)? = null' "$LOGS_ROUTE"
 grep -q 'LuoShuSideSheet' "$SHELL"
 grep -q 'logsSheetVisible' "$SHELL"
 
-# Studio uses one in-flow final action. Both title actions share one Row and the
-# viewport ends above the floating dock instead of drawing cards under it.
+# Studio keeps one in-flow final action and clears the floating dock.
 grep -q 'MiuixFinalAction(state, actions)' "$STUDIO_MIUIX"
 grep -q 'MaterialFinalAction(state, actions)' "$STUDIO_MATERIAL"
 grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MIUIX"
@@ -108,8 +114,7 @@ grep -q 'padding(bottom = dockClearance)' "$SHELL"
 grep -q 'RoundedCornerShape(22.dp)' "$STUDIO_MIUIX"
 grep -q 'RoundedCornerShape(22.dp)' "$STUDIO_MATERIAL"
 
-# Unified design system: business pages consume semantic tokens and shared
-# components instead of maintaining separate visual constants.
+# Shared tokens and components remain available to the remaining pages.
 grep -q 'data class LuoShuTokens' "$THEME"
 grep -q 'pageBackground = Color(0xFFECEBFA)' "$THEME"
 grep -q 'dark -> Color(0xFF11131A)' "$THEME"
@@ -124,13 +129,11 @@ grep -q 'fun LuoShuSideSheet' "$COMPONENTS"
 grep -q 'val sheetWidth = maxWidth \* .94f' "$COMPONENTS"
 grep -q 'topStart = tokens.sideSheetRadius' "$COMPONENTS"
 grep -q 'tween(300, easing = LuoShuEnterEasing)' "$COMPONENTS"
-grep -q 'LuoShuPageHeader' "$HOME_COMPACT"
 grep -q 'LuoShuPageHeader' "$COMPACT"
 grep -q 'LuoShuPageHeader' "$STUDIO_MIUIX"
 grep -q 'LuoShuPageHeader' "$STUDIO_MATERIAL"
 
-# Four stable primary destinations. Settings stays in the dock; task/log details
-# and nested theme settings temporarily hide it and preserve the underlay.
+# Four stable primary destinations and glass dock behavior.
 grep -q 'private val dockPages' "$SHELL"
 [ "$(sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -c 'AppPage\.')" -eq 4 ]
 grep -q 'Settings("设置", Icons.Rounded.Settings)' "$SHELL"
@@ -148,8 +151,7 @@ printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorBorderColor'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'scheme.primary.copy(alpha = if (dark) .30f else .20f)'
 
-# Settings is a grouped overview plus a nested animated theme page. All style,
-# Monet, dark, pure-black and glass options stay in one shared page hierarchy.
+# Settings and native import hierarchy remain intact.
 grep -q 'showThemeSettings: Boolean = false' "$SETTINGS"
 grep -q 'ThemeSettingsPage' "$SETTINGS"
 grep -q 'title = "主题设置"' "$SETTINGS"
@@ -164,4 +166,4 @@ grep -q 'embedded = true' "$SHELL"
 grep -q 'dockClearance' "$SHELL"
 ! grep -q 'if (page == AppPage.Studio)' "$SHELL"
 
-echo 'LuoShu unified V1.1 UI layout regression passed.'
+echo 'LuoShu reference-video home UI layout regression passed.'
