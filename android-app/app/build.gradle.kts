@@ -130,11 +130,14 @@ dependencies {
     implementation("androidx.compose.material3:material3-window-size-class")
     implementation("androidx.compose.material3:material3-adaptive-navigation-suite")
 
-    // Complete Material 3 adaptive stack for phones, tablets, foldables and Navigation 3.
+    // Complete Material 3 adaptive stack for phones, tablets and foldables.
     implementation("androidx.compose.material3.adaptive:adaptive:$material3AdaptiveVersion")
     implementation("androidx.compose.material3.adaptive:adaptive-layout:$material3AdaptiveVersion")
     implementation("androidx.compose.material3.adaptive:adaptive-navigation:$material3AdaptiveVersion")
-    implementation("androidx.compose.material3.adaptive:adaptive-navigation3:$material3AdaptiveVersion")
+    // Miuix Navigation 3 republishes the same androidx.navigation3 classes. Keep the Material
+    // Navigation 3 API available for the Material source implementation without packaging a
+    // second runtime copy into the same APK.
+    compileOnly("androidx.compose.material3.adaptive:adaptive-navigation3:$material3AdaptiveVersion")
 
     // Complete Miuix visual stack. Keep every module on the exact same version.
     implementation("top.yukonga.miuix.kmp:miuix-core:$miuixVersion")
