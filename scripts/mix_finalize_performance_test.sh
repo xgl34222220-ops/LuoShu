@@ -65,8 +65,8 @@ grep -q "mix_stage manifest '正在生成安全启动清单' 98" "$ROOT/common/f
 grep -q '_progress_message=' "$ROOT/common/weighted_mix_task.sh"
 grep -q '完整复合字体后台进程已退出' "$ROOT/common/weighted_mix_task.sh"
 
-# The import action must fit the full Chinese label on one line.
-grep -q 'else -> 148.dp' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
+# The compact import action must still fit the full Chinese label on one line.
+grep -q 'else -> 132.dp' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 grep -q 'softWrap = false' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 grep -q 'modifier = modifier.fillMaxWidth()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 
