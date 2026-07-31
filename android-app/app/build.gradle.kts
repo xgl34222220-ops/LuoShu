@@ -141,7 +141,9 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-ui:$miuixVersion")
     implementation("top.yukonga.miuix.kmp:miuix-preference:$miuixVersion")
     implementation("top.yukonga.miuix.kmp:miuix-icons:$miuixVersion")
-    implementation("top.yukonga.miuix.kmp:miuix-blur:$miuixVersion")
+    // miuix-blur requires minSdk 33. Keep its API available to the source set while Haze
+    // remains the packaged fallback for LuoShu's Android 9+ support range.
+    compileOnly("top.yukonga.miuix.kmp:miuix-blur:$miuixVersion")
     implementation("top.yukonga.miuix.kmp:miuix-navigation3-ui:$miuixVersion")
     implementation("top.yukonga.miuix.kmp:miuix-shader:$miuixVersion")
     implementation("top.yukonga.miuix.kmp:miuix-squircle:$miuixVersion")
