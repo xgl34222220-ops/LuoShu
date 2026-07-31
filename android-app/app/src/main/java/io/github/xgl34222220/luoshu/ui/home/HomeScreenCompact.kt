@@ -50,12 +50,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.design.LuoShuDivider
 import io.github.xgl34222220.luoshu.ui.design.LuoShuGroupCard
 import io.github.xgl34222220.luoshu.ui.design.LuoShuIconButton
 import io.github.xgl34222220.luoshu.ui.design.LuoShuIconTile
 import io.github.xgl34222220.luoshu.ui.design.LuoShuMetricTile
 import io.github.xgl34222220.luoshu.ui.design.LuoShuPageHeader
 import io.github.xgl34222220.luoshu.ui.design.LuoShuSectionTitle
+import io.github.xgl34222220.luoshu.ui.design.LuoShuSettingRow
 import io.github.xgl34222220.luoshu.ui.theme.LocalLuoShuTokens
 
 @Composable
@@ -70,9 +72,9 @@ internal fun HomeScreenCompact(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
             start = tokens.pagePadding,
-            top = 2.dp,
+            top = 0.dp,
             end = tokens.pagePadding,
-            bottom = 112.dp,
+            bottom = 88.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(tokens.compactGap),
     ) {
@@ -98,7 +100,6 @@ internal fun HomeScreenCompact(
                             { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) }
                         } else null,
                     )
-                    Spacer(Modifier.width(6.dp))
                     LuoShuIconButton(
                         icon = Icons.Rounded.Settings,
                         contentDescription = "设置",
@@ -108,25 +109,22 @@ internal fun HomeScreenCompact(
             )
         }
 
-        item {
-            EngineStatusCard(state = state, actions = actions)
-        }
-
+        item { EngineStatusCard(state = state, actions = actions) }
         item { trustContent() }
 
         if (state.error.isNotBlank()) {
             item {
                 LuoShuGroupCard {
                     Row(
-                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         LuoShuIconTile(
                             icon = Icons.Rounded.Warning,
                             tint = tokens.danger,
-                            containerColor = tokens.danger.copy(alpha = .10f),
+                            containerColor = tokens.danger.copy(alpha = .09f),
                         )
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Text("字体引擎需要处理", color = tokens.textPrimary, style = MaterialTheme.typography.titleSmall)
                             Text(
@@ -145,53 +143,47 @@ internal fun HomeScreenCompact(
 
         item { LuoShuSectionTitle("设备状态") }
         item {
-            LuoShuGroupCard(contentPadding = 10.dp) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        LuoShuMetricTile(
-                            title = "Root",
-                            value = if (state.rootGranted) state.rootManager else "未授权",
-                            icon = Icons.Rounded.Security,
-                            statusColor = if (state.rootGranted) tokens.success else tokens.danger,
-                            modifier = Modifier.weight(1f),
-                        )
-                        LuoShuMetricTile(
-                            title = "挂载引擎",
-                            value = state.mountEngine,
-                            icon = Icons.Rounded.Layers,
-                            statusColor = if (state.mountHealthy) tokens.success else tokens.warning,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        LuoShuMetricTile(
-                            title = "当前任务",
-                            value = if (state.taskRunning) "${state.taskProgress}%" else "空闲",
-                            icon = Icons.Rounded.TaskAlt,
-                            statusColor = if (state.taskRunning) MaterialTheme.colorScheme.primary else tokens.success,
-                            modifier = Modifier.weight(1f),
-                        )
-                        LuoShuMetricTile(
-                            title = "重启状态",
-                            value = if (state.rebootRequired) "等待重启" else "无需重启",
-                            icon = Icons.Rounded.RestartAlt,
-                            statusColor = if (state.rebootRequired) tokens.warning else tokens.success,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
+            LuoShuGroupCard {
+                Column {
+                    LuoShuSettingRow(
+                        icon = Icons.Rounded.Security,
+                        title = "Root",
+                        description = if (state.rootGranted) "已获得字体事务权限" else "尚未获得 Root 授权",
+                        value = if (state.rootGranted) state.rootManager else "未授权",
+                    )
+                    LuoShuDivider(Modifier.padding(start = 56.dp))
+                    LuoShuSettingRow(
+                        icon = Icons.Rounded.Layers,
+                        title = "挂载引擎",
+                        description = if (state.mountHealthy) "当前挂载链工作正常" else "挂载状态需要检查",
+                        value = state.mountEngine,
+                    )
+                    LuoShuDivider(Modifier.padding(start = 56.dp))
+                    LuoShuSettingRow(
+                        icon = Icons.Rounded.TaskAlt,
+                        title = "当前任务",
+                        description = state.taskMessage.ifBlank { state.taskTitle },
+                        value = if (state.taskRunning) "${state.taskProgress}%" else "空闲",
+                        showChevron = true,
+                        onClick = actions.openLogs,
+                    )
+                    LuoShuDivider(Modifier.padding(start = 56.dp))
+                    LuoShuSettingRow(
+                        icon = Icons.Rounded.RestartAlt,
+                        title = "重启状态",
+                        description = if (state.rebootRequired) "字体负载已准备，等待完整重启" else "本次操作无需重启",
+                        value = if (state.rebootRequired) "等待重启" else "无需重启",
+                        onClick = if (state.rebootRequired) actions.reboot else null,
+                    )
                 }
             }
         }
 
         item { LuoShuSectionTitle("下一步") }
-        item {
-            NextStepCard(next = nextStepFor(state, actions))
-        }
+        item { NextStepCard(next = nextStepFor(state, actions)) }
 
         item { LuoShuSectionTitle("全局粗细") }
-        item {
-            SystemWeightCard(weight = state.systemWeight, actions = actions)
-        }
+        item { SystemWeightCard(weight = state.systemWeight, actions = actions) }
     }
 }
 
@@ -205,73 +197,61 @@ private fun EngineStatusCard(state: HomeUiState, actions: HomeActions) {
         healthy -> tokens.success
         else -> MaterialTheme.colorScheme.primary
     }
-    LuoShuGroupCard(elevated = true) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    MaterialTheme.colorScheme.primary.copy(alpha = .045f),
-                    RoundedCornerShape(tokens.dataRadius),
-                )
-                .padding(16.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Surface(
-                        shape = RoundedCornerShape(999.dp),
-                        color = statusColor.copy(alpha = .11f),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Box(Modifier.size(7.dp).background(statusColor, CircleShape))
-                            Spacer(Modifier.width(7.dp))
-                            Text(
-                                text = when {
-                                    state.taskRunning -> "任务执行中"
-                                    state.rebootRequired -> "等待完整重启"
-                                    healthy -> "字体引擎运行正常"
-                                    else -> "正在检查运行环境"
-                                },
-                                color = statusColor,
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(12.dp))
-                    Text("当前字体", color = tokens.textSecondary, style = MaterialTheme.typography.bodySmall)
-                    Text(
-                        text = state.currentFont,
-                        color = tokens.textPrimary,
-                        style = MaterialTheme.typography.headlineMedium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(5.dp))
-                    Text(
-                        text = state.taskMessage.ifBlank { state.taskTitle },
-                        color = tokens.textSecondary,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(Modifier.width(12.dp))
-                StatusOrb(state = state, color = statusColor)
-            }
+    val statusLabel = when {
+        state.taskRunning -> "任务执行中"
+        state.rebootRequired -> "等待完整重启"
+        healthy -> "字体引擎运行正常"
+        else -> "正在检查运行环境"
+    }
 
+    LuoShuGroupCard(elevated = true) {
+        Column(Modifier.fillMaxWidth().padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    shape = RoundedCornerShape(999.dp),
+                    color = statusColor.copy(alpha = .10f),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(7.dp).background(statusColor, CircleShape))
+                        Spacer(Modifier.width(6.dp))
+                        Text(statusLabel, color = statusColor, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = actions.openLogs) { Text("详情") }
+            }
+            Spacer(Modifier.height(10.dp))
+            Text("当前字体", color = tokens.textSecondary, style = MaterialTheme.typography.bodySmall)
+            Text(
+                text = state.currentFont,
+                color = tokens.textPrimary,
+                style = MaterialTheme.typography.headlineSmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = state.taskMessage.ifBlank { state.taskTitle },
+                color = tokens.textSecondary,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
             if (state.taskRunning) {
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(10.dp))
                 LinearProgressIndicator(
                     progress = { state.taskProgress.coerceIn(0, 100) / 100f },
-                    modifier = Modifier.fillMaxWidth().height(5.dp),
+                    modifier = Modifier.fillMaxWidth().height(4.dp),
                     color = MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
                 )
             }
-
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(12.dp))
+            LuoShuDivider()
+            Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusAction(
                     modifier = Modifier.weight(1f),
@@ -300,41 +280,6 @@ private fun EngineStatusCard(state: HomeUiState, actions: HomeActions) {
 }
 
 @Composable
-private fun StatusOrb(state: HomeUiState, color: Color) {
-    val tokens = LocalLuoShuTokens.current
-    Surface(
-        modifier = Modifier.size(88.dp),
-        shape = CircleShape,
-        color = color.copy(alpha = .10f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = .24f)),
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            if (state.taskRunning) {
-                CircularProgressIndicator(
-                    progress = { state.taskProgress.coerceIn(0, 100) / 100f },
-                    modifier = Modifier.size(62.dp),
-                    color = color,
-                    trackColor = color.copy(alpha = .12f),
-                    strokeWidth = 5.dp,
-                )
-                Text(
-                    "${state.taskProgress}%",
-                    color = tokens.textPrimary,
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            } else {
-                Icon(
-                    imageVector = if (state.error.isBlank()) Icons.Rounded.CheckCircle else Icons.Rounded.Warning,
-                    contentDescription = null,
-                    tint = color,
-                    modifier = Modifier.size(50.dp),
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun StatusAction(
     modifier: Modifier,
     icon: ImageVector,
@@ -346,35 +291,23 @@ private fun StatusAction(
     val tokens = LocalLuoShuTokens.current
     Surface(
         modifier = modifier
-            .height(58.dp)
+            .height(44.dp)
             .clickable(enabled = enabled, onClick = onClick),
-        shape = RoundedCornerShape(tokens.smallRadius),
+        shape = RoundedCornerShape(14.dp),
         color = tokens.surfaceAlt.copy(alpha = if (enabled) 1f else .48f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.outline.copy(alpha = .34f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.outline.copy(alpha = .22f)),
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(icon, contentDescription = null, tint = tint.copy(alpha = if (enabled) 1f else .45f), modifier = Modifier.size(20.dp))
-            Spacer(Modifier.height(3.dp))
-            Text(
-                label,
-                color = tokens.textPrimary.copy(alpha = if (enabled) 1f else .45f),
-                style = MaterialTheme.typography.labelMedium,
-            )
+            Icon(icon, contentDescription = null, tint = tint.copy(alpha = if (enabled) 1f else .45f), modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(label, color = tokens.textPrimary.copy(alpha = if (enabled) 1f else .45f), style = MaterialTheme.typography.labelLarge)
         }
     }
 }
-
-private data class HomeNextStep(
-    val title: String,
-    val description: String,
-    val actionLabel: String,
-    val icon: ImageVector,
-    val enabled: Boolean = true,
-    val onClick: () -> Unit,
-)
 
 @Composable
 private fun NextStepCard(next: HomeNextStep) {

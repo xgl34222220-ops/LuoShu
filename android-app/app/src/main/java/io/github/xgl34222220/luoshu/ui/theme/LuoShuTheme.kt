@@ -44,22 +44,22 @@ data class LuoShuTokens(
     val success: Color,
     val warning: Color,
     val danger: Color,
-    val pagePadding: Dp = 12.dp,
+    val pagePadding: Dp = 14.dp,
     val compactGap: Dp = 8.dp,
-    val sectionGap: Dp = 12.dp,
-    val smallRadius: Dp = 12.dp,
-    val fieldRadius: Dp = 14.dp,
-    val groupRadius: Dp = 18.dp,
-    val dataRadius: Dp = 22.dp,
-    val dockRadius: Dp = 32.dp,
-    val sideSheetRadius: Dp = 32.dp,
+    val sectionGap: Dp = 10.dp,
+    val smallRadius: Dp = 14.dp,
+    val fieldRadius: Dp = 16.dp,
+    val groupRadius: Dp = 22.dp,
+    val dataRadius: Dp = 20.dp,
+    val dockRadius: Dp = 26.dp,
+    val sideSheetRadius: Dp = 28.dp,
 )
 
 val LocalLuoShuTokens = staticCompositionLocalOf {
     LuoShuTokens(
-        pageBackground = Color(0xFFECEBFA),
-        surface = Color(0xFFF8F7FD),
-        surfaceAlt = Color(0xFFF2F0FA),
+        pageBackground = Color(0xFFF3F2FA),
+        surface = Color(0xFFFCFBFF),
+        surfaceAlt = Color(0xFFF2F1F8),
         surfaceElevated = Color.White,
         textPrimary = Color(0xFF171923),
         textSecondary = Color(0xFF666B7A),
@@ -87,17 +87,17 @@ private val UnifiedMiuixShapes = Shapes(
 )
 
 private val UnifiedTypography = Typography(
-    displaySmall = TextStyle(fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold),
-    headlineLarge = TextStyle(fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold),
-    headlineMedium = TextStyle(fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold),
-    headlineSmall = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold),
-    titleLarge = TextStyle(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
-    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
-    titleSmall = TextStyle(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold),
-    bodyLarge = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, fontWeight = FontWeight.Normal),
-    bodyMedium = TextStyle(fontSize = 13.sp, lineHeight = 19.sp, fontWeight = FontWeight.Normal),
+    displaySmall = TextStyle(fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold),
+    headlineLarge = TextStyle(fontSize = 24.sp, lineHeight = 30.sp, fontWeight = FontWeight.SemiBold),
+    headlineMedium = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold),
+    headlineSmall = TextStyle(fontSize = 20.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold),
+    titleLarge = TextStyle(fontSize = 17.sp, lineHeight = 23.sp, fontWeight = FontWeight.SemiBold),
+    titleMedium = TextStyle(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold),
+    titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium),
+    bodyLarge = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.Normal),
+    bodyMedium = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Normal),
     bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Normal),
-    labelLarge = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold),
+    labelLarge = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
     labelMedium = TextStyle(fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium),
     labelSmall = TextStyle(fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
 )
@@ -115,8 +115,8 @@ data class MiuixTokens(
 
 val LocalMiuixTokens = staticCompositionLocalOf {
     MiuixTokens(
-        pageBackground = Color(0xFFECEBFA),
-        cardBackground = Color(0xFFF8F7FD),
+        pageBackground = Color(0xFFF3F2FA),
+        cardBackground = Color(0xFFFCFBFF),
         elevatedCardBackground = Color.White,
         textPrimary = Color(0xFF171923),
         textSecondary = Color(0xFF666B7A),
@@ -151,7 +151,7 @@ private fun LuoShuMaterialTheme(settings: AppearanceSettings, content: @Composab
             pageBackground = when {
                 pureBlack -> Color.Black
                 dark -> Color(0xFF11131A)
-                else -> Color(0xFFECEBFA)
+                else -> Color(0xFFF3F2FA)
             },
             surface = when {
                 pureBlack -> Color(0xFF0C0C0D)
@@ -196,17 +196,17 @@ private fun LuoShuMiuixTheme(settings: AppearanceSettings, content: @Composable 
         val page = when {
             pureBlack -> Color.Black
             dark -> Color(0xFF11131A)
-            else -> Color(0xFFECEBFA)
+            else -> Color(0xFFF3F2FA)
         }
         val surface = when {
             pureBlack -> Color(0xFF0C0C0D)
             dark -> Color(0xFF1B1E28)
-            else -> Color(0xFFF8F7FD)
+            else -> Color(0xFFFCFBFF)
         }
         val surfaceAlt = when {
             pureBlack -> Color(0xFF171719)
             dark -> Color(0xFF252937)
-            else -> Color(0xFFF2F0FA)
+            else -> Color(0xFFF2F1F8)
         }
         val elevated = when {
             pureBlack -> Color(0xFF171719)

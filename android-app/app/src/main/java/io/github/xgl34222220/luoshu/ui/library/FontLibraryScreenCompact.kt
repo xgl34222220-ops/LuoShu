@@ -78,7 +78,7 @@ internal fun FontLibraryScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, top = 2.dp, end = 12.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 0.dp, end = 14.dp, bottom = 18.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
@@ -104,9 +104,9 @@ internal fun FontLibraryScreenCompact(
             OutlinedTextField(
                 value = state.query,
                 onValueChange = actions.setQuery,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().height(52.dp),
                 singleLine = true,
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(18.dp),
                 leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                 placeholder = { Text("搜索名称、ID 或格式") },
             )
@@ -201,7 +201,7 @@ internal fun FontLibraryScreenCompact(
                             modifier = Modifier.size(40.dp),
                         )
                         Spacer(Modifier.height(10.dp))
-                        Text("没有符合条件的字体", color = textPrimary, fontSize = 18.sp, fontWeight = FontWeight.Black)
+                        Text("没有符合条件的字体", color = textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                         Text("调整搜索或筛选，也可以展开上方工具导入字体", color = textSecondary, fontSize = 11.sp)
                     }
                 }
@@ -234,33 +234,32 @@ private fun CompactSystemFontRow(
     onRestore: () -> Unit,
 ) {
     Card(
-        shape = RoundedCornerShape(23.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .35f)),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
-                modifier = Modifier.size(50.dp),
-                shape = RoundedCornerShape(17.dp),
-                color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
+                modifier = Modifier.size(42.dp),
+                shape = RoundedCornerShape(14.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = .09f),
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Text("系", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+                    Text("系", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                 }
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text("系统默认字体", color = textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Black)
+                Text("系统默认字体", color = textPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 Text("ROM 原始字体映射", color = textSecondary, fontSize = 11.sp)
             }
             if (active) {
                 StatusPill("使用中", Color(0xFF21966C))
             } else {
-                Button(onClick = onRestore, enabled = !busy, shape = RoundedCornerShape(16.dp)) {
-                    Text("恢复")
-                }
+                TextButton(onClick = onRestore, enabled = !busy) { Text("恢复") }
             }
         }
     }
@@ -280,17 +279,18 @@ private fun CompactFontRow(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails),
-        shape = RoundedCornerShape(23.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (font.valid) cardColor else MaterialTheme.colorScheme.errorContainer.copy(alpha = .42f),
+            containerColor = if (font.valid) cardColor else MaterialTheme.colorScheme.errorContainer.copy(alpha = .34f),
         ),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .30f)),
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    modifier = Modifier.size(54.dp),
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
+                    modifier = Modifier.size(44.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = .08f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         if (font.valid) {
@@ -298,25 +298,25 @@ private fun CompactFontRow(
                                 font = font,
                                 text = "Aa",
                                 axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
-                                modifier = Modifier.size(54.dp).padding(6.dp),
-                                textSizeSp = 19f,
+                                modifier = Modifier.size(44.dp).padding(5.dp),
+                                textSizeSp = 16f,
                                 gravity = Gravity.CENTER,
                                 maxLines = 1,
                             )
                         } else {
-                            Text("Aa", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+                            Text("Aa", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
-                Spacer(Modifier.width(12.dp))
+                Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
                         font.name,
                         color = textPrimary,
-                        fontSize = 17.sp,
-                        lineHeight = 21.sp,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 2,
+                        fontSize = 14.sp,
+                        lineHeight = 19.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Text(
@@ -330,7 +330,6 @@ private fun CompactFontRow(
                         fontCapabilityLabel(font),
                         color = MaterialTheme.colorScheme.primary,
                         fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -338,51 +337,29 @@ private fun CompactFontRow(
                 if (active) {
                     StatusPill("使用中", Color(0xFF21966C))
                 } else {
-                    IconButton(onClick = onDelete, enabled = !busy) {
-                        Icon(Icons.Rounded.Delete, contentDescription = "删除字体", tint = textSecondary)
+                    TextButton(onClick = onApply, enabled = font.valid && !busy) { Text("应用") }
+                    IconButton(onClick = onDelete, enabled = !busy, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Rounded.Delete, contentDescription = "删除字体", tint = textSecondary, modifier = Modifier.size(19.dp))
                     }
                 }
             }
-
             if (!font.valid && font.error.isNotBlank()) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         Icons.Rounded.Warning,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(16.dp),
+                        modifier = Modifier.size(15.dp),
                     )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(5.dp))
                     Text(
                         font.error,
                         color = MaterialTheme.colorScheme.error,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                }
-            }
-
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "点击卡片查看完整预览与字体信息",
-                    modifier = Modifier.weight(1f),
-                    color = textSecondary,
-                    fontSize = 11.sp,
-                )
-                if (!active) {
-                    Button(
-                        onClick = onApply,
-                        enabled = font.valid && !busy,
-                        shape = RoundedCornerShape(16.dp),
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 9.dp),
-                    ) {
-                        Text("应用")
-                    }
-                } else {
-                    Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(0xFF21966C))
                 }
             }
         }
@@ -398,7 +375,7 @@ private fun ChoicePill(label: String, active: Boolean, onClick: () -> Unit) {
     ) {
         Text(
             label,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
             color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
@@ -430,7 +407,7 @@ private fun StatusPill(text: String, color: Color) {
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             color = color,
             fontSize = 10.sp,
-            fontWeight = FontWeight.Black,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }

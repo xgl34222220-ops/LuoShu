@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,10 +24,12 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
@@ -46,17 +49,21 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.theme.LocalLuoShuTokens
 
 val LuoShuEnterEasing = CubicBezierEasing(.20f, .80f, .20f, 1f)
 val LuoShuExitEasing = CubicBezierEasing(.40f, 0f, 1f, 1f)
 val LuoShuStandardEasing = CubicBezierEasing(.20f, 0f, 0f, 1f)
 
+/**
+ * One header system for every page.
+ *
+ * Action containers are always 48 dp. A centred title is laid out independently from the
+ * left/right action count so one page can never shift simply because it has two actions.
+ */
 @Composable
 fun LuoShuPageHeader(
     title: String,
@@ -67,44 +74,67 @@ fun LuoShuPageHeader(
     actions: @Composable RowScope.() -> Unit = {},
 ) {
     val tokens = LocalLuoShuTokens.current
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .statusBarsPadding()
-            .padding(top = 8.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(Modifier.width(52.dp), contentAlignment = Alignment.CenterStart) {
-            leading?.invoke()
-        }
-        Column(
-            modifier = Modifier.weight(1f),
-            horizontalAlignment = if (centered) Alignment.CenterHorizontally else Alignment.Start,
-        ) {
+    val titleBlock: @Composable () -> Unit = {
+        Column(horizontalAlignment = if (centered) Alignment.CenterHorizontally else Alignment.Start) {
             Text(
                 text = title,
                 color = tokens.textPrimary,
-                style = MaterialTheme.typography.headlineMedium,
+                style = MaterialTheme.typography.headlineLarge,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             if (!subtitle.isNullOrBlank()) {
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(1.dp))
                 Text(
                     text = subtitle,
                     color = tokens.textSecondary,
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
         }
+    }
+
+    if (centered) {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .heightIn(min = 72.dp)
+                .padding(vertical = 5.dp),
+        ) {
+            Box(Modifier.align(Alignment.Center), contentAlignment = Alignment.Center) { titleBlock() }
+            if (leading != null) {
+                Box(Modifier.align(Alignment.CenterStart), contentAlignment = Alignment.CenterStart) { leading() }
+            }
+            Row(
+                modifier = Modifier.align(Alignment.CenterEnd),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                content = actions,
+            )
+        }
+    } else {
         Row(
-            modifier = Modifier.width(104.dp),
-            horizontalArrangement = Arrangement.End,
+            modifier = modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .heightIn(min = 72.dp)
+                .padding(vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
-            content = actions,
-        )
+        ) {
+            if (leading != null) {
+                Box(Modifier.size(48.dp), contentAlignment = Alignment.CenterStart) { leading() }
+                Spacer(Modifier.width(8.dp))
+            }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { titleBlock() }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                content = actions,
+            )
+        }
     }
 }
 
@@ -117,6 +147,7 @@ fun LuoShuBackButton(onClick: () -> Unit, contentDescription: String = "返回")
     )
 }
 
+/** One and only top-level icon button specification. */
 @Composable
 fun LuoShuIconButton(
     icon: ImageVector,
@@ -131,13 +162,22 @@ fun LuoShuIconButton(
     val tokens = LocalLuoShuTokens.current
     Surface(
         modifier = modifier.size(48.dp),
-        shape = RoundedCornerShape(tokens.fieldRadius),
+        shape = RoundedCornerShape(16.dp),
         color = containerColor,
-        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.outline.copy(alpha = .55f)),
-        shadowElevation = 2.dp,
+        border = BorderStroke(1.dp, tokens.outline.copy(alpha = .30f)),
+        shadowElevation = 1.dp,
     ) {
         IconButton(onClick = onClick, enabled = enabled) {
-            if (content != null) content() else Icon(icon, contentDescription = contentDescription, tint = tint)
+            if (content != null) {
+                content()
+            } else {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = contentDescription,
+                    tint = tint.copy(alpha = if (enabled) 1f else .38f),
+                    modifier = Modifier.size(22.dp),
+                )
+            }
         }
     }
 }
@@ -150,14 +190,16 @@ fun LuoShuSectionTitle(
 ) {
     val tokens = LocalLuoShuTokens.current
     Row(
-        modifier = modifier.fillMaxWidth().padding(start = 4.dp, top = 4.dp, end = 4.dp, bottom = 2.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, top = 8.dp, end = 4.dp, bottom = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = title,
             modifier = Modifier.weight(1f),
             color = tokens.textPrimary,
-            style = MaterialTheme.typography.titleMedium,
+            style = MaterialTheme.typography.titleLarge,
         )
         action?.invoke()
     }
@@ -175,8 +217,8 @@ fun LuoShuGroupCard(
         modifier = modifier,
         shape = RoundedCornerShape(tokens.groupRadius),
         colors = CardDefaults.cardColors(containerColor = if (elevated) tokens.surfaceElevated else tokens.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (elevated) 2.dp else 0.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.outline.copy(alpha = .42f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (elevated) 1.dp else 0.dp),
+        border = BorderStroke(1.dp, tokens.outline.copy(alpha = .24f)),
     ) {
         Box(Modifier.padding(contentPadding)) { content() }
     }
@@ -187,17 +229,16 @@ fun LuoShuIconTile(
     icon: ImageVector,
     modifier: Modifier = Modifier,
     tint: Color = MaterialTheme.colorScheme.primary,
-    containerColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
-    size: Dp = 40.dp,
+    containerColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = .09f),
+    size: Dp = 34.dp,
 ) {
-    val tokens = LocalLuoShuTokens.current
     Surface(
         modifier = modifier.size(size),
-        shape = RoundedCornerShape(tokens.smallRadius),
+        shape = RoundedCornerShape(11.dp),
         color = containerColor,
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(21.dp))
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
         }
     }
 }
@@ -219,7 +260,7 @@ fun LuoShuSettingRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .defaultMinSize(minHeight = 64.dp)
+            .defaultMinSize(minHeight = 56.dp)
             .then(
                 if (onClick != null) {
                     Modifier.clickable(
@@ -230,11 +271,11 @@ fun LuoShuSettingRow(
                     )
                 } else Modifier,
             )
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        LuoShuIconTile(icon = icon, size = 38.dp)
-        Spacer(Modifier.width(12.dp))
+        LuoShuIconTile(icon = icon)
+        Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 text = title,
@@ -244,7 +285,7 @@ fun LuoShuSettingRow(
                 overflow = TextOverflow.Ellipsis,
             )
             if (!description.isNullOrBlank()) {
-                Spacer(Modifier.height(2.dp))
+                Spacer(Modifier.height(1.dp))
                 Text(
                     text = description,
                     color = tokens.textSecondary.copy(alpha = if (enabled) 1f else .42f),
@@ -261,6 +302,7 @@ fun LuoShuSettingRow(
                 color = MaterialTheme.colorScheme.primary.copy(alpha = if (enabled) 1f else .42f),
                 style = MaterialTheme.typography.labelMedium,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
         trailing?.let {
@@ -268,11 +310,12 @@ fun LuoShuSettingRow(
             it()
         }
         if (showChevron) {
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(2.dp))
             Icon(
                 Icons.Rounded.ChevronRight,
                 contentDescription = null,
-                tint = tokens.textSecondary.copy(alpha = if (enabled) .72f else .32f),
+                tint = tokens.textSecondary.copy(alpha = if (enabled) .66f else .28f),
+                modifier = Modifier.size(20.dp),
             )
         }
     }
@@ -281,7 +324,7 @@ fun LuoShuSettingRow(
 @Composable
 fun LuoShuDivider(modifier: Modifier = Modifier) {
     val tokens = LocalLuoShuTokens.current
-    Box(modifier.fillMaxWidth().height(1.dp).background(tokens.outline.copy(alpha = .42f)))
+    Box(modifier.fillMaxWidth().height(1.dp).background(tokens.outline.copy(alpha = .28f)))
 }
 
 @Composable
@@ -294,16 +337,16 @@ fun LuoShuMetricTile(
 ) {
     val tokens = LocalLuoShuTokens.current
     Surface(
-        modifier = modifier.defaultMinSize(minHeight = 84.dp),
+        modifier = modifier.defaultMinSize(minHeight = 68.dp),
         shape = RoundedCornerShape(tokens.fieldRadius),
         color = tokens.surfaceAlt,
-        border = androidx.compose.foundation.BorderStroke(1.dp, tokens.outline.copy(alpha = .32f)),
+        border = BorderStroke(1.dp, tokens.outline.copy(alpha = .20f)),
     ) {
-        Column(Modifier.padding(12.dp)) {
+        Column(Modifier.padding(horizontal = 11.dp, vertical = 9.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (icon != null) {
-                    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
+                    Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(5.dp))
                 }
                 Text(title, color = tokens.textSecondary, style = MaterialTheme.typography.bodySmall)
                 if (statusColor != null) {
@@ -311,11 +354,11 @@ fun LuoShuMetricTile(
                     Box(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(statusColor))
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(5.dp))
             Text(
                 text = value,
                 color = tokens.textPrimary,
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -332,16 +375,16 @@ fun LuoShuSideSheet(
 ) {
     val tokens = LocalLuoShuTokens.current
     BoxWithConstraints(modifier.fillMaxSize()) {
-        val sheetWidth = maxWidth * .94f
+        val sheetWidth = maxWidth * .92f
         AnimatedVisibility(
             visible = visible,
-            enter = fadeIn(tween(180)),
-            exit = fadeOut(tween(160)),
+            enter = fadeIn(tween(160)),
+            exit = fadeOut(tween(140)),
         ) {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = .29f))
+                    .background(Color.Black.copy(alpha = .22f))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
@@ -353,23 +396,23 @@ fun LuoShuSideSheet(
             visible = visible,
             modifier = Modifier.align(Alignment.CenterEnd),
             enter = slideInHorizontally(
-                animationSpec = tween(300, easing = LuoShuEnterEasing),
+                animationSpec = tween(280, easing = LuoShuEnterEasing),
                 initialOffsetX = { it },
-            ) + fadeIn(tween(180)),
+            ) + fadeIn(tween(150)),
             exit = slideOutHorizontally(
-                animationSpec = tween(220, easing = LuoShuExitEasing),
+                animationSpec = tween(210, easing = LuoShuExitEasing),
                 targetOffsetX = { it },
-            ) + fadeOut(tween(160)),
+            ) + fadeOut(tween(140)),
         ) {
             val shape = RoundedCornerShape(topStart = tokens.sideSheetRadius, bottomStart = tokens.sideSheetRadius)
             Box(
                 modifier = Modifier
                     .width(sheetWidth)
                     .fillMaxHeight()
-                    .shadow(24.dp, shape, clip = false)
+                    .shadow(12.dp, shape, clip = false)
                     .clip(shape)
                     .background(tokens.pageBackground)
-                    .border(1.dp, tokens.outline.copy(alpha = .52f), shape),
+                    .border(1.dp, tokens.outline.copy(alpha = .34f), shape),
             ) {
                 content()
             }

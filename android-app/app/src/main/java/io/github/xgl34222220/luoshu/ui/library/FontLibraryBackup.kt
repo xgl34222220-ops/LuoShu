@@ -386,22 +386,22 @@ private fun FontLibraryBackupTool(
         onClick = { showDialog = true },
         enabled = enabled,
         modifier = modifier,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = MaterialTheme.colorScheme.tertiaryContainer,
-        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Rounded.Description, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
-                Text("备份与升级检查", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Text("备份与升级检查", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     if (migration.ready) "阻断 0 · 提示 ${migration.warningCount}" else "阻断 ${migration.blockerCount} · 提示 ${migration.warningCount}",
                     fontSize = 9.sp,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = .72f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -418,7 +418,7 @@ private fun FontLibraryBackupTool(
                     tint = if (migration.ready) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
                 )
             },
-            title = { Text("字体库备份与升级检查", fontWeight = FontWeight.Black) },
+            title = { Text("字体库备份与升级检查", fontWeight = FontWeight.SemiBold) },
             text = {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text(
@@ -492,7 +492,7 @@ private fun FontLibraryBackupTool(
                                 "收藏和标签已恢复；组合方案因缺失 Family 未写入"
                             }
                         },
-                    ) { Text("确认恢复", fontWeight = FontWeight.Black) }
+                    ) { Text("确认恢复", fontWeight = FontWeight.SemiBold) }
                 } else {
                     TextButton(onClick = { showDialog = false }) { Text("完成") }
                 }
@@ -527,7 +527,7 @@ private fun MigrationCheckRow(check: FontMigrationCheck) {
             )
             Spacer(Modifier.size(7.dp))
             Column(Modifier.weight(1f)) {
-                Text(check.title, fontSize = 10.sp, fontWeight = FontWeight.Black)
+                Text(check.title, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                 Text(check.detail, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp, lineHeight = 13.sp)
             }
         }

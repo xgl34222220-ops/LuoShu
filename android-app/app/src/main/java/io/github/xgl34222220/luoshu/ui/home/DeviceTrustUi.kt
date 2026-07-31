@@ -168,24 +168,24 @@ internal fun DeviceTrustChip(
     Surface(
         onClick = onClick,
         modifier = modifier,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 18.dp),
+        shape = RoundedCornerShape(16.dp),
         color = presentation.color.copy(alpha = .12f),
         contentColor = presentation.color,
-        shadowElevation = 5.dp,
+        shadowElevation = 0.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (state.loading) {
-                CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(Modifier.size(17.dp), strokeWidth = 2.dp)
             } else {
-                Icon(presentation.icon, contentDescription = null, modifier = Modifier.size(19.dp))
+                Icon(presentation.icon, contentDescription = null, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(8.dp))
             Column {
-                Text(presentation.title, fontSize = 11.sp, fontWeight = FontWeight.Black)
-                Text(presentation.subtitle, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(presentation.title, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(presentation.subtitle, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

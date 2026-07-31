@@ -226,24 +226,24 @@ internal fun FontLibraryManagementButton(
         onClick = onClick,
         enabled = !loading,
         modifier = modifier,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-        shadowElevation = 9.dp,
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        shadowElevation = 0.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (loading) {
-                CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
             } else {
                 Icon(Icons.Rounded.ListAlt, contentDescription = null, modifier = Modifier.size(20.dp))
             }
             Spacer(Modifier.width(8.dp))
             Column {
-                Text("管理字体库", fontSize = 11.sp, fontWeight = FontWeight.Black)
-                Text("收藏 $favoriteCount · 提示 $issueCount", fontSize = 9.sp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .75f))
+                Text("管理字体库", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Text("收藏 $favoriteCount · 提示 $issueCount", fontSize = 9.sp, color = MaterialTheme.colorScheme.primary.copy(alpha = .75f))
             }
         }
     }
@@ -284,7 +284,7 @@ internal fun FontLibraryManagementDialog(
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("Family 与收藏管理", fontSize = 19.sp, fontWeight = FontWeight.Black)
+                        Text("Family 与收藏管理", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
                         Text(
                             "${fonts.size} 个 Family · ${collections.favoriteIds.size} 个收藏 · ${conflicts.issueIds.size} 个提示",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -315,7 +315,7 @@ internal fun FontLibraryManagementDialog(
                     sections.forEach { section ->
                         item(key = "header-${section.bucket.name}") {
                             Column(Modifier.padding(top = 5.dp, bottom = 2.dp)) {
-                                Text(section.bucket.label, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                                Text(section.bucket.label, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                                 Text(section.bucket.description, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
                             }
                         }
@@ -367,7 +367,7 @@ private fun ManagementBatchPanel(
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("批量整理", fontSize = 13.sp, fontWeight = FontWeight.Black)
+                    Text("批量整理", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     Text(
                         if (selectedIds.isEmpty()) "选择 Family 后可批量收藏或添加标签" else "已选择 ${selectedIds.size} 个 Family",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -465,7 +465,7 @@ private fun ManagementFamilyRow(
                     color = MaterialTheme.colorScheme.primaryContainer,
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("Aa", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+                        Text("Aa", color = MaterialTheme.colorScheme.surfaceContainerLow, fontWeight = FontWeight.SemiBold)
                     }
                 }
                 Spacer(Modifier.width(10.dp))
@@ -475,7 +475,7 @@ private fun ManagementFamilyRow(
                             font.name,
                             modifier = Modifier.weight(1f),
                             fontSize = 14.sp,
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -555,7 +555,7 @@ private fun ManagementStatusPill(
                 Icon(Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(13.dp))
                 Spacer(Modifier.width(4.dp))
             }
-            Text(text, fontSize = 9.sp, fontWeight = FontWeight.Black, maxLines = 1)
+            Text(text, fontSize = 9.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
     }
 }

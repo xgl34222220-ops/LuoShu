@@ -189,22 +189,22 @@ internal fun FontArchiveExportTool(
         },
         enabled = enabled && validFonts.isNotEmpty(),
         modifier = modifier,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Rounded.FileDownload, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
-                Text("字体文件归档", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Text("字体文件归档", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     "真实文件 · SHA-256 清单 · 最多 32 个 Family",
                     fontSize = 9.sp,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .72f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -218,7 +218,7 @@ internal fun FontArchiveExportTool(
                 if (busy) CircularProgressIndicator(Modifier.size(26.dp), strokeWidth = 2.dp)
                 else Icon(Icons.Rounded.FileDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             },
-            title = { Text("导出字体文件归档", fontWeight = FontWeight.Black) },
+            title = { Text("导出字体文件归档", fontWeight = FontWeight.SemiBold) },
             text = {
                 Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Text(
@@ -316,7 +316,7 @@ internal fun FontArchiveExportTool(
                 TextButton(
                     onClick = { exportLauncher.launch(fontArchiveFileName()) },
                     enabled = !busy && selectedIds.isNotEmpty(),
-                ) { Text(if (busy) "正在归档" else "导出 ZIP", fontWeight = FontWeight.Black) }
+                ) { Text(if (busy) "正在归档" else "导出 ZIP", fontWeight = FontWeight.SemiBold) }
             },
             dismissButton = {
                 TextButton(onClick = { showDialog = false }, enabled = !busy) { Text("关闭") }

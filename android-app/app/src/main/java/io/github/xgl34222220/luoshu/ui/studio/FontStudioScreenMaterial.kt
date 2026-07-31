@@ -60,8 +60,8 @@ internal fun FontStudioScreenMaterial(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, top = 2.dp, end = 12.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 0.dp, end = 14.dp, bottom = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item { MaterialStudioHeader(state.loading, actions.refresh, topAction) }
         item { MaterialCompositionOverview(state) }
@@ -94,7 +94,6 @@ private fun MaterialStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAct
         subtitle = "中文、英文、数字与真实设计轴",
         actions = {
             topAction()
-            Spacer(Modifier.width(6.dp))
             LuoShuIconButton(
                 icon = Icons.Rounded.Refresh,
                 contentDescription = "刷新组合配置",
@@ -112,11 +111,11 @@ private fun MaterialStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAct
 @Composable
 private fun MaterialCompositionOverview(state: FontStudioUiState) {
     Card(
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .84f)),
     ) {
-        Column(Modifier.padding(18.dp)) {
-            Text("组合结构", fontSize = 18.sp, fontWeight = FontWeight.Black)
+        Column(Modifier.padding(14.dp)) {
+            Text("组合结构", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Text("三个槽位只共享最终输出，不共享预览缓存", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
             Spacer(Modifier.height(15.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -160,8 +159,8 @@ private fun MaterialSlotSummary(slot: StudioSlotUiState, modifier: Modifier) {
                         MixSlot.Digit -> "123"
                     },
                     color = MaterialTheme.colorScheme.primary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Black,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
             Spacer(Modifier.height(6.dp))
@@ -183,17 +182,17 @@ private fun MaterialStudioTask(state: FontStudioUiState) {
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
     ) {
-        Column(Modifier.padding(18.dp)) {
+        Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(if (state.busy) "复合字体任务执行中" else "复合字体已生成", fontWeight = FontWeight.Black)
+                    Text(if (state.busy) "复合字体任务执行中" else "复合字体已生成", fontWeight = FontWeight.SemiBold)
                     Text(state.message, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .74f), fontSize = 11.sp)
                 }
-                Text("${state.progress}%", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Black)
+                Text("${state.progress}%", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
             }
-            Spacer(Modifier.height(13.dp))
+            Spacer(Modifier.height(9.dp))
             LinearProgressIndicator(
                 progress = { state.progress.coerceIn(0, 100) / 100f },
                 modifier = Modifier.fillMaxWidth().height(7.dp),
@@ -213,7 +212,7 @@ private fun MaterialSlotCard(
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .84f)),
     ) {
-        Column(Modifier.padding(18.dp)) {
+        Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(50.dp),
@@ -243,14 +242,14 @@ private fun MaterialSlotCard(
                                     MixSlot.Digit -> "123"
                                 },
                                 color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Black,
+                                fontWeight = FontWeight.SemiBold,
                             )
                         }
                     }
                 }
                 Spacer(Modifier.width(13.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(slotState.title, fontSize = 19.sp, fontWeight = FontWeight.Black)
+                    Text(slotState.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     Text(slotState.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                 }
                 if (font != null) {
@@ -258,7 +257,7 @@ private fun MaterialSlotCard(
                 }
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(9.dp))
             OutlinedButton(
                 onClick = { actions.pickSlot(slotState.slot) },
                 enabled = !busy,
@@ -276,7 +275,7 @@ private fun MaterialSlotCard(
             }
 
             if (font != null) {
-                Spacer(Modifier.height(13.dp))
+                Spacer(Modifier.height(9.dp))
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.large,
@@ -286,15 +285,15 @@ private fun MaterialSlotCard(
                         font = font,
                         text = slotState.sample,
                         axes = slotState.axes,
-                        modifier = Modifier.fillMaxWidth().height(82.dp).padding(horizontal = 15.dp),
+                        modifier = Modifier.fillMaxWidth().height(60.dp).padding(horizontal = 14.dp),
                         textSizeSp = 25f,
                         gravity = Gravity.CENTER,
                         maxLines = 1,
                     )
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(9.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(9.dp))
                 MaterialStudioAxisControls(
                     font = font,
                     weight = slotState.weight,
@@ -318,10 +317,10 @@ private fun MaterialCoverageCard(state: FontStudioUiState, actions: FontStudioAc
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .84f)),
     ) {
-        Column(Modifier.padding(18.dp)) {
+        Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("字形覆盖诊断", fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    Text("字形覆盖诊断", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     Text(cjk?.font?.name ?: "请先选择中文基底", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                 }
                 OutlinedButton(
@@ -333,7 +332,7 @@ private fun MaterialCoverageCard(state: FontStudioUiState, actions: FontStudioAc
                 }
             }
             if (metrics != null) {
-                Spacer(Modifier.height(13.dp))
+                Spacer(Modifier.height(9.dp))
                 MaterialCoverageRow("中文", metrics.cjkRatio)
                 MaterialCoverageRow("英文", metrics.latinRatio)
                 MaterialCoverageRow("数字", metrics.digitRatio)
@@ -359,7 +358,7 @@ private fun MaterialCoverageRow(label: String, ratio: Float) {
             modifier = Modifier.weight(1f).height(7.dp),
         )
         Spacer(Modifier.width(10.dp))
-        Text("${(ratio * 100).roundToInt()}%", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Black)
+        Text("${(ratio * 100).roundToInt()}%", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -387,7 +386,7 @@ private fun MaterialFinalAction(state: FontStudioUiState, actions: FontStudioAct
                 }
                 Spacer(Modifier.width(13.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(if (direct != null) "同一字体，无需复合" else "生成完整复合字体", fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    Text(if (direct != null) "同一字体，无需复合" else "生成完整复合字体", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                     Text(
                         if (direct != null) "三个槽位均为标准 Regular 400，将直接应用原始字体。"
                         else "当前真实字重与全部设计轴会写入最终字体。",
@@ -400,12 +399,12 @@ private fun MaterialFinalAction(state: FontStudioUiState, actions: FontStudioAct
             Button(
                 onClick = { if (direct != null) actions.applyDirect(direct) else actions.startMix() },
                 enabled = !state.busy && !state.operationBusy && state.hasFonts,
-                modifier = Modifier.fillMaxWidth().height(60.dp),
+                modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = MaterialTheme.shapes.large,
             ) {
                 Icon(if (direct != null) Icons.Rounded.FontDownload else Icons.Rounded.AutoAwesome, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text(if (direct != null) "直接应用此字体" else "生成并应用到系统", fontSize = 16.sp, fontWeight = FontWeight.Black)
+                Text(if (direct != null) "直接应用此字体" else "生成并应用到系统", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
         }
     }
@@ -437,7 +436,7 @@ private fun MaterialStudioPill(text: String, color: Color) {
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             color = color,
             fontSize = 10.sp,
-            fontWeight = FontWeight.Black,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }

@@ -89,13 +89,13 @@ internal fun NativeImportOverlay(
         val tokens = LocalMiuixTokens.current
         Surface(
             modifier = modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(20.dp),
             color = if (style == UiStyle.MIUIX) tokens.cardBackground else MaterialTheme.colorScheme.surfaceContainerLow,
-            shadowElevation = if (style == UiStyle.MIUIX) 4.dp else 2.dp,
+            shadowElevation = 0.dp,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .08f)),
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                modifier = Modifier.fillMaxWidth().padding(6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -154,15 +154,15 @@ private fun ImportActionButton(
     val dark = scheme.background.luminance() < .5f
     val taskVisible = state.busy || state.paused
     val targetWidth = when {
-        !expanded -> 54.dp
-        taskVisible -> 180.dp
-        else -> 148.dp
+        !expanded -> 48.dp
+        taskVisible -> 164.dp
+        else -> 132.dp
     }
     val targetHeight = when {
-        embedded && taskVisible -> 68.dp
-        embedded -> 56.dp
-        taskVisible -> 68.dp
-        else -> 54.dp
+        embedded && taskVisible -> 56.dp
+        embedded -> 48.dp
+        taskVisible -> 56.dp
+        else -> 48.dp
     }
     val width by animateDpAsState(
         targetValue = targetWidth,

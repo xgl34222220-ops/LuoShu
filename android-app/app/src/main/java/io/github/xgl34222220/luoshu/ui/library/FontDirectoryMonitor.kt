@@ -316,19 +316,19 @@ private fun FontDirectoryMonitorButton(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (scanning) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp)
             else Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(20.dp))
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
-                Text("监视字体目录", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                Text("监视字体目录", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     when {
                         !configured -> "选择 SAF 目录"
@@ -337,7 +337,7 @@ private fun FontDirectoryMonitorButton(
                         else -> "目录已连接"
                     },
                     fontSize = 9.sp,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .72f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -372,7 +372,7 @@ private fun FontDirectoryMonitorDialog(
                     Surface(
                         modifier = Modifier.size(46.dp),
                         shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.secondaryContainer,
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                             Icon(Icons.Rounded.Folder, contentDescription = null)
@@ -380,7 +380,7 @@ private fun FontDirectoryMonitorDialog(
                     }
                     Spacer(Modifier.size(11.dp))
                     Column(Modifier.weight(1f)) {
-                        Text("SAF 字体目录监视", fontSize = 19.sp, fontWeight = FontWeight.Black)
+                        Text("SAF 字体目录监视", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
                         Text("进入字体库时扫描，不在后台常驻", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                     }
                     IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, contentDescription = "关闭") }
@@ -394,7 +394,7 @@ private fun FontDirectoryMonitorDialog(
                     Column(Modifier.padding(12.dp)) {
                         Text(
                             if (config.configured) config.label.ifBlank { "已选择目录" } else "尚未选择目录",
-                            fontWeight = FontWeight.Black,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )

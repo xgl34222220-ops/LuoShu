@@ -123,7 +123,7 @@ private fun SettingsOverviewPage(
             start = tokens.pagePadding,
             top = 2.dp,
             end = tokens.pagePadding,
-            bottom = 112.dp,
+            bottom = 88.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(tokens.compactGap),
     ) {
@@ -131,21 +131,6 @@ private fun SettingsOverviewPage(
             LuoShuPageHeader(
                 title = "设置",
                 subtitle = "外观、任务与显示偏好",
-                actions = {
-                    Surface(
-                        modifier = Modifier.size(48.dp),
-                        shape = RoundedCornerShape(tokens.fieldRadius),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            androidx.compose.material3.Icon(
-                                Icons.Rounded.Settings,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                    }
-                },
             )
         }
 
@@ -161,7 +146,7 @@ private fun SettingsOverviewPage(
                         showChevron = true,
                         onClick = onOpenThemeSettings,
                     )
-                    LuoShuDivider(Modifier.padding(start = 64.dp))
+                    LuoShuDivider(Modifier.padding(start = 56.dp))
                     LuoShuSettingRow(
                         icon = Icons.Rounded.Description,
                         title = "任务中心",
@@ -189,7 +174,7 @@ private fun SettingsOverviewPage(
                             )
                         },
                     )
-                    LuoShuDivider(Modifier.padding(start = 64.dp))
+                    LuoShuDivider(Modifier.padding(start = 56.dp))
                     LuoShuSettingRow(
                         icon = Icons.Rounded.ViewCarousel,
                         title = "悬浮玻璃底栏",
@@ -215,11 +200,11 @@ private fun SettingsOverviewPage(
                         description = "Android 无 Hook 全局字体引擎",
                         value = "v${BuildConfig.VERSION_NAME}",
                     )
-                    LuoShuDivider(Modifier.padding(start = 64.dp))
+                    LuoShuDivider(Modifier.padding(start = 56.dp))
                     LuoShuSettingRow(
                         icon = Icons.Rounded.Layers,
                         title = "统一界面系统",
-                        description = "MIUIX × Material 3 × Monet × Glass",
+                        description = "MIUIX · Material 3 · Monet · Glass",
                         value = "V1.1",
                     )
                 }
@@ -241,7 +226,7 @@ private fun ThemeSettingsPage(
             start = tokens.pagePadding,
             top = 2.dp,
             end = tokens.pagePadding,
-            bottom = 112.dp,
+            bottom = 88.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(tokens.compactGap),
     ) {
@@ -292,7 +277,7 @@ private fun ThemeSettingsPage(
                             )
                         },
                     )
-                    LuoShuDivider(Modifier.padding(start = 64.dp))
+                    LuoShuDivider(Modifier.padding(start = 56.dp))
                     Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                         Text("固定强调色", color = tokens.textPrimary, style = MaterialTheme.typography.titleSmall)
                         Text(
@@ -303,7 +288,7 @@ private fun ThemeSettingsPage(
                         Spacer(Modifier.height(10.dp))
                         AccentSelector(settings, actions.setSeedArgb, enabled = !settings.monetEnabled)
                     }
-                    LuoShuDivider(Modifier.padding(start = 64.dp))
+                    LuoShuDivider(Modifier.padding(start = 56.dp))
                     Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
                         Text("色彩风格", color = tokens.textPrimary, style = MaterialTheme.typography.titleSmall)
                         Spacer(Modifier.height(10.dp))
@@ -329,7 +314,7 @@ private fun ThemeSettingsPage(
                         checked = settings.amoledBlack,
                         onCheckedChange = actions.setAmoledBlack,
                     )
-                    LuoShuDivider(Modifier.padding(start = 64.dp))
+                    LuoShuDivider(Modifier.padding(start = 56.dp))
                     ThemeSwitchRow(
                         icon = Icons.Rounded.Style,
                         title = "玻璃效果",
@@ -337,7 +322,7 @@ private fun ThemeSettingsPage(
                         checked = settings.glassEnabled,
                         onCheckedChange = actions.setGlassEnabled,
                     )
-                    LuoShuDivider(Modifier.padding(start = 64.dp))
+                    LuoShuDivider(Modifier.padding(start = 56.dp))
                     ThemeSwitchRow(
                         icon = Icons.Rounded.Animation,
                         title = "背景模糊",
@@ -346,7 +331,7 @@ private fun ThemeSettingsPage(
                         enabled = settings.glassEnabled,
                         onCheckedChange = actions.setBlurEnabled,
                     )
-                    LuoShuDivider(Modifier.padding(start = 64.dp))
+                    LuoShuDivider(Modifier.padding(start = 56.dp))
                     ThemeSwitchRow(
                         icon = Icons.Rounded.PhoneAndroid,
                         title = "悬浮底栏",

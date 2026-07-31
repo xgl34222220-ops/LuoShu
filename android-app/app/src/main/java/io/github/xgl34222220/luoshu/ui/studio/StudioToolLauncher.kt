@@ -52,24 +52,15 @@ internal fun StudioToolLauncher(
         else -> scheme.surfaceVariant
     }
 
-    Surface(
+    io.github.xgl34222220.luoshu.ui.design.LuoShuIconButton(
+        icon = Icons.Rounded.AutoAwesome,
+        contentDescription = "组合工具",
         onClick = { menuVisible = true },
         enabled = enabled,
-        modifier = modifier.size(56.dp),
-        shape = RoundedCornerShape(18.dp),
-        color = background,
-        contentColor = if (enabled) scheme.primary else scheme.onSurfaceVariant,
-        tonalElevation = if (style == UiStyle.MATERIAL) 2.dp else 0.dp,
-        shadowElevation = if (style == UiStyle.MIUIX) 7.dp else 3.dp,
-    ) {
-        androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) {
-            Icon(
-                Icons.Rounded.AutoAwesome,
-                contentDescription = "组合工具",
-                modifier = Modifier.size(23.dp),
-            )
-        }
-    }
+        modifier = modifier,
+        tint = if (enabled) scheme.primary else scheme.onSurfaceVariant,
+        containerColor = background,
+    )
 
     if (menuVisible) {
         AlertDialog(

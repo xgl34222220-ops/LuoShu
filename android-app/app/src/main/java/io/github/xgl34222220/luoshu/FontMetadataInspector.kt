@@ -70,11 +70,11 @@ internal fun FontMetadataInspector(
     Surface(
         onClick = { showPicker = true },
         enabled = viewModel.snapshot.installed && viewModel.fonts.isNotEmpty() && !busy,
-        modifier = modifier.size(if (style == UiStyle.MIUIX) 54.dp else 52.dp),
-        shape = if (style == UiStyle.MIUIX) RoundedCornerShape(19.dp) else CircleShape,
+        modifier = modifier.size(48.dp),
+        shape = RoundedCornerShape(16.dp),
         color = if (style == UiStyle.MIUIX) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surface.copy(alpha = .96f),
         contentColor = MaterialTheme.colorScheme.primary,
-        shadowElevation = if (style == UiStyle.MIUIX) 16.dp else 12.dp,
+        shadowElevation = 0.dp,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .10f)),
     ) {
         Box(contentAlignment = Alignment.Center) {
