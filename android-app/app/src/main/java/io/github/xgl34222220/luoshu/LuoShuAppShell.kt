@@ -2,7 +2,10 @@ package io.github.xgl34222220.luoshu
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -20,23 +23,24 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.ListAlt
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -51,10 +55,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -90,9 +92,6 @@ import io.github.xgl34222220.luoshu.ui.settings.AppearanceSettingsRoute
 import io.github.xgl34222220.luoshu.ui.studio.FontStudioActions
 import io.github.xgl34222220.luoshu.ui.studio.FontStudioRoute
 import io.github.xgl34222220.luoshu.ui.studio.toFontStudioUiState
-import io.github.xgl34222220.luoshu.ui.design.LuoShuSideSheet
-import io.github.xgl34222220.luoshu.ui.design.LuoShuStandardEasing
-import io.github.xgl34222220.luoshu.ui.theme.LocalLuoShuTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTheme
 
@@ -103,12 +102,7 @@ internal enum class AppPage(val label: String, val icon: ImageVector) {
     Settings("设置", Icons.Rounded.Settings),
 }
 
-private val dockPages = listOf(
-    AppPage.Home,
-    AppPage.Library,
-    AppPage.Studio,
-    AppPage.Settings,
-)
+private val dockPages = AppPage.entries.toList()
 
 @Composable
 internal fun LuoShuAppShell(
@@ -118,8 +112,7 @@ internal fun LuoShuAppShell(
 ) {
     val appearance by appearanceViewModel.settings.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(AppPage.Home) }
-    var logsSheetVisible by rememberSaveable { mutableStateOf(false) }
-    var settingsThemeOpen by rememberSaveable { mutableStateOf(false) }
+    var taskPanelOpen by rememberSaveable { mutableStateOf(false) }
     var pendingApply by remember { mutableStateOf<FontItem?>(null) }
     var pendingDelete by remember { mutableStateOf<FontItem?>(null) }
     var restoreDefault by remember { mutableStateOf(false) }
@@ -140,12 +133,11 @@ internal fun LuoShuAppShell(
             AppPage.Settings -> Unit
         }
     }
-    BackHandler(enabled = logsSheetVisible || settingsThemeOpen || page != AppPage.Home) {
-        when {
-            logsSheetVisible -> logsSheetVisible = false
-            settingsThemeOpen -> settingsThemeOpen = false
-            else -> page = AppPage.Home
-        }
+    LaunchedEffect(taskPanelOpen) {
+        if (taskPanelOpen) viewModel.refreshLogs()
+    }
+    BackHandler(enabled = taskPanelOpen || page != AppPage.Home) {
+        if (taskPanelOpen) taskPanelOpen = false else page = AppPage.Home
     }
 
     val homeActions = remember(viewModel, features) {
@@ -156,10 +148,7 @@ internal fun LuoShuAppShell(
             },
             openFontLibrary = { page = AppPage.Library },
             openFontStudio = { page = AppPage.Studio },
-            openLogs = {
-                viewModel.refreshLogs()
-                logsSheetVisible = true
-            },
+            openLogs = { taskPanelOpen = true },
             openSettings = { page = AppPage.Settings },
             restoreDefault = { restoreDefault = true },
             reboot = viewModel::rebootDevice,
@@ -200,10 +189,6 @@ internal fun LuoShuAppShell(
             setGlassEnabled = appearanceViewModel::setGlassEnabled,
             setFloatingDock = appearanceViewModel::setFloatingDock,
             setHighRefreshRate = appearanceViewModel::setHighRefreshRate,
-            openTaskCenter = {
-                viewModel.refreshLogs()
-                logsSheetVisible = true
-            },
         )
     }
     val validFonts = remember(viewModel.fonts) { viewModel.fonts.filter { it.valid } }
@@ -213,15 +198,9 @@ internal fun LuoShuAppShell(
         val blurActive = appearance.blurEnabled && appearance.glassEnabled
         val hazeState = rememberHazeState(blurEnabled = blurActive)
         val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val dockClearance = navigationBottom + if (appearance.floatingDock) 84.dp else 68.dp
-        val underlayOffset by animateDpAsState(
-            targetValue = if (logsSheetVisible) (-12).dp else 0.dp,
-            animationSpec = tween(300, easing = LuoShuStandardEasing),
-            label = "luoshuSideSheetUnderlayOffset",
-        )
+        val dockClearance = navigationBottom + if (appearance.floatingDock) 92.dp else 78.dp
         val contentModifier = Modifier
             .fillMaxSize()
-            .offset(x = underlayOffset)
             .then(if (blurActive) Modifier.hazeSource(state = hazeState) else Modifier)
 
         Box(Modifier.fillMaxSize()) {
@@ -233,28 +212,21 @@ internal fun LuoShuAppShell(
                     contentKey = { it },
                     transitionSpec = {
                         val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
-                        val enterDuration = if (appearance.uiStyle == UiStyle.MIUIX) 250 else 220
-                        val exitDuration = if (appearance.uiStyle == UiStyle.MIUIX) 180 else 160
-                        (fadeIn(tween(enterDuration)) + slideInHorizontally(tween(enterDuration)) { width ->
-                            direction * width / 14
-                        }).togetherWith(
-                            fadeOut(tween(exitDuration)) + slideOutHorizontally(tween(exitDuration)) { width ->
-                                -direction * width / 18
-                            },
-                        )
+                        (fadeIn(tween(220)) + slideInHorizontally(tween(240)) { direction * it / 12 })
+                            .togetherWith(
+                                fadeOut(tween(150)) + slideOutHorizontally(tween(180)) { -direction * it / 16 },
+                            )
                     },
                     label = "luoshuPageTransition",
                 ) { target ->
-                    when (target) {
-                        AppPage.Home -> HomeRoute(
-                            style = appearance.uiStyle,
-                            state = viewModel.snapshot.toHomeUiState(features.systemWeight),
-                            actions = homeActions,
-                        )
-                        AppPage.Library -> Box(
-                            modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
-                        ) {
-                            FontLibraryRoute(
+                    Box(Modifier.fillMaxSize().padding(bottom = dockClearance)) {
+                        when (target) {
+                            AppPage.Home -> HomeRoute(
+                                style = appearance.uiStyle,
+                                state = viewModel.snapshot.toHomeUiState(features.systemWeight),
+                                actions = homeActions,
+                            )
+                            AppPage.Library -> FontLibraryRoute(
                                 style = appearance.uiStyle,
                                 state = viewModel.toFontLibraryUiState(),
                                 actions = libraryActions,
@@ -267,58 +239,88 @@ internal fun LuoShuAppShell(
                                     )
                                 },
                             )
-                        }
-                        AppPage.Studio -> Box(
-                            modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
-                        ) {
-                            FontStudioRoute(
+                            AppPage.Studio -> FontStudioRoute(
                                 style = appearance.uiStyle,
                                 state = viewModel.toFontStudioUiState(features),
                                 actions = studioActions,
                             )
+                            AppPage.Settings -> AppearanceSettingsRoute(
+                                settings = appearance,
+                                actions = appearanceActions,
+                            )
                         }
-                        AppPage.Settings -> AppearanceSettingsRoute(
-                            settings = appearance,
-                            actions = appearanceActions,
-                            showThemeSettings = settingsThemeOpen,
-                            onOpenThemeSettings = { settingsThemeOpen = true },
-                            onCloseThemeSettings = { settingsThemeOpen = false },
-                        )
                     }
                 }
             }
 
-            if (!logsSheetVisible && !settingsThemeOpen) {
-                if (appearance.uiStyle == UiStyle.MATERIAL) {
-                    MaterialAppDock(
-                        current = page,
-                        onSelect = { page = it },
-                        appearance = appearance,
-                        hazeState = hazeState,
-                        modifier = Modifier.align(Alignment.BottomCenter),
-                    )
-                } else {
-                    MiuixAppDock(
-                        current = page,
-                        onSelect = { page = it },
-                        appearance = appearance,
-                        hazeState = hazeState,
-                        modifier = Modifier.align(Alignment.BottomCenter),
-                    )
-                }
+            if (appearance.uiStyle == UiStyle.MATERIAL) {
+                MaterialAppDock(
+                    current = page,
+                    onSelect = { page = it },
+                    appearance = appearance,
+                    hazeState = hazeState,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            } else {
+                MiuixAppDock(
+                    current = page,
+                    onSelect = { page = it },
+                    appearance = appearance,
+                    hazeState = hazeState,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
             }
 
-            LuoShuSideSheet(
-                visible = logsSheetVisible,
-                onDismiss = { logsSheetVisible = false },
-                modifier = Modifier.fillMaxSize(),
+            AnimatedVisibility(
+                visible = taskPanelOpen,
+                enter = fadeIn(tween(180)) + slideInHorizontally(tween(240)) { it / 7 },
+                exit = fadeOut(tween(140)) + slideOutHorizontally(tween(190)) { it / 8 },
             ) {
-                LogsRoute(
-                    style = appearance.uiStyle,
-                    state = viewModel.toLogsUiState(),
-                    actions = logsActions,
-                    onClose = { logsSheetVisible = false },
-                )
+                BoxWithConstraints(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = .34f))
+                        .clickable { taskPanelOpen = false },
+                ) {
+                    val panelShape = RoundedCornerShape(topStart = 34.dp, bottomStart = 34.dp)
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .width(maxWidth * .94f)
+                            .fillMaxHeight()
+                            .clip(panelShape)
+                            .background(MaterialTheme.colorScheme.background)
+                            .clickable { },
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(start = 12.dp, top = 10.dp, end = 12.dp, bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconButton(
+                                onClick = { taskPanelOpen = false },
+                                modifier = Modifier.size(48.dp),
+                            ) {
+                                Icon(Icons.Rounded.ArrowBack, contentDescription = "返回")
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "任务中心",
+                                fontSize = 28.sp,
+                                lineHeight = 32.sp,
+                                fontWeight = FontWeight.Black,
+                            )
+                        }
+                        Box(Modifier.fillMaxSize()) {
+                            LogsRoute(
+                                style = appearance.uiStyle,
+                                state = viewModel.toLogsUiState(),
+                                actions = logsActions,
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -396,50 +398,26 @@ internal fun LuoShuAppShell(
 private fun AppBackdrop(appearance: AppearanceSettings, dark: Boolean) {
     val scheme = MaterialTheme.colorScheme
     val miuix = appearance.uiStyle == UiStyle.MIUIX
-    val unified = LocalLuoShuTokens.current
-    val base = listOf(unified.pageBackground, unified.pageBackground)
+    val base = when {
+        miuix -> listOf(LocalMiuixTokens.current.pageBackground, LocalMiuixTokens.current.pageBackground)
+        dark -> listOf(scheme.background, scheme.surfaceContainerLow, scheme.background)
+        else -> listOf(scheme.background, scheme.surfaceContainerLowest, scheme.background)
+    }
     Box(
         Modifier
             .fillMaxSize()
             .background(Brush.verticalGradient(base))
             .drawBehind {
-                if (miuix) {
-                    // A subtle accent field behind the floating dock gives Haze real pixels to
-                    // sample instead of blurring a perfectly flat page background.
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(
-                                scheme.primary.copy(alpha = if (dark) .13f else .11f),
-                                scheme.secondary.copy(alpha = if (dark) .06f else .05f),
-                                Color.Transparent,
-                            ),
-                            center = Offset(size.width * .52f, size.height * 1.03f),
-                            radius = size.width * .88f,
+                drawRect(
+                    Brush.radialGradient(
+                        listOf(
+                            scheme.primary.copy(alpha = if (dark) .08f else .09f),
+                            Color.Transparent,
                         ),
-                    )
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(scheme.primary.copy(alpha = if (dark) .055f else .045f), Color.Transparent),
-                            center = Offset(size.width * .92f, size.height * .08f),
-                            radius = size.width * .58f,
-                        ),
-                    )
-                } else {
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(scheme.secondary.copy(alpha = if (dark) .13f else .20f), Color.Transparent),
-                            center = Offset(size.width * .9f, size.height * .06f),
-                            radius = size.width * .72f,
-                        ),
-                    )
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(scheme.primary.copy(alpha = if (dark) .10f else .16f), Color.Transparent),
-                            center = Offset(size.width * .02f, size.height * .54f),
-                            radius = size.width * .82f,
-                        ),
-                    )
-                }
+                        center = Offset(size.width * .58f, size.height * .94f),
+                        radius = size.width * .92f,
+                    ),
+                )
             },
     )
 }
@@ -453,43 +431,13 @@ private fun MaterialAppDock(
     hazeState: HazeState,
     modifier: Modifier = Modifier,
 ) {
-    val scheme = MaterialTheme.colorScheme
-    val dark = scheme.background.luminance() < .5f
-    val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-    val floating = appearance.floatingDock
-    val shape = if (floating) RoundedCornerShape(30.dp) else RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)
-    val activeHaze = appearance.blurEnabled && appearance.glassEnabled
-    val hazeModifier = if (activeHaze) {
-        Modifier.hazeEffect(state = hazeState, style = HazeMaterials.ultraThin()) {
-            blurRadius = 26.dp
-            noiseFactor = .04f
-        }
-    } else Modifier
-
-    AppDockLayout(
-        pages = dockPages,
+    SharedVideoDock(
         current = current,
         onSelect = onSelect,
-        itemHeight = 58.dp,
-        modifier = modifier
-            .then(if (floating) Modifier.padding(horizontal = 16.dp).padding(bottom = bottomInset + 10.dp) else Modifier)
-            .fillMaxWidth()
-            .shadow(if (floating) 14.dp else 6.dp, shape, clip = false)
-            .clip(shape)
-            .then(hazeModifier)
-            .background(
-                when {
-                    activeHaze && dark -> scheme.surface.copy(alpha = .34f)
-                    activeHaze -> Color.White.copy(alpha = .28f)
-                    else -> scheme.surface.copy(alpha = .98f)
-                },
-            )
-            .border(1.dp, if (dark) Color.White.copy(alpha = .12f) else Color.White.copy(alpha = .72f), shape)
-            .padding(start = 6.dp, top = 6.dp, end = 6.dp, bottom = if (floating) 6.dp else bottomInset + 6.dp),
-        indicatorColor = scheme.primaryContainer.copy(alpha = .64f),
-        selectedColor = scheme.primary,
-        unselectedColor = scheme.onSurfaceVariant,
-        label = "luoshuMaterialDockIndicator",
+        appearance = appearance,
+        hazeState = hazeState,
+        modifier = modifier,
+        miuix = false,
     )
 }
 
@@ -502,100 +450,79 @@ private fun MiuixAppDock(
     hazeState: HazeState,
     modifier: Modifier = Modifier,
 ) {
+    SharedVideoDock(
+        current = current,
+        onSelect = onSelect,
+        appearance = appearance,
+        hazeState = hazeState,
+        modifier = modifier,
+        miuix = true,
+    )
+}
+
+@OptIn(ExperimentalHazeMaterialsApi::class)
+@Composable
+private fun SharedVideoDock(
+    current: AppPage,
+    onSelect: (AppPage) -> Unit,
+    appearance: AppearanceSettings,
+    hazeState: HazeState,
+    modifier: Modifier,
+    miuix: Boolean,
+) {
     val scheme = MaterialTheme.colorScheme
-    val tokens = LocalMiuixTokens.current
     val dark = scheme.background.luminance() < .5f
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val floating = appearance.floatingDock
-    val shape = if (floating) RoundedCornerShape(29.dp) else RoundedCornerShape(topStart = 29.dp, topEnd = 29.dp)
     val activeGlass = appearance.glassEnabled
     val activeHaze = activeGlass && appearance.blurEnabled
+    val shape = if (floating) RoundedCornerShape(31.dp) else RoundedCornerShape(topStart = 31.dp, topEnd = 31.dp)
     val hazeModifier = if (activeHaze) {
         Modifier.hazeEffect(state = hazeState, style = HazeMaterials.ultraThin()) {
-            blurRadius = 36.dp
-            noiseFactor = .06f
+            blurRadius = if (miuix) 34.dp else 28.dp
+            noiseFactor = .04f
         }
     } else Modifier
-    val glassBrush = when {
-        activeGlass && dark -> Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = .16f),
-                tokens.elevatedCardBackground.copy(alpha = .22f),
-                scheme.primary.copy(alpha = .10f),
-            ),
-        )
-        activeGlass -> Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = .72f),
-                Color.White.copy(alpha = .30f),
-                scheme.primary.copy(alpha = .10f),
-            ),
-        )
-        else -> Brush.verticalGradient(
-            listOf(tokens.elevatedCardBackground.copy(alpha = .98f), tokens.elevatedCardBackground.copy(alpha = .98f)),
-        )
-    }
 
     AppDockLayout(
         pages = dockPages,
         current = current,
         onSelect = onSelect,
-        itemHeight = 56.dp,
+        itemHeight = 62.dp,
         modifier = modifier
-            .then(if (floating) Modifier.padding(horizontal = 14.dp).padding(bottom = bottomInset + 8.dp) else Modifier)
+            .then(
+                if (floating) {
+                    Modifier.padding(horizontal = 18.dp).padding(bottom = bottomInset + 10.dp)
+                } else {
+                    Modifier
+                },
+            )
             .fillMaxWidth()
-            .shadow(if (floating) if (activeGlass) 20.dp else 12.dp else 5.dp, shape, clip = false)
+            .shadow(if (floating) 12.dp else 5.dp, shape, clip = false)
             .clip(shape)
             .then(hazeModifier)
-            .background(glassBrush)
-            .drawBehind {
-                if (activeGlass) {
-                    val radius = 29.dp.toPx()
-                    drawRoundRect(
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = if (dark) .34f else .90f),
-                                Color.Transparent,
-                                scheme.primary.copy(alpha = if (dark) .16f else .13f),
-                            ),
-                            start = Offset.Zero,
-                            end = Offset(size.width, size.height),
-                        ),
-                        cornerRadius = CornerRadius(radius, radius),
-                        style = Stroke(width = 1.2.dp.toPx()),
-                    )
-                    drawLine(
-                        color = Color.White.copy(alpha = if (dark) .24f else .68f),
-                        start = Offset(radius * .78f, 1.4.dp.toPx()),
-                        end = Offset(size.width - radius * .78f, 1.4.dp.toPx()),
-                        strokeWidth = .9.dp.toPx(),
-                    )
-                }
-            }
+            .background(
+                when {
+                    activeGlass && dark -> scheme.surface.copy(alpha = .56f)
+                    activeGlass -> Color.White.copy(alpha = .66f)
+                    else -> scheme.surface.copy(alpha = .98f)
+                },
+            )
             .border(
-                if (activeGlass) .7.dp else 1.dp,
-                if (activeGlass) {
-                    if (dark) Color.White.copy(alpha = .18f) else Color.White.copy(alpha = .76f)
-                } else if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .58f),
+                1.dp,
+                if (dark) Color.White.copy(alpha = .14f) else Color.White.copy(alpha = .82f),
                 shape,
             )
-            .padding(start = 5.dp, top = 5.dp, end = 5.dp, bottom = if (floating) 5.dp else bottomInset + 5.dp),
-        indicatorColor = scheme.primary.copy(
-            alpha = if (activeGlass) {
-                if (dark) .18f else .12f
-            } else {
-                if (dark) .20f else .12f
-            },
-        ),
-        indicatorBorderColor = if (activeGlass) {
-            scheme.primary.copy(alpha = if (dark) .30f else .20f)
-        } else {
-            Color.Transparent
-        },
-        indicatorShadow = 0.dp,
+            .padding(
+                start = 5.dp,
+                top = 5.dp,
+                end = 5.dp,
+                bottom = if (floating) 5.dp else bottomInset + 5.dp,
+            ),
+        indicatorColor = scheme.primary.copy(alpha = if (dark) .22f else .11f),
         selectedColor = scheme.primary,
-        unselectedColor = scheme.onSurfaceVariant.copy(alpha = .82f),
-        label = "luoshuMiuixDockIndicator",
+        unselectedColor = scheme.onSurface.copy(alpha = .86f),
+        label = if (miuix) "luoshuMiuixDockIndicator" else "luoshuMaterialDockIndicator",
     )
 }
 
@@ -607,8 +534,6 @@ private fun AppDockLayout(
     itemHeight: androidx.compose.ui.unit.Dp,
     modifier: Modifier,
     indicatorColor: Color,
-    indicatorBorderColor: Color = Color.Transparent,
-    indicatorShadow: androidx.compose.ui.unit.Dp = 0.dp,
     selectedColor: Color,
     unselectedColor: Color,
     label: String,
@@ -618,18 +543,16 @@ private fun AppDockLayout(
         val targetIndex = pages.indexOf(current).coerceAtLeast(0)
         val indicatorX by animateDpAsState(
             targetValue = itemWidth * targetIndex.toFloat(),
-            animationSpec = tween(240, easing = LuoShuStandardEasing),
+            animationSpec = spring(dampingRatio = .78f, stiffness = Spring.StiffnessMediumLow),
             label = label,
         )
         Box(
             modifier = Modifier
-                .offset(x = indicatorX + 5.dp)
-                .width(itemWidth - 10.dp)
+                .offset(x = indicatorX + 3.dp)
+                .width(itemWidth - 6.dp)
                 .height(itemHeight)
-                .shadow(indicatorShadow, RoundedCornerShape(20.dp), clip = false)
-                .clip(RoundedCornerShape(20.dp))
-                .background(indicatorColor)
-                .border(1.dp, indicatorBorderColor, RoundedCornerShape(20.dp)),
+                .clip(RoundedCornerShape(25.dp))
+                .background(indicatorColor),
         )
         Row(Modifier.fillMaxWidth()) {
             pages.forEach { page ->
@@ -638,7 +561,7 @@ private fun AppDockLayout(
                     modifier = Modifier
                         .width(itemWidth)
                         .height(itemHeight)
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(25.dp))
                         .clickable { onSelect(page) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
@@ -646,7 +569,7 @@ private fun AppDockLayout(
                     Icon(
                         page.icon,
                         contentDescription = page.label,
-                        modifier = Modifier.size(if (selected) 22.dp else 20.dp),
+                        modifier = Modifier.size(23.dp),
                         tint = if (selected) selectedColor else unselectedColor,
                     )
                     Spacer(Modifier.height(2.dp))
