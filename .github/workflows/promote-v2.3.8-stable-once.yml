@@ -1,0 +1,64 @@
+name: Promote v2.3.8 to stable once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/promote-v2.3.8-stable-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Promote GitHub release and stable channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_id="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v2.3.8" --jq '.id')"
+          test -n "$release_id"
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          notes_path = Path('RELEASE_NOTES_v2.3.8.md')
+          notes = notes_path.read_text(encoding='utf-8')
+          notes = notes.replace('<!-- prerelease -->\n', '', 1)
+          notes = notes.replace('# 洛书 v2.3.8 紧急修复版', '# 洛书 v2.3.8 正式版')
+          notes = notes.replace('发布类型：紧急预发行版', '发布类型：正式版')
+          notes_path.write_text(notes, encoding='utf-8')
+
+          stable = Path('update-prerelease.json').read_text(encoding='utf-8')
+          Path('update.json').write_text(stable, encoding='utf-8')
+
+          version_notes_path = Path('config/version_notes.conf')
+          version_notes = version_notes_path.read_text(encoding='utf-8')
+          version_notes = version_notes.replace('summary=紧急预发行：', 'summary=正式版：')
+          version_notes = version_notes.replace('v2.3.8 紧急预发行完整回退', 'v2.3.8 正式版完整回退')
+          version_notes = version_notes.replace('该版本先作为预发行供真实设备止血验证；', '该版本已提升为正式版；')
+          version_notes_path.write_text(version_notes, encoding='utf-8')
+          PY
+
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            -f name='洛书 v2.3.8' \
+            -F prerelease=false \
+            -F draft=false \
+            --raw-field body="$(cat RELEASE_NOTES_v2.3.8.md)" >/dev/null
+
+          rm -f .github/workflows/promote-v2.3.8-stable-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add RELEASE_NOTES_v2.3.8.md update.json config/version_notes.conf \
+            .github/workflows/promote-v2.3.8-stable-once.yml
+          git commit -m 'release: promote LuoShu v2.3.8 to stable [skip ci]'
+          git push origin HEAD:main
