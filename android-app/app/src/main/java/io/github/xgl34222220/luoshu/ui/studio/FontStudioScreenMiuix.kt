@@ -51,8 +51,6 @@ import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
-import io.github.xgl34222220.luoshu.ui.design.LuoShuIconButton
-import io.github.xgl34222220.luoshu.ui.design.LuoShuPageHeader
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import kotlin.math.roundToInt
 
@@ -64,7 +62,7 @@ internal fun FontStudioScreenMiuix(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, top = 2.dp, end = 12.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item { MiuixStudioHeader(state.loading, actions.refresh, topAction) }
@@ -94,32 +92,49 @@ internal fun FontStudioScreenMiuix(
 @Composable
 private fun MiuixStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAction: @Composable () -> Unit) {
     val tokens = LocalMiuixTokens.current
-    LuoShuPageHeader(
-        title = "字体组合",
-        subtitle = "中文、英文、数字与真实设计轴",
-        actions = {
-            topAction()
-            Spacer(Modifier.width(6.dp))
-            LuoShuIconButton(
-                icon = Icons.Rounded.Refresh,
-                contentDescription = "刷新组合配置",
-                onClick = onRefresh,
-                enabled = !loading,
-                containerColor = tokens.elevatedCardBackground,
-                content = if (loading) {
-                    { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) }
-                } else null,
+    Row(
+        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                "FONT MIX",
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 2.4.sp,
             )
-        },
-    )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                "字体组合",
+                color = tokens.textPrimary,
+                fontSize = 42.sp,
+                lineHeight = 47.sp,
+                fontWeight = FontWeight.Black,
+            )
+            Text("中文、英文、数字与真实设计轴", color = tokens.textSecondary, fontSize = 12.sp)
+        }
+        topAction()
+        Spacer(Modifier.width(10.dp))
+        Card(
+            shape = RoundedCornerShape(18.dp),
+            colors = CardDefaults.cardColors(containerColor = tokens.elevatedCardBackground),
+            elevation = CardDefaults.cardElevation(defaultElevation = 7.dp),
+        ) {
+            IconButton(onClick = onRefresh, enabled = !loading, modifier = Modifier.size(56.dp)) {
+                if (loading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Rounded.Refresh, contentDescription = "刷新组合配置")
+            }
+        }
+    }
 }
 
 @Composable
 private fun MiuixCompositionMap(state: FontStudioUiState) {
     val tokens = LocalMiuixTokens.current
-    val shape = RoundedCornerShape(22.dp)
+    val shape = RoundedCornerShape(36.dp)
     Card(
-        modifier = Modifier.fillMaxWidth().shadow(2.dp, shape, clip = false),
+        modifier = Modifier.fillMaxWidth().shadow(9.dp, shape, clip = false),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
     ) {
