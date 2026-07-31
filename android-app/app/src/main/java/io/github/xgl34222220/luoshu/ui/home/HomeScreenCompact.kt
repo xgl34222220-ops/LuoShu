@@ -309,6 +309,15 @@ private fun StatusAction(
     }
 }
 
+private data class HomeNextStep(
+    val title: String,
+    val description: String,
+    val actionLabel: String,
+    val icon: ImageVector,
+    val onClick: () -> Unit,
+    val enabled: Boolean = true,
+)
+
 @Composable
 private fun NextStepCard(next: HomeNextStep) {
     val tokens = LocalLuoShuTokens.current
