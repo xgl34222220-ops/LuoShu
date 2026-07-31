@@ -44,7 +44,7 @@ fun HomeRoute(
         }
     }
 
-    HomeScreenCompact(
+    HomeScreenVideoExact(
         style = style,
         state = state,
         actions = actions,
