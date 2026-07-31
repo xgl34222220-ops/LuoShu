@@ -9,6 +9,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalResources
@@ -24,13 +25,16 @@ import io.github.xgl34222220.luoshu.ui.appearance.KolorStyle
 import io.github.xgl34222220.luoshu.ui.appearance.LocalAppearanceSettings
 import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.ThemeController
+import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
 
 /**
- * Unified visual tokens shared by every LuoShu business screen.
+ * Semantic tokens shared by LuoShu business features.
  *
- * Business composables should consume these semantic values instead of inventing page-local
- * colors, spacing or corner radii. This keeps the Miuix and Material 3 skins on one information
- * architecture while still allowing their controls to look native to each style.
+ * The two visual engines render their own native components. These tokens only carry business
+ * colors and spacing so state/data code does not need to know which UI library is active.
  */
 @Immutable
 data class LuoShuTokens(
@@ -151,12 +155,12 @@ private fun LuoShuMaterialTheme(settings: AppearanceSettings, content: @Composab
             pageBackground = when {
                 pureBlack -> Color.Black
                 dark -> Color(0xFF11131A)
-                else -> Color(0xFFECEBFA)
+                else -> scheme.background
             },
             surface = when {
                 pureBlack -> Color(0xFF0C0C0D)
                 dark -> Color(0xFF1B1E28)
-                else -> scheme.surfaceContainerLowest.copy(alpha = .98f)
+                else -> scheme.surfaceContainerLowest
             },
             surfaceAlt = when {
                 pureBlack -> Color(0xFF171719)
@@ -183,8 +187,26 @@ private fun LuoShuMaterialTheme(settings: AppearanceSettings, content: @Composab
 private fun LuoShuMiuixTheme(settings: AppearanceSettings, content: @Composable () -> Unit) {
     val dark = resolveDark(settings.themeMode)
     val pureBlack = dark && settings.amoledBlack
+    val seed = resolveSeedColor(settings)
+    val colorMode = when (settings.themeMode) {
+        ThemeMode.SYSTEM -> ColorSchemeMode.MonetSystem
+        ThemeMode.LIGHT -> ColorSchemeMode.MonetLight
+        ThemeMode.DARK -> ColorSchemeMode.MonetDark
+    }
+    val controller = remember(colorMode, seed, settings.kolorStyle, dark) {
+        ThemeController(
+            colorSchemeMode = colorMode,
+            keyColor = seed,
+            paletteStyle = settings.kolorStyle.toMiuixPaletteStyle(),
+            isDark = dark,
+        )
+    }
+
+    // Temporary compatibility provider for legacy screens still being migrated. New MIUIX screens
+    // consume only Miuix components and MiuixTheme values; the bridge is removed after all routes
+    // have their dedicated MIUIX implementation.
     DynamicMaterialTheme(
-        seedColor = resolveSeedColor(settings),
+        seedColor = seed,
         useDarkTheme = dark,
         withAmoled = pureBlack,
         style = settings.kolorStyle.toPaletteStyle(),
@@ -192,61 +214,62 @@ private fun LuoShuMiuixTheme(settings: AppearanceSettings, content: @Composable 
         typography = UnifiedTypography,
         animate = true,
     ) {
-        val scheme = MaterialTheme.colorScheme
-        val page = when {
-            pureBlack -> Color.Black
-            dark -> Color(0xFF11131A)
-            else -> Color(0xFFECEBFA)
+        MiuixTheme(controller = controller) {
+            val page = when {
+                pureBlack -> Color.Black
+                dark -> Color(0xFF11131A)
+                else -> Color(0xFFF0F0FC)
+            }
+            val surface = when {
+                pureBlack -> Color(0xFF0C0C0D)
+                dark -> Color(0xFF1B1E28)
+                else -> Color(0xFFF9F8FE)
+            }
+            val surfaceAlt = when {
+                pureBlack -> Color(0xFF171719)
+                dark -> Color(0xFF252937)
+                else -> Color(0xFFF4F3FA)
+            }
+            val elevated = when {
+                pureBlack -> Color(0xFF171719)
+                dark -> Color(0xFF222632)
+                else -> Color.White
+            }
+            val primaryText = when {
+                pureBlack -> Color(0xFFF4F4F5)
+                dark -> Color(0xFFF2F4F8)
+                else -> Color(0xFF171923)
+            }
+            val secondaryText = when {
+                pureBlack -> Color(0xFFB6B6BC)
+                dark -> Color(0xFFB9BECA)
+                else -> Color(0xFF666B7A)
+            }
+            val miuixTokens = MiuixTokens(
+                pageBackground = page,
+                cardBackground = surface,
+                elevatedCardBackground = elevated,
+                textPrimary = primaryText,
+                textSecondary = secondaryText,
+            )
+            val unifiedTokens = LuoShuTokens(
+                pageBackground = page,
+                surface = surface,
+                surfaceAlt = surfaceAlt,
+                surfaceElevated = elevated,
+                textPrimary = primaryText,
+                textSecondary = secondaryText,
+                outline = Color.Transparent,
+                success = Color(0xFF0AA45B),
+                warning = Color(0xFFB87300),
+                danger = Color(0xFFD83A3A),
+            )
+            CompositionLocalProvider(
+                LocalMiuixTokens provides miuixTokens,
+                LocalLuoShuTokens provides unifiedTokens,
+                content = content,
+            )
         }
-        val surface = when {
-            pureBlack -> Color(0xFF0C0C0D)
-            dark -> Color(0xFF1B1E28)
-            else -> Color(0xFFF8F7FD)
-        }
-        val surfaceAlt = when {
-            pureBlack -> Color(0xFF171719)
-            dark -> Color(0xFF252937)
-            else -> Color(0xFFF2F0FA)
-        }
-        val elevated = when {
-            pureBlack -> Color(0xFF171719)
-            dark -> scheme.surfaceContainerHigh
-            else -> Color.White
-        }
-        val primaryText = when {
-            pureBlack -> Color(0xFFF4F4F5)
-            dark -> Color(0xFFF2F4F8)
-            else -> Color(0xFF171923)
-        }
-        val secondaryText = when {
-            pureBlack -> Color(0xFFB6B6BC)
-            dark -> Color(0xFFB9BECA)
-            else -> Color(0xFF666B7A)
-        }
-        val miuixTokens = MiuixTokens(
-            pageBackground = page,
-            cardBackground = surface,
-            elevatedCardBackground = elevated,
-            textPrimary = primaryText,
-            textSecondary = secondaryText,
-        )
-        val unifiedTokens = LuoShuTokens(
-            pageBackground = page,
-            surface = surface,
-            surfaceAlt = surfaceAlt,
-            surfaceElevated = elevated,
-            textPrimary = primaryText,
-            textSecondary = secondaryText,
-            outline = if (dark) Color.White.copy(alpha = .10f) else Color(0x1F171923),
-            success = Color(0xFF0AA45B),
-            warning = Color(0xFFB87300),
-            danger = Color(0xFFD83A3A),
-        )
-        CompositionLocalProvider(
-            LocalMiuixTokens provides miuixTokens,
-            LocalLuoShuTokens provides unifiedTokens,
-            content = content,
-        )
     }
 }
 
@@ -271,4 +294,10 @@ private fun KolorStyle.toPaletteStyle(): PaletteStyle = when (this) {
     KolorStyle.SOFT -> PaletteStyle.TonalSpot
     KolorStyle.VIBRANT -> PaletteStyle.Vibrant
     KolorStyle.NEUTRAL -> PaletteStyle.Neutral
+}
+
+private fun KolorStyle.toMiuixPaletteStyle(): ThemePaletteStyle = when (this) {
+    KolorStyle.SOFT -> ThemePaletteStyle.TonalSpot
+    KolorStyle.VIBRANT -> ThemePaletteStyle.Vibrant
+    KolorStyle.NEUTRAL -> ThemePaletteStyle.Neutral
 }
