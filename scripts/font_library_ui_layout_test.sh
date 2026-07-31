@@ -39,19 +39,22 @@ grep -q 'NativeFontPreview' "$COMPACT"
 grep -q 'clickable(onClick = onDetails)' "$COMPACT"
 ! grep -q 'height(102.dp)' "$COMPACT"
 
-# Home is measured from the uploaded reference video: 360 dp viewport, 12 dp
-# margins, 8 dp rhythm, 18 dp cards, 42 dp segmented actions and 104 dp dock
-# clearance. Giant page headers and standalone square icon buttons are forbidden.
+# Home second pass is locked to the first real-device screenshot. The first pass
+# was still oversized on the user's active font, so the card radius, rhythm,
+# status orb and segmented bar are reduced while the dock clearance increases.
 grep -q 'private val PagePadding = 12.dp' "$HOME_COMPACT"
-grep -q 'private val CardRadius = 18.dp' "$HOME_COMPACT"
-grep -q 'private val SectionGap = 8.dp' "$HOME_COMPACT"
-grep -q 'bottom = 104.dp' "$HOME_COMPACT"
+grep -q 'private val CardRadius = 17.dp' "$HOME_COMPACT"
+grep -q 'private val SectionGap = 7.dp' "$HOME_COMPACT"
+grep -q 'bottom = 120.dp' "$HOME_COMPACT"
+grep -q 'fontSize = 23.sp' "$HOME_COMPACT"
 grep -q 'private fun EngineOverview' "$HOME_COMPACT"
 grep -q 'private fun SegmentedAction' "$HOME_COMPACT"
-grep -q 'fillMaxWidth().height(42.dp)' "$HOME_COMPACT"
-grep -q 'size(62.dp)' "$HOME_COMPACT"
+grep -q 'fillMaxWidth().height(40.dp)' "$HOME_COMPACT"
+grep -q 'size(54.dp)' "$HOME_COMPACT"
 grep -q 'private fun CompactShortcut' "$HOME_COMPACT"
 grep -q 'private fun StatusGrid' "$HOME_COMPACT"
+grep -q 'private fun StatusPairRow' "$HOME_COMPACT"
+grep -q 'height(42.dp).padding(horizontal = 9.dp)' "$HOME_COMPACT"
 grep -q 'HomeNextStep' "$HOME_COMPACT"
 grep -q '继续调整当前字体' "$HOME_COMPACT"
 grep -q '打开任务中心查看错误与诊断信息' "$HOME_COMPACT"
@@ -59,6 +62,14 @@ grep -q '打开任务中心查看错误与诊断信息' "$HOME_COMPACT"
 ! grep -q 'LuoShuIconButton' "$HOME_COMPACT"
 ! grep -q 'size(88.dp)' "$HOME_COMPACT"
 ! grep -q 'QUICK ACCESS' "$HOME_COMPACT"
+
+# The boot verification prompt must be an in-flow full-width row. The old
+# floating chip produced a dark blurred blob and clipped subtitle on-device.
+grep -q 'private fun HomeTrustRow' "$HOME_ROUTE"
+grep -q 'modifier = Modifier.fillMaxWidth()' "$HOME_ROUTE"
+grep -q 'shadowElevation = 0.dp' "$HOME_ROUTE"
+grep -q 'fontSize = 10.5.sp' "$HOME_ROUTE"
+! grep -q 'DeviceTrustChip(' "$HOME_ROUTE"
 ! grep -q 'bottom = 108.dp' "$HOME_ROUTE"
 
 # Acceptance guidance follows the installed version and does not treat an
@@ -166,4 +177,4 @@ grep -q 'embedded = true' "$SHELL"
 grep -q 'dockClearance' "$SHELL"
 ! grep -q 'if (page == AppPage.Studio)' "$SHELL"
 
-echo 'LuoShu reference-video home UI layout regression passed.'
+echo 'LuoShu real-device home UI layout regression passed.'
