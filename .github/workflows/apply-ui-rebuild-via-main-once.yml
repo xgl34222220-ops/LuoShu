@@ -25,12 +25,16 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git fetch origin ui-rebuild
           git switch -C ui-rebuild origin/ui-rebuild
-          base64 -d .github/ui-rebuild.patch.gz.b64 | gzip -dc > /tmp/luoshu-ui.patch
+          cat .github/ui-patch.part?? > /tmp/luoshu-ui.patch.gz.b64
+          test "$(wc -c < /tmp/luoshu-ui.patch.gz.b64)" -eq 27876
+          echo '62d0ea1b0a14b3c3f05a91edbef60b71874d8249fa902f3f44508e76314d1e88  /tmp/luoshu-ui.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/luoshu-ui.patch.gz.b64 | gzip -dc > /tmp/luoshu-ui.patch
           patch -p3 --forward < /tmp/luoshu-ui.patch
           sh -n scripts/font_library_ui_layout_test.sh
           sh scripts/font_library_ui_layout_test.sh
           rm -f \
             .github/ui-rebuild.patch.gz.b64 \
+            .github/ui-patch.part?? \
             .github/workflows/apply-ui-rebuild-once.yml \
             .github/workflows/export-source-on-pr.yml
           git add -A
