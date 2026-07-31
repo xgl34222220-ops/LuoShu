@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -47,6 +48,8 @@ import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
+import io.github.xgl34222220.luoshu.ui.design.LuoShuIconButton
+import io.github.xgl34222220.luoshu.ui.design.LuoShuPageHeader
 import kotlin.math.roundToInt
 
 @Composable
@@ -57,7 +60,7 @@ internal fun FontStudioScreenMaterial(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 12.dp, top = 2.dp, end = 12.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item { MaterialStudioHeader(state.loading, actions.refresh, topAction) }
@@ -86,41 +89,30 @@ internal fun FontStudioScreenMaterial(
 
 @Composable
 private fun MaterialStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAction: @Composable () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                "FONT MIX",
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.2.sp,
+    LuoShuPageHeader(
+        title = "字体组合",
+        subtitle = "中文、英文、数字与真实设计轴",
+        actions = {
+            topAction()
+            Spacer(Modifier.width(6.dp))
+            LuoShuIconButton(
+                icon = Icons.Rounded.Refresh,
+                contentDescription = "刷新组合配置",
+                onClick = onRefresh,
+                enabled = !loading,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                content = if (loading) {
+                    { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) }
+                } else null,
             )
-            Spacer(Modifier.height(4.dp))
-            Text("字体组合", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
-            Text("中文、英文、数字与完整设计轴", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-        }
-        topAction()
-        Spacer(Modifier.width(10.dp))
-        Surface(
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .84f),
-            shadowElevation = 7.dp,
-        ) {
-            IconButton(onClick = onRefresh, enabled = !loading, modifier = Modifier.size(56.dp)) {
-                if (loading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Rounded.Refresh, contentDescription = "刷新组合配置")
-            }
-        }
-    }
+        },
+    )
 }
 
 @Composable
 private fun MaterialCompositionOverview(state: FontStudioUiState) {
     Card(
-        shape = MaterialTheme.shapes.extraLarge,
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .84f)),
     ) {
         Column(Modifier.padding(18.dp)) {

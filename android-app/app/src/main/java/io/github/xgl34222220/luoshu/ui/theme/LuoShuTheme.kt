@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.materialkolor.DynamicMaterialTheme
@@ -24,50 +25,81 @@ import io.github.xgl34222220.luoshu.ui.appearance.LocalAppearanceSettings
 import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 
-private val MaterialShapes = Shapes(
-    extraSmall = RoundedCornerShape(4.dp),
-    small = RoundedCornerShape(8.dp),
-    medium = RoundedCornerShape(12.dp),
-    large = RoundedCornerShape(20.dp),
-    extraLarge = RoundedCornerShape(32.dp),
+/**
+ * Unified visual tokens shared by every LuoShu business screen.
+ *
+ * Business composables should consume these semantic values instead of inventing page-local
+ * colors, spacing or corner radii. This keeps the Miuix and Material 3 skins on one information
+ * architecture while still allowing their controls to look native to each style.
+ */
+@Immutable
+data class LuoShuTokens(
+    val pageBackground: Color,
+    val surface: Color,
+    val surfaceAlt: Color,
+    val surfaceElevated: Color,
+    val textPrimary: Color,
+    val textSecondary: Color,
+    val outline: Color,
+    val success: Color,
+    val warning: Color,
+    val danger: Color,
+    val pagePadding: Dp = 12.dp,
+    val compactGap: Dp = 8.dp,
+    val sectionGap: Dp = 12.dp,
+    val smallRadius: Dp = 12.dp,
+    val fieldRadius: Dp = 14.dp,
+    val groupRadius: Dp = 18.dp,
+    val dataRadius: Dp = 22.dp,
+    val dockRadius: Dp = 32.dp,
+    val sideSheetRadius: Dp = 32.dp,
 )
 
-private val MaterialTypography = Typography(
-    displaySmall = TextStyle(fontSize = 38.sp, lineHeight = 43.sp, fontWeight = FontWeight.Black),
-    headlineLarge = TextStyle(fontSize = 32.sp, lineHeight = 37.sp, fontWeight = FontWeight.Black),
-    headlineMedium = TextStyle(fontSize = 26.sp, lineHeight = 31.sp, fontWeight = FontWeight.Bold),
-    headlineSmall = TextStyle(fontSize = 22.sp, lineHeight = 27.sp, fontWeight = FontWeight.Bold),
-    titleLarge = TextStyle(fontSize = 21.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold),
-    titleMedium = TextStyle(fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
-    titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold),
-    bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 23.sp),
-    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
-    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
-    labelLarge = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold),
-    labelSmall = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, letterSpacing = .4.sp),
-)
+val LocalLuoShuTokens = staticCompositionLocalOf {
+    LuoShuTokens(
+        pageBackground = Color(0xFFECEBFA),
+        surface = Color(0xFFF8F7FD),
+        surfaceAlt = Color(0xFFF2F0FA),
+        surfaceElevated = Color.White,
+        textPrimary = Color(0xFF171923),
+        textSecondary = Color(0xFF666B7A),
+        outline = Color(0x1F171923),
+        success = Color(0xFF0AA45B),
+        warning = Color(0xFFB87300),
+        danger = Color(0xFFD83A3A),
+    )
+}
 
-private val MiuixShapes = Shapes(
+private val UnifiedMaterialShapes = Shapes(
     extraSmall = RoundedCornerShape(10.dp),
-    small = RoundedCornerShape(14.dp),
-    medium = RoundedCornerShape(20.dp),
-    large = RoundedCornerShape(28.dp),
-    extraLarge = RoundedCornerShape(36.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(18.dp),
+    extraLarge = RoundedCornerShape(22.dp),
 )
 
-private val MiuixTypography = Typography(
-    displaySmall = TextStyle(fontSize = 42.sp, lineHeight = 47.sp, fontWeight = FontWeight.Black),
-    headlineLarge = TextStyle(fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.Black),
-    headlineMedium = TextStyle(fontSize = 27.sp, lineHeight = 32.sp, fontWeight = FontWeight.Black),
-    headlineSmall = TextStyle(fontSize = 23.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold),
-    titleLarge = TextStyle(fontSize = 20.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold),
-    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold),
-    titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.Bold),
-    bodyLarge = TextStyle(fontSize = 15.sp, lineHeight = 21.sp),
-    bodyMedium = TextStyle(fontSize = 13.sp, lineHeight = 18.sp),
-    bodySmall = TextStyle(fontSize = 11.sp, lineHeight = 16.sp),
-    labelLarge = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold),
-    labelSmall = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, letterSpacing = .4.sp),
+private val UnifiedMiuixShapes = Shapes(
+    extraSmall = RoundedCornerShape(12.dp),
+    small = RoundedCornerShape(14.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(30.dp),
+)
+
+private val UnifiedTypography = Typography(
+    displaySmall = TextStyle(fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold),
+    headlineLarge = TextStyle(fontSize = 28.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold),
+    headlineMedium = TextStyle(fontSize = 26.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold),
+    headlineSmall = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold),
+    titleLarge = TextStyle(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
+    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
+    titleSmall = TextStyle(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold),
+    bodyLarge = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, fontWeight = FontWeight.Normal),
+    bodyMedium = TextStyle(fontSize = 13.sp, lineHeight = 19.sp, fontWeight = FontWeight.Normal),
+    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Normal),
+    labelLarge = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.SemiBold),
+    labelMedium = TextStyle(fontSize = 12.sp, lineHeight = 17.sp, fontWeight = FontWeight.Medium),
+    labelSmall = TextStyle(fontSize = 10.sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium),
 )
 
 @Immutable
@@ -77,17 +109,17 @@ data class MiuixTokens(
     val elevatedCardBackground: Color,
     val textPrimary: Color,
     val textSecondary: Color,
-    val success: Color = Color(0xFF27BE83),
-    val warning: Color = Color(0xFFF0A532),
+    val success: Color = Color(0xFF0AA45B),
+    val warning: Color = Color(0xFFB87300),
 )
 
 val LocalMiuixTokens = staticCompositionLocalOf {
     MiuixTokens(
-        pageBackground = Color(0xFFF4F4F6),
-        cardBackground = Color.White,
+        pageBackground = Color(0xFFECEBFA),
+        cardBackground = Color(0xFFF8F7FD),
         elevatedCardBackground = Color.White,
-        textPrimary = Color(0xFF16171B),
-        textSecondary = Color(0xFF70727C),
+        textPrimary = Color(0xFF171923),
+        textSecondary = Color(0xFF666B7A),
     )
 }
 
@@ -103,16 +135,48 @@ fun LuoShuTheme(settings: AppearanceSettings, content: @Composable () -> Unit) {
 
 @Composable
 private fun LuoShuMaterialTheme(settings: AppearanceSettings, content: @Composable () -> Unit) {
+    val dark = resolveDark(settings.themeMode)
+    val pureBlack = dark && settings.amoledBlack
     DynamicMaterialTheme(
         seedColor = resolveSeedColor(settings),
-        useDarkTheme = resolveDark(settings.themeMode),
-        withAmoled = settings.amoledBlack,
+        useDarkTheme = dark,
+        withAmoled = pureBlack,
         style = settings.kolorStyle.toPaletteStyle(),
-        shapes = MaterialShapes,
-        typography = MaterialTypography,
+        shapes = UnifiedMaterialShapes,
+        typography = UnifiedTypography,
         animate = true,
-        content = content,
-    )
+    ) {
+        val scheme = MaterialTheme.colorScheme
+        val tokens = LuoShuTokens(
+            pageBackground = when {
+                pureBlack -> Color.Black
+                dark -> Color(0xFF11131A)
+                else -> Color(0xFFECEBFA)
+            },
+            surface = when {
+                pureBlack -> Color(0xFF0C0C0D)
+                dark -> Color(0xFF1B1E28)
+                else -> scheme.surfaceContainerLowest.copy(alpha = .98f)
+            },
+            surfaceAlt = when {
+                pureBlack -> Color(0xFF171719)
+                dark -> Color(0xFF252937)
+                else -> scheme.surfaceContainerLow
+            },
+            surfaceElevated = when {
+                pureBlack -> Color(0xFF171719)
+                dark -> scheme.surfaceContainerHigh
+                else -> scheme.surface
+            },
+            textPrimary = if (pureBlack) Color(0xFFF4F4F5) else scheme.onSurface,
+            textSecondary = if (pureBlack) Color(0xFFB6B6BC) else scheme.onSurfaceVariant,
+            outline = scheme.outlineVariant.copy(alpha = if (dark) .55f else .42f),
+            success = Color(0xFF0AA45B),
+            warning = Color(0xFFB87300),
+            danger = Color(0xFFD83A3A),
+        )
+        CompositionLocalProvider(LocalLuoShuTokens provides tokens, content = content)
+    }
 }
 
 @Composable
@@ -124,31 +188,65 @@ private fun LuoShuMiuixTheme(settings: AppearanceSettings, content: @Composable 
         useDarkTheme = dark,
         withAmoled = pureBlack,
         style = settings.kolorStyle.toPaletteStyle(),
-        shapes = MiuixShapes,
-        typography = MiuixTypography,
+        shapes = UnifiedMiuixShapes,
+        typography = UnifiedTypography,
         animate = true,
     ) {
         val scheme = MaterialTheme.colorScheme
-        val tokens = MiuixTokens(
-            pageBackground = when {
-                pureBlack -> Color.Black
-                dark -> scheme.surfaceContainerLowest
-                else -> scheme.surfaceContainerLow
-            },
-            cardBackground = when {
-                pureBlack -> Color(0xFF080808)
-                dark -> scheme.surfaceContainer
-                else -> scheme.surfaceContainerLowest
-            },
-            elevatedCardBackground = when {
-                pureBlack -> Color(0xFF111111)
-                dark -> scheme.surfaceContainerHigh
-                else -> scheme.surfaceContainer
-            },
-            textPrimary = scheme.onSurface,
-            textSecondary = scheme.onSurfaceVariant,
+        val page = when {
+            pureBlack -> Color.Black
+            dark -> Color(0xFF11131A)
+            else -> Color(0xFFECEBFA)
+        }
+        val surface = when {
+            pureBlack -> Color(0xFF0C0C0D)
+            dark -> Color(0xFF1B1E28)
+            else -> Color(0xFFF8F7FD)
+        }
+        val surfaceAlt = when {
+            pureBlack -> Color(0xFF171719)
+            dark -> Color(0xFF252937)
+            else -> Color(0xFFF2F0FA)
+        }
+        val elevated = when {
+            pureBlack -> Color(0xFF171719)
+            dark -> scheme.surfaceContainerHigh
+            else -> Color.White
+        }
+        val primaryText = when {
+            pureBlack -> Color(0xFFF4F4F5)
+            dark -> Color(0xFFF2F4F8)
+            else -> Color(0xFF171923)
+        }
+        val secondaryText = when {
+            pureBlack -> Color(0xFFB6B6BC)
+            dark -> Color(0xFFB9BECA)
+            else -> Color(0xFF666B7A)
+        }
+        val miuixTokens = MiuixTokens(
+            pageBackground = page,
+            cardBackground = surface,
+            elevatedCardBackground = elevated,
+            textPrimary = primaryText,
+            textSecondary = secondaryText,
         )
-        CompositionLocalProvider(LocalMiuixTokens provides tokens, content = content)
+        val unifiedTokens = LuoShuTokens(
+            pageBackground = page,
+            surface = surface,
+            surfaceAlt = surfaceAlt,
+            surfaceElevated = elevated,
+            textPrimary = primaryText,
+            textSecondary = secondaryText,
+            outline = if (dark) Color.White.copy(alpha = .10f) else Color(0x1F171923),
+            success = Color(0xFF0AA45B),
+            warning = Color(0xFFB87300),
+            danger = Color(0xFFD83A3A),
+        )
+        CompositionLocalProvider(
+            LocalMiuixTokens provides miuixTokens,
+            LocalLuoShuTokens provides unifiedTokens,
+            content = content,
+        )
     }
 }
 
