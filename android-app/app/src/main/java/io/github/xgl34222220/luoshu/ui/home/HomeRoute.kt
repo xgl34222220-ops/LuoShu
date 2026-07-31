@@ -44,20 +44,29 @@ fun HomeRoute(
         }
     }
 
-    HomeScreenCompact(
-        style = style,
-        state = state,
-        actions = actions,
-        trustContent = {
-            if (state.moduleInstalled) {
-                DeviceTrustChip(
-                    style = style,
-                    state = trustState,
-                    onClick = { showTrustDetails = true },
-                )
-            }
-        },
-    )
+    val trustContent: @Composable () -> Unit = {
+        if (state.moduleInstalled) {
+            DeviceTrustChip(
+                style = style,
+                state = trustState,
+                onClick = { showTrustDetails = true },
+            )
+        }
+    }
+
+    when (style) {
+        UiStyle.MIUIX -> HomeScreenMiuix(
+            state = state,
+            actions = actions,
+            trustContent = trustContent,
+        )
+        UiStyle.MATERIAL -> HomeScreenCompact(
+            style = style,
+            state = state,
+            actions = actions,
+            trustContent = trustContent,
+        )
+    }
 
     if (showTrustDetails) {
         DeviceTrustDialog(
