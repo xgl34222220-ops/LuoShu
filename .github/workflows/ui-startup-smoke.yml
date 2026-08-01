@@ -6,12 +6,14 @@ on:
       - ui-miuix-library-rebuild
     paths:
       - 'android-app/**'
+      - 'scripts/ui_startup_smoke.sh'
       - '.github/workflows/ui-startup-smoke.yml'
   pull_request:
     branches:
       - main
     paths:
       - 'android-app/**'
+      - 'scripts/ui_startup_smoke.sh'
       - '.github/workflows/ui-startup-smoke.yml'
   workflow_dispatch:
 
@@ -72,27 +74,7 @@ jobs:
           profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: |
-            set -eu
-            apk='android-app/app/build/outputs/apk/release/app-release.apk'
-            package='io.github.xgl34222220.luoshu'
-            diagnostics='dist/startup-smoke'
-            mkdir -p "$diagnostics"
-            adb install -r "$apk" > "$diagnostics/install.txt" 2>&1
-            adb shell am force-stop "$package"
-            adb logcat -c
-            adb shell am start -W -n "$package/.MainActivity" > "$diagnostics/am-start.txt" 2>&1 || true
-            sleep 8
-            adb shell pidof "$package" > "$diagnostics/pid.txt" 2>&1 || true
-            adb logcat -d -v threadtime > "$diagnostics/logcat.txt"
-            if grep -nE 'FATAL EXCEPTION|AndroidRuntime.*Process: io\.github\.xgl34222220\.luoshu' "$diagnostics/logcat.txt"; then
-              echo 'LuoShu crashed during cold start.' >&2
-              exit 1
-            fi
-            if [ ! -s "$diagnostics/pid.txt" ]; then
-              echo 'LuoShu process did not survive cold start.' >&2
-              exit 1
-            fi
+          script: sh scripts/ui_startup_smoke.sh
 
       - name: Upload startup diagnostics
         if: always()
