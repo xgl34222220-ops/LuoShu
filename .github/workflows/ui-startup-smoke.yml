@@ -7,6 +7,12 @@ on:
     paths:
       - 'android-app/**'
       - '.github/workflows/ui-startup-smoke.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/ui-startup-smoke.yml'
   workflow_dispatch:
 
 permissions:
