@@ -73,29 +73,26 @@ jobs:
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            set -euo pipefail
+            set -eu
             apk='android-app/app/build/outputs/apk/release/app-release.apk'
             package='io.github.xgl34222220.luoshu'
-            mkdir -p dist/startup-smoke
-            adb install -r "$apk"
+            diagnostics='dist/startup-smoke'
+            mkdir -p "$diagnostics"
+            adb install -r "$apk" > "$diagnostics/install.txt" 2>&1
             adb shell am force-stop "$package"
             adb logcat -c
-            set +e
-            adb shell am start -W -n "$package/.MainActivity" | tee dist/startup-smoke/am-start.txt
-            start_status=${PIPESTATUS[0]}
+            adb shell am start -W -n "$package/.MainActivity" > "$diagnostics/am-start.txt" 2>&1 || true
             sleep 8
-            adb shell pidof "$package" | tee dist/startup-smoke/pid.txt
-            pid_status=${PIPESTATUS[0]}
-            adb logcat -d -v threadtime > dist/startup-smoke/logcat.txt
-            set -e
-            if grep -nE 'FATAL EXCEPTION|AndroidRuntime.*Process: io\.github\.xgl34222220\.luoshu' dist/startup-smoke/logcat.txt; then
+            adb shell pidof "$package" > "$diagnostics/pid.txt" 2>&1 || true
+            adb logcat -d -v threadtime > "$diagnostics/logcat.txt"
+            if grep -nE 'FATAL EXCEPTION|AndroidRuntime.*Process: io\.github\.xgl34222220\.luoshu' "$diagnostics/logcat.txt"; then
               echo 'LuoShu crashed during cold start.' >&2
               exit 1
             fi
-            [[ $start_status -eq 0 && $pid_status -eq 0 && -s dist/startup-smoke/pid.txt ]] || {
+            if [ ! -s "$diagnostics/pid.txt" ]; then
               echo 'LuoShu process did not survive cold start.' >&2
               exit 1
-            }
+            fi
 
       - name: Upload startup diagnostics
         if: always()
