@@ -88,12 +88,19 @@ internal fun FontLibraryRoute(
         }
     }
 
-    FontLibraryScreenCompact(
-        style = style,
-        state = displayState,
-        actions = displayActions,
-        tools = managementTools,
-    )
+    when (style) {
+        UiStyle.MIUIX -> FontLibraryScreenMiuix(
+            state = displayState,
+            actions = displayActions,
+            topActions = managementTools,
+        )
+        UiStyle.MATERIAL -> FontLibraryScreenCompact(
+            style = UiStyle.MATERIAL,
+            state = displayState,
+            actions = displayActions,
+            tools = managementTools,
+        )
+    }
 
     if (showManagement) {
         FontLibraryManagementDialog(
