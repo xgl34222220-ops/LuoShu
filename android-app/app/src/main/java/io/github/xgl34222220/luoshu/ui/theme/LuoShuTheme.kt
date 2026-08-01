@@ -143,8 +143,8 @@ private fun LuoShuMaterialTheme(settings: AppearanceSettings, content: @Composab
     val pureBlack = dark && settings.amoledBlack
     DynamicMaterialTheme(
         seedColor = resolveSeedColor(settings),
-        useDarkTheme = dark,
-        withAmoled = pureBlack,
+        isDark = dark,
+        isAmoled = pureBlack,
         style = settings.kolorStyle.toPaletteStyle(),
         shapes = UnifiedMaterialShapes,
         typography = UnifiedTypography,
@@ -207,8 +207,8 @@ private fun LuoShuMiuixTheme(settings: AppearanceSettings, content: @Composable 
     // have their dedicated MIUIX implementation.
     DynamicMaterialTheme(
         seedColor = seed,
-        useDarkTheme = dark,
-        withAmoled = pureBlack,
+        isDark = dark,
+        isAmoled = pureBlack,
         style = settings.kolorStyle.toPaletteStyle(),
         shapes = UnifiedMiuixShapes,
         typography = UnifiedTypography,
