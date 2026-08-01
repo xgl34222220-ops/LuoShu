@@ -7,6 +7,12 @@ on:
     paths:
       - 'android-app/**'
       - '.github/workflows/ui-apk-refresh.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/ui-apk-refresh.yml'
 
 permissions:
   contents: read
