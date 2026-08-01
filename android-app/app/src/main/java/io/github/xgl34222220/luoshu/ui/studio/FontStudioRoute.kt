@@ -1,10 +1,5 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -15,11 +10,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.xgl34222220.luoshu.LuoShuViewModel
 import io.github.xgl34222220.luoshu.MixSlot
@@ -74,17 +66,25 @@ internal fun FontStudioRoute(
     }
 
     val studioTools: @Composable () -> Unit = {
-        StudioToolLauncher(
-            style = style,
-            enabled = state.hasFonts && !state.loading,
-            onPreview = { showCompositePreview = true },
-            onProfile = { showProfileTransfer = true },
-            onGlyphs = { showGlyphBrowser = true },
-        )
+        when (style) {
+            UiStyle.MIUIX -> StudioToolLauncherMiuix(
+                enabled = state.hasFonts && !state.loading,
+                onPreview = { showCompositePreview = true },
+                onProfile = { showProfileTransfer = true },
+                onGlyphs = { showGlyphBrowser = true },
+            )
+            UiStyle.MATERIAL -> StudioToolLauncher(
+                style = UiStyle.MATERIAL,
+                enabled = state.hasFonts && !state.loading,
+                onPreview = { showCompositePreview = true },
+                onProfile = { showProfileTransfer = true },
+                onGlyphs = { showGlyphBrowser = true },
+            )
+        }
     }
     when (style) {
         UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions, studioTools)
-        UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions, studioTools)
+        UiStyle.MIUIX -> FontStudioScreenMiuixNative(state, stableActions, studioTools)
     }
 
     if (showCompositePreview) {
@@ -115,11 +115,21 @@ internal fun FontStudioRoute(
         )
     }
     if (restoreNotice.isNotBlank()) {
-        AlertDialog(
-            onDismissRequest = { restoreNotice = "" },
-            title = { Text("备份恢复结果", fontWeight = FontWeight.Black) },
-            text = { Text(restoreNotice) },
-            confirmButton = { TextButton(onClick = { restoreNotice = "" }) { Text("完成") } },
-        )
+        when (style) {
+            UiStyle.MIUIX -> StudioRestoreNoticeMiuix(
+                message = restoreNotice,
+                onDismiss = { restoreNotice = "" },
+            )
+            UiStyle.MATERIAL -> AlertDialog(
+                onDismissRequest = { restoreNotice = "" },
+                title = { Text("备份恢复结果", fontWeight = FontWeight.Black) },
+                text = { Text(restoreNotice) },
+                confirmButton = {
+                    TextButton(onClick = { restoreNotice = "" }) {
+                        Text("完成")
+                    }
+                },
+            )
+        }
     }
 }
