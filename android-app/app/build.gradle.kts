@@ -151,8 +151,9 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-shader:$miuixVersion")
     implementation("top.yukonga.miuix.kmp:miuix-squircle:$miuixVersion")
 
-    // Dynamic color and glass layers shared by Material and Miuix themes.
-    implementation("com.materialkolor:material-kolor:2.0.0")
+    // Miuix 0.9.3 ThemeController is compiled against Material Color Utilities 4.1.1.
+    // Do not force the legacy material-kolor 2.x artifact: its Hct ABI crashes at startup.
+    implementation("com.materialkolor:material-color-utilities-android:4.1.1")
     implementation("dev.chrisbanes.haze:haze:1.6.10")
     implementation("dev.chrisbanes.haze:haze-materials:1.6.10")
 
