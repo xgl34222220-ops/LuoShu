@@ -65,9 +65,17 @@ grep -q "mix_stage manifest '正在生成安全启动清单' 98" "$ROOT/common/f
 grep -q '_progress_message=' "$ROOT/common/weighted_mix_task.sh"
 grep -q '完整复合字体后台进程已退出' "$ROOT/common/weighted_mix_task.sh"
 
-# The import action must fit the full Chinese label on one line.
-grep -q 'else -> 148.dp' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
-grep -q 'softWrap = false' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
-grep -q 'modifier = modifier.fillMaxWidth()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
+# Import routing owns state only; each theme renders its own action and progress UI.
+IMPORT_ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
+IMPORT_MATERIAL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlayMaterial.kt"
+IMPORT_MIUIX="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlayMiuix.kt"
+grep -q 'UiStyle.MIUIX -> NativeImportOverlayMiuix' "$IMPORT_ROUTE"
+grep -q 'UiStyle.MATERIAL -> NativeImportOverlayMaterial' "$IMPORT_ROUTE"
+grep -q 'else -> 148.dp' "$IMPORT_MATERIAL"
+grep -q 'softWrap = false' "$IMPORT_MATERIAL"
+grep -q 'modifier.fillMaxWidth().height(height)' "$IMPORT_MATERIAL"
+grep -q 'top.yukonga.miuix.kmp.basic.LinearProgressIndicator' "$IMPORT_MIUIX"
+grep -q 'top.yukonga.miuix.kmp.overlay.OverlayDialog' "$IMPORT_MIUIX"
+! grep -q 'androidx.compose.material3' "$IMPORT_MIUIX"
 
-echo 'Mix finalization uses metadata-only validation, one Mono build, and real progress stages.'
+echo 'Mix finalization uses metadata-only validation, one Mono build, real progress stages, and separate import UIs.'
