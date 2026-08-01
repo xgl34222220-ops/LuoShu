@@ -78,4 +78,7 @@ grep -q 'top.yukonga.miuix.kmp.basic.LinearProgressIndicator' "$IMPORT_MIUIX"
 grep -q 'top.yukonga.miuix.kmp.overlay.OverlayDialog' "$IMPORT_MIUIX"
 ! grep -q 'androidx.compose.material3' "$IMPORT_MIUIX"
 
+# The full UI separation contract is mandatory for every source check.
+sh "$ROOT/scripts/ui_theme_separation_test.sh"
+
 echo 'Mix finalization uses metadata-only validation, one Mono build, real progress stages, and separate import UIs.'
