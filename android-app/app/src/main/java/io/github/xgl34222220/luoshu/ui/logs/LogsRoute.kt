@@ -44,33 +44,62 @@ internal fun LogsRoute(
             .navigationBarsPadding()
             .padding(bottom = 96.dp),
     ) {
-        LogsScreenCompact(
-            style = style,
-            state = displayState,
-            actions = actions,
-            diagnosticState = diagnosticState,
-            onDiagnostic = onDiagnostic,
-            onClose = onClose,
-        )
-        ImportTaskControls(
-            style = style,
-            state = importState,
-            onPause = importViewModel::pauseImport,
-            onResume = importViewModel::resumeImport,
-            onCancel = importViewModel::cancelImport,
-            onRetry = importViewModel::retryFailed,
-            onClear = importViewModel::clearRecord,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-        )
+        when (style) {
+            UiStyle.MIUIX -> LogsScreenMiuix(
+                state = displayState,
+                actions = actions,
+                diagnosticState = diagnosticState,
+                onDiagnostic = onDiagnostic,
+                onClose = onClose,
+            )
+            UiStyle.MATERIAL -> LogsScreenCompact(
+                style = UiStyle.MATERIAL,
+                state = displayState,
+                actions = actions,
+                diagnosticState = diagnosticState,
+                onDiagnostic = onDiagnostic,
+                onClose = onClose,
+            )
+        }
+
+        when (style) {
+            UiStyle.MIUIX -> ImportTaskControlsMiuix(
+                state = importState,
+                onPause = importViewModel::pauseImport,
+                onResume = importViewModel::resumeImport,
+                onCancel = importViewModel::cancelImport,
+                onRetry = importViewModel::retryFailed,
+                onClear = importViewModel::clearRecord,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            )
+            UiStyle.MATERIAL -> ImportTaskControls(
+                style = UiStyle.MATERIAL,
+                state = importState,
+                onPause = importViewModel::pauseImport,
+                onResume = importViewModel::resumeImport,
+                onCancel = importViewModel::cancelImport,
+                onRetry = importViewModel::retryFailed,
+                onClear = importViewModel::clearRecord,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            )
+        }
     }
 
     if (diagnosticState.resultVisible) {
-        DiagnosticExportDialog(
-            style = style,
-            state = diagnosticState,
-            onDismiss = { diagnosticState = DiagnosticExportState() },
-        )
+        when (style) {
+            UiStyle.MIUIX -> DiagnosticExportDialogMiuix(
+                state = diagnosticState,
+                onDismiss = { diagnosticState = DiagnosticExportState() },
+            )
+            UiStyle.MATERIAL -> DiagnosticExportDialog(
+                style = UiStyle.MATERIAL,
+                state = diagnosticState,
+                onDismiss = { diagnosticState = DiagnosticExportState() },
+            )
+        }
     }
 }
