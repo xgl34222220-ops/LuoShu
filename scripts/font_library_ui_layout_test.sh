@@ -24,10 +24,14 @@ COMPONENTS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/
 UTIL="$ROOT/common/util_functions.sh"
 CACHE="$ROOT/common/device_font_cache.sh"
 
-# Legacy style screens stay available as a rollback path while the routes use the
-# shared compact hierarchy.
-grep -q 'private fun MiuixCapabilityStrip' "$MIUIX"
-grep -q 'private fun MaterialCapabilityStrip' "$MATERIAL"
+# Font library now has two independent render trees. The Miuix implementation
+# must use native Miuix controls and must not import Material 3 components.
+grep -q 'top.yukonga.miuix.kmp.basic.BasicComponent' "$MIUIX"
+grep -q 'top.yukonga.miuix.kmp.basic.TextField' "$MIUIX"
+grep -q 'top.yukonga.miuix.kmp.theme.MiuixTheme' "$MIUIX"
+! grep -q 'androidx.compose.material3' "$MIUIX"
+grep -q 'UiStyle.MIUIX -> FontLibraryScreenMiuix' "$ROUTE"
+grep -q 'UiStyle.MATERIAL -> FontLibraryScreenCompact' "$ROUTE"
 grep -q 'FontLibraryScreenCompact' "$ROUTE"
 grep -q 'HomeScreenCompact' "$HOME_ROUTE"
 grep -q 'LogsScreenCompact' "$LOGS_ROUTE"
@@ -40,6 +44,10 @@ grep -q 'CompactFontRow' "$COMPACT"
 grep -q 'NativeFontPreview' "$COMPACT"
 grep -q 'clickable(onClick = onDetails)' "$COMPACT"
 ! grep -q 'height(102.dp)' "$COMPACT"
+grep -q 'var showTools by rememberSaveable' "$MIUIX"
+grep -q '导入与管理' "$MIUIX"
+grep -q 'MiuixFontFamilyCard' "$MIUIX"
+grep -q 'NativeFontPreview' "$MIUIX"
 
 # Home: one dynamic next action replaces duplicate navigation shortcuts and the
 # trust chip participates in normal layout rather than using a fixed 108 dp offset.
@@ -108,8 +116,8 @@ grep -q 'padding(bottom = dockClearance)' "$SHELL"
 grep -q 'RoundedCornerShape(22.dp)' "$STUDIO_MIUIX"
 grep -q 'RoundedCornerShape(22.dp)' "$STUDIO_MATERIAL"
 
-# Unified design system: business pages consume semantic tokens and shared
-# components instead of maintaining separate visual constants.
+# Unified design system remains available to legacy Material pages while the
+# Miuix pages migrate to their own native component tree.
 grep -q 'data class LuoShuTokens' "$THEME"
 grep -q 'pageBackground = Color(0xFFECEBFA)' "$THEME"
 grep -q 'dark -> Color(0xFF11131A)' "$THEME"
@@ -164,4 +172,4 @@ grep -q 'embedded = true' "$SHELL"
 grep -q 'dockClearance' "$SHELL"
 ! grep -q 'if (page == AppPage.Studio)' "$SHELL"
 
-echo 'LuoShu unified V1.1 UI layout regression passed.'
+echo 'LuoShu separate Miuix and Material UI layout regression passed.'
