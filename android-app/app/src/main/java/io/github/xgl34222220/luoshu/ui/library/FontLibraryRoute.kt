@@ -60,25 +60,37 @@ internal fun FontLibraryRoute(
         collectionStore.save(next)
     }
 
-    val managementTools: @Composable () -> Unit = {
+    val miuixTools: @Composable () -> Unit = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            topActions()
+            FontLibraryManagementButtonMiuix(
+                favoriteCount = collections.favoriteIds.size,
+                issueCount = conflicts.issueIds.size,
+                loading = state.loading,
+                onClick = { showManagement = true },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+    val materialTools: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             topActions()
             FontLibraryUtilitiesBar(
-                style = style,
+                style = UiStyle.MATERIAL,
                 fonts = state.allFonts,
                 collections = collections,
                 enabled = !state.loading && !state.operationBusy,
                 onCollectionsChange = ::persistCollections,
             )
             FontArchiveExportTool(
-                style = style,
+                style = UiStyle.MATERIAL,
                 fonts = state.allFonts,
                 collections = collections,
                 enabled = !state.loading && !state.operationBusy,
                 modifier = Modifier.fillMaxWidth(),
             )
             FontLibraryManagementButton(
-                style = style,
+                style = UiStyle.MATERIAL,
                 favoriteCount = collections.favoriteIds.size,
                 issueCount = conflicts.issueIds.size,
                 loading = state.loading,
@@ -92,37 +104,50 @@ internal fun FontLibraryRoute(
         UiStyle.MIUIX -> FontLibraryScreenMiuix(
             state = displayState,
             actions = displayActions,
-            topActions = managementTools,
+            topActions = miuixTools,
         )
         UiStyle.MATERIAL -> FontLibraryScreenCompact(
             style = UiStyle.MATERIAL,
             state = displayState,
             actions = displayActions,
-            tools = managementTools,
+            tools = materialTools,
         )
     }
 
     if (showManagement) {
-        FontLibraryManagementDialog(
-            style = style,
-            fonts = state.fonts,
-            activeFontId = state.activeFontId,
-            collections = collections,
-            conflicts = conflicts,
-            onCollectionsChange = { visibleNext ->
-                val visibleIds = state.fonts.map { it.id }.toSet()
-                val merged = FontLibraryCollections(
-                    favoriteIds = (collections.favoriteIds - visibleIds) + visibleNext.favoriteIds,
-                    tags = collections.tags.filterKeys { it !in visibleIds } + visibleNext.tags,
-                )
-                persistCollections(merged)
-            },
-            onOpenDetails = { font ->
-                showManagement = false
-                detailFont = font
-            },
-            onDismiss = { showManagement = false },
-        )
+        val onCollectionsUpdate: (FontLibraryCollections) -> Unit = { visibleNext ->
+            val visibleIds = state.fonts.map { it.id }.toSet()
+            val merged = FontLibraryCollections(
+                favoriteIds = (collections.favoriteIds - visibleIds) + visibleNext.favoriteIds,
+                tags = collections.tags.filterKeys { it !in visibleIds } + visibleNext.tags,
+            )
+            persistCollections(merged)
+        }
+        val onOpenDetails: (FontItem) -> Unit = { font ->
+            showManagement = false
+            detailFont = font
+        }
+        when (style) {
+            UiStyle.MIUIX -> FontLibraryManagementDialogMiuix(
+                fonts = state.fonts,
+                activeFontId = state.activeFontId,
+                collections = collections,
+                conflicts = conflicts,
+                onCollectionsChange = onCollectionsUpdate,
+                onOpenDetails = onOpenDetails,
+                onDismiss = { showManagement = false },
+            )
+            UiStyle.MATERIAL -> FontLibraryManagementDialog(
+                style = UiStyle.MATERIAL,
+                fonts = state.fonts,
+                activeFontId = state.activeFontId,
+                collections = collections,
+                conflicts = conflicts,
+                onCollectionsChange = onCollectionsUpdate,
+                onOpenDetails = onOpenDetails,
+                onDismiss = { showManagement = false },
+            )
+        }
     }
 
     detailFont?.let { font ->
