@@ -25,9 +25,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  android-10-cold-start:
+  cold-start:
+    name: Android ${{ matrix.api-level }} cold start
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [29, 35]
     steps:
       - uses: actions/checkout@v4
 
@@ -66,21 +71,21 @@ jobs:
           LUOSHU_KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
         run: gradle --no-daemon --stacktrace :app:assembleRelease
 
-      - name: Install and cold-start on Android 10
+      - name: Install and cold-start
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 29
+          api-level: ${{ matrix.api-level }}
           arch: x86_64
           profile: pixel_2
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
-          script: sh scripts/ui_startup_smoke.sh
+          script: sh scripts/ui_startup_smoke.sh android-app/app/build/outputs/apk/release/app-release.apk io.github.xgl34222220.luoshu dist/startup-smoke-${{ matrix.api-level }}
 
       - name: Upload startup diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: LuoShu-UI-startup-smoke
-          path: dist/startup-smoke/
+          name: LuoShu-UI-startup-smoke-${{ matrix.api-level }}
+          path: dist/startup-smoke-${{ matrix.api-level }}/
           if-no-files-found: warn
           retention-days: 7
