@@ -88,6 +88,32 @@ fun AppearanceSettingsRoute(
     onOpenThemeSettings: () -> Unit = {},
     onCloseThemeSettings: () -> Unit = {},
 ) {
+    when (settings.uiStyle) {
+        UiStyle.MIUIX -> AppearanceSettingsMiuix(
+            settings = settings,
+            actions = actions,
+            showThemeSettings = showThemeSettings,
+            onOpenThemeSettings = onOpenThemeSettings,
+            onCloseThemeSettings = onCloseThemeSettings,
+        )
+        UiStyle.MATERIAL -> AppearanceSettingsMaterial(
+            settings = settings,
+            actions = actions,
+            showThemeSettings = showThemeSettings,
+            onOpenThemeSettings = onOpenThemeSettings,
+            onCloseThemeSettings = onCloseThemeSettings,
+        )
+    }
+}
+
+@Composable
+private fun AppearanceSettingsMaterial(
+    settings: AppearanceSettings,
+    actions: AppearanceActions,
+    showThemeSettings: Boolean,
+    onOpenThemeSettings: () -> Unit,
+    onCloseThemeSettings: () -> Unit,
+) {
     AnimatedContent(
         targetState = showThemeSettings,
         modifier = Modifier.fillMaxSize(),
@@ -248,7 +274,7 @@ private fun ThemeSettingsPage(
         item {
             LuoShuPageHeader(
                 title = "主题设置",
-                subtitle = "同一页面骨架，两套系统级控件皮肤",
+                subtitle = "同一业务层，两套独立系统级控件",
                 leading = { LuoShuBackButton(onBack) },
             )
         }
