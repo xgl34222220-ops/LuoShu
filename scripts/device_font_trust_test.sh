@@ -37,8 +37,12 @@ mkdir -p "$AUTO_MOD/common" "$AUTO_MOD/config" "$AUTO_MOD/logs"
 cp "$ROOT/common/device_font_load_verify.sh" "$AUTO_MOD/common/"
 printf 'Composite Font\n' > "$AUTO_MOD/config/active_font.conf"
 printf 'state=confirmed\nfont=Composite Font\n' > "$AUTO_MOD/config/font-payload-boot.conf"
+set +e
 MODDIR="$AUTO_MOD" MODULE_DIR="$AUTO_MOD" \
     sh "$AUTO_MOD/common/device_font_load_verify.sh"
+AUTO_RC=$?
+set -e
+test "$AUTO_RC" -eq 2
 grep -q '^state=pending$' "$AUTO_MOD/config/device-font-load-verification.conf"
 grep -q '^mode=compatibility$' "$AUTO_MOD/config/device-font-load-verification.conf"
 grep -q '^reason=awaiting-visible-font-verification$' "$AUTO_MOD/config/device-font-load-verification.conf"
