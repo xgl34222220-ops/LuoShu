@@ -53,6 +53,19 @@ def fixture() -> tuple[dict, dict, list[dict]]:
     return payload, overlay, mounts
 
 
+def rendered(ratio: float = 1.0) -> dict:
+    comparable = 12
+    return {
+        "status": "ok",
+        "matched": round(comparable * ratio),
+        "comparable": comparable,
+        "ratio": ratio,
+        "missingActual": [],
+        "missingExpected": [],
+        "path": "/system/fonts/LuoShuSlot-abc.ttf",
+    }
+
+
 def main() -> None:
     payload, overlay, mounts = fixture()
     verified = verifier.verify(
@@ -60,18 +73,21 @@ def main() -> None:
         overlay,
         "Family google-sans-text file=/system/fonts/LuoShuSlot-abc.ttf LuoShuSlot-google-sans-text-400",
         mounts,
+        rendered(),
         "DemoFont",
         {"state": "installed", "templateKey": "trusted"},
     )
     assert verified["state"] == "verified", verified
     assert verified["mode"] == "aligned"
     assert verified["summary"]["dynamicFamilyHits"] == 1
+    assert "android-renderer-confirmed-generated-font" in verified["reasons"]
 
     missing_dynamic = verifier.verify(
         payload,
         overlay,
         "file=/system/fonts/LuoShuSlot-abc.ttf",
         mounts,
+        rendered(),
         "DemoFont",
         {"state": "installed"},
     )
@@ -83,14 +99,27 @@ def main() -> None:
         overlay,
         "",
         mounts,
+        {"status": "unavailable", "reason": "luoshu-app-not-installed"},
         "DemoFont",
         {"state": "installed"},
     )
-    assert unavailable_dump["state"] == "verified", unavailable_dump
-    assert unavailable_dump["mode"] == "mount-verified", unavailable_dump
+    assert unavailable_dump["state"] == "unverified", unavailable_dump
+    assert unavailable_dump["mode"] == "mount-only", unavailable_dump
     assert "font-manager-dump-unavailable" in unavailable_dump["reasons"]
     assert "dynamic-family-unconfirmed" in unavailable_dump["reasons"]
-    assert "verified-by-visible-mounts" in unavailable_dump["reasons"]
+    assert "visible-mounts-do-not-prove-font-selection" in unavailable_dump["reasons"]
+
+    renderer_mismatch = verifier.verify(
+        payload,
+        overlay,
+        "Family google-sans-text file=/system/fonts/LuoShuSlot-abc.ttf",
+        mounts,
+        rendered(0.0),
+        "DemoFont",
+        {"state": "installed"},
+    )
+    assert renderer_mismatch["state"] == "failed", renderer_mismatch
+    assert "android-renderer-does-not-match-generated-font" in renderer_mismatch["reasons"]
 
     bad_mounts = [dict(mounts[0], status="mismatch")]
     mismatch = verifier.verify(
@@ -98,6 +127,7 @@ def main() -> None:
         overlay,
         "Family google-sans-text file=/system/fonts/LuoShuSlot-abc.ttf",
         bad_mounts,
+        rendered(),
         "DemoFont",
         {"state": "installed"},
     )
