@@ -6,12 +6,17 @@ on:
       - fix/v2.3.8-stable-font-runtime
     paths:
       - .github/workflows/port-v239-stable-once.yml
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   port:
+    if: github.ref_name == 'fix/v2.3.8-stable-font-runtime' || github.head_ref == 'fix/v2.3.8-stable-font-runtime'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
