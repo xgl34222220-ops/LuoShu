@@ -95,7 +95,8 @@ luoshu_activation_rollback_apply() {
         "$_luar_module_dir/config/device-font-load-verification.conf" \
         "$_luar_module_dir/config/device-font-load-verification.json" \
         "$_luar_module_dir/config/device-font-manager-dump.txt" \
-        "$_luar_module_dir/config/device-font-mount-evidence.txt" 2>/dev/null || true
+        "$_luar_module_dir/config/device-font-mount-evidence.txt" \
+        "$_luar_module_dir/config/device-font-render-evidence.json" 2>/dev/null || true
 
     {
         printf 'state=restored-default\n'
