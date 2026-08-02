@@ -22,6 +22,23 @@ DIGITS = tuple(map(ord, "0123456789"))
 PUNCTUATION = tuple(map(ord, ".,!?-:;()[]/+'\"，。！？：；（）【】《》、"))
 
 
+def required(role: str) -> tuple[int, ...]:
+    """Return the hard-required codepoints for a role.
+
+    Punctuation remains a scored compatibility group instead of a hard list so
+    decorative fonts are not rejected for one optional symbol.  CJK fonts must
+    still carry complete Latin and digit coverage because they become the base
+    face of the generated Android family.
+    """
+    if role == "cjk":
+        return CJK + LATIN + DIGITS
+    if role == "latin":
+        return LATIN
+    if role == "digit":
+        return DIGITS
+    raise ValueError(f"unsupported role: {role}")
+
+
 class RoleCheckError(RuntimeError):
     pass
 
