@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v2.0.0：在 Root 管理器中显示简洁的当前字体状态。
+# 洛书：在 Root 管理器中显示简洁且不夸大的当前字体状态。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -38,15 +38,19 @@ if [ "$ACTIVE" != default ]; then
     VERIFY_MODE=$(sed -n 's/^mode=//p' "$VERIFY" 2>/dev/null | head -n1)
     VERIFY_ACTIVE=$(sed -n 's/^activeFont=//p' "$VERIFY" 2>/dev/null | head -n1)
     MOUNT_STATE=$(sed -n 's/^state=//p' "$MODDIR/config/self-mount.conf" 2>/dev/null | head -n1)
-    if [ -f "$MODDIR/config/text_reboot_required.conf" ]; then
+    if [ -f "$MODDIR/config/font-activation-rollback.conf" ]; then
+        EFFECTIVE_DISPLAY="系统默认字体（$DISPLAY 检测异常，等待重启回滚）"
+    elif [ -f "$MODDIR/config/text_reboot_required.conf" ]; then
         EFFECTIVE_DISPLAY="已配置：$DISPLAY（等待重启）"
     elif [ "$MOUNT_STATE" = failed ] || [ "$VERIFY_STATE" = failed ]; then
         EFFECTIVE_DISPLAY="系统默认字体（$DISPLAY 未生效）"
     elif [ "$VERIFY_ACTIVE" = "$ACTIVE" ] && [ "$VERIFY_STATE" = verified ]; then
         case "$VERIFY_MODE" in
-            aligned|mount-verified) EFFECTIVE_DISPLAY="$DISPLAY" ;;
-            *) EFFECTIVE_DISPLAY="已配置：$DISPLAY（待验证）" ;;
+            aligned|render-verified|font-manager-verified) EFFECTIVE_DISPLAY="$DISPLAY" ;;
+            *) EFFECTIVE_DISPLAY="已配置：$DISPLAY（仅挂载，未确认系统选用）" ;;
         esac
+    elif [ "$VERIFY_MODE" = mount-only ]; then
+        EFFECTIVE_DISPLAY="已配置：$DISPLAY（仅挂载，未确认系统选用）"
     else
         EFFECTIVE_DISPLAY="已配置：$DISPLAY（待验证）"
     fi
