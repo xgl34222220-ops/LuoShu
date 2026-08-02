@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Verify that Android actually loaded a generated per-device font payload.
 
-Generation success is not enough. This verifier combines visible mount evidence,
-the payload/overlay manifests and FontManagerService's dump. It deliberately emits
-`unverified` instead of pretending success when neither runtime source provides evidence.
+Visible bind/overlay mounts prove only that bytes reached the system namespace;
+they do not prove that FontManager selected those files.  A result is therefore
+`verified` only when the visible payload is intact and FontManagerService reports
+one of LuoShu's generated files/families.  Mount-only evidence remains explicitly
+`unverified` so the App never claims success while the ROM is still rendering its
+default font.
 """
 from __future__ import annotations
 
@@ -14,9 +17,14 @@ import time
 from pathlib import Path
 from typing import Any
 
+from fontTools.ttLib import TTFont
+
 PAYLOAD_SCHEMA = "device-font-payload-v1"
 OVERLAY_SCHEMA = "device-font-overlay-v1"
-SCHEMA = "device-font-load-verification-v1"
+SCHEMA = "device-font-load-verification-v2"
+CJK = tuple(map(ord, "一丁七万三上下不与中为主人了二于五人今从他会但你作使入全国其分到前力十又只可同后和在地大天好学家小年心我日时有来民生的看种行要见言这"))
+LATIN = tuple(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
+DIGITS = tuple(map(ord, "0123456789"))
 
 
 class VerifyError(RuntimeError):
@@ -75,6 +83,76 @@ def dynamic_families(overlay: dict[str, Any]) -> list[str]:
     return result
 
 
+def usable_ratio(font: TTFont, probes: tuple[int, ...]) -> tuple[float, int]:
+    cmap = font.getBestCmap() or {}
+    glyph_order = set(font.getGlyphOrder())
+    names: set[str] = set()
+    hits = 0
+    for codepoint in probes:
+        glyph = cmap.get(codepoint)
+        if not glyph or glyph == ".notdef" or glyph not in glyph_order:
+            continue
+        hits += 1
+        names.add(glyph)
+    return (hits / len(probes) if probes else 1.0), len(names)
+
+
+def verify_global_slot_coverage(payload: dict[str, Any], mounts: list[dict[str, Any]]) -> dict[str, Any]:
+    mount_by_rel = {str(item.get("relative")): item for item in mounts}
+    wanted: set[str] = set()
+    for slot in payload.get("slots") or []:
+        if not isinstance(slot, dict):
+            continue
+        roles = {str(role) for role in slot.get("roles") or []}
+        if "global-ui" not in roles:
+            continue
+        generated = str(slot.get("generatedFile") or "")
+        if generated:
+            wanted.add(generated)
+    checked: list[str] = []
+    failed: list[str] = []
+    seen_fingerprints: set[str] = set()
+    for relative, mount in mount_by_rel.items():
+        if not wanted or Path(relative).name not in wanted:
+            continue
+        if mount.get("status") != "ok":
+            continue
+        fingerprint = str(mount.get("actualSha256") or relative)
+        if fingerprint in seen_fingerprints:
+            continue
+        seen_fingerprints.add(fingerprint)
+        visible = Path(str(mount.get("visible") or ""))
+        if not visible.is_file():
+            failed.append(relative)
+            continue
+        try:
+            font = TTFont(str(visible), lazy=True, recalcTimestamp=False)
+            try:
+                cjk_ratio, cjk_unique = usable_ratio(font, CJK)
+                latin_ratio, _ = usable_ratio(font, LATIN)
+                digit_ratio, _ = usable_ratio(font, DIGITS)
+            finally:
+                font.close()
+        except Exception:
+            failed.append(relative)
+            continue
+        checked.append(relative)
+        if not (
+            cjk_ratio >= 0.95
+            and cjk_unique >= max(12, int(len(CJK) * cjk_ratio * 0.75))
+            and latin_ratio == 1.0
+            and digit_ratio == 1.0
+        ):
+            failed.append(relative)
+        if len(checked) >= 8:
+            break
+    return {
+        "checked": checked,
+        "failed": failed,
+        "confirmed": bool(checked) and not failed,
+    }
+
+
 def verify(
     payload: dict[str, Any],
     overlay: dict[str, Any],
@@ -108,14 +186,18 @@ def verify(
     })
     dynamic = dynamic_families(overlay)
     dump_lower = font_dump.lower()
+    normalized_dump = normalize(dump_lower)
     file_hits = sorted(name for name in generated_files if name.lower() in dump_lower)
     slot_hits = sorted(name for name in slot_names if name in dump_lower)
-    dynamic_hits = sorted(name for name in dynamic if name in normalize(dump_lower) or name in dump_lower.replace("_", "-"))
+    dynamic_hits = sorted(name for name in dynamic if name in normalized_dump or name in dump_lower.replace("_", "-"))
     dynamic_missing = sorted(set(dynamic) - set(dynamic_hits))
+    coverage = verify_global_slot_coverage(payload, mounts)
 
     reasons: list[str] = []
-    state = "verified"
-    mode = "aligned"
+    state = "unverified"
+    mode = "mount-only"
+    if not expected_paths:
+        reasons.append("visible-font-manifest-empty")
     if missing_mounts:
         state = "failed"
         mode = "compatibility"
@@ -124,6 +206,10 @@ def verify(
         state = "failed"
         mode = "compatibility"
         reasons.append("visible-font-hash-mismatch")
+    if coverage["failed"]:
+        state = "failed"
+        mode = "compatibility"
+        reasons.append("runtime-global-face-incomplete")
 
     font_manager_confirmed = bool(file_hits or slot_hits)
     mount_confirmed = bool(expected_paths) and not missing_mounts and not bad_mounts
@@ -137,24 +223,18 @@ def verify(
             state = "failed"
             mode = "compatibility"
             reasons.append("dynamic-family-not-loaded")
-        elif mount_confirmed:
-            # A redacted/empty OEM dump cannot prove named dynamic families either way. Keep
-            # that limitation visible, but do not turn byte-identical visible mounts into a
-            # permanent failure state.
-            reasons.append("dynamic-family-unconfirmed")
         else:
-            state = "unverified"
-            mode = "compatibility"
             reasons.append("dynamic-family-unconfirmed")
-    if state != "failed" and not font_manager_confirmed:
-        if mount_confirmed:
-            # Some OEM builds redact generated family/file names from `cmd font dump`.
-            # At boot-complete, byte-identical files at every expected visible mount are
-            # still strong runtime evidence; expose that separately instead of leaving
-            # users permanently stuck at "pending".
+
+    if state != "failed":
+        if mount_confirmed and font_manager_confirmed:
             state = "verified"
-            mode = "mount-verified"
-            reasons.append("verified-by-visible-mounts")
+            mode = "font-manager-verified"
+            reasons.append("font-manager-confirmed-generated-font")
+        elif mount_confirmed:
+            state = "unverified"
+            mode = "mount-only"
+            reasons.append("visible-mounts-do-not-prove-font-selection")
         else:
             state = "unverified"
             mode = "compatibility"
@@ -177,6 +257,8 @@ def verify(
             "fontManagerSlotHits": len(slot_hits),
             "dynamicFamilies": len(dynamic),
             "dynamicFamilyHits": len(dynamic_hits),
+            "coverageSlotsChecked": len(coverage["checked"]),
+            "coverageSlotsFailed": len(coverage["failed"]),
             "mappedSlots": int(summary.get("mappedSlots") or 0),
         },
         "reasons": reasons,
@@ -187,6 +269,8 @@ def verify(
         "dynamicFamilies": dynamic,
         "dynamicFamilyHits": dynamic_hits,
         "dynamicFamilyMissing": dynamic_missing,
+        "coverageChecked": coverage["checked"],
+        "coverageFailed": coverage["failed"],
     }
 
 
