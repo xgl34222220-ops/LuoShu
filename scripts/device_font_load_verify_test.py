@@ -82,6 +82,8 @@ def main() -> None:
     assert verified["summary"]["dynamicFamilyHits"] == 1
     assert "android-renderer-confirmed-generated-font" in verified["reasons"]
 
+    # Some OEM FontManager dumps omit or rename dynamic families. A successful
+    # renderer comparison is stronger evidence and must not trigger rollback.
     missing_dynamic = verifier.verify(
         payload,
         overlay,
@@ -91,8 +93,9 @@ def main() -> None:
         "DemoFont",
         {"state": "installed"},
     )
-    assert missing_dynamic["state"] == "failed", missing_dynamic
-    assert "dynamic-family-not-loaded" in missing_dynamic["reasons"]
+    assert missing_dynamic["state"] == "verified", missing_dynamic
+    assert "dynamic-family-unconfirmed" in missing_dynamic["reasons"]
+    assert "android-renderer-confirmed-generated-font" in missing_dynamic["reasons"]
 
     unavailable_dump = verifier.verify(
         payload,
@@ -133,6 +136,29 @@ def main() -> None:
     )
     assert mismatch["state"] == "failed"
     assert "visible-font-hash-mismatch" in mismatch["reasons"]
+
+    # Host-only CI does not ship the module's embedded fontTools. Coverage
+    # inspection becomes unavailable rather than crashing the complete verifier.
+    previous_ttfont = verifier._TTFont
+    verifier._TTFont = None
+    try:
+        coverage_payload = dict(payload)
+        coverage_payload["slots"] = [dict(payload["slots"][0], roles=["global-ui"])]
+        host_result = verifier.verify(
+            coverage_payload,
+            overlay,
+            "Family google-sans-text file=/system/fonts/LuoShuSlot-abc.ttf",
+            mounts,
+            rendered(),
+            "DemoFont",
+            {"state": "installed"},
+        )
+        assert host_result["state"] == "verified", host_result
+        assert host_result["summary"]["coverageProbeUnavailable"] is True
+        assert "runtime-coverage-probe-unavailable" in host_result["reasons"]
+    finally:
+        verifier._TTFont = previous_ttfont
+
     print(json.dumps(verified["summary"], ensure_ascii=False, sort_keys=True))
 
 
