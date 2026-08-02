@@ -15,28 +15,39 @@ import kotlin.math.roundToInt
  * Small app_process entry point used by the module after boot.
  *
  * Android devices may expose several generated 400-weight slots (global UI,
- * clock, OEM named families). The probe compares all supplied candidates with
- * Typeface.DEFAULT and reports the best match, avoiding accidental selection of
- * a clock-only or app-specific slot.
+ * clock, OEM named families). The shell supplies one visible anchor; the probe
+ * also inspects sibling and known partition font directories, then reports the
+ * best Typeface.DEFAULT outline match instead of trusting the first slot.
  */
 object FontProbeCli {
     private val samples = listOf("洛", "书", "中", "文", "你", "好", "A", "a", "1", "0", "，", "。")
+    private val generatedRegular = Regex("^LuoShuSlot-.*-400\\.ttf$", RegexOption.IGNORE_CASE)
+    private val knownFontDirectories = listOf(
+        "/system/fonts",
+        "/system/system/fonts",
+        "/system_ext/fonts",
+        "/system/system_ext/fonts",
+        "/product/fonts",
+        "/system/product/fonts",
+        "/vendor/fonts",
+        "/odm/fonts",
+        "/my_product/fonts",
+        "/oplus_product/fonts",
+        "/mi_ext/fonts",
+    )
 
     @JvmStatic
     fun main(args: Array<String>) {
         val result = runCatching {
             require(args.isNotEmpty()) { "缺少待验证字体路径" }
-            val candidates = args.asSequence()
-                .map(::File)
-                .filter { file -> file.isFile && file.length() >= 4_096L }
-                .distinctBy(File::getCanonicalPath)
+            val candidates = discoverCandidates(args)
                 .map(::probe)
                 .toList()
             require(candidates.isNotEmpty()) { "没有可读取的 400 字重验证字体" }
             val best = candidates.maxWithOrNull(
                 compareBy<JSONObject> { item -> item.optDouble("ratio", 0.0) }
                     .thenBy { item -> item.optInt("comparable", 0) }
-                    .thenBy { item -> -item.optJSONArray("missingActual").length() },
+                    .thenBy { item -> -(item.optJSONArray("missingActual")?.length() ?: Int.MAX_VALUE) },
             ) ?: error("验证候选为空")
             best.put("candidates", candidates.size)
         }.getOrElse { error ->
@@ -45,6 +56,25 @@ object FontProbeCli {
                 .put("message", error.message ?: error.javaClass.simpleName)
         }
         println(result.toString())
+    }
+
+    private fun discoverCandidates(args: Array<String>): Sequence<File> {
+        val anchors = args.asSequence().map(::File).toList()
+        val directories = buildList {
+            addAll(knownFontDirectories.map(::File))
+            anchors.mapNotNullTo(this) { file -> file.parentFile }
+        }
+        return sequence {
+            yieldAll(anchors)
+            directories.forEach { directory ->
+                val siblings = directory.listFiles { file ->
+                    file.isFile && generatedRegular.matches(file.name)
+                }
+                if (siblings != null) yieldAll(siblings.asSequence())
+            }
+        }
+            .filter { file -> file.isFile && file.length() >= 4_096L }
+            .distinctBy { file -> file.canonicalPath }
     }
 
     private fun probe(file: File): JSONObject {
