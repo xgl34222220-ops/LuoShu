@@ -1,8 +1,8 @@
 #!/system/bin/sh
 # Verify the active LuoShu payload after Android boot.
-# A successful mount is recorded as mount-only until FontManagerService confirms
-# a generated LuoShu file/family.  Hard integrity failures schedule a safe
-# next-boot rollback; unconfirmed OEM dumps never trigger rollback by themselves.
+# Mounts are only transport evidence.  When the matching LuoShu App is installed,
+# app_process compares Typeface.DEFAULT glyph outlines with the generated 400-weight
+# font; otherwise FontManagerService evidence remains the compatibility fallback.
 set +e
 
 _dfload_module() {
@@ -221,6 +221,76 @@ _dfload_mount_evidence() {
     chmod 0600 "$_dfload_output" 2>/dev/null || true
 }
 
+_dfload_write_render_unavailable() {
+    _dfload_output="$1"
+    _dfload_reason="$2"
+    printf '{"status":"unavailable","reason":"%s"}\n' "$_dfload_reason" > "${_dfload_output}.tmp.$$" 2>/dev/null || return 1
+    mv -f "${_dfload_output}.tmp.$$" "$_dfload_output" 2>/dev/null || return 1
+    chmod 0600 "$_dfload_output" 2>/dev/null || true
+}
+
+_dfload_app_apk() {
+    for _dfload_package in io.github.xgl34222220.luoshu io.github.xgl34222220.luoshu.debug; do
+        _dfload_package_lines=''
+        if command -v cmd >/dev/null 2>&1; then
+            _dfload_package_lines=$(cmd package path "$_dfload_package" 2>/dev/null)
+        fi
+        if [ -z "$_dfload_package_lines" ] && command -v pm >/dev/null 2>&1; then
+            _dfload_package_lines=$(pm path "$_dfload_package" 2>/dev/null)
+        fi
+        _dfload_apk=$(printf '%s\n' "$_dfload_package_lines" | sed -n 's/^package://p' | head -n1)
+        [ -f "$_dfload_apk" ] && {
+            printf '%s\n' "$_dfload_apk"
+            return 0
+        }
+    done
+    return 1
+}
+
+_dfload_render_probe() {
+    _dfload_mounts="$1"
+    _dfload_output="$2"
+    rm -f "$_dfload_output" "${_dfload_output}.tmp.$$" 2>/dev/null || true
+    _dfload_probe_path=$(awk -F'|' '$3 == "ok" && $2 ~ /\/LuoShuSlot-.*-400\.ttf$/ { print $2; exit }' "$_dfload_mounts" 2>/dev/null)
+    if [ -z "$_dfload_probe_path" ] || [ ! -f "$_dfload_probe_path" ]; then
+        _dfload_write_render_unavailable "$_dfload_output" no-global-400-probe-font
+        return 2
+    fi
+    _dfload_apk=$(_dfload_app_apk) || {
+        _dfload_write_render_unavailable "$_dfload_output" luoshu-app-not-installed
+        return 2
+    }
+    command -v app_process >/dev/null 2>&1 || {
+        _dfload_write_render_unavailable "$_dfload_output" app-process-unavailable
+        return 2
+    }
+
+    _dfload_raw="${_dfload_output}.raw.$$"
+    rm -f "$_dfload_raw" 2>/dev/null || true
+    if command -v timeout >/dev/null 2>&1; then
+        CLASSPATH="$_dfload_apk" timeout 20 app_process /system/bin \
+            io.github.xgl34222220.luoshu.FontProbeCli "$_dfload_probe_path" > "$_dfload_raw" 2>/dev/null
+    elif command -v toybox >/dev/null 2>&1 && toybox timeout --help >/dev/null 2>&1; then
+        CLASSPATH="$_dfload_apk" toybox timeout 20 app_process /system/bin \
+            io.github.xgl34222220.luoshu.FontProbeCli "$_dfload_probe_path" > "$_dfload_raw" 2>/dev/null
+    else
+        CLASSPATH="$_dfload_apk" app_process /system/bin \
+            io.github.xgl34222220.luoshu.FontProbeCli "$_dfload_probe_path" > "$_dfload_raw" 2>/dev/null
+    fi
+    _dfload_probe_rc=$?
+    _dfload_json_line=$(tail -n1 "$_dfload_raw" 2>/dev/null | tr -d '\r')
+    rm -f "$_dfload_raw" 2>/dev/null || true
+    if [ "$_dfload_probe_rc" -ne 0 ] || ! printf '%s' "$_dfload_json_line" | grep -q '^{' || \
+       ! printf '%s' "$_dfload_json_line" | grep -q '"status"'; then
+        _dfload_write_render_unavailable "$_dfload_output" android-render-probe-execution-failed
+        return 2
+    fi
+    printf '%s\n' "$_dfload_json_line" > "${_dfload_output}.tmp.$$" 2>/dev/null || return 1
+    mv -f "${_dfload_output}.tmp.$$" "$_dfload_output" 2>/dev/null || return 1
+    chmod 0600 "$_dfload_output" 2>/dev/null || true
+    return 0
+}
+
 _dfload_write_conf_from_json() {
     _dfload_json_file="$1"
     _dfload_conf="$2"
@@ -261,7 +331,7 @@ _dfload_schedule_rollback() {
     _dfload_reason="$1"
     _dfload_active_font="$2"
     case "$_dfload_reason" in
-        visible-mount-evidence-missing|visible-font-hash-mismatch|runtime-global-face-incomplete|dynamic-family-not-loaded|self-mount-not-visible|self-mount-failed) ;;
+        visible-mount-evidence-missing|visible-font-hash-mismatch|runtime-global-face-incomplete|runtime-render-missing-glyph|android-renderer-does-not-match-generated-font|dynamic-family-not-loaded|self-mount-not-visible|self-mount-failed) ;;
         *) return 0 ;;
     esac
     _dfload_module_dir="$(_dfload_module)"
@@ -312,15 +382,18 @@ device_font_load_verify() {
 
     _dfload_dump="$_dfload_config/device-font-manager-dump.txt"
     _dfload_mounts="$_dfload_config/device-font-mount-evidence.txt"
+    _dfload_render="$_dfload_config/device-font-render-evidence.json"
     _dfload_json="$_dfload_config/device-font-load-verification.json"
     _dfload_conf="$_dfload_config/device-font-load-verification.conf"
     _dfload_dump_font_manager "$_dfload_dump"
     _dfload_mount_evidence "$_dfload_mounts" || true
+    _dfload_render_probe "$_dfload_mounts" "$_dfload_render" || true
     _dfload_result=$(_dfload_python \
         --payload "$_dfload_payload" \
         --overlay "$_dfload_overlay" \
         --font-dump "$_dfload_dump" \
         --mount-evidence "$_dfload_mounts" \
+        --render-evidence "$_dfload_render" \
         --engine-state "$_dfload_engine_state" \
         --active-font "$_dfload_active_font" \
         --output "$_dfload_json" 2>> "$_dfload_module_dir/logs/device-font-load-verify.log")
@@ -334,8 +407,8 @@ device_font_load_verify() {
     _dfload_reason=$(_dfload_read "$_dfload_conf" reason)
     [ "$_dfload_state" != failed ] || _dfload_schedule_rollback "$_dfload_reason" "$_dfload_active_font"
     case "$_dfload_state" in
-        verified) _dfload_log "FontManager 已确认加载设备对齐字体：$_dfload_active_font" ;;
-        unverified) _dfload_log "字体挂载可见但系统未提供选用证据：$_dfload_result" ;;
+        verified) _dfload_log "Android 渲染器或 FontManager 已确认设备字体：$_dfload_active_font" ;;
+        unverified) _dfload_log "字体挂载可见但系统选用仍未确认：$_dfload_result" ;;
         *) _dfload_log "设备字体加载验证失败：$_dfload_result" ;;
     esac
     return "$_dfload_rc"
