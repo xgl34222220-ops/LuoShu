@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Deep verification for a generated LuoShu device font payload.
 
-A visible mount proves only that bytes reached Android's namespace.  The result is
-reported as verified only when the mounted payload is intact, its global UI face
-still has complete text coverage, and FontManagerService names a generated LuoShu
-file or family.  Mount-only evidence remains unverified.
+Visible mounts prove only that bytes reached Android's namespace.  The strongest
+proof is a glyph-outline comparison performed inside Android through app_process:
+Typeface.DEFAULT must render the same normalized outlines as LuoShu's generated
+400-weight global UI font.  FontManagerService evidence remains a compatibility
+fallback when the matching App build is not installed yet.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from fontTools.ttLib import TTFont
 
 PAYLOAD_SCHEMA = "device-font-payload-v1"
 OVERLAY_SCHEMA = "device-font-overlay-v1"
-SCHEMA = "device-font-load-verification-v2"
+SCHEMA = "device-font-load-verification-v3"
 CJK = tuple(map(ord, "一丁七万三上下不与中为主人了二于五人今从他会但你作使入全国其分到前力十又只可同后和在地大天好学家小年心我日时有来民生的看种行要见言这"))
 LATIN = tuple(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
 DIGITS = tuple(map(ord, "0123456789"))
@@ -44,6 +45,16 @@ def load_json(path: Path, schema: str) -> dict[str, Any]:
     if value.get("schema") != schema:
         raise VerifyError(f"不支持的清单：{path.name} schema={value.get('schema')!r}")
     return value
+
+
+def load_optional_json(path: Path) -> dict[str, Any]:
+    if not path.is_file() or path.stat().st_size < 2:
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        return value if isinstance(value, dict) else {}
+    except Exception:
+        return {}
 
 
 def load_mounts(path: Path) -> list[dict[str, Any]]:
@@ -136,11 +147,36 @@ def verify_global_coverage(payload: dict[str, Any], mounts: list[dict[str, Any]]
     return {"checked": checked, "failed": failed}
 
 
+def render_assessment(render: dict[str, Any]) -> dict[str, Any]:
+    status = str(render.get("status") or "unavailable")
+    comparable = int(render.get("comparable") or 0)
+    matched = int(render.get("matched") or 0)
+    ratio = float(render.get("ratio") or 0.0)
+    missing_actual = render.get("missingActual") if isinstance(render.get("missingActual"), list) else []
+    missing_expected = render.get("missingExpected") if isinstance(render.get("missingExpected"), list) else []
+    available = status == "ok" and comparable >= 8
+    return {
+        "status": status,
+        "available": available,
+        "confirmed": available and ratio >= 0.75 and not missing_actual and not missing_expected,
+        "mismatch": available and ratio < 0.25,
+        "inconclusive": available and 0.25 <= ratio < 0.75,
+        "missingActual": missing_actual,
+        "missingExpected": missing_expected,
+        "matched": matched,
+        "comparable": comparable,
+        "ratio": ratio,
+        "path": str(render.get("path") or ""),
+        "reason": str(render.get("reason") or render.get("message") or ""),
+    }
+
+
 def verify(
     payload: dict[str, Any],
     overlay: dict[str, Any],
     font_dump: str,
     mounts: list[dict[str, Any]],
+    render_evidence: dict[str, Any],
     active_font: str,
     engine: dict[str, str],
 ) -> dict[str, Any]:
@@ -175,6 +211,7 @@ def verify(
     dynamic_hits = sorted(name for name in dynamic if name in normalized_dump or name in dump_lower.replace("_", "-"))
     dynamic_missing = sorted(set(dynamic) - set(dynamic_hits))
     coverage = verify_global_coverage(payload, mounts)
+    render = render_assessment(render_evidence)
 
     reasons: list[str] = []
     state = "unverified"
@@ -190,6 +227,12 @@ def verify(
     if coverage["failed"]:
         state, mode = "failed", "compatibility"
         reasons.append("runtime-global-face-incomplete")
+    if render["missingActual"] or render["missingExpected"]:
+        state, mode = "failed", "compatibility"
+        reasons.append("runtime-render-missing-glyph")
+    elif render["mismatch"]:
+        state, mode = "failed", "compatibility"
+        reasons.append("android-renderer-does-not-match-generated-font")
 
     font_manager_confirmed = bool(file_hits or slot_hits)
     mount_confirmed = bool(expected_paths) and not missing_mounts and not bad_mounts
@@ -206,9 +249,13 @@ def verify(
             reasons.append("dynamic-family-unconfirmed")
 
     if state != "failed":
-        if mount_confirmed and font_manager_confirmed:
-            # Keep the historical `aligned` public mode so existing App builds
-            # understand the stronger verifier without treating it as unknown.
+        if render["confirmed"] and mount_confirmed:
+            state, mode = "verified", "aligned"
+            reasons.append("android-renderer-confirmed-generated-font")
+        elif render["inconclusive"]:
+            state, mode = "unverified", "render-inconclusive"
+            reasons.append("android-renderer-result-inconclusive")
+        elif mount_confirmed and font_manager_confirmed:
             state, mode = "verified", "aligned"
             reasons.append("font-manager-confirmed-generated-font")
         elif mount_confirmed:
@@ -216,6 +263,9 @@ def verify(
             reasons.append("visible-mounts-do-not-prove-font-selection")
         else:
             state, mode = "unverified", "compatibility"
+
+    if not render["available"]:
+        reasons.append("android-render-probe-unavailable")
 
     summary = overlay.get("summary") if isinstance(overlay.get("summary"), dict) else {}
     return {
@@ -237,6 +287,9 @@ def verify(
             "dynamicFamilyHits": len(dynamic_hits),
             "coverageSlotsChecked": len(coverage["checked"]),
             "coverageSlotsFailed": len(coverage["failed"]),
+            "renderMatched": int(render["matched"]),
+            "renderComparable": int(render["comparable"]),
+            "renderRatio": float(render["ratio"]),
             "mappedSlots": int(summary.get("mappedSlots") or 0),
         },
         "reasons": reasons,
@@ -249,6 +302,7 @@ def verify(
         "dynamicFamilyMissing": dynamic_missing,
         "coverageChecked": coverage["checked"],
         "coverageFailed": coverage["failed"],
+        "render": render,
     }
 
 
@@ -278,6 +332,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--overlay", required=True, type=Path)
     parser.add_argument("--font-dump", required=True, type=Path)
     parser.add_argument("--mount-evidence", required=True, type=Path)
+    parser.add_argument("--render-evidence", required=True, type=Path)
     parser.add_argument("--engine-state", required=True, type=Path)
     parser.add_argument("--active-font", default="unknown")
     parser.add_argument("--output", required=True, type=Path)
@@ -292,6 +347,7 @@ def main() -> int:
             load_json(args.overlay, OVERLAY_SCHEMA),
             args.font_dump.read_text(encoding="utf-8", errors="replace") if args.font_dump.is_file() else "",
             load_mounts(args.mount_evidence),
+            load_optional_json(args.render_evidence),
             args.active_font,
             parse_engine(args.engine_state),
         )
