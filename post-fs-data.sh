@@ -11,6 +11,16 @@ _lpf_temp="$MODDIR/.post-fs-data-v227.$$.sh"
 [ -f "$MODDIR/common/private_payload.sh" ] && . "$MODDIR/common/private_payload.sh"
 luoshu_private_mount_module_view "$MODDIR" >/dev/null 2>&1 || true
 
+# A hard failure detected after the previous boot is consumed before any font
+# target is mounted.  This guarantees the next boot starts from the complete ROM
+# font tree instead of attempting to hot-unmount fonts from running processes.
+if [ -f "$MODDIR/common/font_activation_rollback.sh" ]; then
+    . "$MODDIR/common/font_activation_rollback.sh"
+    type luoshu_activation_rollback_pending >/dev/null 2>&1 && \
+       luoshu_activation_rollback_pending && \
+       luoshu_activation_rollback_apply >/dev/null 2>&1 || true
+fi
+
 sed '$d' "$_lpf_base" > "$_lpf_temp" 2>/dev/null || exit 0
 . "$_lpf_temp"
 _lpf_rc=$?
