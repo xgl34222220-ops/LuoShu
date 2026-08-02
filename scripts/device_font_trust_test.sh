@@ -30,46 +30,68 @@ assert "verified-by-visible-mounts" in payload["reasons"], payload
 assert "dynamic-family-unconfirmed" in payload["reasons"], payload
 PY
 
-# Normal boot status must not invoke mount traversal or Python. A confirmed transaction
-# is enough to expose the active font after the reboot requested by the switch task.
+# A confirmed transaction alone is no longer enough. Until the deep verifier has
+# checked visible font files, the lightweight status must remain pending.
 AUTO_MOD="$TMP/auto-module"
 mkdir -p "$AUTO_MOD/common" "$AUTO_MOD/config" "$AUTO_MOD/logs"
 cp "$ROOT/common/device_font_load_verify.sh" "$AUTO_MOD/common/"
 printf 'Composite Font\n' > "$AUTO_MOD/config/active_font.conf"
 printf 'state=confirmed\nfont=Composite Font\n' > "$AUTO_MOD/config/font-payload-boot.conf"
+set +e
+MODDIR="$AUTO_MOD" MODULE_DIR="$AUTO_MOD" \
+    sh "$AUTO_MOD/common/device_font_load_verify.sh"
+AUTO_RC=$?
+set -e
+test "$AUTO_RC" -eq 2
+grep -q '^state=pending$' "$AUTO_MOD/config/device-font-load-verification.conf"
+grep -q '^mode=compatibility$' "$AUTO_MOD/config/device-font-load-verification.conf"
+grep -q '^reason=awaiting-visible-font-verification$' "$AUTO_MOD/config/device-font-load-verification.conf"
+
+# A matching deep-verification record may be reused without rescanning on every App open.
+cat > "$AUTO_MOD/config/device-font-load-verification.conf" <<'EOF_VERIFIED'
+state=verified
+mode=mount-verified
+activeFont=Composite Font
+reason=visible-font-files-match
+EOF_VERIFIED
 MODDIR="$AUTO_MOD" MODULE_DIR="$AUTO_MOD" \
     sh "$AUTO_MOD/common/device_font_load_verify.sh"
 grep -q '^state=verified$' "$AUTO_MOD/config/device-font-load-verification.conf"
-grep -q '^mode=mount-verified$' "$AUTO_MOD/config/device-font-load-verification.conf"
-grep -q '^reason=boot-transaction-confirmed$' "$AUTO_MOD/config/device-font-load-verification.conf"
+grep -q '^activeFont=Composite Font$' "$AUTO_MOD/config/device-font-load-verification.conf"
 
-# The expensive verifier remains available only as an explicit diagnostic command.
+# Compatibility verification must compare actual files in the visible namespace,
+# not trust self-mount.conf or a synthetic mount callback.
 COMPAT_MOD="$TMP/compat-module"
-mkdir -p "$COMPAT_MOD/common" "$COMPAT_MOD/config" "$COMPAT_MOD/logs"
+VISIBLE_ROOT="$TMP/visible-root"
+mkdir -p "$COMPAT_MOD/common" "$COMPAT_MOD/config" "$COMPAT_MOD/logs" \
+    "$COMPAT_MOD/system/fonts" "$VISIBLE_ROOT/system/fonts"
 cp "$ROOT/common/device_font_load_verify.sh" "$COMPAT_MOD/common/"
-cat > "$COMPAT_MOD/common/mount_compat.sh" <<'EOF_MOUNT_OK'
-luoshu_mount_verify_active() { return 0; }
-EOF_MOUNT_OK
 printf 'Composite Font\n' > "$COMPAT_MOD/config/active_font.conf"
-MODDIR="$COMPAT_MOD" MODULE_DIR="$COMPAT_MOD" \
+python3 - "$COMPAT_MOD/system/fonts/Roboto-Regular.ttf" "$VISIBLE_ROOT/system/fonts/Roboto-Regular.ttf" <<'PY_FONT'
+from pathlib import Path
+import sys
+payload = (b"LuoShu-visible-font-test" * 4096) + b"END"
+Path(sys.argv[1]).write_bytes(payload)
+Path(sys.argv[2]).write_bytes(payload)
+PY_FONT
+printf '%s\n' 'system/fonts/Roboto-Regular.ttf|0|0' > "$COMPAT_MOD/config/font-payload-manifest.conf"
+MODDIR="$COMPAT_MOD" MODULE_DIR="$COMPAT_MOD" LUOSHU_VISIBLE_ROOT="$VISIBLE_ROOT" \
     sh "$COMPAT_MOD/common/device_font_load_verify.sh" verify
 grep -q '^state=verified$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 grep -q '^mode=mount-verified$' "$COMPAT_MOD/config/device-font-load-verification.conf"
-grep -q '^reason=verified-by-visible-mounts$' "$COMPAT_MOD/config/device-font-load-verification.conf"
+grep -q '^reason=visible-font-files-match$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 
-# A missing/partial PID 1 mount remains a hard failure in explicit diagnostics.
-cat > "$COMPAT_MOD/common/mount_compat.sh" <<'EOF_MOUNT_FAIL'
-luoshu_mount_verify_active() { return 1; }
-EOF_MOUNT_FAIL
+# A visible ROM/default file with different bytes remains a hard failure.
+printf 'different-visible-font\n' > "$VISIBLE_ROOT/system/fonts/Roboto-Regular.ttf"
 set +e
-MODDIR="$COMPAT_MOD" MODULE_DIR="$COMPAT_MOD" \
+MODDIR="$COMPAT_MOD" MODULE_DIR="$COMPAT_MOD" LUOSHU_VISIBLE_ROOT="$VISIBLE_ROOT" \
     sh "$COMPAT_MOD/common/device_font_load_verify.sh" verify
 VERIFY_RC=$?
 set -e
 test "$VERIFY_RC" -eq 1
 grep -q '^state=failed$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 grep -q '^mode=compatibility$' "$COMPAT_MOD/config/device-font-load-verification.conf"
-grep -q '^reason=self-mount-not-visible$' "$COMPAT_MOD/config/device-font-load-verification.conf"
+grep -q '^reason=visible-font-files-mismatch$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 
 # The legacy worker remains callable for manual diagnostics, but boot scripts must not schedule it.
 MOD="$TMP/module"
