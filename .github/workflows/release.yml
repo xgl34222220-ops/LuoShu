@@ -227,11 +227,7 @@ jobs:
           set -euo pipefail
           args=(--target "$VERSION" --enforce)
           if [[ "$PRERELEASE" != 'true' ]]; then
-            if [[ "$VERSION" == 'v2.3.9' && "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF_NAME" == 'main' ]]; then
-              echo '::warning::v2.3.9 is being published under an explicit one-time maintainer authorization. The real-device matrix remains pending and is recorded as a readiness warning; no device result is being fabricated.'
-            else
-              args+=(--stable)
-            fi
+            args+=(--stable)
           fi
           sh ./scripts/pre_release_readiness.sh "${args[@]}"
 
