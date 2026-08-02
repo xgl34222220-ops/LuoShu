@@ -13,6 +13,7 @@ EOF_OVERLAY
 : > "$TMP/font-dump.txt"
 printf '%s\n' 'system/fonts/Roboto-Regular.ttf|/system/fonts/Roboto-Regular.ttf|ok|abc|abc|8192' > "$TMP/mounts.conf"
 printf '%s\n' 'state=installed' > "$TMP/engine.conf"
+set +e
 python3 "$ROOT/common/device_font_load_verify.py" \
     --payload "$TMP/payload.json" \
     --overlay "$TMP/overlay.json" \
@@ -21,29 +22,38 @@ python3 "$ROOT/common/device_font_load_verify.py" \
     --engine-state "$TMP/engine.conf" \
     --active-font test \
     --output "$TMP/result.json" >/dev/null
+VERIFY_RC=$?
+set -e
+test "$VERIFY_RC" -eq 2
 python3 - "$TMP/result.json" <<'PY'
 import json, sys
 payload = json.load(open(sys.argv[1], encoding="utf-8"))
-assert payload["state"] == "verified", payload
-assert payload["mode"] == "mount-verified", payload
-assert "verified-by-visible-mounts" in payload["reasons"], payload
+assert payload["state"] == "unverified", payload
+assert payload["mode"] == "mount-only", payload
+assert "visible-mounts-do-not-prove-font-selection" in payload["reasons"], payload
 assert "dynamic-family-unconfirmed" in payload["reasons"], payload
+assert "android-render-probe-unavailable" in payload["reasons"], payload
 PY
 
-# Normal boot status must not invoke mount traversal or Python. A confirmed transaction
-# is enough to expose the active font after the reboot requested by the switch task.
+# Read-only status may observe a confirmed mount transaction, but it must not
+# claim that Android selected the generated font without renderer/FontManager proof.
 AUTO_MOD="$TMP/auto-module"
 mkdir -p "$AUTO_MOD/common" "$AUTO_MOD/config" "$AUTO_MOD/logs"
 cp "$ROOT/common/device_font_load_verify.sh" "$AUTO_MOD/common/"
 printf 'Composite Font\n' > "$AUTO_MOD/config/active_font.conf"
 printf 'state=confirmed\nfont=Composite Font\n' > "$AUTO_MOD/config/font-payload-boot.conf"
+set +e
 MODDIR="$AUTO_MOD" MODULE_DIR="$AUTO_MOD" \
-    sh "$AUTO_MOD/common/device_font_load_verify.sh"
-grep -q '^state=verified$' "$AUTO_MOD/config/device-font-load-verification.conf"
-grep -q '^mode=mount-verified$' "$AUTO_MOD/config/device-font-load-verification.conf"
-grep -q '^reason=boot-transaction-confirmed$' "$AUTO_MOD/config/device-font-load-verification.conf"
+    sh "$AUTO_MOD/common/device_font_load_verify.sh" status
+STATUS_RC=$?
+set -e
+test "$STATUS_RC" -eq 2
+grep -q '^state=unverified$' "$AUTO_MOD/config/device-font-load-verification.conf"
+grep -q '^mode=mount-only$' "$AUTO_MOD/config/device-font-load-verification.conf"
+grep -q '^reason=visible-mounts-do-not-prove-font-selection$' "$AUTO_MOD/config/device-font-load-verification.conf"
 
-# The expensive verifier remains available only as an explicit diagnostic command.
+# Explicit diagnostics with a visible mount but no aligned manifest remain
+# unverified rather than inventing a successful runtime state.
 COMPAT_MOD="$TMP/compat-module"
 mkdir -p "$COMPAT_MOD/common" "$COMPAT_MOD/config" "$COMPAT_MOD/logs"
 cp "$ROOT/common/device_font_load_verify.sh" "$COMPAT_MOD/common/"
@@ -51,11 +61,15 @@ cat > "$COMPAT_MOD/common/mount_compat.sh" <<'EOF_MOUNT_OK'
 luoshu_mount_verify_active() { return 0; }
 EOF_MOUNT_OK
 printf 'Composite Font\n' > "$COMPAT_MOD/config/active_font.conf"
+set +e
 MODDIR="$COMPAT_MOD" MODULE_DIR="$COMPAT_MOD" \
     sh "$COMPAT_MOD/common/device_font_load_verify.sh" verify
-grep -q '^state=verified$' "$COMPAT_MOD/config/device-font-load-verification.conf"
-grep -q '^mode=mount-verified$' "$COMPAT_MOD/config/device-font-load-verification.conf"
-grep -q '^reason=verified-by-visible-mounts$' "$COMPAT_MOD/config/device-font-load-verification.conf"
+VERIFY_RC=$?
+set -e
+test "$VERIFY_RC" -eq 2
+grep -q '^state=unverified$' "$COMPAT_MOD/config/device-font-load-verification.conf"
+grep -q '^mode=mount-only$' "$COMPAT_MOD/config/device-font-load-verification.conf"
+grep -q '^reason=aligned-manifest-unavailable$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 
 # A missing/partial PID 1 mount remains a hard failure in explicit diagnostics.
 cat > "$COMPAT_MOD/common/mount_compat.sh" <<'EOF_MOUNT_FAIL'
@@ -78,7 +92,7 @@ cp "$ROOT/common/device_font_boot_verify.sh" "$MOD/common/"
 cp "$ROOT/common/background_task.sh" "$MOD/common/"
 cat > "$MOD/common/device_font_load_verify.sh" <<'EOF_VERIFY'
 #!/bin/sh
-printf 'state=verified\nmode=mount-verified\nactiveFont=test\n' > "$MODDIR/config/device-font-load-verification.conf"
+printf 'state=verified\nmode=aligned\nactiveFont=test\n' > "$MODDIR/config/device-font-load-verification.conf"
 exit 0
 EOF_VERIFY
 chmod +x "$MOD/common/"*.sh
