@@ -71,8 +71,13 @@ EOF_LUOSHU_RUNTIME_INVENTORY
     if [ "$_lria_count" -gt 0 ]; then
         LUOSHU_INVENTORY_TARGETS_MAPPED=1
         export LUOSHU_INVENTORY_TARGETS_MAPPED
-        type _log_step >/dev/null 2>&1 && \
-            _log_step "  已补齐 $_lria_count 个本机原厂字体槽位${_lria_bad:+，异常=$_lria_bad}"
+        if type _log_step >/dev/null 2>&1; then
+            if [ "$_lria_bad" -gt 0 ]; then
+                _log_step "  已补齐 $_lria_count 个本机原厂字体槽位，$_lria_bad 个槽位跳过"
+            else
+                _log_step "  已补齐 $_lria_count 个本机原厂字体槽位"
+            fi
+        fi
         return 0
     fi
     return 2
@@ -112,9 +117,10 @@ apply_font_by_rom() {
     # XML metric shell.  Other ROMs may safely add the generated XML view.
     if [ "${IS_HYPEROS:-false}" != true ] && \
        type font_config_enable_for_payload >/dev/null 2>&1; then
-        font_config_enable_for_payload "$_lrh_family" || \
+        if ! font_config_enable_for_payload "$_lrh_family"; then
             type _log_step >/dev/null 2>&1 && \
-            _log_step '  设备没有可安全启用的字体 XML，继续使用文件槽映射'
+                _log_step '  设备没有可安全启用的字体 XML，继续使用文件槽映射'
+        fi
     fi
     return 0
 }
