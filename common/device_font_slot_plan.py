@@ -40,14 +40,19 @@ def source_supports_slot(slot: dict[str, Any], source_profile: dict[str, Any]) -
 def slot_plan(slot: dict[str, Any], source_profile: dict[str, Any]) -> dict[str, Any]:
     result = _ORIGINAL_SLOT_PLAN(slot, source_profile)
     roles = set(slot.get("roles") or [])
+
+    # Preserve the base engine's established protected/fallback result for Emoji,
+    # symbols and scripts that LuoShu does not explicitly support. The additional
+    # coverage gate applies only to the newly eligible Chinese/Latin fallbacks.
+    if "protected" in roles or not roles.intersection(("fallback-cjk", "fallback-latin")):
+        return result
+
     if not source_supports_slot(slot, source_profile):
         result["status"] = "skipped"
         if "fallback-cjk" in roles:
             result["reason"] = "source-cjk-coverage-missing"
-        elif "fallback-latin" in roles:
-            result["reason"] = "source-latin-coverage-missing"
         else:
-            result["reason"] = "unsupported-fallback-script"
+            result["reason"] = "source-latin-coverage-missing"
         result["transforms"] = {}
         return result
 
