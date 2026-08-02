@@ -7,6 +7,15 @@ _dfload_module() {
     printf '%s\n' "${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
 }
 
+_dfload_visible_path() {
+    _dfload_rel="${1#/}"
+    if [ -n "${LUOSHU_VISIBLE_ROOT:-}" ]; then
+        printf '%s/%s\n' "${LUOSHU_VISIBLE_ROOT%/}" "$_dfload_rel"
+    else
+        printf '/%s\n' "$_dfload_rel"
+    fi
+}
+
 _dfload_hash_stream() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum 2>/dev/null | awk '{print $1}'
@@ -186,7 +195,7 @@ _dfload_compat_fonts_visible() {
         esac
         _dfload_seen=$((_dfload_seen + 1))
         _dfload_module_file="$_dfload_module_dir/$_dfload_rel"
-        _dfload_visible_file="/$_dfload_rel"
+        _dfload_visible_file=$(_dfload_visible_path "$_dfload_rel")
         [ -f "$_dfload_module_file" ] && [ -f "$_dfload_visible_file" ] || {
             _dfload_failed=$((_dfload_failed + 1))
             continue
