@@ -2,10 +2,50 @@
 from __future__ import annotations
 
 import sys
+import types
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "common"))
+
+# v2_source_audit runs before CI installs fontTools. The policy test exercises only
+# role/coverage/identity helpers, so lightweight import stubs keep this early gate
+# independent from the later real font-engine test environment.
+def module(name: str) -> types.ModuleType:
+    value = types.ModuleType(name)
+    sys.modules[name] = value
+    return value
+
+fonttools = module("fontTools")
+pens = module("fontTools.pens")
+bounds = module("fontTools.pens.boundsPen")
+recording = module("fontTools.pens.recordingPen")
+transform_pen = module("fontTools.pens.transformPen")
+tt_glyph_pen = module("fontTools.pens.ttGlyphPen")
+misc = module("fontTools.misc")
+transform = module("fontTools.misc.transform")
+ttlib = module("fontTools.ttLib")
+scale_upem = module("fontTools.ttLib.scaleUpem")
+varlib = module("fontTools.varLib")
+instancer = module("fontTools.varLib.instancer")
+
+class Dummy:
+    def __init__(self, *args, **kwargs):
+        pass
+
+bounds.BoundsPen = Dummy
+recording.DecomposingRecordingPen = Dummy
+transform_pen.TransformPen = Dummy
+tt_glyph_pen.TTGlyphPen = Dummy
+transform.Transform = Dummy
+ttlib.TTCollection = Dummy
+ttlib.TTFont = Dummy
+scale_upem.scale_upem = lambda *args, **kwargs: None
+instancer.instantiateVariableFont = lambda font, *args, **kwargs: font
+fonttools.pens = pens
+fonttools.misc = misc
+fonttools.ttLib = ttlib
+fonttools.varLib = varlib
 
 import device_font_payload_build as payload_build
 import device_font_slot_build as slot_build
