@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Materialize a font source at concrete variation-axis values for LuoShu v2.0.0.
+"""Materialize a font source at concrete variation-axis values for LuoShu.
 
 Variable fonts are pinned to every requested fvar axis. TTC/OTC collections are
-reduced to the face whose coverage and weight best match the requested role.
-Plain static TTF/OTF files may be copied by the shell wrapper without invoking
-this helper.
+reduced to one deterministic face whose coverage and weight satisfy the selected
+role.  The CJK face is the complete composite base, so it must also contain Latin,
+digits and common punctuation; a collection containing those scripts in separate
+faces is rejected instead of silently choosing an incomplete face.
 """
 from __future__ import annotations
 
@@ -14,15 +15,17 @@ import os
 import re
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from fontTools.ttLib import TTCollection, TTFont
 from fontTools.varLib.instancer import instantiateVariableFont
 
 from font_metrics_normalize import normalize_font_metrics
 
-CJK_PROBES = tuple(map(ord, "中文字体系统默认洛书汉字国一的。"))
+CJK_PROBES = tuple(map(ord, "一丁七万三上下不与中为主人了二于五人今从他会但你作使入全国其分到前力十又只可同后和在地大天好学家小年心我日时有来民生的看种行要见言这"))
 LATIN_PROBES = tuple(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
 DIGIT_PROBES = tuple(map(ord, "0123456789"))
+PUNCTUATION_PROBES = tuple(map(ord, ".,!?-:;()[]/+'\"，。！？：；（）【】《》、"))
 AXIS_TAG_RE = re.compile(r"^[ -~]{1,4}$")
 
 
@@ -35,6 +38,26 @@ def is_collection(path: Path) -> bool:
         return stream.read(4) == b"ttcf"
 
 
+def collection_count(path: Path) -> int:
+    if not is_collection(path):
+        return 1
+    collection = TTCollection(str(path), lazy=True)
+    try:
+        return len(collection.fonts)
+    finally:
+        collection.close()
+
+
+def open_face(path: Path, index: int, *, lazy: bool = True) -> TTFont:
+    kwargs: dict[str, Any] = {
+        "lazy": lazy,
+        "recalcTimestamp": False,
+    }
+    if is_collection(path):
+        kwargs["fontNumber"] = index
+    return TTFont(str(path), **kwargs)
+
+
 def font_weight(font: TTFont) -> int:
     try:
         return int(font["OS/2"].usWeightClass)
@@ -42,33 +65,79 @@ def font_weight(font: TTFont) -> int:
         return 400
 
 
-def face_score(font: TTFont, role: str, weight: int) -> tuple[int, int]:
+def usable(font: TTFont, probes: tuple[int, ...]) -> tuple[int, set[str]]:
     cmap = font.getBestCmap() or {}
-    probes = CJK_PROBES if role == "cjk" else LATIN_PROBES if role == "latin" else DIGIT_PROBES
-    hits = sum(1 for codepoint in probes if codepoint in cmap)
-    return hits, -abs(font_weight(font) - weight)
+    glyph_order = set(font.getGlyphOrder())
+    names: set[str] = set()
+    hits = 0
+    for codepoint in probes:
+        name = cmap.get(codepoint)
+        if not name or name == ".notdef" or name not in glyph_order:
+            continue
+        hits += 1
+        names.add(name)
+    return hits, names
+
+
+def coverage_profile(font: TTFont) -> dict[str, tuple[int, int, int]]:
+    result: dict[str, tuple[int, int, int]] = {}
+    for name, probes in (
+        ("cjk", CJK_PROBES),
+        ("latin", LATIN_PROBES),
+        ("digits", DIGIT_PROBES),
+        ("punctuation", PUNCTUATION_PROBES),
+    ):
+        hits, glyphs = usable(font, probes)
+        result[name] = hits, len(probes), len(glyphs)
+    return result
+
+
+def fraction(value: tuple[int, int, int]) -> float:
+    return value[0] / value[1] if value[1] else 1.0
+
+
+def face_valid(profile: dict[str, tuple[int, int, int]], role: str) -> bool:
+    if role == "cjk":
+        cjk_hits, _cjk_total, cjk_unique = profile["cjk"]
+        return (
+            fraction(profile["cjk"]) >= 0.95
+            and cjk_unique >= max(12, int(cjk_hits * 0.75))
+            and fraction(profile["latin"]) == 1.0
+            and fraction(profile["digits"]) == 1.0
+            and fraction(profile["punctuation"]) >= 0.85
+        )
+    if role == "latin":
+        return fraction(profile["latin"]) == 1.0
+    return fraction(profile["digits"]) == 1.0
+
+
+def face_score(font: TTFont, role: str, weight: int) -> tuple[int, float, int, int]:
+    profile = coverage_profile(font)
+    if role == "cjk":
+        selected = ("cjk", "latin", "digits", "punctuation")
+    elif role == "latin":
+        selected = ("latin",)
+    else:
+        selected = ("digits",)
+    score = sum(fraction(profile[name]) for name in selected)
+    hits = sum(profile[name][0] for name in selected)
+    return 1 if face_valid(profile, role) else 0, score, hits, -abs(font_weight(font) - weight)
 
 
 def pick_face(path: Path, role: str, weight: int) -> int:
-    if not is_collection(path):
-        return -1
-    collection = TTCollection(str(path), lazy=True)
-    try:
-        count = len(collection.fonts)
-    finally:
-        collection.close()
-    best: tuple[tuple[int, int], int] | None = None
-    for index in range(count):
-        font = TTFont(str(path), fontNumber=index, lazy=True, recalcTimestamp=False)
+    best: tuple[tuple[int, float, int, int], int] | None = None
+    for index in range(collection_count(path)):
+        font = open_face(path, index, lazy=True)
         try:
             score = face_score(font, role, weight)
         finally:
             font.close()
         if best is None or score > best[0]:
             best = score, index
-    if best is None or best[0][0] == 0:
-        raise InstanceError(f"无法从 {path.name} 中找到适合的{role}字体面")
-    return best[1]
+    if best is None or best[0][0] != 1:
+        role_name = {"cjk": "中文基底", "latin": "英文", "digit": "数字"}[role]
+        raise InstanceError(f"无法从 {path.name} 中找到覆盖完整的{role_name}字体面")
+    return best[1] if is_collection(path) else -1
 
 
 def clamp_weight(value: float | int) -> int:
@@ -121,6 +190,12 @@ def materialize(source: Path, output: Path, role: str, requested_weight: int, re
         elif requested_axes:
             ignored_axes = sorted(tag for tag in requested_axes if tag != "wght")
 
+        # Recheck after variable-font instancing.  A malformed variation table must
+        # never turn a previously valid face into an incomplete output unnoticed.
+        post_profile = coverage_profile(font)
+        if not face_valid(post_profile, role):
+            raise InstanceError("可变轴实例化后的字体面缺少该角色所需字形")
+
         final_weight = clamp_weight(location.get("wght", requested_weight))
         if "OS/2" in font:
             font["OS/2"].usWeightClass = final_weight
@@ -150,6 +225,10 @@ def materialize(source: Path, output: Path, role: str, requested_weight: int, re
             "variable": variable,
             "location": location,
             "ignoredAxes": ignored_axes,
+            "coverage": {
+                name: round(fraction(values) * 100)
+                for name, values in post_profile.items()
+            },
             "metrics": metrics,
             "size": output.stat().st_size,
         }
