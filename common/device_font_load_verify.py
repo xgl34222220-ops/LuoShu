@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Verify that Android actually loaded a generated per-device font payload.
+"""Deep verification for a generated LuoShu device font payload.
 
-Visible bind/overlay mounts prove only that bytes reached the system namespace;
-they do not prove that FontManager selected those files.  A result is therefore
-`verified` only when the visible payload is intact and FontManagerService reports
-one of LuoShu's generated files/families.  Mount-only evidence remains explicitly
-`unverified` so the App never claims success while the ROM is still rendering its
-default font.
+A visible mount proves only that bytes reached Android's namespace.  The result is
+reported as verified only when the mounted payload is intact, its global UI face
+still has complete text coverage, and FontManagerService names a generated LuoShu
+file or family.  Mount-only evidence remains unverified.
 """
 from __future__ import annotations
 
@@ -38,30 +36,27 @@ def normalize(value: str) -> str:
 def safe_family(slot: dict[str, Any]) -> str:
     family = str(slot.get("familyNormalized") or slot.get("family") or "luoshu-slot")
     safe = "".join(char if char.isalnum() else "-" for char in family).strip("-") or "LuoShuSlot"
-    weight = int(slot.get("weight") or 400)
-    return f"luoshuslot-{safe.lower()}-{weight}"
+    return f"luoshuslot-{safe.lower()}-{int(slot.get('weight') or 400)}"
 
 
 def load_json(path: Path, schema: str) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema") != schema:
-        raise VerifyError(f"不支持的清单：{path.name} schema={payload.get('schema')!r}")
-    return payload
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if value.get("schema") != schema:
+        raise VerifyError(f"不支持的清单：{path.name} schema={value.get('schema')!r}")
+    return value
 
 
-def load_mount_evidence(path: Path) -> list[dict[str, Any]]:
+def load_mounts(path: Path) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     if not path.is_file():
         return result
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if not raw.strip():
-            continue
         parts = raw.split("|", 5)
         if len(parts) != 6:
             continue
-        rel, visible, status, expected_hash, actual_hash, size = parts
+        relative, visible, status, expected_hash, actual_hash, size = parts
         result.append({
-            "relative": rel,
+            "relative": relative,
             "visible": visible,
             "status": status,
             "expectedSha256": expected_hash,
@@ -97,34 +92,26 @@ def usable_ratio(font: TTFont, probes: tuple[int, ...]) -> tuple[float, int]:
     return (hits / len(probes) if probes else 1.0), len(names)
 
 
-def verify_global_slot_coverage(payload: dict[str, Any], mounts: list[dict[str, Any]]) -> dict[str, Any]:
-    mount_by_rel = {str(item.get("relative")): item for item in mounts}
-    wanted: set[str] = set()
-    for slot in payload.get("slots") or []:
-        if not isinstance(slot, dict):
-            continue
-        roles = {str(role) for role in slot.get("roles") or []}
-        if "global-ui" not in roles:
-            continue
-        generated = str(slot.get("generatedFile") or "")
-        if generated:
-            wanted.add(generated)
+def verify_global_coverage(payload: dict[str, Any], mounts: list[dict[str, Any]]) -> dict[str, Any]:
+    wanted = {
+        str(slot.get("generatedFile"))
+        for slot in payload.get("slots") or []
+        if isinstance(slot, dict)
+        and "global-ui" in {str(role) for role in slot.get("roles") or []}
+        and slot.get("generatedFile")
+    }
     checked: list[str] = []
     failed: list[str] = []
-    seen_fingerprints: set[str] = set()
-    for relative, mount in mount_by_rel.items():
-        if not wanted or Path(relative).name not in wanted:
-            continue
-        if mount.get("status") != "ok":
+    seen: set[str] = set()
+    for mount in mounts:
+        relative = str(mount.get("relative") or "")
+        if Path(relative).name not in wanted or mount.get("status") != "ok":
             continue
         fingerprint = str(mount.get("actualSha256") or relative)
-        if fingerprint in seen_fingerprints:
+        if fingerprint in seen:
             continue
-        seen_fingerprints.add(fingerprint)
+        seen.add(fingerprint)
         visible = Path(str(mount.get("visible") or ""))
-        if not visible.is_file():
-            failed.append(relative)
-            continue
         try:
             font = TTFont(str(visible), lazy=True, recalcTimestamp=False)
             try:
@@ -133,24 +120,20 @@ def verify_global_slot_coverage(payload: dict[str, Any], mounts: list[dict[str, 
                 digit_ratio, _ = usable_ratio(font, DIGITS)
             finally:
                 font.close()
+            valid = (
+                cjk_ratio >= 0.95
+                and cjk_unique >= max(12, int(len(CJK) * cjk_ratio * 0.75))
+                and latin_ratio == 1.0
+                and digit_ratio == 1.0
+            )
         except Exception:
-            failed.append(relative)
-            continue
+            valid = False
         checked.append(relative)
-        if not (
-            cjk_ratio >= 0.95
-            and cjk_unique >= max(12, int(len(CJK) * cjk_ratio * 0.75))
-            and latin_ratio == 1.0
-            and digit_ratio == 1.0
-        ):
+        if not valid:
             failed.append(relative)
         if len(checked) >= 8:
             break
-    return {
-        "checked": checked,
-        "failed": failed,
-        "confirmed": bool(checked) and not failed,
-    }
+    return {"checked": checked, "failed": failed}
 
 
 def verify(
@@ -165,7 +148,7 @@ def verify(
     expected_paths = {
         str(item.get("path"))
         for item in copied
-        if isinstance(item, dict) and str(item.get("path") or "")
+        if isinstance(item, dict) and item.get("path")
     }
     mount_by_rel = {str(item.get("relative")): item for item in mounts}
     missing_mounts = sorted(path for path in expected_paths if path not in mount_by_rel)
@@ -191,7 +174,7 @@ def verify(
     slot_hits = sorted(name for name in slot_names if name in dump_lower)
     dynamic_hits = sorted(name for name in dynamic if name in normalized_dump or name in dump_lower.replace("_", "-"))
     dynamic_missing = sorted(set(dynamic) - set(dynamic_hits))
-    coverage = verify_global_slot_coverage(payload, mounts)
+    coverage = verify_global_coverage(payload, mounts)
 
     reasons: list[str] = []
     state = "unverified"
@@ -199,16 +182,13 @@ def verify(
     if not expected_paths:
         reasons.append("visible-font-manifest-empty")
     if missing_mounts:
-        state = "failed"
-        mode = "compatibility"
+        state, mode = "failed", "compatibility"
         reasons.append("visible-mount-evidence-missing")
     if bad_mounts:
-        state = "failed"
-        mode = "compatibility"
+        state, mode = "failed", "compatibility"
         reasons.append("visible-font-hash-mismatch")
     if coverage["failed"]:
-        state = "failed"
-        mode = "compatibility"
+        state, mode = "failed", "compatibility"
         reasons.append("runtime-global-face-incomplete")
 
     font_manager_confirmed = bool(file_hits or slot_hits)
@@ -220,24 +200,22 @@ def verify(
 
     if dynamic_missing:
         if font_dump.strip() and font_manager_confirmed:
-            state = "failed"
-            mode = "compatibility"
+            state, mode = "failed", "compatibility"
             reasons.append("dynamic-family-not-loaded")
         else:
             reasons.append("dynamic-family-unconfirmed")
 
     if state != "failed":
         if mount_confirmed and font_manager_confirmed:
-            state = "verified"
-            mode = "font-manager-verified"
+            # Keep the historical `aligned` public mode so existing App builds
+            # understand the stronger verifier without treating it as unknown.
+            state, mode = "verified", "aligned"
             reasons.append("font-manager-confirmed-generated-font")
         elif mount_confirmed:
-            state = "unverified"
-            mode = "mount-only"
+            state, mode = "unverified", "mount-only"
             reasons.append("visible-mounts-do-not-prove-font-selection")
         else:
-            state = "unverified"
-            mode = "compatibility"
+            state, mode = "unverified", "compatibility"
 
     summary = overlay.get("summary") if isinstance(overlay.get("summary"), dict) else {}
     return {
@@ -279,11 +257,10 @@ def parse_engine(path: Path) -> dict[str, str]:
     if not path.is_file():
         return result
     for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        if key and value:
-            result[key] = value
+        if "=" in line:
+            key, value = line.split("=", 1)
+            if key and value:
+                result[key] = value
     return result
 
 
@@ -310,14 +287,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     try:
-        payload = load_json(args.payload, PAYLOAD_SCHEMA)
-        overlay = load_json(args.overlay, OVERLAY_SCHEMA)
-        font_dump = args.font_dump.read_text(encoding="utf-8", errors="replace") if args.font_dump.is_file() else ""
         result = verify(
-            payload,
-            overlay,
-            font_dump,
-            load_mount_evidence(args.mount_evidence),
+            load_json(args.payload, PAYLOAD_SCHEMA),
+            load_json(args.overlay, OVERLAY_SCHEMA),
+            args.font_dump.read_text(encoding="utf-8", errors="replace") if args.font_dump.is_file() else "",
+            load_mounts(args.mount_evidence),
             args.active_font,
             parse_engine(args.engine_state),
         )
