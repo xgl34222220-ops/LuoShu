@@ -36,7 +36,14 @@ printf 'state=verified\nmode=mount-verified\nactiveFont=Beta\n' \
 MODDIR="$MODULE" sh "$MODULE/common/module_status.sh" Beta >/dev/null
 grep -q '系统默认字体（Beta 未生效）' "$MODULE/module.prop"
 
+# 仅有挂载证据时必须明确显示未确认，不能冒充系统已经选用了目标字体。
 printf 'state=mounted\nbackend=self-overlay\n' >"$MODULE/config/self-mount.conf"
+MODDIR="$MODULE" sh "$MODULE/common/module_status.sh" Beta >/dev/null
+grep -q '已配置：Beta（仅挂载，未确认系统选用）' "$MODULE/module.prop"
+
+# 只有 Android 渲染探针或 FontManager 给出强证据时，才显示为真正生效。
+printf 'state=verified\nmode=render-verified\nactiveFont=Beta\n' \
+    >"$MODULE/config/device-font-load-verification.conf"
 MODDIR="$MODULE" sh "$MODULE/common/module_status.sh" Beta >/dev/null
 grep -q '当前字体：Beta$' "$MODULE/module.prop"
 rm -f "$MODULE/config/self-mount.conf" "$MODULE/config/device-font-load-verification.conf"
