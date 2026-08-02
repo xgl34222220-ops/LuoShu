@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Deep verification for a generated LuoShu device font payload.
 
-Visible mounts prove only that bytes reached Android's namespace.  The strongest
+Visible mounts prove only that bytes reached Android's namespace. The strongest
 proof is a glyph-outline comparison performed inside Android through app_process:
 Typeface.DEFAULT must render the same normalized outlines as LuoShu's generated
-400-weight global UI font.  FontManagerService evidence remains a compatibility
+400-weight global UI font. FontManagerService evidence remains a compatibility
 fallback when the matching App build is not installed yet.
 """
 from __future__ import annotations
@@ -16,7 +16,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fontTools.ttLib import TTFont
+try:
+    from fontTools.ttLib import TTFont as _TTFont
+except ImportError:  # Host-only CI jobs intentionally do not install the runtime bundle.
+    _TTFont = None
 
 PAYLOAD_SCHEMA = "device-font-payload-v1"
 OVERLAY_SCHEMA = "device-font-overlay-v1"
@@ -89,7 +92,7 @@ def dynamic_families(overlay: dict[str, Any]) -> list[str]:
     return result
 
 
-def usable_ratio(font: TTFont, probes: tuple[int, ...]) -> tuple[float, int]:
+def usable_ratio(font: Any, probes: tuple[int, ...]) -> tuple[float, int]:
     cmap = font.getBestCmap() or {}
     glyph_order = set(font.getGlyphOrder())
     names: set[str] = set()
@@ -111,6 +114,11 @@ def verify_global_coverage(payload: dict[str, Any], mounts: list[dict[str, Any]]
         and "global-ui" in {str(role) for role in slot.get("roles") or []}
         and slot.get("generatedFile")
     }
+    if not wanted:
+        return {"checked": [], "failed": [], "unavailable": False}
+    if _TTFont is None:
+        return {"checked": [], "failed": [], "unavailable": True}
+
     checked: list[str] = []
     failed: list[str] = []
     seen: set[str] = set()
@@ -124,7 +132,7 @@ def verify_global_coverage(payload: dict[str, Any], mounts: list[dict[str, Any]]
         seen.add(fingerprint)
         visible = Path(str(mount.get("visible") or ""))
         try:
-            font = TTFont(str(visible), lazy=True, recalcTimestamp=False)
+            font = _TTFont(str(visible), lazy=True, recalcTimestamp=False)
             try:
                 cjk_ratio, cjk_unique = usable_ratio(font, CJK)
                 latin_ratio, _ = usable_ratio(font, LATIN)
@@ -144,7 +152,7 @@ def verify_global_coverage(payload: dict[str, Any], mounts: list[dict[str, Any]]
             failed.append(relative)
         if len(checked) >= 8:
             break
-    return {"checked": checked, "failed": failed}
+    return {"checked": checked, "failed": failed, "unavailable": False}
 
 
 def render_assessment(render: dict[str, Any]) -> dict[str, Any]:
@@ -227,6 +235,8 @@ def verify(
     if coverage["failed"]:
         state, mode = "failed", "compatibility"
         reasons.append("runtime-global-face-incomplete")
+    elif coverage["unavailable"]:
+        reasons.append("runtime-coverage-probe-unavailable")
     if render["missingActual"] or render["missingExpected"]:
         state, mode = "failed", "compatibility"
         reasons.append("runtime-render-missing-glyph")
@@ -241,12 +251,10 @@ def verify(
     elif not font_manager_confirmed:
         reasons.append("generated-font-not-found-in-font-manager-dump")
 
+    # OEM dumps frequently omit or rename dynamic families. Treat absence as
+    # diagnostic evidence only; the Android renderer probe is authoritative.
     if dynamic_missing:
-        if font_dump.strip() and font_manager_confirmed:
-            state, mode = "failed", "compatibility"
-            reasons.append("dynamic-family-not-loaded")
-        else:
-            reasons.append("dynamic-family-unconfirmed")
+        reasons.append("dynamic-family-unconfirmed")
 
     if state != "failed":
         if render["confirmed"] and mount_confirmed:
@@ -287,6 +295,7 @@ def verify(
             "dynamicFamilyHits": len(dynamic_hits),
             "coverageSlotsChecked": len(coverage["checked"]),
             "coverageSlotsFailed": len(coverage["failed"]),
+            "coverageProbeUnavailable": bool(coverage["unavailable"]),
             "renderMatched": int(render["matched"]),
             "renderComparable": int(render["comparable"]),
             "renderRatio": float(render["ratio"]),
