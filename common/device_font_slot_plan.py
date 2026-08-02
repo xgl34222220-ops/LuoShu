@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Packaging contract marker: device-font-slot-plan-v2
 """Coverage-aware policy for Android fallback font slots."""
 from __future__ import annotations
 
@@ -22,9 +23,6 @@ def _probe_hits(profile: dict[str, Any], name: str) -> int:
 def source_supports_slot(slot: dict[str, Any], source_profile: dict[str, Any]) -> bool:
     roles = set(slot.get("roles") or [])
     if "fallback-cjk" in roles:
-        # The stock probe uses common Han characters. A real Chinese font should hit
-        # nearly all of them; eight hits still permits useful subsets without letting
-        # a Latin-only font replace the Chinese fallback chain.
         return _probe_hits(source_profile, "cjk") >= 8
     if "fallback-latin" in roles:
         return (
@@ -40,10 +38,6 @@ def source_supports_slot(slot: dict[str, Any], source_profile: dict[str, Any]) -
 def slot_plan(slot: dict[str, Any], source_profile: dict[str, Any]) -> dict[str, Any]:
     result = _ORIGINAL_SLOT_PLAN(slot, source_profile)
     roles = set(slot.get("roles") or [])
-
-    # Preserve the base engine's established protected/fallback result for Emoji,
-    # symbols and scripts that LuoShu does not explicitly support. The additional
-    # coverage gate applies only to the newly eligible Chinese/Latin fallbacks.
     if "protected" in roles or not roles.intersection(("fallback-cjk", "fallback-latin")):
         return result
 
@@ -56,8 +50,6 @@ def slot_plan(slot: dict[str, Any], source_profile: dict[str, Any]) -> dict[str,
         result["transforms"] = {}
         return result
 
-    # A Chinese language fallback is useful only when its Han anchor is truly ready.
-    # Do not let a few shared Latin glyphs make an otherwise unresolved CJK slot pass.
     if "fallback-cjk" in roles:
         transform = (result.get("transforms") or {}).get("cjk", {})
         if not isinstance(transform, dict) or transform.get("status") != "ready":

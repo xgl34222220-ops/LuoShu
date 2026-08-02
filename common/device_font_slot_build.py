@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Packaging contract marker: device-font-slot-build-v2
 """Preserve target Android family identity in generated slot fonts."""
 from __future__ import annotations
 
@@ -10,15 +11,8 @@ import device_font_slot_build_base as _base
 from device_font_slot_build_base import *  # noqa: F401,F403
 
 _WEIGHT_NAMES = {
-    100: "Thin",
-    200: "ExtraLight",
-    300: "Light",
-    400: "Regular",
-    500: "Medium",
-    600: "SemiBold",
-    700: "Bold",
-    800: "ExtraBold",
-    900: "Black",
+    100: "Thin", 200: "ExtraLight", 300: "Light", 400: "Regular",
+    500: "Medium", 600: "SemiBold", 700: "Bold", 800: "ExtraBold", 900: "Black",
 }
 
 
@@ -37,7 +31,6 @@ def target_family_identity(slot: dict[str, Any]) -> tuple[str, str, str, str]:
     original_ps = _clean_family(str(slot.get("postScriptName") or ""))
     if not family:
         family = _clean_family(original_ps) or _clean_family(Path(declared).stem) or "LuoShu Fallback"
-
     try:
         weight = int(slot.get("weight") or 400)
     except (TypeError, ValueError):
@@ -49,7 +42,6 @@ def target_family_identity(slot: dict[str, Any]) -> tuple[str, str, str, str]:
     legacy_style = "Bold Italic" if italic and nearest >= 700 else (
         "Italic" if italic else ("Bold" if nearest >= 700 else "Regular")
     )
-    full_name = f"{family} {typographic_style}".strip()
     if original_ps:
         postscript = _postscript(original_ps)
     else:
@@ -64,11 +56,6 @@ def set_slot_identity(font: Any, slot: dict[str, Any]) -> None:
     full_name = f"{family} {typographic_style}".strip()
     unique_id = _postscript(f"LuoShu-v2.3.11-{postscript}")
     table = font["name"]
-
-    # Name IDs 1/16 preserve the family Android and third-party apps expect. Mature
-    # font packs patch internal identities to the target family instead of exposing a
-    # generic generated name, which prevents direct-name lookups from falling back to
-    # the stock face even though fonts.xml was rewritten correctly.
     values = {
         1: family,
         2: legacy_style,

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Packaging contract markers: device-font-template-v1; CAPTURE_REVISION = 2
 """Script-aware Android font template policy.
 
 The original scanner remains the source of truth for XML parsing and stock metrics.

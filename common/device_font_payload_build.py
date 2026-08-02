@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Packaging contract marker: device-font-payload-v1
 """Identity-safe wrapper for the per-device payload builder."""
 from __future__ import annotations
 
@@ -14,10 +15,6 @@ _ORIGINAL_BUILD_SIGNATURE = _base.build_signature
 
 def build_signature(slot: dict[str, Any], source_profile: dict[str, Any], source_weight: int) -> str:
     original = _ORIGINAL_BUILD_SIGNATURE(slot, source_profile, source_weight)
-    # Partition/XML location is deliberately excluded: the same target family and
-    # filename may appear in system and product and can safely share one generated
-    # font. Different family/PostScript identities must not share a file because its
-    # internal name table can represent only one target identity.
     identity = {
         "family": slot.get("family", ""),
         "familyNormalized": slot.get("familyNormalized", ""),
