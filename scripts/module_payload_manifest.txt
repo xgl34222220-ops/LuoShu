@@ -55,6 +55,9 @@ common/font_name_normalize.py
 common/font_provider_cache.sh
 common/font_role_check.py
 common/font_role_check.sh
+common/font_runtime_cleanup.sh
+common/font_runtime_mount.sh
+common/font_runtime_policy.sh
 common/font_safety.sh
 common/font_validation_cache.sh
 common/font_switch_task.sh

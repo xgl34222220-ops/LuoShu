@@ -57,8 +57,6 @@ import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
-import io.github.xgl34222220.luoshu.ui.design.LuoShuIconButton
-import io.github.xgl34222220.luoshu.ui.design.LuoShuPageHeader
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 
 @Composable
@@ -78,26 +76,52 @@ internal fun FontLibraryScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 12.dp, top = 2.dp, end = 12.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
-            LuoShuPageHeader(
-                title = "字体库",
-                subtitle = "${state.validCount}/${state.totalCount} 可用 · 当前显示 ${state.visibleCount}",
-                actions = {
-                    LuoShuIconButton(
-                        icon = Icons.Rounded.Refresh,
-                        contentDescription = "刷新字体库",
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "FONT LIBRARY",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.2.sp,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        "字体库",
+                        color = textPrimary,
+                        fontSize = 34.sp,
+                        lineHeight = 39.sp,
+                        fontWeight = FontWeight.Black,
+                    )
+                    Text(
+                        "${state.validCount}/${state.totalCount} 可用 · 当前显示 ${state.visibleCount}",
+                        color = textSecondary,
+                        fontSize = 12.sp,
+                    )
+                }
+                Surface(
+                    shape = RoundedCornerShape(17.dp),
+                    color = elevatedColor,
+                    tonalElevation = 2.dp,
+                    shadowElevation = 3.dp,
+                ) {
+                    IconButton(
                         onClick = actions.refresh,
                         enabled = !state.loading,
-                        containerColor = elevatedColor,
-                        content = if (state.loading) {
-                            { CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) }
-                        } else null,
-                    )
-                },
-            )
+                        modifier = Modifier.size(50.dp),
+                    ) {
+                        if (state.loading) {
+                            CircularProgressIndicator(Modifier.size(21.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Rounded.Refresh, contentDescription = "刷新字体库")
+                        }
+                    }
+                }
+            }
         }
 
         item {

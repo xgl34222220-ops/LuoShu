@@ -7,6 +7,15 @@ _dfload_module() {
     printf '%s\n' "${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
 }
 
+_dfload_visible_path() {
+    _dfload_rel="${1#/}"
+    if [ -n "${LUOSHU_VISIBLE_ROOT:-}" ]; then
+        printf '%s/%s\n' "${LUOSHU_VISIBLE_ROOT%/}" "$_dfload_rel"
+    else
+        printf '/%s\n' "$_dfload_rel"
+    fi
+}
+
 _dfload_hash_stream() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum 2>/dev/null | awk '{print $1}'
@@ -62,10 +71,9 @@ _dfload_write_simple() {
     return 0
 }
 
-# Normal boot path: switching already completed transaction, payload and mount checks.
-# Do not traverse or hash the font tree again. A confirmed boot transaction or mounted
-# self-mount is sufficient for the App's applied state; explicit deep verification remains
-# available for diagnostics.
+# The lightweight status path may reuse only a verification record produced by the
+# explicit deep verifier. A stale self-mount flag or a confirmed boot transaction is
+# not proof that Android's main namespace is actually reading LuoShu's font files.
 device_font_load_status() {
     _dfload_module_dir="$(_dfload_module)"
     _dfload_config="$_dfload_module_dir/config"
@@ -77,21 +85,19 @@ device_font_load_status() {
     fi
 
     _dfload_mount_state=$(sed -n 's/^state=//p' "$_dfload_config/self-mount.conf" 2>/dev/null | head -n1)
-    _dfload_boot_state=$(sed -n 's/^state=//p' "$_dfload_config/font-payload-boot.conf" 2>/dev/null | head -n1)
     if [ "$_dfload_mount_state" = failed ]; then
         _dfload_write_simple failed self-mount-failed "$_dfload_active" compatibility
         _dfload_log "字体自挂载状态失败：$_dfload_active"
         return 1
     fi
-    case "$_dfload_mount_state:$_dfload_boot_state" in
-        mounted:*|*:confirmed)
-            _dfload_write_simple verified boot-transaction-confirmed "$_dfload_active" mount-verified
-            _dfload_log "字体已按正常切换流程生效：$_dfload_active"
-            return 0
-            ;;
-    esac
 
-    _dfload_write_simple pending awaiting-boot-transaction "$_dfload_active" compatibility
+    _dfload_verified_state=$(sed -n 's/^state=//p' "$_dfload_config/device-font-load-verification.conf" 2>/dev/null | head -n1)
+    _dfload_verified_active=$(sed -n 's/^activeFont=//p' "$_dfload_config/device-font-load-verification.conf" 2>/dev/null | head -n1)
+    if [ "$_dfload_verified_state" = verified ] && [ "$_dfload_verified_active" = "$_dfload_active" ]; then
+        return 0
+    fi
+
+    _dfload_write_simple pending awaiting-visible-font-verification "$_dfload_active" compatibility
     return 2
 }
 
@@ -172,6 +178,48 @@ _dfload_mount_evidence() {
     chmod 0600 "$_dfload_output" 2>/dev/null || true
 }
 
+# Compatibility payloads do not have the device-aligned manifest. Verify the actual
+# mounted font files from the transaction manifest instead of trusting self-mount.conf.
+# A single missing or mismatching file means Android can still be reading the ROM font.
+_dfload_compat_fonts_visible() {
+    _dfload_module_dir="$(_dfload_module)"
+    _dfload_manifest="$_dfload_module_dir/config/font-payload-manifest.conf"
+    [ -s "$_dfload_manifest" ] || return 1
+    _dfload_seen=0
+    _dfload_failed=0
+
+    while IFS='|' read -r _dfload_rel _dfload_manifest_sum _dfload_manifest_size; do
+        case "$_dfload_rel" in
+            */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;;
+            *) continue ;;
+        esac
+        _dfload_seen=$((_dfload_seen + 1))
+        _dfload_module_file="$_dfload_module_dir/$_dfload_rel"
+        _dfload_visible_file=$(_dfload_visible_path "$_dfload_rel")
+        [ -f "$_dfload_module_file" ] && [ -f "$_dfload_visible_file" ] || {
+            _dfload_failed=$((_dfload_failed + 1))
+            continue
+        }
+        _dfload_expected_size=$(_dfload_size "$_dfload_module_file")
+        _dfload_actual_size=$(_dfload_size "$_dfload_visible_file")
+        case "$_dfload_expected_size:$_dfload_actual_size" in *[!0-9:]*)
+            _dfload_failed=$((_dfload_failed + 1))
+            continue
+            ;;
+        esac
+        [ "$_dfload_expected_size" = "$_dfload_actual_size" ] || {
+            _dfload_failed=$((_dfload_failed + 1))
+            continue
+        }
+        _dfload_expected_fp=$(_dfload_quick_fingerprint "$_dfload_module_file")
+        _dfload_actual_fp=$(_dfload_quick_fingerprint "$_dfload_visible_file")
+        [ -n "$_dfload_expected_fp" ] && [ "$_dfload_expected_fp" = "$_dfload_actual_fp" ] || \
+            _dfload_failed=$((_dfload_failed + 1))
+    done < "$_dfload_manifest"
+
+    [ "$_dfload_seen" -gt 0 ] && [ "$_dfload_failed" -eq 0 ]
+}
+
 _dfload_write_conf_from_json() {
     _dfload_json="$1"
     _dfload_conf="$2"
@@ -212,16 +260,23 @@ device_font_load_verify() {
         _dfload_write_simple not-applicable default-font "$_dfload_active"
         return 2
     fi
+
+    _dfload_engine_state="$_dfload_config/device-font-engine.conf"
+    if ! grep -q '^state=installed$' "$_dfload_engine_state" 2>/dev/null; then
+        if _dfload_compat_fonts_visible; then
+            _dfload_write_simple verified visible-font-files-match "$_dfload_active" mount-verified
+            _dfload_log "兼容字体负载已通过系统主命名空间字体文件核验：$_dfload_active"
+            return 0
+        fi
+        _dfload_write_simple failed visible-font-files-mismatch "$_dfload_active" compatibility
+        _dfload_log '系统主命名空间中的字体文件与洛书负载不一致，禁止标记字体已生效'
+        return 1
+    fi
+
     if ! _dfload_mount_guard "$_dfload_active"; then
         _dfload_write_simple failed self-mount-not-visible "$_dfload_active"
         _dfload_log '自挂载未完整提交或未进入系统主命名空间，禁止标记字体已生效'
         return 1
-    fi
-    _dfload_engine_state="$_dfload_config/device-font-engine.conf"
-    if ! grep -q '^state=installed$' "$_dfload_engine_state" 2>/dev/null; then
-        _dfload_write_simple verified verified-by-visible-mounts "$_dfload_active" mount-verified
-        _dfload_log "兼容字体负载已通过系统主命名空间挂载验证：$_dfload_active"
-        return 0
     fi
 
     _dfload_paths=$(_dfload_manifest_paths)

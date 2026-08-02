@@ -4,6 +4,10 @@
 # unchanged. Replacing, rewriting or touching the font invalidates the entry and runs the full gate.
 set +e
 
+# Increment whenever the meaning of a successful global-font validation changes.
+# v2 requires broad CJK coverage instead of the old tiny probe phrase.
+LUOSHU_FONT_VALIDATION_SCHEMA="${LUOSHU_FONT_VALIDATION_SCHEMA:-global-v2-cjk6000}"
+
 luoshu_font_validation_cache_path() {
     _lfvcp_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
     printf '%s/config/font-validation-cache.conf\n' "$_lfvcp_module"
@@ -30,6 +34,7 @@ luoshu_font_validation_cache_restore() {
     _lfvcr_file="$1"
     _lfvcr_cache="$(luoshu_font_validation_cache_path)"
     [ -s "$_lfvcr_cache" ] || return 1
+    [ "$(luoshu_font_validation_read schema)" = "$LUOSHU_FONT_VALIDATION_SCHEMA" ] || return 1
     [ "$(luoshu_font_validation_read valid)" = true ] || return 1
     [ "$(luoshu_font_validation_read path)" = "$_lfvcr_file" ] || return 1
     _lfvcr_now="$(luoshu_font_validation_identity "$_lfvcr_file")" || return 1
@@ -54,6 +59,7 @@ luoshu_font_validation_cache_store() {
     _lfvcs_tmp="${_lfvcs_cache}.tmp.$$"
     mkdir -p "${_lfvcs_cache%/*}" 2>/dev/null || return 1
     {
+        printf 'schema=%s\n' "$LUOSHU_FONT_VALIDATION_SCHEMA"
         printf 'valid=true\n'
         printf 'path=%s\n' "$(printf '%s' "$_lfvcs_file" | tr '\n\r' '  ')"
         printf 'identity=%s\n' "$_lfvcs_identity"

@@ -46,7 +46,6 @@ MODULE_DIR="$MODDIR"
     }
 
     log_service "INFO" "服务脚本开始执行 ($MODULE_VERSION)"
-    type font_config_mark_boot_success >/dev/null 2>&1 && font_config_mark_boot_success
     if [ -f "$LOG_FILE" ]; then
         _log_size=$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d '[:space:]')
         case "$_log_size" in ''|*[!0-9]*) _log_size=0 ;; esac
@@ -121,8 +120,7 @@ MODULE_DIR="$MODDIR"
       _app_retry_count=$(cat "$_app_retry_file" 2>/dev/null)
       case "$_app_retry_count" in ''|*[!0-9]*) _app_retry_count=0 ;; esac
       _app_retry_count=$((_app_retry_count + 1))
-      printf '%s
-' "$_app_retry_count" > "$_app_retry_file" 2>/dev/null || true
+      printf '%s\n' "$_app_retry_count" > "$_app_retry_file" 2>/dev/null || true
       if [ "$_app_retry_count" -lt "$_app_retry_limit" ]; then
           touch "$MODDIR/config/app_install_pending" 2>/dev/null || true
           rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
@@ -208,20 +206,69 @@ MODULE_DIR="$MODDIR"
         fi
     fi
 
-    # post-fs-data 提交的 detached worker 在部分 Root/SELinux 组合上可能被回收。
-    # late_start service 是更可靠的执行上下文；在模板、索引和负载维护完成后再做一次
-    # 最终验证，保证系统字体写入 not-applicable，设备负载写入真实 verified/compatibility。
+    # 只有系统主命名空间中的字体挂载真实可见，才能确认本次启动事务。
+    # 验证失败时将 booting 恢复为 prepared，保留负载并在下次完整开机重试；
+    # 连续三次仍不可见才安全撤销，避免“App 显示已验证但系统仍是默认字体”。
     if [ -f "$MODDIR/common/device_font_load_verify.sh" ] && \
        [ ! -f "$MODDIR/config/font-payload-rebuild-pending.conf" ] && \
        [ ! -e "$MODDIR/.font_switch.lock" ]; then
-        MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$MODDIR/common/device_font_load_verify.sh" >/dev/null 2>&1
-        _load_verify_rc=$?
-        _load_verify_state=$(sed -n 's/^state=//p' "$MODDIR/config/device-font-load-verification.conf" 2>/dev/null | head -n1)
+        _load_verify_attempt=1
+        _load_verify_state=''
+        _load_verify_rc=2
+        while [ "$_load_verify_attempt" -le 3 ]; do
+            MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$MODDIR/common/device_font_load_verify.sh" verify >/dev/null 2>&1
+            _load_verify_rc=$?
+            _load_verify_state=$(sed -n 's/^state=//p' "$MODDIR/config/device-font-load-verification.conf" 2>/dev/null | head -n1)
+            case "$_load_verify_state" in
+                verified|not-applicable) break ;;
+            esac
+            [ "$_load_verify_attempt" -lt 3 ] && sleep 3
+            _load_verify_attempt=$((_load_verify_attempt + 1))
+        done
+
+        _active_verify=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+        [ -n "$_active_verify" ] || _active_verify=default
         case "$_load_verify_state" in
-            verified) log_service "INFO" "设备字体加载验证完成" ;;
-            not-applicable) log_service "INFO" "当前为系统字体，无需设备加载验证" ;;
-            compatibility) log_service "INFO" "当前字体使用兼容映射，不标记设备已验证" ;;
-            *) log_service "INFO" "设备字体加载验证未完成（state=${_load_verify_state:-missing}, code=$_load_verify_rc）" ;;
+            verified)
+                type font_config_mark_boot_success >/dev/null 2>&1 && font_config_mark_boot_success
+                rm -f "$MODDIR/config/font-mount-verify-failures" 2>/dev/null || true
+                log_service "INFO" "设备字体加载与主命名空间挂载验证完成"
+                ;;
+            not-applicable)
+                rm -f "$MODDIR/config/font-mount-verify-failures" 2>/dev/null || true
+                log_service "INFO" "当前为系统字体，无需设备加载验证"
+                ;;
+            *)
+                log_service "ERROR" "设备字体加载验证未通过（state=${_load_verify_state:-missing}, code=$_load_verify_rc, attempt=$_load_verify_attempt）"
+                _boot_state=$(sed -n 's/^state=//p' "$MODDIR/config/font-payload-boot.conf" 2>/dev/null | head -n1)
+                if [ "$_active_verify" != default ] && [ "$_boot_state" = booting ]; then
+                    _mount_fail_file="$MODDIR/config/font-mount-verify-failures"
+                    _mount_fail_count=$(cat "$_mount_fail_file" 2>/dev/null)
+                    case "$_mount_fail_count" in ''|*[!0-9]*) _mount_fail_count=0 ;; esac
+                    _mount_fail_count=$((_mount_fail_count + 1))
+                    printf '%s\n' "$_mount_fail_count" > "$_mount_fail_file" 2>/dev/null || true
+                    if [ "$_mount_fail_count" -lt 3 ]; then
+                        {
+                            printf 'state=prepared\n'
+                            printf 'font=%s\n' "$_active_verify"
+                            printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+                            printf 'reason=mount-not-visible\n'
+                        } > "$MODDIR/config/font-payload-boot.conf.tmp.$$" 2>/dev/null && \
+                            mv -f "$MODDIR/config/font-payload-boot.conf.tmp.$$" "$MODDIR/config/font-payload-boot.conf" 2>/dev/null || true
+                        log_service "ERROR" "字体挂载未进入系统主命名空间，已保留负载并安排下次开机重试（第 $_mount_fail_count/3 次）"
+                        notify_service "洛书" "本次开机字体挂载未生效，已保留字体并将在下次完整重启自动重试。" luoshu-font-mount
+                    else
+                        rm -f "$_mount_fail_file" 2>/dev/null || true
+                        if type luoshu_payload_quarantine >/dev/null 2>&1; then
+                            luoshu_payload_quarantine
+                        else
+                            printf 'default\n' > "$MODDIR/config/active_font.conf" 2>/dev/null || true
+                        fi
+                        log_service "ERROR" "字体挂载连续三次不可见，已安全恢复系统默认字体"
+                        notify_service "洛书" "字体挂载连续失败，已安全恢复系统默认字体；请打开洛书重新应用或导出诊断。" luoshu-font-mount
+                    fi
+                fi
+                ;;
         esac
     fi
     if [ -f "$MODDIR/common/module_status.sh" ]; then
