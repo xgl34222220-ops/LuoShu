@@ -19,8 +19,9 @@ jobs:
   dispatch:
     if: github.head_ref == 'ops/v2.3.9-publish-trigger'
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
-      - name: Create immutable v2.3.9 tag and dispatch signed release
+      - name: Create tag, dispatch and verify signed v2.3.9 release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: 0f2952f19e087b53dc28ff97aec85a8dbeb43233
@@ -29,8 +30,24 @@ jobs:
         run: |
           set -euo pipefail
 
+          verify_release_assets() {
+            local assets
+            assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+            for name in \
+              LuoShu-v2.3.9.zip \
+              LuoShu-v2.3.9.zip.sha256 \
+              LuoShu-App-v2.3.9.apk \
+              LuoShu-App-v2.3.9.apk.sha256; do
+              grep -qx "$name" <<<"$assets" || {
+                echo "Missing release asset: $name" >&2
+                return 1
+              }
+            done
+          }
+
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Release $TAG already exists; nothing to do."
+            verify_release_assets
+            echo "Release $TAG already exists with all required assets."
             exit 0
           fi
 
@@ -51,14 +68,55 @@ jobs:
             exit 2
           }
 
-          python3 - <<'PY' | gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/dispatches" \
-            --input -
+          find_release_run() {
+            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/runs?event=workflow_dispatch&branch=${TAG}&per_page=20" |
+              jq -r --arg sha "$RELEASE_SHA" \
+                '[.workflow_runs[] | select(.head_sha == $sha)][0].id // empty'
+          }
+
+          run_id="$(find_release_run)"
+          if [[ -z "$run_id" ]]; then
+            python3 - <<'PY' | gh api --method POST \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/release.yml/dispatches" \
+              --input -
           import json
           print(json.dumps({
               "ref": "v2.3.9",
               "inputs": {"tag": "v2.3.9", "prerelease": False},
           }))
           PY
+            for _ in {1..12}; do
+              sleep 5
+              run_id="$(find_release_run)"
+              [[ -z "$run_id" ]] || break
+            done
+          fi
+          [[ -n "$run_id" ]] || { echo 'Unable to locate dispatched release workflow run' >&2; exit 3; }
+          echo "Monitoring signed release workflow run $run_id"
 
-          echo "Dispatched signed release workflow for $TAG at $RELEASE_SHA"
+          for _ in {1..180}; do
+            run_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}")"
+            status="$(jq -r '.status' <<<"$run_json")"
+            conclusion="$(jq -r '.conclusion // ""' <<<"$run_json")"
+            echo "release_run=$run_id status=$status conclusion=${conclusion:-pending}"
+            if [[ "$status" == completed ]]; then
+              [[ "$conclusion" == success ]] || {
+                echo "Signed release workflow failed: run=$run_id conclusion=$conclusion" >&2
+                exit 4
+              }
+              for _ in {1..12}; do
+                if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+                  verify_release_assets
+                  echo "Signed stable release $TAG is published with all required assets."
+                  exit 0
+                fi
+                sleep 5
+              done
+              echo "Workflow succeeded but GitHub Release $TAG is not visible" >&2
+              exit 5
+            fi
+            sleep 20
+          done
+
+          echo "Timed out waiting for signed release workflow run $run_id" >&2
+          exit 6
