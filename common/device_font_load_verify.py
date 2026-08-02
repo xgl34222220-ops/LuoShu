@@ -332,7 +332,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--overlay", required=True, type=Path)
     parser.add_argument("--font-dump", required=True, type=Path)
     parser.add_argument("--mount-evidence", required=True, type=Path)
-    parser.add_argument("--render-evidence", required=True, type=Path)
+    parser.add_argument("--render-evidence", type=Path, default=Path("/dev/null"))
     parser.add_argument("--engine-state", required=True, type=Path)
     parser.add_argument("--active-font", default="unknown")
     parser.add_argument("--output", required=True, type=Path)
