@@ -14,9 +14,10 @@ import kotlin.math.roundToInt
 /**
  * Small app_process entry point used by the module after boot.
  *
- * It compares normalized glyph outlines rendered through Typeface.DEFAULT with
- * the exact generated LuoShu font file.  Unlike a mount check or a FontManager
- * listing, matching outlines prove that Android's renderer selected the payload.
+ * Android devices may expose several generated 400-weight slots (global UI,
+ * clock, OEM named families). The probe compares all supplied candidates with
+ * Typeface.DEFAULT and reports the best match, avoiding accidental selection of
+ * a clock-only or app-specific slot.
  */
 object FontProbeCli {
     private val samples = listOf("洛", "书", "中", "文", "你", "好", "A", "a", "1", "0", "，", "。")
@@ -25,7 +26,19 @@ object FontProbeCli {
     fun main(args: Array<String>) {
         val result = runCatching {
             require(args.isNotEmpty()) { "缺少待验证字体路径" }
-            probe(File(args[0]))
+            val candidates = args.asSequence()
+                .map(::File)
+                .filter { file -> file.isFile && file.length() >= 4_096L }
+                .distinctBy(File::getCanonicalPath)
+                .map(::probe)
+                .toList()
+            require(candidates.isNotEmpty()) { "没有可读取的 400 字重验证字体" }
+            val best = candidates.maxWithOrNull(
+                compareBy<JSONObject> { item -> item.optDouble("ratio", 0.0) }
+                    .thenBy { item -> item.optInt("comparable", 0) }
+                    .thenBy { item -> -item.optJSONArray("missingActual").length() },
+            ) ?: error("验证候选为空")
+            best.put("candidates", candidates.size)
         }.getOrElse { error ->
             JSONObject()
                 .put("status", "error")
@@ -35,7 +48,6 @@ object FontProbeCli {
     }
 
     private fun probe(file: File): JSONObject {
-        require(file.isFile && file.length() >= 4_096L) { "验证字体不存在或文件过小：${file.path}" }
         val expected = Typeface.Builder(file).build()
         val actual = Typeface.DEFAULT
         val mismatched = JSONArray()
