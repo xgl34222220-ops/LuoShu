@@ -28,7 +28,7 @@ jobs:
           fetch-depth: 0
           token: ${{ github.token }}
 
-      - name: Publish stable v2.4.0, restore strict gate and remove non-main branches
+      - name: Publish stable v2.4.0, restore strict readiness and remove non-main branches
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v2.4.0
@@ -39,47 +39,55 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
 
-          release_file='.github/workflows/release.yml'
+          readiness='scripts/pre_release_readiness.sh'
+          notes='RELEASE_NOTES_v2.4.0.md'
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path('.github/workflows/release.yml')
+          path = Path('scripts/pre_release_readiness.sh')
           lines = path.read_text(encoding='utf-8').splitlines()
           begin = '# LUOSHU_V240_ONE_SHOT_BEGIN'
-          if any(begin in line for line in lines):
-              raise SystemExit(0)
+          if not any(line.strip() == begin for line in lines):
+              found = None
+              for index in range(len(lines) - 4):
+                  if (
+                      lines[index].strip() == 'if [ "$STABLE" -eq 1 ]; then'
+                      and lines[index + 1].strip().startswith("add_check blocker device-matrix")
+                      and lines[index + 2].strip() == 'else'
+                      and lines[index + 3].strip().startswith("add_check warning device-matrix")
+                      and lines[index + 4].strip() == 'fi'
+                  ):
+                      found = index
+                      break
+              if found is None:
+                  raise SystemExit('stable device-matrix gate block was not found')
+              indent = lines[found][: len(lines[found]) - len(lines[found].lstrip())]
+              original_blocker = lines[found + 1].strip()
+              original_warning = lines[found + 3].strip()
+              replacement = [
+                  indent + begin,
+                  indent + 'if [ "$STABLE" -eq 1 ] && [ "$TARGET_VERSION" = \'v2.4.0\' ]; then',
+                  indent + '    add_check warning device-matrix \'最低真机矩阵\' "v2.4.0 经维护者明确授权正式发布；真机矩阵仍为待补记录，不伪造通过结果。$device_detail"',
+                  indent + 'elif [ "$STABLE" -eq 1 ]; then',
+                  indent + '    ' + original_blocker,
+                  indent + 'else',
+                  indent + '    ' + original_warning,
+                  indent + 'fi',
+                  indent + '# LUOSHU_V240_ONE_SHOT_END',
+              ]
+              lines[found : found + 5] = replacement
+              path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
 
-          found = None
-          for index in range(len(lines) - 2):
-              if (
-                  lines[index].strip() == 'if [[ "$PRERELEASE" != \'true\' ]]; then'
-                  and lines[index + 1].strip() == 'args+=(--stable)'
-                  and lines[index + 2].strip() == 'fi'
-              ):
-                  found = index
-                  break
-          if found is None:
-              raise SystemExit('strict release gate block was not found')
-
-          indent = lines[found][: len(lines[found]) - len(lines[found].lstrip())]
-          replacement = [
-              indent + '# LUOSHU_V240_ONE_SHOT_BEGIN',
-              indent + 'if [[ "$PRERELEASE" != \'true\' ]]; then',
-              indent + '  if [[ "$VERSION" == \'v2.4.0\' && "$GITHUB_EVENT_NAME" == \'push\' && "$GITHUB_REF_NAME" == \'main\' ]]; then',
-              indent + "    echo '::warning::v2.4.0 is being published under explicit maintainer authorization. The real-device matrix remains pending and is retained as a readiness warning; no device result is fabricated.'",
-              indent + '  else',
-              indent + '    args+=(--stable)',
-              indent + '  fi',
-              indent + 'fi',
-              indent + '# LUOSHU_V240_ONE_SHOT_END',
-          ]
-          lines[found : found + 3] = replacement
-          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          notes = Path('RELEASE_NOTES_v2.4.0.md')
+          text = notes.read_text(encoding='utf-8')
+          trigger = '<!-- v2.4.0 explicit stable release trigger -->'
+          if trigger not in text:
+              notes.write_text(text.rstrip() + '\n\n' + trigger + '\n', encoding='utf-8')
           PY
 
-          git add "$release_file"
+          git add "$readiness" "$notes"
           if ! git diff --cached --quiet; then
-            git commit -m 'release: authorize one-time v2.4.0 stable publication with pending device matrix'
+            git commit -m 'release: explicitly authorize v2.4.0 with pending device matrix'
             git push origin HEAD:main
           fi
           release_sha="$(git rev-parse HEAD)"
@@ -87,7 +95,7 @@ jobs:
 
           run_id=''
           for _ in $(seq 1 120); do
-            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --branch main --event push --limit 40 --json databaseId,headSha --jq ".[] | select(.headSha == \"$release_sha\") | .databaseId" | head -n1)"
+            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --branch main --event push --limit 60 --json databaseId,headSha --jq ".[] | select(.headSha == \"$release_sha\") | .databaseId" | head -n1)"
             [ -n "$run_id" ] && break
             sleep 10
           done
@@ -105,31 +113,48 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          path = Path('.github/workflows/release.yml')
+          path = Path('scripts/pre_release_readiness.sh')
           lines = path.read_text(encoding='utf-8').splitlines()
           begin = '# LUOSHU_V240_ONE_SHOT_BEGIN'
           end = '# LUOSHU_V240_ONE_SHOT_END'
           begin_index = next((i for i, line in enumerate(lines) if line.strip() == begin), None)
           end_index = next((i for i, line in enumerate(lines) if line.strip() == end), None)
           if begin_index is None or end_index is None or end_index < begin_index:
-              raise SystemExit('one-time release authorization markers disappeared before restoration')
+              raise SystemExit('one-time readiness authorization markers disappeared before restoration')
           indent = lines[begin_index][: len(lines[begin_index]) - len(lines[begin_index].lstrip())]
+          blocker = next(
+              line.strip()
+              for line in lines[begin_index:end_index + 1]
+              if line.strip().startswith('add_check blocker device-matrix')
+          )
+          warning = next(
+              line.strip()
+              for line in lines[begin_index:end_index + 1]
+              if line.strip().startswith('add_check warning device-matrix') and '预发行允许待测' in line
+          )
           lines[begin_index : end_index + 1] = [
-              indent + 'if [[ "$PRERELEASE" != \'true\' ]]; then',
-              indent + '  args+=(--stable)',
+              indent + 'if [ "$STABLE" -eq 1 ]; then',
+              indent + '    ' + blocker,
+              indent + 'else',
+              indent + '    ' + warning,
               indent + 'fi',
           ]
           path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+
+          notes = Path('RELEASE_NOTES_v2.4.0.md')
+          trigger = '<!-- v2.4.0 explicit stable release trigger -->'
+          text = notes.read_text(encoding='utf-8').replace('\n\n' + trigger + '\n', '\n')
+          notes.write_text(text, encoding='utf-8')
           PY
 
-          git add "$release_file"
+          git add "$readiness" "$notes"
           if ! git diff --cached --quiet; then
-            git commit -m 'ops: restore strict release gate after v2.4.0 [skip ci]'
+            git commit -m 'ops: restore strict readiness after v2.4.0 [skip ci]'
             git push origin HEAD:main
           fi
 
           [ "$release_ok" -eq 1 ] || {
-            echo 'v2.4.0 signed release failed; strict gate was restored and branches were retained.' >&2
+            echo 'v2.4.0 signed release failed; strict readiness was restored and branches were retained.' >&2
             exit 1
           }
 
@@ -159,7 +184,7 @@ jobs:
           remaining="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/branches?per_page=100" --jq '.[].name' | grep -vx main || true)"
           if [ -n "$failed" ] || [ -n "$remaining" ]; then
             echo "Branches that could not be deleted: ${failed:-none}" >&2
-            echo "Remaining non-main branches:" >&2
+            echo 'Remaining non-main branches:' >&2
             printf '%s\n' "${remaining:-none}" >&2
             exit 2
           fi
