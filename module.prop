@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v2.3.11
-versionCode=20311
+version=v2.3.12
+versionCode=20312
 author=惜故里丶
-description=Android 无 Hook 全局字体引擎：逐系统字体槽位统一替换、私有自挂载与安全回退
+description=Android 无 Hook 全局字体引擎：补齐 Play/GMS 下载字体与系统/OEM 字体链路
 updateJson=https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/main/update.json
