@@ -54,7 +54,7 @@ def set_slot_identity(font: Any, slot: dict[str, Any]) -> None:
         return
     family, legacy_style, typographic_style, postscript = target_family_identity(slot)
     full_name = f"{family} {typographic_style}".strip()
-    unique_id = _postscript(f"LuoShu-v2.3.11-{postscript}")
+    unique_id = _postscript(f"LuoShu-v2.4.0-{postscript}")
     table = font["name"]
     values = {
         1: family,
