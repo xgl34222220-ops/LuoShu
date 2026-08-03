@@ -44,24 +44,37 @@ jobs:
           from pathlib import Path
 
           path = Path('.github/workflows/release.yml')
-          text = path.read_text(encoding='utf-8')
-          strict = '''          if [[ "$PRERELEASE" != 'true' ]]; then
-            args+=(--stable)
-          fi'''
-          authorized = '''          if [[ "$PRERELEASE" != 'true' ]]; then
-            if [[ "$VERSION" == 'v2.4.0' && "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF_NAME" == 'main' ]]; then
-              echo '::warning::v2.4.0 is being published under explicit maintainer authorization. The real-device matrix remains pending and is retained as a readiness warning; no device result is fabricated.'
-            else
-              args+=(--stable)
-            fi
-          fi'''
-          if authorized in text:
-              pass
-          elif strict in text:
-              text = text.replace(strict, authorized, 1)
-              path.write_text(text, encoding='utf-8')
-          else:
+          lines = path.read_text(encoding='utf-8').splitlines()
+          begin = '# LUOSHU_V240_ONE_SHOT_BEGIN'
+          if any(begin in line for line in lines):
+              raise SystemExit(0)
+
+          found = None
+          for index in range(len(lines) - 2):
+              if (
+                  lines[index].strip() == 'if [[ "$PRERELEASE" != \'true\' ]]; then'
+                  and lines[index + 1].strip() == 'args+=(--stable)'
+                  and lines[index + 2].strip() == 'fi'
+              ):
+                  found = index
+                  break
+          if found is None:
               raise SystemExit('strict release gate block was not found')
+
+          indent = lines[found][: len(lines[found]) - len(lines[found].lstrip())]
+          replacement = [
+              indent + '# LUOSHU_V240_ONE_SHOT_BEGIN',
+              indent + 'if [[ "$PRERELEASE" != \'true\' ]]; then',
+              indent + '  if [[ "$VERSION" == \'v2.4.0\' && "$GITHUB_EVENT_NAME" == \'push\' && "$GITHUB_REF_NAME" == \'main\' ]]; then',
+              indent + "    echo '::warning::v2.4.0 is being published under explicit maintainer authorization. The real-device matrix remains pending and is retained as a readiness warning; no device result is fabricated.'",
+              indent + '  else',
+              indent + '    args+=(--stable)',
+              indent + '  fi',
+              indent + 'fi',
+              indent + '# LUOSHU_V240_ONE_SHOT_END',
+          ]
+          lines[found : found + 3] = replacement
+          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
 
           git add "$release_file"
@@ -93,20 +106,20 @@ jobs:
           from pathlib import Path
 
           path = Path('.github/workflows/release.yml')
-          text = path.read_text(encoding='utf-8')
-          strict = '''          if [[ "$PRERELEASE" != 'true' ]]; then
-            args+=(--stable)
-          fi'''
-          authorized = '''          if [[ "$PRERELEASE" != 'true' ]]; then
-            if [[ "$VERSION" == 'v2.4.0' && "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF_NAME" == 'main' ]]; then
-              echo '::warning::v2.4.0 is being published under explicit maintainer authorization. The real-device matrix remains pending and is retained as a readiness warning; no device result is fabricated.'
-            else
-              args+=(--stable)
-            fi
-          fi'''
-          if authorized not in text:
-              raise SystemExit('one-time release authorization block disappeared before restoration')
-          path.write_text(text.replace(authorized, strict, 1), encoding='utf-8')
+          lines = path.read_text(encoding='utf-8').splitlines()
+          begin = '# LUOSHU_V240_ONE_SHOT_BEGIN'
+          end = '# LUOSHU_V240_ONE_SHOT_END'
+          begin_index = next((i for i, line in enumerate(lines) if line.strip() == begin), None)
+          end_index = next((i for i, line in enumerate(lines) if line.strip() == end), None)
+          if begin_index is None or end_index is None or end_index < begin_index:
+              raise SystemExit('one-time release authorization markers disappeared before restoration')
+          indent = lines[begin_index][: len(lines[begin_index]) - len(lines[begin_index].lstrip())]
+          lines[begin_index : end_index + 1] = [
+              indent + 'if [[ "$PRERELEASE" != \'true\' ]]; then',
+              indent + '  args+=(--stable)',
+              indent + 'fi',
+          ]
+          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
 
           git add "$release_file"
