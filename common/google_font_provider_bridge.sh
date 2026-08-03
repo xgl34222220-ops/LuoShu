@@ -1,0 +1,314 @@
+#!/system/bin/sh
+# LuoShu Google/GMS downloadable-font provider bridge.
+#
+# Android system XML and /data/fonts/config do not cover fonts opened directly from
+# com.google.android.gms' private downloadable-font cache. This bridge never modifies
+# those provider files: it builds identity-compatible clones inside the module and
+# bind-mounts them read-only in zygote/GMS/Play mount namespaces.
+set +e
+
+MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
+MODULE_DIR="$MODDIR"
+PYROOT="$MODDIR/common/python"
+PYTHON="${LUOSHU_GOOGLE_FONT_PYTHON:-$PYROOT/bin/luoshu-python}"
+PATCHER="$MODDIR/common/google_font_provider_patch.py"
+CACHE="$MODDIR/config/google-font-provider"
+STATE="$MODDIR/config/google-font-provider-mounts.conf"
+LOG="$MODDIR/logs/google-font-provider.log"
+
+_gfp_log() {
+    mkdir -p "$MODDIR/logs" 2>/dev/null || true
+    printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$*" >> "$LOG" 2>/dev/null || true
+}
+
+_gfp_hash() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" 2>/dev/null | awk '{print $1}'
+    elif command -v busybox >/dev/null 2>&1; then
+        busybox sha256sum "$1" 2>/dev/null | awk '{print $1}'
+    else
+        cksum "$1" 2>/dev/null | awk '{print $1 "-" $2}'
+    fi
+}
+
+_gfp_hash_text() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum 2>/dev/null | awk '{print $1}'
+    elif command -v busybox >/dev/null 2>&1; then
+        busybox sha256sum 2>/dev/null | awk '{print $1}'
+    else
+        cksum 2>/dev/null | awk '{print $1 "-" $2}'
+    fi
+}
+
+_gfp_size() {
+    wc -c < "$1" 2>/dev/null | tr -d '[:space:]'
+}
+
+_gfp_valid_font() {
+    [ -f "$1" ] || return 1
+    _gfp_bytes=$(_gfp_size "$1")
+    case "$_gfp_bytes" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$_gfp_bytes" -ge 1024 ]
+}
+
+_gfp_python() {
+    [ -x "$PYTHON" ] && [ -f "$PATCHER" ] || return 1
+    if [ "$PYTHON" = "$PYROOT/bin/luoshu-python" ]; then
+        PYTHONHOME="$PYROOT" \
+        PYTHONPATH="$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$PYTHON" "$PATCHER" "$@"
+    else
+        "$PYTHON" "$PATCHER" "$@"
+    fi
+}
+
+_gfp_active_font() {
+    _gfp_active=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_gfp_active" ] || _gfp_active=default
+    printf '%s\n' "$_gfp_active"
+}
+
+_gfp_weight() {
+    _gfp_name=$(basename "$1")
+    _gfp_value=$(printf '%s\n' "$_gfp_name" | tr '._-' '\n' | awk '/^(100|200|300|400|500|600|700|800|900)$/ { print; exit }')
+    case "$_gfp_value" in 100|200|300|400|500|600|700|800|900) printf '%s\n' "$_gfp_value"; return 0 ;; esac
+    case "$_gfp_name" in
+        *Thin*) printf '100\n' ;;
+        *ExtraLight*|*UltraLight*) printf '200\n' ;;
+        *Light*) printf '300\n' ;;
+        *Medium*) printf '500\n' ;;
+        *SemiBold*|*DemiBold*) printf '600\n' ;;
+        *ExtraBold*|*UltraBold*) printf '800\n' ;;
+        *Black*|*Heavy*) printf '900\n' ;;
+        *Bold*) printf '700\n' ;;
+        *) printf '400\n' ;;
+    esac
+}
+
+_gfp_source_for_weight() {
+    _gfp_requested="$1"
+    case "$_gfp_requested" in
+        100) _gfp_order='100 200 300 400 500 600 700 800 900' ;;
+        200) _gfp_order='200 100 300 400 500 600 700 800 900' ;;
+        300) _gfp_order='300 400 200 500 100 600 700 800 900' ;;
+        500) _gfp_order='500 400 600 300 700 200 800 100 900' ;;
+        600) _gfp_order='600 500 700 400 800 300 900 200 100' ;;
+        700) _gfp_order='700 600 800 500 900 400 300 200 100' ;;
+        800) _gfp_order='800 900 700 600 500 400 300 200 100' ;;
+        900) _gfp_order='900 800 700 600 500 400 300 200 100' ;;
+        *) _gfp_order='400 500 300 600 200 700 100 800 900' ;;
+    esac
+    for _gfp_w in $_gfp_order; do
+        for _gfp_candidate in \
+            "$MODDIR/config/device-font-sources/LuoShu-${_gfp_w}.ttf" \
+            "$MODDIR/system/fonts/LuoShu-${_gfp_w}.ttf" \
+            "$MODDIR/.luoshu-payload/system/fonts/LuoShu-${_gfp_w}.ttf"; do
+            if _gfp_valid_font "$_gfp_candidate"; then
+                printf '%s\n' "$_gfp_candidate"
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
+_gfp_targets() {
+    if [ -n "${LUOSHU_GOOGLE_FONT_TARGETS:-}" ]; then
+        printf '%s\n' "$LUOSHU_GOOGLE_FONT_TARGETS" | awk 'NF && !seen[$0]++'
+        return 0
+    fi
+    _gfp_list="$CACHE/.targets.$$"
+    : > "$_gfp_list" 2>/dev/null || return 1
+    for _gfp_root in \
+        /data/data/com.google.android.gms/files/fonts \
+        /data/user/*/com.google.android.gms/files/fonts \
+        /data/user_de/*/com.google.android.gms/files/fonts \
+        /data/data/com.android.vending/files/fonts \
+        /data/user/*/com.android.vending/files/fonts \
+        /data/user_de/*/com.android.vending/files/fonts; do
+        [ -d "$_gfp_root" ] || continue
+        find "$_gfp_root" -maxdepth 6 -type f \( \
+            -iname 'Google*Sans*.ttf' -o -iname 'Google*Sans*.otf' -o \
+            -iname 'Google_Sans*.ttf' -o -iname 'Google_Sans*.otf' \
+        \) -print 2>/dev/null >> "$_gfp_list"
+    done
+    if [ -d /data/fonts/files ]; then
+        find /data/fonts/files -maxdepth 3 -type f \( \
+            -iname 'Google*Sans*.ttf' -o -iname 'Google*Sans*.otf' -o \
+            -iname 'Google_Sans*.ttf' -o -iname 'Google_Sans*.otf' \
+        \) -print 2>/dev/null >> "$_gfp_list"
+    fi
+    awk 'NF && !seen[$0]++' "$_gfp_list" 2>/dev/null
+    rm -f "$_gfp_list" 2>/dev/null || true
+}
+
+_gfp_build_clone() {
+    _gfp_target="$1"
+    _gfp_weight_value="$2"
+    _gfp_source="$3"
+    _gfp_source_hash=$(_gfp_hash "$_gfp_source")
+    _gfp_target_hash=$(_gfp_hash "$_gfp_target")
+    [ -n "$_gfp_source_hash" ] && [ -n "$_gfp_target_hash" ] || return 1
+    _gfp_key=$(printf '%s\n%s\n%s\n' "$_gfp_source_hash" "$_gfp_target_hash" "$_gfp_weight_value" | _gfp_hash_text)
+    [ -n "$_gfp_key" ] || return 1
+    _gfp_output="$CACHE/${_gfp_key}.ttf"
+    if ! _gfp_valid_font "$_gfp_output"; then
+        _gfp_tmp="${_gfp_output}.tmp.$$"
+        rm -f "$_gfp_tmp" 2>/dev/null || true
+        _gfp_result=$(_gfp_python --source "$_gfp_source" --target "$_gfp_target" --output "$_gfp_tmp" --weight "$_gfp_weight_value" 2>> "$LOG")
+        _gfp_rc=$?
+        if [ "$_gfp_rc" -ne 0 ] || ! _gfp_valid_font "$_gfp_tmp"; then
+            rm -f "$_gfp_tmp" 2>/dev/null || true
+            _gfp_log "跳过 provider 字体：target=$_gfp_target weight=$_gfp_weight_value result=$_gfp_result"
+            return 2
+        fi
+        mv -f "$_gfp_tmp" "$_gfp_output" 2>/dev/null || return 1
+        chmod 0644 "$_gfp_output" 2>/dev/null || true
+    fi
+    if command -v chcon >/dev/null 2>&1; then
+        chcon --reference="$_gfp_target" "$_gfp_output" 2>/dev/null || \
+            chcon u:object_r:system_file:s0 "$_gfp_output" 2>/dev/null || true
+    elif command -v toybox >/dev/null 2>&1; then
+        toybox chcon --reference="$_gfp_target" "$_gfp_output" 2>/dev/null || true
+    fi
+    printf '%s\n' "$_gfp_output"
+    return 0
+}
+
+_gfp_namespace_pids() {
+    {
+        pidof zygote64 zygote zygote_secondary zygote64_32 zygote_ocomp 2>/dev/null
+        pidof com.android.vending 2>/dev/null
+        pidof com.google.android.gms com.google.android.gms.persistent com.google.android.gms.unstable 2>/dev/null
+        for _gfp_proc in /proc/[0-9]*; do
+            [ -r "$_gfp_proc/cmdline" ] || continue
+            _gfp_cmd=$(tr '\000' ' ' < "$_gfp_proc/cmdline" 2>/dev/null)
+            case "$_gfp_cmd" in
+                zygote*|*com.android.vending*|*com.google.android.gms*) basename "$_gfp_proc" ;;
+            esac
+        done
+    } | tr ' ' '\n' | awk '/^[0-9]+$/ && !seen[$0]++'
+}
+
+_gfp_mount_in_pid() {
+    _gfp_pid="$1"
+    _gfp_source="$2"
+    _gfp_target="$3"
+    [ -d "/proc/$_gfp_pid/ns" ] || return 1
+    command -v nsenter >/dev/null 2>&1 || return 1
+    _gfp_ns_source="/proc/1/root$_gfp_source"
+    nsenter -t "$_gfp_pid" -m -- /system/bin/sh -c '
+        src="$1"; dst="$2"
+        [ -f "$src" ] && [ -f "$dst" ] || exit 1
+        mount --bind "$src" "$dst" 2>/dev/null || mount -o bind "$src" "$dst" 2>/dev/null || exit 1
+        mount -o remount,bind,ro "$dst" 2>/dev/null || mount -o bind,remount,ro "$dst" 2>/dev/null || true
+        exit 0
+    ' sh "$_gfp_ns_source" "$_gfp_target" >/dev/null 2>&1
+}
+
+_gfp_unmount_in_pid() {
+    _gfp_pid="$1"
+    _gfp_target="$2"
+    [ -d "/proc/$_gfp_pid/ns" ] || return 1
+    command -v nsenter >/dev/null 2>&1 || return 1
+    nsenter -t "$_gfp_pid" -m -- umount "$_gfp_target" >/dev/null 2>&1
+}
+
+_gfp_apply_once() {
+    [ "$(_gfp_active_font)" != default ] || return 2
+    mkdir -p "$CACHE" "$MODDIR/logs" 2>/dev/null || return 1
+    _gfp_targets_file="$CACHE/.apply-targets.$$"
+    _gfp_state_tmp="${STATE}.tmp.$$"
+    _gfp_targets > "$_gfp_targets_file" 2>/dev/null || true
+    : > "$_gfp_state_tmp" 2>/dev/null || return 1
+    _gfp_found=0
+    _gfp_prepared=0
+    _gfp_mounted=0
+    _gfp_failed=0
+    while IFS= read -r _gfp_target; do
+        _gfp_valid_font "$_gfp_target" || continue
+        case "$(basename "$_gfp_target")" in *Emoji*|*Color*Emoji*|*Code*) continue ;; esac
+        _gfp_found=$((_gfp_found + 1))
+        _gfp_weight_value=$(_gfp_weight "$_gfp_target")
+        _gfp_source=$(_gfp_source_for_weight "$_gfp_weight_value")
+        if [ -z "$_gfp_source" ]; then
+            _gfp_failed=$((_gfp_failed + 1))
+            continue
+        fi
+        _gfp_clone=$(_gfp_build_clone "$_gfp_target" "$_gfp_weight_value" "$_gfp_source")
+        _gfp_clone_rc=$?
+        if [ "$_gfp_clone_rc" -ne 0 ] || ! _gfp_valid_font "$_gfp_clone"; then
+            _gfp_failed=$((_gfp_failed + 1))
+            continue
+        fi
+        _gfp_prepared=$((_gfp_prepared + 1))
+        _gfp_target_mounts=0
+        if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
+            for _gfp_pid in $(_gfp_namespace_pids); do
+                if _gfp_mount_in_pid "$_gfp_pid" "$_gfp_clone" "$_gfp_target"; then
+                    _gfp_target_mounts=$((_gfp_target_mounts + 1))
+                fi
+            done
+        fi
+        if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || [ "$_gfp_target_mounts" -gt 0 ]; then
+            _gfp_mounted=$((_gfp_mounted + 1))
+            printf '%s|%s|%s|%s\n' "$_gfp_target" "$_gfp_clone" "$(_gfp_hash "$_gfp_target")" "$(_gfp_hash "$_gfp_clone")" >> "$_gfp_state_tmp"
+        else
+            _gfp_failed=$((_gfp_failed + 1))
+        fi
+    done < "$_gfp_targets_file"
+    rm -f "$_gfp_targets_file" 2>/dev/null || true
+    if [ "$_gfp_mounted" -gt 0 ]; then
+        mv -f "$_gfp_state_tmp" "$STATE" 2>/dev/null || true
+        chmod 0600 "$STATE" 2>/dev/null || true
+        _gfp_log "provider bridge：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed"
+        [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || am force-stop com.android.vending >/dev/null 2>&1 || true
+        return 0
+    fi
+    rm -f "$_gfp_state_tmp" 2>/dev/null || true
+    _gfp_log "provider bridge 未生效：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed"
+    [ "$_gfp_found" -gt 0 ] && return 1
+    return 2
+}
+
+_gfp_restore() {
+    [ -s "$STATE" ] || return 0
+    while IFS='|' read -r _gfp_target _gfp_source _gfp_th _gfp_sh; do
+        [ -n "$_gfp_target" ] || continue
+        for _gfp_pid in $(_gfp_namespace_pids); do
+            _gfp_unmount_in_pid "$_gfp_pid" "$_gfp_target" || true
+        done
+    done < "$STATE"
+    rm -f "$STATE" 2>/dev/null || true
+    _gfp_log 'provider bridge 已撤销当前命名空间挂载'
+    return 0
+}
+
+_gfp_boot() {
+    _gfp_attempt=1
+    _gfp_limit="${LUOSHU_GOOGLE_FONT_RETRIES:-12}"
+    case "$_gfp_limit" in ''|*[!0-9]*) _gfp_limit=12 ;; esac
+    [ "$_gfp_limit" -ge 1 ] 2>/dev/null || _gfp_limit=1
+    while [ "$_gfp_attempt" -le "$_gfp_limit" ]; do
+        _gfp_apply_once && return 0
+        _gfp_rc=$?
+        [ "$_gfp_attempt" -lt "$_gfp_limit" ] || return "$_gfp_rc"
+        sleep 5
+        _gfp_attempt=$((_gfp_attempt + 1))
+    done
+    return 2
+}
+
+case "${1:-boot}" in
+    boot) _gfp_boot ;;
+    apply|now) _gfp_apply_once ;;
+    prepare) LUOSHU_GOOGLE_FONT_DRY_RUN=1 _gfp_apply_once ;;
+    restore) _gfp_restore ;;
+    invalidate)
+        _gfp_restore >/dev/null 2>&1 || true
+        rm -rf "$CACHE" "$STATE" 2>/dev/null || true
+        ;;
+    *) echo "Usage: $0 {boot|apply|prepare|restore|invalidate}" >&2; exit 2 ;;
+esac

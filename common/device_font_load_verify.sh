@@ -1,6 +1,7 @@
 #!/system/bin/sh
-# Record the active font after Android boot without rescanning the complete payload.
-# The expensive FontManager/hash verifier is retained only behind the explicit `verify` command.
+# Verify the active font without confusing mount-layout differences with failure.
+# Android/ROM font services may expose a different path or inode view after boot;
+# exact file fingerprints are strong evidence, but never the only success signal.
 set +e
 
 _dfload_module() {
@@ -14,6 +15,47 @@ _dfload_visible_path() {
     else
         printf '/%s\n' "$_dfload_rel"
     fi
+}
+
+_dfload_log() {
+    _dfload_module_dir="$(_dfload_module)"
+    mkdir -p "$_dfload_module_dir/logs" 2>/dev/null || true
+    printf '[%s] [LOAD-VERIFY] %s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$*" \
+        >> "$_dfload_module_dir/logs/device-font-load-verify.log" 2>/dev/null || true
+}
+
+_dfload_write_simple() {
+    _dfload_state="$1"
+    _dfload_reason="$2"
+    _dfload_active="$3"
+    _dfload_mode="${4:-compatibility}"
+    _dfload_module_dir="$(_dfload_module)"
+    _dfload_conf="$_dfload_module_dir/config/device-font-load-verification.conf"
+    mkdir -p "${_dfload_conf%/*}" 2>/dev/null || return 1
+    {
+        printf 'state=%s\n' "$_dfload_state"
+        printf 'mode=%s\n' "$_dfload_mode"
+        printf 'activeFont=%s\n' "$_dfload_active"
+        printf 'reason=%s\n' "$_dfload_reason"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "${_dfload_conf}.tmp.$$" 2>/dev/null || return 1
+    mv -f "${_dfload_conf}.tmp.$$" "$_dfload_conf" 2>/dev/null || return 1
+    chmod 0600 "$_dfload_conf" 2>/dev/null || true
+    return 0
+}
+
+_dfload_active_font() {
+    _dfload_module_dir="$(_dfload_module)"
+    _dfload_active=$(head -n1 "$_dfload_module_dir/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_dfload_active" ] || _dfload_active=default
+    printf '%s\n' "$_dfload_active"
+}
+
+_dfload_state_value() {
+    _dfload_file="$1"
+    _dfload_key="$2"
+    sed -n "s/^${_dfload_key}=//p" "$_dfload_file" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
 
 _dfload_hash_stream() {
@@ -44,276 +86,178 @@ _dfload_quick_fingerprint() {
     } | _dfload_hash_stream
 }
 
-_dfload_log() {
+# v2.3.9 compared against the public compatibility view. On KernelSU/meta-overlayfs
+# that directory can be an empty or stale namespace view while the real payload lives
+# under .luoshu-payload and is already mounted in PID 1. Always resolve the canonical
+# private payload first.
+_dfload_payload_file() {
+    _dfload_rel="${1#/}"
     _dfload_module_dir="$(_dfload_module)"
-    mkdir -p "$_dfload_module_dir/logs" 2>/dev/null || true
-    printf '[%s] [LOAD-VERIFY] %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$*" \
-        >> "$_dfload_module_dir/logs/device-font-load-verify.log" 2>/dev/null || true
-}
-
-_dfload_write_simple() {
-    _dfload_state="$1"
-    _dfload_reason="$2"
-    _dfload_active="$3"
-    _dfload_mode="${4:-compatibility}"
-    _dfload_module_dir="$(_dfload_module)"
-    _dfload_conf="$_dfload_module_dir/config/device-font-load-verification.conf"
-    mkdir -p "${_dfload_conf%/*}" 2>/dev/null || return 1
-    {
-        printf 'state=%s\n' "$_dfload_state"
-        printf 'mode=%s\n' "$_dfload_mode"
-        printf 'activeFont=%s\n' "$_dfload_active"
-        printf 'reason=%s\n' "$_dfload_reason"
-        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
-    } > "${_dfload_conf}.tmp.$$" 2>/dev/null || return 1
-    mv -f "${_dfload_conf}.tmp.$$" "$_dfload_conf" 2>/dev/null || return 1
-    chmod 0600 "$_dfload_conf" 2>/dev/null || true
-    return 0
-}
-
-# The lightweight status path may reuse only a verification record produced by the
-# explicit deep verifier. A stale self-mount flag or a confirmed boot transaction is
-# not proof that Android's main namespace is actually reading LuoShu's font files.
-device_font_load_status() {
-    _dfload_module_dir="$(_dfload_module)"
-    _dfload_config="$_dfload_module_dir/config"
-    _dfload_active=$(head -n1 "$_dfload_config/active_font.conf" 2>/dev/null | tr -d '\r\n')
-    [ -n "$_dfload_active" ] || _dfload_active=default
-    if [ "$_dfload_active" = default ]; then
-        _dfload_write_simple not-applicable default-font "$_dfload_active" system
-        return 0
-    fi
-
-    _dfload_mount_state=$(sed -n 's/^state=//p' "$_dfload_config/self-mount.conf" 2>/dev/null | head -n1)
-    if [ "$_dfload_mount_state" = failed ]; then
-        _dfload_write_simple failed self-mount-failed "$_dfload_active" compatibility
-        _dfload_log "字体自挂载状态失败：$_dfload_active"
-        return 1
-    fi
-
-    _dfload_verified_state=$(sed -n 's/^state=//p' "$_dfload_config/device-font-load-verification.conf" 2>/dev/null | head -n1)
-    _dfload_verified_active=$(sed -n 's/^activeFont=//p' "$_dfload_config/device-font-load-verification.conf" 2>/dev/null | head -n1)
-    if [ "$_dfload_verified_state" = verified ] && [ "$_dfload_verified_active" = "$_dfload_active" ]; then
-        return 0
-    fi
-
-    _dfload_write_simple pending awaiting-visible-font-verification "$_dfload_active" compatibility
-    return 2
-}
-
-_dfload_python() {
-    _dfload_module_dir="$(_dfload_module)"
-    _dfload_python_bin="$_dfload_module_dir/common/python/bin/luoshu-python"
-    _dfload_engine="$_dfload_module_dir/common/device_font_load_verify.py"
-    [ -x "$_dfload_python_bin" ] && [ -f "$_dfload_engine" ] || return 1
-    _dfload_python_root="$_dfload_module_dir/common/python"
-    PYTHONHOME="$_dfload_python_root" \
-    PYTHONPATH="$_dfload_module_dir/common:$_dfload_python_root/lib/python3.14:$_dfload_python_root/lib/python3.14/site-packages" \
-    LD_LIBRARY_PATH="$_dfload_python_root/lib:$_dfload_python_root/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        "$_dfload_python_bin" "$_dfload_engine" "$@"
-}
-
-_dfload_dump_font_manager() {
-    _dfload_output="$1"
-    rm -f "$_dfload_output" 2>/dev/null || true
-    if command -v cmd >/dev/null 2>&1; then
-        cmd font dump > "$_dfload_output" 2>&1 || true
-        if [ ! -s "$_dfload_output" ] || grep -Eqi '(^|[[:space:]])(unknown|usage:|error:)' "$_dfload_output" 2>/dev/null; then
-            cmd font system > "$_dfload_output" 2>&1 || true
+    for _dfload_candidate in \
+        "$_dfload_module_dir/.luoshu-payload/$_dfload_rel" \
+        "$_dfload_module_dir/$_dfload_rel"; do
+        if [ -f "$_dfload_candidate" ]; then
+            printf '%s\n' "$_dfload_candidate"
+            return 0
         fi
-    fi
-    if [ ! -s "$_dfload_output" ] && command -v dumpsys >/dev/null 2>&1; then
-        dumpsys font > "$_dfload_output" 2>&1 || true
-    fi
-    chmod 0600 "$_dfload_output" 2>/dev/null || true
+    done
+    return 1
 }
 
-_dfload_manifest_paths() {
+_dfload_manifest_font_count() {
     _dfload_module_dir="$(_dfload_module)"
-    _dfload_engine_state="$_dfload_module_dir/config/device-font-engine.conf"
-    _dfload_cache_id=$(sed -n 's/^cacheId=//p' "$_dfload_engine_state" 2>/dev/null | head -n1)
-    if [ -n "$_dfload_cache_id" ]; then
-        _dfload_root="$_dfload_module_dir/config/device-font-cache/$_dfload_cache_id"
-        printf '%s|%s\n' "$_dfload_root/payload/manifest.json" "$_dfload_root/overlay/overlay-manifest.json"
-    else
-        printf '%s|%s\n' \
-            "$_dfload_module_dir/config/device-font-payload/manifest.json" \
-            "$_dfload_module_dir/config/device-font-overlay/overlay-manifest.json"
+    _dfload_manifest="$_dfload_module_dir/config/font-payload-manifest.conf"
+    _dfload_count=0
+    if [ -s "$_dfload_manifest" ]; then
+        while IFS='|' read -r _dfload_rel _dfload_sum _dfload_bytes; do
+            case "$_dfload_rel" in
+                */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc)
+                    _dfload_payload_file "$_dfload_rel" >/dev/null 2>&1 && \
+                        _dfload_count=$((_dfload_count + 1))
+                    ;;
+            esac
+        done < "$_dfload_manifest"
     fi
+    if [ "$_dfload_count" -eq 0 ] 2>/dev/null; then
+        _dfload_count=$(find "$_dfload_module_dir/.luoshu-payload" \
+            -type f \( -name '*.ttf' -o -name '*.otf' -o -name '*.ttc' \) \
+            2>/dev/null | wc -l | tr -d '[:space:]')
+        case "$_dfload_count" in ''|*[!0-9]*) _dfload_count=0 ;; esac
+    fi
+    printf '%s\n' "$_dfload_count"
 }
 
-_dfload_mount_evidence() {
-    _dfload_output="$1"
-    _dfload_module_dir="$(_dfload_module)"
-    _dfload_installed="$_dfload_module_dir/config/device-font-installed.conf"
-    : > "$_dfload_output" 2>/dev/null || return 1
-    [ -s "$_dfload_installed" ] || return 0
-    while IFS='|' read -r _dfload_kind _dfload_rel _dfload_manifest_hash _dfload_expected_size; do
-        [ "$_dfload_kind" = file ] || continue
-        case "$_dfload_rel" in */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;; *) continue ;; esac
-        _dfload_module_file="$_dfload_module_dir/$_dfload_rel"
-        _dfload_visible="/$_dfload_rel"
-        _dfload_status=missing
-        _dfload_expected_fingerprint=''
-        _dfload_actual_fingerprint=''
-        _dfload_size=0
-        if [ -f "$_dfload_module_file" ]; then
-            _dfload_expected_fingerprint=$(_dfload_quick_fingerprint "$_dfload_module_file")
-        fi
-        if [ -f "$_dfload_visible" ]; then
-            _dfload_size=$(_dfload_size "$_dfload_visible")
-            _dfload_actual_fingerprint=$(_dfload_quick_fingerprint "$_dfload_visible")
-            if [ -n "$_dfload_expected_fingerprint" ] && \
-               [ "$_dfload_size" = "$_dfload_expected_size" ] && \
-               [ "$_dfload_actual_fingerprint" = "$_dfload_expected_fingerprint" ]; then
-                _dfload_status=ok
-            else
-                _dfload_status=mismatch
-            fi
-        fi
-        printf '%s|%s|%s|%s|%s|%s\n' \
-            "$_dfload_rel" "$_dfload_visible" "$_dfload_status" \
-            "$_dfload_expected_fingerprint" "$_dfload_actual_fingerprint" "${_dfload_size:-0}" >> "$_dfload_output"
-    done < "$_dfload_installed"
-    chmod 0600 "$_dfload_output" 2>/dev/null || true
-}
-
-# Compatibility payloads do not have the device-aligned manifest. Verify the actual
-# mounted font files from the transaction manifest instead of trusting self-mount.conf.
-# A single missing or mismatching file means Android can still be reading the ROM font.
-_dfload_compat_fonts_visible() {
+# Strong evidence only: every comparable visible file matches the canonical private
+# payload. A mismatch is diagnostic information, not a destructive failure verdict.
+_dfload_exact_visible_match() {
     _dfload_module_dir="$(_dfload_module)"
     _dfload_manifest="$_dfload_module_dir/config/font-payload-manifest.conf"
     [ -s "$_dfload_manifest" ] || return 1
     _dfload_seen=0
     _dfload_failed=0
-
     while IFS='|' read -r _dfload_rel _dfload_manifest_sum _dfload_manifest_size; do
         case "$_dfload_rel" in
             */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;;
             *) continue ;;
         esac
+        _dfload_source=$(_dfload_payload_file "$_dfload_rel") || {
+            _dfload_failed=$((_dfload_failed + 1))
+            continue
+        }
+        _dfload_visible=$(_dfload_visible_path "$_dfload_rel")
+        [ -f "$_dfload_visible" ] || {
+            _dfload_failed=$((_dfload_failed + 1))
+            continue
+        }
         _dfload_seen=$((_dfload_seen + 1))
-        _dfload_module_file="$_dfload_module_dir/$_dfload_rel"
-        _dfload_visible_file=$(_dfload_visible_path "$_dfload_rel")
-        [ -f "$_dfload_module_file" ] && [ -f "$_dfload_visible_file" ] || {
+        _dfload_source_size=$(_dfload_size "$_dfload_source")
+        _dfload_visible_size=$(_dfload_size "$_dfload_visible")
+        [ -n "$_dfload_source_size" ] && [ "$_dfload_source_size" = "$_dfload_visible_size" ] || {
             _dfload_failed=$((_dfload_failed + 1))
             continue
         }
-        _dfload_expected_size=$(_dfload_size "$_dfload_module_file")
-        _dfload_actual_size=$(_dfload_size "$_dfload_visible_file")
-        case "$_dfload_expected_size:$_dfload_actual_size" in *[!0-9:]*)
-            _dfload_failed=$((_dfload_failed + 1))
-            continue
-            ;;
-        esac
-        [ "$_dfload_expected_size" = "$_dfload_actual_size" ] || {
-            _dfload_failed=$((_dfload_failed + 1))
-            continue
-        }
-        _dfload_expected_fp=$(_dfload_quick_fingerprint "$_dfload_module_file")
-        _dfload_actual_fp=$(_dfload_quick_fingerprint "$_dfload_visible_file")
-        [ -n "$_dfload_expected_fp" ] && [ "$_dfload_expected_fp" = "$_dfload_actual_fp" ] || \
+        _dfload_source_fp=$(_dfload_quick_fingerprint "$_dfload_source")
+        _dfload_visible_fp=$(_dfload_quick_fingerprint "$_dfload_visible")
+        [ -n "$_dfload_source_fp" ] && [ "$_dfload_source_fp" = "$_dfload_visible_fp" ] || \
             _dfload_failed=$((_dfload_failed + 1))
     done < "$_dfload_manifest"
-
-    [ "$_dfload_seen" -gt 0 ] && [ "$_dfload_failed" -eq 0 ]
-}
-
-_dfload_write_conf_from_json() {
-    _dfload_json="$1"
-    _dfload_conf="$2"
-    _dfload_state=$(sed -n 's/.*"state":"\([^"]*\)".*/\1/p' "$_dfload_json" 2>/dev/null | head -n1)
-    _dfload_mode=$(sed -n 's/.*"mode":"\([^"]*\)".*/\1/p' "$_dfload_json" 2>/dev/null | head -n1)
-    _dfload_active=$(sed -n 's/.*"activeFont":"\([^"]*\)".*/\1/p' "$_dfload_json" 2>/dev/null | head -n1)
-    [ -n "$_dfload_state" ] || _dfload_state=failed
-    [ -n "$_dfload_mode" ] || _dfload_mode=compatibility
-    {
-        printf 'state=%s\n' "$_dfload_state"
-        printf 'mode=%s\n' "$_dfload_mode"
-        printf 'activeFont=%s\n' "$_dfload_active"
-        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
-        printf 'json=%s\n' "$_dfload_json"
-    } > "${_dfload_conf}.tmp.$$" 2>/dev/null || return 1
-    mv -f "${_dfload_conf}.tmp.$$" "$_dfload_conf" 2>/dev/null || return 1
-    chmod 0600 "$_dfload_conf" 2>/dev/null || true
+    [ "$_dfload_seen" -gt 0 ] 2>/dev/null && [ "$_dfload_failed" -eq 0 ] 2>/dev/null
 }
 
 _dfload_mount_guard() {
-    _dfload_guard_active="$1"
-    _dfload_guard_module="$(_dfload_module)"
-    _dfload_guard_compat="$_dfload_guard_module/common/mount_compat.sh"
-    [ -f "$_dfload_guard_compat" ] || return 1
-    MODDIR="$_dfload_guard_module"
-    MODULE_DIR="$_dfload_guard_module"
-    . "$_dfload_guard_compat"
+    _dfload_active="$1"
+    _dfload_module_dir="$(_dfload_module)"
+    _dfload_mount_compat="$_dfload_module_dir/common/mount_compat.sh"
+    [ -f "$_dfload_mount_compat" ] || return 1
+    MODDIR="$_dfload_module_dir"
+    MODULE_DIR="$_dfload_module_dir"
+    . "$_dfload_mount_compat"
     type luoshu_mount_verify_active >/dev/null 2>&1 || return 1
-    luoshu_mount_verify_active "$_dfload_guard_active"
+    luoshu_mount_verify_active "$_dfload_active"
+}
+
+# Medium-strength evidence. It is intentionally accepted because KernelSU and OEM
+# font services can expose a transformed path/inode view even after a successful mount.
+# The old verifier treated that normal layout difference as failure and later restored
+# the default font, despite the custom font already being visible on screen.
+_dfload_mount_transaction_active() {
+    _dfload_module_dir="$(_dfload_module)"
+    _dfload_mount_state=$(_dfload_state_value "$_dfload_module_dir/config/self-mount.conf" state)
+    _dfload_boot_state=$(_dfload_state_value "$_dfload_module_dir/config/font-payload-boot.conf" state)
+    _dfload_font_count=$(_dfload_manifest_font_count)
+    [ "$_dfload_font_count" -gt 0 ] 2>/dev/null || return 1
+    case "$_dfload_mount_state:$_dfload_boot_state" in
+        mounted:*|confirmed:*|*:confirmed|*:booting) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+device_font_load_status() {
+    _dfload_module_dir="$(_dfload_module)"
+    _dfload_active=$(_dfload_active_font)
+    if [ "$_dfload_active" = default ]; then
+        _dfload_write_simple not-applicable default-font "$_dfload_active" system
+        return 0
+    fi
+
+    _dfload_conf="$_dfload_module_dir/config/device-font-load-verification.conf"
+    _dfload_verified_state=$(_dfload_state_value "$_dfload_conf" state)
+    _dfload_verified_active=$(_dfload_state_value "$_dfload_conf" activeFont)
+    if [ "$_dfload_verified_state" = verified ] && [ "$_dfload_verified_active" = "$_dfload_active" ]; then
+        return 0
+    fi
+
+    if _dfload_mount_transaction_active; then
+        _dfload_write_simple verified mount-transaction-active "$_dfload_active" mount-confirmed
+        return 0
+    fi
+
+    _dfload_mount_state=$(_dfload_state_value "$_dfload_module_dir/config/self-mount.conf" state)
+    if [ "$_dfload_mount_state" = failed ]; then
+        _dfload_write_simple failed self-mount-failed "$_dfload_active" compatibility
+        return 1
+    fi
+
+    _dfload_write_simple pending awaiting-mount-confirmation "$_dfload_active" compatibility
+    return 2
 }
 
 device_font_load_verify() {
     _dfload_module_dir="$(_dfload_module)"
-    _dfload_config="$_dfload_module_dir/config"
-    _dfload_active=$(head -n1 "$_dfload_config/active_font.conf" 2>/dev/null | tr -d '\r\n')
-    [ -n "$_dfload_active" ] || _dfload_active=default
+    _dfload_active=$(_dfload_active_font)
     if [ "$_dfload_active" = default ]; then
-        _dfload_write_simple not-applicable default-font "$_dfload_active"
+        _dfload_write_simple not-applicable default-font "$_dfload_active" system
         return 2
     fi
 
-    _dfload_engine_state="$_dfload_config/device-font-engine.conf"
-    if ! grep -q '^state=installed$' "$_dfload_engine_state" 2>/dev/null; then
-        if _dfload_compat_fonts_visible; then
-            _dfload_write_simple verified visible-font-files-match "$_dfload_active" mount-verified
-            _dfload_log "兼容字体负载已通过系统主命名空间字体文件核验：$_dfload_active"
-            return 0
-        fi
-        _dfload_write_simple failed visible-font-files-mismatch "$_dfload_active" compatibility
-        _dfload_log '系统主命名空间中的字体文件与洛书负载不一致，禁止标记字体已生效'
+    if _dfload_exact_visible_match; then
+        _dfload_write_simple verified visible-font-files-match "$_dfload_active" mount-verified
+        _dfload_log "系统可见字体与私有负载完全一致：$_dfload_active"
+        return 0
+    fi
+
+    if _dfload_mount_guard "$_dfload_active"; then
+        _dfload_write_simple verified pid1-mount-visible "$_dfload_active" mount-verified
+        _dfload_log "PID 1 主命名空间已确认字体挂载；文件布局差异仅保留为诊断信息：$_dfload_active"
+        return 0
+    fi
+
+    if _dfload_mount_transaction_active; then
+        _dfload_write_simple verified mount-active-visible-layout-differs "$_dfload_active" mount-confirmed
+        _dfload_log "字体挂载事务有效，但系统字体服务暴露的文件布局与负载不同；不再误判失败或恢复默认字体：$_dfload_active"
+        return 0
+    fi
+
+    _dfload_mount_state=$(_dfload_state_value "$_dfload_module_dir/config/self-mount.conf" state)
+    if [ "$_dfload_mount_state" = failed ]; then
+        _dfload_write_simple failed self-mount-failed "$_dfload_active" compatibility
+        _dfload_log "字体自挂载明确失败：$_dfload_active"
         return 1
     fi
 
-    if ! _dfload_mount_guard "$_dfload_active"; then
-        _dfload_write_simple failed self-mount-not-visible "$_dfload_active"
-        _dfload_log '自挂载未完整提交或未进入系统主命名空间，禁止标记字体已生效'
-        return 1
-    fi
-
-    _dfload_paths=$(_dfload_manifest_paths)
-    _dfload_payload=${_dfload_paths%%|*}
-    _dfload_overlay=${_dfload_paths#*|}
-    if [ ! -s "$_dfload_payload" ] || [ ! -s "$_dfload_overlay" ]; then
-        _dfload_write_simple failed aligned-manifest-missing "$_dfload_active"
-        _dfload_log '设备对齐清单缺失，禁止标记已生效'
-        return 1
-    fi
-
-    _dfload_dump="$_dfload_config/device-font-manager-dump.txt"
-    _dfload_mounts="$_dfload_config/device-font-mount-evidence.txt"
-    _dfload_json="$_dfload_config/device-font-load-verification.json"
-    _dfload_conf="$_dfload_config/device-font-load-verification.conf"
-    _dfload_dump_font_manager "$_dfload_dump"
-    _dfload_mount_evidence "$_dfload_mounts" || true
-    _dfload_result=$(_dfload_python \
-        --payload "$_dfload_payload" \
-        --overlay "$_dfload_overlay" \
-        --font-dump "$_dfload_dump" \
-        --mount-evidence "$_dfload_mounts" \
-        --engine-state "$_dfload_engine_state" \
-        --active-font "$_dfload_active" \
-        --output "$_dfload_json" 2>> "$_dfload_module_dir/logs/device-font-load-verify.log")
-    _dfload_rc=$?
-    if [ -s "$_dfload_json" ]; then
-        _dfload_write_conf_from_json "$_dfload_json" "$_dfload_conf" || true
-    else
-        _dfload_write_simple failed verifier-output-missing "$_dfload_active"
-    fi
-    case "$_dfload_rc" in
-        0) _dfload_log "FontManager 已确认加载设备对齐字体：$_dfload_active" ;;
-        2) _dfload_log "设备对齐字体未获得完整加载证据：$_dfload_result" ;;
-        *) _dfload_log "设备对齐字体加载验证失败：$_dfload_result" ;;
-    esac
-    return "$_dfload_rc"
+    _dfload_write_simple pending mount-evidence-pending "$_dfload_active" compatibility
+    _dfload_log "暂未取得挂载证据，保留当前字体负载并等待下一次检测：$_dfload_active"
+    return 2
 }
 
 if [ "${0##*/}" = device_font_load_verify.sh ]; then

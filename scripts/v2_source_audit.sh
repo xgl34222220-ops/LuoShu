@@ -56,3 +56,16 @@ grep -q 'native_font_index.json' "$ROOT/service.sh"
 sh "$ROOT/scripts/uninstall_cleanup_test.sh"
 sh "$ROOT/scripts/self_mount_test.sh"
 sh "$ROOT/scripts/font_runtime_policy_test.sh"
+python3 "$ROOT/scripts/fallback_coverage_policy_test.py"
+
+# The lightweight App-only inventory runs before build dependencies are installed.
+# Run the provider identity fixture whenever fontTools and system test fonts exist;
+# all later source/build checks satisfy both conditions.
+if python3 -c 'import fontTools' >/dev/null 2>&1 && \
+   find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit 2>/dev/null | grep -q .; then
+  sh "$ROOT/scripts/google_font_provider_bridge_test.sh"
+else
+  sh -n "$ROOT/common/google_font_provider_bridge.sh"
+  sh -n "$ROOT/common/google_font_provider_service.sh"
+  python3 -m py_compile "$ROOT/common/google_font_provider_patch.py"
+fi

@@ -18,6 +18,7 @@ _lmcl_atomic="$_lmcl_module/common/mount_self_atomic.sh"
 _lmcl_font_runtime="$_lmcl_module/common/font_runtime_policy.sh"
 _lmcl_font_cleanup="$_lmcl_module/common/font_runtime_cleanup.sh"
 _lmcl_font_mount="$_lmcl_module/common/font_runtime_mount.sh"
+_lmcl_google_provider="$_lmcl_module/common/google_font_provider_service.sh"
 
 # When invoked as a CLI, source the base in a child shell whose $0 is not
 # mount_compat.sh so the legacy CLI footer cannot run before the overrides.
@@ -66,6 +67,18 @@ fi
 [ -f "$_lmcl_font_runtime" ] && . "$_lmcl_font_runtime"
 [ -f "$_lmcl_font_cleanup" ] && . "$_lmcl_font_cleanup"
 [ -f "$_lmcl_font_mount" ] && . "$_lmcl_font_mount"
+
+# Play Store and some GMS surfaces open downloadable Google Sans files directly,
+# outside Android fonts.xml. Launch the provider bridge only from service.sh; it waits
+# for boot completion and applies read-only binds in each consumer mount namespace.
+if [ "${0##*/}" = service.sh ] && [ -f "$_lmcl_google_provider" ]; then
+    (
+        MODDIR="$_lmcl_module" MODULE_DIR="$_lmcl_module" \
+            sh "$_lmcl_google_provider" boot >/dev/null 2>&1
+    ) &
+fi
+
 unset _lmcl_module _lmcl_base _lmcl_fallback _lmcl_policy _lmcl_private_policy \
     _lmcl_atomic _lmcl_font_runtime _lmcl_font_cleanup _lmcl_font_mount \
+    _lmcl_google_provider \
     _lmcl_command _lmcl_argument
