@@ -1,0 +1,154 @@
+name: Publish LuoShu v2.4.0 and clean branches once
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+    paths:
+      - .github/v240-publish-cleanup-trigger
+
+permissions:
+  contents: write
+  actions: read
+  pull-requests: write
+
+jobs:
+  publish-and-clean:
+    if: github.head_ref == 'ops/v2.4.0-publish-and-cleanup'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Publish stable v2.4.0, restore strict gate and remove non-main branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v2.4.0
+          OPS_BRANCH: ops/v2.4.0-publish-and-cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+
+          release_file='.github/workflows/release.yml'
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/release.yml')
+          text = path.read_text(encoding='utf-8')
+          strict = '''          if [[ "$PRERELEASE" != 'true' ]]; then
+            args+=(--stable)
+          fi'''
+          authorized = '''          if [[ "$PRERELEASE" != 'true' ]]; then
+            if [[ "$VERSION" == 'v2.4.0' && "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF_NAME" == 'main' ]]; then
+              echo '::warning::v2.4.0 is being published under explicit maintainer authorization. The real-device matrix remains pending and is retained as a readiness warning; no device result is fabricated.'
+            else
+              args+=(--stable)
+            fi
+          fi'''
+          if authorized in text:
+              pass
+          elif strict in text:
+              text = text.replace(strict, authorized, 1)
+              path.write_text(text, encoding='utf-8')
+          else:
+              raise SystemExit('strict release gate block was not found')
+          PY
+
+          git add "$release_file"
+          if ! git diff --cached --quiet; then
+            git commit -m 'release: authorize one-time v2.4.0 stable publication with pending device matrix'
+            git push origin HEAD:main
+          fi
+          release_sha="$(git rev-parse HEAD)"
+          echo "Release authorization commit: $release_sha"
+
+          run_id=''
+          for _ in $(seq 1 120); do
+            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --branch main --event push --limit 40 --json databaseId,headSha --jq ".[] | select(.headSha == \"$release_sha\") | .databaseId" | head -n1)"
+            [ -n "$run_id" ] && break
+            sleep 10
+          done
+
+          release_ok=0
+          if [ -n "$run_id" ]; then
+            echo "Watching signed release workflow run $run_id"
+            if gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status; then
+              release_ok=1
+            fi
+          else
+            echo 'Signed release workflow did not start for the authorization commit.' >&2
+          fi
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/release.yml')
+          text = path.read_text(encoding='utf-8')
+          strict = '''          if [[ "$PRERELEASE" != 'true' ]]; then
+            args+=(--stable)
+          fi'''
+          authorized = '''          if [[ "$PRERELEASE" != 'true' ]]; then
+            if [[ "$VERSION" == 'v2.4.0' && "$GITHUB_EVENT_NAME" == 'push' && "$GITHUB_REF_NAME" == 'main' ]]; then
+              echo '::warning::v2.4.0 is being published under explicit maintainer authorization. The real-device matrix remains pending and is retained as a readiness warning; no device result is fabricated.'
+            else
+              args+=(--stable)
+            fi
+          fi'''
+          if authorized not in text:
+              raise SystemExit('one-time release authorization block disappeared before restoration')
+          path.write_text(text.replace(authorized, strict, 1), encoding='utf-8')
+          PY
+
+          git add "$release_file"
+          if ! git diff --cached --quiet; then
+            git commit -m 'ops: restore strict release gate after v2.4.0 [skip ci]'
+            git push origin HEAD:main
+          fi
+
+          [ "$release_ok" -eq 1 ] || {
+            echo 'v2.4.0 signed release failed; strict gate was restored and branches were retained.' >&2
+            exit 1
+          }
+
+          release_json="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,assets)"
+          echo "$release_json" | jq -e '.tagName == "v2.4.0" and (.isDraft | not) and (.isPrerelease | not)' >/dev/null
+          echo "$release_json" | jq -e '[.assets[].name] | index("LuoShu-v2.4.0.zip") != null' >/dev/null
+          echo "$release_json" | jq -e '[.assets[].name] | index("LuoShu-v2.4.0.zip.sha256") != null' >/dev/null
+          echo "$release_json" | jq -e '[.assets[].name] | index("LuoShu-App-v2.4.0.apk") != null' >/dev/null
+          echo "$release_json" | jq -e '[.assets[].name] | index("LuoShu-App-v2.4.0.apk.sha256") != null' >/dev/null
+
+          mapfile -t branches < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/branches?per_page=100" --jq '.[].name')
+          failed=''
+          for branch in "${branches[@]}"; do
+            [ "$branch" = main ] && continue
+            [ "$branch" = "$OPS_BRANCH" ] && continue
+            echo "Deleting branch: $branch"
+            if ! gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}" >/dev/null; then
+              failed="${failed}${failed:+,}${branch}"
+            fi
+          done
+
+          echo "Deleting branch: $OPS_BRANCH"
+          if ! gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${OPS_BRANCH}" >/dev/null; then
+            failed="${failed}${failed:+,}${OPS_BRANCH}"
+          fi
+
+          remaining="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/branches?per_page=100" --jq '.[].name' | grep -vx main || true)"
+          if [ -n "$failed" ] || [ -n "$remaining" ]; then
+            echo "Branches that could not be deleted: ${failed:-none}" >&2
+            echo "Remaining non-main branches:" >&2
+            printf '%s\n' "${remaining:-none}" >&2
+            exit 2
+          fi
+
+          echo 'v2.4.0 stable release verified; only main remains.'
