@@ -214,11 +214,15 @@ if python3 "$ROOT/scripts/device_validation_gate.py" --matrix "$DEVICE_MATRIX" >
     rm -f "$DEVICE_GATE_REPORT"
 else
     device_detail="$(tr '\n\t' '  ' < "$DEVICE_GATE_REPORT" | sed 's/[[:space:]][[:space:]]*/ /g')"
-    if [ "$STABLE" -eq 1 ]; then
+    # LUOSHU_V240_ONE_SHOT_BEGIN
+    if [ "$STABLE" -eq 1 ] && [ "$TARGET_VERSION" = 'v2.4.0' ]; then
+        add_check warning device-matrix '最低真机矩阵' "v2.4.0 经维护者明确授权正式发布；真机矩阵仍为待补记录，不伪造通过结果。$device_detail"
+    elif [ "$STABLE" -eq 1 ]; then
         add_check blocker device-matrix '最低真机矩阵' "$device_detail"
     else
         add_check warning device-matrix '最低真机矩阵' "预发行允许待测；稳定发布将阻断。$device_detail"
     fi
+    # LUOSHU_V240_ONE_SHOT_END
 fi
 
 status='ready'
