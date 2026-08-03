@@ -1,4 +1,4 @@
-name: Publish LuoShu v2.4.0 and clean branches once
+name: Publish signed LuoShu v2.4.0 and clean branches once
 
 on:
   pull_request:
@@ -10,11 +10,16 @@ on:
       - synchronize
     paths:
       - .github/v240-publish-cleanup-trigger
+      - .github/workflows/v240-publish-cleanup-once.yml
 
 permissions:
   contents: write
   actions: read
   pull-requests: write
+
+concurrency:
+  group: luoshu-v240-publish-cleanup-once
+  cancel-in-progress: false
 
 jobs:
   publish-and-clean:
@@ -22,171 +27,223 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 75
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out verified main source
+        uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
           token: ${{ github.token }}
 
-      - name: Publish stable v2.4.0, restore strict readiness and remove non-main branches
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: v2.4.0
-          OPS_BRANCH: ops/v2.4.0-publish-and-cleanup
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Verify exact v2.4.0 source
+        id: source
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          . ./scripts/version.sh
+          [[ "$LUOSHU_VERSION" == 'v2.4.0' ]]
+          [[ "$LUOSHU_VERSION_CODE" == '20400' ]]
+          [[ "$LUOSHU_ARTIFACT_VERSION" == 'v2.4.0' ]]
+          test -s RELEASE_NOTES_v2.4.0.md
+          source_sha="$(git rev-parse HEAD)"
+          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          [[ "$source_sha" == "$remote_main" ]]
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
 
-          readiness='scripts/pre_release_readiness.sh'
-          notes='RELEASE_NOTES_v2.4.0.md'
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path('scripts/pre_release_readiness.sh')
-          lines = path.read_text(encoding='utf-8').splitlines()
-          begin = '# LUOSHU_V240_ONE_SHOT_BEGIN'
-          if not any(line.strip() == begin for line in lines):
-              found = None
-              for index in range(len(lines) - 4):
-                  if (
-                      lines[index].strip() == 'if [ "$STABLE" -eq 1 ]; then'
-                      and lines[index + 1].strip().startswith("add_check blocker device-matrix")
-                      and lines[index + 2].strip() == 'else'
-                      and lines[index + 3].strip().startswith("add_check warning device-matrix")
-                      and lines[index + 4].strip() == 'fi'
-                  ):
-                      found = index
-                      break
-              if found is None:
-                  raise SystemExit('stable device-matrix gate block was not found')
-              indent = lines[found][: len(lines[found]) - len(lines[found].lstrip())]
-              original_blocker = lines[found + 1].strip()
-              original_warning = lines[found + 3].strip()
-              replacement = [
-                  indent + begin,
-                  indent + 'if [ "$STABLE" -eq 1 ] && [ "$TARGET_VERSION" = \'v2.4.0\' ]; then',
-                  indent + '    add_check warning device-matrix \'最低真机矩阵\' "v2.4.0 经维护者明确授权正式发布；真机矩阵仍为待补记录，不伪造通过结果。$device_detail"',
-                  indent + 'elif [ "$STABLE" -eq 1 ]; then',
-                  indent + '    ' + original_blocker,
-                  indent + 'else',
-                  indent + '    ' + original_warning,
-                  indent + 'fi',
-                  indent + '# LUOSHU_V240_ONE_SHOT_END',
-              ]
-              lines[found : found + 5] = replacement
-              path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-
-          notes = Path('RELEASE_NOTES_v2.4.0.md')
-          text = notes.read_text(encoding='utf-8')
-          trigger = '<!-- v2.4.0 explicit stable release trigger -->'
-          if trigger not in text:
-              notes.write_text(text.rstrip() + '\n\n' + trigger + '\n', encoding='utf-8')
-          PY
-
-          git add "$readiness" "$notes"
-          if ! git diff --cached --quiet; then
-            git commit -m 'release: explicitly authorize v2.4.0 with pending device matrix'
-            git push origin HEAD:main
-          fi
-          release_sha="$(git rev-parse HEAD)"
-          echo "Release authorization commit: $release_sha"
-
-          run_id=''
-          for _ in $(seq 1 120); do
-            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --branch main --event push --limit 60 --json databaseId,headSha --jq ".[] | select(.headSha == \"$release_sha\") | .databaseId" | head -n1)"
-            [ -n "$run_id" ] && break
-            sleep 10
+      - name: Require signing secrets
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.LUOSHU_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for value in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [[ -n "${!value}" ]] || { echo "Missing signing secret: $value" >&2; exit 3; }
           done
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/luoshu-release.jks"
+          keytool -list -keystore "$RUNNER_TEMP/luoshu-release.jks" \
+            -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
 
-          release_ok=0
-          if [ -n "$run_id" ]; then
-            echo "Watching signed release workflow run $run_id"
-            if gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status; then
-              release_ok=1
-            fi
-          else
-            echo 'Signed release workflow did not start for the authorization commit.' >&2
+      - name: Install module build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+
+      - name: Prepare ARM64 composite runtime
+        shell: bash
+        run: |
+          if [[ ! -x common/python/bin/luoshu-python ]]; then
+            sh ./scripts/prepare_composite_runtime.sh
           fi
 
-          python3 - <<'PY'
-          from pathlib import Path
+      - name: Run complete source and module checks
+        shell: bash
+        run: sh ./scripts/check.sh
 
-          path = Path('scripts/pre_release_readiness.sh')
-          lines = path.read_text(encoding='utf-8').splitlines()
-          begin = '# LUOSHU_V240_ONE_SHOT_BEGIN'
-          end = '# LUOSHU_V240_ONE_SHOT_END'
-          begin_index = next((i for i, line in enumerate(lines) if line.strip() == begin), None)
-          end_index = next((i for i, line in enumerate(lines) if line.strip() == end), None)
-          if begin_index is None or end_index is None or end_index < begin_index:
-              raise SystemExit('one-time readiness authorization markers disappeared before restoration')
-          indent = lines[begin_index][: len(lines[begin_index]) - len(lines[begin_index].lstrip())]
-          blocker = next(
-              line.strip()
-              for line in lines[begin_index:end_index + 1]
-              if line.strip().startswith('add_check blocker device-matrix')
-          )
-          warning = next(
-              line.strip()
-              for line in lines[begin_index:end_index + 1]
-              if line.strip().startswith('add_check warning device-matrix') and '预发行允许待测' in line
-          )
-          lines[begin_index : end_index + 1] = [
-              indent + 'if [ "$STABLE" -eq 1 ]; then',
-              indent + '    ' + blocker,
-              indent + 'else',
-              indent + '    ' + warning,
-              indent + 'fi',
-          ]
-          path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+      - name: Record explicit stable-release authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '::warning::v2.4.0 is being published under the maintainer explicit instruction. The ColorOS, HyperOS, Magisk and APatch device records remain pending; no device result is being fabricated.'
+          sh ./scripts/pre_release_readiness.sh --target v2.4.0 --enforce
 
-          notes = Path('RELEASE_NOTES_v2.4.0.md')
-          trigger = '<!-- v2.4.0 explicit stable release trigger -->'
-          text = notes.read_text(encoding='utf-8').replace('\n\n' + trigger + '\n', '\n')
-          notes.write_text(text, encoding='utf-8')
-          PY
+      - name: Lint, test and build signed release App
+        working-directory: android-app
+        env:
+          LUOSHU_KEYSTORE_FILE: ${{ runner.temp }}/luoshu-release.jks
+          LUOSHU_KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
+          LUOSHU_KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
+          LUOSHU_KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
+        run: gradle --no-daemon --stacktrace :app:lintRelease :app:testDebugUnitTest :app:assembleRelease
 
-          git add "$readiness" "$notes"
-          if ! git diff --cached --quiet; then
-            git commit -m 'ops: restore strict readiness after v2.4.0 [skip ci]'
-            git push origin HEAD:main
+      - name: Verify APK signature certificate
+        shell: bash
+        env:
+          EXPECTED_CERT_SHA256: e0043b560a10111d3ffddd3a7afba680b854e14ed793c7a3fdb7f8b7aa95ff27
+        run: |
+          set -euo pipefail
+          apk='android-app/app/build/outputs/apk/release/app-release.apk'
+          test -s "$apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+          test -x "$apksigner"
+          "$apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/apk-signature.txt"
+          grep -Eq '^Verified using v(2|3|3\.1|3\.2) scheme.*: true$' "$RUNNER_TEMP/apk-signature.txt"
+          grep -qx 'Number of signers: 1' "$RUNNER_TEMP/apk-signature.txt"
+          actual_cert="$(awk -F': ' '/Signer.*certificate SHA-256 digest:/ {print $NF; exit}' \
+            "$RUNNER_TEMP/apk-signature.txt" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
+          [[ "$actual_cert" == "$EXPECTED_CERT_SHA256" ]]
+
+      - name: Build and verify formal packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./scripts/version.sh
+          apk='android-app/app/build/outputs/apk/release/app-release.apk'
+          mkdir -p dist
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}.apk"
+          cp -f "$apk" "$app"
+          (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
+          LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
+          module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
+          test -s "$module"
+          unzip -t "$module" >/dev/null
+          unzip -Z1 "$module" | grep -qx 'bundled/LuoShu-App.apk'
+          ! unzip -Z1 "$module" | grep -qE '(^|/)webroot(/|$)'
+          unzip -p "$module" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
+          cmp -s "$apk" "$RUNNER_TEMP/embedded.apk"
+          (cd dist && sha256sum -c "$(basename "$module").sha256")
+          (cd dist && sha256sum -c "$(basename "$app").sha256")
+
+      - name: Preserve verified formal candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-v2.4.0-verified-release
+          path: |
+            dist/LuoShu-v2.4.0.zip
+            dist/LuoShu-v2.4.0.zip.sha256
+            dist/LuoShu-App-v2.4.0.apk
+            dist/LuoShu-App-v2.4.0.apk.sha256
+            dist/pre-release-readiness/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish immutable stable GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v2.4.0
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; immutable releases are not overwritten." >&2
+            exit 4
           fi
-
-          [ "$release_ok" -eq 1 ] || {
-            echo 'v2.4.0 signed release failed; strict readiness was restored and branches were retained.' >&2
-            exit 1
+          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          [[ "$remote_main" == "$SOURCE_SHA" ]] || {
+            echo "main moved during signed validation: $remote_main != $SOURCE_SHA" >&2
+            exit 4
           }
+          gh release create "$TAG" \
+            dist/LuoShu-v2.4.0.zip \
+            dist/LuoShu-v2.4.0.zip.sha256 \
+            dist/LuoShu-App-v2.4.0.apk \
+            dist/LuoShu-App-v2.4.0.apk.sha256 \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" \
+            --title '洛书 v2.4.0' \
+            --notes-file RELEASE_NOTES_v2.4.0.md \
+            --latest
 
+      - name: Re-download and verify published assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: v2.4.0
+        shell: bash
+        run: |
+          set -euo pipefail
           release_json="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,isDraft,isPrerelease,assets)"
           echo "$release_json" | jq -e '.tagName == "v2.4.0" and (.isDraft | not) and (.isPrerelease | not)' >/dev/null
-          echo "$release_json" | jq -e '[.assets[].name] | index("LuoShu-v2.4.0.zip") != null' >/dev/null
-          echo "$release_json" | jq -e '[.assets[].name] | index("LuoShu-v2.4.0.zip.sha256") != null' >/dev/null
-          echo "$release_json" | jq -e '[.assets[].name] | index("LuoShu-App-v2.4.0.apk") != null' >/dev/null
-          echo "$release_json" | jq -e '[.assets[].name] | index("LuoShu-App-v2.4.0.apk.sha256") != null' >/dev/null
+          for name in \
+            LuoShu-v2.4.0.zip LuoShu-v2.4.0.zip.sha256 \
+            LuoShu-App-v2.4.0.apk LuoShu-App-v2.4.0.apk.sha256; do
+            echo "$release_json" | jq -e --arg name "$name" '[.assets[].name] | index($name) != null' >/dev/null
+          done
+          published="$RUNNER_TEMP/published-v240"
+          mkdir -p "$published"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$published" \
+            --pattern 'LuoShu-v2.4.0.zip' \
+            --pattern 'LuoShu-v2.4.0.zip.sha256' \
+            --pattern 'LuoShu-App-v2.4.0.apk' \
+            --pattern 'LuoShu-App-v2.4.0.apk.sha256'
+          (cd "$published" && sha256sum -c LuoShu-v2.4.0.zip.sha256)
+          (cd "$published" && sha256sum -c LuoShu-App-v2.4.0.apk.sha256)
+          cmp -s dist/LuoShu-v2.4.0.zip "$published/LuoShu-v2.4.0.zip"
+          cmp -s dist/LuoShu-App-v2.4.0.apk "$published/LuoShu-App-v2.4.0.apk"
 
+      - name: Delete every non-default branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
           mapfile -t branches < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/branches?per_page=100" --jq '.[].name')
           failed=''
           for branch in "${branches[@]}"; do
-            [ "$branch" = main ] && continue
-            [ "$branch" = "$OPS_BRANCH" ] && continue
+            [[ "$branch" == main ]] && continue
             echo "Deleting branch: $branch"
-            if ! gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}" >/dev/null; then
+            encoded="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$branch")"
+            if ! gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${encoded}" >/dev/null; then
               failed="${failed}${failed:+,}${branch}"
             fi
           done
-
-          echo "Deleting branch: $OPS_BRANCH"
-          if ! gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${OPS_BRANCH}" >/dev/null; then
-            failed="${failed}${failed:+,}${OPS_BRANCH}"
-          fi
-
           remaining="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/branches?per_page=100" --jq '.[].name' | grep -vx main || true)"
-          if [ -n "$failed" ] || [ -n "$remaining" ]; then
+          if [[ -n "$failed" || -n "$remaining" ]]; then
             echo "Branches that could not be deleted: ${failed:-none}" >&2
             echo 'Remaining non-main branches:' >&2
             printf '%s\n' "${remaining:-none}" >&2
-            exit 2
+            exit 5
           fi
-
-          echo 'v2.4.0 stable release verified; only main remains.'
+          echo 'Only the default branch main remains.'
