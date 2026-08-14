@@ -1,10 +1,5 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -15,11 +10,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.xgl34222220.luoshu.LuoShuViewModel
 import io.github.xgl34222220.luoshu.MixSlot
@@ -38,6 +30,7 @@ internal fun FontStudioRoute(
     }
     val latestActions by rememberUpdatedState(actions)
     var showCompositePreview by remember { mutableStateOf(false) }
+    var showPresetLibrary by remember { mutableStateOf(false) }
     var showProfileTransfer by remember { mutableStateOf(false) }
     var showGlyphBrowser by remember { mutableStateOf(false) }
     var restoreNotice by remember { mutableStateOf("") }
@@ -78,6 +71,7 @@ internal fun FontStudioRoute(
             style = style,
             enabled = state.hasFonts && !state.loading,
             onPreview = { showCompositePreview = true },
+            onPresets = { showPresetLibrary = true },
             onProfile = { showProfileTransfer = true },
             onGlyphs = { showGlyphBrowser = true },
         )
@@ -97,6 +91,14 @@ internal fun FontStudioRoute(
                 latestActions.updateWeight(MixSlot.Digit, preset.weightFor(MixSlot.Digit))
             },
             onDismiss = { showCompositePreview = false },
+        )
+    }
+    if (showPresetLibrary) {
+        StudioPresetDialog(
+            style = style,
+            state = state,
+            actions = stableActions,
+            onDismiss = { showPresetLibrary = false },
         )
     }
     if (showProfileTransfer) {

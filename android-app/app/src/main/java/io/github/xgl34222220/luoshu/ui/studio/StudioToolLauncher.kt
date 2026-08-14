@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.ListAlt
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
@@ -39,6 +40,7 @@ internal fun StudioToolLauncher(
     style: UiStyle,
     enabled: Boolean,
     onPreview: () -> Unit,
+    onPresets: () -> Unit,
     onProfile: () -> Unit,
     onGlyphs: () -> Unit,
     modifier: Modifier = Modifier,
@@ -94,8 +96,17 @@ internal fun StudioToolLauncher(
                         },
                     )
                     StudioToolMenuItem(
-                        label = "方案管理",
-                        description = "导入、导出和恢复三个槽位的组合配置",
+                        label = "本地方案库",
+                        description = "保存、收藏和载入常用组合，并按最近使用快速回滚",
+                        icon = Icons.Rounded.History,
+                        onClick = {
+                            menuVisible = false
+                            onPresets()
+                        },
+                    )
+                    StudioToolMenuItem(
+                        label = "方案导入导出",
+                        description = "通过 JSON 迁移三个槽位、字重和变量轴配置",
                         icon = Icons.Rounded.Description,
                         onClick = {
                             menuVisible = false

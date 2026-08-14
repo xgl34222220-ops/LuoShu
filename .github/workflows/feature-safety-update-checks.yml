@@ -1,0 +1,59 @@
+name: Safety and update feature checks
+
+on:
+  push:
+    branches:
+      - 'feat/**'
+    paths:
+      - 'android-app/**'
+      - 'system/bin/luoshu-health'
+      - 'scripts/system_health_test.sh'
+      - 'scripts/sync_update_metadata.py'
+      - 'scripts/sync_update_metadata_test.py'
+      - 'update-prerelease.json'
+      - '.github/workflows/sync-update-metadata.yml'
+      - '.github/workflows/feature-safety-update-checks.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'android-app/**'
+      - 'system/bin/luoshu-health'
+      - 'scripts/system_health_test.sh'
+      - 'scripts/sync_update_metadata.py'
+      - 'scripts/sync_update_metadata_test.py'
+      - 'update-prerelease.json'
+      - '.github/workflows/sync-update-metadata.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate health and update metadata helpers
+        run: |
+          sh -n system/bin/luoshu-health
+          sh scripts/system_health_test.sh
+          python3 -m py_compile scripts/sync_update_metadata.py
+          python3 scripts/sync_update_metadata_test.py
+
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Unit test, lint and assemble App
+        working-directory: android-app
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:lintDebug :app:assembleDebug

@@ -1,0 +1,243 @@
+#!/system/bin/sh
+# 洛书系统体检与模块冲突探测。
+# 只读 report 不修改任何字体状态；repair-stale 仅清理已确认失效的锁/PID 文件。
+set +e
+
+MOD="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
+ADB_ROOT="${LUOSHU_ADB_ROOT:-/data/adb}"
+MODULES_ROOT="${LUOSHU_MODULES_ROOT:-$ADB_ROOT/modules}"
+ACTION="${1:-report}"
+
+read_value() {
+    sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
+bool_file() {
+    [ -s "$1" ] && printf 'true\n' || printf 'false\n'
+}
+
+safe_count() {
+    _sc_value="$1"
+    case "$_sc_value" in ''|*[!0-9]*) printf '0\n' ;; *) printf '%s\n' "$_sc_value" ;; esac
+}
+
+root_manager() {
+    if [ -n "${LUOSHU_ROOT_MANAGER:-}" ]; then
+        printf '%s\n' "$LUOSHU_ROOT_MANAGER"
+    elif [ -n "${APATCH:-}" ] || [ -n "${APATCH_VER_CODE:-}" ] || [ -d "$ADB_ROOT/ap" ] || [ -d "$ADB_ROOT/apatch" ] || command -v apd >/dev/null 2>&1; then
+        printf 'APatch\n'
+    elif [ -n "${SUKISU:-}" ] || [ -n "${SUKISU_VER:-}" ]; then
+        printf 'SukiSU\n'
+    elif [ "${KSU:-}" = true ] || [ -n "${KSU_VER_CODE:-}" ] || [ -d "$ADB_ROOT/ksu" ] || command -v ksud >/dev/null 2>&1; then
+        printf 'KernelSU\n'
+    elif [ -n "${MAGISK_VER_CODE:-}" ] || [ -d "$ADB_ROOT/magisk" ] || command -v magisk >/dev/null 2>&1; then
+        printf 'Magisk\n'
+    else
+        printf 'Unknown\n'
+    fi
+}
+
+font_target_list() {
+    cat <<'TARGETS'
+system/fonts
+product/fonts
+system_ext/fonts
+vendor/fonts
+odm/fonts
+oem/fonts
+my_product/fonts
+oplus_product/fonts
+mi_ext/fonts
+system/etc/fonts.xml
+system/etc/font_fallback.xml
+system/etc/fonts_customization.xml
+product/etc/fonts.xml
+product/etc/font_fallback.xml
+product/etc/fonts_customization.xml
+system_ext/etc/fonts.xml
+vendor/etc/fonts.xml
+TARGETS
+}
+
+module_enabled_for_conflict_scan() {
+    _mecs_dir="$1"
+    [ -d "$_mecs_dir" ] || return 1
+    [ "${_mecs_dir##*/}" != LuoShu ] || return 1
+    [ ! -e "$_mecs_dir/disable" ] || return 1
+    [ ! -e "$_mecs_dir/remove" ] || return 1
+    return 0
+}
+
+target_is_conflict() {
+    _tic_path="$1"
+    [ -e "$_tic_path" ] || return 1
+    [ -d "$_tic_path" ] || return 0
+    [ -e "$_tic_path/.replace" ] && return 0
+    find "$_tic_path" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' -o -iname '*.xml' \) \
+        -print -quit 2>/dev/null | grep -q .
+}
+
+conflict_target_count() {
+    _ctc_count=0
+    [ -d "$MODULES_ROOT" ] || { printf '0\n'; return; }
+    for _ctc_module in "$MODULES_ROOT"/*; do
+        module_enabled_for_conflict_scan "$_ctc_module" || continue
+        while IFS= read -r _ctc_target; do
+            target_is_conflict "$_ctc_module/$_ctc_target" || continue
+            _ctc_count=$((_ctc_count + 1))
+        done <<EOF_TARGETS
+$(font_target_list)
+EOF_TARGETS
+    done
+    printf '%s\n' "$_ctc_count"
+}
+
+print_conflicts() {
+    [ -d "$MODULES_ROOT" ] || return 0
+    for _pc_module in "$MODULES_ROOT"/*; do
+        module_enabled_for_conflict_scan "$_pc_module" || continue
+        _pc_id="${_pc_module##*/}"
+        _pc_name="$(read_value "$_pc_module/module.prop" name)"
+        [ -n "$_pc_name" ] || _pc_name="$_pc_id"
+        _pc_name="$(printf '%s' "$_pc_name" | tr '|\r\n' '   ')"
+        while IFS= read -r _pc_target; do
+            _pc_path="$_pc_module/$_pc_target"
+            target_is_conflict "$_pc_path" || continue
+            if [ -d "$_pc_path" ]; then
+                _pc_files="$(find "$_pc_path" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' -o -iname '*.xml' \) 2>/dev/null | wc -l | tr -d '[:space:]')"
+                _pc_files="$(safe_count "$_pc_files")"
+                printf 'conflict=%s|%s|%s|directory|%s\n' "$_pc_id" "$_pc_name" "$_pc_target" "$_pc_files"
+            else
+                printf 'conflict=%s|%s|%s|file|1\n' "$_pc_id" "$_pc_name" "$_pc_target"
+            fi
+        done <<EOF_TARGETS
+$(font_target_list)
+EOF_TARGETS
+    done
+}
+
+payload_font_count() {
+    _pfc_total=0
+    for _pfc_path in \
+        "$MOD/system/fonts" "$MOD/product/fonts" "$MOD/system_ext/fonts" "$MOD/vendor/fonts" \
+        "$MOD/odm/fonts" "$MOD/oem/fonts" "$MOD/my_product/fonts" "$MOD/oplus_product/fonts" "$MOD/mi_ext/fonts"; do
+        [ -d "$_pfc_path" ] || continue
+        _pfc_count="$(find "$_pfc_path" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) 2>/dev/null | wc -l | tr -d '[:space:]')"
+        _pfc_count="$(safe_count "$_pfc_count")"
+        _pfc_total=$((_pfc_total + _pfc_count))
+    done
+    printf '%s\n' "$_pfc_total"
+}
+
+lock_state() {
+    _ls_lock="$MOD/.font_switch.lock"
+    [ -e "$_ls_lock" ] || { printf 'idle\n'; return; }
+    if [ -f "$MOD/common/util_functions.sh" ]; then
+        MODULE_DIR="$MOD"
+        . "$MOD/common/util_functions.sh" >/dev/null 2>&1 || true
+        if type luoshu_font_lock_active >/dev/null 2>&1 && luoshu_font_lock_active "$_ls_lock"; then
+            printf 'active\n'
+            return
+        fi
+    else
+        _ls_pid="$(cat "$_ls_lock/pid" 2>/dev/null || cat "$_ls_lock" 2>/dev/null)"
+        case "$_ls_pid" in ''|*[!0-9]*) ;; *) kill -0 "$_ls_pid" 2>/dev/null && { printf 'active\n'; return; } ;; esac
+    fi
+    printf 'stale\n'
+}
+
+mount_engine() {
+    if [ -f "$MOD/common/mount_compat.sh" ]; then
+        MODULE_DIR="$MOD"
+        . "$MOD/common/mount_compat.sh" >/dev/null 2>&1 || true
+        if type luoshu_detect_mount_engine >/dev/null 2>&1; then
+            luoshu_detect_mount_engine 2>/dev/null | head -n1
+            return
+        fi
+    fi
+    printf 'unknown\n'
+}
+
+report() {
+    _r_active="$(head -n1 "$MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
+    [ -n "$_r_active" ] || _r_active=default
+    _r_payload="$(payload_font_count)"
+    _r_conflicts="$(conflict_target_count)"
+    _r_errors="$(tail -n 500 "$MOD/logs/fontswitch.log" 2>/dev/null | grep -Eic 'error|failed|失败|错误' 2>/dev/null)"
+    _r_errors="$(safe_count "$_r_errors")"
+    _r_warnings="$(tail -n 500 "$MOD/logs/fontswitch.log" 2>/dev/null | grep -Eic 'warn|警告' 2>/dev/null)"
+    _r_warnings="$(safe_count "$_r_warnings")"
+    _r_reboot=false
+    for _r_marker in "$MOD/config"/*reboot_required.conf; do
+        [ -s "$_r_marker" ] || continue
+        _r_reboot=true
+        break
+    done
+    _r_module=false
+    [ -f "$MOD/module.prop" ] && _r_module=true
+    _r_pending=false
+    [ -d "${LUOSHU_MODULES_UPDATE_ROOT:-$ADB_ROOT/modules_update}/LuoShu" ] && _r_pending=true
+
+    printf 'healthVersion=1\n'
+    printf 'modulePresent=%s\n' "$_r_module"
+    printf 'pendingModulePresent=%s\n' "$_r_pending"
+    printf 'moduleVersion=%s\n' "$(read_value "$MOD/module.prop" version)"
+    printf 'moduleVersionCode=%s\n' "$(read_value "$MOD/module.prop" versionCode)"
+    printf 'rootManager=%s\n' "$(root_manager)"
+    printf 'androidSdk=%s\n' "$(getprop ro.build.version.sdk 2>/dev/null)"
+    printf 'activeFont=%s\n' "$_r_active"
+    printf 'payloadFonts=%s\n' "$_r_payload"
+    printf 'lockState=%s\n' "$(lock_state)"
+    printf 'engineState=%s\n' "$(read_value "$MOD/config/device-font-engine.conf" state)"
+    printf 'templateState=%s\n' "$(read_value "$MOD/config/device-font-template.state" state)"
+    printf 'alignmentState=%s\n' "$(read_value "$MOD/config/device-font-load-verification.conf" state)"
+    printf 'alignmentMode=%s\n' "$(read_value "$MOD/config/device-font-load-verification.conf" mode)"
+    printf 'selfMountState=%s\n' "$(read_value "$MOD/config/self-mount.conf" state)"
+    printf 'selfMountBackend=%s\n' "$(read_value "$MOD/config/self-mount.conf" backend)"
+    printf 'mountEngine=%s\n' "$(mount_engine)"
+    printf 'cachePending=%s\n' "$(bool_file "$MOD/config/device-font-cache-pending.conf")"
+    printf 'rebootRequired=%s\n' "$_r_reboot"
+    printf 'recentWarnings=%s\n' "$_r_warnings"
+    printf 'recentErrors=%s\n' "$_r_errors"
+    printf 'conflictCount=%s\n' "$_r_conflicts"
+    print_conflicts
+}
+
+repair_stale() {
+    _rs_changed=0
+    _rs_lock="$MOD/.font_switch.lock"
+    if [ -e "$_rs_lock" ]; then
+        if [ -f "$MOD/common/util_functions.sh" ]; then
+            MODULE_DIR="$MOD"
+            . "$MOD/common/util_functions.sh" >/dev/null 2>&1 || true
+            if type luoshu_font_lock_active >/dev/null 2>&1 && ! luoshu_font_lock_active "$_rs_lock"; then
+                if type luoshu_font_lock_reap_stale >/dev/null 2>&1; then
+                    luoshu_font_lock_reap_stale "$_rs_lock" >/dev/null 2>&1 && _rs_changed=$((_rs_changed + 1))
+                fi
+            fi
+        fi
+    fi
+    for _rs_pidfile in "$MOD/config"/*.pid "$MOD/config"/*.pid.task; do
+        [ -f "$_rs_pidfile" ] || continue
+        _rs_pid="$(head -n1 "$_rs_pidfile" 2>/dev/null | tr -d '\r\n')"
+        case "$_rs_pid" in
+            ''|*[!0-9]*) rm -f "$_rs_pidfile" 2>/dev/null && _rs_changed=$((_rs_changed + 1)) ;;
+            *) kill -0 "$_rs_pid" 2>/dev/null || { rm -f "$_rs_pidfile" 2>/dev/null && _rs_changed=$((_rs_changed + 1)); } ;;
+        esac
+    done
+    printf 'status=ok\n'
+    printf 'changed=%s\n' "$_rs_changed"
+}
+
+restore_default() {
+    [ -f "$MOD/common/font_manager.sh" ] || { printf 'status=error\nmessage=font_manager_missing\n'; return 2; }
+    _rd_out="$(MODDIR="$MOD" MODULE_DIR="$MOD" sh "$MOD/common/font_manager.sh" action switch default 2>&1)"
+    printf '%s\n' "$_rd_out"
+}
+
+case "$ACTION" in
+    report) report ;;
+    repair-stale) repair_stale ;;
+    restore-default) restore_default ;;
+    *) printf 'status=error\nmessage=unsupported_action\n'; exit 2 ;;
+esac

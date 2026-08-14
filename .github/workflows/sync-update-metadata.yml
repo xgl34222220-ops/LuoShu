@@ -1,0 +1,119 @@
+name: Sync online update metadata
+
+on:
+  workflow_run:
+    workflows: ["Publish signed release"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: luoshu-update-metadata
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve verified release inputs
+        id: release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          module_prop="$(git show "$RELEASE_SHA:module.prop")"
+          version="$(printf '%s\n' "$module_prop" | sed -n 's/^version=//p' | head -n1)"
+          version_code="$(printf '%s\n' "$module_prop" | sed -n 's/^versionCode=//p' | head -n1)"
+          [[ -n "$version" && "$version_code" =~ ^[0-9]+$ ]] || {
+            echo "Invalid module.prop at $RELEASE_SHA" >&2
+            exit 2
+          }
+          artifact_version="$(printf '%s' "$version" | sed -E 's/[^0-9A-Za-z._-]+/-/g; s/^-+|-+$//g')"
+          case "$artifact_version" in v*) ;; *) artifact_version="v$artifact_version" ;; esac
+          tag="$artifact_version"
+          tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
+          [[ -n "$tag_sha" ]] || { echo "Missing release tag: $tag" >&2; exit 2; }
+          [[ "$tag_sha" == "$RELEASE_SHA" ]] || {
+            echo "Release tag does not match validated workflow SHA: $tag_sha != $RELEASE_SHA" >&2
+            exit 2
+          }
+
+          notes_file="RELEASE_NOTES_${version// /_}.md"
+          git cat-file -e "$tag:$notes_file" 2>/dev/null || {
+            echo "Missing release notes at tag: $notes_file" >&2
+            exit 2
+          }
+
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")"
+          prerelease="$(printf '%s' "$release_json" | jq -r '.prerelease')"
+          module_name="LuoShu-${artifact_version}.zip"
+          app_name="LuoShu-App-${artifact_version}.apk"
+          asset_names="$(printf '%s' "$release_json" | jq -r '.assets[].name')"
+          for required in "$module_name" "${module_name}.sha256" "$app_name" "${app_name}.sha256"; do
+            printf '%s\n' "$asset_names" | grep -qxF "$required" || {
+              echo "Missing verified release asset: $required" >&2
+              exit 3
+            }
+          done
+
+          if [[ "$prerelease" == 'true' ]]; then
+            output='update-prerelease.json'
+          else
+            output='update.json'
+          fi
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "version_code=$version_code"
+            echo "notes_file=$notes_file"
+            echo "output=$output"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate and push metadata
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          VERSION_CODE: ${{ steps.release.outputs.version_code }}
+          NOTES_FILE: ${{ steps.release.outputs.notes_file }}
+          OUTPUT: ${{ steps.release.outputs.output }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git reset --hard origin/main
+            python3 scripts/sync_update_metadata.py \
+              --repository "$GITHUB_REPOSITORY" \
+              --version "$VERSION" \
+              --version-code "$VERSION_CODE" \
+              --tag "$TAG" \
+              --notes-file "$NOTES_FILE" \
+              --output "$OUTPUT"
+
+            git add -- "$OUTPUT"
+            if git diff --cached --quiet; then
+              echo "$OUTPUT already matches $TAG"
+              exit 0
+            fi
+            git commit -m "chore: sync $TAG online update metadata [skip ci]"
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            echo "main moved while syncing metadata; retry $attempt/3" >&2
+          done
+          echo 'Unable to push update metadata after three attempts.' >&2
+          exit 4
