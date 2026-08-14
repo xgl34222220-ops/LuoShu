@@ -1,0 +1,157 @@
+#!/system/bin/sh
+# LuoShu successful font switch history. Records only completed transactions and
+# restores through the existing guarded switch/mix controllers.
+set +e
+MODDIR="${MODDIR:-/data/adb/modules/LuoShu}"
+CONFIG_DIR="$MODDIR/config"
+HISTORY_DIR="${LUOSHU_HISTORY_DIR:-$CONFIG_DIR/switch_history}"
+DIRECT_TASK="$MODDIR/common/font_switch_task.sh"
+MIX_CONTROLLER="$MODDIR/common/font_mix_controller.sh"
+MIX_CONF="$CONFIG_DIR/font_mix.conf"
+MIX_TASK="$CONFIG_DIR/axes_task.conf"
+MAX_ITEMS="${LUOSHU_HISTORY_MAX:-10}"
+case "$MAX_ITEMS" in ''|*[!0-9]*) MAX_ITEMS=10 ;; esac
+[ "$MAX_ITEMS" -ge 3 ] 2>/dev/null || MAX_ITEMS=3
+[ "$MAX_ITEMS" -le 20 ] 2>/dev/null || MAX_ITEMS=20
+
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
+read_key() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'; }
+safe_value() { printf '%s' "$1" | tr -d '\r\n|' | cut -c1-180; }
+now_epoch() { date +%s 2>/dev/null || echo 0; }
+
+history_hash() {
+    if command -v sha256sum >/dev/null 2>&1; then sha256sum | awk '{print $1}'
+    elif command -v toybox >/dev/null 2>&1; then toybox sha256sum | awk '{print $1}'
+    else cksum | awk '{print $1 "-" $2}'
+    fi
+}
+
+prune_history() {
+    _count=0
+    for _file in $(ls -1t "$HISTORY_DIR"/*.conf 2>/dev/null); do
+        _count=$((_count + 1))
+        [ "$_count" -le "$MAX_ITEMS" ] && continue
+        rm -f "$_file" 2>/dev/null || true
+    done
+}
+
+latest_fingerprint() {
+    _latest=$(ls -1t "$HISTORY_DIR"/*.conf 2>/dev/null | head -n1)
+    [ -f "$_latest" ] && read_key "$_latest" fingerprint
+}
+
+write_entry() {
+    _type="$1"; shift
+    _payload="$*"
+    _time=$(now_epoch)
+    _fingerprint=$(printf '%s|%s' "$_type" "$_payload" | history_hash)
+    [ -n "$_fingerprint" ] || return 1
+    [ "$(latest_fingerprint)" = "$_fingerprint" ] && return 0
+    mkdir -p "$HISTORY_DIR" 2>/dev/null || return 1
+    _id="${_time}-$$-${_type}"
+    _tmp="$HISTORY_DIR/.${_id}.tmp"
+    {
+        printf 'historyVersion=1\n'
+        printf 'id=%s\n' "$_id"
+        printf 'type=%s\n' "$_type"
+        printf 'time=%s\n' "$_time"
+        printf 'fingerprint=%s\n' "$_fingerprint"
+        printf '%s\n' "$_payload"
+    } >"$_tmp" 2>/dev/null || { rm -f "$_tmp"; return 1; }
+    mv -f "$_tmp" "$HISTORY_DIR/${_id}.conf" 2>/dev/null || return 1
+    chmod 0600 "$HISTORY_DIR/${_id}.conf" 2>/dev/null || true
+    prune_history
+}
+
+record_direct() {
+    _font=$(safe_value "$1")
+    [ -n "$_font" ] || return 1
+    write_entry direct "font=$_font"
+}
+
+record_mix() {
+    [ -s "$MIX_CONF" ] || return 1
+    # Only a completed axes/mix task is eligible. This prevents a direct-font success
+    # from accidentally recording an edited-but-never-applied Studio configuration.
+    [ "$(read_key "$MIX_TASK" state)" = success ] || return 0
+    _cjk=$(safe_value "$(read_key "$MIX_CONF" cjk)")
+    _latin=$(safe_value "$(read_key "$MIX_CONF" latin)")
+    _digit=$(safe_value "$(read_key "$MIX_CONF" digit)")
+    [ -n "$_cjk" ] && [ -n "$_latin" ] && [ -n "$_digit" ] || return 1
+    _cjk_axes=$(safe_value "$(read_key "$MIX_CONF" cjkAxes)"); [ -n "$_cjk_axes" ] || _cjk_axes="wght=$(read_key "$MIX_CONF" cjkWeight)"
+    _latin_axes=$(safe_value "$(read_key "$MIX_CONF" latinAxes)"); [ -n "$_latin_axes" ] || _latin_axes="wght=$(read_key "$MIX_CONF" latinWeight)"
+    _digit_axes=$(safe_value "$(read_key "$MIX_CONF" digitAxes)"); [ -n "$_digit_axes" ] || _digit_axes="wght=$(read_key "$MIX_CONF" digitWeight)"
+    write_entry mix "cjk=$_cjk
+latin=$_latin
+digit=$_digit
+cjkAxes=$_cjk_axes
+latinAxes=$_latin_axes
+digitAxes=$_digit_axes"
+}
+
+entry_json() {
+    _file="$1"
+    _id=$(read_key "$_file" id); _type=$(read_key "$_file" type); _time=$(read_key "$_file" time)
+    if [ "$_type" = direct ]; then
+        _font=$(read_key "$_file" font)
+        printf '{"id":"%s","type":"direct","time":%s,"font":"%s"}\n' \
+            "$(json_escape "$_id")" "${_time:-0}" "$(json_escape "$_font")"
+    else
+        printf '{"id":"%s","type":"mix","time":%s,"cjk":"%s","latin":"%s","digit":"%s","cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s"}\n' \
+            "$(json_escape "$_id")" "${_time:-0}" \
+            "$(json_escape "$(read_key "$_file" cjk)")" "$(json_escape "$(read_key "$_file" latin)")" "$(json_escape "$(read_key "$_file" digit)")" \
+            "$(json_escape "$(read_key "$_file" cjkAxes)")" "$(json_escape "$(read_key "$_file" latinAxes)")" "$(json_escape "$(read_key "$_file" digitAxes)")"
+    fi
+}
+
+list_entries() {
+    printf '{"status":"ok","historyVersion":1,"entries":['
+    _first=true
+    for _file in $(ls -1t "$HISTORY_DIR"/*.conf 2>/dev/null | head -n "$MAX_ITEMS"); do
+        _json=$(entry_json "$_file")
+        [ -n "$_json" ] || continue
+        [ "$_first" = true ] || printf ','
+        printf '%s' "$_json"
+        _first=false
+    done
+    printf ']}\n'
+}
+
+resolve_entry() {
+    _id="$1"
+    case "$_id" in ''|*/*|*'..'*|*[!A-Za-z0-9._-]*) return 1 ;; esac
+    _file="$HISTORY_DIR/${_id}.conf"
+    [ -s "$_file" ] || return 1
+    printf '%s\n' "$_file"
+}
+
+restore_entry() {
+    _file=$(resolve_entry "$1") || { printf '{"status":"error","message":"历史记录不存在"}\n'; return 0; }
+    _type=$(read_key "$_file" type)
+    if [ "$_type" = direct ]; then
+        _font=$(read_key "$_file" font)
+        [ -f "$DIRECT_TASK" ] || { printf '{"status":"error","message":"字体切换守卫不存在"}\n'; return 0; }
+        MODDIR="$MODDIR" sh "$DIRECT_TASK" start "$_font"
+        return
+    fi
+    if [ "$_type" = mix ]; then
+        _cjk=$(read_key "$_file" cjk); _latin=$(read_key "$_file" latin); _digit=$(read_key "$_file" digit)
+        _cjk_axes=$(read_key "$_file" cjkAxes); _latin_axes=$(read_key "$_file" latinAxes); _digit_axes=$(read_key "$_file" digitAxes)
+        [ -f "$MIX_CONTROLLER" ] || { printf '{"status":"error","message":"组合字体控制器不存在"}\n'; return 0; }
+        MODDIR="$MODDIR" sh "$MIX_CONTROLLER" start "$_cjk" "$_latin" "$_digit" \
+            "${_cjk_axes:-wght=400}" "${_latin_axes:-wght=400}" "${_digit_axes:-wght=400}"
+        return
+    fi
+    printf '{"status":"error","message":"不支持的历史记录类型"}\n'
+}
+
+case "${1:-list}" in
+    record-direct) record_direct "${2:-}" ;;
+    record-mix) record_mix ;;
+    list) list_entries ;;
+    show) _f=$(resolve_entry "${2:-}") && entry_json "$_f" || printf '{"status":"error","message":"历史记录不存在"}\n' ;;
+    restore) restore_entry "${2:-}" ;;
+    clear) rm -f "$HISTORY_DIR"/*.conf 2>/dev/null || true; printf '{"status":"ok"}\n' ;;
+    *) printf '{"status":"error","message":"未知历史命令"}\n' ;;
+esac
+exit 0

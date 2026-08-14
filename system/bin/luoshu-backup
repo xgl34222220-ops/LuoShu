@@ -1,0 +1,68 @@
+#!/system/bin/sh
+# Root-facing full-backup helper. It only stages user font files and a strict
+# whitelist of portable LuoShu configuration; it never exports payload, locks or logs.
+set +e
+MODDIR="${MODDIR:-/data/adb/modules/LuoShu}"
+PUBLIC_ROOT="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
+FONT_ROOT="$PUBLIC_ROOT/fonts"
+CONFIG_DIR="$MODDIR/config"
+
+json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
+trusted_stage() {
+    case "$1" in
+        /data/user/0/io.github.xgl34222220.luoshu/cache/full_backup/*|/data/data/io.github.xgl34222220.luoshu/cache/full_backup/*|\
+        /data/user/0/io.github.xgl34222220.luoshu.debug/cache/full_backup/*|/data/data/io.github.xgl34222220.luoshu.debug/cache/full_backup/*|\
+        /tmp/luoshu-full-backup-test/*) return 0 ;;
+    esac
+    return 1
+}
+safe_copy_file() { [ -f "$1" ] || return 0; mkdir -p "${2%/*}" 2>/dev/null || return 1; cp -f "$1" "$2" 2>/dev/null; }
+
+export_root() {
+    _dest="$1"; trusted_stage "$_dest" || { printf '{"status":"error","message":"备份暂存目录不受信任"}\n'; return; }
+    rm -rf "$_dest/root" 2>/dev/null || true
+    mkdir -p "$_dest/root/fonts" "$_dest/root/config" 2>/dev/null || { printf '{"status":"error","message":"无法创建备份暂存目录"}\n'; return; }
+    _count=0; _bytes=0
+    for _f in "$FONT_ROOT"/*.ttf "$FONT_ROOT"/*.otf "$FONT_ROOT"/*.ttc "$FONT_ROOT"/*.TTF "$FONT_ROOT"/*.OTF "$FONT_ROOT"/*.TTC "$FONT_ROOT"/*.conf; do
+        [ -f "$_f" ] || continue
+        _name=$(basename "$_f" | tr -d '\r\n/' | cut -c1-180)
+        cp -f "$_f" "$_dest/root/fonts/$_name" 2>/dev/null || continue
+        chmod 0644 "$_dest/root/fonts/$_name" 2>/dev/null || true
+        _size=$(wc -c <"$_f" 2>/dev/null | tr -d '[:space:]'); case "$_size" in ''|*[!0-9]*) _size=0 ;; esac
+        _bytes=$((_bytes + _size)); _count=$((_count + 1))
+    done
+    # Portable preference/config only. Runtime state, locks, payload snapshots and logs are intentionally excluded.
+    for _name in font_mix.conf axes_mix.conf font_weight.conf font_weight_original.conf; do
+        safe_copy_file "$CONFIG_DIR/$_name" "$_dest/root/config/$_name" || true
+    done
+    chmod -R a+rX "$_dest/root" 2>/dev/null || true
+    printf '{"status":"ok","fontFiles":%s,"fontBytes":%s}\n' "$_count" "$_bytes"
+}
+
+restore_root() {
+    _src="$1"; trusted_stage "$_src" || { printf '{"status":"error","message":"恢复暂存目录不受信任"}\n'; return; }
+    [ -d "$_src/root" ] || { printf '{"status":"error","message":"备份缺少 root 数据"}\n'; return; }
+    mkdir -p "$FONT_ROOT" "$CONFIG_DIR" 2>/dev/null || { printf '{"status":"error","message":"无法创建字体目录"}\n'; return; }
+    _count=0
+    for _f in "$_src/root/fonts"/*; do
+        [ -f "$_f" ] || continue
+        _name=$(basename "$_f")
+        case "$_name" in *.ttf|*.otf|*.ttc|*.TTF|*.OTF|*.TTC|*.conf) ;; *) continue ;; esac
+        cp -f "$_f" "$FONT_ROOT/$_name" 2>/dev/null || continue
+        chmod 0644 "$FONT_ROOT/$_name" 2>/dev/null || true
+        _count=$((_count + 1))
+    done
+    for _name in font_mix.conf axes_mix.conf font_weight.conf font_weight_original.conf; do
+        safe_copy_file "$_src/root/config/$_name" "$CONFIG_DIR/$_name" || true
+        [ ! -f "$CONFIG_DIR/$_name" ] || chmod 0644 "$CONFIG_DIR/$_name" 2>/dev/null || true
+    done
+    rm -f "$CONFIG_DIR/native_font_index.json" "$CONFIG_DIR/native_font_index.key" 2>/dev/null || true
+    printf '{"status":"ok","restoredFiles":%s,"message":"字体与便携配置已恢复；当前生效字体不会被强制切换"}\n' "$_count"
+}
+
+case "${1:-}" in
+    export-root) export_root "${2:-}" ;;
+    restore-root) restore_root "${2:-}" ;;
+    *) printf '{"status":"error","message":"未知备份命令"}\n' ;;
+esac
+exit 0

@@ -1,0 +1,50 @@
+name: v2.5 Beta 1 feature checks
+on:
+  push:
+    branches:
+      - feat/safety-update-presets
+      - feat/v2.5-beta1
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate history, backup and coverage map
+        run: |
+          sh -n system/bin/luoshu-history
+          sh -n system/bin/luoshu-backup
+          sh scripts/switch_history_test.sh
+          sh scripts/full_backup_root_test.sh
+          python3 -m py_compile common/font_coverage_info.py
+          FONT=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit 2>/dev/null || true)
+          test -n "$FONT"
+          python3 common/font_coverage_info.py "$FONT" > /tmp/coverage.json
+          python3 - <<'PY'
+          import json
+          data=json.load(open('/tmp/coverage.json'))['data']
+          for key in ('cjk','latin','digit','punctuation','groups','missingByGroup','recommendation'):
+              assert key in data, key
+          for group in ('simplifiedSample','traditionalSample','japaneseKana','koreanHangul','latinExtended','math','pua'):
+              assert group in data['groups'], group
+          PY
+  android:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit test, lint and assemble App
+        working-directory: android-app
+        run: ./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon --stacktrace
