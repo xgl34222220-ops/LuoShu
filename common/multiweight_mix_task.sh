@@ -492,10 +492,16 @@ start_mix() {
             return
         }
     fi
-    [ ! -e "$LOCK_FILE" ] || {
+    if type luoshu_font_lock_busy >/dev/null 2>&1; then
+        if luoshu_font_lock_busy "$LOCK_FILE"; then
+            printf '{"status":"error","message":"字体正在切换中"}\n'
+            return
+        fi
+        luoshu_font_lock_reap_stale "$LOCK_FILE" >/dev/null 2>&1 || true
+    elif [ -e "$LOCK_FILE" ]; then
         printf '{"status":"error","message":"字体正在切换中"}\n'
         return
-    }
+    fi
     mkdir -p "$CONFIG_DIR" "$CACHE_ROOT" "$COMPOSITE_CACHE" "$PREPARED_CACHE" "$SOURCE_META_CACHE" "$MODDIR/logs" 2>/dev/null || {
         printf '{"status":"error","message":"无法创建任务目录"}\n'
         return

@@ -395,7 +395,16 @@ start_mix() {
             printf '{"status":"error","message":"已有字体组合任务正在运行"}\n'; return
         }
     fi
-    [ ! -e "$LOCK_FILE" ] || { printf '{"status":"error","message":"字体正在切换中"}\n'; return; }
+    if type luoshu_font_lock_busy >/dev/null 2>&1; then
+        if luoshu_font_lock_busy "$LOCK_FILE"; then
+            printf '{"status":"error","message":"字体正在切换中"}\n'
+            return
+        fi
+        luoshu_font_lock_reap_stale "$LOCK_FILE" >/dev/null 2>&1 || true
+    elif [ -e "$LOCK_FILE" ]; then
+        printf '{"status":"error","message":"字体正在切换中"}\n'
+        return
+    fi
     [ -n "$_cjk_axes" ] || _cjk_axes='wght=400'
     [ -n "$_latin_axes" ] || _latin_axes='wght=400'
     [ -n "$_digit_axes" ] || _digit_axes='wght=400'

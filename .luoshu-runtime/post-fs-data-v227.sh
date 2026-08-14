@@ -91,8 +91,17 @@ done
 # 字体索引由原生 App 按需刷新，启动早期不扫描或复制大字体。
 
 # 完整重启后解除本次开机切换保护。
-rm -f "$MODDIR/config/text_reboot_required.conf" "$MODDIR/config/font_weight_reboot_required.conf" \
-      "$MODDIR/.font_switch.lock" 2>/dev/null || true
+rm -f "$MODDIR/config/text_reboot_required.conf" \
+      "$MODDIR/config/font_weight_reboot_required.conf" 2>/dev/null || true
+if type luoshu_font_lock_force_clear >/dev/null 2>&1; then
+    luoshu_font_lock_force_clear "$MODDIR/.font_switch.lock" >/dev/null 2>&1 || \
+        log_message "WARN" "残留字体切换锁清理失败：$MODDIR/.font_switch.lock"
+else
+    rm -f "$MODDIR/.font_switch.lock/pid" 2>/dev/null || true
+    rmdir "$MODDIR/.font_switch.lock" 2>/dev/null || true
+    rm -f "$MODDIR/.font_switch.lock" 2>/dev/null || true
+    rm -f "$MODDIR"/.font_switch.lock.owner.* 2>/dev/null || true
+fi
 
 # 不再提交开机深度字体加载验证。切换事务和启动守卫已经完成必要安全校验；
 # Android 启动完成后只由 service.sh 写入轻量应用状态。

@@ -96,7 +96,11 @@ device_font_cache_lookup() {
 
 _dfcache_foreground_idle() {
     _dfc_module="$(_dfcache_module)"
-    [ ! -e "$_dfc_module/.font_switch.lock" ] || return 1
+    if type luoshu_font_lock_busy >/dev/null 2>&1; then
+        luoshu_font_lock_busy "$_dfc_module/.font_switch.lock" && return 1
+    else
+        [ ! -e "$_dfc_module/.font_switch.lock" ] || return 1
+    fi
     [ ! -e "$_dfc_module/.mount_compat.lock" ] || return 1
     if find "$_dfc_module/config" -maxdepth 1 -type d -name '.payload-transaction.*' -print -quit 2>/dev/null | grep -q .; then
         return 1

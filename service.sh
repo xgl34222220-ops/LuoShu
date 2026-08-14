@@ -209,9 +209,16 @@ MODULE_DIR="$MODDIR"
     # 只有系统主命名空间中的字体挂载真实可见，才能确认本次启动事务。
     # 验证失败时将 booting 恢复为 prepared，保留负载并在下次完整开机重试；
     # 连续三次仍不可见才安全撤销，避免“App 显示已验证但系统仍是默认字体”。
+    if type luoshu_font_lock_busy >/dev/null 2>&1; then
+        luoshu_font_lock_busy "$MODDIR/.font_switch.lock" && _switch_busy=true || _switch_busy=false
+    elif [ -e "$MODDIR/.font_switch.lock" ]; then
+        _switch_busy=true
+    else
+        _switch_busy=false
+    fi
     if [ -f "$MODDIR/common/device_font_load_verify.sh" ] && \
        [ ! -f "$MODDIR/config/font-payload-rebuild-pending.conf" ] && \
-       [ ! -e "$MODDIR/.font_switch.lock" ]; then
+       [ "$_switch_busy" = false ]; then
         _load_verify_attempt=1
         _load_verify_state=''
         _load_verify_rc=2

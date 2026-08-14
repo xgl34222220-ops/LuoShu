@@ -187,3 +187,33 @@ luoshu_font_lock_release() {
         rm -f "$_lflr_path" 2>/dev/null
     fi
 }
+
+# Unconditionally clear both directory/file lock shapes plus interrupted owner temp files.
+luoshu_font_lock_force_clear() {
+    _lflfc_path="${1:-$MODULE_DIR/.font_switch.lock}"
+    rm -f "$_lflfc_path/pid" 2>/dev/null || true
+    rmdir "$_lflfc_path" 2>/dev/null || true
+    rm -f "$_lflfc_path" 2>/dev/null || true
+    for _lflfc_tmp in "$_lflfc_path".owner.*; do
+        [ -e "$_lflfc_tmp" ] || continue
+        rm -f "$_lflfc_tmp" 2>/dev/null || true
+    done
+    [ ! -e "$_lflfc_path" ]
+}
+
+# Return 0 only while a live owner is present. Empty mkdir-owned locks receive one
+# initialization grace period because acquire creates the directory before metadata mv.
+# This function never reaps; callers that need cleanup must call reap_stale separately.
+luoshu_font_lock_busy() {
+    _lflbz_path="${1:-$MODULE_DIR/.font_switch.lock}"
+    [ -e "$_lflbz_path" ] || return 1
+    luoshu_font_lock_active "$_lflbz_path" && return 0
+    if [ -d "$_lflbz_path" ] && [ ! -s "$_lflbz_path/pid" ]; then
+        _lflbz_grace="${LUOSHU_FONT_LOCK_INIT_GRACE_SECONDS:-1}"
+        case "$_lflbz_grace" in ''|*[!0-9.]*|*.*.*) _lflbz_grace=1 ;; esac
+        sleep "$_lflbz_grace" 2>/dev/null || sleep 1
+        [ -e "$_lflbz_path" ] || return 1
+        luoshu_font_lock_active "$_lflbz_path" && return 0
+    fi
+    return 1
+}

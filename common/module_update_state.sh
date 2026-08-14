@@ -69,8 +69,13 @@ luoshu_update_has_font_payload() {
 
 luoshu_clear_update_volatile() {
     _module="$1"
-    rm -f "$_module/.font_switch.lock/pid" 2>/dev/null || true
-    rmdir "$_module/.font_switch.lock" 2>/dev/null || true
+    if type luoshu_font_lock_force_clear >/dev/null 2>&1; then
+        luoshu_font_lock_force_clear "$_module/.font_switch.lock" >/dev/null 2>&1 || true
+    else
+        rm -f "$_module/.font_switch.lock/pid" 2>/dev/null || true
+        rmdir "$_module/.font_switch.lock" 2>/dev/null || true
+        rm -f "$_module"/.font_switch.lock.owner.* 2>/dev/null || true
+    fi
     rm -f \
         "$_module/config/switch_task.conf" \
         "$_module/config/mix_task.conf" \
@@ -224,8 +229,13 @@ luoshu_rebuild_preserved_payload() {
     [ -n "$_lur_active" ] || _lur_active=default
     LUOSHU_UPDATE_REBUILT=false
     LUOSHU_UPDATE_REBUILD_FAILED=false
-    rm -f "$_lur_module/.font_switch.lock/pid" 2>/dev/null || true
-    rmdir "$_lur_module/.font_switch.lock" 2>/dev/null || true
+    if type luoshu_font_lock_force_clear >/dev/null 2>&1; then
+        luoshu_font_lock_force_clear "$_lur_module/.font_switch.lock" >/dev/null 2>&1 || true
+    else
+        rm -f "$_lur_module/.font_switch.lock/pid" 2>/dev/null || true
+        rmdir "$_lur_module/.font_switch.lock" 2>/dev/null || true
+        rm -f "$_lur_module"/.font_switch.lock.owner.* 2>/dev/null || true
+    fi
     rm -f "$_lur_module/config/text_reboot_required.conf" "$_lur_module/.font_switch.lock" \
           "$_lur_module/config/axes_task.conf" "$_lur_module/config/mix_task.conf" \
           "$_lur_module/config/font-payload-schema.conf" 2>/dev/null || true

@@ -54,7 +54,11 @@ _boot_verify_write_pending() {
 }
 
 _boot_verify_busy() {
-    [ -e "$MODDIR/.font_switch.lock" ] && return 0
+    if type luoshu_font_lock_busy >/dev/null 2>&1; then
+        luoshu_font_lock_busy "$MODDIR/.font_switch.lock" && return 0
+    else
+        [ -e "$MODDIR/.font_switch.lock" ] && return 0
+    fi
     [ -f "$MODDIR/config/font-payload-rebuild-pending.conf" ] && return 0
     _switch_state=$(_boot_verify_value "$MODDIR/config/switch_task.conf" state)
     _mix_state=$(_boot_verify_value "$MODDIR/config/axes_task.conf" state)
