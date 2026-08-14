@@ -20,7 +20,7 @@ jobs:
           ref: feat/safety-update-presets
           fetch-depth: 0
 
-      - name: Apply Kotlin compile fixes
+      - name: Apply Android fixes
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -37,6 +37,22 @@ jobs:
           new = 'MIXED("混排"), BODY("正文"), INTERFACE("界面"), WECHAT("微信")'
           assert old in text, 'compact scenario enum anchor not found'
           preview.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          presets = Path('android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/StudioPresetStore.kt')
+          text = presets.read_text(encoding='utf-8')
+          old = '.put("profile", JSONObject(item.profileRaw))\n                .put("createdAt", item.createdAt)'
+          new = '.put("profile", JSONObject(item.profileRaw))\n                .put("profileRaw", item.profileRaw)\n                .put("createdAt", item.createdAt)'
+          assert old in text, 'preset encode anchor not found'
+          text = text.replace(old, new, 1)
+          old = 'val profile = item.optJSONObject("profile")?.toString() ?: continue'
+          new = '''val rawProfile = item.optString("profileRaw")
+        val profile = if (rawProfile.isNotBlank() && runCatching { JSONObject(rawProfile) }.isSuccess) {
+            rawProfile
+        } else {
+            item.optJSONObject("profile")?.toString() ?: continue
+        }'''
+          assert old in text, 'preset decode anchor not found'
+          presets.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
 
       - uses: actions/setup-java@v4
@@ -75,6 +91,7 @@ jobs:
           git add -- \
             android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/settings/FullBackupManager.kt \
             android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/StudioCompositePreviewCompact.kt \
+            android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/StudioPresetStore.kt \
             .github/workflows/v25-kotlin-fix-once.yml
-          git commit -m "fix: resolve v2.5 beta1 Android compilation"
+          git commit -m "fix: resolve v2.5 beta1 Android validation"
           git push origin HEAD:feat/safety-update-presets
