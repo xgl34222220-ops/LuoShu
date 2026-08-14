@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
+      - name: Install coverage test dependency
+        run: python3 -m pip install --disable-pip-version-check 'fonttools>=4.50,<5'
       - name: Validate history, backup and coverage map
         run: |
           sh -n system/bin/luoshu-history
@@ -45,6 +47,8 @@ jobs:
           java-version: '17'
       - uses: android-actions/setup-android@v3
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
       - name: Unit test, lint and assemble App
         working-directory: android-app
-        run: ./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon --stacktrace
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
