@@ -215,7 +215,15 @@ cleanup_mix_process() {
     payload_stage_abort
     payload_stage_rollback
     type luoshu_payload_transaction_abort >/dev/null 2>&1 && luoshu_payload_transaction_abort
-    rm -f "$LOCK_FILE" 2>/dev/null || true
+    type luoshu_font_lock_release >/dev/null 2>&1 && \
+        luoshu_font_lock_release "$LOCK_FILE" "$$" >/dev/null 2>&1 || true
+}
+
+mix_signal_exit() {
+    _mse_code="$1"
+    trap - EXIT HUP INT TERM
+    cleanup_mix_process
+    exit "$_mse_code"
 }
 
 populate_coloros_payload() (
@@ -456,13 +464,22 @@ apply_mix() {
     mix_stage initialize '正在初始化字体组合任务' 1
     recover_interrupted_payload
     if [ -e "$LOCK_FILE" ]; then
-        _pid=$(cat "$LOCK_FILE" 2>/dev/null)
-        if [ -n "$_pid" ] && kill -0 "$_pid" 2>/dev/null; then set_mix_error '字体正在切换中'; return 2; fi
-        rm -f "$LOCK_FILE" 2>/dev/null || true
+        if type luoshu_font_lock_active >/dev/null 2>&1 && luoshu_font_lock_active "$LOCK_FILE"; then
+            set_mix_error '字体正在切换中'
+            return 2
+        fi
+        type luoshu_font_lock_reap_stale >/dev/null 2>&1 && \
+            luoshu_font_lock_reap_stale "$LOCK_FILE" >/dev/null 2>&1 || true
     fi
     [ ! -f "$TEXT_REBOOT_REQUIRED" ] || { set_mix_error '本次开机已更改文字字体，请先重启手机'; return 3; }
-    printf '%s\n' "$PPID" > "$LOCK_FILE"
-    trap cleanup_mix_process EXIT INT TERM
+    type luoshu_font_lock_acquire >/dev/null 2>&1 || { set_mix_error '字体切换锁不可用'; return 2; }
+    luoshu_font_lock_acquire "$LOCK_FILE" "$$"
+    _lock_rc=$?
+    [ "$_lock_rc" -eq 0 ] || { set_mix_error '字体正在切换中'; return 2; }
+    trap cleanup_mix_process EXIT
+    trap 'mix_signal_exit 129' HUP
+    trap 'mix_signal_exit 130' INT
+    trap 'mix_signal_exit 143' TERM
     mix_stage snapshot '正在创建字体负载回滚点' 3
     if ! type luoshu_payload_transaction_begin >/dev/null 2>&1 || ! luoshu_payload_transaction_begin; then
         set_mix_error '无法创建字体负载安全快照'
@@ -537,8 +554,8 @@ apply_mix() {
             "$MODDIR/system/fonts/.luoshu-font-store/mix-composite.font" >/dev/null 2>&1 || true
     fi
     mix_stage complete '完整复合字体负载已准备完成' 100
-    rm -f "$LOCK_FILE" 2>/dev/null || true
-    trap - EXIT INT TERM
+    trap - EXIT HUP INT TERM
+    luoshu_font_lock_release "$LOCK_FILE" "$$" >/dev/null 2>&1 || true
     return 0
 }
 

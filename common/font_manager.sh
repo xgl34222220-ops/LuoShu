@@ -161,26 +161,48 @@ invalidate_font_index_cache() {
     rm -f "$FONT_INDEX_JSON" "$FONT_INDEX_KEY" 2>/dev/null || true
 }
 
+luoshu_switch_cleanup() {
+    type luoshu_payload_transaction_abort >/dev/null 2>&1 && luoshu_payload_transaction_abort
+    type luoshu_font_lock_release >/dev/null 2>&1 && \
+        luoshu_font_lock_release "$MODULE_DIR/.font_switch.lock" "$$" >/dev/null 2>&1 || true
+}
+
+luoshu_switch_signal_exit() {
+    _lsse_code="$1"
+    trap - EXIT HUP INT TERM
+    luoshu_switch_cleanup
+    exit "$_lsse_code"
+}
+
 switch_font() {
     _font_id="$1"
     [ -n "$_font_id" ] || { echo '错误：未指定字体' >&2; return 1; }
 
     _lock="$MODULE_DIR/.font_switch.lock"
     if [ -e "$_lock" ]; then
-        _old_pid="$(cat "$_lock" 2>/dev/null)"
-        if [ -n "$_old_pid" ] && kill -0 "$_old_pid" 2>/dev/null; then
+        if type luoshu_font_lock_active >/dev/null 2>&1 && luoshu_font_lock_active "$_lock"; then
             echo '错误：字体正在切换中，请稍候' >&2
             return 2
         fi
-        rm -f "$_lock" 2>/dev/null || true
+        type luoshu_font_lock_reap_stale >/dev/null 2>&1 && \
+            luoshu_font_lock_reap_stale "$_lock" >/dev/null 2>&1 || true
     fi
     if [ -f "$TEXT_REBOOT_REQUIRED" ]; then
         echo '错误：本次开机已更改文字字体，请先重启手机后再切换' >&2
         return 3
     fi
 
-    printf '%s\n' "$$" > "$_lock" 2>/dev/null || return 1
-    trap 'type luoshu_payload_transaction_abort >/dev/null 2>&1 && luoshu_payload_transaction_abort; rm -f "$MODULE_DIR/.font_switch.lock" 2>/dev/null' EXIT HUP INT TERM
+    type luoshu_font_lock_acquire >/dev/null 2>&1 || return 1
+    luoshu_font_lock_acquire "$_lock" "$$"
+    _lock_rc=$?
+    if [ "$_lock_rc" -ne 0 ]; then
+        [ "$_lock_rc" -eq 2 ] && echo '错误：字体正在切换中，请稍候' >&2
+        return "$_lock_rc"
+    fi
+    trap 'luoshu_switch_cleanup' EXIT
+    trap 'luoshu_switch_signal_exit 129' HUP
+    trap 'luoshu_switch_signal_exit 130' INT
+    trap 'luoshu_switch_signal_exit 143' TERM
     luoshu_switch_perf_begin
 
     _source=''
@@ -267,6 +289,8 @@ fi
     chmod 0644 "$TEXT_REBOOT_REQUIRED" 2>/dev/null || true
     invalidate_font_index_cache
     luoshu_switch_perf_mark complete
+    trap - EXIT HUP INT TERM
+    luoshu_font_lock_release "$_lock" "$$" >/dev/null 2>&1 || true
     return 0
 }
 
@@ -588,12 +612,13 @@ start_switch_task() {
     [ ! -f "$TEXT_REBOOT_REQUIRED" ] || { printf '{"status":"error","message":"本次开机已更改文字字体，请先重启手机"}\n'; return 0; }
 
     if [ -e "$MODULE_DIR/.font_switch.lock" ]; then
-        _lock_pid="$(cat "$MODULE_DIR/.font_switch.lock" 2>/dev/null)"
-        if [ -n "$_lock_pid" ] && kill -0 "$_lock_pid" 2>/dev/null; then
+        if type luoshu_font_lock_active >/dev/null 2>&1 && \
+           luoshu_font_lock_active "$MODULE_DIR/.font_switch.lock"; then
             printf '{"status":"error","message":"字体正在切换中，请稍候"}\n'
             return 0
         fi
-        rm -f "$MODULE_DIR/.font_switch.lock" 2>/dev/null || true
+        type luoshu_font_lock_reap_stale >/dev/null 2>&1 && \
+            luoshu_font_lock_reap_stale "$MODULE_DIR/.font_switch.lock" >/dev/null 2>&1 || true
     fi
 
     mkdir -p "$MODULE_DIR/logs" "$CONFIG_DIR" 2>/dev/null || true

@@ -20,6 +20,67 @@ USER_REPORT_DIR="$LUOSHU_PUBLIC_DIR/reports"
 USER_IMPORT_DIR="$LUOSHU_PUBLIC_DIR/import"
 LEGACY_FONTS_DIR="${LEGACY_FONTS_DIR:-/sdcard/Fonts}"
 
+luoshu_font_lock_pid() {
+    _lflp_path="${1:-$MODULE_DIR/.font_switch.lock}"
+    if [ -d "$_lflp_path" ]; then
+        cat "$_lflp_path/pid" 2>/dev/null
+    elif [ -f "$_lflp_path" ]; then
+        cat "$_lflp_path" 2>/dev/null
+    fi
+}
+
+luoshu_font_lock_active() {
+    _lfla_pid="$(luoshu_font_lock_pid "$1")"
+    case "$_lfla_pid" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$_lfla_pid" 2>/dev/null
+}
+
+luoshu_font_lock_reap_stale() {
+    _lfls_path="${1:-$MODULE_DIR/.font_switch.lock}"
+    [ -e "$_lfls_path" ] || return 0
+    luoshu_font_lock_active "$_lfls_path" && return 1
+    if [ -d "$_lfls_path" ]; then
+        rm -f "$_lfls_path/pid" 2>/dev/null || true
+        rmdir "$_lfls_path" 2>/dev/null
+    else
+        rm -f "$_lfls_path" 2>/dev/null
+    fi
+}
+
+luoshu_font_lock_acquire() {
+    _lfla_path="${1:-$MODULE_DIR/.font_switch.lock}"
+    _lfla_owner="${2:-$$}"
+    _lfla_attempt=0
+    while [ "$_lfla_attempt" -lt 3 ]; do
+        if mkdir "$_lfla_path" 2>/dev/null; then
+            if printf '%s\n' "$_lfla_owner" > "$_lfla_path/pid" 2>/dev/null; then
+                return 0
+            fi
+            rmdir "$_lfla_path" 2>/dev/null || true
+            return 1
+        fi
+        [ -e "$_lfla_path" ] || { _lfla_attempt=$((_lfla_attempt + 1)); continue; }
+        luoshu_font_lock_active "$_lfla_path" && return 2
+        luoshu_font_lock_reap_stale "$_lfla_path" >/dev/null 2>&1 || true
+        _lfla_attempt=$((_lfla_attempt + 1))
+    done
+    return 2
+}
+
+luoshu_font_lock_release() {
+    _lflr_path="${1:-$MODULE_DIR/.font_switch.lock}"
+    _lflr_owner="${2:-$$}"
+    [ -e "$_lflr_path" ] || return 0
+    _lflr_pid="$(luoshu_font_lock_pid "$_lflr_path")"
+    [ "$_lflr_pid" = "$_lflr_owner" ] || return 1
+    if [ -d "$_lflr_path" ]; then
+        rm -f "$_lflr_path/pid" 2>/dev/null || return 1
+        rmdir "$_lflr_path" 2>/dev/null
+    else
+        rm -f "$_lflr_path" 2>/dev/null
+    fi
+}
+
 
 # 创建公开目录并兼容迁移旧版 /sdcard/Fonts。迁移采用复制而不是移动，
 # 避免用户仍使用旧版模块时找不到原文件。
