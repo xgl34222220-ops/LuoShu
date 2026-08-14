@@ -115,6 +115,7 @@ internal fun encodePresets(items: List<StoredStudioPreset>): String {
                 .put("id", item.id)
                 .put("name", item.name)
                 .put("profile", JSONObject(item.profileRaw))
+                .put("profileRaw", item.profileRaw)
                 .put("createdAt", item.createdAt)
                 .put("updatedAt", item.updatedAt)
                 .put("lastUsedAt", item.lastUsedAt)
@@ -136,7 +137,12 @@ internal fun decodePresets(raw: String): List<StoredStudioPreset> {
     for (index in 0 until minOf(array.length(), STUDIO_PRESET_MAX_ITEMS)) {
         val item = array.optJSONObject(index) ?: continue
         val id = item.optString("id").trim()
-        val profile = item.optJSONObject("profile")?.toString() ?: continue
+        val rawProfile = item.optString("profileRaw")
+        val profile = if (rawProfile.isNotBlank() && runCatching { JSONObject(rawProfile) }.isSuccess) {
+            rawProfile
+        } else {
+            item.optJSONObject("profile")?.toString() ?: continue
+        }
         if (id.isBlank()) continue
         result += StoredStudioPreset(
             id = id,

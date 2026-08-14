@@ -49,7 +49,7 @@ import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 
 private enum class CompactPreviewScenario(val label: String) {
-    MIXED("混排"), BODY("正文"), WECHAT("微信"), PLAY("Play"), STATUS("状态栏"),
+    MIXED("混排"), BODY("正文"), INTERFACE("界面"), WECHAT("微信"), PLAY("Play"), STATUS("状态栏"),
     NUMBERS("金额"), SMALL("小字"), HEADLINE("标题"),
 }
 
