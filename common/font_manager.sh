@@ -242,6 +242,13 @@ switch_font() {
     fi
 
     luoshu_switch_perf_mark map_slots
+    # monospace is intentionally protected from file-slot rewrites; XML overlay is its only
+    # no-hook coverage path. Keep this fail-open exactly like apply_mix.
+    if [ "$_font_id" != default ] && type font_config_enable_for_payload >/dev/null 2>&1; then
+        font_config_enable_for_payload "$_font_id" || \
+            echo '警告：无 Hook XML 未安全启用，已保留文件槽映射' >&2
+    fi
+    luoshu_switch_perf_mark xml_overlay
     if ! type luoshu_payload_validate_current >/dev/null 2>&1 || ! luoshu_payload_validate_current "$_font_id"; then
     echo '错误：字体负载覆盖校验失败，已恢复上一个字体' >&2
     return 6

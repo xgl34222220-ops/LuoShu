@@ -172,4 +172,22 @@ with tempfile.TemporaryDirectory() as directory:
     finally:
         composite.close()
 
+    # Reverse case: the CJK base has vertically centered ASCII while the selected Latin/digit
+    # sources already sit on y=0. The composite must not inherit the base ASCII elevation.
+    raised_base = temp / "raised-base.ttf"
+    flat_latin = temp / "flat-latin.ttf"
+    flat_digit = temp / "flat-digit.ttf"
+    raised_output = temp / "composite-raised-base.ttf"
+    make_font(raised_base, 150, 850, 150, 850)
+    make_font(flat_latin, 0, 700, 0, 700)
+    make_font(flat_digit, 0, 700, 0, 700)
+    build(SimpleNamespace(cjk=str(raised_base), latin=str(flat_latin), digit=str(flat_digit), output=str(raised_output), weight=400, cjk_face=None, latin_face=None, digit_face=None, progress=None))
+    raised_composite = TTFont(raised_output)
+    try:
+        a = bounds(raised_composite, "A"); one = bounds(raised_composite, "1")
+        assert abs(a[1]) <= 20, a
+        assert abs(one[1]) <= 20, one
+    finally:
+        raised_composite.close()
+
 print("Font metrics and mixed-script baseline normalization passed.")

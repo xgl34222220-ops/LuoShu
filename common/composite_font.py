@@ -162,6 +162,12 @@ def _bounds_for_codepoint(font: TTFont, glyph_set, codepoint: int) -> tuple[floa
     return None if pen.bounds is None else tuple(float(value) for value in pen.bounds)
 
 
+# Translation probes deliberately use flat-bottom glyphs. Rounded glyphs such as O/0/8/9
+# overshoot the baseline and introduce a systematic upward bias.
+FLAT_BOTTOM_PROBES = {"latin": "HIEX", "digit": "147"}
+BASELINE_SHIFT_LIMIT_RATIO = 0.25
+
+
 def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tuple[float, float]:
     base_glyph_set = base.getGlyphSet()
     probes = tuple(map(ord, "AHIOXEx" if role == "latin" else "0189"))
@@ -180,10 +186,20 @@ def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tupl
     ]
     shape_scale = max(0.82, min(1.18, float(statistics.median(ratios))))
     scale = upem_scale * shape_scale
-    base_bottom = float(statistics.median(base_bounds[1] for base_bounds, _ in pairs))
-    source_bottom = float(statistics.median(src_bounds[1] for _, src_bounds in pairs))
-    shift = base_bottom - source_bottom * scale
-    limit = base["head"].unitsPerEm * 0.14
+    source_bottoms = [
+        bounds[1]
+        for bounds in (
+            _bounds_for_codepoint(src, src_glyph_set, codepoint)
+            for codepoint in map(ord, FLAT_BOTTOM_PROBES.get(role, ""))
+        )
+        if bounds
+    ]
+    if not source_bottoms:
+        return scale, 0.0
+    # OpenType baseline is y=0. Never inherit the CJK base font's potentially vertically
+    # centered ASCII bottom; only correct genuine source-font vertical displacement.
+    shift = -float(statistics.median(source_bottoms)) * scale
+    limit = base["head"].unitsPerEm * BASELINE_SHIFT_LIMIT_RATIO
     return scale, max(-limit, min(limit, shift))
 
 

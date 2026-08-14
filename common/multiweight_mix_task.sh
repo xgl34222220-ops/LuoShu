@@ -364,12 +364,16 @@ build_composite_cached() {
 
 save_mix_config() {
     _tmp="$MIX_CONF.auto.$$"
+    _xml_overlay=false
+    [ "$(sed -n 's/^mode=//p' "$CONFIG_DIR/font-config-overlay.conf" 2>/dev/null | head -n1 | tr -d '\r')" = enabled ] &&
+        _xml_overlay=true
     {
         printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$1" "$2" "$3"
         printf 'cjkWeight=%s\nlatinWeight=%s\ndigitWeight=%s\n' "$(safe_weight "$4")" "$(safe_weight "$5")" "$(safe_weight "$6")"
         printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$4" "$5" "$6"
         printf 'cjkMode=%s\nlatinMode=%s\ndigitMode=%s\n' "$7" "$8" "$9"
-        printf 'isolation=auto-multiweight-v3\ncharacterIsolation=true\ncomposite=true\nxmlOverlay=false\ntime=%s\n' "$(date +%s)"
+        printf 'isolation=auto-multiweight-v3\ncharacterIsolation=true\ncomposite=true\nxmlOverlay=%s\ntime=%s\n' \
+            "$_xml_overlay" "$(date +%s)"
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$MIX_CONF" 2>/dev/null || return 1
     cp -f "$MIX_CONF" "$AXES_CONF" 2>/dev/null || true
     printf 'mix\n' >"$ACTIVE_CONF" 2>/dev/null || return 1
