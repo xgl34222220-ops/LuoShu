@@ -89,6 +89,7 @@ common/native_import.sh
 common/origin_flyme_global.sh
 common/rom_adapters.sh
 common/util_functions.sh
+common/util_functions_core.sh
 common/weighted_mix_task.sh
 common/python
 .luoshu-runtime
