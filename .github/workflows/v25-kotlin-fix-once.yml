@@ -45,12 +45,12 @@ jobs:
           assert old in text, 'preset encode anchor not found'
           text = text.replace(old, new, 1)
           old = 'val profile = item.optJSONObject("profile")?.toString() ?: continue'
-          new = '''val rawProfile = item.optString("profileRaw")
-        val profile = if (rawProfile.isNotBlank() && runCatching { JSONObject(rawProfile) }.isSuccess) {
-            rawProfile
-        } else {
-            item.optJSONObject("profile")?.toString() ?: continue
-        }'''
+          new = ('val rawProfile = item.optString("profileRaw")\n'
+                 '        val profile = if (rawProfile.isNotBlank() && runCatching { JSONObject(rawProfile) }.isSuccess) {\n'
+                 '            rawProfile\n'
+                 '        } else {\n'
+                 '            item.optJSONObject("profile")?.toString() ?: continue\n'
+                 '        }')
           assert old in text, 'preset decode anchor not found'
           presets.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
