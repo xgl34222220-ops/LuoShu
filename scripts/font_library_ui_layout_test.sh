@@ -19,7 +19,7 @@ STUDIO_MATERIAL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luosh
 OVERLAY="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 SHELL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
 SETTINGS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/settings/AppearanceSettingsScreen.kt"
-UTIL="$ROOT/common/util_functions.sh"
+UTIL="$ROOT/common/util_functions_core.sh"
 CACHE="$ROOT/common/device_font_cache.sh"
 
 # Legacy style screens stay available as a rollback path while the routes use the
