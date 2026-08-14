@@ -18,7 +18,7 @@ STUDIO_MIUIX="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/u
 STUDIO_MATERIAL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMaterial.kt"
 OVERLAY="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 SHELL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
-SETTINGS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/settings/AppearanceSettingsScreen.kt"
+SETTINGS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/settings/SettingsHubScreen.kt"
 UTIL="$ROOT/common/util_functions_core.sh"
 CACHE="$ROOT/common/device_font_cache.sh"
 
@@ -116,8 +116,13 @@ printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorBorderColor'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'scheme.primary.copy(alpha = if (dark) .30f else .20f)'
-grep -q '底栏液态玻璃效果' "$SETTINGS"
-grep -q '真实背景采样、折射高光与透明质感' "$SETTINGS"
+
+# v2.5 settings hub keeps the appearance controls after replacing the old
+# AppearanceSettingsScreen file with the consolidated system/settings center.
+grep -q 'SettingCard("视觉与显示")' "$SETTINGS"
+grep -q 'ToggleLine("玻璃半透明", "启用卡片和底栏玻璃层"' "$SETTINGS"
+grep -q 'ToggleLine("背景模糊", "模糊玻璃层后方内容"' "$SETTINGS"
+grep -q 'ToggleLine("悬浮底栏", "关闭后贴合屏幕底部"' "$SETTINGS"
 grep -q 'embedded: Boolean = false' "$OVERLAY"
 grep -q 'embedded = true' "$SHELL"
 grep -q 'dockClearance' "$SHELL"
