@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
 import android.view.Gravity
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
@@ -46,6 +48,11 @@ import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 
+private enum class CompactPreviewScenario(val label: String) {
+    MIXED("混排"), BODY("正文"), WECHAT("微信"), PLAY("Play"), STATUS("状态栏"),
+    NUMBERS("金额"), SMALL("小字"), HEADLINE("标题"),
+}
+
 @Composable
 internal fun StudioCompositePreviewDialogCompact(
     style: UiStyle,
@@ -53,9 +60,9 @@ internal fun StudioCompositePreviewDialogCompact(
     onApplyPreset: (StudioQuickPreset) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var scenarioName by rememberSaveable { mutableStateOf(StudioPreviewScenario.MIXED.name) }
+    var scenarioName by rememberSaveable { mutableStateOf(CompactPreviewScenario.MIXED.name) }
     val scenario = remember(scenarioName) {
-        StudioPreviewScenario.entries.firstOrNull { it.name == scenarioName } ?: StudioPreviewScenario.MIXED
+        CompactPreviewScenario.entries.firstOrNull { it.name == scenarioName } ?: CompactPreviewScenario.MIXED
     }
     val tokens = LocalMiuixTokens.current
     val miuix = style == UiStyle.MIUIX
@@ -166,17 +173,17 @@ internal fun StudioCompositePreviewDialogCompact(
 
 @Composable
 private fun CompactScenarioSelector(
-    selected: StudioPreviewScenario,
-    onSelect: (StudioPreviewScenario) -> Unit,
+    selected: CompactPreviewScenario,
+    onSelect: (CompactPreviewScenario) -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        StudioPreviewScenario.entries.forEach { scenario ->
+        CompactPreviewScenario.entries.forEach { scenario ->
             Surface(
                 onClick = { onSelect(scenario) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.width(66.dp),
                 shape = RoundedCornerShape(15.dp),
                 color = if (scenario == selected) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceContainer,
@@ -219,7 +226,7 @@ private fun CompactPreviewCard(
 }
 
 @Composable
-private fun SystemPreviewCompact(scenario: StudioPreviewScenario) {
+private fun SystemPreviewCompact(scenario: CompactPreviewScenario) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(19.dp),
@@ -227,24 +234,45 @@ private fun SystemPreviewCompact(scenario: StudioPreviewScenario) {
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 13.dp)) {
             when (scenario) {
-                StudioPreviewScenario.MIXED -> Text(
+                CompactPreviewScenario.MIXED -> Text(
                     "洛书 LuoShu 2026",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                StudioPreviewScenario.BODY -> {
+                CompactPreviewScenario.BODY -> {
                     Text("字体影响阅读节奏与信息层级。", fontSize = 16.sp)
                     Text("Typography shapes rhythm.", fontSize = 13.sp)
                     Text("2026-07-24  19:30", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
-                StudioPreviewScenario.INTERFACE -> {
+                CompactPreviewScenario.INTERFACE -> {
                     Text("字体设置", fontSize = 20.sp, fontWeight = FontWeight.Bold)
                     Text("System typography and fallback", fontSize = 12.sp)
                     Text("已验证 · 3 个字体槽位", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
-                StudioPreviewScenario.NUMBERS -> {
+                CompactPreviewScenario.WECHAT -> {
+                    Text("公众号文章标题", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("正文排版：中文阅读与 English 混排 2026", fontSize = 14.sp, lineHeight = 20.sp)
+                }
+                CompactPreviewScenario.PLAY -> {
+                    Text("Google Play", fontSize = 19.sp, fontWeight = FontWeight.Bold)
+                    Text("应用与游戏 · Apps & games", fontSize = 13.sp)
+                    Text("4.8 ★  ·  12 MB", fontSize = 12.sp)
+                }
+                CompactPreviewScenario.STATUS -> {
+                    Text("09:41   5G   88%", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("状态栏数字、符号与紧凑字宽", fontSize = 11.sp)
+                }
+                CompactPreviewScenario.SMALL -> {
+                    Text("辅助说明 · Secondary text · 12:45", fontSize = 10.sp)
+                    Text("小字号仍应保持清晰、字腔不过度拥挤。", fontSize = 11.sp)
+                }
+                CompactPreviewScenario.HEADLINE -> {
+                    Text("洛书字体引擎", fontSize = 27.sp, fontWeight = FontWeight.Black)
+                    Text("LuoShu Typography 2026", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+                CompactPreviewScenario.NUMBERS -> {
                     Text("本月用量", fontSize = 12.sp)
                     Text("¥ 12,680.50", fontSize = 28.sp, fontWeight = FontWeight.Bold)
                     Text("+18.6% · 19:30", fontSize = 13.sp, fontWeight = FontWeight.Medium)
@@ -255,7 +283,7 @@ private fun SystemPreviewCompact(scenario: StudioPreviewScenario) {
 }
 
 @Composable
-private fun CandidatePreviewCompact(state: FontStudioUiState, scenario: StudioPreviewScenario) {
+private fun CandidatePreviewCompact(state: FontStudioUiState, scenario: CompactPreviewScenario) {
     val cjk = state.slots.firstOrNull { it.slot == MixSlot.Cjk }
     val latin = state.slots.firstOrNull { it.slot == MixSlot.Latin }
     val digit = state.slots.firstOrNull { it.slot == MixSlot.Digit }
@@ -284,7 +312,7 @@ private fun CandidatePreviewCompact(state: FontStudioUiState, scenario: StudioPr
     ) {
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp)) {
             when (scenario) {
-                StudioPreviewScenario.MIXED -> Row(
+                CompactPreviewScenario.MIXED -> Row(
                     modifier = Modifier.fillMaxWidth().height(48.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
@@ -292,17 +320,39 @@ private fun CandidatePreviewCompact(state: FontStudioUiState, scenario: StudioPr
                     NativeFontPreview(latin.font, " LuoShu ", latin.axes, Modifier.weight(.42f).height(44.dp), 20f, Gravity.CENTER, 1)
                     NativeFontPreview(digit.font, "2026", digit.axes, Modifier.weight(.30f).height(44.dp), 19f, Gravity.START or Gravity.CENTER_VERTICAL, 1)
                 }
-                StudioPreviewScenario.BODY -> {
+                CompactPreviewScenario.BODY -> {
                     NativeFontPreview(cjk.font, "字体影响阅读节奏与信息层级。", cjk.axes, Modifier.fillMaxWidth().height(34.dp), 16f, maxLines = 1)
                     NativeFontPreview(latin.font, "Typography shapes rhythm.", latin.axes, Modifier.fillMaxWidth().height(29.dp), 13f, maxLines = 1)
                     NativeFontPreview(digit.font, "2026-07-24  19:30", digit.axes, Modifier.fillMaxWidth().height(29.dp), 13f, maxLines = 1)
                 }
-                StudioPreviewScenario.INTERFACE -> {
+                CompactPreviewScenario.INTERFACE -> {
                     NativeFontPreview(cjk.font, "字体设置", cjk.axes, Modifier.fillMaxWidth().height(37.dp), 20f, maxLines = 1)
                     NativeFontPreview(latin.font, "System typography and fallback", latin.axes, Modifier.fillMaxWidth().height(27.dp), 12f, maxLines = 1)
                     NativeFontPreview(cjk.font, "已验证 · 3 个字体槽位", cjk.axes, Modifier.fillMaxWidth().height(30.dp), 13f, maxLines = 1)
                 }
-                StudioPreviewScenario.NUMBERS -> {
+                CompactPreviewScenario.WECHAT -> {
+                    NativeFontPreview(cjk.font, "公众号文章标题", cjk.axes, Modifier.fillMaxWidth().height(38.dp), 20f, maxLines = 1)
+                    NativeFontPreview(cjk.font, "正文排版：中文阅读与", cjk.axes, Modifier.fillMaxWidth().height(29.dp), 14f, maxLines = 1)
+                    NativeFontPreview(latin.font, "English 2026", latin.axes, Modifier.fillMaxWidth().height(29.dp), 14f, maxLines = 1)
+                }
+                CompactPreviewScenario.PLAY -> {
+                    NativeFontPreview(latin.font, "Google Play", latin.axes, Modifier.fillMaxWidth().height(36.dp), 19f, maxLines = 1)
+                    NativeFontPreview(cjk.font, "应用与游戏", cjk.axes, Modifier.fillMaxWidth().height(28.dp), 13f, maxLines = 1)
+                    NativeFontPreview(digit.font, "4.8 ★ · 12 MB", digit.axes, Modifier.fillMaxWidth().height(28.dp), 12f, maxLines = 1)
+                }
+                CompactPreviewScenario.STATUS -> {
+                    NativeFontPreview(digit.font, "09:41   5G   88%", digit.axes, Modifier.fillMaxWidth().height(34.dp), 15f, maxLines = 1)
+                    NativeFontPreview(cjk.font, "状态栏数字、符号与紧凑字宽", cjk.axes, Modifier.fillMaxWidth().height(26.dp), 11f, maxLines = 1)
+                }
+                CompactPreviewScenario.SMALL -> {
+                    NativeFontPreview(latin.font, "Secondary text · 12:45", latin.axes, Modifier.fillMaxWidth().height(25.dp), 10f, maxLines = 1)
+                    NativeFontPreview(cjk.font, "小字号仍应保持清晰、字腔不过度拥挤。", cjk.axes, Modifier.fillMaxWidth().height(26.dp), 11f, maxLines = 1)
+                }
+                CompactPreviewScenario.HEADLINE -> {
+                    NativeFontPreview(cjk.font, "洛书字体引擎", cjk.axes, Modifier.fillMaxWidth().height(48.dp), 27f, maxLines = 1)
+                    NativeFontPreview(latin.font, "LuoShu Typography 2026", latin.axes, Modifier.fillMaxWidth().height(34.dp), 16f, maxLines = 1)
+                }
+                CompactPreviewScenario.NUMBERS -> {
                     NativeFontPreview(cjk.font, "本月用量", cjk.axes, Modifier.fillMaxWidth().height(27.dp), 12f, maxLines = 1)
                     NativeFontPreview(digit.font, "¥ 12,680.50", digit.axes, Modifier.fillMaxWidth().height(47.dp), 28f, maxLines = 1)
                     NativeFontPreview(digit.font, "+18.6% · 19:30", digit.axes, Modifier.fillMaxWidth().height(30.dp), 13f, maxLines = 1)

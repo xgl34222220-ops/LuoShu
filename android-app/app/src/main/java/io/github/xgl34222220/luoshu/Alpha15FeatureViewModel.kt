@@ -25,6 +25,12 @@ internal data class SystemWeightState(
     val error: String = "",
 )
 
+internal data class CoverageGroupMetrics(
+    val present: Int = 0,
+    val total: Int = 0,
+    val percent: Float = 0f,
+)
+
 internal data class CoverageMetrics(
     val glyphs: Int = 0,
     val cjkPresent: Int = 0,
@@ -36,6 +42,9 @@ internal data class CoverageMetrics(
     val punctuationPresent: Int = 0,
     val punctuationTotal: Int = 0,
     val missingSample: String = "",
+    val groups: Map<String, CoverageGroupMetrics> = emptyMap(),
+    val missingByGroup: Map<String, String> = emptyMap(),
+    val recommendation: String = "",
 ) {
     val cjkRatio: Float get() = ratio(cjkPresent, cjkTotal)
     val latinRatio: Float get() = ratio(latinPresent, latinTotal)
@@ -221,6 +230,9 @@ internal class Alpha15FeatureViewModel : ViewModel() {
                         punctuationPresent = data.optJSONObject("punctuation")?.optInt("present", 0) ?: 0,
                         punctuationTotal = data.optJSONObject("punctuation")?.optInt("total", 0) ?: 0,
                         missingSample = data.optString("missingSample", ""),
+                        groups = parseCoverageGroups(data.optJSONObject("groups")),
+                        missingByGroup = parseMissingGroups(data.optJSONObject("missingByGroup")),
+                        recommendation = data.optString("recommendation", ""),
                     ),
                 )
             } catch (error: Throwable) {
@@ -229,6 +241,36 @@ internal class Alpha15FeatureViewModel : ViewModel() {
                     fontId = fontId,
                     error = error.message ?: "字体覆盖诊断失败",
                 )
+            }
+        }
+    }
+
+    private fun parseCoverageGroups(root: JSONObject?): Map<String, CoverageGroupMetrics> {
+        if (root == null) return emptyMap()
+        return buildMap {
+            val keys = root.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                val item = root.optJSONObject(key) ?: continue
+                put(
+                    key,
+                    CoverageGroupMetrics(
+                        present = item.optInt("present", 0),
+                        total = item.optInt("total", 0),
+                        percent = item.optDouble("percent", 0.0).toFloat().coerceIn(0f, 100f),
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun parseMissingGroups(root: JSONObject?): Map<String, String> {
+        if (root == null) return emptyMap()
+        return buildMap {
+            val keys = root.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                root.optString(key).takeIf { it.isNotBlank() }?.let { put(key, it) }
             }
         }
     }

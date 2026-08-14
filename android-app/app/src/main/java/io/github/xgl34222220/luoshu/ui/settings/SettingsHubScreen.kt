@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Error
@@ -85,6 +86,7 @@ private enum class SettingsSection(val label: String, val icon: ImageVector) {
     OVERVIEW("总览", Icons.Rounded.Settings),
     APPEARANCE("外观", Icons.Rounded.Palette),
     SAFETY("安全", Icons.Rounded.Security),
+    BACKUP("备份", Icons.Rounded.Backup),
     UPDATE("更新", Icons.Rounded.SystemUpdate),
 }
 
@@ -133,6 +135,7 @@ internal fun SettingsHubRoute(settings: AppearanceSettings, actions: AppearanceA
                 SettingsSection.OVERVIEW -> OverviewPage(model)
                 SettingsSection.APPEARANCE -> AppearancePage(settings, actions)
                 SettingsSection.SAFETY -> SafetyPage(model, settings.uiStyle)
+                SettingsSection.BACKUP -> pageList { item { FullBackupCard(settings, actions) } }
                 SettingsSection.UPDATE -> UpdatePage(model)
             }
         }
@@ -299,7 +302,7 @@ private fun UpdatePage(model: SystemCenterViewModel) {
             SettingCard("更新通道") {
                 Text(if (model.updateChannel == UpdateChannel.STABLE) "只接收正式稳定版本。" else "接收 Alpha / Beta / RC，适合参与兼容性验证。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
                 Spacer(Modifier.height(10.dp))
-                ChoiceRow(UpdateChannel.entries, model.updateChannel, { it.label }, model::setUpdateChannel)
+                ChoiceRow(UpdateChannel.entries, model.updateChannel, { it.label }, model::selectUpdateChannel)
             }
         }
         item {

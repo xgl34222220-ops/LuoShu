@@ -33,6 +33,7 @@ internal fun FontStudioRoute(
     var showPresetLibrary by remember { mutableStateOf(false) }
     var showProfileTransfer by remember { mutableStateOf(false) }
     var showGlyphBrowser by remember { mutableStateOf(false) }
+    var showSwitchHistory by remember { mutableStateOf(false) }
     var restoreNotice by remember { mutableStateOf("") }
     val stableActions = remember(studioViewModel) {
         FontStudioActions(
@@ -66,12 +67,17 @@ internal fun FontStudioRoute(
         }
     }
 
+    LaunchedEffect(state.taskState) {
+        if (state.taskState == "success") recordSuccessfulMixHistory()
+    }
+
     val studioTools: @Composable () -> Unit = {
         StudioToolLauncher(
             style = style,
             enabled = state.hasFonts && !state.loading,
             onPreview = { showCompositePreview = true },
             onPresets = { showPresetLibrary = true },
+            onHistory = { showSwitchHistory = true },
             onProfile = { showProfileTransfer = true },
             onGlyphs = { showGlyphBrowser = true },
         )
@@ -113,8 +119,12 @@ internal fun FontStudioRoute(
         StudioGlyphBrowserDialog(
             style = style,
             state = state,
+            onInspectCoverage = stableActions.inspectCoverage,
             onDismiss = { showGlyphBrowser = false },
         )
+    }
+    if (showSwitchHistory) {
+        SwitchHistoryDialog(style = style, onDismiss = { showSwitchHistory = false })
     }
     if (restoreNotice.isNotBlank()) {
         AlertDialog(

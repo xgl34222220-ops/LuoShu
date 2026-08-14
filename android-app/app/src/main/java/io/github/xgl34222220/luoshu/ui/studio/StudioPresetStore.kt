@@ -77,6 +77,14 @@ internal class StudioPresetStore(private val context: Context) {
         }
     }
 
+    suspend fun replaceAll(items: List<StoredStudioPreset>) {
+        context.studioPresetDataStore.edit { preferences ->
+            preferences[studioPresetsKey] = encodePresets(
+                items.distinctBy { it.id }.sortedWith(presetOrder).take(STUDIO_PRESET_MAX_ITEMS),
+            )
+        }
+    }
+
     private suspend fun mutate(block: (List<StoredStudioPreset>) -> List<StoredStudioPreset>) {
         context.studioPresetDataStore.edit { preferences ->
             val current = decodePresets(preferences[studioPresetsKey].orEmpty())

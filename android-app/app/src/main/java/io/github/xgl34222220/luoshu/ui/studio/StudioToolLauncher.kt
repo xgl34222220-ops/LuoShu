@@ -41,6 +41,7 @@ internal fun StudioToolLauncher(
     enabled: Boolean,
     onPreview: () -> Unit,
     onPresets: () -> Unit,
+    onHistory: () -> Unit,
     onProfile: () -> Unit,
     onGlyphs: () -> Unit,
     modifier: Modifier = Modifier,
@@ -102,6 +103,15 @@ internal fun StudioToolLauncher(
                         onClick = {
                             menuVisible = false
                             onPresets()
+                        },
+                    )
+                    StudioToolMenuItem(
+                        label = "成功切换历史",
+                        description = "最近 10 次真正完成的切换，可一键恢复并重新走安全事务",
+                        icon = Icons.Rounded.History,
+                        onClick = {
+                            menuVisible = false
+                            onHistory()
                         },
                     )
                     StudioToolMenuItem(

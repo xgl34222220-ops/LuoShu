@@ -201,7 +201,7 @@ internal class SystemCenterViewModel(application: Application) : AndroidViewMode
         }
     }
 
-    fun setUpdateChannel(channel: UpdateChannel) {
+    fun selectUpdateChannel(channel: UpdateChannel) {
         if (channel == updateChannel) return
         updateChannel = channel
         updateInfo = OnlineUpdateInfo()

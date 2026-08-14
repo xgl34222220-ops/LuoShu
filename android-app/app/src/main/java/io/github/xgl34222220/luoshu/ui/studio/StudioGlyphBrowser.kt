@@ -91,6 +91,7 @@ internal fun glyphPage(text: String, page: Int, pageSize: Int = GLYPH_PAGE_SIZE)
 internal fun StudioGlyphBrowserDialog(
     style: UiStyle,
     state: FontStudioUiState,
+    onInspectCoverage: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var slot by rememberSaveable { mutableStateOf(MixSlot.Cjk) }
@@ -147,6 +148,14 @@ internal fun StudioGlyphBrowserDialog(
                             ),
                             selected = slot,
                             onSelected = { slot = it; page = 0 },
+                        )
+                    }
+                    item {
+                        CoverageMapPanel(
+                            coverage = state.coverage,
+                            fontId = slotState?.font?.id.orEmpty(),
+                            fontName = slotState?.font?.name.orEmpty(),
+                            onInspect = onInspectCoverage,
                         )
                     }
                     item {
