@@ -192,20 +192,91 @@ _gfp_namespace_pids() {
     } | tr ' ' '\n' | awk '/^[0-9]+$/ && !seen[$0]++'
 }
 
+# bind 的源必须由目标进程自己的 mount namespace 解析。
+# 普通模块路径在目标 namespace 可见时直接 bind；如果 root 管理器隐藏了模块目录，
+# 只通过 /proc/1/root 读取 clone 内容，并在目标 namespace 的 /data/local/tmp 创建
+# 临时 staging 文件。真正执行 bind 的始终是目标 namespace 内解析出的普通路径，
+# 避免把 /proc/1/root 对应的 foreign vfsmount 直接交给 __do_loopback()/check_mnt()。
 _gfp_mount_in_pid() {
     _gfp_pid="$1"
     _gfp_source="$2"
     _gfp_target="$3"
-    [ -d "/proc/$_gfp_pid/ns" ] || return 1
-    command -v nsenter >/dev/null 2>&1 || return 1
-    _gfp_ns_source="/proc/1/root$_gfp_source"
-    nsenter -t "$_gfp_pid" -m -- /system/bin/sh -c '
-        src="$1"; dst="$2"
-        [ -f "$src" ] && [ -f "$dst" ] || exit 1
-        mount --bind "$src" "$dst" 2>/dev/null || mount -o bind "$src" "$dst" 2>/dev/null || exit 1
-        mount -o remount,bind,ro "$dst" 2>/dev/null || mount -o bind,remount,ro "$dst" 2>/dev/null || true
-        exit 0
-    ' sh "$_gfp_ns_source" "$_gfp_target" >/dev/null 2>&1
+    _gfp_mount_detail=
+    _gfp_mount_mode=
+    [ -d "/proc/$_gfp_pid/ns" ] || { _gfp_mount_detail=namespace-missing; return 1; }
+    command -v nsenter >/dev/null 2>&1 || { _gfp_mount_detail=nsenter-missing; return 1; }
+    _gfp_proc_source="/proc/1/root$_gfp_source"
+    _gfp_stage_dir="${LUOSHU_GOOGLE_FONT_STAGE_DIR:-/data/local/tmp}"
+    _gfp_ns_shell="${LUOSHU_GOOGLE_FONT_NS_SHELL:-/system/bin/sh}"
+    _gfp_mount_detail=$(nsenter -t "$_gfp_pid" -m -- "$_gfp_ns_shell" -c '
+        plain="$1"; proc_src="$2"; dst="$3"; stage_dir="$4"; owner_pid="$5"
+        [ -f "$dst" ] || { printf "target-missing"; exit 1; }
+
+        one_line() {
+            printf "%s" "$1" | tr "\r\n" "  " | cut -c1-240
+        }
+
+        bind_one() {
+            src="$1"
+            first=$(mount --bind "$src" "$dst" 2>&1)
+            first_rc=$?
+            if [ "$first_rc" -ne 0 ]; then
+                second=$(mount -o bind "$src" "$dst" 2>&1)
+                second_rc=$?
+                if [ "$second_rc" -ne 0 ]; then
+                    printf "%s | %s" "$(one_line "$first")" "$(one_line "$second")"
+                    return 1
+                fi
+            fi
+            mount -o remount,bind,ro "$dst" 2>/dev/null || \
+                mount -o bind,remount,ro "$dst" 2>/dev/null || true
+            return 0
+        }
+
+        plain_detail=source-not-visible
+        if [ -f "$plain" ]; then
+            plain_detail=$(bind_one "$plain")
+            if [ $? -eq 0 ]; then
+                printf "ok:plain"
+                exit 0
+            fi
+            [ -n "$plain_detail" ] || plain_detail=bind-failed
+        fi
+
+        stage_detail=procroot-source-not-readable
+        stage="${stage_dir%/}/.luoshu-provider-${owner_pid}-$$.ttf"
+        rm -f "$stage" 2>/dev/null || true
+        if [ -r "$proc_src" ]; then
+            if mkdir -p "$stage_dir" 2>/dev/null && cat "$proc_src" > "$stage" 2>/dev/null; then
+                chmod 0644 "$stage" 2>/dev/null || true
+                if command -v chcon >/dev/null 2>&1; then
+                    chcon --reference="$dst" "$stage" 2>/dev/null || true
+                elif command -v toybox >/dev/null 2>&1; then
+                    toybox chcon --reference="$dst" "$stage" 2>/dev/null || true
+                fi
+                stage_detail=$(bind_one "$stage")
+                stage_rc=$?
+                rm -f "$stage" 2>/dev/null || true
+                if [ "$stage_rc" -eq 0 ]; then
+                    printf "ok:staging"
+                    exit 0
+                fi
+                [ -n "$stage_detail" ] || stage_detail=bind-failed
+            else
+                stage_detail=stage-copy-failed
+                rm -f "$stage" 2>/dev/null || true
+            fi
+        fi
+        printf "plain=%s; staging=%s" "$(one_line "$plain_detail")" "$(one_line "$stage_detail")"
+        exit 1
+    ' sh "$_gfp_source" "$_gfp_proc_source" "$_gfp_target" "$_gfp_stage_dir" "$_gfp_pid" 2>&1)
+    _gfp_mount_rc=$?
+    case "$_gfp_mount_detail" in
+        ok:plain) _gfp_mount_mode=plain; _gfp_mount_detail=; return 0 ;;
+        ok:staging) _gfp_mount_mode=staging; _gfp_mount_detail=; return 0 ;;
+    esac
+    [ "$_gfp_mount_rc" -eq 0 ] && _gfp_mount_detail=unexpected-success-without-mode
+    return 1
 }
 
 _gfp_unmount_in_pid() {
@@ -227,6 +298,13 @@ _gfp_apply_once() {
     _gfp_prepared=0
     _gfp_mounted=0
     _gfp_failed=0
+    _gfp_missing_sources=0
+    _gfp_ns_attempted=0
+    _gfp_ns_plain=0
+    _gfp_ns_staging=0
+    _gfp_ns_failed=0
+    _gfp_ns_first_error=
+    _gfp_missing_first=
     while IFS= read -r _gfp_target; do
         _gfp_valid_font "$_gfp_target" || continue
         case "$(basename "$_gfp_target")" in *Emoji*|*Color*Emoji*|*Code*) continue ;; esac
@@ -234,6 +312,8 @@ _gfp_apply_once() {
         _gfp_weight_value=$(_gfp_weight "$_gfp_target")
         _gfp_source=$(_gfp_source_for_weight "$_gfp_weight_value")
         if [ -z "$_gfp_source" ]; then
+            _gfp_missing_sources=$((_gfp_missing_sources + 1))
+            [ -n "$_gfp_missing_first" ] || _gfp_missing_first="weight=$_gfp_weight_value target=$_gfp_target"
             _gfp_failed=$((_gfp_failed + 1))
             continue
         fi
@@ -245,12 +325,27 @@ _gfp_apply_once() {
         fi
         _gfp_prepared=$((_gfp_prepared + 1))
         _gfp_target_mounts=0
+        _gfp_target_attempts=0
         if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
             for _gfp_pid in $(_gfp_namespace_pids); do
+                _gfp_target_attempts=$((_gfp_target_attempts + 1))
+                _gfp_ns_attempted=$((_gfp_ns_attempted + 1))
                 if _gfp_mount_in_pid "$_gfp_pid" "$_gfp_clone" "$_gfp_target"; then
                     _gfp_target_mounts=$((_gfp_target_mounts + 1))
+                    case "$_gfp_mount_mode" in
+                        plain) _gfp_ns_plain=$((_gfp_ns_plain + 1)) ;;
+                        staging) _gfp_ns_staging=$((_gfp_ns_staging + 1)) ;;
+                    esac
+                else
+                    _gfp_ns_failed=$((_gfp_ns_failed + 1))
+                    if [ -z "$_gfp_ns_first_error" ]; then
+                        _gfp_ns_first_error="pid=$_gfp_pid target=$_gfp_target detail=${_gfp_mount_detail:-unknown}"
+                    fi
                 fi
             done
+            if [ "$_gfp_target_attempts" -eq 0 ] && [ -z "$_gfp_ns_first_error" ]; then
+                _gfp_ns_first_error="no-target-namespace-pids"
+            fi
         fi
         if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || [ "$_gfp_target_mounts" -gt 0 ]; then
             _gfp_mounted=$((_gfp_mounted + 1))
@@ -260,15 +355,18 @@ _gfp_apply_once() {
         fi
     done < "$_gfp_targets_file"
     rm -f "$_gfp_targets_file" 2>/dev/null || true
+    _gfp_diag="命名空间=attempted:$_gfp_ns_attempted plain:$_gfp_ns_plain staging:$_gfp_ns_staging failed:$_gfp_ns_failed 缺源=$_gfp_missing_sources"
+    [ -n "$_gfp_ns_first_error" ] && _gfp_diag="$_gfp_diag 首个挂载错误=$_gfp_ns_first_error"
+    [ -n "$_gfp_missing_first" ] && _gfp_diag="$_gfp_diag 首个缺源=$_gfp_missing_first"
     if [ "$_gfp_mounted" -gt 0 ]; then
         mv -f "$_gfp_state_tmp" "$STATE" 2>/dev/null || true
         chmod 0600 "$STATE" 2>/dev/null || true
-        _gfp_log "provider bridge：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed"
+        _gfp_log "provider bridge：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag"
         [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || am force-stop com.android.vending >/dev/null 2>&1 || true
         return 0
     fi
     rm -f "$_gfp_state_tmp" 2>/dev/null || true
-    _gfp_log "provider bridge 未生效：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed"
+    _gfp_log "provider bridge 未生效：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag"
     [ "$_gfp_found" -gt 0 ] && return 1
     return 2
 }

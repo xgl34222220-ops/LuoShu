@@ -199,7 +199,7 @@ internal fun LuoShuAppShell(
         val blurActive = appearance.blurEnabled && appearance.glassEnabled
         val hazeState = rememberHazeState(blurEnabled = blurActive)
         val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val dockClearance = navigationBottom + if (appearance.floatingDock) 84.dp else 68.dp
+        val dockClearance = navigationBottom + if (appearance.floatingDock) 78.dp else 64.dp
         val contentModifier = Modifier
             .fillMaxSize()
             .then(if (blurActive) Modifier.hazeSource(state = hazeState) else Modifier)
@@ -213,13 +213,13 @@ internal fun LuoShuAppShell(
                     contentKey = { it },
                     transitionSpec = {
                         val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
-                        val enterDuration = if (appearance.uiStyle == UiStyle.MIUIX) 250 else 220
-                        val exitDuration = if (appearance.uiStyle == UiStyle.MIUIX) 180 else 160
+                        val enterDuration = if (appearance.uiStyle == UiStyle.MIUIX) 200 else 180
+                        val exitDuration = if (appearance.uiStyle == UiStyle.MIUIX) 110 else 100
                         (fadeIn(tween(enterDuration)) + slideInHorizontally(tween(enterDuration)) { width ->
-                            direction * width / 14
+                            direction * width / 22
                         }).togetherWith(
                             fadeOut(tween(exitDuration)) + slideOutHorizontally(tween(exitDuration)) { width ->
-                                -direction * width / 18
+                                -direction * width / 28
                             },
                         )
                     },
@@ -430,7 +430,7 @@ private fun MaterialAppDock(
     val dark = scheme.background.luminance() < .5f
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val floating = appearance.floatingDock
-    val shape = if (floating) RoundedCornerShape(30.dp) else RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)
+    val shape = if (floating) RoundedCornerShape(26.dp) else RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
     val activeHaze = appearance.blurEnabled && appearance.glassEnabled
     val hazeModifier = if (activeHaze) {
         Modifier.hazeEffect(state = hazeState, style = HazeMaterials.ultraThin()) {
@@ -443,7 +443,7 @@ private fun MaterialAppDock(
         pages = dockPages,
         current = current,
         onSelect = onSelect,
-        itemHeight = 58.dp,
+        itemHeight = 52.dp,
         modifier = modifier
             .then(if (floating) Modifier.padding(horizontal = 16.dp).padding(bottom = bottomInset + 10.dp) else Modifier)
             .fillMaxWidth()
@@ -480,7 +480,7 @@ private fun MiuixAppDock(
     val dark = scheme.background.luminance() < .5f
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val floating = appearance.floatingDock
-    val shape = if (floating) RoundedCornerShape(29.dp) else RoundedCornerShape(topStart = 29.dp, topEnd = 29.dp)
+    val shape = if (floating) RoundedCornerShape(26.dp) else RoundedCornerShape(topStart = 26.dp, topEnd = 26.dp)
     val activeGlass = appearance.glassEnabled
     val activeHaze = activeGlass && appearance.blurEnabled
     val hazeModifier = if (activeHaze) {
@@ -513,7 +513,7 @@ private fun MiuixAppDock(
         pages = dockPages,
         current = current,
         onSelect = onSelect,
-        itemHeight = 56.dp,
+        itemHeight = 52.dp,
         modifier = modifier
             .then(if (floating) Modifier.padding(horizontal = 14.dp).padding(bottom = bottomInset + 8.dp) else Modifier)
             .fillMaxWidth()
@@ -523,7 +523,7 @@ private fun MiuixAppDock(
             .background(glassBrush)
             .drawBehind {
                 if (activeGlass) {
-                    val radius = 29.dp.toPx()
+                    val radius = 26.dp.toPx()
                     drawRoundRect(
                         brush = Brush.linearGradient(
                             colors = listOf(
@@ -596,22 +596,27 @@ private fun AppDockLayout(
         )
         Box(
             modifier = Modifier
-                .offset(x = indicatorX + 5.dp)
-                .width(itemWidth - 10.dp)
+                .offset(x = indicatorX + 7.dp)
+                .width(itemWidth - 14.dp)
                 .height(itemHeight)
-                .shadow(indicatorShadow, RoundedCornerShape(20.dp), clip = false)
-                .clip(RoundedCornerShape(20.dp))
+                .shadow(indicatorShadow, RoundedCornerShape(18.dp), clip = false)
+                .clip(RoundedCornerShape(18.dp))
                 .background(indicatorColor)
-                .border(1.dp, indicatorBorderColor, RoundedCornerShape(20.dp)),
+                .border(1.dp, indicatorBorderColor, RoundedCornerShape(18.dp)),
         )
         Row(Modifier.fillMaxWidth()) {
             pages.forEach { page ->
                 val selected = current == page
+                val iconSize by animateDpAsState(
+                    targetValue = if (selected) 21.dp else 19.dp,
+                    animationSpec = tween(160),
+                    label = "dockIcon-${page.name}",
+                )
                 Column(
                     modifier = Modifier
                         .width(itemWidth)
                         .height(itemHeight)
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(RoundedCornerShape(18.dp))
                         .clickable { onSelect(page) },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
@@ -619,14 +624,14 @@ private fun AppDockLayout(
                     Icon(
                         page.icon,
                         contentDescription = page.label,
-                        modifier = Modifier.size(if (selected) 22.dp else 20.dp),
+                        modifier = Modifier.size(iconSize),
                         tint = if (selected) selectedColor else unselectedColor,
                     )
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(1.dp))
                     Text(
                         page.label,
                         color = if (selected) selectedColor else unselectedColor,
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1,
                     )

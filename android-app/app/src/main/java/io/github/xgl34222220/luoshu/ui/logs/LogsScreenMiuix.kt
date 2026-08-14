@@ -111,8 +111,8 @@ private fun MiuixTaskCenterHeader(
             Text(
                 "任务中心",
                 color = tokens.textPrimary,
-                fontSize = 42.sp,
-                lineHeight = 47.sp,
+                fontSize = 39.sp,
+                lineHeight = 44.sp,
                 fontWeight = FontWeight.Black,
             )
             Text("扫描、导入、应用、组合与重启状态", color = tokens.textSecondary, fontSize = 12.sp)
@@ -127,11 +127,11 @@ private fun MiuixTaskCenterHeader(
                 onClick = onDiagnostic,
             )
             Card(
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = tokens.elevatedCardBackground),
-                elevation = CardDefaults.cardElevation(defaultElevation = 7.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
             ) {
-                IconButton(onClick = onRefresh, modifier = Modifier.size(56.dp)) {
+                IconButton(onClick = onRefresh, modifier = Modifier.size(50.dp)) {
                     Icon(Icons.Rounded.Refresh, contentDescription = "刷新任务和日志")
                 }
             }
@@ -143,11 +143,11 @@ private fun MiuixTaskCenterHeader(
 private fun MiuixTaskOverview(state: LogsUiState) {
     val tokens = LocalMiuixTokens.current
     Card(
-        shape = RoundedCornerShape(36.dp),
+        shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
     ) {
-        Column(Modifier.padding(19.dp)) {
+        Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(52.dp),
@@ -177,7 +177,7 @@ private fun MiuixTaskOverview(state: LogsUiState) {
                     )
                 }
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 MiuixOverviewMetric("进行中", state.activeTaskCount, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
                 MiuixOverviewMetric("已完成", state.completedTaskCount, tokens.success, Modifier.weight(1f))
@@ -190,9 +190,9 @@ private fun MiuixTaskOverview(state: LogsUiState) {
 @Composable
 private fun MiuixOverviewMetric(label: String, value: Int, color: Color, modifier: Modifier) {
     val tokens = LocalMiuixTokens.current
-    Surface(modifier = modifier, shape = RoundedCornerShape(21.dp), color = color.copy(alpha = .10f)) {
-        Column(Modifier.padding(horizontal = 13.dp, vertical = 11.dp)) {
-            Text(value.toString(), color = color, fontSize = 20.sp, fontWeight = FontWeight.Black)
+    Surface(modifier = modifier, shape = RoundedCornerShape(17.dp), color = color.copy(alpha = .09f)) {
+        Column(Modifier.padding(horizontal = 11.dp, vertical = 9.dp)) {
+            Text(value.toString(), color = color, fontSize = 18.sp, fontWeight = FontWeight.Black)
             Text(label, color = tokens.textSecondary, fontSize = 10.sp)
         }
     }
@@ -215,15 +215,15 @@ private fun MiuixTaskCard(task: TaskCenterItem) {
     val tokens = LocalMiuixTokens.current
     val color = miuixTaskPhaseColor(task.phase)
     Card(
-        shape = RoundedCornerShape(32.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (task.current) 7.dp else 4.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (task.current) 4.dp else 2.dp),
     ) {
-        Column(Modifier.padding(horizontal = 17.dp, vertical = 16.dp)) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 13.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    modifier = Modifier.size(48.dp),
-                    shape = RoundedCornerShape(17.dp),
+                    modifier = Modifier.size(42.dp),
+                    shape = RoundedCornerShape(15.dp),
                     color = color.copy(alpha = .11f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -235,7 +235,7 @@ private fun MiuixTaskCard(task: TaskCenterItem) {
                     Text(
                         task.title,
                         color = tokens.textPrimary,
-                        fontSize = 16.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Black,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -244,7 +244,7 @@ private fun MiuixTaskCard(task: TaskCenterItem) {
                         task.message,
                         color = tokens.textSecondary,
                         fontSize = 11.sp,
-                        maxLines = 3,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
@@ -266,10 +266,10 @@ private fun MiuixTaskCard(task: TaskCenterItem) {
                 }
             }
             if (task.active && task.progress >= 0) {
-                Spacer(Modifier.height(13.dp))
+                Spacer(Modifier.height(10.dp))
                 LinearProgressIndicator(
                     progress = { task.progress.coerceIn(0, 100) / 100f },
-                    modifier = Modifier.fillMaxWidth().height(7.dp),
+                    modifier = Modifier.fillMaxWidth().height(5.dp),
                 )
             }
         }

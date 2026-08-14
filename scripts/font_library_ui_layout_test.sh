@@ -101,12 +101,12 @@ grep -q 'shape = RoundedCornerShape(18.dp)' "$STUDIO_TOOLS"
 ! grep -q 'align(Alignment.BottomCenter)' "$STUDIO_ROUTE"
 grep -q 'padding(bottom = dockClearance)' "$SHELL"
 
-# Four-item dock, larger labels, hidden settings dock, Haze sampling and a real
+# Four-item dock, compact labels, hidden settings dock, Haze sampling and a real
 # liquid-glass surface with refraction highlights instead of an opaque white card.
 grep -q 'private val dockPages' "$SHELL"
 [ "$(sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -c 'AppPage\.')" -eq 4 ]
 grep -q 'if (page != AppPage.Settings)' "$SHELL"
-grep -q 'fontSize = 11.sp' "$SHELL"
+grep -q 'fontSize = 10.sp' "$SHELL"
 grep -q 'private fun MiuixAppDock' "$SHELL"
 MIUIX_DOCK=$(sed -n '/private fun MiuixAppDock/,/private fun AppDockLayout/p' "$SHELL")
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'hazeEffect'

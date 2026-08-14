@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FontDownload
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Warning
@@ -32,14 +33,17 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -125,14 +129,22 @@ internal fun FontLibraryScreenCompact(
         }
 
         item {
-            OutlinedTextField(
+            TextField(
                 value = state.query,
                 onValueChange = actions.setQuery,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                shape = RoundedCornerShape(20.dp),
+                shape = RoundedCornerShape(18.dp),
                 leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
                 placeholder = { Text("搜索名称、ID 或格式") },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = elevatedColor,
+                    unfocusedContainerColor = elevatedColor,
+                    disabledContainerColor = elevatedColor,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    disabledIndicatorColor = Color.Transparent,
+                ),
             )
         }
 
@@ -302,28 +314,29 @@ private fun CompactFontRow(
     onApply: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    var menuExpanded by remember(font.id) { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails),
-        shape = RoundedCornerShape(23.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (font.valid) cardColor else MaterialTheme.colorScheme.errorContainer.copy(alpha = .42f),
         ),
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column(Modifier.padding(13.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    modifier = Modifier.size(54.dp),
-                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.size(52.dp),
+                    shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         if (font.valid) {
                             NativeFontPreview(
                                 font = font,
-                                text = "Aa",
+                                text = "Aa 12",
                                 axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
-                                modifier = Modifier.size(54.dp).padding(6.dp),
-                                textSizeSp = 19f,
+                                modifier = Modifier.size(52.dp).padding(5.dp),
+                                textSizeSp = 16f,
                                 gravity = Gravity.CENTER,
                                 maxLines = 1,
                             )
@@ -362,8 +375,21 @@ private fun CompactFontRow(
                 if (active) {
                     StatusPill("使用中", Color(0xFF21966C))
                 } else {
-                    IconButton(onClick = onDelete, enabled = !busy) {
-                        Icon(Icons.Rounded.Delete, contentDescription = "删除字体", tint = textSecondary)
+                    Box {
+                        IconButton(onClick = { menuExpanded = true }, enabled = !busy) {
+                            Icon(Icons.Rounded.MoreVert, contentDescription = "更多字体操作", tint = textSecondary)
+                        }
+                        DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                            DropdownMenuItem(
+                                text = { Text("删除字体") },
+                                leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+                                enabled = !busy,
+                                onClick = {
+                                    menuExpanded = false
+                                    onDelete()
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -400,7 +426,7 @@ private fun CompactFontRow(
                     Button(
                         onClick = onApply,
                         enabled = font.valid && !busy,
-                        shape = RoundedCornerShape(16.dp),
+                        shape = RoundedCornerShape(14.dp),
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 9.dp),
                     ) {
                         Text("应用")
@@ -422,7 +448,7 @@ private fun ChoicePill(label: String, active: Boolean, onClick: () -> Unit) {
     ) {
         Text(
             label,
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
             color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,

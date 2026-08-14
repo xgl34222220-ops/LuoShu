@@ -69,3 +69,6 @@ else
   sh -n "$ROOT/common/google_font_provider_service.sh"
   python3 -m py_compile "$ROOT/common/google_font_provider_patch.py"
 fi
+
+# 命名空间 bind 源路径的契约不依赖 fontTools 或系统字体，始终执行。
+sh "$ROOT/scripts/google_font_provider_mount_test.sh"

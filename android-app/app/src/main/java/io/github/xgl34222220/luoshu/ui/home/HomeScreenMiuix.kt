@@ -174,8 +174,8 @@ private fun MiuixPageHeader(state: HomeUiState, onRefresh: () -> Unit) {
             Text(
                 text = "洛书",
                 color = LocalMiuixTokens.current.textPrimary,
-                fontSize = 42.sp,
-                lineHeight = 47.sp,
+                fontSize = 39.sp,
+                lineHeight = 44.sp,
                 fontWeight = FontWeight.Black,
             )
             Text(
@@ -185,11 +185,11 @@ private fun MiuixPageHeader(state: HomeUiState, onRefresh: () -> Unit) {
             )
         }
         Card(
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = LocalMiuixTokens.current.elevatedCardBackground),
-            elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         ) {
-            IconButton(onClick = onRefresh, modifier = Modifier.size(56.dp)) {
+            IconButton(onClick = onRefresh, modifier = Modifier.size(50.dp)) {
                 if (state.loading) {
                     CircularProgressIndicator(modifier = Modifier.size(23.dp), strokeWidth = 2.dp)
                 } else {
@@ -204,9 +204,9 @@ private fun MiuixPageHeader(state: HomeUiState, onRefresh: () -> Unit) {
 private fun MiuixFontHero(state: HomeUiState) {
     val tokens = LocalMiuixTokens.current
     val scheme = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(36.dp)
+    val shape = RoundedCornerShape(30.dp)
     Card(
-        modifier = Modifier.fillMaxWidth().shadow(12.dp, shape, clip = false),
+        modifier = Modifier.fillMaxWidth().shadow(8.dp, shape, clip = false),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
     ) {
@@ -229,7 +229,7 @@ private fun MiuixFontHero(state: HomeUiState) {
                         size = size.copy(height = size.height * .36f),
                     )
                 }
-                .padding(24.dp),
+                .padding(20.dp),
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -249,20 +249,20 @@ private fun MiuixFontHero(state: HomeUiState) {
                         fontSize = 12.sp,
                     )
                 }
-                Spacer(Modifier.height(25.dp))
+                Spacer(Modifier.height(18.dp))
                 Text("当前字体", color = tokens.textSecondary, fontSize = 12.sp)
                 Text(
                     text = state.currentFont,
                     color = tokens.textPrimary,
-                    fontSize = 42.sp,
-                    lineHeight = 47.sp,
+                    fontSize = 36.sp,
+                    lineHeight = 42.sp,
                     fontWeight = FontWeight.Black,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(21.dp))
+                Spacer(Modifier.height(16.dp))
                 Surface(
-                    shape = RoundedCornerShape(22.dp),
+                    shape = RoundedCornerShape(18.dp),
                     color = tokens.textPrimary.copy(alpha = .045f),
                 ) {
                     Row(
@@ -306,11 +306,11 @@ private fun MiuixMetricCard(
     val tokens = LocalMiuixTokens.current
     Card(
         modifier = modifier,
-        shape = RoundedCornerShape(30.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 5.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 3.dp),
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Surface(
                 modifier = Modifier.size(44.dp),
                 shape = RoundedCornerShape(17.dp),
@@ -344,9 +344,9 @@ private fun MiuixMetricCard(
 private fun MiuixSystemWeightCard(weight: HomeWeightUiState, actions: HomeActions) {
     val tokens = LocalMiuixTokens.current
     Card(
-        shape = RoundedCornerShape(34.dp),
+        shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 7.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {

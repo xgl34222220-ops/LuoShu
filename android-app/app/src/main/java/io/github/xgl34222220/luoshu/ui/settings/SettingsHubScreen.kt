@@ -107,8 +107,8 @@ internal fun SettingsHubRoute(settings: AppearanceSettings, actions: AppearanceA
     Column(Modifier.fillMaxSize().navigationBarsPadding()) {
         HubHeader(settings.uiStyle)
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             SettingsSection.entries.forEach { item ->
                 val active = item == section
@@ -118,14 +118,14 @@ internal fun SettingsHubRoute(settings: AppearanceSettings, actions: AppearanceA
                         if (item == SettingsSection.SAFETY) model.refreshHealth()
                         if (item == SettingsSection.UPDATE) model.checkUpdate()
                     },
-                    shape = RoundedCornerShape(999.dp),
-                    color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    contentColor = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                    shape = RoundedCornerShape(17.dp),
+                    color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+                    contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                 ) {
-                    Row(Modifier.padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.padding(horizontal = 13.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(item.icon, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text(item.label, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text(item.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     }
                 }
             }
@@ -145,13 +145,13 @@ internal fun SettingsHubRoute(settings: AppearanceSettings, actions: AppearanceA
 @Composable
 private fun HubHeader(style: UiStyle) {
     val tokens = LocalMiuixTokens.current
-    Row(Modifier.fillMaxWidth().padding(18.dp, 12.dp, 18.dp, 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(18.dp, 10.dp, 18.dp, 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("SETTINGS", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-            Text("设置中心", color = if (style == UiStyle.MIUIX) tokens.textPrimary else MaterialTheme.colorScheme.onSurface, fontSize = 30.sp, fontWeight = FontWeight.Black)
+            Text("设置中心", color = if (style == UiStyle.MIUIX) tokens.textPrimary else MaterialTheme.colorScheme.onSurface, fontSize = 32.sp, fontWeight = FontWeight.Black)
             Text("外观 · 安全体检 · 更新通道", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
-        Surface(Modifier.size(52.dp), RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .11f)) {
+        Surface(Modifier.size(46.dp), RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .09f)) {
             Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Settings, null, tint = MaterialTheme.colorScheme.primary) }
         }
     }
@@ -162,7 +162,7 @@ private fun pageList(content: androidx.compose.foundation.lazy.LazyListScope.() 
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
         content = content,
     )
 }
