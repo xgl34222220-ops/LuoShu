@@ -227,7 +227,19 @@ jobs:
           set -euo pipefail
           args=(--target "$VERSION" --enforce)
           if [[ "$PRERELEASE" != 'true' ]]; then
-            args+=(--stable)
+            authorization='config/stable_release_authorization.conf'
+            explicitly_authorized=false
+            if [[ -f "$authorization" ]] \
+              && grep -qx "version=$VERSION" "$authorization" \
+              && grep -qx 'scope=stable-release' "$authorization" \
+              && grep -qx 'allowPendingDeviceMatrix=true' "$authorization"; then
+              explicitly_authorized=true
+            fi
+            if [[ "$explicitly_authorized" == true ]]; then
+              echo "::warning::$VERSION stable release is explicitly authorized with the device matrix still pending; no device validation result is being fabricated."
+            else
+              args+=(--stable)
+            fi
           fi
           sh ./scripts/pre_release_readiness.sh "${args[@]}"
 
