@@ -22,7 +22,10 @@ jobs:
           fetch-depth: 0
 
       - name: Apply reviewed integration
-        run: python3 .github/tmp/apply_generic_xml_overlay.py
+        run: |
+          python3 .github/tmp/apply_generic_xml_overlay.py
+          cp -f .github/tmp/device_font_payload_bridge_test.new.sh scripts/device_font_payload_bridge_test.sh
+          chmod 0755 scripts/device_font_payload_bridge_test.sh
 
       - name: Shell syntax checks
         run: |
@@ -49,6 +52,7 @@ jobs:
       - name: Commit verified source only
         run: |
           rm -f .github/tmp/apply_generic_xml_overlay.py
+          rm -f .github/tmp/device_font_payload_bridge_test.new.sh
           rmdir .github/tmp 2>/dev/null || true
           rm -f .github/workflows/tmp-generic-xml-overlay-apply.yml
           git diff --check
