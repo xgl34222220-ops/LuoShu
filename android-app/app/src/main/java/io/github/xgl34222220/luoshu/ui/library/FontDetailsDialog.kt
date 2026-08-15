@@ -6,9 +6,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -80,12 +80,14 @@ internal fun FontDetailsDialogRoute(
     val primaryText = if (miuix) tokens.textPrimary else scheme.onSurface
     val secondaryText = if (miuix) tokens.textSecondary else scheme.onSurfaceVariant
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val detailScrollState = rememberScrollState()
     var deepMetadata by remember(font.id) { mutableStateOf<FontDeepMetadata?>(null) }
     var deepLoading by remember(font.id) { mutableStateOf(true) }
     var metadataExpanded by rememberSaveable(font.id) { mutableStateOf(false) }
     var previewMode by remember(font.id) { mutableStateOf(FontPreviewMode.Mixed) }
 
     LaunchedEffect(font.id) {
+        detailScrollState.scrollTo(0)
         deepLoading = true
         deepMetadata = loadFontDeepMetadata(font)
         deepLoading = false
@@ -113,22 +115,17 @@ internal fun FontDetailsDialogRoute(
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        sheetGesturesEnabled = false,
         shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
         containerColor = container,
-        dragHandle = {
-            Surface(
-                modifier = Modifier.padding(top = 10.dp).width(36.dp).height(4.dp),
-                shape = RoundedCornerShape(999.dp),
-                color = secondaryText.copy(alpha = .24f),
-            ) {}
-        },
+        dragHandle = null,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(max = 760.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(start = 20.dp, end = 20.dp, bottom = 28.dp),
+                .fillMaxHeight(0.94f)
+                .verticalScroll(detailScrollState)
+                .padding(start = 20.dp, end = 20.dp, top = 10.dp, bottom = 28.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
