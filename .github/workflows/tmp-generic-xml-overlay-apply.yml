@@ -51,11 +51,10 @@ jobs:
       - name: Run transactional XML runtime test
         run: sh scripts/font_config_runtime_test.sh
 
-      - name: Run safety test
-        run: sh scripts/font_safety_test.sh
-
-      - name: Trace partial coverage assertions
-        run: sh -x scripts/generic_xml_partial_coverage_test.sh
+      - name: Run safety and partial coverage tests
+        run: |
+          sh scripts/font_safety_test.sh
+          sh scripts/generic_xml_partial_coverage_test.sh
 
       - name: Commit verified source only
         run: |
