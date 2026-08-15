@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -70,8 +72,8 @@ internal fun FontMetadataInspector(
     Surface(
         onClick = { showPicker = true },
         enabled = viewModel.snapshot.installed && viewModel.fonts.isNotEmpty() && !busy,
-        modifier = modifier.size(if (style == UiStyle.MIUIX) 54.dp else 52.dp),
-        shape = if (style == UiStyle.MIUIX) RoundedCornerShape(19.dp) else CircleShape,
+        modifier = modifier.size(52.dp),
+        shape = if (style == UiStyle.MIUIX) RoundedCornerShape(18.dp) else CircleShape,
         color = if (style == UiStyle.MIUIX) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surface.copy(alpha = .96f),
         contentColor = MaterialTheme.colorScheme.primary,
         shadowElevation = if (style == UiStyle.MIUIX) 16.dp else 12.dp,
@@ -79,9 +81,14 @@ internal fun FontMetadataInspector(
     ) {
         Box(contentAlignment = Alignment.Center) {
             if (busy) {
-                CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp)
+                CircularProgressIndicator(Modifier.size(LuoShuIconTokens.CompactProgress), strokeWidth = 2.dp)
             } else {
-                Icon(Icons.Rounded.Info, contentDescription = "深度分析字体")
+                LuoShuGlyph(
+                    imageVector = Icons.Rounded.Info,
+                    contentDescription = "深度分析字体",
+                    size = LuoShuIconTokens.ToolGlyph,
+                    opticalScale = .98f,
+                )
             }
         }
     }

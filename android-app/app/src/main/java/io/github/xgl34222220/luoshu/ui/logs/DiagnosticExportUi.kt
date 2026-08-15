@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.RootShell
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 
 internal data class DiagnosticExportState(
     val busy: Boolean = false,
@@ -141,30 +143,20 @@ internal fun DiagnosticExportButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = modifier.size(50.dp),
-        shape = RoundedCornerShape(17.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        contentColor = MaterialTheme.colorScheme.primary,
-        tonalElevation = 2.dp,
-        shadowElevation = 3.dp,
-    ) {
-        IconButton(
-            onClick = onClick,
-            enabled = !state.busy,
-            modifier = Modifier.size(50.dp),
-        ) {
-            if (state.busy) {
-                CircularProgressIndicator(Modifier.size(21.dp), strokeWidth = 2.dp)
-            } else {
-                Icon(
-                    Icons.Rounded.Description,
-                    contentDescription = "生成脱敏诊断报告",
-                    modifier = Modifier.size(24.dp),
-                )
-            }
-        }
-    }
+    LuoShuHeaderAction(
+        icon = Icons.Rounded.Description,
+        contentDescription = "生成脱敏诊断报告",
+        onClick = onClick,
+        enabled = !state.busy,
+        loading = state.busy,
+        containerColor = if (style == UiStyle.MIUIX) {
+            LocalMiuixTokens.current.elevatedCardBackground
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        modifier = modifier,
+        opticalScale = .96f,
+    )
 }
 
 @Composable

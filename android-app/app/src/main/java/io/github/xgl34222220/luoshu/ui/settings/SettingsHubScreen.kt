@@ -68,6 +68,8 @@ import io.github.xgl34222220.luoshu.ui.appearance.KolorStyle
 import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 
 data class AppearanceActions(
     val setUiStyle: (UiStyle) -> Unit,
@@ -82,12 +84,16 @@ data class AppearanceActions(
     val setHighRefreshRate: (Boolean) -> Unit,
 )
 
-private enum class SettingsSection(val label: String, val icon: ImageVector) {
-    OVERVIEW("总览", Icons.Rounded.Settings),
-    APPEARANCE("外观", Icons.Rounded.Palette),
-    SAFETY("安全", Icons.Rounded.Security),
-    BACKUP("备份", Icons.Rounded.Backup),
-    UPDATE("更新", Icons.Rounded.SystemUpdate),
+private enum class SettingsSection(
+    val label: String,
+    val icon: ImageVector,
+    val opticalScale: Float,
+) {
+    OVERVIEW("总览", Icons.Rounded.Settings, .94f),
+    APPEARANCE("外观", Icons.Rounded.Palette, 1.00f),
+    SAFETY("安全", Icons.Rounded.Security, .96f),
+    BACKUP("备份", Icons.Rounded.Backup, 1.08f),
+    UPDATE("更新", Icons.Rounded.SystemUpdate, 1.03f),
 }
 
 @Composable
@@ -123,7 +129,12 @@ internal fun SettingsHubRoute(settings: AppearanceSettings, actions: AppearanceA
                     contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                 ) {
                     Row(Modifier.padding(horizontal = 13.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(item.icon, null, Modifier.size(16.dp))
+                        LuoShuGlyph(
+                            imageVector = item.icon,
+                            contentDescription = null,
+                            size = LuoShuIconTokens.SectionGlyph,
+                            opticalScale = item.opticalScale,
+                        )
                         Spacer(Modifier.width(6.dp))
                         Text(item.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     }
@@ -151,8 +162,20 @@ private fun HubHeader(style: UiStyle) {
             Text("设置中心", color = if (style == UiStyle.MIUIX) tokens.textPrimary else MaterialTheme.colorScheme.onSurface, fontSize = 32.sp, fontWeight = FontWeight.Black)
             Text("外观 · 安全体检 · 更新通道", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
-        Surface(Modifier.size(46.dp), RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .09f)) {
-            Box(contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Settings, null, tint = MaterialTheme.colorScheme.primary) }
+        Surface(
+            Modifier.size(LuoShuIconTokens.HeaderContainer),
+            RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = .09f),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                LuoShuGlyph(
+                    imageVector = Icons.Rounded.Settings,
+                    contentDescription = null,
+                    size = LuoShuIconTokens.HeaderGlyph,
+                    opticalScale = .94f,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
     }
 }

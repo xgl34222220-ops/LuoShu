@@ -52,6 +52,7 @@ import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import kotlin.math.roundToInt
 
 @Composable
@@ -116,16 +117,14 @@ private fun MiuixStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAction
         }
         topAction()
         Spacer(Modifier.width(10.dp))
-        Card(
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = tokens.elevatedCardBackground),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-        ) {
-            IconButton(onClick = onRefresh, enabled = !loading, modifier = Modifier.size(50.dp)) {
-                if (loading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Rounded.Refresh, contentDescription = "刷新组合配置")
-            }
-        }
+        LuoShuHeaderAction(
+            icon = Icons.Rounded.Refresh,
+            contentDescription = "刷新组合配置",
+            onClick = onRefresh,
+            enabled = !loading,
+            loading = loading,
+            containerColor = tokens.elevatedCardBackground,
+        )
     }
 }
 

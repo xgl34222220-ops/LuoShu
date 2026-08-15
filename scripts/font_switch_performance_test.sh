@@ -27,11 +27,13 @@ grep -q 'horizontalArrangement = Arrangement.spacedBy(10.dp)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
 ! grep -q 'top = if (style == UiStyle.MIUIX)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
-# Compact task-center header actions intentionally share one 50 dp visual box.
-grep -q 'modifier = modifier.size(50.dp)' \
+# Compact task-center header actions use the shared 48 dp / 22 dp icon system.
+grep -q 'LuoShuHeaderAction(' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
-grep -q 'modifier = Modifier.size(50.dp)' \
-    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
+grep -q 'HeaderContainer = 48.dp' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
+grep -q 'HeaderGlyph = 22.dp' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
 grep -q 'timeoutSeconds = 390' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 grep -q 'advertisedTimeout' \

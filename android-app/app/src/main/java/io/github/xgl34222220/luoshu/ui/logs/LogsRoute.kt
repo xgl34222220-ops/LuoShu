@@ -40,8 +40,7 @@ internal fun LogsRoute(
     Box(
         Modifier
             .fillMaxSize()
-            .navigationBarsPadding()
-            .padding(bottom = 96.dp),
+            .padding(bottom = 8.dp),
     ) {
         LogsScreenCompact(
             style = style,

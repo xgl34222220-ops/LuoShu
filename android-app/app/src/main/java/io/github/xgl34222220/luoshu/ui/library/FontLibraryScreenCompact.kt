@@ -62,6 +62,9 @@ import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 
 @Composable
 internal fun FontLibraryScreenCompact(
@@ -107,24 +110,14 @@ internal fun FontLibraryScreenCompact(
                         fontSize = 12.sp,
                     )
                 }
-                Surface(
-                    shape = RoundedCornerShape(17.dp),
-                    color = elevatedColor,
-                    tonalElevation = 2.dp,
-                    shadowElevation = 3.dp,
-                ) {
-                    IconButton(
-                        onClick = actions.refresh,
-                        enabled = !state.loading,
-                        modifier = Modifier.size(50.dp),
-                    ) {
-                        if (state.loading) {
-                            CircularProgressIndicator(Modifier.size(21.dp), strokeWidth = 2.dp)
-                        } else {
-                            Icon(Icons.Rounded.Refresh, contentDescription = "刷新字体库")
-                        }
-                    }
-                }
+                LuoShuHeaderAction(
+                    icon = Icons.Rounded.Refresh,
+                    contentDescription = "刷新字体库",
+                    onClick = actions.refresh,
+                    enabled = !state.loading,
+                    loading = state.loading,
+                    containerColor = elevatedColor,
+                )
             }
         }
 
@@ -135,7 +128,13 @@ internal fun FontLibraryScreenCompact(
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
-                leadingIcon = { Icon(Icons.Rounded.Search, contentDescription = null) },
+                leadingIcon = {
+                    LuoShuGlyph(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = null,
+                        size = LuoShuIconTokens.SectionGlyph,
+                    )
+                },
                 placeholder = { Text("搜索名称、ID 或格式") },
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = elevatedColor,
@@ -180,9 +179,10 @@ internal fun FontLibraryScreenCompact(
                 )
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { showTools = !showTools }) {
-                    Icon(
-                        if (showTools) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                    LuoShuGlyph(
+                        imageVector = if (showTools) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
                         contentDescription = null,
+                        size = LuoShuIconTokens.SectionGlyph,
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(if (showTools) "收起导入与管理" else "导入与管理")
@@ -270,7 +270,7 @@ private fun CompactSystemFontRow(
     onRestore: () -> Unit,
 ) {
     Card(
-        shape = RoundedCornerShape(23.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor),
     ) {
         Row(
@@ -278,8 +278,8 @@ private fun CompactSystemFontRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
-                modifier = Modifier.size(50.dp),
-                shape = RoundedCornerShape(17.dp),
+                modifier = Modifier.size(52.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -294,7 +294,7 @@ private fun CompactSystemFontRow(
             if (active) {
                 StatusPill("使用中", Color(0xFF21966C))
             } else {
-                Button(onClick = onRestore, enabled = !busy, shape = RoundedCornerShape(16.dp)) {
+                Button(onClick = onRestore, enabled = !busy, shape = RoundedCornerShape(14.dp)) {
                     Text("恢复")
                 }
             }
@@ -377,12 +377,25 @@ private fun CompactFontRow(
                 } else {
                     Box {
                         IconButton(onClick = { menuExpanded = true }, enabled = !busy) {
-                            Icon(Icons.Rounded.MoreVert, contentDescription = "更多字体操作", tint = textSecondary)
+                            LuoShuGlyph(
+                                imageVector = Icons.Rounded.MoreVert,
+                                contentDescription = "更多字体操作",
+                                size = LuoShuIconTokens.ToolGlyph,
+                                opticalScale = .92f,
+                                tint = textSecondary,
+                            )
                         }
                         DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                             DropdownMenuItem(
                                 text = { Text("删除字体") },
-                                leadingIcon = { Icon(Icons.Rounded.Delete, contentDescription = null) },
+                                leadingIcon = {
+                                    LuoShuGlyph(
+                                        imageVector = Icons.Rounded.Delete,
+                                        contentDescription = null,
+                                        size = LuoShuIconTokens.ToolGlyph,
+                                        opticalScale = .96f,
+                                    )
+                                },
                                 enabled = !busy,
                                 onClick = {
                                     menuExpanded = false
@@ -397,11 +410,12 @@ private fun CompactFontRow(
             if (!font.valid && font.error.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Rounded.Warning,
+                    LuoShuGlyph(
+                        imageVector = Icons.Rounded.Warning,
                         contentDescription = null,
+                        size = LuoShuIconTokens.SectionGlyph,
+                        opticalScale = .96f,
                         tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(16.dp),
                     )
                     Spacer(Modifier.width(6.dp))
                     Text(
@@ -432,7 +446,13 @@ private fun CompactFontRow(
                         Text("应用")
                     }
                 } else {
-                    Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = Color(0xFF21966C))
+                    LuoShuGlyph(
+                        imageVector = Icons.Rounded.CheckCircle,
+                        contentDescription = null,
+                        size = LuoShuIconTokens.ToolGlyph,
+                        opticalScale = .98f,
+                        tint = Color(0xFF21966C),
+                    )
                 }
             }
         }

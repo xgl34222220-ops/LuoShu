@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -238,7 +240,12 @@ internal fun FontLibraryManagementButton(
             if (loading) {
                 CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
             } else {
-                Icon(Icons.Rounded.ListAlt, contentDescription = null, modifier = Modifier.size(20.dp))
+                LuoShuGlyph(
+                    imageVector = Icons.Rounded.ListAlt,
+                    contentDescription = null,
+                    size = LuoShuIconTokens.ToolGlyph,
+                    opticalScale = .98f,
+                )
             }
             Spacer(Modifier.width(8.dp))
             Column {
@@ -279,7 +286,13 @@ internal fun FontLibraryManagementDialog(
                         color = MaterialTheme.colorScheme.primaryContainer,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.ListAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            LuoShuGlyph(
+                                imageVector = Icons.Rounded.ListAlt,
+                                contentDescription = null,
+                                size = LuoShuIconTokens.HeaderGlyph,
+                                opticalScale = .98f,
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
                         }
                     }
                     Spacer(Modifier.width(12.dp))
@@ -292,7 +305,11 @@ internal fun FontLibraryManagementDialog(
                         )
                     }
                     IconButton(onClick = onDismiss) {
-                        Icon(Icons.Rounded.Close, contentDescription = "关闭")
+                        LuoShuGlyph(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "关闭",
+                            size = LuoShuIconTokens.ToolGlyph,
+                        )
                     }
                 }
 

@@ -43,6 +43,8 @@ import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.BuildConfig
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import io.github.xgl34222220.luoshu.ui.studio.StudioProfileBridgeStore
 import io.github.xgl34222220.luoshu.ui.studio.parseStudioProfile
 import java.io.BufferedReader
@@ -394,7 +396,12 @@ private fun FontLibraryBackupTool(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Rounded.Description, contentDescription = null, modifier = Modifier.size(20.dp))
+            LuoShuGlyph(
+                imageVector = Icons.Rounded.Description,
+                contentDescription = null,
+                size = LuoShuIconTokens.ToolGlyph,
+                opticalScale = .96f,
+            )
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
                 Text("备份与升级检查", fontSize = 11.sp, fontWeight = FontWeight.Black)

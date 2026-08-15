@@ -93,14 +93,20 @@ import io.github.xgl34222220.luoshu.ui.studio.FontStudioActions
 import io.github.xgl34222220.luoshu.ui.studio.FontStudioRoute
 import io.github.xgl34222220.luoshu.ui.studio.toFontStudioUiState
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTheme
 
-internal enum class AppPage(val label: String, val icon: ImageVector) {
-    Home("首页", Icons.Rounded.Home),
-    Library("字体库", Icons.Rounded.ListAlt),
-    Studio("组合", Icons.Rounded.Layers),
-    Logs("任务", Icons.Rounded.Description),
-    Settings("设置", Icons.Rounded.Settings),
+internal enum class AppPage(
+    val label: String,
+    val icon: ImageVector,
+    val dockOpticalScale: Float = 1f,
+) {
+    Home("首页", Icons.Rounded.Home, .94f),
+    Library("字体库", Icons.Rounded.ListAlt, 1.00f),
+    Studio("组合", Icons.Rounded.Layers, .96f),
+    Logs("任务", Icons.Rounded.Description, .96f),
+    Settings("设置", Icons.Rounded.Settings, .94f),
 }
 
 private val dockPages = listOf(
@@ -199,7 +205,7 @@ internal fun LuoShuAppShell(
         val blurActive = appearance.blurEnabled && appearance.glassEnabled
         val hazeState = rememberHazeState(blurEnabled = blurActive)
         val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val dockClearance = navigationBottom + if (appearance.floatingDock) 78.dp else 64.dp
+        val dockClearance = navigationBottom + if (appearance.floatingDock) 84.dp else 70.dp
         val contentModifier = Modifier
             .fillMaxSize()
             .then(if (blurActive) Modifier.hazeSource(state = hazeState) else Modifier)
@@ -226,11 +232,15 @@ internal fun LuoShuAppShell(
                     label = "luoshuPageTransition",
                 ) { target ->
                     when (target) {
-                        AppPage.Home -> HomeRoute(
-                            style = appearance.uiStyle,
-                            state = viewModel.snapshot.toHomeUiState(features.systemWeight),
-                            actions = homeActions,
-                        )
+                        AppPage.Home -> Box(
+                            modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
+                        ) {
+                            HomeRoute(
+                                style = appearance.uiStyle,
+                                state = viewModel.snapshot.toHomeUiState(features.systemWeight),
+                                actions = homeActions,
+                            )
+                        }
                         AppPage.Library -> Box(
                             modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
                         ) {
@@ -257,11 +267,15 @@ internal fun LuoShuAppShell(
                                 actions = studioActions,
                             )
                         }
-                        AppPage.Logs -> LogsRoute(
-                            style = appearance.uiStyle,
-                            state = viewModel.toLogsUiState(),
-                            actions = logsActions,
-                        )
+                        AppPage.Logs -> Box(
+                            modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
+                        ) {
+                            LogsRoute(
+                                style = appearance.uiStyle,
+                                state = viewModel.toLogsUiState(),
+                                actions = logsActions,
+                            )
+                        }
                         AppPage.Settings -> AppearanceSettingsRoute(
                             settings = appearance,
                             actions = appearanceActions,
@@ -607,11 +621,6 @@ private fun AppDockLayout(
         Row(Modifier.fillMaxWidth()) {
             pages.forEach { page ->
                 val selected = current == page
-                val iconSize by animateDpAsState(
-                    targetValue = if (selected) 21.dp else 19.dp,
-                    animationSpec = tween(160),
-                    label = "dockIcon-${page.name}",
-                )
                 Column(
                     modifier = Modifier
                         .width(itemWidth)
@@ -621,10 +630,11 @@ private fun AppDockLayout(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    Icon(
-                        page.icon,
+                    LuoShuGlyph(
+                        imageVector = page.icon,
                         contentDescription = page.label,
-                        modifier = Modifier.size(iconSize),
+                        size = LuoShuIconTokens.DockGlyph,
+                        opticalScale = page.dockOpticalScale,
                         tint = if (selected) selectedColor else unselectedColor,
                     )
                     Spacer(Modifier.height(1.dp))

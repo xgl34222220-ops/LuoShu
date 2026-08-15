@@ -19,6 +19,7 @@ STUDIO_MATERIAL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luosh
 OVERLAY="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 SHELL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
 SETTINGS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/settings/SettingsHubScreen.kt"
+ICON_SYSTEM="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
 UTIL="$ROOT/common/util_functions_core.sh"
 CACHE="$ROOT/common/device_font_cache.sh"
 
@@ -72,15 +73,16 @@ grep -q 'device_font_transaction_guard.sh' "$CACHE"
 grep -q 'mount_compat.sh' "$CACHE"
 grep -q 'type luoshu_sync_mount_payload' "$CACHE"
 
-# Task center separates user-facing tasks/issues from raw logs and its two header
-# actions have the same 50 dp visual size.
+# Task center separates user-facing tasks/issues from raw logs and all routed header
+# actions use the same 48 dp touch box / 22 dp glyph system.
 grep -q 'enum class LogsTab' "$LOGS_COMPACT"
 grep -q 'TASKS("任务")' "$LOGS_COMPACT"
 grep -q 'ISSUES("问题")' "$LOGS_COMPACT"
 grep -q 'LOGS("日志")' "$LOGS_COMPACT"
 grep -q 'TaskPhase.FAILED' "$LOGS_COMPACT"
-grep -q 'modifier = modifier.size(50.dp)' "$DIAGNOSTIC"
-grep -q 'Modifier.size(50.dp)' "$LOGS_COMPACT"
+grep -q 'LuoShuHeaderAction' "$DIAGNOSTIC"
+grep -q 'LuoShuHeaderAction' "$LOGS_COMPACT"
+! grep -q 'Modifier.size(50.dp)' "$LOGS_COMPACT"
 
 # Studio uses one in-flow final action. Both title actions share one Row and the
 # Studio viewport ends above the floating dock instead of drawing cards under it.
@@ -95,11 +97,13 @@ grep -q 'bottom = 24.dp' "$STUDIO_MATERIAL"
 ! grep -q 'align(Alignment.TopEnd)' "$STUDIO_ROUTE"
 ! grep -q 'statusBarsPadding()' "$STUDIO_ROUTE"
 ! grep -q 'navigationBarsPadding()' "$STUDIO_ROUTE"
-grep -q 'shape = RoundedCornerShape(18.dp)' "$STUDIO_TOOLS"
-! grep -q 'CircleShape' "$STUDIO_TOOLS"
+grep -q 'LuoShuHeaderAction' "$STUDIO_TOOLS"
+grep -q 'opticalScale = 1.08f' "$STUDIO_TOOLS"
+! grep -q 'modifier = modifier.size(56.dp)' "$STUDIO_TOOLS"
 ! grep -q 'align(Alignment.BottomStart)' "$STUDIO_ROUTE"
 ! grep -q 'align(Alignment.BottomCenter)' "$STUDIO_ROUTE"
-grep -q 'padding(bottom = dockClearance)' "$SHELL"
+[ "$(grep -c 'padding(bottom = dockClearance)' "$SHELL")" -eq 4 ]
+grep -q 'floatingDock) 84.dp else 70.dp' "$SHELL"
 
 # Four-item dock, compact labels, hidden settings dock, Haze sampling and a real
 # liquid-glass surface with refraction highlights instead of an opaque white card.
@@ -107,6 +111,8 @@ grep -q 'private val dockPages' "$SHELL"
 [ "$(sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -c 'AppPage\.')" -eq 4 ]
 grep -q 'if (page != AppPage.Settings)' "$SHELL"
 grep -q 'fontSize = 10.sp' "$SHELL"
+grep -q 'LuoShuIconTokens.DockGlyph' "$SHELL"
+! grep -q 'targetValue = if (selected) 21.dp else 19.dp' "$SHELL"
 grep -q 'private fun MiuixAppDock' "$SHELL"
 MIUIX_DOCK=$(sed -n '/private fun MiuixAppDock/,/private fun AppDockLayout/p' "$SHELL")
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'hazeEffect'
@@ -126,6 +132,14 @@ grep -q 'ToggleLine("悬浮底栏", "关闭后贴合屏幕底部"' "$SETTINGS"
 grep -q 'embedded: Boolean = false' "$OVERLAY"
 grep -q 'embedded = true' "$SHELL"
 grep -q 'dockClearance' "$SHELL"
+grep -q 'val HeaderContainer = 48.dp' "$ICON_SYSTEM"
+grep -q 'val HeaderGlyph = 22.dp' "$ICON_SYSTEM"
+grep -q 'val DockGlyph = 20.dp' "$ICON_SYSTEM"
+grep -q 'val SectionGlyph = 18.dp' "$ICON_SYSTEM"
+grep -q 'val ToolGlyph = 20.dp' "$ICON_SYSTEM"
+grep -q 'bottom = 24.dp' "$HOME_COMPACT"
+grep -q 'bottom = 24.dp' "$LOGS_COMPACT"
+! grep -q 'padding(bottom = 96.dp)' "$LOGS_ROUTE"
 ! grep -q 'if (page == AppPage.Studio)' "$SHELL"
 
 echo 'LuoShu compact UI layout regression passed.'

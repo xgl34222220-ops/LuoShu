@@ -37,6 +37,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
@@ -60,24 +63,16 @@ internal fun StudioToolLauncher(
         else -> scheme.surfaceVariant
     }
 
-    Surface(
+    LuoShuHeaderAction(
+        icon = Icons.Rounded.AutoAwesome,
+        contentDescription = "组合工具",
         onClick = { menuVisible = true },
         enabled = enabled,
-        modifier = modifier.size(56.dp),
-        shape = RoundedCornerShape(18.dp),
-        color = background,
+        containerColor = background,
+        modifier = modifier,
+        opticalScale = 1.08f,
         contentColor = if (enabled) scheme.primary else scheme.onSurfaceVariant,
-        tonalElevation = if (style == UiStyle.MATERIAL) 2.dp else 0.dp,
-        shadowElevation = if (style == UiStyle.MIUIX) 7.dp else 3.dp,
-    ) {
-        androidx.compose.foundation.layout.Box(contentAlignment = Alignment.Center) {
-            Icon(
-                Icons.Rounded.AutoAwesome,
-                contentDescription = "组合工具",
-                modifier = Modifier.size(23.dp),
-            )
-        }
-    }
+    )
 
     if (menuVisible) {
         ModalBottomSheet(
@@ -109,7 +104,12 @@ internal fun StudioToolLauncher(
                         contentColor = scheme.primary,
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, modifier = Modifier.size(21.dp))
+                            LuoShuGlyph(
+                                imageVector = Icons.Rounded.AutoAwesome,
+                                contentDescription = null,
+                                size = LuoShuIconTokens.ToolGlyph,
+                                opticalScale = 1.08f,
+                            )
                         }
                     }
                     Spacer(Modifier.width(12.dp))
@@ -118,7 +118,7 @@ internal fun StudioToolLauncher(
                         Text("预览、方案、历史与字形工具", color = scheme.onSurfaceVariant, fontSize = 11.sp)
                     }
                 }
-                StudioToolMenuItem("最终组合预览", "对照系统字体并切换混排、正文、界面和金额场景", Icons.Rounded.AutoAwesome) {
+                StudioToolMenuItem("最终组合预览", "对照系统字体并切换混排、正文、界面和金额场景", Icons.Rounded.AutoAwesome, 1.08f) {
                     menuVisible = false; onPreview()
                 }
                 StudioToolMenuItem("本地方案库", "保存、收藏和载入常用组合，并按最近使用快速回滚", Icons.Rounded.History) {
@@ -127,10 +127,10 @@ internal fun StudioToolLauncher(
                 StudioToolMenuItem("成功切换历史", "最近 10 次真正完成的切换，可一键恢复并重新走安全事务", Icons.Rounded.History) {
                     menuVisible = false; onHistory()
                 }
-                StudioToolMenuItem("方案导入导出", "通过 JSON 迁移三个槽位、字重和变量轴配置", Icons.Rounded.Description) {
+                StudioToolMenuItem("方案导入导出", "通过 JSON 迁移三个槽位、字重和变量轴配置", Icons.Rounded.Description, .96f) {
                     menuVisible = false; onProfile()
                 }
-                StudioToolMenuItem("字形浏览", "浏览中文、拉丁、数字、标点和 Unicode 码位", Icons.Rounded.ListAlt) {
+                StudioToolMenuItem("字形浏览", "浏览中文、拉丁、数字、标点和 Unicode 码位", Icons.Rounded.ListAlt, .98f) {
                     menuVisible = false; onGlyphs()
                 }
             }
@@ -143,6 +143,7 @@ private fun StudioToolMenuItem(
     label: String,
     description: String,
     icon: ImageVector,
+    opticalScale: Float = 1f,
     onClick: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
@@ -164,7 +165,12 @@ private fun StudioToolMenuItem(
                 contentColor = scheme.primary,
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+                    LuoShuGlyph(
+                    imageVector = icon,
+                    contentDescription = null,
+                    size = LuoShuIconTokens.ToolGlyph,
+                    opticalScale = opticalScale,
+                )
                 }
             }
             Spacer(Modifier.width(12.dp))
@@ -178,11 +184,11 @@ private fun StudioToolMenuItem(
                 )
             }
             Spacer(Modifier.width(8.dp))
-            Icon(
-                Icons.Rounded.ChevronRight,
+            LuoShuGlyph(
+                imageVector = Icons.Rounded.ChevronRight,
                 contentDescription = null,
+                size = LuoShuIconTokens.TrailingGlyph,
                 tint = scheme.onSurfaceVariant.copy(alpha = .72f),
-                modifier = Modifier.size(20.dp),
             )
         }
     }

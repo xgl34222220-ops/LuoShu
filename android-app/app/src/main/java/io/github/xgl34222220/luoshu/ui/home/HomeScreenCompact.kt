@@ -53,6 +53,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 
 @Composable
 internal fun HomeScreenCompact(
@@ -71,7 +74,7 @@ internal fun HomeScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 132.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
@@ -166,9 +169,11 @@ internal fun HomeScreenCompact(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(
-                                if (state.taskRunning) Icons.Rounded.Refresh else Icons.Rounded.CheckCircle,
+                            LuoShuGlyph(
+                                imageVector = if (state.taskRunning) Icons.Rounded.Refresh else Icons.Rounded.CheckCircle,
                                 contentDescription = null,
+                                size = LuoShuIconTokens.StatusGlyph,
+                                opticalScale = if (state.taskRunning) 1f else .98f,
                                 tint = MaterialTheme.colorScheme.primary,
                             )
                             Spacer(Modifier.width(10.dp))
@@ -214,7 +219,13 @@ internal fun HomeScreenCompact(
                         modifier = Modifier.fillMaxWidth().padding(15.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Rounded.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                        LuoShuGlyph(
+                            imageVector = Icons.Rounded.Warning,
+                            contentDescription = null,
+                            size = LuoShuIconTokens.ToolGlyph,
+                            opticalScale = .96f,
+                            tint = MaterialTheme.colorScheme.error,
+                        )
                         Spacer(Modifier.width(10.dp))
                         Text(
                             state.error,
@@ -269,7 +280,13 @@ internal fun HomeScreenCompact(
                         color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
-                            Icon(next.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            LuoShuGlyph(
+                                imageVector = next.icon,
+                                contentDescription = null,
+                                size = LuoShuIconTokens.StatusGlyph,
+                                opticalScale = homeOpticalScale(next.icon),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
                         }
                     }
                     Spacer(Modifier.width(12.dp))
@@ -291,9 +308,10 @@ internal fun HomeScreenCompact(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                         )
-                        Icon(
-                            Icons.Rounded.ChevronRight,
+                        LuoShuGlyph(
+                            imageVector = Icons.Rounded.ChevronRight,
                             contentDescription = null,
+                            size = LuoShuIconTokens.TrailingGlyph,
                             tint = if (next.enabled) MaterialTheme.colorScheme.primary else textSecondary,
                         )
                     }
@@ -328,7 +346,11 @@ internal fun HomeScreenCompact(
                     modifier = Modifier.weight(1f).height(52.dp),
                     shape = RoundedCornerShape(18.dp),
                 ) {
-                    Icon(Icons.Rounded.RestartAlt, contentDescription = null)
+                    LuoShuGlyph(
+                        imageVector = Icons.Rounded.RestartAlt,
+                        contentDescription = null,
+                        size = LuoShuIconTokens.SectionGlyph,
+                    )
                     Spacer(Modifier.width(6.dp))
                     Text("完整重启", fontWeight = FontWeight.Bold)
                 }
@@ -391,6 +413,17 @@ private fun nextStepFor(state: HomeUiState, actions: HomeActions): HomeNextStep 
     )
 }
 
+
+private fun homeOpticalScale(icon: ImageVector): Float = when (icon) {
+    Icons.Rounded.Security -> .95f
+    Icons.Rounded.Layers -> .96f
+    Icons.Rounded.Description -> .96f
+    Icons.Rounded.FontDownload -> .98f
+    Icons.Rounded.Warning -> .96f
+    Icons.Rounded.RestartAlt -> .96f
+    else -> 1f
+}
+
 @Composable
 private fun HeaderAction(
     icon: ImageVector,
@@ -399,20 +432,14 @@ private fun HeaderAction(
     loading: Boolean = false,
     onClick: () -> Unit,
 ) {
-    Surface(
-        shape = RoundedCornerShape(17.dp),
-        color = containerColor,
-        tonalElevation = 2.dp,
-        shadowElevation = 3.dp,
-    ) {
-        IconButton(onClick = onClick, modifier = Modifier.size(50.dp)) {
-            if (loading) {
-                CircularProgressIndicator(Modifier.size(21.dp), strokeWidth = 2.dp)
-            } else {
-                Icon(icon, contentDescription = description)
-            }
-        }
-    }
+    LuoShuHeaderAction(
+        icon = icon,
+        contentDescription = description,
+        onClick = onClick,
+        containerColor = containerColor,
+        loading = loading,
+        opticalScale = if (icon == Icons.Rounded.Settings) .94f else 1f,
+    )
 }
 
 @Composable
@@ -432,7 +459,13 @@ private fun StatusCard(
         colors = CardDefaults.cardColors(containerColor = cardColor),
     ) {
         Column(Modifier.padding(15.dp)) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            LuoShuGlyph(
+                imageVector = icon,
+                contentDescription = null,
+                size = LuoShuIconTokens.StatusGlyph,
+                opticalScale = homeOpticalScale(icon),
+                tint = MaterialTheme.colorScheme.primary,
+            )
             Spacer(Modifier.height(10.dp))
             Text(title, color = textSecondary, fontSize = 11.sp)
             Text(
@@ -474,7 +507,13 @@ private fun SystemWeightCard(
                     color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.Speed, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        LuoShuGlyph(
+                            imageVector = Icons.Rounded.Speed,
+                            contentDescription = null,
+                            size = LuoShuIconTokens.StatusGlyph,
+                            opticalScale = .96f,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
                     }
                 }
                 Spacer(Modifier.width(12.dp))

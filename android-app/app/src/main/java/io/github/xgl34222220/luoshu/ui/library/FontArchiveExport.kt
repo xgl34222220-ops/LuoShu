@@ -46,6 +46,8 @@ import io.github.xgl34222220.luoshu.BuildConfig
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.RootShell
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import java.io.File
 import java.security.MessageDigest
 import java.time.LocalDateTime
@@ -197,7 +199,12 @@ internal fun FontArchiveExportTool(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Rounded.FileDownload, contentDescription = null, modifier = Modifier.size(20.dp))
+            LuoShuGlyph(
+                imageVector = Icons.Rounded.FileDownload,
+                contentDescription = null,
+                size = LuoShuIconTokens.ToolGlyph,
+                opticalScale = .96f,
+            )
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
                 Text("字体文件归档", fontSize = 11.sp, fontWeight = FontWeight.Black)

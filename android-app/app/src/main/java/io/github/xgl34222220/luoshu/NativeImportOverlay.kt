@@ -47,6 +47,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 
 @Composable
 internal fun NativeImportOverlay(
@@ -159,8 +161,8 @@ private fun ImportActionButton(
         else -> 148.dp
     }
     val targetHeight = when {
-        embedded && taskVisible -> 68.dp
-        embedded -> 56.dp
+        embedded && taskVisible -> 64.dp
+        embedded -> 52.dp
         taskVisible -> 68.dp
         else -> 54.dp
     }
@@ -201,7 +203,11 @@ private fun ImportActionButton(
     ) {
         if (!expanded) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Rounded.Add, contentDescription = "导入字体", modifier = Modifier.size(24.dp))
+                LuoShuGlyph(
+                    imageVector = Icons.Rounded.Add,
+                    contentDescription = "导入字体",
+                    size = LuoShuIconTokens.HeaderGlyph,
+                )
             }
         } else {
             Column(
@@ -215,12 +221,21 @@ private fun ImportActionButton(
                 ) {
                     when {
                         state.busy -> CircularProgressIndicator(
-                            modifier = Modifier.size(19.dp),
+                            modifier = Modifier.size(LuoShuIconTokens.CompactProgress),
                             strokeWidth = 2.dp,
                             color = scheme.primary,
                         )
-                        state.paused -> Icon(Icons.Rounded.PlayArrow, contentDescription = null)
-                        else -> Icon(Icons.Rounded.Add, contentDescription = null)
+                        state.paused -> LuoShuGlyph(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = null,
+                            size = LuoShuIconTokens.ToolGlyph,
+                            opticalScale = .96f,
+                        )
+                        else -> LuoShuGlyph(
+                            imageVector = Icons.Rounded.Add,
+                            contentDescription = null,
+                            size = LuoShuIconTokens.ToolGlyph,
+                        )
                     }
                     Spacer(Modifier.width(8.dp))
                     Text(

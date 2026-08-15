@@ -46,6 +46,8 @@ import androidx.compose.ui.window.Dialog
 import io.github.xgl34222220.luoshu.NativeImportViewModel
 import io.github.xgl34222220.luoshu.rememberNativeImportViewModel
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import java.util.ArrayDeque
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -324,8 +326,13 @@ private fun FontDirectoryMonitorButton(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (scanning) CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp)
-            else Icon(Icons.Rounded.Folder, contentDescription = null, modifier = Modifier.size(20.dp))
+            if (scanning) CircularProgressIndicator(Modifier.size(LuoShuIconTokens.CompactProgress), strokeWidth = 2.dp)
+            else LuoShuGlyph(
+                imageVector = Icons.Rounded.Folder,
+                contentDescription = null,
+                size = LuoShuIconTokens.ToolGlyph,
+                opticalScale = .94f,
+            )
             Spacer(Modifier.size(8.dp))
             Column(Modifier.weight(1f)) {
                 Text("监视字体目录", fontSize = 11.sp, fontWeight = FontWeight.Black)
@@ -375,7 +382,12 @@ private fun FontDirectoryMonitorDialog(
                         color = MaterialTheme.colorScheme.secondaryContainer,
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                            Icon(Icons.Rounded.Folder, contentDescription = null)
+                            LuoShuGlyph(
+                                imageVector = Icons.Rounded.Folder,
+                                contentDescription = null,
+                                size = LuoShuIconTokens.HeaderGlyph,
+                                opticalScale = .94f,
+                            )
                         }
                     }
                     Spacer(Modifier.size(11.dp))
@@ -383,7 +395,11 @@ private fun FontDirectoryMonitorDialog(
                         Text("SAF 字体目录监视", fontSize = 19.sp, fontWeight = FontWeight.Black)
                         Text("进入字体库时扫描，不在后台常驻", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
                     }
-                    IconButton(onClick = onDismiss) { Icon(Icons.Rounded.Close, contentDescription = "关闭") }
+                    IconButton(onClick = onDismiss) { LuoShuGlyph(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "关闭",
+                        size = LuoShuIconTokens.ToolGlyph,
+                    ) }
                 }
 
                 Surface(

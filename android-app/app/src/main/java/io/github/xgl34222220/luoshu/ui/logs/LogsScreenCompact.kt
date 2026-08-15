@@ -45,6 +45,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 
 private enum class LogsTab(val label: String) {
     TASKS("任务"),
@@ -70,7 +73,7 @@ internal fun LogsScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 132.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(11.dp),
     ) {
         item {
@@ -106,16 +109,12 @@ internal fun LogsScreenCompact(
                     onClick = onDiagnostic,
                 )
                 Spacer(Modifier.size(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(17.dp),
-                    color = elevatedColor,
-                    tonalElevation = 2.dp,
-                    shadowElevation = 3.dp,
-                ) {
-                    IconButton(onClick = actions.refresh, modifier = Modifier.size(50.dp)) {
-                        Icon(Icons.Rounded.Refresh, contentDescription = "刷新任务和日志")
-                    }
-                }
+                LuoShuHeaderAction(
+                    icon = Icons.Rounded.Refresh,
+                    contentDescription = "刷新任务和日志",
+                    onClick = actions.refresh,
+                    containerColor = elevatedColor,
+                )
             }
         }
 
@@ -282,11 +281,12 @@ private fun OverviewCard(
     ) {
         Column(Modifier.padding(17.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    if (state.activeTaskCount > 0) Icons.Rounded.Refresh else Icons.Rounded.CheckCircle,
+                LuoShuGlyph(
+                    imageVector = if (state.activeTaskCount > 0) Icons.Rounded.Refresh else Icons.Rounded.CheckCircle,
                     contentDescription = null,
+                    size = LuoShuIconTokens.StatusGlyph,
+                    opticalScale = if (state.activeTaskCount > 0) 1f else .98f,
                     tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp),
                 )
                 Spacer(Modifier.size(10.dp))
                 Column(Modifier.weight(1f)) {
@@ -326,11 +326,12 @@ private fun IssueSummary(
         colors = CardDefaults.cardColors(containerColor = cardColor),
     ) {
         Row(Modifier.fillMaxWidth().padding(17.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-                if (failedCount > 0) Icons.Rounded.Warning else Icons.Rounded.CheckCircle,
+            LuoShuGlyph(
+                imageVector = if (failedCount > 0) Icons.Rounded.Warning else Icons.Rounded.CheckCircle,
                 contentDescription = null,
+                size = LuoShuIconTokens.StatusGlyph,
+                opticalScale = if (failedCount > 0) .96f else .98f,
                 tint = if (failedCount > 0) MaterialTheme.colorScheme.error else Color(0xFF21966C),
-                modifier = Modifier.size(30.dp),
             )
             Spacer(Modifier.size(12.dp))
             Column {
@@ -371,9 +372,11 @@ private fun TaskCard(
                     color = color.copy(alpha = .11f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            if (task.phase == TaskPhase.FAILED) Icons.Rounded.Warning else Icons.Rounded.Description,
+                        LuoShuGlyph(
+                            imageVector = if (task.phase == TaskPhase.FAILED) Icons.Rounded.Warning else Icons.Rounded.Description,
                             contentDescription = null,
+                            size = LuoShuIconTokens.LeadingGlyph,
+                            opticalScale = .96f,
                             tint = color,
                         )
                     }
