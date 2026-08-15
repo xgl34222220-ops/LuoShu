@@ -313,6 +313,51 @@ device_font_payload_build_install() {
     return 2
 }
 
+# A foreground switch must remain bounded. Static sources can be linked cheaply; a variable source
+# would require real instancing for nine weights and therefore stays on the background cache path.
+_dfpp_xml_prepare_is_cheap() {
+    type _luoshu_config_weight_source >/dev/null 2>&1 || return 1
+    type is_variable_font >/dev/null 2>&1 || return 0
+    _dfpp_seen='|'
+    for _dfpp_w in 100 200 300 400 500 600 700 800 900; do
+        _dfpp_src=$(_luoshu_config_weight_source "$_dfpp_w" 2>/dev/null)
+        [ -n "$_dfpp_src" ] || return 1
+        case "$_dfpp_seen" in *"|$_dfpp_src|"*) continue ;; esac
+        _dfpp_seen="${_dfpp_seen}${_dfpp_src}|"
+        if is_variable_font "$_dfpp_src"; then
+            _device_font_policy_log "字重来源为可变字体，前台跳过 XML 家族覆盖以免长时间卡顿：$_dfpp_src"
+            return 1
+        fi
+    done
+    return 0
+}
+
+# font_config_generate can succeed with dynamic file aliases only. That fallback is useful, but it
+# is not proof of XML coverage and must not cancel the background device-aligned cache build.
+_dfpp_xml_overlay_active() {
+    _dfpp_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+    _dfpp_config="${CONFIG_DIR:-$_dfpp_module/config}"
+    _dfpp_state="$_dfpp_config/font-config-overlay.conf"
+    [ -s "$_dfpp_state" ] || return 1
+    grep -qx 'mode=enabled' "$_dfpp_state" 2>/dev/null || return 1
+    _dfpp_expected=$(sed -n 's/^configs=//p' "$_dfpp_state" 2>/dev/null | head -n1)
+    case "$_dfpp_expected" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$_dfpp_expected" -gt 0 ] || return 1
+    type _luoshu_font_config_specs >/dev/null 2>&1 || return 1
+    _dfpp_seen_xml=0
+    while IFS='|' read -r _dfpp_key _dfpp_real _dfpp_overlay _dfpp_fonts; do
+        [ -s "$_dfpp_overlay" ] || continue
+        grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\.ttf' "$_dfpp_overlay" 2>/dev/null || continue
+        if type _luoshu_font_config_validate >/dev/null 2>&1; then
+            _luoshu_font_config_validate "$_dfpp_overlay" "$_dfpp_fonts" || return 1
+        fi
+        _dfpp_seen_xml=$((_dfpp_seen_xml + 1))
+    done <<EOF_DFPP_XML
+$(_luoshu_font_config_specs)
+EOF_DFPP_XML
+    [ "$_dfpp_seen_xml" -eq "$_dfpp_expected" ]
+}
+
 font_config_enable_for_payload() {
     _dfpp_family="${1:-unknown}"
     LUOSHU_DEVICE_PAYLOAD_RESULT='preparing'
@@ -332,23 +377,51 @@ font_config_enable_for_payload() {
             ;;
     esac
 
-    # Keep the physical ROM aliases prepared by the quick mapper and remove only stale v2/XML state.
+    # A device-cache miss is not a reason to abandon the no-hook XML family overlay. Keep OEM
+    # quick-map aliases intact while trying the bounded static path.
     _dfpp_preserve="${LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE:-0}"
     LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE=1
     export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
-    if type font_config_disable >/dev/null 2>&1; then
+
+    _dfpp_xml=0
+    if type font_config_prepare_payload_weights >/dev/null 2>&1 && \
+       type font_config_generate >/dev/null 2>&1 && \
+       _dfpp_xml_prepare_is_cheap; then
+        if font_config_prepare_payload_weights; then
+            if font_config_generate "$_dfpp_family"; then
+                if _dfpp_xml_overlay_active; then
+                    _dfpp_xml=1
+                else
+                    _device_font_policy_log "字体配置返回成功但未提交有效 XML，继续安排后台设备对齐缓存：$_dfpp_family"
+                fi
+            else
+                _device_font_policy_log "XML 家族覆盖生成失败，回退物理槽映射：$_dfpp_family"
+            fi
+        else
+            _device_font_policy_log "九档静态字体准备失败，跳过 XML 家族覆盖：$_dfpp_family"
+        fi
+    fi
+
+    if [ "$_dfpp_xml" -ne 1 ] && type font_config_disable >/dev/null 2>&1; then
         font_config_disable >/dev/null 2>&1 || true
     fi
     LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE="$_dfpp_preserve"
     export LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE
 
+    [ "${IS_COLOROS:-false}" != true ] || LUOSHU_COLOROS_TARGETS_MAPPED=1
+    export LUOSHU_COLOROS_TARGETS_MAPPED
+
+    if [ "$_dfpp_xml" -eq 1 ]; then
+        LUOSHU_DEVICE_PAYLOAD_RESULT='legacy'
+        _device_font_policy_log "已启用无 Hook XML 家族覆盖（含等宽），未安排重复的后台对齐缓存：$_dfpp_family"
+        return 0
+    fi
+
     # Scheduling is metadata-only. The expensive builder runs after the foreground transaction.
     if type device_font_cache_schedule >/dev/null 2>&1; then
         device_font_cache_schedule "$_dfpp_family" >/dev/null 2>&1 || true
     fi
-    [ "${IS_COLOROS:-false}" != true ] || LUOSHU_COLOROS_TARGETS_MAPPED=1
-    export LUOSHU_COLOROS_TARGETS_MAPPED
     LUOSHU_DEVICE_PAYLOAD_RESULT='slot-only'
-    _device_font_policy_log "前台已完成常量时间物理槽映射；后台对齐缓存按条件安排：$_dfpp_family"
+    _device_font_policy_log "前台保留物理槽映射；后台对齐缓存按条件安排：$_dfpp_family"
     return 0
 }

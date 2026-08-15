@@ -171,4 +171,61 @@ for overlay in \
     test ! -e "$overlay"
 done
 
+
+
+mk_weights() {
+    mkdir -p "$MOD/system/fonts"
+    for _prefix in LuoShu LuoShuMono; do
+        for _weight in 100 200 300 400 500 600 700 800 900; do
+            dd if=/dev/zero of="$MOD/system/fonts/${_prefix}-${_weight}.ttf" bs=2048 count=1 2>/dev/null
+            chmod 0644 "$MOD/system/fonts/${_prefix}-${_weight}.ttf"
+        done
+    done
+}
+font_config_disable
+mk_weights
+cat > "$PRODUCT_ETC/hihonor_magic_fonts.xml" <<'XML'
+<familyset>
+  <family name="honor-sans"><font weight="400">HonorSans-Regular.ttf</font></family>
+  <family name="honor-icons"><font weight="400">HonorIcons.ttf</font></family>
+</familyset>
+XML
+cat > "$PRODUCT_ETC/ACME_FONT_CONFIG.xml" <<'XML'
+<familyset>
+  <family name="sans-serif"><font weight="500">AcmeSans-Medium.ttf</font></family>
+</familyset>
+XML
+font_config_generate DemoFamily
+test -s "$MOD/product/etc/hihonor_magic_fonts.xml"
+grep -q 'LuoShu-400.ttf' "$MOD/product/etc/hihonor_magic_fonts.xml"
+grep -q 'HonorIcons.ttf' "$MOD/product/etc/hihonor_magic_fonts.xml"
+test -s "$MOD/product/etc/ACME_FONT_CONFIG.xml"
+grep -q 'LuoShu-500.ttf' "$MOD/product/etc/ACME_FONT_CONFIG.xml"
+test "$(_luoshu_font_config_specs | sort | uniq -d | wc -l)" -eq 0
+
+# One unusable overlay partition does not veto validated XML from the others.
+font_config_disable
+mk_weights
+rm -rf "$MOD/odm"
+: > "$MOD/odm"
+font_config_generate DemoFamily
+test -s "$MOD/system/etc/fonts.xml"
+grep -q 'LuoShu-400.ttf' "$MOD/system/etc/fonts.xml"
+test -s "$MOD/product/etc/mi_fonts_customization.xml"
+test ! -e "$MOD/odm/etc/fonts_customization.xml"
+rm -f "$MOD/odm"
+
+# Missing master weights are a global XML failure.
+font_config_disable
+mk_weights
+rm -f "$MOD/system/fonts/LuoShuMono-500.ttf"
+if _luoshu_font_config_generate_base DemoFamily; then
+    echo 'XML overlay unexpectedly generated without a complete nine-weight set' >&2
+    exit 1
+fi
+test ! -e "$MOD/system/etc/fonts.xml"
+test ! -e "$MOD/product/etc/mi_fonts_customization.xml"
+test ! -e "$MOD/product/etc/hihonor_magic_fonts.xml"
+test ! -e "$MOD/product/etc/ACME_FONT_CONFIG.xml"
+
 printf 'Font configuration runtime tests passed.\n'

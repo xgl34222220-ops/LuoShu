@@ -179,11 +179,33 @@ luoshu_payload_validate_current() {
         done
     done
     [ "$_lpv_fonts" -gt 0 ] || return 1
-    _lpv_targets=$(sed -n 's/^targets=//p' "$_lpv_config/font-target-coverage.conf" 2>/dev/null | head -n1)
-    _lpv_mapped=$(sed -n 's/^mapped=//p' "$_lpv_config/font-target-coverage.conf" 2>/dev/null | head -n1)
-    case "$_lpv_targets" in ''|*[!0-9]*) _lpv_targets=0 ;; esac
-    case "$_lpv_mapped" in ''|*[!0-9]*) _lpv_mapped=0 ;; esac
-    [ "$_lpv_targets" -eq "$_lpv_mapped" ] || return 1
+    _lpv_coverage="$_lpv_config/font-target-coverage.conf"
+    if [ -f "$_lpv_coverage" ]; then
+        _lpv_targets=$(sed -n 's/^targets=//p' "$_lpv_coverage" 2>/dev/null | head -n1)
+        _lpv_mapped=$(sed -n 's/^mapped=//p' "$_lpv_coverage" 2>/dev/null | head -n1)
+        _lpv_status=$(sed -n 's/^status=//p' "$_lpv_coverage" 2>/dev/null | head -n1)
+        case "$_lpv_targets" in ''|*[!0-9]*) return 1 ;; esac
+        case "$_lpv_mapped" in ''|*[!0-9]*) return 1 ;; esac
+        [ "$_lpv_mapped" -le "$_lpv_targets" ] || return 1
+        case "$_lpv_status" in
+            full) [ "$_lpv_mapped" -eq "$_lpv_targets" ] || return 1 ;;
+            partial) [ "$_lpv_mapped" -gt 0 ] && [ "$_lpv_mapped" -lt "$_lpv_targets" ] || return 1 ;;
+            '') [ "$_lpv_targets" -eq 0 ] || [ "$_lpv_mapped" -gt 0 ] || return 1 ;;
+            *) return 1 ;;
+        esac
+        _lpv_manifest="$_lpv_config/font-target-aliases.conf"
+        _lpv_manifest_count=$(awk 'NF { n++ } END { print n+0 }' "$_lpv_manifest" 2>/dev/null)
+        case "$_lpv_manifest_count" in ''|*[!0-9]*) return 1 ;; esac
+        [ "$_lpv_manifest_count" -eq "$_lpv_mapped" ] || return 1
+        while IFS='|' read -r _lpv_rel _lpv_key _lpv_weight _lpv_family; do
+            [ -n "$_lpv_rel" ] || continue
+            case "$_lpv_rel" in */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;; *) return 1 ;; esac
+            [ -f "$_lpv_module/$_lpv_rel" ] || return 1
+            if type _luoshu_fast_font_ok >/dev/null 2>&1; then
+                _luoshu_fast_font_ok "$_lpv_module/$_lpv_rel" || return 1
+            fi
+        done < "$_lpv_manifest"
+    fi
     while IFS='|' read -r _lpv_key _lpv_real _lpv_overlay _lpv_font_dir; do
         [ -f "$_lpv_overlay" ] || continue
         grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\.ttf' "$_lpv_overlay" 2>/dev/null || continue
