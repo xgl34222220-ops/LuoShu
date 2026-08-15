@@ -1,0 +1,630 @@
+#!/usr/bin/env python3
+from pathlib import Path
+
+
+def replace(path: str, old: str, new: str, count: int = 1) -> None:
+    p = Path(path)
+    text = p.read_text(encoding="utf-8")
+    actual = text.count(old)
+    if actual != count:
+        raise SystemExit(
+            f"{path}: expected {count} occurrence(s), found {actual}: {old[:100]!r}"
+        )
+    p.write_text(text.replace(old, new, count), encoding="utf-8")
+
+
+def patch_shell() -> None:
+    path = "android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
+    replace(
+        path,
+        "import androidx.compose.runtime.Composable\nimport androidx.compose.runtime.LaunchedEffect\n",
+        "import androidx.compose.runtime.Composable\nimport androidx.compose.runtime.CompositionLocalProvider\nimport androidx.compose.runtime.LaunchedEffect\n",
+    )
+    replace(
+        path,
+        "import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens\n",
+        "import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding\nimport io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens\n",
+    )
+    replace(
+        path,
+        """        val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val dockClearance = navigationBottom + when {
+            !appearance.floatingDock -> 70.dp
+            appearance.uiStyle == UiStyle.MIUIX && appearance.glassEnabled -> 34.dp
+            else -> 84.dp
+        }
+""",
+        """        val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val edgeToEdgeGlass = appearance.uiStyle == UiStyle.MIUIX &&
+            appearance.glassEnabled && appearance.floatingDock
+        // A floating glass dock overlays a full-height viewport. Lists own the trailing
+        // safe space so content can pass behind the glass yet still scroll fully clear.
+        val dockClearance = when {
+            edgeToEdgeGlass -> 0.dp
+            !appearance.floatingDock -> navigationBottom + 70.dp
+            else -> navigationBottom + 84.dp
+        }
+        val dockContentPadding = if (edgeToEdgeGlass) navigationBottom + 88.dp else 0.dp
+""",
+    )
+    replace(
+        path,
+        """                            HomeRoute(
+                                style = appearance.uiStyle,
+                                state = viewModel.snapshot.toHomeUiState(features.systemWeight),
+                                actions = homeActions,
+                            )
+""",
+        """                            CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
+                                HomeRoute(
+                                    style = appearance.uiStyle,
+                                    state = viewModel.snapshot.toHomeUiState(features.systemWeight),
+                                    actions = homeActions,
+                                )
+                            }
+""",
+    )
+    replace(
+        path,
+        """                            FontLibraryRoute(
+                                style = appearance.uiStyle,
+                                state = viewModel.toFontLibraryUiState(),
+                                actions = libraryActions,
+                                topActions = {
+                                    NativeImportOverlay(
+                                        viewModel = viewModel,
+                                        style = appearance.uiStyle,
+                                        modifier = Modifier.fillMaxWidth(),
+                                        embedded = true,
+                                    )
+                                },
+                            )
+""",
+        """                            CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
+                                FontLibraryRoute(
+                                    style = appearance.uiStyle,
+                                    state = viewModel.toFontLibraryUiState(),
+                                    actions = libraryActions,
+                                    topActions = {
+                                        NativeImportOverlay(
+                                            viewModel = viewModel,
+                                            style = appearance.uiStyle,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            embedded = true,
+                                        )
+                                    },
+                                )
+                            }
+""",
+    )
+    replace(
+        path,
+        """                            FontStudioRoute(
+                                style = appearance.uiStyle,
+                                state = viewModel.toFontStudioUiState(features),
+                                actions = studioActions,
+                            )
+""",
+        """                            CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
+                                FontStudioRoute(
+                                    style = appearance.uiStyle,
+                                    state = viewModel.toFontStudioUiState(features),
+                                    actions = studioActions,
+                                )
+                            }
+""",
+    )
+    replace(
+        path,
+        """                            LogsRoute(
+                                style = appearance.uiStyle,
+                                state = viewModel.toLogsUiState(),
+                                actions = logsActions,
+                            )
+""",
+        """                            CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
+                                LogsRoute(
+                                    style = appearance.uiStyle,
+                                    state = viewModel.toLogsUiState(),
+                                    actions = logsActions,
+                                )
+                            }
+""",
+    )
+
+    p = Path(path)
+    text = p.read_text(encoding="utf-8")
+    start = text.index("private fun MiuixAppDock(")
+    end = text.index("@Composable\nprivate fun AppDockLayout(", start)
+    dock = text[start:end]
+    changes = {
+        "blurRadius = 30.dp": "blurRadius = 24.dp",
+        "noiseFactor = .025f": "noiseFactor = .012f",
+        """                Color.White.copy(alpha = .10f),
+                tokens.elevatedCardBackground.copy(alpha = .08f),
+                scheme.primary.copy(alpha = .05f),""": """                Color.White.copy(alpha = .07f),
+                tokens.elevatedCardBackground.copy(alpha = .04f),
+                scheme.primary.copy(alpha = .035f),""",
+        """                Color.White.copy(alpha = .30f),
+                Color.White.copy(alpha = .10f),
+                scheme.primary.copy(alpha = .055f),""": """                Color.White.copy(alpha = .12f),
+                Color.White.copy(alpha = .035f),
+                scheme.primary.copy(alpha = .025f),""",
+        ".shadow(if (floating) if (activeGlass) 14.dp else 12.dp else 5.dp, shape, clip = false)": ".shadow(if (floating) if (activeGlass) 8.dp else 12.dp else 5.dp, shape, clip = false)",
+        """                                Color.White.copy(alpha = if (dark) .18f else .46f),
+                                Color.White.copy(alpha = if (dark) .06f else .14f),""": """                                Color.White.copy(alpha = if (dark) .14f else .20f),
+                                Color.White.copy(alpha = if (dark) .04f else .05f),""",
+        """                                scheme.primary.copy(alpha = if (dark) .11f else .085f),
+                                scheme.secondary.copy(alpha = if (dark) .045f else .035f),""": """                                scheme.primary.copy(alpha = if (dark) .08f else .07f),
+                                scheme.secondary.copy(alpha = if (dark) .03f else .025f),""",
+        """                                Color.White.copy(alpha = if (dark) .28f else .72f),
+                                Color.White.copy(alpha = if (dark) .08f else .18f),
+                                scheme.primary.copy(alpha = if (dark) .14f else .11f),""": """                                Color.White.copy(alpha = if (dark) .20f else .30f),
+                                Color.White.copy(alpha = if (dark) .05f else .08f),
+                                scheme.primary.copy(alpha = if (dark) .10f else .07f),""",
+        "color = Color.White.copy(alpha = if (dark) .20f else .52f)": "color = Color.White.copy(alpha = if (dark) .14f else .24f)",
+        "if (dark) Color.White.copy(alpha = .14f) else Color.White.copy(alpha = .42f)": "if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .20f)",
+        "Color.White.copy(alpha = if (dark) .08f else .18f)": "Color.White.copy(alpha = if (dark) .05f else .09f)",
+        "if (dark) Color.White.copy(alpha = .20f) else Color.White.copy(alpha = .48f)": "if (dark) Color.White.copy(alpha = .14f) else Color.White.copy(alpha = .28f)",
+    }
+    for old, new in changes.items():
+        actual = dock.count(old)
+        if actual != 1:
+            raise SystemExit(f"MiuixAppDock expected once, found {actual}: {old!r}")
+        dock = dock.replace(old, new, 1)
+    text = text[:start] + dock + text[end:]
+
+    layout_start = text.index("private fun AppDockLayout(")
+    layout = text[layout_start:]
+    lens_changes = {
+        """                                    Color.White.copy(alpha = .30f),
+                                    Color.White.copy(alpha = .08f),""": """                                    Color.White.copy(alpha = .18f),
+                                    Color.White.copy(alpha = .04f),""",
+        "colors = listOf(selectedColor.copy(alpha = .15f), Color.Transparent)": "colors = listOf(selectedColor.copy(alpha = .08f), Color.Transparent)",
+        "color = Color.White.copy(alpha = .32f)": "color = Color.White.copy(alpha = .16f)",
+    }
+    for old, new in lens_changes.items():
+        actual = layout.count(old)
+        if actual != 1:
+            raise SystemExit(f"AppDockLayout expected once, found {actual}: {old!r}")
+        layout = layout.replace(old, new, 1)
+    p.write_text(text[:layout_start] + layout, encoding="utf-8")
+
+
+def patch_dock_insets() -> None:
+    Path(
+        "android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/DockInsets.kt"
+    ).write_text(
+        """package io.github.xgl34222220.luoshu.ui.theme
+
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+
+/** Extra scroll range used only while the floating glass dock overlays page content. */
+internal val LocalDockContentPadding = staticCompositionLocalOf<Dp> { 0.dp }
+""",
+        encoding="utf-8",
+    )
+
+
+def patch_home() -> None:
+    path = "android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/HomeScreenCompact.kt"
+    replace(
+        path,
+        "import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens\n",
+        "import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding\nimport io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens\n",
+    )
+    replace(
+        path,
+        "    val miuix = style == UiStyle.MIUIX\n    val tokens = LocalMiuixTokens.current\n",
+        "    val miuix = style == UiStyle.MIUIX\n    val dockBottomPadding = maxOf(LocalDockContentPadding.current, 24.dp)\n    val tokens = LocalMiuixTokens.current\n",
+    )
+    replace(
+        path,
+        "contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 24.dp)",
+        "contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = dockBottomPadding)",
+    )
+    replace(
+        path,
+        """        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatusCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Rounded.Security,
+                    title = "Root",
+                    value = if (state.rootGranted) state.rootManager else "未授权",
+                    healthy = state.rootGranted,
+                    cardColor = cardColor,
+                    textPrimary = textPrimary,
+                    textSecondary = textSecondary,
+                )
+                StatusCard(
+                    modifier = Modifier.weight(1f),
+                    icon = Icons.Rounded.Layers,
+                    title = "挂载引擎",
+                    value = state.mountEngine,
+                    healthy = state.mountHealthy,
+                    cardColor = cardColor,
+                    textPrimary = textPrimary,
+                    textSecondary = textSecondary,
+                )
+            }
+        }
+""",
+        """        item {
+            Card(
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = cardColor),
+                elevation = CardDefaults.cardElevation(defaultElevation = if (miuix) 3.dp else 1.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CompactStatusCell(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Rounded.Security,
+                        title = "Root",
+                        value = if (state.rootGranted) state.rootManager else "未授权",
+                        healthy = state.rootGranted,
+                        textPrimary = textPrimary,
+                        textSecondary = textSecondary,
+                    )
+                    Box(Modifier.width(1.dp).height(40.dp).background(textSecondary.copy(alpha = .12f)))
+                    CompactStatusCell(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Rounded.Layers,
+                        title = "挂载",
+                        value = state.mountEngine,
+                        healthy = state.mountHealthy,
+                        textPrimary = textPrimary,
+                        textSecondary = textSecondary,
+                    )
+                }
+            }
+        }
+""",
+    )
+    replace(
+        path,
+        """@Composable
+private fun StatusCard(
+    modifier: Modifier,
+    icon: ImageVector,
+    title: String,
+    value: String,
+    healthy: Boolean,
+    cardColor: Color,
+    textPrimary: Color,
+    textSecondary: Color,
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = cardColor),
+    ) {
+        Column(Modifier.padding(15.dp)) {
+            LuoShuGlyph(
+                imageVector = icon,
+                contentDescription = null,
+                size = LuoShuIconTokens.StatusGlyph,
+                opticalScale = homeOpticalScale(icon),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(Modifier.height(10.dp))
+            Text(title, color = textSecondary, fontSize = 11.sp)
+            Text(
+                value,
+                color = textPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (healthy) "正常" else "需要检查",
+                color = if (healthy) Color(0xFF21966C) else MaterialTheme.colorScheme.error,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+""",
+        """@Composable
+private fun CompactStatusCell(
+    modifier: Modifier,
+    icon: ImageVector,
+    title: String,
+    value: String,
+    healthy: Boolean,
+    textPrimary: Color,
+    textSecondary: Color,
+) {
+    val accent = if (healthy) Color(0xFF21966C) else MaterialTheme.colorScheme.error
+    Row(
+        modifier = modifier.padding(horizontal = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Surface(
+            modifier = Modifier.size(36.dp),
+            shape = RoundedCornerShape(13.dp),
+            color = accent.copy(alpha = .09f),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                LuoShuGlyph(
+                    imageVector = icon,
+                    contentDescription = null,
+                    size = LuoShuIconTokens.SectionGlyph,
+                    opticalScale = homeOpticalScale(icon),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                value,
+                color = textPrimary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Black,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "$title · ${if (healthy) "正常" else "需检查"}",
+                color = if (healthy) textSecondary else accent,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+            )
+        }
+    }
+}
+""",
+    )
+
+
+def patch_compact_padding(path: str, default_bottom: int, top: int) -> None:
+    replace(
+        path,
+        "import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens\n",
+        "import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding\nimport io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens\n",
+    )
+    replace(
+        path,
+        "    val miuix = style == UiStyle.MIUIX\n    val tokens = LocalMiuixTokens.current\n",
+        f"    val miuix = style == UiStyle.MIUIX\n    val dockBottomPadding = maxOf(LocalDockContentPadding.current, {default_bottom}.dp)\n    val tokens = LocalMiuixTokens.current\n",
+    )
+    replace(
+        path,
+        f"contentPadding = PaddingValues(start = 16.dp, top = {top}.dp, end = 16.dp, bottom = {default_bottom}.dp)",
+        f"contentPadding = PaddingValues(start = 16.dp, top = {top}.dp, end = 16.dp, bottom = dockBottomPadding)",
+    )
+
+
+def patch_studio() -> None:
+    path = "android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/studio/FontStudioScreenMiuix.kt"
+    replace(
+        path,
+        "import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens\n",
+        "import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding\nimport io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens\n",
+    )
+    replace(
+        path,
+        """internal fun FontStudioScreenMiuix(
+    state: FontStudioUiState,
+    actions: FontStudioActions,
+    topAction: @Composable () -> Unit,
+) {
+    LazyColumn(
+""",
+        """internal fun FontStudioScreenMiuix(
+    state: FontStudioUiState,
+    actions: FontStudioActions,
+    topAction: @Composable () -> Unit,
+) {
+    val dockBottomPadding = maxOf(LocalDockContentPadding.current, 24.dp)
+    LazyColumn(
+""",
+    )
+    replace(
+        path,
+        "contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp)",
+        "contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = dockBottomPadding)",
+    )
+
+
+def patch_mount_labels() -> None:
+    bridge = "common/app_bridge.sh"
+    replace(
+        bridge,
+        """mount_engine() {
+    if type luoshu_detect_mount_engine >/dev/null 2>&1; then
+        case "$(luoshu_detect_mount_engine)" in
+            magic-mount|magic-mount-rs) printf 'Magic Mount' ;;
+            mountify) printf 'Mountify' ;;
+            meta-overlayfs|dual-dir-metamodule) printf 'Meta OverlayFS' ;;
+            hybrid-mount) printf 'Hybrid Mount' ;;
+            *) printf '原生模块挂载' ;;
+        esac
+        return
+    fi
+    printf '原生模块挂载'
+}
+""",
+        """mount_engine() {
+    if type luoshu_detect_mount_engine >/dev/null 2>&1; then
+        case "$(luoshu_detect_mount_engine)" in
+            self-mount) printf '洛书自挂载' ;;
+            magic-mount|magic-mount-rs) printf 'Magic Mount' ;;
+            mountify) printf 'Mountify' ;;
+            meta-overlayfs|dual-dir-metamodule) printf 'Meta OverlayFS' ;;
+            hybrid-mount) printf 'Hybrid Mount' ;;
+            native-module-mount) printf 'Root 原生挂载' ;;
+            *) printf '洛书自挂载' ;;
+        esac
+        return
+    fi
+    printf '洛书自挂载'
+}
+""",
+    )
+
+    settings = "android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/settings/SettingsHubScreen.kt"
+    replace(
+        settings,
+        'InfoLine("挂载", listOf(h.mountEngine, h.selfMountBackend).filter { it.isNotBlank() && it != "unknown" }.joinToString(" · ").ifBlank { "待检测" })',
+        'InfoLine("挂载", mountSummary(h))',
+    )
+    replace(
+        settings,
+        'InfoLine("自挂载", listOf(h.selfMountState, h.selfMountBackend).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "待确认" })',
+        'InfoLine("自挂载", selfMountSummary(h))',
+    )
+    replace(
+        settings,
+        """                if (h.cachePending) add("设备字体缓存仍在等待完成")
+                if (h.conflicts.isNotEmpty()) add("发现 ${h.conflicts.size} 个其它模块字体覆盖目标")
+""",
+        """                if (h.cachePending) add("设备字体缓存仍在等待完成")
+                if (h.selfMountState == "degraded") add("洛书自挂载正在使用 OverlayFS + Bind 降级路径")
+                if (h.conflicts.isNotEmpty()) add("发现 ${h.conflicts.size} 个其它模块字体覆盖目标")
+""",
+    )
+    replace(
+        settings,
+        """@Composable
+private fun InfoLine(label: String, value: String) = Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+""",
+        """private fun mountEngineLabel(value: String): String = when (value) {
+    "self-mount" -> "洛书自挂载"
+    "native-module-mount" -> "Root 原生挂载"
+    "meta-overlayfs", "dual-dir-metamodule" -> "Meta OverlayFS"
+    "hybrid-mount" -> "Hybrid Mount"
+    "magic-mount", "magic-mount-rs" -> "Magic Mount"
+    "mountify" -> "Mountify"
+    "unknown", "" -> ""
+    else -> value
+}
+
+private fun mountBackendLabel(value: String): String = when (value) {
+    "self-overlay" -> "OverlayFS"
+    "self-overlay-bind" -> "OverlayFS + Bind"
+    "self-existing", "external-mount" -> "已接管"
+    "overlayfs" -> "OverlayFS"
+    "magic-mount" -> "Magic Mount"
+    "mountify" -> "Mountify"
+    "none", "unknown", "" -> ""
+    else -> value
+}
+
+private fun mountStateLabel(value: String): String = when (value) {
+    "mounted" -> "已挂载"
+    "degraded" -> "降级"
+    "failed" -> "失败"
+    "idle" -> "待命"
+    "unknown", "" -> ""
+    else -> value
+}
+
+private fun mountSummary(state: SystemHealthSnapshot): String = listOf(
+    mountEngineLabel(state.mountEngine),
+    mountBackendLabel(state.selfMountBackend),
+).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "待检测" }
+
+private fun selfMountSummary(state: SystemHealthSnapshot): String = listOf(
+    mountStateLabel(state.selfMountState),
+    mountBackendLabel(state.selfMountBackend),
+).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "待确认" }
+
+@Composable
+private fun InfoLine(label: String, value: String) = Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+""",
+    )
+
+
+def patch_regression() -> None:
+    path = "scripts/font_library_ui_layout_test.sh"
+    replace(
+        path,
+        'ICON_SYSTEM="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"\n',
+        'ICON_SYSTEM="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"\nDOCK_INSETS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/DockInsets.kt"\nAPP_BRIDGE="$ROOT/common/app_bridge.sh"\n',
+    )
+    replace(
+        path,
+        'grep -q \'bottom = 24.dp\' "$STUDIO_MIUIX"\ngrep -q \'bottom = 24.dp\' "$STUDIO_MATERIAL"\n',
+        'grep -q \'maxOf(LocalDockContentPadding.current, 24.dp)\' "$STUDIO_MIUIX"\ngrep -q \'bottom = 24.dp\' "$STUDIO_MATERIAL"\n',
+    )
+    replace(
+        path,
+        """[ "$(grep -c 'padding(bottom = dockClearance)' "$SHELL")" -eq 4 ]
+grep -q 'appearance.uiStyle == UiStyle.MIUIX && appearance.glassEnabled -> 34.dp' "$SHELL"
+grep -q 'else -> 84.dp' "$SHELL"
+""",
+        """[ "$(grep -c 'padding(bottom = dockClearance)' "$SHELL")" -eq 4 ]
+grep -q 'val edgeToEdgeGlass = appearance.uiStyle == UiStyle.MIUIX' "$SHELL"
+grep -q 'edgeToEdgeGlass -> 0.dp' "$SHELL"
+grep -q 'navigationBottom + 88.dp' "$SHELL"
+[ "$(grep -c 'LocalDockContentPadding provides dockContentPadding' "$SHELL")" -eq 4 ]
+grep -q 'LocalDockContentPadding' "$DOCK_INSETS"
+""",
+    )
+    replace(
+        path,
+        """printf '%s\\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 30.dp'
+printf '%s\\n' "$MIUIX_DOCK" | grep -q 'noiseFactor = .025f'
+printf '%s\\n' "$MIUIX_DOCK" | grep -q 'RoundedCornerShape(31.dp)'
+printf '%s\\n' "$MIUIX_DOCK" | grep -q 'activeGlass'
+printf '%s\\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .30f)'
+""",
+        """printf '%s\\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 24.dp'
+printf '%s\\n' "$MIUIX_DOCK" | grep -q 'noiseFactor = .012f'
+printf '%s\\n' "$MIUIX_DOCK" | grep -q 'RoundedCornerShape(31.dp)'
+printf '%s\\n' "$MIUIX_DOCK" | grep -q 'activeGlass'
+printf '%s\\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .12f)'
+""",
+    )
+    replace(
+        path,
+        'grep -q \'bottom = 24.dp\' "$HOME_COMPACT"\ngrep -q \'bottom = 24.dp\' "$LOGS_COMPACT"\n',
+        'grep -q \'maxOf(LocalDockContentPadding.current, 24.dp)\' "$HOME_COMPACT"\ngrep -q \'maxOf(LocalDockContentPadding.current, 28.dp)\' "$COMPACT"\ngrep -q \'maxOf(LocalDockContentPadding.current, 24.dp)\' "$LOGS_COMPACT"\ngrep -q \'CompactStatusCell\' "$HOME_COMPACT"\ngrep -q "self-mount) printf \'洛书自挂载\'" "$APP_BRIDGE"\ngrep -q \'mountSummary(h)\' "$SETTINGS"\ngrep -q \'selfMountSummary(h)\' "$SETTINGS"\n',
+    )
+    p = Path(path)
+    text = p.read_text(encoding="utf-8")
+    needle = "! printf '%s\\n' \"$MIUIX_DOCK\" | grep -q 'blurRadius = 36.dp'\n"
+    if text.count(needle) != 1:
+        raise SystemExit("regression test: blur guard anchor missing")
+    text = text.replace(
+        needle,
+        needle
+        + "! printf '%s\\n' \"$MIUIX_DOCK\" | grep -q 'blurRadius = 30.dp'\n"
+        + "! grep -q -- '-> 34.dp' \"$SHELL\"\n",
+        1,
+    )
+    p.write_text(text, encoding="utf-8")
+
+
+def main() -> None:
+    patch_dock_insets()
+    patch_shell()
+    patch_home()
+    patch_compact_padding(
+        "android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/library/FontLibraryScreenCompact.kt",
+        28,
+        10,
+    )
+    patch_studio()
+    patch_compact_padding(
+        "android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenCompact.kt",
+        24,
+        8,
+    )
+    patch_mount_labels()
+    patch_regression()
+    print("MIUIX edge-to-edge polish patch applied")
+
+
+if __name__ == "__main__":
+    main()
