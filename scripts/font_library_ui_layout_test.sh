@@ -33,7 +33,7 @@ grep -q 'HomeScreenCompact' "$HOME_ROUTE"
 grep -q 'LogsScreenCompact' "$LOGS_ROUTE"
 
 # Font library: management tools are collapsed, the card itself opens details,
-# preview glyphs use one Aa12 contract, and detail viewing is a large preview sheet.
+# preview glyphs use one Aa12 contract, and detail viewing is a stable large preview sheet.
 grep -q 'var showTools' "$COMPACT"
 grep -q 'Text(if (showTools) "收起管理" else "管理")' "$COMPACT"
 grep -q 'CompactFontRow' "$COMPACT"
@@ -46,6 +46,11 @@ grep -q 'FontLibraryBadge' "$COMPACT"
 grep -q 'fontPrimaryBadge' "$COMPACT"
 ! grep -q 'height(102.dp)' "$COMPACT"
 grep -q 'ModalBottomSheet' "$DETAILS"
+grep -q 'sheetGesturesEnabled = false' "$DETAILS"
+grep -q 'fillMaxHeight(0.94f)' "$DETAILS"
+grep -q 'dragHandle = null' "$DETAILS"
+grep -q 'detailScrollState.scrollTo(0)' "$DETAILS"
+! grep -q 'heightIn(max = 760.dp)' "$DETAILS"
 grep -q 'FontPreviewMode' "$DETAILS"
 grep -q 'PreviewModeChip' "$DETAILS"
 grep -q '花间一壶酒' "$DETAILS"
