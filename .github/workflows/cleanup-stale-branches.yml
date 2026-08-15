@@ -1,0 +1,38 @@
+name: Cleanup stale branches
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/cleanup-stale-branches.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete obsolete branches
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branches=(
+            'feat/safety-update-presets'
+            'feat/ui-polish-v2.5.1'
+            'ops/v250-finalize-temp'
+            'release/v2.5.1'
+            'release/v2.5.2-tmp'
+            'release/v2.5.2-work'
+            'release/v2.5.2'
+            'release/v2.5.3-ui-consistency'
+            'release/v2.5.4-font-library'
+          )
+
+          for branch in "${branches[@]}"; do
+            echo "Deleting $branch"
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${branch}"
+          done
