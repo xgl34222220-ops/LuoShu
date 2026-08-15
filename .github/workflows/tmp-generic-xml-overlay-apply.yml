@@ -26,6 +26,9 @@ jobs:
           python3 .github/tmp/apply_generic_xml_overlay.py
           cp -f .github/tmp/device_font_payload_bridge_test.new.sh scripts/device_font_payload_bridge_test.sh
           chmod 0755 scripts/device_font_payload_bridge_test.sh
+          # Uppercase filename discovery should be tested with a family that the existing safe
+          # overlay policy intentionally rewrites; arbitrary OEM family names must stay untouched.
+          sed -i 's/<family name="acme-sans">/<family name="sans-serif">/' scripts/font_config_runtime_test.sh
 
       - name: Shell syntax checks
         run: |
