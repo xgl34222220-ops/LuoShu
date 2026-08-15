@@ -32,7 +32,7 @@ jobs:
           p = Path('scripts/generic_xml_partial_coverage_test.sh')
           s = p.read_text()
           old = '''. "$ROOT/common/font_safety.sh"\nset -eu\n_luoshu_font_config_specs() {\n'''
-          new = '''. "$ROOT/common/font_safety.sh"\nset -eu\nmkdir -p "$TMP/real-fonts"\nprintf 'stock-good\\n' > "$TMP/real-fonts/Good.ttf"\nprintf 'stock-bad\\n' > "$TMP/real-fonts/Bad.ttf"\n_luoshu_font_real_path() { printf '%s/%s\\n' "$TMP/real-fonts" "$1"; }\n_luoshu_font_config_specs() {\n'''
+          new = '''. "$ROOT/common/font_safety.sh"\nset -eu\nmkdir -p "$TMP/real-fonts" "$MOD/common"\nprintf 'stock-good\\n' > "$TMP/real-fonts/Good.ttf"\nprintf 'stock-bad\\n' > "$TMP/real-fonts/Bad.ttf"\n: > "$MOD/common/font_config_targets.py"\n_luoshu_font_real_path() { printf '%s/%s\\n' "$TMP/real-fonts" "$1"; }\n_luoshu_font_config_specs() {\n'''
           if s.count(old) != 1:
               raise SystemExit('partial coverage fixture anchor mismatch')
           p.write_text(s.replace(old, new, 1))
