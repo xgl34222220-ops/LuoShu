@@ -28,7 +28,7 @@ jobs:
           git diff --check
           sh -n common/app_bridge.sh
           sh scripts/font_library_ui_layout_test.sh
-          sh scripts/check.sh
+          sh -x scripts/check.sh
 
       - uses: actions/setup-java@v4
         with:
