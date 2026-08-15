@@ -29,6 +29,18 @@ jobs:
           # Uppercase filename discovery should be tested with a family that the existing safe
           # overlay policy intentionally rewrites; arbitrary OEM family names must stay untouched.
           sed -i 's/<family name="acme-sans">/<family name="sans-serif">/' scripts/font_config_runtime_test.sh
+          # Partial-coverage test needs real OEM source files. Keep them inside the fixture rather
+          # than touching the runner's /system tree, then override the path resolver used at runtime.
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/generic_xml_partial_coverage_test.sh')
+          s = p.read_text()
+          old = '''. "$ROOT/common/font_safety.sh"\nset -eu\n_luoshu_font_config_specs() {\n'''
+          new = '''. "$ROOT/common/font_safety.sh"\nset -eu\nmkdir -p "$TMP/real-fonts"\nprintf 'stock-good\\n' > "$TMP/real-fonts/Good.ttf"\nprintf 'stock-bad\\n' > "$TMP/real-fonts/Bad.ttf"\n_luoshu_font_real_path() { printf '%s/%s\\n' "$TMP/real-fonts" "$1"; }\n_luoshu_font_config_specs() {\n'''
+          if s.count(old) != 1:
+              raise SystemExit('partial coverage fixture anchor mismatch')
+          p.write_text(s.replace(old, new, 1))
+          PY
 
       - name: Shell syntax checks
         run: |
@@ -49,13 +61,13 @@ jobs:
           sh scripts/device_font_payload_policy_test.sh
           sh scripts/device_font_payload_bridge_test.sh
 
-      - name: Trace transactional XML runtime test
-        run: sh -x scripts/font_config_runtime_test.sh
+      - name: Run transactional XML runtime test
+        run: sh scripts/font_config_runtime_test.sh
 
       - name: Run partial coverage and safety tests
         run: |
-          sh -x scripts/font_safety_test.sh
-          sh -x scripts/generic_xml_partial_coverage_test.sh
+          sh scripts/font_safety_test.sh
+          sh scripts/generic_xml_partial_coverage_test.sh
 
       - name: Commit verified source only
         run: |
