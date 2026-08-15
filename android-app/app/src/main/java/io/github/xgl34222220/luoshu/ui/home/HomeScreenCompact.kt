@@ -52,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
@@ -65,6 +66,7 @@ internal fun HomeScreenCompact(
     trustContent: @Composable () -> Unit,
 ) {
     val miuix = style == UiStyle.MIUIX
+    val dockBottomPadding = maxOf(LocalDockContentPadding.current, 24.dp)
     val tokens = LocalMiuixTokens.current
     val cardColor = if (miuix) tokens.cardBackground else MaterialTheme.colorScheme.surfaceContainerLow
     val elevatedColor = if (miuix) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surfaceContainerHigh
@@ -74,7 +76,7 @@ internal fun HomeScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = dockBottomPadding),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
@@ -238,27 +240,35 @@ internal fun HomeScreenCompact(
         }
 
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                StatusCard(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Rounded.Security,
-                    title = "Root",
-                    value = if (state.rootGranted) state.rootManager else "未授权",
-                    healthy = state.rootGranted,
-                    cardColor = cardColor,
-                    textPrimary = textPrimary,
-                    textSecondary = textSecondary,
-                )
-                StatusCard(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Rounded.Layers,
-                    title = "挂载引擎",
-                    value = state.mountEngine,
-                    healthy = state.mountHealthy,
-                    cardColor = cardColor,
-                    textPrimary = textPrimary,
-                    textSecondary = textSecondary,
-                )
+            Card(
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = cardColor),
+                elevation = CardDefaults.cardElevation(defaultElevation = if (miuix) 3.dp else 1.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CompactStatusCell(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Rounded.Security,
+                        title = "Root",
+                        value = if (state.rootGranted) state.rootManager else "未授权",
+                        healthy = state.rootGranted,
+                        textPrimary = textPrimary,
+                        textSecondary = textSecondary,
+                    )
+                    Box(Modifier.width(1.dp).height(40.dp).background(textSecondary.copy(alpha = .12f)))
+                    CompactStatusCell(
+                        modifier = Modifier.weight(1f),
+                        icon = Icons.Rounded.Layers,
+                        title = "挂载",
+                        value = state.mountEngine,
+                        healthy = state.mountHealthy,
+                        textPrimary = textPrimary,
+                        textSecondary = textSecondary,
+                    )
+                }
             }
         }
 
@@ -443,44 +453,51 @@ private fun HeaderAction(
 }
 
 @Composable
-private fun StatusCard(
+private fun CompactStatusCell(
     modifier: Modifier,
     icon: ImageVector,
     title: String,
     value: String,
     healthy: Boolean,
-    cardColor: Color,
     textPrimary: Color,
     textSecondary: Color,
 ) {
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = cardColor),
+    val accent = if (healthy) Color(0xFF21966C) else MaterialTheme.colorScheme.error
+    Row(
+        modifier = modifier.padding(horizontal = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.padding(15.dp)) {
-            LuoShuGlyph(
-                imageVector = icon,
-                contentDescription = null,
-                size = LuoShuIconTokens.StatusGlyph,
-                opticalScale = homeOpticalScale(icon),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(title, color = textSecondary, fontSize = 11.sp)
+        Surface(
+            modifier = Modifier.size(36.dp),
+            shape = RoundedCornerShape(13.dp),
+            color = accent.copy(alpha = .09f),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                LuoShuGlyph(
+                    imageVector = icon,
+                    contentDescription = null,
+                    size = LuoShuIconTokens.SectionGlyph,
+                    opticalScale = homeOpticalScale(icon),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
             Text(
                 value,
                 color = textPrimary,
-                fontSize = 15.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Black,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                if (healthy) "正常" else "需要检查",
-                color = if (healthy) Color(0xFF21966C) else MaterialTheme.colorScheme.error,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
+                "$title · ${if (healthy) "正常" else "需检查"}",
+                color = if (healthy) textSecondary else accent,
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
             )
         }
     }

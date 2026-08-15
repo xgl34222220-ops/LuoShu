@@ -169,6 +169,18 @@ _luoshu_font_config_generate_base() {
     _lfc_tool="$_lfc_module/common/font_config_overlay.py"
     _lfc_stage="$_lfc_config/font-config-stage.$$"
     font_config_capture_original || return 1
+
+    # Weight availability is a global invariant. Never publish XML that references a half-built
+    # family merely because one partition happens to be writable.
+    for _lfc_prefix in LuoShu LuoShuMono; do
+        for _lfc_weight in 100 200 300 400 500 600 700 800 900; do
+            [ -s "$_lfc_module/system/fonts/${_lfc_prefix}-${_lfc_weight}.ttf" ] || {
+                _luoshu_font_config_disable_base
+                return 1
+            }
+        done
+    done
+
     mkdir -p "$_lfc_stage" 2>/dev/null || return 1
 
     _lfc_changed=0
@@ -184,19 +196,22 @@ _luoshu_font_config_generate_base() {
             [ -s "$_lfc_output" ] && _luoshu_font_config_validate "$_lfc_output" "$_lfc_fonts"; then
             _lfc_changed=$((_lfc_changed + 1))
         else
+            _lfc_failed=$((_lfc_failed + 1))
             rm -f "$_lfc_output" 2>/dev/null || true
         fi
     done <<EOF_LUOSHU_FONT_CONFIG
 $(_luoshu_font_config_specs)
 EOF_LUOSHU_FONT_CONFIG
 
-    if [ "$_lfc_changed" -eq 0 ] || [ "$_lfc_failed" -gt 0 ]; then
+    if [ "$_lfc_changed" -eq 0 ]; then
         rm -rf "$_lfc_stage" 2>/dev/null || true
         _luoshu_font_config_disable_base
         return 1
     fi
+    [ "$_lfc_failed" -eq 0 ] || _luoshu_font_config_log WARN \
+        "部分分区未能生成字体别名，已按通过校验的可用分区提交 XML 覆盖：ok=$_lfc_changed failed=$_lfc_failed"
 
-    # Commit only after every generated document and every referenced font has validated.
+    # Commit only independently generated documents whose referenced aliases already validated.
     while IFS='|' read -r _lfc_key _lfc_real _lfc_overlay _lfc_fonts; do
         _lfc_ready="$_lfc_stage/$_lfc_key"
         if [ -s "$_lfc_ready" ]; then

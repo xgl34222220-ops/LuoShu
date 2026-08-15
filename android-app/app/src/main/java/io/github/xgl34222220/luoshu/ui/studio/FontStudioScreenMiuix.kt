@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
+import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import kotlin.math.roundToInt
@@ -61,9 +62,10 @@ internal fun FontStudioScreenMiuix(
     actions: FontStudioActions,
     topAction: @Composable () -> Unit,
 ) {
+    val dockBottomPadding = maxOf(LocalDockContentPadding.current, 24.dp)
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = dockBottomPadding),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item { MiuixStudioHeader(state.loading, actions.refresh, topAction) }

@@ -112,31 +112,43 @@ internal fun SettingsHubRoute(settings: AppearanceSettings, actions: AppearanceA
     }
     Column(Modifier.fillMaxSize().navigationBarsPadding()) {
         HubHeader(settings.uiStyle)
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp),
+            shape = RoundedCornerShape(23.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (settings.uiStyle == UiStyle.MIUIX) .62f else .90f),
         ) {
-            SettingsSection.entries.forEach { item ->
-                val active = item == section
-                Surface(
-                    onClick = {
-                        sectionName = item.name
-                        if (item == SettingsSection.SAFETY) model.refreshHealth()
-                        if (item == SettingsSection.UPDATE) model.checkUpdate()
-                    },
-                    shape = RoundedCornerShape(17.dp),
-                    color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-                    contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                ) {
-                    Row(Modifier.padding(horizontal = 13.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LuoShuGlyph(
-                            imageVector = item.icon,
-                            contentDescription = null,
-                            size = LuoShuIconTokens.SectionGlyph,
-                            opticalScale = item.opticalScale,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(item.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                SettingsSection.entries.forEach { item ->
+                    val active = item == section
+                    Surface(
+                        onClick = {
+                            sectionName = item.name
+                            if (item == SettingsSection.SAFETY) model.refreshHealth()
+                            if (item == SettingsSection.UPDATE) model.checkUpdate()
+                        },
+                        modifier = Modifier.width(78.dp),
+                        shape = RoundedCornerShape(19.dp),
+                        color = if (active) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
+                        contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        shadowElevation = if (active && settings.uiStyle == UiStyle.MIUIX) 2.dp else 0.dp,
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 9.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            LuoShuGlyph(
+                                imageVector = item.icon,
+                                contentDescription = null,
+                                size = LuoShuIconTokens.SectionGlyph,
+                                opticalScale = item.opticalScale,
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(item.label, fontSize = 10.sp, fontWeight = if (active) FontWeight.Black else FontWeight.SemiBold)
+                        }
                     }
                 }
             }
@@ -198,7 +210,7 @@ private fun OverviewPage(model: SystemCenterViewModel) = pageList {
             InfoLine("App", BuildConfig.VERSION_NAME)
             InfoLine("模块", h.moduleVersion.ifBlank { if (h.modulePresent) "已安装" else "未检测到" })
             InfoLine("Root", h.rootManager)
-            InfoLine("挂载", listOf(h.mountEngine, h.selfMountBackend).filter { it.isNotBlank() && it != "unknown" }.joinToString(" · ").ifBlank { "待检测" })
+            InfoLine("挂载", mountSummary(h))
             InfoLine("当前字体", if (h.activeFont == "default") "系统默认" else h.activeFont)
         }
     }
@@ -208,6 +220,7 @@ private fun OverviewPage(model: SystemCenterViewModel) = pageList {
                 if (h.rebootRequired) add("存在等待重启后生效的字体变更")
                 if (h.lockState == "stale") add("检测到失效字体切换锁，可在安全页一键清理")
                 if (h.cachePending) add("设备字体缓存仍在等待完成")
+                if (h.selfMountState == "degraded") add("洛书自挂载正在使用 OverlayFS + Bind 降级路径")
                 if (h.conflicts.isNotEmpty()) add("发现 ${h.conflicts.size} 个其它模块字体覆盖目标")
                 if (h.recentErrors > 0) add("最近日志中有 ${h.recentErrors} 条错误记录")
             }
@@ -274,7 +287,7 @@ private fun SafetyPage(model: SystemCenterViewModel, style: UiStyle) {
                     InfoLine("Android API", h.androidSdk.takeIf { it > 0 }?.toString() ?: "未知")
                     InfoLine("引擎 / 模板", "${h.engineState.ifBlank { "?" }} · ${h.templateState.ifBlank { "?" }}")
                     InfoLine("字体加载", h.alignmentState.ifBlank { "待确认" })
-                    InfoLine("自挂载", listOf(h.selfMountState, h.selfMountBackend).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "待确认" })
+                    InfoLine("自挂载", selfMountSummary(h))
                     InfoLine("Payload 字体", h.payloadFonts.toString())
                     InfoLine("切换锁", when (h.lockState) { "idle" -> "空闲"; "active" -> "切换中"; "stale" -> "失效残留"; else -> h.lockState })
                     InfoLine("最近日志", "${h.recentWarnings} 警告 · ${h.recentErrors} 错误")
@@ -389,6 +402,47 @@ private fun StatusCard(title: String, subtitle: String, level: HealthLevel, load
         }
     }
 }
+
+private fun mountEngineLabel(value: String): String = when (value) {
+    "self-mount" -> "洛书自挂载"
+    "native-module-mount" -> "Root 原生挂载"
+    "meta-overlayfs", "dual-dir-metamodule" -> "Meta OverlayFS"
+    "hybrid-mount" -> "Hybrid Mount"
+    "magic-mount", "magic-mount-rs" -> "Magic Mount"
+    "mountify" -> "Mountify"
+    "unknown", "" -> ""
+    else -> value
+}
+
+private fun mountBackendLabel(value: String): String = when (value) {
+    "self-overlay" -> "OverlayFS"
+    "self-overlay-bind" -> "OverlayFS + Bind"
+    "self-existing", "external-mount" -> "已接管"
+    "overlayfs" -> "OverlayFS"
+    "magic-mount" -> "Magic Mount"
+    "mountify" -> "Mountify"
+    "none", "unknown", "" -> ""
+    else -> value
+}
+
+private fun mountStateLabel(value: String): String = when (value) {
+    "mounted" -> "已挂载"
+    "degraded" -> "降级"
+    "failed" -> "失败"
+    "idle" -> "待命"
+    "unknown", "" -> ""
+    else -> value
+}
+
+private fun mountSummary(state: SystemHealthSnapshot): String = listOf(
+    mountEngineLabel(state.mountEngine),
+    mountBackendLabel(state.selfMountBackend),
+).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "待检测" }
+
+private fun selfMountSummary(state: SystemHealthSnapshot): String = listOf(
+    mountStateLabel(state.selfMountState),
+    mountBackendLabel(state.selfMountBackend),
+).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "待确认" }
 
 @Composable
 private fun InfoLine(label: String, value: String) = Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {

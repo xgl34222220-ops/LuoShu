@@ -60,8 +60,19 @@ _luoshu_font_config_specs() {
     _lfcp_names="$(_luoshu_font_config_xml_names)"
     while IFS='|' read -r _lfcp_key _lfcp_real_etc _lfcp_overlay; do
         [ -n "$_lfcp_key" ] && [ -n "$_lfcp_real_etc" ] && [ -n "$_lfcp_overlay" ] || continue
+        # Keep the curated list as a stable baseline, then discover vendor-specific font XML that
+        # actually exists on this ROM. Unknown OEM names must not silently escape the no-hook path.
+        _lfcp_all="$_lfcp_names"
+        for _lfcp_found in             "$_lfcp_real_etc"/*font*.xml             "$_lfcp_real_etc"/*Font*.xml             "$_lfcp_real_etc"/*FONT*.xml; do
+            [ -f "$_lfcp_found" ] || continue
+            _lfcp_base="${_lfcp_found##*/}"
+            case " $_lfcp_all " in
+                *" $_lfcp_base "*) continue ;;
+            esac
+            _lfcp_all="$_lfcp_all $_lfcp_base"
+        done
         # shellcheck disable=SC2086
-        _luoshu_font_config_emit_partition "$_lfcp_key" "$_lfcp_real_etc" "$_lfcp_overlay" $_lfcp_names
+        _luoshu_font_config_emit_partition "$_lfcp_key" "$_lfcp_real_etc" "$_lfcp_overlay" $_lfcp_all
     done <<EOF_LUOSHU_PARTITIONS
 $(_luoshu_font_config_partition_rows)
 EOF_LUOSHU_PARTITIONS

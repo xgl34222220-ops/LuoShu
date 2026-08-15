@@ -179,23 +179,38 @@ luoshu_dynamic_targets_apply() {
 $(_luoshu_font_config_specs)
 EOF_LUOSHU_DYNAMIC_TARGETS
 
-    if [ "$_ldt_scan_failed" -gt 0 ] || [ "$_ldt_mapped" -ne "$_ldt_targets" ]; then
+    # Unmapped targets keep their stock font. Zero useful mappings is a hard failure; non-zero partial
+    # coverage is committed and reported honestly instead of collapsing an unfamiliar ROM to zero.
+    if [ "$_ldt_mapped" -eq 0 ]; then
         while IFS='|' read -r _ldt_rel _ldt_rest; do rm -f "$_ldt_module/$_ldt_rel" 2>/dev/null || true; done < "$_ldt_manifest_tmp"
         rm -f "$_ldt_manifest_tmp" "$_ldt_coverage_tmp" 2>/dev/null || true
-        _luoshu_safety_log ERROR "动态字体目标映射失败：targets=$_ldt_targets mapped=$_ldt_mapped scanFailed=$_ldt_scan_failed"
+        _luoshu_safety_log ERROR "动态字体目标映射失败：targets=$_ldt_targets mapped=0 scanFailed=$_ldt_scan_failed"
         return 1
+    fi
+    if [ "$_ldt_mapped" -eq "$_ldt_targets" ] && [ "$_ldt_scan_failed" -eq 0 ]; then
+        _ldt_coverage_status=full
+    else
+        _ldt_coverage_status=partial
+        _luoshu_safety_log WARN "部分字体目标未能映射，未映射项保留原厂字体：targets=$_ldt_targets mapped=$_ldt_mapped scanFailed=$_ldt_scan_failed"
     fi
     {
         printf 'configs=%s\n' "$_ldt_configs"
+        printf 'discovered=%s\n' "$_ldt_targets"
         printf 'targets=%s\n' "$_ldt_targets"
         printf 'mapped=%s\n' "$_ldt_mapped"
+        printf 'status=%s\n' "$_ldt_coverage_status"
+        printf 'scanFailed=%s\n' "$_ldt_scan_failed"
         printf 'time=%s\n' "$(date +%s)"
     } > "$_ldt_coverage_tmp" 2>/dev/null || return 1
     mv -f "$_ldt_manifest_tmp" "$_ldt_config/font-target-aliases.conf" 2>/dev/null || return 1
     mv -f "$_ldt_coverage_tmp" "$_ldt_config/font-target-coverage.conf" 2>/dev/null || return 1
     chmod 0644 "$_ldt_config/font-target-aliases.conf" "$_ldt_config/font-target-coverage.conf" 2>/dev/null || true
     [ "$_ldt_targets" -gt 0 ] || return 2
-    _luoshu_safety_log INFO "已按设备真实 XML 完整映射 $_ldt_mapped 个 UI 字体目标"
+    if [ "$_ldt_coverage_status" = full ]; then
+        _luoshu_safety_log INFO "已按设备真实 XML 完整映射 $_ldt_mapped/$_ldt_targets 个 UI 字体目标"
+    else
+        _luoshu_safety_log WARN "已按设备真实 XML 部分映射 $_ldt_mapped/$_ldt_targets 个 UI 字体目标"
+    fi
     return 0
 }
 
@@ -217,11 +232,35 @@ luoshu_payload_validate_current() {
     done
     [ "$_lpv_fonts" -gt 0 ] || return 1
 
-    _lpv_targets=$(sed -n 's/^targets=//p' "$_lpv_config/font-target-coverage.conf" 2>/dev/null | head -n1)
-    _lpv_mapped=$(sed -n 's/^mapped=//p' "$_lpv_config/font-target-coverage.conf" 2>/dev/null | head -n1)
-    case "$_lpv_targets" in ''|*[!0-9]*) _lpv_targets=0 ;; esac
-    case "$_lpv_mapped" in ''|*[!0-9]*) _lpv_mapped=0 ;; esac
-    [ "$_lpv_targets" -eq "$_lpv_mapped" ] || return 1
+    _lpv_coverage="$_lpv_config/font-target-coverage.conf"
+    if [ -f "$_lpv_coverage" ]; then
+        _lpv_targets=$(sed -n 's/^targets=//p' "$_lpv_coverage" 2>/dev/null | head -n1)
+        _lpv_mapped=$(sed -n 's/^mapped=//p' "$_lpv_coverage" 2>/dev/null | head -n1)
+        _lpv_status=$(sed -n 's/^status=//p' "$_lpv_coverage" 2>/dev/null | head -n1)
+        case "$_lpv_targets" in ''|*[!0-9]*) return 1 ;; esac
+        case "$_lpv_mapped" in ''|*[!0-9]*) return 1 ;; esac
+        [ "$_lpv_mapped" -le "$_lpv_targets" ] || return 1
+        case "$_lpv_status" in
+            full) [ "$_lpv_mapped" -eq "$_lpv_targets" ] || return 1 ;;
+            partial) [ "$_lpv_mapped" -gt 0 ] && [ "$_lpv_mapped" -lt "$_lpv_targets" ] || return 1 ;;
+            '') [ "$_lpv_targets" -eq 0 ] || [ "$_lpv_mapped" -gt 0 ] || return 1 ;;
+            *) return 1 ;;
+        esac
+        if [ "$_lpv_mapped" -gt 0 ]; then
+    _lpv_manifest="$_lpv_config/font-target-aliases.conf"
+    _lpv_manifest_count=$(awk 'NF { n++ } END { print n+0 }' "$_lpv_manifest" 2>/dev/null)
+    case "$_lpv_manifest_count" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$_lpv_manifest_count" -eq "$_lpv_mapped" ] || return 1
+    while IFS='|' read -r _lpv_rel _lpv_key _lpv_weight _lpv_family; do
+        [ -n "$_lpv_rel" ] || continue
+        case "$_lpv_rel" in */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;; *) return 1 ;; esac
+        [ -f "$_lpv_module/$_lpv_rel" ] || return 1
+        if type _luoshu_fast_font_ok >/dev/null 2>&1; then
+            _luoshu_fast_font_ok "$_lpv_module/$_lpv_rel" || return 1
+        fi
+    done < "$_lpv_manifest"
+fi
+    fi
 
     while IFS='|' read -r _lpv_key _lpv_real _lpv_overlay _lpv_font_dir; do
         [ -f "$_lpv_overlay" ] || continue

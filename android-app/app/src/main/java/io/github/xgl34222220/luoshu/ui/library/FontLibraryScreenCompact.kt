@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
@@ -73,6 +74,7 @@ internal fun FontLibraryScreenCompact(
     tools: @Composable () -> Unit,
 ) {
     val miuix = style == UiStyle.MIUIX
+    val dockBottomPadding = maxOf(LocalDockContentPadding.current, 28.dp)
     val tokens = LocalMiuixTokens.current
     val cardColor = if (miuix) tokens.cardBackground else MaterialTheme.colorScheme.surfaceContainerLow
     val elevatedColor = if (miuix) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surfaceContainerHigh
@@ -82,7 +84,7 @@ internal fun FontLibraryScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = dockBottomPadding),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
