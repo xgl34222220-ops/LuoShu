@@ -103,7 +103,7 @@ grep -q 'LuoShuHeaderAction' "$LOGS_COMPACT"
 ! grep -q 'Modifier.size(50.dp)' "$LOGS_COMPACT"
 
 # Studio uses one in-flow final action. Both title actions share one Row and the
-# Studio viewport ends above the floating dock instead of drawing cards under it.
+# Studio viewport keeps its local padding while the shell lets glass overlap the final content.
 grep -q 'MiuixFinalAction(state, actions)' "$STUDIO_MIUIX"
 grep -q 'MaterialFinalAction(state, actions)' "$STUDIO_MATERIAL"
 grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MIUIX"
@@ -121,10 +121,12 @@ grep -q 'opticalScale = 1.08f' "$STUDIO_TOOLS"
 ! grep -q 'align(Alignment.BottomStart)' "$STUDIO_ROUTE"
 ! grep -q 'align(Alignment.BottomCenter)' "$STUDIO_ROUTE"
 [ "$(grep -c 'padding(bottom = dockClearance)' "$SHELL")" -eq 4 ]
-grep -q 'floatingDock) 84.dp else 70.dp' "$SHELL"
+grep -q 'appearance.uiStyle == UiStyle.MIUIX && appearance.glassEnabled -> 34.dp' "$SHELL"
+grep -q 'else -> 84.dp' "$SHELL"
 
-# Four-item dock, compact labels, hidden settings dock, Haze sampling and a real
-# liquid-glass surface with refraction highlights instead of an opaque white card.
+# Four-item dock, compact labels, hidden settings dock, Haze sampling and a
+# liquid-glass-inspired surface with transparent sampling, optical highlights,
+# a separate moving lens and compositor-safe press response instead of an opaque white card.
 grep -q 'private val dockPages' "$SHELL"
 [ "$(sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -c 'AppPage\.')" -eq 4 ]
 grep -q 'if (page != AppPage.Settings)' "$SHELL"
@@ -134,12 +136,23 @@ grep -q 'LuoShuIconTokens.DockGlyph' "$SHELL"
 grep -q 'private fun MiuixAppDock' "$SHELL"
 MIUIX_DOCK=$(sed -n '/private fun MiuixAppDock/,/private fun AppDockLayout/p' "$SHELL")
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'hazeEffect'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 36.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 30.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'noiseFactor = .025f'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'RoundedCornerShape(31.dp)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'activeGlass'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .30f)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorBorderColor'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorColor = if (activeGlass)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'scheme.primary.copy(alpha = if (dark) .30f else .20f)'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'liquidLens = activeGlass'
+! printf '%s\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .72f)'
+! printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 36.dp'
+grep -q 'collectIsPressedAsState' "$SHELL"
+grep -q 'baseItemColor.copy(alpha = .62f)' "$SHELL"
+grep -q 'offscreen buffer inside the Haze surface' "$SHELL"
+! grep -q 'luoshuDockItemScale' "$SHELL"
+! grep -q 'graphicsLayer' "$SHELL"
+grep -q 'dampingRatio = if (liquidLens) .64f else .76f' "$SHELL"
 
 # v2.5 settings hub keeps the appearance controls after replacing the old
 # AppearanceSettingsScreen file with the consolidated system/settings center.
