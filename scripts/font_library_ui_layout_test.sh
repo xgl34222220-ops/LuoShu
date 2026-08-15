@@ -5,6 +5,7 @@ MIUIX="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/libra
 MATERIAL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/library/FontLibraryScreenMaterial.kt"
 ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/library/FontLibraryRoute.kt"
 COMPACT="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/library/FontLibraryScreenCompact.kt"
+DETAILS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/library/FontDetailsDialog.kt"
 HOME_ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/HomeRoute.kt"
 HOME_COMPACT="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/HomeScreenCompact.kt"
 ACCEPTANCE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceAcceptanceGuide.kt"
@@ -32,13 +33,25 @@ grep -q 'HomeScreenCompact' "$HOME_ROUTE"
 grep -q 'LogsScreenCompact' "$LOGS_ROUTE"
 
 # Font library: management tools are collapsed, the card itself opens details,
-# and the default row is compact rather than a 102 dp showcase card.
+# preview glyphs use one Aa12 contract, and detail viewing is a large preview sheet.
 grep -q 'var showTools' "$COMPACT"
-grep -q '导入与管理' "$COMPACT"
+grep -q 'Text(if (showTools) "收起管理" else "管理")' "$COMPACT"
 grep -q 'CompactFontRow' "$COMPACT"
 grep -q 'NativeFontPreview' "$COMPACT"
 grep -q 'clickable(onClick = onDetails)' "$COMPACT"
+[ "$(grep -c '"Aa12"' "$COMPACT")" -ge 3 ]
+! grep -q '"Aa 12"' "$COMPACT"
+! grep -q '点击卡片查看完整预览与字体信息' "$COMPACT"
+grep -q 'FontLibraryBadge' "$COMPACT"
+grep -q 'fontPrimaryBadge' "$COMPACT"
 ! grep -q 'height(102.dp)' "$COMPACT"
+grep -q 'ModalBottomSheet' "$DETAILS"
+grep -q 'FontPreviewMode' "$DETAILS"
+grep -q 'PreviewModeChip' "$DETAILS"
+grep -q '花间一壶酒' "$DETAILS"
+grep -q 'LuoShu Aa 0123456789' "$DETAILS"
+grep -q '应用此字体' "$DETAILS"
+! grep -q 'AlertDialog' "$DETAILS"
 
 # Home: one dynamic next action replaces duplicate navigation shortcuts and the
 # trust chip participates in normal layout rather than using a fixed 108 dp offset.
