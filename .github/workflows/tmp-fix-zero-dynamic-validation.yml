@@ -1,0 +1,80 @@
+name: Fix zero dynamic target validation
+
+on:
+  push:
+    branches:
+      - fix/generic-xml-overlay
+    paths:
+      - .github/workflows/tmp-fix-zero-dynamic-validation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/generic-xml-overlay
+          fetch-depth: 0
+      - name: Guard alias manifest by mapped count
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          paths = [
+              Path('common/font_safety.sh'),
+              Path('common/font_finalize_hotfix.sh'),
+              Path('common/device_font_payload_bridge.sh'),
+          ]
+          old = '''        _lpv_manifest="$_lpv_config/font-target-aliases.conf"
+          _lpv_manifest_count=$(awk 'NF { n++ } END { print n+0 }' "$_lpv_manifest" 2>/dev/null)
+          case "$_lpv_manifest_count" in ''|*[!0-9]*) return 1 ;; esac
+          [ "$_lpv_manifest_count" -eq "$_lpv_mapped" ] || return 1
+          while IFS='|' read -r _lpv_rel _lpv_key _lpv_weight _lpv_family; do
+              [ -n "$_lpv_rel" ] || continue
+              case "$_lpv_rel" in */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;; *) return 1 ;; esac
+              [ -f "$_lpv_module/$_lpv_rel" ] || return 1
+              if type _luoshu_fast_font_ok >/dev/null 2>&1; then
+                  _luoshu_fast_font_ok "$_lpv_module/$_lpv_rel" || return 1
+              fi
+          done < "$_lpv_manifest"
+          '''
+          new = '''        if [ "$_lpv_mapped" -gt 0 ]; then
+              _lpv_manifest="$_lpv_config/font-target-aliases.conf"
+              _lpv_manifest_count=$(awk 'NF { n++ } END { print n+0 }' "$_lpv_manifest" 2>/dev/null)
+              case "$_lpv_manifest_count" in ''|*[!0-9]*) return 1 ;; esac
+              [ "$_lpv_manifest_count" -eq "$_lpv_mapped" ] || return 1
+              while IFS='|' read -r _lpv_rel _lpv_key _lpv_weight _lpv_family; do
+                  [ -n "$_lpv_rel" ] || continue
+                  case "$_lpv_rel" in */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;; *) return 1 ;; esac
+                  [ -f "$_lpv_module/$_lpv_rel" ] || return 1
+                  if type _luoshu_fast_font_ok >/dev/null 2>&1; then
+                      _luoshu_fast_font_ok "$_lpv_module/$_lpv_rel" || return 1
+                  fi
+              done < "$_lpv_manifest"
+          fi
+          '''
+          for path in paths:
+              text = path.read_text()
+              if text.count(old) != 1:
+                  raise SystemExit(f'{path}: validator block mismatch ({text.count(old)})')
+              path.write_text(text.replace(old, new, 1))
+          PY
+          sh -n common/font_safety.sh
+          sh -n common/font_finalize_hotfix.sh
+          sh -n common/device_font_payload_bridge.sh
+          sh scripts/mix_finalize_performance_test.sh
+          sh scripts/font_safety_test.sh
+          sh scripts/generic_xml_partial_coverage_test.sh
+          sh scripts/device_font_payload_bridge_test.sh
+      - name: Commit source fix
+        run: |
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add common/font_safety.sh common/font_finalize_hotfix.sh common/device_font_payload_bridge.sh
+          git commit -m 'fix(font): allow zero dynamic targets without alias manifest'
+          git push origin HEAD:fix/generic-xml-overlay
