@@ -80,6 +80,7 @@ on:
       - scripts/font_metrics_normalization_test.py
       - scripts/font_config_targets_test.py
       - scripts/font_config_runtime_test.sh
+      - scripts/generic_xml_partial_coverage_test.sh
       - scripts/font_config_weights_test.sh
       - scripts/font_name_normalize_test.py
       - scripts/font_safety_test.sh
@@ -147,8 +148,10 @@ jobs:
           python3 scripts/font_config_monospace_test.py
       - name: Run dynamic target discovery tests
         run: python3 scripts/font_config_targets_test.py
-      - name: Run payload transaction and boot guard tests
-        run: sh -x scripts/font_safety_test.sh
+      - name: Run payload transaction, boot guard and partial coverage tests
+        run: |
+          sh -x scripts/font_safety_test.sh
+          sh -x scripts/generic_xml_partial_coverage_test.sh
       - name: Run meta-module synchronization tests
         run: |
           sh -x scripts/meta_module_sync_test.sh
