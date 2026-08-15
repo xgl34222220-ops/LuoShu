@@ -51,15 +51,17 @@ root_manager() {
 mount_engine() {
     if type luoshu_detect_mount_engine >/dev/null 2>&1; then
         case "$(luoshu_detect_mount_engine)" in
+            self-mount) printf '洛书自挂载' ;;
             magic-mount|magic-mount-rs) printf 'Magic Mount' ;;
             mountify) printf 'Mountify' ;;
             meta-overlayfs|dual-dir-metamodule) printf 'Meta OverlayFS' ;;
             hybrid-mount) printf 'Hybrid Mount' ;;
-            *) printf '原生模块挂载' ;;
+            native-module-mount) printf 'Root 原生挂载' ;;
+            *) printf '洛书自挂载' ;;
         esac
         return
     fi
-    printf '原生模块挂载'
+    printf '洛书自挂载'
 }
 
 select_task_file() {

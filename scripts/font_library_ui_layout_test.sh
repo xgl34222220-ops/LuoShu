@@ -21,6 +21,8 @@ OVERLAY="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/Native
 SHELL="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
 SETTINGS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/settings/SettingsHubScreen.kt"
 ICON_SYSTEM="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
+DOCK_INSETS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/DockInsets.kt"
+APP_BRIDGE="$ROOT/common/app_bridge.sh"
 UTIL="$ROOT/common/util_functions_core.sh"
 CACHE="$ROOT/common/device_font_cache.sh"
 
@@ -110,7 +112,7 @@ grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MIUIX"
 grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MATERIAL"
 grep -q 'topAction()' "$STUDIO_MIUIX"
 grep -q 'topAction()' "$STUDIO_MATERIAL"
-grep -q 'bottom = 24.dp' "$STUDIO_MIUIX"
+grep -q 'maxOf(LocalDockContentPadding.current, 24.dp)' "$STUDIO_MIUIX"
 grep -q 'bottom = 24.dp' "$STUDIO_MATERIAL"
 ! grep -q 'align(Alignment.TopEnd)' "$STUDIO_ROUTE"
 ! grep -q 'statusBarsPadding()' "$STUDIO_ROUTE"
@@ -121,8 +123,11 @@ grep -q 'opticalScale = 1.08f' "$STUDIO_TOOLS"
 ! grep -q 'align(Alignment.BottomStart)' "$STUDIO_ROUTE"
 ! grep -q 'align(Alignment.BottomCenter)' "$STUDIO_ROUTE"
 [ "$(grep -c 'padding(bottom = dockClearance)' "$SHELL")" -eq 4 ]
-grep -q 'appearance.uiStyle == UiStyle.MIUIX && appearance.glassEnabled -> 34.dp' "$SHELL"
-grep -q 'else -> 84.dp' "$SHELL"
+grep -q 'val edgeToEdgeGlass = appearance.uiStyle == UiStyle.MIUIX' "$SHELL"
+grep -q 'edgeToEdgeGlass -> 0.dp' "$SHELL"
+grep -q 'navigationBottom + 88.dp' "$SHELL"
+[ "$(grep -c 'LocalDockContentPadding provides dockContentPadding' "$SHELL")" -eq 4 ]
+grep -q 'LocalDockContentPadding' "$DOCK_INSETS"
 
 # Four-item dock, compact labels, hidden settings dock, Haze sampling and a
 # liquid-glass-inspired surface with transparent sampling, optical highlights,
@@ -136,17 +141,19 @@ grep -q 'LuoShuIconTokens.DockGlyph' "$SHELL"
 grep -q 'private fun MiuixAppDock' "$SHELL"
 MIUIX_DOCK=$(sed -n '/private fun MiuixAppDock/,/private fun AppDockLayout/p' "$SHELL")
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'hazeEffect'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 30.dp'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'noiseFactor = .025f'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 24.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'noiseFactor = .012f'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'RoundedCornerShape(31.dp)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'activeGlass'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .30f)'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .12f)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorColor = if (activeGlass)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'liquidLens = activeGlass'
 ! printf '%s\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .72f)'
 ! printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 36.dp'
+! printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 30.dp'
+! grep -q -- '-> 34.dp' "$SHELL"
 grep -q 'collectIsPressedAsState' "$SHELL"
 grep -q 'baseItemColor.copy(alpha = .62f)' "$SHELL"
 grep -q 'offscreen buffer inside the Haze surface' "$SHELL"
@@ -168,8 +175,13 @@ grep -q 'val HeaderGlyph = 22.dp' "$ICON_SYSTEM"
 grep -q 'val DockGlyph = 20.dp' "$ICON_SYSTEM"
 grep -q 'val SectionGlyph = 18.dp' "$ICON_SYSTEM"
 grep -q 'val ToolGlyph = 20.dp' "$ICON_SYSTEM"
-grep -q 'bottom = 24.dp' "$HOME_COMPACT"
-grep -q 'bottom = 24.dp' "$LOGS_COMPACT"
+grep -q 'maxOf(LocalDockContentPadding.current, 24.dp)' "$HOME_COMPACT"
+grep -q 'maxOf(LocalDockContentPadding.current, 28.dp)' "$COMPACT"
+grep -q 'maxOf(LocalDockContentPadding.current, 24.dp)' "$LOGS_COMPACT"
+grep -q 'CompactStatusCell' "$HOME_COMPACT"
+grep -q "self-mount) printf '洛书自挂载'" "$APP_BRIDGE"
+grep -q 'mountSummary(h)' "$SETTINGS"
+grep -q 'selfMountSummary(h)' "$SETTINGS"
 ! grep -q 'padding(bottom = 96.dp)' "$LOGS_ROUTE"
 ! grep -q 'if (page == AppPage.Studio)' "$SHELL"
 

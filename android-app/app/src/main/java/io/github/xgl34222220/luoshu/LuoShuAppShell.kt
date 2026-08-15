@@ -44,6 +44,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -94,6 +95,7 @@ import io.github.xgl34222220.luoshu.ui.settings.AppearanceSettingsRoute
 import io.github.xgl34222220.luoshu.ui.studio.FontStudioActions
 import io.github.xgl34222220.luoshu.ui.studio.FontStudioRoute
 import io.github.xgl34222220.luoshu.ui.studio.toFontStudioUiState
+import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
@@ -207,11 +209,16 @@ internal fun LuoShuAppShell(
         val blurActive = appearance.blurEnabled && appearance.glassEnabled
         val hazeState = rememberHazeState(blurEnabled = blurActive)
         val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val dockClearance = navigationBottom + when {
-            !appearance.floatingDock -> 70.dp
-            appearance.uiStyle == UiStyle.MIUIX && appearance.glassEnabled -> 34.dp
-            else -> 84.dp
+        val edgeToEdgeGlass = appearance.uiStyle == UiStyle.MIUIX &&
+            appearance.glassEnabled && appearance.floatingDock
+        // A floating glass dock overlays a full-height viewport. Lists own the trailing
+        // safe space so content can pass behind the glass yet still scroll fully clear.
+        val dockClearance = when {
+            edgeToEdgeGlass -> 0.dp
+            !appearance.floatingDock -> navigationBottom + 70.dp
+            else -> navigationBottom + 84.dp
         }
+        val dockContentPadding = if (edgeToEdgeGlass) navigationBottom + 88.dp else 0.dp
         val contentModifier = Modifier
             .fillMaxSize()
             .then(if (blurActive) Modifier.hazeSource(state = hazeState) else Modifier)
@@ -241,46 +248,54 @@ internal fun LuoShuAppShell(
                         AppPage.Home -> Box(
                             modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
                         ) {
-                            HomeRoute(
-                                style = appearance.uiStyle,
-                                state = viewModel.snapshot.toHomeUiState(features.systemWeight),
-                                actions = homeActions,
-                            )
+                            CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
+                                HomeRoute(
+                                    style = appearance.uiStyle,
+                                    state = viewModel.snapshot.toHomeUiState(features.systemWeight),
+                                    actions = homeActions,
+                                )
+                            }
                         }
                         AppPage.Library -> Box(
                             modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
                         ) {
-                            FontLibraryRoute(
-                                style = appearance.uiStyle,
-                                state = viewModel.toFontLibraryUiState(),
-                                actions = libraryActions,
-                                topActions = {
-                                    NativeImportOverlay(
-                                        viewModel = viewModel,
-                                        style = appearance.uiStyle,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        embedded = true,
-                                    )
-                                },
-                            )
+                            CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
+                                FontLibraryRoute(
+                                    style = appearance.uiStyle,
+                                    state = viewModel.toFontLibraryUiState(),
+                                    actions = libraryActions,
+                                    topActions = {
+                                        NativeImportOverlay(
+                                            viewModel = viewModel,
+                                            style = appearance.uiStyle,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            embedded = true,
+                                        )
+                                    },
+                                )
+                            }
                         }
                         AppPage.Studio -> Box(
                             modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
                         ) {
-                            FontStudioRoute(
-                                style = appearance.uiStyle,
-                                state = viewModel.toFontStudioUiState(features),
-                                actions = studioActions,
-                            )
+                            CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
+                                FontStudioRoute(
+                                    style = appearance.uiStyle,
+                                    state = viewModel.toFontStudioUiState(features),
+                                    actions = studioActions,
+                                )
+                            }
                         }
                         AppPage.Logs -> Box(
                             modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
                         ) {
-                            LogsRoute(
-                                style = appearance.uiStyle,
-                                state = viewModel.toLogsUiState(),
-                                actions = logsActions,
-                            )
+                            CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
+                                LogsRoute(
+                                    style = appearance.uiStyle,
+                                    state = viewModel.toLogsUiState(),
+                                    actions = logsActions,
+                                )
+                            }
                         }
                         AppPage.Settings -> AppearanceSettingsRoute(
                             settings = appearance,
@@ -503,23 +518,23 @@ private fun MiuixAppDock(
     val activeHaze = activeGlass && appearance.blurEnabled
     val hazeModifier = if (activeHaze) {
         Modifier.hazeEffect(state = hazeState, style = HazeMaterials.ultraThin()) {
-            blurRadius = 30.dp
-            noiseFactor = .025f
+            blurRadius = 24.dp
+            noiseFactor = .012f
         }
     } else Modifier
     val glassBrush = when {
         activeGlass && dark -> Brush.verticalGradient(
             listOf(
-                Color.White.copy(alpha = .10f),
-                tokens.elevatedCardBackground.copy(alpha = .08f),
-                scheme.primary.copy(alpha = .05f),
+                Color.White.copy(alpha = .07f),
+                tokens.elevatedCardBackground.copy(alpha = .04f),
+                scheme.primary.copy(alpha = .035f),
             ),
         )
         activeGlass -> Brush.verticalGradient(
             listOf(
-                Color.White.copy(alpha = .30f),
-                Color.White.copy(alpha = .10f),
-                scheme.primary.copy(alpha = .055f),
+                Color.White.copy(alpha = .12f),
+                Color.White.copy(alpha = .035f),
+                scheme.primary.copy(alpha = .025f),
             ),
         )
         else -> Brush.verticalGradient(
@@ -535,7 +550,7 @@ private fun MiuixAppDock(
         modifier = modifier
             .then(if (floating) Modifier.padding(horizontal = 12.dp).padding(bottom = bottomInset + 8.dp) else Modifier)
             .fillMaxWidth()
-            .shadow(if (floating) if (activeGlass) 14.dp else 12.dp else 5.dp, shape, clip = false)
+            .shadow(if (floating) if (activeGlass) 8.dp else 12.dp else 5.dp, shape, clip = false)
             .clip(shape)
             .then(hazeModifier)
             .background(glassBrush)
@@ -546,8 +561,8 @@ private fun MiuixAppDock(
                     drawRoundRect(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                Color.White.copy(alpha = if (dark) .18f else .46f),
-                                Color.White.copy(alpha = if (dark) .06f else .14f),
+                                Color.White.copy(alpha = if (dark) .14f else .20f),
+                                Color.White.copy(alpha = if (dark) .04f else .05f),
                                 Color.Transparent,
                             ),
                             center = Offset(size.width * .23f, 0f),
@@ -558,8 +573,8 @@ private fun MiuixAppDock(
                     drawRoundRect(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                scheme.primary.copy(alpha = if (dark) .11f else .085f),
-                                scheme.secondary.copy(alpha = if (dark) .045f else .035f),
+                                scheme.primary.copy(alpha = if (dark) .08f else .07f),
+                                scheme.secondary.copy(alpha = if (dark) .03f else .025f),
                                 Color.Transparent,
                             ),
                             center = Offset(size.width * .76f, size.height * 1.18f),
@@ -570,9 +585,9 @@ private fun MiuixAppDock(
                     drawRoundRect(
                         brush = Brush.linearGradient(
                             colors = listOf(
-                                Color.White.copy(alpha = if (dark) .28f else .72f),
-                                Color.White.copy(alpha = if (dark) .08f else .18f),
-                                scheme.primary.copy(alpha = if (dark) .14f else .11f),
+                                Color.White.copy(alpha = if (dark) .20f else .30f),
+                                Color.White.copy(alpha = if (dark) .05f else .08f),
+                                scheme.primary.copy(alpha = if (dark) .10f else .07f),
                                 Color.Transparent,
                             ),
                             start = Offset.Zero,
@@ -582,7 +597,7 @@ private fun MiuixAppDock(
                         style = Stroke(width = 1.05.dp.toPx()),
                     )
                     drawLine(
-                        color = Color.White.copy(alpha = if (dark) .20f else .52f),
+                        color = Color.White.copy(alpha = if (dark) .14f else .24f),
                         start = Offset(radius * .78f, 1.25.dp.toPx()),
                         end = Offset(size.width - radius * .78f, 1.25.dp.toPx()),
                         strokeWidth = .8.dp.toPx(),
@@ -592,18 +607,18 @@ private fun MiuixAppDock(
             .border(
                 if (activeGlass) .6.dp else 1.dp,
                 if (activeGlass) {
-                    if (dark) Color.White.copy(alpha = .14f) else Color.White.copy(alpha = .42f)
+                    if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .20f)
                 } else if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .58f),
                 shape,
             )
             .padding(start = 5.dp, top = 5.dp, end = 5.dp, bottom = if (floating) 5.dp else bottomInset + 5.dp),
         indicatorColor = if (activeGlass) {
-            Color.White.copy(alpha = if (dark) .08f else .18f)
+            Color.White.copy(alpha = if (dark) .05f else .09f)
         } else {
             scheme.primary.copy(alpha = if (dark) .20f else .12f)
         },
         indicatorBorderColor = if (activeGlass) {
-            if (dark) Color.White.copy(alpha = .20f) else Color.White.copy(alpha = .48f)
+            if (dark) Color.White.copy(alpha = .14f) else Color.White.copy(alpha = .28f)
         } else {
             Color.Transparent
         },
@@ -658,8 +673,8 @@ private fun AppDockLayout(
                         drawRoundRect(
                             brush = Brush.radialGradient(
                                 colors = listOf(
-                                    Color.White.copy(alpha = .30f),
-                                    Color.White.copy(alpha = .08f),
+                                    Color.White.copy(alpha = .18f),
+                                    Color.White.copy(alpha = .04f),
                                     Color.Transparent,
                                 ),
                                 center = Offset(size.width * .28f, size.height * .08f),
@@ -669,14 +684,14 @@ private fun AppDockLayout(
                         )
                         drawRoundRect(
                             brush = Brush.radialGradient(
-                                colors = listOf(selectedColor.copy(alpha = .15f), Color.Transparent),
+                                colors = listOf(selectedColor.copy(alpha = .08f), Color.Transparent),
                                 center = Offset(size.width * .72f, size.height * 1.08f),
                                 radius = size.width * .56f,
                             ),
                             cornerRadius = corners,
                         )
                         drawLine(
-                            color = Color.White.copy(alpha = .32f),
+                            color = Color.White.copy(alpha = .16f),
                             start = Offset(radius * .62f, 1.dp.toPx()),
                             end = Offset(size.width - radius * .62f, 1.dp.toPx()),
                             strokeWidth = .7.dp.toPx(),
