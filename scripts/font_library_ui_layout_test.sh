@@ -126,7 +126,7 @@ grep -q 'else -> 84.dp' "$SHELL"
 
 # Four-item dock, compact labels, hidden settings dock, Haze sampling and a
 # liquid-glass-inspired surface with transparent sampling, optical highlights,
-# a separate moving lens and layer-safe press response instead of an opaque white card.
+# a separate moving lens and compositor-safe press response instead of an opaque white card.
 grep -q 'private val dockPages' "$SHELL"
 [ "$(sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -c 'AppPage\.')" -eq 4 ]
 grep -q 'if (page != AppPage.Settings)' "$SHELL"
@@ -149,6 +149,7 @@ printf '%s\n' "$MIUIX_DOCK" | grep -q 'liquidLens = activeGlass'
 ! printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 36.dp'
 grep -q 'collectIsPressedAsState' "$SHELL"
 grep -q 'baseItemColor.copy(alpha = .62f)' "$SHELL"
+grep -q 'offscreen buffer inside the Haze surface' "$SHELL"
 ! grep -q 'luoshuDockItemScale' "$SHELL"
 ! grep -q 'graphicsLayer' "$SHELL"
 grep -q 'dampingRatio = if (liquidLens) .64f else .76f' "$SHELL"
