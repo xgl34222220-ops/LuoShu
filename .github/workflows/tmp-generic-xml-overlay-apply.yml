@@ -39,15 +39,20 @@ jobs:
           sh -n scripts/font_config_runtime_test.sh
           sh -n scripts/generic_xml_partial_coverage_test.sh
 
-      - name: Run focused XML and payload regressions
+      - name: Run XML structure and policy tests
         run: |
           python3 scripts/font_config_overlay_test.py
           python3 scripts/font_config_targets_test.py
           sh scripts/device_font_payload_policy_test.sh
           sh scripts/device_font_payload_bridge_test.sh
-          sh scripts/font_config_runtime_test.sh
-          sh scripts/font_safety_test.sh
-          sh scripts/generic_xml_partial_coverage_test.sh
+
+      - name: Trace transactional XML runtime test
+        run: sh -x scripts/font_config_runtime_test.sh
+
+      - name: Run partial coverage and safety tests
+        run: |
+          sh -x scripts/font_safety_test.sh
+          sh -x scripts/generic_xml_partial_coverage_test.sh
 
       - name: Commit verified source only
         run: |
