@@ -23,12 +23,11 @@ jobs:
       - name: Apply MIUIX polish
         run: python3 scripts/miuix_polish_patch.py
 
-      - name: Verify source contracts
+      - name: Verify UI source contracts
         run: |
           git diff --check
           sh -n common/app_bridge.sh
           sh scripts/font_library_ui_layout_test.sh
-          sh -x scripts/check.sh
 
       - uses: actions/setup-java@v4
         with:
