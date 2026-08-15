@@ -397,8 +397,6 @@ private fun AppBackdrop(appearance: AppearanceSettings, dark: Boolean) {
             .background(Brush.verticalGradient(base))
             .drawBehind {
                 if (miuix) {
-                    // Liquid glass needs real variation behind it. Keep a restrained accent field
-                    // near the dock so the transparent material has pixels to sample even between cards.
                     drawRect(
                         Brush.radialGradient(
                             listOf(
@@ -505,8 +503,6 @@ private fun MiuixAppDock(
     val activeHaze = activeGlass && appearance.blurEnabled
     val hazeModifier = if (activeHaze) {
         Modifier.hazeEffect(state = hazeState, style = HazeMaterials.ultraThin()) {
-            // A smaller blur radius keeps shapes and colors from the content legible through
-            // the dock instead of turning the whole surface into an opaque white fog.
             blurRadius = 30.dp
             noiseFactor = .025f
         }
@@ -547,9 +543,6 @@ private fun MiuixAppDock(
                 if (activeGlass) {
                     val radius = 31.dp.toPx()
                     val corners = CornerRadius(radius, radius)
-
-                    // Wide specular bloom: this reads as light travelling across curved glass,
-                    // not as another opaque white layer.
                     drawRoundRect(
                         brush = Brush.radialGradient(
                             colors = listOf(
@@ -562,9 +555,6 @@ private fun MiuixAppDock(
                         ),
                         cornerRadius = corners,
                     )
-
-                    // A soft theme-colored caustic near the lower edge makes the glass pick up
-                    // the current Monet color without looking like a filled primary container.
                     drawRoundRect(
                         brush = Brush.radialGradient(
                             colors = listOf(
@@ -577,9 +567,6 @@ private fun MiuixAppDock(
                         ),
                         cornerRadius = corners,
                     )
-
-                    // Fresnel-like rim: brightest where the virtual surface curves toward the
-                    // viewer, with a faint themed edge on the opposite side.
                     drawRoundRect(
                         brush = Brush.linearGradient(
                             colors = listOf(
@@ -620,7 +607,7 @@ private fun MiuixAppDock(
         } else {
             Color.Transparent
         },
-        indicatorShadow = if (activeGlass) 4.dp else 0.dp,
+        indicatorShadow = 0.dp,
         selectedColor = scheme.primary,
         unselectedColor = scheme.onSurfaceVariant.copy(alpha = .80f),
         label = "luoshuMiuixDockIndicator",
