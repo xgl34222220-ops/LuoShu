@@ -65,7 +65,8 @@ grep -qx 'discovered=2' "$MOD/config/font-target-coverage.conf"
 grep -qx 'targets=2' "$MOD/config/font-target-coverage.conf"
 grep -qx 'mapped=1' "$MOD/config/font-target-coverage.conf"
 grep -qx 'status=partial' "$MOD/config/font-target-coverage.conf"
-grep -qx 'scanFailed=1' "$MOD/config/font-target-coverage.conf"
+# scanFailed tracks XML discovery/parser failures, not target install failures.
+grep -qx 'scanFailed=0' "$MOD/config/font-target-coverage.conf"
 test "$(awk 'NF { n++ } END { print n+0 }' "$MOD/config/font-target-aliases.conf")" -eq 1
 test -s "$MOD/system/fonts/Good.ttf"
 test ! -e "$MOD/system/fonts/Bad.ttf"
