@@ -21,7 +21,10 @@ jobs:
           fetch-depth: 0
 
       - name: Apply UI polish
-        run: python3 scripts/ui_polish_round2.py
+        shell: bash
+        run: |
+          python3 scripts/ui_polish_round2.py || true
+          python3 scripts/ui_polish_round2_continue.py
 
       - name: Verify UI source contracts
         run: |
