@@ -26,11 +26,7 @@ jobs:
           python3 .github/tmp/apply_generic_xml_overlay.py
           cp -f .github/tmp/device_font_payload_bridge_test.new.sh scripts/device_font_payload_bridge_test.sh
           chmod 0755 scripts/device_font_payload_bridge_test.sh
-          # Uppercase filename discovery should be tested with a family that the existing safe
-          # overlay policy intentionally rewrites; arbitrary OEM family names must stay untouched.
           sed -i 's/<family name="acme-sans">/<family name="sans-serif">/' scripts/font_config_runtime_test.sh
-          # Partial-coverage test needs real OEM source files. Keep them inside the fixture rather
-          # than touching the runner's /system tree, then override the path resolver used at runtime.
           python3 - <<'PY'
           from pathlib import Path
           p = Path('scripts/generic_xml_partial_coverage_test.sh')
@@ -64,10 +60,11 @@ jobs:
       - name: Run transactional XML runtime test
         run: sh scripts/font_config_runtime_test.sh
 
-      - name: Run partial coverage and safety tests
-        run: |
-          sh scripts/font_safety_test.sh
-          sh scripts/generic_xml_partial_coverage_test.sh
+      - name: Run safety test
+        run: sh scripts/font_safety_test.sh
+
+      - name: Trace partial coverage test
+        run: sh -x scripts/generic_xml_partial_coverage_test.sh
 
       - name: Commit verified source only
         run: |
