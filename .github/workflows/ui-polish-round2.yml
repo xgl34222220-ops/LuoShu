@@ -25,6 +25,7 @@ jobs:
         run: |
           python3 scripts/ui_polish_round2.py || true
           python3 scripts/ui_polish_round2_continue.py
+          python3 scripts/ui_polish_round2_imports.py
 
       - name: Verify UI source contracts
         run: |
