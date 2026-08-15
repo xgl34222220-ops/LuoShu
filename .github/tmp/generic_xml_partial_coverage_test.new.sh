@@ -53,7 +53,8 @@ ln() {
     command ln "$@"
 }
 cp() {
-    case "$2" in *Bad.ttf) return 1 ;; esac
+    # Runtime fallback uses: cp -f SOURCE DEST, so DEST is the third argument.
+    case "${3:-}" in *Bad.ttf) return 1 ;; esac
     command cp "$@"
 }
 
