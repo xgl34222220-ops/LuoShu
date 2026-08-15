@@ -4,7 +4,6 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -61,7 +60,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -705,26 +703,12 @@ private fun AppDockLayout(
                 val selected = current == page
                 val interactionSource = remember(page) { MutableInteractionSource() }
                 val pressed by interactionSource.collectIsPressedAsState()
-                val itemScale by animateFloatAsState(
-                    targetValue = when {
-                        pressed -> .94f
-                        selected && liquidLens -> 1.025f
-                        else -> 1f
-                    },
-                    animationSpec = spring(
-                        dampingRatio = .62f,
-                        stiffness = Spring.StiffnessMedium,
-                    ),
-                    label = "luoshuDockItemScale-${page.name}",
-                )
+                val baseItemColor = if (selected) selectedColor else unselectedColor
+                val itemColor = if (pressed) baseItemColor.copy(alpha = .62f) else baseItemColor
                 Column(
                     modifier = Modifier
                         .width(itemWidth)
                         .height(itemHeight)
-                        .graphicsLayer {
-                            scaleX = itemScale
-                            scaleY = itemScale
-                        }
                         .clip(RoundedCornerShape(18.dp))
                         .clickable(
                             interactionSource = interactionSource,
@@ -738,12 +722,12 @@ private fun AppDockLayout(
                         contentDescription = page.label,
                         size = LuoShuIconTokens.DockGlyph,
                         opticalScale = page.dockOpticalScale,
-                        tint = if (selected) selectedColor else unselectedColor,
+                        tint = itemColor,
                     )
                     Spacer(Modifier.height(1.dp))
                     Text(
                         page.label,
-                        color = if (selected) selectedColor else unselectedColor,
+                        color = itemColor,
                         fontSize = 10.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1,
