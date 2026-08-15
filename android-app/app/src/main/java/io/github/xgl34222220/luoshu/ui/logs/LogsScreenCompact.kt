@@ -1,5 +1,6 @@
 package io.github.xgl34222220.luoshu.ui.logs
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,8 +14,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -121,34 +125,33 @@ internal fun LogsScreenCompact(
         }
 
         item {
-            Row(
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                shape = RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (miuix) .62f else .90f),
             ) {
-                LogsTab.entries.forEach { option ->
-                    Surface(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clickable { tab = option },
-                        shape = RoundedCornerShape(16.dp),
-                        color = if (tab == option) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.surfaceContainerHigh
-                        },
-                    ) {
-                        Text(
-                            option.label,
-                            modifier = Modifier.padding(vertical = 11.dp),
-                            color = if (tab == option) {
-                                MaterialTheme.colorScheme.onPrimary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Black,
-                        )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    LogsTab.entries.forEach { option ->
+                        val active = tab == option
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            onClick = { tab = option },
+                            shape = RoundedCornerShape(18.dp),
+                            color = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
+                            contentColor = if (active) MaterialTheme.colorScheme.onPrimary else textSecondary,
+                            shadowElevation = if (active && miuix) 2.dp else 0.dp,
+                        ) {
+                            Text(
+                                option.label,
+                                modifier = Modifier.padding(vertical = 10.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                fontSize = 12.sp,
+                                fontWeight = if (active) FontWeight.Black else FontWeight.Bold,
+                            )
+                        }
                     }
                 }
             }
@@ -176,9 +179,10 @@ internal fun LogsScreenCompact(
                         )
                     }
                 } else {
-                    items(state.tasks, key = { it.id }) { task ->
+                    itemsIndexed(state.tasks, key = { _, item -> item.id }) { index, task ->
                         TaskCard(
                             task = task,
+                            isLast = index == state.tasks.lastIndex,
                             cardColor = cardColor,
                             textPrimary = textPrimary,
                             textSecondary = textSecondary,
@@ -210,9 +214,10 @@ internal fun LogsScreenCompact(
                         )
                     }
                 } else {
-                    items(failed, key = { "issue-${it.id}" }) { task ->
+                    itemsIndexed(failed, key = { _, item -> "issue-${item.id}" }) { index, task ->
                         TaskCard(
                             task = task,
+                            isLast = index == failed.lastIndex,
                             cardColor = cardColor,
                             textPrimary = textPrimary,
                             textSecondary = textSecondary,
@@ -352,6 +357,7 @@ private fun IssueSummary(
 @Composable
 private fun TaskCard(
     task: TaskCenterItem,
+    isLast: Boolean,
     cardColor: Color,
     textPrimary: Color,
     textSecondary: Color,
@@ -362,11 +368,25 @@ private fun TaskCard(
         TaskPhase.WAITING_REBOOT -> MaterialTheme.colorScheme.tertiary
         else -> MaterialTheme.colorScheme.primary
     }
-    Card(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = cardColor),
-    ) {
-        Column(Modifier.padding(15.dp)) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
+        Column(
+            modifier = Modifier.width(22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Spacer(Modifier.height(17.dp))
+            Box(Modifier.size(10.dp).background(color, CircleShape))
+            if (!isLast) {
+                Spacer(Modifier.height(4.dp))
+                Box(Modifier.width(2.dp).height(88.dp).background(color.copy(alpha = .18f), RoundedCornerShape(999.dp)))
+            }
+        }
+        Spacer(Modifier.width(5.dp))
+        Card(
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(22.dp),
+            colors = CardDefaults.cardColors(containerColor = cardColor),
+        ) {
+            Column(Modifier.padding(15.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(42.dp),
@@ -422,6 +442,7 @@ private fun TaskCard(
             if (task.timeLabel.isNotBlank()) {
                 Spacer(Modifier.height(6.dp))
                 Text(task.timeLabel, color = textSecondary, fontSize = 10.sp)
+            }
             }
         }
     }

@@ -112,31 +112,43 @@ internal fun SettingsHubRoute(settings: AppearanceSettings, actions: AppearanceA
     }
     Column(Modifier.fillMaxSize().navigationBarsPadding()) {
         HubHeader(settings.uiStyle)
-        Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
+        Surface(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp),
+            shape = RoundedCornerShape(23.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (settings.uiStyle == UiStyle.MIUIX) .62f else .90f),
         ) {
-            SettingsSection.entries.forEach { item ->
-                val active = item == section
-                Surface(
-                    onClick = {
-                        sectionName = item.name
-                        if (item == SettingsSection.SAFETY) model.refreshHealth()
-                        if (item == SettingsSection.UPDATE) model.checkUpdate()
-                    },
-                    shape = RoundedCornerShape(17.dp),
-                    color = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-                    contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                ) {
-                    Row(Modifier.padding(horizontal = 13.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LuoShuGlyph(
-                            imageVector = item.icon,
-                            contentDescription = null,
-                            size = LuoShuIconTokens.SectionGlyph,
-                            opticalScale = item.opticalScale,
-                        )
-                        Spacer(Modifier.width(6.dp))
-                        Text(item.label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                SettingsSection.entries.forEach { item ->
+                    val active = item == section
+                    Surface(
+                        onClick = {
+                            sectionName = item.name
+                            if (item == SettingsSection.SAFETY) model.refreshHealth()
+                            if (item == SettingsSection.UPDATE) model.checkUpdate()
+                        },
+                        modifier = Modifier.width(78.dp),
+                        shape = RoundedCornerShape(19.dp),
+                        color = if (active) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
+                        contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                        shadowElevation = if (active && settings.uiStyle == UiStyle.MIUIX) 2.dp else 0.dp,
+                    ) {
+                        Row(
+                            Modifier.padding(horizontal = 9.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            LuoShuGlyph(
+                                imageVector = item.icon,
+                                contentDescription = null,
+                                size = LuoShuIconTokens.SectionGlyph,
+                                opticalScale = item.opticalScale,
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(item.label, fontSize = 10.sp, fontWeight = if (active) FontWeight.Black else FontWeight.SemiBold)
+                        }
                     }
                 }
             }
