@@ -691,6 +691,9 @@ private fun AppDockLayout(
                 val interactionSource = remember(page) { MutableInteractionSource() }
                 val pressed by interactionSource.collectIsPressedAsState()
                 val baseItemColor = if (selected) selectedColor else unselectedColor
+                // Keep press feedback entirely in color. A graphicsLayer here can create an
+                // offscreen buffer inside the Haze surface and render as a hard white rectangle
+                // on some OEM compositors.
                 val itemColor = if (pressed) baseItemColor.copy(alpha = .62f) else baseItemColor
                 Column(
                     modifier = Modifier
