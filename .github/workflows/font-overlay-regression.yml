@@ -1,0 +1,23 @@
+name: Validate XML font overlay regression
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - common/font_config_overlay.py
+      - scripts/font_config_overlay_test.py
+      - .github/workflows/font-overlay-regression.yml
+permissions:
+  contents: read
+jobs:
+  overlay:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile and run overlay tests
+        run: |
+          python3 -m py_compile common/font_config_overlay.py scripts/font_config_overlay_test.py
+          python3 scripts/font_config_overlay_test.py
