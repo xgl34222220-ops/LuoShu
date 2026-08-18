@@ -49,6 +49,13 @@ PROTECTED_COMMON_TOKENS = (
 )
 PROTECTED_UI_FILE_TOKENS = PROTECTED_COMMON_TOKENS + ("mono", "serif")
 PROTECTED_MONO_FILE_TOKENS = PROTECTED_COMMON_TOKENS + ("serif",)
+# `sans` as a whole word anywhere in the family name: sans-serif, misans, hihonor-sans,
+# oneui-sans-condensed, vivo-sans-vf ... but not "sansa" or an unrelated substring.
+SANS_FAMILY_PATTERN = re.compile(r"(?:^|-)(?:[a-z0-9]*sans)(?:$|-)")
+# A serif family must keep its own face. AOSP's sans-serif and ui-sans-serif are UI families
+# despite carrying "serif" in the name; vendor serif faces such as misans-serif stay protected.
+SERIF_FAMILY_PATTERN = re.compile(r"(?:^|-)serif(?:$|-)")
+UI_SANS_SERIF_FAMILIES = ("sans-serif", "ui-sans-serif")
 FONT_SUFFIXES = (".ttf", ".otf", ".ttc")
 WEIGHTS = (100, 200, 300, 400, 500, 600, 700, 800, 900)
 MIN_FONT_BYTES = 1024
@@ -67,12 +74,35 @@ def is_safe_mono_family(name: str) -> bool:
     return bool(normalized) and (normalized in MONO_EXACT_FAMILIES or normalized.startswith(MONO_PREFIXES))
 
 
+def looks_like_sans_family(normalized: str) -> bool:
+    """Recognise a UI text family by shape rather than by vendor name.
+
+    A curated list can only ever name the ROMs that existed when it was written, so every OEM that
+    calls its UI family something new escapes the overlay and silently keeps the stock font. Any
+    family whose name identifies it as a sans / UI text family therefore qualifies, while decorative
+    families keep their own names and are left alone.
+    """
+    if SANS_FAMILY_PATTERN.search(normalized):
+        return True
+    return normalized.endswith(("-ui-font", "-os-ui", "-uifont"))
+
+
 def is_safe_family(name: str) -> bool:
     normalized = normalize_family(name)
     if not normalized or is_safe_mono_family(normalized):
         return False
-    safe = normalized in SAFE_EXACT_FAMILIES or normalized.startswith(SAFE_PREFIXES)
-    return safe and not any(token in normalized for token in PROTECTED_COMMON_TOKENS)
+    if any(token in normalized for token in PROTECTED_COMMON_TOKENS):
+        return False
+    if SERIF_FAMILY_PATTERN.search(normalized) and not (
+        normalized in UI_SANS_SERIF_FAMILIES
+        or any(normalized.startswith(name + "-") for name in UI_SANS_SERIF_FAMILIES)
+    ):
+        return False
+    return (
+        normalized in SAFE_EXACT_FAMILIES
+        or normalized.startswith(SAFE_PREFIXES)
+        or looks_like_sans_family(normalized)
+    )
 
 
 def is_locale_specific_family(family: ET.Element) -> bool:
