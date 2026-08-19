@@ -5,8 +5,8 @@
 import_detect_family() {
     _stem="${1%.*}"
     _stem=$(printf '%s' "$_stem" | sed -E '
-        s/[-_](thin|extralight|ultralight|light|regular|book|normal|medium|semibold|demibold|bold|extrabold|ultrabold|black|heavy)(italic|oblique)$//I;
-        s/[-_](italic|oblique)(thin|extralight|ultralight|light|regular|book|normal|medium|semibold|demibold|bold|extrabold|ultrabold|black|heavy)$//I;
+        s/[-_](thin|extralight|ultralight|light|regular|book|normal|medium|semibold|demibold|bold|extrabold|ultrabold|black|heavy)[-_]?(italic|oblique)$//I;
+        s/[-_](italic|oblique)[-_]?(thin|extralight|ultralight|light|regular|book|normal|medium|semibold|demibold|bold|extrabold|ultrabold|black|heavy)$//I;
         s/[-_](italic|oblique)$//I;
         s/[-_](thin|extralight|ultralight|light|regular|book|normal|medium|semibold|demibold|bold|extrabold|ultrabold|black|heavy)$//I;
         s/[-_]w([1-9]|[1-9]00)(italic|oblique)?$//I;
@@ -18,7 +18,7 @@ import_detect_family() {
 
 import_filename_has_style_suffix() {
     _stem="${1%.*}"
-    printf '%s\n' "$_stem" | grep -Eiq '[-_](thin|extralight|ultralight|light|regular|book|normal|medium|semibold|demibold|bold|extrabold|ultrabold|black|heavy)(italic|oblique)?$|[-_](italic|oblique)(thin|extralight|ultralight|light|regular|book|normal|medium|semibold|demibold|bold|extrabold|ultrabold|black|heavy)$|[-_]w([1-9]|[1-9]00)(italic|oblique)?$|[-_](100|200|300|400|500|600|700|800|900)(italic|oblique)?$'
+    printf '%s\n' "$_stem" | grep -Eiq '[-_](thin|extralight|ultralight|light|regular|book|normal|medium|semibold|demibold|bold|extrabold|ultrabold|black|heavy)([-_]?(italic|oblique))?$|[-_](italic|oblique)[-_]?(thin|extralight|ultralight|light|regular|book|normal|medium|semibold|demibold|bold|extrabold|ultrabold|black|heavy)$|[-_]w([1-9]|[1-9]00)(italic|oblique)?$|[-_](100|200|300|400|500|600|700|800|900)(italic|oblique)?$'
 }
 
 # 某些字体模块为每个字重写入不同的内部 family 名，但文件名仍是稳定的

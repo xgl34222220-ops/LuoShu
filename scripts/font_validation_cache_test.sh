@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$ROOT/scripts/assert.sh"
+CASE='字体校验缓存'
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export MODULE_DIR="$TMP/module"
@@ -48,5 +50,5 @@ luoshu_font_validate_global_cached "$preflight"
 [ "$(wc -l < "$calls" | tr -d ' ')" -eq 3 ]
 
 # Direct switch still performs the full cached validator inside font_manager.
-grep -q 'luoshu_font_validate_global_cached "$_source"' "$ROOT/common/font_manager.sh"
+ok grep -q 'luoshu_font_validate_global_cached "$_source"' "$ROOT/common/font_manager.sh"
 echo 'font_validation_cache_test: PASS'

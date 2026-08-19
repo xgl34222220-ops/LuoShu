@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$ROOT/scripts/assert.sh"
+CASE='合成收尾性能'
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-mix-finalize)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
@@ -28,8 +30,8 @@ MODULE_DIR="$MODULE" MODDIR="$MODULE" sh -c '
     . "$1/common/font_safety.sh"
     luoshu_payload_build_manifest
 ' sh "$MODULE"
-test "$(cat "$TMP/cksum-count")" -eq 1
-test "$(wc -l < "$MODULE/config/font-payload-manifest.conf" | tr -d '[:space:]')" -eq 3
+ok test "$(cat "$TMP/cksum-count")" -eq 1
+eq "$(wc -l < "$MODULE/config/font-payload-manifest.conf" | tr -d '[:space:]')" 3
 
 # 94% payload validation must use stat metadata and must never stream every hard-linked font through wc.
 printf 'targets=0\nmapped=0\n' > "$MODULE/config/font-target-coverage.conf"
@@ -50,24 +52,24 @@ MODULE_DIR="$MODULE" MODDIR="$MODULE" sh -c '
     _luoshu_font_config_validate() { return 0; }
     luoshu_payload_validate_current mix
 ' sh "$MODULE"
-test "$(cat "$TMP/wc-count")" -eq 0
+ok test "$(cat "$TMP/wc-count")" -eq 0
 
-grep -q '_luoshu_fast_filesize' "$ROOT/common/font_finalize_hotfix.sh"
-grep -q "mix_stage weight-map '正在准备九档字体映射' 92" "$ROOT/common/font_finalize_hotfix.sh"
-grep -q "mix_stage mono-map '正在生成等宽英文数字映射' 93" "$ROOT/common/font_finalize_hotfix.sh"
-test "$(grep -c '_luoshu_config_make_mono_weight .* 400' "$ROOT/common/font_finalize_hotfix.sh")" -eq 1
+ok grep -q '_luoshu_fast_filesize' "$ROOT/common/font_finalize_hotfix.sh"
+ok grep -q "mix_stage weight-map '正在准备九档字体映射' 92" "$ROOT/common/font_finalize_hotfix.sh"
+ok grep -q "mix_stage mono-map '正在生成等宽英文数字映射' 93" "$ROOT/common/font_finalize_hotfix.sh"
+ok test "$(grep -c '_luoshu_config_make_mono_weight .* 400' "$ROOT/common/font_finalize_hotfix.sh")" -eq 1
 
 # Finalization progress must reserve space after glyph generation and expose real stages.
-grep -q '完整复合字体已生成", 80' "$ROOT/common/composite_font.py"
-grep -q "mix_stage mount-sync '正在同步元模块字体负载' 96" "$ROOT/common/font_mix.sh"
-grep -q "mix_stage manifest '正在生成安全启动清单' 98" "$ROOT/common/font_mix.sh"
-! grep -q 'cp -af "$SYSTEM_FONTS_DIR/." "$PAYLOAD_STAGE/"' "$ROOT/common/font_mix.sh"
-grep -q '_progress_message=' "$ROOT/common/weighted_mix_task.sh"
-grep -q '完整复合字体后台进程已退出' "$ROOT/common/weighted_mix_task.sh"
+ok grep -q '完整复合字体已生成", 80' "$ROOT/common/composite_font.py"
+ok grep -q "mix_stage mount-sync '正在同步元模块字体负载' 96" "$ROOT/common/font_mix.sh"
+ok grep -q "mix_stage manifest '正在生成安全启动清单' 98" "$ROOT/common/font_mix.sh"
+no grep -q 'cp -af "$SYSTEM_FONTS_DIR/." "$PAYLOAD_STAGE/"' "$ROOT/common/font_mix.sh"
+ok grep -q '_progress_message=' "$ROOT/common/weighted_mix_task.sh"
+ok grep -q '完整复合字体后台进程已退出' "$ROOT/common/weighted_mix_task.sh"
 
 # The import action must fit the full Chinese label on one line.
-grep -q 'else -> 148.dp' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
-grep -q 'softWrap = false' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
-grep -q 'modifier = modifier.fillMaxWidth()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
+ok grep -q 'else -> 148.dp' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
+ok grep -q 'softWrap = false' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
+ok grep -q 'modifier = modifier.fillMaxWidth()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 
 echo 'Mix finalization uses metadata-only validation, one Mono build, and real progress stages.'

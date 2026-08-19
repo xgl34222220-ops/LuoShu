@@ -2,6 +2,8 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$ROOT/scripts/assert.sh"
+CASE='负载策略'
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-policy)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
@@ -26,13 +28,13 @@ templateKey=fixture-template-key
 EOF
 
 device_font_payload_build_install SameFont
-test ! -s "$CLEARS"
+no test -s "$CLEARS"
 
 a=0
 device_font_payload_build_install OtherFont || a=$?
-test "$a" -eq 2
-grep -qx clear "$CLEARS"
-grep -q '设备缓存未命中' "$MODULE/logs/device-font-payload.log"
+ok test "$a" -eq 2
+ok grep -qx clear "$CLEARS"
+ok grep -q '设备缓存未命中' "$MODULE/logs/device-font-payload.log"
 
 : > "$CLEARS"
 cat > "$MODULE/config/device-font-engine.conf" <<'EOF'
@@ -43,9 +45,9 @@ EOF
 
 a=0
 device_font_payload_build_install SameFont || a=$?
-test "$a" -eq 2
-grep -qx clear "$CLEARS"
-grep -q '模板指纹变化' "$MODULE/logs/device-font-payload.log"
+ok test "$a" -eq 2
+ok grep -qx clear "$CLEARS"
+ok grep -q '模板指纹变化' "$MODULE/logs/device-font-payload.log"
 
 sh -n "$ROOT/common/device_font_payload_policy.sh"
 echo 'Device font foreground policy tests passed.'
