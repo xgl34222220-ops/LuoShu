@@ -29,7 +29,7 @@
 - No-Hook font engine tests
 - Font engine smoke tests
 
-其中扩展后的 `scripts/check.sh`、严格断言、duplicate-function guard、Android 构建与候选包验证均已通过。
+其中扩展后的 `scripts/check.sh`、严格断言、duplicate-function guard、Android 构建与候选包验证均已通过；正式版 `module.prop`、`config/version_notes.conf` 与稳定版授权也已统一到 v2.8.0。
 
 正式发布工作流还会重新执行完整源码检查、Android Release Lint、单元测试、固定签名 APK 构建与证书校验、模块 ZIP 与内嵌 APK 一致性检查、SHA-256 校验和稳定版发布就绪门禁。
 
