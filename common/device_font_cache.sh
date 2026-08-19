@@ -108,6 +108,135 @@ _dfcache_foreground_idle() {
     return 0
 }
 
+# The aligned cache is a pure enhancement: fonts are already live through the physical slot mapping
+# before it ever runs. It had no failure counter and no ceiling, and the pending marker was only
+# removed on the success path, so a build that could never succeed on a given ROM was relaunched at
+# full CPU on every single boot. That is how a font module ends up looking like a permanent load.
+LUOSHU_CACHE_FAILURE_LIMIT="${LUOSHU_CACHE_FAILURE_LIMIT:-3}"
+case "$LUOSHU_CACHE_FAILURE_LIMIT" in ''|*[!0-9]*) LUOSHU_CACHE_FAILURE_LIMIT=3 ;; esac
+[ "$LUOSHU_CACHE_FAILURE_LIMIT" -ge 1 ] 2>/dev/null || LUOSHU_CACHE_FAILURE_LIMIT=1
+
+_dfcache_failure_file() {
+    printf '%s/config/device-font-cache-failures.conf\n' "$(_dfcache_module)"
+}
+
+_dfcache_failure_count() {
+    _dfcf_value=$(sed -n 's/^count=//p' "$(_dfcache_failure_file)" 2>/dev/null | head -n1)
+    case "$_dfcf_value" in ''|*[!0-9]*) _dfcf_value=0 ;; esac
+    printf '%s\n' "$_dfcf_value"
+}
+
+_dfcache_failure_reset() {
+    rm -f "$(_dfcache_failure_file)" 2>/dev/null || true
+}
+
+_dfcache_failure_record() {
+    _dfcr_reason="${1:-unknown}"
+    _dfcr_count=$(_dfcache_failure_count)
+    _dfcr_count=$((_dfcr_count + 1))
+    {
+        printf 'count=%s\n' "$_dfcr_count"
+        printf 'reason=%s\n' "$_dfcr_reason"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$(_dfcache_failure_file)" 2>/dev/null || true
+    if [ "$_dfcr_count" -ge "$LUOSHU_CACHE_FAILURE_LIMIT" ]; then
+        rm -f "$(_dfcache_module)/config/device-font-cache-pending.conf" 2>/dev/null || true
+        _dfcache_log "设备对齐缓存连续失败 ${_dfcr_count} 次，已放弃并停止重试（reason=${_dfcr_reason}）；字体本身已由物理槽映射生效，此项仅为增强"
+    else
+        _dfcache_log "设备对齐缓存失败 ${_dfcr_count}/${LUOSHU_CACHE_FAILURE_LIMIT}（reason=${_dfcr_reason}）"
+    fi
+}
+
+# Both launchers must run the builder at the lowest priority available. One of them did not, so
+# whether the heavy fontTools pass competed with the UI depended on which path happened to start it.
+_dfcache_run_service_lowpri() {
+    _dfcrs_module="$1"
+    MODDIR="$_dfcrs_module"
+    MODULE_DIR="$_dfcrs_module"
+    export MODDIR MODULE_DIR
+    mkdir -p "$_dfcrs_module/logs" 2>/dev/null || true
+    if command -v ionice >/dev/null 2>&1 && command -v nice >/dev/null 2>&1; then
+        ionice -c 3 nice -n 19 sh "$_dfcrs_module/common/device_font_cache.sh" service \
+            >> "$_dfcrs_module/logs/device-font-cache.log" 2>&1
+    elif command -v nice >/dev/null 2>&1; then
+        nice -n 19 sh "$_dfcrs_module/common/device_font_cache.sh" service \
+            >> "$_dfcrs_module/logs/device-font-cache.log" 2>&1
+    else
+        sh "$_dfcrs_module/common/device_font_cache.sh" service \
+            >> "$_dfcrs_module/logs/device-font-cache.log" 2>&1
+    fi
+}
+
+# Cache locks survive in the persistent module directory, so a reboot/OOM can leave one behind.
+# Reuse the font-switch identity lock helpers (PID + starttime + boot_id) when available; this
+# avoids treating a recycled PID after reboot as the old cache worker.
+_dfcache_load_lock_helpers() {
+    type luoshu_font_lock_acquire >/dev/null 2>&1 &&
+        type luoshu_font_lock_reap_stale >/dev/null 2>&1 &&
+        type luoshu_font_lock_release >/dev/null 2>&1 && return 0
+    _dfcl_module="$(_dfcache_module)"
+    _dfcl_util="$_dfcl_module/common/util_functions.sh"
+    [ -f "$_dfcl_util" ] && . "$_dfcl_util"
+    type luoshu_font_lock_acquire >/dev/null 2>&1 &&
+        type luoshu_font_lock_reap_stale >/dev/null 2>&1 &&
+        type luoshu_font_lock_release >/dev/null 2>&1
+}
+
+_dfcache_lock_reap_stale() {
+    _dfclr_lock="$1"
+    [ -e "$_dfclr_lock" ] || return 0
+    if _dfcache_load_lock_helpers; then
+        luoshu_font_lock_active "$_dfclr_lock" >/dev/null 2>&1 && return 1
+        luoshu_font_lock_reap_stale "$_dfclr_lock" >/dev/null 2>&1 || true
+        [ ! -e "$_dfclr_lock" ]
+        return $?
+    fi
+    # Minimal fallback for stripped/test environments where util_functions.sh is unavailable.
+    _dfclr_owner=$(sed -n '1p' "$_dfclr_lock/pid" 2>/dev/null)
+    case "$_dfclr_owner" in
+        ''|*[!0-9]*)
+            sleep 1 2>/dev/null || true
+            _dfclr_owner=$(sed -n '1p' "$_dfclr_lock/pid" 2>/dev/null)
+            ;;
+    esac
+    case "$_dfclr_owner" in
+        ''|*[!0-9]*) ;;
+        *) kill -0 "$_dfclr_owner" 2>/dev/null && return 1 ;;
+    esac
+    rm -f "$_dfclr_lock/pid" 2>/dev/null || true
+    rmdir "$_dfclr_lock" 2>/dev/null || true
+    [ ! -e "$_dfclr_lock" ]
+}
+
+_dfcache_lock_acquire() {
+    _dfcla_lock="$1"
+    if _dfcache_load_lock_helpers; then
+        luoshu_font_lock_acquire "$_dfcla_lock" "$$"
+        return $?
+    fi
+    _dfcache_lock_reap_stale "$_dfcla_lock" >/dev/null 2>&1 || {
+        [ ! -e "$_dfcla_lock" ] || return 2
+    }
+    mkdir "$_dfcla_lock" 2>/dev/null || return 2
+    printf '%s\n' "$$" > "$_dfcla_lock/pid" 2>/dev/null || {
+        rmdir "$_dfcla_lock" 2>/dev/null || true
+        return 1
+    }
+    return 0
+}
+
+_dfcache_lock_release() {
+    _dfclx_lock="$1"
+    if _dfcache_load_lock_helpers; then
+        luoshu_font_lock_release "$_dfclx_lock" "$$" >/dev/null 2>&1 && return 0
+    fi
+    _dfclx_owner=$(sed -n '1p' "$_dfclx_lock/pid" 2>/dev/null)
+    [ -z "$_dfclx_owner" ] || [ "$_dfclx_owner" = "$$" ] || return 1
+    rm -f "$_dfclx_lock/pid" 2>/dev/null || true
+    rmdir "$_dfclx_lock" 2>/dev/null || true
+    [ ! -e "$_dfclx_lock" ]
+}
+
 _dfcache_autostart_pending() {
     _dfc_font="$1"
     _dfc_module="$(_dfcache_module)"
@@ -132,13 +261,7 @@ _dfcache_autostart_pending() {
         MODDIR="$_dfc_module"
         MODULE_DIR="$_dfc_module"
         export MODDIR MODULE_DIR
-        if command -v ionice >/dev/null 2>&1 && command -v nice >/dev/null 2>&1; then
-            ionice -c 3 nice -n 10 sh "$_dfc_script" service >> "$_dfc_module/logs/device-font-cache.log" 2>&1
-        elif command -v nice >/dev/null 2>&1; then
-            nice -n 10 sh "$_dfc_script" service >> "$_dfc_module/logs/device-font-cache.log" 2>&1
-        else
-            sh "$_dfc_script" service >> "$_dfc_module/logs/device-font-cache.log" 2>&1
-        fi
+        _dfcache_run_service_lowpri "$_dfc_module"
     ) &
     return 0
 }
@@ -167,6 +290,8 @@ device_font_cache_schedule() {
     } > "${_dfc_pending}.tmp.$$" 2>/dev/null || return 1
     mv -f "${_dfc_pending}.tmp.$$" "$_dfc_pending" 2>/dev/null || return 1
     chmod 0600 "$_dfc_pending" 2>/dev/null || true
+    # An explicit switch is a new intent, not a retry of the thing that kept failing.
+    _dfcache_failure_reset
     _dfcache_log "已安排后台生成设备对齐缓存：$_dfc_font"
     _dfcache_autostart_pending "$_dfc_font"
     return 0
@@ -254,7 +379,7 @@ _dfcache_prune() {
     done
 }
 
-device_font_cache_build_pending() {
+_dfcache_build_pending_inner() {
     _dfc_module="$(_dfcache_module)"
     _dfc_pending="$_dfc_module/config/device-font-cache-pending.conf"
     _dfc_lock="$_dfc_module/.device-font-cache.lock"
@@ -263,11 +388,14 @@ device_font_cache_build_pending() {
         _dfcache_log '前台字体事务尚未结束，后台缓存本轮跳过并保留待办'
         return 2
     }
-    if ! mkdir "$_dfc_lock" 2>/dev/null; then
-        _dfcache_log '后台对齐缓存任务已经在运行'
-        return 2
-    fi
-    trap 'rmdir "'"$_dfc_lock"'" 2>/dev/null || true' EXIT HUP INT TERM
+    _dfcache_lock_acquire "$_dfc_lock"
+    _dfc_lock_rc=$?
+    case "$_dfc_lock_rc" in
+        0) ;;
+        2) _dfcache_log '后台对齐缓存任务已经在运行'; return 2 ;;
+        *) _dfcache_log '后台对齐缓存锁创建失败'; return 1 ;;
+    esac
+    trap '_dfcache_lock_release "$_dfc_lock" >/dev/null 2>&1 || true' EXIT HUP INT TERM
 
     _dfc_font=$(sed -n 's/^font=//p' "$_dfc_pending" 2>/dev/null | head -n1)
     _dfc_cache_id=$(sed -n 's/^cacheId=//p' "$_dfc_pending" 2>/dev/null | head -n1)
@@ -372,13 +500,25 @@ device_font_cache_build_pending() {
         _dfcache_prune "$_dfc_root"
         _dfcache_notify '设备对齐字体已在后台生成完成，请完整重启一次加载校准结果。'
         _dfcache_log "后台设备对齐缓存已提交，等待重启：$_dfc_font"
-        rmdir "$_dfc_lock" 2>/dev/null || true
+        _dfcache_lock_release "$_dfc_lock" >/dev/null 2>&1 || true
         trap - EXIT HUP INT TERM
         return 0
     fi
     [ "$_dfc_txn" -eq 0 ] || luoshu_payload_transaction_abort >/dev/null 2>&1 || true
     _dfcache_log "后台设备对齐缓存激活失败：$_dfc_font"
     return 1
+}
+
+# rc=2 means "not now" (foreground busy, nothing pending, no template yet) and must not burn the
+# failure budget. Only a real build or activation failure counts.
+device_font_cache_build_pending() {
+    _dfcache_build_pending_inner "$@"
+    _dfcbp_rc=$?
+    case "$_dfcbp_rc" in
+        0) _dfcache_failure_reset ;;
+        1) _dfcache_failure_record build ;;
+    esac
+    return "$_dfcbp_rc"
 }
 
 if [ "${0##*/}" = device_font_cache.sh ]; then
