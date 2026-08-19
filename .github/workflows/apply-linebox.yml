@@ -25,9 +25,9 @@ jobs:
           set -euo pipefail
           cat .tmp/linebox/gz00.b64 .tmp/linebox/gz01.b64 > /tmp/linebox.patch.gz.b64
           base64 --decode /tmp/linebox.patch.gz.b64 > /tmp/linebox.patch.gz
-          echo 'b9b5790e10d97607304fc8840d5f12e467ae518b4c2b5ba6c53f801229a267ab  /tmp/linebox.patch.gz' | sha256sum -c -
+          echo '0f851e8f578b0e400850f5deda586cf4139127927d2f4f3ee52391aee107c889  /tmp/linebox.patch.gz' | sha256sum -c -
           gzip -dc /tmp/linebox.patch.gz > /tmp/linebox.patch
-          echo '29b2a2713de9fd88ba476fac3fce6113100dbe6d244566a8613001940b2ee44c  /tmp/linebox.patch' | sha256sum -c -
+          echo 'a67d28e0b7a0ff3e0e8a37703ad422f4d5f5530ee18f6087cb408e31740c45f2  /tmp/linebox.patch' | sha256sum -c -
           git apply --check /tmp/linebox.patch
           git apply /tmp/linebox.patch
 
