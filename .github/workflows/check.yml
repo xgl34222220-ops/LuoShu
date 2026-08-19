@@ -29,11 +29,30 @@ jobs:
           set -euo pipefail
           git fetch origin main
 
+          expected=(
+            f22702950cba4ee3fc39508390c4038ddb66c838eae7faf1bc2f3b26cabef70a
+            ab96f95b852302c792e25da8d5cc9eb260f35ddc2ba54bd40000bb98b79a6346
+            ec59bd5376e398676a6619fa5e91fdd69c45209c568c610f749ce7c8a0bef26f
+            30b59351ced383173cfac4344ce384b82ea9abdd4cc60a0aaa1867bf1489a29c
+            0c969fda1abd247167bf1723aebc7942bd1c1ef5c866157b7349b98183a35aa6
+            a662853e12f27049b285a129aa42071ffbc42e7a2c6f623a8f4fb2eb78e15b01
+          )
+          i=0
+          for f in .github/patches/p2part*.b64; do
+            actual=$(sha256sum "$f" | awk '{print $1}')
+            echo "$f $actual"
+            test "$actual" = "${expected[$i]}"
+            i=$((i + 1))
+          done
+
           : > /tmp/remaining-2.diff
           for f in .github/patches/p2part*.b64; do
             base64 -d "$f" >> /tmp/remaining-2.diff
           done
+          wc -c /tmp/remaining-2.diff
+          sha256sum /tmp/remaining-2.diff
           test "$(wc -c < /tmp/remaining-2.diff | tr -d ' ')" -eq 47051
+          test "$(sha256sum /tmp/remaining-2.diff | awk '{print $1}')" = ebec43e08f35d7cefb99963736e4adb898ef90f750f12cb1723b6850cc47b30b
 
           if git apply --check .github/patches/remaining-1.diff; then
             git apply .github/patches/remaining-1.diff
