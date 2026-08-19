@@ -13,6 +13,7 @@ import json
 import os
 import re
 import tempfile
+from io import BytesIO
 from pathlib import Path
 
 from fontTools.ttLib import TTCollection, TTFont
@@ -94,7 +95,14 @@ def parse_axis_spec(spec: str) -> dict[str, float]:
     return result
 
 
-def materialize(source: Path, output: Path, role: str, requested_weight: int, requested_axes: dict[str, float]) -> dict[str, object]:
+def materialize(
+    source: Path,
+    output: Path,
+    role: str,
+    requested_weight: int,
+    requested_axes: dict[str, float],
+    source_bytes: bytes | None = None,
+) -> dict[str, object]:
     if not source.is_file() or source.stat().st_size < 12:
         raise InstanceError(f"字体源文件不可用：{source}")
     requested_weight = clamp_weight(requested_axes.get("wght", requested_weight))
@@ -106,7 +114,9 @@ def materialize(source: Path, output: Path, role: str, requested_weight: int, re
     }
     if face >= 0:
         kwargs["fontNumber"] = face
-    font = TTFont(str(source), **kwargs)
+    # In batch mode the caller has already read the file once; parsing that buffer avoids re-reading
+    # a multi-megabyte font from storage for every weight.
+    font = TTFont(BytesIO(source_bytes) if source_bytes is not None else str(source), **kwargs)
     variable = "fvar" in font
     location: dict[str, float] = {}
     ignored_axes: list[str] = []
@@ -159,17 +169,59 @@ def materialize(source: Path, output: Path, role: str, requested_weight: int, re
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True)
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--role", choices=("cjk", "latin", "digit"), required=True)
+    parser.add_argument("--input")
+    parser.add_argument("--output")
+    parser.add_argument("--batch")
+    parser.add_argument("--role", choices=("cjk", "latin", "digit"), default="cjk")
     parser.add_argument("--weight", type=int, default=400)
     parser.add_argument("--axes", default="")
     return parser.parse_args()
 
 
+def run_batch(job_file: Path) -> int:
+    """Materialize several weights from one source in a single interpreter.
+
+    A variable font has one file behind all nine weights, so the per-weight form started the
+    embedded interpreter nine times and read the whole font nine times. The instancing itself
+    genuinely differs per weight and still runs per job; everything around it does not need to.
+
+    Job lines are tab separated:  input<TAB>output<TAB>role<TAB>weight<TAB>axes
+    Result lines:                 output<TAB>ok|error<TAB>message
+    """
+    cache: dict[str, bytes] = {}
+    for raw in job_file.read_text(encoding="utf-8").splitlines():
+        line = raw.rstrip("\n")
+        if not line.strip():
+            continue
+        fields = line.split("\t")
+        if len(fields) < 4:
+            print("\terror\tmalformed job line")
+            continue
+        source, output, role, weight = fields[0], fields[1], fields[2], fields[3]
+        axes = fields[4] if len(fields) > 4 else ""
+        try:
+            key = str(Path(source))
+            if key not in cache:
+                if len(cache) >= 2:
+                    cache.clear()
+                cache[key] = Path(source).read_bytes()
+            materialize(Path(source), Path(output), role, int(weight or 400),
+                        parse_axis_spec(axes), source_bytes=cache[key])
+        except Exception as error:  # noqa: BLE001 - reported per line so the batch continues
+            message = (str(error) or error.__class__.__name__).replace("\n", " ").replace("\t", " ")
+            print(f"{output}\terror\t{message}")
+            continue
+        print(f"{output}\tok\t")
+    return 0
+
+
 def main() -> int:
     try:
         args = parse_args()
+        if getattr(args, "batch", None):
+            return run_batch(Path(args.batch))
+        if not args.input or not args.output:
+            raise InstanceError("缺少 --input/--output（除非使用 --batch）")
         result = materialize(Path(args.input), Path(args.output), args.role, args.weight, parse_axis_spec(args.axes))
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         return 0
