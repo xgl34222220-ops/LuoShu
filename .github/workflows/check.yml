@@ -29,10 +29,8 @@ jobs:
           set -euo pipefail
           git fetch origin main
 
-          cat .github/patches/gzpart*.b64 > /tmp/remaining-2.diff.gz.b64
-          base64 -d /tmp/remaining-2.diff.gz.b64 > /tmp/remaining-2.diff.gz
-          gunzip -t /tmp/remaining-2.diff.gz
-          gunzip -c /tmp/remaining-2.diff.gz > /tmp/remaining-2.diff
+          gunzip -t .github/patches/remaining-2.diff.gz
+          gunzip -c .github/patches/remaining-2.diff.gz > /tmp/remaining-2.diff
           echo "patch2-bytes=$(wc -c < /tmp/remaining-2.diff)"
 
           if git apply --check .github/patches/remaining-1.diff; then
