@@ -2,6 +2,8 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$ROOT/scripts/assert.sh"
+CASE='设备对齐缓存'
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-cache)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MODULE="$TMP/module"
@@ -36,8 +38,8 @@ _dfcache_foreground_idle
 
 device_font_cache_schedule DemoFont
 PENDING="$MODULE/config/device-font-cache-pending.conf"
-grep -q '^state=pending$' "$PENDING"
-grep -q '^font=DemoFont$' "$PENDING"
+ok grep -q '^state=pending$' "$PENDING"
+ok grep -q '^font=DemoFont$' "$PENDING"
 CACHE_ID=$(sed -n 's/^cacheId=//p' "$PENDING")
 SOURCE_KEY=$(sed -n 's/^sourceKey=//p' "$PENDING")
 CACHE="$MODULE/config/device-font-cache/$CACHE_ID"
@@ -52,13 +54,13 @@ templateKey=trusted-key
 sourceKey=$SOURCE_KEY
 EOF
 
-test "$(device_font_cache_lookup DemoFont)" = "$CACHE"
+ok test "$(device_font_cache_lookup DemoFont)" = "$CACHE"
 device_font_cache_activate DemoFont
-grep -qx "$CACHE/overlay" "$INSTALLS"
-grep -q '^state=installed$' "$MODULE/config/device-font-engine.conf"
-grep -q '^templateKey=trusted-key$' "$MODULE/config/device-font-engine.conf"
-grep -q '^planRevision=2$' "$MODULE/config/device-font-engine.conf"
-test ! -e "$PENDING"
+ok grep -qx "$CACHE/overlay" "$INSTALLS"
+ok grep -q '^state=installed$' "$MODULE/config/device-font-engine.conf"
+ok grep -q '^templateKey=trusted-key$' "$MODULE/config/device-font-engine.conf"
+ok grep -q '^planRevision=2$' "$MODULE/config/device-font-engine.conf"
+no test -e "$PENDING"
 
 sh -n "$ROOT/common/device_font_cache.sh"
 echo 'Device font cache tests passed.'

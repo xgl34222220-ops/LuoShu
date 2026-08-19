@@ -2,6 +2,8 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$ROOT/scripts/assert.sh"
+CASE='运行时报告'
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-runtime-report)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MOD="$TMP/module"
@@ -56,20 +58,20 @@ export PATH="$BIN:$PATH"
 
 font_config_mark_boot_success
 
-grep -q '^state=confirmed$' "$MOD/config/font-payload-boot.conf"
-grep -q '^moduleVersion=v2.2.0 Alpha 1$' "$REPORT/summary.txt"
-grep -q '^activeFont=Fixture Font$' "$REPORT/summary.txt"
-grep -q '^engineState=installed$' "$REPORT/summary.txt"
-grep -q 'google-sans-text.*LuoShuSlot-fixture.ttf' "$REPORT/font-manager-dump.txt"
-grep -q 'google-sans-text.*LuoShuSlot-fixture.ttf' "$REPORT/dynamic-font-proof.txt"
-test -s "$REPORT/device-font-template.json"
-test -s "$REPORT/device-font-payload-manifest.json"
-test -s "$REPORT/device-font-overlay-manifest.json"
-test -s "$REPORT/device-font-installed.conf"
+ok grep -q '^state=confirmed$' "$MOD/config/font-payload-boot.conf"
+ok grep -q '^moduleVersion=v2.2.0 Alpha 1$' "$REPORT/summary.txt"
+ok grep -q '^activeFont=Fixture Font$' "$REPORT/summary.txt"
+ok grep -q '^engineState=installed$' "$REPORT/summary.txt"
+ok grep -q 'google-sans-text.*LuoShuSlot-fixture.ttf' "$REPORT/font-manager-dump.txt"
+ok grep -q 'google-sans-text.*LuoShuSlot-fixture.ttf' "$REPORT/dynamic-font-proof.txt"
+ok test -s "$REPORT/device-font-template.json"
+ok test -s "$REPORT/device-font-payload-manifest.json"
+ok test -s "$REPORT/device-font-overlay-manifest.json"
+ok test -s "$REPORT/device-font-installed.conf"
 
 # Reporting remains repeatable after the boot transaction is already confirmed.
 rm -rf "$REPORT"
 font_config_mark_boot_success
-test -s "$REPORT/font-manager-dump.txt"
+ok test -s "$REPORT/font-manager-dump.txt"
 
 echo 'device font runtime report tests passed'

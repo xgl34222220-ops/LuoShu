@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$ROOT/scripts/assert.sh"
+CASE='ColorOS 一致性映射'
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-coloros-consistency)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MODULE="$TMP/module"
@@ -41,9 +43,9 @@ LUOSHU_COLOROS_OPLUS_REGION_FONTS_ROOT="$TMP/none-oplus-region"
 . "$MODULE/common/coloros_global.sh"
 
 copy_as_coloros "$PUBLIC/fonts/Demo-Regular.ttf" "$MODULE/system/fonts" quick Demo
-cmp -s "$PUBLIC/fonts/Demo-Thin.ttf" "$MODULE/product/fonts/OplusOSUI-XThin.ttf"
-cmp -s "$PUBLIC/fonts/Demo-SemiBold.ttf" "$MODULE/product/fonts/OplusSans-SemiBold.ttf"
-cmp -s "$PUBLIC/fonts/Demo-Regular.ttf" "$MODULE/product/fonts/GoogleSansText-Regular.ttf"
-test ! -e "$MODULE/product/fonts/Oplus-Serif.ttf"
-test ! -e "$MODULE/product/fonts/Roboto-Italic.ttf"
+ok cmp -s "$PUBLIC/fonts/Demo-Thin.ttf" "$MODULE/product/fonts/OplusOSUI-XThin.ttf"
+ok cmp -s "$PUBLIC/fonts/Demo-SemiBold.ttf" "$MODULE/product/fonts/OplusSans-SemiBold.ttf"
+ok cmp -s "$PUBLIC/fonts/Demo-Regular.ttf" "$MODULE/product/fonts/GoogleSansText-Regular.ttf"
+no test -e "$MODULE/product/fonts/Oplus-Serif.ttf"
+no test -e "$MODULE/product/fonts/Roboto-Italic.ttf"
 echo 'ColorOS consistency mapping passed.'

@@ -2,6 +2,8 @@
 set -eu
 
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+. "$ROOT/scripts/assert.sh"
+CASE='字体切换锁'
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -54,7 +56,7 @@ if luoshu_font_lock_active "$IDENTITY_LOCK"; then
     exit 1
 fi
 luoshu_font_lock_reap_stale "$IDENTITY_LOCK"
-test ! -e "$IDENTITY_LOCK"
+no test -e "$IDENTITY_LOCK"
 
 # A previous-boot lock must be stale even if the PID and starttime happen to
 # collide with a live process on the current boot.
@@ -66,7 +68,7 @@ if luoshu_font_lock_active "$IDENTITY_LOCK"; then
     exit 1
 fi
 luoshu_font_lock_reap_stale "$IDENTITY_LOCK"
-test ! -e "$IDENTITY_LOCK"
+no test -e "$IDENTITY_LOCK"
 
 # Legacy locks remain readable during upgrades. A pid-only directory and the
 # older flat pid file both continue to protect a live owner.
@@ -74,11 +76,11 @@ mkdir "$IDENTITY_LOCK"
 printf '%s\n' "$LIVE_PID" > "$IDENTITY_LOCK/pid"
 luoshu_font_lock_active "$IDENTITY_LOCK"
 luoshu_font_lock_release "$IDENTITY_LOCK" "$LIVE_PID"
-test ! -e "$IDENTITY_LOCK"
+no test -e "$IDENTITY_LOCK"
 printf '%s\n' "$LIVE_PID" > "$IDENTITY_LOCK"
 luoshu_font_lock_active "$IDENTITY_LOCK"
 luoshu_font_lock_release "$IDENTITY_LOCK" "$LIVE_PID"
-test ! -e "$IDENTITY_LOCK"
+no test -e "$IDENTITY_LOCK"
 
 # Release is ownership-aware beyond PID equality. A reused PID cannot remove a
 # lock created by the earlier process incarnation.
@@ -135,8 +137,8 @@ for contender in 1 2 3 4 5 6 7 8; do
 done
 : > "$RACE_GATE"
 for race_pid in $race_pids; do wait "$race_pid"; done
-test "$(wc -l < "$RACE_WINNERS")" -eq 1
-test ! -e "$RACE_LOCK"
+ok test "$(wc -l < "$RACE_WINNERS")" -eq 1
+no test -e "$RACE_LOCK"
 
 MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
     LOCK_TEST_MARKER="$MARKER" LOCK_TEST_RELEASE="$TMP/release" \
@@ -144,26 +146,26 @@ MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
     sh "$ROOT/common/font_manager.sh" action switch default > "$TMP/first.out" 2>&1 &
 first_pid=$!
 wait_for_file "$MARKER"
-test -d "$LOCK"
-test "$(sed -n '1p' "$LOCK/pid")" = "$first_pid"
-grep -Eq '^starttime=[0-9]+$' "$LOCK/pid"
-grep -Eq '^boot_id=.+$' "$LOCK/pid"
+ok test -d "$LOCK"
+ok test "$(sed -n '1p' "$LOCK/pid")" = "$first_pid"
+ok grep -Eq '^starttime=[0-9]+$' "$LOCK/pid"
+ok grep -Eq '^boot_id=.+$' "$LOCK/pid"
 
 MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
     LOCK_TEST_MARKER="$MARKER" LOCK_TEST_RELEASE="$TMP/release" \
     LOCK_TEST_ABORT_MARKER="$ABORT_MARKER" \
     sh "$ROOT/common/font_manager.sh" action switch default > "$TMP/second.out" 2>&1
-grep -q '字体正在切换中' "$TMP/second.out"
-test "$(sed -n '1p' "$LOCK/pid")" = "$first_pid"
+ok grep -q '字体正在切换中' "$TMP/second.out"
+ok test "$(sed -n '1p' "$LOCK/pid")" = "$first_pid"
 
 kill -TERM "$first_pid"
 set +e
 wait "$first_pid"
 first_rc=$?
 set -e
-test "$first_rc" -eq 143
-test ! -e "$LOCK"
-test "$(wc -l < "$ABORT_MARKER")" -eq 1
+ok test "$first_rc" -eq 143
+no test -e "$LOCK"
+ok test "$(wc -l < "$ABORT_MARKER")" -eq 1
 
 # Dead legacy PID locks are still reaped.
 rm -f "$MARKER" "$ABORT_MARKER"
@@ -175,15 +177,15 @@ MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
     sh "$ROOT/common/font_manager.sh" action switch default > "$TMP/stale.out" 2>&1 &
 stale_pid=$!
 wait_for_file "$MARKER"
-test "$(sed -n '1p' "$LOCK/pid")" = "$stale_pid"
+ok test "$(sed -n '1p' "$LOCK/pid")" = "$stale_pid"
 kill -TERM "$stale_pid"
 set +e
 wait "$stale_pid"
 stale_rc=$?
 set -e
-test "$stale_rc" -eq 143
-test ! -e "$LOCK"
-test "$(wc -l < "$ABORT_MARKER")" -eq 1
+ok test "$stale_rc" -eq 143
+no test -e "$LOCK"
+ok test "$(wc -l < "$ABORT_MARKER")" -eq 1
 
 # A live-but-reused PID lock is also reaped by the real switch entrypoint.
 rm -f "$MARKER" "$ABORT_MARKER"
@@ -195,14 +197,14 @@ MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
     sh "$ROOT/common/font_manager.sh" action switch default > "$TMP/reused.out" 2>&1 &
 reused_pid=$!
 wait_for_file "$MARKER"
-test "$(sed -n '1p' "$LOCK/pid")" = "$reused_pid"
+ok test "$(sed -n '1p' "$LOCK/pid")" = "$reused_pid"
 kill -TERM "$reused_pid"
 set +e
 wait "$reused_pid"
 reused_rc=$?
 set -e
-test "$reused_rc" -eq 143
-test ! -e "$LOCK"
-test "$(wc -l < "$ABORT_MARKER")" -eq 1
+ok test "$reused_rc" -eq 143
+no test -e "$LOCK"
+ok test "$(wc -l < "$ABORT_MARKER")" -eq 1
 
 echo 'font_switch_lock_test: PASS'

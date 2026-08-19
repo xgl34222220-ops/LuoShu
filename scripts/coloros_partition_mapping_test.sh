@@ -2,17 +2,19 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$ROOT/scripts/assert.sh"
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-coloros)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
 MODULE_DIR="$TMP/module"
 MODDIR="$MODULE_DIR"
-USER_FONTS_DIR="$TMP/user-fonts"
+LUOSHU_PUBLIC_DIR="$TMP/public"
+USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
 LUOSHU_COLOROS_SYSTEM_FONTS_ROOT="$TMP/real/system/fonts"
 LUOSHU_COLOROS_SYSTEM_EXT_FONTS_ROOT="$TMP/real/system_ext/fonts"
 LUOSHU_COLOROS_PRODUCT_FONTS_ROOT="$TMP/real/product/fonts"
 LUOSHU_COLOROS_MY_PRODUCT_FONTS_ROOT="$TMP/real/my_product/fonts"
-export MODULE_DIR MODDIR USER_FONTS_DIR \
+export MODULE_DIR MODDIR LUOSHU_PUBLIC_DIR USER_FONTS_DIR \
     LUOSHU_COLOROS_SYSTEM_FONTS_ROOT LUOSHU_COLOROS_SYSTEM_EXT_FONTS_ROOT \
     LUOSHU_COLOROS_PRODUCT_FONTS_ROOT LUOSHU_COLOROS_MY_PRODUCT_FONTS_ROOT
 
@@ -50,23 +52,25 @@ _luoshu_font_config_module() { printf '%s\n' "$MODULE_DIR"; }
 . "$ROOT/common/rom_adapters.sh"
 . "$ROOT/common/font_config_partitions.sh"
 
-type get_all_coloros_names >/dev/null 2>&1
-type copy_as_coloros >/dev/null 2>&1
-copy_as_coloros "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/system/fonts" quick Demo
+CASE='ColorOS 分区槽位映射'
+ok type get_all_coloros_names >/dev/null
+ok type copy_as_coloros >/dev/null
+ok copy_as_coloros "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/system/fonts" quick Demo
 
-cmp -s "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/system/fonts/SysFont-Regular.ttf"
-cmp -s "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-Regular.ttf"
-cmp -s "$USER_FONTS_DIR/Demo-Medium.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-Medium.ttf"
-cmp -s "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-Bold.ttf"
-cmp -s "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-VF.ttf"
-cmp -s "$USER_FONTS_DIR/Demo-Medium.ttf" "$MODULE_DIR/system_ext/fonts/Roboto-Medium.ttf"
-cmp -s "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/my_product/fonts/Opposans-En-Bold.ttf"
+ok cmp -s "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/system/fonts/SysFont-Regular.ttf"
+ok cmp -s "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-Regular.ttf"
+ok cmp -s "$USER_FONTS_DIR/Demo-Medium.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-Medium.ttf"
+ok cmp -s "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-Bold.ttf"
+ok cmp -s "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-VF.ttf"
+ok cmp -s "$USER_FONTS_DIR/Demo-Medium.ttf" "$MODULE_DIR/system_ext/fonts/Roboto-Medium.ttf"
+ok cmp -s "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/my_product/fonts/Opposans-En-Bold.ttf"
 
 # A product-only slot must not be misplaced into system/fonts; that was the regression that left
 # Google Play text fields on the stock GoogleSansText family.
-test ! -e "$MODULE_DIR/system/fonts/GoogleSansText-Regular.ttf"
+no test -e "$MODULE_DIR/system/fonts/GoogleSansText-Regular.ttf"
 COLOROS_NAMES=$(get_all_coloros_names)
-printf '%s\n' "$COLOROS_NAMES" | grep -qx 'GoogleSansText-Regular'
-printf '%s\n' "$COLOROS_NAMES" | grep -qx 'SysFont-Regular'
+printf '%s\n' "$COLOROS_NAMES" > "$TMP/coloros-names"
+ok grep -qx 'GoogleSansText-Regular' "$TMP/coloros-names"
+ok grep -qx 'SysFont-Regular' "$TMP/coloros-names"
 
 printf 'ColorOS Play input partition mapping tests passed.\n'

@@ -2,6 +2,8 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "${0%/*}/.." && pwd)
+. "$ROOT/scripts/assert.sh"
+CASE='meta 模块同步'
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
@@ -33,7 +35,7 @@ if luoshu_sync_mount_payload Demo; then
     echo 'undeclared dual-directory partition unexpectedly succeeded' >&2
     exit 1
 fi
-grep -q 'my_product' "$MODDIR/config/mount_compat.conf"
+ok grep -q 'my_product' "$MODDIR/config/mount_compat.conf"
 rm -rf "$MODDIR/my_product"
 
 printf 'font-two' > "$MODDIR/system/fonts/Test.ttf"
@@ -45,15 +47,15 @@ rm -rf "$LUOSHU_META_TEST_ROOT/LuoShu"
 LUOSHU_META_TEST_ENGINE=mountify
 export LUOSHU_META_TEST_ENGINE
 luoshu_sync_mount_payload Demo
-[ ! -e "$LUOSHU_META_TEST_ROOT/LuoShu" ]
-grep -q '^detail=当前引擎直接读取标准模块目录' "$MODDIR/config/mount_compat.conf"
-grep -q '^system|' "$MODDIR/config/mount-probes-expected.conf"
-! grep -q '^my_product|' "$MODDIR/config/mount-probes-expected.conf"
+no test -e "$LUOSHU_META_TEST_ROOT/LuoShu"
+ok grep -q '^detail=当前引擎直接读取标准模块目录' "$MODDIR/config/mount_compat.conf"
+ok grep -q '^system|' "$MODDIR/config/mount-probes-expected.conf"
+no grep -q '^my_product|' "$MODDIR/config/mount-probes-expected.conf"
 
 LUOSHU_META_TEST_ENGINE=hybrid-mount
 export LUOSHU_META_TEST_ENGINE
 luoshu_sync_mount_payload Demo
-[ ! -e "$LUOSHU_META_TEST_ROOT/LuoShu" ]
+no test -e "$LUOSHU_META_TEST_ROOT/LuoShu"
 
 # Magic Mount reads the canonical module tree. An explicit font transaction only recovers
 # LuoShu-local stale markers and never creates a guessed mirror or rewrites external config.
@@ -61,9 +63,9 @@ touch "$MODDIR/skip_mount" "$MODDIR/mount_error"
 LUOSHU_META_TEST_ENGINE=magic-mount
 export LUOSHU_META_TEST_ENGINE
 luoshu_sync_mount_payload Demo
-[ ! -e "$MODDIR/skip_mount" ]
-[ ! -e "$MODDIR/mount_error" ]
-[ ! -e "$LUOSHU_META_TEST_ROOT/LuoShu" ]
+no test -e "$MODDIR/skip_mount"
+no test -e "$MODDIR/mount_error"
+no test -e "$LUOSHU_META_TEST_ROOT/LuoShu"
 [ "$(sed -n 's/^engine=//p' "$MODDIR/config/mount_compat.conf")" = magic-mount ]
 
 # skip_mount remains an actual compatibility failure for a true dual-directory metamodule.

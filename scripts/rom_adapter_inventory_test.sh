@@ -2,10 +2,17 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$ROOT/scripts/assert.sh"
 if [ -d "$ROOT/common/python/lib/python3.14/site-packages" ]; then
     PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages${PYTHONPATH:+:$PYTHONPATH}"
     export PYTHONPATH
 fi
+# check.sh passes a real font as $1. Say so instead of dying with "1: parameter not set".
+if [ "$#" -lt 1 ]; then
+    printf 'usage: %s <font.ttf>  (run via scripts/check.sh, which supplies the fixture font)\n' "${0##*/}" >&2
+    exit 2
+fi
+
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
@@ -75,20 +82,20 @@ export IS_HYPEROS IS_COLOROS
 
 apply_font_by_rom "$TMP/source.ttf" "$MODULE_DIR/system/fonts" quick TestFamily
 
-test -s "$MODULE_DIR/system/fonts/MiSansVF.ttf"
-test -s "$MODULE_DIR/system_ext/fonts/GoogleSansText-Regular.ttf"
-test -s "$MODULE_DIR/product/fonts/400.ttf"
+ok test -s "$MODULE_DIR/system/fonts/MiSansVF.ttf"
+ok test -s "$MODULE_DIR/system_ext/fonts/GoogleSansText-Regular.ttf"
+ok test -s "$MODULE_DIR/product/fonts/400.ttf"
 anchor="$MODULE_DIR/system/fonts/.luoshu-font-store/regular.font"
-test -s "$anchor"
+ok test -s "$anchor"
 inode=$(stat -c '%d:%i' "$anchor")
 for file in \
   "$MODULE_DIR/system/fonts/MiSansVF.ttf" \
   "$MODULE_DIR/system_ext/fonts/GoogleSansText-Regular.ttf" \
   "$MODULE_DIR/product/fonts/400.ttf"; do
-  test "$(stat -c '%d:%i' "$file")" = "$inode"
+  ok test "$(stat -c '%d:%i' "$file")" = "$inode"
 done
 
-test "${LUOSHU_INVENTORY_TARGETS_MAPPED:-0}" = 1
+ok test "${LUOSHU_INVENTORY_TARGETS_MAPPED:-0}" = 1
 cp "$MODULE_DIR/config/device_font_inventory.json" "$TMP/valid-inventory.json"
 
 # The foreground policy overrides the dispatcher later in the bootstrap chain; it must keep the
@@ -99,21 +106,21 @@ font_config_enable_for_payload() { return 0; }
 cp "$TMP/valid-inventory.json" "$MODULE_DIR/config/device_font_inventory.json"
 rm -rf "$MODULE_DIR/system_ext" "$MODULE_DIR/product"
 apply_font_by_rom "$TMP/source.ttf" "$MODULE_DIR/system/fonts" quick TestFamily
-test -s "$MODULE_DIR/system_ext/fonts/GoogleSansText-Regular.ttf"
-test -s "$MODULE_DIR/product/fonts/400.ttf"
+ok test -s "$MODULE_DIR/system_ext/fonts/GoogleSansText-Regular.ttf"
+ok test -s "$MODULE_DIR/product/fonts/400.ttf"
 
 rm -rf "$MODULE_DIR/system_ext" "$MODULE_DIR/product"
 apply_font_by_rom "$TMP/source.ttf" "$MODULE_DIR/system/fonts" full TestFamily
-test -s "$MODULE_DIR/system_ext/fonts/GoogleSansText-Regular.ttf"
-test -s "$MODULE_DIR/product/fonts/400.ttf"
+ok test -s "$MODULE_DIR/system_ext/fonts/GoogleSansText-Regular.ttf"
+ok test -s "$MODULE_DIR/product/fonts/400.ttf"
 
 # Malformed inventory must not block untested devices: the existing static mapper is the fallback.
 printf '%s\n' '{"schema":"broken"}' > "$MODULE_DIR/config/device_font_inventory.json"
 _device_font_fast_map() { touch "$TMP/quick-static-fallback"; return 0; }
 copy_as_hyperos() { touch "$TMP/full-static-fallback"; return 0; }
 apply_font_by_rom "$TMP/source.ttf" "$MODULE_DIR/system/fonts" quick TestFamily
-test -e "$TMP/quick-static-fallback"
+ok test -e "$TMP/quick-static-fallback"
 apply_font_by_rom "$TMP/source.ttf" "$MODULE_DIR/system/fonts" full TestFamily
-test -e "$TMP/full-static-fallback"
+ok test -e "$TMP/full-static-fallback"
 
 echo 'rom_adapter_inventory_test: PASS'

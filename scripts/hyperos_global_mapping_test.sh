@@ -1,17 +1,19 @@
 #!/bin/sh
 set -eu
 REPO_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$REPO_ROOT/scripts/assert.sh"
 ROOT=$(mktemp -d)
 trap 'rm -rf "$ROOT"' EXIT HUP INT TERM
 
 MODULE_DIR="$ROOT/module"
 MODDIR="$MODULE_DIR"
-USER_FONTS_DIR="$ROOT/user-fonts"
+LUOSHU_PUBLIC_DIR="$ROOT/public"
+USER_FONTS_DIR="$LUOSHU_PUBLIC_DIR/fonts"
 LUOSHU_SYSTEM_FONTS_ROOT="$ROOT/real/system/fonts"
 LUOSHU_PRODUCT_FONTS_ROOT="$ROOT/real/product/fonts"
 LUOSHU_SYSTEM_EXT_FONTS_ROOT="$ROOT/real/system_ext/fonts"
 LUOSHU_MI_EXT_FONTS_ROOT="$ROOT/real/mi_ext/fonts"
-export MODULE_DIR MODDIR USER_FONTS_DIR LUOSHU_SYSTEM_FONTS_ROOT LUOSHU_PRODUCT_FONTS_ROOT LUOSHU_SYSTEM_EXT_FONTS_ROOT LUOSHU_MI_EXT_FONTS_ROOT
+export MODULE_DIR MODDIR LUOSHU_PUBLIC_DIR USER_FONTS_DIR LUOSHU_SYSTEM_FONTS_ROOT LUOSHU_PRODUCT_FONTS_ROOT LUOSHU_SYSTEM_EXT_FONTS_ROOT LUOSHU_MI_EXT_FONTS_ROOT
 
 mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/product/fonts" "$MODULE_DIR/system_ext/fonts" "$MODULE_DIR/mi_ext/fonts" \
     "$USER_FONTS_DIR" "$LUOSHU_SYSTEM_FONTS_ROOT" "$LUOSHU_PRODUCT_FONTS_ROOT" "$LUOSHU_SYSTEM_EXT_FONTS_ROOT" "$LUOSHU_MI_EXT_FONTS_ROOT"
@@ -45,8 +47,9 @@ _font_alias() {
 }
 detect_font_family() {
     _name=${1%.*}
-    _name=${_name%-Regular}
-    _name=${_name%-Bold}
+    for _suffix in -Thin -ExtraLight -Light -Regular -Medium -SemiBold -Bold -ExtraBold -Black; do
+        case "$_name" in *"$_suffix") _name=${_name%"$_suffix"}; break ;; esac
+    done
     printf '%s\n' "$_name"
 }
 detect_font_weight() {
@@ -64,24 +67,26 @@ _hyperos_compact_normalize() {
     printf '%s\n' "$_count" > "$NORMALIZE_COUNT_FILE"
     cp -f "$1" "$2"
 }
+CASE='HyperOS 物理槽与字重映射'
 copy_as_hyperos "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/system/fonts" quick Demo
 
-test "$(cat "$MODULE_DIR/product/fonts/MiSansVF.ttf")" = 'regular-source'
-test "$(cat "$MODULE_DIR/system_ext/fonts/MiSansVF_Overlay.ttf")" = 'regular-source'
-test "$(cat "$MODULE_DIR/system/fonts/400.ttf")" = 'regular-source'
-test "$(cat "$MODULE_DIR/product/fonts/700.ttf")" = 'bold-source'
-test ! -e "$MODULE_DIR/system/fonts/MiSansVF.ttf"
-test "$(cat "$MODULE_DIR/system/fonts/Roboto-Regular.ttf")" = 'regular-source'
-test ! -e "$MODULE_DIR/product/fonts/Roboto-Regular.ttf"
-test ! -e "$MODULE_DIR/system_ext/fonts/Roboto-Regular.ttf"
-test ! -e "$MODULE_DIR/system/fonts/Roboto-Italic.ttf"
-test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Regular.ttf")" = 'regular-source'
-test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Medium.ttf")" = 'medium-source'
-test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Bold.ttf")" = 'bold-source'
-test "$(cat "$MODULE_DIR/mi_ext/fonts/MiClock.otf")" = 'regular-source'
-test "$(cat "$MODULE_DIR/product/fonts/MitypeClock.otf")" = 'regular-source'
-test "$(cat "$NORMALIZE_COUNT_FILE")" -eq 11
-_luoshu_hyperos_root_pairs | grep -q "$LUOSHU_MI_EXT_FONTS_ROOT|$MODULE_DIR/mi_ext/fonts"
+ok test "$(cat "$MODULE_DIR/product/fonts/MiSansVF.ttf")" = 'regular-source'
+ok test "$(cat "$MODULE_DIR/system_ext/fonts/MiSansVF_Overlay.ttf")" = 'regular-source'
+ok test "$(cat "$MODULE_DIR/system/fonts/400.ttf")" = 'regular-source'
+ok test "$(cat "$MODULE_DIR/product/fonts/700.ttf")" = 'bold-source'
+no test -e "$MODULE_DIR/system/fonts/MiSansVF.ttf"
+ok test "$(cat "$MODULE_DIR/system/fonts/Roboto-Regular.ttf")" = 'regular-source'
+no test -e "$MODULE_DIR/product/fonts/Roboto-Regular.ttf"
+no test -e "$MODULE_DIR/system_ext/fonts/Roboto-Regular.ttf"
+no test -e "$MODULE_DIR/system/fonts/Roboto-Italic.ttf"
+ok test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Regular.ttf")" = 'regular-source'
+ok test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Medium.ttf")" = 'medium-source'
+ok test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Bold.ttf")" = 'bold-source'
+ok test "$(cat "$MODULE_DIR/mi_ext/fonts/MiClock.otf")" = 'regular-source'
+ok test "$(cat "$MODULE_DIR/product/fonts/MitypeClock.otf")" = 'regular-source'
+ok test "$(cat "$NORMALIZE_COUNT_FILE")" -eq 11
+_luoshu_hyperos_root_pairs > "$ROOT/hyperos-root-pairs"
+ok grep -qF "$LUOSHU_MI_EXT_FONTS_ROOT|$MODULE_DIR/mi_ext/fonts" "$ROOT/hyperos-root-pairs"
 printf 'HyperOS global mapping and compact-anchor reuse tests passed.\n'
 
 # Keep OEM partition regressions in the always-on source gate.

@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$ROOT/scripts/assert.sh"
+CASE='运行时策略'
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
@@ -28,7 +30,7 @@ mkdir -p "$MODDIR/.luoshu-payload/system/fonts" \
 
 # The private tree must be selected dynamically even if it appeared after the
 # policy was sourced, matching installation and App-shell namespace handoff.
-test "$(_lfrp_payload_root)" = "$MODDIR/.luoshu-payload"
+ok test "$(_lfrp_payload_root)" = "$MODDIR/.luoshu-payload"
 SYSTEM_FONTS_DIR="$MODDIR/system/fonts"
 # A direct mapper target must preserve the real partition instead of collapsing
 # product/vendor/OEM slots into system/fonts.
@@ -53,9 +55,9 @@ LUOSHU_FONT_HAS_MIXED=false
 export LUOSHU_FONT_HAS_CJK LUOSHU_FONT_HAS_LATIN LUOSHU_FONT_HAS_MIXED
 
 COUNT=$(_lfrp_alias_existing_targets "$TMP/anchor.ttf" Roboto-Regular.ttf)
-test "$COUNT" -eq 1
-test -s "$MODDIR/.luoshu-payload/product/fonts/Roboto-Regular.ttf"
-test ! -e "$MODDIR/.luoshu-payload/system/fonts/Roboto-Regular.ttf"
+ok test "$COUNT" -eq 1
+ok test -s "$MODDIR/.luoshu-payload/product/fonts/Roboto-Regular.ttf"
+no test -e "$MODDIR/.luoshu-payload/system/fonts/Roboto-Regular.ttf"
 
 # A Latin-only font must not replace CJK or mixed fallback slots, which is the
 # architectural fix for the Telegram/System Settings tofu-box failure.
@@ -71,8 +73,8 @@ cp "$TMP/anchor.ttf" "$MODDIR/.luoshu-payload/system/fonts/OldAlias.ttf"
 printf '%s\n' '<family><font>LuoShu-400.ttf</font></family>' \
   > "$MODDIR/.luoshu-payload/system/etc/fonts.xml"
 clear_managed_text_fonts
-test ! -e "$MODDIR/.luoshu-payload/system/fonts/OldAlias.ttf"
-test ! -e "$MODDIR/.luoshu-payload/system/etc/fonts.xml"
-test -d "$MODDIR/.luoshu-payload/system/fonts"
+no test -e "$MODDIR/.luoshu-payload/system/fonts/OldAlias.ttf"
+no test -e "$MODDIR/.luoshu-payload/system/etc/fonts.xml"
+ok test -d "$MODDIR/.luoshu-payload/system/fonts"
 
 echo 'font_runtime_policy_test: PASS'

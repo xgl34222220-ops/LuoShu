@@ -2,6 +2,8 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$ROOT/scripts/assert.sh"
+CASE='挂载兼容'
 CASE_NAME="${1:-all}"
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-mount)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
@@ -32,13 +34,13 @@ sync_dual() {
 case_dual_sync() {
     new_module dual-sync
     sync_dual
-    test -f "$META/LuoShu/system/fonts/Roboto-Regular.ttf"
-    test -f "$META/LuoShu/product/fonts/Test.ttf"
-    test -f "$META/LuoShu/system/etc/luoshu/mount-probe.conf"
-    test -f "$META/LuoShu/product/etc/luoshu/mount-probe.conf"
-    grep -q '^engine=meta-overlayfs$' "$MODULE/config/mount_compat.conf"
-    grep -q '^state=prepared$' "$MODULE/config/mount_compat.conf"
-    grep -q '^partitions=system,product$' "$MODULE/config/mount_compat.conf"
+    ok test -f "$META/LuoShu/system/fonts/Roboto-Regular.ttf"
+    ok test -f "$META/LuoShu/product/fonts/Test.ttf"
+    ok test -f "$META/LuoShu/system/etc/luoshu/mount-probe.conf"
+    ok test -f "$META/LuoShu/product/etc/luoshu/mount-probe.conf"
+    ok grep -q '^engine=meta-overlayfs$' "$MODULE/config/mount_compat.conf"
+    ok grep -q '^state=prepared$' "$MODULE/config/mount_compat.conf"
+    ok grep -q '^partitions=system,product$' "$MODULE/config/mount_compat.conf"
 }
 
 case_dual_replace() {
@@ -47,9 +49,9 @@ case_dual_replace() {
     rm -f "$MODULE/system/fonts/Roboto-Regular.ttf"
     printf stale > "$META/LuoShu/system/fonts/Old.ttf"
     sync_dual
-    test ! -e "$META/LuoShu/system/fonts/Old.ttf"
-    test ! -e "$META/LuoShu/system/fonts/Roboto-Regular.ttf"
-    test -s "$META/LuoShu/system/etc/luoshu/mount-probe.conf"
+    no test -e "$META/LuoShu/system/fonts/Old.ttf"
+    no test -e "$META/LuoShu/system/fonts/Roboto-Regular.ttf"
+    ok test -s "$META/LuoShu/system/etc/luoshu/mount-probe.conf"
 }
 
 case_dual_verify() {
@@ -63,8 +65,8 @@ case_dual_verify() {
         . "$MODDIR/common/mount_compat.sh"
         luoshu_mount_verify_active Demo
     '
-    grep -q '^state=verified$' "$MODULE/config/mount_compat.conf"
-    grep -q '^verifiedPartitions=system,product$' "$MODULE/config/mount_compat.conf"
+    ok grep -q '^state=verified$' "$MODULE/config/mount_compat.conf"
+    ok grep -q '^verifiedPartitions=system,product$' "$MODULE/config/mount_compat.conf"
     rm -f "$VISIBLE/product/etc/luoshu/mount-probe.conf"
     if MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=meta-overlayfs \
        LUOSHU_META_TEST_ROOT="$META" LUOSHU_VISIBLE_PROBE_ROOT="$VISIBLE" sh -c '
@@ -74,8 +76,8 @@ case_dual_verify() {
         echo 'partition verification unexpectedly passed with product missing' >&2
         exit 1
     fi
-    grep -q '^state=unverified$' "$MODULE/config/mount_compat.conf"
-    grep -q '^failedPartitions=product$' "$MODULE/config/mount_compat.conf"
+    ok grep -q '^state=unverified$' "$MODULE/config/mount_compat.conf"
+    ok grep -q '^failedPartitions=product$' "$MODULE/config/mount_compat.conf"
 }
 
 case_dual_unsupported() {
@@ -86,13 +88,13 @@ case_dual_unsupported() {
         echo 'unsupported meta-overlayfs partition unexpectedly succeeded' >&2
         exit 1
     fi
-    grep -q 'my_product' "$MODULE/config/mount_compat.conf"
+    ok grep -q 'my_product' "$MODULE/config/mount_compat.conf"
     MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=meta-overlayfs \
     LUOSHU_META_TEST_ROOT="$META" LUOSHU_META_EXTRA_PARTITIONS=my_product sh -c '
         . "$MODDIR/common/mount_compat.sh"
         luoshu_sync_mount_payload Demo
     '
-    test -f "$META/LuoShu/my_product/fonts/Oem.ttf"
+    ok test -f "$META/LuoShu/my_product/fonts/Oem.ttf"
 }
 
 case_direct_source() {
@@ -104,18 +106,18 @@ case_direct_source() {
         . "$MODDIR/common/mount_compat.sh"
         luoshu_sync_mount_payload Demo
     '
-    test ! -e "$META/LuoShu"
-    grep -q '^engine=mountify$' "$MODULE/config/mount_compat.conf"
-    grep -q '^system|' "$MODULE/config/mount-probes-expected.conf"
-    ! grep -q '^product|' "$MODULE/config/mount-probes-expected.conf"
+    no test -e "$META/LuoShu"
+    ok grep -q '^engine=mountify$' "$MODULE/config/mount_compat.conf"
+    ok grep -q '^system|' "$MODULE/config/mount-probes-expected.conf"
+    no grep -q '^product|' "$MODULE/config/mount-probes-expected.conf"
 
     MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=hybrid-mount \
     LUOSHU_META_TEST_BACKEND=kasumi sh -c '
         . "$MODDIR/common/mount_compat.sh"
         luoshu_sync_mount_payload Demo
     '
-    grep -q '^engine=hybrid-mount$' "$MODULE/config/mount_compat.conf"
-    grep -q '^backend=kasumi$' "$MODULE/config/mount_compat.conf"
+    ok grep -q '^engine=hybrid-mount$' "$MODULE/config/mount_compat.conf"
+    ok grep -q '^backend=kasumi$' "$MODULE/config/mount_compat.conf"
 
     touch "$MODULE/skip_mount" "$MODULE/mount_error"
     MAGIC_CONFIG="$TMP/direct/magic-mount-config.toml"
@@ -126,13 +128,13 @@ case_direct_source() {
         . "$MODDIR/common/mount_compat.sh"
         luoshu_sync_mount_payload Demo
     '
-    test ! -e "$MODULE/skip_mount"
-    test ! -e "$MODULE/mount_error"
-    test "$(cksum "$MAGIC_CONFIG")" = "$MAGIC_BEFORE"
-    grep -q '"vendor"' "$MAGIC_CONFIG"
-    ! grep -q '"product"' "$MAGIC_CONFIG"
-    test ! -e "$MAGIC_CONFIG.luoshu.bak"
-    test ! -e "$MAGIC_CONFIG.luoshu.lock"
+    no test -e "$MODULE/skip_mount"
+    no test -e "$MODULE/mount_error"
+    ok test "$(cksum "$MAGIC_CONFIG")" = "$MAGIC_BEFORE"
+    ok grep -q '"vendor"' "$MAGIC_CONFIG"
+    no grep -q '"product"' "$MAGIC_CONFIG"
+    no test -e "$MAGIC_CONFIG.luoshu.bak"
+    no test -e "$MAGIC_CONFIG.luoshu.lock"
 
     touch "$MODULE/disable"
     printf '2\n' > "$MODULE/config/font-boot-failures"
@@ -141,8 +143,8 @@ case_direct_source() {
         . "$MODDIR/common/mount_compat.sh"
         luoshu_sync_mount_payload FontA
     '
-    test ! -e "$MODULE/disable"
-    test ! -e "$MODULE/config/font-boot-failures"
+    no test -e "$MODULE/disable"
+    no test -e "$MODULE/config/font-boot-failures"
     touch "$MODULE/remove"
     if MODDIR="$MODULE" MODULE_DIR="$MODULE" LUOSHU_META_TEST_ENGINE=magic-mount \
        LUOSHU_MAGIC_MOUNT_CONFIG="$MAGIC_CONFIG" sh -c '
@@ -152,7 +154,7 @@ case_direct_source() {
         echo 'remove marker was unexpectedly cleared' >&2
         exit 1
     fi
-    test -e "$MODULE/remove"
+    ok test -e "$MODULE/remove"
 }
 
 case_timeout() {
@@ -176,8 +178,8 @@ EOS
         echo 'slow copy unexpectedly succeeded' >&2
         exit 1
     fi
-    test -f "$TMP/timeout/dest/system/old.ttf"
-    test ! -e "$TMP/timeout/dest/system/new.ttf"
+    ok test -f "$TMP/timeout/dest/system/old.ttf"
+    no test -e "$TMP/timeout/dest/system/new.ttf"
 }
 
 case_diagnostics() {
@@ -188,19 +190,19 @@ case_diagnostics() {
         luoshu_sync_mount_payload Demo
         luoshu_mount_status_json > "$MODDIR/config/mount_status.json"
     '
-    grep -q '^warning=检测到多个已启用挂载模块：mountify、magic-mount$' "$MODULE/config/mount_compat.conf"
-    grep -q '"backend":"mountify"' "$MODULE/config/mount_status.json"
-    grep -q '"warning":"检测到多个已启用挂载模块：mountify、magic-mount"' "$MODULE/config/mount_status.json"
+    ok grep -q '^warning=检测到多个已启用挂载模块：mountify、magic-mount$' "$MODULE/config/mount_compat.conf"
+    ok grep -q '"backend":"mountify"' "$MODULE/config/mount_status.json"
+    ok grep -q '"warning":"检测到多个已启用挂载模块：mountify、magic-mount"' "$MODULE/config/mount_status.json"
 }
 
 case_static_contracts() {
-    grep -q 'for _enable_dir in "$MODPATH" "$OLD_MOD"' "$ROOT/customize.sh"
-    grep -q 'rm -f "$_enable_dir/disable"' "$ROOT/customize.sh"
-    grep -q 'common/mount_compat.sh' "$ROOT/common/font_mix.sh"
-    grep -q 'luoshu_sync_mount_payload' "$ROOT/common/font_mix.sh"
-    ! grep -q 'luoshu_sync_mount_payload' "$ROOT/post-fs-data.sh"
-    ! grep -q 'luoshu_sync_mount_payload' "$ROOT/service.sh"
-    ! grep -q 'prepare_mount_compat.sh' "$ROOT/scripts/build.sh"
+    ok grep -q 'for _enable_dir in "$MODPATH" "$OLD_MOD"' "$ROOT/customize.sh"
+    ok grep -q 'rm -f "$_enable_dir/disable"' "$ROOT/customize.sh"
+    ok grep -q 'common/mount_compat.sh' "$ROOT/common/font_mix.sh"
+    ok grep -q 'luoshu_sync_mount_payload' "$ROOT/common/font_mix.sh"
+    no grep -q 'luoshu_sync_mount_payload' "$ROOT/post-fs-data.sh"
+    no grep -q 'luoshu_sync_mount_payload' "$ROOT/service.sh"
+    no grep -q 'prepare_mount_compat.sh' "$ROOT/scripts/build.sh"
 
     STAGE="$TMP/static-stage"
     mkdir -p "$STAGE"
