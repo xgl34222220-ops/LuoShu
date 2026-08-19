@@ -3,6 +3,14 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$ROOT/scripts/version.sh"
 
+# Host-side CI/tests use system Python, while the module ships FontTools in the embedded runtime.
+# Reuse that pure-Python package tree whenever the prepared runtime is present.
+EMBEDDED_SITE="$ROOT/common/python/lib/python3.14/site-packages"
+if [ -d "$EMBEDDED_SITE" ]; then
+  PYTHONPATH="$EMBEDDED_SITE${PYTHONPATH:+:$PYTHONPATH}"
+  export PYTHONPATH
+fi
+
 # 所有 Shell 与 Python 后端必须先通过基础语法检查。
 find "$ROOT" -type f -name '*.sh' -print | while IFS= read -r file; do
   sh -n "$file"
