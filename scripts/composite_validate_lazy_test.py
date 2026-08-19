@@ -14,6 +14,9 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+EMBEDDED_FONTTOOLS = ROOT / "common/python/lib/python3.14/site-packages"
+if EMBEDDED_FONTTOOLS.is_dir():
+    sys.path.insert(0, str(EMBEDDED_FONTTOOLS))
 sys.path.insert(0, str(ROOT / "common"))
 
 import composite_font

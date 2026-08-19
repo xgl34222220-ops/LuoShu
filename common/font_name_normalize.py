@@ -137,6 +137,7 @@ def run_batch(job_file: Path) -> int:
     Job lines are tab separated:  input<TAB>output<TAB>weight<TAB>family<TAB>monospace(0|1)
     Result lines:                 output<TAB>ok|error<TAB>message
     """
+    failed = False
     for raw in job_file.read_text(encoding="utf-8").splitlines():
         line = raw.rstrip("\n")
         if not line.strip():
@@ -144,6 +145,7 @@ def run_batch(job_file: Path) -> int:
         fields = line.split("\t")
         if len(fields) < 3:
             print(f"\terror\tmalformed job line")
+            failed = True
             continue
         source, output, weight = Path(fields[0]), Path(fields[1]), fields[2]
         family = fields[3] if len(fields) > 3 and fields[3] else "LuoShu UI"
@@ -154,9 +156,10 @@ def run_batch(job_file: Path) -> int:
             output.unlink(missing_ok=True)
             message = (str(error) or error.__class__.__name__).replace("\n", " ").replace("\t", " ")
             print(f"{output}\terror\t{message}")
+            failed = True
             continue
         print(f"{output}\tok\t")
-    return 0
+    return 1 if failed else 0
 
 
 def main() -> int:

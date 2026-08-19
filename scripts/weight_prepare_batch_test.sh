@@ -73,6 +73,43 @@ CASE='总调用次数必须是常数，不随字重数量增长'
 _total=$(awk 'NF' "$CALLS" | wc -l | tr -d '[:space:]')
 [ "$_total" -le 4 ] || fail "后端调用 $_total 次，九档准备应当只需常数次"
 
+CASE='批处理失败必须自动回退逐档路径'
+rm -f "$MOD/system/fonts"/LuoShu-*.ttf "$MOD/system/fonts"/LuoShuMono-*.ttf
+: > "$CALLS"
+_luoshu_font_config_exec() {
+    _tool="${1##*/}"
+    printf '%s %s\n' "$_tool" "${2:-}" >> "$CALLS"
+    _jobs=''
+    _out=''
+    _is_batch=0
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --batch) _jobs="$2"; _is_batch=1; shift 2 ;;
+            --output) _out="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    if [ "$_tool" = font_instance.py ] && [ "$_is_batch" -eq 1 ]; then
+        return 9
+    fi
+    if [ -n "$_out" ]; then
+        dd if=/dev/zero of="$_out" bs=4096 count=1 2>/dev/null
+    fi
+    [ -n "$_jobs" ] || return 0
+    while IFS="$(printf '\t')" read -r _a _b _rest; do
+        [ -n "$_b" ] || continue
+        dd if=/dev/zero of="$_b" bs=4096 count=1 2>/dev/null
+    done < "$_jobs"
+    return 0
+}
+ok font_config_prepare_payload_weights
+for w in 100 200 300 400 500 600 700 800 900; do
+    ok test -s "$MOD/system/fonts/LuoShu-${w}.ttf"
+    ok test -s "$MOD/system/fonts/LuoShuMono-${w}.ttf"
+done
+_fallback_instances=$(grep -c '^font_instance.py' "$CALLS" | tr -d '[:space:]')
+[ "$_fallback_instances" -gt 1 ] || fail "批处理失败后没有进入逐档实例化路径"
+
 CASE='语法'
 ok sh -n "$ROOT/common/font_finalize_hotfix.sh"
 ok python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$ROOT/common/font_instance.py"

@@ -189,6 +189,7 @@ def run_batch(job_file: Path) -> int:
     Result lines:                 output<TAB>ok|error<TAB>message
     """
     cache: dict[str, bytes] = {}
+    failed = False
     for raw in job_file.read_text(encoding="utf-8").splitlines():
         line = raw.rstrip("\n")
         if not line.strip():
@@ -196,6 +197,7 @@ def run_batch(job_file: Path) -> int:
         fields = line.split("\t")
         if len(fields) < 4:
             print("\terror\tmalformed job line")
+            failed = True
             continue
         source, output, role, weight = fields[0], fields[1], fields[2], fields[3]
         axes = fields[4] if len(fields) > 4 else ""
@@ -210,9 +212,10 @@ def run_batch(job_file: Path) -> int:
         except Exception as error:  # noqa: BLE001 - reported per line so the batch continues
             message = (str(error) or error.__class__.__name__).replace("\n", " ").replace("\t", " ")
             print(f"{output}\terror\t{message}")
+            failed = True
             continue
         print(f"{output}\tok\t")
-    return 0
+    return 1 if failed else 0
 
 
 def main() -> int:
