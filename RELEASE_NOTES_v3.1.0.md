@@ -24,3 +24,5 @@
 
 ## 发布验证
 ColorOS 16、HyperOS 3、Magisk、APatch 的完整真机设备矩阵仍保持 pending；本次稳定版由维护者明确授权放行，不伪造未执行的真机 PASS。
+
+<!-- release-trigger: v3.1.0 -->
