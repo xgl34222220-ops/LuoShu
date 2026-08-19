@@ -7,15 +7,18 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+EMBEDDED_FONTTOOLS = ROOT / "common/python/lib/python3.14/site-packages"
+if EMBEDDED_FONTTOOLS.is_dir():
+    sys.path.insert(0, str(EMBEDDED_FONTTOOLS))
 sys.path.insert(0, str(ROOT / "common"))
 
-from fontTools.fontBuilder import FontBuilder
-from fontTools.pens.ttGlyphPen import TTGlyphPen
-from fontTools.ttLib.tables._g_v_a_r import table__g_v_a_r
-from fontTools.ttLib.tables.TupleVariation import TupleVariation
-from fontTools.varLib import instancer
+from fontTools.fontBuilder import FontBuilder  # noqa: E402
+from fontTools.pens.ttGlyphPen import TTGlyphPen  # noqa: E402
+from fontTools.ttLib.tables._g_v_a_r import table__g_v_a_r  # noqa: E402
+from fontTools.ttLib.tables.TupleVariation import TupleVariation  # noqa: E402
+from fontTools.varLib import instancer  # noqa: E402
 
-import device_font_slot_build_base as builder
+import device_font_slot_build_base as builder  # noqa: E402
 
 
 def build_variable_font(path: Path, glyph_count: int = 40) -> None:
