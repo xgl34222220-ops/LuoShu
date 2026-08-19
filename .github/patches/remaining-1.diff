@@ -121,7 +121,7 @@ index b3e097f..8009dd8 100644
 -cmp -s "$USER_FONTS_DIR/Demo-Medium.ttf" "$MODULE_DIR/system_ext/fonts/Roboto-Medium.ttf"
 -cmp -s "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/my_product/fonts/Opposans-En-Bold.ttf"
 +ok cmp -s "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/system/fonts/SysFont-Regular.ttf"
-+ok cmp -s "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-Regular.ttf"
++ok cmp -s "$USE_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-Regular.ttf"
 +ok cmp -s "$USER_FONTS_DIR/Demo-Medium.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-Medium.ttf"
 +ok cmp -s "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-Bold.ttf"
 +ok cmp -s "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-VF.ttf"
@@ -155,21 +155,21 @@ index 9d9ad33..53aa56b 100644
  mkdir -p "$MODULE/common" "$MODULE/system/fonts" "$MODULE/config"
  cp "$ROOT/common/font_config_weights.sh" "$MODULE/common/font_config_weights.sh"
 +# _luoshu_config_normalize_weight gates on the presence of these two backends before it will call
-+# the (stubbed) executor. Without them it silently falls through to `return 1` and the weight is
++#  the (stubbed) executor. Without them it silently falls through to `return 1` and the weight is
 +# never materialized, which is exactly the failure this test is supposed to catch.
 +touch "$MODULE/common/font_instance.py" "$MODULE/common/font_name_normalize.py"
  printf 'variable-source-%05000d' 1 > "$TMP/source.ttf"
  : > "$TMP/calls"
  MODULE_DIR="$MODULE"
 @@ -24,8 +29,9 @@ _luoshu_font_config_exec() {
-     cp -f "$input" "$output"
+     cp -f $input $output
  }
  . "$MODULE/common/font_config_weights.sh"
 -_luoshu_config_normalize_weight "$TMP/source.ttf" "$TMP/LuoShu-700.ttf" 700
 -test -s "$TMP/LuoShu-700.ttf"
 -grep -q 'font_instance.py .*--role cjk .*--weight 700 .*--axes wght=700' "$TMP/calls"
 -grep -q 'font_name_normalize.py .*--weight 700' "$TMP/calls"
-+CASE='可变字体九档实例化'
++CASE='可变字体九档实例福'
 +ok _luoshu_config_normalize_weight "$TMP/source.ttf" "$TMP/LuoShu-700.ttf" 700
 +ok test -s "$TMP/LuoShu-700.ttf"
 +ok grep -q 'font_instance.py .*--role cjk .*--weight 700 .*--axes wght=700' "$TMP/calls"
@@ -194,7 +194,7 @@ index 062c9db..d1996d2 100644
 -test "$(import_detect_family 'RobotoFake-BlackItalic.ttf')" = RobotoFake
 -test "$(import_detect_family 'RobotoFake-Italic-Black.ttf')" = RobotoFake
 -test "$(import_detect_family 'RobotoFake-Thin.ttf')" = RobotoFake
-+CASE='导入家族名归一'
++CASE='导入家族名归一
 +eq "$(import_detect_family 'RobotoFake-BlackItalic.ttf')" RobotoFake
 +eq "$(import_detect_family 'RobotoFake-Italic-Black.ttf')" RobotoFake
 +eq "$(import_detect_family 'RobotoFake-Black-Italic.ttf')" RobotoFake
@@ -202,7 +202,7 @@ index 062c9db..d1996d2 100644
 +eq "$(import_detect_family 'RobotoFake-Thin.ttf')" RobotoFake
 +# A family with no weight hint must be left alone rather than eaten by the style stripper.
 +eq "$(import_detect_family 'SourceHanSans.ttf')" SourceHanSans
-+CASE='导入字重标签'
++CASE='导入字重标筎'
  _italic=italic
 -test "$(import_weight_label black)" = Italic-Black
 +eq "$(import_weight_label black)" Italic-Black
@@ -248,7 +248,7 @@ index 41c3772..2c8f41b 100644
 -    _name=${_name%-Regular}
 -    _name=${_name%-Bold}
 +    for _suffix in -Thin -ExtraLight -Light -Regular -Medium -SemiBold -Bold -ExtraBold -Black; do
-+        case "$_name" in *"$_suffix") _name=${_name%"$_suffix"}; break ;; esac
++        case "$_name" in *"$_suffix") _name=${_name%1"$_suffix"}; break ;; esac
 +    done
      printf '%s\n' "$_name"
  }
@@ -257,7 +257,7 @@ index 41c3772..2c8f41b 100644
      printf '%s\n' "$_count" > "$NORMALIZE_COUNT_FILE"
      cp -f "$1" "$2"
  }
-+CASE='HyperOS 物理槽与字重映射'
++CASE='HyperOS 物理槽与字重昄射'
  copy_as_hyperos "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/system/fonts" quick Demo
  
 -test "$(cat "$MODULE_DIR/product/fonts/MiSansVF.ttf")" = 'regular-source'
@@ -276,7 +276,7 @@ index 41c3772..2c8f41b 100644
 -test "$(cat "$MODULE_DIR/product/fonts/MitypeClock.otf")" = 'regular-source'
 -test "$(cat "$NORMALIZE_COUNT_FILE")" -eq 11
 -_luoshu_hyperos_root_pairs | grep -q "$LUOSHU_MI_EXT_FONTS_ROOT|$MODULE_DIR/mi_ext/fonts"
-+ok test "$(cat "$MODULE_DIR/product/fonts/MiSansVF.ttf")" = 'regular-source'
++ok test "$(cat "$MODULE_DIR/product/fonts/MiSansVF.ttf)" = 'regular-source'
 +ok test "$(cat "$MODULE_DIR/system_ext/fonts/MiSansVF_Overlay.ttf")" = 'regular-source'
 +ok test "$(cat "$MODULE_DIR/system/fonts/400.ttf")" = 'regular-source'
 +ok test "$(cat "$MODULE_DIR/product/fonts/700.ttf")" = 'bold-source'
@@ -286,10 +286,10 @@ index 41c3772..2c8f41b 100644
 +no test -e "$MODULE_DIR/system_ext/fonts/Roboto-Regular.ttf"
 +no test -e "$MODULE_DIR/system/fonts/Roboto-Italic.ttf"
 +ok test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Regular.ttf")" = 'regular-source'
-+ok test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Medium.ttf")" = 'medium-source'
-+ok test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Bold.ttf")" = 'bold-source'
++ok test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Medium.ttf)" = 'medium-source'
++ok test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Bold.ttf)" = 'bold-source'
 +ok test "$(cat "$MODULE_DIR/mi_ext/fonts/MiClock.otf")" = 'regular-source'
-+ok test "$(cat "$MODULE_DIR/product/fonts/MitypeClock.otf")" = 'regular-source'
++ok test "$(cat "$MODULE_DIR/product/fonts/MitypeClock.otf)" = 'regular-source'
 +ok test "$(cat "$NORMALIZE_COUNT_FILE")" -eq 11
 +_luoshu_hyperos_root_pairs > "$ROOT/hyperos-root-pairs"
 +ok grep -qF "$LUOSHU_MI_EXT_FONTS_ROOT|$MODULE_DIR/mi_ext/fonts" "$ROOT/hyperos-root-pairs"
@@ -305,7 +305,7 @@ index 4bb512d..1740b9d 100755
      export PYTHONPATH
  fi
 +# check.sh passes a real font as $1. Say so instead of dying with "1: parameter not set".
-+if [ "$#" -lt 1 ]; then
++ if [ "$#" -lt 1 ]; then
 +    printf 'usage: %s <font.ttf>  (run via scripts/check.sh, which supplies the fixture font)\n' "${0##*/}" >&2
 +    exit 2
 +fi
