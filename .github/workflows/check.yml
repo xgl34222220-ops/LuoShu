@@ -29,14 +29,20 @@ jobs:
           set -euo pipefail
           git fetch origin main
 
+          cat .github/patches/p1small*.b64 > /tmp/remaining-1.diff.gz.b64
+          base64 -d /tmp/remaining-1.diff.gz.b64 > /tmp/remaining-1.diff.gz
+          gunzip -t /tmp/remaining-1.diff.gz
+          gunzip -c /tmp/remaining-1.diff.gz > /tmp/remaining-1.diff
+          echo "patch1-bytes=$(wc -c < /tmp/remaining-1.diff)"
+
           gunzip -t .github/patches/remaining-2.diff.gz
           gunzip -c .github/patches/remaining-2.diff.gz > /tmp/remaining-2.diff
           echo "patch2-bytes=$(wc -c < /tmp/remaining-2.diff)"
 
-          if git apply --check .github/patches/remaining-1.diff; then
-            git apply .github/patches/remaining-1.diff
+          if git apply --check /tmp/remaining-1.diff; then
+            git apply /tmp/remaining-1.diff
           else
-            git apply --3way .github/patches/remaining-1.diff
+            git apply --3way /tmp/remaining-1.diff
           fi
 
           if git apply --check /tmp/remaining-2.diff; then
