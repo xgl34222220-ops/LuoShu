@@ -34,7 +34,7 @@ jobs:
             cat "$part" >> /tmp/latest.patch.gz.b64
           done
           base64 --decode /tmp/latest.patch.gz.b64 > /tmp/latest.patch.gz
-          echo '65b07e3ab086f7fb5106dbf20feeb43144f17980361320c8534261889d9dd9e5  /tmp/latest.patch.gz' | sha256sum -c -
+          echo 'e714e8d87e8137c152eda5dbe26cc58d414ef346507d48f401ed5a5bb1e2a9bc  /tmp/latest.patch.gz' | sha256sum -c -
           gzip -dc /tmp/latest.patch.gz > /tmp/latest.patch
           echo 'd88a7b395020895396db609a1db659c2ab740dd36b7cff1ec6dd6eee53182ae6  /tmp/latest.patch' | sha256sum -c -
 
