@@ -19,6 +19,9 @@ jobs:
           fetch-depth: 0
           ref: agent/latest-patch-ready
 
+      - name: Install targeted test dependency
+        run: python3 -m pip install --disable-pip-version-check fonttools
+
       - name: Reconstruct and verify line-box patch
         shell: bash
         run: |
