@@ -1,0 +1,47 @@
+name: Fix source-check FontTools path
+
+on:
+  push:
+    branches:
+      - agent/latest-patch-ready
+    paths:
+      - '.github/workflows/fix-check-pythonpath.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/latest-patch-ready
+      - name: Add bundled Python package path to aggregate checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/check.sh')
+          text = path.read_text(encoding='utf-8')
+          anchor = '. "$ROOT/scripts/version.sh"\n'
+          block = '''. "$ROOT/scripts/version.sh"\n\n# Host-side CI/tests use system Python, while the module ships FontTools in the embedded runtime.\n# Reuse that pure-Python package tree whenever the prepared runtime is present.\nEMBEDDED_SITE="$ROOT/common/python/lib/python3.14/site-packages"\nif [ -d "$EMBEDDED_SITE" ]; then\n  PYTHONPATH="$EMBEDDED_SITE${PYTHONPATH:+:$PYTHONPATH}"\n  export PYTHONPATH\nfi\n'''
+          if anchor not in text:
+              raise SystemExit('check.sh version anchor not found')
+          if 'EMBEDDED_SITE="$ROOT/common/python/lib/python3.14/site-packages"' not in text:
+              text = text.replace(anchor, block, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+          sh -n scripts/check.sh
+          grep -q 'EMBEDDED_SITE="$ROOT/common/python/lib/python3.14/site-packages"' scripts/check.sh
+      - name: Commit and clean helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'LuoShu CI'
+          git config user.email 'actions@users.noreply.github.com'
+          rm -f .github/workflows/fix-check-pythonpath.yml
+          git add -A
+          git commit -m 'fix: expose bundled FontTools to aggregate source checks'
+          git push origin HEAD:agent/latest-patch-ready
