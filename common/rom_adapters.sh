@@ -85,11 +85,51 @@ _font_inventory_cache_token() {
     fi
 }
 
+# sha256 over a multi-megabyte font is not free, and the anchor path asks for the same digest once
+# per weight role and once more when it writes the cache entry. A single switch therefore hashed the
+# same 20-40 MB file a dozen times. Memoize by (device, inode, size, mtime, ctime) so it is hashed
+# once; any real change to the file changes the identity and invalidates the entry.
+_font_source_identity() {
+    _fsi_file="$1"
+    # Use sub-second timestamps when available. %Y/%Z are whole seconds, so a same-size rewrite
+    # inside one second could otherwise reuse a stale digest. Android toybox stat supports %y/%z
+    # with fractional timestamps; if neither stat implementation can provide them, skip memoization
+    # and hash the file normally instead of weakening cache correctness.
+    if command -v stat >/dev/null 2>&1; then
+        stat -c '%d:%i:%s:%y:%z' "$_fsi_file" 2>/dev/null && return 0
+    fi
+    if command -v toybox >/dev/null 2>&1; then
+        toybox stat -c '%d:%i:%s:%y:%z' "$_fsi_file" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+_font_source_digest() {
+    _fsd_src="$1"
+    command -v sha256sum >/dev/null 2>&1 || return 1
+    _fsd_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+    _fsd_memo="${LUOSHU_DIGEST_MEMO:-$_fsd_module/config/.font-digest-memo}"
+    _fsd_id=$(_font_source_identity "$_fsd_src" 2>/dev/null)
+    if [ -n "$_fsd_id" ] && [ -f "$_fsd_memo" ]; then
+        _fsd_hit=$(awk -F'\t' -v k="$_fsd_id" '$1 == k { print $2; exit }' "$_fsd_memo" 2>/dev/null)
+        if [ -n "$_fsd_hit" ]; then
+            printf '%s\n' "$_fsd_hit"
+            return 0
+        fi
+    fi
+    _fsd_sha=$(sha256sum "$_fsd_src" 2>/dev/null | awk '{print $1}')
+    [ -n "$_fsd_sha" ] || return 1
+    if [ -n "$_fsd_id" ]; then
+        mkdir -p "${_fsd_memo%/*}" 2>/dev/null || true
+        printf '%s\t%s\n' "$_fsd_id" "$_fsd_sha" >> "$_fsd_memo" 2>/dev/null || true
+    fi
+    printf '%s\n' "$_fsd_sha"
+}
+
 _font_anchor_cache_lookup() {
     _facl_src="$1"
     _facl_key="$2"
-    command -v sha256sum >/dev/null 2>&1 || return 1
-    _facl_sha=$(sha256sum "$_facl_src" 2>/dev/null | awk '{print $1}')
+    _facl_sha=$(_font_source_digest "$_facl_src") || return 1
     [ -n "$_facl_sha" ] || return 1
     _facl_inventory=$(_font_inventory_cache_token)
     [ -n "$_facl_inventory" ] || _facl_inventory=fallback
@@ -139,7 +179,7 @@ _font_anchor() {
 
     # 写入归一化缓存，供下次切换同字体秒切
     if command -v sha256sum >/dev/null 2>&1; then
-        _fa_sha=$(sha256sum "$src" 2>/dev/null | awk '{print $1}')
+        _fa_sha=$(_font_source_digest "$src")
         if [ -n "$_fa_sha" ]; then
             _fa_cache="$module/config/metrics_cache"
             mkdir -p "$_fa_cache" 2>/dev/null || true
