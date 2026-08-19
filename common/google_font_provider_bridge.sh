@@ -177,19 +177,42 @@ _gfp_build_clone() {
     return 0
 }
 
+# The full /proc sweep used to run unconditionally and forked twice per process on the device --
+# a `tr` and a `basename` for each of roughly a thousand entries, repeated on every retry. On a
+# phone that is tens of thousands of process spawns in the first minute after boot, from a module
+# whose only job is to swap fonts. pidof already answers the question in the normal case, so the
+# sweep is now a fallback, and when it does run it forks once instead of once per process.
 _gfp_namespace_pids() {
+    _gfp_proc_root="${LUOSHU_PROC_ROOT:-/proc}"
     {
-        pidof zygote64 zygote zygote_secondary zygote64_32 zygote_ocomp 2>/dev/null
-        pidof com.android.vending 2>/dev/null
-        pidof com.google.android.gms com.google.android.gms.persistent com.google.android.gms.unstable 2>/dev/null
-        for _gfp_proc in /proc/[0-9]*; do
-            [ -r "$_gfp_proc/cmdline" ] || continue
-            _gfp_cmd=$(tr '\000' ' ' < "$_gfp_proc/cmdline" 2>/dev/null)
-            case "$_gfp_cmd" in
-                zygote*|*com.android.vending*|*com.google.android.gms*) basename "$_gfp_proc" ;;
-            esac
+        # Named fast paths cover the common processes.
+        for _gfp_pid in $(pidof zygote64 zygote zygote_secondary zygote64_32 zygote_ocomp 2>/dev/null); do
+            printf '%s
+' "$_gfp_pid"
         done
-    } | tr ' ' '\n' | awk '/^[0-9]+$/ && !seen[$0]++'
+        for _gfp_pid in $(pidof com.android.vending 2>/dev/null); do
+            printf '%s
+' "$_gfp_pid"
+        done
+        for _gfp_pid in $(pidof com.google.android.gms com.google.android.gms.persistent com.google.android.gms.unstable 2>/dev/null); do
+            printf '%s
+' "$_gfp_pid"
+        done
+
+        # Preserve the previous wildcard semantics for GMS subprocesses such as
+        # com.google.android.gms:phenotype. This is one grep process for the whole proc tree, not
+        # two child processes per PID. The result is merged with pidof rather than replacing it.
+        grep -al -e zygote -e com.android.vending -e com.google.android.gms \
+            "$_gfp_proc_root"/[0-9]*/cmdline 2>/dev/null |
+            while IFS= read -r _gfp_path; do
+                [ -n "$_gfp_path" ] || continue
+                _gfp_rest=${_gfp_path#"$_gfp_proc_root"/}
+                _gfp_pid=${_gfp_rest%%/*}
+                case "$_gfp_pid" in ''|*[!0-9]*) continue ;; esac
+                printf '%s
+' "$_gfp_pid"
+            done
+    } | awk '/^[0-9]+$/ && !seen[$0]++'
 }
 
 # bind 的源必须由目标进程自己的 mount namespace 解析。
@@ -305,6 +328,10 @@ _gfp_apply_once() {
     _gfp_ns_failed=0
     _gfp_ns_first_error=
     _gfp_missing_first=
+    _gfp_namespace_pid_list=
+    if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
+        _gfp_namespace_pid_list=$(_gfp_namespace_pids)
+    fi
     while IFS= read -r _gfp_target; do
         _gfp_valid_font "$_gfp_target" || continue
         case "$(basename "$_gfp_target")" in *Emoji*|*Color*Emoji*|*Code*) continue ;; esac
@@ -327,7 +354,7 @@ _gfp_apply_once() {
         _gfp_target_mounts=0
         _gfp_target_attempts=0
         if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
-            for _gfp_pid in $(_gfp_namespace_pids); do
+            for _gfp_pid in $_gfp_namespace_pid_list; do
                 _gfp_target_attempts=$((_gfp_target_attempts + 1))
                 _gfp_ns_attempted=$((_gfp_ns_attempted + 1))
                 if _gfp_mount_in_pid "$_gfp_pid" "$_gfp_clone" "$_gfp_target"; then
@@ -373,9 +400,10 @@ _gfp_apply_once() {
 
 _gfp_restore() {
     [ -s "$STATE" ] || return 0
+    _gfp_restore_pids=$(_gfp_namespace_pids)
     while IFS='|' read -r _gfp_target _gfp_source _gfp_th _gfp_sh; do
         [ -n "$_gfp_target" ] || continue
-        for _gfp_pid in $(_gfp_namespace_pids); do
+        for _gfp_pid in $_gfp_restore_pids; do
             _gfp_unmount_in_pid "$_gfp_pid" "$_gfp_target" || true
         done
     done < "$STATE"
@@ -399,14 +427,16 @@ _gfp_boot() {
     return 2
 }
 
-case "${1:-boot}" in
-    boot) _gfp_boot ;;
-    apply|now) _gfp_apply_once ;;
-    prepare) LUOSHU_GOOGLE_FONT_DRY_RUN=1 _gfp_apply_once ;;
-    restore) _gfp_restore ;;
-    invalidate)
-        _gfp_restore >/dev/null 2>&1 || true
-        rm -rf "$CACHE" "$STATE" 2>/dev/null || true
-        ;;
-    *) echo "Usage: $0 {boot|apply|prepare|restore|invalidate}" >&2; exit 2 ;;
-esac
+if [ "${0##*/}" = google_font_provider_bridge.sh ]; then
+    case "${1:-boot}" in
+        boot) _gfp_boot ;;
+        apply|now) _gfp_apply_once ;;
+        prepare) LUOSHU_GOOGLE_FONT_DRY_RUN=1 _gfp_apply_once ;;
+        restore) _gfp_restore ;;
+        invalidate)
+            _gfp_restore >/dev/null 2>&1 || true
+            rm -rf "$CACHE" "$STATE" 2>/dev/null || true
+            ;;
+        *) echo "Usage: $0 {boot|apply|prepare|restore|invalidate}" >&2; exit 2 ;;
+    esac
+fi
