@@ -70,6 +70,19 @@ with tempfile.TemporaryDirectory(prefix="luoshu batch | ") as tmp_raw:
     assert ("hihonor-sans", "LuoShu-500.ttf") in rendered, rendered
     assert ("honor-serif-display", "HonorSerif.ttf") in rendered, rendered
 
+    # Overlay batching must isolate a broken document and still process later jobs.
+    broken = tmp / "broken | fonts.xml"
+    broken.write_text("<familyset><broken>", encoding="utf-8")
+    mixed_overlay_jobs = tmp / "mixed overlay jobs.tsv"
+    mixed_overlay_jobs.write_text(
+        f"validate\t{broken}\t\n"
+        f"validate\t{source}\t\n",
+        encoding="utf-8",
+    )
+    mixed_overlay = rows(run(OVERLAY, "--batch", mixed_overlay_jobs).stdout)
+    assert any(row[:3] == ["validate", str(broken), "error"] for row in mixed_overlay), mixed_overlay
+    assert any(row[:3] == ["validate", str(source), "ok"] for row in mixed_overlay), mixed_overlay
+
     target_jobs = tmp / "target jobs.txt"
     target_jobs.write_text(f"{source}\n", encoding="utf-8")
     discovered = rows(run(TARGETS, "--batch", target_jobs).stdout)
@@ -80,8 +93,6 @@ with tempfile.TemporaryDirectory(prefix="luoshu batch | ") as tmp_raw:
     assert doc_rows == [["DOC", str(source), "ok", "2", ""]], doc_rows
 
     # Per-document errors must be reported without aborting later documents in the same process.
-    broken = tmp / "broken | fonts.xml"
-    broken.write_text("<familyset><broken>", encoding="utf-8")
     mixed_jobs = tmp / "mixed jobs.txt"
     mixed_jobs.write_text(f"{broken}\n{source}\n", encoding="utf-8")
     mixed = rows(run(TARGETS, "--batch", mixed_jobs).stdout)
