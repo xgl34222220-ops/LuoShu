@@ -39,10 +39,20 @@ _luoshu_font_config_specs() {
 
 font_config_capture_original() { :; }
 
+# The scanner now runs as a single batch over every document, so the stub speaks the batch
+# protocol: one TARGET line per discovered slot, then one DOC status line per document.
 _luoshu_font_config_exec() {
-    printf '%s\n' \
-        'Good.ttf|400|sans-serif' \
-        'Bad.ttf|400|sans-serif'
+    _stub_jobs=''
+    while [ "$#" -gt 0 ]; do
+        case "$1" in --batch) _stub_jobs="$2"; shift 2 ;; *) shift ;; esac
+    done
+    [ -n "$_stub_jobs" ] || return 1
+    while IFS= read -r _stub_input; do
+        [ -n "$_stub_input" ] || continue
+        printf 'TARGET\t%s\tGood.ttf\t400\tsans-serif\n' "$_stub_input"
+        printf 'TARGET\t%s\tBad.ttf\t400\tsans-serif\n' "$_stub_input"
+        printf 'DOC\t%s\tok\t2\t\n' "$_stub_input"
+    done < "$_stub_jobs"
 }
 
 _luoshu_safety_log() { :; }

@@ -143,41 +143,77 @@ luoshu_dynamic_targets_apply() {
     luoshu_dynamic_targets_clear
     : > "$_ldt_manifest_tmp" 2>/dev/null || return 1
     _ldt_targets=0; _ldt_mapped=0; _ldt_configs=0; _ldt_scan_failed=0
+    # One interpreter scans every document. The per-document form paid a full embedded-CPython start
+    # for each font configuration file the ROM ships, before a single font was touched, which is a
+    # large part of why a switch grew from seconds to minutes as the partition matrix expanded.
+    _ldt_jobs="$_ldt_config/.font-target-jobs.$$"
+    _ldt_map="$_ldt_config/.font-target-map.$$"
+    _ldt_out="$_ldt_config/.font-targets.$$.txt"
+    : > "$_ldt_jobs" 2>/dev/null || return 1
+    : > "$_ldt_map" 2>/dev/null || { rm -f "$_ldt_jobs"; return 1; }
     while IFS='|' read -r _ldt_key _ldt_real _ldt_overlay _ldt_font_dir; do
         _ldt_input="$_ldt_backup/$_ldt_key"
         [ -s "$_ldt_input" ] || continue
-        _ldt_out="$_ldt_config/.font-targets.$$.txt"
-        rm -f "$_ldt_out" 2>/dev/null || true
-        if ! _luoshu_font_config_exec "$_ldt_tool" --input "$_ldt_input" > "$_ldt_out" 2>/dev/null; then
-            _ldt_scan_failed=$((_ldt_scan_failed + 1)); rm -f "$_ldt_out"; continue
-        fi
-        _ldt_configs=$((_ldt_configs + 1))
-        while IFS='|' read -r _ldt_file _ldt_weight _ldt_family; do
-            [ -n "$_ldt_file" ] || continue
-            case "$_ldt_file" in */*|*'..'*|LuoShu-*.ttf|LuoShuMono-*.ttf) continue ;; *.ttf|*.otf|*.ttc) ;; *) continue ;; esac
-            case "$_ldt_weight" in 100|200|300|400|500|600|700|800|900) ;; *) _ldt_weight=400 ;; esac
-            _ldt_rel="${_ldt_font_dir#$_ldt_module/}/$_ldt_file"
-            grep -Fq "$_ldt_rel|" "$_ldt_manifest_tmp" 2>/dev/null && continue
-            _ldt_targets=$((_ldt_targets + 1))
-            _ldt_source="$_ldt_module/system/fonts/LuoShu-${_ldt_weight}.ttf"
-            _ldt_dest="$_ldt_font_dir/$_ldt_file"
-            _luoshu_fast_font_ok "$_ldt_source" || continue
-            mkdir -p "$_ldt_font_dir" 2>/dev/null || continue
-            rm -f "$_ldt_dest" 2>/dev/null || true
-            if ln "$_ldt_source" "$_ldt_dest" 2>/dev/null || cp -f "$_ldt_source" "$_ldt_dest" 2>/dev/null; then
-                chmod 0644 "$_ldt_dest" 2>/dev/null || true
-                if _luoshu_fast_font_ok "$_ldt_dest"; then
-                    printf '%s|%s|%s|%s\n' "$_ldt_rel" "$_ldt_key" "$_ldt_weight" "$_ldt_family" >> "$_ldt_manifest_tmp"
-                    _ldt_mapped=$((_ldt_mapped + 1))
-                else
-                    rm -f "$_ldt_dest" 2>/dev/null || true
-                fi
-            fi
-        done < "$_ldt_out"
-        rm -f "$_ldt_out" 2>/dev/null || true
+        printf '%s\n' "$_ldt_input" >> "$_ldt_jobs"
+        printf '%s\t%s\t%s\n' "$_ldt_input" "$_ldt_key" "$_ldt_font_dir" >> "$_ldt_map"
     done <<EOF_LUOSHU_DYNAMIC_TARGETS
 $(_luoshu_font_config_specs)
 EOF_LUOSHU_DYNAMIC_TARGETS
+
+    : > "$_ldt_out"
+    if [ -s "$_ldt_jobs" ]; then
+        _luoshu_font_config_exec "$_ldt_tool" --batch "$_ldt_jobs" > "$_ldt_out" 2>/dev/null || \
+            _ldt_scan_failed=$((_ldt_scan_failed + 1))
+    fi
+
+    # The batch groups its output by document, so the key/font-dir lookup only repeats when the
+    # document changes rather than once per target.
+    _ldt_cur=''
+    _ldt_key=''
+    _ldt_font_dir=''
+    while IFS="$(printf '\t')" read -r _ldt_tag _ldt_input _ldt_a _ldt_b _ldt_c; do
+        case "$_ldt_tag" in
+            DOC)
+                if [ "$_ldt_a" = ok ]; then
+                    _ldt_configs=$((_ldt_configs + 1))
+                else
+                    _ldt_scan_failed=$((_ldt_scan_failed + 1))
+                fi
+                continue
+                ;;
+            TARGET) ;;
+            *) continue ;;
+        esac
+        if [ "$_ldt_input" != "$_ldt_cur" ]; then
+            _ldt_cur="$_ldt_input"
+            _ldt_key=$(awk -F'\t' -v k="$_ldt_input" '$1 == k { print $2; exit }' "$_ldt_map" 2>/dev/null)
+            _ldt_font_dir=$(awk -F'\t' -v k="$_ldt_input" '$1 == k { print $3; exit }' "$_ldt_map" 2>/dev/null)
+        fi
+        [ -n "$_ldt_font_dir" ] || continue
+        _ldt_file="$_ldt_a"
+        _ldt_weight="$_ldt_b"
+        _ldt_family="$_ldt_c"
+        case "$_ldt_file" in */*|*'..'*|LuoShu-*.ttf|LuoShuMono-*.ttf) continue ;; *.ttf|*.otf|*.ttc) ;; *) continue ;; esac
+        case "$_ldt_weight" in 100|200|300|400|500|600|700|800|900) ;; *) _ldt_weight=400 ;; esac
+        _ldt_rel="${_ldt_font_dir#$_ldt_module/}/$_ldt_file"
+        grep -Fq "$_ldt_rel|" "$_ldt_manifest_tmp" 2>/dev/null && continue
+        _ldt_targets=$((_ldt_targets + 1))
+        _ldt_source="$_ldt_module/system/fonts/LuoShu-${_ldt_weight}.ttf"
+        _ldt_dest="$_ldt_font_dir/$_ldt_file"
+        _luoshu_fast_font_ok "$_ldt_source" || continue
+        mkdir -p "$_ldt_font_dir" 2>/dev/null || continue
+        rm -f "$_ldt_dest" 2>/dev/null || true
+        if ln "$_ldt_source" "$_ldt_dest" 2>/dev/null || cp -f "$_ldt_source" "$_ldt_dest" 2>/dev/null; then
+            chmod 0644 "$_ldt_dest" 2>/dev/null || true
+            if _luoshu_fast_font_ok "$_ldt_dest"; then
+                printf '%s|%s|%s|%s\n' "$_ldt_rel" "$_ldt_key" "$_ldt_weight" "$_ldt_family" >> "$_ldt_manifest_tmp"
+                _ldt_mapped=$((_ldt_mapped + 1))
+            else
+                rm -f "$_ldt_dest" 2>/dev/null || true
+            fi
+        fi
+    done < "$_ldt_out"
+    rm -f "$_ldt_jobs" "$_ldt_map" "$_ldt_out" 2>/dev/null || true
 
     # Unmapped targets keep their stock font. Zero useful mappings is a hard failure; non-zero partial
     # coverage is committed and reported honestly instead of collapsing an unfamiliar ROM to zero.

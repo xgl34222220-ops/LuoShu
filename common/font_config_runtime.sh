@@ -112,36 +112,95 @@ _luoshu_font_config_remove_aliases() {
     done
 }
 
+# Validate a list of documents in one interpreter. Input lines are XML paths; the function prints
+# the subset that parsed successfully. Batching matters because the per-document form cost a full
+# embedded-CPython start each, and a ROM can ship a dozen font configuration files.
+_luoshu_font_config_validate_batch() {
+    _lfcvb_list="$1"
+    _lfcvb_module="$(_luoshu_font_config_module)"
+    _lfcvb_tool="$_lfcvb_module/common/font_config_overlay.py"
+    [ -s "$_lfcvb_list" ] && [ -f "$_lfcvb_tool" ] || return 1
+    _lfcvb_jobs="${_lfcvb_list}.jobs"
+    : > "$_lfcvb_jobs" 2>/dev/null || return 1
+    while IFS= read -r _lfcvb_xml; do
+        [ -n "$_lfcvb_xml" ] || continue
+        printf 'validate\t%s\t\n' "$_lfcvb_xml" >> "$_lfcvb_jobs"
+    done < "$_lfcvb_list"
+    _luoshu_font_config_exec "$_lfcvb_tool" --batch "$_lfcvb_jobs" 2>/dev/null | \
+        while IFS="$(printf '\t')" read -r _lfcvb_op _lfcvb_src _lfcvb_status _lfcvb_rest; do
+            [ "$_lfcvb_op" = validate ] && [ "$_lfcvb_status" = ok ] || continue
+            printf '%s\n' "$_lfcvb_src"
+        done
+    rm -f "$_lfcvb_jobs" 2>/dev/null || true
+}
+
 font_config_capture_original() {
     _lfc_module="$(_luoshu_font_config_module)"
-    _lfc_backup_root="${CONFIG_DIR:-$_lfc_module/config}/font-config-source"
+    _lfc_config="${CONFIG_DIR:-$_lfc_module/config}"
+    _lfc_backup_root="$_lfc_config/font-config-source"
     mkdir -p "$_lfc_backup_root" 2>/dev/null || return 1
+    _lfc_work="$_lfc_config/.capture.$$"
+    rm -rf "$_lfc_work" 2>/dev/null || true
+    mkdir -p "$_lfc_work" 2>/dev/null || return 1
     _lfc_found=0
+
+    # Pass 1: pick the documents that need a fresh snapshot at all. No interpreter is involved.
+    : > "$_lfc_work/check"
+    : > "$_lfc_work/pending"
     while IFS='|' read -r _lfc_key _lfc_real _lfc_overlay _lfc_fonts; do
         [ -f "$_lfc_real" ] || continue
         _lfc_found=$((_lfc_found + 1))
         _lfc_backup="$_lfc_backup_root/$_lfc_key"
         mkdir -p "${_lfc_backup%/*}" 2>/dev/null || continue
-        _lfc_backup_valid=0
-        if [ -s "$_lfc_backup" ] && _luoshu_font_config_validate "$_lfc_backup"; then
-            _lfc_backup_valid=1
-            command -v cmp >/dev/null 2>&1 && cmp -s "$_lfc_real" "$_lfc_backup" 2>/dev/null && continue
-        fi
         # Never snapshot our own upper-layer document. Keep a valid previous source when mounted.
         if grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\.ttf' "$_lfc_real" 2>/dev/null; then
             continue
         fi
-        _lfc_temp="${_lfc_backup}.tmp.$$"
-        cp -f "$_lfc_real" "$_lfc_temp" 2>/dev/null || continue
-        if _luoshu_font_config_validate "$_lfc_temp"; then
-            chmod 0644 "$_lfc_temp" 2>/dev/null || true
-            mv -f "$_lfc_temp" "$_lfc_backup" 2>/dev/null || true
+        if [ -s "$_lfc_backup" ]; then
+            printf '%s\n' "$_lfc_backup" >> "$_lfc_work/check"
+            printf '%s\t%s\t%s\n' "$_lfc_real" "$_lfc_backup" keep >> "$_lfc_work/pending"
         else
-            rm -f "$_lfc_temp" 2>/dev/null || true
+            printf '%s\t%s\t%s\n' "$_lfc_real" "$_lfc_backup" fresh >> "$_lfc_work/pending"
         fi
     done <<EOF_LUOSHU_FONT_CONFIG
 $(_luoshu_font_config_specs)
 EOF_LUOSHU_FONT_CONFIG
+
+    # Pass 2: one interpreter validates every existing backup.
+    : > "$_lfc_work/valid"
+    if [ -s "$_lfc_work/check" ]; then
+        _luoshu_font_config_validate_batch "$_lfc_work/check" > "$_lfc_work/valid" 2>/dev/null || true
+    fi
+
+    # Pass 3: stage the snapshots that are missing, stale or unusable.
+    : > "$_lfc_work/verify"
+    : > "$_lfc_work/commit"
+    while IFS="$(printf '\t')" read -r _lfc_real _lfc_backup _lfc_state; do
+        [ -n "$_lfc_real" ] || continue
+        if [ "$_lfc_state" = keep ] && grep -Fxq "$_lfc_backup" "$_lfc_work/valid" 2>/dev/null; then
+            command -v cmp >/dev/null 2>&1 && cmp -s "$_lfc_real" "$_lfc_backup" 2>/dev/null && continue
+        fi
+        _lfc_temp="${_lfc_backup}.tmp.$$"
+        cp -f "$_lfc_real" "$_lfc_temp" 2>/dev/null || continue
+        printf '%s\n' "$_lfc_temp" >> "$_lfc_work/verify"
+        printf '%s\t%s\n' "$_lfc_temp" "$_lfc_backup" >> "$_lfc_work/commit"
+    done < "$_lfc_work/pending"
+
+    # Pass 4: one interpreter validates every staged snapshot, then the good ones are committed.
+    if [ -s "$_lfc_work/verify" ]; then
+        _luoshu_font_config_validate_batch "$_lfc_work/verify" > "$_lfc_work/verified" 2>/dev/null || : > "$_lfc_work/verified"
+        while IFS="$(printf '\t')" read -r _lfc_temp _lfc_backup; do
+            [ -n "$_lfc_temp" ] || continue
+            if grep -Fxq "$_lfc_temp" "$_lfc_work/verified" 2>/dev/null; then
+                chmod 0644 "$_lfc_temp" 2>/dev/null || true
+                mv -f "$_lfc_temp" "$_lfc_backup" 2>/dev/null || true
+            else
+                rm -f "$_lfc_temp" 2>/dev/null || true
+            fi
+        done < "$_lfc_work/commit"
+    fi
+
+    rm -rf "$_lfc_work" 2>/dev/null || true
     [ "$_lfc_found" -gt 0 ]
 }
 
@@ -185,23 +244,43 @@ _luoshu_font_config_generate_base() {
 
     _lfc_changed=0
     _lfc_failed=0
+
+    # One interpreter for every document. Each embedded-CPython start on a phone costs far more than
+    # the rewrite itself, so a per-document invocation made the switch scale with how many font
+    # configuration files the ROM happens to ship -- eight documents meant sixteen interpreter starts
+    # here alone. The batch generator validates the references it emits, so the separate
+    # validate-only pass is gone as well.
+    _lfc_jobs="$_lfc_stage/.jobs"
+    : > "$_lfc_jobs" 2>/dev/null || { rm -rf "$_lfc_stage"; return 1; }
     while IFS='|' read -r _lfc_key _lfc_real _lfc_overlay _lfc_fonts; do
         _lfc_input="$_lfc_backup_root/$_lfc_key"
         [ -s "$_lfc_input" ] || continue
         _luoshu_font_config_alias_partition "$_lfc_fonts" || { _lfc_failed=$((_lfc_failed + 1)); continue; }
         _lfc_output="$_lfc_stage/$_lfc_key"
         mkdir -p "${_lfc_output%/*}" 2>/dev/null || { _lfc_failed=$((_lfc_failed + 1)); continue; }
-        if _luoshu_font_config_exec "$_lfc_tool" --input "$_lfc_input" --output "$_lfc_output" \
-            --font-prefix LuoShu --mono-font-prefix LuoShuMono --font-dir "$_lfc_fonts" >/dev/null 2>&1 && \
-            [ -s "$_lfc_output" ] && _luoshu_font_config_validate "$_lfc_output" "$_lfc_fonts"; then
-            _lfc_changed=$((_lfc_changed + 1))
-        else
-            _lfc_failed=$((_lfc_failed + 1))
-            rm -f "$_lfc_output" 2>/dev/null || true
-        fi
+        printf 'generate\t%s\t%s\t%s\n' "$_lfc_input" "$_lfc_output" "$_lfc_fonts" >> "$_lfc_jobs"
     done <<EOF_LUOSHU_FONT_CONFIG
 $(_luoshu_font_config_specs)
 EOF_LUOSHU_FONT_CONFIG
+
+    if [ -s "$_lfc_jobs" ]; then
+        _lfc_results="$_lfc_stage/.results"
+        if _luoshu_font_config_exec "$_lfc_tool" --batch "$_lfc_jobs" \
+            --font-prefix LuoShu --mono-font-prefix LuoShuMono > "$_lfc_results" 2>/dev/null; then
+            while IFS="$(printf '\t')" read -r _lfc_op _lfc_src _lfc_status _lfc_flag _lfc_refs _lfc_msg; do
+                [ "$_lfc_op" = generate ] || continue
+                if [ "$_lfc_status" = ok ] && [ "$_lfc_flag" = 1 ]; then
+                    _lfc_changed=$((_lfc_changed + 1))
+                else
+                    _lfc_failed=$((_lfc_failed + 1))
+                fi
+            done < "$_lfc_results"
+        else
+            _lfc_failed=$((_lfc_failed + 1))
+        fi
+        rm -f "$_lfc_results" 2>/dev/null || true
+    fi
+    rm -f "$_lfc_jobs" 2>/dev/null || true
 
     if [ "$_lfc_changed" -eq 0 ]; then
         rm -rf "$_lfc_stage" 2>/dev/null || true

@@ -54,6 +54,15 @@ def normalize(value: str) -> str:
     return re.sub(r"[\s_-]+", "-", value.strip().lower()).strip("-")
 
 
+# The overlay owns family classification. Keeping a second copy of the vendor lists here meant the
+# slot-alias discovery and the XML rewrite could disagree about what counts as a UI family, and a
+# name added to one was silently missing from the other.
+try:
+    from font_config_overlay import is_safe_family as _overlay_is_safe_family
+except ImportError:  # pragma: no cover - only when the two files are separated
+    _overlay_is_safe_family = None
+
+
 def safe_family(element: ET.Element) -> bool:
     name = normalize(element.attrib.get("name", ""))
     if not name or any(token in name for token in PROTECTED_FAMILY_TOKENS):
@@ -62,6 +71,8 @@ def safe_family(element: ET.Element) -> bool:
     for key in ("lang", "variant", "fallbackFor", "fallbackfor"):
         if element.attrib.get(key):
             return False
+    if _overlay_is_safe_family is not None:
+        return _overlay_is_safe_family(name)
     return name in SAFE_EXACT_FAMILIES or name.startswith(SAFE_PREFIXES)
 
 
@@ -105,11 +116,46 @@ def discover(path: Path) -> list[dict[str, object]]:
     return sorted(found.values(), key=lambda item: (str(item["filename"]).lower(), int(item["weight"])))
 
 
+def run_batch(job_file: Path) -> int:
+    """Scan every listed document in one interpreter.
+
+    Slot discovery used to pay a full embedded-CPython start per ROM document, so a device shipping
+    eight font configuration files spent eight interpreter startups here before any font was even
+    touched. Emits one tab separated line per target:
+        TARGET<TAB>input<TAB>filename<TAB>weight<TAB>family
+    and one status line per document:
+        DOC<TAB>input<TAB>ok|error<TAB>count<TAB>message
+    """
+    for raw in job_file.read_text(encoding="utf-8").splitlines():
+        source = raw.strip()
+        if not source:
+            continue
+        try:
+            entries = discover(Path(source))
+        except (OSError, ET.ParseError, ValueError) as error:
+            message = (str(error) or error.__class__.__name__).replace("\n", " ")
+            print(f"DOC\t{source}\terror\t0\t{message}")
+            continue
+        for entry in entries:
+            print(f"TARGET\t{source}\t{entry['filename']}\t{entry['weight']}\t{entry['family']}")
+        print(f"DOC\t{source}\tok\t{len(entries)}\t")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, type=Path)
+    parser.add_argument("--input", type=Path)
+    parser.add_argument("--batch", type=Path)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()
+    if args.batch is not None:
+        try:
+            return run_batch(args.batch)
+        except OSError as error:
+            print(json.dumps({"status": "error", "message": str(error)}, ensure_ascii=False, separators=(",", ":")))
+            return 2
+    if args.input is None:
+        parser.error("--input is required unless --batch is used")
     try:
         targets = discover(args.input)
         if args.json:

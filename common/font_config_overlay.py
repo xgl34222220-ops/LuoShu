@@ -214,9 +214,67 @@ def atomic_write(tree: ET.ElementTree, output: Path) -> None:
             pass
 
 
+def run_batch(job_file: Path, prefixes: tuple[str, ...]) -> int:
+    """Process many documents in one interpreter.
+
+    A switch touches every font configuration document the ROM ships, and each one previously cost
+    its own interpreter start: capture-validate, generate, validate-generated. On a phone the
+    embedded CPython takes far longer to start than this script takes to run, so the switch was
+    dominated by process startup and grew linearly with the number of documents on the device.
+    One process handles the whole list instead.
+
+    Job lines are tab separated so that paths containing '|' or spaces stay intact:
+        validate<TAB>input<TAB>font_dir
+        generate<TAB>input<TAB>output<TAB>font_dir
+    Each result line is: op<TAB>input<TAB>status<TAB>changed<TAB>references<TAB>message
+    """
+    failures = 0
+    for raw in job_file.read_text(encoding="utf-8").splitlines():
+        line = raw.rstrip("\n")
+        if not line.strip():
+            continue
+        fields = line.split("\t")
+        op = fields[0]
+        source = Path(fields[1]) if len(fields) > 1 else None
+        changed = "0"
+        references = 0
+        try:
+            if source is None:
+                raise ValueError("missing input path")
+            if op == "validate":
+                font_dir = Path(fields[2]) if len(fields) > 2 and fields[2] else None
+                tree = parse_xml(source)
+                references = validate_generated_references(tree, prefixes, font_dir) if font_dir else 0
+            elif op == "generate":
+                if len(fields) < 3 or not fields[2]:
+                    raise ValueError("missing output path")
+                output = Path(fields[2])
+                font_dir = Path(fields[3]) if len(fields) > 3 and fields[3] else None
+                tree = parse_xml(source)
+                report = rewrite_tree(tree, prefixes[0], prefixes[1])
+                references = validate_generated_references(tree, prefixes, font_dir) if font_dir else 0
+                if report["changed"]:
+                    atomic_write(tree, output)
+                else:
+                    output.unlink(missing_ok=True)
+                changed = "1" if report["changed"] else "0"
+            else:
+                raise ValueError(f"unknown batch op: {op}")
+        except (OSError, ET.ParseError, ValueError, IndexError) as error:
+            failures += 1
+            message = str(error) or error.__class__.__name__
+            print(f"{op}\t{source or ''}\terror\t0\t0\t{message}".replace("\n", " "))
+            continue
+        print(f"{op}\t{source}\tok\t{changed}\t{references}\t")
+    # A per-item failure is reported on its own line; the exit code only reports whether the batch
+    # itself could be read, so one unusable ROM document cannot discard the others.
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True, type=Path)
+    parser.add_argument("--input", type=Path)
+    parser.add_argument("--batch", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--font-prefix", default="LuoShu")
     parser.add_argument("--mono-font-prefix", default="LuoShuMono")
@@ -224,6 +282,15 @@ def main() -> int:
     parser.add_argument("--validate-only", action="store_true")
     args = parser.parse_args()
     prefixes = (args.font_prefix, args.mono_font_prefix)
+
+    if args.batch is not None:
+        try:
+            return run_batch(args.batch, prefixes)
+        except OSError as error:
+            print(json.dumps({"status": "error", "message": str(error)}, ensure_ascii=False, separators=(",", ":")))
+            return 2
+    if args.input is None:
+        parser.error("--input is required unless --batch is used")
 
     try:
         tree = parse_xml(args.input)
