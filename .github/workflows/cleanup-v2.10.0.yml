@@ -1,0 +1,73 @@
+name: Cleanup obsolete v2.10.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - cleanup-v2.10.0.trigger
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify v3.0.0 is the active stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view v3.0.0 --repo "$GITHUB_REPOSITORY" >/dev/null
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/v3.0.0")"
+          [[ "$(printf '%s' "$release_json" | jq -r '.draft')" == false ]]
+          [[ "$(printf '%s' "$release_json" | jq -r '.prerelease')" == false ]]
+          asset_names="$(printf '%s' "$release_json" | jq -r '.assets[].name')"
+          for required in \
+            LuoShu-v3.0.0.zip \
+            LuoShu-v3.0.0.zip.sha256 \
+            LuoShu-App-v3.0.0.apk \
+            LuoShu-App-v3.0.0.apk.sha256; do
+            printf '%s\n' "$asset_names" | grep -qxF "$required"
+          done
+          [[ "$(jq -r '.version' update.json)" == v3.0.0 ]]
+          [[ "$(jq -r '.versionCode' update.json)" == 30000 ]]
+
+      - name: Delete v2.10.0 release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view v2.10.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete v2.10.0 --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v2.10.0" >/dev/null 2>&1; then
+            gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/v2.10.0"
+          fi
+          if gh release view v2.10.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo 'v2.10.0 release still exists' >&2
+            exit 2
+          fi
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v2.10.0" >/dev/null 2>&1; then
+            echo 'v2.10.0 tag still exists' >&2
+            exit 2
+          fi
+
+      - name: Record cleanup completion
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          printf 'v2.10.0 release=deleted\nv2.10.0 tag=deleted\nactive=v3.0.0\n' > cleanup-v2.10.0.done
+          git add cleanup-v2.10.0.done
+          git commit -m 'chore: confirm v2.10.0 release cleanup [skip ci]'
+          git push origin HEAD:main
