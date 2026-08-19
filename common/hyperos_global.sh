@@ -155,28 +155,22 @@ _hyperos_file_weight() {
 
 # 对 HyperOS 物理槽使用固定 0.98/0.30 em 行框。禁止按字体极端轮廓扩大 hhea/typo，
 # 避免 QQ 回复栏偏移、年龄标签裁切以及酷安标题与热度重叠。
+# 紧凑行框交给 font_metrics_normalize.py 的 --compact 正式模式，不再从 shell 里 monkey-patch
+# 私有函数。旧写法把 _outline_extremes 直接置空，等于让归一化器完全不看字体真实墨迹，于是墨迹
+# 高过 0.98em 的中文字体被硬性削顶——溢出部分画进上一行（酷安标题压住热度），下伸部分被裁掉
+# （QQ 年龄标签少一截）。ColorOS 走的是标准路径、上限 1.60em，所以同一份字体在两台机器上表现
+# 相反。--compact 保留固定契约，但以 UI 探针墨迹为下限。
 _hyperos_compact_normalize() {
     _source="$1"; _output="$2"
     _module="$(_luoshu_hyperos_module_dir)"
     _pyroot="$_module/common/python"
     _python="$_pyroot/bin/luoshu-python"
-    [ -x "$_python" ] && [ -f "$_module/common/font_metrics_normalize.py" ] || return 1
+    _normalizer="$_module/common/font_metrics_normalize.py"
+    [ -x "$_python" ] && [ -f "$_normalizer" ] || return 1
     PYTHONHOME="$_pyroot" \
     PYTHONPATH="$_module/common:$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \
     LD_LIBRARY_PATH="$_pyroot/lib:$_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        "$_python" - "$_source" "$_output" <<'PY_COMPACT' >/dev/null 2>&1
-import sys
-from pathlib import Path
-import font_metrics_normalize as metrics
-metrics.TYPO_ASCENDER_RATIO = 0.98
-metrics.TYPO_DESCENDER_RATIO = 0.30
-metrics.WIN_ASCENT_CAP_RATIO = 0.98
-metrics.WIN_DESCENT_CAP_RATIO = 0.35
-metrics.HHEA_ASCENT_CAP_RATIO = 0.98
-metrics.HHEA_DESCENT_CAP_RATIO = 0.30
-metrics._outline_extremes = lambda font: None
-metrics.normalize_path(Path(sys.argv[1]), Path(sys.argv[2]))
-PY_COMPACT
+        "$_python" "$_normalizer" --input "$_source" --output "$_output" --compact >/dev/null 2>&1
 }
 
 _hyperos_compact_anchor() {

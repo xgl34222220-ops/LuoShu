@@ -192,6 +192,18 @@ def validate_inventory(data: dict[str, Any], expected_key: str | None = None) ->
 
 
 def _local_name(tag: str) -> str:
+    """Local part of an element tag.
+
+    ElementTree represents comments and processing instructions as elements whose ``tag`` is a
+    *callable* (``ET.Comment`` / ``ET.PI``), not a string. Any document parsed with
+    ``insert_comments=True`` therefore yields nodes that have no ``rsplit``, and iterating a real ROM
+    ``fonts.xml`` -- AOSP and every OEM customization file carries comments -- raised
+    ``AttributeError: 'function' object has no attribute 'rsplit'``. That aborted the whole rewrite,
+    which is why the no-hook XML overlay never enabled on real devices. Non-element nodes simply have
+    no local name, so they are reported as empty and skipped by every caller's tag comparison.
+    """
+    if not isinstance(tag, str):
+        return ""
     return tag.rsplit("}", 1)[-1]
 
 

@@ -137,11 +137,21 @@ printf '%s\n' '{"valid":true,"format":"TTF","bytes":4096,"variable":false,"color
         slots = payload["slots"]
         summary = payload["scanSummary"]
 
-        assert payload["scannerRevision"] == 2
+        # common/font_inventory_scan.py keeps a v2 implementation for import, but its __main__
+        # entry point delegates to font_inventory_scan_v3, and customize-v227.sh invokes it as a
+        # script. The CLI contract this test covers is therefore v3's.
+        assert payload["scannerRevision"] == 3
         assert payload["romKind"] == "coloros"
         assert result["stockFontFileCount"] == len(stock_files)
         assert summary["stockFontFileCount"] == len(stock_files)
-        assert summary["partitionFontFileCounts"] == {
+        # v3 reports every partition it scanned, including ones holding no fonts on this ROM.
+        # Compare only the partitions that carry files so adding a partition to the scanner does
+        # not break this expectation.
+        assert {
+            name: count
+            for name, count in summary["partitionFontFileCounts"].items()
+            if count
+        } == {
             "system": 3,
             "system_ext": 1,
             "product": 1,
