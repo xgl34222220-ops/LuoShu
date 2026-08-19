@@ -68,6 +68,7 @@ def build(path: Path) -> None:
 
 
 def main() -> int:
+    # Guard the Android wiring as well as the Python metric math so the old shell monkey-patch cannot return.
     hyperos = (ROOT / "common/hyperos_global.sh").read_text(encoding="utf-8")
     assert "--compact" in hyperos, "HyperOS 物理槽必须调用正式 --compact 模式"
     assert "_outline_extremes = lambda font: None" not in hyperos, "旧 monkey-patch 不得回归"
