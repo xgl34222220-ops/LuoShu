@@ -305,6 +305,26 @@ composite_hash_file() {
     fi
 }
 
+# 复合字体缓存此前只按三个源字体的 sha 加一个手写字面量 "full-composite-v11" 作键，不含任何
+# 引擎自身的信息。于是改了 composite_font.py 或 font_metrics_normalize.py 的度量契约之后，缓存
+# 照样命中，设备继续复用修复前生成的那份复合字体——用户看到的是"修了但没变"。手写版本号要靠
+# 人记得递增，而这次恰恰没记得。改为直接哈希引擎文件内容，引擎一变缓存自动失效。
+composite_engine_key() {
+    _cek_module="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
+    _cek_acc=''
+    for _cek_file in \
+        "$_cek_module/common/composite_font.py" \
+        "$_cek_module/common/font_metrics_normalize.py" \
+        "$_cek_module/common/font_instance.py"; do
+        [ -f "$_cek_file" ] || continue
+        _cek_acc="$_cek_acc$(composite_hash_file "$_cek_file")"
+    done
+    [ -n "$_cek_acc" ] || _cek_acc=no-engine
+    printf '%s' "$_cek_acc" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum
+        elif command -v toybox >/dev/null 2>&1; then toybox sha256sum
+        else cksum; fi; } | awk '{print $1}'
+}
+
 set_mix_error() {
     LAST_MIX_ERROR="$1"
     printf '%s\n' "$LAST_MIX_ERROR" > "$CONFIG_DIR/mix_last_error.txt" 2>/dev/null || true
@@ -385,7 +405,7 @@ build_composite_file() {
     check_composite_runtime || return 1
     _cache="$MODDIR/cache/full-composite-v11"
     mkdir -p "$_cache" "$MODDIR/cache/tmp" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
-    _key_src="$(composite_hash_file "$_cjk_src")-$(composite_hash_file "$_latin_src")-$(composite_hash_file "$_digit_src")-full-composite-v11"
+    _key_src="$(composite_hash_file "$_cjk_src")-$(composite_hash_file "$_latin_src")-$(composite_hash_file "$_digit_src")-full-composite-v11-engine:$(composite_engine_key)"
     _key=$(printf '%s' "$_key_src" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; elif command -v toybox >/dev/null 2>&1; then toybox sha256sum; else cksum; fi; } | awk '{print $1}')
     _cached="$_cache/${_key}.otf"; _report="$_cache/${_key}.json"; _progress="$CONFIG_DIR/composite_progress.json"
     rm -f "$_cache"/.*.tmp.* 2>/dev/null || true
