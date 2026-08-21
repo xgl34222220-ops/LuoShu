@@ -31,6 +31,30 @@ _luoshu_atomic_component_required() {
     [ "${1:-}/${2:-}" = system/fonts ]
 }
 
+# Resolve the source tree when the transaction runs, not when this file is
+# sourced. font_runtime_policy.sh is loaded later and exposes the canonical
+# private payload; unit fixtures and legacy installs still use the module view.
+# Keeping this choice in the atomic implementation prevents later runtime
+# layers from copying and silently diverging from the mount policy.
+_luoshu_atomic_payload_root() {
+    if type _lfrp_payload_root >/dev/null 2>&1; then
+        _lsapr_root=$(_lfrp_payload_root)
+        [ -n "$_lsapr_root" ] && {
+            printf '%s\n' "${_lsapr_root%/}"
+            return 0
+        }
+    fi
+    _luoshu_self_module
+}
+
+_luoshu_atomic_payload_partitions() {
+    if type _lfrp_partitions >/dev/null 2>&1; then
+        _lfrp_partitions
+    else
+        luoshu_payload_partitions
+    fi
+}
+
 _luoshu_atomic_missing_target_allowed() {
     _lsamta_rel="$1"
     _lsamta_mode="${2:-overlay}"
@@ -314,6 +338,7 @@ _luoshu_atomic_verify_manifest_retry() {
 # a complete rollback to the ROM tree, never a mixed/degraded font configuration.
 luoshu_self_mount_ensure() {
     _lsme_module=$(_luoshu_self_module)
+    _lsme_payload=$(_luoshu_atomic_payload_root)
     _lsme_active=$(head -n1 "$_lsme_module/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
     [ -n "$_lsme_active" ] || _lsme_active=default
     _lsme_state_root=$(_luoshu_self_state_root)
@@ -348,10 +373,10 @@ luoshu_self_mount_ensure() {
     _lsme_bind_count=0
     _lsme_system_fonts_ok=0
 
-    for _lsme_partition in $(luoshu_payload_partitions); do
+    for _lsme_partition in $(_luoshu_atomic_payload_partitions); do
         _lsme_has_payload=0
         for _lsme_subdir in fonts etc; do
-            _lsme_source="$_lsme_module/$_lsme_partition/$_lsme_subdir"
+            _lsme_source="$_lsme_payload/$_lsme_partition/$_lsme_subdir"
             if [ -d "$_lsme_source" ] && find "$_lsme_source" -type f -print -quit 2>/dev/null | grep -q .; then
                 _lsme_has_payload=1
                 break
@@ -368,7 +393,7 @@ luoshu_self_mount_ensure() {
             continue
         }
         for _lsme_subdir in fonts etc; do
-            _lsme_source="$_lsme_module/$_lsme_partition/$_lsme_subdir"
+            _lsme_source="$_lsme_payload/$_lsme_partition/$_lsme_subdir"
             [ -d "$_lsme_source" ] && find "$_lsme_source" -type f -print -quit 2>/dev/null | grep -q . || continue
             _lsme_target="$_lsme_root/$_lsme_subdir"
             [ -d "$_lsme_target" ] || {
