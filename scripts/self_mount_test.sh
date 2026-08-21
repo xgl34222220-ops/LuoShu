@@ -14,13 +14,16 @@ FAKE_UMOUNT="$TMP/fake-umount.sh"
 MOUNTINFO="$TMP/mounts"
 mkdir -p \
     "$MODULE/system/fonts" \
+    "$MODULE/system_ext/fonts" \
     "$MODULE/system/etc/luoshu" \
     "$MODULE/config" \
     "$VISIBLE/system/fonts" \
-    "$VISIBLE/system/etc"
+    "$VISIBLE/system/etc" \
+    "$VISIBLE/system_ext"
 ln -s "$ROOT/common" "$MODULE/common"
 
 printf 'new-font\n' > "$MODULE/system/fonts/Roboto-Regular.ttf"
+printf 'extension-font\n' > "$MODULE/system_ext/fonts/ExtensionOnly.ttf"
 printf 'stock-font\n' > "$VISIBLE/system/fonts/Roboto-Regular.ttf"
 printf 'stock-emoji\n' > "$VISIBLE/system/fonts/NotoColorEmoji.ttf"
 printf 'Demo\n' > "$MODULE/config/active_font.conf"
@@ -89,6 +92,7 @@ sh -c '
     . "$1/common/private_payload.sh"
     luoshu_private_install_migrate "$MODDIR"
     [ -f "$MODDIR/.luoshu-payload/system/fonts/Roboto-Regular.ttf" ]
+    [ -f "$MODDIR/.luoshu-payload/system_ext/fonts/ExtensionOnly.ttf" ]
     [ -f "$MODDIR/.luoshu-payload/system/etc/luoshu/mount-probe.conf" ]
     [ -d "$MODDIR/system" ]
     [ -z "$(find "$MODDIR/system" -mindepth 1 -print -quit)" ]
@@ -117,7 +121,7 @@ LUOSHU_PRIVATE_MOUNT_COMMAND="$FAKE_MOUNT" \
 LUOSHU_PRIVATE_UMOUNT_COMMAND="$FAKE_UMOUNT" \
 LUOSHU_TEST_MOUNTINFO="$MOUNTINFO" \
 sh -c '
-    luoshu_payload_partitions() { printf "system\n"; }
+    luoshu_payload_partitions() { printf "system\nsystem_ext\n"; }
     luoshu_module_id() { printf "LuoShu\n"; }
     _luoshu_probe_path() { printf "/system/etc/luoshu/mount-probe.conf\n"; }
     _luoshu_now() { printf "1\n"; }
@@ -135,9 +139,12 @@ sh -c '
     [ ! -e "$MODDIR/mount_error" ]
     [ "$(sed -n "s/^state=//p" "$MODDIR/config/self-mount.conf")" = mounted ]
     [ "$(sed -n "s/^backend=//p" "$MODDIR/config/self-mount.conf")" = self-overlay ]
+    [ -z "$(sed -n "s/^failed=//p" "$MODDIR/config/self-mount.conf")" ]
     [ "$(cat "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system/fonts/Roboto-Regular.ttf")" = new-font ]
+    [ ! -d "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system_ext/fonts" ]
     [ "$(cat "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system/fonts/NotoColorEmoji.ttf")" = stock-emoji ]
     _luoshu_atomic_verify_manifest "$MODDIR/config/self-mount-required.conf"
+    ! grep -q "/system_ext/fonts|" "$MODDIR/config/self-mount-required.conf"
     mount_list="$LUOSHU_SELF_MOUNT_STATE_ROOT/mounts.list"
     [ -s "$mount_list" ]
     before=$(wc -l < "$mount_list" | tr -d "[:space:]")
