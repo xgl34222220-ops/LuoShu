@@ -38,7 +38,7 @@ jobs:
           exit "$code"
       - name: Upload Android diagnostic log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: LuoShu-Android-Diagnostic-Log
           path: ${{ runner.temp }}/luoshu-android-diagnostic.log

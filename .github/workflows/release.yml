@@ -244,7 +244,7 @@ jobs:
           sh ./scripts/pre_release_readiness.sh "${args[@]}"
 
       - name: Preserve verified release candidate
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: LuoShu-${{ steps.version.outputs.artifact_version }}-verified-release
           path: |

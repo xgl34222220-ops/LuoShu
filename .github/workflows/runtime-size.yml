@@ -43,7 +43,7 @@ jobs:
           sh scripts/python_runtime_prune_test.sh > "$RUNNER_TEMP/runtime-size.log" 2>&1
       - name: Upload runtime audit log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: embedded-runtime-size-log
           path: ${{ runner.temp }}/runtime-size.log
