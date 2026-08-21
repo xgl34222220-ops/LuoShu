@@ -1,8 +1,24 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$ROOT/scripts/runtime_versions.conf"
 SOURCE="$ROOT/common/python"
 [ -d "$SOURCE/lib/python3.14" ] || { echo 'embedded Python runtime is missing' >&2; exit 1; }
+test -s "$SOURCE/runtime-manifest.json"
+python3 - "$SOURCE/runtime-manifest.json" "$LUOSHU_PY_VERSION" "$LUOSHU_FONTTOOLS_VERSION" \
+  "$LUOSHU_ANDROID_NDK_VERSION" "$LUOSHU_ANDROID_MIN_API" <<'PY_MANIFEST'
+import json
+import sys
+
+path, python_version, fonttools_version, ndk_version, min_api = sys.argv[1:]
+data = json.load(open(path, encoding="utf-8"))
+assert data["schema"] == 1
+assert data["python"]["version"] == python_version
+assert data["fontTools"]["version"] == fonttools_version
+assert data["androidNdk"]["version"] == ndk_version
+assert data["androidNdk"]["abi"] == "arm64-v8a"
+assert data["androidNdk"]["minApi"] == int(min_api)
+PY_MANIFEST
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 STAGE="$TMP/module"
