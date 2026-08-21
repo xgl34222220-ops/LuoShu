@@ -41,12 +41,12 @@ for file in \
   common/app_bridge.sh common/font_manager.sh common/font_library_cache.sh common/app_installer.sh \
   common/font_provider_cache.sh common/font_validation_cache.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
-  scripts/assert.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/weight_prepare_batch_test.sh scripts/slot_build_instance_cache_test.py scripts/composite_validate_lazy_test.py scripts/compact_metrics_clipping_test.py scripts/provider_verify_after_restart_test.sh scripts/engine_cache_invalidation_test.sh scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
+  scripts/assert.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/weight_prepare_batch_test.sh scripts/slot_build_instance_cache_test.py scripts/composite_validate_lazy_test.py scripts/composite_font_safeguards_test.py scripts/compact_metrics_clipping_test.py scripts/provider_verify_after_restart_test.sh scripts/engine_cache_invalidation_test.sh scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/runtime_versions.conf scripts/python_runtime_prune_test.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
   scripts/device_validation_gate.py scripts/device_validation_gate_test.py docs/device_validation.json \
-  scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh scripts/app_bridge_status_test.sh \
+  scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/font_import_limits_test.sh scripts/font_mix_transaction_recovery_test.sh scripts/native_preview_source_test.sh scripts/app_bridge_status_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_config_monospace_test.py \
   scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/mix_finalize_performance_test.sh scripts/font_library_ui_layout_test.sh scripts/v2_source_audit.sh \
-  docs/RELEASING.md docs/TEST_MATRIX.md \
+  docs/RELEASING.md docs/TEST_MATRIX.md docs/RUNTIME_DEPENDENCIES.md docs/COMPLIANCE.md \
   android-app/app/build.gradle.kts \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/MainActivity.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuHost.kt \
@@ -215,10 +215,25 @@ grep -q 'GPL-3.0-only' "$ROOT/CONTRIBUTING.md"
 grep -q '^MIT License$' "$ROOT/licenses/LuoShu-MIT-HISTORICAL.txt"
 grep -q 'Python Software Foundation' "$ROOT/licenses/CPython-LICENSE.txt"
 grep -q '^MIT License$' "$ROOT/licenses/FontTools-LICENSE.txt"
+grep -q 'GPL-3.0-only' "$ROOT/docs/COMPLIANCE.md"
+
+# 内置 Python、FontTools 与 NDK 使用同一份锁文件，CI 缓存不能脱离该锁文件复用。
+. "$ROOT/scripts/runtime_versions.conf"
+test "$LUOSHU_PY_VERSION" = 3.14.6
+test "$LUOSHU_FONTTOOLS_VERSION" = 4.63.0
+test "$LUOSHU_ANDROID_NDK_VERSION" = 27.0.12077973
+test "$LUOSHU_ANDROID_MIN_API" = 26
+grep -q 'runtime_versions.conf' "$ROOT/scripts/prepare_composite_runtime.sh"
+for workflow in build.yml check.yml no-hook-font-engine.yml release.yml runtime-size.yml test-candidate.yml; do
+  grep -q "hashFiles('scripts/prepare_composite_runtime.sh', 'scripts/runtime_versions.conf')" "$ROOT/.github/workflows/$workflow"
+done
 
 # 功能回归脚本。
 sh "$ROOT/scripts/native_preview_source_test.sh"
 sh "$ROOT/scripts/app_bridge_status_test.sh"
+sh "$ROOT/scripts/font_import_limits_test.sh"
+sh "$ROOT/scripts/font_mix_transaction_recovery_test.sh"
+python3 "$ROOT/scripts/composite_font_safeguards_test.py"
 # 用 `python3 -S` 并显式指向打包路径，因此只有打包后的 fontTools 才算数；
 # 开发机上装的那份不会被 -S 加载。缺失时明确跳过，而不是抛一个 ModuleNotFoundError 回溯。
 if [ -d "$ROOT/common/python/lib/python3.14/site-packages/fontTools" ]; then

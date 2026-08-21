@@ -12,6 +12,7 @@ import hashlib
 import json
 import gc
 import os
+import re
 import sys
 import tempfile
 import time
@@ -84,11 +85,73 @@ def _is_collection(path: Path) -> bool:
         return fp.read(4) == b"ttcf"
 
 
-def _font_weight(font: TTFont) -> int:
+WEIGHT_NAME_HINTS = (
+    ("extrablack", 950),
+    ("ultrablack", 950),
+    ("extrabold", 800),
+    ("ultrabold", 800),
+    ("semibold", 600),
+    ("demibold", 600),
+    ("extralight", 200),
+    ("ultralight", 200),
+    ("hairline", 100),
+    ("thin", 100),
+    ("light", 300),
+    ("book", 400),
+    ("regular", 400),
+    ("normal", 400),
+    ("roman", 400),
+    ("medium", 500),
+    ("bold", 700),
+    ("heavy", 900),
+    ("black", 900),
+)
+
+
+def _font_name_weight(font: TTFont) -> int | None:
     try:
-        return int(font["OS/2"].usWeightClass)
+        names = font["name"].names
     except Exception:
-        return 400
+        return None
+    for name_id in (17, 2, 4, 6):
+        for record in names:
+            if record.nameID != name_id:
+                continue
+            try:
+                normalized = re.sub(r"[^a-z0-9]+", "", record.toUnicode().lower())
+            except Exception:
+                continue
+            for hint, weight in WEIGHT_NAME_HINTS:
+                if hint in normalized:
+                    return weight
+    return None
+
+
+def _font_weight(font: TTFont) -> int:
+    os2_weight: int | None = None
+    try:
+        weight = int(font["OS/2"].usWeightClass)
+        if 1 <= weight <= 1000:
+            os2_weight = weight
+    except Exception:
+        pass
+
+    name_weight = _font_name_weight(font)
+    # A common broken export writes 400 into every face. In that one ambiguous case, a
+    # non-Regular typographic subfamily is more useful than the default-looking OS/2 value.
+    if os2_weight == 400 and name_weight not in (None, 400):
+        return name_weight
+    if os2_weight is not None:
+        return os2_weight
+    if name_weight is not None:
+        return name_weight
+
+    try:
+        if int(font["head"].macStyle) & 0x01:
+            return 700
+    except Exception:
+        pass
+    return 400
 
 
 def _score_face(font: TTFont, role: str, target_weight: int) -> tuple[int, int]:
@@ -166,6 +229,20 @@ def _bounds_for_codepoint(font: TTFont, glyph_set, codepoint: int) -> tuple[floa
 # overshoot the baseline and introduce a systematic upward bias.
 FLAT_BOTTOM_PROBES = {"latin": "HIEX", "digit": "147"}
 BASELINE_SHIFT_LIMIT_RATIO = 0.25
+BASELINE_PROBE_SPREAD_LIMIT_RATIO = 0.08
+
+
+def _safe_baseline_shift(source_bottoms: Iterable[float], scale: float, base_upem: int) -> float:
+    scaled_bottoms = [float(value) * scale for value in source_bottoms]
+    if len(scaled_bottoms) < 2:
+        return 0.0
+    if max(scaled_bottoms) - min(scaled_bottoms) > base_upem * BASELINE_PROBE_SPREAD_LIMIT_RATIO:
+        # Artistic/handwritten faces sometimes give I or 1 a decorative descender. A dispersed
+        # probe set is not trustworthy enough to move every Latin or digit glyph vertically.
+        return 0.0
+    shift = -float(statistics.median(scaled_bottoms))
+    limit = base_upem * BASELINE_SHIFT_LIMIT_RATIO
+    return max(-limit, min(limit, shift))
 
 
 def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tuple[float, float]:
@@ -194,13 +271,9 @@ def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tupl
         )
         if bounds
     ]
-    if not source_bottoms:
-        return scale, 0.0
     # OpenType baseline is y=0. Never inherit the CJK base font's potentially vertically
     # centered ASCII bottom; only correct genuine source-font vertical displacement.
-    shift = -float(statistics.median(source_bottoms)) * scale
-    limit = base["head"].unitsPerEm * BASELINE_SHIFT_LIMIT_RATIO
-    return scale, max(-limit, min(limit, shift))
+    return scale, _safe_baseline_shift(source_bottoms, scale, base["head"].unitsPerEm)
 
 
 def _draw_decomposed(glyph_set, glyph_name: str, destination_pen, scale: float, y_shift: float) -> None:
