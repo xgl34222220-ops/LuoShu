@@ -41,8 +41,17 @@ printf 'state=verified\nmode=mount-verified\nreason=\nactiveFont=DemoFont\n' \
     >"$CONFIG/device-font-load-verification.conf"
 assert_status DemoFont verified ''
 
+printf 'state=verified\nmode=mount-confirmed\nreason=mount-active-visible-layout-differs\nactiveFont=DemoFont\n' \
+    >"$CONFIG/device-font-load-verification.conf"
+assert_status DemoFont verified mount-active-visible-layout-differs
+
+# An explicit atomic rollback wins over a stale mount-confirmed record and the
+# App must show the actionable mount failure instead of an internal layout code.
+printf 'state=failed\nbackend=rollback\nfailed=system_ext/fonts-target-missing\n' >"$CONFIG/self-mount.conf"
+assert_status default failed self-mount-failed
+
 printf 'state=failed\nbackend=rollback\nfailed=system/etc\n' >"$CONFIG/self-mount.conf"
-assert_status default failed ''
+assert_status default failed self-mount-failed
 
 printf 'state=mounted\nbackend=self-overlay\n' >"$CONFIG/self-mount.conf"
 printf 'state=verified\nmode=mount-verified\nreason=\nactiveFont=OldFont\n' \

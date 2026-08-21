@@ -80,7 +80,7 @@ internal data class DeviceTrustState(
             activeFont in setOf("", "default") || alignment == "not-applicable" -> DeviceTrustLevel.SYSTEM
             mountState == "failed" -> DeviceTrustLevel.ISSUE
             alignment == "failed" || reason in failedTrustReasons -> DeviceTrustLevel.ISSUE
-            alignment == "verified" && mode in setOf("aligned", "mount-verified") -> DeviceTrustLevel.VERIFIED
+            alignment == "verified" && mode in setOf("aligned", "mount-verified", "mount-confirmed") -> DeviceTrustLevel.VERIFIED
             alignment == "pending" || reason in pendingTrustReasons -> DeviceTrustLevel.PENDING
             alignment == "compatibility" || mode == "compatibility" -> DeviceTrustLevel.COMPATIBILITY
             engine == "installed" -> DeviceTrustLevel.PENDING
@@ -109,9 +109,9 @@ internal suspend fun loadDeviceTrustState(): DeviceTrustState {
         mountState="${'$'}(read_value "${'$'}CFG/self-mount.conf" state)"
         if [ "${'$'}active" != default ]; then
             if [ "${'$'}mountState" = failed ]; then
+                [ "${'$'}alignment" = failed ] || reason=self-mount-failed
                 alignment=failed
                 mode=compatibility
-                [ -n "${'$'}reason" ] || reason=self-mount-failed
             elif [ -n "${'$'}verifiedActive" ] && [ "${'$'}verifiedActive" != "${'$'}active" ]; then
                 alignment=pending
                 mode=unknown
@@ -282,6 +282,12 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
             Icons.Rounded.CheckCircle,
             scheme.primary,
         )
+        state.level == DeviceTrustLevel.VERIFIED && state.mode == "mount-confirmed" -> DeviceTrustPresentation(
+            "本次启动挂载已确认",
+            "字体事务已完成；系统字体服务暴露的目录布局与负载不同",
+            Icons.Rounded.CheckCircle,
+            scheme.primary,
+        )
         state.level == DeviceTrustLevel.VERIFIED -> DeviceTrustPresentation(
             "本次启动字体已验证",
             "原厂模板、字体事务与本次启动证据一致",
@@ -339,6 +345,8 @@ private fun friendlyTrustReason(value: String): String = when (value) {
     "current-boot-mount-confirmed" -> "本次启动的字体、配置与挂载事务均已确认"
     "dynamic-config-changed" -> "系统在启动后改写了动态字体配置"
     "verified-by-visible-mounts" -> "系统可见字体文件与洛书负载一致"
+    "mount-transaction-active" -> "本次启动的字体挂载事务已确认"
+    "mount-active-visible-layout-differs" -> "字体挂载已确认，系统可见目录布局与模块负载不同"
     else -> value
 }
 
@@ -355,6 +363,7 @@ private fun friendlyTrustValue(value: String): String = when (value) {
     "not-applicable" -> "不适用"
     "aligned" -> "设备对齐"
     "mount-verified" -> "挂载证据"
+    "mount-confirmed" -> "事务确认"
     "compatibility" -> "兼容映射"
     "mounted" -> "完整挂载"
     "idle" -> "未启用"

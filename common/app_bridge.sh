@@ -151,9 +151,14 @@ status_json() {
         # failure, so the only safe effective-font claim is the ROM default.
         _effective_active=default
         _font_effect_state=failed
+        if [ "$_mount_state" = failed ]; then
+            [ "$_verification_state" = failed ] || _verification_reason=self-mount-failed
+            _verification_state=failed
+            _verification_mode=compatibility
+        fi
     elif [ "$_verification_state" = verified ]; then
         case "$_verification_mode" in
-            aligned|mount-verified)
+            aligned|mount-verified|mount-confirmed)
                 _effective_active="$_active"
                 _font_effect_state=verified
                 ;;
