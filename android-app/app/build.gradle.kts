@@ -122,8 +122,8 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("com.materialkolor:material-kolor:2.0.0")
-    implementation("dev.chrisbanes.haze:haze:1.6.10")
-    implementation("dev.chrisbanes.haze:haze-materials:1.6.10")
+    implementation("dev.chrisbanes.haze:haze:1.7.2")
+    implementation("dev.chrisbanes.haze:haze-materials:1.7.2")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20251224")
