@@ -10,11 +10,15 @@ PY_SHA256=$LUOSHU_PY_SHA256
 FONTTOOLS_VERSION=$LUOSHU_FONTTOOLS_VERSION
 NDK_VERSION=$LUOSHU_ANDROID_NDK_VERSION
 ANDROID_MIN_API=$LUOSHU_ANDROID_MIN_API
-NDK=${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}
-
-if [ -z "$NDK" ]; then
-  test -n "${ANDROID_HOME:-}" || { echo 'ANDROID_HOME is required to locate the pinned NDK.' >&2; exit 1; }
+# GitHub-hosted Android runners export ANDROID_NDK_HOME for their newest
+# preinstalled NDK.  That path must not override LuoShu's pinned toolchain.
+# Prefer the versioned SDK location whenever ANDROID_HOME is available; retain
+# the legacy variables only for environments without an Android SDK root.
+if [ -n "${ANDROID_HOME:-}" ]; then
   NDK="$ANDROID_HOME/ndk/$NDK_VERSION"
+else
+  NDK=${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}
+  test -n "$NDK" || { echo 'ANDROID_HOME is required to locate the pinned NDK.' >&2; exit 1; }
 fi
 if [ ! -d "$NDK" ]; then
   SDKMANAGER="${ANDROID_HOME:-}/cmdline-tools/latest/bin/sdkmanager"
