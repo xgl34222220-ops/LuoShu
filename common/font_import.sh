@@ -5,6 +5,7 @@
 IMPORT_MAX_ZIP_BYTES=268435456
 IMPORT_MAX_FILES=128
 IMPORT_MAX_EXTRACT_BYTES=536870912
+IMPORT_MAX_FONT_BYTES=268435456
 USER_IMPORT_DIR="${USER_IMPORT_DIR:-${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/import}"
 IMPORT_CACHE_DIR="${IMPORT_CACHE_DIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}/cache/import}"
 IMPORT_PROBE="${IMPORT_PROBE:-${MODULE_DIR:-/data/adb/modules/LuoShu}/common/font_import_probe.py}"
@@ -275,6 +276,27 @@ import_zip_package() {
         import_unzip -j -o "$_zip" "$_pat" -d "$_tmp" >/dev/null 2>&1 || true
     done
     find "$_tmp" -type l -exec rm -f {} \; 2>/dev/null || true
+
+    # ZIP headers are only an early rejection hint. Recount the files and bytes that actually
+    # landed on disk so forged metadata, duplicate flattened names and extraction expansion
+    # cannot bypass the limits above.
+    _actual_count=0; _actual_bytes=0; _oversized_font=false
+    for _f in "$_tmp"/*; do
+        [ -f "$_f" ] || continue
+        _actual_count=$((_actual_count + 1))
+        _actual_size=$(wc -c < "$_f" 2>/dev/null | tr -d '[:space:]')
+        case "$_actual_size" in ''|*[!0-9]*) _actual_size=0 ;; esac
+        _actual_bytes=$((_actual_bytes + _actual_size))
+        [ "$_actual_size" -le "$IMPORT_MAX_FONT_BYTES" ] || _oversized_font=true
+    done
+    if [ "$_actual_count" -ne "$_declared_count" ]; then
+        rm -rf "$_tmp" 2>/dev/null || true
+        printf '{"status":"error","message":"ZIP 中存在重名字体或解压结果不完整"}\n'; return 0
+    fi
+    if [ "$_actual_count" -gt "$IMPORT_MAX_FILES" ] || [ "$_actual_bytes" -gt "$IMPORT_MAX_EXTRACT_BYTES" ] || [ "$_oversized_font" = true ]; then
+        rm -rf "$_tmp" 2>/dev/null || true
+        printf '{"status":"error","message":"字体包解压后的真实内容超过安全限制"}\n'; return 0
+    fi
 
     _manifest="$_tmp/.manifest"; : > "$_manifest"
     _valid=0; _invalid=0; _ignored=0
