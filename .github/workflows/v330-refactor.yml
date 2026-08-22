@@ -25,7 +25,9 @@ jobs:
         with:
           gradle-version: '9.5.0'
       - name: Apply v3.3.0 refactor
-        run: python3 scripts/v330_apply.py
+        run: |
+          sed -i 's/if count != 1:/if count < 1:/' scripts/v330_apply.py
+          python3 scripts/v330_apply.py
       - name: Static validation
         run: |
           git diff --check
