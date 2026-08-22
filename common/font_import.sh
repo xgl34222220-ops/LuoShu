@@ -11,6 +11,15 @@ IMPORT_PROBE="${IMPORT_PROBE:-${MODULE_DIR:-/data/adb/modules/LuoShu}/common/fon
 IMPORT_PYROOT="${IMPORT_PYROOT:-${MODULE_DIR:-/data/adb/modules/LuoShu}/common/python}"
 IMPORT_PYBIN="${IMPORT_PYBIN:-$IMPORT_PYROOT/bin/luoshu-python}"
 
+# Import is the right place to pay the expensive FontTools cost. Build the deterministic
+# 100-900 UI/Mono payload once here; later switches only restore hard-linked cache entries.
+[ -f "${MODULE_DIR:-/data/adb/modules/LuoShu}/common/rom_adapters.sh" ] && \
+    . "${MODULE_DIR:-/data/adb/modules/LuoShu}/common/rom_adapters.sh"
+[ -f "${MODULE_DIR:-/data/adb/modules/LuoShu}/common/font_config_runtime.sh" ] && \
+    . "${MODULE_DIR:-/data/adb/modules/LuoShu}/common/font_config_runtime.sh"
+[ -f "${MODULE_DIR:-/data/adb/modules/LuoShu}/common/font_config_weights.sh" ] && \
+    . "${MODULE_DIR:-/data/adb/modules/LuoShu}/common/font_config_weights.sh"
+
 import_unzip() {
     if command -v unzip >/dev/null 2>&1; then unzip "$@"
     elif command -v busybox >/dev/null 2>&1; then busybox unzip "$@"
@@ -362,6 +371,10 @@ EOF_PROBE
         _font_id=$(detect_font_family "$_target_name")
         _supports_cjk="${_best_supports_cjk:-false}"
         import_write_font_config "$_font_id" "$_display_name" "$_zip_name" "$_module_version" "$_module_author" "$_supports_cjk" "$_best_variable" || true
+        _prewarm_source="$USER_FONTS_DIR/$_target_name"
+        if [ -s "$_prewarm_source" ] && type font_config_prewarm_payload_weights >/dev/null 2>&1; then
+            font_config_prewarm_payload_weights "$_font_id" "$_prewarm_source" >/dev/null 2>&1 || true
+        fi
     fi
 
     rm -rf "$_tmp" 2>/dev/null || true
