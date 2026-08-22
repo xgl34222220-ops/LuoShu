@@ -147,9 +147,6 @@ import_font_file() {
     _duplicate=$(find_duplicate "$_src" "$_hash")
     if [ -f "$_duplicate" ]; then
         _family=$(detect_font_family "$(basename "$_duplicate")")
-        if type font_config_prewarm_payload_weights >/dev/null 2>&1; then
-            font_config_prewarm_payload_weights "$_family" "$_duplicate" >/dev/null 2>&1 || true
-        fi
         printf '{"status":"ok","data":{"kind":"font","id":"%s","name":"%s","format":"%s","duplicate":true,"message":"字体已存在，未重复导入"}}\n' \
             "$(json_escape "$_family")" "$(json_escape "$(safe_stem "$_display")")" "$_format"
         return
@@ -178,9 +175,6 @@ EOF_RAW_PROBE
         printf 'supports_cjk=%s\n' "$_supports_cjk"
         printf 'is_variable=%s\n' "${_probe_variable:-false}"
     } > "$USER_FONTS_DIR/${_family}.conf" 2>/dev/null || true
-    if type font_config_prewarm_payload_weights >/dev/null 2>&1; then
-        font_config_prewarm_payload_weights "$_family" "$_target" >/dev/null 2>&1 || true
-    fi
     printf '{"status":"ok","data":{"kind":"font","id":"%s","name":"%s","format":"%s","supportsCjk":%s,"duplicate":false,"message":"字体已导入"}}\n' \
         "$(json_escape "$_family")" "$(json_escape "$_stem")" "$_format" "$_supports_cjk"
 }

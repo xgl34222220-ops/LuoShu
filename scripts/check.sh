@@ -250,7 +250,6 @@ sh "$ROOT/scripts/duplicate_function_test.sh"
 sh "$ROOT/scripts/device_font_cache_budget_test.sh"
 sh "$ROOT/scripts/provider_pid_scan_test.sh"
 sh "$ROOT/scripts/weight_prepare_batch_test.sh"
-sh "$ROOT/scripts/font_payload_cache_test.sh"
 
 # 这些测试早已存在但从未被 CI 执行过：50 个测试文件里包含无 Hook XML 家族覆盖
 # (font_config_overlay_test.py) 与 ColorOS 槽位映射 (coloros_partition_mapping_test.sh)，
