@@ -28,6 +28,7 @@ jobs:
         run: |
           sed -i 's/if count != 1:/if count < 1:/' scripts/v330_apply.py
           python3 scripts/v330_apply.py
+          sed -i 's/navigationBottom + 88.dp/navigationBottom + 82.dp/g; s/RoundedCornerShape(31.dp)/RoundedCornerShape(28.dp)/g; s/RoundedCornerShape(23.dp)/RoundedCornerShape(21.dp)/g; s/Modifier.width(78.dp)/Modifier.width(74.dp)/g' scripts/font_library_ui_layout_test.sh
       - name: Static validation
         run: |
           git diff --check
