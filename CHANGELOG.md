@@ -6,6 +6,13 @@
 
 - 暂无。
 
+## [v3.2.3] - 2026-08-21
+
+- 修复最终加载的 `font_runtime_mount.sh` 仍以旧版同名函数覆盖原子自挂载修复，导致 Android 16 / KernelSU 设备继续因缺少 `/system_ext/fonts` 回滚主字体挂载的问题。
+- 自挂载收敛到 `mount_self_atomic.sh` 单一实现，并在执行时读取规范的 `.luoshu-payload` 私有负载，避免多份策略再次漂移。
+- 生产 `mount_compat.sh` 加载链新增缺失可选 `system_ext/fonts` 回归；`/system/fonts` 继续保持强制验证、PID 1 可见性校验和失败完整回滚。
+- 模块正式版 versionCode 为 `30203`，App versionCode 为 `3020301`。
+
 ## [v2.3.7] - 2026-07-30
 
 - 合入本次启动激活证据门禁：字体事务、自挂载清单、动态字体配置与 `bootId` 必须属于当前启动，只有 PID 1 可见且原子事务为 `mounted` 才显示生效。

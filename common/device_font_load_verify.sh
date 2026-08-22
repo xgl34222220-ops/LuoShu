@@ -186,6 +186,9 @@ _dfload_mount_transaction_active() {
     _dfload_boot_state=$(_dfload_state_value "$_dfload_module_dir/config/font-payload-boot.conf" state)
     _dfload_font_count=$(_dfload_manifest_font_count)
     [ "$_dfload_font_count" -gt 0 ] 2>/dev/null || return 1
+    # A stale confirmed boot record must never override an explicit rollback
+    # from the current self-mount transaction.
+    [ "$_dfload_mount_state" != failed ] || return 1
     case "$_dfload_mount_state:$_dfload_boot_state" in
         mounted:*|confirmed:*|*:confirmed|*:booting) return 0 ;;
         *) return 1 ;;
@@ -200,6 +203,12 @@ device_font_load_status() {
         return 0
     fi
 
+    _dfload_mount_state=$(_dfload_state_value "$_dfload_module_dir/config/self-mount.conf" state)
+    if [ "$_dfload_mount_state" = failed ]; then
+        _dfload_write_simple failed self-mount-failed "$_dfload_active" compatibility
+        return 1
+    fi
+
     _dfload_conf="$_dfload_module_dir/config/device-font-load-verification.conf"
     _dfload_verified_state=$(_dfload_state_value "$_dfload_conf" state)
     _dfload_verified_active=$(_dfload_state_value "$_dfload_conf" activeFont)
@@ -212,12 +221,6 @@ device_font_load_status() {
         return 0
     fi
 
-    _dfload_mount_state=$(_dfload_state_value "$_dfload_module_dir/config/self-mount.conf" state)
-    if [ "$_dfload_mount_state" = failed ]; then
-        _dfload_write_simple failed self-mount-failed "$_dfload_active" compatibility
-        return 1
-    fi
-
     _dfload_write_simple pending awaiting-mount-confirmation "$_dfload_active" compatibility
     return 2
 }
@@ -228,6 +231,13 @@ device_font_load_verify() {
     if [ "$_dfload_active" = default ]; then
         _dfload_write_simple not-applicable default-font "$_dfload_active" system
         return 2
+    fi
+
+    _dfload_mount_state=$(_dfload_state_value "$_dfload_module_dir/config/self-mount.conf" state)
+    if [ "$_dfload_mount_state" = failed ]; then
+        _dfload_write_simple failed self-mount-failed "$_dfload_active" compatibility
+        _dfload_log "字体自挂载明确失败；旧启动确认记录不再覆盖本次回滚：$_dfload_active"
+        return 1
     fi
 
     if _dfload_exact_visible_match; then
@@ -246,13 +256,6 @@ device_font_load_verify() {
         _dfload_write_simple verified mount-active-visible-layout-differs "$_dfload_active" mount-confirmed
         _dfload_log "字体挂载事务有效，但系统字体服务暴露的文件布局与负载不同；不再误判失败或恢复默认字体：$_dfload_active"
         return 0
-    fi
-
-    _dfload_mount_state=$(_dfload_state_value "$_dfload_module_dir/config/self-mount.conf" state)
-    if [ "$_dfload_mount_state" = failed ]; then
-        _dfload_write_simple failed self-mount-failed "$_dfload_active" compatibility
-        _dfload_log "字体自挂载明确失败：$_dfload_active"
-        return 1
     fi
 
     _dfload_write_simple pending mount-evidence-pending "$_dfload_active" compatibility

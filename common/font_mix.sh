@@ -27,6 +27,7 @@ PAYLOAD_STAGE=""
 PAYLOAD_BACKUP=""
 PAYLOAD_ACTIVATED=0
 PAYLOAD_COMMIT_MARKER="$MODDIR/.font-payload-commit.ok"
+PAYLOAD_JOURNAL="$MODDIR/.font-payload-transaction.state"
 COMPOSITE_RESULT=""
 COMPOSITE_REPORT=""
 COMPOSITE_CACHE_HIT=false
@@ -145,7 +146,104 @@ verify_core_files() {
     return 0
 }
 
+payload_path_is_private() {
+    case "$1" in
+        "$MODDIR"/.font-payload-stage.*|"$MODDIR"/.font-payload-backup.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+payload_outer_path_is_private() {
+    case "$1" in
+        "$MODDIR"/.payload-transaction.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+payload_journal_value() {
+    _pjv_key="$1"
+    sed -n "s/^${_pjv_key}=//p" "$PAYLOAD_JOURNAL" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
+payload_journal_write() {
+    _pjw_state="$1"
+    _pjw_tmp="$PAYLOAD_JOURNAL.tmp.$$"
+    {
+        printf 'version=1\n'
+        printf 'state=%s\n' "$_pjw_state"
+        printf 'pid=%s\n' "$$"
+        printf 'stage=%s\n' "$PAYLOAD_STAGE"
+        printf 'backup=%s\n' "$PAYLOAD_BACKUP"
+        printf 'outer=%s\n' "${LUOSHU_PAYLOAD_TXN:-}"
+        printf 'target=%s\n' "$SYSTEM_FONTS_DIR"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$_pjw_tmp" 2>/dev/null || return 1
+    mv -f "$_pjw_tmp" "$PAYLOAD_JOURNAL" 2>/dev/null || return 1
+    chmod 0600 "$PAYLOAD_JOURNAL" 2>/dev/null || true
+    return 0
+}
+
+payload_outer_commit_visible() {
+    _poc_state=$(sed -n 's/^state=//p' "$CONFIG_DIR/font-payload-boot.conf" 2>/dev/null | head -n1 | tr -d '\r')
+    _poc_font=$(sed -n 's/^font=//p' "$CONFIG_DIR/font-payload-boot.conf" 2>/dev/null | head -n1 | tr -d '\r')
+    [ "$_poc_state" = prepared ] && [ "$_poc_font" = mix ] || return 1
+    type luoshu_payload_validate_manifest_fast >/dev/null 2>&1 || return 1
+    luoshu_payload_validate_manifest_fast >/dev/null 2>&1
+}
+
 recover_interrupted_payload() {
+    if [ -f "$PAYLOAD_JOURNAL" ]; then
+        _recover_state=$(payload_journal_value state)
+        _recover_stage=$(payload_journal_value stage)
+        _recover_backup=$(payload_journal_value backup)
+        _recover_outer=$(payload_journal_value outer)
+        payload_path_is_private "$_recover_stage" || _recover_stage=""
+        payload_path_is_private "$_recover_backup" || _recover_backup=""
+        payload_outer_path_is_private "$_recover_outer" || _recover_outer=""
+        case "$_recover_state" in
+            PAYLOAD_SWAPPED|CONFIG_COMMITTED)
+                [ -n "$_recover_backup" ] || [ -d "$_recover_outer" ] || return 1
+                ;;
+        esac
+
+        # luoshu_payload_transaction_commit() publishes the prepared boot manifest last.
+        # If that manifest is already valid, a SIGKILL happened after the outer commit and
+        # the new payload must be kept. Otherwise every non-final state is rolled back.
+        if [ "$_recover_state" = COMMITTED ] || \
+           { [ "$_recover_state" = CONFIG_COMMITTED ] && payload_outer_commit_visible; }; then
+            [ -z "$_recover_backup" ] || rm -rf "$_recover_backup" 2>/dev/null || true
+            [ -z "$_recover_stage" ] || rm -rf "$_recover_stage" 2>/dev/null || true
+            [ -z "$_recover_outer" ] || rm -rf "$_recover_outer" 2>/dev/null || true
+            rm -f "$PAYLOAD_COMMIT_MARKER" "$PAYLOAD_JOURNAL" 2>/dev/null || true
+            return 0
+        fi
+
+        [ -z "$_recover_stage" ] || rm -rf "$_recover_stage" 2>/dev/null || true
+        _recover_outer_done=false
+        if [ -n "$_recover_outer" ] && [ -d "$_recover_outer" ] && \
+           type luoshu_payload_transaction_rollback >/dev/null 2>&1; then
+            LUOSHU_PAYLOAD_TXN="$_recover_outer"
+            luoshu_payload_transaction_rollback >/dev/null 2>&1 || true
+            [ -d "$_recover_outer" ] || _recover_outer_done=true
+        fi
+        if [ "$_recover_outer_done" = true ]; then
+            [ -z "$_recover_backup" ] || rm -rf "$_recover_backup" 2>/dev/null || true
+        elif [ -n "$_recover_backup" ] && [ -d "$_recover_backup" ]; then
+            rm -rf "$SYSTEM_FONTS_DIR" 2>/dev/null || true
+            if ! mv "$_recover_backup" "$SYSTEM_FONTS_DIR" 2>/dev/null; then
+                # Keep the journal and backup for the next retry; never discard the only
+                # known-good payload merely because recovery storage is temporarily unavailable.
+                return 1
+            fi
+        elif [ "$_recover_state" != PREPARED ]; then
+            return 1
+        fi
+        rm -f "$PAYLOAD_COMMIT_MARKER" "$PAYLOAD_JOURNAL" 2>/dev/null || true
+        rm -rf "$MODDIR"/.font-payload-stage.* 2>/dev/null || true
+        return 0
+    fi
+
+    # Legacy residue from releases before the persistent journal.
     if [ -f "$PAYLOAD_COMMIT_MARKER" ]; then
         rm -rf "$MODDIR"/.font-payload-backup.* "$MODDIR"/.font-payload-stage.* 2>/dev/null || true
         rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
@@ -169,12 +267,14 @@ payload_stage_begin() {
     # Starting from an empty directory avoids copying dozens of large hard-linked aliases only to
     # delete them immediately before generating the replacement payload.
     mkdir -p "$PAYLOAD_STAGE" 2>/dev/null || return 1
+    payload_journal_write PREPARED || { rm -rf "$PAYLOAD_STAGE" 2>/dev/null || true; return 1; }
     return 0
 }
 
 payload_stage_abort() {
     [ -z "$PAYLOAD_STAGE" ] || rm -rf "$PAYLOAD_STAGE" 2>/dev/null || true
     PAYLOAD_STAGE=""
+    [ "$PAYLOAD_ACTIVATED" -eq 1 ] || rm -f "$PAYLOAD_JOURNAL" 2>/dev/null || true
 }
 
 payload_stage_activate() {
@@ -191,22 +291,28 @@ payload_stage_activate() {
     fi
     PAYLOAD_STAGE=""
     PAYLOAD_ACTIVATED=1
+    if ! payload_journal_write PAYLOAD_SWAPPED; then
+        payload_stage_rollback
+        return 1
+    fi
     return 0
 }
 
 payload_stage_rollback() {
     [ "$PAYLOAD_ACTIVATED" -eq 1 ] || return 0
     rm -rf "$SYSTEM_FONTS_DIR" 2>/dev/null || true
-    mv "$PAYLOAD_BACKUP" "$SYSTEM_FONTS_DIR" 2>/dev/null || true
-    rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
+    [ -d "$PAYLOAD_BACKUP" ] || return 1
+    mv "$PAYLOAD_BACKUP" "$SYSTEM_FONTS_DIR" 2>/dev/null || return 1
+    rm -f "$PAYLOAD_COMMIT_MARKER" "$PAYLOAD_JOURNAL" 2>/dev/null || true
     PAYLOAD_BACKUP=""
     PAYLOAD_ACTIVATED=0
 }
 
 payload_stage_finalize() {
     [ "$PAYLOAD_ACTIVATED" -eq 1 ] || return 0
+    payload_journal_write COMMITTED || return 1
     rm -rf "$PAYLOAD_BACKUP" 2>/dev/null || true
-    rm -f "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
+    rm -f "$PAYLOAD_COMMIT_MARKER" "$PAYLOAD_JOURNAL" 2>/dev/null || true
     PAYLOAD_BACKUP=""
     PAYLOAD_ACTIVATED=0
 }
@@ -305,6 +411,26 @@ composite_hash_file() {
     fi
 }
 
+# 复合字体缓存此前只按三个源字体的 sha 加一个手写字面量 "full-composite-v11" 作键，不含任何
+# 引擎自身的信息。于是改了 composite_font.py 或 font_metrics_normalize.py 的度量契约之后，缓存
+# 照样命中，设备继续复用修复前生成的那份复合字体——用户看到的是"修了但没变"。手写版本号要靠
+# 人记得递增，而这次恰恰没记得。改为直接哈希引擎文件内容，引擎一变缓存自动失效。
+composite_engine_key() {
+    _cek_module="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
+    _cek_acc=''
+    for _cek_file in \
+        "$_cek_module/common/composite_font.py" \
+        "$_cek_module/common/font_metrics_normalize.py" \
+        "$_cek_module/common/font_instance.py"; do
+        [ -f "$_cek_file" ] || continue
+        _cek_acc="$_cek_acc$(composite_hash_file "$_cek_file")"
+    done
+    [ -n "$_cek_acc" ] || _cek_acc=no-engine
+    printf '%s' "$_cek_acc" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum
+        elif command -v toybox >/dev/null 2>&1; then toybox sha256sum
+        else cksum; fi; } | awk '{print $1}'
+}
+
 set_mix_error() {
     LAST_MIX_ERROR="$1"
     printf '%s\n' "$LAST_MIX_ERROR" > "$CONFIG_DIR/mix_last_error.txt" 2>/dev/null || true
@@ -385,7 +511,7 @@ build_composite_file() {
     check_composite_runtime || return 1
     _cache="$MODDIR/cache/full-composite-v11"
     mkdir -p "$_cache" "$MODDIR/cache/tmp" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
-    _key_src="$(composite_hash_file "$_cjk_src")-$(composite_hash_file "$_latin_src")-$(composite_hash_file "$_digit_src")-full-composite-v11"
+    _key_src="$(composite_hash_file "$_cjk_src")-$(composite_hash_file "$_latin_src")-$(composite_hash_file "$_digit_src")-full-composite-v11-engine:$(composite_engine_key)"
     _key=$(printf '%s' "$_key_src" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; elif command -v toybox >/dev/null 2>&1; then toybox sha256sum; else cksum; fi; } | awk '{print $1}')
     _cached="$_cache/${_key}.otf"; _report="$_cache/${_key}.json"; _progress="$CONFIG_DIR/composite_progress.json"
     rm -f "$_cache"/.*.tmp.* 2>/dev/null || true
@@ -454,6 +580,7 @@ commit_mix_config() {
     mv -f "$ACTIVE_CONF_TMP" "$ACTIVE_FONT_CONF" 2>/dev/null || return 1
     mv -f "$REBOOT_CONF_TMP" "$TEXT_REBOOT_REQUIRED" 2>/dev/null || return 1
     printf 'time=%s\n' "$(date +%s)" > "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || return 1
+    payload_journal_write CONFIG_COMMITTED || return 1
     chmod 0644 "$MIX_CONF" "$ACTIVE_FONT_CONF" "$TEXT_REBOOT_REQUIRED" 2>/dev/null || true
     return 0
 }
@@ -462,7 +589,10 @@ apply_mix() {
     _cjk="$1"; _latin="$2"; _digit="$3"
     [ -n "$_cjk" ] && [ -n "$_latin" ] && [ -n "$_digit" ] || { set_mix_error '组合配置不完整'; return 1; }
     mix_stage initialize '正在初始化字体组合任务' 1
-    recover_interrupted_payload
+    if ! recover_interrupted_payload; then
+        set_mix_error '检测到未完成的字体负载事务，旧负载恢复失败；已拒绝继续切换'
+        return 2
+    fi
     if [ -e "$LOCK_FILE" ]; then
         if type luoshu_font_lock_active >/dev/null 2>&1 && luoshu_font_lock_active "$LOCK_FILE"; then
             set_mix_error '字体正在切换中'
@@ -511,7 +641,6 @@ apply_mix() {
         set_mix_error '无法提交字体组合状态，已恢复旧字体负载'
         return 6
     fi
-    payload_stage_finalize
     chmod 0755 "$SYSTEM_FONTS_DIR" 2>/dev/null || true
     chmod 0644 "$SYSTEM_FONTS_DIR"/* 2>/dev/null || true
     if [ "$IS_COLOROS" = "true" ]; then
@@ -544,6 +673,11 @@ apply_mix() {
     if ! luoshu_payload_transaction_commit mix; then
         set_mix_error '无法提交复合字体负载事务，已恢复旧字体'
         return 7
+    fi
+    if ! payload_stage_finalize; then
+        # The outer transaction is already committed and boot-safe here. Leaving the journal and
+        # backup intact is recoverable; reporting success avoids rolling back a valid manifest.
+        echo '警告：字体负载已提交，但旧负载清理将留待下次恢复' >&2
     fi
     # Downloadable Fonts（GMS Fonts Provider）缓存劫持：Play 商店等 Google 系应用
     # 不读系统分区字体，mix 链路同样需要同步 /data/fonts/files 才会应用。
@@ -621,7 +755,11 @@ case "${1:-status}" in
         ;;
     worker) mix_worker "$2" "$3" "$4" "$5" "$6" ;;
     status) status_json ;;
-    recover) recover_interrupted_payload; printf '{"status":"ok"}\n' ;;
+    recover)
+        if recover_interrupted_payload; then printf '{"status":"ok"}\n'
+        else printf '{"status":"error","message":"字体负载事务恢复失败，已保留恢复现场"}\n'
+        fi
+        ;;
     *) printf '{"status":"error","message":"未知组合命令"}\n' ;;
 esac
 exit 0

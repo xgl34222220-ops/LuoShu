@@ -28,6 +28,25 @@ class DeviceTrustUiTest {
     }
 
     @Test
+    fun mountConfirmedLayoutDifferenceIsVerifiedWhenTransactionMounted() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+                engine=installed
+                template=trusted
+                alignment=verified
+                mode=mount-confirmed
+                reason=mount-active-visible-layout-differs
+                mountState=mounted
+                cachePending=no
+            """.trimIndent(),
+        )
+
+        assertEquals(DeviceTrustLevel.VERIFIED, state.level)
+    }
+
+    @Test
     fun restoredSystemFontDoesNotPretendVerificationIsPending() {
         val state = parseDeviceTrustOutput(
             """

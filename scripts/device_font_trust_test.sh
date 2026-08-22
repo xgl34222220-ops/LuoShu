@@ -89,6 +89,7 @@ grep -q '^reason=mount-active-visible-layout-differs$' "$COMPAT_MOD/config/devic
 
 # Only an explicit mount failure without stronger visible evidence remains a hard failure.
 printf 'state=failed\n' > "$COMPAT_MOD/config/self-mount.conf"
+printf 'state=confirmed\nfont=Composite Font\n' > "$COMPAT_MOD/config/font-payload-boot.conf"
 set +e
 MODDIR="$COMPAT_MOD" MODULE_DIR="$COMPAT_MOD" LUOSHU_VISIBLE_ROOT="$VISIBLE_ROOT" \
     sh "$COMPAT_MOD/common/device_font_load_verify.sh" verify
