@@ -1,0 +1,9 @@
+-keep class androidx.compose.ui.tooling.PreviewActivity { <init>(); }
+-keep class androidx.core.app.CoreComponentFactory { <init>(); }
+-keep class androidx.profileinstaller.ProfileInstallReceiver { <init>(); }
+-keep class androidx.startup.InitializationProvider { <init>(); }
+-keep class io.github.xgl34222220.luoshu.LuoShuApplication { <init>(); }
+-keep class io.github.xgl34222220.luoshu.MainActivity { <init>(); }
+-keep class io.github.xgl34222220.luoshu.NativeImportActionReceiver { <init>(); }
+-keep class io.github.xgl34222220.luoshu.NativeImportForegroundService { <init>(); }
+-keep class io.github.xgl34222220.luoshu.TaskCenterActivity { <init>(); }

@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
@@ -124,6 +125,10 @@ private fun previewMemoryPut(key: String, entry: PreviewMemoryEntry) = synchroni
     previewMemoryCache.put(key, entry)
 }
 
+internal fun invalidateNativeFontPreviewMemoryCache() = synchronized(previewMemoryCache) {
+    previewMemoryCache.evictAll()
+}
+
 @Composable
 internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
     val cached = remember(font?.id) { font?.id?.let(axisInfoCache::get) }
@@ -222,6 +227,7 @@ internal fun NativeFontPreview(
     textSizeSp: Float = 25f,
     gravity: Int = Gravity.START or Gravity.CENTER_VERTICAL,
     maxLines: Int = 2,
+    rootFallback: Boolean = true,
 ) {
     val context = LocalContext.current.applicationContext
     val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
@@ -238,10 +244,9 @@ internal fun NativeFontPreview(
         } ?: 400f
         (cleanAxes["wght"] ?: fallback).roundToInt().coerceIn(1, 1000)
     }
-    val sourceRevision = remember(font, requestedWeight) {
+    val sourceRevision = remember(font?.id, font?.variable, requestedWeight) {
         font?.let {
-            val staticRevision = if (it.variable) "" else "|wght=$requestedWeight"
-            "${it.id}|${it.size}|${it.date}$staticRevision"
+            if (it.variable) it.id else "${it.id}|wght=$requestedWeight"
         }
     }
     val extension = remember(font?.format) {
@@ -256,8 +261,8 @@ internal fun NativeFontPreview(
         sourceRevision?.let { File(cacheDir, "${stableKey(it)}.$extension") }
     }
     val memoryEntry = remember(sourceRevision) { sourceRevision?.let(::previewMemoryGet) }
-    val previewKey = remember(sourceRevision, font?.valid, font?.error) {
-        "${sourceRevision.orEmpty()}|${font?.valid}|${font?.error.orEmpty()}"
+    val previewKey = remember(sourceRevision, font?.size, font?.date, font?.valid, font?.error, rootFallback) {
+        "${sourceRevision.orEmpty()}|${font?.size}|${font?.date}|${font?.valid}|${font?.error.orEmpty()}|root=$rootFallback"
     }
 
     val preview by produceState(
@@ -279,7 +284,13 @@ internal fun NativeFontPreview(
                         previewExportSemaphore.withPermit {
                             try {
                                 var exported = false
-                                if (!target.isFile || target.length() == 0L) {
+                                if ((!target.isFile || target.length() == 0L) && !rootFallback) {
+                                    for (attempt in 0 until 40) {
+                                        if (target.isFile && target.length() > 0L) break
+                                        delay(150L)
+                                    }
+                                }
+                                if ((!target.isFile || target.length() == 0L) && rootFallback) {
                                     val command = "sh ${RootShell.quote(APP_BRIDGE)} preview_export " +
                                         "${RootShell.quote(font.id)} ${RootShell.quote(target.absolutePath)} $requestedWeight"
                                     val result = RootShell.exec(command, timeoutMs = 25_000L)
@@ -297,6 +308,9 @@ internal fun NativeFontPreview(
                                         error("预览字体文件为空")
                                     }
                                     exported = true
+                                }
+                                if (!target.isFile || target.length() == 0L) {
+                                    return@withPermit PreviewTypefaceState()
                                 }
                                 val loaded = Typeface.createFromFile(target)
                                 target.setLastModified(System.currentTimeMillis())

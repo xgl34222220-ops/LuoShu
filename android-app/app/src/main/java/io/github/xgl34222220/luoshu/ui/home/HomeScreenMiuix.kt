@@ -85,26 +85,6 @@ fun HomeScreenMiuix(
             }
         }
 
-        item { MiuixSectionTitle("SYSTEM STATUS", "运行状态", "Root 与字体挂载") }
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MiuixMetricCard(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Rounded.Security,
-                    label = "Root",
-                    value = if (state.rootGranted) state.rootManager else "未授权",
-                    positive = state.rootGranted,
-                )
-                MiuixMetricCard(
-                    modifier = Modifier.weight(1f),
-                    icon = Icons.Rounded.Layers,
-                    label = "挂载引擎",
-                    value = state.mountEngine,
-                    positive = state.mountHealthy,
-                )
-            }
-        }
-
         item { MiuixSectionTitle("QUICK ACCESS", "常用入口", "字体管理与诊断") }
         item {
             MiuixActionGroup(
@@ -131,7 +111,6 @@ fun HomeScreenMiuix(
             )
         }
 
-        item { MiuixSectionTitle("SYSTEM WEIGHT", "全局粗细微调", "向左更细，向右更粗") }
         item { MiuixSystemWeightCard(state.systemWeight, actions) }
 
         item {
@@ -174,8 +153,8 @@ private fun MiuixPageHeader(state: HomeUiState, onRefresh: () -> Unit) {
             Text(
                 text = "洛书",
                 color = LocalMiuixTokens.current.textPrimary,
-                fontSize = 39.sp,
-                lineHeight = 44.sp,
+                fontSize = 36.sp,
+                lineHeight = 41.sp,
                 fontWeight = FontWeight.Black,
             )
             Text(
@@ -254,8 +233,8 @@ private fun MiuixFontHero(state: HomeUiState) {
                 Text(
                     text = state.currentFont,
                     color = tokens.textPrimary,
-                    fontSize = 36.sp,
-                    lineHeight = 42.sp,
+                    fontSize = 32.sp,
+                    lineHeight = 38.sp,
                     fontWeight = FontWeight.Black,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -290,6 +269,53 @@ private fun MiuixFontHero(state: HomeUiState) {
                         }
                     }
                 }
+                Spacer(Modifier.height(11.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MiuixStatusChip(
+                        modifier = Modifier.weight(1f),
+                        label = "Root",
+                        value = if (state.rootGranted) state.rootManager else "未授权",
+                        positive = state.rootGranted,
+                    )
+                    MiuixStatusChip(
+                        modifier = Modifier.weight(1f),
+                        label = "挂载",
+                        value = state.mountEngine,
+                        positive = state.mountHealthy,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiuixStatusChip(
+    modifier: Modifier,
+    label: String,
+    value: String,
+    positive: Boolean,
+) {
+    val tokens = LocalMiuixTokens.current
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = tokens.textPrimary.copy(alpha = .045f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier.size(7.dp).background(
+                    if (positive) tokens.success else tokens.warning,
+                    CircleShape,
+                ),
+            )
+            Spacer(Modifier.width(7.dp))
+            Column(Modifier.weight(1f)) {
+                Text(label, color = tokens.textSecondary, fontSize = 9.sp)
+                Text(value, color = tokens.textPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
@@ -365,7 +391,7 @@ private fun MiuixSystemWeightCard(weight: HomeWeightUiState, actions: HomeAction
                     Text("不修改字体文件", color = tokens.textSecondary, fontSize = 10.sp)
                 }
                 Text(
-                    if (weight.loading) "读取中" else weight.weight.toString(),
+                    weight.weight.toString(),
                     color = MaterialTheme.colorScheme.primary,
                     fontSize = 27.sp,
                     fontWeight = FontWeight.Black,
@@ -373,7 +399,11 @@ private fun MiuixSystemWeightCard(weight: HomeWeightUiState, actions: HomeAction
             }
             Spacer(Modifier.height(16.dp))
             when {
-                weight.loading -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                weight.loading -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                    Text("正在后台校验系统粗细…", color = tokens.textSecondary, fontSize = 10.sp)
+                }
                 !weight.supported -> Text(
                     weight.error.ifBlank { "当前系统不支持全局粗细微调" },
                     color = MaterialTheme.colorScheme.error,

@@ -3,7 +3,10 @@ package io.github.xgl34222220.luoshu
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import android.app.Application
+import android.content.Context
+import android.os.SystemClock
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -62,22 +65,54 @@ internal data class CoverageProbeState(
     val error: String = "",
 )
 
-internal class Alpha15FeatureViewModel : ViewModel() {
+internal class Alpha15FeatureViewModel(application: Application) : AndroidViewModel(application) {
     private val fontManager = "/data/adb/modules/LuoShu/common/font_manager.sh"
     private val coverageTool = "/data/adb/modules/LuoShu/common/font_coverage.sh"
     private var weightJob: Job? = null
+    private var refreshJob: Job? = null
     private var lastCommittedWeight: Int? = null
+    private var lastWeightRefreshElapsed = 0L
+    private val weightPrefs = application.getSharedPreferences("system-weight-cache-v1", Context.MODE_PRIVATE)
 
     var systemWeight by mutableStateOf(SystemWeightState())
         private set
 
+    init {
+        val cachedWeight = weightPrefs.getInt("weight", Int.MIN_VALUE)
+        val cachedMin = weightPrefs.getInt("min", 300)
+        val cachedMax = weightPrefs.getInt("max", 700).coerceAtLeast(cachedMin)
+        val cachedStep = weightPrefs.getInt("step", 10).coerceAtLeast(1)
+        if (cachedWeight != Int.MIN_VALUE) {
+            val safeWeight = cachedWeight.coerceIn(cachedMin, cachedMax)
+            lastCommittedWeight = safeWeight
+            systemWeight = SystemWeightState(
+                loading = false,
+                supported = weightPrefs.getBoolean("supported", true),
+                weight = safeWeight,
+                adjustment = weightPrefs.getInt("adjustment", safeWeight - 400),
+                originalAdjustment = weightPrefs.getInt("originalAdjustment", 0),
+                min = cachedMin,
+                max = cachedMax,
+                step = cachedStep,
+                message = "已显示上次值，后台会静默校验",
+            )
+        }
+    }
+
     var coverage by mutableStateOf(CoverageProbeState())
         private set
 
-    fun refreshSystemWeight() {
-        if (systemWeight.applying) return
-        systemWeight = systemWeight.copy(loading = true, error = "")
-        viewModelScope.launch {
+    fun refreshSystemWeight(force: Boolean = false) {
+        if (systemWeight.applying || refreshJob?.isActive == true) return
+        val now = SystemClock.elapsedRealtime()
+        if (!force && lastWeightRefreshElapsed > 0L && now - lastWeightRefreshElapsed < 120_000L) return
+        val hadCachedValue = !systemWeight.loading
+        systemWeight = if (hadCachedValue) {
+            systemWeight.copy(message = "正在后台校验系统粗细…", error = "")
+        } else {
+            systemWeight.copy(loading = true, error = "")
+        }
+        refreshJob = viewModelScope.launch {
             val result = RootShell.exec(
                 "sh ${RootShell.quote(fontManager)} action font_weight_status",
                 timeoutMs = 20_000L,
@@ -103,13 +138,25 @@ internal class Alpha15FeatureViewModel : ViewModel() {
                     step = step,
                     message = "拖动后会自动写入，未刷新的应用重新打开即可",
                 )
+                persistWeightCache()
+                lastWeightRefreshElapsed = SystemClock.elapsedRealtime()
             } catch (error: Throwable) {
-                systemWeight = systemWeight.copy(
-                    loading = false,
-                    supported = false,
-                    error = error.message ?: "系统字体粗细读取失败",
-                    message = "",
-                )
+                systemWeight = if (hadCachedValue) {
+                    systemWeight.copy(
+                        loading = false,
+                        error = "",
+                        message = "沿用缓存粗细；后台校验暂时失败",
+                    )
+                } else {
+                    systemWeight.copy(
+                        loading = false,
+                        supported = false,
+                        error = error.message ?: "系统字体粗细读取失败",
+                        message = "",
+                    )
+                }
+            } finally {
+                refreshJob = null
             }
         }
     }
@@ -168,6 +215,8 @@ internal class Alpha15FeatureViewModel : ViewModel() {
                     },
                     error = "",
                 )
+                persistWeightCache()
+                lastWeightRefreshElapsed = SystemClock.elapsedRealtime()
             } catch (error: Throwable) {
                 systemWeight = systemWeight.copy(
                     applying = false,
@@ -192,7 +241,7 @@ internal class Alpha15FeatureViewModel : ViewModel() {
                 val root = firstJson(result.stdout)
                 if (root.optString("status") != "ok") error(root.optString("message", "无法恢复系统字体粗细"))
                 systemWeight = systemWeight.copy(applying = false)
-                refreshSystemWeight()
+                refreshSystemWeight(force = true)
             } catch (error: Throwable) {
                 systemWeight = systemWeight.copy(
                     applying = false,
@@ -273,6 +322,19 @@ internal class Alpha15FeatureViewModel : ViewModel() {
                 root.optString(key).takeIf { it.isNotBlank() }?.let { put(key, it) }
             }
         }
+    }
+
+    private fun persistWeightCache() {
+        val state = systemWeight
+        weightPrefs.edit()
+            .putBoolean("supported", state.supported)
+            .putInt("weight", state.weight)
+            .putInt("adjustment", state.adjustment)
+            .putInt("originalAdjustment", state.originalAdjustment)
+            .putInt("min", state.min)
+            .putInt("max", state.max)
+            .putInt("step", state.step)
+            .apply()
     }
 
     private fun snapWeight(value: Int, min: Int, max: Int, step: Int): Int {

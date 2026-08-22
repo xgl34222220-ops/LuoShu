@@ -91,9 +91,9 @@ internal fun NativeImportOverlay(
         val tokens = LocalMiuixTokens.current
         Surface(
             modifier = modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(22.dp),
             color = if (style == UiStyle.MIUIX) tokens.cardBackground else MaterialTheme.colorScheme.surfaceContainerLow,
-            shadowElevation = if (style == UiStyle.MIUIX) 4.dp else 2.dp,
+            shadowElevation = if (style == UiStyle.MIUIX) 2.dp else 1.dp,
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .08f)),
         ) {
             Row(
@@ -177,7 +177,7 @@ private fun ImportActionButton(
         label = "nativeImportGlassHeight",
     )
     val glassColor = when {
-        embedded && style == UiStyle.MIUIX -> scheme.primary.copy(alpha = if (dark) .18f else .10f)
+        embedded && style == UiStyle.MIUIX -> tokens.elevatedCardBackground.copy(alpha = if (dark) .78f else .70f)
         embedded -> scheme.primaryContainer.copy(alpha = if (dark) .46f else .62f)
         style == UiStyle.MIUIX -> tokens.elevatedCardBackground.copy(alpha = if (dark) .76f else .72f)
         dark -> scheme.surfaceContainerHigh.copy(alpha = .72f)

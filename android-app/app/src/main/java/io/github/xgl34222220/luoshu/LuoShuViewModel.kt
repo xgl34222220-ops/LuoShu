@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import kotlin.math.roundToInt
 
 internal data class ModuleSnapshot(
@@ -139,6 +140,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     private var fontRequestJob: Job? = null
     private var pendingForceRefresh = false
     private var prewarmRequested = false
+    private var previewPrewarmRequested = false
+    private var previewPrewarmJob: Job? = null
 
     var snapshot by mutableStateOf(ModuleSnapshot())
         private set
@@ -243,7 +246,11 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     }
 
     private fun requestFontPrewarm() {
-        if (prewarmRequested && fonts.isNotEmpty()) return
+        if (fonts.isNotEmpty()) {
+            requestPreviewPrewarm()
+            return
+        }
+        if (prewarmRequested) return
         prewarmRequested = true
         if (fontRequestJob?.isActive == true) return
         launchFontWork(force = false, showErrors = false)
@@ -261,7 +268,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 when {
                     force -> rebuildFontIndex(showErrors = true)
                     fonts.isEmpty() -> rebuildFontIndex(showErrors = showErrors)
-                    else -> refreshOnlyWhenChanged(showErrors = showErrors)
+                    else -> Unit // 本地索引优先：导入、删除或手动刷新才重建。
                 }
             } finally {
                 fontLoading = false
@@ -321,6 +328,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             cachedFingerprint = fingerprint?.value.orEmpty()
             normalizeMixSelections()
             persistFontIndex(currentFont = current)
+            requestPreviewPrewarm(force = true)
             fontError = ""
         } catch (error: Throwable) {
             if (fonts.isEmpty() || showErrors) {
@@ -356,6 +364,42 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         )
         withContext(Dispatchers.IO) {
             runCatching { fontIndexStore.save(index) }
+        }
+    }
+
+    private fun requestPreviewPrewarm(force: Boolean = false) {
+        if (!snapshot.installed || fonts.isEmpty()) return
+        if (previewPrewarmJob?.isActive == true) return
+        if (previewPrewarmRequested && !force) return
+        previewPrewarmRequested = true
+        val previewDir = File(getApplication<Application>().cacheDir, "native-font-preview")
+        val marker = File(previewDir, ".font-index")
+        previewPrewarmJob = viewModelScope.launch {
+            val alreadyReady = withContext(Dispatchers.IO) {
+                previewDir.mkdirs()
+                !force && cachedFingerprint.isNotBlank() &&
+                    marker.isFile && marker.readText().trim() == cachedFingerprint
+            }
+            if (alreadyReady) {
+                previewPrewarmJob = null
+                return@launch
+            }
+            if (force) {
+                invalidateNativeFontPreviewMemoryCache()
+                withContext(Dispatchers.IO) {
+                    previewDir.listFiles()?.forEach { file -> if (file.isFile) file.delete() }
+                }
+            }
+            val result = RootShell.exec(
+                "sh ${RootShell.quote(bridge)} preview_export_batch ${RootShell.quote(previewDir.absolutePath)}",
+                timeoutMs = 90_000L,
+            )
+            if (result.code == 0) {
+                withContext(Dispatchers.IO) {
+                    runCatching { marker.writeText(cachedFingerprint) }
+                }
+            }
+            previewPrewarmJob = null
         }
     }
 

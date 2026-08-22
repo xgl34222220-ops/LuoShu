@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="io.github.xgl34222220.luoshu.NativeImportStateTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-08-22T19:52:53.590Z" hostname="runnervm76f27" time="0.001">
+  <properties/>
+  <testcase name="runningStateCalculatesProgressBelowCompletion" classname="io.github.xgl34222220.luoshu.NativeImportStateTest" time="0.0"/>
+  <testcase name="totalFailureUsesFailureTitle" classname="io.github.xgl34222220.luoshu.NativeImportStateTest" time="0.001"/>
+  <testcase name="partialFailureKeepsSuccessfulCountsVisible" classname="io.github.xgl34222220.luoshu.NativeImportStateTest" time="0.0"/>
+  <testcase name="completedStateReportsImportedAndDuplicates" classname="io.github.xgl34222220.luoshu.NativeImportStateTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
