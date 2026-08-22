@@ -26,11 +26,13 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: common/python
-          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh', 'scripts/runtime_versions.conf') }}
       - name: Prepare ARM64 font runtime
+        shell: bash
         run: |
+          set -o pipefail
           if [ ! -x common/python/bin/luoshu-python ]; then
-            sh ./scripts/prepare_composite_runtime.sh
+            sh ./scripts/prepare_composite_runtime.sh 2>&1 | tee "$RUNNER_TEMP/runtime-size.log"
           fi
       - name: Audit pruned runtime
         id: audit

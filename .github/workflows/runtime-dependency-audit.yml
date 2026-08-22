@@ -1,0 +1,23 @@
+name: Audit runtime dependencies
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 7 * * 1'
+permissions:
+  contents: read
+jobs:
+  audit-fonttools:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Audit pinned Python package
+        shell: bash
+        run: |
+          set -euo pipefail
+          . scripts/runtime_versions.conf
+          printf 'fonttools==%s\n' "$LUOSHU_FONTTOOLS_VERSION" > "$RUNNER_TEMP/runtime-requirements.txt"
+          python -m pip install --disable-pip-version-check pip-audit
+          python -m pip_audit -r "$RUNNER_TEMP/runtime-requirements.txt"
