@@ -28,41 +28,10 @@ jobs:
         run: |
           sed -i 's/if count != 1:/if count < 1:/' scripts/v330_apply.py
           python3 scripts/v330_apply.py
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt')
-          s = p.read_text(encoding='utf-8')
-          old = '''    axes: Map<String, Float> = emptyMap(),
-    rootFallback: Boolean = true,
-    modifier: Modifier = Modifier,
-    textSizeSp: Float = 25f,
-    gravity: Int = Gravity.START or Gravity.CENTER_VERTICAL,
-    maxLines: Int = 2,
-'''
-          new = '''    axes: Map<String, Float> = emptyMap(),
-    modifier: Modifier = Modifier,
-    textSizeSp: Float = 25f,
-    gravity: Int = Gravity.START or Gravity.CENTER_VERTICAL,
-    maxLines: Int = 2,
-    rootFallback: Boolean = true,
-'''
-          if old not in s:
-              raise SystemExit('NativeFontPreview signature fix target missing')
-          s = s.replace(old, new, 1)
-          old_loop = '''                                    repeat(40) {
-                                        if (target.isFile && target.length() > 0L) return@repeat
-                                        delay(150L)
-                                    }
-'''
-          new_loop = '''                                    for (attempt in 0 until 40) {
-                                        if (target.isFile && target.length() > 0L) break
-                                        delay(150L)
-                                    }
-'''
-          if old_loop not in s:
-              raise SystemExit('NativeFontPreview wait loop fix target missing')
-          p.write_text(s.replace(old_loop, new_loop, 1), encoding='utf-8')
-          PY
+          PREVIEW='android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt'
+          sed -i '/    rootFallback: Boolean = true,/d' "$PREVIEW"
+          sed -i '/    maxLines: Int = 2,/a\    rootFallback: Boolean = true,' "$PREVIEW"
+          sed -i 's/repeat(40) {/for (attempt in 0 until 40) {/; s/return@repeat/break/' "$PREVIEW"
           sed -i 's/navigationBottom + 88.dp/navigationBottom + 82.dp/g; s/RoundedCornerShape(31.dp)/RoundedCornerShape(28.dp)/g; s/RoundedCornerShape(23.dp)/RoundedCornerShape(21.dp)/g; s/Modifier.width(78.dp)/Modifier.width(74.dp)/g' scripts/font_library_ui_layout_test.sh
       - name: Static validation
         run: |
