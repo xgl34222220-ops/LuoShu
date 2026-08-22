@@ -126,6 +126,7 @@ rm -f "$ZIP" "$ZIP.sha256" "$SIZE_REPORT"
 (cd "$STAGE" && zip -9 -r -q "$ZIP" .)
 (cd "$OUT" && sha256sum "$ZIP_NAME" > "$ZIP_NAME.sha256")
 unzip -t "$ZIP" >/dev/null
+unzip -Z1 "$ZIP" | grep -qx "post-mount.sh" || { echo "required mount hook missing from final ZIP: post-mount.sh" >&2; exit 91; }
 unzip -Z1 "$ZIP" | grep -Eq '(^|/)webroot(/|$)|(^|/)(__pycache__|emoji)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|common/stability\.sh|fonts_xml_template|play_font_bridge\.sh|wechat_xweb_bridge\.sh' && {
   echo 'forbidden legacy or WebUI path found in final ZIP' >&2
   exit 89

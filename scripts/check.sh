@@ -31,7 +31,7 @@ python3 -m py_compile \
 
 # App-only 活跃源码清单。WebUI 前端及其准备脚本必须彻底不存在。
 for file in \
-  module.prop customize.sh post-fs-data.sh service.sh uninstall.sh action.sh \
+  module.prop customize.sh post-fs-data.sh post-mount.sh service.sh uninstall.sh action.sh \
   README.md README.txt LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
   common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py common/font_inventory.py \
@@ -85,6 +85,7 @@ grep -q '^description=Android 无 Hook 全局字体引擎' "$ROOT/module.prop"
 # 发布包使用显式清单。common/ 新增运行文件必须被审查后列入，不能再整目录复制。
 PAYLOAD_MANIFEST="$ROOT/scripts/module_payload_manifest.txt"
 test -s "$PAYLOAD_MANIFEST"
+grep -qx "post-mount.sh" "$PAYLOAD_MANIFEST"
 awk 'NF && $1 !~ /^#/ { if (seen[$0]++) exit 1 }' "$PAYLOAD_MANIFEST"
 while IFS= read -r payload || [ -n "$payload" ]; do
   case "$payload" in ''|\#*) continue ;; esac
