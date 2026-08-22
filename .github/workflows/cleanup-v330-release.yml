@@ -1,0 +1,35 @@
+name: Cleanup v3.3.0 release branch
+
+on:
+  push:
+    branches:
+      - release/v3.3.0-ui-font-performance
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release branch
+        uses: actions/checkout@v4
+        with:
+          ref: release/v3.3.0-ui-font-performance
+          fetch-depth: 0
+
+      - name: Remove generated Android build artifacts from Git
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r --ignore-unmatch android-app/.gradle android-app/app/build android-app/build
+          git rm --ignore-unmatch .github/workflows/cleanup-v330-release.yml
+          if git diff --cached --quiet; then
+            echo "Nothing to clean"
+            exit 0
+          fi
+          git commit -m "chore: remove generated Android build artifacts"
+          git push origin HEAD:release/v3.3.0-ui-font-performance
