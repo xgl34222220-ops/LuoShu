@@ -1,0 +1,78 @@
+name: Verify v3.3.0 release
+
+on:
+  push:
+    branches:
+      - ops/verify-v3.3.0-release
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SHA: 09c521e51f9a4daece5e12c8dc3b29597c7dd5e1
+      TARGET_TAG: v3.3.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ops/verify-v3.3.0-release
+      - name: Observe signed release and record result
+        shell: bash
+        run: |
+          set -u
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          item=''
+          for _ in $(seq 1 120); do
+            runs="$(gh run list --workflow release.yml --branch main --limit 20 --json databaseId,status,conclusion,headSha,event,url,createdAt,displayTitle 2>/dev/null || printf '[]')"
+            item="$(printf '%s' "$runs" | jq -c --arg sha "$TARGET_SHA" '[.[] | select(.headSha == $sha and .event == "push")][0] // empty')"
+            if [ -n "$item" ]; then
+              status="$(printf '%s' "$item" | jq -r '.status')"
+              [ "$status" = completed ] && break
+            fi
+            sleep 5
+          done
+
+          verified=false
+          release='null'
+          failure_log=''
+          if [ -z "$item" ]; then
+            item='{"status":"not-found","conclusion":null}'
+          else
+            conclusion="$(printf '%s' "$item" | jq -r '.conclusion // ""')"
+            run_id="$(printf '%s' "$item" | jq -r '.databaseId // empty')"
+            if [ "$(printf '%s' "$item" | jq -r '.status')" = completed ] && [ "$conclusion" = success ]; then
+              release_raw="$(gh release view "$TARGET_TAG" --json tagName,name,isPrerelease,isDraft,publishedAt,url,assets 2>/dev/null || true)"
+              if [ -n "$release_raw" ] && printf '%s' "$release_raw" | jq -e \
+                '.tagName == "v3.3.0" and (.isDraft == false) and (.isPrerelease == false) and \
+                 ([.assets[].name] | contains(["LuoShu-v3.3.0.zip","LuoShu-v3.3.0.zip.sha256","LuoShu-App-v3.3.0.apk","LuoShu-App-v3.3.0.apk.sha256"]))' >/dev/null; then
+                release="$release_raw"
+                verified=true
+              elif [ -n "$release_raw" ]; then
+                release="$release_raw"
+              fi
+            elif [ -n "$run_id" ]; then
+              failure_log="$(gh run view "$run_id" --log-failed 2>&1 | tail -n 160 || true)"
+            fi
+          fi
+
+          jq -n \
+            --arg targetSha "$TARGET_SHA" \
+            --arg targetTag "$TARGET_TAG" \
+            --argjson run "$item" \
+            --argjson release "$release" \
+            --arg failureLog "$failure_log" \
+            --argjson verified "$verified" \
+            '{targetSha:$targetSha,targetTag:$targetTag,verified:$verified,run:$run,release:$release,failureLog:$failureLog}' \
+            > release-v330-status.json
+
+          git add release-v330-status.json
+          git rm --ignore-unmatch .github/workflows/verify-v330-release.yml
+          git commit -m 'chore: record v3.3.0 release verification'
+          git push origin HEAD:ops/verify-v3.3.0-release
