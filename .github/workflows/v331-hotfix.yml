@@ -37,7 +37,7 @@ jobs:
           grep -q 'post-mount.sh' scripts/check.sh
           grep -q 'required mount hook missing from final ZIP' scripts/build.sh
           ! grep -q 'if \[ -n "$font_family" \] && type scan_family_weights' common/rom_adapters.sh
-          sh scripts/check.sh
+          sh -x scripts/check.sh
 
       - name: Commit validated hotfix
         shell: bash
