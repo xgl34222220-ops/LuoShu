@@ -114,7 +114,7 @@ internal fun SettingsHubRoute(settings: AppearanceSettings, actions: AppearanceA
         HubHeader(settings.uiStyle)
         Surface(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 5.dp),
-            shape = RoundedCornerShape(23.dp),
+            shape = RoundedCornerShape(21.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (settings.uiStyle == UiStyle.MIUIX) .62f else .90f),
         ) {
             Row(
@@ -129,14 +129,14 @@ internal fun SettingsHubRoute(settings: AppearanceSettings, actions: AppearanceA
                             if (item == SettingsSection.SAFETY) model.refreshHealth()
                             if (item == SettingsSection.UPDATE) model.checkUpdate()
                         },
-                        modifier = Modifier.width(78.dp),
+                        modifier = Modifier.width(74.dp),
                         shape = RoundedCornerShape(19.dp),
                         color = if (active) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
                         contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                         shadowElevation = if (active && settings.uiStyle == UiStyle.MIUIX) 2.dp else 0.dp,
                     ) {
                         Row(
-                            Modifier.padding(horizontal = 9.dp, vertical = 8.dp),
+                            Modifier.padding(horizontal = 8.dp, vertical = 7.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center,
                         ) {
@@ -171,7 +171,7 @@ private fun HubHeader(style: UiStyle) {
     Row(Modifier.fillMaxWidth().padding(18.dp, 10.dp, 18.dp, 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("SETTINGS", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-            Text("设置中心", color = if (style == UiStyle.MIUIX) tokens.textPrimary else MaterialTheme.colorScheme.onSurface, fontSize = 32.sp, fontWeight = FontWeight.Black)
+            Text("设置中心", color = if (style == UiStyle.MIUIX) tokens.textPrimary else MaterialTheme.colorScheme.onSurface, fontSize = 29.sp, fontWeight = FontWeight.Black)
             Text("外观 · 安全体检 · 更新通道", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
         Surface(
@@ -197,7 +197,7 @@ private fun pageList(content: androidx.compose.foundation.lazy.LazyListScope.() 
     LazyColumn(
         Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 28.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
         content = content,
     )
 }
@@ -382,16 +382,16 @@ private fun ToggleLine(title: String, description: String, checked: Boolean, onC
 
 @Composable
 private fun SettingCard(title: String, content: @Composable () -> Unit) {
-    Card(shape = RoundedCornerShape(26.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .86f))) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) { Text(title, fontSize = 16.sp, fontWeight = FontWeight.Black); Spacer(Modifier.height(10.dp)); content() }
+    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .72f))) {
+        Column(Modifier.fillMaxWidth().padding(14.dp)) { Text(title, fontSize = 16.sp, fontWeight = FontWeight.Black); Spacer(Modifier.height(10.dp)); content() }
     }
 }
 
 @Composable
 private fun StatusCard(title: String, subtitle: String, level: HealthLevel, loading: Boolean, content: @Composable () -> Unit) {
     val accent = when (level) { HealthLevel.HEALTHY -> MaterialTheme.colorScheme.primary; HealthLevel.WARNING -> MaterialTheme.colorScheme.tertiary; HealthLevel.ERROR -> MaterialTheme.colorScheme.error }
-    Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .9f))) {
-        Column(Modifier.fillMaxWidth().padding(17.dp)) {
+    Card(shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .76f))) {
+        Column(Modifier.fillMaxWidth().padding(15.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(Modifier.size(42.dp), RoundedCornerShape(15.dp), color = accent.copy(alpha = .11f), contentColor = accent) {
                     Box(contentAlignment = Alignment.Center) { if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Icon(when (level) { HealthLevel.HEALTHY -> Icons.Rounded.CheckCircle; HealthLevel.WARNING -> Icons.Rounded.Info; HealthLevel.ERROR -> Icons.Rounded.Error }, null, Modifier.size(21.dp)) }

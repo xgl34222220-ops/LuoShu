@@ -135,7 +135,6 @@ internal fun LuoShuAppShell(
 
     LaunchedEffect(Unit) {
         viewModel.refresh()
-        features.refreshSystemWeight()
     }
     LaunchedEffect(page) {
         when (page) {
@@ -155,7 +154,7 @@ internal fun LuoShuAppShell(
         HomeActions(
             refresh = {
                 viewModel.refresh()
-                features.refreshSystemWeight()
+                features.refreshSystemWeight(force = true)
             },
             openFontLibrary = { page = AppPage.Library },
             openFontStudio = { page = AppPage.Studio },
@@ -218,7 +217,7 @@ internal fun LuoShuAppShell(
             !appearance.floatingDock -> navigationBottom + 70.dp
             else -> navigationBottom + 84.dp
         }
-        val dockContentPadding = if (edgeToEdgeGlass) navigationBottom + 88.dp else 0.dp
+        val dockContentPadding = if (edgeToEdgeGlass) navigationBottom + 82.dp else 0.dp
         val contentModifier = Modifier
             .fillMaxSize()
             .then(if (blurActive) Modifier.hazeSource(state = hazeState) else Modifier)
@@ -513,7 +512,7 @@ private fun MiuixAppDock(
     val dark = scheme.background.luminance() < .5f
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val floating = appearance.floatingDock
-    val shape = if (floating) RoundedCornerShape(31.dp) else RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)
+    val shape = if (floating) RoundedCornerShape(28.dp) else RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
     val activeGlass = appearance.glassEnabled
     val activeHaze = activeGlass && appearance.blurEnabled
     val hazeModifier = if (activeHaze) {
@@ -546,9 +545,9 @@ private fun MiuixAppDock(
         pages = dockPages,
         current = current,
         onSelect = onSelect,
-        itemHeight = 52.dp,
+        itemHeight = 48.dp,
         modifier = modifier
-            .then(if (floating) Modifier.padding(horizontal = 12.dp).padding(bottom = bottomInset + 8.dp) else Modifier)
+            .then(if (floating) Modifier.padding(horizontal = 14.dp).padding(bottom = bottomInset + 7.dp) else Modifier)
             .fillMaxWidth()
             .shadow(if (floating) if (activeGlass) 8.dp else 12.dp else 5.dp, shape, clip = false)
             .clip(shape)
@@ -611,7 +610,7 @@ private fun MiuixAppDock(
                 } else if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .58f),
                 shape,
             )
-            .padding(start = 5.dp, top = 5.dp, end = 5.dp, bottom = if (floating) 5.dp else bottomInset + 5.dp),
+            .padding(start = 4.dp, top = 4.dp, end = 4.dp, bottom = if (floating) 4.dp else bottomInset + 4.dp),
         indicatorColor = if (activeGlass) {
             Color.White.copy(alpha = if (dark) .05f else .09f)
         } else {
@@ -648,7 +647,7 @@ private fun AppDockLayout(
     BoxWithConstraints(modifier = modifier) {
         val itemWidth = maxWidth / pages.size.toFloat()
         val targetIndex = pages.indexOf(current).coerceAtLeast(0)
-        val indicatorInset = if (liquidLens) 5.dp else 7.dp
+        val indicatorInset = if (liquidLens) 6.dp else 7.dp
         val indicatorX by animateDpAsState(
             targetValue = itemWidth * targetIndex.toFloat(),
             animationSpec = spring(
@@ -657,7 +656,7 @@ private fun AppDockLayout(
             ),
             label = label,
         )
-        val indicatorShape = RoundedCornerShape(if (liquidLens) 20.dp else 18.dp)
+        val indicatorShape = RoundedCornerShape(if (liquidLens) 18.dp else 18.dp)
         Box(
             modifier = Modifier
                 .offset(x = indicatorX + indicatorInset)

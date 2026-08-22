@@ -125,7 +125,7 @@ grep -q 'opticalScale = 1.08f' "$STUDIO_TOOLS"
 [ "$(grep -c 'padding(bottom = dockClearance)' "$SHELL")" -eq 4 ]
 grep -q 'val edgeToEdgeGlass = appearance.uiStyle == UiStyle.MIUIX' "$SHELL"
 grep -q 'edgeToEdgeGlass -> 0.dp' "$SHELL"
-grep -q 'navigationBottom + 88.dp' "$SHELL"
+grep -q 'navigationBottom + 82.dp' "$SHELL"
 [ "$(grep -c 'LocalDockContentPadding provides dockContentPadding' "$SHELL")" -eq 4 ]
 grep -q 'LocalDockContentPadding' "$DOCK_INSETS"
 
@@ -143,7 +143,7 @@ MIUIX_DOCK=$(sed -n '/private fun MiuixAppDock/,/private fun AppDockLayout/p' "$
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'hazeEffect'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 24.dp'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'noiseFactor = .012f'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'RoundedCornerShape(31.dp)'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'RoundedCornerShape(28.dp)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'activeGlass'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .12f)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
@@ -182,8 +182,8 @@ grep -q 'CompactStatusCell' "$HOME_COMPACT"
 grep -q "self-mount) printf '洛书自挂载'" "$APP_BRIDGE"
 grep -q 'mountSummary(h)' "$SETTINGS"
 grep -q 'selfMountSummary(h)' "$SETTINGS"
-grep -q 'RoundedCornerShape(23.dp)' "$SETTINGS"
-grep -q 'Modifier.width(78.dp)' "$SETTINGS"
+grep -q 'RoundedCornerShape(21.dp)' "$SETTINGS"
+grep -q 'Modifier.width(74.dp)' "$SETTINGS"
 grep -q 'itemsIndexed(state.tasks' "$LOGS_COMPACT"
 grep -q 'Box(Modifier.size(10.dp).background(color, CircleShape))' "$LOGS_COMPACT"
 grep -q 'isLast: Boolean' "$LOGS_COMPACT"

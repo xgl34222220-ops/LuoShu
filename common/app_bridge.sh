@@ -278,6 +278,68 @@ preview_export() {
         "$(json_escape "$_dest")" "$(json_escape "$(basename "$_src")")" "$(json_escape "$_sha")"
 }
 
+preview_cache_key() {
+    _pck_value="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf '%s' "$_pck_value" | sha256sum 2>/dev/null | awk '{print substr($1,1,24)}'
+    elif command -v busybox >/dev/null 2>&1; then
+        printf '%s' "$_pck_value" | busybox sha256sum 2>/dev/null | awk '{print substr($1,1,24)}'
+    else
+        printf '%s' "$_pck_value" | cksum 2>/dev/null | awk '{printf "%024x", $1}'
+    fi
+}
+
+preview_export_batch() {
+    _peb_dest="${1:-}"
+    case "$_peb_dest" in
+        /data/user/0/io.github.xgl34222220.luoshu/cache/native-font-preview|/data/user/0/io.github.xgl34222220.luoshu/cache/native-font-preview/*|\
+        /data/data/io.github.xgl34222220.luoshu/cache/native-font-preview|/data/data/io.github.xgl34222220.luoshu/cache/native-font-preview/*|\
+        /data/user/0/io.github.xgl34222220.luoshu.debug/cache/native-font-preview|/data/user/0/io.github.xgl34222220.luoshu.debug/cache/native-font-preview/*|\
+        /data/data/io.github.xgl34222220.luoshu.debug/cache/native-font-preview|/data/data/io.github.xgl34222220.luoshu.debug/cache/native-font-preview/*) ;;
+        *) printf '{"status":"error","message":"批量预览目标目录不受信任"}\n'; return 1 ;;
+    esac
+    mkdir -p "$_peb_dest" 2>/dev/null || { printf '{"status":"error","message":"无法创建预览缓存目录"}\n'; return 1; }
+    _peb_list="$MODDIR/config/.preview-families.$$"
+    : > "$_peb_list" 2>/dev/null || return 1
+    for _peb_file in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
+        "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+        [ -f "$_peb_file" ] || continue
+        _peb_name="$(basename "$_peb_file")"
+        case "$_peb_name" in SysFont*|SysSans*) continue ;; esac
+        _peb_family="${_peb_name%.*}"
+        case "$_peb_family" in
+            *-Regular|*-Bold|*-Light|*-Medium|*-Thin|*-Black|*-Heavy|*-SemiBold|*-ExtraBold|*-ExtraLight|\
+            *-regular|*-bold|*-light|*-medium|*-thin|*-black|*-heavy|*-semibold|*-extrabold|*-extralight)
+                _peb_family="${_peb_family%-*}"
+                ;;
+        esac
+        printf '%s\n' "$_peb_family" >> "$_peb_list"
+    done
+    LC_ALL=C sort -u -o "$_peb_list" "$_peb_list" 2>/dev/null || true
+    _peb_count=0
+    while IFS= read -r _peb_family; do
+        [ -n "$_peb_family" ] || continue
+        _peb_src="$(find_preview_source "$_peb_family" 400)"
+        [ -f "$_peb_src" ] || continue
+        _peb_ext="${_peb_src##*.}"
+        _peb_ext="$(printf '%s' "$_peb_ext" | tr '[:upper:]' '[:lower:]')"
+        case "$_peb_ext" in ttf|otf|ttc) ;; *) _peb_ext=ttf ;; esac
+        _peb_variable_key="$(preview_cache_key "$_peb_family")"
+        _peb_static_key="$(preview_cache_key "${_peb_family}|wght=400")"
+        [ -n "$_peb_variable_key" ] && [ -n "$_peb_static_key" ] || continue
+        _peb_variable="$_peb_dest/${_peb_variable_key}.${_peb_ext}"
+        _peb_static="$_peb_dest/${_peb_static_key}.${_peb_ext}"
+        cp -f "$_peb_src" "$_peb_variable" 2>/dev/null || continue
+        chmod 0644 "$_peb_variable" 2>/dev/null || true
+        rm -f "$_peb_static" 2>/dev/null || true
+        ln "$_peb_variable" "$_peb_static" 2>/dev/null || cp -f "$_peb_variable" "$_peb_static" 2>/dev/null || true
+        chmod 0644 "$_peb_static" 2>/dev/null || true
+        _peb_count=$((_peb_count + 1))
+    done < "$_peb_list"
+    rm -f "$_peb_list" 2>/dev/null || true
+    printf '{"status":"ok","data":{"count":%s}}\n' "$_peb_count"
+}
+
 weight_axis_info() {
     _family="$1"
     _src="$(find_preview_source "$_family")"
@@ -306,6 +368,7 @@ case "${1:-status}" in
         ;;
     preview_source) preview_source_json "${2:-}" "${3:-400}" ;;
     preview_export) preview_export "${2:-}" "${3:-}" "${4:-400}" ;;
+    preview_export_batch) preview_export_batch "${2:-}" ;;
     weight_axis) weight_axis_info "${2:-}" ;;
     validate) manager_ready || exit 1; sh "$FONT_MANAGER" action validate "${2:-}" ;;
     switch_start) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "${2:-default}" ;;

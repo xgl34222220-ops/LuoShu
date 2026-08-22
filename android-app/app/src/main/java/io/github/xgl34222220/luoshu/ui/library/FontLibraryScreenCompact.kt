@@ -101,8 +101,8 @@ internal fun FontLibraryScreenCompact(
                     Text(
                         "字体库",
                         color = textPrimary,
-                        fontSize = 34.sp,
-                        lineHeight = 39.sp,
+                        fontSize = 30.sp,
+                        lineHeight = 35.sp,
                         fontWeight = FontWeight.Black,
                     )
                     Text(
@@ -282,17 +282,17 @@ private fun CompactSystemFontRow(
     onRestore: () -> Unit,
 ) {
     Card(
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor),
         border = if (active) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .24f)) else null,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
-                modifier = Modifier.size(58.dp),
-                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.size(52.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -347,17 +347,17 @@ private fun CompactFontRow(
     var menuExpanded by remember(font.id) { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (font.valid) cardColor else MaterialTheme.colorScheme.errorContainer.copy(alpha = .34f),
         ),
         border = if (active) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .24f)) else null,
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    modifier = Modifier.size(58.dp),
-                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.size(52.dp),
+                    shape = RoundedCornerShape(16.dp),
                     color = if (font.valid) {
                         MaterialTheme.colorScheme.primary.copy(alpha = .09f)
                     } else {
@@ -370,8 +370,9 @@ private fun CompactFontRow(
                                 font = font,
                                 text = "Aa12",
                                 axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
-                                modifier = Modifier.size(58.dp).padding(6.dp),
-                                textSizeSp = 15.5f,
+                                modifier = Modifier.size(52.dp).padding(5.dp),
+                                rootFallback = false,
+                                textSizeSp = 15f,
                                 gravity = Gravity.CENTER,
                                 maxLines = 1,
                             )
@@ -390,8 +391,8 @@ private fun CompactFontRow(
                     Text(
                         font.name,
                         color = textPrimary,
-                        fontSize = 17.sp,
-                        lineHeight = 21.sp,
+                        fontSize = 16.sp,
+                        lineHeight = 20.sp,
                         fontWeight = FontWeight.Black,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
