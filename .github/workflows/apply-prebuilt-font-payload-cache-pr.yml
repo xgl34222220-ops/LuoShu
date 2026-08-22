@@ -24,6 +24,14 @@ jobs:
           set -euo pipefail
           sed -n "/python3 - <<'PY'/,/^          PY$/p" .github/workflows/apply-prebuilt-font-payload-cache.yml \
             | sed '1d;$d;s/^          //' > /tmp/apply_prebuilt_cache.py
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/apply_prebuilt_cache.py')
+          text = path.read_text()
+          text = text.replace("test.write_text(r'''", "test_content = r'''", 1)
+          text = text.replace("''').replace('\\n          ', '\\n').lstrip()\n\ncheck = root / 'scripts/check.sh'", "'''\ntest.write_text(test_content.replace('\\n          ', '\\n').lstrip())\n\ncheck = root / 'scripts/check.sh'", 1)
+          path.write_text(text)
+          PY
           python3 -m py_compile /tmp/apply_prebuilt_cache.py
           python3 /tmp/apply_prebuilt_cache.py
 
