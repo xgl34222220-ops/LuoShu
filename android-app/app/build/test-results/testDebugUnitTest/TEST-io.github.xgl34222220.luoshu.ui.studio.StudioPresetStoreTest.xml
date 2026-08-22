@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="io.github.xgl34222220.luoshu.ui.studio.StudioPresetStoreTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-22T19:52:53.834Z" hostname="runnervm76f27" time="0.004">
-  <properties/>
-  <testcase name="invalidStoreIsIgnored" classname="io.github.xgl34222220.luoshu.ui.studio.StudioPresetStoreTest" time="0.002"/>
-  <testcase name="namesAreSanitizedAndBounded" classname="io.github.xgl34222220.luoshu.ui.studio.StudioPresetStoreTest" time="0.0"/>
-  <testcase name="presetRoundTripPreservesProfileAndFlags" classname="io.github.xgl34222220.luoshu.ui.studio.StudioPresetStoreTest" time="0.002"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

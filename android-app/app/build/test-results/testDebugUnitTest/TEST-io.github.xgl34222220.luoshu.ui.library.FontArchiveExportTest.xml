@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="io.github.xgl34222220.luoshu.ui.library.FontArchiveExportTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-22T19:52:53.710Z" hostname="runnervm76f27" time="0.008">
-  <properties/>
-  <testcase name="archiveSegmentRemovesUnsafePathCharacters" classname="io.github.xgl34222220.luoshu.ui.library.FontArchiveExportTest" time="0.003"/>
-  <testcase name="archiveSelectionRequiresExistingValidFamilies" classname="io.github.xgl34222220.luoshu.ui.library.FontArchiveExportTest" time="0.002"/>
-  <testcase name="manifestContainsFilesAndChecksumsWithoutPrivatePaths" classname="io.github.xgl34222220.luoshu.ui.library.FontArchiveExportTest" time="0.003"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

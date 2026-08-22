@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="io.github.xgl34222220.luoshu.ui.library.FontLibraryContractTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-22T19:52:53.762Z" hostname="runnervm76f27" time="0.004">
-  <properties/>
-  <testcase name="filtersDoNotMutateTheUnderlyingIndex" classname="io.github.xgl34222220.luoshu.ui.library.FontLibraryContractTest" time="0.002"/>
-  <testcase name="newestSortUsesTheImportedDateDescending" classname="io.github.xgl34222220.luoshu.ui.library.FontLibraryContractTest" time="0.001"/>
-  <testcase name="activeFirstKeepsTheCurrentFontAtTheTop" classname="io.github.xgl34222220.luoshu.ui.library.FontLibraryContractTest" time="0.001"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>

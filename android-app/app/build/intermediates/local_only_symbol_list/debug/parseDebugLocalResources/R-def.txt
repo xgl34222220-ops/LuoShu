@@ -1,6 +1,0 @@
-R_DEF: Internal format may change without notice
-local
-drawable ic_luoshu
-mipmap ic_luoshu
-string app_name
-style Theme.LuoShuHybrid

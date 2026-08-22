@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="io.github.xgl34222220.luoshu.ui.settings.SystemCenterViewModelTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-08-22T19:52:53.795Z" hostname="runnervm76f27" time="0.028">
-  <properties/>
-  <testcase name="missingPayloadIsErrorForCustomFont" classname="io.github.xgl34222220.luoshu.ui.settings.SystemCenterViewModelTest" time="0.026"/>
-  <testcase name="healthyDefaultInstallStaysHealthy" classname="io.github.xgl34222220.luoshu.ui.settings.SystemCenterViewModelTest" time="0.001"/>
-  <testcase name="parsesHealthAndConflicts" classname="io.github.xgl34222220.luoshu.ui.settings.SystemCenterViewModelTest" time="0.001"/>
-  <system-out><![CDATA[]]></system-out>
-  <system-err><![CDATA[]]></system-err>
-</testsuite>
