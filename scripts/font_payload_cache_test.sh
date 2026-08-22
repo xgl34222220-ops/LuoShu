@@ -10,7 +10,7 @@ cp -f "$ROOT/common/font_config_weights.sh" "$MOD/common/font_config_weights.sh"
 
 SRC="$LIB/Demo-Regular.ttf"
 dd if=/dev/zero of="$SRC" bs=2048 count=1 2>/dev/null
-printf 'demo-font-v1\n' >> "$SRC"
+printf 'demo-font-v1-fvar\n' >> "$SRC"
 
 export MODDIR="$MOD"
 export MODULE_DIR="$MOD"
@@ -22,12 +22,43 @@ _font_source_digest() { sha256sum "$1" | awk '{print $1}'; }
 . "$MOD/common/font_config_weights.sh"
 set -eu
 
-# Host test substitutes cheap builders; the cache contract must not depend on FontTools.
-_luoshu_config_normalize_weight() { cp -f "$1" "$2"; }
-_luoshu_config_make_mono_weight() { cp -f "$1" "$2"; }
+# Host test emulates the two batch backends and one Mono normalization call.
+# A variable source containing fvar must not start one interpreter per weight.
+touch "$MOD/common/font_instance.py" "$MOD/common/font_name_normalize.py"
+CALLS="$TMP/backend-calls"
+: > "$CALLS"
+_luoshu_font_config_exec() {
+    _tool="${1##*/}"
+    printf '%s %s\n' "$_tool" "${2:-}" >> "$CALLS"
+    _jobs=''
+    _output=''
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --batch) _jobs="$2"; shift 2 ;;
+            --output) _output="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    if [ -n "$_jobs" ]; then
+        while IFS="$(printf '\t')" read -r _input _ready _rest; do
+            [ -n "$_ready" ] || continue
+            dd if=/dev/zero of="$_ready" bs=2048 count=1 2>/dev/null
+        done < "$_jobs"
+        return 0
+    fi
+    if [ -n "$_output" ]; then
+        dd if=/dev/zero of="$_output" bs=2048 count=1 2>/dev/null
+        return 0
+    fi
+    return 1
+}
 
 KEY1=$(_luoshu_config_weight_cache_key Demo "$SRC")
 font_config_prewarm_payload_weights Demo "$SRC"
+BACKEND_CALLS=$(awk 'NF' "$CALLS" | wc -l | tr -d '[:space:]')
+[ "$BACKEND_CALLS" -le 3 ] || { echo "prewarm backend calls=$BACKEND_CALLS, expected <=3" >&2; exit 1; }
+grep -q '^font_instance.py --batch' "$CALLS"
+grep -q '^font_name_normalize.py --batch' "$CALLS"
 CACHE=$(_luoshu_config_weight_cache_dir "$KEY1")
 _luoshu_config_weight_cache_valid "$CACHE"
 

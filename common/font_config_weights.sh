@@ -307,7 +307,7 @@ _luoshu_config_weight_cache_restore() {
         done
     done
     rmdir "$_lcwcr_stage" 2>/dev/null || true
-    touch "$_lcwcr_dir/.complete" 2>/dev/null || true
+    touch "$_lcwcr_dir/.complete" "$_lcwcr_dir" 2>/dev/null || true
     return 0
 }
 
@@ -379,26 +379,103 @@ _luoshu_config_link_font() {
     [ "$_lcwlf_size" -ge 1024 ]
 }
 
+_luoshu_config_source_is_variable() {
+    _lcwiv_source="$1"
+    if type font_has_table >/dev/null 2>&1; then
+        font_has_table "$_lcwiv_source" fvar
+        return $?
+    fi
+    dd if="$_lcwiv_source" bs=65536 count=2 2>/dev/null | grep -a -q 'fvar'
+}
+
 _luoshu_config_build_weight_stage() {
     _lcwbs_stage="$1"
     _lcwbs_family="${2:-}"
     _lcwbs_hint="${3:-}"
+    _lcwbs_module="$(_luoshu_config_weight_module)"
+    _lcwbs_instance="$_lcwbs_module/common/font_instance.py"
+    _lcwbs_namer="$_lcwbs_module/common/font_name_normalize.py"
     rm -rf "$_lcwbs_stage" 2>/dev/null || true
     mkdir -p "$_lcwbs_stage" 2>/dev/null || return 1
+    _lcwbs_instance_jobs="$_lcwbs_stage/.instance-jobs"
+    _lcwbs_name_jobs="$_lcwbs_stage/.name-jobs"
+    : > "$_lcwbs_instance_jobs" 2>/dev/null || { rm -rf "$_lcwbs_stage"; return 1; }
+    : > "$_lcwbs_name_jobs" 2>/dev/null || { rm -rf "$_lcwbs_stage"; return 1; }
+    _lcwbs_variable=0
+
     for _lcwbs_weight in 100 200 300 400 500 600 700 800 900; do
         _lcwbs_source="$(_luoshu_config_weight_source "$_lcwbs_weight" "$_lcwbs_family" "$_lcwbs_hint")" || {
             rm -rf "$_lcwbs_stage" 2>/dev/null || true
             return 1
         }
         _lcwbs_target="$_lcwbs_stage/LuoShu-${_lcwbs_weight}.ttf"
-        _luoshu_config_normalize_weight "$_lcwbs_source" "$_lcwbs_target" "$_lcwbs_weight" || {
+        _lcwbs_magic=$(dd if="$_lcwbs_source" bs=4 count=1 2>/dev/null)
+        if [ "$_lcwbs_magic" = ttcf ]; then
             rm -rf "$_lcwbs_stage" 2>/dev/null || true
             return 1
-        }
+        fi
+        if _luoshu_config_source_is_variable "$_lcwbs_source"; then
+            _lcwbs_variable=1
+            printf '%s	%s	cjk	%s	wght=%s
+' \
+                "$_lcwbs_source" "${_lcwbs_target}.raw" "$_lcwbs_weight" "$_lcwbs_weight" >> "$_lcwbs_instance_jobs"
+            printf '%s	%s	%s	%s	0
+' \
+                "${_lcwbs_target}.raw" "$_lcwbs_target" "$_lcwbs_weight" 'LuoShu UI' >> "$_lcwbs_name_jobs"
+        else
+            printf '%s	%s	%s	%s	0
+' \
+                "$_lcwbs_source" "$_lcwbs_target" "$_lcwbs_weight" 'LuoShu UI' >> "$_lcwbs_name_jobs"
+        fi
     done
 
-    # Monospace only needs one normalized outline. Android selects the declared XML weight;
-    # the eight aliases can safely share the 400 file, matching the existing finalizer.
+    _lcwbs_batch_ok=0
+    if [ -f "$_lcwbs_namer" ] && type _luoshu_font_config_exec >/dev/null 2>&1; then
+        _lcwbs_instance_ok=1
+        if [ "$_lcwbs_variable" -eq 1 ]; then
+            _lcwbs_instance_ok=0
+            if [ -f "$_lcwbs_instance" ] && \
+               _luoshu_font_config_exec "$_lcwbs_instance" --batch "$_lcwbs_instance_jobs" >/dev/null 2>&1; then
+                _lcwbs_instance_ok=1
+            fi
+        fi
+        if [ "$_lcwbs_instance_ok" -eq 1 ] && \
+           _luoshu_font_config_exec "$_lcwbs_namer" --batch "$_lcwbs_name_jobs" >/dev/null 2>&1; then
+            _lcwbs_batch_ok=1
+        fi
+    fi
+
+    if [ "$_lcwbs_batch_ok" -eq 1 ]; then
+        for _lcwbs_weight in 100 200 300 400 500 600 700 800 900; do
+            rm -f "$_lcwbs_stage/LuoShu-${_lcwbs_weight}.ttf.raw" 2>/dev/null || true
+            _lcwbs_ready="$_lcwbs_stage/LuoShu-${_lcwbs_weight}.ttf"
+            _lcwbs_size=$(_luoshu_config_fast_size "$_lcwbs_ready")
+            case "$_lcwbs_size" in ''|*[!0-9]*) _lcwbs_batch_ok=0; break ;; esac
+            [ "$_lcwbs_size" -ge 1024 ] || { _lcwbs_batch_ok=0; break; }
+        done
+    fi
+
+    if [ "$_lcwbs_batch_ok" -ne 1 ]; then
+        # A backend can fail after earlier jobs succeeded. Remove every partial output and
+        # fall back to the proven per-weight path instead of publishing a mixed payload.
+        for _lcwbs_weight in 100 200 300 400 500 600 700 800 900; do
+            rm -f "$_lcwbs_stage/LuoShu-${_lcwbs_weight}.ttf" \
+                  "$_lcwbs_stage/LuoShu-${_lcwbs_weight}.ttf.raw" 2>/dev/null || true
+        done
+        for _lcwbs_weight in 100 200 300 400 500 600 700 800 900; do
+            _lcwbs_source="$(_luoshu_config_weight_source "$_lcwbs_weight" "$_lcwbs_family" "$_lcwbs_hint")" || {
+                rm -rf "$_lcwbs_stage" 2>/dev/null || true
+                return 1
+            }
+            _lcwbs_target="$_lcwbs_stage/LuoShu-${_lcwbs_weight}.ttf"
+            _luoshu_config_normalize_weight "$_lcwbs_source" "$_lcwbs_target" "$_lcwbs_weight" || {
+                rm -rf "$_lcwbs_stage" 2>/dev/null || true
+                return 1
+            }
+        done
+    fi
+    rm -f "$_lcwbs_instance_jobs" "$_lcwbs_name_jobs" 2>/dev/null || true
+
     _lcwbs_mono400="$_lcwbs_stage/LuoShuMono-400.ttf"
     _luoshu_config_make_mono_weight "$_lcwbs_stage/LuoShu-400.ttf" "$_lcwbs_mono400" 400 || {
         rm -rf "$_lcwbs_stage" 2>/dev/null || true
@@ -458,6 +535,7 @@ font_config_prepare_payload_weights() {
             rm -f "$_lcw_dest" 2>/dev/null || true
             mv -f "$_lcw_ready" "$_lcw_dest" 2>/dev/null || {
                 rm -rf "$_lcw_stage" 2>/dev/null || true
+                _luoshu_config_weight_active_clear
                 return 1
             }
         done
