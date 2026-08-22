@@ -35,7 +35,7 @@ jobs:
           gradle --no-daemon --stacktrace :app:compileDebugKotlin :app:testDebugUnitTest > "$RUNNER_TEMP/display-performance.log" 2>&1
       - name: Upload display validation log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: display-performance-log
           path: ${{ runner.temp }}/display-performance.log

@@ -54,8 +54,24 @@ _font_store_reset() {
 
 # 归一化结果缓存：以 源文件sha256+字重+归一化版本 为 key。
 # 同一字体重复切换时直接复用，跳过 fonttools 冷启动（手机端每字重数秒）。
-# 修改 font_metrics_normalize.py 的度量契约时递增版本号使旧缓存失效。
-LUOSHU_NORMALIZER_VERSION="6"
+#
+# 版本号原本要靠人在改度量契约时记得手动递增，而这次恰恰没记得：紧凑行框的修复进了
+# font_metrics_normalize.py，版本号还停在 6，于是设备继续复用修复前的锚点，表现为"修了但没变"。
+# 改为直接由引擎文件内容派生，引擎一变缓存自动失效，不再依赖人的记性。
+_luoshu_normalizer_version() {
+    _lnv_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+    _lnv_engine="$_lnv_module/common/font_metrics_normalize.py"
+    if [ -f "$_lnv_engine" ] && command -v sha256sum >/dev/null 2>&1; then
+        printf '6-%s\n' "$(sha256sum "$_lnv_engine" 2>/dev/null | cut -c1-12)"
+        return 0
+    fi
+    if [ -f "$_lnv_engine" ] && command -v toybox >/dev/null 2>&1; then
+        printf '6-%s\n' "$(toybox sha256sum "$_lnv_engine" 2>/dev/null | cut -c1-12)"
+        return 0
+    fi
+    printf '6\n'
+}
+LUOSHU_NORMALIZER_VERSION="$(_luoshu_normalizer_version)"
 
 _font_inventory_cache_token() {
     _fict_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
@@ -186,6 +202,16 @@ _font_anchor() {
             _fa_inventory=$(_font_inventory_cache_token)
             [ -n "$_fa_inventory" ] || _fa_inventory=fallback
             _fa_cached="$_fa_cache/${_fa_sha}_${key}_v${LUOSHU_NORMALIZER_VERSION}_${_fa_inventory}.font"
+            # Nothing else ever removes entries from this directory: switching fonts clears
+            # .luoshu-font-store but not config/metrics_cache, and uninstalling the module is the only
+            # thing that empties it. Each entry is a full normalized font, so a device that has tried
+            # a few fonts across a few engine revisions accumulates hundreds of megabytes it can never
+            # use again. Drop the superseded generations of this exact (source, weight) pair.
+            for _fa_stale in "$_fa_cache/${_fa_sha}_${key}_v"*; do
+                [ -e "$_fa_stale" ] || continue
+                [ "$_fa_stale" != "$_fa_cached" ] || continue
+                rm -f "$_fa_stale" 2>/dev/null || true
+            done
             ln "$anchor" "$_fa_cached" 2>/dev/null || cp -f "$anchor" "$_fa_cached" 2>/dev/null || true
         fi
     fi

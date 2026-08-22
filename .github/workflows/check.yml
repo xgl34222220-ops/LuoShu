@@ -64,7 +64,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: common/python
-          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh', 'scripts/runtime_versions.conf') }}
 
       - name: Prepare ARM64 composite runtime
         run: |
@@ -238,7 +238,7 @@ jobs:
           ! grep -qE '(^|/)skip_mount(ify)?$' /tmp/luoshu-package-list.txt
           ! grep -qEi '(^|/)(emoji|__pycache__)(/|$)|\.pyc$|NotoColorEmoji|active_emoji|emoji_task|stability\.(js|css)|common/stability\.sh|fonts_xml_template|play_font_bridge|wechat_xweb_bridge|legacy_data_fonts_cleanup|volume_key\.sh' /tmp/luoshu-package-list.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: EXTRACT-FIRST-LuoShu-App-Only-Debug
           path: dist/*
