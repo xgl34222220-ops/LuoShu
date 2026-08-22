@@ -3,11 +3,37 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 WORK=${LUOSHU_RUNTIME_WORK:-"$ROOT/.runtime-work"}
-PY_VERSION=${PY_VERSION:-3.14.6}
-PY_ARCHIVE=${PY_ARCHIVE:-python-3.14.6-aarch64-linux-android.tar.gz}
-PY_SHA256=${PY_SHA256:-38bbe77d3167b5cd554e03b1021324926f09f3825202b065951dd7638e9c37e5}
-FONTTOOLS_VERSION=${FONTTOOLS_VERSION:-4.63.0}
-NDK=${ANDROID_NDK_LATEST_HOME:-}
+. "$ROOT/scripts/runtime_versions.conf"
+PY_VERSION=$LUOSHU_PY_VERSION
+PY_ARCHIVE=$LUOSHU_PY_ARCHIVE
+PY_SHA256=$LUOSHU_PY_SHA256
+FONTTOOLS_VERSION=$LUOSHU_FONTTOOLS_VERSION
+NDK_VERSION=$LUOSHU_ANDROID_NDK_VERSION
+ANDROID_MIN_API=$LUOSHU_ANDROID_MIN_API
+# GitHub-hosted Android runners export ANDROID_NDK_HOME for their newest
+# preinstalled NDK.  That path must not override LuoShu's pinned toolchain.
+# Prefer the versioned SDK location whenever ANDROID_HOME is available; retain
+# the legacy variables only for environments without an Android SDK root.
+if [ -n "${ANDROID_HOME:-}" ]; then
+  NDK="$ANDROID_HOME/ndk/$NDK_VERSION"
+else
+  NDK=${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}
+  test -n "$NDK" || { echo 'ANDROID_HOME is required to locate the pinned NDK.' >&2; exit 1; }
+fi
+if [ ! -d "$NDK" ]; then
+  SDKMANAGER="${ANDROID_HOME:-}/cmdline-tools/latest/bin/sdkmanager"
+  test -x "$SDKMANAGER" || SDKMANAGER=$(command -v sdkmanager 2>/dev/null || true)
+  test -n "$SDKMANAGER" || { echo "Pinned Android NDK $NDK_VERSION is unavailable." >&2; exit 1; }
+  yes | "$SDKMANAGER" "ndk;$NDK_VERSION" >/dev/null
+fi
+ACTUAL_NDK_VERSION=$(sed -n 's/^Pkg\.Revision[[:space:]]*=[[:space:]]*//p' "$NDK/source.properties" 2>/dev/null | head -n1)
+test "$ACTUAL_NDK_VERSION" = "$NDK_VERSION" || {
+  echo "NDK mismatch: expected $NDK_VERSION, found ${ACTUAL_NDK_VERSION:-unknown}." >&2
+  exit 1
+}
+CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android${ANDROID_MIN_API}-clang"
+STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+test -x "$CC"
 
 rm -rf "$WORK" "$ROOT/common/python"
 mkdir -p "$WORK/runtime" "$WORK/download" "$ROOT/common/python" "$ROOT/licenses"
@@ -23,12 +49,6 @@ test -f "$R/lib/libpython3.14.so"
 test -f "$R/lib/python3.14/LICENSE.txt"
 mkdir -p "$R/bin" "$R/lib/python3.14/site-packages"
 
-if [ -z "$NDK" ] || [ ! -d "$NDK" ]; then
-  NDK="$ANDROID_HOME/ndk/$(ls "$ANDROID_HOME/ndk" | sort -V | tail -1)"
-fi
-CC="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
-STRIP="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-test -x "$CC"
 cat > "$WORK/luoshu_python.c" <<'C'
 #include <dlfcn.h>
 #include <stdio.h>
@@ -84,6 +104,14 @@ find "$R/lib/python3.14/site-packages" -type f -name '*.so' -delete
 
 cp -a "$R"/. "$ROOT/common/python/"
 chmod 0755 "$ROOT/common/python/bin/luoshu-python"
+cat > "$ROOT/common/python/runtime-manifest.json" <<EOF_MANIFEST
+{
+  "schema": 1,
+  "python": {"version": "$PY_VERSION", "archive": "$PY_ARCHIVE", "sha256": "$PY_SHA256"},
+  "fontTools": {"version": "$FONTTOOLS_VERSION"},
+  "androidNdk": {"version": "$NDK_VERSION", "abi": "arm64-v8a", "minApi": $ANDROID_MIN_API}
+}
+EOF_MANIFEST
 
 # Copy exact upstream license files. Do not use a broad find over the combined
 # runtime tree: after FontTools is installed, that can select the wrong file.

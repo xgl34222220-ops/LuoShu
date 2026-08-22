@@ -215,6 +215,105 @@ _gfp_namespace_pids() {
     } | awk '/^[0-9]+$/ && !seen[$0]++'
 }
 
+_gfp_pid_cmdline() {
+    _gfp_pc_root="${LUOSHU_PROC_ROOT:-/proc}"
+    tr '\000' ' ' < "$_gfp_pc_root/$1/cmdline" 2>/dev/null
+}
+
+_gfp_parent_pid() {
+    _gfp_pp_root="${LUOSHU_PROC_ROOT:-/proc}"
+    awk '/^PPid:[[:space:]]*/ { print $2; exit }' "$_gfp_pp_root/$1/status" 2>/dev/null
+}
+
+# Prefer the zygote that actually parented the currently running Play Store. If Play Store is not
+# running, require every available app zygote to carry the complete replacement set; accepting an
+# arbitrary one is a false positive on mixed 32/64-bit devices.
+_gfp_vending_parent_zygotes() {
+    for _gfp_vpid in $(pidof com.android.vending 2>/dev/null); do
+        _gfp_ancestor="$_gfp_vpid"
+        _gfp_depth=0
+        while [ "$_gfp_depth" -lt 8 ]; do
+            _gfp_ancestor=$(_gfp_parent_pid "$_gfp_ancestor")
+            case "$_gfp_ancestor" in ''|0|1|*[!0-9]*) break ;; esac
+            case "$(_gfp_pid_cmdline "$_gfp_ancestor")" in
+                zygote*) printf '%s\n' "$_gfp_ancestor"; break ;;
+            esac
+            _gfp_depth=$((_gfp_depth + 1))
+        done
+    done | awk '/^[0-9]+$/ && !seen[$0]++'
+}
+
+_gfp_all_zygote_pids() {
+    for _gfp_zpid in $(pidof zygote64 zygote zygote_secondary zygote64_32 zygote_ocomp 2>/dev/null); do
+        case "$(_gfp_pid_cmdline "$_gfp_zpid")" in
+            zygote*) printf '%s\n' "$_gfp_zpid" ;;
+        esac
+    done | awk '/^[0-9]+$/ && !seen[$0]++'
+}
+
+# Validate the exact targets from this apply transaction and their clone hashes in one process's
+# namespace. Merely finding some path containing "files/fonts" can match a stale bind from an older
+# font and must never be treated as proof that the current transaction reached zygote.
+_gfp_verify_pid_state() {
+    _gfp_vps_pid="$1"
+    _gfp_vps_state="$2"
+    _gfp_vps_root="${LUOSHU_PROC_ROOT:-/proc}"
+    _gfp_verify_detail=
+    [ -r "$_gfp_vps_root/$_gfp_vps_pid/mounts" ] || {
+        _gfp_verify_detail=mount-table-unreadable
+        return 1
+    }
+    [ -s "$_gfp_vps_state" ] || {
+        _gfp_verify_detail=empty-transaction-state
+        return 1
+    }
+
+    _gfp_vps_count=0
+    while IFS='|' read -r _gfp_vps_target _gfp_vps_clone _gfp_vps_target_hash _gfp_vps_clone_hash; do
+        [ -n "$_gfp_vps_target" ] || continue
+        _gfp_vps_count=$((_gfp_vps_count + 1))
+        if ! awk -v target="$_gfp_vps_target" '$2 == target { found=1 } END { exit(found ? 0 : 1) }' \
+            "$_gfp_vps_root/$_gfp_vps_pid/mounts" 2>/dev/null; then
+            _gfp_verify_detail="target-not-mounted:$_gfp_vps_target"
+            return 1
+        fi
+        _gfp_vps_live_hash=$(_gfp_hash "$_gfp_vps_root/$_gfp_vps_pid/root$_gfp_vps_target")
+        if [ -z "$_gfp_vps_clone_hash" ] || [ "$_gfp_vps_live_hash" != "$_gfp_vps_clone_hash" ]; then
+            _gfp_verify_detail="target-hash-mismatch:$_gfp_vps_target"
+            return 1
+        fi
+    done < "$_gfp_vps_state"
+    [ "$_gfp_vps_count" -gt 0 ] || {
+        _gfp_verify_detail=empty-transaction-state
+        return 1
+    }
+    return 0
+}
+
+_gfp_verify_relevant_zygotes() {
+    _gfp_vrz_state="$1"
+    _gfp_zygote_scope=vending-parent
+    _gfp_vrz_pids=$(_gfp_vending_parent_zygotes)
+    if [ -z "$_gfp_vrz_pids" ]; then
+        _gfp_zygote_scope=all-app-zygotes
+        _gfp_vrz_pids=$(_gfp_all_zygote_pids)
+    fi
+
+    _gfp_zygote_seen=0
+    _gfp_zygote_verified=0
+    _gfp_zygote_verify_first_error=
+    for _gfp_vrz_pid in $_gfp_vrz_pids; do
+        _gfp_zygote_seen=$((_gfp_zygote_seen + 1))
+        if _gfp_verify_pid_state "$_gfp_vrz_pid" "$_gfp_vrz_state"; then
+            _gfp_zygote_verified=$((_gfp_zygote_verified + 1))
+        elif [ -z "$_gfp_zygote_verify_first_error" ]; then
+            _gfp_zygote_verify_first_error="pid=$_gfp_vrz_pid detail=${_gfp_verify_detail:-unknown}"
+        fi
+    done
+
+    [ "$_gfp_zygote_seen" -gt 0 ] && [ "$_gfp_zygote_verified" -eq "$_gfp_zygote_seen" ]
+}
+
 # bind 的源必须由目标进程自己的 mount namespace 解析。
 # 普通模块路径在目标 namespace 可见时直接 bind；如果 root 管理器隐藏了模块目录，
 # 只通过 /proc/1/root 读取 clone 内容，并在目标 namespace 的 /data/local/tmp 创建
@@ -327,6 +426,9 @@ _gfp_apply_once() {
     _gfp_ns_staging=0
     _gfp_ns_failed=0
     _gfp_ns_first_error=
+    _gfp_zygote_ok=0
+    _gfp_zygote_fail=0
+    _gfp_zygote_first_error=
     _gfp_missing_first=
     _gfp_namespace_pid_list=
     if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
@@ -363,7 +465,19 @@ _gfp_apply_once() {
                         plain) _gfp_ns_plain=$((_gfp_ns_plain + 1)) ;;
                         staging) _gfp_ns_staging=$((_gfp_ns_staging + 1)) ;;
                     esac
+                    # Whether a restarted Play Store inherits anything depends entirely on the zygote
+                    # bind, so its outcome is recorded by name instead of being averaged into a count.
+                    case "$(_gfp_pid_cmdline "$_gfp_pid")" in
+                        zygote*) _gfp_zygote_ok=$((_gfp_zygote_ok + 1)) ;;
+                    esac
                 else
+                    case "$(_gfp_pid_cmdline "$_gfp_pid")" in
+                        zygote*)
+                            _gfp_zygote_fail=$((_gfp_zygote_fail + 1))
+                            [ -n "$_gfp_zygote_first_error" ] || \
+                                _gfp_zygote_first_error="pid=$_gfp_pid detail=${_gfp_mount_detail:-unknown}"
+                            ;;
+                    esac
                     _gfp_ns_failed=$((_gfp_ns_failed + 1))
                     if [ -z "$_gfp_ns_first_error" ]; then
                         _gfp_ns_first_error="pid=$_gfp_pid target=$_gfp_target detail=${_gfp_mount_detail:-unknown}"
@@ -382,15 +496,48 @@ _gfp_apply_once() {
         fi
     done < "$_gfp_targets_file"
     rm -f "$_gfp_targets_file" 2>/dev/null || true
-    _gfp_diag="命名空间=attempted:$_gfp_ns_attempted plain:$_gfp_ns_plain staging:$_gfp_ns_staging failed:$_gfp_ns_failed 缺源=$_gfp_missing_sources"
+    _gfp_diag="命名空间=attempted:$_gfp_ns_attempted plain:$_gfp_ns_plain staging:$_gfp_ns_staging failed:$_gfp_ns_failed 缺源=$_gfp_missing_sources zygote=ok:$_gfp_zygote_ok/fail:$_gfp_zygote_fail"
+    [ -n "$_gfp_zygote_first_error" ] && _gfp_diag="$_gfp_diag 首个zygote错误=$_gfp_zygote_first_error"
     [ -n "$_gfp_ns_first_error" ] && _gfp_diag="$_gfp_diag 首个挂载错误=$_gfp_ns_first_error"
     [ -n "$_gfp_missing_first" ] && _gfp_diag="$_gfp_diag 首个缺源=$_gfp_missing_first"
     if [ "$_gfp_mounted" -gt 0 ]; then
-        mv -f "$_gfp_state_tmp" "$STATE" 2>/dev/null || true
+        if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ]; then
+            # prepare only builds clones. It made no mounts, so replacing the real undo list with
+            # this synthetic state would make existing bindings impossible to restore correctly.
+            rm -f "$_gfp_state_tmp" 2>/dev/null || true
+            _gfp_log "provider bridge 预准备：发现=$_gfp_found 生成=$_gfp_prepared 失败=$_gfp_failed"
+            return 0
+        fi
+
+        # A future Play Store process inherits from its actual parent zygote. Verify every exact
+        # target and clone hash from this transaction there; if Play Store is not running, require
+        # the complete transaction in every available app zygote.
+        _gfp_verify_relevant_zygotes "$_gfp_state_tmp"
+        _gfp_verify_rc=$?
+
+        # The binds that were made are real and have to be undoable, so the state file is written
+        # whichever way the verdict goes -- it is the undo list, not a success flag. The verdict is
+        # carried by the log line and the exit code.
+        if ! mv -f "$_gfp_state_tmp" "$STATE" 2>/dev/null; then
+            _gfp_log "provider bridge 状态保存失败：临时清单=$_gfp_state_tmp，已保留现场且未停止 Play 商店"
+            return 1
+        fi
         chmod 0600 "$STATE" 2>/dev/null || true
-        _gfp_log "provider bridge：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag"
-        [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || am force-stop com.android.vending >/dev/null 2>&1 || true
-        return 0
+
+        if [ "$_gfp_verify_rc" -eq 0 ]; then
+            # Clear the currently running Play Store so its next launch forks from the bound zygote.
+            if am force-stop com.android.vending >/dev/null 2>&1; then
+                _gfp_stop_result='已停止 Play 商店进程，下次打开即生效'
+            else
+                _gfp_stop_result='停止 Play 商店进程失败，请手动关闭后重新打开'
+            fi
+            _gfp_log "provider bridge：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag zygote校验=完整($_gfp_zygote_verified/$_gfp_zygote_seen scope=$_gfp_zygote_scope)，$_gfp_stop_result"
+            return 0
+        fi
+
+        # Without the zygote bind a restart changes nothing, so do not disrupt the running app.
+        _gfp_log "provider bridge 未继承：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag zygote校验=不完整($_gfp_zygote_verified/$_gfp_zygote_seen scope=$_gfp_zygote_scope)，首个校验错误=${_gfp_zygote_verify_first_error:-no-zygote}，已跳过停止 Play 商店"
+        return 1
     fi
     rm -f "$_gfp_state_tmp" 2>/dev/null || true
     _gfp_log "provider bridge 未生效：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag"
