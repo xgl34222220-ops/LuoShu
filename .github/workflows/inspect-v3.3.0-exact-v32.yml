@@ -1,0 +1,35 @@
+name: Inspect v3.3.0 exact v3.2 republish
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/inspect-v3.3.0-exact-v32.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Inspect latest republish run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          json="$(gh api "/repos/$REPO/actions/workflows/republish-v3.3.0-exact-v32.yml/runs?per_page=1")"
+          mkdir -p ops
+          echo "$json" | jq -r '.workflow_runs[0] | "runId=\(.id)\nstatus=\(.status)\nconclusion=\(.conclusion // "")\nurl=\(.html_url)\nheadSha=\(.head_sha)"' > ops/v3.3.0-exact-v32-inspect.status
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add ops/v3.3.0-exact-v32-inspect.status
+          git commit -m 'ops: inspect v3.3.0 exact v3.2 republish'
+          git push origin HEAD:main
