@@ -1,0 +1,196 @@
+name: Finalize prebuilt font cache fast path
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.head_ref == 'perf/prebuilt-font-payload-cache'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: perf/prebuilt-font-payload-cache
+          fetch-depth: 0
+
+      - name: Apply final cache and batch-prewarm fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+          path = root / 'common/font_config_weights.sh'
+          text = path.read_text()
+
+          # Make cache pruning real LRU-ish: a successful restore updates the cache directory mtime.
+          old = '''    rmdir "$_lcwcr_stage" 2>/dev/null || true\n    touch "$_lcwcr_dir/.complete" 2>/dev/null || true\n    return 0\n}\n'''
+          new = '''    rmdir "$_lcwcr_stage" 2>/dev/null || true\n    touch "$_lcwcr_dir/.complete" "$_lcwcr_dir" 2>/dev/null || true\n    return 0\n}\n'''
+          assert old in text, 'cache restore tail not found'
+          text = text.replace(old, new, 1)
+
+          # Batch the expensive first-time preparation. Variable instancing and all UI identity
+          # normalization run in one embedded-Python process each; Mono is still generated once.
+          build_pattern = re.compile(r'_luoshu_config_build_weight_stage\(\) \{.*?\n\}\n\nfont_config_prewarm_payload_weights\(\)', re.S)
+          build = r'''_luoshu_config_source_is_variable() {
+              _lcwiv_source="$1"
+              if type font_has_table >/dev/null 2>&1; then
+                  font_has_table "$_lcwiv_source" fvar
+                  return $?
+              fi
+              dd if="$_lcwiv_source" bs=65536 count=2 2>/dev/null | grep -a -q 'fvar'
+          }
+
+          _luoshu_config_build_weight_stage() {
+              _lcwbs_stage="$1"
+              _lcwbs_family="${2:-}"
+              _lcwbs_hint="${3:-}"
+              _lcwbs_module="$(_luoshu_config_weight_module)"
+              _lcwbs_instance="$_lcwbs_module/common/font_instance.py"
+              _lcwbs_namer="$_lcwbs_module/common/font_name_normalize.py"
+              rm -rf "$_lcwbs_stage" 2>/dev/null || true
+              mkdir -p "$_lcwbs_stage" 2>/dev/null || return 1
+              _lcwbs_instance_jobs="$_lcwbs_stage/.instance-jobs"
+              _lcwbs_name_jobs="$_lcwbs_stage/.name-jobs"
+              : > "$_lcwbs_instance_jobs" 2>/dev/null || { rm -rf "$_lcwbs_stage"; return 1; }
+              : > "$_lcwbs_name_jobs" 2>/dev/null || { rm -rf "$_lcwbs_stage"; return 1; }
+              _lcwbs_variable=0
+
+              for _lcwbs_weight in 100 200 300 400 500 600 700 800 900; do
+                  _lcwbs_source="$(_luoshu_config_weight_source "$_lcwbs_weight" "$_lcwbs_family" "$_lcwbs_hint")" || {
+                      rm -rf "$_lcwbs_stage" 2>/dev/null || true
+                      return 1
+                  }
+                  _lcwbs_target="$_lcwbs_stage/LuoShu-${_lcwbs_weight}.ttf"
+                  _lcwbs_magic=$(dd if="$_lcwbs_source" bs=4 count=1 2>/dev/null)
+                  if [ "$_lcwbs_magic" = ttcf ]; then
+                      rm -rf "$_lcwbs_stage" 2>/dev/null || true
+                      return 1
+                  fi
+                  if _luoshu_config_source_is_variable "$_lcwbs_source"; then
+                      _lcwbs_variable=1
+                      printf '%s\t%s\tcjk\t%s\twght=%s\n' \
+                          "$_lcwbs_source" "${_lcwbs_target}.raw" "$_lcwbs_weight" "$_lcwbs_weight" >> "$_lcwbs_instance_jobs"
+                      printf '%s\t%s\t%s\t%s\t0\n' \
+                          "${_lcwbs_target}.raw" "$_lcwbs_target" "$_lcwbs_weight" 'LuoShu UI' >> "$_lcwbs_name_jobs"
+                  else
+                      printf '%s\t%s\t%s\t%s\t0\n' \
+                          "$_lcwbs_source" "$_lcwbs_target" "$_lcwbs_weight" 'LuoShu UI' >> "$_lcwbs_name_jobs"
+                  fi
+              done
+
+              _lcwbs_batch_ok=0
+              if [ -f "$_lcwbs_namer" ] && type _luoshu_font_config_exec >/dev/null 2>&1; then
+                  _lcwbs_instance_ok=1
+                  if [ "$_lcwbs_variable" -eq 1 ]; then
+                      _lcwbs_instance_ok=0
+                      if [ -f "$_lcwbs_instance" ] && \
+                         _luoshu_font_config_exec "$_lcwbs_instance" --batch "$_lcwbs_instance_jobs" >/dev/null 2>&1; then
+                          _lcwbs_instance_ok=1
+                      fi
+                  fi
+                  if [ "$_lcwbs_instance_ok" -eq 1 ] && \
+                     _luoshu_font_config_exec "$_lcwbs_namer" --batch "$_lcwbs_name_jobs" >/dev/null 2>&1; then
+                      _lcwbs_batch_ok=1
+                  fi
+              fi
+
+              if [ "$_lcwbs_batch_ok" -eq 1 ]; then
+                  for _lcwbs_weight in 100 200 300 400 500 600 700 800 900; do
+                      rm -f "$_lcwbs_stage/LuoShu-${_lcwbs_weight}.ttf.raw" 2>/dev/null || true
+                      _lcwbs_ready="$_lcwbs_stage/LuoShu-${_lcwbs_weight}.ttf"
+                      _lcwbs_size=$(_luoshu_config_fast_size "$_lcwbs_ready")
+                      case "$_lcwbs_size" in ''|*[!0-9]*) _lcwbs_batch_ok=0; break ;; esac
+                      [ "$_lcwbs_size" -ge 1024 ] || { _lcwbs_batch_ok=0; break; }
+                  done
+              fi
+
+              if [ "$_lcwbs_batch_ok" -ne 1 ]; then
+                  # A backend can fail after earlier jobs succeeded. Remove every partial output and
+                  # fall back to the proven per-weight path instead of publishing a mixed payload.
+                  for _lcwbs_weight in 100 200 300 400 500 600 700 800 900; do
+                      rm -f "$_lcwbs_stage/LuoShu-${_lcwbs_weight}.ttf" \
+                            "$_lcwbs_stage/LuoShu-${_lcwbs_weight}.ttf.raw" 2>/dev/null || true
+                  done
+                  for _lcwbs_weight in 100 200 300 400 500 600 700 800 900; do
+                      _lcwbs_source="$(_luoshu_config_weight_source "$_lcwbs_weight" "$_lcwbs_family" "$_lcwbs_hint")" || {
+                          rm -rf "$_lcwbs_stage" 2>/dev/null || true
+                          return 1
+                      }
+                      _lcwbs_target="$_lcwbs_stage/LuoShu-${_lcwbs_weight}.ttf"
+                      _luoshu_config_normalize_weight "$_lcwbs_source" "$_lcwbs_target" "$_lcwbs_weight" || {
+                          rm -rf "$_lcwbs_stage" 2>/dev/null || true
+                          return 1
+                      }
+                  done
+              fi
+              rm -f "$_lcwbs_instance_jobs" "$_lcwbs_name_jobs" 2>/dev/null || true
+
+              _lcwbs_mono400="$_lcwbs_stage/LuoShuMono-400.ttf"
+              _luoshu_config_make_mono_weight "$_lcwbs_stage/LuoShu-400.ttf" "$_lcwbs_mono400" 400 || {
+                  rm -rf "$_lcwbs_stage" 2>/dev/null || true
+                  return 1
+              }
+              for _lcwbs_weight in 100 200 300 500 600 700 800 900; do
+                  _luoshu_config_link_font "$_lcwbs_mono400" "$_lcwbs_stage/LuoShuMono-${_lcwbs_weight}.ttf" || {
+                      rm -rf "$_lcwbs_stage" 2>/dev/null || true
+                      return 1
+                  }
+              done
+              return 0
+          }
+
+          font_config_prewarm_payload_weights()'''
+          text, count = build_pattern.subn(build, text, count=1)
+          assert count == 1, 'weight stage block not found'
+
+          # Never leave half of a newly generated active XML payload if publishing a miss fails.
+          old_fail = '''            mv -f "$_lcw_ready" "$_lcw_dest" 2>/dev/null || {\n                rm -rf "$_lcw_stage" 2>/dev/null || true\n                return 1\n            }\n'''
+          new_fail = '''            mv -f "$_lcw_ready" "$_lcw_dest" 2>/dev/null || {\n                rm -rf "$_lcw_stage" 2>/dev/null || true\n                _luoshu_config_weight_active_clear\n                return 1\n            }\n'''
+          assert old_fail in text, 'miss publish failure block not found'
+          text = text.replace(old_fail, new_fail, 1)
+          path.write_text(text)
+
+          # Extend the cache regression to prove first-time variable preparation is constant-call
+          # batch work, not nine interpreter launches.
+          test = root / 'scripts/font_payload_cache_test.sh'
+          t = test.read_text()
+          t = t.replace("printf 'demo-font-v1\\n' >> \"$SRC\"", "printf 'demo-font-v1-fvar\\n' >> \"$SRC\"")
+          old_stub = '''# Host test substitutes cheap builders; the cache contract must not depend on FontTools.\n_luoshu_config_normalize_weight() { cp -f "$1" "$2"; }\n_luoshu_config_make_mono_weight() { cp -f "$1" "$2"; }\n\nKEY1=$(_luoshu_config_weight_cache_key Demo "$SRC")\nfont_config_prewarm_payload_weights Demo "$SRC"\n'''
+          new_stub = '''# Host test emulates the two batch backends and one Mono normalization call.\n# A variable source containing fvar must not start one interpreter per weight.\ntouch "$MOD/common/font_instance.py" "$MOD/common/font_name_normalize.py"\nCALLS="$TMP/backend-calls"\n: > "$CALLS"\n_luoshu_font_config_exec() {\n    _tool="${1##*/}"\n    printf '%s %s\\n' "$_tool" "${2:-}" >> "$CALLS"\n    _jobs=''\n    _output=''\n    while [ "$#" -gt 0 ]; do\n        case "$1" in\n            --batch) _jobs="$2"; shift 2 ;;\n            --output) _output="$2"; shift 2 ;;\n            *) shift ;;\n        esac\n    done\n    if [ -n "$_jobs" ]; then\n        while IFS="$(printf '\\t')" read -r _input _ready _rest; do\n            [ -n "$_ready" ] || continue\n            dd if=/dev/zero of="$_ready" bs=2048 count=1 2>/dev/null\n        done < "$_jobs"\n        return 0\n    fi\n    if [ -n "$_output" ]; then\n        dd if=/dev/zero of="$_output" bs=2048 count=1 2>/dev/null\n        return 0\n    fi\n    return 1\n}\n\nKEY1=$(_luoshu_config_weight_cache_key Demo "$SRC")\nfont_config_prewarm_payload_weights Demo "$SRC"\nBACKEND_CALLS=$(awk 'NF' "$CALLS" | wc -l | tr -d '[:space:]')\n[ "$BACKEND_CALLS" -le 3 ] || { echo "prewarm backend calls=$BACKEND_CALLS, expected <=3" >&2; exit 1; }\ngrep -q '^font_instance.py --batch' "$CALLS"\ngrep -q '^font_name_normalize.py --batch' "$CALLS"\n'''
+          assert old_stub in t, 'cache test builder stub not found'
+          t = t.replace(old_stub, new_stub, 1)
+          test.write_text(t)
+          PY
+
+      - name: Run focused regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sh -n common/font_config_weights.sh
+          sh -n common/font_manager.sh
+          sh -n common/font_import.sh
+          sh -n common/native_import.sh
+          sh scripts/font_config_weights_test.sh
+          sh scripts/font_payload_cache_test.sh
+          sh scripts/font_switch_performance_test.sh
+          sh scripts/weight_prepare_batch_test.sh
+          sh scripts/font_import_compat_test.sh
+
+      - name: Commit final changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/finalize-prebuilt-font-cache.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'perf: batch first-time font payload prewarm'
+          git push origin HEAD:perf/prebuilt-font-payload-cache
