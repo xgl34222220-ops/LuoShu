@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 65
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Enforce App-only inventory
         run: sh ./scripts/v2_source_audit.sh
@@ -64,7 +64,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: common/python
-          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh', 'scripts/runtime_versions.conf') }}
 
       - name: Prepare ARM64 composite runtime
         run: |

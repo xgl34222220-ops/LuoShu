@@ -141,6 +141,8 @@
 - [完整使用教程](docs/USER_GUIDE.md)
 - [真机验证状态与发布测试矩阵](docs/TEST_MATRIX.md)
 - [设备字体模板引擎说明](docs/DEVICE_FONT_TEMPLATE_ENGINE.md)
+- [内置运行时依赖与复现](docs/RUNTIME_DEPENDENCIES.md)
+- [GPLv3 分发合规说明](docs/COMPLIANCE.md)
 - [发布流程](docs/RELEASING.md)
 - [版本变化](CHANGELOG.md)
 

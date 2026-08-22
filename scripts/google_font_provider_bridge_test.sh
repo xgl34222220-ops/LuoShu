@@ -14,13 +14,14 @@ TARGET_SOURCE=$(find /usr/share/fonts -type f -iname 'DejaVuSans-Bold.ttf' -prin
 TARGET="$TMP/Google_Sans-700-100_0-0_0.ttf"
 cp "$SOURCE" "$MOD/config/device-font-sources/LuoShu-700.ttf"
 cp "$TARGET_SOURCE" "$TARGET"
+printf 'existing-undo-list\n' > "$MOD/config/google-font-provider-mounts.conf"
 LUOSHU_GOOGLE_FONT_PYTHON="$(command -v python3)" \
 LUOSHU_GOOGLE_FONT_TARGETS="$TARGET" \
 LUOSHU_GOOGLE_FONT_DRY_RUN=1 \
 MODDIR="$MOD" \
     sh "$MOD/common/google_font_provider_bridge.sh" apply
-[ -s "$MOD/config/google-font-provider-mounts.conf" ]
-OUTPUT=$(awk -F'|' 'NR==1 {print $2}' "$MOD/config/google-font-provider-mounts.conf")
+[ "$(cat "$MOD/config/google-font-provider-mounts.conf")" = existing-undo-list ]
+OUTPUT=$(find "$MOD/config/google-font-provider" -maxdepth 1 -type f -name '*.ttf' -print -quit)
 [ -s "$OUTPUT" ]
 python3 - "$TARGET" "$OUTPUT" <<'PY'
 from pathlib import Path
@@ -46,5 +47,5 @@ try:
 finally:
     font.close()
 PY
-grep -q 'provider bridge：发现=1 生成=1 挂载=1 失败=0' "$MOD/logs/google-font-provider.log"
+grep -q 'provider bridge 预准备：发现=1 生成=1 失败=0' "$MOD/logs/google-font-provider.log"
 echo 'google_font_provider_bridge_test: PASS'
