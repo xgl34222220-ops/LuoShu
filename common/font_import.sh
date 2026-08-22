@@ -13,6 +13,8 @@ IMPORT_PYBIN="${IMPORT_PYBIN:-$IMPORT_PYROOT/bin/luoshu-python}"
 
 # Import is the right place to pay the expensive FontTools cost. Build the deterministic
 # 100-900 UI/Mono payload once here; later switches only restore hard-linked cache entries.
+[ -f "${MODULE_DIR:-/data/adb/modules/LuoShu}/common/rom_adapters.sh" ] && \
+    . "${MODULE_DIR:-/data/adb/modules/LuoShu}/common/rom_adapters.sh"
 [ -f "${MODULE_DIR:-/data/adb/modules/LuoShu}/common/font_config_runtime.sh" ] && \
     . "${MODULE_DIR:-/data/adb/modules/LuoShu}/common/font_config_runtime.sh"
 [ -f "${MODULE_DIR:-/data/adb/modules/LuoShu}/common/font_config_weights.sh" ] && \

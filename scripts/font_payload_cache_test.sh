@@ -31,6 +31,12 @@ font_config_prewarm_payload_weights Demo "$SRC"
 CACHE=$(_luoshu_config_weight_cache_dir "$KEY1")
 _luoshu_config_weight_cache_valid "$CACHE"
 
+# Mono aliases share one cached inode instead of serializing the same outlines nine times.
+MONO_INODE=$(stat -c '%i' "$CACHE/LuoShuMono-400.ttf")
+for weight in 100 200 300 500 600 700 800 900; do
+    test "$(stat -c '%i' "$CACHE/LuoShuMono-${weight}.ttf")" = "$MONO_INODE"
+done
+
 # Prewarm is side-effect free for the currently active payload.
 test ! -e "$MOD/system/fonts/LuoShu-400.ttf"
 test ! -e "$MOD/system/fonts/LuoShuMono-400.ttf"
