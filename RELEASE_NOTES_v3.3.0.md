@@ -1,6 +1,14 @@
 # 洛书 v3.3.0
 
-本版把 v3.2.0 稳定基线上的字体切换性能优化与 App 界面/加载性能优化合并为正式版本，核心方向是“预处理一次，前台秒开/秒切”。
+本版把 v3.2.0 稳定基线上的字体切换性能优化与 App 界面/加载性能优化合并为正式版本，核心方向是“预处理一次，前台秒开/秒切”。当前 v3.3.0 Release 已覆盖热修挂载打包问题，版本号与 versionCode 保持不变。
+
+## 重要热修
+- 修复正式模块 ZIP 漏打包根目录 `post-mount.sh` 的问题。
+- KernelSU / SukiSU / APatch 在 `post-fs-data.sh` 阶段会等待 post-mount 再执行洛书自挂载；缺少该脚本会导致洛书自挂载入口未执行，从而出现挂载异常。
+- 发布清单现在明确包含 `post-mount.sh`。
+- `scripts/check.sh` 强制检查 payload manifest 必须包含 `post-mount.sh`。
+- `scripts/build.sh` 在最终 ZIP 生成后再次检查 `post-mount.sh`，缺失时直接阻止发布。
+- ColorOS / HyperOS 静态 ROM 适配的 `quick` 模式不再扫描和构建 Bold / Medium / Light 等多字重族，避免前台切换误跑 full 模式重活。
 
 ## 性能
 - 合并 PR #181：导入/预热阶段预构建 100–900 UI + Mono 共 18 个字体成品，后续切换命中缓存时不再在前台重复启动 FontTools。
