@@ -419,7 +419,7 @@ copy_as_coloros() {
     [ "$extra_count" -gt 0 ] && _log_step "  已覆盖 $extra_count 个额外字体文件（数字/英文粗体等）"
 
     # 多字重支持：如果用户字体族提供了 Bold/Medium/Light 等文件，生成对应字重变体
-    if [ "$mode" != quick ] && [ -n "$font_family" ] && type scan_family_weights >/dev/null 2>&1; then
+    if [ -n "$font_family" ] && type scan_family_weights >/dev/null 2>&1; then
         weights=$(scan_family_weights "$font_family")
         weight_base="SysSans-Hant SysSans-Hans SysFont-Static SysFont-Myanmar SysFont-Hant SysFont-Hans SysFont SysSans-En"
         for w in $(echo "$weights" | tr ',' ' '); do
@@ -498,7 +498,7 @@ copy_as_hyperos() {
     # 多字重支持：数字文件（100~900）跟字重数值天然对应，直接精确映射；
     # Roboto 系列按字重名映射；MiSans 那 5 个核心文件本身是变量字体容器/
     # 单一设计，没法按静态字重文件拆分，固定用 Regular（已在上面覆盖过）
-    if [ "$mode" != quick ] && [ -n "$font_family" ] && type scan_family_weights >/dev/null 2>&1; then
+    if [ -n "$font_family" ] && type scan_family_weights >/dev/null 2>&1; then
         weights=$(scan_family_weights "$font_family")
         for w in $(echo "$weights" | tr ',' ' '); do
             [ "$w" = "regular" ] && continue
