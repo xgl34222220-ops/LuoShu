@@ -41,7 +41,7 @@ for file in \
   common/app_bridge.sh common/font_manager.sh common/font_library_cache.sh common/app_installer.sh \
   common/font_provider_cache.sh common/font_validation_cache.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
-  scripts/assert.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/weight_prepare_batch_test.sh scripts/slot_build_instance_cache_test.py scripts/composite_validate_lazy_test.py scripts/compact_metrics_clipping_test.py scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
+  scripts/assert.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/weight_prepare_batch_test.sh scripts/font_payload_cache_test.sh scripts/slot_build_instance_cache_test.py scripts/composite_validate_lazy_test.py scripts/compact_metrics_clipping_test.py scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
   scripts/device_validation_gate.py scripts/device_validation_gate_test.py docs/device_validation.json \
   scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh scripts/app_bridge_status_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_config_monospace_test.py \
@@ -250,6 +250,7 @@ sh "$ROOT/scripts/duplicate_function_test.sh"
 sh "$ROOT/scripts/device_font_cache_budget_test.sh"
 sh "$ROOT/scripts/provider_pid_scan_test.sh"
 sh "$ROOT/scripts/weight_prepare_batch_test.sh"
+sh "$ROOT/scripts/font_payload_cache_test.sh"
 
 # 这些测试早已存在但从未被 CI 执行过：50 个测试文件里包含无 Hook XML 家族覆盖
 # (font_config_overlay_test.py) 与 ColorOS 槽位映射 (coloros_partition_mapping_test.sh)，
