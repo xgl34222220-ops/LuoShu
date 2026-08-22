@@ -1,0 +1,82 @@
+{
+  "targetSha": "09c521e51f9a4daece5e12c8dc3b29597c7dd5e1",
+  "targetTag": "v3.3.0",
+  "verified": false,
+  "run": {
+    "conclusion": "success",
+    "createdAt": "2026-08-22T20:57:30Z",
+    "databaseId": 32598182356,
+    "displayTitle": "release: LuoShu v3.3.0 UI and font loading performance (#182)",
+    "event": "push",
+    "headSha": "09c521e51f9a4daece5e12c8dc3b29597c7dd5e1",
+    "status": "completed",
+    "url": "https://github.com/xgl34222220-ops/LuoShu/actions/runs/32598182356"
+  },
+  "release": {
+    "assets": [
+      {
+        "apiUrl": "https://api.github.com/repos/xgl34222220-ops/LuoShu/releases/assets/525448862",
+        "contentType": "application/vnd.android.package-archive",
+        "createdAt": "2026-08-22T21:05:59Z",
+        "digest": "sha256:730c0135c0150dd0236b2763cdfc1a0404f884919ffe91feeecbea71d2907708",
+        "downloadCount": 0,
+        "id": "RA_kwDOTY78_84fUbae",
+        "label": "",
+        "name": "LuoShu-App-v3.3.0.apk",
+        "size": 3517990,
+        "state": "uploaded",
+        "updatedAt": "2026-08-22T21:05:59Z",
+        "url": "https://github.com/xgl34222220-ops/LuoShu/releases/download/v3.3.0/LuoShu-App-v3.3.0.apk"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/xgl34222220-ops/LuoShu/releases/assets/525448866",
+        "contentType": "application/octet-stream",
+        "createdAt": "2026-08-22T21:05:59Z",
+        "digest": "sha256:0a40d049b13f75f59e4581a2ebca086c2b4b84755720fc2f0c6ee68ff4f464f8",
+        "downloadCount": 0,
+        "id": "RA_kwDOTY78_84fUbai",
+        "label": "",
+        "name": "LuoShu-App-v3.3.0.apk.sha256",
+        "size": 88,
+        "state": "uploaded",
+        "updatedAt": "2026-08-22T21:05:59Z",
+        "url": "https://github.com/xgl34222220-ops/LuoShu/releases/download/v3.3.0/LuoShu-App-v3.3.0.apk.sha256"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/xgl34222220-ops/LuoShu/releases/assets/525448863",
+        "contentType": "application/zip",
+        "createdAt": "2026-08-22T21:05:59Z",
+        "digest": "sha256:be11ad4e3c94a94e717a846a17156a5aebbd4df8d3b0b3af88ddd8b689c4c6fb",
+        "downloadCount": 0,
+        "id": "RA_kwDOTY78_84fUbaf",
+        "label": "",
+        "name": "LuoShu-v3.3.0.zip",
+        "size": 10274082,
+        "state": "uploaded",
+        "updatedAt": "2026-08-22T21:06:00Z",
+        "url": "https://github.com/xgl34222220-ops/LuoShu/releases/download/v3.3.0/LuoShu-v3.3.0.zip"
+      },
+      {
+        "apiUrl": "https://api.github.com/repos/xgl34222220-ops/LuoShu/releases/assets/525448864",
+        "contentType": "application/octet-stream",
+        "createdAt": "2026-08-22T21:05:59Z",
+        "digest": "sha256:766040e282cd5b9de4fa6c56a4fb17c8e467d598eeff68cbfa350e38dac6c8d1",
+        "downloadCount": 0,
+        "id": "RA_kwDOTY78_84fUbag",
+        "label": "",
+        "name": "LuoShu-v3.3.0.zip.sha256",
+        "size": 84,
+        "state": "uploaded",
+        "updatedAt": "2026-08-22T21:05:59Z",
+        "url": "https://github.com/xgl34222220-ops/LuoShu/releases/download/v3.3.0/LuoShu-v3.3.0.zip.sha256"
+      }
+    ],
+    "isDraft": false,
+    "isPrerelease": false,
+    "name": "洛书 v3.3.0",
+    "publishedAt": "2026-08-22T21:06:00Z",
+    "tagName": "v3.3.0",
+    "url": "https://github.com/xgl34222220-ops/LuoShu/releases/tag/v3.3.0"
+  },
+  "failureLog": ""
+}
