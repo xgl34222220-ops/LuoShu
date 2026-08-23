@@ -10,4 +10,4 @@ jobs:
   noop:
     runs-on: ubuntu-latest
     steps:
-      - run: echo cleanup workflow disabled after execution
+      - run: echo cleanup finished; workflow retained as manual-only placeholder
