@@ -22,7 +22,7 @@ jobs:
       - name: Capture publisher run
         env:
           GH_TOKEN: ${{ github.token }}
-          PUBLISH_SHA: dfa1dd367a538fb0585618e0b8bdb508f2b0fa74
+          PUBLISH_SHA: 204ba71fedf04b5349cdf06f464c619d8698c481
         shell: bash
         run: |
           set -euo pipefail
