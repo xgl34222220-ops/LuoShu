@@ -68,6 +68,7 @@ common/font_runtime_policy.sh
 common/font_safety.sh
 common/font_validation_cache.sh
 common/font_switch_task.sh
+common/hyperos_coverage_floor.sh
 common/hyperos_global.sh
 common/luoshu_cli.sh
 common/luoshu_composite.sh
