@@ -1,0 +1,43 @@
+name: Inspect cleanup result
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/inspect-cleanup-result.yml
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Capture releases and branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo='xgl34222220-ops/LuoShu'
+          mkdir -p ops
+          {
+            echo '[releases-oldest-first]'
+            gh api --paginate "repos/$repo/releases?per_page=100" --jq '.[] | [.created_at,.tag_name] | @tsv' | sort || true
+            echo '[branches]'
+            gh api --paginate "repos/$repo/branches?per_page=100" --jq '.[].name' | sort || true
+            echo '[v3.3.0-release]'
+            gh api "repos/$repo/releases/tags/v3.3.0" --jq '.tag_name' 2>/dev/null || echo absent
+            echo '[v3.3.0-tag]'
+            git ls-remote origin 'refs/tags/v3.3.0' || true
+          } > ops/cleanup-result.txt
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add ops/cleanup-result.txt
+          git commit -m 'ops: record cleanup result'
+          git pull --rebase origin main
+          git push origin HEAD:main
