@@ -162,7 +162,16 @@ jobs:
 
       - name: Run complete source and module checks
         shell: bash
-        run: sh ./scripts/check.sh
+        run: |
+          set +e
+          sh ./scripts/check.sh 2>&1 | tee "$RUNNER_TEMP/luoshu-source-check.log"
+          check_rc=${PIPESTATUS[0]}
+          set -e
+          if [[ "$check_rc" -ne 0 ]]; then
+            excerpt="$(tail -n 8 "$RUNNER_TEMP/luoshu-source-check.log" | tr '\n' '|' | sed 's/|$//')"
+            echo "::error title=Complete source check failed::$excerpt"
+            exit "$check_rc"
+          fi
 
       - name: Lint, test and build signed release App
         working-directory: android-app
