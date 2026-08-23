@@ -22,6 +22,10 @@
 - 不重新引入 v3.2.3 / v3.2.4 的 OnePlus / ColorOS 高风险挂载改动。
 
 ## 覆盖修复
+- HyperOS 不再只依赖五个写死的 MiSans 文件名；现在会从 system、product、system_ext 与 mi_ext 分区动态发现 MiSans、MiLanPro、MIUI、XiaomiSans、Mitype 等直立 UI 字体，补齐红米 K80 至尊等机型此前大量页面未替换的问题。
+- HyperOS 动态发现会排除斜体、衬线、等宽、Emoji、图标和时钟字面，时钟仍由独立槽位处理，避免误覆盖特殊字体。
+- ColorOS 字体发现同时支持 .ttf、.otf 及大小写扩展名，并补充 ColorOS 15 的 OSans 新命名。
+- 新增 HyperOS / ColorOS ROM 字体发现对等性回归测试，防止后续再次退化为少量写死文件名。
 - 撤回 v3.3.0 首发版新增的字体 payload 预构建缓存后端，恢复 v3.2.0 已验证稳定的字重生成链，优先解决真机“选择字体后系统仍保持默认字体”的回归。
 - 保留 App 字体库缓存与预览优化；这些 UI/浏览性能改动不参与系统字体 payload 生成。
 - ColorOS / HyperOS 的 quick 切换不再扫描 Bold / Medium / Light 等多字重族，减少前台切换重活。
