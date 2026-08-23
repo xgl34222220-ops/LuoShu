@@ -1,10 +1,82 @@
 name: Cleanup old releases and branches
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/cleanup-old-releases-branches.yml
+
+permissions:
+  contents: write
+  actions: read
 
 jobs:
-  noop:
-    runs-on: ubuntu-latest
+  cleanup:
+    runs-on: ubuntu-24.04
     steps:
-      - run: echo disabled
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Delete v3.3.0, oldest 10 releases, and stale branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo='xgl34222220-ops/LuoShu'
+
+          # Always remove v3.3.0 release and tag if present.
+          gh release delete v3.3.0 --repo "$repo" --cleanup-tag --yes 2>/dev/null || true
+          git push origin ':refs/tags/v3.3.0' 2>/dev/null || true
+
+          # Delete the 10 oldest GitHub Releases by created_at. This acts on releases,
+          # not arbitrary historical commits. Their corresponding tags are removed too.
+          mapfile -t old_tags < <(
+            gh api --paginate "repos/$repo/releases?per_page=100" \
+              --jq '.[] | [.created_at, .tag_name] | @tsv' \
+              | sort \
+              | head -n 10 \
+              | cut -f2
+          )
+
+          printf 'oldest releases to delete:\n'
+          printf '  %s\n' "${old_tags[@]:-}"
+          for tag in "${old_tags[@]:-}"; do
+            [ -n "$tag" ] || continue
+            gh release delete "$tag" --repo "$repo" --cleanup-tag --yes 2>/dev/null || true
+            git push origin ":refs/tags/$tag" 2>/dev/null || true
+          done
+
+          # Keep only main and release branches that are still tied to an existing open PR.
+          # The explicit hotfix/temporary branches used during v3.3.0 work are stale now.
+          mapfile -t open_pr_heads < <(
+            gh pr list --repo "$repo" --state open --limit 200 --json headRefName --jq '.[].headRefName'
+          )
+
+          keep_branch() {
+            local branch="$1"
+            [ "$branch" = 'main' ] && return 0
+            for head in "${open_pr_heads[@]:-}"; do
+              [ "$branch" = "$head" ] && return 0
+            done
+            return 1
+          }
+
+          mapfile -t branches < <(
+            gh api --paginate "repos/$repo/branches?per_page=100" --jq '.[].name'
+          )
+
+          printf 'stale branches to delete:\n'
+          for branch in "${branches[@]:-}"; do
+            [ -n "$branch" ] || continue
+            if keep_branch "$branch"; then
+              continue
+            fi
+            printf '  %s\n' "$branch"
+            git push origin --delete "$branch" 2>/dev/null || true
+          done
+
+          echo 'cleanup complete'
