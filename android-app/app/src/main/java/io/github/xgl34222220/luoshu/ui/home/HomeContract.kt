@@ -51,6 +51,7 @@ data class HomeActions(
 
 internal fun ModuleSnapshot.toHomeUiState(weight: SystemWeightState): HomeUiState {
     val running = taskState == "running" || taskState == "queued"
+    val safeRebootRequired = rebootRequired && !effectFailed && mountState != "failed"
     return HomeUiState(
         loading = loading,
         version = version,
@@ -60,7 +61,7 @@ internal fun ModuleSnapshot.toHomeUiState(weight: SystemWeightState): HomeUiStat
         moduleInstalled = installed,
         mountEngine = mountEngine,
         mountHealthy = installed && mountState != "failed" &&
-            (activeFont in setOf("", "default") || rebootRequired || mountState == "mounted"),
+            (activeFont in setOf("", "default") || safeRebootRequired || mountState == "mounted"),
         taskRunning = running,
         taskTitle = when {
             running -> "字体任务执行中"
@@ -71,7 +72,7 @@ internal fun ModuleSnapshot.toHomeUiState(weight: SystemWeightState): HomeUiStat
         },
         taskMessage = if (effectFailed) effectFailureMessage else taskMessage,
         taskProgress = taskProgress,
-        rebootRequired = rebootRequired,
+        rebootRequired = safeRebootRequired,
         error = error,
         systemWeight = HomeWeightUiState(
             loading = weight.loading,
