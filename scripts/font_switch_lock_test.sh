@@ -5,7 +5,15 @@ ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 . "$ROOT/scripts/assert.sh"
 CASE='字体切换锁'
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+LIVE_PID=''
+cleanup() {
+    if [ -n "$LIVE_PID" ]; then
+        kill "$LIVE_PID" 2>/dev/null || true
+        wait "$LIVE_PID" 2>/dev/null || true
+    fi
+    rm -rf "$TMP"
+}
+trap cleanup EXIT
 
 MODDIR="$TMP/module"
 PUBLIC_DIR="$TMP/public"
@@ -43,8 +51,15 @@ wait_for_file() {
 MODULE_DIR="$MODDIR"
 . "$ROOT/common/util_functions.sh"
 IDENTITY_LOCK="$TMP/identity.lock"
-LIVE_PID="$$"
+# A dedicated owner remains visible in /proc even under nested CI/container
+# launchers where the shell's $$ can refer to a short-lived outer process.
+sleep 300 &
+LIVE_PID=$!
 LIVE_START="$(luoshu_process_starttime "$LIVE_PID")"
+if [ -z "$LIVE_START" ]; then
+    echo 'font_switch_lock_test: SKIP (/proc starttime unavailable)'
+    exit 0
+fi
 LIVE_BOOT="$(luoshu_current_boot_id)"
 
 # PID reuse: the PID is alive, but the recorded start time belongs to another
