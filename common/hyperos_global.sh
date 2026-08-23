@@ -71,9 +71,35 @@ EOF_CLOCK_ROOTS
     } | awk 'NF && !seen[$0]++'
 }
 
+# ColorOS 那边会真的去枚举分区里的字体文件，再按前缀挑出 OEM 的 UI 家族；HyperOS 这边却只有
+# _hyperos_core_files 那五个写死的名字，唯一的枚举只覆盖 Roboto/GoogleSans 和时钟槽。于是 ROM
+# 里任何一个不叫这五个名字的 MiSans 变体——各语种 VF、Rounded、Text、Global 等——全部漏掉，
+# 表现就是「同一份字体，红米很多地方没换，一加正常」。这里补上对等的枚举。
+_hyperos_discovered_ui_files() {
+    while IFS='|' read -r _real _overlay; do
+        [ -d "$_real" ] || continue
+        for _path in "$_real"/*.ttf "$_real"/*.otf "$_real"/*.TTF "$_real"/*.OTF; do
+            [ -f "$_path" ] || continue
+            _name=${_path##*/}
+            # 时钟槽由 _hyperos_clock_ui_files 单独处理；斜体、衬线、等宽、emoji、图标保持原厂。
+            case "$_name" in
+                *Italic*|*Oblique*|*Serif*|*Mono*|*Emoji*|*Symbol*|*Icon*|*Clock*) continue ;;
+            esac
+            case "$_name" in
+                MiSans*|MiLanPro*|Mipro*|MIUI*|Miui*|XiaomiSans*|MiType*|Mitype*)
+                    printf '%s\n' "$_name"
+                    ;;
+            esac
+        done
+    done <<EOF_HYPEROS_DISCOVERY
+$(_luoshu_hyperos_root_pairs)
+EOF_HYPEROS_DISCOVERY
+}
+
 get_all_hyperos_files() {
-    printf '%s %s %s %s %s\n' "$(_hyperos_core_files)" "$(_hyperos_weight_files)" \
-        "$(_hyperos_metric_shell_files)" "$(_hyperos_upright_ui_files)" "$(_hyperos_clock_ui_files)"
+    printf '%s %s %s %s %s %s\n' "$(_hyperos_core_files)" "$(_hyperos_weight_files)" \
+        "$(_hyperos_metric_shell_files)" "$(_hyperos_upright_ui_files)" \
+        "$(_hyperos_clock_ui_files)" "$(_hyperos_discovered_ui_files)"
 }
 
 _hyperos_remove_overlay_file() {

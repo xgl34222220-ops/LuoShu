@@ -46,14 +46,15 @@ _coloros_oem_ui_files() {
 _coloros_discovered_ui_files() {
     while IFS='|' read -r _lcg_real _lcg_overlay; do
         [ -d "$_lcg_real" ] || continue
-        for _lcg_path in "$_lcg_real"/*.ttf; do
+        # ColorOS 15 起 OSans/OplusSans 的部分字面以 .otf 发布，只 glob .ttf 会整族漏掉。
+        for _lcg_path in "$_lcg_real"/*.ttf "$_lcg_real"/*.otf "$_lcg_real"/*.TTF "$_lcg_real"/*.OTF; do
             [ -f "$_lcg_path" ] || continue
             _lcg_name=${_lcg_path##*/}
             case "$_lcg_name" in
                 *Italic*|*Oblique*|*Serif*|*Mono*|*Emoji*|*Symbol*|*Icon*|*Clock*) continue ;;
             esac
             case "$_lcg_name" in
-                SysFont*.ttf|SysSans*.ttf|OplusSans*.ttf|OplusOSUI*.ttf|OppoSans*.ttf|Opposans*.ttf|OPSans*.ttf|GoogleSans*.ttf|Roboto*.ttf|SourceSansPro*.ttf|DIN*.ttf|OPPODIN*.ttf)
+                SysFont*|SysSans*|OplusSans*|OplusOSUI*|OppoSans*|Opposans*|OPSans*|OSans*|GoogleSans*|Roboto*|SourceSansPro*|DIN*|OPPODIN*)
                     printf '%s\n' "$_lcg_name"
                     ;;
             esac
