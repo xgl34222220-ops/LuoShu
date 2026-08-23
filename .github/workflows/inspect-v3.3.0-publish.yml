@@ -22,11 +22,11 @@ jobs:
       - name: Capture publisher run
         env:
           GH_TOKEN: ${{ github.token }}
-          PUBLISH_SHA: 204ba71fedf04b5349cdf06f464c619d8698c481
+          PUBLISH_SHA: 7486f874cfe71e96d724e160e585119020df9870
         shell: bash
         run: |
           set -euo pipefail
-          sleep 3
+          sleep 5
           json="$(gh run list --workflow publish-v3.3.0-hotfix.yml --limit 10 --json databaseId,status,conclusion,headSha,url,createdAt)"
           run="$(jq -c --arg sha "$PUBLISH_SHA" '[.[] | select(.headSha == $sha)] | first // {}' <<<"$json")"
           test "$(jq -r '.databaseId // empty' <<<"$run")" != ''
