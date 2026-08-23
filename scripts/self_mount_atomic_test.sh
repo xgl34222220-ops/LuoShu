@@ -25,6 +25,7 @@ setup_case() {
     mkdir -p "$MODULE_DIR/config" "$MODULE_DIR/logs" "$CASE_ROOT/root/system/fonts" \
         "$CASE_ROOT/root/system/etc" "$CASE_ROOT/state"
     printf 'custom\n' > "$MODULE_DIR/config/active_font.conf"
+    printf 'state=booting\nfont=custom\n' > "$MODULE_DIR/config/font-payload-boot.conf"
     : > "$CASE_ROOT/unmount.log"
     FAIL_OVERLAY=''
     FAIL_BIND=''
@@ -90,6 +91,29 @@ _luoshu_overlay_mount_dir() {
 }
 CURRENT_BOOT_ID=test-boot
 _luoshu_atomic_boot_id() { printf '%s\n' "$CURRENT_BOOT_ID"; }
+
+setup_case rebuild-pending
+mkdir -p "$MODULE_DIR/system/fonts"
+printf 'new-font\n' > "$MODULE_DIR/system/fonts/Roboto.ttf"
+printf 'stock-font\n' > "$CASE_ROOT/root/system/fonts/Roboto.ttf"
+printf 'state=pending\n' > "$MODULE_DIR/config/font-payload-rebuild-pending.conf"
+printf '%s\n' "$CURRENT_BOOT_ID" > "$CASE_ROOT/state/boot-id"
+printf '%s\n' "$CASE_ROOT/root/system/fonts" > "$CASE_ROOT/state/mounts.list"
+luoshu_self_mount_ensure || fail 'pending rebuild did not fail open'
+grep -q '^state=deferred$' "$MODULE_DIR/config/self-mount.conf" || fail 'pending rebuild was not deferred'
+grep -q '^failed=rebuild-pending$' "$MODULE_DIR/config/self-mount.conf" || fail 'pending rebuild reason missing'
+test "$(cat "$CASE_ROOT/root/system/fonts/Roboto.ttf")" = stock-font || fail 'pending payload reached the system font tree'
+test -s "$CASE_ROOT/unmount.log" || fail 'same-boot pending payload was not rolled back'
+
+setup_case unarmed
+mkdir -p "$MODULE_DIR/system/fonts"
+printf 'new-font\n' > "$MODULE_DIR/system/fonts/Roboto.ttf"
+printf 'stock-font\n' > "$CASE_ROOT/root/system/fonts/Roboto.ttf"
+rm -f "$MODULE_DIR/config/font-payload-boot.conf"
+luoshu_self_mount_ensure || fail 'unarmed payload did not fail open'
+grep -q '^state=deferred$' "$MODULE_DIR/config/self-mount.conf" || fail 'unarmed payload was not deferred'
+grep -q '^failed=boot-guard-missing$' "$MODULE_DIR/config/self-mount.conf" || fail 'unarmed payload reason missing'
+test "$(cat "$CASE_ROOT/root/system/fonts/Roboto.ttf")" = stock-font || fail 'unarmed payload reached the system font tree'
 
 setup_case success
 mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/system/etc"

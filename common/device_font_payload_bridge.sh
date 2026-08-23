@@ -7,7 +7,7 @@ _dfpb_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
 [ -f "$_dfpb_module/common/device_font_payload_runtime.sh" ] && . "$_dfpb_module/common/device_font_payload_runtime.sh"
 
 # Force one background rebuild when upgrading from the uniform-metrics payload.
-LUOSHU_PAYLOAD_SCHEMA_CURRENT="device-template-v1-baseline-v7-mono-v6"
+LUOSHU_PAYLOAD_SCHEMA_CURRENT="device-template-v1-baseline-v8-boot-safe"
 
 # Prefer the already prepared 100-900 files, then ROM-specific anchors. This keeps
 # direct, variable and composite flows on the same source selection contract.

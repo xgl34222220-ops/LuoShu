@@ -18,7 +18,7 @@ _dfpr_mark_dynamic_rebuild() {
         printf 'font=%s\n' "$_dfpr_active"
         printf 'reason=%s\n' "$_dfpr_reason"
         printf 'oldSchema=%s\n' "$(sed -n 's/^schema=//p' "$_dfpr_config/font-payload-schema.conf" 2>/dev/null | head -n1)"
-        printf 'newSchema=%s\n' "${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-device-template-v1-baseline-v7-mono-v6}"
+        printf 'newSchema=%s\n' "${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-device-template-v1-baseline-v8-boot-safe}"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$_dfpr_pending_tmp" 2>/dev/null || return 1
     mv -f "$_dfpr_pending_tmp" "$_dfpr_pending" 2>/dev/null || return 1

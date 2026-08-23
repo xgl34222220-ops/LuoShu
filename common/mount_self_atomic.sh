@@ -31,6 +31,31 @@ _luoshu_atomic_component_required() {
     [ "${1:-}/${2:-}" = system/fonts ]
 }
 
+# The early boot guard is the only authority allowed to arm a font payload.
+# A migrated payload waiting for a background rebuild deliberately bypasses
+# that guard so Android can boot on the stock font. Never let post-mount mount
+# such a payload anyway: doing so turns every failed boot into the same failed
+# retry and defeats the persistent boot-loop rollback state machine.
+LUOSHU_SELF_MOUNT_DEFER_REASON=''
+_luoshu_atomic_mount_authorized() {
+    _lsama_module="${1:-$(_luoshu_self_module)}"
+    _lsama_config="$_lsama_module/config"
+    LUOSHU_SELF_MOUNT_DEFER_REASON=''
+    if [ -f "$_lsama_config/font-payload-rebuild-pending.conf" ]; then
+        LUOSHU_SELF_MOUNT_DEFER_REASON=rebuild-pending
+        return 1
+    fi
+    _lsama_state=$(sed -n 's/^state=//p' \
+        "$_lsama_config/font-payload-boot.conf" 2>/dev/null | head -n1 | tr -d '\r\n')
+    case "$_lsama_state" in
+        booting|confirmed) return 0 ;;
+        *)
+            LUOSHU_SELF_MOUNT_DEFER_REASON="boot-guard-${_lsama_state:-missing}"
+            return 1
+            ;;
+    esac
+}
+
 _luoshu_atomic_missing_target_allowed() {
     _lsamta_rel="$1"
     _lsamta_mode="${2:-overlay}"
@@ -329,6 +354,15 @@ luoshu_self_mount_ensure() {
         : > "$_lsme_mount_list" 2>/dev/null || true
         rm -f "$_lsme_manifest" "$_lsme_manifest_temp" 2>/dev/null || true
         _luoshu_self_state_write idle none '' ''
+        return 0
+    fi
+
+    if ! _luoshu_atomic_mount_authorized "$_lsme_module"; then
+        [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list"
+        : > "$_lsme_mount_list" 2>/dev/null || true
+        rm -f "$_lsme_manifest" "$_lsme_manifest_temp" 2>/dev/null || true
+        _luoshu_self_state_write deferred none '' "$LUOSHU_SELF_MOUNT_DEFER_REASON"
+        _luoshu_self_log "自挂载已安全延后：reason=$LUOSHU_SELF_MOUNT_DEFER_REASON"
         return 0
     fi
 

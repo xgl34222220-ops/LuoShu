@@ -24,6 +24,7 @@ printf 'new-font\n' > "$MODULE/system/fonts/Roboto-Regular.ttf"
 printf 'stock-font\n' > "$VISIBLE/system/fonts/Roboto-Regular.ttf"
 printf 'stock-emoji\n' > "$VISIBLE/system/fonts/NotoColorEmoji.ttf"
 printf 'Demo\n' > "$MODULE/config/active_font.conf"
+printf 'state=booting\nfont=Demo\n' > "$MODULE/config/font-payload-boot.conf"
 printf 'id=LuoShu\nfont=Demo\nengine=self-mount\npartition=system\nnonce=test-system\n' \
     > "$MODULE/system/etc/luoshu/mount-probe.conf"
 printf 'system|test-system|/system/etc/luoshu/mount-probe.conf\n' \

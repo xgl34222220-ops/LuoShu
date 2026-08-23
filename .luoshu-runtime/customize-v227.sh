@@ -10,7 +10,7 @@ MODULE_DIR="$MODPATH"
 [ -f "$MODPATH/common/rom_adapters.sh" ] && . "$MODPATH/common/rom_adapters.sh"
 # customize.sh runs before the normal font runtime bridge is loaded. Set the v2.2
 # schema first so a v2.1 payload is always scheduled for a device-template rebuild.
-LUOSHU_PAYLOAD_SCHEMA_CURRENT=device-template-v1-baseline-v7-mono-v6
+LUOSHU_PAYLOAD_SCHEMA_CURRENT=device-template-v1-baseline-v8-boot-safe
 [ -f "$MODPATH/common/module_update_state.sh" ] && . "$MODPATH/common/module_update_state.sh"
 
 if type ensure_public_storage >/dev/null 2>&1; then
