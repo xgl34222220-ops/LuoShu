@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   noop:
     runs-on: ubuntu-latest
     steps:
-      - run: echo cleanup finished; workflow retained as manual-only placeholder
+      - run: echo archived cleanup workflow
