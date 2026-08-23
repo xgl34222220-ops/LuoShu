@@ -5,7 +5,7 @@ on:
 
 jobs:
   noop:
-    if: ${{ false }}
+    if: false
     runs-on: ubuntu-latest
     steps:
       - run: echo disabled
