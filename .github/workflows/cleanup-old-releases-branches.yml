@@ -1,69 +1,13 @@
 name: Cleanup old releases and branches
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/cleanup-old-releases-branches.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  cleanup:
-    runs-on: ubuntu-24.04
+  noop:
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Delete v3.3.0, oldest 10 releases, and obsolete temporary branches
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          repo='xgl34222220-ops/LuoShu'
-
-          gh release delete v3.3.0 --repo "$repo" --cleanup-tag --yes 2>/dev/null || true
-          git push origin ':refs/tags/v3.3.0' 2>/dev/null || true
-
-          mapfile -t old_tags < <(
-            gh api --paginate "repos/$repo/releases?per_page=100" \
-              --jq '.[] | [.created_at, .tag_name] | @tsv' \
-              | sort \
-              | head -n 10 \
-              | cut -f2
-          )
-          for tag in "${old_tags[@]:-}"; do
-            [ -n "$tag" ] || continue
-            gh release delete "$tag" --repo "$repo" --cleanup-tag --yes 2>/dev/null || true
-            git push origin ":refs/tags/$tag" 2>/dev/null || true
-          done
-
-          mapfile -t open_pr_heads < <(
-            gh pr list --repo "$repo" --state open --limit 200 --json headRefName --jq '.[].headRefName'
-          )
-
-          is_open_pr_head() {
-            local branch="$1"
-            for head in "${open_pr_heads[@]:-}"; do
-              [ "$branch" = "$head" ] && return 0
-            done
-            return 1
-          }
-
-          mapfile -t branches < <(
-            gh api --paginate "repos/$repo/branches?per_page=100" --jq '.[].name'
-          )
-          for branch in "${branches[@]:-}"; do
-            [ -n "$branch" ] || continue
-            [ "$branch" = main ] && continue
-            is_open_pr_head "$branch" && continue
-            case "$branch" in
-              release/v3.3.0-*|fix/*|hotfix/*|temp/*|tmp/*|codex/*|backup/*)
-                git push origin --delete "$branch" 2>/dev/null || true
-                ;;
-            esac
-          done
+      - run: echo cleanup workflow disabled after execution
