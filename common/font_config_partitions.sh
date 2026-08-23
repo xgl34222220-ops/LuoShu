@@ -63,7 +63,10 @@ _luoshu_font_config_specs() {
         # Keep the curated list as a stable baseline, then discover vendor-specific font XML that
         # actually exists on this ROM. Unknown OEM names must not silently escape the no-hook path.
         _lfcp_all="$_lfcp_names"
-        for _lfcp_found in             "$_lfcp_real_etc"/*font*.xml             "$_lfcp_real_etc"/*Font*.xml             "$_lfcp_real_etc"/*FONT*.xml; do
+        for _lfcp_found in \
+            "$_lfcp_real_etc"/*font*.xml \
+            "$_lfcp_real_etc"/*Font*.xml \
+            "$_lfcp_real_etc"/*FONT*.xml; do
             [ -f "$_lfcp_found" ] || continue
             _lfcp_base="${_lfcp_found##*/}"
             case " $_lfcp_all " in
@@ -91,6 +94,9 @@ if ! type font_config_prepare_payload_weights >/dev/null 2>&1; then
     [ -f "$_luoshufp_module/common/font_config_weights.sh" ] && . "$_luoshufp_module/common/font_config_weights.sh"
 fi
 [ -f "$_luoshufp_module/common/font_finalize_hotfix.sh" ] && . "$_luoshufp_module/common/font_finalize_hotfix.sh"
+# Loaded after the current dynamic-target implementation so this compatibility layer can preserve
+# the 3.x batch fast path while enforcing the proven v2.8 HyperOS per-document coverage floor.
+[ -f "$_luoshufp_module/common/hyperos_coverage_floor.sh" ] && . "$_luoshufp_module/common/hyperos_coverage_floor.sh"
 
 [ -f "$_luoshufp_module/common/device_font_payload_bridge.sh" ] && . "$_luoshufp_module/common/device_font_payload_bridge.sh"
 [ -f "$_luoshufp_module/common/device_font_dynamic_guard.sh" ] && . "$_luoshufp_module/common/device_font_dynamic_guard.sh"
