@@ -22,7 +22,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: v3.3.0
-          TARGET_SHA: f27ff95fcd9a0dee19c62c5e8cdb03d1abd5e844
+          TARGET_SHA: fe5d38e17a6fd0b0863356fb36078ab19bbd45c8
         shell: bash
         run: |
           set -euo pipefail
