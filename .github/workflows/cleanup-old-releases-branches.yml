@@ -8,6 +8,7 @@ permissions:
 
 jobs:
   noop:
+    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
-      - run: echo archived cleanup workflow
+      - run: echo disabled
