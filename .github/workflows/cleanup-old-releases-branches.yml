@@ -1,1 +1,10 @@
-placeholder
+name: Cleanup old releases and branches
+
+on:
+  workflow_dispatch:
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo disabled
