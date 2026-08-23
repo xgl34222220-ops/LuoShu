@@ -1,6 +1,6 @@
-publisherCommit=dfa1dd367a538fb0585618e0b8bdb508f2b0fa74
-runId=32603366398
-status=in_progress
-conclusion=
-url=https://github.com/xgl34222220-ops/LuoShu/actions/runs/32603366398
-createdAt=2026-08-22T22:46:07Z
+publisherCommit=204ba71fedf04b5349cdf06f464c619d8698c481
+runId=32629747654
+status=completed
+conclusion=failure
+url=https://github.com/xgl34222220-ops/LuoShu/actions/runs/32629747654
+createdAt=2026-08-23T08:59:30Z
