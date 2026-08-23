@@ -4,6 +4,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "${0%/*}" 2>/dev/null && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd)
 ATOMIC_SCRIPT=${ATOMIC_SCRIPT:-$REPO_ROOT/common/mount_self_atomic.sh}
+FINAL_SCRIPT=${FINAL_SCRIPT:-}
 TEST_ROOT=$(mktemp -d)
 trap 'rm -rf "$TEST_ROOT"' EXIT INT TERM
 
@@ -27,6 +28,7 @@ setup_case() {
     : > "$CASE_ROOT/unmount.log"
     FAIL_OVERLAY=''
     FAIL_BIND=''
+    LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT=''
 }
 
 _luoshu_self_module() { printf '%s\n' "$MODULE_DIR"; }
@@ -43,16 +45,20 @@ _luoshu_self_state_write() {
 _luoshu_self_state_value() {
     sed -n "s/^${1}=//p" "$MODULE_DIR/config/self-mount.conf" 2>/dev/null | head -n1
 }
-luoshu_payload_partitions() { printf '%s\n' 'system product'; }
+luoshu_payload_partitions() { printf '%s\n' 'system product system_ext'; }
+_lfrp_partitions() { luoshu_payload_partitions; }
+_lfrp_payload_root() {
+    printf '%s\n' "${LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT:-$MODULE_DIR}"
+}
 _luoshu_partition_root() {
     case "$1" in
         system)
             test -d "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system" || return 1
             printf '%s/system\n' "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT"
             ;;
-        product)
-            test -d "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/product" || return 1
-            printf '%s/product\n' "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT"
+        product|system_ext)
+            test -d "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/$1" || return 1
+            printf '%s/%s\n' "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT" "$1"
             ;;
         *) return 1 ;;
     esac
@@ -75,6 +81,13 @@ luoshu_mount_record() {
 }
 
 . "$ATOMIC_SCRIPT"
+[ -z "$FINAL_SCRIPT" ] || . "$FINAL_SCRIPT"
+# mount_self_backend.sh owns the production OverlayFS helper. Replace it with
+# the deterministic fixture after loading the selected final implementation.
+_luoshu_overlay_mount_dir() {
+    test "${FAIL_OVERLAY:-}" != all && test "${FAIL_OVERLAY:-}" != "$3" || return 1
+    cp -R "$1/." "$2/"
+}
 CURRENT_BOOT_ID=test-boot
 _luoshu_atomic_boot_id() { printf '%s\n' "$CURRENT_BOOT_ID"; }
 
@@ -135,10 +148,33 @@ mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/product/etc"
 printf 'new-font\n' > "$MODULE_DIR/system/fonts/Roboto.ttf"
 printf 'stock-font\n' > "$CASE_ROOT/root/system/fonts/Roboto.ttf"
 printf 'product-xml\n' > "$MODULE_DIR/product/etc/fonts.xml"
-if luoshu_self_mount_ensure; then
-    fail 'missing payload partition root was silently skipped'
+luoshu_self_mount_ensure || fail 'missing optional payload partition root rolled back system/fonts'
+grep -q '^state=mounted$' "$MODULE_DIR/config/self-mount.conf" || fail 'optional missing partition was not skipped'
+grep -q '^failed=$' "$MODULE_DIR/config/self-mount.conf" || fail 'optional missing partition was recorded as failure'
+test "$(wc -l < "$MODULE_DIR/config/self-mount-required.conf" | tr -d ' ')" -eq 1 || fail 'missing optional root entered required manifest'
+
+setup_case missing-optional-target
+mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/system_ext/fonts" "$CASE_ROOT/root/system_ext"
+printf 'new-font\n' > "$MODULE_DIR/system/fonts/Roboto.ttf"
+printf 'extension-font\n' > "$MODULE_DIR/system_ext/fonts/Extension.ttf"
+printf 'stock-font\n' > "$CASE_ROOT/root/system/fonts/Roboto.ttf"
+luoshu_self_mount_ensure || fail 'missing optional system_ext/fonts target rolled back system/fonts'
+grep -q '^state=mounted$' "$MODULE_DIR/config/self-mount.conf" || fail 'optional missing target was not skipped'
+grep -q '^failed=$' "$MODULE_DIR/config/self-mount.conf" || fail 'optional missing target was recorded as failure'
+test "$(wc -l < "$MODULE_DIR/config/self-mount-required.conf" | tr -d ' ')" -eq 1 || fail 'missing optional target entered required manifest'
+
+if [ -n "$FINAL_SCRIPT" ]; then
+    setup_case kernelsu-private-payload-missing-optional-target
+    LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT="$MODULE_DIR/.luoshu-payload"
+    mkdir -p "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/system/fonts" "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/system_ext/fonts" "$CASE_ROOT/root/system_ext"
+    printf 'new-font\n' > "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/system/fonts/Roboto.ttf"
+    printf 'extension-font\n' > "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/system_ext/fonts/Extension.ttf"
+    printf 'stock-font\n' > "$CASE_ROOT/root/system/fonts/Roboto.ttf"
+    luoshu_self_mount_ensure || fail 'KernelSU private payload rolled back on missing optional system_ext/fonts'
+    grep -q '^state=mounted$' "$MODULE_DIR/config/self-mount.conf" || fail 'KernelSU private payload was not committed'
+    grep -q '^failed=$' "$MODULE_DIR/config/self-mount.conf" || fail 'KernelSU private optional target was recorded as failure'
+    test "$(wc -l < "$MODULE_DIR/config/self-mount-required.conf" | tr -d ' ')" -eq 1 || fail 'KernelSU private optional target entered required manifest'
 fi
-grep -q 'product/root-unavailable' "$MODULE_DIR/config/self-mount.conf" || fail 'missing partition root reason absent'
 
 setup_case bind-compatible-alias
 mkdir -p "$MODULE_DIR/system/fonts"
@@ -190,4 +226,9 @@ if luoshu_self_mount_ensure; then
 fi
 grep -q 'system/fonts-bind-empty' "$MODULE_DIR/config/self-mount.conf" || fail 'empty bind reason absent'
 
-echo 'self-mount atomic transaction tests passed'
+echo "self-mount transaction tests passed: ${FINAL_SCRIPT:-atomic}"
+
+if [ -z "$FINAL_SCRIPT" ]; then
+    FINAL_SCRIPT="$REPO_ROOT/common/mount_self_backend.sh" sh "$0"
+    FINAL_SCRIPT="$REPO_ROOT/common/font_runtime_mount.sh" sh "$0"
+fi

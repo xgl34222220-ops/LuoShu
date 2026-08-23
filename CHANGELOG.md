@@ -6,6 +6,13 @@
 
 - 暂无。
 
+## [v3.3.1] - 2026-08-24
+
+- 修复 ColorOS / HyperOS 可选字体分区或子目录缺失时错误回滚全部字体挂载的问题。
+- 仅保留 `system/fonts` 为强制目标；不存在的 `product`、`system_ext`、`mi_ext` 等跨 ROM 目标安全跳过。
+- 同步修复基础原子层、KernelSU / SukiSU / APatch `post-mount` 最终后端和私有 payload 运行层。
+- 增加与脱敏报告一致的 `system_ext/fonts-target-missing` 私有 payload 回归测试。
+
 ## [v2.3.7] - 2026-07-30
 
 - 合入本次启动激活证据门禁：字体事务、自挂载清单、动态字体配置与 `bootId` 必须属于当前启动，只有 PID 1 可见且原子事务为 `mounted` 才显示生效。

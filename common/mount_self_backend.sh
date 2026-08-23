@@ -126,16 +126,24 @@ luoshu_self_mount_ensure() {
         [ "$_lsme_has_payload" -eq 1 ] || continue
 
         _lsme_root=$(_luoshu_partition_root "$_lsme_partition") || {
-            _lsme_failed="$_lsme_partition/root-unavailable"
-            break
+            if [ "$_lsme_partition" = system ]; then
+                _lsme_failed="$_lsme_partition/root-unavailable"
+                break
+            fi
+            _luoshu_self_log "自挂载跳过本机不存在的可选分区：$_lsme_partition"
+            continue
         }
         for _lsme_subdir in fonts etc; do
             _lsme_source=$(_luoshu_self_payload_source "$_lsme_module" "$_lsme_partition" "$_lsme_subdir")
             [ -d "$_lsme_source" ] && find "$_lsme_source" -type f -print -quit 2>/dev/null | grep -q . || continue
             _lsme_target="$_lsme_root/$_lsme_subdir"
             [ -d "$_lsme_target" ] || {
-                _lsme_failed="$_lsme_partition/$_lsme_subdir-target-missing"
-                break
+                if _luoshu_atomic_component_required "$_lsme_partition" "$_lsme_subdir"; then
+                    _lsme_failed="$_lsme_partition/$_lsme_subdir-target-missing"
+                    break
+                fi
+                _luoshu_self_log "自挂载跳过本机不存在的可选目标：$_lsme_partition/$_lsme_subdir"
+                continue
             }
             _lsme_mode=overlay
             if _luoshu_overlay_mount_dir "$_lsme_source" "$_lsme_target" \
