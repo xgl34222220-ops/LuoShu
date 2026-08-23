@@ -51,26 +51,32 @@ data class HomeActions(
 
 internal fun ModuleSnapshot.toHomeUiState(weight: SystemWeightState): HomeUiState {
     val running = taskState == "running" || taskState == "queued"
-    val safeRebootRequired = rebootRequired && !effectFailed && mountState != "failed"
+    val mountFailed = mountState == "failed"
+    val applicationFailed = effectFailed || mountFailed
+    val safeRebootRequired = rebootRequired && !applicationFailed
     return HomeUiState(
         loading = loading,
         version = version,
-        currentFont = effectiveLabel,
+        currentFont = if (applicationFailed && activeFont !in setOf("", "default")) {
+            "系统默认字体（${activeLabel}未生效）"
+        } else {
+            effectiveLabel
+        },
         rootGranted = rootGranted,
         rootManager = rootManager,
         moduleInstalled = installed,
         mountEngine = mountEngine,
-        mountHealthy = installed && mountState != "failed" &&
+        mountHealthy = installed && !mountFailed &&
             (activeFont in setOf("", "default") || safeRebootRequired || mountState == "mounted"),
         taskRunning = running,
         taskTitle = when {
             running -> "字体任务执行中"
-            effectFailed -> "字体未生效"
+            applicationFailed -> "字体未生效"
             installed && rootGranted -> "字体引擎已就绪"
             installed -> "模块已连接"
             else -> "正在等待模块连接"
         },
-        taskMessage = if (effectFailed) effectFailureMessage else taskMessage,
+        taskMessage = if (applicationFailed) effectFailureMessage else taskMessage,
         taskProgress = taskProgress,
         rebootRequired = safeRebootRequired,
         error = error,
