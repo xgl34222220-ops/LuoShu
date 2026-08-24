@@ -108,4 +108,7 @@ fi
 [ -f "$_luoshufp_module/common/mount_self_fallback.sh" ] && . "$_luoshufp_module/common/mount_self_fallback.sh"
 [ -f "$_luoshufp_module/common/mount_compat_policy.sh" ] && . "$_luoshufp_module/common/mount_compat_policy.sh"
 [ -f "$_luoshufp_module/common/device_font_payload_policy.sh" ] && . "$_luoshufp_module/common/device_font_payload_policy.sh"
+# Final foreground-switch layer: it must load after bridge/policy overrides so expensive device
+# preparation becomes idempotent and the HyperOS v2.8 target scanner can use its ROM-content cache.
+[ -f "$_luoshufp_module/common/font_switch_speed_hotfix.sh" ] && . "$_luoshufp_module/common/font_switch_speed_hotfix.sh"
 unset _luoshufp_module
