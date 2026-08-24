@@ -150,10 +150,38 @@ get_managed_text_files() {
 }
 
 clear_managed_text_fonts() {
-    for _file in $(get_managed_text_files); do
-        rm -f "$SYSTEM_FONTS_DIR/$_file" "$MODULE_DIR/system_ext/fonts/$_file" "$MODULE_DIR/product/fonts/$_file" 2>/dev/null || true
-    done
-    rm -rf "$SYSTEM_FONTS_DIR/.luoshu-font-store" 2>/dev/null || true
+    if type _lfrp_payload_root >/dev/null 2>&1 && type _lfrp_partitions >/dev/null 2>&1; then
+        _fmt_root=$(_lfrp_payload_root)
+        for _fmt_part in $(_lfrp_partitions); do
+            rm -rf "$_fmt_root/$_fmt_part/fonts" 2>/dev/null || true
+            _fmt_etc="$_fmt_root/$_fmt_part/etc"
+            [ -d "$_fmt_etc" ] || continue
+            for _fmt_xml in "$_fmt_etc"/*.xml; do
+                [ -f "$_fmt_xml" ] || continue
+                grep -Eq 'LuoShu(Mono)?-|LuoShuSlot-' "$_fmt_xml" 2>/dev/null && \
+                    rm -f "$_fmt_xml" 2>/dev/null || true
+            done
+        done
+        mkdir -p "$_fmt_root/system/fonts" 2>/dev/null || true
+        rm -f "$CONFIG_DIR/font-runtime-targets.conf" \
+              "$CONFIG_DIR/font-target-aliases.conf" \
+              "$CONFIG_DIR/font-target-coverage.conf" \
+              "$CONFIG_DIR/font-config-overlay.conf" 2>/dev/null || true
+    else
+        for _file in $(get_managed_text_files); do
+            rm -f "$SYSTEM_FONTS_DIR/$_file" "$MODULE_DIR/system_ext/fonts/$_file" \
+                  "$MODULE_DIR/product/fonts/$_file" 2>/dev/null || true
+        done
+        rm -rf "$SYSTEM_FONTS_DIR/.luoshu-font-store" 2>/dev/null || true
+    fi
+    # Invalidate every late device-alignment commit from an older release. A running worker checks
+    # the pending marker again before activation, so removing it safely cancels the obsolete job.
+    rm -f "$CONFIG_DIR/device-font-cache-pending.conf" \
+          "$CONFIG_DIR/device-font-engine.conf" \
+          "$CONFIG_DIR/device-font-installed.conf" \
+          "$CONFIG_DIR/device-font-dynamic-mount.conf" \
+          "$CONFIG_DIR/device-font-load-verification.conf" \
+          "$CONFIG_DIR/device-font-load-verification.json" 2>/dev/null || true
     type font_config_disable >/dev/null 2>&1 && font_config_disable
 }
 

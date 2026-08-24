@@ -11,6 +11,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -64,6 +65,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -149,11 +152,13 @@ internal fun SettingsHubRoute(
         modifier = Modifier.fillMaxSize(),
         transitionSpec = {
             if (targetState != null) {
-                (fadeIn(tween(220)) + slideInHorizontally(tween(280)) { it })
-                    .togetherWith(fadeOut(tween(140)) + slideOutHorizontally(tween(240)) { -it / 10 })
+                (fadeIn(tween(250)) + slideInHorizontally(tween(340)) { it })
+                    .togetherWith(
+                        fadeOut(tween(210), targetAlpha = .52f) + slideOutHorizontally(tween(340)) { -it / 7 },
+                    )
             } else {
-                (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { -it / 10 })
-                    .togetherWith(fadeOut(tween(180)) + slideOutHorizontally(tween(280)) { it })
+                (fadeIn(tween(230)) + slideInHorizontally(tween(340)) { -it / 7 })
+                    .togetherWith(fadeOut(tween(210)) + slideOutHorizontally(tween(340)) { it })
             }
         },
         label = "settingsDetailTransition",
@@ -165,7 +170,22 @@ internal fun SettingsHubRoute(
                 onOpenTasks = onOpenTasks,
             )
         } else {
-            Column(Modifier.fillMaxSize()) {
+            val detailShape = RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp)
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .padding(start = if (settings.uiStyle == UiStyle.MIUIX) 6.dp else 0.dp)
+                    .then(
+                        if (settings.uiStyle == UiStyle.MIUIX) {
+                            Modifier
+                                .shadow(22.dp, detailShape, clip = false)
+                                .clip(detailShape)
+                                .background(LocalMiuixTokens.current.pageBackground)
+                        } else {
+                            Modifier
+                        },
+                    ),
+            ) {
                 LuoShuDetailBar(title = target.label, onBack = { sectionName = null })
                 Box(Modifier.weight(1f)) {
                     when (target) {

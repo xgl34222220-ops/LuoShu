@@ -561,6 +561,19 @@ luoshu_payload_quarantine() {
     _luoshu_safety_log ERROR "检测到上次字体负载未完成开机，已撤销全部字体覆盖（failure=$_lpq_fail）"
 }
 
+_luoshu_payload_boot_id() {
+    if [ -n "${LUOSHU_CURRENT_BOOT_ID:-}" ]; then
+        printf '%s\n' "$LUOSHU_CURRENT_BOOT_ID"
+        return 0
+    fi
+    if type luoshu_current_boot_id >/dev/null 2>&1; then
+        luoshu_current_boot_id 2>/dev/null && return 0
+    fi
+    _lpbi_value=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
+    [ -n "$_lpbi_value" ] || return 1
+    printf '%s\n' "$_lpbi_value"
+}
+
 font_config_boot_guard() {
     _lbg_active="${1:-default}"
     _lbg_config="$(_luoshu_safety_config)"
@@ -577,16 +590,29 @@ font_config_boot_guard() {
     fi
     case "$_lbg_state" in
         booting)
+            _lbg_saved_boot=$(sed -n 's/^bootId=//p' "$_lbg_config/font-payload-boot.conf" 2>/dev/null | head -n1)
+            _lbg_current_boot=$(_luoshu_payload_boot_id 2>/dev/null)
+            if [ -n "$_lbg_saved_boot" ] && [ "$_lbg_saved_boot" = "$_lbg_current_boot" ]; then
+                # KernelSU/APatch may invoke post-fs-data more than once in the same boot. That is
+                # idempotent, not evidence of a failed boot; the old guard quarantined a valid
+                # payload here and made the first reboot appear to restore the default font.
+                luoshu_payload_validate_manifest_fast || { luoshu_payload_quarantine; return 1; }
+                _luoshu_safety_log INFO '同一次开机重复校验字体负载，保持当前事务'
+                return 0
+            fi
             luoshu_payload_quarantine
             return 1
             ;;
         prepared)
             luoshu_payload_validate_manifest_fast || { luoshu_payload_quarantine; return 1; }
+            _lbg_current_boot=$(_luoshu_payload_boot_id 2>/dev/null) || { luoshu_payload_quarantine; return 1; }
             {
                 printf 'state=booting
 '
                 printf 'font=%s
 ' "$_lbg_active"
+                printf 'bootId=%s
+' "$_lbg_current_boot"
                 printf 'time=%s
 ' "$(date +%s)"
             } > "$_lbg_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || { luoshu_payload_quarantine; return 1; }
@@ -611,11 +637,14 @@ font_config_mark_boot_success() {
     _lmbs_state=$(sed -n 's/^state=//p' "$_lmbs_config/font-payload-boot.conf" 2>/dev/null | head -n1)
     [ "$_lmbs_state" = booting ] || return 0
     _lmbs_font=$(sed -n 's/^font=//p' "$_lmbs_config/font-payload-boot.conf" 2>/dev/null | head -n1)
+    _lmbs_boot=$(_luoshu_payload_boot_id 2>/dev/null)
     {
         printf 'state=confirmed
 '
         printf 'font=%s
 ' "${_lmbs_font:-unknown}"
+        [ -z "$_lmbs_boot" ] || printf 'bootId=%s
+' "$_lmbs_boot"
         printf 'time=%s
 ' "$(date +%s)"
     } > "$_lmbs_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || return 1

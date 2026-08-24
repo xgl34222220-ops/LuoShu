@@ -9,6 +9,7 @@ export MODULE_DIR="$TMP/module"
 export MODDIR="$MODULE_DIR"
 mkdir -p "$MODULE_DIR/config"
 . "$ROOT/common/font_validation_cache.sh"
+[ "$LUOSHU_FONT_VALIDATION_SCHEMA" = global-v4-latin-digits ]
 calls="$TMP/calls"
 font_validate_global() {
     printf 'call\n' >> "$calls"

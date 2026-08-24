@@ -53,28 +53,59 @@ sh "$ROOT/scripts/font_switch_task_test.sh"
 sh "$ROOT/scripts/font_switch_lock_test.sh"
 sh "$ROOT/scripts/device_font_trust_test.sh"
 
-# A direct switch cache miss must only schedule the background enhancement. It must never enter
-# XML discovery, nine-weight preparation or another Python-backed foreground generator.
+# A direct switch is complete in the foreground. It must neither inspect/reuse a generated cache
+# nor schedule a second payload mutation after success.
 _fsp_tmp="$(mktemp -d)"
 (
     export MODULE_DIR="$_fsp_tmp/module" MODDIR="$_fsp_tmp/module"
     mkdir -p "$MODULE_DIR/config" "$MODULE_DIR/logs"
     . "$ROOT/common/device_font_payload_policy.sh"
     set -eu
-    device_font_payload_build_install() { return 2; }
+    device_font_payload_build_install() { : > "$_fsp_tmp/cache-lookup"; return 2; }
     font_config_prepare_payload_weights() { : > "$_fsp_tmp/heavy-weights"; return 0; }
     font_config_generate() { : > "$_fsp_tmp/heavy-xml"; return 0; }
     font_config_disable() { : > "$_fsp_tmp/heavy-disable"; return 0; }
-    device_font_cache_schedule() { printf '%s\n' "$1" > "$_fsp_tmp/scheduled"; return 0; }
+    device_font_cache_schedule() { : > "$_fsp_tmp/scheduled"; return 0; }
+    printf 'state=pending\n' > "$MODULE_DIR/config/device-font-cache-pending.conf"
+    printf 'state=installed\n' > "$MODULE_DIR/config/device-font-engine.conf"
     IS_COLOROS=false
     LUOSHU_FOREGROUND_QUICK_SWITCH=1
     export IS_COLOROS LUOSHU_FOREGROUND_QUICK_SWITCH
     font_config_enable_for_payload FastFixture || exit 1
     test "$LUOSHU_DEVICE_PAYLOAD_RESULT" = slot-only
-    grep -qx FastFixture "$_fsp_tmp/scheduled"
+    test ! -e "$_fsp_tmp/cache-lookup"
+    test ! -e "$_fsp_tmp/scheduled"
+    test ! -e "$MODULE_DIR/config/device-font-cache-pending.conf"
+    test ! -e "$MODULE_DIR/config/device-font-engine.conf"
     test ! -e "$_fsp_tmp/heavy-weights"
     test ! -e "$_fsp_tmp/heavy-xml"
     test ! -e "$_fsp_tmp/heavy-disable"
+)
+rm -rf "$_fsp_tmp"
+
+# The final source-order manifest builder must checksum one inode once even when HyperOS exposes
+# it through dozens of hard-link aliases. This is the difference between seconds and minutes.
+_fsp_tmp="$(mktemp -d)"
+(
+    export MODULE_DIR="$_fsp_tmp/module" MODDIR="$_fsp_tmp/module"
+    mkdir -p "$MODULE_DIR/config" "$MODULE_DIR/.luoshu-payload/system/fonts"
+    . "$ROOT/common/font_safety.sh"
+    . "$ROOT/common/font_runtime_policy.sh"
+    _lfrp_partitions() { printf '%s\n' system; }
+    dd if=/dev/zero of="$MODULE_DIR/.luoshu-payload/system/fonts/regular.font" bs=2048 count=1 2>/dev/null
+    for _fsp_name in MiSansVF.ttf MiSansLatinVF.ttf Roboto-Regular.ttf GoogleSans-Regular.ttf \
+        100.ttf 200.ttf 300.ttf 400.ttf 500.ttf 600.ttf 700.ttf 800.ttf 900.ttf MitypeMonoVF.ttf; do
+        ln "$MODULE_DIR/.luoshu-payload/system/fonts/regular.font" \
+           "$MODULE_DIR/.luoshu-payload/system/fonts/$_fsp_name"
+    done
+    _luoshu_checksum_original="$(command -v cksum)"
+    _luoshu_checksum() {
+        printf 'x\n' >> "$_fsp_tmp/checksum-calls"
+        "$_luoshu_checksum_original" "$1" | awk '{print $1 "|" $2}'
+    }
+    luoshu_payload_build_manifest
+    test "$(wc -l < "$_fsp_tmp/checksum-calls" | tr -d '[:space:]')" -eq 1
+    test "$(wc -l < "$MODULE_DIR/config/font-payload-manifest.conf" | tr -d '[:space:]')" -eq 15
 )
 rm -rf "$_fsp_tmp"
 echo 'font_switch_performance_test: PASS'

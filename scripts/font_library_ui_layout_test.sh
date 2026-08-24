@@ -146,8 +146,8 @@ grep -q 'navigationBottom + 78.dp' "$SHELL"
 [ "$(grep -c 'LocalDockContentPadding provides dockContentPadding' "$SHELL")" -eq 5 ]
 grep -q 'LocalDockContentPadding' "$DOCK_INSETS"
 
-# Four-item dock maps the primary product areas directly, keeps tasks as a detail page,
-# and limits glass to one quiet Haze surface with a flat tinted selection indicator.
+# Four-item dock maps the primary product areas directly and keeps tasks as a detail page. The
+# Miuix variant uses the reference-style frosted shell plus a separate animated liquid lens.
 grep -q 'private val dockPages' "$SHELL"
 [ "$(sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -c 'AppPage\.')" -eq 4 ]
 sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -q 'AppPage.Settings'
@@ -159,24 +159,25 @@ grep -q 'LuoShuIconTokens.DockGlyph' "$SHELL"
 grep -q 'private fun MiuixAppDock' "$SHELL"
 MIUIX_DOCK=$(sed -n '/private fun MiuixAppDock/,/private fun AppDockLayout/p' "$SHELL")
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'hazeEffect'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 20.dp'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'noiseFactor = .008f'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 32.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'noiseFactor = .016f'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'RoundedCornerShape(27.dp)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'activeGlass'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .62f)'
-! printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .48f)'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorColor = scheme.primary.copy'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
-! printf '%s\n' "$MIUIX_DOCK" | grep -q 'liquidLens'
-! printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 36.dp'
-! printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 30.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 7.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'liquidGlass = activeGlass'
 ! grep -q -- '-> 34.dp' "$SHELL"
 grep -q 'collectIsPressedAsState' "$SHELL"
 grep -q 'baseItemColor.copy(alpha = .62f)' "$SHELL"
 grep -q 'offscreen buffer inside the Haze surface' "$SHELL"
 ! grep -q 'luoshuDockItemScale' "$SHELL"
 ! grep -q 'graphicsLayer' "$SHELL"
-grep -q 'dampingRatio = .84f' "$SHELL"
+grep -q 'dampingRatio = if (liquidGlass) .68f else .84f' "$SHELL"
+grep -q 'liquidStretch.animateTo' "$SHELL"
+grep -q 'direction \* it \* 3 / 4' "$SHELL"
+grep -q 'AnimatedVisibility(' "$SHELL"
 
 # Settings follows a grouped home -> detail hierarchy instead of a clipped horizontal tab strip.
 grep -q 'SettingCard("视觉与显示")' "$SETTINGS"

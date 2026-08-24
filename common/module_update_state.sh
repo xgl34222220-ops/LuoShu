@@ -53,6 +53,8 @@ luoshu_update_config_is_volatile() {
         app_install_manual|font-payload-rebuild-pending.conf|font-boot-failures|\
         font-payload-quarantine.conf|mount_compat.conf|self-mount.conf|\
         self-mount-required.conf|device-font-load-verification.conf|\
+        device-font-cache-pending.conf|device-font-cache-failures.conf|\
+        device-font-engine.conf|device-font-installed.conf|device-font-dynamic-mount.conf|\
         device-font-load-verification.json|device-font-manager-dump.txt|\
         device-font-mount-evidence.txt|*.pid|*.pid.task|*.tmp|*.tmp.*)
             return 0
@@ -111,6 +113,11 @@ luoshu_clear_update_volatile() {
         "$_module/config/app_install_state.conf" \
         "$_module/config/app_install_manual" \
         "$_module/config/font-payload-rebuild-pending.conf" \
+        "$_module/config/device-font-cache-pending.conf" \
+        "$_module/config/device-font-cache-failures.conf" \
+        "$_module/config/device-font-engine.conf" \
+        "$_module/config/device-font-installed.conf" \
+        "$_module/config/device-font-dynamic-mount.conf" \
         "$_module/config/mount_compat.conf" \
         "$_module/config/self-mount.conf" \
         "$_module/config/self-mount-required.conf" \
@@ -123,6 +130,11 @@ luoshu_clear_update_volatile() {
     rm -f "$_module/config"/*.pid "$_module/config"/*.pid.task \
         "$_module/config"/*.tmp "$_module/config"/*.tmp.* 2>/dev/null || true
     rm -rf "$_module"/.font-payload-stage.* "$_module"/.font-payload-backup.* 2>/dev/null || true
+    if [ -e "$_module/.device-font-cache.lock" ]; then
+        if type luoshu_font_lock_reap_stale >/dev/null 2>&1; then
+            luoshu_font_lock_reap_stale "$_module/.device-font-cache.lock" >/dev/null 2>&1 || true
+        fi
+    fi
 }
 
 luoshu_migrate_update_config() {

@@ -487,6 +487,15 @@ _dfcache_build_pending_inner() {
         _dfcache_log '缓存已生成，但前台事务重新出现，延后激活并保留待办'
         return 2
     }
+    # An explicit direct switch deletes the pending marker. Re-read it after the expensive build
+    # so a worker that started earlier can never activate stale output over the newly committed
+    # one-click payload.
+    _dfc_live_font=$(sed -n 's/^font=//p' "$_dfc_pending" 2>/dev/null | head -n1)
+    _dfc_live_id=$(sed -n 's/^cacheId=//p' "$_dfc_pending" 2>/dev/null | head -n1)
+    if [ "$_dfc_live_font" != "$_dfc_font" ] || [ "$_dfc_live_id" != "$_dfc_cache_id" ]; then
+        _dfcache_log "缓存任务已被新的显式切换取消，不激活旧负载：$_dfc_font"
+        return 2
+    fi
     _dfc_txn=0
     if type luoshu_payload_transaction_begin >/dev/null 2>&1; then
         luoshu_payload_transaction_begin || return 1

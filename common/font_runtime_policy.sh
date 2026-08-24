@@ -142,8 +142,12 @@ font_validate_global() {
     LUOSHU_FONT_HAS_LATIN=false
     LUOSHU_FONT_HAS_MIXED=false
     [ "$_lfrp_han" -ge 6000 ] && [ "$_lfrp_cjk" -ge 95 ] && LUOSHU_FONT_HAS_CJK=true
-    [ "$_lfrp_latin" -ge 95 ] && [ "$_lfrp_digits" -eq 100 ] && [ "$_lfrp_punct" -ge 75 ] && \
-        LUOSHU_FONT_HAS_LATIN=true
+    # HyperOS splits CJK, Latin and numeric UI glyphs across independent physical slots.
+    # Punctuation coverage varies wildly between otherwise complete CJK fonts, so using it as a
+    # hard gate left Roboto/MiSansLatin/100-900 on the stock font even though A-Z/a-z/0-9 were
+    # present. Keep punctuation in the diagnostic, but let usable letters + all digits drive the
+    # Latin slot decision.
+    [ "$_lfrp_latin" -ge 90 ] && [ "$_lfrp_digits" -eq 100 ] && LUOSHU_FONT_HAS_LATIN=true
     [ "$LUOSHU_FONT_HAS_CJK" = true ] && [ "$LUOSHU_FONT_HAS_LATIN" = true ] && \
         LUOSHU_FONT_HAS_MIXED=true
     export LUOSHU_FONT_HAS_CJK LUOSHU_FONT_HAS_LATIN LUOSHU_FONT_HAS_MIXED
@@ -152,6 +156,8 @@ font_validate_global() {
     case "$LUOSHU_FONT_HAS_CJK:$LUOSHU_FONT_HAS_LATIN" in
         true:true)
             FONT_CHECK_WARNING="${FONT_CHECK_WARNING:+$FONT_CHECK_WARNING；}字形覆盖完整"
+            [ "$_lfrp_punct" -ge 75 ] || \
+                FONT_CHECK_WARNING="${FONT_CHECK_WARNING}；部分标点将由系统回退字体补齐"
             ;;
         true:false)
             FONT_CHECK_WARNING="${FONT_CHECK_WARNING:+$FONT_CHECK_WARNING；}字体缺少完整英文或数字，洛书将只替换中文槽位并保留系统英文"
@@ -194,6 +200,12 @@ luoshu_font_validate_global_cached() {
 _lfrp_target_kind() {
     _lfrp_name=$(printf '%s' "${1##*/}" | tr '[:upper:]' '[:lower:]')
     case "$_lfrp_name" in
+        [1-9]00.ttf|350.ttf|*mitype*|*miclock*|*misansclock*|androidclock*|clockopia*)
+            # Xiaomi hard-codes these UI/clock/number files outside the normal Android family
+            # graph. They are Latin/digit presentation slots even when their filename contains
+            # "Mono"; protecting them was the reason many HyperOS pages kept stock digits.
+            printf 'latin\n'
+            ;;
         *emoji*|*symbol*|*icon*|*math*|*music*|*serif*|*mono*|\
         *myanmar*|*arabic*|*thai*|*tibetan*|*devanagari*|*khmer*|*lao*|\
         *hebrew*|*korean*|*japanese*)
@@ -443,28 +455,42 @@ luoshu_payload_build_manifest() {
     _lfrp_root=$(_lfrp_payload_root)
     _lfrp_config=$(_lfrp_config_root)
     _lfrp_tmp="$_lfrp_config/font-payload-manifest.conf.tmp.$$"
+    _lfrp_checksum_cache="$_lfrp_config/.font-payload-checksums.$$"
     mkdir -p "$_lfrp_config" 2>/dev/null || return 1
     : > "$_lfrp_tmp" 2>/dev/null || return 1
+    : > "$_lfrp_checksum_cache" 2>/dev/null || { rm -f "$_lfrp_tmp" 2>/dev/null; return 1; }
     for _lfrp_part in $(_lfrp_partitions); do
         _lfrp_fonts="$_lfrp_root/$_lfrp_part/fonts"
         if [ -d "$_lfrp_fonts" ]; then
             find "$_lfrp_fonts" -type f 2>/dev/null | while IFS= read -r _lfrp_file; do
                 case "$_lfrp_file" in *.ttf|*.otf|*.ttc|*.font|*.TTF|*.OTF|*.TTC) ;; *) continue ;; esac
                 _lfrp_rel=${_lfrp_file#$_lfrp_root/}
-                _lfrp_sum=$(_luoshu_checksum "$_lfrp_file")
+                if type _luoshu_cached_checksum >/dev/null 2>&1; then
+                    _lfrp_sum=$(_luoshu_cached_checksum "$_lfrp_file" "$_lfrp_checksum_cache")
+                else
+                    _lfrp_sum=$(_luoshu_checksum "$_lfrp_file")
+                fi
                 [ -n "$_lfrp_sum" ] && printf '%s|%s\n' "$_lfrp_rel" "$_lfrp_sum"
             done >> "$_lfrp_tmp"
         fi
         _lfrp_etc="$_lfrp_root/$_lfrp_part/etc"
         if [ -d "$_lfrp_etc" ]; then
             find "$_lfrp_etc" -maxdepth 1 -type f -name '*.xml' 2>/dev/null | while IFS= read -r _lfrp_file; do
-                grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\\.ttf' "$_lfrp_file" 2>/dev/null || continue
+                case "${_lfrp_file##*/}" in
+                    .luoshu-data-fonts-config.xml) ;;
+                    *) grep -Eq 'LuoShu(Mono)?-|LuoShuSlot-' "$_lfrp_file" 2>/dev/null || continue ;;
+                esac
                 _lfrp_rel=${_lfrp_file#$_lfrp_root/}
-                _lfrp_sum=$(_luoshu_checksum "$_lfrp_file")
+                if type _luoshu_cached_checksum >/dev/null 2>&1; then
+                    _lfrp_sum=$(_luoshu_cached_checksum "$_lfrp_file" "$_lfrp_checksum_cache")
+                else
+                    _lfrp_sum=$(_luoshu_checksum "$_lfrp_file")
+                fi
                 [ -n "$_lfrp_sum" ] && printf '%s|%s\n' "$_lfrp_rel" "$_lfrp_sum"
             done >> "$_lfrp_tmp"
         fi
     done
+    rm -f "$_lfrp_checksum_cache" 2>/dev/null || true
     [ -s "$_lfrp_tmp" ] || {
         rm -f "$_lfrp_tmp" 2>/dev/null || true
         return 1

@@ -362,6 +362,23 @@ font_config_enable_for_payload() {
     _dfpp_family="${1:-unknown}"
     LUOSHU_DEVICE_PAYLOAD_RESULT='preparing'
 
+    # A direct App switch is the final payload, not the first half of a second switch. Physical
+    # inventory + ROM slots have already been mapped atomically by apply_font_by_rom. Never reuse,
+    # build or schedule a device cache here: the old worker could commit a different payload after
+    # the UI had reported success, causing the first reboot to restore stock and the second to work.
+    if [ "${LUOSHU_FOREGROUND_QUICK_SWITCH:-0}" = 1 ]; then
+        _dfpp_module="$(_device_font_policy_module)"
+        rm -f "$_dfpp_module/config/device-font-cache-pending.conf" \
+              "$_dfpp_module/config/device-font-engine.conf" \
+              "$_dfpp_module/config/device-font-installed.conf" \
+              "$_dfpp_module/config/device-font-dynamic-mount.conf" 2>/dev/null || true
+        [ "${IS_COLOROS:-false}" != true ] || LUOSHU_COLOROS_TARGETS_MAPPED=1
+        export LUOSHU_COLOROS_TARGETS_MAPPED
+        LUOSHU_DEVICE_PAYLOAD_RESULT='slot-only'
+        _device_font_policy_log "前台快速切换已作为唯一负载提交，不再后台二次改写：$_dfpp_family"
+        return 0
+    fi
+
     device_font_payload_build_install "$_dfpp_family"
     _dfpp_rc=$?
     case "$_dfpp_rc" in
@@ -376,21 +393,6 @@ font_config_enable_for_payload() {
             return 1
             ;;
     esac
-
-    # A direct App switch is latency-sensitive. On a cache miss the physical inventory/ROM slots
-    # have already been mapped with hard links, so never start XML discovery, nine-weight
-    # preparation or embedded Python in this foreground transaction. The device-aligned cache
-    # worker performs that enhancement after the lock and transaction are gone.
-    if [ "${LUOSHU_FOREGROUND_QUICK_SWITCH:-0}" = 1 ]; then
-        if type device_font_cache_schedule >/dev/null 2>&1; then
-            device_font_cache_schedule "$_dfpp_family" >/dev/null 2>&1 || true
-        fi
-        [ "${IS_COLOROS:-false}" != true ] || LUOSHU_COLOROS_TARGETS_MAPPED=1
-        export LUOSHU_COLOROS_TARGETS_MAPPED
-        LUOSHU_DEVICE_PAYLOAD_RESULT='slot-only'
-        _device_font_policy_log "前台快速切换已提交物理槽映射；设备对齐缓存转入后台：$_dfpp_family"
-        return 0
-    fi
 
     # A device-cache miss is not a reason to abandon the no-hook XML family overlay. Keep OEM
     # quick-map aliases intact while trying the bounded static path.
