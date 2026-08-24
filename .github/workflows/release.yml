@@ -66,6 +66,7 @@ jobs:
           tag="${GITHUB_REF_NAME}"
           mode="tag"
           source_sha="$GITHUB_SHA"
+          replace_old_tag_sha=''
           git fetch --force --tags origin
 
           if [[ "${GITHUB_EVENT_NAME}" == 'workflow_dispatch' ]]; then
@@ -82,18 +83,55 @@ jobs:
             if [[ -z "$tag_sha" ]]; then
               mode="create-tag"
             else
-              git merge-base --is-ancestor "$tag_sha" "$GITHUB_SHA" || {
-                echo "Existing tag is not an ancestor of main: $tag -> $tag_sha" >&2
-                exit 2
-              }
-              disallowed_changes="$(git diff --name-only "$tag_sha" "$GITHUB_SHA" -- | grep -Ev '^(RELEASE_NOTES_.*\.md|\.github/workflows/release\.yml)$' || true)"
-              [[ -z "$disallowed_changes" ]] || {
-                echo "Existing tag differs from main by non-release files:" >&2
-                printf '%s\n' "$disallowed_changes" >&2
-                exit 2
-              }
-              mode="existing-tag"
-              source_sha="$tag_sha"
+              replacement='config/replace_v3_3_0_release.conf'
+              replacement_status=''
+              replacement_old=''
+              replacement_source=''
+              replacement_version=''
+              replacement_code=''
+              if [[ -f "$replacement" ]]; then
+                replacement_status="$(sed -n 's/^status=//p' "$replacement" | head -n1)"
+                replacement_old="$(sed -n 's/^expectedOldTagSha=//p' "$replacement" | head -n1)"
+                replacement_source="$(sed -n 's/^releaseSourceSha=//p' "$replacement" | head -n1)"
+                replacement_version="$(sed -n 's/^expectedMainVersion=//p' "$replacement" | head -n1)"
+                replacement_code="$(sed -n 's/^expectedMainVersionCode=//p' "$replacement" | head -n1)"
+              fi
+
+              if [[ "$tag" == 'v3.3.0' \
+                    && "$replacement_status" == 'pending' \
+                    && "$replacement_old" == 'd20db1d3a44657a112dc1bfa1c8e88af6eaa5c31' \
+                    && "$replacement_source" == '0b05b6955bc6f49b4556189622302f5dcccfda02' \
+                    && "$replacement_version" == 'v3.3.0' \
+                    && "$replacement_code" == '30300' ]]; then
+                [[ "$tag_sha" == "$replacement_old" ]] || {
+                  echo "Refusing v3.3.0 replacement: current tag $tag_sha != authorized old tag $replacement_old" >&2
+                  exit 2
+                }
+                git cat-file -e "${replacement_source}^{commit}"
+                source_version="$(git show "$replacement_source:module.prop" | sed -n 's/^version=//p' | head -n1)"
+                source_code="$(git show "$replacement_source:module.prop" | sed -n 's/^versionCode=//p' | head -n1)"
+                [[ "$source_version" == "$replacement_version" && "$source_code" == "$replacement_code" ]] || {
+                  echo "Replacement source version mismatch: $source_version/$source_code" >&2
+                  exit 2
+                }
+                git cat-file -e "$replacement_source:RELEASE_NOTES_v3.3.0.md"
+                mode="replace-tag"
+                source_sha="$replacement_source"
+                replace_old_tag_sha="$replacement_old"
+              else
+                git merge-base --is-ancestor "$tag_sha" "$GITHUB_SHA" || {
+                  echo "Existing tag is not an ancestor of main: $tag -> $tag_sha" >&2
+                  exit 2
+                }
+                disallowed_changes="$(git diff --name-only "$tag_sha" "$GITHUB_SHA" -- | grep -Ev '^(RELEASE_NOTES_.*\.md|\.github/workflows/release\.yml)$' || true)"
+                [[ -z "$disallowed_changes" ]] || {
+                  echo "Existing tag differs from main by non-release files:" >&2
+                  printf '%s\n' "$disallowed_changes" >&2
+                  exit 2
+                }
+                mode="existing-tag"
+                source_sha="$tag_sha"
+              fi
             fi
           else
             tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
@@ -123,6 +161,7 @@ jobs:
           echo "notes_file=$notes_temp" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
           echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "replace_old_tag_sha=$replace_old_tag_sha" >> "$GITHUB_OUTPUT"
 
           if [[ "$source_sha" != "$GITHUB_SHA" ]]; then
             git checkout --detach "$source_sha"
@@ -265,6 +304,8 @@ jobs:
           ARTIFACT_VERSION: ${{ steps.version.outputs.artifact_version }}
           NOTES_FILE: ${{ steps.version.outputs.notes_file }}
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
+          SOURCE_SHA: ${{ steps.version.outputs.source_sha }}
+          REPLACE_OLD_TAG_SHA: ${{ steps.version.outputs.replace_old_tag_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -280,8 +321,34 @@ jobs:
               echo "Tag appeared during validation: $TAG" >&2
               exit 4
             }
-          fi
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          elif [[ "$MODE" == 'replace-tag' ]]; then
+            [[ "$TAG" == 'v3.3.0' ]] || { echo "Replacement tag changed: $TAG" >&2; exit 4; }
+            [[ "$SOURCE_SHA" == '0b05b6955bc6f49b4556189622302f5dcccfda02' ]] || { echo "Replacement source changed: $SOURCE_SHA" >&2; exit 4; }
+            [[ "$REPLACE_OLD_TAG_SHA" == 'd20db1d3a44657a112dc1bfa1c8e88af6eaa5c31' ]] || { echo "Replacement old tag authorization changed" >&2; exit 4; }
+
+            git fetch origin main
+            marker="$(git show origin/main:config/replace_v3_3_0_release.conf 2>/dev/null || true)"
+            printf '%s\n' "$marker" | grep -qx 'status=pending'
+            printf '%s\n' "$marker" | grep -qx 'tag=v3.3.0'
+            printf '%s\n' "$marker" | grep -qx 'expectedOldTagSha=d20db1d3a44657a112dc1bfa1c8e88af6eaa5c31'
+            printf '%s\n' "$marker" | grep -qx 'releaseSourceSha=0b05b6955bc6f49b4556189622302f5dcccfda02'
+
+            actual_old="$(git rev-list -n1 "$TAG" 2>/dev/null || true)"
+            [[ "$actual_old" == "$REPLACE_OLD_TAG_SHA" ]] || {
+              echo "Refusing delete: $TAG points to $actual_old, expected $REPLACE_OLD_TAG_SHA" >&2
+              exit 4
+            }
+            gh release view "$TAG" >/dev/null 2>&1 || {
+              echo "Refusing delete: GitHub Release $TAG is missing" >&2
+              exit 4
+            }
+            gh release delete "$TAG" --cleanup-tag --yes
+            git fetch --prune --tags origin
+            [[ -z "$(git rev-list -n1 "$TAG" 2>/dev/null || true)" ]] || {
+              echo "Old tag still exists after authorized release deletion" >&2
+              exit 4
+            }
+          elif gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists; immutable releases are never overwritten." >&2
             exit 4
           fi
@@ -298,11 +365,28 @@ jobs:
             prerelease=(--prerelease)
           fi
           tag_mode=(--verify-tag)
-          if [[ "$MODE" == 'create-tag' ]]; then
-            tag_mode=(--target "$GITHUB_SHA")
+          if [[ "$MODE" == 'create-tag' || "$MODE" == 'replace-tag' ]]; then
+            tag_mode=(--target "$SOURCE_SHA")
           fi
           gh release create "$TAG" "$module" "$module_sha" "$app" "$app_sha" \
             "${tag_mode[@]}" \
             --title "洛书 $VERSION" \
             --notes-file "$NOTES_FILE" \
             "${prerelease[@]}"
+
+      - name: Consume one-shot v3.3.0 replacement authorization
+        if: success() && steps.version.outputs.mode == 'replace-tag'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B main origin/main
+          marker='config/replace_v3_3_0_release.conf'
+          test -s "$marker"
+          grep -qx 'status=pending' "$marker"
+          sed -i 's/^status=pending$/status=consumed/' "$marker"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$marker"
+          git commit -m 'chore(release): consume v3.3.0 replacement authorization'
+          git push origin HEAD:main
