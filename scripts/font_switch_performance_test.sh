@@ -33,9 +33,9 @@ grep -q 'LuoShuHeaderAction(' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
 grep -q 'HeaderTouchTarget = 48.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
-grep -q 'HeaderContainer = 30.dp' \
+grep -q 'HeaderContainer = 40.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
-grep -q 'HeaderGlyph = 17.dp' \
+grep -q 'HeaderGlyph = 21.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
 grep -q 'timeoutSeconds = 390' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
@@ -53,8 +53,8 @@ sh "$ROOT/scripts/font_switch_task_test.sh"
 sh "$ROOT/scripts/font_switch_lock_test.sh"
 sh "$ROOT/scripts/device_font_trust_test.sh"
 
-# A direct switch is complete in the foreground. It must neither inspect/reuse a generated cache
-# nor schedule a second payload mutation after success.
+# A direct switch is complete in the foreground. It may attach the lightweight reusable XML family
+# in that same transaction, but must neither inspect nor schedule a second payload mutation.
 _fsp_tmp="$(mktemp -d)"
 (
     export MODULE_DIR="$_fsp_tmp/module" MODDIR="$_fsp_tmp/module"

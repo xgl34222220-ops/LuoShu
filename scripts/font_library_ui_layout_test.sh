@@ -159,14 +159,16 @@ grep -q 'LuoShuIconTokens.DockGlyph' "$SHELL"
 grep -q 'private fun MiuixAppDock' "$SHELL"
 MIUIX_DOCK=$(sed -n '/private fun MiuixAppDock/,/private fun AppDockLayout/p' "$SHELL")
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'hazeEffect'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 32.dp'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'noiseFactor = .016f'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'RoundedCornerShape(27.dp)'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 24.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'noiseFactor = .012f'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'RoundedCornerShape(24.dp)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'activeGlass'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .48f)'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .22f)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorColor = scheme.primary.copy'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 7.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'itemHeight = 44.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'background-only node'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'liquidGlass = activeGlass'
 ! grep -q -- '-> 34.dp' "$SHELL"
 grep -q 'collectIsPressedAsState' "$SHELL"
@@ -193,10 +195,10 @@ grep -q 'embedded: Boolean = false' "$OVERLAY"
 grep -q 'embedded = true' "$SHELL"
 grep -q 'dockClearance' "$SHELL"
 grep -q 'val HeaderTouchTarget = 48.dp' "$ICON_SYSTEM"
-grep -q 'val HeaderContainer = 30.dp' "$ICON_SYSTEM"
-grep -q 'val HeaderGlyph = 17.dp' "$ICON_SYSTEM"
+grep -q 'val HeaderContainer = 40.dp' "$ICON_SYSTEM"
+grep -q 'val HeaderGlyph = 21.dp' "$ICON_SYSTEM"
 grep -q 'IconButtonDefaults.iconButtonColors' "$ICON_SYSTEM"
-grep -q 'val DockGlyph = 19.dp' "$ICON_SYSTEM"
+grep -q 'val DockGlyph = 18.dp' "$ICON_SYSTEM"
 grep -q 'val SectionGlyph = 18.dp' "$ICON_SYSTEM"
 grep -q 'val ToolGlyph = 20.dp' "$ICON_SYSTEM"
 grep -q 'maxOf(LocalDockContentPadding.current, 24.dp)' "$HOME_COMPACT"
@@ -207,6 +209,7 @@ grep -q "self-mount) printf '洛书自挂载'" "$APP_BRIDGE"
 grep -q 'mountSummary(h)' "$SETTINGS"
 grep -q 'selfMountSummary(h)' "$SETTINGS"
 grep -q 'RoundedCornerShape(22.dp)' "$SETTINGS"
+grep -q 'Modifier.fillMaxWidth().height(64.dp)' "$SETTINGS"
 grep -q 'pageBackground = Color(0xFFF5F3FC)' "$THEME"
 grep -q 'internal fun LuoShuTopBar' "$COMPACT_LAYOUT"
 grep -q 'internal fun LuoShuDetailBar' "$COMPACT_LAYOUT"

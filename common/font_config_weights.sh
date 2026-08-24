@@ -6,6 +6,14 @@ _luoshu_config_weight_module() {
     printf '%s\n' "${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
 }
 
+_luoshu_config_weight_fonts() {
+    if type _luoshu_font_config_payload_root >/dev/null 2>&1; then
+        printf '%s/system/fonts\n' "$(_luoshu_font_config_payload_root)"
+    else
+        printf '%s/system/fonts\n' "$(_luoshu_config_weight_module)"
+    fi
+}
+
 _luoshu_config_weight_role() {
     case "$1" in
         100) printf 'Thin\n' ;;
@@ -23,7 +31,7 @@ _luoshu_config_weight_role() {
 _luoshu_config_weight_source() {
     _lcw_weight="$1"
     _lcw_module="$(_luoshu_config_weight_module)"
-    _lcw_fonts="$_lcw_module/system/fonts"
+    _lcw_fonts="$(_luoshu_config_weight_fonts)"
     _lcw_role="$(_luoshu_config_weight_role "$_lcw_weight")"
 
     for _lcw_file in \
@@ -136,7 +144,7 @@ _luoshu_config_make_mono_weight() {
 
 font_config_prepare_payload_weights() {
     _lcw_module="$(_luoshu_config_weight_module)"
-    _lcw_fonts="$_lcw_module/system/fonts"
+    _lcw_fonts="$(_luoshu_config_weight_fonts)"
     mkdir -p "$_lcw_fonts" "$_lcw_module/config" 2>/dev/null || return 1
 
     _lcw_stage="$_lcw_module/config/font-config-weights.$$"

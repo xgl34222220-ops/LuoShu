@@ -358,14 +358,100 @@ EOF_DFPP_XML
     [ "$_dfpp_seen_xml" -eq "$_dfpp_expected" ]
 }
 
+_dfpp_fast_link_alias() {
+    _dfpp_link_source="$1"
+    _dfpp_link_target="$2"
+    [ -s "$_dfpp_link_source" ] || return 1
+    [ "$_dfpp_link_source" = "$_dfpp_link_target" ] && return 0
+    rm -f "$_dfpp_link_target" 2>/dev/null || true
+    ln "$_dfpp_link_source" "$_dfpp_link_target" 2>/dev/null || \
+        cp -f "$_dfpp_link_source" "$_dfpp_link_target" 2>/dev/null || return 1
+    chmod 0644 "$_dfpp_link_target" 2>/dev/null || true
+    _verify_font_copy "$_dfpp_link_target"
+}
+
+# XML family aliases do not need nine serialized copies of the outline. Android's XML declares the
+# weight; every alias may safely point at the already validated source inode. This keeps the first
+# no-hook XML setup bounded even for a 50-100 MB CJK/variable font.
+_dfpp_quick_prepare_xml_aliases() {
+    type _luoshu_config_weight_source >/dev/null 2>&1 || return 1
+    if type _luoshu_font_config_payload_root >/dev/null 2>&1; then
+        _dfpp_payload="$(_luoshu_font_config_payload_root)"
+    else
+        _dfpp_payload="$(_device_font_policy_module)"
+    fi
+    _dfpp_fonts="$_dfpp_payload/system/fonts"
+    mkdir -p "$_dfpp_fonts" 2>/dev/null || return 1
+
+    for _dfpp_weight in 100 200 300 400 500 600 700 800 900; do
+        _dfpp_source=$(_luoshu_config_weight_source "$_dfpp_weight" 2>/dev/null) || return 1
+        [ -s "$_dfpp_source" ] || return 1
+        _dfpp_magic=$(dd if="$_dfpp_source" bs=4 count=1 2>/dev/null)
+        # A collection needs an explicit face index and therefore cannot be exposed safely under
+        # nine .ttf aliases. Physical ROM slots remain the fail-open path for this rare input.
+        [ "$_dfpp_magic" != ttcf ] || return 2
+        _dfpp_fast_link_alias "$_dfpp_source" "$_dfpp_fonts/LuoShu-${_dfpp_weight}.ttf" || return 1
+        _dfpp_fast_link_alias "$_dfpp_source" "$_dfpp_fonts/LuoShuMono-${_dfpp_weight}.ttf" || return 1
+    done
+
+    # When a trusted XML template already exists, repopulate only the alias directories referenced
+    # by those documents. The XML bytes themselves are font-independent and stay reusable.
+    if type _luoshu_font_config_specs >/dev/null 2>&1 && \
+       type _luoshu_font_config_alias_partition >/dev/null 2>&1; then
+        while IFS='|' read -r _dfpp_key _dfpp_real _dfpp_overlay _dfpp_partition_fonts; do
+            [ -s "$_dfpp_overlay" ] || continue
+            grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\.ttf' "$_dfpp_overlay" 2>/dev/null || continue
+            _luoshu_font_config_alias_partition "$_dfpp_partition_fonts" || return 1
+        done <<EOF_DFPP_ALIAS_SPECS
+$(_luoshu_font_config_specs)
+EOF_DFPP_ALIAS_SPECS
+    fi
+    return 0
+}
+
+# Fast trust check for an XML template that was validated when it was generated and again at boot.
+# Avoid starting an embedded Python interpreter once per document on every font-to-font switch.
+_dfpp_xml_overlay_ready_fast() {
+    _dfpp_module="$(_device_font_policy_module)"
+    _dfpp_state="$_dfpp_module/config/font-config-overlay.conf"
+    [ -s "$_dfpp_state" ] || return 1
+    grep -qx 'mode=enabled' "$_dfpp_state" 2>/dev/null || return 1
+    _dfpp_expected=$(sed -n 's/^configs=//p' "$_dfpp_state" 2>/dev/null | head -n1)
+    case "$_dfpp_expected" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$_dfpp_expected" -gt 0 ] || return 1
+    type _luoshu_font_config_specs >/dev/null 2>&1 || return 1
+    _dfpp_seen=0
+    while IFS='|' read -r _dfpp_key _dfpp_real _dfpp_overlay _dfpp_fonts; do
+        [ -s "$_dfpp_overlay" ] || continue
+        grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\.ttf' "$_dfpp_overlay" 2>/dev/null || continue
+        for _dfpp_prefix in LuoShu LuoShuMono; do
+            for _dfpp_weight in 100 200 300 400 500 600 700 800 900; do
+                [ -s "$_dfpp_fonts/${_dfpp_prefix}-${_dfpp_weight}.ttf" ] || return 1
+            done
+        done
+        _dfpp_seen=$((_dfpp_seen + 1))
+    done <<EOF_DFPP_FAST_XML
+$(_luoshu_font_config_specs)
+EOF_DFPP_FAST_XML
+    [ "$_dfpp_seen" -eq "$_dfpp_expected" ]
+}
+
+_dfpp_quick_enable_xml() {
+    _dfpp_family="$1"
+    _dfpp_quick_prepare_xml_aliases || return $?
+    _dfpp_xml_overlay_ready_fast && return 0
+    type _luoshu_font_config_generate_base >/dev/null 2>&1 || return 1
+    _luoshu_font_config_generate_base "$_dfpp_family" || return 1
+    _dfpp_xml_overlay_ready_fast
+}
+
 font_config_enable_for_payload() {
     _dfpp_family="${1:-unknown}"
     LUOSHU_DEVICE_PAYLOAD_RESULT='preparing'
 
     # A direct App switch is the final payload, not the first half of a second switch. Physical
-    # inventory + ROM slots have already been mapped atomically by apply_font_by_rom. Never reuse,
-    # build or schedule a device cache here: the old worker could commit a different payload after
-    # the UI had reported success, causing the first reboot to restore stock and the second to work.
+    # inventory + ROM slots have already been mapped atomically by apply_font_by_rom. Add the cheap
+    # family XML in this same transaction, but never build/schedule a second device payload later.
     if [ "${LUOSHU_FOREGROUND_QUICK_SWITCH:-0}" = 1 ]; then
         _dfpp_module="$(_device_font_policy_module)"
         rm -f "$_dfpp_module/config/device-font-cache-pending.conf" \
@@ -374,8 +460,13 @@ font_config_enable_for_payload() {
               "$_dfpp_module/config/device-font-dynamic-mount.conf" 2>/dev/null || true
         [ "${IS_COLOROS:-false}" != true ] || LUOSHU_COLOROS_TARGETS_MAPPED=1
         export LUOSHU_COLOROS_TARGETS_MAPPED
-        LUOSHU_DEVICE_PAYLOAD_RESULT='slot-only'
-        _device_font_policy_log "前台快速切换已作为唯一负载提交，不再后台二次改写：$_dfpp_family"
+        if _dfpp_quick_enable_xml "$_dfpp_family"; then
+            LUOSHU_DEVICE_PAYLOAD_RESULT='slot+xml'
+            _device_font_policy_log "前台已在同一原子负载启用物理槽与 XML 家族覆盖：$_dfpp_family"
+        else
+            LUOSHU_DEVICE_PAYLOAD_RESULT='slot-only'
+            _device_font_policy_log "前台 XML 不适用于当前字体，保留物理槽唯一负载：$_dfpp_family"
+        fi
         return 0
     fi
 

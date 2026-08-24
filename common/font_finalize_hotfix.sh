@@ -36,7 +36,7 @@ _verify_font_copy() {
 _luoshu_config_weight_source() {
     _lcw_weight="$1"
     _lcw_module="$(_luoshu_config_weight_module)"
-    _lcw_fonts="$_lcw_module/system/fonts"
+    _lcw_fonts="$(_luoshu_config_weight_fonts)"
     _lcw_role="$(_luoshu_config_weight_role "$_lcw_weight")"
 
     for _lcw_file in \
@@ -87,7 +87,7 @@ _luoshu_fast_link_font() {
 # UI 九档直接引用对应静态来源；Mono 只生成一次 400 档，其余权重共享同一固定宽度文件。
 font_config_prepare_payload_weights() {
     _lcw_module="$(_luoshu_config_weight_module)"
-    _lcw_fonts="$_lcw_module/system/fonts"
+    _lcw_fonts="$(_luoshu_config_weight_fonts)"
     mkdir -p "$_lcw_fonts" "$_lcw_module/config" 2>/dev/null || return 1
 
     _lcw_stage="$_lcw_module/config/font-config-weights.$$"

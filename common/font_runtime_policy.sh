@@ -319,7 +319,12 @@ clear_managed_text_fonts() {
     done
     mkdir -p "$_lfrp_root/system/fonts" 2>/dev/null || true
     rm -f "$(_lfrp_target_manifest)" 2>/dev/null || true
-    type font_config_disable >/dev/null 2>&1 && font_config_disable
+    # Generated XML contains stable LuoShu alias names, not a specific font identity. Keep a
+    # boot-validated template during font-to-font switches and only replace its hard-link targets.
+    # Restoring the system font still removes every XML overlay.
+    if [ "${LUOSHU_KEEP_XML_OVERLAY:-0}" != 1 ]; then
+        type font_config_disable >/dev/null 2>&1 && font_config_disable
+    fi
 }
 
 _copy_as_inventory() {

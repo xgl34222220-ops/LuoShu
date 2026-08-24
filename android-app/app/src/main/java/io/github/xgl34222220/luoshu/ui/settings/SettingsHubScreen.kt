@@ -640,6 +640,25 @@ private fun ConflictLine(c: ModuleConflict) = Surface(Modifier.fillMaxWidth().pa
 }
 
 @Composable
-private fun DownloadButton(label: String, url: String, sha: String, onClick: () -> Unit) = Button(onClick, Modifier.fillMaxWidth().height(48.dp), enabled = url.startsWith("https://"), shape = RoundedCornerShape(16.dp)) {
-    Icon(Icons.Rounded.OpenInNew, null, Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Column(Modifier.weight(1f)) { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold); if (sha.isNotBlank()) Text("SHA-256 ${sha.take(12)}…", fontSize = 8.sp) }
+private fun DownloadButton(label: String, url: String, sha: String, onClick: () -> Unit) = Button(
+    onClick = onClick,
+    modifier = Modifier.fillMaxWidth().height(64.dp),
+    enabled = url.startsWith("https://"),
+    shape = RoundedCornerShape(18.dp),
+) {
+    Icon(Icons.Rounded.OpenInNew, null, Modifier.size(18.dp))
+    Spacer(Modifier.width(9.dp))
+    Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
+        Text(label, fontSize = 12.sp, lineHeight = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        if (sha.isNotBlank()) {
+            Text(
+                "SHA-256 ${sha.take(16)}…",
+                color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .78f),
+                fontSize = 9.sp,
+                lineHeight = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }

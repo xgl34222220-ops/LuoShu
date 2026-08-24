@@ -214,7 +214,7 @@ link_or_copy_font() {
 # 生成大量 staging 节点，降低 No space left on device / 挂载上限风险。
 _rom_font_target_exists() {
     _name="$1"
-    for _root in /system/fonts /system_ext/fonts /product/fonts /my_product/fonts /vendor/fonts; do
+    for _root in /system/fonts /system_ext/fonts /product/fonts /mi_ext/fonts /my_product/fonts /vendor/fonts; do
         [ -e "$_root/${_name}.ttf" ] || [ -e "$_root/${_name}.otf" ] || [ -e "$_root/${_name}.ttc" ] && return 0
     done
     return 1
@@ -222,7 +222,7 @@ _rom_font_target_exists() {
 
 _rom_exact_target_exists() {
     _file="$1"
-    for _root in /system/fonts /system_ext/fonts /product/fonts /my_product/fonts /vendor/fonts; do
+    for _root in /system/fonts /system_ext/fonts /product/fonts /mi_ext/fonts /my_product/fonts /vendor/fonts; do
         [ -e "$_root/$_file" ] && return 0
     done
     return 1

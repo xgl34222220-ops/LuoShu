@@ -573,70 +573,87 @@ private fun MiuixAppDock(
     val dark = scheme.background.luminance() < .5f
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val floating = appearance.floatingDock
-    val shape = if (floating) RoundedCornerShape(27.dp) else RoundedCornerShape(topStart = 27.dp, topEnd = 27.dp)
+    val shape = if (floating) RoundedCornerShape(24.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     val activeGlass = appearance.glassEnabled
     val activeHaze = activeGlass && appearance.blurEnabled
     val hazeModifier = if (activeHaze) {
         Modifier.hazeEffect(state = hazeState, style = HazeMaterials.ultraThin()) {
-            blurRadius = 32.dp
-            noiseFactor = .016f
+            blurRadius = 24.dp
+            noiseFactor = .012f
         }
     } else Modifier
     val glassBrush = when {
-        activeGlass && dark -> Brush.verticalGradient(listOf(Color.White.copy(alpha = .13f), Color.White.copy(alpha = .055f)))
-        activeGlass -> Brush.verticalGradient(listOf(Color.White.copy(alpha = .48f), Color.White.copy(alpha = .27f)))
+        activeGlass && dark -> Brush.verticalGradient(listOf(Color.White.copy(alpha = .10f), Color.White.copy(alpha = .035f)))
+        activeGlass -> Brush.verticalGradient(listOf(Color.White.copy(alpha = .22f), Color.White.copy(alpha = .09f)))
         else -> Brush.verticalGradient(
             listOf(tokens.elevatedCardBackground.copy(alpha = .98f), tokens.elevatedCardBackground.copy(alpha = .98f)),
         )
     }
 
-    AppDockLayout(
-        pages = dockPages,
-        current = current,
-        onSelect = onSelect,
-        itemHeight = 50.dp,
+    // Keep the blur in a background-only node. Placing icons, text and the moving lens inside the
+    // Haze effect asks some HyperOS renderers to allocate child-sized offscreen buffers; those
+    // buffers are the opaque white rectangles visible behind the selected label in real screenshots.
+    Box(
         modifier = modifier
             .then(if (floating) Modifier.padding(horizontal = 14.dp).padding(bottom = bottomInset + 9.dp) else Modifier)
             .fillMaxWidth()
-            .shadow(if (floating) 18.dp else 5.dp, shape, clip = false)
-            .clip(shape)
-            .then(hazeModifier)
-            .background(glassBrush)
-            .drawBehind {
-                if (activeGlass) {
-                    drawRoundRect(
-                        brush = Brush.radialGradient(
-                            colors = listOf(Color.White.copy(alpha = if (dark) .11f else .50f), Color.Transparent),
-                            center = Offset(size.width * .22f, 0f),
-                            radius = size.width * .78f,
-                        ),
-                        cornerRadius = CornerRadius(size.height / 2f),
-                    )
-                    drawLine(
-                        color = Color.White.copy(alpha = if (dark) .14f else .72f),
-                        start = Offset(size.width * .08f, .8.dp.toPx()),
-                        end = Offset(size.width * .92f, .8.dp.toPx()),
-                        strokeWidth = .8.dp.toPx(),
-                    )
+            .height(52.dp + if (floating) 0.dp else bottomInset),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .shadow(if (floating) 10.dp else 3.dp, shape, clip = false)
+                .clip(shape)
+                .then(hazeModifier)
+                .background(glassBrush)
+                .drawBehind {
+                    if (activeGlass) {
+                        drawRoundRect(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = if (dark) .08f else .24f),
+                                    Color.Transparent,
+                                ),
+                                center = Offset(size.width * .18f, 0f),
+                                radius = size.width * .72f,
+                            ),
+                            cornerRadius = CornerRadius(size.height / 2f),
+                        )
+                        drawLine(
+                            color = Color.White.copy(alpha = if (dark) .12f else .42f),
+                            start = Offset(size.width * .09f, .7.dp.toPx()),
+                            end = Offset(size.width * .91f, .7.dp.toPx()),
+                            strokeWidth = .7.dp.toPx(),
+                        )
+                    }
                 }
-            }
-            .border(
-                .8.dp,
-                if (activeGlass) {
-                    if (dark) Color.White.copy(alpha = .14f) else Color.White.copy(alpha = .68f)
-                } else if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .58f),
-                shape,
-            )
-            .padding(start = 5.dp, top = 5.dp, end = 5.dp, bottom = if (floating) 5.dp else bottomInset + 5.dp),
-        indicatorColor = scheme.primary.copy(alpha = if (dark) .31f else .17f),
-        indicatorBorderColor = Color.White.copy(alpha = if (dark) .15f else .62f),
-        indicatorShadow = 7.dp,
-        selectedColor = scheme.primary,
-        unselectedColor = scheme.onSurfaceVariant.copy(alpha = .76f),
-        label = "luoshuMiuixDockIndicator",
-        liquidGlass = activeGlass,
-        dark = dark,
-    )
+                .border(
+                    .7.dp,
+                    if (activeGlass) {
+                        if (dark) Color.White.copy(alpha = .13f) else Color.White.copy(alpha = .40f)
+                    } else if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .50f),
+                    shape,
+                ),
+        )
+
+        AppDockLayout(
+            pages = dockPages,
+            current = current,
+            onSelect = onSelect,
+            itemHeight = 44.dp,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 4.dp, top = 4.dp, end = 4.dp, bottom = if (floating) 4.dp else bottomInset + 4.dp),
+            indicatorColor = scheme.primary.copy(alpha = if (dark) .25f else .13f),
+            indicatorBorderColor = Color.White.copy(alpha = if (dark) .13f else .34f),
+            indicatorShadow = 0.dp,
+            selectedColor = scheme.primary,
+            unselectedColor = scheme.onSurfaceVariant.copy(alpha = .72f),
+            label = "luoshuMiuixDockIndicator",
+            liquidGlass = activeGlass,
+            dark = dark,
+        )
+    }
 }
 
 @Composable
@@ -658,7 +675,7 @@ private fun AppDockLayout(
     BoxWithConstraints(modifier = modifier) {
         val itemWidth = maxWidth / pages.size.toFloat()
         val targetIndex = pages.indexOf(current).coerceAtLeast(0)
-        val indicatorInset = 6.dp
+        val indicatorInset = 5.dp
         val liquidStretch = remember { Animatable(0f) }
         var previousIndex by remember { mutableStateOf(targetIndex) }
         LaunchedEffect(targetIndex) {
@@ -682,8 +699,8 @@ private fun AppDockLayout(
             ),
             label = label,
         )
-        val liquidExtra = if (liquidGlass) 12.dp * liquidStretch.value else 0.dp
-        val indicatorShape = RoundedCornerShape(22.dp)
+        val liquidExtra = if (liquidGlass) 8.dp * liquidStretch.value else 0.dp
+        val indicatorShape = RoundedCornerShape(18.dp)
         Box(
             modifier = Modifier
                 .offset(x = indicatorX + indicatorInset - liquidExtra / 2)
@@ -710,7 +727,7 @@ private fun AppDockLayout(
                         drawRoundRect(
                             brush = Brush.radialGradient(
                                 colors = listOf(
-                                    Color.White.copy(alpha = if (dark) .13f else .58f),
+                                    Color.White.copy(alpha = if (dark) .10f else .24f),
                                     Color.Transparent,
                                 ),
                                 center = Offset(size.width * .27f, 0f),

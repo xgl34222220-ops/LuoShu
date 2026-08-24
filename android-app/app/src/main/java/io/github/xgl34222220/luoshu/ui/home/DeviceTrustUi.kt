@@ -170,14 +170,14 @@ internal fun DeviceTrustChip(
     val presentation = deviceTrustPresentation(state)
     Surface(
         onClick = onClick,
-        modifier = modifier,
-        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 18.dp),
-        color = presentation.color.copy(alpha = .12f),
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 18.dp else 16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         contentColor = presentation.color,
-        shadowElevation = 5.dp,
+        shadowElevation = 0.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 13.dp, vertical = 10.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (state.loading) {
@@ -186,7 +186,7 @@ internal fun DeviceTrustChip(
                 Icon(presentation.icon, contentDescription = null, modifier = Modifier.size(19.dp))
             }
             Spacer(Modifier.width(8.dp))
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text(presentation.title, fontSize = 11.sp, fontWeight = FontWeight.Black)
                 Text(presentation.subtitle, fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
