@@ -1,0 +1,200 @@
+name: Emergency replace v3.3.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/emergency-replace-v3.3.0.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: luoshu-emergency-v3.3.0
+  cancel-in-progress: true
+
+jobs:
+  replace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      TAG: v3.3.0
+      OLD_TAG_SHA: d20db1d3a44657a112dc1bfa1c8e88af6eaa5c31
+      SOURCE_SHA: 0b05b6955bc6f49b4556189622302f5dcccfda02
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate replacement authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          current_tag_sha="$(git rev-list -n1 "$TAG" 2>/dev/null || true)"
+          [[ "$current_tag_sha" == "$OLD_TAG_SHA" ]] || {
+            echo "Refusing replacement: $TAG -> $current_tag_sha, expected $OLD_TAG_SHA" >&2
+            exit 2
+          }
+          marker='config/replace_v3_3_0_release.conf'
+          grep -qx 'status=pending' "$marker"
+          grep -qx "tag=$TAG" "$marker"
+          grep -qx "expectedOldTagSha=$OLD_TAG_SHA" "$marker"
+          grep -qx "releaseSourceSha=$SOURCE_SHA" "$marker"
+          grep -qx 'expectedMainVersion=v3.3.0' "$marker"
+          grep -qx 'expectedMainVersionCode=30300' "$marker"
+          git cat-file -e "${SOURCE_SHA}^{commit}"
+          [[ "$(git show "$SOURCE_SHA:module.prop" | sed -n 's/^version=//p' | head -n1)" == 'v3.3.0' ]]
+          [[ "$(git show "$SOURCE_SHA:module.prop" | sed -n 's/^versionCode=//p' | head -n1)" == '30300' ]]
+          git cat-file -e "$SOURCE_SHA:RELEASE_NOTES_v3.3.0.md"
+          git checkout --detach "$SOURCE_SHA"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      - name: Require signing secrets
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.LUOSHU_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for value in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [[ -n "${!value}" ]] || { echo "Missing release signing secret: $value" >&2; exit 3; }
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/luoshu-release.jks"
+          keytool -list -keystore "$RUNNER_TEMP/luoshu-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+
+      - name: Prepare ARM64 composite runtime
+        shell: bash
+        run: |
+          if [[ ! -x common/python/bin/luoshu-python ]]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
+
+      - name: Run complete source and module checks
+        shell: bash
+        run: sh ./scripts/check.sh
+
+      - name: Lint, test and build signed release App
+        working-directory: android-app
+        env:
+          LUOSHU_KEYSTORE_FILE: ${{ runner.temp }}/luoshu-release.jks
+          LUOSHU_KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
+          LUOSHU_KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
+          LUOSHU_KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
+        run: gradle --no-daemon --stacktrace :app:lintRelease :app:testDebugUnitTest :app:assembleRelease
+
+      - name: Verify APK signature certificate
+        shell: bash
+        env:
+          EXPECTED_CERT_SHA256: e0043b560a10111d3ffddd3a7afba680b854e14ed793c7a3fdb7f8b7aa95ff27
+        run: |
+          set -euo pipefail
+          apk='android-app/app/build/outputs/apk/release/app-release.apk'
+          test -s "$apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+          test -x "$apksigner"
+          "$apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/apk-signature.txt"
+          grep -qx 'Number of signers: 1' "$RUNNER_TEMP/apk-signature.txt"
+          actual_cert="$(awk -F': ' '/Signer.*certificate SHA-256 digest:/ {print $NF; exit}' "$RUNNER_TEMP/apk-signature.txt" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
+          [[ "$actual_cert" == "$EXPECTED_CERT_SHA256" ]] || {
+            echo "Release certificate mismatch: $actual_cert" >&2
+            exit 3
+          }
+
+      - name: Build verified module and App artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./scripts/version.sh
+          apk='android-app/app/build/outputs/apk/release/app-release.apk'
+          mkdir -p dist
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}.apk"
+          cp -f "$apk" "$app"
+          (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
+          LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
+          module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
+          test -s "$module"
+          unzip -t "$module" >/dev/null
+          unzip -Z1 "$module" | grep -qx 'bundled/LuoShu-App.apk'
+          unzip -p "$module" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
+          cmp -s "$apk" "$RUNNER_TEMP/embedded.apk"
+          (cd dist && sha256sum -c "$(basename "$module").sha256")
+          (cd dist && sha256sum -c "$(basename "$app").sha256")
+
+      - name: Enforce release readiness
+        shell: bash
+        run: sh ./scripts/pre_release_readiness.sh --target v3.3.0 --enforce
+
+      - name: Preserve verified candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-v3.3.0-emergency-verified
+          path: |
+            dist/LuoShu-v3.3.0.zip
+            dist/LuoShu-v3.3.0.zip.sha256
+            dist/LuoShu-App-v3.3.0.apk
+            dist/LuoShu-App-v3.3.0.apk.sha256
+            dist/pre-release-readiness/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Atomically replace old v3.3.0 release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+          current_tag_sha="$(git rev-list -n1 "$TAG" 2>/dev/null || true)"
+          [[ "$current_tag_sha" == "$OLD_TAG_SHA" ]] || {
+            echo "Tag changed before publish: $current_tag_sha" >&2
+            exit 4
+          }
+          git fetch origin main
+          marker="$(git show origin/main:config/replace_v3_3_0_release.conf)"
+          printf '%s\n' "$marker" | grep -qx 'status=pending'
+          printf '%s\n' "$marker" | grep -qx "expectedOldTagSha=$OLD_TAG_SHA"
+          printf '%s\n' "$marker" | grep -qx "releaseSourceSha=$SOURCE_SHA"
+          gh release view "$TAG" >/dev/null
+          gh release delete "$TAG" --cleanup-tag --yes
+          gh release create "$TAG" \
+            dist/LuoShu-v3.3.0.zip \
+            dist/LuoShu-v3.3.0.zip.sha256 \
+            dist/LuoShu-App-v3.3.0.apk \
+            dist/LuoShu-App-v3.3.0.apk.sha256 \
+            --target "$SOURCE_SHA" \
+            --title '洛书 v3.3.0' \
+            --notes-file RELEASE_NOTES_v3.3.0.md
+          git fetch --force --tags origin
+          new_tag_sha="$(git rev-list -n1 "$TAG")"
+          [[ "$new_tag_sha" == "$SOURCE_SHA" ]] || {
+            echo "Replacement tag mismatch: $new_tag_sha != $SOURCE_SHA" >&2
+            exit 5
+          }
