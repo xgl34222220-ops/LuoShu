@@ -28,6 +28,7 @@ internal data class ModuleSnapshot(
     val verificationMode: String = "unknown",
     val verificationReason: String = "",
     val mountState: String = "unknown",
+    val mountFailure: String = "",
     val taskType: String = "none",
     val taskId: String = "",
     val taskState: String = "idle",
@@ -58,15 +59,18 @@ internal data class ModuleSnapshot(
         get() = activeFont !in setOf("", "default") && fontEffectState == "failed"
 
     val effectFailureMessage: String
-        get() = when (verificationReason) {
-            "self-mount-not-visible" -> "开机挂载未完整生效，系统已安全使用默认字体"
-            "self-mount-failed" -> "本次启动的原子挂载事务失败，已完整回滚到系统字体"
-            "self-mount-invalid-backend" -> "检测到不受支持的挂载后端，洛书没有提交字体负载"
-            "self-mount-manifest-missing" -> "本次启动的字体与配置挂载清单缺失，已回滚到系统字体"
-            "aligned-manifest-missing" -> "字体负载清单缺失，系统已安全使用默认字体"
-            "dynamic-config-overridden" -> "系统动态字体配置覆盖了洛书负载，已安全回到系统字体"
-            "dynamic-config-mount-failed" -> "系统动态字体配置挂载失败，已完整回滚到系统字体"
-            else -> "开机字体验证失败，系统已安全使用默认字体"
+        get() = when {
+            mountFailure.isNotBlank() -> "自挂载失败（${mountFailure}），已安全回滚到系统字体"
+            else -> when (verificationReason) {
+                "self-mount-not-visible" -> "开机挂载未完整生效，系统已安全使用默认字体"
+                "self-mount-failed" -> "本次启动的原子挂载事务失败，已完整回滚到系统字体"
+                "self-mount-invalid-backend" -> "检测到不受支持的挂载后端，洛书没有提交字体负载"
+                "self-mount-manifest-missing" -> "本次启动的字体与配置挂载清单缺失，已回滚到系统字体"
+                "aligned-manifest-missing" -> "字体负载清单缺失，系统已安全使用默认字体"
+                "dynamic-config-overridden" -> "系统动态字体配置覆盖了洛书负载，已安全回到系统字体"
+                "dynamic-config-mount-failed" -> "系统动态字体配置挂载失败，已完整回滚到系统字体"
+                else -> "开机字体验证失败，系统已安全使用默认字体"
+            }
         }
 }
 
@@ -801,6 +805,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 verificationMode = data.optString("verificationMode", "unknown"),
                 verificationReason = data.optString("verificationReason", ""),
                 mountState = data.optString("mountState", "unknown"),
+                mountFailure = data.optString("mountFailure", ""),
                 taskType = data.optString("taskType", "none"),
                 taskId = data.optString("taskId", ""),
                 taskState = data.optString("taskState", "idle"),

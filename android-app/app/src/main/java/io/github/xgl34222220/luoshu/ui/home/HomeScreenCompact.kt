@@ -72,12 +72,12 @@ internal fun HomeScreenCompact(
     val elevatedColor = if (miuix) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surfaceContainerHigh
     val textPrimary = if (miuix) tokens.textPrimary else MaterialTheme.colorScheme.onSurface
     val textSecondary = if (miuix) tokens.textSecondary else MaterialTheme.colorScheme.onSurfaceVariant
-    val shape = RoundedCornerShape(if (miuix) 28.dp else 24.dp)
+    val shape = RoundedCornerShape(if (miuix) 24.dp else 22.dp)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = dockBottomPadding),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 8.dp, end = 14.dp, bottom = dockBottomPadding),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         item {
             Row(
@@ -96,14 +96,14 @@ internal fun HomeScreenCompact(
                     Text(
                         "洛书",
                         color = textPrimary,
-                        fontSize = 36.sp,
-                        lineHeight = 40.sp,
+                        fontSize = 30.sp,
+                        lineHeight = 34.sp,
                         fontWeight = FontWeight.Black,
                     )
                     Text(
                         "${if (miuix) "Miuix" else "Material"} · ${state.version}",
                         color = textSecondary,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                     )
                 }
                 HeaderAction(
@@ -129,7 +129,7 @@ internal fun HomeScreenCompact(
                 colors = CardDefaults.cardColors(containerColor = cardColor),
                 elevation = CardDefaults.cardElevation(defaultElevation = if (miuix) 5.dp else 2.dp),
             ) {
-                Column(Modifier.padding(20.dp)) {
+                Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(
                             Modifier
@@ -151,24 +151,24 @@ internal fun HomeScreenCompact(
                             fontWeight = FontWeight.Bold,
                         )
                     }
-                    Spacer(Modifier.height(18.dp))
-                    Text("当前字体", color = textSecondary, fontSize = 12.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Text("当前字体", color = textSecondary, fontSize = 11.sp)
                     Text(
                         state.currentFont,
                         color = textPrimary,
-                        fontSize = 34.sp,
-                        lineHeight = 39.sp,
+                        fontSize = 26.sp,
+                        lineHeight = 31.sp,
                         fontWeight = FontWeight.Black,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(12.dp))
                     Surface(
-                        shape = RoundedCornerShape(18.dp),
+                        shape = RoundedCornerShape(16.dp),
                         color = MaterialTheme.colorScheme.primary.copy(alpha = .08f),
                     ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp),
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             LuoShuGlyph(
@@ -180,7 +180,7 @@ internal fun HomeScreenCompact(
                             )
                             Spacer(Modifier.width(10.dp))
                             Column(Modifier.weight(1f)) {
-                                Text(state.taskTitle, color = textPrimary, fontWeight = FontWeight.Bold)
+                                Text(state.taskTitle, color = textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                                 Text(
                                     state.taskMessage,
                                     color = textSecondary,
@@ -241,12 +241,12 @@ internal fun HomeScreenCompact(
 
         item {
             Card(
-                shape = RoundedCornerShape(24.dp),
+                shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = cardColor),
                 elevation = CardDefaults.cardElevation(defaultElevation = if (miuix) 3.dp else 1.dp),
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 11.dp),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 9.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     CompactStatusCell(
@@ -281,12 +281,12 @@ internal fun HomeScreenCompact(
                 elevation = CardDefaults.cardElevation(defaultElevation = if (miuix) 4.dp else 1.dp),
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(17.dp),
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Surface(
-                        modifier = Modifier.size(48.dp),
-                        shape = RoundedCornerShape(17.dp),
+                        modifier = Modifier.size(42.dp),
+                        shape = RoundedCornerShape(15.dp),
                         color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -301,7 +301,7 @@ internal fun HomeScreenCompact(
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(next.title, color = textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Black)
+                        Text(next.title, color = textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Black)
                         Text(
                             next.description,
                             color = textSecondary,
@@ -345,16 +345,16 @@ internal fun HomeScreenCompact(
                 OutlinedButton(
                     onClick = actions.restoreDefault,
                     enabled = !state.taskRunning,
-                    modifier = Modifier.weight(1f).height(52.dp),
-                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(16.dp),
                 ) {
                     Text("恢复系统字体", fontWeight = FontWeight.Bold)
                 }
                 Button(
                     onClick = actions.reboot,
                     enabled = state.rebootRequired && !state.taskRunning,
-                    modifier = Modifier.weight(1f).height(52.dp),
-                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(16.dp),
                 ) {
                     LuoShuGlyph(
                         imageVector = Icons.Rounded.RestartAlt,

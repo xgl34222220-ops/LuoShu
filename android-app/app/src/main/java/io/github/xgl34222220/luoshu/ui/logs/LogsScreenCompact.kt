@@ -79,8 +79,8 @@ internal fun LogsScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 8.dp, end = 16.dp, bottom = dockBottomPadding),
-        verticalArrangement = Arrangement.spacedBy(11.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 6.dp, end = 14.dp, bottom = dockBottomPadding),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
     ) {
         item {
             Row(
@@ -99,14 +99,14 @@ internal fun LogsScreenCompact(
                     Text(
                         "任务中心",
                         color = textPrimary,
-                        fontSize = 34.sp,
-                        lineHeight = 39.sp,
+                        fontSize = 29.sp,
+                        lineHeight = 33.sp,
                         fontWeight = FontWeight.Black,
                     )
                     Text(
                         "任务、问题和原始日志分开查看",
                         color = textSecondary,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                     )
                 }
                 DiagnosticExportButton(
@@ -127,11 +127,11 @@ internal fun LogsScreenCompact(
         item {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(22.dp),
+                shape = RoundedCornerShape(18.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (miuix) .62f else .90f),
             ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().padding(4.dp),
+                    modifier = Modifier.fillMaxWidth().padding(3.dp),
                     horizontalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
                     LogsTab.entries.forEach { option ->
@@ -139,16 +139,16 @@ internal fun LogsScreenCompact(
                         Surface(
                             modifier = Modifier.weight(1f),
                             onClick = { tab = option },
-                            shape = RoundedCornerShape(18.dp),
+                            shape = RoundedCornerShape(15.dp),
                             color = if (active) MaterialTheme.colorScheme.primary else Color.Transparent,
                             contentColor = if (active) MaterialTheme.colorScheme.onPrimary else textSecondary,
                             shadowElevation = if (active && miuix) 2.dp else 0.dp,
                         ) {
                             Text(
                                 option.label,
-                                modifier = Modifier.padding(vertical = 10.dp),
+                                modifier = Modifier.padding(vertical = 8.dp),
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                fontSize = 12.sp,
+                                fontSize = 11.sp,
                                 fontWeight = if (active) FontWeight.Black else FontWeight.Bold,
                             )
                         }
@@ -283,10 +283,10 @@ private fun OverviewCard(
     textSecondary: Color,
 ) {
     Card(
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor),
     ) {
-        Column(Modifier.padding(17.dp)) {
+        Column(Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LuoShuGlyph(
                     imageVector = if (state.activeTaskCount > 0) Icons.Rounded.Refresh else Icons.Rounded.CheckCircle,
@@ -300,7 +300,7 @@ private fun OverviewCard(
                     Text(
                         if (state.activeTaskCount > 0) "${state.activeTaskCount} 个任务正在处理" else "当前任务队列空闲",
                         color = textPrimary,
-                        fontSize = 18.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Black,
                     )
                     Text(
@@ -310,7 +310,7 @@ private fun OverviewCard(
                     )
                 }
             }
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(10.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Metric("进行中", state.activeTaskCount, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
                 Metric("已完成", state.completedTaskCount, Color(0xFF21966C), Modifier.weight(1f))
@@ -329,10 +329,10 @@ private fun IssueSummary(
     textSecondary: Color,
 ) {
     Card(
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor),
     ) {
-        Row(Modifier.fillMaxWidth().padding(17.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
             LuoShuGlyph(
                 imageVector = if (failedCount > 0) Icons.Rounded.Warning else Icons.Rounded.CheckCircle,
                 contentDescription = null,
@@ -345,7 +345,7 @@ private fun IssueSummary(
                 Text(
                     if (failedCount > 0) "$failedCount 个失败任务需要处理" else "没有失败任务",
                     color = textPrimary,
-                    fontSize = 17.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Black,
                 )
                 Text("$warningCount 条警告记录", color = textSecondary, fontSize = 11.sp)
@@ -377,20 +377,20 @@ private fun TaskCard(
             Box(Modifier.size(10.dp).background(color, CircleShape))
             if (!isLast) {
                 Spacer(Modifier.height(4.dp))
-                Box(Modifier.width(2.dp).height(88.dp).background(color.copy(alpha = .18f), RoundedCornerShape(999.dp)))
+                Box(Modifier.width(2.dp).height(76.dp).background(color.copy(alpha = .18f), RoundedCornerShape(999.dp)))
             }
         }
         Spacer(Modifier.width(5.dp))
         Card(
             modifier = Modifier.weight(1f),
-            shape = RoundedCornerShape(22.dp),
+            shape = RoundedCornerShape(18.dp),
             colors = CardDefaults.cardColors(containerColor = cardColor),
         ) {
-            Column(Modifier.padding(15.dp)) {
+            Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    modifier = Modifier.size(42.dp),
-                    shape = RoundedCornerShape(15.dp),
+                    modifier = Modifier.size(38.dp),
+                    shape = RoundedCornerShape(13.dp),
                     color = color.copy(alpha = .11f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
@@ -408,7 +408,7 @@ private fun TaskCard(
                     Text(
                         task.title,
                         color = textPrimary,
-                        fontSize = 16.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Black,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,

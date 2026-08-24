@@ -71,6 +71,7 @@ internal data class DeviceTrustState(
     val mode: String = "unknown",
     val reason: String = "",
     val mountState: String = "unknown",
+    val mountFailure: String = "",
     val cachePending: Boolean = false,
     val error: String = "",
 ) {
@@ -107,11 +108,12 @@ internal suspend fun loadDeviceTrustState(): DeviceTrustState {
         reason="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" reason)"
         verifiedActive="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" activeFont)"
         mountState="${'$'}(read_value "${'$'}CFG/self-mount.conf" state)"
+        mountFailure="${'$'}(read_value "${'$'}CFG/self-mount.conf" failed)"
         if [ "${'$'}active" != default ]; then
             if [ "${'$'}mountState" = failed ]; then
                 alignment=failed
                 mode=compatibility
-                [ -n "${'$'}reason" ] || reason=self-mount-failed
+                reason=self-mount-failed
             elif [ -n "${'$'}verifiedActive" ] && [ "${'$'}verifiedActive" != "${'$'}active" ]; then
                 alignment=pending
                 mode=unknown
@@ -120,10 +122,10 @@ internal suspend fun loadDeviceTrustState(): DeviceTrustState {
         fi
         cachePending=no
         [ -s "${'$'}CFG/device-font-cache-pending.conf" ] && cachePending=yes
-        printf 'activeFont=%s\ninventory=%s\nengine=%s\ntemplate=%s\nalignment=%s\nmode=%s\nreason=%s\nmountState=%s\ncachePending=%s\n' \
+        printf 'activeFont=%s\ninventory=%s\nengine=%s\ntemplate=%s\nalignment=%s\nmode=%s\nreason=%s\nmountState=%s\nmountFailure=%s\ncachePending=%s\n' \
             "${'$'}active" "${'$'}inventory" "${'$'}{engine:-missing}" "${'$'}{template:-missing}" \
             "${'$'}{alignment:-pending}" "${'$'}{mode:-compatibility}" "${'$'}reason" \
-            "${'$'}{mountState:-missing}" "${'$'}cachePending"
+            "${'$'}{mountState:-missing}" "${'$'}mountFailure" "${'$'}cachePending"
     """.trimIndent()
     val result = RootShell.exec(command, timeoutMs = 12_000L)
     if (result.code != 0) {
@@ -153,6 +155,7 @@ internal fun parseDeviceTrustOutput(raw: String): DeviceTrustState {
         mode = values["mode"].orEmpty().ifBlank { "unknown" },
         reason = values["reason"].orEmpty(),
         mountState = values["mountState"].orEmpty().ifBlank { "unknown" },
+        mountFailure = values["mountFailure"].orEmpty(),
         cachePending = values["cachePending"] == "yes",
     )
 }
@@ -219,6 +222,9 @@ internal fun DeviceTrustDialog(
                 DeviceTrustRow("开机加载验证", friendlyTrustValue(state.alignment))
                 DeviceTrustRow("加载模式", friendlyTrustValue(state.mode))
                 DeviceTrustRow("自挂载事务", friendlyTrustValue(state.mountState))
+                if (state.mountFailure.isNotBlank()) {
+                    DeviceTrustRow("失败目标", state.mountFailure)
+                }
                 if (state.reason.isNotBlank()) {
                     DeviceTrustRow("验证说明", friendlyTrustReason(state.reason))
                 }
@@ -296,7 +302,7 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
         )
         state.level == DeviceTrustLevel.ISSUE -> DeviceTrustPresentation(
             "字体应用失败",
-            friendlyTrustReason(state.reason).ifBlank { "加载验证失败，请根据说明修复后重新应用" },
+            if (state.mountFailure.isNotBlank()) "自挂载失败：${state.mountFailure}" else friendlyTrustReason(state.reason).ifBlank { "加载验证失败，请根据说明修复后重新应用" },
             Icons.Rounded.Warning,
             scheme.error,
         )
@@ -339,6 +345,7 @@ private fun friendlyTrustReason(value: String): String = when (value) {
     "current-boot-mount-confirmed" -> "本次启动的字体、配置与挂载事务均已确认"
     "dynamic-config-changed" -> "系统在启动后改写了动态字体配置"
     "verified-by-visible-mounts" -> "系统可见字体文件与洛书负载一致"
+    "mount-active-visible-layout-differs" -> "挂载事务已确认；系统字体服务使用了不同的可见路径"
     else -> value
 }
 
