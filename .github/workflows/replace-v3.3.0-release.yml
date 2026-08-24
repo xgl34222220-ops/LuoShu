@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: luoshu-replace-v3.3.0
@@ -37,6 +38,7 @@ jobs:
           status="$(get status)"
           tag="$(get tag)"
           expected_old_tag_sha="$(get expectedOldTagSha)"
+          release_source_sha="$(get releaseSourceSha)"
           expected_main_version="$(get expectedMainVersion)"
           expected_main_code="$(get expectedMainVersionCode)"
 
@@ -50,14 +52,21 @@ jobs:
             echo "Unexpected old tag authorization: $expected_old_tag_sha" >&2
             exit 2
           }
-          [[ "$(sed -n 's/^version=//p' module.prop | head -n1)" == "$expected_main_version" ]] || exit 2
-          [[ "$(sed -n 's/^versionCode=//p' module.prop | head -n1)" == "$expected_main_code" ]] || exit 2
-          grep -qx 'version=v3.3.0' config/stable_release_authorization.conf
-          grep -qx 'scope=stable-release' config/stable_release_authorization.conf
-          grep -qx 'allowPendingDeviceMatrix=true' config/stable_release_authorization.conf
-          test -s RELEASE_NOTES_v3.3.0.md
+          [[ "$release_source_sha" == '0b05b6955bc6f49b4556189622302f5dcccfda02' ]] || {
+            echo "Unexpected replacement source: $release_source_sha" >&2
+            exit 2
+          }
+          [[ "$expected_main_version" == 'v3.3.0' && "$expected_main_code" == '30300' ]] || exit 2
 
           git fetch --force --tags origin
+          git cat-file -e "${release_source_sha}^{commit}"
+          [[ "$(git show "$release_source_sha:module.prop" | sed -n 's/^version=//p' | head -n1)" == "$expected_main_version" ]] || exit 2
+          [[ "$(git show "$release_source_sha:module.prop" | sed -n 's/^versionCode=//p' | head -n1)" == "$expected_main_code" ]] || exit 2
+          git cat-file -e "$release_source_sha:RELEASE_NOTES_v3.3.0.md"
+          git show "$release_source_sha:config/stable_release_authorization.conf" | grep -qx 'version=v3.3.0'
+          git show "$release_source_sha:config/stable_release_authorization.conf" | grep -qx 'scope=stable-release'
+          git show "$release_source_sha:config/stable_release_authorization.conf" | grep -qx 'allowPendingDeviceMatrix=true'
+
           actual_old_tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
           [[ "$actual_old_tag_sha" == "$expected_old_tag_sha" ]] || {
             echo "Refusing replacement: $tag points to $actual_old_tag_sha, expected $expected_old_tag_sha" >&2
@@ -70,6 +79,7 @@ jobs:
 
           echo 'skip=false' >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "release_source_sha=$release_source_sha" >> "$GITHUB_OUTPUT"
 
       - name: Delete authorized old release and tag
         if: steps.guard.outputs.skip != 'true'
@@ -86,18 +96,30 @@ jobs:
             exit 4
           }
 
-      - name: Trigger normal signed release workflow from current main
+      - name: Create replacement tag on verified release source
         if: steps.guard.outputs.skip != 'true'
         shell: bash
+        env:
+          TAG: ${{ steps.guard.outputs.tag }}
+          RELEASE_SOURCE_SHA: ${{ steps.guard.outputs.release_source_sha }}
         run: |
           set -euo pipefail
-          git fetch origin main
-          git reset --hard origin/main
-          grep -qx 'version=v3.3.0' module.prop
-          test -s RELEASE_NOTES_v3.3.0.md
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          printf '\n<!-- replacement-dispatch: %s -->\n' "$GITHUB_SHA" >> RELEASE_NOTES_v3.3.0.md
-          git add RELEASE_NOTES_v3.3.0.md
-          git commit -m 'chore(release): trigger rebuilt v3.3.0'
-          git push origin HEAD:main
+          git tag "$TAG" "$RELEASE_SOURCE_SHA"
+          git push origin "refs/tags/$TAG"
+          git fetch --force --tags origin
+          actual="$(git rev-list -n1 "$TAG")"
+          [[ "$actual" == "$RELEASE_SOURCE_SHA" ]] || {
+            echo "Replacement tag mismatch: $actual != $RELEASE_SOURCE_SHA" >&2
+            exit 5
+          }
+
+      - name: Dispatch normal signed release workflow from replacement tag
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.guard.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --ref "$TAG" -f tag="$TAG" -f prerelease=false
+          echo "Dispatched signed release workflow for $TAG"
