@@ -168,14 +168,18 @@ printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorColor = scheme.primary.copy'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'itemHeight = 44.dp'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'background-only node'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'runtimeLiquid'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'Modifier.layerBackdrop(dockSurfaceBackdrop)'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'Modifier.drawBackdrop'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'liquidGlassLens'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorBackdrop = dockSurfaceBackdrop'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'liquidGlass = activeGlass'
 ! grep -q -- '-> 34.dp' "$SHELL"
 grep -q 'collectIsPressedAsState' "$SHELL"
 grep -q 'baseItemColor.copy(alpha = .62f)' "$SHELL"
-grep -q 'offscreen buffer inside the Haze surface' "$SHELL"
 ! grep -q 'luoshuDockItemScale' "$SHELL"
-! grep -q 'graphicsLayer' "$SHELL"
+grep -q 'Three independent layers mirror the reference implementation' "$SHELL"
+grep -q 'graphicsLayer' "$SHELL"
 grep -q 'dampingRatio = if (liquidGlass) .68f else .84f' "$SHELL"
 grep -q 'liquidStretch.animateTo' "$SHELL"
 grep -q 'direction \* it \* 3 / 4' "$SHELL"

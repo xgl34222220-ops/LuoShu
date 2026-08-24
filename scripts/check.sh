@@ -166,6 +166,9 @@ grep -q 'testImplementation("junit:junit:4.13.2")' "$ROOT/android-app/app/build.
 # Miuix 悬浮底栏必须使用真实背景取样、RuntimeShader 折射和连续圆角；图标文字保持为独立内容层。
 grep -q 'miuix-blur-android:0.9.3' "$ROOT/android-app/app/build.gradle.kts"
 grep -q 'miuix-squircle-android:0.9.3' "$ROOT/android-app/app/build.gradle.kts"
+grep -q 'compileSdk = 37' "$ROOT/android-app/app/build.gradle.kts"
+grep -q 'targetSdk = 36' "$ROOT/android-app/app/build.gradle.kts"
+grep -q 'minSdk = 28' "$ROOT/android-app/app/build.gradle.kts"
 grep -q 'Modifier.layerBackdrop(liquidBackdrop)' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
 grep -q 'Modifier.drawBackdrop' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
 grep -q 'indicatorBackdrop = dockSurfaceBackdrop' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"

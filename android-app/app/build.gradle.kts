@@ -31,7 +31,9 @@ val hasReleaseSigning = listOf(
 
 android {
     namespace = "io.github.xgl34222220.luoshu"
-    compileSdk = 36
+    // Miuix 0.9.3 publishes against API 37. This is compile-time only: targetSdk and the
+    // install/runtime floor stay unchanged, while shader calls remain capability-gated.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.github.xgl34222220.luoshu"
