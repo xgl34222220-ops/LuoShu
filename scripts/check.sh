@@ -49,6 +49,7 @@ for file in \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontMetadataInspector.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/glass/LiquidGlassLens.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/appearance/AppearanceSettings.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/TaskCenterModel.kt \
@@ -162,6 +163,15 @@ grep -q 'cachedFontDefaultWeight' "$ROOT/android-app/app/src/main/java/io/github
 grep -q 'optDouble("default"' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt"
 grep -q 'testImplementation("junit:junit:4.13.2")' "$ROOT/android-app/app/build.gradle.kts"
 
+# Miuix 悬浮底栏必须使用真实背景取样、RuntimeShader 折射和连续圆角；图标文字保持为独立内容层。
+grep -q 'miuix-blur-android:0.9.3' "$ROOT/android-app/app/build.gradle.kts"
+grep -q 'miuix-squircle-android:0.9.3' "$ROOT/android-app/app/build.gradle.kts"
+grep -q 'Modifier.layerBackdrop(liquidBackdrop)' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
+grep -q 'Modifier.drawBackdrop' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
+grep -q 'indicatorBackdrop = dockSurfaceBackdrop' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
+grep -q 'isRuntimeShaderSupported()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
+grep -q 'chromaticAberration' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/glass/LiquidGlassLens.kt"
+
 # HyperOS 必须保留紧凑控件的原厂度量壳，并按真实分区写入 MiSans 与数字字重目标。
 grep -q '_hyperos_metric_shell_files' "$ROOT/common/hyperos_global.sh"
 grep -q 'LUOSHU_PRODUCT_FONTS_ROOT' "$ROOT/common/hyperos_global.sh"
@@ -207,6 +217,8 @@ grep -q 'GPL-3.0-only' "$ROOT/CONTRIBUTING.md"
 grep -q '^MIT License$' "$ROOT/licenses/LuoShu-MIT-HISTORICAL.txt"
 grep -q 'Python Software Foundation' "$ROOT/licenses/CPython-LICENSE.txt"
 grep -q '^MIT License$' "$ROOT/licenses/FontTools-LICENSE.txt"
+grep -q '^                                 Apache License$' "$ROOT/licenses/Apache-2.0.txt"
+grep -q 'Miuix 与 AndroidLiquidGlass' "$ROOT/THIRD_PARTY_NOTICES.md"
 
 # 功能回归脚本。
 sh "$ROOT/scripts/native_preview_source_test.sh"

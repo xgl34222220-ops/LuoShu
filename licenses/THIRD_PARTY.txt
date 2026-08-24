@@ -9,6 +9,12 @@ LuoShu bundles or builds with the following third-party components:
    Full text: licenses/FontTools-LICENSE.txt
    Upstream external notices: licenses/FontTools-LICENSE.external.txt
 
+3. Miuix and AndroidLiquidGlass-derived lens example
+   License: Apache License 2.0
+   Full text: licenses/Apache-2.0.txt
+   Sources: https://github.com/compose-miuix-ui/miuix and
+            https://github.com/Kyant0/AndroidLiquidGlass
+
 LuoShu only removes files not required at runtime, such as tests, development
 headers, IDLE and ensurepip. The third-party licenses are not changed.
 
