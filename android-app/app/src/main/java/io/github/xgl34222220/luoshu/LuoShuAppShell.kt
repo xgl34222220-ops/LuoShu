@@ -476,7 +476,7 @@ private fun MaterialAppDock(
         pages = dockPages,
         current = current,
         onSelect = onSelect,
-        itemHeight = 52.dp,
+        itemHeight = 48.dp,
         modifier = modifier
             .then(if (floating) Modifier.padding(horizontal = 16.dp).padding(bottom = bottomInset + 10.dp) else Modifier)
             .fillMaxWidth()
@@ -548,7 +548,7 @@ private fun MiuixAppDock(
         onSelect = onSelect,
         itemHeight = 52.dp,
         modifier = modifier
-            .then(if (floating) Modifier.padding(horizontal = 12.dp).padding(bottom = bottomInset + 8.dp) else Modifier)
+            .then(if (floating) Modifier.padding(horizontal = 12.dp).padding(bottom = bottomInset + 6.dp) else Modifier)
             .fillMaxWidth()
             .shadow(if (floating) if (activeGlass) 8.dp else 12.dp else 5.dp, shape, clip = false)
             .clip(shape)
@@ -611,7 +611,7 @@ private fun MiuixAppDock(
                 } else if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .58f),
                 shape,
             )
-            .padding(start = 5.dp, top = 5.dp, end = 5.dp, bottom = if (floating) 5.dp else bottomInset + 5.dp),
+            .padding(start = 4.dp, top = 4.dp, end = 4.dp, bottom = if (floating) 4.dp else bottomInset + 4.dp),
         indicatorColor = if (activeGlass) {
             Color.White.copy(alpha = if (dark) .05f else .09f)
         } else {

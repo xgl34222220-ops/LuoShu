@@ -105,6 +105,7 @@ status_json() {
     _verification_reason="$(read_prop "$_verification_file" reason)"
     _verification_active="$(read_prop "$_verification_file" activeFont)"
     _mount_state="$(read_prop "$MODDIR/config/self-mount.conf" state)"
+    _mount_failed="$(read_prop "$MODDIR/config/self-mount.conf" failed)"
     [ -n "$_verification_state" ] || _verification_state='pending'
     [ -n "$_verification_mode" ] || _verification_mode='unknown'
     [ -n "$_mount_state" ] || _mount_state='unknown'
@@ -151,6 +152,9 @@ status_json() {
         # failure, so the only safe effective-font claim is the ROM default.
         _effective_active=default
         _font_effect_state=failed
+        if [ "$_mount_state" = failed ]; then
+            _verification_reason=self-mount-failed
+        fi
     elif [ "$_verification_state" = verified ]; then
         case "$_verification_mode" in
             aligned|mount-verified)
@@ -163,11 +167,11 @@ status_json() {
         _font_effect_state=unverified
     fi
 
-    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
+    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","mountFailure":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
         "$_installed" "$(json_escape "$_version")" "${_version_code:-0}" "$(json_escape "$_active")" \
         "$(json_escape "$_effective_active")" "$(json_escape "$_font_effect_state")" \
         "$(json_escape "$_verification_state")" "$(json_escape "$_verification_mode")" \
-        "$(json_escape "$_verification_reason")" "$(json_escape "$_mount_state")" \
+        "$(json_escape "$_verification_reason")" "$(json_escape "$_mount_state")" "$(json_escape "$_mount_failed")" \
         "$(json_escape "$_task_type")" "$(json_escape "$_task_id")" "$(json_escape "$_task_state")" \
         "$(json_escape "$_task_message")" "$_task_progress" "$_reboot_required" \
         "$(json_escape "$(root_manager)")" "$(json_escape "$(mount_engine)")" "$(json_escape "$MODDIR")"

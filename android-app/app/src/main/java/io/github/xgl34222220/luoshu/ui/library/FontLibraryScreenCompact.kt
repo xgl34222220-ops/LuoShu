@@ -84,8 +84,8 @@ internal fun FontLibraryScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = dockBottomPadding),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 8.dp, end = 14.dp, bottom = dockBottomPadding),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -101,14 +101,14 @@ internal fun FontLibraryScreenCompact(
                     Text(
                         "字体库",
                         color = textPrimary,
-                        fontSize = 34.sp,
-                        lineHeight = 39.sp,
+                        fontSize = 29.sp,
+                        lineHeight = 33.sp,
                         fontWeight = FontWeight.Black,
                     )
                     Text(
                         "${state.visibleCount} 款字体 · ${state.validCount} 款可用",
                         color = textSecondary,
-                        fontSize = 12.sp,
+                        fontSize = 11.sp,
                     )
                 }
                 LuoShuHeaderAction(
@@ -282,17 +282,17 @@ private fun CompactSystemFontRow(
     onRestore: () -> Unit,
 ) {
     Card(
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(19.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor),
         border = if (active) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .24f)) else null,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(14.dp),
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
-                modifier = Modifier.size(58.dp),
-                shape = RoundedCornerShape(18.dp),
+                modifier = Modifier.size(50.dp),
+                shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -306,7 +306,7 @@ private fun CompactSystemFontRow(
             }
             Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
-                Text("系统默认字体", color = textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Black)
+                Text("系统默认字体", color = textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Black)
                 Spacer(Modifier.height(2.dp))
                 Text("ROM 原始字体映射", color = textSecondary, fontSize = 10.sp)
                 Spacer(Modifier.height(7.dp))
@@ -347,17 +347,17 @@ private fun CompactFontRow(
     var menuExpanded by remember(font.id) { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails),
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(19.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (font.valid) cardColor else MaterialTheme.colorScheme.errorContainer.copy(alpha = .34f),
         ),
         border = if (active) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .24f)) else null,
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    modifier = Modifier.size(58.dp),
-                    shape = RoundedCornerShape(18.dp),
+                    modifier = Modifier.size(50.dp),
+                    shape = RoundedCornerShape(16.dp),
                     color = if (font.valid) {
                         MaterialTheme.colorScheme.primary.copy(alpha = .09f)
                     } else {
@@ -370,8 +370,8 @@ private fun CompactFontRow(
                                 font = font,
                                 text = "Aa12",
                                 axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
-                                modifier = Modifier.size(58.dp).padding(6.dp),
-                                textSizeSp = 15.5f,
+                                modifier = Modifier.size(50.dp).padding(5.dp),
+                                textSizeSp = 14f,
                                 gravity = Gravity.CENTER,
                                 maxLines = 1,
                             )
@@ -390,8 +390,8 @@ private fun CompactFontRow(
                     Text(
                         font.name,
                         color = textPrimary,
-                        fontSize = 17.sp,
-                        lineHeight = 21.sp,
+                        fontSize = 15.sp,
+                        lineHeight = 19.sp,
                         fontWeight = FontWeight.Black,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,

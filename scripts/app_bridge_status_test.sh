@@ -27,6 +27,17 @@ assert data["verificationReason"] == expected_reason, data
 ' "$_expected_effective" "$_expected_state" "$_expected_reason"
 }
 
+assert_mount_failure() {
+    _expected="$1"
+    _output=$(MODDIR="$MODULE" sh "$ROOT/common/app_bridge.sh" status)
+    printf '%s' "$_output" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)["data"]
+assert data["verificationReason"] == "self-mount-failed", data
+assert data["mountFailure"] == sys.argv[1], data
+' "$_expected"
+}
+
 printf 'default\n' >"$CONFIG/active_font.conf"
 assert_status default system ''
 
@@ -34,7 +45,8 @@ printf 'DemoFont\n' >"$CONFIG/active_font.conf"
 printf 'state=failed\nbackend=rollback\nfailed=oplus_product/fonts\n' >"$CONFIG/self-mount.conf"
 printf 'state=failed\nmode=compatibility\nreason=self-mount-not-visible\nactiveFont=DemoFont\n' \
     >"$CONFIG/device-font-load-verification.conf"
-assert_status default failed self-mount-not-visible
+assert_status default failed self-mount-failed
+assert_mount_failure oplus_product/fonts
 
 printf 'state=mounted\nbackend=self-overlay\n' >"$CONFIG/self-mount.conf"
 printf 'state=verified\nmode=mount-verified\nreason=\nactiveFont=DemoFont\n' \
@@ -42,7 +54,7 @@ printf 'state=verified\nmode=mount-verified\nreason=\nactiveFont=DemoFont\n' \
 assert_status DemoFont verified ''
 
 printf 'state=failed\nbackend=rollback\nfailed=system/etc\n' >"$CONFIG/self-mount.conf"
-assert_status default failed ''
+assert_status default failed self-mount-failed
 
 printf 'state=mounted\nbackend=self-overlay\n' >"$CONFIG/self-mount.conf"
 printf 'state=verified\nmode=mount-verified\nreason=\nactiveFont=OldFont\n' \

@@ -24,11 +24,10 @@ import androidx.compose.ui.unit.dp
  * compensates only the vector path, so selected/disabled/loading states never jump.
  */
 internal object LuoShuIconTokens {
-    // Material Studio already used a 56 dp refresh action while the shared tool action was 48 dp.
-    // Use one 56 dp header touch/container contract in every style so paired actions align exactly.
-    val HeaderContainer = 56.dp
-    val HeaderGlyph = 22.dp
-    val DockGlyph = 20.dp
+    // Keep paired header actions aligned without letting them dominate compact phone layouts.
+    val HeaderContainer = 48.dp
+    val HeaderGlyph = 20.dp
+    val DockGlyph = 19.dp
     val SectionGlyph = 18.dp
     val ToolGlyph = 20.dp
     val LeadingGlyph = 20.dp

@@ -30,13 +30,12 @@ grep -q 'horizontalArrangement = Arrangement.spacedBy(10.dp)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
 ! grep -q 'top = if (style == UiStyle.MIUIX)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
-# All routed header actions now share the 56 dp touch/container contract; Material Studio's refresh
-# action was already 56 dp, so its adjacent tool button no longer renders smaller than refresh.
+# All routed header actions share the compact 48 dp touch/container contract.
 grep -q 'LuoShuHeaderAction(' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
-grep -q 'HeaderContainer = 56.dp' \
+grep -q 'HeaderContainer = 48.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
-grep -q 'HeaderGlyph = 22.dp' \
+grep -q 'HeaderGlyph = 20.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
 grep -q 'timeoutSeconds = 390' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
