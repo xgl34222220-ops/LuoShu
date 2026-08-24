@@ -192,36 +192,6 @@ def glyph_bounds(font: TTFont, codepoints: Iterable[int]) -> dict[int, tuple[flo
     return result
 
 
-# HyperOS control layouts are tuned around a tight line box, so the physical slots there ask for a
-# fixed contract instead of one grown from the font's own outlines. The tight box is only safe while
-# it still encloses the text that is actually drawn: a CJK face whose ink reaches past the cap has
-# its overflow painted into the previous line (酷安标题压住热度) or clipped (QQ 年龄标签少一截).
-# The compact profile therefore keeps the fixed ratios but measures the UI probe set -- the very
-# characters that get rendered -- rather than ignoring the outlines altogether.
-COMPACT_TYPO_ASCENDER_RATIO = 0.98
-COMPACT_TYPO_DESCENDER_RATIO = 0.30
-COMPACT_WIN_ASCENT_CAP_RATIO = 0.98
-COMPACT_WIN_DESCENT_CAP_RATIO = 0.35
-COMPACT_HHEA_ASCENT_CAP_RATIO = 0.98
-COMPACT_HHEA_DESCENT_CAP_RATIO = 0.30
-
-
-def probe_outline_extremes(font: TTFont) -> tuple[float, float] | None:
-    """Ink extremes across the UI probe set only.
-
-    Full-font extremes let one rare glyph with a long tail inflate the line box for every screen,
-    which is what the compact profile exists to avoid. Ignoring outlines entirely goes too far the
-    other way and clips ordinary text. The probes are the CJK, Latin, digit and descender characters
-    that actually appear in UI strings, so they bound the box by what is really drawn.
-    """
-    bounds = glyph_bounds(font, UI_PROBES)
-    if not bounds:
-        return None
-    bottom = min(item[1] for item in bounds.values())
-    top = max(item[3] for item in bounds.values())
-    return (float(bottom), float(top))
-
-
 def _outline_extremes(font: TTFont) -> tuple[float, float] | None:
     """True outline ink extremes across every glyph, from the outlines themselves.
 
@@ -330,7 +300,6 @@ def normalize_font_metrics(
     font: TTFont,
     monospaced: bool = False,
     target_contract: dict[str, Any] | None = None,
-    compact: bool = False,
 ) -> dict[str, object]:
     if "head" not in font or "hhea" not in font or "OS/2" not in font:
         raise MetricsError("字体缺少 head、hhea 或 OS/2 度量表")
@@ -346,12 +315,7 @@ def normalize_font_metrics(
     # Android control baselines are derived from hhea/OS/2 ratios. Prefer the main stock UI slot
     # discovered on this ROM; only fall back to the historical Roboto contract when the inventory
     # is missing, stale or malformed. The hhea/typo enclosure logic below is intentionally unchanged.
-    if compact:
-        # The compact contract is deliberate and does not consult the device inventory.
-        ascender_ratio = COMPACT_TYPO_ASCENDER_RATIO
-        descender_ratio = COMPACT_TYPO_DESCENDER_RATIO
-        metrics_source = "compact"
-    elif target_contract is not None:
+    if target_contract is not None:
         ascender_ratio = float(target_contract["ascentRatio"])
         descender_ratio = float(target_contract["descentRatio"])
         metrics_source = "inventory"
@@ -365,29 +329,16 @@ def normalize_font_metrics(
     descender = _clamp_signed(-descender_abs)
 
     head = font["head"]
-    import math
-
-    if compact:
-        # head.yMax/yMin is the box around *every* glyph, so a single rare long-tailed character
-        # would defeat the whole point of a compact contract. Bound the box by the UI probe set
-        # alone -- the CJK, Latin, digit and descender characters that actually get rendered.
-        probes = probe_outline_extremes(font)
-        if probes is not None:
-            y_min = int(math.floor(probes[0]))
-            y_max = int(math.ceil(probes[1]))
-        else:
-            y_max = int(round(upem * ascender_ratio))
-            y_min = -int(round(upem * descender_ratio))
-    else:
-        y_max = int(getattr(head, "yMax", ascender))
-        y_min = int(getattr(head, "yMin", -descender_abs))
-        # head.yMax/yMin can be stale (composite builds recalc the box only at save time),
-        # so enclose the true outline extremes as well; otherwise hhea/typo stay contracted
-        # and ink still overflows the line box (标题压热度 / 标签少一截).
-        extremes = _outline_extremes(font)
-        if extremes is not None:
-            y_min = min(y_min, int(math.floor(extremes[0])))
-            y_max = max(y_max, int(math.ceil(extremes[1])))
+    y_max = int(getattr(head, "yMax", ascender))
+    y_min = int(getattr(head, "yMin", -descender_abs))
+    # head.yMax/yMin can be stale (composite builds recalc the box only at save time),
+    # so enclose the true outline extremes as well; otherwise hhea/typo stay contracted
+    # and ink still overflows the line box (标题压热度 / 标签少一截).
+    extremes = _outline_extremes(font)
+    if extremes is not None:
+        import math
+        y_min = min(y_min, int(math.floor(extremes[0])))
+        y_max = max(y_max, int(math.ceil(extremes[1])))
 
     # Apps rendering with includeFontPadding=false lay out (and clip) against the hhea line
     # box. When a CJK face's ink extends past the declared box, the overflow paints into the
@@ -395,20 +346,8 @@ def normalize_font_metrics(
     # extremes in hhea — floored at the stable contract so compact faces keep stock spacing —
     # typo mirrors this enclosed box (see below); win stays capped on the contract, leaving
     # includeFontPadding=true spacing unchanged.
-    if compact:
-        # A cap below the measured ink is what pushed overflow into the neighbouring line. Raise the
-        # cap to whatever the probes need, so the box stays tight but never cuts into real text.
-        hhea_ascent_cap = max(int(round(upem * COMPACT_HHEA_ASCENT_CAP_RATIO)), y_max)
-        hhea_descent_cap = max(int(round(upem * COMPACT_HHEA_DESCENT_CAP_RATIO)), -y_min)
-        win_ascent_cap_ratio = COMPACT_WIN_ASCENT_CAP_RATIO
-        win_descent_cap_ratio = COMPACT_WIN_DESCENT_CAP_RATIO
-    else:
-        hhea_ascent_cap = int(round(upem * HHEA_ASCENT_CAP_RATIO))
-        hhea_descent_cap = int(round(upem * HHEA_DESCENT_CAP_RATIO))
-        win_ascent_cap_ratio = WIN_ASCENT_CAP_RATIO
-        win_descent_cap_ratio = WIN_DESCENT_CAP_RATIO
-    hhea_ascent = _clamp_signed(min(max(ascender, y_max), hhea_ascent_cap))
-    hhea_descent_abs = min(max(descender_abs, -y_min), hhea_descent_cap)
+    hhea_ascent = _clamp_signed(min(max(ascender, y_max), int(round(upem * HHEA_ASCENT_CAP_RATIO))))
+    hhea_descent_abs = min(max(descender_abs, -y_min), int(round(upem * HHEA_DESCENT_CAP_RATIO)))
     hhea = font["hhea"]
     hhea.ascent = hhea_ascent
     hhea.descent = _clamp_signed(-int(hhea_descent_abs))
@@ -424,11 +363,8 @@ def normalize_font_metrics(
     os2.sTypoDescender = _clamp_signed(-int(hhea_descent_abs))
     os2.sTypoLineGap = 0
     os2.fsSelection |= 1 << 7
-    win_ascent_cap = int(round(upem * win_ascent_cap_ratio))
-    win_descent_cap = int(round(upem * win_descent_cap_ratio))
-    if compact:
-        win_ascent_cap = max(win_ascent_cap, y_max)
-        win_descent_cap = max(win_descent_cap, -y_min)
+    win_ascent_cap = int(round(upem * WIN_ASCENT_CAP_RATIO))
+    win_descent_cap = int(round(upem * WIN_DESCENT_CAP_RATIO))
     os2.usWinAscent = _clamp_unsigned(min(max(ascender, y_max), win_ascent_cap))
     os2.usWinDescent = _clamp_unsigned(min(max(descender_abs, -y_min), win_descent_cap))
 
@@ -486,16 +422,11 @@ def normalize_path(
     monospaced: bool = False,
     inventory: Path | None = None,
     target_contract: dict[str, Any] | None = None,
-    compact: bool = False,
 ) -> dict[str, object]:
-    contract = None if compact else (
-        target_contract if target_contract is not None else load_inventory_contract(inventory)
-    )
+    contract = target_contract if target_contract is not None else load_inventory_contract(inventory)
     font, face = load_font(source)
     try:
-        report = normalize_font_metrics(
-            font, monospaced=monospaced, target_contract=contract, compact=compact
-        )
+        report = normalize_font_metrics(font, monospaced=monospaced, target_contract=contract)
         atomic_save(font, output)
     finally:
         font.close()
@@ -529,11 +460,6 @@ def main() -> int:
     parser.add_argument("--input", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--monospace", action="store_true")
-    parser.add_argument(
-        "--compact",
-        action="store_true",
-        help="紧凑行框（HyperOS 物理槽）：固定契约，但仍以 UI 探针墨迹为下限，避免裁切与压行",
-    )
     parser.add_argument("--batch", type=Path, help="批量清单：每行 input<TAB>output[<TAB>mono]，单进程处理全部字重")
     parser.add_argument("--inventory", type=Path, default=default_inventory_path(), help="设备原厂字体清单")
     args = parser.parse_args()
@@ -542,7 +468,7 @@ def main() -> int:
     if not args.input or not args.output:
         parser.error("--input 与 --output 为必填（或使用 --batch）")
     try:
-        print(json.dumps(normalize_path(args.input, args.output, args.monospace, inventory=args.inventory, compact=args.compact), ensure_ascii=False, separators=(",", ":")))
+        print(json.dumps(normalize_path(args.input, args.output, args.monospace, inventory=args.inventory), ensure_ascii=False, separators=(",", ":")))
         return 0
     except Exception as error:
         args.output.unlink(missing_ok=True)

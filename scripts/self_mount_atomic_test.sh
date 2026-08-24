@@ -147,20 +147,20 @@ mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/product/etc"
 printf 'new-font\n' > "$MODULE_DIR/system/fonts/Roboto.ttf"
 printf 'stock-font\n' > "$CASE_ROOT/root/system/fonts/Roboto.ttf"
 printf 'product-xml\n' > "$MODULE_DIR/product/etc/fonts.xml"
-luoshu_self_mount_ensure || fail 'missing optional payload partition root rolled back system/fonts'
-grep -q '^state=mounted$' "$MODULE_DIR/config/self-mount.conf" || fail 'optional missing partition was not skipped'
-grep -q '^failed=$' "$MODULE_DIR/config/self-mount.conf" || fail 'optional missing partition was recorded as failure'
-test "$(wc -l < "$MODULE_DIR/config/self-mount-required.conf" | tr -d ' ')" -eq 1 || fail 'missing optional root entered required manifest'
+if luoshu_self_mount_ensure; then
+    fail 'missing payload partition root was silently skipped'
+fi
+grep -q 'product/root-unavailable' "$MODULE_DIR/config/self-mount.conf" || fail 'missing partition root reason absent'
 
 setup_case missing-optional-target
 mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/system_ext/fonts" "$CASE_ROOT/root/system_ext"
 printf 'new-font\n' > "$MODULE_DIR/system/fonts/Roboto.ttf"
 printf 'extension-font\n' > "$MODULE_DIR/system_ext/fonts/Extension.ttf"
 printf 'stock-font\n' > "$CASE_ROOT/root/system/fonts/Roboto.ttf"
-luoshu_self_mount_ensure || fail 'missing optional system_ext/fonts target rolled back system/fonts'
-grep -q '^state=mounted$' "$MODULE_DIR/config/self-mount.conf" || fail 'optional missing target was not skipped'
-grep -q '^failed=$' "$MODULE_DIR/config/self-mount.conf" || fail 'optional missing target was recorded as failure'
-test "$(wc -l < "$MODULE_DIR/config/self-mount-required.conf" | tr -d ' ')" -eq 1 || fail 'missing optional target entered required manifest'
+if luoshu_self_mount_ensure; then
+    fail 'missing payload font target was silently skipped'
+fi
+grep -q 'system_ext/fonts-target-missing' "$MODULE_DIR/config/self-mount.conf" || fail 'missing target reason absent'
 
 if [ -n "$FINAL_SCRIPT" ]; then
     setup_case kernelsu-private-payload-missing-optional-target
@@ -169,10 +169,10 @@ if [ -n "$FINAL_SCRIPT" ]; then
     printf 'new-font\n' > "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/system/fonts/Roboto.ttf"
     printf 'extension-font\n' > "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/system_ext/fonts/Extension.ttf"
     printf 'stock-font\n' > "$CASE_ROOT/root/system/fonts/Roboto.ttf"
-    luoshu_self_mount_ensure || fail 'KernelSU private payload rolled back on missing optional system_ext/fonts'
-    grep -q '^state=mounted$' "$MODULE_DIR/config/self-mount.conf" || fail 'KernelSU private payload was not committed'
-    grep -q '^failed=$' "$MODULE_DIR/config/self-mount.conf" || fail 'KernelSU private optional target was recorded as failure'
-    test "$(wc -l < "$MODULE_DIR/config/self-mount-required.conf" | tr -d ' ')" -eq 1 || fail 'KernelSU private optional target entered required manifest'
+    if luoshu_self_mount_ensure; then
+        fail 'KernelSU private payload skipped a missing font target'
+    fi
+    grep -q 'system_ext/fonts-target-missing' "$MODULE_DIR/config/self-mount.conf" || fail 'KernelSU missing target reason absent'
 fi
 
 setup_case bind-compatible-alias
@@ -223,7 +223,11 @@ FAIL_OVERLAY=system-fonts
 if luoshu_self_mount_ensure; then
     fail 'bind fallback with no device-compatible target was accepted'
 fi
-grep -q 'system/fonts-bind-empty' "$MODULE_DIR/config/self-mount.conf" || fail 'empty bind reason absent'
+if [ -n "$FINAL_SCRIPT" ]; then
+    grep -q 'payload-empty' "$MODULE_DIR/config/self-mount.conf" || fail 'final empty bind reason absent'
+else
+    grep -q 'system/fonts-bind-empty' "$MODULE_DIR/config/self-mount.conf" || fail 'empty bind reason absent'
+fi
 
 echo "self-mount transaction tests passed: ${FINAL_SCRIPT:-atomic}"
 

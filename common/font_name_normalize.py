@@ -118,68 +118,14 @@ def atomic_save(font: TTFont, output: Path) -> None:
             pass
 
 
-def _normalize_one(source: Path, output: Path, weight: int, family: str, monospace: bool) -> None:
-    digest = hashlib.sha256(source.read_bytes()).hexdigest()
-    font = TTFont(source, lazy=False, recalcTimestamp=False)
-    try:
-        normalize_font(font, nearest_weight(weight), family, digest, monospaced=monospace)
-        atomic_save(font, output)
-    finally:
-        font.close()
-
-
-def run_batch(job_file: Path) -> int:
-    """Normalize several weights in one interpreter.
-
-    Preparing the nine static weights called this script nine times, and each call paid a full
-    embedded-CPython start. On a phone that start costs far more than the normalization itself.
-
-    Job lines are tab separated:  input<TAB>output<TAB>weight<TAB>family<TAB>monospace(0|1)
-    Result lines:                 output<TAB>ok|error<TAB>message
-    """
-    failed = False
-    for raw in job_file.read_text(encoding="utf-8").splitlines():
-        line = raw.rstrip("\n")
-        if not line.strip():
-            continue
-        fields = line.split("\t")
-        if len(fields) < 3:
-            print(f"\terror\tmalformed job line")
-            failed = True
-            continue
-        source, output, weight = Path(fields[0]), Path(fields[1]), fields[2]
-        family = fields[3] if len(fields) > 3 and fields[3] else "LuoShu UI"
-        monospace = len(fields) > 4 and fields[4] == "1"
-        try:
-            _normalize_one(source, output, int(weight or 400), family, monospace)
-        except (OSError, TTLibError, ValueError) as error:
-            output.unlink(missing_ok=True)
-            message = (str(error) or error.__class__.__name__).replace("\n", " ").replace("\t", " ")
-            print(f"{output}\terror\t{message}")
-            failed = True
-            continue
-        print(f"{output}\tok\t")
-    return 1 if failed else 0
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=Path)
-    parser.add_argument("--output", type=Path)
-    parser.add_argument("--batch", type=Path)
-    parser.add_argument("--weight", type=int, default=400)
+    parser.add_argument("--input", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--weight", required=True, type=int)
     parser.add_argument("--family", default="LuoShu UI")
     parser.add_argument("--monospace", action="store_true")
     args = parser.parse_args()
-
-    if args.batch is not None:
-        try:
-            return run_batch(args.batch)
-        except OSError as error:
-            print(f"font identity normalization batch failed: {error}", file=os.sys.stderr)
-            return 2
-    if args.input is None or args.output is None:
-        parser.error("--input/--output are required unless --batch is used")
 
     weight = nearest_weight(args.weight)
     try:

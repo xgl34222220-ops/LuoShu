@@ -9,7 +9,6 @@ import math
 import os
 import sys
 import unicodedata
-from io import BytesIO
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -146,66 +145,24 @@ def static_instance(font: TTFont, weight: int) -> TTFont:
         raise BuildError(f"可变字体静态实例化失败：{exc}") from exc
 
 
-# One payload build can request the same variable source/face/weight for many distinct slot
-# signatures. Instancing the full variable font for every signature is pure duplicate CPU/RSS work.
-# Cache only variable-font static instances; static fonts keep the direct path. The file identity is
-# deliberately conservative so same-path/same-size replacements cannot reuse stale font bytes.
-_STATIC_INSTANCE_CACHE: dict[tuple[str, int, int, int, int, int, int, int], bytes] = {}
-_STATIC_INSTANCE_CACHE_LIMIT = 4
-
-
-def _open_source_font(path: Path, face_index: int, collection: bool) -> TTFont:
-    kwargs: dict[str, Any] = {"lazy": False, "recalcTimestamp": False, "recalcBBoxes": True}
-    if collection:
-        kwargs["fontNumber"] = max(0, face_index)
-    return TTFont(str(path), **kwargs)
-
-
 def read_source(path: Path, face_index: int, weight: int) -> TTFont:
-    if not path.is_file():
+    if not path.is_file() or path.stat().st_size < 12:
         raise BuildError(f"源字体不可用：{path}")
-    stat = path.stat()
-    if stat.st_size < 12:
-        raise BuildError(f"源字体不可用：{path}")
+    kwargs: dict[str, Any] = {"lazy": False, "recalcTimestamp": False, "recalcBBoxes": True}
     with path.open("rb") as stream:
         collection = stream.read(4) == b"ttcf"
-
-    key = (
-        str(path),
-        int(face_index),
-        int(weight),
-        int(stat.st_dev),
-        int(stat.st_ino),
-        int(stat.st_size),
-        int(stat.st_mtime_ns),
-        int(stat.st_ctime_ns),
-    )
-    cached = _STATIC_INSTANCE_CACHE.get(key)
-    if cached is not None:
-        result = TTFont(BytesIO(cached), lazy=False, recalcTimestamp=False, recalcBBoxes=True)
-        if "glyf" not in result:
-            result.close()
-            raise BuildError("静态实例不包含 TrueType glyf 轮廓")
-        return result
-
-    font = _open_source_font(path, face_index, collection)
+    if collection:
+        kwargs["fontNumber"] = max(0, face_index)
+    font = TTFont(str(path), **kwargs)
     if "glyf" not in font:
         font.close()
         raise BuildError("当前阶段仅支持 TrueType glyf 轮廓；CFF/CFF2 不伪装支持")
-    variable = "fvar" in font
     result = static_instance(font, weight)
     if result is not font:
         font.close()
     if "glyf" not in result:
         result.close()
         raise BuildError("静态实例不包含 TrueType glyf 轮廓")
-
-    if variable:
-        buffer = BytesIO()
-        result.save(buffer, reorderTables=False)
-        if len(_STATIC_INSTANCE_CACHE) >= _STATIC_INSTANCE_CACHE_LIMIT:
-            _STATIC_INSTANCE_CACHE.clear()
-        _STATIC_INSTANCE_CACHE[key] = buffer.getvalue()
     return result
 
 

@@ -95,16 +95,6 @@ font_config_prepare_payload_weights() {
     mkdir -p "$_lcw_stage" 2>/dev/null || return 1
     type mix_stage >/dev/null 2>&1 && mix_stage weight-map '正在准备九档字体映射' 92
 
-    # A variable source has exactly one file behind all nine weights, so the old loop started the
-    # embedded interpreter eighteen times over the same font: nine instancings plus nine identity
-    # normalizations. Interpreter startup on a phone costs more than either step, so both stages run
-    # as a single batch. Static sources never reach the interpreter at all -- they are hard links.
-    _lcw_var_jobs="$_lcw_stage/.instance-jobs"
-    _lcw_name_jobs="$_lcw_stage/.name-jobs"
-    : > "$_lcw_var_jobs" 2>/dev/null || { rm -rf "$_lcw_stage"; return 1; }
-    : > "$_lcw_name_jobs" 2>/dev/null || { rm -rf "$_lcw_stage"; return 1; }
-    _lcw_variable=0
-
     for _lcw_weight in 100 200 300 400 500 600 700 800 900; do
         _lcw_source="$(_luoshu_config_weight_source "$_lcw_weight")" || { rm -rf "$_lcw_stage"; return 1; }
         _lcw_target="$_lcw_stage/LuoShu-${_lcw_weight}.ttf"
@@ -114,57 +104,11 @@ font_config_prepare_payload_weights() {
             return 1
         fi
         if type is_variable_font >/dev/null 2>&1 && is_variable_font "$_lcw_source"; then
-            _lcw_variable=1
-            printf '%s\t%s\tcjk\t%s\twght=%s\n' \
-                "$_lcw_source" "${_lcw_target}.raw" "$_lcw_weight" "$_lcw_weight" >> "$_lcw_var_jobs"
-            printf '%s\t%s\t%s\t%s\t0\n' \
-                "${_lcw_target}.raw" "$_lcw_target" "$_lcw_weight" 'LuoShu UI' >> "$_lcw_name_jobs"
+            _luoshu_config_normalize_weight "$_lcw_source" "$_lcw_target" "$_lcw_weight" || { rm -rf "$_lcw_stage"; return 1; }
         else
             _luoshu_fast_link_font "$_lcw_source" "$_lcw_target" || { rm -rf "$_lcw_stage"; return 1; }
         fi
     done
-
-    if [ "$_lcw_variable" -eq 1 ]; then
-    _lcw_instance="$_lcw_module/common/font_instance.py"
-    _lcw_namer="$_lcw_module/common/font_name_normalize.py"
-    _lcw_batch_ok=0
-    if [ -f "$_lcw_instance" ] && [ -f "$_lcw_namer" ] && type _luoshu_font_config_exec >/dev/null 2>&1; then
-        if _luoshu_font_config_exec "$_lcw_instance" --batch "$_lcw_var_jobs" >/dev/null 2>&1; then
-            if _luoshu_font_config_exec "$_lcw_namer" --batch "$_lcw_name_jobs" >/dev/null 2>&1; then
-                _lcw_batch_ok=1
-            fi
-        fi
-    fi
-
-    if [ "$_lcw_batch_ok" -eq 1 ]; then
-        for _lcw_weight in 100 200 300 400 500 600 700 800 900; do
-            rm -f "$_lcw_stage/LuoShu-${_lcw_weight}.ttf.raw" 2>/dev/null || true
-        done
-    else
-        # A batch can fail after producing some earlier jobs. Remove every partial output
-        # and replay the pre-batch per-weight path instead of leaving a half-built payload.
-        for _lcw_weight in 100 200 300 400 500 600 700 800 900; do
-            rm -f "$_lcw_stage/LuoShu-${_lcw_weight}.ttf" "$_lcw_stage/LuoShu-${_lcw_weight}.ttf.raw" 2>/dev/null || true
-        done
-        for _lcw_weight in 100 200 300 400 500 600 700 800 900; do
-            _lcw_source="$(_luoshu_config_weight_source "$_lcw_weight")" || { rm -rf "$_lcw_stage"; return 1; }
-            _lcw_target="$_lcw_stage/LuoShu-${_lcw_weight}.ttf"
-            if type is_variable_font >/dev/null 2>&1 && is_variable_font "$_lcw_source"; then
-                _luoshu_config_normalize_weight "$_lcw_source" "$_lcw_target" "$_lcw_weight" || {
-                    rm -rf "$_lcw_stage"
-                    return 1
-                }
-            else
-                _luoshu_fast_link_font "$_lcw_source" "$_lcw_target" || { rm -rf "$_lcw_stage"; return 1; }
-            fi
-        done
-    fi
-
-    for _lcw_weight in 100 200 300 400 500 600 700 800 900; do
-        _luoshu_fast_font_ok "$_lcw_stage/LuoShu-${_lcw_weight}.ttf" || { rm -rf "$_lcw_stage"; return 1; }
-    done
-fi
-    rm -f "$_lcw_var_jobs" "$_lcw_name_jobs" 2>/dev/null || true
 
     type mix_stage >/dev/null 2>&1 && mix_stage mono-map '正在生成等宽英文数字映射' 93
     _lcw_mono400="$_lcw_stage/LuoShuMono-400.ttf"

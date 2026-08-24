@@ -35,14 +35,6 @@ class OverlayError(RuntimeError):
 
 
 def local(tag: str) -> str:
-    """Local part of an element tag.
-
-    Comments and processing instructions carry a callable ``tag`` (``ET.Comment`` / ``ET.PI``), and
-    this module parses with ``insert_comments=True``. Without this guard a ROM document containing a
-    comment raises ``AttributeError`` and takes the whole overlay down with it.
-    """
-    if not isinstance(tag, str):
-        return ""
     return tag.rsplit("}", 1)[-1]
 
 
@@ -59,7 +51,7 @@ def is_dynamic_path(path: str) -> bool:
 
 
 def namespace(root: ET.Element) -> str:
-    if isinstance(root.tag, str) and root.tag.startswith("{") and "}" in root.tag:
+    if root.tag.startswith("{") and "}" in root.tag:
         return root.tag.split("}", 1)[0] + "}"
     return ""
 

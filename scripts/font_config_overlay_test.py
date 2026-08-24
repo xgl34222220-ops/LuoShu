@@ -116,54 +116,6 @@ def main() -> int:
         assert serif_font.text == "NotoSerifCJK-Regular.ttc"
         assert serif_font.attrib.get("index") == "0"
 
-    # Real ROM documents carry comments. ElementTree gives a comment node a *callable* tag, and this
-    # module parses with insert_comments=True, so an unguarded local_name(tag) raised
-    # AttributeError and aborted the whole rewrite. Two devices reported exactly that, which is why
-    # the no-hook XML overlay never enabled on them.
-    with tempfile.TemporaryDirectory() as tmp:
-        commented = Path(tmp) / "commented.xml"
-        commented.write_text(
-            '<?xml version="1.0" encoding="utf-8"?>\n'
-            "<!-- copyright banner outside the root -->\n"
-            '<familyset version="23">\n'
-            "    <!-- comment inside familyset -->\n"
-            '    <family name="sans-serif">\n'
-            '        <font weight="400" style="normal">Roboto-Regular.ttf</font>\n'
-            "        <!-- comment inside a family -->\n"
-            '        <font weight="700" style="normal">Roboto-Bold.ttf</font>\n'
-            "    </family>\n"
-            '    <family name="monospace">\n'
-            '        <font weight="400" style="normal">DroidSansMono.ttf</font>\n'
-            "    </family>\n"
-            "</familyset>\n",
-            encoding="utf-8",
-        )
-        tree = parse_xml(commented)
-        report = rewrite_tree(tree, "LuoShu", "LuoShuMono")
-        assert report["changed_fonts"] == 3, report
-        assert report["changed_families"] == ["sans-serif"], report
-        assert report["changed_mono_families"] == ["monospace"], report
-
-        families = {
-            f.attrib.get("name"): f
-            for f in tree.getroot()
-            if isinstance(f.tag, str) and f.tag == "family"
-        }
-        assert child_text(families["sans-serif"]) == ["LuoShu-400.ttf", "LuoShu-700.ttf"]
-        assert child_text(families["monospace"]) == ["LuoShuMono-400.ttf"]
-
-        # The ROM's own comments must survive the rewrite rather than being dropped.
-        out = Path(tmp) / "out.xml"
-        overlay.atomic_write(tree, out)
-        written = out.read_text(encoding="utf-8")
-        assert "comment inside familyset" in written, written
-        assert "comment inside a family" in written, written
-
-        # A non-element tag has no local name; it must never raise.
-        assert overlay.local_name(ET.Comment) == ""
-        assert overlay.local_name(ET.PI) == ""
-        assert overlay.local_name("{urn:x}family") == "family"
-
     print("Font configuration overlay tests passed.")
     return 0
 
