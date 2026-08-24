@@ -19,6 +19,9 @@ grep -q 'timeout=%s' "$ROOT/common/font_switch_task.sh"
 grep -q 'luoshu_switch_perf_mark complete' "$ROOT/common/font_manager.sh"
 grep -q 'luoshu_font_lock_acquire' "$ROOT/common/font_manager.sh"
 grep -q 'luoshu_switch_signal_exit 143' "$ROOT/common/font_manager.sh"
+grep -q 'font_switch_speed_hotfix.sh' "$ROOT/common/font_config_partitions.sh"
+grep -q 'font-target-v28-cache' "$ROOT/common/font_switch_speed_hotfix.sh"
+grep -q 'LUOSHU_SPEED_READY_TOKEN' "$ROOT/common/font_switch_speed_hotfix.sh"
 grep -q 'MiuixTaskCenterHeader(' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
 grep -q 'DiagnosticExportButton(' \
@@ -27,10 +30,11 @@ grep -q 'horizontalArrangement = Arrangement.spacedBy(10.dp)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
 ! grep -q 'top = if (style == UiStyle.MIUIX)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
-# Compact task-center header actions use the shared 48 dp / 22 dp icon system.
+# All routed header actions now share the 56 dp touch/container contract; Material Studio's refresh
+# action was already 56 dp, so its adjacent tool button no longer renders smaller than refresh.
 grep -q 'LuoShuHeaderAction(' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
-grep -q 'HeaderContainer = 48.dp' \
+grep -q 'HeaderContainer = 56.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
 grep -q 'HeaderGlyph = 22.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
@@ -46,6 +50,7 @@ grep -q 'attempt < 9' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/HomeRoute.kt"
 grep -q 'LUOSHU_BOOT_VERIFY_RETRY_LIMIT:-3' "$ROOT/common/device_font_boot_verify.sh"
 
+sh "$ROOT/scripts/font_switch_speed_hotfix_test.sh"
 sh "$ROOT/scripts/font_switch_task_test.sh"
 sh "$ROOT/scripts/font_switch_lock_test.sh"
 sh "$ROOT/scripts/device_font_trust_test.sh"
