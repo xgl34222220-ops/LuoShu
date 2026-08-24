@@ -94,7 +94,7 @@ grep -q 'mount_compat.sh' "$CACHE"
 grep -q 'type luoshu_sync_mount_payload' "$CACHE"
 
 # Task center separates user-facing tasks/issues from raw logs and all routed header
-# actions use the same 48 dp touch box / 22 dp glyph system.
+# actions use the same 56 dp touch box / 22 dp glyph system.
 grep -q 'enum class LogsTab' "$LOGS_COMPACT"
 grep -q 'TASKS("任务")' "$LOGS_COMPACT"
 grep -q 'ISSUES("问题")' "$LOGS_COMPACT"
@@ -170,7 +170,7 @@ grep -q 'ToggleLine("悬浮底栏", "关闭后贴合屏幕底部"' "$SETTINGS"
 grep -q 'embedded: Boolean = false' "$OVERLAY"
 grep -q 'embedded = true' "$SHELL"
 grep -q 'dockClearance' "$SHELL"
-grep -q 'val HeaderContainer = 48.dp' "$ICON_SYSTEM"
+grep -q 'val HeaderContainer = 56.dp' "$ICON_SYSTEM"
 grep -q 'val HeaderGlyph = 22.dp' "$ICON_SYSTEM"
 grep -q 'val DockGlyph = 20.dp' "$ICON_SYSTEM"
 grep -q 'val SectionGlyph = 18.dp' "$ICON_SYSTEM"
