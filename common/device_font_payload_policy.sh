@@ -377,6 +377,21 @@ font_config_enable_for_payload() {
             ;;
     esac
 
+    # A direct App switch is latency-sensitive. On a cache miss the physical inventory/ROM slots
+    # have already been mapped with hard links, so never start XML discovery, nine-weight
+    # preparation or embedded Python in this foreground transaction. The device-aligned cache
+    # worker performs that enhancement after the lock and transaction are gone.
+    if [ "${LUOSHU_FOREGROUND_QUICK_SWITCH:-0}" = 1 ]; then
+        if type device_font_cache_schedule >/dev/null 2>&1; then
+            device_font_cache_schedule "$_dfpp_family" >/dev/null 2>&1 || true
+        fi
+        [ "${IS_COLOROS:-false}" != true ] || LUOSHU_COLOROS_TARGETS_MAPPED=1
+        export LUOSHU_COLOROS_TARGETS_MAPPED
+        LUOSHU_DEVICE_PAYLOAD_RESULT='slot-only'
+        _device_font_policy_log "前台快速切换已提交物理槽映射；设备对齐缓存转入后台：$_dfpp_family"
+        return 0
+    fi
+
     # A device-cache miss is not a reason to abandon the no-hook XML family overlay. Keep OEM
     # quick-map aliases intact while trying the bounded static path.
     _dfpp_preserve="${LUOSHU_OEM_PRESERVE_ON_CONFIG_DISABLE:-0}"

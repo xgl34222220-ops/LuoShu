@@ -19,6 +19,10 @@ font_validate_global() {
     FONT_CHECK_WARNING=''
     FONT_CHECK_COVERAGE=ok
     FONT_CHECK_ERROR=''
+    LUOSHU_FONT_HAS_CJK=true
+    LUOSHU_FONT_HAS_LATIN=false
+    LUOSHU_FONT_HAS_MIXED=false
+    export LUOSHU_FONT_HAS_CJK LUOSHU_FONT_HAS_LATIN LUOSHU_FONT_HAS_MIXED
     return 0
 }
 font_detect_format() { printf 'TTF\n'; }
@@ -30,6 +34,7 @@ luoshu_font_validate_global_cached "$font"
 [ "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" = false ]
 luoshu_font_validate_global_cached "$font"
 [ "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" = true ]
+[ "$LUOSHU_FONT_HAS_CJK:$LUOSHU_FONT_HAS_LATIN:$LUOSHU_FONT_HAS_MIXED" = true:false:false ]
 [ "$(wc -l < "$calls" | tr -d ' ')" -eq 1 ]
 printf x >> "$font"
 luoshu_font_validate_global_cached "$font"
@@ -49,6 +54,16 @@ unset LUOSHU_VALIDATION_MODE
 luoshu_font_validate_global_cached "$preflight"
 [ "$(wc -l < "$calls" | tr -d ' ')" -eq 3 ]
 
+# Cache entries are per font identity: validating another font must not evict the first one.
+font_two="$TMP/font-two.ttf"
+dd if=/dev/zero of="$font_two" bs=4096 count=2 status=none
+luoshu_font_validate_global_cached "$font_two"
+[ "$(wc -l < "$calls" | tr -d ' ')" -eq 4 ]
+luoshu_font_validate_global_cached "$font"
+[ "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" = true ]
+[ "$(wc -l < "$calls" | tr -d ' ')" -eq 4 ]
+
 # Direct switch still performs the full cached validator inside font_manager.
 ok grep -q 'luoshu_font_validate_global_cached "$_source"' "$ROOT/common/font_manager.sh"
+ok grep -q 'luoshu_font_validation_cache_restore "$_lfrp_font"' "$ROOT/common/font_runtime_policy.sh"
 echo 'font_validation_cache_test: PASS'

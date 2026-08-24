@@ -168,9 +168,9 @@ font_validate_global() {
     return 0
 }
 
-# Old successful cache entries did not carry script capabilities. The real switch
-# therefore always performs the current coverage analysis; only the UI preflight
-# keeps the existing fast structural check.
+# Capability-aware cache entries restore the exact CJK/Latin slot policy. The first validation of
+# a changed font still performs the complete coverage analysis; later switches reuse it by file
+# identity without opening the font in Python again.
 luoshu_font_validate_global_cached() {
     _lfrp_font="$1"
     LUOSHU_FONT_VALIDATION_CACHE_HIT=false
@@ -181,7 +181,14 @@ luoshu_font_validate_global_cached() {
         luoshu_font_validation_fast_preflight "$_lfrp_font"
         return $?
     fi
-    font_validate_global "$_lfrp_font"
+    if type luoshu_font_validation_cache_restore >/dev/null 2>&1 && \
+       luoshu_font_validation_cache_restore "$_lfrp_font"; then
+        return 0
+    fi
+    font_validate_global "$_lfrp_font" || return $?
+    type luoshu_font_validation_cache_store >/dev/null 2>&1 && \
+        luoshu_font_validation_cache_store "$_lfrp_font" >/dev/null 2>&1 || true
+    return 0
 }
 
 _lfrp_target_kind() {

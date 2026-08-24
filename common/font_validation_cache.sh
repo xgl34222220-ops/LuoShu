@@ -5,12 +5,35 @@
 set +e
 
 # Increment whenever the meaning of a successful global-font validation changes.
-# v2 requires broad CJK coverage instead of the old tiny probe phrase.
-LUOSHU_FONT_VALIDATION_SCHEMA="${LUOSHU_FONT_VALIDATION_SCHEMA:-global-v2-cjk6000}"
+# v3 stores script capabilities with the validation result. That lets the runtime safely restore
+# its CJK/Latin slot policy instead of rescanning the complete cmap whenever a font is selected.
+LUOSHU_FONT_VALIDATION_SCHEMA="${LUOSHU_FONT_VALIDATION_SCHEMA:-global-v3-capabilities}"
+
+luoshu_font_validation_hash() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+    elif command -v busybox >/dev/null 2>&1; then
+        busybox sha256sum | awk '{print $1}'
+    else
+        cksum | awk '{print $1 "-" $2}'
+    fi
+}
 
 luoshu_font_validation_cache_path() {
     _lfvcp_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
-    printf '%s/config/font-validation-cache.conf\n' "$_lfvcp_module"
+    _lfvcp_file="${1:-}"
+    if [ -z "$_lfvcp_file" ]; then
+        printf '%s/config/font-validation-cache.conf\n' "$_lfvcp_module"
+        return 0
+    fi
+    _lfvcp_identity="$(luoshu_font_validation_identity "$_lfvcp_file")" || return 1
+    _lfvcp_key=$({
+        printf '%s\n' "$LUOSHU_FONT_VALIDATION_SCHEMA"
+        printf '%s\n' "$_lfvcp_file"
+        printf '%s\n' "$_lfvcp_identity"
+    } | luoshu_font_validation_hash)
+    [ -n "$_lfvcp_key" ] || return 1
+    printf '%s/config/font-validation-cache/%s.conf\n' "$_lfvcp_module" "$_lfvcp_key"
 }
 
 luoshu_font_validation_identity() {
@@ -26,26 +49,35 @@ luoshu_font_validation_identity() {
 
 luoshu_font_validation_read() {
     _lfvr_key="$1"
-    _lfvr_cache="$(luoshu_font_validation_cache_path)"
+    _lfvr_cache="$2"
     sed -n "s/^${_lfvr_key}=//p" "$_lfvr_cache" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
 
 luoshu_font_validation_cache_restore() {
     _lfvcr_file="$1"
-    _lfvcr_cache="$(luoshu_font_validation_cache_path)"
+    _lfvcr_cache="$(luoshu_font_validation_cache_path "$_lfvcr_file")" || return 1
     [ -s "$_lfvcr_cache" ] || return 1
-    [ "$(luoshu_font_validation_read schema)" = "$LUOSHU_FONT_VALIDATION_SCHEMA" ] || return 1
-    [ "$(luoshu_font_validation_read valid)" = true ] || return 1
-    [ "$(luoshu_font_validation_read path)" = "$_lfvcr_file" ] || return 1
+    [ "$(luoshu_font_validation_read schema "$_lfvcr_cache")" = "$LUOSHU_FONT_VALIDATION_SCHEMA" ] || return 1
+    [ "$(luoshu_font_validation_read valid "$_lfvcr_cache")" = true ] || return 1
+    [ "$(luoshu_font_validation_read path "$_lfvcr_cache")" = "$_lfvcr_file" ] || return 1
     _lfvcr_now="$(luoshu_font_validation_identity "$_lfvcr_file")" || return 1
-    [ -n "$_lfvcr_now" ] && [ "$_lfvcr_now" = "$(luoshu_font_validation_read identity)" ] || return 1
+    [ -n "$_lfvcr_now" ] && [ "$_lfvcr_now" = "$(luoshu_font_validation_read identity "$_lfvcr_cache")" ] || return 1
 
-    FONT_CHECK_FORMAT="$(luoshu_font_validation_read format)"
-    FONT_CHECK_SIZE="$(luoshu_font_validation_read bytes)"
-    FONT_CHECK_VARIABLE="$(luoshu_font_validation_read variable)"
-    FONT_CHECK_COLOR="$(luoshu_font_validation_read color)"
-    FONT_CHECK_WARNING="$(luoshu_font_validation_read warning)"
-    FONT_CHECK_COVERAGE="$(luoshu_font_validation_read coverage)"
+    LUOSHU_FONT_HAS_CJK="$(luoshu_font_validation_read hasCjk "$_lfvcr_cache")"
+    LUOSHU_FONT_HAS_LATIN="$(luoshu_font_validation_read hasLatin "$_lfvcr_cache")"
+    LUOSHU_FONT_HAS_MIXED="$(luoshu_font_validation_read hasMixed "$_lfvcr_cache")"
+    case "$LUOSHU_FONT_HAS_CJK:$LUOSHU_FONT_HAS_LATIN:$LUOSHU_FONT_HAS_MIXED" in
+        true:true:true|true:false:false|false:true:false) ;;
+        *) return 1 ;;
+    esac
+    export LUOSHU_FONT_HAS_CJK LUOSHU_FONT_HAS_LATIN LUOSHU_FONT_HAS_MIXED
+
+    FONT_CHECK_FORMAT="$(luoshu_font_validation_read format "$_lfvcr_cache")"
+    FONT_CHECK_SIZE="$(luoshu_font_validation_read bytes "$_lfvcr_cache")"
+    FONT_CHECK_VARIABLE="$(luoshu_font_validation_read variable "$_lfvcr_cache")"
+    FONT_CHECK_COLOR="$(luoshu_font_validation_read color "$_lfvcr_cache")"
+    FONT_CHECK_WARNING="$(luoshu_font_validation_read warning "$_lfvcr_cache")"
+    FONT_CHECK_COVERAGE="$(luoshu_font_validation_read coverage "$_lfvcr_cache")"
     FONT_CHECK_ERROR=''
     LUOSHU_FONT_VALIDATION_CACHE_HIT=true
     export LUOSHU_FONT_VALIDATION_CACHE_HIT
@@ -55,7 +87,7 @@ luoshu_font_validation_cache_restore() {
 luoshu_font_validation_cache_store() {
     _lfvcs_file="$1"
     _lfvcs_identity="$(luoshu_font_validation_identity "$_lfvcs_file")" || return 1
-    _lfvcs_cache="$(luoshu_font_validation_cache_path)"
+    _lfvcs_cache="$(luoshu_font_validation_cache_path "$_lfvcs_file")" || return 1
     _lfvcs_tmp="${_lfvcs_cache}.tmp.$$"
     mkdir -p "${_lfvcs_cache%/*}" 2>/dev/null || return 1
     {
@@ -69,6 +101,9 @@ luoshu_font_validation_cache_store() {
         printf 'color=%s\n' "${FONT_CHECK_COLOR:-false}"
         printf 'warning=%s\n' "$(printf '%s' "${FONT_CHECK_WARNING:-}" | tr '\n\r' '  ')"
         printf 'coverage=%s\n' "$(printf '%s' "${FONT_CHECK_COVERAGE:-}" | tr '\n\r' '  ')"
+        printf 'hasCjk=%s\n' "${LUOSHU_FONT_HAS_CJK:-true}"
+        printf 'hasLatin=%s\n' "${LUOSHU_FONT_HAS_LATIN:-true}"
+        printf 'hasMixed=%s\n' "${LUOSHU_FONT_HAS_MIXED:-true}"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$_lfvcs_tmp" 2>/dev/null || return 1
     mv -f "$_lfvcs_tmp" "$_lfvcs_cache" 2>/dev/null || return 1
