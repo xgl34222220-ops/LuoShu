@@ -2,6 +2,14 @@ package io.github.xgl34222220.luoshu.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +31,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.OpenInNew
@@ -37,6 +47,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -68,8 +79,11 @@ import io.github.xgl34222220.luoshu.ui.appearance.KolorStyle
 import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuDetailBar
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
 
 data class AppearanceActions(
     val setUiStyle: (UiStyle) -> Unit,
@@ -86,108 +100,246 @@ data class AppearanceActions(
 
 private enum class SettingsSection(
     val label: String,
+    val description: String,
     val icon: ImageVector,
     val opticalScale: Float,
 ) {
-    OVERVIEW("总览", Icons.Rounded.Settings, .94f),
-    APPEARANCE("外观", Icons.Rounded.Palette, 1.00f),
-    SAFETY("安全", Icons.Rounded.Security, .96f),
-    BACKUP("备份", Icons.Rounded.Backup, 1.08f),
-    UPDATE("更新", Icons.Rounded.SystemUpdate, 1.03f),
+    OVERVIEW("洛书状态", "版本、Root、挂载与当前字体", Icons.Rounded.Settings, .94f),
+    APPEARANCE("外观与主题", "颜色、深色模式与界面效果", Icons.Rounded.Palette, 1.00f),
+    SAFETY("安全与维护", "字体加载检查、冲突与安全清理", Icons.Rounded.Security, .96f),
+    BACKUP("备份与恢复", "完整备份洛书数据和组合方案", Icons.Rounded.Backup, 1.08f),
+    UPDATE("软件更新", "稳定版、预发行版与下载说明", Icons.Rounded.SystemUpdate, 1.03f),
 }
 
 @Composable
-fun AppearanceSettingsRoute(settings: AppearanceSettings, actions: AppearanceActions) {
-    SettingsHubRoute(settings, actions)
+fun AppearanceSettingsRoute(
+    settings: AppearanceSettings,
+    actions: AppearanceActions,
+    onOpenTasks: () -> Unit = {},
+    onDetailChanged: (Boolean) -> Unit = {},
+) {
+    SettingsHubRoute(settings, actions, onOpenTasks, onDetailChanged)
 }
 
 @Composable
-internal fun SettingsHubRoute(settings: AppearanceSettings, actions: AppearanceActions) {
+internal fun SettingsHubRoute(
+    settings: AppearanceSettings,
+    actions: AppearanceActions,
+    onOpenTasks: () -> Unit,
+    onDetailChanged: (Boolean) -> Unit,
+) {
     val model: SystemCenterViewModel = viewModel()
-    var sectionName by rememberSaveable { mutableStateOf(SettingsSection.OVERVIEW.name) }
-    val section = runCatching { SettingsSection.valueOf(sectionName) }.getOrDefault(SettingsSection.OVERVIEW)
+    var sectionName by rememberSaveable { mutableStateOf<String?>(null) }
+    val section = sectionName?.let { runCatching { SettingsSection.valueOf(it) }.getOrNull() }
     LaunchedEffect(Unit) {
         model.refreshHealth()
         model.checkUpdate()
     }
-    Column(Modifier.fillMaxSize().navigationBarsPadding()) {
-        HubHeader(settings.uiStyle)
-        Surface(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
-            shape = RoundedCornerShape(19.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = if (settings.uiStyle == UiStyle.MIUIX) .62f else .90f),
-        ) {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                SettingsSection.entries.forEach { item ->
-                    val active = item == section
-                    Surface(
-                        onClick = {
-                            sectionName = item.name
-                            if (item == SettingsSection.SAFETY) model.refreshHealth()
-                            if (item == SettingsSection.UPDATE) model.checkUpdate()
-                        },
-                        modifier = Modifier.width(70.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        color = if (active) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
-                        contentColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                        shadowElevation = if (active && settings.uiStyle == UiStyle.MIUIX) 2.dp else 0.dp,
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 7.dp, vertical = 7.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                        ) {
-                            LuoShuGlyph(
-                                imageVector = item.icon,
-                                contentDescription = null,
-                                size = LuoShuIconTokens.SectionGlyph,
-                                opticalScale = item.opticalScale,
-                            )
-                            Spacer(Modifier.width(5.dp))
-                            Text(item.label, fontSize = 10.sp, fontWeight = if (active) FontWeight.Black else FontWeight.SemiBold)
-                        }
+    LaunchedEffect(section) { onDetailChanged(section != null) }
+    BackHandler(enabled = section != null) { sectionName = null }
+
+    fun openSection(item: SettingsSection) {
+        sectionName = item.name
+        if (item == SettingsSection.SAFETY) model.refreshHealth()
+        if (item == SettingsSection.UPDATE) model.checkUpdate()
+    }
+
+    AnimatedContent(
+        targetState = section,
+        modifier = Modifier.fillMaxSize(),
+        transitionSpec = {
+            if (targetState != null) {
+                (fadeIn(tween(220)) + slideInHorizontally(tween(280)) { it })
+                    .togetherWith(fadeOut(tween(140)) + slideOutHorizontally(tween(240)) { -it / 10 })
+            } else {
+                (fadeIn(tween(180)) + slideInHorizontally(tween(240)) { -it / 10 })
+                    .togetherWith(fadeOut(tween(180)) + slideOutHorizontally(tween(280)) { it })
+            }
+        },
+        label = "settingsDetailTransition",
+    ) { target ->
+        if (target == null) {
+            SettingsHome(
+                model = model,
+                onOpenSection = ::openSection,
+                onOpenTasks = onOpenTasks,
+            )
+        } else {
+            Column(Modifier.fillMaxSize()) {
+                LuoShuDetailBar(title = target.label, onBack = { sectionName = null })
+                Box(Modifier.weight(1f)) {
+                    when (target) {
+                        SettingsSection.OVERVIEW -> OverviewPage(model)
+                        SettingsSection.APPEARANCE -> AppearancePage(settings, actions)
+                        SettingsSection.SAFETY -> SafetyPage(model, settings.uiStyle)
+                        SettingsSection.BACKUP -> pageList { item { FullBackupCard(settings, actions) } }
+                        SettingsSection.UPDATE -> UpdatePage(model)
                     }
                 }
-            }
-        }
-        Box(Modifier.weight(1f)) {
-            when (section) {
-                SettingsSection.OVERVIEW -> OverviewPage(model)
-                SettingsSection.APPEARANCE -> AppearancePage(settings, actions)
-                SettingsSection.SAFETY -> SafetyPage(model, settings.uiStyle)
-                SettingsSection.BACKUP -> pageList { item { FullBackupCard(settings, actions) } }
-                SettingsSection.UPDATE -> UpdatePage(model)
             }
         }
     }
 }
 
 @Composable
-private fun HubHeader(style: UiStyle) {
+private fun SettingsHome(
+    model: SystemCenterViewModel,
+    onOpenSection: (SettingsSection) -> Unit,
+    onOpenTasks: () -> Unit,
+) {
     val tokens = LocalMiuixTokens.current
-    Row(Modifier.fillMaxWidth().padding(16.dp, 8.dp, 16.dp, 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("SETTINGS", color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-            Text("设置中心", color = if (style == UiStyle.MIUIX) tokens.textPrimary else MaterialTheme.colorScheme.onSurface, fontSize = 28.sp, fontWeight = FontWeight.Black)
-            Text("外观 · 安全体检 · 更新通道", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-        }
-        Surface(
-            Modifier.size(LuoShuIconTokens.HeaderContainer),
-            RoundedCornerShape(16.dp),
-            color = MaterialTheme.colorScheme.primary.copy(alpha = .09f),
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                LuoShuGlyph(
-                    imageVector = Icons.Rounded.Settings,
-                    contentDescription = null,
-                    size = LuoShuIconTokens.HeaderGlyph,
-                    opticalScale = .94f,
-                    tint = MaterialTheme.colorScheme.primary,
+    val h = model.health
+    val bottom = maxOf(LocalDockContentPadding.current, 24.dp)
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 14.dp, top = 0.dp, end = 14.dp, bottom = bottom),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item { LuoShuTopBar("设置") }
+        item {
+            SettingsGroup {
+                SettingsNavigationRow(
+                    section = SettingsSection.OVERVIEW,
+                    subtitle = h.summary.ifBlank { SettingsSection.OVERVIEW.description },
+                    onClick = { onOpenSection(SettingsSection.OVERVIEW) },
+                )
+                SettingsDivider()
+                SettingsNavigationRow(
+                    section = SettingsSection.APPEARANCE,
+                    onClick = { onOpenSection(SettingsSection.APPEARANCE) },
                 )
             }
+        }
+        item {
+            SettingsGroup {
+                SettingsNavigationRow(
+                    section = SettingsSection.SAFETY,
+                    onClick = { onOpenSection(SettingsSection.SAFETY) },
+                )
+                SettingsDivider()
+                SettingsNavigationRow(
+                    section = SettingsSection.BACKUP,
+                    onClick = { onOpenSection(SettingsSection.BACKUP) },
+                )
+                SettingsDivider()
+                SettingsNavigationRow(
+                    section = SettingsSection.UPDATE,
+                    subtitle = model.updateInfo.version.takeIf { model.updateInfo.hasUpdate }
+                        ?.let { "发现新版本 $it" }
+                        ?: SettingsSection.UPDATE.description,
+                    onClick = { onOpenSection(SettingsSection.UPDATE) },
+                )
+            }
+        }
+        item {
+            SettingsGroup {
+                SettingsNavigationRow(
+                    icon = Icons.Rounded.Description,
+                    iconScale = .96f,
+                    title = "任务与日志",
+                    subtitle = "查看字体任务、问题和原始日志",
+                    onClick = onOpenTasks,
+                )
+            }
+        }
+        item {
+            Text(
+                "洛书 ${BuildConfig.VERSION_NAME}",
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                color = tokens.textSecondary,
+                textAlign = TextAlign.Center,
+                fontSize = 10.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsGroup(content: @Composable () -> Unit) {
+    val tokens = LocalMiuixTokens.current
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        color = tokens.cardBackground,
+        tonalElevation = 0.dp,
+        shadowElevation = 0.dp,
+    ) {
+        Column { content() }
+    }
+}
+
+@Composable
+private fun SettingsDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 62.dp, end = 14.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .32f),
+    )
+}
+
+@Composable
+private fun SettingsNavigationRow(
+    section: SettingsSection,
+    subtitle: String = section.description,
+    onClick: () -> Unit,
+) = SettingsNavigationRow(
+    icon = section.icon,
+    iconScale = section.opticalScale,
+    title = section.label,
+    subtitle = subtitle,
+    onClick = onClick,
+)
+
+@Composable
+private fun SettingsNavigationRow(
+    icon: ImageVector,
+    iconScale: Float,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    val tokens = LocalMiuixTokens.current
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        color = androidx.compose.ui.graphics.Color.Transparent,
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                modifier = Modifier.size(38.dp),
+                shape = RoundedCornerShape(13.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
+                contentColor = MaterialTheme.colorScheme.primary,
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    LuoShuGlyph(
+                        imageVector = icon,
+                        contentDescription = null,
+                        size = LuoShuIconTokens.SectionGlyph,
+                        opticalScale = iconScale,
+                    )
+                }
+            }
+            Spacer(Modifier.width(11.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, color = tokens.textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    subtitle,
+                    color = tokens.textSecondary,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            LuoShuGlyph(
+                imageVector = Icons.Rounded.ChevronRight,
+                contentDescription = null,
+                size = LuoShuIconTokens.TrailingGlyph,
+                tint = tokens.textSecondary.copy(alpha = .66f),
+            )
         }
     }
 }
@@ -196,8 +348,8 @@ private fun HubHeader(style: UiStyle) {
 private fun pageList(content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
     LazyColumn(
         Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, top = 6.dp, end = 14.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 2.dp, end = 14.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
         content = content,
     )
 }
@@ -265,8 +417,8 @@ private fun AppearancePage(settings: AppearanceSettings, actions: AppearanceActi
         SettingCard("视觉与显示") {
             ToggleLine("Monet 动态取色", "跟随系统壁纸强调色", settings.monetEnabled, actions.setMonetEnabled)
             ToggleLine("纯黑深色模式", "AMOLED 黑色背景", settings.amoledBlack, actions.setAmoledBlack)
-            ToggleLine("玻璃半透明", "启用卡片和底栏玻璃层", settings.glassEnabled, actions.setGlassEnabled)
-            ToggleLine("背景模糊", "模糊玻璃层后方内容", settings.blurEnabled, actions.setBlurEnabled, settings.glassEnabled)
+            ToggleLine("玻璃半透明", "用于悬浮底栏和弹层，内容卡片保持清晰", settings.glassEnabled, actions.setGlassEnabled)
+            ToggleLine("背景模糊", "模糊底栏后方经过的内容", settings.blurEnabled, actions.setBlurEnabled, settings.glassEnabled)
             ToggleLine("悬浮底栏", "关闭后贴合屏幕底部", settings.floatingDock, actions.setFloatingDock)
             ToggleLine("高刷新率", "优先同分辨率高刷新模式", settings.highRefreshRate, actions.setHighRefreshRate)
         }
@@ -382,7 +534,12 @@ private fun ToggleLine(title: String, description: String, checked: Boolean, onC
 
 @Composable
 private fun SettingCard(title: String, content: @Composable () -> Unit) {
-    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .86f))) {
+    val tokens = LocalMiuixTokens.current
+    Card(
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) { Text(title, fontSize = 15.sp, fontWeight = FontWeight.Black); Spacer(Modifier.height(8.dp)); content() }
     }
 }
@@ -390,7 +547,12 @@ private fun SettingCard(title: String, content: @Composable () -> Unit) {
 @Composable
 private fun StatusCard(title: String, subtitle: String, level: HealthLevel, loading: Boolean, content: @Composable () -> Unit) {
     val accent = when (level) { HealthLevel.HEALTHY -> MaterialTheme.colorScheme.primary; HealthLevel.WARNING -> MaterialTheme.colorScheme.tertiary; HealthLevel.ERROR -> MaterialTheme.colorScheme.error }
-    Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .9f))) {
+    val tokens = LocalMiuixTokens.current
+    Card(
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(Modifier.size(38.dp), RoundedCornerShape(13.dp), color = accent.copy(alpha = .11f), contentColor = accent) {

@@ -22,6 +22,7 @@ internal fun LogsRoute(
     style: UiStyle,
     state: LogsUiState,
     actions: LogsActions,
+    onBack: () -> Unit,
 ) {
     val importViewModel = rememberNativeImportViewModel()
     val importState = importViewModel.state
@@ -48,6 +49,7 @@ internal fun LogsRoute(
             actions = actions,
             diagnosticState = diagnosticState,
             onDiagnostic = onDiagnostic,
+            onBack = onBack,
         )
         ImportTaskControls(
             style = style,

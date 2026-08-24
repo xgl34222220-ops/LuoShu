@@ -28,14 +28,14 @@ grep -q 'horizontalArrangement = Arrangement.spacedBy(10.dp)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
 ! grep -q 'top = if (style == UiStyle.MIUIX)' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
-# All routed header actions share a compact visual container and keep a 48 dp touch target.
+# All routed header actions keep an accessible touch target while their visible surface stays quiet.
 grep -q 'LuoShuHeaderAction(' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
 grep -q 'HeaderTouchTarget = 48.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
-grep -q 'HeaderContainer = 36.dp' \
+grep -q 'HeaderContainer = 30.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
-grep -q 'HeaderGlyph = 18.dp' \
+grep -q 'HeaderGlyph = 17.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
 grep -q 'timeoutSeconds = 390' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"

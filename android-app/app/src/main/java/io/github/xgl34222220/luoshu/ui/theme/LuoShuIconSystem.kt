@@ -28,8 +28,8 @@ internal object LuoShuIconTokens {
     // Keep a full 48 dp touch target, but make the visible button compact enough
     // to stay secondary to the page title on narrow phone layouts.
     val HeaderTouchTarget = 48.dp
-    val HeaderContainer = 36.dp
-    val HeaderGlyph = 18.dp
+    val HeaderContainer = 30.dp
+    val HeaderGlyph = 17.dp
     val DockGlyph = 19.dp
     val SectionGlyph = 18.dp
     val ToolGlyph = 20.dp
@@ -83,11 +83,11 @@ internal fun LuoShuHeaderAction(
     ) {
         Surface(
             modifier = Modifier.size(LuoShuIconTokens.HeaderContainer),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(10.dp),
             color = containerColor,
             contentColor = resolvedContentColor,
-            tonalElevation = 1.dp,
-            shadowElevation = 1.dp,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
         ) {
             IconButton(
                 onClick = onClick,

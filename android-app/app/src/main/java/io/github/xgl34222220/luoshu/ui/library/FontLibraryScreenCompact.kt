@@ -65,6 +65,7 @@ import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
 
 @Composable
 internal fun FontLibraryScreenCompact(
@@ -84,33 +85,11 @@ internal fun FontLibraryScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, top = 8.dp, end = 14.dp, bottom = dockBottomPadding),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 0.dp, end = 14.dp, bottom = dockBottomPadding),
+        verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         item {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "FONT LIBRARY",
-                        color = MaterialTheme.colorScheme.primary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.2.sp,
-                    )
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        "字体库",
-                        color = textPrimary,
-                        fontSize = 29.sp,
-                        lineHeight = 33.sp,
-                        fontWeight = FontWeight.Black,
-                    )
-                    Text(
-                        "${state.visibleCount} 款字体 · ${state.validCount} 款可用",
-                        color = textSecondary,
-                        fontSize = 11.sp,
-                    )
-                }
+            LuoShuTopBar(title = "字体库") {
                 LuoShuHeaderAction(
                     icon = Icons.Rounded.Refresh,
                     contentDescription = "刷新字体库",
@@ -128,7 +107,7 @@ internal fun FontLibraryScreenCompact(
                 onValueChange = actions.setQuery,
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                shape = RoundedCornerShape(18.dp),
+                shape = RoundedCornerShape(16.dp),
                 leadingIcon = {
                     LuoShuGlyph(
                         imageVector = Icons.Rounded.Search,
@@ -166,7 +145,7 @@ internal fun FontLibraryScreenCompact(
         item {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "共 ${state.visibleCount} 款",
+                    "${state.visibleCount} 款字体 · ${state.validCount} 款可用",
                     color = textSecondary,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
@@ -282,17 +261,18 @@ private fun CompactSystemFontRow(
     onRestore: () -> Unit,
 ) {
     Card(
-        shape = RoundedCornerShape(19.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor),
         border = if (active) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .24f)) else null,
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
-                modifier = Modifier.size(50.dp),
-                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.size(44.dp),
+                shape = RoundedCornerShape(14.dp),
                 color = MaterialTheme.colorScheme.primary.copy(alpha = .10f),
             ) {
                 Box(contentAlignment = Alignment.Center) {
@@ -304,28 +284,24 @@ private fun CompactSystemFontRow(
                     )
                 }
             }
-            Spacer(Modifier.width(13.dp))
+            Spacer(Modifier.width(11.dp))
             Column(Modifier.weight(1f)) {
-                Text("系统默认字体", color = textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                Text("系统默认字体", color = textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(2.dp))
-                Text("ROM 原始字体映射", color = textSecondary, fontSize = 10.sp)
-                Spacer(Modifier.height(7.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FontLibraryBadge("系统")
-                    FontLibraryBadge("默认")
-                }
+                Text("ROM 原始字体映射 · 系统默认", color = textSecondary, fontSize = 10.sp)
             }
-            Spacer(Modifier.width(10.dp))
+            Spacer(Modifier.width(8.dp))
             if (active) {
                 StatusPill("使用中", Color(0xFF21966C))
             } else {
                 FilledTonalButton(
                     onClick = onRestore,
                     enabled = !busy,
-                    shape = RoundedCornerShape(14.dp),
-                    contentPadding = PaddingValues(horizontal = 15.dp, vertical = 8.dp),
+                    modifier = Modifier.height(34.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 13.dp, vertical = 0.dp),
                 ) {
-                    Text("恢复", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("恢复", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -347,17 +323,21 @@ private fun CompactFontRow(
     var menuExpanded by remember(font.id) { mutableStateOf(false) }
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onDetails),
-        shape = RoundedCornerShape(19.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (font.valid) cardColor else MaterialTheme.colorScheme.errorContainer.copy(alpha = .34f),
         ),
         border = if (active) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .24f)) else null,
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        Column {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Surface(
-                    modifier = Modifier.size(50.dp),
-                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.size(44.dp),
+                    shape = RoundedCornerShape(14.dp),
                     color = if (font.valid) {
                         MaterialTheme.colorScheme.primary.copy(alpha = .09f)
                     } else {
@@ -370,8 +350,8 @@ private fun CompactFontRow(
                                 font = font,
                                 text = "Aa12",
                                 axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
-                                modifier = Modifier.size(50.dp).padding(5.dp),
-                                textSizeSp = 14f,
+                                modifier = Modifier.size(44.dp).padding(4.dp),
+                                textSizeSp = 13f,
                                 gravity = Gravity.CENTER,
                                 maxLines = 1,
                             )
@@ -385,15 +365,15 @@ private fun CompactFontRow(
                         }
                     }
                 }
-                Spacer(Modifier.width(13.dp))
+                Spacer(Modifier.width(11.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
                         font.name,
                         color = textPrimary,
-                        fontSize = 15.sp,
-                        lineHeight = 19.sp,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 2,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
                     Spacer(Modifier.height(2.dp))
@@ -404,15 +384,34 @@ private fun CompactFontRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
-                    Spacer(Modifier.height(7.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        FontLibraryBadge(fontPrimaryBadge(font))
-                        FontLibraryBadge(if (font.supportsCjk) "中日韩" else "拉丁")
+                    Text(
+                        "${fontPrimaryBadge(font)} · ${if (font.supportsCjk) "中日韩" else "拉丁"}",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                }
+                Spacer(Modifier.width(6.dp))
+                if (active) {
+                    StatusPill("使用中", Color(0xFF21966C))
+                } else {
+                    Button(
+                        onClick = onApply,
+                        enabled = font.valid && !busy,
+                        modifier = Modifier.height(34.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 13.dp, vertical = 0.dp),
+                    ) {
+                        Text("应用", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-                Spacer(Modifier.width(4.dp))
                 Box {
-                    IconButton(onClick = { menuExpanded = true }, enabled = !busy && !active) {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        enabled = !busy && !active,
+                        modifier = Modifier.size(38.dp),
+                    ) {
                         LuoShuGlyph(
                             imageVector = Icons.Rounded.MoreVert,
                             contentDescription = "更多字体操作",
@@ -443,8 +442,10 @@ private fun CompactFontRow(
             }
 
             if (!font.valid && font.error.isNotBlank()) {
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     LuoShuGlyph(
                         imageVector = Icons.Rounded.Warning,
                         contentDescription = null,
@@ -460,30 +461,6 @@ private fun CompactFontRow(
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
-                }
-            }
-
-            Spacer(Modifier.height(11.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    if (font.valid) "轻触卡片预览" else "字体需要检查",
-                    modifier = Modifier.weight(1f),
-                    color = textSecondary.copy(alpha = .82f),
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium,
-                )
-                if (active) {
-                    StatusPill("使用中", Color(0xFF21966C))
-                } else {
-                    Button(
-                        onClick = onApply,
-                        enabled = font.valid && !busy,
-                        modifier = Modifier.height(38.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp),
-                    ) {
-                        Text("应用", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
                 }
             }
         }

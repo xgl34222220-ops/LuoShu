@@ -82,6 +82,7 @@ internal fun TaskCenterHost() {
                 style = appearance.uiStyle,
                 state = model.toLogsUiState(),
                 actions = LogsActions(refresh = model::refreshLogs),
+                onBack = { (context as? Activity)?.finish() },
             )
         }
     }

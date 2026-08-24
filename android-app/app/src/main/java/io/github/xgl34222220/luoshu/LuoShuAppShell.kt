@@ -117,7 +117,7 @@ private val dockPages = listOf(
     AppPage.Home,
     AppPage.Library,
     AppPage.Studio,
-    AppPage.Logs,
+    AppPage.Settings,
 )
 
 @Composable
@@ -128,6 +128,8 @@ internal fun LuoShuAppShell(
 ) {
     val appearance by appearanceViewModel.settings.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(AppPage.Home) }
+    var settingsDetailVisible by rememberSaveable { mutableStateOf(false) }
+    var logsReturnPage by rememberSaveable { mutableStateOf(AppPage.Home) }
     var pendingApply by remember { mutableStateOf<FontItem?>(null) }
     var pendingDelete by remember { mutableStateOf<FontItem?>(null) }
     var restoreDefault by remember { mutableStateOf(false) }
@@ -149,7 +151,12 @@ internal fun LuoShuAppShell(
             AppPage.Settings -> Unit
         }
     }
-    BackHandler(enabled = page != AppPage.Home) { page = AppPage.Home }
+    LaunchedEffect(page) {
+        if (page != AppPage.Settings) settingsDetailVisible = false
+    }
+    BackHandler(
+        enabled = page != AppPage.Home && !(page == AppPage.Settings && settingsDetailVisible),
+    ) { page = if (page == AppPage.Logs) logsReturnPage else AppPage.Home }
 
     val homeActions = remember(viewModel, features) {
         HomeActions(
@@ -159,7 +166,10 @@ internal fun LuoShuAppShell(
             },
             openFontLibrary = { page = AppPage.Library },
             openFontStudio = { page = AppPage.Studio },
-            openLogs = { page = AppPage.Logs },
+            openLogs = {
+                logsReturnPage = AppPage.Home
+                page = AppPage.Logs
+            },
             openSettings = { page = AppPage.Settings },
             restoreDefault = { restoreDefault = true },
             reboot = viewModel::rebootDevice,
@@ -209,16 +219,18 @@ internal fun LuoShuAppShell(
         val blurActive = appearance.blurEnabled && appearance.glassEnabled
         val hazeState = rememberHazeState(blurEnabled = blurActive)
         val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val showDock = page != AppPage.Logs && !(page == AppPage.Settings && settingsDetailVisible)
         val edgeToEdgeGlass = appearance.uiStyle == UiStyle.MIUIX &&
-            appearance.glassEnabled && appearance.floatingDock
+            appearance.glassEnabled && appearance.floatingDock && showDock
         // A floating glass dock overlays a full-height viewport. Lists own the trailing
         // safe space so content can pass behind the glass yet still scroll fully clear.
         val dockClearance = when {
+            !showDock -> 0.dp
             edgeToEdgeGlass -> 0.dp
             !appearance.floatingDock -> navigationBottom + 70.dp
-            else -> navigationBottom + 84.dp
+            else -> navigationBottom + 76.dp
         }
-        val dockContentPadding = if (edgeToEdgeGlass) navigationBottom + 88.dp else 0.dp
+        val dockContentPadding = if (edgeToEdgeGlass) navigationBottom + 78.dp else 0.dp
         val contentModifier = Modifier
             .fillMaxSize()
             .then(if (blurActive) Modifier.hazeSource(state = hazeState) else Modifier)
@@ -231,16 +243,27 @@ internal fun LuoShuAppShell(
                     modifier = Modifier.fillMaxSize(),
                     contentKey = { it },
                     transitionSpec = {
-                        val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
-                        val enterDuration = if (appearance.uiStyle == UiStyle.MIUIX) 200 else 180
-                        val exitDuration = if (appearance.uiStyle == UiStyle.MIUIX) 110 else 100
-                        (fadeIn(tween(enterDuration)) + slideInHorizontally(tween(enterDuration)) { width ->
-                            direction * width / 22
-                        }).togetherWith(
-                            fadeOut(tween(exitDuration)) + slideOutHorizontally(tween(exitDuration)) { width ->
-                                -direction * width / 28
-                            },
-                        )
+                        when {
+                            targetState == AppPage.Logs -> {
+                                (fadeIn(tween(240)) + slideInHorizontally(tween(280)) { it })
+                                    .togetherWith(
+                                        fadeOut(tween(150)) + slideOutHorizontally(tween(240)) { -it / 10 },
+                                    )
+                            }
+                            initialState == AppPage.Logs -> {
+                                (fadeIn(tween(190)) + slideInHorizontally(tween(240)) { -it / 10 })
+                                    .togetherWith(
+                                        fadeOut(tween(190)) + slideOutHorizontally(tween(280)) { it },
+                                    )
+                            }
+                            else -> {
+                                val direction = if (targetState.ordinal >= initialState.ordinal) 1 else -1
+                                (fadeIn(tween(190)) + slideInHorizontally(tween(210)) { direction * it / 30 })
+                                    .togetherWith(
+                                        fadeOut(tween(120)) + slideOutHorizontally(tween(170)) { -direction * it / 36 },
+                                    )
+                            }
+                        }
                     },
                     label = "luoshuPageTransition",
                 ) { target ->
@@ -294,18 +317,30 @@ internal fun LuoShuAppShell(
                                     style = appearance.uiStyle,
                                     state = viewModel.toLogsUiState(),
                                     actions = logsActions,
+                                    onBack = { page = logsReturnPage },
                                 )
                             }
                         }
-                        AppPage.Settings -> AppearanceSettingsRoute(
-                            settings = appearance,
-                            actions = appearanceActions,
-                        )
+                        AppPage.Settings -> Box(
+                            modifier = Modifier.fillMaxSize().padding(bottom = dockClearance),
+                        ) {
+                            CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
+                                AppearanceSettingsRoute(
+                                    settings = appearance,
+                                    actions = appearanceActions,
+                                    onOpenTasks = {
+                                        logsReturnPage = AppPage.Settings
+                                        page = AppPage.Logs
+                                    },
+                                    onDetailChanged = { settingsDetailVisible = it },
+                                )
+                            }
+                        }
                     }
                 }
             }
 
-            if (page != AppPage.Settings) {
+            if (showDock) {
                 if (appearance.uiStyle == UiStyle.MATERIAL) {
                     MaterialAppDock(
                         current = page,
@@ -411,26 +446,7 @@ private fun AppBackdrop(appearance: AppearanceSettings, dark: Boolean) {
             .fillMaxSize()
             .background(Brush.verticalGradient(base))
             .drawBehind {
-                if (miuix) {
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(
-                                scheme.primary.copy(alpha = if (dark) .18f else .14f),
-                                scheme.secondary.copy(alpha = if (dark) .09f else .07f),
-                                Color.Transparent,
-                            ),
-                            center = Offset(size.width * .50f, size.height * 1.01f),
-                            radius = size.width * .92f,
-                        ),
-                    )
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(scheme.primary.copy(alpha = if (dark) .06f else .05f), Color.Transparent),
-                            center = Offset(size.width * .92f, size.height * .08f),
-                            radius = size.width * .58f,
-                        ),
-                    )
-                } else {
+                if (!miuix) {
                     drawRect(
                         Brush.radialGradient(
                             listOf(scheme.secondary.copy(alpha = if (dark) .13f else .20f), Color.Transparent),
@@ -513,30 +529,18 @@ private fun MiuixAppDock(
     val dark = scheme.background.luminance() < .5f
     val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val floating = appearance.floatingDock
-    val shape = if (floating) RoundedCornerShape(31.dp) else RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp)
+    val shape = if (floating) RoundedCornerShape(27.dp) else RoundedCornerShape(topStart = 27.dp, topEnd = 27.dp)
     val activeGlass = appearance.glassEnabled
     val activeHaze = activeGlass && appearance.blurEnabled
     val hazeModifier = if (activeHaze) {
         Modifier.hazeEffect(state = hazeState, style = HazeMaterials.ultraThin()) {
-            blurRadius = 24.dp
-            noiseFactor = .012f
+            blurRadius = 20.dp
+            noiseFactor = .008f
         }
     } else Modifier
     val glassBrush = when {
-        activeGlass && dark -> Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = .07f),
-                tokens.elevatedCardBackground.copy(alpha = .04f),
-                scheme.primary.copy(alpha = .035f),
-            ),
-        )
-        activeGlass -> Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = .12f),
-                Color.White.copy(alpha = .035f),
-                scheme.primary.copy(alpha = .025f),
-            ),
-        )
+        activeGlass && dark -> Brush.verticalGradient(listOf(Color.White.copy(alpha = .08f), Color.White.copy(alpha = .04f)))
+        activeGlass -> Brush.verticalGradient(listOf(Color.White.copy(alpha = .62f), Color.White.copy(alpha = .44f)))
         else -> Brush.verticalGradient(
             listOf(tokens.elevatedCardBackground.copy(alpha = .98f), tokens.elevatedCardBackground.copy(alpha = .98f)),
         )
@@ -546,87 +550,28 @@ private fun MiuixAppDock(
         pages = dockPages,
         current = current,
         onSelect = onSelect,
-        itemHeight = 52.dp,
+        itemHeight = 46.dp,
         modifier = modifier
-            .then(if (floating) Modifier.padding(horizontal = 12.dp).padding(bottom = bottomInset + 6.dp) else Modifier)
+            .then(if (floating) Modifier.padding(horizontal = 12.dp).padding(bottom = bottomInset + 8.dp) else Modifier)
             .fillMaxWidth()
-            .shadow(if (floating) if (activeGlass) 8.dp else 12.dp else 5.dp, shape, clip = false)
+            .shadow(if (floating) 4.dp else 2.dp, shape, clip = false)
             .clip(shape)
             .then(hazeModifier)
             .background(glassBrush)
-            .drawBehind {
-                if (activeGlass) {
-                    val radius = 31.dp.toPx()
-                    val corners = CornerRadius(radius, radius)
-                    drawRoundRect(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = if (dark) .14f else .20f),
-                                Color.White.copy(alpha = if (dark) .04f else .05f),
-                                Color.Transparent,
-                            ),
-                            center = Offset(size.width * .23f, 0f),
-                            radius = size.width * .62f,
-                        ),
-                        cornerRadius = corners,
-                    )
-                    drawRoundRect(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                scheme.primary.copy(alpha = if (dark) .08f else .07f),
-                                scheme.secondary.copy(alpha = if (dark) .03f else .025f),
-                                Color.Transparent,
-                            ),
-                            center = Offset(size.width * .76f, size.height * 1.18f),
-                            radius = size.width * .58f,
-                        ),
-                        cornerRadius = corners,
-                    )
-                    drawRoundRect(
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = if (dark) .20f else .30f),
-                                Color.White.copy(alpha = if (dark) .05f else .08f),
-                                scheme.primary.copy(alpha = if (dark) .10f else .07f),
-                                Color.Transparent,
-                            ),
-                            start = Offset.Zero,
-                            end = Offset(size.width, size.height),
-                        ),
-                        cornerRadius = corners,
-                        style = Stroke(width = 1.05.dp.toPx()),
-                    )
-                    drawLine(
-                        color = Color.White.copy(alpha = if (dark) .14f else .24f),
-                        start = Offset(radius * .78f, 1.25.dp.toPx()),
-                        end = Offset(size.width - radius * .78f, 1.25.dp.toPx()),
-                        strokeWidth = .8.dp.toPx(),
-                    )
-                }
-            }
             .border(
-                if (activeGlass) .6.dp else 1.dp,
+                .6.dp,
                 if (activeGlass) {
-                    if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .20f)
+                    if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .52f)
                 } else if (dark) Color.White.copy(alpha = .10f) else Color.White.copy(alpha = .58f),
                 shape,
             )
             .padding(start = 4.dp, top = 4.dp, end = 4.dp, bottom = if (floating) 4.dp else bottomInset + 4.dp),
-        indicatorColor = if (activeGlass) {
-            Color.White.copy(alpha = if (dark) .05f else .09f)
-        } else {
-            scheme.primary.copy(alpha = if (dark) .20f else .12f)
-        },
-        indicatorBorderColor = if (activeGlass) {
-            if (dark) Color.White.copy(alpha = .14f) else Color.White.copy(alpha = .28f)
-        } else {
-            Color.Transparent
-        },
+        indicatorColor = scheme.primary.copy(alpha = if (dark) .20f else .11f),
+        indicatorBorderColor = Color.Transparent,
         indicatorShadow = 0.dp,
         selectedColor = scheme.primary,
-        unselectedColor = scheme.onSurfaceVariant.copy(alpha = .80f),
+        unselectedColor = scheme.onSurfaceVariant.copy(alpha = .76f),
         label = "luoshuMiuixDockIndicator",
-        liquidLens = activeGlass,
     )
 }
 
@@ -643,21 +588,20 @@ private fun AppDockLayout(
     selectedColor: Color,
     unselectedColor: Color,
     label: String,
-    liquidLens: Boolean = false,
 ) {
     BoxWithConstraints(modifier = modifier) {
         val itemWidth = maxWidth / pages.size.toFloat()
         val targetIndex = pages.indexOf(current).coerceAtLeast(0)
-        val indicatorInset = if (liquidLens) 5.dp else 7.dp
+        val indicatorInset = 6.dp
         val indicatorX by animateDpAsState(
             targetValue = itemWidth * targetIndex.toFloat(),
             animationSpec = spring(
-                dampingRatio = if (liquidLens) .64f else .76f,
-                stiffness = if (liquidLens) Spring.StiffnessLow else Spring.StiffnessMediumLow,
+                dampingRatio = .84f,
+                stiffness = Spring.StiffnessMediumLow,
             ),
             label = label,
         )
-        val indicatorShape = RoundedCornerShape(if (liquidLens) 20.dp else 18.dp)
+        val indicatorShape = RoundedCornerShape(17.dp)
         Box(
             modifier = Modifier
                 .offset(x = indicatorX + indicatorInset)
@@ -666,39 +610,7 @@ private fun AppDockLayout(
                 .shadow(indicatorShadow, indicatorShape, clip = false)
                 .clip(indicatorShape)
                 .background(indicatorColor)
-                .drawBehind {
-                    if (liquidLens) {
-                        val radius = 20.dp.toPx()
-                        val corners = CornerRadius(radius, radius)
-                        drawRoundRect(
-                            brush = Brush.radialGradient(
-                                colors = listOf(
-                                    Color.White.copy(alpha = .18f),
-                                    Color.White.copy(alpha = .04f),
-                                    Color.Transparent,
-                                ),
-                                center = Offset(size.width * .28f, size.height * .08f),
-                                radius = size.width * .58f,
-                            ),
-                            cornerRadius = corners,
-                        )
-                        drawRoundRect(
-                            brush = Brush.radialGradient(
-                                colors = listOf(selectedColor.copy(alpha = .08f), Color.Transparent),
-                                center = Offset(size.width * .72f, size.height * 1.08f),
-                                radius = size.width * .56f,
-                            ),
-                            cornerRadius = corners,
-                        )
-                        drawLine(
-                            color = Color.White.copy(alpha = .16f),
-                            start = Offset(radius * .62f, 1.dp.toPx()),
-                            end = Offset(size.width - radius * .62f, 1.dp.toPx()),
-                            strokeWidth = .7.dp.toPx(),
-                        )
-                    }
-                }
-                .border(if (liquidLens) .7.dp else 1.dp, indicatorBorderColor, indicatorShape),
+                .border(1.dp, indicatorBorderColor, indicatorShape),
         )
         Row(Modifier.fillMaxWidth()) {
             pages.forEach { page ->

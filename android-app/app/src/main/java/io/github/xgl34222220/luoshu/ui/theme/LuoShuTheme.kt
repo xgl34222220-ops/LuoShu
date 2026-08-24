@@ -48,19 +48,19 @@ private val MaterialTypography = Typography(
 )
 
 private val MiuixShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(18.dp),
-    large = RoundedCornerShape(24.dp),
-    extraLarge = RoundedCornerShape(30.dp),
+    extraSmall = RoundedCornerShape(7.dp),
+    small = RoundedCornerShape(11.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(26.dp),
 )
 
 private val MiuixTypography = Typography(
-    displaySmall = TextStyle(fontSize = 42.sp, lineHeight = 47.sp, fontWeight = FontWeight.Black),
-    headlineLarge = TextStyle(fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.Black),
-    headlineMedium = TextStyle(fontSize = 27.sp, lineHeight = 32.sp, fontWeight = FontWeight.Black),
-    headlineSmall = TextStyle(fontSize = 23.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold),
-    titleLarge = TextStyle(fontSize = 20.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold),
+    displaySmall = TextStyle(fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.Black),
+    headlineLarge = TextStyle(fontSize = 30.sp, lineHeight = 35.sp, fontWeight = FontWeight.Black),
+    headlineMedium = TextStyle(fontSize = 24.sp, lineHeight = 29.sp, fontWeight = FontWeight.Black),
+    headlineSmall = TextStyle(fontSize = 21.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold),
+    titleLarge = TextStyle(fontSize = 19.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold),
     titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold),
     titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.Bold),
     bodyLarge = TextStyle(fontSize = 15.sp, lineHeight = 21.sp),
@@ -83,7 +83,7 @@ data class MiuixTokens(
 
 val LocalMiuixTokens = staticCompositionLocalOf {
     MiuixTokens(
-        pageBackground = Color(0xFFF4F4F6),
+        pageBackground = Color(0xFFF5F3FC),
         cardBackground = Color.White,
         elevatedCardBackground = Color.White,
         textPrimary = Color(0xFF16171B),
@@ -133,7 +133,7 @@ private fun LuoShuMiuixTheme(settings: AppearanceSettings, content: @Composable 
             pageBackground = when {
                 pureBlack -> Color.Black
                 dark -> scheme.surfaceContainerLowest
-                else -> scheme.surfaceContainerLow
+                else -> Color(0xFFF5F3FC)
             },
             cardBackground = when {
                 pureBlack -> Color(0xFF080808)
