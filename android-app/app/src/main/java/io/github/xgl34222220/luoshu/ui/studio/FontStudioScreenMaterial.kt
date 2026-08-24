@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import kotlin.math.roundToInt
 
 @Composable
@@ -86,8 +87,9 @@ internal fun FontStudioScreenMaterial(
 
 @Composable
 private fun MaterialStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAction: @Composable () -> Unit) {
+    val actionColor = MaterialTheme.colorScheme.primary
     Row(
-        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 4.dp),
+        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -98,21 +100,24 @@ private fun MaterialStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAct
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 2.2.sp,
             )
-            Spacer(Modifier.height(4.dp))
-            Text("字体组合", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
-            Text("中文、英文、数字与完整设计轴", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+            Spacer(Modifier.height(3.dp))
+            Text("字体组合", fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.Black)
+            Text("中文、英文、数字与完整设计轴", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
-        topAction()
-        Spacer(Modifier.width(10.dp))
-        Surface(
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .84f),
-            shadowElevation = 7.dp,
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            IconButton(onClick = onRefresh, enabled = !loading, modifier = Modifier.size(56.dp)) {
-                if (loading) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                else Icon(Icons.Rounded.Refresh, contentDescription = "刷新组合配置")
-            }
+            topAction()
+            LuoShuHeaderAction(
+                icon = Icons.Rounded.Refresh,
+                contentDescription = "刷新组合配置",
+                onClick = onRefresh,
+                enabled = !loading,
+                loading = loading,
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .84f),
+                contentColor = actionColor,
+            )
         }
     }
 }

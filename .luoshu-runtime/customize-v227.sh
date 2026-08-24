@@ -73,7 +73,7 @@ RUNTIME_RECOVERY_RESET=false
 # 更新安装只迁移活动配置和旧负载；任何耗时字体生成都移到完整开机后的后台服务。
 if type luoshu_runtime_recovery_required >/dev/null 2>&1 && \
    luoshu_runtime_recovery_required "$OLD_MOD" "$MODPATH"; then
-    # v3.3.4 returns to the v3.0 runtime.  Never carry a generated v3.1-v3.3
+    # v3.3.4+ uses the recovered v3.0 runtime.  Never carry a generated v3.1-v3.3
     # payload across that boundary: keep user choices, boot once on stock, and
     # let the user explicitly build a clean payload with the recovered engine.
     RUNTIME_RECOVERY_RESET=true

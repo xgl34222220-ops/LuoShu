@@ -58,9 +58,11 @@ if luoshu_runtime_recovery_required "$RECOVERY_OLD" "$RECOVERY_NEW"; then
 fi
 printf 'id=LuoShu\nversionCode=30305\n' > "$RECOVERY_NEW/module.prop"
 if luoshu_runtime_recovery_required "$RECOVERY_OLD" "$RECOVERY_NEW"; then
-    echo 'future release unexpectedly reused the v3.3.4 one-shot reset' >&2
+    echo 'post-recovery upgrade unexpectedly reset its clean payload' >&2
     exit 1
 fi
+printf 'id=LuoShu\nversionCode=30303\n' > "$RECOVERY_OLD/module.prop"
+luoshu_runtime_recovery_required "$RECOVERY_OLD" "$RECOVERY_NEW"
 
 luoshu_migrate_active_install "$OLD" "$NEW"
 
