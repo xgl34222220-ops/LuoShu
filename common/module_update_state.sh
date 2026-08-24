@@ -8,6 +8,19 @@ LUOSHU_UPDATE_REBUILD_REQUIRED=false
 LUOSHU_UPDATE_REBUILT=false
 LUOSHU_UPDATE_REBUILD_FAILED=false
 
+# v3.1-v3.3 changed variable-font preparation, XML overlays, HyperOS metrics and
+# switch caches in several independent layers.  v3.3.4 deliberately returns to
+# the v3.0 runtime and must not inherit a payload produced by those releases.
+# The reset is one-shot: reflashing the same recovery release keeps its payload.
+luoshu_runtime_recovery_required() {
+    _lrr_old="$1"
+    _lrr_new="$2"
+    [ -f "$_lrr_old/module.prop" ] && [ -f "$_lrr_new/module.prop" ] || return 1
+    _lrr_old_code=$(sed -n 's/^versionCode=//p' "$_lrr_old/module.prop" 2>/dev/null | head -n1)
+    _lrr_new_code=$(sed -n 's/^versionCode=//p' "$_lrr_new/module.prop" 2>/dev/null | head -n1)
+    [ "$_lrr_new_code" = 30304 ] && [ "$_lrr_old_code" != 30304 ]
+}
+
 luoshu_update_payload_schema() {
     sed -n 's/^schema=//p' "$1/config/font-payload-schema.conf" 2>/dev/null | head -n1 | tr -d '\r\n'
 }

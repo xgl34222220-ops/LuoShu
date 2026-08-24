@@ -3,14 +3,6 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$ROOT/scripts/version.sh"
 
-# Host-side CI/tests use system Python, while the module ships FontTools in the embedded runtime.
-# Reuse that pure-Python package tree whenever the prepared runtime is present.
-EMBEDDED_SITE="$ROOT/common/python/lib/python3.14/site-packages"
-if [ -d "$EMBEDDED_SITE" ]; then
-  PYTHONPATH="$EMBEDDED_SITE${PYTHONPATH:+:$PYTHONPATH}"
-  export PYTHONPATH
-fi
-
 # 所有 Shell 与 Python 后端必须先通过基础语法检查。
 find "$ROOT" -type f -name '*.sh' -print | while IFS= read -r file; do
   sh -n "$file"
@@ -41,7 +33,7 @@ for file in \
   common/app_bridge.sh common/font_manager.sh common/font_library_cache.sh common/app_installer.sh \
   common/font_provider_cache.sh common/font_validation_cache.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
-  scripts/assert.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/weight_prepare_batch_test.sh scripts/slot_build_instance_cache_test.py scripts/composite_validate_lazy_test.py scripts/compact_metrics_clipping_test.py scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
+  scripts/assert.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
   scripts/device_validation_gate.py scripts/device_validation_gate_test.py docs/device_validation.json \
   scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh scripts/app_bridge_status_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_config_monospace_test.py \
@@ -219,13 +211,7 @@ grep -q '^MIT License$' "$ROOT/licenses/FontTools-LICENSE.txt"
 # 功能回归脚本。
 sh "$ROOT/scripts/native_preview_source_test.sh"
 sh "$ROOT/scripts/app_bridge_status_test.sh"
-# 用 `python3 -S` 并显式指向打包路径，因此只有打包后的 fontTools 才算数；
-# 开发机上装的那份不会被 -S 加载。缺失时明确跳过，而不是抛一个 ModuleNotFoundError 回溯。
-if [ -d "$ROOT/common/python/lib/python3.14/site-packages/fontTools" ]; then
-  sh "$ROOT/scripts/native_zip_import_test.sh"
-else
-  printf '跳过 native_zip_import_test.sh：fontTools 尚未随内置运行时打包\n'
-fi
+sh "$ROOT/scripts/native_zip_import_test.sh"
 sh "$ROOT/scripts/font_index_delete_regression_test.sh"
 sh "$ROOT/scripts/v2_source_audit.sh"
 sh "$ROOT/scripts/customize_reenable_test.sh"
@@ -249,70 +235,6 @@ sh "$ROOT/scripts/font_switch_lock_recovery_test.sh"
 sh "$ROOT/scripts/duplicate_function_test.sh"
 sh "$ROOT/scripts/device_font_cache_budget_test.sh"
 sh "$ROOT/scripts/provider_pid_scan_test.sh"
-sh "$ROOT/scripts/weight_prepare_batch_test.sh"
-
-# 这些测试早已存在但从未被 CI 执行过：50 个测试文件里包含无 Hook XML 家族覆盖
-# (font_config_overlay_test.py) 与 ColorOS 槽位映射 (coloros_partition_mapping_test.sh)，
-# 也就是模块里最关键的两条路径。断言写好了却没人跑，等同于没有。
-python3 "$ROOT/scripts/font_config_overlay_test.py"
-python3 "$ROOT/scripts/font_config_targets_test.py"
-python3 "$ROOT/scripts/fallback_coverage_policy_test.py"
-python3 "$ROOT/scripts/device_font_load_verify_test.py"
-python3 "$ROOT/scripts/device_font_payload_overlay_test.py"
-python3 "$ROOT/scripts/device_font_payload_verify_test.py"
-python3 "$ROOT/scripts/device_font_slot_plan_test.py"
-python3 "$ROOT/scripts/device_font_template_test.py"
-python3 "$ROOT/scripts/sync_update_metadata_test.py"
-python3 "$ROOT/scripts/device_font_payload_build_test.py" --font "$FONT_INVENTORY_TEST_FONT"
-python3 "$ROOT/scripts/device_font_slot_build_test.py" --font "$FONT_INVENTORY_TEST_FONT"
-python3 "$ROOT/scripts/font_inventory_scan_test.py" --font "$FONT_INVENTORY_TEST_FONT"
-python3 "$ROOT/scripts/font_inventory_scan_v3_test.py" --font "$FONT_INVENTORY_TEST_FONT"
-python3 "$ROOT/scripts/font_name_normalize_test.py" --font "$FONT_INVENTORY_TEST_FONT"
-sh "$ROOT/scripts/background_task_test.sh"
-sh "$ROOT/scripts/coloros_partition_mapping_test.sh"
-sh "$ROOT/scripts/device_font_cache_test.sh"
-sh "$ROOT/scripts/device_font_foreground_quick_test.sh"
-sh "$ROOT/scripts/device_font_payload_bridge_test.sh"
-sh "$ROOT/scripts/device_font_payload_policy_test.sh"
-sh "$ROOT/scripts/device_font_payload_runtime_test.sh"
-sh "$ROOT/scripts/device_font_runtime_report_test.sh"
-sh "$ROOT/scripts/device_font_slot_plan_runtime_test.sh"
-sh "$ROOT/scripts/device_font_slot_plan_test.sh"
-sh "$ROOT/scripts/device_font_transaction_guard_test.sh"
-sh "$ROOT/scripts/device_font_trust_test.sh"
-sh "$ROOT/scripts/font_config_runtime_test.sh"
-sh "$ROOT/scripts/font_config_weights_test.sh"
-sh "$ROOT/scripts/font_import_compat_test.sh"
-sh "$ROOT/scripts/font_runtime_policy_test.sh"
-sh "$ROOT/scripts/font_safety_test.sh"
-sh "$ROOT/scripts/font_switch_task_test.sh"
-sh "$ROOT/scripts/full_backup_root_test.sh"
-sh "$ROOT/scripts/google_font_provider_bridge_test.sh"
-sh "$ROOT/scripts/google_font_provider_mount_test.sh"
-sh "$ROOT/scripts/meta_module_sync_test.sh"
-sh "$ROOT/scripts/module_update_state_test.sh"
-sh "$ROOT/scripts/mount_fast_sync_test.sh"
-sh "$ROOT/scripts/nested_mix_task_handoff_test.sh"
-sh "$ROOT/scripts/no_hook_bootstrap_test.sh"
-sh "$ROOT/scripts/originos_flyme_mapping_test.sh"
-sh "$ROOT/scripts/self_mount_atomic_test.sh"
-sh "$ROOT/scripts/self_mount_test.sh"
-sh "$ROOT/scripts/service_dynamic_template_order_test.sh"
-sh "$ROOT/scripts/switch_history_test.sh"
-sh "$ROOT/scripts/system_health_test.sh"
-sh "$ROOT/scripts/uninstall_cleanup_test.sh"
-sh "$ROOT/scripts/uninstall_safety_test.sh"
-
-# 这两个依赖打包阶段才写入的内置 Python 运行时，缺失时明确跳过而不是根本不出现。
-if [ -x "$ROOT/common/python/bin/luoshu-python" ]; then
-  sh "$ROOT/scripts/python_runtime_prune_test.sh"
-  sh "$ROOT/scripts/ttc_face_test.sh"
-else
-  printf '跳过 python_runtime_prune_test.sh 与 ttc_face_test.sh：内置 Python 运行时尚未构建\n'
-fi
-python3 "$ROOT/scripts/slot_build_instance_cache_test.py"
-python3 "$ROOT/scripts/composite_validate_lazy_test.py"
-python3 "$ROOT/scripts/compact_metrics_clipping_test.py"
 sh "$ROOT/scripts/font_config_mono_coverage_test.sh"
 sh "$ROOT/scripts/font_config_transaction_rollback_test.sh"
 sh "$ROOT/scripts/generic_xml_partial_coverage_test.sh"

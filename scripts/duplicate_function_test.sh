@@ -23,7 +23,6 @@ _dfpr_anchor_lines
 _dfpr_prepare_dynamic_state
 _font_anchor
 _luoshu_config_weight_source
-_luoshu_font_config_exec
 _luoshu_font_config_specs
 _luoshu_magic_mount_present
 _luoshu_mountify_present

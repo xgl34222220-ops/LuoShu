@@ -41,7 +41,7 @@ luoshu_self_mount_ensure() {
     _lsme_failed=''
     _lsme_component_count=0
     _lsme_bind_count=0
-    _lsme_system_fonts_ok=0
+    _lsme_any_fonts_ok=0
 
     for _lsme_partition in $(_lfrp_partitions); do
         _lsme_has_payload=0
@@ -55,24 +55,16 @@ luoshu_self_mount_ensure() {
         [ "$_lsme_has_payload" -eq 1 ] || continue
 
         _lsme_root=$(_luoshu_partition_root "$_lsme_partition") || {
-            if [ "$_lsme_partition" = system ]; then
-                _lsme_failed="$_lsme_partition/root-unavailable"
-                break
-            fi
-            _luoshu_self_log "自挂载跳过本机不存在的可选分区：$_lsme_partition"
-            continue
+            _lsme_failed="$_lsme_partition/root-unavailable"
+            break
         }
         for _lsme_subdir in fonts etc; do
             _lsme_source="$_lsme_payload/$_lsme_partition/$_lsme_subdir"
             [ -d "$_lsme_source" ] && find "$_lsme_source" -type f -print -quit 2>/dev/null | grep -q . || continue
             _lsme_target="$_lsme_root/$_lsme_subdir"
             [ -d "$_lsme_target" ] || {
-                if _luoshu_atomic_component_required "$_lsme_partition" "$_lsme_subdir"; then
-                    _lsme_failed="$_lsme_partition/$_lsme_subdir-target-missing"
-                    break
-                fi
-                _luoshu_self_log "自挂载跳过本机不存在的可选目标：$_lsme_partition/$_lsme_subdir"
-                continue
+                _lsme_failed="$_lsme_partition/$_lsme_subdir-target-missing"
+                break
             }
             _lsme_mode=overlay
             if _luoshu_overlay_mount_dir "$_lsme_source" "$_lsme_target" \
@@ -88,10 +80,6 @@ luoshu_self_mount_ensure() {
                 else
                     _lsme_bind_rc=$?
                     if [ "$_lsme_bind_rc" -eq 2 ] 2>/dev/null; then
-                        if [ "$_lsme_partition/$_lsme_subdir" = system/fonts ]; then
-                            _lsme_failed=system/fonts-bind-empty
-                            break
-                        fi
                         _luoshu_self_log \
                             "自挂载跳过无本机 bind 目标的附加组件：$_lsme_partition/$_lsme_subdir"
                         continue
@@ -111,13 +99,13 @@ luoshu_self_mount_ensure() {
             }
             _lsme_component_count=$((_lsme_component_count + 1))
             _lsme_mounted="${_lsme_mounted}${_lsme_mounted:+,}${_lsme_partition}/${_lsme_subdir}:${_lsme_mode}"
-            [ "$_lsme_partition/$_lsme_subdir" = system/fonts ] && _lsme_system_fonts_ok=1
+            [ "$_lsme_subdir" = fonts ] && _lsme_any_fonts_ok=1
         done
         [ -z "$_lsme_failed" ] || break
     done
 
     [ "$_lsme_component_count" -gt 0 ] 2>/dev/null || _lsme_failed="${_lsme_failed:-payload-empty}"
-    [ "$_lsme_system_fonts_ok" -eq 1 ] 2>/dev/null || _lsme_failed="${_lsme_failed:-system/fonts-required}"
+    [ "$_lsme_any_fonts_ok" -eq 1 ] 2>/dev/null || _lsme_failed="${_lsme_failed:-font-partition-required}"
     if [ -z "$_lsme_failed" ]; then
         _luoshu_atomic_verify_manifest_retry "$_lsme_manifest_temp" || _lsme_failed=pid1-visibility-mismatch
     fi

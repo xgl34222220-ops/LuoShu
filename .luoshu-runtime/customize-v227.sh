@@ -68,9 +68,16 @@ for _enable_dir in "$MODPATH" "$OLD_MOD"; do
 done
 rm -f "$MODPATH/remove" 2>/dev/null || true
 UPDATE_PRESERVED=false
+RUNTIME_RECOVERY_RESET=false
 
 # 更新安装只迁移活动配置和旧负载；任何耗时字体生成都移到完整开机后的后台服务。
-if type luoshu_migrate_active_install >/dev/null 2>&1; then
+if type luoshu_runtime_recovery_required >/dev/null 2>&1 && \
+   luoshu_runtime_recovery_required "$OLD_MOD" "$MODPATH"; then
+    # v3.3.4 returns to the v3.0 runtime.  Never carry a generated v3.1-v3.3
+    # payload across that boundary: keep user choices, boot once on stock, and
+    # let the user explicitly build a clean payload with the recovered engine.
+    RUNTIME_RECOVERY_RESET=true
+elif type luoshu_migrate_active_install >/dev/null 2>&1; then
     if luoshu_migrate_active_install "$OLD_MOD" "$MODPATH"; then
         UPDATE_PRESERVED=true
     fi
@@ -162,7 +169,12 @@ if [ "$UPDATE_PRESERVED" = true ]; then
         ui_print "✓ 更新后只需重启一次，无需重新应用字体"
     fi
 else
-    ui_print "✓ 当前保持系统默认字体"
+    if [ "$RUNTIME_RECOVERY_RESET" = true ]; then
+        ui_print "✓ 已清除 3.1–3.3 生成的旧字体负载"
+        ui_print "✓ 字体选择与组合偏好已保留，首次开机保持系统字体"
+    else
+        ui_print "✓ 当前保持系统默认字体"
+    fi
 fi
 
 if [ -s "$MODPATH/bundled/LuoShu-App.apk" ] && [ -f "$MODPATH/common/app_installer.sh" ]; then

@@ -318,10 +318,7 @@ def _set_names(font: TTFont) -> None:
 
 
 def _validate_output(path: Path) -> dict[str, object]:
-    # This check reads the cmap, draws three probe glyphs and reads maxp. Loading eagerly decompiled
-    # every glyph of the freshly written composite -- a ~20 MB CJK font on a real device -- purely to
-    # look at 中, A and 1. Lazy loading expands only what is actually drawn.
-    font = TTFont(str(path), lazy=True, recalcTimestamp=False)
+    font = TTFont(str(path), lazy=False, recalcTimestamp=False)
     try:
         cmap = font.getBestCmap() or {}
         required = {"cjk": ord("中"), "latin": ord("A"), "digit": ord("1")}
