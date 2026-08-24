@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -24,9 +25,11 @@ import androidx.compose.ui.unit.dp
  * compensates only the vector path, so selected/disabled/loading states never jump.
  */
 internal object LuoShuIconTokens {
-    // Keep paired header actions aligned without letting them dominate compact phone layouts.
-    val HeaderContainer = 48.dp
-    val HeaderGlyph = 20.dp
+    // Keep a full 48 dp touch target, but make the visible button compact enough
+    // to stay secondary to the page title on narrow phone layouts.
+    val HeaderTouchTarget = 48.dp
+    val HeaderContainer = 36.dp
+    val HeaderGlyph = 18.dp
     val DockGlyph = 19.dp
     val SectionGlyph = 18.dp
     val ToolGlyph = 20.dp
@@ -74,33 +77,42 @@ internal fun LuoShuHeaderAction(
     } else {
         contentColor
     }
-    Surface(
-        modifier = modifier.size(LuoShuIconTokens.HeaderContainer),
-        shape = RoundedCornerShape(16.dp),
-        color = containerColor,
-        contentColor = resolvedContentColor,
-        tonalElevation = 2.dp,
-        shadowElevation = 3.dp,
+    Box(
+        modifier = modifier.size(LuoShuIconTokens.HeaderTouchTarget),
+        contentAlignment = Alignment.Center,
     ) {
-        IconButton(
-            onClick = onClick,
-            enabled = enabled,
-            modifier = Modifier.fillMaxSize(),
+        Surface(
+            modifier = Modifier.size(LuoShuIconTokens.HeaderContainer),
+            shape = RoundedCornerShape(12.dp),
+            color = containerColor,
+            contentColor = resolvedContentColor,
+            tonalElevation = 1.dp,
+            shadowElevation = 1.dp,
         ) {
-            if (loading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(LuoShuIconTokens.ProgressGlyph),
-                    strokeWidth = 2.dp,
-                    color = resolvedContentColor,
-                )
-            } else {
-                LuoShuGlyph(
-                    imageVector = icon,
-                    contentDescription = contentDescription,
-                    size = LuoShuIconTokens.HeaderGlyph,
-                    opticalScale = opticalScale,
-                    tint = resolvedContentColor,
-                )
+            IconButton(
+                onClick = onClick,
+                enabled = enabled,
+                modifier = Modifier.fillMaxSize(),
+                colors = IconButtonDefaults.iconButtonColors(
+                    contentColor = resolvedContentColor,
+                    disabledContentColor = resolvedContentColor.copy(alpha = .38f),
+                ),
+            ) {
+                if (loading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(LuoShuIconTokens.HeaderGlyph),
+                        strokeWidth = 2.dp,
+                        color = resolvedContentColor,
+                    )
+                } else {
+                    LuoShuGlyph(
+                        imageVector = icon,
+                        contentDescription = contentDescription,
+                        size = LuoShuIconTokens.HeaderGlyph,
+                        opticalScale = opticalScale,
+                        tint = resolvedContentColor,
+                    )
+                }
             }
         }
     }

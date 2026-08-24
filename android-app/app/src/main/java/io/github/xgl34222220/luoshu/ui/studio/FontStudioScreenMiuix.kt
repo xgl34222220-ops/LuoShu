@@ -95,8 +95,9 @@ internal fun FontStudioScreenMiuix(
 @Composable
 private fun MiuixStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAction: @Composable () -> Unit) {
     val tokens = LocalMiuixTokens.current
+    val actionColor = MaterialTheme.colorScheme.primary
     Row(
-        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 4.dp),
+        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -111,22 +112,27 @@ private fun MiuixStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAction
             Text(
                 "字体组合",
                 color = tokens.textPrimary,
-                fontSize = 39.sp,
-                lineHeight = 44.sp,
+                fontSize = 30.sp,
+                lineHeight = 34.sp,
                 fontWeight = FontWeight.Black,
             )
-            Text("中文、英文、数字与真实设计轴", color = tokens.textSecondary, fontSize = 12.sp)
+            Text("中文、英文、数字与真实设计轴", color = tokens.textSecondary, fontSize = 11.sp)
         }
-        topAction()
-        Spacer(Modifier.width(10.dp))
-        LuoShuHeaderAction(
-            icon = Icons.Rounded.Refresh,
-            contentDescription = "刷新组合配置",
-            onClick = onRefresh,
-            enabled = !loading,
-            loading = loading,
-            containerColor = tokens.elevatedCardBackground,
-        )
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            topAction()
+            LuoShuHeaderAction(
+                icon = Icons.Rounded.Refresh,
+                contentDescription = "刷新组合配置",
+                onClick = onRefresh,
+                enabled = !loading,
+                loading = loading,
+                containerColor = tokens.elevatedCardBackground,
+                contentColor = actionColor,
+            )
+        }
     }
 }
 
