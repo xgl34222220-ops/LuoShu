@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书
-version=v3.3.5
-versionCode=30305
+version=v3.3.6
+versionCode=30306
 author=惜故里丶
 description=Android 无 Hook 全局字体引擎：统一系统、OEM、fallback 与 Play/GMS 下载字体链路
 updateJson=https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/main/update.json

@@ -226,6 +226,11 @@ switch_font() {
     luoshu_switch_perf_mark transaction_snapshot
     clear_managed_text_fonts
     if [ "$_font_id" != default ]; then
+        # Direct font switches must stay on the foreground quick path. A ready per-device
+        # alignment cache may be activated immediately, but XML/outline generation belongs to
+        # the low-priority cache worker after this transaction has committed.
+        LUOSHU_FOREGROUND_QUICK_SWITCH=1
+        export LUOSHU_FOREGROUND_QUICK_SWITCH
         apply_font_by_rom "$_source" "$SYSTEM_FONTS_DIR" quick "$_font_id" || {
             echo '错误：ROM 字体映射失败' >&2
             return 5
@@ -248,6 +253,8 @@ switch_font() {
         font_config_enable_for_payload "$_font_id" || \
             echo '警告：无 Hook XML 未安全启用，已保留文件槽映射' >&2
     fi
+    LUOSHU_FOREGROUND_QUICK_SWITCH=0
+    export LUOSHU_FOREGROUND_QUICK_SWITCH
     luoshu_switch_perf_mark xml_overlay
     if ! type luoshu_payload_validate_current >/dev/null 2>&1 || ! luoshu_payload_validate_current "$_font_id"; then
     echo '错误：字体负载覆盖校验失败，已恢复上一个字体' >&2
