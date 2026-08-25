@@ -52,10 +52,10 @@ ACTIVE_TEXT=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r
 BOOT_GUARD_OK=1
 DYNAMIC_VIEW_ALLOWED=0
 
-# 架构升级负载会在 Android 完成启动后后台重建。第一次启动暂时沿用旧负载，
-# 避免在 post-fs-data 阶段执行分钟级字体生成或提前把待迁移配置隔离掉。
+# 架构升级负载保持只读并继续用于当前启动。后台服务不会重建或激活它；
+# 下一次用户明确应用时才由单一前台事务替换，避免自动产生第二次重启。
 if [ -f "$MODDIR/config/font-payload-rebuild-pending.conf" ]; then
-    log_message "INFO" "检测到待后台重建的字体负载；本次启动跳过架构隔离"
+    log_message "INFO" "检测到待显式重应用的旧字体负载；本次启动保留并跳过架构隔离"
 elif type font_config_boot_guard >/dev/null 2>&1; then
     # 常规启动严格验证 XML、逐槽位字体和负载架构。
     if font_config_boot_guard "$ACTIVE_TEXT"; then
@@ -90,9 +90,9 @@ done
 
 # 字体索引由原生 App 按需刷新，启动早期不扫描或复制大字体。
 
-# 完整重启后解除本次开机切换保护。
-rm -f "$MODDIR/config/text_reboot_required.conf" \
-      "$MODDIR/config/font_weight_reboot_required.conf" 2>/dev/null || true
+# 文字字体的重启事务只有在 service.sh 看到主命名空间中的真实挂载后才完成；
+# post-fs-data 过早删除标记会把“尚未加载”误报成“已经生效”。字重标记不依赖挂载，可在此复位。
+rm -f "$MODDIR/config/font_weight_reboot_required.conf" 2>/dev/null || true
 if type luoshu_font_lock_force_clear >/dev/null 2>&1; then
     luoshu_font_lock_force_clear "$MODDIR/.font_switch.lock" >/dev/null 2>&1 || \
         log_message "WARN" "残留字体切换锁清理失败：$MODDIR/.font_switch.lock"
@@ -105,6 +105,6 @@ fi
 
 # 不再提交开机深度字体加载验证。切换事务和启动守卫已经完成必要安全校验；
 # Android 启动完成后只由 service.sh 写入轻量应用状态。
-log_message "INFO" "当前文字=$ACTIVE_TEXT | 重启保护已复位"
+log_message "INFO" "当前文字=$ACTIVE_TEXT | 等待主命名空间挂载确认后完成重启事务"
 log_message "INFO" "===== post-fs-data 完成 ====="
 exit 0

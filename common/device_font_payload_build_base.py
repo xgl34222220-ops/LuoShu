@@ -80,14 +80,17 @@ def source_profiles(sources: dict[int, Path]) -> dict[int, dict[str, Any]]:
 
 
 def build_signature(slot: dict[str, Any], source_profile: dict[str, Any], source_weight: int) -> str:
+    roles = set(slot.get("roles") or [])
     signature = {
         "engine": slot_builder.SCHEMA,
         "sourceSha256": source_profile.get("sha256", ""),
         "sourceFaceIndex": source_profile.get("faceIndex", -1),
-        "sourceWeight": source_weight,
         "targetWeight": slot.get("weight", 400),
         "style": slot.get("style", "normal"),
-        "roles": sorted(slot.get("roles") or []),
+        # Semantic Android roles do not change outlines. Only clock/mono slots
+        # select the exact-advance branch in the builder. Including every role
+        # label generated identical multi-megabyte fonts repeatedly on OEM ROMs.
+        "advanceRole": "fixed" if roles.intersection(("clock", "mono")) else "proportional",
         "lineContract": slot.get("lineContract", {}),
         "transforms": slot.get("transforms", {}),
         "advancePolicy": slot.get("targetAdvancePolicy", ""),

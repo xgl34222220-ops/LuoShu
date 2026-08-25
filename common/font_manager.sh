@@ -88,6 +88,23 @@ if ! type detect_font_family >/dev/null 2>&1; then
     }
 fi
 
+if ! type detect_font_weight >/dev/null 2>&1; then
+    detect_font_weight() {
+        _name="${1%.*}"
+        case "$_name" in
+            *-Thin|*-thin) printf '100\n' ;;
+            *-ExtraLight|*-UltraLight|*-extralight|*-ultralight) printf '200\n' ;;
+            *-Light|*-light) printf '300\n' ;;
+            *-Medium|*-medium) printf '500\n' ;;
+            *-SemiBold|*-DemiBold|*-semibold|*-demibold) printf '600\n' ;;
+            *-Bold|*-bold) printf '700\n' ;;
+            *-ExtraBold|*-UltraBold|*-extrabold|*-ultrabold) printf '800\n' ;;
+            *-Black|*-Heavy|*-black|*-heavy) printf '900\n' ;;
+            *) printf '400\n' ;;
+        esac
+    }
+fi
+
 if ! type link_or_copy_font >/dev/null 2>&1; then
     link_or_copy_font() {
         ln -f "$1" "$2" 2>/dev/null || cp -f "$1" "$2" 2>/dev/null
@@ -208,7 +225,7 @@ switch_font() {
 
     _lock="$MODULE_DIR/.font_switch.lock"
     if [ -e "$_lock" ]; then
-        if type luoshu_font_lock_active >/dev/null 2>&1 && luoshu_font_lock_active "$_lock"; then
+        if type luoshu_font_lock_busy >/dev/null 2>&1 && luoshu_font_lock_busy "$_lock"; then
             echo '错误：字体正在切换中，请稍候' >&2
             return 2
         fi
@@ -247,6 +264,21 @@ switch_font() {
     fi
     luoshu_switch_perf_mark validation
 
+    if [ "$_font_id" != default ] && [ -f "$MODULE_DIR/common/device_font_template.sh" ]; then
+        MODDIR="$MODULE_DIR" MODULE_DIR="$MODULE_DIR" \
+            sh "$MODULE_DIR/common/device_font_template.sh" ensure >/dev/null 2>&1
+        _template_rc=$?
+        if [ "$_template_rc" -ne 0 ]; then
+            if [ "$_template_rc" -eq 2 ]; then
+                echo '错误：缺少可信原厂字体模板；请先恢复系统默认字体并完整重启一次，再应用字体' >&2
+            else
+                echo '错误：无法读取本机原厂字体槽位，未开始切换' >&2
+            fi
+            return 5
+        fi
+    fi
+    luoshu_switch_perf_mark template_ready
+
     if ! type luoshu_payload_transaction_begin >/dev/null 2>&1 || ! luoshu_payload_transaction_begin; then
         echo '错误：无法创建字体负载安全快照' >&2
         return 5
@@ -280,11 +312,14 @@ switch_font() {
     fi
 
     luoshu_switch_perf_mark map_slots
-    # monospace is intentionally protected from file-slot rewrites; XML overlay is its only
-    # no-hook coverage path. Keep this fail-open exactly like apply_mix.
+    # Build/activate the final per-device UI, Latin/digit and monospace roles in this transaction.
+    # A raw physical-slot map is only staging input and must never be committed as a success.
     if [ "$_font_id" != default ] && type font_config_enable_for_payload >/dev/null 2>&1; then
-        font_config_enable_for_payload "$_font_id" || \
-            echo '警告：无 Hook XML 未安全启用，已保留文件槽映射' >&2
+        if ! font_config_enable_for_payload "$_font_id"; then
+            _payload_error="${LUOSHU_DEVICE_PAYLOAD_ERROR:-设备原厂槽位对齐失败}"
+            echo "错误：$_payload_error" >&2
+            return 6
+        fi
     fi
     LUOSHU_FOREGROUND_QUICK_SWITCH=0
     LUOSHU_KEEP_XML_OVERLAY=0
@@ -300,7 +335,12 @@ printf '%s\n' "$_font_id" > "$ACTIVE_FONT_CONF" || {
     echo '错误：无法保存当前字体状态' >&2
     return 7
 }
+printf 'font=%s\ntime=%s\n' "$_font_id" "$(date +%s)" > "$TEXT_REBOOT_REQUIRED" || {
+    echo '错误：无法保存本次重启事务状态' >&2
+    return 7
+}
 chmod 0644 "$ACTIVE_FONT_CONF" "$SYSTEM_FONTS_DIR"/* 2>/dev/null || true
+chmod 0644 "$TEXT_REBOOT_REQUIRED" 2>/dev/null || true
 if type luoshu_sync_mount_payload >/dev/null 2>&1 && ! luoshu_sync_mount_payload; then
     echo '错误：元模块真实挂载目录同步失败，已恢复上一个字体' >&2
     return 7
@@ -332,10 +372,8 @@ fi
         } > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$_recent" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
     fi
 
-    printf 'font=%s\ntime=%s\n' "$_font_id" "$(date +%s)" > "$TEXT_REBOOT_REQUIRED"
     printf '%s\n' "$_font_id" > "$CONFIG_DIR/last_switch_result.conf"
     date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
-    chmod 0644 "$TEXT_REBOOT_REQUIRED" 2>/dev/null || true
     invalidate_font_index_cache
     luoshu_switch_perf_mark complete
     trap - EXIT HUP INT TERM

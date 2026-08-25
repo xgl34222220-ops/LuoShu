@@ -53,6 +53,7 @@ _luoshu_font_config_partition_rows() {
     printf 'oplus_region|%s|%s/oplus_region\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_OPLUS_REGION_ROOT:-}" "${LUOSHU_OPLUS_REGION_ETC_ROOT:-}" /oplus_region/etc)" "$_lfcp_payload"
     printf 'mi_ext|%s|%s/mi_ext\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_MI_EXT_ROOT:-}" "${LUOSHU_MI_EXT_ETC_ROOT:-}" /mi_ext/etc)" "$_lfcp_payload"
     printf 'cust|%s|%s/cust\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_CUST_ROOT:-}" "${LUOSHU_CUST_ETC_ROOT:-}" /cust/etc)" "$_lfcp_payload"
+    printf 'hw_product|%s|%s/hw_product\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_HW_PRODUCT_ROOT:-}" "${LUOSHU_HW_PRODUCT_ETC_ROOT:-}" /hw_product/etc)" "$_lfcp_payload"
 }
 
 # key | real XML | module overlay XML | font directory referenced by that document

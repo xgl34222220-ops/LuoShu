@@ -239,6 +239,21 @@ FONT_INVENTORY_TEST_FONT=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf'
 [ -s "$FONT_INVENTORY_TEST_FONT" ]
 python3 "$ROOT/scripts/font_inventory_test.py" --font "$FONT_INVENTORY_TEST_FONT"
 sh "$ROOT/scripts/rom_adapter_inventory_test.sh" "$FONT_INVENTORY_TEST_FONT"
+# The per-device engine is the release-critical HyperOS/KernelSU path. These
+# were previously only syntax-compiled, allowing composite-outline and stale
+# legacy-fallback regressions to pass CI unnoticed.
+python3 "$ROOT/scripts/device_font_template_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/device_font_slot_plan_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/device_font_slot_build_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/device_font_payload_build_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/device_font_payload_overlay_test.py"
+python3 "$ROOT/scripts/device_font_payload_verify_test.py"
+python3 "$ROOT/scripts/device_font_load_verify_test.py"
+sh "$ROOT/scripts/device_font_payload_bridge_test.sh"
+sh "$ROOT/scripts/device_font_payload_policy_test.sh"
+sh "$ROOT/scripts/device_font_cache_test.sh"
+sh "$ROOT/scripts/device_font_payload_runtime_test.sh"
+sh "$ROOT/scripts/device_font_transaction_guard_test.sh"
 sh "$ROOT/scripts/font_config_variable_weight_test.sh"
 python3 "$ROOT/scripts/font_metrics_normalization_test.py"
 python3 "$ROOT/scripts/font_config_monospace_test.py"

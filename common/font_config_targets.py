@@ -58,25 +58,39 @@ def normalize(value: str) -> str:
 # slot-alias discovery and the XML rewrite could disagree about what counts as a UI family, and a
 # name added to one was silently missing from the other.
 try:
-    from font_config_overlay import is_safe_family as _overlay_is_safe_family
+    from font_config_overlay import (
+        effective_family_name as _overlay_effective_family_name,
+        is_protected_file as _overlay_is_protected_file,
+        is_safe_family as _overlay_is_safe_family,
+        is_safe_mono_family as _overlay_is_safe_mono_family,
+    )
 except ImportError:  # pragma: no cover - only when the two files are separated
+    _overlay_effective_family_name = None
+    _overlay_is_protected_file = None
     _overlay_is_safe_family = None
+    _overlay_is_safe_mono_family = None
 
 
-def safe_family(element: ET.Element) -> bool:
-    name = normalize(element.attrib.get("name", ""))
-    if not name or any(token in name for token in PROTECTED_FAMILY_TOKENS):
-        return False
+def family_role(element: ET.Element, name: str) -> str | None:
+    name = normalize(name)
+    if not name:
+        return None
     # Families carrying a locale/script contract are fallbacks, not the global UI family.
     for key in ("lang", "variant", "fallbackFor", "fallbackfor"):
         if element.attrib.get(key):
-            return False
+            return None
+    if _overlay_is_safe_mono_family is not None and _overlay_is_safe_mono_family(name):
+        return "mono"
+    if any(token in name for token in PROTECTED_FAMILY_TOKENS):
+        return None
     if _overlay_is_safe_family is not None:
-        return _overlay_is_safe_family(name)
-    return name in SAFE_EXACT_FAMILIES or name.startswith(SAFE_PREFIXES)
+        return "ui" if _overlay_is_safe_family(name) else None
+    return "ui" if name in SAFE_EXACT_FAMILIES or name.startswith(SAFE_PREFIXES) else None
 
 
-def protected_file(value: str) -> bool:
+def protected_file(value: str, role: str = "ui") -> bool:
+    if _overlay_is_protected_file is not None:
+        return _overlay_is_protected_file(value, mono=role == "mono")
     filename = os.path.basename(value.strip()).lower()
     return (
         not filename.endswith(FONT_SUFFIXES)
@@ -94,24 +108,38 @@ def nearest_weight(raw: str | None) -> int:
 
 def discover(path: Path) -> list[dict[str, object]]:
     tree = ET.parse(path)
-    found: dict[tuple[str, int], dict[str, object]] = {}
+    root = tree.getroot()
+    parents = {child: parent for parent in root.iter() for child in list(parent)}
+    found: dict[tuple[str, int, str], dict[str, object]] = {}
     for family in tree.getroot().iter():
-        if local_name(family.tag) != "family" or not safe_family(family):
+        if local_name(family.tag) != "family":
             continue
-        family_name = family.attrib.get("name", "")
+        family_name = (
+            _overlay_effective_family_name(family, parents)
+            if _overlay_effective_family_name is not None
+            else family.attrib.get("name", "")
+        )
+        role = family_role(family, family_name)
+        if role is None:
+            continue
+        parent = parents.get(family)
+        if parent is not None and local_name(parent.tag) == "family-list":
+            if any(parent.attrib.get(key) for key in ("lang", "variant", "fallbackFor", "fallbackfor")):
+                continue
         for font in list(family):
             if local_name(font.tag) != "font" or not font.text:
                 continue
             if font.attrib.get("style", "normal").lower() in {"italic", "oblique"}:
                 continue
             filename = os.path.basename(font.text.strip())
-            if protected_file(filename):
+            if protected_file(filename, role=role):
                 continue
             weight = nearest_weight(font.attrib.get("weight"))
-            found[(filename, weight)] = {
+            found[(filename, weight, role)] = {
                 "filename": filename,
                 "weight": weight,
                 "family": family_name,
+                "role": role,
             }
     return sorted(found.values(), key=lambda item: (str(item["filename"]).lower(), int(item["weight"])))
 
@@ -122,7 +150,7 @@ def run_batch(job_file: Path) -> int:
     Slot discovery used to pay a full embedded-CPython start per ROM document, so a device shipping
     eight font configuration files spent eight interpreter startups here before any font was even
     touched. Emits one tab separated line per target:
-        TARGET<TAB>input<TAB>filename<TAB>weight<TAB>family
+        TARGET<TAB>input<TAB>filename<TAB>weight<TAB>family<TAB>role
     and one status line per document:
         DOC<TAB>input<TAB>ok|error<TAB>count<TAB>message
     """
@@ -137,7 +165,10 @@ def run_batch(job_file: Path) -> int:
             print(f"DOC\t{source}\terror\t0\t{message}")
             continue
         for entry in entries:
-            print(f"TARGET\t{source}\t{entry['filename']}\t{entry['weight']}\t{entry['family']}")
+            print(
+                f"TARGET\t{source}\t{entry['filename']}\t{entry['weight']}\t"
+                f"{entry['family']}\t{entry['role']}"
+            )
         print(f"DOC\t{source}\tok\t{len(entries)}\t")
     return 0
 
@@ -162,7 +193,7 @@ def main() -> int:
             print(json.dumps({"status": "ok", "targets": targets}, ensure_ascii=False, separators=(",", ":")))
         else:
             for target in targets:
-                print(f"{target['filename']}|{target['weight']}|{target['family']}")
+                print(f"{target['filename']}|{target['weight']}|{target['family']}|{target['role']}")
         return 0
     except (OSError, ET.ParseError, ValueError) as error:
         if args.json:

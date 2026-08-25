@@ -26,11 +26,10 @@ def _postscript(value: str) -> str:
 
 
 def target_family_identity(slot: dict[str, Any]) -> tuple[str, str, str, str]:
-    family = _clean_family(str(slot.get("family") or ""))
-    declared = str(slot.get("declared") or slot.get("stockPath") or "")
-    original_ps = _clean_family(str(slot.get("postScriptName") or ""))
-    if not family:
-        family = _clean_family(original_ps) or _clean_family(Path(declared).stem) or "LuoShu Fallback"
+    # The external Android XML owns family selection. A deterministic internal identity lets slots
+    # with the same weight/metric/role contract share one generated font safely and dramatically
+    # reduces full-outline rewrites on OEM ROMs with many alias families.
+    family = "LuoShu System"
     try:
         weight = int(slot.get("weight") or 400)
     except (TypeError, ValueError):
@@ -42,10 +41,7 @@ def target_family_identity(slot: dict[str, Any]) -> tuple[str, str, str, str]:
     legacy_style = "Bold Italic" if italic and nearest >= 700 else (
         "Italic" if italic else ("Bold" if nearest >= 700 else "Regular")
     )
-    if original_ps:
-        postscript = _postscript(original_ps)
-    else:
-        postscript = _postscript(f"{family}-{typographic_style}")
+    postscript = _postscript(f"LuoShuSystem-{typographic_style}")
     return family, legacy_style, typographic_style, postscript
 
 

@@ -41,6 +41,12 @@ def main() -> int:
           <family name="sans-serif-monospace">
             <font weight="400">RobotoMono-Regular.ttf</font>
           </family>
+          <family-list name="serif-monospace">
+            <family><font weight="400">CutiveMono-Regular.ttf</font></family>
+          </family-list>
+          <family-list name="google-sans-text">
+            <family><font weight="500">GoogleSansText-Medium.ttf</font></family>
+          </family-list>
           <family name="emoji">
             <font weight="400">NotoColorEmoji.ttf</font>
           </family>
@@ -59,7 +65,7 @@ def main() -> int:
             text=True,
             capture_output=True,
         )
-    lines = {line.split("|", 2)[0]: line for line in result.stdout.splitlines() if line}
+    lines = {line.split("|", 3)[0]: line for line in result.stdout.splitlines() if line}
     assert lines["Roboto-Regular.ttf"].split("|")[1] == "400"
     assert lines["Roboto-Bold.ttf"].split("|")[1] == "700"
     assert lines["OPSans-Regular.ttf"].split("|")[1] == "300"
@@ -67,10 +73,12 @@ def main() -> int:
     assert lines["HONORSans-Medium.ttf"].split("|")[1] == "500"
     assert lines["vivoSansVF.ttf"].split("|")[1] == "400"
     assert lines["FlymeSans-Medium.ttf"].split("|")[1] == "500"
+    assert lines["GoogleSansText-Medium.ttf"].split("|")[3] == "ui"
+    assert lines["RobotoMono-Regular.ttf"].split("|")[3] == "mono"
+    assert lines["CutiveMono-Regular.ttf"].split("|")[3] == "mono"
     for protected in (
         "Roboto-Italic.ttf",
         "NotoSansCJKjp-Regular.otf",
-        "RobotoMono-Regular.ttf",
         "NotoColorEmoji.ttf",
         "NotoSansFallback.ttf",
     ):

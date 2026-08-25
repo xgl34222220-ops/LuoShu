@@ -94,7 +94,15 @@ def parse_axis_spec(spec: str) -> dict[str, float]:
     return result
 
 
-def materialize(source: Path, output: Path, role: str, requested_weight: int, requested_axes: dict[str, float]) -> dict[str, object]:
+def materialize(
+    source: Path,
+    output: Path,
+    role: str,
+    requested_weight: int,
+    requested_axes: dict[str, float],
+    *,
+    preserve_metrics: bool = False,
+) -> dict[str, object]:
     if not source.is_file() or source.stat().st_size < 12:
         raise InstanceError(f"字体源文件不可用：{source}")
     requested_weight = clamp_weight(requested_axes.get("wght", requested_weight))
@@ -127,7 +135,7 @@ def materialize(source: Path, output: Path, role: str, requested_weight: int, re
         for tag in ("DSIG", "LTSH", "hdmx", "VDMX"):
             if tag in font:
                 del font[tag]
-        metrics = normalize_font_metrics(font)
+        metrics = {"mode": "preserved"} if preserve_metrics else normalize_font_metrics(font)
 
         output.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(prefix=output.name + ".", suffix=".tmp", dir=output.parent, delete=False) as handle:
@@ -164,13 +172,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--role", choices=("cjk", "latin", "digit"), required=True)
     parser.add_argument("--weight", type=int, default=400)
     parser.add_argument("--axes", default="")
+    parser.add_argument("--preserve-metrics", action="store_true")
     return parser.parse_args()
 
 
 def main() -> int:
     try:
         args = parse_args()
-        result = materialize(Path(args.input), Path(args.output), args.role, args.weight, parse_axis_spec(args.axes))
+        result = materialize(
+            Path(args.input),
+            Path(args.output),
+            args.role,
+            args.weight,
+            parse_axis_spec(args.axes),
+            preserve_metrics=args.preserve_metrics,
+        )
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         return 0
     except MemoryError:

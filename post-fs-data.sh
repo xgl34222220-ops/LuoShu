@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # LuoShu early-boot wrapper around the verified v2.2.7 initializer.
-# Delegated core consumes font-payload-rebuild-pending.conf before the payload is hidden.
+# Delegated core preserves font-payload-rebuild-pending.conf without background mutation.
 # Delegated recovery contract: font_mix_controller.sh recover
 # Delegated dynamic view contract: device_font_dynamic_mount_apply
 set +e

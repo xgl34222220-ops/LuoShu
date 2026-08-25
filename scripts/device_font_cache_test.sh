@@ -27,6 +27,9 @@ device_font_payload_validate_installed() { return 0; }
 
 . "$ROOT/common/device_font_cache.sh"
 
+ok grep -q 'source-contract-v4' "$ROOT/common/device_font_cache.sh"
+ok grep -q 'alignment-cache-v4' "$ROOT/common/device_font_cache.sh"
+
 _dfcache_foreground_idle
 touch "$MODULE/.font_switch.lock"
 ! _dfcache_foreground_idle

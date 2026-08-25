@@ -73,6 +73,8 @@ internal data class DeviceTrustState(
     val mountState: String = "unknown",
     val mountFailure: String = "",
     val cachePending: Boolean = false,
+    val reapplyPending: Boolean = false,
+    val reapplyReason: String = "",
     val error: String = "",
 ) {
     val level: DeviceTrustLevel
@@ -81,6 +83,7 @@ internal data class DeviceTrustState(
             activeFont in setOf("", "default") || alignment == "not-applicable" -> DeviceTrustLevel.SYSTEM
             mountState == "failed" -> DeviceTrustLevel.ISSUE
             alignment == "failed" || reason in failedTrustReasons -> DeviceTrustLevel.ISSUE
+            reapplyPending -> DeviceTrustLevel.PENDING
             alignment == "verified" && mode in setOf("aligned", "mount-verified") -> DeviceTrustLevel.VERIFIED
             alignment == "pending" || reason in pendingTrustReasons -> DeviceTrustLevel.PENDING
             alignment == "compatibility" || mode == "compatibility" -> DeviceTrustLevel.COMPATIBILITY
@@ -122,10 +125,15 @@ internal suspend fun loadDeviceTrustState(): DeviceTrustState {
         fi
         cachePending=no
         [ -s "${'$'}CFG/device-font-cache-pending.conf" ] && cachePending=yes
-        printf 'activeFont=%s\ninventory=%s\nengine=%s\ntemplate=%s\nalignment=%s\nmode=%s\nreason=%s\nmountState=%s\nmountFailure=%s\ncachePending=%s\n' \
+        reapplyState="${'$'}(read_value "${'$'}CFG/font-payload-rebuild-pending.conf" state)"
+        reapplyReason="${'$'}(read_value "${'$'}CFG/font-payload-rebuild-pending.conf" reason)"
+        reapplyPending=no
+        [ "${'$'}reapplyState" = awaiting-explicit-apply ] && reapplyPending=yes
+        printf 'activeFont=%s\ninventory=%s\nengine=%s\ntemplate=%s\nalignment=%s\nmode=%s\nreason=%s\nmountState=%s\nmountFailure=%s\ncachePending=%s\nreapplyPending=%s\nreapplyReason=%s\n' \
             "${'$'}active" "${'$'}inventory" "${'$'}{engine:-missing}" "${'$'}{template:-missing}" \
             "${'$'}{alignment:-pending}" "${'$'}{mode:-compatibility}" "${'$'}reason" \
-            "${'$'}{mountState:-missing}" "${'$'}mountFailure" "${'$'}cachePending"
+            "${'$'}{mountState:-missing}" "${'$'}mountFailure" "${'$'}cachePending" \
+            "${'$'}reapplyPending" "${'$'}reapplyReason"
     """.trimIndent()
     val result = RootShell.exec(command, timeoutMs = 12_000L)
     if (result.code != 0) {
@@ -157,6 +165,8 @@ internal fun parseDeviceTrustOutput(raw: String): DeviceTrustState {
         mountState = values["mountState"].orEmpty().ifBlank { "unknown" },
         mountFailure = values["mountFailure"].orEmpty(),
         cachePending = values["cachePending"] == "yes",
+        reapplyPending = values["reapplyPending"] == "yes",
+        reapplyReason = values["reapplyReason"].orEmpty(),
     )
 }
 
@@ -229,6 +239,9 @@ internal fun DeviceTrustDialog(
                     DeviceTrustRow("验证说明", friendlyTrustReason(state.reason))
                 }
                 DeviceTrustRow("后台对齐缓存", if (state.cachePending) "等待生成" else "无待处理任务")
+                if (state.reapplyPending) {
+                    DeviceTrustRow("负载升级", "应用一次当前字体后，完整重启一次")
+                }
                 if (state.error.isNotBlank()) {
                     Spacer(Modifier.size(8.dp))
                     Text(state.error, color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
@@ -293,6 +306,12 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
             "原厂模板、字体事务与本次启动证据一致",
             Icons.Rounded.CheckCircle,
             scheme.primary,
+        )
+        state.reapplyPending -> DeviceTrustPresentation(
+            "当前字体已保留，等待一次应用",
+            "应用当前字体后只需完整重启一次；后台不会自动切换或要求二次重启",
+            Icons.Rounded.Info,
+            scheme.secondary,
         )
         state.level == DeviceTrustLevel.COMPATIBILITY -> DeviceTrustPresentation(
             "字体效果尚未确认",

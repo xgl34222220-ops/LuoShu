@@ -56,6 +56,27 @@ def namespace(root: ET.Element) -> str:
     return ""
 
 
+def element_parents(root: ET.Element) -> dict[ET.Element, ET.Element]:
+    return {child: parent for parent in root.iter() for child in list(parent)}
+
+
+def effective_family_name(
+    family: ET.Element,
+    parents: dict[ET.Element, ET.Element],
+) -> str:
+    name = family.attrib.get("name", "").strip()
+    if name:
+        return name
+    current = parents.get(family)
+    while current is not None:
+        if local(current.tag) == "family-list":
+            name = current.attrib.get("name", "").strip()
+            if name:
+                return name
+        current = parents.get(current)
+    return ""
+
+
 def parse(path: Path) -> ET.ElementTree:
     parser = ET.XMLParser(target=ET.TreeBuilder(insert_comments=True))
     return ET.parse(path, parser=parser)
@@ -148,7 +169,44 @@ def fallback_match(
     candidates = [key for key, values in queues.items() if values and key[:5] == prefix]
     if len(candidates) == 1:
         return queues[candidates[0]].popleft()
+    # Capture revision 2 did not inherit names from OEM <family-list> wrappers.
+    # Such slots still contain a unique source XML + weight/style/index + declared
+    # filename contract. Match that legacy shape without weakening ambiguous files.
+    legacy_candidates = [
+        key
+        for key, values in queues.items()
+        if values and key[0] == exact[0] and key[2:] == exact[2:]
+    ]
+    if len(legacy_candidates) == 1:
+        return queues[legacy_candidates[0]].popleft()
     return None
+
+
+def stock_xml_input(template: dict[str, Any], source_xml: str) -> Path:
+    """Return a stock XML view even while LuoShu's current overlay is mounted.
+
+    New captures freeze XML under ``xmlSourceRoot``. Existing installations may
+    predate that snapshot, so use the lower directory captured by LuoShu's atomic
+    self-mount before falling back to the live path. Reading the live overlaid XML
+    during a switch was the main cause of first-apply failure and a second reboot.
+    """
+    source = Path(source_xml)
+    if is_dynamic_path(source_xml):
+        return source
+
+    snapshot_root = str(template.get("xmlSourceRoot") or "").strip()
+    if snapshot_root and source.is_absolute():
+        snapshot = Path(snapshot_root) / source_xml.lstrip("/")
+        if snapshot.is_file():
+            return snapshot
+
+    parts = source.parts
+    if len(parts) >= 4 and parts[0] == "/" and parts[2] == "etc":
+        state_root = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))
+        lower = state_root / "lower" / f"{parts[1]}-etc" / Path(*parts[3:])
+        if lower.is_file():
+            return lower
+    return source
 
 
 def clean_font_node(font: ET.Element, filename: str) -> None:
@@ -209,10 +267,12 @@ def rewrite_regular_xml(
     partition = partition_for_xml(source_xml)
     changed = 0
     families: set[str] = set()
-    for family in tree.getroot().iter():
+    root = tree.getroot()
+    parents = element_parents(root)
+    for family in root.iter():
         if local(family.tag) != "family":
             continue
-        family_name = family.attrib.get("name", "")
+        family_name = effective_family_name(family, parents)
         for font in list(family):
             if local(font.tag) != "font":
                 continue
@@ -373,7 +433,7 @@ def render_overlay(
         system_trees: dict[str, ET.ElementTree] = {}
         system_inputs: dict[str, Path] = {}
         for source_xml in template_xmls:
-            input_path = Path(source_xml)
+            input_path = stock_xml_input(template, source_xml)
             if not input_path.is_file():
                 continue
             if is_dynamic_path(source_xml):

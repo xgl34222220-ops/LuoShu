@@ -573,7 +573,7 @@ luoshu_payload_transaction_begin() {
             fi
         done
     done
-    for _lfrp_name in active_font.conf font_mix.conf font-config-overlay.conf font-target-aliases.conf font-target-coverage.conf font-runtime-targets.conf font-payload-manifest.conf font-payload-boot.conf font-payload-schema.conf text_reboot_required.conf; do
+    for _lfrp_name in active_font.conf font_mix.conf font-config-overlay.conf font-target-aliases.conf font-target-coverage.conf font-runtime-targets.conf font-payload-manifest.conf font-payload-boot.conf font-payload-schema.conf font-payload-rebuild-pending.conf font-payload-reapply-notified.conf text_reboot_required.conf font-boot-failures font-boot-inconclusive.conf font-mount-verify-failures device-font-load-verification.conf device-font-load-verification.json; do
         if [ -f "$_lfrp_config/$_lfrp_name" ]; then
             cp -fp "$_lfrp_config/$_lfrp_name" "$LUOSHU_PAYLOAD_TXN/config/$_lfrp_name" 2>/dev/null || return 1
             printf 'config|present|%s\n' "$_lfrp_name" >> "$LUOSHU_PAYLOAD_TXN/paths"
@@ -655,6 +655,7 @@ luoshu_payload_quarantine() {
     printf 'default\n' > "$_lfrp_config/active_font.conf" 2>/dev/null || true
     rm -f "$_lfrp_config/font-payload-boot.conf" "$_lfrp_config/font-payload-manifest.conf" \
         "$_lfrp_config/font-payload-schema.conf" "$_lfrp_config/font-payload-rebuild-pending.conf" \
+        "$_lfrp_config/font-payload-reapply-notified.conf" \
         "$_lfrp_config/font-target-aliases.conf" "$_lfrp_config/font-target-coverage.conf" \
         "$_lfrp_config/font-runtime-targets.conf" "$_lfrp_config/font-config-overlay.conf" 2>/dev/null || true
     {

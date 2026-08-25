@@ -13,6 +13,8 @@ if [ -z "$MODDIR" ]; then
     fi
 fi
 
+MODULE_DIR="$MODDIR"
+[ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 MANAGER="${LUOSHU_FONT_MANAGER:-$MODDIR/common/font_manager.sh}"
 TASK_FILE="${LUOSHU_SWITCH_TASK_FILE:-$MODDIR/config/switch_task.conf}"
 LOG_FILE="${LUOSHU_SWITCH_LOG:-$MODDIR/logs/fontswitch.log}"
@@ -22,6 +24,7 @@ BACKGROUND_TASK="$MODDIR/common/background_task.sh"
 WORKER_PID_FILE="${LUOSHU_SWITCH_WORKER_PID_FILE:-$MODDIR/config/switch_task_worker.pid}"
 LOAD_VERIFY_STATE="$MODDIR/config/device-font-load-verification.conf"
 [ -f "$BACKGROUND_TASK" ] && . "$BACKGROUND_TASK"
+START_LOCK="${LUOSHU_SWITCH_START_LOCK:-$MODDIR/.font_switch_start.lock}"
 
 TIMEOUT_SECONDS="${LUOSHU_SWITCH_TIMEOUT_SECONDS:-360}"
 case "$TIMEOUT_SECONDS" in ''|*[!0-9]*) TIMEOUT_SECONDS=360 ;; esac
@@ -102,6 +105,29 @@ task_pid_alive() {
     _pid="$1"
     case "$_pid" in ''|*[!0-9]*) return 1 ;; esac
     kill -0 "$_pid" 2>/dev/null
+}
+
+start_lock_acquire() {
+    if type luoshu_font_lock_acquire >/dev/null 2>&1; then
+        luoshu_font_lock_acquire "$START_LOCK" "$$"
+        return $?
+    fi
+    mkdir "$START_LOCK" 2>/dev/null || return 2
+    printf '%s\n' "$$" > "$START_LOCK/pid" 2>/dev/null || {
+        rmdir "$START_LOCK" 2>/dev/null || true
+        return 1
+    }
+}
+
+start_lock_release() {
+    if type luoshu_font_lock_release >/dev/null 2>&1; then
+        luoshu_font_lock_release "$START_LOCK" "$$" >/dev/null 2>&1 || true
+        return 0
+    fi
+    _owner=$(sed -n '1p' "$START_LOCK/pid" 2>/dev/null)
+    [ -z "$_owner" ] || [ "$_owner" = "$$" ] || return 1
+    rm -f "$START_LOCK/pid" 2>/dev/null || true
+    rmdir "$START_LOCK" 2>/dev/null || true
 }
 
 reconcile_task() {
@@ -207,6 +233,11 @@ start_task() {
     _font="$1"
     [ -n "$_font" ] || { printf '{"status":"error","message":"未指定字体"}\n'; return 0; }
     [ -f "$MANAGER" ] || { printf '{"status":"error","message":"字体管理器不存在"}\n'; return 0; }
+    if ! start_lock_acquire; then
+        printf '{"status":"error","message":"字体正在切换中，请稍候"}\n'
+        return 0
+    fi
+    trap 'start_lock_release' EXIT
     reconcile_task
     _state="$(read_value state)"
     _pid="$(read_value pid)"

@@ -18,6 +18,9 @@ _luoshu_hyperos_root_pairs() {
     printf '%s|%s\n' "${LUOSHU_PRODUCT_FONTS_ROOT:-/product/fonts}" "$_module/product/fonts"
     printf '%s|%s\n' "${LUOSHU_SYSTEM_EXT_FONTS_ROOT:-/system_ext/fonts}" "$_module/system_ext/fonts"
     printf '%s|%s\n' "${LUOSHU_MI_EXT_FONTS_ROOT:-/mi_ext/fonts}" "$_module/mi_ext/fonts"
+    printf '%s|%s\n' "${LUOSHU_VENDOR_FONTS_ROOT:-/vendor/fonts}" "$_module/vendor/fonts"
+    printf '%s|%s\n' "${LUOSHU_MY_PRODUCT_FONTS_ROOT:-/my_product/fonts}" "$_module/my_product/fonts"
+    printf '%s|%s\n' "${LUOSHU_HW_PRODUCT_FONTS_ROOT:-/hw_product/fonts}" "$_module/hw_product/fonts"
 }
 
 _hyperos_core_files() {
@@ -80,7 +83,9 @@ _hyperos_remove_overlay_file() {
     _file="$1"
     _module="$(_luoshu_hyperos_module_dir)"
     rm -f "$_module/system/fonts/$_file" "$_module/product/fonts/$_file" \
-        "$_module/system_ext/fonts/$_file" "$_module/mi_ext/fonts/$_file" 2>/dev/null || true
+        "$_module/system_ext/fonts/$_file" "$_module/mi_ext/fonts/$_file" \
+        "$_module/vendor/fonts/$_file" "$_module/my_product/fonts/$_file" \
+        "$_module/hw_product/fonts/$_file" 2>/dev/null || true
 }
 
 _hyperos_alias_existing_targets() {
@@ -153,30 +158,16 @@ _hyperos_file_weight() {
     esac
 }
 
-# 对 HyperOS 物理槽使用固定 0.98/0.30 em 行框。禁止按字体极端轮廓扩大 hhea/typo，
-# 避免 QQ 回复栏偏移、年龄标签裁切以及酷安标题与热度重叠。
+# Compatibility-only staging helper. v4 never applies one universal line box to every HyperOS
+# family: UI, labels, clocks and monospace each retain the captured stock slot contract in the
+# per-device builder. This helper therefore preserves source metrics instead of guessing ratios.
 _hyperos_compact_normalize() {
     _source="$1"; _output="$2"
-    _module="$(_luoshu_hyperos_module_dir)"
-    _pyroot="$_module/common/python"
-    _python="$_pyroot/bin/luoshu-python"
-    [ -x "$_python" ] && [ -f "$_module/common/font_metrics_normalize.py" ] || return 1
-    PYTHONHOME="$_pyroot" \
-    PYTHONPATH="$_module/common:$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \
-    LD_LIBRARY_PATH="$_pyroot/lib:$_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        "$_python" - "$_source" "$_output" <<'PY_COMPACT' >/dev/null 2>&1
-import sys
-from pathlib import Path
-import font_metrics_normalize as metrics
-metrics.TYPO_ASCENDER_RATIO = 0.98
-metrics.TYPO_DESCENDER_RATIO = 0.30
-metrics.WIN_ASCENT_CAP_RATIO = 0.98
-metrics.WIN_DESCENT_CAP_RATIO = 0.35
-metrics.HHEA_ASCENT_CAP_RATIO = 0.98
-metrics.HHEA_DESCENT_CAP_RATIO = 0.30
-metrics._outline_extremes = lambda font: None
-metrics.normalize_path(Path(sys.argv[1]), Path(sys.argv[2]))
-PY_COMPACT
+    [ -s "$_source" ] || return 1
+    mkdir -p "${_output%/*}" 2>/dev/null || return 1
+    rm -f "$_output" 2>/dev/null || true
+    ln "$_source" "$_output" 2>/dev/null || cp -f "$_source" "$_output" 2>/dev/null || return 1
+    chmod 0644 "$_output" 2>/dev/null || true
 }
 
 _hyperos_compact_anchor() {
@@ -207,7 +198,7 @@ _hyperos_materialize_variable_weight() {
     PYTHONPATH="$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \
     LD_LIBRARY_PATH="$_pyroot/lib:$_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         "$_python" "$_instancer" --input "$_source" --output "$_raw" \
-        --role cjk --weight "$_weight" --axes "wght=$_weight" >/dev/null 2>&1 || return 1
+        --role cjk --weight "$_weight" --axes "wght=$_weight" --preserve-metrics >/dev/null 2>&1 || return 1
     _hyperos_compact_normalize "$_raw" "$_output"
     _rc=$?
     rm -f "$_raw" 2>/dev/null || true
@@ -295,7 +286,7 @@ copy_as_hyperos() {
     # HyperOS 的 XML family 经常只是度量外壳。这里保留 ROM XML，避免再次用旧度量
     # 覆盖紧凑物理槽；MiSans、Roboto、GoogleSans、Mitype 与时钟槽已完整映射。
     _log_step "  已覆盖 $core_count 个 MiSans 核心、$weight_count 个数字字重、$ui_slot_count 个 Google/Roboto、$clock_slot_count 个时钟/Mitype 目标"
-    _log_step '  已启用固定紧凑行框，QQ/酷安/标签控件不再随字体极端轮廓漂移'
+    _log_step '  兼容槽位仅完成源映射；最终行框由本机原厂槽位契约逐项生成'
     return 0
 }
 

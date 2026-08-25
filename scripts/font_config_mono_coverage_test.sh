@@ -33,7 +33,9 @@ grep -q 'font_config_enable_for_payload' "$ROOT/common/font_mix.sh" || fail 'fon
 grep -q 'font_config_enable_for_payload' "$ROOT/common/font_manager.sh" || fail 'switch_font missing XML overlay'
 grep -q '\[ "\$_font_id" != default \] && type font_config_enable_for_payload' "$ROOT/common/font_manager.sh" || fail 'switch_font missing default guard'
 grep -q 'font_config_disable' "$ROOT/common/font_manager.sh" || fail 'font_manager missing disable path'
-grep -q '警告：无 Hook XML 未安全启用，已保留文件槽映射' "$ROOT/common/font_manager.sh" || fail 'switch_font XML path is not fail-open'
+grep -q '设备原厂槽位对齐失败' "$ROOT/common/font_manager.sh" || fail 'switch_font missing atomic aligned-payload error'
+grep -q 'return 6' "$ROOT/common/font_manager.sh" || fail 'switch_font must reject a partial XML/slot payload'
+grep -q '警告：无 Hook XML 未安全启用，已保留文件槽映射' "$ROOT/common/font_manager.sh" && fail 'switch_font still commits a partial fail-open payload' || true
 grep -q 'xmlOverlay=false' "$ROOT/common/multiweight_mix_task.sh" && fail 'multiweight still hard-codes xmlOverlay=false' || true
 grep -q 'font-config-overlay.conf' "$ROOT/common/multiweight_mix_task.sh" || fail 'multiweight does not read actual XML overlay state'
 echo 'font_config_mono_coverage_test: PASS'

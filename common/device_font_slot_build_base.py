@@ -211,18 +211,30 @@ def transform_for_probe(slot: dict[str, Any], probe: str) -> dict[str, Any] | No
 def apply_outline_transforms(font: TTFont, slot: dict[str, Any]) -> dict[str, Any]:
     roles = set(slot.get("roles") or [])
     probe_map = glyph_probe_map(font)
-    recordings = record_target_glyphs(font, probe_map)
     glyf = font["glyf"]
     hmtx = font["hmtx"].metrics
+    # Capture only composite outlines, and do it before mutating any simple base
+    # glyph. Recording a composite after one of its components was transformed
+    # applies the slot transform twice (common for accented Latin glyphs). The old
+    # implementation avoided that bug by recording every glyph eagerly, but paid
+    # the full CJK decomposition cost. This keeps the correctness guarantee while
+    # limiting decomposition to glyphs that actually need it.
+    composite_names = (
+        glyph_name
+        for glyph_name in probe_map
+        if glyph_name in glyf and glyf[glyph_name].numberOfContours < 0
+    )
+    composite_recordings = record_target_glyphs(font, composite_names)
     changed = 0
     centered = 0
     advances = 0
+    direct = 0
+    decomposed = 0
     probe_counts: dict[str, int] = {}
 
     for glyph_name, probe in probe_map.items():
-        recording = recordings.get(glyph_name)
         transform_data = transform_for_probe(slot, probe)
-        if recording is None or transform_data is None or glyph_name not in hmtx:
+        if transform_data is None or glyph_name not in hmtx or glyph_name not in glyf:
             continue
 
         scale_y = finite(transform_data.get("relativeScaleY")) or 1.0
@@ -238,21 +250,37 @@ def apply_outline_transforms(font: TTFont, slot: dict[str, Any]) -> dict[str, An
         new_advance = int(round(target_advance if exact_advance and target_advance is not None else old_advance * relative_advance))
         new_advance = max(1, min(65535, new_advance))
 
-        provisional = replay_glyph(recording, Transform(scale_x, 0, 0, scale_y, 0, shift_y))
-        bounds = glyph_bounds(provisional, glyf)
+        source_glyph = glyf[glyph_name]
+        bounds = glyph_bounds(source_glyph, glyf)
         shift_x = 0.0
         new_lsb = int(old_lsb)
         if bounds is not None and exact_advance:
-            ink_width = bounds[2] - bounds[0]
+            ink_width = (bounds[2] - bounds[0]) * scale_x
             desired_x_min = (new_advance - ink_width) / 2.0
-            shift_x = desired_x_min - bounds[0]
+            shift_x = desired_x_min - bounds[0] * scale_x
             new_lsb = int(round(desired_x_min))
             centered += 1
         elif scale_x != 1.0:
             new_lsb = int(round(old_lsb * scale_x))
 
-        glyph = replay_glyph(recording, Transform(scale_x, 0, 0, scale_y, shift_x, shift_y))
-        glyf[glyph_name] = glyph
+        # Simple TrueType outlines can be transformed in place. This is equivalent to replaying
+        # them through a TransformPen, but avoids rebuilding every glyph in a large CJK font.
+        # Composite glyphs retain the conservative decomposing path so nested component transforms
+        # cannot be applied twice.
+        if source_glyph.numberOfContours > 0:
+            source_glyph.coordinates.transform(((scale_x, 0.0), (0.0, scale_y)))
+            source_glyph.coordinates.translate((shift_x, shift_y))
+            source_glyph.coordinates.toInt()
+            source_glyph.recalcBounds(glyf)
+            glyph = source_glyph
+            direct += 1
+        else:
+            recording = composite_recordings.get(glyph_name)
+            if recording is None:
+                continue
+            glyph = replay_glyph(recording, Transform(scale_x, 0, 0, scale_y, shift_x, shift_y))
+            glyf[glyph_name] = glyph
+            decomposed += 1
         bounds_after = glyph_bounds(glyph, glyf)
         if bounds_after is not None and exact_advance:
             new_lsb = int(bounds_after[0])
@@ -265,6 +293,8 @@ def apply_outline_transforms(font: TTFont, slot: dict[str, Any]) -> dict[str, An
         "glyphs": changed,
         "centered": centered,
         "advances": advances,
+        "direct": direct,
+        "decomposed": decomposed,
         "probes": dict(sorted(probe_counts.items())),
     }
 

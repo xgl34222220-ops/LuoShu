@@ -131,8 +131,8 @@ identity = slot_build.target_family_identity({
     "style": "normal",
     "postScriptName": "Roboto-Regular",
 })
-assert identity[0] == "sans-serif", identity
-assert identity[3] == "Roboto-Regular", identity
+assert identity[0] == "LuoShu System", identity
+assert identity[3] == "LuoShuSystem-Regular", identity
 
 source_profile = {"sha256": "abc", "faceIndex": -1}
 slot_a = {
@@ -147,6 +147,9 @@ slot_a = {
     "transforms": {},
 }
 slot_b = dict(slot_a, family="google-sans", familyNormalized="google-sans")
-assert payload_build.build_signature(slot_a, source_profile, 400) != payload_build.build_signature(slot_b, source_profile, 400)
+# XML owns the Android family graph and removes stock PostScript references. Two aliases with the
+# same source, role, metrics and transforms must therefore share one generated outline; retaining
+# the family name here multiplied first-apply work on OEM ROMs with dozens of aliases.
+assert payload_build.build_signature(slot_a, source_profile, 400) == payload_build.build_signature(slot_b, source_profile, 400)
 
 print("fallback_coverage_policy_test: PASS")

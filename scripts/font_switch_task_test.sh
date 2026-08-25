@@ -12,6 +12,7 @@ export LUOSHU_SWITCH_TIMEOUT_SECONDS=5
 export LUOSHU_SWITCH_WORKER_PID_FILE="$MODDIR/config/switch_task_worker.pid"
 mkdir -p "$MODDIR/common" "$MODDIR/config" "$MODDIR/logs"
 cp "$ROOT/common/background_task.sh" "$MODDIR/common/background_task.sh"
+cp "$ROOT/common/util_functions.sh" "$ROOT/common/util_functions_core.sh" "$MODDIR/common/"
 
 MANAGER="$TMP/fake-manager.sh"
 cat > "$MANAGER" <<'EOF_MANAGER'
@@ -23,6 +24,10 @@ case "${3:-}" in
         trap 'printf "%s\n" rolled-back > "${ROLLBACK_MARKER:?}"; exit 143' TERM INT
         sleep 30
         printf '%s\n' '{"status":"ok"}'
+        ;;
+    hold)
+        sleep 2
+        printf '%s\n' '{"status":"ok","data":{"font":"hold"}}'
         ;;
     *) printf '%s\n' '{"status":"error","message":"unknown"}' ;;
 esac
@@ -61,6 +66,21 @@ start_output="$(sh "$ROOT/common/font_switch_task.sh" start bad)"
 printf '%s\n' "$start_output" | grep -q '"status":"ok"'
 wait_state failed
 grep -q 'fake failure' "$LUOSHU_SWITCH_TASK_FILE"
+
+# Two simultaneous App requests must produce exactly one accepted task. The
+# launch lock protects the queued/running task record before the manager lock
+# exists, so the rejected request cannot overwrite the accepted task ID.
+sh "$ROOT/common/font_switch_task.sh" start hold > "$TMP/concurrent-a.out" &
+start_a=$!
+sh "$ROOT/common/font_switch_task.sh" start hold > "$TMP/concurrent-b.out" &
+start_b=$!
+wait "$start_a"
+wait "$start_b"
+accepted=$(grep -l '"status":"ok"' "$TMP/concurrent-a.out" "$TMP/concurrent-b.out" | wc -l | tr -d '[:space:]')
+rejected=$(grep -l '字体正在切换中' "$TMP/concurrent-a.out" "$TMP/concurrent-b.out" | wc -l | tr -d '[:space:]')
+[ "$accepted" = 1 ]
+[ "$rejected" = 1 ]
+wait_state success
 
 start_output="$(sh "$ROOT/common/font_switch_task.sh" start slow)"
 printf '%s\n' "$start_output" | grep -q '"status":"ok"'

@@ -46,6 +46,7 @@ def main() -> int:
         shutil.copy2(args.font, font_dirs["my_product"] / "SysFont-Hans-Regular.ttf")
         os.link(font_dirs["product"] / "ProductUi-Regular.ttf", font_dirs["odm"] / "DuplicateProduct.ttf")
         shutil.copy2(args.font, font_dirs["oem"] / "OPlusSans3.0.ttf")
+        shutil.copy2(args.font, font_dirs["hw_product"] / "HwUi-Regular.ttf")
 
         (etc_dirs["system"] / "fonts.xml").write_text(
             '<familyset><family name="sans-serif"><font weight="400">Roboto-Regular.ttf</font></family></familyset>\n',
@@ -61,6 +62,10 @@ def main() -> int:
         )
         (etc_dirs["oem"] / "fonts.xml").write_text(
             '<familyset><family name="system-ui"><font weight="400">ProductUi-Regular.ttf</font></family></familyset>\n',
+            encoding="utf-8",
+        )
+        (etc_dirs["hw_product"] / "fonts.xml").write_text(
+            '<familyset><family name="system-ui"><font weight="400">HwUi-Regular.ttf</font></family></familyset>\n',
             encoding="utf-8",
         )
 
@@ -94,17 +99,19 @@ def main() -> int:
 
         assert payload["scannerRevision"] == 3
         assert payload["romKind"] == "coloros"
-        assert result["stockFontFileCount"] == 5
-        assert result["stockFontUniqueFileCount"] == 4
-        assert summary["stockFontFileCount"] == 5
-        assert summary["stockFontUniqueFileCount"] == 4
+        assert result["stockFontFileCount"] == 6
+        assert result["stockFontUniqueFileCount"] == 5
+        assert summary["stockFontFileCount"] == 6
+        assert summary["stockFontUniqueFileCount"] == 5
         assert summary["partitionFontFileCounts"]["odm"] == 1
         assert summary["partitionUniqueFontFileCounts"]["odm"] == 0
-        assert summary["xmlSourceCount"] == 4
-        assert payload["slotCount"] == 3
+        assert summary["xmlSourceCount"] == 5
+        assert payload["slotCount"] == 5
         assert "/system/fonts/Roboto-Regular.ttf" in payload["slots"]
         assert "/product/fonts/ProductUi-Regular.ttf" in payload["slots"]
         assert "/my_product/fonts/SysFont-Hans-Regular.ttf" in payload["slots"]
+        assert "/oem/fonts/OPlusSans3.0.ttf" in payload["slots"]
+        assert "/hw_product/fonts/HwUi-Regular.ttf" in payload["slots"]
         assert summary["fontSignatures"]["coloros"] == ["SysFont-Hans-Regular.ttf", "OPlusSans3.0.ttf"]
         assert "Roboto-Regular.ttf" in summary["fontSignatures"]["aosp"]
         assert all(not path.startswith("/data/") for path in payload["slots"])
@@ -113,7 +120,7 @@ def main() -> int:
         assert reused.returncode == 0, reused.stderr
         reused_result = json.loads(reused.stdout)
         assert reused_result["status"] == "reused"
-        assert reused_result["stockFontUniqueFileCount"] == 4
+        assert reused_result["stockFontUniqueFileCount"] == 5
 
         scanner = importlib.import_module("font_inventory_scan_v3")
         theme = temp / "theme/fonts"

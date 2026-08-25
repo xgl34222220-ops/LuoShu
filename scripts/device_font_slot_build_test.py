@@ -42,6 +42,12 @@ def main() -> None:
         shift_y=48.0,
         advance_delta=24.0,
     )
+    # DejaVu's accented capitals are composites. Shifting this probe verifies
+    # that their already-shifted base glyphs are not transformed a second time.
+    target["probes"]["latinCap"] = shifted_probe(
+        source["probes"]["latinCap"],
+        shift_y=32.0,
+    )
 
     template = {
         "schema": "device-font-template-v1",
@@ -89,9 +95,10 @@ def main() -> None:
         assert abs(generated_digits["advance"] - target_digits["advance"]) <= 1.0, (source_digits, target_digits, generated_digits)
 
         generated_caps = generated["probes"]["latinCap"]
-        source_caps = source["probes"]["latinCap"]
-        assert abs(generated_caps["yMin"] - source_caps["yMin"]) <= 1.0
-        assert abs(generated_caps["yMax"] - source_caps["yMax"]) <= 1.0
+        target_caps = target["probes"]["latinCap"]
+        assert report["transformed"]["decomposed"] > 0, report
+        assert abs(generated_caps["yMin"] - target_caps["yMin"]) <= 1.0
+        assert abs(generated_caps["yMax"] - target_caps["yMax"]) <= 1.0
         print(json.dumps(report, ensure_ascii=False, sort_keys=True))
 
 

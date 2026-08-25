@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -100,6 +101,9 @@ def main() -> None:
             """<?xml version='1.0' encoding='utf-8'?>
 <familyset>
   <family name='mi-sans'><font weight='400' style='normal'>MiSans-Regular.ttf</font></family>
+  <family-list name='serif-monospace'>
+    <family><font weight='400' style='normal'>CutiveMono-Regular.ttf</font></family>
+  </family-list>
 </familyset>
 """,
         )
@@ -123,6 +127,7 @@ def main() -> None:
             "LuoShuSlot-ui-400.ttf",
             "LuoShuSlot-mi-400.ttf",
             "LuoShuSlot-google-400.ttf",
+            "LuoShuSlot-mono-400.ttf",
         }
         for name in generated:
             (fonts / name).write_bytes((name.encode("utf-8") + b"\0") * 256)
@@ -131,6 +136,15 @@ def main() -> None:
             slot(system_primary, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-400.ttf"),
             slot(system_legacy, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-400.ttf"),
             slot(product_xml, "mi-sans", "MiSans-Regular.ttf", "LuoShuSlot-mi-400.ttf"),
+            slot(
+                product_xml,
+                # Legacy capture revision 2 lost the family-list wrapper name.
+                # The renderer must still locate this unique monospace slot.
+                "",
+                "CutiveMono-Regular.ttf",
+                "LuoShuSlot-mono-400.ttf",
+                roles=["mono"],
+            ),
             slot(
                 dynamic_xml,
                 "google-sans",
@@ -189,11 +203,11 @@ def main() -> None:
             overlay.PRIMARY_SYSTEM_XMLS = original_primary
 
         assert report["summary"] == {
-            "mappedSlots": 4,
-            "rewrittenSlots": 3,
+            "mappedSlots": 5,
+            "rewrittenSlots": 4,
             "dynamicSlots": 1,
             "dynamicInjectedFonts": 2,
-            "uniqueCopiedFonts": 3,
+            "uniqueCopiedFonts": 4,
             "xmlOutputs": 3,
             "incompleteDynamicFamilies": 1,
         }, report["summary"]
@@ -216,6 +230,7 @@ def main() -> None:
             assert "LuoShuSlot-google-400.ttf" in texts
         assert "NotoColorEmoji.ttf" in font_texts(output_primary)
         assert "LuoShuSlot-mi-400.ttf" in font_texts(output_product)
+        assert "LuoShuSlot-mono-400.ttf" in font_texts(output_product)
 
         dynamic_names = family_names(output_dynamic)
         assert "google-sans" not in dynamic_names
@@ -227,9 +242,22 @@ def main() -> None:
         assert (output / "system/fonts/LuoShuSlot-ui-400.ttf").is_file()
         assert (output / "system/fonts/LuoShuSlot-google-400.ttf").is_file()
         assert (output / "product/fonts/LuoShuSlot-mi-400.ttf").is_file()
+        assert (output / "product/fonts/LuoShuSlot-mono-400.ttf").is_file()
         assert report["dynamicMounts"] == [
             {"source": "dynamic/data-fonts-config.xml", "target": str(dynamic_xml)}
         ]
+
+        stock_lower = root / "self-mount/lower/system-etc/fonts.xml"
+        write(stock_lower, "<familyset/>")
+        old_state_root = os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT")
+        os.environ["LUOSHU_SELF_MOUNT_STATE_ROOT"] = str(root / "self-mount")
+        try:
+            assert overlay.stock_xml_input({}, "/system/etc/fonts.xml") == stock_lower
+        finally:
+            if old_state_root is None:
+                os.environ.pop("LUOSHU_SELF_MOUNT_STATE_ROOT", None)
+            else:
+                os.environ["LUOSHU_SELF_MOUNT_STATE_ROOT"] = old_state_root
         print(json.dumps(report["summary"], ensure_ascii=False, sort_keys=True))
 
 

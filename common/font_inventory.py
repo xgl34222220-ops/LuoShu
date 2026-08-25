@@ -32,6 +32,20 @@ LOGICAL_FONT_ROOTS = (
     ("product", Path("/product/fonts")),
     ("my_product", Path("/my_product/fonts")),
     ("vendor", Path("/vendor/fonts")),
+    ("odm", Path("/odm/fonts")),
+    ("oem", Path("/oem/fonts")),
+    ("my_engineering", Path("/my_engineering/fonts")),
+    ("my_company", Path("/my_company/fonts")),
+    ("my_preload", Path("/my_preload/fonts")),
+    ("my_region", Path("/my_region/fonts")),
+    ("my_stock", Path("/my_stock/fonts")),
+    ("oplus_product", Path("/oplus_product/fonts")),
+    ("oplus_engineering", Path("/oplus_engineering/fonts")),
+    ("oplus_version", Path("/oplus_version/fonts")),
+    ("oplus_region", Path("/oplus_region/fonts")),
+    ("mi_ext", Path("/mi_ext/fonts")),
+    ("cust", Path("/cust/fonts")),
+    ("hw_product", Path("/hw_product/fonts")),
 )
 MIRROR_PREFIXES = (
     Path("/debug_ramdisk/.magisk/mirror"),
@@ -333,8 +347,8 @@ def _overlay_risk(module: Path | None) -> bool:
         return False
     if not active or active == "default":
         return False
-    for relative in ("system/fonts", "system_ext/fonts", "product/fonts", "my_product/fonts", "vendor/fonts"):
-        root = module / relative
+    for _partition, logical in LOGICAL_FONT_ROOTS:
+        root = module / logical.relative_to("/")
         if root.is_dir() and any(path.suffix.lower() in FONT_EXTENSIONS for path in root.iterdir() if path.is_file()):
             return True
     return False
@@ -361,7 +375,7 @@ def _resolve_roots(args: argparse.Namespace, overlay_risk: bool) -> tuple[list[F
         "vendor": args.vendor_fonts,
     }
     roots = [
-        FontRoot(partition, logical, _pick_actual_root(logical, explicit[partition], overlay_risk))
+        FontRoot(partition, logical, _pick_actual_root(logical, explicit.get(partition), overlay_risk))
         for partition, logical in LOGICAL_FONT_ROOTS
     ]
     system_etc = _pick_actual_root(Path("/system/etc"), args.system_etc, overlay_risk)

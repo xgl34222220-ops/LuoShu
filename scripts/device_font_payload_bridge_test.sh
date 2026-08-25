@@ -119,60 +119,47 @@ has flyme-apply
 has device-clear
 eq "$(cat "$MODULE/config/active_font.conf")" default
 
-# Production loads the policy last. Its real device-cache probe should return unsupported/cache-miss
-# in this fixture, then the stubs below exercise foreground XML result handling.
+# Production loads the v4 policy last. The final stock-aligned builder is the
+# only accepted foreground result; legacy XML/slot fallbacks are deliberately
+# fail-closed because they caused mixed baselines and a second apply/reboot.
 . "$ROOT/common/device_font_payload_policy.sh"
-_dfpp_xml_overlay_active() { [ "$LEGACY_REAL_XML" = 1 ]; }
+device_font_payload_build_install() { record device; return "$DEVICE_RC"; }
 ROM=originos
 rm -f "$MODULE/config/device-font-engine.conf"
-VARIABLE_SOURCE=0
 
-CASE='policy/cache miss enables real xml'
-LEGACY_RC=0
-LEGACY_REAL_XML=1
+CASE='policy/final aligned payload succeeds'
+DEVICE_RC=0
 : > "$CALLS"
 ok font_config_enable_for_payload Fixture
-has prepare
-has legacy
-hasnt schedule
-hasnt base-clear
-eq "$LUOSHU_DEVICE_PAYLOAD_RESULT" legacy
-
-CASE='policy/false xml success still schedules cache'
-LEGACY_RC=0
-LEGACY_REAL_XML=0
-: > "$CALLS"
-ok font_config_enable_for_payload Fixture
-has prepare
-has legacy
-has schedule
-has base-clear
-hasnt oem-clear
-eq "$LUOSHU_DEVICE_PAYLOAD_RESULT" slot-only
-
-CASE='policy/xml generation failure falls back'
-LEGACY_RC=1
-LEGACY_REAL_XML=0
-: > "$CALLS"
-ok font_config_enable_for_payload Fixture
-has prepare
-has legacy
-has schedule
-has base-clear
-hasnt oem-clear
-eq "$LUOSHU_DEVICE_PAYLOAD_RESULT" slot-only
-
-CASE='policy/variable source defers background'
-VARIABLE_SOURCE=1
-LEGACY_RC=0
-: > "$CALLS"
-ok font_config_enable_for_payload Fixture
+has device
 hasnt prepare
 hasnt legacy
-has schedule
-eq "$LUOSHU_DEVICE_PAYLOAD_RESULT" slot-only
-VARIABLE_SOURCE=0
-LEGACY_RC=0
+hasnt schedule
+eq "$LUOSHU_DEVICE_PAYLOAD_RESULT" device
+
+CASE='policy/hard builder failure is atomic'
+DEVICE_RC=1
+: > "$CALLS"
+RC=0
+font_config_enable_for_payload Fixture || RC=$?
+eq "$RC" 1
+has device
+hasnt prepare
+hasnt legacy
+hasnt schedule
+eq "$LUOSHU_DEVICE_PAYLOAD_RESULT" device-failed
+
+CASE='policy/template unavailable is atomic'
+DEVICE_RC=2
+: > "$CALLS"
+RC=0
+font_config_enable_for_payload Fixture || RC=$?
+eq "$RC" 1
+has device
+hasnt prepare
+hasnt legacy
+hasnt schedule
+eq "$LUOSHU_DEVICE_PAYLOAD_RESULT" device-failed
 
 CASE='policy/coloros discovery cache'
 _coloros_core_files() { printf '%s\n' 'Core-Regular.ttf Core-Medium.ttf'; }

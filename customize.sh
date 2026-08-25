@@ -2,7 +2,7 @@
 # LuoShu v2.3.0 installer wrapper: run the verified installer, then hide every
 # standard partition payload before the first boot.
 # Delegated core contract: module_update_state.sh records upgrade migration.
-# User contract retained by the delegated core: 后台重建完成后会通知再次重启。
+# User contract retained by the delegated core: 后台不改写字体，只在明确应用时提交。
 # Delegated inventory output: 原厂字体文件
 # Delegated slot summary: XML 与 OEM 探测
 set +e

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -61,6 +62,24 @@ def main() -> None:
     assert "protected" not in dynamic_roles
 
     assert mod.partition_root_for_xml(Path("/system/etc/fonts.xml")) == Path("/system")
+
+    with tempfile.TemporaryDirectory() as temporary:
+        xml = Path(temporary) / "fonts.xml"
+        xml.write_text(
+            """<familyset>
+  <family-list name="serif-monospace">
+    <family><font weight="400">CutiveMono-Regular.ttf</font></family>
+  </family-list>
+  <family-list name="google-sans-text">
+    <family><font weight="500">GoogleSansText-Medium.ttf</font></family>
+  </family-list>
+</familyset>""",
+            encoding="utf-8",
+        )
+        inherited = mod.parse_xml(xml)
+        assert [item.family for item in inherited] == ["serif-monospace", "google-sans-text"]
+        assert "mono" in mod.classify_roles(inherited[0], Path("/system/fonts/CutiveMono-Regular.ttf"))
+        assert "global-ui" in mod.classify_roles(inherited[1], Path("/system/fonts/GoogleSansText-Medium.ttf"))
     print(
         json.dumps(
             {

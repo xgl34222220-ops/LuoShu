@@ -4,7 +4,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-update-state)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-SCHEMA=device-template-v1-baseline-v7-mono-v6
+SCHEMA=device-template-v2-baseline-v9-rolegraph-v2
 LUOSHU_PAYLOAD_SCHEMA_CURRENT="$SCHEMA"
 export LUOSHU_PAYLOAD_SCHEMA_CURRENT
 OEM_PARTITIONS='my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product'
@@ -90,7 +90,9 @@ test ! -e "$NEW/config/self-mount-required.conf"
 test ! -e "$NEW/config/device-font-load-verification.conf"
 test "$LUOSHU_UPDATE_ACTIVE" = Qsal
 test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = true
-grep -q '^state=pending$' "$NEW/config/font-payload-rebuild-pending.conf"
+grep -q '^state=awaiting-explicit-apply$' "$NEW/config/font-payload-rebuild-pending.conf"
+grep -q '^mode=preserve-current$' "$NEW/config/font-payload-rebuild-pending.conf"
+grep -q '^reason=schema-upgrade$' "$NEW/config/font-payload-rebuild-pending.conf"
 grep -q '^oldSchema=missing$' "$NEW/config/font-payload-rebuild-pending.conf"
 grep -q "^newSchema=$SCHEMA$" "$NEW/config/font-payload-rebuild-pending.conf"
 
@@ -127,26 +129,6 @@ luoshu_migrate_active_install "$OPLUS_ONLY" "$OPLUS_ONLY_NEW"
 test -f "$OPLUS_ONLY_NEW/oplus_product/fonts/OPPOSans-Regular.ttf"
 test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = false
 
-# The installer-side direct-font rebuild waits for and accepts only the current schema.
-REBUILD="$TMP/rebuild"
-mkdir -p "$REBUILD/common" "$REBUILD/config" "$REBUILD/logs"
-printf 'FontA\n' >"$REBUILD/config/active_font.conf"
-printf 'state=pending\n' >"$REBUILD/config/font-payload-rebuild-pending.conf"
-cat >"$REBUILD/common/font_manager.sh" <<EOS
-#!/bin/sh
-mkdir -p "\$MODDIR/config"
-printf 'schema=$SCHEMA\\nfont=FontA\\n' >"\$MODDIR/config/font-payload-schema.conf"
-printf '{"status":"ok"}\\n'
-EOS
-chmod 0755 "$REBUILD/common/font_manager.sh"
-LUOSHU_UPDATE_ACTIVE=FontA
-LUOSHU_UPDATE_REBUILD_TIMEOUT=4
-luoshu_rebuild_preserved_payload "$REBUILD"
-test "$LUOSHU_UPDATE_REBUILT" = true
-test "$LUOSHU_UPDATE_REBUILD_FAILED" = false
-test ! -e "$REBUILD/config/font-payload-rebuild-pending.conf"
-test "$(luoshu_update_payload_schema "$REBUILD")" = "$SCHEMA"
-
 INVALID="$TMP/invalid"
 TARGET="$TMP/invalid-target"
 mkdir -p "$INVALID/config" "$TARGET/config"
@@ -166,4 +148,4 @@ FRESH_CODE=$?
 set -e
 test "$FRESH_CODE" -eq 2
 
-echo 'Module updates preserve current payloads and rebuild stale schemas before the one reboot.'
+echo 'Module updates preserve current payloads; stale schemas wait for one explicit foreground apply.'

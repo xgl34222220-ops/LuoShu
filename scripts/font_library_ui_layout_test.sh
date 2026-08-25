@@ -95,11 +95,15 @@ grep -q 'compact_rom_detection_logs' "$UTIL"
 grep -q 'log_rom_detection_once coloros' "$UTIL"
 grep -q 'log_rom_detection_once hyperos' "$UTIL"
 
-# A detached background cache worker must load the transaction and mount layers
-# itself before activating a generated payload.
-grep -q 'device_font_transaction_guard.sh' "$CACHE"
-grep -q 'mount_compat.sh' "$CACHE"
-grep -q 'type luoshu_sync_mount_payload' "$CACHE"
+# A detached background cache worker is preparation-only. It may publish an immutable
+# ready cache, but activation, reboot markers and transaction commits belong exclusively
+# to the explicit foreground switch.
+CACHE_WORKER=$(sed -n '/^_dfcache_build_pending_inner()/,/^}/p' "$CACHE")
+printf '%s\n' "$CACHE_WORKER" | grep -q 'LUOSHU_CACHE_FOREGROUND'
+! printf '%s\n' "$CACHE_WORKER" | grep -q 'device_font_cache_activate'
+! printf '%s\n' "$CACHE_WORKER" | grep -q 'text_reboot_required.conf'
+! printf '%s\n' "$CACHE_WORKER" | grep -q 'luoshu_payload_transaction_commit'
+grep -q '设备对齐缓存已就绪且未改动当前字体' "$CACHE"
 
 # Task center separates user-facing tasks/issues from raw logs and all routed header
 # actions use the same compact visible box while preserving a 48 dp touch target.
@@ -142,7 +146,8 @@ grep -q 'opticalScale = 1.08f' "$STUDIO_TOOLS"
 [ "$(grep -c 'padding(bottom = dockClearance)' "$SHELL")" -eq 5 ]
 grep -q 'val edgeToEdgeGlass = appearance.uiStyle == UiStyle.MIUIX' "$SHELL"
 grep -q 'edgeToEdgeGlass -> 0.dp' "$SHELL"
-grep -q 'navigationBottom + 78.dp' "$SHELL"
+grep -q 'navigationBottom + 94.dp' "$SHELL"
+grep -q 'navigationBottom + 96.dp' "$SHELL"
 [ "$(grep -c 'LocalDockContentPadding provides dockContentPadding' "$SHELL")" -eq 5 ]
 grep -q 'LocalDockContentPadding' "$DOCK_INSETS"
 
@@ -153,21 +158,21 @@ grep -q 'private val dockPages' "$SHELL"
 sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -q 'AppPage.Settings'
 ! sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -q 'AppPage.Logs'
 grep -q 'val showDock = page != AppPage.Logs' "$SHELL"
-grep -q 'fontSize = 10.sp' "$SHELL"
+grep -q 'fontSize = 11.sp' "$SHELL"
 grep -q 'LuoShuIconTokens.DockGlyph' "$SHELL"
 ! grep -q 'targetValue = if (selected) 21.dp else 19.dp' "$SHELL"
 grep -q 'private fun MiuixAppDock' "$SHELL"
 MIUIX_DOCK=$(sed -n '/private fun MiuixAppDock/,/private fun AppDockLayout/p' "$SHELL")
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'hazeEffect'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 24.dp'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'noiseFactor = .012f'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'RoundedCornerShape(24.dp)'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'blurRadius = 30.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'noiseFactor = .018f'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'RoundedCornerShape(31.dp)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'activeGlass'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .22f)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorColor = scheme.primary.copy'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 0.dp'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'itemHeight = 44.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 3.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'itemHeight = 54.dp'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'runtimeLiquid'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'Modifier.layerBackdrop(dockSurfaceBackdrop)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'Modifier.drawBackdrop'
@@ -182,8 +187,10 @@ grep -q 'Three independent layers mirror the reference implementation' "$SHELL"
 grep -q 'graphicsLayer' "$SHELL"
 grep -q 'dampingRatio = if (liquidGlass) .68f else .84f' "$SHELL"
 grep -q 'liquidStretch.animateTo' "$SHELL"
-grep -q 'direction \* it \* 3 / 4' "$SHELL"
 grep -q 'AnimatedVisibility(' "$SHELL"
+grep -q 'key(page)' "$SHELL"
+grep -q 'translationY = (1f - pageEnter.value) \* 18.dp.toPx()' "$SHELL"
+! grep -q 'AnimatedContent' "$SHELL"
 
 # Settings follows a grouped home -> detail hierarchy instead of a clipped horizontal tab strip.
 grep -q 'SettingCard("视觉与显示")' "$SETTINGS"

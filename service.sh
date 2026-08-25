@@ -68,7 +68,6 @@ MODULE_DIR="$MODDIR"
     # updates can persist normally. Template refresh is allowed only after that original
     # document is visible again.
     _dynamic_template_safe=1
-    _device_template_ready=1
     if type device_font_dynamic_mount_release >/dev/null 2>&1; then
         device_font_dynamic_mount_release
         _dynamic_release_rc=$?
@@ -77,7 +76,6 @@ MODULE_DIR="$MODDIR"
             2) log_service "DEBUG" "本次启动没有洛书动态字体临时视图" ;;
             *)
                 _dynamic_template_safe=0
-                _device_template_ready=0
                 log_service "ERROR" "动态字体临时视图无法安全释放，本次跳过原厂模板刷新"
                 ;;
         esac
@@ -85,14 +83,15 @@ MODULE_DIR="$MODDIR"
 
     _active_for_template=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
     [ -n "$_active_for_template" ] || _active_for_template=default
-    if [ "$_dynamic_template_safe" -eq 1 ] && \
-       { [ "$_active_for_template" != default ] || [ -f "$MODDIR/config/font-payload-rebuild-pending.conf" ]; } && \
-       [ -f "$MODDIR/common/device_font_template.sh" ]; then
+    if [ "$_dynamic_template_safe" -eq 1 ] && [ -f "$MODDIR/common/device_font_template.sh" ]; then
         if MODDIR="$MODDIR" sh "$MODDIR/common/device_font_template.sh" ensure >/dev/null 2>&1; then
-            log_service "INFO" "原厂字体槽位模板已按当前 ROM 配置校验"
+            if [ "$_active_for_template" = default ]; then
+                log_service "INFO" "已在系统默认字体状态冻结本机原厂字体槽位模板"
+            else
+                log_service "INFO" "原厂字体槽位模板已按当前 ROM 配置校验"
+            fi
         else
-            _device_template_ready=0
-            log_service "ERROR" "原厂字体槽位模板刷新失败，本次禁止使用旧模板重建"
+            log_service "ERROR" "原厂字体槽位模板刷新失败；明确应用会保持旧负载并返回错误"
         fi
     fi
 
@@ -141,8 +140,6 @@ MODULE_DIR="$MODDIR"
     fi
 
     # 字体列表在后台预热。轻量指纹未变化时跳过轮廓解析；变化后重建原生索引。
-    # 必须先于负载重建完成：重建任务要靠字体索引定位源文件，索引未就绪时
-    # 重建会在一秒内误报失败，进而误删用户正在正常使用的字体负载。
     if [ -f "$MODDIR/common/font_library_cache.sh" ] && [ -f "$MODDIR/common/font_manager.sh" ]; then
         _font_fp=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_library_cache.sh" value 2>/dev/null)
         _font_fp_old=$(cat "$MODDIR/config/native_font_index.key" 2>/dev/null)
@@ -156,40 +153,24 @@ MODULE_DIR="$MODDIR"
         fi
     fi
 
-    # 架构升级时不再卡住刷写界面。Android 完成启动后再使用完整运行环境后台重建，
-    # 成功后通知用户重启一次加载新负载；失败则保留当前可用负载，下次开机重试，
-    # 连续失败达到上限才撤销覆盖并恢复系统默认字体。
+    # 架构升级或 ROM 动态字体配置变化时，保留本次启动正在使用的完整旧负载。
+    # 后台服务绝不改写 active_font、绝不激活缓存、也绝不创建第二个重启事务。
+    # 用户下一次明确点击“应用”时，前台原子事务一次生成并提交当前架构负载。
     if [ -f "$MODDIR/config/font-payload-rebuild-pending.conf" ]; then
         _pending_font=$(sed -n 's/^font=//p' "$MODDIR/config/font-payload-rebuild-pending.conf" 2>/dev/null | head -n1 | tr -d '\r\n')
         [ -n "$_pending_font" ] || _pending_font=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
         [ -n "$_pending_font" ] || _pending_font=default
-        LUOSHU_UPDATE_ACTIVE="$_pending_font"
-        export LUOSHU_UPDATE_ACTIVE
-        log_service "INFO" "开始后台重建旧字体负载：$_pending_font"
-        notify_service "洛书" "正在后台升级当前字体，无需停留在刷写页面。" luoshu-font-rebuild
-        if [ "$_device_template_ready" -eq 1 ] && \
-           type luoshu_rebuild_preserved_payload >/dev/null 2>&1 && \
-           luoshu_rebuild_preserved_payload "$MODDIR"; then
-            log_service "INFO" "旧字体负载已按新架构重建：$_pending_font"
-            notify_service "洛书" "字体升级完成，请完整重启一次使新版字体生效。" luoshu-font-rebuild
-        elif type luoshu_rebuild_failure_retry >/dev/null 2>&1 && luoshu_rebuild_failure_retry "$MODDIR" 3; then
-            _retry_count=$(cat "$MODDIR/config/font-payload-rebuild-failures" 2>/dev/null)
-            if [ "$_device_template_ready" -eq 1 ]; then
-                log_service "ERROR" "旧字体负载后台重建失败（第 ${_retry_count:-1} 次），保留当前字体并下次开机重试"
-            else
-                log_service "ERROR" "原厂模板未就绪（第 ${_retry_count:-1} 次），保留当前字体并下次开机重试"
-            fi
-            notify_service "洛书" "字体升级未完成，已保留当前字体，将在下次开机自动重试。" luoshu-font-rebuild
-        else
-            log_service "ERROR" "旧字体负载连续重建失败，正在恢复系统默认字体"
-            rm -f "$MODDIR/config/font-payload-rebuild-failures" 2>/dev/null || true
-            if type luoshu_payload_quarantine >/dev/null 2>&1; then
-                luoshu_payload_quarantine
-            else
-                printf 'default\n' > "$MODDIR/config/active_font.conf" 2>/dev/null || true
-                rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" "$MODDIR/config/font-payload-schema.conf" 2>/dev/null || true
-            fi
-            notify_service "洛书" "字体升级失败，已安全恢复系统默认字体；请打开洛书重新应用。" luoshu-font-rebuild
+        _pending_reason=$(sed -n 's/^reason=//p' "$MODDIR/config/font-payload-rebuild-pending.conf" 2>/dev/null | head -n1)
+        log_service "INFO" "旧字体负载保持不变，等待一次明确应用：font=$_pending_font reason=${_pending_reason:-schema-upgrade}"
+        if [ ! -f "$MODDIR/config/font-payload-reapply-notified.conf" ]; then
+            notify_service "洛书" "当前字体已保留。请在洛书中应用一次当前字体；完成后只需完整重启一次。" luoshu-font-reapply
+            {
+                printf 'font=%s\n' "$_pending_font"
+                printf 'reason=%s\n' "${_pending_reason:-schema-upgrade}"
+                printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+            } > "$MODDIR/config/font-payload-reapply-notified.conf.tmp.$$" 2>/dev/null && \
+                mv -f "$MODDIR/config/font-payload-reapply-notified.conf.tmp.$$" \
+                    "$MODDIR/config/font-payload-reapply-notified.conf" 2>/dev/null || true
         fi
     fi
 
@@ -238,11 +219,13 @@ MODULE_DIR="$MODDIR"
         case "$_load_verify_state" in
             verified)
                 type font_config_mark_boot_success >/dev/null 2>&1 && font_config_mark_boot_success
-                rm -f "$MODDIR/config/font-mount-verify-failures" 2>/dev/null || true
+                rm -f "$MODDIR/config/font-mount-verify-failures" \
+                    "$MODDIR/config/text_reboot_required.conf" 2>/dev/null || true
                 log_service "INFO" "设备字体加载与主命名空间挂载验证完成"
                 ;;
             not-applicable)
-                rm -f "$MODDIR/config/font-mount-verify-failures" 2>/dev/null || true
+                rm -f "$MODDIR/config/font-mount-verify-failures" \
+                    "$MODDIR/config/text_reboot_required.conf" 2>/dev/null || true
                 log_service "INFO" "当前为系统字体，无需设备加载验证"
                 ;;
             *)
