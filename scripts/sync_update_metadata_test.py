@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import importlib.util
+import json
 import pathlib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -10,17 +11,21 @@ spec.loader.exec_module(mod)
 
 meta = mod.build_metadata(
     repository="xgl34222220-ops/LuoShu",
-    version="v2.4.1 Beta 1",
-    version_code=20401,
-    tag="v2.4.1-Beta-1",
-    notes_file="RELEASE_NOTES_v2.4.1_Beta_1.md",
+    version="v4.0.0",
+    version_code=40000,
+    tag="v4.0.0",
+    notes_file="RELEASE_NOTES_v4.0.0.md",
 )
 assert meta == {
-    "version": "v2.4.1 Beta 1",
-    "versionCode": 20401,
-    "zipUrl": "https://github.com/xgl34222220-ops/LuoShu/releases/download/v2.4.1-Beta-1/LuoShu-v2.4.1-Beta-1.zip",
-    "changelog": "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/v2.4.1-Beta-1/RELEASE_NOTES_v2.4.1_Beta_1.md",
+    "version": "v4.0.0",
+    "versionCode": 40000,
+    "zipUrl": "https://github.com/xgl34222220-ops/LuoShu/releases/download/v4.0.0/LuoShu-v4.0.0.zip",
+    "changelog": "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/v4.0.0/RELEASE_NOTES_v4.0.0.md",
 }
+
+for metadata_file in ("update.json", "update-prerelease.json"):
+    actual = json.loads((ROOT / metadata_file).read_text(encoding="utf-8"))
+    assert actual == meta, (metadata_file, actual)
 
 for kwargs in (
     dict(repository="bad", version="v1", version_code=1, tag="v1", notes_file="n"),
