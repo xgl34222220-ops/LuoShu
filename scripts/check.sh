@@ -3,6 +3,16 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$ROOT/scripts/version.sh"
 
+# Source checks run with the host Python, while release workflows prepare the
+# pure-Python FontTools payload for the bundled Android runtime.  Make that
+# payload visible to every host-side Python test as well; otherwise a clean CI
+# runner fails before the Android build even though the runtime is present.
+LUOSHU_BUNDLED_SITE="$ROOT/common/python/lib/python3.14/site-packages"
+if [ -d "$LUOSHU_BUNDLED_SITE/fontTools" ]; then
+  PYTHONPATH="$LUOSHU_BUNDLED_SITE${PYTHONPATH:+:$PYTHONPATH}"
+  export PYTHONPATH
+fi
+
 # 所有 Shell 与 Python 后端必须先通过基础语法检查。
 find "$ROOT" -type f -name '*.sh' -print | while IFS= read -r file; do
   sh -n "$file"
