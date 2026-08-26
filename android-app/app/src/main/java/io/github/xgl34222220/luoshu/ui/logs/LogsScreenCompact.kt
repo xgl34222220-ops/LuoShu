@@ -51,8 +51,10 @@ import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuDetailBar
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
 
 private enum class LogsTab(val label: String) {
     TASKS("任务"),
@@ -67,6 +69,7 @@ internal fun LogsScreenCompact(
     actions: LogsActions,
     diagnosticState: DiagnosticExportState,
     onDiagnostic: () -> Unit,
+    onBack: () -> Unit,
 ) {
     val miuix = style == UiStyle.MIUIX
     val dockBottomPadding = maxOf(LocalDockContentPadding.current, 24.dp)
@@ -79,42 +82,16 @@ internal fun LogsScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, top = 6.dp, end = 14.dp, bottom = dockBottomPadding),
-        verticalArrangement = Arrangement.spacedBy(9.dp),
+        contentPadding = PaddingValues(start = 14.dp, top = 0.dp, end = 14.dp, bottom = dockBottomPadding),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        "TASK CENTER",
-                        color = MaterialTheme.colorScheme.primary,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.2.sp,
-                    )
-                    Spacer(Modifier.height(3.dp))
-                    Text(
-                        "任务中心",
-                        color = textPrimary,
-                        fontSize = 29.sp,
-                        lineHeight = 33.sp,
-                        fontWeight = FontWeight.Black,
-                    )
-                    Text(
-                        "任务、问题和原始日志分开查看",
-                        color = textSecondary,
-                        fontSize = 11.sp,
-                    )
-                }
+            LuoShuDetailBar(title = "任务与日志", onBack = onBack) {
                 DiagnosticExportButton(
                     style = style,
                     state = diagnosticState,
                     onClick = onDiagnostic,
                 )
-                Spacer(Modifier.size(8.dp))
                 LuoShuHeaderAction(
                     icon = Icons.Rounded.Refresh,
                     contentDescription = "刷新任务和日志",

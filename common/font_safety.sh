@@ -11,7 +11,7 @@ _luoshu_safety_config() {
     printf '%s/config\n' "$(_luoshu_safety_module)"
 }
 
-LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v7-mono-v6}"
+LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v9-rolegraph-v2}"
 
 luoshu_payload_schema_current() {
     printf '%s\n' "$LUOSHU_PAYLOAD_SCHEMA_CURRENT"
@@ -150,7 +150,7 @@ EOF_LUOSHU_DYNAMIC_TARGETS
     _ldt_cur=''
     _ldt_key=''
     _ldt_font_dir=''
-    while IFS="$(printf '\t')" read -r _ldt_tag _ldt_input _ldt_a _ldt_b _ldt_c; do
+    while IFS="$(printf '\t')" read -r _ldt_tag _ldt_input _ldt_a _ldt_b _ldt_c _ldt_d; do
         case "$_ldt_tag" in
             DOC)
                 if [ "$_ldt_a" = ok ]; then
@@ -172,8 +172,9 @@ EOF_LUOSHU_DYNAMIC_TARGETS
         _ldt_file="$_ldt_a"
         _ldt_weight="$_ldt_b"
         _ldt_family="$_ldt_c"
+        _ldt_role="$_ldt_d"
         case "$_ldt_file" in
-            */*|*'..'*|LuoShu-*.ttf) continue ;;
+            */*|*'..'*|LuoShu-*.ttf|LuoShuMono-*.ttf) continue ;;
             *.ttf|*.otf|*.ttc) ;;
             *) continue ;;
         esac
@@ -181,7 +182,11 @@ EOF_LUOSHU_DYNAMIC_TARGETS
         _ldt_rel="${_ldt_font_dir#$_ldt_module/}/$_ldt_file"
         grep -Fq "$_ldt_rel|" "$_ldt_manifest_tmp" 2>/dev/null && continue
         _ldt_targets=$((_ldt_targets + 1))
-        _ldt_source="$_ldt_module/system/fonts/LuoShu-${_ldt_weight}.ttf"
+        if [ "$_ldt_role" = mono ]; then
+            _ldt_source="$_ldt_module/system/fonts/LuoShuMono-${_ldt_weight}.ttf"
+        else
+            _ldt_source="$_ldt_module/system/fonts/LuoShu-${_ldt_weight}.ttf"
+        fi
         _ldt_dest="$_ldt_font_dir/$_ldt_file"
         [ -s "$_ldt_source" ] || continue
         mkdir -p "$_ldt_font_dir" 2>/dev/null || continue
@@ -400,18 +405,26 @@ luoshu_payload_arm() {
     _lpa_active="$1"
     _lpa_config="$(_luoshu_safety_config)"
     mkdir -p "$_lpa_config" 2>/dev/null || return 1
-    # 任何一次成功的字体应用都会按当前架构重建负载，升级遗留的"待后台重建"
-    # 标记必须随之清除，否则下次开机会多重建一次，重建失败还会误删这份新负载。
-    rm -f "$_lpa_config/font-payload-rebuild-pending.conf" "$_lpa_config/font-payload-rebuild-failures" 2>/dev/null || true
+    # 任何一次成功的字体应用都会按当前架构一次提交负载；随事务清除旧版
+    # “待显式重应用”及其一次性通知，后台不会再发起第二次字体变更。
+    rm -f "$_lpa_config/font-payload-rebuild-pending.conf" \
+        "$_lpa_config/font-payload-reapply-notified.conf" \
+        "$_lpa_config/font-boot-failures" \
+        "$_lpa_config/font-boot-inconclusive.conf" \
+        "$_lpa_config/font-mount-verify-failures" \
+        "$_lpa_config/device-font-load-verification.conf" \
+        "$_lpa_config/device-font-load-verification.json" 2>/dev/null || true
     if [ "$_lpa_active" = default ]; then
         rm -f "$_lpa_config/font-payload-boot.conf" "$_lpa_config/font-payload-manifest.conf" 2>/dev/null || true
         luoshu_payload_schema_write default
         return $?
     fi
     luoshu_payload_build_manifest || return 1
+    _lpa_generation="$(date +%s 2>/dev/null || echo 0)-$$"
     {
         printf 'state=prepared\n'
         printf 'font=%s\n' "$_lpa_active"
+        printf 'generation=%s\n' "$_lpa_generation"
         printf 'time=%s\n' "$(date +%s)"
     } > "$_lpa_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || return 1
     mv -f "$_lpa_config/font-payload-boot.conf.tmp.$$" "$_lpa_config/font-payload-boot.conf" 2>/dev/null || return 1
@@ -458,7 +471,7 @@ luoshu_payload_transaction_begin() {
             fi
         done
     done
-    for _lpt_name in active_font.conf font_mix.conf font-config-overlay.conf font-target-aliases.conf font-target-coverage.conf font-payload-manifest.conf font-payload-boot.conf font-payload-schema.conf text_reboot_required.conf; do
+    for _lpt_name in active_font.conf font_mix.conf font-config-overlay.conf font-target-aliases.conf font-target-coverage.conf font-payload-manifest.conf font-payload-boot.conf font-payload-schema.conf font-payload-rebuild-pending.conf font-payload-reapply-notified.conf text_reboot_required.conf font-boot-failures font-boot-inconclusive.conf font-mount-verify-failures device-font-load-verification.conf device-font-load-verification.json; do
         if [ -f "$_lpt_config/$_lpt_name" ]; then
             cp -fp "$_lpt_config/$_lpt_name" "$LUOSHU_PAYLOAD_TXN/config/$_lpt_name" 2>/dev/null || return 1
             printf 'present|config/%s\n' "$_lpt_name" >> "$LUOSHU_PAYLOAD_TXN/paths"
@@ -548,8 +561,10 @@ luoshu_payload_quarantine() {
     printf 'default\n' > "$_lpq_config/active_font.conf" 2>/dev/null || true
     rm -f "$_lpq_config/font-payload-boot.conf" "$_lpq_config/font-payload-manifest.conf" \
           "$_lpq_config/font-payload-schema.conf" "$_lpq_config/font-payload-rebuild-pending.conf" \
+          "$_lpq_config/font-payload-reapply-notified.conf" \
           "$_lpq_config/font-target-aliases.conf" "$_lpq_config/font-target-coverage.conf" \
-          "$_lpq_config/font-config-overlay.conf" 2>/dev/null || true
+          "$_lpq_config/font-config-overlay.conf" "$_lpq_config/text_reboot_required.conf" \
+          "$_lpq_config/font-boot-inconclusive.conf" "$_lpq_config/font-mount-verify-failures" 2>/dev/null || true
     # Quarantine only the generated font payload. Disabling the whole module makes both
     # "restore default" and the next explicit font retry impossible, so a recoverable font
     # validation failure must never create the root manager's disable marker.
@@ -561,10 +576,24 @@ luoshu_payload_quarantine() {
     _luoshu_safety_log ERROR "检测到上次字体负载未完成开机，已撤销全部字体覆盖（failure=$_lpq_fail）"
 }
 
+_luoshu_payload_boot_id() {
+    if [ -n "${LUOSHU_CURRENT_BOOT_ID:-}" ]; then
+        printf '%s\n' "$LUOSHU_CURRENT_BOOT_ID"
+        return 0
+    fi
+    if type luoshu_current_boot_id >/dev/null 2>&1; then
+        luoshu_current_boot_id 2>/dev/null && return 0
+    fi
+    _lpbi_value=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
+    [ -n "$_lpbi_value" ] || return 1
+    printf '%s\n' "$_lpbi_value"
+}
+
 font_config_boot_guard() {
     _lbg_active="${1:-default}"
     _lbg_config="$(_luoshu_safety_config)"
     _lbg_state=$(sed -n 's/^state=//p' "$_lbg_config/font-payload-boot.conf" 2>/dev/null | head -n1)
+    _lbg_generation=$(sed -n 's/^generation=//p' "$_lbg_config/font-payload-boot.conf" 2>/dev/null | head -n1)
     if [ "$_lbg_active" = default ]; then
         rm -f "$_lbg_config/font-payload-boot.conf" "$_lbg_config/font-payload-manifest.conf" 2>/dev/null || true
         return 0
@@ -577,16 +606,57 @@ font_config_boot_guard() {
     fi
     case "$_lbg_state" in
         booting)
-            luoshu_payload_quarantine
-            return 1
+            _lbg_saved_boot=$(sed -n 's/^bootId=//p' "$_lbg_config/font-payload-boot.conf" 2>/dev/null | head -n1)
+            _lbg_current_boot=$(_luoshu_payload_boot_id 2>/dev/null)
+            if [ -n "$_lbg_saved_boot" ] && [ "$_lbg_saved_boot" = "$_lbg_current_boot" ]; then
+                # KernelSU/APatch may invoke post-fs-data more than once in the same boot. That is
+                # idempotent, not evidence of a failed boot; the old guard quarantined a valid
+                # payload here and made the first reboot appear to restore the default font.
+                luoshu_payload_validate_manifest_fast || { luoshu_payload_quarantine; return 1; }
+                _luoshu_safety_log INFO '同一次开机重复校验字体负载，保持当前事务'
+                return 0
+            fi
+            # A missing service confirmation is inconclusive, not proof that the payload caused a
+            # boot failure (KernelSU/APatch mount timing differs). Retry the same validated generation
+            # once; only a second unconfirmed boot quarantines it.
+            _lbg_retry_generation=$(sed -n 's/^generation=//p' "$_lbg_config/font-boot-inconclusive.conf" 2>/dev/null | head -n1)
+            _lbg_retry_count=$(sed -n 's/^count=//p' "$_lbg_config/font-boot-inconclusive.conf" 2>/dev/null | head -n1)
+            case "$_lbg_retry_count" in ''|*[!0-9]*) _lbg_retry_count=0 ;; esac
+            [ "$_lbg_retry_generation" = "$_lbg_generation" ] || _lbg_retry_count=0
+            if [ "$_lbg_retry_count" -ge 1 ]; then
+                luoshu_payload_quarantine
+                return 1
+            fi
+            luoshu_payload_validate_manifest_fast || { luoshu_payload_quarantine; return 1; }
+            _lbg_current_boot=$(_luoshu_payload_boot_id 2>/dev/null) || { luoshu_payload_quarantine; return 1; }
+            {
+                printf 'generation=%s\n' "$_lbg_generation"
+                printf 'count=1\n'
+                printf 'time=%s\n' "$(date +%s)"
+            } > "$_lbg_config/font-boot-inconclusive.conf" 2>/dev/null || true
+            {
+                printf 'state=booting\n'
+                printf 'font=%s\n' "$_lbg_active"
+                printf 'generation=%s\n' "$_lbg_generation"
+                printf 'bootId=%s\n' "$_lbg_current_boot"
+                printf 'time=%s\n' "$(date +%s)"
+                printf 'reason=previous-boot-unconfirmed-retry\n'
+            } > "$_lbg_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || { luoshu_payload_quarantine; return 1; }
+            mv -f "$_lbg_config/font-payload-boot.conf.tmp.$$" "$_lbg_config/font-payload-boot.conf" 2>/dev/null || { luoshu_payload_quarantine; return 1; }
+            _luoshu_safety_log WARN '上次开机未留下服务确认；已保留同一代字体负载并进行一次有界重试'
+            return 0
             ;;
         prepared)
             luoshu_payload_validate_manifest_fast || { luoshu_payload_quarantine; return 1; }
+            _lbg_current_boot=$(_luoshu_payload_boot_id 2>/dev/null) || { luoshu_payload_quarantine; return 1; }
             {
                 printf 'state=booting
 '
                 printf 'font=%s
 ' "$_lbg_active"
+                [ -z "$_lbg_generation" ] || printf 'generation=%s\n' "$_lbg_generation"
+                printf 'bootId=%s
+' "$_lbg_current_boot"
                 printf 'time=%s
 ' "$(date +%s)"
             } > "$_lbg_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || { luoshu_payload_quarantine; return 1; }
@@ -611,16 +681,23 @@ font_config_mark_boot_success() {
     _lmbs_state=$(sed -n 's/^state=//p' "$_lmbs_config/font-payload-boot.conf" 2>/dev/null | head -n1)
     [ "$_lmbs_state" = booting ] || return 0
     _lmbs_font=$(sed -n 's/^font=//p' "$_lmbs_config/font-payload-boot.conf" 2>/dev/null | head -n1)
+    _lmbs_generation=$(sed -n 's/^generation=//p' "$_lmbs_config/font-payload-boot.conf" 2>/dev/null | head -n1)
+    _lmbs_boot=$(_luoshu_payload_boot_id 2>/dev/null)
     {
         printf 'state=confirmed
 '
         printf 'font=%s
 ' "${_lmbs_font:-unknown}"
+        [ -z "$_lmbs_generation" ] || printf 'generation=%s\n' "$_lmbs_generation"
+        [ -z "$_lmbs_boot" ] || printf 'bootId=%s
+' "$_lmbs_boot"
         printf 'time=%s
 ' "$(date +%s)"
     } > "$_lmbs_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || return 1
     mv -f "$_lmbs_config/font-payload-boot.conf.tmp.$$" "$_lmbs_config/font-payload-boot.conf" 2>/dev/null || return 1
-    rm -f "$_lmbs_config/font-boot-failures" "$_lmbs_config/font-payload-quarantine.conf" 2>/dev/null || true
+    rm -f "$_lmbs_config/font-boot-failures" "$_lmbs_config/font-payload-quarantine.conf" \
+        "$_lmbs_config/font-boot-inconclusive.conf" "$_lmbs_config/font-mount-verify-failures" \
+        "$_lmbs_config/text_reboot_required.conf" 2>/dev/null || true
     printf 'time=%s
 ' "$(date +%s)" > "$_lmbs_config/font-last-boot-success.conf" 2>/dev/null || true
     chmod 0644 "$_lmbs_config/font-payload-boot.conf" "$_lmbs_config/font-last-boot-success.conf" 2>/dev/null || true

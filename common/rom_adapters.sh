@@ -214,7 +214,7 @@ link_or_copy_font() {
 # 生成大量 staging 节点，降低 No space left on device / 挂载上限风险。
 _rom_font_target_exists() {
     _name="$1"
-    for _root in /system/fonts /system_ext/fonts /product/fonts /my_product/fonts /vendor/fonts; do
+    for _root in /system/fonts /system_ext/fonts /product/fonts /mi_ext/fonts /my_product/fonts /vendor/fonts; do
         [ -e "$_root/${_name}.ttf" ] || [ -e "$_root/${_name}.otf" ] || [ -e "$_root/${_name}.ttc" ] && return 0
     done
     return 1
@@ -222,7 +222,7 @@ _rom_font_target_exists() {
 
 _rom_exact_target_exists() {
     _file="$1"
-    for _root in /system/fonts /system_ext/fonts /product/fonts /my_product/fonts /vendor/fonts; do
+    for _root in /system/fonts /system_ext/fonts /product/fonts /mi_ext/fonts /my_product/fonts /vendor/fonts; do
         [ -e "$_root/$_file" ] && return 0
     done
     return 1
@@ -255,7 +255,38 @@ _device_font_inventory_exec() {
 
 _device_font_inventory_entries() {
     _dfie_module="$(_device_font_inventory_module)"
-    _device_font_inventory_exec --list --output "$_dfie_module/config/device_font_inventory.json" 2>/dev/null
+    _dfie_inventory="$_dfie_module/config/device_font_inventory.json"
+    _dfie_cache="$_dfie_module/config/device_font_inventory.tsv"
+    _dfie_key_file="${_dfie_cache}.key"
+    _dfie_key=$(_font_inventory_cache_token 2>/dev/null)
+    if [ -n "$_dfie_key" ] && [ "$_dfie_key" != fallback ] && \
+       [ "$(cat "$_dfie_key_file" 2>/dev/null)" = "$_dfie_key" ] && [ -s "$_dfie_cache" ]; then
+        cat "$_dfie_cache"
+        return 0
+    fi
+    _dfie_tmp="${_dfie_cache}.tmp.$$"
+    mkdir -p "${_dfie_cache%/*}" 2>/dev/null || return 1
+    if ! _device_font_inventory_exec --list --output "$_dfie_inventory" > "$_dfie_tmp" 2>/dev/null || \
+       [ ! -s "$_dfie_tmp" ]; then
+        rm -f "$_dfie_tmp" 2>/dev/null || true
+        return 1
+    fi
+    # Reject logs/JSON accidentally emitted into the row protocol. Every inventory row has seven
+    # non-empty tab-separated fields and begins with an absolute logical target.
+    awk -F '\t' 'NF != 7 || $1 !~ /^\// || $2 == "" { bad=1 } END { exit bad }' "$_dfie_tmp" || {
+        rm -f "$_dfie_tmp" 2>/dev/null || true
+        return 1
+    }
+    mv -f "$_dfie_tmp" "$_dfie_cache" 2>/dev/null || return 1
+    chmod 0600 "$_dfie_cache" 2>/dev/null || true
+    if [ -n "$_dfie_key" ] && [ "$_dfie_key" != fallback ]; then
+        printf '%s\n' "$_dfie_key" > "${_dfie_key_file}.tmp.$$" 2>/dev/null && \
+            mv -f "${_dfie_key_file}.tmp.$$" "$_dfie_key_file" 2>/dev/null || true
+        chmod 0600 "$_dfie_key_file" 2>/dev/null || true
+    else
+        rm -f "$_dfie_key_file" 2>/dev/null || true
+    fi
+    cat "$_dfie_cache"
 }
 
 _device_font_inventory_target() {

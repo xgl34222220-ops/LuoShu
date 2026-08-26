@@ -68,7 +68,14 @@ def main() -> None:
         "fingerprint": "payload-fixture-rom",
         "slots": [
             slot("sans-serif", "/system/etc/fonts.xml", ui_profile),
-            slot("sans-serif", "/product/etc/fonts.xml", copy.deepcopy(ui_profile)),
+            # Different semantic family roles with the same effective outline
+            # contract must share one generated file.
+            slot(
+                "sans-serif",
+                "/product/etc/fonts.xml",
+                copy.deepcopy(ui_profile),
+                roles=["named-ui"],
+            ),
             slot("clock-family", "/system/etc/fonts.xml", clock_profile, weight=700, roles=["clock"]),
             slot(
                 "emoji-family",

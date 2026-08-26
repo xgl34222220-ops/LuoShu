@@ -6,6 +6,22 @@ _luoshu_font_config_module() {
     printf '%s\n' "${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
 }
 
+# Font/config overlays live in the canonical private payload when that layout is enabled. The App
+# shell can run in a mount namespace where the public module view is only an empty placeholder;
+# writing XML there made the task report success while post-fs-data mounted a different tree.
+_luoshu_font_config_payload_root() {
+    _lfc_module="$(_luoshu_font_config_module)"
+    if type _lfrp_payload_root >/dev/null 2>&1; then
+        _lfc_payload=$(_lfrp_payload_root 2>/dev/null)
+        [ -n "$_lfc_payload" ] && { printf '%s\n' "${_lfc_payload%/}"; return 0; }
+    fi
+    if [ -d "$_lfc_module/.luoshu-payload" ]; then
+        printf '%s/.luoshu-payload\n' "${_lfc_module%/}"
+    else
+        printf '%s\n' "${_lfc_module%/}"
+    fi
+}
+
 _luoshu_font_config_python() {
     if [ -n "${LUOSHU_PYTHON:-}" ]; then
         printf '%s\n' "$LUOSHU_PYTHON"
@@ -39,34 +55,35 @@ _luoshu_font_config_log() {
 # key | real XML | module overlay XML | font directory used by that config
 _luoshu_font_config_specs() {
     _lfc_module="$(_luoshu_font_config_module)"
+    _lfc_payload="$(_luoshu_font_config_payload_root)"
     _lfc_system_etc="${LUOSHU_SYSTEM_ETC_ROOT:-/system/etc}"
     _lfc_product_etc="${LUOSHU_PRODUCT_ETC_ROOT:-/product/etc}"
     _lfc_system_ext_etc="${LUOSHU_SYSTEM_EXT_ETC_ROOT:-/system_ext/etc}"
 
     printf 'system/fonts.xml|%s/fonts.xml|%s/system/etc/fonts.xml|%s/system/fonts\n' \
-        "$_lfc_system_etc" "$_lfc_module" "$_lfc_module"
+        "$_lfc_system_etc" "$_lfc_payload" "$_lfc_payload"
     printf 'system/font_fallback.xml|%s/font_fallback.xml|%s/system/etc/font_fallback.xml|%s/system/fonts\n' \
-        "$_lfc_system_etc" "$_lfc_module" "$_lfc_module"
+        "$_lfc_system_etc" "$_lfc_payload" "$_lfc_payload"
 
     printf 'product/fonts.xml|%s/fonts.xml|%s/product/etc/fonts.xml|%s/product/fonts\n' \
-        "$_lfc_product_etc" "$_lfc_module" "$_lfc_module"
+        "$_lfc_product_etc" "$_lfc_payload" "$_lfc_payload"
     printf 'product/font_fallback.xml|%s/font_fallback.xml|%s/product/etc/font_fallback.xml|%s/product/fonts\n' \
-        "$_lfc_product_etc" "$_lfc_module" "$_lfc_module"
+        "$_lfc_product_etc" "$_lfc_payload" "$_lfc_payload"
     printf 'product/fonts_customization.xml|%s/fonts_customization.xml|%s/product/etc/fonts_customization.xml|%s/product/fonts\n' \
-        "$_lfc_product_etc" "$_lfc_module" "$_lfc_module"
+        "$_lfc_product_etc" "$_lfc_payload" "$_lfc_payload"
     printf 'product/font_customization.xml|%s/font_customization.xml|%s/product/etc/font_customization.xml|%s/product/fonts\n' \
-        "$_lfc_product_etc" "$_lfc_module" "$_lfc_module"
+        "$_lfc_product_etc" "$_lfc_payload" "$_lfc_payload"
     printf 'product/mi_fonts_customization.xml|%s/mi_fonts_customization.xml|%s/product/etc/mi_fonts_customization.xml|%s/product/fonts\n' \
-        "$_lfc_product_etc" "$_lfc_module" "$_lfc_module"
+        "$_lfc_product_etc" "$_lfc_payload" "$_lfc_payload"
 
     printf 'system_ext/fonts.xml|%s/fonts.xml|%s/system_ext/etc/fonts.xml|%s/system_ext/fonts\n' \
-        "$_lfc_system_ext_etc" "$_lfc_module" "$_lfc_module"
+        "$_lfc_system_ext_etc" "$_lfc_payload" "$_lfc_payload"
     printf 'system_ext/font_fallback.xml|%s/font_fallback.xml|%s/system_ext/etc/font_fallback.xml|%s/system_ext/fonts\n' \
-        "$_lfc_system_ext_etc" "$_lfc_module" "$_lfc_module"
+        "$_lfc_system_ext_etc" "$_lfc_payload" "$_lfc_payload"
     printf 'system_ext/fonts_customization.xml|%s/fonts_customization.xml|%s/system_ext/etc/fonts_customization.xml|%s/system_ext/fonts\n' \
-        "$_lfc_system_ext_etc" "$_lfc_module" "$_lfc_module"
+        "$_lfc_system_ext_etc" "$_lfc_payload" "$_lfc_payload"
     printf 'system_ext/font_customization.xml|%s/font_customization.xml|%s/system_ext/etc/font_customization.xml|%s/system_ext/fonts\n' \
-        "$_lfc_system_ext_etc" "$_lfc_module" "$_lfc_module"
+        "$_lfc_system_ext_etc" "$_lfc_payload" "$_lfc_payload"
 }
 
 _luoshu_font_config_validate() {
@@ -85,8 +102,7 @@ _luoshu_font_config_validate() {
 
 _luoshu_font_config_alias_partition() {
     _lfc_target="$1"
-    _lfc_module="$(_luoshu_font_config_module)"
-    _lfc_system_fonts="$_lfc_module/system/fonts"
+    _lfc_system_fonts="$(_luoshu_font_config_payload_root)/system/fonts"
     mkdir -p "$_lfc_target" 2>/dev/null || return 1
     for _lfc_prefix in LuoShu LuoShuMono; do
         for _lfc_weight in 100 200 300 400 500 600 700 800 900; do
@@ -227,13 +243,14 @@ _luoshu_font_config_generate_base() {
     _lfc_backup_root="$_lfc_config/font-config-source"
     _lfc_tool="$_lfc_module/common/font_config_overlay.py"
     _lfc_stage="$_lfc_config/font-config-stage.$$"
+    _lfc_payload="$(_luoshu_font_config_payload_root)"
     font_config_capture_original || return 1
 
     # Weight availability is a global invariant. Never publish XML that references a half-built
     # family merely because one partition happens to be writable.
     for _lfc_prefix in LuoShu LuoShuMono; do
         for _lfc_weight in 100 200 300 400 500 600 700 800 900; do
-            [ -s "$_lfc_module/system/fonts/${_lfc_prefix}-${_lfc_weight}.ttf" ] || {
+            [ -s "$_lfc_payload/system/fonts/${_lfc_prefix}-${_lfc_weight}.ttf" ] || {
                 _luoshu_font_config_disable_base
                 return 1
             }

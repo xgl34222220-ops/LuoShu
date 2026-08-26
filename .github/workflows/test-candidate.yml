@@ -148,7 +148,7 @@ jobs:
           unzip -p "$module" common/background_task.sh | grep -q '_lsd_task'
           unzip -p "$module" common/background_task.sh | grep -q 'every new worker wrote an empty .task sidecar'
           unzip -p "$module" common/device_font_template.sh | grep -q 'CAPTURE_REVISION=2'
-          unzip -p "$module" common/device_font_cache.sh | grep -q 'alignment-cache-v2'
+          unzip -p "$module" common/device_font_cache.sh | grep -q 'alignment-cache-v4'
           unzip -p "$module" common/device_font_cache.sh | grep -q '.font_switch.lock'
           unzip -p "$module" common/device_font_load_verify.py | grep -q 'device-font-load-verification-v1'
           unzip -p "$module" common/device_font_load_verify.sh | grep -q 'device_font_load_verify'

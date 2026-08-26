@@ -106,12 +106,12 @@ sh "$ROOT/scripts/app_installer_test.sh"
 # 原生 App 字体索引只在文件集合实际变化时失效。
 sh "$ROOT/scripts/font_library_cache_test.sh"
 
-# 模块刷写阶段严禁同步生成字体；旧负载只登记迁移，完整开机后由后台服务重建。
+# 模块刷写阶段严禁同步生成字体；旧负载保持只读，后台服务也不得改写或激活它。
 grep -q 'module_update_state.sh' "$ROOT/customize.sh"
 ! grep -q 'luoshu_rebuild_preserved_payload.*MODPATH' "$ROOT/customize.sh"
 grep -q 'font-payload-rebuild-pending.conf' "$ROOT/post-fs-data.sh"
-grep -q 'luoshu_rebuild_preserved_payload.*MODDIR' "$ROOT/service.sh"
-grep -q '后台重建完成后会通知再次重启' "$ROOT/customize.sh"
+! grep -q 'luoshu_rebuild_preserved_payload' "$ROOT/service.sh"
+grep -q '后台不改写字体，只在明确应用时提交' "$ROOT/customize.sh"
 sh "$ROOT/scripts/module_update_state_test.sh"
 
 # 所有字体卡片必须使用同一套短双行样张，任何字体字宽都不得把第二行挤掉。

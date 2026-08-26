@@ -159,6 +159,29 @@ class DeviceTrustUiTest {
     }
 
     @Test
+    fun preservedUpgradeRequiresOneExplicitApplyEvenWithOldVerifiedRecord() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+                engine=installed
+                template=trusted
+                alignment=verified
+                mode=mount-verified
+                reason=
+                mountState=mounted
+                cachePending=no
+                reapplyPending=yes
+                reapplyReason=schema-upgrade
+            """.trimIndent(),
+        )
+
+        assertEquals(DeviceTrustLevel.PENDING, state.level)
+        assertTrue(state.reapplyPending)
+        assertEquals("schema-upgrade", state.reapplyReason)
+    }
+
+    @Test
     fun emptyBridgeOutputReturnsReadableError() {
         val state = parseDeviceTrustOutput("")
 

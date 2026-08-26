@@ -189,7 +189,7 @@ jobs:
           unzip -p "$module" common/device_font_template.sh | grep -q '/data/fonts/config/config.xml'
           unzip -p "$module" common/device_font_slot_plan.py | grep -q 'device-font-slot-plan-v2'
           unzip -p "$module" common/device_font_slot_build.py | grep -q 'device-font-slot-build-v2'
-          unzip -p "$module" common/device_font_cache.sh | grep -q 'alignment-cache-v2'
+          unzip -p "$module" common/device_font_cache.sh | grep -q 'alignment-cache-v4'
           unzip -p "$module" common/device_font_load_verify.py | grep -q 'device-font-load-verification-v1'
           unzip -p "$module" common/device_font_payload_build.py | grep -q 'device-font-payload-v1'
           unzip -p "$module" common/device_font_payload_overlay.py | grep -q 'device-font-overlay-v1'

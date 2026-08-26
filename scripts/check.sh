@@ -3,6 +3,16 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$ROOT/scripts/version.sh"
 
+# Source checks run with the host Python, while release workflows prepare the
+# pure-Python FontTools payload for the bundled Android runtime.  Make that
+# payload visible to every host-side Python test as well; otherwise a clean CI
+# runner fails before the Android build even though the runtime is present.
+LUOSHU_BUNDLED_SITE="$ROOT/common/python/lib/python3.14/site-packages"
+if [ -d "$LUOSHU_BUNDLED_SITE/fontTools" ]; then
+  PYTHONPATH="$LUOSHU_BUNDLED_SITE${PYTHONPATH:+:$PYTHONPATH}"
+  export PYTHONPATH
+fi
+
 # 所有 Shell 与 Python 后端必须先通过基础语法检查。
 find "$ROOT" -type f -name '*.sh' -print | while IFS= read -r file; do
   sh -n "$file"
@@ -49,6 +59,7 @@ for file in \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontMetadataInspector.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeFontPreview.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt \
+  android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/glass/LiquidGlassLens.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/appearance/AppearanceSettings.kt \
   android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/TaskCenterModel.kt \
@@ -162,6 +173,19 @@ grep -q 'cachedFontDefaultWeight' "$ROOT/android-app/app/src/main/java/io/github
 grep -q 'optDouble("default"' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontDefaultAxes.kt"
 grep -q 'testImplementation("junit:junit:4.13.2")' "$ROOT/android-app/app/build.gradle.kts"
 
+# Miuix 悬浮底栏必须使用真实背景取样、RuntimeShader 折射和连续圆角；图标文字保持为独立内容层。
+grep -q 'miuix-blur-android:0.9.3' "$ROOT/android-app/app/build.gradle.kts"
+grep -q 'miuix-squircle-android:0.9.3' "$ROOT/android-app/app/build.gradle.kts"
+grep -q 'compileSdk = 37' "$ROOT/android-app/app/build.gradle.kts"
+grep -q 'targetSdk = 36' "$ROOT/android-app/app/build.gradle.kts"
+grep -q 'minSdk = 28' "$ROOT/android-app/app/build.gradle.kts"
+grep -q 'tools:overrideLibrary="top.yukonga.miuix.kmp.blur"' "$ROOT/android-app/app/src/main/AndroidManifest.xml"
+grep -q 'Modifier.layerBackdrop(liquidBackdrop)' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
+grep -q 'Modifier.drawBackdrop' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
+grep -q 'indicatorBackdrop = dockSurfaceBackdrop' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
+grep -q 'isRuntimeShaderSupported()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
+grep -q 'chromaticAberration' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/glass/LiquidGlassLens.kt"
+
 # HyperOS 必须保留紧凑控件的原厂度量壳，并按真实分区写入 MiSans 与数字字重目标。
 grep -q '_hyperos_metric_shell_files' "$ROOT/common/hyperos_global.sh"
 grep -q 'LUOSHU_PRODUCT_FONTS_ROOT' "$ROOT/common/hyperos_global.sh"
@@ -207,6 +231,8 @@ grep -q 'GPL-3.0-only' "$ROOT/CONTRIBUTING.md"
 grep -q '^MIT License$' "$ROOT/licenses/LuoShu-MIT-HISTORICAL.txt"
 grep -q 'Python Software Foundation' "$ROOT/licenses/CPython-LICENSE.txt"
 grep -q '^MIT License$' "$ROOT/licenses/FontTools-LICENSE.txt"
+grep -q '^                                 Apache License$' "$ROOT/licenses/Apache-2.0.txt"
+grep -q 'Miuix 与 AndroidLiquidGlass' "$ROOT/THIRD_PARTY_NOTICES.md"
 
 # 功能回归脚本。
 sh "$ROOT/scripts/native_preview_source_test.sh"
@@ -216,6 +242,7 @@ sh "$ROOT/scripts/font_index_delete_regression_test.sh"
 sh "$ROOT/scripts/v2_source_audit.sh"
 sh "$ROOT/scripts/customize_reenable_test.sh"
 python3 "$ROOT/scripts/device_validation_gate_test.py"
+python3 "$ROOT/scripts/sync_update_metadata_test.py"
 sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
 sh "$ROOT/scripts/coloros_consistency_mapping_test.sh"
@@ -223,6 +250,21 @@ FONT_INVENTORY_TEST_FONT=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf'
 [ -s "$FONT_INVENTORY_TEST_FONT" ]
 python3 "$ROOT/scripts/font_inventory_test.py" --font "$FONT_INVENTORY_TEST_FONT"
 sh "$ROOT/scripts/rom_adapter_inventory_test.sh" "$FONT_INVENTORY_TEST_FONT"
+# The per-device engine is the release-critical HyperOS/KernelSU path. These
+# were previously only syntax-compiled, allowing composite-outline and stale
+# legacy-fallback regressions to pass CI unnoticed.
+python3 "$ROOT/scripts/device_font_template_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/device_font_slot_plan_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/device_font_slot_build_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/device_font_payload_build_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/device_font_payload_overlay_test.py"
+python3 "$ROOT/scripts/device_font_payload_verify_test.py"
+python3 "$ROOT/scripts/device_font_load_verify_test.py"
+sh "$ROOT/scripts/device_font_payload_bridge_test.sh"
+sh "$ROOT/scripts/device_font_payload_policy_test.sh"
+sh "$ROOT/scripts/device_font_cache_test.sh"
+sh "$ROOT/scripts/device_font_payload_runtime_test.sh"
+sh "$ROOT/scripts/device_font_transaction_guard_test.sh"
 sh "$ROOT/scripts/font_config_variable_weight_test.sh"
 python3 "$ROOT/scripts/font_metrics_normalization_test.py"
 python3 "$ROOT/scripts/font_config_monospace_test.py"
@@ -240,6 +282,7 @@ sh "$ROOT/scripts/font_config_transaction_rollback_test.sh"
 sh "$ROOT/scripts/generic_xml_partial_coverage_test.sh"
 python3 "$ROOT/scripts/font_config_batch_test.py"
 sh "$ROOT/scripts/font_digest_memo_test.sh"
+sh "$ROOT/scripts/foreground_quick_xml_test.sh"
 sh "$ROOT/scripts/font_switch_performance_test.sh"
 sh "$ROOT/scripts/font_validation_cache_test.sh"
 sh "$ROOT/scripts/font_library_ui_layout_test.sh"

@@ -25,12 +25,12 @@ import androidx.compose.ui.unit.dp
  * compensates only the vector path, so selected/disabled/loading states never jump.
  */
 internal object LuoShuIconTokens {
-    // Keep a full 48 dp touch target, but make the visible button compact enough
-    // to stay secondary to the page title on narrow phone layouts.
+    // Keep a full 48 dp touch target. The visible 40 dp surface matches the reference app's
+    // header actions: clearly discoverable without returning to the oversized 56 dp tile.
     val HeaderTouchTarget = 48.dp
-    val HeaderContainer = 36.dp
-    val HeaderGlyph = 18.dp
-    val DockGlyph = 19.dp
+    val HeaderContainer = 40.dp
+    val HeaderGlyph = 21.dp
+    val DockGlyph = 18.dp
     val SectionGlyph = 18.dp
     val ToolGlyph = 20.dp
     val LeadingGlyph = 20.dp
@@ -83,11 +83,11 @@ internal fun LuoShuHeaderAction(
     ) {
         Surface(
             modifier = Modifier.size(LuoShuIconTokens.HeaderContainer),
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(14.dp),
             color = containerColor,
             contentColor = resolvedContentColor,
-            tonalElevation = 1.dp,
-            shadowElevation = 1.dp,
+            tonalElevation = 0.dp,
+            shadowElevation = 0.dp,
         ) {
             IconButton(
                 onClick = onClick,

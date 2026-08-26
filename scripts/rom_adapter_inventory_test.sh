@@ -80,6 +80,18 @@ IS_HYPEROS=true
 IS_COLOROS=false
 export IS_HYPEROS IS_COLOROS
 
+# Repeated switch stages on the same ROM inventory reuse the validated TSV protocol.
+# Starting embedded Python for every adapter pass was a measurable part of multi-minute applies.
+_device_font_inventory_exec() {
+    printf 'x\n' >> "$TMP/inventory-exec-calls"
+    python3 "$MODULE_DIR/common/font_inventory.py" "$@"
+}
+rm -f "$MODULE_DIR/config/device_font_inventory.tsv" "$MODULE_DIR/config/device_font_inventory.tsv.key"
+first_entries="$(_device_font_inventory_entries)"
+second_entries="$(_device_font_inventory_entries)"
+ok test "$first_entries" = "$second_entries"
+ok test "$(wc -l < "$TMP/inventory-exec-calls" | tr -d '[:space:]')" -eq 1
+
 apply_font_by_rom "$TMP/source.ttf" "$MODULE_DIR/system/fonts" quick TestFamily
 
 ok test -s "$MODULE_DIR/system/fonts/MiSansVF.ttf"

@@ -5,9 +5,10 @@
 set +e
 
 # Increment whenever the meaning of a successful global-font validation changes.
-# v3 stores script capabilities with the validation result. That lets the runtime safely restore
-# its CJK/Latin slot policy instead of rescanning the complete cmap whenever a font is selected.
-LUOSHU_FONT_VALIDATION_SCHEMA="${LUOSHU_FONT_VALIDATION_SCHEMA:-global-v3-capabilities}"
+# v4 reflects the HyperOS policy where usable letters + complete digits qualify Latin UI slots;
+# punctuation remains fallback-capable. Old v3 results used punctuation as a hard gate and must not
+# be restored or the upgraded build can still leave English/digits on the stock font.
+LUOSHU_FONT_VALIDATION_SCHEMA="${LUOSHU_FONT_VALIDATION_SCHEMA:-global-v4-latin-digits}"
 
 luoshu_font_validation_hash() {
     if command -v sha256sum >/dev/null 2>&1; then

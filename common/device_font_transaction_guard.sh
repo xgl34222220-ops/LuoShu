@@ -89,11 +89,13 @@ luoshu_payload_transaction_begin() {
     for _lpt_name in \
         active_font.conf font_mix.conf font-config-overlay.conf font-target-aliases.conf \
         font-target-coverage.conf font-payload-manifest.conf font-payload-boot.conf \
-        font-payload-schema.conf text_reboot_required.conf device-font-engine.conf \
+        font-payload-schema.conf font-payload-rebuild-pending.conf \
+        font-payload-reapply-notified.conf text_reboot_required.conf device-font-engine.conf \
         device-font-installed.conf device-font-dynamic-mount.conf \
         device-font-cache-pending.conf device-font-load-verification.conf \
         device-font-load-verification.json device-font-manager-dump.txt \
-        device-font-mount-evidence.txt; do
+        device-font-mount-evidence.txt font-boot-failures font-boot-inconclusive.conf \
+        font-mount-verify-failures; do
         if [ -f "$_lpt_config/$_lpt_name" ]; then
             cp -fp "$_lpt_config/$_lpt_name" "$LUOSHU_PAYLOAD_TXN/config/$_lpt_name" 2>/dev/null || {
                 rm -rf "$LUOSHU_PAYLOAD_TXN" 2>/dev/null || true

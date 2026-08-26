@@ -34,13 +34,33 @@ PRIMARY_ETC_SPECS = (
 AUX_FONT_SPECS = (
     ("odm", Path("/odm/fonts"), "odm_fonts"),
     ("oem", Path("/oem/fonts"), "oem_fonts"),
+    ("my_engineering", Path("/my_engineering/fonts"), "my_engineering_fonts"),
+    ("my_company", Path("/my_company/fonts"), "my_company_fonts"),
+    ("my_preload", Path("/my_preload/fonts"), "my_preload_fonts"),
     ("my_region", Path("/my_region/fonts"), "my_region_fonts"),
+    ("my_stock", Path("/my_stock/fonts"), "my_stock_fonts"),
+    ("oplus_product", Path("/oplus_product/fonts"), "oplus_product_fonts"),
+    ("oplus_engineering", Path("/oplus_engineering/fonts"), "oplus_engineering_fonts"),
+    ("oplus_version", Path("/oplus_version/fonts"), "oplus_version_fonts"),
+    ("oplus_region", Path("/oplus_region/fonts"), "oplus_region_fonts"),
+    ("mi_ext", Path("/mi_ext/fonts"), "mi_ext_fonts"),
+    ("cust", Path("/cust/fonts"), "cust_fonts"),
     ("hw_product", Path("/hw_product/fonts"), "hw_product_fonts"),
 )
 AUX_ETC_SPECS = (
     ("odm", Path("/odm/etc"), "odm_etc"),
     ("oem", Path("/oem/etc"), "oem_etc"),
+    ("my_engineering", Path("/my_engineering/etc"), "my_engineering_etc"),
+    ("my_company", Path("/my_company/etc"), "my_company_etc"),
+    ("my_preload", Path("/my_preload/etc"), "my_preload_etc"),
     ("my_region", Path("/my_region/etc"), "my_region_etc"),
+    ("my_stock", Path("/my_stock/etc"), "my_stock_etc"),
+    ("oplus_product", Path("/oplus_product/etc"), "oplus_product_etc"),
+    ("oplus_engineering", Path("/oplus_engineering/etc"), "oplus_engineering_etc"),
+    ("oplus_version", Path("/oplus_version/etc"), "oplus_version_etc"),
+    ("oplus_region", Path("/oplus_region/etc"), "oplus_region_etc"),
+    ("mi_ext", Path("/mi_ext/etc"), "mi_ext_etc"),
+    ("cust", Path("/cust/etc"), "cust_etc"),
     ("hw_product", Path("/hw_product/etc"), "hw_product_etc"),
 )
 THEME_FONT_ROOTS = (
@@ -240,8 +260,9 @@ def scan(args: Any) -> int:
     xml_sources = v2._discover_xml_sources(etc_roots)
 
     base._is_ui_family = v2._is_ui_family
-    families, slots = v2._parse_partition_xml(xml_sources, primary_roots)
-    base._add_heuristic_slots(slots, primary_roots, args.font_check)
+    replaceable_roots = [*primary_roots, *auxiliary_roots]
+    families, slots = v2._parse_partition_xml(xml_sources, replaceable_roots)
+    base._add_heuristic_slots(slots, replaceable_roots, args.font_check)
     base._populate_metrics(slots)
     main_path, main_entry, rom = base._pick_main_slot(slots, families)
 
@@ -310,11 +331,31 @@ def build_parser() -> Any:
     parser = v2.build_parser()
     parser.add_argument("--odm-fonts", type=Path)
     parser.add_argument("--oem-fonts", type=Path)
+    parser.add_argument("--my-engineering-fonts", type=Path)
+    parser.add_argument("--my-company-fonts", type=Path)
+    parser.add_argument("--my-preload-fonts", type=Path)
     parser.add_argument("--my-region-fonts", type=Path)
+    parser.add_argument("--my-stock-fonts", type=Path)
+    parser.add_argument("--oplus-product-fonts", type=Path)
+    parser.add_argument("--oplus-engineering-fonts", type=Path)
+    parser.add_argument("--oplus-version-fonts", type=Path)
+    parser.add_argument("--oplus-region-fonts", type=Path)
+    parser.add_argument("--mi-ext-fonts", type=Path)
+    parser.add_argument("--cust-fonts", type=Path)
     parser.add_argument("--hw-product-fonts", type=Path)
     parser.add_argument("--odm-etc", type=Path)
     parser.add_argument("--oem-etc", type=Path)
+    parser.add_argument("--my-engineering-etc", type=Path)
+    parser.add_argument("--my-company-etc", type=Path)
+    parser.add_argument("--my-preload-etc", type=Path)
     parser.add_argument("--my-region-etc", type=Path)
+    parser.add_argument("--my-stock-etc", type=Path)
+    parser.add_argument("--oplus-product-etc", type=Path)
+    parser.add_argument("--oplus-engineering-etc", type=Path)
+    parser.add_argument("--oplus-version-etc", type=Path)
+    parser.add_argument("--oplus-region-etc", type=Path)
+    parser.add_argument("--mi-ext-etc", type=Path)
+    parser.add_argument("--cust-etc", type=Path)
     parser.add_argument("--hw-product-etc", type=Path)
     return parser
 

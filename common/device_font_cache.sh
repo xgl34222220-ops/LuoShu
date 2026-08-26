@@ -1,12 +1,23 @@
 #!/system/bin/sh
 # LuoShu persistent per-device alignment cache.
-# Foreground application only activates a ready cache or writes a tiny pending request.
-# Expensive generation starts at low priority only after the foreground switch transaction
-# has fully exited; boot service resumes the same request after interruption or reboot.
+# A cache worker is preparation-only: it may create immutable aligned output, but it must never
+# replace the active payload or request another reboot. Only an explicit foreground apply may
+# activate a ready cache inside the caller's outer transaction.
 set +e
 
 _dfcache_module() {
     printf '%s\n' "${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+}
+
+_dfcache_payload_root() {
+    _dfc_module="$(_dfcache_module)"
+    if type _lfrp_payload_root >/dev/null 2>&1; then
+        _lfrp_payload_root
+    elif [ -d "$_dfc_module/.luoshu-payload" ]; then
+        printf '%s/.luoshu-payload\n' "${_dfc_module%/}"
+    else
+        printf '%s\n' "${_dfc_module%/}"
+    fi
 }
 
 _dfcache_log() {
@@ -40,12 +51,12 @@ _dfcache_template_key() {
 # inode/size/mtime and automatically selects a different cache directory.
 _dfcache_source_key() {
     _dfc_module="$(_dfcache_module)"
-    _dfc_store="$_dfc_module/system/fonts/.luoshu-font-store"
+    _dfc_store="$(_dfcache_payload_root)/system/fonts/.luoshu-font-store"
     [ -d "$_dfc_store" ] || return 1
     _dfc_files=$(find "$_dfc_store" -maxdepth 1 -type f -name '*.font' -print 2>/dev/null | LC_ALL=C sort)
     [ -n "$_dfc_files" ] || return 1
     {
-        printf 'source-contract-v2\n'
+        printf 'source-contract-v4\n'
         while IFS= read -r _dfc_file; do
             [ -f "$_dfc_file" ] || continue
             stat -c '%n|%d|%i|%s|%Y' "$_dfc_file" 2>/dev/null || ls -ln "$_dfc_file" 2>/dev/null
@@ -59,7 +70,7 @@ _dfcache_id() {
     _dfc_font="$1"
     _dfc_template_key="$2"
     _dfc_source_key="$3"
-    printf 'alignment-cache-v2|%s|%s|%s\n' "$_dfc_font" "$_dfc_template_key" "$_dfc_source_key" | _dfcache_hash_stream
+    printf 'alignment-cache-v4|%s|%s|%s\n' "$_dfc_font" "$_dfc_template_key" "$_dfc_source_key" | _dfcache_hash_stream
 }
 
 _dfcache_root_for() {
@@ -329,9 +340,8 @@ device_font_cache_activate() {
     type _dfpr_install_overlay >/dev/null 2>&1 || return 1
     _dfpr_install_overlay "$_dfc_root/overlay" || return 1
     _dfcache_write_engine_state "$_dfc_font" "$_dfc_template_key" "$_dfc_source_key" "$_dfc_cache_id" || return 1
-    if type device_font_payload_validate_installed >/dev/null 2>&1; then
-        device_font_payload_validate_installed || return 1
-    fi
+    # _dfpr_install_overlay already verifies every copied target and records its exact digest.
+    # Re-reading every multi-megabyte font immediately afterward doubled activation time.
     rm -f "$_dfc_module/config/device-font-cache-pending.conf" 2>/dev/null || true
     _dfcache_log "设备对齐缓存已激活：$_dfc_font cache=$_dfc_cache_id"
     return 0
@@ -343,19 +353,10 @@ _dfcache_runtime_ready() {
         [ -f "$_dfc_module/common/device_font_payload_runtime.sh" ] || return 1
         . "$_dfc_module/common/device_font_payload_runtime.sh"
     fi
-    if ! type luoshu_payload_transaction_begin >/dev/null 2>&1 || ! type luoshu_payload_transaction_commit >/dev/null 2>&1; then
-        [ -f "$_dfc_module/common/device_font_transaction_guard.sh" ] && . "$_dfc_module/common/device_font_transaction_guard.sh"
-    fi
-    if ! type luoshu_sync_mount_payload >/dev/null 2>&1; then
-        [ -f "$_dfc_module/common/mount_compat.sh" ] && . "$_dfc_module/common/mount_compat.sh"
-    fi
+    # Preparation writes only an immutable cache directory. It deliberately does not load the
+    # payload transaction or mount stack; those belong exclusively to explicit activation.
     type _dfpr_exec >/dev/null 2>&1 &&
-        type _dfpr_prepare_sources >/dev/null 2>&1 &&
-        type _dfpr_install_overlay >/dev/null 2>&1 &&
-        type luoshu_payload_transaction_begin >/dev/null 2>&1 &&
-        type luoshu_payload_transaction_commit >/dev/null 2>&1 &&
-        type luoshu_payload_transaction_abort >/dev/null 2>&1 &&
-        type luoshu_sync_mount_payload >/dev/null 2>&1
+        type _dfpr_prepare_sources >/dev/null 2>&1
 }
 
 _dfcache_notify() {
@@ -384,10 +385,13 @@ _dfcache_build_pending_inner() {
     _dfc_pending="$_dfc_module/config/device-font-cache-pending.conf"
     _dfc_lock="$_dfc_module/.device-font-cache.lock"
     [ -s "$_dfc_pending" ] || return 2
-    _dfcache_foreground_idle || {
+    [ "${LUOSHU_CACHE_FOREGROUND:-0}" = 1 ] || _dfcache_foreground_idle || {
         _dfcache_log '前台字体事务尚未结束，后台缓存本轮跳过并保留待办'
         return 2
     }
+    # Isolate the worker's EXIT trap. device_font_cache.sh is also sourced by font_manager.sh;
+    # installing a trap in that parent shell used to erase the outer rollback handler.
+    (
     _dfcache_lock_acquire "$_dfc_lock"
     _dfc_lock_rc=$?
     case "$_dfc_lock_rc" in
@@ -402,7 +406,8 @@ _dfcache_build_pending_inner() {
     _dfc_expected_template=$(sed -n 's/^templateKey=//p' "$_dfc_pending" 2>/dev/null | head -n1)
     _dfc_expected_source=$(sed -n 's/^sourceKey=//p' "$_dfc_pending" 2>/dev/null | head -n1)
     _dfc_active=$(head -n1 "$_dfc_module/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
-    [ -n "$_dfc_font" ] && [ "$_dfc_font" != default ] && [ "$_dfc_active" = "$_dfc_font" ] || {
+    [ -n "$_dfc_font" ] && [ "$_dfc_font" != default ] && \
+        { [ "${LUOSHU_CACHE_FOREGROUND:-0}" = 1 ] || [ "$_dfc_active" = "$_dfc_font" ]; } || {
         _dfcache_log "取消过期缓存任务：pending=$_dfc_font active=$_dfc_active"
         rm -f "$_dfc_pending" 2>/dev/null || true
         return 2
@@ -483,30 +488,27 @@ _dfcache_build_pending_inner() {
         _dfcache_log "后台设备对齐缓存生成完成：font=$_dfc_font verify=$_dfc_verify_result"
     fi
 
-    _dfcache_foreground_idle || {
-        _dfcache_log '缓存已生成，但前台事务重新出现，延后激活并保留待办'
-        return 2
+    [ "${LUOSHU_CACHE_FOREGROUND:-0}" = 1 ] || _dfcache_foreground_idle || {
+        _dfcache_log '缓存已生成；前台事务正在运行，本轮只保留就绪缓存'
     }
-    _dfc_txn=0
-    if type luoshu_payload_transaction_begin >/dev/null 2>&1; then
-        luoshu_payload_transaction_begin || return 1
-        _dfc_txn=1
+    # Re-read intent after the expensive build. A stale worker may finish its immutable cache, but
+    # it can never publish state over a newer explicit switch.
+    _dfc_live_font=$(sed -n 's/^font=//p' "$_dfc_pending" 2>/dev/null | head -n1)
+    _dfc_live_id=$(sed -n 's/^cacheId=//p' "$_dfc_pending" 2>/dev/null | head -n1)
+    if [ "$_dfc_live_font" != "$_dfc_font" ] || [ "$_dfc_live_id" != "$_dfc_cache_id" ]; then
+        _dfcache_log "缓存任务已被新的显式切换取消，不激活旧负载：$_dfc_font"
+        return 2
     fi
-    if device_font_cache_activate "$_dfc_font" && \
-       { ! type luoshu_sync_mount_payload >/dev/null 2>&1 || luoshu_sync_mount_payload; } && \
-       { [ "$_dfc_txn" -eq 0 ] || luoshu_payload_transaction_commit "$_dfc_font"; }; then
-        printf 'font=%s\ntime=%s\n' "$_dfc_font" "$(date +%s 2>/dev/null || echo 0)" > "$_dfc_module/config/text_reboot_required.conf" 2>/dev/null || true
-        rm -f "$_dfc_pending" 2>/dev/null || true
-        _dfcache_prune "$_dfc_root"
-        _dfcache_notify '设备对齐字体已在后台生成完成，请完整重启一次加载校准结果。'
-        _dfcache_log "后台设备对齐缓存已提交，等待重启：$_dfc_font"
-        _dfcache_lock_release "$_dfc_lock" >/dev/null 2>&1 || true
-        trap - EXIT HUP INT TERM
-        return 0
+    rm -f "$_dfc_pending" 2>/dev/null || true
+    _dfcache_prune "$_dfc_root"
+    if [ "${LUOSHU_CACHE_FOREGROUND:-0}" != 1 ]; then
+        _dfcache_notify '设备对齐字体缓存已准备完成；下次明确应用该字体时会一次提交。'
     fi
-    [ "$_dfc_txn" -eq 0 ] || luoshu_payload_transaction_abort >/dev/null 2>&1 || true
-    _dfcache_log "后台设备对齐缓存激活失败：$_dfc_font"
-    return 1
+    _dfcache_log "设备对齐缓存已就绪且未改动当前字体：$_dfc_font"
+    _dfcache_lock_release "$_dfc_lock" >/dev/null 2>&1 || true
+    trap - EXIT HUP INT TERM
+    return 0
+    )
 }
 
 # rc=2 means "not now" (foreground busy, nothing pending, no template yet) and must not burn the

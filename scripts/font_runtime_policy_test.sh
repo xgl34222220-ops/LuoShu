@@ -14,7 +14,7 @@ mkdir -p "$MODDIR/common" "$MODDIR/config"
 _log_step() { :; }
 _font_alias() {
   rm -f "$2"
-  cp -f "$1" "$2"
+  ln "$1" "$2" 2>/dev/null || cp -f "$1" "$2"
 }
 _verify_font_copy() {
   test -s "$1"
@@ -65,6 +65,26 @@ _lfrp_target_allowed Roboto-Regular.ttf
 ! _lfrp_target_allowed NotoSansSC-Regular.otf
 ! _lfrp_target_allowed MiSansVF.ttf
 ! _lfrp_target_allowed NotoColorEmoji.ttf
+_lfrp_target_allowed 400.ttf
+_lfrp_target_allowed MitypeMonoVF.ttf
+! _lfrp_target_allowed RobotoMono-Regular.ttf
+
+# A complete HyperOS font must drive the CJK, Latin, numeric and Xiaomi clock slots from the same
+# source inode so no page can silently fall back to stock English/digits.
+rm -f "$TMP/visible/product/fonts/Roboto-Regular.ttf"
+for NAME in MiSansVF.ttf Roboto-Regular.ttf 400.ttf MitypeMonoVF.ttf; do
+  cp "$TMP/anchor.ttf" "$TMP/visible/system/fonts/$NAME"
+done
+LUOSHU_FONT_HAS_CJK=true
+LUOSHU_FONT_HAS_LATIN=true
+LUOSHU_FONT_HAS_MIXED=true
+export LUOSHU_FONT_HAS_CJK LUOSHU_FONT_HAS_LATIN LUOSHU_FONT_HAS_MIXED
+for NAME in MiSansVF.ttf Roboto-Regular.ttf 400.ttf MitypeMonoVF.ttf; do
+  COUNT=$(_lfrp_alias_existing_targets "$TMP/anchor.ttf" "$NAME")
+  ok test "$COUNT" -eq 1
+  ok test "$(stat -c '%d:%i' "$MODDIR/.luoshu-payload/system/fonts/$NAME")" = \
+    "$(stat -c '%d:%i' "$TMP/anchor.ttf")"
+done
 
 # Switching again must remove every old generated alias and generated XML from
 # the canonical private payload, not only from the public compatibility view.

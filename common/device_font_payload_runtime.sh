@@ -10,6 +10,17 @@ _dfpr_module() {
     printf '%s\n' "${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
 }
 
+_dfpr_payload_root() {
+    _dfpr_module_dir="$(_dfpr_module)"
+    if type _lfrp_payload_root >/dev/null 2>&1; then
+        _lfrp_payload_root
+    elif [ -d "$_dfpr_module_dir/.luoshu-payload" ]; then
+        printf '%s/.luoshu-payload\n' "${_dfpr_module_dir%/}"
+    else
+        printf '%s\n' "${_dfpr_module_dir%/}"
+    fi
+}
+
 _dfpr_log() {
     _dfpr_level="$1"
     shift
@@ -96,7 +107,7 @@ EOF_DFPR_ANCHORS
 
 _dfpr_prepare_sources() {
     _dfpr_module_dir="$(_dfpr_module)"
-    _dfpr_store="$_dfpr_module_dir/system/fonts/.luoshu-font-store"
+    _dfpr_store="$(_dfpr_payload_root)/system/fonts/.luoshu-font-store"
     _dfpr_output="$_dfpr_module_dir/config/device-font-sources"
     _dfpr_stage="$_dfpr_module_dir/config/.device-font-sources.$$"
     [ -d "$_dfpr_store" ] || return 2
@@ -134,7 +145,8 @@ _dfpr_path_allowed() {
         my_region/fonts/*|my_region/etc/*.xml|my_stock/fonts/*|my_stock/etc/*.xml|\
         oplus_product/fonts/*|oplus_product/etc/*.xml|oplus_engineering/fonts/*|oplus_engineering/etc/*.xml|\
         oplus_version/fonts/*|oplus_version/etc/*.xml|oplus_region/fonts/*|oplus_region/etc/*.xml|\
-        mi_ext/fonts/*|mi_ext/etc/*.xml|cust/fonts/*|cust/etc/*.xml) return 0 ;;
+        mi_ext/fonts/*|mi_ext/etc/*.xml|cust/fonts/*|cust/etc/*.xml|\
+        hw_product/fonts/*|hw_product/etc/*.xml) return 0 ;;
     esac
     return 1
 }
@@ -146,7 +158,7 @@ _dfpr_remove_installed_files() {
     while IFS='|' read -r _dfpr_kind _dfpr_rel _dfpr_hash_value _dfpr_bytes; do
         [ "$_dfpr_kind" = file ] || continue
         _dfpr_path_allowed "$_dfpr_rel" || continue
-        rm -f "$_dfpr_module_dir/$_dfpr_rel" 2>/dev/null || true
+        rm -f "$(_dfpr_payload_root)/$_dfpr_rel" 2>/dev/null || true
     done < "$_dfpr_manifest"
     return 0
 }
@@ -156,7 +168,7 @@ _dfpr_prepare_dynamic_state() {
     _dfpr_manifest_tmp="$2"
     _dfpr_module_dir="$(_dfpr_module)"
     _dfpr_dynamic_source="$_dfpr_overlay/dynamic/data-fonts-config.xml"
-    _dfpr_dynamic_dest="$_dfpr_module_dir/system/etc/.luoshu-data-fonts-config.xml"
+    _dfpr_dynamic_dest="$(_dfpr_payload_root)/system/etc/.luoshu-data-fonts-config.xml"
     _dfpr_dynamic_state="$_dfpr_module_dir/config/device-font-dynamic-mount.conf"
     # Keep the real target in a dedicated variable. _dfpr_link_or_copy uses shell-global
     # scratch variables named _dfpr_source/_dfpr_target and must never overwrite this path.
@@ -211,7 +223,7 @@ _dfpr_install_overlay() {
             rm -f "$_dfpr_manifest_tmp" "$_dfpr_list" 2>/dev/null || true
             return 1
         }
-        _dfpr_target="$_dfpr_module_dir/$_dfpr_rel"
+        _dfpr_target="$(_dfpr_payload_root)/$_dfpr_rel"
         _dfpr_link_or_copy "$_dfpr_source" "$_dfpr_target" || {
             rm -f "$_dfpr_manifest_tmp" "$_dfpr_list" 2>/dev/null || true
             return 1
@@ -249,7 +261,7 @@ device_font_payload_validate_installed() {
     while IFS='|' read -r _dfpr_kind _dfpr_rel _dfpr_expected_hash _dfpr_expected_size; do
         [ "$_dfpr_kind" = file ] || return 1
         _dfpr_path_allowed "$_dfpr_rel" || return 1
-        _dfpr_file="$_dfpr_module_dir/$_dfpr_rel"
+        _dfpr_file="$(_dfpr_payload_root)/$_dfpr_rel"
         [ -f "$_dfpr_file" ] || return 1
         _dfpr_size_now="$(_dfpr_size "$_dfpr_file")"
         [ "$_dfpr_size_now" = "$_dfpr_expected_size" ] || return 1
@@ -266,7 +278,7 @@ device_font_payload_clear() {
     rm -f "$_dfpr_module_dir/config/device-font-installed.conf" \
           "$_dfpr_module_dir/config/device-font-engine.conf" \
           "$_dfpr_module_dir/config/device-font-dynamic-mount.conf" \
-          "$_dfpr_module_dir/system/etc/.luoshu-data-fonts-config.xml" 2>/dev/null || true
+          "$(_dfpr_payload_root)/system/etc/.luoshu-data-fonts-config.xml" 2>/dev/null || true
     return 0
 }
 
@@ -366,7 +378,7 @@ device_font_dynamic_mount_apply() {
     _dfpr_source_hash=$(sed -n 's/^sourceSha256=//p' "$_dfpr_state" 2>/dev/null | head -n1)
     case "$_dfpr_source_rel" in system/etc/.luoshu-data-fonts-config.xml) ;; *) return 1 ;; esac
     [ "$_dfpr_target" = "${LUOSHU_DATA_FONTS_CONFIG_TARGET:-/data/fonts/config/config.xml}" ] || return 1
-    _dfpr_source="$_dfpr_module_dir/$_dfpr_source_rel"
+    _dfpr_source="$(_dfpr_payload_root)/$_dfpr_source_rel"
     [ -s "$_dfpr_source" ] && [ -s "$_dfpr_target" ] || return 2
     [ "$(_dfpr_hash "$_dfpr_source")" = "$_dfpr_source_hash" ] || return 1
     if [ "$(_dfpr_hash "$_dfpr_target")" != "$_dfpr_target_hash" ]; then

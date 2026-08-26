@@ -51,6 +51,9 @@ grep -q 'my_product' "$ROOT/common/font_config_partitions.sh"
 grep -q 'oplus_fonts_customization.xml' "$ROOT/common/font_config_partitions.sh"
 grep -q 'vendor' "$ROOT/common/font_config_partitions.sh"
 grep -q 'odm' "$ROOT/common/font_config_partitions.sh"
+grep -q 'hw_product' "$ROOT/common/font_config_partitions.sh"
+grep -q '/hw_product/fonts' "$ROOT/common/device_font_template.sh"
+grep -q 'hw_product/fonts/\*' "$ROOT/common/device_font_payload_runtime.sh"
 
 # Restoring the system default must remove generated XML and partition aliases.
 grep -q 'font_config_disable' "$ROOT/common/font_manager.sh"

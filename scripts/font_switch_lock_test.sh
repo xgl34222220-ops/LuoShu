@@ -29,12 +29,25 @@ EOF_STUBS
 wait_for_file() {
     _wff_file="$1"
     _wff_count=0
-    while [ "$_wff_count" -lt 50 ]; do
+    while [ "$_wff_count" -lt 150 ]; do
         [ -e "$_wff_file" ] && return 0
         sleep 0.1
         _wff_count=$((_wff_count + 1))
     done
     echo "timed out waiting for $_wff_file" >&2
+    for _wff_out in "$TMP"/*.out; do
+        [ -f "$_wff_out" ] || continue
+        printf '%s\n' "--- ${_wff_out##*/}" >&2
+        sed -n '1,120p' "$_wff_out" >&2
+    done
+    if [ -e "$LOCK" ]; then
+        printf '%s\n' '--- lock metadata' >&2
+        if [ -d "$LOCK" ]; then
+            sed -n '1,20p' "$LOCK/pid" 2>/dev/null >&2 || true
+        else
+            sed -n '1,20p' "$LOCK" 2>/dev/null >&2 || true
+        fi
+    fi
     return 1
 }
 
@@ -44,6 +57,12 @@ MODULE_DIR="$MODDIR"
 . "$ROOT/common/util_functions.sh"
 IDENTITY_LOCK="$TMP/identity.lock"
 LIVE_PID="$$"
+# Some container executors virtualize shell $$ without exposing that number in /proc.
+# Use the visible parent for identity-mismatch fixtures in that environment; production
+# Android exposes the root shell PID directly and therefore keeps the normal $$ path.
+if [ ! -r "/proc/$LIVE_PID/stat" ] && [ -n "${PPID:-}" ] && [ -r "/proc/$PPID/stat" ]; then
+    LIVE_PID="$PPID"
+fi
 LIVE_START="$(luoshu_process_starttime "$LIVE_PID")"
 LIVE_BOOT="$(luoshu_current_boot_id)"
 
@@ -53,6 +72,21 @@ mkdir "$IDENTITY_LOCK"
 printf '%s\nstarttime=0\nboot_id=%s\n' "$LIVE_PID" "$LIVE_BOOT" > "$IDENTITY_LOCK/pid"
 if luoshu_font_lock_active "$IDENTITY_LOCK"; then
     echo 'PID reuse was incorrectly treated as an active font lock' >&2
+    exit 1
+fi
+luoshu_font_lock_reap_stale "$IDENTITY_LOCK"
+no test -e "$IDENTITY_LOCK"
+
+# A fresh token is a bounded lease when a Root PID namespace reports a different
+# process birth time for the same externally visible shell PID. This must remain
+# busy, while the same mismatched identity becomes stale after the lease expires.
+mkdir "$IDENTITY_LOCK"
+printf '%s\nstarttime=0\nboot_id=%s\ntoken=fixture\ncreated=%s\n' \
+    "$LIVE_PID" "$LIVE_BOOT" "$(date +%s)" > "$IDENTITY_LOCK/pid"
+luoshu_font_lock_active "$IDENTITY_LOCK"
+sed -i 's/^created=.*/created=0/' "$IDENTITY_LOCK/pid"
+if luoshu_font_lock_active "$IDENTITY_LOCK"; then
+    echo 'expired token lease was incorrectly treated as active' >&2
     exit 1
 fi
 luoshu_font_lock_reap_stale "$IDENTITY_LOCK"
@@ -101,7 +135,9 @@ mkdir "$IDENTITY_LOCK"
     printf '%s\nstarttime=%s\nboot_id=%s\n' "$LIVE_PID" "$LIVE_START" "$LIVE_BOOT" > "$IDENTITY_LOCK/pid"
 ) &
 identity_writer=$!
-LUOSHU_FONT_LOCK_INIT_GRACE_SECONDS=0.2
+# Match the production grace. Busy CI/container schedulers can delay a nominal
+# 50 ms writer beyond 200 ms even though the mkdir owner is still initializing.
+LUOSHU_FONT_LOCK_INIT_GRACE_SECONDS=1
 export LUOSHU_FONT_LOCK_INIT_GRACE_SECONDS
 if luoshu_font_lock_reap_stale "$IDENTITY_LOCK"; then
     echo 'initializing lock was incorrectly reaped' >&2

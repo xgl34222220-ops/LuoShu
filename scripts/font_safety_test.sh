@@ -25,14 +25,29 @@ luoshu_payload_transaction_abort
 [ "$(cat "$MODDIR/config/active_font.conf")" = old ]
 [ "$(luoshu_payload_schema_read)" = legacy-v1 ]
 
-# A prepared current-schema payload is allowed for one boot, then quarantined if boot never confirms.
+# A prepared current-schema payload is allowed for one boot. Repeated post-fs-data entry in that
+# same boot is idempotent. One different boot is an inconclusive bounded retry for
+# KernelSU/APatch mount timing; a second unconfirmed boot quarantines the generation.
+LUOSHU_CURRENT_BOOT_ID=boot-a
+export LUOSHU_CURRENT_BOOT_ID
 luoshu_payload_arm Demo
 [ "$(sed -n 's/^state=//p' "$MODDIR/config/font-payload-boot.conf")" = prepared ]
 [ "$(luoshu_payload_schema_read)" = "$LUOSHU_PAYLOAD_SCHEMA_CURRENT" ]
 font_config_boot_guard Demo
 [ "$(sed -n 's/^state=//p' "$MODDIR/config/font-payload-boot.conf")" = booting ]
+font_config_boot_guard Demo
+[ "$(sed -n 's/^bootId=//p' "$MODDIR/config/font-payload-boot.conf")" = boot-a ]
+[ -d "$MODDIR/system/fonts" ]
+LUOSHU_CURRENT_BOOT_ID=boot-b
+export LUOSHU_CURRENT_BOOT_ID
+font_config_boot_guard Demo
+[ "$(sed -n 's/^reason=//p' "$MODDIR/config/font-payload-boot.conf")" = previous-boot-unconfirmed-retry ]
+[ "$(sed -n 's/^count=//p' "$MODDIR/config/font-boot-inconclusive.conf")" = 1 ]
+[ -d "$MODDIR/system/fonts" ]
+LUOSHU_CURRENT_BOOT_ID=boot-c
+export LUOSHU_CURRENT_BOOT_ID
 if font_config_boot_guard Demo; then
-    echo 'stale boot marker was not rejected' >&2
+    echo 'second unconfirmed boot was not rejected' >&2
     exit 1
 fi
 [ ! -d "$MODDIR/system/fonts" ]
@@ -52,6 +67,8 @@ luoshu_payload_quarantine
 # A completed boot keeps the current schema and resets failure history.
 mkdir -p "$MODDIR/system/fonts"
 dd if=/dev/zero of="$MODDIR/system/fonts/Test.ttf" bs=2048 count=1 2>/dev/null
+LUOSHU_CURRENT_BOOT_ID=boot-d
+export LUOSHU_CURRENT_BOOT_ID
 luoshu_payload_arm Demo
 font_config_boot_guard Demo
 font_config_mark_boot_success

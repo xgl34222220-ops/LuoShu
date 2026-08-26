@@ -31,7 +31,9 @@ val hasReleaseSigning = listOf(
 
 android {
     namespace = "io.github.xgl34222220.luoshu"
-    compileSdk = 36
+    // Miuix 0.9.3 publishes against API 37. This is compile-time only: targetSdk and the
+    // install/runtime floor stay unchanged, while shader calls remain capability-gated.
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "io.github.xgl34222220.luoshu"
@@ -124,6 +126,10 @@ dependencies {
     implementation("com.materialkolor:material-kolor:2.0.0")
     implementation("dev.chrisbanes.haze:haze:1.6.10")
     implementation("dev.chrisbanes.haze:haze-materials:1.6.10")
+    // The reference UI uses Miuix's RuntimeShader backdrop and continuous-corner stack.
+    // Keep Haze as the API 28-32 fallback; the real liquid-glass path is capability-gated.
+    implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.3")
+    implementation("top.yukonga.miuix.kmp:miuix-squircle-android:0.9.3")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20251224")

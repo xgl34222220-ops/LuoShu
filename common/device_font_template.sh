@@ -13,6 +13,7 @@ OUT="$MODDIR/config/device-font-template.json"
 KEY="$MODDIR/config/device-font-template.key"
 STATE="$MODDIR/config/device-font-template.state"
 PENDING="$MODDIR/config/device-font-template-pending.conf"
+XML_SOURCE_ROOT="$MODDIR/config/device-font-template-source"
 LOG="$MODDIR/logs/device-font-template.log"
 LOCK="$MODDIR/.device-font-template.lock"
 CAPTURE_REVISION=2
@@ -62,7 +63,7 @@ collect_xml() {
         /system/etc /system_ext/etc /product/etc /vendor/etc /odm/etc /oem/etc \
         /my_product/etc /my_engineering/etc /my_company/etc /my_preload/etc /my_region/etc /my_stock/etc \
         /oplus_product/etc /oplus_engineering/etc /oplus_version/etc /oplus_region/etc \
-        /mi_ext/etc /cust/etc; do
+        /mi_ext/etc /cust/etc /hw_product/etc; do
         [ -d "$_dft_base" ] || continue
         find "$_dft_base" -maxdepth 3 -type f \( \
             -name 'fonts.xml' -o -name 'font_fallback.xml' -o \
@@ -87,7 +88,7 @@ source_key() {
 }
 
 template_parts() {
-    printf '%s\n' 'system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust'
+    printf '%s\n' 'system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product'
 }
 
 capture_clean_reason() {
@@ -184,7 +185,23 @@ capture_template() {
     }
     _dft_source=$(source_key "$_dft_xml_list")
 
-    set -- --output "$OUT.tmp" --fingerprint "$_dft_rom" --capture-revision "$CAPTURE_REVISION"
+    _dft_xml_source_stage="${XML_SOURCE_ROOT}.stage.$$"
+    rm -rf "$_dft_xml_source_stage" 2>/dev/null || true
+    mkdir -p "$_dft_xml_source_stage" 2>/dev/null || return 1
+    while IFS= read -r _dft_xml; do
+        [ -f "$_dft_xml" ] || continue
+        case "$_dft_xml" in
+            /data/fonts/*) continue ;;
+            /*) _dft_xml_relative=${_dft_xml#/} ;;
+            *) continue ;;
+        esac
+        mkdir -p "$_dft_xml_source_stage/${_dft_xml_relative%/*}" 2>/dev/null || return 1
+        cp -f "$_dft_xml" "$_dft_xml_source_stage/$_dft_xml_relative" 2>/dev/null || return 1
+        chmod 0600 "$_dft_xml_source_stage/$_dft_xml_relative" 2>/dev/null || true
+    done < "$_dft_xml_list"
+
+    set -- --output "$OUT.tmp" --fingerprint "$_dft_rom" --capture-revision "$CAPTURE_REVISION" \
+        --xml-source-root "$XML_SOURCE_ROOT"
     while IFS= read -r _dft_xml; do
         [ -f "$_dft_xml" ] && set -- "$@" --xml "$_dft_xml"
     done < "$_dft_xml_list"
@@ -192,7 +209,7 @@ capture_template() {
         /system/fonts /system_ext/fonts /product/fonts /vendor/fonts /odm/fonts /oem/fonts \
         /my_product/fonts /my_engineering/fonts /my_company/fonts /my_preload/fonts /my_region/fonts /my_stock/fonts \
         /oplus_product/fonts /oplus_engineering/fonts /oplus_version/fonts /oplus_region/fonts \
-        /mi_ext/fonts /cust/fonts /data/fonts/files; do
+        /mi_ext/fonts /cust/fonts /hw_product/fonts /data/fonts/files; do
         [ -d "$_dft_root" ] && set -- "$@" --font-root "$_dft_root"
     done
 
@@ -201,10 +218,20 @@ capture_template() {
     rm -f "$_dft_xml_list" 2>/dev/null || true
     if [ "$_dft_rc" -ne 0 ] || [ ! -s "$OUT.tmp" ] || ! grep -q '"captureRevision":2' "$OUT.tmp" 2>/dev/null; then
         rm -f "$OUT.tmp" 2>/dev/null || true
+        rm -rf "$_dft_xml_source_stage" 2>/dev/null || true
         log_template "可信原厂模板采集失败：code=$_dft_rc result=$_dft_result"
         return 1
     fi
 
+    rm -rf "${XML_SOURCE_ROOT}.previous" 2>/dev/null || true
+    [ ! -d "$XML_SOURCE_ROOT" ] || mv "$XML_SOURCE_ROOT" "${XML_SOURCE_ROOT}.previous" 2>/dev/null || return 1
+    if mv "$_dft_xml_source_stage" "$XML_SOURCE_ROOT" 2>/dev/null; then
+        rm -rf "${XML_SOURCE_ROOT}.previous" 2>/dev/null || true
+    else
+        [ ! -d "${XML_SOURCE_ROOT}.previous" ] || mv "${XML_SOURCE_ROOT}.previous" "$XML_SOURCE_ROOT" 2>/dev/null || true
+        rm -f "$OUT.tmp" 2>/dev/null || true
+        return 1
+    fi
     chmod 0600 "$OUT.tmp" 2>/dev/null || true
     mv -f "$OUT.tmp" "$OUT" 2>/dev/null || return 1
     printf '%s\n' "$_dft_source" > "$KEY.tmp.$$" 2>/dev/null || return 1

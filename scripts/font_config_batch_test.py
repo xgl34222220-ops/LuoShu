@@ -37,6 +37,7 @@ with tempfile.TemporaryDirectory(prefix="luoshu batch | ") as tmp_raw:
     font_dir.mkdir()
     for weight in (400, 500):
         (font_dir / f"LuoShu-{weight}.ttf").write_bytes(b"L" * 2048)
+    (font_dir / "LuoShuMono-400.ttf").write_bytes(b"M" * 2048)
 
     source.write_text(
         """<?xml version="1.0" encoding="utf-8"?>
@@ -44,6 +45,7 @@ with tempfile.TemporaryDirectory(prefix="luoshu batch | ") as tmp_raw:
   <family name="sans-serif"><font weight="400">Roboto-Regular.ttf</font></family>
   <family name="hihonor-sans"><font weight="500">HonorSans-Medium.ttf</font></family>
   <family name="honor-serif-display"><font weight="400">HonorSerif.ttf</font></family>
+  <family-list name="serif-monospace"><family><font weight="400">CutiveMono.ttf</font></family></family-list>
 </familyset>
 """,
         encoding="utf-8",
@@ -57,8 +59,8 @@ with tempfile.TemporaryDirectory(prefix="luoshu batch | ") as tmp_raw:
     )
     result = rows(run(OVERLAY, "--batch", overlay_jobs).stdout)
     assert len(result) == 2, result
-    assert result[0][0:5] == ["generate", str(source), "ok", "1", "2"], result[0]
-    assert result[1][0:5] == ["validate", str(output), "ok", "0", "2"], result[1]
+    assert result[0][0:5] == ["generate", str(source), "ok", "1", "3"], result[0]
+    assert result[1][0:5] == ["validate", str(output), "ok", "0", "3"], result[1]
 
     tree = ET.parse(output)
     rendered = [
@@ -88,15 +90,16 @@ with tempfile.TemporaryDirectory(prefix="luoshu batch | ") as tmp_raw:
     discovered = rows(run(TARGETS, "--batch", target_jobs).stdout)
     target_rows = [row for row in discovered if row[0] == "TARGET"]
     doc_rows = [row for row in discovered if row[0] == "DOC"]
-    assert [row[2] for row in target_rows] == ["HonorSans-Medium.ttf", "Roboto-Regular.ttf"], target_rows
+    assert [row[2] for row in target_rows] == ["CutiveMono.ttf", "HonorSans-Medium.ttf", "Roboto-Regular.ttf"], target_rows
+    assert next(row for row in target_rows if row[2] == "CutiveMono.ttf")[5] == "mono", target_rows
     assert all(row[2] != "HonorSerif.ttf" for row in target_rows), target_rows
-    assert doc_rows == [["DOC", str(source), "ok", "2", ""]], doc_rows
+    assert doc_rows == [["DOC", str(source), "ok", "3", ""]], doc_rows
 
     # Per-document errors must be reported without aborting later documents in the same process.
     mixed_jobs = tmp / "mixed jobs.txt"
     mixed_jobs.write_text(f"{broken}\n{source}\n", encoding="utf-8")
     mixed = rows(run(TARGETS, "--batch", mixed_jobs).stdout)
     assert any(row[:3] == ["DOC", str(broken), "error"] for row in mixed), mixed
-    assert any(row[:4] == ["DOC", str(source), "ok", "2"] for row in mixed), mixed
+    assert any(row[:4] == ["DOC", str(source), "ok", "3"] for row in mixed), mixed
 
 print("Font config batch protocol tests passed.")

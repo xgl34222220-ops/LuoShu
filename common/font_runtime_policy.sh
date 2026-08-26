@@ -142,8 +142,12 @@ font_validate_global() {
     LUOSHU_FONT_HAS_LATIN=false
     LUOSHU_FONT_HAS_MIXED=false
     [ "$_lfrp_han" -ge 6000 ] && [ "$_lfrp_cjk" -ge 95 ] && LUOSHU_FONT_HAS_CJK=true
-    [ "$_lfrp_latin" -ge 95 ] && [ "$_lfrp_digits" -eq 100 ] && [ "$_lfrp_punct" -ge 75 ] && \
-        LUOSHU_FONT_HAS_LATIN=true
+    # HyperOS splits CJK, Latin and numeric UI glyphs across independent physical slots.
+    # Punctuation coverage varies wildly between otherwise complete CJK fonts, so using it as a
+    # hard gate left Roboto/MiSansLatin/100-900 on the stock font even though A-Z/a-z/0-9 were
+    # present. Keep punctuation in the diagnostic, but let usable letters + all digits drive the
+    # Latin slot decision.
+    [ "$_lfrp_latin" -ge 90 ] && [ "$_lfrp_digits" -eq 100 ] && LUOSHU_FONT_HAS_LATIN=true
     [ "$LUOSHU_FONT_HAS_CJK" = true ] && [ "$LUOSHU_FONT_HAS_LATIN" = true ] && \
         LUOSHU_FONT_HAS_MIXED=true
     export LUOSHU_FONT_HAS_CJK LUOSHU_FONT_HAS_LATIN LUOSHU_FONT_HAS_MIXED
@@ -152,6 +156,8 @@ font_validate_global() {
     case "$LUOSHU_FONT_HAS_CJK:$LUOSHU_FONT_HAS_LATIN" in
         true:true)
             FONT_CHECK_WARNING="${FONT_CHECK_WARNING:+$FONT_CHECK_WARNING；}字形覆盖完整"
+            [ "$_lfrp_punct" -ge 75 ] || \
+                FONT_CHECK_WARNING="${FONT_CHECK_WARNING}；部分标点将由系统回退字体补齐"
             ;;
         true:false)
             FONT_CHECK_WARNING="${FONT_CHECK_WARNING:+$FONT_CHECK_WARNING；}字体缺少完整英文或数字，洛书将只替换中文槽位并保留系统英文"
@@ -194,6 +200,12 @@ luoshu_font_validate_global_cached() {
 _lfrp_target_kind() {
     _lfrp_name=$(printf '%s' "${1##*/}" | tr '[:upper:]' '[:lower:]')
     case "$_lfrp_name" in
+        [1-9]00.ttf|350.ttf|*mitype*|*miclock*|*misansclock*|androidclock*|clockopia*)
+            # Xiaomi hard-codes these UI/clock/number files outside the normal Android family
+            # graph. They are Latin/digit presentation slots even when their filename contains
+            # "Mono"; protecting them was the reason many HyperOS pages kept stock digits.
+            printf 'latin\n'
+            ;;
         *emoji*|*symbol*|*icon*|*math*|*music*|*serif*|*mono*|\
         *myanmar*|*arabic*|*thai*|*tibetan*|*devanagari*|*khmer*|*lao*|\
         *hebrew*|*korean*|*japanese*)
@@ -307,7 +319,12 @@ clear_managed_text_fonts() {
     done
     mkdir -p "$_lfrp_root/system/fonts" 2>/dev/null || true
     rm -f "$(_lfrp_target_manifest)" 2>/dev/null || true
-    type font_config_disable >/dev/null 2>&1 && font_config_disable
+    # Generated XML contains stable LuoShu alias names, not a specific font identity. Keep a
+    # boot-validated template during font-to-font switches and only replace its hard-link targets.
+    # Restoring the system font still removes every XML overlay.
+    if [ "${LUOSHU_KEEP_XML_OVERLAY:-0}" != 1 ]; then
+        type font_config_disable >/dev/null 2>&1 && font_config_disable
+    fi
 }
 
 _copy_as_inventory() {
@@ -443,28 +460,42 @@ luoshu_payload_build_manifest() {
     _lfrp_root=$(_lfrp_payload_root)
     _lfrp_config=$(_lfrp_config_root)
     _lfrp_tmp="$_lfrp_config/font-payload-manifest.conf.tmp.$$"
+    _lfrp_checksum_cache="$_lfrp_config/.font-payload-checksums.$$"
     mkdir -p "$_lfrp_config" 2>/dev/null || return 1
     : > "$_lfrp_tmp" 2>/dev/null || return 1
+    : > "$_lfrp_checksum_cache" 2>/dev/null || { rm -f "$_lfrp_tmp" 2>/dev/null; return 1; }
     for _lfrp_part in $(_lfrp_partitions); do
         _lfrp_fonts="$_lfrp_root/$_lfrp_part/fonts"
         if [ -d "$_lfrp_fonts" ]; then
             find "$_lfrp_fonts" -type f 2>/dev/null | while IFS= read -r _lfrp_file; do
                 case "$_lfrp_file" in *.ttf|*.otf|*.ttc|*.font|*.TTF|*.OTF|*.TTC) ;; *) continue ;; esac
                 _lfrp_rel=${_lfrp_file#$_lfrp_root/}
-                _lfrp_sum=$(_luoshu_checksum "$_lfrp_file")
+                if type _luoshu_cached_checksum >/dev/null 2>&1; then
+                    _lfrp_sum=$(_luoshu_cached_checksum "$_lfrp_file" "$_lfrp_checksum_cache")
+                else
+                    _lfrp_sum=$(_luoshu_checksum "$_lfrp_file")
+                fi
                 [ -n "$_lfrp_sum" ] && printf '%s|%s\n' "$_lfrp_rel" "$_lfrp_sum"
             done >> "$_lfrp_tmp"
         fi
         _lfrp_etc="$_lfrp_root/$_lfrp_part/etc"
         if [ -d "$_lfrp_etc" ]; then
             find "$_lfrp_etc" -maxdepth 1 -type f -name '*.xml' 2>/dev/null | while IFS= read -r _lfrp_file; do
-                grep -Eq 'LuoShu(Mono)?-[1-9][0-9][0-9]\\.ttf' "$_lfrp_file" 2>/dev/null || continue
+                case "${_lfrp_file##*/}" in
+                    .luoshu-data-fonts-config.xml) ;;
+                    *) grep -Eq 'LuoShu(Mono)?-|LuoShuSlot-' "$_lfrp_file" 2>/dev/null || continue ;;
+                esac
                 _lfrp_rel=${_lfrp_file#$_lfrp_root/}
-                _lfrp_sum=$(_luoshu_checksum "$_lfrp_file")
+                if type _luoshu_cached_checksum >/dev/null 2>&1; then
+                    _lfrp_sum=$(_luoshu_cached_checksum "$_lfrp_file" "$_lfrp_checksum_cache")
+                else
+                    _lfrp_sum=$(_luoshu_checksum "$_lfrp_file")
+                fi
                 [ -n "$_lfrp_sum" ] && printf '%s|%s\n' "$_lfrp_rel" "$_lfrp_sum"
             done >> "$_lfrp_tmp"
         fi
     done
+    rm -f "$_lfrp_checksum_cache" 2>/dev/null || true
     [ -s "$_lfrp_tmp" ] || {
         rm -f "$_lfrp_tmp" 2>/dev/null || true
         return 1
@@ -542,7 +573,7 @@ luoshu_payload_transaction_begin() {
             fi
         done
     done
-    for _lfrp_name in active_font.conf font_mix.conf font-config-overlay.conf font-target-aliases.conf font-target-coverage.conf font-runtime-targets.conf font-payload-manifest.conf font-payload-boot.conf font-payload-schema.conf text_reboot_required.conf; do
+    for _lfrp_name in active_font.conf font_mix.conf font-config-overlay.conf font-target-aliases.conf font-target-coverage.conf font-runtime-targets.conf font-payload-manifest.conf font-payload-boot.conf font-payload-schema.conf font-payload-rebuild-pending.conf font-payload-reapply-notified.conf text_reboot_required.conf font-boot-failures font-boot-inconclusive.conf font-mount-verify-failures device-font-load-verification.conf device-font-load-verification.json; do
         if [ -f "$_lfrp_config/$_lfrp_name" ]; then
             cp -fp "$_lfrp_config/$_lfrp_name" "$LUOSHU_PAYLOAD_TXN/config/$_lfrp_name" 2>/dev/null || return 1
             printf 'config|present|%s\n' "$_lfrp_name" >> "$LUOSHU_PAYLOAD_TXN/paths"
@@ -624,6 +655,7 @@ luoshu_payload_quarantine() {
     printf 'default\n' > "$_lfrp_config/active_font.conf" 2>/dev/null || true
     rm -f "$_lfrp_config/font-payload-boot.conf" "$_lfrp_config/font-payload-manifest.conf" \
         "$_lfrp_config/font-payload-schema.conf" "$_lfrp_config/font-payload-rebuild-pending.conf" \
+        "$_lfrp_config/font-payload-reapply-notified.conf" \
         "$_lfrp_config/font-target-aliases.conf" "$_lfrp_config/font-target-coverage.conf" \
         "$_lfrp_config/font-runtime-targets.conf" "$_lfrp_config/font-config-overlay.conf" 2>/dev/null || true
     {

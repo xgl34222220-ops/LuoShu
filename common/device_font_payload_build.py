@@ -3,8 +3,6 @@
 """Identity-safe wrapper for the per-device payload builder."""
 from __future__ import annotations
 
-import hashlib
-import json
 from typing import Any
 
 import device_font_payload_build_base as _base
@@ -14,15 +12,10 @@ _ORIGINAL_BUILD_SIGNATURE = _base.build_signature
 
 
 def build_signature(slot: dict[str, Any], source_profile: dict[str, Any], source_weight: int) -> str:
-    original = _ORIGINAL_BUILD_SIGNATURE(slot, source_profile, source_weight)
-    identity = {
-        "family": slot.get("family", ""),
-        "familyNormalized": slot.get("familyNormalized", ""),
-        "declared": slot.get("declared", ""),
-        "postScriptName": slot.get("postScriptName", ""),
-    }
-    encoded = json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(f"{original}\0{encoded}".encode("utf-8")).hexdigest()
+    # Android resolves the family graph from fonts.xml; duplicating an otherwise identical outline
+    # solely for each family/name-table identity multiplied first-apply time by dozens of full font
+    # rewrites. The actual device metric/role contract remains part of the base signature.
+    return _ORIGINAL_BUILD_SIGNATURE(slot, source_profile, source_weight)
 
 
 _base.build_signature = build_signature

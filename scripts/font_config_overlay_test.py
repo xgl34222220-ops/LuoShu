@@ -19,6 +19,8 @@ SAMPLE = """<?xml version='1.0' encoding='utf-8'?>
   <alias name="sans" to="sans-serif" weight="400"/>
   <family name="sys-sans-en"><font weight="400">SysSans-En-Regular.ttf</font></family>
   <family name="monospace"><font weight="400">DroidSansMono.ttf</font></family>
+  <family-list name="serif-monospace"><family><font weight="400">CutiveMono-Regular.ttf</font></family></family-list>
+  <family-list name="google-sans-text"><family><font weight="500">GoogleSansText-Medium.ttf</font></family></family-list>
   <family name="serif"><font weight="400">NotoSerif-Regular.ttf</font></family>
   <family name="material-icons"><font weight="400">MaterialIcons.ttf</font></family>
   <family lang="und-Arab"><font weight="400">NotoNaskhArabic-Regular.ttf</font></family>
@@ -37,8 +39,8 @@ def main() -> int:
         source.write_text(SAMPLE, encoding="utf-8")
         tree = parse_xml(source)
         report = rewrite_tree(tree, "LuoShu", "LuoShuMono")
-        assert report["changed_fonts"] == 4, report
-        assert report["changed_mono_families"] == ["monospace"], report
+        assert report["changed_fonts"] == 6, report
+        assert report["changed_mono_families"] == ["monospace", "serif-monospace"], report
 
         root = tree.getroot()
         families = {family.attrib.get("name", ""): family for family in root if family.tag == "family"}
@@ -50,6 +52,9 @@ def main() -> int:
         assert child_text(families["sys-sans-en"]) == ["LuoShu-400.ttf"]
 
         assert child_text(families["monospace"]) == ["LuoShuMono-400.ttf"]
+        family_lists = {item.attrib.get("name", ""): item for item in root if item.tag == "family-list"}
+        assert child_text(list(family_lists["serif-monospace"])[0]) == ["LuoShuMono-400.ttf"]
+        assert child_text(list(family_lists["google-sans-text"])[0]) == ["LuoShu-500.ttf"]
         assert child_text(families["serif"]) == ["NotoSerif-Regular.ttf"]
         assert child_text(families["material-icons"]) == ["MaterialIcons.ttf"]
         assert child_text(families["mitype-clock"]) == ["Mitype2019.ttf"]
@@ -74,7 +79,7 @@ def main() -> int:
 
     for name in (
         "monospace", "roboto-mono", "noto-sans-mono", "droid-sans-mono",
-        "sans-serif-monospace", "ui-monospace",
+        "sans-serif-monospace", "serif-monospace", "ui-monospace", "monaco",
     ):
         assert overlay.is_safe_mono_family(name), f"monospace family not recognised: {name}"
 

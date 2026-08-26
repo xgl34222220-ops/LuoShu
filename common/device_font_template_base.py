@@ -106,6 +106,37 @@ def normalize(value: str) -> str:
     return re.sub(r"[\s_-]+", "-", str(value or "").strip().lower()).strip("-")
 
 
+def element_parents(root: ET.Element) -> dict[ET.Element, ET.Element]:
+    return {child: parent for parent in root.iter() for child in list(parent)}
+
+
+def effective_family_context(
+    family: ET.Element,
+    parents: dict[ET.Element, ET.Element],
+) -> tuple[str, dict[str, str]]:
+    """Resolve OEM ``family-list`` wrappers without flattening the XML graph.
+
+    Several HyperOS/AOSP-derived configurations put the public family name on a
+    ``family-list`` and leave its child ``family`` anonymous. Treating that child as
+    unnamed loses roles such as ``monospace`` and ``google-sans-text`` entirely.
+    """
+    lineage: list[ET.Element] = []
+    current: ET.Element | None = family
+    while current is not None:
+        lineage.append(current)
+        current = parents.get(current)
+    attrs: dict[str, str] = {}
+    name = ""
+    for node in reversed(lineage):
+        if local_name(node.tag) not in ("family-list", "family"):
+            continue
+        attrs.update({key: value for key, value in node.attrib.items() if value})
+        candidate = node.attrib.get("name", "").strip()
+        if candidate:
+            name = candidate
+    return name, attrs
+
+
 def nearest_weight(raw: str | None) -> int:
     try:
         requested = int(raw or "400")
@@ -225,11 +256,12 @@ def parse_xml(path: Path) -> list[FontRef]:
     tree = ET.parse(path)
     dynamic = "/data/fonts/" in str(path).replace("\\", "/")
     refs: list[FontRef] = []
-    for family in tree.getroot().iter():
+    root = tree.getroot()
+    parents = element_parents(root)
+    for family in root.iter():
         if local_name(family.tag) != "family":
             continue
-        family_name = family.attrib.get("name", "")
-        family_attrs = {key: value for key, value in family.attrib.items() if value}
+        family_name, family_attrs = effective_family_context(family, parents)
         for child in list(family):
             if local_name(child.tag) != "font":
                 continue
@@ -400,6 +432,7 @@ def build_template(
     fingerprint: str,
     hash_fonts: bool = False,
     capture_revision: int = CAPTURE_REVISION,
+    xml_source_root: Path | None = None,
 ) -> dict[str, object]:
     readable_xmls = [path for path in xml_paths if path.is_file()]
     if not readable_xmls:
@@ -465,7 +498,7 @@ def build_template(
     for slot in slots:
         for role in slot["roles"]:
             role_counts[role] = role_counts.get(role, 0) + 1
-    return {
+    result: dict[str, object] = {
         "schema": SCHEMA,
         "captureRevision": CAPTURE_REVISION,
         "probeSchema": PROBE_SCHEMA,
@@ -482,6 +515,9 @@ def build_template(
         "slots": slots,
         "failures": failures,
     }
+    if xml_source_root is not None:
+        result["xmlSourceRoot"] = str(xml_source_root)
+    return result
 
 
 def atomic_json_write(payload: dict[str, object], output: Path) -> None:
@@ -502,6 +538,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--font-root", action="append", default=[], type=Path)
     parser.add_argument("--fingerprint", default="")
     parser.add_argument("--capture-revision", type=int, default=CAPTURE_REVISION)
+    parser.add_argument("--xml-source-root", type=Path)
     parser.add_argument("--hash-fonts", action="store_true")
     return parser.parse_args()
 
@@ -515,6 +552,7 @@ def main() -> int:
             args.fingerprint,
             args.hash_fonts,
             args.capture_revision,
+            args.xml_source_root,
         )
         atomic_json_write(payload, args.output)
         print(json.dumps({"status": "ok", **payload["summary"], "output": str(args.output)}, ensure_ascii=False, separators=(",", ":")))

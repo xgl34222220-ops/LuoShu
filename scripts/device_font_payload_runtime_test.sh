@@ -46,7 +46,7 @@ printf '{"schema":"device-font-overlay-v1"}\n' > "$OVERLAY/overlay-manifest.json
 MODDIR="$MODULE"
 MODULE_DIR="$MODULE"
 LUOSHU_DATA_FONTS_CONFIG_TARGET="$TARGET"
-LUOSHU_PAYLOAD_SCHEMA_CURRENT=device-template-v1-baseline-v7-mono-v6
+LUOSHU_PAYLOAD_SCHEMA_CURRENT=device-template-v2-baseline-v9-rolegraph-v2
 LUOSHU_MOUNTINFO="$MOUNTINFO"
 export MODDIR MODULE_DIR LUOSHU_DATA_FONTS_CONFIG_TARGET LUOSHU_PAYLOAD_SCHEMA_CURRENT LUOSHU_MOUNTINFO
 . "$MODULE/common/device_font_payload_runtime.sh"
@@ -61,7 +61,7 @@ grep -q '^targetSha256=' "$MODULE/config/device-font-dynamic-mount.conf"
 grep -q '^file|system/etc/.luoshu-data-fonts-config.xml|' "$MODULE/config/device-font-installed.conf"
 printf 'state=installed\nschema=device-font-payload-v1\nfont=fixture\n' > "$MODULE/config/device-font-engine.conf"
 printf 'fixture\n' > "$MODULE/config/active_font.conf"
-printf 'schema=device-template-v1-baseline-v7-mono-v6\nfont=fixture\n' > "$MODULE/config/font-payload-schema.conf"
+printf 'schema=device-template-v2-baseline-v9-rolegraph-v2\nfont=fixture\n' > "$MODULE/config/font-payload-schema.conf"
 device_font_payload_validate_installed
 
 # Simulate the early-boot read-only bind. Boot-complete release must verify that the
@@ -88,14 +88,15 @@ cmp -s "$TARGET" "$ORIGINAL"
 test ! -s "$MOUNTINFO"
 
 # A changed FontManagerService config must be detected before any bind mount is attempted,
-# and the complete active payload is scheduled for one background rebuild.
+# and the complete active payload is preserved until one explicit foreground apply.
 printf '<fontConfig version="changed"/>\n' > "$TARGET"
 set +e
 device_font_dynamic_mount_apply
 RC=$?
 set -e
 test "$RC" -eq 2
-grep -q '^state=pending$' "$MODULE/config/font-payload-rebuild-pending.conf"
+grep -q '^state=awaiting-explicit-apply$' "$MODULE/config/font-payload-rebuild-pending.conf"
+grep -q '^mode=preserve-current$' "$MODULE/config/font-payload-rebuild-pending.conf"
 grep -q '^font=fixture$' "$MODULE/config/font-payload-rebuild-pending.conf"
 grep -q '^reason=dynamic-config-changed$' "$MODULE/config/font-payload-rebuild-pending.conf"
 

@@ -78,9 +78,11 @@ grep -q '^state=verified$' "$COMPAT_MOD/config/device-font-load-verification.con
 grep -q '^mode=mount-verified$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 grep -q '^reason=visible-font-files-match$' "$COMPAT_MOD/config/device-font-load-verification.conf"
 
-# A different visible inode/path is not a failure when the mount transaction is active.
+# A different visible inode/path is not a failure only when both halves of the mount
+# transaction agree. A bare self-mount marker is not sufficient proof of system visibility.
 printf 'different-visible-font\n' > "$VISIBLE_ROOT/system/fonts/Roboto-Regular.ttf"
 printf 'state=mounted\n' > "$COMPAT_MOD/config/self-mount.conf"
+printf 'state=confirmed\nfont=Composite Font\n' > "$COMPAT_MOD/config/font-payload-boot.conf"
 MODDIR="$COMPAT_MOD" MODULE_DIR="$COMPAT_MOD" LUOSHU_VISIBLE_ROOT="$VISIBLE_ROOT" \
     sh "$COMPAT_MOD/common/device_font_load_verify.sh" verify
 grep -q '^state=verified$' "$COMPAT_MOD/config/device-font-load-verification.conf"

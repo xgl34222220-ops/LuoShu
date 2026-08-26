@@ -22,6 +22,15 @@
 
 发布运行时不会使用 FontTools 测试字体作为洛书内置字体，但仍保留上游外部声明以便完整追溯。
 
+## Miuix 与 AndroidLiquidGlass
+
+- 用途：Android 13 及以上悬浮底栏的背景取样、RuntimeShader 模糊与折射、边缘高光和平滑连续圆角。
+- 来源：[`compose-miuix-ui/miuix`](https://github.com/compose-miuix-ui/miuix)；折射透镜按其官方示例改写，该示例注明源自 [`Kyant0/AndroidLiquidGlass`](https://github.com/Kyant0/AndroidLiquidGlass)。
+- 许可证：Apache License 2.0。
+- 完整文本：[`licenses/Apache-2.0.txt`](licenses/Apache-2.0.txt)。
+
+洛书修改了示例的包名、配色、分层、尺寸和导航状态接入；底层库及原示例的许可证与署名不变。
+
 ## 用户字体与第三方模块
 
 洛书不会在仓库或发布包中附带商业字体。以下内容不受洛书 GPL-3.0-only 授权：

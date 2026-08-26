@@ -36,7 +36,7 @@ _verify_font_copy() {
 _luoshu_config_weight_source() {
     _lcw_weight="$1"
     _lcw_module="$(_luoshu_config_weight_module)"
-    _lcw_fonts="$_lcw_module/system/fonts"
+    _lcw_fonts="$(_luoshu_config_weight_fonts)"
     _lcw_role="$(_luoshu_config_weight_role "$_lcw_weight")"
 
     for _lcw_file in \
@@ -87,7 +87,7 @@ _luoshu_fast_link_font() {
 # UI 九档直接引用对应静态来源；Mono 只生成一次 400 档，其余权重共享同一固定宽度文件。
 font_config_prepare_payload_weights() {
     _lcw_module="$(_luoshu_config_weight_module)"
-    _lcw_fonts="$_lcw_module/system/fonts"
+    _lcw_fonts="$(_luoshu_config_weight_fonts)"
     mkdir -p "$_lcw_fonts" "$_lcw_module/config" 2>/dev/null || return 1
 
     _lcw_stage="$_lcw_module/config/font-config-weights.$$"
@@ -171,7 +171,7 @@ EOF_LUOSHU_DYNAMIC_TARGETS
     _ldt_cur=''
     _ldt_key=''
     _ldt_font_dir=''
-    while IFS="$(printf '\t')" read -r _ldt_tag _ldt_input _ldt_a _ldt_b _ldt_c; do
+    while IFS="$(printf '\t')" read -r _ldt_tag _ldt_input _ldt_a _ldt_b _ldt_c _ldt_d; do
         case "$_ldt_tag" in
             DOC)
                 if [ "$_ldt_a" = ok ]; then
@@ -193,12 +193,17 @@ EOF_LUOSHU_DYNAMIC_TARGETS
         _ldt_file="$_ldt_a"
         _ldt_weight="$_ldt_b"
         _ldt_family="$_ldt_c"
+        _ldt_role="$_ldt_d"
         case "$_ldt_file" in */*|*'..'*|LuoShu-*.ttf|LuoShuMono-*.ttf) continue ;; *.ttf|*.otf|*.ttc) ;; *) continue ;; esac
         case "$_ldt_weight" in 100|200|300|400|500|600|700|800|900) ;; *) _ldt_weight=400 ;; esac
         _ldt_rel="${_ldt_font_dir#$_ldt_module/}/$_ldt_file"
         grep -Fq "$_ldt_rel|" "$_ldt_manifest_tmp" 2>/dev/null && continue
         _ldt_targets=$((_ldt_targets + 1))
-        _ldt_source="$_ldt_module/system/fonts/LuoShu-${_ldt_weight}.ttf"
+        if [ "$_ldt_role" = mono ]; then
+            _ldt_source="$_ldt_module/system/fonts/LuoShuMono-${_ldt_weight}.ttf"
+        else
+            _ldt_source="$_ldt_module/system/fonts/LuoShu-${_ldt_weight}.ttf"
+        fi
         _ldt_dest="$_ldt_font_dir/$_ldt_file"
         _luoshu_fast_font_ok "$_ldt_source" || continue
         mkdir -p "$_ldt_font_dir" 2>/dev/null || continue

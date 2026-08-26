@@ -240,7 +240,10 @@ populate_hyperos_payload() (
     _font_store_reset "$SYSTEM_FONTS_DIR" || exit 1
     _ma=$(_font_anchor "$_composite" "$SYSTEM_FONTS_DIR" mix-composite) || exit 1
     alias_core "$_ma" MiSansVF.ttf MiSansVF_Overlay.ttf MiSansTCVF.ttf MiSansL3.otf MiSansLatinVF.ttf Roboto-Regular.ttf GoogleSans-Regular.ttf GoogleSansText-Regular.ttf 100.ttf 200.ttf 300.ttf 350.ttf 400.ttf 500.ttf 600.ttf 700.ttf 800.ttf 900.ttf || exit 1
-    alias_existing_list "$_ma" Roboto-Medium.ttf Roboto-Bold.ttf Roboto-Light.ttf Roboto-Thin.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Medium.ttf GoogleSans-Bold.ttf GoogleSansText-Medium.ttf GoogleSansText-Bold.ttf GoogleSansFlex-Regular.ttf
+    # HyperOS apps may request MiSansLatin, Roboto/Google Sans, Mitype or numeric UI slots directly.
+    # Mapping only the small historical subset is why external apps could show custom Chinese while
+    # keeping stock English and digits. Every real text slot shares the already-built composite inode.
+    alias_existing_list "$_ma" $(get_all_hyperos_files)
     verify_core_files "$SYSTEM_FONTS_DIR" MiSansVF.ttf MiSansLatinVF.ttf Roboto-Regular.ttf 400.ttf 700.ttf || exit 1
 )
 
@@ -294,6 +297,9 @@ sync_secondary_hyperos_dirs() {
     [ "$IS_HYPEROS" = "true" ] || return 0
     sync_secondary_partition system_ext "${LUOSHU_SYSTEM_EXT_FONTS_ROOT:-/system_ext/fonts}" || return 1
     sync_secondary_partition product "${LUOSHU_PRODUCT_FONTS_ROOT:-/product/fonts}" || return 1
+    if [ -d "${LUOSHU_MI_EXT_FONTS_ROOT:-/mi_ext/fonts}" ]; then
+        sync_secondary_partition mi_ext "${LUOSHU_MI_EXT_FONTS_ROOT:-/mi_ext/fonts}" || return 1
+    fi
     return 0
 }
 
@@ -522,11 +528,15 @@ apply_mix() {
     fi
     mix_stage mapping '正在生成系统字体映射' 91
     if type font_config_enable_for_payload >/dev/null 2>&1; then
+        LUOSHU_FOREGROUND_QUICK_SWITCH=1
+        export LUOSHU_FOREGROUND_QUICK_SWITCH
         if font_config_enable_for_payload mix; then
             sed -i 's/^xmlOverlay=false$/xmlOverlay=true/' "$MIX_CONF" 2>/dev/null || true
         else
             echo '警告：无 Hook XML 未安全启用，已保留文件槽映射' >&2
         fi
+        LUOSHU_FOREGROUND_QUICK_SWITCH=0
+        export LUOSHU_FOREGROUND_QUICK_SWITCH
     fi
     mix_stage validate '正在校验完整字体负载' 94
     if ! type luoshu_payload_validate_current >/dev/null 2>&1 || ! luoshu_payload_validate_current mix; then

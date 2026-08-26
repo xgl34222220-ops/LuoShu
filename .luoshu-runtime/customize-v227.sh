@@ -8,9 +8,9 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | he
 MODULE_DIR="$MODPATH"
 [ -f "$MODPATH/common/util_functions.sh" ] && . "$MODPATH/common/util_functions.sh"
 [ -f "$MODPATH/common/rom_adapters.sh" ] && . "$MODPATH/common/rom_adapters.sh"
-# customize.sh runs before the normal font runtime bridge is loaded. Set the v2.2
-# schema first so a v2.1 payload is always scheduled for a device-template rebuild.
-LUOSHU_PAYLOAD_SCHEMA_CURRENT=device-template-v1-baseline-v7-mono-v6
+# customize.sh runs before the normal font runtime bridge is loaded. Keep this in
+# lockstep with device_font_payload_bridge.sh so upgrades are classified once.
+LUOSHU_PAYLOAD_SCHEMA_CURRENT=device-template-v2-baseline-v9-rolegraph-v2
 [ -f "$MODPATH/common/module_update_state.sh" ] && . "$MODPATH/common/module_update_state.sh"
 
 if type ensure_public_storage >/dev/null 2>&1; then
@@ -70,7 +70,8 @@ rm -f "$MODPATH/remove" 2>/dev/null || true
 UPDATE_PRESERVED=false
 RUNTIME_RECOVERY_RESET=false
 
-# 更新安装只迁移活动配置和旧负载；任何耗时字体生成都移到完整开机后的后台服务。
+# 更新安装只迁移活动配置和旧负载。后台服务不得改写字体；架构升级由
+# 用户下一次明确应用在同一个前台事务中一次提交。
 if type luoshu_runtime_recovery_required >/dev/null 2>&1 && \
    luoshu_runtime_recovery_required "$OLD_MOD" "$MODPATH"; then
     # v3.3.4+ uses the recovered v3.0 runtime.  Never carry a generated v3.1-v3.3
@@ -163,8 +164,8 @@ if [ "$UPDATE_PRESERVED" = true ]; then
     [ -n "$_preserved_font" ] || _preserved_font=default
     ui_print "✓ 已继承当前字体配置：$_preserved_font"
     if [ "${LUOSHU_UPDATE_REBUILD_REQUIRED:-false}" = true ]; then
-        ui_print "• 旧版字体负载将在首次开机后后台重建"
-        ui_print "• 本次刷写不再等待字体生成"
+        ui_print "✓ 本次重启继续使用当前字体，不会后台切回默认字体"
+        ui_print "• 重启后在洛书中应用一次当前字体，即可升级到新版引擎"
     else
         ui_print "✓ 更新后只需重启一次，无需重新应用字体"
     fi
@@ -193,7 +194,7 @@ else
     ui_print "✗ 模块内置 App 或安装器缺失，请重新下载洛书模块包"
 fi
 if [ "$UPDATE_PRESERVED" = true ] && [ "${LUOSHU_UPDATE_REBUILD_REQUIRED:-false}" = true ]; then
-    ui_print "请先完整重启；后台重建完成后会通知再次重启。"
+    ui_print "请完整重启；当前字体会保留。之后只需明确应用一次并重启一次。"
 elif [ "$UPDATE_PRESERVED" = true ]; then
     ui_print "请完整重启一次，新版字体会直接生效。"
 else

@@ -14,14 +14,16 @@ _dfpr_mark_dynamic_rebuild() {
     mkdir -p "$_dfpr_config" 2>/dev/null || return 1
     _dfpr_pending_tmp="${_dfpr_pending}.tmp.$$"
     {
-        printf 'state=pending\n'
+        printf 'state=awaiting-explicit-apply\n'
+        printf 'mode=preserve-current\n'
         printf 'font=%s\n' "$_dfpr_active"
         printf 'reason=%s\n' "$_dfpr_reason"
         printf 'oldSchema=%s\n' "$(sed -n 's/^schema=//p' "$_dfpr_config/font-payload-schema.conf" 2>/dev/null | head -n1)"
-        printf 'newSchema=%s\n' "${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-device-template-v1-baseline-v7-mono-v6}"
+        printf 'newSchema=%s\n' "${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-device-template-v2-baseline-v9-rolegraph-v2}"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$_dfpr_pending_tmp" 2>/dev/null || return 1
     mv -f "$_dfpr_pending_tmp" "$_dfpr_pending" 2>/dev/null || return 1
+    rm -f "$_dfpr_config/font-payload-reapply-notified.conf" 2>/dev/null || true
     chmod 0600 "$_dfpr_pending" 2>/dev/null || true
     return 0
 }
@@ -158,7 +160,7 @@ device_font_dynamic_mount_apply() {
     [ "$(_dfpr_hash "$_dfpr_source")" = "$_dfpr_source_hash" ] || return 1
     if [ "$(_dfpr_hash "$_dfpr_target")" != "$_dfpr_target_hash" ]; then
         _dfpr_mark_dynamic_rebuild dynamic-config-changed >/dev/null 2>&1 || true
-        _dfpr_log WARN '动态字体配置已被系统更新，已登记后台重建并保留 ROM 原配置'
+        _dfpr_log WARN '动态字体配置已被系统更新；当前负载保持不变，等待下一次明确应用'
         return 2
     fi
     _dfpr_dynamic_mount_is_readonly "$_dfpr_target" && return 0

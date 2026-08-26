@@ -40,15 +40,23 @@ SAFE_PREFIXES = (
 )
 MONO_EXACT_FAMILIES = {
     "monospace", "sans-serif-monospace", "ui-monospace", "roboto-mono",
-    "noto-sans-mono", "droid-sans-mono", "courier", "courier-new",
+    "serif-monospace", "noto-serif-mono", "noto-mono", "noto-sans-mono",
+    "droid-sans-mono", "courier", "courier-new", "monaco",
 }
-MONO_PREFIXES = ("monospace-", "roboto-mono-", "noto-sans-mono-", "droid-sans-mono-")
+MONO_PREFIXES = (
+    "monospace-", "sans-serif-monospace-", "serif-monospace-", "ui-monospace-",
+    "roboto-mono-", "noto-mono-", "noto-sans-mono-", "noto-serif-mono-",
+    "droid-sans-mono-", "courier-", "monaco-",
+)
 PROTECTED_COMMON_TOKENS = (
     "emoji", "symbol", "icon", "material", "dingbat", "clock", "mitype",
     "math", "music", "braille", "barcode", "qrcode", "fallback", "legacy",
 )
 PROTECTED_UI_FILE_TOKENS = PROTECTED_COMMON_TOKENS + ("mono", "serif")
-PROTECTED_MONO_FILE_TOKENS = PROTECTED_COMMON_TOKENS + ("serif",)
+# A named monospace family is an explicit Android text role. Its stock file may legitimately be
+# called NotoSerifMono/CutiveMono, so filename words such as ``serif`` and ``mono`` cannot be used
+# to reject it after the family graph has already classified the role.
+PROTECTED_MONO_FILE_TOKENS = PROTECTED_COMMON_TOKENS
 # `sans` as a whole word anywhere in the family name: sans-serif, misans, hihonor-sans,
 # oneui-sans-condensed, vivo-sans-vf ... but not "sansa" or an unrelated substring.
 SANS_FAMILY_PATTERN = re.compile(r"(?:^|-)(?:[a-z0-9]*sans)(?:$|-)")
@@ -109,6 +117,25 @@ def is_locale_specific_family(family: ET.Element) -> bool:
     return any(family.attrib.get(key) for key in ("lang", "variant", "fallbackFor", "fallbackfor"))
 
 
+def effective_family_name(
+    family: ET.Element,
+    parents: dict[ET.Element, ET.Element],
+) -> str:
+    """Return the Android named-family role for ``family``.
+
+    Android 14+ product customisations may use ``<family-list name=\"…\">`` with anonymous
+    ``<family>`` children. Looking only at ``family.attrib['name']`` leaves those OEM overrides on
+    the ROM font even though Android resolves them as a named family. A child's own name still wins.
+    """
+    own = family.attrib.get("name", "")
+    if own:
+        return own
+    parent = parents.get(family)
+    if parent is not None and local_name(parent.tag) == "family-list":
+        return parent.attrib.get("name", "")
+    return ""
+
+
 def is_protected_file(value: str, mono: bool = False) -> bool:
     filename = os.path.basename(value.strip()).lower()
     tokens = PROTECTED_MONO_FILE_TOKENS if mono else PROTECTED_UI_FILE_TOKENS
@@ -131,6 +158,7 @@ def parse_xml(path: Path) -> ET.ElementTree:
 
 def rewrite_tree(tree: ET.ElementTree, prefix: str, mono_prefix: str = "LuoShuMono") -> dict[str, object]:
     root = tree.getroot()
+    parents = {child: parent for parent in root.iter() for child in list(parent)}
     changed_families: list[str] = []
     changed_mono_families: list[str] = []
     changed_fonts = 0
@@ -138,8 +166,11 @@ def rewrite_tree(tree: ET.ElementTree, prefix: str, mono_prefix: str = "LuoShuMo
     for family in root.iter():
         if local_name(family.tag) != "family":
             continue
-        family_name = family.attrib.get("name", "")
+        family_name = effective_family_name(family, parents)
         if is_locale_specific_family(family):
+            continue
+        parent = parents.get(family)
+        if parent is not None and local_name(parent.tag) == "family-list" and is_locale_specific_family(parent):
             continue
         mono = is_safe_mono_family(family_name)
         if not mono and not is_safe_family(family_name):
