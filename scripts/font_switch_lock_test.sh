@@ -128,10 +128,11 @@ rm -rf "$IDENTITY_LOCK"
 
 # Protect the tiny mkdir -> metadata rename window. A reaper that encounters an
 # empty lock directory waits briefly, then recognizes the owner once metadata
-# appears instead of deleting a lock that is still being initialized.
+# appears instead of deleting a lock that is still being initialized. Coordinate
+# on the observation marker so this assertion cannot depend on CI scheduling.
 mkdir "$IDENTITY_LOCK"
 (
-    sleep 0.05
+    while [ ! -e "$IDENTITY_LOCK/.init-observed" ]; do sleep 0.01; done
     printf '%s\nstarttime=%s\nboot_id=%s\n' "$LIVE_PID" "$LIVE_START" "$LIVE_BOOT" > "$IDENTITY_LOCK/pid"
 ) &
 identity_writer=$!
