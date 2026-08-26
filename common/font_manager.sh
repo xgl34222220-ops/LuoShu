@@ -34,6 +34,7 @@ FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 [ -f "$MODULE_DIR/common/font_config_runtime.sh" ] && . "$MODULE_DIR/common/font_config_runtime.sh"
 [ -f "$MODULE_DIR/common/font_config_weights.sh" ] && . "$MODULE_DIR/common/font_config_weights.sh"
 [ -f "$MODULE_DIR/common/mount_compat.sh" ] && . "$MODULE_DIR/common/mount_compat.sh"
+[ -f "$MODULE_DIR/common/font_boot_state.sh" ] && . "$MODULE_DIR/common/font_boot_state.sh"
 
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
 type check_coloros >/dev/null 2>&1 && check_coloros
@@ -335,7 +336,11 @@ printf '%s\n' "$_font_id" > "$ACTIVE_FONT_CONF" || {
     echo '错误：无法保存当前字体状态' >&2
     return 7
 }
-printf 'font=%s\ntime=%s\n' "$_font_id" "$(date +%s)" > "$TEXT_REBOOT_REQUIRED" || {
+if type luoshu_text_reboot_mark >/dev/null 2>&1; then
+    luoshu_text_reboot_mark "$_font_id"
+else
+    printf 'font=%s\ntime=%s\n' "$_font_id" "$(date +%s)" > "$TEXT_REBOOT_REQUIRED"
+fi || {
     echo '错误：无法保存本次重启事务状态' >&2
     return 7
 }

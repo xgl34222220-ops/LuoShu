@@ -29,6 +29,7 @@ common/device_font_template.py
 common/device_font_template_base.py
 common/device_font_template.sh
 common/font_archive_export.sh
+common/font_boot_state.sh
 common/font_axis_info.py
 common/font_check.sh
 common/font_config_overlay.py
@@ -110,5 +111,6 @@ post-mount.sh
 service.sh
 uninstall.sh
 action.sh
+boot-completed.sh
 magic
 兼容与目录说明.txt
