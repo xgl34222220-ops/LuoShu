@@ -23,6 +23,7 @@ SWITCH_TASK_FILE="$MODDIR/config/switch_task.conf"
 TEXT_REBOOT_REQUIRED="$MODDIR/config/text_reboot_required.conf"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
+[ -f "$MODDIR/common/font_boot_state.sh" ] && . "$MODDIR/common/font_boot_state.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -89,6 +90,10 @@ select_task_file() {
 }
 
 status_json() {
+    # App refresh is also a safe late-boot convergence point. The helper will
+    # never consume a marker created during this same boot.
+    type luoshu_text_reboot_reconcile >/dev/null 2>&1 && \
+        luoshu_text_reboot_reconcile >/dev/null 2>&1 || true
     _installed=false
     _version='未安装'
     _version_code=0
@@ -157,7 +162,7 @@ status_json() {
         fi
     elif [ "$_verification_state" = verified ]; then
         case "$_verification_mode" in
-            aligned|mount-verified)
+            aligned|mount-verified|mount-confirmed)
                 _effective_active="$_active"
                 _font_effect_state=verified
                 ;;

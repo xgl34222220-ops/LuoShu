@@ -49,6 +49,19 @@ clean_spec() {
     printf '%s' "$1" | tr -d '\r\n'
 }
 
+# The inner engine commits active/reboot/manifest/boot as one payload
+# transaction. Those files are the authoritative completion signal even if a
+# controller task file was replaced or its final write arrived late.
+mix_payload_committed() {
+    [ "$(head -n1 "$ACTIVE_CONF" 2>/dev/null | tr -d '\r\n')" = mix ] || return 1
+    [ "$(read_value "$TEXT_REBOOT_REQUIRED" font)" = mix ] || return 1
+    _committed_state=$(read_value "$CONFIG_DIR/font-payload-boot.conf" state)
+    _committed_font=$(read_value "$CONFIG_DIR/font-payload-boot.conf" font)
+    case "$_committed_state" in prepared|booting|confirmed) ;; *) return 1 ;; esac
+    [ "$_committed_font" = mix ] || return 1
+    [ -s "$CONFIG_DIR/font-payload-manifest.conf" ] || return 1
+}
+
 axis_value() {
     _spec="$1"
     _tag="$2"
@@ -282,6 +295,11 @@ worker() {
     update_task "$_wanted" running '完整复合字体正在后台生成' 36 "$_child" ''
     _loops=0
     while [ "$_loops" -lt 360 ]; do
+        if mix_payload_committed; then
+            update_task "$_wanted" success '完整复合字体负载已提交，完整重启后生效' 100 "$_child" "$(date +%s)"
+            rewrite_public_config
+            rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 0
+        fi
         _base_task=$(read_value "$BASE_TASK_FILE" task)
         _base_state=$(read_value "$BASE_TASK_FILE" state)
         if [ "$_base_task" = "$_child" ]; then
@@ -323,6 +341,11 @@ worker() {
         _loops=$((_loops + 1))
     done
 
+    if mix_payload_committed; then
+        update_task "$_wanted" success '完整复合字体负载已提交，完整重启后生效' 100 "$_child" "$(date +%s)"
+        rewrite_public_config
+        rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 0
+    fi
     update_task "$_wanted" failed '完整复合字体生成超时' 100 "$_child" "$(date +%s)"
     rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"
     exit 1
