@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
-      - name: Trace stability tail regression
+      - name: Verify repaired stability tail
         shell: bash
         run: |
           set -o pipefail
