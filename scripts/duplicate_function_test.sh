@@ -69,6 +69,7 @@ luoshu_font_lock_release
 luoshu_font_validate_global_cached
 luoshu_hybrid_backend
 luoshu_magic_mount_ensure_partitions
+luoshu_migrate_active_install
 luoshu_mount_backend
 luoshu_mount_preflight
 luoshu_mount_verify_active
@@ -102,6 +103,11 @@ update_task
 worker
 write_task
 ALLOW
+
+# v4.0.0 deliberately sources common/module_update_hotfix_v4.sh after
+# common/module_update_state.sh. Its luoshu_migrate_active_install override preserves the selected
+# font while isolating/rebuilding payloads whose schema is incompatible during an in-place update.
+# Keep that override registered here so a different accidental third definition still fails below.
 
 : > "$TMP/defs"
 for f in "$ROOT"/common/*.sh "$ROOT"/*.sh; do
