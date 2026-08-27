@@ -549,14 +549,14 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun rebootDevice() {
-        if (operationBusy || mixState.busy) return
-        operationBusy = true
-        operationMessage = "正在请求重启…"
+        // Complete reboot is deliberately independent from font-task busy state. A stale worker
+        // flag used to make the button look dead for tens of seconds even though reboot itself is
+        // immediate. The shell bridge backgrounds the reboot command, so use a short request timeout.
+        operationMessage = "正在请求完整重启…"
         viewModelScope.launch {
-            val result = RootShell.exec("sh ${RootShell.quote(bridge)} reboot", timeoutMs = 20_000L)
+            val result = RootShell.exec("sh ${RootShell.quote(bridge)} reboot", timeoutMs = 4_000L)
             if (result.code != 0) {
                 operationMessage = result.stderr.ifBlank { "重启请求失败" }
-                operationBusy = false
             }
         }
     }

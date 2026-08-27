@@ -251,14 +251,20 @@ MODULE_DIR="$MODDIR"
                         log_service "ERROR" "字体挂载未进入系统主命名空间，已保留负载并安排下次开机重试（第 $_mount_fail_count/3 次）"
                         notify_service "洛书" "本次开机字体挂载未生效，已保留字体并将在下次完整重启自动重试。" luoshu-font-mount
                     else
-                        rm -f "$_mount_fail_file" 2>/dev/null || true
-                        if type luoshu_payload_quarantine >/dev/null 2>&1; then
-                            luoshu_payload_quarantine
-                        else
-                            printf 'default\n' > "$MODDIR/config/active_font.conf" 2>/dev/null || true
-                        fi
-                        log_service "ERROR" "字体挂载连续三次不可见，已安全恢复系统默认字体"
-                        notify_service "洛书" "字体挂载连续失败，已安全恢复系统默认字体；请打开洛书重新应用或导出诊断。" luoshu-font-mount
+                        # Three inconclusive probes are not proof that the selected font is bad.
+                        # Keep both active_font.conf and the committed payload. A later verified
+                        # mount may converge without forcing the user back to the ROM default.
+                        printf '3\n' > "$_mount_fail_file" 2>/dev/null || true
+                        {
+                            printf 'state=prepared\n'
+                            printf 'font=%s\n' "$_active_verify"
+                            printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+                            printf 'reason=mount-verification-inconclusive\n'
+                        } > "$MODDIR/config/font-payload-boot.conf.tmp.$$" 2>/dev/null && \
+                            mv -f "$MODDIR/config/font-payload-boot.conf.tmp.$$" "$MODDIR/config/font-payload-boot.conf" 2>/dev/null || true
+                        type luoshu_payload_quarantine >/dev/null 2>&1 && luoshu_payload_quarantine >/dev/null 2>&1 || true
+                        log_service "ERROR" "字体挂载连续三次未取得完整证据；已保留当前字体选择和负载，不自动恢复默认字体"
+                        notify_service "洛书" "字体挂载验证仍未收敛，已保留当前字体与负载；请导出诊断，不会自动切回系统默认字体。" luoshu-font-mount
                     fi
                 fi
                 ;;

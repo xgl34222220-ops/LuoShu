@@ -636,34 +636,22 @@ luoshu_payload_transaction_commit() {
 }
 
 luoshu_payload_quarantine() {
-    _lfrp_root=$(_lfrp_payload_root)
     _lfrp_config=$(_lfrp_config_root)
     _lfrp_fail=$(cat "$_lfrp_config/font-boot-failures" 2>/dev/null)
     case "$_lfrp_fail" in ''|*[!0-9]*) _lfrp_fail=0 ;; esac
     _lfrp_fail=$((_lfrp_fail + 1))
     printf '%s\n' "$_lfrp_fail" > "$_lfrp_config/font-boot-failures" 2>/dev/null || true
-    for _lfrp_part in $(_lfrp_partitions); do
-        rm -rf "$_lfrp_root/$_lfrp_part/fonts" 2>/dev/null || true
-        _lfrp_etc="$_lfrp_root/$_lfrp_part/etc"
-        [ -d "$_lfrp_etc" ] || continue
-        for _lfrp_xml in "$_lfrp_etc"/*.xml; do
-            [ -f "$_lfrp_xml" ] || continue
-            grep -Eq 'LuoShu(Mono)?-' "$_lfrp_xml" 2>/dev/null && rm -f "$_lfrp_xml" 2>/dev/null || true
-        done
-    done
-    mkdir -p "$_lfrp_root/system/fonts" 2>/dev/null || true
-    printf 'default\n' > "$_lfrp_config/active_font.conf" 2>/dev/null || true
-    rm -f "$_lfrp_config/font-payload-boot.conf" "$_lfrp_config/font-payload-manifest.conf" \
-        "$_lfrp_config/font-payload-schema.conf" "$_lfrp_config/font-payload-rebuild-pending.conf" \
-        "$_lfrp_config/font-payload-reapply-notified.conf" \
-        "$_lfrp_config/font-target-aliases.conf" "$_lfrp_config/font-target-coverage.conf" \
-        "$_lfrp_config/font-runtime-targets.conf" "$_lfrp_config/font-config-overlay.conf" 2>/dev/null || true
+    _lfrp_active=$(head -n1 "$_lfrp_config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_lfrp_active" ] || _lfrp_active=default
     {
-        printf 'state=quarantined\n'
+        printf 'state=held\n'
+        printf 'activeFont=%s\n' "$_lfrp_active"
         printf 'failures=%s\n' "$_lfrp_fail"
+        printf 'reason=boot-verification-inconclusive\n'
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$_lfrp_config/font-payload-quarantine.conf" 2>/dev/null || true
-    _luoshu_safety_log ERROR "字体负载无法通过真实启动校验，已撤销覆盖（failure=$_lfrp_fail）"
+    _luoshu_safety_log WARN "字体启动证据不足，已保留当前字体选择与负载，等待下一次挂载验证（failure=$_lfrp_fail active=$_lfrp_active）"
+    return 2
 }
 
 # Self-mount reads the private tree directly. It no longer depends on a bind view
