@@ -29,5 +29,5 @@ jobs:
           if [ ! -x common/python/bin/luoshu-python ]; then
             sh ./scripts/prepare_composite_runtime.sh
           fi
-      - name: Run complete source checks with legacy identity lock
+      - name: Run complete source checks with legacy identity and recovery paths
         run: sh ./scripts/check.sh
