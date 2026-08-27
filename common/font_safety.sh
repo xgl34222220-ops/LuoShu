@@ -302,14 +302,22 @@ luoshu_payload_validate_current() {
     _lpv_manifest_count=$(awk 'NF { n++ } END { print n+0 }' "$_lpv_manifest" 2>/dev/null)
     case "$_lpv_manifest_count" in ''|*[!0-9]*) return 1 ;; esac
     [ "$_lpv_manifest_count" -eq "$_lpv_mapped" ] || return 1
+    _lpv_seen_identity="$_lpv_config/.font-validate-identities.$$"
+    : > "$_lpv_seen_identity" 2>/dev/null || return 1
     while IFS='|' read -r _lpv_rel _lpv_key _lpv_weight _lpv_family; do
         [ -n "$_lpv_rel" ] || continue
-        case "$_lpv_rel" in */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;; *) return 1 ;; esac
-        [ -f "$_lpv_module/$_lpv_rel" ] || return 1
-        if type _luoshu_fast_font_ok >/dev/null 2>&1; then
-            _luoshu_fast_font_ok "$_lpv_module/$_lpv_rel" || return 1
+        case "$_lpv_rel" in */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;; *) rm -f "$_lpv_seen_identity"; return 1 ;; esac
+        _lpv_path="$_lpv_module/$_lpv_rel"
+        [ -f "$_lpv_path" ] || { rm -f "$_lpv_seen_identity"; return 1; }
+        _lpv_identity=$(_luoshu_file_identity "$_lpv_path")
+        if ! grep -Fqx "$_lpv_identity" "$_lpv_seen_identity" 2>/dev/null; then
+            if type _luoshu_fast_font_ok >/dev/null 2>&1; then
+                _luoshu_fast_font_ok "$_lpv_path" || { rm -f "$_lpv_seen_identity"; return 1; }
+            fi
+            printf '%s\n' "$_lpv_identity" >> "$_lpv_seen_identity"
         fi
     done < "$_lpv_manifest"
+    rm -f "$_lpv_seen_identity" 2>/dev/null || true
 fi
     fi
 
