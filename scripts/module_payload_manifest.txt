@@ -59,6 +59,7 @@ common/font_mix.sh
 common/font_mix_controller.sh
 common/font_name_normalize.py
 common/font_provider_cache.sh
+common/font_validate_fast_v4.sh
 common/google_font_provider_bridge.sh
 common/google_font_provider_patch.py
 common/google_font_provider_service.sh
@@ -76,6 +77,7 @@ common/luoshu_composite.sh
 common/mix_task_handoff.sh
 common/mix_weight_mode.sh
 common/module_status.sh
+common/module_update_hotfix_v4.sh
 common/module_update_state.sh
 common/private_payload.sh
 common/private_mount_policy.sh

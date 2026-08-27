@@ -1,0 +1,35 @@
+name: Runtime update safety
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'common/**'
+      - 'customize.sh'
+      - 'scripts/**'
+      - '.github/workflows/runtime-update-safety.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-safety:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: |
+          sh -n common/font_validate_fast_v4.sh
+          sh -n common/module_update_hotfix_v4.sh
+          sh -n customize.sh
+          sh -n scripts/v4_update_preserve_test.sh
+          sh -n scripts/v4_fast_validate_test.sh
+      - name: Preserve selected font across update
+        run: sh scripts/v4_update_preserve_test.sh
+      - name: Bounded 94 percent validation
+        run: sh scripts/v4_fast_validate_test.sh
+      - name: Prepare bundled composite runtime
+        run: sh scripts/prepare_composite_runtime.sh
+      - name: Complete repository source checks
+        run: sh scripts/check.sh
