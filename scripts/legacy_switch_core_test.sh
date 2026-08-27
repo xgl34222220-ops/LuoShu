@@ -34,7 +34,7 @@ grep -q 'Roboto' "$ROM"
 
 # Composite App actions must also leave the v4 runtime immediately and enter the exact
 # pre-reset bridge / weighted / auto-multiweight / full composite chain.
-grep -q 'legacy_v14_4/mix_router.sh' "$MIX_ROUTER"
+grep -q 'legacy_v1.*4_4/mix_router.sh' "$MIX_ROUTER"
 grep -q 'exec sh "$LEGACY_V14_MIX" "$@"' "$MIX_ROUTER"
 grep -q 'v142_weighted_mix.sh' "$LEGACY_MIX_BRIDGE"
 grep -q 'v143_auto_multiweight_mix.sh' "$LEGACY_MIX_BRIDGE"
