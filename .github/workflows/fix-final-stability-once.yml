@@ -37,6 +37,11 @@ jobs:
                 "grep -q 'native_font_index.key' \"$ROOT/common/font_manager_v4.sh\"\n"
           if old not in s:
               raise SystemExit('font-manager stability contract target not found')
+          s = s.replace(old, new, 1)
+          old = "grep -q 'native-v3|' \"$ROOT/common/font_manager.sh\"\n"
+          new = "grep -q 'native-v3|' \"$ROOT/common/font_manager_v4.sh\"\n"
+          if old not in s:
+              raise SystemExit('native cache schema stability target not found')
           p.write_text(s.replace(old, new, 1))
           PY
       - name: Trace stability test
