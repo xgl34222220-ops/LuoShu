@@ -1,0 +1,62 @@
+name: Replace v4.0.0 once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/replace-v4.0.0-once.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: luoshu-replace-v4.0.0-once
+  cancel-in-progress: false
+
+jobs:
+  replace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v4.0.0
+      EXPECTED_OLD_TAG_SHA: 94548516c1766a390b2511790feed1162e26d740
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Replace old v4.0.0 release and tag exactly once
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version=//p' module.prop | head -n1)"
+          version_code="$(sed -n 's/^versionCode=//p' module.prop | head -n1)"
+          [[ "$version" == 'v4.0.0' && "$version_code" == '40000' ]] || {
+            echo "Refusing replacement: main is $version/$version_code" >&2
+            exit 2
+          }
+
+          git fetch --force --tags origin
+          current="$(git rev-list -n1 "$TAG" 2>/dev/null || true)"
+          if [[ "$current" == "$GITHUB_SHA" ]]; then
+            echo "$TAG already points to this main commit; nothing to replace."
+            exit 0
+          fi
+          [[ "$current" == "$EXPECTED_OLD_TAG_SHA" ]] || {
+            echo "Refusing replacement: $TAG points to $current, expected $EXPECTED_OLD_TAG_SHA" >&2
+            exit 2
+          }
+
+          gh release view "$TAG" >/dev/null
+          gh release delete "$TAG" --cleanup-tag --yes
+          git fetch --prune --tags origin
+          [[ -z "$(git rev-list -n1 "$TAG" 2>/dev/null || true)" ]] || {
+            echo "Old tag still exists after release deletion" >&2
+            exit 3
+          }
+
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/$TAG"
+          echo "Re-tagged $TAG at $GITHUB_SHA. The normal signed release workflow will publish it."
