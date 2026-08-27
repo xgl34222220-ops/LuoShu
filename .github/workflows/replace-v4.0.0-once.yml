@@ -1,0 +1,84 @@
+name: Replace v4.0.0 once
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/replace-v4.0.0-once.yml
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: luoshu-replace-v4.0.0-once
+  cancel-in-progress: false
+
+jobs:
+  replace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v4.0.0
+      EXPECTED_OLD_TAG_SHA: 227bca1bb34a18a738c5c9a0f8a338f3880aa2a0
+      REQUIRED_RUNTIME_FIX_SHA: dfdc8e13400d0a2bbd850e4643e6913cd7f8c085
+      REQUIRED_CHECK_FIX_SHA: c07a1d9e7b12a7ea7d401df77f0bd95daf0fa9f8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Replace tag with fully checked v4.0.0 source and dispatch signed publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version=//p' module.prop | head -n1)"
+          version_code="$(sed -n 's/^versionCode=//p' module.prop | head -n1)"
+          [[ "$version" == 'v4.0.0' && "$version_code" == '40000' ]] || {
+            echo "Refusing replacement: main is $version/$version_code" >&2
+            exit 2
+          }
+
+          git merge-base --is-ancestor "$REQUIRED_RUNTIME_FIX_SHA" "$GITHUB_SHA" || {
+            echo "Refusing replacement: #201 runtime fix is missing" >&2
+            exit 2
+          }
+          git merge-base --is-ancestor "$REQUIRED_CHECK_FIX_SHA" "$GITHUB_SHA" || {
+            echo "Refusing replacement: duplicate-function guard fix is missing" >&2
+            exit 2
+          }
+
+          git fetch --force --tags origin
+          current="$(git rev-list -n1 "$TAG" 2>/dev/null || true)"
+          if [[ "$current" == "$GITHUB_SHA" ]]; then
+            echo "$TAG already points to this fully fixed commit."
+          else
+            if [[ -n "$current" ]]; then
+              [[ "$current" == "$EXPECTED_OLD_TAG_SHA" ]] || {
+                echo "Refusing replacement: $TAG points to unexpected $current" >&2
+                exit 2
+              }
+              if gh release view "$TAG" >/dev/null 2>&1; then
+                gh release delete "$TAG" --cleanup-tag --yes
+              else
+                git push origin ":refs/tags/$TAG"
+              fi
+            fi
+
+            # A deleted remote tag remains in this runner's local refs until explicitly removed.
+            git tag -d "$TAG" >/dev/null 2>&1 || true
+            git fetch --prune --prune-tags origin
+            remote_tag="$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')"
+            [[ -z "$remote_tag" ]] || {
+              echo "Old remote tag still exists after cleanup: $remote_tag" >&2
+              exit 3
+            }
+
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG"
+          fi
+
+          gh workflow run release.yml --ref "$TAG" -f tag="$TAG" -f prerelease=false
+          echo "Dispatched signed release workflow from $TAG at $GITHUB_SHA."
