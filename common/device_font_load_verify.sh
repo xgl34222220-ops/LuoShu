@@ -187,7 +187,7 @@ _dfload_mount_transaction_active() {
     _dfload_font_count=$(_dfload_manifest_font_count)
     [ "$_dfload_font_count" -gt 0 ] 2>/dev/null || return 1
     case "$_dfload_mount_state:$_dfload_boot_state" in
-        mounted:booting|mounted:confirmed|confirmed:booting|confirmed:confirmed) return 0 ;;
+        mounted:booting|mounted:confirmed|confirmed:booting|confirmed:confirmed|degraded:booting|degraded:confirmed) return 0 ;;
         *) return 1 ;;
     esac
 }

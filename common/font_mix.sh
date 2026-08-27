@@ -301,6 +301,18 @@ sync_secondary_hyperos_dirs() {
     if [ -d "${LUOSHU_MI_EXT_FONTS_ROOT:-/mi_ext/fonts}" ]; then
         sync_secondary_partition mi_ext "${LUOSHU_MI_EXT_FONTS_ROOT:-/mi_ext/fonts}" || return 1
     fi
+    for _pair in \
+        "vendor|${LUOSHU_VENDOR_FONTS_ROOT:-/vendor/fonts}" \
+        "odm|${LUOSHU_ODM_FONTS_ROOT:-/odm/fonts}" \
+        "oem|${LUOSHU_OEM_FONTS_ROOT:-/oem/fonts}" \
+        "my_product|${LUOSHU_MY_PRODUCT_FONTS_ROOT:-/my_product/fonts}" \
+        "hw_product|${LUOSHU_HW_PRODUCT_FONTS_ROOT:-/hw_product/fonts}" \
+        "cust|${LUOSHU_CUST_FONTS_ROOT:-/cust/fonts}"; do
+        _part=${_pair%%|*}
+        _root=${_pair#*|}
+        [ -d "$_root" ] || continue
+        sync_secondary_partition "$_part" "$_root" || return 1
+    done
     return 0
 }
 

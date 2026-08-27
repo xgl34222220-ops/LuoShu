@@ -149,6 +149,18 @@ _font_anchor() {
     normalizer="$module/common/font_metrics_normalize.py"
     rm -f "$anchor" 2>/dev/null || true
 
+    # HyperOS has several independent physical font slots with different line-box contracts.
+    # Applying one main-slot hhea/OS2 contract to all of them moves text vertically in compact
+    # labels and EditText controls. Preserve the selected font/composite metrics on HyperOS;
+    # the ROM-specific mapper still selects only real UI slots and keeps protected scripts stock.
+    if [ "${IS_HYPEROS:-false}" = true ] && type _hyperos_compact_normalize >/dev/null 2>&1; then
+        if _hyperos_compact_normalize "$src" "$anchor" && [ -s "$anchor" ]; then
+            printf '%s\n' "$anchor"
+            return 0
+        fi
+        rm -f "$anchor" 2>/dev/null || true
+    fi
+
     # 命中缓存则直接硬链接，跳过 Python 归一化
     if _fa_cached=$(_font_anchor_cache_lookup "$src" "$key"); then
         if ln "$_fa_cached" "$anchor" 2>/dev/null || cp -f "$_fa_cached" "$anchor" 2>/dev/null; then

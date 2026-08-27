@@ -835,7 +835,7 @@ handle_action() {
             ;;
         reboot_device)
             printf '{"status":"ok","data":{"message":"正在重启手机"}}\n'
-            (sleep 1; svc power reboot 2>/dev/null || reboot 2>/dev/null) &
+            (svc power reboot 2>/dev/null || reboot 2>/dev/null) </dev/null >/dev/null 2>&1 &
             ;;
         *) printf '{"status":"error","message":"未知字体管理操作"}\n' ;;
     esac
