@@ -1,0 +1,69 @@
+name: Replace bootlooping v4.0.0
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/replace-v4.0.0-bootloop-rollback.yml
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: luoshu-replace-v4.0.0-bootloop-rollback
+  cancel-in-progress: false
+
+jobs:
+  replace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v4.0.0
+      EXPECTED_BAD_TAG_SHA: 7ede53c5ee354b579659125eb3024ff855f75b23
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Remove bootlooping release, retag rollback, dispatch signed publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^version=//p' module.prop | head -n1)"
+          version_code="$(sed -n 's/^versionCode=//p' module.prop | head -n1)"
+          [[ "$version" == 'v4.0.0' && "$version_code" == '40000' ]] || {
+            echo "Refusing rollback replacement: main is $version/$version_code" >&2
+            exit 2
+          }
+
+          git fetch --force --tags origin
+          current="$(git rev-list -n1 "$TAG" 2>/dev/null || true)"
+
+          if [[ "$current" == "$EXPECTED_BAD_TAG_SHA" ]]; then
+            gh release view "$TAG" >/dev/null
+            gh release delete "$TAG" --cleanup-tag --yes
+            git fetch --prune --tags origin
+            [[ -z "$(git rev-list -n1 "$TAG" 2>/dev/null || true)" ]] || {
+              echo "Bad tag still exists after release deletion" >&2
+              exit 3
+            }
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG"
+            current="$GITHUB_SHA"
+          fi
+
+          [[ "$current" == "$GITHUB_SHA" ]] || {
+            echo "Refusing publish: $TAG points to unexpected $current, expected bad $EXPECTED_BAD_TAG_SHA or rollback $GITHUB_SHA" >&2
+            exit 2
+          }
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG rollback release already exists."
+            exit 0
+          fi
+
+          gh workflow run release.yml --ref "$TAG" -f tag="$TAG" -f prerelease=false
+          echo "Dispatched signed rollback release from $TAG at $current."
