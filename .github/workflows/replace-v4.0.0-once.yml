@@ -55,19 +55,24 @@ jobs:
           if [[ "$current" == "$GITHUB_SHA" ]]; then
             echo "$TAG already points to this fully fixed commit."
           else
-            [[ "$current" == "$EXPECTED_OLD_TAG_SHA" ]] || {
-              echo "Refusing replacement: $TAG points to unexpected $current" >&2
-              exit 2
-            }
-
-            if gh release view "$TAG" >/dev/null 2>&1; then
-              gh release delete "$TAG" --cleanup-tag --yes
-            else
-              git push origin ":refs/tags/$TAG"
+            if [[ -n "$current" ]]; then
+              [[ "$current" == "$EXPECTED_OLD_TAG_SHA" ]] || {
+                echo "Refusing replacement: $TAG points to unexpected $current" >&2
+                exit 2
+              }
+              if gh release view "$TAG" >/dev/null 2>&1; then
+                gh release delete "$TAG" --cleanup-tag --yes
+              else
+                git push origin ":refs/tags/$TAG"
+              fi
             fi
-            git fetch --prune --tags origin
-            [[ -z "$(git rev-list -n1 "$TAG" 2>/dev/null || true)" ]] || {
-              echo "Old tag still exists after cleanup" >&2
+
+            # A deleted remote tag remains in this runner's local refs until explicitly removed.
+            git tag -d "$TAG" >/dev/null 2>&1 || true
+            git fetch --prune --prune-tags origin
+            remote_tag="$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')"
+            [[ -z "$remote_tag" ]] || {
+              echo "Old remote tag still exists after cleanup: $remote_tag" >&2
               exit 3
             }
 
