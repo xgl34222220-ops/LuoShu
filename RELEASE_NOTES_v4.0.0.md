@@ -1,22 +1,30 @@
 # 洛书 v4.0.0 正式版
 
-本版集中修复 3.1–3.3 系列暴露出的字体切换、HyperOS 覆盖、字体偏移、重复重启与界面回归，并将 App 与模块统一为 v4.0.0 正式发布。
+本版集中修复 3.1–3.3 系列暴露出的字体切换、HyperOS 覆盖、字体偏移、重复重启与界面回归，并将 App 与模块统一为 v4.0.0 正式发布。本次重新发布同时修复 KernelSU/SukiSU 覆盖更新失败、错误“待验证”状态，以及 HyperOS 状态栏/锁屏之外仍有大量物理字体槽未覆盖的问题。
 
-## 字体切换
+## 字体切换与更新
 
 - 一次点击只创建一个前台事务，最终字体槽、动态 XML、自挂载清单和重启状态全部验证成功后才原子提交。
 - 首次切换不会在重启后被后台缓存或迁移任务改回默认字体；后台对齐缓存只做准备，不能自行激活、改写当前负载或请求重启。
 - 旧版对齐缓存升级为 v4 命名空间，避免复用 3.x 生成的错误字形与 XML。
 - 并发锁识别 PID、进程启动时间、Android 启动标识和有限租约，重复点击、进程退出及重启遗留均能安全处理。
 - 更新已有 v4.0.0 时不再在 Root 管理器刷写界面同步重建字体；跨架构迁移保留当前可工作负载，重启后再由洛书显式重应用，避免刷写阶段卡在“自动重建”。
+- 修复 KernelSU / SukiSU 刷写命名空间无法 bind mount 时，旧 `.luoshu-payload` 无法被迁移器读取而报“无法安全迁移当前字体 mix”的问题；bind 不可用时使用临时私有负载投影视图，迁移结束立即恢复。
+- 安装器的委托脚本退出与私有视图清理已隔离，避免成功迁移后因为 shell 返回语义导致 Root 管理器误判安装失败。
 
-## HyperOS 覆盖与度量
+## HyperOS 全局覆盖
 
-- 根据每台设备的原厂配置建立真实字体槽位图，覆盖中文、英文、数字、等宽、时钟、fallback、MiSans、Roboto、Google Sans、Mitype 及 OEM 命名字体族。
-- 覆盖范围包含 `system`、`product`、`system_ext`、`vendor`、`odm`、`mi_ext` 与 `hw_product` 中实际存在的字体目标。
-- 每个目标按原厂行框和字形度量单独归一；复合字形只变换一次，修复英文字母、数字未替换以及部分 HyperOS 页面字体上下偏移。
-- 同一来源、目标字重和输出合约只构建一次，其余槽位引用同一验证产物，降低切换等待时间和写入量。
-- 恢复 HyperOS 3 状态栏时间、锁屏时钟与控制中心等直连物理槽覆盖，包括 `Mitype`、`MitypeClock`、`MiClock`、`MiSansClock`、`AndroidClock`、`Clockopia`，并按设备真实存在分区写入 `system/system_ext/product/mi_ext/vendor/odm/oem/my_product/hw_product/cust`。
+- 根据每台设备的真实字体文件建立物理覆盖，不再只补状态栏/锁屏时钟。
+- 覆盖范围扩展到设备实际存在的 `system`、`system_ext`、`product`、`mi_ext`、`vendor`、`odm`、`oem`、`my_product`、`hw_product` 与 `cust` 字体目录。
+- 恢复并扩展 MiSans 核心、100–900 数字字重、Roboto、Google Sans / Google Sans Text、Noto Sans UI、Source Sans Pro、Droid Sans 等普通 UI 英文/数字物理槽。
+- 恢复 HyperOS 3 状态栏时间、锁屏时钟、控制中心等直连槽，包括 `Mitype`、`MitypeClock`、`MiClock`、`MiSansClock`、`AndroidClock`、`Clockopia`。
+- 按真机已有文件动态补齐 `MiLanPro`、`XiaomiSans` 等 Xiaomi OEM 命名字体槽；仅处理安全的 UI Sans/时钟目标，继续保留 Emoji、图标、衬线、斜体及其他脚本专用字体。
+- 单字体和中英数字复合字体都直接复用当前已经生成好的物理负载，不重新进入 device-template / XML / 94% 验证链，不在开机或刷写阶段重新构建大字体。
+
+## 状态显示
+
+- Root 管理器模块描述中的“当前字体”现在只显示实际选择结果；字体已生效时不再因为设备可信验证文件缺失或模式不同而长期显示“待验证”。
+- 只有明确等待重启时显示“等待重启”，只有自挂载或加载验证明确失败时才显示“未生效”。设备可信验收仍保留在洛书 App 内，不再污染 Root 管理器的当前字体状态。
 
 ## 界面
 
@@ -32,5 +40,5 @@
 
 ## 发布说明
 
-- 已通过源码检查、Android 单元测试、Lint、APK 编译、模块打包、字体引擎回归、HyperOS 状态栏/锁屏物理槽回归和候选产物校验。
-- 开发者已明确授权在真机矩阵尚待补录的情况下发布正式版；本说明不伪造 HyperOS、ColorOS、Magisk 或 APatch 的真机通过证据。
+- 已通过更新保留、94% 有界验证、私有自挂载、KernelSU 无 bind 权限更新回归、HyperOS 普通 UI + 状态栏/锁屏跨分区覆盖、字体引擎 Smoke、设备字体清单与源码门禁；正式发布工作流会再次执行完整源码检查、Android Lint/单元测试、签名 APK、模块打包和候选产物校验。
+- 开发者已明确授权在真机矩阵尚待补录的情况下发布正式版；本说明不伪造未执行的 HyperOS、ColorOS、Magisk 或 APatch 真机 PASS。
