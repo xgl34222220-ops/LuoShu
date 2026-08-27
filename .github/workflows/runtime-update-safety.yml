@@ -30,4 +30,9 @@ jobs:
       - name: Bounded 94 percent validation
         run: sh scripts/v4_fast_validate_test.sh
       - name: Complete repository source checks
-        run: sh scripts/check.sh
+        run: |
+          if ! sh scripts/check.sh; then
+            echo 'source checks failed; rerunning with shell trace'
+            sh -x scripts/check.sh
+            exit 1
+          fi
