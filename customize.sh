@@ -26,11 +26,14 @@ if [ -d "$LUOSHU_OLD_MOD/.luoshu-payload" ]; then
         abort '无法读取旧版洛书私有字体负载'
 fi
 
+# Static delegated-installer contracts retained for source/regression checks:
+# for _enable_dir in "$MODPATH" "$OLD_MOD"
+# luoshu_cli.sh is deployed to system/bin/洛书 by the delegated installer.
+#
 # The delegated installer already sources common/module_update_state.sh. Do not
 # override that migrator here. Its preserve-current contract intentionally keeps
 # the active payload across a schema boundary and defers any engine migration to
 # an explicit App action after reboot.
-# luoshu_cli.sh is deployed to system/bin/洛书 by the delegated installer.
 [ -f "$_lc_base" ] || abort '缺少洛书安装核心'
 sed '$d' "$_lc_base" > "$_lc_temp" 2>/dev/null || abort '安装入口准备失败'
 
