@@ -66,7 +66,11 @@ sed -e 's/^[[:space:]]*exit 1[[:space:]]*$/        return 1/' \
 . "$_lc_temp"
 _lc_rc=$?
 rm -f "$_lc_temp" 2>/dev/null || true
-luoshu_private_unmount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1 || true
+# Some sh implementations can propagate a sourced helper's top-level return through
+# the caller when the function is invoked during installer unwinding. Keep cleanup in
+# a child shell: filesystem symlink cleanup and umounts still take effect, while an
+# unexpected helper exit can no longer terminate the Root manager's parent script.
+( luoshu_private_unmount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1 ) || true
 if [ "$_lc_rc" -ne 0 ]; then
     # APatch sources customize.sh into its installer process. Returning here keeps
     # the manager's commit phase alive; direct execution still exits with the
