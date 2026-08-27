@@ -36,8 +36,8 @@ make_font Demo-Regular.ttf regular-source
 make_font Demo-Medium.ttf medium-source
 make_font Demo-Bold.ttf bold-source
 
-# Simulate the physical ColorOS layout: Google input families live in product, while the normal
-# system family and other OEM faces can be spread across system_ext and my_product.
+# Safe ColorOS mapping deliberately covers system/system_ext/product only. my_product is present
+# in the fixture to prove LuoShu does not recreate the bootloop-prone broad OEM overlay.
 touch "$LUOSHU_COLOROS_SYSTEM_FONTS_ROOT/SysFont-Regular.ttf"
 touch "$LUOSHU_COLOROS_PRODUCT_FONTS_ROOT/GoogleSansText-Regular.ttf"
 touch "$LUOSHU_COLOROS_PRODUCT_FONTS_ROOT/GoogleSansText-Medium.ttf"
@@ -52,7 +52,7 @@ _luoshu_font_config_module() { printf '%s\n' "$MODULE_DIR"; }
 . "$ROOT/common/rom_adapters.sh"
 . "$ROOT/common/font_config_partitions.sh"
 
-CASE='ColorOS 分区槽位映射'
+CASE='ColorOS 安全分区槽位映射'
 ok type get_all_coloros_names >/dev/null
 ok type copy_as_coloros >/dev/null
 ok copy_as_coloros "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/system/fonts" quick Demo
@@ -63,7 +63,9 @@ ok cmp -s "$USER_FONTS_DIR/Demo-Medium.ttf" "$MODULE_DIR/product/fonts/GoogleSan
 ok cmp -s "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-Bold.ttf"
 ok cmp -s "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODULE_DIR/product/fonts/GoogleSansText-VF.ttf"
 ok cmp -s "$USER_FONTS_DIR/Demo-Medium.ttf" "$MODULE_DIR/system_ext/fonts/Roboto-Medium.ttf"
-ok cmp -s "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/my_product/fonts/Opposans-En-Bold.ttf"
+
+# Never fan the ColorOS payload back into boot-sensitive OEM partitions merely because a font exists there.
+no test -e "$MODULE_DIR/my_product/fonts/Opposans-En-Bold.ttf"
 
 # A product-only slot must not be misplaced into system/fonts; that was the regression that left
 # Google Play text fields on the stock GoogleSansText family.
@@ -73,4 +75,4 @@ printf '%s\n' "$COLOROS_NAMES" > "$TMP/coloros-names"
 ok grep -qx 'GoogleSansText-Regular' "$TMP/coloros-names"
 ok grep -qx 'SysFont-Regular' "$TMP/coloros-names"
 
-printf 'ColorOS Play input partition mapping tests passed.\n'
+printf 'ColorOS safe partition mapping tests passed.\n'
