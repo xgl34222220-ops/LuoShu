@@ -19,11 +19,24 @@ _lc_temp="$MODPATH/.customize-v227.$$.sh"
 [ -f "$_lc_helper" ] || _lc_helper="$_lc_source_dir/common/private_payload.sh"
 [ -f "$_lc_helper" ] && . "$_lc_helper"
 
+# Magisk/KernelSU/APatch provide ui_print/abort while flashing. Host-side safety
+# tests and a few nonstandard installers may not. Missing presentation helpers
+# must never turn a successful migration into exit 127/2 after all payload work
+# completed, so provide harmless portable fallbacks only when the manager did not.
+if ! command -v ui_print >/dev/null 2>&1; then
+    ui_print() { printf '%s\n' "$*"; }
+fi
+if ! command -v abort >/dev/null 2>&1; then
+    abort() { ui_print "! $*"; return 1; }
+fi
+
 # Existing private-payload installations are exposed only for the duration of
 # the verified update migrator, then hidden again.
 if [ -d "$LUOSHU_OLD_MOD/.luoshu-payload" ]; then
-    luoshu_private_mount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1 || \
+    if ! luoshu_private_mount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1; then
         abort '无法读取旧版洛书私有字体负载'
+        return 1 2>/dev/null || exit 1
+    fi
 fi
 
 # Static delegated-installer contracts retained for source/regression checks:
@@ -35,13 +48,29 @@ fi
 # override that migrator here. Its preserve-current contract intentionally keeps
 # the active payload across a schema boundary and defers any engine migration to
 # an explicit App action after reboot.
-[ -f "$_lc_base" ] || abort '缺少洛书安装核心'
-sed '$d' "$_lc_base" > "$_lc_temp" 2>/dev/null || abort '安装入口准备失败'
+if [ ! -f "$_lc_base" ]; then
+    abort '缺少洛书安装核心'
+    return 1 2>/dev/null || exit 1
+fi
+# Run the delegated installer by sourcing it so its migration state remains visible
+# to this wrapper, but convert its top-level exit statements into returns. This is
+# essential for APatch (which sources customize.sh) and also guarantees cleanup of
+# the temporary private-payload view on a controlled migration rejection.
+sed -e 's/^[[:space:]]*exit 1[[:space:]]*$/        return 1/' \
+    -e 's/^[[:space:]]*exit 0[[:space:]]*$/return 0/' \
+    "$_lc_base" > "$_lc_temp" 2>/dev/null || {
+    abort '安装入口准备失败'
+    return 1 2>/dev/null || exit 1
+}
 
 . "$_lc_temp"
 _lc_rc=$?
 rm -f "$_lc_temp" 2>/dev/null || true
-luoshu_private_unmount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1 || true
+# Some sh implementations can propagate a sourced helper's top-level return through
+# the caller when the function is invoked during installer unwinding. Keep cleanup in
+# a child shell: filesystem symlink cleanup and umounts still take effect, while an
+# unexpected helper exit can no longer terminate the Root manager's parent script.
+( luoshu_private_unmount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1 ) || true
 if [ "$_lc_rc" -ne 0 ]; then
     # APatch sources customize.sh into its installer process. Returning here keeps
     # the manager's commit phase alive; direct execution still exits with the
@@ -62,6 +91,7 @@ fi
 
 if ! luoshu_private_install_migrate "$MODPATH"; then
     abort '洛书私有挂载树部署失败'
+    return 1 2>/dev/null || exit 1
 fi
 ui_print '✓ 私有字体负载已部署'
 ui_print '✓ 洛书将独立完成字体挂载'

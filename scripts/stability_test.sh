@@ -13,7 +13,8 @@ cp "$ROOT/common/font_mix_controller.sh" "$MODULE/common/font_mix_controller.sh"
 cp "$ROOT/common/font_mix.sh" "$MODULE/common/font_mix.sh"
 cp "$ROOT/module.prop" "$MODULE/module.prop"
 
-# 状态查询不得触发真正的字体切换。
+# 状态查询不得触发真正的字体切换；Root 管理器的“当前字体”也不得在字体已
+# 选择/生效后长期显示“待验证”。可信验证属于 App 验收页，不污染模块描述。
 printf '#!/bin/sh\ntouch "%s/manager-called"\nprintf '\''{"status":"ok"}\n'\''\n' "$TMP" > "$MODULE/common/font_manager.sh"
 chmod 0755 "$MODULE/common"/*
 cat > "$MODULE/config/switch_task.conf" <<'EOT'
@@ -27,8 +28,8 @@ EOT
 TASK=$(MODDIR="$MODULE" sh "$MODULE/common/font_switch_task.sh" status test-task)
 printf '%s' "$TASK" | grep -q '"state":"success"'
 test ! -e "$TMP/manager-called"
-grep -q '当前字体：已配置：Beta' "$MODULE/module.prop"
-grep -q 'Beta（待验证）' "$MODULE/module.prop"
+grep -q '当前字体：Beta$' "$MODULE/module.prop"
+! grep -q '待验证' "$MODULE/module.prop"
 
 printf 'state=failed\nbackend=rollback\n' >"$MODULE/config/self-mount.conf"
 printf 'state=verified\nmode=mount-verified\nactiveFont=Beta\n' \
@@ -60,8 +61,28 @@ EOT
 MIX=$(MODDIR="$MODULE" sh "$MODULE/common/font_mix_controller.sh" status mix-task)
 printf '%s' "$MIX" | grep -q '"cjk":"中文甲"'
 test ! -e "$TMP/manager-called"
-grep -q '当前字体：已配置：组合：中文甲 / Latin B / DIN C' "$MODULE/module.prop"
-grep -q 'DIN C（待验证）' "$MODULE/module.prop"
+grep -q '当前字体：组合：中文甲 / Latin B / DIN C$' "$MODULE/module.prop"
+! grep -q '待验证' "$MODULE/module.prop"
+
+# 私有字体负载更新不能依赖刷写进程拥有 bind-mount 权限。KernelSU/SukiSU 的
+# 安装命名空间禁止 mount 时，旧 .luoshu-payload 必须通过只读式临时符号链接
+# 投影给迁移器，结束后恢复为空目录。
+PRIVATE_MODULE="$TMP/private-module"
+PRIVATE_STATE="$TMP/private-state"
+mkdir -p "$PRIVATE_MODULE/.luoshu-payload/system/fonts" "$PRIVATE_MODULE/system"
+printf 'font-payload\n' > "$PRIVATE_MODULE/.luoshu-payload/system/fonts/Roboto-Regular.ttf"
+MODULE_DIR="$PRIVATE_MODULE" \
+LUOSHU_PRIVATE_STATE_ROOT="$PRIVATE_STATE" \
+LUOSHU_PRIVATE_MOUNT_COMMAND=false \
+    sh -c '
+        . "$1/common/private_payload.sh"
+        luoshu_private_mount_module_view "$MODULE_DIR"
+        test -L "$MODULE_DIR/system"
+        test -s "$MODULE_DIR/system/fonts/Roboto-Regular.ttf"
+        luoshu_private_unmount_module_view "$MODULE_DIR"
+        test -d "$MODULE_DIR/system"
+        test ! -L "$MODULE_DIR/system"
+    ' sh "$ROOT"
 
 # 原生 App 字体管理器必须使用原生索引，且不再携带 WebUI 预览、热刷新或回滚入口。
 grep -q 'native_font_index.json' "$ROOT/common/font_manager.sh"

@@ -15,7 +15,11 @@ printf 'state=quarantined\n' > "$OLD/config/font-payload-quarantine.conf"
 
 # customize.sh intentionally tolerates unavailable Android commands during host-side tests. The
 # regression contract is that a flash immediately re-enables both the active and staged trees.
-MODPATH="$NEW" LUOSHU_OLD_MOD="$OLD" sh "$ROOT/customize.sh" >/dev/null 2>&1
+if ! MODPATH="$NEW" LUOSHU_OLD_MOD="$OLD" sh -x "$ROOT/customize.sh" >"$TMP/direct.log" 2>&1; then
+    cat "$TMP/direct.log" >&2
+    echo 'direct customize execution failed' >&2
+    exit 1
+fi
 
 test ! -e "$OLD/disable"
 test ! -e "$NEW/disable"
@@ -25,10 +29,14 @@ test ! -e "$OLD/config/font-payload-quarantine.conf"
 # APatch sources customize.sh. The wrapper must return to the manager instead of
 # exiting its parent shell before the staged module is committed.
 SOURCED_MARKER="$TMP/source-continued"
-MODPATH="$NEW" LUOSHU_OLD_MOD="$OLD" sh -c '
-    . "$1" >/dev/null 2>&1
+if ! MODPATH="$NEW" LUOSHU_OLD_MOD="$OLD" sh -x -c '
+    . "$1" >"$3" 2>&1
     printf "continued\n" > "$2"
-' sh "$ROOT/customize.sh" "$SOURCED_MARKER"
+' sh "$ROOT/customize.sh" "$SOURCED_MARKER" "$TMP/sourced.log"; then
+    cat "$TMP/sourced.log" >&2 || true
+    echo 'sourced customize execution failed' >&2
+    exit 1
+fi
 test "$(cat "$SOURCED_MARKER")" = continued
 
 echo 'Module flash re-enable and APatch source-safety checks passed.'
