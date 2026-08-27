@@ -19,7 +19,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: v4.0.0
-          SOURCE_SHA: 315353592034ebd5ba8afcaa0ddb62bfd167f8e7
+          SOURCE_SHA: 65000d38bdef8a597e1bb3ae41dc8530b1dc95c5
         shell: bash
         run: |
           set -euo pipefail
