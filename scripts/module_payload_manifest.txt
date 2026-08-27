@@ -53,6 +53,7 @@ common/font_inventory_scan.py
 common/font_inventory_scan_v3.py
 common/font_library_cache.sh
 common/font_manager.sh
+common/font_manager_v4.sh
 common/font_metadata.py
 common/font_metrics_normalize.py
 common/font_mix.sh
@@ -72,6 +73,8 @@ common/font_safety.sh
 common/font_validation_cache.sh
 common/font_switch_task.sh
 common/hyperos_global.sh
+common/legacy_v14_4_switch.sh
+common/legacy_v14_4
 common/luoshu_cli.sh
 common/luoshu_composite.sh
 common/mix_task_handoff.sh
@@ -110,8 +113,11 @@ CHANGELOG.md
 customize.sh
 module.prop
 post-fs-data.sh
+post-fs-data-v4.sh
 post-mount.sh
+post-mount-v4.sh
 service.sh
+service_v4.sh
 uninstall.sh
 action.sh
 boot-completed.sh
