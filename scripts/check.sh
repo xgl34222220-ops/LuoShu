@@ -45,7 +45,7 @@ for file in \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
   scripts/assert.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
   scripts/device_validation_gate.py scripts/device_validation_gate_test.py docs/device_validation.json \
-  scripts/stability_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh scripts/app_bridge_status_test.sh scripts/font_boot_state_test.sh \
+  scripts/stability_test.sh scripts/legacy_switch_core_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh scripts/app_bridge_status_test.sh scripts/font_boot_state_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_config_monospace_test.py \
   scripts/auto_multiweight_mode_test.sh scripts/auto_multiweight_engine_test.sh scripts/mix_finalize_performance_test.sh scripts/font_library_ui_layout_test.sh scripts/v2_source_audit.sh \
   docs/RELEASING.md docs/TEST_MATRIX.md \
@@ -94,15 +94,16 @@ while IFS= read -r payload || [ -n "$payload" ]; do
   test -e "$ROOT/$payload"
 done < "$PAYLOAD_MANIFEST"
 find "$ROOT/common" -maxdepth 1 -type f -printf 'common/%f\n' | sort > /tmp/luoshu-common-files.txt
-grep '^common/' "$PAYLOAD_MANIFEST" | grep -v '^common/python$' | sort > /tmp/luoshu-manifest-common.txt
+grep '^common/' "$PAYLOAD_MANIFEST" | grep -v '^common/python$' | grep -v '^common/legacy_v14_4$' | sort > /tmp/luoshu-manifest-common.txt
 cmp -s /tmp/luoshu-common-files.txt /tmp/luoshu-manifest-common.txt
 
 # 活跃运行时代码不得再出现历史开发版本头、WebUI 函数或未使用的报告脚本。
-! grep -RInE --exclude-dir=python '(^|[^0-9])v1[34](\.|[^0-9])|Beta[[:space:]]*[0-9]|Hotfix' \
-  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data.sh" "$ROOT/service.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
+! grep -RInE --exclude-dir=python --exclude-dir=legacy_v14_4 --exclude=legacy_v14_4_switch.sh --exclude=font_manager.sh \
+  '(^|[^0-9])v1[34](\.|[^0-9])|Beta[[:space:]]*[0-9]|Hotfix' \
+  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data-v4.sh" "$ROOT/service_v4.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
 ! grep -qE 'get_all_fonts_json|get_font_info_json|scan_installed_families|refresh_font_cache' "$ROOT/common/util_functions.sh"
 test ! -e "$ROOT/common/font_report.sh"
-! grep -RInE 'webui_font_list|WebUI' "$ROOT/common" --exclude=module_update_state.sh >/dev/null 2>&1
+! grep -RInE 'webui_font_list|WebUI' "$ROOT/common" --exclude=module_update_state.sh --exclude-dir=legacy_v14_4 >/dev/null 2>&1
 
 # 单包构建必须显式传入 APK；Debug 包只能由测试工作流明确放行。
 grep -q "LUOSHU_APP_APK is required" "$ROOT/scripts/build.sh"
@@ -214,8 +215,9 @@ for active in \
 done
 ! grep -RInE --exclude-dir=.git --exclude=check.sh --exclude=CHANGELOG.md --exclude='RELEASE_NOTES_*' \
   'common/(v14_mix|v142_weighted_mix|v143_auto_multiweight_mix|v14_switch)\.sh' "$ROOT" >/dev/null 2>&1
-! grep -RInE --exclude-dir=python '洛书 v1[34]\.|LuoShu v1[34]\.' \
-  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data.sh" "$ROOT/service.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
+! grep -RInE --exclude-dir=python --exclude-dir=legacy_v14_4 --exclude=legacy_v14_4_switch.sh --exclude=font_manager.sh \
+  '洛书 v1[34]\.|LuoShu v1[34]\.' \
+  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data-v4.sh" "$ROOT/service_v4.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
 
 # 许可证与声明保持完整。
 test "$(sha256sum "$ROOT/LICENSE" | awk '{print $1}')" = '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986'
@@ -286,6 +288,7 @@ python3 "$ROOT/scripts/font_config_batch_test.py"
 sh "$ROOT/scripts/font_digest_memo_test.sh"
 sh "$ROOT/scripts/foreground_quick_xml_test.sh"
 sh "$ROOT/scripts/font_switch_performance_test.sh"
+sh "$ROOT/scripts/legacy_switch_core_test.sh"
 sh "$ROOT/scripts/font_validation_cache_test.sh"
 sh "$ROOT/scripts/font_library_ui_layout_test.sh"
 sh "$ROOT/scripts/stability_test.sh"
