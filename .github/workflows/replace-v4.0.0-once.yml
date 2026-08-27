@@ -22,15 +22,15 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: v4.0.0
-      EXPECTED_OLD_TAG_SHA: 64eb1adf16f4e3fbf84e3d224b269b45ff419512
-      REPLACEMENT_TAG_SHA: 227bca1bb34a18a738c5c9a0f8a338f3880aa2a0
-      REQUIRED_FIX_SHA: dfdc8e13400d0a2bbd850e4643e6913cd7f8c085
+      EXPECTED_OLD_TAG_SHA: 227bca1bb34a18a738c5c9a0f8a338f3880aa2a0
+      REQUIRED_RUNTIME_FIX_SHA: dfdc8e13400d0a2bbd850e4643e6913cd7f8c085
+      REQUIRED_CHECK_FIX_SHA: c07a1d9e7b12a7ea7d401df77f0bd95daf0fa9f8
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Ensure replacement tag and dispatch signed publish exactly once
+      - name: Replace tag with fully checked v4.0.0 source and dispatch signed publish
         shell: bash
         run: |
           set -euo pipefail
@@ -41,36 +41,39 @@ jobs:
             exit 2
           }
 
-          git merge-base --is-ancestor "$REQUIRED_FIX_SHA" "$REPLACEMENT_TAG_SHA" || {
-            echo "Refusing publish: required #201 fix is not in replacement tag" >&2
+          git merge-base --is-ancestor "$REQUIRED_RUNTIME_FIX_SHA" "$GITHUB_SHA" || {
+            echo "Refusing replacement: #201 runtime fix is missing" >&2
+            exit 2
+          }
+          git merge-base --is-ancestor "$REQUIRED_CHECK_FIX_SHA" "$GITHUB_SHA" || {
+            echo "Refusing replacement: duplicate-function guard fix is missing" >&2
             exit 2
           }
 
           git fetch --force --tags origin
           current="$(git rev-list -n1 "$TAG" 2>/dev/null || true)"
+          if [[ "$current" == "$GITHUB_SHA" ]]; then
+            echo "$TAG already points to this fully fixed commit."
+          else
+            [[ "$current" == "$EXPECTED_OLD_TAG_SHA" ]] || {
+              echo "Refusing replacement: $TAG points to unexpected $current" >&2
+              exit 2
+            }
 
-          if [[ "$current" == "$EXPECTED_OLD_TAG_SHA" ]]; then
-            gh release view "$TAG" >/dev/null
-            gh release delete "$TAG" --cleanup-tag --yes
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release delete "$TAG" --cleanup-tag --yes
+            else
+              git push origin ":refs/tags/$TAG"
+            fi
             git fetch --prune --tags origin
             [[ -z "$(git rev-list -n1 "$TAG" 2>/dev/null || true)" ]] || {
-              echo "Old tag still exists after release deletion" >&2
+              echo "Old tag still exists after cleanup" >&2
               exit 3
             }
-            git tag "$TAG" "$REPLACEMENT_TAG_SHA"
+
+            git tag "$TAG" "$GITHUB_SHA"
             git push origin "refs/tags/$TAG"
-            current="$REPLACEMENT_TAG_SHA"
-          fi
-
-          [[ "$current" == "$REPLACEMENT_TAG_SHA" ]] || {
-            echo "Refusing publish dispatch: $TAG points to unexpected $current" >&2
-            exit 2
-          }
-
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "$TAG release already exists; replacement is complete."
-            exit 0
           fi
 
           gh workflow run release.yml --ref "$TAG" -f tag="$TAG" -f prerelease=false
-          echo "Dispatched signed release workflow from $TAG at $current."
+          echo "Dispatched signed release workflow from $TAG at $GITHUB_SHA."
