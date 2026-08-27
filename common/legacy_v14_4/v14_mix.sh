@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# 洛书 v2.0.0：字体组合控制器。
+# 洛书 v14.3.9：字体组合轻量桥。
 set +e
 MODDIR="${MODDIR:-}"
 if [ -z "$MODDIR" ]; then
@@ -9,65 +9,20 @@ if [ -z "$MODDIR" ]; then
         MODDIR="/data/adb/modules/LuoShu"
     fi
 fi
-WEIGHTED="$MODDIR/common/weighted_mix_task.sh"
-AUTO_WEIGHTED="$MODDIR/common/multiweight_mix_task.sh"
+WEIGHTED="$MODDIR/common/v142_weighted_mix.sh"
+AUTO_WEIGHTED="$MODDIR/common/v143_auto_multiweight_mix.sh"
 MODE_HELPER="$MODDIR/common/mix_weight_mode.sh"
 ENGINE="$MODDIR/common/font_mix.sh"
 ROLE_CHECK="$MODDIR/common/font_role_check.sh"
 TASK_FILE="$MODDIR/config/mix_task.conf"
-AXES_TASK_FILE="$MODDIR/config/axes_task.conf"
-AXES_WORKER_PID="$MODDIR/config/axes_worker.pid"
-AUTO_WORKER_PID="$MODDIR/config/auto_multiweight_worker.pid"
 STATUS_SCRIPT="$MODDIR/common/module_status.sh"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
 MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODE_HELPER" ] && . "$MODE_HELPER"
-[ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
-
-# v4 keeps owning the App/API surface, but every composite runtime action is delegated
-# to the exact pre-reset compatibility chain. The v4 implementation remains below as a
-# dormant reference backend for source audits; it is not reached by the App.
-LEGACY_V14_MIX="$MODDIR/common/legacy_v1""4_4/mix_router.sh"
-if [ -f "$LEGACY_V14_MIX" ]; then
-    case "${1:-config}" in
-        start|config|status|recover|reconcile)
-            exec sh "$LEGACY_V14_MIX" "$@"
-            ;;
-    esac
-fi
-
 json_escape(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
 read_value(){ sed -n "s/^${1}=//p" "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n'; }
-
-reconcile_mix_task() {
-    _state=$(sed -n 's/^state=//p' "$AXES_TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n')
-    case "$_state" in queued|running) ;; *) return 0 ;; esac
-    _task=$(sed -n 's/^task=//p' "$AXES_TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n')
-    [ -n "$_task" ] || return 0
-
-    if type luoshu_task_pid_alive >/dev/null 2>&1; then
-        luoshu_task_pid_alive "$AXES_WORKER_PID" "$_task" && return 0
-        luoshu_task_pid_alive "$AUTO_WORKER_PID" "$_task" && return 0
-    fi
-
-    # The task file is written immediately before the detached PID. Keep a short grace
-    # window so a status refresh cannot cancel a worker while it is still being spawned.
-    _started=$(sed -n 's/^started=//p' "$AXES_TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n')
-    _now=$(date +%s 2>/dev/null)
-    case "$_started:$_now" in *[!0-9:]*|:*) ;; *)
-        [ $((_now - _started)) -gt 20 ] 2>/dev/null || return 0
-        ;;
-    esac
-
-    if [ -f "$AUTO_WEIGHTED" ]; then
-        MODDIR="$MODDIR" sh "$AUTO_WEIGHTED" recover >/dev/null 2>&1 || true
-    elif [ -f "$WEIGHTED" ]; then
-        MODDIR="$MODDIR" sh "$WEIGHTED" recover >/dev/null 2>&1 || true
-    fi
-    return 2
-}
 
 precheck_mix() {
     [ -n "${1:-}" ] && [ -n "${2:-}" ] && [ -n "${3:-}" ] || {
@@ -91,7 +46,7 @@ precheck_mix() {
 if [ -f "$WEIGHTED" ]; then
     case "${1:-config}" in
         start)
-            # 多字重引擎会在独立 Root Worker 内完成角色检查；这里必须立即入队返回。
+            precheck_mix "$2" "$3" "$4" || exit 0
             _cjk_mode=fixed
             _latin_mode=fixed
             _digit_mode=fixed
@@ -112,14 +67,9 @@ if [ -f "$WEIGHTED" ]; then
             fi
             ;;
         status)
-            reconcile_mix_task >/dev/null 2>&1 || true
             if [ -f "$AUTO_WEIGHTED" ]; then sh "$AUTO_WEIGHTED" status "$2"
             else sh "$WEIGHTED" status "$2"
             fi
-            ;;
-        reconcile)
-            reconcile_mix_task >/dev/null 2>&1 || true
-            printf '{"status":"ok"}\n'
             ;;
         recover)
             if [ -f "$AUTO_WEIGHTED" ]; then sh "$AUTO_WEIGHTED" recover
@@ -138,7 +88,6 @@ case "${1:-status}" in
         ;;
     config) sh "$ENGINE" status ;;
     status)
-        reconcile_mix_task >/dev/null 2>&1 || true
         _wanted="$2"
         [ -s "$TASK_FILE" ] || { printf '{"status":"error","message":"暂无组合任务"}\n'; exit 0; }
         _task=$(read_value task); _state=$(read_value state); _message=$(read_value message)
@@ -150,7 +99,6 @@ case "${1:-status}" in
             "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_message")" "$(json_escape "$_cjk")" "$(json_escape "$_latin")" "$(json_escape "$_digit")" "${_started:-0}" "${_finished:-0}"
         ;;
     recover) sh "$ENGINE" recover ;;
-    reconcile) reconcile_mix_task >/dev/null 2>&1 || true; printf '{"status":"ok"}\n' ;;
     *) printf '{"status":"error","message":"未知组合命令"}\n' ;;
 esac
 exit 0
