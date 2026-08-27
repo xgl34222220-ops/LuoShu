@@ -1,4 +1,4 @@
-name: Replace v4.0.0 ROM fix
+name: Prepare v4.0.0 replacement
 
 on:
   push:
@@ -8,18 +8,16 @@ on:
 
 permissions:
   contents: write
-  actions: write
 
 jobs:
-  replace:
+  cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Replace v4.0.0 tag and dispatch signed release
+      - name: Remove old v4.0.0 release and tag
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           TAG: v4.0.0
-          SOURCE_SHA: 65000d38bdef8a597e1bb3ae41dc8530b1dc95c5
         shell: bash
         run: |
           set -euo pipefail
@@ -31,17 +29,13 @@ jobs:
 
           gh api --method DELETE "repos/$REPO/git/refs/tags/$TAG" 2>/dev/null || true
 
-          gh api --method POST "repos/$REPO/git/refs" \
-            -f ref="refs/tags/$TAG" \
-            -f sha="$SOURCE_SHA" >/dev/null
-
-          resolved="$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq '.object.sha')"
-          [ "$resolved" = "$SOURCE_SHA" ] || {
-            echo "Tag mismatch: $resolved != $SOURCE_SHA" >&2
+          if gh api "repos/$REPO/releases/tags/$TAG" >/dev/null 2>&1; then
+            echo "Old release still exists: $TAG" >&2
             exit 1
-          }
+          fi
+          if gh api "repos/$REPO/git/ref/tags/$TAG" >/dev/null 2>&1; then
+            echo "Old tag still exists: $TAG" >&2
+            exit 1
+          fi
 
-          gh api --method POST "repos/$REPO/actions/workflows/release.yml/dispatches" \
-            -f ref="$TAG" \
-            -f 'inputs[tag]'="$TAG" \
-            -f 'inputs[prerelease]'='false'
+          echo "v4.0.0 release/tag removed; next main release-notes commit may publish the verified replacement."
