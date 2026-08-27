@@ -26,6 +26,7 @@ if luoshu_runtime_recovery_required "$RECOVERY_OLD" "$RECOVERY_NEW"; then
 fi
 
 # Regression: a v10 Latin-coverage payload must NEVER be mounted by the v9 rollback/hotfix.
+# The selected font/config must survive and be marked for rebuild during installation, never defaulted.
 OLD="$TMP/old-bad"
 NEW="$TMP/new-safe"
 mkdir -p "$OLD/config/device-font-cache/stale" "$OLD/system/fonts/.luoshu-font-store" "$OLD/system/etc" "$NEW/config" "$NEW/system/bin"
@@ -67,7 +68,7 @@ test ! -e "$NEW/config/font-payload-manifest.conf"
 test ! -e "$NEW/config/font-payload-boot.conf"
 
 grep -q '^state=awaiting-explicit-apply$' "$NEW/config/font-payload-rebuild-pending.conf"
-grep -q '^mode=safe-stock$' "$NEW/config/font-payload-rebuild-pending.conf"
+grep -q '^mode=rebuild-on-install$' "$NEW/config/font-payload-rebuild-pending.conf"
 grep -q '^reason=schema-mismatch$' "$NEW/config/font-payload-rebuild-pending.conf"
 grep -q '^payloadPreserved=false$' "$NEW/config/font-payload-rebuild-pending.conf"
 grep -q '^font=Qsal$' "$NEW/config/font-payload-rebuild-pending.conf"
@@ -127,4 +128,4 @@ if luoshu_migrate_active_install "$INVALID" "$TARGET"; then
 fi
 test ! -e "$TARGET/config/active_font.conf"
 
-echo 'Module updates preserve only same-schema payloads; incompatible payloads boot safely on ROM fonts while retaining the selected font.'
+echo 'Module updates preserve same-schema payloads; incompatible payloads keep the selected font and require install-time rebuild without default fallback.'
