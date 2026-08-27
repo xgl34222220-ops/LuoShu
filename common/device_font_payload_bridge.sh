@@ -7,7 +7,7 @@ _dfpb_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
 [ -f "$_dfpb_module/common/device_font_payload_runtime.sh" ] && . "$_dfpb_module/common/device_font_payload_runtime.sh"
 
 # Schema upgrades preserve the current payload and require one explicit foreground apply.
-LUOSHU_PAYLOAD_SCHEMA_CURRENT="device-template-v2-baseline-v10-latin-coverage-v1"
+LUOSHU_PAYLOAD_SCHEMA_CURRENT="device-template-v2-baseline-v9-rolegraph-v2"
 
 # Prefer the already prepared 100-900 files, then ROM-specific anchors. This keeps
 # direct, variable and composite flows on the same source selection contract.

@@ -68,7 +68,7 @@ fi
 [ -f "$_lmcl_font_cleanup" ] && . "$_lmcl_font_cleanup"
 [ -f "$_lmcl_font_mount" ] && . "$_lmcl_font_mount"
 
-# Play Store, Google surfaces, Chrome and WebView can open downloadable Latin fonts directly,
+# Play Store and some GMS surfaces open downloadable Google Sans files directly,
 # outside Android fonts.xml. Launch the provider bridge only from service.sh; it waits
 # for boot completion and applies read-only binds in each consumer mount namespace.
 if [ "${0##*/}" = service.sh ] && [ -f "$_lmcl_google_provider" ]; then

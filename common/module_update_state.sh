@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # 模块更新状态迁移：继承当前字体负载；架构变化只登记一次显式重应用。
 
-LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v10-latin-coverage-v1}"
+LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v9-rolegraph-v2}"
 LUOSHU_UPDATE_ACTIVE=default
 LUOSHU_UPDATE_OLD_SCHEMA=''
 LUOSHU_UPDATE_REBUILD_REQUIRED=false

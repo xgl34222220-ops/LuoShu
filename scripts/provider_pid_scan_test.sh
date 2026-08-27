@@ -23,9 +23,6 @@ make_proc 1700 'com.google.android.gms:phenotype'
 make_proc 1800 'com.android.vending:background'
 make_proc 1900 'unrelated.app'
 make_proc 2000 'zygote64'
-make_proc 2100 'com.android.chrome:privileged_process0'
-make_proc 2200 'com.google.android.googlequicksearchbox:search'
-make_proc 2300 'com.google.android.webview:sandboxed_process0'
 
 # Deliberately return only a partial named set. The old optimization returned early as soon as
 # zygote was found, which silently dropped GMS/Vending subprocesses that only the wildcard scan sees.
@@ -46,11 +43,8 @@ ok command grep -qx 1600 "$TMP/out"
 ok command grep -qx 1700 "$TMP/out"
 ok command grep -qx 1800 "$TMP/out"
 ok command grep -qx 2000 "$TMP/out"
-ok command grep -qx 2100 "$TMP/out"
-ok command grep -qx 2200 "$TMP/out"
-ok command grep -qx 2300 "$TMP/out"
 no command grep -qx 1900 "$TMP/out"
-eq "$(wc -l < "$TMP/out" | tr -d '[:space:]')" 8
+eq "$(wc -l < "$TMP/out" | tr -d '[:space:]')" 5
 
 CASE='源码不得恢复逐进程 fork'
 no command grep -q 'basename "\$_gfp_proc"' "$ROOT/common/google_font_provider_bridge.sh"

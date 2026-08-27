@@ -29,16 +29,13 @@ _device_font_policy_trusted_template_key() {
     printf '%s\n' "$_dfpp_key"
 }
 
-# Cache ColorOS target discovery by build fingerprint and discovery contract. A module update that
-# learns new ColorOS/Google font names must invalidate the cache even when the ROM did not change.
+# Cache ColorOS target discovery by build fingerprint; an OTA invalidates it automatically.
 get_all_coloros_files() {
     _dfpp_module="$(_device_font_policy_module)"
     _dfpp_cache="$_dfpp_module/config/coloros-font-targets.cache"
-    _dfpp_revision="${LUOSHU_COLOROS_TARGET_REVISION:-3}"
-    _dfpp_build_key="${LUOSHU_COLOROS_CACHE_KEY:-$(getprop ro.build.fingerprint 2>/dev/null)}"
-    [ -n "$_dfpp_build_key" ] || _dfpp_build_key="$(getprop ro.build.version.incremental 2>/dev/null)"
-    [ -n "$_dfpp_build_key" ] || _dfpp_build_key=unknown
-    _dfpp_key="r${_dfpp_revision}|${_dfpp_build_key}"
+    _dfpp_key="${LUOSHU_COLOROS_CACHE_KEY:-$(getprop ro.build.fingerprint 2>/dev/null)}"
+    [ -n "$_dfpp_key" ] || _dfpp_key="$(getprop ro.build.version.incremental 2>/dev/null)"
+    [ -n "$_dfpp_key" ] || _dfpp_key=unknown
     _dfpp_cached_key=$(sed -n 's/^key=//p' "$_dfpp_cache" 2>/dev/null | head -n1)
     if [ "$_dfpp_cached_key" = "$_dfpp_key" ] && sed -n '2,$p' "$_dfpp_cache" 2>/dev/null | grep -q .; then
         sed -n '2,$p' "$_dfpp_cache" 2>/dev/null
@@ -64,7 +61,7 @@ get_all_coloros_files() {
 get_all_coloros_names() {
     [ "${LUOSHU_COLOROS_TARGETS_MAPPED:-0}" != 1 ] || return 0
     for _dfpp_file in $(get_all_coloros_files); do
-        printf '%s\n' "${_dfpp_file%.*}"
+        printf '%s\n' "${_dfpp_file%.ttf}"
     done
 }
 

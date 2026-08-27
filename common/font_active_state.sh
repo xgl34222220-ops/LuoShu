@@ -21,8 +21,6 @@ luoshu_active_payload_verified() {
     [ ! -s "$_las_config/text_reboot_required.conf" ] || return 1
     [ ! -s "$_las_config/font-payload-rebuild-pending.conf" ] || return 1
     [ -s "$_las_config/font-payload-manifest.conf" ] || return 1
-    _las_schema=$(_luoshu_active_state_value "$_las_config/font-payload-schema.conf" schema)
-    [ "$_las_schema" = "${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-device-template-v2-baseline-v10-latin-coverage-v1}" ] || return 1
 
     _las_boot_state=$(_luoshu_active_state_value "$_las_config/font-payload-boot.conf" state)
     [ "$_las_boot_state" = confirmed ] || return 1
@@ -70,3 +68,4 @@ luoshu_mix_request_matches_active() {
     [ "$(_luoshu_mix_state_value "$_lms_source" digitMode fixed)" = "${9:-fixed}" ] || return 1
     return 0
 }
+

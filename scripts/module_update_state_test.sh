@@ -4,7 +4,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-update-state)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-SCHEMA=device-template-v2-baseline-v10-latin-coverage-v1
+SCHEMA=device-template-v2-baseline-v9-rolegraph-v2
 LUOSHU_PAYLOAD_SCHEMA_CURRENT="$SCHEMA"
 export LUOSHU_PAYLOAD_SCHEMA_CURRENT
 OEM_PARTITIONS='my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product'

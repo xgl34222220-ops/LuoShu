@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# Wait for Android/Google/Chrome startup, then apply the downloadable-font bridge.
+# Wait for Android/GMS startup, then apply the Google downloadable-font bridge.
 set +e
 
 MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"

@@ -11,7 +11,7 @@ _luoshu_safety_config() {
     printf '%s/config\n' "$(_luoshu_safety_module)"
 }
 
-LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v10-latin-coverage-v1}"
+LUOSHU_PAYLOAD_SCHEMA_CURRENT="${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-baseline-v9-rolegraph-v2}"
 
 luoshu_payload_schema_current() {
     printf '%s\n' "$LUOSHU_PAYLOAD_SCHEMA_CURRENT"

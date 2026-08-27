@@ -15,7 +15,6 @@ export MODDIR MODULE_DIR
 printf 'Demo\n' > "$CFG/active_font.conf"
 printf 'state=confirmed\nfont=Demo\n' > "$CFG/font-payload-boot.conf"
 printf 'system/fonts/Demo.ttf|hash|1234\n' > "$CFG/font-payload-manifest.conf"
-printf 'schema=device-template-v2-baseline-v10-latin-coverage-v1\nfont=Demo\n' > "$CFG/font-payload-schema.conf"
 printf 'state=verified\nmode=mount-confirmed\nactiveFont=Demo\n' > "$CFG/device-font-load-verification.conf"
 printf 'state=mounted\n' > "$CFG/self-mount.conf"
 
@@ -39,13 +38,6 @@ if luoshu_active_payload_verified Demo; then
     exit 1
 fi
 rm -f "$CFG/font-payload-rebuild-pending.conf"
-
-printf 'schema=device-template-v2-baseline-v9-rolegraph-v2\nfont=Demo\n' > "$CFG/font-payload-schema.conf"
-if luoshu_active_payload_verified Demo; then
-    echo 'stale payload schema was reused' >&2
-    exit 1
-fi
-printf 'schema=device-template-v2-baseline-v10-latin-coverage-v1\nfont=Demo\n' > "$CFG/font-payload-schema.conf"
 
 printf 'font=Demo\n' > "$CFG/text_reboot_required.conf"
 if luoshu_active_payload_verified Demo; then

@@ -46,7 +46,7 @@ printf '{"schema":"device-font-overlay-v1"}\n' > "$OVERLAY/overlay-manifest.json
 MODDIR="$MODULE"
 MODULE_DIR="$MODULE"
 LUOSHU_DATA_FONTS_CONFIG_TARGET="$TARGET"
-LUOSHU_PAYLOAD_SCHEMA_CURRENT=device-template-v2-baseline-v10-latin-coverage-v1
+LUOSHU_PAYLOAD_SCHEMA_CURRENT=device-template-v2-baseline-v9-rolegraph-v2
 LUOSHU_MOUNTINFO="$MOUNTINFO"
 export MODDIR MODULE_DIR LUOSHU_DATA_FONTS_CONFIG_TARGET LUOSHU_PAYLOAD_SCHEMA_CURRENT LUOSHU_MOUNTINFO
 . "$MODULE/common/device_font_payload_runtime.sh"
@@ -61,7 +61,7 @@ grep -q '^targetSha256=' "$MODULE/config/device-font-dynamic-mount.conf"
 grep -q '^file|system/etc/.luoshu-data-fonts-config.xml|' "$MODULE/config/device-font-installed.conf"
 printf 'state=installed\nschema=device-font-payload-v1\nfont=fixture\n' > "$MODULE/config/device-font-engine.conf"
 printf 'fixture\n' > "$MODULE/config/active_font.conf"
-printf 'schema=device-template-v2-baseline-v10-latin-coverage-v1\nfont=fixture\n' > "$MODULE/config/font-payload-schema.conf"
+printf 'schema=device-template-v2-baseline-v9-rolegraph-v2\nfont=fixture\n' > "$MODULE/config/font-payload-schema.conf"
 device_font_payload_validate_installed
 
 # Simulate the early-boot read-only bind. Boot-complete release must verify that the

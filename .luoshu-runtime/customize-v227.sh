@@ -10,7 +10,7 @@ MODULE_DIR="$MODPATH"
 [ -f "$MODPATH/common/rom_adapters.sh" ] && . "$MODPATH/common/rom_adapters.sh"
 # customize.sh runs before the normal font runtime bridge is loaded. Keep this in
 # lockstep with device_font_payload_bridge.sh so upgrades are classified once.
-LUOSHU_PAYLOAD_SCHEMA_CURRENT=device-template-v2-baseline-v10-latin-coverage-v1
+LUOSHU_PAYLOAD_SCHEMA_CURRENT=device-template-v2-baseline-v9-rolegraph-v2
 [ -f "$MODPATH/common/module_update_state.sh" ] && . "$MODPATH/common/module_update_state.sh"
 
 if type ensure_public_storage >/dev/null 2>&1; then
