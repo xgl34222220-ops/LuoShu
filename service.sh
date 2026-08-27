@@ -3,6 +3,7 @@
 # Normal installations keep the current v4 service unchanged. Once a font is applied
 # with the v14.4 compatibility core, background v4 template/payload rebuilds are
 # intentionally disabled so the physical-file mapping cannot be rewritten after boot.
+# Current App inventory is still prewarmed through config/native_font_index.json.
 set +e
 MODDIR="${0%/*}"
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
