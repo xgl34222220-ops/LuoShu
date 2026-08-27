@@ -1,0 +1,45 @@
+name: Repository cleanup once
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - .github/workflows/repository-cleanup-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove unusable v4.0.0 release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          release_id="$(gh api "repos/$REPO/releases/tags/v4.0.0" --jq '.id' 2>/dev/null || true)"
+          if [ -n "$release_id" ]; then
+            gh api --method DELETE "repos/$REPO/releases/$release_id"
+          fi
+          gh api --method DELETE "repos/$REPO/git/refs/tags/v4.0.0" 2>/dev/null || true
+
+      - name: Remove obsolete branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for branch in \
+            'feat/v3.3.7-boxproxy-ui' \
+            'hotfix/v4.0.1-safe-payload-migration' \
+            'release/emergency-v3.3.0-trigger' \
+            'reset-v3.2.0-source'; do
+            encoded="$(python3 - <<'PY' "$branch"
+import sys, urllib.parse
+print(urllib.parse.quote(sys.argv[1], safe=''))
+PY
+)"
+            gh api --method DELETE "repos/$REPO/git/refs/heads/$encoded" 2>/dev/null || true
+          done
