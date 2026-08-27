@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: luoshu-replace-v4.0.0-once
@@ -22,12 +23,13 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TAG: v4.0.0
       EXPECTED_OLD_TAG_SHA: 94548516c1766a390b2511790feed1162e26d740
+      REPLACEMENT_TAG_SHA: 7ede53c5ee354b579659125eb3024ff855f75b23
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Replace old v4.0.0 release and tag exactly once
+      - name: Replace old v4.0.0 release and dispatch signed publish exactly once
         shell: bash
         run: |
           set -euo pipefail
@@ -40,23 +42,29 @@ jobs:
 
           git fetch --force --tags origin
           current="$(git rev-list -n1 "$TAG" 2>/dev/null || true)"
-          if [[ "$current" == "$GITHUB_SHA" ]]; then
-            echo "$TAG already points to this main commit; nothing to replace."
-            exit 0
+
+          if [[ "$current" == "$EXPECTED_OLD_TAG_SHA" ]]; then
+            gh release view "$TAG" >/dev/null
+            gh release delete "$TAG" --cleanup-tag --yes
+            git fetch --prune --tags origin
+            [[ -z "$(git rev-list -n1 "$TAG" 2>/dev/null || true)" ]] || {
+              echo "Old tag still exists after release deletion" >&2
+              exit 3
+            }
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG"
+            current="$GITHUB_SHA"
           fi
-          [[ "$current" == "$EXPECTED_OLD_TAG_SHA" ]] || {
-            echo "Refusing replacement: $TAG points to $current, expected $EXPECTED_OLD_TAG_SHA" >&2
+
+          [[ "$current" == "$REPLACEMENT_TAG_SHA" || "$current" == "$GITHUB_SHA" ]] || {
+            echo "Refusing publish dispatch: $TAG points to unexpected $current" >&2
             exit 2
           }
 
-          gh release view "$TAG" >/dev/null
-          gh release delete "$TAG" --cleanup-tag --yes
-          git fetch --prune --tags origin
-          [[ -z "$(git rev-list -n1 "$TAG" 2>/dev/null || true)" ]] || {
-            echo "Old tag still exists after release deletion" >&2
-            exit 3
-          }
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "$TAG release already exists; replacement is complete."
+            exit 0
+          fi
 
-          git tag "$TAG" "$GITHUB_SHA"
-          git push origin "refs/tags/$TAG"
-          echo "Re-tagged $TAG at $GITHUB_SHA. The normal signed release workflow will publish it."
+          gh workflow run release.yml --ref "$TAG" -f tag="$TAG" -f prerelease=false
+          echo "Dispatched the normal signed release workflow from $TAG at $current."
