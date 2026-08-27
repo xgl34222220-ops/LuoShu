@@ -2,7 +2,7 @@
 # LuoShu Google/GMS downloadable-font provider bridge.
 #
 # Android system XML and /data/fonts/config do not cover fonts opened directly from
-# com.google.android.gms' private downloadable-font cache. This bridge never modifies
+# Google/GMS/Chrome private downloadable-font caches. This bridge never modifies
 # those provider files: it builds identity-compatible clones inside the module and
 # bind-mounts them read-only in zygote/GMS/Play mount namespaces.
 set +e
@@ -114,6 +114,32 @@ _gfp_source_for_weight() {
     return 1
 }
 
+_gfp_consumer_packages() {
+    printf '%s\n' \
+        com.google.android.gms \
+        com.android.vending \
+        com.android.chrome \
+        com.chrome.beta \
+        com.chrome.dev \
+        com.chrome.canary \
+        com.google.android.googlequicksearchbox \
+        com.google.android.webview \
+        com.google.android.webview.beta \
+        com.google.android.webview.dev \
+        com.google.android.webview.canary
+}
+
+_gfp_find_targets_in_root() {
+    _gfp_scan_root="$1"
+    [ -d "$_gfp_scan_root" ] || return 0
+    find "$_gfp_scan_root" -maxdepth 6 -type f \( \
+        -iname 'Google*Sans*.ttf' -o -iname 'Google*Sans*.otf' -o \
+        -iname 'Google_Sans*.ttf' -o -iname 'Google_Sans*.otf' -o \
+        -iname 'ProductSans*.ttf' -o -iname 'ProductSans*.otf' -o \
+        -iname 'Roboto*.ttf' -o -iname 'Roboto*.otf' \
+    \) -print 2>/dev/null
+}
+
 _gfp_targets() {
     if [ -n "${LUOSHU_GOOGLE_FONT_TARGETS:-}" ]; then
         printf '%s\n' "$LUOSHU_GOOGLE_FONT_TARGETS" | awk 'NF && !seen[$0]++'
@@ -121,24 +147,23 @@ _gfp_targets() {
     fi
     _gfp_list="$CACHE/.targets.$$"
     : > "$_gfp_list" 2>/dev/null || return 1
-    for _gfp_root in \
-        /data/data/com.google.android.gms/files/fonts \
-        /data/user/*/com.google.android.gms/files/fonts \
-        /data/user_de/*/com.google.android.gms/files/fonts \
-        /data/data/com.android.vending/files/fonts \
-        /data/user/*/com.android.vending/files/fonts \
-        /data/user_de/*/com.android.vending/files/fonts; do
-        [ -d "$_gfp_root" ] || continue
-        find "$_gfp_root" -maxdepth 6 -type f \( \
-            -iname 'Google*Sans*.ttf' -o -iname 'Google*Sans*.otf' -o \
-            -iname 'Google_Sans*.ttf' -o -iname 'Google_Sans*.otf' \
-        \) -print 2>/dev/null >> "$_gfp_list"
+    for _gfp_package in $(_gfp_consumer_packages); do
+        for _gfp_root in \
+            "/data/data/$_gfp_package/files/fonts" \
+            "/data/data/$_gfp_package/files/downloadable_fonts" \
+            "/data/data/$_gfp_package/cache/fonts" \
+            "/data/data/$_gfp_package/app_fonts" \
+            /data/user/*/"$_gfp_package"/files/fonts \
+            /data/user/*/"$_gfp_package"/files/downloadable_fonts \
+            /data/user/*/"$_gfp_package"/cache/fonts \
+            /data/user/*/"$_gfp_package"/app_fonts \
+            /data/user_de/*/"$_gfp_package"/files/fonts \
+            /data/user_de/*/"$_gfp_package"/files/downloadable_fonts; do
+            _gfp_find_targets_in_root "$_gfp_root" >> "$_gfp_list"
+        done
     done
     if [ -d /data/fonts/files ]; then
-        find /data/fonts/files -maxdepth 3 -type f \( \
-            -iname 'Google*Sans*.ttf' -o -iname 'Google*Sans*.otf' -o \
-            -iname 'Google_Sans*.ttf' -o -iname 'Google_Sans*.otf' \
-        \) -print 2>/dev/null >> "$_gfp_list"
+        _gfp_find_targets_in_root /data/fonts/files >> "$_gfp_list"
     fi
     awk 'NF && !seen[$0]++' "$_gfp_list" 2>/dev/null
     rm -f "$_gfp_list" 2>/dev/null || true
@@ -186,7 +211,7 @@ _gfp_namespace_pids() {
     _gfp_proc_root="${LUOSHU_PROC_ROOT:-/proc}"
     {
         # Named fast paths cover the common processes.
-        for _gfp_pid in $(pidof zygote64 zygote zygote_secondary zygote64_32 zygote_ocomp 2>/dev/null); do
+        for _gfp_pid in $(pidof zygote64 zygote zygote_secondary zygote64_32 zygote_ocomp webview_zygote 2>/dev/null); do
             printf '%s
 ' "$_gfp_pid"
         done
@@ -198,11 +223,18 @@ _gfp_namespace_pids() {
             printf '%s
 ' "$_gfp_pid"
         done
+        for _gfp_package in $(_gfp_consumer_packages); do
+            for _gfp_pid in $(pidof "$_gfp_package" 2>/dev/null); do
+                printf '%s\n' "$_gfp_pid"
+            done
+        done
 
         # Preserve the previous wildcard semantics for GMS subprocesses such as
         # com.google.android.gms:phenotype. This is one grep process for the whole proc tree, not
         # two child processes per PID. The result is merged with pidof rather than replacing it.
         grep -al -e zygote -e com.android.vending -e com.google.android.gms \
+            -e com.android.chrome -e com.chrome.beta -e com.chrome.dev -e com.chrome.canary \
+            -e com.google.android.googlequicksearchbox -e com.google.android.webview \
             "$_gfp_proc_root"/[0-9]*/cmdline 2>/dev/null |
             while IFS= read -r _gfp_path; do
                 [ -n "$_gfp_path" ] || continue
@@ -389,7 +421,13 @@ _gfp_apply_once() {
         mv -f "$_gfp_state_tmp" "$STATE" 2>/dev/null || true
         chmod 0600 "$STATE" 2>/dev/null || true
         _gfp_log "provider bridge：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag"
-        [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || am force-stop com.android.vending >/dev/null 2>&1 || true
+        if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
+            # A font already mmap'ed by a running browser is unaffected by a later bind. Restart
+            # only user-facing consumers; never force-stop GMS or the WebView provider itself.
+            for _gfp_refresh_package in com.android.vending com.android.chrome com.chrome.beta com.chrome.dev com.chrome.canary; do
+                am force-stop "$_gfp_refresh_package" >/dev/null 2>&1 || true
+            done
+        fi
         return 0
     fi
     rm -f "$_gfp_state_tmp" 2>/dev/null || true

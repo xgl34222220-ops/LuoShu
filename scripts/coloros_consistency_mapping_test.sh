@@ -20,7 +20,7 @@ import sys
 for index, name in enumerate(sys.argv[1:], 1):
     Path(name).write_bytes((f'font-{index}-'.encode() * 700)[:5000])
 PY
-for name in OplusOSUI-XThin.ttf OplusSans-SemiBold.ttf GoogleSansText-Regular.ttf Oplus-Serif.ttf Roboto-Italic.ttf; do
+for name in OplusOSUI-XThin.ttf OplusSans-SemiBold.ttf GoogleSansText-Regular.ttf GoogleSansText18pt-SemiBold.otf ProductSans-Bold.otf Oplus-Serif.ttf Roboto-Italic.ttf; do
     : > "$REAL_PRODUCT/$name"
 done
 
@@ -46,6 +46,8 @@ copy_as_coloros "$PUBLIC/fonts/Demo-Regular.ttf" "$MODULE/system/fonts" quick De
 ok cmp -s "$PUBLIC/fonts/Demo-Thin.ttf" "$MODULE/product/fonts/OplusOSUI-XThin.ttf"
 ok cmp -s "$PUBLIC/fonts/Demo-SemiBold.ttf" "$MODULE/product/fonts/OplusSans-SemiBold.ttf"
 ok cmp -s "$PUBLIC/fonts/Demo-Regular.ttf" "$MODULE/product/fonts/GoogleSansText-Regular.ttf"
+ok cmp -s "$PUBLIC/fonts/Demo-SemiBold.ttf" "$MODULE/product/fonts/GoogleSansText18pt-SemiBold.otf"
+ok cmp -s "$PUBLIC/fonts/Demo-Regular.ttf" "$MODULE/product/fonts/ProductSans-Bold.otf"
 no test -e "$MODULE/product/fonts/Oplus-Serif.ttf"
 no test -e "$MODULE/product/fonts/Roboto-Italic.ttf"
 echo 'ColorOS consistency mapping passed.'

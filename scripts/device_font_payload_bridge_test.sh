@@ -177,6 +177,15 @@ eq "$(grep -c '^Core-Regular.ttf$' "$TMP/coloros-first")" 1
 _coloros_discovered_ui_files() { printf '%s\n' 'Should-Not-Appear.ttf'; }
 get_all_coloros_files > "$TMP/coloros-second"
 ok cmp "$TMP/coloros-first" "$TMP/coloros-second"
+LUOSHU_COLOROS_TARGET_REVISION=4
+export LUOSHU_COLOROS_TARGET_REVISION
+get_all_coloros_files > "$TMP/coloros-revision"
+ok grep -qx Should-Not-Appear.ttf "$TMP/coloros-revision"
+if cmp "$TMP/coloros-first" "$TMP/coloros-revision" >/dev/null 2>&1; then
+    fail 'discovery revision did not invalidate the target cache'
+fi
+LUOSHU_COLOROS_TARGET_REVISION=3
+export LUOSHU_COLOROS_TARGET_REVISION
 LUOSHU_COLOROS_TARGETS_MAPPED=1
 export LUOSHU_COLOROS_TARGETS_MAPPED
 eq "$(get_all_coloros_names)" ''

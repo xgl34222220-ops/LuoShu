@@ -45,7 +45,7 @@ grep -q '^bootId=boot-b$' "$CONFIG/font-payload-boot.conf"
 
 # A successful newer payload commit invalidates an older migration marker.
 printf 'DemoFont\n' >"$CONFIG/active_font.conf"
-printf 'schema=device-template-v2-baseline-v9-rolegraph-v2\n' >"$CONFIG/font-payload-schema.conf"
+printf 'schema=device-template-v2-baseline-v10-latin-coverage-v1\n' >"$CONFIG/font-payload-schema.conf"
 printf 'system/fonts/Demo.ttf|hash|1234\n' >"$CONFIG/font-payload-manifest.conf"
 cat >"$CONFIG/font-payload-boot.conf" <<'EOF_PREPARED'
 state=prepared

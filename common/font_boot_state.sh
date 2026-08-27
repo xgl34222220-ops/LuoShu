@@ -59,7 +59,7 @@ luoshu_font_rebuild_marker_reconcile() {
     case "$_lfbs_boot_state" in prepared|booting|confirmed) ;; *) return 2 ;; esac
     [ -n "$_lfbs_active" ] && [ "$_lfbs_active" != default ] || return 2
     [ "$_lfbs_pending_font" = "$_lfbs_active" ] && [ "$_lfbs_boot_font" = "$_lfbs_active" ] || return 2
-    [ "$_lfbs_schema" = "${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-device-template-v2-baseline-v9-rolegraph-v2}" ] || return 2
+    [ "$_lfbs_schema" = "${LUOSHU_PAYLOAD_SCHEMA_CURRENT:-device-template-v2-baseline-v10-latin-coverage-v1}" ] || return 2
     [ "$_lfbs_boot_time" -ge "$_lfbs_pending_time" ] 2>/dev/null || return 2
     [ -s "$_lfbs_config/font-payload-manifest.conf" ] || return 2
     rm -f "$_lfbs_pending" "$_lfbs_config/font-payload-reapply-notified.conf" 2>/dev/null || true
