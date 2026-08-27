@@ -103,4 +103,6 @@ fi
 [ -f "$_luoshufp_module/common/mount_self_fallback.sh" ] && . "$_luoshufp_module/common/mount_self_fallback.sh"
 [ -f "$_luoshufp_module/common/mount_compat_policy.sh" ] && . "$_luoshufp_module/common/mount_compat_policy.sh"
 [ -f "$_luoshufp_module/common/device_font_payload_policy.sh" ] && . "$_luoshufp_module/common/device_font_payload_policy.sh"
+# Must load last: device_font_payload_policy.sh also overrides the validator.
+[ -f "$_luoshufp_module/common/font_validate_fast_v4.sh" ] && . "$_luoshufp_module/common/font_validate_fast_v4.sh"
 unset _luoshufp_module
