@@ -25,6 +25,19 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODE_HELPER" ] && . "$MODE_HELPER"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
+
+# v4 keeps owning the App/API surface, but every composite runtime action is delegated
+# to the exact pre-reset v14.4 chain. The v4 implementation remains below as a dormant
+# compatibility/reference backend for source audits; it is not reached by the App.
+LEGACY_V14_MIX="$MODDIR/common/legacy_v14_4/mix_router.sh"
+if [ -f "$LEGACY_V14_MIX" ]; then
+    case "${1:-config}" in
+        start|config|status|recover|reconcile)
+            exec sh "$LEGACY_V14_MIX" "$@"
+            ;;
+    esac
+fi
+
 json_escape(){ printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
 read_value(){ sed -n "s/^${1}=//p" "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n'; }
 
