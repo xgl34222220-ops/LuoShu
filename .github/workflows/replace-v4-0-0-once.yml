@@ -1,0 +1,53 @@
+name: Replace v4.0.0 once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/replace-v4-0-0-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  replace-tag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Replace v4.0.0 release tag with verified clean main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SOURCE_SHA: 0406ee3da74ff8918df63654cb6ceeb88a2409e1
+          EXPECTED_OLD_TAG_SHA: 31dd6e82e36b3785f7fac581c7a61fde01ca42de
+          TAG: v4.0.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force origin main --tags
+          source_sha="$(git rev-parse HEAD^)"
+          [[ "$source_sha" == "$EXPECTED_SOURCE_SHA" ]] || {
+            echo "Unexpected clean source: $source_sha" >&2
+            exit 2
+          }
+          old_tag_sha="$(git rev-list -n1 "$TAG" 2>/dev/null || true)"
+          [[ "$old_tag_sha" == "$EXPECTED_OLD_TAG_SHA" ]] || {
+            echo "Unexpected old tag: $old_tag_sha" >&2
+            exit 2
+          }
+          version="$(git show "$source_sha:module.prop" | sed -n 's/^version=//p' | head -n1)"
+          code="$(git show "$source_sha:module.prop" | sed -n 's/^versionCode=//p' | head -n1)"
+          [[ "$version" == 'v4.0.0' && "$code" == '40000' ]] || {
+            echo "Source version mismatch: $version/$code" >&2
+            exit 2
+          }
+          git cat-file -e "$source_sha:RELEASE_NOTES_v4.0.0.md"
+          gh release view "$TAG" >/dev/null
+          gh release delete "$TAG" --yes
+          git tag -f "$TAG" "$source_sha"
+          git push --force origin "refs/tags/$TAG"
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          [[ "$(git rev-list -n1 "$TAG")" == "$source_sha" ]]
+          echo "v4.0.0 tag moved to $source_sha; signed release workflow should now run from the tag."
