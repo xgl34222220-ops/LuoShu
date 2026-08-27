@@ -110,6 +110,24 @@ luoshu_text_reboot_reconcile() {
     return 0
 }
 
+# mix 模式只需要覆盖真实 UI 常用槽。v10 曾把 ColorOS 所有可发现字体文件都塞进
+# 前台复合负载，导致 payload 数量暴涨，94% 的完整负载校验遍历大量重复硬链接。
+# 这里仅在 font_mix.sh 进程内收敛到已知文本槽；普通单字体链路仍保留完整设备发现。
+_lfbs_mix_coloros_files() {
+    printf '%s\n' 'SysSans-Hans-Regular.ttf SysSans-Hans-Bold.ttf SysSans-Hans-Medium.ttf SysSans-Hans-Light.ttf SysSans-Hant-Regular.ttf SysSans-Hant-Bold.ttf SysSans-Hant-Medium.ttf SysSans-Hant-Light.ttf SysFont-Hans-Regular.ttf SysFont-Hans-Bold.ttf SysFont-Hans-Medium.ttf SysFont-Hans-Light.ttf SysFont-Hant-Regular.ttf SysFont-Hant-Bold.ttf SysFont-Hant-Medium.ttf SysFont-Hant-Light.ttf SysFont-Static-Regular.ttf SysFont-Static-Bold.ttf SysFont-Static-Medium.ttf SysFont-Static-Light.ttf SysFont-Regular.ttf SysFont-Bold.ttf SysFont-Medium.ttf SysFont-Light.ttf SysFont-Thin.ttf SysFont-Black.ttf SysSans-En-Regular.ttf SysSans-En-Bold.ttf SysSans-En-Medium.ttf SysSans-En-Light.ttf SysSans-En-Thin.ttf SysSans-En-Black.ttf Opposans-Hans-Regular.ttf Opposans-Hans-Bold.ttf Opposans-Hans-Medium.ttf Opposans-Hans-Light.ttf Opposans-En-Regular.ttf Opposans-En-Bold.ttf Opposans-En-Medium.ttf Opposans-En-Light.ttf OPSans-En-Regular.ttf OplusSans-Regular.ttf OplusSans-Medium.ttf OplusSans-Bold.ttf OppoSans-Regular.ttf OppoSans-Medium.ttf OppoSans-Bold.ttf GoogleSansText-Thin.ttf GoogleSansText-ExtraLight.ttf GoogleSansText-Light.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-SemiBold.ttf GoogleSansText-Bold.ttf GoogleSansText-ExtraBold.ttf GoogleSansText-Black.ttf GoogleSansText-VF.ttf GoogleSansTextVF.ttf GoogleSans-Thin.ttf GoogleSans-ExtraLight.ttf GoogleSans-Light.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-SemiBold.ttf GoogleSans-Bold.ttf GoogleSans-ExtraBold.ttf GoogleSans-Black.ttf GoogleSans-VF.ttf GoogleSansFlex-Regular.ttf GoogleSansDisplay-Regular.ttf GoogleSansDisplay-Medium.ttf GoogleSansDisplay-SemiBold.ttf GoogleSansDisplay-Bold.ttf GoogleSans18pt-Regular.ttf GoogleSans18pt-Medium.ttf GoogleSans18pt-SemiBold.ttf GoogleSans18pt-Bold.ttf GoogleSansText18pt-Regular.ttf GoogleSansText18pt-Medium.ttf GoogleSansText18pt-SemiBold.ttf GoogleSansText18pt-Bold.ttf ProductSans-Regular.ttf ProductSans-Medium.ttf ProductSans-Bold.ttf Roboto-Thin.ttf Roboto-ExtraLight.ttf Roboto-Light.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf Roboto-ExtraBold.ttf Roboto-Black.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf NotoSans-Regular.ttf NotoSans-Medium.ttf NotoSans-SemiBold.ttf NotoSans-Bold.ttf SourceSansPro-Regular.ttf SourceSansPro-SemiBold.ttf SourceSansPro-Bold.ttf DINCondensedBold.ttf DINPro-Regular.ttf DINPro-Medium.ttf DINPro-Bold.ttf OPPODIN-Regular.ttf OPPODIN-Medium.ttf OPPODIN-Bold.ttf OPPODINCondensed-Regular.ttf OPPODINCondensed-Medium.ttf OPPODINCondensed-Bold.ttf'
+}
+
+if [ "${0##*/}" = font_mix.sh ]; then
+    get_all_coloros_files() {
+        _lfbs_mix_coloros_files
+    }
+    get_all_coloros_names() {
+        for _lfbs_file in $(_lfbs_mix_coloros_files); do
+            printf '%s\n' "${_lfbs_file%.*}"
+        done
+    }
+fi
+
 if [ "${0##*/}" = font_boot_state.sh ]; then
     case "${1:-reconcile}" in
         mark) luoshu_text_reboot_mark "${2:-default}" ;;
