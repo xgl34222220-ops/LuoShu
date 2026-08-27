@@ -29,5 +29,5 @@ jobs:
           if [ ! -x common/python/bin/luoshu-python ]; then
             sh ./scripts/prepare_composite_runtime.sh
           fi
-      - name: Run complete source checks with isolated legacy final apply
+      - name: Run complete source checks with split v4 and legacy performance contracts
         run: sh ./scripts/check.sh
