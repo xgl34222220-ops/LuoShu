@@ -1,0 +1,47 @@
+name: Replace v4.0.0 ROM fix
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - .github/workflows/replace-v4.0.0-rom-fix.yml
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  replace:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Replace v4.0.0 tag and dispatch signed release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: v4.0.0
+          SOURCE_SHA: 315353592034ebd5ba8afcaa0ddb62bfd167f8e7
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_id="$(gh api "repos/$REPO/releases/tags/$TAG" --jq '.id' 2>/dev/null || true)"
+          if [ -n "$release_id" ]; then
+            gh api --method DELETE "repos/$REPO/releases/$release_id"
+          fi
+
+          gh api --method DELETE "repos/$REPO/git/refs/tags/$TAG" 2>/dev/null || true
+
+          gh api --method POST "repos/$REPO/git/refs" \
+            -f ref="refs/tags/$TAG" \
+            -f sha="$SOURCE_SHA" >/dev/null
+
+          resolved="$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq '.object.sha')"
+          [ "$resolved" = "$SOURCE_SHA" ] || {
+            echo "Tag mismatch: $resolved != $SOURCE_SHA" >&2
+            exit 1
+          }
+
+          gh api --method POST "repos/$REPO/actions/workflows/release.yml/dispatches" \
+            -f ref="$TAG" \
+            -f 'inputs[tag]'="$TAG" \
+            -f 'inputs[prerelease]'='false'
