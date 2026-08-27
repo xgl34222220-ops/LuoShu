@@ -9,18 +9,32 @@ mod = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
 spec.loader.exec_module(mod)
 
+module_prop = {}
+for raw_line in (ROOT / "module.prop").read_text(encoding="utf-8").splitlines():
+    if "=" not in raw_line:
+        continue
+    key, value = raw_line.split("=", 1)
+    module_prop[key.strip()] = value.strip()
+
+version = module_prop["version"]
+version_code = int(module_prop["versionCode"])
+tag = version
+notes_file = f"RELEASE_NOTES_{version}.md"
+assert (ROOT / notes_file).is_file(), notes_file
+
 meta = mod.build_metadata(
     repository="xgl34222220-ops/LuoShu",
-    version="v4.0.0",
-    version_code=40000,
-    tag="v4.0.0",
-    notes_file="RELEASE_NOTES_v4.0.0.md",
+    version=version,
+    version_code=version_code,
+    tag=tag,
+    notes_file=notes_file,
 )
+artifact = mod.artifact_version(version)
 assert meta == {
-    "version": "v4.0.0",
-    "versionCode": 40000,
-    "zipUrl": "https://github.com/xgl34222220-ops/LuoShu/releases/download/v4.0.0/LuoShu-v4.0.0.zip",
-    "changelog": "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/v4.0.0/RELEASE_NOTES_v4.0.0.md",
+    "version": version,
+    "versionCode": version_code,
+    "zipUrl": f"https://github.com/xgl34222220-ops/LuoShu/releases/download/{tag}/LuoShu-{artifact}.zip",
+    "changelog": f"https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/{tag}/{notes_file}",
 }
 
 for metadata_file in ("update.json", "update-prerelease.json"):
