@@ -167,12 +167,13 @@ sh -c '
 ' sh "$ROOT"
 grep -q 'luoshu_self_mount_stage_for_manager' "$ROOT/post-fs-data.sh"
 
-# Exercise the production wrapper too: APatch must leave post-fs-data without
-# mounting and wait for post-mount, while Magisk must still mount early.
+# Exercise the production router and its preserved v4 implementation together:
+# APatch waits for post-mount, while Magisk still mounts in post-fs-data.
 STAGE_MODULE="$TMP/stage-module"
 STAGE_LOG="$TMP/stage.log"
 mkdir -p "$STAGE_MODULE/common" "$STAGE_MODULE/.luoshu-runtime"
 cp "$ROOT/post-fs-data.sh" "$STAGE_MODULE/post-fs-data.sh"
+cp "$ROOT/post-fs-data-v4.sh" "$STAGE_MODULE/post-fs-data-v4.sh"
 cp "$ROOT/common/mount_self_backend.sh" "$STAGE_MODULE/common/mount_self_backend.sh"
 cat >"$STAGE_MODULE/common/private_payload.sh" <<'EOF_PRIVATE_STAGE'
 luoshu_private_mount_module_view() { printf 'view\n' >>"$LUOSHU_STAGE_LOG"; }
