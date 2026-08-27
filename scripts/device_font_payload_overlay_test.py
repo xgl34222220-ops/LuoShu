@@ -206,6 +206,7 @@ def main() -> None:
             "mappedSlots": 5,
             "rewrittenSlots": 4,
             "dynamicSlots": 1,
+            "directPhysicalSlots": 0,
             "dynamicInjectedFonts": 2,
             "uniqueCopiedFonts": 4,
             "xmlOutputs": 3,
