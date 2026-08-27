@@ -29,5 +29,5 @@ jobs:
           if [ ! -x common/python/bin/luoshu-python ]; then
             sh ./scripts/prepare_composite_runtime.sh
           fi
-      - name: Run complete source checks after router fixture update
+      - name: Run complete source checks after all router fixture updates
         run: sh ./scripts/check.sh
