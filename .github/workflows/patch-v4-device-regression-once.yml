@@ -2,7 +2,8 @@ name: Patch v4 device regression once
 
 on:
   push:
-    branches: [ fix/v4.0.0-device-regression ]
+    branches:
+      - fix/v4.0.0-device-regression
     paths:
       - .github/workflows/patch-v4-device-regression-once.yml
 
@@ -16,181 +17,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: fix/v4.0.0-device-regression
-      - name: Apply device regression fixes
-        shell: bash
+      - name: Apply patch
+        run: python3 scripts/apply_v4_device_regression_patch.py
+      - name: Validate patch
         run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          def read(path):
-              return Path(path).read_text(encoding='utf-8')
-          def write(path, text):
-              Path(path).write_text(text, encoding='utf-8')
-          def replace_once(path, old, new):
-              text = read(path)
-              if old not in text:
-                  raise SystemExit(f'missing expected block: {path}')
-              text = text.replace(old, new, 1)
-              write(path, text)
-
-          # 1. HyperOS: remove the v4.0.0 global raw-metric bypass. Final payload must be slot-specific.
-          replace_once('common/rom_adapters.sh', '''    # HyperOS has several independent physical font slots with different line-box contracts.\n    # Applying one main-slot hhea/OS2 contract to all of them moves text vertically in compact\n    # labels and EditText controls. Preserve the selected font/composite metrics on HyperOS;\n    # the ROM-specific mapper still selects only real UI slots and keeps protected scripts stock.\n    if [ "${IS_HYPEROS:-false}" = true ] && type _hyperos_compact_normalize >/dev/null 2>&1; then\n        if _hyperos_compact_normalize "$src" "$anchor" && [ -s "$anchor" ]; then\n            printf '%s\\n' "$anchor"\n            return 0\n        fi\n        rm -f "$anchor" 2>/dev/null || true\n    fi\n\n''', '')
-
-          # Inventory targets: support every logical font partition, but ColorOS will be filtered to safe roots below.
-          text = read('common/rom_adapters.sh')
-          pattern = re.compile(r'_device_font_inventory_target\(\) \{.*?\n\}\n\n_device_font_inventory_role\(\)', re.S)
-          replacement = r'''_device_font_inventory_target() {
-    _dfit_path="$1"
-    _dfit_module="$(_device_font_inventory_module)"
-    case "$_dfit_path" in
-        /system/fonts/*) printf '%s/system/fonts/%s\n' "$_dfit_module" "${_dfit_path#/system/fonts/}" ;;
-        /system_ext/fonts/*) printf '%s/system_ext/fonts/%s\n' "$_dfit_module" "${_dfit_path#/system_ext/fonts/}" ;;
-        /product/fonts/*) printf '%s/product/fonts/%s\n' "$_dfit_module" "${_dfit_path#/product/fonts/}" ;;
-        /vendor/fonts/*) printf '%s/vendor/fonts/%s\n' "$_dfit_module" "${_dfit_path#/vendor/fonts/}" ;;
-        /odm/fonts/*) printf '%s/odm/fonts/%s\n' "$_dfit_module" "${_dfit_path#/odm/fonts/}" ;;
-        /oem/fonts/*) printf '%s/oem/fonts/%s\n' "$_dfit_module" "${_dfit_path#/oem/fonts/}" ;;
-        /my_product/fonts/*) printf '%s/my_product/fonts/%s\n' "$_dfit_module" "${_dfit_path#/my_product/fonts/}" ;;
-        /my_engineering/fonts/*) printf '%s/my_engineering/fonts/%s\n' "$_dfit_module" "${_dfit_path#/my_engineering/fonts/}" ;;
-        /my_company/fonts/*) printf '%s/my_company/fonts/%s\n' "$_dfit_module" "${_dfit_path#/my_company/fonts/}" ;;
-        /my_preload/fonts/*) printf '%s/my_preload/fonts/%s\n' "$_dfit_module" "${_dfit_path#/my_preload/fonts/}" ;;
-        /my_region/fonts/*) printf '%s/my_region/fonts/%s\n' "$_dfit_module" "${_dfit_path#/my_region/fonts/}" ;;
-        /my_stock/fonts/*) printf '%s/my_stock/fonts/%s\n' "$_dfit_module" "${_dfit_path#/my_stock/fonts/}" ;;
-        /oplus_product/fonts/*) printf '%s/oplus_product/fonts/%s\n' "$_dfit_module" "${_dfit_path#/oplus_product/fonts/}" ;;
-        /oplus_engineering/fonts/*) printf '%s/oplus_engineering/fonts/%s\n' "$_dfit_module" "${_dfit_path#/oplus_engineering/fonts/}" ;;
-        /oplus_version/fonts/*) printf '%s/oplus_version/fonts/%s\n' "$_dfit_module" "${_dfit_path#/oplus_version/fonts/}" ;;
-        /oplus_region/fonts/*) printf '%s/oplus_region/fonts/%s\n' "$_dfit_module" "${_dfit_path#/oplus_region/fonts/}" ;;
-        /mi_ext/fonts/*) printf '%s/mi_ext/fonts/%s\n' "$_dfit_module" "${_dfit_path#/mi_ext/fonts/}" ;;
-        /cust/fonts/*) printf '%s/cust/fonts/%s\n' "$_dfit_module" "${_dfit_path#/cust/fonts/}" ;;
-        /hw_product/fonts/*) printf '%s/hw_product/fonts/%s\n' "$_dfit_module" "${_dfit_path#/hw_product/fonts/}" ;;
-        *) return 1 ;;
-    esac
-}
-
-_device_font_inventory_role()'''
-          text, count = pattern.subn(replacement, text, count=1)
-          if count != 1:
-              raise SystemExit('failed to replace inventory target mapper')
-          write('common/rom_adapters.sh', text)
-
-          # ColorOS inventory mapping must never touch dangerous OEM partitions; exact safe roots only.
-          text = read('common/rom_adapters.sh')
-          text = text.replace('''    _dfii_count=0\n    _dfii_bad=0\n''', '''    _dfii_count=0\n    _dfii_bad=0\n    _dfii_skipped=0\n''', 1)
-          text = text.replace('''        [ -n "$_dfii_logical" ] && [ -n "$_dfii_name" ] || continue\n        _dfii_target=$(_device_font_inventory_target "$_dfii_logical") || continue\n''', '''        [ -n "$_dfii_logical" ] && [ -n "$_dfii_name" ] || continue\n        if [ "${IS_COLOROS:-false}" = true ]; then\n            case "$_dfii_logical" in\n                /system/fonts/*|/system_ext/fonts/*|/product/fonts/*) ;;\n                *) _dfii_skipped=$((_dfii_skipped + 1)); continue ;;\n            esac\n        fi\n        _dfii_target=$(_device_font_inventory_target "$_dfii_logical") || {\n            _dfii_skipped=$((_dfii_skipped + 1))\n            continue\n        }\n''', 1)
-          text = text.replace('''    LUOSHU_INVENTORY_TARGETS_MAPPED=1\n    export LUOSHU_INVENTORY_TARGETS_MAPPED\n    _log_step "  已按设备原厂清单覆盖 $_dfii_count 个真实字体槽位"\n''', '''    LUOSHU_INVENTORY_TARGETS_MAPPED=1\n    LUOSHU_SAFE_PHYSICAL_FALLBACK=1\n    export LUOSHU_INVENTORY_TARGETS_MAPPED LUOSHU_SAFE_PHYSICAL_FALLBACK\n    _log_step "  已按设备原厂清单覆盖 $_dfii_count 个真实字体槽位"\n    [ "$_dfii_skipped" -eq 0 ] || _log_step "  已按 ROM 安全策略跳过 $_dfii_skipped 个非安全/未知字体槽位"\n''', 1)
-          write('common/rom_adapters.sh', text)
-
-          # 2. HyperOS: remove blind whole-partition mirroring. Exact physical slots come from inventory/final payload.
-          text = read('common/font_mix.sh')
-          block = '''    for _pair in \\\n        "vendor|${LUOSHU_VENDOR_FONTS_ROOT:-/vendor/fonts}" \\\n        "odm|${LUOSHU_ODM_FONTS_ROOT:-/odm/fonts}" \\\n        "oem|${LUOSHU_OEM_FONTS_ROOT:-/oem/fonts}" \\\n        "my_product|${LUOSHU_MY_PRODUCT_FONTS_ROOT:-/my_product/fonts}" \\\n        "hw_product|${LUOSHU_HW_PRODUCT_FONTS_ROOT:-/hw_product/fonts}" \\\n        "cust|${LUOSHU_CUST_FONTS_ROOT:-/cust/fonts}"; do\n        _part=${_pair%%|*}\n        _root=${_pair#*|}\n        [ -d "$_root" ] || continue\n        sync_secondary_partition "$_part" "$_root" || return 1\n    done\n'''
-          if block not in text:
-              raise SystemExit('HyperOS blanket sync block not found')
-          write('common/font_mix.sh', text.replace(block, '', 1))
-
-          # 3. ColorOS: restore the proven safe partition allowlist.
-          text = read('common/coloros_global.sh')
-          for line in [
-              '    printf \'%s|%s/vendor/fonts\\n\' "${LUOSHU_COLOROS_VENDOR_FONTS_ROOT:-/vendor/fonts}" "$_lcg_module"\n',
-              '    printf \'%s|%s/odm/fonts\\n\' "${LUOSHU_COLOROS_ODM_FONTS_ROOT:-/odm/fonts}" "$_lcg_module"\n',
-              '    printf \'%s|%s/oem/fonts\\n\' "${LUOSHU_COLOROS_OEM_FONTS_ROOT:-/oem/fonts}" "$_lcg_module"\n',
-              '    printf \'%s|%s/my_product/fonts\\n\' "${LUOSHU_COLOROS_MY_PRODUCT_FONTS_ROOT:-/my_product/fonts}" "$_lcg_module"\n',
-              '    printf \'%s|%s/oplus_product/fonts\\n\' "${LUOSHU_COLOROS_OPLUS_PRODUCT_FONTS_ROOT:-/oplus_product/fonts}" "$_lcg_module"\n',
-              '    printf \'%s|%s/oplus_engineering/fonts\\n\' "${LUOSHU_COLOROS_OPLUS_ENGINEERING_FONTS_ROOT:-/oplus_engineering/fonts}" "$_lcg_module"\n',
-              '    printf \'%s|%s/oplus_version/fonts\\n\' "${LUOSHU_COLOROS_OPLUS_VERSION_FONTS_ROOT:-/oplus_version/fonts}" "$_lcg_module"\n',
-              '    printf \'%s|%s/oplus_region/fonts\\n\' "${LUOSHU_COLOROS_OPLUS_REGION_FONTS_ROOT:-/oplus_region/fonts}" "$_lcg_module"\n',
-          ]:
-              text = text.replace(line, '')
-          write('common/coloros_global.sh', text)
-
-          # 4. Foreground fast fallback: ColorOS only maps system/system_ext/product. HyperOS may use exact broader roots.
-          text = read('common/device_font_payload_policy.sh')
-          pattern = re.compile(r'_device_font_fast_alias_roots\(\) \{.*?\n\}\n\n_device_font_fast_map\(\)', re.S)
-          replacement = r'''_device_font_fast_alias_roots() {
-    _dffar_anchor="$1"
-    _dffar_file="$2"
-    _dffar_module="$(_device_font_policy_module)"
-    _dffar_count=0
-    if [ "${IS_COLOROS:-false}" = true ]; then
-        _dffar_roots="/system/fonts|$_dffar_module/system/fonts
-/system_ext/fonts|$_dffar_module/system_ext/fonts
-/product/fonts|$_dffar_module/product/fonts"
-    else
-        _dffar_roots="/system/fonts|$_dffar_module/system/fonts
-/system_ext/fonts|$_dffar_module/system_ext/fonts
-/product/fonts|$_dffar_module/product/fonts
-/mi_ext/fonts|$_dffar_module/mi_ext/fonts
-/my_product/fonts|$_dffar_module/my_product/fonts
-/vendor/fonts|$_dffar_module/vendor/fonts
-/odm/fonts|$_dffar_module/odm/fonts
-/oem/fonts|$_dffar_module/oem/fonts
-/cust/fonts|$_dffar_module/cust/fonts
-/hw_product/fonts|$_dffar_module/hw_product/fonts"
-    fi
-    while IFS='|' read -r _dffar_real _dffar_overlay; do
-        [ -e "$_dffar_real/$_dffar_file" ] || continue
-        mkdir -p "$_dffar_overlay" 2>/dev/null || continue
-        rm -f "$_dffar_overlay/$_dffar_file" 2>/dev/null || true
-        if ln "$_dffar_anchor" "$_dffar_overlay/$_dffar_file" 2>/dev/null || \
-           cp -f "$_dffar_anchor" "$_dffar_overlay/$_dffar_file" 2>/dev/null; then
-            chmod 0644 "$_dffar_overlay/$_dffar_file" 2>/dev/null || true
-            _dffar_count=$((_dffar_count + 1))
-        fi
-    done <<EOF_DFFAR_ROOTS
-$_dffar_roots
-EOF_DFFAR_ROOTS
-    printf '%s\n' "$_dffar_count"
-}
-
-_device_font_fast_map()'''
-          text, count = pattern.subn(replacement, text, count=1)
-          if count != 1:
-              raise SystemExit('failed to replace fast alias roots')
-          text = text.replace('''    _device_font_policy_log "前台快速映射完成：font=$_dffm_family aliases=$_dffm_total"\n    return 0\n''', '''    LUOSHU_SAFE_PHYSICAL_FALLBACK=1\n    export LUOSHU_SAFE_PHYSICAL_FALLBACK\n    _device_font_policy_log "前台快速映射完成：font=$_dffm_family aliases=$_dffm_total"\n    return 0\n''', 1)
-          old_missing = '''    if [ -z "$_dfpp_template_key" ]; then\n        _device_font_policy_log "设备对齐暂不可用：需要在系统默认字体状态重启一次建立原厂模板"\n        LUOSHU_DEVICE_PAYLOAD_ERROR='缺少原厂字体模板；请先恢复系统默认字体并完整重启一次'\n        export LUOSHU_DEVICE_PAYLOAD_ERROR\n        return 2\n    fi\n'''
-          new_missing = '''    if [ -z "$_dfpp_template_key" ]; then\n        if [ "${IS_COLOROS:-false}" = true ] && [ "${LUOSHU_SAFE_PHYSICAL_FALLBACK:-0}" = 1 ]; then\n            _device_font_policy_log "ColorOS 原厂模板不可用；保留已验证的 system/system_ext/product 物理槽映射，不阻止切换"\n            return 3\n        fi\n        _device_font_policy_log "设备对齐暂不可用：当前 ROM 没有可信原厂槽位模板"\n        LUOSHU_DEVICE_PAYLOAD_ERROR='缺少可信原厂字体模板，未提交不确定的逐槽负载'\n        export LUOSHU_DEVICE_PAYLOAD_ERROR\n        return 2\n    fi\n'''
-          if old_missing not in text:
-              raise SystemExit('missing template-fail block not found')
-          text = text.replace(old_missing, new_missing, 1)
-          text = text.replace('''        1)\n            LUOSHU_DEVICE_PAYLOAD_RESULT='device-failed'\n            return 1\n            ;;\n    esac\n''', '''        1)\n            LUOSHU_DEVICE_PAYLOAD_RESULT='device-failed'\n            return 1\n            ;;\n        3)\n            LUOSHU_DEVICE_PAYLOAD_RESULT='safe-physical-fallback'\n            return 0\n            ;;\n    esac\n''', 1)
-          write('common/device_font_payload_policy.sh', text)
-
-          # 5. Inventory: include Xiaomi direct status-bar/clock slots and prefer LuoShu's captured stock lower tree.
-          text = read('common/font_inventory.py')
-          text = text.replace('''    re.compile(r"^MiSans(?:VF(?:_Overlay)?|LatinVF|TCVF|L3)\\.(?:ttf|otf|ttc|otc)$", re.I),\n''', '''    re.compile(r"^MiSans(?:VF(?:_Overlay)?|LatinVF|TCVF|L3|Clock[A-Za-z0-9_.-]*)\\.(?:ttf|otf|ttc|otc)$", re.I),\n    re.compile(r"^(?:Mitype[A-Za-z0-9_.-]*|MiClock[A-Za-z0-9_.-]*|AndroidClock[A-Za-z0-9_.-]*|Clockopia)\\.(?:ttf|otf|ttc|otc)$", re.I),\n''', 1)
-          old_pick = '''    if overlay_risk:\n        for prefix in MIRROR_PREFIXES:\n            candidate = prefix / logical.relative_to("/")\n            if candidate.is_dir():\n                return candidate\n        raise InventoryError(f"旧版字体覆盖仍在活动，无法安全读取原厂目录：{logical}")\n'''
-          new_pick = '''    if overlay_risk:\n        parts = logical.parts\n        if len(parts) >= 3 and parts[0] == "/":\n            state_root = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))\n            lower = state_root / "lower" / f"{parts[1]}-{parts[2]}"\n            if lower.is_dir():\n                return lower\n        for prefix in MIRROR_PREFIXES:\n            candidate = prefix / logical.relative_to("/")\n            if candidate.is_dir():\n                return candidate\n        raise InventoryError(f"字体覆盖仍在活动且没有可验证的原厂 lower/mirror：{logical}")\n'''
-          if old_pick not in text:
-              raise SystemExit('inventory stock-root block not found')
-          text = text.replace(old_pick, new_pick, 1)
-          write('common/font_inventory.py', text)
-
-          # Always refresh inventory during module update: heuristics/root policy changed in this hotfix.
-          text = read('.luoshu-runtime/customize-v227.sh')
-          text = text.replace('''            "$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan \\\n                --output "$FONT_INVENTORY_OUTPUT" \\\n''', '''            "$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan --force \\\n                --output "$FONT_INVENTORY_OUTPUT" \\\n''', 1)
-          # Never silently convert a selected font to default if migration failed.
-          text = text.replace('''    printf 'default\\n' > "$MODPATH/config/active_font.conf"\nfi\n\n# 必须在新模块覆盖挂载系统字体之前读取原厂槽位。''', '''    _old_selected=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\\r\\n')\n    if [ -n "$_old_selected" ] && [ "$_old_selected" != default ]; then\n        ui_print "✗ 无法安全迁移当前字体 $_old_selected；已中止本次更新，不会切回系统默认字体"\n        exit 1\n    fi\n    printf 'default\\n' > "$MODPATH/config/active_font.conf"\nfi\n\n# 必须在新模块覆盖挂载系统字体之前读取原厂槽位。''', 1)
-          write('.luoshu-runtime/customize-v227.sh', text)
-
-          # 6. Final device payload: enrich trusted XML template with Xiaomi physical slots that bypass fonts.xml.
-          path = 'common/device_font_payload_build.py'
-          write(path, '''#!/usr/bin/env python3\n# Packaging contract marker: device-font-payload-v1\n"""Identity-safe wrapper plus HyperOS direct physical-slot enrichment."""\nfrom __future__ import annotations\n\nimport os\nimport re\nfrom pathlib import Path\nfrom typing import Any\n\nimport device_font_payload_build_base as _base\nfrom device_font_payload_build_base import *  # noqa: F401,F403\n\n_ORIGINAL_BUILD_SIGNATURE = _base.build_signature\n_ORIGINAL_BUILD_PAYLOAD = _base.build_payload\n\n_HYPEROS_DIRECT = re.compile(\n    r"^(?:MiSans(?:VF(?:_Overlay)?|LatinVF|TCVF|L3|Clock[A-Za-z0-9_.-]*)|"\n    r"Mitype[A-Za-z0-9_.-]*|MiClock[A-Za-z0-9_.-]*|AndroidClock[A-Za-z0-9_.-]*|Clockopia|"\n    r"GoogleSans(?:Text|Flex)?[A-Za-z0-9_.-]*|Roboto(?:Flex|Static)?[A-Za-z0-9_.-]*|"\n    r"SourceSansPro[A-Za-z0-9_.-]*|(?:100|200|300|350|400|500|600|700|800|900))"\n    r"\\.(?:ttf|otf|ttc|otc)$", re.I\n)\n_DENY = ("italic", "oblique", "emoji", "symbol", "icon", "serif", "math", "music")\n_ROOTS = (\n    "system", "system_ext", "product", "mi_ext", "my_product", "vendor", "odm", "oem", "cust", "hw_product"\n)\n\ndef build_signature(slot: dict[str, Any], source_profile: dict[str, Any], source_weight: int) -> str:\n    return _ORIGINAL_BUILD_SIGNATURE(slot, source_profile, source_weight)\n\ndef _weight(name: str) -> int:\n    lowered = name.lower()\n    hit = re.search(r"(?:^|[-_])(100|200|300|350|400|500|600|700|800|900)(?:[-_.]|$)", lowered)\n    if hit:\n        return int(hit.group(1))\n    for token, value in (("thin",100),("extralight",200),("light",300),("medium",500),("semibold",600),("bold",700),("extrabold",800),("black",900)):\n        if token in lowered.replace("-", "").replace("_", ""):\n            return value\n    return 400\n\ndef _roles(name: str) -> list[str]:\n    lower = name.lower()\n    if any(token in lower for token in _DENY):\n        return []\n    if not _HYPEROS_DIRECT.fullmatch(name):\n        return []\n    if "clock" in lower or lower.startswith("mitypeclock"):\n        return ["clock", "global-ui"]\n    if "mono" in lower:\n        return ["mono", "global-ui"]\n    if lower.startswith("mitype"):\n        return ["display", "global-ui"]\n    return ["global-ui"]\n\ndef _stock_file(module: Path, partition: str, name: str) -> Path | None:\n    logical = Path("/") / partition / "fonts" / name\n    state_root = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))\n    lower = state_root / "lower" / f"{partition}-fonts" / name\n    if lower.is_file():\n        return lower\n    for prefix in (Path("/debug_ramdisk/.magisk/mirror"), Path("/sbin/.magisk/mirror"), Path("/data/adb/magisk/mirror")):\n        candidate = prefix / partition / "fonts" / name\n        if candidate.is_file():\n            return candidate\n    overlay = module / partition / "fonts" / name\n    if overlay.exists():\n        return None\n    return logical if logical.is_file() else None\n\ndef _enrich_hyperos(template: dict[str, Any]) -> dict[str, Any]:\n    module = Path(__file__).resolve().parent.parent\n    slots = template.get("slots") if isinstance(template.get("slots"), list) else []\n    existing = {str(item.get("resolvedPath", "")) for item in slots if isinstance(item, dict)}\n    found_hyperos = False\n    candidates: list[tuple[str, str, Path, list[str]]] = []\n    for partition in _ROOTS:\n        live = Path("/") / partition / "fonts"\n        lower_root = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount")) / "lower" / f"{partition}-fonts"\n        roots = [root for root in (lower_root, live) if root.is_dir()]\n        names: set[str] = set()\n        for root in roots:\n            try:\n                names.update(item.name for item in root.iterdir() if item.is_file())\n            except OSError:\n                continue\n        for name in sorted(names):\n            roles = _roles(name)\n            if not roles:\n                continue\n            if name.lower().startswith(("misans", "mitype", "miclock")):\n                found_hyperos = True\n            logical = str(Path("/") / partition / "fonts" / name)\n            if logical in existing:\n                continue\n            stock = _stock_file(module, partition, name)\n            if stock is not None:\n                candidates.append((partition, name, stock, roles))\n    if not found_hyperos:\n        return template\n    for partition, name, stock, roles in candidates:\n        logical = str(Path("/") / partition / "fonts" / name)\n        try:\n            profile = _base.template_engine.inspect_font(stock, -1, hash_fonts=False)\n        except Exception:\n            continue\n        slots.append({\n            "family": f"physical-{name}",\n            "familyNormalized": f"physical-{name}".lower(),\n            "familyAttributes": {},\n            "sourceXml": "",\n            "declared": name,\n            "postScriptName": "",\n            "weight": _weight(name),\n            "style": "normal",\n            "index": 0,\n            "axes": "",\n            "roles": roles,\n            "replaceable": True,\n            "resolvedPath": logical,\n            "directPhysical": True,\n            "font": profile,\n        })\n        existing.add(logical)\n    template["slots"] = slots\n    summary = template.setdefault("summary", {})\n    summary["slots"] = len(slots)\n    summary["replaceable"] = sum(1 for item in slots if item.get("replaceable"))\n    summary["directPhysical"] = sum(1 for item in slots if item.get("directPhysical"))\n    return template\n\ndef build_payload(template, source_dir, source_prefix, output_dir, manifest_path):\n    return _ORIGINAL_BUILD_PAYLOAD(_enrich_hyperos(template), source_dir, source_prefix, output_dir, manifest_path)\n\n_base.build_signature = build_signature\n_base.build_payload = build_payload\n\ndef main() -> int:\n    return _base.main()\n\nif __name__ == "__main__":\n    raise SystemExit(main())\n''')
-
-          # 7. Overlay renderer: physical slots are copied to their exact stock filenames, not only XML families.
-          text = read('common/device_font_payload_overlay.py')
-          anchor = '''def commit_directory(stage: Path, output: Path) -> None:\n'''
-          direct_fn = '''def copy_direct_physical_slots(\n    slots: list[dict[str, Any]], payload_root: Path, stage: Path, copied: dict[tuple[str, str], Path]\n) -> int:\n    count = 0\n    for slot in slots:\n        if slot.get("sourceXml") or not slot.get("generatedFile"):\n            continue\n        stock_path = str(slot.get("stockPath", ""))\n        if not stock_path.startswith("/"):\n            continue\n        parts = Path(stock_path).parts\n        if len(parts) < 4 or parts[0] != "/" or parts[2] != "fonts":\n            raise OverlayError(f"物理字体槽路径无效：{stock_path}")\n        partition = parts[1]\n        target_name = parts[-1]\n        generated_name = str(slot["generatedFile"])\n        source = payload_root / "fonts" / generated_name\n        if not source.is_file() or source.stat().st_size < 1024:\n            raise OverlayError(f"物理槽生成字体不存在：{generated_name}")\n        destination = stage / partition / "fonts" / target_name\n        destination.parent.mkdir(parents=True, exist_ok=True)\n        try:\n            os.link(source, destination)\n        except OSError:\n            shutil.copyfile(source, destination)\n        os.chmod(destination, 0o644)\n        copied[(partition, target_name)] = destination\n        count += 1\n    return count\n\n\n'''
-          if direct_fn not in text:
-              text = text.replace(anchor, direct_fn + anchor, 1)
-          text = text.replace('''        by_xml: dict[str, list[dict[str, Any]]] = defaultdict(list)\n        for slot in slots:\n            by_xml[str(slot.get("sourceXml", ""))].append(slot)\n\n        system_trees:''', '''        by_xml: dict[str, list[dict[str, Any]]] = defaultdict(list)\n        for slot in slots:\n            if slot.get("sourceXml"):\n                by_xml[str(slot.get("sourceXml", ""))].append(slot)\n        direct_physical = copy_direct_physical_slots(slots, payload_root, stage, copied)\n\n        system_trees:''', 1)
-          text = text.replace('''        if rewritten + dynamic_mapped != mapped:\n            raise OverlayError(\n                f"槽位映射不完整：mapped={mapped} rewritten={rewritten} dynamic={dynamic_mapped}"\n            )\n''', '''        if rewritten + dynamic_mapped + direct_physical != mapped:\n            raise OverlayError(\n                f"槽位映射不完整：mapped={mapped} rewritten={rewritten} dynamic={dynamic_mapped} physical={direct_physical}"\n            )\n''', 1)
-          text = text.replace('''                "dynamicSlots": dynamic_mapped,\n''', '''                "dynamicSlots": dynamic_mapped,\n                "directPhysicalSlots": direct_physical,\n''', 1)
-          write('common/device_font_payload_overlay.py', text)
-
-          # 8. Regression guard reflects real device contract, not the failed #206 assumptions.
-          write('scripts/v4_rom_regression_test.sh', '''#!/bin/sh\nset -eu\n# Inconclusive boot verification never resets user selection.\ngrep -q 'degraded:booting.*degraded:confirmed' common/device_font_load_verify.sh\n! grep -A45 '^luoshu_payload_quarantine()' common/font_runtime_policy.sh | grep -q "printf 'default"\n! grep -q '字体挂载连续三次不可见，已安全恢复系统默认字体' service_v4.sh\n# HyperOS must not use the failed global raw-metric bypass or blanket secondary partition copy.\n! grep -A25 '^_font_anchor()' common/rom_adapters.sh | grep -q '_hyperos_compact_normalize'\n! grep -A35 '^sync_secondary_hyperos_dirs()' common/font_mix.sh | grep -q 'LUOSHU_VENDOR_FONTS_ROOT'\n# Exact inventory mapper covers Xiaomi secondary roots and direct SystemUI clock/type slots.\ngrep -A35 '^_device_font_inventory_target()' common/rom_adapters.sh | grep -q '/mi_ext/fonts/'\ngrep -A35 '^_device_font_inventory_target()' common/rom_adapters.sh | grep -q '/hw_product/fonts/'\ngrep -q 'Mitype' common/font_inventory.py\ngrep -q 'MiClock' common/font_inventory.py\ngrep -q 'directPhysicalSlots' common/device_font_payload_overlay.py\ngrep -q 'physical-{name}' common/device_font_payload_build.py\n# ColorOS fallback is limited to system/system_ext/product and missing template no longer forces default.\n! grep -A20 '^_luoshu_coloros_root_pairs()' common/coloros_global.sh | grep -Eq '/vendor/fonts|/odm/fonts|/oem/fonts|/oplus_'\ngrep -q 'ColorOS 原厂模板不可用' common/device_font_payload_policy.sh\n! grep -q '请先恢复系统默认字体并完整重启一次' common/device_font_payload_policy.sh\n# Complete reboot remains independent from font task busy state.\ngrep -q 'fun rebootDevice()' android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt\n! grep -A12 'fun rebootDevice()' android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt | grep -q 'operationBusy || mixState.busy'\necho 'v4 device regression guards passed'\n''')
-          PY
-
           sh -n common/rom_adapters.sh
           sh -n common/font_mix.sh
           sh -n common/coloros_global.sh
@@ -198,7 +28,8 @@ _device_font_fast_map()'''
           sh -n .luoshu-runtime/customize-v227.sh
           python3 -m py_compile common/font_inventory.py common/device_font_payload_build.py common/device_font_payload_overlay.py
           sh scripts/v4_rom_regression_test.sh
-
+      - name: Commit patch
+        run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add common .luoshu-runtime/customize-v227.sh scripts/v4_rom_regression_test.sh
