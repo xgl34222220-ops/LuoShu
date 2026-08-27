@@ -84,6 +84,39 @@ elif type luoshu_migrate_active_install >/dev/null 2>&1; then
     fi
 fi
 
+# A schema mismatch must never turn the user's selection into stock/default.
+# Rebuild the selected composite synchronously with the new engine before this update can boot.
+if [ "$UPDATE_PRESERVED" = true ] && [ "${LUOSHU_UPDATE_REBUILD_REQUIRED:-false}" = true ]; then
+    _upgrade_active=$(head -n1 "$MODPATH/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    if [ "$_upgrade_active" = mix ]; then
+        _upgrade_cjk=$(sed -n 's/^cjk=//p' "$MODPATH/config/font_mix.conf" 2>/dev/null | head -n1)
+        _upgrade_latin=$(sed -n 's/^latin=//p' "$MODPATH/config/font_mix.conf" 2>/dev/null | head -n1)
+        _upgrade_digit=$(sed -n 's/^digit=//p' "$MODPATH/config/font_mix.conf" 2>/dev/null | head -n1)
+        [ -n "$_upgrade_cjk" ] && [ -n "$_upgrade_latin" ] && [ -n "$_upgrade_digit" ] || {
+            ui_print "✗ 无法读取原复合字体配置，已取消更新；不会恢复默认字体"
+            type abort >/dev/null 2>&1 && abort "洛书：原字体配置不完整" || exit 1
+        }
+        ui_print "• 字体引擎结构已变化，正在保留当前字体并重建安全负载..."
+        _upgrade_task="upgrade-$(date +%s)-$$"
+        _upgrade_started=$(date +%s)
+        MODDIR="$MODPATH" sh "$MODPATH/common/font_mix.sh" worker             "$_upgrade_task" "$_upgrade_cjk" "$_upgrade_latin" "$_upgrade_digit" "$_upgrade_started"
+        _upgrade_state=$(sed -n 's/^state=//p' "$MODPATH/config/mix_task.conf" 2>/dev/null | head -n1)
+        if [ "$_upgrade_state" != success ]; then
+            _upgrade_error=$(sed -n 's/^message=//p' "$MODPATH/config/mix_task.conf" 2>/dev/null | head -n1)
+            [ -n "$_upgrade_error" ] || _upgrade_error="新字体负载重建失败"
+            ui_print "✗ $_upgrade_error"
+            ui_print "✗ 已取消本次更新；旧模块与旧字体选择保持不变"
+            type abort >/dev/null 2>&1 && abort "洛书：$_upgrade_error" || exit 1
+        fi
+        LUOSHU_UPDATE_REBUILD_REQUIRED=false
+        rm -f "$MODPATH/config/font-payload-rebuild-pending.conf" 2>/dev/null || true
+        ui_print "✓ 已按新版引擎重建当前复合字体；不会切回默认字体"
+    elif [ "$_upgrade_active" != default ]; then
+        ui_print "✗ 当前字体模式需要安全重建，但此安装器不能无损重建；已取消更新"
+        type abort >/dev/null 2>&1 && abort "洛书：无法无损重建当前字体" || exit 1
+    fi
+fi
+
 if [ "$UPDATE_PRESERVED" != true ]; then
     # 全新安装或旧负载无效时，仅迁移可安全复用的用户偏好。
     for _config in font_weight.conf font_weight_original.conf axes_mix.conf font_mix.conf; do
@@ -98,7 +131,11 @@ if [ "$UPDATE_PRESERVED" != true ]; then
     done
     rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" \
           "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
+    if [ -f "$OLD_MOD/module.prop" ] && [ -s "$OLD_MOD/config/active_font.conf" ]; then
+    cp -f "$OLD_MOD/config/active_font.conf" "$MODPATH/config/active_font.conf" 2>/dev/null || true
+else
     printf 'default\n' > "$MODPATH/config/active_font.conf"
+fi
 fi
 
 # 必须在新模块覆盖挂载系统字体之前读取原厂槽位。v2 扫描器会分别统计全部原厂
