@@ -1,0 +1,39 @@
+name: Patch v4 tests once
+on:
+  push:
+    branches: [fix/v4.0.0-device-regression]
+    paths: [.github/workflows/patch-v4-tests-once.yml]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/v4.0.0-device-regression
+      - name: Update test contracts
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p=Path('scripts/coloros_partition_mapping_test.sh')
+          s=p.read_text()
+          s=s.replace('''# Simulate the physical ColorOS layout: Google input families live in product, while the normal\n# system family and other OEM faces can be spread across system_ext and my_product.\n''','''# Safe ColorOS mapping deliberately covers system/system_ext/product only. my_product is present\n# in the fixture to prove the module does not recreate the bootloop-prone broad OEM overlay.\n''')
+          s=s.replace('''ok cmp -s "$USER_FONTS_DIR/Demo-Bold.ttf" "$MODULE_DIR/my_product/fonts/Opposans-En-Bold.ttf"\n''','''no test -e "$MODULE_DIR/my_product/fonts/Opposans-En-Bold.ttf"\n''')
+          s=s.replace("printf 'ColorOS Play input partition mapping tests passed.\\n'","printf 'ColorOS safe partition mapping tests passed.\\n'")
+          p.write_text(s)
+
+          p=Path('scripts/device_font_payload_overlay_test.py')
+          s=p.read_text()
+          s=s.replace('''            "dynamicSlots": 1,\n            "dynamicInjectedFonts": 2,\n''','''            "dynamicSlots": 1,\n            "directPhysicalSlots": 0,\n            "dynamicInjectedFonts": 2,\n''')
+          p.write_text(s)
+          PY
+          sh scripts/coloros_partition_mapping_test.sh
+          python3 scripts/device_font_payload_overlay_test.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add scripts/coloros_partition_mapping_test.sh scripts/device_font_payload_overlay_test.py
+          git commit -m 'test: enforce safe ColorOS and physical overlay contracts'
+          git push origin HEAD:fix/v4.0.0-device-regression

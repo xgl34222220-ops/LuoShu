@@ -78,7 +78,8 @@ SANS_SERIF_UI_SUFFIX_TOKENS = {
 }
 DENY_FILE_TOKENS = ("emoji", "icon", "symbol", "math", "music", "serif")
 HEURISTIC_PATTERNS = (
-    re.compile(r"^MiSans(?:VF(?:_Overlay)?|LatinVF|TCVF|L3)\.(?:ttf|otf|ttc|otc)$", re.I),
+    re.compile(r"^MiSans(?:VF(?:_Overlay)?|LatinVF|TCVF|L3|Clock[A-Za-z0-9_.-]*)\.(?:ttf|otf|ttc|otc)$", re.I),
+    re.compile(r"^(?:Mitype[A-Za-z0-9_.-]*|MiClock[A-Za-z0-9_.-]*|AndroidClock[A-Za-z0-9_.-]*|Clockopia)\.(?:ttf|otf|ttc|otc)$", re.I),
     re.compile(r"^(?:100|200|300|350|400|500|600|700|800|900)\.ttf$", re.I),
     re.compile(
         r"^(?:Sys(?:Sans|Font)|OppoSans|Opposans|OPSans|OPlusSans|GoogleSans(?:Text|Flex)?|"
@@ -358,11 +359,17 @@ def _pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: bool) 
     if explicit is not None:
         return explicit
     if overlay_risk:
+        parts = logical.parts
+        if len(parts) >= 3 and parts[0] == "/":
+            state_root = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))
+            lower = state_root / "lower" / f"{parts[1]}-{parts[2]}"
+            if lower.is_dir():
+                return lower
         for prefix in MIRROR_PREFIXES:
             candidate = prefix / logical.relative_to("/")
             if candidate.is_dir():
                 return candidate
-        raise InventoryError(f"旧版字体覆盖仍在活动，无法安全读取原厂目录：{logical}")
+        raise InventoryError(f"字体覆盖仍在活动且没有可验证的原厂 lower/mirror：{logical}")
     return logical
 
 
