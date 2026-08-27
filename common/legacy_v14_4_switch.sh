@@ -21,6 +21,8 @@ ACTIVE_FONT_CONF="$CONFIG_DIR/active_font.conf"
 TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
 LEGACY_MODE_CONF="$CONFIG_DIR/font_runtime_legacy_v14_4.conf"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
+LEGACY_SWITCH_LOCK="$MODDIR/.font_switch.lock"
+LEGACY_LOCK_HELD=false
 
 # Current releases keep the mountable tree private. Generate the old v14.4 aliases
 # directly inside that source tree, then let the existing self-mount layer expose it.
@@ -35,6 +37,9 @@ export MODULE_DIR LUOSHU_PUBLIC_DIR
 [ -f "$LEGACY_DIR/util_functions.sh" ] && . "$LEGACY_DIR/util_functions.sh"
 [ -f "$LEGACY_DIR/font_check.sh" ] && . "$LEGACY_DIR/font_check.sh"
 [ -f "$LEGACY_DIR/rom_adapters.sh" ] && . "$LEGACY_DIR/rom_adapters.sh"
+# Only concurrency safety is shared with v4. Font mapping, validation and payload
+# generation above remain the isolated v14.4 implementation.
+[ -f "$MODDIR/common/font_switch_lock.sh" ] && . "$MODDIR/common/font_switch_lock.sh"
 
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
 type check_coloros >/dev/null 2>&1 && check_coloros
@@ -50,6 +55,43 @@ legacy_error() {
     printf '{"status":"error","message":"%s","legacyCore":"v14.4.0"}\n' "$_msg"
     return 1
 }
+
+legacy_lock_cleanup() {
+    [ "$LEGACY_LOCK_HELD" = true ] || return 0
+    if type luoshu_font_lock_release >/dev/null 2>&1; then
+        luoshu_font_lock_release "$LEGACY_SWITCH_LOCK" "$$" >/dev/null 2>&1 || \
+            luoshu_font_lock_force_clear "$LEGACY_SWITCH_LOCK" "$$" >/dev/null 2>&1 || true
+    fi
+    LEGACY_LOCK_HELD=false
+}
+
+legacy_lock_acquire() {
+    type luoshu_font_lock_acquire >/dev/null 2>&1 || {
+        legacy_error '缺少字体切换身份锁'
+        return 1
+    }
+    luoshu_font_lock_acquire "$LEGACY_SWITCH_LOCK" "$$"
+    _legacy_lock_rc=$?
+    case "$_legacy_lock_rc" in
+        0)
+            LEGACY_LOCK_HELD=true
+            return 0
+            ;;
+        2)
+            legacy_error '字体正在切换中，请稍后再试'
+            return 1
+            ;;
+        *)
+            legacy_error '无法创建字体切换锁'
+            return 1
+            ;;
+    esac
+}
+
+trap 'legacy_lock_cleanup' EXIT
+trap 'legacy_lock_cleanup; exit 129' HUP
+trap 'legacy_lock_cleanup; exit 130' INT
+trap 'legacy_lock_cleanup; exit 143' TERM
 
 legacy_find_text_font_file() {
     _wanted="$1"
@@ -99,7 +141,6 @@ legacy_clear_generated_xml() {
         [ -d "$_etc" ] || continue
         rm -f "$_etc/fonts.xml" "$_etc/font_fallback.xml" \
               "$_etc/fonts_customization.xml" "$_etc/font_customization.xml" 2>/dev/null || true
-        # Remove only LuoShu-generated XML leftovers with nonstandard names.
         for _xml in "$_etc"/*.xml; do
             [ -f "$_xml" ] || continue
             if grep -a -qE 'LuoShuSlot-|LuoShu-|luoshu' "$_xml" 2>/dev/null; then
@@ -174,6 +215,7 @@ legacy_write_mode() {
 legacy_switch_font() {
     _font_id="$1"
     [ -n "$_font_id" ] || { legacy_error '未指定字体'; return 1; }
+    legacy_lock_acquire || return 1
 
     _source=''
     if [ "$_font_id" != default ]; then
