@@ -1,0 +1,276 @@
+#!/system/bin/sh
+# ============================================================
+# 洛书 - 后台服务（版本以 module.prop 为准）
+# 功能：启动完成后校正权限、补装内置 App、重建旧字体负载、预热索引并恢复字重。
+# ============================================================
+
+MODDIR="${0%/*}"
+MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1)
+[ -n "$MODULE_VERSION" ] || MODULE_VERSION="unknown"
+MODULE_DIR="$MODDIR"
+[ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
+[ -f "$MODDIR/common/font_config_runtime.sh" ] && . "$MODDIR/common/font_config_runtime.sh"
+[ -f "$MODDIR/common/font_config_partitions.sh" ] && . "$MODDIR/common/font_config_partitions.sh"
+[ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
+[ -f "$MODDIR/common/module_update_state.sh" ] && . "$MODDIR/common/module_update_state.sh"
+[ -f "$MODDIR/common/font_boot_state.sh" ] && . "$MODDIR/common/font_boot_state.sh"
+
+(
+    WAITED=0
+    while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ] && [ "$WAITED" -lt 600 ]; do
+        sleep 3
+        WAITED=$((WAITED + 3))
+    done
+
+    # A timeout is not proof that Android completed boot; never confirm in that case.
+    [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ] || exit 0
+
+    LOG_FILE="$MODDIR/logs/fontswitch.log"
+    LOG_LEVEL="${LOG_LEVEL:-INFO}"
+    mkdir -p "$MODDIR/logs" "$MODDIR/config" 2>/dev/null || true
+
+    log_service() {
+        LEVEL="$1"
+        MSG="$2"
+        TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)
+        [ "$LEVEL" = "DEBUG" ] && [ "$LOG_LEVEL" != "DEBUG" ] && return 0
+        echo "[$TIMESTAMP] [SERVICE] [$LEVEL] $MSG" >> "$LOG_FILE" 2>/dev/null || true
+    }
+
+    notify_service() {
+        _title="$1"
+        _message="$2"
+        _tag="$3"
+        command -v cmd >/dev/null 2>&1 || return 0
+        cmd notification post -S bigtext -t "$_title" "$_tag" "$_message" >/dev/null 2>&1 || \
+            cmd notification post -t "$_title" "$_tag" "$_message" >/dev/null 2>&1 || true
+    }
+
+    log_service "INFO" "服务脚本开始执行 ($MODULE_VERSION)"
+    if [ -f "$LOG_FILE" ]; then
+        _log_size=$(wc -c < "$LOG_FILE" 2>/dev/null | tr -d '[:space:]')
+        case "$_log_size" in ''|*[!0-9]*) _log_size=0 ;; esac
+        if [ "$_log_size" -gt 1048576 ]; then
+            _trim="$LOG_FILE.trim.$$"
+            tail -n 1200 "$LOG_FILE" > "$_trim" 2>/dev/null && mv -f "$_trim" "$LOG_FILE" 2>/dev/null || true
+        fi
+    fi
+
+    # 原生 App 后端统一通过 sh 调用，仍校正权限以兼容不同 Root 管理器的解压行为。
+    chmod 0755 "$MODDIR" "$MODDIR/common" 2>/dev/null || true
+    chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/post-mount.sh" "$MODDIR/boot-completed.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" "$MODDIR/action.sh" 2>/dev/null || true
+    find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
+    chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" "$MODDIR/common/font_metrics_normalize.py" 2>/dev/null || true
+    chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
+    chmod 0755 "$MODDIR/system/bin/洛书" "$MODDIR/system/bin/luoshud" 2>/dev/null || true
+
+    # The sanitized /data/fonts config is only an early-boot input to FontManagerService.
+    # Once Android reports boot complete, release LuoShu's verified bind so future provider
+    # updates can persist normally. Template refresh is allowed only after that original
+    # document is visible again.
+    _dynamic_template_safe=1
+    if type device_font_dynamic_mount_release >/dev/null 2>&1; then
+        device_font_dynamic_mount_release
+        _dynamic_release_rc=$?
+        case "$_dynamic_release_rc" in
+            0) log_service "INFO" "已释放启动期动态字体临时视图" ;;
+            2) log_service "DEBUG" "本次启动没有洛书动态字体临时视图" ;;
+            *)
+                _dynamic_template_safe=0
+                log_service "ERROR" "动态字体临时视图无法安全释放，本次跳过原厂模板刷新"
+                ;;
+        esac
+    fi
+
+    _active_for_template=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_active_for_template" ] || _active_for_template=default
+    if [ "$_dynamic_template_safe" -eq 1 ] && [ -f "$MODDIR/common/device_font_template.sh" ]; then
+        if MODDIR="$MODDIR" sh "$MODDIR/common/device_font_template.sh" ensure >/dev/null 2>&1; then
+            if [ "$_active_for_template" = default ]; then
+                log_service "INFO" "已在系统默认字体状态冻结本机原厂字体槽位模板"
+            else
+                log_service "INFO" "原厂字体槽位模板已按当前 ROM 配置校验"
+            fi
+        else
+            log_service "ERROR" "原厂字体槽位模板刷新失败；明确应用会保持旧负载并返回错误"
+        fi
+    fi
+
+    # 刷写阶段无法调用 pm，或系统包管理器在开机初期尚未稳定时，最多跨三次完整开机重试。
+    # 签名冲突、损坏 APK 等永久错误立即转为手动处理，避免每次开机重复失败。
+    if [ -s "$MODDIR/bundled/LuoShu-App.apk" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
+        if [ -f "$MODDIR/config/app_install_pending" ] || [ ! -f "$MODDIR/config/app_install_state.conf" ]; then
+            _app_retry_file="$MODDIR/config/app_install_retry_count"
+            _app_retry_limit="${LUOSHU_APP_INSTALL_RETRY_LIMIT:-3}"
+            case "$_app_retry_limit" in ''|*[!0-9]*) _app_retry_limit=3 ;; esac
+            [ "$_app_retry_limit" -ge 1 ] 2>/dev/null || _app_retry_limit=1
+            _app_result=$(MODDIR="$MODDIR" APP_INSTALL_LOG="$MODDIR/logs/app-install.log" sh "$MODDIR/common/app_installer.sh" first-boot 2>/dev/null)
+            _app_code=$?
+            case "$_app_result" in
+  installed|already-current)
+      rm -f "$MODDIR/config/app_install_manual" "$_app_retry_file" 2>/dev/null || true
+      log_service "INFO" "洛书 App 已安装并与模块内置版本一致"
+      ;;
+  permanent-failure|invalid-package|invalid-apk)
+      rm -f "$MODDIR/config/app_install_pending" "$_app_retry_file" 2>/dev/null || true
+      touch "$MODDIR/config/app_install_manual" 2>/dev/null || true
+      log_service "ERROR" "App 自动更新被永久错误阻断（result=$_app_result, code=$_app_code），请使用模块操作按钮处理；详情见 app-install.log"
+      ;;
+  *)
+      _app_retry_count=$(cat "$_app_retry_file" 2>/dev/null)
+      case "$_app_retry_count" in ''|*[!0-9]*) _app_retry_count=0 ;; esac
+      _app_retry_count=$((_app_retry_count + 1))
+      printf '%s\n' "$_app_retry_count" > "$_app_retry_file" 2>/dev/null || true
+      if [ "$_app_retry_count" -lt "$_app_retry_limit" ]; then
+          touch "$MODDIR/config/app_install_pending" 2>/dev/null || true
+          rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
+          log_service "INFO" "App 自动更新暂未完成（第 $_app_retry_count/$_app_retry_limit 次，result=$_app_result, code=$_app_code），下次完整开机继续重试"
+      else
+          rm -f "$MODDIR/config/app_install_pending" 2>/dev/null || true
+          touch "$MODDIR/config/app_install_manual" 2>/dev/null || true
+          log_service "ERROR" "App 自动更新连续 $_app_retry_count 次未完成，已停止自动重试；请使用模块操作按钮重试"
+      fi
+      ;;
+            esac
+        fi
+    fi
+
+    # Root 管理器模块说明只显示当前字体，不再塞入更新日志。
+    if [ -f "$MODDIR/common/module_status.sh" ]; then
+        MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" >/dev/null 2>&1 || true
+    fi
+
+    # 字体列表在后台预热。轻量指纹未变化时跳过轮廓解析；变化后重建原生索引。
+    if [ -f "$MODDIR/common/font_library_cache.sh" ] && [ -f "$MODDIR/common/font_manager.sh" ]; then
+        _font_fp=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_library_cache.sh" value 2>/dev/null)
+        _font_fp_old=$(cat "$MODDIR/config/native_font_index.key" 2>/dev/null)
+        case "$_font_fp_old" in native-v1\|*) _font_fp_old="${_font_fp_old##*|}" ;; esac
+        if [ -n "$_font_fp" ] && { [ "$_font_fp" != "$_font_fp_old" ] || [ ! -s "$MODDIR/config/native_font_index.json" ]; }; then
+            if MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list refresh >/dev/null 2>&1; then
+                log_service "INFO" "原生字体索引后台预热完成"
+            else
+                log_service "INFO" "字体索引后台预热失败，App 将继续使用已有本地索引"
+            fi
+        fi
+    fi
+
+    # 架构升级或 ROM 动态字体配置变化时，保留本次启动正在使用的完整旧负载。
+    # 后台服务绝不改写 active_font、绝不激活缓存、也绝不创建第二个重启事务。
+    # 用户下一次明确点击“应用”时，前台原子事务一次生成并提交当前架构负载。
+    type luoshu_font_rebuild_marker_reconcile >/dev/null 2>&1 && \
+        luoshu_font_rebuild_marker_reconcile >/dev/null 2>&1 || true
+    if [ -f "$MODDIR/config/font-payload-rebuild-pending.conf" ]; then
+        _pending_font=$(sed -n 's/^font=//p' "$MODDIR/config/font-payload-rebuild-pending.conf" 2>/dev/null | head -n1 | tr -d '\r\n')
+        [ -n "$_pending_font" ] || _pending_font=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+        [ -n "$_pending_font" ] || _pending_font=default
+        _pending_reason=$(sed -n 's/^reason=//p' "$MODDIR/config/font-payload-rebuild-pending.conf" 2>/dev/null | head -n1)
+        log_service "INFO" "旧字体负载保持不变，等待一次明确应用：font=$_pending_font reason=${_pending_reason:-schema-upgrade}"
+        if [ ! -f "$MODDIR/config/font-payload-reapply-notified.conf" ]; then
+            notify_service "洛书" "当前字体已保留。请在洛书中应用一次当前字体；完成后只需完整重启一次。" luoshu-font-reapply
+            {
+                printf 'font=%s\n' "$_pending_font"
+                printf 'reason=%s\n' "${_pending_reason:-schema-upgrade}"
+                printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+            } > "$MODDIR/config/font-payload-reapply-notified.conf.tmp.$$" 2>/dev/null && \
+                mv -f "$MODDIR/config/font-payload-reapply-notified.conf.tmp.$$" \
+                    "$MODDIR/config/font-payload-reapply-notified.conf" 2>/dev/null || true
+        fi
+    fi
+
+    # 恢复用户保存的 Android 全局字重调节；组合槽字重已固化到字体轮廓。
+    if [ -f "$MODDIR/config/font_weight.conf" ] && command -v settings >/dev/null 2>&1; then
+        FW_ADJ=$(sed -n 's/^adjustment=//p' "$MODDIR/config/font_weight.conf" 2>/dev/null | head -n1)
+        case "$FW_ADJ" in ''|*[!0-9-]*) FW_ADJ=0 ;; esac
+        if [ "$FW_ADJ" -ge -100 ] 2>/dev/null && [ "$FW_ADJ" -le 300 ] 2>/dev/null; then
+            if settings --user current put secure font_weight_adjustment "$FW_ADJ" >/dev/null 2>&1 || settings put secure font_weight_adjustment "$FW_ADJ" >/dev/null 2>&1; then
+                log_service "INFO" "已恢复系统字体粗细调整：$FW_ADJ"
+            else
+                log_service "INFO" "字体粗细调整恢复失败"
+            fi
+        fi
+    fi
+
+    # 只有系统主命名空间中的字体挂载真实可见，才能确认本次启动事务。
+    # 验证失败时将 booting 恢复为 prepared，保留负载并在下次完整开机重试；
+    # 连续三次仍不可见才安全撤销，避免“App 显示已验证但系统仍是默认字体”。
+    if type luoshu_font_lock_busy >/dev/null 2>&1; then
+        luoshu_font_lock_busy "$MODDIR/.font_switch.lock" && _switch_busy=true || _switch_busy=false
+    elif [ -e "$MODDIR/.font_switch.lock" ]; then
+        _switch_busy=true
+    else
+        _switch_busy=false
+    fi
+    if [ -f "$MODDIR/common/device_font_load_verify.sh" ] && \
+       [ ! -f "$MODDIR/config/font-payload-rebuild-pending.conf" ] && \
+       [ "$_switch_busy" = false ]; then
+        _load_verify_attempt=1
+        _load_verify_state=''
+        _load_verify_rc=2
+        while [ "$_load_verify_attempt" -le 3 ]; do
+            MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$MODDIR/common/device_font_load_verify.sh" verify >/dev/null 2>&1
+            _load_verify_rc=$?
+            _load_verify_state=$(sed -n 's/^state=//p' "$MODDIR/config/device-font-load-verification.conf" 2>/dev/null | head -n1)
+            case "$_load_verify_state" in
+                verified|not-applicable) break ;;
+            esac
+            [ "$_load_verify_attempt" -lt 3 ] && sleep 3
+            _load_verify_attempt=$((_load_verify_attempt + 1))
+        done
+
+        _active_verify=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+        [ -n "$_active_verify" ] || _active_verify=default
+        case "$_load_verify_state" in
+            verified)
+                type font_config_mark_boot_success >/dev/null 2>&1 && font_config_mark_boot_success
+                rm -f "$MODDIR/config/font-mount-verify-failures" \
+                    "$MODDIR/config/text_reboot_required.conf" 2>/dev/null || true
+                log_service "INFO" "设备字体加载与主命名空间挂载验证完成"
+                ;;
+            not-applicable)
+                rm -f "$MODDIR/config/font-mount-verify-failures" \
+                    "$MODDIR/config/text_reboot_required.conf" 2>/dev/null || true
+                log_service "INFO" "当前为系统字体，无需设备加载验证"
+                ;;
+            *)
+                log_service "ERROR" "设备字体加载验证未通过（state=${_load_verify_state:-missing}, code=$_load_verify_rc, attempt=$_load_verify_attempt）"
+                _boot_state=$(sed -n 's/^state=//p' "$MODDIR/config/font-payload-boot.conf" 2>/dev/null | head -n1)
+                if [ "$_active_verify" != default ] && [ "$_boot_state" = booting ]; then
+                    _mount_fail_file="$MODDIR/config/font-mount-verify-failures"
+                    _mount_fail_count=$(cat "$_mount_fail_file" 2>/dev/null)
+                    case "$_mount_fail_count" in ''|*[!0-9]*) _mount_fail_count=0 ;; esac
+                    _mount_fail_count=$((_mount_fail_count + 1))
+                    printf '%s\n' "$_mount_fail_count" > "$_mount_fail_file" 2>/dev/null || true
+                    if [ "$_mount_fail_count" -lt 3 ]; then
+                        {
+                            printf 'state=prepared\n'
+                            printf 'font=%s\n' "$_active_verify"
+                            printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+                            printf 'reason=mount-not-visible\n'
+                        } > "$MODDIR/config/font-payload-boot.conf.tmp.$$" 2>/dev/null && \
+                            mv -f "$MODDIR/config/font-payload-boot.conf.tmp.$$" "$MODDIR/config/font-payload-boot.conf" 2>/dev/null || true
+                        log_service "ERROR" "字体挂载未进入系统主命名空间，已保留负载并安排下次开机重试（第 $_mount_fail_count/3 次）"
+                        notify_service "洛书" "本次开机字体挂载未生效，已保留字体并将在下次完整重启自动重试。" luoshu-font-mount
+                    else
+                        rm -f "$_mount_fail_file" 2>/dev/null || true
+                        if type luoshu_payload_quarantine >/dev/null 2>&1; then
+                            luoshu_payload_quarantine
+                        else
+                            printf 'default\n' > "$MODDIR/config/active_font.conf" 2>/dev/null || true
+                        fi
+                        log_service "ERROR" "字体挂载连续三次不可见，已安全恢复系统默认字体"
+                        notify_service "洛书" "字体挂载连续失败，已安全恢复系统默认字体；请打开洛书重新应用或导出诊断。" luoshu-font-mount
+                    fi
+                fi
+                ;;
+        esac
+    fi
+    type luoshu_text_reboot_reconcile >/dev/null 2>&1 && \
+        luoshu_text_reboot_reconcile >/dev/null 2>&1 || true
+    if [ -f "$MODDIR/common/module_status.sh" ]; then
+        MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" >/dev/null 2>&1 || true
+    fi
+
+    # 新字体只由原生 App 或后台迁移任务提交，完整重启后由系统自然加载。
+    rm -f "$MODDIR/.first_boot" 2>/dev/null || true
+    log_service "INFO" "服务脚本执行完成"
+) &
