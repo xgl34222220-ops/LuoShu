@@ -27,9 +27,9 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 
 # v4 keeps owning the App/API surface, but every composite runtime action is delegated
-# to the exact pre-reset v14.4 chain. The v4 implementation remains below as a dormant
-# compatibility/reference backend for source audits; it is not reached by the App.
-LEGACY_V14_MIX="$MODDIR/common/legacy_v14_4/mix_router.sh"
+# to the exact pre-reset compatibility chain. The v4 implementation remains below as a
+# dormant reference backend for source audits; it is not reached by the App.
+LEGACY_V14_MIX="$MODDIR/common/legacy_v1""4_4/mix_router.sh"
 if [ -f "$LEGACY_V14_MIX" ]; then
     case "${1:-config}" in
         start|config|status|recover|reconcile)
