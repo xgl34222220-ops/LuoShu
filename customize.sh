@@ -52,7 +52,13 @@ if [ ! -f "$_lc_base" ]; then
     abort '缺少洛书安装核心'
     return 1 2>/dev/null || exit 1
 fi
-sed '$d' "$_lc_base" > "$_lc_temp" 2>/dev/null || {
+# Run the delegated installer by sourcing it so its migration state remains visible
+# to this wrapper, but convert its top-level exit statements into returns. This is
+# essential for APatch (which sources customize.sh) and also guarantees cleanup of
+# the temporary private-payload view on a controlled migration rejection.
+sed -e 's/^[[:space:]]*exit 1[[:space:]]*$/        return 1/' \
+    -e 's/^[[:space:]]*exit 0[[:space:]]*$/return 0/' \
+    "$_lc_base" > "$_lc_temp" 2>/dev/null || {
     abort '安装入口准备失败'
     return 1 2>/dev/null || exit 1
 }
