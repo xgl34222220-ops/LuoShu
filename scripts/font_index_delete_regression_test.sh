@@ -14,6 +14,7 @@ MODULE="$TMP/module"
 PUBLIC="$TMP/public"
 mkdir -p "$MODULE/common" "$MODULE/config" "$PUBLIC/fonts"
 cp "$ROOT/common/font_manager.sh" "$MODULE/common/font_manager.sh"
+cp "$ROOT/common/font_manager_v4.sh" "$MODULE/common/font_manager_v4.sh"
 cp "$ROOT/common/util_functions.sh" "$MODULE/common/util_functions.sh"
 cp "$ROOT/common/util_functions_core.sh" "$MODULE/common/util_functions_core.sh"
 cp "$ROOT/common/font_check.sh" "$MODULE/common/font_check.sh"
@@ -37,7 +38,10 @@ printf '%s\n' "$AFTER" | grep -q '"count":1'
 ! printf '%s\n' "$AFTER" | grep -q '"id":"Alpha"'
 printf '%s\n' "$AFTER" | grep -q '"id":"Beta"'
 
-! grep -Fq 'case "$_name|$_family"' "$ROOT/common/font_manager.sh"
-grep -Fq 'case "$_name" in' "$ROOT/common/font_manager.sh"
-grep -Fq 'case "$_family" in' "$ROOT/common/font_manager.sh"
-echo 'Deleting one font preserves every remaining font in the native index.'
+# Inventory/delete implementation remains in the preserved current manager; the
+# root manager is intentionally only a switch router.
+! grep -Fq 'case "$_name|$_family"' "$ROOT/common/font_manager_v4.sh"
+grep -Fq 'case "$_name" in' "$ROOT/common/font_manager_v4.sh"
+grep -Fq 'case "$_family" in' "$ROOT/common/font_manager_v4.sh"
+grep -q 'exec sh "$CURRENT_MANAGER" "$@"' "$ROOT/common/font_manager.sh"
+echo 'Deleting one font through the router preserves every remaining font in the native index.'

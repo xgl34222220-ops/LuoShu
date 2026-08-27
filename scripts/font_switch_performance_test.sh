@@ -18,10 +18,21 @@ grep -q 'start_lock_acquire' "$ROOT/common/font_switch_task.sh"
 grep -q 'mark_load_verification_pending' "$ROOT/common/font_switch_task.sh"
 grep -q 'heartbeat=%s' "$ROOT/common/font_switch_task.sh"
 grep -q 'timeout=%s' "$ROOT/common/font_switch_task.sh"
-grep -q 'luoshu_switch_perf_mark complete' "$ROOT/common/font_manager.sh"
-grep -q 'LUOSHU_FOREGROUND_QUICK_SWITCH=1' "$ROOT/common/font_manager.sh"
-grep -q 'luoshu_font_lock_acquire' "$ROOT/common/font_manager.sh"
-grep -q 'luoshu_switch_signal_exit 143' "$ROOT/common/font_manager.sh"
+
+# The full v4 manager is preserved behind the router for inventory and regression coverage.
+# Its performance markers remain pinned here, but final App apply no longer enters this body.
+grep -q 'luoshu_switch_perf_mark complete' "$ROOT/common/font_manager_v4.sh"
+grep -q 'LUOSHU_FOREGROUND_QUICK_SWITCH=1' "$ROOT/common/font_manager_v4.sh"
+grep -q 'luoshu_font_lock_acquire' "$ROOT/common/font_manager_v4.sh"
+grep -q 'luoshu_switch_signal_exit 143' "$ROOT/common/font_manager_v4.sh"
+
+# Final apply is intentionally the v14.4 physical-file path. Keep the modern identity lock,
+# but never reconnect the device-template/slot/XML payload pipeline that caused the 94% stall.
+grep -q 'legacy_v14_4_switch.sh' "$ROOT/common/font_manager.sh"
+grep -q 'legacy_lock_acquire' "$ROOT/common/legacy_v14_4_switch.sh"
+! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|device_font_payload_build' \
+    "$ROOT/common/legacy_v14_4_switch.sh"
+
 grep -q 'MiuixTaskCenterHeader(' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsScreenMiuix.kt"
 grep -q 'DiagnosticExportButton(' \
@@ -55,9 +66,9 @@ sh "$ROOT/scripts/font_switch_task_test.sh"
 sh "$ROOT/scripts/font_switch_lock_test.sh"
 sh "$ROOT/scripts/device_font_trust_test.sh"
 
-# A direct switch calls the final stock-aligned builder exactly once. Cache lookup/build/activation
-# may happen inside that single foreground call, but the policy wrapper must never run a second
-# provisional path or schedule a post-commit mutation.
+# A direct v4 switch calls the final stock-aligned builder exactly once. Cache lookup/build/activation
+# may happen inside that single preserved foreground call, but the policy wrapper must never run a
+# second provisional path or schedule a post-commit mutation.
 _fsp_tmp="$(mktemp -d)"
 (
     export MODULE_DIR="$_fsp_tmp/module" MODDIR="$_fsp_tmp/module"
@@ -83,14 +94,15 @@ _fsp_tmp="$(mktemp -d)"
 )
 rm -rf "$_fsp_tmp"
 
-# The ROM adapter stages anchors only; font_manager owns the one final builder invocation.
+# The ROM adapter stages anchors only; the preserved v4 manager owns one final builder invocation.
 quick_body="$(awk '/^apply_font_by_rom\(\)/,/^}/' "$ROOT/common/device_font_payload_policy.sh")"
 ! printf '%s\n' "$quick_body" | grep -q 'font_config_enable_for_payload'
-manager_switch_body="$(awk '/^switch_font\(\)/,/^}/' "$ROOT/common/font_manager.sh")"
+manager_switch_body="$(awk '/^switch_font\(\)/,/^}/' "$ROOT/common/font_manager_v4.sh")"
 test "$(printf '%s\n' "$manager_switch_body" | grep -c 'font_config_enable_for_payload')" -eq 2
 
 # The final source-order manifest builder must checksum one inode once even when HyperOS exposes
-# it through dozens of hard-link aliases. This is the difference between seconds and minutes.
+# it through dozens of hard-link aliases. This remains a regression guard for the preserved v4
+# engine and update/migration paths even though explicit final apply uses v14.4 aliases.
 _fsp_tmp="$(mktemp -d)"
 (
     export MODULE_DIR="$_fsp_tmp/module" MODDIR="$_fsp_tmp/module"

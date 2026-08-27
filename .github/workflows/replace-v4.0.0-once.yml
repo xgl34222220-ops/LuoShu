@@ -22,15 +22,17 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: v4.0.0
-      EXPECTED_OLD_TAG_SHA: 227bca1bb34a18a738c5c9a0f8a338f3880aa2a0
+      EXPECTED_OLD_TAG_SHA: 434ed20fa36be70439f5bd2a97b52fc6df75968f
       REQUIRED_RUNTIME_FIX_SHA: dfdc8e13400d0a2bbd850e4643e6913cd7f8c085
-      REQUIRED_CHECK_FIX_SHA: c07a1d9e7b12a7ea7d401df77f0bd95daf0fa9f8
+      REQUIRED_DUPLICATE_GUARD_FIX_SHA: c07a1d9e7b12a7ea7d401df77f0bd95daf0fa9f8
+      REQUIRED_STABILITY_FIX_SHA: c88a7a9ddb7da776fde210e8914ce2b237306429
+      REQUIRED_FULL_CHECK_SHA: a801ddff6c27cf180ec2eacb3b01f8f0dc4462c5
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Replace tag with fully checked v4.0.0 source and dispatch signed publish
+      - name: Replace tag with verified v4.0.0 source and dispatch signed publish
         shell: bash
         run: |
           set -euo pipefail
@@ -41,19 +43,21 @@ jobs:
             exit 2
           }
 
-          git merge-base --is-ancestor "$REQUIRED_RUNTIME_FIX_SHA" "$GITHUB_SHA" || {
-            echo "Refusing replacement: #201 runtime fix is missing" >&2
-            exit 2
-          }
-          git merge-base --is-ancestor "$REQUIRED_CHECK_FIX_SHA" "$GITHUB_SHA" || {
-            echo "Refusing replacement: duplicate-function guard fix is missing" >&2
-            exit 2
-          }
+          for required in \
+            "$REQUIRED_RUNTIME_FIX_SHA" \
+            "$REQUIRED_DUPLICATE_GUARD_FIX_SHA" \
+            "$REQUIRED_STABILITY_FIX_SHA" \
+            "$REQUIRED_FULL_CHECK_SHA"; do
+            git merge-base --is-ancestor "$required" "$GITHUB_SHA" || {
+              echo "Refusing replacement: required verified fix $required is missing" >&2
+              exit 2
+            }
+          done
 
           git fetch --force --tags origin
           current="$(git rev-list -n1 "$TAG" 2>/dev/null || true)"
           if [[ "$current" == "$GITHUB_SHA" ]]; then
-            echo "$TAG already points to this fully fixed commit."
+            echo "$TAG already points to this verified commit."
           else
             if [[ -n "$current" ]]; then
               [[ "$current" == "$EXPECTED_OLD_TAG_SHA" ]] || {
@@ -67,7 +71,6 @@ jobs:
               fi
             fi
 
-            # A deleted remote tag remains in this runner's local refs until explicitly removed.
             git tag -d "$TAG" >/dev/null 2>&1 || true
             git fetch --prune --prune-tags origin
             remote_tag="$(git ls-remote --tags origin "refs/tags/$TAG" | awk '{print $1}')"
