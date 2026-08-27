@@ -154,6 +154,7 @@ EOF_LFBS_HYPEROS_ROOTS
 _lfbs_mix_hyperos_extra_sync() {
     [ "${IS_HYPEROS:-false}" = true ] || return 0
     type sync_secondary_partition >/dev/null 2>&1 || return 0
+    [ "${LUOSHU_HYPEROS_EXTRA_SYNC_DONE:-0}" != 1 ] || return 0
     [ "${LUOSHU_HYPEROS_EXTRA_SYNC_ACTIVE:-0}" != 1 ] || return 0
     LUOSHU_HYPEROS_EXTRA_SYNC_ACTIVE=1
     export LUOSHU_HYPEROS_EXTRA_SYNC_ACTIVE
@@ -167,7 +168,8 @@ _lfbs_mix_hyperos_extra_sync() {
         sync_secondary_partition "$_lfbs_part" "$_lfbs_root" || { _lfbs_sync_rc=1; break; }
     done
     LUOSHU_HYPEROS_EXTRA_SYNC_ACTIVE=0
-    export LUOSHU_HYPEROS_EXTRA_SYNC_ACTIVE
+    LUOSHU_HYPEROS_EXTRA_SYNC_DONE=1
+    export LUOSHU_HYPEROS_EXTRA_SYNC_ACTIVE LUOSHU_HYPEROS_EXTRA_SYNC_DONE
     return "$_lfbs_sync_rc"
 }
 
