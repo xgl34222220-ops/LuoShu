@@ -108,8 +108,8 @@ sh "$ROOT/scripts/app_installer_test.sh"
 # 原生 App 字体索引只在文件集合实际变化时失效。
 sh "$ROOT/scripts/font_library_cache_test.sh"
 
-# 模块刷写阶段严禁后台悄悄激活字体；跨 schema 更新只能在 root 管理器提交前
-# 显式重建当前选择，失败必须拒绝更新，且不得把选择改成系统默认字体。
+# 模块刷写阶段严禁同步重建字体。跨 schema 更新只能保留当前可工作负载并登记
+# 重启后由 App 显式重应用；Root 管理器刷写进程不得调用字体切换/复合重建器。
 grep -q 'module_update_state.sh' "$ROOT/customize.sh"
 ! grep -q 'luoshu_rebuild_preserved_payload.*MODPATH' "$ROOT/customize.sh"
 grep -q 'font-payload-rebuild-pending.conf' "$ROOT/post-fs-data-v4.sh"
@@ -118,8 +118,9 @@ grep -q 'exec sh "$V4_POST_FS"' "$ROOT/post-fs-data.sh"
 ! grep -q 'font-payload-rebuild-pending.conf' "$ROOT/post-fs-data.sh"
 ! grep -q 'luoshu_rebuild_preserved_payload' "$ROOT/service.sh"
 grep -q 'LUOSHU_UPDATE_REBUILD_REQUIRED' "$ROOT/customize.sh"
-grep -q 'luoshu_v4_update_rebuild_selected' "$ROOT/customize.sh"
-grep -q '未切换为系统默认字体' "$ROOT/customize.sh"
+! grep -q 'luoshu_v4_update_rebuild_selected' "$ROOT/customize.sh"
+grep -q '本次刷写不会同步重建字体' "$ROOT/customize.sh"
+grep -q '已保留当前字体负载' "$ROOT/customize.sh"
 sh "$ROOT/scripts/module_update_state_test.sh"
 
 # 所有字体卡片必须使用同一套短双行样张，任何字体字宽都不得把第二行挤掉。
