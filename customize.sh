@@ -28,6 +28,7 @@ fi
 
 # Static delegated-installer contracts retained for source/regression checks:
 # for _enable_dir in "$MODPATH" "$OLD_MOD"
+# rm -f "$_enable_dir/disable"
 # luoshu_cli.sh is deployed to system/bin/洛书 by the delegated installer.
 #
 # The delegated installer already sources common/module_update_state.sh. Do not
