@@ -30,14 +30,18 @@ grep -q 'MiSansLatinVF.ttf' "$ROM"
 grep -q 'GoogleSans' "$ROM"
 grep -q 'Roboto' "$ROM"
 
-# Restoring the old switch core must not throw away the later proven HyperOS 3
-# status-bar / lock-screen coverage from v2.1.2. The bridge is boot-time only,
-# writes physical aliases into the private payload and never enters the v4 pipeline.
+# Restoring the old switch core must not throw away later proven HyperOS 3 physical
+# coverage. The bridge runs before self-mount, writes only aliases into the private
+# payload and never enters the v4 template/XML/94% validation pipeline.
 test -f "$HYPEROS_COMPAT"
 grep -q 'MitypeClock.ttf' "$HYPEROS_COMPAT"
 grep -q 'MiClock.ttf' "$HYPEROS_COMPAT"
 grep -q 'AndroidClock.ttf' "$HYPEROS_COMPAT"
 grep -q 'Clockopia.ttf' "$HYPEROS_COMPAT"
+grep -q 'GoogleSansText-Regular.ttf' "$HYPEROS_COMPAT"
+grep -q 'NotoSansUI-Regular.ttf' "$HYPEROS_COMPAT"
+grep -q 'MiLanPro' "$HYPEROS_COMPAT"
+grep -q 'XiaomiSans' "$HYPEROS_COMPAT"
 grep -q 'mi_ext' "$HYPEROS_COMPAT"
 grep -q 'hyperos_clock_compat.sh' "$POSTFS"
 grep -q 'luoshu_hyperos_clock_payload_ensure' "$POSTFS"
@@ -45,14 +49,22 @@ grep -q 'hyperos_clock_compat.sh' "$POSTMOUNT"
 grep -q 'luoshu_hyperos_clock_payload_ensure' "$POSTMOUNT"
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' "$HYPEROS_COMPAT"
 
-# Functional fixture: a HyperOS 3 clock file living only in mi_ext and another
-# clock file in product must both be mirrored from the selected/composite anchor.
+# Functional fixture: cover status/lock-screen slots and ordinary HyperOS UI slots
+# living outside system/fonts. Every alias must come from the already-built selected
+# payload, so no foreground rebuild or second validation pipeline is needed.
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-legacy-clock)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
-mkdir -p "$TMP/module/.luoshu-payload/system/fonts" "$TMP/stock/mi_ext" "$TMP/stock/product"
+mkdir -p \
+    "$TMP/module/.luoshu-payload/system/fonts" \
+    "$TMP/stock/system" "$TMP/stock/system_ext" "$TMP/stock/product" \
+    "$TMP/stock/mi_ext" "$TMP/stock/vendor"
 printf 'selected-font-anchor\n' > "$TMP/module/.luoshu-payload/system/fonts/MiSansVF.ttf"
 : > "$TMP/stock/mi_ext/MitypeClock.ttf"
 : > "$TMP/stock/product/MiClock.ttf"
+: > "$TMP/stock/system_ext/GoogleSansText-Regular.ttf"
+: > "$TMP/stock/product/NotoSansUI-Medium.ttf"
+: > "$TMP/stock/vendor/MiLanProVF.ttf"
+IS_HYPEROS=true \
 MODDIR="$TMP/module" \
 LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT="$TMP/module/.luoshu-payload" \
 LUOSHU_SYSTEM_FONTS_ROOT="$TMP/stock/system" \
@@ -66,10 +78,14 @@ LUOSHU_MY_PRODUCT_FONTS_ROOT="$TMP/stock/my_product" \
 LUOSHU_HW_PRODUCT_FONTS_ROOT="$TMP/stock/hw_product" \
 LUOSHU_CUST_FONTS_ROOT="$TMP/stock/cust" \
     sh -c '. "$1"; luoshu_hyperos_clock_payload_ensure' sh "$HYPEROS_COMPAT"
-cmp -s "$TMP/module/.luoshu-payload/system/fonts/MiSansVF.ttf" \
-    "$TMP/module/.luoshu-payload/mi_ext/fonts/MitypeClock.ttf"
-cmp -s "$TMP/module/.luoshu-payload/system/fonts/MiSansVF.ttf" \
-    "$TMP/module/.luoshu-payload/product/fonts/MiClock.ttf"
+for generated in \
+    "$TMP/module/.luoshu-payload/mi_ext/fonts/MitypeClock.ttf" \
+    "$TMP/module/.luoshu-payload/product/fonts/MiClock.ttf" \
+    "$TMP/module/.luoshu-payload/system_ext/fonts/GoogleSansText-Regular.ttf" \
+    "$TMP/module/.luoshu-payload/product/fonts/NotoSansUI-Medium.ttf" \
+    "$TMP/module/.luoshu-payload/vendor/fonts/MiLanProVF.ttf"; do
+    cmp -s "$TMP/module/.luoshu-payload/system/fonts/MiSansVF.ttf" "$generated"
+done
 
 # 94% v4 pipeline components are forbidden from the actual legacy apply backend.
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' "$BACKEND"
@@ -95,7 +111,7 @@ grep -q 'font_mix_engine.sh' "$LEGACY_MIX_ROUTER"
     "$LEGACY_MIX_ROUTER" "$LEGACY_MIX_BRIDGE" "$LEGACY_WEIGHTED" "$LEGACY_AUTO" "$LEGACY_MIX_ENGINE"
 
 # Once selected, all three boot stages keep the legacy payload immutable except for
-# the deterministic HyperOS clock/status aliases above.
+# deterministic HyperOS physical UI aliases generated immediately before self-mount.
 for file in "$SERVICE" "$POSTFS" "$POSTMOUNT"; do
     grep -q 'font_runtime_legacy_v14_4.conf' "$file"
     sh -n "$file"
@@ -120,4 +136,4 @@ sh -n "$ROOT/service_v4.sh"
 sh -n "$ROOT/post-fs-data-v4.sh"
 sh -n "$ROOT/post-mount-v4.sh"
 
-echo 'single/composite legacy switching keeps HyperOS status-bar and lock-screen physical slots.'
+echo 'single/composite legacy switching keeps full HyperOS physical UI coverage.'
