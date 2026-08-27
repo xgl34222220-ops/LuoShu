@@ -154,6 +154,7 @@ luoshu_migrate_update_config() {
 luoshu_migrate_update_cache() {
     _old="$1"
     _new="$2"
+    _schema_compatible="${3:-false}"
     for _relative in \
         cache/full-composite-v11 \
         cache/auto-multiweight-mix/composites-v8 \
@@ -170,6 +171,22 @@ luoshu_migrate_update_cache() {
         cp -al "$_probe" "$_new/cache/${_probe##*/}" 2>/dev/null || \
             cp -af "$_probe" "$_new/cache/${_probe##*/}" 2>/dev/null || true
     done
+
+    # Config contains persistent immutable artifacts as directories. The old migrator copied only
+    # regular files from config/*, silently dropping the entire device alignment cache on update.
+    # Metric/source caches are content-addressed and safe across releases. A device payload cache is
+    # retained only when its payload schema is unchanged.
+    for _relative in config/metrics_cache config/font-config-source; do
+        [ -d "$_old/$_relative" ] || continue
+        rm -rf "$_new/$_relative" 2>/dev/null || true
+        mkdir -p "${_new}/${_relative%/*}" 2>/dev/null || continue
+        luoshu_copy_update_tree "$_old/$_relative" "$_new/$_relative" || true
+    done
+    if [ "$_schema_compatible" = true ] && [ -d "$_old/config/device-font-cache" ]; then
+        rm -rf "$_new/config/device-font-cache" 2>/dev/null || true
+        mkdir -p "$_new/config" 2>/dev/null || true
+        luoshu_copy_update_tree "$_old/config/device-font-cache" "$_new/config/device-font-cache" || true
+    fi
 }
 
 luoshu_migrate_active_install() {
@@ -185,6 +202,11 @@ luoshu_migrate_active_install() {
     LUOSHU_UPDATE_OLD_SCHEMA="$_old_schema"
     LUOSHU_UPDATE_REBUILD_REQUIRED=false
     [ "$_active" = default ] || [ "$_old_schema" = "$LUOSHU_PAYLOAD_SCHEMA_CURRENT" ] || LUOSHU_UPDATE_REBUILD_REQUIRED=true
+    if [ "$_active" = mix ]; then
+        for _mix_key in cjk latin digit; do
+            [ -n "$(luoshu_update_config_value "$_old/config/font_mix.conf" "$_mix_key")" ] || return 1
+        done
+    fi
     if [ "$_active" != default ] && ! luoshu_update_has_font_payload "$_old"; then
         return 1
     fi
@@ -208,9 +230,13 @@ luoshu_migrate_active_install() {
         luoshu_copy_update_tree "$_old/$_partition" "$_new/$_partition" || return 1
     done
 
-    luoshu_migrate_update_cache "$_old" "$_new"
-    [ -s "$_new/config/active_font.conf" ] || printf '%s\n' "$_active" >"$_new/config/active_font.conf"
+    _schema_compatible=false
+    [ "$_old_schema" = "$LUOSHU_PAYLOAD_SCHEMA_CURRENT" ] && _schema_compatible=true
+    luoshu_migrate_update_cache "$_old" "$_new" "$_schema_compatible"
     luoshu_clear_update_volatile "$_new"
+    # active_font.conf is the selection authority. Write the captured value after cleanup so a
+    # packaged default or a partial config copy can never relabel an inherited composite as default.
+    printf '%s\n' "$_active" >"$_new/config/active_font.conf" || return 1
     if [ "$LUOSHU_UPDATE_REBUILD_REQUIRED" = true ]; then
         {
             printf 'state=awaiting-explicit-apply\n'
@@ -223,7 +249,8 @@ luoshu_migrate_active_install() {
         } > "$_new/config/font-payload-rebuild-pending.conf" 2>/dev/null || return 1
         rm -f "$_new/config/font-payload-reapply-notified.conf" 2>/dev/null || true
     fi
-    chmod 0644 "$_new/config"/* 2>/dev/null || true
+    find "$_new/config" -type d -exec chmod 0755 {} \; 2>/dev/null || true
+    find "$_new/config" -type f -exec chmod 0644 {} \; 2>/dev/null || true
     find "$_new/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
     return 0
 }

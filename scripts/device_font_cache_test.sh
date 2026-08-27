@@ -27,8 +27,42 @@ device_font_payload_validate_installed() { return 0; }
 
 . "$ROOT/common/device_font_cache.sh"
 
-ok grep -q 'source-contract-v4' "$ROOT/common/device_font_cache.sh"
-ok grep -q 'alignment-cache-v4' "$ROOT/common/device_font_cache.sh"
+ok grep -q 'source-contract-v5-content' "$ROOT/common/device_font_cache.sh"
+ok grep -q 'alignment-cache-v5-content' "$ROOT/common/device_font_cache.sh"
+! device_font_cache_lookup MissingFont >/dev/null 2>&1
+
+CASE='设备缓存键只认字体内容'
+FIRST_SOURCE_KEY=$(_dfcache_source_key)
+cp "$MODULE/system/fonts/.luoshu-font-store/regular.font" "$TMP/recreated.font"
+rm -f "$MODULE/system/fonts/.luoshu-font-store/regular.font"
+mv "$TMP/recreated.font" "$MODULE/system/fonts/.luoshu-font-store/regular.font"
+touch "$MODULE/system/fonts/.luoshu-font-store/regular.font"
+SECOND_SOURCE_KEY=$(_dfcache_source_key)
+eq "$SECOND_SOURCE_KEY" "$FIRST_SOURCE_KEY"
+printf 'font-date\n' > "$MODULE/system/fonts/.luoshu-font-store/regular.font"
+THIRD_SOURCE_KEY=$(_dfcache_source_key)
+ne "$THIRD_SOURCE_KEY" "$FIRST_SOURCE_KEY"
+printf 'font-data\n' > "$MODULE/system/fonts/.luoshu-font-store/regular.font"
+eq "$(_dfcache_source_key)" "$FIRST_SOURCE_KEY"
+
+CASE='v4 设备缓存无损升级为内容键'
+V4_SOURCE_KEY=$(_dfcache_source_key_v4)
+V4_CACHE_ID=$(_dfcache_id_v4 DemoFont trusted-key "$V4_SOURCE_KEY")
+V4_CACHE="$MODULE/config/device-font-cache/$V4_CACHE_ID"
+mkdir -p "$V4_CACHE/payload" "$V4_CACHE/overlay"
+printf '{}\n' > "$V4_CACHE/payload/manifest.json"
+printf '{}\n' > "$V4_CACHE/overlay/overlay-manifest.json"
+cat > "$V4_CACHE/cache.conf" <<EOF_V4_CACHE
+state=ready
+font=DemoFont
+cacheId=$V4_CACHE_ID
+templateKey=trusted-key
+sourceKey=$V4_SOURCE_KEY
+EOF_V4_CACHE
+V5_CACHE_ID=$(_dfcache_id DemoFont trusted-key "$FIRST_SOURCE_KEY")
+V5_CACHE="$MODULE/config/device-font-cache/$V5_CACHE_ID"
+eq "$(device_font_cache_lookup DemoFont)" "$V5_CACHE"
+ok grep -q "^sourceKey=$FIRST_SOURCE_KEY$" "$V5_CACHE/cache.conf"
 
 _dfcache_foreground_idle
 touch "$MODULE/.font_switch.lock"

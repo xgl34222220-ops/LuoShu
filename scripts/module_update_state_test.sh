@@ -14,6 +14,7 @@ NEW="$TMP/new"
 mkdir -p \
     "$OLD/config" "$OLD/system/fonts/.luoshu-font-store" "$OLD/system/etc" "$OLD/product/fonts" \
     "$OLD/cache/full-composite-v5" "$OLD/cache/auto-multiweight-mix/composites-v2" \
+    "$OLD/config/device-font-cache/stale" \
     "$NEW/config" "$NEW/system/bin"
 for partition in $OEM_PARTITIONS; do
     mkdir -p "$OLD/$partition/fonts"
@@ -39,6 +40,7 @@ printf '<familyset/>\n' >"$OLD/system/etc/fonts.xml"
 printf 'OEM payload\n' >"$OLD/product/fonts/OEM-Regular.ttf"
 printf 'cached composite\n' >"$OLD/cache/full-composite-v5/test.otf"
 printf 'cached auto composite\n' >"$OLD/cache/auto-multiweight-mix/composites-v2/test.font"
+printf 'state=ready\n' >"$OLD/config/device-font-cache/stale/cache.conf"
 
 printf 'new notes\n' >"$NEW/config/version_notes.conf"
 printf '#!/bin/sh\n' >"$NEW/system/bin/洛书"
@@ -79,6 +81,7 @@ for partition in $OEM_PARTITIONS; do
 done
 test ! -e "$NEW/cache/full-composite-v5/test.otf"
 test ! -e "$NEW/cache/auto-multiweight-mix/composites-v2/test.font"
+test ! -e "$NEW/config/device-font-cache/stale/cache.conf"
 test -f "$NEW/system/bin/洛书"
 test ! -e "$NEW/config/switch_task.conf"
 test ! -e "$NEW/config/text_reboot_required.conf"
@@ -101,19 +104,30 @@ CURRENT="$TMP/current"
 CURRENT_NEW="$TMP/current-new"
 mkdir -p "$CURRENT/config" "$CURRENT/system/fonts" \
     "$CURRENT/cache/full-composite-v11" "$CURRENT/cache/auto-multiweight-mix/composites-v8" \
-    "$CURRENT/cache/auto-multiweight-mix/prepared-v8" "$CURRENT_NEW/config"
+    "$CURRENT/cache/auto-multiweight-mix/prepared-v8" "$CURRENT/config/device-font-cache/current/payload" \
+    "$CURRENT/config/device-font-cache/current/overlay" "$CURRENT/config/metrics_cache" "$CURRENT_NEW/config"
 printf 'id=LuoShu\nversion=current\n' >"$CURRENT/module.prop"
-printf 'Qsal\n' >"$CURRENT/config/active_font.conf"
-printf 'schema=%s\nfont=Qsal\n' "$SCHEMA" >"$CURRENT/config/font-payload-schema.conf"
+printf 'mix\n' >"$CURRENT/config/active_font.conf"
+printf 'cjk=Qsal\nlatin=Latin\ndigit=Digit\n' >"$CURRENT/config/font_mix.conf"
+printf 'schema=%s\nfont=mix\n' "$SCHEMA" >"$CURRENT/config/font-payload-schema.conf"
 printf 'payload\n' >"$CURRENT/system/fonts/Qsal-Regular.ttf"
 printf 'v11\n' >"$CURRENT/cache/full-composite-v11/current.font"
 printf 'v8\n' >"$CURRENT/cache/auto-multiweight-mix/composites-v8/current.font"
 printf 'prepared\n' >"$CURRENT/cache/auto-multiweight-mix/prepared-v8/current.font"
+printf '{}\n' >"$CURRENT/config/device-font-cache/current/payload/manifest.json"
+printf '{}\n' >"$CURRENT/config/device-font-cache/current/overlay/overlay-manifest.json"
+printf 'state=ready\nfont=mix\n' >"$CURRENT/config/device-font-cache/current/cache.conf"
+printf 'metric\n' >"$CURRENT/config/metrics_cache/current.font"
 luoshu_migrate_active_install "$CURRENT" "$CURRENT_NEW"
 test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = false
+test "$(cat "$CURRENT_NEW/config/active_font.conf")" = mix
+grep -q '^cjk=Qsal$' "$CURRENT_NEW/config/font_mix.conf"
 test -f "$CURRENT_NEW/cache/full-composite-v11/current.font"
 test -f "$CURRENT_NEW/cache/auto-multiweight-mix/composites-v8/current.font"
 test -f "$CURRENT_NEW/cache/auto-multiweight-mix/prepared-v8/current.font"
+test -f "$CURRENT_NEW/config/device-font-cache/current/cache.conf"
+test -f "$CURRENT_NEW/config/device-font-cache/current/payload/manifest.json"
+test -f "$CURRENT_NEW/config/metrics_cache/current.font"
 test ! -e "$CURRENT_NEW/config/font-payload-rebuild-pending.conf"
 
 # A valid active payload may live only in an OEM partition. It must still be

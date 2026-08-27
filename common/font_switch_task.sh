@@ -67,6 +67,8 @@ write_task() {
     _timeout="${9:-$TIMEOUT_SECONDS}"
     _elapsed="${10:-0}"
     _boot_id="${11:-$(current_boot_id)}"
+    _reused="${12:-false}"
+    [ "$_reused" = true ] || _reused=false
     mkdir -p "${TASK_FILE%/*}" 2>/dev/null || return 1
     _tmp="${TASK_FILE}.tmp.$$"
     {
@@ -81,6 +83,7 @@ write_task() {
         printf 'timeout=%s\n' "$_timeout"
         printf 'elapsed=%s\n' "$_elapsed"
         printf 'bootId=%s\n' "$_boot_id"
+        printf 'reused=%s\n' "$_reused"
     } > "$_tmp" 2>/dev/null || return 1
     mv -f "$_tmp" "$TASK_FILE" 2>/dev/null || return 1
     chmod 0644 "$TASK_FILE" 2>/dev/null || true
@@ -214,9 +217,14 @@ run_worker() {
     _finished="$(date +%s 2>/dev/null || echo 0)"
     if [ "$_rc" -eq 0 ] && grep -q '"status":"ok"' "$_output" 2>/dev/null; then
         cat "$_output" >> "$LOG_FILE" 2>/dev/null || true
-        mark_load_verification_pending "$_font" || true
-        write_task "$_task" success "$_font" '字体已准备完成；完整重启后自动验证实际加载状态' "$_started" "$_finished" ''
-        [ -f "$HISTORY_TOOL" ] && MODDIR="$MODDIR" sh "$HISTORY_TOOL" record-direct "$_font" >/dev/null 2>&1 || true
+        if grep -q '"reused":true' "$_output" 2>/dev/null; then
+            write_task "$_task" success "$_font" '当前字体已验证，无需重新生成或重启' \
+                "$_started" "$_finished" '' '' '' 0 '' true
+        else
+            mark_load_verification_pending "$_font" || true
+            write_task "$_task" success "$_font" '字体已准备完成；完整重启后自动验证实际加载状态' "$_started" "$_finished" ''
+            [ -f "$HISTORY_TOOL" ] && MODDIR="$MODDIR" sh "$HISTORY_TOOL" record-direct "$_font" >/dev/null 2>&1 || true
+        fi
     elif [ "$_rc" -eq 124 ] || [ "$_rc" -eq 137 ]; then
         cat "$_output" >> "$LOG_FILE" 2>/dev/null || true
         write_task "$_task" failed "$_font" "字体切换超过 ${TIMEOUT_SECONDS} 秒，已终止并回滚" "$_started" "$_finished" ''
@@ -294,12 +302,14 @@ status_task() {
     _timeout="$(read_value timeout)"
     _elapsed="$(read_value elapsed)"
     _boot_id="$(read_value bootId)"
+    _reused="$(read_value reused)"
+    [ "$_reused" = true ] || _reused=false
     if [ "$_state" = success ] && [ -f "$STATUS_SCRIPT" ]; then
         MODDIR="$MODDIR" sh "$STATUS_SCRIPT" "$_font" >/dev/null 2>&1 || true
     fi
-    printf '{"status":"ok","data":{"task":"%s","state":"%s","font":"%s","message":"%s","started":%s,"finished":%s,"heartbeat":%s,"timeout":%s,"elapsed":%s,"bootId":"%s"}}\n' \
+    printf '{"status":"ok","data":{"task":"%s","state":"%s","font":"%s","message":"%s","started":%s,"finished":%s,"heartbeat":%s,"timeout":%s,"elapsed":%s,"bootId":"%s","reused":%s}}\n' \
         "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_font")" "$(json_escape "$_message")" \
-        "${_started:-0}" "${_finished:-0}" "${_heartbeat:-0}" "${_timeout:-$TIMEOUT_SECONDS}" "${_elapsed:-0}" "$(json_escape "$_boot_id")"
+        "${_started:-0}" "${_finished:-0}" "${_heartbeat:-0}" "${_timeout:-$TIMEOUT_SECONDS}" "${_elapsed:-0}" "$(json_escape "$_boot_id")" "$_reused"
 }
 
 case "${1:-status}" in

@@ -29,6 +29,7 @@ common/device_font_template.py
 common/device_font_template_base.py
 common/device_font_template.sh
 common/font_archive_export.sh
+common/font_active_state.sh
 common/font_boot_state.sh
 common/font_axis_info.py
 common/font_check.sh

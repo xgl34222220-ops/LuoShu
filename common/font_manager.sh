@@ -35,6 +35,7 @@ FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 [ -f "$MODULE_DIR/common/font_config_weights.sh" ] && . "$MODULE_DIR/common/font_config_weights.sh"
 [ -f "$MODULE_DIR/common/mount_compat.sh" ] && . "$MODULE_DIR/common/mount_compat.sh"
 [ -f "$MODULE_DIR/common/font_boot_state.sh" ] && . "$MODULE_DIR/common/font_boot_state.sh"
+[ -f "$MODULE_DIR/common/font_active_state.sh" ] && . "$MODULE_DIR/common/font_active_state.sh"
 
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
 type check_coloros >/dev/null 2>&1 && check_coloros
@@ -222,7 +223,19 @@ luoshu_switch_signal_exit() {
 
 switch_font() {
     _font_id="$1"
+    LUOSHU_SWITCH_REUSED=false
     [ -n "$_font_id" ] || { echo '错误：未指定字体' >&2; return 1; }
+
+    # A complete boot already proved this exact payload. Reapplying it must be a metadata-only
+    # no-op: clearing the live tree first discarded the proof and forced the 94% FontTools rebuild.
+    if [ "$_font_id" != default ] && type luoshu_active_payload_verified >/dev/null 2>&1 && \
+       luoshu_active_payload_verified "$_font_id"; then
+        LUOSHU_SWITCH_REUSED=true
+        printf '%s\n' "$_font_id" > "$CONFIG_DIR/last_switch_result.conf" 2>/dev/null || true
+        date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
+        printf '[PERF] switch reuse=verified-active font=%s totalSeconds=0\n' "$_font_id"
+        return 0
+    fi
 
     _lock="$MODULE_DIR/.font_switch.lock"
     if [ -e "$_lock" ]; then
@@ -784,7 +797,17 @@ handle_action() {
         list) build_font_index_json "$_param" ;;
         current) printf '{"status":"ok","data":{"current":"%s"}}\n' "$(json_escape "$(get_current_font_id)")" ;;
         validate) validate_font_json "$_param" ;;
-        switch) if switch_font "$_param"; then printf '{"status":"ok","data":{"font":"%s","message":"已准备，重启手机后生效"}}\n' "$(json_escape "$_param")"; else printf '{"status":"error","message":"切换失败"}\n'; fi ;;
+        switch)
+            if switch_font "$_param"; then
+                if [ "$LUOSHU_SWITCH_REUSED" = true ]; then
+                    printf '{"status":"ok","data":{"font":"%s","reused":true,"message":"当前字体已验证，无需重新生成或重启"}}\n' "$(json_escape "$_param")"
+                else
+                    printf '{"status":"ok","data":{"font":"%s","reused":false,"message":"已准备，重启手机后生效"}}\n' "$(json_escape "$_param")"
+                fi
+            else
+                printf '{"status":"error","message":"切换失败"}\n'
+            fi
+            ;;
         switch_async) start_switch_task "$_param" ;;
         switch_status) switch_task_status_json "$_param" ;;
         delete) delete_font_json "$_param" ;;

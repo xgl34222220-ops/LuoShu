@@ -40,7 +40,7 @@ for file in \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
   common/multiweight_mix_task.sh common/mix_weight_mode.sh \
-  common/app_bridge.sh common/font_manager.sh common/font_boot_state.sh common/font_library_cache.sh common/app_installer.sh \
+  common/app_bridge.sh common/font_manager.sh common/font_active_state.sh common/font_boot_state.sh common/font_library_cache.sh common/app_installer.sh \
   common/font_provider_cache.sh common/font_validation_cache.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
   scripts/assert.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
@@ -237,6 +237,7 @@ grep -q 'Miuix 与 AndroidLiquidGlass' "$ROOT/THIRD_PARTY_NOTICES.md"
 # 功能回归脚本。
 sh "$ROOT/scripts/native_preview_source_test.sh"
 sh "$ROOT/scripts/app_bridge_status_test.sh"
+sh "$ROOT/scripts/font_active_state_test.sh"
 sh "$ROOT/scripts/font_boot_state_test.sh"
 sh "$ROOT/scripts/native_zip_import_test.sh"
 sh "$ROOT/scripts/font_index_delete_regression_test.sh"

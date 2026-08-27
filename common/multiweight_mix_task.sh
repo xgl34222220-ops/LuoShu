@@ -40,6 +40,7 @@ LOCK_FILE="$MODDIR/.font_switch.lock"
 [ -f "$MODE_HELPER" ] && . "$MODE_HELPER"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 [ -f "$MODDIR/common/font_boot_state.sh" ] && . "$MODDIR/common/font_boot_state.sh"
+[ -f "$MODDIR/common/font_active_state.sh" ] && . "$MODDIR/common/font_active_state.sh"
 
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
 read_value() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'; }
@@ -128,6 +129,7 @@ write_task() {
         shift 9
         printf 'cjkMode=%s\nlatinMode=%s\ndigitMode=%s\n' "$1" "$2" "$3"
         printf 'root=%s\nchildTask=%s\nstarted=%s\nfinished=%s\npercent=%s\n' "$4" "$5" "$6" "$7" "$8"
+        printf 'reused=%s\n' "${9:-false}"
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$TASK_FILE" 2>/dev/null
     chmod 0644 "$TASK_FILE" 2>/dev/null || true
 }
@@ -143,7 +145,8 @@ update_task() {
         "$(read_value "$TASK_FILE" cjk)" "$(read_value "$TASK_FILE" latin)" "$(read_value "$TASK_FILE" digit)" \
         "$(read_value "$TASK_FILE" cjkAxes)" "$(read_value "$TASK_FILE" latinAxes)" "$(read_value "$TASK_FILE" digitAxes)" \
         "$(read_value "$TASK_FILE" cjkMode)" "$(read_value "$TASK_FILE" latinMode)" "$(read_value "$TASK_FILE" digitMode)" \
-        "$(read_value "$TASK_FILE" root)" '' "$(read_value "$TASK_FILE" started)" "$_finished" "$_percent"
+        "$(read_value "$TASK_FILE" root)" '' "$(read_value "$TASK_FILE" started)" "$_finished" "$_percent" \
+        "$(read_value "$TASK_FILE" reused)"
 }
 
 find_best_source() {
@@ -196,11 +199,40 @@ run_instance() {
     chmod 0644 "$_destination" 2>/dev/null || true
 }
 
+source_file_identity() {
+    _source="$1"
+    if command -v stat >/dev/null 2>&1; then
+        stat -c '%d:%i:%s:%y:%z' "$_source" 2>/dev/null && return 0
+    fi
+    if command -v toybox >/dev/null 2>&1; then
+        toybox stat -c '%d:%i:%s:%y:%z' "$_source" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+source_content_digest() {
+    _source="$1"
+    _identity=$(source_file_identity "$_source" 2>/dev/null)
+    _memo="$SOURCE_META_CACHE/content-digest.memo"
+    if [ -n "$_identity" ] && [ -f "$_memo" ]; then
+        _hit=$(awk -F'\t' -v k="$_identity" '$1 == k { print $2; exit }' "$_memo" 2>/dev/null)
+        if [ -n "$_hit" ]; then
+            printf '%s\n' "$_hit"
+            return 0
+        fi
+    fi
+    _digest=$(hash_file "$_source")
+    [ -n "$_digest" ] || return 1
+    mkdir -p "$SOURCE_META_CACHE" 2>/dev/null || true
+    [ -z "$_identity" ] || printf '%s\t%s\n' "$_identity" "$_digest" >> "$_memo" 2>/dev/null || true
+    printf '%s\n' "$_digest"
+}
+
 source_signature() {
     _source="$1"
-    _stat=$(stat -c '%d:%i:%s:%Y:%Z' "$_source" 2>/dev/null)
-    [ -n "$_stat" ] || _stat=$(stat -c '%s:%Y' "$_source" 2>/dev/null)
-    printf '%s|%s' "$_source" "$_stat" | hash_text
+    _digest=$(source_content_digest "$_source") || return 1
+    _size=$(stat -c '%s' "$_source" 2>/dev/null || wc -c < "$_source" 2>/dev/null | tr -d '[:space:]')
+    printf 'content-v2|%s|%s' "$_digest" "$_size" | hash_text
 }
 
 source_metadata() {
@@ -253,7 +285,7 @@ prepare_source() {
     mkdir -p "${_destination%/*}" "$PREPARED_CACHE" 2>/dev/null || return 1
 
     if [ "$_variable" = true ] || [ "$_format" = TTC ]; then
-        _prepared_key=$(printf '%s' "instance-v3|$_signature|$_role|$_effective" | hash_text)
+        _prepared_key=$(printf '%s' "instance-v4-content|$_signature|$_role|$_effective" | hash_text)
         [ -n "$_prepared_key" ] || return 1
         _cached="$PREPARED_CACHE/${_prepared_key}.font"
         if [ ! -s "$_cached" ]; then
@@ -265,10 +297,10 @@ prepare_source() {
   prune_prepared_cache
         fi
         link_or_copy "$_cached" "$_destination" || return 1
-        _content_key="instance-v3|$_prepared_key"
+        _content_key="instance-v4-content|$_prepared_key"
     else
         link_or_copy "$_source" "$_destination" || return 1
-        _content_key="static-v2|$_signature"
+        _content_key="static-v3-content|$_signature"
     fi
     printf '%s\n' "$_content_key" > "${_destination}.source-key" 2>/dev/null || return 1
     chmod 0644 "$_destination" "${_destination}.source-key" 2>/dev/null || true
@@ -319,9 +351,9 @@ build_composite_cached() {
     _latin_key=$(cat "${_latin}.source-key" 2>/dev/null)
     _digit_key=$(cat "${_digit}.source-key" 2>/dev/null)
     if [ -n "$_cjk_key" ] && [ -n "$_latin_key" ] && [ -n "$_digit_key" ]; then
-        _key=$(printf '%s|%s|%s|auto-multiweight-v3' "$_cjk_key" "$_latin_key" "$_digit_key" | hash_text)
+        _key=$(printf '%s|%s|%s|auto-multiweight-v4-content' "$_cjk_key" "$_latin_key" "$_digit_key" | hash_text)
     else
-        _key=$(printf '%s|%s|%s|auto-multiweight-v3' \
+        _key=$(printf '%s|%s|%s|auto-multiweight-v4-content' \
   "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" | hash_text)
     fi
     [ -n "$_key" ] || return 1
@@ -488,6 +520,17 @@ start_mix() {
 
     if [ "$_cjk_mode" = fixed ] && [ "$_latin_mode" = fixed ] && [ "$_digit_mode" = fixed ]; then
         sh "$FALLBACK_ENGINE" start "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes"
+        return
+    fi
+    if type luoshu_mix_request_matches_active >/dev/null 2>&1 && \
+       luoshu_mix_request_matches_active "$_cjk" "$_latin" "$_digit" \
+           "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_cjk_mode" "$_latin_mode" "$_digit_mode"; then
+        _task="auto-mix-reuse-$(date +%s)-$$"
+        write_task "$_task" success '当前复合字体已验证，无需重新生成或重启' \
+            "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" \
+            "$_cjk_mode" "$_latin_mode" "$_digit_mode" '' '' "$(date +%s)" "$(date +%s)" 100 true
+        printf '{"status":"ok","data":{"task":"%s","cjkMode":"%s","latinMode":"%s","digitMode":"%s","reused":true}}\n' \
+            "$(json_escape "$_task")" "$_cjk_mode" "$_latin_mode" "$_digit_mode"
         return
     fi
     [ ! -f "$REBOOT_CONF" ] || {

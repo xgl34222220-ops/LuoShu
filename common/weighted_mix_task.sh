@@ -36,6 +36,7 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 [ -f "$MODDIR/common/mix_task_handoff.sh" ] && . "$MODDIR/common/mix_task_handoff.sh"
+[ -f "$MODDIR/common/font_active_state.sh" ] && . "$MODDIR/common/font_active_state.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -106,6 +107,7 @@ write_task() {
         printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$7" "$8" "$9"
         shift 9
         printf 'root=%s\nchildTask=%s\nstarted=%s\nfinished=%s\npercent=%s\n' "$1" "$2" "$3" "$4" "$5"
+        printf 'reused=%s\n' "${6:-false}"
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$TASK_FILE" 2>/dev/null
     chmod 0644 "$TASK_FILE" 2>/dev/null || true
 }
@@ -126,10 +128,11 @@ update_task() {
     _digit_axes=$(read_value "$TASK_FILE" digitAxes)
     _root=$(read_value "$TASK_FILE" root)
     _started=$(read_value "$TASK_FILE" started)
+    _reused=$(read_value "$TASK_FILE" reused)
     [ -n "$_child" ] || _child=$(read_value "$TASK_FILE" childTask)
     [ -n "$_finished" ] || _finished=$(read_value "$TASK_FILE" finished)
     write_task "$_wanted" "$_state" "$_message" "$_cjk" "$_latin" "$_digit" \
-        "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_root" "$_child" "$_started" "$_finished" "$_percent"
+        "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_root" "$_child" "$_started" "$_finished" "$_percent" "$_reused"
 }
 
 find_best_source() {
@@ -369,12 +372,14 @@ status_json() {
     _started=$(read_value "$TASK_FILE" started)
     _finished=$(read_value "$TASK_FILE" finished)
     _percent=$(read_value "$TASK_FILE" percent)
-    printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","started":%s,"finished":%s,"progress":{"message":"%s","percent":%s}}}\n' \
+    _reused=$(read_value "$TASK_FILE" reused)
+    [ "$_reused" = true ] || _reused=false
+    printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","started":%s,"finished":%s,"reused":%s,"progress":{"message":"%s","percent":%s}}}\n' \
         "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_message")" \
         "$(json_escape "$_cjk")" "$(json_escape "$_latin")" "$(json_escape "$_digit")" \
         "$(safe_weight "$_cjk_axes")" "$(safe_weight "$_latin_axes")" "$(safe_weight "$_digit_axes")" \
         "$(json_escape "$_cjk_axes")" "$(json_escape "$_latin_axes")" "$(json_escape "$_digit_axes")" \
-        "${_started:-0}" "${_finished:-0}" "$(json_escape "$_message")" "${_percent:-0}"
+        "${_started:-0}" "${_finished:-0}" "$_reused" "$(json_escape "$_message")" "${_percent:-0}"
 }
 
 config_json() {
@@ -431,6 +436,16 @@ start_mix() {
     [ -n "$_cjk_axes" ] || _cjk_axes='wght=400'
     [ -n "$_latin_axes" ] || _latin_axes='wght=400'
     [ -n "$_digit_axes" ] || _digit_axes='wght=400'
+    if type luoshu_mix_request_matches_active >/dev/null 2>&1 && \
+       luoshu_mix_request_matches_active "$_cjk" "$_latin" "$_digit" \
+           "$_cjk_axes" "$_latin_axes" "$_digit_axes" fixed fixed fixed; then
+        _request="axes-reuse-$(date +%s)-$$"
+        write_task "$_request" success '当前复合字体已验证，无需重新生成或重启' \
+            "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" \
+            '' '' "$(date +%s)" "$(date +%s)" 100 true
+        printf '{"status":"ok","data":{"task":"%s","reused":true}}\n' "$(json_escape "$_request")"
+        return
+    fi
     mkdir -p "$CONFIG_DIR" "$CACHE_ROOT" "$MODDIR/cache/tmp" "$MODDIR/logs" 2>/dev/null || {
         printf '{"status":"error","message":"无法创建字体组合缓存目录"}\n'; return
     }
