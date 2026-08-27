@@ -10,9 +10,9 @@ permissions:
   contents: write
 
 jobs:
-  patch-and-verify:
+  trace-stability:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - name: Patch routed boot stability contract
@@ -30,26 +30,5 @@ jobs:
               raise SystemExit('stability contract target not found')
           p.write_text(s.replace(old, new, 1))
           PY
-      - name: Install source-check dependencies
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends curl unzip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
-      - uses: actions/cache@v4
-        with:
-          path: common/python
-          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
-      - name: Prepare bundled runtime
-        run: |
-          if [ ! -x common/python/bin/luoshu-python ]; then
-            sh ./scripts/prepare_composite_runtime.sh
-          fi
-      - name: Run complete source checks
-        run: sh ./scripts/check.sh
-      - name: Commit verified stability contract
-        run: |
-          git config user.name 'xgl34222220-ops'
-          git config user.email 'xgl34222220@gmail.com'
-          git add scripts/stability_test.sh
-          git diff --cached --quiet && exit 0
-          git commit -m 'test: align stability check with routed boot runtime'
-          git push origin HEAD:main
+      - name: Trace stability test
+        run: sh -x ./scripts/stability_test.sh
