@@ -29,10 +29,7 @@ jobs:
         run: sh scripts/v4_update_preserve_test.sh
       - name: Bounded 94 percent validation
         run: sh scripts/v4_fast_validate_test.sh
+      - name: Prepare bundled composite runtime
+        run: sh scripts/prepare_composite_runtime.sh
       - name: Complete repository source checks
-        run: |
-          if ! sh scripts/check.sh; then
-            echo 'source checks failed; rerunning with shell trace'
-            sh -x scripts/check.sh
-            exit 1
-          fi
+        run: sh scripts/check.sh
