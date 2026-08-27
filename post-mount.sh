@@ -1,6 +1,7 @@
 #!/system/bin/sh
 # LuoShu post-mount router. Legacy-v14.4 mode only exposes the already-generated
 # physical-file payload; normal mode preserves the current v4 post-mount behavior.
+# External metamodules are intentionally ignored; LuoShu owns the self-mount path.
 set +e
 MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
