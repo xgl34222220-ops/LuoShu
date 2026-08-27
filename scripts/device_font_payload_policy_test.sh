@@ -75,7 +75,9 @@ a=0
 device_font_payload_build_install MissingTemplate || a=$?
 ok test "$a" -eq 2
 ok test "$LUOSHU_DEVICE_PAYLOAD_ERROR" = '缺少可信原厂字体模板，未提交不确定的逐槽负载'
-no printf '%s\n' "$LUOSHU_DEVICE_PAYLOAD_ERROR" | grep -q '恢复系统默认字体'
+case "$LUOSHU_DEVICE_PAYLOAD_ERROR" in
+    *'恢复系统默认字体'*) fail '错误提示不应要求恢复系统默认字体' ;;
+esac
 
 # ColorOS is different: if the foreground mapper already staged the verified
 # system/system_ext/product physical slots, a missing template must not block the switch.

@@ -18,17 +18,20 @@ dd if=/dev/zero of="$OLD/vendor/fonts/BadBoot.ttf" bs=2048 count=1 2>/dev/null
 LUOSHU_PAYLOAD_SCHEMA_CURRENT='new-safe-schema'
 export LUOSHU_PAYLOAD_SCHEMA_CURRENT
 . "$ROOT/common/module_update_state.sh"
-. "$ROOT/common/module_update_hotfix_v4.sh"
 
+# A schema mismatch must preserve the currently working payload. The update may
+# mark it for one explicit foreground re-apply after reboot, but the Root manager
+# flashing process itself must never rebuild or discard the active font.
 luoshu_migrate_active_install "$OLD" "$NEW"
 [ "$(cat "$NEW/config/active_font.conf")" = mix ]
 [ "$LUOSHU_UPDATE_REBUILD_REQUIRED" = true ]
-[ ! -f "$NEW/system/fonts/Roboto-Regular.ttf" ]
-[ ! -f "$NEW/vendor/fonts/BadBoot.ttf" ]
-grep -q '^mode=preserve-selection$' "$NEW/config/font-payload-rebuild-pending.conf"
+[ -s "$NEW/system/fonts/Roboto-Regular.ttf" ]
+[ -s "$NEW/vendor/fonts/BadBoot.ttf" ]
+grep -q '^mode=preserve-current$' "$NEW/config/font-payload-rebuild-pending.conf"
 grep -q '^font=mix$' "$NEW/config/font-payload-rebuild-pending.conf"
 
-# Same-schema migration still preserves an already validated payload.
+# Same-schema migration also preserves the validated payload and needs no
+# explicit engine migration marker.
 rm -rf "$NEW"
 mkdir -p "$NEW/config" "$NEW/system/fonts"
 printf 'id=LuoShu\nversion=v4.0.0\nversionCode=40000\n' > "$NEW/module.prop"
@@ -38,9 +41,16 @@ luoshu_migrate_active_install "$OLD" "$NEW"
 [ "$LUOSHU_UPDATE_REBUILD_REQUIRED" = false ]
 [ -s "$NEW/system/fonts/Roboto-Regular.ttf" ]
 [ -s "$NEW/vendor/fonts/BadBoot.ttf" ]
+[ ! -f "$NEW/config/font-payload-rebuild-pending.conf" ]
 
-grep -q 'luoshu_v4_update_rebuild_selected' "$ROOT/customize.sh"
-grep -q '未切换为系统默认字体' "$ROOT/customize.sh"
+# Regression guard for the real-device v4.0.0 installer stall: customize.sh may
+# report a deferred rebuild, but it must not source the hotfix override nor call
+# any synchronous update rebuild worker while the module is being flashed.
+! grep -q 'module_update_hotfix_v4.sh' "$ROOT/customize.sh"
+! grep -q 'luoshu_v4_update_rebuild_selected' "$ROOT/customize.sh"
+! grep -q 'font_mix.sh.*worker' "$ROOT/customize.sh"
+! grep -q 'font_manager.sh.*action switch' "$ROOT/customize.sh"
+grep -q '不会同步重建字体' "$ROOT/customize.sh"
 ! grep -q "printf 'default\\n'.*active_font.conf" "$ROOT/customize.sh"
 
 echo 'v4 update preserve test: ok'
