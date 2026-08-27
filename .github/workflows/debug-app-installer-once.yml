@@ -1,4 +1,4 @@
-name: Debug App Installer Once
+name: Debug Stability Tail Once
 
 on:
   push:
@@ -13,11 +13,11 @@ permissions:
 jobs:
   trace:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
-      - name: Trace bundled App installer regression
+      - name: Trace stability tail regression
         shell: bash
         run: |
           set -o pipefail
-          sh -x scripts/app_installer_test.sh
+          sh -x scripts/stability_test.sh
