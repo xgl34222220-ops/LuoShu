@@ -9,7 +9,29 @@ LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
 V4_POST_FS="$MODDIR/post-fs-data-v4.sh"
 
 if [ ! -f "$LEGACY_MODE" ]; then
-    [ -f "$V4_POST_FS" ] && exec sh "$V4_POST_FS"
+    if [ -f "$V4_POST_FS" ]; then
+        exec sh "$V4_POST_FS"
+    fi
+
+    # Damaged/minimal test installs may contain the router without its preserved
+    # v4 wrapper. Fall back to the same self-mount stage selection instead of
+    # silently doing nothing; production packages still use post-fs-data-v4.sh.
+    [ -f "$MODDIR/common/private_payload.sh" ] && . "$MODDIR/common/private_payload.sh"
+    type luoshu_private_mount_module_view >/dev/null 2>&1 && \
+        luoshu_private_mount_module_view "$MODDIR" >/dev/null 2>&1 || true
+    [ -f "$MODDIR/common/mount_self_backend.sh" ] && . "$MODDIR/common/mount_self_backend.sh"
+    _lpf_root=$(luoshu_detect_root_manager 2>/dev/null | head -n1)
+    _lpf_stage=$(luoshu_self_mount_stage_for_manager "$_lpf_root" 2>/dev/null)
+    case "$_lpf_stage" in
+        post-mount)
+            type luoshu_private_unmount_module_view >/dev/null 2>&1 && \
+                luoshu_private_unmount_module_view "$MODDIR" >/dev/null 2>&1 || true
+            ;;
+        *)
+            type luoshu_private_self_mount_ensure >/dev/null 2>&1 && \
+                luoshu_private_self_mount_ensure >/dev/null 2>&1 || true
+            ;;
+    esac
     exit 0
 fi
 
