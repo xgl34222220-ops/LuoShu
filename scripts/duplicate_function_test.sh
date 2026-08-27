@@ -63,9 +63,17 @@ luoshu_detect_mount_engine
 luoshu_dynamic_targets_apply
 luoshu_font_lock_acquire
 luoshu_font_lock_active
+luoshu_font_lock_boot_id
+luoshu_font_lock_created
+luoshu_font_lock_force_clear
+luoshu_font_lock_forget_owned
+luoshu_font_lock_owned_record
 luoshu_font_lock_pid
+luoshu_font_lock_recent_token
 luoshu_font_lock_reap_stale
 luoshu_font_lock_release
+luoshu_font_lock_starttime
+luoshu_font_lock_token
 luoshu_font_validate_global_cached
 luoshu_hybrid_backend
 luoshu_magic_mount_ensure_partitions
@@ -84,6 +92,7 @@ luoshu_payload_transaction_rollback
 luoshu_payload_validate_current
 luoshu_payload_validate_manifest_fast
 luoshu_payload_validate_manifest_full
+luoshu_process_starttime
 luoshu_self_mount_ensure
 luoshu_used_partitions
 luoshu_write_mount_probe
@@ -108,6 +117,11 @@ ALLOW
 # common/module_update_state.sh. Its luoshu_migrate_active_install override preserves the selected
 # font while isolating/rebuilding payloads whose schema is incompatible during an in-place update.
 # Keep that override registered here so a different accidental third definition still fails below.
+#
+# common/font_switch_lock.sh deliberately mirrors only the current identity-lock functions used by
+# common/util_functions.sh. The isolated v14.4 switch backend sources this safety-only file after its
+# old utility layer, preserving PID/starttime/boot-id/token concurrency protection without importing
+# the v4 device-template / slot / XML font generation pipeline.
 
 : > "$TMP/defs"
 for f in "$ROOT"/common/*.sh "$ROOT"/*.sh; do
