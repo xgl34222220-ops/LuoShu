@@ -66,13 +66,26 @@ ok grep -qx SameFont "$TMP/schedules"
 ok grep -qx SameFont "$TMP/builds"
 ok grep -qx SameFont "$TMP/activations"
 
-# Without a trusted stock template v4 refuses to commit a universal-metrics fallback.
+# Without a trusted stock template, generic ROMs refuse an uncertain per-slot payload.
+# Never instruct the user to restore the system/default font as a prerequisite.
 unset LUOSHU_TRUSTED_TEMPLATE_KEY
 rm -f "$MODULE/common/device_font_template.sh"
+unset IS_COLOROS LUOSHU_SAFE_PHYSICAL_FALLBACK 2>/dev/null || true
 a=0
 device_font_payload_build_install MissingTemplate || a=$?
 ok test "$a" -eq 2
-ok test "$LUOSHU_DEVICE_PAYLOAD_ERROR" = '缺少原厂字体模板；请先恢复系统默认字体并完整重启一次'
+ok test "$LUOSHU_DEVICE_PAYLOAD_ERROR" = '缺少可信原厂字体模板，未提交不确定的逐槽负载'
+no printf '%s\n' "$LUOSHU_DEVICE_PAYLOAD_ERROR" | grep -q '恢复系统默认字体'
+
+# ColorOS is different: if the foreground mapper already staged the verified
+# system/system_ext/product physical slots, a missing template must not block the switch.
+IS_COLOROS=true
+LUOSHU_SAFE_PHYSICAL_FALLBACK=1
+export IS_COLOROS LUOSHU_SAFE_PHYSICAL_FALLBACK
+a=0
+device_font_payload_build_install ColorOsPhysicalFallback || a=$?
+ok test "$a" -eq 3
+ok grep -q 'ColorOS 原厂模板不可用；保留已验证的 system/system_ext/product 物理槽映射' "$MODULE/logs/device-font-payload.log"
 
 sh -n "$ROOT/common/device_font_payload_policy.sh"
 echo 'Device font foreground policy tests passed.'
