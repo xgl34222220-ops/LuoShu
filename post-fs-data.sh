@@ -7,6 +7,7 @@ MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
 V4_POST_FS="$MODDIR/post-fs-data-v4.sh"
+HYPEROS_LEGACY_COMPAT="$MODDIR/common/legacy_v14_4/hyperos_clock_compat.sh"
 
 if [ ! -f "$LEGACY_MODE" ]; then
     if [ -f "$V4_POST_FS" ]; then
@@ -43,6 +44,12 @@ rm -rf "$MODDIR/config/font_switch.lock" "$MODDIR/config/mount.lock" 2>/dev/null
 [ -f "$MODDIR/common/private_payload.sh" ] && . "$MODDIR/common/private_payload.sh"
 type luoshu_private_mount_module_view >/dev/null 2>&1 && \
     luoshu_private_mount_module_view "$MODDIR" >/dev/null 2>&1 || true
+
+# The restored v14.4 core predates HyperOS 3's mi_ext + Mitype/MiClock coverage.
+# Re-create only physical clock/status targets that exist on this ROM before mount.
+[ -f "$HYPEROS_LEGACY_COMPAT" ] && . "$HYPEROS_LEGACY_COMPAT"
+type luoshu_hyperos_clock_payload_ensure >/dev/null 2>&1 && \
+    luoshu_hyperos_clock_payload_ensure >/dev/null 2>&1 || true
 
 [ -f "$MODDIR/common/mount_self_backend.sh" ] && . "$MODDIR/common/mount_self_backend.sh"
 _lpf_root=$(luoshu_detect_root_manager 2>/dev/null | head -n1)
