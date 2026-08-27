@@ -45,7 +45,10 @@ printf 'state=ready\n' >"$OLD/config/device-font-cache/stale/cache.conf"
 printf 'new notes\n' >"$NEW/config/version_notes.conf"
 printf '#!/bin/sh\n' >"$NEW/system/bin/洛书"
 
+# Test the exact production update chain: customize.sh loads module_update_state.sh first,
+# then the v4 override before calling luoshu_migrate_active_install.
 . "$ROOT/common/module_update_state.sh"
+. "$ROOT/common/module_update_hotfix_v4.sh"
 
 RECOVERY_OLD="$TMP/recovery-old"
 RECOVERY_NEW="$TMP/recovery-new"
@@ -66,18 +69,20 @@ fi
 printf 'id=LuoShu\nversionCode=30303\n' > "$RECOVERY_OLD/module.prop"
 luoshu_runtime_recovery_required "$RECOVERY_OLD" "$RECOVERY_NEW"
 
+# Missing/old schema: keep selection/config, but never inherit generated payload from a
+# different engine schema. customize.sh will rebuild the same selected font before commit.
 luoshu_migrate_active_install "$OLD" "$NEW"
 
 test "$(cat "$NEW/config/active_font.conf")" = Qsal
 test "$(cat "$NEW/config/active_emoji.conf")" = Twemoji
 grep -q '^cjk=Qsal$' "$NEW/config/font_mix.conf"
 test "$(cat "$NEW/config/version_notes.conf")" = 'new notes'
-test -f "$NEW/system/fonts/Qsal-Regular.ttf"
-test -f "$NEW/system/fonts/.luoshu-font-store/qsal.font"
-test -f "$NEW/system/etc/fonts.xml"
-test -f "$NEW/product/fonts/OEM-Regular.ttf"
+test ! -e "$NEW/system/fonts/Qsal-Regular.ttf"
+test ! -e "$NEW/system/fonts/.luoshu-font-store/qsal.font"
+test ! -e "$NEW/system/etc/fonts.xml"
+test ! -e "$NEW/product/fonts/OEM-Regular.ttf"
 for partition in $OEM_PARTITIONS; do
-    test -f "$NEW/$partition/fonts/LuoShu-OEM.ttf"
+    test ! -e "$NEW/$partition/fonts/LuoShu-OEM.ttf"
 done
 test ! -e "$NEW/cache/full-composite-v5/test.otf"
 test ! -e "$NEW/cache/auto-multiweight-mix/composites-v2/test.font"
@@ -93,13 +98,13 @@ test ! -e "$NEW/config/self-mount-required.conf"
 test ! -e "$NEW/config/device-font-load-verification.conf"
 test "$LUOSHU_UPDATE_ACTIVE" = Qsal
 test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = true
-grep -q '^state=awaiting-explicit-apply$' "$NEW/config/font-payload-rebuild-pending.conf"
-grep -q '^mode=preserve-current$' "$NEW/config/font-payload-rebuild-pending.conf"
-grep -q '^reason=schema-upgrade$' "$NEW/config/font-payload-rebuild-pending.conf"
+grep -q '^state=install-rebuild-required$' "$NEW/config/font-payload-rebuild-pending.conf"
+grep -q '^mode=preserve-selection$' "$NEW/config/font-payload-rebuild-pending.conf"
+grep -q '^reason=schema-mismatch$' "$NEW/config/font-payload-rebuild-pending.conf"
 grep -q '^oldSchema=missing$' "$NEW/config/font-payload-rebuild-pending.conf"
 grep -q "^newSchema=$SCHEMA$" "$NEW/config/font-payload-rebuild-pending.conf"
 
-# Current-schema updates keep only current cache generations and do not request a rebuild.
+# Current-schema updates preserve the already validated payload and current cache generations.
 CURRENT="$TMP/current"
 CURRENT_NEW="$TMP/current-new"
 mkdir -p "$CURRENT/config" "$CURRENT/system/fonts" \
@@ -122,6 +127,7 @@ luoshu_migrate_active_install "$CURRENT" "$CURRENT_NEW"
 test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = false
 test "$(cat "$CURRENT_NEW/config/active_font.conf")" = mix
 grep -q '^cjk=Qsal$' "$CURRENT_NEW/config/font_mix.conf"
+test -f "$CURRENT_NEW/system/fonts/Qsal-Regular.ttf"
 test -f "$CURRENT_NEW/cache/full-composite-v11/current.font"
 test -f "$CURRENT_NEW/cache/auto-multiweight-mix/composites-v8/current.font"
 test -f "$CURRENT_NEW/cache/auto-multiweight-mix/prepared-v8/current.font"
@@ -130,8 +136,7 @@ test -f "$CURRENT_NEW/config/device-font-cache/current/payload/manifest.json"
 test -f "$CURRENT_NEW/config/metrics_cache/current.font"
 test ! -e "$CURRENT_NEW/config/font-payload-rebuild-pending.conf"
 
-# A valid active payload may live only in an OEM partition. It must still be
-# recognized and preserved instead of silently resetting the selected font.
+# A valid current-schema payload may live only in an OEM partition and must be retained.
 OPLUS_ONLY="$TMP/oplus-only"
 OPLUS_ONLY_NEW="$TMP/oplus-only-new"
 mkdir -p "$OPLUS_ONLY/config" "$OPLUS_ONLY/oplus_product/fonts" "$OPLUS_ONLY_NEW/config"
@@ -143,16 +148,17 @@ luoshu_migrate_active_install "$OPLUS_ONLY" "$OPLUS_ONLY_NEW"
 test -f "$OPLUS_ONLY_NEW/oplus_product/fonts/OPPOSans-Regular.ttf"
 test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = false
 
+# A selected font with no compatible generated payload is kept as selection state and marked for
+# install-time rebuild. If its source font is really unavailable, customize.sh aborts before commit.
 INVALID="$TMP/invalid"
 TARGET="$TMP/invalid-target"
 mkdir -p "$INVALID/config" "$TARGET/config"
 printf 'id=LuoShu\n' >"$INVALID/module.prop"
 printf 'MissingFont\n' >"$INVALID/config/active_font.conf"
-if luoshu_migrate_active_install "$INVALID" "$TARGET"; then
-    echo 'invalid active payload was migrated' >&2
-    exit 1
-fi
-test ! -e "$TARGET/config/active_font.conf"
+luoshu_migrate_active_install "$INVALID" "$TARGET"
+test "$(cat "$TARGET/config/active_font.conf")" = MissingFont
+test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = true
+grep -q '^mode=preserve-selection$' "$TARGET/config/font-payload-rebuild-pending.conf"
 
 FRESH="$TMP/fresh"
 mkdir -p "$FRESH"
@@ -162,4 +168,4 @@ FRESH_CODE=$?
 set -e
 test "$FRESH_CODE" -eq 2
 
-echo 'Module updates preserve current payloads; stale schemas wait for one explicit foreground apply.'
+echo 'Module updates preserve selection, reject incompatible generated payloads, and rebuild before commit.'
