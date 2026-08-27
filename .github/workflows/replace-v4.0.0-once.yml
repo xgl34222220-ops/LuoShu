@@ -22,12 +22,13 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: v4.0.0
-      EXPECTED_OLD_TAG_SHA: 315353592034ebd5ba8afcaa0ddb62bfd167f8e7
+      EXPECTED_OLD_TAG_SHA: 59e120a76152ba9ee21cf7d441d738df030fd21d
       REQUIRED_RUNTIME_FIX_SHA: dfdc8e13400d0a2bbd850e4643e6913cd7f8c085
       REQUIRED_DUPLICATE_GUARD_FIX_SHA: c07a1d9e7b12a7ea7d401df77f0bd95daf0fa9f8
       REQUIRED_STABILITY_FIX_SHA: c88a7a9ddb7da776fde210e8914ce2b237306429
       REQUIRED_FULL_CHECK_SHA: a801ddff6c27cf180ec2eacb3b01f8f0dc4462c5
       REQUIRED_DEVICE_REGRESSION_FIX_SHA: 4d1c9a0ea320e4bbb558717ce5e58156a9998e6f
+      REQUIRED_POLICY_TEST_FIX_SHA: 8933b272df99480db3a0fb301044dde8200be78c
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,7 +50,8 @@ jobs:
             "$REQUIRED_DUPLICATE_GUARD_FIX_SHA" \
             "$REQUIRED_STABILITY_FIX_SHA" \
             "$REQUIRED_FULL_CHECK_SHA" \
-            "$REQUIRED_DEVICE_REGRESSION_FIX_SHA"; do
+            "$REQUIRED_DEVICE_REGRESSION_FIX_SHA" \
+            "$REQUIRED_POLICY_TEST_FIX_SHA"; do
             git merge-base --is-ancestor "$required" "$GITHUB_SHA" || {
               echo "Refusing replacement: required verified fix $required is missing" >&2
               exit 2
