@@ -103,17 +103,12 @@ _device_font_fast_alias_roots() {
     _dffar_file="$2"
     _dffar_module="$(_device_font_policy_module)"
     _dffar_count=0
-    while IFS='|' read -r _dffar_real _dffar_overlay; do
-        [ -e "$_dffar_real/$_dffar_file" ] || continue
-        mkdir -p "$_dffar_overlay" 2>/dev/null || continue
-        rm -f "$_dffar_overlay/$_dffar_file" 2>/dev/null || true
-        if ln "$_dffar_anchor" "$_dffar_overlay/$_dffar_file" 2>/dev/null || \
-           cp -f "$_dffar_anchor" "$_dffar_overlay/$_dffar_file" 2>/dev/null; then
-            chmod 0644 "$_dffar_overlay/$_dffar_file" 2>/dev/null || true
-            _dffar_count=$((_dffar_count + 1))
-        fi
-    done <<EOF_DFFAR_ROOTS
-/system/fonts|$_dffar_module/system/fonts
+    if [ "${IS_COLOROS:-false}" = true ]; then
+        _dffar_roots="/system/fonts|$_dffar_module/system/fonts
+/system_ext/fonts|$_dffar_module/system_ext/fonts
+/product/fonts|$_dffar_module/product/fonts"
+    else
+        _dffar_roots="/system/fonts|$_dffar_module/system/fonts
 /system_ext/fonts|$_dffar_module/system_ext/fonts
 /product/fonts|$_dffar_module/product/fonts
 /mi_ext/fonts|$_dffar_module/mi_ext/fonts
@@ -121,19 +116,22 @@ _device_font_fast_alias_roots() {
 /vendor/fonts|$_dffar_module/vendor/fonts
 /odm/fonts|$_dffar_module/odm/fonts
 /oem/fonts|$_dffar_module/oem/fonts
-/my_engineering/fonts|$_dffar_module/my_engineering/fonts
-/my_company/fonts|$_dffar_module/my_company/fonts
-/my_preload/fonts|$_dffar_module/my_preload/fonts
-/my_region/fonts|$_dffar_module/my_region/fonts
-/my_stock/fonts|$_dffar_module/my_stock/fonts
-/oplus_product/fonts|$_dffar_module/oplus_product/fonts
-/oplus_engineering/fonts|$_dffar_module/oplus_engineering/fonts
-/oplus_version/fonts|$_dffar_module/oplus_version/fonts
-/oplus_region/fonts|$_dffar_module/oplus_region/fonts
 /cust/fonts|$_dffar_module/cust/fonts
-/hw_product/fonts|$_dffar_module/hw_product/fonts
+/hw_product/fonts|$_dffar_module/hw_product/fonts"
+    fi
+    while IFS='|' read -r _dffar_real _dffar_overlay; do
+        [ -e "$_dffar_real/$_dffar_file" ] || continue
+        mkdir -p "$_dffar_overlay" 2>/dev/null || continue
+        rm -f "$_dffar_overlay/$_dffar_file" 2>/dev/null || true
+        if ln "$_dffar_anchor" "$_dffar_overlay/$_dffar_file" 2>/dev/null ||            cp -f "$_dffar_anchor" "$_dffar_overlay/$_dffar_file" 2>/dev/null; then
+            chmod 0644 "$_dffar_overlay/$_dffar_file" 2>/dev/null || true
+            _dffar_count=$((_dffar_count + 1))
+        fi
+    done <<EOF_DFFAR_ROOTS
+$_dffar_roots
 EOF_DFFAR_ROOTS
-    printf '%s\n' "$_dffar_count"
+    printf '%s
+' "$_dffar_count"
 }
 
 _device_font_fast_map() {
@@ -190,6 +188,8 @@ _device_font_fast_map() {
         done
     done
 
+    LUOSHU_SAFE_PHYSICAL_FALLBACK=1
+    export LUOSHU_SAFE_PHYSICAL_FALLBACK
     _device_font_policy_log "前台快速映射完成：font=$_dffm_family aliases=$_dffm_total"
     return 0
 }
@@ -314,8 +314,12 @@ device_font_payload_build_install() {
         esac
     fi
     if [ -z "$_dfpp_template_key" ]; then
-        _device_font_policy_log "设备对齐暂不可用：需要在系统默认字体状态重启一次建立原厂模板"
-        LUOSHU_DEVICE_PAYLOAD_ERROR='缺少原厂字体模板；请先恢复系统默认字体并完整重启一次'
+        if [ "${IS_COLOROS:-false}" = true ] && [ "${LUOSHU_SAFE_PHYSICAL_FALLBACK:-0}" = 1 ]; then
+            _device_font_policy_log "ColorOS 原厂模板不可用；保留已验证的 system/system_ext/product 物理槽映射，不阻止切换"
+            return 3
+        fi
+        _device_font_policy_log "设备对齐暂不可用：当前 ROM 没有可信原厂槽位模板"
+        LUOSHU_DEVICE_PAYLOAD_ERROR='缺少可信原厂字体模板，未提交不确定的逐槽负载'
         export LUOSHU_DEVICE_PAYLOAD_ERROR
         return 2
     fi
@@ -369,6 +373,10 @@ font_config_enable_for_payload() {
         1)
             LUOSHU_DEVICE_PAYLOAD_RESULT='device-failed'
             return 1
+            ;;
+        3)
+            LUOSHU_DEVICE_PAYLOAD_RESULT='safe-physical-fallback'
+            return 0
             ;;
     esac
 

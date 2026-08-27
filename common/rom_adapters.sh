@@ -149,18 +149,6 @@ _font_anchor() {
     normalizer="$module/common/font_metrics_normalize.py"
     rm -f "$anchor" 2>/dev/null || true
 
-    # HyperOS has several independent physical font slots with different line-box contracts.
-    # Applying one main-slot hhea/OS2 contract to all of them moves text vertically in compact
-    # labels and EditText controls. Preserve the selected font/composite metrics on HyperOS;
-    # the ROM-specific mapper still selects only real UI slots and keeps protected scripts stock.
-    if [ "${IS_HYPEROS:-false}" = true ] && type _hyperos_compact_normalize >/dev/null 2>&1; then
-        if _hyperos_compact_normalize "$src" "$anchor" && [ -s "$anchor" ]; then
-            printf '%s\n' "$anchor"
-            return 0
-        fi
-        rm -f "$anchor" 2>/dev/null || true
-    fi
-
     # 命中缓存则直接硬链接，跳过 Python 归一化
     if _fa_cached=$(_font_anchor_cache_lookup "$src" "$key"); then
         if ln "$_fa_cached" "$anchor" 2>/dev/null || cp -f "$_fa_cached" "$anchor" 2>/dev/null; then
@@ -305,11 +293,44 @@ _device_font_inventory_target() {
     _dfit_path="$1"
     _dfit_module="$(_device_font_inventory_module)"
     case "$_dfit_path" in
-        /system/fonts/*) printf '%s/system/fonts/%s\n' "$_dfit_module" "${_dfit_path#/system/fonts/}" ;;
-        /system_ext/fonts/*) printf '%s/system_ext/fonts/%s\n' "$_dfit_module" "${_dfit_path#/system_ext/fonts/}" ;;
-        /product/fonts/*) printf '%s/product/fonts/%s\n' "$_dfit_module" "${_dfit_path#/product/fonts/}" ;;
-        /my_product/fonts/*) printf '%s/my_product/fonts/%s\n' "$_dfit_module" "${_dfit_path#/my_product/fonts/}" ;;
-        /vendor/fonts/*) printf '%s/vendor/fonts/%s\n' "$_dfit_module" "${_dfit_path#/vendor/fonts/}" ;;
+        /system/fonts/*) printf '%s/system/fonts/%s
+' "$_dfit_module" "${_dfit_path#/system/fonts/}" ;;
+        /system_ext/fonts/*) printf '%s/system_ext/fonts/%s
+' "$_dfit_module" "${_dfit_path#/system_ext/fonts/}" ;;
+        /product/fonts/*) printf '%s/product/fonts/%s
+' "$_dfit_module" "${_dfit_path#/product/fonts/}" ;;
+        /vendor/fonts/*) printf '%s/vendor/fonts/%s
+' "$_dfit_module" "${_dfit_path#/vendor/fonts/}" ;;
+        /odm/fonts/*) printf '%s/odm/fonts/%s
+' "$_dfit_module" "${_dfit_path#/odm/fonts/}" ;;
+        /oem/fonts/*) printf '%s/oem/fonts/%s
+' "$_dfit_module" "${_dfit_path#/oem/fonts/}" ;;
+        /my_product/fonts/*) printf '%s/my_product/fonts/%s
+' "$_dfit_module" "${_dfit_path#/my_product/fonts/}" ;;
+        /my_engineering/fonts/*) printf '%s/my_engineering/fonts/%s
+' "$_dfit_module" "${_dfit_path#/my_engineering/fonts/}" ;;
+        /my_company/fonts/*) printf '%s/my_company/fonts/%s
+' "$_dfit_module" "${_dfit_path#/my_company/fonts/}" ;;
+        /my_preload/fonts/*) printf '%s/my_preload/fonts/%s
+' "$_dfit_module" "${_dfit_path#/my_preload/fonts/}" ;;
+        /my_region/fonts/*) printf '%s/my_region/fonts/%s
+' "$_dfit_module" "${_dfit_path#/my_region/fonts/}" ;;
+        /my_stock/fonts/*) printf '%s/my_stock/fonts/%s
+' "$_dfit_module" "${_dfit_path#/my_stock/fonts/}" ;;
+        /oplus_product/fonts/*) printf '%s/oplus_product/fonts/%s
+' "$_dfit_module" "${_dfit_path#/oplus_product/fonts/}" ;;
+        /oplus_engineering/fonts/*) printf '%s/oplus_engineering/fonts/%s
+' "$_dfit_module" "${_dfit_path#/oplus_engineering/fonts/}" ;;
+        /oplus_version/fonts/*) printf '%s/oplus_version/fonts/%s
+' "$_dfit_module" "${_dfit_path#/oplus_version/fonts/}" ;;
+        /oplus_region/fonts/*) printf '%s/oplus_region/fonts/%s
+' "$_dfit_module" "${_dfit_path#/oplus_region/fonts/}" ;;
+        /mi_ext/fonts/*) printf '%s/mi_ext/fonts/%s
+' "$_dfit_module" "${_dfit_path#/mi_ext/fonts/}" ;;
+        /cust/fonts/*) printf '%s/cust/fonts/%s
+' "$_dfit_module" "${_dfit_path#/cust/fonts/}" ;;
+        /hw_product/fonts/*) printf '%s/hw_product/fonts/%s
+' "$_dfit_module" "${_dfit_path#/hw_product/fonts/}" ;;
         *) return 1 ;;
     esac
 }
@@ -369,10 +390,20 @@ _copy_as_inventory() {
     _dfii_regular=$(_font_anchor "$_dfii_src" "$_dfii_dest" regular) || return 1
     _dfii_count=0
     _dfii_bad=0
+    _dfii_skipped=0
     _dfii_tab=$(printf '\t')
     while IFS="$_dfii_tab" read -r _dfii_logical _dfii_name _dfii_partition _dfii_format _dfii_weight _dfii_style _dfii_source; do
         [ -n "$_dfii_logical" ] && [ -n "$_dfii_name" ] || continue
-        _dfii_target=$(_device_font_inventory_target "$_dfii_logical") || continue
+        if [ "${IS_COLOROS:-false}" = true ]; then
+            case "$_dfii_logical" in
+                /system/fonts/*|/system_ext/fonts/*|/product/fonts/*) ;;
+                *) _dfii_skipped=$((_dfii_skipped + 1)); continue ;;
+            esac
+        fi
+        _dfii_target=$(_device_font_inventory_target "$_dfii_logical") || {
+            _dfii_skipped=$((_dfii_skipped + 1))
+            continue
+        }
         mkdir -p "${_dfii_target%/*}" 2>/dev/null || continue
         _dfii_anchor="$_dfii_regular"
         if [ "$_dfii_mode" != quick ] && [ "$_dfii_weight" != 400 ]; then
@@ -390,8 +421,10 @@ $_dfii_entries
 EOF_LUOSHU_FONT_INVENTORY
     [ "$_dfii_count" -gt 0 ] || return 2
     LUOSHU_INVENTORY_TARGETS_MAPPED=1
-    export LUOSHU_INVENTORY_TARGETS_MAPPED
+    LUOSHU_SAFE_PHYSICAL_FALLBACK=1
+    export LUOSHU_INVENTORY_TARGETS_MAPPED LUOSHU_SAFE_PHYSICAL_FALLBACK
     _log_step "  已按设备原厂清单覆盖 $_dfii_count 个真实字体槽位"
+    [ "$_dfii_skipped" -eq 0 ] || _log_step "  已按 ROM 安全策略跳过 $_dfii_skipped 个非安全/未知字体槽位"
     [ "$_dfii_bad" -eq 0 ] || _log_step "  ⚠ $_dfii_bad 个清单槽位写入后校验异常"
     return 0
 }

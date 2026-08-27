@@ -13,14 +13,6 @@ _luoshu_coloros_root_pairs() {
     printf '%s|%s/system/fonts\n' "${LUOSHU_COLOROS_SYSTEM_FONTS_ROOT:-${LUOSHU_SYSTEM_FONTS_ROOT:-/system/fonts}}" "$_lcg_module"
     printf '%s|%s/system_ext/fonts\n' "${LUOSHU_COLOROS_SYSTEM_EXT_FONTS_ROOT:-${LUOSHU_SYSTEM_EXT_FONTS_ROOT:-/system_ext/fonts}}" "$_lcg_module"
     printf '%s|%s/product/fonts\n' "${LUOSHU_COLOROS_PRODUCT_FONTS_ROOT:-${LUOSHU_PRODUCT_FONTS_ROOT:-/product/fonts}}" "$_lcg_module"
-    printf '%s|%s/vendor/fonts\n' "${LUOSHU_COLOROS_VENDOR_FONTS_ROOT:-/vendor/fonts}" "$_lcg_module"
-    printf '%s|%s/odm/fonts\n' "${LUOSHU_COLOROS_ODM_FONTS_ROOT:-/odm/fonts}" "$_lcg_module"
-    printf '%s|%s/oem/fonts\n' "${LUOSHU_COLOROS_OEM_FONTS_ROOT:-/oem/fonts}" "$_lcg_module"
-    printf '%s|%s/my_product/fonts\n' "${LUOSHU_COLOROS_MY_PRODUCT_FONTS_ROOT:-/my_product/fonts}" "$_lcg_module"
-    printf '%s|%s/oplus_product/fonts\n' "${LUOSHU_COLOROS_OPLUS_PRODUCT_FONTS_ROOT:-/oplus_product/fonts}" "$_lcg_module"
-    printf '%s|%s/oplus_engineering/fonts\n' "${LUOSHU_COLOROS_OPLUS_ENGINEERING_FONTS_ROOT:-/oplus_engineering/fonts}" "$_lcg_module"
-    printf '%s|%s/oplus_version/fonts\n' "${LUOSHU_COLOROS_OPLUS_VERSION_FONTS_ROOT:-/oplus_version/fonts}" "$_lcg_module"
-    printf '%s|%s/oplus_region/fonts\n' "${LUOSHU_COLOROS_OPLUS_REGION_FONTS_ROOT:-/oplus_region/fonts}" "$_lcg_module"
 }
 
 _coloros_core_files() {

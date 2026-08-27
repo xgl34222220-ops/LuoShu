@@ -98,6 +98,11 @@ if [ "$UPDATE_PRESERVED" != true ]; then
     done
     rm -f "$MODPATH/system/etc/fonts.xml" "$MODPATH/system/etc/font_fallback.xml" \
           "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
+    _old_selected=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    if [ -n "$_old_selected" ] && [ "$_old_selected" != default ]; then
+        ui_print "✗ 无法安全迁移当前字体 $_old_selected；已中止本次更新，不会切回系统默认字体"
+        exit 1
+    fi
     printf 'default\n' > "$MODPATH/config/active_font.conf"
 fi
 
@@ -120,7 +125,7 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         PYTHONHOME="$_inventory_pyroot" \
         PYTHONPATH="$_inventory_pyroot/lib/python3.14:$_inventory_pyroot/lib/python3.14/site-packages:$MODPATH/common" \
         LD_LIBRARY_PATH="$_inventory_pyroot/lib:$_inventory_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-            "$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan \
+            "$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan --force \
                 --output "$FONT_INVENTORY_OUTPUT" \
                 --font-check "$MODPATH/common/font_check.sh" \
                 --overlay-module "$OLD_MOD" 2>> "$FONT_INVENTORY_LOG"

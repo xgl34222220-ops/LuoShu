@@ -383,6 +383,34 @@ def inject_dynamic_families(
     return injected
 
 
+def copy_direct_physical_slots(
+    slots: list[dict[str, Any]], payload_root: Path, stage: Path, copied: dict[tuple[str, str], Path]
+) -> int:
+    count = 0
+    for slot in slots:
+        if slot.get("sourceXml") or not slot.get("generatedFile"):
+            continue
+        stock_path = str(slot.get("stockPath", ""))
+        parts = Path(stock_path).parts
+        if len(parts) < 4 or parts[0] != "/" or parts[2] != "fonts":
+            raise OverlayError(f"物理字体槽路径无效：{stock_path}")
+        partition, target_name = parts[1], parts[-1]
+        generated_name = str(slot["generatedFile"])
+        source = payload_root / "fonts" / generated_name
+        if not source.is_file() or source.stat().st_size < 1024:
+            raise OverlayError(f"物理槽生成字体不存在：{generated_name}")
+        destination = stage / partition / "fonts" / target_name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.link(source, destination)
+        except OSError:
+            shutil.copyfile(source, destination)
+        os.chmod(destination, 0o644)
+        copied[(partition, target_name)] = destination
+        count += 1
+    return count
+
+
 def commit_directory(stage: Path, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     backup = output.with_name(f".{output.name}.previous.{os.getpid()}")
@@ -428,7 +456,9 @@ def render_overlay(
     try:
         by_xml: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for slot in slots:
-            by_xml[str(slot.get("sourceXml", ""))].append(slot)
+            if slot.get("sourceXml"):
+                by_xml[str(slot.get("sourceXml", ""))].append(slot)
+        direct_physical = copy_direct_physical_slots(slots, payload_root, stage, copied)
 
         system_trees: dict[str, ET.ElementTree] = {}
         system_inputs: dict[str, Path] = {}
@@ -479,9 +509,9 @@ def render_overlay(
         rewritten = sum(int(report.get("changedFonts", 0)) for report in xml_reports)
         injected = sum(int(report.get("dynamicInjectedFonts", 0)) for report in xml_reports)
         dynamic_mapped = sum(len(items) for items in eligible_dynamic.values())
-        if rewritten + dynamic_mapped != mapped:
+        if rewritten + dynamic_mapped + direct_physical != mapped:
             raise OverlayError(
-                f"槽位映射不完整：mapped={mapped} rewritten={rewritten} dynamic={dynamic_mapped}"
+                f"槽位映射不完整：mapped={mapped} rewritten={rewritten} dynamic={dynamic_mapped} physical={direct_physical}"
             )
 
         report = {
@@ -492,6 +522,7 @@ def render_overlay(
                 "mappedSlots": mapped,
                 "rewrittenSlots": rewritten,
                 "dynamicSlots": dynamic_mapped,
+                "directPhysicalSlots": direct_physical,
                 "dynamicInjectedFonts": injected,
                 "uniqueCopiedFonts": len(copied),
                 "xmlOutputs": sum(1 for item in xml_reports if int(item.get("changedFonts", 0)) or int(item.get("dynamicInjectedFonts", 0))),
