@@ -19,6 +19,7 @@ cat > "$MANAGER" <<'EOF_MANAGER'
 #!/bin/sh
 case "${3:-}" in
     good) printf '%s\n' '{"status":"ok","data":{"font":"good"}}' ;;
+    reused) printf '%s\n' '{"status":"ok","data":{"font":"reused","reused":true}}' ;;
     bad) printf '%s\n' '{"status":"error","message":"fake failure"}' ;;
     slow)
         trap 'printf "%s\n" rolled-back > "${ROLLBACK_MARKER:?}"; exit 143' TERM INT
@@ -61,6 +62,18 @@ grep -q '^heartbeat=[0-9][0-9]*$' "$LUOSHU_SWITCH_TASK_FILE"
 grep -q '^timeout=5$' "$LUOSHU_SWITCH_TASK_FILE"
 grep -q '^elapsed=[0-9][0-9]*$' "$LUOSHU_SWITCH_TASK_FILE"
 grep -q '^bootId=.' "$LUOSHU_SWITCH_TASK_FILE"
+grep -q '^reused=false$' "$LUOSHU_SWITCH_TASK_FILE"
+
+rm -f "$MODDIR/config/device-font-load-verification.conf"
+start_output="$(sh "$ROOT/common/font_switch_task.sh" start reused)"
+printf '%s\n' "$start_output" | grep -q '"status":"ok"'
+wait_state success
+grep -q '^message=当前字体已验证，无需重新生成或重启$' "$LUOSHU_SWITCH_TASK_FILE"
+grep -q '^reused=true$' "$LUOSHU_SWITCH_TASK_FILE"
+test ! -e "$MODDIR/config/device-font-load-verification.conf"
+reused_task=$(sed -n 's/^task=//p' "$LUOSHU_SWITCH_TASK_FILE")
+reused_status="$(sh "$ROOT/common/font_switch_task.sh" status "$reused_task")"
+printf '%s\n' "$reused_status" | grep -q '"reused":true'
 
 start_output="$(sh "$ROOT/common/font_switch_task.sh" start bad)"
 printf '%s\n' "$start_output" | grep -q '"status":"ok"'

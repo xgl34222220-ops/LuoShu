@@ -37,6 +37,7 @@ LAST_MIX_ERROR=""
 [ -f "$MODDIR/common/rom_adapters.sh" ] && . "$MODDIR/common/rom_adapters.sh"
 [ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
+[ -f "$MODDIR/common/font_boot_state.sh" ] && . "$MODDIR/common/font_boot_state.sh"
 
 type check_coloros >/dev/null 2>&1 && check_coloros
 type check_hyperos >/dev/null 2>&1 && check_hyperos
@@ -106,7 +107,9 @@ all_text_targets() {
     _files=""
     type get_all_hyperos_files >/dev/null 2>&1 && _files="$_files $(get_all_hyperos_files)"
     type get_all_generic_files >/dev/null 2>&1 && _files="$_files $(get_all_generic_files)"
-    if type get_all_coloros_names >/dev/null 2>&1; then
+    if type get_all_coloros_files >/dev/null 2>&1; then
+        _files="$_files $(get_all_coloros_files)"
+    elif type get_all_coloros_names >/dev/null 2>&1; then
         for _name in $(get_all_coloros_names); do _files="$_files ${_name}.ttf"; done
     fi
     printf '%s\n' "$_files"
@@ -231,7 +234,9 @@ populate_coloros_payload() (
     _font_store_reset "$SYSTEM_FONTS_DIR" || exit 1
     _ma=$(_font_anchor "$_composite" "$SYSTEM_FONTS_DIR" mix-composite) || exit 1
     alias_core "$_ma" SysSans-Hans-Regular.ttf SysSans-Hant-Regular.ttf SysFont-Hans-Regular.ttf SysFont-Hant-Regular.ttf SysFont-Static-Regular.ttf SysFont-Regular.ttf SysSans-En-Regular.ttf Roboto-Regular.ttf GoogleSans-Regular.ttf GoogleSansText-Regular.ttf || exit 1
-    alias_existing_list "$_ma" Opposans-Hans-Regular.ttf Opposans-Hans-Bold.ttf Opposans-Hans-Medium.ttf Opposans-Hans-Light.ttf SysSans-Hans-Bold.ttf SysSans-Hans-Medium.ttf SysSans-Hans-Light.ttf SysSans-Hant-Bold.ttf SysSans-Hant-Medium.ttf SysSans-Hant-Light.ttf SysFont-Hans-Bold.ttf SysFont-Hans-Medium.ttf SysFont-Hans-Light.ttf SysFont-Hant-Bold.ttf SysFont-Hant-Medium.ttf SysFont-Hant-Light.ttf SysFont-Static-Bold.ttf SysFont-Static-Medium.ttf SysFont-Static-Light.ttf SysFont-Bold.ttf SysFont-Medium.ttf SysFont-Light.ttf SysFont-Thin.ttf SysFont-Black.ttf SysSans-En-Bold.ttf SysSans-En-Medium.ttf SysSans-En-Light.ttf SysSans-En-Thin.ttf SysSans-En-Black.ttf Opposans-En-Regular.ttf Opposans-En-Bold.ttf Opposans-En-Medium.ttf Opposans-En-Light.ttf OPSans-En-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf Roboto-Light.ttf Roboto-Thin.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Medium.ttf GoogleSans-Bold.ttf GoogleSansText-Medium.ttf GoogleSansText-Bold.ttf GoogleSansFlex-Regular.ttf SourceSansPro-Regular.ttf SourceSansPro-SemiBold.ttf SourceSansPro-Bold.ttf DINCondensedBold.ttf DINPro-Regular.ttf DINPro-Medium.ttf DINPro-Bold.ttf OPPODIN-Regular.ttf OPPODIN-Medium.ttf OPPODIN-Bold.ttf OPPODINCondensed-Regular.ttf OPPODINCondensed-Medium.ttf OPPODINCondensed-Bold.ttf
+    # Keep mix mode on the same complete, revisioned target inventory as normal ColorOS mode.
+    # The historical hand-written subset omitted newer Latin weights and optical-size families.
+    alias_existing_list "$_ma" $(get_all_coloros_files)
     verify_core_files "$SYSTEM_FONTS_DIR" SysSans-Hans-Regular.ttf SysSans-En-Regular.ttf Roboto-Regular.ttf || exit 1
 )
 
@@ -287,6 +292,19 @@ sync_secondary_coloros_dirs() {
     [ "$IS_COLOROS" = "true" ] || return 0
     sync_secondary_partition system_ext /system_ext/fonts || return 1
     sync_secondary_partition product /product/fonts || return 1
+    for _scp_row in \
+        'vendor|/vendor/fonts' 'odm|/odm/fonts' 'oem|/oem/fonts' \
+        'my_product|/my_product/fonts' 'my_engineering|/my_engineering/fonts' \
+        'my_company|/my_company/fonts' 'my_preload|/my_preload/fonts' \
+        'my_region|/my_region/fonts' 'my_stock|/my_stock/fonts' \
+        'oplus_product|/oplus_product/fonts' 'oplus_engineering|/oplus_engineering/fonts' \
+        'oplus_version|/oplus_version/fonts' 'oplus_region|/oplus_region/fonts' \
+        'cust|/cust/fonts' 'hw_product|/hw_product/fonts'; do
+        _scp_part=${_scp_row%%|*}
+        _scp_root=${_scp_row#*|}
+        [ -d "$_scp_root" ] || continue
+        sync_secondary_partition "$_scp_part" "$_scp_root" || return 1
+    done
     return 0
 }
 
@@ -459,6 +477,9 @@ commit_mix_config() {
     mv -f "$MIX_CONF_TMP" "$MIX_CONF" 2>/dev/null || return 1
     mv -f "$ACTIVE_CONF_TMP" "$ACTIVE_FONT_CONF" 2>/dev/null || return 1
     mv -f "$REBOOT_CONF_TMP" "$TEXT_REBOOT_REQUIRED" 2>/dev/null || return 1
+    if type luoshu_text_reboot_mark >/dev/null 2>&1; then
+        luoshu_text_reboot_mark mix || return 1
+    fi
     printf 'time=%s\n' "$(date +%s)" > "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || return 1
     chmod 0644 "$MIX_CONF" "$ACTIVE_FONT_CONF" "$TEXT_REBOOT_REQUIRED" 2>/dev/null || true
     return 0

@@ -638,8 +638,14 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             }
             if (result.optString("state") != "success") error(result.optString("message", "字体应用失败"))
             val applied = result.optString("font", fontId).ifBlank { fontId }
-            operationMessage = if (applied == "default") "已准备恢复系统字体，重启后生效" else "字体已准备完成，重启后全局生效"
-            rebootRequired = true
+            val reused = result.optBoolean("reused", false)
+            operationMessage = when {
+                reused -> "当前字体已验证，无需重新生成或重启"
+                applied == "default" -> "已准备恢复系统字体，重启后生效"
+                else -> "字体已准备完成，重启后全局生效"
+            }
+            val nextRebootRequired = if (reused) rebootRequired else true
+            rebootRequired = nextRebootRequired
             snapshot = snapshot.copy(
                 activeFont = applied,
                 taskType = "switch",
@@ -647,7 +653,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 taskState = "success",
                 taskMessage = operationMessage,
                 taskProgress = 100,
-                rebootRequired = true,
+                rebootRequired = nextRebootRequired,
             )
             persistFontIndex(currentFont = applied)
         } catch (error: Throwable) {
@@ -690,7 +696,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 )
             }
             if (result.optString("state") != "success") error(result.optString("message", "复合字体生成失败"))
+            val reused = result.optBoolean("reused", false)
             val message = result.optString("message", "复合字体已生成，重启后生效")
+            val nextRebootRequired = if (reused) rebootRequired else true
             mixState = mixState.copy(
                 busy = false,
                 enabled = true,
@@ -700,7 +708,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 progress = 100,
                 error = "",
             )
-            rebootRequired = true
+            rebootRequired = nextRebootRequired
             snapshot = snapshot.copy(
                 activeFont = "mix",
                 taskType = "mix",
@@ -708,7 +716,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 taskState = "success",
                 taskMessage = message,
                 taskProgress = 100,
-                rebootRequired = true,
+                rebootRequired = nextRebootRequired,
             )
             persistFontIndex(currentFont = "mix")
         } catch (error: Throwable) {

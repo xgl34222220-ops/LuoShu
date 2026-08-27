@@ -17,10 +17,17 @@ _luoshu_coloros_root_pairs() {
     printf '%s|%s/odm/fonts\n' "${LUOSHU_COLOROS_ODM_FONTS_ROOT:-/odm/fonts}" "$_lcg_module"
     printf '%s|%s/oem/fonts\n' "${LUOSHU_COLOROS_OEM_FONTS_ROOT:-/oem/fonts}" "$_lcg_module"
     printf '%s|%s/my_product/fonts\n' "${LUOSHU_COLOROS_MY_PRODUCT_FONTS_ROOT:-/my_product/fonts}" "$_lcg_module"
+    printf '%s|%s/my_engineering/fonts\n' "${LUOSHU_COLOROS_MY_ENGINEERING_FONTS_ROOT:-/my_engineering/fonts}" "$_lcg_module"
+    printf '%s|%s/my_company/fonts\n' "${LUOSHU_COLOROS_MY_COMPANY_FONTS_ROOT:-/my_company/fonts}" "$_lcg_module"
+    printf '%s|%s/my_preload/fonts\n' "${LUOSHU_COLOROS_MY_PRELOAD_FONTS_ROOT:-/my_preload/fonts}" "$_lcg_module"
+    printf '%s|%s/my_region/fonts\n' "${LUOSHU_COLOROS_MY_REGION_FONTS_ROOT:-/my_region/fonts}" "$_lcg_module"
+    printf '%s|%s/my_stock/fonts\n' "${LUOSHU_COLOROS_MY_STOCK_FONTS_ROOT:-/my_stock/fonts}" "$_lcg_module"
     printf '%s|%s/oplus_product/fonts\n' "${LUOSHU_COLOROS_OPLUS_PRODUCT_FONTS_ROOT:-/oplus_product/fonts}" "$_lcg_module"
     printf '%s|%s/oplus_engineering/fonts\n' "${LUOSHU_COLOROS_OPLUS_ENGINEERING_FONTS_ROOT:-/oplus_engineering/fonts}" "$_lcg_module"
     printf '%s|%s/oplus_version/fonts\n' "${LUOSHU_COLOROS_OPLUS_VERSION_FONTS_ROOT:-/oplus_version/fonts}" "$_lcg_module"
     printf '%s|%s/oplus_region/fonts\n' "${LUOSHU_COLOROS_OPLUS_REGION_FONTS_ROOT:-/oplus_region/fonts}" "$_lcg_module"
+    printf '%s|%s/cust/fonts\n' "${LUOSHU_COLOROS_CUST_FONTS_ROOT:-/cust/fonts}" "$_lcg_module"
+    printf '%s|%s/hw_product/fonts\n' "${LUOSHU_COLOROS_HW_PRODUCT_FONTS_ROOT:-/hw_product/fonts}" "$_lcg_module"
 }
 
 _coloros_core_files() {
@@ -30,7 +37,7 @@ _coloros_core_files() {
 # Google apps commonly request google-sans-text directly. On current ColorOS builds these files are
 # normally in /product/fonts, not /system/fonts, so a system-only alias does not affect text fields.
 _coloros_google_text_files() {
-    printf '%s\n' 'GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-SemiBold.ttf GoogleSansText-Bold.ttf GoogleSansText-VF.ttf GoogleSansTextVF.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-SemiBold.ttf GoogleSans-Bold.ttf GoogleSans-VF.ttf GoogleSansFlex-Regular.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf Roboto-Light.ttf Roboto-Thin.ttf Roboto-ExtraLight.ttf Roboto-ExtraBold.ttf Roboto-Black.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf'
+    printf '%s\n' 'GoogleSansText-Thin.ttf GoogleSansText-ExtraLight.ttf GoogleSansText-Light.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-SemiBold.ttf GoogleSansText-Bold.ttf GoogleSansText-ExtraBold.ttf GoogleSansText-Black.ttf GoogleSansText-VF.ttf GoogleSansTextVF.ttf GoogleSans-Thin.ttf GoogleSans-ExtraLight.ttf GoogleSans-Light.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-SemiBold.ttf GoogleSans-Bold.ttf GoogleSans-ExtraBold.ttf GoogleSans-Black.ttf GoogleSans-VF.ttf GoogleSansFlex-Regular.ttf GoogleSansDisplay-Regular.ttf GoogleSansDisplay-Medium.ttf GoogleSansDisplay-SemiBold.ttf GoogleSansDisplay-Bold.ttf GoogleSans18pt-Regular.ttf GoogleSans18pt-Medium.ttf GoogleSans18pt-SemiBold.ttf GoogleSans18pt-Bold.ttf GoogleSansText18pt-Regular.ttf GoogleSansText18pt-Medium.ttf GoogleSansText18pt-SemiBold.ttf GoogleSansText18pt-Bold.ttf ProductSans-Regular.ttf ProductSans-Medium.ttf ProductSans-Bold.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf Roboto-Light.ttf Roboto-Thin.ttf Roboto-ExtraLight.ttf Roboto-ExtraBold.ttf Roboto-Black.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf'
 }
 
 
@@ -46,14 +53,14 @@ _coloros_oem_ui_files() {
 _coloros_discovered_ui_files() {
     while IFS='|' read -r _lcg_real _lcg_overlay; do
         [ -d "$_lcg_real" ] || continue
-        for _lcg_path in "$_lcg_real"/*.ttf; do
+        for _lcg_path in "$_lcg_real"/*.ttf "$_lcg_real"/*.otf "$_lcg_real"/*.ttc "$_lcg_real"/*.otc; do
             [ -f "$_lcg_path" ] || continue
             _lcg_name=${_lcg_path##*/}
             case "$_lcg_name" in
                 *Italic*|*Oblique*|*Serif*|*Mono*|*Emoji*|*Symbol*|*Icon*|*Clock*) continue ;;
             esac
             case "$_lcg_name" in
-                SysFont*.ttf|SysSans*.ttf|OplusSans*.ttf|OplusOSUI*.ttf|OppoSans*.ttf|Opposans*.ttf|OPSans*.ttf|GoogleSans*.ttf|Roboto*.ttf|SourceSansPro*.ttf|DIN*.ttf|OPPODIN*.ttf)
+                SysFont*|SysSans*|OplusSans*|OplusOSUI*|OppoSans*|Opposans*|OPSans*|GoogleSans*|ProductSans*|Roboto*|NotoSans*|SourceSansPro*|DIN*|OPPODIN*)
                     printf '%s\n' "$_lcg_name"
                     ;;
             esac
@@ -79,7 +86,8 @@ get_all_coloros_files() {
 # Legacy callers use names without the .ttf suffix.
 get_all_coloros_names() {
     for _lcg_file in $(get_all_coloros_files); do
-        printf '%s\n' "${_lcg_file%.ttf}"
+        _lcg_name=${_lcg_file%.*}
+        printf '%s\n' "$_lcg_name"
     done
 }
 

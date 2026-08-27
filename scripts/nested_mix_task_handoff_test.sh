@@ -117,6 +117,47 @@ EOF_ENGINE
     fi
     test "$(sed -n 's/^childTask=//p' "$MODULE/config/axes_task.conf")" = base-no-output
     ! grep -q '无法启动完整复合字体引擎' "$MODULE/config/axes_task.conf"
+
+    # The committed payload is authoritative even when the inner controller's
+    # final task-file write is delayed. This is the real-device false-timeout
+    # regression: active/mount data was ready, but the outer task waited 12 min.
+    rm -f "$MODULE/config/text_reboot_required.conf"
+    cat >"$MODULE/common/font_mix.sh" <<'EOF_COMMITTED_ENGINE'
+#!/bin/sh
+MODDIR="${MODDIR:-${0%/*}/..}"
+case "${1:-}" in
+    start)
+        cat >"$MODDIR/config/mix_task.conf" <<EOF_INNER
+task=base-committed
+state=running
+message=正在收尾
+cjk=$2
+latin=$3
+digit=$4
+EOF_INNER
+        printf 'mix\n' >"$MODDIR/config/active_font.conf"
+        printf 'font=mix\ntime=2\nbootId=boot-a\n' >"$MODDIR/config/text_reboot_required.conf"
+        printf 'state=prepared\nfont=mix\ngeneration=test\ntime=2\n' >"$MODDIR/config/font-payload-boot.conf"
+        printf 'system/fonts/LuoShu.ttf|hash|1234\n' >"$MODDIR/config/font-payload-manifest.conf"
+        ;;
+    recover) exit 0 ;;
+esac
+exit 0
+EOF_COMMITTED_ENGINE
+    chmod 0755 "$MODULE/common/font_mix.sh"
+    START=$(MODDIR="$MODULE" LUOSHU_PUBLIC_DIR="$PUBLIC" sh "$MODULE/common/weighted_mix_task.sh" \
+        start CJK Latin Digit wght=400 wght=400 wght=400)
+    OUTER=$(printf '%s\n' "$START" | sed -n 's/^.*"task":"\([^"]*\)".*$/\1/p' | tail -n1)
+    test -n "$OUTER"
+    COUNT=0
+    while [ "$COUNT" -lt 30 ]; do
+        STATE=$(sed -n 's/^state=//p' "$MODULE/config/axes_task.conf" 2>/dev/null | head -n1)
+        case "$STATE" in success|failed) break ;; esac
+        sleep 1
+        COUNT=$((COUNT + 1))
+    done
+    test "$(sed -n 's/^state=//p' "$MODULE/config/axes_task.conf")" = success
+    grep -q '负载已提交' "$MODULE/config/axes_task.conf"
 fi
 
 grep -q 'mix_task_handoff.sh' "$ROOT/common/weighted_mix_task.sh"

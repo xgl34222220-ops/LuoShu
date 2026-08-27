@@ -13,6 +13,7 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/font_config_partitions.sh" ] && . "$MODDIR/common/font_config_partitions.sh"
 [ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
 [ -f "$MODDIR/common/module_update_state.sh" ] && . "$MODDIR/common/module_update_state.sh"
+[ -f "$MODDIR/common/font_boot_state.sh" ] && . "$MODDIR/common/font_boot_state.sh"
 
 (
     WAITED=0
@@ -57,7 +58,7 @@ MODULE_DIR="$MODDIR"
 
     # 原生 App 后端统一通过 sh 调用，仍校正权限以兼容不同 Root 管理器的解压行为。
     chmod 0755 "$MODDIR" "$MODDIR/common" 2>/dev/null || true
-    chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" "$MODDIR/action.sh" 2>/dev/null || true
+    chmod 0755 "$MODDIR/customize.sh" "$MODDIR/post-fs-data.sh" "$MODDIR/post-mount.sh" "$MODDIR/boot-completed.sh" "$MODDIR/service.sh" "$MODDIR/uninstall.sh" "$MODDIR/action.sh" 2>/dev/null || true
     find "$MODDIR/common" -maxdepth 1 -type f -exec chmod 0755 {} \; 2>/dev/null || true
     chmod 0644 "$MODDIR/common/font_instance.py" "$MODDIR/common/composite_font.py" "$MODDIR/common/font_metrics_normalize.py" 2>/dev/null || true
     chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
@@ -156,6 +157,8 @@ MODULE_DIR="$MODDIR"
     # 架构升级或 ROM 动态字体配置变化时，保留本次启动正在使用的完整旧负载。
     # 后台服务绝不改写 active_font、绝不激活缓存、也绝不创建第二个重启事务。
     # 用户下一次明确点击“应用”时，前台原子事务一次生成并提交当前架构负载。
+    type luoshu_font_rebuild_marker_reconcile >/dev/null 2>&1 && \
+        luoshu_font_rebuild_marker_reconcile >/dev/null 2>&1 || true
     if [ -f "$MODDIR/config/font-payload-rebuild-pending.conf" ]; then
         _pending_font=$(sed -n 's/^font=//p' "$MODDIR/config/font-payload-rebuild-pending.conf" 2>/dev/null | head -n1 | tr -d '\r\n')
         [ -n "$_pending_font" ] || _pending_font=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
@@ -261,6 +264,8 @@ MODULE_DIR="$MODDIR"
                 ;;
         esac
     fi
+    type luoshu_text_reboot_reconcile >/dev/null 2>&1 && \
+        luoshu_text_reboot_reconcile >/dev/null 2>&1 || true
     if [ -f "$MODDIR/common/module_status.sh" ]; then
         MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" >/dev/null 2>&1 || true
     fi

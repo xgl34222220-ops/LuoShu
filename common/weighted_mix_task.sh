@@ -36,6 +36,7 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 [ -f "$MODDIR/common/mix_task_handoff.sh" ] && . "$MODDIR/common/mix_task_handoff.sh"
+[ -f "$MODDIR/common/font_active_state.sh" ] && . "$MODDIR/common/font_active_state.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -47,6 +48,19 @@ read_value() {
 
 clean_spec() {
     printf '%s' "$1" | tr -d '\r\n'
+}
+
+# The inner engine commits active/reboot/manifest/boot as one payload
+# transaction. Those files are the authoritative completion signal even if a
+# controller task file was replaced or its final write arrived late.
+mix_payload_committed() {
+    [ "$(head -n1 "$ACTIVE_CONF" 2>/dev/null | tr -d '\r\n')" = mix ] || return 1
+    [ "$(read_value "$TEXT_REBOOT_REQUIRED" font)" = mix ] || return 1
+    _committed_state=$(read_value "$CONFIG_DIR/font-payload-boot.conf" state)
+    _committed_font=$(read_value "$CONFIG_DIR/font-payload-boot.conf" font)
+    case "$_committed_state" in prepared|booting|confirmed) ;; *) return 1 ;; esac
+    [ "$_committed_font" = mix ] || return 1
+    [ -s "$CONFIG_DIR/font-payload-manifest.conf" ] || return 1
 }
 
 axis_value() {
@@ -93,6 +107,7 @@ write_task() {
         printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$7" "$8" "$9"
         shift 9
         printf 'root=%s\nchildTask=%s\nstarted=%s\nfinished=%s\npercent=%s\n' "$1" "$2" "$3" "$4" "$5"
+        printf 'reused=%s\n' "${6:-false}"
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$TASK_FILE" 2>/dev/null
     chmod 0644 "$TASK_FILE" 2>/dev/null || true
 }
@@ -113,10 +128,11 @@ update_task() {
     _digit_axes=$(read_value "$TASK_FILE" digitAxes)
     _root=$(read_value "$TASK_FILE" root)
     _started=$(read_value "$TASK_FILE" started)
+    _reused=$(read_value "$TASK_FILE" reused)
     [ -n "$_child" ] || _child=$(read_value "$TASK_FILE" childTask)
     [ -n "$_finished" ] || _finished=$(read_value "$TASK_FILE" finished)
     write_task "$_wanted" "$_state" "$_message" "$_cjk" "$_latin" "$_digit" \
-        "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_root" "$_child" "$_started" "$_finished" "$_percent"
+        "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_root" "$_child" "$_started" "$_finished" "$_percent" "$_reused"
 }
 
 find_best_source() {
@@ -282,6 +298,11 @@ worker() {
     update_task "$_wanted" running '完整复合字体正在后台生成' 36 "$_child" ''
     _loops=0
     while [ "$_loops" -lt 360 ]; do
+        if mix_payload_committed; then
+            update_task "$_wanted" success '完整复合字体负载已提交，完整重启后生效' 100 "$_child" "$(date +%s)"
+            rewrite_public_config
+            rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 0
+        fi
         _base_task=$(read_value "$BASE_TASK_FILE" task)
         _base_state=$(read_value "$BASE_TASK_FILE" state)
         if [ "$_base_task" = "$_child" ]; then
@@ -323,6 +344,11 @@ worker() {
         _loops=$((_loops + 1))
     done
 
+    if mix_payload_committed; then
+        update_task "$_wanted" success '完整复合字体负载已提交，完整重启后生效' 100 "$_child" "$(date +%s)"
+        rewrite_public_config
+        rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 0
+    fi
     update_task "$_wanted" failed '完整复合字体生成超时' 100 "$_child" "$(date +%s)"
     rm -rf "$_root"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"
     exit 1
@@ -346,12 +372,14 @@ status_json() {
     _started=$(read_value "$TASK_FILE" started)
     _finished=$(read_value "$TASK_FILE" finished)
     _percent=$(read_value "$TASK_FILE" percent)
-    printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","started":%s,"finished":%s,"progress":{"message":"%s","percent":%s}}}\n' \
+    _reused=$(read_value "$TASK_FILE" reused)
+    [ "$_reused" = true ] || _reused=false
+    printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","started":%s,"finished":%s,"reused":%s,"progress":{"message":"%s","percent":%s}}}\n' \
         "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_message")" \
         "$(json_escape "$_cjk")" "$(json_escape "$_latin")" "$(json_escape "$_digit")" \
         "$(safe_weight "$_cjk_axes")" "$(safe_weight "$_latin_axes")" "$(safe_weight "$_digit_axes")" \
         "$(json_escape "$_cjk_axes")" "$(json_escape "$_latin_axes")" "$(json_escape "$_digit_axes")" \
-        "${_started:-0}" "${_finished:-0}" "$(json_escape "$_message")" "${_percent:-0}"
+        "${_started:-0}" "${_finished:-0}" "$_reused" "$(json_escape "$_message")" "${_percent:-0}"
 }
 
 config_json() {
@@ -408,6 +436,16 @@ start_mix() {
     [ -n "$_cjk_axes" ] || _cjk_axes='wght=400'
     [ -n "$_latin_axes" ] || _latin_axes='wght=400'
     [ -n "$_digit_axes" ] || _digit_axes='wght=400'
+    if type luoshu_mix_request_matches_active >/dev/null 2>&1 && \
+       luoshu_mix_request_matches_active "$_cjk" "$_latin" "$_digit" \
+           "$_cjk_axes" "$_latin_axes" "$_digit_axes" fixed fixed fixed; then
+        _request="axes-reuse-$(date +%s)-$$"
+        write_task "$_request" success '当前复合字体已验证，无需重新生成或重启' \
+            "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" \
+            '' '' "$(date +%s)" "$(date +%s)" 100 true
+        printf '{"status":"ok","data":{"task":"%s","reused":true}}\n' "$(json_escape "$_request")"
+        return
+    fi
     mkdir -p "$CONFIG_DIR" "$CACHE_ROOT" "$MODDIR/cache/tmp" "$MODDIR/logs" 2>/dev/null || {
         printf '{"status":"error","message":"无法创建字体组合缓存目录"}\n'; return
     }

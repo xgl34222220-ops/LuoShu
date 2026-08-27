@@ -13,10 +13,13 @@ LUOSHU_SYSTEM_FONTS_ROOT="$ROOT/real/system/fonts"
 LUOSHU_PRODUCT_FONTS_ROOT="$ROOT/real/product/fonts"
 LUOSHU_SYSTEM_EXT_FONTS_ROOT="$ROOT/real/system_ext/fonts"
 LUOSHU_MI_EXT_FONTS_ROOT="$ROOT/real/mi_ext/fonts"
-export MODULE_DIR MODDIR LUOSHU_PUBLIC_DIR USER_FONTS_DIR LUOSHU_SYSTEM_FONTS_ROOT LUOSHU_PRODUCT_FONTS_ROOT LUOSHU_SYSTEM_EXT_FONTS_ROOT LUOSHU_MI_EXT_FONTS_ROOT
+LUOSHU_ODM_FONTS_ROOT="$ROOT/real/odm/fonts"
+LUOSHU_CUST_FONTS_ROOT="$ROOT/real/cust/fonts"
+export MODULE_DIR MODDIR LUOSHU_PUBLIC_DIR USER_FONTS_DIR LUOSHU_SYSTEM_FONTS_ROOT LUOSHU_PRODUCT_FONTS_ROOT LUOSHU_SYSTEM_EXT_FONTS_ROOT LUOSHU_MI_EXT_FONTS_ROOT LUOSHU_ODM_FONTS_ROOT LUOSHU_CUST_FONTS_ROOT
 
 mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/product/fonts" "$MODULE_DIR/system_ext/fonts" "$MODULE_DIR/mi_ext/fonts" \
-    "$USER_FONTS_DIR" "$LUOSHU_SYSTEM_FONTS_ROOT" "$LUOSHU_PRODUCT_FONTS_ROOT" "$LUOSHU_SYSTEM_EXT_FONTS_ROOT" "$LUOSHU_MI_EXT_FONTS_ROOT"
+    "$USER_FONTS_DIR" "$LUOSHU_SYSTEM_FONTS_ROOT" "$LUOSHU_PRODUCT_FONTS_ROOT" "$LUOSHU_SYSTEM_EXT_FONTS_ROOT" "$LUOSHU_MI_EXT_FONTS_ROOT" \
+    "$LUOSHU_ODM_FONTS_ROOT" "$LUOSHU_CUST_FONTS_ROOT"
 printf 'regular-source\n' > "$USER_FONTS_DIR/Demo-Regular.ttf"
 printf 'medium-source\n' > "$USER_FONTS_DIR/Demo-Medium.ttf"
 printf 'bold-source\n' > "$USER_FONTS_DIR/Demo-Bold.ttf"
@@ -31,6 +34,8 @@ printf 'stock-google-medium\n' > "$LUOSHU_PRODUCT_FONTS_ROOT/GoogleSansText-Medi
 printf 'stock-google-bold\n' > "$LUOSHU_PRODUCT_FONTS_ROOT/GoogleSansText-Bold.ttf"
 printf 'stock-clock\n' > "$LUOSHU_MI_EXT_FONTS_ROOT/MiClock.otf"
 printf 'stock-mitype\n' > "$LUOSHU_PRODUCT_FONTS_ROOT/MitypeClock.otf"
+printf 'stock-noto\n' > "$LUOSHU_ODM_FONTS_ROOT/NotoSansUI-Regular.ttf"
+printf 'stock-source\n' > "$LUOSHU_CUST_FONTS_ROOT/SourceSansPro-Bold.ttf"
 printf 'stale-overlay\n' > "$MODULE_DIR/system/fonts/Roboto-Regular.ttf"
 
 _font_store_reset() {
@@ -84,9 +89,13 @@ ok test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Medium.ttf")" = 'medium
 ok test "$(cat "$MODULE_DIR/product/fonts/GoogleSansText-Bold.ttf")" = 'bold-source'
 ok test "$(cat "$MODULE_DIR/mi_ext/fonts/MiClock.otf")" = 'regular-source'
 ok test "$(cat "$MODULE_DIR/product/fonts/MitypeClock.otf")" = 'regular-source'
+ok test "$(cat "$MODULE_DIR/odm/fonts/NotoSansUI-Regular.ttf")" = 'regular-source'
+ok test "$(cat "$MODULE_DIR/cust/fonts/SourceSansPro-Bold.ttf")" = 'bold-source'
 ok test "$(cat "$NORMALIZE_COUNT_FILE")" -eq 11
 _luoshu_hyperos_root_pairs > "$ROOT/hyperos-root-pairs"
 ok grep -qF "$LUOSHU_MI_EXT_FONTS_ROOT|$MODULE_DIR/mi_ext/fonts" "$ROOT/hyperos-root-pairs"
+ok grep -qF "$LUOSHU_ODM_FONTS_ROOT|$MODULE_DIR/odm/fonts" "$ROOT/hyperos-root-pairs"
+ok grep -qF "$LUOSHU_CUST_FONTS_ROOT|$MODULE_DIR/cust/fonts" "$ROOT/hyperos-root-pairs"
 printf 'HyperOS global mapping and compact-anchor reuse tests passed.\n'
 
 # Keep OEM partition regressions in the always-on source gate.

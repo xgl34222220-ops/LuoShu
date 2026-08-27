@@ -19,8 +19,11 @@ _luoshu_hyperos_root_pairs() {
     printf '%s|%s\n' "${LUOSHU_SYSTEM_EXT_FONTS_ROOT:-/system_ext/fonts}" "$_module/system_ext/fonts"
     printf '%s|%s\n' "${LUOSHU_MI_EXT_FONTS_ROOT:-/mi_ext/fonts}" "$_module/mi_ext/fonts"
     printf '%s|%s\n' "${LUOSHU_VENDOR_FONTS_ROOT:-/vendor/fonts}" "$_module/vendor/fonts"
+    printf '%s|%s\n' "${LUOSHU_ODM_FONTS_ROOT:-/odm/fonts}" "$_module/odm/fonts"
+    printf '%s|%s\n' "${LUOSHU_OEM_FONTS_ROOT:-/oem/fonts}" "$_module/oem/fonts"
     printf '%s|%s\n' "${LUOSHU_MY_PRODUCT_FONTS_ROOT:-/my_product/fonts}" "$_module/my_product/fonts"
     printf '%s|%s\n' "${LUOSHU_HW_PRODUCT_FONTS_ROOT:-/hw_product/fonts}" "$_module/hw_product/fonts"
+    printf '%s|%s\n' "${LUOSHU_CUST_FONTS_ROOT:-/cust/fonts}" "$_module/cust/fonts"
 }
 
 _hyperos_core_files() {
@@ -38,13 +41,17 @@ _hyperos_metric_shell_files() {
 # Google Play、系统搜索框、安装器和部分 Launcher/设置页面会直接打开这些物理槽。
 _hyperos_upright_ui_files() {
     {
-        printf '%s\n' 'Roboto-Thin.ttf Roboto-ExtraLight.ttf Roboto-Light.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf Roboto-ExtraBold.ttf Roboto-Black.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-SemiBold.ttf GoogleSans-Bold.ttf GoogleSans-Black.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-SemiBold.ttf GoogleSansText-Bold.ttf GoogleSansText-Black.ttf GoogleSansText-VF.ttf GoogleSansTextVF.ttf GoogleSans-VF.ttf GoogleSansFlex-Regular.ttf'
+        printf '%s\n' 'Roboto-Thin.ttf Roboto-ExtraLight.ttf Roboto-Light.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf Roboto-ExtraBold.ttf Roboto-Black.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-SemiBold.ttf GoogleSans-Bold.ttf GoogleSans-Black.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-SemiBold.ttf GoogleSansText-Bold.ttf GoogleSansText-Black.ttf GoogleSansText-VF.ttf GoogleSansTextVF.ttf GoogleSans-VF.ttf GoogleSansFlex-Regular.ttf NotoSans-Regular.ttf NotoSans-Medium.ttf NotoSans-SemiBold.ttf NotoSans-Bold.ttf NotoSans-Black.ttf NotoSansUI-Regular.ttf NotoSansUI-Medium.ttf NotoSansUI-Bold.ttf SourceSansPro-Regular.ttf SourceSansPro-Medium.ttf SourceSansPro-SemiBold.ttf SourceSansPro-Bold.ttf DroidSans.ttf'
         while IFS='|' read -r _real _overlay; do
             [ -d "$_real" ] || continue
-            for _path in "$_real"/Roboto*.ttf "$_real"/GoogleSans*.ttf; do
+            for _path in "$_real"/Roboto*.ttf "$_real"/GoogleSans*.ttf \
+                         "$_real"/NotoSans*.ttf "$_real"/SourceSansPro*.ttf \
+                         "$_real"/DroidSans.ttf; do
                 [ -f "$_path" ] || continue
                 _name=${_path##*/}
-                case "$_name" in *Italic*|*Oblique*|*Mono*|*Emoji*|*Symbol*|*Icon*) continue ;; esac
+                case "$_name" in
+                    *Italic*|*Oblique*|*Mono*|*Emoji*|*Symbol*|*Icon*|*Arabic*|*Hebrew*|*Thai*|*Devanagari*|*Bengali*|*Tamil*|*Telugu*|*Malayalam*|*Gujarati*|*Gurmukhi*|*Kannada*) continue ;;
+                esac
                 printf '%s\n' "$_name"
             done
         done <<EOF_UI_ROOTS

@@ -53,6 +53,10 @@ printf 'state=verified\nmode=mount-verified\nreason=\nactiveFont=DemoFont\n' \
     >"$CONFIG/device-font-load-verification.conf"
 assert_status DemoFont verified ''
 
+printf 'state=verified\nmode=mount-confirmed\nreason=mount-transaction-active\nactiveFont=DemoFont\n' \
+    >"$CONFIG/device-font-load-verification.conf"
+assert_status DemoFont verified mount-transaction-active
+
 printf 'state=failed\nbackend=rollback\nfailed=system/etc\n' >"$CONFIG/self-mount.conf"
 assert_status default failed self-mount-failed
 
