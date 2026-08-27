@@ -117,6 +117,60 @@ _lfbs_mix_coloros_files() {
     printf '%s\n' 'SysSans-Hans-Regular.ttf SysSans-Hans-Bold.ttf SysSans-Hans-Medium.ttf SysSans-Hans-Light.ttf SysSans-Hant-Regular.ttf SysSans-Hant-Bold.ttf SysSans-Hant-Medium.ttf SysSans-Hant-Light.ttf SysFont-Hans-Regular.ttf SysFont-Hans-Bold.ttf SysFont-Hans-Medium.ttf SysFont-Hans-Light.ttf SysFont-Hant-Regular.ttf SysFont-Hant-Bold.ttf SysFont-Hant-Medium.ttf SysFont-Hant-Light.ttf SysFont-Static-Regular.ttf SysFont-Static-Bold.ttf SysFont-Static-Medium.ttf SysFont-Static-Light.ttf SysFont-Regular.ttf SysFont-Bold.ttf SysFont-Medium.ttf SysFont-Light.ttf SysFont-Thin.ttf SysFont-Black.ttf SysSans-En-Regular.ttf SysSans-En-Bold.ttf SysSans-En-Medium.ttf SysSans-En-Light.ttf SysSans-En-Thin.ttf SysSans-En-Black.ttf Opposans-Hans-Regular.ttf Opposans-Hans-Bold.ttf Opposans-Hans-Medium.ttf Opposans-Hans-Light.ttf Opposans-En-Regular.ttf Opposans-En-Bold.ttf Opposans-En-Medium.ttf Opposans-En-Light.ttf OPSans-En-Regular.ttf OplusSans-Regular.ttf OplusSans-Medium.ttf OplusSans-Bold.ttf OppoSans-Regular.ttf OppoSans-Medium.ttf OppoSans-Bold.ttf GoogleSansText-Thin.ttf GoogleSansText-ExtraLight.ttf GoogleSansText-Light.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-SemiBold.ttf GoogleSansText-Bold.ttf GoogleSansText-ExtraBold.ttf GoogleSansText-Black.ttf GoogleSansText-VF.ttf GoogleSansTextVF.ttf GoogleSans-Thin.ttf GoogleSans-ExtraLight.ttf GoogleSans-Light.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-SemiBold.ttf GoogleSans-Bold.ttf GoogleSans-ExtraBold.ttf GoogleSans-Black.ttf GoogleSans-VF.ttf GoogleSansFlex-Regular.ttf GoogleSansDisplay-Regular.ttf GoogleSansDisplay-Medium.ttf GoogleSansDisplay-SemiBold.ttf GoogleSansDisplay-Bold.ttf GoogleSans18pt-Regular.ttf GoogleSans18pt-Medium.ttf GoogleSans18pt-SemiBold.ttf GoogleSans18pt-Bold.ttf GoogleSansText18pt-Regular.ttf GoogleSansText18pt-Medium.ttf GoogleSansText18pt-SemiBold.ttf GoogleSansText18pt-Bold.ttf ProductSans-Regular.ttf ProductSans-Medium.ttf ProductSans-Bold.ttf Roboto-Thin.ttf Roboto-ExtraLight.ttf Roboto-Light.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf Roboto-ExtraBold.ttf Roboto-Black.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf NotoSans-Regular.ttf NotoSans-Medium.ttf NotoSans-SemiBold.ttf NotoSans-Bold.ttf SourceSansPro-Regular.ttf SourceSansPro-SemiBold.ttf SourceSansPro-Bold.ttf DINCondensedBold.ttf DINPro-Regular.ttf DINPro-Medium.ttf DINPro-Bold.ttf OPPODIN-Regular.ttf OPPODIN-Medium.ttf OPPODIN-Bold.ttf OPPODINCondensed-Regular.ttf OPPODINCondensed-Medium.ttf OPPODINCondensed-Bold.ttf'
 }
 
+# HyperOS 不能只按 Chrome/Google Sans 特判。系统组件、控制中心、安装器、设置与第三方 App
+# 会直接命中 MiSans/Mitype/Roboto/Noto/ProductSans 以及 OEM 自定义物理字体槽；同时部分槽
+# 位于 product/system_ext 之外的 vendor/odm/oem/my_product/hw_product/cust。
+_lfbs_mix_hyperos_files() {
+    {
+        printf '%s\n' 'MiSansVF.ttf MiSansVF_Overlay.ttf MiSansLatinVF.ttf MiSansTCVF.ttf MiSansL3.otf 100.ttf 200.ttf 300.ttf 350.ttf 400.ttf 500.ttf 600.ttf 700.ttf 800.ttf 900.ttf'
+        printf '%s\n' 'MitypeVF.ttf MitypeMonoVF.ttf MitypeClock.ttf MitypeClock.otf MitypeClockMono.ttf MitypeClockMono.otf MiClock.ttf MiClock.otf MiClockThin.ttf MiClockThin.otf MiClockMono.ttf MiClockMono.otf MiSansClock.ttf MiSansClockVF.ttf AndroidClock.ttf AndroidClock_Highlight.ttf AndroidClock_Solid.ttf Clockopia.ttf'
+        printf '%s\n' 'Roboto-Thin.ttf Roboto-ExtraLight.ttf Roboto-Light.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf Roboto-ExtraBold.ttf Roboto-Black.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-SemiBold.ttf GoogleSans-Bold.ttf GoogleSans-ExtraBold.ttf GoogleSans-Black.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-SemiBold.ttf GoogleSansText-Bold.ttf GoogleSansText-ExtraBold.ttf GoogleSansText-Black.ttf GoogleSansText-VF.ttf GoogleSansTextVF.ttf GoogleSans-VF.ttf GoogleSansFlex-Regular.ttf GoogleSansDisplay-Regular.ttf GoogleSansDisplay-Medium.ttf GoogleSansDisplay-SemiBold.ttf GoogleSansDisplay-Bold.ttf GoogleSans18pt-Regular.ttf GoogleSans18pt-Medium.ttf GoogleSans18pt-SemiBold.ttf GoogleSans18pt-Bold.ttf GoogleSansText18pt-Regular.ttf GoogleSansText18pt-Medium.ttf GoogleSansText18pt-SemiBold.ttf GoogleSansText18pt-Bold.ttf ProductSans-Regular.ttf ProductSans-Medium.ttf ProductSans-SemiBold.ttf ProductSans-Bold.ttf NotoSans-Regular.ttf NotoSans-Medium.ttf NotoSans-SemiBold.ttf NotoSans-Bold.ttf NotoSans-Black.ttf NotoSansUI-Regular.ttf NotoSansUI-Medium.ttf NotoSansUI-SemiBold.ttf NotoSansUI-Bold.ttf SourceSansPro-Regular.ttf SourceSansPro-Medium.ttf SourceSansPro-SemiBold.ttf SourceSansPro-Bold.ttf DroidSans.ttf'
+        if type _luoshu_hyperos_root_pairs >/dev/null 2>&1; then
+            while IFS='|' read -r _lfbs_real _lfbs_overlay; do
+                [ -d "$_lfbs_real" ] || continue
+                for _lfbs_path in "$_lfbs_real"/*.ttf "$_lfbs_real"/*.otf "$_lfbs_real"/*.ttc "$_lfbs_real"/*.otc \
+                    "$_lfbs_real"/*.TTF "$_lfbs_real"/*.OTF "$_lfbs_real"/*.TTC "$_lfbs_real"/*.OTC; do
+                    [ -f "$_lfbs_path" ] || continue
+                    _lfbs_name=${_lfbs_path##*/}
+                    case "$_lfbs_name" in
+                        *Italic*|*Oblique*|*Emoji*|*Symbol*|*Icon*|*Serif*|*Arabic*|*Hebrew*|*Thai*|*Devanagari*|*Bengali*|*Tamil*|*Telugu*|*Malayalam*|*Gujarati*|*Gurmukhi*|*Kannada*) continue ;;
+                    esac
+                    case "$_lfbs_name" in
+                        MiSans*|Misans*|miSans*|Mitype*|MiClock*|AndroidClock*|Clockopia*|Roboto*|GoogleSans*|ProductSans*|NotoSans*|SourceSansPro*|DroidSans*|*Latin*|*latin*|100.*|200.*|300.*|350.*|400.*|500.*|600.*|700.*|800.*|900.*)
+                            printf '%s\n' "$_lfbs_name"
+                            ;;
+                    esac
+                done
+            done <<EOF_LFBS_HYPEROS_ROOTS
+$(_luoshu_hyperos_root_pairs)
+EOF_LFBS_HYPEROS_ROOTS
+        fi
+    } | awk 'NF && !seen[$0]++'
+}
+
+# font_mix.sh 原来的 HyperOS 二级同步只处理 system_ext/product/mi_ext。这里利用同一个
+# 事务同步器把设备真实存在的额外字体分区也镜像过去。递归守卫避免 clear_text_targets
+# 再次进入本函数；单字体链路不受影响。
+_lfbs_mix_hyperos_extra_sync() {
+    [ "${IS_HYPEROS:-false}" = true ] || return 0
+    type sync_secondary_partition >/dev/null 2>&1 || return 0
+    [ "${LUOSHU_HYPEROS_EXTRA_SYNC_ACTIVE:-0}" != 1 ] || return 0
+    LUOSHU_HYPEROS_EXTRA_SYNC_ACTIVE=1
+    export LUOSHU_HYPEROS_EXTRA_SYNC_ACTIVE
+    _lfbs_sync_rc=0
+    for _lfbs_row in \
+        'vendor|/vendor/fonts' 'odm|/odm/fonts' 'oem|/oem/fonts' \
+        'my_product|/my_product/fonts' 'hw_product|/hw_product/fonts' 'cust|/cust/fonts'; do
+        _lfbs_part=${_lfbs_row%%|*}
+        _lfbs_root=${_lfbs_row#*|}
+        [ -d "$_lfbs_root" ] || continue
+        sync_secondary_partition "$_lfbs_part" "$_lfbs_root" || { _lfbs_sync_rc=1; break; }
+    done
+    LUOSHU_HYPEROS_EXTRA_SYNC_ACTIVE=0
+    export LUOSHU_HYPEROS_EXTRA_SYNC_ACTIVE
+    return "$_lfbs_sync_rc"
+}
+
 if [ "${0##*/}" = font_mix.sh ]; then
     get_all_coloros_files() {
         _lfbs_mix_coloros_files
@@ -125,6 +179,10 @@ if [ "${0##*/}" = font_mix.sh ]; then
         for _lfbs_file in $(_lfbs_mix_coloros_files); do
             printf '%s\n' "${_lfbs_file%.*}"
         done
+    }
+    get_all_hyperos_files() {
+        _lfbs_mix_hyperos_extra_sync >/dev/null 2>&1 || true
+        _lfbs_mix_hyperos_files
     }
 fi
 
