@@ -254,8 +254,14 @@ start_task() {
     _font="$1"
     [ -n "$_font" ] || { printf '{"status":"error","message":"未指定字体"}\n'; return 0; }
     [ -f "$MANAGER" ] || { printf '{"status":"error","message":"字体管理器不存在"}\n'; return 0; }
-    if ! start_lock_acquire; then
-        printf '{"status":"error","message":"字体任务锁正在释放，请重试"}\n'; return 0
+    start_lock_acquire
+    _lock_rc=$?
+    if [ "$_lock_rc" -ne 0 ]; then
+        case "$_lock_rc" in
+            2) printf '{"status":"error","message":"已有字体任务在运行中，请查看当前进度"}\n' ;;
+            *) printf '{"status":"error","message":"字体任务锁异常，请重试"}\n' ;;
+        esac
+        return 0
     fi
     trap 'start_lock_release' EXIT
     reconcile_task
