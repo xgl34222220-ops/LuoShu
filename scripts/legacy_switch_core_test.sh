@@ -3,6 +3,7 @@ set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ROUTER="$ROOT/common/font_manager.sh"
 SAFE_BACKEND="$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+NEXT_BOOT="$ROOT/common/next_boot_payload.sh"
 LEGACY_BACKEND="$ROOT/common/legacy_v14_4_switch.sh"
 ROM="$ROOT/common/legacy_v14_4/rom_adapters.sh"
 HYPEROS_COMPAT="$ROOT/common/legacy_v14_4/hyperos_full_coverage.sh"
@@ -22,16 +23,51 @@ grep -q 'legacy_v14_4_switch.sh' "$ROUTER"
 grep -q 'exec sh "$SAFE_SWITCH" "$@"' "$ROUTER"
 grep -q 'exec sh "$CURRENT_MANAGER" "$@"' "$ROUTER"
 
+# Foreground switching may read/clone live payload but must never rename, delete,
+# or rewrite it. It can only move the isolated staging tree into -next.
 grep -q 'STAGE_PAYLOAD=.*\.luoshu-payload-stage' "$SAFE_BACKEND"
-grep -q 'RETIRED_ROOT=.*\.luoshu-retired' "$SAFE_BACKEND"
+grep -q 'NEXT_PAYLOAD=.*\.luoshu-payload-next' "$SAFE_BACKEND"
 grep -q 'cp -al "$LIVE_PAYLOAD/\." "$STAGE_PAYLOAD/"' "$SAFE_BACKEND"
-grep -q 'mv "$LIVE_PAYLOAD" "$_retired"' "$SAFE_BACKEND"
-grep -q 'mv "$STAGE_PAYLOAD" "$LIVE_PAYLOAD"' "$SAFE_BACKEND"
+grep -q 'mv "$STAGE_PAYLOAD" "$NEXT_PAYLOAD"' "$SAFE_BACKEND"
+! grep -q 'mv "$LIVE_PAYLOAD"' "$SAFE_BACKEND"
 ! grep -q 'rm -rf "$LIVE_PAYLOAD"' "$SAFE_BACKEND"
-grep -q 'apply_font_by_rom' "$SAFE_BACKEND"
-grep -q 'atomic-next-boot' "$SAFE_BACKEND"
+grep -q 'next-boot-stage' "$SAFE_BACKEND"
 grep -q 'LUOSHU_SWITCH_PROGRESS_FILE' "$SAFE_BACKEND"
+grep -q 'apply_font_by_rom' "$SAFE_BACKEND"
 
+# Only the early-boot helper is allowed to activate -next as live, before self-mount.
+test -f "$NEXT_BOOT"
+grep -q 'mv "$_lnba_live" "$_lnba_retired"' "$NEXT_BOOT"
+grep -q 'mv "$_lnba_next" "$_lnba_live"' "$NEXT_BOOT"
+grep -q 'next_boot_payload.sh' "$POSTFS"
+grep -q 'luoshu_next_boot_activate' "$POSTFS"
+
+# Functional early-boot activation fixture: current payload remains untouched until
+# activation, then becomes retired while the prepared payload becomes live.
+NEXT_TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-next-boot)
+mkdir -p "$NEXT_TMP/module/.luoshu-payload/system/fonts" \
+         "$NEXT_TMP/module/.luoshu-payload-next/system/fonts" \
+         "$NEXT_TMP/module/config"
+printf 'old-live\n' > "$NEXT_TMP/module/.luoshu-payload/system/fonts/Roboto-Regular.ttf"
+printf 'next-live\n' > "$NEXT_TMP/module/.luoshu-payload-next/system/fonts/Roboto-Regular.ttf"
+printf 'default\n' > "$NEXT_TMP/module/config/active_font.conf"
+cat > "$NEXT_TMP/module/config/font-payload-next.conf" <<'EOF_NEXT_STATE'
+state=prepared
+font=DemoFont
+previousFont=default
+previousLegacy=false
+time=1
+EOF_NEXT_STATE
+MODDIR="$NEXT_TMP/module" MODULE_DIR="$NEXT_TMP/module" \
+    sh -c '. "$1"; luoshu_next_boot_activate' sh "$NEXT_BOOT"
+grep -q '^next-live$' "$NEXT_TMP/module/.luoshu-payload/system/fonts/Roboto-Regular.ttf"
+grep -q '^DemoFont$' "$NEXT_TMP/module/config/active_font.conf"
+grep -q '^core=physical-safe-v1$' "$NEXT_TMP/module/config/font_runtime_legacy_v14_4.conf"
+test ! -d "$NEXT_TMP/module/.luoshu-payload-next"
+find "$NEXT_TMP/module/.luoshu-retired" -type f -name Roboto-Regular.ttf -exec grep -q '^old-live$' {} \;
+rm -rf "$NEXT_TMP"
+
+# Old compatibility backend remains available only as fallback/reference.
 grep -q 'apply_font_by_rom' "$LEGACY_BACKEND"
 grep -q '\.luoshu-payload' "$LEGACY_BACKEND"
 grep -q 'physical-file-map' "$LEGACY_BACKEND"
@@ -127,6 +163,7 @@ grep -q 'post-mount-v4.sh' "$POSTMOUNT"
 
 sh -n "$ROUTER"
 sh -n "$SAFE_BACKEND"
+sh -n "$NEXT_BOOT"
 sh -n "$LEGACY_BACKEND"
 sh -n "$HYPEROS_COMPAT"
 sh -n "$MIX_ROUTER"
@@ -141,4 +178,4 @@ sh -n "$ROOT/service_v4.sh"
 sh -n "$ROOT/post-fs-data-v4.sh"
 sh -n "$ROOT/post-mount-v4.sh"
 
-echo 'safe single/composite switching keeps full HyperOS physical UI coverage and current-boot payload integrity.'
+echo 'foreground switch never mutates live payload; early boot activates next payload; HyperOS physical UI coverage remains guarded.'
