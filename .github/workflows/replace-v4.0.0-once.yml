@@ -22,7 +22,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: v4.0.0
-      EXPECTED_OLD_TAG_SHA: ca23d25bbe96e0d09c181473f7facd3f745f0b77
+      EXPECTED_OLD_TAG_SHA: 0c004c4b8ef6fdd8a772d56e0eeb90848a77f922
     steps:
       - uses: actions/checkout@v4
         with:
@@ -57,7 +57,7 @@ jobs:
           echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "Replacement source: $source_sha"
 
-      - name: Verify repaired v4.0.0 source
+      - name: Verify repaired v4.0.0 source and real boot mount entry
         shell: bash
         run: |
           set -euo pipefail
@@ -75,6 +75,18 @@ jobs:
           grep -q 'hyperos_stage_complete.sh' common/legacy_v14_4/font_switch_safe.sh
           grep -q '^    stock_scan)' common/app_bridge.sh
           grep -qx 'common/stock_inventory_scan.py' scripts/module_payload_manifest.txt
+
+          # Critical regression: the broken v4.0.0 generated a payload and wrote
+          # success state, but legacy boot routers sourced only mount_self_backend.sh.
+          # That file does NOT define luoshu_private_self_mount_ensure, so the real
+          # mount was silently skipped. Refuse release unless both boot stages load
+          # mount_compat.sh and the actual private self-mount entry is defined.
+          grep -q 'common/mount_compat.sh' post-fs-data.sh
+          grep -q 'common/mount_compat.sh' post-mount.sh
+          grep -q 'runtime-loader-missing' post-fs-data.sh
+          grep -q 'runtime-loader-missing' post-mount.sh
+          MODDIR="$PWD" MODULE_DIR="$PWD" sh -c '. "$1"; type luoshu_private_self_mount_ensure >/dev/null 2>&1' sh common/mount_compat.sh
+          sh scripts/legacy_switch_core_test.sh
 
       - name: Remove broken v4.0.0 and retag repaired source
         env:
