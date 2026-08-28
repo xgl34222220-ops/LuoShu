@@ -317,6 +317,7 @@ case "${1:-status}" in
     preview_export) preview_export "${2:-}" "${3:-}" "${4:-400}" ;;
     weight_axis) weight_axis_info "${2:-}" ;;
     validate) manager_ready || exit 1; sh "$FONT_MANAGER" action validate "${2:-}" ;;
+    stock_scan) manager_ready || exit 1; sh "$FONT_MANAGER" action stock_scan ;;
     switch_start) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "${2:-default}" ;;
     switch_status) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" status "${2:-}" ;;
     delete) manager_ready || exit 1; sh "$FONT_MANAGER" action delete "${2:-}" ;;
