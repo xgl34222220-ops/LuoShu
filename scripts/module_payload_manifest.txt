@@ -61,7 +61,6 @@ common/font_mix_controller.sh
 common/font_name_normalize.py
 common/font_provider_cache.sh
 common/font_switch_lock.sh
-common/font_switch_safe.sh
 common/font_validate_fast_v4.sh
 common/google_font_provider_bridge.sh
 common/google_font_provider_patch.py
@@ -76,7 +75,6 @@ common/font_validation_cache.sh
 common/font_switch_task.sh
 common/hyperos_global.sh
 common/legacy_v14_4_switch.sh
-common/legacy_v14_4/hyperos_full_coverage.sh
 common/legacy_v14_4
 common/luoshu_cli.sh
 common/luoshu_composite.sh
