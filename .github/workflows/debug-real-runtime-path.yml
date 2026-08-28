@@ -21,6 +21,58 @@ jobs:
           grep -q '\.luoshu-mix-stage' common/legacy_v14_4/mix_router.sh
           ! grep -q 'PAYLOAD="$REALMOD/.luoshu-payload"' common/legacy_v14_4/mix_router.sh
           grep -q 'hyperos_stage_complete.sh' common/legacy_v14_4/font_switch_safe.sh
+      - name: Reproduce legacy runtime safe-switch routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          T="$(mktemp -d)"
+          trap 'rm -rf "$T"' EXIT
+          REAL="$T/real"
+          RUNTIME="$REAL/.legacy-v14-runtime"
+          PUBLIC="$T/public"
+          mkdir -p "$REAL/common/legacy_v14_4" "$REAL/common" "$REAL/config" "$REAL/logs" \
+                   "$REAL/.luoshu-payload/system/fonts" "$RUNTIME/common/legacy_v14_4" "$PUBLIC/fonts"
+          printf 'id=LuoShu\nversion=v4.0.0\n' > "$REAL/module.prop"
+          printf 'LIVE-UNCHANGED\n' > "$REAL/.luoshu-payload/system/fonts/live-sentinel.ttf"
+          cp common/legacy_v14_4/font_switch_safe.sh "$REAL/common/legacy_v14_4/font_switch_safe.sh"
+          cp common/font_manager.sh "$REAL/common/font_manager.sh"
+          cat > "$REAL/common/legacy_v14_4/util_functions.sh" <<'EOF_UTIL'
+          ensure_public_storage(){ :; }
+          check_coloros(){ IS_COLOROS=false; export IS_COLOROS; }
+          check_hyperos(){ IS_HYPEROS=false; export IS_HYPEROS; }
+          detect_font_family(){ _n="${1##*/}"; _n="${_n%.*}"; _n="${_n%-Regular}"; printf '%s\n' "$_n"; }
+          link_or_copy_font(){ mkdir -p "${2%/*}"; rm -f "$2"; ln "$1" "$2" 2>/dev/null || cp -f "$1" "$2"; }
+          EOF_UTIL
+          cat > "$REAL/common/legacy_v14_4/font_check.sh" <<'EOF_CHECK'
+          font_validate(){ return 0; }
+          EOF_CHECK
+          cat > "$REAL/common/legacy_v14_4/rom_adapters.sh" <<'EOF_ROM'
+          apply_font_by_rom(){
+            _src="$1"; _dest="$2"
+            mkdir -p "$_dest/.luoshu-font-store"
+            cp -f "$_src" "$_dest/.luoshu-font-store/regular.font"
+            cp -f "$_src" "$_dest/Roboto-Regular.ttf"
+          }
+          EOF_ROM
+          cat > "$REAL/common/font_switch_lock.sh" <<'EOF_LOCK'
+          luoshu_font_lock_acquire(){ return 0; }
+          luoshu_font_lock_release(){ return 0; }
+          luoshu_font_lock_force_clear(){ return 0; }
+          EOF_LOCK
+          printf 'TEST-FONT\n' > "$PUBLIC/fonts/MixSource-Regular.ttf"
+          ln -s "$REAL/common/font_manager.sh" "$RUNTIME/common/font_manager.sh"
+          ln -s "$REAL/common/legacy_v14_4/font_switch_safe.sh" "$RUNTIME/common/legacy_v14_4/font_switch_safe.sh"
+
+          OUT=$(MODDIR="$RUNTIME" LUOSHU_REAL_MODDIR="$REAL" LUOSHU_PUBLIC_DIR="$PUBLIC" \
+            sh "$RUNTIME/common/font_manager.sh" action switch MixSource)
+          printf '%s\n' "$OUT"
+          printf '%s\n' "$OUT" | grep -q '"font":"mix"'
+          test -d "$REAL/.luoshu-payload-next"
+          test ! -e "$RUNTIME/.luoshu-payload-next"
+          grep -q '^font=mix$' "$REAL/config/font-payload-next.conf"
+          grep -q '^mix$' "$REAL/config/active_font.conf"
+          grep -q '^LIVE-UNCHANGED$' "$REAL/.luoshu-payload/system/fonts/live-sentinel.ttf"
+          test -s "$REAL/.luoshu-payload-next/system/fonts/Roboto-Regular.ttf"
       - name: Existing legacy switch regression
         run: sh scripts/legacy_switch_core_test.sh
       - name: Existing composite handoff regression
