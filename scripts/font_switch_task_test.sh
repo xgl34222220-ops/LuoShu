@@ -88,7 +88,8 @@ grep -q '^percent=100$' "$LUOSHU_SWITCH_TASK_FILE"
 
 # Two simultaneous App requests must produce exactly one accepted task. The
 # launch lock protects the queued/running task record before the manager lock
-# exists, so the rejected request cannot overwrite the accepted task ID.
+# exists, so the rejected request cannot overwrite the accepted task ID. Both
+# launch-lock contention and an already-live worker use the same user-facing state.
 sh "$ROOT/common/font_switch_task.sh" start hold > "$TMP/concurrent-a.out" &
 start_a=$!
 sh "$ROOT/common/font_switch_task.sh" start hold > "$TMP/concurrent-b.out" &
@@ -96,7 +97,7 @@ start_b=$!
 wait "$start_a"
 wait "$start_b"
 accepted=$(grep -l '"status":"ok"' "$TMP/concurrent-a.out" "$TMP/concurrent-b.out" | wc -l | tr -d '[:space:]')
-rejected=$(grep -l '字体正在切换中' "$TMP/concurrent-a.out" "$TMP/concurrent-b.out" | wc -l | tr -d '[:space:]')
+rejected=$(grep -l '已有字体任务在运行中，请查看当前进度' "$TMP/concurrent-a.out" "$TMP/concurrent-b.out" | wc -l | tr -d '[:space:]')
 [ "$accepted" = 1 ]
 [ "$rejected" = 1 ]
 wait_state success
