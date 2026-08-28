@@ -1,16 +1,16 @@
-name: Debug v4 font switch task gate 2
+name: Debug v4 final legacy switch gate
 
 on:
   push:
     branches: [ debug/v4-task-gate-2 ]
 
 jobs:
-  task-gate:
-    runs-on: ubuntu-latest
+  legacy-gate:
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Trace font switch task regression
+      - name: Trace legacy switch regression
         shell: bash
         run: |
           set -o pipefail
-          sh -x scripts/font_switch_task_test.sh
+          sh -x scripts/legacy_switch_core_test.sh
