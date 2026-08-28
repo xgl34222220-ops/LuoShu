@@ -21,7 +21,7 @@ SAFE_SWITCH="$MODDIR/common/legacy_v14_4/font_switch_safe.sh"
 LEGACY_SWITCH="$MODDIR/common/legacy_v14_4_switch.sh"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
-STOCK_SCANNER="$MODDIR/common/font_inventory.py"
+STOCK_SCANNER="$MODDIR/common/stock_inventory_scan.py"
 STOCK_INVENTORY="$MODDIR/config/device_font_inventory.json"
 export MODDIR LUOSHU_PUBLIC_DIR
 
@@ -30,7 +30,7 @@ json_escape_router() {
 }
 
 stock_scan_available() {
-    [ -x "$PYBIN" ] && [ -f "$STOCK_SCANNER" ] && [ -f "$MODDIR/common/font_check.sh" ]
+    [ -x "$PYBIN" ] && [ -f "$STOCK_SCANNER" ] && [ -f "$MODDIR/common/font_inventory.py" ] && [ -f "$MODDIR/common/font_check.sh" ]
 }
 
 stock_scan_json() {
