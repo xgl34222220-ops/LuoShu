@@ -5,6 +5,7 @@ on:
 jobs:
   runtime-path:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Shell syntax
@@ -79,3 +80,14 @@ jobs:
         run: sh scripts/nested_mix_task_handoff_test.sh
       - name: HyperOS mapping regression
         run: sh scripts/hyperos_global_mapping_test.sh
+      - name: Install complete-check dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - name: Prepare composite runtime
+        run: |
+          if [ ! -x common/python/bin/luoshu-python ]; then
+            sh scripts/prepare_composite_runtime.sh
+          fi
+      - name: Complete source and module gate
+        run: sh scripts/check.sh
