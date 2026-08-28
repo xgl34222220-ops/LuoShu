@@ -1,8 +1,8 @@
 #!/system/bin/sh
 # LuoShu native App font-manager router.
 # Inventory, preview, delete and weight actions stay on the current manager.
-# Final font apply uses the safe physical switch core, which builds the next-boot
-# payload off-line and never rewrites the source tree mounted by the current boot.
+# Final font apply uses the isolated safe physical switch core, which builds the
+# next-boot payload off-line and never rewrites the source tree mounted by this boot.
 # Source-check compatibility markers owned by font_manager_v4.sh: native-v3 manifest-fast
 # The current inventory contract remains config/native_font_index.json.
 set +e
@@ -17,7 +17,7 @@ if [ -z "$MODDIR" ]; then
 fi
 LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 CURRENT_MANAGER="$MODDIR/common/font_manager_v4.sh"
-SAFE_SWITCH="$MODDIR/common/font_switch_safe.sh"
+SAFE_SWITCH="$MODDIR/common/legacy_v14_4/font_switch_safe.sh"
 LEGACY_SWITCH="$MODDIR/common/legacy_v14_4_switch.sh"
 export MODDIR LUOSHU_PUBLIC_DIR
 
