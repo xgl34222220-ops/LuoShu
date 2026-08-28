@@ -2,6 +2,7 @@
 # LuoShu service router.
 # Normal installations keep the current v4 service unchanged. Once the isolated
 # physical compatibility runtime is selected, background v4 payload rebuilds stay off.
+# App font inventory remains prewarmed through config/native_font_index.json.
 set +e
 MODDIR="${0%/*}"
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
@@ -34,9 +35,6 @@ fi
     _boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
     _now=$(date +%s 2>/dev/null || echo 0)
 
-    # A full reboot has happened, so the foreground restart marker is consumed now.
-    # The actual loaded state below is authoritative; do not let a stale reboot marker
-    # hide a mount failure behind "waiting for reboot".
     rm -f "$MODDIR/config/text_reboot_required.conf" 2>/dev/null || true
 
     _verify_state=pending
@@ -78,14 +76,11 @@ fi
 
     case "$_verify_state" in
         verified|not-applicable)
-            # Only after the new boot is confirmed may old source trees be reclaimed.
             rm -rf "$MODDIR/.luoshu-retired" "$MODDIR"/.luoshu-payload-stage.* 2>/dev/null || true
             printf '[%s] font load confirmed: active=%s mount=%s\n' \
                 "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_active" "$_mount_state" >> "$LOG" 2>/dev/null
             ;;
         failed)
-            # Keep the retired source intact for diagnostics/recovery. Never silently
-            # claim success or destroy the last known-good payload after a failed boot.
             printf '[%s] font load FAILED: active=%s mount=%s detail=%s; retired payload retained\n' \
                 "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_active" "$_mount_state" "$_mount_failed" >> "$LOG" 2>/dev/null
             ;;
