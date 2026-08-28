@@ -1,0 +1,14 @@
+name: Debug v4 final stability gate
+on:
+  push:
+    branches: [debug/v4-stability-final]
+jobs:
+  stability:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trace stability regression
+        shell: bash
+        run: |
+          set -o pipefail
+          sh -x scripts/stability_test.sh
