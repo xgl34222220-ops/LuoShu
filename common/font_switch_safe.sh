@@ -26,6 +26,7 @@ LEGACY_MODE_CONF="$CONFIG_DIR/font_runtime_legacy_v14_4.conf"
 TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
 SWITCH_LOCK="$MODDIR/.font_switch.lock"
+PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
 LOCK_HELD=false
 
 export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
@@ -33,7 +34,7 @@ export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
 [ -f "$LEGACY_DIR/font_check.sh" ] && . "$LEGACY_DIR/font_check.sh"
 [ -f "$LEGACY_DIR/rom_adapters.sh" ] && . "$LEGACY_DIR/rom_adapters.sh"
 [ -f "$MODDIR/common/font_switch_lock.sh" ] && . "$MODDIR/common/font_switch_lock.sh"
-HYPEROS_COMPAT="$LEGACY_DIR/hyperos_clock_compat.sh"
+HYPEROS_COMPAT="$LEGACY_DIR/hyperos_full_coverage.sh"
 [ -f "$HYPEROS_COMPAT" ] && . "$HYPEROS_COMPAT"
 
 type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
@@ -45,7 +46,19 @@ json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
 
+progress() {
+    _p="$1"; shift; _m="$*"
+    [ -n "$PROGRESS_FILE" ] || return 0
+    _tmp="${PROGRESS_FILE}.tmp.$$"
+    {
+        printf 'percent=%s\n' "$_p"
+        printf 'message=%s\n' "$_m"
+    } > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$PROGRESS_FILE" 2>/dev/null || true
+    chmod 0644 "$PROGRESS_FILE" 2>/dev/null || true
+}
+
 safe_error() {
+    progress 100 "$1"
     printf '{"status":"error","message":"%s","pipeline":"atomic-next-boot"}\n' "$(json_escape "$1")"
     return 1
 }
@@ -60,10 +73,7 @@ lock_cleanup() {
 }
 
 lock_acquire() {
-    type luoshu_font_lock_acquire >/dev/null 2>&1 || {
-        safe_error '缺少字体切换身份锁'
-        return 1
-    }
+    type luoshu_font_lock_acquire >/dev/null 2>&1 || { safe_error '缺少字体切换身份锁'; return 1; }
     luoshu_font_lock_acquire "$SWITCH_LOCK" "$$"
     _rc=$?
     case "$_rc" in
@@ -100,7 +110,9 @@ find_text_font_file() {
 
 validate_global() {
     _file="$1"
-    type font_validate >/dev/null 2>&1 && font_validate "$_file" text || return 1
+    if type font_validate >/dev/null 2>&1; then
+        font_validate "$_file" text || return 1
+    fi
     _python="$MODDIR/common/python/bin/luoshu-python"
     _checker="$LEGACY_DIR/font_coverage.py"
     [ -x "$_python" ] && [ -f "$_checker" ] || return 0
@@ -116,10 +128,7 @@ validate_global() {
 }
 
 stage_clone_live() {
-    [ -d "$LIVE_PAYLOAD" ] || {
-        safe_error '私有字体负载不存在，请重新刷入当前洛书版本'
-        return 1
-    }
+    [ -d "$LIVE_PAYLOAD" ] || { safe_error '私有字体负载不存在，请重新刷入当前洛书版本'; return 1; }
     cleanup_stage
     mkdir -p "$STAGE_PAYLOAD" 2>/dev/null || return 1
     cp -al "$LIVE_PAYLOAD/." "$STAGE_PAYLOAD/" 2>/dev/null || \
@@ -167,9 +176,11 @@ mirror_existing_targets() {
 
 stage_hyperos_complete() {
     [ "${IS_HYPEROS:-false}" = true ] || return 0
-    type luoshu_hyperos_legacy_payload_ensure >/dev/null 2>&1 || return 0
-    LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT="$STAGE_PAYLOAD" \
-        luoshu_hyperos_legacy_payload_ensure >/dev/null 2>&1 || true
+    type luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 || return 0
+    LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT="$STAGE_PAYLOAD"
+    export LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT
+    luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 || true
+    unset LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT 2>/dev/null || true
 }
 
 stage_verify() {
@@ -211,7 +222,6 @@ write_runtime_state() {
             printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
         } > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$LEGACY_MODE_CONF" 2>/dev/null || return 1
         chmod 0600 "$LEGACY_MODE_CONF" 2>/dev/null || true
-        # Update migration recognizes this as a persistent physical payload contract.
         printf 'schema=legacy-physical-v14.4-safe-v1\n' > "$CONFIG_DIR/font-payload-schema.conf" 2>/dev/null || true
     fi
 
@@ -241,10 +251,12 @@ write_runtime_state() {
 switch_font() {
     _font="$1"
     [ -n "$_font" ] || { safe_error '未指定字体'; return 1; }
+    progress 4 '正在获取字体切换锁'
     lock_acquire || return 1
 
     _source=''
     if [ "$_font" != default ]; then
+        progress 10 '正在查找并校验字体文件'
         _source="$(find_text_font_file "$_font")"
         [ -f "$_source" ] || { safe_error "字体 $_font 不存在"; return 1; }
         if ! validate_global "$_source"; then
@@ -253,30 +265,40 @@ switch_font() {
         fi
     fi
 
+    progress 22 '正在复制当前负载到安全暂存区'
     stage_clone_live || { safe_error '无法创建下一启动字体负载'; return 1; }
+    progress 34 '正在清理暂存区旧文字映射'
     stage_clear_text_payload || { safe_error '无法准备下一启动字体负载'; return 1; }
 
     if [ "$_font" != default ]; then
         PAYLOAD_ROOT="$STAGE_PAYLOAD"
         SYSTEM_FONTS_DIR="$STAGE_PAYLOAD/system/fonts"
         export PAYLOAD_ROOT SYSTEM_FONTS_DIR
+        progress 48 '正在生成 ROM 核心字体映射'
         type apply_font_by_rom >/dev/null 2>&1 || { safe_error '缺少 ROM 字体映射器'; return 1; }
         if ! apply_font_by_rom "$_source" "$SYSTEM_FONTS_DIR" quick "$_font" >> "$LOG_FILE" 2>&1; then
             safe_error 'ROM 字体映射失败，当前字体未被改动'
             return 1
         fi
+        progress 66 '正在补齐系统分区同名字体槽位'
         mirror_existing_targets
-        stage_hyperos_complete
+        if [ "${IS_HYPEROS:-false}" = true ]; then
+            progress 76 '正在补齐 HyperOS 状态栏、锁屏和系统 UI 字体槽位'
+            stage_hyperos_complete
+        fi
+        progress 86 '正在校验下一启动字体负载'
         stage_verify "$_font" || { safe_error '新字体负载校验失败，当前字体未被改动'; return 1; }
     fi
 
+    progress 94 '正在原子提交下一启动字体负载'
     commit_stage || { safe_error '新字体负载提交失败，已保留当前字体'; return 1; }
-    # Stage has moved into LIVE_PAYLOAD; do not let EXIT cleanup touch it.
     STAGE_PAYLOAD="$MODDIR/.luoshu-payload-stage.committed.$$"
+    progress 98 '正在保存字体状态'
     write_runtime_state "$_font" || { safe_error '字体负载已提交，但状态保存失败，请完整重启后导出诊断'; return 1; }
 
     printf '%s\n' "$_font" > "$CONFIG_DIR/last_switch_result.conf" 2>/dev/null || true
     date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
+    progress 100 '字体已准备完成，完整重启后生效'
     printf '{"status":"ok","data":{"font":"%s","rebootRequired":true,"legacyCore":"v14.4.0-safe","pipeline":"atomic-next-boot"}}\n' \
         "$(json_escape "$_font")"
     return 0
