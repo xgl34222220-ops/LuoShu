@@ -28,6 +28,35 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Ensure stock scan App bridge route
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! grep -q '^    stock_scan)' common/app_bridge.sh; then
+            python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('common/app_bridge.sh')
+          text = path.read_text(encoding='utf-8')
+          needle = '    validate) manager_ready || exit 1; sh "$FONT_MANAGER" action validate "${2:-}" ;;\n    switch_start)'
+          replacement = '    validate) manager_ready || exit 1; sh "$FONT_MANAGER" action validate "${2:-}" ;;\n    stock_scan) manager_ready || exit 1; sh "$FONT_MANAGER" action stock_scan ;;\n    switch_start)'
+          if needle not in text:
+              raise SystemExit('stock_scan bridge insertion anchor is missing')
+          path.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
+          PY
+            sh -n common/app_bridge.sh
+            grep -q '^    stock_scan)' common/app_bridge.sh
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add common/app_bridge.sh
+            git commit -m 'fix: route stock font scan through App bridge'
+            git push origin HEAD:main
+          fi
+          source_sha="$(git rev-parse HEAD)"
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "Replacement source: $source_sha"
+
       - name: Verify repaired v4.0.0 source
         shell: bash
         run: |
@@ -35,7 +64,7 @@ jobs:
           version="$(sed -n 's/^version=//p' module.prop | head -n1)"
           version_code="$(sed -n 's/^versionCode=//p' module.prop | head -n1)"
           [[ "$version" == 'v4.0.0' && "$version_code" == '40000' ]] || {
-            echo "Refusing replacement: main is $version/$version_code" >&2
+            echo "Refusing replacement: source is $version/$version_code" >&2
             exit 2
           }
 
@@ -44,18 +73,26 @@ jobs:
           grep -q 'LUOSHU_REAL_MODDIR' common/legacy_v14_4/font_switch_safe.sh
           grep -q '\.luoshu-mix-stage' common/legacy_v14_4/mix_router.sh
           grep -q 'hyperos_stage_complete.sh' common/legacy_v14_4/font_switch_safe.sh
-          grep -q 'stock_scan' common/app_bridge.sh
+          grep -q '^    stock_scan)' common/app_bridge.sh
           grep -qx 'common/stock_inventory_scan.py' scripts/module_payload_manifest.txt
 
       - name: Remove broken v4.0.0 and retag repaired source
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
           git fetch --force --tags origin
-          current="$(git rev-list -n1 "$TAG" 2>/dev/null || true)"
+          git fetch origin main
+          main_sha="$(git rev-parse origin/main)"
+          [[ "$main_sha" == "$SOURCE_SHA" ]] || {
+            echo "Refusing replacement: main moved to $main_sha after source $SOURCE_SHA was prepared" >&2
+            exit 2
+          }
 
-          if [[ "$current" == "$GITHUB_SHA" ]]; then
-            echo "$TAG already points to repaired source $GITHUB_SHA."
+          current="$(git rev-list -n1 "$TAG" 2>/dev/null || true)"
+          if [[ "$current" == "$SOURCE_SHA" ]]; then
+            echo "$TAG already points to repaired source $SOURCE_SHA."
           else
             [[ "$current" == "$EXPECTED_OLD_TAG_SHA" ]] || {
               echo "Refusing replacement: $TAG points to unexpected ${current:-<missing>}" >&2
@@ -75,13 +112,15 @@ jobs:
               exit 3
             }
 
-            git tag "$TAG" "$GITHUB_SHA"
+            git tag "$TAG" "$SOURCE_SHA"
             git push origin "refs/tags/$TAG"
           fi
 
       - name: Dispatch signed v4.0.0 publish
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
           gh workflow run release.yml --ref "$TAG" -f tag="$TAG" -f prerelease=false
-          echo "Dispatched signed replacement release from $TAG at $GITHUB_SHA."
+          echo "Dispatched signed replacement release from $TAG at $SOURCE_SHA."
