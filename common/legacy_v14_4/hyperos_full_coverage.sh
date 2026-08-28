@@ -3,9 +3,25 @@
 # Source the proven compatibility layer, then broaden only its target discovery.
 set +e
 
-_hfc_dir="${0%/*}"
-_hfc_base="$_hfc_dir/hyperos_clock_compat.sh"
-[ -f "$_hfc_base" ] && . "$_hfc_base"
+# This file is sourced by post-fs-data/post-mount, so $0 belongs to the outer
+# script and cannot be used as this file's directory. Resolve the compatibility
+# backend from the module root first, then keep source-tree fallbacks for tests.
+_hfc_base=''
+for _hfc_candidate in \
+    "${LUOSHU_REAL_MODDIR:-}/common/legacy_v14_4/hyperos_clock_compat.sh" \
+    "${MODDIR:-}/common/legacy_v14_4/hyperos_clock_compat.sh" \
+    "${MODULE_DIR:-}/common/legacy_v14_4/hyperos_clock_compat.sh" \
+    "${PWD:-.}/common/legacy_v14_4/hyperos_clock_compat.sh" \
+    "${0%/*}/common/legacy_v14_4/hyperos_clock_compat.sh" \
+    "${0%/*}/legacy_v14_4/hyperos_clock_compat.sh"; do
+    [ "$_hfc_candidate" != "/common/legacy_v14_4/hyperos_clock_compat.sh" ] || continue
+    if [ -f "$_hfc_candidate" ]; then
+        _hfc_base="$_hfc_candidate"
+        break
+    fi
+done
+[ -n "$_hfc_base" ] && . "$_hfc_base"
+unset _hfc_candidate _hfc_base
 
 # Replace only upright, single-font TTF/OTF UI/clock/typeface aliases. TTC files can
 # carry multiple faces/index contracts; replacing those with one arbitrary font file
