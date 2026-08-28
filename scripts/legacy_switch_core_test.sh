@@ -2,9 +2,10 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ROUTER="$ROOT/common/font_manager.sh"
-BACKEND="$ROOT/common/legacy_v14_4_switch.sh"
+SAFE_BACKEND="$ROOT/common/font_switch_safe.sh"
+LEGACY_BACKEND="$ROOT/common/legacy_v14_4_switch.sh"
 ROM="$ROOT/common/legacy_v14_4/rom_adapters.sh"
-HYPEROS_COMPAT="$ROOT/common/legacy_v14_4/hyperos_clock_compat.sh"
+HYPEROS_COMPAT="$ROOT/common/legacy_v14_4/hyperos_full_coverage.sh"
 MIX_ROUTER="$ROOT/common/font_mix_controller.sh"
 LEGACY_MIX_ROUTER="$ROOT/common/legacy_v14_4/mix_router.sh"
 LEGACY_MIX_BRIDGE="$ROOT/common/legacy_v14_4/v14_mix.sh"
@@ -15,44 +16,50 @@ SERVICE="$ROOT/service.sh"
 POSTFS="$ROOT/post-fs-data.sh"
 POSTMOUNT="$ROOT/post-mount.sh"
 
-# Current App-facing manager stays in place for every action except final apply.
+# Current App-facing manager stays in place for inventory etc, but final apply must
+# prefer the safe next-boot staging core. The old v14.4 switch remains fallback only.
 grep -q 'font_manager_v4.sh' "$ROUTER"
+grep -q 'font_switch_safe.sh' "$ROUTER"
 grep -q 'legacy_v14_4_switch.sh' "$ROUTER"
-grep -q '\[ "${1:-}" = action \].*\[ "${2:-}" = switch \]' "$ROUTER"
+grep -q 'exec sh "$SAFE_SWITCH" "$@"' "$ROUTER"
 grep -q 'exec sh "$CURRENT_MANAGER" "$@"' "$ROUTER"
 
-# The compatibility backend must be the pre-reset physical filename mapping path.
-grep -q 'apply_font_by_rom' "$BACKEND"
-grep -q '\.luoshu-payload' "$BACKEND"
-grep -q 'legacyCore.*v14.4.0' "$BACKEND"
-grep -q 'physical-file-map' "$BACKEND"
+# The safe backend must never clear the live payload. It clones to staging, builds
+# there, then swaps paths while retaining the old mounted source until next boot.
+grep -q 'STAGE_PAYLOAD=.*\.luoshu-payload-stage' "$SAFE_BACKEND"
+grep -q 'RETIRED_ROOT=.*\.luoshu-retired' "$SAFE_BACKEND"
+grep -q 'cp -al "$LIVE_PAYLOAD/\." "$STAGE_PAYLOAD/"' "$SAFE_BACKEND"
+grep -q 'mv "$LIVE_PAYLOAD" "$_retired"' "$SAFE_BACKEND"
+grep -q 'mv "$STAGE_PAYLOAD" "$LIVE_PAYLOAD"' "$SAFE_BACKEND"
+! grep -q 'rm -rf "$LIVE_PAYLOAD"' "$SAFE_BACKEND"
+grep -q 'apply_font_by_rom' "$SAFE_BACKEND"
+grep -q 'atomic-next-boot' "$SAFE_BACKEND"
+grep -q 'LUOSHU_SWITCH_PROGRESS_FILE' "$SAFE_BACKEND"
+
+# Old compatibility backend remains available as a fallback/reference.
+grep -q 'apply_font_by_rom' "$LEGACY_BACKEND"
+grep -q '\.luoshu-payload' "$LEGACY_BACKEND"
+grep -q 'physical-file-map' "$LEGACY_BACKEND"
 grep -q 'MiSansLatinVF.ttf' "$ROM"
 grep -q 'GoogleSans' "$ROM"
 grep -q 'Roboto' "$ROM"
 
-# Restoring the old switch core must not throw away later proven HyperOS 3 physical
-# coverage. The bridge runs before self-mount, writes only aliases into the private
-# payload and never enters the v4 template/XML/94% validation pipeline.
+# HyperOS 3 coverage is dynamic across all real font partitions and accepts newly
+# introduced upright MiSans/XiaomiSans/MiLanPro/Mitype slots including TTC files.
 test -f "$HYPEROS_COMPAT"
-grep -q 'MitypeClock.ttf' "$HYPEROS_COMPAT"
-grep -q 'MiClock.ttf' "$HYPEROS_COMPAT"
-grep -q 'AndroidClock.ttf' "$HYPEROS_COMPAT"
-grep -q 'Clockopia.ttf' "$HYPEROS_COMPAT"
-grep -q 'GoogleSansText-Regular.ttf' "$HYPEROS_COMPAT"
-grep -q 'NotoSansUI-Regular.ttf' "$HYPEROS_COMPAT"
-grep -q 'MiLanPro' "$HYPEROS_COMPAT"
-grep -q 'XiaomiSans' "$HYPEROS_COMPAT"
-grep -q 'mi_ext' "$HYPEROS_COMPAT"
-grep -q 'hyperos_clock_compat.sh' "$POSTFS"
-grep -q 'luoshu_hyperos_clock_payload_ensure' "$POSTFS"
-grep -q 'hyperos_clock_compat.sh' "$POSTMOUNT"
-grep -q 'luoshu_hyperos_clock_payload_ensure' "$POSTMOUNT"
+grep -q 'MiSans\*\.ttc' "$HYPEROS_COMPAT"
+grep -q 'XiaomiSans\*\.ttf' "$HYPEROS_COMPAT"
+grep -q 'MiLanPro\*\.ttf' "$HYPEROS_COMPAT"
+grep -q 'Mitype\*\.ttf' "$HYPEROS_COMPAT"
+grep -q 'hyperos_full_coverage.sh' "$POSTFS"
+grep -q 'luoshu_hyperos_full_payload_ensure' "$POSTFS"
+grep -q 'hyperos_full_coverage.sh' "$POSTMOUNT"
+grep -q 'luoshu_hyperos_full_payload_ensure' "$POSTMOUNT"
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' "$HYPEROS_COMPAT"
 
-# Functional fixture: cover status/lock-screen slots and ordinary HyperOS UI slots
-# living outside system/fonts. Every alias must come from the already-built selected
-# payload, so no foreground rebuild or second validation pipeline is needed.
-TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-legacy-clock)
+# Functional HyperOS fixture: discover physical aliases outside system/fonts,
+# including names that were absent from the old short whitelist and TTC slots.
+TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-safe-switch)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 mkdir -p \
     "$TMP/module/.luoshu-payload/system/fonts" \
@@ -64,6 +71,8 @@ printf 'selected-font-anchor\n' > "$TMP/module/.luoshu-payload/system/fonts/MiSa
 : > "$TMP/stock/system_ext/GoogleSansText-Regular.ttf"
 : > "$TMP/stock/product/NotoSansUI-Medium.ttf"
 : > "$TMP/stock/vendor/MiLanProVF.ttf"
+: > "$TMP/stock/system_ext/MiSansGlobalVF.ttf"
+: > "$TMP/stock/product/XiaomiSansUI.ttc"
 IS_HYPEROS=true \
 MODDIR="$TMP/module" \
 LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT="$TMP/module/.luoshu-payload" \
@@ -77,21 +86,23 @@ LUOSHU_OEM_FONTS_ROOT="$TMP/stock/oem" \
 LUOSHU_MY_PRODUCT_FONTS_ROOT="$TMP/stock/my_product" \
 LUOSHU_HW_PRODUCT_FONTS_ROOT="$TMP/stock/hw_product" \
 LUOSHU_CUST_FONTS_ROOT="$TMP/stock/cust" \
-    sh -c '. "$1"; luoshu_hyperos_clock_payload_ensure' sh "$HYPEROS_COMPAT"
+    sh -c '. "$1"; luoshu_hyperos_full_payload_ensure' sh "$HYPEROS_COMPAT"
 for generated in \
     "$TMP/module/.luoshu-payload/mi_ext/fonts/MitypeClock.ttf" \
     "$TMP/module/.luoshu-payload/product/fonts/MiClock.ttf" \
     "$TMP/module/.luoshu-payload/system_ext/fonts/GoogleSansText-Regular.ttf" \
     "$TMP/module/.luoshu-payload/product/fonts/NotoSansUI-Medium.ttf" \
-    "$TMP/module/.luoshu-payload/vendor/fonts/MiLanProVF.ttf"; do
+    "$TMP/module/.luoshu-payload/vendor/fonts/MiLanProVF.ttf" \
+    "$TMP/module/.luoshu-payload/system_ext/fonts/MiSansGlobalVF.ttf" \
+    "$TMP/module/.luoshu-payload/product/fonts/XiaomiSansUI.ttc"; do
     cmp -s "$TMP/module/.luoshu-payload/system/fonts/MiSansVF.ttf" "$generated"
 done
 
-# 94% v4 pipeline components are forbidden from the actual legacy apply backend.
-! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' "$BACKEND"
+# 94% v4 pipeline components are forbidden from both physical apply paths.
+! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' \
+    "$SAFE_BACKEND" "$LEGACY_BACKEND"
 
-# Composite App actions must also leave the v4 runtime immediately and enter the exact
-# pre-reset bridge / weighted / auto-multiweight / full composite chain.
+# Composite actions remain on the isolated pre-reset chain.
 grep -q 'legacy_v1.*4_4/mix_router.sh' "$MIX_ROUTER"
 grep -q 'exec sh "$LEGACY_V14_MIX" "$@"' "$MIX_ROUTER"
 grep -q 'v142_weighted_mix.sh' "$LEGACY_MIX_BRIDGE"
@@ -110,8 +121,7 @@ grep -q 'font_mix_engine.sh' "$LEGACY_MIX_ROUTER"
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' \
     "$LEGACY_MIX_ROUTER" "$LEGACY_MIX_BRIDGE" "$LEGACY_WEIGHTED" "$LEGACY_AUTO" "$LEGACY_MIX_ENGINE"
 
-# Once selected, all three boot stages keep the legacy payload immutable except for
-# deterministic HyperOS physical UI aliases generated immediately before self-mount.
+# Legacy boot stages never rebuild the selected payload after it is committed.
 for file in "$SERVICE" "$POSTFS" "$POSTMOUNT"; do
     grep -q 'font_runtime_legacy_v14_4.conf' "$file"
     sh -n "$file"
@@ -124,7 +134,8 @@ grep -q 'post-mount-v4.sh' "$POSTMOUNT"
 ! grep -q 'font_config_runtime.sh' "$POSTMOUNT"
 
 sh -n "$ROUTER"
-sh -n "$BACKEND"
+sh -n "$SAFE_BACKEND"
+sh -n "$LEGACY_BACKEND"
 sh -n "$HYPEROS_COMPAT"
 sh -n "$MIX_ROUTER"
 sh -n "$LEGACY_MIX_ROUTER"
@@ -132,8 +143,10 @@ sh -n "$LEGACY_MIX_BRIDGE"
 sh -n "$LEGACY_WEIGHTED"
 sh -n "$LEGACY_AUTO"
 sh -n "$LEGACY_MIX_ENGINE"
+sh -n "$ROOT/common/font_switch_task.sh"
+sh -n "$ROOT/customize.sh"
 sh -n "$ROOT/service_v4.sh"
 sh -n "$ROOT/post-fs-data-v4.sh"
 sh -n "$ROOT/post-mount-v4.sh"
 
-echo 'single/composite legacy switching keeps full HyperOS physical UI coverage.'
+echo 'safe single/composite switching keeps full HyperOS physical UI coverage and current-boot payload integrity.'
