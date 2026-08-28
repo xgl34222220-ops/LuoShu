@@ -9,6 +9,7 @@ ENGINE="$RUNTIME/common/font_mix_engine.sh"
 TASK_FILE="$RUNTIME/config/mix_task.conf"
 LEGACY_MODE="$RUNTIME/config/font_runtime_legacy_v14_4.conf"
 LOG_FILE="$RUNTIME/logs/fontswitch.log"
+MIX_ROUTER="$REALMOD/common/legacy_v14_4/mix_router.sh"
 
 read_task_value() {
     sed -n "s/^${1}=//p" "$TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n'
@@ -21,7 +22,7 @@ mark_legacy_mix_mode() {
         printf 'enabled=true\n'
         printf 'core=v14.4.0\n'
         printf 'font=mix\n'
-        printf 'pipeline=legacy-v14-composite\n'
+        printf 'pipeline=atomic-next-boot-composite\n'
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$LEGACY_MODE" 2>/dev/null || true
     chmod 0600 "$LEGACY_MODE" 2>/dev/null || true
@@ -39,6 +40,12 @@ mark_legacy_mix_mode() {
         "$RUNTIME/config/font-config-overlay.conf" 2>/dev/null || true
 }
 
+finalize_next_payload() {
+    [ -f "$MIX_ROUTER" ] || return 1
+    MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" \
+        sh "$MIX_ROUTER" finalize >> "$LOG_FILE" 2>&1
+}
+
 monitor_task() {
     _wanted="$1"
     _loops=0
@@ -48,8 +55,17 @@ monitor_task() {
         if [ "$_task" = "$_wanted" ]; then
             case "$_state" in
                 success)
-                    mark_legacy_mix_mode
-                    printf '[%s] legacy-v14 composite task committed: %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_wanted" >>"$LOG_FILE" 2>/dev/null || true
+                    # Do not depend on the App staying alive long enough to poll status.
+                    # A completed fixed-weight task must atomically become the real
+                    # module's next-boot payload from this background monitor too.
+                    if finalize_next_payload; then
+                        mark_legacy_mix_mode
+                        printf '[%s] legacy-v14 composite task committed for next boot: %s\n' \
+                            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_wanted" >>"$LOG_FILE" 2>/dev/null || true
+                    else
+                        printf '[%s] legacy-v14 composite task finished but next payload commit FAILED: %s\n' \
+                            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_wanted" >>"$LOG_FILE" 2>/dev/null || true
+                    fi
                     exit 0
                     ;;
                 failed) exit 0 ;;
