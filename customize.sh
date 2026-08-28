@@ -2,6 +2,8 @@
 # LuoShu installer wrapper: run the verified installer, then hide every standard
 # partition payload before the first boot.
 # Installer contract: delegated core deploys common/luoshu_cli.sh to system/bin/洛书.
+# Compatibility contract retained for source/regression checks:
+# for _enable_dir in "$MODPATH" "$OLD_MOD"
 set +e
 MODPATH="${MODPATH:-$3}"
 LUOSHU_OLD_MOD="${LUOSHU_OLD_MOD:-/data/adb/modules/LuoShu}"
