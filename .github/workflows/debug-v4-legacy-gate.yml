@@ -1,0 +1,14 @@
+name: Debug v4 legacy switch gate
+on:
+  push:
+    branches: [debug/v4-legacy-gate]
+jobs:
+  legacy-gate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trace legacy switch regression
+        shell: bash
+        run: |
+          set -o pipefail
+          sh -x scripts/legacy_switch_core_test.sh
