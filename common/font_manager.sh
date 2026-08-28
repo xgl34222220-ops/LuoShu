@@ -101,8 +101,10 @@ fi
 case "${1:-}:${2:-}" in
     action:list|list:*)
         if stock_scan_available; then
-            sh "$CURRENT_MANAGER" "$@" | sed 's/"nativeAvailable":false/"nativeAvailable":true/g'
-            exit ${PIPESTATUS:-0}
+            _manager_out=$(sh "$CURRENT_MANAGER" "$@")
+            _manager_rc=$?
+            printf '%s\n' "$_manager_out" | sed 's/"nativeAvailable":false/"nativeAvailable":true/g'
+            exit "$_manager_rc"
         fi
         ;;
 esac
