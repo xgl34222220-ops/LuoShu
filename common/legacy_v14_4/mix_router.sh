@@ -135,6 +135,24 @@ commit_mix_stage_if_needed() {
     return 0
 }
 
+write_legacy_mix_mode() {
+    _tmp="$REALMOD/config/font_runtime_legacy_v14_4.conf.tmp.$$"
+    {
+        printf 'enabled=true\ncore=v14.4.0\nfont=mix\npipeline=atomic-next-boot-composite\ntime=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$REALMOD/config/font_runtime_legacy_v14_4.conf" 2>/dev/null || true
+    chmod 0600 "$REALMOD/config/font_runtime_legacy_v14_4.conf" 2>/dev/null || true
+}
+
+finalize_mix_stage() {
+    if ! commit_mix_stage_if_needed; then
+        printf '{"status":"error","message":"复合字体已生成但下一启动负载提交失败"}\n'
+        return 1
+    fi
+    write_legacy_mix_mode
+    printf '{"status":"ok","data":{"font":"mix","rebootRequired":true,"pipeline":"atomic-next-boot-composite"}}\n'
+    return 0
+}
+
 setup_runtime() {
     _payload="$1"
     mkdir -p "$RUNTIME/common" "$REALMOD/config" "$REALMOD/cache" "$REALMOD/logs" "$_payload" 2>/dev/null || return 1
@@ -183,16 +201,15 @@ EOF
 mark_mix_mode_if_success() {
     _out="$1"
     printf '%s\n' "$_out" | grep -q '"state":"success"' || return 0
-    commit_mix_stage_if_needed || return 1
-    _tmp="$REALMOD/config/font_runtime_legacy_v14_4.conf.tmp.$$"
-    {
-        printf 'enabled=true\ncore=v14.4.0\nfont=mix\npipeline=atomic-next-boot-composite\ntime=%s\n' "$(date +%s 2>/dev/null || echo 0)"
-    } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$REALMOD/config/font_runtime_legacy_v14_4.conf" 2>/dev/null || true
-    chmod 0600 "$REALMOD/config/font_runtime_legacy_v14_4.conf" 2>/dev/null || true
+    finalize_mix_stage >/dev/null 2>&1 || return 1
     return 0
 }
 
 _cmd="${1:-config}"
+if [ "$_cmd" = finalize ]; then
+    finalize_mix_stage
+    exit $?
+fi
 case "$_cmd" in
     start)
         prepare_mix_stage || {
