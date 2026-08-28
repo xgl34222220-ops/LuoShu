@@ -23,6 +23,7 @@
 - 覆盖 HyperOS 3 状态栏时间、锁屏时钟、控制中心及部分设置/安装器/Launcher/应用英文数字直连槽，包括 `MitypeClock`、`MiClock`、`MiSansClock`、`AndroidClock`、`Clockopia` 等。
 - 动态扩展只处理安全的 upright TTF/OTF UI 字体；TTC 容器、Emoji、图标、衬线、斜体及阿拉伯/日韩等语言专用字体保持原系统，避免为了覆盖率引入 face-index 或缺字崩溃风险。
 - HyperOS 补槽直接复用已经生成好的选中字体负载，不重新进入 device-template / XML / 94% 重建链。
+- 修复 `hyperos_full_coverage.sh` 被开机脚本 source 时使用 `$0` 定位自身目录导致兼容后端未加载的问题；现在从模块根目录解析并加载后端，动态系统 UI 补槽不再静默失效。
 
 ## ColorOS
 
@@ -54,3 +55,4 @@
 - 发布入口兼容契约已同步恢复，确保模块启用状态处理继续通过完整挂载兼容回归门禁。
 - 字体任务锁与任务进度回归均已同步到 `physical-safe-v1 / next-boot-stage` 架构，验证活锁拦截、死锁回收、当前启动负载不被前台切换修改，以及可恢复的百分比进度。
 - 并发任务独立回归已通过，确认两个同时发起的切换请求严格一进一拒，且真实 30 秒超时任务会被终止并进入 100% 失败终态。
+- 最终 legacy/HyperOS 物理覆盖专项回归已通过，确认下一启动激活与 HyperOS 动态 UI 字体槽生成均可正常执行。
