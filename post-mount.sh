@@ -15,6 +15,16 @@ if [ ! -f "$LEGACY_MODE" ]; then
 fi
 
 [ -f "$MODDIR/common/private_payload.sh" ] && . "$MODDIR/common/private_payload.sh"
+[ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
+[ -f "$MODDIR/common/font_config_runtime.sh" ] && . "$MODDIR/common/font_config_runtime.sh"
+[ -f "$MODDIR/common/font_config_partitions.sh" ] && . "$MODDIR/common/font_config_partitions.sh"
+# mount_compat.sh loads private_mount_policy + atomic/runtime mount functions.
+# The previous legacy router sourced only mount_self_backend.sh, so the real
+# luoshu_private_self_mount_ensure entry point did not exist and post-mount
+# silently exited without mounting any font payload.
+[ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
+[ -f "$MODDIR/common/mount_self_backend.sh" ] && . "$MODDIR/common/mount_self_backend.sh"
+
 type luoshu_private_mount_module_view >/dev/null 2>&1 && \
     luoshu_private_mount_module_view "$MODDIR" >/dev/null 2>&1 || true
 
@@ -22,7 +32,27 @@ type luoshu_private_mount_module_view >/dev/null 2>&1 && \
 type luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 && \
     luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 || true
 
-[ -f "$MODDIR/common/mount_self_backend.sh" ] && . "$MODDIR/common/mount_self_backend.sh"
-type luoshu_private_self_mount_ensure >/dev/null 2>&1 || exit 0
-luoshu_private_self_mount_ensure >/dev/null 2>&1 || true
+if ! type luoshu_private_self_mount_ensure >/dev/null 2>&1; then
+    mkdir -p "$MODDIR/config" "$MODDIR/logs" 2>/dev/null || true
+    {
+        printf 'state=failed\n'
+        printf 'backend=none\n'
+        printf 'failed=runtime-loader-missing\n'
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$MODDIR/config/self-mount.conf" 2>/dev/null || true
+    printf '[%s] post-mount runtime loader missing; no font mount attempted\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" \
+        >> "$MODDIR/logs/post-mount.log" 2>/dev/null || true
+    exit 0
+fi
+
+if luoshu_private_self_mount_ensure >/dev/null 2>&1; then
+    printf '[%s] physical compatibility post-mount completed\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" \
+        >> "$MODDIR/logs/post-mount.log" 2>/dev/null || true
+else
+    printf '[%s] physical compatibility post-mount failed; see self-mount.conf/fontswitch.log\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" \
+        >> "$MODDIR/logs/post-mount.log" 2>/dev/null || true
+fi
 exit 0
