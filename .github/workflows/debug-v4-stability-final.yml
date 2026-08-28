@@ -1,14 +1,21 @@
-name: Debug v4 final stability gate
+name: Debug v4 final tail gate
 on:
   push:
     branches: [debug/v4-stability-final]
 jobs:
-  stability:
+  tail-gate:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Trace stability regression
+      - name: Run final source-check tail
         shell: bash
         run: |
-          set -o pipefail
-          sh -x scripts/stability_test.sh
+          set -euxo pipefail
+          sh scripts/stability_test.sh
+          sh scripts/font_library_cache_test.sh
+          sh scripts/app_installer_test.sh
+          sh scripts/nested_mix_task_handoff_test.sh
+          grep -q 'native-v3' common/font_manager.sh
+          grep -q 'manifest-fast' common/font_manager.sh
+          grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
+          grep -q 'prepared-v8' common/multiweight_mix_task.sh
