@@ -34,15 +34,24 @@ fi
     _now=$(date +%s 2>/dev/null || echo 0)
 
     # A completed reboot satisfies the foreground switch's restart requirement.
+    # Keep the mode inside the App bridge's verified contract. The old
+    # legacy-physical-map value was written as verified here but rejected by the App,
+    # leaving HyperOS permanently displayed as "已准备，待本次启动验证".
     rm -f "$MODDIR/config/text_reboot_required.conf" 2>/dev/null || true
     {
         printf 'state=verified\n'
-        printf 'mode=legacy-physical-map\n'
+        printf 'mode=mount-confirmed\n'
         printf 'activeFont=%s\n' "$_active"
+        printf 'reason=legacy-physical-map\n'
         printf 'bootId=%s\n' "$_boot_id"
         printf 'time=%s\n' "$_now"
     } > "$MODDIR/config/device-font-load-verification.conf" 2>/dev/null || true
     chmod 0644 "$MODDIR/config/device-font-load-verification.conf" 2>/dev/null || true
+
+    # Foreground switching now stages a completely new physical mapping and keeps the
+    # previous source tree alive until reboot. Once this boot is complete, no active
+    # mount can still depend on those retired source directories, so reclaim them here.
+    rm -rf "$MODDIR/.luoshu-retired" "$MODDIR"/.luoshu-payload-stage.* 2>/dev/null || true
 
     # Preserve the current App lifecycle without touching the font payload.
     if [ -f "$MODDIR/config/app_install_pending" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
