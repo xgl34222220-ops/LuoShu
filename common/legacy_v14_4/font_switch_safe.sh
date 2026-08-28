@@ -1,8 +1,8 @@
 #!/system/bin/sh
 # LuoShu safe physical font switch core.
-# Build the next-boot payload in an isolated directory and atomically replace the
-# payload path only after the whole mapping succeeds. The payload used by this boot
-# is never deleted or rewritten, preventing ColorOS/SystemUI/App crashes while switching.
+# Foreground switching never renames, deletes or rewrites the payload used by the
+# current Android boot. It builds .luoshu-payload-next off-line; post-fs-data activates
+# that tree before LuoShu mounts fonts on the following complete boot.
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -20,7 +20,8 @@ USER_ROOT="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 USER_FONTS_DIR="$USER_ROOT/fonts"
 LIVE_PAYLOAD="$MODDIR/.luoshu-payload"
 STAGE_PAYLOAD="$MODDIR/.luoshu-payload-stage.$$"
-RETIRED_ROOT="$MODDIR/.luoshu-retired"
+NEXT_PAYLOAD="$MODDIR/.luoshu-payload-next"
+NEXT_STATE="$CONFIG_DIR/font-payload-next.conf"
 ACTIVE_FONT_CONF="$CONFIG_DIR/active_font.conf"
 LEGACY_MODE_CONF="$CONFIG_DIR/font_runtime_legacy_v14_4.conf"
 TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
@@ -46,6 +47,10 @@ json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
 
+read_state_value() {
+    sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
 progress() {
     _p="$1"; shift; _m="$*"
     [ -n "$PROGRESS_FILE" ] || return 0
@@ -59,7 +64,7 @@ progress() {
 
 safe_error() {
     progress 100 "$1"
-    printf '{"status":"error","message":"%s","pipeline":"atomic-next-boot"}\n' "$(json_escape "$1")"
+    printf '{"status":"error","message":"%s","pipeline":"next-boot-stage"}\n' "$(json_escape "$1")"
     return 1
 }
 
@@ -195,42 +200,60 @@ stage_verify() {
             -print -quit 2>/dev/null | grep -q .
 }
 
-commit_stage() {
-    _stamp="$(date +%s 2>/dev/null || echo 0)-$$"
-    _retired="$RETIRED_ROOT/payload-$_stamp"
-    mkdir -p "$RETIRED_ROOT" 2>/dev/null || return 1
-    mv "$LIVE_PAYLOAD" "$_retired" 2>/dev/null || return 1
-    if mv "$STAGE_PAYLOAD" "$LIVE_PAYLOAD" 2>/dev/null; then
-        chmod 0755 "$LIVE_PAYLOAD" 2>/dev/null || true
-        return 0
+resolve_previous_state() {
+    PREVIOUS_FONT=$(head -n1 "$ACTIVE_FONT_CONF" 2>/dev/null | tr -d '\r\n')
+    [ -n "$PREVIOUS_FONT" ] || PREVIOUS_FONT=default
+    PREVIOUS_LEGACY=false
+    [ -f "$LEGACY_MODE_CONF" ] && PREVIOUS_LEGACY=true
+    if [ -s "$NEXT_STATE" ]; then
+        _queued_previous=$(read_state_value "$NEXT_STATE" previousFont)
+        _queued_legacy=$(read_state_value "$NEXT_STATE" previousLegacy)
+        [ -n "$_queued_previous" ] && PREVIOUS_FONT="$_queued_previous"
+        [ "$_queued_legacy" = true ] && PREVIOUS_LEGACY=true || PREVIOUS_LEGACY=false
     fi
-    mv "$_retired" "$LIVE_PAYLOAD" 2>/dev/null || true
-    return 1
+}
+
+prepare_next_payload() {
+    _font="$1"; _previous="$2"; _previous_legacy="$3"
+    _next_tmp="${NEXT_STATE}.tmp.$$"
+    rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
+    rm -f "$NEXT_STATE" 2>/dev/null || true
+    if ! mv "$STAGE_PAYLOAD" "$NEXT_PAYLOAD" 2>/dev/null; then
+        return 1
+    fi
+    STAGE_PAYLOAD="$MODDIR/.luoshu-payload-stage.committed.$$"
+    {
+        printf 'state=prepared\n'
+        printf 'font=%s\n' "$_font"
+        printf 'previousFont=%s\n' "$_previous"
+        printf 'previousLegacy=%s\n' "$_previous_legacy"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$_next_tmp" 2>/dev/null || {
+        rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
+        return 1
+    }
+    mv -f "$_next_tmp" "$NEXT_STATE" 2>/dev/null || {
+        rm -rf "$NEXT_PAYLOAD" "$_next_tmp" 2>/dev/null || true
+        return 1
+    }
+    chmod 0644 "$NEXT_STATE" 2>/dev/null || true
+    return 0
+}
+
+cancel_next_payload() {
+    rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
+    rm -f "$NEXT_STATE" 2>/dev/null || true
 }
 
 write_runtime_state() {
     _font="$1"
-    if [ "$_font" = default ]; then
-        rm -f "$LEGACY_MODE_CONF" "$CONFIG_DIR/font-payload-schema.conf" 2>/dev/null || true
-    else
-        _tmp="${LEGACY_MODE_CONF}.tmp.$$"
-        {
-            printf 'enabled=true\n'
-            printf 'core=physical-safe-v1\n'
-            printf 'font=%s\n' "$_font"
-            printf 'pipeline=atomic-next-boot\n'
-            printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
-        } > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$LEGACY_MODE_CONF" 2>/dev/null || return 1
-        chmod 0600 "$LEGACY_MODE_CONF" 2>/dev/null || true
-        printf 'schema=legacy-physical-safe-v1\n' > "$CONFIG_DIR/font-payload-schema.conf" 2>/dev/null || true
-    fi
-
-    printf '%s\n' "$_font" > "$ACTIVE_FONT_CONF" 2>/dev/null || return 1
+    _tmp_active="${ACTIVE_FONT_CONF}.tmp.$$"
+    printf '%s\n' "$_font" > "$_tmp_active" 2>/dev/null && mv -f "$_tmp_active" "$ACTIVE_FONT_CONF" 2>/dev/null || return 1
     chmod 0644 "$ACTIVE_FONT_CONF" 2>/dev/null || true
     _boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
     {
         printf 'font=%s\n' "$_font"
-        printf 'reason=atomic-next-boot-switch\n'
+        printf 'reason=next-boot-payload-prepared\n'
         printf 'bootId=%s\n' "$_boot_id"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$TEXT_REBOOT_REQUIRED" 2>/dev/null || true
@@ -253,6 +276,7 @@ switch_font() {
     [ -n "$_font" ] || { safe_error '未指定字体'; return 1; }
     progress 4 '正在获取字体切换锁'
     lock_acquire || return 1
+    resolve_previous_state
 
     _source=''
     if [ "$_font" != default ]; then
@@ -265,7 +289,7 @@ switch_font() {
         fi
     fi
 
-    progress 22 '正在复制当前负载到安全暂存区'
+    progress 22 '正在复制当前启动负载到安全暂存区'
     stage_clone_live || { safe_error '无法创建下一启动字体负载'; return 1; }
     progress 34 '正在清理暂存区旧文字映射'
     stage_clear_text_payload || { safe_error '无法准备下一启动字体负载'; return 1; }
@@ -277,7 +301,7 @@ switch_font() {
         progress 48 '正在生成 ROM 核心字体映射'
         type apply_font_by_rom >/dev/null 2>&1 || { safe_error '缺少 ROM 字体映射器'; return 1; }
         if ! apply_font_by_rom "$_source" "$SYSTEM_FONTS_DIR" quick "$_font" >> "$LOG_FILE" 2>&1; then
-            safe_error 'ROM 字体映射失败，当前字体未被改动'
+            safe_error 'ROM 字体映射失败，当前启动字体未被改动'
             return 1
         fi
         progress 66 '正在补齐系统分区同名字体槽位'
@@ -287,19 +311,25 @@ switch_font() {
             stage_hyperos_complete
         fi
         progress 86 '正在校验下一启动字体负载'
-        stage_verify "$_font" || { safe_error '新字体负载校验失败，当前字体未被改动'; return 1; }
+        stage_verify "$_font" || { safe_error '新字体负载校验失败，当前启动字体未被改动'; return 1; }
     fi
 
-    progress 94 '正在原子提交下一启动字体负载'
-    commit_stage || { safe_error '新字体负载提交失败，已保留当前字体'; return 1; }
-    STAGE_PAYLOAD="$MODDIR/.luoshu-payload-stage.committed.$$"
-    progress 98 '正在保存字体状态'
-    write_runtime_state "$_font" || { safe_error '字体负载已提交，但状态保存失败，请完整重启后导出诊断'; return 1; }
+    progress 94 '正在提交下一启动字体负载'
+    prepare_next_payload "$_font" "$PREVIOUS_FONT" "$PREVIOUS_LEGACY" || {
+        safe_error '下一启动字体负载提交失败，当前启动字体未被改动'
+        return 1
+    }
+    progress 98 '正在保存字体选择状态'
+    if ! write_runtime_state "$_font"; then
+        cancel_next_payload
+        safe_error '字体状态保存失败，下一启动负载已取消'
+        return 1
+    fi
 
     printf '%s\n' "$_font" > "$CONFIG_DIR/last_switch_result.conf" 2>/dev/null || true
     date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
     progress 100 '字体已准备完成，完整重启后生效'
-    printf '{"status":"ok","data":{"font":"%s","rebootRequired":true,"core":"physical-safe-v1","pipeline":"atomic-next-boot"}}\n' \
+    printf '{"status":"ok","data":{"font":"%s","rebootRequired":true,"core":"physical-safe-v1","pipeline":"next-boot-stage"}}\n' \
         "$(json_escape "$_font")"
     return 0
 }
