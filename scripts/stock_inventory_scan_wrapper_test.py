@@ -30,7 +30,8 @@ def main() -> int:
         logical = temp / "system/fonts"
         logical.mkdir(parents=True)
         state_root = temp / "state"
-        lower = state_root / "lower/tmp-system"
+        key = f"{logical.parts[1]}-{logical.parts[2]}"
+        lower = state_root / "lower" / key
         lower.mkdir(parents=True)
         old_state = os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT")
         old_mirrors = inventory.MIRROR_PREFIXES
@@ -40,9 +41,6 @@ def main() -> int:
             resolved = stock._safe_pick_actual_root(logical, None, True)
             assert resolved == lower, (resolved, lower)
 
-            for child in lower.iterdir():
-                if child.is_file():
-                    child.unlink()
             lower.rmdir()
             try:
                 stock._safe_pick_actual_root(logical, None, True)
