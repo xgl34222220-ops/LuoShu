@@ -7,7 +7,7 @@ MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
 V4_POST_MOUNT="$MODDIR/post-mount-v4.sh"
-HYPEROS_LEGACY_COMPAT="$MODDIR/common/legacy_v14_4/hyperos_clock_compat.sh"
+HYPEROS_LEGACY_COMPAT="$MODDIR/common/legacy_v14_4/hyperos_full_coverage.sh"
 
 if [ ! -f "$LEGACY_MODE" ]; then
     [ -f "$V4_POST_MOUNT" ] && exec sh "$V4_POST_MOUNT"
@@ -18,11 +18,9 @@ fi
 type luoshu_private_mount_module_view >/dev/null 2>&1 && \
     luoshu_private_mount_module_view "$MODDIR" >/dev/null 2>&1 || true
 
-# KernelSU/APatch arrive here after their OverlayFS stage. Make sure the exact
-# HyperOS clock/status physical aliases exist before exposing the payload.
 [ -f "$HYPEROS_LEGACY_COMPAT" ] && . "$HYPEROS_LEGACY_COMPAT"
-type luoshu_hyperos_clock_payload_ensure >/dev/null 2>&1 && \
-    luoshu_hyperos_clock_payload_ensure >/dev/null 2>&1 || true
+type luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 && \
+    luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 || true
 
 [ -f "$MODDIR/common/mount_self_backend.sh" ] && . "$MODDIR/common/mount_self_backend.sh"
 type luoshu_private_self_mount_ensure >/dev/null 2>&1 || exit 0
