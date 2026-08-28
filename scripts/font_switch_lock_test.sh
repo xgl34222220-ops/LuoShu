@@ -8,11 +8,14 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MODDIR="$TMP/module"
 PUBLIC_DIR="$TMP/public"
 LOCK="$MODDIR/.font_switch.lock"
-mkdir -p "$MODDIR/common" "$MODDIR/config" "$MODDIR/logs" "$PUBLIC_DIR/fonts"
+mkdir -p "$MODDIR/common" "$MODDIR/config" "$MODDIR/logs" "$PUBLIC_DIR/fonts" \
+    "$MODDIR/.luoshu-payload/system/fonts"
 cp "$ROOT/common/font_manager.sh" "$MODDIR/common/font_manager.sh"
 cp "$ROOT/common/legacy_v14_4_switch.sh" "$MODDIR/common/legacy_v14_4_switch.sh"
 cp "$ROOT/common/font_switch_lock.sh" "$MODDIR/common/font_switch_lock.sh"
 ln -s "$ROOT/common/legacy_v14_4" "$MODDIR/common/legacy_v14_4"
+printf 'live-payload-must-not-change\n' > "$MODDIR/.luoshu-payload/live-marker"
+printf 'BeforeSwitch\n' > "$MODDIR/config/active_font.conf"
 
 MODULE_DIR="$MODDIR"
 . "$ROOT/common/font_switch_lock.sh"
@@ -88,7 +91,7 @@ test "$(wc -l < "$RACE_WINNERS")" -eq 1
 test ! -e "$RACE_LOCK"
 
 # Integration: a live lock must stop the actual App-facing switch router before it
-# touches payload state. This proves the v14.4 backend did not drop v4 concurrency safety.
+# touches either the current-boot payload or the next-boot payload.
 luoshu_font_lock_acquire "$LOCK" "$$"
 set +e
 MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
@@ -98,28 +101,40 @@ set -e
 test "$busy_rc" -ne 0
 grep -q '字体正在切换中' "$TMP/busy.out"
 test -d "$LOCK"
+test "$(cat "$MODDIR/.luoshu-payload/live-marker")" = 'live-payload-must-not-change'
+test ! -e "$MODDIR/.luoshu-payload-next"
 luoshu_font_lock_release "$LOCK" "$$"
 test ! -e "$LOCK"
 
-# Dead legacy locks are reaped by the same real entrypoint; a default switch then
-# completes through the physical-file backend and releases its newly acquired lock.
+# Dead locks are reaped by the same real entrypoint. A default switch now completes
+# through the safe next-boot staging backend: current-boot payload stays byte-for-byte
+# available while the replacement is queued for post-fs-data activation.
 mkdir "$LOCK"
 printf '%s\n' 999999 > "$LOCK/pid"
 MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
     sh "$MODDIR/common/font_manager.sh" action switch default > "$TMP/stale.out" 2>&1
 grep -q '"status":"ok"' "$TMP/stale.out"
-grep -q '"legacyCore":"v14.4.0"' "$TMP/stale.out"
-grep -q '"pipeline":"physical-file-map"' "$TMP/stale.out"
+grep -q '"core":"physical-safe-v1"' "$TMP/stale.out"
+grep -q '"pipeline":"next-boot-stage"' "$TMP/stale.out"
 test ! -e "$LOCK"
 test "$(cat "$MODDIR/config/active_font.conf")" = default
+test "$(cat "$MODDIR/.luoshu-payload/live-marker")" = 'live-payload-must-not-change'
+test -d "$MODDIR/.luoshu-payload-next"
+grep -q '^state=prepared$' "$MODDIR/config/font-payload-next.conf"
+grep -q '^font=default$' "$MODDIR/config/font-payload-next.conf"
+grep -q '^previousFont=BeforeSwitch$' "$MODDIR/config/font-payload-next.conf"
 
-# Keep the safety layer independent from the generation engine: the backend may
-# import the lock helper, but it must never pull the v4 94% pipeline back in.
-grep -q 'font_switch_lock.sh' "$ROOT/common/legacy_v14_4_switch.sh"
-grep -q 'legacy_lock_acquire' "$ROOT/common/legacy_v14_4_switch.sh"
+# Keep the safety layer independent from the generation engine. The active backend
+# may import the lock helper, but it must never pull the v4 94% pipeline back in or
+# mutate the live payload from the foreground switch path.
+SAFE_BACKEND="$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q 'font_switch_lock.sh' "$SAFE_BACKEND"
+grep -q 'lock_acquire' "$SAFE_BACKEND"
+grep -q 'NEXT_PAYLOAD=.*\.luoshu-payload-next' "$SAFE_BACKEND"
+! grep -q 'mv "$LIVE_PAYLOAD"' "$SAFE_BACKEND"
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|device_font_payload_build' \
-    "$ROOT/common/legacy_v14_4_switch.sh"
+    "$SAFE_BACKEND"
 sh -n "$ROOT/common/font_switch_lock.sh"
-sh -n "$ROOT/common/legacy_v14_4_switch.sh"
+sh -n "$SAFE_BACKEND"
 
 echo 'font_switch_lock_test: PASS'
