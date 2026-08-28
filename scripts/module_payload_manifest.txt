@@ -83,6 +83,7 @@ common/mix_weight_mode.sh
 common/module_status.sh
 common/module_update_hotfix_v4.sh
 common/module_update_state.sh
+common/next_boot_payload.sh
 common/private_payload.sh
 common/private_mount_policy.sh
 common/mount_compat.sh
