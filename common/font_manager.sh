@@ -26,6 +26,18 @@ json_escape_router() {
 }
 
 if [ "${1:-}" = action ] && [ "${2:-}" = switch ]; then
+    # The legacy composite runtime creates a temporary family (LuoShuAutoMix etc.)
+    # only as a source container. It must never become the persisted active font.
+    # Keep the user-visible/runtime identity as `mix`, while the safe switch still
+    # resolves and validates the temporary source family normally.
+    if [ -n "${LUOSHU_REAL_MODDIR:-}" ]; then
+        case "$MODDIR" in
+            */.legacy-v14-runtime)
+                LUOSHU_SWITCH_ACTIVE_LABEL="${LUOSHU_SWITCH_ACTIVE_LABEL:-mix}"
+                export LUOSHU_SWITCH_ACTIVE_LABEL
+                ;;
+        esac
+    fi
     if [ -f "$SAFE_SWITCH" ]; then
         exec sh "$SAFE_SWITCH" "$@"
     fi
