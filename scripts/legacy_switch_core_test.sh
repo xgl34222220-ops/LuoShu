@@ -2,7 +2,7 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ROUTER="$ROOT/common/font_manager.sh"
-SAFE_BACKEND="$ROOT/common/font_switch_safe.sh"
+SAFE_BACKEND="$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 LEGACY_BACKEND="$ROOT/common/legacy_v14_4_switch.sh"
 ROM="$ROOT/common/legacy_v14_4/rom_adapters.sh"
 HYPEROS_COMPAT="$ROOT/common/legacy_v14_4/hyperos_full_coverage.sh"
@@ -57,8 +57,6 @@ grep -q 'hyperos_full_coverage.sh' "$POSTMOUNT"
 grep -q 'luoshu_hyperos_full_payload_ensure' "$POSTMOUNT"
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' "$HYPEROS_COMPAT"
 
-# Functional HyperOS fixture: discover physical aliases outside system/fonts,
-# including names that were absent from the old short whitelist and TTC slots.
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-safe-switch)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 mkdir -p \
@@ -98,11 +96,9 @@ for generated in \
     cmp -s "$TMP/module/.luoshu-payload/system/fonts/MiSansVF.ttf" "$generated"
 done
 
-# 94% v4 pipeline components are forbidden from both physical apply paths.
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' \
     "$SAFE_BACKEND" "$LEGACY_BACKEND"
 
-# Composite actions remain on the isolated pre-reset chain.
 grep -q 'legacy_v1.*4_4/mix_router.sh' "$MIX_ROUTER"
 grep -q 'exec sh "$LEGACY_V14_MIX" "$@"' "$MIX_ROUTER"
 grep -q 'v142_weighted_mix.sh' "$LEGACY_MIX_BRIDGE"
@@ -121,7 +117,6 @@ grep -q 'font_mix_engine.sh' "$LEGACY_MIX_ROUTER"
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' \
     "$LEGACY_MIX_ROUTER" "$LEGACY_MIX_BRIDGE" "$LEGACY_WEIGHTED" "$LEGACY_AUTO" "$LEGACY_MIX_ENGINE"
 
-# Legacy boot stages never rebuild the selected payload after it is committed.
 for file in "$SERVICE" "$POSTFS" "$POSTMOUNT"; do
     grep -q 'font_runtime_legacy_v14_4.conf' "$file"
     sh -n "$file"
