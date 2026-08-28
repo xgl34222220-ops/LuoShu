@@ -74,6 +74,7 @@ common/font_safety.sh
 common/font_validation_cache.sh
 common/font_switch_task.sh
 common/hyperos_global.sh
+common/hyperos_stage_complete.sh
 common/legacy_v14_4_switch.sh
 common/legacy_v14_4
 common/luoshu_cli.sh
