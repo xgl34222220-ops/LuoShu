@@ -1,0 +1,29 @@
+name: Debug real runtime path hotfix
+on:
+  push:
+    branches: [fix/v4-real-runtime-path]
+jobs:
+  runtime-path:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: |
+          sh -n common/legacy_v14_4/font_switch_safe.sh
+          sh -n common/legacy_v14_4/mix_router.sh
+          sh -n common/font_manager.sh
+          sh -n common/hyperos_stage_complete.sh
+      - name: Structural runtime-path contracts
+        run: |
+          grep -q 'LUOSHU_REAL_MODDIR' common/legacy_v14_4/font_switch_safe.sh
+          grep -q 'LUOSHU_SWITCH_ACTIVE_LABEL' common/legacy_v14_4/font_switch_safe.sh
+          grep -q 'font=mix' common/legacy_v14_4/mix_router.sh
+          grep -q '\.luoshu-mix-stage' common/legacy_v14_4/mix_router.sh
+          ! grep -q 'PAYLOAD="$REALMOD/.luoshu-payload"' common/legacy_v14_4/mix_router.sh
+          grep -q 'hyperos_stage_complete.sh' common/legacy_v14_4/font_switch_safe.sh
+      - name: Existing legacy switch regression
+        run: sh scripts/legacy_switch_core_test.sh
+      - name: Existing composite handoff regression
+        run: sh scripts/nested_mix_task_handoff_test.sh
+      - name: HyperOS mapping regression
+        run: sh scripts/hyperos_global_mapping_test.sh
