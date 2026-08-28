@@ -16,16 +16,12 @@ SERVICE="$ROOT/service.sh"
 POSTFS="$ROOT/post-fs-data.sh"
 POSTMOUNT="$ROOT/post-mount.sh"
 
-# Current App-facing manager stays in place for inventory etc, but final apply must
-# prefer the safe next-boot staging core. The old v14.4 switch remains fallback only.
 grep -q 'font_manager_v4.sh' "$ROUTER"
 grep -q 'font_switch_safe.sh' "$ROUTER"
 grep -q 'legacy_v14_4_switch.sh' "$ROUTER"
 grep -q 'exec sh "$SAFE_SWITCH" "$@"' "$ROUTER"
 grep -q 'exec sh "$CURRENT_MANAGER" "$@"' "$ROUTER"
 
-# The safe backend must never clear the live payload. It clones to staging, builds
-# there, then swaps paths while retaining the old mounted source until next boot.
 grep -q 'STAGE_PAYLOAD=.*\.luoshu-payload-stage' "$SAFE_BACKEND"
 grep -q 'RETIRED_ROOT=.*\.luoshu-retired' "$SAFE_BACKEND"
 grep -q 'cp -al "$LIVE_PAYLOAD/\." "$STAGE_PAYLOAD/"' "$SAFE_BACKEND"
@@ -36,7 +32,6 @@ grep -q 'apply_font_by_rom' "$SAFE_BACKEND"
 grep -q 'atomic-next-boot' "$SAFE_BACKEND"
 grep -q 'LUOSHU_SWITCH_PROGRESS_FILE' "$SAFE_BACKEND"
 
-# Old compatibility backend remains available as a fallback/reference.
 grep -q 'apply_font_by_rom' "$LEGACY_BACKEND"
 grep -q '\.luoshu-payload' "$LEGACY_BACKEND"
 grep -q 'physical-file-map' "$LEGACY_BACKEND"
@@ -44,13 +39,13 @@ grep -q 'MiSansLatinVF.ttf' "$ROM"
 grep -q 'GoogleSans' "$ROM"
 grep -q 'Roboto' "$ROM"
 
-# HyperOS 3 coverage is dynamic across all real font partitions and accepts newly
-# introduced upright MiSans/XiaomiSans/MiLanPro/Mitype slots including TTC files.
+# HyperOS 3 coverage is dynamic across real partitions, but only for safe upright
+# TTF/OTF slots. TTC containers remain stock until their face-index layout is proven.
 test -f "$HYPEROS_COMPAT"
-grep -q 'MiSans\*\.ttc' "$HYPEROS_COMPAT"
 grep -q 'XiaomiSans\*\.ttf' "$HYPEROS_COMPAT"
 grep -q 'MiLanPro\*\.ttf' "$HYPEROS_COMPAT"
 grep -q 'Mitype\*\.ttf' "$HYPEROS_COMPAT"
+! grep -q 'MiSans\*\.ttc' "$HYPEROS_COMPAT"
 grep -q 'hyperos_full_coverage.sh' "$POSTFS"
 grep -q 'luoshu_hyperos_full_payload_ensure' "$POSTFS"
 grep -q 'hyperos_full_coverage.sh' "$POSTMOUNT"
@@ -70,7 +65,8 @@ printf 'selected-font-anchor\n' > "$TMP/module/.luoshu-payload/system/fonts/MiSa
 : > "$TMP/stock/product/NotoSansUI-Medium.ttf"
 : > "$TMP/stock/vendor/MiLanProVF.ttf"
 : > "$TMP/stock/system_ext/MiSansGlobalVF.ttf"
-: > "$TMP/stock/product/XiaomiSansUI.ttc"
+: > "$TMP/stock/product/XiaomiSansUI-Regular.ttf"
+: > "$TMP/stock/product/XiaomiSansCollection.ttc"
 IS_HYPEROS=true \
 MODDIR="$TMP/module" \
 LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT="$TMP/module/.luoshu-payload" \
@@ -92,9 +88,10 @@ for generated in \
     "$TMP/module/.luoshu-payload/product/fonts/NotoSansUI-Medium.ttf" \
     "$TMP/module/.luoshu-payload/vendor/fonts/MiLanProVF.ttf" \
     "$TMP/module/.luoshu-payload/system_ext/fonts/MiSansGlobalVF.ttf" \
-    "$TMP/module/.luoshu-payload/product/fonts/XiaomiSansUI.ttc"; do
+    "$TMP/module/.luoshu-payload/product/fonts/XiaomiSansUI-Regular.ttf"; do
     cmp -s "$TMP/module/.luoshu-payload/system/fonts/MiSansVF.ttf" "$generated"
 done
+test ! -e "$TMP/module/.luoshu-payload/product/fonts/XiaomiSansCollection.ttc"
 
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' \
     "$SAFE_BACKEND" "$LEGACY_BACKEND"
