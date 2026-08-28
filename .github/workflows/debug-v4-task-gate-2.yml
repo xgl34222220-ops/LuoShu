@@ -1,0 +1,16 @@
+name: Debug v4 font switch task gate 2
+
+on:
+  push:
+    branches: [ debug/v4-task-gate-2 ]
+
+jobs:
+  task-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trace font switch task regression
+        shell: bash
+        run: |
+          set -o pipefail
+          sh -x scripts/font_switch_task_test.sh
