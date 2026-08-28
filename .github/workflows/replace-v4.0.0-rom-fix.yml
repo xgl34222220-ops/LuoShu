@@ -39,3 +39,5 @@ jobs:
           fi
 
           echo "v4.0.0 release/tag removed; next main release-notes commit may publish the verified replacement."
+
+# Retriggered after PR #210 merged: ColorOS next-boot payload switching and HyperOS coverage fixes.
