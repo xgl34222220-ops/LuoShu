@@ -51,6 +51,7 @@ common/font_instance.py
 common/font_inventory.py
 common/font_inventory_scan.py
 common/font_inventory_scan_v3.py
+common/stock_inventory_scan.py
 common/font_library_cache.sh
 common/font_manager.sh
 common/font_manager_v4.sh
@@ -74,6 +75,7 @@ common/font_safety.sh
 common/font_validation_cache.sh
 common/font_switch_task.sh
 common/hyperos_global.sh
+common/hyperos_stage_complete.sh
 common/legacy_v14_4_switch.sh
 common/legacy_v14_4
 common/luoshu_cli.sh

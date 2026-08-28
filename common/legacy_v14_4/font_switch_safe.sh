@@ -5,12 +5,20 @@
 # that tree before LuoShu mounts fonts on the following complete boot.
 set +e
 
-MODDIR="${MODDIR:-}"
-if [ -z "$MODDIR" ]; then
-    if [ -f "${0%/*}/../../module.prop" ]; then
-        MODDIR="$(CDPATH= cd -- "${0%/*}/../.." 2>/dev/null && pwd)"
-    else
-        MODDIR="/data/adb/modules/LuoShu"
+# Composite compatibility workers execute inside .legacy-v14-runtime and pass that
+# directory as MODDIR. Their actual module is exported as LUOSHU_REAL_MODDIR. Always
+# commit next-boot payload/state to the real module when that trusted hint is present.
+_REALMOD_HINT="${LUOSHU_REAL_MODDIR:-}"
+if [ -n "$_REALMOD_HINT" ] && [ -f "$_REALMOD_HINT/module.prop" ]; then
+    MODDIR="$_REALMOD_HINT"
+else
+    MODDIR="${MODDIR:-}"
+    if [ -z "$MODDIR" ]; then
+        if [ -f "${0%/*}/../../module.prop" ]; then
+            MODDIR="$(CDPATH= cd -- "${0%/*}/../.." 2>/dev/null && pwd)"
+        else
+            MODDIR="/data/adb/modules/LuoShu"
+        fi
     fi
 fi
 MODULE_DIR="$MODDIR"
@@ -181,6 +189,17 @@ mirror_existing_targets() {
 
 stage_hyperos_complete() {
     [ "${IS_HYPEROS:-false}" = true ] || return 0
+
+    # Use the current HyperOS target inventory to complete the isolated staged tree.
+    # This covers current MiSans/Roboto/GoogleSans/NotoSans/Mitype/clock targets across
+    # real partitions without ever touching the live payload used by this boot.
+    _stage_bridge="$MODDIR/common/hyperos_stage_complete.sh"
+    if [ -f "$_stage_bridge" ]; then
+        LUOSHU_REAL_MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" \
+            sh "$_stage_bridge" "$STAGE_PAYLOAD" >> "$LOG_FILE" 2>&1 && return 0
+    fi
+
+    # Compatibility fallback for packages that do not yet carry the stage bridge.
     type luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 || return 0
     LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT="$STAGE_PAYLOAD"
     export LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT
@@ -196,6 +215,7 @@ stage_verify() {
     case "$_count" in ''|*[!0-9]*) _count=0 ;; esac
     [ "$_count" -gt 0 ] || return 1
     [ -s "$STAGE_PAYLOAD/system/fonts/.luoshu-font-store/regular.font" ] || \
+        [ -s "$STAGE_PAYLOAD/system/fonts/.luoshu-font-store/mix-composite.font" ] || \
         find "$STAGE_PAYLOAD/system/fonts" -maxdepth 1 -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) \
             -print -quit 2>/dev/null | grep -q .
 }
@@ -274,6 +294,9 @@ write_runtime_state() {
 switch_font() {
     _font="$1"
     [ -n "$_font" ] || { safe_error '未指定字体'; return 1; }
+    _active_label="${LUOSHU_SWITCH_ACTIVE_LABEL:-$_font}"
+    [ -n "$_active_label" ] || _active_label="$_font"
+
     progress 4 '正在获取字体切换锁'
     lock_acquire || return 1
     resolve_previous_state
@@ -315,22 +338,22 @@ switch_font() {
     fi
 
     progress 94 '正在提交下一启动字体负载'
-    prepare_next_payload "$_font" "$PREVIOUS_FONT" "$PREVIOUS_LEGACY" || {
+    prepare_next_payload "$_active_label" "$PREVIOUS_FONT" "$PREVIOUS_LEGACY" || {
         safe_error '下一启动字体负载提交失败，当前启动字体未被改动'
         return 1
     }
     progress 98 '正在保存字体选择状态'
-    if ! write_runtime_state "$_font"; then
+    if ! write_runtime_state "$_active_label"; then
         cancel_next_payload
         safe_error '字体状态保存失败，下一启动负载已取消'
         return 1
     fi
 
-    printf '%s\n' "$_font" > "$CONFIG_DIR/last_switch_result.conf" 2>/dev/null || true
+    printf '%s\n' "$_active_label" > "$CONFIG_DIR/last_switch_result.conf" 2>/dev/null || true
     date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
     progress 100 '字体已准备完成，完整重启后生效'
     printf '{"status":"ok","data":{"font":"%s","rebootRequired":true,"core":"physical-safe-v1","pipeline":"next-boot-stage"}}\n' \
-        "$(json_escape "$_font")"
+        "$(json_escape "$_active_label")"
     return 0
 }
 
