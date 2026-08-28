@@ -16,6 +16,7 @@ LEGACY_MIX_ENGINE="$ROOT/common/legacy_v14_4/font_mix_engine.sh"
 SERVICE="$ROOT/service.sh"
 POSTFS="$ROOT/post-fs-data.sh"
 POSTMOUNT="$ROOT/post-mount.sh"
+MOUNT_COMPAT="$ROOT/common/mount_compat.sh"
 
 grep -q 'font_manager_v4.sh' "$ROUTER"
 grep -q 'font_switch_safe.sh' "$ROUTER"
@@ -150,6 +151,17 @@ grep -q 'font_mix_engine.sh' "$LEGACY_MIX_ROUTER"
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' \
     "$LEGACY_MIX_ROUTER" "$LEGACY_MIX_BRIDGE" "$LEGACY_WEIGHTED" "$LEGACY_AUTO" "$LEGACY_MIX_ENGINE"
 
+# The production self-mount entry point is defined by mount_compat.sh, not by
+# mount_self_backend.sh. Legacy/physical boot routers MUST load the full runtime
+# before they attempt to mount; otherwise the old `type ... || true` pattern can
+# silently skip every real font mount while still reporting boot completion.
+test -f "$MOUNT_COMPAT"
+grep -q 'common/mount_compat.sh' "$POSTFS"
+grep -q 'common/mount_compat.sh' "$POSTMOUNT"
+grep -q 'runtime-loader-missing' "$POSTFS"
+grep -q 'runtime-loader-missing' "$POSTMOUNT"
+MODDIR="$ROOT" MODULE_DIR="$ROOT" sh -c '. "$1"; type luoshu_private_self_mount_ensure >/dev/null 2>&1' sh "$MOUNT_COMPAT"
+
 for file in "$SERVICE" "$POSTFS" "$POSTMOUNT"; do
     grep -q 'font_runtime_legacy_v14_4.conf' "$file"
     sh -n "$file"
@@ -158,8 +170,6 @@ grep -q 'service_v4.sh' "$SERVICE"
 grep -q 'post-fs-data-v4.sh' "$POSTFS"
 grep -q 'post-mount-v4.sh' "$POSTMOUNT"
 ! grep -q 'device_font_template.sh' "$SERVICE"
-! grep -q 'font_config_runtime.sh' "$POSTFS"
-! grep -q 'font_config_runtime.sh' "$POSTMOUNT"
 
 sh -n "$ROUTER"
 sh -n "$SAFE_BACKEND"
@@ -178,4 +188,4 @@ sh -n "$ROOT/service_v4.sh"
 sh -n "$ROOT/post-fs-data-v4.sh"
 sh -n "$ROOT/post-mount-v4.sh"
 
-echo 'foreground switch never mutates live payload; early boot activates next payload; HyperOS physical UI coverage remains guarded.'
+echo 'foreground switch never mutates live payload; early boot activates next payload; real self-mount runtime is loaded before legacy boot mount; HyperOS physical UI coverage remains guarded.'
