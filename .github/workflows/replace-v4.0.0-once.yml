@@ -22,7 +22,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: v4.0.0
-      EXPECTED_OLD_TAG_SHA: 15639e2c974016da7635e6786aef41723f516cf6
+      EXPECTED_OLD_TAG_SHA: eca9f810ac36bf6a5fa352718b971a112bd0cea8
     steps:
       - uses: actions/checkout@v4
         with:
@@ -72,6 +72,10 @@ jobs:
           test -s common/stock_inventory_scan.py
           grep -q 'LUOSHU_REAL_MODDIR' common/legacy_v14_4/font_switch_safe.sh
           grep -q '\.luoshu-mix-stage' common/legacy_v14_4/mix_router.sh
+          grep -q 'mix_clone_source' common/legacy_v14_4/mix_router.sh
+          grep -q 'clone_mix_tree' common/legacy_v14_4/mix_router.sh
+          grep -q 'cp -R "$_source/\." "$MIX_STAGE/"' common/legacy_v14_4/mix_router.sh
+          grep -q 'cp -rf "$_source/\." "$MIX_STAGE/"' common/legacy_v14_4/mix_router.sh
           grep -q 'hyperos_stage_complete.sh' common/legacy_v14_4/font_switch_safe.sh
           grep -q '^    stock_scan)' common/app_bridge.sh
           grep -qx 'common/stock_inventory_scan.py' scripts/module_payload_manifest.txt
