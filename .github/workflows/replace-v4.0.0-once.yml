@@ -22,7 +22,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: v4.0.0
-      EXPECTED_OLD_TAG_SHA: 0c004c4b8ef6fdd8a772d56e0eeb90848a77f922
+      EXPECTED_OLD_TAG_SHA: 15639e2c974016da7635e6786aef41723f516cf6
     steps:
       - uses: actions/checkout@v4
         with:
