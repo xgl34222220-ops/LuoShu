@@ -41,14 +41,72 @@ force_link() {
     fi
 }
 
+mix_clone_source() {
+    if [ -d "$LIVE_PAYLOAD" ]; then
+        printf '%s\n' "$LIVE_PAYLOAD"
+        return 0
+    fi
+
+    # Match the normal safe-switch recovery path: if early boot retired the live
+    # payload and was interrupted before completing activation, recover only from
+    # the retired tree recorded by this module.
+    _activated="$REALMOD/config/font-payload-activated.conf"
+    _retired=$(read_value "$_activated" retired)
+    case "$_retired" in
+        "$REALMOD"/.luoshu-retired/*)
+            [ -d "$_retired" ] && { printf '%s\n' "$_retired"; return 0; }
+            ;;
+    esac
+    return 1
+}
+
+clone_mix_tree() {
+    _source="$1"
+    rm -rf "$MIX_STAGE" 2>/dev/null || true
+    mkdir -p "$MIX_STAGE" 2>/dev/null || return 1
+
+    # Activated payloads can be active mount sources. Some kernels/root managers
+    # reject hard-link or metadata-preserving copies after first activation, which
+    # used to make the next composite switch fail immediately. Retry each method
+    # from a completely clean stage and finally fall back to plain recursive copy.
+    if cp -al "$_source/." "$MIX_STAGE/" 2>/dev/null; then
+        return 0
+    fi
+
+    rm -rf "$MIX_STAGE" 2>/dev/null || true
+    mkdir -p "$MIX_STAGE" 2>/dev/null || return 1
+    if cp -R "$_source/." "$MIX_STAGE/" 2>/dev/null; then
+        find "$MIX_STAGE" -type d -exec chmod 0755 {} \; 2>/dev/null || true
+        find "$MIX_STAGE" -type f -exec chmod 0644 {} \; 2>/dev/null || true
+        return 0
+    fi
+
+    rm -rf "$MIX_STAGE" 2>/dev/null || true
+    mkdir -p "$MIX_STAGE" 2>/dev/null || return 1
+    if cp -rf "$_source/." "$MIX_STAGE/" 2>/dev/null; then
+        find "$MIX_STAGE" -type d -exec chmod 0755 {} \; 2>/dev/null || true
+        find "$MIX_STAGE" -type f -exec chmod 0644 {} \; 2>/dev/null || true
+        return 0
+    fi
+
+    rm -rf "$MIX_STAGE" 2>/dev/null || true
+    return 1
+}
+
 prepare_mix_stage() {
     mkdir -p "$REALMOD/config" "$REALMOD/cache" "$REALMOD/logs" 2>/dev/null || return 1
     rm -rf "$MIX_STAGE" 2>/dev/null || true
     mkdir -p "$MIX_STAGE" 2>/dev/null || return 1
     if [ -d "$LIVE_PAYLOAD" ]; then
-        cp -al "$LIVE_PAYLOAD/." "$MIX_STAGE/" 2>/dev/null || \
-            cp -af "$LIVE_PAYLOAD/." "$MIX_STAGE/" 2>/dev/null || \
-            cp -rfp "$LIVE_PAYLOAD/." "$MIX_STAGE/" 2>/dev/null || return 1
+        _clone_source="$LIVE_PAYLOAD"
+    else
+        _clone_source=$(mix_clone_source 2>/dev/null || true)
+    fi
+    if [ -n "$_clone_source" ] && ! clone_mix_tree "$_clone_source"; then
+        printf '[%s] [MIX] stage clone failed source=%s live=%s next=%s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" \
+            "$_clone_source" "$LIVE_PAYLOAD" "$NEXT_PAYLOAD" >> "$LOG_FILE" 2>/dev/null || true
+        return 1
     fi
 
     _previous=$(head -n1 "$ACTIVE_CONF" 2>/dev/null | tr -d '\r\n')
