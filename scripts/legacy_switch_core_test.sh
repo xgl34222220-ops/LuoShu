@@ -25,10 +25,17 @@ grep -q 'exec sh "$SAFE_SWITCH" "$@"' "$ROUTER"
 grep -q 'exec sh "$CURRENT_MANAGER" "$@"' "$ROUTER"
 
 # Foreground switching may read/clone live payload but must never rename, delete,
-# or rewrite it. It can only move the isolated staging tree into -next.
+# or rewrite it. It can only move the isolated staging tree into -next. Repeated
+# switches must be able to clone an already activated payload even when hard-link
+# or metadata-preserving copies are rejected by the current root/kernel setup.
 grep -q 'STAGE_PAYLOAD=.*\.luoshu-payload-stage' "$SAFE_BACKEND"
 grep -q 'NEXT_PAYLOAD=.*\.luoshu-payload-next' "$SAFE_BACKEND"
-grep -q 'cp -al "$LIVE_PAYLOAD/\." "$STAGE_PAYLOAD/"' "$SAFE_BACKEND"
+grep -q 'payload_clone_source' "$SAFE_BACKEND"
+grep -q 'cleanup_stale_stages' "$SAFE_BACKEND"
+grep -q 'cp -al "$_clone_source/\." "$STAGE_PAYLOAD/"' "$SAFE_BACKEND"
+grep -q 'cp -R "$_clone_source/\." "$STAGE_PAYLOAD/"' "$SAFE_BACKEND"
+grep -q 'cp -rf "$_clone_source/\." "$STAGE_PAYLOAD/"' "$SAFE_BACKEND"
+grep -q '\.luoshu-retired/\*' "$SAFE_BACKEND"
 grep -q 'mv "$STAGE_PAYLOAD" "$NEXT_PAYLOAD"' "$SAFE_BACKEND"
 ! grep -q 'mv "$LIVE_PAYLOAD"' "$SAFE_BACKEND"
 ! grep -q 'rm -rf "$LIVE_PAYLOAD"' "$SAFE_BACKEND"
@@ -188,4 +195,4 @@ sh -n "$ROOT/service_v4.sh"
 sh -n "$ROOT/post-fs-data-v4.sh"
 sh -n "$ROOT/post-mount-v4.sh"
 
-echo 'foreground switch never mutates live payload; early boot activates next payload; real self-mount runtime is loaded before legacy boot mount; HyperOS physical UI coverage remains guarded.'
+echo 'foreground switch supports repeat payload staging without mutating live payload; early boot activates next payload; real self-mount runtime is loaded before legacy boot mount; HyperOS physical UI coverage remains guarded.'
