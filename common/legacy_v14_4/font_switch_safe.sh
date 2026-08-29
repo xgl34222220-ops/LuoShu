@@ -100,6 +100,14 @@ cleanup_stage() {
     rm -rf "$STAGE_PAYLOAD" 2>/dev/null || true
 }
 
+cleanup_stale_stages() {
+    for _stale_stage in "$MODDIR"/.luoshu-payload-stage.*; do
+        [ -e "$_stale_stage" ] || continue
+        [ "$_stale_stage" = "$STAGE_PAYLOAD" ] && continue
+        rm -rf "$_stale_stage" 2>/dev/null || true
+    done
+}
+
 trap 'cleanup_stage; lock_cleanup' EXIT
 trap 'cleanup_stage; lock_cleanup; exit 129' HUP
 trap 'cleanup_stage; lock_cleanup; exit 130' INT
@@ -140,13 +148,69 @@ validate_global() {
     return 1
 }
 
-stage_clone_live() {
-    [ -d "$LIVE_PAYLOAD" ] || { safe_error '私有字体负载不存在，请重新刷入当前洛书版本'; return 1; }
+payload_clone_source() {
+    if [ -d "$LIVE_PAYLOAD" ]; then
+        printf '%s\n' "$LIVE_PAYLOAD"
+        return 0
+    fi
+
+    # If an early-boot activation was interrupted after retiring the previous tree,
+    # recover from the activation record instead of permanently blocking future
+    # switches. Only trust retired paths owned by this module.
+    _activated="$CONFIG_DIR/font-payload-activated.conf"
+    _retired=$(read_state_value "$_activated" retired)
+    case "$_retired" in
+        "$MODDIR"/.luoshu-retired/*)
+            [ -d "$_retired" ] && { printf '%s\n' "$_retired"; return 0; }
+            ;;
+    esac
+    return 1
+}
+
+clone_payload_tree() {
+    _clone_source="$1"
     cleanup_stage
     mkdir -p "$STAGE_PAYLOAD" 2>/dev/null || return 1
-    cp -al "$LIVE_PAYLOAD/." "$STAGE_PAYLOAD/" 2>/dev/null || \
-        cp -af "$LIVE_PAYLOAD/." "$STAGE_PAYLOAD/" 2>/dev/null || \
-        cp -rfp "$LIVE_PAYLOAD/." "$STAGE_PAYLOAD/" 2>/dev/null || return 1
+
+    # Hard-link cloning is fastest on the normal /data/adb path, but after a payload
+    # has been activated and used as a mount source some kernels/root managers reject
+    # link or metadata-preserving copies. Retry from a clean stage with a plain
+    # recursive copy so a successful first switch never makes the second one unusable.
+    if cp -al "$_clone_source/." "$STAGE_PAYLOAD/" 2>/dev/null; then
+        return 0
+    fi
+
+    cleanup_stage
+    mkdir -p "$STAGE_PAYLOAD" 2>/dev/null || return 1
+    if cp -R "$_clone_source/." "$STAGE_PAYLOAD/" 2>/dev/null; then
+        find "$STAGE_PAYLOAD" -type d -exec chmod 0755 {} \; 2>/dev/null || true
+        find "$STAGE_PAYLOAD" -type f -exec chmod 0644 {} \; 2>/dev/null || true
+        return 0
+    fi
+
+    cleanup_stage
+    mkdir -p "$STAGE_PAYLOAD" 2>/dev/null || return 1
+    if cp -rf "$_clone_source/." "$STAGE_PAYLOAD/" 2>/dev/null; then
+        find "$STAGE_PAYLOAD" -type d -exec chmod 0755 {} \; 2>/dev/null || true
+        find "$STAGE_PAYLOAD" -type f -exec chmod 0644 {} \; 2>/dev/null || true
+        return 0
+    fi
+
+    cleanup_stage
+    return 1
+}
+
+stage_clone_live() {
+    _clone_source=$(payload_clone_source) || {
+        safe_error '当前启动字体负载不可读取，请重新刷入当前洛书版本'
+        return 1
+    }
+    if ! clone_payload_tree "$_clone_source"; then
+        printf '[%s] [SAFE-SWITCH] clone failed source=%s live=%s next=%s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" \
+            "$_clone_source" "$LIVE_PAYLOAD" "$NEXT_PAYLOAD" >> "$LOG_FILE" 2>/dev/null || true
+        return 1
+    fi
     return 0
 }
 
@@ -299,6 +363,7 @@ switch_font() {
 
     progress 4 '正在获取字体切换锁'
     lock_acquire || return 1
+    cleanup_stale_stages
     resolve_previous_state
 
     _source=''
