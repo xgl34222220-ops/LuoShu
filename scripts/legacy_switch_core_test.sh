@@ -155,6 +155,16 @@ grep -q '不裁剪 ROM 字体槽' "$LEGACY_MIX_ENGINE"
 grep -q '\.legacy-v14-runtime' "$LEGACY_MIX_ROUTER"
 grep -q '\.luoshu-payload' "$LEGACY_MIX_ROUTER"
 grep -q 'font_mix_engine.sh' "$LEGACY_MIX_ROUTER"
+# Composite staging must have the same repeat-switch fallback as normal font
+# staging. A live payload that is already an active mount source must not make the
+# second composite attempt fail just because hard-link/preserve copy is rejected.
+grep -q 'mix_clone_source' "$LEGACY_MIX_ROUTER"
+grep -q 'clone_mix_tree' "$LEGACY_MIX_ROUTER"
+grep -q 'cp -al "$_source/\." "$MIX_STAGE/"' "$LEGACY_MIX_ROUTER"
+grep -q 'cp -R "$_source/\." "$MIX_STAGE/"' "$LEGACY_MIX_ROUTER"
+grep -q 'cp -rf "$_source/\." "$MIX_STAGE/"' "$LEGACY_MIX_ROUTER"
+grep -q '\.luoshu-retired/\*' "$LEGACY_MIX_ROUTER"
+! grep -q 'cp -af "$LIVE_PAYLOAD/\." "$MIX_STAGE/"' "$LEGACY_MIX_ROUTER"
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' \
     "$LEGACY_MIX_ROUTER" "$LEGACY_MIX_BRIDGE" "$LEGACY_WEIGHTED" "$LEGACY_AUTO" "$LEGACY_MIX_ENGINE"
 
@@ -195,4 +205,4 @@ sh -n "$ROOT/service_v4.sh"
 sh -n "$ROOT/post-fs-data-v4.sh"
 sh -n "$ROOT/post-mount-v4.sh"
 
-echo 'foreground switch supports repeat payload staging without mutating live payload; early boot activates next payload; real self-mount runtime is loaded before legacy boot mount; HyperOS physical UI coverage remains guarded.'
+echo 'foreground switch and composite staging both support repeat payload cloning without mutating live payload; early boot activates next payload; real self-mount runtime is loaded before legacy boot mount; HyperOS physical UI coverage remains guarded.'
