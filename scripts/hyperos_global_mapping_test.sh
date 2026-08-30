@@ -98,6 +98,23 @@ ok grep -qF "$LUOSHU_ODM_FONTS_ROOT|$MODULE_DIR/odm/fonts" "$ROOT/hyperos-root-p
 ok grep -qF "$LUOSHU_CUST_FONTS_ROOT|$MODULE_DIR/cust/fonts" "$ROOT/hyperos-root-pairs"
 printf 'HyperOS global mapping and compact-anchor reuse tests passed.\n'
 
+# Safe next-boot staging intentionally restores the exact v3.3.6 compact line
+# contract. Keep it weight-cached: the later per-target metric experiment caused a
+# real-device switching regression and must not return here.
+CASE='HyperOS v3.3.6 紧凑行框安全暂存链'
+STAGE_HELPER="$REPO_ROOT/common/hyperos_stage_complete.sh"
+ok grep -q 'hyperos_336_compact_anchor' "$STAGE_HELPER"
+ok grep -q 'TYPO_ASCENDER_RATIO = 0.98' "$STAGE_HELPER"
+ok grep -q 'TYPO_DESCENDER_RATIO = 0.30' "$STAGE_HELPER"
+ok grep -q 'WIN_DESCENT_CAP_RATIO = 0.35' "$STAGE_HELPER"
+ok grep -q 'HHEA_ASCENT_CAP_RATIO = 0.98' "$STAGE_HELPER"
+ok grep -q 'HHEA_DESCENT_CAP_RATIO = 0.30' "$STAGE_HELPER"
+ok grep -q 'hyperos-336-wght-${_weight}.font' "$STAGE_HELPER"
+no grep -q 'device_font_slot_plan' "$STAGE_HELPER"
+no grep -q 'device_font_slot_build' "$STAGE_HELPER"
+sh -n "$STAGE_HELPER"
+printf 'HyperOS v3.3.6 compact staging regression gates passed.\n'
+
 # Keep OEM partition regressions in the always-on source gate.
 sh "$REPO_ROOT/scripts/coloros_partition_mapping_test.sh"
 sh "$REPO_ROOT/scripts/originos_flyme_mapping_test.sh"
