@@ -31,6 +31,56 @@ type _hyperos_clock_ui_files >/dev/null 2>&1 || exit 2
 stage_font_dir="$PAYLOAD_ROOT/system/fonts"
 [ -d "$stage_font_dir" ] || exit 1
 
+# v3.3.6 used one compact line contract for HyperOS physical slots instead of
+# feeding each user's raw hhea/OS2 metrics directly to SystemUI and app controls.
+# That release is already device-proven to have substantially less vertical drift.
+# Reuse the exact old ratios here, but cache once per selected weight so this does
+# not repeat the expensive per-target Python work that caused the later regression.
+hyperos_336_compact_anchor() {
+    _source="$1"
+    _weight="$2"
+    [ -s "$_source" ] || return 1
+    _store="$stage_font_dir/.luoshu-font-store"
+    _output="$_store/hyperos-336-wght-${_weight}.font"
+    if [ -s "$_output" ]; then
+        printf '%s\n' "$_output"
+        return 0
+    fi
+
+    _pyroot="$REALMOD/common/python"
+    _python="$_pyroot/bin/luoshu-python"
+    [ -x "$_python" ] && [ -f "$REALMOD/common/font_metrics_normalize.py" ] || return 1
+    mkdir -p "$_store" 2>/dev/null || return 1
+    rm -f "$_output" 2>/dev/null || true
+
+    PYTHONHOME="$_pyroot" \
+    PYTHONPATH="$REALMOD/common:$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \
+    LD_LIBRARY_PATH="$_pyroot/lib:$_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$_python" - "$_source" "$_output" <<'PY_COMPACT' >/dev/null 2>&1
+import sys
+from pathlib import Path
+import font_metrics_normalize as metrics
+
+# Exact HyperOS compact line contract used by LuoShu v3.3.6.
+metrics.TYPO_ASCENDER_RATIO = 0.98
+metrics.TYPO_DESCENDER_RATIO = 0.30
+metrics.WIN_ASCENT_CAP_RATIO = 0.98
+metrics.WIN_DESCENT_CAP_RATIO = 0.35
+metrics.HHEA_ASCENT_CAP_RATIO = 0.98
+metrics.HHEA_DESCENT_CAP_RATIO = 0.30
+metrics._outline_extremes = lambda font: None
+metrics.normalize_path(Path(sys.argv[1]), Path(sys.argv[2]))
+PY_COMPACT
+    _rc=$?
+    if [ "$_rc" -eq 0 ] && [ -s "$_output" ]; then
+        chmod 0644 "$_output" 2>/dev/null || true
+        printf '%s\n' "$_output"
+        return 0
+    fi
+    rm -f "$_output" 2>/dev/null || true
+    return 1
+}
+
 pick_anchor() {
     _name="$1"
     _weight=400
@@ -43,6 +93,7 @@ pick_anchor() {
             800.ttf) _weight=800 ;; 900.ttf) _weight=900 ;; *) _weight=400 ;;
         esac
     fi
+    _raw=''
     for _candidate in \
         "$stage_font_dir/LuoShu-${_weight}.ttf" \
         "$stage_font_dir/.luoshu-font-store/wght-${_weight}.font" \
@@ -54,10 +105,22 @@ pick_anchor() {
         "$stage_font_dir/MiSansVF.ttf" \
         "$stage_font_dir/Roboto-Regular.ttf"; do
         [ -s "$_candidate" ] || continue
-        printf '%s\n' "$_candidate"
-        return 0
+        _raw="$_candidate"
+        break
     done
-    find "$stage_font_dir" -maxdepth 2 -type f \( -iname '*.ttf' -o -iname '*.otf' \) -print -quit 2>/dev/null
+    if [ -z "$_raw" ]; then
+        _raw=$(find "$stage_font_dir" -maxdepth 2 -type f \( -iname '*.ttf' -o -iname '*.otf' \) -print -quit 2>/dev/null)
+    fi
+    [ -s "$_raw" ] || return 1
+
+    _compact=$(hyperos_336_compact_anchor "$_raw" "$_weight" 2>/dev/null || true)
+    if [ -s "$_compact" ]; then
+        printf '%s\n' "$_compact"
+    else
+        # Never make font switching fail merely because normalization failed on an
+        # unusual font. The old raw physical mapping remains the safety fallback.
+        printf '%s\n' "$_raw"
+    fi
 }
 
 link_font() {
