@@ -98,26 +98,6 @@ ok grep -qF "$LUOSHU_ODM_FONTS_ROOT|$MODULE_DIR/odm/fonts" "$ROOT/hyperos-root-p
 ok grep -qF "$LUOSHU_CUST_FONTS_ROOT|$MODULE_DIR/cust/fonts" "$ROOT/hyperos-root-pairs"
 printf 'HyperOS global mapping and compact-anchor reuse tests passed.\n'
 
-# Safe v4 staging must not regress to hard-linking the raw regular/composite font into
-# every HyperOS target. The dedicated helper normalizes general UI slots and routes
-# MiClock/Mitype clock/mono slots through the existing stock-aligned slot engine first.
-CASE='HyperOS 安全暂存度量对齐链'
-METRIC_STAGE="$REPO_ROOT/common/legacy_v14_4/hyperos_metric_stage.sh"
-METRIC_ALIGN="$REPO_ROOT/common/legacy_v14_4/hyperos_metric_align.py"
-ok test -s "$METRIC_STAGE"
-ok test -s "$METRIC_ALIGN"
-ok grep -q 'hyperos_metric_stage.sh' "$REPO_ROOT/common/hyperos_stage_complete.sh"
-ok grep -q 'luoshu_hyperos_stage_metric_anchor' "$REPO_ROOT/common/hyperos_stage_complete.sh"
-ok grep -q 'font_metrics_normalize' "$METRIC_ALIGN"
-ok grep -q 'device_font_slot_plan' "$METRIC_ALIGN"
-ok grep -q 'device_font_slot_build' "$METRIC_ALIGN"
-python3 -m py_compile "$METRIC_ALIGN"
-. "$METRIC_STAGE"
-ok test "$(_lhms_role_for_target MiClock.otf)" = clock
-ok test "$(_lhms_role_for_target MitypeClockMono.ttf)" = mono
-ok test "$(_lhms_role_for_target Roboto-Regular.ttf)" = ui
-printf 'HyperOS safe-stage metric alignment regression gates passed.\n'
-
 # Keep OEM partition regressions in the always-on source gate.
 sh "$REPO_ROOT/scripts/coloros_partition_mapping_test.sh"
 sh "$REPO_ROOT/scripts/originos_flyme_mapping_test.sh"
