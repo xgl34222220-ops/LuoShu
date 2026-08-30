@@ -22,7 +22,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: v4.0.0
-      EXPECTED_OLD_TAG_SHA: c7cd5aa02a0ac7c68a2cdf3450fae71af7c7ae4f
+      EXPECTED_OLD_TAG_SHA: 050b0ffd32ed2e3008b5dde4772ab8cdc2e24f39
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,14 +80,15 @@ jobs:
           grep -q '^    stock_scan)' common/app_bridge.sh
           grep -qx 'common/stock_inventory_scan.py' scripts/module_payload_manifest.txt
 
-          # Emergency regression rollback: PR #214 inserted expensive per-slot metric
-          # generation into the foreground/next-boot switch path. Real HyperOS testing
-          # showed that it did not solve the offset and regressed font switching. Keep
-          # those helpers out of the shipping switch path until separately device-tested.
+          # Keep the failed per-slot metric experiment out of the foreground switch
+          # path. HyperOS staging instead restores the exact v3.3.6 compact line
+          # contract, cached once per weight; the mapping regression test below locks
+          # 0.98/0.30/0.35 and rejects device_font_slot_plan/build in this helper.
           test ! -e common/legacy_v14_4/hyperos_metric_stage.sh
           test ! -e common/legacy_v14_4/hyperos_metric_align.py
           ! grep -q 'hyperos_metric_stage.sh' common/hyperos_stage_complete.sh
           ! grep -q 'luoshu_hyperos_stage_metric_anchor' common/hyperos_stage_complete.sh
+          grep -q 'hyperos_336_compact_anchor' common/hyperos_stage_complete.sh
           sh scripts/hyperos_global_mapping_test.sh
 
           # Critical regression: the broken v4.0.0 generated a payload and wrote
