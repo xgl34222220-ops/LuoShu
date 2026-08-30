@@ -11,7 +11,7 @@ _lhms_role_for_target() {
     _lhms_lower=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
     case "$_lhms_lower" in
         *mono*) printf 'mono\n' ;;
-        *clock*|clockopia.ttf) printf 'clock\n' ;;
+        *mitype*|*clock*|clockopia.ttf) printf 'clock\n' ;;
         *) printf 'ui\n' ;;
     esac
 }
