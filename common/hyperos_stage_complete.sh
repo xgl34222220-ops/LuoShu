@@ -22,7 +22,6 @@ export MODULE_DIR MODDIR USER_FONTS_DIR
 [ -f "$REALMOD/common/util_functions.sh" ] && . "$REALMOD/common/util_functions.sh"
 [ -f "$REALMOD/common/rom_adapters.sh" ] && . "$REALMOD/common/rom_adapters.sh"
 [ -f "$REALMOD/common/hyperos_global.sh" ] && . "$REALMOD/common/hyperos_global.sh"
-[ -f "$REALMOD/common/legacy_v14_4/hyperos_metric_stage.sh" ] && . "$REALMOD/common/legacy_v14_4/hyperos_metric_stage.sh"
 
 type _hyperos_core_files >/dev/null 2>&1 || exit 2
 type _hyperos_weight_files >/dev/null 2>&1 || exit 2
@@ -31,7 +30,6 @@ type _hyperos_clock_ui_files >/dev/null 2>&1 || exit 2
 
 stage_font_dir="$PAYLOAD_ROOT/system/fonts"
 [ -d "$stage_font_dir" ] || exit 1
-metric_log="$REALMOD/logs/fontswitch.log"
 
 pick_anchor() {
     _name="$1"
@@ -45,7 +43,6 @@ pick_anchor() {
             800.ttf) _weight=800 ;; 900.ttf) _weight=900 ;; *) _weight=400 ;;
         esac
     fi
-    _raw=''
     for _candidate in \
         "$stage_font_dir/LuoShu-${_weight}.ttf" \
         "$stage_font_dir/.luoshu-font-store/wght-${_weight}.font" \
@@ -57,32 +54,10 @@ pick_anchor() {
         "$stage_font_dir/MiSansVF.ttf" \
         "$stage_font_dir/Roboto-Regular.ttf"; do
         [ -s "$_candidate" ] || continue
-        _raw="$_candidate"
-        break
+        printf '%s\n' "$_candidate"
+        return 0
     done
-    if [ -z "$_raw" ]; then
-        _raw=$(find "$stage_font_dir" -maxdepth 2 -type f \( -iname '*.ttf' -o -iname '*.otf' \) -print -quit 2>/dev/null)
-    fi
-    [ -s "$_raw" ] || return 1
-
-    # The v4 safe switch used to hard-link this raw source directly into every
-    # HyperOS slot. That bypassed LuoShu's metric normalizer and produced the exact
-    # status-bar / QQ / Coolapk vertical offset regression seen on HyperOS 3.
-    if type luoshu_hyperos_stage_metric_anchor >/dev/null 2>&1; then
-        _aligned=$(luoshu_hyperos_stage_metric_anchor "$_raw" "$_name" "$stage_font_dir" 2>/dev/null || true)
-        if [ -s "$_aligned" ]; then
-            printf '%s\n' "$_aligned"
-            return 0
-        fi
-        mkdir -p "${metric_log%/*}" 2>/dev/null || true
-        printf '[%s] [HYPEROS-METRIC] alignment fallback target=%s source=%s\n' \
-            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_name" "$_raw" \
-            >> "$metric_log" 2>/dev/null || true
-    fi
-
-    # Safety fallback: a metric helper failure must never make the next-boot payload
-    # unbootable. Keep the previous physical mapping rather than failing the switch.
-    printf '%s\n' "$_raw"
+    find "$stage_font_dir" -maxdepth 2 -type f \( -iname '*.ttf' -o -iname '*.otf' \) -print -quit 2>/dev/null
 }
 
 link_font() {
