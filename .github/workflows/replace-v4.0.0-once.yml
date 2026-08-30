@@ -22,7 +22,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: v4.0.0
-      EXPECTED_OLD_TAG_SHA: 41f5b79bb92b6a1d44b667f0dcd3765988c085e8
+      EXPECTED_OLD_TAG_SHA: c7cd5aa02a0ac7c68a2cdf3450fae71af7c7ae4f
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,18 +80,14 @@ jobs:
           grep -q '^    stock_scan)' common/app_bridge.sh
           grep -qx 'common/stock_inventory_scan.py' scripts/module_payload_manifest.txt
 
-          # HyperOS safe-stage must run the selected font through the real metric
-          # normalizer / stock slot engine. Raw regular/composite hard-links into
-          # MiSans/Mitype/MiClock caused status-bar and App baseline offsets.
-          test -s common/legacy_v14_4/hyperos_metric_stage.sh
-          test -s common/legacy_v14_4/hyperos_metric_align.py
-          grep -q 'hyperos_metric_stage.sh' common/hyperos_stage_complete.sh
-          grep -q 'luoshu_hyperos_stage_metric_anchor' common/hyperos_stage_complete.sh
-          grep -q 'font_metrics_normalize' common/legacy_v14_4/hyperos_metric_align.py
-          grep -q 'device_font_slot_plan' common/legacy_v14_4/hyperos_metric_align.py
-          grep -q 'device_font_slot_build' common/legacy_v14_4/hyperos_metric_align.py
-          sh -n common/legacy_v14_4/hyperos_metric_stage.sh
-          python3 -m py_compile common/legacy_v14_4/hyperos_metric_align.py
+          # Emergency regression rollback: PR #214 inserted expensive per-slot metric
+          # generation into the foreground/next-boot switch path. Real HyperOS testing
+          # showed that it did not solve the offset and regressed font switching. Keep
+          # those helpers out of the shipping switch path until separately device-tested.
+          test ! -e common/legacy_v14_4/hyperos_metric_stage.sh
+          test ! -e common/legacy_v14_4/hyperos_metric_align.py
+          ! grep -q 'hyperos_metric_stage.sh' common/hyperos_stage_complete.sh
+          ! grep -q 'luoshu_hyperos_stage_metric_anchor' common/hyperos_stage_complete.sh
           sh scripts/hyperos_global_mapping_test.sh
 
           # Critical regression: the broken v4.0.0 generated a payload and wrote
