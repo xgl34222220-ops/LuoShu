@@ -22,7 +22,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
       TAG: v4.0.0
-      EXPECTED_OLD_TAG_SHA: 050b0ffd32ed2e3008b5dde4772ab8cdc2e24f39
+      EXPECTED_OLD_TAG_SHA: e846c8310617cc51614a61ff2767a64ea13ba591
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,15 +80,34 @@ jobs:
           grep -q '^    stock_scan)' common/app_bridge.sh
           grep -qx 'common/stock_inventory_scan.py' scripts/module_payload_manifest.txt
 
-          # Keep the failed per-slot metric experiment out of the foreground switch
-          # path. HyperOS staging instead restores the exact v3.3.6 compact line
-          # contract, cached once per weight; the mapping regression test below locks
-          # 0.98/0.30/0.35 and rejects device_font_slot_plan/build in this helper.
+          # The final v4.0.0 must not initialize the legacy runtime for every App
+          # status/config poll.  That real-device timeout stalled the UI at 34%
+          # and surfaced read interrupted by close() even while generation ran.
+          grep -q '^mix_config_json_fast()' common/legacy_v14_4/mix_router.sh
+          grep -q '^mix_status_json_fast()' common/legacy_v14_4/mix_router.sh
+          grep -q 'mix-finalize-state.conf' common/legacy_v14_4/font_mix_runtime.sh
+          grep -q 'compositeHash' common/legacy_v14_4/font_mix_engine.sh
+          grep -q 'requestId' common/next_boot_payload.sh
+          sh scripts/legacy_mix_34_progress_test.sh
+          sh scripts/legacy_mix_finalize_race_test.sh
+
+          # Stock inventory scans are serialized and the early boot scan is
+          # explicitly marked as a verified lower view before self-mount.
+          grep -q 'stock_scan_lock_acquire' common/font_manager.sh
+          grep -q 'LUOSHU_STOCK_VIEW_VERIFIED=1' post-fs-data.sh
+          grep -q 'LUOSHU_STOCK_VIEW_VERIFIED=1' post-mount.sh
+          sh scripts/stock_scan_lock_test.sh
+
+          # HyperOS keeps an exact stock metric contract per physical slot and
+          # deduplicates only identical contracts.  This prevents status-bar and
+          # third-party App Latin/numeric slots from sharing one incorrect line box.
           test ! -e common/legacy_v14_4/hyperos_metric_stage.sh
           test ! -e common/legacy_v14_4/hyperos_metric_align.py
           ! grep -q 'hyperos_metric_stage.sh' common/hyperos_stage_complete.sh
           ! grep -q 'luoshu_hyperos_stage_metric_anchor' common/hyperos_stage_complete.sh
           grep -q 'hyperos_336_compact_anchor' common/hyperos_stage_complete.sh
+          grep -q 'hyperos-slot-contracts.tsv' common/hyperos_stage_complete.sh
+          grep -q 'slot_contract_key' common/hyperos_stage_complete.sh
           sh scripts/hyperos_global_mapping_test.sh
 
           # Critical regression: the broken v4.0.0 generated a payload and wrote

@@ -30,6 +30,10 @@ PAYLOAD_COMMIT_MARKER="$MODDIR/.font-payload-commit.ok"
 COMPOSITE_RESULT=""
 COMPOSITE_REPORT=""
 COMPOSITE_CACHE_HIT=false
+COMPOSITE_CJK_HASH=""
+COMPOSITE_LATIN_HASH=""
+COMPOSITE_DIGIT_HASH=""
+COMPOSITE_OUTPUT_HASH=""
 LAST_MIX_ERROR=""
 
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
@@ -164,12 +168,12 @@ payload_stage_begin() {
     PAYLOAD_BACKUP="$MODDIR/.font-payload-backup.$$"
     PAYLOAD_ACTIVATED=0
     rm -rf "$PAYLOAD_STAGE" "$PAYLOAD_BACKUP" "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
+    # The compatibility router already cloned the live payload and this engine
+    # replaces every text target. Copying the current font tree here again can
+    # expand dozens of large aliases into hundreds of MB on toybox cp, only for
+    # clear_text_targets_in_dir to delete them immediately. Start empty instead;
+    # PAYLOAD_BACKUP still provides the atomic rollback point during activation.
     mkdir -p "$PAYLOAD_STAGE" 2>/dev/null || return 1
-    if [ -d "$SYSTEM_FONTS_DIR" ]; then
-        cp -af "$SYSTEM_FONTS_DIR/." "$PAYLOAD_STAGE/" 2>/dev/null || \
-            cp -rfp "$SYSTEM_FONTS_DIR/." "$PAYLOAD_STAGE/" 2>/dev/null || return 1
-    fi
-    clear_text_targets_in_dir "$PAYLOAD_STAGE"
     return 0
 }
 
@@ -342,10 +346,15 @@ write_progress() {
 }
 
 prune_composite_cache() {
-    _cache="$1"; _keep=3; _count=0
+    # Keep enough recent combinations for normal back-and-forth switching, with a
+    # storage cap so cached CJK composites cannot grow without bound.
+    _cache="$1"; _keep=8; _max_kb=262144; _count=0; _total_kb=0
     for _old in $(ls -1t "$_cache"/*.otf 2>/dev/null); do
         _count=$((_count + 1))
-        [ "$_count" -le "$_keep" ] && continue
+        _size_kb=$(du -k "$_old" 2>/dev/null | awk '{print $1}')
+        case "$_size_kb" in ''|*[!0-9]*) _size_kb=0 ;; esac
+        _total_kb=$((_total_kb + _size_kb))
+        [ "$_count" -le "$_keep" ] && [ "$_total_kb" -le "$_max_kb" ] && continue
         _base=${_old%.otf}
         rm -f "$_old" "${_base}.json" 2>/dev/null || true
     done
@@ -361,7 +370,13 @@ build_composite_file() {
     check_composite_runtime || return 1
     _cache="$MODDIR/cache/full-composite-v5"
     mkdir -p "$_cache" "$MODDIR/cache/tmp" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
-    _key_src="$(composite_hash_file "$_cjk_src")-$(composite_hash_file "$_latin_src")-$(composite_hash_file "$_digit_src")-full-composite-v5"
+    _cjk_hash=$(composite_hash_file "$_cjk_src")
+    _latin_hash=$(composite_hash_file "$_latin_src")
+    _digit_hash=$(composite_hash_file "$_digit_src")
+    COMPOSITE_CJK_HASH="$_cjk_hash"
+    COMPOSITE_LATIN_HASH="$_latin_hash"
+    COMPOSITE_DIGIT_HASH="$_digit_hash"
+    _key_src="${_cjk_hash}-${_latin_hash}-${_digit_hash}-full-composite-v5"
     _key=$(printf '%s' "$_key_src" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; elif command -v toybox >/dev/null 2>&1; then toybox sha256sum; else cksum; fi; } | awk '{print $1}')
     _cached="$_cache/${_key}.otf"; _report="$_cache/${_key}.json"; _progress="$CONFIG_DIR/composite_progress.json"
     rm -f "$_cache"/.*.tmp.* 2>/dev/null || true
@@ -369,6 +384,17 @@ build_composite_file() {
         COMPOSITE_CACHE_HIT=true
         touch "$_cached" "$_report" 2>/dev/null || true
         write_progress cache '已验证并使用现有复合字体缓存' 100
+    elif [ -n "$_cjk_hash" ] && [ "$_cjk_hash" = "$_latin_hash" ] && [ "$_cjk_hash" = "$_digit_hash" ]; then
+        # Selecting one complete font for all three roles needs no glyph rewrite.
+        # Reuse the validated source directly instead of serializing the entire CJK
+        # font through embedded Python.
+        ln "$_cjk_src" "$_cached" 2>/dev/null || cp -f "$_cjk_src" "$_cached" 2>/dev/null || {
+            set_mix_error '无法保存同源复合字体缓存'
+            return 1
+        }
+        chmod 0644 "$_cached" 2>/dev/null || true
+        printf '{"status":"ok","fastPath":"same-source"}\n' >"$_report" 2>/dev/null || true
+        write_progress cache '三项字体来源相同，已跳过重复合成' 100
     else
         _tmp="$_cache/.${_key}.$$.tmp.otf"; _tmp_report="$_cache/.${_key}.$$.tmp.json"; _tmp_error="$_cache/.${_key}.$$.tmp.err"
         rm -f "$_tmp" "$_tmp_report" "$_tmp_error" "$_progress" 2>/dev/null || true
@@ -403,7 +429,30 @@ build_composite_file() {
     fi
     prune_composite_cache "$_cache"
     COMPOSITE_RESULT="$_cached"; COMPOSITE_REPORT="$_report"
+    COMPOSITE_OUTPUT_HASH=$(composite_hash_file "$_cached")
     return 0
+}
+
+write_mix_generation_manifest() {
+    _manifest="${LUOSHU_MIX_MANIFEST:-}"
+    _request="${LUOSHU_MIX_REQUEST_ID:-}"
+    _expected_cjk="${LUOSHU_MIX_EXPECTED_CJK:-$1}"
+    _expected_latin="${LUOSHU_MIX_EXPECTED_LATIN:-$2}"
+    _expected_digit="${LUOSHU_MIX_EXPECTED_DIGIT:-$3}"
+    [ -n "$_manifest" ] && [ -n "$_request" ] || return 0
+    mkdir -p "${_manifest%/*}" 2>/dev/null || return 1
+    _tmp="${_manifest}.tmp.$$"
+    {
+        printf 'requestId=%s\n' "$_request"
+        printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$_expected_cjk" "$_expected_latin" "$_expected_digit"
+        printf 'engineCjk=%s\nengineLatin=%s\nengineDigit=%s\n' "$1" "$2" "$3"
+        printf 'cjkHash=%s\nlatinHash=%s\ndigitHash=%s\n' \
+            "$COMPOSITE_CJK_HASH" "$COMPOSITE_LATIN_HASH" "$COMPOSITE_DIGIT_HASH"
+        printf 'compositeHash=%s\n' "$COMPOSITE_OUTPUT_HASH"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } >"$_tmp" 2>/dev/null || return 1
+    mv -f "$_tmp" "$_manifest" 2>/dev/null || return 1
+    chmod 0644 "$_manifest" 2>/dev/null || true
 }
 
 prepare_mix_config() {
@@ -464,6 +513,7 @@ apply_mix() {
     else
         populate_generic_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成通用 Android 字体负载失败'; return 5; }
     fi
+    write_mix_generation_manifest "$_cjk" "$_latin" "$_digit" || { set_mix_error '无法写入本次组合字体校验清单'; return 6; }
     prepare_mix_config "$_cjk" "$_latin" "$_digit" || { set_mix_error '无法准备字体组合状态'; return 6; }
     payload_stage_activate || { set_mix_error '无法原子替换字体负载'; return 6; }
     if ! commit_mix_config; then

@@ -6,9 +6,36 @@ import os
 from pathlib import Path
 
 import font_inventory as inventory
+import font_inventory_scan_v3 as scanner
+
+
+_ACTIVE_OVERLAY_MODULE: Path | None = None
+
+
+def _private_root_overlaid(logical: Path) -> bool:
+    module = _ACTIVE_OVERLAY_MODULE
+    if module is None:
+        return False
+    relative = logical.relative_to("/")
+    for payload in (module / ".luoshu-payload", module / ".luoshu-payload-next", module):
+        root = payload / relative
+        if not root.is_dir():
+            continue
+        try:
+            if any(path.is_file() for path in root.iterdir()):
+                return True
+        except OSError:
+            continue
+    return False
 
 
 def _private_overlay_risk(module: Path | None) -> bool:
+    global _ACTIVE_OVERLAY_MODULE
+    _ACTIVE_OVERLAY_MODULE = None
+    # LuoShu's early boot hook sets this only immediately before self-mount, while
+    # skip_mount/skip_mountify still leave the logical ROM roots stock-visible.
+    if os.environ.get("LUOSHU_STOCK_VIEW_VERIFIED", "").strip() == "1":
+        return False
     if not module or not module.is_dir():
         return False
     try:
@@ -17,6 +44,7 @@ def _private_overlay_risk(module: Path | None) -> bool:
         active = ""
     if not active or active == "default":
         return False
+    _ACTIVE_OVERLAY_MODULE = module
 
     payload_roots = (
         module / ".luoshu-payload",
@@ -46,6 +74,10 @@ def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: b
         return explicit
     if not overlay_risk:
         return logical
+    # Overlay risk is per partition, not global. A custom system/fonts payload
+    # does not make an untouched vendor/fonts tree unsafe to scan directly.
+    if _ACTIVE_OVERLAY_MODULE is not None and not _private_root_overlaid(logical):
+        return logical
 
     parts = logical.parts
     if len(parts) >= 3 and parts[0] == "/":
@@ -69,7 +101,7 @@ def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: b
 def main() -> int:
     inventory._overlay_risk = _private_overlay_risk
     inventory._pick_actual_root = _safe_pick_actual_root
-    return inventory.main()
+    return scanner.main()
 
 
 if __name__ == "__main__":

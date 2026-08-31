@@ -75,6 +75,12 @@ luoshu_self_mount_ensure() {
                 }
             else
                 _lsme_mode=bind
+                if type _luoshu_capture_lower_dir >/dev/null 2>&1; then
+                    _luoshu_capture_lower_dir "$_lsme_target" \
+                        "${_lsme_partition}-${_lsme_subdir}" || \
+                        _luoshu_self_log \
+                            "私有字体挂载无法保留原厂 lower：$_lsme_partition/$_lsme_subdir"
+                fi
                 if _luoshu_atomic_bind_tree "$_lsme_source" "$_lsme_target"; then
                     _lsme_bind_count=$((_lsme_bind_count + 1))
                 else

@@ -109,7 +109,8 @@ fi
 # 必须在新模块覆盖挂载系统字体之前读取原厂槽位。v2 扫描器会分别统计全部原厂
 # 字体文件和可替换 UI 槽位，并读取 system、system_ext、product、my_product、vendor
 # 各分区的 fonts*.xml。相同系统指纹复用；旧扫描器生成的清单会自动升级重扫。
-FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory_scan.py"
+FONT_INVENTORY_SCRIPT="$MODPATH/common/stock_inventory_scan.py"
+[ -f "$FONT_INVENTORY_SCRIPT" ] || FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory_scan.py"
 [ -f "$FONT_INVENTORY_SCRIPT" ] || FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory.py"
 FONT_INVENTORY_PYTHON="$MODPATH/common/python/bin/luoshu-python"
 FONT_INVENTORY_OUTPUT="$MODPATH/config/device_font_inventory.json"
@@ -133,6 +134,7 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
     _inventory_rc=$?
     printf '%s\n' "$_inventory_result" >> "$FONT_INVENTORY_LOG" 2>/dev/null || true
     if [ "$_inventory_rc" -eq 0 ]; then
+        rm -f "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
         _inventory_files=$(printf '%s' "$_inventory_result" | sed -n 's/.*"stockFontFileCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
         _inventory_slots=$(printf '%s' "$_inventory_result" | sed -n 's/.*"slotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
         _inventory_xml=$(printf '%s' "$_inventory_result" | sed -n 's/.*"xmlSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
@@ -146,7 +148,13 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         ui_print "✓ 原厂字体文件：$_inventory_files 个（ROM：$_inventory_rom）"
         ui_print "✓ 可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / OEM 探测 $_inventory_heuristic）"
     else
-        ui_print "• 原厂字体清单扫描不可用，本机将自动使用旧静态适配清单"
+        _old_active=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+        if [ -n "$_old_active" ] && [ "$_old_active" != default ]; then
+            : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
+            ui_print "• 当前字体仍在挂载，已安排重启后读取原厂字体清单"
+        else
+            ui_print "• 原厂字体清单扫描不可用，本机将自动使用旧静态适配清单"
+        fi
     fi
 else
     ui_print "• 字体清单扫描器不可用，本机将自动使用旧静态适配清单"

@@ -4,6 +4,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "${0%/*}" 2>/dev/null && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." 2>/dev/null && pwd)
 ATOMIC_SCRIPT=${ATOMIC_SCRIPT:-$REPO_ROOT/common/mount_self_atomic.sh}
+BACKEND_SCRIPT=${BACKEND_SCRIPT:-$REPO_ROOT/common/mount_self_backend.sh}
 FINAL_SCRIPT=${FINAL_SCRIPT:-}
 TEST_ROOT=$(mktemp -d)
 trap 'rm -rf "$TEST_ROOT"' EXIT INT TERM
@@ -68,9 +69,17 @@ _luoshu_overlay_mount_dir() {
     cp -R "$1/." "$2/"
 }
 _luoshu_mount_cmd() {
+    if test "$1" = --make-private; then
+        return 0
+    fi
     test "$1" = -o && test "$2" = bind || return 1
     test "${FAIL_BIND:-}" != "$4" || return 1
-    cp -f "$3" "$4"
+    if test -d "$3"; then
+        mkdir -p "$4"
+        cp -R "$3/." "$4/"
+    else
+        cp -f "$3" "$4"
+    fi
 }
 _luoshu_umount_cmd() {
     printf '%s\n' "$1" >> "$CASE_ROOT/unmount.log"
@@ -80,6 +89,7 @@ luoshu_mount_record() {
     printf '%s|%s\n' "$1" "$2" > "$MODULE_DIR/config/mount-record.txt"
 }
 
+. "$BACKEND_SCRIPT"
 . "$ATOMIC_SCRIPT"
 [ -z "$FINAL_SCRIPT" ] || . "$FINAL_SCRIPT"
 # The production backend owns the OverlayFS helper. Keep tests deterministic.
@@ -186,6 +196,10 @@ grep -q '^state=mounted$' "$MODULE_DIR/config/self-mount.conf" || fail 'bind fal
 grep -q '^backend=self-overlay-bind$' "$MODULE_DIR/config/self-mount.conf" || fail 'bind fallback backend missing'
 test "$(cat "$CASE_ROOT/root/system/fonts/A.ttf")" = 'font-a' || fail 'existing bind target was not replaced'
 test ! -e "$CASE_ROOT/root/system/fonts/B.ttf" || fail 'bind fallback created an additive ROM alias'
+test "$(cat "$CASE_ROOT/state/lower/system-fonts/A.ttf")" = 'stock-a' || \
+    fail 'bind fallback did not preserve the stock lower view'
+test ! -e "$CASE_ROOT/state/lower/system-fonts/B.ttf" || \
+    fail 'stock lower was contaminated by the LuoShu payload'
 luoshu_mount_verify_active custom || fail 'strict verifier rejected compatible bind fallback'
 
 setup_case bind-symlink-alias

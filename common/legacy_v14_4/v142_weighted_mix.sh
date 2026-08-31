@@ -28,11 +28,14 @@ PROGRESS_FILE="$CONFIG_DIR/composite_progress.json"
 TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
 LOCK_FILE="$MODDIR/.font_switch.lock"
 WORKER_PID="$CONFIG_DIR/axes_worker.pid"
+AUTO_WORKER_PID="$CONFIG_DIR/auto_multiweight_worker.pid"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
 
 MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
+[ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
+[ -f "$MODDIR/common/mix_task_handoff.sh" ] && . "$MODDIR/common/mix_task_handoff.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -44,6 +47,47 @@ read_value() {
 
 clean_spec() {
     printf '%s' "$1" | tr -d '\r\n'
+}
+
+clear_worker_pid() {
+    _cw_task="${1:-}"
+    if type luoshu_clear_task_pid >/dev/null 2>&1; then
+        luoshu_clear_task_pid "$WORKER_PID" "$_cw_task"
+    else
+        rm -f "$WORKER_PID" 2>/dev/null || true
+    fi
+}
+
+task_worker_alive() {
+    _twa_task="$1"
+    if type luoshu_task_pid_alive >/dev/null 2>&1; then
+        luoshu_task_pid_alive "$WORKER_PID" "$_twa_task" && return 0
+        luoshu_task_pid_alive "$AUTO_WORKER_PID" "$_twa_task" && return 0
+    fi
+    for _twa_file in "$WORKER_PID" "$AUTO_WORKER_PID"; do
+        _twa_pid=$(sed -n '1{s/[^0-9].*$//;p;}' "$_twa_file" 2>/dev/null)
+        if [ -n "$_twa_pid" ] && kill -0 "$_twa_pid" 2>/dev/null; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+reconcile_task() {
+    [ -s "$TASK_FILE" ] || return 0
+    _rt_state=$(read_value "$TASK_FILE" state)
+    case "$_rt_state" in queued|running) ;; *) return 0 ;; esac
+    _rt_task=$(read_value "$TASK_FILE" task)
+    [ -n "$_rt_task" ] || return 0
+    task_worker_alive "$_rt_task" && return 0
+    _rt_started=$(read_value "$TASK_FILE" started)
+    _rt_now=$(date +%s 2>/dev/null || echo 0)
+    case "$_rt_started:$_rt_now" in *[!0-9:]*|:*) ;; *)
+        [ $((_rt_now - _rt_started)) -gt 20 ] 2>/dev/null || return 0
+        ;;
+    esac
+    update_task "$_rt_task" failed '字体组合后台进程已退出，任务已自动释放，请重新应用' 100 '' "$_rt_now"
+    clear_worker_pid "$_rt_task"
 }
 
 axis_value() {
@@ -218,6 +262,7 @@ rewrite_public_config() {
 }
 
 worker() {
+    trap '' HUP
     _wanted="$1"
     [ "$(read_value "$TASK_FILE" task)" = "$_wanted" ] || exit 0
     _cjk=$(read_value "$TASK_FILE" cjk)
@@ -231,28 +276,59 @@ worker() {
     update_task "$_wanted" running '正在准备中文字体' 4 '' ''
     prepare_slot cjk "$_cjk" "$_cjk_axes" "$_root" LuoShuMixCJK || {
         update_task "$_wanted" failed '中文字体准备失败' 100 '' "$(date +%s)"
-        rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+        rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
     }
     update_task "$_wanted" running '正在准备英文字体' 14 '' ''
     prepare_slot latin "$_latin" "$_latin_axes" "$_root" LuoShuMixLatin || {
         update_task "$_wanted" failed '英文字体准备失败' 100 '' "$(date +%s)"
-        rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+        rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
     }
     update_task "$_wanted" running '正在准备数字字体' 24 '' ''
     prepare_slot digit "$_digit" "$_digit_axes" "$_root" LuoShuMixDigit || {
         update_task "$_wanted" failed '数字字体准备失败' 100 '' "$(date +%s)"
-        rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+        rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
     }
 
     update_task "$_wanted" running '正在启动完整复合字体引擎' 34 '' ''
-    _output=$(LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$BASE_ENGINE" start LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit 2>&1)
-    _child=$(printf '%s\n' "$_output" | sed -n 's/^.*"task":"\([^"]*\)".*$/\1/p' | tail -n1)
-    if [ -z "$_child" ]; then
-        _message=$(printf '%s\n' "$_output" | sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' | tail -n1)
-        [ -n "$_message" ] || _message='无法启动完整复合字体引擎'
-        update_task "$_wanted" failed "$_message" 100 '' "$(date +%s)"
-        rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+    _previous_child=$(read_value "$BASE_TASK_FILE" task)
+    _response_file="$_root/base-engine-start.json"
+    : >"$_response_file" 2>/dev/null || true
+    (
+        trap '' HUP
+        LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$BASE_ENGINE" start \
+            LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit >"$_response_file" 2>&1
+    ) &
+    _starter_pid=$!
+    _child=''
+    _start_loops=0
+    while [ "$_start_loops" -lt 20 ]; do
+        if type luoshu_resolve_nested_mix_task >/dev/null 2>&1; then
+            _child=$(luoshu_resolve_nested_mix_task "$_response_file" "$BASE_TASK_FILE" "$_previous_child" \
+                LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit 2>/dev/null)
+        else
+            _child=$(sed -n 's/^.*"task":"\([^"]*\)".*$/\1/p' "$_response_file" 2>/dev/null | tail -n1)
+        fi
+        [ -z "$_child" ] || break
+        kill -0 "$_starter_pid" 2>/dev/null || break
+        sleep 1
+        _start_loops=$((_start_loops + 1))
+    done
+    if [ -z "$_child" ] && type luoshu_resolve_nested_mix_task >/dev/null 2>&1; then
+        _child=$(luoshu_resolve_nested_mix_task "$_response_file" "$BASE_TASK_FILE" "$_previous_child" \
+            LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit 2>/dev/null)
     fi
+    if [ -z "$_child" ]; then
+        kill "$_starter_pid" 2>/dev/null || true
+        if type luoshu_mix_task_message_from_response >/dev/null 2>&1; then
+            _message=$(luoshu_mix_task_message_from_response "$_response_file" 2>/dev/null)
+        else
+            _message=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_response_file" 2>/dev/null | tail -n1)
+        fi
+        [ -n "$_message" ] || _message='完整复合字体子任务在 20 秒内未登记，已停止等待'
+        update_task "$_wanted" failed "$_message" 100 '' "$(date +%s)"
+        rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
+    fi
+    rm -f "$_response_file" 2>/dev/null || true
 
     update_task "$_wanted" running '完整复合字体正在后台生成' 36 "$_child" ''
     _loops=0
@@ -273,11 +349,11 @@ worker() {
                 success)
                     update_task "$_wanted" success "$_base_message" 100 "$_child" "$(date +%s)"
                     rewrite_public_config
-                    rm -rf "$_root"; rm -f "$WORKER_PID"; exit 0
+                    rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 0
                     ;;
                 failed)
                     update_task "$_wanted" failed "$_base_message" 100 "$_child" "$(date +%s)"
-                    rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+                    rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
                     ;;
                 *) update_task "$_wanted" running "$_base_message" "$_mapped" "$_child" '' ;;
             esac
@@ -287,11 +363,12 @@ worker() {
     done
 
     update_task "$_wanted" failed '完整复合字体生成超时' 100 "$_child" "$(date +%s)"
-    rm -rf "$_root"; rm -f "$WORKER_PID"
+    rm -rf "$_root"; clear_worker_pid "$_wanted"
     exit 1
 }
 
 status_json() {
+    reconcile_task
     _wanted="$1"
     [ -s "$TASK_FILE" ] || { printf '{"status":"error","message":"暂无字体组合任务"}\n'; return; }
     _task=$(read_value "$TASK_FILE" task)
@@ -372,9 +449,16 @@ start_mix() {
     }
     write_task "$_request" queued '任务已进入后台队列' "$_cjk" "$_latin" "$_digit" \
         "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_root" '' "$(date +%s)" '' 1
-    ( MODDIR="$MODDIR" sh "$0" worker "$_request" ) </dev/null >>"$LOG_FILE" 2>&1 &
-    _pid=$!
-    printf '%s\n' "$_pid" >"$WORKER_PID" 2>/dev/null || true
+    if type luoshu_start_detached >/dev/null 2>&1; then
+        luoshu_start_detached "$WORKER_PID" "$_request" "$LOG_FILE" sh "$0" worker "$_request" || {
+            update_task "$_request" failed '无法启动独立后台任务' 100 '' "$(date +%s)"
+            printf '{"status":"error","message":"无法启动独立后台任务"}\n'
+            return
+        }
+    else
+        ( trap '' HUP; MODDIR="$MODDIR" sh "$0" worker "$_request" ) </dev/null >>"$LOG_FILE" 2>&1 &
+        printf '%s\n' "$!" >"$WORKER_PID" 2>/dev/null || true
+    fi
     printf '{"status":"ok","data":{"task":"%s"}}\n' "$(json_escape "$_request")"
 }
 
@@ -389,7 +473,7 @@ recover_task() {
         esac
         [ -z "$_root" ] || rm -rf "$_root" 2>/dev/null || true
     fi
-    rm -f "$WORKER_PID" 2>/dev/null || true
+    clear_worker_pid "${_task:-}"
     printf '{"status":"ok"}\n'
 }
 

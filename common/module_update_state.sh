@@ -165,6 +165,20 @@ luoshu_migrate_update_cache() {
         mkdir -p "${_new}/${_relative%/*}" 2>/dev/null || continue
         luoshu_copy_update_tree "$_old/$_relative" "$_new/$_relative" || true
     done
+    # v4 may deliberately run the verified v14.4 compatibility compositor. Its
+    # content-addressed caches are safe only across the same payload schema; keep
+    # them on ordinary v4 updates so a known combination remains a seconds-level
+    # switch instead of being synthesized again after every module replacement.
+    if [ "$_schema_compatible" = true ]; then
+        for _relative in \
+            cache/full-composite-v5 \
+            cache/auto-multiweight-mix/composites-v1; do
+            [ -d "$_old/$_relative" ] || continue
+            rm -rf "$_new/$_relative" 2>/dev/null || true
+            mkdir -p "${_new}/${_relative%/*}" 2>/dev/null || continue
+            luoshu_copy_update_tree "$_old/$_relative" "$_new/$_relative" || true
+        done
+    fi
     mkdir -p "$_new/cache" 2>/dev/null || true
     for _probe in "$_old/cache"/runtime_probe.*.ok; do
         [ -f "$_probe" ] || continue

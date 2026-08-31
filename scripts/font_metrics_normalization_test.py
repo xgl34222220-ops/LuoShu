@@ -99,6 +99,12 @@ with tempfile.TemporaryDirectory() as directory:
                         "path": "/system/fonts/MiSansVF.ttf",
                         "format": "TTF",
                         "metrics": {"upem": 1000, "hhea": {"ascent": 1100, "descent": -300}},
+                    },
+                    "/system/fonts/MitypeClock.ttf": {
+                        "slotName": "MitypeClock.ttf",
+                        "path": "/system/fonts/MitypeClock.ttf",
+                        "format": "TTF",
+                        "metrics": {"upem": 1000, "hhea": {"ascent": 850, "descent": -150}},
                     }
                 },
                 "mainSlot": {
@@ -123,6 +129,22 @@ with tempfile.TemporaryDirectory() as directory:
         assert inventory_report["targetSlot"] == "MiSansVF.ttf"
     finally:
         inventory_font.close()
+
+    clock_normalized = temp / "clock-normalized.ttf"
+    clock_report = normalize_path(
+        source,
+        clock_normalized,
+        inventory=inventory,
+        target_slot="/system/fonts/MitypeClock.ttf",
+        strict_contract=True,
+    )
+    clock_font = TTFont(clock_normalized)
+    try:
+        assert clock_font["hhea"].ascent == 850
+        assert clock_font["hhea"].descent == -150
+        assert clock_report["targetSlot"] == "MitypeClock.ttf"
+    finally:
+        clock_font.close()
 
 
     os.environ["LUOSHU_BUILD_KEY"] = "different-rom"

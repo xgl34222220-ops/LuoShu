@@ -20,13 +20,100 @@ MIX_STAGE="$REALMOD/.luoshu-mix-stage"
 NEXT_PAYLOAD="$REALMOD/.luoshu-payload-next"
 NEXT_STATE="$REALMOD/config/font-payload-next.conf"
 MIX_STAGE_STATE="$REALMOD/config/mix-stage-next.conf"
+MIX_MANIFEST="$MIX_STAGE/.luoshu-mix-generation.conf"
 ACTIVE_CONF="$REALMOD/config/active_font.conf"
 LEGACY_MODE="$REALMOD/config/font_runtime_legacy_v14_4.conf"
 REBOOT_CONF="$REALMOD/config/text_reboot_required.conf"
 LOG_FILE="$REALMOD/logs/fontswitch.log"
+FINALIZE_LOCK="$REALMOD/.mix-stage-finalize.lock"
 
 read_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
+json_escape_router() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
+}
+
+# The App reads this on every entry to the combination page.  Building the entire
+# compatibility runtime just to read three small config files can exceed the App's
+# 25-second Root timeout while another worker owns the filesystem, which surfaced
+# as `read interrupted by close() on another thread`.  The config is atomically
+# persisted in REALMOD/config, so answer it directly without touching payloads.
+mix_config_json_fast() {
+    _source="$REALMOD/config/axes_mix.conf"
+    [ -s "$_source" ] || _source="$REALMOD/config/font_mix.conf"
+    _cjk=$(read_value "$_source" cjk)
+    _latin=$(read_value "$_source" latin)
+    _digit=$(read_value "$_source" digit)
+    _cjk_weight=$(read_value "$_source" cjkWeight)
+    _latin_weight=$(read_value "$_source" latinWeight)
+    _digit_weight=$(read_value "$_source" digitWeight)
+    case "$_cjk_weight" in ''|*[!0-9]*) _cjk_weight=400 ;; esac
+    case "$_latin_weight" in ''|*[!0-9]*) _latin_weight=400 ;; esac
+    case "$_digit_weight" in ''|*[!0-9]*) _digit_weight=400 ;; esac
+    _cjk_axes=$(read_value "$_source" cjkAxes)
+    _latin_axes=$(read_value "$_source" latinAxes)
+    _digit_axes=$(read_value "$_source" digitAxes)
+    [ -n "$_cjk_axes" ] || _cjk_axes="wght=$_cjk_weight"
+    [ -n "$_latin_axes" ] || _latin_axes="wght=$_latin_weight"
+    [ -n "$_digit_axes" ] || _digit_axes="wght=$_digit_weight"
+    _enabled=false
+    [ "$(head -n1 "$ACTIVE_CONF" 2>/dev/null | tr -d '\r\n')" = mix ] && _enabled=true
+    printf '{"status":"ok","data":{"enabled":%s,"cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s"}}\n' \
+        "$_enabled" "$(json_escape_router "$_cjk")" "$(json_escape_router "$_latin")" "$(json_escape_router "$_digit")" \
+        "$_cjk_weight" "$_latin_weight" "$_digit_weight" \
+        "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")"
+}
+
+mix_status_json_fast() {
+    _wanted="$1"
+    _task_file="$REALMOD/config/axes_task.conf"
+    [ -s "$_task_file" ] || _task_file="$REALMOD/config/mix_task.conf"
+    [ -s "$_task_file" ] || {
+        printf '{"status":"error","message":"暂无字体组合任务"}\n'
+        return 0
+    }
+    _task=$(read_value "$_task_file" task)
+    if [ -n "$_wanted" ] && [ "$_wanted" != "$_task" ]; then
+        printf '{"status":"error","message":"任务不存在或已被新任务替换"}\n'
+        return 0
+    fi
+    _state=$(read_value "$_task_file" state)
+    _message=$(read_value "$_task_file" message)
+    _percent=$(read_value "$_task_file" percent)
+    case "$_percent" in ''|*[!0-9]*) _percent=0 ;; esac
+
+    if [ "$_state" = success ]; then
+        _next_font=$(read_value "$NEXT_STATE" font)
+        if [ -d "$NEXT_PAYLOAD" ] && [ "$_next_font" = mix ]; then
+            _percent=100
+        else
+            _finalize_state=$(read_value "$REALMOD/config/mix-finalize-state.conf" state)
+            _finalize_message=$(read_value "$REALMOD/config/mix-finalize-state.conf" message)
+            if [ "$_finalize_state" = failed ]; then
+                _state=failed
+                _message="${_finalize_message:-复合字体负载提交失败}"
+                _percent=100
+            else
+                _state=running
+                _message="${_finalize_message:-正在提交下一启动字体负载}"
+                _percent=99
+            fi
+        fi
+    fi
+
+    _cjk=$(read_value "$_task_file" cjk)
+    _latin=$(read_value "$_task_file" latin)
+    _digit=$(read_value "$_task_file" digit)
+    _cjk_axes=$(read_value "$_task_file" cjkAxes); [ -n "$_cjk_axes" ] || _cjk_axes=wght=400
+    _latin_axes=$(read_value "$_task_file" latinAxes); [ -n "$_latin_axes" ] || _latin_axes=wght=400
+    _digit_axes=$(read_value "$_task_file" digitAxes); [ -n "$_digit_axes" ] || _digit_axes=wght=400
+    printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":400,"latinWeight":400,"digitWeight":400,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","timeout":720,"progress":{"message":"%s","percent":%s}}}\n' \
+        "$(json_escape_router "$_task")" "$(json_escape_router "$_state")" "$(json_escape_router "$_message")" \
+        "$(json_escape_router "$_cjk")" "$(json_escape_router "$_latin")" "$(json_escape_router "$_digit")" \
+        "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")" \
+        "$(json_escape_router "$_message")" "$_percent"
 }
 
 force_link() {
@@ -93,6 +180,29 @@ clone_mix_tree() {
     return 1
 }
 
+clear_mix_text_payload() {
+    _payload="$1"
+    # A second composite starts from the previous live tree only so non-font
+    # payload state can be retained. No previous text alias may survive into the
+    # new generation: otherwise slots not rediscovered on this pass keep the old
+    # digit/Latin source and Android displays two composite generations at once.
+    for _part in system system_ext product vendor odm oem my_product \
+                 my_engineering my_company my_preload my_region my_stock \
+                 oplus_product oplus_engineering oplus_version oplus_region \
+                 mi_ext cust hw_product; do
+        rm -rf "$_payload/$_part/fonts" 2>/dev/null || true
+        _etc="$_payload/$_part/etc"
+        [ -d "$_etc" ] || continue
+        for _xml in "$_etc"/*.xml; do
+            [ -f "$_xml" ] || continue
+            grep -a -qE 'LuoShuSlot-|LuoShu(Mono)?-|luoshu' "$_xml" 2>/dev/null && \
+                rm -f "$_xml" 2>/dev/null || true
+        done
+    done
+    mkdir -p "$_payload/system/fonts" 2>/dev/null || return 1
+    return 0
+}
+
 prepare_mix_stage() {
     mkdir -p "$REALMOD/config" "$REALMOD/cache" "$REALMOD/logs" 2>/dev/null || return 1
     rm -rf "$MIX_STAGE" 2>/dev/null || true
@@ -108,12 +218,17 @@ prepare_mix_stage() {
             "$_clone_source" "$LIVE_PAYLOAD" "$NEXT_PAYLOAD" >> "$LOG_FILE" 2>/dev/null || true
         return 1
     fi
+    clear_mix_text_payload "$MIX_STAGE" || return 1
 
     _previous=$(head -n1 "$ACTIVE_CONF" 2>/dev/null | tr -d '\r\n')
     [ -n "$_previous" ] || _previous=default
     _previous_legacy=false
     [ -f "$LEGACY_MODE" ] && _previous_legacy=true
+    _request="mix-request-$(date +%s 2>/dev/null || echo 0)-$$"
     {
+        printf 'requestId=%s\n' "$_request"
+        printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$1" "$2" "$3"
+        printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$4" "$5" "$6"
         printf 'previousFont=%s\n' "$_previous"
         printf 'previousLegacy=%s\n' "$_previous_legacy"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
@@ -129,6 +244,19 @@ stage_has_fonts() {
         -print -quit 2>/dev/null | grep -q .
 }
 
+stage_generation_matches() {
+    _request=$(read_value "$MIX_STAGE_STATE" requestId)
+    # Backward recovery for a stage produced by an older installed build.
+    [ -n "$_request" ] || return 0
+    [ -s "$MIX_MANIFEST" ] || return 1
+    [ "$(read_value "$MIX_MANIFEST" requestId)" = "$_request" ] || return 1
+    for _field in cjk latin digit; do
+        [ "$(read_value "$MIX_MANIFEST" "$_field")" = "$(read_value "$MIX_STAGE_STATE" "$_field")" ] || return 1
+    done
+    [ -n "$(read_value "$MIX_MANIFEST" compositeHash)" ] || return 1
+    return 0
+}
+
 complete_hyperos_stage() {
     _helper="$REALMOD/common/hyperos_stage_complete.sh"
     [ -f "$_helper" ] || return 0
@@ -141,12 +269,19 @@ complete_hyperos_stage() {
 write_next_state() {
     _previous=$(read_value "$MIX_STAGE_STATE" previousFont)
     _previous_legacy=$(read_value "$MIX_STAGE_STATE" previousLegacy)
+    _request=$(read_value "$MIX_STAGE_STATE" requestId)
+    _generation_manifest="$MIX_MANIFEST"
+    [ -s "$_generation_manifest" ] || _generation_manifest="$NEXT_PAYLOAD/.luoshu-mix-generation.conf"
     [ -n "$_previous" ] || _previous=default
     [ "$_previous_legacy" = true ] || _previous_legacy=false
     _tmp="${NEXT_STATE}.tmp.$$"
     {
         printf 'state=prepared\n'
         printf 'font=mix\n'
+        printf 'requestId=%s\n' "$_request"
+        printf 'cjk=%s\nlatin=%s\ndigit=%s\n' \
+            "$(read_value "$MIX_STAGE_STATE" cjk)" "$(read_value "$MIX_STAGE_STATE" latin)" "$(read_value "$MIX_STAGE_STATE" digit)"
+        printf 'compositeHash=%s\n' "$(read_value "$_generation_manifest" compositeHash)"
         printf 'previousFont=%s\n' "$_previous"
         printf 'previousLegacy=%s\n' "$_previous_legacy"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
@@ -172,14 +307,28 @@ commit_mix_stage_if_needed() {
     # case the real next payload is authoritative; discard this compatibility clone.
     if [ -d "$NEXT_PAYLOAD" ] && [ -s "$NEXT_STATE" ]; then
         _next_font=$(read_value "$NEXT_STATE" font)
+        _stage_request=$(read_value "$MIX_STAGE_STATE" requestId)
+        _next_request=$(read_value "$NEXT_STATE" requestId)
         if [ "$_next_font" = mix ]; then
-            rm -rf "$MIX_STAGE" 2>/dev/null || true
-            rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
-            return 0
+            if [ ! -s "$MIX_STAGE_STATE" ] || { [ -n "$_stage_request" ] && [ "$_next_request" = "$_stage_request" ]; }; then
+                rm -rf "$MIX_STAGE" 2>/dev/null || true
+                rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
+                return 0
+            fi
         fi
     fi
 
+    # Recover a process killed after the stage directory was atomically renamed
+    # but before its small state file was committed. MIX_STAGE_STATE is retained
+    # until both pieces are durable, so the next status poll can finish the commit.
+    if [ -d "$NEXT_PAYLOAD" ] && [ ! -s "$NEXT_STATE" ] && [ -s "$MIX_STAGE_STATE" ]; then
+        write_next_state || return 1
+        rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
+        return 0
+    fi
+
     stage_has_fonts || return 1
+    stage_generation_matches || return 1
     complete_hyperos_stage
     rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
     mv "$MIX_STAGE" "$NEXT_PAYLOAD" 2>/dev/null || return 1
@@ -193,6 +342,38 @@ commit_mix_stage_if_needed() {
     return 0
 }
 
+finalize_lock_acquire() {
+    _tries=0
+    while [ "$_tries" -lt 20 ]; do
+        if mkdir "$FINALIZE_LOCK" 2>/dev/null; then
+            printf '%s\n' "$$" > "$FINALIZE_LOCK/pid" 2>/dev/null || {
+                rmdir "$FINALIZE_LOCK" 2>/dev/null || true
+                return 1
+            }
+            return 0
+        fi
+        _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
+        case "$_owner" in
+            ''|*[!0-9]*) _owner='' ;;
+        esac
+        if [ -z "$_owner" ] || ! kill -0 "$_owner" 2>/dev/null; then
+            rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
+            rmdir "$FINALIZE_LOCK" 2>/dev/null || true
+            continue
+        fi
+        sleep 1
+        _tries=$((_tries + 1))
+    done
+    return 1
+}
+
+finalize_lock_release() {
+    _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
+    [ -z "$_owner" ] || [ "$_owner" = "$$" ] || return 1
+    rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
+    rmdir "$FINALIZE_LOCK" 2>/dev/null || true
+}
+
 write_legacy_mix_mode() {
     _tmp="$REALMOD/config/font_runtime_legacy_v14_4.conf.tmp.$$"
     {
@@ -202,7 +383,14 @@ write_legacy_mix_mode() {
 }
 
 finalize_mix_stage() {
-    if ! commit_mix_stage_if_needed; then
+    if ! finalize_lock_acquire; then
+        printf '{"status":"error","message":"复合字体已生成但提交锁不可用，请稍后重试"}\n'
+        return 1
+    fi
+    commit_mix_stage_if_needed
+    _commit_rc=$?
+    finalize_lock_release >/dev/null 2>&1 || true
+    if [ "$_commit_rc" -ne 0 ]; then
         printf '{"status":"error","message":"复合字体已生成但下一启动负载提交失败"}\n'
         return 1
     fi
@@ -239,6 +427,11 @@ setup_runtime() {
     force_link "$LEGACY/util_functions.sh" "$RUNTIME/common/util_functions.sh" || return 1
     force_link "$LEGACY/font_check.sh" "$RUNTIME/common/font_check.sh" || return 1
     force_link "$LEGACY/rom_adapters.sh" "$RUNTIME/common/rom_adapters.sh" || return 1
+    # Keep the v14.4 font engine, but use the current detached-task and nested-task
+    # handoff helpers. Without them Android can keep the public task at 34% until
+    # the complete composite build exits.
+    force_link "$REALMOD/common/background_task.sh" "$RUNTIME/common/background_task.sh" || return 1
+    force_link "$REALMOD/common/mix_task_handoff.sh" "$RUNTIME/common/mix_task_handoff.sh" || return 1
     force_link "$REALMOD/common/python" "$RUNTIME/common/python" || return 1
     force_link "$REALMOD/common/font_manager.sh" "$RUNTIME/common/font_manager.sh" || return 1
     force_link "$REALMOD/common/legacy_v14_4_switch.sh" "$RUNTIME/common/legacy_v14_4_switch.sh" || return 1
@@ -268,9 +461,17 @@ if [ "$_cmd" = finalize ]; then
     finalize_mix_stage
     exit $?
 fi
+if [ "$_cmd" = config ]; then
+    mix_config_json_fast
+    exit 0
+fi
+if [ "$_cmd" = status ]; then
+    mix_status_json_fast "${2:-}"
+    exit 0
+fi
 case "$_cmd" in
     start)
-        prepare_mix_stage || {
+        prepare_mix_stage "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" || {
             printf '{"status":"error","message":"无法创建复合字体下一启动暂存负载"}\n'
             exit 1
         }
@@ -290,6 +491,11 @@ setup_runtime "$_payload" || {
     exit 1
 }
 export LUOSHU_REAL_MODDIR="$REALMOD"
+export LUOSHU_MIX_REQUEST_ID="$(read_value "$MIX_STAGE_STATE" requestId)"
+export LUOSHU_MIX_MANIFEST="$MIX_MANIFEST"
+export LUOSHU_MIX_EXPECTED_CJK="$(read_value "$MIX_STAGE_STATE" cjk)"
+export LUOSHU_MIX_EXPECTED_LATIN="$(read_value "$MIX_STAGE_STATE" latin)"
+export LUOSHU_MIX_EXPECTED_DIGIT="$(read_value "$MIX_STAGE_STATE" digit)"
 export MODDIR="$RUNTIME"
 export MODULE_DIR="$RUNTIME"
 

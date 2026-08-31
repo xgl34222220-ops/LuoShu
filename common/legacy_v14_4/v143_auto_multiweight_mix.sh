@@ -36,11 +36,21 @@ LOCK_FILE="$MODDIR/.font_switch.lock"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODE_HELPER" ] && . "$MODE_HELPER"
+[ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
 read_value() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'; }
 clean_spec() { printf '%s' "$1" | tr -d '\r\n'; }
 normalize_mode() { case "$1" in auto) printf 'auto\n' ;; *) printf 'fixed\n' ;; esac; }
+
+clear_auto_worker_pid() {
+    _caw_task="${1:-}"
+    if type luoshu_clear_task_pid >/dev/null 2>&1; then
+        luoshu_clear_task_pid "$WORKER_PID" "$_caw_task"
+    else
+        rm -f "$WORKER_PID" 2>/dev/null || true
+    fi
+}
 
 resolve_mode() {
     _requested="$1"
@@ -306,6 +316,7 @@ save_mix_config() {
 }
 
 worker() {
+    trap '' HUP
     _wanted="$1"
     [ "$(read_value "$TASK_FILE" task)" = "$_wanted" ] || exit 0
     _cjk=$(read_value "$TASK_FILE" cjk)
@@ -334,15 +345,15 @@ worker() {
         mkdir -p "$_dir" 2>/dev/null || exit 1
         prepare_source cjk "$_cjk" "$_cjk_axes" "$_cjk_mode" "$_weight" "$_dir/cjk.ttf" || {
             update_task "$_wanted" failed "中文字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
-            rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+            rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
         prepare_source latin "$_latin" "$_latin_axes" "$_latin_mode" "$_weight" "$_dir/latin.ttf" || {
             update_task "$_wanted" failed "英文字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
-            rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+            rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
         prepare_source digit "$_digit" "$_digit_axes" "$_digit_mode" "$_weight" "$_dir/digit.ttf" || {
             update_task "$_wanted" failed "数字字体 ${_weight} 字重准备失败" 100 "$(date +%s)"
-            rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+            rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
         if [ "$_weight" = 400 ]; then
             _output="$_root/fonts/${_family}-Regular.ttf"
@@ -351,7 +362,7 @@ worker() {
         fi
         build_composite_cached "$_dir/cjk.ttf" "$_dir/latin.ttf" "$_dir/digit.ttf" "$_output" "$_dir/progress.json" || {
             update_task "$_wanted" failed "${_weight} 字重复合失败" 100 "$(date +%s)"
-            rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+            rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
         rm -rf "$_dir" 2>/dev/null || true
     done
@@ -361,16 +372,16 @@ worker() {
     printf '%s\n' "$_result" >>"$LOG_FILE" 2>/dev/null || true
     printf '%s\n' "$_result" | grep -q '"status":"ok"' || {
         update_task "$_wanted" failed '自动多字重字体族应用失败' 100 "$(date +%s)"
-        rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+        rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
     }
     save_mix_config "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" \
         "$_cjk_mode" "$_latin_mode" "$_digit_mode" || {
         update_task "$_wanted" failed '组合配置保存失败' 100 "$(date +%s)"
-        rm -rf "$_root"; rm -f "$WORKER_PID"; exit 1
+        rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
     }
     update_task "$_wanted" success '自动多字重复合字体已准备，完整重启后生效' 100 "$(date +%s)"
     rm -rf "$_root" 2>/dev/null || true
-    rm -f "$WORKER_PID" 2>/dev/null || true
+    clear_auto_worker_pid "$_wanted"
 }
 
 precheck_mix() {
@@ -436,8 +447,16 @@ start_mix() {
     write_task "$_task" queued '自动多字重任务已进入队列' "$_cjk" "$_latin" "$_digit" \
         "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_cjk_mode" "$_latin_mode" "$_digit_mode" \
         "$_root" '' "$(date +%s)" '' 1
-    ( MODDIR="$MODDIR" sh "$0" worker "$_task" ) </dev/null >>"$LOG_FILE" 2>&1 &
-    printf '%s\n' "$!" >"$WORKER_PID" 2>/dev/null || true
+    if type luoshu_start_detached >/dev/null 2>&1; then
+        luoshu_start_detached "$WORKER_PID" "$_task" "$LOG_FILE" sh "$0" worker "$_task" || {
+            update_task "$_task" failed '无法启动独立后台任务' 100 "$(date +%s)"
+            printf '{"status":"error","message":"无法启动独立后台任务"}\n'
+            return
+        }
+    else
+        ( trap '' HUP; MODDIR="$MODDIR" sh "$0" worker "$_task" ) </dev/null >>"$LOG_FILE" 2>&1 &
+        printf '%s\n' "$!" >"$WORKER_PID" 2>/dev/null || true
+    fi
     printf '{"status":"ok","data":{"task":"%s","cjkMode":"%s","latinMode":"%s","digitMode":"%s"}}\n' \
         "$(json_escape "$_task")" "$_cjk_mode" "$_latin_mode" "$_digit_mode"
 }
@@ -472,7 +491,7 @@ recover_task() {
         _pid=$(cat "$WORKER_PID" 2>/dev/null)
         [ -z "$_pid" ] || ! kill -0 "$_pid" 2>/dev/null || kill "$_pid" 2>/dev/null || true
     fi
-    rm -f "$WORKER_PID" 2>/dev/null || true
+    clear_auto_worker_pid ''
     sh "$FALLBACK_ENGINE" recover
 }
 

@@ -19,7 +19,15 @@ luoshu_font_rebuild_marker_reconcile >/dev/null 2>&1 || true
 _lfbc_active=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
 [ -n "$_lfbc_active" ] || _lfbc_active=default
 if [ "$_lfbc_active" != default ]; then
-    type font_config_boot_guard >/dev/null 2>&1 && font_config_boot_guard "$_lfbc_active" >/dev/null 2>&1 || true
+    # The physical compatibility compositor has its own mount-confirmation
+    # contract in service.sh and deliberately carries no v4 device-template
+    # manifest. Running the v4 guard here falsely labels every successfully
+    # activated composite as an expired payload and leaves the App showing both
+    # "confirmed" and "next payload failed" at the same time.
+    if [ ! -f "$MODDIR/config/font_runtime_legacy_v14_4.conf" ]; then
+        type font_config_boot_guard >/dev/null 2>&1 && \
+            font_config_boot_guard "$_lfbc_active" >/dev/null 2>&1 || true
+    fi
     type luoshu_private_self_mount_ensure >/dev/null 2>&1 && \
         luoshu_private_self_mount_ensure >/dev/null 2>&1 || true
 fi

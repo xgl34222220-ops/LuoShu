@@ -50,6 +50,12 @@ internal object RootShell {
         } catch (error: Throwable) {
             process?.destroyForcibly()
             val raw = error.message.orEmpty()
+            if (
+                error is IOException &&
+                raw.contains("interrupted by close", ignoreCase = true)
+            ) {
+                return@withContext ShellResult(75, "", "Root 输出暂时中断，请重试")
+            }
             val message = if (
                 error is IOException &&
                 (raw.contains("Cannot run program \"su\"") || raw.contains("No such file or directory"))

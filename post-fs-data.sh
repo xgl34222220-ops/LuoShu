@@ -41,6 +41,16 @@ record_mount_loader_failure() {
         >> "$MODDIR/logs/post-fs-data.log" 2>/dev/null || true
 }
 
+scan_stock_before_self_mount_postfs() {
+    _ls_stock_manager="$MODDIR/common/font_manager.sh"
+    _ls_stock_inventory="$MODDIR/config/device_font_inventory.json"
+    [ -f "$_ls_stock_manager" ] || return 0
+    if [ -f "$MODDIR/config/stock_inventory_scan_pending" ] || [ ! -s "$_ls_stock_inventory" ]; then
+        LUOSHU_STOCK_VIEW_VERIFIED=1 MODDIR="$MODDIR" \
+            sh "$_ls_stock_manager" action stock_scan >>"$MODDIR/logs/post-fs-data.log" 2>&1 || true
+    fi
+}
+
 if [ ! -f "$LEGACY_MODE" ]; then
     if [ -f "$V4_POST_FS" ]; then
         exec sh "$V4_POST_FS"
@@ -61,6 +71,7 @@ if [ ! -f "$LEGACY_MODE" ]; then
                 luoshu_private_unmount_module_view "$MODDIR" >/dev/null 2>&1 || true
             ;;
         *)
+            scan_stock_before_self_mount_postfs
             type luoshu_private_self_mount_ensure >/dev/null 2>&1 || {
                 record_mount_loader_failure
                 exit 0
@@ -98,6 +109,7 @@ case "$_lpf_stage" in
             luoshu_private_unmount_module_view "$MODDIR" >/dev/null 2>&1 || true
         ;;
     *)
+        scan_stock_before_self_mount_postfs
         type luoshu_private_self_mount_ensure >/dev/null 2>&1 || {
             record_mount_loader_failure
             exit 0

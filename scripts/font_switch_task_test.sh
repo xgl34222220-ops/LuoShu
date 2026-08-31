@@ -25,7 +25,10 @@ case "${3:-}" in
     bad) printf '%s\n' '{"status":"error","message":"fake failure"}' ;;
     slow)
         trap 'printf "%s\n" rolled-back > "${ROLLBACK_MARKER:?}"; exit 143' TERM INT
-        sleep 31
+        # Leave scheduling headroom around the 30-second boundary. On a loaded
+        # CI host the one-second polling loop can be delayed long enough for a
+        # 31-second child to exit just before the timeout branch runs.
+        sleep 36
         printf '%s\n' '{"status":"ok"}'
         ;;
     hold)

@@ -25,12 +25,27 @@ fi
 [ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
 [ -f "$MODDIR/common/mount_self_backend.sh" ] && . "$MODDIR/common/mount_self_backend.sh"
 
+scan_stock_before_self_mount_postmount() {
+    _ls_stock_manager="$MODDIR/common/font_manager.sh"
+    _ls_stock_inventory="$MODDIR/config/device_font_inventory.json"
+    [ -f "$_ls_stock_manager" ] || return 0
+    if [ -f "$MODDIR/config/stock_inventory_scan_pending" ] || [ ! -s "$_ls_stock_inventory" ]; then
+        LUOSHU_STOCK_VIEW_VERIFIED=1 MODDIR="$MODDIR" \
+            sh "$_ls_stock_manager" action stock_scan >>"$MODDIR/logs/post-mount.log" 2>&1 || true
+    fi
+}
+
 type luoshu_private_mount_module_view >/dev/null 2>&1 && \
     luoshu_private_mount_module_view "$MODDIR" >/dev/null 2>&1 || true
 
 [ -f "$HYPEROS_LEGACY_COMPAT" ] && . "$HYPEROS_LEGACY_COMPAT"
 type luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 && \
     luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 || true
+
+# App-side su processes may live in a different KernelSU mount namespace and miss
+# captured bind lowers. Persist the stock metrics at the one guaranteed point:
+# immediately before LuoShu installs its own overlay/per-file binds.
+scan_stock_before_self_mount_postmount
 
 if ! type luoshu_private_self_mount_ensure >/dev/null 2>&1; then
     mkdir -p "$MODDIR/config" "$MODDIR/logs" 2>/dev/null || true

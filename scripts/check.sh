@@ -253,6 +253,8 @@ sh "$ROOT/scripts/coloros_consistency_mapping_test.sh"
 FONT_INVENTORY_TEST_FONT=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit 2>/dev/null || true)
 [ -s "$FONT_INVENTORY_TEST_FONT" ]
 python3 "$ROOT/scripts/font_inventory_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/font_inventory_scan_v3_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/stock_inventory_scan_wrapper_test.py"
 sh "$ROOT/scripts/rom_adapter_inventory_test.sh" "$FONT_INVENTORY_TEST_FONT"
 # The per-device engine is the release-critical HyperOS/KernelSU path. These
 # were previously only syntax-compiled, allowing composite-outline and stale
@@ -295,6 +297,9 @@ sh "$ROOT/scripts/stability_test.sh"
 sh "$ROOT/scripts/font_library_cache_test.sh"
 sh "$ROOT/scripts/app_installer_test.sh"
 sh "$ROOT/scripts/nested_mix_task_handoff_test.sh"
+sh "$ROOT/scripts/legacy_mix_34_progress_test.sh"
+sh "$ROOT/scripts/legacy_mix_finalize_race_test.sh"
+sh "$ROOT/scripts/stock_scan_lock_test.sh"
 
 test -x "$ROOT/common/python/bin/luoshu-python"
 echo 'LuoShu App-only source checks passed.'

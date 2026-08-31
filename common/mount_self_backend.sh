@@ -50,3 +50,33 @@ _luoshu_overlay_mount_dir() {
     rm -rf "$_lsomb_lower" 2>/dev/null || true
     return 1
 }
+
+# OverlayFS is not available on every KernelSU/HyperOS combination. The atomic
+# runtime then falls back to per-file bind mounts, but the stock directory must
+# still remain reachable for later inventory scans and stock-metric alignment.
+# Capture it before installing any file binds and detach its propagation so the
+# later child mounts cannot leak back into this stock view.
+_luoshu_capture_lower_dir() {
+    _lscld_target="$1"
+    _lscld_key="$2"
+    _lscld_state=$(_luoshu_self_state_root)
+    _lscld_lower="$_lscld_state/lower/$_lscld_key"
+
+    [ -d "$_lscld_target" ] || return 1
+    _luoshu_umount_cmd "$_lscld_lower" >/dev/null 2>&1 || true
+    rm -rf "$_lscld_lower" 2>/dev/null || true
+    mkdir -p "$_lscld_lower" 2>/dev/null || return 1
+    _luoshu_mount_cmd -o bind "$_lscld_target" "$_lscld_lower" >/dev/null 2>&1 || {
+        rm -rf "$_lscld_lower" 2>/dev/null || true
+        return 1
+    }
+    _luoshu_mount_cmd --make-private "$_lscld_lower" >/dev/null 2>&1 || true
+    if [ -n "${_lsme_mount_list:-}" ]; then
+        printf '%s\n' "$_lscld_lower" >> "$_lsme_mount_list" 2>/dev/null || {
+            _luoshu_umount_cmd "$_lscld_lower" >/dev/null 2>&1 || true
+            rm -rf "$_lscld_lower" 2>/dev/null || true
+            return 1
+        }
+    fi
+    return 0
+}

@@ -141,6 +141,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     private var watchedTaskId: String = ""
     private var cachedFingerprint: String = ""
     private var fontRequestJob: Job? = null
+    private var refreshJob: Job? = null
+    private var mixConfigJob: Job? = null
     private var pendingForceRefresh = false
     private var prewarmRequested = false
 
@@ -208,7 +210,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
 
     fun refresh() {
         snapshot = snapshot.copy(loading = true, error = "")
-        viewModelScope.launch {
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch {
             val result = RootShell.exec(
                 "if [ -f ${RootShell.quote(bridge)} ]; then sh ${RootShell.quote(bridge)} status; " +
                     "else printf '%s\\n' '{\"status\":\"error\",\"message\":\"请先刷入匹配的洛书模块\"}'; fi",
@@ -366,7 +369,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     fun refreshMixConfig() {
         if (mixState.loading || mixState.busy) return
         mixState = mixState.copy(loading = true, error = "")
-        viewModelScope.launch {
+        mixConfigJob?.cancel()
+        mixConfigJob = viewModelScope.launch {
             val result = RootShell.exec(
                 "sh ${RootShell.quote(bridge)} mix_config",
                 timeoutMs = 25_000L,
@@ -396,7 +400,12 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 )
                 normalizeMixSelections()
             } catch (error: Throwable) {
-                mixState = mixState.copy(loading = false, error = error.message ?: "组合配置读取失败")
+                val message = error.message.orEmpty()
+                mixState = if (message.contains("interrupted by close", ignoreCase = true)) {
+                    mixState.copy(loading = false, error = "")
+                } else {
+                    mixState.copy(loading = false, error = message.ifBlank { "组合配置读取失败" })
+                }
             }
         }
     }

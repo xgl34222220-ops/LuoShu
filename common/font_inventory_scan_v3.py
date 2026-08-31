@@ -90,12 +90,22 @@ def _resolve_actual(logical: Path, explicit: Path | None, aliases: Iterable[Path
         return explicit
     candidates = (logical, *tuple(aliases))
     if overlay_risk:
+        existing = False
+        last_error: Exception | None = None
         for candidate in candidates:
-            for prefix in base.MIRROR_PREFIXES:
-                mirrored = prefix / candidate.relative_to("/")
-                if mirrored.is_dir():
-                    return mirrored
-        raise base.InventoryError(f"旧版字体覆盖仍在活动，无法安全读取原厂目录：{logical}")
+            existing = existing or candidate.exists()
+            try:
+                resolved = base._pick_actual_root(candidate, None, True)
+            except base.InventoryError as error:
+                last_error = error
+                continue
+            if resolved.is_dir():
+                return resolved
+        if not existing:
+            return logical
+        if last_error is not None:
+            raise last_error
+        raise base.InventoryError(f"字体覆盖仍在活动，无法安全读取原厂目录：{logical}")
     for candidate in candidates:
         if candidate.is_dir():
             return candidate
@@ -110,9 +120,8 @@ def _resolve_primary_font_roots(args: Any, overlay_risk: bool) -> list[base.Font
 
 
 def _resolve_aux_font_roots(args: Any, overlay_risk: bool) -> list[base.FontRoot]:
-    del overlay_risk
     return [
-        base.FontRoot(partition, logical, _resolve_actual(logical, getattr(args, argument), (), False))
+        base.FontRoot(partition, logical, _resolve_actual(logical, getattr(args, argument), (), overlay_risk))
         for partition, logical, argument in AUX_FONT_SPECS
     ]
 
@@ -122,7 +131,7 @@ def _resolve_etc_roots(args: Any, overlay_risk: bool) -> list[tuple[str, Path, P
     for partition, logical, argument, aliases in PRIMARY_ETC_SPECS:
         roots.append((partition, logical, _resolve_actual(logical, getattr(args, argument), aliases, overlay_risk)))
     for partition, logical, argument in AUX_ETC_SPECS:
-        roots.append((partition, logical, _resolve_actual(logical, getattr(args, argument), (), False)))
+        roots.append((partition, logical, _resolve_actual(logical, getattr(args, argument), (), overlay_risk)))
     return roots
 
 

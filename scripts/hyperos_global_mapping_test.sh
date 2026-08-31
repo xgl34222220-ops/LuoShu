@@ -99,8 +99,8 @@ ok grep -qF "$LUOSHU_CUST_FONTS_ROOT|$MODULE_DIR/cust/fonts" "$ROOT/hyperos-root
 printf 'HyperOS global mapping and compact-anchor reuse tests passed.\n'
 
 # Safe next-boot staging intentionally restores the exact v3.3.6 compact line
-# contract. Keep it weight-cached: the later per-target metric experiment caused a
-# real-device switching regression and must not return here.
+# contract. Cache by distinct source: a fixed composite feeds every weight slot,
+# so weight-keyed caching needlessly rewrites the same large font nine times.
 CASE='HyperOS v3.3.6 紧凑行框安全暂存链'
 STAGE_HELPER="$REPO_ROOT/common/hyperos_stage_complete.sh"
 ok grep -q 'hyperos_336_compact_anchor' "$STAGE_HELPER"
@@ -109,7 +109,13 @@ ok grep -q 'TYPO_DESCENDER_RATIO = 0.30' "$STAGE_HELPER"
 ok grep -q 'WIN_DESCENT_CAP_RATIO = 0.35' "$STAGE_HELPER"
 ok grep -q 'HHEA_ASCENT_CAP_RATIO = 0.98' "$STAGE_HELPER"
 ok grep -q 'HHEA_DESCENT_CAP_RATIO = 0.30' "$STAGE_HELPER"
-ok grep -q 'hyperos-336-wght-${_weight}.font' "$STAGE_HELPER"
+ok grep -q 'hyperos_336_source_key' "$STAGE_HELPER"
+ok grep -q 'hyperos-336-source-${_source_key}.font' "$STAGE_HELPER"
+ok grep -q 'hyperos-slot-contracts.tsv' "$STAGE_HELPER"
+ok grep -q 'slot_contract_key "$_logical_slot"' "$STAGE_HELPER"
+ok grep -q '_contract_key="slot-$_slot_key"' "$STAGE_HELPER"
+ok grep -q 'strict_contract = sys.argv\[5\]' "$STAGE_HELPER"
+no grep -q 'hyperos-336-wght-' "$STAGE_HELPER"
 no grep -q 'device_font_slot_plan' "$STAGE_HELPER"
 no grep -q 'device_font_slot_build' "$STAGE_HELPER"
 sh -n "$STAGE_HELPER"

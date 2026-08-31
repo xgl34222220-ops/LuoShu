@@ -71,6 +71,11 @@ luoshu_next_boot_activate() {
     _lnba_font=$(luoshu_next_boot_value "$_lnba_state" font)
     _lnba_previous=$(luoshu_next_boot_value "$_lnba_state" previousFont)
     _lnba_previous_legacy=$(luoshu_next_boot_value "$_lnba_state" previousLegacy)
+    _lnba_request=$(luoshu_next_boot_value "$_lnba_state" requestId)
+    _lnba_cjk=$(luoshu_next_boot_value "$_lnba_state" cjk)
+    _lnba_latin=$(luoshu_next_boot_value "$_lnba_state" latin)
+    _lnba_digit=$(luoshu_next_boot_value "$_lnba_state" digit)
+    _lnba_digest=$(luoshu_next_boot_value "$_lnba_state" compositeHash)
     [ -n "$_lnba_font" ] || return 1
     [ -n "$_lnba_previous" ] || _lnba_previous=default
     [ "$_lnba_previous_legacy" = true ] || _lnba_previous_legacy=false
@@ -110,6 +115,9 @@ luoshu_next_boot_activate() {
     chmod 0644 "$_lnba_module/config/active_font.conf" 2>/dev/null || true
     {
         printf 'font=%s\n' "$_lnba_font"
+        printf 'requestId=%s\n' "$_lnba_request"
+        printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$_lnba_cjk" "$_lnba_latin" "$_lnba_digit"
+        printf 'compositeHash=%s\n' "$_lnba_digest"
         printf 'previousFont=%s\n' "$_lnba_previous"
         printf 'previousLegacy=%s\n' "$_lnba_previous_legacy"
         printf 'retired=%s\n' "$_lnba_retired"

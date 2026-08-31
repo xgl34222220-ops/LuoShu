@@ -62,6 +62,11 @@ printf 'default\n' > "$NEXT_TMP/module/config/active_font.conf"
 cat > "$NEXT_TMP/module/config/font-payload-next.conf" <<'EOF_NEXT_STATE'
 state=prepared
 font=DemoFont
+requestId=request-demo
+cjk=CjkDemo
+latin=LatinDemo
+digit=DigitDemo
+compositeHash=digest-demo
 previousFont=default
 previousLegacy=false
 time=1
@@ -70,6 +75,10 @@ MODDIR="$NEXT_TMP/module" MODULE_DIR="$NEXT_TMP/module" \
     sh -c '. "$1"; luoshu_next_boot_activate' sh "$NEXT_BOOT"
 grep -q '^next-live$' "$NEXT_TMP/module/.luoshu-payload/system/fonts/Roboto-Regular.ttf"
 grep -q '^DemoFont$' "$NEXT_TMP/module/config/active_font.conf"
+grep -q '^requestId=request-demo$' "$NEXT_TMP/module/config/font-payload-activated.conf"
+grep -q '^latin=LatinDemo$' "$NEXT_TMP/module/config/font-payload-activated.conf"
+grep -q '^digit=DigitDemo$' "$NEXT_TMP/module/config/font-payload-activated.conf"
+grep -q '^compositeHash=digest-demo$' "$NEXT_TMP/module/config/font-payload-activated.conf"
 grep -q '^core=physical-safe-v1$' "$NEXT_TMP/module/config/font_runtime_legacy_v14_4.conf"
 test ! -d "$NEXT_TMP/module/.luoshu-payload-next"
 find "$NEXT_TMP/module/.luoshu-retired" -type f -name Roboto-Regular.ttf -exec grep -q '^old-live$' {} \;

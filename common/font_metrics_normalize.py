@@ -74,7 +74,10 @@ def _device_build_key() -> str:
     return ""
 
 
-def load_inventory_contract(path: Path | None = None) -> dict[str, Any] | None:
+def load_inventory_contract(
+    path: Path | None = None,
+    target_slot: str | None = None,
+) -> dict[str, Any] | None:
     inventory = path or default_inventory_path()
     try:
         payload = json.loads(inventory.read_text(encoding="utf-8"))
@@ -92,10 +95,13 @@ def load_inventory_contract(path: Path | None = None) -> dict[str, Any] | None:
     recorded_key = str(payload.get("buildKey", ""))
     if current_key and recorded_key != current_key:
         return None
-    main_slot = payload.get("mainSlot")
-    if not isinstance(main_slot, dict):
+    selected_slot = payload.get("mainSlot")
+    if target_slot:
+        slots = payload.get("slots")
+        selected_slot = slots.get(target_slot) if isinstance(slots, dict) else None
+    if not isinstance(selected_slot, dict):
         return None
-    metrics = main_slot.get("metrics")
+    metrics = selected_slot.get("metrics")
     if not isinstance(metrics, dict):
         return None
     hhea = metrics.get("hhea")
@@ -117,7 +123,8 @@ def load_inventory_contract(path: Path | None = None) -> dict[str, Any] | None:
         "source": "inventory",
         "inventory": str(inventory),
         "buildKey": str(payload.get("buildKey", "")),
-        "slot": str(main_slot.get("slotName", main_slot.get("path", ""))),
+        "slot": str(selected_slot.get("slotName", selected_slot.get("path", target_slot or ""))),
+        "slotPath": str(target_slot or selected_slot.get("path", "")),
         "upem": upem,
         "ascent": ascent,
         "descent": descent,
@@ -300,6 +307,7 @@ def normalize_font_metrics(
     font: TTFont,
     monospaced: bool = False,
     target_contract: dict[str, Any] | None = None,
+    enclose_outlines: bool = True,
 ) -> dict[str, object]:
     if "head" not in font or "hhea" not in font or "OS/2" not in font:
         raise MetricsError("字体缺少 head、hhea 或 OS/2 度量表")
@@ -329,12 +337,12 @@ def normalize_font_metrics(
     descender = _clamp_signed(-descender_abs)
 
     head = font["head"]
-    y_max = int(getattr(head, "yMax", ascender))
-    y_min = int(getattr(head, "yMin", -descender_abs))
+    y_max = int(getattr(head, "yMax", ascender)) if enclose_outlines else ascender
+    y_min = int(getattr(head, "yMin", -descender_abs)) if enclose_outlines else -descender_abs
     # head.yMax/yMin can be stale (composite builds recalc the box only at save time),
     # so enclose the true outline extremes as well; otherwise hhea/typo stay contracted
     # and ink still overflows the line box (标题压热度 / 标签少一截).
-    extremes = _outline_extremes(font)
+    extremes = _outline_extremes(font) if enclose_outlines else None
     if extremes is not None:
         import math
         y_min = min(y_min, int(math.floor(extremes[0])))
@@ -396,6 +404,7 @@ def normalize_font_metrics(
         "targetUpem": int(target_contract.get("upem", 0)) if target_contract else 0,
         "targetAscent": int(target_contract.get("ascent", 0)) if target_contract else 0,
         "targetDescent": int(target_contract.get("descent", 0)) if target_contract else 0,
+        "outlineEnclosure": bool(enclose_outlines),
     }
 
 
@@ -422,11 +431,22 @@ def normalize_path(
     monospaced: bool = False,
     inventory: Path | None = None,
     target_contract: dict[str, Any] | None = None,
+    target_slot: str | None = None,
+    strict_contract: bool = False,
 ) -> dict[str, object]:
-    contract = target_contract if target_contract is not None else load_inventory_contract(inventory)
+    contract = (
+        target_contract
+        if target_contract is not None
+        else load_inventory_contract(inventory, target_slot=target_slot)
+    )
     font, face = load_font(source)
     try:
-        report = normalize_font_metrics(font, monospaced=monospaced, target_contract=contract)
+        report = normalize_font_metrics(
+            font,
+            monospaced=monospaced,
+            target_contract=contract,
+            enclose_outlines=not strict_contract,
+        )
         atomic_save(font, output)
     finally:
         font.close()
@@ -435,9 +455,9 @@ def normalize_path(
 
 
 def run_batch(manifest: Path, inventory: Path | None = None) -> int:
-    """Normalize many fonts in one process. Manifest lines: input<TAB>output[<TAB>mono]."""
+    """Normalize many fonts in one process. Lines: input<TAB>output[<TAB>mono[<TAB>slot]]."""
     failures = 0
-    contract = load_inventory_contract(inventory)
+    contracts: dict[str, dict[str, Any] | None] = {}
     for raw in manifest.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -445,8 +465,18 @@ def run_batch(manifest: Path, inventory: Path | None = None) -> int:
         parts = line.split("\t")
         source, output = Path(parts[0]), Path(parts[1])
         monospaced = len(parts) > 2 and parts[2] == "mono"
+        target_slot = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
+        contract_key = target_slot or ""
+        if contract_key not in contracts:
+            contracts[contract_key] = load_inventory_contract(inventory, target_slot=target_slot)
         try:
-            report = normalize_path(source, output, monospaced, inventory=inventory, target_contract=contract)
+            report = normalize_path(
+                source,
+                output,
+                monospaced,
+                inventory=inventory,
+                target_contract=contracts[contract_key],
+            )
             print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
         except Exception as error:
             failures += 1
@@ -462,13 +492,22 @@ def main() -> int:
     parser.add_argument("--monospace", action="store_true")
     parser.add_argument("--batch", type=Path, help="批量清单：每行 input<TAB>output[<TAB>mono]，单进程处理全部字重")
     parser.add_argument("--inventory", type=Path, default=default_inventory_path(), help="设备原厂字体清单")
+    parser.add_argument("--target-slot", help="按清单中指定原厂槽位的行框指标归一化")
+    parser.add_argument("--strict-contract", action="store_true", help="专用时钟槽严格采用原厂行框，不由无关字形扩张")
     args = parser.parse_args()
     if args.batch:
         return run_batch(args.batch, args.inventory)
     if not args.input or not args.output:
         parser.error("--input 与 --output 为必填（或使用 --batch）")
     try:
-        print(json.dumps(normalize_path(args.input, args.output, args.monospace, inventory=args.inventory), ensure_ascii=False, separators=(",", ":")))
+        print(json.dumps(normalize_path(
+            args.input,
+            args.output,
+            args.monospace,
+            inventory=args.inventory,
+            target_slot=args.target_slot,
+            strict_contract=args.strict_contract,
+        ), ensure_ascii=False, separators=(",", ":")))
         return 0
     except Exception as error:
         args.output.unlink(missing_ok=True)
