@@ -168,13 +168,7 @@ clone_mix_tree() {
         return 0
     fi
 
-    rm -rf "$MIX_STAGE" 2>/dev/null || true
-    mkdir -p "$MIX_STAGE" 2>/dev/null || return 1
-    if cp -rf "$_source/." "$MIX_STAGE/" 2>/dev/null; then
-        find "$MIX_STAGE" -type d -exec chmod 0755 {} \; 2>/dev/null || true
-        find "$MIX_STAGE" -type f -exec chmod 0644 {} \; 2>/dev/null || true
-        return 0
-    fi
+
 
     rm -rf "$MIX_STAGE" 2>/dev/null || true
     return 1
@@ -259,10 +253,10 @@ stage_generation_matches() {
 
 complete_hyperos_stage() {
     _helper="$REALMOD/common/hyperos_stage_complete.sh"
-    [ -f "$_helper" ] || return 0
     if [ -e /system/fonts/MiSansVF.ttf ] || [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)" ] || \
        [ -n "$(getprop ro.miui.ui.version.name 2>/dev/null)" ]; then
-        LUOSHU_REAL_MODDIR="$REALMOD" sh "$_helper" "$MIX_STAGE" >> "$LOG_FILE" 2>&1 || true
+        [ -f "$_helper" ] || return 1
+        LUOSHU_REAL_MODDIR="$REALMOD" sh "$_helper" "$MIX_STAGE" >> "$LOG_FILE" 2>&1 || return 1
     fi
 }
 
@@ -329,7 +323,7 @@ commit_mix_stage_if_needed() {
 
     stage_has_fonts || return 1
     stage_generation_matches || return 1
-    complete_hyperos_stage
+    complete_hyperos_stage || return 1
     rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
     mv "$MIX_STAGE" "$NEXT_PAYLOAD" 2>/dev/null || return 1
     if ! write_next_state; then

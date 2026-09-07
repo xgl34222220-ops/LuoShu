@@ -2,7 +2,7 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 ENGINE="$ROOT/common/multiweight_mix_task.sh"
-BRIDGE="$ROOT/common/font_mix_controller.sh"
+BRIDGE="$ROOT/common/legacy_v14_4/v14_mix.sh"
 MODE="$ROOT/common/mix_weight_mode.sh"
 
 test -f "$ENGINE"
@@ -22,7 +22,7 @@ grep -q 'Regular.ttf' "$ENGINE"
 grep -q '\${_family}-\${_role}.otf' "$ENGINE"
 grep -q 'cjkMode=%s' "$ENGINE"
 grep -q 'LUOSHU_PUBLIC_DIR=.*FONT_MANAGER.*action switch' "$ENGINE"
-grep -q 'multiweight_mix_task.sh' "$BRIDGE"
+grep -q 'v143_auto_multiweight_mix.sh' "$BRIDGE"
 grep -q 'infer_mix_weight_mode' "$BRIDGE"
 grep -q 'AUTO_WEIGHTED.*status' "$BRIDGE"
 grep -q 'AUTO_WEIGHTED.*recover' "$BRIDGE"

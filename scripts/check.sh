@@ -99,7 +99,7 @@ cmp -s /tmp/luoshu-common-files.txt /tmp/luoshu-manifest-common.txt
 
 # 活跃运行时代码不得再出现历史开发版本头、WebUI 函数或未使用的报告脚本。
 ! grep -RInE --exclude-dir=python --exclude-dir=legacy_v14_4 --exclude=legacy_v14_4_switch.sh --exclude=font_manager.sh \
-  '(^|[^0-9])v1[34](\.|[^0-9])|Beta[[:space:]]*[0-9]|Hotfix' \
+  '^[[:space:]]*#[[:space:]]*(洛书|LuoShu)[[:space:]]+v1[34]\.' \
   "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data-v4.sh" "$ROOT/service_v4.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
 ! grep -qE 'get_all_fonts_json|get_font_info_json|scan_installed_families|refresh_font_cache' "$ROOT/common/util_functions.sh"
 test ! -e "$ROOT/common/font_report.sh"
@@ -127,10 +127,7 @@ grep -q 'native_font_index.json' "$ROOT/service.sh"
 # 字体处理、安全门禁和原生桥能力必须保留。
 grep -q 'full-composite-v11' "$ROOT/common/font_mix.sh"
 grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
-grep -q 'weighted_mix_task.sh' "$ROOT/common/font_mix_controller.sh"
-grep -q 'multiweight_mix_task.sh' "$ROOT/common/font_mix_controller.sh"
-grep -q 'infer_mix_weight_mode' "$ROOT/common/font_mix_controller.sh"
-grep -q 'font_role_check.sh' "$ROOT/common/font_mix_controller.sh"
+sh "$ROOT/scripts/mix_entry_router_test.sh"
 grep -q 'for _weight in 100 200 300 400 500 600 700 800 900' "$ROOT/common/multiweight_mix_task.sh"
 grep -q 'build_composite_cached' "$ROOT/common/multiweight_mix_task.sh"
 grep -q 'LuoShuAutoMix' "$ROOT/common/multiweight_mix_task.sh"

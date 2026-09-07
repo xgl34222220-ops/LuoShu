@@ -228,6 +228,9 @@ luoshu_hyperos_clock_payload_ensure() {
         while IFS= read -r _lhcc_name; do
             [ -n "$_lhcc_name" ] || continue
             [ -e "$_lhcc_real/$_lhcc_name" ] || continue
+            # This is a missing-slot repair, not a rebuild. Staged OEM slots may
+            # have a different stock contract from their system namesake.
+            [ -s "$_lhcc_overlay/$_lhcc_name" ] && continue
             _lhcc_source="$(_lhcc_source_for_name "$_lhcc_name")" || continue
             mkdir -p "$_lhcc_overlay" 2>/dev/null || continue
             if _lhcc_link_or_copy "$_lhcc_source" "$_lhcc_overlay/$_lhcc_name"; then

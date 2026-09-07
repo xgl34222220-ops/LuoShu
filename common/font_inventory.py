@@ -299,6 +299,7 @@ def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]
                 "lineGap": int(getattr(hhea, "lineGap", 0)),
             },
             "os2": {
+                "fsSelection": int(getattr(os2, "fsSelection", 0)),
                 "typoAscender": int(getattr(os2, "sTypoAscender", 0)),
                 "typoDescender": int(getattr(os2, "sTypoDescender", 0)),
                 "typoLineGap": int(getattr(os2, "sTypoLineGap", 0)),

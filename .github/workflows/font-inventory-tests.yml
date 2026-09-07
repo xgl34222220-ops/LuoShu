@@ -15,7 +15,6 @@ on:
       - customize.sh
       - .luoshu-runtime/customize-v227.sh
       - scripts/font_inventory_test.py
-      - scripts/font_inventory_scan_test.py
       - scripts/font_inventory_scan_v3_test.py
       - scripts/stock_inventory_scan_wrapper_test.py
       - scripts/rom_adapter_inventory_test.sh

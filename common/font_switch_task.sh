@@ -239,7 +239,8 @@ run_worker() {
         fi
     elif [ "$_rc" -eq 124 ] || [ "$_rc" -eq 137 ]; then
         cat "$_output" >> "$LOG_FILE" 2>/dev/null || true
-        write_task "$_task" failed "$_font" "字体切换超过 ${TIMEOUT_SECONDS} 秒，已终止；当前启动字体未被改动" \
+        _last_stage=$(progress_message "$_progress" '正在准备下一启动字体负载' "$(progress_value "$_progress" 0)")
+        write_task "$_task" failed "$_font" "字体切换超过 ${TIMEOUT_SECONDS} 秒，已终止（${_last_stage}）；当前启动字体未被改动" \
             "$_started" "$_finished" '' '' '' "$TIMEOUT_SECONDS" '' false 100
     else
         _message=$(sed -n 's/.*"message":"\([^"]*\)".*/\1/p' "$_output" 2>/dev/null | tail -n1)

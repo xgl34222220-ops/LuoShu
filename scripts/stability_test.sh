@@ -6,10 +6,11 @@ TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-stability)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
 MODULE="$TMP/module"
-mkdir -p "$MODULE/common" "$MODULE/config"
+mkdir -p "$MODULE/common/legacy_v14_4" "$MODULE/config"
 cp "$ROOT/common/module_status.sh" "$MODULE/common/module_status.sh"
 cp "$ROOT/common/font_switch_task.sh" "$MODULE/common/font_switch_task.sh"
 cp "$ROOT/common/font_mix_controller.sh" "$MODULE/common/font_mix_controller.sh"
+cp "$ROOT/common/legacy_v14_4/mix_router.sh" "$MODULE/common/legacy_v14_4/mix_router.sh"
 cp "$ROOT/common/font_mix.sh" "$MODULE/common/font_mix.sh"
 cp "$ROOT/module.prop" "$MODULE/module.prop"
 
@@ -42,7 +43,7 @@ MODDIR="$MODULE" sh "$MODULE/common/module_status.sh" Beta >/dev/null
 grep -q '当前字体：Beta$' "$MODULE/module.prop"
 rm -f "$MODULE/config/self-mount.conf" "$MODULE/config/device-font-load-verification.conf"
 
-# 当完整多轴引擎不可用时，组合桥仍应正确返回历史任务状态。
+# Production fast status reads persisted tasks without initializing engines.
 cat > "$MODULE/config/font_mix.conf" <<'EOT'
 cjk=中文甲
 latin=Latin B
@@ -61,6 +62,7 @@ EOT
 MIX=$(MODDIR="$MODULE" sh "$MODULE/common/font_mix_controller.sh" status mix-task)
 printf '%s' "$MIX" | grep -q '"cjk":"中文甲"'
 test ! -e "$TMP/manager-called"
+MODDIR="$MODULE" sh "$MODULE/common/module_status.sh" mix >/dev/null
 grep -q '当前字体：组合：中文甲 / Latin B / DIN C$' "$MODULE/module.prop"
 ! grep -q '待验证' "$MODULE/module.prop"
 

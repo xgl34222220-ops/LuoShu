@@ -188,13 +188,7 @@ clone_payload_tree() {
         return 0
     fi
 
-    cleanup_stage
-    mkdir -p "$STAGE_PAYLOAD" 2>/dev/null || return 1
-    if cp -rf "$_clone_source/." "$STAGE_PAYLOAD/" 2>/dev/null; then
-        find "$STAGE_PAYLOAD" -type d -exec chmod 0755 {} \; 2>/dev/null || true
-        find "$STAGE_PAYLOAD" -type f -exec chmod 0644 {} \; 2>/dev/null || true
-        return 0
-    fi
+
 
     cleanup_stage
     return 1
@@ -263,12 +257,8 @@ stage_hyperos_complete() {
             sh "$_stage_bridge" "$STAGE_PAYLOAD" >> "$LOG_FILE" 2>&1 && return 0
     fi
 
-    # Compatibility fallback for packages that do not yet carry the stage bridge.
-    type luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 || return 0
-    LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT="$STAGE_PAYLOAD"
-    export LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT
-    luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 || true
-    unset LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT 2>/dev/null || true
+    # A failed modern stage must not be replaced by raw aliases and reported OK.
+    return 1
 }
 
 stage_verify() {
@@ -396,7 +386,10 @@ switch_font() {
         mirror_existing_targets
         if [ "${IS_HYPEROS:-false}" = true ]; then
             progress 76 '正在补齐 HyperOS 状态栏、锁屏和系统 UI 字体槽位'
-            stage_hyperos_complete
+            stage_hyperos_complete || {
+                safe_error 'HyperOS 字体槽位或度量处理失败，请查看字体切换日志'
+                return 1
+            }
         fi
         progress 86 '正在校验下一启动字体负载'
         stage_verify "$_font" || { safe_error '新字体负载校验失败，当前启动字体未被改动'; return 1; }

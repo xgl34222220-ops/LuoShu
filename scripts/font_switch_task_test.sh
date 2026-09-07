@@ -24,6 +24,7 @@ case "${3:-}" in
     reused) printf '%s\n' '{"status":"ok","data":{"font":"reused","reused":true}}' ;;
     bad) printf '%s\n' '{"status":"error","message":"fake failure"}' ;;
     slow)
+        printf 'percent=76\nmessage=正在处理 HyperOS 字体度量\n' > "$LUOSHU_SWITCH_PROGRESS_FILE"
         trap 'printf "%s\n" rolled-back > "${ROLLBACK_MARKER:?}"; exit 143' TERM INT
         # Leave scheduling headroom around the 30-second boundary. On a loaded
         # CI host the one-second polling loop can be delayed long enough for a
@@ -112,6 +113,7 @@ start_output="$(sh "$ROOT/common/font_switch_task.sh" start slow)"
 printf '%s\n' "$start_output" | grep -q '"status":"ok"'
 wait_state failed
 grep -q '超过 30 秒' "$LUOSHU_SWITCH_TASK_FILE"
+grep -q '76% · 正在处理 HyperOS 字体度量' "$LUOSHU_SWITCH_TASK_FILE"
 grep -q '^percent=100$' "$LUOSHU_SWITCH_TASK_FILE"
 
 cat > "$LUOSHU_SWITCH_TASK_FILE" <<'EOF_STALE'

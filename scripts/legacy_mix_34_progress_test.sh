@@ -101,8 +101,6 @@ grep -q 'mix_task_handoff.sh' "$ROOT/common/legacy_v14_4/mix_router.sh"
 grep -q 'mix-engine-start.*json' "$ROOT/common/legacy_v14_4/font_mix_runtime.sh"
 ! grep -q '_output=$(LUOSHU_PUBLIC_DIR=' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
 ! sed -n '/^payload_stage_begin()/,/^}/p' "$ROOT/common/legacy_v14_4/font_mix_engine.sh" | grep -q 'cp -af'
-grep -q 'hyperos_336_source_key' "$ROOT/common/hyperos_stage_complete.sh"
-grep -q 'hyperos-336-source-' "$ROOT/common/hyperos_stage_complete.sh"
-! grep -q 'hyperos-336-wght-' "$ROOT/common/hyperos_stage_complete.sh"
+grep -q 'hyperos_metrics_batch.py' "$ROOT/common/hyperos_stage_complete.sh"
 
 echo 'Legacy composite start advances past 34% before the nested start shell exits.'
