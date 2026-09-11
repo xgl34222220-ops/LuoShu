@@ -168,6 +168,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     # Generate every distinct source/contract before replacing even one alias.
     # Thus subsequent sources cannot accidentally refer to earlier outputs.
     prepared = []
+    slot_report = []
     fallback = 0
     try:
         for source, dest, contract in jobs:
@@ -179,8 +180,19 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 cache[key] = output
             prepared.append((cache[key], dest))
             fallback += contract[-1] == 'fallback'
+            slot_report.append({'slot': '/' + dest.relative_to(stage).as_posix(),
+                                'metricsSource': contract[-1],
+                                'referenceUpem': contract[0],
+                                'hhea': list(contract[1:4]),
+                                'typo': list(contract[4:7]),
+                                'win': list(contract[7:9]),
+                                'useTypoMetrics': contract[9]})
         for output, dest in prepared:
             link_copy(output, dest)
+        report = stage / '.luoshu-metrics-report.json'
+        report.write_text(json.dumps({'schema': 'luoshu-slot-metrics-v1',
+                                      'slots': slot_report}, ensure_ascii=False), encoding='utf-8')
+        report.chmod(0o644)
     except Exception:
         shutil.rmtree(outputs, ignore_errors=True)
         raise

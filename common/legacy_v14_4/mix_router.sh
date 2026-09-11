@@ -26,6 +26,7 @@ LEGACY_MODE="$REALMOD/config/font_runtime_legacy_v14_4.conf"
 REBOOT_CONF="$REALMOD/config/text_reboot_required.conf"
 LOG_FILE="$REALMOD/logs/fontswitch.log"
 FINALIZE_LOCK="$REALMOD/.mix-stage-finalize.lock"
+[ -f "$LEGACY/payload_clone.sh" ] && . "$LEGACY/payload_clone.sh"
 
 read_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
@@ -152,24 +153,9 @@ clone_mix_tree() {
     rm -rf "$MIX_STAGE" 2>/dev/null || true
     mkdir -p "$MIX_STAGE" 2>/dev/null || return 1
 
-    # Activated payloads can be active mount sources. Some kernels/root managers
-    # reject hard-link or metadata-preserving copies after first activation, which
-    # used to make the next composite switch fail immediately. Retry each method
-    # from a completely clean stage and finally fall back to plain recursive copy.
-    if cp -al "$_source/." "$MIX_STAGE/" 2>/dev/null; then
+    if luoshu_clone_payload_metadata "$_source" "$MIX_STAGE"; then
         return 0
     fi
-
-    rm -rf "$MIX_STAGE" 2>/dev/null || true
-    mkdir -p "$MIX_STAGE" 2>/dev/null || return 1
-    if cp -R "$_source/." "$MIX_STAGE/" 2>/dev/null; then
-        find "$MIX_STAGE" -type d -exec chmod 0755 {} \; 2>/dev/null || true
-        find "$MIX_STAGE" -type f -exec chmod 0644 {} \; 2>/dev/null || true
-        return 0
-    fi
-
-
-
     rm -rf "$MIX_STAGE" 2>/dev/null || true
     return 1
 }

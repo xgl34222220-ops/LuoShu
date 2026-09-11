@@ -70,6 +70,9 @@ class HyperOSMetricsTest(unittest.TestCase):
         with patch.object(TTFont, 'getGlyphSet', side_effect=AssertionError('outline rebuild')):
             result = batch.build(self.module, self.stage, ['MiSansVF.ttf'])
         self.assertEqual(result, {'mapped': 1, 'generated': 1, 'fallbackSlots': 0})
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertEqual(report['slots'][0]['metricsSource'], 'stock')
+        self.assertEqual(report['slots'][0]['slot'], '/system/fonts/MiSansVF.ttf')
         with TTFont(self.fonts / 'MiSansVF.ttf') as out, TTFont(self.fonts / '400.ttf') as src:
             self.assertEqual((out['hhea'].ascent, out['hhea'].descent, out['hhea'].lineGap), (1100, -350, 30))
             self.assertEqual((out['OS/2'].sTypoAscender, out['OS/2'].sTypoLineGap), (1080, 20))
@@ -102,6 +105,8 @@ class HyperOSMetricsTest(unittest.TestCase):
         (self.root / 'stock/system/MiSansVF.ttf').touch()
         result = batch.build(self.module, self.stage, ['MiSansVF.ttf'])
         self.assertEqual(result['fallbackSlots'], 1)
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertEqual(report['slots'][0]['metricsSource'], 'fallback')
         (self.fonts / '400.ttf').write_bytes(b'corrupt')
         with self.assertRaises(Exception):
             batch.build(self.module, self.stage, ['MiSansVF.ttf'])
@@ -121,6 +126,37 @@ class HyperOSMetricsTest(unittest.TestCase):
     def test_reject_live_payload(self):
         with self.assertRaisesRegex(ValueError, '本次启动'):
             batch.build(self.module, self.module / '.luoshu-payload', ['MiSansVF.ttf'])
+
+    def test_stage_covers_the_same_dynamic_slots_as_boot(self):
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot(),
+                        '/product/fonts/MiSansDisplayVF.ttf': slot(ascent=850, descent=-150),
+                        '/product/fonts/XiaomiSansVF.otf': slot(ascent=900, descent=-200)})
+        common = self.module / 'common'
+        (common / 'python/bin').mkdir(parents=True)
+        (common / 'legacy_v14_4').mkdir()
+        (self.module / 'module.prop').touch()
+        for relative in ('hyperos_metrics_batch.py', 'font_metrics_normalize.py',
+                         'legacy_v14_4/hyperos_full_coverage.sh',
+                         'legacy_v14_4/hyperos_clock_compat.sh'):
+            (common / relative).write_bytes((ROOT / 'common' / relative).read_bytes())
+        (common / 'hyperos_global.sh').write_text('''
+_hyperos_core_files() { echo MiSansVF.ttf; }
+_hyperos_weight_files() { :; }
+_hyperos_upright_ui_files() { :; }
+_hyperos_clock_ui_files() { :; }
+''')
+        launcher = common / 'python/bin/luoshu-python'
+        launcher.write_text('#!/bin/sh\nunset PYTHONHOME PYTHONPATH LD_LIBRARY_PATH\n'
+                            'exec "$LUOSHU_TEST_PYTHON" "$@"\n')
+        launcher.chmod(0o755)
+        subprocess.run(['sh', str(ROOT / 'common/hyperos_stage_complete.sh'), str(self.stage)],
+            env={**os.environ, 'LUOSHU_REAL_MODDIR': str(self.module),
+                 'LUOSHU_TEST_PYTHON': sys.executable}, capture_output=True, check=True)
+        for name, ascent in (('MiSansDisplayVF.ttf', 850), ('XiaomiSansVF.otf', 900)):
+            target = self.stage / 'product/fonts' / name
+            self.assertTrue(target.exists(), 'boot-only aliases bypass per-slot metrics')
+            with TTFont(target) as font:
+                self.assertEqual(font['hhea'].ascent, ascent)
 
     def test_stage_failure_propagates_through_both_callers(self):
         helper = self.module / 'common/hyperos_stage_complete.sh'

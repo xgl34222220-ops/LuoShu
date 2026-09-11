@@ -8,6 +8,7 @@ LOCK="$MODDIR/.google-font-provider.lock"
 LOG="$MODDIR/logs/google-font-provider.log"
 
 [ -f "$BRIDGE" ] || exit 0
+[ -f "$MODDIR/common/font_switch_lock.sh" ] && . "$MODDIR/common/font_switch_lock.sh"
 
 _waited=0
 while [ "$(getprop sys.boot_completed 2>/dev/null)" != 1 ] && [ "$_waited" -lt 600 ]; do
@@ -16,10 +17,14 @@ while [ "$(getprop sys.boot_completed 2>/dev/null)" != 1 ] && [ "$_waited" -lt 6
 done
 [ "$(getprop sys.boot_completed 2>/dev/null)" = 1 ] || exit 0
 
-if ! mkdir "$LOCK" 2>/dev/null; then
-    exit 0
-fi
-trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT HUP INT TERM
+# A bare mkdir lock survives an interrupted boot and used to disable all later
+# attempts. Reuse the module's PID/start-time/boot-identity lock implementation.
+type luoshu_font_lock_acquire >/dev/null 2>&1 || exit 1
+luoshu_font_lock_acquire "$LOCK" "$$" || exit 0
+trap 'luoshu_font_lock_release "$LOCK" "$$" >/dev/null 2>&1 || true' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 _attempt=1
 _limit="${LUOSHU_GOOGLE_FONT_RETRIES:-24}"
@@ -27,6 +32,8 @@ case "$_limit" in ''|*[!0-9]*) _limit=24 ;; esac
 [ "$_limit" -ge 1 ] 2>/dev/null || _limit=1
 
 while [ "$_attempt" -le "$_limit" ]; do
+    _active=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null)
+    [ -n "$_active" ] && [ "$_active" != default ] || exit 0
     MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$BRIDGE" apply >/dev/null 2>&1
     _rc=$?
     [ "$_rc" -eq 0 ] && exit 0

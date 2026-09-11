@@ -8,6 +8,15 @@ MODDIR="${0%/*}"
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
 V4_SERVICE="$MODDIR/service_v4.sh"
 
+# Start from the real entry point before either service route is selected. The
+# mount loader sees $0=service_v4.sh on one route and is absent on the other.
+if [ -f "$MODDIR/common/google_font_provider_service.sh" ]; then
+    (
+        MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
+            sh "$MODDIR/common/google_font_provider_service.sh" boot
+    ) </dev/null >/dev/null 2>&1 &
+fi
+
 if [ ! -f "$LEGACY_MODE" ]; then
     [ -f "$V4_SERVICE" ] && exec sh "$V4_SERVICE"
     exit 0

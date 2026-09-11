@@ -100,11 +100,46 @@ _gfp_source_for_weight() {
         900) _gfp_order='900 800 700 600 500 400 300 200 100' ;;
         *) _gfp_order='400 500 300 600 200 700 100 800 900' ;;
     esac
+    # The active physical payload is authoritative after boot. The v4 source
+    # cache can belong to a previous selection and must never override it.
+    _gfp_live="$MODDIR/.luoshu-payload/system/fonts"
+    if [ -d "$MODDIR/.luoshu-payload" ]; then
+        for _gfp_w in $_gfp_order; do
+            case "$_gfp_w" in
+                100) _gfp_style=Thin ;; 200) _gfp_style=ExtraLight ;;
+                300) _gfp_style=Light ;; 500) _gfp_style=Medium ;;
+                600) _gfp_style=SemiBold ;; 700) _gfp_style=Bold ;;
+                800) _gfp_style=ExtraBold ;; 900) _gfp_style=Black ;;
+                *) _gfp_style=Regular ;;
+            esac
+            for _gfp_candidate in \
+                "$_gfp_live/LuoShu-${_gfp_w}.ttf" \
+                "$_gfp_live/${_gfp_w}.ttf" \
+                "$_gfp_live/.luoshu-font-store/wght-${_gfp_w}.font" \
+                "$_gfp_live/Roboto-${_gfp_style}.ttf" \
+                "$_gfp_live/SysSans-En-${_gfp_style}.ttf" \
+                "$_gfp_live/SysFont-${_gfp_style}.ttf"; do
+                if _gfp_valid_font "$_gfp_candidate"; then
+                    printf '%s\n' "$_gfp_candidate"
+                    return 0
+                fi
+            done
+        done
+        for _gfp_candidate in \
+            "$_gfp_live/.luoshu-font-store/mix-composite.font" \
+            "$_gfp_live/.luoshu-font-store/regular.font" \
+            "$_gfp_live/MiSansLatinVF.ttf" "$_gfp_live/MiSansVF.ttf"; do
+            if _gfp_valid_font "$_gfp_candidate"; then
+                printf '%s\n' "$_gfp_candidate"
+                return 0
+            fi
+        done
+        return 1
+    fi
     for _gfp_w in $_gfp_order; do
         for _gfp_candidate in \
             "$MODDIR/config/device-font-sources/LuoShu-${_gfp_w}.ttf" \
-            "$MODDIR/system/fonts/LuoShu-${_gfp_w}.ttf" \
-            "$MODDIR/.luoshu-payload/system/fonts/LuoShu-${_gfp_w}.ttf"; do
+            "$MODDIR/system/fonts/LuoShu-${_gfp_w}.ttf"; do
             if _gfp_valid_font "$_gfp_candidate"; then
                 printf '%s\n' "$_gfp_candidate"
                 return 0

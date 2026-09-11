@@ -43,6 +43,7 @@ export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
 [ -f "$LEGACY_DIR/font_check.sh" ] && . "$LEGACY_DIR/font_check.sh"
 [ -f "$LEGACY_DIR/rom_adapters.sh" ] && . "$LEGACY_DIR/rom_adapters.sh"
 [ -f "$MODDIR/common/font_switch_lock.sh" ] && . "$MODDIR/common/font_switch_lock.sh"
+[ -f "$LEGACY_DIR/payload_clone.sh" ] && . "$LEGACY_DIR/payload_clone.sh"
 HYPEROS_COMPAT="$LEGACY_DIR/hyperos_full_coverage.sh"
 [ -f "$HYPEROS_COMPAT" ] && . "$HYPEROS_COMPAT"
 
@@ -61,6 +62,8 @@ read_state_value() {
 
 progress() {
     _p="$1"; shift; _m="$*"
+    printf '[%s] [SAFE-SWITCH] stage=%s message=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_p" "$_m" >> "$LOG_FILE" 2>/dev/null || true
     [ -n "$PROGRESS_FILE" ] || return 0
     _tmp="${PROGRESS_FILE}.tmp.$$"
     {
@@ -172,24 +175,9 @@ clone_payload_tree() {
     cleanup_stage
     mkdir -p "$STAGE_PAYLOAD" 2>/dev/null || return 1
 
-    # Hard-link cloning is fastest on the normal /data/adb path, but after a payload
-    # has been activated and used as a mount source some kernels/root managers reject
-    # link or metadata-preserving copies. Retry from a clean stage with a plain
-    # recursive copy so a successful first switch never makes the second one unusable.
-    if cp -al "$_clone_source/." "$STAGE_PAYLOAD/" 2>/dev/null; then
+    if luoshu_clone_payload_metadata "$_clone_source" "$STAGE_PAYLOAD"; then
         return 0
     fi
-
-    cleanup_stage
-    mkdir -p "$STAGE_PAYLOAD" 2>/dev/null || return 1
-    if cp -R "$_clone_source/." "$STAGE_PAYLOAD/" 2>/dev/null; then
-        find "$STAGE_PAYLOAD" -type d -exec chmod 0755 {} \; 2>/dev/null || true
-        find "$STAGE_PAYLOAD" -type f -exec chmod 0644 {} \; 2>/dev/null || true
-        return 0
-    fi
-
-
-
     cleanup_stage
     return 1
 }
@@ -367,7 +355,7 @@ switch_font() {
         fi
     fi
 
-    progress 22 '正在复制当前启动负载到安全暂存区'
+    progress 22 '正在保留非字体负载并建立安全暂存区'
     stage_clone_live || { safe_error '无法创建下一启动字体负载'; return 1; }
     progress 34 '正在清理暂存区旧文字映射'
     stage_clear_text_payload || { safe_error '无法准备下一启动字体负载'; return 1; }

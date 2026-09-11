@@ -23,9 +23,22 @@ assert meta == {
     "changelog": "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/v4.0.0/RELEASE_NOTES_v4.0.0.md",
 }
 
+# Published stable and prerelease channels advance independently, and may lag
+# module.prop while a new release is being built. Check each published record's
+# consistency without requiring both channels to remain on the v4.0.0 fixture.
 for metadata_file in ("update.json", "update-prerelease.json"):
     actual = json.loads((ROOT / metadata_file).read_text(encoding="utf-8"))
-    assert actual == meta, (metadata_file, actual)
+    version = actual['version']
+    assert isinstance(version, str) and version.startswith('v')
+    assert mod.artifact_version(version) == version
+    assert isinstance(actual['versionCode'], int) and actual['versionCode'] > 0
+    notes_file = f"RELEASE_NOTES_{version}.md"
+    assert (ROOT / notes_file).is_file(), (metadata_file, notes_file)
+    expected = mod.build_metadata(
+        repository="xgl34222220-ops/LuoShu", version=version,
+        version_code=actual['versionCode'], tag=version, notes_file=notes_file,
+    )
+    assert actual == expected, (metadata_file, actual)
 
 for kwargs in (
     dict(repository="bad", version="v1", version_code=1, tag="v1", notes_file="n"),
