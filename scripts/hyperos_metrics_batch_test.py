@@ -31,11 +31,14 @@ def font_file(path, top=700):
     fb.setupPost(); fb.setupMaxp(); fb.save(path)
 
 
-def slot(ascent=1100, descent=-350, win=1400, typo=1080, use_typo=True):
-    return {'metrics': {'upem': 1000,
+def slot(ascent=1100, descent=-350, win=1400, typo=1080, use_typo=True, head=None, upem=1000):
+    result = {'metrics': {'upem': upem,
         'hhea': {'ascent': ascent, 'descent': descent, 'lineGap': 30},
         'os2': {'typoAscender': typo, 'typoDescender': -320, 'typoLineGap': 20,
                 'winAscent': win, 'winDescent': 400, 'fsSelection': 128 if use_typo else 0}}}
+    if head is not None:
+        result['metrics']['head'] = dict(zip(('yMin', 'yMax'), head))
+    return result
 
 
 class HyperOSMetricsTest(unittest.TestCase):
@@ -103,6 +106,47 @@ class HyperOSMetricsTest(unittest.TestCase):
                         '/product/fonts/MiSansVF.ttf': slot()})
         result = batch.build(self.module, self.stage, ['MiSansVF.ttf'])
         self.assertEqual(result['generated'], 1)
+
+    def test_padded_layout_frame_uses_each_stock_slot_and_scales_units(self):
+        self.inventory({'/system/fonts/MiClock.otf': slot(head=(-201, 880)),
+                        '/product/fonts/MiClock.otf': slot(head=(-555, 2163), upem=2048)})
+        with patch.object(TTFont, 'getGlyphSet', side_effect=AssertionError('outline rebuild')):
+            result = batch.build(self.module, self.stage, ['MiClock.otf'])
+        self.assertEqual(result['generated'], 2, 'head must participate in slot cache key')
+        for part, expected in (('system', (-201, 880)), ('product', (-271, 1056))):
+            with TTFont(self.stage / part / 'fonts/MiClock.otf') as font:
+                self.assertEqual((font['head'].yMin, font['head'].yMax), expected)
+                with TTFont(self.fonts / '400.ttf') as source:
+                    self.assertEqual(font.reader['glyf'], source.reader['glyf'])
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertTrue(all(entry['layoutBoundsSource'] == 'stock' for entry in report['slots']))
+
+    def test_different_head_with_identical_line_metrics_cannot_share_alias(self):
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot(head=(-300, 1100)),
+                        '/system/fonts/MiClock.otf': slot(head=(-201, 880))})
+        result = batch.build(self.module, self.stage, ['MiSansVF.ttf', 'MiClock.otf'])
+        self.assertEqual(result['generated'], 2)
+        self.assertNotEqual((self.fonts / 'MiSansVF.ttf').stat().st_ino,
+                            (self.fonts / 'MiClock.otf').stat().st_ino)
+
+    def test_zero_and_shallow_stock_descent_do_not_trigger_generic_fallback(self):
+        for descent in (0, -1, -20):
+            with self.subTest(descent=descent):
+                self.inventory({'/system/fonts/MiClock.otf': slot(descent=descent, head=(100, 700))})
+                result = batch.build(self.module, self.stage, ['MiClock.otf'])
+                self.assertEqual(result['fallbackSlots'], 0)
+                with TTFont(self.fonts / 'MiClock.otf') as font:
+                    self.assertEqual(font['hhea'].descent, descent)
+                    self.assertEqual(font['head'].yMin, 100)
+
+    def test_missing_or_malformed_head_keeps_line_metrics_and_reports_gap(self):
+        for head in (None, (700, 100), (-99999, 800)):
+            with self.subTest(head=head):
+                self.inventory({'/system/fonts/MiClock.otf': slot(head=head)})
+                self.assertEqual(batch.build(self.module, self.stage, ['MiClock.otf'])['fallbackSlots'], 0)
+                report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots'][0]
+                self.assertEqual(report['layoutBoundsSource'], 'source')
+                self.assertEqual(report['outputHead'], report['sourceHead'])
 
     def test_missing_inventory_reports_fallback_and_bad_source_fails(self):
         (self.root / 'stock/system/MiSansVF.ttf').touch()

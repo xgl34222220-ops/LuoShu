@@ -70,23 +70,6 @@ _gfp_active_font() {
     printf '%s\n' "$_gfp_active"
 }
 
-_gfp_weight() {
-    _gfp_name=$(basename "$1")
-    _gfp_value=$(printf '%s\n' "$_gfp_name" | tr '._-' '\n' | awk '/^(100|200|300|400|500|600|700|800|900)$/ { print; exit }')
-    case "$_gfp_value" in 100|200|300|400|500|600|700|800|900) printf '%s\n' "$_gfp_value"; return 0 ;; esac
-    case "$_gfp_name" in
-        *Thin*) printf '100\n' ;;
-        *ExtraLight*|*UltraLight*) printf '200\n' ;;
-        *Light*) printf '300\n' ;;
-        *Medium*) printf '500\n' ;;
-        *SemiBold*|*DemiBold*) printf '600\n' ;;
-        *ExtraBold*|*UltraBold*) printf '800\n' ;;
-        *Black*|*Heavy*) printf '900\n' ;;
-        *Bold*) printf '700\n' ;;
-        *) printf '400\n' ;;
-    esac
-}
-
 _gfp_source_for_weight() {
     _gfp_requested="$1"
     case "$_gfp_requested" in
@@ -164,16 +147,12 @@ _gfp_targets() {
         /data/user/*/com.android.vending/files/fonts \
         /data/user_de/*/com.android.vending/files/fonts; do
         [ -d "$_gfp_root" ] || continue
-        find "$_gfp_root" -maxdepth 6 -type f \( \
-            -iname 'Google*Sans*.ttf' -o -iname 'Google*Sans*.otf' -o \
-            -iname 'Google_Sans*.ttf' -o -iname 'Google_Sans*.otf' \
-        \) -print 2>/dev/null >> "$_gfp_list"
+        # Cache filenames are not an API. The Python probe checks font headers
+        # and a strict family allowlist, including opaque and extensionless files.
+        find "$_gfp_root" -maxdepth 6 -type f -print 2>/dev/null >> "$_gfp_list"
     done
     if [ -d /data/fonts/files ]; then
-        find /data/fonts/files -maxdepth 3 -type f \( \
-            -iname 'Google*Sans*.ttf' -o -iname 'Google*Sans*.otf' -o \
-            -iname 'Google_Sans*.ttf' -o -iname 'Google_Sans*.otf' \
-        \) -print 2>/dev/null >> "$_gfp_list"
+        find /data/fonts/files -maxdepth 3 -type f -print 2>/dev/null >> "$_gfp_list"
     fi
     awk 'NF && !seen[$0]++' "$_gfp_list" 2>/dev/null
     rm -f "$_gfp_list" 2>/dev/null || true
@@ -186,7 +165,7 @@ _gfp_build_clone() {
     _gfp_source_hash=$(_gfp_hash "$_gfp_source")
     _gfp_target_hash=$(_gfp_hash "$_gfp_target")
     [ -n "$_gfp_source_hash" ] && [ -n "$_gfp_target_hash" ] || return 1
-    _gfp_key=$(printf '%s\n%s\n%s\n' "$_gfp_source_hash" "$_gfp_target_hash" "$_gfp_weight_value" | _gfp_hash_text)
+    _gfp_key=$(printf 'provider-v2\n%s\n%s\n%s\n' "$_gfp_source_hash" "$_gfp_target_hash" "$_gfp_weight_value" | _gfp_hash_text)
     [ -n "$_gfp_key" ] || return 1
     _gfp_output="$CACHE/${_gfp_key}.ttf"
     if ! _gfp_valid_font "$_gfp_output"; then
@@ -293,6 +272,10 @@ _gfp_mount_in_pid() {
 
         plain_detail=source-not-visible
         if [ -f "$plain" ]; then
+            if cmp -s "$plain" "$dst" 2>/dev/null; then
+                printf "ok:already"
+                exit 0
+            fi
             plain_detail=$(bind_one "$plain")
             if [ $? -eq 0 ]; then
                 printf "ok:plain"
@@ -311,6 +294,11 @@ _gfp_mount_in_pid() {
                     chcon --reference="$dst" "$stage" 2>/dev/null || true
                 elif command -v toybox >/dev/null 2>&1; then
                     toybox chcon --reference="$dst" "$stage" 2>/dev/null || true
+                fi
+                if cmp -s "$stage" "$dst" 2>/dev/null; then
+                    rm -f "$stage" 2>/dev/null || true
+                    printf "ok:already"
+                    exit 0
                 fi
                 stage_detail=$(bind_one "$stage")
                 stage_rc=$?
@@ -332,6 +320,7 @@ _gfp_mount_in_pid() {
     case "$_gfp_mount_detail" in
         ok:plain) _gfp_mount_mode=plain; _gfp_mount_detail=; return 0 ;;
         ok:staging) _gfp_mount_mode=staging; _gfp_mount_detail=; return 0 ;;
+        ok:already) _gfp_mount_mode=already; _gfp_mount_detail=; return 0 ;;
     esac
     [ "$_gfp_mount_rc" -eq 0 ] && _gfp_mount_detail=unexpected-success-without-mode
     return 1
@@ -349,8 +338,15 @@ _gfp_apply_once() {
     [ "$(_gfp_active_font)" != default ] || return 2
     mkdir -p "$CACHE" "$MODDIR/logs" 2>/dev/null || return 1
     _gfp_targets_file="$CACHE/.apply-targets.$$"
+    _gfp_candidates_file="$CACHE/.apply-candidates.$$"
     _gfp_state_tmp="${STATE}.tmp.$$"
-    _gfp_targets > "$_gfp_targets_file" 2>/dev/null || true
+    _gfp_targets > "$_gfp_candidates_file" 2>/dev/null || true
+    if ! _gfp_python --inspect-targets "$_gfp_candidates_file" > "$_gfp_targets_file" 2>> "$LOG"; then
+        rm -f "$_gfp_candidates_file" "$_gfp_targets_file" 2>/dev/null || true
+        _gfp_log 'provider bridge 未生效：字体缓存识别失败（Python/FontTools）'
+        return 1
+    fi
+    rm -f "$_gfp_candidates_file" 2>/dev/null || true
     : > "$_gfp_state_tmp" 2>/dev/null || return 1
     _gfp_found=0
     _gfp_prepared=0
@@ -360,6 +356,7 @@ _gfp_apply_once() {
     _gfp_ns_attempted=0
     _gfp_ns_plain=0
     _gfp_ns_staging=0
+    _gfp_ns_already=0
     _gfp_ns_failed=0
     _gfp_ns_first_error=
     _gfp_missing_first=
@@ -367,11 +364,9 @@ _gfp_apply_once() {
     if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
         _gfp_namespace_pid_list=$(_gfp_namespace_pids)
     fi
-    while IFS= read -r _gfp_target; do
+    while IFS="$(printf '\t')" read -r _gfp_target _gfp_weight_value; do
         _gfp_valid_font "$_gfp_target" || continue
-        case "$(basename "$_gfp_target")" in *Emoji*|*Color*Emoji*|*Code*) continue ;; esac
         _gfp_found=$((_gfp_found + 1))
-        _gfp_weight_value=$(_gfp_weight "$_gfp_target")
         _gfp_source=$(_gfp_source_for_weight "$_gfp_weight_value")
         if [ -z "$_gfp_source" ]; then
             _gfp_missing_sources=$((_gfp_missing_sources + 1))
@@ -397,6 +392,7 @@ _gfp_apply_once() {
                     case "$_gfp_mount_mode" in
                         plain) _gfp_ns_plain=$((_gfp_ns_plain + 1)) ;;
                         staging) _gfp_ns_staging=$((_gfp_ns_staging + 1)) ;;
+                        already) _gfp_ns_already=$((_gfp_ns_already + 1)) ;;
                     esac
                 else
                     _gfp_ns_failed=$((_gfp_ns_failed + 1))
@@ -417,15 +413,19 @@ _gfp_apply_once() {
         fi
     done < "$_gfp_targets_file"
     rm -f "$_gfp_targets_file" 2>/dev/null || true
-    _gfp_diag="命名空间=attempted:$_gfp_ns_attempted plain:$_gfp_ns_plain staging:$_gfp_ns_staging failed:$_gfp_ns_failed 缺源=$_gfp_missing_sources"
+    _gfp_diag="命名空间=attempted:$_gfp_ns_attempted plain:$_gfp_ns_plain staging:$_gfp_ns_staging already:$_gfp_ns_already failed:$_gfp_ns_failed 缺源=$_gfp_missing_sources"
     [ -n "$_gfp_ns_first_error" ] && _gfp_diag="$_gfp_diag 首个挂载错误=$_gfp_ns_first_error"
     [ -n "$_gfp_missing_first" ] && _gfp_diag="$_gfp_diag 首个缺源=$_gfp_missing_first"
     if [ "$_gfp_mounted" -gt 0 ]; then
         mv -f "$_gfp_state_tmp" "$STATE" 2>/dev/null || true
         chmod 0600 "$STATE" 2>/dev/null || true
         _gfp_log "provider bridge：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag"
-        [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || am force-stop com.android.vending >/dev/null 2>&1 || true
-        return 0
+        if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ] && [ $((_gfp_ns_plain + _gfp_ns_staging)) -gt 0 ]; then
+            am force-stop com.android.vending >/dev/null 2>&1 || true
+        fi
+        # A successful zygote bind alone does not prove GMS can open the clone.
+        [ "$_gfp_failed" -eq 0 ] && [ "$_gfp_ns_failed" -eq 0 ] && return 0
+        return 1
     fi
     rm -f "$_gfp_state_tmp" 2>/dev/null || true
     _gfp_log "provider bridge 未生效：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag"

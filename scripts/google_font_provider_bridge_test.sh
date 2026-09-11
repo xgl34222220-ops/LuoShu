@@ -14,6 +14,16 @@ TARGET_SOURCE=$(find /usr/share/fonts -type f -iname 'DejaVuSans-Bold.ttf' -prin
 TARGET="$TMP/Google_Sans-700-100_0-0_0.ttf"
 cp "$SOURCE" "$MOD/config/device-font-sources/LuoShu-700.ttf"
 cp "$TARGET_SOURCE" "$TARGET"
+python3 - "$TARGET" <<'PY'
+import sys
+from fontTools.ttLib import TTFont
+font = TTFont(sys.argv[1])
+for record in font['name'].names:
+    if record.nameID in (1, 16):
+        record.string = 'Google Sans'.encode(record.getEncoding())
+font.save(sys.argv[1])
+font.close()
+PY
 LUOSHU_GOOGLE_FONT_PYTHON="$(command -v python3)" \
 LUOSHU_GOOGLE_FONT_TARGETS="$TARGET" \
 LUOSHU_GOOGLE_FONT_DRY_RUN=1 \
@@ -48,3 +58,4 @@ finally:
 PY
 grep -q 'provider bridge：发现=1 生成=1 挂载=1 失败=0' "$MOD/logs/google-font-provider.log"
 echo 'google_font_provider_bridge_test: PASS'
+python3 "$ROOT/scripts/google_font_provider_patch_test.py"

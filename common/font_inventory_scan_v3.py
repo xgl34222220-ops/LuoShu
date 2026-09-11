@@ -17,6 +17,7 @@ import font_inventory as base
 import font_inventory_scan as v2
 
 SCANNER_REVISION = 3
+METRICS_REVISION = 2
 PRIMARY_FONT_SPECS = (
     ("system", Path("/system/fonts"), "system_fonts", (Path("/system/font"),)),
     ("system_ext", Path("/system_ext/fonts"), "system_ext_fonts", (Path("/system/system_ext/fonts"),)),
@@ -232,10 +233,38 @@ def _can_reuse(existing: dict[str, Any], build_key: str) -> bool:
     summary = existing.get("scanSummary")
     return (
         int(existing.get("scannerRevision", 0) or 0) == SCANNER_REVISION
+        and _has_current_metrics(existing)
         and isinstance(summary, dict)
         and "stockFontUniqueFileCount" in summary
         and "themeOverrideRoots" in summary
     )
+
+
+def _has_current_metrics(existing: dict[str, Any]) -> bool:
+    return (existing.get("metricsRevision") == METRICS_REVISION
+            and all(isinstance(entry.get("metrics", {}).get("head"), dict)
+                    for entry in existing.get("slots", {}).values())
+            and isinstance(existing.get("mainSlot", {}).get("metrics", {}).get("head"), dict))
+
+
+def _verify_upgrade_roots(font_roots: list[base.FontRoot], etc_roots: list[tuple[str, Path, Path]]) -> None:
+    """A metrics-only refresh must not promote live replacement fonts to stock.
+
+    Resolve each present root again through the existing lower/mirror safety
+    resolver, including explicit directory arguments. The private-payload wrapper
+    can also prove a partition is untouched; the pre-mount hook bypasses this
+    check only via its existing LUOSHU_STOCK_VIEW_VERIFIED contract.
+    """
+    aliases_by_root = {logical: aliases for _partition, logical, _argument, aliases
+                       in (*PRIMARY_FONT_SPECS, *PRIMARY_ETC_SPECS)}
+    sources = [(root.logical, root.actual) for root in font_roots]
+    sources.extend((logical, actual) for _partition, logical, actual in etc_roots)
+    for logical, actual in sources:
+        if not actual.is_dir():
+            continue
+        verified = _resolve_actual(logical, None, aliases_by_root.get(logical, ()), True)
+        if not verified.is_dir() or verified.resolve() != actual.resolve():
+            raise base.InventoryError(f"补充原厂字体度量需要可验证的 stock lower/mirror：{logical}")
 
 
 def scan(args: Any) -> int:
@@ -256,16 +285,40 @@ def scan(args: Any) -> int:
             "romKind": existing.get("romKind", "generic"),
         }, ensure_ascii=False))
         return 0
+    valid_existing = None
     if existing is not None:
         try:
             base.validate_inventory(existing, build_key)
         except base.InventoryError:
             output.unlink(missing_ok=True)
+        else:
+            valid_existing = existing
+    upgrade = valid_existing is not None and not _has_current_metrics(valid_existing)
+    try:
+        return _scan_current_roots(args, build_key, fingerprint, display_id, valid_existing, upgrade)
+    except Exception as error:
+        if not upgrade:
+            raise
+        # The former valid inventory remains readable. Return failure so the
+        # existing pending marker survives and the next pre-mount boot can retry.
+        print(json.dumps({
+            "status": "error", "retainedInventory": True, "metricsRefreshPending": True,
+            "message": f"原厂字体度量补充未完成，保留原有清单：{error}",
+        }, ensure_ascii=False), file=os.sys.stderr)
+        return 2
 
+
+def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id: str,
+                        existing: dict[str, Any] | None, upgrade: bool) -> int:
+    output: Path = args.output
     risk = base._overlay_risk(args.overlay_module)
+    require_verified = upgrade and os.environ.get("LUOSHU_STOCK_VIEW_VERIFIED", "").strip() != "1"
+    risk = risk or require_verified
     primary_roots = _resolve_primary_font_roots(args, risk)
     auxiliary_roots = _resolve_aux_font_roots(args, risk)
     etc_roots = _resolve_etc_roots(args, risk)
+    if require_verified:
+        _verify_upgrade_roots([*primary_roots, *auxiliary_roots], etc_roots)
     xml_sources = v2._discover_xml_sources(etc_roots)
 
     base._is_ui_family = v2._is_ui_family
@@ -291,6 +344,7 @@ def scan(args: Any) -> int:
         "schema": base.SCHEMA,
         "inventoryRevision": base.INVENTORY_REVISION,
         "scannerRevision": SCANNER_REVISION,
+        "metricsRevision": METRICS_REVISION,
         "state": "ready",
         "buildKey": build_key,
         "buildFingerprint": fingerprint,
@@ -318,6 +372,8 @@ def scan(args: Any) -> int:
         "mainSlot": {**main_entry, "path": main_path},
     }
     base.validate_inventory(inventory, build_key)
+    if upgrade and existing is not None and set(existing["slots"]) - set(slots):
+        raise base.InventoryError("原厂字体重扫未完整保留已有槽位")
     base._atomic_write(output, inventory)
     print(json.dumps({
         "status": "ok",

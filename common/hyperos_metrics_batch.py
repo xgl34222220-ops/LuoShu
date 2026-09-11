@@ -69,7 +69,7 @@ def read_inventory(module: Path) -> dict:
 
 
 def contract_for_slot(data: dict, logical: str) -> tuple:
-    """Cache all layout fields, including OS/2; equal hhea alone is insufficient."""
+    """Cache line metrics and the stock Skia top/bottom layout frame separately."""
     try:
         slot = (data.get('slots') or {}).get(logical, {})
         metrics = slot.get('metrics', {})
@@ -77,8 +77,8 @@ def contract_for_slot(data: dict, logical: str) -> tuple:
         hhea = metrics['hhea']
         ascent, descent = int(hhea['ascent']), int(hhea['descent'])
         gap = int(hhea.get('lineGap', 0))
-        if not (16 <= upem <= 16384 and .4 <= ascent / upem <= 1.6 and
-                .05 <= -descent / upem <= .9 and 0 <= gap / upem <= 1):
+        if not (16 <= upem <= 16384 and 0 < ascent <= 32767 and
+                -32768 <= descent <= 0 and 0 <= gap <= 32767):
             raise ValueError('invalid stock line metrics')
         os2 = metrics.get('os2', {})
         typo = (int(os2.get('typoAscender', ascent)),
@@ -93,15 +93,26 @@ def contract_for_slot(data: dict, logical: str) -> tuple:
         values = (ascent, descent, gap, *typo, *win)
         if any(abs(v) > 4 * upem for v in values) or min(win) < 0:
             raise ValueError('invalid stock metrics')
-        return (upem, *values, use_typo, 'stock')
+        # Skia/FreeType reads SFNT head for top/bottom, independently of hhea
+        # and OS/2. Old inventories have no head: retain their line contract,
+        # but explicitly report that the padded layout frame remains unaligned.
+        frame = None
+        head = metrics.get('head', {})
+        try:
+            ymin, ymax = int(head['yMin']), int(head['yMax'])
+            if -32768 <= ymin < ymax <= 32767 and ymax > 0:
+                frame = (ymin, ymax)
+        except (KeyError, TypeError, ValueError):
+            pass
+        return (upem, *values, use_typo, frame, 'stock')
     except (KeyError, TypeError, ValueError, ZeroDivisionError, AttributeError):
         # Older installations can lack a trustworthy inventory. Keep the known
         # compact fallback explicit in the report; never read the mounted overlay
         # as stock and never silently use an unnormalized raw font on errors.
-        return (1000, 980, -300, 0, 980, -300, 0, 980, 350, True, 'fallback')
+        return (1000, 980, -300, 0, 980, -300, 0, 980, 350, True, None, 'fallback')
 
 
-def write_metrics(source: Path, output: Path, contract: tuple) -> None:
+def write_metrics(source: Path, output: Path, contract: tuple) -> dict:
     # lazy + recalcBBoxes=False retains glyf/CFF/gvar as raw tables. Loading glyph
     # bounds just to change hhea/OS2 used to recompile entire CJK fonts per slot.
     face = _pick_face(source)
@@ -123,11 +134,27 @@ def write_metrics(source: Path, output: Path, contract: tuple) -> None:
         (os2.sTypoAscender, os2.sTypoDescender, os2.sTypoLineGap,
          os2.usWinAscent, os2.usWinDescent) = values[3:]
         os2.fsSelection = (os2.fsSelection & ~128) | (128 if contract[9] else 0)
+        source_frame = (int(head.yMin), int(head.yMax))
+        if contract[10] is not None:
+            frame = tuple(round(v * scale) for v in contract[10])
+            if not all(-32768 <= v <= 32767 for v in frame):
+                raise ValueError('原厂上下边界超出源字体数值范围')
+            # Android UI compatibility envelope, deliberately not a recomputed
+            # outline union. Filling a small Clock/Roboto slot with a full CJK
+            # font otherwise changes includeFontPadding and vertical centering.
+            # The user's font and glyf/CFF/gvar remain untouched. Only staged
+            # HyperOS aliases receive this envelope; old/no stock stays explicit.
+            head.yMin, head.yMax = frame
         # MVAR can restore source line metrics at non-default variable weights.
         if 'MVAR' in font:
             del font['MVAR']
         font.save(output, reorderTables=False)
+        report = {'sourceUpem': upem, 'sourceHead': list(source_frame),
+                  'outputHead': [int(head.yMin), int(head.yMax)],
+                  'layoutBoundsSource': 'stock' if contract[10] is not None else 'source',
+                  'layoutBoundsDifferFromSource': source_frame != (head.yMin, head.yMax)}
     os.chmod(output, 0o644)
+    return report
 
 
 def link_copy(source: Path, dest: Path) -> None:
@@ -165,6 +192,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     store.mkdir(parents=True, exist_ok=True)
     outputs = Path(tempfile.mkdtemp(prefix='hyperos-metrics-', dir=store))
     cache = {}
+    output_reports = {}
     # Generate every distinct source/contract before replacing even one alias.
     # Thus subsequent sources cannot accidentally refer to earlier outputs.
     prepared = []
@@ -176,7 +204,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract)
             if key not in cache:
                 output = outputs / f'{len(cache)}.font'
-                write_metrics(source, output, contract)
+                output_reports[key] = write_metrics(source, output, contract)
                 cache[key] = output
             prepared.append((cache[key], dest))
             fallback += contract[-1] == 'fallback'
@@ -186,7 +214,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 'hhea': list(contract[1:4]),
                                 'typo': list(contract[4:7]),
                                 'win': list(contract[7:9]),
-                                'useTypoMetrics': contract[9]})
+                                'useTypoMetrics': contract[9],
+                                **output_reports[key]})
         for output, dest in prepared:
             link_copy(output, dest)
         report = stage / '.luoshu-metrics-report.json'

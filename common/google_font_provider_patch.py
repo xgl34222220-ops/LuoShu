@@ -10,6 +10,7 @@ import argparse
 import copy
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -18,23 +19,56 @@ from fontTools.ttLib import TTFont
 from fontTools.varLib.instancer import instantiateVariableFont
 
 NAME_IDS = {1, 2, 3, 4, 6, 16, 17, 21, 22}
+PROVIDER_FAMILIES = {
+    "googlesans", "googlesanstext", "googlesansdisplay", "googlesansflex", "productsans",
+}
 
 
 class ProviderPatchError(RuntimeError):
     pass
 
 
-def open_font(path: Path) -> TTFont:
+def open_font(path: Path, *, lazy: bool = False) -> TTFont:
     with path.open("rb") as stream:
         collection = stream.read(4) == b"ttcf"
     kwargs: dict[str, Any] = {
-        "lazy": False,
+        "lazy": lazy,
         "recalcTimestamp": False,
         "recalcBBoxes": False,
     }
     if collection:
         kwargs["fontNumber"] = 0
     return TTFont(str(path), **kwargs)
+
+
+def inspect_target(path: Path) -> int | None:
+    """Recognize a provider font by its family, including opaque cache filenames.
+
+    The shell only submits files inside known font-cache directories. Do not infer
+    identity from a filename: Google Sans Code, emoji and unrelated app fonts must
+    remain untouched. TTC caches need per-face replacement, which this bridge does
+    not yet implement, so leave collections alone instead of breaking TTC indexes.
+    """
+    if any(char in str(path) for char in "\r\n\t|"):
+        return None
+    with path.open("rb") as stream:
+        if stream.read(4) not in (b"\x00\x01\x00\x00", b"OTTO", b"true"):
+            return None
+    with open_font(path, lazy=True) as font:
+        if "name" not in font:
+            return None
+        families = {
+            re.sub(r"[\s_-]+", "", record.toUnicode()).lower()
+            for record in font["name"].names if record.nameID in (1, 16)
+        }
+        if not families.intersection(PROVIDER_FAMILIES):
+            return None
+        # Named GMS instances encode the requested weight before width/italic.
+        match = re.search(r"(?:^|[._-])([1-9]00)(?=[._-]|$)", path.name)
+        if match:
+            return int(match.group(1))
+        weight = int(font["OS/2"].usWeightClass) if "OS/2" in font else 400
+        return min(range(100, 1000, 100), key=lambda value: abs(value - weight))
 
 
 def copy_target_names(source: TTFont, target: TTFont) -> None:
@@ -72,12 +106,16 @@ def normalize_weight(font: TTFont, weight: int) -> None:
 def instantiate_for_target(source: TTFont, target: TTFont, weight: int) -> TTFont:
     target_variable = "fvar" in target
     source_variable = "fvar" in source
-    if target_variable and not source_variable:
-        raise ProviderPatchError("variable-target-requires-variable-source")
+    # Skia ignores variation coordinates for axes absent from a font. A real
+    # static donor is therefore valid even if the provider originally returned a
+    # variable font. Keep it static; copying the target's fvar without matching
+    # variation outlines would create a malformed font.
+    # https://api.skia.org/structSkFontArguments.html#setVariationDesignPosition
     if source_variable and not target_variable:
-        axes: dict[str, float] = {}
-        if "wght" in {axis.axisTag for axis in source["fvar"].axes}:
-            axes["wght"] = float(weight)
+        axes = {axis.axisTag: float(axis.defaultValue) for axis in source["fvar"].axes}
+        if "wght" in axes:
+            axis = next(axis for axis in source["fvar"].axes if axis.axisTag == "wght")
+            axes["wght"] = max(float(axis.minValue), min(float(axis.maxValue), float(weight)))
         source = instantiateVariableFont(source, axes, inplace=False, optimize=True)
     return source
 
@@ -112,6 +150,8 @@ def patch(source_path: Path, target_path: Path, output_path: Path, weight: int) 
             "output": str(output_path),
             "weight": int(weight),
             "targetVariable": "fvar" in target,
+            "outputVariable": "fvar" in source,
+            "variationMode": "native" if "fvar" in source else "static-instance",
             "outputBytes": output_path.stat().st_size,
         }
     finally:
@@ -124,11 +164,29 @@ def patch(source_path: Path, target_path: Path, output_path: Path, weight: int) 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", required=True, type=Path)
-    parser.add_argument("--target", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--weight", required=True, type=int)
+    parser.add_argument("--inspect-targets", type=Path)
+    parser.add_argument("--source", type=Path)
+    parser.add_argument("--target", type=Path)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--weight", type=int)
     args = parser.parse_args()
+    if args.inspect_targets is not None:
+        seen: set[str] = set()
+        for raw in args.inspect_targets.read_text(encoding="utf-8").splitlines():
+            if not raw or raw in seen:
+                continue
+            seen.add(raw)
+            try:
+                weight = inspect_target(Path(raw))
+            except Exception:
+                # A provider can rotate files while scanning; a corrupt/cache
+                # metadata file is not a reason to abort other valid targets.
+                continue
+            if weight is not None:
+                print(f"{raw}\t{weight}")
+        return 0
+    if any(value is None for value in (args.source, args.target, args.output, args.weight)):
+        parser.error("--source, --target, --output and --weight are required for patching")
     try:
         result = patch(args.source, args.target, args.output, args.weight)
     except Exception as exc:

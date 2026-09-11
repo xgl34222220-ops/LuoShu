@@ -148,6 +148,43 @@ def _load_json(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _metric_int(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("boolean is not a font metric")
+    result = int(value)
+    if not isinstance(value, (int, str)) and value != result:
+        raise ValueError("font metric must be an integer")
+    return result
+
+
+def _validate_metrics(metrics: Any) -> None:
+    """Validate stored design units without discarding zero-descender clock fonts.
+
+    OpenType hhea ascent/descent are signed FWORD values, not glyph bounds.
+    A slot whose designed lower extent is the baseline can legitimately use 0.
+    Require the field explicitly: a missing descent must not become a valid 0.
+    """
+    try:
+        upem = _metric_int(metrics["upem"])
+        ascent = _metric_int(metrics["hhea"]["ascent"])
+        descent = _metric_int(metrics["hhea"]["descent"])
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise InventoryError("设备字体清单槽位度量无效") from error
+    if not 16 <= upem <= 16384 or not 0 < ascent <= 32767 or not -32768 <= descent <= 0:
+        raise InventoryError("设备字体清单槽位基线无效")
+    # The bounding box is additive diagnostic data. Inventories captured by an
+    # older scanner remain usable; never synthesize bounds from line metrics.
+    if "head" in metrics:
+        try:
+            head = metrics["head"]
+            bounds = {name: _metric_int(head[name]) for name in ("xMin", "yMin", "xMax", "yMax")}
+        except (KeyError, TypeError, ValueError, OverflowError) as error:
+            raise InventoryError("设备字体清单槽位字形边界无效") from error
+        if (any(not -32768 <= value <= 32767 for value in bounds.values())
+                or bounds["xMin"] > bounds["xMax"] or bounds["yMin"] > bounds["yMax"]):
+            raise InventoryError("设备字体清单槽位字形边界无效")
+
+
 def validate_inventory(data: dict[str, Any], expected_key: str | None = None) -> None:
     if data.get("schema") != SCHEMA or data.get("state") != "ready":
         raise InventoryError("设备字体清单格式无效")
@@ -180,30 +217,12 @@ def validate_inventory(data: dict[str, Any], expected_key: str | None = None) ->
             raise InventoryError("设备字体清单槽位路径不一致")
         if str(entry.get("format", "")) not in {"TTF", "OTF", "TTC"}:
             raise InventoryError("设备字体清单包含无效字体格式")
-        slot_metrics = entry.get("metrics")
-        slot_hhea = slot_metrics.get("hhea") if isinstance(slot_metrics, dict) else None
-        try:
-            slot_upem = int(slot_metrics.get("upem", 0)) if isinstance(slot_metrics, dict) else 0
-            slot_ascent = int(slot_hhea.get("ascent", 0)) if isinstance(slot_hhea, dict) else 0
-            slot_descent = int(slot_hhea.get("descent", 0)) if isinstance(slot_hhea, dict) else 0
-        except (TypeError, ValueError) as error:
-            raise InventoryError("设备字体清单槽位度量无效") from error
-        if slot_upem <= 0 or slot_ascent <= 0 or slot_descent >= 0:
-            raise InventoryError("设备字体清单槽位基线无效")
+        _validate_metrics(entry.get("metrics"))
 
     indexed_main = slots[main_path]
     if str(main_slot.get("slotName", "")) != str(indexed_main.get("slotName", "")):
         raise InventoryError("设备字体清单主槽位不一致")
-    metrics = main_slot.get("metrics")
-    hhea = metrics.get("hhea") if isinstance(metrics, dict) else None
-    try:
-        upem = int(metrics.get("upem", 0)) if isinstance(metrics, dict) else 0
-        ascent = int(hhea.get("ascent", 0)) if isinstance(hhea, dict) else 0
-        descent = int(hhea.get("descent", 0)) if isinstance(hhea, dict) else 0
-    except (TypeError, ValueError) as error:
-        raise InventoryError("设备字体清单主槽位度量无效") from error
-    if upem <= 0 or ascent <= 0 or descent >= 0:
-        raise InventoryError("设备字体清单主槽位基线无效")
+    _validate_metrics(main_slot.get("metrics"))
 
 
 def _local_name(tag: str) -> str:
@@ -287,12 +306,18 @@ def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]
         upem = int(head.unitsPerEm)
         ascent = int(hhea.ascent)
         descent = int(hhea.descent)
-        if upem <= 0 or ascent <= 0 or descent >= 0:
-            raise InventoryError(f"字体基线数值异常：{path.name}")
         metrics = {
             "upem": upem,
             "ascent": ascent,
             "descent": descent,
+            "head": {
+                "xMin": int(head.xMin),
+                "yMin": int(head.yMin),
+                "xMax": int(head.xMax),
+                "yMax": int(head.yMax),
+                "flags": int(head.flags),
+                "lowestRecPPEM": int(head.lowestRecPPEM),
+            },
             "hhea": {
                 "ascent": ascent,
                 "descent": descent,
@@ -307,6 +332,7 @@ def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]
                 "winDescent": int(getattr(os2, "usWinDescent", 0)),
             },
         }
+        _validate_metrics(metrics)
     finally:
         font.close()
     return fmt, metrics

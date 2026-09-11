@@ -36,11 +36,15 @@ while [ "$_attempt" -le "$_limit" ]; do
     [ -n "$_active" ] && [ "$_active" != default ] || exit 0
     MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$BRIDGE" apply >/dev/null 2>&1
     _rc=$?
-    [ "$_rc" -eq 0 ] && exit 0
+    # GMS downloads families lazily. One mounted family must not end the boot
+    # discovery window before Play opens or another font weight arrives. Binds
+    # are idempotent, so later passes do not keep force-stopping Play.
     [ "$_attempt" -lt "$_limit" ] || break
     sleep 5
     _attempt=$((_attempt + 1))
 done
+
+[ "${_rc:-2}" -eq 0 ] && exit 0
 
 mkdir -p "$MODDIR/logs" 2>/dev/null || true
 printf '[%s] provider service exhausted retries: code=%s attempts=%s\n' \
