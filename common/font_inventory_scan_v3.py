@@ -17,7 +17,7 @@ import font_inventory as base
 import font_inventory_scan as v2
 
 SCANNER_REVISION = 3
-METRICS_REVISION = 2
+METRICS_REVISION = 3
 PRIMARY_FONT_SPECS = (
     ("system", Path("/system/fonts"), "system_fonts", (Path("/system/font"),)),
     ("system_ext", Path("/system_ext/fonts"), "system_ext_fonts", (Path("/system/system_ext/fonts"),)),
@@ -243,8 +243,10 @@ def _can_reuse(existing: dict[str, Any], build_key: str) -> bool:
 def _has_current_metrics(existing: dict[str, Any]) -> bool:
     return (existing.get("metricsRevision") == METRICS_REVISION
             and all(isinstance(entry.get("metrics", {}).get("head"), dict)
+                    and base.valid_coverage(entry.get("metrics", {}).get("coverage"))
                     for entry in existing.get("slots", {}).values())
-            and isinstance(existing.get("mainSlot", {}).get("metrics", {}).get("head"), dict))
+            and isinstance(existing.get("mainSlot", {}).get("metrics", {}).get("head"), dict)
+            and base.valid_coverage(existing.get("mainSlot", {}).get("metrics", {}).get("coverage")))
 
 
 def _verify_upgrade_roots(font_roots: list[base.FontRoot], etc_roots: list[tuple[str, Path, Path]]) -> None:

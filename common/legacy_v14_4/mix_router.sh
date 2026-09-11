@@ -246,6 +246,25 @@ complete_hyperos_stage() {
     fi
 }
 
+complete_coloros_stage() {
+    # The composite worker runs in a separate shell. Detect the same ROM markers
+    # as legacy util_functions instead of relying on its unexported IS_COLOROS.
+    _helper="$REALMOD/common/coloros_stage_complete.sh"
+    if [ -e /system/fonts/MiSansVF.ttf ] || [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)" ] || \
+       [ -n "$(getprop ro.miui.ui.version.name 2>/dev/null)" ]; then
+        return 0
+    fi
+    if [ -n "$(getprop ro.build.version.oplusrom 2>/dev/null)" ] || \
+       [ -n "$(getprop ro.build.version.opporom 2>/dev/null)" ] || \
+       [ -d /data/oplus/os ] || [ -d /system_ext/oplus ] || \
+       [ -e /system/fonts/SysSans-En-Regular.ttf ] || \
+       [ -e /system/fonts/SysFont-Regular.ttf ]; then
+        [ -f "$_helper" ] || return 1
+        LUOSHU_REAL_MODDIR="$REALMOD" sh "$_helper" "$MIX_STAGE" >> "$LOG_FILE" 2>&1 || return 1
+    fi
+    return 0
+}
+
 write_next_state() {
     _previous=$(read_value "$MIX_STAGE_STATE" previousFont)
     _previous_legacy=$(read_value "$MIX_STAGE_STATE" previousLegacy)
@@ -310,6 +329,7 @@ commit_mix_stage_if_needed() {
     stage_has_fonts || return 1
     stage_generation_matches || return 1
     complete_hyperos_stage || return 1
+    complete_coloros_stage || return 1
     rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
     mv "$MIX_STAGE" "$NEXT_PAYLOAD" 2>/dev/null || return 1
     if ! write_next_state; then

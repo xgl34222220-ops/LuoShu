@@ -249,6 +249,13 @@ stage_hyperos_complete() {
     return 1
 }
 
+stage_coloros_complete() {
+    [ "${IS_COLOROS:-false}" = true ] || return 0
+    _stage_bridge="$MODDIR/common/coloros_stage_complete.sh"
+    [ -f "$_stage_bridge" ] || return 1
+    LUOSHU_REAL_MODDIR="$MODDIR" sh "$_stage_bridge" "$STAGE_PAYLOAD" >> "$LOG_FILE" 2>&1
+}
+
 stage_verify() {
     _font="$1"
     [ "$_font" = default ] && return 0
@@ -376,6 +383,12 @@ switch_font() {
             progress 76 '正在补齐 HyperOS 状态栏、锁屏和系统 UI 字体槽位'
             stage_hyperos_complete || {
                 safe_error 'HyperOS 字体槽位或度量处理失败，请查看字体切换日志'
+                return 1
+            }
+        elif [ "${IS_COLOROS:-false}" = true ]; then
+            progress 76 '正在按原厂槽位对齐 ColorOS 字体度量'
+            stage_coloros_complete || {
+                safe_error 'ColorOS 字体度量处理失败，请查看字体切换日志'
                 return 1
             }
         fi

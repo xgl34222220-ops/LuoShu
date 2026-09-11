@@ -16,6 +16,8 @@ import tempfile
 
 from fontTools.ttLib import TTFont
 from font_metrics_normalize import _device_build_key, _pick_face, _promote_os2_for_typo_metrics
+from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
+                                preferred_unicode_codepoints, valid_coverage)
 
 PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
          "my_product", "hw_product", "cust")
@@ -112,7 +114,9 @@ def contract_for_slot(data: dict, logical: str) -> tuple:
         return (1000, 980, -300, 0, 980, -300, 0, 980, 350, True, None, 'fallback')
 
 
-def write_metrics(source: Path, output: Path, contract: tuple) -> dict:
+def write_metrics(source: Path, output: Path, contract: tuple,
+                  cjk_fallback_codepoints: frozenset[int] | None = None,
+                  stock_cjk_punctuation: frozenset[int] = frozenset()) -> dict:
     # lazy + recalcBBoxes=False retains glyf/CFF/gvar as raw tables. Loading glyph
     # bounds just to change hhea/OS2 used to recompile entire CJK fonts per slot.
     face = _pick_face(source)
@@ -148,11 +152,19 @@ def write_metrics(source: Path, output: Path, contract: tuple) -> dict:
         # MVAR can restore source line metrics at non-default variable weights.
         if 'MVAR' in font:
             del font['MVAR']
+        removed = (remove_cjk_mappings(font, cjk_fallback_codepoints, stock_cjk_punctuation)
+                   if cjk_fallback_codepoints else 0)
+        # cmap glyph-name resolution can lazily load CFF to learn the glyph
+        # order. Discard only those unmodified decoded tables so save copies
+        # their original reader bytes instead of reserializing the outlines.
+        for tag in ('glyf', 'CFF ', 'CFF2', 'gvar'):
+            font.tables.pop(tag, None)
         font.save(output, reorderTables=False)
         report = {'sourceUpem': upem, 'sourceHead': list(source_frame),
                   'outputHead': [int(head.yMin), int(head.yMax)],
                   'layoutBoundsSource': 'stock' if contract[10] is not None else 'source',
-                  'layoutBoundsDifferFromSource': source_frame != (head.yMin, head.yMax)}
+                  'layoutBoundsDifferFromSource': source_frame != (head.yMin, head.yMax),
+                  'removedCjkMappings': removed}
     os.chmod(output, 0o644)
     return report
 
@@ -169,6 +181,73 @@ def link_copy(source: Path, dest: Path) -> None:
         os.replace(temporary, dest)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def _specialized_slot(logical: str, slot: dict) -> bool:
+    label = ' '.join([Path(logical).name, *slot.get('families', [])]).lower()
+    return any(token in label for token in
+               ('clock', 'mitype', 'mono', 'symbol', 'icon', 'emoji', 'math', 'music'))
+
+
+def _latin_ui_slot(logical: str, slot: dict) -> bool:
+    name = Path(logical).name.lower()
+    families = [str(family).lower().replace('_', '-') for family in slot.get('families', [])]
+    return (any(family.startswith(('sans-serif', 'system-ui', 'system-sans', 'roboto',
+                                  'google-sans', 'misans', 'mi-sans', 'sys-sans', 'oppo-sans',
+                                  'oplus-sans')) for family in families)
+            or name.startswith(('roboto', 'misanslatin', 'googlesans', 'syssans', 'sysfont',
+                                'sourcesanspro', 'opposans', 'oplussans', 'opsans')))
+
+
+def _staged_cjk_fallback(data: dict, jobs: list, stage: Path) -> frozenset[int]:
+    """Coverage proven to survive in generated, stock-Han UI fallback slots.
+
+    These jobs will be written before any alias is switched. Never count a stock
+    file outside staging or an unverified old inventory as a usable fallback.
+    """
+    points = set()
+    seen = set()
+    for source, dest, contract in jobs:
+        logical = '/' + dest.relative_to(stage).as_posix()
+        slot = (data.get('slots') or {}).get(logical, {})
+        coverage = slot.get('metrics', {}).get('coverage')
+        if (contract[-1] != 'stock' or not valid_coverage(coverage)
+                or not coverage['hasHan'] or _specialized_slot(logical, slot)):
+            continue
+        # A private, named display family is not proof that sans-serif can
+        # reach it. Count the scanner's selected system main face or the core
+        # HyperOS CJK faces already covered by the OEM adapter.
+        if (logical != data.get('mainSlotPath') and Path(logical).name not in
+                {'MiSansVF.ttf', 'MiSansVF_Overlay.ttf', 'MiSansTCVF.ttf', 'MiSansL3.otf'}):
+            continue
+        stat = source.stat()
+        key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+        if key in seen:
+            continue
+        seen.add(key)
+        face = _pick_face(source)
+        options = {'fontNumber': face} if face >= 0 else {}
+        with TTFont(source, lazy=True, recalcBBoxes=False, **options) as font:
+            source_points = preferred_unicode_codepoints(font)
+            if any(is_han(cp) for cp in source_points):
+                points.update(cp for cp in source_points if is_cjk_routing_codepoint(cp))
+    return frozenset(points)
+
+
+def _cjk_routing(data: dict, logical: str, fallback: frozenset[int]) -> tuple:
+    slot = (data.get('slots') or {}).get(logical, {})
+    coverage = slot.get('metrics', {}).get('coverage')
+    if not valid_coverage(coverage):
+        return None, frozenset(), 'stock-coverage-refresh-pending'
+    if _specialized_slot(logical, slot):
+        return None, frozenset(), 'specialized-slot'
+    if coverage['hasHan']:
+        return None, frozenset(), 'stock-han-slot'
+    if not coverage['hasLatin'] or not _latin_ui_slot(logical, slot):
+        return None, frozenset(), 'not-latin-ui-slot'
+    if not fallback:
+        return None, frozenset(), 'no-staged-cjk-fallback'
+    return fallback, frozenset(coverage['cjkPunctuation']), 'stock-latin-primary'
 
 
 def build(module: Path, stage: Path, names: list[str]) -> dict:
@@ -188,6 +267,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                              contract_for_slot(data, logical)))
     if not jobs:
         raise ValueError('没有找到当前 ROM 的 HyperOS 字体目标')
+    cjk_fallback = _staged_cjk_fallback(data, jobs, stage)
     store = fonts / '.luoshu-font-store'
     store.mkdir(parents=True, exist_ok=True)
     outputs = Path(tempfile.mkdtemp(prefix='hyperos-metrics-', dir=store))
@@ -201,10 +281,15 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     try:
         for source, dest, contract in jobs:
             stat = source.stat()
-            key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract)
+            logical = '/' + dest.relative_to(stage).as_posix()
+            routing, stock_punctuation, routing_reason = _cjk_routing(data, logical, cjk_fallback)
+            if contract[-1] != 'stock':
+                routing, stock_punctuation, routing_reason = None, frozenset(), 'invalid-stock-contract'
+            key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract,
+                   routing, stock_punctuation)
             if key not in cache:
                 output = outputs / f'{len(cache)}.font'
-                output_reports[key] = write_metrics(source, output, contract)
+                output_reports[key] = write_metrics(source, output, contract, routing, stock_punctuation)
                 cache[key] = output
             prepared.append((cache[key], dest))
             fallback += contract[-1] == 'fallback'
@@ -215,6 +300,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 'typo': list(contract[4:7]),
                                 'win': list(contract[7:9]),
                                 'useTypoMetrics': contract[9],
+                                'cjkRoutingSource': 'stock-fallback' if routing else 'source',
+                                'cjkRoutingReason': routing_reason,
                                 **output_reports[key]})
         for output, dest in prepared:
             link_copy(output, dest)

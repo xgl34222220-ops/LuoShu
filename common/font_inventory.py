@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from fontTools.ttLib import TTFont
+from font_slot_coverage import summarize_coverage, valid_coverage
 
 SCHEMA = "device-font-inventory-v1"
 INVENTORY_REVISION = 1
@@ -183,6 +184,8 @@ def _validate_metrics(metrics: Any) -> None:
         if (any(not -32768 <= value <= 32767 for value in bounds.values())
                 or bounds["xMin"] > bounds["xMax"] or bounds["yMin"] > bounds["yMax"]):
             raise InventoryError("设备字体清单槽位字形边界无效")
+    if "coverage" in metrics and not valid_coverage(metrics["coverage"]):
+        raise InventoryError("设备字体清单槽位字符覆盖无效")
 
 
 def validate_inventory(data: dict[str, Any], expected_key: str | None = None) -> None:
@@ -308,6 +311,7 @@ def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]
         descent = int(hhea.descent)
         metrics = {
             "upem": upem,
+            "coverage": summarize_coverage(font),
             "ascent": ascent,
             "descent": descent,
             "head": {

@@ -119,12 +119,24 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
             printf 'androidSdk=%s\n' "${'$'}(getprop ro.build.version.sdk 2>/dev/null)"
             printf 'recentWarningCount=%s\n' "${'$'}warningCount"
             printf 'recentErrorCount=%s\n' "${'$'}errorCount"
-            printf 'privacy=device fingerprint, serial, model, font names, filenames and private paths omitted\n'
+            printf 'privacy=device identifiers, accounts, chat content and source font names omitted; system slots and APK font resource names may be included\n'
         } > "${'$'}OUT" 2>/dev/null || exit 21
+        LAYOUT_HELPER="${'$'}MOD/common/font_layout_diagnostic.sh"
+        LAYOUT_OUT="${'$'}OUT_DIR/LuoShu-font-layout.json"
+        if [ -f "${'$'}LAYOUT_HELPER" ]; then
+            if MODDIR="${'$'}MOD" sh "${'$'}LAYOUT_HELPER" --output "${'$'}LAYOUT_OUT" >/dev/null 2>&1; then
+                printf '\n[font-layout]\n' >> "${'$'}OUT"
+                cat "${'$'}LAYOUT_OUT" >> "${'$'}OUT"
+            else
+                printf '\nlayoutDiagnostic=unavailable\n' >> "${'$'}OUT"
+            fi
+        else
+            printf '\nlayoutDiagnostic=module-helper-missing\n' >> "${'$'}OUT"
+        fi
         chmod 0644 "${'$'}OUT" 2>/dev/null || true
         printf '%s\n' "${'$'}OUT"
     """.trimIndent()
-    val result = RootShell.exec(command, timeoutMs = 20_000L)
+    val result = RootShell.exec(command, timeoutMs = 45_000L)
     if (result.code != 0) {
         return DiagnosticExportState(error = result.stderr.ifBlank { "脱敏诊断报告生成失败" })
     }
@@ -182,7 +194,7 @@ internal fun DiagnosticExportDialog(
         text = {
             Column(Modifier.fillMaxWidth()) {
                 Text(
-                    if (failed) state.error else "报告只包含引擎状态和错误数量，不包含设备指纹、序列号、型号、字体名称、字体文件名或私人路径。",
+                    if (failed) state.error else "报告包含引擎状态、字体度量、系统字体槽位及相关应用的字体资源信息，用于排查偏移和漏替换。不包含设备标识、账号或聊天内容。",
                     color = if (failed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                 )

@@ -247,10 +247,13 @@ python3 "$ROOT/scripts/sync_update_metadata_test.py"
 sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
 sh "$ROOT/scripts/coloros_consistency_mapping_test.sh"
+python3 "$ROOT/scripts/coloros_metrics_batch_test.py"
 FONT_INVENTORY_TEST_FONT=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit 2>/dev/null || true)
 [ -s "$FONT_INVENTORY_TEST_FONT" ]
 python3 "$ROOT/scripts/font_inventory_test.py" --font "$FONT_INVENTORY_TEST_FONT"
 python3 "$ROOT/scripts/stock_metric_contract_test.py"
+python3 "$ROOT/scripts/hyperos_cjk_routing_test.py"
+python3 "$ROOT/scripts/font_layout_diagnostic_test.py"
 python3 "$ROOT/scripts/font_inventory_scan_v3_test.py" --font "$FONT_INVENTORY_TEST_FONT"
 python3 "$ROOT/scripts/stock_inventory_scan_wrapper_test.py"
 sh "$ROOT/scripts/rom_adapter_inventory_test.sh" "$FONT_INVENTORY_TEST_FONT"
