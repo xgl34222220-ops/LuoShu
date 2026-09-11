@@ -99,9 +99,9 @@ ok grep -qF "$LUOSHU_CUST_FONTS_ROOT|$MODULE_DIR/cust/fonts" "$ROOT/hyperos-root
 printf 'HyperOS global mapping and compact-anchor reuse tests passed.\n'
 
 # Execute the production batch builder against different physical slot contracts.
-python3 "$REPO_ROOT/scripts/hyperos_metrics_batch_test.py"
-sh -n "$REPO_ROOT/common/hyperos_stage_complete.sh"
+ok python3 "$REPO_ROOT/scripts/hyperos_metrics_batch_test.py"
+ok sh -n "$REPO_ROOT/common/hyperos_stage_complete.sh"
 
 # Keep OEM partition regressions in the always-on source gate.
-sh "$REPO_ROOT/scripts/coloros_partition_mapping_test.sh"
-sh "$REPO_ROOT/scripts/originos_flyme_mapping_test.sh"
+ok sh "$REPO_ROOT/scripts/coloros_partition_mapping_test.sh"
+ok sh "$REPO_ROOT/scripts/originos_flyme_mapping_test.sh"

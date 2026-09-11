@@ -48,7 +48,10 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.fonts = self.stage / 'system/fonts'
         self.fonts.mkdir(parents=True)
         (self.module / 'config').mkdir()
-        self.env = {'LUOSHU_BUILD_KEY': 'fixture'}
+        # The host may load FontTools only through the bundled pure-Python path.
+        # Preserve that path separately before the Android entry point replaces it.
+        self.env = {'LUOSHU_BUILD_KEY': 'fixture',
+                    'LUOSHU_TEST_PYTHONPATH': os.pathsep.join(sys.path)}
         for part in batch.PARTS:
             root = self.root / 'stock' / part
             root.mkdir(parents=True)
@@ -146,12 +149,14 @@ _hyperos_upright_ui_files() { :; }
 _hyperos_clock_ui_files() { :; }
 ''')
         launcher = common / 'python/bin/luoshu-python'
-        launcher.write_text('#!/bin/sh\nunset PYTHONHOME PYTHONPATH LD_LIBRARY_PATH\n'
+        launcher.write_text('#!/bin/sh\nunset PYTHONHOME LD_LIBRARY_PATH\n'
+                            'PYTHONPATH="$LUOSHU_TEST_PYTHONPATH" '
                             'exec "$LUOSHU_TEST_PYTHON" "$@"\n')
         launcher.chmod(0o755)
-        subprocess.run(['sh', str(ROOT / 'common/hyperos_stage_complete.sh'), str(self.stage)],
+        result = subprocess.run(['sh', str(ROOT / 'common/hyperos_stage_complete.sh'), str(self.stage)],
             env={**os.environ, 'LUOSHU_REAL_MODDIR': str(self.module),
-                 'LUOSHU_TEST_PYTHON': sys.executable}, capture_output=True, check=True)
+                 'LUOSHU_TEST_PYTHON': sys.executable}, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
         for name, ascent in (('MiSansDisplayVF.ttf', 850), ('XiaomiSansVF.otf', 900)):
             target = self.stage / 'product/fonts' / name
             self.assertTrue(target.exists(), 'boot-only aliases bypass per-slot metrics')
@@ -191,14 +196,16 @@ _hyperos_clock_ui_files() { :; }
 ''')
         launcher = common / 'python/bin/luoshu-python'
         launcher.write_text('#!/bin/sh\nprintf "launch\\n" >> "$LUOSHU_TEST_LAUNCHES"\n'
-                            'unset PYTHONHOME PYTHONPATH LD_LIBRARY_PATH\n'
+                            'unset PYTHONHOME LD_LIBRARY_PATH\n'
+                            'PYTHONPATH="$LUOSHU_TEST_PYTHONPATH" '
                             'exec "$LUOSHU_TEST_PYTHON" "$@"\n')
         launcher.chmod(0o755)
         launches = self.root / 'launches'
         command = ['sh', str(ROOT / 'common/hyperos_stage_complete.sh'), str(self.stage)]
         env = {**os.environ, 'LUOSHU_REAL_MODDIR': str(self.module),
                'LUOSHU_TEST_LAUNCHES': str(launches), 'LUOSHU_TEST_PYTHON': sys.executable}
-        result = subprocess.run(command, env=env, capture_output=True, text=True, check=True)
+        result = subprocess.run(command, env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)['mapped'], 2)
         self.assertEqual(launches.read_text().splitlines(), ['launch'])
         (self.fonts / '400.ttf').write_bytes(b'corrupt')
