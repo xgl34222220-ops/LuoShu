@@ -15,7 +15,6 @@ import os
 import sys
 import tempfile
 import time
-import statistics
 from pathlib import Path
 from typing import Iterable
 
@@ -29,6 +28,7 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
 
 from font_metrics_normalize import normalize_font_metrics
+from legacy_v14_4.composite_layout import _role_transform, enclose_imported_bounds
 
 LATIN_CODEPOINTS = (
     set(range(0x0020, 0x0030))
@@ -153,56 +153,6 @@ def _outline_kind(font: TTFont) -> str:
     raise CompositeError("字体不包含受支持的 glyf、CFF 或 CFF2 轮廓")
 
 
-def _bounds_for_codepoint(font: TTFont, glyph_set, codepoint: int) -> tuple[float, float, float, float] | None:
-    glyph_name = (font.getBestCmap() or {}).get(codepoint)
-    if not glyph_name or glyph_name not in glyph_set:
-        return None
-    pen = BoundsPen(glyph_set)
-    glyph_set[glyph_name].draw(pen)
-    return None if pen.bounds is None else tuple(float(value) for value in pen.bounds)
-
-
-# Translation probes deliberately use flat-bottom glyphs. Rounded glyphs such as O/0/8/9
-# overshoot the baseline and introduce a systematic upward bias.
-FLAT_BOTTOM_PROBES = {"latin": "HIEX", "digit": "147"}
-BASELINE_SHIFT_LIMIT_RATIO = 0.25
-
-
-def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tuple[float, float]:
-    base_glyph_set = base.getGlyphSet()
-    probes = tuple(map(ord, "AHIOXEx" if role == "latin" else "0189"))
-    upem_scale = base["head"].unitsPerEm / src["head"].unitsPerEm
-    pairs: list[tuple[tuple[float, float, float, float], tuple[float, float, float, float]]] = []
-    for codepoint in probes:
-        base_bounds = _bounds_for_codepoint(base, base_glyph_set, codepoint)
-        src_bounds = _bounds_for_codepoint(src, src_glyph_set, codepoint)
-        if base_bounds and src_bounds and src_bounds[3] > src_bounds[1] and base_bounds[3] > base_bounds[1]:
-            pairs.append((base_bounds, src_bounds))
-    if not pairs:
-        return upem_scale, 0.0
-    ratios = [
-        (base_bounds[3] - base_bounds[1]) / ((src_bounds[3] - src_bounds[1]) * upem_scale)
-        for base_bounds, src_bounds in pairs
-    ]
-    shape_scale = max(0.82, min(1.18, float(statistics.median(ratios))))
-    scale = upem_scale * shape_scale
-    source_bottoms = [
-        bounds[1]
-        for bounds in (
-            _bounds_for_codepoint(src, src_glyph_set, codepoint)
-            for codepoint in map(ord, FLAT_BOTTOM_PROBES.get(role, ""))
-        )
-        if bounds
-    ]
-    if not source_bottoms:
-        return scale, 0.0
-    # OpenType baseline is y=0. Never inherit the CJK base font's potentially vertically
-    # centered ASCII bottom; only correct genuine source-font vertical displacement.
-    shift = -float(statistics.median(source_bottoms)) * scale
-    limit = base["head"].unitsPerEm * BASELINE_SHIFT_LIMIT_RATIO
-    return scale, max(-limit, min(limit, shift))
-
-
 def _draw_decomposed(glyph_set, glyph_name: str, destination_pen, scale: float, y_shift: float) -> None:
     recorder = DecomposingRecordingPen(glyph_set)
     glyph_set[glyph_name].draw(recorder)
@@ -227,6 +177,7 @@ def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_
     if not hasattr(glyph, "xMin"):
         # 空格等空轮廓不会产生边界，显式补零以保证序列化安全。
         glyph.xMin = glyph.yMin = glyph.xMax = glyph.yMax = 0
+    enclose_imported_bounds(base, (glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax))
     if "gvar" in base:
         base["gvar"].variations.pop(base_name, None)
 
@@ -254,6 +205,7 @@ def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_n
     if selector is not None:
         char_string.fdSelectIndex = selector
     top.CharStrings[base_name] = char_string
+    enclose_imported_bounds(base, char_string.calcBounds(top.CharStrings))
 
 
 def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], role: str, location: dict[str, float] | None = None, required: set[int] | None = None) -> tuple[int, list[int]]:

@@ -265,7 +265,7 @@ build_composite_cached() {
     _output="$4"
     _progress="$5"
     mkdir -p "$COMPOSITE_CACHE" "${_output%/*}" 2>/dev/null || return 1
-    _key=$(printf '%s|%s|%s|auto-multiweight-v1' \
+    _key=$(printf '%s|%s|%s|auto-multiweight-v2-layout' \
         "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" | hash_text)
     [ -n "$_key" ] || return 1
     _cached="$COMPOSITE_CACHE/${_key}.font"

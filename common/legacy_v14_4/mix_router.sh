@@ -400,6 +400,7 @@ setup_runtime() {
     force_link "$LEGACY/font_mix_engine.sh" "$RUNTIME/common/font_mix_engine.sh" || return 1
     force_link "$LEGACY/font_instance.py" "$RUNTIME/common/font_instance.py" || return 1
     force_link "$LEGACY/composite_font.py" "$RUNTIME/common/composite_font.py" || return 1
+    force_link "$LEGACY/composite_layout.py" "$RUNTIME/common/composite_layout.py" || return 1
     force_link "$LEGACY/luoshu_composite.sh" "$RUNTIME/common/luoshu_composite.sh" || return 1
     force_link "$LEGACY/mix_weight_mode.sh" "$RUNTIME/common/mix_weight_mode.sh" || return 1
     force_link "$LEGACY/font_role_check.sh" "$RUNTIME/common/font_role_check.sh" || return 1

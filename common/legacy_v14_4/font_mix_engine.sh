@@ -376,7 +376,7 @@ build_composite_file() {
     COMPOSITE_CJK_HASH="$_cjk_hash"
     COMPOSITE_LATIN_HASH="$_latin_hash"
     COMPOSITE_DIGIT_HASH="$_digit_hash"
-    _key_src="${_cjk_hash}-${_latin_hash}-${_digit_hash}-full-composite-v5"
+    _key_src="${_cjk_hash}-${_latin_hash}-${_digit_hash}-full-composite-v6-layout"
     _key=$(printf '%s' "$_key_src" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; elif command -v toybox >/dev/null 2>&1; then toybox sha256sum; else cksum; fi; } | awk '{print $1}')
     _cached="$_cache/${_key}.otf"; _report="$_cache/${_key}.json"; _progress="$CONFIG_DIR/composite_progress.json"
     rm -f "$_cache"/.*.tmp.* 2>/dev/null || true
