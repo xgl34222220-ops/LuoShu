@@ -6,6 +6,7 @@ freetype-py nor Pillow. It skips explicitly when the host has no FreeType.
 """
 import ctypes as C
 from ctypes.util import find_library
+import math
 from pathlib import Path
 import sys
 import tempfile
@@ -16,6 +17,7 @@ sys.path.insert(0, str(ROOT / 'common'))
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTFont
 import hyperos_metrics_batch as batch
 
 
@@ -114,7 +116,9 @@ class FreeType:
         try:
             record = face.contents
             bounds = tuple(getattr(record.bbox, name) for name in ('xMin', 'yMin', 'xMax', 'yMax'))
-            result = {'bbox': bounds, 'upem': record.units_per_EM, 'glyphs': {}}
+            result = {'bbox': bounds, 'upem': record.units_per_EM,
+                      'ascender': record.ascender, 'descender': record.descender,
+                      'glyphs': {}}
             self.check(self.api.FT_Set_Pixel_Sizes(face, 0, 48), 'set raster size')
             for character in 'A02':
                 # NO_SCALE | NO_HINTING | NO_BITMAP: retain actual design-space
@@ -141,19 +145,25 @@ class FreeType:
             self.check(self.api.FT_Done_Face(face), 'close font')
 
 
-def fixture_font(path, upem, cff):
+def fixture_font(path, upem, cff, latin_bottom=-80, combining_bottom=None, variable=False):
     """Include a distant, unused glyph to model a large donor's global bounds."""
     names = ['.notdef', 'A', 'zero', 'two', 'unused.extreme']
+    cmap = {65: 'A', 48: 'zero', 50: 'two'}
+    if combining_bottom is not None:
+        names.append('combining.low')
+        cmap[0x323] = 'combining.low'
     scale = upem / 1000
     width = round(600 * scale)
     fb = FontBuilder(upem, isTTF=not cff)
     fb.setupGlyphOrder(names)
-    fb.setupCharacterMap({65: 'A', 48: 'zero', 50: 'two'})
+    fb.setupCharacterMap(cmap)
     outlines = {}
     for name in names:
         pen = T2CharStringPen(width, None) if cff else TTGlyphPen(None)
         if name != '.notdef':
-            bottom, top = (-500, 1500) if name == 'unused.extreme' else (-80, 720)
+            bottom, top = (-500, 1500) if name == 'unused.extreme' else (latin_bottom, 720)
+            if name == 'combining.low':
+                bottom, top = combining_bottom, combining_bottom + 40
             for method, point in (
                     ('moveTo', (0, bottom)), ('lineTo', (500, bottom)),
                     ('lineTo', (400, top)), ('lineTo', (100, top))):
@@ -173,7 +183,29 @@ def fixture_font(path, upem, cff):
     else:
         fb.setupGlyf(outlines)
         fb.setupMaxp()
+    if variable:
+        fb.setupFvar([('wght', 100, 400, 900, 'Weight')], [])
     fb.save(path)
+
+
+def bitmap_span_baseline(font, pixels=48):
+    """Model QQ's same-Paint bitmap span, not general Android span layout.
+
+    QQ allocates ceil(bottom-top) pixels, draws text at -top, then bottom-aligns
+    the bitmap to the line. The line uses this same face's effective descent.
+    A line with other fallback faces can have different extents and is outside
+    this regression model. Bitmap allocation can leave a subpixel difference.
+    """
+    scale = pixels / font['upem']
+    top, bottom = -font['bbox'][3] * scale, -font['bbox'][1] * scale
+    line_bottom = math.ceil(-font['descender'] * scale)
+    bitmap_height = math.ceil(bottom - top)
+    return line_bottom - bitmap_height - top
+
+
+def table_bytes(path, tags):
+    with TTFont(path, lazy=True) as font:
+        return {tag: font.reader[tag] for tag in tags if tag in font}
 
 
 class HyperOSLayoutFreeTypeTest(unittest.TestCase):
@@ -233,6 +265,120 @@ class HyperOSLayoutFreeTypeTest(unittest.TestCase):
         for cff in (False, True):
             with self.subTest(cff=cff):
                 self.assert_layout_contract(cff=cff, upem=2048, with_head=False)
+
+    @staticmethod
+    def bitmap_contract(use_typo=False, descent=-282, typo_descent=-220,
+                        head_min=-430, with_head=True):
+        metrics = {'upem': 1000,
+                   'hhea': {'ascent': 1044, 'descent': descent, 'lineGap': 0},
+                   'os2': {'typoAscender': 890, 'typoDescender': typo_descent,
+                           'typoLineGap': 30, 'winAscent': 1044, 'winDescent': 430,
+                           'fsSelection': 128 if use_typo else 0}}
+        if with_head:
+            metrics['head'] = {'yMin': head_min, 'yMax': 1044}
+        logical = '/system/fonts/Roboto-Regular.ttf'
+        return batch.contract_for_slot({'slots': {logical: {'metrics': metrics}}}, logical)
+
+    def assert_bitmap_correction(self, cff, upem, use_typo=False):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            suffix = '.otf' if cff else '.ttf'
+            source, control, output = (root / (name + suffix)
+                                       for name in ('source', 'stock-frame', 'aligned'))
+            fixture_font(source, upem, cff)
+            source_bytes = source.read_bytes()
+            contract = self.bitmap_contract(use_typo=use_typo)
+            batch.write_metrics(source, control, contract)
+            report = batch.write_metrics(source, output, contract, align_bitmap_bottom=True)
+            before, after = self.freetype.inspect(control), self.freetype.inspect(output)
+            expected_descent = round((-220 if use_typo else -282) * upem / 1000)
+            self.assertEqual(before['descender'], expected_descent)
+            self.assertEqual(after['descender'], expected_descent)
+            self.assertLess(bitmap_span_baseline(before), -5,
+                            'fixture must reproduce a visible raised bitmap span')
+            self.assertLessEqual(abs(bitmap_span_baseline(after)), 1,
+                                 'same-Paint bitmap baseline must agree within rounding')
+            self.assertEqual(after['bbox'][1], expected_descent)
+            self.assertEqual(after['bbox'][::2], before['bbox'][::2])
+            self.assertEqual(after['bbox'][3], before['bbox'][3], 'top frame changed')
+            self.assertEqual(after['ascender'], before['ascender'])
+            self.assertEqual(after['glyphs'], before['glyphs'],
+                             'bitmap correction must not translate or reshape glyphs')
+            unchanged = ('hhea', 'OS/2', 'hmtx', 'cmap', 'glyf', 'loca', 'CFF ', 'gvar')
+            self.assertEqual(table_bytes(output, unchanged), table_bytes(control, unchanged),
+                             'only the staged bottom envelope may change')
+            self.assertEqual(source.read_bytes(), source_bytes, 'source font was mutated')
+            self.assertEqual(report['layoutBoundsSource'], 'stock-line-descent')
+            self.assertEqual(report['bitmapBaselineCorrection'],
+                             expected_descent - before['bbox'][1])
+
+    def test_ttf_qq_bitmap_bottom_alignment(self):
+        self.assert_bitmap_correction(cff=False, upem=1000)
+
+    def test_ttf_qq_bitmap_bottom_alignment_mixed_upem(self):
+        self.assert_bitmap_correction(cff=False, upem=2048)
+
+    def test_cff_qq_bitmap_bottom_alignment(self):
+        self.assert_bitmap_correction(cff=True, upem=1000)
+
+    def test_cff_qq_bitmap_bottom_alignment_mixed_upem(self):
+        self.assert_bitmap_correction(cff=True, upem=2048)
+
+    def test_qq_bitmap_alignment_uses_effective_typo_descent(self):
+        for cff in (False, True):
+            for upem in (1000, 2048):
+                with self.subTest(cff=cff, upem=upem):
+                    self.assert_bitmap_correction(cff=cff, upem=upem, use_typo=True)
+
+    def test_qq_bitmap_alignment_is_byte_idempotent(self):
+        for cff in (False, True):
+            for upem in (1000, 2048):
+                with self.subTest(cff=cff, upem=upem), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    source, first, second = (root / name for name in ('source', 'first', 'second'))
+                    fixture_font(source, upem, cff)
+                    contract = self.bitmap_contract(use_typo=True)
+                    batch.write_metrics(source, first, contract, align_bitmap_bottom=True)
+                    batch.write_metrics(first, second, contract, align_bitmap_bottom=True)
+                    self.assertEqual(first.read_bytes(), second.read_bytes())
+                    self.assertEqual(self.freetype.inspect(first), self.freetype.inspect(second))
+
+    def assert_bitmap_preserved(self, contract, cff=False, **fixture_options):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, control, output = (root / name for name in ('source', 'stock-frame', 'aligned'))
+            fixture_font(source, 1000, cff, **fixture_options)
+            batch.write_metrics(source, control, contract)
+            report = batch.write_metrics(source, output, contract, align_bitmap_bottom=True)
+            self.assertEqual(output.read_bytes(), control.read_bytes(),
+                             'an unproven or unnecessary correction changed the font')
+            self.assertEqual(report['bitmapBaselineCorrection'], 0)
+
+    def test_qq_bitmap_alignment_requires_trusted_stock_frame(self):
+        contracts = (batch.contract_for_slot({}, '/system/fonts/Roboto-Regular.ttf'),
+                     self.bitmap_contract(with_head=False))
+        for cff in (False, True):
+            for contract in contracts:
+                with self.subTest(cff=cff, contract=contract):
+                    self.assert_bitmap_preserved(contract, cff=cff)
+
+    def test_qq_bitmap_alignment_preserves_zero_effective_descent(self):
+        for use_typo in (False, True):
+            contract = self.bitmap_contract(use_typo=use_typo, descent=0, typo_descent=0)
+            with self.subTest(use_typo=use_typo):
+                self.assert_bitmap_preserved(contract)
+
+    def test_qq_bitmap_alignment_preserves_nonexcess_bottom(self):
+        for head_min in (-282, -120):
+            with self.subTest(head_min=head_min):
+                self.assert_bitmap_preserved(self.bitmap_contract(head_min=head_min))
+
+    def test_qq_bitmap_alignment_protects_latin_ink_and_variable_fonts(self):
+        for cff in (False, True):
+            for options in ({'latin_bottom': -350}, {'combining_bottom': -350},
+                            {'variable': True}):
+                with self.subTest(cff=cff, options=options):
+                    self.assert_bitmap_preserved(self.bitmap_contract(), cff=cff, **options)
 
 
 if __name__ == '__main__':

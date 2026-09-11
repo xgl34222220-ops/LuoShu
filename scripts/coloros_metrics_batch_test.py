@@ -110,15 +110,16 @@ class ColorOSMetricsTest(unittest.TestCase):
                         '/oplus_product/fonts/SysSans-Hans-Regular.ttf': stock(
                             ascent=1800, descent=-400, head=(-410, 2000), upem=2000)})
         writer = batch.write_metrics
-        def checked_writer(source, output, contract):
+        def checked_writer(source, output, contract, **options):
             for path in (regular, product, same):
                 self.assertEqual(path.read_bytes(), source_bytes,
                                  'every font must be generated before replacing aliases')
-            return writer(source, output, contract)
+            return writer(source, output, contract, **options)
         with patch.object(batch, 'write_metrics', side_effect=checked_writer):
             result = batch.build(self.module, self.stage)
-        self.assertEqual(result['generated'], 2)
-        self.assertEqual(regular.stat().st_ino, same.stat().st_ino)
+        self.assertEqual(result['generated'], 3)
+        self.assertNotEqual(regular.stat().st_ino, same.stat().st_ino,
+                            'Latin alignment must not leak into CJK aliases')
         self.assertNotEqual(regular.stat().st_ino, product.stat().st_ino)
         with TTFont(product) as font:
             self.assertEqual(font['hhea'].ascent, 900)

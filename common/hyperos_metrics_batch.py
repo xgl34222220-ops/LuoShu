@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import sys
 import tempfile
 
@@ -114,9 +115,41 @@ def contract_for_slot(data: dict, logical: str) -> tuple:
         return (1000, 980, -300, 0, 980, -300, 0, 980, 350, True, None, 'fallback')
 
 
+def _latin_ink_bottom(font: TTFont) -> int | None:
+    """Bound Latin descenders without scanning or recompiling CJK outlines."""
+    if 'fvar' in font:
+        return None  # Default-axis bounds cannot prove other variable instances.
+    cmap = font.getBestCmap() or {}
+    names = {name for cp, name in cmap.items()
+             if 0x20 <= cp <= 0x24f or 0x300 <= cp <= 0x36f}
+    if not names:
+        return None
+    bottom = 0
+    if 'glyf' in font:
+        offsets, raw = font['loca'].locations, font.reader['glyf']
+        for name in names:
+            gid = font.getGlyphID(name)
+            start, end = offsets[gid], offsets[gid + 1]
+            if start == end:
+                continue
+            if not 0 <= start <= end - 10 <= len(raw) - 10:
+                raise ValueError('invalid glyph header')
+            bottom = min(bottom, struct.unpack_from('>hhhhh', raw, start)[2])
+    else:
+        from fontTools.pens.boundsPen import BoundsPen
+        glyphs = font.getGlyphSet()
+        for name in names:
+            pen = BoundsPen(glyphs)
+            glyphs[name].draw(pen)
+            if pen.bounds is not None:
+                bottom = min(bottom, pen.bounds[1])
+    return bottom
+
+
 def write_metrics(source: Path, output: Path, contract: tuple,
                   cjk_fallback_codepoints: frozenset[int] | None = None,
-                  stock_cjk_punctuation: frozenset[int] = frozenset()) -> dict:
+                  stock_cjk_punctuation: frozenset[int] = frozenset(), *,
+                  align_bitmap_bottom: bool = False) -> dict:
     # lazy + recalcBBoxes=False retains glyf/CFF/gvar as raw tables. Loading glyph
     # bounds just to change hhea/OS2 used to recompile entire CJK fonts per slot.
     face = _pick_face(source)
@@ -149,6 +182,29 @@ def write_metrics(source: Path, output: Path, contract: tuple,
             # The user's font and glyf/CFF/gvar remain untouched. Only staged
             # HyperOS aliases receive this envelope; old/no stock stays explicit.
             head.yMin, head.yMax = frame
+        bottom_reason = 'stock-preserved'
+        bottom_correction = 0
+        if align_bitmap_bottom and contract[-1] == 'stock' and contract[10] is not None:
+            # QQ draws @names at -fm.top into a ceil(bottom-top) bitmap. Its
+            # ALIGN_BOTTOM span does not extend the line's metrics, so excess
+            # (fm.bottom-fm.descent) shifts the name above the normal baseline.
+            # Change only the Latin layout envelope, never the glyph baseline.
+            descent = values[4] if contract[9] else values[1]
+            if descent < 0 and head.yMin < descent:
+                try:
+                    ink_bottom = _latin_ink_bottom(font)
+                except (KeyError, ValueError, IndexError, TypeError, struct.error):
+                    ink_bottom = None
+                if ink_bottom is None:
+                    bottom_reason = 'unproven-latin-ink-bounds'
+                elif ink_bottom < descent:
+                    bottom_reason = 'latin-descender-would-clip'
+                else:
+                    bottom_correction = descent - head.yMin
+                    head.yMin = descent
+                    bottom_reason = 'latin-ui-bottom-to-descent'
+            else:
+                bottom_reason = 'no-excess-bottom-padding'
         # MVAR can restore source line metrics at non-default variable weights.
         if 'MVAR' in font:
             del font['MVAR']
@@ -162,7 +218,10 @@ def write_metrics(source: Path, output: Path, contract: tuple,
         font.save(output, reorderTables=False)
         report = {'sourceUpem': upem, 'sourceHead': list(source_frame),
                   'outputHead': [int(head.yMin), int(head.yMax)],
-                  'layoutBoundsSource': 'stock' if contract[10] is not None else 'source',
+                  'layoutBoundsSource': ('stock-line-descent' if bottom_correction else
+                                         'stock' if contract[10] is not None else 'source'),
+                  'bitmapBaselineCorrection': bottom_correction,
+                  'bitmapBaselineReason': bottom_reason,
                   'layoutBoundsDifferFromSource': source_frame != (head.yMin, head.yMax),
                   'removedCjkMappings': removed}
     os.chmod(output, 0o644)
@@ -197,6 +256,22 @@ def _latin_ui_slot(logical: str, slot: dict) -> bool:
                                   'oplus-sans')) for family in families)
             or name.startswith(('roboto', 'misanslatin', 'googlesans', 'syssans', 'sysfont',
                                 'sourcesanspro', 'opposans', 'oplussans', 'opsans')))
+
+
+def bitmap_bottom_slot(data: dict, logical: str, contract: tuple) -> bool:
+    """Limit the correction to Latin UI; preserve the working OEM main/clock."""
+    slot = (data.get('slots') or {}).get(logical, {})
+    if (contract[-1] != 'stock' or contract[10] is None or
+            logical == data.get('mainSlotPath') or _specialized_slot(logical, slot)):
+        return False
+    coverage = slot.get('metrics', {}).get('coverage')
+    if valid_coverage(coverage) and (coverage['hasHan'] or not coverage['hasLatin']):
+        return False
+    name = Path(logical).name.lower()
+    return name.startswith(('roboto', 'misanslatin', 'googlesans', 'sysfont-regular',
+                            'sysfont-static', 'syssans-en-', 'sysfont-en-',
+                            'opposans-en-', 'opsans-en-', 'sourcesanspro',
+                            'notosans-', 'notosansui-', 'droidsans'))
 
 
 def _staged_cjk_fallback(data: dict, jobs: list, stage: Path) -> frozenset[int]:
@@ -285,11 +360,13 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             routing, stock_punctuation, routing_reason = _cjk_routing(data, logical, cjk_fallback)
             if contract[-1] != 'stock':
                 routing, stock_punctuation, routing_reason = None, frozenset(), 'invalid-stock-contract'
+            align_bottom = bitmap_bottom_slot(data, logical, contract)
             key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract,
-                   routing, stock_punctuation)
+                   routing, stock_punctuation, align_bottom)
             if key not in cache:
                 output = outputs / f'{len(cache)}.font'
-                output_reports[key] = write_metrics(source, output, contract, routing, stock_punctuation)
+                output_reports[key] = write_metrics(source, output, contract, routing, stock_punctuation,
+                                                    align_bitmap_bottom=align_bottom)
                 cache[key] = output
             prepared.append((cache[key], dest))
             fallback += contract[-1] == 'fallback'

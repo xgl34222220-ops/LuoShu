@@ -337,12 +337,18 @@ class Collector:
                     "metricsSource": allowed_label(item.get("metricsSource"), {"stock", "fallback", "preserved"}),
                     "reason": allowed_label(item.get("reason"), {"missing-or-ineligible-stock-slot",
                         "invalid-stock-metrics", "collection-metrics-preserved"}),
-                    "layoutBoundsSource": allowed_label(item.get("layoutBoundsSource"), {"stock", "source"}),
+                    "layoutBoundsSource": allowed_label(item.get("layoutBoundsSource"), {"stock", "source", "stock-line-descent"}),
+                    "bitmapBaselineReason": allowed_label(item.get("bitmapBaselineReason"), {
+                        "stock-preserved", "unproven-latin-ink-bounds", "latin-descender-would-clip",
+                        "latin-ui-bottom-to-descent", "no-excess-bottom-padding"}),
                     "cjkRoutingSource": allowed_label(item.get("cjkRoutingSource"), {"stock-fallback", "source"}),
                     "cjkRoutingReason": allowed_label(item.get("cjkRoutingReason"), CJK_ROUTING_REASONS)}
                 removed = item.get("removedCjkMappings")
                 if type(removed) is int and 0 <= removed <= 0x110000:
                     result[item["slot"]]["removedCjkMappings"] = removed
+                correction = item.get("bitmapBaselineCorrection")
+                if type(correction) is int and 0 <= correction <= 32767:
+                    result[item["slot"]]["bitmapBaselineCorrection"] = correction
             return result
         except Exception:
             return {}

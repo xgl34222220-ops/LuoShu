@@ -16,7 +16,8 @@ import tempfile
 
 from font_inventory import FONT_EXTENSIONS, LOGICAL_FONT_ROOTS, _heuristic_candidate
 from font_inventory_scan import _is_ui_family
-from hyperos_metrics_batch import contract_for_slot, link_copy, read_inventory, write_metrics
+from hyperos_metrics_batch import (bitmap_bottom_slot, contract_for_slot, link_copy,
+                                  read_inventory, write_metrics)
 
 
 def eligible_slot(slot: object, logical: str) -> bool:
@@ -94,10 +95,12 @@ def build(module: Path, stage: Path) -> dict:
         # frame or weight, especially when the same basename spans partitions.
         for source, contract, report in jobs:
             stat = source.stat()
-            key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract)
+            align_bottom = bitmap_bottom_slot(inventory, report['slot'], contract)
+            key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract, align_bottom)
             if key not in cache:
                 output = outputs / f'{len(cache)}.font'
-                cached_reports[key] = write_metrics(source, output, contract)
+                cached_reports[key] = write_metrics(source, output, contract,
+                                                   align_bitmap_bottom=align_bottom)
                 cache[key] = output
             prepared.append((cache[key], source))
             report.update({'metricsSource': 'stock', 'referenceUpem': contract[0],

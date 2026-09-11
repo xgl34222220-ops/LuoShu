@@ -107,6 +107,37 @@ class HyperOSMetricsTest(unittest.TestCase):
         result = batch.build(self.module, self.stage, ['MiSansVF.ttf'])
         self.assertEqual(result['generated'], 1)
 
+    def test_latin_bitmap_policy_does_not_leak_to_main_or_clock(self):
+        slots = {f'/system/fonts/{name}': slot(use_typo=False, head=(-430, 1100))
+                 for name in ('Roboto-Regular.ttf', 'MiSansVF.ttf', 'MiClock.otf')}
+        self.inventory(slots)
+        batch.build(self.module, self.stage, [Path(logical).name for logical in slots])
+        for name, expected in (('Roboto-Regular.ttf', -350), ('MiSansVF.ttf', -430),
+                               ('MiClock.otf', -430)):
+            with self.subTest(name=name), TTFont(self.fonts / name) as font:
+                self.assertEqual(font['head'].yMin, expected)
+                self.assertEqual(font['head'].yMax, 1100)
+                self.assertEqual(font['hhea'].descent, -350)
+        data = {'mainSlotPath': '/system/fonts/Roboto-Regular.ttf', 'slots': slots}
+        contract = batch.contract_for_slot(data, data['mainSlotPath'])
+        self.assertFalse(batch.bitmap_bottom_slot(data, data['mainSlotPath'], contract))
+
+    def test_latin_descenders_guard_against_new_bitmap_clipping(self):
+        source = self.fonts / '400.ttf'
+        with TTFont(source) as font:
+            pen = TTGlyphPen(None)
+            pen.moveTo((0, -500)); pen.lineTo((500, -500))
+            pen.lineTo((500, 700)); pen.closePath()
+            font['glyf']['A'] = pen.glyph()
+            font.save(source)
+        self.inventory({'/system/fonts/Roboto-Regular.ttf': slot(use_typo=False, head=(-550, 1100))})
+        batch.build(self.module, self.stage, ['Roboto-Regular.ttf'])
+        with TTFont(self.fonts / 'Roboto-Regular.ttf') as font:
+            self.assertEqual(font['head'].yMin, -550)
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots'][0]
+        self.assertEqual(report['bitmapBaselineReason'], 'latin-descender-would-clip')
+        self.assertEqual(report['bitmapBaselineCorrection'], 0)
+
     def test_padded_layout_frame_uses_each_stock_slot_and_scales_units(self):
         self.inventory({'/system/fonts/MiClock.otf': slot(head=(-201, 880)),
                         '/product/fonts/MiClock.otf': slot(head=(-555, 2163), upem=2048)})
