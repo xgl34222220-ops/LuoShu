@@ -29,9 +29,18 @@ precheck_mix() {
         printf '{"status":"error","message":"请选择中文、英文和数字字体"}\n'
         return 1
     }
-    _role_error=$(MODDIR="$MODDIR" sh "$ROLE_CHECK" "$1" cjk) || { printf '%s\n' "$_role_error"; return 1; }
-    _role_error=$(MODDIR="$MODDIR" sh "$ROLE_CHECK" "$2" latin) || { printf '%s\n' "$_role_error"; return 1; }
-    _role_error=$(MODDIR="$MODDIR" sh "$ROLE_CHECK" "$3" digit) || { printf '%s\n' "$_role_error"; return 1; }
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$1" cjk >/dev/null 2>&1 || {
+        printf '{"status":"error","message":"中文基底缺少必要的中文、英文字母或数字字形"}\n'
+        return 1
+    }
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$2" latin >/dev/null 2>&1 || {
+        printf '{"status":"error","message":"英文字体缺少必要的大小写拉丁字母"}\n'
+        return 1
+    }
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$3" digit >/dev/null 2>&1 || {
+        printf '{"status":"error","message":"数字字体缺少必要的 0–9 数字字形"}\n'
+        return 1
+    }
 }
 
 if [ -f "$WEIGHTED" ]; then

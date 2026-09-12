@@ -63,15 +63,23 @@ provider_fingerprint() {
 }
 
 provider_restore_theme() {
-    [ -f "$THEME_BRIDGE" ] || return 0
+    # Restore both adapters. Keep this function name for older lifecycle callers.
+    _provider_cleanup_rc=0
+    provider_restore_bridge "$BRIDGE" || _provider_cleanup_rc=1
+    [ ! -f "$THEME_BRIDGE" ] || provider_restore_bridge "$THEME_BRIDGE" || _provider_cleanup_rc=1
+    return "$_provider_cleanup_rc"
+}
+
+provider_restore_bridge() {
+    _provider_restore_bridge="$1"
     _provider_restore_attempt=1
     while [ "$_provider_restore_attempt" -le 3 ]; do
-        provider_run "$THEME_BRIDGE" restore 0 && return 0
+        provider_run "$_provider_restore_bridge" restore 0 && return 0
         # Removal can finish while a child is unwinding. Do not recreate a
         # removed module just to record an already obsolete cleanup failure.
-        [ -d "$MODDIR" ] && [ -f "$THEME_BRIDGE" ] || return 0
+        [ -d "$MODDIR" ] && [ -f "$_provider_restore_bridge" ] || return 0
         mkdir -p "${LOG%/*}" 2>/dev/null || true
-        printf '[%s] HyperOS theme restore failed (attempt %s/3); namespace journal retained\n' \
+        printf '[%s] font restore failed (attempt %s/3); namespace journal retained\n' \
             "$(date '+%F %T' 2>/dev/null)" "$_provider_restore_attempt" >> "$LOG" 2>/dev/null || true
         [ "$_provider_restore_attempt" -lt 3 ] || return 1
         # Keep the bounded retry pause cancellable through the same child-tree
@@ -133,9 +141,10 @@ while [ "$_attempt" -le "$_limit" ]; do
         # watch. Downloads arriving during apply must remain visible changes.
         _fingerprint=$_observed
     fi
+    [ ! -s "$MODDIR/config/google-font-refresh-pending.conf" ] || provider_run "$BRIDGE" refresh 0
     # GMS downloads families lazily. One mounted family must not end the boot
     # discovery window before Play opens or another font weight arrives. Binds
-    # are idempotent, so later passes do not keep force-stopping Play.
+    # are idempotent; old consumer FDs use only the deferred background queue.
     [ "$_attempt" -lt "$_limit" ] || break
     sleep 5
     _boot_retry_age=$((_boot_retry_age + 5))
@@ -180,5 +189,6 @@ while [ "$_watch_limit" = -1 ] || [ "$_watch_count" -lt "$_watch_limit" ]; do
         # Our own binds may cause one extra idempotent pass, then settle.
         _fingerprint="$_observed"
     fi
+    [ ! -s "$MODDIR/config/google-font-refresh-pending.conf" ] || provider_run "$BRIDGE" refresh 0
 done
 exit 0

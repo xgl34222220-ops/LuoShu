@@ -11,6 +11,7 @@ import copy
 import json
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -193,19 +194,23 @@ def main() -> int:
     args = parser.parse_args()
     if args.inspect_targets is not None:
         seen: set[str] = set()
+        failed = False
         for raw in args.inspect_targets.read_text(encoding="utf-8").splitlines():
             if not raw or raw in seen:
                 continue
             seen.add(raw)
             try:
                 weight = inspect_target(Path(raw))
-            except Exception:
-                # A provider can rotate files while scanning; a corrupt/cache
-                # metadata file is not a reason to abort other valid targets.
+            except Exception as exc:
+                # A temporarily unreadable SFNT/runtime table is not proof of
+                # an unrelated family. Let the shell retry without committing
+                # negative cache entries for unchanged font metadata.
+                failed = True
+                print(f"provider-target-inspection-failed: {raw}: {type(exc).__name__}: {exc}", file=sys.stderr)
                 continue
             if weight is not None:
                 print(f"{raw}\t{weight}")
-        return 0
+        return 1 if failed else 0
     if any(value is None for value in (args.source, args.target, args.output, args.weight)):
         parser.error("--source, --target, --output and --weight are required for patching")
     try:

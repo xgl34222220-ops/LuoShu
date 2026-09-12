@@ -174,7 +174,7 @@ class ProviderPatchTest(unittest.TestCase):
         shutil.copyfile(source, module / "config/device-font-sources/LuoShu-400.ttf")
         shutil.copyfile(ROOT / "common/google_font_provider_patch.py", module / "common/google_font_provider_patch.py")
         script = '''. "$1"
-_gfp_namespace_pids() { printf '10\\n20\\n'; }
+_gfp_unique_namespace_pids() { printf '10\\n20\\n'; }
 _gfp_mount_in_pid() {
     if [ "$1" = 10 ]; then _gfp_mount_mode=already; return 0; fi
     _gfp_mount_detail=permission-denied
@@ -204,7 +204,7 @@ _gfp_apply_once
         old_clone = cache / "previous-selection.ttf"
         shutil.copyfile(source, old_clone)
         script = '''. "$1"
-_gfp_namespace_pids() { printf '10\\n'; }
+_gfp_unique_namespace_pids() { printf '10\\n'; }
 _gfp_mount_in_pid() { _gfp_mount_mode=already; return 0; }
 _gfp_apply_once
 '''
@@ -238,6 +238,105 @@ _gfp_apply_once
         self.assertEqual(Path(state.read_text().split("|")[1]), first)
         self.assertEqual(list((module / "config/google-font-provider").glob("*.ttf")), [first])
 
+    def test_warm_target_inspection_and_new_namespace_do_not_restart_python(self):
+        module = self.root / "module"
+        (module / "common").mkdir(parents=True)
+        (module / "config/device-font-sources").mkdir(parents=True)
+        (module / "config/active_font.conf").write_text("fixture\n")
+        target = self.font("opaque")
+        source = self.font("source.ttf", family="Custom")
+        shutil.copyfile(source, module / "config/device-font-sources/LuoShu-400.ttf")
+        shutil.copyfile(ROOT / "common/google_font_provider_patch.py", module / "common/google_font_provider_patch.py")
+        script = '''. "$1"
+_gfp_unique_namespace_pids() { :; }
+_gfp_apply_once || exit 10
+_gfp_python() { echo unexpected-python >&2; return 99; }
+_gfp_apply_once || exit 11
+'''
+        env = dict(os.environ, MODDIR=str(module), LUOSHU_GOOGLE_FONT_PYTHON=sys.executable,
+                   LUOSHU_GOOGLE_FONT_TARGETS=str(target), LUOSHU_GOOGLE_FONT_DRY_RUN="1")
+        result = subprocess.run(["sh", "-c", script, "sh", str(ROOT / "common/google_font_provider_bridge.sh")],
+                                env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("unexpected-python", result.stderr)
+
+    def test_inspection_cache_invalidates_same_size_timestamp_inode_replacement(self):
+        module = self.root / "module"
+        (module / "config/google-font-provider").mkdir(parents=True)
+        (module / "logs").mkdir()
+        target = self.root / "opaque-font"
+        target.write_bytes(b"font-fixture")
+        candidates = self.root / "targets"
+        candidates.write_text(str(target) + "\n")
+        script = '''. "$1"
+_gfp_python() {
+    echo inspected >> "$TEST_ROOT/inspections"
+    while IFS= read -r target; do printf '%s\t400\n' "$target"; done < "$2"
+}
+_gfp_inspect_targets "$TEST_ROOT/targets" "$TEST_ROOT/out" || exit 10
+_gfp_inspect_targets "$TEST_ROOT/targets" "$TEST_ROOT/out" || exit 11
+cp -p "$TEST_ROOT/opaque-font" "$TEST_ROOT/replacement"
+mv "$TEST_ROOT/replacement" "$TEST_ROOT/opaque-font"
+_gfp_inspect_targets "$TEST_ROOT/targets" "$TEST_ROOT/out" || exit 12
+'''
+        result = subprocess.run(["sh", "-c", script, "sh", str(ROOT / "common/google_font_provider_bridge.sh")],
+                                env={**os.environ, "MODDIR": str(module), "TEST_ROOT": str(self.root)},
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.root / "inspections").read_text().splitlines(), ["inspected"] * 2)
+        self.assertEqual((self.root / "out").read_text(), str(target) + "\t400\n")
+
+    def test_temporary_inspection_error_does_not_commit_negative_cache(self):
+        module = self.root / "module"
+        (module / "config/google-font-provider").mkdir(parents=True)
+        (module / "logs").mkdir()
+        target = self.root / "opaque-font"
+        target.write_bytes(b"font-fixture")
+        (self.root / "targets").write_text(str(target) + "\n")
+        script = '''. "$1"
+_gfp_python() { echo temporary-runtime-error >&2; return 1; }
+_gfp_inspect_targets "$TEST_ROOT/targets" "$TEST_ROOT/out"
+[ "$?" = 1 ] && [ ! -e "$INSPECT_CACHE" ] || exit 10
+_gfp_python() { while IFS= read -r target; do printf '%s\t400\n' "$target"; done < "$2"; }
+_gfp_inspect_targets "$TEST_ROOT/targets" "$TEST_ROOT/out" || exit 11
+'''
+        result = subprocess.run(["sh", "-c", script, "sh", str(ROOT / "common/google_font_provider_bridge.sh")],
+                                env={**os.environ, "MODDIR": str(module), "TEST_ROOT": str(self.root)},
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.root / "out").read_text(), str(target) + "\t400\n")
+
+    def test_unreadable_font_is_a_retryable_batch_failure(self):
+        missing = self.root / "removed-during-scan.ttf"
+        candidates = self.root / "candidates"
+        candidates.write_text(str(missing) + "\n")
+        result = subprocess.run([sys.executable, str(ROOT / "common/google_font_provider_patch.py"),
+                                 "--inspect-targets", str(candidates)], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("provider-target-inspection-failed:", result.stderr)
+        self.assertIn("FileNotFoundError", result.stderr)
+
+    def test_one_apply_hashes_shared_full_source_only_once(self):
+        module = self.root / "module"
+        (module / "common").mkdir(parents=True)
+        (module / "config/device-font-sources").mkdir(parents=True)
+        (module / "config/active_font.conf").write_text("fixture\n")
+        targets = [self.font("regular", weight=400), self.font("bold", weight=700)]
+        source = self.font("source.ttf", family="Custom")
+        donor = module / "config/device-font-sources/LuoShu-400.ttf"
+        shutil.copyfile(source, donor)
+        shutil.copyfile(ROOT / "common/google_font_provider_patch.py", module / "common/google_font_provider_patch.py")
+        script = '''. "$1"
+_gfp_hash_raw() { printf '%s\n' "$1" >> "$TEST_ROOT/hashed"; sha256sum "$1" | awk '{print $1}'; }
+_gfp_apply_once
+'''
+        env = dict(os.environ, MODDIR=str(module), TEST_ROOT=str(self.root),
+                   LUOSHU_GOOGLE_FONT_PYTHON=sys.executable,
+                   LUOSHU_GOOGLE_FONT_TARGETS="\n".join(map(str, targets)), LUOSHU_GOOGLE_FONT_DRY_RUN="1")
+        subprocess.run(["sh", "-c", script, "sh", str(ROOT / "common/google_font_provider_bridge.sh")],
+                       env=env, capture_output=True, text=True, check=True)
+        self.assertEqual((self.root / "hashed").read_text().splitlines().count(str(donor)), 1)
+
     def test_background_mount_repair_does_not_force_stop_play(self):
         module = self.root / "module"
         (module / "common").mkdir(parents=True)
@@ -249,7 +348,7 @@ _gfp_apply_once
         shutil.copyfile(ROOT / "common/google_font_provider_patch.py", module / "common/google_font_provider_patch.py")
         marker = self.root / "force-stopped"
         script = '''. "$1"
-_gfp_namespace_pids() { printf '10\\n'; }
+_gfp_unique_namespace_pids() { printf '10\\n'; }
 _gfp_mount_in_pid() { _gfp_mount_mode=plain; return 0; }
 am() { printf '%s\\n' "$*" >> "$TEST_RESTARTS"; }
 _gfp_apply_once

@@ -52,7 +52,6 @@ internal class FontIndexStore(context: Context) {
                             error = item.optString("error", ""),
                             weights = weights,
                             supportsCjk = item.optBoolean("supportsCjk", true),
-                            sourceRevision = root.optString("fingerprint", ""),
                         ),
                     )
                 }

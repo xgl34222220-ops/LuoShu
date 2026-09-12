@@ -90,7 +90,6 @@ internal data class FontItem(
     val error: String,
     val weights: List<String>,
     val supportsCjk: Boolean = true,
-    val sourceRevision: String = "",
 ) {
     val weightLabel: String
         get() = when {
@@ -336,9 +335,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             val current = data.optString("current", knownFingerprint?.currentFont ?: snapshot.activeFont)
             val fingerprint = knownFingerprint ?: readFontFingerprint()
             snapshot = snapshot.copy(activeFont = current)
-            // The directory fingerprint uses file names, exact byte counts and full mtimes.
-            // Display size/date strings alone cannot identify a same-day font replacement.
-            fonts = parsedFonts.map { it.copy(sourceRevision = fingerprint?.value.orEmpty()) }
+            fonts = parsedFonts
             cachedFingerprint = fingerprint?.value.orEmpty()
             normalizeMixSelections()
             persistFontIndex(currentFont = current)

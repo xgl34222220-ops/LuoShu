@@ -50,6 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--notes-file", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--fallback-output")
     return parser.parse_args()
 
 
@@ -65,7 +66,20 @@ def main() -> int:
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if args.fallback_output:
+        advance_fallback_channel(metadata, Path(args.fallback_output))
     return 0
+
+
+def advance_fallback_channel(metadata: dict, output: Path) -> bool:
+    """Let preview-channel users receive a newer stable without downgrading RCs."""
+    if output.is_file():
+        current = json.loads(output.read_text(encoding="utf-8"))
+        if int(current["versionCode"]) > int(metadata["versionCode"]):
+            return False
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return True
 
 
 if __name__ == "__main__":

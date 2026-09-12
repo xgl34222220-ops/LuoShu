@@ -37,6 +37,12 @@ printf 'stock-mitype\n' > "$LUOSHU_PRODUCT_FONTS_ROOT/MitypeClock.otf"
 printf 'stock-noto\n' > "$LUOSHU_ODM_FONTS_ROOT/NotoSansUI-Regular.ttf"
 printf 'stock-source\n' > "$LUOSHU_CUST_FONTS_ROOT/SourceSansPro-Bold.ttf"
 printf 'stale-overlay\n' > "$MODULE_DIR/system/fonts/Roboto-Regular.ttf"
+for _name in NotoSansAdlam-VF.ttf NotoSansAhom-Regular.ttf NotoSansCuneiform-Regular.ttf NotoSansEgyptianHieroglyphs-Regular.ttf; do
+    printf 'stock-language\n' > "$LUOSHU_SYSTEM_FONTS_ROOT/$_name"
+done
+for _name in NotoSans.ttf NotoSansUI.ttf NotoSansSC-Regular.ttf NotoSansCJKsc-Regular.ttf NotoSansHant-Regular.ttf; do
+    printf 'stock-ui\n' > "$LUOSHU_SYSTEM_FONTS_ROOT/$_name"
+done
 
 _font_store_reset() {
     rm -rf "$1/.luoshu-font-store"
@@ -92,6 +98,13 @@ ok test "$(cat "$MODULE_DIR/product/fonts/MitypeClock.otf")" = 'regular-source'
 ok test "$(cat "$MODULE_DIR/odm/fonts/NotoSansUI-Regular.ttf")" = 'regular-source'
 ok test "$(cat "$MODULE_DIR/cust/fonts/SourceSansPro-Bold.ttf")" = 'bold-source'
 ok test "$(cat "$NORMALIZE_COUNT_FILE")" -eq 11
+for _name in NotoSansAdlam-VF.ttf NotoSansAhom-Regular.ttf NotoSansCuneiform-Regular.ttf NotoSansEgyptianHieroglyphs-Regular.ttf; do
+    no test -e "$MODULE_DIR/system/fonts/$_name"
+    ok test "$(cat "$LUOSHU_SYSTEM_FONTS_ROOT/$_name")" = 'stock-language'
+done
+for _name in NotoSans.ttf NotoSansUI.ttf NotoSansSC-Regular.ttf NotoSansCJKsc-Regular.ttf NotoSansHant-Regular.ttf; do
+    ok test "$(cat "$MODULE_DIR/system/fonts/$_name")" = 'regular-source'
+done
 _luoshu_hyperos_root_pairs > "$ROOT/hyperos-root-pairs"
 ok grep -qF "$LUOSHU_MI_EXT_FONTS_ROOT|$MODULE_DIR/mi_ext/fonts" "$ROOT/hyperos-root-pairs"
 ok grep -qF "$LUOSHU_ODM_FONTS_ROOT|$MODULE_DIR/odm/fonts" "$ROOT/hyperos-root-pairs"
