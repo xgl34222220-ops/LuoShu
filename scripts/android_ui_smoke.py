@@ -33,37 +33,74 @@ def labels(node: ET.Element) -> set[str]:
     return {line.strip() for value in values for line in value.splitlines() if line.strip()}
 
 
-def center(node: ET.Element) -> tuple[int, int]:
+def bounds(node: ET.Element) -> tuple[int, int, int, int]:
     match = BOUNDS.fullmatch(node.get("bounds", ""))
     if not match:
         raise ValueError(f"Invalid UI bounds: {node.get('bounds')!r}")
     left, top, right, bottom = map(int, match.groups())
     if right <= left or bottom <= top:
         raise ValueError("UI node has no visible bounds")
+    return left, top, right, bottom
+
+
+def center(node: ET.Element) -> tuple[int, int]:
+    left, top, right, bottom = bounds(node)
     return (left + right) // 2, (top + bottom) // 2
 
 
 def tab_target(root: ET.Element, label: str, package: str) -> ET.Element:
-    parents = {child: parent for parent in root.iter() for child in parent}
-    targets = []
-    for node in root.iter("node"):
-        if label not in labels(node) or node.get("package") != package:
-            continue
-        target = node
-        while target.get("clickable") != "true" and target in parents:
-            target = parents[target]
-        if target.get("clickable") != "true" or target.get("enabled") == "false":
-            continue
+    page_labels = [page[1] for page in PAGES]
+    page_label_set = set(page_labels)
+    app_nodes = [node for node in root.iter("node") if node.get("package") == package]
+    valid_bounds = []
+    for node in app_nodes:
         try:
-            center(target)
+            valid_bounds.append(bounds(node))
         except ValueError:
             continue
+    if not valid_bounds:
+        raise ValueError("App bounds not found in the hierarchy")
+    screen_bottom = max(rect[3] for rect in valid_bounds)
+    targets = []
+    for group in app_nodes:
+        tabs = {}
+        for child in group:
+            child_labels = {value for node in child.iter("node") if node.get("package") == package for value in labels(node)} & page_label_set
+            if len(child_labels) != 1:
+                continue
+            child_label = child_labels.pop()
+            if child_label in tabs:
+                tabs = {}
+                break
+            tabs[child_label] = child
+        if set(tabs) != page_label_set:
+            continue
+        try:
+            ordered = [tabs[value] for value in page_labels]
+            centers = [center(node) for node in ordered]
+            heights = [bounds(node)[3] - bounds(node)[1] for node in ordered]
+        except ValueError:
+            continue
+        if any(node.get("package") != package or node.get("enabled") == "false" for node in ordered):
+            continue
+        if any(node.get("clickable") != "true" and not (
+            node.get("focusable") == "true" and node.get("selected") == "true"
+        ) for node in ordered):
+            continue
+        if any(centers[index][0] >= centers[index + 1][0] for index in range(len(centers) - 1)):
+            continue
+        if max(y for _, y in centers) - min(y for _, y in centers) > min(heights) / 2:
+            continue
+        if min(y for _, y in centers) < screen_bottom * 0.65:
+            continue
+        target = tabs[label]
         targets.append(target)
     if not targets:
-        raise ValueError(f"Clickable tab {label!r} not found in the App hierarchy")
-    # Home also contains a font-library card. Choose the actual bottom tab, using
-    # hierarchy bounds rather than coordinates tied to a particular emulator.
-    return max(targets, key=lambda node: center(node)[1])
+        raise ValueError(f"Bottom navigation tab {label!r} not found in the App hierarchy")
+    # AndroidX deliberately exposes an already-selected Role.Tab as non-clickable.
+    # Accept its focusable parent only inside the complete, horizontal four-tab
+    # group. The subsequent real tap must still select the requested page and body.
+    return max(targets, key=lambda node: (center(node)[1], node.get("clickable") == "true"))
 
 
 def page_ready(root: ET.Element, label: str, marker: str, package: str) -> bool:
