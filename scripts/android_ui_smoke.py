@@ -165,6 +165,9 @@ class SmokeRun:
         self.adb("wait-for-device", timeout=60)
         self.adb("install", "-r", "-g", str(self.apk), timeout=120)
         self.adb("shell", "pm", "clear", self.package)
+        # Clearing App data also revokes the grant made by install -g. Grant this
+        # permission after the reset so the first-run dialog cannot cover the UI.
+        self.adb("shell", "pm", "grant", self.package, "android.permission.POST_NOTIFICATIONS")
         self.adb("logcat", "-c")
         self.adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
         self.adb("shell", "wm", "dismiss-keyguard")
