@@ -92,6 +92,22 @@ class ProviderPatchTest(unittest.TestCase):
             self.assertNotIn("gvar", font)
             self.assertEqual(font["OS/2"].usWeightClass, 700)
 
+    def test_provider_clone_does_not_carry_unrelated_cjk_donor_glyphs(self):
+        from hyperos_cjk_routing_test import make_font
+        source = self.root / 'large-cjk.ttf'
+        make_font(source, points=(*range(32, 127), *range(0x4E00, 0x5E00)), variable=True)
+        target = self.font('target.ttf', variable=True)
+        output = self.root / 'provider.ttf'
+        before = source.read_bytes()
+        PATCHER.patch(source, target, output, 400)
+        with TTFont(output) as font:
+            self.assertTrue(all(cp in font.getBestCmap() for cp in range(32, 127)))
+            self.assertNotIn(0x4E00, font.getBestCmap())
+            self.assertLess(len(font.getGlyphOrder()), 150)
+            self.assertIn('fvar', font)
+        self.assertLess(output.stat().st_size, len(before) // 10)
+        self.assertEqual(source.read_bytes(), before)
+
     def test_scan_ignores_nonfonts_and_preserves_spaces(self):
         valid = self.font("opaque with spaces", weight=600)
         invalid = self.root / "metadata.json"

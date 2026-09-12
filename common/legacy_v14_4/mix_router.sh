@@ -458,6 +458,12 @@ mark_mix_mode_if_success() {
 }
 
 _cmd="${1:-config}"
+if [ "$_cmd" = reconcile ]; then
+    # This compatibility controller has no reconciliation mutation. In particular,
+    # a status request must not rebuild links into a live/actively staged payload.
+    printf '{"status":"ok"}\n'
+    exit 0
+fi
 if [ "$_cmd" = finalize ]; then
     finalize_mix_stage
     exit $?

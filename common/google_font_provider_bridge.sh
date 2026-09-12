@@ -225,7 +225,8 @@ _gfp_build_clone() {
     # identity/cache key instead of generating clone-of-clone on every repair.
     if [ -s "$STATE" ]; then
         while IFS='|' read -r _gfp_old_target _gfp_old_clone _gfp_old_target_hash \
-            _gfp_old_clone_hash _gfp_old_source_hash _gfp_old_weight; do
+            _gfp_old_clone_hash _gfp_old_source_hash _gfp_old_weight _gfp_old_schema; do
+            [ "$_gfp_old_schema" = provider-v3 ] || continue
             [ "$_gfp_old_target" = "$_gfp_target" ] || continue
             [ "$_gfp_old_source_hash" = "$_gfp_source_hash" ] || continue
             [ "$_gfp_old_weight" = "$_gfp_weight_value" ] || continue
@@ -238,7 +239,7 @@ _gfp_build_clone() {
             return 0
         done < "$STATE"
     fi
-    _gfp_key=$(printf 'provider-v2\n%s\n%s\n%s\n' "$_gfp_source_hash" "$_gfp_target_hash" "$_gfp_weight_value" | _gfp_hash_text)
+    _gfp_key=$(printf 'provider-v3\n%s\n%s\n%s\n' "$_gfp_source_hash" "$_gfp_target_hash" "$_gfp_weight_value" | _gfp_hash_text)
     [ -n "$_gfp_key" ] || return 1
     _gfp_output="$CACHE/${_gfp_key}.ttf"
     if ! _gfp_valid_font "$_gfp_output"; then
@@ -277,7 +278,7 @@ _gfp_namespace_pids() {
             printf '%s
 ' "$_gfp_pid"
         done
-        for _gfp_pid in $(pidof com.android.vending 2>/dev/null); do
+        for _gfp_pid in $(pidof com.android.vending com.android.chrome com.chrome.beta com.chrome.dev com.chrome.canary 2>/dev/null); do
             printf '%s
 ' "$_gfp_pid"
         done
@@ -289,7 +290,8 @@ _gfp_namespace_pids() {
         # Preserve the previous wildcard semantics for GMS subprocesses such as
         # com.google.android.gms:phenotype. This is one grep process for the whole proc tree, not
         # two child processes per PID. The result is merged with pidof rather than replacing it.
-        grep -al -e zygote -e com.android.vending -e com.google.android.gms \
+        grep -al -e '^zygote' -e '^com[.]android[.]vending' -e '^com[.]google[.]android[.]' \
+            -e '^com[.]android[.]chrome' -e '^com[.]chrome[.]beta' -e '^com[.]chrome[.]dev' -e '^com[.]chrome[.]canary' \
             "$_gfp_proc_root"/[0-9]*/cmdline 2>/dev/null |
             while IFS= read -r _gfp_path; do
                 [ -n "$_gfp_path" ] || continue
@@ -505,7 +507,7 @@ _gfp_apply_once() {
         fi
         if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || [ "$_gfp_target_mounts" -gt 0 ]; then
             _gfp_mounted=$((_gfp_mounted + 1))
-            printf '%s|%s|%s|%s|%s|%s\n' "$_gfp_target" "$_gfp_clone" \
+            printf '%s|%s|%s|%s|%s|%s|provider-v3\n' "$_gfp_target" "$_gfp_clone" \
                 "$_gfp_original_target_hash" "$(_gfp_hash "$_gfp_clone")" \
                 "$_gfp_selected_hash" "$_gfp_weight_value" >> "$_gfp_state_tmp"
         else

@@ -37,10 +37,15 @@ FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 [ -f "$MODULE_DIR/common/font_boot_state.sh" ] && . "$MODULE_DIR/common/font_boot_state.sh"
 [ -f "$MODULE_DIR/common/font_active_state.sh" ] && . "$MODULE_DIR/common/font_active_state.sh"
 
-type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
-type check_coloros >/dev/null 2>&1 && check_coloros
-type check_hyperos >/dev/null 2>&1 && check_hyperos
-mkdir -p "$CONFIG_DIR" "$SYSTEM_FONTS_DIR" "$USER_FONTS_DIR" "$USER_REPORT_DIR" 2>/dev/null || true
+case "${1:-}:${2:-}" in
+    action:font_weight_status) ;; # A settings read must never migrate /sdcard/Fonts.
+    *)
+        type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
+        type check_coloros >/dev/null 2>&1 && check_coloros
+        type check_hyperos >/dev/null 2>&1 && check_hyperos
+        mkdir -p "$CONFIG_DIR" "$SYSTEM_FONTS_DIR" "$USER_FONTS_DIR" "$USER_REPORT_DIR" 2>/dev/null || true
+        ;;
+esac
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -504,8 +509,16 @@ font_weight_status_json() {
     _supported=false
     command -v settings >/dev/null 2>&1 && _supported=true
     _system="$(font_weight_get_system)"
-    _saved="$(font_weight_get_saved)"
-    _desired="$(font_weight_get_desired)"
+    # One Binder query per refresh; missing saved configuration formerly queried
+    # Settings three times, multiplying slow/system-busy responses.
+    _saved="$_system"
+    _desired=$((400 + _system))
+    if [ -f "$FONT_WEIGHT_CONF" ]; then
+        _saved="$(font_weight_get_saved)"
+        _desired="$(font_weight_get_desired)"
+    fi
+    [ "$_desired" -ge 300 ] || _desired=300
+    [ "$_desired" -le 700 ] || _desired=700
     _original=0
     [ -f "$FONT_WEIGHT_ORIGINAL_CONF" ] && _original="$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null | head -n1)"
     _original="$(font_weight_normalize_int "$_original")"
