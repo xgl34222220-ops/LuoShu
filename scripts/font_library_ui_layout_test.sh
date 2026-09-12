@@ -37,20 +37,20 @@ grep -q 'HomeScreenCompact' "$HOME_ROUTE"
 grep -q 'LogsScreenCompact' "$LOGS_ROUTE"
 
 # Font library: management tools are collapsed, the card itself opens details,
-# preview glyphs use one Aa12 contract, and detail viewing is a stable large preview sheet.
+# each card has one readable native preview, and detail viewing is a stable large preview sheet.
 grep -q 'var showTools' "$COMPACT"
-grep -q 'Text(if (showTools) "收起管理" else "管理")' "$COMPACT"
+grep -q '导入与管理' "$COMPACT"
 grep -q 'CompactFontRow' "$COMPACT"
 grep -q 'NativeFontPreview' "$COMPACT"
-grep -q 'clickable(onClick = onDetails)' "$COMPACT"
-[ "$(grep -c '"Aa12"' "$COMPACT")" -ge 3 ]
+grep -q 'onClick = onDetails' "$COMPACT"
+grep -q '山海有相逢 Aa 0123' "$COMPACT"
+grep -q 'Hello, LuoShu 0123' "$COMPACT"
 ! grep -q '"Aa 12"' "$COMPACT"
 ! grep -q '点击卡片查看完整预览与字体信息' "$COMPACT"
-grep -q 'FontLibraryBadge' "$COMPACT"
 grep -q 'fontPrimaryBadge' "$COMPACT"
 ! grep -q 'height(102.dp)' "$COMPACT"
 ! grep -q '轻触卡片预览' "$COMPACT"
-grep -q 'modifier = Modifier.size(44.dp)' "$COMPACT"
+grep -q 'modifier = Modifier.heightIn(min = 44.dp)' "$COMPACT"
 grep -q 'ModalBottomSheet' "$DETAILS"
 grep -q 'sheetGesturesEnabled = false' "$DETAILS"
 grep -q 'fillMaxHeight(0.94f)' "$DETAILS"
@@ -64,8 +64,8 @@ grep -q 'LuoShu Aa 0123456789' "$DETAILS"
 grep -q '应用此字体' "$DETAILS"
 ! grep -q 'AlertDialog' "$DETAILS"
 
-# Home: one dynamic next action replaces duplicate navigation shortcuts and the
-# trust chip participates in normal layout rather than using a fixed 108 dp offset.
+# Home keeps one state-aware primary action, font shortcuts, and collapsible device details.
+# The trust chip participates in normal layout rather than using a fixed offset.
 grep -q 'HomeNextStep' "$HOME_COMPACT"
 grep -q '继续调整当前字体' "$HOME_COMPACT"
 grep -q '打开任务中心查看错误原因' "$HOME_COMPACT"
@@ -126,7 +126,7 @@ grep -q 'topAction()' "$STUDIO_MIUIX"
 grep -q 'topAction()' "$STUDIO_MATERIAL"
 grep -q 'LuoShuTopBar(title = "字体组合")' "$STUDIO_MIUIX"
 ! grep -q 'FONT MIX' "$STUDIO_MIUIX"
-grep -q 'fontSize = 30.sp' "$STUDIO_MATERIAL"
+grep -q 'LuoShuTopBar' "$STUDIO_MATERIAL"
 grep -q 'horizontalArrangement = Arrangement.spacedBy(0.dp)' "$STUDIO_MIUIX"
 grep -q 'horizontalArrangement = Arrangement.spacedBy(6.dp)' "$STUDIO_MATERIAL"
 grep -q 'contentColor = actionColor' "$STUDIO_MIUIX"
@@ -134,7 +134,7 @@ grep -q 'contentColor = actionColor' "$STUDIO_MATERIAL"
 grep -q 'LuoShuHeaderAction' "$STUDIO_MATERIAL"
 ! grep -q 'modifier = Modifier.size(56.dp)' "$STUDIO_MATERIAL"
 grep -q 'maxOf(LocalDockContentPadding.current, 24.dp)' "$STUDIO_MIUIX"
-grep -q 'bottom = 24.dp' "$STUDIO_MATERIAL"
+grep -q 'maxOf(LocalDockContentPadding.current, 28.dp)' "$STUDIO_MATERIAL"
 ! grep -q 'align(Alignment.TopEnd)' "$STUDIO_ROUTE"
 ! grep -q 'statusBarsPadding()' "$STUDIO_ROUTE"
 ! grep -q 'navigationBarsPadding()' "$STUDIO_ROUTE"
@@ -147,7 +147,7 @@ grep -q 'opticalScale = 1.08f' "$STUDIO_TOOLS"
 grep -q 'val edgeToEdgeGlass = appearance.uiStyle == UiStyle.MIUIX' "$SHELL"
 grep -q 'edgeToEdgeGlass -> 0.dp' "$SHELL"
 grep -q 'navigationBottom + 94.dp' "$SHELL"
-grep -q 'navigationBottom + 96.dp' "$SHELL"
+grep -q 'navigationBottom + 108.dp' "$SHELL"
 [ "$(grep -c 'LocalDockContentPadding provides dockContentPadding' "$SHELL")" -eq 5 ]
 grep -q 'LocalDockContentPadding' "$DOCK_INSETS"
 
@@ -158,7 +158,7 @@ grep -q 'private val dockPages' "$SHELL"
 sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -q 'AppPage.Settings'
 ! sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -q 'AppPage.Logs'
 grep -q 'val showDock = page != AppPage.Logs' "$SHELL"
-grep -q 'fontSize = 11.sp' "$SHELL"
+grep -q 'fontSize = 12.sp' "$SHELL"
 grep -q 'LuoShuIconTokens.DockGlyph' "$SHELL"
 ! grep -q 'targetValue = if (selected) 21.dp else 19.dp' "$SHELL"
 grep -q 'private fun MiuixAppDock' "$SHELL"
@@ -172,7 +172,7 @@ printf '%s\n' "$MIUIX_DOCK" | grep -q 'Color.White.copy(alpha = .22f)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'drawRoundRect'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorColor = scheme.primary.copy'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'indicatorShadow = 3.dp'
-printf '%s\n' "$MIUIX_DOCK" | grep -q 'itemHeight = 54.dp'
+printf '%s\n' "$MIUIX_DOCK" | grep -q 'itemHeight = 60.dp'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'runtimeLiquid'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'Modifier.layerBackdrop(dockSurfaceBackdrop)'
 printf '%s\n' "$MIUIX_DOCK" | grep -q 'Modifier.drawBackdrop'
@@ -189,7 +189,7 @@ grep -q 'dampingRatio = if (liquidGlass) .68f else .84f' "$SHELL"
 grep -q 'liquidStretch.animateTo' "$SHELL"
 grep -q 'AnimatedVisibility(' "$SHELL"
 grep -q 'key(page)' "$SHELL"
-grep -q 'translationY = (1f - pageEnter.value) \* 18.dp.toPx()' "$SHELL"
+grep -q 'translationY = (1f - pageEnter.value) \* 10.dp.toPx()' "$SHELL"
 ! grep -q 'AnimatedContent' "$SHELL"
 
 # Settings follows a grouped home -> detail hierarchy instead of a clipped horizontal tab strip.
@@ -206,27 +206,34 @@ grep -q 'embedded: Boolean = false' "$OVERLAY"
 grep -q 'embedded = true' "$SHELL"
 grep -q 'dockClearance' "$SHELL"
 grep -q 'val HeaderTouchTarget = 48.dp' "$ICON_SYSTEM"
-grep -q 'val HeaderContainer = 40.dp' "$ICON_SYSTEM"
+grep -q 'val HeaderContainer = 44.dp' "$ICON_SYSTEM"
 grep -q 'val HeaderGlyph = 21.dp' "$ICON_SYSTEM"
 grep -q 'IconButtonDefaults.iconButtonColors' "$ICON_SYSTEM"
-grep -q 'val DockGlyph = 18.dp' "$ICON_SYSTEM"
+grep -q 'val DockGlyph = 22.dp' "$ICON_SYSTEM"
 grep -q 'val SectionGlyph = 18.dp' "$ICON_SYSTEM"
 grep -q 'val ToolGlyph = 20.dp' "$ICON_SYSTEM"
 grep -q 'maxOf(LocalDockContentPadding.current, 24.dp)' "$HOME_COMPACT"
 grep -q 'maxOf(LocalDockContentPadding.current, 28.dp)' "$COMPACT"
-grep -q 'maxOf(LocalDockContentPadding.current, 24.dp)' "$LOGS_COMPACT"
+# Logs is a detail route without a dock; reserve the measured import controls instead.
+grep -q 'controlsBottomPadding + 28.dp' "$LOGS_COMPACT"
+grep -q 'onSizeChanged { importControlsHeight = it.height }' "$LOGS_ROUTE"
 grep -q 'CompactStatusCell' "$HOME_COMPACT"
 grep -q "self-mount) printf '洛书自挂载'" "$APP_BRIDGE"
 grep -q 'mountSummary(h)' "$SETTINGS"
 grep -q 'selfMountSummary(h)' "$SETTINGS"
-grep -q 'RoundedCornerShape(22.dp)' "$SETTINGS"
-grep -q 'Modifier.fillMaxWidth().height(64.dp)' "$SETTINGS"
-grep -q 'pageBackground = Color(0xFFF5F3FC)' "$THEME"
+grep -q 'RoundedCornerShape(24.dp)' "$SETTINGS"
+grep -q 'heightIn(min = 64.dp)' "$SETTINGS"
+grep -q 'Role.Switch' "$SETTINGS"
+grep -q 'Switch(checked = checked, onCheckedChange = null' "$SETTINGS"
+grep -q 'pageBackground = Color(0xFFF4F6FA)' "$THEME"
 grep -q 'internal fun LuoShuTopBar' "$COMPACT_LAYOUT"
 grep -q 'internal fun LuoShuDetailBar' "$COMPACT_LAYOUT"
-grep -q 'itemsIndexed(state.tasks' "$LOGS_COMPACT"
-grep -q 'Box(Modifier.size(10.dp).background(color, CircleShape))' "$LOGS_COMPACT"
-grep -q 'isLast: Boolean' "$LOGS_COMPACT"
+# Task errors can be expanded, and raw logs are filtered and composed lazily.
+grep -q 'items(state.tasks' "$LOGS_COMPACT"
+grep -q 'maxLines = if (expanded) Int.MAX_VALUE else 3' "$LOGS_COMPACT"
+grep -q 'items(visibleLines' "$LOGS_COMPACT"
+grep -q 'visibleLines.joinToString' "$LOGS_COMPACT"
+grep -q 'logMatchesFilter' "$LOGS_COMPACT"
 ! grep -q 'padding(bottom = 96.dp)' "$LOGS_ROUTE"
 ! grep -q 'if (page == AppPage.Studio)' "$SHELL"
 

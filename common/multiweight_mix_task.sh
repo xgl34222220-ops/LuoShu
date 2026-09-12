@@ -12,7 +12,7 @@ if [ -z "$MODDIR" ]; then
 fi
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/auto-multiweight-mix"
-COMPOSITE_CACHE="$CACHE_ROOT/composites-v8"
+COMPOSITE_CACHE="$CACHE_ROOT/composites-v9"
 PREPARED_CACHE="$CACHE_ROOT/prepared-v8"
 SOURCE_META_CACHE="$CACHE_ROOT/source-meta-v1"
 PUBLIC_ROOT="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
@@ -351,9 +351,9 @@ build_composite_cached() {
     _latin_key=$(cat "${_latin}.source-key" 2>/dev/null)
     _digit_key=$(cat "${_digit}.source-key" 2>/dev/null)
     if [ -n "$_cjk_key" ] && [ -n "$_latin_key" ] && [ -n "$_digit_key" ]; then
-        _key=$(printf '%s|%s|%s|auto-multiweight-v4-content' "$_cjk_key" "$_latin_key" "$_digit_key" | hash_text)
+        _key=$(printf '%s|%s|%s|auto-multiweight-v5-metrics' "$_cjk_key" "$_latin_key" "$_digit_key" | hash_text)
     else
-        _key=$(printf '%s|%s|%s|auto-multiweight-v4-content' \
+        _key=$(printf '%s|%s|%s|auto-multiweight-v5-metrics' \
   "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" | hash_text)
     fi
     [ -n "$_key" ] || return 1

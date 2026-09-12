@@ -7,13 +7,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import io.github.xgl34222220.luoshu.rememberNativeImportViewModel
+import io.github.xgl34222220.luoshu.NativeImportPhase
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import kotlinx.coroutines.launch
 
@@ -27,6 +31,9 @@ internal fun LogsRoute(
     val importViewModel = rememberNativeImportViewModel()
     val importState = importViewModel.state
     val displayState = state.withNativeImport(importState)
+    val density = LocalDensity.current
+    var importControlsHeight by remember { mutableIntStateOf(0) }
+    val hasImportControls = importState.taskId.isNotBlank() && importState.phase != NativeImportPhase.IDLE
     val scope = rememberCoroutineScope()
     var diagnosticState by remember { mutableStateOf(DiagnosticExportState()) }
     val onDiagnostic = {
@@ -41,6 +48,7 @@ internal fun LogsRoute(
     Box(
         Modifier
             .fillMaxSize()
+            .navigationBarsPadding()
             .padding(bottom = 8.dp),
     ) {
         LogsScreenCompact(
@@ -50,6 +58,7 @@ internal fun LogsRoute(
             diagnosticState = diagnosticState,
             onDiagnostic = onDiagnostic,
             onBack = onBack,
+            controlsBottomPadding = if (hasImportControls) with(density) { importControlsHeight.toDp() } else 0.dp,
         )
         ImportTaskControls(
             style = style,
@@ -61,6 +70,7 @@ internal fun LogsRoute(
             onClear = importViewModel::clearRecord,
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .onSizeChanged { importControlsHeight = it.height }
                 .padding(horizontal = 14.dp, vertical = 12.dp),
         )
     }

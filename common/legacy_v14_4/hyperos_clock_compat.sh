@@ -227,6 +227,15 @@ luoshu_hyperos_clock_payload_ensure() {
         _lhcc_part_count=0
         while IFS= read -r _lhcc_name; do
             [ -n "$_lhcc_name" ] || continue
+            # The framework switches this exact ROM link between locale/theme
+            # fonts after init. Covering it with a regular TTF freezes that route.
+            # Read only the stock symlink text; never alter its /data target.
+            if [ "$_lhcc_part/$_lhcc_name" = system/MiSansVF_Overlay.ttf ] && \
+               [ -L "$_lhcc_real/$_lhcc_name" ] && \
+               [ "$(readlink "$_lhcc_real/$_lhcc_name" 2>/dev/null)" = /data/system/fonts/theme_webview/Roboto-Regular.ttf ]; then
+                rm -f "$_lhcc_overlay/$_lhcc_name" 2>/dev/null || return 1
+                continue
+            fi
             [ -e "$_lhcc_real/$_lhcc_name" ] || continue
             # This is a missing-slot repair, not a rebuild. Staged OEM slots may
             # have a different stock contract from their system namesake.

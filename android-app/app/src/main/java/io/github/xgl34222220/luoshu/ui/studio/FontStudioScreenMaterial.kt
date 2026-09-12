@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -44,10 +45,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
+import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import kotlin.math.roundToInt
 
 @Composable
@@ -58,11 +62,11 @@ internal fun FontStudioScreenMaterial(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 18.dp, top = 8.dp, end = 18.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = maxOf(LocalDockContentPadding.current, 28.dp)),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item { MaterialStudioHeader(state.loading, actions.refresh, topAction) }
-        item { MaterialCompositionOverview(state) }
+        item { MaterialCompositionOverview(state, actions) }
 
         if (state.loading) {
             item { LinearProgressIndicator(Modifier.fillMaxWidth().height(4.dp)) }
@@ -76,34 +80,20 @@ internal fun FontStudioScreenMaterial(
 
         state.slots.forEach { slotState ->
             item(key = slotState.slot.name) {
-                MaterialSlotCard(slotState, state.busy, actions)
+                MaterialSlotCard(slotState, state.busy || state.operationBusy, actions)
             }
         }
 
-        item { MaterialCoverageCard(state, actions) }
         item { MaterialFinalAction(state, actions) }
+        item { LuoShuSectionHeading("字形覆盖", "需要时查看所选中文字体包含哪些字符") }
+        item { MaterialCoverageCard(state, actions) }
     }
 }
 
 @Composable
 private fun MaterialStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAction: @Composable () -> Unit) {
     val actionColor = MaterialTheme.colorScheme.primary
-    Row(
-        modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Column(Modifier.weight(1f)) {
-            Text(
-                "FONT MIX",
-                color = MaterialTheme.colorScheme.primary,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 2.2.sp,
-            )
-            Spacer(Modifier.height(3.dp))
-            Text("字体组合", fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.Black)
-            Text("中文、英文、数字与完整设计轴", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
-        }
+    LuoShuTopBar(title = "字体组合") {
         Row(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -123,18 +113,18 @@ private fun MaterialStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAct
 }
 
 @Composable
-private fun MaterialCompositionOverview(state: FontStudioUiState) {
+private fun MaterialCompositionOverview(state: FontStudioUiState, actions: FontStudioActions) {
     Card(
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .84f)),
     ) {
-        Column(Modifier.padding(18.dp)) {
-            Text("组合结构", fontSize = 18.sp, fontWeight = FontWeight.Black)
-            Text("三个槽位只共享最终输出，不共享预览缓存", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+        Column(Modifier.padding(20.dp)) {
+            Text("组合你的专属字体", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text("中文、英文、数字，分别挑选喜欢的样子。", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             Spacer(Modifier.height(15.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                 state.slots.forEach { slot ->
-                    MaterialSlotSummary(slot, Modifier.weight(1f))
+                    MaterialSlotSummary(slot, Modifier.weight(1f), !state.busy && !state.operationBusy) { actions.pickSlot(slot.slot) }
                 }
             }
         }
@@ -142,47 +132,32 @@ private fun MaterialCompositionOverview(state: FontStudioUiState) {
 }
 
 @Composable
-private fun MaterialSlotSummary(slot: StudioSlotUiState, modifier: Modifier) {
+private fun MaterialSlotSummary(slot: StudioSlotUiState, modifier: Modifier, enabled: Boolean, onSelect: () -> Unit) {
     Surface(
+        onClick = onSelect,
+        enabled = enabled,
         modifier = modifier,
         shape = MaterialTheme.shapes.large,
         color = if (slot.font == null) MaterialTheme.colorScheme.surfaceContainerHigh
         else MaterialTheme.colorScheme.primaryContainer,
     ) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 12.dp)) {
-            val summaryFont = slot.font
-            if (summaryFont != null && summaryFont.valid) {
-                NativeFontPreview(
-                    font = summaryFont,
-                    text = when (slot.slot) {
-                        MixSlot.Cjk -> "中"
-                        MixSlot.Latin -> "Aa"
-                        MixSlot.Digit -> "123"
-                    },
-                    axes = if (summaryFont.variable) mapOf("wght" to 400f) else emptyMap(),
-                    modifier = Modifier.height(24.dp).width(44.dp),
-                    textSizeSp = 16f,
-                    gravity = Gravity.CENTER_VERTICAL,
-                    maxLines = 1,
-                )
-            } else {
-                Text(
-                    when (slot.slot) {
-                        MixSlot.Cjk -> "中"
-                        MixSlot.Latin -> "Aa"
-                        MixSlot.Digit -> "123"
-                    },
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Black,
-                )
-            }
+            Text(
+                when (slot.slot) {
+                    MixSlot.Cjk -> "中"
+                    MixSlot.Latin -> "Aa"
+                    MixSlot.Digit -> "123"
+                },
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Medium,
+            )
             Spacer(Modifier.height(6.dp))
-            Text(slot.title, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Text(slot.title, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             Text(
                 slot.font?.name ?: "未选择",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 9.sp,
+                fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -196,15 +171,15 @@ private fun MaterialStudioTask(state: FontStudioUiState) {
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
     ) {
-        Column(Modifier.padding(18.dp)) {
+        Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(if (state.busy) "复合字体任务执行中" else "复合字体已生成", fontWeight = FontWeight.Black)
-                    Text(state.message, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .74f), fontSize = 11.sp)
+                    Text(if (state.busy) "正在生成组合字体" else "组合字体已生成", fontWeight = FontWeight.SemiBold)
+                    Text(state.message, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .74f), fontSize = 12.sp)
                 }
-                Text("${state.progress}%", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Black)
+                Text("${state.progress}%", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(13.dp))
             LinearProgressIndicator(
@@ -226,7 +201,7 @@ private fun MaterialSlotCard(
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .84f)),
     ) {
-        Column(Modifier.padding(18.dp)) {
+        Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(50.dp),
@@ -234,52 +209,38 @@ private fun MaterialSlotCard(
                     color = MaterialTheme.colorScheme.primaryContainer,
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        if (font != null && font.valid) {
-                            NativeFontPreview(
-                                font = font,
-                                text = when (slotState.slot) {
-                                    MixSlot.Cjk -> "中"
-                                    MixSlot.Latin -> "Aa"
-                                    MixSlot.Digit -> "123"
-                                },
-                                axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
-                                modifier = Modifier.size(50.dp).padding(6.dp),
-                                textSizeSp = 16f,
-                                gravity = Gravity.CENTER,
-                                maxLines = 1,
-                            )
-                        } else {
-                            Text(
-                                when (slotState.slot) {
-                                    MixSlot.Cjk -> "中"
-                                    MixSlot.Latin -> "Aa"
-                                    MixSlot.Digit -> "123"
-                                },
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Black,
-                            )
-                        }
+                        Text(
+                            when (slotState.slot) {
+                                MixSlot.Cjk -> "中"
+                                MixSlot.Latin -> "Aa"
+                                MixSlot.Digit -> "123"
+                            },
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
                     }
                 }
                 Spacer(Modifier.width(13.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(slotState.title, fontSize = 19.sp, fontWeight = FontWeight.Black)
-                    Text(slotState.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                    Text(slotState.title, fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
+                    Text(slotState.subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
-                if (font != null) {
-                    MaterialStudioPill(fontCapabilityLabel(font), MaterialTheme.colorScheme.primary)
-                }
+            }
+            if (font != null) {
+                Spacer(Modifier.height(10.dp))
+                MaterialStudioPill(fontCapabilityLabel(font), MaterialTheme.colorScheme.primary)
             }
 
             Spacer(Modifier.height(14.dp))
             OutlinedButton(
                 onClick = { actions.pickSlot(slotState.slot) },
                 enabled = !busy,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
                 shape = MaterialTheme.shapes.large,
             ) {
                 Text(
-                    font?.name ?: "选择字体",
+                    font?.name ?: "点此选择字体",
                     modifier = Modifier.weight(1f),
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -331,15 +292,15 @@ private fun MaterialCoverageCard(state: FontStudioUiState, actions: FontStudioAc
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .84f)),
     ) {
-        Column(Modifier.padding(18.dp)) {
+        Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("字形覆盖诊断", fontSize = 18.sp, fontWeight = FontWeight.Black)
-                    Text(cjk?.font?.name ?: "请先选择中文基底", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    Text("所选字体覆盖率", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Text(cjk?.font?.name ?: "请先选择中文基底", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
                 OutlinedButton(
                     onClick = { actions.inspectCoverage(fontId) },
-                    enabled = fontId.isNotBlank() && !probe.loading,
+                    enabled = fontId.isNotBlank() && !probe.loading && !state.busy && !state.operationBusy,
                 ) {
                     if (probe.loading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     else Text("检测")
@@ -353,11 +314,11 @@ private fun MaterialCoverageCard(state: FontStudioUiState, actions: FontStudioAc
                 MaterialCoverageRow("标点", metrics.punctuationRatio)
                 if (metrics.missingSample.isNotBlank()) {
                     Spacer(Modifier.height(8.dp))
-                    Text("缺失示例：${metrics.missingSample}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
+                    Text("缺失示例：${metrics.missingSample}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
             } else if (probe.error.isNotBlank() && probe.fontId == fontId) {
                 Spacer(Modifier.height(10.dp))
-                Text(probe.error, color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+                Text(probe.error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
             }
         }
     }
@@ -366,19 +327,20 @@ private fun MaterialCoverageCard(state: FontStudioUiState, actions: FontStudioAc
 @Composable
 private fun MaterialCoverageRow(label: String, ratio: Float) {
     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, modifier = Modifier.width(42.dp), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Text(label, modifier = Modifier.width(42.dp), fontSize = 12.sp, fontWeight = FontWeight.Bold)
         LinearProgressIndicator(
             progress = { ratio },
             modifier = Modifier.weight(1f).height(7.dp),
         )
         Spacer(Modifier.width(10.dp))
-        Text("${(ratio * 100).roundToInt()}%", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Black)
+        Text("${(ratio * 100).roundToInt()}%", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
 @Composable
 private fun MaterialFinalAction(state: FontStudioUiState, actions: FontStudioActions) {
     val direct = state.directApplyFontId
+    val selectionReady = state.slots.size == MixSlot.entries.size && state.slots.all { it.font?.valid == true }
     Card(
         shape = MaterialTheme.shapes.extraLarge,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = .84f)),
@@ -400,25 +362,30 @@ private fun MaterialFinalAction(state: FontStudioUiState, actions: FontStudioAct
                 }
                 Spacer(Modifier.width(13.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(if (direct != null) "同一字体，无需复合" else "生成完整复合字体", fontSize = 18.sp, fontWeight = FontWeight.Black)
+                    Text(if (direct != null) "准备应用" else "让这个组合成为日常", fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
                     Text(
-                        if (direct != null) "三个槽位均为标准 Regular 400，将直接应用原始字体。"
-                        else "当前真实字重与全部设计轴会写入最终字体。",
+                        if (direct != null) "三个部分使用同一款字体，可直接应用。"
+                        else "按上面的字体和字重生成组合，然后应用到系统。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                     )
                 }
             }
             Spacer(Modifier.height(17.dp))
             Button(
                 onClick = { if (direct != null) actions.applyDirect(direct) else actions.startMix() },
-                enabled = !state.busy && !state.operationBusy && state.hasFonts,
-                modifier = Modifier.fillMaxWidth().height(60.dp),
+                enabled = !state.loading && !state.busy && !state.operationBusy && selectionReady,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp),
                 shape = MaterialTheme.shapes.large,
             ) {
                 Icon(if (direct != null) Icons.Rounded.FontDownload else Icons.Rounded.AutoAwesome, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text(if (direct != null) "直接应用此字体" else "生成并应用到系统", fontSize = 16.sp, fontWeight = FontWeight.Black)
+                Text(
+                    if (state.busy || state.operationBusy) "正在处理，请稍候…"
+                    else if (!selectionReady) "先选择组合字体"
+                    else if (direct != null) "直接应用此字体" else "生成并应用",
+                    fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                )
             }
         }
     }
@@ -449,8 +416,8 @@ private fun MaterialStudioPill(text: String, color: Color) {
             text,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             color = color,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Black,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }

@@ -11,6 +11,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -33,41 +34,41 @@ private val MaterialShapes = Shapes(
 )
 
 private val MaterialTypography = Typography(
-    displaySmall = TextStyle(fontSize = 38.sp, lineHeight = 43.sp, fontWeight = FontWeight.Black),
-    headlineLarge = TextStyle(fontSize = 32.sp, lineHeight = 37.sp, fontWeight = FontWeight.Black),
+    displaySmall = TextStyle(fontSize = 38.sp, lineHeight = 43.sp, fontWeight = FontWeight.Bold),
+    headlineLarge = TextStyle(fontSize = 32.sp, lineHeight = 37.sp, fontWeight = FontWeight.Bold),
     headlineMedium = TextStyle(fontSize = 26.sp, lineHeight = 31.sp, fontWeight = FontWeight.Bold),
     headlineSmall = TextStyle(fontSize = 22.sp, lineHeight = 27.sp, fontWeight = FontWeight.Bold),
-    titleLarge = TextStyle(fontSize = 21.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold),
+    titleLarge = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold),
     titleMedium = TextStyle(fontSize = 17.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold),
     titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.SemiBold),
     bodyLarge = TextStyle(fontSize = 16.sp, lineHeight = 23.sp),
     bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
     bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 17.sp),
     labelLarge = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Bold),
-    labelSmall = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, letterSpacing = .4.sp),
+    labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = .2.sp),
 )
 
 private val MiuixShapes = Shapes(
     extraSmall = RoundedCornerShape(7.dp),
     small = RoundedCornerShape(11.dp),
-    medium = RoundedCornerShape(16.dp),
-    large = RoundedCornerShape(22.dp),
-    extraLarge = RoundedCornerShape(26.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(24.dp),
+    extraLarge = RoundedCornerShape(30.dp),
 )
 
 private val MiuixTypography = Typography(
-    displaySmall = TextStyle(fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.Black),
-    headlineLarge = TextStyle(fontSize = 30.sp, lineHeight = 35.sp, fontWeight = FontWeight.Black),
-    headlineMedium = TextStyle(fontSize = 24.sp, lineHeight = 29.sp, fontWeight = FontWeight.Black),
-    headlineSmall = TextStyle(fontSize = 21.sp, lineHeight = 26.sp, fontWeight = FontWeight.Bold),
-    titleLarge = TextStyle(fontSize = 19.sp, lineHeight = 24.sp, fontWeight = FontWeight.Bold),
-    titleMedium = TextStyle(fontSize = 16.sp, lineHeight = 21.sp, fontWeight = FontWeight.Bold),
-    titleSmall = TextStyle(fontSize = 14.sp, lineHeight = 19.sp, fontWeight = FontWeight.Bold),
-    bodyLarge = TextStyle(fontSize = 15.sp, lineHeight = 21.sp),
-    bodyMedium = TextStyle(fontSize = 13.sp, lineHeight = 18.sp),
-    bodySmall = TextStyle(fontSize = 11.sp, lineHeight = 16.sp),
+    displaySmall = TextStyle(fontSize = 34.sp, lineHeight = 39.sp, fontWeight = FontWeight.Bold),
+    headlineLarge = TextStyle(fontSize = 30.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold),
+    headlineMedium = TextStyle(fontSize = 26.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold),
+    headlineSmall = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold),
+    titleLarge = TextStyle(fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold),
+    titleMedium = TextStyle(fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold),
+    titleSmall = TextStyle(fontSize = 15.sp, lineHeight = 21.sp, fontWeight = FontWeight.SemiBold),
+    bodyLarge = TextStyle(fontSize = 15.sp, lineHeight = 23.sp),
+    bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 21.sp),
+    bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
     labelLarge = TextStyle(fontSize = 13.sp, fontWeight = FontWeight.Bold),
-    labelSmall = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium, letterSpacing = .4.sp),
+    labelSmall = TextStyle(fontSize = 11.sp, lineHeight = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = .2.sp),
 )
 
 @Immutable
@@ -83,7 +84,7 @@ data class MiuixTokens(
 
 val LocalMiuixTokens = staticCompositionLocalOf {
     MiuixTokens(
-        pageBackground = Color(0xFFF5F3FC),
+        pageBackground = Color(0xFFF4F6FA),
         cardBackground = Color.White,
         elevatedCardBackground = Color.White,
         textPrimary = Color(0xFF16171B),
@@ -111,8 +112,9 @@ private fun LuoShuMaterialTheme(settings: AppearanceSettings, content: @Composab
         shapes = MaterialShapes,
         typography = MaterialTypography,
         animate = true,
-        content = content,
-    )
+    ) {
+        ProvideMiuixTokens(settings, content)
+    }
 }
 
 @Composable
@@ -128,28 +130,38 @@ private fun LuoShuMiuixTheme(settings: AppearanceSettings, content: @Composable 
         typography = MiuixTypography,
         animate = true,
     ) {
-        val scheme = MaterialTheme.colorScheme
-        val tokens = MiuixTokens(
-            pageBackground = when {
-                pureBlack -> Color.Black
-                dark -> scheme.surfaceContainerLowest
-                else -> Color(0xFFF5F3FC)
-            },
-            cardBackground = when {
-                pureBlack -> Color(0xFF080808)
-                dark -> scheme.surfaceContainer
-                else -> scheme.surfaceContainerLowest
-            },
-            elevatedCardBackground = when {
-                pureBlack -> Color(0xFF111111)
-                dark -> scheme.surfaceContainerHigh
-                else -> scheme.surfaceContainer
-            },
-            textPrimary = scheme.onSurface,
-            textSecondary = scheme.onSurfaceVariant,
-        )
-        CompositionLocalProvider(LocalMiuixTokens provides tokens, content = content)
+        ProvideMiuixTokens(settings, content)
     }
+}
+
+/** Shared screens use the same resolved palette in either appearance mode. */
+@Composable
+private fun ProvideMiuixTokens(settings: AppearanceSettings, content: @Composable () -> Unit) {
+    val dark = resolveDark(settings.themeMode)
+    val pureBlack = dark && settings.amoledBlack
+    val scheme = MaterialTheme.colorScheme
+    val tokens = MiuixTokens(
+        pageBackground = when {
+            pureBlack -> Color.Black
+            dark -> scheme.surfaceContainerLowest
+            else -> lerp(Color(0xFFF4F6FA), scheme.primaryContainer, .07f)
+        },
+        cardBackground = when {
+            pureBlack -> Color(0xFF111214)
+            dark -> scheme.surfaceContainerLow
+            else -> scheme.surfaceContainerLowest
+        },
+        elevatedCardBackground = when {
+            pureBlack -> Color(0xFF1B1C20)
+            dark -> scheme.surfaceContainerHigh
+            else -> lerp(scheme.surfaceContainerLowest, scheme.primaryContainer, .20f)
+        },
+        textPrimary = scheme.onSurface,
+        textSecondary = scheme.onSurfaceVariant,
+        success = if (dark) Color(0xFF69D9AD) else Color(0xFF187B58),
+        warning = if (dark) Color(0xFFF3C378) else Color(0xFF956319),
+    )
+    CompositionLocalProvider(LocalMiuixTokens provides tokens, content = content)
 }
 
 @Composable

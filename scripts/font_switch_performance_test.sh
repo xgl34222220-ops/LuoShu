@@ -46,7 +46,7 @@ grep -q 'LuoShuHeaderAction(' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/DiagnosticExportUi.kt"
 grep -q 'HeaderTouchTarget = 48.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
-grep -q 'HeaderContainer = 40.dp' \
+grep -q 'HeaderContainer = 44.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"
 grep -q 'HeaderGlyph = 21.dp' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/theme/LuoShuIconSystem.kt"

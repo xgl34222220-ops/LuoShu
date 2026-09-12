@@ -29,9 +29,10 @@ ASCII_CODEPOINTS = tuple(range(0x20, 0x7F))
 # main stock UI slot's real hhea ratios from config/device_font_inventory.json.
 TYPO_ASCENDER_RATIO = 0.928
 TYPO_DESCENDER_RATIO = 0.244
-# Android TextView defaults to includeFontPadding=true and reads top/bottom from the
-# OS/2 win metrics. CJK fonts often carry huge yMax/yMin extremes; trusting them adds
-# a large blank band above every line ("文字抬高/页面偏移"). Cap win metrics instead.
+# Historical Win caps used by this generic normalizer. Android's Skia/FreeType
+# top/bottom comes from the SFNT head box, not these OS/2 fields. HyperOS's final
+# per-slot pass separately restores the stock padded layout frame; changing Win
+# metrics here alone cannot fix includeFontPadding or vertical centering.
 WIN_ASCENT_CAP_RATIO = 0.98
 WIN_DESCENT_CAP_RATIO = 0.35
 # hhea additionally encloses real outline extremes for includeFontPadding=false apps, but

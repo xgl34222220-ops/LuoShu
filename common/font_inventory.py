@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -22,6 +23,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from fontTools.ttLib import TTFont
+from font_slot_coverage import summarize_coverage, valid_coverage
 
 SCHEMA = "device-font-inventory-v1"
 INVENTORY_REVISION = 1
@@ -148,6 +150,45 @@ def _load_json(path: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
+def _metric_int(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("boolean is not a font metric")
+    result = int(value)
+    if not isinstance(value, (int, str)) and value != result:
+        raise ValueError("font metric must be an integer")
+    return result
+
+
+def _validate_metrics(metrics: Any) -> None:
+    """Validate stored design units without discarding zero-descender clock fonts.
+
+    OpenType hhea ascent/descent are signed FWORD values, not glyph bounds.
+    A slot whose designed lower extent is the baseline can legitimately use 0.
+    Require the field explicitly: a missing descent must not become a valid 0.
+    """
+    try:
+        upem = _metric_int(metrics["upem"])
+        ascent = _metric_int(metrics["hhea"]["ascent"])
+        descent = _metric_int(metrics["hhea"]["descent"])
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise InventoryError("设备字体清单槽位度量无效") from error
+    if not 16 <= upem <= 16384 or not 0 < ascent <= 32767 or not -32768 <= descent <= 0:
+        raise InventoryError("设备字体清单槽位基线无效")
+    # The bounding box is additive diagnostic data. Inventories captured by an
+    # older scanner remain usable; never synthesize bounds from line metrics.
+    if "head" in metrics:
+        try:
+            head = metrics["head"]
+            bounds = {name: _metric_int(head[name]) for name in ("xMin", "yMin", "xMax", "yMax")}
+        except (KeyError, TypeError, ValueError, OverflowError) as error:
+            raise InventoryError("设备字体清单槽位字形边界无效") from error
+        if (any(not -32768 <= value <= 32767 for value in bounds.values())
+                or bounds["xMin"] > bounds["xMax"] or bounds["yMin"] > bounds["yMax"]):
+            raise InventoryError("设备字体清单槽位字形边界无效")
+    if "coverage" in metrics and not valid_coverage(metrics["coverage"]):
+        raise InventoryError("设备字体清单槽位字符覆盖无效")
+
+
 def validate_inventory(data: dict[str, Any], expected_key: str | None = None) -> None:
     if data.get("schema") != SCHEMA or data.get("state") != "ready":
         raise InventoryError("设备字体清单格式无效")
@@ -180,30 +221,12 @@ def validate_inventory(data: dict[str, Any], expected_key: str | None = None) ->
             raise InventoryError("设备字体清单槽位路径不一致")
         if str(entry.get("format", "")) not in {"TTF", "OTF", "TTC"}:
             raise InventoryError("设备字体清单包含无效字体格式")
-        slot_metrics = entry.get("metrics")
-        slot_hhea = slot_metrics.get("hhea") if isinstance(slot_metrics, dict) else None
-        try:
-            slot_upem = int(slot_metrics.get("upem", 0)) if isinstance(slot_metrics, dict) else 0
-            slot_ascent = int(slot_hhea.get("ascent", 0)) if isinstance(slot_hhea, dict) else 0
-            slot_descent = int(slot_hhea.get("descent", 0)) if isinstance(slot_hhea, dict) else 0
-        except (TypeError, ValueError) as error:
-            raise InventoryError("设备字体清单槽位度量无效") from error
-        if slot_upem <= 0 or slot_ascent <= 0 or slot_descent >= 0:
-            raise InventoryError("设备字体清单槽位基线无效")
+        _validate_metrics(entry.get("metrics"))
 
     indexed_main = slots[main_path]
     if str(main_slot.get("slotName", "")) != str(indexed_main.get("slotName", "")):
         raise InventoryError("设备字体清单主槽位不一致")
-    metrics = main_slot.get("metrics")
-    hhea = metrics.get("hhea") if isinstance(metrics, dict) else None
-    try:
-        upem = int(metrics.get("upem", 0)) if isinstance(metrics, dict) else 0
-        ascent = int(hhea.get("ascent", 0)) if isinstance(hhea, dict) else 0
-        descent = int(hhea.get("descent", 0)) if isinstance(hhea, dict) else 0
-    except (TypeError, ValueError) as error:
-        raise InventoryError("设备字体清单主槽位度量无效") from error
-    if upem <= 0 or ascent <= 0 or descent >= 0:
-        raise InventoryError("设备字体清单主槽位基线无效")
+    _validate_metrics(main_slot.get("metrics"))
 
 
 def _local_name(tag: str) -> str:
@@ -287,12 +310,19 @@ def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]
         upem = int(head.unitsPerEm)
         ascent = int(hhea.ascent)
         descent = int(hhea.descent)
-        if upem <= 0 or ascent <= 0 or descent >= 0:
-            raise InventoryError(f"字体基线数值异常：{path.name}")
         metrics = {
             "upem": upem,
+            "coverage": summarize_coverage(font),
             "ascent": ascent,
             "descent": descent,
+            "head": {
+                "xMin": int(head.xMin),
+                "yMin": int(head.yMin),
+                "xMax": int(head.xMax),
+                "yMax": int(head.yMax),
+                "flags": int(head.flags),
+                "lowestRecPPEM": int(head.lowestRecPPEM),
+            },
             "hhea": {
                 "ascent": ascent,
                 "descent": descent,
@@ -307,6 +337,7 @@ def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]
                 "winDescent": int(getattr(os2, "usWinDescent", 0)),
             },
         }
+        _validate_metrics(metrics)
     finally:
         font.close()
     return fmt, metrics
@@ -390,6 +421,83 @@ def _resolve_roots(args: argparse.Namespace, overlay_risk: bool) -> tuple[list[F
     return roots, system_etc
 
 
+def _font_root_names(root: FontRoot) -> tuple[Path, ...]:
+    """Logical partition aliases also accepted by the partition-aware scanner."""
+    aliases = {
+        Path("/system/fonts"): (Path("/system/font"),),
+        Path("/system_ext/fonts"): (Path("/system/system_ext/fonts"),),
+        Path("/product/fonts"): (Path("/system/product/fonts"),),
+        Path("/my_product/fonts"): (Path("/system/my_product/fonts"),),
+        Path("/vendor/fonts"): (Path("/system/vendor/fonts"),),
+    }
+    return (root.logical, *aliases.get(root.logical, ()))
+
+
+def _stock_font_path(root: FontRoot, actual: Path, roots: Iterable[FontRoot]) -> Path:
+    """Resolve each font link inside the selected stock views, never the live ROM.
+
+    A stock /system/fonts directory can contain absolute links to /product/fonts.
+    Opening those links normally escapes a lower/mirror directory and can read the
+    active replacement. Resolve in the logical namespace, remapping every link hop
+    to its partition's selected stock root before touching another filesystem node.
+    """
+    def lexical(path: Path) -> Path:
+        return Path(os.path.abspath(os.path.normpath(str(path))))
+
+    selected = list(roots)
+    if root not in selected:
+        raise InventoryError("字体不属于本次验证的原厂目录")
+    try:
+        relative = lexical(actual).relative_to(lexical(root.actual))
+    except ValueError as error:
+        raise InventoryError("字体路径超出原厂目录") from error
+    logical = lexical(root.logical / relative)
+    views: list[tuple[Path, Path]] = []
+    for candidate in selected:
+        try:
+            stock = candidate.actual.resolve(strict=True)
+            if stock.is_dir():
+                views.extend((lexical(name), stock) for name in _font_root_names(candidate))
+        except (OSError, RuntimeError):
+            continue
+    views.sort(key=lambda item: len(item[0].parts), reverse=True)
+    visited: set[Path] = set()
+    for _hop in range(41):
+        if logical in visited:
+            raise InventoryError("原厂字体符号链接存在环路")
+        visited.add(logical)
+        for logical_root, stock_root in views:
+            try:
+                parts = logical.relative_to(logical_root).parts
+            except ValueError:
+                continue
+            break
+        else:
+            raise InventoryError(f"原厂字体链接离开已验证的字体分区：{logical}")
+        if not parts:
+            raise InventoryError("原厂字体路径指向目录")
+        physical = stock_root
+        for index, component in enumerate(parts):
+            physical = physical / component
+            try:
+                mode = physical.lstat().st_mode
+                if stat.S_ISLNK(mode):
+                    target = Path(os.readlink(physical))
+                    parent = logical_root.joinpath(*parts[:index])
+                    logical = lexical((target if target.is_absolute() else parent / target)
+                                      .joinpath(*parts[index + 1:]))
+                    break
+            except OSError as error:
+                raise InventoryError(f"无法读取原厂字体路径：{logical}") from error
+            if index == len(parts) - 1:
+                if not stat.S_ISREG(mode):
+                    raise InventoryError("原厂字体不是普通文件")
+                return physical
+            if not stat.S_ISDIR(mode):
+                raise InventoryError("原厂字体路径包含非目录节点")
+    raise InventoryError("原厂字体符号链接层数过多")
+
+
 def _resolve_file(name: str, roots: Iterable[FontRoot]) -> tuple[FontRoot, Path] | None:
     stripped = name.strip()
     if not stripped:
@@ -398,19 +506,28 @@ def _resolve_file(name: str, roots: Iterable[FontRoot]) -> tuple[FontRoot, Path]
     basename = candidate_path.name
     if basename in {"", ".", ".."} or "/" in basename:
         return None
+    selected = list(roots)
     if candidate_path.is_absolute():
-        for root in roots:
-            try:
-                relative = candidate_path.relative_to(root.logical)
-            except ValueError:
-                continue
-            actual = root.actual / relative
-            if actual.is_file():
-                return root, actual
-    for root in roots:
-        actual = root.actual / basename
-        if actual.is_file():
+        for root in selected:
+            for logical_root in _font_root_names(root):
+                try:
+                    relative = candidate_path.relative_to(logical_root)
+                except ValueError:
+                    continue
+                actual = root.actual / relative
+                try:
+                    _stock_font_path(root, actual, selected)
+                    return root, actual
+                except InventoryError:
+                    return None
+        return None
+    for root in selected:
+        actual = root.actual / candidate_path
+        try:
+            _stock_font_path(root, actual, selected)
             return root, actual
+        except InventoryError:
+            continue
     return None
 
 
@@ -451,6 +568,10 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot]) -> tup
                     continue
                 root, actual = resolved
                 logical = _logical_path(root, actual)
+                try:
+                    stock_file = _stock_font_path(root, actual, roots)
+                except InventoryError:
+                    continue
                 families.setdefault(family_name, [])
                 if logical not in families[family_name]:
                     families[family_name].append(logical)
@@ -460,7 +581,7 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot]) -> tup
                         "slotName": actual.name,
                         "path": logical,
                         "partition": root.partition,
-                        "actualPath": str(actual),
+                        "actualPath": str(stock_file),
                         "source": "xml",
                         "families": [],
                         "weight": _infer_weight(actual.name, font_node.get("weight")),
@@ -522,20 +643,21 @@ def _add_heuristic_slots(slots: dict[str, dict[str, Any]], roots: list[FontRoot]
         if not root.actual.is_dir():
             continue
         for actual in sorted(root.actual.iterdir(), key=lambda item: item.name.lower()):
-            if not actual.is_file() or actual.suffix.lower() not in FONT_EXTENSIONS or not _heuristic_candidate(actual.name):
+            if actual.suffix.lower() not in FONT_EXTENSIONS or not _heuristic_candidate(actual.name):
                 continue
             logical = _logical_path(root, actual)
             if logical in slots:
                 continue
             try:
-                checked_format = _font_check(actual, font_check)
+                stock_file = _stock_font_path(root, actual, roots)
+                checked_format = _font_check(stock_file, font_check)
             except InventoryError:
                 continue
             slots[logical] = {
                 "slotName": actual.name,
                 "path": logical,
                 "partition": root.partition,
-                "actualPath": str(actual),
+                "actualPath": str(stock_file),
                 "source": "heuristic",
                 "families": [],
                 "weight": _infer_weight(actual.name),

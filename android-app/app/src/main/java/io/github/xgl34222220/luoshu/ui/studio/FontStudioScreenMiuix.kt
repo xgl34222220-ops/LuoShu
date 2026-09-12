@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -48,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
@@ -66,11 +68,11 @@ internal fun FontStudioScreenMiuix(
     val dockBottomPadding = maxOf(LocalDockContentPadding.current, 24.dp)
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, top = 0.dp, end = 14.dp, bottom = dockBottomPadding),
-        verticalArrangement = Arrangement.spacedBy(9.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = dockBottomPadding),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item { MiuixStudioHeader(state.loading, actions.refresh, topAction) }
-        item { MiuixCompositionMap(state) }
+        item { MiuixCompositionMap(state, actions) }
 
         if (state.loading) {
             item { LinearProgressIndicator(Modifier.fillMaxWidth().height(4.dp)) }
@@ -84,12 +86,13 @@ internal fun FontStudioScreenMiuix(
 
         state.slots.forEach { slotState ->
             item(key = slotState.slot.name) {
-                MiuixSlotCard(slotState, state.busy, actions)
+                MiuixSlotCard(slotState, state.busy || state.operationBusy, actions)
             }
         }
 
-        item { MiuixCoverageGroup(state, actions) }
         item { MiuixFinalAction(state, actions) }
+        item { LuoShuSectionHeading("字形覆盖", "需要时查看所选中文字体包含哪些字符") }
+        item { MiuixCoverageGroup(state, actions) }
     }
 }
 
@@ -117,9 +120,9 @@ private fun MiuixStudioHeader(loading: Boolean, onRefresh: () -> Unit, topAction
 }
 
 @Composable
-private fun MiuixCompositionMap(state: FontStudioUiState) {
+private fun MiuixCompositionMap(state: FontStudioUiState, actions: FontStudioActions) {
     val tokens = LocalMiuixTokens.current
-    val shape = RoundedCornerShape(22.dp)
+    val shape = RoundedCornerShape(24.dp)
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = shape,
@@ -137,14 +140,14 @@ private fun MiuixCompositionMap(state: FontStudioUiState) {
                         ),
                     ),
                 )
-                .padding(14.dp),
+                .padding(20.dp),
         ) {
-            Text("组合结构", color = tokens.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Black)
-            Text("三个槽位独立预览，最终输出统一生成", color = tokens.textSecondary, fontSize = 11.sp)
-            Spacer(Modifier.height(9.dp))
+            Text("组合你的专属字体", color = tokens.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+            Text("中文、英文、数字，分别挑选喜欢的样子。", color = tokens.textSecondary, fontSize = 12.sp)
+            Spacer(Modifier.height(16.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 state.slots.forEach { slot ->
-                    MiuixSlotSummary(slot, Modifier.weight(1f))
+                    MiuixSlotSummary(slot, Modifier.weight(1f), !state.busy && !state.operationBusy) { actions.pickSlot(slot.slot) }
                 }
             }
         }
@@ -152,48 +155,33 @@ private fun MiuixCompositionMap(state: FontStudioUiState) {
 }
 
 @Composable
-private fun MiuixSlotSummary(slot: StudioSlotUiState, modifier: Modifier) {
+private fun MiuixSlotSummary(slot: StudioSlotUiState, modifier: Modifier, enabled: Boolean, onSelect: () -> Unit) {
     val tokens = LocalMiuixTokens.current
     Surface(
+        onClick = onSelect,
+        enabled = enabled,
         modifier = modifier,
         shape = RoundedCornerShape(16.dp),
         color = if (slot.font == null) tokens.textPrimary.copy(alpha = .045f)
         else MaterialTheme.colorScheme.primary.copy(alpha = .11f),
     ) {
         Column(Modifier.padding(horizontal = 10.dp, vertical = 10.dp)) {
-            val summaryFont = slot.font
-            if (summaryFont != null && summaryFont.valid) {
-                NativeFontPreview(
-                    font = summaryFont,
-                    text = when (slot.slot) {
-                        MixSlot.Cjk -> "中"
-                        MixSlot.Latin -> "Aa"
-                        MixSlot.Digit -> "123"
-                    },
-                    axes = if (summaryFont.variable) mapOf("wght" to 400f) else emptyMap(),
-                    modifier = Modifier.height(24.dp).width(44.dp),
-                    textSizeSp = 16f,
-                    gravity = Gravity.CENTER_VERTICAL,
-                    maxLines = 1,
-                )
-            } else {
-                Text(
-                    when (slot.slot) {
-                        MixSlot.Cjk -> "中"
-                        MixSlot.Latin -> "Aa"
-                        MixSlot.Digit -> "123"
-                    },
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Black,
-                )
-            }
+            Text(
+                when (slot.slot) {
+                    MixSlot.Cjk -> "中"
+                    MixSlot.Latin -> "Aa"
+                    MixSlot.Digit -> "123"
+                },
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Medium,
+            )
             Spacer(Modifier.height(5.dp))
-            Text(slot.title, color = tokens.textPrimary, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            Text(slot.title, color = tokens.textPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             Text(
                 slot.font?.name ?: "未选择",
                 color = tokens.textSecondary,
-                fontSize = 9.sp,
+                fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -205,11 +193,11 @@ private fun MiuixSlotSummary(slot: StudioSlotUiState, modifier: Modifier) {
 private fun MiuixStudioTask(state: FontStudioUiState) {
     val tokens = LocalMiuixTokens.current
     Card(
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(40.dp),
@@ -223,12 +211,12 @@ private fun MiuixStudioTask(state: FontStudioUiState) {
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (state.busy) "复合任务执行中" else "复合字体已生成",
+                        if (state.busy) "正在生成组合字体" else "组合字体已生成",
                         color = tokens.textPrimary,
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.Black,
+                        fontWeight = FontWeight.SemiBold,
                     )
-                    Text(state.message, color = tokens.textSecondary, fontSize = 11.sp)
+                    Text(state.message, color = tokens.textSecondary, fontSize = 12.sp)
                 }
                 MiuixStudioPill("${state.progress}%", MaterialTheme.colorScheme.primary)
             }
@@ -249,14 +237,14 @@ private fun MiuixSlotCard(
 ) {
     val tokens = LocalMiuixTokens.current
     val font = slotState.font
-    val shape = RoundedCornerShape(22.dp)
+    val shape = RoundedCornerShape(24.dp)
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 13.dp)) {
+        Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(44.dp),
@@ -264,39 +252,27 @@ private fun MiuixSlotCard(
                     color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        if (font != null && font.valid) {
-                            NativeFontPreview(
-                                font = font,
-                                text = when (slotState.slot) {
-                                    MixSlot.Cjk -> "中"
-                                    MixSlot.Latin -> "Aa"
-                                    MixSlot.Digit -> "123"
-                                },
-                                axes = if (font.variable) mapOf("wght" to 400f) else emptyMap(),
-                                modifier = Modifier.size(44.dp).padding(5.dp),
-                                textSizeSp = 16f,
-                                gravity = Gravity.CENTER,
-                                maxLines = 1,
-                            )
-                        } else {
-                            Text(
-                                when (slotState.slot) {
-                                    MixSlot.Cjk -> "中"
-                                    MixSlot.Latin -> "Aa"
-                                    MixSlot.Digit -> "123"
-                                },
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Black,
-                            )
-                        }
+                        Text(
+                            when (slotState.slot) {
+                                MixSlot.Cjk -> "中"
+                                MixSlot.Latin -> "Aa"
+                                MixSlot.Digit -> "123"
+                            },
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
                     }
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(slotState.title, color = tokens.textPrimary, fontSize = 17.sp, fontWeight = FontWeight.Black)
-                    Text(slotState.subtitle, color = tokens.textSecondary, fontSize = 10.sp)
+                    Text(slotState.title, color = tokens.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Text(slotState.subtitle, color = tokens.textSecondary, fontSize = 12.sp)
                 }
-                if (font != null) MiuixStudioPill(fontCapabilityLabel(font), MaterialTheme.colorScheme.primary)
+            }
+            if (font != null) {
+                Spacer(Modifier.height(10.dp))
+                MiuixStudioPill(fontCapabilityLabel(font), MaterialTheme.colorScheme.primary)
             }
 
             Spacer(Modifier.height(10.dp))
@@ -313,14 +289,14 @@ private fun MiuixSlotCard(
                 ) {
                     Column(Modifier.weight(1f)) {
                         Text(
-                            font?.name ?: "选择字体",
+                            font?.name ?: "点此选择字体",
                             color = tokens.textPrimary,
                             fontWeight = FontWeight.Bold,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
                         if (font != null) {
-                            Text(font.format, color = tokens.textSecondary, fontSize = 9.sp)
+                            Text(font.format, color = tokens.textSecondary, fontSize = 12.sp)
                         }
                     }
                     Icon(Icons.Rounded.KeyboardArrowDown, contentDescription = null, tint = tokens.textSecondary)
@@ -338,7 +314,7 @@ private fun MiuixSlotCard(
                         font = font,
                         text = slotState.sample,
                         axes = slotState.axes,
-                        modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 12.dp),
+                        modifier = Modifier.fillMaxWidth().height(84.dp).padding(horizontal = 12.dp),
                         textSizeSp = 23f,
                         gravity = Gravity.CENTER,
                         maxLines = 1,
@@ -366,19 +342,19 @@ private fun MiuixCoverageGroup(state: FontStudioUiState, actions: FontStudioActi
     val probe = state.coverage
     val metrics = probe.metrics.takeIf { probe.fontId == fontId }
     Card(
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(horizontal = 14.dp, vertical = 13.dp)) {
+        Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("字形覆盖诊断", color = tokens.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.Black)
-                    Text(cjk?.font?.name ?: "请先选择中文基底", color = tokens.textSecondary, fontSize = 11.sp)
+                    Text("所选字体覆盖率", color = tokens.textPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(cjk?.font?.name ?: "请先选择中文基底", color = tokens.textSecondary, fontSize = 12.sp)
                 }
                 OutlinedButton(
                     onClick = { actions.inspectCoverage(fontId) },
-                    enabled = fontId.isNotBlank() && !probe.loading,
+                    enabled = fontId.isNotBlank() && !probe.loading && !state.busy && !state.operationBusy,
                     shape = RoundedCornerShape(17.dp),
                 ) {
                     if (probe.loading) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
@@ -404,13 +380,13 @@ private fun MiuixCoverageGroup(state: FontStudioUiState, actions: FontStudioActi
                             "缺失示例：${metrics.missingSample}",
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 10.dp),
                             color = tokens.textSecondary,
-                            fontSize = 9.sp,
+                            fontSize = 12.sp,
                         )
                     }
                 }
             } else if (probe.error.isNotBlank() && probe.fontId == fontId) {
                 Spacer(Modifier.height(10.dp))
-                Text(probe.error, color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
+                Text(probe.error, color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
             }
         }
     }
@@ -420,13 +396,13 @@ private fun MiuixCoverageGroup(state: FontStudioUiState, actions: FontStudioActi
 private fun MiuixCoverageRow(label: String, ratio: Float) {
     val tokens = LocalMiuixTokens.current
     Row(Modifier.fillMaxWidth().padding(vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = tokens.textPrimary, modifier = Modifier.width(42.dp), fontSize = 12.sp, fontWeight = FontWeight.Black)
+        Text(label, color = tokens.textPrimary, modifier = Modifier.width(42.dp), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         LinearProgressIndicator(
             progress = { ratio },
             modifier = Modifier.weight(1f).height(7.dp),
         )
         Spacer(Modifier.width(10.dp))
-        Text("${(ratio * 100).roundToInt()}%", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Black)
+        Text("${(ratio * 100).roundToInt()}%", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -434,6 +410,7 @@ private fun MiuixCoverageRow(label: String, ratio: Float) {
 private fun MiuixFinalAction(state: FontStudioUiState, actions: FontStudioActions) {
     val tokens = LocalMiuixTokens.current
     val direct = state.directApplyFontId
+    val selectionReady = state.slots.size == MixSlot.entries.size && state.slots.all { it.font?.valid == true }
     val shape = RoundedCornerShape(24.dp)
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -441,7 +418,7 @@ private fun MiuixFinalAction(state: FontStudioUiState, actions: FontStudioAction
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(15.dp)) {
+        Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(44.dp),
@@ -459,62 +436,40 @@ private fun MiuixFinalAction(state: FontStudioUiState, actions: FontStudioAction
                 Spacer(Modifier.width(13.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
-                        if (direct != null) "同一字体，无需复合" else "生成完整复合字体",
+                        if (direct != null) "准备应用" else "让这个组合成为日常",
                         color = tokens.textPrimary,
                         fontSize = 17.sp,
-                        fontWeight = FontWeight.Black,
+                        fontWeight = FontWeight.SemiBold,
                     )
                     Text(
-                        if (direct != null) "三个槽位保持标准 Regular 400，将直接应用原始字体。"
-                        else "真实字重和全部设计轴会写入最终字体文件。",
+                        if (direct != null) "三个部分使用同一款字体，可直接应用。"
+                        else "按上面的字体和字重生成组合，然后应用到系统。",
                         color = tokens.textSecondary,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                     )
                 }
             }
             Spacer(Modifier.height(12.dp))
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(
-                        enabled = !state.busy && !state.operationBusy && state.hasFonts,
-                    ) {
-                        if (direct != null) actions.applyDirect(direct) else actions.startMix()
-                    },
+            Button(
+                onClick = { if (direct != null) actions.applyDirect(direct) else actions.startMix() },
+                enabled = !state.loading && !state.busy && !state.operationBusy && selectionReady,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
                 shape = RoundedCornerShape(18.dp),
-                color = if (!state.busy && !state.operationBusy && state.hasFonts) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.surfaceVariant
-                },
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    Icon(
-                        if (direct != null) Icons.Rounded.FontDownload else Icons.Rounded.AutoAwesome,
-                        contentDescription = null,
-                        tint = if (!state.busy && !state.operationBusy && state.hasFonts) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        if (direct != null) "直接应用此字体" else "生成并应用到系统",
-                        color = if (!state.busy && !state.operationBusy && state.hasFonts) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Black,
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Icon(
-                        Icons.Rounded.ChevronRight,
-                        contentDescription = null,
-                        tint = if (!state.busy && !state.operationBusy && state.hasFonts) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Icon(
+                    if (direct != null) Icons.Rounded.FontDownload else Icons.Rounded.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    if (state.busy || state.operationBusy) "正在处理，请稍候…"
+                    else if (!selectionReady) "先选择组合字体"
+                    else if (direct != null) "直接应用此字体" else "生成并应用",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
         }
     }
@@ -524,7 +479,7 @@ private fun MiuixFinalAction(state: FontStudioUiState, actions: FontStudioAction
 private fun MiuixStudioNotice(message: String, error: Boolean) {
     val tokens = LocalMiuixTokens.current
     Surface(
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(24.dp),
         color = if (error) MaterialTheme.colorScheme.errorContainer else tokens.cardBackground,
         shadowElevation = 0.dp,
     ) {
@@ -552,8 +507,8 @@ private fun MiuixStudioPill(text: String, color: Color) {
             text,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             color = color,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Black,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }

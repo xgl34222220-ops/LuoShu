@@ -137,7 +137,7 @@ internal fun FontDetailsDialogRoute(
                         color = primaryText,
                         fontSize = 24.sp,
                         lineHeight = 29.sp,
-                        fontWeight = FontWeight.Black,
+                        fontWeight = FontWeight.SemiBold,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -191,8 +191,8 @@ internal fun FontDetailsDialogRoute(
             }
 
             Spacer(Modifier.height(18.dp))
-            Text("字体信息", color = primaryText, fontSize = 16.sp, fontWeight = FontWeight.Black)
-            Text("快速查看这款字体的能力、字重与文件信息", color = secondaryText, fontSize = 10.sp)
+            Text("字体信息", color = primaryText, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("快速查看这款字体的能力、字重与文件信息", color = secondaryText, fontSize = 12.sp)
             Spacer(Modifier.height(9.dp))
             Surface(
                 modifier = Modifier.fillMaxWidth(),
@@ -227,7 +227,7 @@ internal fun FontDetailsDialogRoute(
                             text = font.error,
                             modifier = Modifier.weight(1f),
                             color = scheme.onErrorContainer,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                         )
                     }
                 }
@@ -248,8 +248,8 @@ internal fun FontDetailsDialogRoute(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text("字体内部信息", color = primaryText, fontSize = 14.sp, fontWeight = FontWeight.Black)
-                            Text("内部名称、SHA-256、字形覆盖与可变轴", color = secondaryText, fontSize = 10.sp)
+                            Text("字体内部信息", color = primaryText, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text("内部名称、SHA-256、字形覆盖与可变轴", color = secondaryText, fontSize = 12.sp)
                         }
                         Icon(
                             if (metadataExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
@@ -281,7 +281,7 @@ internal fun FontDetailsDialogRoute(
                                         deepMetadata?.error.orEmpty(),
                                         modifier = Modifier.weight(1f),
                                         color = scheme.error,
-                                        fontSize = 11.sp,
+                                        fontSize = 12.sp,
                                     )
                                 }
                             }
@@ -291,7 +291,7 @@ internal fun FontDetailsDialogRoute(
                                         text = deepMetadata?.text.orEmpty(),
                                         modifier = Modifier.padding(15.dp),
                                         color = primaryText,
-                                        fontSize = 10.sp,
+                                        fontSize = 12.sp,
                                         lineHeight = 16.sp,
                                         fontFamily = FontFamily.Monospace,
                                     )
@@ -316,7 +316,7 @@ internal fun FontDetailsDialogRoute(
                     ) {
                         Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = tokens.success)
                         Spacer(Modifier.width(8.dp))
-                        Text("当前正在使用", color = tokens.success, fontWeight = FontWeight.Black)
+                        Text("当前正在使用", color = tokens.success, fontWeight = FontWeight.SemiBold)
                     }
                 }
             } else {
@@ -326,7 +326,7 @@ internal fun FontDetailsDialogRoute(
                     modifier = Modifier.fillMaxWidth().height(50.dp),
                     shape = RoundedCornerShape(17.dp),
                 ) {
-                    Text("应用此字体", fontSize = 14.sp, fontWeight = FontWeight.Black)
+                    Text("应用此字体", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -350,7 +350,7 @@ private fun FontStateBadge(text: String, color: Color, valid: Boolean) {
                 tint = color,
             )
             Spacer(Modifier.width(5.dp))
-            Text(text, color = color, fontSize = 10.sp, fontWeight = FontWeight.Black)
+            Text(text, color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -366,7 +366,7 @@ private fun PreviewModeChip(label: String, active: Boolean, onClick: () -> Unit)
             text = label,
             modifier = Modifier.padding(horizontal = 13.dp, vertical = 7.dp),
             color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
         )
     }
@@ -390,7 +390,7 @@ private fun FontDetailLine(
             text = label,
             modifier = Modifier.width(68.dp),
             color = secondaryText,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
         )
         Text(

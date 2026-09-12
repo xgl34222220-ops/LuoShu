@@ -66,6 +66,7 @@ internal class Alpha15FeatureViewModel : ViewModel() {
     private val fontManager = "/data/adb/modules/LuoShu/common/font_manager.sh"
     private val coverageTool = "/data/adb/modules/LuoShu/common/font_coverage.sh"
     private var weightJob: Job? = null
+    private var weightRefreshJob: Job? = null
     private var lastCommittedWeight: Int? = null
 
     var systemWeight by mutableStateOf(SystemWeightState())
@@ -75,9 +76,9 @@ internal class Alpha15FeatureViewModel : ViewModel() {
         private set
 
     fun refreshSystemWeight() {
-        if (systemWeight.applying) return
+        if (systemWeight.applying || weightRefreshJob?.isActive == true) return
         systemWeight = systemWeight.copy(loading = true, error = "")
-        viewModelScope.launch {
+        weightRefreshJob = viewModelScope.launch {
             val result = RootShell.exec(
                 "sh ${RootShell.quote(fontManager)} action font_weight_status",
                 timeoutMs = 20_000L,

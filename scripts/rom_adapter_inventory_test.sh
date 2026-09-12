@@ -20,6 +20,7 @@ export MODULE_DIR="$TMP/module"
 export MODDIR="$MODULE_DIR"
 mkdir -p "$MODULE_DIR/common" "$MODULE_DIR/config" "$MODULE_DIR/system/fonts"
 cp "$ROOT/common/font_inventory.py" "$MODULE_DIR/common/font_inventory.py"
+cp "$ROOT/common/font_slot_coverage.py" "$MODULE_DIR/common/font_slot_coverage.py"
 cp "$1" "$TMP/source.ttf"
 
 cat > "$MODULE_DIR/config/device_font_inventory.json" <<'JSON'

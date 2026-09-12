@@ -1,0 +1,102 @@
+name: Android UI smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - android-app/**
+      - module.prop
+      - scripts/android_ui_smoke*.py
+      - .github/workflows/android-ui-smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-ui-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build UI smoke APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Verify UI navigation and crash detection helpers
+        run: python3 scripts/android_ui_smoke_test.py
+      - name: Build production-optimized debug APK
+        working-directory: android-app
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:assembleDebug 2>&1 | tee "$RUNNER_TEMP/luoshu-ui-build.log"
+      - name: Upload emulator APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-UI-Smoke-APK
+          path: android-app/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 7
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-UI-Smoke-Build-Log
+          path: ${{ runner.temp }}/luoshu-ui-build.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  smoke:
+    name: UI smoke API 36
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: LuoShu-UI-Smoke-APK
+          path: ui-smoke-apk
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Enable KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          test -r /dev/kvm && test -w /dev/kvm
+      - name: Capture and verify real App screens
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          ram-size: 2048M
+          heap-size: 512M
+          emulator-boot-timeout: 600
+          disable-animations: false
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --output ui-smoke-output --serial emulator-5554
+      - name: Upload screenshots, hierarchy and crash evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-UI-Smoke-API-36
+          path: ui-smoke-output/
+          if-no-files-found: warn
+          retention-days: 14

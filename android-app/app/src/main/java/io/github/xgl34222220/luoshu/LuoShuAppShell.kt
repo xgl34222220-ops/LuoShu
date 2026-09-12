@@ -17,6 +17,8 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -69,6 +71,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -232,14 +235,14 @@ internal fun LuoShuAppShell(
 
     LuoShuTheme(appearance) {
         val dark = MaterialTheme.colorScheme.background.luminance() < .5f
-        val blurActive = appearance.blurEnabled && appearance.glassEnabled
+        val showDock = page != AppPage.Logs && !(page == AppPage.Settings && settingsDetailVisible)
+        val blurActive = appearance.blurEnabled && appearance.glassEnabled && showDock
         val hazeState = rememberHazeState(blurEnabled = blurActive)
         val liquidBackdrop = rememberLayerBackdrop()
         val liquidGlassSupported = blurActive &&
             appearance.uiStyle == UiStyle.MIUIX &&
             isRuntimeShaderSupported()
         val navigationBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-        val showDock = page != AppPage.Logs && !(page == AppPage.Settings && settingsDetailVisible)
         val edgeToEdgeGlass = appearance.uiStyle == UiStyle.MIUIX &&
             appearance.glassEnabled && appearance.floatingDock && showDock
         // A floating glass dock overlays a full-height viewport. Lists own the trailing
@@ -250,7 +253,7 @@ internal fun LuoShuAppShell(
             !appearance.floatingDock -> navigationBottom + 82.dp
             else -> navigationBottom + 94.dp
         }
-        val dockContentPadding = if (edgeToEdgeGlass) navigationBottom + 96.dp else 0.dp
+        val dockContentPadding = if (edgeToEdgeGlass) navigationBottom + 108.dp else 0.dp
         val contentModifier = Modifier
             .fillMaxSize()
             .then(if (blurActive && !liquidGlassSupported) Modifier.hazeSource(state = hazeState) else Modifier)
@@ -274,8 +277,8 @@ internal fun LuoShuAppShell(
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
-                                alpha = .86f + (.14f * pageEnter.value)
-                                translationY = (1f - pageEnter.value) * 18.dp.toPx()
+                                alpha = 1f
+                                translationY = (1f - pageEnter.value) * 10.dp.toPx()
                             },
                     ) {
                     when (page) {
@@ -540,9 +543,9 @@ private fun MaterialAppDock(
         pages = dockPages,
         current = current,
         onSelect = onSelect,
-        itemHeight = 48.dp,
+        itemHeight = 56.dp,
         modifier = modifier
-            .then(if (floating) Modifier.padding(horizontal = 16.dp).padding(bottom = bottomInset + 10.dp) else Modifier)
+            .then(if (floating) Modifier.padding(horizontal = 20.dp).padding(bottom = bottomInset + 12.dp) else Modifier)
             .fillMaxWidth()
             .shadow(if (floating) 14.dp else 6.dp, shape, clip = false)
             .clip(shape)
@@ -663,9 +666,9 @@ private fun MiuixAppDock(
     // OEM compositor can never turn their offscreen buffers into the old white rectangles.
     Box(
         modifier = modifier
-            .then(if (floating) Modifier.padding(horizontal = 12.dp).padding(bottom = bottomInset + 10.dp) else Modifier)
+            .then(if (floating) Modifier.padding(horizontal = 20.dp).padding(bottom = bottomInset + 12.dp) else Modifier)
             .fillMaxWidth()
-            .height(66.dp + if (floating) 0.dp else bottomInset),
+            .height(72.dp + if (floating) 0.dp else bottomInset),
     ) {
         Box(
             modifier = Modifier
@@ -687,7 +690,7 @@ private fun MiuixAppDock(
             pages = dockPages,
             current = current,
             onSelect = onSelect,
-            itemHeight = 54.dp,
+            itemHeight = 60.dp,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(start = 6.dp, top = 6.dp, end = 6.dp, bottom = if (floating) 6.dp else bottomInset + 6.dp),
@@ -695,7 +698,7 @@ private fun MiuixAppDock(
             indicatorBorderColor = Color.White.copy(alpha = if (dark) .18f else .46f),
             indicatorShadow = 3.dp,
             selectedColor = scheme.primary,
-            unselectedColor = scheme.onSurfaceVariant.copy(alpha = .72f),
+            unselectedColor = scheme.onSurfaceVariant.copy(alpha = .90f),
             label = "luoshuMiuixDockIndicator",
             liquidGlass = activeGlass,
             indicatorBackdrop = dockSurfaceBackdrop.takeIf { runtimeLiquid },
@@ -831,7 +834,7 @@ private fun AppDockLayout(
                 .then(movingLensModifier)
                 .border(1.dp, indicatorBorderColor, indicatorShape),
         )
-        Row(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().selectableGroup()) {
             pages.forEach { page ->
                 val selected = current == page
                 val interactionSource = remember(page) { MutableInteractionSource() }
@@ -860,25 +863,29 @@ private fun AppDockLayout(
                             scaleY = itemScale
                         }
                         .clip(RoundedCornerShape(23.dp))
-                        .clickable(
+                        .selectable(
+                            selected = selected,
+                            role = Role.Tab,
                             interactionSource = interactionSource,
                             indication = null,
-                        ) { onSelect(page) },
+                            onClick = { if (!selected) onSelect(page) },
+                        ),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
                     LuoShuGlyph(
                         imageVector = page.icon,
-                        contentDescription = page.label,
+                        contentDescription = null,
                         size = LuoShuIconTokens.DockGlyph,
                         opticalScale = page.dockOpticalScale,
                         tint = itemColor,
                     )
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(3.dp))
                     Text(
                         page.label,
                         color = itemColor,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
+                        lineHeight = 17.sp,
                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1,
                     )

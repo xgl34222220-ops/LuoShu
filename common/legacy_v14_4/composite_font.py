@@ -27,6 +27,9 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
 
+from composite_layout import (_role_transform, clear_imported_metric_variations,
+                              enclose_imported_bounds)
+
 LATIN_CODEPOINTS = (
     set(range(0x0020, 0x0030))
     | set(range(0x003A, 0x007F))
@@ -150,13 +153,13 @@ def _outline_kind(font: TTFont) -> str:
     raise CompositeError("字体不包含受支持的 glyf、CFF 或 CFF2 轮廓")
 
 
-def _draw_decomposed(glyph_set, glyph_name: str, destination_pen, scale: float) -> None:
+def _draw_decomposed(glyph_set, glyph_name: str, destination_pen, scale: float, y_shift: float) -> None:
     recorder = DecomposingRecordingPen(glyph_set)
     glyph_set[glyph_name].draw(recorder)
-    recorder.replay(TransformPen(destination_pen, (scale, 0, 0, scale, 0, 0)))
+    recorder.replay(TransformPen(destination_pen, (scale, 0, 0, scale, 0, y_shift)))
 
 
-def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float) -> None:
+def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float, y_shift: float) -> None:
     pen = TTGlyphPen(None)
     source_kind = _outline_kind(src)
     output_pen = Cu2QuPen(
@@ -164,7 +167,7 @@ def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_
         max_err=max(0.5, base["head"].unitsPerEm / 2000),
         reverse_direction=source_kind in {"cff", "cff2"},
     )
-    _draw_decomposed(src_glyph_set, src_name, output_pen, scale)
+    _draw_decomposed(src_glyph_set, src_name, output_pen, scale, y_shift)
     # TTGlyphPen 生成的新 glyph 默认没有 xMin/yMin/xMax/yMax。
     # 当 TTFont 以 recalcBBoxes=False 保存时，FontTools 会直接读取这些字段；
     # glyf 中文基底因此会在保存阶段抛出 KeyError("xMin")。
@@ -174,11 +177,12 @@ def _replace_glyf(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_
     if not hasattr(glyph, "xMin"):
         # 空格等空轮廓不会产生边界，显式补零以保证序列化安全。
         glyph.xMin = glyph.yMin = glyph.xMax = glyph.yMax = 0
+    enclose_imported_bounds(base, (glyph.xMin, glyph.yMin, glyph.xMax, glyph.yMax))
     if "gvar" in base:
         base["gvar"].variations.pop(base_name, None)
 
 
-def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float, width: int) -> None:
+def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_name: str, scale: float, y_shift: float, width: int) -> None:
     tag = "CFF " if "CFF " in base else "CFF2"
     cff = base[tag].cff
     top = cff.topDictIndex[0]
@@ -196,22 +200,21 @@ def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_n
         all_cubic=True,
         reverse_direction=source_kind == "glyf",
     )
-    _draw_decomposed(src_glyph_set, src_name, output_pen, scale)
+    _draw_decomposed(src_glyph_set, src_name, output_pen, scale, y_shift)
     char_string = pen.getCharString(private=private, globalSubrs=cff.GlobalSubrs)
     if selector is not None:
         char_string.fdSelectIndex = selector
     top.CharStrings[base_name] = char_string
+    enclose_imported_bounds(base, char_string.calcBounds(top.CharStrings))
 
 
-def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], location: dict[str, float] | None = None, required: set[int] | None = None) -> tuple[int, list[int]]:
+def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], role: str, location: dict[str, float] | None = None, required: set[int] | None = None) -> tuple[int, list[int]]:
     required = required or set()
     base_cmap = base.getBestCmap() or {}
     src_cmap = src.getBestCmap() or {}
     src_glyph_set = src.getGlyphSet(location=location) if location else src.getGlyphSet()
     base_kind = _outline_kind(base)
-    base_upem = base["head"].unitsPerEm
-    src_upem = src["head"].unitsPerEm
-    scale = base_upem / src_upem
+    scale, y_shift = _role_transform(base, src, src_glyph_set, role)
     replaced = 0
     missing: list[int] = []
     already: set[str] = set()
@@ -239,15 +242,16 @@ def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], lo
         lsb = int(round(float(lsb) * scale))
         try:
             if base_kind == "glyf":
-                _replace_glyf(base, src, src_glyph_set, base_name, src_name, scale)
+                _replace_glyf(base, src, src_glyph_set, base_name, src_name, scale, y_shift)
             else:
-                _replace_cff(base, src, src_glyph_set, base_name, src_name, scale, advance)
+                _replace_cff(base, src, src_glyph_set, base_name, src_name, scale, y_shift, advance)
         except Exception as exc:
             if cp in required:
                 raise CompositeError(f"必要字符 U+{cp:04X} 的字形转换失败：{exc}") from exc
             missing.append(cp)
             continue
         base["hmtx"].metrics[base_name] = (advance, lsb)
+        clear_imported_metric_variations(base, base_name)
         replaced += 1
     return replaced, missing
 
@@ -308,11 +312,11 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             raise CompositeError("中文基础字体必须同时包含中文、英文字母和数字，才能安全生成完整复合字体")
         _progress(args.progress, "latin", "正在导入英文字形", 20)
         latin, latin_face, latin_location = _load_font(latin_path, "latin", args.weight, args.latin_face)
-        latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS, latin_location, REQUIRED_LATIN)
+        latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS, "latin", latin_location, REQUIRED_LATIN)
         latin.close(); latin = None; gc.collect()
         _progress(args.progress, "digit", "正在导入数字字形", 52)
         digit, digit_face, digit_location = _load_font(digit_path, "digit", args.weight, args.digit_face)
-        digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, digit_location, REQUIRED_DIGITS)
+        digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, "digit", digit_location, REQUIRED_DIGITS)
         digit.close(); digit = None; gc.collect()
         if latin_replaced < 52:
             raise CompositeError(f"英文替换数量异常（仅 {latin_replaced} 个）")

@@ -91,7 +91,7 @@ internal fun StudioToolLauncher(
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
@@ -114,8 +114,8 @@ internal fun StudioToolLauncher(
                     }
                     Spacer(Modifier.width(12.dp))
                     Column {
-                        Text("组合工具", fontWeight = FontWeight.Black, fontSize = 20.sp)
-                        Text("预览、方案、历史与字形工具", color = scheme.onSurfaceVariant, fontSize = 11.sp)
+                        Text("组合工具", fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+                        Text("预览、方案、历史与字形工具", color = scheme.onSurfaceVariant, fontSize = 12.sp)
                     }
                 }
                 StudioToolMenuItem("最终组合预览", "对照系统字体并切换混排、正文、界面和金额场景", Icons.Rounded.AutoAwesome, 1.08f) {
@@ -124,13 +124,13 @@ internal fun StudioToolLauncher(
                 StudioToolMenuItem("本地方案库", "保存、收藏和载入常用组合，并按最近使用快速回滚", Icons.Rounded.History) {
                     menuVisible = false; onPresets()
                 }
-                StudioToolMenuItem("成功切换历史", "最近 10 次真正完成的切换，可一键恢复并重新走安全事务", Icons.Rounded.History) {
+                StudioToolMenuItem("成功切换历史", "回看最近 10 次成功切换，快速恢复喜欢的字体", Icons.Rounded.History) {
                     menuVisible = false; onHistory()
                 }
-                StudioToolMenuItem("方案导入导出", "通过 JSON 迁移三个槽位、字重和变量轴配置", Icons.Rounded.Description, .96f) {
+                StudioToolMenuItem("方案导入导出", "备份或分享所选字体、字重和调节参数", Icons.Rounded.Description, .96f) {
                     menuVisible = false; onProfile()
                 }
-                StudioToolMenuItem("字形浏览", "浏览中文、拉丁、数字、标点和 Unicode 码位", Icons.Rounded.ListAlt, .98f) {
+                StudioToolMenuItem("字形浏览", "查看中文、英文、数字和标点的实际字形", Icons.Rounded.ListAlt, .98f) {
                     menuVisible = false; onGlyphs()
                 }
             }
@@ -155,7 +155,7 @@ private fun StudioToolMenuItem(
         contentColor = scheme.onSurface,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
@@ -175,12 +175,12 @@ private fun StudioToolMenuItem(
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(label, fontWeight = FontWeight.Black, fontSize = 14.sp)
+                Text(label, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 Text(
                     description,
                     color = scheme.onSurfaceVariant,
-                    fontSize = 10.sp,
-                    lineHeight = 14.sp,
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
                 )
             }
             Spacer(Modifier.width(8.dp))

@@ -14,8 +14,11 @@ import io.github.xgl34222220.luoshu.BuildConfig
 import io.github.xgl34222220.luoshu.RootShell
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -125,6 +128,8 @@ internal class SystemCenterViewModel(application: Application) : AndroidViewMode
         private set
 
     private var updateJob: Job? = null
+    private var requestedUpdateChannel: UpdateChannel? = null
+    private var healthJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -138,9 +143,9 @@ internal class SystemCenterViewModel(application: Application) : AndroidViewMode
     }
 
     fun refreshHealth() {
-        if (health.loading && health.moduleVersion.isNotBlank()) return
+        if (healthJob?.isActive == true) return
         health = health.copy(loading = true, error = "")
-        viewModelScope.launch {
+        healthJob = viewModelScope.launch {
             val result = RootShell.exec(
                 "sh ${RootShell.quote(healthScript)} report",
                 timeoutMs = 25_000L,
@@ -217,12 +222,15 @@ internal class SystemCenterViewModel(application: Application) : AndroidViewMode
 
     fun checkUpdate() {
         val requestedChannel = updateChannel
+        if (updateJob?.isActive == true && requestedUpdateChannel == requestedChannel) return
         updateJob?.cancel()
+        requestedUpdateChannel = requestedChannel
         updateInfo = updateInfo.copy(loading = true, error = "")
         updateJob = viewModelScope.launch {
             val result = runCatching {
                 fetchUpdateInfo(requestedChannel)
             }
+            (result.exceptionOrNull() as? CancellationException)?.let { throw it }
             if (requestedChannel != updateChannel) return@launch
             updateInfo = result.getOrElse { error ->
                 OnlineUpdateInfo(error = error.message ?: "检查更新失败")
@@ -234,17 +242,20 @@ internal class SystemCenterViewModel(application: Application) : AndroidViewMode
         val file = if (channel == UpdateChannel.PRERELEASE) "update-prerelease.json" else "update.json"
         val metadataUrl = "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/main/$file"
         val root = JSONObject(fetchText(metadataUrl, "application/json"))
+        currentCoroutineContext().ensureActive()
         val zipUrl = root.optString("zipUrl").trim()
         val versionCode = root.optInt("versionCode", 0)
         require(versionCode > 0 && zipUrl.startsWith("https://")) { "更新元数据不完整" }
 
         val appUrl = deriveAppUrl(zipUrl)
         val moduleSha = runCatching { fetchPublishedSha256("$zipUrl.sha256") }.getOrDefault("")
+        currentCoroutineContext().ensureActive()
         val appSha = if (appUrl.isNotBlank()) {
             runCatching { fetchPublishedSha256("$appUrl.sha256") }.getOrDefault("")
         } else {
             ""
         }
+        currentCoroutineContext().ensureActive()
         OnlineUpdateInfo(
             version = root.optString("version").trim(),
             versionCode = versionCode,

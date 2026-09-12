@@ -103,4 +103,20 @@ grep -q 'mix-engine-start.*json' "$ROOT/common/legacy_v14_4/font_mix_runtime.sh"
 ! sed -n '/^payload_stage_begin()/,/^}/p' "$ROOT/common/legacy_v14_4/font_mix_engine.sh" | grep -q 'cp -af'
 grep -q 'hyperos_metrics_batch.py' "$ROOT/common/hyperos_stage_complete.sh"
 
+# Replacing a task must also stop its old completion monitor promptly. It must
+# neither poll for the former twelve-minute budget nor finalize the new task.
+printf 'task=newer-task\nstate=running\n' > "$MODULE/config/mix_task.conf"
+python3 - "$ROOT" "$MODULE" <<'PY'
+import os
+from pathlib import Path
+import subprocess
+import sys
+root, module = map(Path, sys.argv[1:])
+subprocess.run(["sh", str(root / "common/legacy_v14_4/font_mix_runtime.sh"),
+                "monitor", "superseded-task"],
+               env={**os.environ, "MODDIR": str(module), "LUOSHU_REAL_MODDIR": str(module)},
+               check=True, timeout=3)
+assert not (module / "config/mix-finalize-state.conf").exists()
+PY
+
 echo 'Legacy composite start advances past 34% before the nested start shell exits.'

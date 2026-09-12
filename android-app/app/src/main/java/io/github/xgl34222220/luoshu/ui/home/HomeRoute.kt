@@ -102,7 +102,7 @@ fun HomeRoute(
                         onClick = {
                             if (stockScanBusy) return@OutlinedButton
                             stockScanBusy = true
-                            stockScanMessage = "正在从原厂 lower / mirror 扫描字体槽位…"
+                            stockScanMessage = "正在扫描设备原厂字体…"
                             stockScanError = false
                             scope.launch {
                                 val result = RootShell.exec(STOCK_SCAN_COMMAND, timeoutMs = 180_000L)
@@ -128,7 +128,7 @@ fun HomeRoute(
                         Text(
                             stockScanMessage,
                             color = if (stockScanError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 10.sp,
+                            fontSize = 12.sp,
                         )
                     }
                 }

@@ -1,5 +1,6 @@
 package io.github.xgl34222220.luoshu.ui.home
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -18,23 +20,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FontDownload
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Security
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -43,10 +42,19 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -57,6 +65,7 @@ import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
 
 @Composable
@@ -66,275 +75,207 @@ internal fun HomeScreenCompact(
     actions: HomeActions,
     trustContent: @Composable () -> Unit,
 ) {
-    val miuix = style == UiStyle.MIUIX
-    val dockBottomPadding = maxOf(LocalDockContentPadding.current, 24.dp)
     val tokens = LocalMiuixTokens.current
-    val cardColor = if (miuix) tokens.cardBackground else MaterialTheme.colorScheme.surfaceContainerLow
-    val elevatedColor = if (miuix) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surfaceContainerHigh
-    val textPrimary = if (miuix) tokens.textPrimary else MaterialTheme.colorScheme.onSurface
-    val textSecondary = if (miuix) tokens.textSecondary else MaterialTheme.colorScheme.onSurfaceVariant
-    val shape = RoundedCornerShape(22.dp)
+    val scheme = MaterialTheme.colorScheme
+    val cardColor = tokens.cardBackground
+    val textPrimary = tokens.textPrimary
+    val textSecondary = tokens.textSecondary
+    val shape = RoundedCornerShape(24.dp)
+    var deviceDetailsExpanded by rememberSaveable { mutableStateOf(false) }
+    val canChange = state.moduleInstalled && state.rootGranted && !state.taskRunning
+    val next = nextStepFor(state, actions)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 14.dp, top = 0.dp, end = 14.dp, bottom = dockBottomPadding),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = maxOf(LocalDockContentPadding.current, 24.dp)),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        item {
+        item(key = "header") {
             LuoShuTopBar(title = "洛书") {
+                LuoShuHeaderAction(
+                    icon = Icons.Rounded.Description,
+                    contentDescription = "任务中心",
+                    onClick = actions.openLogs,
+                    containerColor = cardColor,
+                )
                 LuoShuHeaderAction(
                     icon = Icons.Rounded.Refresh,
                     contentDescription = "刷新",
                     onClick = actions.refresh,
-                    containerColor = elevatedColor,
+                    containerColor = cardColor,
                     loading = state.loading,
                 )
             }
         }
-
-        item {
-            Card(
-                shape = shape,
-                colors = CardDefaults.cardColors(containerColor = cardColor),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-            ) {
-                Column(Modifier.padding(14.dp)) {
+        item(key = "current-font") {
+            Surface(shape = RoundedCornerShape(28.dp), color = cardColor, shadowElevation = 2.dp) {
+                Column(
+                    Modifier.fillMaxWidth()
+                        .background(Brush.linearGradient(listOf(scheme.primaryContainer.copy(alpha = .46f), cardColor)))
+                        .padding(22.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier
-                                .size(10.dp)
-                                .background(
-                                    if (state.moduleInstalled && state.rootGranted) {
-                                        if (miuix) tokens.success else Color(0xFF21966C)
-                                    } else {
-                                        if (miuix) tokens.warning else MaterialTheme.colorScheme.tertiary
+                        Surface(shape = CircleShape, color = cardColor.copy(alpha = .72f)) {
+                            Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.size(6.dp).background(if (state.moduleInstalled && state.rootGranted) tokens.success else tokens.warning, CircleShape))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    when {
+                                        state.loading -> "正在连接"
+                                        !state.moduleInstalled -> "等待模块"
+                                        !state.rootGranted -> "需要授权"
+                                        state.taskRunning -> "正在处理"
+                                        state.rebootRequired -> "等待重启"
+                                        else -> "模块已连接"
                                     },
-                                    CircleShape,
-                                ),
-                        )
+                                    color = textPrimary,
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Text(state.version, color = textSecondary, style = MaterialTheme.typography.labelMedium)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("当前字体", color = textSecondary, style = MaterialTheme.typography.bodySmall)
+                        Text(state.currentFont, color = textPrimary, fontSize = 24.sp, lineHeight = 32.sp,
+                            fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("字里行间，自有风格。", color = textPrimary, fontSize = 25.sp, lineHeight = 36.sp,
+                            fontWeight = FontWeight.Medium)
+                        Text("Aa Bb  ·  0123456789", color = scheme.primary, fontSize = 19.sp,
+                            lineHeight = 28.sp, letterSpacing = .5.sp)
+                    }
+                    Button(
+                        onClick = next.onClick,
+                        enabled = next.enabled,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+                        shape = RoundedCornerShape(18.dp),
+                    ) {
+                        LuoShuGlyph(next.icon, null, LuoShuIconTokens.ToolGlyph)
                         Spacer(Modifier.width(8.dp))
-                        Text(
-                            if (state.moduleInstalled) "模块与字体引擎已连接" else "正在等待模块连接",
-                            modifier = Modifier.weight(1f),
-                            color = textSecondary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(state.version, color = textSecondary, fontSize = 9.sp, fontWeight = FontWeight.Medium)
-                    }
-                    Spacer(Modifier.height(9.dp))
-                    Text("当前字体", color = textSecondary, fontSize = 11.sp)
-                    Text(
-                        state.currentFont,
-                        color = textPrimary,
-                        fontSize = 22.sp,
-                        lineHeight = 27.sp,
-                        fontWeight = FontWeight.Black,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(9.dp))
-                    Surface(
-                        shape = RoundedCornerShape(15.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = .08f),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            LuoShuGlyph(
-                                imageVector = if (state.taskRunning) Icons.Rounded.Refresh else Icons.Rounded.CheckCircle,
-                                contentDescription = null,
-                                size = LuoShuIconTokens.StatusGlyph,
-                                opticalScale = if (state.taskRunning) 1f else .98f,
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text(state.taskTitle, color = textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                                Text(
-                                    state.taskMessage,
-                                    color = textSecondary,
-                                    fontSize = 11.sp,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                            if (state.taskRunning) {
-                                Text(
-                                    "${state.taskProgress}%",
-                                    color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.Black,
-                                )
-                            }
-                        }
-                    }
-                    if (state.taskRunning) {
-                        Spacer(Modifier.height(10.dp))
-                        LinearProgressIndicator(
-                            progress = { state.taskProgress.coerceIn(0, 100) / 100f },
-                            modifier = Modifier.fillMaxWidth().height(6.dp),
-                        )
+                        Text(next.actionLabel, style = MaterialTheme.typography.labelLarge)
                     }
                 }
             }
         }
-
-        item { trustContent() }
-
-        if (state.error.isNotBlank()) {
-            item {
+        if (state.taskRunning || state.rebootRequired || state.error.isNotBlank()) {
+            item(key = "task-status") {
+                val failed = state.error.isNotBlank() && !state.taskRunning
                 Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.errorContainer,
+                    color = if (failed) scheme.errorContainer else cardColor,
+                    shape = shape,
+                    modifier = Modifier.fillMaxWidth().clip(shape).clickable(onClick = actions.openLogs),
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(15.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        LuoShuGlyph(
-                            imageVector = Icons.Rounded.Warning,
-                            contentDescription = null,
-                            size = LuoShuIconTokens.ToolGlyph,
-                            opticalScale = .96f,
-                            tint = MaterialTheme.colorScheme.error,
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            state.error,
-                            modifier = Modifier.weight(1f),
-                            color = MaterialTheme.colorScheme.onErrorContainer,
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            LuoShuGlyph(
+                                if (failed) Icons.Rounded.Warning else if (state.rebootRequired) Icons.Rounded.RestartAlt else Icons.Rounded.Refresh,
+                                null, LuoShuIconTokens.StatusGlyph,
+                                tint = if (failed) scheme.error else scheme.primary,
+                            )
+                            Text(if (state.rebootRequired && !state.taskRunning) "重启后生效" else state.taskTitle,
+                                modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall,
+                                color = if (failed) scheme.onErrorContainer else textPrimary)
+                            if (state.taskRunning) Text("${state.taskProgress.coerceIn(0, 100)}%", color = scheme.primary,
+                                style = MaterialTheme.typography.titleSmall)
+                            LuoShuGlyph(Icons.Rounded.ChevronRight, null, LuoShuIconTokens.TrailingGlyph, tint = textSecondary)
+                        }
+                        Text(if (failed) state.error else next.description,
+                            color = if (failed) scheme.onErrorContainer else textSecondary,
+                            style = MaterialTheme.typography.bodySmall)
+                        if (state.taskRunning) LinearProgressIndicator(
+                            progress = { state.taskProgress.coerceIn(0, 100) / 100f },
+                            modifier = Modifier.fillMaxWidth().height(5.dp).clip(CircleShape),
                         )
                     }
                 }
             }
         }
-
-        item {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = cardColor),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 7.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    CompactStatusCell(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Rounded.Security,
-                        title = "Root",
-                        value = if (state.rootGranted) state.rootManager else "未授权",
-                        healthy = state.rootGranted,
-                        textPrimary = textPrimary,
-                        textSecondary = textSecondary,
-                    )
-                    Box(Modifier.width(1.dp).height(40.dp).background(textSecondary.copy(alpha = .12f)))
-                    CompactStatusCell(
-                        modifier = Modifier.weight(1f),
-                        icon = Icons.Rounded.Layers,
-                        title = "挂载",
-                        value = state.mountEngine,
-                        healthy = state.mountHealthy,
-                        textPrimary = textPrimary,
-                        textSecondary = textSecondary,
-                    )
+        item(key = "font-actions") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                LuoShuSectionHeading("我的字体", "从挑选到组合，让每一处文字更合心意")
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    HomeShortcut("字体库", "导入 · 预览 · 应用", Icons.Rounded.FontDownload, actions.openFontLibrary,
+                        Modifier.weight(1f))
+                    HomeShortcut("字体组合", "中文 · 英文 · 数字", Icons.Rounded.Layers, actions.openFontStudio,
+                        Modifier.weight(1f))
                 }
             }
         }
-
-        item {
-            val next = nextStepFor(state, actions)
-            Card(
-                modifier = Modifier.fillMaxWidth().clickable(enabled = next.enabled, onClick = next.onClick),
-                shape = shape,
-                colors = CardDefaults.cardColors(containerColor = cardColor),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Surface(
-                        modifier = Modifier.size(40.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = .11f),
+        item(key = "weight") {
+            SystemWeightCard(state.systemWeight.copy(applying = state.systemWeight.applying || state.taskRunning), actions, cardColor, textPrimary, textSecondary, shape)
+        }
+        item(key = "device-details") {
+            Surface(shape = shape, color = cardColor) {
+                Column(Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth()
+                            .semantics { stateDescription = if (deviceDetailsExpanded) "已展开" else "已收起" }
+                            .clickable(role = Role.Button) { deviceDetailsExpanded = !deviceDetailsExpanded }
+                            .padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            LuoShuGlyph(
-                                imageVector = next.icon,
-                                contentDescription = null,
-                                size = LuoShuIconTokens.StatusGlyph,
-                                opticalScale = homeOpticalScale(next.icon),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
+                        LuoShuGlyph(Icons.Rounded.Security, null, LuoShuIconTokens.StatusGlyph, tint = scheme.primary)
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("设备与生效状态", style = MaterialTheme.typography.titleSmall, color = textPrimary)
+                            Text(if (state.rootGranted && state.mountHealthy) "${state.rootManager} · 挂载正常" else "查看权限、挂载与字体检查",
+                                style = MaterialTheme.typography.bodySmall, color = textSecondary)
+                        }
+                        LuoShuGlyph(if (deviceDetailsExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                            null, LuoShuIconTokens.ToolGlyph, tint = textSecondary)
+                    }
+                    AnimatedVisibility(visible = deviceDetailsExpanded) {
+                        Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                CompactStatusCell(Modifier.weight(1f), Icons.Rounded.Security, "Root",
+                                    if (state.rootGranted) state.rootManager else "未授权", state.rootGranted, textPrimary, textSecondary)
+                                CompactStatusCell(Modifier.weight(1f), Icons.Rounded.Layers, "挂载",
+                                    state.mountEngine, state.mountHealthy, textPrimary, textSecondary)
+                            }
+                            trustContent()
                         }
                     }
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(next.title, color = textPrimary, fontSize = 14.sp, fontWeight = FontWeight.Black)
-                        Text(
-                            next.description,
-                            color = textSecondary,
-                            fontSize = 11.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            next.actionLabel,
-                            color = if (next.enabled) MaterialTheme.colorScheme.primary else textSecondary,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        LuoShuGlyph(
-                            imageVector = Icons.Rounded.ChevronRight,
-                            contentDescription = null,
-                            size = LuoShuIconTokens.TrailingGlyph,
-                            tint = if (next.enabled) MaterialTheme.colorScheme.primary else textSecondary,
-                        )
-                    }
                 }
             }
         }
-
-        item {
-            SystemWeightCard(
-                weight = state.systemWeight,
-                actions = actions,
-                cardColor = cardColor,
-                textPrimary = textPrimary,
-                textSecondary = textSecondary,
-                shape = shape,
-            )
+        item(key = "restore") {
+            OutlinedButton(
+                onClick = actions.restoreDefault,
+                enabled = canChange,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                shape = RoundedCornerShape(18.dp),
+            ) {
+                LuoShuGlyph(Icons.Rounded.RestartAlt, null, LuoShuIconTokens.ToolGlyph)
+                Spacer(Modifier.width(8.dp))
+                Text("恢复系统字体")
+            }
         }
+    }
+}
 
-        item {
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                OutlinedButton(
-                    onClick = actions.restoreDefault,
-                    enabled = !state.taskRunning,
-                    modifier = Modifier.weight(1f).height(46.dp),
-                    shape = RoundedCornerShape(15.dp),
-                ) {
-                    Text("恢复系统字体", fontWeight = FontWeight.Bold)
+@Composable
+private fun HomeShortcut(title: String, subtitle: String, icon: ImageVector, onClick: () -> Unit, modifier: Modifier) {
+    val tokens = LocalMiuixTokens.current
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(24.dp),
+        color = tokens.cardBackground,
+        shadowElevation = 1.dp,
+    ) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Surface(shape = RoundedCornerShape(15.dp), color = tokens.elevatedCardBackground) {
+                Box(Modifier.size(44.dp), contentAlignment = Alignment.Center) {
+                    LuoShuGlyph(icon, null, LuoShuIconTokens.StatusGlyph, tint = MaterialTheme.colorScheme.primary)
                 }
-                Button(
-                    onClick = actions.reboot,
-                    enabled = state.rebootRequired && !state.taskRunning,
-                    modifier = Modifier.weight(1f).height(46.dp),
-                    shape = RoundedCornerShape(15.dp),
-                ) {
-                    LuoShuGlyph(
-                        imageVector = Icons.Rounded.RestartAlt,
-                        contentDescription = null,
-                        size = LuoShuIconTokens.SectionGlyph,
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text("完整重启", fontWeight = FontWeight.Bold)
-                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, color = tokens.textPrimary, style = MaterialTheme.typography.titleMedium)
+                Text(subtitle, color = tokens.textSecondary, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -350,7 +291,7 @@ private data class HomeNextStep(
 )
 
 private fun nextStepFor(state: HomeUiState, actions: HomeActions): HomeNextStep = when {
-    !state.moduleInstalled -> HomeNextStep(
+    !state.moduleInstalled || !state.rootGranted -> HomeNextStep(
         title = "连接洛书模块",
         description = "安装模块并授予 Root 权限后才能应用全局字体",
         actionLabel = "重新检查",
@@ -406,24 +347,6 @@ private fun homeOpticalScale(icon: ImageVector): Float = when (icon) {
 }
 
 @Composable
-private fun HeaderAction(
-    icon: ImageVector,
-    description: String,
-    containerColor: Color,
-    loading: Boolean = false,
-    onClick: () -> Unit,
-) {
-    LuoShuHeaderAction(
-        icon = icon,
-        contentDescription = description,
-        onClick = onClick,
-        containerColor = containerColor,
-        loading = loading,
-        opticalScale = if (icon == Icons.Rounded.Settings) .94f else 1f,
-    )
-}
-
-@Composable
 private fun CompactStatusCell(
     modifier: Modifier,
     icon: ImageVector,
@@ -449,7 +372,7 @@ private fun CompactStatusCell(
                     contentDescription = null,
                     size = LuoShuIconTokens.SectionGlyph,
                     opticalScale = homeOpticalScale(icon),
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = accent,
                 )
             }
         }
@@ -458,15 +381,15 @@ private fun CompactStatusCell(
             Text(
                 value,
                 color = textPrimary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Black,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 "$title · ${if (healthy) "正常" else "需检查"}",
                 color = if (healthy) textSecondary else accent,
-                fontSize = 9.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
             )
@@ -488,7 +411,7 @@ private fun SystemWeightCard(
         colors = CardDefaults.cardColors(containerColor = cardColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(14.dp)) {
+        Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(40.dp),
@@ -507,14 +430,14 @@ private fun SystemWeightCard(
                 }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("全局粗细微调", color = textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Black)
-                    Text("不修改字体文件，可随时恢复", color = textSecondary, fontSize = 11.sp)
+                    Text("全局粗细微调", color = textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    Text("不修改字体文件，可随时恢复", color = textSecondary, fontSize = 12.sp)
                 }
                 Text(
                     if (weight.loading) "读取中" else weight.weight.toString(),
                     color = MaterialTheme.colorScheme.primary,
                     fontSize = 20.sp,
-                    fontWeight = FontWeight.Black,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -538,7 +461,7 @@ private fun SystemWeightCard(
                             weight.error.ifBlank { weight.message },
                             modifier = Modifier.weight(1f),
                             color = if (weight.error.isNotBlank()) MaterialTheme.colorScheme.error else textSecondary,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             maxLines = 2,
                         )
                         TextButton(onClick = actions.resetSystemWeight, enabled = !weight.applying) {
