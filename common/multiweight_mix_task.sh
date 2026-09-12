@@ -438,9 +438,9 @@ worker() {
     _precheck=$?
     case "$_precheck" in
         1) update_task "$_wanted" failed '请选择中文、英文和数字字体' 100 "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1 ;;
-        2) update_task "$_wanted" failed '中文基底缺少必要字形' 100 "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1 ;;
-        3) update_task "$_wanted" failed '英文字体缺少必要字形' 100 "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1 ;;
-        4) update_task "$_wanted" failed '数字字体缺少必要字形' 100 "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1 ;;
+        2) update_task "$_wanted" failed "$_role_error" 100 "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1 ;;
+        3) update_task "$_wanted" failed "$_role_error" 100 "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1 ;;
+        4) update_task "$_wanted" failed "$_role_error" 100 "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1 ;;
     esac
     mkdir -p "$_root/fonts" "$_root/prepared" 2>/dev/null || {
         update_task "$_wanted" failed '无法创建自动多字重缓存' 100 "$(date +%s)"
@@ -499,9 +499,9 @@ worker() {
 precheck_mix() {
     [ -n "$1" ] && [ -n "$2" ] && [ -n "$3" ] || return 1
     [ -f "$ROLE_CHECK" ] || return 0
-    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$1" cjk >/dev/null 2>&1 || return 2
-    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$2" latin >/dev/null 2>&1 || return 3
-    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$3" digit >/dev/null 2>&1 || return 4
+    _role_error=$(MODDIR="$MODDIR" sh "$ROLE_CHECK" "$1" cjk --message) || return 2
+    _role_error=$(MODDIR="$MODDIR" sh "$ROLE_CHECK" "$2" latin --message) || return 3
+    _role_error=$(MODDIR="$MODDIR" sh "$ROLE_CHECK" "$3" digit --message) || return 4
 }
 
 start_mix() {

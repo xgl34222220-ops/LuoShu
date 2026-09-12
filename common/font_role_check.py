@@ -6,8 +6,6 @@ import argparse
 import json
 from pathlib import Path
 
-from fontTools.ttLib import TTCollection, TTFont
-
 CJK = tuple(map(ord, "中文字体系统默认洛书汉字"))
 LATIN = tuple(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
 DIGITS = tuple(map(ord, "0123456789"))
@@ -23,6 +21,8 @@ def is_collection(path: Path) -> bool:
 
 
 def faces(path: Path) -> range:
+    from fontTools.ttLib import TTCollection
+
     if not is_collection(path):
         return range(1)
     collection = TTCollection(str(path), lazy=True)
@@ -44,6 +44,8 @@ def required(role: str) -> tuple[int, ...]:
 
 
 def inspect_face(path: Path, index: int, role: str) -> dict[str, object]:
+    from fontTools.ttLib import TTFont
+
     kwargs: dict[str, object] = {"lazy": True, "recalcTimestamp": False}
     if is_collection(path):
         kwargs["fontNumber"] = index
@@ -70,8 +72,11 @@ def check(path: Path, role: str) -> dict[str, object]:
     best = max(results, key=lambda item: int(item["present"]), default=None)
     if best is None:
         raise RoleCheckError("字体中没有可读取的字体面")
+    label = {"cjk": "中文基底", "latin": "英文字体", "digit": "数字字体"}[role]
     return {
         "status": "ok" if best["valid"] else "error",
+        "reason": "covered" if best["valid"] else "missing_glyphs",
+        "message": "字形检查通过" if best["valid"] else label + "缺少必要字形：" + ", ".join(best["missing"]),
         "role": role,
         "path": str(path),
         **best,
@@ -82,19 +87,16 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("font")
     parser.add_argument("role", choices=("cjk", "latin", "digit"))
+    parser.add_argument("--message", action="store_true")
     args = parser.parse_args()
     try:
         result = check(Path(args.font), args.role)
-        print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        print(result["message"] if args.message else json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         return 0 if result["valid"] else 2
     except Exception as error:
-        print(
-            json.dumps(
-                {"status": "error", "role": args.role, "message": str(error) or error.__class__.__name__},
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-        )
+        message = "字体读取失败：" + (str(error) or error.__class__.__name__)
+        result = {"status": "error", "reason": "read_failed", "role": args.role, "message": message}
+        print(message if args.message else json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         return 1
 
 
