@@ -148,6 +148,37 @@ class RoutingTest(unittest.TestCase):
     def test_cff_cjk_routes_to_fallback_without_recompiling_cff(self):
         self.assert_routing_and_raw_tables(cff=True)
 
+    def test_dali_dynamic_overlay_uses_verified_roboto_metrics_and_han_fallback(self):
+        # dali OS3.0.305 ROM init copies stock Roboto into theme_webview; the
+        # scanner resolves this known dynamic alias back to immutable Roboto.
+        # Reproduce its measured metrics without redistributing the ROM font.
+        self.default_pair()
+        overlay = self.stock('MiSansVF_Overlay.ttf', (LATIN, 48), ())
+        overlay['metricsReferencePath'] = '/system/fonts/Roboto-Regular.ttf'
+        metrics = overlay['metrics']
+        metrics['upem'] = 2048
+        metrics['head'].update(yMin=-555, yMax=2163)
+        metrics['hhea'].update(ascent=1900, descent=-500, lineGap=0)
+        metrics['os2'].update(typoAscender=2146, typoDescender=-555, typoLineGap=0,
+                              winAscent=2146, winDescent=555, fsSelection=64)
+        self.build()
+        report = self.reports['/system/fonts/MiSansVF_Overlay.ttf']
+        self.assertEqual(report['cjkRoutingReason'], 'stock-latin-primary')
+        self.assertGreater(report['removedCjkMappings'], 0)
+        with TTFont(self.fonts / 'MiSansVF_Overlay.ttf', lazy=True) as out, \
+                TTFont(self.fonts / 'MiSansVF.ttf', lazy=True) as han, \
+                TTFont(self.fonts / '400.ttf', lazy=True) as source:
+            self.assertEqual((out['hhea'].ascent, out['hhea'].descent), (928, -244))
+            self.assertEqual((out['head'].yMin, out['head'].yMax), (-244, 1056))
+            self.assertNotIn(HAN, out.getBestCmap())
+            self.assertIn(HAN, han.getBestCmap())
+            self.assertIn(48, out.getBestCmap(), 'selected digits must remain replaced')
+            self.assertEqual(out.reader['glyf'], source.reader['glyf'])
+            self.assertEqual(han.reader['glyf'], source.reader['glyf'])
+        # A file with a similar name is not sufficient proof of the ROM link.
+        del overlay['metricsReferencePath']
+        self.assertFalse(batch._latin_ui_slot('/system/fonts/MiSansVF_Overlay.ttf', overlay))
+
     def test_old_inventory_keeps_cjk_and_reports_pending_scan(self):
         self.default_pair()
         for entry in self.slots.values():
@@ -157,6 +188,26 @@ class RoutingTest(unittest.TestCase):
             self.assertIn(HAN, font.getBestCmap())
         self.assertEqual(self.reports['/system/fonts/Roboto-Regular.ttf']['cjkRoutingReason'],
                          'stock-coverage-refresh-pending')
+
+    def test_real_misans_latin_shared_zero_does_not_claim_chinese_repertoire(self):
+        self.default_pair()
+        make_font(self.fonts / '400.ttf', (*DEFAULT_POINTS, 0x3007))
+        latin = self.stock('MiSansLatinVF.ttf', (LATIN, 48, 0x3007), ())
+        self.assertTrue(latin['metrics']['coverage']['hasHan'])
+        self.assertEqual(latin['metrics']['coverage']['hanCount'], 1)
+        self.build()
+        with TTFont(self.fonts / 'MiSansLatinVF.ttf') as font:
+            self.assertNotIn(HAN, font.getBestCmap())
+            self.assertNotIn(OTHER_HAN, font.getBestCmap())
+            self.assertIn(0x3007, font.getBestCmap(), 'keep the original ideographic zero')
+            self.assertIn(48, font.getBestCmap())
+        self.assertEqual(self.reports['/system/fonts/MiSansLatinVF.ttf']['cjkRoutingReason'],
+                         'stock-latin-primary')
+        # Even one real stock ideograph remains sufficient to protect that slot.
+        self.stock('MiSansLatinVF.ttf', (LATIN, 48, 0x3007, HAN), ())
+        self.build()
+        self.assertEqual(self.reports['/system/fonts/MiSansLatinVF.ttf']['cjkRoutingReason'],
+                         'stock-han-slot')
 
     def test_no_staged_fallback_keeps_primary_han(self):
         self.default_pair()

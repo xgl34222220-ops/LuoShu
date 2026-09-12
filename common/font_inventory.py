@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -420,6 +421,83 @@ def _resolve_roots(args: argparse.Namespace, overlay_risk: bool) -> tuple[list[F
     return roots, system_etc
 
 
+def _font_root_names(root: FontRoot) -> tuple[Path, ...]:
+    """Logical partition aliases also accepted by the partition-aware scanner."""
+    aliases = {
+        Path("/system/fonts"): (Path("/system/font"),),
+        Path("/system_ext/fonts"): (Path("/system/system_ext/fonts"),),
+        Path("/product/fonts"): (Path("/system/product/fonts"),),
+        Path("/my_product/fonts"): (Path("/system/my_product/fonts"),),
+        Path("/vendor/fonts"): (Path("/system/vendor/fonts"),),
+    }
+    return (root.logical, *aliases.get(root.logical, ()))
+
+
+def _stock_font_path(root: FontRoot, actual: Path, roots: Iterable[FontRoot]) -> Path:
+    """Resolve each font link inside the selected stock views, never the live ROM.
+
+    A stock /system/fonts directory can contain absolute links to /product/fonts.
+    Opening those links normally escapes a lower/mirror directory and can read the
+    active replacement. Resolve in the logical namespace, remapping every link hop
+    to its partition's selected stock root before touching another filesystem node.
+    """
+    def lexical(path: Path) -> Path:
+        return Path(os.path.abspath(os.path.normpath(str(path))))
+
+    selected = list(roots)
+    if root not in selected:
+        raise InventoryError("字体不属于本次验证的原厂目录")
+    try:
+        relative = lexical(actual).relative_to(lexical(root.actual))
+    except ValueError as error:
+        raise InventoryError("字体路径超出原厂目录") from error
+    logical = lexical(root.logical / relative)
+    views: list[tuple[Path, Path]] = []
+    for candidate in selected:
+        try:
+            stock = candidate.actual.resolve(strict=True)
+            if stock.is_dir():
+                views.extend((lexical(name), stock) for name in _font_root_names(candidate))
+        except (OSError, RuntimeError):
+            continue
+    views.sort(key=lambda item: len(item[0].parts), reverse=True)
+    visited: set[Path] = set()
+    for _hop in range(41):
+        if logical in visited:
+            raise InventoryError("原厂字体符号链接存在环路")
+        visited.add(logical)
+        for logical_root, stock_root in views:
+            try:
+                parts = logical.relative_to(logical_root).parts
+            except ValueError:
+                continue
+            break
+        else:
+            raise InventoryError(f"原厂字体链接离开已验证的字体分区：{logical}")
+        if not parts:
+            raise InventoryError("原厂字体路径指向目录")
+        physical = stock_root
+        for index, component in enumerate(parts):
+            physical = physical / component
+            try:
+                mode = physical.lstat().st_mode
+                if stat.S_ISLNK(mode):
+                    target = Path(os.readlink(physical))
+                    parent = logical_root.joinpath(*parts[:index])
+                    logical = lexical((target if target.is_absolute() else parent / target)
+                                      .joinpath(*parts[index + 1:]))
+                    break
+            except OSError as error:
+                raise InventoryError(f"无法读取原厂字体路径：{logical}") from error
+            if index == len(parts) - 1:
+                if not stat.S_ISREG(mode):
+                    raise InventoryError("原厂字体不是普通文件")
+                return physical
+            if not stat.S_ISDIR(mode):
+                raise InventoryError("原厂字体路径包含非目录节点")
+    raise InventoryError("原厂字体符号链接层数过多")
+
+
 def _resolve_file(name: str, roots: Iterable[FontRoot]) -> tuple[FontRoot, Path] | None:
     stripped = name.strip()
     if not stripped:
@@ -428,19 +506,28 @@ def _resolve_file(name: str, roots: Iterable[FontRoot]) -> tuple[FontRoot, Path]
     basename = candidate_path.name
     if basename in {"", ".", ".."} or "/" in basename:
         return None
+    selected = list(roots)
     if candidate_path.is_absolute():
-        for root in roots:
-            try:
-                relative = candidate_path.relative_to(root.logical)
-            except ValueError:
-                continue
-            actual = root.actual / relative
-            if actual.is_file():
-                return root, actual
-    for root in roots:
-        actual = root.actual / basename
-        if actual.is_file():
+        for root in selected:
+            for logical_root in _font_root_names(root):
+                try:
+                    relative = candidate_path.relative_to(logical_root)
+                except ValueError:
+                    continue
+                actual = root.actual / relative
+                try:
+                    _stock_font_path(root, actual, selected)
+                    return root, actual
+                except InventoryError:
+                    return None
+        return None
+    for root in selected:
+        actual = root.actual / candidate_path
+        try:
+            _stock_font_path(root, actual, selected)
             return root, actual
+        except InventoryError:
+            continue
     return None
 
 
@@ -481,6 +568,10 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot]) -> tup
                     continue
                 root, actual = resolved
                 logical = _logical_path(root, actual)
+                try:
+                    stock_file = _stock_font_path(root, actual, roots)
+                except InventoryError:
+                    continue
                 families.setdefault(family_name, [])
                 if logical not in families[family_name]:
                     families[family_name].append(logical)
@@ -490,7 +581,7 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot]) -> tup
                         "slotName": actual.name,
                         "path": logical,
                         "partition": root.partition,
-                        "actualPath": str(actual),
+                        "actualPath": str(stock_file),
                         "source": "xml",
                         "families": [],
                         "weight": _infer_weight(actual.name, font_node.get("weight")),
@@ -552,20 +643,21 @@ def _add_heuristic_slots(slots: dict[str, dict[str, Any]], roots: list[FontRoot]
         if not root.actual.is_dir():
             continue
         for actual in sorted(root.actual.iterdir(), key=lambda item: item.name.lower()):
-            if not actual.is_file() or actual.suffix.lower() not in FONT_EXTENSIONS or not _heuristic_candidate(actual.name):
+            if actual.suffix.lower() not in FONT_EXTENSIONS or not _heuristic_candidate(actual.name):
                 continue
             logical = _logical_path(root, actual)
             if logical in slots:
                 continue
             try:
-                checked_format = _font_check(actual, font_check)
+                stock_file = _stock_font_path(root, actual, roots)
+                checked_format = _font_check(stock_file, font_check)
             except InventoryError:
                 continue
             slots[logical] = {
                 "slotName": actual.name,
                 "path": logical,
                 "partition": root.partition,
-                "actualPath": str(actual),
+                "actualPath": str(stock_file),
                 "source": "heuristic",
                 "families": [],
                 "weight": _infer_weight(actual.name),

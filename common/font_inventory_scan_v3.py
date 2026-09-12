@@ -15,9 +15,11 @@ from typing import Any, Iterable
 
 import font_inventory as base
 import font_inventory_scan as v2
+from hyperos_physical_policy import PARTITIONS as HYPEROS_PARTITIONS, safe_physical_font_name
 
 SCANNER_REVISION = 3
 METRICS_REVISION = 3
+HYPEROS_COVERAGE_REVISION = 1
 PRIMARY_FONT_SPECS = (
     ("system", Path("/system/fonts"), "system_fonts", (Path("/system/font"),)),
     ("system_ext", Path("/system_ext/fonts"), "system_ext_fonts", (Path("/system/system_ext/fonts"),)),
@@ -75,7 +77,7 @@ THEME_FONT_ROOTS = (
     Path("/data/skin/fonts"),
 )
 ROM_FONT_MARKERS = {
-    "hyperos": ("MiSansVF.ttf", "MiSansVF_Overlay.ttf", "MiLanProVF.ttf", "MiSans-Regular.ttf"),
+    "hyperos": ("MiSansVF.ttf", "MiSansVF_Overlay.ttf", "MiLanProVF.ttf", "MiSans-Regular.ttf", "XiaomiSansVF.ttf"),
     "coloros": ("SysSans-Hans-Regular.ttf", "SysFont-Hans-Regular.ttf", "OPlusSans3.0.ttf", "ColorOSUI-Regular.ttf"),
     "originos": ("VivoFont.ttf", "DroidSansFallbackBBK.ttf"),
     "oneui": ("SamsungOneUI-Regular.ttf", "SECRobotoLight-Regular.ttf"),
@@ -225,6 +227,74 @@ def _rom_markers(names: set[str]) -> dict[str, list[str]]:
     return result
 
 
+def _is_hyperos_inventory(existing: dict[str, Any]) -> bool:
+    # A ColorOS ROM can contain an unused Xiaomi-named file. Its already-selected
+    # OEM main family takes precedence over those optional physical signatures.
+    if existing.get("romKind") == "coloros":
+        return False
+    summary = existing.get("scanSummary")
+    signatures = summary.get("fontSignatures") if isinstance(summary, dict) else None
+    return (existing.get("romKind") == "hyperos"
+            or isinstance(signatures, dict) and bool(signatures.get("hyperos")))
+
+
+def _has_current_hyperos_coverage(existing: dict[str, Any]) -> bool:
+    return (not _is_hyperos_inventory(existing)
+            or existing.get("hyperosCoverageRevision") == HYPEROS_COVERAGE_REVISION)
+
+
+def _add_hyperos_physical_slots(slots: dict[str, dict[str, Any]], roots: list[base.FontRoot]) -> None:
+    """Capture stock contracts for files the HyperOS mapper actually replaces.
+
+    Named UI-family discovery intentionally omits lang=zh-Hans/zh-Hant fallback
+    families. HyperOS's physical mapper still replaces their NotoSans files, so
+    those files need real stock metrics too. This addition is ROM-local and does
+    not change the generic/ColorOS replacement heuristic.
+    """
+    additional: dict[str, dict[str, Any]] = {}
+    for root in roots:
+        if root.partition not in HYPEROS_PARTITIONS or not root.actual.is_dir():
+            continue
+        for actual in sorted(root.actual.iterdir(), key=lambda item: item.name.lower()):
+            if not safe_physical_font_name(actual.name):
+                continue
+            logical = base._logical_path(root, actual)
+            if logical in slots:
+                continue
+            try:
+                # Absolute links in a stock lower directory must resolve through
+                # the corresponding stock partition, never through a live mount.
+                reference = None
+                if (logical == "/system/fonts/MiSansVF_Overlay.ttf" and actual.is_symlink()
+                        and os.readlink(actual) == "/data/system/fonts/theme_webview/Roboto-Regular.ttf"):
+                    # HyperOS init.miui.ext.rc seeds this mutable WebView cache
+                    # from stock Roboto before applying an optional theme. Its
+                    # immutable contract is that exact source, not the current
+                    # data file and not the similarly named MiSans main face.
+                    safe = base._stock_font_path(root, root.actual / "Roboto-Regular.ttf", roots)
+                    reference = "/system/fonts/Roboto-Regular.ttf"
+                else:
+                    safe = base._stock_font_path(root, actual, roots)
+                fmt = base._font_format(safe)
+            except (base.InventoryError, OSError):
+                continue
+            # A .ttf/.otf filename can conceal a collection. The physical mapper
+            # does not preserve a collection's face/index contract.
+            if fmt not in {"TTF", "OTF"}:
+                continue
+            additional[logical] = {
+                "slotName": actual.name, "path": logical, "partition": root.partition,
+                "actualPath": str(safe), "source": "hyperos-physical", "families": [],
+                "weight": base._infer_weight(actual.name), "style": "normal", "faceIndex": 0,
+                "validatedBy": "fontTools-stock-metrics", "validatedFormat": fmt,
+            }
+            if reference is not None:
+                additional[logical]["source"] = "hyperos-rom-reference"
+                additional[logical]["metricsReferencePath"] = reference
+    base._populate_metrics(additional)
+    slots.update(additional)
+
+
 def _can_reuse(existing: dict[str, Any], build_key: str) -> bool:
     try:
         base.validate_inventory(existing, build_key)
@@ -234,6 +304,7 @@ def _can_reuse(existing: dict[str, Any], build_key: str) -> bool:
     return (
         int(existing.get("scannerRevision", 0) or 0) == SCANNER_REVISION
         and _has_current_metrics(existing)
+        and _has_current_hyperos_coverage(existing)
         and isinstance(summary, dict)
         and "stockFontUniqueFileCount" in summary
         and "themeOverrideRoots" in summary
@@ -295,7 +366,9 @@ def scan(args: Any) -> int:
             output.unlink(missing_ok=True)
         else:
             valid_existing = existing
-    upgrade = valid_existing is not None and not _has_current_metrics(valid_existing)
+    upgrade = valid_existing is not None and (
+        not _has_current_metrics(valid_existing) or not _has_current_hyperos_coverage(valid_existing)
+    )
     try:
         return _scan_current_roots(args, build_key, fingerprint, display_id, valid_existing, upgrade)
     except Exception as error:
@@ -328,9 +401,25 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     families, slots = v2._parse_partition_xml(xml_sources, replaceable_roots)
     base._add_heuristic_slots(slots, replaceable_roots, args.font_check)
     base._populate_metrics(slots)
+    path_total, unique_total, path_counts, unique_counts, names = _stock_file_counts(replaceable_roots)
+    try:
+        _initial_path, _initial_entry, initial_rom = base._pick_main_slot(slots, families)
+    except base.InventoryError:
+        initial_rom = "generic"
+    # Use validated stock core slots, not only _pick_main_slot's filename order:
+    # a ColorOS ROM can retain a MiSansVF file which that older selector ranks
+    # first. An existing valid ColorOS inventory also keeps this pass ROM-local.
+    coloros_cores = {*ROM_FONT_MARKERS["coloros"], "SysFont-Regular.ttf", "SysSans-En-Regular.ttf"}
+    coloros = (existing is not None and existing.get("romKind") == "coloros") or any(
+        entry.get("slotName") in coloros_cores for entry in slots.values()
+    )
+    hyperos = not coloros and (initial_rom == "hyperos" or bool(_rom_markers(names).get("hyperos")))
+    if hyperos:
+        _add_hyperos_physical_slots(slots, replaceable_roots)
     main_path, main_entry, rom = base._pick_main_slot(slots, families)
+    if hyperos:
+        rom = "hyperos"
 
-    path_total, unique_total, path_counts, unique_counts, names = _stock_file_counts((*primary_roots, *auxiliary_roots))
     theme_roots = _theme_override_roots()
     mount_targets = _font_mount_targets()
     scan_summary = v2._summary(slots, path_total, path_counts, len(xml_sources), v2._count_xml_ui_faces(xml_sources))
@@ -347,6 +436,10 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "inventoryRevision": base.INVENTORY_REVISION,
         "scannerRevision": SCANNER_REVISION,
         "metricsRevision": METRICS_REVISION,
+        # Successful scans have checked applicability as well as coverage. This
+        # avoids repeated refreshes when an old main-family selector labels a
+        # ColorOS inventory "hyperos" because an unused MiSans file is present.
+        "hyperosCoverageRevision": HYPEROS_COVERAGE_REVISION,
         "state": "ready",
         "buildKey": build_key,
         "buildFingerprint": fingerprint,

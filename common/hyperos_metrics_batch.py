@@ -251,11 +251,20 @@ def _specialized_slot(logical: str, slot: dict) -> bool:
 def _latin_ui_slot(logical: str, slot: dict) -> bool:
     name = Path(logical).name.lower()
     families = [str(family).lower().replace('_', '-') for family in slot.get('families', [])]
-    return (any(family.startswith(('sans-serif', 'system-ui', 'system-sans', 'roboto',
+    return (_hyperos_overlay_reference(logical, slot)
+            or any(family.startswith(('sans-serif', 'system-ui', 'system-sans', 'roboto',
                                   'google-sans', 'misans', 'mi-sans', 'sys-sans', 'oppo-sans',
                                   'oplus-sans')) for family in families)
             or name.startswith(('roboto', 'misanslatin', 'googlesans', 'syssans', 'sysfont',
                                 'sourcesanspro', 'opposans', 'oplussans', 'opsans')))
+
+
+def _hyperos_overlay_reference(logical: str, slot: dict) -> bool:
+    # dali's ROM init copies Roboto into the mutable theme_webview target of
+    # this alias. The stock scanner verifies the ROM symlink and reads the
+    # immutable Roboto through its lower/mirror instead of following /data.
+    return (logical == '/system/fonts/MiSansVF_Overlay.ttf'
+            and slot.get('metricsReferencePath') == '/system/fonts/Roboto-Regular.ttf')
 
 
 def bitmap_bottom_slot(data: dict, logical: str, contract: tuple) -> bool:
@@ -268,10 +277,21 @@ def bitmap_bottom_slot(data: dict, logical: str, contract: tuple) -> bool:
     if valid_coverage(coverage) and (coverage['hasHan'] or not coverage['hasLatin']):
         return False
     name = Path(logical).name.lower()
-    return name.startswith(('roboto', 'misanslatin', 'googlesans', 'sysfont-regular',
+    return (_hyperos_overlay_reference(logical, slot)
+            or name.startswith(('roboto', 'misanslatin', 'googlesans', 'sysfont-regular',
                             'sysfont-static', 'syssans-en-', 'sysfont-en-',
                             'opposans-en-', 'opsans-en-', 'sourcesanspro',
-                            'notosans-', 'notosansui-', 'droidsans'))
+                            'notosans-', 'notosansui-', 'droidsans')))
+
+
+def _stock_has_cjk_ideographs(coverage: dict) -> bool:
+    # summarize_coverage correctly counts U+3007 IDEOGRAPHIC NUMBER ZERO as Han.
+    # Stock MiSansLatinVF includes that numeral, but no CJK ideographs. Treating
+    # this one shared numeral as a Chinese font lets the replacement's whole Han
+    # repertoire take over Latin UI slots. Original U+3007 stays protected by the
+    # stock cjkPunctuation set when new Han mappings are pruned below.
+    shared_zero = int(0x3007 in coverage['cjkPunctuation'])
+    return coverage['hanCount'] > shared_zero
 
 
 def _staged_cjk_fallback(data: dict, jobs: list, stage: Path) -> frozenset[int]:
@@ -287,7 +307,7 @@ def _staged_cjk_fallback(data: dict, jobs: list, stage: Path) -> frozenset[int]:
         slot = (data.get('slots') or {}).get(logical, {})
         coverage = slot.get('metrics', {}).get('coverage')
         if (contract[-1] != 'stock' or not valid_coverage(coverage)
-                or not coverage['hasHan'] or _specialized_slot(logical, slot)):
+                or not _stock_has_cjk_ideographs(coverage) or _specialized_slot(logical, slot)):
             continue
         # A private, named display family is not proof that sans-serif can
         # reach it. Count the scanner's selected system main face or the core
@@ -316,7 +336,7 @@ def _cjk_routing(data: dict, logical: str, fallback: frozenset[int]) -> tuple:
         return None, frozenset(), 'stock-coverage-refresh-pending'
     if _specialized_slot(logical, slot):
         return None, frozenset(), 'specialized-slot'
-    if coverage['hasHan']:
+    if _stock_has_cjk_ideographs(coverage):
         return None, frozenset(), 'stock-han-slot'
     if not coverage['hasLatin'] or not _latin_ui_slot(logical, slot):
         return None, frozenset(), 'not-latin-ui-slot'

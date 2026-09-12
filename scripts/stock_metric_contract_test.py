@@ -6,7 +6,9 @@ import contextlib
 import copy
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -14,11 +16,13 @@ from unittest import mock
 
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.ttLib import TTCollection, TTFont
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "common"))
 import font_inventory as inventory  # noqa: E402
 import font_inventory_scan_v3 as scanner  # noqa: E402
+from hyperos_physical_policy import safe_physical_font_name  # noqa: E402
 
 
 def make_font(path: Path, descent: int = 0, ascent: int = 900) -> None:
@@ -250,6 +254,285 @@ class StockMetricContractTest(unittest.TestCase):
                 invalid["head"][key] = value
                 with self.assertRaises(inventory.InventoryError):
                     inventory.validate_inventory(fixture(invalid))
+
+    def physical_scan_fixture(self, *, coloros: bool = False, trusted_lower: bool = False):
+        prefix = self.root / "state/lower" if trusted_lower else self.root / "physical"
+        fonts, etc = prefix / "system-fonts", prefix / "system-etc"
+        fonts.mkdir(parents=True)
+        etc.mkdir(parents=True)
+        main = "SysSans-Hans-Regular.ttf" if coloros else "MiSansVF.ttf"
+        make_font(fonts / main, descent=-282, ascent=1044)
+        values = {"NotoSansSC-VF.otf": (1250, -300), "NotoSansTC-Regular.otf": (1190, -290),
+                  "NotoSans-Regular.ttf": (930, -250), "MiLanProVF.ttf": (980, -220),
+                  "XiaomiSansVF.ttf": (1150, -310), "DroidSans.ttf": (1020, -260)}
+        for name, (ascent, descent) in values.items():
+            path = fonts / name
+            make_font(path, ascent=ascent, descent=descent)
+            if name.startswith(("NotoSansSC", "NotoSansTC")):
+                with TTFont(path) as font:
+                    for table in font["cmap"].tables:
+                        if table.isUnicode():
+                            table.cmap[0x4E2D] = "zero"
+                    font.save(path)
+        (etc / "font_fallback.xml").write_text(
+            f'<familyset><family name="sans-serif"><font>{main}</font></family>'
+            '<family lang="zh-Hans"><font>NotoSansSC-VF.otf</font></family>'
+            '<family lang="zh-Hant"><font>NotoSansTC-Regular.otf</font></family>'
+            '</familyset>', encoding="utf-8")
+        args = self.scan_args(fonts, etc)
+        return args, values
+
+    def test_hyperos_collects_physical_cjk_fallback_and_hidden_oem_contracts(self) -> None:
+        args, values = self.physical_scan_fixture()
+        original = {name: (args.system_fonts / name).read_bytes() for name in values}
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(scanner.scan(args), 0)
+        result = json.loads(args.output.read_text())
+        self.assertEqual(result["romKind"], "hyperos")
+        self.assertEqual(result["hyperosCoverageRevision"], scanner.HYPEROS_COVERAGE_REVISION)
+        for name, (ascent, descent) in values.items():
+            with self.subTest(name=name):
+                entry = result["slots"][f"/system/fonts/{name}"]
+                self.assertEqual(entry["source"], "hyperos-physical")
+                self.assertEqual((entry["metrics"]["hhea"]["ascent"], entry["metrics"]["hhea"]["descent"]),
+                                 (ascent, descent))
+                self.assertIn("head", entry["metrics"])
+                self.assertTrue(inventory.valid_coverage(entry["metrics"]["coverage"]))
+                self.assertEqual((args.system_fonts / name).read_bytes(), original[name])
+        self.assertTrue(result["slots"]["/system/fonts/NotoSansSC-VF.otf"]["metrics"]["coverage"]["hasHan"])
+        self.assertTrue(scanner._can_reuse(result, "stock-metrics-test"))
+
+    def test_coloros_keeps_original_scope_with_unused_xiaomi_and_cjk_files(self) -> None:
+        args, _values = self.physical_scan_fixture(coloros=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(scanner.scan(args), 0)
+        result = json.loads(args.output.read_text())
+        self.assertEqual(result["romKind"], "coloros")
+        self.assertEqual(set(result["slots"]), {"/system/fonts/SysSans-Hans-Regular.ttf"})
+        result.pop("hyperosCoverageRevision")
+        self.assertTrue(scanner._can_reuse(result, "stock-metrics-test"),
+                        "this HyperOS-only refresh must not invalidate ColorOS metrics")
+
+    def add_unused_misans_to_coloros(self, args) -> None:
+        make_font(args.system_fonts / "MiSansVF.ttf", ascent=1044, descent=-282)
+        xml = args.system_etc / "font_fallback.xml"
+        xml.write_text(xml.read_text().replace(
+            "</familyset>", '<family name="system-ui"><font>MiSansVF.ttf</font></family></familyset>'
+        ))
+
+    def assert_coloros_with_misans_does_not_expand(self, args) -> None:
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(scanner.scan(args), 0)
+        result = json.loads(args.output.read_text())
+        self.assertEqual(set(result["slots"]), {
+            "/system/fonts/SysSans-Hans-Regular.ttf", "/system/fonts/MiSansVF.ttf",
+        })
+        # Preserve the existing global main selector while ensuring this narrow
+        # coverage fix cannot mistake its preferred MiSans name for ROM proof.
+        self.assertEqual(result["mainSlotPath"], "/system/fonts/MiSansVF.ttf")
+        self.assertTrue(scanner._can_reuse(result, "stock-metrics-test"))
+
+    def test_initial_coloros_scan_with_misans_does_not_expand_hyperos_scope(self) -> None:
+        args, _values = self.physical_scan_fixture(coloros=True)
+        self.add_unused_misans_to_coloros(args)
+        self.assert_coloros_with_misans_does_not_expand(args)
+
+    def test_existing_coloros_inventory_with_misans_does_not_expand_hyperos_scope(self) -> None:
+        args, _values = self.physical_scan_fixture(coloros=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(scanner.scan(args), 0)
+        previous = json.loads(args.output.read_text())
+        previous.pop("hyperosCoverageRevision")
+        self.assertEqual(previous["romKind"], "coloros")
+        args.output.write_text(json.dumps(previous))
+        self.add_unused_misans_to_coloros(args)
+        args.force = True  # Matches an installer/manual rescan of a valid old inventory.
+        self.assert_coloros_with_misans_does_not_expand(args)
+
+    def test_hyperos_extra_collection_obeys_mapper_partitions_and_font_exclusions(self) -> None:
+        args, _values = self.physical_scan_fixture()
+        excluded = ("NotoSansCJKJP.otf", "NotoSansCJKKR.otf", "NotoSansArabic-Regular.ttf",
+                    "NotoSansThai-Regular.ttf", "NotoSans-RegularItalic.ttf", "NotoSansSymbols.ttf",
+                    "NotoSansSC-Regular.ttc", "NotoSansEmoji.ttf")
+        for name in excluded:
+            make_font(args.system_fonts / name)
+        disguised_collection = "NotoSansCollection.ttf"
+        with TTFont(args.system_fonts / "MiSansVF.ttf") as font:
+            collection = TTCollection()
+            collection.fonts = [font]
+            collection.save(args.system_fonts / disguised_collection)
+        for partition in ("mi_ext", "product", "oplus_product"):
+            directory = self.root / partition / "fonts"
+            directory.mkdir(parents=True)
+            make_font(directory / "NotoSansSC-Regular.otf", ascent=1190, descent=-290)
+            setattr(args, f"{partition}_fonts", directory)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(scanner.scan(args), 0)
+        slots = json.loads(args.output.read_text())["slots"]
+        for name in (*excluded, disguised_collection):
+            self.assertNotIn(f"/system/fonts/{name}", slots)
+        self.assertIn("/mi_ext/fonts/NotoSansSC-Regular.otf", slots)
+        self.assertIn("/product/fonts/NotoSansSC-Regular.otf", slots)
+        self.assertNotIn("/oplus_product/fonts/NotoSansSC-Regular.otf", slots)
+
+    def test_hyperos_additional_alias_reads_stock_partition_and_rejects_theme_target(self) -> None:
+        args, _values = self.physical_scan_fixture()
+        product = self.root / "stock-product/fonts"
+        product.mkdir(parents=True)
+        make_font(product / "OriginalCjk.ttf", ascent=1270, descent=-330)
+        args.product_fonts = product
+        alias = args.system_fonts / "NotoSansSC-VF.otf"
+        alias.unlink()
+        alias.symlink_to("/product/fonts/OriginalCjk.ttf")
+        theme = self.root / "theme-font.ttf"
+        make_font(theme, ascent=1600, descent=-500)
+        theme_alias = args.system_fonts / "NotoSansTheme.ttf"
+        theme_alias.symlink_to(theme)
+        with mock.patch.object(inventory, "_read_metrics", wraps=inventory._read_metrics) as reader:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(scanner.scan(args), 0)
+        result = json.loads(args.output.read_text())
+        entry = result["slots"]["/system/fonts/NotoSansSC-VF.otf"]
+        self.assertEqual(entry["slotName"], "NotoSansSC-VF.otf")
+        self.assertEqual(entry["metrics"]["hhea"]["ascent"], 1270)
+        self.assertEqual(entry["metrics"]["hhea"]["descent"], -330)
+        self.assertNotIn("/system/fonts/NotoSansTheme.ttf", result["slots"])
+        paths = [Path(call.args[0]) for call in reader.call_args_list]
+        self.assertIn(product / "OriginalCjk.ttf", paths)
+        self.assertNotIn(theme, paths)
+        self.assertNotIn(alias, paths)
+
+    def test_hyperos_known_webview_overlay_uses_only_its_init_stock_roboto_reference(self) -> None:
+        args, _values = self.physical_scan_fixture()
+        roboto = args.system_fonts / "Roboto-Regular.ttf"
+        make_font(roboto, ascent=927, descent=-233)
+        with TTFont(roboto) as font:
+            for table in font["cmap"].tables:
+                if table.isUnicode():
+                    table.cmap[ord("A")] = "zero"
+            font.save(roboto)
+        theme = self.root / "mutable-theme/Roboto-Regular.ttf"
+        theme.parent.mkdir()
+        make_font(theme, ascent=1600, descent=-500)
+        # Reproduce init's exact absolute link even when the test host does not
+        # expose Android /data. The reference must work without opening its
+        # mutable target at all; only the trusted stock source is admissible.
+        overlay = args.system_fonts / "MiSansVF_Overlay.ttf"
+        overlay.symlink_to("/data/system/fonts/theme_webview/Roboto-Regular.ttf")
+        with mock.patch.object(inventory, "_read_metrics", wraps=inventory._read_metrics) as reader:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(scanner.scan(args), 0)
+        entry = json.loads(args.output.read_text())["slots"]["/system/fonts/MiSansVF_Overlay.ttf"]
+        self.assertEqual(entry["source"], "hyperos-rom-reference")
+        self.assertEqual(entry["metricsReferencePath"], "/system/fonts/Roboto-Regular.ttf")
+        self.assertEqual(entry["metrics"]["hhea"], {"ascent": 927, "descent": -233, "lineGap": 0})
+        self.assertEqual(entry["metrics"]["coverage"]["latinCount"], 1)
+        self.assertFalse(entry["metrics"]["coverage"]["hasHan"])
+        paths = [Path(call.args[0]) for call in reader.call_args_list]
+        self.assertNotIn(theme, paths)
+        self.assertNotIn(Path("/data/system/fonts/theme_webview/Roboto-Regular.ttf"), paths)
+
+        # Refresh an old, valid-shaped inventory polluted by the active MiSans
+        # payload. Keep the existing Overlay path while replacing its bad stock
+        # data with the ROM-proven source during the verified pre-mount scan.
+        previous = json.loads(args.output.read_text())
+        previous.pop("hyperosCoverageRevision")
+        previous["slots"]["/system/fonts/MiSansVF_Overlay.ttf"]["metrics"] = copy.deepcopy(
+            previous["mainSlot"]["metrics"]
+        )
+        args.output.write_text(json.dumps(previous))
+        with mock.patch.dict(scanner.os.environ, {"LUOSHU_STOCK_VIEW_VERIFIED": "1"}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(scanner.scan(args), 0)
+        refreshed = json.loads(args.output.read_text())
+        self.assertEqual(refreshed["slots"]["/system/fonts/MiSansVF_Overlay.ttf"]["metrics"]["hhea"]["ascent"], 927)
+        self.assertTrue(scanner._can_reuse(refreshed, "stock-metrics-test"))
+
+        # An almost identical mutable link is not an approved stock reference.
+        overlay.unlink()
+        overlay.symlink_to("/data/system/fonts/theme_webview/Other.ttf")
+        args.output = self.root / "different-theme-target.json"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(scanner.scan(args), 0)
+        self.assertNotIn("/system/fonts/MiSansVF_Overlay.ttf", json.loads(args.output.read_text())["slots"])
+
+        # The known link also cannot invent metrics when its stock source fails.
+        overlay.unlink()
+        overlay.symlink_to("/data/system/fonts/theme_webview/Roboto-Regular.ttf")
+        roboto.write_bytes(b"broken original Roboto")
+        args.output = self.root / "missing-stock-reference.json"
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(scanner.scan(args), 0)
+        self.assertNotIn("/system/fonts/MiSansVF_Overlay.ttf", json.loads(args.output.read_text())["slots"])
+
+    def old_physical_inventory(self, args) -> bytes:
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(scanner.scan(args), 0)
+        data = json.loads(args.output.read_text())
+        data.pop("hyperosCoverageRevision")
+        data["slots"] = {path: entry for path, entry in data["slots"].items()
+                         if entry["source"] != "hyperos-physical"}
+        data["slotCount"] = len(data["slots"])
+        args.output.write_text(json.dumps(data), encoding="utf-8")
+        self.assertTrue(scanner._has_current_metrics(data), "this fixture already has Test4 metrics")
+        self.assertFalse(scanner._can_reuse(data, "stock-metrics-test"))
+        return args.output.read_bytes()
+
+    def test_hyperos_coverage_upgrade_requires_stock_lower_even_with_current_metrics(self) -> None:
+        args, _values = self.physical_scan_fixture()
+        previous = self.old_physical_inventory(args)
+        env = {"LUOSHU_SELF_MOUNT_STATE_ROOT": str(self.root / "no-stock"), "LUOSHU_STOCK_VIEW_VERIFIED": ""}
+        with mock.patch.dict(scanner.os.environ, env), mock.patch.object(inventory, "MIRROR_PREFIXES", ()):
+            with mock.patch.object(inventory, "_read_metrics") as reader, contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(scanner.scan(args), 2)
+                reader.assert_not_called()
+        self.assertEqual(args.output.read_bytes(), previous)
+
+    def test_hyperos_coverage_upgrade_adds_slots_from_verified_lower_and_then_reuses(self) -> None:
+        args, values = self.physical_scan_fixture(trusted_lower=True)
+        self.old_physical_inventory(args)
+        env = {"LUOSHU_SELF_MOUNT_STATE_ROOT": str(self.root / "state"), "LUOSHU_STOCK_VIEW_VERIFIED": ""}
+        with mock.patch.dict(scanner.os.environ, env), mock.patch.object(inventory, "MIRROR_PREFIXES", ()):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(scanner.scan(args), 0)
+            data = json.loads(args.output.read_text())
+            self.assertTrue(scanner._can_reuse(data, "stock-metrics-test"))
+            self.assertEqual(data["metricsRevision"], 3)
+            self.assertTrue(all(f"/system/fonts/{name}" in data["slots"] for name in values))
+            with mock.patch.object(inventory, "_read_metrics") as reader, contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(scanner.scan(args), 0)
+                reader.assert_not_called()
+
+    def test_hyperos_partial_coverage_upgrade_retains_old_inventory(self) -> None:
+        args, _values = self.physical_scan_fixture(trusted_lower=True)
+        previous = self.old_physical_inventory(args)
+        (args.system_fonts / "MiSansVF.ttf").write_bytes(b"invalid original font")
+        env = {"LUOSHU_SELF_MOUNT_STATE_ROOT": str(self.root / "state"), "LUOSHU_STOCK_VIEW_VERIFIED": ""}
+        with mock.patch.dict(scanner.os.environ, env), mock.patch.object(inventory, "MIRROR_PREFIXES", ()):
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(scanner.scan(args), 2)
+        self.assertEqual(args.output.read_bytes(), previous)
+
+    def test_hyperos_physical_name_policy_matches_actual_shell_mapper(self) -> None:
+        names = ("MiSansVF.ttf", "MiSansNewVF.otf", "MiSansLatinVF.ttf", "XiaomiSansVF.ttf", "MiLanProVF.ttf",
+                 "NotoSansSC-VF.otf", "NotoSansTC-Regular.otf", "NotoSans-Regular.ttf", "DroidSans.ttf", "DroidSans.otf",
+                 "MiClock.otf", "MitypeMonoVF.ttf", "GoogleSansText-VF.ttf", "RobotoFlex-Regular.ttf",
+                 "Clockopia.ttf", "100.ttf", "350.ttf", "950.ttf", "NotoSansCJKJP.otf", "NotoSansCJKKR.otf",
+                 "MiSansJPVF.ttf", "MiSansKrVF.ttf", "NotoSans-RegularItalic.ttf", "NotoSansSymbols.ttf",
+                 "NotoSansSC.ttc", "NotoSansArabic.ttf", "MiSansThaiVF.ttf", "NotoSansDevanagari.ttf",
+                 "NotoSansVietnamese.ttf", "NotoSansJapanese.ttf", "NotoSansHangul.ttf", "NotoSansEmoji.ttf",
+                 "SysSans-Hans-Regular.ttf", "Roboto-Regular.TTF", "misansnew.ttf")
+        command = '\n'.join((
+            '. "$1"', 'shift', 'for name in "$@"', 'do',
+            '    if _lhcc_safe_dynamic_name "$name"; then echo yes; else echo no; fi', 'done',
+        ))
+        result = subprocess.run(
+            ["sh", "-c", command, "policy-check", str(ROOT / "common/legacy_v14_4/hyperos_full_coverage.sh"), *names],
+            env={**os.environ, "LUOSHU_REAL_MODDIR": str(ROOT)}, capture_output=True, text=True, check=True,
+        )
+        actual = [value == "yes" for value in result.stdout.splitlines()]
+        self.assertEqual(len(actual), len(names))
+        self.assertEqual(actual, [safe_physical_font_name(name) for name in names])
 
 
 if __name__ == "__main__":
