@@ -1,6 +1,6 @@
 {
-  "version": "v4.0.0",
-  "versionCode": 40000,
-  "zipUrl": "https://github.com/xgl34222220-ops/LuoShu/releases/download/v4.0.0/LuoShu-v4.0.0.zip",
-  "changelog": "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/v4.0.0/RELEASE_NOTES_v4.0.0.md"
+  "version": "v4.2.1 RC1",
+  "versionCode": 40201,
+  "zipUrl": "https://github.com/xgl34222220-ops/LuoShu/releases/download/v4.2.1-RC1/LuoShu-v4.2.1-RC1.zip",
+  "changelog": "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/v4.2.1-RC1/RELEASE_NOTES_v4.2.1_RC1.md"
 }
