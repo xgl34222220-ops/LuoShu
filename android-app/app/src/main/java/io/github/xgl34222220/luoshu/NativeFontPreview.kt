@@ -147,31 +147,29 @@ private suspend fun loadWeightAxisInfo(font: FontItem): WeightAxisInfo = try {
     val command = "sh ${RootShell.quote(APP_BRIDGE)} weight_axis ${RootShell.quote(font.id)}"
     val result = RootShell.exec(command, timeoutMs = 25_000L)
     val root = parseFontProbeResponse(result, "字体轴读取失败")
-    val rawAxes = root.optJSONArray("axes")
+    val rawAxes = root.optJSONArray("axes") ?: error("未收到字体轴数据")
     val axes = buildList {
-        if (rawAxes != null) {
-            for (index in 0 until rawAxes.length()) {
-                val axis = rawAxes.optJSONObject(index) ?: continue
-                val tag = axis.optString("tag").trim()
-                val minimum = axis.optDouble("min", Double.NaN).toFloat()
-                val maximum = axis.optDouble("max", Double.NaN).toFloat()
-                val defaultValue = axis.optDouble("default", Double.NaN).toFloat()
-                if (
-                    tag.length == 4 &&
-                    minimum.isFinite() &&
-                    maximum.isFinite() &&
-                    defaultValue.isFinite() &&
-                    maximum >= minimum
-                ) {
-                    add(
-                        VariableAxisInfo(
-                            tag = tag,
-                            min = minimum,
-                            default = defaultValue.coerceIn(minimum, maximum),
-                            max = maximum,
-                        ),
-                    )
-                }
+        for (index in 0 until rawAxes.length()) {
+            val axis = rawAxes.optJSONObject(index) ?: continue
+            val tag = axis.optString("tag").trim()
+            val minimum = axis.optDouble("min", Double.NaN).toFloat()
+            val maximum = axis.optDouble("max", Double.NaN).toFloat()
+            val defaultValue = axis.optDouble("default", Double.NaN).toFloat()
+            if (
+                tag.length == 4 &&
+                minimum.isFinite() &&
+                maximum.isFinite() &&
+                defaultValue.isFinite() &&
+                maximum >= minimum
+            ) {
+                add(
+                    VariableAxisInfo(
+                        tag = tag,
+                        min = minimum,
+                        default = defaultValue.coerceIn(minimum, maximum),
+                        max = maximum,
+                    ),
+                )
             }
         }
     }
