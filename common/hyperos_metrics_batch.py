@@ -16,6 +16,7 @@ import sys
 import tempfile
 
 from fontTools.ttLib import TTFont
+from fontTools import subset
 from font_metrics_normalize import _device_build_key, _pick_face, _promote_os2_for_typo_metrics
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
@@ -145,6 +146,45 @@ def _latin_ink_bottom(font: TTFont) -> int | None:
             if pen.bounds is not None:
                 bottom = min(bottom, pen.bounds[1])
     return bottom
+
+
+def compact_routed_source(source: Path, output: Path, routing: frozenset[int],
+                          stock_punctuation: frozenset[int]) -> tuple[Path, int]:
+    """Drop unreachable CJK outlines once per donor, before per-slot metrics.
+
+    Cmap-only removal left the entire donor in every Latin alias. Keep all
+    remaining mappings, variation sequences and layout closure; CJK coverage is
+    removed only where the staged fallback has already proved it can serve it.
+    """
+    face = _pick_face(source)
+    kwargs = {'fontNumber': face} if face >= 0 else {}
+    with TTFont(source, lazy=True, recalcBBoxes=False, recalcTimestamp=False, **kwargs) as font:
+        removed = remove_cjk_mappings(font, routing, stock_punctuation)
+        if not removed:
+            return source, 0
+        points = set()
+        glyphs = set()
+        for table in font['cmap'].tables:
+            if table.format == 14:
+                points.update(table.uvsDict)
+                glyphs.update(name for entries in table.uvsDict.values()
+                              for _, name in entries if name is not None)
+            elif table.isUnicode():
+                points.update(table.cmap)
+            else:
+                glyphs.update(table.cmap.values())
+        options = subset.Options()
+        options.name_IDs = ['*']
+        options.name_languages = ['*']
+        options.name_legacy = True
+        options.layout_features = ['*']
+        options.glyph_names = True
+        options.notdef_outline = True
+        worker = subset.Subsetter(options=options)
+        worker.populate(unicodes=points, glyphs=glyphs)
+        worker.subset(font)
+        font.save(output, reorderTables=False)
+    return output, removed
 
 
 def write_metrics(source: Path, output: Path, contract: tuple,
@@ -362,6 +402,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     store.mkdir(parents=True, exist_ok=True)
     outputs = Path(tempfile.mkdtemp(prefix='hyperos-metrics-', dir=store))
     cache = {}
+    compact_sources = {}
     output_reports = {}
     # Generate every distinct source/contract before replacing even one alias.
     # Thus subsequent sources cannot accidentally refer to earlier outputs.
@@ -380,8 +421,18 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                    routing, stock_punctuation, align_bottom)
             if key not in cache:
                 output = outputs / f'{len(cache)}.font'
-                output_reports[key] = write_metrics(source, output, contract, routing, stock_punctuation,
+                metric_source, compact_removed = source, 0
+                if routing:
+                    source_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
+                                  routing, stock_punctuation)
+                    if source_key not in compact_sources:
+                        compact_sources[source_key] = compact_routed_source(
+                            source, outputs / f'source-{len(compact_sources)}.font',
+                            routing, stock_punctuation)
+                    metric_source, compact_removed = compact_sources[source_key]
+                output_reports[key] = write_metrics(metric_source, output, contract, routing, stock_punctuation,
                                                     align_bitmap_bottom=align_bottom)
+                output_reports[key]['removedCjkMappings'] += compact_removed
                 cache[key] = output
             prepared.append((cache[key], dest))
             fallback += contract[-1] == 'fallback'

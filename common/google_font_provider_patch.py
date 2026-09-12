@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from fontTools.ttLib import TTFont
+from fontTools import subset
 from fontTools.varLib.instancer import instantiateVariableFont
 
 NAME_IDS = {1, 2, 3, 4, 6, 16, 17, 21, 22}
@@ -139,6 +140,26 @@ def patch(source_path: Path, target_path: Path, output_path: Path, weight: int) 
     source = open_font(source_path)
     target = open_font(target_path)
     try:
+        # Provider Sans fonts use system fallback for CJK. Do not replicate the
+        # whole CJK donor per downloaded weight or instantiate its unused glyphs.
+        # The CJK filter also handles an old, full-donor clone visible at target.
+        points = set(target.getBestCmap() or {}) & set(source.getBestCmap() or {})
+        points = {cp for cp in points if not (
+            0x2E80 <= cp <= 0x4DBF or 0x4E00 <= cp <= 0x9FFF or 0xAC00 <= cp <= 0xD7FF or
+            0xF900 <= cp <= 0xFAFF or 0x20000 <= cp <= 0x323AF)}
+        if not points:
+            raise ProviderPatchError("no-shared-provider-characters")
+        if points != set(source.getBestCmap() or {}):
+            options = subset.Options()
+            options.name_IDs = ['*']
+            options.name_legacy = True
+            options.name_languages = ['*']
+            options.layout_features = ['*']
+            options.glyph_names = True
+            options.notdef_outline = True
+            subsetter = subset.Subsetter(options=options)
+            subsetter.populate(unicodes=points)
+            subsetter.subset(source)
         source = instantiate_for_target(source, target, weight)
         copy_target_names(source, target)
         normalize_weight(source, weight)

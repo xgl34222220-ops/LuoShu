@@ -37,8 +37,8 @@ root_manager() {
     if command -v apd >/dev/null 2>&1 || [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then
         printf 'APatch'
     elif command -v ksud >/dev/null 2>&1 || [ -d /data/adb/ksu ]; then
-        _info="$(ksud -V 2>/dev/null || ksud --version 2>/dev/null)"
-        case "$_info $(getprop ro.build.version.incremental 2>/dev/null)" in
+        # A display label must not wait on a root-manager daemon invocation.
+        case "${KSU_VER:-} $(getprop ro.build.version.incremental 2>/dev/null)" in
             *SukiSU*|*sukisu*|*SUKISU*) printf 'SukiSU Ultra' ;;
             *) printf 'KernelSU' ;;
         esac
@@ -93,7 +93,7 @@ status_json() {
     # App refresh is also a safe late-boot convergence point. The helper will
     # never consume a marker created during this same boot.
     type luoshu_text_reboot_reconcile >/dev/null 2>&1 && \
-        luoshu_text_reboot_reconcile >/dev/null 2>&1 || true
+        LUOSHU_BOOT_RECONCILE_CACHED_ONLY=1 luoshu_text_reboot_reconcile >/dev/null 2>&1 || true
     _installed=false
     _version='未安装'
     _version_code=0

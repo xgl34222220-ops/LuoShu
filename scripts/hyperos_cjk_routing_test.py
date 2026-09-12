@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / 'common'))
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.pens.recordingPen import RecordingPen
 from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 import font_inventory as inventory
@@ -117,7 +118,7 @@ class RoutingTest(unittest.TestCase):
         self.stock('Roboto-Regular.ttf', (LATIN, 48))
         self.stock('MiSansVF.ttf', DEFAULT_POINTS, ('mi-sans',))
 
-    def assert_routing_and_raw_tables(self, cff=False, variable=False):
+    def assert_routing_and_compact_outlines(self, cff=False, variable=False):
         self.default_pair(cff, variable)
         result = self.build()
         self.assertEqual(result, {'mapped': 2, 'generated': 2, 'fallbackSlots': 0})
@@ -133,8 +134,15 @@ class RoutingTest(unittest.TestCase):
                 self.assertEqual(primary.getBestCmap()[cp], source.getBestCmap()[cp])
             for tag in ('glyf', 'loca', 'CFF ', 'CFF2', 'gvar'):
                 if tag in source:
-                    self.assertEqual(primary.reader[tag], source.reader[tag], tag)
                     self.assertEqual(fallback.reader[tag], source.reader[tag], tag)
+            # Latin aliases now physically subset unreachable glyphs. Compare
+            # retained outlines instead of requiring the old, bloated binary.
+            self.assertLess(len(primary.getGlyphOrder()), len(source.getGlyphOrder()))
+            for cp in (LATIN, 48, 0xFF11, EMOJI, UVS_HAN):
+                actual, expected = RecordingPen(), RecordingPen()
+                primary.getGlyphSet()[primary.getBestCmap()[cp]].draw(actual)
+                source.getGlyphSet()[source.getBestCmap()[cp]].draw(expected)
+                self.assertEqual(actual.value, expected.value)
             uvs = next(table for table in primary['cmap'].tables if table.format == 14)
             self.assertEqual(uvs.uvsDict[0xFE00], [(LATIN, None), (EMOJI, None), (UVS_HAN, None)])
             self.assertIn(UVS_HAN, primary.getBestCmap(), 'unproven Han variation must stay usable')
@@ -145,11 +153,23 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(report['cjkRoutingSource'], 'stock-fallback')
         self.assertEqual(report['layoutBoundsSource'], 'stock')
 
-    def test_ttf_cjk_routes_to_fallback_and_raw_gvar_survives(self):
-        self.assert_routing_and_raw_tables(variable=True)
+    def test_ttf_cjk_routes_to_fallback_and_retained_outlines_survive(self):
+        self.assert_routing_and_compact_outlines(variable=True)
 
-    def test_cff_cjk_routes_to_fallback_without_recompiling_cff(self):
-        self.assert_routing_and_raw_tables(cff=True)
+    def test_cff_cjk_routes_to_fallback_with_compact_latin_outlines(self):
+        self.assert_routing_and_compact_outlines(cff=True)
+
+    def test_many_latin_contracts_compact_shared_source_only_once(self):
+        self.default_pair(variable=True)
+        for index in range(20):
+            name = f'Roboto-Extra{index}.ttf'
+            self.stock(name, (LATIN, 48))
+            self.slots[f'/system/fonts/{name}']['metrics']['hhea']['ascent'] += index + 1
+        with patch.object(batch, 'compact_routed_source', wraps=batch.compact_routed_source) as compact:
+            result = self.build()
+        self.assertEqual(result['mapped'], 22)
+        self.assertEqual(compact.call_count, 1)
+        self.assertFalse(list((self.fonts / '.luoshu-font-store').glob('hyperos-metrics-*')))
 
     def test_dali_dynamic_overlay_is_not_frozen_to_the_init_roboto_seed(self):
         self.default_pair()
@@ -393,7 +413,7 @@ class RoutingTest(unittest.TestCase):
         self.build()
         primary = self.fonts / 'Roboto-Regular.ttf'
         self.assertGreater(self.freetype_index(primary, UVS_HAN), 0)
-        self.assertEqual(self.freetype_index(primary, UVS_HAN, 0xFE00), before_variant)
+        self.assertGreater(self.freetype_index(primary, UVS_HAN, 0xFE00), 0)
         with TTFont(primary) as font:
             table = next(table for table in font['cmap'].tables if table.format == 14)
             self.assertIn((UVS_HAN, f'u{HAN:X}'), table.uvsDict[0xFE00])
