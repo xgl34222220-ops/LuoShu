@@ -315,7 +315,10 @@ case "${1:-status}" in
         ;;
     preview_source) preview_source_json "${2:-}" "${3:-400}" ;;
     preview_export) preview_export "${2:-}" "${3:-}" "${4:-400}" ;;
-    weight_axis) weight_axis_info "${2:-}" ;;
+    # Axis probing is a read operation with a meaningful process result. Do not
+    # let the common exit 0 below turn a failed Python launch into a successful,
+    # empty capability response (which the UI may interpret as a fixed font).
+    weight_axis) weight_axis_info "${2:-}"; exit $? ;;
     validate) manager_ready || exit 1; sh "$FONT_MANAGER" action validate "${2:-}" ;;
     stock_scan) manager_ready || exit 1; sh "$FONT_MANAGER" action stock_scan ;;
     switch_start) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "${2:-default}" ;;
