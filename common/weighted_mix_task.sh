@@ -249,9 +249,9 @@ worker() {
     _root=$(read_value "$TASK_FILE" root)
 
     if [ -f "$ROLE_CHECK" ]; then
-        MODDIR="$MODDIR" sh "$ROLE_CHECK" "$_cjk" cjk >/dev/null 2>&1 || { update_task "$_wanted" failed '中文基底缺少必要字形' 100 '' "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1; }
-        MODDIR="$MODDIR" sh "$ROLE_CHECK" "$_latin" latin >/dev/null 2>&1 || { update_task "$_wanted" failed '英文字体缺少必要字形' 100 '' "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1; }
-        MODDIR="$MODDIR" sh "$ROLE_CHECK" "$_digit" digit >/dev/null 2>&1 || { update_task "$_wanted" failed '数字字体缺少必要字形' 100 '' "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1; }
+        _role_error=$(MODDIR="$MODDIR" sh "$ROLE_CHECK" "$_cjk" cjk --message) || { update_task "$_wanted" failed "$_role_error" 100 '' "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1; }
+        _role_error=$(MODDIR="$MODDIR" sh "$ROLE_CHECK" "$_latin" latin --message) || { update_task "$_wanted" failed "$_role_error" 100 '' "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1; }
+        _role_error=$(MODDIR="$MODDIR" sh "$ROLE_CHECK" "$_digit" digit --message) || { update_task "$_wanted" failed "$_role_error" 100 '' "$(date +%s)"; luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1; }
     fi
 
     update_task "$_wanted" running '正在准备中文字体' 4 '' ''
