@@ -14,6 +14,25 @@ PARTITIONS = frozenset({
     "my_product", "hw_product", "cust",
 })
 
+DYNAMIC_OVERLAY_PATH = "/system/fonts/MiSansVF_Overlay.ttf"
+DYNAMIC_OVERLAY_TARGET = "/data/system/fonts/theme_webview/Roboto-Regular.ttf"
+
+
+def preserved_dynamic_alias(data: dict, logical: str) -> bool:
+    """Only the ROM-proven, framework-managed HyperOS WebView alias is exempt."""
+    if logical != DYNAMIC_OVERLAY_PATH:
+        return False
+    alias = (data.get("preservedDynamicAliases") or {}).get(logical, {})
+    if (alias.get("source") == "hyperos-framework-symlink"
+            and alias.get("target") == DYNAMIC_OVERLAY_TARGET):
+        return True
+    # Test6 recorded this exact ROM symlink but incorrectly assumed its init
+    # seed remained Roboto after the framework had selected a locale font.
+    # This migration allows reapply before its deferred inventory refresh.
+    slot = (data.get("slots") or {}).get(logical, {})
+    return (slot.get("source") == "hyperos-rom-reference"
+            and slot.get("metricsReferencePath") == "/system/fonts/Roboto-Regular.ttf")
+
 _EXCLUDED = (
     "italic", "oblique", "emoji", "symbol", "icon", "serif", "arabic",
     "hebrew", "thai", "devanagari", "bengali", "tamil", "telugu", "malayalam",

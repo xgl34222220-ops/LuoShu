@@ -7,6 +7,7 @@ This verifies the routing contract, not QQ/Coolapk rendering on a K80 device.
 import ctypes as C
 import json
 import os
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -88,6 +89,7 @@ class RoutingTest(unittest.TestCase):
         self.patch = patch.dict(os.environ, env)
         self.patch.start(); self.addCleanup(self.patch.stop)
         self.slots = {}
+        self.dynamic_aliases = {}
 
     def stock(self, name, points, families=('sans-serif',)):
         path = self.root / 'stock/system' / name
@@ -101,10 +103,11 @@ class RoutingTest(unittest.TestCase):
     def build(self, names=None):
         (self.module / 'config/device_font_inventory.json').write_text(json.dumps({
             'schema': inventory.SCHEMA, 'inventoryRevision': 1, 'metricsRevision': 3,
-            'state': 'ready', 'buildKey': 'routing-test', 'slots': self.slots}))
+            'state': 'ready', 'buildKey': 'routing-test', 'slots': self.slots,
+            'preservedDynamicAliases': self.dynamic_aliases}))
         with patch.object(TTFont, 'getGlyphSet', side_effect=AssertionError('rebuild outlines')):
             result = batch.build(self.module, self.stage,
-                                 names or [Path(logical).name for logical in self.slots])
+                                 names or [Path(logical).name for logical in (*self.slots, *self.dynamic_aliases)])
         self.reports = {entry['slot']: entry for entry in json.loads(
             (self.stage / '.luoshu-metrics-report.json').read_text())['slots']}
         return result
@@ -148,36 +151,93 @@ class RoutingTest(unittest.TestCase):
     def test_cff_cjk_routes_to_fallback_without_recompiling_cff(self):
         self.assert_routing_and_raw_tables(cff=True)
 
-    def test_dali_dynamic_overlay_uses_verified_roboto_metrics_and_han_fallback(self):
-        # dali OS3.0.305 ROM init copies stock Roboto into theme_webview; the
-        # scanner resolves this known dynamic alias back to immutable Roboto.
-        # Reproduce its measured metrics without redistributing the ROM font.
+    def test_dali_dynamic_overlay_is_not_frozen_to_the_init_roboto_seed(self):
+        self.default_pair()
+        # Measured dali stock line contracts differ. Paint.getFontMetrics can
+        # inspect the configured Overlay face before drawText's getNativeInstance
+        # invokes Xiaomi's checkMiuiFont and selects MiSans. Freezing Overlay to
+        # Roboto therefore makes those operations use different line frames.
+        for name, ascent, descent in (('MiSansVF.ttf', 1044, -282),
+                                      ('Roboto-Regular.ttf', 928, -244)):
+            metrics = self.slots['/system/fonts/' + name]['metrics']
+            metrics['hhea'].update(ascent=ascent, descent=descent, lineGap=0)
+            metrics['os2'].update(fsSelection=64)
+        name = 'MiSansVF_Overlay.ttf'
+        logical = '/system/fonts/' + name
+        target = '/data/system/fonts/theme_webview/Roboto-Regular.ttf'
+        stock_link = self.root / 'stock/system' / name
+        stock_link.symlink_to(target)
+        self.dynamic_aliases[logical] = {
+            'source': 'hyperos-framework-symlink', 'target': target}
+        # Initial generic mapping and previously installed Test6 both create
+        # this wrong regular font. Final staging must remove it even if the
+        # mutable /data link is not initialized on this host/pre-mount boot.
+        make_font(self.fonts / name)
+        result = self.build()
+        self.assertFalse((self.fonts / name).exists())
+        self.assertEqual(os.readlink(stock_link), target)
+        self.assertEqual(result['mapped'], 2)
+        with TTFont(self.fonts / 'MiSansVF.ttf') as han, \
+                TTFont(self.fonts / 'Roboto-Regular.ttf') as latin:
+            self.assertIn(HAN, han.getBestCmap())
+            self.assertIn(48, han.getBestCmap())
+            self.assertNotIn(HAN, latin.getBestCmap())
+        self.assertNotIn(logical, self.reports)
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertEqual(report['preservedDynamicAliases'], [logical])
+
+        # Model the unchanged ROM symlink chain inside the fixture namespace.
+        # It follows the mapped MiSans selected by the framework, then follows
+        # Roboto when that framework route changes; no cached copied alias exists.
+        routes = self.root / 'framework-route'
+        routes.mkdir()
+        overlay_route = routes / name
+        mutable_route = routes / 'theme-webview-Roboto.ttf'
+        overlay_route.symlink_to(mutable_route.name)
+        mutable_route.symlink_to(self.fonts / 'MiSansVF.ttf')
+        ft = FreeType()
+        try:
+            measured = ft.inspect(overlay_route)
+            drawn = ft.inspect(self.fonts / 'MiSansVF.ttf')
+            roboto = ft.inspect(self.fonts / 'Roboto-Regular.ttf')
+            frame = lambda font: (font['ascender'], font['descender'])
+            self.assertEqual(frame(measured), (1044, -282))
+            self.assertEqual(frame(measured), frame(drawn))
+            self.assertNotEqual(frame(roboto), frame(drawn), 'Test6 froze the wrong frame')
+            mutable_route.unlink()
+            mutable_route.symlink_to(self.fonts / 'Roboto-Regular.ttf')
+            self.assertEqual(frame(ft.inspect(overlay_route)), frame(roboto))
+        finally:
+            ft.close()
+
+        # Boot compatibility used to recreate every absent Overlay alias.
+        # It must now expose the exact ROM link in both overlay and bind modes.
+        env = {**os.environ, 'IS_HYPEROS': 'true',
+               'LUOSHU_REAL_MODDIR': str(self.module),
+               'LUOSHU_HYPEROS_CLOCK_PAYLOAD_ROOT': str(self.stage)}
+        helper = ROOT / 'common/legacy_v14_4/hyperos_clock_compat.sh'
+        command = '. "$1"; luoshu_hyperos_clock_payload_ensure'
+        for stale in (False, True):
+            if stale:
+                make_font(self.fonts / name)
+            subprocess.run(['sh', '-c', command, 'sh', str(helper)], env=env, check=True)
+            self.assertFalse((self.fonts / name).exists())
+            self.assertEqual(os.readlink(stock_link), target)
+
+        # Static Overlay files on another ROM are still mapped by boot repair.
+        stock_link.unlink()
+        make_font(stock_link)
+        subprocess.run(['sh', '-c', command, 'sh', str(helper)], env=env, check=True)
+        self.assertTrue((self.fonts / name).is_file())
+
+    def test_test6_overlay_reference_migrates_before_deferred_scan(self):
         self.default_pair()
         overlay = self.stock('MiSansVF_Overlay.ttf', (LATIN, 48), ())
+        overlay['source'] = 'hyperos-rom-reference'
         overlay['metricsReferencePath'] = '/system/fonts/Roboto-Regular.ttf'
-        metrics = overlay['metrics']
-        metrics['upem'] = 2048
-        metrics['head'].update(yMin=-555, yMax=2163)
-        metrics['hhea'].update(ascent=1900, descent=-500, lineGap=0)
-        metrics['os2'].update(typoAscender=2146, typoDescender=-555, typoLineGap=0,
-                              winAscent=2146, winDescent=555, fsSelection=64)
+        make_font(self.fonts / 'MiSansVF_Overlay.ttf')
         self.build()
-        report = self.reports['/system/fonts/MiSansVF_Overlay.ttf']
-        self.assertEqual(report['cjkRoutingReason'], 'stock-latin-primary')
-        self.assertGreater(report['removedCjkMappings'], 0)
-        with TTFont(self.fonts / 'MiSansVF_Overlay.ttf', lazy=True) as out, \
-                TTFont(self.fonts / 'MiSansVF.ttf', lazy=True) as han, \
-                TTFont(self.fonts / '400.ttf', lazy=True) as source:
-            self.assertEqual((out['hhea'].ascent, out['hhea'].descent), (928, -244))
-            self.assertEqual((out['head'].yMin, out['head'].yMax), (-244, 1056))
-            self.assertNotIn(HAN, out.getBestCmap())
-            self.assertIn(HAN, han.getBestCmap())
-            self.assertIn(48, out.getBestCmap(), 'selected digits must remain replaced')
-            self.assertEqual(out.reader['glyf'], source.reader['glyf'])
-            self.assertEqual(han.reader['glyf'], source.reader['glyf'])
-        # A file with a similar name is not sufficient proof of the ROM link.
-        del overlay['metricsReferencePath']
-        self.assertFalse(batch._latin_ui_slot('/system/fonts/MiSansVF_Overlay.ttf', overlay))
+        self.assertFalse((self.fonts / 'MiSansVF_Overlay.ttf').exists())
 
     def test_old_inventory_keeps_cjk_and_reports_pending_scan(self):
         self.default_pair()
@@ -203,6 +263,11 @@ class RoutingTest(unittest.TestCase):
             self.assertIn(48, font.getBestCmap())
         self.assertEqual(self.reports['/system/fonts/MiSansLatinVF.ttf']['cjkRoutingReason'],
                          'stock-latin-primary')
+        self.assertTrue(batch.bitmap_bottom_slot(
+            {'slots': {'/system/fonts/MiSansLatinVF.ttf': latin}},
+            '/system/fonts/MiSansLatinVF.ttf',
+            batch.contract_for_slot({'slots': {'/system/fonts/MiSansLatinVF.ttf': latin}},
+                                    '/system/fonts/MiSansLatinVF.ttf')))
         # Even one real stock ideograph remains sufficient to protect that slot.
         self.stock('MiSansLatinVF.ttf', (LATIN, 48, 0x3007, HAN), ())
         self.build()

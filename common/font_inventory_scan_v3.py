@@ -15,11 +15,12 @@ from typing import Any, Iterable
 
 import font_inventory as base
 import font_inventory_scan as v2
-from hyperos_physical_policy import PARTITIONS as HYPEROS_PARTITIONS, safe_physical_font_name
+from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, safe_physical_font_name,
+                                    DYNAMIC_OVERLAY_PATH, DYNAMIC_OVERLAY_TARGET)
 
 SCANNER_REVISION = 3
 METRICS_REVISION = 3
-HYPEROS_COVERAGE_REVISION = 1
+HYPEROS_COVERAGE_REVISION = 2
 PRIMARY_FONT_SPECS = (
     ("system", Path("/system/fonts"), "system_fonts", (Path("/system/font"),)),
     ("system_ext", Path("/system_ext/fonts"), "system_ext_fonts", (Path("/system/system_ext/fonts"),)),
@@ -243,7 +244,7 @@ def _has_current_hyperos_coverage(existing: dict[str, Any]) -> bool:
             or existing.get("hyperosCoverageRevision") == HYPEROS_COVERAGE_REVISION)
 
 
-def _add_hyperos_physical_slots(slots: dict[str, dict[str, Any]], roots: list[base.FontRoot]) -> None:
+def _add_hyperos_physical_slots(slots: dict[str, dict[str, Any]], roots: list[base.FontRoot]) -> dict:
     """Capture stock contracts for files the HyperOS mapper actually replaces.
 
     Named UI-family discovery intentionally omits lang=zh-Hans/zh-Hant fallback
@@ -252,6 +253,7 @@ def _add_hyperos_physical_slots(slots: dict[str, dict[str, Any]], roots: list[ba
     not change the generic/ColorOS replacement heuristic.
     """
     additional: dict[str, dict[str, Any]] = {}
+    dynamic_aliases: dict[str, dict[str, str]] = {}
     for root in roots:
         if root.partition not in HYPEROS_PARTITIONS or not root.actual.is_dir():
             continue
@@ -259,22 +261,22 @@ def _add_hyperos_physical_slots(slots: dict[str, dict[str, Any]], roots: list[ba
             if not safe_physical_font_name(actual.name):
                 continue
             logical = base._logical_path(root, actual)
+            if (logical == DYNAMIC_OVERLAY_PATH and actual.is_symlink()
+                    and os.readlink(actual) == DYNAMIC_OVERLAY_TARGET):
+                # init only seeds this path with Roboto. SymlinkUtils replaces
+                # it with the locale-selected MiSans/Roboto or theme font later.
+                # Preserve that framework route rather than freezing the seed
+                # as an independently normalized Latin font. Never read /data.
+                dynamic_aliases[logical] = {"source": "hyperos-framework-symlink",
+                                            "target": DYNAMIC_OVERLAY_TARGET}
+                slots.pop(logical, None)
+                continue
             if logical in slots:
                 continue
             try:
                 # Absolute links in a stock lower directory must resolve through
                 # the corresponding stock partition, never through a live mount.
-                reference = None
-                if (logical == "/system/fonts/MiSansVF_Overlay.ttf" and actual.is_symlink()
-                        and os.readlink(actual) == "/data/system/fonts/theme_webview/Roboto-Regular.ttf"):
-                    # HyperOS init.miui.ext.rc seeds this mutable WebView cache
-                    # from stock Roboto before applying an optional theme. Its
-                    # immutable contract is that exact source, not the current
-                    # data file and not the similarly named MiSans main face.
-                    safe = base._stock_font_path(root, root.actual / "Roboto-Regular.ttf", roots)
-                    reference = "/system/fonts/Roboto-Regular.ttf"
-                else:
-                    safe = base._stock_font_path(root, actual, roots)
+                safe = base._stock_font_path(root, actual, roots)
                 fmt = base._font_format(safe)
             except (base.InventoryError, OSError):
                 continue
@@ -288,11 +290,9 @@ def _add_hyperos_physical_slots(slots: dict[str, dict[str, Any]], roots: list[ba
                 "weight": base._infer_weight(actual.name), "style": "normal", "faceIndex": 0,
                 "validatedBy": "fontTools-stock-metrics", "validatedFormat": fmt,
             }
-            if reference is not None:
-                additional[logical]["source"] = "hyperos-rom-reference"
-                additional[logical]["metricsReferencePath"] = reference
     base._populate_metrics(additional)
     slots.update(additional)
+    return dynamic_aliases
 
 
 def _can_reuse(existing: dict[str, Any], build_key: str) -> bool:
@@ -414,8 +414,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         entry.get("slotName") in coloros_cores for entry in slots.values()
     )
     hyperos = not coloros and (initial_rom == "hyperos" or bool(_rom_markers(names).get("hyperos")))
-    if hyperos:
-        _add_hyperos_physical_slots(slots, replaceable_roots)
+    dynamic_aliases = _add_hyperos_physical_slots(slots, replaceable_roots) if hyperos else {}
     main_path, main_entry, rom = base._pick_main_slot(slots, families)
     if hyperos:
         rom = "hyperos"
@@ -440,6 +439,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         # avoids repeated refreshes when an old main-family selector labels a
         # ColorOS inventory "hyperos" because an unused MiSans file is present.
         "hyperosCoverageRevision": HYPEROS_COVERAGE_REVISION,
+        "preservedDynamicAliases": dynamic_aliases,
         "state": "ready",
         "buildKey": build_key,
         "buildFingerprint": fingerprint,
@@ -467,7 +467,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "mainSlot": {**main_entry, "path": main_path},
     }
     base.validate_inventory(inventory, build_key)
-    if upgrade and existing is not None and set(existing["slots"]) - set(slots):
+    if upgrade and existing is not None and set(existing["slots"]) - set(slots) - set(dynamic_aliases):
         raise base.InventoryError("原厂字体重扫未完整保留已有槽位")
     base._atomic_write(output, inventory)
     print(json.dumps({

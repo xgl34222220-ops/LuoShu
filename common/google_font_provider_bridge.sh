@@ -158,6 +158,54 @@ _gfp_targets() {
     rm -f "$_gfp_list" 2>/dev/null || true
 }
 
+# Watch metadata, not font contents. This is used after boot to detect lazy GMS
+# downloads, atomic cache replacement and recreated/unmounted process views.
+# Batch stat calls so an idle pass never starts Python or hashes large fonts.
+_gfp_stat_files() {
+    set --
+    while IFS= read -r _gfp_stat_path; do
+        [ -n "$_gfp_stat_path" ] || continue
+        printf 'path|%s\n' "$_gfp_stat_path"
+        set -- "$@" "$_gfp_stat_path"
+        if [ "$#" -ge 100 ]; then
+            stat -L -c '%n|%d|%i|%s|%Y|%Z' "$@" 2>/dev/null
+            set --
+        fi
+    done
+    [ "$#" -eq 0 ] || stat -L -c '%n|%d|%i|%s|%Y|%Z' "$@" 2>/dev/null
+    return 0
+}
+
+_gfp_fingerprint() {
+    mkdir -p "$CACHE" 2>/dev/null || return 1
+    _gfp_fp_targets="$CACHE/.watch-targets.$$"
+    _gfp_targets | LC_ALL=C sort -u > "$_gfp_fp_targets" || return 1
+    _gfp_fp_proc="${LUOSHU_PROC_ROOT:-/proc}"
+    {
+        printf 'active|%s\n' "$(_gfp_active_font)"
+        {
+            printf '%s\n' "$MODDIR/config/active_font.conf" \
+                "$MODDIR/.luoshu-payload" "$MODDIR/.luoshu-payload/system/fonts" \
+                "$MODDIR/.luoshu-payload/system/fonts/.luoshu-font-store" \
+                "$MODDIR/config/device-font-sources"
+            cat "$_gfp_fp_targets"
+            [ ! -s "$STATE" ] || awk -F '|' 'NF >= 2 {print $2}' "$STATE"
+        } | _gfp_stat_files
+        for _gfp_fp_pid in $(_gfp_namespace_pids); do
+            printf 'namespace|%s|' "$_gfp_fp_pid"
+            readlink "$_gfp_fp_proc/$_gfp_fp_pid/ns/mnt" 2>/dev/null || printf 'missing\n'
+            # stat through the process root observes its own bind, including
+            # fallback staging files that were unlinked immediately after bind.
+            while IFS= read -r _gfp_fp_target; do
+                printf '%s/%s/root%s\n' "$_gfp_fp_proc" "$_gfp_fp_pid" "$_gfp_fp_target"
+            done < "$_gfp_fp_targets" | _gfp_stat_files
+        done
+    } | LC_ALL=C sort | _gfp_hash_text
+    _gfp_fp_rc=$?
+    rm -f "$_gfp_fp_targets" 2>/dev/null || true
+    return "$_gfp_fp_rc"
+}
+
 _gfp_build_clone() {
     _gfp_target="$1"
     _gfp_weight_value="$2"
@@ -165,6 +213,24 @@ _gfp_build_clone() {
     _gfp_source_hash=$(_gfp_hash "$_gfp_source")
     _gfp_target_hash=$(_gfp_hash "$_gfp_target")
     [ -n "$_gfp_source_hash" ] && [ -n "$_gfp_target_hash" ] || return 1
+    # Some managers share our mount namespace with a target process. A later
+    # pass may therefore see our own clone at the cache path. Keep its original
+    # identity/cache key instead of generating clone-of-clone on every repair.
+    if [ -s "$STATE" ]; then
+        while IFS='|' read -r _gfp_old_target _gfp_old_clone _gfp_old_target_hash \
+            _gfp_old_clone_hash _gfp_old_source_hash _gfp_old_weight; do
+            [ "$_gfp_old_target" = "$_gfp_target" ] || continue
+            [ "$_gfp_old_source_hash" = "$_gfp_source_hash" ] || continue
+            [ "$_gfp_old_weight" = "$_gfp_weight_value" ] || continue
+            case "$_gfp_old_clone" in "$CACHE/"*.ttf) ;; *) continue ;; esac
+            [ "$_gfp_target_hash" = "$_gfp_old_target_hash" ] || \
+                [ "$_gfp_target_hash" = "$_gfp_old_clone_hash" ] || continue
+            _gfp_valid_font "$_gfp_old_clone" || continue
+            [ "$(_gfp_hash "$_gfp_old_clone")" = "$_gfp_old_clone_hash" ] || continue
+            printf '%s\n' "$_gfp_old_clone"
+            return 0
+        done < "$STATE"
+    fi
     _gfp_key=$(printf 'provider-v2\n%s\n%s\n%s\n' "$_gfp_source_hash" "$_gfp_target_hash" "$_gfp_weight_value" | _gfp_hash_text)
     [ -n "$_gfp_key" ] || return 1
     _gfp_output="$CACHE/${_gfp_key}.ttf"
@@ -381,6 +447,8 @@ _gfp_apply_once() {
             continue
         fi
         _gfp_prepared=$((_gfp_prepared + 1))
+        _gfp_selected_hash=$(_gfp_hash "$_gfp_source")
+        _gfp_original_target_hash=$(_gfp_hash "$_gfp_target")
         _gfp_target_mounts=0
         _gfp_target_attempts=0
         if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
@@ -407,7 +475,9 @@ _gfp_apply_once() {
         fi
         if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || [ "$_gfp_target_mounts" -gt 0 ]; then
             _gfp_mounted=$((_gfp_mounted + 1))
-            printf '%s|%s|%s|%s\n' "$_gfp_target" "$_gfp_clone" "$(_gfp_hash "$_gfp_target")" "$(_gfp_hash "$_gfp_clone")" >> "$_gfp_state_tmp"
+            printf '%s|%s|%s|%s|%s|%s\n' "$_gfp_target" "$_gfp_clone" \
+                "$_gfp_original_target_hash" "$(_gfp_hash "$_gfp_clone")" \
+                "$_gfp_selected_hash" "$_gfp_weight_value" >> "$_gfp_state_tmp"
         else
             _gfp_failed=$((_gfp_failed + 1))
         fi
@@ -420,7 +490,9 @@ _gfp_apply_once() {
         mv -f "$_gfp_state_tmp" "$STATE" 2>/dev/null || true
         chmod 0600 "$STATE" 2>/dev/null || true
         _gfp_log "provider bridge：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag"
-        if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ] && [ $((_gfp_ns_plain + _gfp_ns_staging)) -gt 0 ]; then
+        if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ] && \
+            [ "${LUOSHU_GOOGLE_FONT_ALLOW_RESTART:-1}" = 1 ] && \
+            [ $((_gfp_ns_plain + _gfp_ns_staging)) -gt 0 ]; then
             am force-stop com.android.vending >/dev/null 2>&1 || true
         fi
         # A successful zygote bind alone does not prove GMS can open the clone.
@@ -467,11 +539,12 @@ if [ "${0##*/}" = google_font_provider_bridge.sh ]; then
         boot) _gfp_boot ;;
         apply|now) _gfp_apply_once ;;
         prepare) LUOSHU_GOOGLE_FONT_DRY_RUN=1 _gfp_apply_once ;;
+        fingerprint) _gfp_fingerprint ;;
         restore) _gfp_restore ;;
         invalidate)
             _gfp_restore >/dev/null 2>&1 || true
             rm -rf "$CACHE" "$STATE" 2>/dev/null || true
             ;;
-        *) echo "Usage: $0 {boot|apply|prepare|restore|invalidate}" >&2; exit 2 ;;
+        *) echo "Usage: $0 {boot|apply|prepare|fingerprint|restore|invalidate}" >&2; exit 2 ;;
     esac
 fi

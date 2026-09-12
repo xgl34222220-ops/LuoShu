@@ -19,6 +19,7 @@ from fontTools.ttLib import TTFont
 from font_metrics_normalize import _device_build_key, _pick_face, _promote_os2_for_typo_metrics
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
+from hyperos_physical_policy import preserved_dynamic_alias
 
 PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
          "my_product", "hw_product", "cust")
@@ -251,20 +252,11 @@ def _specialized_slot(logical: str, slot: dict) -> bool:
 def _latin_ui_slot(logical: str, slot: dict) -> bool:
     name = Path(logical).name.lower()
     families = [str(family).lower().replace('_', '-') for family in slot.get('families', [])]
-    return (_hyperos_overlay_reference(logical, slot)
-            or any(family.startswith(('sans-serif', 'system-ui', 'system-sans', 'roboto',
+    return (any(family.startswith(('sans-serif', 'system-ui', 'system-sans', 'roboto',
                                   'google-sans', 'misans', 'mi-sans', 'sys-sans', 'oppo-sans',
                                   'oplus-sans')) for family in families)
             or name.startswith(('roboto', 'misanslatin', 'googlesans', 'syssans', 'sysfont',
                                 'sourcesanspro', 'opposans', 'oplussans', 'opsans')))
-
-
-def _hyperos_overlay_reference(logical: str, slot: dict) -> bool:
-    # dali's ROM init copies Roboto into the mutable theme_webview target of
-    # this alias. The stock scanner verifies the ROM symlink and reads the
-    # immutable Roboto through its lower/mirror instead of following /data.
-    return (logical == '/system/fonts/MiSansVF_Overlay.ttf'
-            and slot.get('metricsReferencePath') == '/system/fonts/Roboto-Regular.ttf')
 
 
 def bitmap_bottom_slot(data: dict, logical: str, contract: tuple) -> bool:
@@ -274,14 +266,13 @@ def bitmap_bottom_slot(data: dict, logical: str, contract: tuple) -> bool:
             logical == data.get('mainSlotPath') or _specialized_slot(logical, slot)):
         return False
     coverage = slot.get('metrics', {}).get('coverage')
-    if valid_coverage(coverage) and (coverage['hasHan'] or not coverage['hasLatin']):
+    if valid_coverage(coverage) and (_stock_has_cjk_ideographs(coverage) or not coverage['hasLatin']):
         return False
     name = Path(logical).name.lower()
-    return (_hyperos_overlay_reference(logical, slot)
-            or name.startswith(('roboto', 'misanslatin', 'googlesans', 'sysfont-regular',
+    return name.startswith(('roboto', 'misanslatin', 'googlesans', 'sysfont-regular',
                             'sysfont-static', 'syssans-en-', 'sysfont-en-',
                             'opposans-en-', 'opsans-en-', 'sourcesanspro',
-                            'notosans-', 'notosansui-', 'droidsans')))
+                            'notosans-', 'notosansui-', 'droidsans'))
 
 
 def _stock_has_cjk_ideographs(coverage: dict) -> bool:
@@ -351,13 +342,17 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     fonts = stage / 'system/fonts'
     data = read_inventory(module)
     jobs = []
+    preserved_aliases = []
     for part in PARTS:
         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
         for name in dict.fromkeys(names):
             if Path(name).name != name or not name.endswith(('.ttf', '.otf')):
                 raise ValueError(f'不安全的字体槽位：{name}')
+            logical = f'/{part}/fonts/{name}'
+            if preserved_dynamic_alias(data, logical):
+                preserved_aliases.append(stage / part / 'fonts' / name)
+                continue
             if (root / name).exists():
-                logical = f'/{part}/fonts/{name}'
                 jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name,
                              contract_for_slot(data, logical)))
     if not jobs:
@@ -402,9 +397,17 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 **output_reports[key]})
         for output, dest in prepared:
             link_copy(output, dest)
+        for alias in preserved_aliases:
+            # Initial generic mapping creates the alias as a regular font. Its
+            # absence exposes the ROM lower symlink in OverlayFS and leaves it
+            # untouched in per-file bind mode. Framework changes keep working.
+            alias.unlink(missing_ok=True)
         report = stage / '.luoshu-metrics-report.json'
         report.write_text(json.dumps({'schema': 'luoshu-slot-metrics-v1',
-                                      'slots': slot_report}, ensure_ascii=False), encoding='utf-8')
+                                      'slots': slot_report,
+                                      'preservedDynamicAliases': [
+                                          '/' + alias.relative_to(stage).as_posix()
+                                          for alias in preserved_aliases]}, ensure_ascii=False), encoding='utf-8')
         report.chmod(0o644)
     except Exception:
         shutil.rmtree(outputs, ignore_errors=True)

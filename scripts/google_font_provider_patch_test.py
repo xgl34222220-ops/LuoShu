@@ -118,6 +118,7 @@ class ProviderPatchTest(unittest.TestCase):
             path.write_text(f"#!/bin/sh\n{content}\n")
             path.chmod(0o755)
         env = dict(os.environ, MODDIR=str(module), LUOSHU_GOOGLE_FONT_RETRIES="3",
+                   LUOSHU_GOOGLE_FONT_WATCH_CYCLES="0",
                    PROVIDER_TEST_MARKER=str(marker), PATH=f"{commands}:{os.environ['PATH']}")
         subprocess.run(["sh", str(ROOT / "common/google_font_provider_service.sh")], env=env, check=True)
         self.assertEqual(marker.read_text().splitlines(), ["pass", "pass", "pass"])
@@ -166,6 +167,50 @@ _gfp_apply_once
                                 env=env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("failed:1", (module / "logs/google-font-provider.log").read_text())
+
+    def test_existing_clone_visible_at_target_reuses_original_cache_entry(self):
+        module = self.root / "module"
+        (module / "common").mkdir(parents=True)
+        (module / "config/device-font-sources").mkdir(parents=True)
+        (module / "config/active_font.conf").write_text("fixture\n")
+        target = self.font("opaque")
+        source = self.font("source.ttf", family="Custom")
+        shutil.copyfile(source, module / "config/device-font-sources/LuoShu-400.ttf")
+        shutil.copyfile(ROOT / "common/google_font_provider_patch.py", module / "common/google_font_provider_patch.py")
+        env = dict(os.environ, MODDIR=str(module), LUOSHU_GOOGLE_FONT_PYTHON=sys.executable,
+                   LUOSHU_GOOGLE_FONT_TARGETS=str(target), LUOSHU_GOOGLE_FONT_DRY_RUN="1")
+        command = ["sh", str(ROOT / "common/google_font_provider_bridge.sh"), "apply"]
+        subprocess.run(command, env=env, check=True, capture_output=True)
+        state = module / "config/google-font-provider-mounts.conf"
+        first = Path(state.read_text().split("|")[1])
+        # A shared mount namespace now exposes our clone at the provider path.
+        shutil.copyfile(first, target)
+        subprocess.run(command, env=env, check=True, capture_output=True)
+        self.assertEqual(Path(state.read_text().split("|")[1]), first)
+        self.assertEqual(list((module / "config/google-font-provider").glob("*.ttf")), [first])
+
+    def test_background_mount_repair_does_not_force_stop_play(self):
+        module = self.root / "module"
+        (module / "common").mkdir(parents=True)
+        (module / "config/device-font-sources").mkdir(parents=True)
+        (module / "config/active_font.conf").write_text("fixture\n")
+        target = self.font("opaque")
+        source = self.font("source.ttf", family="Custom")
+        shutil.copyfile(source, module / "config/device-font-sources/LuoShu-400.ttf")
+        shutil.copyfile(ROOT / "common/google_font_provider_patch.py", module / "common/google_font_provider_patch.py")
+        marker = self.root / "force-stopped"
+        script = '''. "$1"
+_gfp_namespace_pids() { printf '10\\n'; }
+_gfp_mount_in_pid() { _gfp_mount_mode=plain; return 0; }
+am() { printf '%s\\n' "$*" >> "$TEST_RESTARTS"; }
+_gfp_apply_once
+'''
+        env = dict(os.environ, MODDIR=str(module), LUOSHU_GOOGLE_FONT_PYTHON=sys.executable,
+                   LUOSHU_GOOGLE_FONT_TARGETS=str(target), TEST_RESTARTS=str(marker),
+                   LUOSHU_GOOGLE_FONT_ALLOW_RESTART="0")
+        subprocess.run(["sh", "-c", script, "sh", str(ROOT / "common/google_font_provider_bridge.sh")],
+                       env=env, capture_output=True, check=True)
+        self.assertFalse(marker.exists(), "background repair interrupted the foreground Play app")
 
 
 if __name__ == "__main__":

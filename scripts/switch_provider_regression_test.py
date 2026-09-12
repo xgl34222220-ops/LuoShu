@@ -76,7 +76,7 @@ class SwitchProviderTest(unittest.TestCase):
         self.executable('getprop', 'echo 1\n')
         subprocess.run(['sh', str(service)], env={**self.env,
             'TEST_APPLIED': str(marker), 'LUOSHU_FONT_LOCK_INIT_GRACE_SECONDS': '0.01',
-            'LUOSHU_GOOGLE_FONT_RETRIES': '1'},
+            'LUOSHU_GOOGLE_FONT_RETRIES': '1', 'LUOSHU_GOOGLE_FONT_WATCH_CYCLES': '0'},
             capture_output=True, check=True, timeout=5)
         self.assertEqual(marker.read_text().splitlines(), ['applied'])
         self.assertFalse(lock.exists())

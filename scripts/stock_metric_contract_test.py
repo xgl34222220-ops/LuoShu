@@ -402,68 +402,61 @@ class StockMetricContractTest(unittest.TestCase):
         self.assertNotIn(theme, paths)
         self.assertNotIn(alias, paths)
 
-    def test_hyperos_known_webview_overlay_uses_only_its_init_stock_roboto_reference(self) -> None:
+    def test_hyperos_dynamic_webview_alias_is_preserved_without_reading_data(self) -> None:
         args, _values = self.physical_scan_fixture()
-        roboto = args.system_fonts / "Roboto-Regular.ttf"
-        make_font(roboto, ascent=927, descent=-233)
-        with TTFont(roboto) as font:
-            for table in font["cmap"].tables:
-                if table.isUnicode():
-                    table.cmap[ord("A")] = "zero"
-            font.save(roboto)
-        theme = self.root / "mutable-theme/Roboto-Regular.ttf"
-        theme.parent.mkdir()
-        make_font(theme, ascent=1600, descent=-500)
-        # Reproduce init's exact absolute link even when the test host does not
-        # expose Android /data. The reference must work without opening its
-        # mutable target at all; only the trusted stock source is admissible.
+        logical = "/system/fonts/MiSansVF_Overlay.ttf"
+        target = "/data/system/fonts/theme_webview/Roboto-Regular.ttf"
         overlay = args.system_fonts / "MiSansVF_Overlay.ttf"
-        overlay.symlink_to("/data/system/fonts/theme_webview/Roboto-Regular.ttf")
+        overlay.symlink_to(target)
         with mock.patch.object(inventory, "_read_metrics", wraps=inventory._read_metrics) as reader:
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(scanner.scan(args), 0)
-        entry = json.loads(args.output.read_text())["slots"]["/system/fonts/MiSansVF_Overlay.ttf"]
-        self.assertEqual(entry["source"], "hyperos-rom-reference")
-        self.assertEqual(entry["metricsReferencePath"], "/system/fonts/Roboto-Regular.ttf")
-        self.assertEqual(entry["metrics"]["hhea"], {"ascent": 927, "descent": -233, "lineGap": 0})
-        self.assertEqual(entry["metrics"]["coverage"]["latinCount"], 1)
-        self.assertFalse(entry["metrics"]["coverage"]["hasHan"])
+        result = json.loads(args.output.read_text())
+        self.assertNotIn(logical, result["slots"])
+        self.assertEqual(result["preservedDynamicAliases"][logical], {
+            "source": "hyperos-framework-symlink", "target": target})
+        self.assertTrue(scanner._can_reuse(result, "stock-metrics-test"))
         paths = [Path(call.args[0]) for call in reader.call_args_list]
-        self.assertNotIn(theme, paths)
-        self.assertNotIn(Path("/data/system/fonts/theme_webview/Roboto-Regular.ttf"), paths)
+        self.assertNotIn(Path(target), paths)
+        self.assertNotIn(overlay, paths)
 
-        # Refresh an old, valid-shaped inventory polluted by the active MiSans
-        # payload. Keep the existing Overlay path while replacing its bad stock
-        # data with the ROM-proven source during the verified pre-mount scan.
-        previous = json.loads(args.output.read_text())
-        previous.pop("hyperosCoverageRevision")
-        previous["slots"]["/system/fonts/MiSansVF_Overlay.ttf"]["metrics"] = copy.deepcopy(
-            previous["mainSlot"]["metrics"]
-        )
+        # Test6's valid-shaped Roboto assumption migrates to a preserved alias;
+        # no other old slot may disappear through this exception.
+        previous = copy.deepcopy(result)
+        previous["hyperosCoverageRevision"] = 1
+        previous.pop("preservedDynamicAliases")
+        previous["slots"][logical] = {**copy.deepcopy(previous["mainSlot"]),
+            "path": logical, "slotName": "MiSansVF_Overlay.ttf",
+            "source": "hyperos-rom-reference",
+            "metricsReferencePath": "/system/fonts/Roboto-Regular.ttf"}
+        previous["slotCount"] = len(previous["slots"])
         args.output.write_text(json.dumps(previous))
         with mock.patch.dict(scanner.os.environ, {"LUOSHU_STOCK_VIEW_VERIFIED": "1"}):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(scanner.scan(args), 0)
         refreshed = json.loads(args.output.read_text())
-        self.assertEqual(refreshed["slots"]["/system/fonts/MiSansVF_Overlay.ttf"]["metrics"]["hhea"]["ascent"], 927)
+        self.assertNotIn(logical, refreshed["slots"])
+        self.assertIn(logical, refreshed["preservedDynamicAliases"])
         self.assertTrue(scanner._can_reuse(refreshed, "stock-metrics-test"))
 
-        # An almost identical mutable link is not an approved stock reference.
         overlay.unlink()
         overlay.symlink_to("/data/system/fonts/theme_webview/Other.ttf")
         args.output = self.root / "different-theme-target.json"
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(scanner.scan(args), 0)
-        self.assertNotIn("/system/fonts/MiSansVF_Overlay.ttf", json.loads(args.output.read_text())["slots"])
+        different = json.loads(args.output.read_text())
+        self.assertNotIn(logical, different["slots"])
+        self.assertNotIn(logical, different["preservedDynamicAliases"])
 
-        # The known link also cannot invent metrics when its stock source fails.
+        # A real Overlay font on another ROM keeps its own original contract.
         overlay.unlink()
-        overlay.symlink_to("/data/system/fonts/theme_webview/Roboto-Regular.ttf")
-        roboto.write_bytes(b"broken original Roboto")
-        args.output = self.root / "missing-stock-reference.json"
+        make_font(overlay, ascent=1110, descent=-310)
+        args.output = self.root / "static-overlay.json"
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(scanner.scan(args), 0)
-        self.assertNotIn("/system/fonts/MiSansVF_Overlay.ttf", json.loads(args.output.read_text())["slots"])
+        static = json.loads(args.output.read_text())
+        self.assertEqual(static["slots"][logical]["metrics"]["hhea"]["ascent"], 1110)
+        self.assertNotIn(logical, static["preservedDynamicAliases"])
 
     def old_physical_inventory(self, args) -> bytes:
         with contextlib.redirect_stdout(io.StringIO()):
