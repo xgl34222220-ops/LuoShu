@@ -409,9 +409,11 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                           '/' + alias.relative_to(stage).as_posix()
                                           for alias in preserved_aliases]}, ensure_ascii=False), encoding='utf-8')
         report.chmod(0o644)
-    except Exception:
+    finally:
+        # Every prepared result has its own hard link (or copy) in the final
+        # alias. Keeping these temporary names after success only enlarges
+        # cached payload copies and accumulates on repeated stage completion.
         shutil.rmtree(outputs, ignore_errors=True)
-        raise
     return {'mapped': len(jobs), 'generated': len(cache), 'fallbackSlots': fallback}
 
 

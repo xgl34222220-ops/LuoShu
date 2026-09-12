@@ -66,6 +66,10 @@ monitor_task() {
     while [ "$_loops" -lt 720 ]; do
         _task="$(read_task_value task)"
         _state="$(read_task_value state)"
+        # The shared task record has moved on. Keeping this monitor alive for
+        # another twelve minutes only polls the next task and can never commit
+        # the superseded one.
+        [ -z "$_task" ] || [ "$_task" = "$_wanted" ] || exit 0
         if [ "$_task" = "$_wanted" ]; then
             case "$_state" in
                 success)

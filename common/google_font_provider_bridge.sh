@@ -18,6 +18,11 @@ LOG="$MODDIR/logs/google-font-provider.log"
 
 _gfp_log() {
     mkdir -p "$MODDIR/logs" 2>/dev/null || true
+    _gfp_log_bytes=$(stat -c '%s' "$LOG" 2>/dev/null)
+    case "$_gfp_log_bytes" in ''|*[!0-9]*) _gfp_log_bytes=0 ;; esac
+    # A persistent permission failure is retried throughout the boot lifetime.
+    # Keep its history bounded instead of growing a permanent error log.
+    [ "$_gfp_log_bytes" -lt 1048576 ] || mv -f "$LOG" "$LOG.1" 2>/dev/null || true
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$*" >> "$LOG" 2>/dev/null || true
 }
 
@@ -191,7 +196,9 @@ _gfp_fingerprint() {
             cat "$_gfp_fp_targets"
             [ ! -s "$STATE" ] || awk -F '|' 'NF >= 2 {print $2}' "$STATE"
         } | _gfp_stat_files
-        for _gfp_fp_pid in $(_gfp_namespace_pids); do
+        _gfp_fp_pids=
+        [ ! -s "$_gfp_fp_targets" ] || _gfp_fp_pids=$(_gfp_namespace_pids)
+        for _gfp_fp_pid in $_gfp_fp_pids; do
             printf 'namespace|%s|' "$_gfp_fp_pid"
             readlink "$_gfp_fp_proc/$_gfp_fp_pid/ns/mnt" 2>/dev/null || printf 'missing\n'
             # stat through the process root observes its own bind, including
@@ -400,6 +407,23 @@ _gfp_unmount_in_pid() {
     nsenter -t "$_gfp_pid" -m -- umount "$_gfp_target" >/dev/null 2>&1
 }
 
+_gfp_prune_clones() {
+    [ -s "$STATE" ] || return 0
+    _gfp_keep=$(awk -F '|' 'NF >= 2 {print $2}' "$STATE")
+    for _gfp_cached in "$CACHE"/*.ttf; do
+        [ -f "$_gfp_cached" ] || continue
+        case "
+$_gfp_keep
+" in *"
+$_gfp_cached
+"*) continue ;; esac
+        # Old source selections/download identities otherwise leave one full
+        # font per cache key forever. Existing kernel binds retain their inode;
+        # only prune after every current target namespace has been handled.
+        rm -f "$_gfp_cached" 2>/dev/null || true
+    done
+}
+
 _gfp_apply_once() {
     [ "$(_gfp_active_font)" != default ] || return 2
     mkdir -p "$CACHE" "$MODDIR/logs" 2>/dev/null || return 1
@@ -407,6 +431,12 @@ _gfp_apply_once() {
     _gfp_candidates_file="$CACHE/.apply-candidates.$$"
     _gfp_state_tmp="${STATE}.tmp.$$"
     _gfp_targets > "$_gfp_candidates_file" 2>/dev/null || true
+    # No downloaded files means there is nothing for FontTools to identify.
+    # In particular a phone without GMS should never start Python each retry.
+    if [ ! -s "$_gfp_candidates_file" ]; then
+        rm -f "$_gfp_candidates_file" 2>/dev/null || true
+        return 2
+    fi
     if ! _gfp_python --inspect-targets "$_gfp_candidates_file" > "$_gfp_targets_file" 2>> "$LOG"; then
         rm -f "$_gfp_candidates_file" "$_gfp_targets_file" 2>/dev/null || true
         _gfp_log 'provider bridge 未生效：字体缓存识别失败（Python/FontTools）'
@@ -487,7 +517,11 @@ _gfp_apply_once() {
     [ -n "$_gfp_ns_first_error" ] && _gfp_diag="$_gfp_diag 首个挂载错误=$_gfp_ns_first_error"
     [ -n "$_gfp_missing_first" ] && _gfp_diag="$_gfp_diag 首个缺源=$_gfp_missing_first"
     if [ "$_gfp_mounted" -gt 0 ]; then
-        mv -f "$_gfp_state_tmp" "$STATE" 2>/dev/null || true
+        if ! mv -f "$_gfp_state_tmp" "$STATE" 2>/dev/null; then
+            rm -f "$_gfp_state_tmp" 2>/dev/null || true
+            _gfp_log 'provider bridge 挂载记录保存失败，保留现有字体缓存等待重试'
+            return 1
+        fi
         chmod 0600 "$STATE" 2>/dev/null || true
         _gfp_log "provider bridge：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag"
         if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ] && \
@@ -496,7 +530,10 @@ _gfp_apply_once() {
             am force-stop com.android.vending >/dev/null 2>&1 || true
         fi
         # A successful zygote bind alone does not prove GMS can open the clone.
-        [ "$_gfp_failed" -eq 0 ] && [ "$_gfp_ns_failed" -eq 0 ] && return 0
+        if [ "$_gfp_failed" -eq 0 ] && [ "$_gfp_ns_failed" -eq 0 ]; then
+            [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || _gfp_prune_clones
+            return 0
+        fi
         return 1
     fi
     rm -f "$_gfp_state_tmp" 2>/dev/null || true

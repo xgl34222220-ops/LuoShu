@@ -1,6 +1,5 @@
 package io.github.xgl34222220.luoshu.ui.logs
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -49,7 +48,7 @@ internal fun ImportTaskControls(
     if (state.taskId.isBlank() || state.phase == NativeImportPhase.IDLE) return
 
     val tokens = LocalMiuixTokens.current
-    val shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 30.dp else 24.dp)
+    val shape = RoundedCornerShape(24.dp)
     val container = if (style == UiStyle.MIUIX) {
         tokens.elevatedCardBackground
     } else {
@@ -60,20 +59,20 @@ internal fun ImportTaskControls(
         modifier = modifier.fillMaxWidth(),
         shape = shape,
         color = container.copy(alpha = .98f),
-        shadowElevation = 18.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f)),
+        shadowElevation = 8.dp,
     ) {
         Column(Modifier.padding(horizontal = 15.dp, vertical = 13.dp)) {
             Text(
                 state.title,
                 color = if (style == UiStyle.MIUIX) tokens.textPrimary else MaterialTheme.colorScheme.onSurface,
                 fontSize = 15.sp,
-                fontWeight = FontWeight.Black,
+                fontWeight = FontWeight.SemiBold,
             )
             Text(
                 state.message,
                 color = if (style == UiStyle.MIUIX) tokens.textSecondary else MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
                 maxLines = 2,
             )
             if (state.busy || state.paused) {

@@ -23,6 +23,40 @@ FLAT_BOTTOM_PROBES = {"latin": "HIEX", "digit": "147"}
 BASELINE_SHIFT_LIMIT_RATIO = 0.25
 
 
+def clear_imported_metric_variations(font: TTFont, glyph_name: str) -> None:
+    """Keep a copied static glyph independent of the replaced glyph's metrics.
+
+    Removing its gvar outlines does not remove HVAR/VVAR deltas. In particular,
+    HyperOS changes the selected weight with text size, exposing the old base
+    glyph's advance variation on an otherwise static imported letter or digit.
+    Override only this glyph's mapping; shared delta sets and CJK stay intact.
+    """
+    if 'HVAR' not in font and 'VVAR' not in font:
+        return
+    from fontTools.ttLib.tables.otTables import NO_VARIATION_INDEX
+    from fontTools.varLib.builder import buildVarIdxMap
+
+    for tag, fields in (
+        ('HVAR', ('AdvWidthMap', 'LsbMap', 'RsbMap')),
+        ('VVAR', ('AdvHeightMap', 'TsbMap', 'BsbMap', 'VOrgMap')),
+    ):
+        if tag not in font:
+            continue
+        table = font[tag].table
+        for field in fields:
+            mapping = getattr(table, field, None)
+            if mapping is None:
+                if field != fields[0]:
+                    continue  # Missing optional side-bearing maps mean no delta.
+                # Missing advance maps use glyph IDs as implicit delta indices.
+                # Preserve that mapping for every untouched glyph before making
+                # one imported glyph independent of the base variation store.
+                order = font.getGlyphOrder()
+                mapping = buildVarIdxMap(range(len(order)), order)
+                setattr(table, field, mapping)
+            mapping.mapping[glyph_name] = NO_VARIATION_INDEX
+
+
 def _role_transform(base: TTFont, src: TTFont, src_glyph_set, role: str) -> tuple[float, float]:
     base_glyph_set = base.getGlyphSet()
     probes = tuple(map(ord, "AHIOXEx" if role == "latin" else "0189"))

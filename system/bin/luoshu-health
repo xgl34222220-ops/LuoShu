@@ -217,13 +217,30 @@ repair_stale() {
             fi
         fi
     fi
-    for _rs_pidfile in "$MOD/config"/*.pid "$MOD/config"/*.pid.task; do
+    [ ! -f "$MOD/common/background_task.sh" ] || . "$MOD/common/background_task.sh"
+    # .pid.task contains a task ID, never a PID. Treating it as a PID used to
+    # delete every live worker's identity and make the App recover active jobs.
+    for _rs_pidfile in "$MOD/config"/*.pid; do
         [ -f "$_rs_pidfile" ] || continue
-        _rs_pid="$(head -n1 "$_rs_pidfile" 2>/dev/null | tr -d '\r\n')"
-        case "$_rs_pid" in
-            ''|*[!0-9]*) rm -f "$_rs_pidfile" 2>/dev/null && _rs_changed=$((_rs_changed + 1)) ;;
-            *) kill -0 "$_rs_pid" 2>/dev/null || { rm -f "$_rs_pidfile" 2>/dev/null && _rs_changed=$((_rs_changed + 1)); } ;;
-        esac
+        _rs_alive=0
+        if type luoshu_task_pid_alive >/dev/null 2>&1; then
+            _rs_task=$(cat "${_rs_pidfile}.task" 2>/dev/null)
+            luoshu_task_pid_alive "$_rs_pidfile" "$_rs_task" && _rs_alive=1
+        else
+            _rs_pid="$(head -n1 "$_rs_pidfile" 2>/dev/null | tr -d '\r\n')"
+            case "$_rs_pid" in
+                ''|*[!0-9]*) ;;
+                *) kill -0 "$_rs_pid" 2>/dev/null && _rs_alive=1 ;;
+            esac
+        fi
+        if [ "$_rs_alive" = 0 ]; then
+            rm -f "$_rs_pidfile" "${_rs_pidfile}.task" "${_rs_pidfile}.boot" 2>/dev/null && \
+                _rs_changed=$((_rs_changed + 1))
+        fi
+    done
+    for _rs_sidecar in "$MOD/config"/*.pid.task "$MOD/config"/*.pid.boot; do
+        [ -f "$_rs_sidecar" ] || continue
+        [ -f "${_rs_sidecar%.*}" ] || rm -f "$_rs_sidecar" 2>/dev/null || true
     done
     printf 'status=ok\n'
     printf 'changed=%s\n' "$_rs_changed"

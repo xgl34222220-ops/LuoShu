@@ -69,7 +69,8 @@ class SwitchProviderTest(unittest.TestCase):
         shutil.copyfile(ROOT / 'common/google_font_provider_service.sh', service)
         shutil.copyfile(ROOT / 'common/font_switch_lock.sh', self.module / 'common/font_switch_lock.sh')
         (self.module / 'common/google_font_provider_bridge.sh').write_text(
-            'printf "applied\\n" >> "$TEST_APPLIED"\n')
+            'case "$1" in fingerprint) echo unchanged;; '
+            'apply) printf "applied\\n" >> "$TEST_APPLIED";; esac\n')
         (self.module / 'config/active_font.conf').write_text('example\n')
         lock = self.module / '.google-font-provider.lock'
         lock.mkdir()

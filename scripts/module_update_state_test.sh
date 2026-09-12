@@ -108,8 +108,8 @@ grep -q "^newSchema=$SCHEMA$" "$NEW/config/font-payload-rebuild-pending.conf"
 CURRENT="$TMP/current"
 CURRENT_NEW="$TMP/current-new"
 mkdir -p "$CURRENT/config" "$CURRENT/system/fonts" \
-    "$CURRENT/cache/full-composite-v11" "$CURRENT/cache/full-composite-v5" \
-    "$CURRENT/cache/auto-multiweight-mix/composites-v8" "$CURRENT/cache/auto-multiweight-mix/composites-v1" \
+    "$CURRENT/cache/full-composite-v12" "$CURRENT/cache/full-composite-v7" \
+    "$CURRENT/cache/auto-multiweight-mix/composites-v9" "$CURRENT/cache/auto-multiweight-mix/composites-v3" \
     "$CURRENT/cache/auto-multiweight-mix/prepared-v8" "$CURRENT/config/device-font-cache/current/payload" \
     "$CURRENT/config/device-font-cache/current/overlay" "$CURRENT/config/metrics_cache" "$CURRENT_NEW/config"
 printf 'id=LuoShu\nversion=current\n' >"$CURRENT/module.prop"
@@ -117,11 +117,16 @@ printf 'mix\n' >"$CURRENT/config/active_font.conf"
 printf 'cjk=Qsal\nlatin=Latin\ndigit=Digit\n' >"$CURRENT/config/font_mix.conf"
 printf 'schema=%s\nfont=mix\n' "$SCHEMA" >"$CURRENT/config/font-payload-schema.conf"
 printf 'payload\n' >"$CURRENT/system/fonts/Qsal-Regular.ttf"
-printf 'v11\n' >"$CURRENT/cache/full-composite-v11/current.font"
-printf 'v5\n' >"$CURRENT/cache/full-composite-v5/current.font"
-printf 'v8\n' >"$CURRENT/cache/auto-multiweight-mix/composites-v8/current.font"
-printf 'v1\n' >"$CURRENT/cache/auto-multiweight-mix/composites-v1/current.font"
+printf 'v11\n' >"$CURRENT/cache/full-composite-v12/current.font"
+printf 'v5\n' >"$CURRENT/cache/full-composite-v7/current.font"
+printf 'v8\n' >"$CURRENT/cache/auto-multiweight-mix/composites-v9/current.font"
+printf 'v1\n' >"$CURRENT/cache/auto-multiweight-mix/composites-v3/current.font"
 printf 'prepared\n' >"$CURRENT/cache/auto-multiweight-mix/prepared-v8/current.font"
+for _stale_cache in full-composite-v11 full-composite-v5 \
+    auto-multiweight-mix/composites-v8 auto-multiweight-mix/composites-v1; do
+    mkdir -p "$CURRENT/cache/$_stale_cache"
+    printf 'old glyph metric variations\n' >"$CURRENT/cache/$_stale_cache/stale.font"
+done
 printf '{}\n' >"$CURRENT/config/device-font-cache/current/payload/manifest.json"
 printf '{}\n' >"$CURRENT/config/device-font-cache/current/overlay/overlay-manifest.json"
 printf 'state=ready\nfont=mix\n' >"$CURRENT/config/device-font-cache/current/cache.conf"
@@ -131,11 +136,15 @@ test "$LUOSHU_UPDATE_REBUILD_REQUIRED" = false
 test "$(cat "$CURRENT_NEW/config/active_font.conf")" = mix
 grep -q '^cjk=Qsal$' "$CURRENT_NEW/config/font_mix.conf"
 test -f "$CURRENT_NEW/system/fonts/Qsal-Regular.ttf"
-test -f "$CURRENT_NEW/cache/full-composite-v11/current.font"
-test -f "$CURRENT_NEW/cache/full-composite-v5/current.font"
-test -f "$CURRENT_NEW/cache/auto-multiweight-mix/composites-v8/current.font"
-test -f "$CURRENT_NEW/cache/auto-multiweight-mix/composites-v1/current.font"
+test -f "$CURRENT_NEW/cache/full-composite-v12/current.font"
+test -f "$CURRENT_NEW/cache/full-composite-v7/current.font"
+test -f "$CURRENT_NEW/cache/auto-multiweight-mix/composites-v9/current.font"
+test -f "$CURRENT_NEW/cache/auto-multiweight-mix/composites-v3/current.font"
 test -f "$CURRENT_NEW/cache/auto-multiweight-mix/prepared-v8/current.font"
+for _stale_cache in full-composite-v11 full-composite-v5 \
+    auto-multiweight-mix/composites-v8 auto-multiweight-mix/composites-v1; do
+    test ! -e "$CURRENT_NEW/cache/$_stale_cache/stale.font"
+done
 test -f "$CURRENT_NEW/config/device-font-cache/current/cache.conf"
 test -f "$CURRENT_NEW/config/device-font-cache/current/payload/manifest.json"
 test -f "$CURRENT_NEW/config/metrics_cache/current.font"

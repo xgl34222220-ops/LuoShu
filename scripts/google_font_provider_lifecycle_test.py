@@ -77,6 +77,58 @@ esac
     def test_idle_watch_does_not_reapply_fonts(self):
         self.assertEqual(self.service(20), ["boot-cache-and-namespace|1"])
 
+    def test_idle_boot_discovery_does_not_apply_twenty_four_times(self):
+        self.assertEqual(self.service(0, LUOSHU_GOOGLE_FONT_RETRIES="24"),
+                         ["boot-cache-and-namespace|1"])
+
+    def test_boot_discovery_still_catches_new_download_after_initial_success(self):
+        self.assertEqual(self.service(0, '''
+if [ "$count" = 12 ]; then printf 'late-boot-download\\n' > "$TEST_SNAPSHOT"; fi
+''', LUOSHU_GOOGLE_FONT_RETRIES="24"),
+                         ["boot-cache-and-namespace|1", "late-boot-download|1"])
+
+    def test_stable_boot_failure_has_thirty_second_backoff(self):
+        self.assertEqual(self.service(0, LUOSHU_GOOGLE_FONT_RETRIES="24", TEST_APPLY_RC="1"),
+                         ["boot-cache-and-namespace|1"] * 4)
+
+    def test_singleton_is_owned_before_boot_wait_starts(self):
+        self.commands("getprop", '''
+[ -s "$MODDIR/.google-font-provider.lock/pid" ] || touch "$TEST_ROOT/unlocked-boot-wait"
+echo 1
+''')
+        self.assertEqual(self.service(0), ["boot-cache-and-namespace|1"])
+        self.assertFalse((self.root / "unlocked-boot-wait").exists())
+
+    def test_persistent_error_log_rotates_and_retains_latest_event(self):
+        logs = self.module / "logs"
+        logs.mkdir()
+        log = logs / "google-font-provider.log"
+        previous = b"x" * 1048576
+        log.write_bytes(previous)
+        subprocess.run(["sh", "-c", '. "$1"; _gfp_log repaired', "sh",
+                        str(ROOT / "common/google_font_provider_bridge.sh")],
+                       env=self.env, check=True, capture_output=True, timeout=5)
+        self.assertEqual(Path(str(log) + ".1").read_bytes(), previous)
+        self.assertIn("repaired", log.read_text())
+        self.assertLess(log.stat().st_size, 1024)
+
+    def test_no_downloaded_files_does_not_launch_python_or_scan_processes(self):
+        script = '''. "$1"
+_gfp_targets() { :; }
+_gfp_python() { echo unexpected-python >&2; return 91; }
+_gfp_namespace_pids() { echo unexpected-process-scan >&2; return 92; }
+_gfp_apply_once
+rc=$?
+[ "$rc" = 2 ] || exit "$rc"
+_gfp_fingerprint
+'''
+        result = subprocess.run(["sh", "-c", script, "sh",
+                                 str(ROOT / "common/google_font_provider_bridge.sh")],
+                                env=self.env, capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertRegex(result.stdout, r"^[a-f0-9]{64}\n$")
+
     def test_partial_failure_retries_at_five_minutes_not_each_watch(self):
         self.assertEqual(self.service(11, TEST_APPLY_RC="1"),
                          ["boot-cache-and-namespace|1", "boot-cache-and-namespace|0"])

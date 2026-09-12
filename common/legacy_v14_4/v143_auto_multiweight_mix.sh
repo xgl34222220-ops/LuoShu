@@ -12,7 +12,7 @@ if [ -z "$MODDIR" ]; then
 fi
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/auto-multiweight-mix"
-COMPOSITE_CACHE="$CACHE_ROOT/composites-v1"
+COMPOSITE_CACHE="$CACHE_ROOT/composites-v3"
 PUBLIC_ROOT="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 SOURCE_FONTS="$PUBLIC_ROOT/fonts"
 USER_FONTS_DIR="$SOURCE_FONTS"
@@ -265,7 +265,7 @@ build_composite_cached() {
     _output="$4"
     _progress="$5"
     mkdir -p "$COMPOSITE_CACHE" "${_output%/*}" 2>/dev/null || return 1
-    _key=$(printf '%s|%s|%s|auto-multiweight-v2-layout' \
+    _key=$(printf '%s|%s|%s|auto-multiweight-v3-metrics' \
         "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" | hash_text)
     [ -n "$_key" ] || return 1
     _cached="$COMPOSITE_CACHE/${_key}.font"

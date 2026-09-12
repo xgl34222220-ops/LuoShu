@@ -162,17 +162,10 @@ reconcile_task() {
 }
 
 terminate_child_tree() {
-    _child="$1"
-    if command -v pgrep >/dev/null 2>&1; then
-        for _desc in $(pgrep -P "$_child" 2>/dev/null); do kill -TERM "$_desc" 2>/dev/null || true; done
-    fi
-    kill -TERM "$_child" 2>/dev/null || true
-    sleep 1
-    if pid_alive "$_child"; then
-        if command -v pgrep >/dev/null 2>&1; then
-            for _desc in $(pgrep -P "$_child" 2>/dev/null); do kill -KILL "$_desc" 2>/dev/null || true; done
-        fi
-        kill -KILL "$_child" 2>/dev/null || true
+    if type luoshu_terminate_task_tree >/dev/null 2>&1; then
+        luoshu_terminate_task_tree "$1"
+    else
+        kill -TERM "$1" 2>/dev/null || true
     fi
 }
 
@@ -194,10 +187,12 @@ progress_message() {
 run_bounded() {
     _font="$1"; _output="$2"; _task="$3"; _started="$4"; _progress_file="$5"
     LUOSHU_SWITCH_PROGRESS_FILE="$_progress_file" sh "$MANAGER" action switch "$_font" > "$_output" 2>&1 &
-    _child=$!; _elapsed=0; _next_heartbeat=0
+    _child=$!; _switch_child=$_child; _elapsed=0; _next_heartbeat=0
     while pid_alive "$_child"; do
         if [ "$_elapsed" -ge "$TIMEOUT_SECONDS" ]; then
-            terminate_child_tree "$_child"; wait "$_child" 2>/dev/null || true; return 124
+            terminate_child_tree "$_child"; wait "$_child" 2>/dev/null || true
+            _switch_child=
+            return 124
         fi
         if [ "$_elapsed" -ge "$_next_heartbeat" ]; then
             _fallback=$((5 + (_elapsed * 80 / TIMEOUT_SECONDS)))
@@ -211,13 +206,33 @@ run_bounded() {
         sleep 1; _elapsed=$((_elapsed + 1))
     done
     wait "$_child"
+    _switch_rc=$?
+    _switch_child=
+    return "$_switch_rc"
+}
+
+worker_signal_exit() {
+    _switch_signal_code="$1"
+    trap '' HUP INT TERM
+    if [ -n "${_switch_child:-}" ]; then
+        terminate_child_tree "$_switch_child"
+        wait "$_switch_child" 2>/dev/null || true
+        _switch_child=
+    fi
+    write_task "$_worker_task" failed "$_font" '字体切换已终止，当前启动字体未被改动' \
+        "$_started" "$(date +%s 2>/dev/null || echo 0)" '' '' '' "${_elapsed:-0}" '' false 100 || true
+    exit "$_switch_signal_code"
 }
 
 run_worker() {
     _task="$1"; _font="$2"; _started="$3"
+    _worker_task=$_task
     _output="${TASK_FILE}.output.${_task}"
     _progress="${TASK_FILE}.progress.${_task}"
-    trap 'rm -f "$_progress" 2>/dev/null || true; type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$WORKER_PID_FILE" "$_task"' EXIT HUP INT TERM
+    trap 'rm -f "$_progress" 2>/dev/null || true; type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$WORKER_PID_FILE" "$_worker_task"' EXIT
+    trap 'worker_signal_exit 129' HUP
+    trap 'worker_signal_exit 130' INT
+    trap 'worker_signal_exit 143' TERM
     mkdir -p "${LOG_FILE%/*}" 2>/dev/null || true
     printf 'percent=2\nmessage=正在启动字体切换任务\n' > "$_progress" 2>/dev/null || true
     write_task "$_task" running "$_font" '2% · 正在启动字体切换任务' "$_started" '' "$$" '' '' 0 '' false 2 || exit 1

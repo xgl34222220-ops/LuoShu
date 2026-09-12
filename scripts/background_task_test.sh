@@ -47,3 +47,4 @@ test ! -e "${PID_FILE}.task"
 test ! -e "${PID_FILE}.boot"
 
 echo 'background_task_test: PASS'
+python3 "$ROOT/scripts/background_task_tree_test.py"

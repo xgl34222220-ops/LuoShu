@@ -83,11 +83,11 @@ internal fun StudioCompositePreviewDialogCompact(
             Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("最终组合预览", fontSize = 25.sp, fontWeight = FontWeight.Black)
+                        Text("最终组合预览", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
                         Text(
                             "对照系统字体，检查混排比例、字重和基线",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                         )
                     }
                     IconButton(onClick = onDismiss) {
@@ -126,11 +126,11 @@ internal fun StudioCompositePreviewDialogCompact(
                     }
                     item {
                         Column(Modifier.padding(top = 2.dp)) {
-                            Text("快速方案", fontSize = 17.sp, fontWeight = FontWeight.Black)
+                            Text("快速方案", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                             Text(
                                 "只调整三个槽位的字重，不会更换已选择字体。",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 10.sp,
+                                fontSize = 12.sp,
                             )
                         }
                     }
@@ -147,11 +147,11 @@ internal fun StudioCompositePreviewDialogCompact(
                             color = MaterialTheme.colorScheme.primary.copy(alpha = .08f),
                         ) {
                             Text(
-                                "这是槽位级视觉模拟。最终覆盖率、系统加载和开机结果仍以生成任务与设备验证为准。",
+                                "此处预览所选字体的搭配效果，应用后的实际显示以手机界面为准。",
                                 modifier = Modifier.fillMaxWidth().padding(13.dp),
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 10.sp,
-                                lineHeight = 15.sp,
+                                fontSize = 12.sp,
+                                lineHeight = 18.sp,
                             )
                         }
                     }
@@ -164,7 +164,7 @@ internal fun StudioCompositePreviewDialogCompact(
                 ) {
                     Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(7.dp))
-                    Text("完成", fontWeight = FontWeight.Black)
+                    Text("完成", fontWeight = FontWeight.SemiBold)
                 }
             }
         }
@@ -183,7 +183,7 @@ private fun CompactScenarioSelector(
         CompactPreviewScenario.entries.forEach { scenario ->
             Surface(
                 onClick = { onSelect(scenario) },
-                modifier = Modifier.width(66.dp),
+                modifier = Modifier.width(72.dp).heightIn(min = 44.dp),
                 shape = RoundedCornerShape(15.dp),
                 color = if (scenario == selected) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceContainer,
@@ -194,8 +194,8 @@ private fun CompactScenarioSelector(
                     scenario.label,
                     modifier = Modifier.padding(vertical = 10.dp),
                     textAlign = TextAlign.Center,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Black,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
         }
@@ -217,8 +217,8 @@ private fun CompactPreviewCard(
         shadowElevation = if (style == UiStyle.MIUIX) 4.dp else 0.dp,
     ) {
         Column(Modifier.padding(14.dp)) {
-            Text(title, fontSize = 14.sp, fontWeight = FontWeight.Black)
-            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
+            Text(title, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             Spacer(Modifier.height(9.dp))
             content()
         }
@@ -390,11 +390,11 @@ private fun CompactPresetRow(
             }
             Spacer(Modifier.width(11.dp))
             Column(Modifier.weight(1f)) {
-                Text(preset.label, fontSize = 13.sp, fontWeight = FontWeight.Black)
+                Text(preset.label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Text(
                     preset.description,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 9.sp,
+                    fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -402,7 +402,7 @@ private fun CompactPresetRow(
             Text(
                 "${preset.cjkWeight} · ${preset.latinWeight} · ${preset.digitWeight}",
                 color = MaterialTheme.colorScheme.primary,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
             )
         }

@@ -156,8 +156,8 @@ luoshu_migrate_update_cache() {
     _new="$2"
     _schema_compatible="${3:-false}"
     for _relative in \
-        cache/full-composite-v11 \
-        cache/auto-multiweight-mix/composites-v8 \
+        cache/full-composite-v12 \
+        cache/auto-multiweight-mix/composites-v9 \
         cache/auto-multiweight-mix/prepared-v8 \
         cache/auto-multiweight-mix/source-meta-v1; do
         [ -d "$_old/$_relative" ] || continue
@@ -171,8 +171,8 @@ luoshu_migrate_update_cache() {
     # switch instead of being synthesized again after every module replacement.
     if [ "$_schema_compatible" = true ]; then
         for _relative in \
-            cache/full-composite-v5 \
-            cache/auto-multiweight-mix/composites-v1; do
+            cache/full-composite-v7 \
+            cache/auto-multiweight-mix/composites-v3; do
             [ -d "$_old/$_relative" ] || continue
             rm -rf "$_new/$_relative" 2>/dev/null || true
             mkdir -p "${_new}/${_relative%/*}" 2>/dev/null || continue

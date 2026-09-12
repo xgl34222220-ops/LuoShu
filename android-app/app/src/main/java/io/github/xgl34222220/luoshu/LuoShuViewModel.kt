@@ -6,9 +6,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -142,7 +147,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     private var cachedFingerprint: String = ""
     private var fontRequestJob: Job? = null
     private var refreshJob: Job? = null
+    private var logsJob: Job? = null
     private var mixConfigJob: Job? = null
+    private val foreground = MutableStateFlow(true)
     private var pendingForceRefresh = false
     private var prewarmRequested = false
 
@@ -208,9 +215,13 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         _searchQuery = value
     }
 
+    fun setForeground(visible: Boolean) {
+        foreground.value = visible
+    }
+
     fun refresh() {
+        if (refreshJob?.isActive == true) return
         snapshot = snapshot.copy(loading = true, error = "")
-        refreshJob?.cancel()
         refreshJob = viewModelScope.launch {
             val result = RootShell.exec(
                 "if [ -f ${RootShell.quote(bridge)} ]; then sh ${RootShell.quote(bridge)} status; " +
@@ -274,7 +285,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 fontLoading = false
                 fontRefreshing = false
                 fontRequestJob = null
-                if (pendingForceRefresh) {
+                if (pendingForceRefresh && currentCoroutineContext().isActive) {
                     pendingForceRefresh = false
                     refreshFonts(force = true)
                 }
@@ -480,6 +491,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 val taskId = root.optJSONObject("data")?.optString("task").orEmpty()
                 if (taskId.isBlank()) error("复合字体任务 ID 缺失")
                 watchMixTask(taskId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
                 finishMixFailure(error.message ?: "复合字体生成失败")
             }
@@ -522,6 +535,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 val taskId = startJson.optJSONObject("data")?.optString("task").orEmpty()
                 if (taskId.isBlank()) error("字体任务 ID 缺失")
                 watchSwitchTask(taskId, fontId)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (error: Throwable) {
                 operationMessage = error.message ?: "字体应用失败"
                 snapshot = snapshot.copy(taskState = "failed", taskMessage = operationMessage)
@@ -571,7 +586,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun refreshLogs() {
-        viewModelScope.launch {
+        if (logsJob?.isActive == true) return
+        logsJob = viewModelScope.launch {
             val result = RootShell.exec(
                 "if [ -f ${RootShell.quote(bridge)} ]; then sh ${RootShell.quote(bridge)} logs 180; " +
                     "else tail -n 180 /data/adb/modules/LuoShu/logs/fontswitch.log 2>/dev/null; fi",
@@ -633,6 +649,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     }
 
     private suspend fun watchSwitchTask(taskId: String, fontId: String) {
+        if (watchedTaskId == taskId) return
         watchedTaskId = taskId
         operationBusy = true
         try {
@@ -643,6 +660,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                     taskId = taskId,
                     taskState = data.optString("state", "running"),
                     taskMessage = operationMessage,
+                    taskProgress = data.optInt("percent", snapshot.taskProgress).coerceIn(0, 100),
                 )
             }
             if (result.optString("state") != "success") error(result.optString("message", "字体应用失败"))
@@ -665,6 +683,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 rebootRequired = nextRebootRequired,
             )
             persistFontIndex(currentFont = applied)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Throwable) {
             operationMessage = error.message ?: "字体应用失败"
             snapshot = snapshot.copy(taskState = "failed", taskMessage = operationMessage, taskProgress = 100)
@@ -675,6 +695,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     }
 
     private suspend fun watchMixTask(taskId: String) {
+        if (watchedTaskId == taskId) return
         watchedTaskId = taskId
         mixState = mixState.copy(
             busy = true,
@@ -728,6 +749,8 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 rebootRequired = nextRebootRequired,
             )
             persistFontIndex(currentFont = "mix")
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (error: Throwable) {
             finishMixFailure(error.message ?: "复合字体生成失败")
         } finally {
@@ -741,16 +764,18 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         timeoutSeconds: Int,
         onProgress: (JSONObject) -> Unit,
     ): JSONObject {
-        var elapsed = 0
         var failures = 0
-        var deadlineSeconds = timeoutSeconds
-        while (elapsed < deadlineSeconds) {
-            val interval = if (elapsed < 30) 1 else 2
-            delay(interval * 1_000L)
-            elapsed += interval
+        val budget = TaskPollBudget(timeoutSeconds.toLong() * 1_000L)
+        while (budget.remainingMs > 0L) {
+            awaitForeground(budget)
+            val intervalMs = if (budget.elapsedMs < 30_000L) 1_000L else 2_000L
+            delay(minOf(intervalMs, budget.remainingMs))
+            awaitForeground(budget)
+            val remainingMs = budget.remainingMs
+            if (remainingMs <= 0L) break
             val status = RootShell.exec(
                 "sh ${RootShell.quote(bridge)} $command ${RootShell.quote(taskId)}",
-                timeoutMs = 15_000L,
+                timeoutMs = minOf(15_000L, remainingMs),
             )
             if (status.code != 0) {
                 failures += 1
@@ -766,13 +791,20 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             }
             failures = 0
             val advertisedTimeout = data.optInt("timeout", 0)
-            if (advertisedTimeout > 0) deadlineSeconds = maxOf(deadlineSeconds, advertisedTimeout + 30)
+            if (advertisedTimeout > 0) budget.extendTo((advertisedTimeout.toLong() + 30L) * 1_000L)
             onProgress(data)
             when (data.optString("state")) {
                 "success", "failed" -> return data
             }
         }
         error("字体任务超时，请查看日志")
+    }
+
+    private suspend fun awaitForeground(budget: TaskPollBudget) {
+        if (foreground.value) return
+        val pausedAt = System.nanoTime()
+        foreground.first { it }
+        budget.excludePause((System.nanoTime() - pausedAt) / 1_000_000L)
     }
 
     private fun finishMixFailure(message: String) {

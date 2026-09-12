@@ -3,7 +3,9 @@ package io.github.xgl34222220.luoshu.ui.theme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -25,12 +27,12 @@ import androidx.compose.ui.unit.dp
  * compensates only the vector path, so selected/disabled/loading states never jump.
  */
 internal object LuoShuIconTokens {
-    // Keep a full 48 dp touch target. The visible 40 dp surface matches the reference app's
+    // Keep a full 48 dp touch target. The visible 44 dp surface matches the reference app's
     // header actions: clearly discoverable without returning to the oversized 56 dp tile.
     val HeaderTouchTarget = 48.dp
-    val HeaderContainer = 40.dp
+    val HeaderContainer = 44.dp
     val HeaderGlyph = 21.dp
-    val DockGlyph = 18.dp
+    val DockGlyph = 22.dp
     val SectionGlyph = 18.dp
     val ToolGlyph = 20.dp
     val LeadingGlyph = 20.dp
@@ -83,16 +85,16 @@ internal fun LuoShuHeaderAction(
     ) {
         Surface(
             modifier = Modifier.size(LuoShuIconTokens.HeaderContainer),
-            shape = RoundedCornerShape(14.dp),
+            shape = CircleShape,
             color = containerColor,
             contentColor = resolvedContentColor,
             tonalElevation = 0.dp,
-            shadowElevation = 0.dp,
+            shadowElevation = 1.dp,
         ) {
             IconButton(
                 onClick = onClick,
-                enabled = enabled,
-                modifier = Modifier.fillMaxSize(),
+                enabled = enabled && !loading,
+                modifier = Modifier.fillMaxSize().semantics { this.contentDescription = contentDescription },
                 colors = IconButtonDefaults.iconButtonColors(
                     contentColor = resolvedContentColor,
                     disabledContentColor = resolvedContentColor.copy(alpha = .38f),

@@ -107,6 +107,26 @@ class HyperOSMetricsTest(unittest.TestCase):
         result = batch.build(self.module, self.stage, ['MiSansVF.ttf'])
         self.assertEqual(result['generated'], 1)
 
+    def test_stage_completion_releases_temporary_fonts_after_linking(self):
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot(),
+                        '/product/fonts/MiSansVF.ttf': slot()})
+        for _ in range(3):
+            batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+            store = self.fonts / '.luoshu-font-store'
+            self.assertEqual(list(store.glob('hyperos-metrics-*')), [])
+            # Removing generator names must leave both partition aliases usable.
+            for part in ('system', 'product'):
+                with TTFont(self.stage / part / 'fonts/MiSansVF.ttf') as font:
+                    self.assertEqual(font['hhea'].ascent, 1100)
+                    self.assertIn(65, font.getBestCmap())
+
+    def test_failed_stage_completion_releases_temporary_fonts(self):
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot()})
+        with patch.object(batch, 'write_metrics', side_effect=ValueError('bad source')):
+            with self.assertRaisesRegex(ValueError, 'bad source'):
+                batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+        self.assertEqual(list((self.fonts / '.luoshu-font-store').glob('hyperos-metrics-*')), [])
+
     def test_latin_bitmap_policy_does_not_leak_to_main_or_clock(self):
         slots = {f'/system/fonts/{name}': slot(use_typo=False, head=(-430, 1100))
                  for name in ('Roboto-Regular.ttf', 'MiSansVF.ttf', 'MiClock.otf')}

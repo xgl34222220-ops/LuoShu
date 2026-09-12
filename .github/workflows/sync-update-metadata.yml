@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  actions: read
+  pull-requests: write
 
 concurrency:
   group: luoshu-update-metadata
@@ -117,3 +119,20 @@ jobs:
           done
           echo 'Unable to push update metadata after three attempts.' >&2
           exit 4
+
+      - name: Archive and retire approved v4.2.0 branches
+        if: ${{ steps.release.outputs.tag == 'v4.2.0' && steps.release.outputs.output == 'update.json' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          RELEASE_RUN_ID: ${{ github.event.workflow_run.id }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release_branch_cleanup.py \
+            --manifest config/release_branch_cleanup_v4.2.0.json \
+            --tag "$RELEASE_TAG" \
+            --release-sha "$RELEASE_SHA" \
+            --release-run-id "$RELEASE_RUN_ID" \
+            --apply

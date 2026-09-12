@@ -45,6 +45,29 @@ printf '%s\n' "$REPAIR" | grep -qx 'status=ok'
 test ! -e "$MOD/.font_switch.lock"
 test ! -e "$MOD/config/dead.pid"
 
+# Repair must keep a live task's nonnumeric identity rather than parsing it as
+# a PID, and clean stale boot records even if their PID has since been recycled.
+cp "$ROOT/common/background_task.sh" "$MOD/common/background_task.sh"
+printf '%s\n' "$$" > "$MOD/config/live.pid"
+printf 'active-task-123\n' > "$MOD/config/live.pid.task"
+printf '%s\n' "$$" > "$MOD/config/stale-boot.pid"
+printf 'active-task-123\n' > "$MOD/config/stale-boot.pid.task"
+printf 'previous-boot\n' > "$MOD/config/stale-boot.pid.boot"
+printf 'orphan-task\n' > "$MOD/config/orphan.pid.task"
+# Keep this fixture independent of the executor's unusual /proc PID namespace;
+# use the actual identity helper for boot checks and an exact synthetic cmdline.
+sed 's@/proc/$_ltpa_pid/cmdline@'"$TMP"'/proc/$_ltpa_pid/cmdline@g' \
+    "$ROOT/common/background_task.sh" > "$MOD/common/background_task.sh"
+mkdir -p "$TMP/proc/$$"
+printf 'sh\000worker\000active-task-123\000' > "$TMP/proc/$$/cmdline"
+MODDIR="$MOD" sh "$ROOT/system/bin/luoshu-health" repair-stale >/dev/null
+test -s "$MOD/config/live.pid"
+test "$(cat "$MOD/config/live.pid.task")" = active-task-123
+test ! -e "$MOD/config/stale-boot.pid"
+test ! -e "$MOD/config/stale-boot.pid.task"
+test ! -e "$MOD/config/stale-boot.pid.boot"
+test ! -e "$MOD/config/orphan.pid.task"
+
 mkdir -p "$OTHER/disable"
 OUT2=$(MODDIR="$MOD" LUOSHU_ADB_ROOT="$TMP/adb" LUOSHU_MODULES_ROOT="$TMP/adb/modules" sh "$ROOT/system/bin/luoshu-health" report)
 printf '%s\n' "$OUT2" | grep -qx 'conflictCount=0'

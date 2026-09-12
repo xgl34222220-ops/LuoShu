@@ -1,13 +1,16 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,6 +22,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -59,7 +64,7 @@ internal fun MaterialStudioAxisControls(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(fontAxisDisplayName(axis.tag), fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text(axis.tag, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 9.sp)
+                                Text(axis.tag, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                             }
                             Surface(
                                 shape = RoundedCornerShape(999.dp),
@@ -69,8 +74,8 @@ internal fun MaterialStudioAxisControls(
                                     fontAxisValueLabel(current),
                                     modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
                                     color = MaterialTheme.colorScheme.primary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Black,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
                                 )
                             }
                         }
@@ -82,7 +87,7 @@ internal fun MaterialStudioAxisControls(
                                 } else raw.coerceIn(minimum, maximum)
                                 onAxis(axis.tag, next)
                             },
-                            enabled = enabled,
+                            enabled = enabled && maximum > minimum,
                             valueRange = minimum..maximum,
                             steps = if (isWeight && maximum > minimum) {
                                 (((maximum - minimum) / 10f).roundToInt() - 1).coerceAtLeast(0)
@@ -91,7 +96,7 @@ internal fun MaterialStudioAxisControls(
                         Text(
                             "${fontAxisValueLabel(minimum)} · 默认 ${fontAxisValueLabel(axis.default)} · ${fontAxisValueLabel(maximum)}",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 9.sp,
+                            fontSize = 12.sp,
                         )
                     }
                 }
@@ -99,7 +104,7 @@ internal fun MaterialStudioAxisControls(
         }
         fontStaticWeights(font).size >= 2 -> {
             Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 fontStaticWeights(font).forEach { option ->
@@ -114,9 +119,9 @@ internal fun MaterialStudioAxisControls(
         }
         else -> {
             Text(
-                "固定 ${fontWeightName(fontFixedWeight(font))}，没有可调设计轴。",
+                "字重：${fontWeightName(fontFixedWeight(font))}，此字体不支持调节。",
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
             )
         }
     }
@@ -153,10 +158,10 @@ internal fun MiuixStudioAxisControls(
                                     fontAxisDisplayName(axis.tag),
                                     color = tokens.textPrimary,
                                     fontSize = 14.sp,
-                                    fontWeight = FontWeight.Black,
+                                    fontWeight = FontWeight.SemiBold,
                                     modifier = Modifier.weight(1f),
                                 )
-                                Text(axis.tag, color = tokens.textSecondary, fontSize = 9.sp)
+                                Text(axis.tag, color = tokens.textSecondary, fontSize = 12.sp)
                                 Spacer(Modifier.width(8.dp))
                                 Surface(
                                     shape = RoundedCornerShape(999.dp),
@@ -166,8 +171,8 @@ internal fun MiuixStudioAxisControls(
                                         fontAxisValueLabel(current),
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                                         color = MaterialTheme.colorScheme.primary,
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Black,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
                                     )
                                 }
                             }
@@ -179,18 +184,18 @@ internal fun MiuixStudioAxisControls(
                                     } else raw.coerceIn(minimum, maximum)
                                     onAxis(axis.tag, next)
                                 },
-                                enabled = enabled,
+                                enabled = enabled && maximum > minimum,
                                 valueRange = minimum..maximum,
                                 steps = if (isWeight && maximum > minimum) {
                                     (((maximum - minimum) / 10f).roundToInt() - 1).coerceAtLeast(0)
                                 } else 0,
                             )
                             Row(Modifier.fillMaxWidth()) {
-                                Text(fontAxisValueLabel(minimum), color = tokens.textSecondary, fontSize = 9.sp)
+                                Text(fontAxisValueLabel(minimum), color = tokens.textSecondary, fontSize = 12.sp)
                                 Spacer(Modifier.weight(1f))
-                                Text("默认 ${fontAxisValueLabel(axis.default)}", color = tokens.textSecondary, fontSize = 9.sp)
+                                Text("默认 ${fontAxisValueLabel(axis.default)}", color = tokens.textSecondary, fontSize = 12.sp)
                                 Spacer(Modifier.weight(1f))
-                                Text(fontAxisValueLabel(maximum), color = tokens.textSecondary, fontSize = 9.sp)
+                                Text(fontAxisValueLabel(maximum), color = tokens.textSecondary, fontSize = 12.sp)
                             }
                         }
                     }
@@ -199,7 +204,7 @@ internal fun MiuixStudioAxisControls(
         }
         fontStaticWeights(font).size >= 2 -> {
             Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).selectableGroup(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 fontStaticWeights(font).forEach { option ->
@@ -218,10 +223,10 @@ internal fun MiuixStudioAxisControls(
                 color = tokens.textPrimary.copy(alpha = .035f),
             ) {
                 Text(
-                    "固定 ${fontWeightName(fontFixedWeight(font))} · 无可调设计轴",
+                    "字重：${fontWeightName(fontFixedWeight(font))} · 无需调节",
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 10.dp),
                     color = tokens.textSecondary,
-                    fontSize = 10.sp,
+                    fontSize = 12.sp,
                 )
             }
         }
@@ -233,41 +238,46 @@ private fun AxisLoadingRow() {
     Row(verticalAlignment = Alignment.CenterVertically) {
         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         Spacer(Modifier.width(9.dp))
-        Text("正在读取真实可变轴…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+        Text("正在读取可调参数…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
     }
 }
 
 @Composable
 private fun MaterialWeightChip(text: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    Surface(
-        modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
-        shape = RoundedCornerShape(999.dp),
-        color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-    ) {
-        Text(
-            text,
-            modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
-            color = if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-        )
-    }
+    WeightChoiceChip(text, selected, enabled, RoundedCornerShape(999.dp), onClick)
 }
 
 @Composable
 private fun MiuixWeightChip(text: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {
-    val tokens = LocalMiuixTokens.current
+    WeightChoiceChip(text, selected, enabled, RoundedCornerShape(16.dp), onClick)
+}
+
+@Composable
+private fun WeightChoiceChip(
+    text: String,
+    selected: Boolean,
+    enabled: Boolean,
+    shape: RoundedCornerShape,
+    onClick: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
     Surface(
-        modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
-        shape = RoundedCornerShape(16.dp),
-        color = if (selected) MaterialTheme.colorScheme.primary else tokens.textPrimary.copy(alpha = .05f),
+        modifier = Modifier.clip(shape).selectable(
+            selected = selected,
+            enabled = enabled,
+            role = Role.RadioButton,
+            onClick = onClick,
+        ),
+        shape = shape,
+        color = if (selected) scheme.primary else scheme.surfaceContainerHigh,
+        contentColor = (if (selected) scheme.onPrimary else scheme.onSurface)
+            .copy(alpha = if (enabled) 1f else .45f),
     ) {
-        Text(
-            text,
-            modifier = Modifier.padding(horizontal = 13.dp, vertical = 9.dp),
-            color = if (selected) MaterialTheme.colorScheme.onPrimary else tokens.textPrimary,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Black,
-        )
+        Box(
+            Modifier.heightIn(min = 48.dp).padding(horizontal = 14.dp, vertical = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }

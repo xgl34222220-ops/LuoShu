@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "repository": "xgl34222220-ops/LuoShu",
+  "default_branch": "main",
+  "tag": "v4.2.0",
+  "release_workflow": ".github/workflows/release.yml",
+  "archive_prefix": "archive/v4.2.0/",
+  "authorization": "Maintainer requested removal of obsolete branches after the successful 4.2.0 stable release and online metadata synchronization.",
+  "branches": [
+    {"name": "debug/v4-legacy-gate", "sha": "63fe436b01dc71475e2d6dfb4e04e7192901fbaf", "rationale": "One-time v4 legacy workflow gate trigger; superseded by the stable release checks."},
+    {"name": "debug/v4-stability-final", "sha": "379572b4d4fafa1cb4ae7776c1b56afb97c8f4c0", "rationale": "One-time v4 stability workflow trigger; no continuing development."},
+    {"name": "debug/v4-task-gate", "sha": "fad93f2381203741cfd7dcd1266d0092f091e03f", "rationale": "One-time v4 task workflow gate trigger; superseded by the stable release checks."},
+    {"name": "debug/v4-task-gate-2", "sha": "ce69512011755aa773f8c7beff0425e56510c54e", "rationale": "Second one-time v4 task workflow gate trigger; no continuing development."},
+    {"name": "feat/v3.3.7-boxproxy-ui", "sha": "537657575b1275dfadbe96b8f0ce67f4699bdb5f", "rationale": "Obsolete v3.3.7 UI work replaced by PR196/198; PR197 is closed."},
+    {"name": "fix/v4.0.0-usable-release", "sha": "ac472d90ffb1edb57eb845701817081c78e9c411", "rationale": "Old v4.0.0 repair line superseded by v4.1 and v4.2; obsolete PR202 and reverse-sync PR203 may be closed only after release verification."},
+    {"name": "hotfix/v4.0.1-safe-payload-migration", "sha": "aef49a6ad22f3fa02427b09100e91dff5e158263", "rationale": "Unused v4.0.1 repair proposal; PR200 is closed and migration fixes are maintained on the stable line."},
+    {"name": "release/emergency-v3.3.0-trigger", "sha": "fc17e60d8410082592a8e29f190cb23b291fe7bb", "rationale": "Historical emergency release trigger already represented on main."},
+    {"name": "reset-v3.2.0-source", "sha": "66df2b793c2d0ee8ed21d3eafd0947f96d19d159", "rationale": "Historical reset source already represented on main."},
+    {"name": "fix/font-switch-provider-diagnostics", "merged_pr": 217, "rationale": "Remove the 4.2.0 repair branch only after PR217 is merged and its exact head is an ancestor of the published release."}
+  ],
+  "obsolete_prs": [
+    {"number": 202, "head": "fix/v4.0.0-usable-release", "base": "main", "head_sha": "ac472d90ffb1edb57eb845701817081c78e9c411"},
+    {"number": 203, "head": "main", "base": "fix/v4.0.0-usable-release", "head_ancestor": "8b058994980544a80358f03859c86631e6b5d97c"}
+  ]
+}

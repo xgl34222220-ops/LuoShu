@@ -27,7 +27,8 @@ from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
 
-from composite_layout import _role_transform, enclose_imported_bounds
+from composite_layout import (_role_transform, clear_imported_metric_variations,
+                              enclose_imported_bounds)
 
 LATIN_CODEPOINTS = (
     set(range(0x0020, 0x0030))
@@ -250,6 +251,7 @@ def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], ro
             missing.append(cp)
             continue
         base["hmtx"].metrics[base_name] = (advance, lsb)
+        clear_imported_metric_variations(base, base_name)
         replaced += 1
     return replaced, missing
 

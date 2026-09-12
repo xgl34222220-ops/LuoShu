@@ -109,7 +109,8 @@ class ProviderPatchTest(unittest.TestCase):
         (module / "config/active_font.conf").write_text("fixture\n")
         marker = self.root / "passes"
         (module / "common/google_font_provider_bridge.sh").write_text(
-            'printf "pass\\n" >> "$PROVIDER_TEST_MARKER"\nexit 0\n')
+            'case "$1" in fingerprint) echo unchanged;; '
+            'apply) printf "pass\\n" >> "$PROVIDER_TEST_MARKER";; esac\nexit 0\n')
         shutil.copyfile(ROOT / "common/font_switch_lock.sh", module / "common/font_switch_lock.sh")
         commands = self.root / "bin"
         commands.mkdir()
@@ -121,7 +122,7 @@ class ProviderPatchTest(unittest.TestCase):
                    LUOSHU_GOOGLE_FONT_WATCH_CYCLES="0",
                    PROVIDER_TEST_MARKER=str(marker), PATH=f"{commands}:{os.environ['PATH']}")
         subprocess.run(["sh", str(ROOT / "common/google_font_provider_service.sh")], env=env, check=True)
-        self.assertEqual(marker.read_text().splitlines(), ["pass", "pass", "pass"])
+        self.assertEqual(marker.read_text().splitlines(), ["pass"])
 
     def test_equal_clone_skips_remount_in_target_namespace(self):
         source = self.font("source.ttf")
@@ -150,6 +151,10 @@ class ProviderPatchTest(unittest.TestCase):
         (module / "config/active_font.conf").write_text("fixture\n")
         target = self.font("opaque")
         source = self.font("source.ttf", family="Custom")
+        cache = module / "config/google-font-provider"
+        cache.mkdir()
+        old_clone = cache / "previous-selection.ttf"
+        shutil.copyfile(source, old_clone)
         shutil.copyfile(source, module / "config/device-font-sources/LuoShu-400.ttf")
         shutil.copyfile(ROOT / "common/google_font_provider_patch.py", module / "common/google_font_provider_patch.py")
         script = '''. "$1"
@@ -167,6 +172,34 @@ _gfp_apply_once
                                 env=env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("failed:1", (module / "logs/google-font-provider.log").read_text())
+        self.assertTrue(old_clone.exists(), "partial repair discarded a potentially needed clone")
+
+    def test_complete_repair_removes_obsolete_clones_but_preserves_current_state(self):
+        module = self.root / "module"
+        (module / "common").mkdir(parents=True)
+        (module / "config/device-font-sources").mkdir(parents=True)
+        (module / "config/active_font.conf").write_text("fixture\n")
+        target = self.font("opaque")
+        source = self.font("source.ttf", family="Custom")
+        shutil.copyfile(source, module / "config/device-font-sources/LuoShu-400.ttf")
+        shutil.copyfile(ROOT / "common/google_font_provider_patch.py", module / "common/google_font_provider_patch.py")
+        cache = module / "config/google-font-provider"
+        cache.mkdir()
+        old_clone = cache / "previous-selection.ttf"
+        shutil.copyfile(source, old_clone)
+        script = '''. "$1"
+_gfp_namespace_pids() { printf '10\\n'; }
+_gfp_mount_in_pid() { _gfp_mount_mode=already; return 0; }
+_gfp_apply_once
+'''
+        env = dict(os.environ, MODDIR=str(module), LUOSHU_GOOGLE_FONT_PYTHON=sys.executable,
+                   LUOSHU_GOOGLE_FONT_TARGETS=str(target), LUOSHU_GOOGLE_FONT_ALLOW_RESTART="0")
+        subprocess.run(["sh", "-c", script, "sh", str(ROOT / "common/google_font_provider_bridge.sh")],
+                       env=env, capture_output=True, check=True)
+        current = Path((module / "config/google-font-provider-mounts.conf").read_text().split("|")[1])
+        self.assertTrue(current.exists())
+        self.assertFalse(old_clone.exists())
+        self.assertEqual(list(cache.glob("*.ttf")), [current])
 
     def test_existing_clone_visible_at_target_reuses_original_cache_entry(self):
         module = self.root / "module"

@@ -52,9 +52,56 @@ luoshu_clear_task_pid() {
 luoshu_stop_task_pid() {
     _lstp_pid_file="$1"
     _lstp_pid=$(luoshu_pid_value "$_lstp_pid_file")
-    [ -z "$_lstp_pid" ] || ! kill -0 "$_lstp_pid" 2>/dev/null || kill "$_lstp_pid" 2>/dev/null || true
+    _lstp_task=$(cat "${_lstp_pid_file}.task" 2>/dev/null)
+    if luoshu_task_pid_alive "$_lstp_pid_file" "$_lstp_task"; then
+        luoshu_terminate_task_tree "$_lstp_pid"
+    fi
     luoshu_clear_task_pid "$_lstp_pid_file"
 }
+
+# Cancellation is rare: take one process-tree snapshot, rather than running a
+# pgrep for every child. Keep the descendants after their parents exit so a
+# grandchild FontTools worker cannot escape the final KILL by being reparented.
+# Start-time checks keep the saved list from signalling a recycled PID.
+luoshu_terminate_task_tree() (
+    _ltt_root="$1"
+    case "$_ltt_root" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    [ "$_ltt_root" != "$$" ] || return 1
+    _ltt_proc_root="${LUOSHU_PROC_ROOT:-/proc}"
+    _ltt_identity() {
+        IFS= read -r _ltt_stat 2>/dev/null < "$_ltt_proc_root/$1/stat" || return 1
+        _ltt_tail=${_ltt_stat##*) }
+        [ "$_ltt_tail" != "$_ltt_stat" ] || return 1
+        set -- $_ltt_tail
+        [ "$#" -ge 20 ] || return 1
+        shift 19
+        printf '%s\n' "$1"
+    }
+    _ltt_pids=$(ps -A -o PID,PPID 2>/dev/null | awk -v root="$_ltt_root" '
+        $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { parent[$1] = $2 }
+        function children(p, child) {
+            if (seen[p]++) return
+            for (child in parent) if (parent[child] == p) children(child)
+            print p
+        }
+        END { children(root) }
+    ')
+    _ltt_saved=$(
+        for _ltt_pid in $_ltt_pids; do
+            _ltt_start=$(_ltt_identity "$_ltt_pid") || continue
+            printf '%s:%s\n' "$_ltt_pid" "$_ltt_start"
+        done
+    )
+    for _ltt_signal in TERM KILL; do
+        for _ltt_record in $_ltt_saved; do
+            _ltt_pid=${_ltt_record%%:*}
+            _ltt_start=${_ltt_record#*:}
+            [ "$(_ltt_identity "$_ltt_pid" 2>/dev/null)" = "$_ltt_start" ] || continue
+            kill -"$_ltt_signal" "$_ltt_pid" 2>/dev/null || true
+        done
+        [ "$_ltt_signal" != TERM ] || sleep 1
+    done
+)
 
 luoshu_start_detached() {
     _lsd_pid_file="$1"
