@@ -30,13 +30,13 @@ for metadata_file in ("update.json", "update-prerelease.json"):
     actual = json.loads((ROOT / metadata_file).read_text(encoding="utf-8"))
     version = actual['version']
     assert isinstance(version, str) and version.startswith('v')
-    assert mod.artifact_version(version) == version
+    tag = mod.artifact_version(version)
     assert isinstance(actual['versionCode'], int) and actual['versionCode'] > 0
-    notes_file = f"RELEASE_NOTES_{version}.md"
+    notes_file = f"RELEASE_NOTES_{version.replace(' ', '_')}.md"
     assert (ROOT / notes_file).is_file(), (metadata_file, notes_file)
     expected = mod.build_metadata(
         repository="xgl34222220-ops/LuoShu", version=version,
-        version_code=actual['versionCode'], tag=version, notes_file=notes_file,
+        version_code=actual['versionCode'], tag=tag, notes_file=notes_file,
     )
     assert actual == expected, (metadata_file, actual)
 

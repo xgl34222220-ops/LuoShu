@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -76,6 +77,118 @@ esac
 
     def test_idle_watch_does_not_reapply_fonts(self):
         self.assertEqual(self.service(20), ["boot-cache-and-namespace|1"])
+
+    def theme_fixture(self):
+        (self.root / 'theme-snapshot').write_text('theme-one\n')
+        (self.module / 'common/hyperos_theme_font_bridge.sh').write_text('''
+case "$1" in
+    fingerprint) cat "$TEST_ROOT/theme-snapshot" ;;
+    apply)
+        cat "$TEST_ROOT/theme-snapshot" >> "$TEST_ROOT/theme-applied"
+        exit "${TEST_THEME_RC:-0}"
+        ;;
+    restore)
+        echo restored >> "$TEST_ROOT/theme-restored"
+        count=$(wc -l < "$TEST_ROOT/theme-restored")
+        [ "$count" -gt "${TEST_THEME_RESTORE_FAILURES:-0}" ] || exit 1
+        ;;
+esac
+''')
+
+    def test_theme_route_change_is_watched_when_google_has_no_fonts(self):
+        self.theme_fixture()
+        self.service(3, '''
+if [ "$count" = 2 ]; then echo theme-two > "$TEST_ROOT/theme-snapshot"; fi
+''', TEST_APPLY_RC='2')
+        self.assertEqual((self.root / 'theme-applied').read_text().splitlines(),
+                         ['theme-one', 'theme-two'])
+
+    def test_idle_theme_does_not_start_repeated_builds(self):
+        self.theme_fixture()
+        self.service(20)
+        self.assertEqual((self.root / 'theme-applied').read_text().splitlines(), ['theme-one'])
+
+    def test_theme_failure_gets_backoff_even_when_google_succeeds(self):
+        self.theme_fixture()
+        self.service(11, TEST_THEME_RC='1')
+        self.assertEqual((self.root / 'theme-applied').read_text().splitlines(),
+                         ['theme-one', 'theme-one'])
+
+    def test_restoring_default_releases_owned_theme_mounts(self):
+        self.theme_fixture()
+        self.service(4, '''
+if [ "$count" = 1 ]; then echo default > "$MODDIR/config/active_font.conf"; fi
+''')
+        self.assertEqual((self.root / 'theme-restored').read_text(), 'restored\n')
+        self.assertEqual((self.root / 'theme-applied').read_text().splitlines(), ['theme-one'])
+
+    def test_theme_restore_retries_transient_failure_then_exits(self):
+        self.theme_fixture()
+        self.service(4, '''
+if [ "$count" = 1 ]; then echo default > "$MODDIR/config/active_font.conf"; fi
+''', TEST_THEME_RESTORE_FAILURES='2')
+        self.assertEqual((self.root / 'theme-restored').read_text().splitlines(),
+                         ['restored'] * 3)
+        self.assertEqual((self.root / 'theme-applied').read_text().splitlines(), ['theme-one'])
+
+    def test_default_disable_and_remove_report_bounded_restore_failure(self):
+        self.theme_fixture()
+        journal = self.module / 'config/hyperos-theme-font-namespaces.conf'
+        for stop in ('default', 'disable', 'remove'):
+            with self.subTest(stop=stop):
+                self.active.write_text('custom\n')
+                for name in ('disable', 'remove'):
+                    (self.module / name).unlink(missing_ok=True)
+                for name in ('ticks', 'theme-restored', 'theme-applied'):
+                    (self.root / name).unlink(missing_ok=True)
+                journal.write_text('mnt:[123]|owned-font-inode\n')
+                action = ('echo default > "$MODDIR/config/active_font.conf"'
+                          if stop == 'default' else f'touch "$MODDIR/{stop}"')
+                with self.assertRaises(subprocess.CalledProcessError) as failed:
+                    self.service(20, action, TEST_THEME_RESTORE_FAILURES='99')
+                self.assertEqual(failed.exception.returncode, 1)
+                self.assertEqual((self.root / 'theme-restored').read_text().splitlines(),
+                                 ['restored'] * 3)
+                self.assertEqual((self.root / 'theme-applied').read_text().splitlines(), ['theme-one'])
+                self.assertEqual(journal.read_text(), 'mnt:[123]|owned-font-inode\n')
+                self.assertIn('attempt 3/3',
+                              (self.module / 'logs/google-font-provider.log').read_text())
+                self.assertFalse((self.module / '.google-font-provider.lock').exists())
+
+    def test_removed_module_does_not_recreate_cleanup_files(self):
+        self.theme_fixture()
+        self.service(4, 'rm -rf "$MODDIR"')
+        self.assertFalse(self.module.exists())
+        self.assertFalse((self.root / 'theme-restored').exists())
+
+    def test_theme_restore_retry_pause_is_cancelled_with_service(self):
+        self.theme_fixture()
+        self.active.write_text('default\n')
+        self.commands('sleep', '''
+echo $$ > "$TEST_ROOT/retry-sleep-pid"
+exec /bin/sleep 30
+''')
+        process = subprocess.Popen(
+            ['sh', str(ROOT / 'common/google_font_provider_service.sh')],
+            env={**self.env, 'TEST_THEME_RESTORE_FAILURES': '99'},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            pid_file = self.root / 'retry-sleep-pid'
+            deadline = time.monotonic() + 5
+            while not pid_file.exists() and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertTrue(pid_file.exists(), 'service did not reach restore retry pause')
+            child_pid = int(pid_file.read_text())
+            process.terminate()
+            process.communicate(timeout=5)
+            self.assertEqual(process.returncode, 143)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(child_pid, 0)
+            self.assertFalse((self.module / '.google-font-provider.lock').exists())
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=5)
 
     def test_idle_boot_discovery_does_not_apply_twenty_four_times(self):
         self.assertEqual(self.service(0, LUOSHU_GOOGLE_FONT_RETRIES="24"),

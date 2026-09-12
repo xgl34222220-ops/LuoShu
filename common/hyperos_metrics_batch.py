@@ -20,7 +20,7 @@ from fontTools import subset
 from font_metrics_normalize import _device_build_key, _pick_face, _promote_os2_for_typo_metrics
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
-from hyperos_physical_policy import preserved_dynamic_alias
+from hyperos_physical_policy import preserved_dynamic_alias, safe_physical_font_name
 
 PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
          "my_product", "hw_product", "cust")
@@ -292,11 +292,13 @@ def _specialized_slot(logical: str, slot: dict) -> bool:
 def _latin_ui_slot(logical: str, slot: dict) -> bool:
     name = Path(logical).name.lower()
     families = [str(family).lower().replace('_', '-') for family in slot.get('families', [])]
-    return (any(family.startswith(('sans-serif', 'system-ui', 'system-sans', 'roboto',
+    return (name in {'notosans.ttf', 'notosans.otf', 'notosansui.ttf', 'notosansui.otf'}
+            or any(family.startswith(('sans-serif', 'system-ui', 'system-sans', 'roboto',
                                   'google-sans', 'misans', 'mi-sans', 'sys-sans', 'oppo-sans',
                                   'oplus-sans')) for family in families)
             or name.startswith(('roboto', 'misanslatin', 'googlesans', 'syssans', 'sysfont',
-                                'sourcesanspro', 'opposans', 'oplussans', 'opsans')))
+                                'sourcesanspro', 'opposans', 'oplussans', 'opsans',
+                                'notosans-', 'notosansui-', 'droidsans')))
 
 
 def bitmap_bottom_slot(data: dict, logical: str, contract: tuple) -> bool:
@@ -383,12 +385,26 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     data = read_inventory(module)
     jobs = []
     preserved_aliases = []
+    excluded_aliases = []
     for part in PARTS:
         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
+        staged_fonts = stage / part / 'fonts'
+        if staged_fonts.is_dir():
+            for alias in staged_fonts.iterdir():
+                if (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
+                        and alias.suffix in ('.ttf', '.otf')
+                        and not safe_physical_font_name(alias.name)):
+                    excluded_aliases.append(alias)
         for name in dict.fromkeys(names):
             if Path(name).name != name or not name.endswith(('.ttf', '.otf')):
                 raise ValueError(f'不安全的字体槽位：{name}')
             logical = f'/{part}/fonts/{name}'
+            if not safe_physical_font_name(name):
+                # Never let a stale inventory/target list recreate obsolete
+                # language aliases. Removing only its isolated staged alias
+                # exposes the untouched ROM font when the payload is mounted.
+                excluded_aliases.append(stage / part / 'fonts' / name)
+                continue
             if preserved_dynamic_alias(data, logical):
                 preserved_aliases.append(stage / part / 'fonts' / name)
                 continue
@@ -448,7 +464,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 **output_reports[key]})
         for output, dest in prepared:
             link_copy(output, dest)
-        for alias in preserved_aliases:
+        for alias in preserved_aliases + excluded_aliases:
             # Initial generic mapping creates the alias as a regular font. Its
             # absence exposes the ROM lower symlink in OverlayFS and leaves it
             # untouched in per-file bind mode. Framework changes keep working.
@@ -458,7 +474,10 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                       'slots': slot_report,
                                       'preservedDynamicAliases': [
                                           '/' + alias.relative_to(stage).as_posix()
-                                          for alias in preserved_aliases]}, ensure_ascii=False), encoding='utf-8')
+                                          for alias in preserved_aliases],
+                                      'preservedStockAliases': sorted({
+                                          '/' + alias.relative_to(stage).as_posix()
+                                          for alias in excluded_aliases if alias.parent.is_dir()})}, ensure_ascii=False), encoding='utf-8')
         report.chmod(0o644)
     finally:
         # Every prepared result has its own hard link (or copy) in the final
