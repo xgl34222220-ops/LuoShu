@@ -35,7 +35,7 @@ _lhcc_safe_dynamic_name() {
         *italic*|*oblique*|*emoji*|*symbol*|*icon*|*serif*) return 1 ;;
         *arabic*|*hebrew*|*thai*|*devanagari*|*bengali*|*tamil*|*telugu*|*malayalam*|\
         *gujarati*|*gurmukhi*|*kannada*|*khmer*|*lao*|*tibetan*|*myanmar*|*vietnam*|\
-        *japanese*|*korean*|*hangul*|*hiragana*|*katakana*) return 1 ;;
+        *japanese*|*korean*|*hangul*|*hiragana*|*katakana*|*odia*|*oriya*) return 1 ;;
     esac
     case "$_lhcc_name" in
         MiSansJP*|MiSansJp*|MiSansKR*|MiSansKr*|*CJKJP*|*CJKKR*) return 1 ;;
@@ -47,8 +47,16 @@ _lhcc_safe_dynamic_name() {
         AndroidClock*.ttf|AndroidClock*.otf|Clockopia.ttf|\
         Roboto*.ttf|Roboto*.otf|\
         GoogleSans*.ttf|GoogleSans*.otf|\
-        NotoSans*.ttf|NotoSans*.otf|\
-        SourceSansPro*.ttf|SourceSansPro*.otf|DroidSans*.ttf|\
+        NotoSans.ttf|NotoSans.otf|NotoSans-*.ttf|NotoSans-*.otf|\
+        NotoSansUI.ttf|NotoSansUI.otf|NotoSansUI-*.ttf|NotoSansUI-*.otf|\
+        NotoSansSC*.ttf|NotoSansSC*.otf|NotoSansTC*.ttf|NotoSansTC*.otf|\
+        NotoSansHK*.ttf|NotoSansHK*.otf|NotoSansHans*.ttf|NotoSansHans*.otf|\
+        NotoSansHant*.ttf|NotoSansHant*.otf|\
+        NotoSansCJKSC*.ttf|NotoSansCJKSC*.otf|NotoSansCJKsc*.ttf|NotoSansCJKsc*.otf|\
+        NotoSansCJKTC*.ttf|NotoSansCJKTC*.otf|NotoSansCJKtc*.ttf|NotoSansCJKtc*.otf|\
+        NotoSansCJKHK*.ttf|NotoSansCJKHK*.otf|NotoSansCJKhk*.ttf|NotoSansCJKhk*.otf|\
+        SourceSansPro*.ttf|SourceSansPro*.otf|\
+        DroidSans.ttf|DroidSans-Regular.ttf|DroidSans-Bold.ttf|\
         100.ttf|200.ttf|300.ttf|350.ttf|400.ttf|500.ttf|600.ttf|700.ttf|800.ttf|900.ttf)
             return 0
             ;;

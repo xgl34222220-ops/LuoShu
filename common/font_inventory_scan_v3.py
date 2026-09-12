@@ -20,7 +20,7 @@ from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, safe_phys
 
 SCANNER_REVISION = 3
 METRICS_REVISION = 3
-HYPEROS_COVERAGE_REVISION = 2
+HYPEROS_COVERAGE_REVISION = 3
 PRIMARY_FONT_SPECS = (
     ("system", Path("/system/fonts"), "system_fonts", (Path("/system/font"),)),
     ("system_ext", Path("/system_ext/fonts"), "system_ext_fonts", (Path("/system/system_ext/fonts"),)),
@@ -340,6 +340,39 @@ def _verify_upgrade_roots(font_roots: list[base.FontRoot], etc_roots: list[tuple
             raise base.InventoryError(f"补充原厂字体度量需要可验证的 stock lower/mirror：{logical}")
 
 
+def _refresh_known_slots(slots: dict[str, dict[str, Any]], families: dict[str, list[str]],
+                         existing: dict[str, Any], roots: list[base.FontRoot],
+                         preserved_paths: set[str]) -> None:
+    """Refresh previously discovered UI slots from the same verified stock path.
+
+    A metrics upgrade must not depend on rediscovering every OEM family through
+    the current XML/filename rules. Keep its established face contract, but read
+    all metrics again through the selected stock views. Missing, corrupt, or
+    theme-linked files still fail the preservation check below.
+    """
+    for logical in sorted(set(existing["slots"]) - set(slots) - preserved_paths):
+        resolved = base._resolve_file(logical, roots)
+        if resolved is None:
+            continue
+        root, actual = resolved
+        if base._logical_path(root, actual) != logical:
+            continue
+        old = existing["slots"][logical]
+        try:
+            stock_file = base._stock_font_path(root, actual, roots)
+            fmt, metrics = base._read_metrics(stock_file, int(old.get("faceIndex", 0)))
+        except (base.InventoryError, OSError, ValueError):
+            continue
+        entry = {**old, "format": fmt, "metrics": metrics,
+                 "partition": root.partition, "validatedBy": "fontTools-stock-metrics"}
+        entry.pop("actualPath", None)
+        slots[logical] = entry
+        for name in entry.get("families", []):
+            paths = families.setdefault(name, [])
+            if logical not in paths:
+                paths.append(logical)
+
+
 def scan(args: Any) -> int:
     output: Path = args.output
     build_key, fingerprint, display_id = base.current_build_key(args.build_key)
@@ -415,7 +448,23 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     )
     hyperos = not coloros and (initial_rom == "hyperos" or bool(_rom_markers(names).get("hyperos")))
     dynamic_aliases = _add_hyperos_physical_slots(slots, replaceable_roots) if hyperos else {}
-    main_path, main_entry, rom = base._pick_main_slot(slots, families)
+    retired_physical_slots = {
+        path for path, entry in (existing or {}).get("slots", {}).items()
+        if hyperos and entry.get("source") == "hyperos-physical"
+        and path not in slots and not safe_physical_font_name(Path(path).name)
+    }
+    preserved_paths = set(dynamic_aliases) | retired_physical_slots
+    if upgrade and existing is not None:
+        _refresh_known_slots(slots, families, existing, replaceable_roots, preserved_paths)
+    if coloros:
+        # The generic selector prefers MiSans by filename. An unused MiSans on
+        # ColorOS must not become the main metric contract or change the ROM kind.
+        native_slots = {path: entry for path, entry in slots.items()
+                        if entry.get("slotName") in coloros_cores}
+        main_path, main_entry, _rom = base._pick_main_slot(native_slots or slots, families)
+        rom = "coloros"
+    else:
+        main_path, main_entry, rom = base._pick_main_slot(slots, families)
     if hyperos:
         rom = "hyperos"
 
@@ -440,6 +489,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         # ColorOS inventory "hyperos" because an unused MiSans file is present.
         "hyperosCoverageRevision": HYPEROS_COVERAGE_REVISION,
         "preservedDynamicAliases": dynamic_aliases,
+        "retiredPhysicalSlots": sorted(retired_physical_slots),
         "state": "ready",
         "buildKey": build_key,
         "buildFingerprint": fingerprint,
@@ -467,8 +517,11 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "mainSlot": {**main_entry, "path": main_path},
     }
     base.validate_inventory(inventory, build_key)
-    if upgrade and existing is not None and set(existing["slots"]) - set(slots) - set(dynamic_aliases):
-        raise base.InventoryError("原厂字体重扫未完整保留已有槽位")
+    if upgrade and existing is not None:
+        missing = sorted(set(existing["slots"]) - set(slots) - preserved_paths)
+        if missing:
+            names = "、".join(Path(path).name for path in missing[:5])
+            raise base.InventoryError(f"原厂字体重扫未完整保留已有槽位（{len(missing)} 个：{names}）")
     base._atomic_write(output, inventory)
     print(json.dumps({
         "status": "ok",

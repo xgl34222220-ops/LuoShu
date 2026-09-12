@@ -327,9 +327,8 @@ class StockMetricContractTest(unittest.TestCase):
         self.assertEqual(set(result["slots"]), {
             "/system/fonts/SysSans-Hans-Regular.ttf", "/system/fonts/MiSansVF.ttf",
         })
-        # Preserve the existing global main selector while ensuring this narrow
-        # coverage fix cannot mistake its preferred MiSans name for ROM proof.
-        self.assertEqual(result["mainSlotPath"], "/system/fonts/MiSansVF.ttf")
+        self.assertEqual(result["mainSlotPath"], "/system/fonts/SysSans-Hans-Regular.ttf")
+        self.assertEqual(result["romKind"], "coloros")
         self.assertTrue(scanner._can_reuse(result, "stock-metrics-test"))
 
     def test_initial_coloros_scan_with_misans_does_not_expand_hyperos_scope(self) -> None:
@@ -353,7 +352,9 @@ class StockMetricContractTest(unittest.TestCase):
         args, _values = self.physical_scan_fixture()
         excluded = ("NotoSansCJKJP.otf", "NotoSansCJKKR.otf", "NotoSansArabic-Regular.ttf",
                     "NotoSansThai-Regular.ttf", "NotoSans-RegularItalic.ttf", "NotoSansSymbols.ttf",
-                    "NotoSansSC-Regular.ttc", "NotoSansEmoji.ttf")
+                    "NotoSansSC-Regular.ttc", "NotoSansEmoji.ttf", "NotoSansAdlam-VF.ttf",
+                    "NotoSansAhom-Regular.otf", "NotoSansCuneiform-Regular.ttf",
+                    "NotoSansEgyptianHieroglyphs-Regular.ttf", "MiSansOdiaVF.ttf", "DroidSansMono.ttf")
         for name in excluded:
             make_font(args.system_fonts / name)
         disguised_collection = "NotoSansCollection.ttf"
@@ -514,6 +515,10 @@ class StockMetricContractTest(unittest.TestCase):
                  "MiSansJPVF.ttf", "MiSansKrVF.ttf", "NotoSans-RegularItalic.ttf", "NotoSansSymbols.ttf",
                  "NotoSansSC.ttc", "NotoSansArabic.ttf", "MiSansThaiVF.ttf", "NotoSansDevanagari.ttf",
                  "NotoSansVietnamese.ttf", "NotoSansJapanese.ttf", "NotoSansHangul.ttf", "NotoSansEmoji.ttf",
+                 "NotoSansAdlam-VF.ttf", "NotoSansAhom-Regular.otf", "NotoSansCuneiform-Regular.ttf",
+                 "NotoSansEgyptianHieroglyphs-Regular.ttf", "MiSansOdiaVF.ttf", "DroidSansMono.ttf",
+                 "NotoSansUI.ttf", "NotoSansCJKsc-Regular.otf", "NotoSansCJKTC-VF.otf",
+                 "NotoSansHK-Regular.otf", "NotoSansHant-Regular.otf", "DroidSans-Regular.ttf",
                  "SysSans-Hans-Regular.ttf", "Roboto-Regular.TTF", "misansnew.ttf")
         command = '\n'.join((
             '. "$1"', 'shift', 'for name in "$@"', 'do',

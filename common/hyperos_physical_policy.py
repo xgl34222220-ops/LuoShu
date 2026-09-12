@@ -37,12 +37,21 @@ _EXCLUDED = (
     "italic", "oblique", "emoji", "symbol", "icon", "serif", "arabic",
     "hebrew", "thai", "devanagari", "bengali", "tamil", "telugu", "malayalam",
     "gujarati", "gurmukhi", "kannada", "khmer", "lao", "tibetan", "myanmar",
-    "vietnam", "japanese", "korean", "hangul", "hiragana", "katakana",
+    "vietnam", "japanese", "korean", "hangul", "hiragana", "katakana", "odia", "oriya",
 )
 _PREFIXES = (
     "MiSans", "XiaomiSans", "MiLanPro", "Mitype", "MiClock", "AndroidClock",
-    "Roboto", "GoogleSans", "NotoSans", "SourceSansPro",
+    "Roboto", "GoogleSans", "SourceSansPro",
 )
+_NOTO_UI_PREFIXES = (
+    "NotoSans-", "NotoSansUI-", "NotoSansSC", "NotoSansTC", "NotoSansHK",
+    "NotoSansHans", "NotoSansHant", "NotoSansCJKSC", "NotoSansCJKTC", "NotoSansCJKHK",
+    "NotoSansCJKsc", "NotoSansCJKtc", "NotoSansCJKhk",
+)
+_UI_NAMES = frozenset({
+    "NotoSans.ttf", "NotoSans.otf", "NotoSansUI.ttf", "NotoSansUI.otf",
+    "DroidSans.ttf", "DroidSans-Regular.ttf", "DroidSans-Bold.ttf", "Clockopia.ttf",
+})
 _NUMERIC = frozenset(f"{weight}.ttf" for weight in (100, 200, 300, 350, 400, 500, 600, 700, 800, 900))
 
 
@@ -56,5 +65,8 @@ def safe_physical_font_name(name: str) -> bool:
         token in name for token in ("CJKJP", "CJKKR")
     ):
         return False
-    return (name.startswith(_PREFIXES) or name == "Clockopia.ttf" or name in _NUMERIC
-            or name.startswith("DroidSans") and name.endswith(".ttf"))
+    # NotoSans is also the prefix of hundreds of unrelated script fallbacks.
+    # A blacklist cannot enumerate them reliably; replacing each with the full
+    # selected CJK donor both removes language coverage and multiplies storage.
+    return (name.startswith(_PREFIXES + _NOTO_UI_PREFIXES)
+            or name in _UI_NAMES or name in _NUMERIC)

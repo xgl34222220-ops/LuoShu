@@ -31,6 +31,22 @@ luoshu_update_config_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
 
+# The installer may carry the current schema forward for the compatibility
+# runtime. Schema equality alone therefore cannot certify generated physical
+# fonts: a new routing/subsetting/metric policy must take effect on the next
+# explicit apply. Compare only the small builders, never the active font trees.
+luoshu_update_font_builder_compatible() {
+    for _lufb_relative in \
+        common/hyperos_physical_policy.py \
+        common/hyperos_metrics_batch.py \
+        common/coloros_metrics_batch.py; do
+        [ -e "$1/$_lufb_relative" ] || [ -e "$2/$_lufb_relative" ] || continue
+        [ -f "$1/$_lufb_relative" ] && [ -f "$2/$_lufb_relative" ] || return 1
+        cmp -s "$1/$_lufb_relative" "$2/$_lufb_relative" || return 1
+    done
+    return 0
+}
+
 
 luoshu_copy_update_tree() {
     _source="$1"
@@ -155,6 +171,7 @@ luoshu_migrate_update_cache() {
     _old="$1"
     _new="$2"
     _schema_compatible="${3:-false}"
+    _builder_compatible="${4:-true}"
     for _relative in \
         cache/full-composite-v12 \
         cache/auto-multiweight-mix/composites-v9 \
@@ -189,17 +206,23 @@ luoshu_migrate_update_cache() {
     # Config contains persistent immutable artifacts as directories. The old migrator copied only
     # regular files from config/*, silently dropping the entire device alignment cache on update.
     # Metric/source caches are content-addressed and safe across releases. A device payload cache is
-    # retained only when its payload schema is unchanged.
+    # retained only when its payload schema and physical-font builder agree.
     for _relative in config/metrics_cache config/font-config-source; do
         [ -d "$_old/$_relative" ] || continue
         rm -rf "$_new/$_relative" 2>/dev/null || true
         mkdir -p "${_new}/${_relative%/*}" 2>/dev/null || continue
         luoshu_copy_update_tree "$_old/$_relative" "$_new/$_relative" || true
     done
-    if [ "$_schema_compatible" = true ] && [ -d "$_old/config/device-font-cache" ]; then
+    if [ "$_schema_compatible" = true ] && [ "$_builder_compatible" = true ]; then
+        if [ -d "$_old/config/device-font-cache" ]; then
+            rm -rf "$_new/config/device-font-cache" 2>/dev/null || true
+            mkdir -p "$_new/config" 2>/dev/null || true
+            luoshu_copy_update_tree "$_old/config/device-font-cache" "$_new/config/device-font-cache" || true
+        fi
+    else
+        # Only discard derived artifacts in the replacement installation. Keep
+        # the active installation and its mounted font payload untouched.
         rm -rf "$_new/config/device-font-cache" 2>/dev/null || true
-        mkdir -p "$_new/config" 2>/dev/null || true
-        luoshu_copy_update_tree "$_old/config/device-font-cache" "$_new/config/device-font-cache" || true
     fi
 }
 
@@ -216,6 +239,18 @@ luoshu_migrate_active_install() {
     LUOSHU_UPDATE_OLD_SCHEMA="$_old_schema"
     LUOSHU_UPDATE_REBUILD_REQUIRED=false
     [ "$_active" = default ] || [ "$_old_schema" = "$LUOSHU_PAYLOAD_SCHEMA_CURRENT" ] || LUOSHU_UPDATE_REBUILD_REQUIRED=true
+    _lup_builder_compatible=false
+    luoshu_update_font_builder_compatible "$_old" "$_new" && _lup_builder_compatible=true
+    _lup_rebuild_reason=schema-upgrade
+    # Reinstalling before applying must not lose a previous builder migration.
+    # Explicit successful switch/mix commits already remove this marker.
+    if [ "$(luoshu_update_config_value "$_old/config/font-payload-rebuild-pending.conf" reason)" = font-builder-changed ]; then
+        _lup_builder_compatible=false
+    fi
+    if [ "$_active" != default ] && [ "$_lup_builder_compatible" != true ]; then
+        LUOSHU_UPDATE_REBUILD_REQUIRED=true
+        _lup_rebuild_reason=font-builder-changed
+    fi
     if [ "$_active" = mix ]; then
         for _mix_key in cjk latin digit; do
             [ -n "$(luoshu_update_config_value "$_old/config/font_mix.conf" "$_mix_key")" ] || return 1
@@ -246,7 +281,7 @@ luoshu_migrate_active_install() {
 
     _schema_compatible=false
     [ "$_old_schema" = "$LUOSHU_PAYLOAD_SCHEMA_CURRENT" ] && _schema_compatible=true
-    luoshu_migrate_update_cache "$_old" "$_new" "$_schema_compatible"
+    luoshu_migrate_update_cache "$_old" "$_new" "$_schema_compatible" "$_lup_builder_compatible"
     luoshu_clear_update_volatile "$_new"
     # active_font.conf is the selection authority. Write the captured value after cleanup so a
     # packaged default or a partial config copy can never relabel an inherited composite as default.
@@ -255,7 +290,7 @@ luoshu_migrate_active_install() {
         {
             printf 'state=awaiting-explicit-apply\n'
             printf 'mode=preserve-current\n'
-            printf 'reason=schema-upgrade\n'
+            printf 'reason=%s\n' "$_lup_rebuild_reason"
             printf 'font=%s\n' "$_active"
             printf 'oldSchema=%s\n' "${_old_schema:-missing}"
             printf 'newSchema=%s\n' "$LUOSHU_PAYLOAD_SCHEMA_CURRENT"

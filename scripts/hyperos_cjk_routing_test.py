@@ -328,16 +328,55 @@ class RoutingTest(unittest.TestCase):
         with TTFont(self.fonts / 'Roboto-Regular.ttf') as font:
             self.assertIn(HAN, font.getBestCmap())
 
-    def test_clock_mono_and_symbol_slots_keep_existing_routing(self):
+    def test_clock_and_mono_slots_keep_existing_routing(self):
         self.default_pair()
-        for name in ('MiClock.otf', 'RobotoMono-Regular.ttf', 'RobotoSymbols.ttf'):
+        for name in ('MiClock.otf', 'RobotoMono-Regular.ttf'):
             self.stock(name, (LATIN, 48))
         self.build()
-        for name in ('MiClock.otf', 'RobotoMono-Regular.ttf', 'RobotoSymbols.ttf'):
+        for name in ('MiClock.otf', 'RobotoMono-Regular.ttf'):
             with TTFont(self.fonts / name) as font:
                 self.assertIn(HAN, font.getBestCmap())
             self.assertEqual(self.reports['/system/fonts/' + name]['cjkRoutingReason'],
                              'specialized-slot')
+
+    def test_stale_script_targets_are_removed_only_from_isolated_stage(self):
+        self.default_pair()
+        original = {}
+        for name in ('NotoSansAdlam-VF.ttf', 'NotoSansCuneiform-Regular.ttf',
+                     'DroidSansMono.ttf', 'MiSansOdiaVF.ttf', 'RobotoSymbols.ttf'):
+            self.stock(name, (0x12000,), ())
+            original[name] = (self.root / 'stock/system' / name).read_bytes()
+            make_font(self.fonts / name)
+        result = self.build()
+        self.assertEqual(result['mapped'], 2)
+        for name, expected in original.items():
+            self.assertFalse((self.fonts / name).exists())
+            self.assertEqual((self.root / 'stock/system' / name).read_bytes(), expected)
+
+    def test_stock_latin_noto_ui_slots_are_physically_compacted(self):
+        self.default_pair()
+        names = ('NotoSans-Regular.ttf', 'NotoSansUI-Regular.ttf', 'DroidSans.ttf',
+                 'NotoSans.ttf', 'NotoSans.otf', 'NotoSansUI.ttf', 'NotoSansUI.otf')
+        for name in names:
+            self.stock(name, (LATIN, 48), ())
+        self.build()
+        for name in names:
+            with TTFont(self.fonts / name) as font:
+                self.assertNotIn(HAN, font.getBestCmap())
+                self.assertIn(LATIN, font.getBestCmap())
+            self.assertEqual(self.reports['/system/fonts/' + name]['cjkRoutingReason'],
+                             'stock-latin-primary')
+
+    def test_obsolete_script_alias_is_removed_even_when_target_list_is_current(self):
+        self.default_pair()
+        name = 'NotoSansAdlam-VF.ttf'
+        make_font(self.fonts / name)
+        stock = self.root / 'stock/system' / name
+        make_font(stock, (0x1E900,))
+        expected = stock.read_bytes()
+        self.build(['MiSansVF.ttf', 'Roboto-Regular.ttf'])
+        self.assertFalse((self.fonts / name).exists())
+        self.assertEqual(stock.read_bytes(), expected)
 
     def test_original_cjk_punctuation_is_preserved(self):
         self.default_pair()

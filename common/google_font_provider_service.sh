@@ -4,6 +4,7 @@ set +e
 
 MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
 BRIDGE="$MODDIR/common/google_font_provider_bridge.sh"
+THEME_BRIDGE="$MODDIR/common/hyperos_theme_font_bridge.sh"
 LOCK="$MODDIR/.google-font-provider.lock"
 LOG="$MODDIR/logs/google-font-provider.log"
 
@@ -26,14 +27,62 @@ provider_signal_exit() {
     exit "$_provider_signal_code"
 }
 
-provider_apply() {
-    MODDIR="$MODDIR" MODULE_DIR="$MODDIR" LUOSHU_GOOGLE_FONT_ALLOW_RESTART="$1" \
-        sh "$BRIDGE" apply >/dev/null 2>&1 &
+provider_run() {
+    MODDIR="$MODDIR" MODULE_DIR="$MODDIR" LUOSHU_GOOGLE_FONT_ALLOW_RESTART="$3" \
+        sh "$1" "$2" >/dev/null 2>&1 &
     _provider_child=$!
     wait "$_provider_child"
     _provider_apply_rc=$?
     _provider_child=
     return "$_provider_apply_rc"
+}
+
+provider_apply() {
+    provider_run "$BRIDGE" apply "$1"
+    _provider_google_rc=$?
+    _provider_theme_rc=2
+    if [ -f "$THEME_BRIDGE" ]; then
+        provider_run "$THEME_BRIDGE" apply 0
+        _provider_theme_rc=$?
+    fi
+    # Either adapter can need repair even when the other has no targets.
+    case "$_provider_google_rc:$_provider_theme_rc" in
+        0:0|0:2|2:0) return 0 ;;
+        2:2) return 2 ;;
+        *) return 1 ;;
+    esac
+}
+
+provider_fingerprint() {
+    _provider_google_fp=$(MODDIR="$MODDIR" sh "$BRIDGE" fingerprint 2>/dev/null) || return 1
+    _provider_theme_fp=
+    if [ -f "$THEME_BRIDGE" ]; then
+        _provider_theme_fp=$(MODDIR="$MODDIR" sh "$THEME_BRIDGE" fingerprint 2>/dev/null) || return 1
+    fi
+    printf 'google|%s\ntheme|%s\n' "$_provider_google_fp" "$_provider_theme_fp"
+}
+
+provider_restore_theme() {
+    [ -f "$THEME_BRIDGE" ] || return 0
+    _provider_restore_attempt=1
+    while [ "$_provider_restore_attempt" -le 3 ]; do
+        provider_run "$THEME_BRIDGE" restore 0 && return 0
+        # Removal can finish while a child is unwinding. Do not recreate a
+        # removed module just to record an already obsolete cleanup failure.
+        [ -d "$MODDIR" ] && [ -f "$THEME_BRIDGE" ] || return 0
+        mkdir -p "${LOG%/*}" 2>/dev/null || true
+        printf '[%s] HyperOS theme restore failed (attempt %s/3); namespace journal retained\n' \
+            "$(date '+%F %T' 2>/dev/null)" "$_provider_restore_attempt" >> "$LOG" 2>/dev/null || true
+        [ "$_provider_restore_attempt" -lt 3 ] || return 1
+        # Keep the bounded retry pause cancellable through the same child-tree
+        # handler as apply/restore; disabling must never leave a waiting worker.
+        sleep 3 &
+        _provider_child=$!
+        wait "$_provider_child"
+        _provider_child=
+        _provider_restore_attempt=$((_provider_restore_attempt + 1))
+    done
+    return 1
 }
 
 # A bare mkdir lock survives an interrupted boot and used to disable all later
@@ -49,7 +98,7 @@ trap 'provider_signal_exit 143' TERM
 
 _waited=0
 while [ "$(getprop sys.boot_completed 2>/dev/null)" != 1 ] && [ "$_waited" -lt 600 ]; do
-    [ -d "$MODDIR" ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || exit 0
+    [ -d "$MODDIR" ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || { provider_restore_theme; exit $?; }
     sleep 3
     _waited=$((_waited + 3))
 done
@@ -63,13 +112,13 @@ _fingerprint=
 _boot_retry_age=0
 
 while [ "$_attempt" -le "$_limit" ]; do
-    [ -d "$MODDIR" ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || exit 0
+    [ -d "$MODDIR" ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || { provider_restore_theme; exit $?; }
     _active=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null)
-    [ -n "$_active" ] && [ "$_active" != default ] || exit 0
+    [ -n "$_active" ] && [ "$_active" != default ] || { provider_restore_theme; exit $?; }
     # Continue discovery throughout boot, but only generate/inspect fonts when
     # metadata changes. The former 24 unconditional applies repeatedly launched
     # Python and hashed large composite fonts even on a completely idle phone.
-    _observed=$(MODDIR="$MODDIR" sh "$BRIDGE" fingerprint 2>/dev/null)
+    _observed=$(provider_fingerprint)
     _repair=0
     [ -n "$_observed" ] && [ "$_observed" = "$_fingerprint" ] || _repair=1
     case "${_rc:-2}" in
@@ -109,10 +158,10 @@ _fingerprint="${_fingerprint:-}"
 while [ "$_watch_limit" = -1 ] || [ "$_watch_count" -lt "$_watch_limit" ]; do
     sleep "$_interval"
     _watch_count=$((_watch_count + 1))
-    [ -d "$MODDIR" ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || exit 0
+    [ -d "$MODDIR" ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || { provider_restore_theme; exit $?; }
     _active=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null)
-    [ -n "$_active" ] && [ "$_active" != default ] || exit 0
-    _observed=$(MODDIR="$MODDIR" sh "$BRIDGE" fingerprint 2>/dev/null)
+    [ -n "$_active" ] && [ "$_active" != default ] || { provider_restore_theme; exit $?; }
+    _observed=$(provider_fingerprint)
     _retry_age=$((_retry_age + _interval))
     _repair=0
     [ -n "$_observed" ] && [ "$_observed" = "$_fingerprint" ] || _repair=1

@@ -5,6 +5,8 @@
 set +e
 MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
+[ ! -f "$MODDIR/common/hyperos_theme_font_bridge.sh" ] || \
+    MODDIR="$MODDIR" sh "$MODDIR/common/hyperos_theme_font_bridge.sh" restore >/dev/null 2>&1 || true
 [ -f "$MODDIR/common/private_payload.sh" ] && . "$MODDIR/common/private_payload.sh"
 type luoshu_private_unmount_module_view >/dev/null 2>&1 && \
     luoshu_private_unmount_module_view "$MODDIR" >/dev/null 2>&1 || true

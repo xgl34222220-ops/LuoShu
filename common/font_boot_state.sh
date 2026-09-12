@@ -47,6 +47,10 @@ luoshu_font_rebuild_marker_reconcile() {
     _lfbs_config="$_lfbs_module_dir/config"
     _lfbs_pending="$_lfbs_config/font-payload-rebuild-pending.conf"
     [ -s "$_lfbs_pending" ] || return 0
+    # An update preserves the previous payload, so confirming that payload on a
+    # later boot does not prove the new builder has run. Only an explicit
+    # successful font switch/mix commit may consume this migration marker.
+    [ "$(_lfbs_value "$_lfbs_pending" reason)" != font-builder-changed ] || return 2
     _lfbs_active=$(head -n1 "$_lfbs_config/active_font.conf" 2>/dev/null | tr -d '\r\n')
     _lfbs_pending_font=$(_lfbs_value "$_lfbs_pending" font)
     _lfbs_pending_time=$(_lfbs_value "$_lfbs_pending" time)

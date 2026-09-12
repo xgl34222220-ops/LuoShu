@@ -313,6 +313,7 @@ _gfp_mount_in_pid() {
     _gfp_pid="$1"
     _gfp_source="$2"
     _gfp_target="$3"
+    _gfp_regular_only="${4:-0}"
     _gfp_mount_detail=
     _gfp_mount_mode=
     [ -d "/proc/$_gfp_pid/ns" ] || { _gfp_mount_detail=namespace-missing; return 1; }
@@ -321,7 +322,10 @@ _gfp_mount_in_pid() {
     _gfp_stage_dir="${LUOSHU_GOOGLE_FONT_STAGE_DIR:-/data/local/tmp}"
     _gfp_ns_shell="${LUOSHU_GOOGLE_FONT_NS_SHELL:-/system/bin/sh}"
     _gfp_mount_detail=$(nsenter -t "$_gfp_pid" -m -- "$_gfp_ns_shell" -c '
-        plain="$1"; proc_src="$2"; dst="$3"; stage_dir="$4"; owner_pid="$5"
+        plain="$1"; proc_src="$2"; dst="$3"; stage_dir="$4"; owner_pid="$5"; regular_only="$6"
+        if [ "$regular_only" = 1 ] && [ -L "$dst" ]; then
+            printf "target-is-symlink"; exit 1
+        fi
         [ -f "$dst" ] || { printf "target-missing"; exit 1; }
 
         one_line() {
@@ -390,7 +394,7 @@ _gfp_mount_in_pid() {
         fi
         printf "plain=%s; staging=%s" "$(one_line "$plain_detail")" "$(one_line "$stage_detail")"
         exit 1
-    ' sh "$_gfp_source" "$_gfp_proc_source" "$_gfp_target" "$_gfp_stage_dir" "$_gfp_pid" 2>&1)
+    ' sh "$_gfp_source" "$_gfp_proc_source" "$_gfp_target" "$_gfp_stage_dir" "$_gfp_pid" "$_gfp_regular_only" 2>&1)
     _gfp_mount_rc=$?
     case "$_gfp_mount_detail" in
         ok:plain) _gfp_mount_mode=plain; _gfp_mount_detail=; return 0 ;;
