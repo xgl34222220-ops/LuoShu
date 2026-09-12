@@ -67,7 +67,64 @@ mix_config_json_fast() {
         "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")"
 }
 
+# Reconcile only the detached axes controller used by the App. Its PID sidecars
+# include task and boot identity; the older base engine's bare PID does not.
+# This runs without setting up a runtime, reading fonts or touching payloads.
+mix_reconcile_fast() (
+    _mrf_file="$REALMOD/config/axes_task.conf"
+    [ -s "$_mrf_file" ] || return 0
+    _mrf_snapshot=$(cat "$_mrf_file" 2>/dev/null) || return 0
+    _mrf_state=$(read_value "$_mrf_file" state)
+    case "$_mrf_state" in queued|running) ;; *) return 0 ;; esac
+    _mrf_task=$(read_value "$_mrf_file" task)
+    [ -n "$_mrf_task" ] || return 0
+    [ -f "$REALMOD/common/background_task.sh" ] || return 0
+    . "$REALMOD/common/background_task.sh"
+    mix_worker_alive_fast() {
+        for _mwaf_file in "$REALMOD/config/axes_worker.pid" \
+            "$REALMOD/config/auto_multiweight_worker.pid"; do
+            luoshu_task_pid_alive "$_mwaf_file" "$_mrf_task" || continue
+            _mwaf_pid=$(luoshu_pid_value "$_mwaf_file")
+            # The shared helper checks recycled PID/task/boot identities. Require
+            # an exact task argument as well, rather than a task-prefix match.
+            [ -r "/proc/$_mwaf_pid/cmdline" ] || return 0
+            tr '\000' '\n' < "/proc/$_mwaf_pid/cmdline" 2>/dev/null | \
+                grep -Fxq -- "$_mrf_task" && return 0
+        done
+        return 1
+    }
+    mix_worker_alive_fast && return 0
+    _mrf_started=$(read_value "$_mrf_file" started)
+    _mrf_now=$(date +%s 2>/dev/null) || return 0
+    case "$_mrf_now" in ''|*[!0-9]*) return 0 ;; esac
+    case "$_mrf_started" in
+        ''|*[!0-9]*) _mrf_started=$(stat -c '%Y' "$_mrf_file" 2>/dev/null) ;;
+    esac
+    case "$_mrf_started" in ''|*[!0-9]*) return 0 ;; esac
+    # The queued record precedes the detached worker and its sidecar writes.
+    # Preserve that startup window, including a worker already marked running.
+    _mrf_age=$((_mrf_now - _mrf_started))
+    [ "$_mrf_age" -ge 20 ] 2>/dev/null || return 0
+    _mrf_tmp="${_mrf_file}.reconcile.$$"
+    printf '%s\n' "$_mrf_snapshot" | awk -F '=' -v now="$_mrf_now" '
+        $1 != "state" && $1 != "message" && $1 != "percent" && $1 != "finished" {print}
+        END {print "state=failed"; print "message=字体组合后台进程已退出，任务已自动释放，请重新应用";
+             print "percent=100"; print "finished=" now}' > "$_mrf_tmp" || return 0
+    # A new request or worker may have arrived while the lightweight checks ran.
+    # Do not publish a stale failure over its task record or erase its sidecars.
+    if [ "$(cat "$_mrf_file" 2>/dev/null)" != "$_mrf_snapshot" ] || mix_worker_alive_fast; then
+        rm -f "$_mrf_tmp" 2>/dev/null || true
+        return 0
+    fi
+    mv -f "$_mrf_tmp" "$_mrf_file" 2>/dev/null || { rm -f "$_mrf_tmp"; return 0; }
+    for _mrf_pid_file in "$REALMOD/config/axes_worker.pid" \
+        "$REALMOD/config/auto_multiweight_worker.pid"; do
+        luoshu_clear_task_pid "$_mrf_pid_file" "$_mrf_task"
+    done
+)
+
 mix_status_json_fast() {
+    mix_reconcile_fast
     _wanted="$1"
     _task_file="$REALMOD/config/axes_task.conf"
     [ -s "$_task_file" ] || _task_file="$REALMOD/config/mix_task.conf"
@@ -459,8 +516,8 @@ mark_mix_mode_if_success() {
 
 _cmd="${1:-config}"
 if [ "$_cmd" = reconcile ]; then
-    # This compatibility controller has no reconciliation mutation. In particular,
-    # a status request must not rebuild links into a live/actively staged payload.
+    # Reconcile task ownership without rebuilding compatibility runtime links.
+    mix_reconcile_fast
     printf '{"status":"ok"}\n'
     exit 0
 fi

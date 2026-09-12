@@ -113,7 +113,8 @@ private class PreviewTextView(context: Context) : TextView(context) {
 private val previewMemoryCache = object : LruCache<String, PreviewMemoryEntry>(PREVIEW_MEMORY_MAX_ENTRIES) {}
 private val previewLocks = ConcurrentHashMap<String, Mutex>()
 private val previewExportSemaphore = Semaphore(PREVIEW_EXPORT_CONCURRENCY)
-private val axisInfoCache = WeightAxisInfoCache()
+private val axisInfoCache = ConcurrentHashMap<String, WeightAxisInfo>()
+private val axisInfoLocks = ConcurrentHashMap<String, Mutex>()
 
 private fun previewMemoryGet(key: String): PreviewMemoryEntry? = synchronized(previewMemoryCache) {
     previewMemoryCache.get(key)
@@ -124,20 +125,25 @@ private fun previewMemoryPut(key: String, entry: PreviewMemoryEntry) = synchroni
 }
 
 @Composable
-internal fun rememberWeightAxisInfo(font: FontItem?, retryKey: Int = 0): WeightAxisInfo {
-    val cached = remember(font, retryKey) { font?.let(axisInfoCache::get) }
+internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
+    val cached = remember(font?.id) { font?.id?.let(axisInfoCache::get) }
     val info by produceState(
         initialValue = cached ?: WeightAxisInfo(loading = font?.variable == true),
-        key1 = font,
-        key2 = retryKey,
+        key1 = font?.id,
+        key2 = font?.variable,
     ) {
-        // produceState retains its last value across keys; clear a previous error while retrying.
-        value = cached ?: WeightAxisInfo(loading = font?.variable == true)
         value = when {
             font == null -> WeightAxisInfo(loading = false, error = "未选择字体")
             !font.variable -> WeightAxisInfo(loading = false, hasWeight = false)
             cached != null -> cached
-            else -> axisInfoCache.load(font, ::loadWeightAxisInfo)
+            else -> {
+                val lock = axisInfoLocks.computeIfAbsent(font.id) { Mutex() }
+                lock.withLock {
+                    axisInfoCache[font.id] ?: loadWeightAxisInfo(font).also { loaded ->
+                        axisInfoCache[font.id] = loaded
+                    }
+                }
+            }
         }
     }
     return info
@@ -146,30 +152,41 @@ internal fun rememberWeightAxisInfo(font: FontItem?, retryKey: Int = 0): WeightA
 private suspend fun loadWeightAxisInfo(font: FontItem): WeightAxisInfo = try {
     val command = "sh ${RootShell.quote(APP_BRIDGE)} weight_axis ${RootShell.quote(font.id)}"
     val result = RootShell.exec(command, timeoutMs = 25_000L)
-    val root = parseFontProbeResponse(result, "字体轴读取失败")
-    val rawAxes = root.optJSONArray("axes") ?: error("未收到字体轴数据")
+    if (result.code != 0) {
+        error(result.stderr.ifBlank { bridgeError(result.stdout, "字体轴读取失败") })
+    }
+    val jsonLine = result.stdout.lineSequence()
+        .firstOrNull { it.trimStart().startsWith("{") }
+        ?: error("未收到字体轴数据")
+    val root = JSONObject(jsonLine.trim())
+    if (root.optString("status") != "ok") {
+        error(root.optString("message", "字体轴读取失败"))
+    }
+    val rawAxes = root.optJSONArray("axes")
     val axes = buildList {
-        for (index in 0 until rawAxes.length()) {
-            val axis = rawAxes.optJSONObject(index) ?: continue
-            val tag = axis.optString("tag").trim()
-            val minimum = axis.optDouble("min", Double.NaN).toFloat()
-            val maximum = axis.optDouble("max", Double.NaN).toFloat()
-            val defaultValue = axis.optDouble("default", Double.NaN).toFloat()
-            if (
-                tag.length == 4 &&
-                minimum.isFinite() &&
-                maximum.isFinite() &&
-                defaultValue.isFinite() &&
-                maximum >= minimum
-            ) {
-                add(
-                    VariableAxisInfo(
-                        tag = tag,
-                        min = minimum,
-                        default = defaultValue.coerceIn(minimum, maximum),
-                        max = maximum,
-                    ),
-                )
+        if (rawAxes != null) {
+            for (index in 0 until rawAxes.length()) {
+                val axis = rawAxes.optJSONObject(index) ?: continue
+                val tag = axis.optString("tag").trim()
+                val minimum = axis.optDouble("min", Double.NaN).toFloat()
+                val maximum = axis.optDouble("max", Double.NaN).toFloat()
+                val defaultValue = axis.optDouble("default", Double.NaN).toFloat()
+                if (
+                    tag.length == 4 &&
+                    minimum.isFinite() &&
+                    maximum.isFinite() &&
+                    defaultValue.isFinite() &&
+                    maximum >= minimum
+                ) {
+                    add(
+                        VariableAxisInfo(
+                            tag = tag,
+                            min = minimum,
+                            default = defaultValue.coerceIn(minimum, maximum),
+                            max = maximum,
+                        ),
+                    )
+                }
             }
         }
     }
@@ -354,6 +371,13 @@ private fun formatAxisValue(value: Float): String = if (value % 1f == 0f) {
     value.roundToInt().toString()
 } else {
     value.toString().trimEnd('0').trimEnd('.')
+}
+
+private fun bridgeError(raw: String, fallback: String): String {
+    val line = raw.lineSequence().firstOrNull { it.trimStart().startsWith("{") }
+        ?: return fallback
+    return runCatching { JSONObject(line.trim()).optString("message", fallback) }
+        .getOrDefault(fallback)
 }
 
 private fun stableKey(value: String): String {

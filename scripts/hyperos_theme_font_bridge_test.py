@@ -100,6 +100,41 @@ class ThemeViewTest(unittest.TestCase):
         self.assertNotEqual(self.shell('_htf_active').returncode, 0)
         self.assertEqual(self.shell('_htf_fingerprint').stdout.strip(), 'theme-font:inactive')
 
+    def test_relative_theme_router_remains_active(self):
+        self.router.unlink()
+        self.router.symlink_to('../theme/Roboto-Regular.ttf')
+        self.alias.unlink()
+        self.alias.symlink_to('theme_webview/Roboto-Regular.ttf')
+        self.assertEqual(self.shell('_htf_active').returncode, 0)
+
+    def test_router_recreated_as_regular_font_is_repaired(self):
+        self.router.unlink()
+        self.router.write_bytes(self.target.read_bytes())
+        result = self.shell('_htf_active && printf "%s" "$HTF_TARGET"')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, str(self.router))
+
+    def test_inherited_clone_is_restored_in_new_chrome_namespace(self):
+        commands = '''
+_htf_pids() { echo 101; }
+_gfp_mount_in_pid() {
+    view="$LUOSHU_PROC_ROOT/$1/root$3"
+    mkdir -p "${view%/*}"
+    ln "$2" "$view"
+}
+_htf_apply || exit 10
+# Chrome inherits the exact owned inode into a newly created namespace.
+view="$LUOSHU_PROC_ROOT/102/root$HTF_TARGET"
+mkdir -p "${view%/*}"
+ln "$HTF_CLONE" "$view"
+_htf_pids() { echo 102; }
+_gfp_unmount_in_pid() { echo "$1" >> "$TEST_ROOT/unmounted"; rm -f "$LUOSHU_PROC_ROOT/$1/root$2"; }
+_htf_restore || exit 11
+'''
+        result = self.shell(commands)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.root / 'unmounted').read_text().split(), ['102'])
+
     def test_missing_live_payload_never_uses_pending_selection(self):
         self.source.rename(self.source.with_name('unavailable.font'))
         pending = self.module / '.luoshu-payload-next/system/fonts/400.ttf'
@@ -272,6 +307,7 @@ _htf_apply
         # whose command runner exposes a different PID view to subprocesses.
         self.command('nsenter', 'while [ "$1" != -- ]; do shift; done\nshift\nexec "$@"\n')
         self.env['LUOSHU_GOOGLE_FONT_NS_SHELL'] = '/bin/sh'
+        self.env['LUOSHU_PROC_ROOT'] = '/proc'
         result = self.shell('''
 _gfp_mount_in_pid 1 "$HTF_TARGET" "$HTF_ROUTER" 1
 [ "$?" = 1 ] && [ "$_gfp_mount_detail" = target-is-symlink ] || exit 10

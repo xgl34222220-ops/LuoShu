@@ -14,7 +14,47 @@ PYTHON="${LUOSHU_GOOGLE_FONT_PYTHON:-$PYROOT/bin/luoshu-python}"
 PATCHER="$MODDIR/common/google_font_provider_patch.py"
 CACHE="$MODDIR/config/google-font-provider"
 STATE="$MODDIR/config/google-font-provider-mounts.conf"
+MOUNTS="$MODDIR/config/google-font-provider-namespaces.conf"
+INSPECT_CACHE="$CACHE/inspected-targets-v1.conf"
+REFRESH_QUEUE="$MODDIR/config/google-font-refresh-pending.conf"
 LOG="$MODDIR/logs/google-font-provider.log"
+
+# One writer owns all provider/theme journals and the deferred-refresh queue.
+# The service's lifetime lock is separate: a manual apply/restore can safely
+# coexist with the sleeping watcher without racing its next maintenance pass.
+_gfp_locked() {
+    if [ "${_gfp_lock_held:-0}" = 1 ]; then "$@"; return $?; fi
+    if ! type luoshu_font_lock_acquire >/dev/null 2>&1 && [ -f "$MODDIR/common/font_switch_lock.sh" ]; then
+        . "$MODDIR/common/font_switch_lock.sh"
+    fi
+    if type luoshu_font_lock_acquire >/dev/null 2>&1; then
+        luoshu_font_lock_acquire "$MODDIR/.google-font-provider-bridge.lock" "$$" || return 1
+        _gfp_lock_held=1
+        case "${0##*/}" in
+            google_font_provider_bridge.sh|hyperos_theme_font_bridge.sh)
+                # Entry scripts own their traps. A killed apply must release
+                # its lease before the service/installer attempts restore.
+                trap '_gfp_release_lock' EXIT
+                trap 'exit 129' HUP
+                trap 'exit 130' INT
+                trap 'exit 143' TERM
+                ;;
+        esac
+    fi
+    "$@"
+    _gfp_locked_rc=$?
+    if [ "${_gfp_lock_held:-0}" = 1 ]; then
+        luoshu_font_lock_release "$MODDIR/.google-font-provider-bridge.lock" "$$" >/dev/null 2>&1 || true
+        _gfp_lock_held=0
+    fi
+    return "$_gfp_locked_rc"
+}
+
+_gfp_release_lock() {
+    [ "${_gfp_lock_held:-0}" = 1 ] || return 0
+    luoshu_font_lock_release "$MODDIR/.google-font-provider-bridge.lock" "$$" >/dev/null 2>&1 || true
+    _gfp_lock_held=0
+}
 
 _gfp_log() {
     mkdir -p "$MODDIR/logs" 2>/dev/null || true
@@ -26,7 +66,7 @@ _gfp_log() {
     printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$*" >> "$LOG" 2>/dev/null || true
 }
 
-_gfp_hash() {
+_gfp_hash_raw() {
     if command -v sha256sum >/dev/null 2>&1; then
         sha256sum "$1" 2>/dev/null | awk '{print $1}'
     elif command -v busybox >/dev/null 2>&1; then
@@ -34,6 +74,21 @@ _gfp_hash() {
     else
         cksum "$1" 2>/dev/null | awk '{print $1 "-" $2}'
     fi
+}
+
+# Hash each immutable source once per repair, even when many downloaded weights
+# use the same composite. This cache is discarded after this apply, never a
+# persistent assumption that a file with an old pathname still has old bytes.
+_gfp_hash() {
+    _gfp_h_stamp=$(stat -L -c '%d:%i:%s:%y:%z' "$1" 2>/dev/null) || return 1
+    if [ -n "${_gfp_hash_cache:-}" ]; then
+        _gfp_h_value=$(awk -F '|' -v p="$1" -v s="$_gfp_h_stamp" '$1 == p && $2 == s {print $3; exit}' "$_gfp_hash_cache" 2>/dev/null)
+        [ -z "$_gfp_h_value" ] || { printf '%s\n' "$_gfp_h_value"; return 0; }
+    fi
+    _gfp_h_value=$(_gfp_hash_raw "$1")
+    [ -n "$_gfp_h_value" ] || return 1
+    [ -z "${_gfp_hash_cache:-}" ] || printf '%s|%s|%s\n' "$1" "$_gfp_h_stamp" "$_gfp_h_value" >> "$_gfp_hash_cache"
+    printf '%s\n' "$_gfp_h_value"
 }
 
 _gfp_hash_text() {
@@ -144,6 +199,7 @@ _gfp_targets() {
     fi
     _gfp_list="$CACHE/.targets.$$"
     : > "$_gfp_list" 2>/dev/null || return 1
+    _gfp_seen_roots='|'
     for _gfp_root in \
         /data/data/com.google.android.gms/files/fonts \
         /data/user/*/com.google.android.gms/files/fonts \
@@ -152,6 +208,9 @@ _gfp_targets() {
         /data/user/*/com.android.vending/files/fonts \
         /data/user_de/*/com.android.vending/files/fonts; do
         [ -d "$_gfp_root" ] || continue
+        _gfp_root=$(readlink -f "$_gfp_root" 2>/dev/null) || continue
+        case "$_gfp_seen_roots" in *"|$_gfp_root|"*) continue ;; esac
+        _gfp_seen_roots="$_gfp_seen_roots$_gfp_root|"
         # Cache filenames are not an API. The Python probe checks font headers
         # and a strict family allowlist, including opaque and extensionless files.
         find "$_gfp_root" -maxdepth 6 -type f -print 2>/dev/null >> "$_gfp_list"
@@ -173,11 +232,11 @@ _gfp_stat_files() {
         printf 'path|%s\n' "$_gfp_stat_path"
         set -- "$@" "$_gfp_stat_path"
         if [ "$#" -ge 100 ]; then
-            stat -L -c '%n|%d|%i|%s|%Y|%Z' "$@" 2>/dev/null
+            stat -L -c '%n|%d|%i|%s|%y|%z' "$@" 2>/dev/null
             set --
         fi
     done
-    [ "$#" -eq 0 ] || stat -L -c '%n|%d|%i|%s|%Y|%Z' "$@" 2>/dev/null
+    [ "$#" -eq 0 ] || stat -L -c '%n|%d|%i|%s|%y|%z' "$@" 2>/dev/null
     return 0
 }
 
@@ -197,7 +256,7 @@ _gfp_fingerprint() {
             [ ! -s "$STATE" ] || awk -F '|' 'NF >= 2 {print $2}' "$STATE"
         } | _gfp_stat_files
         _gfp_fp_pids=
-        [ ! -s "$_gfp_fp_targets" ] || _gfp_fp_pids=$(_gfp_namespace_pids)
+        [ ! -s "$_gfp_fp_targets" ] || _gfp_fp_pids=$(_gfp_unique_namespace_pids)
         for _gfp_fp_pid in $_gfp_fp_pids; do
             printf 'namespace|%s|' "$_gfp_fp_pid"
             readlink "$_gfp_fp_proc/$_gfp_fp_pid/ns/mnt" 2>/dev/null || printf 'missing\n'
@@ -225,7 +284,7 @@ _gfp_build_clone() {
     # identity/cache key instead of generating clone-of-clone on every repair.
     if [ -s "$STATE" ]; then
         while IFS='|' read -r _gfp_old_target _gfp_old_clone _gfp_old_target_hash \
-            _gfp_old_clone_hash _gfp_old_source_hash _gfp_old_weight _gfp_old_schema; do
+            _gfp_old_clone_hash _gfp_old_source_hash _gfp_old_weight _gfp_old_schema _gfp_old_identity; do
             [ "$_gfp_old_schema" = provider-v3 ] || continue
             [ "$_gfp_old_target" = "$_gfp_target" ] || continue
             [ "$_gfp_old_source_hash" = "$_gfp_source_hash" ] || continue
@@ -304,6 +363,49 @@ _gfp_namespace_pids() {
     } | awk '/^[0-9]+$/ && !seen[$0]++'
 }
 
+# Google apps commonly share a namespace with several renderers. Mount once per
+# namespace; a newly isolated Chrome/Google process still produces a new entry.
+_gfp_unique_namespace_pids() {
+    _gfp_up_proc="${LUOSHU_PROC_ROOT:-/proc}"
+    _gfp_namespace_pids | while IFS= read -r _gfp_up_pid; do
+        [ "$_gfp_up_pid" != 1 ] || continue
+        _gfp_up_ns=$(readlink "$_gfp_up_proc/$_gfp_up_pid/ns/mnt" 2>/dev/null)
+        [ -z "$_gfp_up_ns" ] || printf '%s|%s\n' "$_gfp_up_ns" "$_gfp_up_pid"
+    done | awk -F '|' '!seen[$1]++ {print $2}'
+}
+
+# A Chrome namespace restart must not launch FontTools to re-identify unchanged
+# provider files. Cache both recognized fonts and irrelevant metadata by inode,
+# size, mtime and ctime; build the cache transactionally only after parsing works.
+_gfp_inspect_targets() {
+    _gfp_ic_candidates="$1"; _gfp_ic_output="$2"
+    _gfp_ic_stamps="$CACHE/.inspect-stamps.$$"
+    _gfp_ic_pending="$CACHE/.inspect-pending.$$"
+    _gfp_ic_parsed="$CACHE/.inspect-parsed.$$"
+    _gfp_ic_next="$CACHE/.inspect-next.$$"
+    _gfp_stat_files < "$_gfp_ic_candidates" | awk -F '|' 'NF == 6 {print}' > "$_gfp_ic_stamps"
+    awk -F '|' 'FILENAME == ARGV[1] {old[$1]=$0; next}
+        {split(old[$1], v, "|"); if (v[2] != $2 || v[3] != $3 || v[4] != $4 || v[5] != $5 || v[6] != $6) print $1}' \
+        "$INSPECT_CACHE" "$_gfp_ic_stamps" > "$_gfp_ic_pending" 2>/dev/null
+    # awk cannot open a missing first input; an absent cache means all files are new.
+    [ -f "$INSPECT_CACHE" ] || cut -d '|' -f 1 "$_gfp_ic_stamps" > "$_gfp_ic_pending"
+    : > "$_gfp_ic_parsed"
+    if [ -s "$_gfp_ic_pending" ] && ! _gfp_python --inspect-targets "$_gfp_ic_pending" > "$_gfp_ic_parsed" 2>> "$LOG"; then
+        rm -f "$_gfp_ic_stamps" "$_gfp_ic_pending" "$_gfp_ic_parsed" "$_gfp_ic_next"
+        return 1
+    fi
+    # Explicit empty files make the first read safe without changing a previous cache.
+    [ -f "$INSPECT_CACHE" ] || : > "$INSPECT_CACHE"
+    awk -F '|' 'FILENAME == ARGV[1] {old[$1]=$7; next}
+        FILENAME == ARGV[2] {pending[$1]=1; next}
+        FILENAME == ARGV[3] {split($0, p, "\t"); parsed[p[1]]=p[2]; next}
+        {weight=($1 in pending ? parsed[$1] : old[$1]); print $0 "|" (weight == "" ? "-" : weight)}' \
+        "$INSPECT_CACHE" "$_gfp_ic_pending" "$_gfp_ic_parsed" "$_gfp_ic_stamps" > "$_gfp_ic_next" || return 1
+    mv -f "$_gfp_ic_next" "$INSPECT_CACHE" || return 1
+    awk -F '|' '$7 ~ /^[1-9]00$/ {print $1 "\t" $7}' "$INSPECT_CACHE" > "$_gfp_ic_output"
+    rm -f "$_gfp_ic_stamps" "$_gfp_ic_pending" "$_gfp_ic_parsed"
+}
+
 # bind 的源必须由目标进程自己的 mount namespace 解析。
 # 普通模块路径在目标 namespace 可见时直接 bind；如果 root 管理器隐藏了模块目录，
 # 只通过 /proc/1/root 读取 clone 内容，并在目标 namespace 的 /data/local/tmp 创建
@@ -316,7 +418,7 @@ _gfp_mount_in_pid() {
     _gfp_regular_only="${4:-0}"
     _gfp_mount_detail=
     _gfp_mount_mode=
-    [ -d "/proc/$_gfp_pid/ns" ] || { _gfp_mount_detail=namespace-missing; return 1; }
+    [ -d "${LUOSHU_PROC_ROOT:-/proc}/$_gfp_pid/ns" ] || { _gfp_mount_detail=namespace-missing; return 1; }
     command -v nsenter >/dev/null 2>&1 || { _gfp_mount_detail=nsenter-missing; return 1; }
     _gfp_proc_source="/proc/1/root$_gfp_source"
     _gfp_stage_dir="${LUOSHU_GOOGLE_FONT_STAGE_DIR:-/data/local/tmp}"
@@ -408,9 +510,216 @@ _gfp_mount_in_pid() {
 _gfp_unmount_in_pid() {
     _gfp_pid="$1"
     _gfp_target="$2"
-    [ -d "/proc/$_gfp_pid/ns" ] || return 1
+    [ -d "${LUOSHU_PROC_ROOT:-/proc}/$_gfp_pid/ns" ] || return 1
     command -v nsenter >/dev/null 2>&1 || return 1
     nsenter -t "$_gfp_pid" -m -- umount "$_gfp_target" >/dev/null 2>&1
+}
+
+_gfp_process_start() {
+    IFS= read -r _gfp_ps_stat < "${LUOSHU_PROC_ROOT:-/proc}/$1/stat" 2>/dev/null || return 1
+    _gfp_ps_tail=${_gfp_ps_stat##*) }
+    [ "$_gfp_ps_tail" != "$_gfp_ps_stat" ] || return 1
+    set -- $_gfp_ps_tail
+    [ "$#" -ge 20 ] || return 1
+    shift 19
+    case "$1" in ''|*[!0-9]*) return 1 ;; esac
+    printf '%s\n' "$1"
+}
+
+_gfp_consumer_package() {
+    _gfp_cp_name=$(tr '\000' '\n' < "${LUOSHU_PROC_ROOT:-/proc}/$1/cmdline" 2>/dev/null | head -n1)
+    _gfp_cp_name=${_gfp_cp_name%%:*}
+    case "$_gfp_cp_name" in
+        com.google.android.gms|com.google.android.gms.*|com.google.android.webview) return 1 ;;
+        com.android.chrome|com.chrome.beta|com.chrome.dev|com.chrome.canary|com.android.vending|com.google.android.*) ;;
+        *) return 1 ;;
+    esac
+    case "$_gfp_cp_name" in *[!A-Za-z0-9_.]*) return 1 ;; esac
+    printf '%s\n' "$_gfp_cp_name"
+}
+
+# Chromium caches opened ParcelFileDescriptors and dup()s them on later font
+# requests. A replacement bind only affects future opens, not these old FDs.
+# Remember only consumers whose view actually changed; never poll all app FDs.
+_gfp_refresh_boot() {
+    _gfp_rb_current=$(cat "${LUOSHU_PROC_ROOT:-/proc}/sys/kernel/random/boot_id" 2>/dev/null)
+    [ -n "$_gfp_rb_current" ] || _gfp_rb_current=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+    [ -n "$_gfp_rb_current" ] || return 1
+    if [ "$(cat "${REFRESH_QUEUE}.boot" 2>/dev/null)" != "$_gfp_rb_current" ]; then
+        rm -f "$REFRESH_QUEUE"
+        printf '%s\n' "$_gfp_rb_current" > "${REFRESH_QUEUE}.boot" || return 1
+    fi
+}
+
+_gfp_queue_all_consumers() {
+    _gfp_qac_identity="$1"
+    [ -n "$_gfp_qac_identity" ] || return 0
+    case "|${_gfp_queued_identities:-}" in *"|$_gfp_qac_identity|"*) return 0 ;; esac
+    _gfp_queued_identities="${_gfp_queued_identities:-}$_gfp_qac_identity|"
+    # Mount once per namespace, but stale FDs belong to individual processes.
+    # A representative zygote/GMS PID must not hide its Chrome consumers.
+    if [ -z "${_gfp_consumer_pids_loaded:-}" ]; then
+        _gfp_consumer_pids=$(_gfp_namespace_pids)
+        _gfp_consumer_pids_loaded=1
+    fi
+    for _gfp_qac_pid in $_gfp_consumer_pids; do
+        _gfp_queue_refresh "$_gfp_qac_pid" "$_gfp_qac_identity"
+    done
+}
+
+_gfp_queue_refresh() {
+    _gfp_q_pid="$1"; _gfp_q_id="$2"
+    case "$_gfp_q_id" in ''|*[!0-9:]*) return 0 ;; esac
+    _gfp_refresh_boot || return 0
+    _gfp_q_pkg=$(_gfp_consumer_package "$_gfp_q_pid") || return 0
+    _gfp_q_start=$(_gfp_process_start "$_gfp_q_pid") || return 0
+    _gfp_q_uid=$(awk '/^Uid:/ {print $2; exit}' "${LUOSHU_PROC_ROOT:-/proc}/$_gfp_q_pid/status" 2>/dev/null)
+    case "$_gfp_q_uid" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$_gfp_q_uid" -ge 10000 ] || return 0
+    _gfp_q_user=$((_gfp_q_uid / 100000))
+    _gfp_q_device=${_gfp_q_id%:*}; _gfp_q_inode=${_gfp_q_id#*:}
+    _gfp_q_map=$(printf '%x:%x:%s' "$(( (_gfp_q_device >> 8 & 4095) | (_gfp_q_device >> 32 & 4294963200) ))" \
+        "$(( (_gfp_q_device & 255) | (_gfp_q_device >> 12 & 4294967040) ))" "$_gfp_q_inode")
+    _gfp_q_row="$_gfp_q_pid|$_gfp_q_start|$_gfp_q_pkg|$_gfp_q_user|$_gfp_q_id"
+    if [ -s "$REFRESH_QUEUE" ] && awk -F '|' -v row="$_gfp_q_row" '$1 FS $2 FS $3 FS $4 FS $5 == row {found=1} END {exit !found}' "$REFRESH_QUEUE"; then
+        return 0
+    fi
+    printf '%s|0|%s\n' "$_gfp_q_row" "$_gfp_q_map" >> "$REFRESH_QUEUE"
+    chmod 0600 "$REFRESH_QUEUE" 2>/dev/null || true
+}
+
+_gfp_refresh_internal() {
+    [ -s "$REFRESH_QUEUE" ] || return 0
+    _gfp_refresh_boot || return 1
+    [ -s "$REFRESH_QUEUE" ] || return 0
+    [ "$(_gfp_active_font)" != default ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || {
+        rm -f "$REFRESH_QUEUE" "${REFRESH_QUEUE}.boot"; return 0;
+    }
+    _gfp_r_proc="${LUOSHU_PROC_ROOT:-/proc}"
+    _gfp_r_groups="${REFRESH_QUEUE}.groups.$$"
+    _gfp_r_open="${REFRESH_QUEUE}.open.$$"
+    _gfp_r_keep="${REFRESH_QUEUE}.keep.$$"
+    _gfp_r_next="${REFRESH_QUEUE}.next.$$"
+    awk -F '|' 'NF == 7 && !seen[$1 FS $2 FS $3 FS $4]++ {print $1 FS $2 FS $3 FS $4 FS $6}' "$REFRESH_QUEUE" > "$_gfp_r_groups" || return 1
+    : > "$_gfp_r_next" || return 1
+    _gfp_r_now=$(date +%s 2>/dev/null)
+    case "$_gfp_r_now" in ''|*[!0-9]*) _gfp_r_now=0 ;; esac
+    _gfp_r_calls=0
+    while IFS='|' read -r _gfp_r_pid _gfp_r_start _gfp_r_pkg _gfp_r_user _gfp_r_last; do
+        [ "$(_gfp_process_start "$_gfp_r_pid")" = "$_gfp_r_start" ] || continue
+        [ "$(_gfp_consumer_package "$_gfp_r_pid")" = "$_gfp_r_pkg" ] || continue
+        case "$_gfp_r_user:$_gfp_r_last" in *[!0-9:]*) continue ;; esac
+        # All stat calls are in one batch; maps also cover a closed FD whose
+        # font remains mmap'ed. Matching both device and inode prevents an
+        # unrelated descriptor on another filesystem from triggering a refresh.
+        stat -L -c '%d:%i' "$_gfp_r_proc/$_gfp_r_pid/fd/"* > "$_gfp_r_open" 2>/dev/null || true
+        awk '$5 ~ /^[0-9]+$/ && $5 != 0 {split($4,d,":"); sub(/^0+/,"",d[1]); sub(/^0+/,"",d[2]);
+            print "map|" (d[1] == "" ? "0" : d[1]) ":" (d[2] == "" ? "0" : d[2]) ":" $5}' \
+            "$_gfp_r_proc/$_gfp_r_pid/maps" >> "$_gfp_r_open" 2>/dev/null || true
+        awk -F '|' -v pid="$_gfp_r_pid" -v start="$_gfp_r_start" \
+            'FILENAME == ARGV[1] {opened[$0]=1; next} $1 == pid && $2 == start && (opened[$5] || opened["map|" $7])' \
+            "$_gfp_r_open" "$REFRESH_QUEUE" > "$_gfp_r_keep"
+        [ -s "$_gfp_r_keep" ] || continue
+        if [ "$_gfp_r_calls" -lt 4 ] && [ $((_gfp_r_now - _gfp_r_last)) -ge 60 ] && command -v timeout >/dev/null 2>&1; then
+            # ActivityManager killBackgroundProcesses skips foreground/visible
+            # processes. Never force-stop an app, GMS, zygote or system_server.
+            # Android user comes from the confirmed process UID, not 'all'.
+            timeout 3 am kill --user "$_gfp_r_user" "$_gfp_r_pkg" >/dev/null 2>&1 || true
+            _gfp_r_calls=$((_gfp_r_calls + 1))
+            _gfp_r_last=$_gfp_r_now
+        fi
+        # A foreground process survives 'am kill': retain its exact identity
+        # and retry after it moves to the background. Recycled PIDs are dropped.
+        [ "$(_gfp_process_start "$_gfp_r_pid")" = "$_gfp_r_start" ] || continue
+        awk -F '|' -v OFS='|' -v last="$_gfp_r_last" '{$6=last; print}' "$_gfp_r_keep" >> "$_gfp_r_next"
+    done < "$_gfp_r_groups"
+    mv -f "$_gfp_r_next" "$REFRESH_QUEUE"
+    _gfp_r_rc=$?
+    rm -f "$_gfp_r_groups" "$_gfp_r_open" "$_gfp_r_keep" "$_gfp_r_next"
+    return "$_gfp_r_rc"
+}
+
+_gfp_identity() {
+    stat -L -c '%d:%i:%s' "$1" 2>/dev/null
+}
+
+_gfp_owned_identity() {
+    [ -s "$MOUNTS" ] || return 1
+    # A child can inherit our inode in a new mount namespace. Inode ownership is
+    # independent of PID/namespace, but must still match this exact target path.
+    awk -F '|' -v target="$1" -v inode="$2" '$2 == target && $3 == inode {found=1} END {exit !found}' "$MOUNTS"
+}
+
+_gfp_clear_owned_pid() {
+    _gfp_clear_pid="$1"; _gfp_clear_target="$2"; _gfp_clear_round=0
+    while [ "$_gfp_clear_round" -lt 64 ]; do
+        _gfp_clear_id=$(_gfp_identity "${LUOSHU_PROC_ROOT:-/proc}/$_gfp_clear_pid/root$_gfp_clear_target")
+        [ -n "$_gfp_clear_id" ] || return 0
+        _gfp_owned_identity "$_gfp_clear_target" "$_gfp_clear_id" || return 0
+        _gfp_unmount_in_pid "$_gfp_clear_pid" "$_gfp_clear_target" || return 1
+        _gfp_clear_round=$((_gfp_clear_round + 1))
+    done
+    return 1
+}
+
+_gfp_mount_journal_failed() {
+    # All post-bind journal errors use the same rollback, including inability
+    # to create/append the temporary file. Never remove an already-present or
+    # externally replaced layer while reporting the write failure.
+    if [ "$_gfp_mount_mode" != already ] && [ "$(_gfp_identity "$_gfp_mt_proc/$_gfp_mt_pid/root$_gfp_mt_target")" = "$_gfp_mt_id" ]; then
+        _gfp_unmount_in_pid "$_gfp_mt_pid" "$_gfp_mt_target" || true
+    fi
+    rm -f "$_gfp_mt_tmp"
+    _gfp_mount_detail=mount-journal-write-failed
+}
+
+_gfp_mount_target() {
+    _gfp_mt_pid="$1"; _gfp_mt_clone="$2"; _gfp_mt_target="$3"
+    _gfp_mt_proc="${LUOSHU_PROC_ROOT:-/proc}"
+    _gfp_mt_ns=$(readlink "$_gfp_mt_proc/$_gfp_mt_pid/ns/mnt" 2>/dev/null)
+    _gfp_mt_id=$(_gfp_identity "$_gfp_mt_proc/$_gfp_mt_pid/root$_gfp_mt_target")
+    _gfp_mt_previous=${_gfp_mt_id%:*}
+    if [ -n "$_gfp_mt_id" ] && [ -s "$MOUNTS" ] && \
+        awk -F '|' -v target="$_gfp_mt_target" -v inode="$_gfp_mt_id" -v clone="$_gfp_mt_clone" \
+            '$2 == target && $3 == inode && $4 == clone {found=1} END {exit !found}' "$MOUNTS"; then
+        _gfp_mount_mode=already
+    else
+        _gfp_clear_owned_pid "$_gfp_mt_pid" "$_gfp_mt_target" || { _gfp_mount_detail=owned-unmount-failed; return 1; }
+        _gfp_mount_in_pid "$_gfp_mt_pid" "$_gfp_mt_clone" "$_gfp_mt_target" || return 1
+        _gfp_mt_id=$(_gfp_identity "$_gfp_mt_proc/$_gfp_mt_pid/root$_gfp_mt_target")
+        [ "$_gfp_mount_mode" = already ] || _gfp_queue_all_consumers "$_gfp_mt_previous"
+    fi
+    # A process may exit immediately after bind. Its namespace then needs no
+    # undo record; if it returns later its new namespace is discovered normally.
+    if [ -n "$_gfp_mt_ns" ] && [ -n "$_gfp_mt_id" ]; then
+        _gfp_mt_tmp="${MOUNTS}.tmp.$$"
+        if [ -s "$MOUNTS" ]; then
+            awk -F '|' -v ns="$_gfp_mt_ns" -v target="$_gfp_mt_target" '!($1 == ns && $2 == target)' "$MOUNTS" > "$_gfp_mt_tmp" || { _gfp_mount_journal_failed; return 1; }
+        else
+            printf '' > "$_gfp_mt_tmp" || { _gfp_mount_journal_failed; return 1; }
+        fi
+        printf '%s|%s|%s|%s\n' "$_gfp_mt_ns" "$_gfp_mt_target" "$_gfp_mt_id" "$_gfp_mt_clone" >> "$_gfp_mt_tmp" || { _gfp_mount_journal_failed; return 1; }
+        if ! mv -f "$_gfp_mt_tmp" "$MOUNTS"; then
+            _gfp_mount_journal_failed
+            return 1
+        fi
+        chmod 0600 "$MOUNTS" 2>/dev/null || true
+    fi
+    return 0
+}
+
+_gfp_prune_journal() {
+    [ -s "$MOUNTS" ] || return 0
+    _gfp_pj_live="${MOUNTS}.live.$$"
+    : > "$_gfp_pj_live" || return 1
+    for _gfp_pj_pid in $_gfp_namespace_pid_list; do
+        readlink "${LUOSHU_PROC_ROOT:-/proc}/$_gfp_pj_pid/ns/mnt" 2>/dev/null >> "$_gfp_pj_live"
+    done
+    awk -F '|' 'FILENAME == ARGV[1] {live[$1]=1; next} $1 in live' "$_gfp_pj_live" "$MOUNTS" > "${MOUNTS}.tmp.$$" && \
+        mv -f "${MOUNTS}.tmp.$$" "$MOUNTS"
+    _gfp_pj_rc=$?
+    rm -f "$_gfp_pj_live" "${MOUNTS}.tmp.$$"
+    return "$_gfp_pj_rc"
 }
 
 _gfp_prune_clones() {
@@ -430,7 +739,7 @@ $_gfp_cached
     done
 }
 
-_gfp_apply_once() {
+_gfp_apply_internal() {
     [ "$(_gfp_active_font)" != default ] || return 2
     mkdir -p "$CACHE" "$MODDIR/logs" 2>/dev/null || return 1
     _gfp_targets_file="$CACHE/.apply-targets.$$"
@@ -443,7 +752,7 @@ _gfp_apply_once() {
         rm -f "$_gfp_candidates_file" 2>/dev/null || true
         return 2
     fi
-    if ! _gfp_python --inspect-targets "$_gfp_candidates_file" > "$_gfp_targets_file" 2>> "$LOG"; then
+    if ! _gfp_inspect_targets "$_gfp_candidates_file" "$_gfp_targets_file"; then
         rm -f "$_gfp_candidates_file" "$_gfp_targets_file" 2>/dev/null || true
         _gfp_log 'provider bridge 未生效：字体缓存识别失败（Python/FontTools）'
         return 1
@@ -464,7 +773,7 @@ _gfp_apply_once() {
     _gfp_missing_first=
     _gfp_namespace_pid_list=
     if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
-        _gfp_namespace_pid_list=$(_gfp_namespace_pids)
+        _gfp_namespace_pid_list=$(_gfp_unique_namespace_pids)
     fi
     while IFS="$(printf '\t')" read -r _gfp_target _gfp_weight_value; do
         _gfp_valid_font "$_gfp_target" || continue
@@ -485,13 +794,25 @@ _gfp_apply_once() {
         _gfp_prepared=$((_gfp_prepared + 1))
         _gfp_selected_hash=$(_gfp_hash "$_gfp_source")
         _gfp_original_target_hash=$(_gfp_hash "$_gfp_target")
+        _gfp_original_identity=$(_gfp_identity "$_gfp_target")
+        _gfp_original_identity=${_gfp_original_identity%:*}
+        _gfp_clone_identity=$(_gfp_identity "$_gfp_clone")
+        _gfp_clone_identity=${_gfp_clone_identity%:*}
+        if [ "$_gfp_original_identity" = "$_gfp_clone_identity" ]; then
+            _gfp_original_identity=$(awk -F '|' -v target="$_gfp_target" -v clone="$_gfp_clone" '$1 == target && $2 == clone && NF >= 8 {print $8; exit}' "$STATE" 2>/dev/null)
+        fi
+        # Paths may already show the clone while a Chrome process still dup()s
+        # its earlier provider FD. Preserve and check the original inode too.
+        if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
+            [ "$_gfp_original_identity" = "$_gfp_clone_identity" ] || _gfp_queue_all_consumers "$_gfp_original_identity"
+        fi
         _gfp_target_mounts=0
         _gfp_target_attempts=0
         if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
             for _gfp_pid in $_gfp_namespace_pid_list; do
                 _gfp_target_attempts=$((_gfp_target_attempts + 1))
                 _gfp_ns_attempted=$((_gfp_ns_attempted + 1))
-                if _gfp_mount_in_pid "$_gfp_pid" "$_gfp_clone" "$_gfp_target"; then
+                if _gfp_mount_target "$_gfp_pid" "$_gfp_clone" "$_gfp_target"; then
                     _gfp_target_mounts=$((_gfp_target_mounts + 1))
                     case "$_gfp_mount_mode" in
                         plain) _gfp_ns_plain=$((_gfp_ns_plain + 1)) ;;
@@ -511,9 +832,9 @@ _gfp_apply_once() {
         fi
         if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || [ "$_gfp_target_mounts" -gt 0 ]; then
             _gfp_mounted=$((_gfp_mounted + 1))
-            printf '%s|%s|%s|%s|%s|%s|provider-v3\n' "$_gfp_target" "$_gfp_clone" \
+            printf '%s|%s|%s|%s|%s|%s|provider-v3|%s\n' "$_gfp_target" "$_gfp_clone" \
                 "$_gfp_original_target_hash" "$(_gfp_hash "$_gfp_clone")" \
-                "$_gfp_selected_hash" "$_gfp_weight_value" >> "$_gfp_state_tmp"
+                "$_gfp_selected_hash" "$_gfp_weight_value" "$_gfp_original_identity" >> "$_gfp_state_tmp"
         else
             _gfp_failed=$((_gfp_failed + 1))
         fi
@@ -530,14 +851,14 @@ _gfp_apply_once() {
         fi
         chmod 0600 "$STATE" 2>/dev/null || true
         _gfp_log "provider bridge：发现=$_gfp_found 生成=$_gfp_prepared 挂载=$_gfp_mounted 失败=$_gfp_failed $_gfp_diag"
-        if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ] && \
-            [ "${LUOSHU_GOOGLE_FONT_ALLOW_RESTART:-1}" = 1 ] && \
-            [ $((_gfp_ns_plain + _gfp_ns_staging)) -gt 0 ]; then
-            am force-stop com.android.vending >/dev/null 2>&1 || true
-        fi
+        # Refresh old consumer FDs through the bounded background-only queue.
+        # Never force-stop Play/Chrome during boot or interrupt the current app.
         # A successful zygote bind alone does not prove GMS can open the clone.
         if [ "$_gfp_failed" -eq 0 ] && [ "$_gfp_ns_failed" -eq 0 ]; then
-            [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" = 1 ] || _gfp_prune_clones
+            if [ "${LUOSHU_GOOGLE_FONT_DRY_RUN:-0}" != 1 ]; then
+                _gfp_prune_clones
+                _gfp_prune_journal || return 1
+            fi
             return 0
         fi
         return 1
@@ -548,19 +869,42 @@ _gfp_apply_once() {
     return 2
 }
 
-_gfp_restore() {
-    [ -s "$STATE" ] || return 0
-    _gfp_restore_pids=$(_gfp_namespace_pids)
-    while IFS='|' read -r _gfp_target _gfp_source _gfp_th _gfp_sh; do
-        [ -n "$_gfp_target" ] || continue
-        for _gfp_pid in $_gfp_restore_pids; do
-            _gfp_unmount_in_pid "$_gfp_pid" "$_gfp_target" || true
+_gfp_restore_internal() {
+    rm -f "$REFRESH_QUEUE" "${REFRESH_QUEUE}.boot"
+    [ -s "$MOUNTS" ] || { rm -f "$STATE"; return 0; }
+    _gfp_restore_pids=$(_gfp_unique_namespace_pids)
+    _gfp_restore_failed=0
+    _gfp_restore_targets=$(awk -F '|' 'NF == 4 && !seen[$2]++ {print $2}' "$MOUNTS")
+    while IFS= read -r _gfp_restore_target; do
+        [ -n "$_gfp_restore_target" ] || continue
+        for _gfp_restore_pid in $_gfp_restore_pids; do
+            _gfp_clear_owned_pid "$_gfp_restore_pid" "$_gfp_restore_target" || _gfp_restore_failed=1
         done
-    done < "$STATE"
-    rm -f "$STATE" 2>/dev/null || true
-    _gfp_log 'provider bridge 已撤销当前命名空间挂载'
+    done <<EOF
+$_gfp_restore_targets
+EOF
+    [ "$_gfp_restore_failed" -eq 0 ] || return 1
+    rm -f "$STATE" "$MOUNTS" 2>/dev/null || true
+    _gfp_log 'provider bridge 已撤销本模块拥有的命名空间挂载'
     return 0
 }
+
+_gfp_apply_cached() {
+    _gfp_consumer_pids_loaded=
+    _gfp_queued_identities=
+    mkdir -p "$CACHE" 2>/dev/null || return 1
+    _gfp_hash_cache="$CACHE/.apply-hashes.$$"
+    : > "$_gfp_hash_cache" || return 1
+    _gfp_apply_internal
+    _gfp_apply_result=$?
+    rm -f "$_gfp_hash_cache"
+    _gfp_hash_cache=
+    return "$_gfp_apply_result"
+}
+
+_gfp_apply_once() { _gfp_locked _gfp_apply_cached; }
+_gfp_restore() { _gfp_locked _gfp_restore_internal; }
+_gfp_refresh_consumers() { _gfp_locked _gfp_refresh_internal; }
 
 _gfp_boot() {
     _gfp_attempt=1
@@ -583,10 +927,11 @@ if [ "${0##*/}" = google_font_provider_bridge.sh ]; then
         apply|now) _gfp_apply_once ;;
         prepare) LUOSHU_GOOGLE_FONT_DRY_RUN=1 _gfp_apply_once ;;
         fingerprint) _gfp_fingerprint ;;
+        refresh) _gfp_refresh_consumers ;;
         restore) _gfp_restore ;;
         invalidate)
-            _gfp_restore >/dev/null 2>&1 || true
-            rm -rf "$CACHE" "$STATE" 2>/dev/null || true
+            _gfp_restore >/dev/null 2>&1 || exit 1
+            rm -rf "$CACHE" "$STATE" "$MOUNTS" 2>/dev/null || true
             ;;
         *) echo "Usage: $0 {boot|apply|prepare|fingerprint|restore|invalidate}" >&2; exit 2 ;;
     esac

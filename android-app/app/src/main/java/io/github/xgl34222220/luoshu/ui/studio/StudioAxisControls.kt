@@ -21,12 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
@@ -54,11 +49,9 @@ internal fun MaterialStudioAxisControls(
     onWeight: (Int) -> Unit,
     onAxis: (String, Float) -> Unit,
 ) {
-    var axisRetry by remember(font) { mutableIntStateOf(0) }
-    val axisInfo = rememberWeightAxisInfo(font, retryKey = axisRetry)
+    val axisInfo = rememberWeightAxisInfo(font)
     when {
         font.variable && axisInfo.loading -> AxisLoadingRow()
-        font.variable && axisInfo.error.isNotBlank() -> AxisErrorRow(axisInfo.error, enabled) { axisRetry += 1 }
         font.variable && axisInfo.axes.isNotEmpty() -> {
             Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
                 axisInfo.axes.forEach { axis ->
@@ -143,12 +136,10 @@ internal fun MiuixStudioAxisControls(
     onWeight: (Int) -> Unit,
     onAxis: (String, Float) -> Unit,
 ) {
-    var axisRetry by remember(font) { mutableIntStateOf(0) }
-    val axisInfo = rememberWeightAxisInfo(font, retryKey = axisRetry)
+    val axisInfo = rememberWeightAxisInfo(font)
     val tokens = LocalMiuixTokens.current
     when {
         font.variable && axisInfo.loading -> AxisLoadingRow()
-        font.variable && axisInfo.error.isNotBlank() -> AxisErrorRow(axisInfo.error, enabled) { axisRetry += 1 }
         font.variable && axisInfo.axes.isNotEmpty() -> {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 axisInfo.axes.forEach { axis ->
@@ -239,18 +230,6 @@ internal fun MiuixStudioAxisControls(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun AxisErrorRow(message: String, enabled: Boolean, onRetry: () -> Unit) {
-    Column {
-        Text(
-            "可调参数读取失败：$message",
-            color = MaterialTheme.colorScheme.error,
-            fontSize = 12.sp,
-        )
-        TextButton(onClick = onRetry, enabled = enabled) { Text("重试") }
     }
 }
 

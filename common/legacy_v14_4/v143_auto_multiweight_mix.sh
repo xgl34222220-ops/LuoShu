@@ -387,9 +387,9 @@ worker() {
 precheck_mix() {
     [ -n "$1" ] && [ -n "$2" ] && [ -n "$3" ] || return 1
     [ -f "$ROLE_CHECK" ] || return 0
-    _role_error=$(MODDIR="$MODDIR" sh "$ROLE_CHECK" "$1" cjk --message) || return 2
-    _role_error=$(MODDIR="$MODDIR" sh "$ROLE_CHECK" "$2" latin --message) || return 3
-    _role_error=$(MODDIR="$MODDIR" sh "$ROLE_CHECK" "$3" digit --message) || return 4
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$1" cjk >/dev/null 2>&1 || return 2
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$2" latin >/dev/null 2>&1 || return 3
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$3" digit >/dev/null 2>&1 || return 4
 }
 
 start_mix() {
@@ -410,7 +410,9 @@ start_mix() {
     _precheck=$?
     case "$_precheck" in
         1) printf '{"status":"error","message":"请选择中文、英文和数字字体"}\n'; return ;;
-        2|3|4) printf '{"status":"error","message":"%s"}\n' "$(json_escape "$_role_error")"; return ;;
+        2) printf '{"status":"error","message":"中文基底缺少必要字形"}\n'; return ;;
+        3) printf '{"status":"error","message":"英文字体缺少必要字形"}\n'; return ;;
+        4) printf '{"status":"error","message":"数字字体缺少必要字形"}\n'; return ;;
     esac
 
     if [ "$_cjk_mode" = fixed ] && [ "$_latin_mode" = fixed ] && [ "$_digit_mode" = fixed ]; then

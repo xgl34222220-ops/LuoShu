@@ -39,6 +39,7 @@ luoshu_update_font_builder_compatible() {
     for _lufb_relative in \
         common/hyperos_physical_policy.py \
         common/hyperos_metrics_batch.py \
+        common/legacy_v14_4/hyperos_full_coverage.sh \
         common/coloros_metrics_batch.py; do
         [ -e "$1/$_lufb_relative" ] || [ -e "$2/$_lufb_relative" ] || continue
         [ -f "$1/$_lufb_relative" ] && [ -f "$2/$_lufb_relative" ] || return 1
@@ -172,30 +173,22 @@ luoshu_migrate_update_cache() {
     _new="$2"
     _schema_compatible="${3:-false}"
     _builder_compatible="${4:-true}"
+    # Generated fonts can be large and are no longer reusable after a builder
+    # change. Do not copy them into the update only to invalidate them on apply;
+    # cross-filesystem installs would allocate a second full set. The active
+    # payload is migrated separately and continues to work until explicit apply.
     for _relative in \
         cache/full-composite-v12 \
         cache/auto-multiweight-mix/composites-v9 \
         cache/auto-multiweight-mix/prepared-v8 \
-        cache/auto-multiweight-mix/source-meta-v1; do
-        [ -d "$_old/$_relative" ] || continue
+        cache/full-composite-v7 \
+        cache/auto-multiweight-mix/composites-v3; do
         rm -rf "$_new/$_relative" 2>/dev/null || true
+        [ "$_schema_compatible" = true ] && [ "$_builder_compatible" = true ] || continue
+        [ -d "$_old/$_relative" ] || continue
         mkdir -p "${_new}/${_relative%/*}" 2>/dev/null || continue
         luoshu_copy_update_tree "$_old/$_relative" "$_new/$_relative" || true
     done
-    # v4 may deliberately run the verified v14.4 compatibility compositor. Its
-    # content-addressed caches are safe only across the same payload schema; keep
-    # them on ordinary v4 updates so a known combination remains a seconds-level
-    # switch instead of being synthesized again after every module replacement.
-    if [ "$_schema_compatible" = true ]; then
-        for _relative in \
-            cache/full-composite-v7 \
-            cache/auto-multiweight-mix/composites-v3; do
-            [ -d "$_old/$_relative" ] || continue
-            rm -rf "$_new/$_relative" 2>/dev/null || true
-            mkdir -p "${_new}/${_relative%/*}" 2>/dev/null || continue
-            luoshu_copy_update_tree "$_old/$_relative" "$_new/$_relative" || true
-        done
-    fi
     mkdir -p "$_new/cache" 2>/dev/null || true
     for _probe in "$_old/cache"/runtime_probe.*.ok; do
         [ -f "$_probe" ] || continue
@@ -207,7 +200,7 @@ luoshu_migrate_update_cache() {
     # regular files from config/*, silently dropping the entire device alignment cache on update.
     # Metric/source caches are content-addressed and safe across releases. A device payload cache is
     # retained only when its payload schema and physical-font builder agree.
-    for _relative in config/metrics_cache config/font-config-source; do
+    for _relative in cache/auto-multiweight-mix/source-meta-v1 config/metrics_cache config/font-config-source; do
         [ -d "$_old/$_relative" ] || continue
         rm -rf "$_new/$_relative" 2>/dev/null || true
         mkdir -p "${_new}/${_relative%/*}" 2>/dev/null || continue

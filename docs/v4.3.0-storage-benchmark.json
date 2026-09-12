@@ -1,0 +1,77 @@
+{
+  "baseline": {
+    "case": "baseline",
+    "baselineTag": "v4.2.0",
+    "fontTools": "4.63.0",
+    "scenario": "real K80 dali system font names; synthetic distinct stock metric contracts",
+    "sourceBytes": 20093424,
+    "sourceSha256": "0ddef90648998900175cfdca9a6f087a2544c182f130b0ad4f7e94a03a115e79",
+    "scannedSystemFontNames": 230,
+    "oldPolicyTargets": 128,
+    "selectedTargets": 128,
+    "seconds": 96.69,
+    "builderProcessPeakRssKiB": 256704,
+    "builderProcessPeakRssBytes": 262864896,
+    "uniqueInodeBytes": 2551899417,
+    "allocatedBytes": 2552102912,
+    "allAliasLogicalBytes": 2592086185,
+    "uniqueInodes": 128,
+    "regularPaths": 130,
+    "fullSizeInodesOver10MB": 127,
+    "builderResult": {
+      "mapped": 128,
+      "generated": 126,
+      "fallbackSlots": 0
+    },
+    "mainHanCodepoints": 27782,
+    "latinHanCodepoints": 0,
+    "latinGlyphs": 29773,
+    "latinAsciiPreserved": true,
+    "latinBytes": 20089596,
+    "sourceUnchanged": true
+  },
+  "fixed": {
+    "case": "fixed",
+    "baselineTag": "v4.2.0",
+    "fontTools": "4.63.0",
+    "scenario": "real K80 dali system font names; synthetic distinct stock metric contracts",
+    "sourceBytes": 20093424,
+    "sourceSha256": "0ddef90648998900175cfdca9a6f087a2544c182f130b0ad4f7e94a03a115e79",
+    "scannedSystemFontNames": 230,
+    "oldPolicyTargets": 128,
+    "selectedTargets": 14,
+    "seconds": 5.54,
+    "builderProcessPeakRssKiB": 145084,
+    "builderProcessPeakRssBytes": 148566016,
+    "uniqueInodeBytes": 85569363,
+    "allocatedBytes": 85594112,
+    "allAliasLogicalBytes": 125756131,
+    "uniqueInodes": 14,
+    "regularPaths": 16,
+    "fullSizeInodesOver10MB": 4,
+    "builderResult": {
+      "mapped": 14,
+      "generated": 12,
+      "fallbackSlots": 0
+    },
+    "mainHanCodepoints": 27782,
+    "latinHanCodepoints": 0,
+    "latinGlyphs": 1867,
+    "latinAsciiPreserved": true,
+    "latinBytes": 575912,
+    "sourceUnchanged": true
+  },
+  "reductionsPercent": {
+    "uniqueInodeBytes": 96.65,
+    "allocatedBytes": 96.65,
+    "allAliasLogicalBytes": 95.15,
+    "builderProcessPeakRssBytes": 43.48,
+    "seconds": 94.27
+  },
+  "limits": [
+    "Host Linux builder benchmark, not Android device measurement.",
+    "Distinct stock metrics are controlled synthetic contracts.",
+    "Does not measure app/daemon idle RAM or entire installed module size.",
+    "RAM peak is Python process RSS; disk bytes are separately reported."
+  ]
+}

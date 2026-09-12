@@ -213,7 +213,9 @@ internal class Alpha15FeatureViewModel : ViewModel() {
                 timeoutMs = 35_000L,
             )
             try {
-                val root = parseFontProbeResponse(result, "字体覆盖检测失败")
+                if (result.code != 0) error(result.stderr.ifBlank { "字体覆盖诊断失败" })
+                val root = firstJson(result.stdout)
+                if (root.optString("status") != "ok") error(root.optString("message", "字体覆盖诊断失败"))
                 val data = root.getJSONObject("data")
                 coverage = CoverageProbeState(
                     loading = false,

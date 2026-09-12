@@ -98,15 +98,19 @@ jobs:
           for attempt in 1 2 3; do
             git fetch origin main
             git reset --hard origin/main
+            fallback=()
+            if [[ "$OUTPUT" == 'update.json' ]]; then
+              fallback=(--fallback-output update-prerelease.json)
+            fi
             python3 scripts/sync_update_metadata.py \
               --repository "$GITHUB_REPOSITORY" \
               --version "$VERSION" \
               --version-code "$VERSION_CODE" \
               --tag "$TAG" \
               --notes-file "$NOTES_FILE" \
-              --output "$OUTPUT"
+              --output "$OUTPUT" "${fallback[@]}"
 
-            git add -- "$OUTPUT"
+            git add -- "$OUTPUT" update-prerelease.json
             if git diff --cached --quiet; then
               echo "$OUTPUT already matches $TAG"
               exit 0

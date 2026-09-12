@@ -159,6 +159,34 @@ class RoutingTest(unittest.TestCase):
     def test_cff_cjk_routes_to_fallback_with_compact_latin_outlines(self):
         self.assert_routing_and_compact_outlines(cff=True)
 
+    def test_compaction_preserves_legacy_symbol_and_variation_only_mappings(self):
+        self.default_pair()
+        source_path = self.fonts / '400.ttf'
+        with TTFont(source_path, recalcBBoxes=False) as font:
+            # Existing non-Unicode mappings are not proof of a CJK fallback.
+            # Keep their referenced glyphs even when its Unicode Han route moves.
+            for platform, encoding, cp in ((1, 0, 0x80), (3, 0, 0xF041)):
+                table = CmapSubtable.newSubtable(4)
+                table.platformID, table.platEncID, table.language = platform, encoding, 0
+                table.cmap = {cp: f'u{HAN:X}'}
+                font['cmap'].tables.append(table)
+            variation = next(table for table in font['cmap'].tables if table.format == 14)
+            variation.uvsDict[0xE0100] = [(0x9FFF, f'u{OTHER_HAN:X}')]
+            font.save(source_path)
+        original = source_path.read_bytes()
+        self.build()
+        self.assertEqual(source_path.read_bytes(), original, 'user source is read-only')
+        with TTFont(self.fonts / 'Roboto-Regular.ttf') as font:
+            for platform, encoding, cp in ((1, 0, 0x80), (3, 0, 0xF041)):
+                table = next(table for table in font['cmap'].tables
+                             if (table.platformID, table.platEncID) == (platform, encoding))
+                self.assertEqual(table.cmap[cp], f'u{HAN:X}')
+                self.assertIn(table.cmap[cp], font.getGlyphOrder())
+            variation = next(table for table in font['cmap'].tables if table.format == 14)
+            self.assertEqual(variation.uvsDict[0xE0100], [(0x9FFF, f'u{OTHER_HAN:X}')])
+            self.assertIn(f'u{OTHER_HAN:X}', font.getGlyphOrder())
+            self.assertNotIn(HAN, font.getBestCmap(), 'Unicode route still uses the proven fallback')
+
     def test_many_latin_contracts_compact_shared_source_only_once(self):
         self.default_pair(variable=True)
         for index in range(20):

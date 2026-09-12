@@ -41,12 +41,22 @@ _hyperos_metric_shell_files() {
 # Google Play、系统搜索框、安装器和部分 Launcher/设置页面会直接打开这些物理槽。
 _hyperos_upright_ui_files() {
     {
+        # Match the full mapper's UI families before staging. A broad NotoSans*
+        # scan includes unrelated scripts and creates large aliases only to
+        # discard them later in the metrics batch. OTF/CJK expansion still uses
+        # the shared full mapper during final staging.
         printf '%s\n' 'Roboto-Thin.ttf Roboto-ExtraLight.ttf Roboto-Light.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-SemiBold.ttf Roboto-Bold.ttf Roboto-ExtraBold.ttf Roboto-Black.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Regular.ttf GoogleSans-Medium.ttf GoogleSans-SemiBold.ttf GoogleSans-Bold.ttf GoogleSans-Black.ttf GoogleSansText-Regular.ttf GoogleSansText-Medium.ttf GoogleSansText-SemiBold.ttf GoogleSansText-Bold.ttf GoogleSansText-Black.ttf GoogleSansText-VF.ttf GoogleSansTextVF.ttf GoogleSans-VF.ttf GoogleSansFlex-Regular.ttf NotoSans-Regular.ttf NotoSans-Medium.ttf NotoSans-SemiBold.ttf NotoSans-Bold.ttf NotoSans-Black.ttf NotoSansUI-Regular.ttf NotoSansUI-Medium.ttf NotoSansUI-Bold.ttf SourceSansPro-Regular.ttf SourceSansPro-Medium.ttf SourceSansPro-SemiBold.ttf SourceSansPro-Bold.ttf DroidSans.ttf'
         while IFS='|' read -r _real _overlay; do
             [ -d "$_real" ] || continue
             for _path in "$_real"/Roboto*.ttf "$_real"/GoogleSans*.ttf \
-                         "$_real"/NotoSans*.ttf "$_real"/SourceSansPro*.ttf \
-                         "$_real"/DroidSans.ttf; do
+                         "$_real"/NotoSans.ttf "$_real"/NotoSans-*.ttf \
+                         "$_real"/NotoSansUI.ttf "$_real"/NotoSansUI-*.ttf \
+                         "$_real"/NotoSansSC*.ttf "$_real"/NotoSansTC*.ttf "$_real"/NotoSansHK*.ttf \
+                         "$_real"/NotoSansHans*.ttf "$_real"/NotoSansHant*.ttf \
+                         "$_real"/NotoSansCJKSC*.ttf "$_real"/NotoSansCJKsc*.ttf \
+                         "$_real"/NotoSansCJKTC*.ttf "$_real"/NotoSansCJKtc*.ttf \
+                         "$_real"/NotoSansCJKHK*.ttf "$_real"/NotoSansCJKhk*.ttf \
+                         "$_real"/SourceSansPro*.ttf "$_real"/DroidSans.ttf; do
                 [ -f "$_path" ] || continue
                 _name=${_path##*/}
                 case "$_name" in

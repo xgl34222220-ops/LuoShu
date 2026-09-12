@@ -248,9 +248,9 @@ def _add_hyperos_physical_slots(slots: dict[str, dict[str, Any]], roots: list[ba
     """Capture stock contracts for files the HyperOS mapper actually replaces.
 
     Named UI-family discovery intentionally omits lang=zh-Hans/zh-Hant fallback
-    families. HyperOS's physical mapper still replaces their NotoSans files, so
-    those files need real stock metrics too. This addition is ROM-local and does
-    not change the generic/ColorOS replacement heuristic.
+    families. Capture only the explicit CJK and UI files selected by the physical
+    mapper, including their real stock metrics. Unrelated language/symbol fonts
+    remain stock; this does not widen the generic/ColorOS replacement heuristic.
     """
     additional: dict[str, dict[str, Any]] = {}
     dynamic_aliases: dict[str, dict[str, str]] = {}

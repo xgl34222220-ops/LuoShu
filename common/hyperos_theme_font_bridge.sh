@@ -10,16 +10,24 @@ HTF_CACHE="$MODDIR/config/hyperos-theme-font"
 HTF_STATE="$MODDIR/config/hyperos-theme-font-mount.conf"
 HTF_MOUNTS="$MODDIR/config/hyperos-theme-font-namespaces.conf"
 HTF_TARGET="${LUOSHU_THEME_FONT_TARGET:-/data/system/theme/fonts/Roboto-Regular.ttf}"
+HTF_THEME_TARGET="$HTF_TARGET"
 HTF_ALIAS="${LUOSHU_THEME_FONT_ALIAS:-/system/fonts/MiSansVF_Overlay.ttf}"
 HTF_ROUTER="${LUOSHU_THEME_FONT_ROUTER:-/data/system/fonts/theme_webview/Roboto-Regular.ttf}"
 
 _htf_active() {
     [ "$(_gfp_active_font)" != default ] || return 1
-    [ -L "$HTF_ALIAS" ] && [ "$(readlink "$HTF_ALIAS" 2>/dev/null)" = "$HTF_ROUTER" ] || return 1
-    [ -L "$HTF_ROUTER" ] && [ "$(readlink "$HTF_ROUTER" 2>/dev/null)" = "$HTF_TARGET" ] || return 1
-    # Never follow a theme file onward into an unrelated path.
-    # Empty-font themes can legitimately have a tiny SFNT. Let the patcher's
-    # table parser validate it; a provider-cache size threshold is not valid here.
+    [ -L "$HTF_ALIAS" ] || return 1
+    # HyperOS can rebuild theme_webview as a regular font or use relative links.
+    # Compare resolved routes, not the spelling of readlink's immediate hop.
+    # Only the two known framework paths are accepted; never follow arbitrary
+    # user theme links into another module or outside the font router.
+    _htf_resolved=$(readlink -f "$HTF_ALIAS" 2>/dev/null) || return 1
+    _htf_router_resolved=$(readlink -f "$HTF_ROUTER" 2>/dev/null) || return 1
+    [ "$_htf_resolved" = "$_htf_router_resolved" ] || return 1
+    case "$_htf_resolved" in
+        "$HTF_THEME_TARGET"|"$HTF_ROUTER") HTF_TARGET=$_htf_resolved ;;
+        *) return 1 ;;
+    esac
     [ ! -L "$HTF_TARGET" ] && [ -s "$HTF_TARGET" ]
 }
 
@@ -38,7 +46,7 @@ _htf_source() {
 }
 
 _htf_stamp() {
-    stat -L -c '%d:%i:%s:%Y:%Z' "$1" 2>/dev/null
+    stat -L -c '%d:%i:%s:%y:%z' "$1" 2>/dev/null
 }
 
 _htf_identity() {
@@ -47,14 +55,7 @@ _htf_identity() {
 }
 
 _htf_pids() {
-    # Reuse one batched /proc scan and the provider's Chrome/Google/zygote set.
-    # Never address PID 1 or system_server; inherited zygote views cover new apps.
-    _htf_proc="${LUOSHU_PROC_ROOT:-/proc}"
-    _gfp_namespace_pids | while IFS= read -r _htf_pid; do
-        [ "$_htf_pid" != 1 ] || continue
-        _htf_ns=$(readlink "$_htf_proc/$_htf_pid/ns/mnt" 2>/dev/null)
-        [ -n "$_htf_ns" ] && printf '%s|%s\n' "$_htf_ns" "$_htf_pid"
-    done | awk -F '|' '!seen[$1]++ {print $2}'
+    _gfp_unique_namespace_pids
 }
 
 _htf_fingerprint() {
@@ -62,9 +63,11 @@ _htf_fingerprint() {
     _htf_donor=$(_htf_source) || { printf 'theme-font:source-pending\n'; return 0; }
     _htf_proc="${LUOSHU_PROC_ROOT:-/proc}"
     {
-        printf 'theme-font:v1|%s|%s\n' "$_htf_donor" "$HTF_TARGET"
+        printf 'theme-font:v2|%s|%s\n' "$_htf_donor" "$HTF_TARGET"
         _htf_stamp "$_htf_donor"
         _htf_stamp "$HTF_TARGET"
+        _htf_stamp "${HTF_ROUTER%/*}"
+        _htf_stamp "${HTF_TARGET%/*}"
         for _htf_pid in $(_htf_pids); do
             printf 'pid|%s|' "$_htf_pid"
             readlink "$_htf_proc/$_htf_pid/ns/mnt" 2>/dev/null || true
@@ -91,7 +94,7 @@ _htf_prepare() {
             fi
         fi
     fi
-    _htf_key=$(printf 'theme-view-v1|%s|%s|%s' "$_htf_donor" "$_htf_source_stamp" "$_htf_target_stamp" | _gfp_hash_text)
+    _htf_key=$(printf 'theme-view-v2|%s|%s|%s' "$_htf_donor" "$_htf_source_stamp" "$_htf_target_stamp" | _gfp_hash_text)
     HTF_CLONE="$HTF_CACHE/$_htf_key.ttf"
     if ! _gfp_valid_font "$HTF_CLONE"; then
         _htf_saved_patcher=$PATCHER
@@ -116,20 +119,21 @@ _htf_prepare() {
 
 _htf_owned_identity() {
     [ -s "$HTF_MOUNTS" ] || return 1
-    awk -F '|' -v ns="$1" -v inode="$2" '$1 == ns && $2 == inode {found=1} END {exit !found}' "$HTF_MOUNTS"
+    awk -F '|' -v inode="$1" -v target="$2" -v legacy="$HTF_THEME_TARGET" \
+        '$2 == inode && (NF == 4 ? $4 : legacy) == target {found=1} END {exit !found}' "$HTF_MOUNTS"
 }
 
 _htf_clear_owned_pid() {
     _htf_clear_pid="$1"
-    _htf_clear_ns=$(readlink "${LUOSHU_PROC_ROOT:-/proc}/$_htf_clear_pid/ns/mnt" 2>/dev/null)
+    _htf_clear_target="${2:-$HTF_TARGET}"
     _htf_clear_round=0
     # Multiple old layers are possible after an interrupted earlier attempt.
     # Never pop a foreign layer; retain the journal if a layer cannot be removed.
     while [ "$_htf_clear_round" -lt 64 ]; do
-        _htf_clear_id=$(_htf_identity "${LUOSHU_PROC_ROOT:-/proc}/$_htf_clear_pid/root$HTF_TARGET")
+        _htf_clear_id=$(_htf_identity "${LUOSHU_PROC_ROOT:-/proc}/$_htf_clear_pid/root$_htf_clear_target")
         [ -n "$_htf_clear_id" ] || return 0
-        _htf_owned_identity "$_htf_clear_ns" "$_htf_clear_id" || return 0
-        _gfp_unmount_in_pid "$_htf_clear_pid" "$HTF_TARGET" || return 1
+        _htf_owned_identity "$_htf_clear_id" "$_htf_clear_target" || return 0
+        _gfp_unmount_in_pid "$_htf_clear_pid" "$_htf_clear_target" || return 1
         _htf_clear_round=$((_htf_clear_round + 1))
     done
     return 1
@@ -139,20 +143,70 @@ _htf_mount_pid() {
     _htf_mount_pid_value="$1"
     _htf_mount_ns=$(readlink "${LUOSHU_PROC_ROOT:-/proc}/$_htf_mount_pid_value/ns/mnt" 2>/dev/null)
     _htf_mount_id=$(_htf_identity "${LUOSHU_PROC_ROOT:-/proc}/$_htf_mount_pid_value/root$HTF_TARGET")
-    if [ -s "$HTF_MOUNTS" ] && grep -Fxq "$_htf_mount_ns|$_htf_mount_id|$HTF_CLONE" "$HTF_MOUNTS"; then
-        return 0
+    _htf_mount_previous=$_htf_mount_id
+    _htf_mount_changed=0
+    # Prepare the journal before mounting, and commit each namespace promptly.
+    # A later failed namespace must not erase successful ownership records.
+    _htf_mount_row="${HTF_MOUNTS}.row.$$"
+    if [ -s "$HTF_MOUNTS" ]; then
+        awk -F '|' -v ns="$_htf_mount_ns" -v target="$HTF_TARGET" -v legacy="$HTF_THEME_TARGET" \
+            '!($1 == ns && (NF == 4 ? $4 : legacy) == target)' "$HTF_MOUNTS" > "$_htf_mount_row" || return 1
+    else
+        : > "$_htf_mount_row" || return 1
     fi
-    # Replacing the top layer rather than stacking makes restore reversible.
-    _htf_clear_owned_pid "$_htf_mount_pid_value" || return 1
-    _gfp_mount_in_pid "$_htf_mount_pid_value" "$HTF_CLONE" "$HTF_TARGET" 1
+    if [ -n "$_htf_mount_id" ] && [ -s "$HTF_MOUNTS" ] && awk -F '|' -v inode="$_htf_mount_id" -v clone="$HTF_CLONE" -v target="$HTF_TARGET" -v legacy="$HTF_THEME_TARGET" \
+        '$2 == inode && $3 == clone && (NF == 4 ? $4 : legacy) == target {found=1} END {exit !found}' "$HTF_MOUNTS"; then
+        _gfp_mount_mode=already
+    else
+        _htf_clear_owned_pid "$_htf_mount_pid_value" || { rm -f "$_htf_mount_row"; return 1; }
+        _gfp_mount_in_pid "$_htf_mount_pid_value" "$HTF_CLONE" "$HTF_TARGET" 1 || { rm -f "$_htf_mount_row"; return 1; }
+        [ "$_gfp_mount_mode" = already ] || _htf_mount_changed=1
+        _htf_mount_id=$(_htf_identity "${LUOSHU_PROC_ROOT:-/proc}/$_htf_mount_pid_value/root$HTF_TARGET")
+    fi
+    _htf_mount_saved=0
+    if [ -n "$_htf_mount_ns" ] && [ -n "$_htf_mount_id" ]; then
+        printf '%s|%s|%s|%s\n' "$_htf_mount_ns" "$_htf_mount_id" "$HTF_CLONE" "$HTF_TARGET" >> "$_htf_mount_row" && \
+            mv -f "$_htf_mount_row" "$HTF_MOUNTS" && _htf_mount_saved=1
+    fi
+    rm -f "$_htf_mount_row"
+    if [ "$_htf_mount_saved" != 1 ]; then
+        if [ "$_htf_mount_changed" = 1 ] && [ "$(_htf_identity "${LUOSHU_PROC_ROOT:-/proc}/$_htf_mount_pid_value/root$HTF_TARGET")" = "$_htf_mount_id" ]; then
+            _gfp_unmount_in_pid "$_htf_mount_pid_value" "$HTF_TARGET" || true
+        fi
+        return 1
+    fi
+    chmod 0600 "$HTF_MOUNTS" 2>/dev/null || true
+    [ "$_htf_mount_changed" != 1 ] || _gfp_queue_all_consumers "${_htf_mount_previous%:*}"
+    return 0
 }
 
-_htf_apply() {
+_htf_apply_internal() {
+    _gfp_consumer_pids_loaded=
+    _gfp_queued_identities=
     if ! _htf_active; then
         _htf_restore || return 1
         return 2
     fi
+    # A router rebuilt as a regular file changes the destination. Release the
+    # previous destination by its recorded path before applying the new route.
+    if [ -s "$HTF_MOUNTS" ]; then
+        _htf_retired=$(awk -F '|' -v current="$HTF_TARGET" -v legacy="$HTF_THEME_TARGET" '{target=(NF == 4 ? $4 : legacy); if (target != current && !seen[target]++) print target}' "$HTF_MOUNTS")
+        while IFS= read -r _htf_retired_target; do
+            [ -n "$_htf_retired_target" ] || continue
+            for _htf_retired_pid in $(_htf_pids); do
+                _htf_clear_owned_pid "$_htf_retired_pid" "$_htf_retired_target" || return 1
+            done
+        done <<EOF
+$_htf_retired
+EOF
+    fi
     _htf_prepare || return $?
+    # Keep the original theme inode from prepare even when a shared namespace
+    # already exposes our clone; old Chrome FDs can still refer to that inode.
+    _htf_original_stamp=$(awk -F '|' 'NR == 1 {print $2}' "$HTF_STATE" 2>/dev/null)
+    _htf_original_identity=$(printf '%s\n' "$_htf_original_stamp" | awk -F ':' 'NF >= 2 {print $1 ":" $2}')
+    _htf_current_identity=$(_gfp_identity "$HTF_CLONE")
+    [ "$_htf_original_identity" = "${_htf_current_identity%:*}" ] || _gfp_queue_all_consumers "$_htf_original_identity"
     _htf_ok=0; _htf_failed=0
     _htf_proc="${LUOSHU_PROC_ROOT:-/proc}"
     _htf_journal="${HTF_MOUNTS}.tmp.$$"
@@ -166,7 +220,7 @@ _htf_apply() {
             _htf_ok=$((_htf_ok + 1))
             _htf_ns=$(readlink "$_htf_proc/$_htf_pid/ns/mnt" 2>/dev/null)
             _htf_view=$(_htf_identity "$_htf_proc/$_htf_pid/root$HTF_TARGET")
-            [ -z "$_htf_ns" ] || [ -z "$_htf_view" ] || printf '%s|%s|%s\n' "$_htf_ns" "$_htf_view" "$HTF_CLONE" >> "$_htf_journal"
+            [ -z "$_htf_ns" ] || [ -z "$_htf_view" ] || printf '%s|%s|%s|%s\n' "$_htf_ns" "$_htf_view" "$HTF_CLONE" "$HTF_TARGET" >> "$_htf_journal"
             [ -z "$_htf_ns" ] || printf '%s\n' "$_htf_ns" >> "${_htf_journal}.handled"
         else
             _htf_failed=$((_htf_failed + 1))
@@ -181,25 +235,35 @@ _htf_apply() {
             "${_htf_journal}.live" "${_htf_journal}.handled" "$HTF_MOUNTS" >> "$_htf_journal"
     fi
     _htf_journal_rc=0
-    awk -F '|' 'NF == 3 && !seen[$1 FS $2]++' "$_htf_journal" > "${HTF_MOUNTS}.new.$$" && \
+    awk -F '|' 'NF >= 3 && !seen[$1 FS $2 FS $4]++' "$_htf_journal" > "${HTF_MOUNTS}.new.$$" && \
         mv -f "${HTF_MOUNTS}.new.$$" "$HTF_MOUNTS" || _htf_journal_rc=1
     rm -f "$_htf_journal" "${_htf_journal}.live" "${_htf_journal}.handled" "${HTF_MOUNTS}.new.$$"
     _gfp_log "HyperOS theme view：mounted=$_htf_ok failed=$_htf_failed; framework symlinks preserved"
     [ "$_htf_ok" -gt 0 ] && [ "$_htf_failed" -eq 0 ] && [ "$_htf_journal_rc" -eq 0 ]
 }
 
-_htf_restore() {
+_htf_restore_internal() {
     [ -s "$HTF_MOUNTS" ] || { rm -f "$HTF_STATE"; return 0; }
     # Mount ownership is checked by inode before unmounting; never detach a
     # replacement installed by the ROM/theme manager or another module.
     _htf_proc="${LUOSHU_PROC_ROOT:-/proc}"
     _htf_restore_failed=0
-    for _htf_pid in $(_htf_pids); do
-        _htf_clear_owned_pid "$_htf_pid" || _htf_restore_failed=1
-    done
+    _htf_restore_targets=$(awk -F '|' -v legacy="$HTF_THEME_TARGET" '{target=(NF == 4 ? $4 : legacy); if (!seen[target]++) print target}' "$HTF_MOUNTS")
+    _htf_restore_pids=$(_htf_pids)
+    while IFS= read -r _htf_restore_target; do
+        [ -n "$_htf_restore_target" ] || continue
+        for _htf_pid in $_htf_restore_pids; do
+            _htf_clear_owned_pid "$_htf_pid" "$_htf_restore_target" || _htf_restore_failed=1
+        done
+    done <<EOF
+$_htf_restore_targets
+EOF
     [ "$_htf_restore_failed" -eq 0 ] || return 1
     rm -f "$HTF_STATE" "$HTF_MOUNTS" 2>/dev/null || true
 }
+
+_htf_apply() { _gfp_locked _htf_apply_internal; }
+_htf_restore() { _gfp_locked _htf_restore_internal; }
 
 if [ "${0##*/}" = hyperos_theme_font_bridge.sh ]; then
     case "${1:-apply}" in

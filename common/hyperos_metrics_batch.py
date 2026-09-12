@@ -167,6 +167,7 @@ def compact_routed_source(source: Path, output: Path, routing: frozenset[int],
         for table in font['cmap'].tables:
             if table.format == 14:
                 points.update(table.uvsDict)
+                points.update(cp for entries in table.uvsDict.values() for cp, _ in entries)
                 glyphs.update(name for entries in table.uvsDict.values()
                               for _, name in entries if name is not None)
             elif table.isUnicode():
@@ -174,6 +175,8 @@ def compact_routed_source(source: Path, output: Path, routing: frozenset[int],
             else:
                 glyphs.update(table.cmap.values())
         options = subset.Options()
+        options.legacy_cmap = True
+        options.symbol_cmap = True
         options.name_IDs = ['*']
         options.name_languages = ['*']
         options.name_legacy = True

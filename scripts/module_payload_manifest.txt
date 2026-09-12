@@ -82,9 +82,9 @@ common/font_switch_task.sh
 common/hyperos_global.sh
 common/hyperos_stage_complete.sh
 common/hyperos_metrics_batch.py
-common/hyperos_physical_policy.py
 common/hyperos_theme_font_bridge.sh
 common/hyperos_theme_font_patch.py
+common/hyperos_physical_policy.py
 common/legacy_v14_4_switch.sh
 common/legacy_v14_4
 common/luoshu_cli.sh
