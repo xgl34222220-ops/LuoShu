@@ -264,7 +264,13 @@ class StockMetricContractTest(unittest.TestCase):
         make_font(fonts / main, descent=-282, ascent=1044)
         values = {"NotoSansSC-VF.otf": (1250, -300), "NotoSansTC-Regular.otf": (1190, -290),
                   "NotoSans-Regular.ttf": (930, -250), "MiLanProVF.ttf": (980, -220),
-                  "XiaomiSansVF.ttf": (1150, -310), "DroidSans.ttf": (1020, -260)}
+                  "XiaomiSansVF.ttf": (1150, -310), "DroidSans.ttf": (1020, -260),
+                  # Restored UI targets must retain their own stock contracts.
+                  "DroidSansMono.ttf": (1100, -240), "DroidSansFallback.ttf": (980, -270),
+                  "NotoSansMono-Regular.ttf": (1024, -256),
+                  "NotoSansDisplay-Regular.otf": (1040, -280),
+                  "NotoSansSemiCondensed-Regular.ttf": (950, -210),
+                  "NotoSansVF.ttf": (1080, -300)}
         for name, (ascent, descent) in values.items():
             path = fonts / name
             make_font(path, ascent=ascent, descent=descent)
@@ -354,7 +360,8 @@ class StockMetricContractTest(unittest.TestCase):
                     "NotoSansThai-Regular.ttf", "NotoSans-RegularItalic.ttf", "NotoSansSymbols.ttf",
                     "NotoSansSC-Regular.ttc", "NotoSansEmoji.ttf", "NotoSansAdlam-VF.ttf",
                     "NotoSansAhom-Regular.otf", "NotoSansCuneiform-Regular.ttf",
-                    "NotoSansEgyptianHieroglyphs-Regular.ttf", "MiSansOdiaVF.ttf", "DroidSansMono.ttf")
+                    "NotoSansEgyptianHieroglyphs-Regular.ttf", "MiSansOdiaVF.ttf",
+                    "NotoSansSemiCondensed-Icons.ttf", "NotoSansMono-Italic.ttf")
         for name in excluded:
             make_font(args.system_fonts / name)
         disguised_collection = "NotoSansCollection.ttf"
@@ -372,6 +379,8 @@ class StockMetricContractTest(unittest.TestCase):
         slots = json.loads(args.output.read_text())["slots"]
         for name in (*excluded, disguised_collection):
             self.assertNotIn(f"/system/fonts/{name}", slots)
+        self.assertIn("/system/fonts/DroidSansMono.ttf", slots)
+        self.assertIn("/system/fonts/NotoSansSemiCondensed-Regular.ttf", slots)
         self.assertIn("/mi_ext/fonts/NotoSansSC-Regular.otf", slots)
         self.assertIn("/product/fonts/NotoSansSC-Regular.otf", slots)
         self.assertNotIn("/oplus_product/fonts/NotoSansSC-Regular.otf", slots)
