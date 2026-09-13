@@ -73,18 +73,9 @@ base_version() {
 }
 
 expected_code() {
-    value="$(base_version "$1")"
-    old_ifs="$IFS"
-    IFS=.
-    set -- $value
-    IFS="$old_ifs"
-    major="${1:-}"
-    minor="${2:-}"
-    patch="${3:-}"
-    case "$major.$minor.$patch" in
-        *[!0-9.]*|.*|*..*|*.) return 1 ;;
-    esac
-    printf '%s\n' $((major * 10000 + minor * 100 + patch))
+    # Refactor display names restart at 1.0.0, but upgrade codes retain a fixed
+    # epoch offset. Unknown series or mismatched codes still block publishing.
+    python3 "$ROOT/scripts/release_version_policy.py" --module "$ROOT/module.prop" --field versionCode
 }
 
 MODULE_PROP="$ROOT/module.prop"
@@ -115,9 +106,9 @@ fi
 
 expected="$(expected_code "$current_version" 2>/dev/null || true)"
 if [ -n "$expected" ] && [ "$current_code" = "$expected" ]; then
-    add_check ready version-code '版本代码' "versionCode $current_code 与语义版本一致"
+    add_check ready version-code '版本代码' "versionCode $current_code 与发布系列及版本规则一致"
 elif [ -n "$current_code" ]; then
-    add_check blocker version-code '版本代码' "versionCode $current_code 与当前语义版本预期 ${expected:-unknown} 不一致"
+    add_check blocker version-code '版本代码' "versionCode $current_code 与当前发布系列预期 ${expected:-unknown} 不一致"
 else
     add_check blocker version-code '版本代码' 'versionCode 不可用'
 fi

@@ -1,15 +1,19 @@
 {
-  "schema": "luoshu-stable-version-policy-v1",
-  "authorizedAt": "2026-09-13T02:32:33Z",
-  "effectiveFrom": "v4.4.4",
-  "currentStable": "v4.4.4",
-  "nextStable": "v5.0.0",
+  "schema": "luoshu-stable-version-policy-v2",
+  "authorizedAt": "2026-09-13T04:47:32Z",
+  "series": "refactor",
+  "effectiveFrom": "v1.0.0",
+  "currentStable": "v1.0.0",
+  "nextStable": "v1.1.1",
   "rule": "n.0.0 -> n.n.n -> (n+1).0.0; n is a positive integer",
-  "examples": ["v1.0.0", "v1.1.1", "v2.0.0", "v2.2.2", "v3.0.0", "v3.3.3", "v4.0.0", "v4.4.4", "v5.0.0", "v5.5.5", "v6.0.0", "v6.6.6"],
+  "examples": ["v1.0.0", "v1.1.1", "v2.0.0", "v2.2.2", "v3.0.0", "v3.3.3", "v4.0.0", "v4.4.4"],
   "versionSource": "module.prop",
-  "moduleVersionCode": "major*10000 + minor*100 + patch",
+  "moduleVersionCode": "50000 + major*10000 + minor*100 + patch",
   "appVersionCode": "moduleVersionCode*100 + 1",
+  "releaseTag": "refactor-v<major>.<minor>.<patch>",
+  "previousStable": "legacy v4.4.4 (40404)",
+  "previousCandidate": "legacy v5.0.0-Beta1 (50000)",
   "legacyTagsRenamed": false,
   "releaseRequiresUserRequest": true,
-  "cleanupAuthorization": "v4.4.4 only; previous six Release entries except v4.0.0, plus all prereleases published by authorizedAt; keep tags and earlier stable releases"
+  "cleanupAuthorization": "No new cleanup; preserve legacy releases and source history"
 }

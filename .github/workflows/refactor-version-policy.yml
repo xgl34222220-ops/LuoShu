@@ -1,0 +1,29 @@
+name: Refactor release version and upgrade policy
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - module.prop
+      - config/stable_version_policy.json
+      - scripts/*version*.py
+      - scripts/version.sh
+      - scripts/pre_release_readiness.sh
+      - scripts/sync_update_metadata*.py
+      - .github/workflows/release.yml
+      - .github/workflows/sync-update-metadata.yml
+      - .github/workflows/refactor-version-policy.yml
+permissions:
+  contents: read
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          python3 scripts/release_version_policy_test.py
+          python3 scripts/sync_update_metadata_test.py
+          sh -n scripts/version.sh
+          sh -n scripts/pre_release_readiness.sh
