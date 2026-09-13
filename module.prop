@@ -1,6 +1,6 @@
 id=LuoShu
 name=洛书
-version=v4.3.1-Beta2
+version=v4.3.2-Beta1
 versionCode=40302
 author=惜故里丶
 description=Android 无 Hook 全局字体引擎：统一系统、OEM、fallback 与 Play/GMS 下载字体链路
