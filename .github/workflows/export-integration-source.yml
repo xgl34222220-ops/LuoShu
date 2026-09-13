@@ -1,0 +1,19 @@
+name: Export integration source
+on:
+  push:
+    branches: [fix/google-provider-fallback-20260913]
+    paths: [.github/workflows/export-integration-source.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: git archive --format=zip -o /tmp/luoshu-integration-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luoshu-integration-source
+          path: /tmp/luoshu-integration-source.zip
+          retention-days: 1
