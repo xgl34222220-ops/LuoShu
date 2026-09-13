@@ -206,6 +206,25 @@ sh ./scripts/build.sh
 
 请不要上传没有授权的商业字体文件。
 
+## 支持项目
+
+洛书由个人持续维护。如果它确实帮到了你，并且你愿意支持后续开发、测试和维护，可以自愿赞赏。
+
+- **捐赠完全自愿**，不影响功能、下载、更新和正常的问题反馈；
+- 不设置付费版，也不以捐赠金额作为优先适配、优先修复或售后服务的条件；
+- 扫码前请自行确认收款信息，理性支持即可。
+
+<div align="center">
+<table>
+<tr>
+<td align="center"><strong>微信支付</strong><br><br><img src="docs/assets/donate-wechat.svg" width="260" alt="微信支付捐赠二维码"></td>
+<td align="center"><strong>支付宝</strong><br><br><img src="docs/assets/donate-alipay.svg" width="260" alt="支付宝捐赠二维码"></td>
+</tr>
+</table>
+</div>
+
+感谢每一份支持，也感谢提交真机反馈、Issue、代码和文档改进的朋友。
+
 ## 文档
 
 - [完整使用教程](docs/USER_GUIDE.md)
