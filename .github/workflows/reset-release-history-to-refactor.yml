@@ -73,15 +73,34 @@ jobs:
           gh api --paginate --jq '.[].ref' \
             "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/" | sed 's#^refs/tags/##' | sort > /tmp/tags-after.txt
           diff -u /tmp/expected.txt /tmp/tags-after.txt
+      - name: Synchronize the only Release description
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$KEEP_TAG" --jq .id)
+          jq -n \
+            --arg name '洛书·重构版 1.0.0' \
+            --rawfile body RELEASE_NOTES_refactor-v1.0.0.md \
+            '{name:$name, body:$body, draft:false, prerelease:false, make_latest:"true"}' \
+            > /tmp/release-patch.json
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" --input /tmp/release-patch.json >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$KEEP_TAG" --jq '.tag_name + "|" + .name' \
+            | grep -qx 'refactor-v1.0.0|洛书·重构版 1.0.0'
+      - name: Write audit
+        shell: bash
+        run: |
+          set -euo pipefail
           {
             echo '# LuoShu release-history reset audit'
             echo
             echo "kept=$KEEP_TAG"
+            echo 'release_count=1'
+            echo 'tag_count=1'
             echo
-            echo '## Deleted releases'
+            echo '## Deleted releases in this run'
             cat /tmp/deleted-releases.txt
             echo
-            echo '## Deleted tags'
+            echo '## Deleted tags in this run'
             cat /tmp/deleted-tags.txt
           } > /tmp/cleanup-audit.txt
       - uses: actions/upload-artifact@v4
