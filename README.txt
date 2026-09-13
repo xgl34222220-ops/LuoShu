@@ -1,6 +1,6 @@
 洛书 · LuoShu
 
-Android 无 Hook 全局字体替换与复合引擎。
+Android 全局字体替换与复合引擎。
 适用于 Magisk、KernelSU、SukiSU Ultra 与 APatch。
 
 当前公开系列从「重构版 1.0.0」开始。
@@ -24,7 +24,6 @@ https://github.com/xgl34222220-ops/LuoShu/blob/main/docs/USER_GUIDE.md
 - 相同组合复用已验证缓存，减少重复生成
 - 新字体验证成功后才提交，失败保留上一套可用负载
 - 原生 Android App，模块内置 App 与独立 APK 使用同一正式签名
-- 不使用 WebUI，不依赖 LSPosed / Zygisk Hook
 
 快速使用：
 1. 从 Latest Release 下载模块 ZIP

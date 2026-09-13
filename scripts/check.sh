@@ -83,7 +83,7 @@ test ! -e "$ROOT/scripts/prepare_webui.sh"
 test "$LUOSHU_VERSION" = "$(sed -n 's/^version=//p' "$ROOT/module.prop" | head -n1)"
 test "$LUOSHU_VERSION_CODE" = "$(sed -n 's/^versionCode=//p' "$ROOT/module.prop" | head -n1)"
 test "$LUOSHU_VERSION" = "$(sed -n 's/^version=//p' "$ROOT/config/version_notes.conf" | head -n1)"
-grep -q '^description=Android 无 Hook 全局字体引擎' "$ROOT/module.prop"
+grep -q '^description=Android 全局字体引擎' "$ROOT/module.prop"
 
 # 发布包使用显式清单。common/ 新增运行文件必须被审查后列入，不能再整目录复制。
 PAYLOAD_MANIFEST="$ROOT/scripts/module_payload_manifest.txt"

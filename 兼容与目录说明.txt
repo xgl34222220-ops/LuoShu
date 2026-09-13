@@ -1,17 +1,25 @@
-洛书 v2.3.0
+洛书 · 重构版 1.0.0
 
-Android 无 Hook 全局字体引擎：
-- 原生 Android App 负责字体导入、预览、组合、应用与任务恢复
-- 中文字体作为完整基底，英文与数字只替换对应字形和度量
-- 根据当前设备原始 fonts.xml、font_fallback.xml 与 OEM 配置生成 systemless 覆盖
-- 真实字体负载保存在 .luoshu-payload 私有目录
-- 标准 system、system_ext、product、my_product、vendor 模块目录只保留空壳
-- 洛书自行完成字体挂载，不依赖、不推荐、不配置任何元模块
-- 保留系统原厂 Emoji、图标、衬线、斜体与 fallback
-- 不直接修改只读系统分区，也不读写 Android 动态字体数据库 /data/fonts
-- 字体负载经过生成、校验、暂存和原子提交，失败时保留旧有效配置
-- 支持 Magisk、KernelSU、SukiSU Ultra 与 APatch
+Android 全局字体替换与复合引擎。
+适用于 Magisk、KernelSU、SukiSU Ultra 与 APatch。
 
-用户字体目录：/sdcard/LuoShu/fonts
-安全导入目录：/sdcard/LuoShu/import
-诊断报告目录：/sdcard/LuoShu/reports
+核心能力：
+- 中文、英文、数字字体可分别选择并生成复合字体
+- 自动读取设备实际字体目录、字体配置、字重、TTC face 与字体度量
+- 针对 HyperOS、ColorOS 等 OEM 字体路由提供专项适配
+- 字体负载使用洛书私有 systemless 挂载
+- 新负载验证成功后才提交，失败保留上一套可用字体
+- 设置中内置“Google 字体兼容”，用于处理部分 Google 应用英数回退问题
+
+重要：Root 管理器中的“默认卸载模块”必须关闭。
+
+Google 字体兼容：
+设置 → Google 字体兼容。先正常应用字体并完整重启；若 Google 商店等应用英数仍恢复默认，再开启兼容并再次完整重启。停用或卸载洛书前，请先恢复原设置。
+
+用户目录：
+/sdcard/LuoShu/fonts/
+/sdcard/LuoShu/import/
+/sdcard/LuoShu/reports/
+
+最新版本与说明：
+https://github.com/xgl34222220-ops/LuoShu/releases/latest
