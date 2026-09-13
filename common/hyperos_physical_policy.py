@@ -34,10 +34,11 @@ def preserved_dynamic_alias(data: dict, logical: str) -> bool:
             and slot.get("metricsReferencePath") == "/system/fonts/Roboto-Regular.ttf")
 
 _EXCLUDED = (
-    "italic", "oblique", "emoji", "symbol", "icon", "serif", "arabic",
+    "italic", "oblique", "emoji", "symbol", "serif", "arabic",
     "hebrew", "thai", "devanagari", "bengali", "tamil", "telugu", "malayalam",
     "gujarati", "gurmukhi", "kannada", "khmer", "lao", "tibetan", "myanmar",
     "vietnam", "japanese", "korean", "hangul", "hiragana", "katakana", "odia", "oriya",
+    "cjkjp", "cjkkr",
 )
 _PREFIXES = (
     "MiSans", "XiaomiSans", "MiLanPro", "Mitype", "MiClock", "AndroidClock",
@@ -48,9 +49,20 @@ _NOTO_UI_PREFIXES = (
     "NotoSansHans", "NotoSansHant", "NotoSansCJKSC", "NotoSansCJKTC", "NotoSansCJKHK",
     "NotoSansCJKsc", "NotoSansCJKtc", "NotoSansCJKhk",
 )
+# These are Latin UI families, not language fallback prefixes. v4.3.0's
+# narrowed NotoSans whitelist accidentally removed them from scanning, staging
+# and boot repair. Match exact family names or a hyphenated style suffix, never
+# restore the broad NotoSans* matcher that copied CJK into unrelated scripts.
+_NOTO_LATIN_UI_FAMILIES = (
+    "NotoSansMono", "NotoSansDisplay", "NotoSansCondensed",
+    "NotoSansSemiCondensed", "NotoSansExtraCondensed",
+    "NotoSansVF", "NotoSansVariable", "NotoSansUIVF",
+    "NotoSansMonoVF", "NotoSansDisplayVF", "NotoSansCondensedVF",
+)
 _UI_NAMES = frozenset({
     "NotoSans.ttf", "NotoSans.otf", "NotoSansUI.ttf", "NotoSansUI.otf",
     "DroidSans.ttf", "DroidSans-Regular.ttf", "DroidSans-Bold.ttf", "Clockopia.ttf",
+    "DroidSansMono.ttf", "DroidSansFallback.ttf",
 })
 _NUMERIC = frozenset(f"{weight}.ttf" for weight in (100, 200, 300, 350, 400, 500, 600, 700, 800, 900))
 
@@ -59,7 +71,12 @@ def safe_physical_font_name(name: str) -> bool:
     """Match the full mapper's single-face, upright physical filename policy."""
     if Path(name).name != name or not name.endswith((".ttf", ".otf")):
         return False
-    if any(token in name.lower() for token in _EXCLUDED):
+    lower = name.lower()
+    # "SemiCondensed" contains the substring "icon" across a word boundary.
+    # Ignore that style token only; an additional Icon/Icons token still fails.
+    if "icon" in lower.replace("semicondensed", ""):
+        return False
+    if any(token in lower for token in _EXCLUDED):
         return False
     if name.startswith(("MiSansJP", "MiSansJp", "MiSansKR", "MiSansKr")) or any(
         token in name for token in ("CJKJP", "CJKKR")
@@ -68,5 +85,8 @@ def safe_physical_font_name(name: str) -> bool:
     # NotoSans is also the prefix of hundreds of unrelated script fallbacks.
     # A blacklist cannot enumerate them reliably; replacing each with the full
     # selected CJK donor both removes language coverage and multiplies storage.
+    stem = Path(name).stem
     return (name.startswith(_PREFIXES + _NOTO_UI_PREFIXES)
-            or name in _UI_NAMES or name in _NUMERIC)
+            or name in _UI_NAMES or name in _NUMERIC
+            or any(stem == family or stem.startswith(family + "-")
+                   for family in _NOTO_LATIN_UI_FAMILIES))

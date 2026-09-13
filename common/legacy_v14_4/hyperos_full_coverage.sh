@@ -30,13 +30,27 @@ unset _hfc_candidate _hfc_base
 # resources also stay untouched to avoid missing-glyph/native parsing regressions.
 _lhcc_safe_dynamic_name() {
     _lhcc_name="$1"
+    case "$_lhcc_name" in */*|'') return 1 ;; esac
+    case "$_lhcc_name" in *.ttf|*.otf) ;; *) return 1 ;; esac
     _lhcc_lower=$(printf '%s' "$_lhcc_name" | tr '[:upper:]' '[:lower:]')
     case "$_lhcc_lower" in
-        *italic*|*oblique*|*emoji*|*symbol*|*icon*|*serif*) return 1 ;;
+        *italic*|*oblique*|*emoji*|*symbol*|*serif*|*cjkjp*|*cjkkr*) return 1 ;;
         *arabic*|*hebrew*|*thai*|*devanagari*|*bengali*|*tamil*|*telugu*|*malayalam*|\
         *gujarati*|*gurmukhi*|*kannada*|*khmer*|*lao*|*tibetan*|*myanmar*|*vietnam*|\
         *japanese*|*korean*|*hangul*|*hiragana*|*katakana*|*odia*|*oriya*) return 1 ;;
     esac
+    # SemiCondensed is a text width, not an Icon font. Strip only that style
+    # token for the icon check, without spawning a process for each filename.
+    _lhcc_icon_name=$_lhcc_lower
+    while :; do
+        case "$_lhcc_icon_name" in
+            *semicondensed*)
+                _lhcc_icon_name=${_lhcc_icon_name%%semicondensed*}${_lhcc_icon_name#*semicondensed}
+                ;;
+            *) break ;;
+        esac
+    done
+    case "$_lhcc_icon_name" in *icon*) return 1 ;; esac
     case "$_lhcc_name" in
         MiSansJP*|MiSansJp*|MiSansKR*|MiSansKr*|*CJKJP*|*CJKKR*) return 1 ;;
         MiSans*.ttf|MiSans*.otf|\
@@ -57,10 +71,23 @@ _lhcc_safe_dynamic_name() {
         NotoSansCJKHK*.ttf|NotoSansCJKHK*.otf|NotoSansCJKhk*.ttf|NotoSansCJKhk*.otf|\
         SourceSansPro*.ttf|SourceSansPro*.otf|\
         DroidSans.ttf|DroidSans-Regular.ttf|DroidSans-Bold.ttf|\
+        DroidSansMono.ttf|DroidSansFallback.ttf|\
         100.ttf|200.ttf|300.ttf|350.ttf|400.ttf|500.ttf|600.ttf|700.ttf|800.ttf|900.ttf)
             return 0
             ;;
     esac
+    # Keep in sync with _NOTO_LATIN_UI_FAMILIES in hyperos_physical_policy.py.
+    # A style suffix is permitted; a different script/family prefix is not.
+    _lhcc_stem=${_lhcc_name%.*}
+    for _lhcc_ui_family in \
+        NotoSansMono NotoSansDisplay NotoSansCondensed \
+        NotoSansSemiCondensed NotoSansExtraCondensed \
+        NotoSansVF NotoSansVariable NotoSansUIVF \
+        NotoSansMonoVF NotoSansDisplayVF NotoSansCondensedVF; do
+        case "$_lhcc_stem" in
+            "$_lhcc_ui_family"|"$_lhcc_ui_family"-*) return 0 ;;
+        esac
+    done
     return 1
 }
 
