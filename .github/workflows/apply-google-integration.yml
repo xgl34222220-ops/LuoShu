@@ -1,0 +1,34 @@
+name: Apply Chinese Google compatibility integration
+on:
+  push:
+    branches: [fix/google-provider-fallback-20260913]
+    paths: [.github/workflows/apply-google-integration.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply exact reviewed route and package edits
+        run: |
+          python3 .github/apply-google-integration.py
+          sh -n uninstall.sh
+          sh -n common/google_font_fallback.sh
+          python3 scripts/google_font_fallback_test.py
+          python3 scripts/google_font_fallback_integration_test.py
+          git diff --check
+      - name: Commit integration to its feature branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: wire Chinese Google font compatibility into settings and module'
+          git push origin HEAD:fix/google-provider-fallback-20260913
+          git archive --format=zip -o /tmp/luoshu-integrated-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luoshu-integrated-source
+          path: /tmp/luoshu-integrated-source.zip
+          retention-days: 1
