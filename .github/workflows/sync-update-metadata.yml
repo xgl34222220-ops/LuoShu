@@ -43,7 +43,13 @@ jobs:
           }
           artifact_version="$(printf '%s' "$version" | sed -E 's/[^0-9A-Za-z._-]+/-/g; s/^-+|-+$//g')"
           case "$artifact_version" in v*) ;; *) artifact_version="v$artifact_version" ;; esac
+          version_series="$(printf '%s\n' "$module_prop" | sed -n 's/^versionSeries=//p' | head -n1)"
           tag="$artifact_version"
+          case "$version_series" in
+            refactor) tag="refactor-$artifact_version" ;;
+            ''|legacy) ;;
+            *) echo 'Unknown release series' >&2; exit 2 ;;
+          esac
           tag_sha="$(git rev-list -n1 "$tag" 2>/dev/null || true)"
           [[ -n "$tag_sha" ]] || { echo "Missing release tag: $tag" >&2; exit 2; }
           [[ "$tag_sha" == "$RELEASE_SHA" ]] || {
@@ -51,7 +57,7 @@ jobs:
             exit 2
           }
 
-          notes_file="RELEASE_NOTES_${version// /_}.md"
+          notes_file="RELEASE_NOTES_${tag}.md"
           git cat-file -e "$tag:$notes_file" 2>/dev/null || {
             echo "Missing release notes at tag: $notes_file" >&2
             exit 2

@@ -6,6 +6,7 @@ on:
       - main
     tags:
       - 'v*'
+      - 'refactor-v*'
     paths:
       - module.prop
       - 'RELEASE_NOTES_*.md'
@@ -13,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing immutable tag to publish (for example v2.0.0)
+        description: Existing immutable tag to publish (for example refactor-v1.0.0)
         required: true
         type: string
       prerelease:
@@ -61,8 +62,10 @@ jobs:
           INPUT_PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
+          python3 scripts/release_version_policy_test.py
+          python3 scripts/sync_update_metadata_test.py
           . ./scripts/version.sh
-          expected_tag="$LUOSHU_ARTIFACT_VERSION"
+          expected_tag="$LUOSHU_RELEASE_TAG"
           tag="${GITHUB_REF_NAME}"
           mode="tag"
           source_sha="$GITHUB_SHA"
@@ -108,7 +111,7 @@ jobs:
             echo "Tag $tag does not match module.prop ($expected_tag)" >&2
             exit 2
           }
-          notes_file="RELEASE_NOTES_${LUOSHU_VERSION// /_}.md"
+          notes_file="$LUOSHU_RELEASE_NOTES"
           [[ -s "$notes_file" ]] || { echo "Missing release notes: $notes_file" >&2; exit 2; }
           notes_temp="$RUNNER_TEMP/$notes_file"
           cp -f "$notes_file" "$notes_temp"
@@ -119,6 +122,7 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
           echo "version=$LUOSHU_VERSION" >> "$GITHUB_OUTPUT"
+          echo "release_title=$LUOSHU_RELEASE_TITLE" >> "$GITHUB_OUTPUT"
           echo "artifact_version=$LUOSHU_ARTIFACT_VERSION" >> "$GITHUB_OUTPUT"
           echo "notes_file=$notes_temp" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
@@ -262,6 +266,7 @@ jobs:
           NOTES_FILE: ${{ steps.version.outputs.notes_file }}
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
           SOURCE_SHA: ${{ steps.version.outputs.source_sha }}
+          RELEASE_TITLE: ${{ steps.version.outputs.release_title }}
         shell: bash
         run: |
           set -euo pipefail
@@ -297,8 +302,10 @@ jobs:
           if [[ "$MODE" == 'create-tag' ]]; then
             tag_mode=(--target "$SOURCE_SHA")
           fi
+          latest=(--latest)
+          if [[ "${#prerelease[@]}" -gt 0 ]]; then latest=(--latest=false); fi
           gh release create "$TAG" "$module" "$module_sha" "$app" "$app_sha" \
             "${tag_mode[@]}" \
-            --title "洛书 $VERSION" \
+            --title "$RELEASE_TITLE" \
             --notes-file "$NOTES_FILE" \
-            "${prerelease[@]}"
+            "${prerelease[@]}" "${latest[@]}"

@@ -117,6 +117,7 @@ private enum class SettingsSection(
     OVERVIEW("洛书状态", "版本、Root、挂载与当前字体", Icons.Rounded.Settings, .94f),
     APPEARANCE("外观与主题", "颜色、深色模式与界面效果", Icons.Rounded.Palette, 1.00f),
     SAFETY("安全与维护", "字体加载检查、冲突与安全清理", Icons.Rounded.Security, .96f),
+    GOOGLE("Google 字体兼容", "谷歌英数回退处理、状态与中文说明", Icons.Rounded.Build, .96f),
     BACKUP("备份与恢复", "完整备份洛书数据和组合方案", Icons.Rounded.Backup, 1.08f),
     UPDATE("软件更新", "稳定版、预发行版与下载说明", Icons.Rounded.SystemUpdate, 1.03f),
 }
@@ -200,6 +201,7 @@ internal fun SettingsHubRoute(
                         SettingsSection.OVERVIEW -> OverviewPage(model)
                         SettingsSection.APPEARANCE -> AppearancePage(settings, actions)
                         SettingsSection.SAFETY -> SafetyPage(model, settings.uiStyle)
+                        SettingsSection.GOOGLE -> GoogleFontCompatibilityPage()
                         SettingsSection.BACKUP -> pageList { item { FullBackupCard(settings, actions) } }
                         SettingsSection.UPDATE -> UpdatePage(model)
                     }
@@ -250,6 +252,11 @@ private fun SettingsHome(
                 SettingsNavigationRow(
                     section = SettingsSection.SAFETY,
                     onClick = { onOpenSection(SettingsSection.SAFETY) },
+                )
+                SettingsDivider()
+                SettingsNavigationRow(
+                    section = SettingsSection.GOOGLE,
+                    onClick = { onOpenSection(SettingsSection.GOOGLE) },
                 )
                 SettingsDivider()
                 SettingsNavigationRow(
