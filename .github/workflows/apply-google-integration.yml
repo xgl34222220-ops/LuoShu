@@ -11,15 +11,19 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Apply exact reviewed route and package edits
+      - name: Apply and test runtime and UI source edits
         run: |
           python3 .github/apply-google-integration.py
+          cp .github/workflows/google-compat-signed.yml /tmp/google-compat-signed.yml
+          # The job token only writes source. Workflow changes are handled separately.
+          git restore --source=HEAD --staged --worktree .github/workflows
+          rm -f .github/workflows/google-compat-signed.yml
           sh -n uninstall.sh
           sh -n common/google_font_fallback.sh
           python3 scripts/google_font_fallback_test.py
           python3 scripts/google_font_fallback_integration_test.py
           git diff --check
-      - name: Commit integration to its feature branch
+      - name: Commit source integration to its feature branch
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -30,5 +34,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: luoshu-integrated-source
-          path: /tmp/luoshu-integrated-source.zip
+          path: |
+            /tmp/luoshu-integrated-source.zip
+            /tmp/google-compat-signed.yml
           retention-days: 1
