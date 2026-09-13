@@ -1,7 +1,10 @@
-洛书（LuoShu）
+洛书 · LuoShu
 
-Android 无 Hook 全局字体复合与安全切换模块。
+Android 无 Hook 全局字体替换与复合引擎。
 适用于 Magisk、KernelSU、SukiSU Ultra 与 APatch。
+
+当前公开系列从「重构版 1.0.0」开始。
+后续正式版本：1.1.1 → 2.0.0 → 2.2.2 → 3.0.0 → 3.3.3……
 
 项目主页：
 https://github.com/xgl34222220-ops/LuoShu
@@ -12,51 +15,61 @@ https://github.com/xgl34222220-ops/LuoShu/releases/latest
 完整使用教程：
 https://github.com/xgl34222220-ops/LuoShu/blob/main/docs/USER_GUIDE.md
 
-v2.3.0 挂载架构：
-- 洛书真实字体负载保存在模块私有目录 .luoshu-payload
-- 标准 system、product、vendor 等模块目录只保留空壳
-- 洛书自行完成 systemless 挂载
-- 不需要安装、选择、配置或推荐任何元模块
-- 不修改 Mountify、Hybrid Mount、Magic Mount 等外部模块配置
-- 保留系统原厂 Emoji、图标、衬线、斜体与 fallback
-
-核心机制：
-- 中文字体作为完整基底
-- 英文字体仅替换对应拉丁字形
-- 数字字体仅替换对应数字字形
-- 安装阶段扫描当前设备真实字体目录与配置
-- 应用字体时优先按照本机清单覆盖真实 UI 字体槽位
-- 静态多字重字体默认只组合当前选择的字重
-- 可变字体读取真实设计轴范围
-- 字体负载与配置状态事务提交，失败保留旧有效配置
-- 唯一模块包始终内置正式 App，也提供相同签名的独立 APK
-- 模块不声明或打包 WebUI
+核心功能：
+- 中文、英文、数字字体可以分别选择
+- 中文作为完整基底，英数按目标字符生成复合字体
+- 自动扫描本机字体目录、字体配置、字重、TTC face 与字体度量
+- 针对 HyperOS、ColorOS 等 OEM 字体路由提供额外适配
+- 私有 systemless 挂载，不要求额外安装 Mountify 等元模块
+- 相同组合复用已验证缓存，减少重复生成
+- 新字体验证成功后才提交，失败保留上一套可用负载
+- 原生 Android App，模块内置 App 与独立 APK 使用同一正式签名
+- 不使用 WebUI，不依赖 LSPosed / Zygisk Hook
 
 快速使用：
-1. 从 Latest Release 下载模块 ZIP 并核对 SHA-256
-2. 通过 Root 管理器刷入并完整重启
-3. 使用模块“操作”按钮安装内置 App，或安装独立 APK
-4. 导入字体并分别选择中文、英文和数字字体
-5. 点击“生成并应用复合字体”
-6. 任务完成后再次完整重启
+1. 从 Latest Release 下载模块 ZIP
+2. Root 管理器中的“默认卸载模块”必须关闭
+3. 刷入模块并完整重启
+4. 安装内置 App 或 Release 中的独立 APK
+5. 导入字体，选择中文、英文、数字字体
+6. 应用字体并按提示再次完整重启
+
+Google 字体兼容：
+设置 → Google 字体兼容
+
+当 Google 商店等应用的中文已经替换，但英文数字反复恢复默认时，可进入该页面：
+- “重新检测”只读取状态
+- “开启 Google 字体兼容”停用当前 Android 用户的 GMS FontsProvider
+- “恢复原设置”按洛书记录恢复原状态
+
+该功能默认关闭，不停用整个 Google Play 服务，不删除账户、App 数据或字体缓存。
+它会影响当前用户所有依赖 GMS 下载字体的应用，不只影响 Google 商店。
+停用或卸载洛书前，请先恢复原设置并完整重启。
 
 用户目录：
-- /sdcard/LuoShu/fonts/   用户文字字体
-- /sdcard/LuoShu/import/  待导入字体模块 ZIP
-- /sdcard/LuoShu/reports/ 脱敏诊断报告
+- /sdcard/LuoShu/fonts/    用户字体
+- /sdcard/LuoShu/import/   待导入字体模块 ZIP
+- /sdcard/LuoShu/reports/  脱敏诊断报告
+
+支持常见 TTF、OTF、TTC、TrueType glyf、CFF/CFF2、多字重和可变字体。
+可变字体读取实际设计轴，不存在的字重不会仅靠文件名伪装为可用。
+
+安全原则：
+- 不直接写只读系统分区
+- 不覆盖整份原厂 fonts.xml / font_fallback.xml
+- 不执行导入 ZIP 中的第三方脚本
+- 图标、Emoji、符号和高风险槽默认不参与普通替换
+- 新负载验证后才提交
+- 失败、超时或内存不足保留当前有效字体
+- 卸载只处理洛书自己的挂载与记录
 
 功能边界：
-洛书只管理 Android 系统文字字体，不提供 Emoji、图标字体、符号字体或应用资源替换。应用自带字体、输入法键帽、图片文字、网页下载字体和私有字体引擎通常不经过系统字体映射。
+洛书主要管理 Android 系统字体链路。App 自带字体、网页 CSS/WebFont、游戏或阅读器私有字体引擎、输入法资源字体、Canvas/SVG/图片文字等可能不经过系统字体，因此不保证替换。
 
-安全说明：
-- 不执行导入 ZIP 中的脚本
-- 不直接修改只读系统分区
-- 不覆盖原厂字体 XML
-- 输出字体验证通过后才提交
-- 失败、超时或内存不足不会先删除当前有效字体
-- 卸载时只清理洛书记录的挂载与私有负载
+真机验证状态：
+https://github.com/xgl34222220-ops/LuoShu/blob/main/docs/TEST_MATRIX.md
 
 许可证：
-洛书当前源码采用 GPL-3.0-only。分发修改版本时必须遵守 GPLv3 的对应源代码、同许可证和声明保留要求。第三方组件适用各自许可证，详见 licenses/ 与 THIRD_PARTY_NOTICES.md。
+GPL-3.0-only。第三方组件许可证见 THIRD_PARTY_NOTICES.md 与 licenses/。
 
 作者：惜故里丶
