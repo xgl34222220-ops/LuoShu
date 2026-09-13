@@ -1,0 +1,26 @@
+name: HyperOS Latin coverage policy regression
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - common/hyperos_physical_policy.py
+      - common/legacy_v14_4/hyperos_full_coverage.sh
+      - common/font_inventory_scan_v3.py
+      - scripts/hyperos_latin_policy_regression_test.py
+      - .github/workflows/hyperos-latin-policy-regression.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  policy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Compile source and run focused policy regressions
+        run: |
+          sh -n common/legacy_v14_4/hyperos_full_coverage.sh
+          python3 -m py_compile common/hyperos_physical_policy.py common/font_inventory_scan_v3.py scripts/hyperos_latin_policy_regression_test.py
+          python3 scripts/hyperos_latin_policy_regression_test.py
