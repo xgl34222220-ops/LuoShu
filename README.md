@@ -1,109 +1,161 @@
 <div align="center">
 
-# 洛书 LuoShu
+# 洛书 · LuoShu
 
-**Android 无 Hook 全局字体复合与安全切换模块**
+**Android 无 Hook 全局字体替换与复合引擎**
 
-适用于 Magisk、KernelSU、SukiSU Ultra 与 APatch
+适用于 **Magisk · KernelSU · SukiSU Ultra · APatch**
 
-[![Release](https://img.shields.io/github/v/release/xgl34222220-ops/LuoShu?display_name=tag&sort=semver&label=正式版)](https://github.com/xgl34222220-ops/LuoShu/releases/latest)
+[![Release](https://img.shields.io/github/v/release/xgl34222220-ops/LuoShu?display_name=release&label=重构版)](https://github.com/xgl34222220-ops/LuoShu/releases/latest)
 [![Build](https://github.com/xgl34222220-ops/LuoShu/actions/workflows/build.yml/badge.svg)](https://github.com/xgl34222220-ops/LuoShu/actions/workflows/build.yml)
-[![ROM](https://img.shields.io/badge/ROM-设备原厂清单自适应-3ddc84?logo=android)](docs/USER_GUIDE.md#10-设备自适应原厂字体清单)
 [![License](https://img.shields.io/badge/license-GPL--3.0--only-orange)](LICENSE)
 
-[下载最新正式版](https://github.com/xgl34222220-ops/LuoShu/releases/latest) · [完整使用教程](docs/USER_GUIDE.md) · [真机验证状态](docs/TEST_MATRIX.md) · [问题反馈](https://github.com/xgl34222220-ops/LuoShu/issues)
+[下载最新正式版](https://github.com/xgl34222220-ops/LuoShu/releases/latest) · [使用教程](docs/USER_GUIDE.md) · [真机验证状态](docs/TEST_MATRIX.md) · [问题反馈](https://github.com/xgl34222220-ops/LuoShu/issues)
 
 </div>
 
-洛书以用户选择的**中文字体作为完整基底**，把英文字体和数字字体中的目标字形与度量写入同一份复合字体，再按照当前设备的原厂字体配置映射到系统文字字体槽。中文、英文和数字可以分别选择，同时避免缺字回退、字体抢占和直接修改系统分区。
+## 项目简介
 
-从 **v2.3.0** 开始，洛书使用完全独立的私有自挂载架构。真实字体负载保存在模块私有目录，由洛书自己完成挂载；不需要安装、选择或配置任何元模块。即使设备中同时存在其他挂载类模块，它们也不会负责洛书的字体负载。
+**洛书**是一套面向 Root Android 设备的无 Hook 字体替换方案。
 
-模块包始终内置原生 Android 管理 App，也提供相同正式签名的独立 APK。项目不使用 WebUI。
+它不是简单把一个字体文件复制到几十个系统路径，而是先读取当前设备真实字体配置，再根据中文、英文、数字的角色分别生成和映射字体负载，尽量兼顾覆盖范围、字体度量、系统稳定性和存储占用。
+
+当前公开版本从 **「重构版 1.0.0」** 重新开始，仓库 Release 与版本标签均以重构系列为起点。
+
+## 主要能力
+
+- **中文 / 英文 / 数字独立选择**：可以分别指定三类字体，也可以直接使用同一字体。
+- **复合字体生成**：以中文字体为完整基底，将英文和数字目标字形合入同一字体，减少缺字回退和字体抢占。
+- **设备自适应字体清单**：扫描当前 ROM 的实际字体目录、配置、字体槽、字重、TTC face 与字体度量，不依赖固定机型列表。
+- **HyperOS / ColorOS 适配**：针对 OEM 字体路由、状态栏/系统 UI、英文数字槽和回退链提供额外处理。
+- **Google 字体兼容**：设置中提供中文的「Google 字体兼容」页面，可检测、开启和恢复 GMS FontsProvider 组件状态，用于处理部分 Google 应用英数重新使用下载字体的问题。
+- **无 Hook**：不依赖 LSPosed / Zygisk Hook，不向目标 App 注入代码。
+- **私有 systemless 挂载**：字体负载保存在洛书自己的私有目录，由洛书完成挂载，不要求额外安装 Mountify 等元模块。
+- **事务与回滚**：新字体完整生成并验证成功后才提交；生成失败、超时或内存不足时保留上一套可用负载。
+- **字体缓存复用**：相同字体组合和设备契约可以复用已验证结果，减少重复生成。
+- **原生 Android App**：模块内置正式签名 App，同时提供独立 APK，不使用 WebUI。
 
 ## 快速开始
 
-1. 在 [Releases](https://github.com/xgl34222220-ops/LuoShu/releases/latest) 下载 `LuoShu-<版本>.zip`，并核对同名 SHA-256 文件。
-2. 使用当前 Root 管理器刷入模块，完整重启手机。
-3. 通过模块“操作”按钮安装内置 App，或安装 Release 中的独立 APK。
-4. 在 App 中导入字体，分别选择中文、英文和数字字体。
-5. 点击“生成并应用复合字体”，任务完成后再次完整重启。
+1. 从 [Releases](https://github.com/xgl34222220-ops/LuoShu/releases/latest) 下载最新 `LuoShu-v*.zip`。
+2. **关闭 Root 管理器中的「默认卸载模块」功能。**
+3. 使用 Magisk / KernelSU / SukiSU Ultra / APatch 刷入模块。
+4. 完整重启手机。
+5. 安装模块内置 App，或安装 Release 中的独立 APK。
+6. 在 App 中导入字体，选择中文、英文和数字字体。
+7. 应用字体，等待任务完成后按提示完整重启。
 
-不需要额外安装挂载模块，也不需要把洛书加入任何白名单。
+> 不需要安装额外挂载模块，也不需要手工修改 `fonts.xml`。
 
-## 核心能力
+## Google 字体兼容
 
-- **中文、英文、数字独立选择**：中文保持完整覆盖，英文与数字只替换各自负责的字符。
-- **设备自适应原厂清单**：安装阶段读取当前设备真实字体目录和字体配置，记录路径、分区、TTC 索引与字体度量。
-- **私有自挂载**：真实负载位于 `.luoshu-payload/`，标准模块分区目录保持为空，洛书自行完成 systemless 挂载。
-- **不依赖元模块**：不检测、不修改、不同步 Mountify、Hybrid Mount、Magic Mount 或其他元模块配置。
-- **保留系统资源**：原厂 Emoji、图标、衬线、斜体、fallback 和未被洛书管理的字体槽保持原样。
-- **真实字重与可变字体**：静态字体只显示实际存在的字重；可变字体读取真实设计轴范围。
-- **格式支持**：支持 TrueType `glyf`、CFF、CFF2、TTF、OTF、TTC 和可变字体。
-- **角色覆盖检查**：任务开始前分别校验中文基底、英文和数字所需的关键字符。
-- **事务提交与安全回退**：新字体通过验证后才替换旧有效负载；失败、超时或内存不足不会先删除当前可用字体。
-- **缓存与后台恢复**：相同组合使用 SHA-256 缓存，App 被关闭或系统回收后仍可重新接管任务状态。
-- **安全导入**：可从字体模块 ZIP 中提取字体，但不会执行第三方脚本。
+部分 Google 应用会通过 Google Play 服务的 `FontsProvider` 获取下载字体，因此可能出现：
 
-## 挂载架构
+- 中文已经替换；
+- 英文和数字一开始正常；
+- 使用一段时间或重新打开 Google 商店后，英数又恢复成 Google 默认字体。
 
-洛书安装后会把真实分区负载迁移到：
+洛书内置：
+
+**设置 → Google 字体兼容**
+
+页面提供：
+
+- **重新检测**：只读取当前状态，不修改系统；
+- **开启 Google 字体兼容**：停用当前 Android 用户的 GMS FontsProvider；
+- **恢复原设置**：按照洛书保存的原状态恢复组件。
+
+该功能默认关闭，不会在安装、开机或升级时自动开启。
+
+### 使用建议
+
+1. 先正常应用字体并重启；
+2. 如果 Google 商店等应用的英文数字仍反复恢复默认，再开启兼容；
+3. 显示「已开启」后完整重启；
+4. 检查 Google 商店、Chrome 等应用，以及放到后台再打开后的字体状态。
+
+### 注意
+
+Google 字体兼容会影响当前用户所有依赖 GMS 下载字体的应用，并不只作用于 Google 商店。它不会停用整个 Google Play 服务，也不会删除账户、App 数据或字体缓存。
+
+**停用或卸载洛书前，请先进入该页面点击「恢复原设置」，然后完整重启。**
+
+## 字体工作方式
+
+### 直接字体
+
+当中文、英文、数字选择同一个字体时，洛书优先使用快速路径，根据本机清单准备字体负载。
+
+### 复合字体
+
+当三类字体来源不同时：
 
 ```text
-/data/adb/modules/LuoShu/.luoshu-payload/
-├── system/
-├── system_ext/
-├── product/
-├── my_product/
-└── vendor/
+中文字体 ─┐
+          ├─> 复合字体 ─> 本机字体槽 ─> systemless 挂载
+英文字体 ─┤
+数字字体 ─┘
 ```
 
-标准的 `system/`、`product/`、`vendor/` 等模块目录只保留空壳，避免 Root 管理器或其他挂载组件重复接管。KernelSU、SukiSU Ultra 和 APatch 在 `post-mount` 阶段由洛书挂载；Magisk 在 `post-fs-data` 阶段由洛书挂载。挂载失败保持 fail-open，不阻断系统启动；App 和模块状态在字体事务已确认且自挂载状态正常后显示所选字体已生效，开机不再重复扫描或哈希完整字体树，深度加载验证仅用于手动诊断。
+中文字体负责完整正文基底，英文和数字只替换各自目标字符，尽量避免为了换英数破坏中文 fallback。
 
-## 使用方式
+## 字体与格式支持
 
-### 直接应用单个字体
+支持常见：
 
-中文、英文和数字都选择同一字体、同一标准字重时，洛书优先走快速应用路径。
+- TTF
+- OTF
+- TTC
+- TrueType `glyf`
+- CFF / CFF2
+- Variable Font
+- 多字重字体
 
-### 生成组合字体
+可变字体会读取实际 `wght`、`wdth`、`opsz`、`slnt` 等设计轴；不存在的字重不会仅靠文件名伪装为可用。
 
-分别选择中文、英文和数字字体后，洛书以中文字体为基底生成完整复合字体。
-
-### 字重与设计轴
-
-- 静态字体只提供真实存在的字重；
-- 静态多字重字体只组合当前选择的字重；
-- 包含 `wght`、`wdth`、`opsz`、`slnt` 等轴的可变字体可使用完整轴控制；
-- 不存在的字重不会通过文件名伪装成已支持。
-
-## 用户字体目录
+## 用户目录
 
 ```text
 /sdcard/LuoShu/
-├── fonts/      # 用户文字字体（TTF / OTF / TTC）
-├── import/     # 待导入的字体模块 ZIP
+├── fonts/      # 用户字体
+├── import/     # 待导入字体模块 ZIP
 └── reports/    # 脱敏诊断报告
 ```
 
-也可以直接在 App 中调用系统文件选择器导入字体。
+也可以直接使用 App 的系统文件选择器导入字体。
 
-## 字体要求
+## 安全设计
 
-- 中文基底需包含常用中文、英文字母、数字和常用标点；
-- 英文字体需包含 `A–Z`、`a–z` 和常用标点；
-- 数字字体需包含 `0–9` 和常用数字标点；
-- 文件扩展名必须与真实字体格式一致；
-- 图标字体、彩色字体、损坏文件和伪装扩展名会被拦截；
-- 请勿上传或分发没有授权的商业字体。
+洛书的基本原则是：**可以失败，但不能为了换字体先破坏当前可用系统。**
 
-洛书不会随仓库或发布包附带商业字体。
+因此：
 
-## ROM 与机型兼容机制
+- 不直接写入 `/system`、`/product`、`/vendor` 等只读分区；
+- 不覆盖整份原厂 `fonts.xml` / `font_fallback.xml`；
+- 不执行导入字体 ZIP 中的第三方脚本；
+- 图标、Emoji、符号、无关语言和高风险字体槽默认不参与普通替换；
+- 新负载生成后会先进行格式、覆盖和契约检查；
+- 切换失败时保留上一套有效字体；
+- 卸载只处理洛书自己的挂载和记录。
 
-洛书不依赖预先写死手机型号。只要设备把系统 UI 文字字体暴露在可读取的字体配置或受支持字体分区中，安装扫描器就可以建立设备清单。
+## 功能边界
 
-当前主要映射分区：
+洛书主要管理 **Android 系统字体链路**。以下内容可能完全不经过系统字体，因此不保证被替换：
+
+- App 自带字体文件；
+- 游戏、阅读器等私有字体引擎；
+- 输入法键帽等资源字体；
+- 网页 CSS / WebFont；
+- Canvas、SVG 路径或图片文字；
+- 与洛书同时覆盖同一字体路径的其他模块。
+
+Google 字体兼容也不能替换 App 自己打包的字体或网页指定字体。
+
+## ROM 兼容
+
+洛书不使用「机型白名单」作为主要覆盖依据，而是读取设备当前可见的字体分区和配置。
+
+常见目标包括：
 
 ```text
 /system/fonts
@@ -111,38 +163,25 @@
 /product/fonts
 /my_product/fonts
 /vendor/fonts
+/odm/fonts
+/oem/fonts
+/mi_ext/fonts
+/hw_product/fonts
 ```
 
-`/odm`、`/oem`、`/my_region`、`/hw_product` 等目录也会参与诊断和 ROM 特征识别。ColorOS、HyperOS 等名称只表示已有真机验证和额外故障回退适配，不是 ROM 白名单。
+不同 ROM 实际目录可能不同。HyperOS、ColorOS 等专项逻辑是对其特殊字体路由的增强，不代表其他 ROM 一律不支持。
 
-## 功能边界
+真机验证情况请查看：[docs/TEST_MATRIX.md](docs/TEST_MATRIX.md)。
 
-洛书只管理 **Android 系统文字字体**，不提供 Emoji、图标字体、符号字体或应用资源替换。以下内容通常不受洛书控制：
+## 版本规则
 
-- 应用自行打包的字体；
-- 输入法键帽、QQ/微信等应用内置资源字体；
-- 游戏、阅读器等私有字体引擎；
-- 网页通过 CSS 下载的网络字体；
-- 图片、Canvas、SVG 路径化文字；
-- 与洛书同时覆盖相同系统字体路径的其他字体模块。
+重构系列从 **1.0.0** 开始：
 
-## 安全设计
+```text
+1.0.0 → 1.1.1 → 2.0.0 → 2.2.2 → 3.0.0 → 3.3.3 → ...
+```
 
-- 不直接修改 `/system`、`/product`、`/vendor` 等只读分区；
-- 不覆盖设备原始字体 XML；
-- 不执行导入 ZIP 中的脚本；
-- 输出字体在提交前重新打开并验证字符覆盖、格式和轮廓；
-- 字体负载和配置状态共同参与事务恢复；
-- 不通过只重启 SystemUI 宣称字体已经完整生效；
-- 卸载时只解除洛书记录的挂载并清理洛书私有负载。
-
-## 文档
-
-- [完整使用教程](docs/USER_GUIDE.md)
-- [真机验证状态与发布测试矩阵](docs/TEST_MATRIX.md)
-- [设备字体模板引擎说明](docs/DEVICE_FONT_TEMPLATE_ENGINE.md)
-- [发布流程](docs/RELEASING.md)
-- [版本变化](CHANGELOG.md)
+当前第一个公开正式版本：**重构版 1.0.0**。
 
 ## 从源码构建
 
@@ -152,16 +191,43 @@ sh ./scripts/check.sh
 sh ./scripts/build.sh
 ```
 
-正式 Release 由固定签名工作流构建，模块内置 App 与独立 APK 必须字节一致。
+正式 Release 使用固定证书构建；模块内置 App 与独立 APK 必须保持一致。
 
-## 反馈问题
+## 问题反馈
 
-提交 Issue 时请提供：设备型号、ROM 与 Android 版本、Root 管理器、字体格式与体积、复现步骤，以及已经检查隐私信息的诊断报告。请勿上传无授权字体文件。
+提交 Issue 时建议提供：
+
+- 手机型号；
+- ROM 与 Android 版本；
+- Magisk / KernelSU / SukiSU Ultra / APatch 版本；
+- 使用的字体格式、字重和大致体积；
+- 具体未覆盖的 App / 页面；
+- 可复现步骤；
+- 已检查隐私信息的洛书诊断报告。
+
+请不要上传没有授权的商业字体文件。
+
+## 文档
+
+- [完整使用教程](docs/USER_GUIDE.md)
+- [Google 字体兼容中文说明](docs/GOOGLE_FONT_COMPATIBILITY_ZH.md)
+- [真机验证矩阵](docs/TEST_MATRIX.md)
+- [设备字体模板引擎](docs/DEVICE_FONT_TEMPLATE_ENGINE.md)
+- [发布流程](docs/RELEASING.md)
+- [第三方许可证](THIRD_PARTY_NOTICES.md)
 
 ## 许可证
 
-洛书当前源码采用 **GNU General Public License v3.0 only**（SPDX：`GPL-3.0-only`），完整条款见 [LICENSE](LICENSE)。分发洛书或其修改版本时，需要按照 GPLv3 提供对应源代码、保留版权与许可证声明，并将基于洛书的整体修改版本继续置于 GPLv3 下。
+洛书源码采用 **GNU General Public License v3.0 only**（`GPL-3.0-only`）。
 
-历史标签和发行包继续适用其发布时附带的许可证；历史 MIT 文本保存在 [`licenses/LuoShu-MIT-HISTORICAL.txt`](licenses/LuoShu-MIT-HISTORICAL.txt)。第三方组件适用各自许可证，详情见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 `licenses/`。
+分发修改版本时，请遵守 GPLv3 关于源码提供、许可证保留和衍生作品许可的要求。第三方组件按各自许可证分发，详见 `THIRD_PARTY_NOTICES.md` 与 `licenses/`。
 
-作者：**惜故里丶**
+---
+
+<div align="center">
+
+**作者：惜故里丶**
+
+如果洛书对你有帮助，欢迎 Star、反馈真机结果或提交改进建议。
+
+</div>
