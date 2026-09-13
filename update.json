@@ -1,6 +1,6 @@
 {
-  "version": "v4.4.4",
-  "versionCode": 40404,
-  "zipUrl": "https://github.com/xgl34222220-ops/LuoShu/releases/download/v4.4.4/LuoShu-v4.4.4.zip",
-  "changelog": "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/v4.4.4/RELEASE_NOTES_v4.4.4.md"
+  "version": "v1.0.0",
+  "versionCode": 60000,
+  "zipUrl": "https://github.com/xgl34222220-ops/LuoShu/releases/download/refactor-v1.0.0/LuoShu-v1.0.0.zip",
+  "changelog": "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/refactor-v1.0.0/RELEASE_NOTES_refactor-v1.0.0.md"
 }
