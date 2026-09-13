@@ -99,7 +99,8 @@ class RefactorVersionTest(unittest.TestCase):
 
     def test_actual_readiness_gate_recognizes_epoch(self):
         with tempfile.TemporaryDirectory() as d:
-            subprocess.run(['sh','scripts/pre_release_readiness.sh','--target','v1.0.0','--enforce','--output',d],cwd=ROOT,check=True,capture_output=True,text=True)
+            current = read_properties(ROOT/'module.prop')['version']
+            subprocess.run(['sh','scripts/pre_release_readiness.sh','--target',current,'--enforce','--output',d],cwd=ROOT,check=True,capture_output=True,text=True)
             report=json.loads((Path(d)/'readiness.json').read_text())
             self.assertEqual(next(x for x in report['checks'] if x['id']=='version-code')['severity'],'ready')
 
