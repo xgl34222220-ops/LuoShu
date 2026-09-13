@@ -7,6 +7,7 @@ on:
       - android-app/**
       - module.prop
       - scripts/android_ui_smoke*.py
+      - scripts/google_font_compat_smoke.py
       - .github/workflows/android-ui-smoke.yml
   workflow_dispatch:
 
@@ -78,7 +79,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
           test -r /dev/kvm && test -w /dev/kvm
-      - name: Capture and verify real App screens
+      - name: Capture and verify real App and Google compatibility screens
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
@@ -91,7 +92,7 @@ jobs:
           disable-animations: false
           disable-linux-hw-accel: false
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: python3 scripts/android_ui_smoke.py --apk ui-smoke-apk/app-debug.apk --output ui-smoke-output --serial emulator-5554
+          script: python3 scripts/google_font_compat_smoke.py --apk ui-smoke-apk/app-debug.apk --output ui-smoke-output --serial emulator-5554
       - name: Upload screenshots, hierarchy and crash evidence
         if: always()
         uses: actions/upload-artifact@v4

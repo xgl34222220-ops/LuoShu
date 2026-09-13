@@ -1,0 +1,144 @@
+name: Signed Google compatibility integration
+on:
+  push:
+    branches: [fix/google-provider-fallback-20260913]
+permissions:
+  contents: read
+concurrency:
+  group: luoshu-google-compat-signed
+  cancel-in-progress: true
+jobs:
+  integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: android-actions/setup-android@v3
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Read integration version
+        id: version
+        run: |
+          . ./scripts/version.sh
+          test "$LUOSHU_VERSION" = 'v5.0.0-Beta1'
+          echo "version=$LUOSHU_VERSION" >> "$GITHUB_OUTPUT"
+          echo "artifact_version=$LUOSHU_ARTIFACT_VERSION" >> "$GITHUB_OUTPUT"
+          git rev-parse HEAD > SOURCE_COMMIT.txt
+      - name: Verify Google component integration
+        run: |
+          python3 scripts/google_font_fallback_test.py
+          python3 scripts/google_font_fallback_integration_test.py
+      - name: Require signing secrets
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.LUOSHU_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for value in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            [[ -n "${!value}" ]] || { echo "Missing repository secret: LUOSHU_${value}" >&2; exit 3; }
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/luoshu-release.jks"
+          keytool -list -keystore "$RUNNER_TEMP/luoshu-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+      - name: Install module build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+      - uses: actions/cache@v4
+        with:
+          path: common/python
+          key: luoshu-arm64-runtime-${{ runner.os }}-${{ hashFiles('scripts/prepare_composite_runtime.sh') }}
+      - name: Prepare ARM64 composite runtime
+        shell: bash
+        run: |
+          if [[ ! -x common/python/bin/luoshu-python ]]; then
+            sh ./scripts/prepare_composite_runtime.sh
+          fi
+      - name: Lint, test and build signed release App
+        working-directory: android-app
+        env:
+          LUOSHU_KEYSTORE_FILE: ${{ runner.temp }}/luoshu-release.jks
+          LUOSHU_KEYSTORE_PASSWORD: ${{ secrets.LUOSHU_KEYSTORE_PASSWORD }}
+          LUOSHU_KEY_ALIAS: ${{ secrets.LUOSHU_KEY_ALIAS }}
+          LUOSHU_KEY_PASSWORD: ${{ secrets.LUOSHU_KEY_PASSWORD }}
+        run: gradle --no-daemon --stacktrace :app:lintRelease :app:testDebugUnitTest :app:assembleRelease
+      - name: Verify APK signature certificate
+        shell: bash
+        env:
+          EXPECTED_CERT_SHA256: e0043b560a10111d3ffddd3a7afba680b854e14ed793c7a3fdb7f8b7aa95ff27
+        run: |
+          set -euo pipefail
+          apk='android-app/app/build/outputs/apk/release/app-release.apk'
+          test -s "$apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+          test -x "$apksigner"
+          "$apksigner" verify --verbose --print-certs "$apk" | tee "$RUNNER_TEMP/apk-signature.txt"
+          grep -Eq '^Verified using v(2|3|3\.1|3\.2) scheme.*: true$' "$RUNNER_TEMP/apk-signature.txt"
+          grep -qx 'Number of signers: 1' "$RUNNER_TEMP/apk-signature.txt"
+          actual_cert="$(awk -F': ' '/Signer.*certificate SHA-256 digest:/ {print $NF; exit}' "$RUNNER_TEMP/apk-signature.txt" | tr -d ':[:space:]' | tr '[:upper:]' '[:lower:]')"
+          [[ "$actual_cert" == "$EXPECTED_CERT_SHA256" ]] || { echo 'Release certificate mismatch' >&2; exit 3; }
+      - name: Build App and single module package
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./scripts/version.sh
+          apk='android-app/app/build/outputs/apk/release/app-release.apk'
+          test -s "$apk"
+          mkdir -p dist
+          app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}.apk"
+          cp -f "$apk" "$app"
+          (cd dist && sha256sum "$(basename "$app")" > "$(basename "$app").sha256")
+          LUOSHU_APP_APK="$apk" sh ./scripts/build.sh
+          module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
+          test -s "$module"
+          unzip -t "$module" >/dev/null
+          unzip -Z1 "$module" | grep -qx 'bundled/LuoShu-App.apk'
+          ! unzip -Z1 "$module" | grep -qE '(^|/)webroot(/|$)'
+          unzip -p "$module" bundled/LuoShu-App.apk > "$RUNNER_TEMP/embedded.apk"
+          cmp -s "$apk" "$RUNNER_TEMP/embedded.apk"
+          (cd dist && sha256sum -c "$(basename "$module").sha256")
+          (cd dist && sha256sum -c "$(basename "$app").sha256")
+      - name: Enforce integration readiness
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: sh ./scripts/pre_release_readiness.sh --target "$VERSION" --enforce
+      - name: Preserve signed integration package
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-${{ steps.version.outputs.artifact_version }}-signed-integration
+          path: |
+            dist/LuoShu-${{ steps.version.outputs.artifact_version }}.zip
+            dist/LuoShu-${{ steps.version.outputs.artifact_version }}.zip.sha256
+            dist/LuoShu-App-${{ steps.version.outputs.artifact_version }}.apk
+            dist/LuoShu-App-${{ steps.version.outputs.artifact_version }}.apk.sha256
+            dist/pre-release-readiness/
+            SOURCE_COMMIT.txt
+            docs/GOOGLE_FONT_COMPATIBILITY_ZH.md
+            android-app/app/build/test-results/testDebugUnitTest/
+            android-app/app/build/reports/lint-results-release.html
+          if-no-files-found: error
+          retention-days: 14
+      - name: Preserve diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-Google-integration-diagnostics
+          path: |
+            android-app/app/build/test-results/testDebugUnitTest/
+            android-app/app/build/reports/lint-results-release.html
+            /tmp/unused-never-present.txt
+            ${{ runner.temp }}/apk-signature.txt
+          if-no-files-found: warn
+          retention-days: 7
