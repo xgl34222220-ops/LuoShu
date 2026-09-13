@@ -1,0 +1,91 @@
+name: Reset release history to refactor v1.0.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/reset-release-history-to-refactor.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.repository == 'xgl34222220-ops/LuoShu'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      KEEP_TAG: refactor-v1.0.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify refactor release is the protected starting point
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(jq -r .version update.json)" = 'v1.0.0'
+          test "$(jq -r .versionCode update.json)" = '60000'
+          jq -e '.zipUrl | contains("/refactor-v1.0.0/")' update.json >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$KEEP_TAG" >/tmp/keep-release.json
+          test "$(jq -r .prerelease /tmp/keep-release.json)" = false
+          gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$KEEP_TAG" >/dev/null
+      - name: Remove every other Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate --jq '.[] | [.id, .tag_name] | @tsv' \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" > /tmp/releases.tsv
+          : > /tmp/deleted-releases.txt
+          while IFS=$'\t' read -r id tag; do
+            [ -n "${id:-}" ] || continue
+            if [ "$tag" = "$KEEP_TAG" ]; then
+              continue
+            fi
+            echo "$tag" | tee -a /tmp/deleted-releases.txt
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done < /tmp/releases.tsv
+      - name: Remove every other tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate --jq '.[] | .ref' \
+            "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/" > /tmp/tags.txt
+          : > /tmp/deleted-tags.txt
+          while IFS= read -r ref; do
+            [ -n "$ref" ] || continue
+            tag="${ref#refs/tags/}"
+            if [ "$tag" = "$KEEP_TAG" ]; then
+              continue
+            fi
+            echo "$tag" | tee -a /tmp/deleted-tags.txt
+            encoded=$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$tag")
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$encoded"
+          done < /tmp/tags.txt
+      - name: Verify only refactor v1.0.0 remains
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate --jq '.[].tag_name' \
+            "repos/$GITHUB_REPOSITORY/releases?per_page=100" | sort > /tmp/releases-after.txt
+          printf '%s\n' "$KEEP_TAG" > /tmp/expected.txt
+          diff -u /tmp/expected.txt /tmp/releases-after.txt
+          gh api --paginate --jq '.[].ref' \
+            "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/" | sed 's#^refs/tags/##' | sort > /tmp/tags-after.txt
+          diff -u /tmp/expected.txt /tmp/tags-after.txt
+          {
+            echo '# LuoShu release-history reset audit'
+            echo
+            echo "kept=$KEEP_TAG"
+            echo
+            echo '## Deleted releases'
+            cat /tmp/deleted-releases.txt
+            echo
+            echo '## Deleted tags'
+            cat /tmp/deleted-tags.txt
+          } > /tmp/cleanup-audit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LuoShu-refactor-v1.0.0-history-reset-audit
+          path: /tmp/cleanup-audit.txt
+          retention-days: 30
