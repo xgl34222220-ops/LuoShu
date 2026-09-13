@@ -1,0 +1,58 @@
+name: Materialize verified Google fingerprint patch
+on:
+  push:
+    branches: [fix/google-nohook-guard-beta2]
+    paths: [.github/workflows/materialize-google-fingerprint-fix.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    if: github.repository == 'xgl34222220-ops/LuoShu'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply exact reviewed hunk and verify resulting blob
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+          p = Path('common/google_font_provider_bridge.sh')
+          def blob():
+              return subprocess.check_output(['git', 'hash-object', str(p)], text=True).strip()
+          assert blob() == '45b82baa86dca4cd211a9aa64e02ce238ca1316c'
+          old = r'''        _gfp_fp_pids=
+                  [ ! -s "$_gfp_fp_targets" ] || _gfp_fp_pids=$(_gfp_unique_namespace_pids)
+                  for _gfp_fp_pid in $_gfp_fp_pids; do
+                      printf 'namespace|%s|' "$_gfp_fp_pid"
+                      readlink "$_gfp_fp_proc/$_gfp_fp_pid/ns/mnt" 2>/dev/null || printf 'missing\n'
+          '''
+          new = r'''        _gfp_fp_pids=
+                  [ ! -s "$_gfp_fp_targets" ] || _gfp_fp_pids=$(_gfp_namespace_pids)
+                  _gfp_fp_seen_ns='|'
+                  for _gfp_fp_pid in $_gfp_fp_pids; do
+                      _gfp_fp_ns=$(readlink "$_gfp_fp_proc/$_gfp_fp_pid/ns/mnt" 2>/dev/null) || continue
+                      # A new consumer can inherit an existing namespace but cache an old
+                      # provider FD. Namespace-only dedup hid that process permanently.
+                      printf 'process|%s|%s|%s\n' "$_gfp_fp_pid" "$(_gfp_process_start "$_gfp_fp_pid" 2>/dev/null)" "$_gfp_fp_ns"
+                      case "$_gfp_fp_seen_ns" in *"|$_gfp_fp_ns|"*) continue ;; esac
+                      _gfp_fp_seen_ns="$_gfp_fp_seen_ns$_gfp_fp_ns|"
+                      printf 'namespace|%s|%s\n' "$_gfp_fp_pid" "$_gfp_fp_ns"
+          '''
+          # YAML indentation is removed uniformly from the embedded script.
+          text = p.read_text()
+          assert text.count(old) == 1
+          p.write_text(text.replace(old, new, 1))
+          assert blob() == '73bf0e2ec66c6911ead0cfbd9c030d5fe9dee334', blob()
+          PY
+          sh -n common/google_font_provider_bridge.sh
+          python3 scripts/google_font_guard_resume_test.py
+          python3 scripts/google_font_watch_test.py
+          git diff --check
+      - name: Commit only the reviewed bridge hunk to this fix branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- common/google_font_provider_bridge.sh
+          git commit -m 'fix: include consumer lifetime in Google font fingerprint'
+          git push origin HEAD:fix/google-nohook-guard-beta2

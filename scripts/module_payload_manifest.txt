@@ -71,6 +71,7 @@ common/font_validate_fast_v4.sh
 common/google_font_provider_bridge.sh
 common/google_font_provider_patch.py
 common/google_font_provider_service.sh
+common/google_font_watch_wait.py
 common/font_role_check.py
 common/font_role_check.sh
 common/font_runtime_cleanup.sh
