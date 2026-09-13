@@ -1,9 +1,10 @@
 {
-  "schema": "luoshu-stable-version-policy-v2",
-  "authorizedAt": "2026-09-13T04:47:32Z",
+  "schema": "luoshu-stable-version-policy-v3",
+  "authorizedAt": "2026-09-13T06:01:30Z",
   "series": "refactor",
   "effectiveFrom": "v1.0.0",
   "currentStable": "v1.0.0",
+  "firstRelease": "v1.0.0",
   "nextStable": "v1.1.1",
   "rule": "n.0.0 -> n.n.n -> (n+1).0.0; n is a positive integer",
   "examples": ["v1.0.0", "v1.1.1", "v2.0.0", "v2.2.2", "v3.0.0", "v3.3.3", "v4.0.0", "v4.4.4"],
@@ -11,9 +12,8 @@
   "moduleVersionCode": "50000 + major*10000 + minor*100 + patch",
   "appVersionCode": "moduleVersionCode*100 + 1",
   "releaseTag": "refactor-v<major>.<minor>.<patch>",
-  "previousStable": "legacy v4.4.4 (40404)",
-  "previousCandidate": "legacy v5.0.0-Beta1 (50000)",
-  "legacyTagsRenamed": false,
+  "releaseHistoryPolicy": "Only refactor-series releases are kept; refactor-v1.0.0 is the first public release/tag in this series",
+  "sourceCommitHistoryPreserved": true,
   "releaseRequiresUserRequest": true,
-  "cleanupAuthorization": "No new cleanup; preserve legacy releases and source history"
+  "cleanupAuthorization": "Delete all legacy Releases, prereleases and tags; keep only refactor-v1.0.0 as the starting version"
 }
