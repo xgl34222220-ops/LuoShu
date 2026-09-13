@@ -68,6 +68,9 @@ common/font_name_normalize.py
 common/font_provider_cache.sh
 common/font_switch_lock.sh
 common/font_validate_fast_v4.sh
+common/google_font_fallback_core.py
+common/google_font_fallback.py
+common/google_font_fallback.sh
 common/google_font_provider_bridge.sh
 common/google_font_provider_patch.py
 common/google_font_provider_service.sh

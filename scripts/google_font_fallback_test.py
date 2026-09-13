@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('fallback', ROOT / 'tools/google_font_fallback.py')
+spec = importlib.util.spec_from_file_location('fallback', ROOT / 'common/google_font_fallback.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
@@ -245,7 +245,7 @@ class FallbackTest(unittest.TestCase):
                 for command in ('default-state','enable','disable')])
 
     def test_status_default_and_no_automatic_enable_in_source(self):
-        source = (ROOT / 'tools/google_font_fallback.py').read_text()
+        source = (ROOT / 'common/google_font_fallback.py').read_text()
         self.assertIn("default='status'", source)
         self.assertNotIn('shutil.rmtree', source)
         self.assertNotIn("'force-stop'", source)

@@ -255,6 +255,8 @@ python3 "$ROOT/scripts/font_inventory_test.py" --font "$FONT_INVENTORY_TEST_FONT
 python3 "$ROOT/scripts/stock_metric_contract_test.py"
 python3 "$ROOT/scripts/font_inventory_symlink_test.py"
 python3 "$ROOT/scripts/hyperos_cjk_routing_test.py"
+python3 "$ROOT/scripts/google_font_fallback_test.py"
+python3 "$ROOT/scripts/google_font_fallback_integration_test.py"
 python3 "$ROOT/scripts/google_font_provider_lifecycle_test.py"
 python3 "$ROOT/scripts/google_font_refresh_test.py"
 python3 "$ROOT/scripts/google_font_provider_journal_test.py"
