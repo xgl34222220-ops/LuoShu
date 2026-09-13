@@ -358,12 +358,16 @@ class RoutingTest(unittest.TestCase):
 
     def test_clock_and_mono_slots_keep_existing_routing(self):
         self.default_pair()
-        for name in ('MiClock.otf', 'RobotoMono-Regular.ttf'):
+        names = ('MiClock.otf', 'RobotoMono-Regular.ttf', 'DroidSansMono.ttf',
+                 'NotoSansMono-Regular.ttf')
+        for name in names:
             self.stock(name, (LATIN, 48))
         self.build()
-        for name in ('MiClock.otf', 'RobotoMono-Regular.ttf'):
+        for name in names:
             with TTFont(self.fonts / name) as font:
                 self.assertIn(HAN, font.getBestCmap())
+                self.assertIn(LATIN, font.getBestCmap())
+                self.assertIn(48, font.getBestCmap())
             self.assertEqual(self.reports['/system/fonts/' + name]['cjkRoutingReason'],
                              'specialized-slot')
 
@@ -371,7 +375,7 @@ class RoutingTest(unittest.TestCase):
         self.default_pair()
         original = {}
         for name in ('NotoSansAdlam-VF.ttf', 'NotoSansCuneiform-Regular.ttf',
-                     'DroidSansMono.ttf', 'MiSansOdiaVF.ttf', 'RobotoSymbols.ttf'):
+                     'NotoSansMono-Icons.ttf', 'MiSansOdiaVF.ttf', 'RobotoSymbols.ttf'):
             self.stock(name, (0x12000,), ())
             original[name] = (self.root / 'stock/system' / name).read_bytes()
             make_font(self.fonts / name)
@@ -380,6 +384,40 @@ class RoutingTest(unittest.TestCase):
         for name, expected in original.items():
             self.assertFalse((self.fonts / name).exists())
             self.assertEqual((self.root / 'stock/system' / name).read_bytes(), expected)
+
+    def test_restored_latin_targets_keep_complete_english_and_digits(self):
+        self.default_pair()
+        alphanumeric = tuple(map(ord, 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'))
+        points = tuple(dict.fromkeys((*DEFAULT_POINTS, *alphanumeric)))
+        source_path = self.fonts / '400.ttf'
+        make_font(source_path, points, variable=True)
+        names = ('DroidSansMono.ttf', 'DroidSansFallback.ttf', 'NotoSansMono-Regular.ttf',
+                 'NotoSansDisplay-Regular.ttf', 'NotoSansCondensed-Regular.ttf',
+                 'NotoSansSemiCondensed-Regular.ttf', 'NotoSansVF.ttf')
+        stock_before = {}
+        for name in names:
+            self.stock(name, alphanumeric, ())
+            stock_before[name] = (self.root / 'stock/system' / name).read_bytes()
+            make_font(self.fonts / name)
+        source_before = source_path.read_bytes()
+        result = self.build()
+        self.assertEqual(result['mapped'], len(names) + 2)
+        self.assertEqual(result['fallbackSlots'], 0)
+        self.assertEqual(source_path.read_bytes(), source_before)
+        with TTFont(source_path) as source:
+            for name in names:
+                with self.subTest(name=name), TTFont(self.fonts / name) as output:
+                    self.assertTrue(set(alphanumeric).issubset(output.getBestCmap()))
+                    for cp in alphanumeric:
+                        actual, expected = RecordingPen(), RecordingPen()
+                        output.getGlyphSet()[output.getBestCmap()[cp]].draw(actual)
+                        source.getGlyphSet()[source.getBestCmap()[cp]].draw(expected)
+                        self.assertEqual(actual.value, expected.value)
+                self.assertEqual((self.root / 'stock/system' / name).read_bytes(), stock_before[name])
+                self.assertEqual(self.reports['/system/fonts/' + name]['metricsSource'], 'stock')
+        # Reapplying uses the same preserved donor rather than dropping aliases.
+        self.assertEqual(self.build()['mapped'], len(names) + 2)
+        self.assertEqual(source_path.read_bytes(), source_before)
 
     def test_stock_latin_noto_ui_slots_are_physically_compacted(self):
         self.default_pair()
