@@ -1,0 +1,24 @@
+name: Google font provider fallback tests
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/google_font_fallback.py
+      - tools/google_font_fallback.sh
+      - scripts/google_font_fallback_test.py
+      - .github/workflows/google-font-fallback-regression.yml
+permissions:
+  contents: read
+jobs:
+  fallback:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify opt-in component scope and rollback
+        run: |
+          sh -n tools/google_font_fallback.sh
+          python3 -m py_compile tools/google_font_fallback.py
+          python3 scripts/google_font_fallback_test.py
