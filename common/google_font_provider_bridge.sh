@@ -256,10 +256,16 @@ _gfp_fingerprint() {
             [ ! -s "$STATE" ] || awk -F '|' 'NF >= 2 {print $2}' "$STATE"
         } | _gfp_stat_files
         _gfp_fp_pids=
-        [ ! -s "$_gfp_fp_targets" ] || _gfp_fp_pids=$(_gfp_unique_namespace_pids)
+        [ ! -s "$_gfp_fp_targets" ] || _gfp_fp_pids=$(_gfp_namespace_pids)
+        _gfp_fp_seen_ns='|'
         for _gfp_fp_pid in $_gfp_fp_pids; do
-            printf 'namespace|%s|' "$_gfp_fp_pid"
-            readlink "$_gfp_fp_proc/$_gfp_fp_pid/ns/mnt" 2>/dev/null || printf 'missing\n'
+            _gfp_fp_ns=$(readlink "$_gfp_fp_proc/$_gfp_fp_pid/ns/mnt" 2>/dev/null) || continue
+            # A new consumer can inherit an existing namespace but cache an old
+            # provider FD. Namespace-only dedup hid that process permanently.
+            printf 'process|%s|%s|%s\n' "$_gfp_fp_pid" "$(_gfp_process_start "$_gfp_fp_pid" 2>/dev/null)" "$_gfp_fp_ns"
+            case "$_gfp_fp_seen_ns" in *"|$_gfp_fp_ns|"*) continue ;; esac
+            _gfp_fp_seen_ns="$_gfp_fp_seen_ns$_gfp_fp_ns|"
+            printf 'namespace|%s|%s\n' "$_gfp_fp_pid" "$_gfp_fp_ns"
             # stat through the process root observes its own bind, including
             # fallback staging files that were unlinked immediately after bind.
             while IFS= read -r _gfp_fp_target; do

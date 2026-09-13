@@ -83,8 +83,14 @@ class SwitchProviderTest(unittest.TestCase):
         self.assertFalse(lock.exists())
         marker.unlink()
         (self.module / 'config/active_font.conf').write_text('default\n')
-        subprocess.run(['sh', str(service)], env=self.env, check=True, timeout=5)
+        # Default now pauses rather than permanently exiting the boot guard.
+        # Bound this lock/no-replacement fixture explicitly; the resume suite
+        # exercises default -> custom and cancellation of the live watcher.
+        subprocess.run(['sh', str(service)], env={**self.env,
+            'TEST_APPLIED': str(marker), 'LUOSHU_GOOGLE_FONT_RETRIES': '1',
+            'LUOSHU_GOOGLE_FONT_WATCH_CYCLES': '0'}, check=True, timeout=5)
         self.assertFalse(marker.exists(), 'default font must not run provider replacement')
+        self.assertFalse(lock.exists(), 'finite test run must release the guard lock')
 
     def test_provider_reads_current_physical_payload_before_old_cache(self):
         live = self.module / '.luoshu-payload/system/fonts'

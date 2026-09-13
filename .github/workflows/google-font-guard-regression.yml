@@ -1,0 +1,26 @@
+name: Google no-Hook font guard regression
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - common/google_font_*.py
+      - common/google_font_*.sh
+      - scripts/google_font_*test.py
+      - .github/workflows/google-font-guard-regression.yml
+permissions:
+  contents: read
+jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Real inotify and shell guard regression
+        run: |
+          sh -n common/google_font_provider_bridge.sh
+          sh -n common/google_font_provider_service.sh
+          python3 -m py_compile common/google_font_watch_wait.py
+          python3 scripts/google_font_guard_resume_test.py
+          python3 scripts/google_font_watch_test.py
