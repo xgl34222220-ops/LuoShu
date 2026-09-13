@@ -1,0 +1,89 @@
+name: Refresh public project copy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/refresh-public-copy.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rewrite current public descriptions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, pairs):
+              p = Path(path)
+              text = p.read_text()
+              for old, new in pairs:
+                  if old not in text:
+                      raise SystemExit(f'missing expected text in {path}: {old!r}')
+                  text = text.replace(old, new)
+              p.write_text(text)
+
+          replace('README.md', [
+              ('**Android 无 Hook 全局字体替换与复合引擎**', '**Android 全局字体替换与复合引擎**'),
+              ('**洛书**是一套面向 Root Android 设备的无 Hook 字体替换方案。', '**洛书**是一套面向 Root Android 设备的全局字体替换与复合方案。'),
+              ('- **无 Hook**：不依赖 LSPosed / Zygisk Hook，不向目标 App 注入代码。\n', ''),
+          ])
+          replace('README.txt', [
+              ('Android 无 Hook 全局字体替换与复合引擎。', 'Android 全局字体替换与复合引擎。'),
+              ('- 不使用 WebUI，不依赖 LSPosed / Zygisk Hook\n', ''),
+          ])
+          replace('module.prop', [
+              ('description=Android 无 Hook 全局字体引擎：统一系统、OEM、fallback 与 Play/GMS 下载字体链路',
+               'description=Android 全局字体引擎：系统、OEM 与 Google 字体统一覆盖与复合'),
+          ])
+          replace('scripts/check.sh', [
+              ("grep -q '^description=Android 无 Hook 全局字体引擎' \"$ROOT/module.prop\"",
+               "grep -q '^description=Android 全局字体引擎' \"$ROOT/module.prop\""),
+          ])
+          replace('RELEASE_NOTES_refactor-v1.0.0.md', [
+              ('继续包含现有 HyperOS 字体覆盖、压缩复用、无 Hook 守护以及中文 Google 字体兼容。',
+               '继续包含现有 HyperOS 字体覆盖、压缩复用、Google 字体维护机制以及中文 Google 字体兼容。'),
+          ])
+
+          Path('兼容与目录说明.txt').write_text('''洛书 · 重构版 1.0.0\n\nAndroid 全局字体替换与复合引擎。\n适用于 Magisk、KernelSU、SukiSU Ultra 与 APatch。\n\n核心能力：\n- 中文、英文、数字字体可分别选择并生成复合字体\n- 自动读取设备实际字体目录、字体配置、字重、TTC face 与字体度量\n- 针对 HyperOS、ColorOS 等 OEM 字体路由提供专项适配\n- 字体负载使用洛书私有 systemless 挂载\n- 新负载验证成功后才提交，失败保留上一套可用字体\n- 设置中内置“Google 字体兼容”，用于处理部分 Google 应用英数回退问题\n\n重要：Root 管理器中的“默认卸载模块”必须关闭。\n\nGoogle 字体兼容：\n设置 → Google 字体兼容。先正常应用字体并完整重启；若 Google 商店等应用英数仍恢复默认，再开启兼容并再次完整重启。停用或卸载洛书前，请先恢复原设置。\n\n用户目录：\n/sdcard/LuoShu/fonts/\n/sdcard/LuoShu/import/\n/sdcard/LuoShu/reports/\n\n最新版本与说明：\nhttps://github.com/xgl34222220-ops/LuoShu/releases/latest\n''')
+
+          Path('CHANGELOG.md').write_text('''# Changelog\n\n公开版本历史从重构系列重新开始。\n\n## [1.0.0] - 2026-09-13\n\n- 洛书重构系列首个正式版本。\n- 中文、英文、数字字体支持独立选择与复合生成。\n- 设备字体清单、OEM 字体路由、事务提交、缓存复用与安全回退整合为统一字体引擎。\n- 完善 HyperOS / ColorOS 字体覆盖与英文数字路由。\n- 设置中加入中文“Google 字体兼容”页面，支持状态检测、开启与恢复。\n- 正式版本序列从 1.0.0 开始，下一正式版为 1.1.1。\n''')
+          PY
+
+          # Public history now starts at the refactor release; keep only its release note.
+          shopt -s nullglob
+          legacy=(RELEASE_NOTES_v*.md)
+          if ((${#legacy[@]})); then
+            git rm -f -- "${legacy[@]}"
+          fi
+
+          # Public-facing current documents must use product/function language only.
+          if grep -nF '无 Hook' README.md README.txt module.prop RELEASE_NOTES_refactor-v1.0.0.md CHANGELOG.md 兼容与目录说明.txt 2>/dev/null; then
+            echo 'obsolete public wording remains' >&2
+            exit 1
+          fi
+          sh -n scripts/check.sh
+          git diff --check
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md README.txt module.prop scripts/check.sh RELEASE_NOTES_refactor-v1.0.0.md CHANGELOG.md 兼容与目录说明.txt
+          git diff --cached --quiet || git commit -m 'docs: focus LuoShu public copy on product capabilities'
+          git push origin HEAD:main
+
+          # Keep the only public Release page in sync with the rewritten note.
+          release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/refactor-v1.0.0" --jq .id)
+          body=$(cat RELEASE_NOTES_refactor-v1.0.0.md)
+          gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -f body="$body" >/dev/null
