@@ -68,6 +68,10 @@ Google 字体兼容：
 真机验证状态：
 https://github.com/xgl34222220-ops/LuoShu/blob/main/docs/TEST_MATRIX.md
 
+支持项目：
+如果洛书对你有帮助，可以自愿赞赏。捐赠完全自愿，不影响功能、下载、更新或问题反馈，也不作为优先适配、优先修复或售后服务的条件。
+微信与支付宝二维码请查看仓库首页 README。
+
 许可证：
 GPL-3.0-only。第三方组件许可证见 THIRD_PARTY_NOTICES.md 与 licenses/。
 
