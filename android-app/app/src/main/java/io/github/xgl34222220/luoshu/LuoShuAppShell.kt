@@ -178,7 +178,7 @@ internal fun LuoShuAppShell(
             AppPage.Library -> viewModel.ensureFonts()
             AppPage.Studio -> {
                 viewModel.ensureFonts()
-                viewModel.refreshMixConfig()
+                viewModel.ensureMixConfig()
             }
             AppPage.Logs -> viewModel.refreshLogs()
             AppPage.Home, AppPage.Settings -> Unit
@@ -188,7 +188,7 @@ internal fun LuoShuAppShell(
         // The mandatory status request gets the root shell first. System weight
         // is secondary and is read only after Home has a usable snapshot.
         if (page == AppPage.Home && !viewModel.snapshot.loading) {
-            features.refreshSystemWeight()
+            features.ensureSystemWeight()
         }
     }
     LaunchedEffect(page) {
