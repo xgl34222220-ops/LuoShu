@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -51,37 +52,41 @@ internal fun LuoShuLoadingSkeleton(
         }
     }
 
-    AnimatedVisibility(
-        visible = active && revealed,
-        enter = fadeIn(tween(LuoShuMotionTokens.Micro)),
-        exit = fadeOut(tween(LuoShuMotionTokens.Micro)),
-    ) {
-        val shimmer = rememberInfiniteTransition(label = "luoshuSkeleton")
-        val progress by shimmer.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(1400, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "luoshuSkeletonProgress",
-        )
-        val base = MaterialTheme.colorScheme.onSurface.copy(alpha = .055f)
-        val highlight = MaterialTheme.colorScheme.onSurface.copy(alpha = .13f)
-        Box(
-            modifier = modifier
-                .clip(shape)
-                .drawBehind {
-                    val band = size.width * .42f
-                    val startX = -band + (size.width + band * 2f) * progress
-                    drawRect(
-                        Brush.linearGradient(
-                            colors = listOf(base, highlight, base),
-                            start = Offset(startX, 0f),
-                            end = Offset(startX + band, size.height),
+    val revealAlpha by animateFloatAsState(
+        targetValue = if (active && revealed) 1f else 0f,
+        animationSpec = tween(LuoShuMotionTokens.Micro),
+        label = "luoshuSkeletonAlpha",
+    )
+    val shimmer = rememberInfiniteTransition(label = "luoshuSkeleton")
+    val progress by shimmer.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "luoshuSkeletonProgress",
+    )
+    val base = MaterialTheme.colorScheme.onSurface.copy(alpha = .055f)
+    val highlight = MaterialTheme.colorScheme.onSurface.copy(alpha = .13f)
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .drawBehind {
+                if (revealAlpha <= 0f) return@drawBehind
+                val band = size.width * .42f
+                val startX = -band + (size.width + band * 2f) * progress
+                drawRect(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            base.copy(alpha = base.alpha * revealAlpha),
+                            highlight.copy(alpha = highlight.alpha * revealAlpha),
+                            base.copy(alpha = base.alpha * revealAlpha),
                         ),
-                    )
-                },
-        )
-    }
+                        start = Offset(startX, 0f),
+                        end = Offset(startX + band, size.height),
+                    ),
+                )
+            },
+    )
 }
