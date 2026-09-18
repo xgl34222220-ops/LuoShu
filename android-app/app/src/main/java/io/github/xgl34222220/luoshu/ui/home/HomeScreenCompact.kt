@@ -363,7 +363,7 @@ private fun HomeWeightSlider(
                 valueRange = minimum..maximum,
                 steps = (((weight.max - weight.min) / step) - 1).coerceAtLeast(0),
             )
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = dragging,
                 modifier = Modifier.offset(x = bubbleX),
                 enter = fadeIn(tween(90)),
