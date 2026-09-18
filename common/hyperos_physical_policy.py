@@ -78,17 +78,9 @@ def safe_physical_font_name(name: str) -> bool:
         return False
     if any(token in lower for token in _EXCLUDED):
         return False
-    if name.startswith((
-        "MiSansJP", "MiSansJp", "MiSansKR", "MiSansKr",
-        "MiSansTC", "MiSansHant", "MiSansHK", "MiSansL3",
-        "XiaomiSansJP", "XiaomiSansKR", "XiaomiSansTC", "XiaomiSansHant",
-        "XiaomiSansHK", "XiaomiSansL3",
-        "NotoSansSC", "NotoSansTC", "NotoSansHK", "NotoSansHans",
-        "NotoSansHant", "NotoSansCJK",
-    )) or any(token in name for token in ("CJKJP", "CJKKR")):
-        # These are language/repertoire fallbacks, not generic UI faces. A
-        # single user donor rarely covers TC/HK/L3 or every regional CJK set;
-        # replacing them is a direct route to tofu/garbled text.
+    if name.startswith(("MiSansJP", "MiSansJp", "MiSansKR", "MiSansKr")) or any(
+        token in name for token in ("CJKJP", "CJKKR")
+    ):
         return False
     # NotoSans is also the prefix of hundreds of unrelated script fallbacks.
     # A blacklist cannot enumerate them reliably; replacing each with the full
