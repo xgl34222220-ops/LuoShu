@@ -52,7 +52,10 @@ _lhcc_safe_dynamic_name() {
     done
     case "$_lhcc_icon_name" in *icon*) return 1 ;; esac
     case "$_lhcc_name" in
-        MiSansJP*|MiSansJp*|MiSansKR*|MiSansKr*|*CJKJP*|*CJKKR*) return 1 ;;
+        MiSansJP*|MiSansJp*|MiSansKR*|MiSansKr*|MiSansTC*|MiSansHant*|MiSansHK*|MiSansL3*|\
+        XiaomiSansJP*|XiaomiSansKR*|XiaomiSansTC*|XiaomiSansHant*|XiaomiSansHK*|XiaomiSansL3*|\
+        NotoSansSC*|NotoSansTC*|NotoSansHK*|NotoSansHans*|NotoSansHant*|NotoSansCJK*|\
+        *CJKJP*|*CJKKR*) return 1 ;;
         MiSans*.ttf|MiSans*.otf|\
         XiaomiSans*.ttf|XiaomiSans*.otf|\
         MiLanPro*.ttf|MiLanPro*.otf|\
