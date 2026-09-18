@@ -43,6 +43,7 @@ export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
 [ -f "$LEGACY_DIR/font_check.sh" ] && . "$LEGACY_DIR/font_check.sh"
 [ -f "$LEGACY_DIR/rom_adapters.sh" ] && . "$LEGACY_DIR/rom_adapters.sh"
 [ -f "$MODDIR/common/font_switch_lock.sh" ] && . "$MODDIR/common/font_switch_lock.sh"
+[ -f "$MODDIR/common/font_validation_cache.sh" ] && . "$MODDIR/common/font_validation_cache.sh"
 [ -f "$LEGACY_DIR/payload_clone.sh" ] && . "$LEGACY_DIR/payload_clone.sh"
 HYPEROS_COMPAT="$LEGACY_DIR/hyperos_full_coverage.sh"
 [ -f "$HYPEROS_COMPAT" ] && . "$HYPEROS_COMPAT"
@@ -134,6 +135,21 @@ find_text_font_file() {
 
 validate_global() {
     _file="$1"
+
+    # Library/import validation already records an identity-bound result. Reuse
+    # it only for a proven mixed CJK+Latin font; this skips reopening a large
+    # font twice on every direct apply while preserving the global-font gate.
+    if type luoshu_font_validation_cache_restore >/dev/null 2>&1 && \
+       luoshu_font_validation_cache_restore "$_file" 2>/dev/null; then
+        if [ "${LUOSHU_FONT_HAS_CJK:-false}" = true ] && \
+           [ "${LUOSHU_FONT_HAS_LATIN:-false}" = true ]; then
+            printf '[%s] [SAFE-SWITCH] validation cache hit: %s\n' \
+                "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" \
+                "${_file##*/}" >> "$LOG_FILE" 2>/dev/null || true
+            return 0
+        fi
+    fi
+
     if type font_validate >/dev/null 2>&1; then
         font_validate "$_file" text || return 1
     fi
