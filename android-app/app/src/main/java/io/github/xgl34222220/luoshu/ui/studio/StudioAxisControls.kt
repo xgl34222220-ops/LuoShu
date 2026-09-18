@@ -1,8 +1,13 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.selection.selectable
@@ -10,16 +15,19 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -63,7 +71,6 @@ internal fun MaterialStudioAxisControls(
     onAxis: (String, Float) -> Unit,
 ) {
     val axisInfo = rememberWeightAxisInfo(font)
-    val haptic = LocalHapticFeedback.current
     when {
         font.variable && axisInfo.loading -> AxisLoadingRow()
         font.variable && axisInfo.axes.isNotEmpty() -> {
@@ -81,7 +88,6 @@ internal fun MaterialStudioAxisControls(
                         animationSpec = spring(dampingRatio = .72f, stiffness = Spring.StiffnessMedium),
                         label = "axisValueBadge",
                     )
-                    var lastHapticWeight by remember(font.id, axis.tag) { mutableStateOf<Int?>(null) }
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -106,31 +112,16 @@ internal fun MaterialStudioAxisControls(
                                 )
                             }
                         }
-                        Slider(
-                            value = current,
-                            onValueChange = { raw ->
-                                val magnetic = if (isWeight) standardWeightSnap(raw, minimum, maximum) else null
-                                val next = when {
-                                    magnetic != null -> magnetic.toFloat()
-                                    isWeight -> ((raw / 10f).roundToInt() * 10).toFloat().coerceIn(minimum, maximum)
-                                    else -> raw.coerceIn(minimum, maximum)
-                                }
-                                if (magnetic != null && lastHapticWeight != magnetic) {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    lastHapticWeight = magnetic
-                                } else if (magnetic == null && lastHapticWeight != null &&
-                                    abs(raw - lastHapticWeight!!.toFloat()) > 22f
-                                ) {
-                                    lastHapticWeight = null
-                                }
-                                onAxis(axis.tag, next)
-                            },
+                        InteractiveAxisSlider(
+                            key = "${font.id}:${axis.tag}",
+                            current = current,
+                            minimum = minimum,
+                            maximum = maximum,
+                            isWeight = isWeight,
+                            enabled = enabled,
                             interactionSource = sliderInteraction,
-                            enabled = enabled && maximum > minimum,
-                            valueRange = minimum..maximum,
-                            steps = if (isWeight && maximum > minimum) {
-                                (((maximum - minimum) / 10f).roundToInt() - 1).coerceAtLeast(0)
-                            } else 0,
+                            dragging = dragging,
+                            onValueChange = { onAxis(axis.tag, it) },
                         )
                         Text(
                             "${fontAxisValueLabel(minimum)} · 默认 ${fontAxisValueLabel(axis.default)} · ${fontAxisValueLabel(maximum)}",
@@ -177,7 +168,6 @@ internal fun MiuixStudioAxisControls(
 ) {
     val axisInfo = rememberWeightAxisInfo(font)
     val tokens = LocalMiuixTokens.current
-    val haptic = LocalHapticFeedback.current
     when {
         font.variable && axisInfo.loading -> AxisLoadingRow()
         font.variable && axisInfo.axes.isNotEmpty() -> {
@@ -195,7 +185,6 @@ internal fun MiuixStudioAxisControls(
                         animationSpec = spring(dampingRatio = .72f, stiffness = Spring.StiffnessMedium),
                         label = "axisValueBadge",
                     )
-                    var lastHapticWeight by remember(font.id, axis.tag) { mutableStateOf<Int?>(null) }
                     Surface(
                         shape = RoundedCornerShape(22.dp),
                         color = tokens.textPrimary.copy(alpha = .035f),
@@ -229,31 +218,16 @@ internal fun MiuixStudioAxisControls(
                                     )
                                 }
                             }
-                            Slider(
-                                value = current,
-                                onValueChange = { raw ->
-                                    val magnetic = if (isWeight) standardWeightSnap(raw, minimum, maximum) else null
-                                    val next = when {
-                                        magnetic != null -> magnetic.toFloat()
-                                        isWeight -> ((raw / 10f).roundToInt() * 10).toFloat().coerceIn(minimum, maximum)
-                                        else -> raw.coerceIn(minimum, maximum)
-                                    }
-                                    if (magnetic != null && lastHapticWeight != magnetic) {
-                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        lastHapticWeight = magnetic
-                                    } else if (magnetic == null && lastHapticWeight != null &&
-                                        abs(raw - lastHapticWeight!!.toFloat()) > 22f
-                                    ) {
-                                        lastHapticWeight = null
-                                    }
-                                    onAxis(axis.tag, next)
-                                },
+                            InteractiveAxisSlider(
+                                key = "${font.id}:${axis.tag}",
+                                current = current,
+                                minimum = minimum,
+                                maximum = maximum,
+                                isWeight = isWeight,
+                                enabled = enabled,
                                 interactionSource = sliderInteraction,
-                                enabled = enabled && maximum > minimum,
-                                valueRange = minimum..maximum,
-                                steps = if (isWeight && maximum > minimum) {
-                                    (((maximum - minimum) / 10f).roundToInt() - 1).coerceAtLeast(0)
-                                } else 0,
+                                dragging = dragging,
+                                onValueChange = { onAxis(axis.tag, it) },
                             )
                             Row(Modifier.fillMaxWidth()) {
                                 Text(fontAxisValueLabel(minimum), color = tokens.textSecondary, fontSize = 12.sp)
@@ -292,6 +266,94 @@ internal fun MiuixStudioAxisControls(
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 10.dp),
                     color = tokens.textSecondary,
                     fontSize = 12.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun InteractiveAxisSlider(
+    key: String,
+    current: Float,
+    minimum: Float,
+    maximum: Float,
+    isWeight: Boolean,
+    enabled: Boolean,
+    interactionSource: MutableInteractionSource,
+    dragging: Boolean,
+    onValueChange: (Float) -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    var lastHapticWeight by remember(key) { mutableStateOf<Int?>(null) }
+    val range = (maximum - minimum).coerceAtLeast(.0001f)
+    val fraction = ((current - minimum) / range).coerceIn(0f, 1f)
+    val scheme = MaterialTheme.colorScheme
+
+    BoxWithConstraints(
+        modifier = Modifier.fillMaxWidth().height(72.dp),
+    ) {
+        val bubbleWidth = 54.dp
+        val haloSize = 32.dp
+        val bubbleX = (maxWidth - bubbleWidth) * fraction
+        val haloX = (maxWidth - haloSize) * fraction
+
+        if (dragging) {
+            Box(
+                modifier = Modifier
+                    .offset(x = haloX, y = 32.dp)
+                    .size(haloSize)
+                    .background(scheme.primary.copy(alpha = .14f), CircleShape),
+            )
+        }
+
+        Slider(
+            value = current,
+            onValueChange = { raw ->
+                val magnetic = if (isWeight) standardWeightSnap(raw, minimum, maximum) else null
+                val next = when {
+                    magnetic != null -> magnetic.toFloat()
+                    isWeight -> ((raw / 10f).roundToInt() * 10).toFloat().coerceIn(minimum, maximum)
+                    else -> raw.coerceIn(minimum, maximum)
+                }
+                if (magnetic != null && lastHapticWeight != magnetic) {
+                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    lastHapticWeight = magnetic
+                } else if (magnetic == null && lastHapticWeight != null &&
+                    abs(raw - lastHapticWeight!!.toFloat()) > 22f
+                ) {
+                    lastHapticWeight = null
+                }
+                onValueChange(next)
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 24.dp),
+            interactionSource = interactionSource,
+            enabled = enabled && maximum > minimum,
+            valueRange = minimum..maximum,
+            steps = if (isWeight && maximum > minimum) {
+                (((maximum - minimum) / 10f).roundToInt() - 1).coerceAtLeast(0)
+            } else 0,
+        )
+
+        AnimatedVisibility(
+            visible = dragging,
+            modifier = Modifier.offset(x = bubbleX),
+            enter = fadeIn(tween(90)),
+            exit = fadeOut(tween(90)),
+        ) {
+            Surface(
+                modifier = Modifier.width(bubbleWidth),
+                shape = RoundedCornerShape(14.dp),
+                color = scheme.primary,
+                contentColor = scheme.onPrimary,
+                shadowElevation = 5.dp,
+            ) {
+                Text(
+                    fontAxisValueLabel(current),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
             }
         }
