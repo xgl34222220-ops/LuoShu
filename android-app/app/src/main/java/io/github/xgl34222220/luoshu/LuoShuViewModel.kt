@@ -149,6 +149,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     private var refreshJob: Job? = null
     private var logsJob: Job? = null
     private var mixConfigJob: Job? = null
+    private var mixConfigLoaded = false
     private val foreground = MutableStateFlow(true)
     private var pendingForceRefresh = false
     private var prewarmRequested = false
@@ -378,9 +379,14 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    fun refreshMixConfig() {
-        if (mixState.loading || mixState.busy) return
-        mixState = mixState.copy(loading = true, error = "")
+    fun ensureMixConfig() {
+        if (mixConfigLoaded || mixState.busy || mixConfigJob?.isActive == true) return
+        refreshMixConfig(showLoading = false)
+    }
+
+    fun refreshMixConfig(showLoading: Boolean = true) {
+        if (mixState.busy || mixConfigJob?.isActive == true) return
+        if (showLoading) mixState = mixState.copy(loading = true, error = "")
         mixConfigJob?.cancel()
         mixConfigJob = viewModelScope.launch {
             val result = RootShell.exec(
@@ -395,6 +401,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 val cjkWeight = data.optInt("cjkWeight", mixState.cjkWeight).coerceIn(1, 1000)
                 val latinWeight = data.optInt("latinWeight", mixState.latinWeight).coerceIn(1, 1000)
                 val digitWeight = data.optInt("digitWeight", mixState.digitWeight).coerceIn(1, 1000)
+                mixConfigLoaded = true
                 mixState = mixState.copy(
                     loading = false,
                     enabled = data.optBoolean("enabled", false),
