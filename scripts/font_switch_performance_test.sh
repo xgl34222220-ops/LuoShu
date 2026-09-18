@@ -30,6 +30,8 @@ _status_body="$(awk '/^status_json\(\)/,/^}/' "$ROOT/common/app_bridge.sh")"
 ! printf '%s\n' "$_status_body" | grep -q 'luoshu_text_reboot_reconcile'
 grep -q 'runningSwitchTask' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 grep -q 'adoptRunningSwitch' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
+grep -q 'timeoutMs = 8_000L' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
+grep -q 'kill -0 "$_lfla_pid"' "$ROOT/common/font_switch_lock.sh"
 ! grep -q 'if (parsed.installed) requestFontPrewarm()' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 ! grep -q 'if (snapshot.installed) requestFontPrewarm()' \
