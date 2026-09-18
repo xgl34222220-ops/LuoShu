@@ -175,14 +175,20 @@ internal fun LuoShuAppShell(
     }
     LaunchedEffect(page) {
         when (page) {
-            AppPage.Home -> features.refreshSystemWeight()
             AppPage.Library -> viewModel.ensureFonts()
             AppPage.Studio -> {
                 viewModel.ensureFonts()
                 viewModel.refreshMixConfig()
             }
             AppPage.Logs -> viewModel.refreshLogs()
-            AppPage.Settings -> Unit
+            AppPage.Home, AppPage.Settings -> Unit
+        }
+    }
+    LaunchedEffect(page, viewModel.snapshot.loading) {
+        // The mandatory status request gets the root shell first. System weight
+        // is secondary and is read only after Home has a usable snapshot.
+        if (page == AppPage.Home && !viewModel.snapshot.loading) {
+            features.refreshSystemWeight()
         }
     }
     LaunchedEffect(page) {
@@ -195,8 +201,10 @@ internal fun LuoShuAppShell(
     val homeActions = remember(viewModel, features) {
         HomeActions(
             refresh = {
+                // Status refresh should stay a single cheap root request. Weight
+                // state changes only through its own control and does not need to
+                // compete with every manual Home refresh.
                 viewModel.refresh()
-                features.refreshSystemWeight()
             },
             openFontLibrary = { page = AppPage.Library },
             openFontStudio = { page = AppPage.Studio },
