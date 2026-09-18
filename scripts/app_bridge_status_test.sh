@@ -41,6 +41,33 @@ assert data["mountFailure"] == sys.argv[1], data
 printf 'default\n' >"$CONFIG/active_font.conf"
 assert_status default system ''
 
+# Switch status must expose the worker's actual stage percent instead of the old
+# hard-coded 10%, so 22/48/76/98 stalls can be diagnosed from the UI.
+cat >"$CONFIG/switch_task.conf" <<'EOF_SWITCH_PROGRESS'
+task=switch-progress
+state=running
+font=DemoFont
+message=24% · 正在建立安全暂存区
+started=1
+finished=
+pid=
+heartbeat=1
+timeout=360
+elapsed=2
+percent=24
+bootId=test
+reused=false
+EOF_SWITCH_PROGRESS
+_progress_output=$(MODDIR="$MODULE" sh "$ROOT/common/app_bridge.sh" status)
+printf '%s' "$_progress_output" | python3 -c '
+import json, sys
+data = json.load(sys.stdin)["data"]
+assert data["taskType"] == "switch", data
+assert data["taskProgress"] == 24, data
+assert data["taskState"] == "running", data
+'
+rm -f "$CONFIG/switch_task.conf"
+
 printf 'DemoFont\n' >"$CONFIG/active_font.conf"
 printf 'state=failed\nbackend=rollback\nfailed=oplus_product/fonts\n' >"$CONFIG/self-mount.conf"
 printf 'state=failed\nmode=compatibility\nreason=self-mount-not-visible\nactiveFont=DemoFont\n' \
