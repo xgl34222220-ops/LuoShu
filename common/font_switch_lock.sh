@@ -117,21 +117,25 @@ luoshu_font_lock_active() {
             { luoshu_font_lock_recent_token "$_lfla_path" && return 0; return 1; }
         [ "$_lfla_saved_boot" = "$_lfla_live_boot" ] || return 1
     fi
+    # A token lease only protects an owner whose PID is still alive. The old
+    # fallback kept a definitely-dead owner "active" for up to 480 seconds when
+    # /proc/<pid>/stat had already disappeared, producing ghost "task running"
+    # errors after a timeout.
+    kill -0 "$_lfla_pid" 2>/dev/null || return 1
+
     _lfla_saved_start="$(luoshu_font_lock_starttime "$_lfla_path")"
     if [ -n "$_lfla_saved_start" ]; then
         case "$_lfla_saved_start" in *[!0-9]*) return 1 ;; esac
         if _lfla_live_start="$(luoshu_process_starttime "$_lfla_pid")"; then
-            if [ "$_lfla_saved_start" != "$_lfla_live_start" ]; then
-                luoshu_font_lock_recent_token "$_lfla_path" && return 0
-                return 1
-            fi
-            return 0
+            [ "$_lfla_saved_start" = "$_lfla_live_start" ] && return 0
+            return 1
         fi
+        # PID is alive but its start-time cannot be read transiently. Only this
+        # narrow case may use the short identity lease as a race guard.
         luoshu_font_lock_recent_token "$_lfla_path" && return 0
         return 1
     fi
-    kill -0 "$_lfla_pid" 2>/dev/null && return 0
-    luoshu_font_lock_recent_token "$_lfla_path"
+    return 0
 }
 
 luoshu_font_lock_reap_stale() {

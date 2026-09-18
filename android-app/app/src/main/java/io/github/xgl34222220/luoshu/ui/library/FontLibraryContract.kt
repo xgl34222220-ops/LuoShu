@@ -106,7 +106,7 @@ internal fun LuoShuViewModel.toFontLibraryUiState(): FontLibraryUiState {
         snapshot.taskType == "switch" && snapshot.taskState == "failed" && it.isNotBlank()
     }.orEmpty()
     return FontLibraryUiState(
-        loading = fontLoading || fontRefreshing,
+        loading = fontLoading,
         operationBusy = operationBusy || mixState.busy,
         query = searchQuery,
         error = fontError.ifBlank { failedSwitchMessage },

@@ -7,7 +7,9 @@ alias is replaced, so neither iteration order nor a second partition changes inp
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -17,6 +19,7 @@ import tempfile
 
 from fontTools.ttLib import TTFont
 from fontTools import subset
+from device_font_template import inspect_font
 from font_metrics_normalize import _device_build_key, _pick_face, _promote_os2_for_typo_metrics
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
@@ -24,6 +27,21 @@ from hyperos_physical_policy import preserved_dynamic_alias, safe_physical_font_
 
 PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
          "my_product", "hw_product", "cust")
+
+TEMPLATE_SCHEMA = "device-font-template-v1"
+TEMPLATE_CAPTURE_REVISION = 2
+BASELINE_SHIFT_LIMIT_RATIO = 0.22
+BASELINE_CACHE_SCHEMA = "hyperos-baseline-v1"
+SLOT_CACHE_SCHEMA = "hyperos-slot-v1"
+SLOT_CACHE_MAX_BYTES = 192 * 1024 * 1024
+SLOT_CACHE_MAX_FILES = 64
+OEM_DIRECT_PREFIXES = ("misans", "xiaomisans", "milanpro", "mitype")
+LANGUAGE_FALLBACK_TOKENS = (
+    "tc", "hant", "hk", "l3", "jp", "kr", "japanese", "korean",
+    "arabic", "thai", "lao", "tibetan", "myanmar", "khmer",
+    "devanagari", "gurmukhi", "bengali", "tamil", "telugu",
+    "malayalam", "gujarati", "kannada",
+)
 
 
 def weight_for_name(name: str) -> int:
@@ -71,6 +89,449 @@ def read_inventory(module: Path) -> dict:
         return data
     except (OSError, ValueError, AttributeError):
         return {}
+
+
+def read_trusted_template(module: Path) -> dict:
+    """Return the frozen stock glyph template only when its trust marker is intact."""
+    try:
+        state = {}
+        for line in (module / 'config/device-font-template.state').read_text(encoding='utf-8').splitlines():
+            if '=' in line:
+                key, value = line.split('=', 1)
+                state[key.strip()] = value.strip()
+        data = json.loads((module / 'config/device-font-template.json').read_text(encoding='utf-8'))
+        if (state.get('state') != 'trusted' or
+                state.get('captureRevision') != str(TEMPLATE_CAPTURE_REVISION) or
+                data.get('schema') != TEMPLATE_SCHEMA or
+                int(data.get('captureRevision', 0)) != TEMPLATE_CAPTURE_REVISION):
+            return {}
+        return data
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {}
+
+
+def _template_slot(template: dict, logical: str) -> dict:
+    """Find the exact stock file that backed a logical physical slot."""
+    exact = []
+    basename = Path(logical).name
+    for slot in template.get('slots') or []:
+        if not isinstance(slot, dict):
+            continue
+        resolved = str(slot.get('resolvedPath') or '')
+        if resolved == logical:
+            exact.append(slot)
+    if exact:
+        exact.sort(key=lambda slot: (0 if 'global-ui' in set(slot.get('roles') or []) else 1,
+                                     abs(int(slot.get('weight') or 400) - weight_for_name(basename))))
+        return exact[0]
+    return {}
+
+
+def _probe_value(profile: dict, name: str) -> dict:
+    probes = profile.get('probes') if isinstance(profile.get('probes'), dict) else {}
+    value = probes.get(name)
+    return value if isinstance(value, dict) else {}
+
+
+def _probe_has_bounds(probe: dict) -> bool:
+    try:
+        return (int(probe.get('hits') or 0) > 0 and
+                float(probe['yMax']) > float(probe['yMin']))
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
+def _oem_direct_full_coverage_slot(logical: str) -> bool:
+    """Known HyperOS physical aliases opened directly by launcher/SystemUI.
+
+    Language-specific fallback families are deliberately excluded. Replacing
+    MiSansTC/L3/etc with one arbitrary user donor removes characters that the
+    ROM intentionally keeps in dedicated fallback fonts.
+    """
+    stem = Path(logical).stem.lower()
+    if stem.isdigit() and stem in {'100', '200', '300', '350', '400', '500', '600', '700', '800', '900'}:
+        return True
+    if any(token in stem for token in LANGUAGE_FALLBACK_TOKENS):
+        return False
+    return stem.startswith(OEM_DIRECT_PREFIXES)
+
+
+def _inventory_proven_ui_slot(data: dict, logical: str) -> bool:
+    """Trust current-ROM XML UI membership over a hard-coded filename list."""
+    slot = (data.get('slots') or {}).get(logical, {})
+    if logical == data.get('mainSlotPath'):
+        return True
+    source = str(slot.get('source') or '')
+    families = [str(value).strip().lower().replace('_', '-')
+                for value in slot.get('families', []) if str(value).strip()]
+    if slot.get('uiEligible') is True:
+        return True
+    if source in {'xml', 'xml-alias'}:
+        return any(family.startswith((
+            'sans-serif', 'system-ui', 'system-sans', 'roboto', 'google-sans',
+            'googlesans', 'mi-sans', 'misans', 'xiaomi-sans', 'xiaomisans',
+        )) for family in families)
+    return False
+
+
+def _logical_parts(logical: str) -> tuple[str, str] | None:
+    path = Path(logical)
+    parts = path.parts
+    if len(parts) != 4 or parts[0] != '/' or parts[2] != 'fonts':
+        return None
+    partition, name = parts[1], parts[3]
+    if partition not in PARTS or Path(name).name != name or not name.endswith(('.ttf', '.otf')):
+        return None
+    return partition, name
+
+
+def _inventory_targets(data: dict) -> list[str]:
+    """Return exact current-ROM UI slots instead of a cartesian filename scan."""
+    selected = []
+    for logical, slot in sorted((data.get('slots') or {}).items()):
+        parsed = _logical_parts(str(logical))
+        if parsed is None:
+            continue
+        _partition, name = parsed
+        if _inventory_proven_ui_slot(data, str(logical)):
+            selected.append(str(logical))
+            continue
+        if _oem_direct_full_coverage_slot(str(logical)):
+            selected.append(str(logical))
+            continue
+        # Clock/mono aliases are direct UI consumers but are intentionally
+        # handled only when the inventory already identified them as actual
+        # replaceable slots.
+        label = ' '.join([name, *slot.get('families', [])]).lower()
+        if any(token in label for token in ('miclock', 'androidclock', 'clockopia')) and safe_physical_font_name(name):
+            selected.append(str(logical))
+    return selected
+
+
+def _outline_baseline_slot(data: dict, logical: str) -> bool:
+    """Only the CJK-bearing primary OEM face gets an outline translation.
+
+    Latin UI, clock and mono aliases keep the donor outlines untouched and use
+    their own stock line contracts. Applying the MiSans CJK visual shift to
+    Roboto/GoogleSans was a cross-family baseline error that showed up as QQ /
+    browser / numeric text moving even when the main Chinese UI improved.
+    """
+    slot = (data.get('slots') or {}).get(logical, {})
+    if _specialized_slot(logical, slot):
+        return False
+    name = Path(logical).name.lower()
+    if 'latin' in name or _latin_ui_slot(logical, slot):
+        return False
+    coverage = slot.get('metrics', {}).get('coverage')
+    if logical == data.get('mainSlotPath'):
+        return True
+    if name in {'misansvf.ttf', 'xiaomisansvf.ttf', 'milanprovf.ttf'}:
+        return True
+    if _oem_direct_full_coverage_slot(logical):
+        return bool(valid_coverage(coverage) and _stock_has_cjk_ideographs(coverage))
+    return False
+
+
+def _canonical_baseline_target(template: dict, data: dict) -> str:
+    """Choose one ROM visual baseline for every donor rewrite.
+
+    Rewriting a large CJK donor once per physical alias is both unnecessary and
+    extremely slow. A font's baseline is intrinsic to the donor; slot-specific
+    hhea/OS2/head contracts are applied later without touching outlines.
+    """
+    slots = data.get('slots') if isinstance(data.get('slots'), dict) else {}
+    main = str(data.get('mainSlotPath') or '')
+    candidates = []
+
+    def score(logical: str) -> tuple:
+        entry = slots.get(logical, {})
+        coverage = entry.get('metrics', {}).get('coverage') if isinstance(entry, dict) else None
+        has_han = bool(valid_coverage(coverage) and _stock_has_cjk_ideographs(coverage))
+        name = Path(logical).name.lower()
+        return (
+            0 if has_han and _oem_direct_full_coverage_slot(logical) else
+            1 if has_han else
+            2 if _oem_direct_full_coverage_slot(logical) else
+            3 if logical == main else 4,
+            0 if name.startswith('misansvf') else 1,
+            logical,
+        )
+
+    seen = set()
+    for slot in template.get('slots') or []:
+        if not isinstance(slot, dict):
+            continue
+        logical = str(slot.get('resolvedPath') or '')
+        if not logical or logical in seen:
+            continue
+        seen.add(logical)
+        font = slot.get('font') if isinstance(slot.get('font'), dict) else {}
+        if not font:
+            continue
+        candidates.append(logical)
+
+    if main and main in candidates:
+        entry = slots.get(main, {})
+        coverage = entry.get('metrics', {}).get('coverage') if isinstance(entry, dict) else None
+        if valid_coverage(coverage) and _stock_has_cjk_ideographs(coverage):
+            return main
+    if candidates:
+        return min(candidates, key=score)
+    return main
+
+
+def _baseline_shift(template: dict, logical: str, source_profile: dict) -> tuple[int, str, str]:
+    """Align real glyph ink to the ROM's frozen visual baseline without scaling shapes."""
+    slot = _template_slot(template, logical)
+    target = slot.get('font') if isinstance(slot.get('font'), dict) else {}
+    if not target:
+        return 0, '', 'stock-probe-unavailable'
+    target_metrics = target.get('metrics') if isinstance(target.get('metrics'), dict) else {}
+    source_metrics = source_profile.get('metrics') if isinstance(source_profile.get('metrics'), dict) else {}
+    try:
+        target_upem = float(target_metrics['unitsPerEm'])
+        source_upem = float(source_metrics['unitsPerEm'])
+        if target_upem <= 0 or source_upem <= 0:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        return 0, '', 'invalid-probe-upem'
+
+    roles = set(slot.get('roles') or [])
+    candidates = []
+    if 'clock' in roles or 'mono' in roles:
+        candidates.extend((('digits', 'center'), ('latinCap', 'bottom')))
+    elif _oem_direct_full_coverage_slot(logical):
+        # CJK baseline is defined by the ideograph bottom relative to y=0.
+        # Centering differently sized CJK designs can leave the entire face
+        # visibly high/low even when its line box matches MiSans.
+        candidates.extend((('cjk', 'bottom'), ('digits', 'bottom'), ('latinCap', 'bottom')))
+    else:
+        candidates.extend((('latinCap', 'bottom'), ('digits', 'bottom'), ('cjk', 'center')))
+
+    scale = source_upem / target_upem
+    for name, anchor in candidates:
+        stock_probe = _probe_value(target, name)
+        source_probe = _probe_value(source_profile, name)
+        if not (_probe_has_bounds(stock_probe) and _probe_has_bounds(source_probe)):
+            continue
+        try:
+            if anchor == 'center':
+                target_anchor = (float(stock_probe['yMin']) + float(stock_probe['yMax'])) / 2.0
+                source_anchor = (float(source_probe['yMin']) + float(source_probe['yMax'])) / 2.0
+            else:
+                target_anchor = float(stock_probe['yMin'])
+                source_anchor = float(source_probe['yMin'])
+            raw = target_anchor * scale - source_anchor
+        except (KeyError, TypeError, ValueError):
+            continue
+        limit = source_upem * BASELINE_SHIFT_LIMIT_RATIO
+        if not math.isfinite(raw):
+            continue
+        if abs(raw) > limit:
+            return 0, name, 'unsafe-probe-shift'
+        shift = int(round(raw))
+        return (0 if abs(shift) < 2 else shift), name, 'stock-probe'
+    return 0, '', 'shared-probe-missing'
+
+
+def _source_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _cached_source_digest(path: Path, digest_cache: dict) -> str:
+    stat = path.stat()
+    identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    digest = digest_cache.get(identity)
+    if digest is None:
+        digest = _source_sha256(path)
+        digest_cache[identity] = digest
+    return digest
+
+
+def _codepoint_digest(values) -> str:
+    digest = hashlib.sha256()
+    for value in sorted(int(item) for item in values):
+        digest.update(struct.pack('>I', value))
+    return digest.hexdigest()
+
+
+def _slot_cache_key(
+    source_digest: str,
+    source_face: int,
+    shift_y: int,
+    contract: tuple,
+    routing,
+    punctuation,
+    align_bottom: bool,
+    target_weight: int,
+) -> str:
+    descriptor = {
+        'schema': SLOT_CACHE_SCHEMA,
+        'source': source_digest,
+        'face': int(source_face),
+        'shiftY': int(shift_y),
+        'contract': contract,
+        'routing': _codepoint_digest(routing or ()),
+        'punctuation': _codepoint_digest(punctuation or ()),
+        'alignBottom': bool(align_bottom),
+        'targetWeight': int(target_weight),
+    }
+    return hashlib.sha256(
+        json.dumps(descriptor, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode('utf-8')
+    ).hexdigest()
+
+
+def _slot_cache_load(module: Path, key: str) -> tuple[Path, dict] | None:
+    cache_dir = module / 'cache/hyperos-slots'
+    font = cache_dir / f'{key}.font'
+    meta = cache_dir / f'{key}.json'
+    try:
+        if not font.is_file() or font.stat().st_size < 12 or not meta.is_file():
+            return None
+        report = json.loads(meta.read_text(encoding='utf-8'))
+        if report.get('schema') != SLOT_CACHE_SCHEMA:
+            return None
+        os.utime(font, None)
+        os.utime(meta, None)
+        return font, dict(report.get('report') or {})
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def _slot_cache_store(module: Path, key: str, source: Path, report: dict) -> Path:
+    cache_dir = module / 'cache/hyperos-slots'
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    font = cache_dir / f'{key}.font'
+    meta = cache_dir / f'{key}.json'
+    temp_font = cache_dir / f'.{key}.{os.getpid()}.font.tmp'
+    temp_meta = cache_dir / f'.{key}.{os.getpid()}.json.tmp'
+    temp_font.unlink(missing_ok=True)
+    temp_meta.unlink(missing_ok=True)
+    try:
+        try:
+            os.link(source, temp_font)
+        except OSError:
+            shutil.copyfile(source, temp_font)
+        os.chmod(temp_font, 0o644)
+        temp_meta.write_text(json.dumps({
+            'schema': SLOT_CACHE_SCHEMA,
+            'report': report,
+        }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+        os.chmod(temp_meta, 0o644)
+        os.replace(temp_font, font)
+        os.replace(temp_meta, meta)
+        return font
+    finally:
+        temp_font.unlink(missing_ok=True)
+        temp_meta.unlink(missing_ok=True)
+
+
+def _prune_slot_cache(module: Path) -> None:
+    cache_dir = module / 'cache/hyperos-slots'
+    try:
+        fonts = [path for path in cache_dir.glob('*.font') if path.is_file()]
+        entries = []
+        total = 0
+        for font in fonts:
+            try:
+                stat = font.stat()
+            except OSError:
+                continue
+            total += stat.st_size
+            entries.append((stat.st_mtime_ns, stat.st_size, font))
+        entries.sort()
+        while entries and (len(entries) > SLOT_CACHE_MAX_FILES or total > SLOT_CACHE_MAX_BYTES):
+            _mtime, size, font = entries.pop(0)
+            key = font.stem
+            font.unlink(missing_ok=True)
+            (cache_dir / f'{key}.json').unlink(missing_ok=True)
+            total -= size
+    except OSError:
+        return
+
+
+def persistent_baseline_source(
+    module: Path,
+    source: Path,
+    shift_y: int,
+    digest_cache: dict,
+) -> tuple[Path, dict]:
+    """Reuse a previously translated donor across separate switch requests."""
+    if not shift_y:
+        return source, {"applied": False, "reason": "zero-shift", "glyphs": 0, "cache": "none"}
+    stat = source.stat()
+    identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    digest = digest_cache.get(identity)
+    if digest is None:
+        digest = _source_sha256(source)
+        digest_cache[identity] = digest
+    face = _pick_face(source)
+    key = hashlib.sha256(
+        f"{BASELINE_CACHE_SCHEMA}|{digest}|{face}|{shift_y}".encode("utf-8")
+    ).hexdigest()
+    cache_dir = module / "cache/hyperos-baseline"
+    cached = cache_dir / f"{key}.font"
+    try:
+        if cached.is_file() and cached.stat().st_size >= 12:
+            return cached, {"applied": True, "reason": "stock-probe", "glyphs": 0, "cache": "hit"}
+    except OSError:
+        pass
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    temporary = cache_dir / f".{key}.{os.getpid()}.tmp"
+    temporary.unlink(missing_ok=True)
+    try:
+        produced, report = shift_glyf_baseline(source, temporary, shift_y)
+        if produced == temporary and report.get("applied") and temporary.is_file():
+            os.replace(temporary, cached)
+            os.chmod(cached, 0o644)
+            return cached, {**report, "cache": "miss"}
+        return source, {**report, "cache": "unsupported"}
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def shift_glyf_baseline(source: Path, output: Path, shift_y: int) -> tuple[Path, dict]:
+    """Translate TrueType base outlines once; composites inherit the same shift.
+
+    This is intentionally a pure translation. Widths, hinting, gvar deltas and
+    glyph shapes stay unchanged. CFF/CFF2 keeps the metrics-only path until a
+    similarly lossless global translation is available.
+    """
+    if not shift_y:
+        return source, {'applied': False, 'reason': 'zero-shift', 'glyphs': 0}
+    face = _pick_face(source)
+    options = {'fontNumber': face} if face >= 0 else {}
+    with TTFont(source, lazy=False, recalcBBoxes=True, recalcTimestamp=False, **options) as font:
+        if 'glyf' not in font:
+            return source, {'applied': False, 'reason': 'non-glyf-source', 'glyphs': 0}
+        glyf = font['glyf']
+        changed = 0
+        for glyph_name in font.getGlyphOrder():
+            glyph = glyf[glyph_name]
+            try:
+                glyph.expand(glyf)
+            except Exception:
+                continue
+            if getattr(glyph, 'numberOfContours', 0) <= 0:
+                continue
+            coordinates = getattr(glyph, 'coordinates', None)
+            if coordinates is None:
+                continue
+            coordinates.translate((0, shift_y))
+            coordinates.toInt()
+            glyph.recalcBounds(glyf)
+            changed += 1
+        if not changed:
+            return source, {'applied': False, 'reason': 'no-simple-outlines', 'glyphs': 0}
+        output.parent.mkdir(parents=True, exist_ok=True)
+        font.save(output, reorderTables=False)
+    os.chmod(output, 0o644)
+    return output, {'applied': True, 'reason': 'stock-probe', 'glyphs': changed}
 
 
 def contract_for_slot(data: dict, logical: str) -> tuple:
@@ -193,7 +654,8 @@ def compact_routed_source(source: Path, output: Path, routing: frozenset[int],
 def write_metrics(source: Path, output: Path, contract: tuple,
                   cjk_fallback_codepoints: frozenset[int] | None = None,
                   stock_cjk_punctuation: frozenset[int] = frozenset(), *,
-                  align_bitmap_bottom: bool = False) -> dict:
+                  align_bitmap_bottom: bool = False,
+                  target_weight: int = 400) -> dict:
     # lazy + recalcBBoxes=False retains glyf/CFF/gvar as raw tables. Loading glyph
     # bounds just to change hhea/OS2 used to recompile entire CJK fonts per slot.
     face = _pick_face(source)
@@ -215,6 +677,17 @@ def write_metrics(source: Path, output: Path, contract: tuple,
         (os2.sTypoAscender, os2.sTypoDescender, os2.sTypoLineGap,
          os2.usWinAscent, os2.usWinDescent) = values[3:]
         os2.fsSelection = (os2.fsSelection & ~128) | (128 if contract[9] else 0)
+        target_weight = max(1, min(1000, int(target_weight or 400)))
+        os2.usWeightClass = target_weight
+        if target_weight >= 700:
+            os2.fsSelection = (os2.fsSelection | (1 << 5)) & ~(1 << 6)
+            head.macStyle = int(getattr(head, 'macStyle', 0)) | 1
+        elif target_weight == 400:
+            os2.fsSelection = (os2.fsSelection | (1 << 6)) & ~(1 << 5)
+            head.macStyle = int(getattr(head, 'macStyle', 0)) & ~1
+        else:
+            os2.fsSelection &= ~((1 << 5) | (1 << 6))
+            head.macStyle = int(getattr(head, 'macStyle', 0)) & ~1
         source_frame = (int(head.yMin), int(head.yMax))
         if contract[10] is not None:
             frame = tuple(round(v * scale) for v in contract[10])
@@ -372,6 +845,8 @@ def _cjk_routing(data: dict, logical: str, fallback: frozenset[int]) -> tuple:
         return None, frozenset(), 'stock-coverage-refresh-pending'
     if _specialized_slot(logical, slot):
         return None, frozenset(), 'specialized-slot'
+    if _oem_direct_full_coverage_slot(logical):
+        return None, frozenset(), 'oem-direct-full-coverage'
     if _stock_has_cjk_ideographs(coverage):
         return None, frozenset(), 'stock-han-slot'
     if not coverage['hasLatin'] or not _latin_ui_slot(logical, slot):
@@ -381,39 +856,68 @@ def _cjk_routing(data: dict, logical: str, fallback: frozenset[int]) -> tuple:
     return fallback, frozenset(coverage['cjkPunctuation']), 'stock-latin-primary'
 
 
-def build(module: Path, stage: Path, names: list[str]) -> dict:
+def build(module: Path, stage: Path, names: list[str], *, inventory_ui: bool = False) -> dict:
     if stage.resolve() == (module / '.luoshu-payload').resolve():
         raise ValueError('拒绝修改本次启动正在使用的字体负载')
     fonts = stage / 'system/fonts'
     data = read_inventory(module)
+    template = read_trusted_template(module)
     jobs = []
     preserved_aliases = []
     excluded_aliases = []
-    for part in PARTS:
-        root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
-        staged_fonts = stage / part / 'fonts'
-        if staged_fonts.is_dir():
-            for alias in staged_fonts.iterdir():
-                if (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
-                        and alias.suffix in ('.ttf', '.otf')
-                        and not safe_physical_font_name(alias.name)):
-                    excluded_aliases.append(alias)
-        for name in dict.fromkeys(names):
-            if Path(name).name != name or not name.endswith(('.ttf', '.otf')):
-                raise ValueError(f'不安全的字体槽位：{name}')
-            logical = f'/{part}/fonts/{name}'
-            if not safe_physical_font_name(name):
-                # Never let a stale inventory/target list recreate obsolete
-                # language aliases. Removing only its isolated staged alias
-                # exposes the untouched ROM font when the payload is mounted.
-                excluded_aliases.append(stage / part / 'fonts' / name)
+
+    # Framework-managed dynamic aliases must be removed from the staged payload
+    # even when they are not part of the exact inventory UI target set. Leaving
+    # an old regular file here freezes Xiaomi's runtime locale/theme route.
+    for logical in (data.get('preservedDynamicAliases') or {}):
+        if not preserved_dynamic_alias(data, str(logical)):
+            continue
+        parsed = _logical_parts(str(logical))
+        if parsed is None:
+            continue
+        part, name = parsed
+        preserved_aliases.append(stage / part / 'fonts' / name)
+
+    if inventory_ui:
+        selectors = _inventory_targets(data)
+        for logical in selectors:
+            parsed = _logical_parts(logical)
+            if parsed is None:
                 continue
+            part, name = parsed
+            root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
+            dest = stage / part / 'fonts' / name
             if preserved_dynamic_alias(data, logical):
-                preserved_aliases.append(stage / part / 'fonts' / name)
+                preserved_aliases.append(dest)
                 continue
-            if (root / name).exists():
-                jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name,
-                             contract_for_slot(data, logical)))
+            if not (root / name).exists():
+                continue
+            jobs.append((pick_source(fonts, name), dest, contract_for_slot(data, logical)))
+    else:
+        # Legacy compatibility mode for old tests/ROMs without a trustworthy
+        # inventory. New HyperOS builds must use exact inventory UI slots.
+        for part in PARTS:
+            root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
+            staged_fonts = stage / part / 'fonts'
+            if staged_fonts.is_dir():
+                for alias in staged_fonts.iterdir():
+                    if (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
+                            and alias.suffix in ('.ttf', '.otf')
+                            and not safe_physical_font_name(alias.name)):
+                        excluded_aliases.append(alias)
+            for name in dict.fromkeys(names):
+                if Path(name).name != name or not name.endswith(('.ttf', '.otf')):
+                    raise ValueError(f'不安全的字体槽位：{name}')
+                logical = f'/{part}/fonts/{name}'
+                if not safe_physical_font_name(name):
+                    excluded_aliases.append(stage / part / 'fonts' / name)
+                    continue
+                if preserved_dynamic_alias(data, logical):
+                    preserved_aliases.append(stage / part / 'fonts' / name)
+                    continue
+                if (root / name).exists():
+                    jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name,
+                                 contract_for_slot(data, logical)))
     if not jobs:
         raise ValueError('没有找到当前 ROM 的 HyperOS 字体目标')
     cjk_fallback = _staged_cjk_fallback(data, jobs, stage)
@@ -422,52 +926,171 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     outputs = Path(tempfile.mkdtemp(prefix='hyperos-metrics-', dir=store))
     cache = {}
     compact_sources = {}
+    shifted_sources = {}
+    source_digests = {}
+    source_profiles = {}
+    source_baselines = {}
+    canonical_baseline_target = _canonical_baseline_target(template, data)
     output_reports = {}
     # Generate every distinct source/contract before replacing even one alias.
     # Thus subsequent sources cannot accidentally refer to earlier outputs.
     prepared = []
     slot_report = []
+    failed_aliases = []
+    slot_errors = []
+    success_logicals = set()
     fallback = 0
     try:
         for source, dest, contract in jobs:
-            stat = source.stat()
             logical = '/' + dest.relative_to(stage).as_posix()
             routing, stock_punctuation, routing_reason = _cjk_routing(data, logical, cjk_fallback)
             if contract[-1] != 'stock':
                 routing, stock_punctuation, routing_reason = None, frozenset(), 'invalid-stock-contract'
             align_bottom = bitmap_bottom_slot(data, logical, contract)
-            key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract,
-                   routing, stock_punctuation, align_bottom)
-            if key not in cache:
-                output = outputs / f'{len(cache)}.font'
-                metric_source, compact_removed = source, 0
-                if routing:
-                    source_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
-                                  routing, stock_punctuation)
-                    if source_key not in compact_sources:
-                        compact_sources[source_key] = compact_routed_source(
-                            source, outputs / f'source-{len(compact_sources)}.font',
-                            routing, stock_punctuation)
-                    metric_source, compact_removed = compact_sources[source_key]
-                output_reports[key] = write_metrics(metric_source, output, contract, routing, stock_punctuation,
-                                                    align_bitmap_bottom=align_bottom)
-                output_reports[key]['removedCjkMappings'] += compact_removed
-                cache[key] = output
-            prepared.append((cache[key], dest))
-            fallback += contract[-1] == 'fallback'
-            slot_report.append({'slot': '/' + dest.relative_to(stage).as_posix(),
-                                'metricsSource': contract[-1],
-                                'referenceUpem': contract[0],
-                                'hhea': list(contract[1:4]),
-                                'typo': list(contract[4:7]),
-                                'win': list(contract[7:9]),
-                                'useTypoMetrics': contract[9],
-                                'cjkRoutingSource': 'stock-fallback' if routing else 'source',
-                                'cjkRoutingReason': routing_reason,
-                                **output_reports[key]})
+            try:
+                stat = source.stat()
+                source_digest = _cached_source_digest(source, source_digests)
+                profile_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+                if profile_key not in source_profiles:
+                    try:
+                        source_profiles[profile_key] = inspect_font(source, _pick_face(source), False)
+                    except Exception:
+                        source_profiles[profile_key] = {}
+                if profile_key not in source_baselines:
+                    if canonical_baseline_target:
+                        source_baselines[profile_key] = _baseline_shift(
+                            template, canonical_baseline_target, source_profiles[profile_key])
+                    else:
+                        source_baselines[profile_key] = (0, '', 'stock-probe-unavailable')
+                if _outline_baseline_slot(data, logical):
+                    shift_y, shift_probe, shift_reason = source_baselines[profile_key]
+                else:
+                    shift_y, shift_probe, shift_reason = 0, '', 'slot-metrics-only'
+                target_weight = weight_for_name(dest.name)
+                key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract,
+                       routing, stock_punctuation, routing_reason, align_bottom, shift_y, target_weight)
+                if key not in cache:
+                    persistent_key = _slot_cache_key(
+                        source_digest, _pick_face(source), shift_y, contract,
+                        routing, stock_punctuation, align_bottom, target_weight)
+                    persistent = _slot_cache_load(module, persistent_key)
+                    if persistent is not None:
+                        cached_output, cached_report = persistent
+                        # The font bytes may be reusable across aliases whose
+                        # current routing/diagnostic classification differs.
+                        # Never inherit another slot's semantic labels.
+                        output_reports[key] = {
+                            **cached_report,
+                            'baselineShift': int(shift_y),
+                            'baselineProbe': shift_probe,
+                            'baselineReason': shift_reason,
+                            'baselineTarget': canonical_baseline_target,
+                            'effectiveCjkRoutingSource': 'stock-fallback' if routing else 'source',
+                            'effectiveCjkRoutingReason': routing_reason,
+                            'slotCache': 'hit',
+                        }
+                        cache[key] = cached_output
+                    else:
+                        output = outputs / f'{len(cache)}.font'
+
+                        # Baseline normalization is the only operation that rewrites
+                        # the whole donor outline table. Do it once on the original
+                        # source, before any Latin CJK-routing subset is produced.
+                        # Every physical alias then reuses that normalized donor.
+                        base_source = source
+                        shift_report = {'applied': False, 'reason': shift_reason, 'glyphs': 0}
+                        if shift_y:
+                            shift_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, shift_y)
+                            if shift_key not in shifted_sources:
+                                shifted_sources[shift_key] = persistent_baseline_source(
+                                    module, source, shift_y, source_digests)
+                            base_source, applied_report = shifted_sources[shift_key]
+                            shift_report = {**applied_report}
+                            if not shift_report.get('applied'):
+                                base_source = source
+                                shift_y = 0
+                                shift_reason = shift_report.get('reason', shift_reason)
+
+                        metric_source, compact_removed = base_source, 0
+                        if routing:
+                            routed_stat = base_source.stat()
+                            source_key = (routed_stat.st_dev, routed_stat.st_ino, routed_stat.st_size,
+                                          routed_stat.st_mtime_ns, routing, stock_punctuation)
+                            if source_key not in compact_sources:
+                                compact_sources[source_key] = compact_routed_source(
+                                    base_source, outputs / f'source-{len(compact_sources)}.font',
+                                    routing, stock_punctuation)
+                            metric_source, compact_removed = compact_sources[source_key]
+
+                        try:
+                            output_reports[key] = write_metrics(
+                                metric_source, output, contract, routing, stock_punctuation,
+                                align_bitmap_bottom=align_bottom, target_weight=target_weight)
+                        except Exception:
+                            if not routing:
+                                raise
+                            routing = None
+                            stock_punctuation = frozenset()
+                            routing_reason = 'routing-fallback-full-coverage'
+                            compact_removed = 0
+                            metric_source = base_source
+                            output_reports[key] = write_metrics(
+                                metric_source, output, contract, None, frozenset(),
+                                align_bitmap_bottom=align_bottom, target_weight=target_weight)
+                        output_reports[key]['removedCjkMappings'] += compact_removed
+                        output_reports[key].update({
+                            'baselineShift': int(shift_y),
+                            'baselineProbe': shift_probe,
+                            'baselineReason': shift_reason,
+                            'baselineTarget': canonical_baseline_target,
+                            'baselineGlyphs': int(shift_report.get('glyphs') or 0),
+                            'baselineCache': str(shift_report.get('cache') or 'none'),
+                            'slotCache': 'miss',
+                            'effectiveCjkRoutingSource': 'stock-fallback' if routing else 'source',
+                            'effectiveCjkRoutingReason': routing_reason,
+                        })
+                        cache[key] = _slot_cache_store(
+                            module, persistent_key, output, output_reports[key])
+                prepared.append((cache[key], dest))
+                success_logicals.add(logical)
+                fallback += contract[-1] == 'fallback'
+                slot_report.append({'slot': logical,
+                                    'metricsSource': contract[-1],
+                                    'referenceUpem': contract[0],
+                                    'hhea': list(contract[1:4]),
+                                    'typo': list(contract[4:7]),
+                                    'win': list(contract[7:9]),
+                                    'useTypoMetrics': contract[9],
+                                    'targetWeight': target_weight,
+                                    'cjkRoutingSource': output_reports[key].get(
+                                        'effectiveCjkRoutingSource',
+                                        'stock-fallback' if routing else 'source'),
+                                    'cjkRoutingReason': output_reports[key].get(
+                                        'effectiveCjkRoutingReason', routing_reason),
+                                    **{name: value for name, value in output_reports[key].items()
+                                       if not name.startswith('effectiveCjkRouting')}})
+            except Exception as error:
+                # Keep one broken OEM alias from invalidating every working slot.
+                # Removing the staged file exposes the untouched stock font.
+                failed_aliases.append(dest)
+                slot_errors.append({'slot': logical,
+                                    'error': (str(error) or error.__class__.__name__)[:240]})
+
+        if not prepared:
+            first = slot_errors[0]['error'] if slot_errors else '没有可生成的字体槽位'
+            raise ValueError(f'所有 HyperOS 字体槽位均处理失败：{first}')
+
+        core = {str(data.get('mainSlotPath') or '')}
+        core.update('/' + dest.relative_to(stage).as_posix()
+                    for _source, dest, _contract in jobs
+                    if dest.name in {'MiSansVF.ttf', 'Roboto-Regular.ttf'})
+        core.discard('')
+        if core and not core.intersection(success_logicals):
+            raise ValueError('HyperOS 核心字体槽位全部失败，已拒绝提交不完整负载')
+
         for output, dest in prepared:
             link_copy(output, dest)
-        for alias in preserved_aliases + excluded_aliases:
+        for alias in preserved_aliases + excluded_aliases + failed_aliases:
             # Initial generic mapping creates the alias as a regular font. Its
             # absence exposes the ROM lower symlink in OverlayFS and leaves it
             # untouched in per-file bind mode. Framework changes keep working.
@@ -475,31 +1098,50 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
         report = stage / '.luoshu-metrics-report.json'
         report.write_text(json.dumps({'schema': 'luoshu-slot-metrics-v1',
                                       'slots': slot_report,
-                                      'preservedDynamicAliases': [
+                                      'slotErrors': slot_errors,
+                                      'baselineTemplate': 'trusted' if template else 'unavailable',
+                                      'targetMode': 'inventory-ui' if inventory_ui else 'legacy-names',
+                                      'preservedDynamicAliases': sorted({
                                           '/' + alias.relative_to(stage).as_posix()
-                                          for alias in preserved_aliases],
+                                          for alias in preserved_aliases}),
                                       'preservedStockAliases': sorted({
                                           '/' + alias.relative_to(stage).as_posix()
-                                          for alias in excluded_aliases if alias.parent.is_dir()})}, ensure_ascii=False), encoding='utf-8')
+                                          for alias in excluded_aliases + failed_aliases
+                                          if alias.parent.is_dir()})}, ensure_ascii=False), encoding='utf-8')
         report.chmod(0o644)
+        targets = stage / '.luoshu-hyperos-targets.list'
+        targets.write_text(''.join(f'{logical}\n' for logical in sorted(success_logicals)),
+                           encoding='utf-8')
+        targets.chmod(0o644)
+        _prune_slot_cache(module)
     finally:
         # Every prepared result has its own hard link (or copy) in the final
         # alias. Keeping these temporary names after success only enlarges
         # cached payload copies and accumulates on repeated stage completion.
         shutil.rmtree(outputs, ignore_errors=True)
-    return {'mapped': len(jobs), 'generated': len(cache), 'fallbackSlots': fallback}
+    result = {'mapped': len(prepared), 'generated': len(cache), 'fallbackSlots': fallback,
+              'targetMode': 'inventory-ui' if inventory_ui else 'legacy-names',
+              'requestedTargets': len(_inventory_targets(data)) if inventory_ui else len(set(names))}
+    if slot_errors:
+        result['skippedSlots'] = len(slot_errors)
+    return result
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('module', type=Path)
     parser.add_argument('stage', type=Path)
+    parser.add_argument('--inventory-ui', action='store_true',
+                        help='Use exact current-ROM UI slots from device_font_inventory.json')
     args = parser.parse_args()
     try:
-        report = build(args.module, args.stage, sys.stdin.read().split())
+        report = build(args.module, args.stage, sys.stdin.read().split(),
+                       inventory_ui=args.inventory_ui)
         print(json.dumps(report, ensure_ascii=False))
         if report['fallbackSlots']:
             print(f"HyperOS：{report['fallbackSlots']} 个槽位缺少有效原厂度量，使用紧凑回退；可重新扫描原厂字体", file=sys.stderr)
+        if report.get('skippedSlots'):
+            print(f"HyperOS：{report['skippedSlots']} 个非核心槽位处理异常，已保留原厂文件继续应用", file=sys.stderr)
         return 0
     except Exception as error:
         print(f'HyperOS 字体处理失败：{error}', file=sys.stderr)

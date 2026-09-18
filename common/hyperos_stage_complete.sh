@@ -30,26 +30,29 @@ type _hyperos_weight_files >/dev/null 2>&1 || exit 2
 type _hyperos_upright_ui_files >/dev/null 2>&1 || exit 2
 type _hyperos_clock_ui_files >/dev/null 2>&1 || exit 2
 
-# Enumerate the existing mapper's safe target names, then process all physical
-# slots in one Python process. Metrics failures must reach the caller.
+# HyperOS 4 / Android 15+ moves variable-font configuration toward
+# font_fallback.xml. Prefer the trusted inventory's exact current-ROM UI graph:
+# this catches new OEM filenames without replacing every language fallback file,
+# and avoids rewriting 100+ unrelated physical fonts on each switch.
 _pyroot="$REALMOD/common/python"
 _python="$_pyroot/bin/luoshu-python"
 [ -x "$_python" ] || { echo 'HyperOS 字体处理运行时不可用' >&2; exit 1; }
+
+if [ -s "$REALMOD/config/device_font_inventory.json" ]; then
+    PYTHONHOME="$_pyroot" \
+    PYTHONPATH="$REALMOD/common:$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \
+    LD_LIBRARY_PATH="$_pyroot/lib:$_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        exec "$_python" "$REALMOD/common/hyperos_metrics_batch.py" \
+            "$REALMOD" "$PAYLOAD_ROOT" --inventory-ui
+fi
+
+# Old installs without a trusted inventory keep the narrow legacy path. They do
+# not receive speculative HyperOS 4 coverage until stock scanning has completed.
 _targets=$({
-    if type _lhcc_names_for_root >/dev/null 2>&1 && type _lhcc_root_for_part >/dev/null 2>&1; then
-        # Use the boot repair mapper's exact discovery policy. Otherwise newer
-        # MiSans/XiaomiSans slots are first added at boot with another slot's metrics.
-        for _part in system system_ext product mi_ext vendor odm oem my_product hw_product cust; do
-            _root=$(_lhcc_root_for_part "$_part") || continue
-            [ -d "$_root" ] || continue
-            _lhcc_names_for_root "$_root"
-        done
-    else
-        _hyperos_core_files
-        _hyperos_weight_files
-        _hyperos_upright_ui_files
-        _hyperos_clock_ui_files
-    fi
+    _hyperos_core_files
+    _hyperos_weight_files
+    _hyperos_upright_ui_files
+    _hyperos_clock_ui_files
 } | tr ' ' '\n' | awk 'NF && !seen[$0]++')
 PYTHONHOME="$_pyroot" \
 PYTHONPATH="$REALMOD/common:$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \

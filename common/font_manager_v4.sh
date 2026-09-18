@@ -39,6 +39,12 @@ FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 
 case "${1:-}:${2:-}" in
     action:font_weight_status) ;; # A settings read must never migrate /sdcard/Fonts.
+    action:list|list:*|action:current|current:*)
+        # Font-library reads only need the current public directory. Re-running
+        # legacy /sdcard/Fonts migration and ROM detection on every pull-to-
+        # refresh can copy/scan a large library before the first JSON byte.
+        mkdir -p "$CONFIG_DIR" "$USER_FONTS_DIR" 2>/dev/null || true
+        ;;
     *)
         type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
         type check_coloros >/dev/null 2>&1 && check_coloros

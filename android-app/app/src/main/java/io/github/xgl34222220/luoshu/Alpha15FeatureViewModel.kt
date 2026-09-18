@@ -12,7 +12,7 @@ import org.json.JSONObject
 import kotlin.math.roundToInt
 
 internal data class SystemWeightState(
-    val loading: Boolean = true,
+    val loading: Boolean = false,
     val supported: Boolean = false,
     val weight: Int = 400,
     val adjustment: Int = 0,
@@ -21,7 +21,7 @@ internal data class SystemWeightState(
     val max: Int = 700,
     val step: Int = 10,
     val applying: Boolean = false,
-    val message: String = "正在读取系统字体粗细…",
+    val message: String = "",
     val error: String = "",
 )
 
@@ -68,6 +68,7 @@ internal class Alpha15FeatureViewModel : ViewModel() {
     private var weightJob: Job? = null
     private var weightRefreshJob: Job? = null
     private var lastCommittedWeight: Int? = null
+    private var systemWeightLoaded = false
 
     var systemWeight by mutableStateOf(SystemWeightState())
         private set
@@ -75,9 +76,20 @@ internal class Alpha15FeatureViewModel : ViewModel() {
     var coverage by mutableStateOf(CoverageProbeState())
         private set
 
-    fun refreshSystemWeight() {
-        if (systemWeight.applying || weightRefreshJob?.isActive == true) return
-        systemWeight = systemWeight.copy(loading = true, error = "")
+    fun ensureSystemWeight() {
+        if (systemWeightLoaded || weightRefreshJob?.isActive == true || systemWeight.applying) return
+        refreshSystemWeight(force = false)
+    }
+
+    fun refreshSystemWeight(force: Boolean = false) {
+        if ((!force && systemWeightLoaded) || systemWeight.applying || weightRefreshJob?.isActive == true) return
+        // Keep the control rendered while the root value is synchronized.
+        // A page visit must never replace the whole card with a loading shell.
+        systemWeight = systemWeight.copy(
+            loading = false,
+            message = if (systemWeightLoaded) systemWeight.message else "正在后台同步系统字体粗细…",
+            error = "",
+        )
         weightRefreshJob = viewModelScope.launch {
             val result = RootShell.exec(
                 "sh ${RootShell.quote(fontManager)} action font_weight_status",
@@ -93,6 +105,7 @@ internal class Alpha15FeatureViewModel : ViewModel() {
                 val step = data.optInt("step", 10).coerceAtLeast(1)
                 val weight = data.optInt("weight", 400).coerceIn(minimum, maximum)
                 lastCommittedWeight = weight
+                systemWeightLoaded = true
                 systemWeight = SystemWeightState(
                     loading = false,
                     supported = data.optBoolean("supported", false),
@@ -193,7 +206,7 @@ internal class Alpha15FeatureViewModel : ViewModel() {
                 val root = firstJson(result.stdout)
                 if (root.optString("status") != "ok") error(root.optString("message", "无法恢复系统字体粗细"))
                 systemWeight = systemWeight.copy(applying = false)
-                refreshSystemWeight()
+                refreshSystemWeight(force = true)
             } catch (error: Throwable) {
                 systemWeight = systemWeight.copy(
                     applying = false,

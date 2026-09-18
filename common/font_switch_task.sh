@@ -302,13 +302,20 @@ start_task() {
             write_task "$_task" failed "$_font" '无法启动独立字体切换任务' "$_started" "$(date +%s 2>/dev/null || echo 0)" '' '' '' 0 '' false 100
             printf '{"status":"error","message":"无法启动独立字体切换任务"}\n'; return 0
         fi
-        _worker=$(head -n1 "$WORKER_PID_FILE" 2>/dev/null)
     else
         ( trap '' HUP; exec sh "$0" run "$_task" "$_font" "$_started" ) </dev/null >> "$LOG_FILE" 2>&1 &
         _worker=$!
+        case "$_worker" in ''|*[!0-9]*) _worker='' ;; esac
+        if [ -n "$_worker" ]; then
+            printf '%s\n' "$_worker" > "$WORKER_PID_FILE" 2>/dev/null || true
+            printf '%s\n' "$_task" > "${WORKER_PID_FILE}.task" 2>/dev/null || true
+            current_boot_id > "${WORKER_PID_FILE}.boot" 2>/dev/null || true
+        fi
     fi
-    case "$_worker" in ''|*[!0-9]*) _worker='' ;; esac
-    write_task "$_task" running "$_font" '2% · 正在启动字体切换任务' "$_started" '' "$_worker" '' '' 0 '' false 2 || true
+
+    # The detached worker owns task state from this point. Never write "running"
+    # here: a very fast worker may already have published success/failed, and the
+    # parent used to overwrite that terminal record back to a ghost running task.
     printf '{"status":"ok","data":{"font":"%s","task":"%s","message":"任务已开始"}}\n' \
         "$(json_escape "$_font")" "$(json_escape "$_task")"
 }

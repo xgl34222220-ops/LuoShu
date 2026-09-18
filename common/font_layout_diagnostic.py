@@ -44,7 +44,11 @@ METRIC_FIELDS = {
 }
 COVERAGE_FIELDS = ("hasHan", "hasLatin", "hanCount", "latinCount", "unicodeCount", "cjkPunctuation")
 CJK_ROUTING_REASONS = {"stock-coverage-refresh-pending", "specialized-slot", "stock-han-slot",
-                       "not-latin-ui-slot", "no-staged-cjk-fallback", "stock-latin-primary"}
+                       "not-latin-ui-slot", "no-staged-cjk-fallback", "stock-latin-primary",
+                       "oem-direct-full-coverage", "routing-fallback-full-coverage"}
+BASELINE_REASONS = {"stock-probe", "stock-probe-unavailable", "invalid-probe-upem",
+                    "unsafe-probe-shift", "shared-probe-missing", "zero-shift",
+                    "non-glyf-source", "no-simple-outlines", "slot-metrics-only"}
 
 
 class BudgetExpired(BaseException):
@@ -342,7 +346,15 @@ class Collector:
                         "stock-preserved", "unproven-latin-ink-bounds", "latin-descender-would-clip",
                         "latin-ui-bottom-to-descent", "no-excess-bottom-padding"}),
                     "cjkRoutingSource": allowed_label(item.get("cjkRoutingSource"), {"stock-fallback", "source"}),
-                    "cjkRoutingReason": allowed_label(item.get("cjkRoutingReason"), CJK_ROUTING_REASONS)}
+                    "cjkRoutingReason": allowed_label(item.get("cjkRoutingReason"), CJK_ROUTING_REASONS),
+                    "baselineReason": allowed_label(item.get("baselineReason"), BASELINE_REASONS),
+                    "baselineProbe": allowed_label(item.get("baselineProbe"), {"cjk", "digits", "latinCap"})}
+                shift = item.get("baselineShift")
+                if type(shift) is int and -32768 <= shift <= 32767:
+                    result[item["slot"]]["baselineShift"] = shift
+                glyphs = item.get("baselineGlyphs")
+                if type(glyphs) is int and 0 <= glyphs <= 1000000:
+                    result[item["slot"]]["baselineGlyphs"] = glyphs
                 removed = item.get("removedCjkMappings")
                 if type(removed) is int and 0 <= removed <= 0x110000:
                     result[item["slot"]]["removedCjkMappings"] = removed

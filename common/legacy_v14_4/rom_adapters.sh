@@ -23,7 +23,11 @@ _verify_font_copy() {
         _log_step "  警告：$(basename "$f") 复制后为空或不存在，可能导致相关文字渲染异常"
         return 1
     fi
-    fsize=$(wc -c < "$f" 2>/dev/null | tr -d '[:space:]')
+    # Every HyperOS alias normally shares the same large donor inode.
+    # wc -c can stream the whole font on Android shells; repeating it for
+    # dozens of aliases turns a metadata check into hundreds of MB of I/O.
+    # File size is metadata, so use stat and never read glyph bytes here.
+    fsize=$(stat -c %s "$f" 2>/dev/null)
     case "$fsize" in ''|*[!0-9]*) fsize=0 ;; esac
     if [ "$fsize" -lt 1024 ]; then
         _log_step "  警告：$(basename "$f") 只有 ${fsize} 字节，明显小于正常字体文件，可能已损坏"
@@ -210,6 +214,32 @@ copy_as_hyperos() {
     done
     _font_store_reset "$dest_dir"
     regular_anchor=$(_font_anchor "$src" "$dest_dir" "regular") || return 1
+
+    # Foreground App switching always runs the exact stock-inventory completion
+    # immediately after this mapper. Do not first spray the donor across every
+    # legacy HyperOS filename: that duplicated work, repeatedly verified the
+    # same large inode and could pre-fill TC/L3/language fallback slots that the
+    # OS4 graph intentionally leaves to the ROM.
+    if [ "$mode" = quick ]; then
+        if [ -n "$font_family" ] && type scan_family_weights >/dev/null 2>&1; then
+            weights=$(scan_family_weights "$font_family")
+            for w in $(echo "$weights" | tr ',' ' '); do
+                case "$w" in
+                    thin) num=100 ;; extralight) num=200 ;; light) num=300 ;;
+                    regular) num=400 ;; medium) num=500 ;; semibold) num=600 ;;
+                    bold) num=700 ;; extrabold) num=800 ;; black) num=900 ;;
+                    *) num="" ;;
+                esac
+                [ -n "$num" ] || continue
+                w_file=$(get_weight_file "$font_family" "$w")
+                [ -f "$w_file" ] || continue
+                [ "$w_file" = "$src" ] && continue
+                _font_anchor "$w_file" "$dest_dir" "wght-$num" >/dev/null 2>&1 || true
+            done
+        fi
+        _log_step "  HyperOS 快速切换：仅暂存 donor，物理 UI 槽由本机库存一次生成"
+        return 0
+    fi
 
     _log_step "  正在应用用户字体（HyperOS/MIUI）..."
     bad_count=0

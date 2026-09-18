@@ -149,6 +149,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     private var refreshJob: Job? = null
     private var logsJob: Job? = null
     private var mixConfigJob: Job? = null
+    private var mixConfigLoaded = false
     private val foreground = MutableStateFlow(true)
     private var pendingForceRefresh = false
     private var prewarmRequested = false
@@ -196,8 +197,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             cachedFingerprint = cached.fingerprint
             normalizeMixSelections()
         }
+        // Loading the on-device cache must never start a root scan by itself.
+        // Library/Studio request freshness lazily when the user actually opens them.
         fontCacheReady = true
-        if (snapshot.installed) requestFontPrewarm()
     }
 
     val filteredFonts: List<FontItem>
@@ -221,18 +223,19 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
 
     fun refresh() {
         if (refreshJob?.isActive == true) return
-        snapshot = snapshot.copy(loading = true, error = "")
+        // Keep the last usable snapshot visible during manual refresh. Flipping
+        // loading back to true made every refresh look like a cold start.
+        snapshot = snapshot.copy(error = "")
         refreshJob = viewModelScope.launch {
             val result = RootShell.exec(
                 "if [ -f ${RootShell.quote(bridge)} ]; then sh ${RootShell.quote(bridge)} status; " +
                     "else printf '%s\\n' '{\"status\":\"error\",\"message\":\"请先刷入匹配的洛书模块\"}'; fi",
-                timeoutMs = 20_000L,
+                timeoutMs = 8_000L,
             )
             if (result.code != 0) {
-                snapshot = ModuleSnapshot(
+                snapshot = snapshot.copy(
                     loading = false,
-                    rootGranted = false,
-                    error = result.stderr.ifBlank { "Root 授权失败或 su 不可用" },
+                    error = result.stderr.ifBlank { "状态读取暂时失败，请重试" },
                 )
                 return@launch
             }
@@ -240,7 +243,6 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             snapshot = parsed
             rebootRequired = parsed.rebootRequired
             resumePendingTask(parsed)
-            if (parsed.installed) requestFontPrewarm()
         }
     }
 
@@ -377,9 +379,14 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    fun refreshMixConfig() {
-        if (mixState.loading || mixState.busy) return
-        mixState = mixState.copy(loading = true, error = "")
+    fun ensureMixConfig() {
+        if (mixConfigLoaded || mixState.busy || mixConfigJob?.isActive == true) return
+        refreshMixConfig(showLoading = false)
+    }
+
+    fun refreshMixConfig(showLoading: Boolean = true) {
+        if (mixState.busy || mixConfigJob?.isActive == true) return
+        if (showLoading) mixState = mixState.copy(loading = true, error = "")
         mixConfigJob?.cancel()
         mixConfigJob = viewModelScope.launch {
             val result = RootShell.exec(
@@ -394,6 +401,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 val cjkWeight = data.optInt("cjkWeight", mixState.cjkWeight).coerceIn(1, 1000)
                 val latinWeight = data.optInt("latinWeight", mixState.latinWeight).coerceIn(1, 1000)
                 val digitWeight = data.optInt("digitWeight", mixState.digitWeight).coerceIn(1, 1000)
+                mixConfigLoaded = true
                 mixState = mixState.copy(
                     loading = false,
                     enabled = data.optBoolean("enabled", false),
@@ -499,32 +507,46 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
+    private suspend fun runningSwitchTask(): JSONObject? {
+        val status = RootShell.exec(
+            "sh ${RootShell.quote(bridge)} switch_status",
+            timeoutMs = 4_000L,
+        )
+        if (status.code != 0) return null
+        val root = runCatching { firstJson(status.stdout) }.getOrNull() ?: return null
+        if (root.optString("status") != "ok") return null
+        val data = root.optJSONObject("data") ?: return null
+        val state = data.optString("state")
+        val taskId = data.optString("task")
+        return data.takeIf { taskId.isNotBlank() && state in setOf("queued", "running") }
+    }
+
+    private suspend fun adoptRunningSwitch(fontId: String): Boolean {
+        val data = runningSwitchTask() ?: return false
+        val taskId = data.optString("task")
+        operationBusy = true
+        operationMessage = data.optString("message", "正在继续字体切换任务…")
+        snapshot = snapshot.copy(
+            taskType = "switch",
+            taskId = taskId,
+            taskState = data.optString("state", "running"),
+            taskMessage = operationMessage,
+            taskProgress = data.optInt("percent", snapshot.taskProgress).coerceIn(0, 100),
+        )
+        watchSwitchTask(taskId, fontId)
+        return true
+    }
+
     fun applyFont(fontId: String) {
         if (operationBusy || mixState.busy) return
         operationBusy = true
         operationMessage = if (fontId == "default") "正在准备恢复系统字体…" else "正在验证并应用字体…"
         viewModelScope.launch {
             try {
-                if (fontId != "default") {
-                    val validation = RootShell.exec(
-                        "sh ${RootShell.quote(bridge)} validate ${RootShell.quote(fontId)}",
-                        timeoutMs = 35_000L,
-                    )
-                    if (validation.code != 0) error(validation.stderr.ifBlank { "字体验证失败" })
-                    val validationJson = firstJson(validation.stdout)
-                    if (validationJson.optString("status") != "ok" ||
-                        validationJson.optJSONObject("data")?.optBoolean("valid", true) == false
-                    ) {
-                        error(
-                            validationJson.optString(
-                                "message",
-                                validationJson.optJSONObject("data")?.optString("error", "字体文件不可用")
-                                    ?: "字体文件不可用",
-                            ),
-                        )
-                    }
-                }
-
+                // Submit immediately. The detached switch worker performs the
+                // authoritative validation inside the transaction. Running a
+                // second synchronous validation here could consume 35 seconds
+                // before the App even received a task ID.
                 val start = RootShell.exec(
                     "sh ${RootShell.quote(bridge)} switch_start ${RootShell.quote(fontId)}",
                     timeoutMs = 20_000L,
@@ -538,9 +560,15 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
-                operationMessage = error.message ?: "字体应用失败"
-                snapshot = snapshot.copy(taskState = "failed", taskMessage = operationMessage)
-                operationBusy = false
+                // The request process may time out after the detached worker was
+                // already created. Adopt that real backend task before showing a
+                // local failure or allowing a duplicate second apply.
+                val adopted = runCatching { adoptRunningSwitch(fontId) }.getOrDefault(false)
+                if (!adopted) {
+                    operationMessage = error.message ?: "字体应用失败"
+                    snapshot = snapshot.copy(taskState = "failed", taskMessage = operationMessage)
+                    operationBusy = false
+                }
             }
         }
     }
@@ -648,7 +676,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    private suspend fun watchSwitchTask(taskId: String, fontId: String) {
+    private suspend fun watchSwitchTask(taskId: String, fontId: String, recoveryDepth: Int = 0) {
         if (watchedTaskId == taskId) return
         watchedTaskId = taskId
         operationBusy = true
@@ -686,6 +714,29 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
+            // Reap a dead worker, but never turn a transport timeout into a
+            // fake terminal failure while the detached worker is still alive.
+            runCatching {
+                RootShell.exec(
+                    "sh ${RootShell.quote(bridge)} switch_reconcile",
+                    timeoutMs = 4_000L,
+                )
+            }
+            val live = if (recoveryDepth < 1) runCatching { runningSwitchTask() }.getOrNull() else null
+            val liveTaskId = live?.optString("task").orEmpty()
+            if (live != null && liveTaskId.isNotBlank()) {
+                operationMessage = live.optString("message", "正在继续字体切换任务…")
+                snapshot = snapshot.copy(
+                    taskType = "switch",
+                    taskId = liveTaskId,
+                    taskState = live.optString("state", "running"),
+                    taskMessage = operationMessage,
+                    taskProgress = live.optInt("percent", snapshot.taskProgress).coerceIn(0, 100),
+                )
+                watchedTaskId = ""
+                watchSwitchTask(liveTaskId, fontId, recoveryDepth + 1)
+                return
+            }
             operationMessage = error.message ?: "字体应用失败"
             snapshot = snapshot.copy(taskState = "failed", taskMessage = operationMessage, taskProgress = 100)
         } finally {

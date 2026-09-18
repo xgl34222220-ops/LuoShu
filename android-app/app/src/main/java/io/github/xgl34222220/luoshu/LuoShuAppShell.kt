@@ -168,19 +168,27 @@ internal fun LuoShuAppShell(
     var pickerSlot by remember { mutableStateOf<MixSlot?>(null) }
 
     LaunchedEffect(Unit) {
+        // Startup status is the only root request that should be mandatory.
+        // The Home page effect below refreshes the system weight once; doing it
+        // here as well spawned two concurrent su commands on every cold start.
         viewModel.refresh()
-        features.refreshSystemWeight()
     }
     LaunchedEffect(page) {
         when (page) {
-            AppPage.Home -> features.refreshSystemWeight()
             AppPage.Library -> viewModel.ensureFonts()
             AppPage.Studio -> {
                 viewModel.ensureFonts()
-                viewModel.refreshMixConfig()
+                viewModel.ensureMixConfig()
             }
             AppPage.Logs -> viewModel.refreshLogs()
-            AppPage.Settings -> Unit
+            AppPage.Home, AppPage.Settings -> Unit
+        }
+    }
+    LaunchedEffect(page, viewModel.snapshot.loading) {
+        // The mandatory status request gets the root shell first. System weight
+        // is secondary and is read only after Home has a usable snapshot.
+        if (page == AppPage.Home && !viewModel.snapshot.loading) {
+            features.ensureSystemWeight()
         }
     }
     LaunchedEffect(page) {
@@ -193,8 +201,10 @@ internal fun LuoShuAppShell(
     val homeActions = remember(viewModel, features) {
         HomeActions(
             refresh = {
+                // Status refresh should stay a single cheap root request. Weight
+                // state changes only through its own control and does not need to
+                // compete with every manual Home refresh.
                 viewModel.refresh()
-                features.refreshSystemWeight()
             },
             openFontLibrary = { page = AppPage.Library },
             openFontStudio = { page = AppPage.Studio },
@@ -220,7 +230,7 @@ internal fun LuoShuAppShell(
     }
     val studioActions = remember(viewModel, features) {
         FontStudioActions(
-            refresh = viewModel::refreshMixConfig,
+            refresh = { viewModel.refreshMixConfig() },
             pickSlot = { pickerSlot = it },
             updateWeight = viewModel::updateMixWeight,
             updateAxis = viewModel::updateMixAxis,

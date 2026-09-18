@@ -140,5 +140,7 @@ printf '%s\n' "$status_output" | grep -q '"state":"failed"'
 printf '%s\n' "$status_output" | grep -q '"bootId":"'
 printf '%s\n' "$status_output" | grep -q '"percent":100'
 grep -q 'luoshu_start_detached' "$ROOT/common/font_switch_task.sh"
+start_body="$(awk '/^start_task\(\)/,/^}/' "$ROOT/common/font_switch_task.sh")"
+! printf '%s\n' "$start_body" | grep -q 'write_task .* running '
 
 echo 'font_switch_task_test: PASS'
