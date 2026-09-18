@@ -1,5 +1,10 @@
 package io.github.xgl34222220.luoshu.ui.library
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -62,29 +67,37 @@ internal fun FontLibraryRoute(
 
     val managementTools: @Composable () -> Unit = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            topActions()
-            FontLibraryUtilitiesBar(
-                style = style,
-                fonts = state.allFonts,
-                collections = collections,
-                enabled = !state.loading && !state.operationBusy,
-                onCollectionsChange = ::persistCollections,
-            )
-            FontArchiveExportTool(
-                style = style,
-                fonts = state.allFonts,
-                collections = collections,
-                enabled = !state.loading && !state.operationBusy,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            FontLibraryManagementButton(
-                style = style,
-                favoriteCount = collections.favoriteIds.size,
-                issueCount = conflicts.issueIds.size,
-                loading = state.loading,
-                onClick = { showManagement = true },
-                modifier = Modifier.fillMaxWidth(),
-            )
+            StaggeredManagementItem(index = 0) {
+                topActions()
+            }
+            StaggeredManagementItem(index = 1) {
+                FontLibraryUtilitiesBar(
+                    style = style,
+                    fonts = state.allFonts,
+                    collections = collections,
+                    enabled = !state.loading && !state.operationBusy,
+                    onCollectionsChange = ::persistCollections,
+                )
+            }
+            StaggeredManagementItem(index = 2) {
+                FontArchiveExportTool(
+                    style = style,
+                    fonts = state.allFonts,
+                    collections = collections,
+                    enabled = !state.loading && !state.operationBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            StaggeredManagementItem(index = 3) {
+                FontLibraryManagementButton(
+                    style = style,
+                    favoriteCount = collections.favoriteIds.size,
+                    issueCount = conflicts.issueIds.size,
+                    loading = state.loading,
+                    onClick = { showManagement = true },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 
@@ -130,5 +143,27 @@ internal fun FontLibraryRoute(
                 latestActions.apply(font)
             },
         )
+    }
+}
+
+
+@Composable
+private fun StaggeredManagementItem(
+    index: Int,
+    content: @Composable () -> Unit,
+) {
+    val visible = remember(index) {
+        MutableTransitionState(false).apply { targetState = true }
+    }
+    val delay = index.coerceAtLeast(0) * 30
+    AnimatedVisibility(
+        visibleState = visible,
+        enter = fadeIn(animationSpec = tween(durationMillis = 180, delayMillis = delay)) +
+            slideInVertically(
+                animationSpec = tween(durationMillis = 220, delayMillis = delay),
+                initialOffsetY = { it / 5 },
+            ),
+    ) {
+        content()
     }
 }
