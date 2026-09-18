@@ -71,7 +71,7 @@ internal fun LuoShuViewModel.toFontStudioUiState(features: Alpha15FeatureViewMod
     }
 
     return FontStudioUiState(
-        loading = fontLoading || current.loading,
+        loading = (fontLoading && fonts.isEmpty()) || current.loading,
         operationBusy = operationBusy,
         busy = current.busy,
         taskState = current.taskState,
