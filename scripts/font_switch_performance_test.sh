@@ -26,6 +26,13 @@ grep -q 'LUOSHU_FOREGROUND_QUICK_SWITCH=1' "$ROOT/common/font_manager_v4.sh"
 grep -q 'luoshu_font_lock_acquire' "$ROOT/common/font_manager_v4.sh"
 grep -q 'luoshu_switch_signal_exit 143' "$ROOT/common/font_manager_v4.sh"
 
+# HyperOS glyph-baseline correction must be donor-scoped, not alias-scoped.
+# One large CJK font rewrite per physical slot regresses real-device switching into minutes.
+grep -q 'canonical_baseline_target = _canonical_baseline_target' "$ROOT/common/hyperos_metrics_batch.py"
+grep -q 'source_baselines\[profile_key\]' "$ROOT/common/hyperos_metrics_batch.py"
+grep -q 'Baseline normalization is the only operation that rewrites' "$ROOT/common/hyperos_metrics_batch.py"
+grep -q 'test_baseline_outline_rewrite_runs_once_per_shared_donor' "$ROOT/scripts/hyperos_metrics_batch_test.py"
+
 # Final apply is intentionally the v14.4 physical-file path. Keep the modern identity lock,
 # but never reconnect the device-template/slot/XML payload pipeline that caused the 94% stall.
 grep -q 'legacy_v14_4_switch.sh' "$ROOT/common/font_manager.sh"
