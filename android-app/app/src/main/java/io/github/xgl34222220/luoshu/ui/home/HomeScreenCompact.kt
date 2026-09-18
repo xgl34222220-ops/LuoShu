@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.home
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
@@ -114,7 +116,16 @@ internal fun HomeScreenCompact(
             }
         }
         item(key = "current-font") {
-            Surface(shape = RoundedCornerShape(28.dp), color = cardColor, shadowElevation = 2.dp) {
+            val dark = scheme.background.luminance() < .5f
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = cardColor,
+                shadowElevation = 2.dp,
+                border = BorderStroke(
+                    0.5.dp,
+                    if (dark) Color.Transparent else LuoShuLayoutTokens.LightCardOutline,
+                ),
+            ) {
                 Column(
                     Modifier.fillMaxWidth()
                         .background(Brush.linearGradient(listOf(scheme.primaryContainer.copy(alpha = .46f), cardColor)))
