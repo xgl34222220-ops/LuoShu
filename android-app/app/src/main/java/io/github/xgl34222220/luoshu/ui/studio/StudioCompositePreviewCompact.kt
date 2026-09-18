@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -47,8 +48,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -208,49 +211,85 @@ private fun CompactScenarioSelector(
         )
     }
 
+    val scrollState = rememberScrollState()
+    val edgeColor = if (MaterialTheme.colorScheme.background.luminance() < .5f) {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    } else {
+        Color(0xFFF8F9FD)
+    }
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
+        modifier = Modifier.fillMaxWidth().height(44.dp),
     ) {
         Box(
             modifier = Modifier
-                .offset(x = indicatorOffset)
-                .width(72.dp)
-                .height(44.dp)
-                .graphicsLayer { scaleX = indicatorStretch.value }
-                .clip(RoundedCornerShape(15.dp))
-                .background(MaterialTheme.colorScheme.primary),
-        )
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            scenarios.forEach { scenario ->
-                val active = scenario == selected
-                val textColor by animateColorAsState(
-                    targetValue = if (active) {
-                        MaterialTheme.colorScheme.onPrimary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                    animationSpec = tween(180),
-                    label = "previewScenarioText",
-                )
-                Surface(
-                    onClick = { onSelect(scenario) },
-                    modifier = Modifier.width(72.dp).height(44.dp),
-                    shape = RoundedCornerShape(15.dp),
-                    color = Color.Transparent,
-                    contentColor = textColor,
-                ) {
-                    Text(
-                        scenario.label,
-                        modifier = Modifier.padding(vertical = 10.dp),
-                        color = textColor,
-                        textAlign = TextAlign.Center,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
+                .fillMaxWidth()
+                .horizontalScroll(scrollState),
+        ) {
+            Box(
+                modifier = Modifier
+                    .offset(x = indicatorOffset)
+                    .width(72.dp)
+                    .height(44.dp)
+                    .graphicsLayer { scaleX = indicatorStretch.value }
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                scenarios.forEach { scenario ->
+                    val active = scenario == selected
+                    val textColor by animateColorAsState(
+                        targetValue = if (active) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        animationSpec = tween(180),
+                        label = "previewScenarioText",
                     )
+                    Surface(
+                        onClick = { onSelect(scenario) },
+                        modifier = Modifier.width(72.dp).height(44.dp),
+                        shape = RoundedCornerShape(15.dp),
+                        color = Color.Transparent,
+                        contentColor = textColor,
+                    ) {
+                        Text(
+                            scenario.label,
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            color = textColor,
+                            textAlign = TextAlign.Center,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
             }
+        }
+        if (scrollState.value > 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .width(16.dp)
+                    .fillMaxHeight()
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(edgeColor, Color.Transparent),
+                        ),
+                    ),
+            )
+        }
+        if (scrollState.value < scrollState.maxValue) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(16.dp)
+                    .fillMaxHeight()
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color.Transparent, edgeColor),
+                        ),
+                    ),
+            )
         }
     }
 }
