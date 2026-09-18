@@ -48,7 +48,7 @@ CJK_ROUTING_REASONS = {"stock-coverage-refresh-pending", "specialized-slot", "st
                        "oem-direct-full-coverage", "routing-fallback-full-coverage"}
 BASELINE_REASONS = {"stock-probe", "stock-probe-unavailable", "invalid-probe-upem",
                     "unsafe-probe-shift", "shared-probe-missing", "zero-shift",
-                    "non-glyf-source", "no-simple-outlines"}
+                    "non-glyf-source", "no-simple-outlines", "slot-metrics-only"}
 
 
 class BudgetExpired(BaseException):
