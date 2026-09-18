@@ -920,6 +920,7 @@ def build(module: Path, stage: Path, names: list[str], *, inventory_ui: bool = F
                                       'slots': slot_report,
                                       'slotErrors': slot_errors,
                                       'baselineTemplate': 'trusted' if template else 'unavailable',
+                                      'targetMode': 'inventory-ui' if inventory_ui else 'legacy-names',
                                       'preservedDynamicAliases': [
                                           '/' + alias.relative_to(stage).as_posix()
                                           for alias in preserved_aliases],
@@ -928,6 +929,10 @@ def build(module: Path, stage: Path, names: list[str], *, inventory_ui: bool = F
                                           for alias in excluded_aliases + failed_aliases
                                           if alias.parent.is_dir()})}, ensure_ascii=False), encoding='utf-8')
         report.chmod(0o644)
+        targets = stage / '.luoshu-hyperos-targets.list'
+        targets.write_text(''.join(f'{logical}\n' for logical in sorted(success_logicals)),
+                           encoding='utf-8')
+        targets.chmod(0o644)
     finally:
         # Every prepared result has its own hard link (or copy) in the final
         # alias. Keeping these temporary names after success only enlarges
