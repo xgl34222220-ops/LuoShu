@@ -142,6 +142,54 @@ def _oem_direct_full_coverage_slot(logical: str) -> bool:
     return stem.startswith(OEM_DIRECT_PREFIXES)
 
 
+def _canonical_baseline_target(template: dict, data: dict) -> str:
+    """Choose one ROM visual baseline for every donor rewrite.
+
+    Rewriting a large CJK donor once per physical alias is both unnecessary and
+    extremely slow. A font's baseline is intrinsic to the donor; slot-specific
+    hhea/OS2/head contracts are applied later without touching outlines.
+    """
+    slots = data.get('slots') if isinstance(data.get('slots'), dict) else {}
+    main = str(data.get('mainSlotPath') or '')
+    candidates = []
+
+    def score(logical: str) -> tuple:
+        entry = slots.get(logical, {})
+        coverage = entry.get('metrics', {}).get('coverage') if isinstance(entry, dict) else None
+        has_han = bool(valid_coverage(coverage) and _stock_has_cjk_ideographs(coverage))
+        name = Path(logical).name.lower()
+        return (
+            0 if has_han and _oem_direct_full_coverage_slot(logical) else
+            1 if has_han else
+            2 if _oem_direct_full_coverage_slot(logical) else
+            3 if logical == main else 4,
+            0 if name.startswith('misansvf') else 1,
+            logical,
+        )
+
+    seen = set()
+    for slot in template.get('slots') or []:
+        if not isinstance(slot, dict):
+            continue
+        logical = str(slot.get('resolvedPath') or '')
+        if not logical or logical in seen:
+            continue
+        seen.add(logical)
+        font = slot.get('font') if isinstance(slot.get('font'), dict) else {}
+        if not font:
+            continue
+        candidates.append(logical)
+
+    if main and main in candidates:
+        entry = slots.get(main, {})
+        coverage = entry.get('metrics', {}).get('coverage') if isinstance(entry, dict) else None
+        if valid_coverage(coverage) and _stock_has_cjk_ideographs(coverage):
+            return main
+    if candidates:
+        return min(candidates, key=score)
+    return main
+
+
 def _baseline_shift(template: dict, logical: str, source_profile: dict) -> tuple[int, str, str]:
     """Align real glyph ink to the ROM's frozen visual baseline without scaling shapes."""
     slot = _template_slot(template, logical)
@@ -598,6 +646,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     compact_sources = {}
     shifted_sources = {}
     source_profiles = {}
+    source_baselines = {}
+    canonical_baseline_target = _canonical_baseline_target(template, data)
     output_reports = {}
     # Generate every distinct source/contract before replacing even one alias.
     # Thus subsequent sources cannot accidentally refer to earlier outputs.
@@ -622,38 +672,49 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                         source_profiles[profile_key] = inspect_font(source, _pick_face(source), False)
                     except Exception:
                         source_profiles[profile_key] = {}
-                shift_y, shift_probe, shift_reason = _baseline_shift(
-                    template, logical, source_profiles[profile_key])
+                if profile_key not in source_baselines:
+                    if canonical_baseline_target:
+                        source_baselines[profile_key] = _baseline_shift(
+                            template, canonical_baseline_target, source_profiles[profile_key])
+                    else:
+                        source_baselines[profile_key] = (0, '', 'stock-probe-unavailable')
+                shift_y, shift_probe, shift_reason = source_baselines[profile_key]
                 target_weight = weight_for_name(dest.name)
                 key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract,
                        routing, stock_punctuation, routing_reason, align_bottom, shift_y, target_weight)
                 if key not in cache:
                     output = outputs / f'{len(cache)}.font'
-                    metric_source, compact_removed = source, 0
-                    if routing:
-                        source_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
-                                      routing, stock_punctuation)
-                        if source_key not in compact_sources:
-                            compact_sources[source_key] = compact_routed_source(
-                                source, outputs / f'source-{len(compact_sources)}.font',
-                                routing, stock_punctuation)
-                        metric_source, compact_removed = compact_sources[source_key]
 
+                    # Baseline normalization is the only operation that rewrites
+                    # the whole donor outline table. Do it once on the original
+                    # source, before any Latin CJK-routing subset is produced.
+                    # Every physical alias then reuses that normalized donor.
+                    base_source = source
                     shift_report = {'applied': False, 'reason': shift_reason, 'glyphs': 0}
                     if shift_y:
-                        shifted_stat = metric_source.stat()
-                        shift_key = (shifted_stat.st_dev, shifted_stat.st_ino, shifted_stat.st_size,
-                                     shifted_stat.st_mtime_ns, shift_y)
+                        shift_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, shift_y)
                         if shift_key not in shifted_sources:
                             shifted_sources[shift_key] = shift_glyf_baseline(
-                                metric_source,
+                                source,
                                 outputs / f'baseline-{len(shifted_sources)}.font',
                                 shift_y)
-                        metric_source, applied_report = shifted_sources[shift_key]
+                        base_source, applied_report = shifted_sources[shift_key]
                         shift_report = {**applied_report}
                         if not shift_report.get('applied'):
+                            base_source = source
                             shift_y = 0
                             shift_reason = shift_report.get('reason', shift_reason)
+
+                    metric_source, compact_removed = base_source, 0
+                    if routing:
+                        routed_stat = base_source.stat()
+                        source_key = (routed_stat.st_dev, routed_stat.st_ino, routed_stat.st_size,
+                                      routed_stat.st_mtime_ns, routing, stock_punctuation)
+                        if source_key not in compact_sources:
+                            compact_sources[source_key] = compact_routed_source(
+                                base_source, outputs / f'source-{len(compact_sources)}.font',
+                                routing, stock_punctuation)
+                        metric_source, compact_removed = compact_sources[source_key]
 
                     try:
                         output_reports[key] = write_metrics(
@@ -669,21 +730,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                         stock_punctuation = frozenset()
                         routing_reason = 'routing-fallback-full-coverage'
                         compact_removed = 0
-                        metric_source = source
-                        if shift_y:
-                            shifted_stat = metric_source.stat()
-                            shift_key = (shifted_stat.st_dev, shifted_stat.st_ino, shifted_stat.st_size,
-                                         shifted_stat.st_mtime_ns, shift_y)
-                            if shift_key not in shifted_sources:
-                                shifted_sources[shift_key] = shift_glyf_baseline(
-                                    metric_source,
-                                    outputs / f'baseline-{len(shifted_sources)}.font',
-                                    shift_y)
-                            metric_source, applied_report = shifted_sources[shift_key]
-                            shift_report = {**applied_report}
-                            if not shift_report.get('applied'):
-                                shift_y = 0
-                                shift_reason = shift_report.get('reason', shift_reason)
+                        metric_source = base_source
                         output_reports[key] = write_metrics(
                             metric_source, output, contract, None, frozenset(),
                             align_bitmap_bottom=align_bottom, target_weight=target_weight)
@@ -692,6 +739,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                         'baselineShift': int(shift_y),
                         'baselineProbe': shift_probe,
                         'baselineReason': shift_reason,
+                        'baselineTarget': canonical_baseline_target,
                         'baselineGlyphs': int(shift_report.get('glyphs') or 0),
                         'effectiveCjkRoutingSource': 'stock-fallback' if routing else 'source',
                         'effectiveCjkRoutingReason': routing_reason,
