@@ -976,7 +976,19 @@ def build(module: Path, stage: Path, names: list[str], *, inventory_ui: bool = F
                     persistent = _slot_cache_load(module, persistent_key)
                     if persistent is not None:
                         cached_output, cached_report = persistent
-                        output_reports[key] = {**cached_report, 'slotCache': 'hit'}
+                        # The font bytes may be reusable across aliases whose
+                        # current routing/diagnostic classification differs.
+                        # Never inherit another slot's semantic labels.
+                        output_reports[key] = {
+                            **cached_report,
+                            'baselineShift': int(shift_y),
+                            'baselineProbe': shift_probe,
+                            'baselineReason': shift_reason,
+                            'baselineTarget': canonical_baseline_target,
+                            'effectiveCjkRoutingSource': 'stock-fallback' if routing else 'source',
+                            'effectiveCjkRoutingReason': routing_reason,
+                            'slotCache': 'hit',
+                        }
                         cache[key] = cached_output
                     else:
                         output = outputs / f'{len(cache)}.font'
