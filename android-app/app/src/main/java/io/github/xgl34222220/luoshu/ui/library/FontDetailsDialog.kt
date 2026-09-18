@@ -1,5 +1,6 @@
 package io.github.xgl34222220.luoshu.ui.library
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -44,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -58,6 +60,7 @@ import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 
 private enum class FontPreviewMode(val label: String) {
@@ -239,10 +242,23 @@ internal fun FontDetailsDialogRoute(
             }
 
             Spacer(Modifier.height(16.dp))
+            val technicalSurface = if (scheme.background.luminance() < .5f) {
+                elevated
+            } else {
+                LuoShuLayoutTokens.TechnicalSurface
+            }
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(22.dp),
-                color = elevated,
+                color = technicalSurface,
+                border = BorderStroke(
+                    0.5.dp,
+                    if (scheme.background.luminance() < .5f) {
+                        Color.Transparent
+                    } else {
+                        LuoShuLayoutTokens.LightCardOutline
+                    },
+                ),
             ) {
                 Column {
                     Row(
@@ -487,12 +503,15 @@ private fun FontDetailLine(
             fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
         )
+        val technicalValue = label.contains("ID", ignoreCase = true) ||
+            label.contains("SHA", ignoreCase = true)
         Text(
             text = value,
             modifier = Modifier.weight(1f),
             color = primaryText,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
+            fontFamily = if (technicalValue) FontFamily.Monospace else FontFamily.Default,
         )
     }
     if (divider) {
