@@ -267,6 +267,40 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.assertTrue(all(item['baselineTarget'] == '/system/fonts/MiSansVF.ttf'
                             for item in report.values()))
 
+    def test_cjk_visual_alignment_uses_stock_ideograph_bottom_not_center(self):
+        template = {
+            'slots': [{
+                'resolvedPath': '/system/fonts/MiSansVF.ttf',
+                'roles': ['global-ui'],
+                'weight': 400,
+                'font': {
+                    'metrics': {'unitsPerEm': 1000},
+                    'probes': {'cjk': {'hits': 8, 'yMin': -100, 'yMax': 800}},
+                },
+            }],
+        }
+        source = {
+            'metrics': {'unitsPerEm': 1000},
+            'probes': {'cjk': {'hits': 8, 'yMin': -40, 'yMax': 900}},
+        }
+        shift, probe, reason = batch._baseline_shift(
+            template, '/system/fonts/MiSansVF.ttf', source)
+        self.assertEqual((shift, probe, reason), (-60, 'cjk', 'stock-probe'))
+
+    def test_final_slot_cache_skips_fonttools_rewrite_on_reapply(self):
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot(head=(-300, 1100))})
+        first = batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+        self.assertEqual(first['mapped'], 1)
+        first_report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots'][0]
+        self.assertEqual(first_report['slotCache'], 'miss')
+        with patch.object(batch, 'write_metrics',
+                          side_effect=AssertionError('cached slot was regenerated')):
+            second = batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+        self.assertEqual(second['mapped'], 1)
+        second_report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots'][0]
+        self.assertEqual(second_report['slotCache'], 'hit')
+        self.assertTrue(list((self.module / 'cache/hyperos-slots').glob('*.font')))
+
     def test_baseline_donor_cache_survives_repeated_switches(self):
         source = self.fonts / '400.ttf'
         with TTFont(source) as font:
