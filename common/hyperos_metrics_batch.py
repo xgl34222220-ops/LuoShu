@@ -724,6 +724,18 @@ def build(module: Path, stage: Path, names: list[str], *, inventory_ui: bool = F
     preserved_aliases = []
     excluded_aliases = []
 
+    # Framework-managed dynamic aliases must be removed from the staged payload
+    # even when they are not part of the exact inventory UI target set. Leaving
+    # an old regular file here freezes Xiaomi's runtime locale/theme route.
+    for logical in (data.get('preservedDynamicAliases') or {}):
+        if not preserved_dynamic_alias(data, str(logical)):
+            continue
+        parsed = _logical_parts(str(logical))
+        if parsed is None:
+            continue
+        part, name = parsed
+        preserved_aliases.append(stage / part / 'fonts' / name)
+
     if inventory_ui:
         selectors = _inventory_targets(data)
         for logical in selectors:
