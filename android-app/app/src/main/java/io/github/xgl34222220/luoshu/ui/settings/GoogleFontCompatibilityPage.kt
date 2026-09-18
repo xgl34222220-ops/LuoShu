@@ -1,19 +1,34 @@
 package io.github.xgl34222220.luoshu.ui.settings
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ExpandLess
+import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -26,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -36,6 +52,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuMotionTokens
 
 @Composable
 internal fun GoogleFontCompatibilityPage() {
@@ -43,6 +61,7 @@ internal fun GoogleFontCompatibilityPage() {
     val state = model.ui
     val owner = LocalLifecycleOwner.current
     var confirmAction by rememberSaveable { mutableStateOf<String?>(null) }
+    var detailsExpanded by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) { model.refresh() }
     DisposableEffect(owner, model) {
         val observer = LifecycleEventObserver { _, event ->
@@ -59,17 +78,27 @@ internal fun GoogleFontCompatibilityPage() {
     ) {
         item {
             GoogleCompatibilityCard("当前状态") {
-                if (!idle) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                Text(if (state.busy) "正在处理，请稍候…" else state.title,
-                    fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold)
-                GoogleCompatibilityText(state.message)
-                state.user?.let { GoogleCompatibilityText("作用范围：当前 Android 用户 $it") }
-                if (state.managed) GoogleCompatibilityText("已找到恢复记录 · 兼容之前的独立脚本")
-                if (state.resultMessage.isNotBlank()) {
-                    Text(state.resultMessage, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, lineHeight = 22.sp)
-                }
-                if (state.error.isNotBlank()) {
-                    Text(state.error, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 22.sp)
+                if (state.loading && !state.busy) {
+                    LuoShuLoadingSkeleton(Modifier.fillMaxWidth(.52f).heightIn(min = 22.dp))
+                    LuoShuLoadingSkeleton(Modifier.fillMaxWidth().heightIn(min = 14.dp))
+                    LuoShuLoadingSkeleton(Modifier.fillMaxWidth(.76f).heightIn(min = 14.dp))
+                } else {
+                    if (state.busy) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                    Text(
+                        if (state.busy) "正在处理，请稍候…" else state.title,
+                        fontSize = 18.sp,
+                        lineHeight = 26.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    GoogleCompatibilityText(state.message)
+                    state.user?.let { GoogleCompatibilityText("作用范围：当前 Android 用户 $it") }
+                    if (state.managed) GoogleCompatibilityText("已找到恢复记录 · 兼容之前的独立脚本")
+                    if (state.resultMessage.isNotBlank()) {
+                        Text(state.resultMessage, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp, lineHeight = 22.sp)
+                    }
+                    if (state.error.isNotBlank()) {
+                        Text(state.error, color = MaterialTheme.colorScheme.error, fontSize = 14.sp, lineHeight = 22.sp)
+                    }
                 }
                 OutlinedButton(onClick = model::refresh, enabled = idle, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                     Text("重新检测")
@@ -82,20 +111,73 @@ internal fun GoogleFontCompatibilityPage() {
         }
         item {
             GoogleCompatibilityCard("怎么用") {
-                GoogleCompatibilityText("用于谷歌商店等应用的英文、数字反复恢复默认，而中文仍正常的情况。不是必须开启的通用设置。")
-                GoogleCompatibilityText("1. 先在洛书应用需要的自定义字体，并按提示完成重启。")
-                GoogleCompatibilityText("2. 点击「开启 Google 字体兼容」，阅读提示并确认。显示已开启后，完整重启一次手机。")
-                GoogleCompatibilityText("3. 检查谷歌商店；放到后台一段时间，再打开检查英文和数字是否保持。组件已停用不等于字体效果已验证。")
-                GoogleCompatibilityText("之前已用脚本开启的：本页会识别原恢复记录，不用再执行命令，也不用重复开启。")
+                GoogleCompatibilityText("只在谷歌应用英文、数字反复恢复默认，而中文仍正常时使用。")
+                GoogleStepCard("1", "先应用字体", "在洛书应用需要的中文、英文和数字字体，并按提示完成重启。")
+                GoogleStepCard("2", "开启兼容", "点击「开启 Google 字体兼容」并确认；显示已开启后完整重启一次。")
+                GoogleStepCard("3", "验证保持", "检查 Google Play 等应用，放到后台后再次打开，确认英文和数字没有恢复默认。")
+                GoogleCompatibilityText("之前用独立脚本开启过的，本页会直接识别原恢复记录，不需要重复执行。")
+            }
+        }
+        item {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = .62f),
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text(
+                        "默认卸载模块一定要关",
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 15.sp,
+                    )
+                    Text(
+                        "保持 Root 管理器中的「默认卸载模块」关闭，避免字体恢复默认或出现异常。",
+                        color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = .82f),
+                        fontSize = 13.sp,
+                        lineHeight = 20.sp,
+                    )
+                }
             }
         }
         item {
             GoogleCompatibilityCard("影响与恢复") {
-                GoogleCompatibilityText("只停用当前用户的 Google 下载字体提供组件，不停用整个谷歌服务，不删除字体缓存、账户或应用数据。")
-                GoogleCompatibilityText("会影响该用户所有依赖 GMS 下载字体的应用，可能涉及下载式表情字体；修改时相关 GMS 进程可能重启。")
-                GoogleCompatibilityText("此设置跨重启保留。停用模块不会保证自动撤销：停用或卸载洛书前，请先点击「恢复原设置」并完整重启。卸载脚本也会尝试恢复有记录的设置，失败记录会保留。")
-                GoogleCompatibilityText("不保证替换应用内置字体、网页指定字体或已经打开的旧字体。不自动封禁联网，不强停前台应用。")
-                GoogleCompatibilityText("「默认卸载模块」请保持关闭。开启和恢复均只在你确认后执行。")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { detailsExpanded = !detailsExpanded }
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("详细原理与影响范围", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        Text(
+                            if (detailsExpanded) "收起技术说明" else "需要时再展开，不影响正常操作",
+                            color = LocalMiuixTokens.current.textSecondary,
+                            fontSize = 12.sp,
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Icon(
+                        if (detailsExpanded) Icons.Rounded.ExpandLess else Icons.Rounded.ExpandMore,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                AnimatedVisibility(
+                    visible = detailsExpanded,
+                    enter = fadeIn(tween(LuoShuMotionTokens.Fast)) +
+                        expandVertically(tween(LuoShuMotionTokens.Normal, easing = FastOutSlowInEasing)),
+                    exit = fadeOut(tween(140)) +
+                        shrinkVertically(tween(170, easing = FastOutSlowInEasing)),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        GoogleCompatibilityText("只停用当前用户的 Google 下载字体提供组件，不停用整个谷歌服务，不删除字体缓存、账户或应用数据。")
+                        GoogleCompatibilityText("会影响该用户所有依赖 GMS 下载字体的应用，可能涉及下载式表情字体；修改时相关 GMS 进程可能重启。")
+                        GoogleCompatibilityText("此设置跨重启保留。停用或卸载洛书前，请先点击「恢复原设置」并完整重启；卸载脚本也会尝试恢复有记录的设置。")
+                        GoogleCompatibilityText("不保证替换应用内置字体、网页指定字体或已经打开的旧字体，也不会自动封禁联网或强停前台应用。")
+                    }
+                }
             }
         }
     }
@@ -122,6 +204,38 @@ internal fun GoogleFontCompatibilityPage() {
                 }) { Text(if (enabling) "了解影响，确认开启" else "确认恢复") }
             },
         )
+    }
+}
+
+@Composable
+private fun GoogleStepCard(number: String, title: String, body: String) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = .07f),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Surface(
+                modifier = Modifier.size(28.dp),
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.primary.copy(alpha = .13f),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    Text(number, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(title, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                GoogleCompatibilityText(body)
+            }
+        }
     }
 }
 
