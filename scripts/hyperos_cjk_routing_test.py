@@ -275,9 +275,16 @@ class RoutingTest(unittest.TestCase):
             self.assertFalse((self.fonts / name).exists())
             self.assertEqual(os.readlink(stock_link), target)
 
-        # Static Overlay files on another ROM are still mapped by boot repair.
+        # An exact target manifest is authoritative for this prepared
+        # generation. If an OTA changes the stock route afterwards, boot repair
+        # must not silently widen the payload; the next stock inventory rebuild
+        # will produce a new manifest. Old payloads without a manifest retain
+        # the legacy static-alias repair behavior.
         stock_link.unlink()
         make_font(stock_link)
+        subprocess.run(['sh', '-c', command, 'sh', str(helper)], env=env, check=True)
+        self.assertFalse((self.fonts / name).exists())
+        (self.stage / '.luoshu-hyperos-targets.list').unlink()
         subprocess.run(['sh', '-c', command, 'sh', str(helper)], env=env, check=True)
         self.assertTrue((self.fonts / name).is_file())
 
