@@ -99,8 +99,8 @@ internal fun FontStudioRoute(
         showSwitchHistory ||
         restoreNotice.isNotBlank()
     val pageScale by animateFloatAsState(
-        targetValue = if (childLayerActive) .96f else 1f,
-        animationSpec = spring(dampingRatio = .86f, stiffness = Spring.StiffnessMediumLow),
+        targetValue = if (childLayerActive) .95f else 1f,
+        animationSpec = spring(dampingRatio = .85f, stiffness = Spring.StiffnessMediumLow),
         label = "studioDepthScale",
     )
     Box(

@@ -32,10 +32,13 @@ import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -54,8 +57,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
@@ -67,6 +68,7 @@ private enum class CompactPreviewScenario(val label: String) {
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 internal fun StudioCompositePreviewDialogCompact(
     style: UiStyle,
     state: FontStudioUiState,
@@ -79,106 +81,113 @@ internal fun StudioCompositePreviewDialogCompact(
     }
     val tokens = LocalMiuixTokens.current
     val miuix = style == UiStyle.MIUIX
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    Dialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false),
+        sheetState = sheetState,
+        shape = RoundedCornerShape(topStart = if (miuix) 34.dp else 30.dp, topEnd = if (miuix) 34.dp else 30.dp),
+        containerColor = if (miuix) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 0.dp,
+        scrimColor = Color.Black.copy(alpha = .20f),
+        dragHandle = {
+            Surface(
+                modifier = Modifier.padding(top = 10.dp).width(36.dp).height(4.dp),
+                shape = RoundedCornerShape(999.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = .26f),
+            ) {}
+        },
     ) {
-        Surface(
-            modifier = Modifier
+        Column(
+            Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 18.dp, vertical = 28.dp)
-                .heightIn(max = 820.dp),
-            shape = RoundedCornerShape(if (miuix) 36.dp else 30.dp),
-            color = if (miuix) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surfaceContainerHigh,
-            shadowElevation = 18.dp,
+                .heightIn(max = 820.dp)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
         ) {
-            Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("最终组合预览", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("最终组合预览", fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "对照系统字体，检查混排比例、字重和基线",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                    )
+                }
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Rounded.Close, contentDescription = "关闭")
+                }
+            }
+
+            Spacer(Modifier.height(12.dp))
+            CompactScenarioSelector(
+                selected = scenario,
+                onSelect = { scenarioName = it.name },
+            )
+
+            LazyColumn(
+                modifier = Modifier.weight(1f, fill = false),
+                contentPadding = PaddingValues(top = 12.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                item {
+                    CompactPreviewCard(
+                        title = "A · 当前系统字体",
+                        subtitle = "作为视觉比例和基线参考",
+                        style = style,
+                    ) {
+                        SystemPreviewCompact(scenario)
+                    }
+                }
+                item {
+                    CompactPreviewCard(
+                        title = "B · 当前组合方案",
+                        subtitle = "中文、英文和数字分别使用所选槽位",
+                        style = style,
+                    ) {
+                        CandidatePreviewCompact(state, scenario)
+                    }
+                }
+                item {
+                    Column(Modifier.padding(top = 2.dp)) {
+                        Text("快速方案", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
                         Text(
-                            "对照系统字体，检查混排比例、字重和基线",
+                            "只调整三个槽位的字重，不会更换已选择字体。",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                         )
                     }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Rounded.Close, contentDescription = "关闭")
-                    }
                 }
-
-                Spacer(Modifier.height(12.dp))
-                CompactScenarioSelector(
-                    selected = scenario,
-                    onSelect = { scenarioName = it.name },
-                )
-
-                LazyColumn(
-                    modifier = Modifier.weight(1f, fill = false),
-                    contentPadding = PaddingValues(top = 12.dp, bottom = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    item {
-                        CompactPreviewCard(
-                            title = "A · 当前系统字体",
-                            subtitle = "作为视觉比例和基线参考",
-                            style = style,
-                        ) {
-                            SystemPreviewCompact(scenario)
-                        }
-                    }
-                    item {
-                        CompactPreviewCard(
-                            title = "B · 当前组合方案",
-                            subtitle = "中文、英文和数字分别使用所选槽位",
-                            style = style,
-                        ) {
-                            CandidatePreviewCompact(state, scenario)
-                        }
-                    }
-                    item {
-                        Column(Modifier.padding(top = 2.dp)) {
-                            Text("快速方案", fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                "只调整三个槽位的字重，不会更换已选择字体。",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 12.sp,
-                            )
-                        }
-                    }
-                    items(studioQuickPresets, key = { it.id }) { preset ->
-                        CompactPresetRow(
-                            preset = preset,
-                            enabled = !state.busy && !state.operationBusy,
-                            onClick = { onApplyPreset(preset) },
+                items(studioQuickPresets, key = { it.id }) { preset ->
+                    CompactPresetRow(
+                        preset = preset,
+                        enabled = !state.busy && !state.operationBusy,
+                        onClick = { onApplyPreset(preset) },
+                    )
+                }
+                item {
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = .08f),
+                    ) {
+                        Text(
+                            "此处预览所选字体的搭配效果，应用后的实际显示以手机界面为准。",
+                            modifier = Modifier.fillMaxWidth().padding(13.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 12.sp,
+                            lineHeight = 18.sp,
                         )
                     }
-                    item {
-                        Surface(
-                            shape = RoundedCornerShape(18.dp),
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = .08f),
-                        ) {
-                            Text(
-                                "此处预览所选字体的搭配效果，应用后的实际显示以手机界面为准。",
-                                modifier = Modifier.fillMaxWidth().padding(13.dp),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 12.sp,
-                                lineHeight = 18.sp,
-                            )
-                        }
-                    }
                 }
+            }
 
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                    shape = RoundedCornerShape(19.dp),
-                ) {
-                    Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(7.dp))
-                    Text("完成", fontWeight = FontWeight.SemiBold)
-                }
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(19.dp),
+            ) {
+                Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(7.dp))
+                Text("完成", fontWeight = FontWeight.SemiBold)
             }
         }
     }
