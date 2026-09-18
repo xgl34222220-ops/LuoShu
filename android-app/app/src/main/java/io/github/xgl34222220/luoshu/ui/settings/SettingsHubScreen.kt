@@ -100,6 +100,7 @@ import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuDetailBar
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
@@ -341,12 +342,21 @@ private fun SettingsOverviewCard(health: SystemHealthSnapshot, onClick: () -> Un
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text("洛书状态", color = tokens.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        if (health.loading) "正在读取模块状态…" else health.summary,
-                        color = accent,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                    )
+                    Box(Modifier.fillMaxWidth().height(18.dp), contentAlignment = Alignment.CenterStart) {
+                        if (health.loading) {
+                            LuoShuLoadingSkeleton(
+                                Modifier.fillMaxWidth(.58f).height(12.dp),
+                                shape = RoundedCornerShape(999.dp),
+                            )
+                        } else {
+                            Text(
+                                health.summary,
+                                color = accent,
+                                fontSize = 12.sp,
+                                lineHeight = 18.sp,
+                            )
+                        }
+                    }
                 }
                 Icon(Icons.Rounded.ChevronRight, null, tint = tokens.textSecondary, modifier = Modifier.size(22.dp))
             }
@@ -354,15 +364,27 @@ private fun SettingsOverviewCard(health: SystemHealthSnapshot, onClick: () -> Un
                 Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
                     Text("当前字体", color = tokens.textSecondary, fontSize = 12.sp)
                     Spacer(Modifier.height(3.dp))
-                    Text(
-                        if (health.loading) "正在读取…" else if (health.activeFont == "default") "系统默认" else health.activeFont.ifBlank { "尚未选择" },
-                        color = tokens.textPrimary,
-                        fontSize = 16.sp,
-                        lineHeight = 22.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        if (health.loading) {
+                            LuoShuLoadingSkeleton(
+                                Modifier.fillMaxWidth(.52f).height(18.dp),
+                                shape = RoundedCornerShape(999.dp),
+                            )
+                        } else {
+                            Text(
+                                if (health.activeFont == "default") "系统默认" else health.activeFont.ifBlank { "尚未选择" },
+                                color = tokens.textPrimary,
+                                fontSize = 16.sp,
+                                lineHeight = 22.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                     if (health.rebootRequired) {
                         Spacer(Modifier.height(5.dp))
                         Text("字体变更等待重启生效", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
@@ -821,8 +843,15 @@ private fun InfoLine(label: String, value: String) {
                     modifier = Modifier.padding(start = 10.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
+                    val displayValue = if (
+                        label.contains("SHA", ignoreCase = true) && value.length > 16
+                    ) {
+                        "${value.take(8)}…${value.takeLast(6)}"
+                    } else {
+                        value
+                    }
                     Text(
-                        value,
+                        displayValue,
                         modifier = Modifier.weight(1f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
