@@ -75,6 +75,11 @@ internal fun FontStudioRoute(
         StudioToolLauncher(
             style = style,
             enabled = state.hasFonts && !state.loading,
+            childLayerActive = showCompositePreview ||
+                showPresetLibrary ||
+                showSwitchHistory ||
+                showProfileTransfer ||
+                showGlyphBrowser,
             onPreview = { showCompositePreview = true },
             onPresets = { showPresetLibrary = true },
             onHistory = { showSwitchHistory = true },
