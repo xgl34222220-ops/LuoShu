@@ -30,11 +30,12 @@ RESTORED = (
     'Roboto-SemiCondensed.ttf', 'GoogleSans-SemiCondensed.ttf',
 )
 PRESERVED = (
-    'MiSansVF.ttf', 'MiSansLatinVF.ttf',
+    'MiSansVF.ttf', 'MiSansLatinVF.ttf', 'MiSansTCVF.ttf', 'MiSansL3.otf',
     'XiaomiSans-Regular.ttf', 'MiLanProVF.ttf', 'MitypeVF.ttf', 'MiClock.ttf',
     'Roboto-Regular.ttf', 'RobotoMono-Regular.ttf', 'RobotoFlex-Regular.ttf',
     'GoogleSans-Regular.ttf', 'GoogleSansText-VF.ttf', 'GoogleSansFlex-Regular.ttf',
-    'NotoSans-Regular.ttf', 'NotoSansUI-Regular.ttf',
+    'NotoSans-Regular.ttf', 'NotoSansUI-Regular.ttf', 'NotoSansCJKsc-Regular.otf',
+    'NotoSansSC-Regular.otf', 'NotoSansTC-Regular.otf', 'NotoSansHK-Regular.otf',
     'DroidSans.ttf', 'DroidSans-Regular.ttf', 'DroidSans-Bold.ttf',
     'Clockopia.ttf', 'AndroidClock.ttf', '100.ttf', '350.ttf', '400.ttf', '900.ttf',
 )
@@ -47,10 +48,6 @@ EXCLUDED = (
     'NotoSansMonoCJKjp-Regular.otf', 'NotoSansMonoCJKKR-Regular.otf',
     'NotoSansMonoArabic-Regular.ttf', 'NotoSansDisplayAdlam-Regular.ttf',
     'NotoSansMonoScript-Regular.ttf', 'MiSansJP.ttf', 'MiSansKR.ttf',
-    'MiSansTCVF.ttf', 'MiSansHantVF.ttf', 'MiSansHKVF.ttf', 'MiSansL3.otf',
-    'XiaomiSansTCVF.ttf', 'XiaomiSansHantVF.ttf', 'XiaomiSansHKVF.ttf', 'XiaomiSansL3.otf',
-    'NotoSansCJKsc-Regular.otf', 'NotoSansSC-Regular.otf',
-    'NotoSansTC-Regular.otf', 'NotoSansHK-Regular.otf',
     'NotoSansMono-Italic.ttf', 'NotoSansDisplay-Oblique.otf',
     'Roboto-Italic.ttf', 'NotoSansMono.ttc', 'NotoSansVF.ttc', '400.ttc',
     '/system/fonts/NotoSansMono.ttf', '../NotoSansDisplay.ttf',
