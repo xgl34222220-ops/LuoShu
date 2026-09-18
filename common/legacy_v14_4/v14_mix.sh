@@ -46,7 +46,12 @@ precheck_mix() {
 if [ -f "$WEIGHTED" ]; then
     case "${1:-config}" in
         start)
-            precheck_mix "$2" "$3" "$4" || exit 0
+            # Role coverage is checked inside the detached worker. Keeping three
+            # embedded-Python probes on the request thread pins the App at 1%.
+            [ -n "${2:-}" ] && [ -n "${3:-}" ] && [ -n "${4:-}" ] || {
+                printf '{"status":"error","message":"请选择中文、英文和数字字体"}\n'
+                exit 0
+            }
             _cjk_mode=fixed
             _latin_mode=fixed
             _digit_mode=fixed
