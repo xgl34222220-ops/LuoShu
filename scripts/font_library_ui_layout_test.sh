@@ -116,8 +116,9 @@ grep -q 'LuoShuHeaderAction' "$DIAGNOSTIC"
 grep -q 'LuoShuHeaderAction' "$LOGS_COMPACT"
 ! grep -q 'Modifier.size(50.dp)' "$LOGS_COMPACT"
 
-# Studio uses one in-flow final action. Both title actions share one Row and the
-# Studio viewport keeps its local padding while the shell lets glass overlap the final content.
+# Studio uses one in-flow final action. Both title actions share one Row. The
+# shell now also owns the directional page motion and Quick Return dock clearance
+# so long lists regain viewport space while the frosted dock keeps its overlap behavior.
 grep -q 'MiuixFinalAction(state, actions)' "$STUDIO_MIUIX"
 grep -q 'MaterialFinalAction(state, actions)' "$STUDIO_MATERIAL"
 grep -q 'topAction: @Composable () -> Unit' "$STUDIO_MIUIX"
@@ -147,7 +148,11 @@ grep -q 'opticalScale = 1.08f' "$STUDIO_TOOLS"
 grep -q 'val edgeToEdgeGlass = appearance.uiStyle == UiStyle.MIUIX' "$SHELL"
 grep -q 'edgeToEdgeGlass -> 0.dp' "$SHELL"
 grep -q 'navigationBottom + 94.dp' "$SHELL"
-grep -q 'navigationBottom + 108.dp' "$SHELL"
+grep -q 'val dockPaddingTarget = if (edgeToEdgeGlass)' "$SHELL"
+grep -q 'if (dockHiddenByScroll) 28.dp else 108.dp' "$SHELL"
+grep -q 'Modifier.nestedScroll(dockScrollConnection)' "$SHELL"
+grep -q 'dockHideThresholdPx' "$SHELL"
+grep -q 'dockShowThresholdPx' "$SHELL"
 [ "$(grep -c 'LocalDockContentPadding provides dockContentPadding' "$SHELL")" -eq 5 ]
 grep -q 'LocalDockContentPadding' "$DOCK_INSETS"
 
@@ -189,7 +194,8 @@ grep -q 'dampingRatio = if (liquidGlass) .68f else .84f' "$SHELL"
 grep -q 'liquidStretch.animateTo' "$SHELL"
 grep -q 'AnimatedVisibility(' "$SHELL"
 grep -q 'key(page)' "$SHELL"
-grep -q 'translationY = (1f - pageEnter.value) \* 10.dp.toPx()' "$SHELL"
+grep -q 'translationX = (1f - pageEnter.value) \* 14.dp.toPx() \* pageDirection' "$SHELL"
+grep -q 'page.motionIndex() - previousPageForMotion.motionIndex()' "$SHELL"
 ! grep -q 'AnimatedContent' "$SHELL"
 
 # Settings follows a grouped home -> detail hierarchy instead of a clipped horizontal tab strip.
