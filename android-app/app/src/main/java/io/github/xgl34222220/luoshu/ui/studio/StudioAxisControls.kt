@@ -31,9 +31,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +60,7 @@ import io.github.xgl34222220.luoshu.ui.font.fontStaticWeights
 import io.github.xgl34222220.luoshu.ui.font.fontWeightName
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
+import kotlinx.coroutines.delay
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -290,6 +293,15 @@ private fun InteractiveAxisSlider(
     val range = (maximum - minimum).coerceAtLeast(.0001f)
     val fraction = ((current - minimum) / range).coerceIn(0f, 1f)
     val scheme = MaterialTheme.colorScheme
+    var tooltipVisible by remember(key) { mutableStateOf(false) }
+    LaunchedEffect(dragging) {
+        if (dragging) {
+            tooltipVisible = true
+        } else {
+            delay(300)
+            tooltipVisible = false
+        }
+    }
 
     BoxWithConstraints(
         modifier = Modifier.fillMaxWidth().height(72.dp),
@@ -307,6 +319,21 @@ private fun InteractiveAxisSlider(
                     .background(scheme.primary.copy(alpha = .14f), CircleShape),
             )
         }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset(y = 45.dp)
+                .height(6.dp)
+                .background(scheme.surfaceVariant, RoundedCornerShape(999.dp)),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(fraction)
+                .offset(y = 45.dp)
+                .height(6.dp)
+                .background(scheme.primary, RoundedCornerShape(999.dp)),
+        )
 
         Slider(
             value = current,
@@ -332,6 +359,12 @@ private fun InteractiveAxisSlider(
             enabled = enabled && maximum > minimum,
             valueRange = minimum..maximum,
             steps = 0,
+            colors = SliderDefaults.colors(
+                activeTrackColor = Color.Transparent,
+                inactiveTrackColor = Color.Transparent,
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = Color.Transparent,
+            ),
         )
 
         if (isWeight) {
@@ -356,7 +389,7 @@ private fun InteractiveAxisSlider(
         }
 
         AnimatedVisibility(
-            visible = dragging,
+            visible = tooltipVisible,
             modifier = Modifier.offset(x = bubbleX),
             enter = fadeIn(tween(90)),
             exit = fadeOut(tween(90)),
@@ -393,7 +426,7 @@ private fun AxisLoadingRow() {
 }
 
 private fun standardWeightSnap(raw: Float, minimum: Float, maximum: Float): Int? =
-    listOf(300, 400, 500, 600, 700, 900).firstOrNull { target ->
+    listOf(400, 700).firstOrNull { target ->
         target.toFloat() in minimum..maximum && abs(raw - target.toFloat()) <= 12f
     }
 
