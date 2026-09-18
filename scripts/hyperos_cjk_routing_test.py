@@ -297,7 +297,7 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(self.reports['/system/fonts/Roboto-Regular.ttf']['cjkRoutingReason'],
                          'stock-coverage-refresh-pending')
 
-    def test_real_misans_latin_shared_zero_does_not_claim_chinese_repertoire(self):
+    def test_misans_latin_direct_alias_keeps_full_cjk_for_launcher_paths(self):
         self.default_pair()
         make_font(self.fonts / '400.ttf', (*DEFAULT_POINTS, 0x3007))
         latin = self.stock('MiSansLatinVF.ttf', (LATIN, 48, 0x3007), ())
@@ -305,22 +305,35 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(latin['metrics']['coverage']['hanCount'], 1)
         self.build()
         with TTFont(self.fonts / 'MiSansLatinVF.ttf') as font:
-            self.assertNotIn(HAN, font.getBestCmap())
-            self.assertNotIn(OTHER_HAN, font.getBestCmap())
-            self.assertIn(0x3007, font.getBestCmap(), 'keep the original ideographic zero')
+            self.assertIn(HAN, font.getBestCmap(),
+                          'HyperOS launcher can open MiSansLatin directly without family fallback')
+            self.assertIn(OTHER_HAN, font.getBestCmap())
+            self.assertIn(0x3007, font.getBestCmap())
             self.assertIn(48, font.getBestCmap())
         self.assertEqual(self.reports['/system/fonts/MiSansLatinVF.ttf']['cjkRoutingReason'],
-                         'stock-latin-primary')
+                         'oem-direct-full-coverage')
+        self.assertEqual(self.reports['/system/fonts/MiSansLatinVF.ttf']['removedCjkMappings'], 0)
         self.assertTrue(batch.bitmap_bottom_slot(
             {'slots': {'/system/fonts/MiSansLatinVF.ttf': latin}},
             '/system/fonts/MiSansLatinVF.ttf',
             batch.contract_for_slot({'slots': {'/system/fonts/MiSansLatinVF.ttf': latin}},
                                     '/system/fonts/MiSansLatinVF.ttf')))
-        # Even one real stock ideograph remains sufficient to protect that slot.
+        # The direct-load rule is filename/ROM-path based, independent of whether
+        # the stock seed happened to contain one real ideograph on this build.
         self.stock('MiSansLatinVF.ttf', (LATIN, 48, 0x3007, HAN), ())
         self.build()
         self.assertEqual(self.reports['/system/fonts/MiSansLatinVF.ttf']['cjkRoutingReason'],
-                         'stock-han-slot')
+                         'oem-direct-full-coverage')
+
+    def test_numeric_hyperos_weight_alias_keeps_full_cjk(self):
+        self.default_pair()
+        self.stock('400.ttf', (LATIN, 48), ())
+        self.build()
+        with TTFont(self.fonts / '400.ttf') as font:
+            self.assertIn(HAN, font.getBestCmap())
+            self.assertIn(OTHER_HAN, font.getBestCmap())
+        self.assertEqual(self.reports['/system/fonts/400.ttf']['cjkRoutingReason'],
+                         'oem-direct-full-coverage')
 
     def test_no_staged_fallback_keeps_primary_han(self):
         self.default_pair()
