@@ -10,6 +10,10 @@ legacy_verify_body="$(awk '/^_verify_font_copy\(\)/,/^}/' "$ROOT/common/legacy_v
 printf '%s\n' "$legacy_verify_body" | grep -q 'stat -c %s'
 ! printf '%s\n' "$legacy_verify_body" | grep -q 'wc -c'
 
+legacy_hyperos_body="$(awk '/^copy_as_hyperos\(\)/,/^}/' "$ROOT/common/legacy_v14_4/rom_adapters.sh")"
+printf '%s\n' "$legacy_hyperos_body" | grep -q 'if \[ "$mode" = quick \]'
+printf '%s\n' "$legacy_hyperos_body" | grep -q '仅暂存 donor'
+
 payload_body="$(awk '/^luoshu_payload_validate_current\(\)/,/^}/' "$ROOT/common/font_safety.sh")"
 ! printf '%s\n' "$payload_body" | grep -q 'wc -c'
 dynamic_body="$(awk '/^luoshu_dynamic_targets_apply\(\)/,/^}/' "$ROOT/common/font_safety.sh")"
