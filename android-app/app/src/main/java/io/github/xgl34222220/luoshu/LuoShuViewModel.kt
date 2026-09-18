@@ -229,13 +229,12 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             val result = RootShell.exec(
                 "if [ -f ${RootShell.quote(bridge)} ]; then sh ${RootShell.quote(bridge)} status; " +
                     "else printf '%s\\n' '{\"status\":\"error\",\"message\":\"请先刷入匹配的洛书模块\"}'; fi",
-                timeoutMs = 20_000L,
+                timeoutMs = 8_000L,
             )
             if (result.code != 0) {
-                snapshot = ModuleSnapshot(
+                snapshot = snapshot.copy(
                     loading = false,
-                    rootGranted = false,
-                    error = result.stderr.ifBlank { "Root 授权失败或 su 不可用" },
+                    error = result.stderr.ifBlank { "状态读取暂时失败，请重试" },
                 )
                 return@launch
             }
@@ -501,6 +500,36 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
+    private suspend fun runningSwitchTask(): JSONObject? {
+        val status = RootShell.exec(
+            "sh ${RootShell.quote(bridge)} switch_status",
+            timeoutMs = 4_000L,
+        )
+        if (status.code != 0) return null
+        val root = runCatching { firstJson(status.stdout) }.getOrNull() ?: return null
+        if (root.optString("status") != "ok") return null
+        val data = root.optJSONObject("data") ?: return null
+        val state = data.optString("state")
+        val taskId = data.optString("task")
+        return data.takeIf { taskId.isNotBlank() && state in setOf("queued", "running") }
+    }
+
+    private suspend fun adoptRunningSwitch(fontId: String): Boolean {
+        val data = runningSwitchTask() ?: return false
+        val taskId = data.optString("task")
+        operationBusy = true
+        operationMessage = data.optString("message", "正在继续字体切换任务…")
+        snapshot = snapshot.copy(
+            taskType = "switch",
+            taskId = taskId,
+            taskState = data.optString("state", "running"),
+            taskMessage = operationMessage,
+            taskProgress = data.optInt("percent", snapshot.taskProgress).coerceIn(0, 100),
+        )
+        watchSwitchTask(taskId, fontId)
+        return true
+    }
+
     fun applyFont(fontId: String) {
         if (operationBusy || mixState.busy) return
         operationBusy = true
@@ -524,9 +553,15 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
-                operationMessage = error.message ?: "字体应用失败"
-                snapshot = snapshot.copy(taskState = "failed", taskMessage = operationMessage)
-                operationBusy = false
+                // The request process may time out after the detached worker was
+                // already created. Adopt that real backend task before showing a
+                // local failure or allowing a duplicate second apply.
+                val adopted = runCatching { adoptRunningSwitch(fontId) }.getOrDefault(false)
+                if (!adopted) {
+                    operationMessage = error.message ?: "字体应用失败"
+                    snapshot = snapshot.copy(taskState = "failed", taskMessage = operationMessage)
+                    operationBusy = false
+                }
             }
         }
     }
@@ -634,7 +669,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    private suspend fun watchSwitchTask(taskId: String, fontId: String) {
+    private suspend fun watchSwitchTask(taskId: String, fontId: String, recoveryDepth: Int = 0) {
         if (watchedTaskId == taskId) return
         watchedTaskId = taskId
         operationBusy = true
@@ -672,14 +707,28 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
-            // Ask the backend to reap a dead worker before allowing another
-            // apply. This keeps a polling/transport timeout from leaving a
-            // stale "running" record visible on the next attempt.
+            // Reap a dead worker, but never turn a transport timeout into a
+            // fake terminal failure while the detached worker is still alive.
             runCatching {
                 RootShell.exec(
                     "sh ${RootShell.quote(bridge)} switch_reconcile",
                     timeoutMs = 4_000L,
                 )
+            }
+            val live = if (recoveryDepth < 1) runCatching { runningSwitchTask() }.getOrNull() else null
+            val liveTaskId = live?.optString("task").orEmpty()
+            if (live != null && liveTaskId.isNotBlank()) {
+                operationMessage = live.optString("message", "正在继续字体切换任务…")
+                snapshot = snapshot.copy(
+                    taskType = "switch",
+                    taskId = liveTaskId,
+                    taskState = live.optString("state", "running"),
+                    taskMessage = operationMessage,
+                    taskProgress = live.optInt("percent", snapshot.taskProgress).coerceIn(0, 100),
+                )
+                watchedTaskId = ""
+                watchSwitchTask(liveTaskId, fontId, recoveryDepth + 1)
+                return
             }
             operationMessage = error.message ?: "字体应用失败"
             snapshot = snapshot.copy(taskState = "failed", taskMessage = operationMessage, taskProgress = 100)
