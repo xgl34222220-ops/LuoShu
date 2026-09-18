@@ -144,7 +144,7 @@ private fun ProvideMiuixTokens(settings: AppearanceSettings, content: @Composabl
         pageBackground = when {
             pureBlack -> Color.Black
             dark -> scheme.surfaceContainerLowest
-            else -> lerp(Color(0xFFF4F6FA), scheme.primaryContainer, .07f)
+            else -> lerp(Color(0xFFF1F5F9), scheme.primaryContainer, .05f)
         },
         cardBackground = when {
             pureBlack -> Color(0xFF111214)
@@ -154,7 +154,7 @@ private fun ProvideMiuixTokens(settings: AppearanceSettings, content: @Composabl
         elevatedCardBackground = when {
             pureBlack -> Color(0xFF1B1C20)
             dark -> scheme.surfaceContainerHigh
-            else -> lerp(scheme.surfaceContainerLowest, scheme.primaryContainer, .20f)
+            else -> lerp(scheme.surfaceContainerLowest, scheme.primaryContainer, .12f)
         },
         textPrimary = scheme.onSurface,
         textSecondary = scheme.onSurfaceVariant,
