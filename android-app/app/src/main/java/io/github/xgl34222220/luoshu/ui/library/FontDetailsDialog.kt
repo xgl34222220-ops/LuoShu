@@ -19,11 +19,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -44,6 +44,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -54,6 +58,7 @@ import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 
 private enum class FontPreviewMode(val label: String) {
     Mixed("综合"),
@@ -261,13 +266,13 @@ internal fun FontDetailsDialogRoute(
                         HorizontalDivider(color = scheme.outlineVariant.copy(alpha = .42f))
                         when {
                             deepLoading -> {
-                                Row(
-                                    modifier = Modifier.padding(16.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
+                                Column(
+                                    modifier = Modifier.padding(15.dp),
+                                    verticalArrangement = Arrangement.spacedBy(9.dp),
                                 ) {
-                                    CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
-                                    Spacer(Modifier.width(11.dp))
-                                    Text("正在分析字体内部结构…", color = secondaryText, fontSize = 12.sp)
+                                    LuoShuLoadingSkeleton(Modifier.fillMaxWidth(.46f).height(14.dp))
+                                    LuoShuLoadingSkeleton(Modifier.fillMaxWidth().height(13.dp))
+                                    LuoShuLoadingSkeleton(Modifier.fillMaxWidth(.78f).height(13.dp))
                                 }
                             }
                             deepMetadata?.error?.isNotBlank() == true -> {
@@ -286,16 +291,11 @@ internal fun FontDetailsDialogRoute(
                                 }
                             }
                             else -> {
-                                SelectionContainer {
-                                    Text(
-                                        text = deepMetadata?.text.orEmpty(),
-                                        modifier = Modifier.padding(15.dp),
-                                        color = primaryText,
-                                        fontSize = 12.sp,
-                                        lineHeight = 16.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                    )
-                                }
+                                StructuredMetadata(
+                                    text = deepMetadata?.text.orEmpty(),
+                                    primaryText = primaryText,
+                                    secondaryText = secondaryText,
+                                )
                             }
                         }
                     }
@@ -327,6 +327,100 @@ internal fun FontDetailsDialogRoute(
                     shape = RoundedCornerShape(17.dp),
                 ) {
                     Text("应用此字体", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+private data class MetadataDisplayRow(
+    val label: String,
+    val value: String = "",
+    val section: Boolean = false,
+)
+
+private fun metadataDisplayRows(text: String): List<MetadataDisplayRow> = buildList {
+    text.lineSequence().forEach { raw ->
+        val line = raw.trim()
+        if (line.isBlank()) return@forEach
+        val separator = line.indexOf('：')
+        if (separator > 0) {
+            add(
+                MetadataDisplayRow(
+                    label = line.substring(0, separator).trim(),
+                    value = line.substring(separator + 1).trim(),
+                ),
+            )
+        } else {
+            add(MetadataDisplayRow(label = line, section = true))
+        }
+    }
+}
+
+@Composable
+private fun StructuredMetadata(
+    text: String,
+    primaryText: Color,
+    secondaryText: Color,
+) {
+    val clipboard = LocalClipboardManager.current
+    val haptic = LocalHapticFeedback.current
+    val rows = remember(text) { metadataDisplayRows(text) }
+    Column(Modifier.padding(horizontal = 15.dp, vertical = 9.dp)) {
+        rows.forEachIndexed { index, row ->
+            if (row.section) {
+                if (index > 0) Spacer(Modifier.height(7.dp))
+                Text(
+                    row.label,
+                    color = primaryText,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(5.dp))
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        row.label,
+                        modifier = Modifier.width(82.dp),
+                        color = secondaryText,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                    SelectionContainer(Modifier.weight(1f)) {
+                        Text(
+                            row.value,
+                            color = primaryText,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (row.label.equals("SHA-256", ignoreCase = true)) {
+                        Spacer(Modifier.width(4.dp))
+                        IconButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(row.value))
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            },
+                            modifier = Modifier.size(36.dp),
+                        ) {
+                            Icon(
+                                Icons.Rounded.ContentCopy,
+                                contentDescription = "复制 SHA-256",
+                                modifier = Modifier.size(17.dp),
+                                tint = secondaryText,
+                            )
+                        }
+                    }
+                }
+                if (index < rows.lastIndex && !rows[index + 1].section) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .26f))
                 }
             }
         }

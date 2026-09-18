@@ -33,14 +33,27 @@ class CompatibilitySmokeRun(base.SmokeRun):
             time.sleep(.3)
         else:
             raise RuntimeError('Google 字体兼容页面未加载')
-        for _ in range(5):
+        details_expanded = False
+        for _ in range(8):
             root = self.hierarchy()
             texts = {text for node in root.iter('node') for text in base.labels(node)}
             if any('停用或卸载洛书前' in text for text in texts):
                 self.capture('google-font-chinese-help', root)
                 return
+            if not details_expanded:
+                toggles = [
+                    node for node in root.iter('node')
+                    if node.get('package') == self.package
+                    and '详细原理与影响范围' in base.labels(node)
+                ]
+                if toggles:
+                    x, y = base.center(toggles[0])
+                    self.adb('shell', 'input', 'tap', str(x), str(y))
+                    details_expanded = True
+                    time.sleep(.7)
+                    continue
             self.scroll(root)
-        raise RuntimeError('中文影响与恢复说明不可见')
+        raise RuntimeError('中文影响与恢复说明不可见或折叠说明无法展开')
 
     def scroll(self, root):
         rectangles = []

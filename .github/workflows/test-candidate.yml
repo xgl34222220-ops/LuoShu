@@ -31,7 +31,9 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
 
       - uses: gradle/actions/setup-gradle@v4
         with:

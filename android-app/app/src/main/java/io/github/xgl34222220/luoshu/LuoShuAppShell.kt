@@ -71,6 +71,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -139,6 +143,14 @@ private val dockPages = listOf(
     AppPage.Settings,
 )
 
+private fun AppPage.motionIndex(): Int = when (this) {
+    AppPage.Home -> 0
+    AppPage.Library -> 1
+    AppPage.Studio -> 2
+    AppPage.Settings -> 3
+    AppPage.Logs -> 4
+}
+
 @Composable
 internal fun LuoShuAppShell(
     viewModel: LuoShuViewModel,
@@ -147,6 +159,7 @@ internal fun LuoShuAppShell(
 ) {
     val appearance by appearanceViewModel.settings.collectAsStateWithLifecycle()
     var page by rememberSaveable { mutableStateOf(AppPage.Home) }
+    var previousPageForMotion by remember { mutableStateOf(AppPage.Home) }
     var settingsDetailVisible by rememberSaveable { mutableStateOf(false) }
     var logsReturnPage by rememberSaveable { mutableStateOf(AppPage.Home) }
     var pendingApply by remember { mutableStateOf<FontItem?>(null) }
@@ -236,6 +249,47 @@ internal fun LuoShuAppShell(
     LuoShuTheme(appearance) {
         val dark = MaterialTheme.colorScheme.background.luminance() < .5f
         val showDock = page != AppPage.Logs && !(page == AppPage.Settings && settingsDetailVisible)
+        val quickReturnEnabled = appearance.floatingDock &&
+            showDock &&
+            page in listOf(AppPage.Library, AppPage.Studio, AppPage.Settings)
+        var dockHiddenByScroll by remember(page) { mutableStateOf(false) }
+        var dockScrollAccumulator by remember(page) { mutableFloatStateOf(0f) }
+        val density = LocalDensity.current
+        val dockHideThresholdPx = with(density) { 34.dp.toPx() }
+        val dockShowThresholdPx = with(density) { 20.dp.toPx() }
+        val dockScrollConnection = remember(page, quickReturnEnabled, dockHideThresholdPx, dockShowThresholdPx) {
+            object : NestedScrollConnection {
+                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                    if (!quickReturnEnabled) return Offset.Zero
+                    when {
+                        available.y < -1f -> {
+                            if (dockScrollAccumulator < 0f) dockScrollAccumulator = 0f
+                            dockScrollAccumulator += -available.y
+                            if (dockScrollAccumulator >= dockHideThresholdPx) {
+                                dockHiddenByScroll = true
+                                dockScrollAccumulator = 0f
+                            }
+                        }
+                        available.y > 1f -> {
+                            if (dockScrollAccumulator > 0f) dockScrollAccumulator = 0f
+                            dockScrollAccumulator -= available.y
+                            if (-dockScrollAccumulator >= dockShowThresholdPx) {
+                                dockHiddenByScroll = false
+                                dockScrollAccumulator = 0f
+                            }
+                        }
+                    }
+                    return Offset.Zero
+                }
+            }
+        }
+        LaunchedEffect(quickReturnEnabled, showDock) {
+            if (!quickReturnEnabled || !showDock) {
+                dockHiddenByScroll = false
+                dockScrollAccumulator = 0f
+            }
+        }
+        val dockActuallyVisible = showDock && !dockHiddenByScroll
         val blurActive = appearance.blurEnabled && appearance.glassEnabled && showDock
         val hazeState = rememberHazeState(blurEnabled = blurActive)
         val liquidBackdrop = rememberLayerBackdrop()
@@ -253,9 +307,19 @@ internal fun LuoShuAppShell(
             !appearance.floatingDock -> navigationBottom + 82.dp
             else -> navigationBottom + 94.dp
         }
-        val dockContentPadding = if (edgeToEdgeGlass) navigationBottom + 108.dp else 0.dp
+        val dockPaddingTarget = if (edgeToEdgeGlass) {
+            navigationBottom + if (dockHiddenByScroll) 28.dp else 108.dp
+        } else {
+            0.dp
+        }
+        val dockContentPadding by animateDpAsState(
+            targetValue = dockPaddingTarget,
+            animationSpec = tween(180, easing = FastOutSlowInEasing),
+            label = "dockContentPadding",
+        )
         val contentModifier = Modifier
             .fillMaxSize()
+            .then(if (quickReturnEnabled) Modifier.nestedScroll(dockScrollConnection) else Modifier)
             .then(if (blurActive && !liquidGlassSupported) Modifier.hazeSource(state = hazeState) else Modifier)
             .then(if (liquidGlassSupported) Modifier.layerBackdrop(liquidBackdrop) else Modifier)
 
@@ -266,19 +330,28 @@ internal fun LuoShuAppShell(
                 // the outgoing page alive for 210–360 ms; the backdrop shader then refracted that
                 // stale layer through the dock, producing the one-frame/old-page flash in recordings.
                 key(page) {
+                    val pageDirection = remember(page) {
+                        val delta = page.motionIndex() - previousPageForMotion.motionIndex()
+                        when {
+                            delta > 0 -> 1f
+                            delta < 0 -> -1f
+                            else -> 0f
+                        }
+                    }
                     val pageEnter = remember { Animatable(0f) }
                     LaunchedEffect(Unit) {
                         pageEnter.animateTo(
                             targetValue = 1f,
-                            animationSpec = spring(dampingRatio = .86f, stiffness = 430f),
+                            animationSpec = tween(210, easing = FastOutSlowInEasing),
                         )
+                        previousPageForMotion = page
                     }
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
-                                alpha = 1f
-                                translationY = (1f - pageEnter.value) * 10.dp.toPx()
+                                alpha = .94f + (.06f * pageEnter.value)
+                                translationX = (1f - pageEnter.value) * 14.dp.toPx() * pageDirection
                             },
                     ) {
                     when (page) {
@@ -373,10 +446,10 @@ internal fun LuoShuAppShell(
 
             val dockPage = if (page in dockPages) page else logsReturnPage
             AnimatedVisibility(
-                visible = showDock,
+                visible = dockActuallyVisible,
                 modifier = Modifier.align(Alignment.BottomCenter),
-                enter = fadeIn(tween(220)) + slideInVertically(tween(300, easing = FastOutSlowInEasing)) { it / 2 },
-                exit = fadeOut(tween(170)) + slideOutVertically(tween(240, easing = FastOutSlowInEasing)) { it / 2 },
+                enter = fadeIn(tween(180)) + slideInVertically(tween(210, easing = FastOutSlowInEasing)) { it / 2 },
+                exit = fadeOut(tween(150)) + slideOutVertically(tween(190, easing = FastOutSlowInEasing)) { it },
             ) {
                 if (appearance.uiStyle == UiStyle.MATERIAL) {
                     MaterialAppDock(

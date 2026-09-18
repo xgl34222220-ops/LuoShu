@@ -48,7 +48,9 @@ jobs:
         with:
           node-version: 22
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
 
       - uses: gradle/actions/setup-gradle@v4
         with:

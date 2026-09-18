@@ -1,5 +1,10 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.horizontalScroll
@@ -16,17 +21,23 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -38,6 +49,8 @@ import io.github.xgl34222220.luoshu.ui.font.fontFixedWeight
 import io.github.xgl34222220.luoshu.ui.font.fontStaticWeights
 import io.github.xgl34222220.luoshu.ui.font.fontWeightName
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @Composable
@@ -50,6 +63,7 @@ internal fun MaterialStudioAxisControls(
     onAxis: (String, Float) -> Unit,
 ) {
     val axisInfo = rememberWeightAxisInfo(font)
+    val haptic = LocalHapticFeedback.current
     when {
         font.variable && axisInfo.loading -> AxisLoadingRow()
         font.variable && axisInfo.axes.isNotEmpty() -> {
@@ -60,6 +74,14 @@ internal fun MaterialStudioAxisControls(
                     val isWeight = axis.tag == "wght"
                     val current = (axes[axis.tag] ?: if (isWeight) weight.toFloat() else axis.default)
                         .coerceIn(minimum, maximum)
+                    val sliderInteraction = remember(font.id, axis.tag) { MutableInteractionSource() }
+                    val dragging by sliderInteraction.collectIsDraggedAsState()
+                    val badgeScale by animateFloatAsState(
+                        targetValue = if (dragging) 1.05f else 1f,
+                        animationSpec = spring(dampingRatio = .72f, stiffness = Spring.StiffnessMedium),
+                        label = "axisValueBadge",
+                    )
+                    var lastHapticWeight by remember(font.id, axis.tag) { mutableStateOf<Int?>(null) }
                     Column {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -67,6 +89,11 @@ internal fun MaterialStudioAxisControls(
                                 Text(axis.tag, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                             }
                             Surface(
+                                modifier = Modifier.graphicsLayer {
+                                    scaleX = badgeScale
+                                    scaleY = badgeScale
+                                    translationY = if (dragging) -2.dp.toPx() else 0f
+                                },
                                 shape = RoundedCornerShape(999.dp),
                                 color = MaterialTheme.colorScheme.primaryContainer,
                             ) {
@@ -82,11 +109,23 @@ internal fun MaterialStudioAxisControls(
                         Slider(
                             value = current,
                             onValueChange = { raw ->
-                                val next = if (isWeight) {
-                                    ((raw / 10f).roundToInt() * 10).toFloat().coerceIn(minimum, maximum)
-                                } else raw.coerceIn(minimum, maximum)
+                                val magnetic = if (isWeight) standardWeightSnap(raw, minimum, maximum) else null
+                                val next = when {
+                                    magnetic != null -> magnetic.toFloat()
+                                    isWeight -> ((raw / 10f).roundToInt() * 10).toFloat().coerceIn(minimum, maximum)
+                                    else -> raw.coerceIn(minimum, maximum)
+                                }
+                                if (magnetic != null && lastHapticWeight != magnetic) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    lastHapticWeight = magnetic
+                                } else if (magnetic == null && lastHapticWeight != null &&
+                                    abs(raw - lastHapticWeight!!.toFloat()) > 22f
+                                ) {
+                                    lastHapticWeight = null
+                                }
                                 onAxis(axis.tag, next)
                             },
+                            interactionSource = sliderInteraction,
                             enabled = enabled && maximum > minimum,
                             valueRange = minimum..maximum,
                             steps = if (isWeight && maximum > minimum) {
@@ -138,6 +177,7 @@ internal fun MiuixStudioAxisControls(
 ) {
     val axisInfo = rememberWeightAxisInfo(font)
     val tokens = LocalMiuixTokens.current
+    val haptic = LocalHapticFeedback.current
     when {
         font.variable && axisInfo.loading -> AxisLoadingRow()
         font.variable && axisInfo.axes.isNotEmpty() -> {
@@ -148,6 +188,14 @@ internal fun MiuixStudioAxisControls(
                     val isWeight = axis.tag == "wght"
                     val current = (axes[axis.tag] ?: if (isWeight) weight.toFloat() else axis.default)
                         .coerceIn(minimum, maximum)
+                    val sliderInteraction = remember(font.id, axis.tag) { MutableInteractionSource() }
+                    val dragging by sliderInteraction.collectIsDraggedAsState()
+                    val badgeScale by animateFloatAsState(
+                        targetValue = if (dragging) 1.05f else 1f,
+                        animationSpec = spring(dampingRatio = .72f, stiffness = Spring.StiffnessMedium),
+                        label = "axisValueBadge",
+                    )
+                    var lastHapticWeight by remember(font.id, axis.tag) { mutableStateOf<Int?>(null) }
                     Surface(
                         shape = RoundedCornerShape(22.dp),
                         color = tokens.textPrimary.copy(alpha = .035f),
@@ -164,6 +212,11 @@ internal fun MiuixStudioAxisControls(
                                 Text(axis.tag, color = tokens.textSecondary, fontSize = 12.sp)
                                 Spacer(Modifier.width(8.dp))
                                 Surface(
+                                    modifier = Modifier.graphicsLayer {
+                                        scaleX = badgeScale
+                                        scaleY = badgeScale
+                                        translationY = if (dragging) -2.dp.toPx() else 0f
+                                    },
                                     shape = RoundedCornerShape(999.dp),
                                     color = MaterialTheme.colorScheme.primary.copy(alpha = .12f),
                                 ) {
@@ -179,11 +232,23 @@ internal fun MiuixStudioAxisControls(
                             Slider(
                                 value = current,
                                 onValueChange = { raw ->
-                                    val next = if (isWeight) {
-                                        ((raw / 10f).roundToInt() * 10).toFloat().coerceIn(minimum, maximum)
-                                    } else raw.coerceIn(minimum, maximum)
+                                    val magnetic = if (isWeight) standardWeightSnap(raw, minimum, maximum) else null
+                                    val next = when {
+                                        magnetic != null -> magnetic.toFloat()
+                                        isWeight -> ((raw / 10f).roundToInt() * 10).toFloat().coerceIn(minimum, maximum)
+                                        else -> raw.coerceIn(minimum, maximum)
+                                    }
+                                    if (magnetic != null && lastHapticWeight != magnetic) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        lastHapticWeight = magnetic
+                                    } else if (magnetic == null && lastHapticWeight != null &&
+                                        abs(raw - lastHapticWeight!!.toFloat()) > 22f
+                                    ) {
+                                        lastHapticWeight = null
+                                    }
                                     onAxis(axis.tag, next)
                                 },
+                                interactionSource = sliderInteraction,
                                 enabled = enabled && maximum > minimum,
                                 valueRange = minimum..maximum,
                                 steps = if (isWeight && maximum > minimum) {
@@ -235,12 +300,19 @@ internal fun MiuixStudioAxisControls(
 
 @Composable
 private fun AxisLoadingRow() {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-        Spacer(Modifier.width(9.dp))
-        Text("正在读取可调参数…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LuoShuLoadingSkeleton(Modifier.fillMaxWidth(.36f).height(14.dp))
+        LuoShuLoadingSkeleton(
+            Modifier.fillMaxWidth().height(42.dp),
+            shape = RoundedCornerShape(18.dp),
+        )
     }
 }
+
+private fun standardWeightSnap(raw: Float, minimum: Float, maximum: Float): Int? =
+    listOf(300, 400, 500, 600, 700, 900).firstOrNull { target ->
+        target.toFloat() in minimum..maximum && abs(raw - target.toFloat()) <= 12f
+    }
 
 @Composable
 private fun MaterialWeightChip(text: String, selected: Boolean, enabled: Boolean, onClick: () -> Unit) {

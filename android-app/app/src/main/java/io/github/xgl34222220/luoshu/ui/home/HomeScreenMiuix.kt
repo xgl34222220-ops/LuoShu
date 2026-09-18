@@ -56,6 +56,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 
 @Composable
 fun HomeScreenMiuix(
@@ -373,7 +374,10 @@ private fun MiuixSystemWeightCard(weight: HomeWeightUiState, actions: HomeAction
             }
             Spacer(Modifier.height(16.dp))
             when {
-                weight.loading -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                weight.loading -> LuoShuLoadingSkeleton(
+                    Modifier.fillMaxWidth().height(12.dp),
+                    shape = RoundedCornerShape(999.dp),
+                )
                 !weight.supported -> Text(
                     weight.error.ifBlank { "当前系统不支持全局粗细微调" },
                     color = MaterialTheme.colorScheme.error,

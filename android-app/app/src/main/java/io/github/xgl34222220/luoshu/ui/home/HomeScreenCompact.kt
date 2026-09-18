@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
@@ -442,7 +443,10 @@ private fun SystemWeightCard(
             }
             Spacer(Modifier.height(8.dp))
             when {
-                weight.loading -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                weight.loading -> LuoShuLoadingSkeleton(
+                    Modifier.fillMaxWidth().height(12.dp),
+                    shape = RoundedCornerShape(999.dp),
+                )
                 !weight.supported -> Text(
                     weight.error.ifBlank { "当前系统不支持全局粗细微调" },
                     color = MaterialTheme.colorScheme.error,
