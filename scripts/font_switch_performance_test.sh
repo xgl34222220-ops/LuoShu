@@ -19,6 +19,21 @@ grep -q 'mark_load_verification_pending' "$ROOT/common/font_switch_task.sh"
 grep -q 'heartbeat=%s' "$ROOT/common/font_switch_task.sh"
 grep -q 'timeout=%s' "$ROOT/common/font_switch_task.sh"
 
+# Startup/refresh and task submission must remain non-blocking.
+_start_body="$(awk '/^start_task\(\)/,/^}/' "$ROOT/common/font_switch_task.sh")"
+! printf '%s\n' "$_start_body" | grep -q 'write_task .* running '
+grep -q 'switch_reconcile' "$ROOT/common/app_bridge.sh"
+grep -q 'Normal App status/refresh must be file-read fast' "$ROOT/common/app_bridge.sh"
+! grep -q 'if (parsed.installed) requestFontPrewarm()' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
+! grep -q 'if (snapshot.installed) requestFontPrewarm()' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
+! grep -q 'validate .*fontId' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
+_unit_effect="$(awk '/LaunchedEffect\(Unit\)/,/^    }/' \
+    "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt")"
+! printf '%s\n' "$_unit_effect" | grep -q 'refreshSystemWeight'
+
 # The full v4 manager is preserved behind the router for inventory and regression coverage.
 # Its performance markers remain pinned here, but final App apply no longer enters this body.
 grep -q 'luoshu_switch_perf_mark complete' "$ROOT/common/font_manager_v4.sh"
@@ -32,6 +47,10 @@ grep -q 'canonical_baseline_target = _canonical_baseline_target' "$ROOT/common/h
 grep -q 'source_baselines\[profile_key\]' "$ROOT/common/hyperos_metrics_batch.py"
 grep -q 'Baseline normalization is the only operation that rewrites' "$ROOT/common/hyperos_metrics_batch.py"
 grep -q 'test_baseline_outline_rewrite_runs_once_per_shared_donor' "$ROOT/scripts/hyperos_metrics_batch_test.py"
+grep -q 'persistent_baseline_source' "$ROOT/common/hyperos_metrics_batch.py"
+grep -q 'cache/hyperos-baseline' "$ROOT/common/hyperos_metrics_batch.py"
+grep -q 'test_baseline_donor_cache_survives_repeated_switches' "$ROOT/scripts/hyperos_metrics_batch_test.py"
+grep -q 'luoshu_font_validation_cache_restore' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 
 # Final apply is intentionally the v14.4 physical-file path. Keep the modern identity lock,
 # but never reconnect the device-template/slot/XML payload pipeline that caused the 94% stall.
