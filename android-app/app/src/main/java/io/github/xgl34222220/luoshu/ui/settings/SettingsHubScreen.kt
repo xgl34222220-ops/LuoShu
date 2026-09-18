@@ -9,6 +9,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.BorderStroke
@@ -66,6 +68,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -77,6 +80,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -163,55 +167,63 @@ internal fun SettingsHubRoute(
         if (item == SettingsSection.UPDATE) model.checkUpdate()
     }
 
-    AnimatedContent(
-        targetState = section,
-        modifier = Modifier.fillMaxSize(),
-        transitionSpec = {
-            if (targetState != null) {
-                (fadeIn(tween(250)) + slideInHorizontally(tween(340)) { it })
-                    .togetherWith(
-                        fadeOut(tween(210), targetAlpha = .52f) + slideOutHorizontally(tween(340)) { -it / 7 },
-                    )
-            } else {
-                (fadeIn(tween(230)) + slideInHorizontally(tween(340)) { -it / 7 })
-                    .togetherWith(fadeOut(tween(210)) + slideOutHorizontally(tween(340)) { it })
-            }
-        },
-        label = "settingsDetailTransition",
-    ) { target ->
-        if (target == null) {
-            SettingsHome(
-                model = model,
-                onOpenSection = ::openSection,
-                onOpenTasks = onOpenTasks,
+    val pageBackground = if (settings.uiStyle == UiStyle.MIUIX) {
+        LocalMiuixTokens.current.pageBackground
+    } else {
+        MaterialTheme.colorScheme.background
+    }
+    key(section?.name ?: "settings-home") {
+        val pageEnter = remember { Animatable(0f) }
+        val direction = if (section == null) -1f else 1f
+        LaunchedEffect(Unit) {
+            pageEnter.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(220, easing = FastOutSlowInEasing),
             )
-        } else {
-            val detailShape = RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp)
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .navigationBarsPadding()
-                    .padding(start = if (settings.uiStyle == UiStyle.MIUIX) 6.dp else 0.dp)
-                    .then(
-                        if (settings.uiStyle == UiStyle.MIUIX) {
-                            Modifier
-                                .shadow(22.dp, detailShape, clip = false)
-                                .clip(detailShape)
-                                .background(LocalMiuixTokens.current.pageBackground)
-                        } else {
-                            Modifier
-                        },
-                    ),
-            ) {
-                LuoShuDetailBar(title = target.label, onBack = { sectionName = null })
-                Box(Modifier.weight(1f)) {
-                    when (target) {
-                        SettingsSection.OVERVIEW -> OverviewPage(model)
-                        SettingsSection.APPEARANCE -> AppearancePage(settings, actions)
-                        SettingsSection.SAFETY -> SafetyPage(model, settings.uiStyle)
-                        SettingsSection.GOOGLE -> GoogleFontCompatibilityPage()
-                        SettingsSection.BACKUP -> pageList { item { FullBackupCard(settings, actions) } }
-                        SettingsSection.UPDATE -> UpdatePage(model)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(pageBackground)
+                .graphicsLayer {
+                    translationX = (1f - pageEnter.value) * 24.dp.toPx() * direction
+                },
+        ) {
+            if (section == null) {
+                SettingsHome(
+                    model = model,
+                    onOpenSection = ::openSection,
+                    onOpenTasks = onOpenTasks,
+                )
+            } else {
+                val detailShape = RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp)
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(pageBackground)
+                        .navigationBarsPadding()
+                        .padding(start = if (settings.uiStyle == UiStyle.MIUIX) 6.dp else 0.dp)
+                        .then(
+                            if (settings.uiStyle == UiStyle.MIUIX) {
+                                Modifier
+                                    .shadow(22.dp, detailShape, clip = false)
+                                    .clip(detailShape)
+                                    .background(pageBackground)
+                            } else {
+                                Modifier.background(pageBackground)
+                            },
+                        ),
+                ) {
+                    LuoShuDetailBar(title = section.label, onBack = { sectionName = null })
+                    Box(Modifier.weight(1f).background(pageBackground)) {
+                        when (section) {
+                            SettingsSection.OVERVIEW -> OverviewPage(model)
+                            SettingsSection.APPEARANCE -> AppearancePage(settings, actions)
+                            SettingsSection.SAFETY -> SafetyPage(model, settings.uiStyle)
+                            SettingsSection.GOOGLE -> GoogleFontCompatibilityPage()
+                            SettingsSection.BACKUP -> pageList { item { FullBackupCard(settings, actions) } }
+                            SettingsSection.UPDATE -> UpdatePage(model)
+                        }
                     }
                 }
             }
