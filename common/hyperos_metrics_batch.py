@@ -205,6 +205,28 @@ def _inventory_targets(data: dict) -> list[str]:
     return selected
 
 
+def _outline_baseline_slot(data: dict, logical: str) -> bool:
+    """Only the CJK-bearing primary OEM face gets an outline translation.
+
+    Latin UI, clock and mono aliases keep the donor outlines untouched and use
+    their own stock line contracts. Applying the MiSans CJK visual shift to
+    Roboto/GoogleSans was a cross-family baseline error that showed up as QQ /
+    browser / numeric text moving even when the main Chinese UI improved.
+    """
+    slot = (data.get('slots') or {}).get(logical, {})
+    if _specialized_slot(logical, slot):
+        return False
+    name = Path(logical).name.lower()
+    if 'latin' in name or _latin_ui_slot(logical, slot):
+        return False
+    coverage = slot.get('metrics', {}).get('coverage')
+    if logical == data.get('mainSlotPath'):
+        return True
+    if _oem_direct_full_coverage_slot(logical):
+        return bool(valid_coverage(coverage) and _stock_has_cjk_ideographs(coverage))
+    return False
+
+
 def _canonical_baseline_target(template: dict, data: dict) -> str:
     """Choose one ROM visual baseline for every donor rewrite.
 
@@ -819,7 +841,10 @@ def build(module: Path, stage: Path, names: list[str], *, inventory_ui: bool = F
                             template, canonical_baseline_target, source_profiles[profile_key])
                     else:
                         source_baselines[profile_key] = (0, '', 'stock-probe-unavailable')
-                shift_y, shift_probe, shift_reason = source_baselines[profile_key]
+                if _outline_baseline_slot(data, logical):
+                    shift_y, shift_probe, shift_reason = source_baselines[profile_key]
+                else:
+                    shift_y, shift_probe, shift_reason = 0, '', 'slot-metrics-only'
                 target_weight = weight_for_name(dest.name)
                 key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract,
                        routing, stock_punctuation, routing_reason, align_bottom, shift_y, target_weight)
