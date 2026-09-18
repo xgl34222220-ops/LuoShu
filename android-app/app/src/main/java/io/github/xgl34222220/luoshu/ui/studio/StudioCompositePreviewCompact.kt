@@ -192,7 +192,7 @@ private fun CompactScenarioSelector(
     val scenarios = CompactPreviewScenario.entries
     val selectedIndex = scenarios.indexOf(selected).coerceAtLeast(0)
     val indicatorOffset by animateDpAsState(
-        targetValue = 78.dp * selectedIndex,
+        targetValue = 78.dp * selectedIndex.toFloat(),
         animationSpec = tween(220, easing = FastOutSlowInEasing),
         label = "previewIndicatorOffset",
     )
