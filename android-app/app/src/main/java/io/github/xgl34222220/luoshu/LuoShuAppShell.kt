@@ -168,8 +168,10 @@ internal fun LuoShuAppShell(
     var pickerSlot by remember { mutableStateOf<MixSlot?>(null) }
 
     LaunchedEffect(Unit) {
+        // Startup status is the only root request that should be mandatory.
+        // The Home page effect below refreshes the system weight once; doing it
+        // here as well spawned two concurrent su commands on every cold start.
         viewModel.refresh()
-        features.refreshSystemWeight()
     }
     LaunchedEffect(page) {
         when (page) {
