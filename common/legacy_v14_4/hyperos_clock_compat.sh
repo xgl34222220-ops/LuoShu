@@ -217,6 +217,16 @@ luoshu_hyperos_clock_payload_ensure() {
     _lhcc_count=0
     _lhcc_parts=0
 
+    # MiSansVF_Overlay is a framework-owned locale/theme symlink on affected
+    # Xiaomi builds. Exact target manifests intentionally omit it, so clear any
+    # stale staged regular file before the per-target loop can decide what to
+    # repair.
+    _lhcc_system_root="$(_lhcc_root_for_part system 2>/dev/null)"
+    if [ -d "$_lhcc_system_root" ] && [ -L "$_lhcc_system_root/MiSansVF_Overlay.ttf" ] && \
+       [ "$(readlink "$_lhcc_system_root/MiSansVF_Overlay.ttf" 2>/dev/null)" = /data/system/fonts/theme_webview/Roboto-Regular.ttf ]; then
+        rm -f "$_lhcc_payload/system/fonts/MiSansVF_Overlay.ttf" 2>/dev/null || return 1
+    fi
+
     # Mirror only names that exist on this exact ROM. The source always comes from
     # the already-built v14.4 payload, so this is fast and cannot re-enter the v4
     # template/slot builder/validation path that previously stalled at 94%.
