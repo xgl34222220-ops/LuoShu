@@ -935,9 +935,9 @@ def build(module: Path, stage: Path, names: list[str], *, inventory_ui: bool = F
                                       'slotErrors': slot_errors,
                                       'baselineTemplate': 'trusted' if template else 'unavailable',
                                       'targetMode': 'inventory-ui' if inventory_ui else 'legacy-names',
-                                      'preservedDynamicAliases': [
+                                      'preservedDynamicAliases': sorted({
                                           '/' + alias.relative_to(stage).as_posix()
-                                          for alias in preserved_aliases],
+                                          for alias in preserved_aliases}),
                                       'preservedStockAliases': sorted({
                                           '/' + alias.relative_to(stage).as_posix()
                                           for alias in excluded_aliases + failed_aliases
