@@ -66,22 +66,13 @@ mount_engine() {
 }
 
 select_task_file() {
-    # Normal App status/refresh must be file-read fast. Only spawn a controller
-    # process when its persisted state actually claims queued/running.
+    # Home status/refresh is a pure persisted-state read. Do not spawn task
+    # controllers here: switch_status/mix_status reconcile their own worker
+    # immediately when the App actually watches a queued/running task. Keeping
+    # this path process-free prevents a stale task record from slowing every
+    # cold start and manual refresh.
     _axes_state="$(read_prop "$AXES_TASK_FILE" state)"
     _switch_state="$(read_prop "$SWITCH_TASK_FILE" state)"
-    case "$_axes_state" in
-        queued|running)
-            [ -f "$MIX_ENGINE" ] && MODDIR="$MODDIR" sh "$MIX_ENGINE" reconcile >/dev/null 2>&1 || true
-            _axes_state="$(read_prop "$AXES_TASK_FILE" state)"
-            ;;
-    esac
-    case "$_switch_state" in
-        queued|running)
-            [ -f "$FONT_SWITCH_TASK" ] && MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" reconcile >/dev/null 2>&1 || true
-            _switch_state="$(read_prop "$SWITCH_TASK_FILE" state)"
-            ;;
-    esac
     case "$_axes_state" in queued|running) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
     case "$_switch_state" in queued|running) printf 'switch|%s\n' "$SWITCH_TASK_FILE"; return ;; esac
 
@@ -100,10 +91,9 @@ select_task_file() {
 }
 
 status_json() {
-    # App refresh is also a safe late-boot convergence point. The helper will
-    # never consume a marker created during this same boot.
-    type luoshu_text_reboot_reconcile >/dev/null 2>&1 && \
-        LUOSHU_BOOT_RECONCILE_CACHED_ONLY=1 luoshu_text_reboot_reconcile >/dev/null 2>&1 || true
+    # Status is latency-sensitive and read-only. Boot convergence is owned by
+    # boot-completed/service verification; a Home refresh must never launch
+    # verification/reconciliation work before it can paint the first screen.
     _installed=false
     _version='未安装'
     _version_code=0
