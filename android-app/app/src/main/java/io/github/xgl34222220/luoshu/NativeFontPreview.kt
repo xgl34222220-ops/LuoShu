@@ -343,7 +343,7 @@ internal fun NativeFontPreview(
     val failure = preview.error.ifBlank { variationError }
     val failed = failure.isNotBlank()
     val renderedText = if (failed) "预览失败 · $failure" else text
-    val renderedColor = if (failed) errorColor else textColor
+    val renderedColor = if (failed) errorColor else resolvedTextColor
     val renderedSize = if (failed) minOf(textSizeSp, 12f) else textSizeSp
 
     AndroidView(
