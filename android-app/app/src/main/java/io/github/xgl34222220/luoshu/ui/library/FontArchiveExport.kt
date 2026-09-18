@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -179,6 +180,7 @@ internal fun FontArchiveExportTool(
         }
     }
 
+    val scheme = MaterialTheme.colorScheme
     Surface(
         onClick = {
             val favoriteDefaults = collections.favoriteIds.intersect(validFonts.map { it.id }.toSet())
@@ -192,8 +194,9 @@ internal fun FontArchiveExportTool(
         enabled = enabled && validFonts.isNotEmpty(),
         modifier = modifier,
         shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        color = scheme.surfaceContainerLow,
+        contentColor = scheme.onSurface,
+        border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .48f)),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
@@ -211,7 +214,7 @@ internal fun FontArchiveExportTool(
                 Text(
                     "真实文件 · SHA-256 清单 · 最多 32 个 Family",
                     fontSize = 9.sp,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .72f),
+                    color = scheme.onSurfaceVariant,
                 )
             }
         }

@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -384,13 +385,15 @@ private fun FontLibraryBackupTool(
         }
     }
 
+    val scheme = MaterialTheme.colorScheme
     Surface(
         onClick = { showDialog = true },
         enabled = enabled,
         modifier = modifier,
         shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = MaterialTheme.colorScheme.tertiaryContainer,
-        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        color = scheme.surfaceContainerLow,
+        contentColor = scheme.onSurface,
+        border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .48f)),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
@@ -408,7 +411,7 @@ private fun FontLibraryBackupTool(
                 Text(
                     if (migration.ready) "阻断 0 · 提示 ${migration.warningCount}" else "阻断 ${migration.blockerCount} · 提示 ${migration.warningCount}",
                     fontSize = 9.sp,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = .72f),
+                    color = scheme.onSurfaceVariant,
                 )
             }
         }

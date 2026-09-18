@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.library
 
 import android.content.Context
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -224,21 +225,23 @@ internal fun FontLibraryManagementButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val scheme = MaterialTheme.colorScheme
     Surface(
         onClick = onClick,
         enabled = !loading,
         modifier = modifier,
         shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = MaterialTheme.colorScheme.primary,
-        contentColor = MaterialTheme.colorScheme.onPrimary,
-        shadowElevation = 9.dp,
+        color = scheme.surfaceContainerLow,
+        contentColor = scheme.onSurface,
+        border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .48f)),
+        shadowElevation = 1.dp,
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 15.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (loading) {
-                CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
+                CircularProgressIndicator(Modifier.size(19.dp), strokeWidth = 2.dp, color = scheme.primary)
             } else {
                 LuoShuGlyph(
                     imageVector = Icons.Rounded.ListAlt,
@@ -250,7 +253,7 @@ internal fun FontLibraryManagementButton(
             Spacer(Modifier.width(8.dp))
             Column {
                 Text("管理字体库", fontSize = 11.sp, fontWeight = FontWeight.Black)
-                Text("收藏 $favoriteCount · 提示 $issueCount", fontSize = 9.sp, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .75f))
+                Text("收藏 $favoriteCount · 提示 $issueCount", fontSize = 9.sp, color = scheme.onSurfaceVariant)
             }
         }
     }

@@ -49,6 +49,7 @@ import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 
 @Composable
 internal fun NativeImportOverlay(
@@ -93,8 +94,8 @@ internal fun NativeImportOverlay(
             modifier = modifier.fillMaxWidth(),
             shape = RoundedCornerShape(28.dp),
             color = if (style == UiStyle.MIUIX) tokens.cardBackground else MaterialTheme.colorScheme.surfaceContainerLow,
-            shadowElevation = if (style == UiStyle.MIUIX) 4.dp else 2.dp,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .08f)),
+            shadowElevation = if (style == UiStyle.MIUIX) 2.dp else 1.dp,
+            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .48f)),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
@@ -177,8 +178,8 @@ private fun ImportActionButton(
         label = "nativeImportGlassHeight",
     )
     val glassColor = when {
-        embedded && style == UiStyle.MIUIX -> scheme.primary.copy(alpha = if (dark) .18f else .10f)
-        embedded -> scheme.primaryContainer.copy(alpha = if (dark) .46f else .62f)
+        embedded && !dark -> LuoShuLayoutTokens.SecondaryBlueSurface
+        embedded -> scheme.surfaceContainerLow
         style == UiStyle.MIUIX -> tokens.elevatedCardBackground.copy(alpha = if (dark) .76f else .72f)
         dark -> scheme.surfaceContainerHigh.copy(alpha = .72f)
         else -> Color.White.copy(alpha = .70f)
@@ -199,7 +200,10 @@ private fun ImportActionButton(
         color = glassColor,
         contentColor = scheme.primary,
         shadowElevation = if (embedded) 0.dp else if (style == UiStyle.MIUIX) 10.dp else 8.dp,
-        border = BorderStroke(1.dp, if (embedded) scheme.primary.copy(alpha = .10f) else borderColor),
+        border = BorderStroke(
+            if (embedded) 0.5.dp else 1.dp,
+            if (embedded) scheme.outlineVariant.copy(alpha = .48f) else borderColor,
+        ),
     ) {
         if (!expanded) {
             Box(contentAlignment = Alignment.Center) {

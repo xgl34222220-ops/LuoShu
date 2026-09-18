@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
@@ -62,8 +63,12 @@ internal fun FontStudioScreenMaterial(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = maxOf(LocalDockContentPadding.current, 28.dp)),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+        contentPadding = PaddingValues(
+            start = LuoShuLayoutTokens.PageHorizontal,
+            end = LuoShuLayoutTokens.PageHorizontal,
+            bottom = maxOf(LocalDockContentPadding.current, LuoShuLayoutTokens.FloatingDockSafeBottom),
+        ),
+        verticalArrangement = Arrangement.spacedBy(LuoShuLayoutTokens.ItemGap),
     ) {
         item { MaterialStudioHeader(state.loading, actions.refresh, topAction) }
         item { MaterialCompositionOverview(state, actions) }

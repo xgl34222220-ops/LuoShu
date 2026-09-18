@@ -2,6 +2,7 @@ package io.github.xgl34222220.luoshu.ui.library
 
 import android.view.Gravity
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -67,6 +68,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -76,6 +78,7 @@ import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
@@ -96,7 +99,12 @@ internal fun FontLibraryScreenCompact(
     val cardColor = if (miuix) tokens.cardBackground else scheme.surfaceContainerLow
     val elevatedColor = if (miuix) tokens.elevatedCardBackground else scheme.surfaceContainerHigh
     val textPrimary = if (miuix) tokens.textPrimary else scheme.onSurface
-    val textSecondary = if (miuix) tokens.textSecondary else scheme.onSurfaceVariant
+    val dark = scheme.background.luminance() < .5f
+    val textSecondary = if (dark) {
+        if (miuix) tokens.textSecondary else scheme.onSurfaceVariant
+    } else {
+        LuoShuLayoutTokens.NeutralSecondaryText
+    }
     var showTools by rememberSaveable { mutableStateOf(false) }
     var showSort by remember { mutableStateOf(false) }
     val filtered = state.query.isNotBlank() || state.filter != FontLibraryFilter.ALL
@@ -104,10 +112,11 @@ internal fun FontLibraryScreenCompact(
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(
-            start = 20.dp, end = 20.dp,
-            bottom = maxOf(LocalDockContentPadding.current, 28.dp),
+            start = LuoShuLayoutTokens.PageHorizontal,
+            end = LuoShuLayoutTokens.PageHorizontal,
+            bottom = maxOf(LocalDockContentPadding.current, LuoShuLayoutTokens.FloatingDockSafeBottom),
         ),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(LuoShuLayoutTokens.ItemGap),
     ) {
         item(key = "header") {
             LuoShuTopBar(title = "字体库") {
@@ -291,9 +300,15 @@ private fun CompactSystemFontRow(
     active: Boolean, busy: Boolean, cardColor: Color,
     textPrimary: Color, textSecondary: Color, onRestore: () -> Unit,
 ) {
+    val dark = MaterialTheme.colorScheme.background.luminance() < .5f
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = cardColor),
+        border = BorderStroke(
+            0.5.dp,
+            if (dark) Color.Transparent else LuoShuLayoutTokens.LightCardOutline,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = .08f)) {
@@ -325,12 +340,23 @@ private fun CompactFontRow(
 ) {
     var menuExpanded by remember(font.id) { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
+    val dark = scheme.background.luminance() < .5f
     Card(
         onClick = onDetails,
-        modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
             containerColor = if (font.valid) cardColor else scheme.errorContainer.copy(alpha = .34f),
         ),
+        border = BorderStroke(
+            0.5.dp,
+            when {
+                !font.valid -> scheme.error.copy(alpha = .16f)
+                dark -> Color.Transparent
+                else -> LuoShuLayoutTokens.LightCardOutline
+            },
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -341,8 +367,11 @@ private fun CompactFontRow(
                     )
                     Spacer(Modifier.height(3.dp))
                     Text(
-                        listOf(font.format, font.size).filter { it.isNotBlank() }.joinToString(" · "),
-                        color = textSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        fontMetadataSummary(font),
+                        color = textSecondary,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 if (active) StatusPill("使用中")
@@ -382,10 +411,12 @@ private fun CompactFontRow(
                 }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(fontPrimaryBadge(font), color = textSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                    Text(if (font.supportsCjk) "含中文字符" else "拉丁字符", color = textSecondary, fontSize = 11.sp)
-                }
+                Text(
+                    "轻触卡片查看详情",
+                    modifier = Modifier.weight(1f),
+                    color = textSecondary,
+                    fontSize = 11.sp,
+                )
                 Spacer(Modifier.width(12.dp))
                 if (active) {
                     FilledTonalButton(onClick = onDetails, modifier = Modifier.heightIn(min = 44.dp), shape = RoundedCornerShape(16.dp)) {
@@ -403,10 +434,18 @@ private fun CompactFontRow(
     }
 }
 
-private fun fontPrimaryBadge(font: FontItem): String = when {
-    font.variable -> "可变字体"
-    font.weights.size > 1 -> "${font.weights.size} 个字重"
-    else -> "单字重"
+private fun fontMetadataSummary(font: FontItem): String {
+    val weight = when {
+        font.variable -> "可变字重"
+        font.weights.size > 1 -> "${font.weights.size} 档字重"
+        else -> "单字重"
+    }
+    return listOf(
+        font.format,
+        font.size,
+        weight,
+        if (font.supportsCjk) "中文 / 拉丁" else "拉丁",
+    ).filter { it.isNotBlank() }.joinToString(" · ")
 }
 
 @Composable

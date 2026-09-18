@@ -11,6 +11,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -36,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Backup
 import androidx.compose.material.icons.rounded.Build
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Error
@@ -54,6 +56,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -73,8 +76,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,6 +95,7 @@ import io.github.xgl34222220.luoshu.ui.appearance.KolorStyle
 import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuDetailBar
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
@@ -219,11 +227,16 @@ private fun SettingsHome(
 ) {
     val tokens = LocalMiuixTokens.current
     val h = model.health
-    val bottom = maxOf(LocalDockContentPadding.current, 24.dp)
+    val bottom = maxOf(LocalDockContentPadding.current, LuoShuLayoutTokens.FloatingDockSafeBottom)
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, top = 0.dp, end = 20.dp, bottom = bottom),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(
+            start = LuoShuLayoutTokens.PageHorizontal,
+            top = 0.dp,
+            end = LuoShuLayoutTokens.PageHorizontal,
+            bottom = bottom,
+        ),
+        verticalArrangement = Arrangement.spacedBy(LuoShuLayoutTokens.ItemGap),
     ) {
         item { LuoShuTopBar("设置") }
         item {
@@ -621,7 +634,7 @@ private fun UpdatePage(model: SystemCenterViewModel) {
         item {
             StatusCard("在线版本", when { info.loading -> "正在检查更新…"; info.error.isNotBlank() -> "检查失败"; info.hasUpdate -> "发现新版本 ${info.version}"; info.available -> "当前已经是最新版本"; else -> "尚未检查" }, if (info.error.isNotBlank()) HealthLevel.WARNING else HealthLevel.HEALTHY, info.loading) {
                 InfoLine("当前 App", BuildConfig.VERSION_NAME)
-                if (info.available) { InfoLine("在线版本", info.version); InfoLine("版本代码", info.versionCode.toString()); if (info.sha256.isNotBlank()) InfoLine("模块 SHA-256", info.sha256.take(16) + "…"); if (info.appSha256.isNotBlank()) InfoLine("App SHA-256", info.appSha256.take(16) + "…") }
+                if (info.available) { InfoLine("在线版本", info.version); InfoLine("版本代码", info.versionCode.toString()); if (info.sha256.isNotBlank()) InfoLine("模块 SHA-256", info.sha256); if (info.appSha256.isNotBlank()) InfoLine("App SHA-256", info.appSha256) }
                 if (info.error.isNotBlank()) Text(info.error, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
                 Spacer(Modifier.height(10.dp))
                 OutlinedButton(model::checkUpdate, Modifier.fillMaxWidth(), enabled = !info.loading) { Icon(Icons.Rounded.Refresh, null, Modifier.size(17.dp)); Spacer(Modifier.width(6.dp)); Text("检查更新") }
@@ -685,12 +698,21 @@ private fun ToggleLine(title: String, description: String, checked: Boolean, onC
 @Composable
 private fun SettingCard(title: String, content: @Composable () -> Unit) {
     val tokens = LocalMiuixTokens.current
+    val dark = MaterialTheme.colorScheme.background.luminance() < .5f
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(
+            0.5.dp,
+            if (dark) Color.Transparent else LuoShuLayoutTokens.LightCardOutline,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
-        Column(Modifier.fillMaxWidth().padding(20.dp)) { Text(title, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(14.dp)); content() }
+        Column(Modifier.fillMaxWidth().padding(LuoShuLayoutTokens.CardPadding)) {
+            Text(title, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(12.dp))
+            content()
+        }
     }
 }
 
@@ -698,12 +720,17 @@ private fun SettingCard(title: String, content: @Composable () -> Unit) {
 private fun StatusCard(title: String, subtitle: String, level: HealthLevel, loading: Boolean, content: @Composable () -> Unit) {
     val accent = when (level) { HealthLevel.HEALTHY -> MaterialTheme.colorScheme.primary; HealthLevel.WARNING -> MaterialTheme.colorScheme.tertiary; HealthLevel.ERROR -> MaterialTheme.colorScheme.error }
     val tokens = LocalMiuixTokens.current
+    val dark = MaterialTheme.colorScheme.background.luminance() < .5f
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(
+            0.5.dp,
+            if (dark) Color.Transparent else LuoShuLayoutTokens.LightCardOutline,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
-        Column(Modifier.fillMaxWidth().padding(20.dp)) {
+        Column(Modifier.fillMaxWidth().padding(LuoShuLayoutTokens.CardPadding)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(Modifier.size(38.dp), RoundedCornerShape(13.dp), color = accent.copy(alpha = .11f), contentColor = accent) {
                     Box(contentAlignment = Alignment.Center) { if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Icon(when (level) { HealthLevel.HEALTHY -> Icons.Rounded.CheckCircle; HealthLevel.WARNING -> Icons.Rounded.Info; HealthLevel.ERROR -> Icons.Rounded.Error }, null, Modifier.size(21.dp)) }
@@ -757,8 +784,66 @@ private fun selfMountSummary(state: SystemHealthSnapshot): String = listOf(
 ).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { "待确认" }
 
 @Composable
-private fun InfoLine(label: String, value: String) = Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.Top) {
-    Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp); Spacer(Modifier.width(12.dp)); Text(value.ifBlank { "—" }, Modifier.weight(1f), textAlign = TextAlign.End, maxLines = 3, overflow = TextOverflow.Ellipsis, fontSize = 13.sp, lineHeight = 19.sp, fontWeight = FontWeight.Medium)
+private fun InfoLine(label: String, value: String) {
+    val technical = label.contains("SHA", ignoreCase = true) || label.endsWith(" ID")
+    val scheme = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = scheme.onSurfaceVariant, fontSize = 13.sp)
+        Spacer(Modifier.width(12.dp))
+        if (technical && value.isNotBlank()) {
+            val clipboard = LocalClipboardManager.current
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(12.dp),
+                color = if (scheme.background.luminance() < .5f) {
+                    scheme.surfaceContainerHigh
+                } else {
+                    LuoShuLayoutTokens.TechnicalSurface
+                },
+                border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .42f)),
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 10.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        value,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    IconButton(
+                        onClick = { clipboard.setText(AnnotatedString(value)) },
+                        modifier = Modifier.size(34.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.ContentCopy,
+                            contentDescription = "复制 $label",
+                            modifier = Modifier.size(16.dp),
+                            tint = scheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+        } else {
+            Text(
+                value.ifBlank { "—" },
+                Modifier.weight(1f),
+                textAlign = TextAlign.End,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+    }
 }
 
 @Composable

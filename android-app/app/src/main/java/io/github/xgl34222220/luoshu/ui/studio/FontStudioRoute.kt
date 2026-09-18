@@ -1,5 +1,9 @@
 package io.github.xgl34222220.luoshu.ui.studio
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -10,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -87,9 +92,27 @@ internal fun FontStudioRoute(
             onGlyphs = { showGlyphBrowser = true },
         )
     }
-    when (style) {
-        UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions, studioTools)
-        UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions, studioTools)
+    val childLayerActive = showCompositePreview ||
+        showPresetLibrary ||
+        showProfileTransfer ||
+        showGlyphBrowser ||
+        showSwitchHistory ||
+        restoreNotice.isNotBlank()
+    val pageScale by animateFloatAsState(
+        targetValue = if (childLayerActive) .96f else 1f,
+        animationSpec = spring(dampingRatio = .86f, stiffness = Spring.StiffnessMediumLow),
+        label = "studioDepthScale",
+    )
+    Box(
+        modifier = androidx.compose.ui.Modifier.graphicsLayer {
+            scaleX = pageScale
+            scaleY = pageScale
+        },
+    ) {
+        when (style) {
+            UiStyle.MATERIAL -> FontStudioScreenMaterial(state, stableActions, studioTools)
+            UiStyle.MIUIX -> FontStudioScreenMiuix(state, stableActions, studioTools)
+        }
     }
 
     if (showCompositePreview) {

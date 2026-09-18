@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu.ui.home
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -51,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
@@ -61,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
@@ -88,8 +91,12 @@ internal fun HomeScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = maxOf(LocalDockContentPadding.current, 24.dp)),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(
+            start = LuoShuLayoutTokens.PageHorizontal,
+            end = LuoShuLayoutTokens.PageHorizontal,
+            bottom = maxOf(LocalDockContentPadding.current, LuoShuLayoutTokens.FloatingDockSafeBottom),
+        ),
+        verticalArrangement = Arrangement.spacedBy(LuoShuLayoutTokens.ItemGap),
     ) {
         item(key = "header") {
             LuoShuTopBar(title = "洛书") {
@@ -109,7 +116,16 @@ internal fun HomeScreenCompact(
             }
         }
         item(key = "current-font") {
-            Surface(shape = RoundedCornerShape(28.dp), color = cardColor, shadowElevation = 2.dp) {
+            val dark = scheme.background.luminance() < .5f
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = cardColor,
+                shadowElevation = 2.dp,
+                border = BorderStroke(
+                    0.5.dp,
+                    if (dark) Color.Transparent else LuoShuLayoutTokens.LightCardOutline,
+                ),
+            ) {
                 Column(
                     Modifier.fillMaxWidth()
                         .background(Brush.linearGradient(listOf(scheme.primaryContainer.copy(alpha = .46f), cardColor)))

@@ -50,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.MixSlot
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
@@ -65,11 +66,15 @@ internal fun FontStudioScreenMiuix(
     actions: FontStudioActions,
     topAction: @Composable () -> Unit,
 ) {
-    val dockBottomPadding = maxOf(LocalDockContentPadding.current, 24.dp)
+    val dockBottomPadding = maxOf(LocalDockContentPadding.current, LuoShuLayoutTokens.FloatingDockSafeBottom)
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = dockBottomPadding),
-        verticalArrangement = Arrangement.spacedBy(18.dp),
+        contentPadding = PaddingValues(
+            start = LuoShuLayoutTokens.PageHorizontal,
+            end = LuoShuLayoutTokens.PageHorizontal,
+            bottom = dockBottomPadding,
+        ),
+        verticalArrangement = Arrangement.spacedBy(LuoShuLayoutTokens.ItemGap),
     ) {
         item { MiuixStudioHeader(state.loading, actions.refresh, topAction) }
         item { MiuixCompositionMap(state, actions) }
