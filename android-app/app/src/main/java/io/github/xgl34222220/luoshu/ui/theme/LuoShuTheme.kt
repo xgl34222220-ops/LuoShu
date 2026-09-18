@@ -84,7 +84,7 @@ data class MiuixTokens(
 
 val LocalMiuixTokens = staticCompositionLocalOf {
     MiuixTokens(
-        pageBackground = Color(0xFFF4F6FA),
+        pageBackground = Color(0xFFF1F5F9),
         cardBackground = Color.White,
         elevatedCardBackground = Color.White,
         textPrimary = Color(0xFF16171B),
