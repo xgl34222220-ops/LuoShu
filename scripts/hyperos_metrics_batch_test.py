@@ -257,10 +257,15 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.assertEqual(result['mapped'], 3)
         self.assertEqual(rewrite.call_count, 1,
                          'one donor must not be fully rewritten once per HyperOS alias')
-        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
-        self.assertTrue(all(item['baselineShift'] == -80 for item in report['slots']))
+        report = {item['slot']: item for item in json.loads(
+            (self.stage / '.luoshu-metrics-report.json').read_text())['slots']}
+        self.assertEqual(report['/system/fonts/MiSansVF.ttf']['baselineShift'], -80)
+        self.assertEqual(report['/system/fonts/Roboto-Regular.ttf']['baselineShift'], 0)
+        self.assertEqual(report['/product/fonts/GoogleSans-Regular.ttf']['baselineShift'], 0)
+        self.assertEqual(report['/system/fonts/Roboto-Regular.ttf']['baselineReason'], 'slot-metrics-only')
+        self.assertEqual(report['/product/fonts/GoogleSans-Regular.ttf']['baselineReason'], 'slot-metrics-only')
         self.assertTrue(all(item['baselineTarget'] == '/system/fonts/MiSansVF.ttf'
-                            for item in report['slots']))
+                            for item in report.values()))
 
     def test_baseline_donor_cache_survives_repeated_switches(self):
         source = self.fonts / '400.ttf'
