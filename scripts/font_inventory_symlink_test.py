@@ -88,8 +88,12 @@ class StockFontLinkTests(unittest.TestCase):
         self.assertEqual(slots[system_key]["metrics"], slots[product_key]["metrics"])
         self.assertFalse(slots[system_key]["metrics"]["coverage"]["hasHan"])
         data = {"slots": {system_key: slots[system_key]}}
+        # The inventory must still describe the true stock Latin seed, but
+        # HyperOS can open MiSansLatinVF directly from launcher/SystemUI paths.
+        # Generated OEM aliases therefore keep full CJK coverage rather than
+        # relying on the Android family fallback graph.
         self.assertEqual(_cjk_routing(data, system_key, frozenset({0x4E2D}))[2],
-                         "stock-latin-primary")
+                         "oem-direct-full-coverage")
 
     def test_xml_keeps_alias_identity_but_reads_stock_entity(self) -> None:
         name = "MiSansLatinVF.ttf"
