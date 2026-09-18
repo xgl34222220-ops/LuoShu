@@ -7,6 +7,7 @@ alias is replaced, so neither iteration order nor a second partition changes inp
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -30,6 +31,7 @@ PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
 TEMPLATE_SCHEMA = "device-font-template-v1"
 TEMPLATE_CAPTURE_REVISION = 2
 BASELINE_SHIFT_LIMIT_RATIO = 0.22
+BASELINE_CACHE_SCHEMA = "hyperos-baseline-v1"
 OEM_DIRECT_PREFIXES = ("misans", "xiaomisans", "milanpro", "mitype")
 
 
@@ -239,6 +241,55 @@ def _baseline_shift(template: dict, logical: str, source_profile: dict) -> tuple
         shift = int(round(raw))
         return (0 if abs(shift) < 2 else shift), name, 'stock-probe'
     return 0, '', 'shared-probe-missing'
+
+
+def _source_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def persistent_baseline_source(
+    module: Path,
+    source: Path,
+    shift_y: int,
+    digest_cache: dict,
+) -> tuple[Path, dict]:
+    """Reuse a previously translated donor across separate switch requests."""
+    if not shift_y:
+        return source, {"applied": False, "reason": "zero-shift", "glyphs": 0, "cache": "none"}
+    stat = source.stat()
+    identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    digest = digest_cache.get(identity)
+    if digest is None:
+        digest = _source_sha256(source)
+        digest_cache[identity] = digest
+    face = _pick_face(source)
+    key = hashlib.sha256(
+        f"{BASELINE_CACHE_SCHEMA}|{digest}|{face}|{shift_y}".encode("utf-8")
+    ).hexdigest()
+    cache_dir = module / "cache/hyperos-baseline"
+    cached = cache_dir / f"{key}.font"
+    try:
+        if cached.is_file() and cached.stat().st_size >= 12:
+            return cached, {"applied": True, "reason": "stock-probe", "glyphs": 0, "cache": "hit"}
+    except OSError:
+        pass
+
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    temporary = cache_dir / f".{key}.{os.getpid()}.tmp"
+    temporary.unlink(missing_ok=True)
+    try:
+        produced, report = shift_glyf_baseline(source, temporary, shift_y)
+        if produced == temporary and report.get("applied") and temporary.is_file():
+            os.replace(temporary, cached)
+            os.chmod(cached, 0o644)
+            return cached, {**report, "cache": "miss"}
+        return source, {**report, "cache": "unsupported"}
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def shift_glyf_baseline(source: Path, output: Path, shift_y: int) -> tuple[Path, dict]:
@@ -645,6 +696,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     cache = {}
     compact_sources = {}
     shifted_sources = {}
+    source_digests = {}
     source_profiles = {}
     source_baselines = {}
     canonical_baseline_target = _canonical_baseline_target(template, data)
@@ -694,10 +746,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                     if shift_y:
                         shift_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, shift_y)
                         if shift_key not in shifted_sources:
-                            shifted_sources[shift_key] = shift_glyf_baseline(
-                                source,
-                                outputs / f'baseline-{len(shifted_sources)}.font',
-                                shift_y)
+                            shifted_sources[shift_key] = persistent_baseline_source(
+                                module, source, shift_y, source_digests)
                         base_source, applied_report = shifted_sources[shift_key]
                         shift_report = {**applied_report}
                         if not shift_report.get('applied'):
@@ -741,6 +791,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                         'baselineReason': shift_reason,
                         'baselineTarget': canonical_baseline_target,
                         'baselineGlyphs': int(shift_report.get('glyphs') or 0),
+                        'baselineCache': str(shift_report.get('cache') or 'none'),
                         'effectiveCjkRoutingSource': 'stock-fallback' if routing else 'source',
                         'effectiveCjkRoutingReason': routing_reason,
                     })
