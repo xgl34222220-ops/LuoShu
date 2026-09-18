@@ -18,12 +18,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -37,6 +40,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,6 +51,7 @@ import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -55,6 +62,7 @@ private const val DETAILS_BRIDGE = "/data/adb/modules/LuoShu/common/font_details
 private data class DetailedFontMetadata(
     val title: String,
     val text: String,
+    val error: String = "",
 )
 
 @Composable
@@ -114,15 +122,18 @@ internal fun FontMetadataInspector(
             onDismissRequest = {},
             title = { Text("正在分析字体", fontWeight = FontWeight.Black) },
             text = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Text("正在读取内部名称、字重、覆盖范围和可变轴…")
+                Column(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 104.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    LuoShuLoadingSkeleton(Modifier.fillMaxWidth(.46f).heightIn(min = 16.dp))
+                    LuoShuLoadingSkeleton(Modifier.fillMaxWidth().heightIn(min = 38.dp), shape = RoundedCornerShape(14.dp))
+                    LuoShuLoadingSkeleton(Modifier.fillMaxWidth(.78f).heightIn(min = 16.dp))
                 }
             },
             confirmButton = {},
             shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
-            containerColor = if (style == UiStyle.MIUIX) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surfaceContainerHigh,
+            containerColor = if (style == UiStyle.MIUIX) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surface,
         )
     }
 
@@ -220,27 +231,203 @@ private fun MetadataResultDialog(
     onDismiss: () -> Unit,
 ) {
     val tokens = LocalMiuixTokens.current
+    val scheme = MaterialTheme.colorScheme
+    val sections = remember(result.text) { parseMetadataSections(result.text) }
+    val rows = remember(sections) { sections.flatMap { it.rows } }
+    val formatValue = rows.firstOrNull { it.label == "格式" }?.value
+        ?.substringBefore("·")?.trim().orEmpty().ifBlank { "未知" }
+    val weightValue = rows.firstOrNull { it.label == "格式" }?.value
+        ?.substringAfter("字重", "")?.substringBefore("·")?.trim().orEmpty().ifBlank {
+            rows.firstOrNull { it.label == "Subfamily" }?.value.orEmpty().ifBlank { "—" }
+        }
+    val glyphValue = rows.firstOrNull { it.label == "字形" }?.value.orEmpty()
+    val unicodeValue = Regex("""Unicode：?(\d+)""").find(glyphValue)?.groupValues?.getOrNull(1) ?: "—"
+    val charsetValue = rows.firstOrNull { it.label == "推荐角色" }?.value.orEmpty().ifBlank { "—" }
+    val sha = rows.firstOrNull { it.label.equals("SHA-256", ignoreCase = true) }?.value.orEmpty()
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(result.title, fontWeight = FontWeight.Black, maxLines = 2) },
+        title = { Text(result.title, fontWeight = FontWeight.SemiBold, maxLines = 2) },
         text = {
-            SelectionContainer {
-                LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 500.dp)) {
+            if (result.error.isNotBlank()) {
+                Text(result.error, color = scheme.error)
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
                     item {
-                        Text(
-                            result.text,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            lineHeight = 18.sp,
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            MetadataMetricCard("格式", formatValue, Modifier.weight(1f))
+                            MetadataMetricCard("字重", weightValue, Modifier.weight(1f))
+                        }
+                    }
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            MetadataMetricCard("字符集", charsetValue, Modifier.weight(1f))
+                            MetadataMetricCard("Unicode", unicodeValue, Modifier.weight(1f))
+                        }
+                    }
+                    if (sha.isNotBlank()) {
+                        item { MetadataHashCard(sha) }
+                    }
+                    items(sections, key = { it.title }) { section ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(18.dp),
+                            color = scheme.surfaceContainerLow,
+                            border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .38f)),
+                        ) {
+                            Column(Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 10.dp)) {
+                                Text(section.title, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                Spacer(Modifier.size(4.dp))
+                                section.rows
+                                    .filterNot { it.label.equals("SHA-256", ignoreCase = true) }
+                                    .forEachIndexed { index, row ->
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                            verticalAlignment = Alignment.Top,
+                                        ) {
+                                            Text(
+                                                row.label,
+                                                modifier = Modifier.width(84.dp),
+                                                color = scheme.onSurfaceVariant,
+                                                fontSize = 11.sp,
+                                            )
+                                            Text(
+                                                row.value.ifBlank { "—" },
+                                                modifier = Modifier.weight(1f),
+                                                color = scheme.onSurface,
+                                                fontSize = 11.5.sp,
+                                                lineHeight = 16.sp,
+                                                fontFamily = if (
+                                                    row.label.contains("ID", true) ||
+                                                    row.label.contains("PostScript", true)
+                                                ) FontFamily.Monospace else FontFamily.Default,
+                                            )
+                                        }
+                                        if (index < section.rows.lastIndex) {
+                                            HorizontalDivider(color = scheme.outlineVariant.copy(alpha = .22f))
+                                        }
+                                    }
+                            }
+                        }
                     }
                 }
             }
         },
         confirmButton = { Button(onClick = onDismiss) { Text("完成") } },
         shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 34.dp else 28.dp),
-        containerColor = if (style == UiStyle.MIUIX) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surfaceContainerHigh,
+        containerColor = if (style == UiStyle.MIUIX) tokens.elevatedCardBackground else scheme.surface,
     )
+}
+
+private data class MetadataDisplayRow(
+    val label: String,
+    val value: String,
+)
+
+private data class MetadataDisplaySection(
+    val title: String,
+    val rows: List<MetadataDisplayRow>,
+)
+
+private fun parseMetadataSections(text: String): List<MetadataDisplaySection> {
+    val sections = mutableListOf<MetadataDisplaySection>()
+    var title = "文件信息"
+    var rows = mutableListOf<MetadataDisplayRow>()
+
+    fun flush() {
+        if (rows.isNotEmpty()) {
+            sections += MetadataDisplaySection(title, rows.toList())
+            rows = mutableListOf()
+        }
+    }
+
+    text.lineSequence().forEach { raw ->
+        val line = raw.trim()
+        if (line.isBlank()) return@forEach
+        if (line.startsWith("字体面 #")) {
+            flush()
+            title = line
+            return@forEach
+        }
+        val separator = line.indexOf('：')
+        if (separator > 0) {
+            rows += MetadataDisplayRow(
+                label = line.substring(0, separator).trim(),
+                value = line.substring(separator + 1).trim(),
+            )
+        } else {
+            rows += MetadataDisplayRow("信息", line)
+        }
+    }
+    flush()
+    return sections
+}
+
+@Composable
+private fun MetadataMetricCard(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(15.dp),
+        color = scheme.primary.copy(alpha = .07f),
+    ) {
+        Column(Modifier.padding(horizontal = 11.dp, vertical = 9.dp)) {
+            Text(label, color = scheme.onSurfaceVariant, fontSize = 10.sp)
+            Text(
+                value,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MetadataHashCard(sha: String) {
+    val scheme = MaterialTheme.colorScheme
+    val clipboard = LocalClipboardManager.current
+    val display = if (sha.length > 16) "${sha.take(8)}…${sha.takeLast(6)}" else sha
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(15.dp),
+        color = scheme.surfaceContainerHigh,
+        border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .38f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("SHA-256", color = scheme.onSurfaceVariant, fontSize = 10.sp)
+                Text(display, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+            }
+            IconButton(
+                onClick = { clipboard.setText(AnnotatedString(sha)) },
+                modifier = Modifier.size(38.dp),
+            ) {
+                Icon(
+                    Icons.Rounded.ContentCopy,
+                    contentDescription = "复制 SHA-256",
+                    modifier = Modifier.size(17.dp),
+                )
+            }
+        }
+    }
 }
 
 private suspend fun loadDetailedFontMetadata(font: FontItem): DetailedFontMetadata {
@@ -312,7 +499,11 @@ private suspend fun loadDetailedFontMetadata(font: FontItem): DetailedFontMetada
         }.trimEnd()
         DetailedFontMetadata(title, text)
     } catch (error: Throwable) {
-        DetailedFontMetadata(font.name, error.message ?: "字体详情读取失败")
+        DetailedFontMetadata(
+            title = font.name,
+            text = "",
+            error = error.message ?: "字体详情读取失败",
+        )
     }
 }
 
