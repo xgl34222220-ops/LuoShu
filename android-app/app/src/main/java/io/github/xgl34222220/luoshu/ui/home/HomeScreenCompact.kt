@@ -46,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -557,25 +558,27 @@ private fun WeightStepButton(
     onStep: () -> Unit,
 ) {
     val scheme = MaterialTheme.colorScheme
+    val latestOnStep by rememberUpdatedState(onStep)
     Surface(
         modifier = Modifier
             .size(42.dp)
             .clip(RoundedCornerShape(14.dp))
-            .pointerInput(enabled, onStep) {
+            .pointerInput(enabled) {
                 detectTapGestures(
                     onPress = {
-                        if (!enabled) return@detectTapGestures
-                        onStep()
-                        coroutineScope {
-                            val repeatJob = launch {
-                                delay(430)
-                                while (true) {
-                                    onStep()
-                                    delay(85)
+                        if (enabled) {
+                            latestOnStep()
+                            coroutineScope {
+                                val repeatJob = launch {
+                                    delay(430)
+                                    while (true) {
+                                        latestOnStep()
+                                        delay(85)
+                                    }
                                 }
+                                tryAwaitRelease()
+                                repeatJob.cancel()
                             }
-                            tryAwaitRelease()
-                            repeatJob.cancel()
                         }
                     },
                 )
