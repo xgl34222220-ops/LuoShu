@@ -71,6 +71,15 @@ class HyperOSMetricsTest(unittest.TestCase):
             part, name = logical.split('/')[1], logical.split('/')[-1]
             (self.root / 'stock' / part / name).touch()
 
+    def trusted_template(self, slots):
+        (self.module / 'config/device-font-template.state').write_text(
+            'state=trusted\ncaptureRevision=2\n')
+        (self.module / 'config/device-font-template.json').write_text(json.dumps({
+            'schema': 'device-font-template-v1',
+            'captureRevision': 2,
+            'slots': slots,
+        }))
+
     def test_full_stock_contract_and_glyphs_unchanged(self):
         self.inventory({'/system/fonts/MiSansVF.ttf': slot()})
         with patch.object(TTFont, 'getGlyphSet', side_effect=AssertionError('outline rebuild')):
@@ -99,6 +108,8 @@ class HyperOSMetricsTest(unittest.TestCase):
             self.assertFalse(font['OS/2'].fsSelection & 128)
         with TTFont(self.fonts / 'Roboto-Bold.ttf') as font:
             self.assertEqual(font['head'].yMax, 900)
+            self.assertEqual(font['OS/2'].usWeightClass, 700)
+            self.assertTrue(font['OS/2'].fsSelection & (1 << 5))
 
     def test_no_cascade_when_alias_is_source(self):
         (self.fonts / '400.ttf').rename(self.fonts / 'MiSansVF.ttf')
@@ -119,6 +130,51 @@ class HyperOSMetricsTest(unittest.TestCase):
                 with TTFont(self.stage / part / 'fonts/MiSansVF.ttf') as font:
                     self.assertEqual(font['hhea'].ascent, 1100)
                     self.assertIn(65, font.getBestCmap())
+
+    def test_trusted_stock_probe_translates_real_glyph_baseline(self):
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot(head=(-300, 1100))})
+        self.trusted_template([{
+            'resolvedPath': '/system/fonts/MiSansVF.ttf',
+            'roles': ['global-ui'],
+            'weight': 400,
+            'font': {
+                'metrics': {'unitsPerEm': 1000},
+                'probes': {
+                    'latinCap': {'hits': 8, 'yMin': -90, 'yMax': 610},
+                },
+            },
+        }])
+        batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+        with TTFont(self.fonts / 'MiSansVF.ttf') as font:
+            glyph = font['glyf'][font.getBestCmap()[65]]
+            glyph.recalcBounds(font['glyf'])
+            self.assertEqual(glyph.yMin, -90)
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots'][0]
+        self.assertEqual(report['baselineShift'], -90)
+        self.assertEqual(report['baselineProbe'], 'latinCap')
+        self.assertEqual(report['baselineReason'], 'stock-probe')
+        self.assertGreater(report['baselineGlyphs'], 0)
+
+    def test_one_noncore_slot_failure_preserves_stock_and_keeps_transaction(self):
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot(ascent=1111),
+                        '/system/fonts/Roboto-Regular.ttf': slot(ascent=900)})
+        original = batch.write_metrics
+
+        def flaky(source, output, contract, *args, **kwargs):
+            if contract[1] == 1111:
+                raise ValueError('fixture slot failure')
+            return original(source, output, contract, *args, **kwargs)
+
+        with patch.object(batch, 'write_metrics', side_effect=flaky):
+            result = batch.build(self.module, self.stage,
+                                 ['MiSansVF.ttf', 'Roboto-Regular.ttf'])
+        self.assertEqual(result['mapped'], 1)
+        self.assertEqual(result['skippedSlots'], 1)
+        self.assertFalse((self.fonts / 'MiSansVF.ttf').exists())
+        self.assertTrue((self.fonts / 'Roboto-Regular.ttf').exists())
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertEqual(report['slotErrors'][0]['slot'], '/system/fonts/MiSansVF.ttf')
+        self.assertIn('/system/fonts/MiSansVF.ttf', report['preservedStockAliases'])
 
     def test_failed_stage_completion_releases_temporary_fonts(self):
         self.inventory({'/system/fonts/MiSansVF.ttf': slot()})
