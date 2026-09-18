@@ -58,7 +58,13 @@ if [ -f "$WEIGHTED" ]; then
             if type infer_mix_weight_mode >/dev/null 2>&1; then
                 _cjk_mode=$(infer_mix_weight_mode "$2" "${5:-wght=400}")
                 _latin_mode=$(infer_mix_weight_mode "$3" "${6:-wght=400}")
-                _digit_mode=$(infer_mix_weight_mode "$4" "${7:-wght=400}")
+                if [ "$4" = "$3" ] && [ "${7:-wght=400}" = "${6:-wght=400}" ]; then
+                    # The common case in the UI is one Latin family for both
+                    # English and digits. Do not rescan/reopen it a second time.
+                    _digit_mode="$_latin_mode"
+                else
+                    _digit_mode=$(infer_mix_weight_mode "$4" "${7:-wght=400}")
+                fi
             fi
             if [ -f "$AUTO_WEIGHTED" ]; then
                 sh "$AUTO_WEIGHTED" start "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" "$_cjk_mode" "$_latin_mode" "$_digit_mode"
