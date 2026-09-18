@@ -151,7 +151,8 @@ class LatinPolicyRegressionTest(unittest.TestCase):
         current = self.coverage_checker()
         self.assertFalse(current({'romKind': 'hyperos', 'hyperosCoverageRevision': 3}))
         self.assertFalse(current({'romKind': 'hyperos'}))
-        self.assertTrue(current({'romKind': 'hyperos', 'hyperosCoverageRevision': 4}))
+        self.assertFalse(current({'romKind': 'hyperos', 'hyperosCoverageRevision': 4}))
+        self.assertTrue(current({'romKind': 'hyperos', 'hyperosCoverageRevision': 5}))
         self.assertFalse(current({'romKind': 'generic', 'hyperosCoverageRevision': 3,
                                   'scanSummary': {'fontSignatures': {'hyperos': ['MiSansVF.ttf']}}}))
 
