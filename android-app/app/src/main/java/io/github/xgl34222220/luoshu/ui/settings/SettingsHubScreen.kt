@@ -821,16 +821,22 @@ private fun selfMountSummary(state: SystemHealthSnapshot): String = listOf(
 private fun InfoLine(label: String, value: String) {
     val technical = label.contains("SHA", ignoreCase = true) || label.endsWith(" ID")
     val scheme = MaterialTheme.colorScheme
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, color = scheme.onSurfaceVariant, fontSize = 13.sp)
-        Spacer(Modifier.width(12.dp))
-        if (technical && value.isNotBlank()) {
-            val clipboard = LocalClipboardManager.current
+    if (technical && value.isNotBlank()) {
+        val clipboard = LocalClipboardManager.current
+        val displayValue = if (
+            label.contains("SHA", ignoreCase = true) && value.length > 16
+        ) {
+            "${value.take(8)}…${value.takeLast(6)}"
+        } else {
+            value
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(label, color = scheme.onSurfaceVariant, fontSize = 12.sp)
             Surface(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 color = if (scheme.background.luminance() < .5f) {
                     scheme.surfaceContainerHigh
@@ -843,13 +849,6 @@ private fun InfoLine(label: String, value: String) {
                     modifier = Modifier.padding(start = 10.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    val displayValue = if (
-                        label.contains("SHA", ignoreCase = true) && value.length > 16
-                    ) {
-                        "${value.take(8)}…${value.takeLast(6)}"
-                    } else {
-                        value
-                    }
                     Text(
                         displayValue,
                         modifier = Modifier.weight(1f),
@@ -872,7 +871,14 @@ private fun InfoLine(label: String, value: String) {
                     }
                 }
             }
-        } else {
+        }
+    } else {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, color = scheme.onSurfaceVariant, fontSize = 13.sp)
+            Spacer(Modifier.width(12.dp))
             val tabular = value.isNotBlank() && value.all { ch ->
                 ch.isDigit() || ch in ".-+"
             }
@@ -892,7 +898,6 @@ private fun InfoLine(label: String, value: String) {
         }
     }
 }
-
 @Composable
 private fun NoticeLine(text: String) = Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.Top) { Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(7.dp)); Text(text, Modifier.weight(1f), fontSize = 13.sp) }
 
