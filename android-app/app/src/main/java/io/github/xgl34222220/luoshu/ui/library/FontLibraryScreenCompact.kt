@@ -1,6 +1,14 @@
 package io.github.xgl34222220.luoshu.ui.library
 
 import android.view.Gravity
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,6 +78,8 @@ import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuMotionTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
 
@@ -186,14 +196,34 @@ internal fun FontLibraryScreenCompact(
                 }
             }
         }
-        if (showTools) item(key = "tools") { tools() }
-        if (state.loading || state.operationBusy) {
+        item(key = "tools") {
+            AnimatedVisibility(
+                visible = showTools,
+                enter = fadeIn(tween(LuoShuMotionTokens.Fast)) +
+                    expandVertically(tween(LuoShuMotionTokens.Normal, easing = FastOutSlowInEasing)) +
+                    slideInVertically(tween(LuoShuMotionTokens.Normal, easing = FastOutSlowInEasing)) { it / 6 },
+                exit = fadeOut(tween(140)) +
+                    shrinkVertically(tween(170, easing = FastOutSlowInEasing)),
+            ) {
+                tools()
+            }
+        }
+        if (state.loading) {
             item(key = "loading") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        if (state.loading) "正在整理字体库…" else "正在处理字体，请稍候…",
-                        color = textSecondary, fontSize = 13.sp,
+                    LuoShuLoadingSkeleton(
+                        modifier = Modifier.fillMaxWidth(.42f).height(14.dp),
                     )
+                    LuoShuLoadingSkeleton(
+                        modifier = Modifier.fillMaxWidth().height(5.dp),
+                        shape = RoundedCornerShape(999.dp),
+                    )
+                }
+            }
+        } else if (state.operationBusy) {
+            item(key = "loading") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("正在处理字体，请稍候…", color = textSecondary, fontSize = 13.sp)
                     LinearProgressIndicator(Modifier.fillMaxWidth().height(4.dp))
                 }
             }
