@@ -32,6 +32,9 @@ TEMPLATE_SCHEMA = "device-font-template-v1"
 TEMPLATE_CAPTURE_REVISION = 2
 BASELINE_SHIFT_LIMIT_RATIO = 0.22
 BASELINE_CACHE_SCHEMA = "hyperos-baseline-v1"
+SLOT_CACHE_SCHEMA = "hyperos-slot-v1"
+SLOT_CACHE_MAX_BYTES = 192 * 1024 * 1024
+SLOT_CACHE_MAX_FILES = 64
 OEM_DIRECT_PREFIXES = ("misans", "xiaomisans", "milanpro", "mitype")
 LANGUAGE_FALLBACK_TOKENS = (
     "tc", "hant", "hk", "l3", "jp", "kr", "japanese", "korean",
@@ -298,7 +301,10 @@ def _baseline_shift(template: dict, logical: str, source_profile: dict) -> tuple
     if 'clock' in roles or 'mono' in roles:
         candidates.extend((('digits', 'center'), ('latinCap', 'bottom')))
     elif _oem_direct_full_coverage_slot(logical):
-        candidates.extend((('cjk', 'center'), ('digits', 'bottom'), ('latinCap', 'bottom')))
+        # CJK baseline is defined by the ideograph bottom relative to y=0.
+        # Centering differently sized CJK designs can leave the entire face
+        # visibly high/low even when its line box matches MiSans.
+        candidates.extend((('cjk', 'bottom'), ('digits', 'bottom'), ('latinCap', 'bottom')))
     else:
         candidates.extend((('latinCap', 'bottom'), ('digits', 'bottom'), ('cjk', 'center')))
 
@@ -334,6 +340,118 @@ def _source_sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _cached_source_digest(path: Path, digest_cache: dict) -> str:
+    stat = path.stat()
+    identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    digest = digest_cache.get(identity)
+    if digest is None:
+        digest = _source_sha256(path)
+        digest_cache[identity] = digest
+    return digest
+
+
+def _codepoint_digest(values) -> str:
+    digest = hashlib.sha256()
+    for value in sorted(int(item) for item in values):
+        digest.update(struct.pack('>I', value))
+    return digest.hexdigest()
+
+
+def _slot_cache_key(
+    source_digest: str,
+    source_face: int,
+    shift_y: int,
+    contract: tuple,
+    routing,
+    punctuation,
+    align_bottom: bool,
+    target_weight: int,
+) -> str:
+    descriptor = {
+        'schema': SLOT_CACHE_SCHEMA,
+        'source': source_digest,
+        'face': int(source_face),
+        'shiftY': int(shift_y),
+        'contract': contract,
+        'routing': _codepoint_digest(routing or ()),
+        'punctuation': _codepoint_digest(punctuation or ()),
+        'alignBottom': bool(align_bottom),
+        'targetWeight': int(target_weight),
+    }
+    return hashlib.sha256(
+        json.dumps(descriptor, sort_keys=True, separators=(',', ':'), ensure_ascii=True).encode('utf-8')
+    ).hexdigest()
+
+
+def _slot_cache_load(module: Path, key: str) -> tuple[Path, dict] | None:
+    cache_dir = module / 'cache/hyperos-slots'
+    font = cache_dir / f'{key}.font'
+    meta = cache_dir / f'{key}.json'
+    try:
+        if not font.is_file() or font.stat().st_size < 12 or not meta.is_file():
+            return None
+        report = json.loads(meta.read_text(encoding='utf-8'))
+        if report.get('schema') != SLOT_CACHE_SCHEMA:
+            return None
+        os.utime(font, None)
+        os.utime(meta, None)
+        return font, dict(report.get('report') or {})
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def _slot_cache_store(module: Path, key: str, source: Path, report: dict) -> Path:
+    cache_dir = module / 'cache/hyperos-slots'
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    font = cache_dir / f'{key}.font'
+    meta = cache_dir / f'{key}.json'
+    temp_font = cache_dir / f'.{key}.{os.getpid()}.font.tmp'
+    temp_meta = cache_dir / f'.{key}.{os.getpid()}.json.tmp'
+    temp_font.unlink(missing_ok=True)
+    temp_meta.unlink(missing_ok=True)
+    try:
+        try:
+            os.link(source, temp_font)
+        except OSError:
+            shutil.copyfile(source, temp_font)
+        os.chmod(temp_font, 0o644)
+        temp_meta.write_text(json.dumps({
+            'schema': SLOT_CACHE_SCHEMA,
+            'report': report,
+        }, ensure_ascii=False, separators=(',', ':')), encoding='utf-8')
+        os.chmod(temp_meta, 0o644)
+        os.replace(temp_font, font)
+        os.replace(temp_meta, meta)
+        return font
+    finally:
+        temp_font.unlink(missing_ok=True)
+        temp_meta.unlink(missing_ok=True)
+
+
+def _prune_slot_cache(module: Path) -> None:
+    cache_dir = module / 'cache/hyperos-slots'
+    try:
+        fonts = [path for path in cache_dir.glob('*.font') if path.is_file()]
+        entries = []
+        total = 0
+        for font in fonts:
+            try:
+                stat = font.stat()
+            except OSError:
+                continue
+            total += stat.st_size
+            entries.append((stat.st_mtime_ns, stat.st_size, font))
+        entries.sort()
+        while entries and (len(entries) > SLOT_CACHE_MAX_FILES or total > SLOT_CACHE_MAX_BYTES):
+            _mtime, size, font = entries.pop(0)
+            key = font.stem
+            font.unlink(missing_ok=True)
+            (cache_dir / f'{key}.json').unlink(missing_ok=True)
+            total -= size
+    except OSError:
+        return
 
 
 def persistent_baseline_source(
@@ -831,6 +949,7 @@ def build(module: Path, stage: Path, names: list[str], *, inventory_ui: bool = F
             align_bottom = bitmap_bottom_slot(data, logical, contract)
             try:
                 stat = source.stat()
+                source_digest = _cached_source_digest(source, source_digests)
                 profile_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
                 if profile_key not in source_profiles:
                     try:
@@ -851,67 +970,75 @@ def build(module: Path, stage: Path, names: list[str], *, inventory_ui: bool = F
                 key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract,
                        routing, stock_punctuation, routing_reason, align_bottom, shift_y, target_weight)
                 if key not in cache:
-                    output = outputs / f'{len(cache)}.font'
+                    persistent_key = _slot_cache_key(
+                        source_digest, _pick_face(source), shift_y, contract,
+                        routing, stock_punctuation, align_bottom, target_weight)
+                    persistent = _slot_cache_load(module, persistent_key)
+                    if persistent is not None:
+                        cached_output, cached_report = persistent
+                        output_reports[key] = {**cached_report, 'slotCache': 'hit'}
+                        cache[key] = cached_output
+                    else:
+                        output = outputs / f'{len(cache)}.font'
 
-                    # Baseline normalization is the only operation that rewrites
-                    # the whole donor outline table. Do it once on the original
-                    # source, before any Latin CJK-routing subset is produced.
-                    # Every physical alias then reuses that normalized donor.
-                    base_source = source
-                    shift_report = {'applied': False, 'reason': shift_reason, 'glyphs': 0}
-                    if shift_y:
-                        shift_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, shift_y)
-                        if shift_key not in shifted_sources:
-                            shifted_sources[shift_key] = persistent_baseline_source(
-                                module, source, shift_y, source_digests)
-                        base_source, applied_report = shifted_sources[shift_key]
-                        shift_report = {**applied_report}
-                        if not shift_report.get('applied'):
-                            base_source = source
-                            shift_y = 0
-                            shift_reason = shift_report.get('reason', shift_reason)
+                        # Baseline normalization is the only operation that rewrites
+                        # the whole donor outline table. Do it once on the original
+                        # source, before any Latin CJK-routing subset is produced.
+                        # Every physical alias then reuses that normalized donor.
+                        base_source = source
+                        shift_report = {'applied': False, 'reason': shift_reason, 'glyphs': 0}
+                        if shift_y:
+                            shift_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, shift_y)
+                            if shift_key not in shifted_sources:
+                                shifted_sources[shift_key] = persistent_baseline_source(
+                                    module, source, shift_y, source_digests)
+                            base_source, applied_report = shifted_sources[shift_key]
+                            shift_report = {**applied_report}
+                            if not shift_report.get('applied'):
+                                base_source = source
+                                shift_y = 0
+                                shift_reason = shift_report.get('reason', shift_reason)
 
-                    metric_source, compact_removed = base_source, 0
-                    if routing:
-                        routed_stat = base_source.stat()
-                        source_key = (routed_stat.st_dev, routed_stat.st_ino, routed_stat.st_size,
-                                      routed_stat.st_mtime_ns, routing, stock_punctuation)
-                        if source_key not in compact_sources:
-                            compact_sources[source_key] = compact_routed_source(
-                                base_source, outputs / f'source-{len(compact_sources)}.font',
-                                routing, stock_punctuation)
-                        metric_source, compact_removed = compact_sources[source_key]
+                        metric_source, compact_removed = base_source, 0
+                        if routing:
+                            routed_stat = base_source.stat()
+                            source_key = (routed_stat.st_dev, routed_stat.st_ino, routed_stat.st_size,
+                                          routed_stat.st_mtime_ns, routing, stock_punctuation)
+                            if source_key not in compact_sources:
+                                compact_sources[source_key] = compact_routed_source(
+                                    base_source, outputs / f'source-{len(compact_sources)}.font',
+                                    routing, stock_punctuation)
+                            metric_source, compact_removed = compact_sources[source_key]
 
-                    try:
-                        output_reports[key] = write_metrics(
-                            metric_source, output, contract, routing, stock_punctuation,
-                            align_bitmap_bottom=align_bottom, target_weight=target_weight)
-                    except Exception:
-                        if not routing:
-                            raise
-                        # A routing/subset-specific failure must not abort the
-                        # selected font. Retry this physical alias with complete
-                        # coverage rather than leaving the whole transaction red.
-                        routing = None
-                        stock_punctuation = frozenset()
-                        routing_reason = 'routing-fallback-full-coverage'
-                        compact_removed = 0
-                        metric_source = base_source
-                        output_reports[key] = write_metrics(
-                            metric_source, output, contract, None, frozenset(),
-                            align_bitmap_bottom=align_bottom, target_weight=target_weight)
-                    output_reports[key]['removedCjkMappings'] += compact_removed
-                    output_reports[key].update({
-                        'baselineShift': int(shift_y),
-                        'baselineProbe': shift_probe,
-                        'baselineReason': shift_reason,
-                        'baselineTarget': canonical_baseline_target,
-                        'baselineGlyphs': int(shift_report.get('glyphs') or 0),
-                        'baselineCache': str(shift_report.get('cache') or 'none'),
-                        'effectiveCjkRoutingSource': 'stock-fallback' if routing else 'source',
-                        'effectiveCjkRoutingReason': routing_reason,
-                    })
-                    cache[key] = output
+                        try:
+                            output_reports[key] = write_metrics(
+                                metric_source, output, contract, routing, stock_punctuation,
+                                align_bitmap_bottom=align_bottom, target_weight=target_weight)
+                        except Exception:
+                            if not routing:
+                                raise
+                            routing = None
+                            stock_punctuation = frozenset()
+                            routing_reason = 'routing-fallback-full-coverage'
+                            compact_removed = 0
+                            metric_source = base_source
+                            output_reports[key] = write_metrics(
+                                metric_source, output, contract, None, frozenset(),
+                                align_bitmap_bottom=align_bottom, target_weight=target_weight)
+                        output_reports[key]['removedCjkMappings'] += compact_removed
+                        output_reports[key].update({
+                            'baselineShift': int(shift_y),
+                            'baselineProbe': shift_probe,
+                            'baselineReason': shift_reason,
+                            'baselineTarget': canonical_baseline_target,
+                            'baselineGlyphs': int(shift_report.get('glyphs') or 0),
+                            'baselineCache': str(shift_report.get('cache') or 'none'),
+                            'slotCache': 'miss',
+                            'effectiveCjkRoutingSource': 'stock-fallback' if routing else 'source',
+                            'effectiveCjkRoutingReason': routing_reason,
+                        })
+                        cache[key] = _slot_cache_store(
+                            module, persistent_key, output, output_reports[key])
                 prepared.append((cache[key], dest))
                 success_logicals.add(logical)
                 fallback += contract[-1] == 'fallback'
@@ -974,6 +1101,7 @@ def build(module: Path, stage: Path, names: list[str], *, inventory_ui: bool = F
         targets.write_text(''.join(f'{logical}\n' for logical in sorted(success_logicals)),
                            encoding='utf-8')
         targets.chmod(0o644)
+        _prune_slot_cache(module)
     finally:
         # Every prepared result has its own hard link (or copy) in the final
         # alias. Keeping these temporary names after success only enlarges
