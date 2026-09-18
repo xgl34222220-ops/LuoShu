@@ -60,6 +60,16 @@ grep -q 'cache/hyperos-baseline' "$ROOT/common/hyperos_metrics_batch.py"
 grep -q 'test_baseline_donor_cache_survives_repeated_switches' "$ROOT/scripts/hyperos_metrics_batch_test.py"
 grep -q 'luoshu_font_validation_cache_restore' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 
+# HyperOS 4 must follow the scanned ROM UI graph instead of processing every
+# filename that happens to live under */fonts. This is both the OS4 coverage
+# contract and the primary switch-speed guard for devices exposing 100+ files.
+grep -q -- '--inventory-ui' "$ROOT/common/hyperos_stage_complete.sh"
+grep -q '_inventory_targets' "$ROOT/common/hyperos_metrics_batch.py"
+grep -q '.luoshu-hyperos-targets.list' "$ROOT/common/hyperos_metrics_batch.py"
+grep -q '.luoshu-hyperos-targets.list' "$ROOT/common/legacy_v14_4/hyperos_clock_compat.sh"
+grep -q 'MiSansL3' "$ROOT/common/legacy_v14_4/hyperos_full_coverage.sh"
+grep -q 'HYPEROS_COVERAGE_REVISION = 5' "$ROOT/common/font_inventory_scan_v3.py"
+
 # Safe next-boot staging must never recursively delete large payload trees while
 # the foreground switch holds its lock. Rename first; reclaim after the transaction.
 _safe_switch="$ROOT/common/legacy_v14_4/font_switch_safe.sh"
