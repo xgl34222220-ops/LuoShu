@@ -23,7 +23,13 @@ grep -q 'timeout=%s' "$ROOT/common/font_switch_task.sh"
 _start_body="$(awk '/^start_task\(\)/,/^}/' "$ROOT/common/font_switch_task.sh")"
 ! printf '%s\n' "$_start_body" | grep -q 'write_task .* running '
 grep -q 'switch_reconcile' "$ROOT/common/app_bridge.sh"
-grep -q 'Normal App status/refresh must be file-read fast' "$ROOT/common/app_bridge.sh"
+grep -q 'Home status/refresh is a pure persisted-state read' "$ROOT/common/app_bridge.sh"
+_status_select="$(awk '/^select_task_file\(\)/,/^}/' "$ROOT/common/app_bridge.sh")"
+! printf '%s\n' "$_status_select" | grep -q ' sh .*reconcile'
+_status_body="$(awk '/^status_json\(\)/,/^}/' "$ROOT/common/app_bridge.sh")"
+! printf '%s\n' "$_status_body" | grep -q 'luoshu_text_reboot_reconcile'
+grep -q 'runningSwitchTask' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
+grep -q 'adoptRunningSwitch' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 ! grep -q 'if (parsed.installed) requestFontPrewarm()' \
     "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
 ! grep -q 'if (snapshot.installed) requestFontPrewarm()' \
@@ -51,6 +57,15 @@ grep -q 'persistent_baseline_source' "$ROOT/common/hyperos_metrics_batch.py"
 grep -q 'cache/hyperos-baseline' "$ROOT/common/hyperos_metrics_batch.py"
 grep -q 'test_baseline_donor_cache_survives_repeated_switches' "$ROOT/scripts/hyperos_metrics_batch_test.py"
 grep -q 'luoshu_font_validation_cache_restore' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+
+# Safe next-boot staging must never recursively delete large payload trees while
+# the foreground switch holds its lock. Rename first; reclaim after the transaction.
+_safe_switch="$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q 'retire_for_gc' "$_safe_switch"
+grep -q 'finalize_next_payload_commit' "$_safe_switch"
+_prepare_body="$(awk '/^prepare_next_payload\(\)/,/^}/' "$_safe_switch")"
+! printf '%s\n' "$_prepare_body" | grep -q 'rm -rf.*NEXT_PAYLOAD'
+grep -q 'action:list|list:\*|action:current|current:\*' "$ROOT/common/font_manager_v4.sh"
 
 # Final apply is intentionally the v14.4 physical-file path. Keep the modern identity lock,
 # but never reconnect the device-template/slot/XML payload pipeline that caused the 94% stall.
