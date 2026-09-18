@@ -222,6 +222,8 @@ def _outline_baseline_slot(data: dict, logical: str) -> bool:
     coverage = slot.get('metrics', {}).get('coverage')
     if logical == data.get('mainSlotPath'):
         return True
+    if name in {'misansvf.ttf', 'xiaomisansvf.ttf', 'milanprovf.ttf'}:
+        return True
     if _oem_direct_full_coverage_slot(logical):
         return bool(valid_coverage(coverage) and _stock_has_cjk_ideographs(coverage))
     return False
