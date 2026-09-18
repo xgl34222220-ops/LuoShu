@@ -51,6 +51,18 @@ fi
 luoshu_font_lock_reap_stale "$IDENTITY_LOCK"
 test ! -e "$IDENTITY_LOCK"
 
+# A definitely-dead PID is stale immediately even with a brand-new token.
+# The token only bridges transient /proc visibility for an owner that still exists.
+mkdir "$IDENTITY_LOCK"
+printf '%s\nstarttime=1\nboot_id=%s\ntoken=fresh-dead\ncreated=%s\n' \
+    999999 "$LIVE_BOOT" "$(date +%s)" > "$IDENTITY_LOCK/pid"
+if luoshu_font_lock_active "$IDENTITY_LOCK"; then
+    echo 'dead PID was incorrectly kept active by token lease' >&2
+    exit 1
+fi
+luoshu_font_lock_reap_stale "$IDENTITY_LOCK"
+test ! -e "$IDENTITY_LOCK"
+
 # A previous-boot identity is always stale even if PID/starttime collide.
 mkdir "$IDENTITY_LOCK"
 printf '%s\nstarttime=%s\nboot_id=00000000-0000-0000-0000-000000000000\n' \
