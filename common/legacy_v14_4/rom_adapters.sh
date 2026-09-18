@@ -23,7 +23,11 @@ _verify_font_copy() {
         _log_step "  警告：$(basename "$f") 复制后为空或不存在，可能导致相关文字渲染异常"
         return 1
     fi
-    fsize=$(wc -c < "$f" 2>/dev/null | tr -d '[:space:]')
+    # Every HyperOS alias normally shares the same large donor inode.
+    # wc -c can stream the whole font on Android shells; repeating it for
+    # dozens of aliases turns a metadata check into hundreds of MB of I/O.
+    # File size is metadata, so use stat and never read glyph bytes here.
+    fsize=$(stat -c %s "$f" 2>/dev/null)
     case "$fsize" in ''|*[!0-9]*) fsize=0 ;; esac
     if [ "$fsize" -lt 1024 ]; then
         _log_step "  警告：$(basename "$f") 只有 ${fsize} 字节，明显小于正常字体文件，可能已损坏"
