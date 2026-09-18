@@ -626,7 +626,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                     template, logical, source_profiles[profile_key])
                 target_weight = weight_for_name(dest.name)
                 key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, contract,
-                       routing, stock_punctuation, align_bottom, shift_y, target_weight)
+                       routing, stock_punctuation, routing_reason, align_bottom, shift_y, target_weight)
                 if key not in cache:
                     output = outputs / f'{len(cache)}.font'
                     metric_source, compact_removed = source, 0
