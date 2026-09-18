@@ -196,8 +196,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             cachedFingerprint = cached.fingerprint
             normalizeMixSelections()
         }
+        // Loading the on-device cache must never start a root scan by itself.
+        // Library/Studio request freshness lazily when the user actually opens them.
         fontCacheReady = true
-        if (snapshot.installed) requestFontPrewarm()
     }
 
     val filteredFonts: List<FontItem>
@@ -221,7 +222,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
 
     fun refresh() {
         if (refreshJob?.isActive == true) return
-        snapshot = snapshot.copy(loading = true, error = "")
+        // Keep the last usable snapshot visible during manual refresh. Flipping
+        // loading back to true made every refresh look like a cold start.
+        snapshot = snapshot.copy(error = "")
         refreshJob = viewModelScope.launch {
             val result = RootShell.exec(
                 "if [ -f ${RootShell.quote(bridge)} ]; then sh ${RootShell.quote(bridge)} status; " +
@@ -240,7 +243,6 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             snapshot = parsed
             rebootRequired = parsed.rebootRequired
             resumePendingTask(parsed)
-            if (parsed.installed) requestFontPrewarm()
         }
     }
 
@@ -505,26 +507,10 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         operationMessage = if (fontId == "default") "正在准备恢复系统字体…" else "正在验证并应用字体…"
         viewModelScope.launch {
             try {
-                if (fontId != "default") {
-                    val validation = RootShell.exec(
-                        "sh ${RootShell.quote(bridge)} validate ${RootShell.quote(fontId)}",
-                        timeoutMs = 35_000L,
-                    )
-                    if (validation.code != 0) error(validation.stderr.ifBlank { "字体验证失败" })
-                    val validationJson = firstJson(validation.stdout)
-                    if (validationJson.optString("status") != "ok" ||
-                        validationJson.optJSONObject("data")?.optBoolean("valid", true) == false
-                    ) {
-                        error(
-                            validationJson.optString(
-                                "message",
-                                validationJson.optJSONObject("data")?.optString("error", "字体文件不可用")
-                                    ?: "字体文件不可用",
-                            ),
-                        )
-                    }
-                }
-
+                // Submit immediately. The detached switch worker performs the
+                // authoritative validation inside the transaction. Running a
+                // second synchronous validation here could consume 35 seconds
+                // before the App even received a task ID.
                 val start = RootShell.exec(
                     "sh ${RootShell.quote(bridge)} switch_start ${RootShell.quote(fontId)}",
                     timeoutMs = 20_000L,
@@ -686,6 +672,15 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (error: Throwable) {
+            // Ask the backend to reap a dead worker before allowing another
+            // apply. This keeps a polling/transport timeout from leaving a
+            // stale "running" record visible on the next attempt.
+            runCatching {
+                RootShell.exec(
+                    "sh ${RootShell.quote(bridge)} switch_reconcile",
+                    timeoutMs = 4_000L,
+                )
+            }
             operationMessage = error.message ?: "字体应用失败"
             snapshot = snapshot.copy(taskState = "failed", taskMessage = operationMessage, taskProgress = 100)
         } finally {
