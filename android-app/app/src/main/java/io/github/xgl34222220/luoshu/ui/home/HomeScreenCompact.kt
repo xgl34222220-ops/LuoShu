@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.ExpandLess
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.FontDownload
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Speed
@@ -54,6 +56,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -71,6 +75,9 @@ import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun HomeScreenCompact(
@@ -213,7 +220,7 @@ internal fun HomeScreenCompact(
         }
         item(key = "font-actions") {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                LuoShuSectionHeading("我的字体", "从挑选到组合，让每一处文字更合心意")
+                LuoShuSectionHeading("我的字体", "个性化字形配置")
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     HomeShortcut("字体库", "导入 · 预览 · 应用", Icons.Rounded.FontDownload, actions.openFontLibrary,
                         Modifier.weight(1f))
@@ -428,7 +435,7 @@ private fun SystemWeightCard(
         colors = CardDefaults.cardColors(containerColor = cardColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
     ) {
-        Column(Modifier.padding(20.dp)) {
+        Column(Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
                     modifier = Modifier.size(40.dp),
@@ -448,40 +455,89 @@ private fun SystemWeightCard(
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text("全局粗细微调", color = textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                    Text("不修改字体文件，可随时恢复", color = textSecondary, fontSize = 12.sp)
+                    Text("轻量显示微调 · 可随时恢复", color = textSecondary, fontSize = 11.sp)
                 }
-                Text(
-                    if (weight.loading) "读取中" else weight.weight.toString(),
-                    color = MaterialTheme.colorScheme.primary,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(12.dp))
             when {
-                weight.loading -> LuoShuLoadingSkeleton(
-                    Modifier.fillMaxWidth().height(12.dp),
-                    shape = RoundedCornerShape(999.dp),
-                )
+                weight.loading -> {
+                    LuoShuLoadingSkeleton(
+                        Modifier.fillMaxWidth(.28f).height(28.dp),
+                        shape = RoundedCornerShape(10.dp),
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    LuoShuLoadingSkeleton(
+                        Modifier.fillMaxWidth().height(42.dp),
+                        shape = RoundedCornerShape(18.dp),
+                    )
+                }
                 !weight.supported -> Text(
                     weight.error.ifBlank { "当前系统不支持全局粗细微调" },
                     color = MaterialTheme.colorScheme.error,
                     fontSize = 12.sp,
                 )
                 else -> {
-                    Slider(
-                        value = weight.weight.toFloat(),
-                        onValueChange = actions.previewSystemWeight,
-                        enabled = !weight.applying,
-                        valueRange = weight.min.toFloat()..weight.max.toFloat(),
-                        steps = (((weight.max - weight.min) / weight.step) - 1).coerceAtLeast(0),
+                    Text(
+                        weight.weight.toString(),
+                        modifier = Modifier.align(Alignment.CenterHorizontally),
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleLarge.copy(fontFeatureSettings = "tnum"),
                     )
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        WeightStepButton(
+                            increase = false,
+                            enabled = !weight.applying && weight.weight > weight.min,
+                            onStep = {
+                                actions.previewSystemWeight(
+                                    (weight.weight - weight.step).coerceAtLeast(weight.min).toFloat(),
+                                )
+                            },
+                        )
+                        Slider(
+                            value = weight.weight.toFloat(),
+                            onValueChange = actions.previewSystemWeight,
+                            modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                            enabled = !weight.applying,
+                            valueRange = weight.min.toFloat()..weight.max.toFloat(),
+                            steps = 0,
+                        )
+                        WeightStepButton(
+                            increase = true,
+                            enabled = !weight.applying && weight.weight < weight.max,
+                            onStep = {
+                                actions.previewSystemWeight(
+                                    (weight.weight + weight.step).coerceAtMost(weight.max).toFloat(),
+                                )
+                            },
+                        )
+                    }
+                    Row(Modifier.fillMaxWidth()) {
+                        Text(
+                            weight.min.toString(),
+                            color = textSecondary,
+                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            weight.max.toString(),
+                            color = textSecondary,
+                            fontSize = 11.sp,
+                            style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
+                        )
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             weight.error.ifBlank { weight.message },
                             modifier = Modifier.weight(1f),
                             color = if (weight.error.isNotBlank()) MaterialTheme.colorScheme.error else textSecondary,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             maxLines = 2,
                         )
                         TextButton(onClick = actions.resetSystemWeight, enabled = !weight.applying) {
@@ -490,6 +546,50 @@ private fun SystemWeightCard(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun WeightStepButton(
+    increase: Boolean,
+    enabled: Boolean,
+    onStep: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .pointerInput(enabled, onStep) {
+                detectTapGestures(
+                    onPress = {
+                        if (!enabled) return@detectTapGestures
+                        onStep()
+                        coroutineScope {
+                            val repeatJob = launch {
+                                delay(430)
+                                while (true) {
+                                    onStep()
+                                    delay(85)
+                                }
+                            }
+                            tryAwaitRelease()
+                            repeatJob.cancel()
+                        }
+                    },
+                )
+            },
+        shape = RoundedCornerShape(14.dp),
+        color = if (enabled) scheme.surfaceContainerHigh else scheme.surfaceContainerLow,
+        contentColor = if (enabled) scheme.primary else scheme.onSurfaceVariant.copy(alpha = .38f),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                if (increase) Icons.Rounded.Add else Icons.Rounded.Remove,
+                contentDescription = if (increase) "加粗一步" else "变细一步",
+                modifier = Modifier.size(20.dp),
+            )
         }
     }
 }
