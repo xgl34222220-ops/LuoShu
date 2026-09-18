@@ -686,6 +686,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                         'baselineProbe': shift_probe,
                         'baselineReason': shift_reason,
                         'baselineGlyphs': int(shift_report.get('glyphs') or 0),
+                        'effectiveCjkRoutingSource': 'stock-fallback' if routing else 'source',
+                        'effectiveCjkRoutingReason': routing_reason,
                     })
                     cache[key] = output
                 prepared.append((cache[key], dest))
@@ -699,9 +701,13 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                     'win': list(contract[7:9]),
                                     'useTypoMetrics': contract[9],
                                     'targetWeight': target_weight,
-                                    'cjkRoutingSource': 'stock-fallback' if routing else 'source',
-                                    'cjkRoutingReason': routing_reason,
-                                    **output_reports[key]})
+                                    'cjkRoutingSource': output_reports[key].get(
+                                        'effectiveCjkRoutingSource',
+                                        'stock-fallback' if routing else 'source'),
+                                    'cjkRoutingReason': output_reports[key].get(
+                                        'effectiveCjkRoutingReason', routing_reason),
+                                    **{name: value for name, value in output_reports[key].items()
+                                       if not name.startswith('effectiveCjkRouting')}})
             except Exception as error:
                 # Keep one broken OEM alias from invalidating every working slot.
                 # Removing the staged file exposes the untouched stock font.
