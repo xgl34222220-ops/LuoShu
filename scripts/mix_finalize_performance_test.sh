@@ -74,6 +74,8 @@ ok grep -q 'composite_file_identity' "$ROOT/common/legacy_v14_4/font_mix_engine.
 ok grep -q 'COMPOSITE_OUTPUT_HASH=$(composite_report_sha' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
 ok grep -A12 '^_font_anchor()' "$ROOT/common/legacy_v14_4/rom_adapters.sh" | grep -q 'ln "\$src" "\$anchor"'
 ok grep -q 'lazy=True, recalcTimestamp=False, recalcBBoxes=False' "$ROOT/common/legacy_v14_4/composite_font.py"
+ok grep -q 'PREPARED_CACHE=.*axes-mix-prepared-v2' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
+ok grep -q 'ln -s "\$_source" "\$_destination"' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
 
 # The import action must fit the full Chinese label on one line.
 ok grep -q 'else -> 148.dp' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
