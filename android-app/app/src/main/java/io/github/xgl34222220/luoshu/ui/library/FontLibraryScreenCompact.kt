@@ -85,7 +85,6 @@ import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuMotionTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
-import kotlin.math.absoluteValue
 
 @Composable
 internal fun FontLibraryScreenCompact(
@@ -495,7 +494,7 @@ private fun fontAvatarColor(name: String): Color {
         Color(0xFFFFE1EA),
         Color(0xFFE0F1F4),
     )
-    return palette[name.hashCode().absoluteValue % palette.size]
+    return palette[(name.hashCode() and Int.MAX_VALUE) % palette.size]
 }
 
 private fun fontMetadataSummary(font: FontItem): String {
