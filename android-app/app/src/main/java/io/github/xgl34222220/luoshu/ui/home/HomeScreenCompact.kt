@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
@@ -88,8 +89,12 @@ internal fun HomeScreenCompact(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = maxOf(LocalDockContentPadding.current, 24.dp)),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(
+            start = LuoShuLayoutTokens.PageHorizontal,
+            end = LuoShuLayoutTokens.PageHorizontal,
+            bottom = maxOf(LocalDockContentPadding.current, LuoShuLayoutTokens.FloatingDockSafeBottom),
+        ),
+        verticalArrangement = Arrangement.spacedBy(LuoShuLayoutTokens.ItemGap),
     ) {
         item(key = "header") {
             LuoShuTopBar(title = "洛书") {
