@@ -230,7 +230,7 @@ internal fun LuoShuAppShell(
     }
     val studioActions = remember(viewModel, features) {
         FontStudioActions(
-            refresh = viewModel::refreshMixConfig,
+            refresh = { viewModel.refreshMixConfig() },
             pickSlot = { pickerSlot = it },
             updateWeight = viewModel::updateMixWeight,
             updateAxis = viewModel::updateMixAxis,
