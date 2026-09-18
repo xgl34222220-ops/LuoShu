@@ -211,6 +211,10 @@ def shift_glyf_baseline(source: Path, output: Path, shift_y: int) -> tuple[Path,
         changed = 0
         for glyph_name in font.getGlyphOrder():
             glyph = glyf[glyph_name]
+            try:
+                glyph.expand(glyf)
+            except Exception:
+                continue
             if getattr(glyph, 'numberOfContours', 0) <= 0:
                 continue
             coordinates = getattr(glyph, 'coordinates', None)
@@ -375,10 +379,13 @@ def write_metrics(source: Path, output: Path, contract: tuple,
         os2.usWeightClass = target_weight
         if target_weight >= 700:
             os2.fsSelection = (os2.fsSelection | (1 << 5)) & ~(1 << 6)
+            head.macStyle = int(getattr(head, 'macStyle', 0)) | 1
         elif target_weight == 400:
             os2.fsSelection = (os2.fsSelection | (1 << 6)) & ~(1 << 5)
+            head.macStyle = int(getattr(head, 'macStyle', 0)) & ~1
         else:
             os2.fsSelection &= ~((1 << 5) | (1 << 6))
+            head.macStyle = int(getattr(head, 'macStyle', 0)) & ~1
         source_frame = (int(head.yMin), int(head.yMax))
         if contract[10] is not None:
             frame = tuple(round(v * scale) for v in contract[10])
