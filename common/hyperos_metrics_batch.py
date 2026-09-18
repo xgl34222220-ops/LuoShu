@@ -33,6 +33,12 @@ TEMPLATE_CAPTURE_REVISION = 2
 BASELINE_SHIFT_LIMIT_RATIO = 0.22
 BASELINE_CACHE_SCHEMA = "hyperos-baseline-v1"
 OEM_DIRECT_PREFIXES = ("misans", "xiaomisans", "milanpro", "mitype")
+LANGUAGE_FALLBACK_TOKENS = (
+    "tc", "hant", "hk", "l3", "jp", "kr", "japanese", "korean",
+    "arabic", "thai", "lao", "tibetan", "myanmar", "khmer",
+    "devanagari", "gurmukhi", "bengali", "tamil", "telugu",
+    "malayalam", "gujarati", "kannada",
+)
 
 
 def weight_for_name(name: str) -> int:
@@ -133,15 +139,68 @@ def _probe_has_bounds(probe: dict) -> bool:
 
 
 def _oem_direct_full_coverage_slot(logical: str) -> bool:
-    """HyperOS launcher/SystemUI can open these physical aliases directly.
+    """Known HyperOS physical aliases opened directly by launcher/SystemUI.
 
-    Never prune Han from them even when their stock seed is Latin-only: doing so
-    produces tofu boxes instead of falling back through Android's family graph.
+    Language-specific fallback families are deliberately excluded. Replacing
+    MiSansTC/L3/etc with one arbitrary user donor removes characters that the
+    ROM intentionally keeps in dedicated fallback fonts.
     """
     stem = Path(logical).stem.lower()
     if stem.isdigit() and stem in {'100', '200', '300', '350', '400', '500', '600', '700', '800', '900'}:
         return True
+    if any(token in stem for token in LANGUAGE_FALLBACK_TOKENS):
+        return False
     return stem.startswith(OEM_DIRECT_PREFIXES)
+
+
+def _inventory_proven_ui_slot(data: dict, logical: str) -> bool:
+    """Trust current-ROM XML UI membership over a hard-coded filename list."""
+    slot = (data.get('slots') or {}).get(logical, {})
+    if logical == data.get('mainSlotPath'):
+        return True
+    source = str(slot.get('source') or '')
+    families = [str(value).strip().lower().replace('_', '-')
+                for value in slot.get('families', []) if str(value).strip()]
+    if source in {'xml', 'xml-alias'} or slot.get('uiEligible') is True:
+        return any(family.startswith((
+            'sans-serif', 'system-ui', 'system-sans', 'roboto', 'google-sans',
+            'googlesans', 'mi-sans', 'misans', 'xiaomi-sans', 'xiaomisans',
+        )) for family in families)
+    return False
+
+
+def _logical_parts(logical: str) -> tuple[str, str] | None:
+    path = Path(logical)
+    parts = path.parts
+    if len(parts) != 4 or parts[0] != '/' or parts[2] != 'fonts':
+        return None
+    partition, name = parts[1], parts[3]
+    if partition not in PARTS or Path(name).name != name or not name.endswith(('.ttf', '.otf')):
+        return None
+    return partition, name
+
+
+def _inventory_targets(data: dict) -> list[str]:
+    """Return exact current-ROM UI slots instead of a cartesian filename scan."""
+    selected = []
+    for logical, slot in sorted((data.get('slots') or {}).items()):
+        parsed = _logical_parts(str(logical))
+        if parsed is None:
+            continue
+        _partition, name = parsed
+        if _inventory_proven_ui_slot(data, str(logical)):
+            selected.append(str(logical))
+            continue
+        if _oem_direct_full_coverage_slot(str(logical)):
+            selected.append(str(logical))
+            continue
+        # Clock/mono aliases are direct UI consumers but are intentionally
+        # handled only when the inventory already identified them as actual
+        # replaceable slots.
+        label = ' '.join([name, *slot.get('families', [])]).lower()
+        if any(token in label for token in ('miclock', 'androidclock', 'clockopia')) and safe_physical_font_name(name):
+            selected.append(str(logical))
+    return selected
 
 
 def _canonical_baseline_target(template: dict, data: dict) -> str:
@@ -653,7 +712,7 @@ def _cjk_routing(data: dict, logical: str, fallback: frozenset[int]) -> tuple:
     return fallback, frozenset(coverage['cjkPunctuation']), 'stock-latin-primary'
 
 
-def build(module: Path, stage: Path, names: list[str]) -> dict:
+def build(module: Path, stage: Path, names: list[str], *, inventory_ui: bool = False) -> dict:
     if stage.resolve() == (module / '.luoshu-payload').resolve():
         raise ValueError('拒绝修改本次启动正在使用的字体负载')
     fonts = stage / 'system/fonts'
@@ -662,31 +721,47 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     jobs = []
     preserved_aliases = []
     excluded_aliases = []
-    for part in PARTS:
-        root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
-        staged_fonts = stage / part / 'fonts'
-        if staged_fonts.is_dir():
-            for alias in staged_fonts.iterdir():
-                if (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
-                        and alias.suffix in ('.ttf', '.otf')
-                        and not safe_physical_font_name(alias.name)):
-                    excluded_aliases.append(alias)
-        for name in dict.fromkeys(names):
-            if Path(name).name != name or not name.endswith(('.ttf', '.otf')):
-                raise ValueError(f'不安全的字体槽位：{name}')
-            logical = f'/{part}/fonts/{name}'
-            if not safe_physical_font_name(name):
-                # Never let a stale inventory/target list recreate obsolete
-                # language aliases. Removing only its isolated staged alias
-                # exposes the untouched ROM font when the payload is mounted.
-                excluded_aliases.append(stage / part / 'fonts' / name)
+
+    if inventory_ui:
+        selectors = _inventory_targets(data)
+        for logical in selectors:
+            parsed = _logical_parts(logical)
+            if parsed is None:
                 continue
+            part, name = parsed
+            root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
+            dest = stage / part / 'fonts' / name
             if preserved_dynamic_alias(data, logical):
-                preserved_aliases.append(stage / part / 'fonts' / name)
+                preserved_aliases.append(dest)
                 continue
-            if (root / name).exists():
-                jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name,
-                             contract_for_slot(data, logical)))
+            if not (root / name).exists():
+                continue
+            jobs.append((pick_source(fonts, name), dest, contract_for_slot(data, logical)))
+    else:
+        # Legacy compatibility mode for old tests/ROMs without a trustworthy
+        # inventory. New HyperOS builds must use exact inventory UI slots.
+        for part in PARTS:
+            root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
+            staged_fonts = stage / part / 'fonts'
+            if staged_fonts.is_dir():
+                for alias in staged_fonts.iterdir():
+                    if (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
+                            and alias.suffix in ('.ttf', '.otf')
+                            and not safe_physical_font_name(alias.name)):
+                        excluded_aliases.append(alias)
+            for name in dict.fromkeys(names):
+                if Path(name).name != name or not name.endswith(('.ttf', '.otf')):
+                    raise ValueError(f'不安全的字体槽位：{name}')
+                logical = f'/{part}/fonts/{name}'
+                if not safe_physical_font_name(name):
+                    excluded_aliases.append(stage / part / 'fonts' / name)
+                    continue
+                if preserved_dynamic_alias(data, logical):
+                    preserved_aliases.append(stage / part / 'fonts' / name)
+                    continue
+                if (root / name).exists():
+                    jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name,
+                                 contract_for_slot(data, logical)))
     if not jobs:
         raise ValueError('没有找到当前 ROM 的 HyperOS 字体目标')
     cjk_fallback = _staged_cjk_fallback(data, jobs, stage)
@@ -858,7 +933,9 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
         # alias. Keeping these temporary names after success only enlarges
         # cached payload copies and accumulates on repeated stage completion.
         shutil.rmtree(outputs, ignore_errors=True)
-    result = {'mapped': len(prepared), 'generated': len(cache), 'fallbackSlots': fallback}
+    result = {'mapped': len(prepared), 'generated': len(cache), 'fallbackSlots': fallback,
+              'targetMode': 'inventory-ui' if inventory_ui else 'legacy-names',
+              'requestedTargets': len(_inventory_targets(data)) if inventory_ui else len(set(names))}
     if slot_errors:
         result['skippedSlots'] = len(slot_errors)
     return result
@@ -868,9 +945,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('module', type=Path)
     parser.add_argument('stage', type=Path)
+    parser.add_argument('--inventory-ui', action='store_true',
+                        help='Use exact current-ROM UI slots from device_font_inventory.json')
     args = parser.parse_args()
     try:
-        report = build(args.module, args.stage, sys.stdin.read().split())
+        report = build(args.module, args.stage, sys.stdin.read().split(),
+                       inventory_ui=args.inventory_ui)
         print(json.dumps(report, ensure_ascii=False))
         if report['fallbackSlots']:
             print(f"HyperOS：{report['fallbackSlots']} 个槽位缺少有效原厂度量，使用紧凑回退；可重新扫描原厂字体", file=sys.stderr)
