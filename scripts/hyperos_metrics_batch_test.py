@@ -199,6 +199,38 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.assertTrue(all(item['baselineTarget'] == '/system/fonts/MiSansVF.ttf'
                             for item in report['slots']))
 
+    def test_baseline_donor_cache_survives_repeated_switches(self):
+        source = self.fonts / '400.ttf'
+        with TTFont(source) as font:
+            pen = TTGlyphPen(None)
+            pen.moveTo((0, 0)); pen.lineTo((500, 0))
+            pen.lineTo((500, 700)); pen.closePath()
+            font['glyf']['A'] = pen.glyph()
+            font.save(source)
+        self.inventory({'/system/fonts/MiSansVF.ttf': slot(head=(-300, 1100))})
+        self.trusted_template([{
+            'resolvedPath': '/system/fonts/MiSansVF.ttf',
+            'roles': ['global-ui'],
+            'weight': 400,
+            'font': {
+                'metrics': {'unitsPerEm': 1000},
+                'probes': {
+                    'latinCap': {'hits': 8, 'yMin': -70, 'yMax': 630},
+                },
+            },
+        }])
+        with patch.object(batch, 'shift_glyf_baseline',
+                          wraps=batch.shift_glyf_baseline) as rewrite:
+            batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+            first = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots'][0]
+            batch.build(self.module, self.stage, ['MiSansVF.ttf'])
+            second = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots'][0]
+        self.assertEqual(rewrite.call_count, 1,
+                         'reapplying the same unchanged font must reuse the persistent aligned donor')
+        self.assertEqual(first['baselineCache'], 'miss')
+        self.assertEqual(second['baselineCache'], 'hit')
+        self.assertTrue(list((self.module / 'cache/hyperos-baseline').glob('*.font')))
+
     def test_one_noncore_slot_failure_preserves_stock_and_keeps_transaction(self):
         self.inventory({'/system/fonts/MiSansVF.ttf': slot(ascent=1111),
                         '/system/fonts/Roboto-Regular.ttf': slot(ascent=900)})
