@@ -873,6 +873,9 @@ private fun InfoLine(label: String, value: String) {
                 }
             }
         } else {
+            val tabular = value.isNotBlank() && value.all { ch ->
+                ch.isDigit() || ch in ".-+"
+            }
             Text(
                 value.ifBlank { "—" },
                 Modifier.weight(1f),
@@ -882,6 +885,9 @@ private fun InfoLine(label: String, value: String) {
                 fontSize = 13.sp,
                 lineHeight = 19.sp,
                 fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFeatureSettings = if (tabular) "tnum" else null,
+                ),
             )
         }
     }
@@ -908,7 +914,7 @@ private fun DownloadButton(label: String, url: String, sha: String, onClick: () 
         Text(label, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         if (sha.isNotBlank()) {
             Text(
-                "SHA-256 ${sha.take(16)}…",
+                "SHA-256 ${if (sha.length > 16) "${sha.take(8)}…${sha.takeLast(6)}" else sha}",
                 color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .78f),
                 fontSize = 12.sp,
                 lineHeight = 18.sp,
