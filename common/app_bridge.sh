@@ -66,12 +66,22 @@ mount_engine() {
 }
 
 select_task_file() {
-    # queued/running is only trustworthy while its matching worker still exists.
-    # Reconcile both controllers before selecting the one visible to the App.
-    [ -f "$MIX_ENGINE" ] && MODDIR="$MODDIR" sh "$MIX_ENGINE" reconcile >/dev/null 2>&1 || true
-    [ -f "$FONT_SWITCH_TASK" ] && MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" reconcile >/dev/null 2>&1 || true
+    # Normal App status/refresh must be file-read fast. Only spawn a controller
+    # process when its persisted state actually claims queued/running.
     _axes_state="$(read_prop "$AXES_TASK_FILE" state)"
     _switch_state="$(read_prop "$SWITCH_TASK_FILE" state)"
+    case "$_axes_state" in
+        queued|running)
+            [ -f "$MIX_ENGINE" ] && MODDIR="$MODDIR" sh "$MIX_ENGINE" reconcile >/dev/null 2>&1 || true
+            _axes_state="$(read_prop "$AXES_TASK_FILE" state)"
+            ;;
+    esac
+    case "$_switch_state" in
+        queued|running)
+            [ -f "$FONT_SWITCH_TASK" ] && MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" reconcile >/dev/null 2>&1 || true
+            _switch_state="$(read_prop "$SWITCH_TASK_FILE" state)"
+            ;;
+    esac
     case "$_axes_state" in queued|running) printf 'mix|%s\n' "$AXES_TASK_FILE"; return ;; esac
     case "$_switch_state" in queued|running) printf 'switch|%s\n' "$SWITCH_TASK_FILE"; return ;; esac
 
@@ -126,13 +136,16 @@ status_json() {
         _task_id="$(read_prop "$_task_file" task)"
         _task_state="$(read_prop "$_task_file" state)"
         _task_message="$(read_prop "$_task_file" message)"
-        if [ "$_task_type" = mix ]; then
-            _task_progress="$(read_prop "$_task_file" percent)"
-        elif [ "$_task_state" = success ] || [ "$_task_state" = failed ]; then
-            _task_progress=100
-        else
-            _task_progress=10
-        fi
+        _task_progress="$(read_prop "$_task_file" percent)"
+        case "$_task_progress" in
+            ''|*[!0-9]*)
+                if [ "$_task_state" = success ] || [ "$_task_state" = failed ]; then
+                    _task_progress=100
+                else
+                    _task_progress=0
+                fi
+                ;;
+        esac
     fi
     case "$_task_progress" in ''|*[!0-9]*) _task_progress=0 ;; esac
     [ -n "$_task_state" ] || _task_state='idle'
@@ -320,6 +333,11 @@ case "${1:-status}" in
     stock_scan) manager_ready || exit 1; sh "$FONT_MANAGER" action stock_scan ;;
     switch_start) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "${2:-default}" ;;
     switch_status) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" status "${2:-}" ;;
+    switch_reconcile)
+        switch_task_ready || exit 1
+        MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" reconcile >/dev/null 2>&1
+        printf '{"status":"ok"}\n'
+        ;;
     delete) manager_ready || exit 1; sh "$FONT_MANAGER" action delete "${2:-}" ;;
     mix_config) mix_ready || exit 1; sh "$MIX_ENGINE" config ;;
     mix_start) mix_ready || exit 1; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" ;;
