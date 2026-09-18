@@ -40,6 +40,13 @@ LOCK_HELD=false
 GC_PATHS=''
 OLD_NEXT_PAYLOAD=''
 OLD_NEXT_STATE=''
+SWITCH_STARTED_MS=''
+
+monotonic_ms() {
+    _mms=$(awk '{printf "%d", $1 * 1000}' /proc/uptime 2>/dev/null)
+    case "$_mms" in ''|*[!0-9]*) _mms=$(($(date +%s 2>/dev/null || echo 0) * 1000)) ;; esac
+    printf '%s\n' "$_mms"
+}
 
 export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
 [ -f "$LEGACY_DIR/util_functions.sh" ] && . "$LEGACY_DIR/util_functions.sh"
@@ -66,8 +73,12 @@ read_state_value() {
 
 progress() {
     _p="$1"; shift; _m="$*"
-    printf '[%s] [SAFE-SWITCH] stage=%s message=%s\n' \
-        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_p" "$_m" >> "$LOG_FILE" 2>/dev/null || true
+    _now_ms=$(monotonic_ms)
+    [ -n "$SWITCH_STARTED_MS" ] || SWITCH_STARTED_MS="$_now_ms"
+    _elapsed_ms=$((_now_ms - SWITCH_STARTED_MS))
+    [ "$_elapsed_ms" -ge 0 ] 2>/dev/null || _elapsed_ms=0
+    printf '[%s] [SAFE-SWITCH] stage=%s elapsedMs=%s message=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_p" "$_elapsed_ms" "$_m" >> "$LOG_FILE" 2>/dev/null || true
     [ -n "$PROGRESS_FILE" ] || return 0
     _tmp="${PROGRESS_FILE}.tmp.$$"
     {
