@@ -113,6 +113,44 @@ def page_ready(root: ET.Element, label: str, marker: str, package: str) -> bool:
     return selected and content
 
 
+def clickable_label_target(root: ET.Element, label: str, package: str) -> ET.Element:
+    candidates = []
+    for node in root.iter("node"):
+        if node.get("package") != package or node.get("clickable") != "true":
+            continue
+        subtree_labels = {
+            value
+            for child in node.iter("node")
+            if child.get("package") == package
+            for value in labels(child)
+        }
+        if label not in subtree_labels:
+            continue
+        try:
+            left, top, right, bottom = bounds(node)
+        except ValueError:
+            continue
+        candidates.append(((right - left) * (bottom - top), node))
+    if not candidates:
+        raise ValueError(f"Clickable label {label!r} not found")
+    return min(candidates, key=lambda item: item[0])[1]
+
+
+def selected_label(root: ET.Element, label: str, package: str) -> bool:
+    for node in root.iter("node"):
+        if node.get("package") != package:
+            continue
+        subtree_labels = {
+            value
+            for child in node.iter("node")
+            if child.get("package") == package
+            for value in labels(child)
+        }
+        if label in subtree_labels and any(child.get("selected") == "true" for child in node.iter("node")):
+            return True
+    return False
+
+
 def crash_reason(log: str, package: str) -> str | None:
     escaped = re.escape(package)
     if re.search(rf"\bANR in {escaped}(?:\s|$|:)", log):
@@ -185,6 +223,60 @@ class SmokeRun:
             time.sleep(0.4)
         raise RuntimeError(f"UI page did not become ready within {timeout}s: {last_error}")
 
+    def wait_label(self, label: str, timeout: float = 30) -> ET.Element:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            self.assert_running()
+            root = self.hierarchy()
+            if any(label in labels(node) and node.get("package") == self.package for node in root.iter("node")):
+                return root
+            time.sleep(.35)
+        raise RuntimeError(f"UI label {label!r} did not become visible within {timeout}s")
+
+    def wait_clickable_label(self, label: str, timeout: float = 30) -> tuple[ET.Element, ET.Element]:
+        deadline = time.monotonic() + timeout
+        last_error = ""
+        while time.monotonic() < deadline:
+            self.assert_running()
+            root = self.hierarchy()
+            try:
+                return root, clickable_label_target(root, label, self.package)
+            except ValueError as error:
+                last_error = str(error)
+            time.sleep(.35)
+        raise RuntimeError(last_error or f"Clickable label {label!r} did not become visible")
+
+    def set_app_theme(self, label: str) -> None:
+        root = self.hierarchy()
+        settings_tab = tab_target(root, "设置", self.package)
+        x, y = center(settings_tab)
+        self.adb("shell", "input", "tap", str(x), str(y))
+        self.wait_page("设置", "你的洛书")
+
+        _, appearance = self.wait_clickable_label("外观与主题")
+        x, y = center(appearance)
+        self.adb("shell", "input", "tap", str(x), str(y))
+        self.wait_label("颜色与模式")
+
+        _, choice = self.wait_clickable_label(label)
+        x, y = center(choice)
+        self.adb("shell", "input", "tap", str(x), str(y))
+
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            self.assert_running()
+            root = self.hierarchy()
+            if selected_label(root, label, self.package):
+                (self.output / f"theme-{label}.txt").write_text("selected\n", encoding="utf-8")
+                break
+            time.sleep(.35)
+        else:
+            raise RuntimeError(f"App theme {label!r} was not selected")
+
+        self.adb("shell", "input", "keyevent", "KEYCODE_BACK")
+        self.wait_page("设置", "你的洛书")
+        time.sleep(.6)
+
     def capture(self, name: str, root: ET.Element) -> None:
         self.assert_running()
         png = self.adb("exec-out", "screencap", "-p").stdout
@@ -208,22 +300,17 @@ class SmokeRun:
         self.adb("logcat", "-c")
         self.adb("shell", "input", "keyevent", "KEYCODE_WAKEUP")
         self.adb("shell", "wm", "dismiss-keyguard")
-        self.adb("shell", "cmd", "uimode", "night", "no")
         launch = self.text("shell", "am", "start", "-W", "-n", f"{self.package}/io.github.xgl34222220.luoshu.MainActivity", timeout=45)
         (self.output / "launch.txt").write_text(launch, encoding="utf-8")
         if "Status: ok" not in launch or "Error:" in launch:
             raise RuntimeError(f"MainActivity launch failed: {launch}")
         self.wait_page("首页", "当前字体")
-        for theme in ("light", "dark"):
-            if theme == "dark":
-                self.adb("shell", "cmd", "uimode", "night", "yes")
-                # Let the actual configuration change and Activity recreation finish.
-                time.sleep(1.5)
-            mode = self.text("shell", "cmd", "uimode", "night")
-            (self.output / f"{theme}-system-mode.txt").write_text(mode, encoding="utf-8")
-            expected_mode = "yes" if theme == "dark" else "no"
-            if not re.search(rf"Night mode:\s*{expected_mode}\b", mode, re.IGNORECASE):
-                raise RuntimeError(f"System night mode was not applied: {mode.strip()}")
+
+        # API 36 emulator images can lock UiModeManager to custom_bedtime. Exercise
+        # LuoShu's real appearance UI instead of injecting preferences or trusting
+        # the host system's mutable night-mode command.
+        for theme, theme_label in (("light", "浅色"), ("dark", "深色")):
+            self.set_app_theme(theme_label)
             for name, label, marker in PAGES:
                 root = self.hierarchy()
                 target = tab_target(root, label, self.package)
