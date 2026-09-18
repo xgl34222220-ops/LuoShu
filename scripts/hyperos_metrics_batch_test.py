@@ -132,6 +132,13 @@ class HyperOSMetricsTest(unittest.TestCase):
                     self.assertIn(65, font.getBestCmap())
 
     def test_trusted_stock_probe_translates_real_glyph_baseline(self):
+        source = self.fonts / '400.ttf'
+        with TTFont(source) as font:
+            pen = TTGlyphPen(None)
+            pen.moveTo((0, 0)); pen.lineTo((500, 0))
+            pen.lineTo((500, 700)); pen.closePath()
+            font['glyf']['A'] = pen.glyph()
+            font.save(source)
         self.inventory({'/system/fonts/MiSansVF.ttf': slot(head=(-300, 1100))})
         self.trusted_template([{
             'resolvedPath': '/system/fonts/MiSansVF.ttf',
