@@ -247,7 +247,16 @@ luoshu_hyperos_clock_payload_ensure() {
                 _lhcc_part_count=$((_lhcc_part_count + 1))
             fi
         done <<EOF_LHCC_NAMES
-$(_lhcc_names_for_root "$_lhcc_real")
+$(if [ -s "$_lhcc_payload/.luoshu-hyperos-targets.list" ]; then
+    awk -v prefix="/$_lhcc_part/fonts/" '
+        index($0, prefix) == 1 {
+            name = substr($0, length(prefix) + 1)
+            if (name != "" && index(name, "/") == 0) print name
+        }
+    ' "$_lhcc_payload/.luoshu-hyperos-targets.list"
+else
+    _lhcc_names_for_root "$_lhcc_real"
+fi)
 EOF_LHCC_NAMES
         [ "$_lhcc_part_count" -gt 0 ] 2>/dev/null && _lhcc_parts=$((_lhcc_parts + 1))
     done
