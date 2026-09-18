@@ -207,6 +207,19 @@ link_cached_font() {
     ln "$_lcf_source" "$_lcf_dest" 2>/dev/null || cp -f "$_lcf_source" "$_lcf_dest" 2>/dev/null
 }
 
+prune_prepared_cache() {
+    _ppc_count=0
+    _ppc_total=0
+    for _ppc_file in $(ls -1t "$PREPARED_CACHE"/*.font 2>/dev/null); do
+        _ppc_count=$((_ppc_count + 1))
+        _ppc_kb=$(du -k "$_ppc_file" 2>/dev/null | awk '{print $1}')
+        case "$_ppc_kb" in ''|*[!0-9]*) _ppc_kb=0 ;; esac
+        _ppc_total=$((_ppc_total + _ppc_kb))
+        [ "$_ppc_count" -le 12 ] && [ "$_ppc_total" -le 393216 ] && continue
+        rm -f "$_ppc_file" 2>/dev/null || true
+    done
+}
+
 validate_family_roles_async() {
     [ -f "$ROLE_CHECK" ] || return 0
     MODDIR="$MODDIR" sh "$ROLE_CHECK" "$1" cjk >/dev/null 2>&1 || return 2
@@ -305,6 +318,7 @@ prepare_slot() {
         mv -f "$_tmp" "$_cached" 2>/dev/null || return 1
         rm -f "$_tmp.json" "$_tmp.err" 2>/dev/null || true
         chmod 0644 "$_cached" 2>/dev/null || true
+        prune_prepared_cache
     fi
     link_cached_font "$_cached" "$_destination" || return 1
     chmod 0644 "$_destination" 2>/dev/null || true
