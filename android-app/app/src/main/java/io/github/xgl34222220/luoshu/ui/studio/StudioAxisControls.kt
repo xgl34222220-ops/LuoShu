@@ -109,6 +109,7 @@ internal fun MaterialStudioAxisControls(
                                     color = MaterialTheme.colorScheme.primary,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                                 )
                             }
                         }
@@ -330,10 +331,29 @@ private fun InteractiveAxisSlider(
             interactionSource = interactionSource,
             enabled = enabled && maximum > minimum,
             valueRange = minimum..maximum,
-            steps = if (isWeight && maximum > minimum) {
-                (((maximum - minimum) / 10f).roundToInt() - 1).coerceAtLeast(0)
-            } else 0,
+            steps = 0,
         )
+
+        if (isWeight) {
+            listOf(400f, 700f).forEach { tick ->
+                if (tick in minimum..maximum) {
+                    val tickFraction = ((tick - minimum) / range).coerceIn(0f, 1f)
+                    val tickSize = 6.dp
+                    Box(
+                        modifier = Modifier
+                            .offset(
+                                x = (maxWidth - tickSize) * tickFraction,
+                                y = 45.dp,
+                            )
+                            .size(tickSize)
+                            .background(
+                                scheme.primary.copy(alpha = if (tick == 400f) .82f else .58f),
+                                CircleShape,
+                            ),
+                    )
+                }
+            }
+        }
 
         AnimatedVisibility(
             visible = dragging,
@@ -353,6 +373,7 @@ private fun InteractiveAxisSlider(
                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.labelMedium.copy(fontFeatureSettings = "tnum"),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                 )
             }
