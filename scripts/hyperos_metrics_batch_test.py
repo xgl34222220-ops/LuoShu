@@ -140,6 +140,11 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.assertFalse((self.stage / 'product/fonts/MiSansTCVF.ttf').exists())
         self.assertFalse((self.stage / 'product/fonts/MiSansL3.ttf').exists())
         self.assertFalse((self.stage / 'product/fonts/NotoSansSC-Regular.otf').exists())
+        manifest = (self.stage / '.luoshu-hyperos-targets.list').read_text().splitlines()
+        self.assertEqual(set(manifest), {
+            '/system/fonts/HyperOSNeoUI-VF.ttf',
+            '/product/fonts/MiSansVF.ttf',
+        })
 
     def test_language_specific_oem_aliases_are_not_direct_global_slots(self):
         for name in ('MiSansTCVF.ttf', 'MiSansHantVF.ttf', 'MiSansHKVF.ttf',
