@@ -97,6 +97,7 @@ internal fun StudioToolLauncher(
             shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
             containerColor = if (style == UiStyle.MIUIX) tokens.cardBackground else scheme.surface,
             tonalElevation = 0.dp,
+            scrimColor = scheme.scrim.copy(alpha = .20f),
             dragHandle = {
                 Surface(
                     modifier = Modifier.padding(top = 10.dp).width(36.dp).height(4.dp),
