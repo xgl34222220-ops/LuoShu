@@ -328,10 +328,13 @@ class HyperOSMetricsTest(unittest.TestCase):
             batch.build(self.module, self.stage, ['MiSansVF.ttf'])
             second = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots'][0]
         self.assertEqual(rewrite.call_count, 1,
-                         'reapplying the same unchanged font must reuse the persistent aligned donor')
+                         'reapplying the same unchanged font must never rewrite the donor twice')
         self.assertEqual(first['baselineCache'], 'miss')
-        self.assertEqual(second['baselineCache'], 'hit')
+        self.assertEqual(first['slotCache'], 'miss')
+        self.assertEqual(second['slotCache'], 'hit',
+                         'reapply should stop at the final slot cache before baseline generation')
         self.assertTrue(list((self.module / 'cache/hyperos-baseline').glob('*.font')))
+        self.assertTrue(list((self.module / 'cache/hyperos-slots').glob('*.font')))
 
     def test_latin_ui_slot_keeps_outlines_unshifted_while_cjk_core_uses_stock_probe(self):
         source = self.fonts / '400.ttf'
