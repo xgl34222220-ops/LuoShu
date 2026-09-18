@@ -85,6 +85,7 @@ import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuMotionTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
+import kotlin.math.absoluteValue
 
 @Composable
 internal fun FontLibraryScreenCompact(
@@ -259,12 +260,31 @@ internal fun FontLibraryScreenCompact(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Surface(shape = RoundedCornerShape(22.dp), color = scheme.primary.copy(alpha = .08f)) {
-                            Icon(
-                                if (filtered) Icons.Rounded.Search else Icons.Rounded.FontDownload,
-                                contentDescription = null, tint = scheme.primary,
-                                modifier = Modifier.padding(18.dp).size(30.dp),
-                            )
+                        Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
+                            Surface(
+                                modifier = Modifier.size(82.dp),
+                                shape = RoundedCornerShape(28.dp),
+                                color = scheme.primary.copy(alpha = .07f),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        if (filtered) Icons.Rounded.Search else Icons.Rounded.FontDownload,
+                                        contentDescription = null,
+                                        tint = scheme.primary,
+                                        modifier = Modifier.size(38.dp),
+                                    )
+                                }
+                            }
+                            Surface(
+                                modifier = Modifier.align(Alignment.BottomEnd).size(30.dp),
+                                shape = RoundedCornerShape(11.dp),
+                                color = scheme.primaryContainer,
+                                contentColor = scheme.primary,
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text("Aa", fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
                         }
                         Text(
                             if (filtered) "没有找到匹配的字体" else "从第一款字体开始",
@@ -360,6 +380,8 @@ private fun CompactFontRow(
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                FontAvatar(font)
+                Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
                         font.name, color = textPrimary, fontSize = 16.sp, lineHeight = 22.sp,
@@ -434,6 +456,48 @@ private fun CompactFontRow(
     }
 }
 
+@Composable
+private fun FontAvatar(font: FontItem) {
+    val foreground = Color(0xFF334155)
+    Surface(
+        modifier = Modifier.size(40.dp),
+        shape = RoundedCornerShape(14.dp),
+        color = fontAvatarColor(font.name),
+        contentColor = foreground,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                font.name.trim().take(1).ifBlank { "A" },
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
+            Text(
+                font.format.take(3).uppercase().ifBlank { "FONT" },
+                fontSize = 7.sp,
+                fontWeight = FontWeight.Medium,
+                color = foreground.copy(alpha = .64f),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+private fun fontAvatarColor(name: String): Color {
+    val palette = listOf(
+        Color(0xFFDCEBFF),
+        Color(0xFFE8E0FF),
+        Color(0xFFDDF4EA),
+        Color(0xFFFFE7D8),
+        Color(0xFFFFE1EA),
+        Color(0xFFE0F1F4),
+    )
+    return palette[name.hashCode().absoluteValue % palette.size]
+}
+
 private fun fontMetadataSummary(font: FontItem): String {
     val weight = when {
         font.variable -> "可变字重"
@@ -488,3 +552,4 @@ private fun StatusPill(text: String) {
         }
     }
 }
+
