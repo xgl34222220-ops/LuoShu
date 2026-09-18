@@ -75,8 +75,8 @@ grep -q -- '--inventory-ui' "$ROOT/common/hyperos_stage_complete.sh"
 grep -q '_inventory_targets' "$ROOT/common/hyperos_metrics_batch.py"
 grep -q '.luoshu-hyperos-targets.list' "$ROOT/common/hyperos_metrics_batch.py"
 grep -q '.luoshu-hyperos-targets.list' "$ROOT/common/legacy_v14_4/hyperos_clock_compat.sh"
-grep -q 'MiSansL3' "$ROOT/common/legacy_v14_4/hyperos_full_coverage.sh"
 grep -q 'HYPEROS_COVERAGE_REVISION = 5' "$ROOT/common/font_inventory_scan_v3.py"
+grep -q 'LANGUAGE_FALLBACK_TOKENS' "$ROOT/common/hyperos_metrics_batch.py"
 
 # Safe next-boot staging must never recursively delete large payload trees while
 # the foreground switch holds its lock. Rename first; reclaim after the transaction.
