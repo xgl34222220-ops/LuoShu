@@ -294,6 +294,42 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.assertEqual(second['baselineCache'], 'hit')
         self.assertTrue(list((self.module / 'cache/hyperos-baseline').glob('*.font')))
 
+    def test_latin_ui_slot_keeps_outlines_unshifted_while_cjk_core_uses_stock_probe(self):
+        source = self.fonts / '400.ttf'
+        with TTFont(source) as font:
+            pen = TTGlyphPen(None)
+            pen.moveTo((0, 0)); pen.lineTo((500, 0))
+            pen.lineTo((500, 700)); pen.closePath()
+            font['glyf']['A'] = pen.glyph()
+            font.save(source)
+        self.inventory({
+            '/system/fonts/MiSansVF.ttf': slot(head=(-300, 1100)),
+            '/system/fonts/Roboto-Regular.ttf': slot(head=(-240, 980)),
+        })
+        self.trusted_template([{
+            'resolvedPath': '/system/fonts/MiSansVF.ttf',
+            'roles': ['global-ui'],
+            'weight': 400,
+            'font': {
+                'metrics': {'unitsPerEm': 1000},
+                'probes': {'latinCap': {'hits': 8, 'yMin': -80, 'yMax': 620}},
+            },
+        }])
+        batch.build(self.module, self.stage, ['MiSansVF.ttf', 'Roboto-Regular.ttf'])
+        report = {item['slot']: item for item in json.loads(
+            (self.stage / '.luoshu-metrics-report.json').read_text())['slots']}
+        self.assertEqual(report['/system/fonts/MiSansVF.ttf']['baselineShift'], -80)
+        self.assertEqual(report['/system/fonts/MiSansVF.ttf']['baselineReason'], 'stock-probe')
+        self.assertEqual(report['/system/fonts/Roboto-Regular.ttf']['baselineShift'], 0)
+        self.assertEqual(report['/system/fonts/Roboto-Regular.ttf']['baselineReason'], 'slot-metrics-only')
+        with TTFont(self.fonts / 'MiSansVF.ttf') as cjk, TTFont(self.fonts / 'Roboto-Regular.ttf') as latin:
+            cjk_glyph = cjk['glyf'][cjk.getBestCmap()[65]]
+            latin_glyph = latin['glyf'][latin.getBestCmap()[65]]
+            cjk_glyph.recalcBounds(cjk['glyf'])
+            latin_glyph.recalcBounds(latin['glyf'])
+            self.assertEqual(cjk_glyph.yMin, -80)
+            self.assertEqual(latin_glyph.yMin, 0)
+
     def test_one_noncore_slot_failure_preserves_stock_and_keeps_transaction(self):
         self.inventory({'/system/fonts/MiSansVF.ttf': slot(ascent=1111),
                         '/system/fonts/Roboto-Regular.ttf': slot(ascent=900)})
