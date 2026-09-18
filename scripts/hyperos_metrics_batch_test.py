@@ -162,6 +162,43 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.assertEqual(report['baselineReason'], 'stock-probe')
         self.assertGreater(report['baselineGlyphs'], 0)
 
+    def test_baseline_outline_rewrite_runs_once_per_shared_donor(self):
+        source = self.fonts / '400.ttf'
+        with TTFont(source) as font:
+            pen = TTGlyphPen(None)
+            pen.moveTo((0, 0)); pen.lineTo((500, 0))
+            pen.lineTo((500, 700)); pen.closePath()
+            font['glyf']['A'] = pen.glyph()
+            font.save(source)
+        self.inventory({
+            '/system/fonts/MiSansVF.ttf': slot(head=(-300, 1100)),
+            '/system/fonts/Roboto-Regular.ttf': slot(ascent=980, descent=-260, head=(-260, 1000)),
+            '/product/fonts/GoogleSans-Regular.ttf': slot(ascent=960, descent=-240, head=(-240, 980)),
+        })
+        self.trusted_template([{
+            'resolvedPath': '/system/fonts/MiSansVF.ttf',
+            'roles': ['global-ui'],
+            'weight': 400,
+            'font': {
+                'metrics': {'unitsPerEm': 1000},
+                'probes': {
+                    'latinCap': {'hits': 8, 'yMin': -80, 'yMax': 620},
+                },
+            },
+        }])
+        with patch.object(batch, 'shift_glyf_baseline',
+                          wraps=batch.shift_glyf_baseline) as rewrite:
+            result = batch.build(
+                self.module, self.stage,
+                ['MiSansVF.ttf', 'Roboto-Regular.ttf', 'GoogleSans-Regular.ttf'])
+        self.assertEqual(result['mapped'], 3)
+        self.assertEqual(rewrite.call_count, 1,
+                         'one donor must not be fully rewritten once per HyperOS alias')
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertTrue(all(item['baselineShift'] == -80 for item in report['slots']))
+        self.assertTrue(all(item['baselineTarget'] == '/system/fonts/MiSansVF.ttf'
+                            for item in report['slots']))
+
     def test_one_noncore_slot_failure_preserves_stock_and_keeps_transaction(self):
         self.inventory({'/system/fonts/MiSansVF.ttf': slot(ascent=1111),
                         '/system/fonts/Roboto-Regular.ttf': slot(ascent=900)})
