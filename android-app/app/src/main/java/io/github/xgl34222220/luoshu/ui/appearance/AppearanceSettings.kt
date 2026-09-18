@@ -45,7 +45,7 @@ data class AccentOption(
 )
 
 val AccentOptions = listOf(
-    AccentOption("luoshu", "洛书蓝", 0xFF426FE8.toInt()),
+    AccentOption("luoshu", "洛书蓝", 0xFF2A62F6.toInt()),
     AccentOption("purple", "曜紫", 0xFF7857D8.toInt()),
     AccentOption("cyan", "青蓝", 0xFF0087A8.toInt()),
     AccentOption("green", "青玉", 0xFF16856B.toInt()),
