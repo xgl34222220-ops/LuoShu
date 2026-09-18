@@ -189,12 +189,25 @@ class SmokeRun:
         return self.adb(*arguments, **kwargs).stdout.decode("utf-8", "replace")
 
     def hierarchy(self) -> ET.Element:
-        remote = "/sdcard/luoshu-ui-smoke.xml"
-        self.adb("shell", "rm", "-f", remote)
-        self.adb("shell", "uiautomator", "dump", remote, timeout=15)
-        xml = self.text("shell", "cat", remote)
-        (self.output / "latest-hierarchy.xml").write_text(xml, encoding="utf-8")
-        return ET.fromstring(xml)
+        remote = "/data/local/tmp/luoshu-ui-smoke.xml"
+        last_detail = "hierarchy not produced"
+        for attempt in range(6):
+            self.adb("shell", "rm", "-f", remote, check=False)
+            dump = self.adb("shell", "uiautomator", "dump", remote, timeout=15, check=False)
+            cat = self.adb("shell", "cat", remote, timeout=10, check=False)
+            xml = cat.stdout.decode("utf-8", "replace")
+            if cat.returncode == 0 and "<hierarchy" in xml:
+                (self.output / "latest-hierarchy.xml").write_text(xml, encoding="utf-8")
+                try:
+                    return ET.fromstring(xml)
+                except ET.ParseError as error:
+                    last_detail = f"invalid hierarchy XML: {error}"
+            else:
+                dump_detail = (dump.stdout + dump.stderr).decode("utf-8", "replace").strip()
+                cat_detail = (cat.stdout + cat.stderr).decode("utf-8", "replace").strip()
+                last_detail = cat_detail or dump_detail or "hierarchy not produced"
+            time.sleep(.45 + attempt * .15)
+        raise RuntimeError(f"UI hierarchy unavailable after retries: {last_detail}")
 
     def logcat(self, filename: str = "logcat.txt") -> str:
         log = self.text("logcat", "-b", "main", "-b", "system", "-b", "crash", "-d", "-v", "threadtime")
