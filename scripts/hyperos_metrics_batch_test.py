@@ -84,7 +84,10 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.inventory({'/system/fonts/MiSansVF.ttf': slot()})
         with patch.object(TTFont, 'getGlyphSet', side_effect=AssertionError('outline rebuild')):
             result = batch.build(self.module, self.stage, ['MiSansVF.ttf'])
-        self.assertEqual(result, {'mapped': 1, 'generated': 1, 'fallbackSlots': 0})
+        self.assertEqual(result['mapped'], 1)
+        self.assertEqual(result['generated'], 1)
+        self.assertEqual(result['fallbackSlots'], 0)
+        self.assertEqual(result['targetMode'], 'legacy-names')
         report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
         self.assertEqual(report['slots'][0]['metricsSource'], 'stock')
         self.assertEqual(report['slots'][0]['slot'], '/system/fonts/MiSansVF.ttf')
@@ -94,6 +97,61 @@ class HyperOSMetricsTest(unittest.TestCase):
             self.assertEqual(out['OS/2'].usWinAscent, 1400)
             self.assertEqual(out['glyf'].compile(out), src['glyf'].compile(src))
             self.assertEqual(out['head'].yMax, src['head'].yMax)
+
+    def test_inventory_ui_mode_tracks_new_os4_xml_family_without_broad_scan(self):
+        slots = {
+            '/system/fonts/HyperOSNeoUI-VF.ttf': {
+                **slot(head=(-300, 1100)),
+                'source': 'xml',
+                'families': ['system-ui'],
+                'uiEligible': True,
+            },
+            '/product/fonts/MiSansVF.ttf': {
+                **slot(head=(-300, 1100)),
+                'source': 'hyperos-physical',
+                'families': [],
+            },
+            '/product/fonts/MiSansTCVF.ttf': {
+                **slot(head=(-300, 1100)),
+                'source': 'hyperos-physical',
+                'families': [],
+            },
+            '/product/fonts/MiSansL3.ttf': {
+                **slot(head=(-300, 1100)),
+                'source': 'hyperos-physical',
+                'families': [],
+            },
+            '/product/fonts/NotoSansSC-Regular.otf': {
+                **slot(head=(-300, 1100)),
+                'source': 'hyperos-physical',
+                'families': [],
+            },
+        }
+        self.inventory(slots)
+        data = json.loads((self.module / 'config/device_font_inventory.json').read_text())
+        data['mainSlotPath'] = '/system/fonts/HyperOSNeoUI-VF.ttf'
+        (self.module / 'config/device_font_inventory.json').write_text(json.dumps(data))
+        result = batch.build(self.module, self.stage, [], inventory_ui=True)
+        self.assertEqual(result['targetMode'], 'inventory-ui')
+        self.assertEqual(result['requestedTargets'], 2)
+        self.assertEqual(result['mapped'], 2)
+        self.assertTrue((self.stage / 'system/fonts/HyperOSNeoUI-VF.ttf').exists())
+        self.assertTrue((self.stage / 'product/fonts/MiSansVF.ttf').exists())
+        self.assertFalse((self.stage / 'product/fonts/MiSansTCVF.ttf').exists())
+        self.assertFalse((self.stage / 'product/fonts/MiSansL3.ttf').exists())
+        self.assertFalse((self.stage / 'product/fonts/NotoSansSC-Regular.otf').exists())
+
+    def test_language_specific_oem_aliases_are_not_direct_global_slots(self):
+        for name in ('MiSansTCVF.ttf', 'MiSansHantVF.ttf', 'MiSansHKVF.ttf',
+                     'MiSansL3.ttf', 'MiSansJPVF.ttf', 'MiSansKRVF.ttf',
+                     'MiSansArabicVF.ttf'):
+            with self.subTest(name=name):
+                self.assertFalse(batch._oem_direct_full_coverage_slot(
+                    f'/product/fonts/{name}'))
+        self.assertTrue(batch._oem_direct_full_coverage_slot(
+            '/product/fonts/MiSansVF.ttf'))
+        self.assertTrue(batch._oem_direct_full_coverage_slot(
+            '/product/fonts/400.ttf'))
 
     def test_full_contract_cache_and_multiweight(self):
         font_file(self.fonts / '700.ttf', 900)
