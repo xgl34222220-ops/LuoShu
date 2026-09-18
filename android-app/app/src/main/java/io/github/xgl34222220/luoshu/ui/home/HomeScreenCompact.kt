@@ -1,11 +1,17 @@
 package io.github.xgl34222220.luoshu.ui.home
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -45,6 +52,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -54,10 +62,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -71,6 +82,7 @@ import io.github.xgl34222220.luoshu.ui.theme.LuoShuHeaderAction
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuSectionHeading
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuTopBar
+import kotlin.math.abs
 
 @Composable
 internal fun HomeScreenCompact(
@@ -298,6 +310,118 @@ private fun HomeShortcut(title: String, subtitle: String, icon: ImageVector, onC
     }
 }
 
+@Composable
+private fun HomeWeightSlider(
+    weight: HomeWeightUiState,
+    enabled: Boolean,
+    onValueChange: (Float) -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val interactionSource = remember { MutableInteractionSource() }
+    val dragging by interactionSource.collectIsDraggedAsState()
+    val haptic = LocalHapticFeedback.current
+    var lastHapticTarget by remember { mutableStateOf<Int?>(null) }
+    val minimum = weight.min.toFloat()
+    val maximum = weight.max.toFloat().coerceAtLeast(minimum + 1f)
+    val current = weight.weight.toFloat().coerceIn(minimum, maximum)
+    val fraction = ((current - minimum) / (maximum - minimum)).coerceIn(0f, 1f)
+    val step = weight.step.coerceAtLeast(1)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        WeightStepButton(
+            label = "−",
+            enabled = enabled && weight.weight > weight.min,
+            onClick = { onValueChange((weight.weight - step).coerceAtLeast(weight.min).toFloat()) },
+        )
+        Spacer(Modifier.width(8.dp))
+        BoxWithConstraints(
+            modifier = Modifier.weight(1f).height(62.dp),
+        ) {
+            val bubbleWidth = 54.dp
+            val bubbleX = (maxWidth - bubbleWidth) * fraction
+            Slider(
+                value = current,
+                onValueChange = { raw ->
+                    val hapticTarget = listOf(400, 700).firstOrNull { target ->
+                        target.toFloat() in minimum..maximum &&
+                            abs(raw - target.toFloat()) <= maxOf(step.toFloat(), 12f)
+                    }
+                    if (hapticTarget != null && hapticTarget != lastHapticTarget) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        lastHapticTarget = hapticTarget
+                    } else if (hapticTarget == null) {
+                        lastHapticTarget = null
+                    }
+                    onValueChange(raw.coerceIn(minimum, maximum))
+                },
+                modifier = Modifier.fillMaxWidth().padding(top = 22.dp),
+                interactionSource = interactionSource,
+                enabled = enabled,
+                valueRange = minimum..maximum,
+                steps = (((weight.max - weight.min) / step) - 1).coerceAtLeast(0),
+            )
+            AnimatedVisibility(
+                visible = dragging,
+                modifier = Modifier.offset(x = bubbleX),
+                enter = fadeIn(tween(90)),
+                exit = fadeOut(tween(90)),
+            ) {
+                Surface(
+                    modifier = Modifier.width(bubbleWidth),
+                    shape = RoundedCornerShape(14.dp),
+                    color = scheme.primary,
+                    contentColor = scheme.onPrimary,
+                    shadowElevation = 5.dp,
+                ) {
+                    Text(
+                        weight.weight.toString(),
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        WeightStepButton(
+            label = "+",
+            enabled = enabled && weight.weight < weight.max,
+            onClick = { onValueChange((weight.weight + step).coerceAtMost(weight.max).toFloat()) },
+        )
+    }
+}
+
+@Composable
+private fun WeightStepButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(32.dp),
+        shape = RoundedCornerShape(11.dp),
+        color = scheme.surfaceContainerHigh,
+        contentColor = scheme.onSurface,
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                label,
+                fontSize = 19.sp,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+
 private data class HomeNextStep(
     val title: String,
     val description: String,
@@ -423,10 +547,15 @@ private fun SystemWeightCard(
     textSecondary: Color,
     shape: RoundedCornerShape,
 ) {
+    val dark = MaterialTheme.colorScheme.background.luminance() < .5f
     Card(
         shape = shape,
         colors = CardDefaults.cardColors(containerColor = cardColor),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(
+            0.5.dp,
+            if (dark) Color.Transparent else LuoShuLayoutTokens.LightCardOutline,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
         Column(Modifier.padding(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -446,9 +575,23 @@ private fun SystemWeightCard(
                     }
                 }
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("全局粗细微调", color = textPrimary, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
-                    Text("不修改字体文件，可随时恢复", color = textSecondary, fontSize = 12.sp)
+                Column(Modifier.weight(1f).padding(end = 8.dp)) {
+                    Text(
+                        "全局粗细微调",
+                        color = textPrimary,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false,
+                    )
+                    Text(
+                        "不改字体文件 · 随时可恢复",
+                        color = textSecondary,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                    )
                 }
                 Text(
                     if (weight.loading) "读取中" else weight.weight.toString(),
@@ -469,12 +612,10 @@ private fun SystemWeightCard(
                     fontSize = 12.sp,
                 )
                 else -> {
-                    Slider(
-                        value = weight.weight.toFloat(),
-                        onValueChange = actions.previewSystemWeight,
+                    HomeWeightSlider(
+                        weight = weight,
                         enabled = !weight.applying,
-                        valueRange = weight.min.toFloat()..weight.max.toFloat(),
-                        steps = (((weight.max - weight.min) / weight.step) - 1).coerceAtLeast(0),
+                        onValueChange = actions.previewSystemWeight,
                     )
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
