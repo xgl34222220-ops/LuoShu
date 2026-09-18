@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -314,13 +315,15 @@ private fun FontDirectoryMonitorButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val scheme = MaterialTheme.colorScheme
     Surface(
         onClick = onClick,
         enabled = enabled,
         modifier = modifier,
         shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+        color = scheme.surfaceContainerLow,
+        contentColor = scheme.onSurface,
+        border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .48f)),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),
@@ -344,7 +347,7 @@ private fun FontDirectoryMonitorButton(
                         else -> "目录已连接"
                     },
                     fontSize = 9.sp,
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .72f),
+                    color = scheme.onSurfaceVariant,
                 )
             }
         }
