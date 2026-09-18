@@ -335,10 +335,10 @@ worker() {
     precheck_mix "$_cjk" "$_latin" "$_digit"
     _precheck=$?
     case "$_precheck" in
-        2) update_task "$_wanted" failed '中文基底缺少必要字形' 100 "$(date +%s)"; clear_auto_worker_pid "$_wanted"; exit 1 ;;
-        3) update_task "$_wanted" failed '英文字体缺少必要字形' 100 "$(date +%s)"; clear_auto_worker_pid "$_wanted"; exit 1 ;;
-        4) update_task "$_wanted" failed '数字字体缺少必要字形' 100 "$(date +%s)"; clear_auto_worker_pid "$_wanted"; exit 1 ;;
-        1) update_task "$_wanted" failed '组合配置不完整' 100 "$(date +%s)"; clear_auto_worker_pid "$_wanted"; exit 1 ;;
+        2) update_task "$_wanted" failed '中文基底缺少必要字形' 100 "$(date +%s)"; rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1 ;;
+        3) update_task "$_wanted" failed '英文字体缺少必要字形' 100 "$(date +%s)"; rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1 ;;
+        4) update_task "$_wanted" failed '数字字体缺少必要字形' 100 "$(date +%s)"; rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1 ;;
+        1) update_task "$_wanted" failed '组合配置不完整' 100 "$(date +%s)"; rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1 ;;
     esac
 
     mkdir -p "$_root/fonts" "$_root/prepared" 2>/dev/null || {
