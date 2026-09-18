@@ -2,10 +2,14 @@ package io.github.xgl34222220.luoshu.ui.library
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
@@ -16,6 +20,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import io.github.xgl34222220.luoshu.FontItem
@@ -101,12 +106,25 @@ internal fun FontLibraryRoute(
         }
     }
 
-    FontLibraryScreenCompact(
-        style = style,
-        state = displayState,
-        actions = displayActions,
-        tools = managementTools,
+    val childLayerActive = showManagement || detailFont != null
+    val pageScale by animateFloatAsState(
+        targetValue = if (childLayerActive) .96f else 1f,
+        animationSpec = spring(dampingRatio = .86f, stiffness = Spring.StiffnessMediumLow),
+        label = "fontLibraryDepthScale",
     )
+    Box(
+        modifier = Modifier.graphicsLayer {
+            scaleX = pageScale
+            scaleY = pageScale
+        },
+    ) {
+        FontLibraryScreenCompact(
+            style = style,
+            state = displayState,
+            actions = displayActions,
+            tools = managementTools,
+        )
+    }
 
     if (showManagement) {
         FontLibraryManagementDialog(
