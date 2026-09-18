@@ -127,6 +127,7 @@ internal fun FontDetailsDialogRoute(
         shape = RoundedCornerShape(topStart = 30.dp, topEnd = 30.dp),
         containerColor = container,
         dragHandle = null,
+        scrimColor = Color.Black.copy(alpha = .20f),
     ) {
         Column(
             modifier = Modifier
