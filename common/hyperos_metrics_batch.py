@@ -161,7 +161,9 @@ def _inventory_proven_ui_slot(data: dict, logical: str) -> bool:
     source = str(slot.get('source') or '')
     families = [str(value).strip().lower().replace('_', '-')
                 for value in slot.get('families', []) if str(value).strip()]
-    if source in {'xml', 'xml-alias'} or slot.get('uiEligible') is True:
+    if slot.get('uiEligible') is True:
+        return True
+    if source in {'xml', 'xml-alias'}:
         return any(family.startswith((
             'sans-serif', 'system-ui', 'system-sans', 'roboto', 'google-sans',
             'googlesans', 'mi-sans', 'misans', 'xiaomi-sans', 'xiaomisans',
