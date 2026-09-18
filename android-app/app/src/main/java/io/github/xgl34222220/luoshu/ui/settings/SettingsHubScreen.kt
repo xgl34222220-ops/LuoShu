@@ -11,6 +11,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -73,6 +74,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -691,12 +693,21 @@ private fun ToggleLine(title: String, description: String, checked: Boolean, onC
 @Composable
 private fun SettingCard(title: String, content: @Composable () -> Unit) {
     val tokens = LocalMiuixTokens.current
+    val dark = MaterialTheme.colorScheme.background.luminance() < .5f
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(
+            0.5.dp,
+            if (dark) Color.Transparent else LuoShuLayoutTokens.LightCardOutline,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
-        Column(Modifier.fillMaxWidth().padding(20.dp)) { Text(title, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold); Spacer(Modifier.height(14.dp)); content() }
+        Column(Modifier.fillMaxWidth().padding(LuoShuLayoutTokens.CardPadding)) {
+            Text(title, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(12.dp))
+            content()
+        }
     }
 }
 
@@ -704,12 +715,17 @@ private fun SettingCard(title: String, content: @Composable () -> Unit) {
 private fun StatusCard(title: String, subtitle: String, level: HealthLevel, loading: Boolean, content: @Composable () -> Unit) {
     val accent = when (level) { HealthLevel.HEALTHY -> MaterialTheme.colorScheme.primary; HealthLevel.WARNING -> MaterialTheme.colorScheme.tertiary; HealthLevel.ERROR -> MaterialTheme.colorScheme.error }
     val tokens = LocalMiuixTokens.current
+    val dark = MaterialTheme.colorScheme.background.luminance() < .5f
     Card(
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(containerColor = tokens.cardBackground),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(
+            0.5.dp,
+            if (dark) Color.Transparent else LuoShuLayoutTokens.LightCardOutline,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
-        Column(Modifier.fillMaxWidth().padding(20.dp)) {
+        Column(Modifier.fillMaxWidth().padding(LuoShuLayoutTokens.CardPadding)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(Modifier.size(38.dp), RoundedCornerShape(13.dp), color = accent.copy(alpha = .11f), contentColor = accent) {
                     Box(contentAlignment = Alignment.Center) { if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Icon(when (level) { HealthLevel.HEALTHY -> Icons.Rounded.CheckCircle; HealthLevel.WARNING -> Icons.Rounded.Info; HealthLevel.ERROR -> Icons.Rounded.Error }, null, Modifier.size(21.dp)) }
