@@ -271,7 +271,9 @@ def _set_names(font: TTFont) -> None:
 
 
 def _validate_output(path: Path) -> dict[str, object]:
-    font = TTFont(str(path), lazy=False, recalcTimestamp=False)
+    # Validation only needs cmap + three probe glyphs. Loading every CJK table
+    # eagerly after a full save duplicates the most expensive part of finalization.
+    font = TTFont(str(path), lazy=True, recalcTimestamp=False, recalcBBoxes=False)
     try:
         cmap = font.getBestCmap() or {}
         required = {"cjk": ord("中"), "latin": ord("A"), "digit": ord("1")}
