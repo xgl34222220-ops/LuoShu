@@ -93,6 +93,73 @@ stock_scan_lock_release() {
     rmdir "$STOCK_SCAN_LOCK" 2>/dev/null || true
 }
 
+stock_scan_namespace_exec() {
+    _sns_shell="${LUOSHU_STOCK_SCAN_ANDROID_SHELL:-/system/bin/sh}"
+    [ -x "$_sns_shell" ] || return 125
+    [ "${LUOSHU_STOCK_SCAN_NAMESPACE:-}" != pid1 ] || return 125
+    [ "${LUOSHU_STOCK_VIEW_VERIFIED:-}" != 1 ] || return 125
+
+    _sns_force="${LUOSHU_STOCK_SCAN_FORCE_NAMESPACE:-0}"
+    _sns_self=$(readlink /proc/self/ns/mnt 2>/dev/null)
+    _sns_pid1=$(readlink /proc/1/ns/mnt 2>/dev/null)
+    if [ "$_sns_force" != 1 ]; then
+        [ -n "$_sns_self" ] && [ -n "$_sns_pid1" ] && [ "$_sns_self" != "$_sns_pid1" ] || return 125
+    fi
+
+    _sns_cmd="${LUOSHU_STOCK_SCAN_NSENTER:-}"
+    if [ -z "$_sns_cmd" ]; then
+        _sns_cmd=$(command -v nsenter 2>/dev/null)
+    fi
+    if [ -n "$_sns_cmd" ] && [ -x "$_sns_cmd" ]; then
+        "$_sns_cmd" -t 1 -m -- "$_sns_shell" -c '
+            MODDIR="$1"
+            LUOSHU_PUBLIC_DIR="$2"
+            LUOSHU_STOCK_SCAN_NAMESPACE=pid1
+            export MODDIR LUOSHU_PUBLIC_DIR LUOSHU_STOCK_SCAN_NAMESPACE
+            exec "$3" "$1/common/font_manager.sh" action stock_scan_local
+        ' sh "$MODDIR" "$LUOSHU_PUBLIC_DIR" "$_sns_shell"
+        return $?
+    fi
+
+    if command -v toybox >/dev/null 2>&1 && toybox nsenter --help >/dev/null 2>&1; then
+        toybox nsenter -t 1 -m -- "$_sns_shell" -c '
+            MODDIR="$1"
+            LUOSHU_PUBLIC_DIR="$2"
+            LUOSHU_STOCK_SCAN_NAMESPACE=pid1
+            export MODDIR LUOSHU_PUBLIC_DIR LUOSHU_STOCK_SCAN_NAMESPACE
+            exec "$3" "$1/common/font_manager.sh" action stock_scan_local
+        ' sh "$MODDIR" "$LUOSHU_PUBLIC_DIR" "$_sns_shell"
+        return $?
+    fi
+    return 125
+}
+
+stock_scan_broker() {
+    # Early-boot callers are already in the trusted stock-visible namespace.
+    if [ "${LUOSHU_STOCK_VIEW_VERIFIED:-}" = 1 ] || [ "${LUOSHU_STOCK_SCAN_NAMESPACE:-}" = pid1 ]; then
+        stock_scan_json
+        return $?
+    fi
+
+    _ssb_out=$(stock_scan_namespace_exec 2>&1)
+    _ssb_rc=$?
+    if [ "$_ssb_rc" -eq 0 ]; then
+        printf '%s\n' "$_ssb_out"
+        return 0
+    fi
+    if [ "$_ssb_rc" -ne 125 ]; then
+        mkdir -p "$MODDIR/logs" 2>/dev/null || true
+        printf '[%s] global stock scan failed rc=%s: %s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" \
+            "$_ssb_rc" "$(printf '%s' "$_ssb_out" | tr '\r\n' '  ' | cut -c1-512)" \
+            >>"$MODDIR/logs/font-inventory.log" 2>/dev/null || true
+    fi
+
+    # Fall back to the current root namespace. Magisk often exposes its mirror
+    # here even when PID 1 entry is unavailable.
+    stock_scan_json
+}
+
 stock_scan_json() {
     if ! stock_scan_available; then
         printf '{"status":"error","message":"%s"}\n' "$(json_escape_router '原厂字体扫描组件不完整')"
@@ -155,7 +222,8 @@ stock_scan_json() {
     chmod 0644 "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
     stock_scan_lock_release
     trap - EXIT HUP INT TERM
-    printf '{"status":"error","message":"%s"}\n' "$(json_escape_router "$_stock_message")"
+    printf '{"status":"error","message":"%s","deferred":true}\n' \
+        "$(json_escape_router "$_stock_message；已安排下次启动前自动重扫")"
     return 1
 }
 
@@ -182,8 +250,13 @@ if [ "${1:-}" = action ] && [ "${2:-}" = switch ]; then
     exit 1
 fi
 
-if [ "${1:-}" = action ] && [ "${2:-}" = stock_scan ]; then
+if [ "${1:-}" = action ] && [ "${2:-}" = stock_scan_local ]; then
     stock_scan_json
+    exit $?
+fi
+
+if [ "${1:-}" = action ] && [ "${2:-}" = stock_scan ]; then
+    stock_scan_broker
     exit $?
 fi
 
