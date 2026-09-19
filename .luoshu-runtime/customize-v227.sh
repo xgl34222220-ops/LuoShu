@@ -100,8 +100,12 @@ if [ "$UPDATE_PRESERVED" != true ]; then
           "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
     _old_selected=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
     if [ -n "$_old_selected" ] && [ "$_old_selected" != default ]; then
-        ui_print "✗ 无法安全迁移当前字体 $_old_selected；已中止本次更新，不会切回系统默认字体"
-        exit 1
+        # Migration state must never prevent the module from installing. Preserve
+        # the user's last selection as recovery metadata, boot stock if the exact
+        # old payload cannot be trusted, and still run the universal stock scan.
+        printf '%s\n' "$_old_selected" > "$MODPATH/config/previous_font.conf" 2>/dev/null || true
+        : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
+        ui_print "• 旧字体负载 $_old_selected 无法完整迁移；继续安装并重新扫描本机字体槽位"
     fi
     printf 'default\n' > "$MODPATH/config/active_font.conf"
 fi
@@ -148,16 +152,15 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         ui_print "✓ 原厂字体文件：$_inventory_files 个（ROM：$_inventory_rom）"
         ui_print "✓ 可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / OEM 探测 $_inventory_heuristic）"
     else
-        _old_active=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
-        if [ -n "$_old_active" ] && [ "$_old_active" != default ]; then
-            : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
-            ui_print "• 当前字体仍在挂载，已安排重启后读取原厂字体清单"
-        else
-            ui_print "• 原厂字体清单扫描不可用，本机将自动使用旧静态适配清单"
-        fi
+        # The install must remain successful even when the current flash namespace
+        # cannot expose a verified stock lower/mirror. Keep a retry marker so the
+        # pre-mount boot hook scans before LuoShu mounts its own payload.
+        : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
+        ui_print "• 安装阶段字体扫描未完成；已安排开机挂载前自动重扫，不中止安装"
     fi
 else
-    ui_print "• 字体清单扫描器不可用，本机将自动使用旧静态适配清单"
+    : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
+    ui_print "• 字体扫描组件暂不可用；已安排开机前自动重试，不中止安装"
 fi
 # 安装安全 CLI，不暴露上一字体回滚、热刷新或重启 SystemUI 命令。
 cp -f "$MODPATH/common/luoshu_cli.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
