@@ -118,6 +118,9 @@ FONT_TARGET_OUTPUT="$MODPATH/config/replaceable_font_targets.json"
 FONT_TARGET_LIST="$MODPATH/config/replaceable_font_targets.list"
 FONT_SLOT_SNAPSHOT="$MODPATH/config/font-slot-snapshot.conf"
 
+if [ "${LUOSHU_HOST_TEST_ALLOW_NO_SCAN:-0}" = 1 ] && [ ! -x /system/bin/getprop ]; then
+    ui_print "• 主机测试环境：跳过真机字体槽位扫描"
+else
 rm -f "$FONT_INVENTORY_OUTPUT" "$FONT_TARGET_OUTPUT" "$FONT_TARGET_LIST" \
       "$FONT_SLOT_SNAPSHOT" "$MODPATH/config/stock_inventory_scan_pending" \
       "$FONT_INVENTORY_FLASH_ERR" 2>/dev/null || true
@@ -235,6 +238,9 @@ ui_print "✓ 已冻结可替换 UI 槽位：$_inventory_slots 个（XML $_inven
 ui_print "✓ 设备专属替换目标：$_target_count 个（物理直覆 $_target_physical）"
 ui_print "✓ 原厂视图来源：直接 $_view_direct / LuoShu lower $_view_lower / Root mirror $_view_mirror"
 ui_print "✓ 后续换字体只读取本次槽位快照，不再临时猜槽位"
+
+
+fi
 
 # 安装安全 CLI，不暴露上一字体回滚、热刷新或重启 SystemUI 命令。
 cp -f "$MODPATH/common/luoshu_cli.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
