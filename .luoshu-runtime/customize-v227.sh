@@ -199,12 +199,17 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         _inventory_error=$(sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' "$FONT_INVENTORY_FLASH_ERR" 2>/dev/null | tail -n1)
         [ -n "$_inventory_error" ] || _inventory_error="刷入环境无法确认原厂字体视图"
         _old_active=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+        _pending_file="$MODPATH/config/stock_inventory_scan_pending"
+        {
+            printf 'state=pending\n'
+            printf 'reason=%s\n' "$_inventory_error"
+            printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+        } > "$_pending_file" 2>/dev/null || true
+        chmod 0644 "$_pending_file" 2>/dev/null || true
         if [ -n "$_old_active" ] && [ "$_old_active" != default ]; then
-            : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
             ui_print "• 刷入时无法安全读取原厂字体：$_inventory_error"
             ui_print "• 已安排下次启动在字体挂载前自动重扫，不会把当前覆盖字体当成原厂"
         else
-            : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
             ui_print "• 原厂字体清单暂未完成：$_inventory_error"
             ui_print "• 已安排下次启动自动重扫"
         fi
