@@ -12,8 +12,8 @@ import tempfile
 from pathlib import Path
 
 
-def run(command: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def run(command: list[str], env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
 
 
 def main() -> int:
@@ -51,6 +51,13 @@ def main() -> int:
         shutil.copy2(args.font, font_dirs["oem"] / "OPlusSans3.0.ttf")
         shutil.copy2(args.font, font_dirs["hw_product"] / "HwUi-Regular.ttf")
 
+        dynamic_root = temp / "dynamic-root"
+        future_fonts = dynamic_root / "future_oem/fonts"
+        future_etc = dynamic_root / "future_oem/etc"
+        future_fonts.mkdir(parents=True)
+        future_etc.mkdir(parents=True)
+        shutil.copy2(args.font, future_fonts / "FutureUi-Regular.ttf")
+
         (etc_dirs["system"] / "fonts.xml").write_text(
             '<familyset><family name="sans-serif"><font weight="400">Roboto-Regular.ttf</font></family></familyset>\n',
             encoding="utf-8",
@@ -69,6 +76,11 @@ def main() -> int:
         )
         (etc_dirs["hw_product"] / "fonts.xml").write_text(
             '<familyset><family name="system-ui"><font weight="400">HwUi-Regular.ttf</font></family></familyset>\n',
+            encoding="utf-8",
+        )
+
+        (future_etc / "fonts.xml").write_text(
+            '<familyset><family name="system-ui"><font weight="400">FutureUi-Regular.ttf</font></family></familyset>\n',
             encoding="utf-8",
         )
 
@@ -94,7 +106,8 @@ def main() -> int:
             command.extend(["--" + name.replace("_", "-") + "-fonts", str(font_dirs[name])])
             command.extend(["--" + name.replace("_", "-") + "-etc", str(etc_dirs[name])])
 
-        first = run(command)
+        scan_env = {**os.environ, "LUOSHU_DYNAMIC_PARTITION_SCAN_ROOTS": str(dynamic_root)}
+        first = run(command, scan_env)
         assert first.returncode == 0, first.stderr
         result = json.loads(first.stdout)
         payload = json.loads(output.read_text(encoding="utf-8"))
@@ -103,21 +116,21 @@ def main() -> int:
 
         assert payload["scannerRevision"] == 4
         assert payload["romKind"] == "coloros"
-        assert result["stockFontFileCount"] == 7
-        assert result["stockFontUniqueFileCount"] == 6
+        assert result["stockFontFileCount"] == 8
+        assert result["stockFontUniqueFileCount"] == 7
         assert result["genericSlotCount"] >= 2
-        assert result["candidatePathCount"] == 7
+        assert result["candidatePathCount"] == 8
         assert candidates["schema"] == "device-font-candidates-v1"
-        assert candidates["fontFileCount"] == 7
-        assert candidates["candidateCount"] == 7
-        assert summary["installCandidatePathCount"] == 7
-        assert summary["stockFontFileCount"] == 7
-        assert summary["stockFontUniqueFileCount"] == 6
+        assert candidates["fontFileCount"] == 8
+        assert candidates["candidateCount"] == 8
+        assert summary["installCandidatePathCount"] == 8
+        assert summary["stockFontFileCount"] == 8
+        assert summary["stockFontUniqueFileCount"] == 7
         assert summary["verifiedScanUiFileCount"] >= 2
         assert summary["partitionFontFileCounts"]["odm"] == 1
         assert summary["partitionUniqueFontFileCounts"]["odm"] == 0
-        assert summary["xmlSourceCount"] == 5
-        assert payload["slotCount"] == 7
+        assert summary["xmlSourceCount"] == 6
+        assert payload["slotCount"] == 8
         assert "/system/fonts/Roboto-Regular.ttf" in payload["slots"]
         mystery = payload["slots"]["/system_ext/fonts/MysteryUiFace-Regular.ttf"]
         assert mystery["source"] == "verified-scan"
@@ -126,17 +139,21 @@ def main() -> int:
         assert "/my_product/fonts/SysFont-Hans-Regular.ttf" in payload["slots"]
         assert "/oem/fonts/OPlusSans3.0.ttf" in payload["slots"]
         assert "/hw_product/fonts/HwUi-Regular.ttf" in payload["slots"]
+        assert "/future_oem/fonts/FutureUi-Regular.ttf" in payload["slots"]
+        assert payload["discoveredPartitions"] == ["future_oem"]
+        assert summary["partitionFontFileCounts"]["future_oem"] == 1
+        assert (temp / "device_font_partitions.conf").read_text(encoding="utf-8") == "future_oem\n"
         assert summary["fontSignatures"]["coloros"] == ["SysFont-Hans-Regular.ttf", "OPlusSans3.0.ttf"]
         assert "Roboto-Regular.ttf" in summary["fontSignatures"]["aosp"]
         assert all(not path.startswith("/data/") for path in payload["slots"])
 
-        reused = run(command)
+        reused = run(command, scan_env)
         assert reused.returncode == 0, reused.stderr
         reused_result = json.loads(reused.stdout)
         assert reused_result["status"] == "reused"
-        assert reused_result["stockFontUniqueFileCount"] == 6
+        assert reused_result["stockFontUniqueFileCount"] == 7
         assert reused_result["genericSlotCount"] >= 2
-        assert reused_result["candidatePathCount"] == 7
+        assert reused_result["candidatePathCount"] == 8
 
         scanner = importlib.import_module("font_inventory_scan_v3")
         theme = temp / "theme/fonts"
