@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from font_slot_coverage import valid_coverage
+
 
 PARTITIONS = frozenset({
     "system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
@@ -68,8 +70,48 @@ _UI_NAMES = frozenset({
 _NUMERIC = frozenset(f"{weight}.ttf" for weight in (100, 200, 300, 350, 400, 500, 600, 700, 800, 900))
 
 
+def safe_physical_inventory_slot(data: dict, logical: str) -> bool:
+    """Trust scanner evidence before falling back to historical filename policy.
+
+    A language-less system UI family parsed from stock fonts XML is stronger
+    evidence than an OEM filename. This allows a future HyperOS build to rename
+    its UI fonts without waiting for LuoShu to add another hard-coded prefix.
+    """
+    path = Path(logical)
+    parts = path.parts
+    if len(parts) != 4 or parts[0] != "/" or parts[2] != "fonts":
+        return False
+    partition, name = parts[1], parts[3]
+    if partition not in PARTITIONS or preserved_dynamic_alias(data, logical):
+        return False
+
+    slot = (data.get("slots") or {}).get(logical)
+    if not isinstance(slot, dict):
+        return False
+    fmt = str(slot.get("validatedFormat") or slot.get("format") or "").upper()
+    if fmt not in {"TTF", "OTF"}:
+        return False
+    try:
+        if int(slot.get("faceIndex", 0)) != 0:
+            return False
+    except (TypeError, ValueError):
+        return False
+    if str(slot.get("style", "normal")).lower() in {"italic", "oblique"}:
+        return False
+
+    families = [str(value).strip() for value in slot.get("families", []) if str(value).strip()]
+    coverage = (slot.get("metrics") or {}).get("coverage")
+    xml_ui_evidence = (
+        slot.get("source") == "xml"
+        and bool(families)
+        and valid_coverage(coverage)
+        and bool(coverage.get("hasLatin") or coverage.get("hasHan"))
+    )
+    return xml_ui_evidence or safe_physical_font_name(name)
+
+
 def safe_physical_font_name(name: str) -> bool:
-    """Match the full mapper's single-face, upright physical filename policy."""
+    """Historical filename fallback for physical slots absent from stock XML."""
     if Path(name).name != name or not name.endswith((".ttf", ".otf")):
         return False
     lower = name.lower()
