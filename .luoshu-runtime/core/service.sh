@@ -4,7 +4,7 @@
 # 功能：启动完成后校正权限、补装内置 App、重建旧字体负载、预热索引并恢复字重。
 # ============================================================
 
-MODDIR="${0%/*}"
+MODDIR="${MODDIR:-$(CDPATH= cd -- "${0%/*}/../.." 2>/dev/null && pwd)}"
 MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1)
 [ -n "$MODULE_VERSION" ] || MODULE_VERSION="unknown"
 MODULE_DIR="$MODDIR"

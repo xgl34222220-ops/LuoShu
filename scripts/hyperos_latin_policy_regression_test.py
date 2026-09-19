@@ -127,7 +127,7 @@ class LatinPolicyRegressionTest(unittest.TestCase):
     def coverage_checker():
         # Execute the actual pure revision predicates, isolated from fontTools
         # and filesystem scanning. Full scanner integration stays in its suite.
-        path = ROOT / 'common/font_inventory_scan_v3.py'
+        path = ROOT / 'common/font_inventory_scan.py'
         tree = ast.parse(path.read_text(), filename=str(path))
         selected = [ast.ImportFrom(module='__future__',
                                    names=[ast.alias(name='annotations')], level=0)]

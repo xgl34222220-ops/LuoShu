@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-SERVICE="$ROOT/service_v4.sh"
+SERVICE="$ROOT/.luoshu-runtime/core/service.sh"
 ROUTER="$ROOT/service.sh"
 
 # The preserved v4 service keeps its original ordering and non-mutating guarantees.
@@ -23,7 +23,7 @@ grep -q 'font-payload-reapply-notified.conf' "$SERVICE"
 
 # The root service is now a compatibility router: legacy mode must never enter that v4 chain.
 grep -q 'font_runtime_legacy_v14_4.conf' "$ROUTER"
-grep -q 'service_v4.sh' "$ROUTER"
+grep -q '.luoshu-runtime/core/service.sh' "$ROUTER"
 ! grep -q 'device_font_template.sh" ensure' "$ROUTER"
 ! grep -q 'font-payload-rebuild-pending.conf' "$ROUTER"
 sh -n "$SERVICE"

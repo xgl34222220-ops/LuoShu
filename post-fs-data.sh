@@ -12,7 +12,7 @@ type luoshu_next_boot_activate >/dev/null 2>&1 && \
     luoshu_next_boot_activate >/dev/null 2>&1 || true
 
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
-V4_POST_FS="$MODDIR/post-fs-data-v4.sh"
+V4_POST_FS="$MODDIR/.luoshu-runtime/core/post-fs-data.sh"
 HYPEROS_LEGACY_COMPAT="$MODDIR/common/legacy_v14_4/hyperos_full_coverage.sh"
 
 load_self_mount_runtime() {

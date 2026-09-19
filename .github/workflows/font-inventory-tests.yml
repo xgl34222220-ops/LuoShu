@@ -6,16 +6,15 @@ on:
     paths:
       - common/font_inventory.py
       - common/font_inventory_scan.py
-      - common/font_inventory_scan_v3.py
       - common/stock_inventory_scan.py
       - common/font_manager.sh
       - common/font_metrics_normalize.py
       - common/rom_adapters.sh
       - common/device_font_payload_policy.sh
       - customize.sh
-      - .luoshu-runtime/customize-v227.sh
+      - .luoshu-runtime/compat/v227/customize.sh
       - scripts/font_inventory_test.py
-      - scripts/font_inventory_scan_v3_test.py
+      - scripts/font_inventory_scan_test.py
       - scripts/stock_inventory_scan_wrapper_test.py
       - scripts/rom_adapter_inventory_test.sh
       - scripts/font_metrics_normalization_test.py
@@ -36,18 +35,18 @@ jobs:
       - name: Validate inventory scanners and runtime mapper
         run: |
           set -eu
-          python3 -m py_compile common/font_inventory.py common/font_inventory_scan.py common/font_inventory_scan_v3.py common/stock_inventory_scan.py common/font_metrics_normalize.py
+          python3 -m py_compile common/font_inventory.py common/font_inventory_scan.py common/stock_inventory_scan.py common/font_metrics_normalize.py
           FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
           test -s "$FONT"
           python3 scripts/font_inventory_test.py --font "$FONT"
-          python3 scripts/font_inventory_scan_v3_test.py --font "$FONT"
+          python3 scripts/font_inventory_scan_test.py --font "$FONT"
           python3 scripts/stock_inventory_scan_wrapper_test.py
           sh scripts/rom_adapter_inventory_test.sh "$FONT"
           python3 scripts/font_metrics_normalization_test.py
       - name: Validate install-stage and fallback contracts
         run: |
           set -eu
-          INSTALLER='.luoshu-runtime/customize-v227.sh'
+          INSTALLER='.luoshu-runtime/compat/v227/customize.sh'
           sh -n customize.sh
           sh -n "$INSTALLER"
           sh -n common/rom_adapters.sh
@@ -57,11 +56,10 @@ jobs:
           grep -q 'FONT_INVENTORY_SCRIPT=.*font_inventory_scan.py' "$INSTALLER"
           grep -q 'stockFontFileCount' "$INSTALLER"
           grep -q '"$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan' "$INSTALLER"
-          grep -q 'font_inventory_scan_v3' common/font_inventory_scan.py
           grep -q '_add_verified_text_slots' common/font_inventory.py
           grep -q 'genericSlotCount' "$INSTALLER"
           grep -q 'device_font_candidates.json' "$INSTALLER"
-          grep -q 'candidatePathCount' common/font_inventory_scan_v3.py
+          grep -q 'candidatePathCount' common/font_inventory_scan.py
           ! grep -q '已中止本次更新' "$INSTALLER"
           grep -q 'stock_inventory_scan.py' common/font_manager.sh
           grep -q '_copy_as_inventory' common/rom_adapters.sh
@@ -69,6 +67,5 @@ jobs:
           grep -q 'device_font_inventory.json' common/font_metrics_normalize.py
           grep -qx 'common/font_inventory.py' scripts/module_payload_manifest.txt
           grep -qx 'common/font_inventory_scan.py' scripts/module_payload_manifest.txt
-          grep -qx 'common/font_inventory_scan_v3.py' scripts/module_payload_manifest.txt
           grep -qx 'common/stock_inventory_scan.py' scripts/module_payload_manifest.txt
           grep -qx '.luoshu-runtime' scripts/module_payload_manifest.txt

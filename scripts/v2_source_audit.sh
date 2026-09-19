@@ -27,7 +27,7 @@ fi
 PATTERN='USER_EMOJI_DIR|/sdcard/LuoShu/emoji/|emojiSection|emojiCurrent|emojiList|openEmojiFolder|moreOpenEmoji|sync_emoji_preview|importedEmoji|find_emoji_file|switch_emoji|emoji_switch|emoji_status|emoji_list|stability\.(js|css)|common/stability\.sh|fonts_xml_template|common/play_font_bridge\.sh|common/wechat_xweb_bridge\.sh'
 HITS=$(grep -RInE --exclude-dir=python --exclude-dir=dist --exclude='*.pyc' "$PATTERN" \
   "$ROOT/common" "$ROOT/config" "$ROOT/service.sh" "$ROOT/uninstall.sh" "$ROOT/module.prop" \
-  "$ROOT/README.md" "$ROOT/README.txt" "$ROOT/CHANGELOG.md" 2>/dev/null || true)
+  "$ROOT/README.md" "$ROOT/CHANGELOG.md" 2>/dev/null || true)
 if [ -n "$HITS" ]; then
   echo '=== Forbidden legacy feature inventory ===' >&2
   printf '%s\n' "$HITS" >&2

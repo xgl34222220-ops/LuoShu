@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # LuoShu private payload mount. External metamodules are intentionally ignored.
 set +e
-MODDIR="${0%/*}"
+MODDIR="${MODDIR:-$(CDPATH= cd -- "${0%/*}/../.." 2>/dev/null && pwd)}"
 MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/private_payload.sh" ] && . "$MODDIR/common/private_payload.sh"
 luoshu_private_mount_module_view "$MODDIR" >/dev/null 2>&1 || true

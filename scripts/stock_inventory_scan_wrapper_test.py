@@ -11,13 +11,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "common"))
 
 import font_inventory as inventory  # noqa: E402
-import font_inventory_scan_v3 as scanner  # noqa: E402
+import font_inventory_scan as scanner  # noqa: E402
 import stock_inventory_scan as stock  # noqa: E402
 
 
 def main() -> int:
     assert stock.scanner.SCANNER_REVISION == 4, "manual/install scan must use the full v4 generic inventory"
-    installer = (ROOT / ".luoshu-runtime/customize-v227.sh").read_text(encoding="utf-8")
+    installer = (ROOT / ".luoshu-runtime/compat/v227/customize.sh").read_text(encoding="utf-8")
     wrapper = (ROOT / "customize.sh").read_text(encoding="utf-8")
     service = (ROOT / "service.sh").read_text(encoding="utf-8")
     post_mount = (ROOT / "post-mount.sh").read_text(encoding="utf-8")

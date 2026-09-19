@@ -123,7 +123,7 @@ class IntegrationTest(unittest.TestCase):
             self.assertIn(text, page)
         self.assertNotIn('model.enable()', page.split('confirmButton')[0])
         uninstall = (ROOT / 'uninstall.sh').read_text()
-        self.assertLess(uninstall.index('restore-owned --json'), uninstall.index('. "$MODDIR/.luoshu-runtime/uninstall-v227.sh"'))
+        self.assertLess(uninstall.index('restore-owned --json'), uninstall.index('. "$MODDIR/.luoshu-runtime/compat/v227/uninstall.sh"'))
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

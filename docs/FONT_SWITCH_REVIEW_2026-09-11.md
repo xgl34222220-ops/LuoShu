@@ -7,7 +7,7 @@
 | 问题 | 代码证据与影响 | 本次处理 |
 | --- | --- | --- |
 | 切换时复制即将丢弃的旧字体 | `font_switch_safe.sh:clone_payload_tree` 和 `mix_router.sh:clone_mix_tree` 先复制整棵旧负载，再删除分区字体目录。不支持 `cp -al` 时退回 `cp -R`，会把原本共享 inode 的大字体别名逐份复制，随后全部删除。 | 两条路径共用 `payload_clone.sh`，只复制需要保留的非字体内容。保留逐项硬链接/普通复制回退、隔离暂存和下一启动激活。日志增加阶段时间，未增加超时上限。 |
-| Google 桥接服务没有从实际启动入口运行 | `mount_compat.sh` 只在 `$0=service.sh` 时启动桥接；实际 V4 路由 `exec sh service_v4.sh`，另一条物理兼容路由不加载该桥接入口。 | 在真实 `service.sh` 分流之前统一启动一次，移除挂载加载器中的失效入口。 |
+| Google 桥接服务没有从实际启动入口运行 | `mount_compat.sh` 只在 `$0=service.sh` 时启动桥接；实际 V4 路由 `exec sh .luoshu-runtime/core/service.sh`，另一条物理兼容路由不加载该桥接入口。 | 在真实 `service.sh` 分流之前统一启动一次，移除挂载加载器中的失效入口。 |
 | Google 桥接取错源或找不到源 | `_gfp_source_for_weight` 优先读取旧 `config/device-font-sources/LuoShu-*.ttf`，没有读取当前物理负载常用的 `400.ttf`、`700.ttf`、`Roboto-*`、`SysSans-En-*` 等源。 | 当前 `.luoshu-payload` 成为唯一优先源，按字重选取实际成品；已有活动负载但缺源时不回用旧缓存。旧布局仍可在没有活动负载时读取。 |
 | Google 服务残留锁阻止后续启动 | 服务只用裸 `mkdir` 锁；异常终止或重启后空目录可能永久遗留。 | 复用现有 PID、进程启动时间和 boot ID 锁，恢复遗留空锁，正常结束释放。系统默认字体不执行桥接替换。 |
 | HyperOS 开机补槽与暂存度量清单不一致 | 暂存使用 `hyperos_global.sh` 的清单，开机使用 `legacy_v14_4/hyperos_full_coverage.sh` 的清单；后一份可发现额外 MiSans、XiaomiSans 等目标。这些槽可能直到开机才被补齐，并沿用其他槽的度量。 | 暂存直接复用开机映射器的现有发现策略，在同一批处理中按物理槽应用原厂度量。没有新增开机覆盖范围。 |

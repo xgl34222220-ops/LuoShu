@@ -188,9 +188,9 @@ for file in "$SERVICE" "$POSTFS" "$POSTMOUNT"; do
     grep -q 'font_runtime_legacy_v14_4.conf' "$file"
     sh -n "$file"
 done
-grep -q 'service_v4.sh' "$SERVICE"
-grep -q 'post-fs-data-v4.sh' "$POSTFS"
-grep -q 'post-mount-v4.sh' "$POSTMOUNT"
+grep -q '.luoshu-runtime/core/service.sh' "$SERVICE"
+grep -q '.luoshu-runtime/core/post-fs-data.sh' "$POSTFS"
+grep -q '.luoshu-runtime/core/post-mount.sh' "$POSTMOUNT"
 ! grep -q 'device_font_template.sh' "$SERVICE"
 
 sh -n "$ROUTER"
@@ -206,8 +206,8 @@ sh -n "$LEGACY_AUTO"
 sh -n "$LEGACY_MIX_ENGINE"
 sh -n "$ROOT/common/font_switch_task.sh"
 sh -n "$ROOT/customize.sh"
-sh -n "$ROOT/service_v4.sh"
-sh -n "$ROOT/post-fs-data-v4.sh"
-sh -n "$ROOT/post-mount-v4.sh"
+sh -n "$ROOT/.luoshu-runtime/core/service.sh"
+sh -n "$ROOT/.luoshu-runtime/core/post-fs-data.sh"
+sh -n "$ROOT/.luoshu-runtime/core/post-mount.sh"
 
 echo 'foreground switch and composite staging both support repeat payload cloning without mutating live payload; early boot activates next payload; real self-mount runtime is loaded before legacy boot mount; HyperOS physical UI coverage remains guarded.'

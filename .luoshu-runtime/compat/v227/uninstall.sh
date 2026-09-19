@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # 洛书安全卸载：恢复模块明确记录的设置与持久字体，然后完整清理模块与元模块镜像。
 set +e
-MODDIR="${0%/*}"
+MODDIR="${MODDIR:-$(CDPATH= cd -- "${0%/*}/../../.." 2>/dev/null && pwd)}"
 MODULE_DIR="$MODDIR"
 MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1)
 [ -n "$MODULE_VERSION" ] || MODULE_VERSION="unknown"

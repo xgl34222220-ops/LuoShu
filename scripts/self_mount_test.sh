@@ -171,15 +171,15 @@ grep -q 'luoshu_self_mount_stage_for_manager' "$ROOT/post-fs-data.sh"
 # APatch waits for post-mount, while Magisk still mounts in post-fs-data.
 STAGE_MODULE="$TMP/stage-module"
 STAGE_LOG="$TMP/stage.log"
-mkdir -p "$STAGE_MODULE/common" "$STAGE_MODULE/.luoshu-runtime"
+mkdir -p "$STAGE_MODULE/common" "$STAGE_MODULE/.luoshu-runtime/core" "$STAGE_MODULE/.luoshu-runtime/compat/v227"
 cp "$ROOT/post-fs-data.sh" "$STAGE_MODULE/post-fs-data.sh"
-cp "$ROOT/post-fs-data-v4.sh" "$STAGE_MODULE/post-fs-data-v4.sh"
+cp "$ROOT/.luoshu-runtime/core/post-fs-data.sh" "$STAGE_MODULE/.luoshu-runtime/core/post-fs-data.sh"
 cp "$ROOT/common/mount_self_backend.sh" "$STAGE_MODULE/common/mount_self_backend.sh"
 cat >"$STAGE_MODULE/common/private_payload.sh" <<'EOF_PRIVATE_STAGE'
 luoshu_private_mount_module_view() { printf 'view\n' >>"$LUOSHU_STAGE_LOG"; }
 luoshu_private_unmount_module_view() { printf 'unmount\n' >>"$LUOSHU_STAGE_LOG"; }
 EOF_PRIVATE_STAGE
-cat >"$STAGE_MODULE/.luoshu-runtime/post-fs-data-v227.sh" <<'EOF_BOOT_STAGE'
+cat >"$STAGE_MODULE/.luoshu-runtime/compat/v227/post-fs-data.sh" <<'EOF_BOOT_STAGE'
 luoshu_detect_root_manager() { printf '%s\n' "$LUOSHU_TEST_ROOT_MANAGER"; }
 luoshu_private_self_mount_ensure() { printf 'ensure\n' >>"$LUOSHU_STAGE_LOG"; }
 exit 0

@@ -1,7 +1,7 @@
 id=LuoShu
 name=洛书·重构版
-version=v1.0.0
-versionCode=60000
+version=v1.1.1
+versionCode=60101
 versionSeries=refactor
 author=惜故里丶
 description=Android 全局字体引擎：系统、OEM 与 Google 字体统一覆盖与复合

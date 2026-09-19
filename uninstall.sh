@@ -32,4 +32,4 @@ if [ -f "$MODDIR/common/google_font_fallback.sh" ]; then
     sh "$MODDIR/common/google_font_fallback.sh" restore-owned --json || \
         echo '洛书：Google 字体兼容恢复未全部完成，恢复记录仍保留。' >&2
 fi
-. "$MODDIR/.luoshu-runtime/uninstall-v227.sh"
+. "$MODDIR/.luoshu-runtime/compat/v227/uninstall.sh"

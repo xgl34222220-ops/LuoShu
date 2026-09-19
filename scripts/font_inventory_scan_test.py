@@ -30,7 +30,7 @@ def main() -> int:
     if embedded_fonttools.is_dir():
         previous = os.environ.get("PYTHONPATH", "")
         os.environ["PYTHONPATH"] = str(embedded_fonttools) + (os.pathsep + previous if previous else "")
-    script = common / "font_inventory_scan_v3.py"
+    script = common / "font_inventory_scan.py"
 
     with tempfile.TemporaryDirectory() as directory:
         temp = Path(directory)
@@ -97,7 +97,7 @@ def main() -> int:
             "--scan",
             "--output", str(output),
             "--font-check", str(font_check),
-            "--build-key", "inventory-v3-rom",
+            "--build-key", "inventory-v4-rom",
         ]
         for name in primary:
             command.extend(["--" + name.replace("_", "-") + "-fonts", str(font_dirs[name])])
@@ -155,14 +155,14 @@ def main() -> int:
         assert reused_result["genericSlotCount"] >= 2
         assert reused_result["candidatePathCount"] == 8
 
-        scanner = importlib.import_module("font_inventory_scan_v3")
+        scanner = importlib.import_module("font_inventory_scan")
         theme = temp / "theme/fonts"
         theme.mkdir(parents=True)
         shutil.copy2(args.font, theme / "Theme.ttf")
         scanner.THEME_FONT_ROOTS = (theme,)
         assert scanner._theme_override_roots() == [str(theme)]
 
-    print("font_inventory_scan_v3_test: PASS")
+    print("font_inventory_scan_test: PASS")
     return 0
 
 

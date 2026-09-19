@@ -23,7 +23,7 @@ from fontTools.pens.recordingPen import RecordingPen
 from fontTools.ttLib import TTFont
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 import font_inventory as inventory
-import font_inventory_scan_v3 as scanner
+import font_inventory_scan as scanner
 import hyperos_metrics_batch as batch
 from font_slot_coverage import valid_coverage
 from hyperos_layout_freetype_test import FreeType, Face
