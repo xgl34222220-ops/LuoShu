@@ -409,16 +409,17 @@ def _verify_upgrade_roots(font_roots: list[base.FontRoot], etc_roots: list[tuple
             raise base.InventoryError(f"补充原厂字体度量需要可验证的 stock lower/mirror：{logical}")
 
 
-def _stock_logical_entry_exists(logical: str, roots: list[base.FontRoot]) -> bool:
-    """Return True when a directory entry exists in the verified stock views.
+COLOROS_LEGACY_GENERATED_ALIASES = {
+    "SysSans-Hans-Regular.ttf", "SysSans-Hant-Regular.ttf",
+    "SysFont-Hans-Regular.ttf", "SysFont-Hant-Regular.ttf",
+    "SysFont-Static-Regular.ttf", "SysFont-Regular.ttf",
+    "SysSans-En-Regular.ttf", "Roboto-Regular.ttf",
+    "GoogleSans-Regular.ttf", "GoogleSansText-Regular.ttf",
+}
 
-    This intentionally uses lexists semantics rather than font parsing. During an
-    inventory upgrade, an old slot may have come from LuoShu's generated payload.
-    If the exact logical filename is absent from every verified stock root, that
-    stale slot can be retired safely. If the entry still exists (even as a broken
-    symlink or malformed font), keep failing closed so a real ROM slot is never
-    silently dropped.
-    """
+
+def _stock_logical_entry_exists(logical: str, roots: list[base.FontRoot]) -> bool:
+    """Return True when a directory entry exists in the verified stock views."""
     candidate = Path(logical)
     if not candidate.is_absolute():
         return False
@@ -430,6 +431,24 @@ def _stock_logical_entry_exists(logical: str, roots: list[base.FontRoot]) -> boo
                 continue
             return os.path.lexists(root.actual / relative)
     return False
+
+
+def _retirable_absent_upgrade_slot(logical: str, *, coloros: bool) -> bool:
+    """Retire only stale entries known to come from old LuoShu compatibility scope.
+
+    Never turn generic "missing from this rescan" into a deletion rule. On ColorOS,
+    old mix payloads unconditionally created a small set of compatibility aliases,
+    and older inventories could also admit script-specific fonts that v4 correctly
+    excludes from global UI replacement. Those entries may be retired only after
+    the exact logical file is proven absent from verified stock.
+    """
+    if not coloros:
+        return False
+    name = Path(logical).name
+    if name in COLOROS_LEGACY_GENERATED_ALIASES:
+        return True
+    lowered = name.lower()
+    return any(token in lowered for token in base.GENERIC_DENY_FILE_TOKENS)
 
 
 def _refresh_known_slots(slots: dict[str, dict[str, Any]], families: dict[str, list[str]],
@@ -564,7 +583,8 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         # logical path that is completely absent from stock is safe to retire.
         # Existing-but-unparseable paths are NOT retired and still fail closed.
         for logical in set(existing["slots"]) - set(slots) - preserved_paths:
-            if not _stock_logical_entry_exists(logical, replaceable_roots):
+            if (_retirable_absent_upgrade_slot(logical, coloros=coloros)
+                    and not _stock_logical_entry_exists(logical, replaceable_roots)):
                 retired_absent_upgrade_slots.add(logical)
     if coloros:
         # The generic selector prefers MiSans by filename. An unused MiSans on
