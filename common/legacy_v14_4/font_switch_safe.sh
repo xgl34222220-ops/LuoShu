@@ -476,8 +476,7 @@ stage_clone_live() {
 }
 
 stage_clear_text_payload() {
-    for _part in system system_ext product vendor odm oem my_product mi_ext \
-                 oplus_product hw_product cust; do
+    for _part in $(safe_partition_list); do
         rm -rf "$STAGE_PAYLOAD/$_part/fonts" 2>/dev/null || true
         _etc="$STAGE_PAYLOAD/$_part/etc"
         [ -d "$_etc" ] || continue
@@ -497,8 +496,8 @@ mirror_existing_targets() {
         [ -f "$_src" ] || continue
         _base="${_src##*/}"
         case "$_base" in *.ttf|*.otf|*.ttc) ;; *) continue ;; esac
-        for _part in system_ext product vendor odm oem my_product mi_ext \
-                     oplus_product hw_product cust; do
+        for _part in $(safe_partition_list); do
+            [ "$_part" != system ] || continue
             [ -e "/$_part/fonts/$_base" ] || continue
             _dest="$STAGE_PAYLOAD/$_part/fonts/$_base"
             mkdir -p "${_dest%/*}" 2>/dev/null || continue
