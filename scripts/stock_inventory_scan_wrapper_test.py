@@ -90,6 +90,23 @@ def main() -> int:
             assert stock._STOCK_VIEW_SOURCES[str(verified)]["view"] == "pre-mount-direct"
 
             lower.rmdir()
+
+            proc1_root = temp / "proc1-root"
+            pid1_lower = proc1_root / state_root.relative_to("/") / "lower" / key
+            pid1_lower.mkdir(parents=True)
+            old_proc1 = os.environ.get("LUOSHU_PROC1_ROOT")
+            os.environ["LUOSHU_PROC1_ROOT"] = str(proc1_root)
+            try:
+                resolved_pid1 = stock._safe_pick_actual_root(logical, None, True)
+                assert resolved_pid1 == pid1_lower, (resolved_pid1, pid1_lower)
+                assert stock._STOCK_VIEW_SOURCES[str(logical)]["view"] == "pid1-luoshu-lower"
+            finally:
+                if old_proc1 is None:
+                    os.environ.pop("LUOSHU_PROC1_ROOT", None)
+                else:
+                    os.environ["LUOSHU_PROC1_ROOT"] = old_proc1
+            pid1_lower.rmdir()
+
             try:
                 stock._safe_pick_actual_root(logical, None, True)
             except inventory.InventoryError as error:
