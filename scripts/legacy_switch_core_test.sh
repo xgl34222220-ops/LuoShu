@@ -108,7 +108,7 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 mkdir -p \
     "$TMP/module/.luoshu-payload/system/fonts" \
     "$TMP/stock/system" "$TMP/stock/system_ext" "$TMP/stock/product" \
-    "$TMP/stock/mi_ext" "$TMP/stock/vendor"
+    "$TMP/stock/mi_ext" "$TMP/stock/vendor" "$TMP/stock/my_region"
 printf 'selected-font-anchor\n' > "$TMP/module/.luoshu-payload/system/fonts/MiSansVF.ttf"
 : > "$TMP/stock/mi_ext/MitypeClock.ttf"
 : > "$TMP/stock/product/MiClock.ttf"
@@ -117,6 +117,7 @@ printf 'selected-font-anchor\n' > "$TMP/module/.luoshu-payload/system/fonts/MiSa
 : > "$TMP/stock/vendor/MiLanProVF.ttf"
 : > "$TMP/stock/system_ext/MiSansGlobalVF.ttf"
 : > "$TMP/stock/product/XiaomiSansUI-Regular.ttf"
+: > "$TMP/stock/my_region/XiaomiSansRegion-Regular.ttf"
 : > "$TMP/stock/product/XiaomiSansCollection.ttc"
 IS_HYPEROS=true \
 MODDIR="$TMP/module" \
@@ -129,6 +130,11 @@ LUOSHU_VENDOR_FONTS_ROOT="$TMP/stock/vendor" \
 LUOSHU_ODM_FONTS_ROOT="$TMP/stock/odm" \
 LUOSHU_OEM_FONTS_ROOT="$TMP/stock/oem" \
 LUOSHU_MY_PRODUCT_FONTS_ROOT="$TMP/stock/my_product" \
+LUOSHU_MY_ENGINEERING_FONTS_ROOT="$TMP/stock/my_engineering" \
+LUOSHU_MY_COMPANY_FONTS_ROOT="$TMP/stock/my_company" \
+LUOSHU_MY_PRELOAD_FONTS_ROOT="$TMP/stock/my_preload" \
+LUOSHU_MY_REGION_FONTS_ROOT="$TMP/stock/my_region" \
+LUOSHU_MY_STOCK_FONTS_ROOT="$TMP/stock/my_stock" \
 LUOSHU_HW_PRODUCT_FONTS_ROOT="$TMP/stock/hw_product" \
 LUOSHU_CUST_FONTS_ROOT="$TMP/stock/cust" \
     sh -c '. "$1"; luoshu_hyperos_full_payload_ensure' sh "$HYPEROS_COMPAT"
