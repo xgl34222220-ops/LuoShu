@@ -499,6 +499,18 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
+    fun prewarmFont(fontId: String) {
+        if (fontId.isBlank() || fontId == "default" || !snapshot.installed) return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                RootShell.exec(
+                    "sh ${RootShell.quote(bridge)} prewarm ${RootShell.quote(fontId)}",
+                    timeoutMs = 6_000L,
+                )
+            }
+        }
+    }
+
     fun applyFont(fontId: String) {
         if (operationBusy || mixState.busy) return
         operationBusy = true
