@@ -21,7 +21,7 @@ from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, safe_phys
 SCANNER_REVISION = 3
 METRICS_REVISION = 3
 # Re-scan trusted stock metrics for Latin UI families restored after v4.3.0.
-HYPEROS_COVERAGE_REVISION = 4
+HYPEROS_COVERAGE_REVISION = 5
 PRIMARY_FONT_SPECS = (
     ("system", Path("/system/fonts"), "system_fonts", (Path("/system/font"),)),
     ("system_ext", Path("/system_ext/fonts"), "system_ext_fonts", (Path("/system/system_ext/fonts"),)),
