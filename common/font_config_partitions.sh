@@ -54,6 +54,27 @@ _luoshu_font_config_partition_rows() {
     printf 'mi_ext|%s|%s/mi_ext\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_MI_EXT_ROOT:-}" "${LUOSHU_MI_EXT_ETC_ROOT:-}" /mi_ext/etc)" "$_lfcp_payload"
     printf 'cust|%s|%s/cust\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_CUST_ROOT:-}" "${LUOSHU_CUST_ETC_ROOT:-}" /cust/etc)" "$_lfcp_payload"
     printf 'hw_product|%s|%s/hw_product\n' "$(_luoshu_font_config_resolve_etc "${LUOSHU_HW_PRODUCT_ROOT:-}" "${LUOSHU_HW_PRODUCT_ETC_ROOT:-}" /hw_product/etc)" "$_lfcp_payload"
+
+    # Scanner-discovered OEM partitions are intentionally data-driven. Only safe
+    # root-level names from device_font_partitions.conf are accepted, and only
+    # when a real etc directory exists on this ROM.
+    _lfcp_module="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}"
+    _lfcp_manifest="$_lfcp_module/config/device_font_partitions.conf"
+    if [ -f "$_lfcp_manifest" ]; then
+        while IFS= read -r _lfcp_part; do
+            case "$_lfcp_part" in
+                ''|*[!A-Za-z0-9_]*|[0-9]*|_*|data|proc|sys|dev|mnt|storage|sdcard|apex|metadata|cache|tmp|config|acct|linkerconfig|debug_ramdisk|vendor_dlkm|odm_dlkm|system_dlkm) continue ;;
+            esac
+            case " system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product " in
+                *" $_lfcp_part "*) continue ;;
+            esac
+            _lfcp_real_etc=''
+            [ -d "/$_lfcp_part/etc" ] && _lfcp_real_etc="/$_lfcp_part/etc"
+            [ -n "$_lfcp_real_etc" ] || [ ! -d "/system/$_lfcp_part/etc" ] || _lfcp_real_etc="/system/$_lfcp_part/etc"
+            [ -n "$_lfcp_real_etc" ] || continue
+            printf '%s|%s|%s/%s\n' "$_lfcp_part" "$_lfcp_real_etc" "$_lfcp_payload" "$_lfcp_part"
+        done < "$_lfcp_manifest"
+    fi
 }
 
 # key | real XML | module overlay XML | font directory referenced by that document

@@ -16,13 +16,15 @@ import stock_inventory_scan as stock  # noqa: E402
 
 
 def main() -> int:
-    assert stock.scanner.SCANNER_REVISION == 3, "manual/install scan must use the full v3 inventory"
+    assert stock.scanner.SCANNER_REVISION == 4, "manual/install scan must use the full v4 generic inventory"
     installer = (ROOT / ".luoshu-runtime/customize-v227.sh").read_text(encoding="utf-8")
     wrapper = (ROOT / "customize.sh").read_text(encoding="utf-8")
     service = (ROOT / "service.sh").read_text(encoding="utf-8")
     post_mount = (ROOT / "post-mount.sh").read_text(encoding="utf-8")
     manager = (ROOT / "common/font_manager.sh").read_text(encoding="utf-8")
     assert "stock_inventory_scan_pending" in installer
+    assert "LUOSHU_FRESH_STOCK_SCAN=1" in installer
+    assert "LUOSHU_FRESH_STOCK_SCAN=1" in post_mount
     assert "已中止本次更新" not in installer
     assert "旧字体负载" in installer and "继续安装并重新扫描本机字体槽位" in installer
     assert "兼容迁移视图" in wrapper
@@ -56,6 +58,31 @@ def main() -> int:
         (private_logical / "active.ttf").write_bytes(b"overlay")
         (module / "config/active_font.conf").write_text("mix\n", encoding="utf-8")
         assert stock._private_overlay_risk(module)
+
+        # A directory with only child file mounts can be recovered by a
+        # non-recursive parent bind. A directory-level mount cannot.
+        mountinfo = temp / "mountinfo"
+        child_target = logical / "active.ttf"
+        mountinfo.write_text(
+            f"10 1 0:1 / {child_target} rw - ext4 /dev/fake rw\n",
+            encoding="utf-8",
+        )
+        old_mountinfo = os.environ.get("LUOSHU_MOUNTINFO")
+        os.environ["LUOSHU_MOUNTINFO"] = str(mountinfo)
+        try:
+            assert stock._child_mount_targets(logical) == [str(child_target)]
+            mountinfo.write_text(
+                f"10 1 0:1 / {logical} rw - overlay KSU rw\n"
+                f"11 10 0:1 / {child_target} rw - ext4 /dev/fake rw\n",
+                encoding="utf-8",
+            )
+            assert stock._child_mount_targets(logical) == []
+        finally:
+            if old_mountinfo is None:
+                os.environ.pop("LUOSHU_MOUNTINFO", None)
+            else:
+                os.environ["LUOSHU_MOUNTINFO"] = old_mountinfo
+
         state_root = temp / "state"
         key = f"{logical.parts[1]}-{logical.parts[2]}"
         lower = state_root / "lower" / key

@@ -46,7 +46,7 @@ scan_stock_before_self_mount_postfs() {
     _ls_stock_inventory="$MODDIR/config/device_font_inventory.json"
     [ -f "$_ls_stock_manager" ] || return 0
     if [ -f "$MODDIR/config/stock_inventory_scan_pending" ] || [ ! -s "$_ls_stock_inventory" ]; then
-        LUOSHU_STOCK_VIEW_VERIFIED=1 MODDIR="$MODDIR" \
+        LUOSHU_STOCK_VIEW_VERIFIED=1 LUOSHU_FRESH_STOCK_SCAN=1 MODDIR="$MODDIR" \
             sh "$_ls_stock_manager" action stock_scan >>"$MODDIR/logs/post-fs-data.log" 2>&1 || true
     fi
 }

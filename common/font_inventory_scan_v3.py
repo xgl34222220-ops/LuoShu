@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Extended stock-font inventory scanner.
 
-Revision 3 keeps replaceable slots restricted to the partitions supported by the
-runtime, while broadening diagnostics to OEM/alias roots and keeping theme fonts
-separate from immutable stock files.
+Revision 4 keeps replaceable slots restricted to the partitions supported by the
+runtime, adds a vendor-independent verified text scan, and persists an install-time
+path probe even when the current boot still has an older font overlay mounted.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Iterable
@@ -18,7 +19,8 @@ import font_inventory_scan as v2
 from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, safe_physical_font_name,
                                     DYNAMIC_OVERLAY_PATH, DYNAMIC_OVERLAY_TARGET)
 
-SCANNER_REVISION = 3
+SCANNER_REVISION = 4
+CANDIDATE_SCHEMA = "device-font-candidates-v1"
 METRICS_REVISION = 3
 # Re-scan trusted stock metrics for Latin UI families restored after v4.3.0.
 HYPEROS_COVERAGE_REVISION = 4
@@ -89,6 +91,169 @@ ROM_FONT_MARKERS = {
     "aosp": ("Roboto-Regular.ttf", "NotoSansCJK-Regular.ttc", "NotoSansSC-VF.otf"),
 }
 
+KNOWN_PARTITIONS = {
+    partition for partition, *_rest in (*PRIMARY_FONT_SPECS, *AUX_FONT_SPECS)
+}
+DYNAMIC_PARTITION_DENY = {
+    "acct", "apex", "cache", "config", "data", "data_mirror", "debug_ramdisk",
+    "dev", "linkerconfig", "lost+found", "metadata", "mnt", "proc", "sdcard",
+    "storage", "sys", "tmp", "vendor_dlkm", "odm_dlkm", "system_dlkm",
+}
+DYNAMIC_PARTITION_LIMIT = 16
+DYNAMIC_PARTITION_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_]{0,63}$")
+
+
+def _dynamic_partition_search_bases() -> tuple[Path, ...]:
+    override = os.environ.get("LUOSHU_DYNAMIC_PARTITION_SCAN_ROOTS", "").strip()
+    if override:
+        return tuple(Path(item) for item in override.split(os.pathsep) if item)
+    return (Path("/"), Path("/system"))
+
+
+def _safe_dynamic_partition_name(name: str) -> bool:
+    return bool(DYNAMIC_PARTITION_NAME.fullmatch(name)
+                and name not in KNOWN_PARTITIONS
+                and name.lower() not in DYNAMIC_PARTITION_DENY)
+
+
+def _dynamic_partition_specs() -> list[tuple[str, Path, tuple[Path, ...], Path, tuple[Path, ...]]]:
+    """Discover unknown root-level OEM partitions that actually contain fonts.
+
+    Only direct children of / and /system are considered, and runtime/data/theme
+    trees are denied. A discovered partition is canonicalized to /<name>/fonts;
+    /system/<name>/fonts is treated as an alias for ROMs that expose logical
+    partitions under /system. Results are capped so a malformed filesystem cannot
+    explode scan or mount work.
+    """
+    found: dict[str, dict[str, Path]] = {}
+    for base_dir in _dynamic_partition_search_bases():
+        try:
+            children = sorted(base_dir.iterdir(), key=lambda path: path.name.lower())
+        except OSError:
+            continue
+        for child in children:
+            name = child.name
+            if not _safe_dynamic_partition_name(name):
+                continue
+            font_dir = child / "fonts"
+            try:
+                font_dir_ready = font_dir.is_dir()
+            except OSError:
+                continue
+            if not font_dir_ready or not _contains_font_capped(font_dir, limit=1024):
+                continue
+            entry = found.setdefault(name, {})
+            # Prefer the direct /partition view over a /system/partition alias.
+            key = "direct" if base_dir == Path("/") else "alias"
+            entry[key] = font_dir
+            etc_dir = child / "etc"
+            try:
+                etc_ready = etc_dir.is_dir()
+            except OSError:
+                etc_ready = False
+            if etc_ready:
+                entry[key + "_etc"] = etc_dir
+            if len(found) >= DYNAMIC_PARTITION_LIMIT:
+                break
+        if len(found) >= DYNAMIC_PARTITION_LIMIT:
+            break
+
+    specs: list[tuple[str, Path, tuple[Path, ...], Path, tuple[Path, ...]]] = []
+    for name in sorted(found):
+        entry = found[name]
+        logical_fonts = Path("/") / name / "fonts"
+        font_aliases = tuple(
+            path for path in (entry.get("direct"), entry.get("alias"))
+            if path is not None and path != logical_fonts
+        )
+        logical_etc = Path("/") / name / "etc"
+        etc_aliases = tuple(
+            path for path in (entry.get("direct_etc"), entry.get("alias_etc"))
+            if path is not None and path != logical_etc
+        )
+        specs.append((name, logical_fonts, font_aliases, logical_etc, etc_aliases))
+    return specs
+
+
+def _write_dynamic_partition_manifest(output: Path, partitions: Iterable[str]) -> None:
+    manifest = output.parent / "device_font_partitions.conf"
+    values = sorted({part for part in partitions if _safe_dynamic_partition_name(part)})
+    temp = manifest.with_name(manifest.name + f".tmp.{os.getpid()}")
+    temp.parent.mkdir(parents=True, exist_ok=True)
+    temp.write_text("".join(f"{part}\n" for part in values), encoding="utf-8")
+    os.replace(temp, manifest)
+
+
+
+def _probe_font_roots(args: Any) -> list[base.FontRoot]:
+    """Pick the live/explicit font directories without requiring stock trust.
+
+    This pass records paths only. It intentionally does not call _read_metrics(),
+    so an already-mounted old LuoShu payload cannot poison stock metric contracts.
+    """
+    roots: list[base.FontRoot] = []
+    for partition, logical, argument, aliases in PRIMARY_FONT_SPECS:
+        explicit = getattr(args, argument)
+        if explicit is not None:
+            actual = explicit
+        else:
+            actual = next((candidate for candidate in (logical, *aliases) if candidate.is_dir()), logical)
+        roots.append(base.FontRoot(partition, logical, actual))
+    for partition, logical, argument in AUX_FONT_SPECS:
+        explicit = getattr(args, argument)
+        roots.append(base.FontRoot(partition, logical, explicit if explicit is not None else logical))
+    for partition, logical, aliases, _etc_logical, _etc_aliases in _dynamic_partition_specs():
+        actual = next((candidate for candidate in (logical, *aliases) if candidate.is_dir()), logical)
+        roots.append(base.FontRoot(partition, logical, actual))
+    return roots
+
+
+def _write_live_candidate_probe(args: Any, output: Path) -> dict[str, Any]:
+    """Persist every visible font path before trusted stock metric resolution.
+
+    A Root manager's merged view still exposes the device's physical filenames even
+    while some files are replaced. This gives installation a device-specific slot
+    map on every phone; the trusted scanner later decides which candidates are safe
+    UI text slots and attaches stock metrics.
+    """
+    entries: dict[str, dict[str, Any]] = {}
+    for root in _probe_font_roots(args):
+        if not root.actual.is_dir():
+            continue
+        try:
+            paths = sorted(root.actual.rglob("*"), key=lambda item: str(item).lower())
+        except OSError:
+            continue
+        for actual in paths:
+            if actual.suffix.lower() not in base.FONT_EXTENSIONS:
+                continue
+            try:
+                if not (actual.is_file() or actual.is_symlink()):
+                    continue
+                relative = actual.relative_to(root.actual)
+            except (OSError, ValueError):
+                continue
+            logical = str(root.logical / relative)
+            lowered = actual.name.lower()
+            denied = any(token in lowered for token in base.GENERIC_DENY_FILE_TOKENS)
+            denied = denied or any(token in lowered for token in base.GENERIC_DENY_STYLE_TOKENS)
+            entries[logical] = {
+                "path": logical,
+                "partition": root.partition,
+                "slotName": actual.name,
+                "candidate": not denied,
+                "reason": "specialized-name" if denied else "visible-font-path",
+            }
+    payload = {
+        "schema": CANDIDATE_SCHEMA,
+        "generatedAt": int(time.time()),
+        "fontFileCount": len(entries),
+        "candidateCount": sum(1 for entry in entries.values() if entry["candidate"]),
+        "paths": [entries[path] for path in sorted(entries)],
+    }
+    base._atomic_write(output, payload)
+    return payload
+
 
 def _resolve_actual(logical: Path, explicit: Path | None, aliases: Iterable[Path], overlay_risk: bool) -> Path:
     if explicit is not None:
@@ -125,10 +290,13 @@ def _resolve_primary_font_roots(args: Any, overlay_risk: bool) -> list[base.Font
 
 
 def _resolve_aux_font_roots(args: Any, overlay_risk: bool) -> list[base.FontRoot]:
-    return [
+    roots = [
         base.FontRoot(partition, logical, _resolve_actual(logical, getattr(args, argument), (), overlay_risk))
         for partition, logical, argument in AUX_FONT_SPECS
     ]
+    for partition, logical, aliases, _etc_logical, _etc_aliases in _dynamic_partition_specs():
+        roots.append(base.FontRoot(partition, logical, _resolve_actual(logical, None, aliases, overlay_risk)))
+    return roots
 
 
 def _resolve_etc_roots(args: Any, overlay_risk: bool) -> list[tuple[str, Path, Path]]:
@@ -137,6 +305,8 @@ def _resolve_etc_roots(args: Any, overlay_risk: bool) -> list[tuple[str, Path, P
         roots.append((partition, logical, _resolve_actual(logical, getattr(args, argument), aliases, overlay_risk)))
     for partition, logical, argument in AUX_ETC_SPECS:
         roots.append((partition, logical, _resolve_actual(logical, getattr(args, argument), (), overlay_risk)))
+    for partition, _font_logical, _font_aliases, logical, aliases in _dynamic_partition_specs():
+        roots.append((partition, logical, _resolve_actual(logical, None, aliases, overlay_risk)))
     return roots
 
 
@@ -217,6 +387,15 @@ def _font_mount_targets() -> list[str]:
         if "/fonts" in lowered or lowered.startswith("/data/fonts"):
             targets.add(target)
     return sorted(targets)
+
+
+def _property_rom_kind() -> str:
+    """Detect the ROM from authoritative Android properties before filename hints."""
+    if base._getprop("ro.build.version.oplusrom") or base._getprop("ro.build.version.opporom"):
+        return "coloros"
+    if base._getprop("ro.mi.os.version.name") or base._getprop("ro.miui.ui.version.name"):
+        return "hyperos"
+    return ""
 
 
 def _rom_markers(names: set[str]) -> dict[str, list[str]]:
@@ -309,6 +488,7 @@ def _can_reuse(existing: dict[str, Any], build_key: str) -> bool:
         and isinstance(summary, dict)
         and "stockFontUniqueFileCount" in summary
         and "themeOverrideRoots" in summary
+        and isinstance(existing.get("discoveredPartitions"), list)
     )
 
 
@@ -339,6 +519,48 @@ def _verify_upgrade_roots(font_roots: list[base.FontRoot], etc_roots: list[tuple
         verified = _resolve_actual(logical, None, aliases_by_root.get(logical, ()), True)
         if not verified.is_dir() or verified.resolve() != actual.resolve():
             raise base.InventoryError(f"补充原厂字体度量需要可验证的 stock lower/mirror：{logical}")
+
+
+COLOROS_LEGACY_GENERATED_ALIASES = {
+    "SysSans-Hans-Regular.ttf", "SysSans-Hant-Regular.ttf",
+    "SysFont-Hans-Regular.ttf", "SysFont-Hant-Regular.ttf",
+    "SysFont-Static-Regular.ttf", "SysFont-Regular.ttf",
+    "SysSans-En-Regular.ttf", "Roboto-Regular.ttf",
+    "GoogleSans-Regular.ttf", "GoogleSansText-Regular.ttf",
+}
+
+
+def _stock_logical_entry_exists(logical: str, roots: list[base.FontRoot]) -> bool:
+    """Return True when a directory entry exists in the verified stock views."""
+    candidate = Path(logical)
+    if not candidate.is_absolute():
+        return False
+    for root in roots:
+        for logical_root in base._font_root_names(root):
+            try:
+                relative = candidate.relative_to(logical_root)
+            except ValueError:
+                continue
+            return os.path.lexists(root.actual / relative)
+    return False
+
+
+def _retirable_absent_upgrade_slot(logical: str, *, coloros: bool) -> bool:
+    """Retire only stale entries known to come from old LuoShu compatibility scope.
+
+    Never turn generic "missing from this rescan" into a deletion rule. On ColorOS,
+    old mix payloads unconditionally created a small set of compatibility aliases,
+    and older inventories could also admit script-specific fonts that v4 correctly
+    excludes from global UI replacement. Those entries may be retired only after
+    the exact logical file is proven absent from verified stock.
+    """
+    if not coloros:
+        return False
+    name = Path(logical).name
+    if name in COLOROS_LEGACY_GENERATED_ALIASES:
+        return True
+    lowered = name.lower()
+    return any(token in lowered for token in base.GENERIC_DENY_FILE_TOKENS)
 
 
 def _refresh_known_slots(slots: dict[str, dict[str, Any]], families: dict[str, list[str]],
@@ -376,35 +598,50 @@ def _refresh_known_slots(slots: dict[str, dict[str, Any]], families: dict[str, l
 
 def scan(args: Any) -> int:
     output: Path = args.output
+    candidate_output = output.with_name("device_font_candidates.json")
+    probe = _write_live_candidate_probe(args, candidate_output)
     build_key, fingerprint, display_id = base.current_build_key(args.build_key)
     existing = base._load_json(output)
-    if not args.force and existing is not None and _can_reuse(existing, build_key):
-        summary = existing["scanSummary"]
+    fresh_scan = os.environ.get("LUOSHU_FRESH_STOCK_SCAN", "").strip() == "1"
+    if fresh_scan:
+        # Installation and pre-mount recovery must rebuild the device inventory
+        # from verified stock only. The previous inventory remains on disk as an
+        # atomic fallback until a new scan succeeds, but it must not constrain the
+        # new slot set or contaminate ROM classification.
+        existing_for_scan = None
+    else:
+        existing_for_scan = existing
+    if not fresh_scan and not args.force and existing_for_scan is not None and _can_reuse(existing_for_scan, build_key):
+        summary = existing_for_scan["scanSummary"]
+        _write_dynamic_partition_manifest(output, existing_for_scan.get("discoveredPartitions", []))
         print(json.dumps({
             "status": "reused",
             "buildKey": build_key,
-            "slotCount": len(existing["slots"]),
+            "slotCount": len(existing_for_scan["slots"]),
             "stockFontFileCount": int(summary.get("stockFontFileCount", 0)),
             "stockFontUniqueFileCount": int(summary.get("stockFontUniqueFileCount", 0)),
             "xmlSlotCount": int(summary.get("xmlUiFileCount", 0)),
             "heuristicSlotCount": int(summary.get("heuristicUiFileCount", 0)),
+            "genericSlotCount": int(summary.get("verifiedScanUiFileCount", 0)),
+            "candidatePathCount": int(probe.get("candidateCount", 0)),
             "themeOverrideCount": len(summary.get("themeOverrideRoots", [])),
-            "romKind": existing.get("romKind", "generic"),
+            "romKind": existing_for_scan.get("romKind", "generic"),
         }, ensure_ascii=False))
         return 0
     valid_existing = None
-    if existing is not None:
+    if existing_for_scan is not None:
         try:
-            base.validate_inventory(existing, build_key)
+            base.validate_inventory(existing_for_scan, build_key)
         except base.InventoryError:
-            output.unlink(missing_ok=True)
+            if not fresh_scan:
+                output.unlink(missing_ok=True)
         else:
-            valid_existing = existing
+            valid_existing = existing_for_scan
     upgrade = valid_existing is not None and (
         not _has_current_metrics(valid_existing) or not _has_current_hyperos_coverage(valid_existing)
     )
     try:
-        return _scan_current_roots(args, build_key, fingerprint, display_id, valid_existing, upgrade)
+        return _scan_current_roots(args, build_key, fingerprint, display_id, valid_existing, upgrade, probe)
     except Exception as error:
         if not upgrade:
             raise
@@ -412,13 +649,15 @@ def scan(args: Any) -> int:
         # existing pending marker survives and the next pre-mount boot can retry.
         print(json.dumps({
             "status": "error", "retainedInventory": True, "metricsRefreshPending": True,
+            "candidatePathCount": int(probe.get("candidateCount", 0)),
             "message": f"原厂字体度量补充未完成，保留原有清单：{error}",
         }, ensure_ascii=False), file=os.sys.stderr)
         return 2
 
 
 def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id: str,
-                        existing: dict[str, Any] | None, upgrade: bool) -> int:
+                        existing: dict[str, Any] | None, upgrade: bool,
+                        probe: dict[str, Any]) -> int:
     output: Path = args.output
     risk = base._overlay_risk(args.overlay_module)
     require_verified = upgrade and os.environ.get("LUOSHU_STOCK_VIEW_VERIFIED", "").strip() != "1"
@@ -434,6 +673,9 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     replaceable_roots = [*primary_roots, *auxiliary_roots]
     families, slots = v2._parse_partition_xml(xml_sources, replaceable_roots)
     base._add_heuristic_slots(slots, replaceable_roots, args.font_check)
+    # Vendor-agnostic final pass: enumerate stock font files and classify real
+    # text faces by cmap/metrics instead of waiting for a hard-coded OEM name.
+    base._add_verified_text_slots(slots, replaceable_roots)
     base._populate_metrics(slots)
     path_total, unique_total, path_counts, unique_counts, names = _stock_file_counts(replaceable_roots)
     try:
@@ -444,10 +686,17 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     # a ColorOS ROM can retain a MiSansVF file which that older selector ranks
     # first. An existing valid ColorOS inventory also keeps this pass ROM-local.
     coloros_cores = {*ROM_FONT_MARKERS["coloros"], "SysFont-Regular.ttf", "SysSans-En-Regular.ttf"}
-    coloros = (existing is not None and existing.get("romKind") == "coloros") or any(
-        entry.get("slotName") in coloros_cores for entry in slots.values()
+    property_rom = _property_rom_kind()
+    coloros = (
+        property_rom == "coloros"
+        or (existing is not None and existing.get("romKind") == "coloros")
+        or any(entry.get("slotName") in coloros_cores for entry in slots.values())
     )
-    hyperos = not coloros and (initial_rom == "hyperos" or bool(_rom_markers(names).get("hyperos")))
+    hyperos = not coloros and (
+        property_rom == "hyperos"
+        or initial_rom == "hyperos"
+        or bool(_rom_markers(names).get("hyperos"))
+    )
     dynamic_aliases = _add_hyperos_physical_slots(slots, replaceable_roots) if hyperos else {}
     retired_physical_slots = {
         path for path, entry in (existing or {}).get("slots", {}).items()
@@ -455,8 +704,18 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         and path not in slots and not safe_physical_font_name(Path(path).name)
     }
     preserved_paths = set(dynamic_aliases) | retired_physical_slots
+    retired_absent_upgrade_slots: set[str] = set()
     if upgrade and existing is not None:
         _refresh_known_slots(slots, families, existing, replaceable_roots, preserved_paths)
+        # Older LuoShu builds could pollute the saved inventory with aliases that
+        # existed only in LuoShu's generated payload (ColorOS alias_core is the
+        # common example). Once this scan is reading verified stock roots, an old
+        # logical path that is completely absent from stock is safe to retire.
+        # Existing-but-unparseable paths are NOT retired and still fail closed.
+        for logical in set(existing["slots"]) - set(slots) - preserved_paths:
+            if (_retirable_absent_upgrade_slot(logical, coloros=coloros)
+                    and not _stock_logical_entry_exists(logical, replaceable_roots)):
+                retired_absent_upgrade_slots.add(logical)
     if coloros:
         # The generic selector prefers MiSans by filename. An unused MiSans on
         # ColorOS must not become the main metric contract or change the ROM kind.
@@ -472,6 +731,12 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     theme_roots = _theme_override_roots()
     mount_targets = _font_mount_targets()
     scan_summary = v2._summary(slots, path_total, path_counts, len(xml_sources), v2._count_xml_ui_faces(xml_sources))
+    scan_summary["heuristicUiFileCount"] = sum(
+        1 for entry in slots.values() if entry.get("source") == "heuristic"
+    )
+    scan_summary["verifiedScanUiFileCount"] = sum(
+        1 for entry in slots.values() if entry.get("source") == "verified-scan"
+    )
     scan_summary.update({
         "stockFontUniqueFileCount": unique_total,
         "partitionUniqueFontFileCounts": unique_counts,
@@ -479,6 +744,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "fontMountTargets": mount_targets,
         "fontSignatures": _rom_markers(names),
         "stockCountSemantics": "font paths from canonical-or-alias partition roots; theme fonts excluded",
+        "installCandidatePathCount": int(probe.get("candidateCount", 0)),
     })
     inventory = {
         "schema": base.SCHEMA,
@@ -491,6 +757,10 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "hyperosCoverageRevision": HYPEROS_COVERAGE_REVISION,
         "preservedDynamicAliases": dynamic_aliases,
         "retiredPhysicalSlots": sorted(retired_physical_slots),
+        "retiredAbsentUpgradeSlots": sorted(retired_absent_upgrade_slots),
+        "discoveredPartitions": sorted(
+            root.partition for root in replaceable_roots if root.partition not in KNOWN_PARTITIONS
+        ),
         "state": "ready",
         "buildKey": build_key,
         "buildFingerprint": fingerprint,
@@ -519,11 +789,14 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     }
     base.validate_inventory(inventory, build_key)
     if upgrade and existing is not None:
-        missing = sorted(set(existing["slots"]) - set(slots) - preserved_paths)
+        missing = sorted(
+            set(existing["slots"]) - set(slots) - preserved_paths - retired_absent_upgrade_slots
+        )
         if missing:
             names = "、".join(Path(path).name for path in missing[:5])
             raise base.InventoryError(f"原厂字体重扫未完整保留已有槽位（{len(missing)} 个：{names}）")
     base._atomic_write(output, inventory)
+    _write_dynamic_partition_manifest(output, inventory.get("discoveredPartitions", []))
     print(json.dumps({
         "status": "ok",
         "buildKey": build_key,
@@ -532,6 +805,11 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "stockFontUniqueFileCount": unique_total,
         "xmlSlotCount": scan_summary["xmlUiFileCount"],
         "heuristicSlotCount": scan_summary["heuristicUiFileCount"],
+        "genericSlotCount": scan_summary["verifiedScanUiFileCount"],
+        "physicalSlotCount": sum(1 for entry in slots.values() if entry.get("source") == "hyperos-physical"),
+        "retiredAbsentUpgradeSlotCount": len(retired_absent_upgrade_slots),
+        "dynamicPartitionCount": len(inventory.get("discoveredPartitions", [])),
+        "candidatePathCount": int(probe.get("candidateCount", 0)),
         "xmlSourceCount": scan_summary["xmlSourceCount"],
         "themeOverrideCount": len(theme_roots),
         "fontMountCount": len(mount_targets),

@@ -107,7 +107,7 @@ fi
     fi
     if [ -f "$MODDIR/common/font_manager.sh" ]; then
         if [ -f "$MODDIR/config/stock_inventory_scan_pending" ]; then
-            _stock_scan=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action stock_scan 2>&1)
+            _stock_scan=$(LUOSHU_FRESH_STOCK_SCAN=1 MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action stock_scan 2>&1)
             printf '[%s] deferred stock inventory: %s\n' \
                 "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_stock_scan" >> "$LOG" 2>/dev/null || true
         fi

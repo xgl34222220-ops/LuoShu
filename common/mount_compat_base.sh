@@ -39,8 +39,34 @@ luoshu_module_id() {
     printf '%s\n' "$_lmi_id"
 }
 
-luoshu_payload_partitions() {
+_luoshu_payload_base_partitions() {
     printf '%s\n' 'system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product'
+}
+
+_luoshu_payload_partition_safe() {
+    case "$1" in
+        ''|*[!A-Za-z0-9_]*|[0-9]*|_* ) return 1 ;;
+        data|proc|sys|dev|mnt|storage|sdcard|apex|metadata|cache|tmp|config|acct|linkerconfig|debug_ramdisk|vendor_dlkm|odm_dlkm|system_dlkm) return 1 ;;
+    esac
+    return 0
+}
+
+luoshu_payload_partitions() {
+    if type luoshu_private_partitions >/dev/null 2>&1; then
+        luoshu_private_partitions
+        return
+    fi
+    _lpp_base=$(_luoshu_payload_base_partitions)
+    printf '%s\n' "$_lpp_base"
+    _lpp_manifest="$LUOSHU_MOUNT_MODDIR/config/device_font_partitions.conf"
+    [ -f "$_lpp_manifest" ] || return 0
+    _lpp_seen=" $_lpp_base "
+    while IFS= read -r _lpp_part; do
+        _luoshu_payload_partition_safe "$_lpp_part" || continue
+        case "$_lpp_seen" in *" $_lpp_part "*) continue ;; esac
+        printf '%s\n' "$_lpp_part"
+        _lpp_seen="$_lpp_seen$_lpp_part "
+    done < "$_lpp_manifest"
 }
 
 luoshu_detect_root_manager() {
