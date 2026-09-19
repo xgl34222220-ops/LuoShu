@@ -82,6 +82,14 @@ DENY_FILE_TOKENS = ("emoji", "icon", "symbol", "math", "music", "serif")
 GENERIC_DENY_FILE_TOKENS = (
     "emoji", "icon", "symbol", "math", "music", "serif", "mono", "monospace",
     "clock", "dingbat", "barcode", "qrcode", "materialicons", "notocoloremoji",
+    # Script-specific Android fallbacks are real fonts but are not global UI
+    # replacement slots. Keep them visible in device_font_candidates.json while
+    # excluding them from the replaceable inventory.
+    "adlam", "arabic", "hebrew", "thai", "devanagari", "bengali", "tamil",
+    "telugu", "malayalam", "gujarati", "gurmukhi", "kannada", "khmer", "lao",
+    "tibetan", "myanmar", "sinhala", "ethiopic", "georgian", "armenian",
+    "japanese", "korean", "hangul", "hiragana", "katakana", "odia", "oriya",
+    "cjkjp", "cjkkr",
 )
 GENERIC_DENY_STYLE_TOKENS = ("italic", "oblique")
 HEURISTIC_PATTERNS = (
@@ -673,16 +681,23 @@ def _add_heuristic_slots(slots: dict[str, dict[str, Any]], roots: list[FontRoot]
             }
 
 
-def _generic_text_slot_candidate(name: str, metrics: dict[str, Any]) -> bool:
-    """Accept an upright stock text face by measured coverage, not by OEM filename.
-
-    Some ROMs address physical UI font files directly without declaring them in
-    fonts.xml. Specialized/icon/emoji/mono/italic faces stay stock.
-    """
+def _generic_font_name_candidate(name: str) -> bool:
+    """Cheap preflight used before opening a font with fontTools."""
     lowered = name.lower()
     if any(token in lowered for token in GENERIC_DENY_FILE_TOKENS):
         return False
     if any(token in lowered for token in GENERIC_DENY_STYLE_TOKENS):
+        return False
+    return True
+
+
+def _generic_text_slot_candidate(name: str, metrics: dict[str, Any]) -> bool:
+    """Accept an upright stock text face by measured coverage, not by OEM filename.
+
+    Some ROMs address physical UI font files directly without declaring them in
+    fonts.xml. Specialized/icon/emoji/mono/italic/script-fallback faces stay stock.
+    """
+    if not _generic_font_name_candidate(name):
         return False
     coverage = metrics.get("coverage")
     if not valid_coverage(coverage):
@@ -711,6 +726,12 @@ def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontR
         for actual in candidates:
             logical = _logical_path(root, actual)
             if logical in slots:
+                continue
+            # Reject known-specialized names before fontTools opens the file.
+            # This is important on ROMs with hundreds of Noto script fallbacks:
+            # they are recorded by the install path probe, but are never promoted
+            # to replaceable global UI slots or read during a policy refresh.
+            if not _generic_font_name_candidate(actual.name):
                 continue
             try:
                 stock_file = _stock_font_path(root, actual, roots)
