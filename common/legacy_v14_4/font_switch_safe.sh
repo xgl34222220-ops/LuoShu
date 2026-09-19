@@ -342,6 +342,21 @@ safe_switch_cache_ready() {
         -print -quit 2>/dev/null | grep -q .
 }
 
+wait_for_prewarm_cache() {
+    _wfpc_file="$1"; _wfpc_font="$2"
+    safe_switch_cache_ready "$_wfpc_file" "$_wfpc_font" && return 0
+    type luoshu_font_lock_active >/dev/null 2>&1 || return 1
+    luoshu_font_lock_active "$PREWARM_LOCK" >/dev/null 2>&1 || return 1
+    _wfpc_steps=0
+    while [ "$_wfpc_steps" -lt 16 ]; do
+        sleep 0.25 2>/dev/null || sleep 1
+        safe_switch_cache_ready "$_wfpc_file" "$_wfpc_font" && return 0
+        luoshu_font_lock_active "$PREWARM_LOCK" >/dev/null 2>&1 || break
+        _wfpc_steps=$((_wfpc_steps + 1))
+    done
+    return 1
+}
+
 lock_acquire() {
     type luoshu_font_lock_acquire >/dev/null 2>&1 || { safe_error '缺少字体切换身份锁'; return 1; }
     luoshu_font_lock_acquire "$SWITCH_LOCK" "$$"
@@ -674,6 +689,7 @@ switch_font() {
         PAYLOAD_ROOT="$STAGE_PAYLOAD"
         SYSTEM_FONTS_DIR="$STAGE_PAYLOAD/system/fonts"
         export PAYLOAD_ROOT SYSTEM_FONTS_DIR
+        wait_for_prewarm_cache "$_source" "$_font" >/dev/null 2>&1 || true
         if safe_switch_cache_restore "$_source" "$_font"; then
             progress 80 '已复用本机字体对齐缓存'
         else
