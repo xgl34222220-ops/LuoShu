@@ -266,7 +266,7 @@ python3 "$ROOT/scripts/legacy_mix_status_lifecycle_test.py"
 python3 "$ROOT/scripts/scanner_refresh_test.py"
 sh "$ROOT/scripts/builder_update_policy_test.sh"
 python3 "$ROOT/scripts/font_layout_diagnostic_test.py"
-python3 "$ROOT/scripts/font_inventory_scan_v3_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/font_inventory_scan_test.py" --font "$FONT_INVENTORY_TEST_FONT"
 python3 "$ROOT/scripts/stock_inventory_scan_wrapper_test.py"
 sh "$ROOT/scripts/rom_adapter_inventory_test.sh" "$FONT_INVENTORY_TEST_FONT"
 # The per-device engine is the release-critical HyperOS/KernelSU path. These
