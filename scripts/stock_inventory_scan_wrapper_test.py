@@ -23,7 +23,11 @@ def main() -> int:
     manager = (ROOT / "common/font_manager.sh").read_text(encoding="utf-8")
     assert "stock_inventory_scan_pending" in installer
     assert "原厂视图来源：直接" in installer
-    assert "刷入时无法安全读取原厂字体" in installer
+    assert "LUOSHU_STOCK_SCAN_STRICT=1" in installer
+    assert "source=flash-preflight" in installer
+    assert "刷入前字体槽位扫描失败" in installer
+    assert "本次安装已中止" in installer
+    assert 'cp -f "$OLD_MOD/config/device_font_inventory.json"' not in installer
     assert "action stock_scan" in service
     assert "LUOSHU_STOCK_VIEW_VERIFIED=1" in post_mount
     assert 'rm -f "$MODDIR/config/stock_inventory_scan_pending"' in manager
