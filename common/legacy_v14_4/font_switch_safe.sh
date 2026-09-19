@@ -80,6 +80,25 @@ safe_error() {
     return 1
 }
 
+slot_snapshot_digest() {
+    _ssd_file="$1"
+    [ -s "$_ssd_file" ] || return 1
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf 'sha256:%s\n' "$(sha256sum "$_ssd_file" 2>/dev/null | awk '{print $1}')"
+    elif command -v toybox >/dev/null 2>&1; then
+        _ssd_hash=$(toybox sha256sum "$_ssd_file" 2>/dev/null | awk '{print $1}')
+        if [ -n "$_ssd_hash" ]; then
+            printf 'sha256:%s\n' "$_ssd_hash"
+        else
+            set -- $(cksum "$_ssd_file" 2>/dev/null)
+            printf 'cksum:%s:%s\n' "${1:-0}" "${2:-0}"
+        fi
+    else
+        set -- $(cksum "$_ssd_file" 2>/dev/null)
+        printf 'cksum:%s:%s\n' "${1:-0}" "${2:-0}"
+    fi
+}
+
 target_manifest_current() {
     _tmc_list="$CONFIG_DIR/replaceable_font_targets.list"
     _tmc_inventory="$CONFIG_DIR/device_font_inventory.json"
@@ -89,10 +108,16 @@ target_manifest_current() {
 
     _tmc_saved=$(read_state_value "$SLOT_SNAPSHOT" buildKey)
     _tmc_list_saved=$(sed -n 's/^# buildKey=//p' "$_tmc_list" 2>/dev/null | head -n1)
+    _tmc_expected_inventory=$(read_state_value "$SLOT_SNAPSHOT" inventoryDigest)
+    _tmc_expected_targets=$(read_state_value "$SLOT_SNAPSHOT" targetsDigest)
+    _tmc_inventory_digest=$(slot_snapshot_digest "$_tmc_inventory") || return 1
+    _tmc_targets_digest=$(slot_snapshot_digest "$_tmc_list") || return 1
     _tmc_now=$(getprop ro.build.fingerprint 2>/dev/null | tr -d '\r\n')
     [ -n "$_tmc_now" ] || _tmc_now=$(getprop ro.build.display.id 2>/dev/null | tr -d '\r\n')
     [ -n "$_tmc_saved" ] && [ "$_tmc_saved" = "$_tmc_list_saved" ] && \
-        [ -n "$_tmc_now" ] && [ "$_tmc_saved" = "$_tmc_now" ]
+        [ -n "$_tmc_now" ] && [ "$_tmc_saved" = "$_tmc_now" ] && \
+        [ -n "$_tmc_expected_inventory" ] && [ "$_tmc_expected_inventory" = "$_tmc_inventory_digest" ] && \
+        [ -n "$_tmc_expected_targets" ] && [ "$_tmc_expected_targets" = "$_tmc_targets_digest" ]
 }
 
 ensure_target_manifest() {
