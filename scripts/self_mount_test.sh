@@ -171,7 +171,7 @@ grep -q 'luoshu_self_mount_stage_for_manager' "$ROOT/post-fs-data.sh"
 # APatch waits for post-mount, while Magisk still mounts in post-fs-data.
 STAGE_MODULE="$TMP/stage-module"
 STAGE_LOG="$TMP/stage.log"
-mkdir -p "$STAGE_MODULE/common" "$STAGE_MODULE/.luoshu-runtime"
+mkdir -p "$STAGE_MODULE/common" "$STAGE_MODULE/.luoshu-runtime/core" "$STAGE_MODULE/.luoshu-runtime/compat/v227"
 cp "$ROOT/post-fs-data.sh" "$STAGE_MODULE/post-fs-data.sh"
 cp "$ROOT/.luoshu-runtime/core/post-fs-data.sh" "$STAGE_MODULE/.luoshu-runtime/core/post-fs-data.sh"
 cp "$ROOT/common/mount_self_backend.sh" "$STAGE_MODULE/common/mount_self_backend.sh"
