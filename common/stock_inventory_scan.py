@@ -125,6 +125,7 @@ def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: b
 
     attempted: list[str] = []
     parts = logical.parts
+    proc1_root = Path(os.environ.get("LUOSHU_PROC1_ROOT", "/proc/1/root"))
     if len(parts) >= 3 and parts[0] == "/":
         state_root = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))
         lower = state_root / "lower" / f"{parts[1]}-{parts[2]}"
@@ -132,6 +133,12 @@ def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: b
         if lower.is_dir():
             _record_stock_view(logical, "luoshu-lower", lower)
             return lower
+        if state_root.is_absolute():
+            pid1_lower = proc1_root / state_root.relative_to("/") / "lower" / f"{parts[1]}-{parts[2]}"
+            attempted.append(str(pid1_lower))
+            if pid1_lower.is_dir():
+                _record_stock_view(logical, "pid1-luoshu-lower", pid1_lower)
+                return pid1_lower
 
     for prefix in inventory.MIRROR_PREFIXES:
         candidate = prefix / logical.relative_to("/")
@@ -139,6 +146,12 @@ def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: b
         if candidate.is_dir():
             _record_stock_view(logical, _mirror_view_name(prefix), candidate, str(prefix))
             return candidate
+        if prefix.is_absolute():
+            pid1_candidate = proc1_root / prefix.relative_to("/") / logical.relative_to("/")
+            attempted.append(str(pid1_candidate))
+            if pid1_candidate.is_dir():
+                _record_stock_view(logical, "pid1-" + _mirror_view_name(prefix), pid1_candidate, str(prefix))
+                return pid1_candidate
 
     # A ROM is not required to expose every optional OEM partition. Missing logical
     # roots are harmless; an existing root without a verifiable stock view is not.
