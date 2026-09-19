@@ -116,7 +116,8 @@ common/util_functions_core.sh
 common/weighted_mix_task.sh
 common/python
 .luoshu-runtime
-config
+config/active_font.conf
+config/version_notes.conf
 fonts
 system
 licenses
