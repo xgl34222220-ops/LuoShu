@@ -12,7 +12,7 @@ on:
       - common/rom_adapters.sh
       - common/device_font_payload_policy.sh
       - customize.sh
-      - .luoshu-runtime/customize-v227.sh
+      - .luoshu-runtime/compat/v227/customize.sh
       - scripts/font_inventory_test.py
       - scripts/font_inventory_scan_test.py
       - scripts/stock_inventory_scan_wrapper_test.py
@@ -46,7 +46,7 @@ jobs:
       - name: Validate install-stage and fallback contracts
         run: |
           set -eu
-          INSTALLER='.luoshu-runtime/customize-v227.sh'
+          INSTALLER='.luoshu-runtime/compat/v227/customize.sh'
           sh -n customize.sh
           sh -n "$INSTALLER"
           sh -n common/rom_adapters.sh
