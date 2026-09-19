@@ -60,6 +60,8 @@ jobs:
           grep -q 'font_inventory_scan_v3' common/font_inventory_scan.py
           grep -q '_add_verified_text_slots' common/font_inventory.py
           grep -q 'genericSlotCount' "$INSTALLER"
+          grep -q 'device_font_candidates.json' "$INSTALLER"
+          grep -q 'candidatePathCount' common/font_inventory_scan_v3.py
           ! grep -q '已中止本次更新' "$INSTALLER"
           grep -q 'stock_inventory_scan.py' common/font_manager.sh
           grep -q '_copy_as_inventory' common/rom_adapters.sh
