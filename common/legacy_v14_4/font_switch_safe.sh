@@ -197,8 +197,10 @@ stage_clone_live() {
 }
 
 stage_clear_text_payload() {
-    for _part in system system_ext product vendor odm oem my_product mi_ext \
-                 oplus_product hw_product cust; do
+    for _part in system system_ext product vendor odm oem my_product \
+                 my_engineering my_company my_preload my_region my_stock \
+                 oplus_product oplus_engineering oplus_version oplus_region \
+                 mi_ext hw_product cust; do
         rm -rf "$STAGE_PAYLOAD/$_part/fonts" 2>/dev/null || true
         _etc="$STAGE_PAYLOAD/$_part/etc"
         [ -d "$_etc" ] || continue
@@ -377,8 +379,12 @@ switch_font() {
             safe_error 'ROM 字体映射失败，当前启动字体未被改动'
             return 1
         fi
-        progress 66 '正在补齐系统分区同名字体槽位'
-        mirror_existing_targets
+        progress 66 '正在补齐系统分区字体槽位'
+        # HyperOS uses the flash-time per-device target manifest below. Do not
+        # broadcast same filenames into other partitions before exact staging.
+        if [ "${IS_HYPEROS:-false}" != true ]; then
+            mirror_existing_targets
+        fi
         if [ "${IS_HYPEROS:-false}" = true ]; then
             progress 76 '正在补齐 HyperOS 状态栏、锁屏和系统 UI 字体槽位'
             stage_hyperos_complete || {
