@@ -38,7 +38,15 @@ font_validate() {
         return 1
     fi
 
-    FONT_CHECK_SIZE=$(wc -c < "$_file" 2>/dev/null | tr -d '[:space:]')
+    if command -v stat >/dev/null 2>&1; then
+        FONT_CHECK_SIZE=$(stat -c '%s' "$_file" 2>/dev/null)
+    elif command -v toybox >/dev/null 2>&1; then
+        FONT_CHECK_SIZE=$(toybox stat -c '%s' "$_file" 2>/dev/null)
+    elif command -v busybox >/dev/null 2>&1; then
+        FONT_CHECK_SIZE=$(busybox stat -c '%s' "$_file" 2>/dev/null)
+    else
+        FONT_CHECK_SIZE=0
+    fi
     case "$FONT_CHECK_SIZE" in ''|*[!0-9]*) FONT_CHECK_SIZE=0 ;; esac
     if [ "$FONT_CHECK_SIZE" -lt 4096 ]; then
         FONT_CHECK_ERROR="字体文件过小（${FONT_CHECK_SIZE} 字节），可能损坏或不是字体"

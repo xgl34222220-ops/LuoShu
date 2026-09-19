@@ -6,6 +6,16 @@ verify_body="$(awk '/^_verify_font_copy\(\)/,/^}/' "$ROOT/common/rom_adapters.sh
 printf '%s\n' "$verify_body" | grep -q '_font_file_size_fast'
 ! printf '%s\n' "$verify_body" | grep -q 'wc -c'
 
+legacy_verify_body="$(awk '/^_verify_font_copy\(\)/,/^}/' "$ROOT/common/legacy_v14_4/rom_adapters.sh")"
+printf '%s\n' "$legacy_verify_body" | grep -q '_font_file_size_fast'
+! printf '%s\n' "$legacy_verify_body" | grep -q 'wc -c'
+legacy_check_body="$(awk '/^font_validate\(\)/,/^}/' "$ROOT/common/legacy_v14_4/font_check.sh")"
+printf '%s\n' "$legacy_check_body" | grep -q "stat -c '%s'"
+! printf '%s\n' "$legacy_check_body" | grep -q 'wc -c'
+grep -q 'safe_validate_global_cached' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q 'SAFE-SWITCH-PERF' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q 'device_font_partitions.conf' "$ROOT/common/legacy_v14_4/payload_clone.sh"
+
 payload_body="$(awk '/^luoshu_payload_validate_current\(\)/,/^}/' "$ROOT/common/font_safety.sh")"
 ! printf '%s\n' "$payload_body" | grep -q 'wc -c'
 dynamic_body="$(awk '/^luoshu_dynamic_targets_apply\(\)/,/^}/' "$ROOT/common/font_safety.sh")"

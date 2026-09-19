@@ -60,6 +60,19 @@ read_state_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
 
+perf_mark() {
+    _pm_label="$1"
+    _pm_now=$(date +%s 2>/dev/null || echo 0)
+    case "$_pm_now" in ''|*[!0-9]*) _pm_now=0 ;; esac
+    case "${PERF_LAST_TS:-}" in ''|*[!0-9]*) PERF_LAST_TS="$_pm_now" ;; esac
+    _pm_delta=$((_pm_now - PERF_LAST_TS))
+    [ "$_pm_delta" -ge 0 ] 2>/dev/null || _pm_delta=0
+    printf '[%s] [SAFE-SWITCH-PERF] %s +%ss\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_pm_label" "$_pm_delta" \
+        >> "$LOG_FILE" 2>/dev/null || true
+    PERF_LAST_TS="$_pm_now"
+}
+
 progress() {
     _p="$1"; shift; _m="$*"
     printf '[%s] [SAFE-SWITCH] stage=%s message=%s\n' \
@@ -132,6 +145,51 @@ find_text_font_file() {
     return 1
 }
 
+safe_validation_identity() {
+    _svi_file="$1"
+    if command -v stat >/dev/null 2>&1; then
+        stat -c '%d:%i:%s:%Y:%Z' "$_svi_file" 2>/dev/null && return 0
+    fi
+    if command -v toybox >/dev/null 2>&1; then
+        toybox stat -c '%d:%i:%s:%Y:%Z' "$_svi_file" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+safe_validation_cache_path() {
+    _svcp_file="$1"
+    _svcp_identity=$(safe_validation_identity "$_svcp_file") || return 1
+    _svcp_key=$(printf '%s\n%s\n%s\n' 'safe-global-v1' "$_svcp_file" "$_svcp_identity" | cksum 2>/dev/null | awk '{print $1 "-" $2}')
+    [ -n "$_svcp_key" ] || return 1
+    printf '%s/safe-switch-validation/%s.conf\n' "$CONFIG_DIR" "$_svcp_key"
+}
+
+safe_validate_global_cached() {
+    _svgc_file="$1"
+    _svgc_identity=$(safe_validation_identity "$_svgc_file") || {
+        validate_global "$_svgc_file"
+        return $?
+    }
+    _svgc_cache=$(safe_validation_cache_path "$_svgc_file") || {
+        validate_global "$_svgc_file"
+        return $?
+    }
+    if [ -s "$_svgc_cache" ] && \
+       [ "$(sed -n 's/^identity=//p' "$_svgc_cache" 2>/dev/null | head -n1)" = "$_svgc_identity" ]; then
+        return 0
+    fi
+    validate_global "$_svgc_file" || return $?
+    mkdir -p "${_svgc_cache%/*}" 2>/dev/null || true
+    {
+        printf 'schema=safe-global-v1\n'
+        printf 'identity=%s\n' "$_svgc_identity"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "${_svgc_cache}.tmp.$" 2>/dev/null && \
+        mv -f "${_svgc_cache}.tmp.$" "$_svgc_cache" 2>/dev/null || true
+    chmod 0644 "$_svgc_cache" 2>/dev/null || true
+    return 0
+}
+
 validate_global() {
     _file="$1"
     if type font_validate >/dev/null 2>&1; then
@@ -196,9 +254,18 @@ stage_clone_live() {
     return 0
 }
 
+safe_switch_partitions() {
+    printf '%s\n' 'system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product'
+    _ssp_manifest="$CONFIG_DIR/device_font_partitions.conf"
+    [ -f "$_ssp_manifest" ] || return 0
+    while IFS= read -r _ssp_part; do
+        case "$_ssp_part" in ''|*[!A-Za-z0-9_]*|[0-9]*|_* ) continue ;; esac
+        printf '%s\n' "$_ssp_part"
+    done < "$_ssp_manifest"
+}
+
 stage_clear_text_payload() {
-    for _part in system system_ext product vendor odm oem my_product mi_ext \
-                 oplus_product hw_product cust; do
+    for _part in $(safe_switch_partitions); do
         rm -rf "$STAGE_PAYLOAD/$_part/fonts" 2>/dev/null || true
         _etc="$STAGE_PAYLOAD/$_part/etc"
         [ -d "$_etc" ] || continue
@@ -218,8 +285,8 @@ mirror_existing_targets() {
         [ -f "$_src" ] || continue
         _base="${_src##*/}"
         case "$_base" in *.ttf|*.otf|*.ttc) ;; *) continue ;; esac
-        for _part in system_ext product vendor odm oem my_product mi_ext \
-                     oplus_product hw_product cust; do
+        for _part in $(safe_switch_partitions); do
+            [ "$_part" != system ] || continue
             [ -e "/$_part/fonts/$_base" ] || continue
             _dest="$STAGE_PAYLOAD/$_part/fonts/$_base"
             mkdir -p "${_dest%/*}" 2>/dev/null || continue
@@ -342,6 +409,7 @@ write_runtime_state() {
 
 switch_font() {
     _font="$1"
+    PERF_LAST_TS=$(date +%s 2>/dev/null || echo 0)
     [ -n "$_font" ] || { safe_error '未指定字体'; return 1; }
     _active_label="${LUOSHU_SWITCH_ACTIVE_LABEL:-$_font}"
     [ -n "$_active_label" ] || _active_label="$_font"
@@ -356,14 +424,16 @@ switch_font() {
         progress 10 '正在查找并校验字体文件'
         _source="$(find_text_font_file "$_font")"
         [ -f "$_source" ] || { safe_error "字体 $_font 不存在"; return 1; }
-        if ! validate_global "$_source"; then
+        if ! safe_validate_global_cached "$_source"; then
             safe_error "${FONT_CHECK_ERROR:-字体校验失败}"
             return 1
         fi
+        perf_mark validation
     fi
 
     progress 22 '正在保留非字体负载并建立安全暂存区'
     stage_clone_live || { safe_error '无法创建下一启动字体负载'; return 1; }
+    perf_mark stage-clone
     progress 34 '正在清理暂存区旧文字映射'
     stage_clear_text_payload || { safe_error '无法准备下一启动字体负载'; return 1; }
 
@@ -377,8 +447,10 @@ switch_font() {
             safe_error 'ROM 字体映射失败，当前启动字体未被改动'
             return 1
         fi
+        perf_mark rom-map
         progress 66 '正在补齐系统分区同名字体槽位'
         mirror_existing_targets
+        perf_mark partition-mirror
         if [ "${IS_HYPEROS:-false}" = true ]; then
             progress 76 '正在补齐 HyperOS 状态栏、锁屏和系统 UI 字体槽位'
             stage_hyperos_complete || {
@@ -392,8 +464,10 @@ switch_font() {
                 return 1
             }
         fi
+        perf_mark rom-complete
         progress 86 '正在校验下一启动字体负载'
         stage_verify "$_font" || { safe_error '新字体负载校验失败，当前启动字体未被改动'; return 1; }
+        perf_mark stage-verify
     fi
 
     progress 94 '正在提交下一启动字体负载'
@@ -401,6 +475,7 @@ switch_font() {
         safe_error '下一启动字体负载提交失败，当前启动字体未被改动'
         return 1
     }
+    perf_mark commit-next
     progress 98 '正在保存字体选择状态'
     if ! write_runtime_state "$_active_label"; then
         cancel_next_payload
