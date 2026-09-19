@@ -369,7 +369,6 @@ def _fast_patch_metrics(source: Path, output: Path, contract: tuple, *,
                 stream.seek(rec[0] + 4)
                 stream.write(struct.pack('>I', new_checks[tag]))
             stream.flush()
-            os.fsync(stream.fileno())
     except OSError:
         output.unlink(missing_ok=True)
         return None
