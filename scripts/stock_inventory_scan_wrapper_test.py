@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "common"))
 
 import font_inventory as inventory  # noqa: E402
-import font_inventory_scan_v3 as scanner  # noqa: E402
+import font_inventory_scan as scanner  # noqa: E402
 import stock_inventory_scan as stock  # noqa: E402
 
 
