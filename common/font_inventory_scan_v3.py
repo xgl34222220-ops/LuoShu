@@ -617,6 +617,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "xmlSlotCount": scan_summary["xmlUiFileCount"],
         "heuristicSlotCount": scan_summary["heuristicUiFileCount"],
         "genericSlotCount": scan_summary["verifiedScanUiFileCount"],
+        "physicalSlotCount": sum(1 for entry in slots.values() if entry.get("source") == "hyperos-physical"),
         "candidatePathCount": int(probe.get("candidateCount", 0)),
         "xmlSourceCount": scan_summary["xmlSourceCount"],
         "themeOverrideCount": len(theme_roots),
