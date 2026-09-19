@@ -17,7 +17,7 @@ from typing import Any
 from hyperos_physical_policy import (
     PARTITIONS as HYPEROS_PARTITIONS,
     preserved_dynamic_alias,
-    safe_physical_font_name,
+    safe_physical_inventory_slot,
 )
 
 SCHEMA = "device-font-target-manifest-v1"
@@ -60,22 +60,7 @@ def _hyperos_physical(data: dict[str, Any], logical: str, partition: str,
                       name: str, entry: dict[str, Any]) -> bool:
     if data.get("romKind") != "hyperos":
         return False
-    if partition not in HYPEROS_PARTITIONS:
-        return False
-    if preserved_dynamic_alias(data, logical):
-        return False
-    if not safe_physical_font_name(name):
-        return False
-    if _slot_format(entry) not in {"TTF", "OTF"}:
-        return False
-    try:
-        face = int(entry.get("faceIndex", 0))
-    except (TypeError, ValueError):
-        return False
-    if face != 0:
-        return False
-    style = str(entry.get("style", "normal")).lower()
-    return style not in {"italic", "oblique"}
+    return safe_physical_inventory_slot(data, logical)
 
 
 def compile_manifest(data: dict[str, Any]) -> dict[str, Any]:
