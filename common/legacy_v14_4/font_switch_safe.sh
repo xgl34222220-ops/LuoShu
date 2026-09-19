@@ -696,32 +696,33 @@ switch_font() {
     _active_label="${LUOSHU_SWITCH_ACTIVE_LABEL:-$_font}"
     [ -n "$_active_label" ] || _active_label="$_font"
 
-    progress 4 '正在获取字体切换锁'
-    lock_acquire || return 1
-    cleanup_stale_stages
-    resolve_previous_state
-
     _source=''
     if [ "$_font" != default ]; then
-        progress 10 '正在查找并校验字体文件'
+        progress 6 '正在查找并校验字体文件'
         _source="$(find_text_font_file "$_font")"
         [ -f "$_source" ] || { safe_error "字体 $_font 不存在"; return 1; }
         if ! validate_global "$_source"; then
             safe_error "${FONT_CHECK_ERROR:-字体校验失败}"
             return 1
         fi
+        progress 14 '正在检查本机字体预热缓存'
+        wait_for_prewarm_cache "$_source" "$_font" >/dev/null 2>&1 || true
     fi
 
-    progress 22 '正在保留非字体负载并建立安全暂存区'
+    progress 20 '正在获取字体切换锁'
+    lock_acquire || return 1
+    cleanup_stale_stages
+    resolve_previous_state
+
+    progress 28 '正在保留非字体负载并建立安全暂存区'
     stage_clone_live || { safe_error '无法创建下一启动字体负载'; return 1; }
-    progress 34 '正在清理暂存区旧文字映射'
+    progress 36 '正在清理暂存区旧文字映射'
     stage_clear_text_payload || { safe_error '无法准备下一启动字体负载'; return 1; }
 
     if [ "$_font" != default ]; then
         PAYLOAD_ROOT="$STAGE_PAYLOAD"
         SYSTEM_FONTS_DIR="$STAGE_PAYLOAD/system/fonts"
         export PAYLOAD_ROOT SYSTEM_FONTS_DIR
-        wait_for_prewarm_cache "$_source" "$_font" >/dev/null 2>&1 || true
         if safe_switch_cache_restore "$_source" "$_font"; then
             progress 80 '已复用本机字体对齐缓存'
         else
