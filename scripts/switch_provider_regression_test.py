@@ -38,7 +38,7 @@ class SwitchProviderTest(unittest.TestCase):
 
     def test_both_service_routes_launch_provider_once(self):
         shutil.copyfile(ROOT / 'service.sh', self.module / 'service.sh')
-        (self.module / 'service_v4.sh').write_text('exit 0\n')
+        (self.module / '.luoshu-runtime/core/service.sh').write_text('exit 0\n')
         marker = self.root / 'provider-starts'
         (self.module / 'common/google_font_provider_service.sh').write_text(
             'printf "started\\n" >> "$TEST_STARTS"\n')
