@@ -226,7 +226,31 @@ def validate_inventory(data: dict[str, Any], expected_key: str | None = None) ->
     if declared_count != len(slots) or main_path not in slots:
         raise InventoryError("设备字体清单槽位索引不完整")
 
-    allowed_prefixes = tuple(f"{logical}/" for _partition, logical in LOGICAL_FONT_ROOTS)
+    discovered = data.get("discoveredPartitions", [])
+    if not isinstance(discovered, list) or len(discovered) > 16:
+        raise InventoryError("设备字体清单动态分区无效")
+    known_partitions = {partition for partition, _logical in LOGICAL_FONT_ROOTS}
+    denied_partitions = {
+        "acct", "apex", "cache", "config", "data", "data_mirror", "debug_ramdisk",
+        "dev", "linkerconfig", "metadata", "mnt", "proc", "sdcard", "storage",
+        "sys", "tmp", "vendor_dlkm", "odm_dlkm", "system_dlkm",
+    }
+    dynamic_prefixes: list[str] = []
+    for value in discovered:
+        if not isinstance(value, str):
+            raise InventoryError("设备字体清单动态分区无效")
+        partition = value.strip()
+        if (not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_]{0,63}", partition)
+                or partition in known_partitions
+                or partition.lower() in denied_partitions):
+            raise InventoryError("设备字体清单动态分区越界")
+        prefix = f"/{partition}/fonts/"
+        if prefix not in dynamic_prefixes:
+            dynamic_prefixes.append(prefix)
+    allowed_prefixes = (
+        *(f"{logical}/" for _partition, logical in LOGICAL_FONT_ROOTS),
+        *dynamic_prefixes,
+    )
     for logical, entry in slots.items():
         if not isinstance(logical, str) or not logical.startswith(allowed_prefixes) or not isinstance(entry, dict):
             raise InventoryError("设备字体清单包含越界槽位")
