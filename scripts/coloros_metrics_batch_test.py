@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import struct
 import sys
 import tempfile
 import unittest
@@ -124,6 +125,21 @@ class ColorOSMetricsTest(unittest.TestCase):
         with TTFont(product) as font:
             self.assertEqual(font['hhea'].ascent, 900)
             self.assertEqual((font['head'].yMin, font['head'].yMax), (-205, 1000))
+
+    def test_simple_sfnt_uses_fast_metric_patch_with_valid_checksum(self):
+        target = self.target(); font_file(target)
+        self.inventory({'/system/fonts/SysSans-Hans-Regular.ttf': stock()})
+        batch.build(self.module, self.stage)
+        report = self.report()[0]
+        self.assertTrue(report.get('fastMetricPatch'), report)
+        raw = target.read_bytes()
+        raw += b'\0' * ((-len(raw)) & 3)
+        total = sum(struct.unpack(f'>{len(raw) // 4}I', raw)) & 0xFFFFFFFF
+        self.assertEqual(total, 0xB1B0AFBA)
+        with TTFont(target) as font:
+            self.assertEqual(font['hhea'].ascent, 920)
+            self.assertEqual(font['hhea'].descent, -240)
+            self.assertEqual((font['head'].yMin, font['head'].yMax), (-250, 1050))
 
     def test_ttf_and_cff_tables_are_not_recompiled(self):
         for cff, name, table in ((False, 'SysSans-Hans-Regular.ttf', 'glyf'),
