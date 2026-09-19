@@ -214,24 +214,48 @@ def _mount_namespace_id(pid: str) -> str:
         return ""
 
 
-def _installer_namespace_is_stock(logical: Path) -> bool:
-    """Prove that this flash process sees stock while PID 1 sees LuoShu payload.
+def _system_namespace_pids() -> list[str]:
+    """Return a few long-lived Android processes that should see live font mounts."""
+    wanted_exact = {"system_server", "zygote", "zygote64"}
+    wanted_suffix = {"/com.android.systemui", ":com.android.systemui"}
+    found: list[str] = ["1"]
+    proc = Path("/proc")
+    try:
+        entries = list(proc.iterdir())
+    except OSError:
+        return found
+    for entry in entries:
+        if not entry.name.isdigit() or entry.name == str(os.getpid()):
+            continue
+        try:
+            raw = (entry / "cmdline").read_bytes().split(b"\0", 1)[0]
+            cmd = raw.decode("utf-8", errors="ignore")
+        except OSError:
+            continue
+        base = Path(cmd).name
+        if base in wanted_exact or cmd == "com.android.systemui" or any(cmd.endswith(s) for s in wanted_suffix):
+            if entry.name not in found:
+                found.append(entry.name)
+        if len(found) >= 8:
+            break
+    return found
 
-    KernelSU/SukiSU can run module installers in a private mount namespace. In
-    that case active_font.conf still says mix, but the install process's
-    /system/fonts is already the lower stock tree. Trust it only when:
-      1) installer and PID 1 are in different mount namespaces;
-      2) at least one known LuoShu payload file matches PID 1's visible file; and
-      3) the installer-visible file at the same path differs from that payload.
-    This turns namespace isolation itself into a verified stock source instead of
-    unnecessarily deferring every ColorOS scan until reboot.
+
+def _installer_namespace_is_stock(logical: Path) -> bool:
+    """Prove the flash process sees stock while a system process sees LuoShu.
+
+    KernelSU/SukiSU may run module installers in a private mount namespace.
+    active_font.conf can still say mix even though this process already sees the
+    lower stock tree. Compare actual font bytes against several long-lived Android
+    namespaces (init, system_server, zygote, SystemUI) and trust the installer
+    tree only when a system namespace matches LuoShu payload while the installer
+    sees different bytes at the exact same logical path.
     """
     module = _ACTIVE_OVERLAY_MODULE
     if module is None or not logical.is_dir():
         return False
     self_ns = _mount_namespace_id("self")
-    init_ns = _mount_namespace_id("1")
-    if not self_ns or not init_ns or self_ns == init_ns:
+    if not self_ns:
         return False
 
     try:
@@ -244,7 +268,12 @@ def _installer_namespace_is_stock(logical: Path) -> bool:
         module / ".luoshu-payload-next" / relative_root,
         module / relative_root,
     )
-    pid1_root = Path(os.environ.get("LUOSHU_PID1_ROOT", "/proc/1/root")) / relative_root
+    target_pids = [
+        pid for pid in _system_namespace_pids()
+        if _mount_namespace_id(pid) and _mount_namespace_id(pid) != self_ns
+    ]
+    if not target_pids:
+        return False
 
     checked = 0
     for payload_root in payload_roots:
@@ -264,24 +293,33 @@ def _installer_namespace_is_stock(logical: Path) -> bool:
             except ValueError:
                 continue
             installer_file = logical / rel
-            init_file = pid1_root / rel
-            if not installer_file.is_file() or not init_file.is_file():
+            if not installer_file.is_file():
                 continue
             payload_sig = _quick_file_signature(payload_file)
-            init_sig = _quick_file_signature(init_file)
             installer_sig = _quick_file_signature(installer_file)
-            if payload_sig is None or init_sig is None or installer_sig is None:
+            if payload_sig is None or installer_sig is None:
                 continue
-            checked += 1
-            if init_sig == payload_sig and installer_sig != payload_sig:
-                return True
-            # If the installer itself already sees the payload for a sampled path,
-            # it is not a clean stock namespace; fail closed immediately.
+
+            # Seeing even one exact payload file in the installer namespace means
+            # it is not a clean stock view. Fail closed.
             if installer_sig == payload_sig:
                 return False
-            if checked >= 8:
+
+            for pid in target_pids:
+                live_file = Path(f"/proc/{pid}/root") / relative_root / rel
+                if not live_file.is_file():
+                    continue
+                live_sig = _quick_file_signature(live_file)
+                if live_sig is None:
+                    continue
+                checked += 1
+                if live_sig == payload_sig and installer_sig != payload_sig:
+                    return True
+                if checked >= 16:
+                    break
+            if checked >= 16:
                 break
-        if checked >= 8:
+        if checked >= 16:
             break
     return False
 
