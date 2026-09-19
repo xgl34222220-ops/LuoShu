@@ -132,6 +132,51 @@ find_text_font_file() {
     return 1
 }
 
+safe_validation_identity() {
+    _svi_file="$1"
+    if command -v stat >/dev/null 2>&1; then
+        stat -c '%d:%i:%s:%Y:%Z' "$_svi_file" 2>/dev/null && return 0
+    fi
+    if command -v toybox >/dev/null 2>&1; then
+        toybox stat -c '%d:%i:%s:%Y:%Z' "$_svi_file" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+safe_validation_cache_path() {
+    _svcp_file="$1"
+    _svcp_identity=$(safe_validation_identity "$_svcp_file") || return 1
+    _svcp_key=$(printf '%s\n%s\n%s\n' 'safe-global-v1' "$_svcp_file" "$_svcp_identity" | cksum 2>/dev/null | awk '{print $1 "-" $2}')
+    [ -n "$_svcp_key" ] || return 1
+    printf '%s/safe-switch-validation/%s.conf\n' "$CONFIG_DIR" "$_svcp_key"
+}
+
+safe_validate_global_cached() {
+    _svgc_file="$1"
+    _svgc_identity=$(safe_validation_identity "$_svgc_file") || {
+        validate_global "$_svgc_file"
+        return $?
+    }
+    _svgc_cache=$(safe_validation_cache_path "$_svgc_file") || {
+        validate_global "$_svgc_file"
+        return $?
+    }
+    if [ -s "$_svgc_cache" ] && \
+       [ "$(sed -n 's/^identity=//p' "$_svgc_cache" 2>/dev/null | head -n1)" = "$_svgc_identity" ]; then
+        return 0
+    fi
+    validate_global "$_svgc_file" || return $?
+    mkdir -p "${_svgc_cache%/*}" 2>/dev/null || true
+    {
+        printf 'schema=safe-global-v1\n'
+        printf 'identity=%s\n' "$_svgc_identity"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "${_svgc_cache}.tmp.$" 2>/dev/null && \
+        mv -f "${_svgc_cache}.tmp.$" "$_svgc_cache" 2>/dev/null || true
+    chmod 0644 "$_svgc_cache" 2>/dev/null || true
+    return 0
+}
+
 validate_global() {
     _file="$1"
     if type font_validate >/dev/null 2>&1; then
@@ -365,7 +410,7 @@ switch_font() {
         progress 10 '正在查找并校验字体文件'
         _source="$(find_text_font_file "$_font")"
         [ -f "$_source" ] || { safe_error "字体 $_font 不存在"; return 1; }
-        if ! validate_global "$_source"; then
+        if ! safe_validate_global_cached "$_source"; then
             safe_error "${FONT_CHECK_ERROR:-字体校验失败}"
             return 1
         fi
