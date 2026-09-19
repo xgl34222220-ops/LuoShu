@@ -48,6 +48,7 @@ export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
 [ -f "$LEGACY_DIR/font_check.sh" ] && . "$LEGACY_DIR/font_check.sh"
 [ -f "$LEGACY_DIR/rom_adapters.sh" ] && . "$LEGACY_DIR/rom_adapters.sh"
 [ -f "$MODDIR/common/font_switch_lock.sh" ] && . "$MODDIR/common/font_switch_lock.sh"
+[ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 [ -f "$LEGACY_DIR/payload_clone.sh" ] && . "$LEGACY_DIR/payload_clone.sh"
 HYPEROS_COMPAT="$LEGACY_DIR/hyperos_full_coverage.sh"
 [ -f "$HYPEROS_COMPAT" ] && . "$HYPEROS_COMPAT"
@@ -618,6 +619,38 @@ write_runtime_state() {
     return 0
 }
 
+prewarm_start() {
+    _font="$1"
+    [ -n "$_font" ] && [ "$_font" != default ] || return 0
+    _source="$(find_text_font_file "$_font")"
+    [ -f "$_source" ] || return 0
+    type luoshu_start_detached >/dev/null 2>&1 || return 0
+    _prewarm_identity=$(safe_source_identity "$_source" 2>/dev/null)
+    [ -n "$_prewarm_identity" ] || return 0
+    _prewarm_key=$({
+        printf '%s\n' "$_font"
+        printf '%s\n' "$_prewarm_identity"
+    } | safe_hash_stream | cut -c1-12)
+    [ -n "$_prewarm_key" ] || return 0
+    _prewarm_pid="$CONFIG_DIR/font-prewarm-$_prewarm_key.pid"
+    _prewarm_log="$MODDIR/logs/font-prewarm.log"
+    _self="$MODDIR/common/legacy_v14_4/font_switch_safe.sh"
+    luoshu_start_detached "$_prewarm_pid" font_switch_safe.sh "$_prewarm_log" \
+        sh -c '
+            sleep 1
+            _script="$1"; _family="$2"; _public="$3"
+            [ -f "$_script" ] || exit 0
+            export LUOSHU_PUBLIC_DIR="$_public"
+            if command -v ionice >/dev/null 2>&1 && command -v nice >/dev/null 2>&1; then
+                exec ionice -c 3 nice -n 19 sh "$_script" action prewarm "$_family"
+            elif command -v nice >/dev/null 2>&1; then
+                exec nice -n 19 sh "$_script" action prewarm "$_family"
+            fi
+            exec sh "$_script" action prewarm "$_family"
+        ' font_switch_safe.sh "$_self" "$_font" "$USER_ROOT" >/dev/null 2>&1 || true
+    return 0
+}
+
 prewarm_font() {
     _font="$1"
     [ -n "$_font" ] && [ "$_font" != default ] || return 0
@@ -746,6 +779,7 @@ case "${1:-}" in
         case "${2:-}" in
             switch) switch_font "${3:-}"; exit $? ;;
             prewarm) prewarm_font "${3:-}"; exit $? ;;
+            prewarm-start) prewarm_start "${3:-}"; exit $? ;;
             *) safe_error '安全切换核心只接管字体应用/预热动作'; exit 2 ;;
         esac
         ;;
