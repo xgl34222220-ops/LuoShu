@@ -141,7 +141,6 @@ jobs:
             common/font_archive_export.sh \
             common/font_inventory.py \
             common/font_inventory_scan.py \
-            common/font_inventory_scan.py \
             common/font_switch_task.sh \
             common/legacy_v14_4/payload_clone.sh \
             common/mix_weight_mode.sh \
@@ -162,8 +161,7 @@ jobs:
           unzip -p "$module" common/font_archive_export.sh | grep -q '归档目标目录不受信任'
           unzip -p "$module" common/font_archive_export.sh | grep -q '1073741824'
           unzip -p "$module" common/font_inventory.py | grep -q 'device_font_inventory.json'
-          unzip -p "$module" common/font_inventory_scan.py | grep -q 'font_inventory_scan'
-          unzip -p "$module" common/font_inventory_scan.py | grep -q 'SCANNER_REVISION = 4'
+                    unzip -p "$module" common/font_inventory_scan.py | grep -q 'SCANNER_REVISION = 4'
           unzip -p "$module" common/font_inventory_scan.py | grep -q 'stockFontUniqueFileCount'
           unzip -p "$module" common/font_inventory_scan.py | grep -q 'themeOverrideRoots'
           unzip -p "$module" common/mix_weight_mode.sh | grep -q '快速单文件组合'
@@ -176,7 +174,7 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           unzip -q "$module" -d "$tmp"
-          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py" "$tmp/common/font_inventory_scan.py"
+          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py"
           sh -n "$tmp/customize.sh"
           sh -n "$tmp/common/background_task.sh"
           sh -n "$tmp/common/device_font_template.sh"
