@@ -10,6 +10,41 @@ import font_inventory_scan_v3 as scanner
 
 
 _ACTIVE_OVERLAY_MODULE: Path | None = None
+_STOCK_VIEW_SOURCES: dict[str, dict[str, str]] = {}
+
+
+def _record_stock_view(logical: Path, view: str, actual: Path, detail: str = "") -> None:
+    _STOCK_VIEW_SOURCES[str(logical)] = {
+        "logical": str(logical),
+        "view": view,
+        "actual": str(actual),
+        "detail": detail,
+    }
+
+
+def _mirror_view_name(prefix: Path) -> str:
+    value = str(prefix).lower()
+    if ".magisk/mirror" in value or "/magisk/mirror" in value:
+        return "magisk-mirror"
+    if "ksu" in value or "kernelsu" in value:
+        return "kernelsu-mirror"
+    if "apatch" in value or "/ap/" in value:
+        return "apatch-mirror"
+    return "root-mirror"
+
+
+def _inject_stock_view_report(path: Path, data: dict, writer) -> None:
+    if isinstance(data, dict):
+        records = [dict(_STOCK_VIEW_SOURCES[key]) for key in sorted(_STOCK_VIEW_SOURCES)]
+        data["stockViewSources"] = records
+        counts: dict[str, int] = {}
+        for item in records:
+            view = item.get("view", "unknown")
+            counts[view] = counts.get(view, 0) + 1
+        summary = data.setdefault("scanSummary", {})
+        if isinstance(summary, dict):
+            summary["stockViewSourceCounts"] = dict(sorted(counts.items()))
+    writer(path, data)
 
 
 def _private_root_overlaid(logical: Path) -> bool:
@@ -71,37 +106,61 @@ def _private_overlay_risk(module: Path | None) -> bool:
 
 def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: bool) -> Path:
     if explicit is not None:
+        _record_stock_view(logical, "explicit", explicit)
         return explicit
+
+    verified = os.environ.get("LUOSHU_STOCK_VIEW_VERIFIED", "").strip() == "1"
     if not overlay_risk:
+        _record_stock_view(logical, "pre-mount-direct" if verified else "direct", logical)
         return logical
+
     # Overlay risk is per partition, not global. A custom system/fonts payload
     # does not make an untouched vendor/fonts tree unsafe to scan directly.
     if _ACTIVE_OVERLAY_MODULE is not None and not _private_root_overlaid(logical):
+        _record_stock_view(logical, "direct-unoverlaid", logical)
         return logical
 
+    attempted: list[str] = []
     parts = logical.parts
     if len(parts) >= 3 and parts[0] == "/":
         state_root = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))
         lower = state_root / "lower" / f"{parts[1]}-{parts[2]}"
+        attempted.append(str(lower))
         if lower.is_dir():
+            _record_stock_view(logical, "luoshu-lower", lower)
             return lower
 
     for prefix in inventory.MIRROR_PREFIXES:
         candidate = prefix / logical.relative_to("/")
+        attempted.append(str(candidate))
         if candidate.is_dir():
+            _record_stock_view(logical, _mirror_view_name(prefix), candidate, str(prefix))
             return candidate
 
     # A ROM is not required to expose every optional OEM partition. Missing logical
     # roots are harmless; an existing root without a verifiable stock view is not.
     if not logical.exists():
+        _record_stock_view(logical, "missing-optional", logical)
         return logical
-    raise inventory.InventoryError(f"字体覆盖仍在活动且没有可验证的原厂 lower/mirror：{logical}")
+
+    detail = "checked=" + ",".join(attempted)
+    _record_stock_view(logical, "blocked", logical, detail)
+    raise inventory.InventoryError(
+        f"字体覆盖仍在活动，分区 {logical} 未找到可信原厂视图"
+        f"（已检查 LuoShu lower 与 Root mirror）"
+    )
 
 
 def main() -> int:
+    _STOCK_VIEW_SOURCES.clear()
     inventory._overlay_risk = _private_overlay_risk
     inventory._pick_actual_root = _safe_pick_actual_root
-    return scanner.main()
+    original_writer = inventory._atomic_write
+    inventory._atomic_write = lambda path, data: _inject_stock_view_report(path, data, original_writer)
+    try:
+        return scanner.main()
+    finally:
+        inventory._atomic_write = original_writer
 
 
 if __name__ == "__main__":
