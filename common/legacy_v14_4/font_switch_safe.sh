@@ -36,6 +36,7 @@ TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
 SWITCH_LOCK="$MODDIR/.font_switch.lock"
 PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
+SLOT_SNAPSHOT="$CONFIG_DIR/font-slot-snapshot.conf"
 LOCK_HELD=false
 
 export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
@@ -81,23 +82,24 @@ safe_error() {
 
 target_manifest_current() {
     _tmc_list="$CONFIG_DIR/replaceable_font_targets.list"
-    [ -s "$_tmc_list" ] || return 1
-    _tmc_saved=$(sed -n 's/^# buildKey=//p' "$_tmc_list" 2>/dev/null | head -n1)
+    _tmc_inventory="$CONFIG_DIR/device_font_inventory.json"
+    [ -s "$SLOT_SNAPSHOT" ] && [ -s "$_tmc_list" ] && [ -s "$_tmc_inventory" ] || return 1
+    [ "$(read_state_value "$SLOT_SNAPSHOT" state)" = ready ] || return 1
+    [ "$(read_state_value "$SLOT_SNAPSHOT" source)" = flash-preflight ] || return 1
+
+    _tmc_saved=$(read_state_value "$SLOT_SNAPSHOT" buildKey)
+    _tmc_list_saved=$(sed -n 's/^# buildKey=//p' "$_tmc_list" 2>/dev/null | head -n1)
     _tmc_now=$(getprop ro.build.fingerprint 2>/dev/null | tr -d '\r\n')
     [ -n "$_tmc_now" ] || _tmc_now=$(getprop ro.build.display.id 2>/dev/null | tr -d '\r\n')
-    [ -n "$_tmc_saved" ] && [ -n "$_tmc_now" ] && [ "$_tmc_saved" = "$_tmc_now" ]
+    [ -n "$_tmc_saved" ] && [ "$_tmc_saved" = "$_tmc_list_saved" ] && \
+        [ -n "$_tmc_now" ] && [ "$_tmc_saved" = "$_tmc_now" ]
 }
 
 ensure_target_manifest() {
-    [ "${IS_HYPEROS:-false}" = true ] || return 0
     target_manifest_current && return 0
-    _etm_manager="$MODDIR/common/font_manager.sh"
-    [ -f "$_etm_manager" ] || return 1
-    printf '[%s] [SAFE-SWITCH] target manifest missing/stale; refreshing stock inventory\n' \
+    printf '[%s] [SAFE-SWITCH] flash-time slot snapshot missing/stale; runtime rescan forbidden\n' \
         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" >>"$LOG_FILE" 2>/dev/null || true
-    MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" \
-        sh "$_etm_manager" action stock_scan >>"$LOG_FILE" 2>&1 || return 1
-    target_manifest_current
+    return 1
 }
 
 lock_cleanup() {
@@ -369,10 +371,10 @@ switch_font() {
     _active_label="${LUOSHU_SWITCH_ACTIVE_LABEL:-$_font}"
     [ -n "$_active_label" ] || _active_label="$_font"
 
-    if [ "$_font" != default ] && [ "${IS_HYPEROS:-false}" = true ]; then
-        progress 2 '正在校验本机字体目标清单'
+    if [ "$_font" != default ]; then
+        progress 2 '正在读取刷入时设备字体槽位快照'
         ensure_target_manifest || {
-            safe_error '系统字体目标清单缺失或已过期，自动重扫失败；未开始切换'
+            safe_error '设备字体槽位快照缺失或系统版本已变化；请重新刷入当前洛书版本以重新扫描槽位'
             return 1
         }
     fi
