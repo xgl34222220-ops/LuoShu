@@ -39,6 +39,12 @@ PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
 SWITCH_CACHE_ROOT="$CONFIG_DIR/safe-switch-cache"
 SWITCH_VALIDATION_CACHE_ROOT="$CONFIG_DIR/safe-switch-validation"
 SWITCH_CACHE_SCHEMA="safe-switch-metrics-v1"
+SWITCH_CACHE_MAX_ENTRIES="${LUOSHU_SWITCH_CACHE_MAX_ENTRIES:-3}"
+SWITCH_CACHE_MAX_KB="${LUOSHU_SWITCH_CACHE_MAX_KB:-786432}"
+case "$SWITCH_CACHE_MAX_ENTRIES" in ''|*[!0-9]*) SWITCH_CACHE_MAX_ENTRIES=3 ;; esac
+case "$SWITCH_CACHE_MAX_KB" in ''|*[!0-9]*) SWITCH_CACHE_MAX_KB=786432 ;; esac
+[ "$SWITCH_CACHE_MAX_ENTRIES" -ge 1 ] 2>/dev/null || SWITCH_CACHE_MAX_ENTRIES=1
+[ "$SWITCH_CACHE_MAX_KB" -ge 131072 ] 2>/dev/null || SWITCH_CACHE_MAX_KB=131072
 PREWARM_LOCK="$MODDIR/.safe-switch-prewarm.lock"
 LOCK_HELD=false
 PREWARM_LOCK_HELD=false
@@ -224,14 +230,40 @@ safe_switch_cache_restore() {
     return 0
 }
 
+safe_switch_cache_dir_kb() {
+    _scdk_dir="$1"
+    if command -v du >/dev/null 2>&1; then
+        _scdk_value=$(du -sk "$_scdk_dir" 2>/dev/null | awk 'NR==1 {print $1}')
+    elif command -v busybox >/dev/null 2>&1; then
+        _scdk_value=$(busybox du -sk "$_scdk_dir" 2>/dev/null | awk 'NR==1 {print $1}')
+    else
+        _scdk_value=0
+    fi
+    case "$_scdk_value" in ''|*[!0-9]*) _scdk_value=0 ;; esac
+    printf '%s\n' "$_scdk_value"
+}
+
 safe_switch_cache_prune() {
     [ -d "$SWITCH_CACHE_ROOT" ] || return 0
-    _scp_seen=0
+    _scp_kept=0
+    _scp_used=0
     for _scp_dir in $(ls -1dt "$SWITCH_CACHE_ROOT"/* 2>/dev/null); do
         [ -d "$_scp_dir" ] || continue
-        _scp_seen=$((_scp_seen + 1))
-        [ "$_scp_seen" -le 3 ] || rm -rf "$_scp_dir" 2>/dev/null || true
+        _scp_kb=$(safe_switch_cache_dir_kb "$_scp_dir")
+        _scp_next=$((_scp_used + _scp_kb))
+        if [ "$_scp_kept" -eq 0 ] || {
+            [ "$_scp_kept" -lt "$SWITCH_CACHE_MAX_ENTRIES" ] &&
+            [ "$_scp_next" -le "$SWITCH_CACHE_MAX_KB" ]
+        }; then
+            _scp_kept=$((_scp_kept + 1))
+            _scp_used=$_scp_next
+            continue
+        fi
+        rm -rf "$_scp_dir" 2>/dev/null || true
     done
+    printf '[%s] [SAFE-SWITCH] cache prune kept=%s budget_kb=%s used_kb=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" \
+        "$_scp_kept" "$SWITCH_CACHE_MAX_KB" "$_scp_used" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 safe_switch_cache_store() {
