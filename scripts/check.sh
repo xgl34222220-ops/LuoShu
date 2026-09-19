@@ -100,7 +100,7 @@ cmp -s /tmp/luoshu-common-files.txt /tmp/luoshu-manifest-common.txt
 # 活跃运行时代码不得再出现历史开发版本头、WebUI 函数或未使用的报告脚本。
 ! grep -RInE --exclude-dir=python --exclude-dir=legacy_v14_4 --exclude=legacy_v14_4_switch.sh --exclude=font_manager.sh \
   '^[[:space:]]*#[[:space:]]*(洛书|LuoShu)[[:space:]]+v1[34]\.' \
-  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data-v4.sh" "$ROOT/service_v4.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
+  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/.luoshu-runtime/core/post-fs-data.sh" "$ROOT/.luoshu-runtime/core/service.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
 ! grep -qE 'get_all_fonts_json|get_font_info_json|scan_installed_families|refresh_font_cache' "$ROOT/common/util_functions.sh"
 test ! -e "$ROOT/common/font_report.sh"
 ! grep -RInE 'webui_font_list|WebUI' "$ROOT/common" --exclude=module_update_state.sh --exclude-dir=legacy_v14_4 >/dev/null 2>&1
@@ -214,7 +214,7 @@ done
   'common/(v14_mix|v142_weighted_mix|v143_auto_multiweight_mix|v14_switch)\.sh' "$ROOT" >/dev/null 2>&1
 ! grep -RInE --exclude-dir=python --exclude-dir=legacy_v14_4 --exclude=legacy_v14_4_switch.sh --exclude=font_manager.sh \
   '洛书 v1[34]\.|LuoShu v1[34]\.' \
-  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data-v4.sh" "$ROOT/service_v4.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
+  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/.luoshu-runtime/core/post-fs-data.sh" "$ROOT/.luoshu-runtime/core/service.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
 
 # 许可证与声明保持完整。
 test "$(sha256sum "$ROOT/LICENSE" | awk '{print $1}')" = '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986'
