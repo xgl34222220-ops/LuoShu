@@ -27,6 +27,19 @@ def main() -> int:
             }
         },
         "slots": {
+            "/my_company/fonts/FutureSystemUi-Regular.ttf": {
+                "validatedFormat": "TTF",
+                "format": "TTF",
+                "faceIndex": 0,
+                "weight": 400,
+                "style": "normal",
+                "source": "xml",
+                "families": ["system-ui"],
+                "metrics": {"coverage": {
+                    "hasHan": False, "hasLatin": True, "hanCount": 0,
+                    "latinCount": 52, "unicodeCount": 96, "cjkPunctuation": [],
+                }},
+            },
             "/system/fonts/Roboto-Regular.ttf": {
                 "validatedFormat": "TTF",
                 "faceIndex": 0,
@@ -64,17 +77,19 @@ def main() -> int:
     }
 
     manifest = target.compile_manifest(inventory)
-    assert manifest["replaceableCount"] == 3, manifest
-    assert manifest["physicalCount"] == 2, manifest
+    assert manifest["replaceableCount"] == 4, manifest
+    assert manifest["physicalCount"] == 3, manifest
     physical = {item["path"] for item in manifest["targets"] if item["mode"] == "physical"}
     assert physical == {
         "/system/fonts/Roboto-Regular.ttf",
         "/my_region/fonts/XiaomiSansRegion-Regular.ttf",
+        "/my_company/fonts/FutureSystemUi-Regular.ttf",
     }, physical
     modes = {item["path"]: item["mode"] for item in manifest["targets"]}
     assert modes["/product/fonts/NotoSansCJK-Regular.ttc"] == "inventory"
     assert "/system/fonts/MiSansVF_Overlay.ttf" not in modes
     assert manifest["partitionCounts"]["my_region"] == 1
+    assert manifest["partitionCounts"]["my_company"] == 1
 
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -97,6 +112,7 @@ def main() -> int:
         assert saved["schema"] == target.SCHEMA
         lines = list_output.read_text(encoding="utf-8").splitlines()
         assert any("|my_region|XiaomiSansRegion-Regular.ttf|physical" in line for line in lines)
+        assert any("|my_company|FutureSystemUi-Regular.ttf|physical" in line for line in lines)
         assert all("MiSansVF_Overlay.ttf" not in line for line in lines)
 
     print("Device-specific replaceable font target manifest tests passed.")
