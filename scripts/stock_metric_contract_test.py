@@ -354,6 +354,33 @@ class StockMetricContractTest(unittest.TestCase):
         args.force = True  # Matches an installer/manual rescan of a valid old inventory.
         self.assert_coloros_with_misans_does_not_expand(args)
 
+    def test_property_detected_coloros_retires_legacy_alias_even_when_inventory_was_generic(self) -> None:
+        args, _previous = self.legacy_scan_fixture()
+        data = json.loads(args.output.read_text(encoding="utf-8"))
+        data["romKind"] = "generic"
+        stale_path = "/system/fonts/SysFont-Static-Regular.ttf"
+        stale = copy.deepcopy(data["mainSlot"])
+        stale["path"] = stale_path
+        stale["slotName"] = "SysFont-Static-Regular.ttf"
+        stale["source"] = "heuristic"
+        data["slots"][stale_path] = stale
+        data["slotCount"] = len(data["slots"])
+        data["metricsRevision"] = scanner.METRICS_REVISION - 1
+        args.output.write_text(json.dumps(data), encoding="utf-8")
+        args.force = True
+
+        def fake_getprop(name: str) -> str:
+            return "V16.1.0" if name == "ro.build.version.oplusrom" else ""
+
+        with mock.patch.object(inventory, "_getprop", side_effect=fake_getprop), \
+             mock.patch.dict(scanner.os.environ, {"LUOSHU_STOCK_VIEW_VERIFIED": "1"}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(scanner.scan(args), 0)
+        refreshed = json.loads(args.output.read_text(encoding="utf-8"))
+        self.assertEqual(refreshed["romKind"], "coloros")
+        self.assertNotIn(stale_path, refreshed["slots"])
+        self.assertIn(stale_path, refreshed["retiredAbsentUpgradeSlots"])
+
     def test_coloros_upgrade_retires_overlay_only_alias_absent_from_verified_stock(self) -> None:
         args, _values = self.physical_scan_fixture(coloros=True)
         with contextlib.redirect_stdout(io.StringIO()):
