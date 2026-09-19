@@ -616,6 +616,21 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot]) -> tup
         if not changed:
             break
 
+    # Alias evidence is authoritative too. OEMs often give the real family an
+    # opaque name and then alias sans-serif/system-ui to it. Promote those target
+    # paths before filtering so future ROM family renames do not need a LuoShu
+    # filename/family whitelist update.
+    for family_name, paths in families.items():
+        if not _is_ui_family(family_name):
+            continue
+        for logical in paths:
+            candidate = all_entries.get(logical)
+            if not candidate:
+                continue
+            candidate["uiEligible"] = True
+            if family_name and family_name not in candidate["families"]:
+                candidate["families"].append(family_name)
+
     slots: dict[str, dict[str, Any]] = {}
     for family_name, paths in families.items():
         if not _is_ui_family(family_name):
