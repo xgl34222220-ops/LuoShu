@@ -191,6 +191,101 @@ def _cleanup_install_snapshots() -> None:
     _INSTALL_SNAPSHOTS.clear()
 
 
+def _quick_file_signature(path: Path) -> tuple[int, bytes, bytes] | None:
+    try:
+        size = path.stat().st_size
+        if size <= 0:
+            return None
+        with path.open("rb") as stream:
+            head = stream.read(65536)
+            tail = b""
+            if size > 65536:
+                stream.seek(max(0, size - 65536))
+                tail = stream.read(65536)
+        return (int(size), head, tail)
+    except OSError:
+        return None
+
+
+def _mount_namespace_id(pid: str) -> str:
+    try:
+        return os.readlink(f"/proc/{pid}/ns/mnt")
+    except OSError:
+        return ""
+
+
+def _installer_namespace_is_stock(logical: Path) -> bool:
+    """Prove that this flash process sees stock while PID 1 sees LuoShu payload.
+
+    KernelSU/SukiSU can run module installers in a private mount namespace. In
+    that case active_font.conf still says mix, but the install process's
+    /system/fonts is already the lower stock tree. Trust it only when:
+      1) installer and PID 1 are in different mount namespaces;
+      2) at least one known LuoShu payload file matches PID 1's visible file; and
+      3) the installer-visible file at the same path differs from that payload.
+    This turns namespace isolation itself into a verified stock source instead of
+    unnecessarily deferring every ColorOS scan until reboot.
+    """
+    module = _ACTIVE_OVERLAY_MODULE
+    if module is None or not logical.is_dir():
+        return False
+    self_ns = _mount_namespace_id("self")
+    init_ns = _mount_namespace_id("1")
+    if not self_ns or not init_ns or self_ns == init_ns:
+        return False
+
+    try:
+        relative_root = logical.relative_to("/")
+    except ValueError:
+        return False
+
+    payload_roots = (
+        module / ".luoshu-payload" / relative_root,
+        module / ".luoshu-payload-next" / relative_root,
+        module / relative_root,
+    )
+    pid1_root = Path(os.environ.get("LUOSHU_PID1_ROOT", "/proc/1/root")) / relative_root
+
+    checked = 0
+    for payload_root in payload_roots:
+        if not payload_root.is_dir():
+            continue
+        try:
+            payload_files = sorted(
+                (path for path in payload_root.rglob("*")
+                 if path.is_file() and path.suffix.lower() in inventory.FONT_EXTENSIONS),
+                key=lambda path: str(path).lower(),
+            )
+        except OSError:
+            continue
+        for payload_file in payload_files[:24]:
+            try:
+                rel = payload_file.relative_to(payload_root)
+            except ValueError:
+                continue
+            installer_file = logical / rel
+            init_file = pid1_root / rel
+            if not installer_file.is_file() or not init_file.is_file():
+                continue
+            payload_sig = _quick_file_signature(payload_file)
+            init_sig = _quick_file_signature(init_file)
+            installer_sig = _quick_file_signature(installer_file)
+            if payload_sig is None or init_sig is None or installer_sig is None:
+                continue
+            checked += 1
+            if init_sig == payload_sig and installer_sig != payload_sig:
+                return True
+            # If the installer itself already sees the payload for a sampled path,
+            # it is not a clean stock namespace; fail closed immediately.
+            if installer_sig == payload_sig:
+                return False
+            if checked >= 8:
+                break
+        if checked >= 8:
+            break
+    return False
+
+
 def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: bool) -> Path:
     if explicit is not None:
         return explicit
@@ -212,6 +307,13 @@ def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: b
         candidate = prefix / logical.relative_to("/")
         if candidate.is_dir():
             return candidate
+
+    # KernelSU/SukiSU installers may be isolated from the active system mount
+    # namespace. If PID 1 still sees LuoShu's payload while this process sees
+    # different bytes at the same font path, the installer-visible tree is a
+    # verified stock view and can be scanned immediately.
+    if _installer_namespace_is_stock(logical):
+        return logical
 
     # Old ColorOS/OPlus LuoShu builds often used per-file bind mounts and did not
     # persist a lower directory. Recover the parent stock filesystem in-place by
