@@ -15,7 +15,7 @@ mkdir -p "$MODULE/common" "$MODULE/.luoshu-runtime" \
     "$MODULE/config/flyme-data-original" "$MODULE/system/etc" \
     "$DATA" "$PROVIDER" "$BIN"
 cp "$ROOT/uninstall.sh" "$MODULE/uninstall.sh"
-cp "$ROOT/.luoshu-runtime/uninstall-v227.sh" "$MODULE/.luoshu-runtime/uninstall-v227.sh"
+cp "$ROOT/.luoshu-runtime/compat/v227/uninstall.sh" "$MODULE/.luoshu-runtime/compat/v227/uninstall.sh"
 cp "$ROOT/common/private_payload.sh" "$MODULE/common/private_payload.sh"
 cp "$ROOT/common/origin_flyme_global.sh" "$MODULE/common/origin_flyme_global.sh"
 cp "$ROOT/common/font_provider_cache.sh" "$MODULE/common/font_provider_cache.sh"
@@ -69,7 +69,7 @@ test "$(sha256sum "$DATA/flymeFont.ttf" | awk '{print $1}')" = "$ORIGINAL_HASH"
 test ! -e "$MODULE/config/flyme-data-original"
 test ! -e "$MODULE/config/flyme-data-pending.conf"
 
-CORE="$ROOT/.luoshu-runtime/uninstall-v227.sh"
+CORE="$ROOT/.luoshu-runtime/compat/v227/uninstall.sh"
 sh -n "$ROOT/uninstall.sh"
 sh -n "$CORE"
 grep -q 'private_payload.sh' "$ROOT/uninstall.sh"
