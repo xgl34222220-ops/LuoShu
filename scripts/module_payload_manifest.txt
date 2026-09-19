@@ -1,6 +1,6 @@
 # Explicit release payload. New runtime files must be reviewed and listed here.
 # Standard partition payloads are migrated into .luoshu-payload during installation.
-# Thin wrappers preserve the verified v2.2.7 cores under .luoshu-runtime.
+# Root-manager hooks stay at module root; internal cores and compatibility layers live under .luoshu-runtime.
 common/app_bridge.sh
 common/app_installer.sh
 common/background_task.sh
@@ -124,18 +124,13 @@ LICENSE
 NOTICE.md
 THIRD_PARTY_NOTICES.md
 README.md
-README.txt
 CHANGELOG.md
 customize.sh
 module.prop
 post-fs-data.sh
-.luoshu-runtime/core/post-fs-data.sh
 post-mount.sh
-.luoshu-runtime/core/post-mount.sh
 service.sh
-.luoshu-runtime/core/service.sh
 uninstall.sh
 action.sh
 boot-completed.sh
 magic
-兼容与目录说明.txt
