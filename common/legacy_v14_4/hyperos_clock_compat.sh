@@ -195,6 +195,15 @@ _lhcc_manifest_list() {
     printf '%s\n' "$_lhcc_module/config/replaceable_font_targets.list"
 }
 
+_lhcc_manifest_current() {
+    _lhcc_list="$(_lhcc_manifest_list)"
+    [ -s "$_lhcc_list" ] || return 1
+    _lhcc_saved=$(sed -n 's/^# buildKey=//p' "$_lhcc_list" 2>/dev/null | head -n1)
+    _lhcc_current=$(getprop ro.build.fingerprint 2>/dev/null | tr -d '\r\n')
+    [ -n "$_lhcc_current" ] || _lhcc_current=$(getprop ro.build.display.id 2>/dev/null | tr -d '\r\n')
+    [ -n "$_lhcc_saved" ] && [ -n "$_lhcc_current" ] && [ "$_lhcc_saved" = "$_lhcc_current" ]
+}
+
 _lhcc_manifest_names_for_part() {
     _lhcc_part="$1"
     _lhcc_list="$(_lhcc_manifest_list)"
@@ -245,7 +254,7 @@ luoshu_hyperos_clock_payload_ensure() {
         _lhcc_overlay="$_lhcc_payload/$_lhcc_part/fonts"
         _lhcc_part_count=0
         _lhcc_manifest="$(_lhcc_manifest_list)"
-        if [ -s "$_lhcc_manifest" ]; then
+        if _lhcc_manifest_current; then
             _lhcc_names="$(_lhcc_manifest_names_for_part "$_lhcc_part")"
         else
             _lhcc_names="$(_lhcc_names_for_root "$_lhcc_real")"
