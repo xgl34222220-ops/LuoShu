@@ -115,6 +115,9 @@ FONT_INVENTORY_SCRIPT="$MODPATH/common/stock_inventory_scan.py"
 FONT_INVENTORY_PYTHON="$MODPATH/common/python/bin/luoshu-python"
 FONT_INVENTORY_OUTPUT="$MODPATH/config/device_font_inventory.json"
 FONT_INVENTORY_LOG="$MODPATH/logs/font-inventory.log"
+FONT_TARGET_COMPILER="$MODPATH/common/font_target_manifest.py"
+FONT_TARGET_OUTPUT="$MODPATH/config/replaceable_font_targets.json"
+FONT_TARGET_LIST="$MODPATH/config/replaceable_font_targets.list"
 if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_inventory.json" ]; then
     cp -f "$OLD_MOD/config/device_font_inventory.json" "$FONT_INVENTORY_OUTPUT" 2>/dev/null || true
 fi
@@ -147,6 +150,33 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         [ -n "$_inventory_rom" ] || _inventory_rom="generic"
         ui_print "✓ 原厂字体文件：$_inventory_files 个（ROM：$_inventory_rom）"
         ui_print "✓ 可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / OEM 探测 $_inventory_heuristic）"
+
+        # Compile the rich stock inventory into the runtime's single source of truth.
+        # Later switching/mixing reads these exact device paths instead of guessing
+        # MiSans/Roboto/etc. names again.
+        if [ -f "$FONT_TARGET_COMPILER" ]; then
+            _target_result=$(
+                PYTHONHOME="$_inventory_pyroot" \
+                PYTHONPATH="$_inventory_pyroot/lib/python3.14:$_inventory_pyroot/lib/python3.14/site-packages:$MODPATH/common" \
+                LD_LIBRARY_PATH="$_inventory_pyroot/lib:$_inventory_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+                    "$FONT_INVENTORY_PYTHON" "$FONT_TARGET_COMPILER" \
+                        --inventory "$FONT_INVENTORY_OUTPUT" \
+                        --output "$FONT_TARGET_OUTPUT" \
+                        --list-output "$FONT_TARGET_LIST" 2>> "$FONT_INVENTORY_LOG"
+            )
+            _target_rc=$?
+            printf '%s\n' "$_target_result" >> "$FONT_INVENTORY_LOG" 2>/dev/null || true
+            if [ "$_target_rc" -eq 0 ]; then
+                _target_count=$(printf '%s' "$_target_result" | sed -n 's/.*"replaceableCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+                _target_physical=$(printf '%s' "$_target_result" | sed -n 's/.*"physicalCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+                [ -n "$_target_count" ] || _target_count="$_inventory_slots"
+                [ -n "$_target_physical" ] || _target_physical=0
+                ui_print "✓ 已生成设备专属替换清单：$_target_count 个槽位（物理直覆 $_target_physical）"
+            else
+                rm -f "$FONT_TARGET_OUTPUT" "$FONT_TARGET_LIST" 2>/dev/null || true
+                ui_print "• 设备专属替换清单生成失败，将使用原厂库存兼容路径"
+            fi
+        fi
     else
         _old_active=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
         if [ -n "$_old_active" ] && [ "$_old_active" != default ]; then
