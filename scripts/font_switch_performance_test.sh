@@ -30,6 +30,11 @@ grep -q 'luoshu_switch_signal_exit 143' "$ROOT/common/font_manager_v4.sh"
 # but never reconnect the device-template/slot/XML payload pipeline that caused the 94% stall.
 grep -q 'legacy_v14_4_switch.sh' "$ROOT/common/font_manager.sh"
 grep -q 'legacy_lock_acquire' "$ROOT/common/legacy_v14_4_switch.sh"
+grep -q 'safe_switch_cache_restore' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q 'safe_switch_cache_store' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q 'safe_validation_restore' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q "progress 80 '已复用本机字体对齐缓存'" "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q 'stat -c %s' "$ROOT/common/legacy_v14_4/font_check.sh"
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|device_font_payload_build' \
     "$ROOT/common/legacy_v14_4_switch.sh"
 
