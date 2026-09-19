@@ -25,6 +25,8 @@ def main() -> int:
     assert "原厂视图来源：直接" in installer
     assert "LUOSHU_STOCK_SCAN_STRICT=1" in installer
     assert "source=flash-preflight" in installer
+    assert "inventoryDigest=%s" in installer
+    assert "targetsDigest=%s" in installer
     assert "刷入前字体槽位扫描失败" in installer
     assert "本次安装已中止" in installer
     assert 'cp -f "$OLD_MOD/config/device_font_inventory.json"' not in installer
