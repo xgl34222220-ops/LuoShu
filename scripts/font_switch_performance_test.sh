@@ -37,7 +37,10 @@ grep -q "progress 80 '已复用本机字体对齐缓存'" "$ROOT/common/legacy_v
 grep -q 'prewarm_font()' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'prewarm) prewarm_font' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'schedule_font_prewarm' "$ROOT/common/native_import.sh"
-grep -q 'ionice -c 3 nice -n 19' "$ROOT/common/native_import.sh"
+grep -q 'prewarm-start' "$ROOT/common/app_bridge.sh"
+grep -q 'ionice -c 3 nice -n 19' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q 'fun prewarmFont' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
+grep -q 'viewModel.prewarmFont(it.id)' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
 grep -q 'stat -c %s' "$ROOT/common/legacy_v14_4/font_check.sh"
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|device_font_payload_build' \
     "$ROOT/common/legacy_v14_4_switch.sh"
