@@ -189,7 +189,15 @@ apply_font_by_rom() {
         old.write_bytes(b'old active font' * 300)
         before = old.read_bytes()
         command = ['sh', str(legacy / 'font_switch_safe.sh'), 'action', 'switch', 'Selected']
+        prewarm_command = ['sh', str(legacy / 'font_switch_safe.sh'), 'action', 'prewarm', 'Selected']
         env = {**self.env, 'LUOSHU_PUBLIC_DIR': str(public)}
+        # Prewarming must never commit a pending payload or alter the live tree.
+        (self.module / 'config/device_font_inventory.json').write_text('{}')
+        prewarm = subprocess.run(prewarm_command, env=env, capture_output=True, text=True, timeout=5)
+        self.assertEqual(prewarm.returncode, 0, prewarm.stdout + prewarm.stderr)
+        self.assertEqual(old.read_bytes(), before)
+        self.assertFalse((self.module / '.luoshu-payload-next').exists())
+        self.assertTrue(any((self.module / 'config/safe-switch-cache').glob('*/cache.conf')))
         success = subprocess.run(command, env=env, capture_output=True, text=True, timeout=5)
         self.assertEqual(success.returncode, 0, success.stdout + success.stderr)
         self.assertIn('"status":"ok"', success.stdout)
