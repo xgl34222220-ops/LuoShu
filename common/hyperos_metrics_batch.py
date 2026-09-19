@@ -23,7 +23,8 @@ from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_map
 from hyperos_physical_policy import preserved_dynamic_alias, safe_physical_font_name
 
 PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
-         "my_product", "hw_product", "cust")
+         "my_product", "my_engineering", "my_company", "my_preload", "my_region",
+         "my_stock", "hw_product", "cust")
 
 
 def weight_for_name(name: str) -> int:
