@@ -120,9 +120,10 @@ stock_scan_namespace_exec() {
             LUOSHU_PUBLIC_DIR="$2"
             LUOSHU_STOCK_SCAN_NAMESPACE=pid1
             LUOSHU_STOCK_SCAN_OVERLAY_MODULE="$4"
-            export MODDIR LUOSHU_PUBLIC_DIR LUOSHU_STOCK_SCAN_NAMESPACE LUOSHU_STOCK_SCAN_OVERLAY_MODULE
+            LUOSHU_STOCK_SCAN_STRICT="$5"
+            export MODDIR LUOSHU_PUBLIC_DIR LUOSHU_STOCK_SCAN_NAMESPACE LUOSHU_STOCK_SCAN_OVERLAY_MODULE LUOSHU_STOCK_SCAN_STRICT
             exec "$3" "$1/common/font_manager.sh" action stock_scan_local
-        ' sh "$MODDIR" "$LUOSHU_PUBLIC_DIR" "$_sns_shell" "$STOCK_OVERLAY_MODULE"
+        ' sh "$MODDIR" "$LUOSHU_PUBLIC_DIR" "$_sns_shell" "$STOCK_OVERLAY_MODULE" "${LUOSHU_STOCK_SCAN_STRICT:-0}"
         return $?
     fi
 
@@ -132,9 +133,10 @@ stock_scan_namespace_exec() {
             LUOSHU_PUBLIC_DIR="$2"
             LUOSHU_STOCK_SCAN_NAMESPACE=pid1
             LUOSHU_STOCK_SCAN_OVERLAY_MODULE="$4"
-            export MODDIR LUOSHU_PUBLIC_DIR LUOSHU_STOCK_SCAN_NAMESPACE LUOSHU_STOCK_SCAN_OVERLAY_MODULE
+            LUOSHU_STOCK_SCAN_STRICT="$5"
+            export MODDIR LUOSHU_PUBLIC_DIR LUOSHU_STOCK_SCAN_NAMESPACE LUOSHU_STOCK_SCAN_OVERLAY_MODULE LUOSHU_STOCK_SCAN_STRICT
             exec "$3" "$1/common/font_manager.sh" action stock_scan_local
-        ' sh "$MODDIR" "$LUOSHU_PUBLIC_DIR" "$_sns_shell" "$STOCK_OVERLAY_MODULE"
+        ' sh "$MODDIR" "$LUOSHU_PUBLIC_DIR" "$_sns_shell" "$STOCK_OVERLAY_MODULE" "${LUOSHU_STOCK_SCAN_STRICT:-0}"
         return $?
     fi
     return 125
