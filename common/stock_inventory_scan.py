@@ -15,6 +15,35 @@ _ACTIVE_OVERLAY_MODULE: Path | None = None
 _INSTALL_SNAPSHOTS: list[Path] = []
 
 
+def _dynamic_manifest_partitions(module: Path | None) -> list[str]:
+    if module is None:
+        return []
+    manifest = module / "config/device_font_partitions.conf"
+    try:
+        lines = manifest.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    found: list[str] = []
+    for value in lines:
+        name = value.strip()
+        if not name or not name.replace("_", "").isalnum() or name[0].isdigit():
+            continue
+        if name not in found:
+            found.append(name)
+    return found
+
+
+def _logical_font_roots(module: Path | None) -> list[tuple[str, Path]]:
+    roots = list(inventory.LOGICAL_FONT_ROOTS)
+    known = {partition for partition, _logical in roots}
+    for partition in _dynamic_manifest_partitions(module):
+        if partition in known:
+            continue
+        roots.append((partition, Path("/") / partition / "fonts"))
+        known.add(partition)
+    return roots
+
+
 def _private_root_overlaid(logical: Path) -> bool:
     module = _ACTIVE_OVERLAY_MODULE
     if module is None:
@@ -55,7 +84,7 @@ def _private_overlay_risk(module: Path | None) -> bool:
         module,
     )
     for payload in payload_roots:
-        for _partition, logical in inventory.LOGICAL_FONT_ROOTS:
+        for _partition, logical in _logical_font_roots(module):
             font_dir = payload / logical.relative_to("/")
             if not font_dir.is_dir():
                 continue
