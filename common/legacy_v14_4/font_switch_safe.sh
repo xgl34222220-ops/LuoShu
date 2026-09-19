@@ -36,6 +36,9 @@ TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
 SWITCH_LOCK="$MODDIR/.font_switch.lock"
 PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
+SWITCH_CACHE_ROOT="$CONFIG_DIR/safe-switch-cache"
+SWITCH_VALIDATION_CACHE_ROOT="$CONFIG_DIR/safe-switch-validation"
+SWITCH_CACHE_SCHEMA="safe-switch-metrics-v1"
 LOCK_HELD=false
 
 export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
@@ -58,6 +61,192 @@ json_escape() {
 
 read_state_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
+safe_hash_stream() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+    elif command -v busybox >/dev/null 2>&1; then
+        busybox sha256sum | awk '{print $1}'
+    else
+        cksum | awk '{print $1 "-" $2}'
+    fi
+}
+
+safe_source_identity() {
+    _ssi_file="$1"
+    if command -v stat >/dev/null 2>&1; then
+        stat -c '%d:%i:%s:%Y:%Z' "$_ssi_file" 2>/dev/null && return 0
+    fi
+    if command -v toybox >/dev/null 2>&1; then
+        toybox stat -c '%d:%i:%s:%Y:%Z' "$_ssi_file" 2>/dev/null && return 0
+    fi
+    return 1
+}
+
+safe_inventory_identity() {
+    _sii_file="$CONFIG_DIR/device_font_inventory.json"
+    [ -s "$_sii_file" ] || { printf 'no-inventory\n'; return 0; }
+    if command -v cksum >/dev/null 2>&1; then
+        cksum "$_sii_file" 2>/dev/null | awk '{print $1 ":" $2}'
+    elif command -v busybox >/dev/null 2>&1; then
+        busybox cksum "$_sii_file" 2>/dev/null | awk '{print $1 ":" $2}'
+    else
+        safe_source_identity "$_sii_file"
+    fi
+}
+
+safe_rom_identity() {
+    if [ "${IS_HYPEROS:-false}" = true ]; then
+        printf 'hyperos\n'
+    elif [ "${IS_COLOROS:-false}" = true ]; then
+        printf 'coloros\n'
+    else
+        printf 'generic\n'
+    fi
+}
+
+safe_partition_list() {
+    _spl_base='system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product'
+    printf '%s\n' "$_spl_base"
+    _spl_manifest="$CONFIG_DIR/device_font_partitions.conf"
+    [ -f "$_spl_manifest" ] || return 0
+    _spl_seen=" $_spl_base "
+    while IFS= read -r _spl_part; do
+        case "$_spl_part" in ''|*[!A-Za-z0-9_]*|[0-9]*|_*) continue ;; esac
+        case "$_spl_seen" in *" $_spl_part "*) continue ;; esac
+        printf '%s\n' "$_spl_part"
+        _spl_seen="$_spl_seen$_spl_part "
+    done < "$_spl_manifest"
+}
+
+safe_validation_key() {
+    _svk_file="$1"
+    _svk_identity=$(safe_source_identity "$_svk_file") || return 1
+    {
+        printf 'safe-validation-v1\n'
+        printf '%s\n' "$_svk_file"
+        printf '%s\n' "$_svk_identity"
+    } | safe_hash_stream
+}
+
+safe_validation_restore() {
+    _svr_file="$1"
+    _svr_key=$(safe_validation_key "$_svr_file") || return 1
+    _svr_conf="$SWITCH_VALIDATION_CACHE_ROOT/$_svr_key.conf"
+    [ -s "$_svr_conf" ] || return 1
+    _svr_identity=$(safe_source_identity "$_svr_file") || return 1
+    [ "$(read_state_value "$_svr_conf" valid)" = true ] || return 1
+    [ "$(read_state_value "$_svr_conf" identity)" = "$_svr_identity" ] || return 1
+    return 0
+}
+
+safe_validation_store() {
+    _svs_file="$1"
+    _svs_key=$(safe_validation_key "$_svs_file") || return 1
+    _svs_identity=$(safe_source_identity "$_svs_file") || return 1
+    mkdir -p "$SWITCH_VALIDATION_CACHE_ROOT" 2>/dev/null || return 1
+    _svs_conf="$SWITCH_VALIDATION_CACHE_ROOT/$_svs_key.conf"
+    {
+        printf 'valid=true\n'
+        printf 'identity=%s\n' "$_svs_identity"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$_svs_conf.tmp.$" 2>/dev/null || return 1
+    mv -f "$_svs_conf.tmp.$" "$_svs_conf" 2>/dev/null || return 1
+    chmod 0600 "$_svs_conf" 2>/dev/null || true
+}
+
+safe_switch_cache_key() {
+    _sck_file="$1"; _sck_font="$2"
+    _sck_identity=$(safe_source_identity "$_sck_file") || return 1
+    _sck_inventory=$(safe_inventory_identity)
+    _sck_rom=$(safe_rom_identity)
+    {
+        printf '%s\n' "$SWITCH_CACHE_SCHEMA"
+        printf '%s\n' "$_sck_font"
+        printf '%s\n' "$_sck_file"
+        printf '%s\n' "$_sck_identity"
+        printf '%s\n' "$_sck_inventory"
+        printf '%s\n' "$_sck_rom"
+    } | safe_hash_stream
+}
+
+safe_switch_cache_restore() {
+    _scr_file="$1"; _scr_font="$2"
+    _scr_key=$(safe_switch_cache_key "$_scr_file" "$_scr_font") || return 1
+    _scr_root="$SWITCH_CACHE_ROOT/$_scr_key"
+    _scr_conf="$_scr_root/cache.conf"
+    [ -s "$_scr_conf" ] && [ -d "$_scr_root/tree" ] || return 1
+    [ "$(read_state_value "$_scr_conf" schema)" = "$SWITCH_CACHE_SCHEMA" ] || return 1
+    [ "$(read_state_value "$_scr_conf" font)" = "$_scr_font" ] || return 1
+    [ "$(read_state_value "$_scr_conf" sourceIdentity)" = "$(safe_source_identity "$_scr_file")" ] || return 1
+    [ "$(read_state_value "$_scr_conf" inventoryIdentity)" = "$(safe_inventory_identity)" ] || return 1
+    [ "$(read_state_value "$_scr_conf" rom)" = "$(safe_rom_identity)" ] || return 1
+
+    _scr_restored=0
+    for _scr_part in $(safe_partition_list); do
+        _scr_src="$_scr_root/tree/$_scr_part/fonts"
+        [ -d "$_scr_src" ] || continue
+        mkdir -p "$STAGE_PAYLOAD/$_scr_part" 2>/dev/null || return 1
+        rm -rf "$STAGE_PAYLOAD/$_scr_part/fonts" 2>/dev/null || true
+        if cp -al "$_scr_src" "$STAGE_PAYLOAD/$_scr_part/fonts" 2>/dev/null ||            cp -af "$_scr_src" "$STAGE_PAYLOAD/$_scr_part/fonts" 2>/dev/null; then
+            _scr_restored=$((_scr_restored + 1))
+        else
+            return 1
+        fi
+    done
+    [ "$_scr_restored" -gt 0 ] || return 1
+    [ ! -f "$_scr_root/tree/.luoshu-metrics-report.json" ] ||         cp -f "$_scr_root/tree/.luoshu-metrics-report.json" "$STAGE_PAYLOAD/.luoshu-metrics-report.json" 2>/dev/null || true
+    printf '[%s] [SAFE-SWITCH] cache hit font=%s key=%s partitions=%s\n'         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_scr_font" "$_scr_key" "$_scr_restored"         >> "$LOG_FILE" 2>/dev/null || true
+    return 0
+}
+
+safe_switch_cache_prune() {
+    [ -d "$SWITCH_CACHE_ROOT" ] || return 0
+    _scp_seen=0
+    for _scp_dir in $(ls -1dt "$SWITCH_CACHE_ROOT"/* 2>/dev/null); do
+        [ -d "$_scp_dir" ] || continue
+        _scp_seen=$((_scp_seen + 1))
+        [ "$_scp_seen" -le 3 ] || rm -rf "$_scp_dir" 2>/dev/null || true
+    done
+}
+
+safe_switch_cache_store() {
+    _scs_file="$1"; _scs_font="$2"
+    _scs_key=$(safe_switch_cache_key "$_scs_file" "$_scs_font") || return 1
+    _scs_root="$SWITCH_CACHE_ROOT/$_scs_key"
+    _scs_stage="$SWITCH_CACHE_ROOT/.stage.$_scs_key.$"
+    rm -rf "$_scs_stage" 2>/dev/null || true
+    mkdir -p "$_scs_stage/tree" 2>/dev/null || return 1
+    _scs_saved=0
+    for _scs_part in $(safe_partition_list); do
+        _scs_src="$STAGE_PAYLOAD/$_scs_part/fonts"
+        [ -d "$_scs_src" ] || continue
+        find "$_scs_src" -type f -print -quit 2>/dev/null | grep -q . || continue
+        mkdir -p "$_scs_stage/tree/$_scs_part" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
+        cp -al "$_scs_src" "$_scs_stage/tree/$_scs_part/fonts" 2>/dev/null ||             cp -af "$_scs_src" "$_scs_stage/tree/$_scs_part/fonts" 2>/dev/null || {
+                rm -rf "$_scs_stage" 2>/dev/null || true
+                return 1
+            }
+        _scs_saved=$((_scs_saved + 1))
+    done
+    [ "$_scs_saved" -gt 0 ] || { rm -rf "$_scs_stage" 2>/dev/null || true; return 1; }
+    [ ! -f "$STAGE_PAYLOAD/.luoshu-metrics-report.json" ] ||         cp -f "$STAGE_PAYLOAD/.luoshu-metrics-report.json" "$_scs_stage/tree/.luoshu-metrics-report.json" 2>/dev/null || true
+    _scs_identity=$(safe_source_identity "$_scs_file") || { rm -rf "$_scs_stage"; return 1; }
+    {
+        printf 'schema=%s\n' "$SWITCH_CACHE_SCHEMA"
+        printf 'font=%s\n' "$_scs_font"
+        printf 'sourceIdentity=%s\n' "$_scs_identity"
+        printf 'inventoryIdentity=%s\n' "$(safe_inventory_identity)"
+        printf 'rom=%s\n' "$(safe_rom_identity)"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$_scs_stage/cache.conf" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
+    mkdir -p "$SWITCH_CACHE_ROOT" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
+    rm -rf "$_scs_root" 2>/dev/null || true
+    mv -f "$_scs_stage" "$_scs_root" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
+    safe_switch_cache_prune
+    printf '[%s] [SAFE-SWITCH] cache store font=%s key=%s partitions=%s\n'         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_scs_font" "$_scs_key" "$_scs_saved"         >> "$LOG_FILE" 2>/dev/null || true
+    return 0
 }
 
 progress() {
@@ -134,21 +323,30 @@ find_text_font_file() {
 
 validate_global() {
     _file="$1"
+    if safe_validation_restore "$_file"; then
+        printf '[%s] [SAFE-SWITCH] validation cache hit: %s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_file" >> "$LOG_FILE" 2>/dev/null || true
+        return 0
+    fi
     if type font_validate >/dev/null 2>&1; then
         font_validate "$_file" text || return 1
     fi
     _python="$MODDIR/common/python/bin/luoshu-python"
     _checker="$LEGACY_DIR/font_coverage.py"
-    [ -x "$_python" ] && [ -f "$_checker" ] || return 0
-    _pyroot="$MODDIR/common/python"
-    _coverage=$(PYTHONHOME="$_pyroot" \
-        PYTHONPATH="$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \
-        LD_LIBRARY_PATH="$_pyroot/lib:$_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        "$_python" "$_checker" --brief "$_file" 2>/dev/null)
-    _rc=$?
-    [ "$_rc" -eq 0 ] && return 0
-    FONT_CHECK_ERROR="${_coverage:-字体缺少全局替换所需字形}"
-    return 1
+    if [ -x "$_python" ] && [ -f "$_checker" ]; then
+        _pyroot="$MODDIR/common/python"
+        _coverage=$(PYTHONHOME="$_pyroot" \
+            PYTHONPATH="$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \
+            LD_LIBRARY_PATH="$_pyroot/lib:$_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$_python" "$_checker" --brief "$_file" 2>/dev/null)
+        _rc=$?
+        if [ "$_rc" -ne 0 ]; then
+            FONT_CHECK_ERROR="${_coverage:-字体缺少全局替换所需字形}"
+            return 1
+        fi
+    fi
+    safe_validation_store "$_file" >/dev/null 2>&1 || true
+    return 0
 }
 
 payload_clone_source() {
@@ -371,26 +569,32 @@ switch_font() {
         PAYLOAD_ROOT="$STAGE_PAYLOAD"
         SYSTEM_FONTS_DIR="$STAGE_PAYLOAD/system/fonts"
         export PAYLOAD_ROOT SYSTEM_FONTS_DIR
-        progress 48 '正在生成 ROM 核心字体映射'
-        type apply_font_by_rom >/dev/null 2>&1 || { safe_error '缺少 ROM 字体映射器'; return 1; }
-        if ! apply_font_by_rom "$_source" "$SYSTEM_FONTS_DIR" quick "$_font" >> "$LOG_FILE" 2>&1; then
-            safe_error 'ROM 字体映射失败，当前启动字体未被改动'
-            return 1
-        fi
-        progress 66 '正在补齐系统分区同名字体槽位'
-        mirror_existing_targets
-        if [ "${IS_HYPEROS:-false}" = true ]; then
-            progress 76 '正在补齐 HyperOS 状态栏、锁屏和系统 UI 字体槽位'
-            stage_hyperos_complete || {
-                safe_error 'HyperOS 字体槽位或度量处理失败，请查看字体切换日志'
+        if safe_switch_cache_restore "$_source" "$_font"; then
+            progress 80 '已复用本机字体对齐缓存'
+        else
+            progress 48 '正在生成 ROM 核心字体映射'
+            type apply_font_by_rom >/dev/null 2>&1 || { safe_error '缺少 ROM 字体映射器'; return 1; }
+            if ! apply_font_by_rom "$_source" "$SYSTEM_FONTS_DIR" quick "$_font" >> "$LOG_FILE" 2>&1; then
+                safe_error 'ROM 字体映射失败，当前启动字体未被改动'
                 return 1
-            }
-        elif [ "${IS_COLOROS:-false}" = true ]; then
-            progress 76 '正在按原厂槽位对齐 ColorOS 字体度量'
-            stage_coloros_complete || {
-                safe_error 'ColorOS 字体度量处理失败，请查看字体切换日志'
-                return 1
-            }
+            fi
+            progress 66 '正在补齐系统分区同名字体槽位'
+            mirror_existing_targets
+            if [ "${IS_HYPEROS:-false}" = true ]; then
+                progress 76 '正在补齐 HyperOS 状态栏、锁屏和系统 UI 字体槽位'
+                stage_hyperos_complete || {
+                    safe_error 'HyperOS 字体槽位或度量处理失败，请查看字体切换日志'
+                    return 1
+                }
+            elif [ "${IS_COLOROS:-false}" = true ]; then
+                progress 76 '正在按原厂槽位对齐 ColorOS 字体度量'
+                stage_coloros_complete || {
+                    safe_error 'ColorOS 字体度量处理失败，请查看字体切换日志'
+                    return 1
+                }
+            fi
+            progress 82 '正在保存本机字体对齐缓存'
+            safe_switch_cache_store "$_source" "$_font" >/dev/null 2>&1 || true
         fi
         progress 86 '正在校验下一启动字体负载'
         stage_verify "$_font" || { safe_error '新字体负载校验失败，当前启动字体未被改动'; return 1; }
