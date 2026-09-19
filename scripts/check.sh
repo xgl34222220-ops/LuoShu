@@ -34,7 +34,7 @@ python3 -m py_compile \
 # App-only 活跃源码清单。WebUI 前端及其准备脚本必须彻底不存在。
 for file in \
   module.prop customize.sh post-fs-data.sh post-mount.sh boot-completed.sh service.sh uninstall.sh action.sh \
-  README.md README.txt LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
+  README.md LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
   common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py common/font_inventory.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
@@ -222,7 +222,6 @@ grep -q 'GNU GENERAL PUBLIC LICENSE' "$ROOT/LICENSE"
 grep -q 'Version 3, 29 June 2007' "$ROOT/LICENSE"
 grep -q 'END OF TERMS AND CONDITIONS' "$ROOT/LICENSE"
 grep -q 'GPL-3.0-only' "$ROOT/README.md"
-grep -q 'GPL-3.0-only' "$ROOT/README.txt"
 grep -q 'GPL-3.0-only' "$ROOT/NOTICE.md"
 grep -q 'GPL-3.0-only' "$ROOT/THIRD_PARTY_NOTICES.md"
 grep -q 'GPL-3.0-only' "$ROOT/CONTRIBUTING.md"
