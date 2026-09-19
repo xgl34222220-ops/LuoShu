@@ -84,7 +84,7 @@ def compile_manifest(data: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(raw, dict):
             continue
         parsed = _parse_logical(logical)
-        if parsed is None:
+        if parsed is None or preserved_dynamic_alias(data, logical):
             continue
         partition, name = parsed
         physical = _hyperos_physical(data, logical, partition, name, raw)
