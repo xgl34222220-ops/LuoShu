@@ -14,7 +14,7 @@ PRIVATE_STATE="$TMP/luoshu/private-payload"
 MODDIR="$MODULES/LuoShu"
 
 mkdir -p \
-  "$MODDIR/logs" "$MODDIR/config" "$MODDIR/common" "$MODDIR/.luoshu-runtime" \
+  "$MODDIR/logs" "$MODDIR/config" "$MODDIR/common" "$MODDIR/.luoshu-runtime/compat/v227" \
   "$MODULES/OtherModule" "$MODULES_UPDATE/LuoShu/system/fonts" \
   "$META_MNT/LuoShu/product/fonts" "$CONTENT_BASE/LuoShu/system/fonts" \
   "$SELF_STATE/lower/system-fonts" "$PRIVATE_STATE" "${MAGIC_CONFIG%/*}"
