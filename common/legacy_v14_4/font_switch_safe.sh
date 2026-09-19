@@ -196,9 +196,18 @@ stage_clone_live() {
     return 0
 }
 
+safe_switch_partitions() {
+    printf '%s\n' 'system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product'
+    _ssp_manifest="$CONFIG_DIR/device_font_partitions.conf"
+    [ -f "$_ssp_manifest" ] || return 0
+    while IFS= read -r _ssp_part; do
+        case "$_ssp_part" in ''|*[!A-Za-z0-9_]*|[0-9]*|_* ) continue ;; esac
+        printf '%s\n' "$_ssp_part"
+    done < "$_ssp_manifest"
+}
+
 stage_clear_text_payload() {
-    for _part in system system_ext product vendor odm oem my_product mi_ext \
-                 oplus_product hw_product cust; do
+    for _part in $(safe_switch_partitions); do
         rm -rf "$STAGE_PAYLOAD/$_part/fonts" 2>/dev/null || true
         _etc="$STAGE_PAYLOAD/$_part/etc"
         [ -d "$_etc" ] || continue
@@ -218,8 +227,8 @@ mirror_existing_targets() {
         [ -f "$_src" ] || continue
         _base="${_src##*/}"
         case "$_base" in *.ttf|*.otf|*.ttc) ;; *) continue ;; esac
-        for _part in system_ext product vendor odm oem my_product mi_ext \
-                     oplus_product hw_product cust; do
+        for _part in $(safe_switch_partitions); do
+            [ "$_part" != system ] || continue
             [ -e "/$_part/fonts/$_base" ] || continue
             _dest="$STAGE_PAYLOAD/$_part/fonts/$_base"
             mkdir -p "${_dest%/*}" 2>/dev/null || continue
