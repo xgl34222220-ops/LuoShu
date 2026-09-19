@@ -136,14 +136,22 @@ def _dynamic_partition_specs() -> list[tuple[str, Path, tuple[Path, ...], Path, 
             if not _safe_dynamic_partition_name(name):
                 continue
             font_dir = child / "fonts"
-            if not font_dir.is_dir() or not _contains_font_capped(font_dir, limit=1024):
+            try:
+                font_dir_ready = font_dir.is_dir()
+            except OSError:
+                continue
+            if not font_dir_ready or not _contains_font_capped(font_dir, limit=1024):
                 continue
             entry = found.setdefault(name, {})
             # Prefer the direct /partition view over a /system/partition alias.
             key = "direct" if base_dir == Path("/") else "alias"
             entry[key] = font_dir
             etc_dir = child / "etc"
-            if etc_dir.is_dir():
+            try:
+                etc_ready = etc_dir.is_dir()
+            except OSError:
+                etc_ready = False
+            if etc_ready:
                 entry[key + "_etc"] = etc_dir
             if len(found) >= DYNAMIC_PARTITION_LIMIT:
                 break
