@@ -461,19 +461,27 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     jobs = []
     preserved_aliases = []
     excluded_aliases = []
+    requests = names or _manifest_physical_paths(module, data)
+    exact_requests = {item for item in requests if item.startswith('/')}
+    exact_mode = bool(exact_requests) and len(exact_requests) == len(requests)
 
-    # Clean stale aliases in every supported partition first. Target selection
-    # below is exact-path based when the device manifest is available.
+    # Clean stale aliases in every supported partition first. With a device
+    # manifest, any safe physical alias not explicitly detected on this ROM is
+    # removed too, so older filename mappers cannot widen coverage again.
     for part in PARTS:
         staged_fonts = stage / part / 'fonts'
         if staged_fonts.is_dir():
             for alias in staged_fonts.iterdir():
-                if (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
+                logical = f'/{part}/fonts/{alias.name}'
+                if (exact_mode and alias.suffix in ('.ttf', '.otf')
+                        and safe_physical_font_name(alias.name)
+                        and logical not in exact_requests):
+                    excluded_aliases.append(alias)
+                elif (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
                         and alias.suffix in ('.ttf', '.otf')
                         and not safe_physical_font_name(alias.name)):
                     excluded_aliases.append(alias)
 
-    requests = names or _manifest_physical_paths(module, data)
     for part, name, logical in _requested_slot_pairs(requests):
         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
         if not safe_physical_font_name(name):
