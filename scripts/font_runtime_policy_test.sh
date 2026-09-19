@@ -63,7 +63,7 @@ no test -e "$MODDIR/.luoshu-payload/system/fonts/Roboto-Regular.ttf"
 
 # A scanner-discovered partition must remain partition-aware all the way to
 # the private payload instead of collapsing into system/fonts.
-cp "$TMP/anchor.ttf" "$TMP/visible/future_oem/fonts/FutureUi-Regular.ttf"
+cp "$TMP/anchor.ttf" "$TMP/visible/future_oem/fonts/RobotoFuture-Regular.ttf"
 COUNT=$(_lfrp_alias_existing_targets "$TMP/anchor.ttf" FutureUi-Regular.ttf)
 ok test "$COUNT" -eq 1
 ok test -s "$MODDIR/.luoshu-payload/future_oem/fonts/FutureUi-Regular.ttf"
