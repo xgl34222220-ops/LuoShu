@@ -576,7 +576,7 @@ def main() -> int:
         report = build(args.module, args.stage, sys.stdin.read().split())
         print(json.dumps(report, ensure_ascii=False))
         if report['fallbackSlots']:
-            print(f"HyperOS：{report['fallbackSlots']} 个槽位缺少有效原厂度量，使用紧凑回退；可重新扫描原厂字体", file=sys.stderr)
+            print(f"HyperOS：{report['fallbackSlots']} 个槽位缺少有效原厂度量，使用紧凑回退；请重新刷入当前洛书版本以重建本机槽位快照", file=sys.stderr)
         return 0
     except Exception as error:
         print(f'HyperOS 字体处理失败：{error}', file=sys.stderr)
