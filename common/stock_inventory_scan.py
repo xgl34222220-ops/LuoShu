@@ -117,6 +117,9 @@ def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: b
     # Overlay risk is per partition, not global. A custom system/fonts payload
     # does not make an untouched vendor/fonts tree unsafe to scan directly.
     if _ACTIVE_OVERLAY_MODULE is not None and not _private_root_overlaid(logical):
+        if not logical.exists():
+            _record_stock_view(logical, "missing-optional", logical)
+            return logical
         _record_stock_view(logical, "direct-unoverlaid", logical)
         return logical
 
