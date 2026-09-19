@@ -326,7 +326,14 @@ case "${1:-status}" in
             printf '{"status":"error","message":"字体预热组件不可用"}\n'
         fi
         ;;
-    validate) manager_ready || exit 1; sh "$FONT_MANAGER" action validate "${2:-}" ;;
+    validate)
+        manager_ready || exit 1
+        if [ -f "$SAFE_SWITCH" ] && [ -n "${2:-}" ] && [ "${2:-}" != default ]; then
+            MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+                sh "$SAFE_SWITCH" action prewarm-start "${2:-}" >/dev/null 2>&1 || true
+        fi
+        sh "$FONT_MANAGER" action validate "${2:-}"
+        ;;
     stock_scan) manager_ready || exit 1; sh "$FONT_MANAGER" action stock_scan ;;
     switch_start) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "${2:-default}" ;;
     switch_status) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" status "${2:-}" ;;
