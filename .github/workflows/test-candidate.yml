@@ -142,6 +142,7 @@ jobs:
             common/font_inventory.py \
             common/font_inventory_scan.py \
             common/font_inventory_scan_v3.py \
+            common/font_target_manifest.py \
             common/font_switch_task.sh \
             common/legacy_v14_4/payload_clone.sh \
             common/mix_weight_mode.sh \
@@ -166,6 +167,7 @@ jobs:
           unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'SCANNER_REVISION = 3'
           unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'stockFontUniqueFileCount'
           unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'themeOverrideRoots'
+          unzip -p "$module" common/font_target_manifest.py | grep -q 'device-font-target-manifest-v1'
           unzip -p "$module" common/mix_weight_mode.sh | grep -q '快速单文件组合'
           unzip -p "$module" .luoshu-runtime/customize-v227.sh | grep -q '原厂字体文件'
           unzip -p "$module" .luoshu-runtime/customize-v227.sh | grep -q 'XML .* OEM 探测'
@@ -176,7 +178,7 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           unzip -q "$module" -d "$tmp"
-          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py" "$tmp/common/font_inventory_scan_v3.py"
+          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py" "$tmp/common/font_inventory_scan_v3.py" "$tmp/common/font_target_manifest.py"
           sh -n "$tmp/customize.sh"
           sh -n "$tmp/common/background_task.sh"
           sh -n "$tmp/common/device_font_template.sh"
