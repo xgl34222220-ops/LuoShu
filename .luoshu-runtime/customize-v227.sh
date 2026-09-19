@@ -216,10 +216,15 @@ for _view_name in direct direct-unoverlaid pre-mount-direct explicit; do
     case "$_view_count" in ''|*[!0-9]*) _view_count=0 ;; esac
     _view_direct=$((_view_direct + _view_count))
 done
-_view_lower=$(grep -c '"view": "luoshu-lower"' "$FONT_INVENTORY_OUTPUT" 2>/dev/null)
-case "$_view_lower" in ''|*[!0-9]*) _view_lower=0 ;; esac
+_view_lower=0
+for _view_name in luoshu-lower pid1-luoshu-lower; do
+    _view_count=$(grep -c "\"view\": \"$_view_name\"" "$FONT_INVENTORY_OUTPUT" 2>/dev/null)
+    case "$_view_count" in ''|*[!0-9]*) _view_count=0 ;; esac
+    _view_lower=$((_view_lower + _view_count))
+done
 _view_mirror=0
-for _view_name in magisk-mirror kernelsu-mirror apatch-mirror root-mirror; do
+for _view_name in magisk-mirror kernelsu-mirror apatch-mirror root-mirror \
+                  pid1-magisk-mirror pid1-kernelsu-mirror pid1-apatch-mirror pid1-root-mirror; do
     _view_count=$(grep -c "\"view\": \"$_view_name\"" "$FONT_INVENTORY_OUTPUT" 2>/dev/null)
     case "$_view_count" in ''|*[!0-9]*) _view_count=0 ;; esac
     _view_mirror=$((_view_mirror + _view_count))
