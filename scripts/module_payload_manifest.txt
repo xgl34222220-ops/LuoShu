@@ -52,7 +52,7 @@ common/font_import_probe.py
 common/font_instance.py
 common/font_inventory.py
 common/font_inventory_scan.py
-common/font_inventory_scan_v3.py
+common/font_inventory_scan.py
 common/font_layout_diagnostic.py
 common/font_layout_diagnostic.sh
 common/font_slot_coverage.py
