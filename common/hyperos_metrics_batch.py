@@ -467,7 +467,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 logical = f'/{part}/fonts/{alias.name}'
                 if (exact_mode and alias.suffix in ('.ttf', '.otf')
                         and logical not in exact_requests
-                        and safe_physical_inventory_slot(data, logical)):
+                        and (safe_physical_font_name(alias.name)
+                             or safe_physical_inventory_slot(data, logical))):
                     excluded_aliases.append(alias)
                 elif (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
                         and alias.suffix in ('.ttf', '.otf')
