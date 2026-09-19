@@ -354,6 +354,29 @@ class StockMetricContractTest(unittest.TestCase):
         args.force = True  # Matches an installer/manual rescan of a valid old inventory.
         self.assert_coloros_with_misans_does_not_expand(args)
 
+    def test_coloros_upgrade_retires_overlay_only_alias_absent_from_verified_stock(self) -> None:
+        args, _values = self.physical_scan_fixture(coloros=True)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(scanner.scan(args), 0)
+        previous = json.loads(args.output.read_text())
+
+        stale_path = "/system/fonts/SysFont-Static-Regular.ttf"
+        stale = copy.deepcopy(previous["mainSlot"])
+        stale["path"] = stale_path
+        stale["slotName"] = "SysFont-Static-Regular.ttf"
+        stale["source"] = "heuristic"
+        previous["slots"][stale_path] = stale
+        previous["slotCount"] = len(previous["slots"])
+        previous["metricsRevision"] = scanner.METRICS_REVISION - 1
+        args.output.write_text(json.dumps(previous), encoding="utf-8")
+        args.force = True
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(scanner.scan(args), 0)
+        refreshed = json.loads(args.output.read_text(encoding="utf-8"))
+        self.assertNotIn(stale_path, refreshed["slots"])
+        self.assertIn(stale_path, refreshed["retiredAbsentUpgradeSlots"])
+
     def test_hyperos_extra_collection_obeys_mapper_partitions_and_font_exclusions(self) -> None:
         args, _values = self.physical_scan_fixture()
         excluded = ("NotoSansCJKJP.otf", "NotoSansCJKKR.otf", "NotoSansArabic-Regular.ttf",
