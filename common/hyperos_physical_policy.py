@@ -11,7 +11,8 @@ from pathlib import Path
 
 PARTITIONS = frozenset({
     "system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
-    "my_product", "hw_product", "cust",
+    "my_product", "my_engineering", "my_company", "my_preload", "my_region",
+    "my_stock", "hw_product", "cust",
 })
 
 DYNAMIC_OVERLAY_PATH = "/system/fonts/MiSansVF_Overlay.ttf"
