@@ -79,6 +79,27 @@ safe_error() {
     return 1
 }
 
+target_manifest_current() {
+    _tmc_list="$CONFIG_DIR/replaceable_font_targets.list"
+    [ -s "$_tmc_list" ] || return 1
+    _tmc_saved=$(sed -n 's/^# buildKey=//p' "$_tmc_list" 2>/dev/null | head -n1)
+    _tmc_now=$(getprop ro.build.fingerprint 2>/dev/null | tr -d '\r\n')
+    [ -n "$_tmc_now" ] || _tmc_now=$(getprop ro.build.display.id 2>/dev/null | tr -d '\r\n')
+    [ -n "$_tmc_saved" ] && [ -n "$_tmc_now" ] && [ "$_tmc_saved" = "$_tmc_now" ]
+}
+
+ensure_target_manifest() {
+    [ "${IS_HYPEROS:-false}" = true ] || return 0
+    target_manifest_current && return 0
+    _etm_manager="$MODDIR/common/font_manager.sh"
+    [ -f "$_etm_manager" ] || return 1
+    printf '[%s] [SAFE-SWITCH] target manifest missing/stale; refreshing stock inventory\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" >>"$LOG_FILE" 2>/dev/null || true
+    MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" \
+        sh "$_etm_manager" action stock_scan >>"$LOG_FILE" 2>&1 || return 1
+    target_manifest_current
+}
+
 lock_cleanup() {
     [ "$LOCK_HELD" = true ] || return 0
     if type luoshu_font_lock_release >/dev/null 2>&1; then
@@ -347,6 +368,14 @@ switch_font() {
     [ -n "$_font" ] || { safe_error '未指定字体'; return 1; }
     _active_label="${LUOSHU_SWITCH_ACTIVE_LABEL:-$_font}"
     [ -n "$_active_label" ] || _active_label="$_font"
+
+    if [ "$_font" != default ] && [ "${IS_HYPEROS:-false}" = true ]; then
+        progress 2 '正在校验本机字体目标清单'
+        ensure_target_manifest || {
+            safe_error '系统字体目标清单缺失或已过期，自动重扫失败；未开始切换'
+            return 1
+        }
+    fi
 
     progress 4 '正在获取字体切换锁'
     lock_acquire || return 1
