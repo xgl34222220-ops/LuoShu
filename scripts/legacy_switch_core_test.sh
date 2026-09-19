@@ -145,7 +145,8 @@ for generated in \
     "$TMP/module/.luoshu-payload/product/fonts/NotoSansUI-Medium.ttf" \
     "$TMP/module/.luoshu-payload/vendor/fonts/MiLanProVF.ttf" \
     "$TMP/module/.luoshu-payload/system_ext/fonts/MiSansGlobalVF.ttf" \
-    "$TMP/module/.luoshu-payload/product/fonts/XiaomiSansUI-Regular.ttf"; do
+    "$TMP/module/.luoshu-payload/product/fonts/XiaomiSansUI-Regular.ttf" \
+    "$TMP/module/.luoshu-payload/my_region/fonts/XiaomiSansRegion-Regular.ttf"; do
     cmp -s "$TMP/module/.luoshu-payload/system/fonts/MiSansVF.ttf" "$generated"
 done
 test ! -e "$TMP/module/.luoshu-payload/product/fonts/XiaomiSansCollection.ttc"
@@ -163,8 +164,8 @@ grep -q 'build_composite_cached' "$LEGACY_AUTO"
 grep -q 'LuoShuAutoMix' "$LEGACY_AUTO"
 grep -q 'action switch' "$LEGACY_AUTO"
 grep -q 'BASE_ENGINE=.*font_mix.sh' "$LEGACY_WEIGHTED"
-# Mix start must return a task before expensive role probes; preparation reuses
-# static files/cached variable instances instead of copying every slot.
+# Mix start must return a task before expensive role probes, while slot
+# materialization keeps the proven copy/instance semantics for coverage safety.
 ! sed -n '/^[[:space:]]*start)/,/^[[:space:]]*;;/p' "$LEGACY_MIX_BRIDGE" | grep -q 'precheck_mix "\$2" "\$3" "\$4"'
 grep -q '正在后台校验组合字体' "$LEGACY_WEIGHTED"
 grep -q 'composite_file_identity' "$LEGACY_MIX_ENGINE"
