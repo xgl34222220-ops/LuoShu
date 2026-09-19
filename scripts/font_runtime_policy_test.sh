@@ -26,7 +26,8 @@ _verify_font_copy() {
 
 mkdir -p "$MODDIR/.luoshu-payload/system/fonts" \
   "$MODDIR/.luoshu-payload/product/fonts" \
-  "$TMP/visible/system/fonts" "$TMP/visible/product/fonts"
+  "$MODDIR/.luoshu-payload/future_oem/fonts" \
+  "$TMP/visible/system/fonts" "$TMP/visible/product/fonts" "$TMP/visible/future_oem/fonts"
 
 # The private tree must be selected dynamically even if it appeared after the
 # policy was sourced, matching installation and App-shell namespace handoff.
@@ -34,11 +35,12 @@ ok test "$(_lfrp_payload_root)" = "$MODDIR/.luoshu-payload"
 SYSTEM_FONTS_DIR="$MODDIR/system/fonts"
 # A direct mapper target must preserve the real partition instead of collapsing
 # product/vendor/OEM slots into system/fonts.
-_lfrp_partitions() { printf '%s\n' 'system product'; }
+_lfrp_partitions() { printf '%s\n' 'system product future_oem'; }
 _lfrp_visible_font_dirs() {
   case "$1" in
     system) printf '%s\n' "$TMP/visible/system/fonts" ;;
     product) printf '%s\n' "$TMP/visible/product/fonts" ;;
+    future_oem) printf '%s\n' "$TMP/visible/future_oem/fonts" ;;
   esac
 }
 
@@ -58,6 +60,14 @@ COUNT=$(_lfrp_alias_existing_targets "$TMP/anchor.ttf" Roboto-Regular.ttf)
 ok test "$COUNT" -eq 1
 ok test -s "$MODDIR/.luoshu-payload/product/fonts/Roboto-Regular.ttf"
 no test -e "$MODDIR/.luoshu-payload/system/fonts/Roboto-Regular.ttf"
+
+# A scanner-discovered partition must remain partition-aware all the way to
+# the private payload instead of collapsing into system/fonts.
+cp "$TMP/anchor.ttf" "$TMP/visible/future_oem/fonts/FutureUi-Regular.ttf"
+COUNT=$(_lfrp_alias_existing_targets "$TMP/anchor.ttf" FutureUi-Regular.ttf)
+ok test "$COUNT" -eq 1
+ok test -s "$MODDIR/.luoshu-payload/future_oem/fonts/FutureUi-Regular.ttf"
+no test -e "$MODDIR/.luoshu-payload/system/fonts/FutureUi-Regular.ttf"
 
 # A Latin-only font must not replace CJK or mixed fallback slots, which is the
 # architectural fix for the Telegram/System Settings tofu-box failure.
