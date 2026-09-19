@@ -98,6 +98,7 @@ def main() -> int:
         assert first.returncode == 0, first.stderr
         result = json.loads(first.stdout)
         payload = json.loads(output.read_text(encoding="utf-8"))
+        candidates = json.loads((temp / "device_font_candidates.json").read_text(encoding="utf-8"))
         summary = payload["scanSummary"]
 
         assert payload["scannerRevision"] == 4
@@ -105,6 +106,11 @@ def main() -> int:
         assert result["stockFontFileCount"] == 7
         assert result["stockFontUniqueFileCount"] == 6
         assert result["genericSlotCount"] >= 2
+        assert result["candidatePathCount"] == 7
+        assert candidates["schema"] == "device-font-candidates-v1"
+        assert candidates["fontFileCount"] == 7
+        assert candidates["candidateCount"] == 7
+        assert summary["installCandidatePathCount"] == 7
         assert summary["stockFontFileCount"] == 7
         assert summary["stockFontUniqueFileCount"] == 6
         assert summary["verifiedScanUiFileCount"] >= 2
@@ -130,6 +136,7 @@ def main() -> int:
         assert reused_result["status"] == "reused"
         assert reused_result["stockFontUniqueFileCount"] == 6
         assert reused_result["genericSlotCount"] >= 2
+        assert reused_result["candidatePathCount"] == 7
 
         scanner = importlib.import_module("font_inventory_scan_v3")
         theme = temp / "theme/fonts"
