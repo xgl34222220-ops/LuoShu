@@ -50,11 +50,37 @@ if [ "$_lc_legacy" = true ] && [ "$_lc_active" != default ] && \
 fi
 
 # Existing private-payload installations are exposed only for the duration of the
-# verified update migrator, then hidden again.
+# verified update migrator, then hidden again. Some KernelSU/APatch flash namespaces
+# cannot bind-mount the old private payload. That must never abort a module install:
+# build a temporary read-only-style migration view with symlinked partition trees.
+_lc_real_old_mod="$LUOSHU_OLD_MOD"
+_lc_old_view=''
 if [ -d "$LUOSHU_OLD_MOD/.luoshu-payload" ]; then
     if ! luoshu_private_mount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1; then
-        abort '无法读取旧版洛书私有字体负载'
-        return 1 2>/dev/null || exit 1
+        _lc_old_view="$MODPATH/.luoshu-old-view.$"
+        rm -rf "$_lc_old_view" 2>/dev/null || true
+        mkdir -p "$_lc_old_view/config" 2>/dev/null || _lc_old_view=''
+        if [ -n "$_lc_old_view" ]; then
+            [ ! -f "$LUOSHU_OLD_MOD/module.prop" ] || cp -f "$LUOSHU_OLD_MOD/module.prop" "$_lc_old_view/module.prop" 2>/dev/null || true
+            if [ -d "$LUOSHU_OLD_MOD/config" ]; then
+                cp -af "$LUOSHU_OLD_MOD/config/." "$_lc_old_view/config/" 2>/dev/null ||                     cp -rfp "$LUOSHU_OLD_MOD/config/." "$_lc_old_view/config/" 2>/dev/null || true
+            fi
+            for _lc_part in $(luoshu_private_partitions); do
+                _lc_src="$LUOSHU_OLD_MOD/.luoshu-payload/$_lc_part"
+                [ -d "$_lc_src" ] || continue
+                ln -s "$_lc_src" "$_lc_old_view/$_lc_part" 2>/dev/null || true
+            done
+            if [ -f "$_lc_old_view/module.prop" ]; then
+                LUOSHU_OLD_MOD="$_lc_old_view"
+                ui_print '• 刷写环境无法直接映射旧负载，已切换兼容迁移视图'
+            else
+                rm -rf "$_lc_old_view" 2>/dev/null || true
+                _lc_old_view=''
+                ui_print '• 旧负载读取受限；继续安装并重新扫描本机字体槽位'
+            fi
+        else
+            ui_print '• 旧负载读取受限；继续安装并重新扫描本机字体槽位'
+        fi
     fi
 fi
 
@@ -72,7 +98,8 @@ sed -e 's/^[[:space:]]*exit 1[[:space:]]*$/        return 1/' \
 . "$_lc_temp"
 _lc_rc=$?
 rm -f "$_lc_temp" 2>/dev/null || true
-( luoshu_private_unmount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1 ) || true
+( luoshu_private_unmount_module_view "$_lc_real_old_mod" >/dev/null 2>&1 ) || true
+[ -z "$_lc_old_view" ] || rm -rf "$_lc_old_view" 2>/dev/null || true
 if [ "$_lc_rc" -ne 0 ]; then
     return "$_lc_rc" 2>/dev/null || exit "$_lc_rc"
 fi
