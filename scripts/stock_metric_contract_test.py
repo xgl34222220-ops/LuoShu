@@ -371,8 +371,9 @@ class StockMetricContractTest(unittest.TestCase):
         args.output.write_text(json.dumps(previous), encoding="utf-8")
         args.force = True
 
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(scanner.scan(args), 0)
+        with mock.patch.dict(scanner.os.environ, {"LUOSHU_STOCK_VIEW_VERIFIED": "1"}):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(scanner.scan(args), 0)
         refreshed = json.loads(args.output.read_text(encoding="utf-8"))
         self.assertNotIn(stale_path, refreshed["slots"])
         self.assertIn(stale_path, refreshed["retiredAbsentUpgradeSlots"])
