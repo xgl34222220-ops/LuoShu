@@ -7,6 +7,7 @@ NEXT_BOOT="$ROOT/common/next_boot_payload.sh"
 LEGACY_BACKEND="$ROOT/common/legacy_v14_4_switch.sh"
 ROM="$ROOT/common/legacy_v14_4/rom_adapters.sh"
 HYPEROS_COMPAT="$ROOT/common/legacy_v14_4/hyperos_full_coverage.sh"
+HYPEROS_CLOCK_COMPAT="$ROOT/common/legacy_v14_4/hyperos_clock_compat.sh"
 MIX_ROUTER="$ROOT/common/font_mix_controller.sh"
 LEGACY_MIX_ROUTER="$ROOT/common/legacy_v14_4/mix_router.sh"
 LEGACY_MIX_BRIDGE="$ROOT/common/legacy_v14_4/v14_mix.sh"
@@ -108,7 +109,7 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 mkdir -p \
     "$TMP/module/.luoshu-payload/system/fonts" \
     "$TMP/stock/system" "$TMP/stock/system_ext" "$TMP/stock/product" \
-    "$TMP/stock/mi_ext" "$TMP/stock/vendor"
+    "$TMP/stock/mi_ext" "$TMP/stock/vendor" "$TMP/stock/my_region"
 printf 'selected-font-anchor\n' > "$TMP/module/.luoshu-payload/system/fonts/MiSansVF.ttf"
 : > "$TMP/stock/mi_ext/MitypeClock.ttf"
 : > "$TMP/stock/product/MiClock.ttf"
@@ -117,6 +118,7 @@ printf 'selected-font-anchor\n' > "$TMP/module/.luoshu-payload/system/fonts/MiSa
 : > "$TMP/stock/vendor/MiLanProVF.ttf"
 : > "$TMP/stock/system_ext/MiSansGlobalVF.ttf"
 : > "$TMP/stock/product/XiaomiSansUI-Regular.ttf"
+: > "$TMP/stock/my_region/XiaomiSansRegion-Regular.ttf"
 : > "$TMP/stock/product/XiaomiSansCollection.ttc"
 IS_HYPEROS=true \
 MODDIR="$TMP/module" \
@@ -129,6 +131,11 @@ LUOSHU_VENDOR_FONTS_ROOT="$TMP/stock/vendor" \
 LUOSHU_ODM_FONTS_ROOT="$TMP/stock/odm" \
 LUOSHU_OEM_FONTS_ROOT="$TMP/stock/oem" \
 LUOSHU_MY_PRODUCT_FONTS_ROOT="$TMP/stock/my_product" \
+LUOSHU_MY_ENGINEERING_FONTS_ROOT="$TMP/stock/my_engineering" \
+LUOSHU_MY_COMPANY_FONTS_ROOT="$TMP/stock/my_company" \
+LUOSHU_MY_PRELOAD_FONTS_ROOT="$TMP/stock/my_preload" \
+LUOSHU_MY_REGION_FONTS_ROOT="$TMP/stock/my_region" \
+LUOSHU_MY_STOCK_FONTS_ROOT="$TMP/stock/my_stock" \
 LUOSHU_HW_PRODUCT_FONTS_ROOT="$TMP/stock/hw_product" \
 LUOSHU_CUST_FONTS_ROOT="$TMP/stock/cust" \
     sh -c '. "$1"; luoshu_hyperos_full_payload_ensure' sh "$HYPEROS_COMPAT"
@@ -139,7 +146,8 @@ for generated in \
     "$TMP/module/.luoshu-payload/product/fonts/NotoSansUI-Medium.ttf" \
     "$TMP/module/.luoshu-payload/vendor/fonts/MiLanProVF.ttf" \
     "$TMP/module/.luoshu-payload/system_ext/fonts/MiSansGlobalVF.ttf" \
-    "$TMP/module/.luoshu-payload/product/fonts/XiaomiSansUI-Regular.ttf"; do
+    "$TMP/module/.luoshu-payload/product/fonts/XiaomiSansUI-Regular.ttf" \
+    "$TMP/module/.luoshu-payload/my_region/fonts/XiaomiSansRegion-Regular.ttf"; do
     cmp -s "$TMP/module/.luoshu-payload/system/fonts/MiSansVF.ttf" "$generated"
 done
 test ! -e "$TMP/module/.luoshu-payload/product/fonts/XiaomiSansCollection.ttc"
@@ -157,6 +165,19 @@ grep -q 'build_composite_cached' "$LEGACY_AUTO"
 grep -q 'LuoShuAutoMix' "$LEGACY_AUTO"
 grep -q 'action switch' "$LEGACY_AUTO"
 grep -q 'BASE_ENGINE=.*font_mix.sh' "$LEGACY_WEIGHTED"
+# Mix start must return a task before expensive role probes, while slot
+# materialization keeps the proven copy/instance semantics for coverage safety.
+! sed -n '/^[[:space:]]*start)/,/^[[:space:]]*;;/p' "$LEGACY_MIX_BRIDGE" | grep -q 'precheck_mix "\$2" "\$3" "\$4"'
+grep -q '正在后台校验组合字体' "$LEGACY_WEIGHTED"
+grep -q 'composite_file_identity' "$LEGACY_MIX_ENGINE"
+grep -q 'composite_report_sha' "$LEGACY_MIX_ENGINE"
+grep -q 'COMPOSITE_OUTPUT_HASH=$(composite_report_sha' "$LEGACY_MIX_ENGINE"
+grep -A10 '^_font_anchor()' "$ROM" | grep -q 'cp -f "\$src" "\$anchor"'
+grep -q 'my_engineering)' "$HYPEROS_CLOCK_COMPAT"
+grep -q 'my_company)' "$HYPEROS_CLOCK_COMPAT"
+grep -q 'my_preload)' "$HYPEROS_CLOCK_COMPAT"
+grep -q 'my_region)' "$HYPEROS_CLOCK_COMPAT"
+grep -q 'my_stock)' "$HYPEROS_CLOCK_COMPAT"
 grep -q '中文字体保留为完整基底' "$LEGACY_MIX_ENGINE"
 grep -q '不裁剪 ROM 字体槽' "$LEGACY_MIX_ENGINE"
 grep -q '\.legacy-v14-runtime' "$LEGACY_MIX_ROUTER"

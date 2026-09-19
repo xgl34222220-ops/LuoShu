@@ -330,6 +330,17 @@ worker() {
     _digit_mode=$(normalize_mode "$(read_value "$TASK_FILE" digitMode)")
     _root=$(read_value "$TASK_FILE" root)
     _family=LuoShuAutoMix
+
+    update_task "$_wanted" running '正在后台校验组合字体' 2 ''
+    precheck_mix "$_cjk" "$_latin" "$_digit"
+    _precheck=$?
+    case "$_precheck" in
+        2) update_task "$_wanted" failed '中文基底缺少必要字形' 100 "$(date +%s)"; rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1 ;;
+        3) update_task "$_wanted" failed '英文字体缺少必要字形' 100 "$(date +%s)"; rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1 ;;
+        4) update_task "$_wanted" failed '数字字体缺少必要字形' 100 "$(date +%s)"; rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1 ;;
+        1) update_task "$_wanted" failed '组合配置不完整' 100 "$(date +%s)"; rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1 ;;
+    esac
+
     mkdir -p "$_root/fonts" "$_root/prepared" 2>/dev/null || {
         update_task "$_wanted" failed '无法创建自动多字重缓存' 100 "$(date +%s)"
         exit 1
@@ -406,14 +417,10 @@ start_mix() {
     _latin_mode=$(resolve_mode "$8" "$_latin" "$_latin_axes")
     _digit_mode=$(resolve_mode "$9" "$_digit" "$_digit_axes")
 
-    precheck_mix "$_cjk" "$_latin" "$_digit"
-    _precheck=$?
-    case "$_precheck" in
-        1) printf '{"status":"error","message":"请选择中文、英文和数字字体"}\n'; return ;;
-        2) printf '{"status":"error","message":"中文基底缺少必要字形"}\n'; return ;;
-        3) printf '{"status":"error","message":"英文字体缺少必要字形"}\n'; return ;;
-        4) printf '{"status":"error","message":"数字字体缺少必要字形"}\n'; return ;;
-    esac
+    [ -n "$_cjk" ] && [ -n "$_latin" ] && [ -n "$_digit" ] || {
+        printf '{"status":"error","message":"请选择中文、英文和数字字体"}\n'
+        return
+    }
 
     if [ "$_cjk_mode" = fixed ] && [ "$_latin_mode" = fixed ] && [ "$_digit_mode" = fixed ]; then
         sh "$FALLBACK_ENGINE" start "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes"

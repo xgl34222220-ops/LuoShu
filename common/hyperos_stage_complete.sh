@@ -39,7 +39,7 @@ _targets=$({
     if type _lhcc_names_for_root >/dev/null 2>&1 && type _lhcc_root_for_part >/dev/null 2>&1; then
         # Use the boot repair mapper's exact discovery policy. Otherwise newer
         # MiSans/XiaomiSans slots are first added at boot with another slot's metrics.
-        for _part in system system_ext product mi_ext vendor odm oem my_product hw_product cust; do
+        for _part in system system_ext product mi_ext vendor odm oem my_product my_engineering my_company my_preload my_region my_stock hw_product cust; do
             _root=$(_lhcc_root_for_part "$_part") || continue
             [ -d "$_root" ] || continue
             _lhcc_names_for_root "$_root"
