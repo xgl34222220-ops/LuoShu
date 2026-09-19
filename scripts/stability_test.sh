@@ -134,7 +134,7 @@ sh "$ROOT/scripts/font_library_cache_test.sh"
 # 模块刷写阶段严禁同步重建字体。跨 schema 更新只能保留当前可工作负载并登记
 # 重启后由 App 显式重应用；Root 管理器刷写进程不得调用字体切换/复合重建器。
 # customize.sh is now a safety wrapper; the delegated verified installer owns update-state loading.
-grep -q 'customize-v227.sh' "$ROOT/customize.sh"
+grep -q '.luoshu-runtime/compat/v227/customize.sh' "$ROOT/customize.sh"
 grep -q 'module_update_state.sh' "$ROOT/.luoshu-runtime/compat/v227/customize.sh"
 ! grep -q 'luoshu_rebuild_preserved_payload.*MODPATH' "$ROOT/customize.sh"
 grep -q 'font-payload-rebuild-pending.conf' "$ROOT/.luoshu-runtime/core/post-fs-data.sh"
