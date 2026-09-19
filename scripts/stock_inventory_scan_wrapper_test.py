@@ -56,6 +56,31 @@ def main() -> int:
         (private_logical / "active.ttf").write_bytes(b"overlay")
         (module / "config/active_font.conf").write_text("mix\n", encoding="utf-8")
         assert stock._private_overlay_risk(module)
+
+        # A directory with only child file mounts can be recovered by a
+        # non-recursive parent bind. A directory-level mount cannot.
+        mountinfo = temp / "mountinfo"
+        child_target = logical / "active.ttf"
+        mountinfo.write_text(
+            f"10 1 0:1 / {child_target} rw - ext4 /dev/fake rw\n",
+            encoding="utf-8",
+        )
+        old_mountinfo = os.environ.get("LUOSHU_MOUNTINFO")
+        os.environ["LUOSHU_MOUNTINFO"] = str(mountinfo)
+        try:
+            assert stock._child_mount_targets(logical) == [str(child_target)]
+            mountinfo.write_text(
+                f"10 1 0:1 / {logical} rw - overlay KSU rw\n"
+                f"11 10 0:1 / {child_target} rw - ext4 /dev/fake rw\n",
+                encoding="utf-8",
+            )
+            assert stock._child_mount_targets(logical) == []
+        finally:
+            if old_mountinfo is None:
+                os.environ.pop("LUOSHU_MOUNTINFO", None)
+            else:
+                os.environ["LUOSHU_MOUNTINFO"] = old_mountinfo
+
         state_root = temp / "state"
         key = f"{logical.parts[1]}-{logical.parts[2]}"
         lower = state_root / "lower" / key
