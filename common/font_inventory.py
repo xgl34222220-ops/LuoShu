@@ -79,6 +79,11 @@ SANS_SERIF_UI_SUFFIX_TOKENS = {
     "condensed", "compact", "smallcaps", "small-caps", "display", "text", "flex", "static",
 }
 DENY_FILE_TOKENS = ("emoji", "icon", "symbol", "math", "music", "serif")
+GENERIC_DENY_FILE_TOKENS = (
+    "emoji", "icon", "symbol", "math", "music", "serif", "mono", "monospace",
+    "clock", "dingbat", "barcode", "qrcode", "materialicons", "notocoloremoji",
+)
+GENERIC_DENY_STYLE_TOKENS = ("italic", "oblique")
 HEURISTIC_PATTERNS = (
     re.compile(r"^MiSans(?:VF(?:_Overlay)?|LatinVF|TCVF|L3|Clock[A-Za-z0-9_.-]*)\.(?:ttf|otf|ttc|otc)$", re.I),
     re.compile(r"^(?:Mitype[A-Za-z0-9_.-]*|MiClock[A-Za-z0-9_.-]*|AndroidClock[A-Za-z0-9_.-]*|Clockopia)\.(?:ttf|otf|ttc|otc)$", re.I),
@@ -668,10 +673,76 @@ def _add_heuristic_slots(slots: dict[str, dict[str, Any]], roots: list[FontRoot]
             }
 
 
+def _generic_text_slot_candidate(name: str, metrics: dict[str, Any]) -> bool:
+    """Accept an upright stock text face by measured coverage, not by OEM filename.
+
+    Some ROMs address physical UI font files directly without declaring them in
+    fonts.xml. Specialized/icon/emoji/mono/italic faces stay stock.
+    """
+    lowered = name.lower()
+    if any(token in lowered for token in GENERIC_DENY_FILE_TOKENS):
+        return False
+    if any(token in lowered for token in GENERIC_DENY_STYLE_TOKENS):
+        return False
+    coverage = metrics.get("coverage")
+    if not valid_coverage(coverage):
+        return False
+    han = int(coverage.get("hanCount", 0))
+    latin = int(coverage.get("latinCount", 0))
+    total = int(coverage.get("unicodeCount", 0))
+    # Measured coverage is the gate: substantial Han coverage or a complete
+    # Latin alphabet. No OEM filename allow-list is required.
+    return han >= 512 or (latin >= 52 and total >= 96)
+
+
+def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontRoot]) -> None:
+    """Enumerate supported stock font roots and add verified text candidates."""
+    for root in roots:
+        if not root.actual.is_dir():
+            continue
+        try:
+            candidates = sorted(
+                (path for path in root.actual.rglob("*")
+                 if path.is_file() and path.suffix.lower() in FONT_EXTENSIONS),
+                key=lambda item: str(item).lower(),
+            )
+        except OSError:
+            continue
+        for actual in candidates:
+            logical = _logical_path(root, actual)
+            if logical in slots:
+                continue
+            try:
+                stock_file = _stock_font_path(root, actual, roots)
+                fmt, metrics = _read_metrics(stock_file, 0)
+            except (InventoryError, OSError, ValueError):
+                continue
+            if not _generic_text_slot_candidate(actual.name, metrics):
+                continue
+            slots[logical] = {
+                "slotName": actual.name,
+                "path": logical,
+                "partition": root.partition,
+                "source": "verified-scan",
+                "families": [],
+                "weight": _infer_weight(actual.name),
+                "style": "normal",
+                "faceIndex": 0,
+                "validatedBy": "fontTools-generic-stock-scan",
+                "validatedFormat": fmt,
+                "format": fmt,
+                "metrics": metrics,
+            }
+
+
 def _populate_metrics(slots: dict[str, dict[str, Any]]) -> None:
     rejected: list[str] = []
     for logical, entry in slots.items():
         try:
+            if entry.get("format") in {"TTF", "OTF", "TTC"} and isinstance(entry.get("metrics"), dict):
+                _validate_metrics(entry["metrics"])
+                entry.pop("actualPath", None)
+                continue
             fmt, metrics = _read_metrics(Path(entry["actualPath"]), int(entry.get("faceIndex", 0)))
         except (InventoryError, OSError, ValueError):
             rejected.append(logical)
