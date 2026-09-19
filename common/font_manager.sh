@@ -23,6 +23,9 @@ PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 STOCK_SCANNER="$MODDIR/common/stock_inventory_scan.py"
 STOCK_INVENTORY="$MODDIR/config/device_font_inventory.json"
+TARGET_COMPILER="$MODDIR/common/font_target_manifest.py"
+TARGET_MANIFEST="$MODDIR/config/replaceable_font_targets.json"
+TARGET_LIST="$MODDIR/config/replaceable_font_targets.list"
 STOCK_SCAN_LOCK="$MODDIR/.stock-inventory-scan.lock"
 export MODDIR LUOSHU_PUBLIC_DIR
 
@@ -32,6 +35,26 @@ json_escape_router() {
 
 stock_scan_available() {
     [ -x "$PYBIN" ] && [ -f "$STOCK_SCANNER" ] && [ -f "$MODDIR/common/font_inventory.py" ] && [ -f "$MODDIR/common/font_check.sh" ]
+}
+
+refresh_target_manifest() {
+    [ -s "$STOCK_INVENTORY" ] && [ -f "$TARGET_COMPILER" ] && [ -x "$PYBIN" ] || return 1
+    _rtm_out=$(
+        PYTHONHOME="$PYROOT" \
+        PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$PYBIN" "$TARGET_COMPILER" \
+                --inventory "$STOCK_INVENTORY" \
+                --output "$TARGET_MANIFEST" \
+                --list-output "$TARGET_LIST" 2>>"$MODDIR/logs/font-inventory.log"
+    )
+    _rtm_rc=$?
+    [ "$_rtm_rc" -eq 0 ] || {
+        rm -f "$TARGET_MANIFEST" "$TARGET_LIST" 2>/dev/null || true
+        return "$_rtm_rc"
+    }
+    printf '%s\n' "$_rtm_out" >>"$MODDIR/logs/font-inventory.log" 2>/dev/null || true
+    return 0
 }
 
 stock_scan_lock_acquire() {
@@ -93,6 +116,7 @@ stock_scan_json() {
         _stock_rc=$?
         if [ "$_stock_rc" -eq 0 ]; then
             rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
+            refresh_target_manifest >/dev/null 2>&1 || true
             stock_scan_lock_release
             trap - EXIT HUP INT TERM
             printf '%s\n' "$(printf '%s\n' "$_stock_out" | tail -n1)"
@@ -113,6 +137,7 @@ stock_scan_json() {
     _stock_last=$(printf '%s\n' "$_stock_out" | tail -n1)
     if [ "$_stock_rc" -eq 0 ] && [ -s "$STOCK_INVENTORY" ]; then
         rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
+        refresh_target_manifest >/dev/null 2>&1 || true
         stock_scan_lock_release
         trap - EXIT HUP INT TERM
         printf '%s\n' "$_stock_last"
