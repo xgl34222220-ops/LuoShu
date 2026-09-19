@@ -6,7 +6,7 @@ on:
     paths:
       - common/font_inventory.py
       - common/font_inventory_scan.py
-      -       - common/stock_inventory_scan.py
+      - common/stock_inventory_scan.py
       - common/font_manager.sh
       - common/font_metrics_normalize.py
       - common/rom_adapters.sh
@@ -35,7 +35,7 @@ jobs:
       - name: Validate inventory scanners and runtime mapper
         run: |
           set -eu
-          python3 -m py_compile common/font_inventory.py common/font_inventory_scan.py common/font_inventory_scan.py common/stock_inventory_scan.py common/font_metrics_normalize.py
+          python3 -m py_compile common/font_inventory.py common/font_inventory_scan.py common/stock_inventory_scan.py common/font_metrics_normalize.py
           FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
           test -s "$FONT"
           python3 scripts/font_inventory_test.py --font "$FONT"
@@ -56,17 +56,16 @@ jobs:
           grep -q 'FONT_INVENTORY_SCRIPT=.*font_inventory_scan.py' "$INSTALLER"
           grep -q 'stockFontFileCount' "$INSTALLER"
           grep -q '"$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan' "$INSTALLER"
-          grep -q 'font_inventory_scan' common/font_inventory_scan.py
           grep -q '_add_verified_text_slots' common/font_inventory.py
           grep -q 'genericSlotCount' "$INSTALLER"
           grep -q 'device_font_candidates.json' "$INSTALLER"
-          grep -q 'candidatePathCount'           ! grep -q '已中止本次更新' "$INSTALLER"
+          grep -q 'candidatePathCount' common/font_inventory_scan.py
+          ! grep -q '已中止本次更新' "$INSTALLER"
           grep -q 'stock_inventory_scan.py' common/font_manager.sh
           grep -q '_copy_as_inventory' common/rom_adapters.sh
           grep -q '_copy_as_inventory.*_dfabr' common/device_font_payload_policy.sh || grep -q '_copy_as_inventory' common/device_font_payload_policy.sh
           grep -q 'device_font_inventory.json' common/font_metrics_normalize.py
           grep -qx 'common/font_inventory.py' scripts/module_payload_manifest.txt
-          grep -qx 'common/font_inventory_scan.py' scripts/module_payload_manifest.txt
           grep -qx 'common/font_inventory_scan.py' scripts/module_payload_manifest.txt
           grep -qx 'common/stock_inventory_scan.py' scripts/module_payload_manifest.txt
           grep -qx '.luoshu-runtime' scripts/module_payload_manifest.txt
