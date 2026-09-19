@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 
 import font_inventory as inventory
-import font_inventory_scan_v3 as scanner
+import font_inventory_scan as scanner
 
 
 _ACTIVE_OVERLAY_MODULE: Path | None = None
