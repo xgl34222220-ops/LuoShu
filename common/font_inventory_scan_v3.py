@@ -499,12 +499,21 @@ def scan(args: Any) -> int:
     probe = _write_live_candidate_probe(args, candidate_output)
     build_key, fingerprint, display_id = base.current_build_key(args.build_key)
     existing = base._load_json(output)
-    if not args.force and existing is not None and _can_reuse(existing, build_key):
-        summary = existing["scanSummary"]
+    fresh_scan = os.environ.get("LUOSHU_FRESH_STOCK_SCAN", "").strip() == "1"
+    if fresh_scan:
+        # Installation and pre-mount recovery must rebuild the device inventory
+        # from verified stock only. The previous inventory remains on disk as an
+        # atomic fallback until a new scan succeeds, but it must not constrain the
+        # new slot set or contaminate ROM classification.
+        existing_for_scan = None
+    else:
+        existing_for_scan = existing
+    if not fresh_scan and not args.force and existing_for_scan is not None and _can_reuse(existing_for_scan, build_key):
+        summary = existing_for_scan["scanSummary"]
         print(json.dumps({
             "status": "reused",
             "buildKey": build_key,
-            "slotCount": len(existing["slots"]),
+            "slotCount": len(existing_for_scan["slots"]),
             "stockFontFileCount": int(summary.get("stockFontFileCount", 0)),
             "stockFontUniqueFileCount": int(summary.get("stockFontUniqueFileCount", 0)),
             "xmlSlotCount": int(summary.get("xmlUiFileCount", 0)),
@@ -512,17 +521,18 @@ def scan(args: Any) -> int:
             "genericSlotCount": int(summary.get("verifiedScanUiFileCount", 0)),
             "candidatePathCount": int(probe.get("candidateCount", 0)),
             "themeOverrideCount": len(summary.get("themeOverrideRoots", [])),
-            "romKind": existing.get("romKind", "generic"),
+            "romKind": existing_for_scan.get("romKind", "generic"),
         }, ensure_ascii=False))
         return 0
     valid_existing = None
-    if existing is not None:
+    if existing_for_scan is not None:
         try:
-            base.validate_inventory(existing, build_key)
+            base.validate_inventory(existing_for_scan, build_key)
         except base.InventoryError:
-            output.unlink(missing_ok=True)
+            if not fresh_scan:
+                output.unlink(missing_ok=True)
         else:
-            valid_existing = existing
+            valid_existing = existing_for_scan
     upgrade = valid_existing is not None and (
         not _has_current_metrics(valid_existing) or not _has_current_hyperos_coverage(valid_existing)
     )
