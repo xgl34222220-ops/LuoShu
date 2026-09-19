@@ -16,7 +16,7 @@ import stock_inventory_scan as stock  # noqa: E402
 
 
 def main() -> int:
-    assert stock.scanner.SCANNER_REVISION == 3, "manual/install scan must use the full v3 inventory"
+    assert stock.scanner.SCANNER_REVISION == 4, "manual/install scan must use the full v4 inventory"
     installer = (ROOT / ".luoshu-runtime/customize-v227.sh").read_text(encoding="utf-8")
     service = (ROOT / "service.sh").read_text(encoding="utf-8")
     post_mount = (ROOT / "post-mount.sh").read_text(encoding="utf-8")
