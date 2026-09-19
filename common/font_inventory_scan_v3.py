@@ -409,6 +409,29 @@ def _verify_upgrade_roots(font_roots: list[base.FontRoot], etc_roots: list[tuple
             raise base.InventoryError(f"补充原厂字体度量需要可验证的 stock lower/mirror：{logical}")
 
 
+def _stock_logical_entry_exists(logical: str, roots: list[base.FontRoot]) -> bool:
+    """Return True when a directory entry exists in the verified stock views.
+
+    This intentionally uses lexists semantics rather than font parsing. During an
+    inventory upgrade, an old slot may have come from LuoShu's generated payload.
+    If the exact logical filename is absent from every verified stock root, that
+    stale slot can be retired safely. If the entry still exists (even as a broken
+    symlink or malformed font), keep failing closed so a real ROM slot is never
+    silently dropped.
+    """
+    candidate = Path(logical)
+    if not candidate.is_absolute():
+        return False
+    for root in roots:
+        for logical_root in base._font_root_names(root):
+            try:
+                relative = candidate.relative_to(logical_root)
+            except ValueError:
+                continue
+            return os.path.lexists(root.actual / relative)
+    return False
+
+
 def _refresh_known_slots(slots: dict[str, dict[str, Any]], families: dict[str, list[str]],
                          existing: dict[str, Any], roots: list[base.FontRoot],
                          preserved_paths: set[str]) -> None:
@@ -532,8 +555,17 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         and path not in slots and not safe_physical_font_name(Path(path).name)
     }
     preserved_paths = set(dynamic_aliases) | retired_physical_slots
+    retired_absent_upgrade_slots: set[str] = set()
     if upgrade and existing is not None:
         _refresh_known_slots(slots, families, existing, replaceable_roots, preserved_paths)
+        # Older LuoShu builds could pollute the saved inventory with aliases that
+        # existed only in LuoShu's generated payload (ColorOS alias_core is the
+        # common example). Once this scan is reading verified stock roots, an old
+        # logical path that is completely absent from stock is safe to retire.
+        # Existing-but-unparseable paths are NOT retired and still fail closed.
+        for logical in set(existing["slots"]) - set(slots) - preserved_paths:
+            if not _stock_logical_entry_exists(logical, replaceable_roots):
+                retired_absent_upgrade_slots.add(logical)
     if coloros:
         # The generic selector prefers MiSans by filename. An unused MiSans on
         # ColorOS must not become the main metric contract or change the ROM kind.
@@ -575,6 +607,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "hyperosCoverageRevision": HYPEROS_COVERAGE_REVISION,
         "preservedDynamicAliases": dynamic_aliases,
         "retiredPhysicalSlots": sorted(retired_physical_slots),
+        "retiredAbsentUpgradeSlots": sorted(retired_absent_upgrade_slots),
         "state": "ready",
         "buildKey": build_key,
         "buildFingerprint": fingerprint,
@@ -603,7 +636,9 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     }
     base.validate_inventory(inventory, build_key)
     if upgrade and existing is not None:
-        missing = sorted(set(existing["slots"]) - set(slots) - preserved_paths)
+        missing = sorted(
+            set(existing["slots"]) - set(slots) - preserved_paths - retired_absent_upgrade_slots
+        )
         if missing:
             names = "、".join(Path(path).name for path in missing[:5])
             raise base.InventoryError(f"原厂字体重扫未完整保留已有槽位（{len(missing)} 个：{names}）")
@@ -618,6 +653,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "heuristicSlotCount": scan_summary["heuristicUiFileCount"],
         "genericSlotCount": scan_summary["verifiedScanUiFileCount"],
         "physicalSlotCount": sum(1 for entry in slots.values() if entry.get("source") == "hyperos-physical"),
+        "retiredAbsentUpgradeSlotCount": len(retired_absent_upgrade_slots),
         "candidatePathCount": int(probe.get("candidateCount", 0)),
         "xmlSourceCount": scan_summary["xmlSourceCount"],
         "themeOverrideCount": len(theme_roots),
