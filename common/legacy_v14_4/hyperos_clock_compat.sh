@@ -190,6 +190,20 @@ _lhcc_safe_dynamic_name() {
     return 1
 }
 
+_lhcc_manifest_list() {
+    _lhcc_module="$(_lhcc_module_dir)"
+    printf '%s\n' "$_lhcc_module/config/replaceable_font_targets.list"
+}
+
+_lhcc_manifest_names_for_part() {
+    _lhcc_part="$1"
+    _lhcc_list="$(_lhcc_manifest_list)"
+    [ -s "$_lhcc_list" ] || return 1
+    awk -F'|' -v part="$_lhcc_part" '
+        $0 !~ /^#/ && NF >= 4 && $2 == part && $4 == "physical" {print $3}
+    ' "$_lhcc_list" 2>/dev/null
+}
+
 _lhcc_names_for_root() {
     _lhcc_real="$1"
     {
@@ -230,6 +244,12 @@ luoshu_hyperos_clock_payload_ensure() {
         [ -d "$_lhcc_real" ] || continue
         _lhcc_overlay="$_lhcc_payload/$_lhcc_part/fonts"
         _lhcc_part_count=0
+        _lhcc_manifest="$(_lhcc_manifest_list)"
+        if [ -s "$_lhcc_manifest" ]; then
+            _lhcc_names="$(_lhcc_manifest_names_for_part "$_lhcc_part")"
+        else
+            _lhcc_names="$(_lhcc_names_for_root "$_lhcc_real")"
+        fi
         while IFS= read -r _lhcc_name; do
             [ -n "$_lhcc_name" ] || continue
             # The framework switches this exact ROM link between locale/theme
@@ -252,7 +272,7 @@ luoshu_hyperos_clock_payload_ensure() {
                 _lhcc_part_count=$((_lhcc_part_count + 1))
             fi
         done <<EOF_LHCC_NAMES
-$(_lhcc_names_for_root "$_lhcc_real")
+$_lhcc_names
 EOF_LHCC_NAMES
         [ "$_lhcc_part_count" -gt 0 ] 2>/dev/null && _lhcc_parts=$((_lhcc_parts + 1))
     done
