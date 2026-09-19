@@ -146,6 +146,7 @@ stock_scan_json() {
     _stock_message=$(printf '%s\n' "$_stock_last" | sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p')
     [ -n "$_stock_message" ] || _stock_message="$_stock_out"
     [ -n "$_stock_message" ] || _stock_message='原厂字体扫描失败'
+    _stock_message=$(printf '%s' "$_stock_message" | tr '\r\n' '  ' | cut -c1-512)
     {
         printf 'state=pending\n'
         printf 'reason=%s\n' "$_stock_message"
