@@ -15,9 +15,29 @@ cp "$ROOT/common/font_manager.sh" "$MOD/common/font_manager.sh"
 : > "$MOD/common/stock_inventory_scan.py"
 : > "$MOD/common/font_inventory.py"
 : > "$MOD/common/font_check.sh"
+: > "$MOD/common/font_target_manifest.py"
 
 cat > "$MOD/common/python/bin/luoshu-python" <<'EOF_PY'
 #!/bin/sh
+script="$1"
+shift
+case "${script##*/}" in
+  font_target_manifest.py)
+    output=''
+    list_output=''
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --output) shift; output="$1" ;;
+        --list-output) shift; list_output="$1" ;;
+      esac
+      shift
+    done
+    [ -n "$output" ] && printf '%s\n' '{"schema":"device-font-target-manifest-v1","buildKey":"fixture","replaceableCount":1,"physicalCount":1,"targets":[]}' > "$output"
+    [ -n "$list_output" ] && printf '%s\n' '# schema=device-font-target-manifest-v1' '# buildKey=fixture' > "$list_output"
+    printf '%s\n' '{"status":"ok","replaceableCount":1,"physicalCount":1}'
+    exit 0
+    ;;
+esac
 count_file="$LUOSHU_SCAN_COUNT"
 count=$(cat "$count_file" 2>/dev/null || echo 0)
 count=$((count + 1))
@@ -34,6 +54,7 @@ cat > "$out" <<'EOF_JSON'
 {"schema":"device-font-inventory-v1","state":"ready","buildKey":"fixture","romKind":"hyperos","slots":{"/system/fonts/Roboto-Regular.ttf":{"format":"TTF"}}}
 EOF_JSON
 printf '%s\n' '{"status":"ok","slotCount":1,"mainSlot":"Roboto-Regular.ttf","romKind":"hyperos"}'
+
 EOF_PY
 chmod 0755 "$MOD/common/python/bin/luoshu-python"
 
