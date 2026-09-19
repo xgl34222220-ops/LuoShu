@@ -23,7 +23,6 @@ MAX_BYTES=268435456
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODDIR/common/font_import.sh" ] && . "$MODDIR/common/font_import.sh"
 [ -f "$MODDIR/common/font_import_compat.sh" ] && . "$MODDIR/common/font_import_compat.sh"
-[ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -77,31 +76,14 @@ invalidate_font_cache() {
 
 schedule_font_prewarm() {
     _sfp_family="$1"
-    _sfp_hash="$2"
-    [ -n "$_sfp_family" ] && [ -n "$_sfp_hash" ] || return 0
-    [ -s "$MODDIR/config/device_font_inventory.json" ] || return 0
+    [ -n "$_sfp_family" ] || return 0
     _sfp_switch="$MODDIR/common/legacy_v14_4/font_switch_safe.sh"
     [ -f "$_sfp_switch" ] || return 0
-    type luoshu_start_detached >/dev/null 2>&1 || return 0
-    _sfp_key=$(printf '%s' "$_sfp_hash" | cut -c1-12)
-    _sfp_pid="$MODDIR/config/font-prewarm-$_sfp_key.pid"
-    _sfp_log="$MODDIR/logs/font-prewarm.log"
-    luoshu_start_detached "$_sfp_pid" font_switch_safe.sh "$_sfp_log" \
-        sh -c '
-            sleep 1
-            _script="$1"; _family="$2"; _public="$3"
-            [ -f "$_script" ] || exit 0
-            export LUOSHU_PUBLIC_DIR="$_public"
-            if command -v ionice >/dev/null 2>&1 && command -v nice >/dev/null 2>&1; then
-                exec ionice -c 3 nice -n 19 sh "$_script" action prewarm "$_family"
-            elif command -v nice >/dev/null 2>&1; then
-                exec nice -n 19 sh "$_script" action prewarm "$_family"
-            fi
-            exec sh "$_script" action prewarm "$_family"
-        ' font_switch_safe.sh "$_sfp_switch" "$_sfp_family" "${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-        >/dev/null 2>&1 || true
+    MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+        sh "$_sfp_switch" action prewarm-start "$_sfp_family" >/dev/null 2>&1 || true
     return 0
 }
+
 find_duplicate() {
     _source="$1"
     _hash="$2"
@@ -175,7 +157,7 @@ import_font_file() {
     _duplicate=$(find_duplicate "$_src" "$_hash")
     if [ -f "$_duplicate" ]; then
         _family=$(detect_font_family "$(basename "$_duplicate")")
-        schedule_font_prewarm "$_family" "$_hash"
+        schedule_font_prewarm "$_family"
         printf '{"status":"ok","data":{"kind":"font","id":"%s","name":"%s","format":"%s","duplicate":true,"message":"字体已存在，未重复导入"}}\n' \
             "$(json_escape "$_family")" "$(json_escape "$(safe_stem "$_display")")" "$_format"
         return
