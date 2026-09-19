@@ -382,6 +382,77 @@ def _cjk_routing(data: dict, logical: str, fallback: frozenset[int]) -> tuple:
     return fallback, frozenset(coverage['cjkPunctuation']), 'stock-latin-primary'
 
 
+def _manifest_physical_paths(module: Path, data: dict) -> list[str]:
+    """Read the flash-time target contract, falling back to the trusted inventory."""
+    manifest = module / 'config/replaceable_font_targets.json'
+    try:
+        payload = json.loads(manifest.read_text(encoding='utf-8'))
+        if (payload.get('schema') == 'device-font-target-manifest-v1'
+                and payload.get('buildKey') == data.get('buildKey')
+                and payload.get('romKind') == data.get('romKind')
+                and isinstance(payload.get('targets'), list)):
+            paths = [
+                str(item.get('path'))
+                for item in payload['targets']
+                if isinstance(item, dict) and item.get('mode') == 'physical'
+            ]
+            paths = [path for path in paths if path.startswith('/')]
+            if paths:
+                return list(dict.fromkeys(paths))
+    except (OSError, ValueError, AttributeError):
+        pass
+
+    # Compatibility fallback: inventory slots are already filtered to replaceable
+    # UI targets. Re-apply only the single-face HyperOS physical policy here.
+    result = []
+    for logical, slot in sorted((data.get('slots') or {}).items()):
+        path = Path(logical)
+        parts = path.parts
+        if len(parts) != 4 or parts[0] != '/' or parts[2] != 'fonts':
+            continue
+        part, name = parts[1], parts[3]
+        if part not in PARTS or not safe_physical_font_name(name):
+            continue
+        if preserved_dynamic_alias(data, logical):
+            continue
+        fmt = str(slot.get('validatedFormat') or slot.get('format') or '').upper()
+        try:
+            face = int(slot.get('faceIndex', 0))
+        except (TypeError, ValueError):
+            continue
+        if fmt not in {'TTF', 'OTF'} or face != 0:
+            continue
+        result.append(logical)
+    return result
+
+
+def _requested_slot_pairs(requests: list[str]) -> list[tuple[str, str, str]]:
+    unique = list(dict.fromkeys(requests))
+    exact = [item for item in unique if item.startswith('/')]
+    if exact:
+        if len(exact) != len(unique):
+            raise ValueError('字体目标不能混用逻辑路径与旧文件名')
+        pairs = []
+        for logical in exact:
+            path = Path(logical)
+            parts = path.parts
+            if len(parts) != 4 or parts[0] != '/' or parts[2] != 'fonts':
+                raise ValueError(f'不安全的字体逻辑路径：{logical}')
+            part, name = parts[1], parts[3]
+            if part not in PARTS:
+                raise ValueError(f'不支持的字体分区：{part}')
+            pairs.append((part, name, logical))
+        return pairs
+
+    pairs = []
+    for part in PARTS:
+        for name in unique:
+            if Path(name).name != name or not name.endswith(('.ttf', '.otf')):
+                raise ValueError(f'不安全的字体槽位：{name}')
+            pairs.append((part, name, f'/{part}/fonts/{name}'))
+    return pairs
+
+
 def build(module: Path, stage: Path, names: list[str]) -> dict:
     if stage.resolve() == (module / '.luoshu-payload').resolve():
         raise ValueError('拒绝修改本次启动正在使用的字体负载')
@@ -390,8 +461,10 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     jobs = []
     preserved_aliases = []
     excluded_aliases = []
+
+    # Clean stale aliases in every supported partition first. Target selection
+    # below is exact-path based when the device manifest is available.
     for part in PARTS:
-        root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
         staged_fonts = stage / part / 'fonts'
         if staged_fonts.is_dir():
             for alias in staged_fonts.iterdir():
@@ -399,22 +472,22 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                         and alias.suffix in ('.ttf', '.otf')
                         and not safe_physical_font_name(alias.name)):
                     excluded_aliases.append(alias)
-        for name in dict.fromkeys(names):
-            if Path(name).name != name or not name.endswith(('.ttf', '.otf')):
-                raise ValueError(f'不安全的字体槽位：{name}')
-            logical = f'/{part}/fonts/{name}'
-            if not safe_physical_font_name(name):
-                # Never let a stale inventory/target list recreate obsolete
-                # language aliases. Removing only its isolated staged alias
-                # exposes the untouched ROM font when the payload is mounted.
-                excluded_aliases.append(stage / part / 'fonts' / name)
-                continue
-            if preserved_dynamic_alias(data, logical):
-                preserved_aliases.append(stage / part / 'fonts' / name)
-                continue
-            if (root / name).exists():
-                jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name,
-                             contract_for_slot(data, logical)))
+
+    requests = names or _manifest_physical_paths(module, data)
+    for part, name, logical in _requested_slot_pairs(requests):
+        root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
+        if not safe_physical_font_name(name):
+            # Never let a stale inventory/target list recreate obsolete
+            # language aliases. Removing only its isolated staged alias
+            # exposes the untouched ROM font when the payload is mounted.
+            excluded_aliases.append(stage / part / 'fonts' / name)
+            continue
+        if preserved_dynamic_alias(data, logical):
+            preserved_aliases.append(stage / part / 'fonts' / name)
+            continue
+        if (root / name).exists():
+            jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name,
+                         contract_for_slot(data, logical)))
     if not jobs:
         raise ValueError('没有找到当前 ROM 的 HyperOS 字体目标')
     cjk_fallback = _staged_cjk_fallback(data, jobs, stage)
