@@ -69,6 +69,7 @@ done
 rm -f "$MODPATH/remove" 2>/dev/null || true
 UPDATE_PRESERVED=false
 RUNTIME_RECOVERY_RESET=false
+UPDATE_MIGRATION_DEFERRED=false
 
 # 更新安装只迁移活动配置和旧负载。后台服务不得改写字体；架构升级由
 # 用户下一次明确应用在同一个前台事务中一次提交。
@@ -100,8 +101,16 @@ if [ "$UPDATE_PRESERVED" != true ]; then
           "$MODPATH/system/fonts/NotoColorEmoji.ttf" "$MODPATH/system/fonts/NotoColorEmojiLegacy.ttf" 2>/dev/null || true
     _old_selected=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
     if [ -n "$_old_selected" ] && [ "$_old_selected" != default ]; then
-        ui_print "✗ 无法安全迁移当前字体 $_old_selected；已中止本次更新，不会切回系统默认字体"
-        exit 1
+        UPDATE_MIGRATION_DEFERRED=true
+        ui_print "• 旧版当前字体 $_old_selected 的负载无法安全迁移"
+        ui_print "• 不再中止安装；本次优先完成本机字体槽扫描"
+        {
+            printf 'state=awaiting-explicit-apply\n'
+            printf 'mode=stock-until-reapply\n'
+            printf 'reason=update-payload-unavailable\n'
+            printf 'font=%s\n' "$_old_selected"
+            printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+        } > "$MODPATH/config/font-payload-rebuild-pending.conf" 2>/dev/null || true
     fi
     printf 'default\n' > "$MODPATH/config/active_font.conf"
 fi
@@ -114,6 +123,7 @@ FONT_INVENTORY_SCRIPT="$MODPATH/common/stock_inventory_scan.py"
 [ -f "$FONT_INVENTORY_SCRIPT" ] || FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory.py"
 FONT_INVENTORY_PYTHON="$MODPATH/common/python/bin/luoshu-python"
 FONT_INVENTORY_OUTPUT="$MODPATH/config/device_font_inventory.json"
+FONT_INVENTORY_CANDIDATES="$MODPATH/config/device_font_candidates.json"
 FONT_INVENTORY_LOG="$MODPATH/logs/font-inventory.log"
 if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_inventory.json" ]; then
     cp -f "$OLD_MOD/config/device_font_inventory.json" "$FONT_INVENTORY_OUTPUT" 2>/dev/null || true
@@ -139,25 +149,34 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         _inventory_slots=$(printf '%s' "$_inventory_result" | sed -n 's/.*"slotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
         _inventory_xml=$(printf '%s' "$_inventory_result" | sed -n 's/.*"xmlSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
         _inventory_heuristic=$(printf '%s' "$_inventory_result" | sed -n 's/.*"heuristicSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        _inventory_generic=$(printf '%s' "$_inventory_result" | sed -n 's/.*"genericSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        _inventory_candidates=$(printf '%s' "$_inventory_result" | sed -n 's/.*"candidatePathCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
         _inventory_rom=$(printf '%s' "$_inventory_result" | sed -n 's/.*"romKind"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | tail -n1)
         [ -n "$_inventory_files" ] || _inventory_files="未知"
         [ -n "$_inventory_slots" ] || _inventory_slots="未知"
         [ -n "$_inventory_xml" ] || _inventory_xml="未知"
-        [ -n "$_inventory_heuristic" ] || _inventory_heuristic="未知"
+        [ -n "$_inventory_heuristic" ] || _inventory_heuristic="0"
+        [ -n "$_inventory_generic" ] || _inventory_generic="0"
+        [ -n "$_inventory_candidates" ] || _inventory_candidates="0"
         [ -n "$_inventory_rom" ] || _inventory_rom="generic"
+        ui_print "✓ 安装阶段已记录本机字体候选槽：$_inventory_candidates 个"
         ui_print "✓ 原厂字体文件：$_inventory_files 个（ROM：$_inventory_rom）"
-        ui_print "✓ 可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / OEM 探测 $_inventory_heuristic）"
+        ui_print "✓ 可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / 通用探测 $_inventory_generic / OEM 规则 $_inventory_heuristic）"
     else
+        : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
+        _inventory_candidates=$(sed -n 's/.*"candidateCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$FONT_INVENTORY_CANDIDATES" 2>/dev/null | head -n1)
+        [ -n "$_inventory_candidates" ] || _inventory_candidates="0"
         _old_active=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+        ui_print "✓ 安装阶段已记录本机字体候选槽：$_inventory_candidates 个"
         if [ -n "$_old_active" ] && [ "$_old_active" != default ]; then
-            : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
-            ui_print "• 当前字体仍在挂载，已安排重启后读取原厂字体清单"
+            ui_print "• 当前字体覆盖仍在活动；原厂度量将在重启前补全，不会中止安装"
         else
-            ui_print "• 原厂字体清单扫描不可用，本机将自动使用旧静态适配清单"
+            ui_print "• 原厂度量本次未完成；已安排重启前自动补扫"
         fi
     fi
 else
-    ui_print "• 字体清单扫描器不可用，本机将自动使用旧静态适配清单"
+    : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
+    ui_print "• 字体清单扫描器不可用；已安排重启前重试"
 fi
 # 安装安全 CLI，不暴露上一字体回滚、热刷新或重启 SystemUI 命令。
 cp -f "$MODPATH/common/luoshu_cli.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
@@ -186,6 +205,9 @@ else
     if [ "$RUNTIME_RECOVERY_RESET" = true ]; then
         ui_print "✓ 已清除 3.1–3.3 生成的旧字体负载"
         ui_print "✓ 字体选择与组合偏好已保留，首次开机保持系统字体"
+    elif [ "$UPDATE_MIGRATION_DEFERRED" = true ]; then
+        ui_print "✓ 安装未因旧字体负载异常中止"
+        ui_print "✓ 重启后保持系统字体，可在洛书中重新应用所需字体"
     else
         ui_print "✓ 当前保持系统默认字体"
     fi

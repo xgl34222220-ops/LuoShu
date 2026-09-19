@@ -51,10 +51,12 @@ fi
 
 # Existing private-payload installations are exposed only for the duration of the
 # verified update migrator, then hidden again.
+_lc_old_view_ready=true
 if [ -d "$LUOSHU_OLD_MOD/.luoshu-payload" ]; then
     if ! luoshu_private_mount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1; then
-        abort '无法读取旧版洛书私有字体负载'
-        return 1 2>/dev/null || exit 1
+        _lc_old_view_ready=false
+        ui_print '• 旧版私有字体负载无法临时投影；不会中止安装'
+        ui_print '• 本次继续以本机原厂字体槽扫描结果为准'
     fi
 fi
 
