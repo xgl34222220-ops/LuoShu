@@ -22,6 +22,20 @@ def _record_stock_view(logical: Path, view: str, actual: Path, detail: str = "")
     }
 
 
+def _safe_is_dir(path: Path) -> bool:
+    try:
+        return path.is_dir()
+    except OSError:
+        return False
+
+
+def _safe_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
 def _mirror_view_name(prefix: Path) -> str:
     value = str(prefix).lower()
     if ".magisk/mirror" in value or "/magisk/mirror" in value:
@@ -117,7 +131,7 @@ def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: b
     # Overlay risk is per partition, not global. A custom system/fonts payload
     # does not make an untouched vendor/fonts tree unsafe to scan directly.
     if _ACTIVE_OVERLAY_MODULE is not None and not _private_root_overlaid(logical):
-        if not logical.exists():
+        if not _safe_exists(logical):
             _record_stock_view(logical, "missing-optional", logical)
             return logical
         _record_stock_view(logical, "direct-unoverlaid", logical)
@@ -130,32 +144,32 @@ def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: b
         state_root = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))
         lower = state_root / "lower" / f"{parts[1]}-{parts[2]}"
         attempted.append(str(lower))
-        if lower.is_dir():
+        if _safe_is_dir(lower):
             _record_stock_view(logical, "luoshu-lower", lower)
             return lower
         if state_root.is_absolute():
             pid1_lower = proc1_root / state_root.relative_to("/") / "lower" / f"{parts[1]}-{parts[2]}"
             attempted.append(str(pid1_lower))
-            if pid1_lower.is_dir():
+            if _safe_is_dir(pid1_lower):
                 _record_stock_view(logical, "pid1-luoshu-lower", pid1_lower)
                 return pid1_lower
 
     for prefix in inventory.MIRROR_PREFIXES:
         candidate = prefix / logical.relative_to("/")
         attempted.append(str(candidate))
-        if candidate.is_dir():
+        if _safe_is_dir(candidate):
             _record_stock_view(logical, _mirror_view_name(prefix), candidate, str(prefix))
             return candidate
         if prefix.is_absolute():
             pid1_candidate = proc1_root / prefix.relative_to("/") / logical.relative_to("/")
             attempted.append(str(pid1_candidate))
-            if pid1_candidate.is_dir():
+            if _safe_is_dir(pid1_candidate):
                 _record_stock_view(logical, "pid1-" + _mirror_view_name(prefix), pid1_candidate, str(prefix))
                 return pid1_candidate
 
     # A ROM is not required to expose every optional OEM partition. Missing logical
     # roots are harmless; an existing root without a verifiable stock view is not.
-    if not logical.exists():
+    if not _safe_exists(logical):
         _record_stock_view(logical, "missing-optional", logical)
         return logical
 
