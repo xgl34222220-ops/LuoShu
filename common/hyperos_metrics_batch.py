@@ -282,7 +282,7 @@ def _fast_patch_metrics(source: Path, output: Path, contract: tuple, *,
 
     os2_version = struct.unpack_from('>H', old_os2, 0)[0]
     # Older OS/2 tables need structural promotion; keep the safe FontTools path.
-    if os2_version < 4:
+    if os2_version < 2:
         return None
     source_upem = struct.unpack_from('>H', old_head, 18)[0]
     if not 16 <= source_upem <= 16384:
@@ -297,6 +297,10 @@ def _fast_patch_metrics(source: Path, output: Path, contract: tuple, *,
     new_head = bytearray(old_head)
     new_hhea = bytearray(old_hhea)
     new_os2 = bytearray(old_os2)
+    # OS/2 v2/v3 and v4 share the same fields used here; match the existing
+    # FontTools path by promoting the version field without growing the table.
+    if os2_version < 4:
+        struct.pack_into('>H', new_os2, 0, 4)
     old_adjustment = struct.unpack_from('>I', old_head, 8)[0]
     # Table checksum for 'head' is always calculated with adjustment zero.
     struct.pack_into('>I', new_head, 8, 0)
