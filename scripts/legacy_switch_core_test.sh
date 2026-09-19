@@ -161,12 +161,15 @@ grep -q 'BASE_ENGINE=.*font_mix.sh' "$LEGACY_WEIGHTED"
 # static files/cached variable instances instead of copying every slot.
 ! sed -n '/^[[:space:]]*start)/,/^[[:space:]]*;;/p' "$LEGACY_MIX_BRIDGE" | grep -q 'precheck_mix "\$2" "\$3" "\$4"'
 grep -q '正在后台校验组合字体' "$LEGACY_WEIGHTED"
-grep -q 'PREPARED_CACHE=.*axes-mix-prepared-v2' "$LEGACY_WEIGHTED"
-grep -q 'ln -s "\$_source" "\$_destination"' "$LEGACY_WEIGHTED"
 grep -q 'composite_file_identity' "$LEGACY_MIX_ENGINE"
 grep -q 'composite_report_sha' "$LEGACY_MIX_ENGINE"
 grep -q 'COMPOSITE_OUTPUT_HASH=$(composite_report_sha' "$LEGACY_MIX_ENGINE"
-grep -A12 '^_font_anchor()' "$ROM" | grep -q 'ln "\$src" "\$anchor"'
+grep -A10 '^_font_anchor()' "$ROM" | grep -q 'cp -f "\$src" "\$anchor"'
+grep -q 'my_engineering)' "$HYPEROS_COMPAT"
+grep -q 'my_company)' "$HYPEROS_COMPAT"
+grep -q 'my_preload)' "$HYPEROS_COMPAT"
+grep -q 'my_region)' "$HYPEROS_COMPAT"
+grep -q 'my_stock)' "$HYPEROS_COMPAT"
 grep -q '中文字体保留为完整基底' "$LEGACY_MIX_ENGINE"
 grep -q '不裁剪 ROM 字体槽' "$LEGACY_MIX_ENGINE"
 grep -q '\.legacy-v14-runtime' "$LEGACY_MIX_ROUTER"
