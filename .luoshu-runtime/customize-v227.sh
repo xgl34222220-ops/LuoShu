@@ -171,12 +171,38 @@ case "$_target_count" in ''|*[!0-9]*|0) ui_print "✗ 设备专属替换清单�
 [ -n "$_target_physical" ] || _target_physical=0
 [ -n "$_snapshot_build" ] || { ui_print "✗ 槽位快照缺少系统标识，已中止安装"; exit 1; }
 
+_slot_digest() {
+    _sd_file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf 'sha256:%s\n' "$(sha256sum "$_sd_file" 2>/dev/null | awk '{print $1}')"
+    elif command -v toybox >/dev/null 2>&1; then
+        _sd_hash=$(toybox sha256sum "$_sd_file" 2>/dev/null | awk '{print $1}')
+        if [ -n "$_sd_hash" ]; then
+            printf 'sha256:%s\n' "$_sd_hash"
+        else
+            set -- $(cksum "$_sd_file" 2>/dev/null)
+            printf 'cksum:%s:%s\n' "${1:-0}" "${2:-0}"
+        fi
+    else
+        set -- $(cksum "$_sd_file" 2>/dev/null)
+        printf 'cksum:%s:%s\n' "${1:-0}" "${2:-0}"
+    fi
+}
+_snapshot_inventory_digest=$(_slot_digest "$FONT_INVENTORY_OUTPUT")
+_snapshot_targets_digest=$(_slot_digest "$FONT_TARGET_LIST")
+[ -n "$_snapshot_inventory_digest" ] && [ -n "$_snapshot_targets_digest" ] || {
+    ui_print "✗ 无法校验设备字体槽位快照，已中止安装"
+    exit 1
+}
+
 {
     printf 'state=ready\n'
     printf 'source=flash-preflight\n'
     printf 'buildKey=%s\n' "$_snapshot_build"
     printf 'slotCount=%s\n' "$_inventory_slots"
     printf 'targetCount=%s\n' "$_target_count"
+    printf 'inventoryDigest=%s\n' "$_snapshot_inventory_digest"
+    printf 'targetsDigest=%s\n' "$_snapshot_targets_digest"
     printf 'capturedAt=%s\n' "$(date +%s 2>/dev/null || echo 0)"
 } > "$FONT_SLOT_SNAPSHOT" 2>/dev/null || {
     ui_print "✗ 无法保存设备字体槽位快照，已中止安装"
