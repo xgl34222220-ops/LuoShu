@@ -198,6 +198,7 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
     else
         _inventory_error=$(sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' "$FONT_INVENTORY_FLASH_ERR" 2>/dev/null | tail -n1)
         [ -n "$_inventory_error" ] || _inventory_error="刷入环境无法确认原厂字体视图"
+        _inventory_error=$(printf '%s' "$_inventory_error" | tr '\r\n' '  ' | cut -c1-512)
         _old_active=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
         _pending_file="$MODPATH/config/stock_inventory_scan_pending"
         {
