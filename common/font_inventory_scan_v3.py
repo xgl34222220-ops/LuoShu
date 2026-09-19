@@ -480,6 +480,7 @@ def _can_reuse(existing: dict[str, Any], build_key: str) -> bool:
         and isinstance(summary, dict)
         and "stockFontUniqueFileCount" in summary
         and "themeOverrideRoots" in summary
+        and isinstance(existing.get("discoveredPartitions"), list)
     )
 
 
@@ -604,6 +605,7 @@ def scan(args: Any) -> int:
         existing_for_scan = existing
     if not fresh_scan and not args.force and existing_for_scan is not None and _can_reuse(existing_for_scan, build_key):
         summary = existing_for_scan["scanSummary"]
+        _write_dynamic_partition_manifest(output, existing_for_scan.get("discoveredPartitions", []))
         print(json.dumps({
             "status": "reused",
             "buildKey": build_key,
