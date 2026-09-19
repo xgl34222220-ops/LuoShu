@@ -118,6 +118,7 @@ FONT_INVENTORY_SCRIPT="$MODPATH/common/stock_inventory_scan.py"
 [ -f "$FONT_INVENTORY_SCRIPT" ] || FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory.py"
 FONT_INVENTORY_PYTHON="$MODPATH/common/python/bin/luoshu-python"
 FONT_INVENTORY_OUTPUT="$MODPATH/config/device_font_inventory.json"
+FONT_INVENTORY_CANDIDATES="$MODPATH/config/device_font_candidates.json"
 FONT_INVENTORY_LOG="$MODPATH/logs/font-inventory.log"
 if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_inventory.json" ]; then
     cp -f "$OLD_MOD/config/device_font_inventory.json" "$FONT_INVENTORY_OUTPUT" 2>/dev/null || true
@@ -143,20 +144,29 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         _inventory_slots=$(printf '%s' "$_inventory_result" | sed -n 's/.*"slotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
         _inventory_xml=$(printf '%s' "$_inventory_result" | sed -n 's/.*"xmlSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
         _inventory_heuristic=$(printf '%s' "$_inventory_result" | sed -n 's/.*"heuristicSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        _inventory_generic=$(printf '%s' "$_inventory_result" | sed -n 's/.*"genericSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+        _inventory_candidates=$(printf '%s' "$_inventory_result" | sed -n 's/.*"candidatePathCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
         _inventory_rom=$(printf '%s' "$_inventory_result" | sed -n 's/.*"romKind"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | tail -n1)
         [ -n "$_inventory_files" ] || _inventory_files="未知"
         [ -n "$_inventory_slots" ] || _inventory_slots="未知"
         [ -n "$_inventory_xml" ] || _inventory_xml="未知"
-        [ -n "$_inventory_heuristic" ] || _inventory_heuristic="未知"
+        [ -n "$_inventory_heuristic" ] || _inventory_heuristic="0"
+        [ -n "$_inventory_generic" ] || _inventory_generic="0"
+        [ -n "$_inventory_candidates" ] || _inventory_candidates="0"
         [ -n "$_inventory_rom" ] || _inventory_rom="generic"
+        ui_print "✓ 安装阶段已记录本机字体候选：$_inventory_candidates 个"
         ui_print "✓ 原厂字体文件：$_inventory_files 个（ROM：$_inventory_rom）"
-        ui_print "✓ 可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / OEM 探测 $_inventory_heuristic）"
+        ui_print "✓ 最终可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / 通用探测 $_inventory_generic / OEM 规则 $_inventory_heuristic）"
     else
         # The install must remain successful even when the current flash namespace
         # cannot expose a verified stock lower/mirror. Keep a retry marker so the
         # pre-mount boot hook scans before LuoShu mounts its own payload.
         : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
-        ui_print "• 安装阶段字体扫描未完成；已安排开机挂载前自动重扫，不中止安装"
+        _inventory_candidates=$(sed -n 's/.*"candidateCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$FONT_INVENTORY_CANDIDATES" 2>/dev/null | head -n1)
+        [ -n "$_inventory_candidates" ] || _inventory_candidates="0"
+        ui_print "✓ 安装阶段已记录本机字体候选：$_inventory_candidates 个"
+        ui_print "• 本次刷写环境没有拿到完整可信原厂视图；最终可替换槽位待重启前确认"
+        ui_print "• 已安排洛书自挂载前自动补扫，不中止安装"
     fi
 else
     : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
