@@ -115,6 +115,7 @@ FONT_INVENTORY_SCRIPT="$MODPATH/common/stock_inventory_scan.py"
 FONT_INVENTORY_PYTHON="$MODPATH/common/python/bin/luoshu-python"
 FONT_INVENTORY_OUTPUT="$MODPATH/config/device_font_inventory.json"
 FONT_INVENTORY_LOG="$MODPATH/logs/font-inventory.log"
+FONT_INVENTORY_FLASH_ERR="$MODPATH/logs/font-inventory-flash.err"
 FONT_TARGET_COMPILER="$MODPATH/common/font_target_manifest.py"
 FONT_TARGET_OUTPUT="$MODPATH/config/replaceable_font_targets.json"
 FONT_TARGET_LIST="$MODPATH/config/replaceable_font_targets.list"
@@ -132,9 +133,10 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
             "$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan --force \
                 --output "$FONT_INVENTORY_OUTPUT" \
                 --font-check "$MODPATH/common/font_check.sh" \
-                --overlay-module "$OLD_MOD" 2>> "$FONT_INVENTORY_LOG"
+                --overlay-module "$OLD_MOD" 2> "$FONT_INVENTORY_FLASH_ERR"
     )
     _inventory_rc=$?
+    [ ! -s "$FONT_INVENTORY_FLASH_ERR" ] || cat "$FONT_INVENTORY_FLASH_ERR" >> "$FONT_INVENTORY_LOG" 2>/dev/null || true
     printf '%s\n' "$_inventory_result" >> "$FONT_INVENTORY_LOG" 2>/dev/null || true
     if [ "$_inventory_rc" -eq 0 ]; then
         rm -f "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
@@ -150,6 +152,22 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         [ -n "$_inventory_rom" ] || _inventory_rom="generic"
         ui_print "✓ 原厂字体文件：$_inventory_files 个（ROM：$_inventory_rom）"
         ui_print "✓ 可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / OEM 探测 $_inventory_heuristic）"
+
+        _view_direct=0
+        for _view_name in direct direct-unoverlaid pre-mount-direct explicit; do
+            _view_count=$(grep -c "\"view\": \"$_view_name\"" "$FONT_INVENTORY_OUTPUT" 2>/dev/null)
+            case "$_view_count" in ''|*[!0-9]*) _view_count=0 ;; esac
+            _view_direct=$((_view_direct + _view_count))
+        done
+        _view_lower=$(grep -c '"view": "luoshu-lower"' "$FONT_INVENTORY_OUTPUT" 2>/dev/null)
+        case "$_view_lower" in ''|*[!0-9]*) _view_lower=0 ;; esac
+        _view_mirror=0
+        for _view_name in magisk-mirror kernelsu-mirror apatch-mirror root-mirror; do
+            _view_count=$(grep -c "\"view\": \"$_view_name\"" "$FONT_INVENTORY_OUTPUT" 2>/dev/null)
+            case "$_view_count" in ''|*[!0-9]*) _view_count=0 ;; esac
+            _view_mirror=$((_view_mirror + _view_count))
+        done
+        ui_print "✓ 原厂视图来源：直接 $_view_direct / LuoShu lower $_view_lower / Root mirror $_view_mirror"
 
         # Compile the rich stock inventory into the runtime's single source of truth.
         # Later switching/mixing reads these exact device paths instead of guessing
@@ -178,12 +196,17 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
             fi
         fi
     else
+        _inventory_error=$(sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' "$FONT_INVENTORY_FLASH_ERR" 2>/dev/null | tail -n1)
+        [ -n "$_inventory_error" ] || _inventory_error="刷入环境无法确认原厂字体视图"
         _old_active=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
         if [ -n "$_old_active" ] && [ "$_old_active" != default ]; then
             : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
-            ui_print "• 当前字体仍在挂载，已安排重启后读取原厂字体清单"
+            ui_print "• 刷入时无法安全读取原厂字体：$_inventory_error"
+            ui_print "• 已安排下次启动在字体挂载前自动重扫，不会把当前覆盖字体当成原厂"
         else
-            ui_print "• 原厂字体清单扫描不可用，本机将自动使用旧静态适配清单"
+            : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
+            ui_print "• 原厂字体清单暂未完成：$_inventory_error"
+            ui_print "• 已安排下次启动自动重扫"
         fi
     fi
 else
