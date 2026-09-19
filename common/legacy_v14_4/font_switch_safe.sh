@@ -36,6 +36,7 @@ TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
 SWITCH_LOCK="$MODDIR/.font_switch.lock"
 PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
+SLOT_SNAPSHOT="$CONFIG_DIR/font-slot-snapshot.conf"
 LOCK_HELD=false
 
 export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
@@ -76,6 +77,53 @@ progress() {
 safe_error() {
     progress 100 "$1"
     printf '{"status":"error","message":"%s","pipeline":"next-boot-stage"}\n' "$(json_escape "$1")"
+    return 1
+}
+
+slot_snapshot_digest() {
+    _ssd_file="$1"
+    [ -s "$_ssd_file" ] || return 1
+    if command -v sha256sum >/dev/null 2>&1; then
+        printf 'sha256:%s\n' "$(sha256sum "$_ssd_file" 2>/dev/null | awk '{print $1}')"
+    elif command -v toybox >/dev/null 2>&1; then
+        _ssd_hash=$(toybox sha256sum "$_ssd_file" 2>/dev/null | awk '{print $1}')
+        if [ -n "$_ssd_hash" ]; then
+            printf 'sha256:%s\n' "$_ssd_hash"
+        else
+            set -- $(cksum "$_ssd_file" 2>/dev/null)
+            printf 'cksum:%s:%s\n' "${1:-0}" "${2:-0}"
+        fi
+    else
+        set -- $(cksum "$_ssd_file" 2>/dev/null)
+        printf 'cksum:%s:%s\n' "${1:-0}" "${2:-0}"
+    fi
+}
+
+target_manifest_current() {
+    _tmc_list="$CONFIG_DIR/replaceable_font_targets.list"
+    _tmc_inventory="$CONFIG_DIR/device_font_inventory.json"
+    [ -s "$SLOT_SNAPSHOT" ] && [ -s "$_tmc_list" ] && [ -s "$_tmc_inventory" ] || return 1
+    [ "$(read_state_value "$SLOT_SNAPSHOT" state)" = ready ] || return 1
+    [ "$(read_state_value "$SLOT_SNAPSHOT" source)" = flash-preflight ] || return 1
+
+    _tmc_saved=$(read_state_value "$SLOT_SNAPSHOT" buildKey)
+    _tmc_list_saved=$(sed -n 's/^# buildKey=//p' "$_tmc_list" 2>/dev/null | head -n1)
+    _tmc_expected_inventory=$(read_state_value "$SLOT_SNAPSHOT" inventoryDigest)
+    _tmc_expected_targets=$(read_state_value "$SLOT_SNAPSHOT" targetsDigest)
+    _tmc_inventory_digest=$(slot_snapshot_digest "$_tmc_inventory") || return 1
+    _tmc_targets_digest=$(slot_snapshot_digest "$_tmc_list") || return 1
+    _tmc_now=$(getprop ro.build.fingerprint 2>/dev/null | tr -d '\r\n')
+    [ -n "$_tmc_now" ] || _tmc_now=$(getprop ro.build.display.id 2>/dev/null | tr -d '\r\n')
+    [ -n "$_tmc_saved" ] && [ "$_tmc_saved" = "$_tmc_list_saved" ] && \
+        [ -n "$_tmc_now" ] && [ "$_tmc_saved" = "$_tmc_now" ] && \
+        [ -n "$_tmc_expected_inventory" ] && [ "$_tmc_expected_inventory" = "$_tmc_inventory_digest" ] && \
+        [ -n "$_tmc_expected_targets" ] && [ "$_tmc_expected_targets" = "$_tmc_targets_digest" ]
+}
+
+ensure_target_manifest() {
+    target_manifest_current && return 0
+    printf '[%s] [SAFE-SWITCH] flash-time slot snapshot missing/stale; runtime rescan forbidden\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" >>"$LOG_FILE" 2>/dev/null || true
     return 1
 }
 
@@ -197,8 +245,10 @@ stage_clone_live() {
 }
 
 stage_clear_text_payload() {
-    for _part in system system_ext product vendor odm oem my_product mi_ext \
-                 oplus_product hw_product cust; do
+    for _part in system system_ext product vendor odm oem my_product \
+                 my_engineering my_company my_preload my_region my_stock \
+                 oplus_product oplus_engineering oplus_version oplus_region \
+                 mi_ext hw_product cust; do
         rm -rf "$STAGE_PAYLOAD/$_part/fonts" 2>/dev/null || true
         _etc="$STAGE_PAYLOAD/$_part/etc"
         [ -d "$_etc" ] || continue
@@ -346,6 +396,14 @@ switch_font() {
     _active_label="${LUOSHU_SWITCH_ACTIVE_LABEL:-$_font}"
     [ -n "$_active_label" ] || _active_label="$_font"
 
+    if [ "$_font" != default ]; then
+        progress 2 '正在读取刷入时设备字体槽位快照'
+        ensure_target_manifest || {
+            safe_error '设备字体槽位快照缺失或系统版本已变化；请重新刷入当前洛书版本以重新扫描槽位'
+            return 1
+        }
+    fi
+
     progress 4 '正在获取字体切换锁'
     lock_acquire || return 1
     cleanup_stale_stages
@@ -377,8 +435,12 @@ switch_font() {
             safe_error 'ROM 字体映射失败，当前启动字体未被改动'
             return 1
         fi
-        progress 66 '正在补齐系统分区同名字体槽位'
-        mirror_existing_targets
+        progress 66 '正在补齐系统分区字体槽位'
+        # HyperOS uses the flash-time per-device target manifest below. Do not
+        # broadcast same filenames into other partitions before exact staging.
+        if [ "${IS_HYPEROS:-false}" != true ]; then
+            mirror_existing_targets
+        fi
         if [ "${IS_HYPEROS:-false}" = true ]; then
             progress 76 '正在补齐 HyperOS 状态栏、锁屏和系统 UI 字体槽位'
             stage_hyperos_complete || {

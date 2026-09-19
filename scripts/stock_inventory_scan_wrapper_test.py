@@ -22,6 +22,14 @@ def main() -> int:
     post_mount = (ROOT / "post-mount.sh").read_text(encoding="utf-8")
     manager = (ROOT / "common/font_manager.sh").read_text(encoding="utf-8")
     assert "stock_inventory_scan_pending" in installer
+    assert "原厂视图来源：直接" in installer
+    assert "LUOSHU_STOCK_SCAN_STRICT=1" in installer
+    assert "source=flash-preflight" in installer
+    assert "inventoryDigest=%s" in installer
+    assert "targetsDigest=%s" in installer
+    assert "刷入前字体槽位扫描失败" in installer
+    assert "本次安装已中止" in installer
+    assert 'cp -f "$OLD_MOD/config/device_font_inventory.json"' not in installer
     assert "action stock_scan" in service
     assert "LUOSHU_STOCK_VIEW_VERIFIED=1" in post_mount
     assert 'rm -f "$MODDIR/config/stock_inventory_scan_pending"' in manager
@@ -60,25 +68,78 @@ def main() -> int:
         try:
             os.environ["LUOSHU_SELF_MOUNT_STATE_ROOT"] = str(state_root)
             inventory.MIRROR_PREFIXES = ()
+            stock._STOCK_VIEW_SOURCES.clear()
             resolved = stock._safe_pick_actual_root(logical, None, True)
             assert resolved == lower, (resolved, lower)
+            assert stock._STOCK_VIEW_SOURCES[str(logical)]["view"] == "luoshu-lower"
 
             untouched = temp / "vendor/fonts"
             untouched.mkdir(parents=True)
             resolved_untouched = stock._safe_pick_actual_root(untouched, None, True)
             assert resolved_untouched == untouched, (resolved_untouched, untouched)
+            assert stock._STOCK_VIEW_SOURCES[str(untouched)]["view"] == "direct-unoverlaid"
+
+            verified = temp / "product/fonts"
+            verified.mkdir(parents=True)
+            os.environ["LUOSHU_STOCK_VIEW_VERIFIED"] = "1"
+            try:
+                resolved_verified = stock._safe_pick_actual_root(verified, None, False)
+            finally:
+                os.environ.pop("LUOSHU_STOCK_VIEW_VERIFIED", None)
+            assert resolved_verified == verified
+            assert stock._STOCK_VIEW_SOURCES[str(verified)]["view"] == "pre-mount-direct"
 
             lower.rmdir()
+
+            proc1_root = temp / "proc1-root"
+            pid1_lower = proc1_root / state_root.relative_to("/") / "lower" / key
+            pid1_lower.mkdir(parents=True)
+            old_proc1 = os.environ.get("LUOSHU_PROC1_ROOT")
+            os.environ["LUOSHU_PROC1_ROOT"] = str(proc1_root)
+            try:
+                resolved_pid1 = stock._safe_pick_actual_root(logical, None, True)
+                assert resolved_pid1 == pid1_lower, (resolved_pid1, pid1_lower)
+                assert stock._STOCK_VIEW_SOURCES[str(logical)]["view"] == "pid1-luoshu-lower"
+            finally:
+                if old_proc1 is None:
+                    os.environ.pop("LUOSHU_PROC1_ROOT", None)
+                else:
+                    os.environ["LUOSHU_PROC1_ROOT"] = old_proc1
+            pid1_lower.rmdir()
+
             try:
                 stock._safe_pick_actual_root(logical, None, True)
-            except inventory.InventoryError:
-                pass
+            except inventory.InventoryError as error:
+                assert str(logical) in str(error), error
+                assert "未找到可信原厂视图" in str(error), error
+                assert stock._STOCK_VIEW_SOURCES[str(logical)]["view"] == "blocked"
             else:
                 raise AssertionError("existing logical root without lower/mirror must be rejected")
+
+            mirror_prefix = temp / "mirror"
+            mirror_root = mirror_prefix / logical.relative_to("/")
+            mirror_root.mkdir(parents=True)
+            inventory.MIRROR_PREFIXES = (mirror_prefix,)
+            resolved_mirror = stock._safe_pick_actual_root(logical, None, True)
+            assert resolved_mirror == mirror_root, (resolved_mirror, mirror_root)
+            assert stock._STOCK_VIEW_SOURCES[str(logical)]["view"] == "root-mirror"
+            inventory.MIRROR_PREFIXES = ()
 
             missing = temp / "missing/fonts"
             resolved_missing = stock._safe_pick_actual_root(missing, None, True)
             assert resolved_missing == missing, (resolved_missing, missing)
+            assert stock._STOCK_VIEW_SOURCES[str(missing)]["view"] == "missing-optional"
+
+            written = {}
+            stock._inject_stock_view_report(
+                temp / "inventory.json",
+                {"scanSummary": {}},
+                lambda _path, data: written.update(data),
+            )
+            counts = written["scanSummary"]["stockViewSourceCounts"]
+            assert counts["root-mirror"] == 1
+            assert counts["direct-unoverlaid"] == 1
+            assert counts["pre-mount-direct"] == 1
         finally:
             inventory.MIRROR_PREFIXES = old_mirrors
             if old_state is None:

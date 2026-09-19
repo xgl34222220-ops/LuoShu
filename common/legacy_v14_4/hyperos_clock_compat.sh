@@ -39,6 +39,11 @@ _lhcc_root_for_part() {
         odm) printf '%s\n' "${LUOSHU_ODM_FONTS_ROOT:-/odm/fonts}" ;;
         oem) printf '%s\n' "${LUOSHU_OEM_FONTS_ROOT:-/oem/fonts}" ;;
         my_product) printf '%s\n' "${LUOSHU_MY_PRODUCT_FONTS_ROOT:-/my_product/fonts}" ;;
+        my_engineering) printf '%s\n' "${LUOSHU_MY_ENGINEERING_FONTS_ROOT:-/my_engineering/fonts}" ;;
+        my_company) printf '%s\n' "${LUOSHU_MY_COMPANY_FONTS_ROOT:-/my_company/fonts}" ;;
+        my_preload) printf '%s\n' "${LUOSHU_MY_PRELOAD_FONTS_ROOT:-/my_preload/fonts}" ;;
+        my_region) printf '%s\n' "${LUOSHU_MY_REGION_FONTS_ROOT:-/my_region/fonts}" ;;
+        my_stock) printf '%s\n' "${LUOSHU_MY_STOCK_FONTS_ROOT:-/my_stock/fonts}" ;;
         hw_product) printf '%s\n' "${LUOSHU_HW_PRODUCT_FONTS_ROOT:-/hw_product/fonts}" ;;
         cust) printf '%s\n' "${LUOSHU_CUST_FONTS_ROOT:-/cust/fonts}" ;;
         *) return 1 ;;
@@ -185,6 +190,29 @@ _lhcc_safe_dynamic_name() {
     return 1
 }
 
+_lhcc_manifest_list() {
+    _lhcc_module="$(_lhcc_module_dir)"
+    printf '%s\n' "$_lhcc_module/config/replaceable_font_targets.list"
+}
+
+_lhcc_manifest_current() {
+    _lhcc_list="$(_lhcc_manifest_list)"
+    [ -s "$_lhcc_list" ] || return 1
+    _lhcc_saved=$(sed -n 's/^# buildKey=//p' "$_lhcc_list" 2>/dev/null | head -n1)
+    _lhcc_current=$(getprop ro.build.fingerprint 2>/dev/null | tr -d '\r\n')
+    [ -n "$_lhcc_current" ] || _lhcc_current=$(getprop ro.build.display.id 2>/dev/null | tr -d '\r\n')
+    [ -n "$_lhcc_saved" ] && [ -n "$_lhcc_current" ] && [ "$_lhcc_saved" = "$_lhcc_current" ]
+}
+
+_lhcc_manifest_names_for_part() {
+    _lhcc_part="$1"
+    _lhcc_list="$(_lhcc_manifest_list)"
+    [ -s "$_lhcc_list" ] || return 1
+    awk -F'|' -v part="$_lhcc_part" '
+        $0 !~ /^#/ && NF >= 4 && $2 == part && $4 == "physical" {print $3}
+    ' "$_lhcc_list" 2>/dev/null
+}
+
 _lhcc_names_for_root() {
     _lhcc_real="$1"
     {
@@ -220,11 +248,17 @@ luoshu_hyperos_clock_payload_ensure() {
     # Mirror only names that exist on this exact ROM. The source always comes from
     # the already-built v14.4 payload, so this is fast and cannot re-enter the v4
     # template/slot builder/validation path that previously stalled at 94%.
-    for _lhcc_part in system system_ext product mi_ext vendor odm oem my_product hw_product cust; do
+    for _lhcc_part in system system_ext product mi_ext vendor odm oem my_product my_engineering my_company my_preload my_region my_stock hw_product cust; do
         _lhcc_real="$(_lhcc_root_for_part "$_lhcc_part")" || continue
         [ -d "$_lhcc_real" ] || continue
         _lhcc_overlay="$_lhcc_payload/$_lhcc_part/fonts"
         _lhcc_part_count=0
+        _lhcc_manifest="$(_lhcc_manifest_list)"
+        if _lhcc_manifest_current; then
+            _lhcc_names="$(_lhcc_manifest_names_for_part "$_lhcc_part")"
+        else
+            _lhcc_names="$(_lhcc_names_for_root "$_lhcc_real")"
+        fi
         while IFS= read -r _lhcc_name; do
             [ -n "$_lhcc_name" ] || continue
             # The framework switches this exact ROM link between locale/theme
@@ -247,7 +281,7 @@ luoshu_hyperos_clock_payload_ensure() {
                 _lhcc_part_count=$((_lhcc_part_count + 1))
             fi
         done <<EOF_LHCC_NAMES
-$(_lhcc_names_for_root "$_lhcc_real")
+$_lhcc_names
 EOF_LHCC_NAMES
         [ "$_lhcc_part_count" -gt 0 ] 2>/dev/null && _lhcc_parts=$((_lhcc_parts + 1))
     done

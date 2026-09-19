@@ -95,9 +95,13 @@ internal fun deviceAcceptanceAutoChecks(
     ),
     DeviceAcceptanceCheck(
         id = "inventory",
-        title = "原厂字体清单",
-        detail = if (trust.inventory == "available") "已建立设备原厂字体清单" else "原厂字体清单缺失或尚未生成",
-        passed = trust.inventory == "available",
+        title = "刷入字体槽位快照",
+        detail = if (trust.inventory == "available" && trust.slotSnapshot == "ready") {
+            "刷入时已冻结 ${trust.slotCount} 个系统字体槽位 / ${trust.targetCount} 个替换目标"
+        } else {
+            "刷入时槽位快照缺失或无效，请重新刷入当前版本"
+        },
+        passed = trust.inventory == "available" && trust.slotSnapshot == "ready" && trust.slotCount > 0,
         automatic = true,
     ),
     DeviceAcceptanceCheck(

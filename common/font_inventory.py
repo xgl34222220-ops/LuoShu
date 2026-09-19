@@ -234,8 +234,9 @@ def _local_name(tag: str) -> str:
 
 
 def _is_ui_family(name: str) -> bool:
+    """Classify system UI families without substring false positives."""
     lowered = name.strip().lower().replace("_", "-")
-    if not lowered or any(token in lowered for token in DENY_FAMILY_TOKENS):
+    if not lowered:
         return False
     if lowered == "sans-serif":
         return True
@@ -243,6 +244,10 @@ def _is_ui_family(name: str) -> bool:
         suffix = lowered.removeprefix("sans-serif-")
         parts = [part for part in suffix.split("-") if part]
         return bool(parts) and all(part in SANS_SERIF_UI_SUFFIX_TOKENS for part in parts)
+
+    tokens = {token for token in re.split(r"[^a-z0-9]+", lowered) if token}
+    if tokens.intersection({"serif", "mono", "monospace", "emoji", "symbol", "icon", "math", "music"}):
+        return False
     return any(
         lowered == prefix or lowered.startswith(prefix + "-")
         for prefix in UI_FAMILY_PREFIXES
@@ -615,6 +620,21 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot]) -> tup
         unresolved = next_round
         if not changed:
             break
+
+    # Alias evidence is authoritative too. OEMs often give the real family an
+    # opaque name and then alias sans-serif/system-ui to it. Promote those target
+    # paths before filtering so future ROM family renames do not need a LuoShu
+    # filename/family whitelist update.
+    for family_name, paths in families.items():
+        if not _is_ui_family(family_name):
+            continue
+        for logical in paths:
+            candidate = all_entries.get(logical)
+            if not candidate:
+                continue
+            candidate["uiEligible"] = True
+            if family_name and family_name not in candidate["families"]:
+                candidate["families"].append(family_name)
 
     slots: dict[str, dict[str, Any]] = {}
     for family_name, paths in families.items():

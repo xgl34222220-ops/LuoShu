@@ -12,6 +12,9 @@ class DeviceTrustUiTest {
             """
                 activeFont=custom-font
                 inventory=available
+slotSnapshot=ready
+slotCount=42
+targetCount=36
                 engine=installed
                 template=trusted
                 alignment=verified
@@ -33,6 +36,9 @@ class DeviceTrustUiTest {
             """
                 activeFont=default
                 inventory=available
+slotSnapshot=ready
+slotCount=42
+targetCount=36
                 engine=installed
                 template=trusted
                 alignment=not-applicable
@@ -52,6 +58,9 @@ class DeviceTrustUiTest {
             """
                 activeFont=custom-font
                 inventory=available
+slotSnapshot=ready
+slotCount=42
+targetCount=36
                 engine=ready
                 template=trusted
                 alignment=compatibility
@@ -70,6 +79,9 @@ class DeviceTrustUiTest {
             """
                 activeFont=custom-font
                 inventory=available
+slotSnapshot=ready
+slotCount=42
+targetCount=36
                 engine=installed
                 template=trusted
                 alignment=compatibility
@@ -88,6 +100,9 @@ class DeviceTrustUiTest {
             """
                 activeFont=custom-font
                 inventory=available
+slotSnapshot=ready
+slotCount=42
+targetCount=36
                 engine=installed
                 template=trusted
                 alignment=failed
@@ -107,6 +122,9 @@ class DeviceTrustUiTest {
             """
                 activeFont=custom-font
                 inventory=available
+slotSnapshot=ready
+slotCount=42
+targetCount=36
                 engine=installed
                 template=trusted
                 alignment=verified
@@ -126,6 +144,9 @@ class DeviceTrustUiTest {
             """
                 activeFont=custom-font
                 inventory=available
+slotSnapshot=ready
+slotCount=42
+targetCount=36
                 engine=installed
                 template=trusted
                 alignment=pending
@@ -145,6 +166,9 @@ class DeviceTrustUiTest {
             """
                 activeFont=custom-font
                 inventory=available
+slotSnapshot=ready
+slotCount=42
+targetCount=36
                 engine=installed
                 template=trusted
                 alignment=failed
@@ -164,6 +188,9 @@ class DeviceTrustUiTest {
             """
                 activeFont=custom-font
                 inventory=available
+slotSnapshot=ready
+slotCount=42
+targetCount=36
                 engine=installed
                 template=trusted
                 alignment=verified
@@ -179,6 +206,54 @@ class DeviceTrustUiTest {
         assertEquals(DeviceTrustLevel.PENDING, state.level)
         assertTrue(state.reapplyPending)
         assertEquals("schema-upgrade", state.reapplyReason)
+    }
+
+    @Test
+    fun pendingStockInventoryReasonIsExposed() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+slotSnapshot=ready
+slotCount=42
+targetCount=36
+                engine=installed
+                template=trusted
+                alignment=compatibility
+                mode=compatibility
+                reason=
+                cachePending=no
+                inventoryScanPending=yes
+                inventoryScanReason=分区 /system/fonts 未找到可信原厂视图
+            """.trimIndent(),
+        )
+
+        assertEquals(DeviceTrustLevel.PENDING, state.level)
+        assertTrue(state.inventoryScanPending)
+        assertEquals("分区 /system/fonts 未找到可信原厂视图", state.inventoryScanReason)
+    }
+
+    @Test
+    fun flashTimeSlotSnapshotIsParsed() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+                slotSnapshot=ready
+                slotCount=128
+                targetCount=93
+                engine=installed
+                template=trusted
+                alignment=compatibility
+                mode=compatibility
+                reason=
+                cachePending=no
+            """.trimIndent(),
+        )
+
+        assertEquals("ready", state.slotSnapshot)
+        assertEquals(128, state.slotCount)
+        assertEquals(93, state.targetCount)
     }
 
     @Test

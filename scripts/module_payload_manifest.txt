@@ -56,6 +56,7 @@ common/font_inventory_scan_v3.py
 common/font_layout_diagnostic.py
 common/font_layout_diagnostic.sh
 common/font_slot_coverage.py
+common/font_target_manifest.py
 common/stock_inventory_scan.py
 common/font_library_cache.sh
 common/font_manager.sh

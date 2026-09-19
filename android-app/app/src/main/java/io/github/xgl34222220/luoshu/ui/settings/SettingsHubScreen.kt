@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -96,6 +97,7 @@ import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuDetailBar
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
@@ -167,14 +169,14 @@ internal fun SettingsHubRoute(
         targetState = section,
         modifier = Modifier.fillMaxSize(),
         transitionSpec = {
+            // Horizontal shared-axis only: keep both destinations fully opaque while moving.
+            // Alpha crossfades left stale text visible through the rounded detail surface on return.
             if (targetState != null) {
-                (fadeIn(tween(250)) + slideInHorizontally(tween(340)) { it })
-                    .togetherWith(
-                        fadeOut(tween(210), targetAlpha = .52f) + slideOutHorizontally(tween(340)) { -it / 7 },
-                    )
+                slideInHorizontally(tween(320)) { it }
+                    .togetherWith(slideOutHorizontally(tween(320)) { -it / 6 })
             } else {
-                (fadeIn(tween(230)) + slideInHorizontally(tween(340)) { -it / 7 })
-                    .togetherWith(fadeOut(tween(210)) + slideOutHorizontally(tween(340)) { it })
+                slideInHorizontally(tween(320)) { -it / 6 }
+                    .togetherWith(slideOutHorizontally(tween(320)) { it })
             }
         },
         label = "settingsDetailTransition",
@@ -584,7 +586,7 @@ private fun SafetyPage(model: SystemCenterViewModel, style: UiStyle) {
                 }
                 Spacer(Modifier.height(10.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(model::refreshHealth, Modifier.weight(1f), enabled = !h.loading && !m.busy) { Icon(Icons.Rounded.Refresh, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("重新体检") }
+                    OutlinedButton(model::refreshHealth, Modifier.weight(1f), enabled = !h.loading && !m.busy) { Icon(Icons.Rounded.Refresh, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("重新检核") }
                     Button(model::clearStaleState, Modifier.weight(1f), enabled = !m.busy) { Icon(Icons.Rounded.Build, null, Modifier.size(17.dp)); Spacer(Modifier.width(5.dp)); Text("安全清理") }
                 }
                 if (m.message.isNotBlank() || m.error.isNotBlank()) Text(m.error.ifBlank { m.message }, color = if (m.error.isNotBlank()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary, fontSize = 13.sp)
@@ -735,7 +737,26 @@ private fun StatusCard(title: String, subtitle: String, level: HealthLevel, load
                 Surface(Modifier.size(38.dp), RoundedCornerShape(13.dp), color = accent.copy(alpha = .11f), contentColor = accent) {
                     Box(contentAlignment = Alignment.Center) { if (loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Icon(when (level) { HealthLevel.HEALTHY -> Icons.Rounded.CheckCircle; HealthLevel.WARNING -> Icons.Rounded.Info; HealthLevel.ERROR -> Icons.Rounded.Error }, null, Modifier.size(21.dp)) }
                 }
-                Spacer(Modifier.width(10.dp)); Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(title, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold); Text(if (loading) "正在读取状态…" else subtitle, color = accent, fontSize = 12.sp, lineHeight = 18.sp) }
+                Spacer(Modifier.width(10.dp))
+                Column(
+                    Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(title, fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold)
+                    if (loading) {
+                        LuoShuLoadingSkeleton(
+                            modifier = Modifier.fillMaxWidth(.46f).height(13.dp),
+                            shape = RoundedCornerShape(999.dp),
+                        )
+                    } else {
+                        AnimatedVisibility(
+                            visible = true,
+                            enter = fadeIn(tween(150)),
+                        ) {
+                            Text(subtitle, color = accent, fontSize = 12.sp, lineHeight = 18.sp)
+                        }
+                    }
+                }
             }
             Spacer(Modifier.height(13.dp)); content()
         }

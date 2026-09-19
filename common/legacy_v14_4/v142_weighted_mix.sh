@@ -17,6 +17,7 @@ CACHE_ROOT="$MODDIR/cache/axes-mix"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
 BASE_ENGINE="$MODDIR/common/font_mix.sh"
 INSTANCE_PY="$MODDIR/common/font_instance.py"
+ROLE_CHECK="$MODDIR/common/font_role_check.sh"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 BASE_TASK_FILE="$CONFIG_DIR/mix_task.conf"
@@ -188,6 +189,14 @@ find_best_source() {
     printf '%s\n' "$_best"
 }
 
+validate_family_roles_async() {
+    [ -f "$ROLE_CHECK" ] || return 0
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$1" cjk >/dev/null 2>&1 || return 2
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$2" latin >/dev/null 2>&1 || return 3
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$3" digit >/dev/null 2>&1 || return 4
+    return 0
+}
+
 run_instance() {
     _source="$1"
     _destination="$2"
@@ -272,6 +281,15 @@ worker() {
     _latin_axes=$(read_value "$TASK_FILE" latinAxes)
     _digit_axes=$(read_value "$TASK_FILE" digitAxes)
     _root=$(read_value "$TASK_FILE" root)
+
+    update_task "$_wanted" running '正在后台校验组合字体' 2 '' ''
+    validate_family_roles_async "$_cjk" "$_latin" "$_digit"
+    _role_rc=$?
+    case "$_role_rc" in
+        2) update_task "$_wanted" failed '中文基底缺少必要字形' 100 '' "$(date +%s)"; rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1 ;;
+        3) update_task "$_wanted" failed '英文字体缺少必要字形' 100 '' "$(date +%s)"; rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1 ;;
+        4) update_task "$_wanted" failed '数字字体缺少必要字形' 100 '' "$(date +%s)"; rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1 ;;
+    esac
 
     update_task "$_wanted" running '正在准备中文字体' 4 '' ''
     prepare_slot cjk "$_cjk" "$_cjk_axes" "$_root" LuoShuMixCJK || {

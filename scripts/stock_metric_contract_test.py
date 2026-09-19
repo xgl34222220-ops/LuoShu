@@ -369,7 +369,7 @@ class StockMetricContractTest(unittest.TestCase):
             collection = TTCollection()
             collection.fonts = [font]
             collection.save(args.system_fonts / disguised_collection)
-        for partition in ("mi_ext", "product", "oplus_product"):
+        for partition in ("mi_ext", "product", "my_region", "oplus_product"):
             directory = self.root / partition / "fonts"
             directory.mkdir(parents=True)
             make_font(directory / "NotoSansSC-Regular.otf", ascent=1190, descent=-290)
@@ -383,6 +383,7 @@ class StockMetricContractTest(unittest.TestCase):
         self.assertIn("/system/fonts/NotoSansSemiCondensed-Regular.ttf", slots)
         self.assertIn("/mi_ext/fonts/NotoSansSC-Regular.otf", slots)
         self.assertIn("/product/fonts/NotoSansSC-Regular.otf", slots)
+        self.assertIn("/my_region/fonts/NotoSansSC-Regular.otf", slots)
         self.assertNotIn("/oplus_product/fonts/NotoSansSC-Regular.otf", slots)
 
     def test_hyperos_additional_alias_reads_stock_partition_and_rejects_theme_target(self) -> None:

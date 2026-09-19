@@ -291,6 +291,18 @@ composite_hash_file() {
     fi
 }
 
+composite_file_identity() {
+    _cfi_file="$1"
+    _cfi_real=$(readlink -f "$_cfi_file" 2>/dev/null)
+    [ -n "$_cfi_real" ] || _cfi_real="$_cfi_file"
+    stat -c '%d:%i:%s:%Y' "$_cfi_real" 2>/dev/null || printf '%s\n' "$_cfi_real"
+}
+
+composite_report_sha() {
+    _crs_report="$1"
+    sed -n 's/^.*"sha256":"\([^"]*\)".*$/\1/p' "$_crs_report" 2>/dev/null | head -n1
+}
+
 set_mix_error() {
     LAST_MIX_ERROR="$1"
     printf '%s\n' "$LAST_MIX_ERROR" > "$CONFIG_DIR/mix_last_error.txt" 2>/dev/null || true
@@ -370,9 +382,22 @@ build_composite_file() {
     check_composite_runtime || return 1
     _cache="$MODDIR/cache/full-composite-v7"
     mkdir -p "$_cache" "$MODDIR/cache/tmp" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
+    _cjk_identity=$(composite_file_identity "$_cjk_src")
+    _latin_identity=$(composite_file_identity "$_latin_src")
+    _digit_identity=$(composite_file_identity "$_digit_src")
     _cjk_hash=$(composite_hash_file "$_cjk_src")
-    _latin_hash=$(composite_hash_file "$_latin_src")
-    _digit_hash=$(composite_hash_file "$_digit_src")
+    if [ "$_latin_identity" = "$_cjk_identity" ]; then
+        _latin_hash="$_cjk_hash"
+    else
+        _latin_hash=$(composite_hash_file "$_latin_src")
+    fi
+    if [ "$_digit_identity" = "$_cjk_identity" ]; then
+        _digit_hash="$_cjk_hash"
+    elif [ "$_digit_identity" = "$_latin_identity" ]; then
+        _digit_hash="$_latin_hash"
+    else
+        _digit_hash=$(composite_hash_file "$_digit_src")
+    fi
     COMPOSITE_CJK_HASH="$_cjk_hash"
     COMPOSITE_LATIN_HASH="$_latin_hash"
     COMPOSITE_DIGIT_HASH="$_digit_hash"
@@ -429,7 +454,10 @@ build_composite_file() {
     fi
     prune_composite_cache "$_cache"
     COMPOSITE_RESULT="$_cached"; COMPOSITE_REPORT="$_report"
-    COMPOSITE_OUTPUT_HASH=$(composite_hash_file "$_cached")
+    # Python already hashes the finished font for its report. Re-reading a large
+    # CJK output here was a second full-file pass at the 93% tail.
+    COMPOSITE_OUTPUT_HASH=$(composite_report_sha "$_report")
+    [ -n "$COMPOSITE_OUTPUT_HASH" ] || COMPOSITE_OUTPUT_HASH=$(composite_hash_file "$_cached")
     return 0
 }
 

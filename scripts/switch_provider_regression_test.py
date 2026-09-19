@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise service routing, active provider sources and slow-copy staging."""
 import os
+import hashlib
 from pathlib import Path
 import shutil
 import subprocess
@@ -188,6 +189,29 @@ apply_font_by_rom() {
         old = live / 'Roboto-Regular.ttf'
         old.write_bytes(b'old active font' * 300)
         before = old.read_bytes()
+
+        # Normal switches must consume the slot snapshot frozen at flash time.
+        self.executable('getprop', '''
+case "$1" in
+  ro.build.fingerprint|ro.build.display.id) echo fixture-build ;;
+esac
+''')
+        inventory = self.module / 'config/device_font_inventory.json'
+        inventory.write_text('{"schema":"device-font-inventory-v1","state":"ready"}\n')
+        targets = self.module / 'config/replaceable_font_targets.list'
+        targets.write_text('# schema=device-font-target-manifest-v1\n# buildKey=fixture-build\n')
+        inventory_digest = 'sha256:' + hashlib.sha256(inventory.read_bytes()).hexdigest()
+        targets_digest = 'sha256:' + hashlib.sha256(targets.read_bytes()).hexdigest()
+        (self.module / 'config/font-slot-snapshot.conf').write_text(
+            'state=ready\n'
+            'source=flash-preflight\n'
+            'buildKey=fixture-build\n'
+            'slotCount=1\n'
+            'targetCount=1\n'
+            f'inventoryDigest={inventory_digest}\n'
+            f'targetsDigest={targets_digest}\n'
+        )
+
         command = ['sh', str(legacy / 'font_switch_safe.sh'), 'action', 'switch', 'Selected']
         env = {**self.env, 'LUOSHU_PUBLIC_DIR': str(public)}
         success = subprocess.run(command, env=env, capture_output=True, text=True, timeout=5)

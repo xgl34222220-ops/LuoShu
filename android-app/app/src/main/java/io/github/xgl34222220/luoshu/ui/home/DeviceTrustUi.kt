@@ -65,6 +65,9 @@ internal data class DeviceTrustState(
     val loading: Boolean = true,
     val activeFont: String = "unknown",
     val inventory: String = "unknown",
+    val slotSnapshot: String = "missing",
+    val slotCount: Int = 0,
+    val targetCount: Int = 0,
     val engine: String = "unknown",
     val template: String = "unknown",
     val alignment: String = "unknown",
@@ -73,6 +76,8 @@ internal data class DeviceTrustState(
     val mountState: String = "unknown",
     val mountFailure: String = "",
     val cachePending: Boolean = false,
+    val inventoryScanPending: Boolean = false,
+    val inventoryScanReason: String = "",
     val reapplyPending: Boolean = false,
     val reapplyReason: String = "",
     val error: String = "",
@@ -82,8 +87,10 @@ internal data class DeviceTrustState(
             error.isNotBlank() -> DeviceTrustLevel.ISSUE
             activeFont in setOf("", "default") || alignment == "not-applicable" -> DeviceTrustLevel.SYSTEM
             mountState == "failed" -> DeviceTrustLevel.ISSUE
+            activeFont !in setOf("", "default") && slotSnapshot != "ready" -> DeviceTrustLevel.ISSUE
             alignment == "failed" || reason in failedTrustReasons -> DeviceTrustLevel.ISSUE
             reapplyPending -> DeviceTrustLevel.PENDING
+            inventoryScanPending -> DeviceTrustLevel.PENDING
             alignment == "verified" && mode in setOf("aligned", "mount-verified", "mount-confirmed") -> DeviceTrustLevel.VERIFIED
             alignment == "pending" || reason in pendingTrustReasons -> DeviceTrustLevel.PENDING
             alignment == "compatibility" || mode == "compatibility" -> DeviceTrustLevel.COMPATIBILITY
@@ -104,6 +111,12 @@ internal suspend fun loadDeviceTrustState(): DeviceTrustState {
         [ -n "${'$'}active" ] || active=default
         inventory=missing
         [ -s "${'$'}CFG/device_font_inventory.json" ] && inventory=available
+        slotSnapshot="${'$'}(read_value "${'$'}CFG/font-slot-snapshot.conf" state)"
+        slotCount="${'$'}(read_value "${'$'}CFG/font-slot-snapshot.conf" slotCount)"
+        targetCount="${'$'}(read_value "${'$'}CFG/font-slot-snapshot.conf" targetCount)"
+        [ -n "${'$'}slotSnapshot" ] || slotSnapshot=missing
+        case "${'$'}slotCount" in ''|*[!0-9]*) slotCount=0 ;; esac
+        case "${'$'}targetCount" in ''|*[!0-9]*) targetCount=0 ;; esac
         engine="${'$'}(read_value "${'$'}CFG/device-font-engine.conf" state)"
         template="${'$'}(read_value "${'$'}CFG/device-font-template.state" state)"
         alignment="${'$'}(read_value "${'$'}CFG/device-font-load-verification.conf" state)"
@@ -125,10 +138,16 @@ internal suspend fun loadDeviceTrustState(): DeviceTrustState {
         fi
         cachePending=no
         [ -s "${'$'}CFG/device-font-cache-pending.conf" ] && cachePending=yes
+        inventoryScanState="${'$'}(read_value "${'$'}CFG/stock_inventory_scan_pending" state)"
+        inventoryScanReason="${'$'}(read_value "${'$'}CFG/stock_inventory_scan_pending" reason)"
+        inventoryScanPending=no
+        [ "${'$'}inventoryScanState" = pending ] && inventoryScanPending=yes
         reapplyState="${'$'}(read_value "${'$'}CFG/font-payload-rebuild-pending.conf" state)"
         reapplyReason="${'$'}(read_value "${'$'}CFG/font-payload-rebuild-pending.conf" reason)"
         reapplyPending=no
         [ "${'$'}reapplyState" = awaiting-explicit-apply ] && reapplyPending=yes
+        printf 'slotSnapshot=%s\nslotCount=%s\ntargetCount=%s\n' "${'$'}slotSnapshot" "${'$'}slotCount" "${'$'}targetCount"
+        printf 'inventoryScanPending=%s\ninventoryScanReason=%s\n' "${'$'}inventoryScanPending" "${'$'}inventoryScanReason"
         printf 'activeFont=%s\ninventory=%s\nengine=%s\ntemplate=%s\nalignment=%s\nmode=%s\nreason=%s\nmountState=%s\nmountFailure=%s\ncachePending=%s\nreapplyPending=%s\nreapplyReason=%s\n' \
             "${'$'}active" "${'$'}inventory" "${'$'}{engine:-missing}" "${'$'}{template:-missing}" \
             "${'$'}{alignment:-pending}" "${'$'}{mode:-compatibility}" "${'$'}reason" \
@@ -157,6 +176,9 @@ internal fun parseDeviceTrustOutput(raw: String): DeviceTrustState {
         loading = false,
         activeFont = values["activeFont"].orEmpty().ifBlank { "default" },
         inventory = values["inventory"].orEmpty().ifBlank { "unknown" },
+        slotSnapshot = values["slotSnapshot"].orEmpty().ifBlank { "missing" },
+        slotCount = values["slotCount"]?.toIntOrNull() ?: 0,
+        targetCount = values["targetCount"]?.toIntOrNull() ?: 0,
         engine = values["engine"].orEmpty().ifBlank { "unknown" },
         template = values["template"].orEmpty().ifBlank { "unknown" },
         alignment = values["alignment"].orEmpty().ifBlank { "unknown" },
@@ -165,6 +187,8 @@ internal fun parseDeviceTrustOutput(raw: String): DeviceTrustState {
         mountState = values["mountState"].orEmpty().ifBlank { "unknown" },
         mountFailure = values["mountFailure"].orEmpty(),
         cachePending = values["cachePending"] == "yes",
+        inventoryScanPending = values["inventoryScanPending"] == "yes",
+        inventoryScanReason = values["inventoryScanReason"].orEmpty(),
         reapplyPending = values["reapplyPending"] == "yes",
         reapplyReason = values["reapplyReason"].orEmpty(),
     )
@@ -227,6 +251,14 @@ internal fun DeviceTrustDialog(
                 Spacer(Modifier.size(12.dp))
                 DeviceTrustRow("当前字体", friendlyActiveFont(state.activeFont))
                 DeviceTrustRow("原厂字体清单", friendlyTrustValue(state.inventory))
+                DeviceTrustRow(
+                    "刷入槽位快照",
+                    if (state.slotSnapshot == "ready") {
+                        "${state.slotCount} 个槽位 · ${state.targetCount} 个替换目标"
+                    } else {
+                        "缺失，请重新刷入当前版本"
+                    },
+                )
                 DeviceTrustRow("设备字体引擎", friendlyTrustValue(state.engine))
                 DeviceTrustRow("原厂模板", friendlyTrustValue(state.template))
                 DeviceTrustRow("开机加载验证", friendlyTrustValue(state.alignment))
@@ -239,6 +271,12 @@ internal fun DeviceTrustDialog(
                     DeviceTrustRow("验证说明", friendlyTrustReason(state.reason))
                 }
                 DeviceTrustRow("后台对齐缓存", if (state.cachePending) "等待生成" else "无待处理任务")
+                if (state.inventoryScanPending) {
+                    DeviceTrustRow(
+                        "原厂清单重扫",
+                        state.inventoryScanReason.ifBlank { "等待下次启动在字体挂载前重新扫描" },
+                    )
+                }
                 if (state.reapplyPending) {
                     DeviceTrustRow("负载升级", "应用一次当前字体后，完整重启一次")
                 }
@@ -319,6 +357,12 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
             Icons.Rounded.Info,
             scheme.secondary,
         )
+        state.inventoryScanPending -> DeviceTrustPresentation(
+            "原厂字体清单等待重扫",
+            state.inventoryScanReason.ifBlank { "下次启动会在洛书挂载字体前自动读取原厂字体" },
+            Icons.Rounded.Info,
+            scheme.secondary,
+        )
         state.level == DeviceTrustLevel.COMPATIBILITY -> DeviceTrustPresentation(
             "字体效果尚未确认",
             "已生成兼容映射，但没有系统实际加载证据",
@@ -327,7 +371,12 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
         )
         state.level == DeviceTrustLevel.ISSUE -> DeviceTrustPresentation(
             "字体应用失败",
-            if (state.mountFailure.isNotBlank()) "自挂载失败：${state.mountFailure}" else friendlyTrustReason(state.reason).ifBlank { "加载验证失败，请根据说明修复后重新应用" },
+            when {
+                state.slotSnapshot != "ready" && state.activeFont !in setOf("", "default") ->
+                    "刷入时设备字体槽位快照缺失或已失效，请重新刷入当前洛书版本"
+                state.mountFailure.isNotBlank() -> "自挂载失败：${state.mountFailure}"
+                else -> friendlyTrustReason(state.reason).ifBlank { "加载验证失败，请根据说明修复后重新应用" }
+            },
             Icons.Rounded.Warning,
             scheme.error,
         )

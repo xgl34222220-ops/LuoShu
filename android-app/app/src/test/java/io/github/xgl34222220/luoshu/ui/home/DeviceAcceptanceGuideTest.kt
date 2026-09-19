@@ -18,6 +18,9 @@ class DeviceAcceptanceGuideTest {
             trust = DeviceTrustState(
                 loading = false,
                 inventory = "available",
+                slotSnapshot = "ready",
+                slotCount = 42,
+                targetCount = 36,
                 engine = "ready",
                 template = "trusted",
                 alignment = "verified",
@@ -41,6 +44,9 @@ class DeviceAcceptanceGuideTest {
             trust = DeviceTrustState(
                 loading = false,
                 inventory = "available",
+                slotSnapshot = "ready",
+                slotCount = 42,
+                targetCount = 36,
                 alignment = "pending",
                 mode = "compatibility",
                 cachePending = true,
@@ -71,6 +77,9 @@ class DeviceAcceptanceGuideTest {
             trust = DeviceTrustState(
                 loading = false,
                 inventory = "available",
+                slotSnapshot = "ready",
+                slotCount = 42,
+                targetCount = 36,
                 engine = "missing",
                 template = "trusted",
                 alignment = "verified",

@@ -22,6 +22,11 @@ _luoshu_hyperos_root_pairs() {
     printf '%s|%s\n' "${LUOSHU_ODM_FONTS_ROOT:-/odm/fonts}" "$_module/odm/fonts"
     printf '%s|%s\n' "${LUOSHU_OEM_FONTS_ROOT:-/oem/fonts}" "$_module/oem/fonts"
     printf '%s|%s\n' "${LUOSHU_MY_PRODUCT_FONTS_ROOT:-/my_product/fonts}" "$_module/my_product/fonts"
+    printf '%s|%s\n' "${LUOSHU_MY_ENGINEERING_FONTS_ROOT:-/my_engineering/fonts}" "$_module/my_engineering/fonts"
+    printf '%s|%s\n' "${LUOSHU_MY_COMPANY_FONTS_ROOT:-/my_company/fonts}" "$_module/my_company/fonts"
+    printf '%s|%s\n' "${LUOSHU_MY_PRELOAD_FONTS_ROOT:-/my_preload/fonts}" "$_module/my_preload/fonts"
+    printf '%s|%s\n' "${LUOSHU_MY_REGION_FONTS_ROOT:-/my_region/fonts}" "$_module/my_region/fonts"
+    printf '%s|%s\n' "${LUOSHU_MY_STOCK_FONTS_ROOT:-/my_stock/fonts}" "$_module/my_stock/fonts"
     printf '%s|%s\n' "${LUOSHU_HW_PRODUCT_FONTS_ROOT:-/hw_product/fonts}" "$_module/hw_product/fonts"
     printf '%s|%s\n' "${LUOSHU_CUST_FONTS_ROOT:-/cust/fonts}" "$_module/cust/fonts"
 }
@@ -102,7 +107,9 @@ _hyperos_remove_overlay_file() {
     rm -f "$_module/system/fonts/$_file" "$_module/product/fonts/$_file" \
         "$_module/system_ext/fonts/$_file" "$_module/mi_ext/fonts/$_file" \
         "$_module/vendor/fonts/$_file" "$_module/my_product/fonts/$_file" \
-        "$_module/hw_product/fonts/$_file" 2>/dev/null || true
+        "$_module/my_engineering/fonts/$_file" "$_module/my_company/fonts/$_file" \
+        "$_module/my_preload/fonts/$_file" "$_module/my_region/fonts/$_file" \
+        "$_module/my_stock/fonts/$_file" "$_module/hw_product/fonts/$_file" 2>/dev/null || true
 }
 
 _hyperos_alias_existing_targets() {

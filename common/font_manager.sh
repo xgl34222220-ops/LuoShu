@@ -23,6 +23,10 @@ PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 STOCK_SCANNER="$MODDIR/common/stock_inventory_scan.py"
 STOCK_INVENTORY="$MODDIR/config/device_font_inventory.json"
+STOCK_OVERLAY_MODULE="${LUOSHU_STOCK_SCAN_OVERLAY_MODULE:-$MODDIR}"
+TARGET_COMPILER="$MODDIR/common/font_target_manifest.py"
+TARGET_MANIFEST="$MODDIR/config/replaceable_font_targets.json"
+TARGET_LIST="$MODDIR/config/replaceable_font_targets.list"
 STOCK_SCAN_LOCK="$MODDIR/.stock-inventory-scan.lock"
 export MODDIR LUOSHU_PUBLIC_DIR
 
@@ -32,6 +36,26 @@ json_escape_router() {
 
 stock_scan_available() {
     [ -x "$PYBIN" ] && [ -f "$STOCK_SCANNER" ] && [ -f "$MODDIR/common/font_inventory.py" ] && [ -f "$MODDIR/common/font_check.sh" ]
+}
+
+refresh_target_manifest() {
+    [ -s "$STOCK_INVENTORY" ] && [ -f "$TARGET_COMPILER" ] && [ -x "$PYBIN" ] || return 1
+    _rtm_out=$(
+        PYTHONHOME="$PYROOT" \
+        PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$PYBIN" "$TARGET_COMPILER" \
+                --inventory "$STOCK_INVENTORY" \
+                --output "$TARGET_MANIFEST" \
+                --list-output "$TARGET_LIST" 2>>"$MODDIR/logs/font-inventory.log"
+    )
+    _rtm_rc=$?
+    [ "$_rtm_rc" -eq 0 ] || {
+        rm -f "$TARGET_MANIFEST" "$TARGET_LIST" 2>/dev/null || true
+        return "$_rtm_rc"
+    }
+    printf '%s\n' "$_rtm_out" >>"$MODDIR/logs/font-inventory.log" 2>/dev/null || true
+    return 0
 }
 
 stock_scan_lock_acquire() {
@@ -70,6 +94,80 @@ stock_scan_lock_release() {
     rmdir "$STOCK_SCAN_LOCK" 2>/dev/null || true
 }
 
+stock_scan_namespace_exec() {
+    _sns_shell="${LUOSHU_STOCK_SCAN_ANDROID_SHELL:-/system/bin/sh}"
+    [ -x "$_sns_shell" ] || return 125
+    [ "${LUOSHU_STOCK_SCAN_NAMESPACE:-}" != pid1 ] || return 125
+    [ "${LUOSHU_STOCK_VIEW_VERIFIED:-}" != 1 ] || return 125
+    _sns_active=$(head -n1 "$STOCK_OVERLAY_MODULE/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_sns_active" ] || _sns_active=default
+    [ "$_sns_active" != default ] || return 125
+
+    _sns_force="${LUOSHU_STOCK_SCAN_FORCE_NAMESPACE:-0}"
+    _sns_self=$(readlink /proc/self/ns/mnt 2>/dev/null)
+    _sns_pid1=$(readlink /proc/1/ns/mnt 2>/dev/null)
+    if [ "$_sns_force" != 1 ]; then
+        [ -n "$_sns_self" ] && [ -n "$_sns_pid1" ] && [ "$_sns_self" != "$_sns_pid1" ] || return 125
+    fi
+
+    _sns_cmd="${LUOSHU_STOCK_SCAN_NSENTER:-}"
+    if [ -z "$_sns_cmd" ]; then
+        _sns_cmd=$(command -v nsenter 2>/dev/null)
+    fi
+    if [ -n "$_sns_cmd" ] && [ -x "$_sns_cmd" ]; then
+        "$_sns_cmd" -t 1 -m -- "$_sns_shell" -c '
+            MODDIR="$1"
+            LUOSHU_PUBLIC_DIR="$2"
+            LUOSHU_STOCK_SCAN_NAMESPACE=pid1
+            LUOSHU_STOCK_SCAN_OVERLAY_MODULE="$4"
+            LUOSHU_STOCK_SCAN_STRICT="$5"
+            export MODDIR LUOSHU_PUBLIC_DIR LUOSHU_STOCK_SCAN_NAMESPACE LUOSHU_STOCK_SCAN_OVERLAY_MODULE LUOSHU_STOCK_SCAN_STRICT
+            exec "$3" "$1/common/font_manager.sh" action stock_scan_local
+        ' sh "$MODDIR" "$LUOSHU_PUBLIC_DIR" "$_sns_shell" "$STOCK_OVERLAY_MODULE" "${LUOSHU_STOCK_SCAN_STRICT:-0}"
+        return $?
+    fi
+
+    if command -v toybox >/dev/null 2>&1 && toybox nsenter --help >/dev/null 2>&1; then
+        toybox nsenter -t 1 -m -- "$_sns_shell" -c '
+            MODDIR="$1"
+            LUOSHU_PUBLIC_DIR="$2"
+            LUOSHU_STOCK_SCAN_NAMESPACE=pid1
+            LUOSHU_STOCK_SCAN_OVERLAY_MODULE="$4"
+            LUOSHU_STOCK_SCAN_STRICT="$5"
+            export MODDIR LUOSHU_PUBLIC_DIR LUOSHU_STOCK_SCAN_NAMESPACE LUOSHU_STOCK_SCAN_OVERLAY_MODULE LUOSHU_STOCK_SCAN_STRICT
+            exec "$3" "$1/common/font_manager.sh" action stock_scan_local
+        ' sh "$MODDIR" "$LUOSHU_PUBLIC_DIR" "$_sns_shell" "$STOCK_OVERLAY_MODULE" "${LUOSHU_STOCK_SCAN_STRICT:-0}"
+        return $?
+    fi
+    return 125
+}
+
+stock_scan_broker() {
+    # Early-boot callers are already in the trusted stock-visible namespace.
+    if [ "${LUOSHU_STOCK_VIEW_VERIFIED:-}" = 1 ] || [ "${LUOSHU_STOCK_SCAN_NAMESPACE:-}" = pid1 ]; then
+        stock_scan_json
+        return $?
+    fi
+
+    _ssb_out=$(stock_scan_namespace_exec 2>&1)
+    _ssb_rc=$?
+    if [ "$_ssb_rc" -eq 0 ]; then
+        printf '%s\n' "$_ssb_out"
+        return 0
+    fi
+    if [ "$_ssb_rc" -ne 125 ]; then
+        mkdir -p "$MODDIR/logs" 2>/dev/null || true
+        printf '[%s] global stock scan failed rc=%s: %s\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" \
+            "$_ssb_rc" "$(printf '%s' "$_ssb_out" | tr '\r\n' '  ' | cut -c1-512)" \
+            >>"$MODDIR/logs/font-inventory.log" 2>/dev/null || true
+    fi
+
+    # Fall back to the current root namespace. Magisk often exposes its mirror
+    # here even when PID 1 entry is unavailable.
+    stock_scan_json
+}
+
 stock_scan_json() {
     if ! stock_scan_available; then
         printf '{"status":"error","message":"%s"}\n' "$(json_escape_router '原厂字体扫描组件不完整')"
@@ -92,6 +190,12 @@ stock_scan_json() {
         )
         _stock_rc=$?
         if [ "$_stock_rc" -eq 0 ]; then
+            if ! refresh_target_manifest >/dev/null 2>&1; then
+                stock_scan_lock_release
+                trap - EXIT HUP INT TERM
+                printf '{"status":"error","message":"%s"}\n' "$(json_escape_router '原厂字体槽位已扫描，但设备专属替换清单生成失败')"
+                return 1
+            fi
             rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
             stock_scan_lock_release
             trap - EXIT HUP INT TERM
@@ -105,13 +209,19 @@ stock_scan_json() {
         LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
             "$PYBIN" "$STOCK_SCANNER" \
                 --scan --force \
-                --overlay-module "$MODDIR" \
+                --overlay-module "$STOCK_OVERLAY_MODULE" \
                 --font-check "$MODDIR/common/font_check.sh" \
                 --output "$STOCK_INVENTORY" 2>&1
     )
     _stock_rc=$?
     _stock_last=$(printf '%s\n' "$_stock_out" | tail -n1)
     if [ "$_stock_rc" -eq 0 ] && [ -s "$STOCK_INVENTORY" ]; then
+        if ! refresh_target_manifest >/dev/null 2>&1; then
+            stock_scan_lock_release
+            trap - EXIT HUP INT TERM
+            printf '{"status":"error","message":"%s"}\n' "$(json_escape_router '原厂字体槽位已扫描，但设备专属替换清单生成失败')"
+            return 1
+        fi
         rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
         stock_scan_lock_release
         trap - EXIT HUP INT TERM
@@ -121,9 +231,25 @@ stock_scan_json() {
     _stock_message=$(printf '%s\n' "$_stock_last" | sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p')
     [ -n "$_stock_message" ] || _stock_message="$_stock_out"
     [ -n "$_stock_message" ] || _stock_message='原厂字体扫描失败'
+    _stock_message=$(printf '%s' "$_stock_message" | tr '\r\n' '  ' | cut -c1-512)
+    if [ "${LUOSHU_STOCK_SCAN_STRICT:-0}" != 1 ]; then
+        {
+            printf 'state=pending\n'
+            printf 'reason=%s\n' "$_stock_message"
+            printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+        } > "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
+        chmod 0644 "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
+    else
+        rm -f "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
+    fi
     stock_scan_lock_release
     trap - EXIT HUP INT TERM
-    printf '{"status":"error","message":"%s"}\n' "$(json_escape_router "$_stock_message")"
+    if [ "${LUOSHU_STOCK_SCAN_STRICT:-0}" = 1 ]; then
+        printf '{"status":"error","message":"%s","deferred":false}\n' "$(json_escape_router "$_stock_message")"
+    else
+        printf '{"status":"error","message":"%s","deferred":true}\n' \
+            "$(json_escape_router "$_stock_message；已安排下次启动前自动重扫")"
+    fi
     return 1
 }
 
@@ -150,8 +276,13 @@ if [ "${1:-}" = action ] && [ "${2:-}" = switch ]; then
     exit 1
 fi
 
-if [ "${1:-}" = action ] && [ "${2:-}" = stock_scan ]; then
+if [ "${1:-}" = action ] && [ "${2:-}" = stock_scan_local ]; then
     stock_scan_json
+    exit $?
+fi
+
+if [ "${1:-}" = action ] && [ "${2:-}" = stock_scan ]; then
+    stock_scan_broker
     exit $?
 fi
 

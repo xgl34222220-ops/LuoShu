@@ -64,10 +64,22 @@ class HyperOSMetricsTest(unittest.TestCase):
         font_file(self.fonts / '400.ttf')
 
     def inventory(self, slots):
+        normalized = {}
+        for logical, entry in slots.items():
+            item = dict(entry)
+            item.setdefault('validatedFormat', 'OTF' if logical.lower().endswith('.otf') else 'TTF')
+            item.setdefault('faceIndex', 0)
+            item.setdefault('weight', 400)
+            item.setdefault('style', 'normal')
+            item.setdefault('source', 'hyperos-physical')
+            item.setdefault('families', [])
+            normalized[logical] = item
         (self.module / 'config/device_font_inventory.json').write_text(json.dumps({
             'schema': 'device-font-inventory-v1', 'inventoryRevision': 1,
-            'state': 'ready', 'buildKey': 'fixture', 'slots': slots}))
-        for logical in slots:
+            'scannerRevision': 3, 'metricsRevision': 3, 'hyperosCoverageRevision': 5,
+            'state': 'ready', 'buildKey': 'fixture', 'romKind': 'hyperos',
+            'slots': normalized}))
+        for logical in normalized:
             part, name = logical.split('/')[1], logical.split('/')[-1]
             (self.root / 'stock' / part / name).touch()
 
@@ -99,6 +111,88 @@ class HyperOSMetricsTest(unittest.TestCase):
             self.assertFalse(font['OS/2'].fsSelection & 128)
         with TTFont(self.fonts / 'Roboto-Bold.ttf') as font:
             self.assertEqual(font['head'].yMax, 900)
+
+    def test_exact_manifest_path_does_not_expand_to_same_name_in_other_partition(self):
+        self.inventory({'/system/fonts/Roboto-Regular.ttf': slot(),
+                        '/product/fonts/Roboto-Regular.ttf': slot(ascent=850, descent=-150)})
+        manifest = {
+            'schema': 'device-font-target-manifest-v1',
+            'revision': 1,
+            'buildKey': 'fixture',
+            'romKind': 'hyperos',
+            'targets': [{
+                'path': '/product/fonts/Roboto-Regular.ttf',
+                'partition': 'product',
+                'name': 'Roboto-Regular.ttf',
+                'mode': 'physical',
+            }],
+        }
+        (self.module / 'config/replaceable_font_targets.json').write_text(json.dumps(manifest))
+        result = batch.build(self.module, self.stage, [])
+        self.assertEqual(result['mapped'], 1)
+        self.assertFalse((self.stage / 'system/fonts/Roboto-Regular.ttf').exists())
+        target = self.stage / 'product/fonts/Roboto-Regular.ttf'
+        self.assertTrue(target.exists())
+        with TTFont(target) as font:
+            self.assertEqual(font['hhea'].ascent, 850)
+
+    def test_manifest_accepts_future_oem_ui_name_from_xml_evidence(self):
+        logical = '/my_company/fonts/FutureSystemUi-Regular.ttf'
+        entry = slot(ascent=910, descent=-210)
+        entry.update({
+            'source': 'xml',
+            'families': ['system-ui'],
+            'validatedFormat': 'TTF',
+            'format': 'TTF',
+            'faceIndex': 0,
+            'style': 'normal',
+        })
+        entry['metrics']['coverage'] = {
+            'hasHan': False, 'hasLatin': True, 'hanCount': 0,
+            'latinCount': 52, 'unicodeCount': 96, 'cjkPunctuation': [],
+        }
+        self.inventory({logical: entry})
+        manifest = {
+            'schema': 'device-font-target-manifest-v1',
+            'revision': 1,
+            'buildKey': 'fixture',
+            'romKind': 'hyperos',
+            'targets': [{
+                'path': logical,
+                'partition': 'my_company',
+                'name': 'FutureSystemUi-Regular.ttf',
+                'mode': 'physical',
+            }],
+        }
+        (self.module / 'config/replaceable_font_targets.json').write_text(json.dumps(manifest))
+        result = batch.build(self.module, self.stage, [])
+        self.assertEqual(result['mapped'], 1)
+        target = self.stage / 'my_company/fonts/FutureSystemUi-Regular.ttf'
+        self.assertTrue(target.exists())
+        with TTFont(target) as font:
+            self.assertEqual(font['hhea'].ascent, 910)
+
+    def test_manifest_prunes_safe_but_undetected_stale_alias(self):
+        self.inventory({'/product/fonts/Roboto-Regular.ttf': slot(ascent=850, descent=-150)})
+        stale = self.fonts / 'MiSansVF.ttf'
+        font_file(stale, 777)
+        manifest = {
+            'schema': 'device-font-target-manifest-v1',
+            'revision': 1,
+            'buildKey': 'fixture',
+            'romKind': 'hyperos',
+            'targets': [{
+                'path': '/product/fonts/Roboto-Regular.ttf',
+                'partition': 'product',
+                'name': 'Roboto-Regular.ttf',
+                'mode': 'physical',
+            }],
+        }
+        (self.module / 'config/replaceable_font_targets.json').write_text(json.dumps(manifest))
+        result = batch.build(self.module, self.stage, [])
+        self.assertEqual(result['mapped'], 1)
+        self.assertFalse(stale.exists(), 'stale safe alias outside manifest must be removed')
+        self.assertTrue((self.stage / 'product/fonts/Roboto-Regular.ttf').exists())
 
     def test_no_cascade_when_alias_is_source(self):
         (self.fonts / '400.ttf').rename(self.fonts / 'MiSansVF.ttf')

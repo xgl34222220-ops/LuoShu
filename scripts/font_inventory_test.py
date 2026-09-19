@@ -44,6 +44,7 @@ def main() -> int:
             system_fonts / "NotoSerif-Regular.ttf",
             system_fonts / "NotoSansArabic-Regular.ttf",
             system_fonts / "MiSansVF.ttf",
+            system_fonts / "FutureUi-Regular.ttf",
             system_fonts / "400.ttf",
             system_ext_fonts / "GoogleSansText-Regular.ttf",
             product_fonts / "SysFont-Hans-Regular.ttf",
@@ -63,7 +64,11 @@ def main() -> int:
   <family name="sans-serif-arabic" lang="ar">
     <font weight="400">NotoSansArabic-Regular.ttf</font>
   </family>
+  <family name="vendor-opaque-ui">
+    <font weight="400" style="normal">FutureUi-Regular.ttf</font>
+  </family>
   <alias name="system-ui" to="sans-serif" />
+  <alias name="sans-serif-condensed" to="vendor-opaque-ui" />
 </familyset>
 """,
             encoding="utf-8",
@@ -116,6 +121,7 @@ esac
         assert "/system/fonts/Roboto-Regular.ttf" in slots
         assert "/system/fonts/MiSansVF.ttf" in slots
         assert "/system/fonts/400.ttf" in slots
+        assert "/system/fonts/FutureUi-Regular.ttf" in slots
         assert "/system_ext/fonts/GoogleSansText-Regular.ttf" in slots
         assert "/product/fonts/SysFont-Hans-Regular.ttf" in slots
         assert "/system/fonts/NotoSerif-Regular.ttf" not in slots
@@ -127,6 +133,8 @@ esac
         assert metrics["hhea"]["descent"] < 0
         assert payload["families"]["sans-serif"] == ["/system/fonts/Roboto-Regular.ttf"]
         assert payload["families"]["system-ui"] == ["/system/fonts/Roboto-Regular.ttf"]
+        assert payload["families"]["sans-serif-condensed"] == ["/system/fonts/FutureUi-Regular.ttf"]
+        assert "sans-serif-condensed" in slots["/system/fonts/FutureUi-Regular.ttf"]["families"]
 
         listed = run([sys.executable, str(script), "--list", "--output", str(output), "--build-key", "rom-a"])
         assert listed.returncode == 0, listed.stderr
