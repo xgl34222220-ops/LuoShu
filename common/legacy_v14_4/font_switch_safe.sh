@@ -171,8 +171,8 @@ safe_validation_store() {
         printf 'valid=true\n'
         printf 'identity=%s\n' "$_svs_identity"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
-    } > "$_svs_conf.tmp.$" 2>/dev/null || return 1
-    mv -f "$_svs_conf.tmp.$" "$_svs_conf" 2>/dev/null || return 1
+    } > "$_svs_conf.tmp.$$" 2>/dev/null || return 1
+    mv -f "$_svs_conf.tmp.$$" "$_svs_conf" 2>/dev/null || return 1
     chmod 0600 "$_svs_conf" 2>/dev/null || true
 }
 
@@ -238,7 +238,7 @@ safe_switch_cache_store() {
     _scs_file="$1"; _scs_font="$2"
     _scs_key=$(safe_switch_cache_key "$_scs_file" "$_scs_font") || return 1
     _scs_root="$SWITCH_CACHE_ROOT/$_scs_key"
-    _scs_stage="$SWITCH_CACHE_ROOT/.stage.$_scs_key.$"
+    _scs_stage="$SWITCH_CACHE_ROOT/.stage.$_scs_key.$$"
     rm -rf "$_scs_stage" 2>/dev/null || true
     mkdir -p "$_scs_stage/tree" 2>/dev/null || return 1
     _scs_saved=0
@@ -295,8 +295,8 @@ safe_error() {
 lock_cleanup() {
     [ "$LOCK_HELD" = true ] || return 0
     if type luoshu_font_lock_release >/dev/null 2>&1; then
-        luoshu_font_lock_release "$SWITCH_LOCK" "$" >/dev/null 2>&1 || \
-            luoshu_font_lock_force_clear "$SWITCH_LOCK" "$" >/dev/null 2>&1 || true
+        luoshu_font_lock_release "$SWITCH_LOCK" "$$" >/dev/null 2>&1 || \
+            luoshu_font_lock_force_clear "$SWITCH_LOCK" "$$" >/dev/null 2>&1 || true
     fi
     LOCK_HELD=false
 }
@@ -304,15 +304,15 @@ lock_cleanup() {
 prewarm_lock_cleanup() {
     [ "$PREWARM_LOCK_HELD" = true ] || return 0
     if type luoshu_font_lock_release >/dev/null 2>&1; then
-        luoshu_font_lock_release "$PREWARM_LOCK" "$" >/dev/null 2>&1 || \
-            luoshu_font_lock_force_clear "$PREWARM_LOCK" "$" >/dev/null 2>&1 || true
+        luoshu_font_lock_release "$PREWARM_LOCK" "$$" >/dev/null 2>&1 || \
+            luoshu_font_lock_force_clear "$PREWARM_LOCK" "$$" >/dev/null 2>&1 || true
     fi
     PREWARM_LOCK_HELD=false
 }
 
 prewarm_lock_acquire() {
     type luoshu_font_lock_acquire >/dev/null 2>&1 || return 1
-    luoshu_font_lock_acquire "$PREWARM_LOCK" "$"
+    luoshu_font_lock_acquire "$PREWARM_LOCK" "$$"
     _pl_rc=$?
     [ "$_pl_rc" -eq 0 ] || return "$_pl_rc"
     PREWARM_LOCK_HELD=true
