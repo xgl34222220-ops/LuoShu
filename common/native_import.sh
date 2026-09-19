@@ -74,6 +74,16 @@ invalidate_font_cache() {
           "$MODDIR/config/recent_fonts.conf" 2>/dev/null || true
 }
 
+schedule_font_prewarm() {
+    _sfp_family="$1"
+    [ -n "$_sfp_family" ] || return 0
+    _sfp_switch="$MODDIR/common/legacy_v14_4/font_switch_safe.sh"
+    [ -f "$_sfp_switch" ] || return 0
+    MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+        sh "$_sfp_switch" action prewarm-start "$_sfp_family" >/dev/null 2>&1 || true
+    return 0
+}
+
 find_duplicate() {
     _source="$1"
     _hash="$2"
@@ -147,6 +157,7 @@ import_font_file() {
     _duplicate=$(find_duplicate "$_src" "$_hash")
     if [ -f "$_duplicate" ]; then
         _family=$(detect_font_family "$(basename "$_duplicate")")
+        schedule_font_prewarm "$_family"
         printf '{"status":"ok","data":{"kind":"font","id":"%s","name":"%s","format":"%s","duplicate":true,"message":"字体已存在，未重复导入"}}\n' \
             "$(json_escape "$_family")" "$(json_escape "$(safe_stem "$_display")")" "$_format"
         return
@@ -175,6 +186,7 @@ EOF_RAW_PROBE
         printf 'supports_cjk=%s\n' "$_supports_cjk"
         printf 'is_variable=%s\n' "${_probe_variable:-false}"
     } > "$USER_FONTS_DIR/${_family}.conf" 2>/dev/null || true
+    schedule_font_prewarm "$_family" "$_hash"
     printf '{"status":"ok","data":{"kind":"font","id":"%s","name":"%s","format":"%s","supportsCjk":%s,"duplicate":false,"message":"字体已导入"}}\n' \
         "$(json_escape "$_family")" "$(json_escape "$_stem")" "$_format" "$_supports_cjk"
 }

@@ -2,7 +2,7 @@
 # 洛书 - 启动早期初始化（版本以 module.prop 为准）
 set +e
 
-MODDIR="${0%/*}"
+MODDIR="${MODDIR:-$(CDPATH= cd -- "${0%/*}/../../.." 2>/dev/null && pwd)}"
 MODULE_VERSION=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n1)
 [ -n "$MODULE_VERSION" ] || MODULE_VERSION="unknown"
 MODULE_DIR="$MODDIR"

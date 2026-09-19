@@ -6,7 +6,7 @@ set +e
 MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
-V4_POST_MOUNT="$MODDIR/post-mount-v4.sh"
+V4_POST_MOUNT="$MODDIR/.luoshu-runtime/core/post-mount.sh"
 HYPEROS_LEGACY_COMPAT="$MODDIR/common/legacy_v14_4/hyperos_full_coverage.sh"
 
 if [ ! -f "$LEGACY_MODE" ]; then

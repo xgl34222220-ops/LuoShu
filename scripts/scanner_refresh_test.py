@@ -18,7 +18,7 @@ from fontTools.ttLib import TTCollection, TTFont
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "common"))
 import font_inventory as inventory  # noqa: E402
-import font_inventory_scan_v3 as scanner  # noqa: E402
+import font_inventory_scan as scanner  # noqa: E402
 from stock_metric_contract_test import make_font  # noqa: E402
 
 

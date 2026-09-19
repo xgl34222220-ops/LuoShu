@@ -213,7 +213,10 @@ internal fun LuoShuAppShell(
         FontLibraryActions(
             refresh = { viewModel.refreshFonts(force = true) },
             setQuery = viewModel::setSearchQuery,
-            apply = { pendingApply = it },
+            apply = {
+                pendingApply = it
+                viewModel.prewarmFont(it.id)
+            },
             delete = { pendingDelete = it },
             restoreDefault = { restoreDefault = true },
         )

@@ -6,7 +6,7 @@
 set +e
 MODDIR="${0%/*}"
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
-V4_SERVICE="$MODDIR/service_v4.sh"
+V4_SERVICE="$MODDIR/.luoshu-runtime/core/service.sh"
 
 # Start from the real entry point before either service route is selected. The
 # mount loader sees $0=service_v4.sh on one route and is absent on the other.

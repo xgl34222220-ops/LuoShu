@@ -14,14 +14,14 @@ PRIVATE_STATE="$TMP/luoshu/private-payload"
 MODDIR="$MODULES/LuoShu"
 
 mkdir -p \
-  "$MODDIR/logs" "$MODDIR/config" "$MODDIR/common" "$MODDIR/.luoshu-runtime" \
+  "$MODDIR/logs" "$MODDIR/config" "$MODDIR/common" "$MODDIR/.luoshu-runtime/compat/v227" \
   "$MODULES/OtherModule" "$MODULES_UPDATE/LuoShu/system/fonts" \
   "$META_MNT/LuoShu/product/fonts" "$CONTENT_BASE/LuoShu/system/fonts" \
   "$SELF_STATE/lower/system-fonts" "$PRIVATE_STATE" "${MAGIC_CONFIG%/*}"
 
 cp "$ROOT/uninstall.sh" "$MODDIR/uninstall.sh"
 cp "$ROOT/common/private_payload.sh" "$MODDIR/common/private_payload.sh"
-cp "$ROOT/.luoshu-runtime/uninstall-v227.sh" "$MODDIR/.luoshu-runtime/uninstall-v227.sh"
+cp "$ROOT/.luoshu-runtime/compat/v227/uninstall.sh" "$MODDIR/.luoshu-runtime/compat/v227/uninstall.sh"
 printf '%s\n' 'version=v-test' > "$MODDIR/module.prop"
 printf '%s\n' 'old log' > "$MODDIR/logs/fontswitch.log"
 printf '%s\n' 'keep sibling' > "$MODULES/OtherModule/module.prop"

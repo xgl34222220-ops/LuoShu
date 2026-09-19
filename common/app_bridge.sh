@@ -12,6 +12,7 @@ if [ -z "$MODDIR" ]; then
 fi
 FONT_MANAGER="$MODDIR/common/font_manager.sh"
 FONT_SWITCH_TASK="$MODDIR/common/font_switch_task.sh"
+SAFE_SWITCH="$MODDIR/common/legacy_v14_4/font_switch_safe.sh"
 MIX_ENGINE="$MODDIR/common/font_mix_controller.sh"
 NATIVE_IMPORT="$MODDIR/common/native_import.sh"
 AXIS_INFO="$MODDIR/common/font_axis_info.py"
@@ -316,7 +317,23 @@ case "${1:-status}" in
     preview_source) preview_source_json "${2:-}" "${3:-400}" ;;
     preview_export) preview_export "${2:-}" "${3:-}" "${4:-400}" ;;
     weight_axis) weight_axis_info "${2:-}" ;;
-    validate) manager_ready || exit 1; sh "$FONT_MANAGER" action validate "${2:-}" ;;
+    prewarm)
+        if [ -f "$SAFE_SWITCH" ]; then
+            MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+                sh "$SAFE_SWITCH" action prewarm-start "${2:-}" >/dev/null 2>&1 || true
+            printf '{"status":"ok","data":{"font":"%s","scheduled":true}}\n' "$(json_escape "${2:-}")"
+        else
+            printf '{"status":"error","message":"字体预热组件不可用"}\n'
+        fi
+        ;;
+    validate)
+        manager_ready || exit 1
+        if [ -f "$SAFE_SWITCH" ] && [ -n "${2:-}" ] && [ "${2:-}" != default ]; then
+            MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+                sh "$SAFE_SWITCH" action prewarm-start "${2:-}" >/dev/null 2>&1 || true
+        fi
+        sh "$FONT_MANAGER" action validate "${2:-}"
+        ;;
     stock_scan) manager_ready || exit 1; sh "$FONT_MANAGER" action stock_scan ;;
     switch_start) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "${2:-default}" ;;
     switch_status) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" status "${2:-}" ;;

@@ -38,7 +38,8 @@ class SwitchProviderTest(unittest.TestCase):
 
     def test_both_service_routes_launch_provider_once(self):
         shutil.copyfile(ROOT / 'service.sh', self.module / 'service.sh')
-        (self.module / 'service_v4.sh').write_text('exit 0\n')
+        (self.module / '.luoshu-runtime/core').mkdir(parents=True)
+        (self.module / '.luoshu-runtime/core/service.sh').write_text('exit 0\n')
         marker = self.root / 'provider-starts'
         (self.module / 'common/google_font_provider_service.sh').write_text(
             'printf "started\\n" >> "$TEST_STARTS"\n')
@@ -187,9 +188,25 @@ apply_font_by_rom() {
         live.mkdir(parents=True)
         old = live / 'Roboto-Regular.ttf'
         old.write_bytes(b'old active font' * 300)
+        dynamic = self.module / '.luoshu-payload/future_oem/fonts'
+        dynamic.mkdir(parents=True)
+        (dynamic / 'OldDynamic.ttf').write_bytes(b'stale dynamic font' * 300)
+        (self.module / 'config/device_font_partitions.conf').write_text('future_oem\n')
         before = old.read_bytes()
         command = ['sh', str(legacy / 'font_switch_safe.sh'), 'action', 'switch', 'Selected']
+        prewarm_command = ['sh', str(legacy / 'font_switch_safe.sh'), 'action', 'prewarm', 'Selected']
         env = {**self.env, 'LUOSHU_PUBLIC_DIR': str(public)}
+        # Prewarming must never commit a pending payload or alter the live tree.
+        (self.module / 'config/device_font_inventory.json').write_text('{}')
+        prewarm = subprocess.run(prewarm_command, env=env, capture_output=True, text=True, timeout=5)
+        self.assertEqual(prewarm.returncode, 0, prewarm.stdout + prewarm.stderr)
+        self.assertEqual(old.read_bytes(), before)
+        self.assertFalse((self.module / '.luoshu-payload-next').exists())
+        cache_confs = list((self.module / 'config/safe-switch-cache').glob('*/cache.conf'))
+        self.assertTrue(cache_confs)
+        cache_root = cache_confs[0].parent
+        self.assertFalse((cache_root / 'tree/future_oem/fonts/OldDynamic.ttf').exists(),
+                         'discovered OEM partitions must not retain stale font payloads')
         success = subprocess.run(command, env=env, capture_output=True, text=True, timeout=5)
         self.assertEqual(success.returncode, 0, success.stdout + success.stderr)
         self.assertIn('"status":"ok"', success.stdout)
@@ -199,6 +216,9 @@ apply_font_by_rom() {
         self.assertEqual(old.read_bytes(), before)
         shutil.rmtree(pending)
         (self.module / 'config/font-payload-next.conf').unlink()
+        # Force a cache miss before exercising the mapper-failure rollback path.
+        # A previously verified cache is allowed to bypass expensive regeneration.
+        shutil.rmtree(self.module / 'config/safe-switch-cache', ignore_errors=True)
         failed = subprocess.run(command, env={**env, 'TEST_MAPPING_FAIL': '1'},
                                 capture_output=True, text=True, timeout=5)
         self.assertNotEqual(failed.returncode, 0)

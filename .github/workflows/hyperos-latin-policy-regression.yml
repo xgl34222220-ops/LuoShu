@@ -5,7 +5,7 @@ on:
     paths:
       - common/hyperos_physical_policy.py
       - common/legacy_v14_4/hyperos_full_coverage.sh
-      - common/font_inventory_scan_v3.py
+      - common/font_inventory_scan.py
       - scripts/hyperos_latin_policy_regression_test.py
       - .github/workflows/hyperos-latin-policy-regression.yml
   workflow_dispatch:
@@ -22,5 +22,5 @@ jobs:
       - name: Compile source and run focused policy regressions
         run: |
           sh -n common/legacy_v14_4/hyperos_full_coverage.sh
-          python3 -m py_compile common/hyperos_physical_policy.py common/font_inventory_scan_v3.py scripts/hyperos_latin_policy_regression_test.py
+          python3 -m py_compile common/hyperos_physical_policy.py common/font_inventory_scan.py scripts/hyperos_latin_policy_regression_test.py
           python3 scripts/hyperos_latin_policy_regression_test.py

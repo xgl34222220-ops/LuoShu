@@ -34,7 +34,7 @@ python3 -m py_compile \
 # App-only 活跃源码清单。WebUI 前端及其准备脚本必须彻底不存在。
 for file in \
   module.prop customize.sh post-fs-data.sh post-mount.sh boot-completed.sh service.sh uninstall.sh action.sh \
-  README.md README.txt LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
+  README.md LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
   common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py common/font_inventory.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
@@ -43,7 +43,7 @@ for file in \
   common/app_bridge.sh common/font_manager.sh common/font_active_state.sh common/font_boot_state.sh common/font_library_cache.sh common/app_installer.sh \
   common/font_provider_cache.sh common/font_validation_cache.sh \
   common/mount_compat.sh common/rom_adapters.sh common/hyperos_global.sh common/util_functions.sh \
-  scripts/assert.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
+  scripts/assert.sh scripts/module_layout_test.sh scripts/duplicate_function_test.sh scripts/device_font_cache_budget_test.sh scripts/provider_pid_scan_test.sh scripts/build.sh scripts/version.sh scripts/module_payload_manifest.txt scripts/prepare_composite_runtime.sh scripts/mount_compat_test.sh scripts/customize_reenable_test.sh \
   scripts/device_validation_gate.py scripts/device_validation_gate_test.py docs/device_validation.json \
   scripts/stability_test.sh scripts/legacy_switch_core_test.sh scripts/native_zip_import_test.sh scripts/native_preview_source_test.sh scripts/app_bridge_status_test.sh scripts/font_boot_state_test.sh \
   scripts/font_library_cache_test.sh scripts/app_installer_test.sh scripts/hyperos_global_mapping_test.sh scripts/coloros_consistency_mapping_test.sh scripts/font_config_variable_weight_test.sh scripts/font_metrics_normalization_test.py scripts/font_config_monospace_test.py \
@@ -100,7 +100,7 @@ cmp -s /tmp/luoshu-common-files.txt /tmp/luoshu-manifest-common.txt
 # 活跃运行时代码不得再出现历史开发版本头、WebUI 函数或未使用的报告脚本。
 ! grep -RInE --exclude-dir=python --exclude-dir=legacy_v14_4 --exclude=legacy_v14_4_switch.sh --exclude=font_manager.sh \
   '^[[:space:]]*#[[:space:]]*(洛书|LuoShu)[[:space:]]+v1[34]\.' \
-  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data-v4.sh" "$ROOT/service_v4.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
+  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/.luoshu-runtime/core/post-fs-data.sh" "$ROOT/.luoshu-runtime/core/service.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
 ! grep -qE 'get_all_fonts_json|get_font_info_json|scan_installed_families|refresh_font_cache' "$ROOT/common/util_functions.sh"
 test ! -e "$ROOT/common/font_report.sh"
 ! grep -RInE 'webui_font_list|WebUI' "$ROOT/common" --exclude=module_update_state.sh --exclude-dir=legacy_v14_4 >/dev/null 2>&1
@@ -214,7 +214,7 @@ done
   'common/(v14_mix|v142_weighted_mix|v143_auto_multiweight_mix|v14_switch)\.sh' "$ROOT" >/dev/null 2>&1
 ! grep -RInE --exclude-dir=python --exclude-dir=legacy_v14_4 --exclude=legacy_v14_4_switch.sh --exclude=font_manager.sh \
   '洛书 v1[34]\.|LuoShu v1[34]\.' \
-  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/post-fs-data-v4.sh" "$ROOT/service_v4.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
+  "$ROOT/common" "$ROOT/customize.sh" "$ROOT/.luoshu-runtime/core/post-fs-data.sh" "$ROOT/.luoshu-runtime/core/service.sh" "$ROOT/uninstall.sh" >/dev/null 2>&1
 
 # 许可证与声明保持完整。
 test "$(sha256sum "$ROOT/LICENSE" | awk '{print $1}')" = '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986'
@@ -222,7 +222,6 @@ grep -q 'GNU GENERAL PUBLIC LICENSE' "$ROOT/LICENSE"
 grep -q 'Version 3, 29 June 2007' "$ROOT/LICENSE"
 grep -q 'END OF TERMS AND CONDITIONS' "$ROOT/LICENSE"
 grep -q 'GPL-3.0-only' "$ROOT/README.md"
-grep -q 'GPL-3.0-only' "$ROOT/README.txt"
 grep -q 'GPL-3.0-only' "$ROOT/NOTICE.md"
 grep -q 'GPL-3.0-only' "$ROOT/THIRD_PARTY_NOTICES.md"
 grep -q 'GPL-3.0-only' "$ROOT/CONTRIBUTING.md"
@@ -248,6 +247,7 @@ python3 "$ROOT/scripts/release_branch_cleanup_test.py"
 sh "$ROOT/scripts/mount_compat_test.sh"
 sh "$ROOT/scripts/hyperos_global_mapping_test.sh"
 sh "$ROOT/scripts/coloros_consistency_mapping_test.sh"
+sh "$ROOT/scripts/module_layout_test.sh"
 python3 "$ROOT/scripts/coloros_metrics_batch_test.py"
 FONT_INVENTORY_TEST_FONT=$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit 2>/dev/null || true)
 [ -s "$FONT_INVENTORY_TEST_FONT" ]
@@ -266,7 +266,7 @@ python3 "$ROOT/scripts/legacy_mix_status_lifecycle_test.py"
 python3 "$ROOT/scripts/scanner_refresh_test.py"
 sh "$ROOT/scripts/builder_update_policy_test.sh"
 python3 "$ROOT/scripts/font_layout_diagnostic_test.py"
-python3 "$ROOT/scripts/font_inventory_scan_v3_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/font_inventory_scan_test.py" --font "$FONT_INVENTORY_TEST_FONT"
 python3 "$ROOT/scripts/stock_inventory_scan_wrapper_test.py"
 sh "$ROOT/scripts/rom_adapter_inventory_test.sh" "$FONT_INVENTORY_TEST_FONT"
 # The per-device engine is the release-critical HyperOS/KernelSU path. These

@@ -78,7 +78,7 @@ jobs:
           sh -x scripts/mount_fast_sync_test.sh
           FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
           test -s "$FONT"
-          python3 scripts/font_inventory_scan_v3_test.py --font "$FONT"
+          python3 scripts/font_inventory_scan_test.py --font "$FONT"
           grep -q '多字重 · ${weights.size} 档' android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/font/FontUiSupport.kt
           grep -q '静态字体现在始终按当前所选字重走快速单文件组合' common/mix_weight_mode.sh
 
@@ -141,7 +141,6 @@ jobs:
             common/font_archive_export.sh \
             common/font_inventory.py \
             common/font_inventory_scan.py \
-            common/font_inventory_scan_v3.py \
             common/font_switch_task.sh \
             common/legacy_v14_4/payload_clone.sh \
             common/mix_weight_mode.sh \
@@ -162,13 +161,12 @@ jobs:
           unzip -p "$module" common/font_archive_export.sh | grep -q '归档目标目录不受信任'
           unzip -p "$module" common/font_archive_export.sh | grep -q '1073741824'
           unzip -p "$module" common/font_inventory.py | grep -q 'device_font_inventory.json'
-          unzip -p "$module" common/font_inventory_scan.py | grep -q 'font_inventory_scan_v3'
-          unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'SCANNER_REVISION = 4'
-          unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'stockFontUniqueFileCount'
-          unzip -p "$module" common/font_inventory_scan_v3.py | grep -q 'themeOverrideRoots'
+                    unzip -p "$module" common/font_inventory_scan.py | grep -q 'SCANNER_REVISION = 4'
+          unzip -p "$module" common/font_inventory_scan.py | grep -q 'stockFontUniqueFileCount'
+          unzip -p "$module" common/font_inventory_scan.py | grep -q 'themeOverrideRoots'
           unzip -p "$module" common/mix_weight_mode.sh | grep -q '快速单文件组合'
-          unzip -p "$module" .luoshu-runtime/customize-v227.sh | grep -q '原厂字体文件'
-          unzip -p "$module" .luoshu-runtime/customize-v227.sh | grep -q 'XML .* OEM 探测'
+          unzip -p "$module" .luoshu-runtime/compat/v227/customize.sh | grep -q '原厂字体文件'
+          unzip -p "$module" .luoshu-runtime/compat/v227/customize.sh | grep -q 'XML .* 通用探测 .* OEM 规则'
           unzip -p "$module" common/font_switch_task.sh | grep -q 'TIMEOUT_SECONDS'
           unzip -p "$module" common/font_switch_task.sh | grep -q '当前启动字体未被改动'
           unzip -p "$module" common/mount_fast_sync.sh | grep -q 'cp -al'
@@ -176,7 +174,7 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           unzip -q "$module" -d "$tmp"
-          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py" "$tmp/common/font_inventory_scan_v3.py"
+          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py"
           sh -n "$tmp/customize.sh"
           sh -n "$tmp/common/background_task.sh"
           sh -n "$tmp/common/device_font_template.sh"
