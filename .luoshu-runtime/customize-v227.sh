@@ -167,6 +167,8 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         _inventory_candidates=$(sed -n 's/.*"candidateCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$FONT_INVENTORY_CANDIDATES" 2>/dev/null | head -n1)
         [ -n "$_inventory_candidates" ] || _inventory_candidates="0"
         ui_print "✓ 安装阶段已记录本机字体候选：$_inventory_candidates 个"
+        _inventory_error=$(tail -n 3 "$FONT_INVENTORY_LOG" 2>/dev/null | sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | tail -n1)
+        [ -z "$_inventory_error" ] || ui_print "• 原厂视图校验失败：$_inventory_error"
         ui_print "• 本次刷写环境没有拿到完整可信原厂视图；最终可替换槽位待重启前确认"
         ui_print "• 已安排洛书自挂载前自动补扫，不中止安装"
     fi
