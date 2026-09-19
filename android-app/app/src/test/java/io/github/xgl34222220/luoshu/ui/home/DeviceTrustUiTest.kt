@@ -182,6 +182,28 @@ class DeviceTrustUiTest {
     }
 
     @Test
+    fun pendingStockInventoryReasonIsExposed() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+                engine=installed
+                template=trusted
+                alignment=compatibility
+                mode=compatibility
+                reason=
+                cachePending=no
+                inventoryScanPending=yes
+                inventoryScanReason=分区 /system/fonts 未找到可信原厂视图
+            """.trimIndent(),
+        )
+
+        assertEquals(DeviceTrustLevel.PENDING, state.level)
+        assertTrue(state.inventoryScanPending)
+        assertEquals("分区 /system/fonts 未找到可信原厂视图", state.inventoryScanReason)
+    }
+
+    @Test
     fun emptyBridgeOutputReturnsReadableError() {
         val state = parseDeviceTrustOutput("")
 
