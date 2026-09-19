@@ -60,6 +60,19 @@ read_state_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
 
+perf_mark() {
+    _pm_label="$1"
+    _pm_now=$(date +%s 2>/dev/null || echo 0)
+    case "$_pm_now" in ''|*[!0-9]*) _pm_now=0 ;; esac
+    case "${PERF_LAST_TS:-}" in ''|*[!0-9]*) PERF_LAST_TS="$_pm_now" ;; esac
+    _pm_delta=$((_pm_now - PERF_LAST_TS))
+    [ "$_pm_delta" -ge 0 ] 2>/dev/null || _pm_delta=0
+    printf '[%s] [SAFE-SWITCH-PERF] %s +%ss\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_pm_label" "$_pm_delta" \
+        >> "$LOG_FILE" 2>/dev/null || true
+    PERF_LAST_TS="$_pm_now"
+}
+
 progress() {
     _p="$1"; shift; _m="$*"
     printf '[%s] [SAFE-SWITCH] stage=%s message=%s\n' \
@@ -396,6 +409,7 @@ write_runtime_state() {
 
 switch_font() {
     _font="$1"
+    PERF_LAST_TS=$(date +%s 2>/dev/null || echo 0)
     [ -n "$_font" ] || { safe_error '未指定字体'; return 1; }
     _active_label="${LUOSHU_SWITCH_ACTIVE_LABEL:-$_font}"
     [ -n "$_active_label" ] || _active_label="$_font"
@@ -414,10 +428,12 @@ switch_font() {
             safe_error "${FONT_CHECK_ERROR:-字体校验失败}"
             return 1
         fi
+        perf_mark validation
     fi
 
     progress 22 '正在保留非字体负载并建立安全暂存区'
     stage_clone_live || { safe_error '无法创建下一启动字体负载'; return 1; }
+    perf_mark stage-clone
     progress 34 '正在清理暂存区旧文字映射'
     stage_clear_text_payload || { safe_error '无法准备下一启动字体负载'; return 1; }
 
@@ -431,8 +447,10 @@ switch_font() {
             safe_error 'ROM 字体映射失败，当前启动字体未被改动'
             return 1
         fi
+        perf_mark rom-map
         progress 66 '正在补齐系统分区同名字体槽位'
         mirror_existing_targets
+        perf_mark partition-mirror
         if [ "${IS_HYPEROS:-false}" = true ]; then
             progress 76 '正在补齐 HyperOS 状态栏、锁屏和系统 UI 字体槽位'
             stage_hyperos_complete || {
@@ -446,8 +464,10 @@ switch_font() {
                 return 1
             }
         fi
+        perf_mark rom-complete
         progress 86 '正在校验下一启动字体负载'
         stage_verify "$_font" || { safe_error '新字体负载校验失败，当前启动字体未被改动'; return 1; }
+        perf_mark stage-verify
     fi
 
     progress 94 '正在提交下一启动字体负载'
@@ -455,6 +475,7 @@ switch_font() {
         safe_error '下一启动字体负载提交失败，当前启动字体未被改动'
         return 1
     }
+    perf_mark commit-next
     progress 98 '正在保存字体选择状态'
     if ! write_runtime_state "$_active_label"; then
         cancel_next_payload
