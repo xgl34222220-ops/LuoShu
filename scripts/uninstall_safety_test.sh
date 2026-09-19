@@ -11,7 +11,7 @@ PROVIDER="$TMP/provider"
 BIN="$TMP/bin"
 TARGET="$TMP/data-fonts-config.xml"
 MOUNTINFO="$TMP/mountinfo"
-mkdir -p "$MODULE/common" "$MODULE/.luoshu-runtime" \
+mkdir -p "$MODULE/common" "$MODULE/.luoshu-runtime/compat/v227" \
     "$MODULE/config/flyme-data-original" "$MODULE/system/etc" \
     "$DATA" "$PROVIDER" "$BIN"
 cp "$ROOT/uninstall.sh" "$MODULE/uninstall.sh"
@@ -73,7 +73,7 @@ CORE="$ROOT/.luoshu-runtime/compat/v227/uninstall.sh"
 sh -n "$ROOT/uninstall.sh"
 sh -n "$CORE"
 grep -q 'private_payload.sh' "$ROOT/uninstall.sh"
-grep -q 'uninstall-v227.sh' "$ROOT/uninstall.sh"
+grep -q '.luoshu-runtime/compat/v227/uninstall.sh' "$ROOT/uninstall.sh"
 grep -q 'device-font-dynamic-mount.conf' "$CORE"
 grep -q '_luoshu_flyme_prepare_data_restore' "$CORE"
 grep -q 'luoshu_flyme_pending_apply' "$CORE"
