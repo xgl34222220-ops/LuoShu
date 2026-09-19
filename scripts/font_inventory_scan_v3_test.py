@@ -128,7 +128,8 @@ def main() -> int:
         assert reused.returncode == 0, reused.stderr
         reused_result = json.loads(reused.stdout)
         assert reused_result["status"] == "reused"
-        assert reused_result["stockFontUniqueFileCount"] == 5
+        assert reused_result["stockFontUniqueFileCount"] == 6
+        assert reused_result["genericSlotCount"] >= 2
 
         scanner = importlib.import_module("font_inventory_scan_v3")
         theme = temp / "theme/fonts"
