@@ -88,7 +88,7 @@ schedule_font_prewarm() {
     _sfp_log="$MODDIR/logs/font-prewarm.log"
     luoshu_start_detached "$_sfp_pid" font_switch_safe.sh "$_sfp_log" \
         sh -c '
-            sleep 3
+            sleep 1
             _script="$1"; _family="$2"; _public="$3"
             [ -f "$_script" ] || exit 0
             export LUOSHU_PUBLIC_DIR="$_public"
