@@ -128,6 +128,7 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
     ui_print "• 正在读取本机全部原厂字体与 UI 映射..."
     _inventory_pyroot="$MODPATH/common/python"
     _inventory_result=$(
+        LUOSHU_FRESH_STOCK_SCAN=1 \
         PYTHONHOME="$_inventory_pyroot" \
         PYTHONPATH="$_inventory_pyroot/lib/python3.14:$_inventory_pyroot/lib/python3.14/site-packages:$MODPATH/common" \
         LD_LIBRARY_PATH="$_inventory_pyroot/lib:$_inventory_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
