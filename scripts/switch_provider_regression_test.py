@@ -199,6 +199,9 @@ apply_font_by_rom() {
         self.assertEqual(old.read_bytes(), before)
         shutil.rmtree(pending)
         (self.module / 'config/font-payload-next.conf').unlink()
+        # Force a cache miss before exercising the mapper-failure rollback path.
+        # A previously verified cache is allowed to bypass expensive regeneration.
+        shutil.rmtree(self.module / 'config/safe-switch-cache', ignore_errors=True)
         failed = subprocess.run(command, env={**env, 'TEST_MAPPING_FAIL': '1'},
                                 capture_output=True, text=True, timeout=5)
         self.assertNotEqual(failed.returncode, 0)
