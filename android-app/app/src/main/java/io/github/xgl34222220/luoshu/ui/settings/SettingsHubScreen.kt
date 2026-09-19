@@ -9,6 +9,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.BorderStroke
@@ -66,6 +68,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -77,6 +80,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -96,6 +100,7 @@ import io.github.xgl34222220.luoshu.ui.appearance.ThemeMode
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LocalMiuixTokens
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLoadingSkeleton
 import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuDetailBar
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
@@ -163,55 +168,63 @@ internal fun SettingsHubRoute(
         if (item == SettingsSection.UPDATE) model.checkUpdate()
     }
 
-    AnimatedContent(
-        targetState = section,
-        modifier = Modifier.fillMaxSize(),
-        transitionSpec = {
-            if (targetState != null) {
-                (fadeIn(tween(250)) + slideInHorizontally(tween(340)) { it })
-                    .togetherWith(
-                        fadeOut(tween(210), targetAlpha = .52f) + slideOutHorizontally(tween(340)) { -it / 7 },
-                    )
-            } else {
-                (fadeIn(tween(230)) + slideInHorizontally(tween(340)) { -it / 7 })
-                    .togetherWith(fadeOut(tween(210)) + slideOutHorizontally(tween(340)) { it })
-            }
-        },
-        label = "settingsDetailTransition",
-    ) { target ->
-        if (target == null) {
-            SettingsHome(
-                model = model,
-                onOpenSection = ::openSection,
-                onOpenTasks = onOpenTasks,
+    val pageBackground = if (settings.uiStyle == UiStyle.MIUIX) {
+        LocalMiuixTokens.current.pageBackground
+    } else {
+        MaterialTheme.colorScheme.background
+    }
+    key(section?.name ?: "settings-home") {
+        val pageEnter = remember { Animatable(0f) }
+        val direction = if (section == null) -1f else 1f
+        LaunchedEffect(Unit) {
+            pageEnter.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(220, easing = FastOutSlowInEasing),
             )
-        } else {
-            val detailShape = RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp)
-            Column(
-                Modifier
-                    .fillMaxSize()
-                    .navigationBarsPadding()
-                    .padding(start = if (settings.uiStyle == UiStyle.MIUIX) 6.dp else 0.dp)
-                    .then(
-                        if (settings.uiStyle == UiStyle.MIUIX) {
-                            Modifier
-                                .shadow(22.dp, detailShape, clip = false)
-                                .clip(detailShape)
-                                .background(LocalMiuixTokens.current.pageBackground)
-                        } else {
-                            Modifier
-                        },
-                    ),
-            ) {
-                LuoShuDetailBar(title = target.label, onBack = { sectionName = null })
-                Box(Modifier.weight(1f)) {
-                    when (target) {
-                        SettingsSection.OVERVIEW -> OverviewPage(model)
-                        SettingsSection.APPEARANCE -> AppearancePage(settings, actions)
-                        SettingsSection.SAFETY -> SafetyPage(model, settings.uiStyle)
-                        SettingsSection.GOOGLE -> GoogleFontCompatibilityPage()
-                        SettingsSection.BACKUP -> pageList { item { FullBackupCard(settings, actions) } }
-                        SettingsSection.UPDATE -> UpdatePage(model)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(pageBackground)
+                .graphicsLayer {
+                    translationX = (1f - pageEnter.value) * 24.dp.toPx() * direction
+                },
+        ) {
+            if (section == null) {
+                SettingsHome(
+                    model = model,
+                    onOpenSection = ::openSection,
+                    onOpenTasks = onOpenTasks,
+                )
+            } else {
+                val detailShape = RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp)
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(pageBackground)
+                        .navigationBarsPadding()
+                        .padding(start = if (settings.uiStyle == UiStyle.MIUIX) 6.dp else 0.dp)
+                        .then(
+                            if (settings.uiStyle == UiStyle.MIUIX) {
+                                Modifier
+                                    .shadow(22.dp, detailShape, clip = false)
+                                    .clip(detailShape)
+                                    .background(pageBackground)
+                            } else {
+                                Modifier.background(pageBackground)
+                            },
+                        ),
+                ) {
+                    LuoShuDetailBar(title = section.label, onBack = { sectionName = null })
+                    Box(Modifier.weight(1f).background(pageBackground)) {
+                        when (section) {
+                            SettingsSection.OVERVIEW -> OverviewPage(model)
+                            SettingsSection.APPEARANCE -> AppearancePage(settings, actions)
+                            SettingsSection.SAFETY -> SafetyPage(model, settings.uiStyle)
+                            SettingsSection.GOOGLE -> GoogleFontCompatibilityPage()
+                            SettingsSection.BACKUP -> pageList { item { FullBackupCard(settings, actions) } }
+                            SettingsSection.UPDATE -> UpdatePage(model)
+                        }
                     }
                 }
             }
@@ -329,12 +342,21 @@ private fun SettingsOverviewCard(health: SystemHealthSnapshot, onClick: () -> Un
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     Text("洛书状态", color = tokens.textPrimary, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        if (health.loading) "正在读取模块状态…" else health.summary,
-                        color = accent,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
-                    )
+                    Box(Modifier.fillMaxWidth().height(18.dp), contentAlignment = Alignment.CenterStart) {
+                        if (health.loading) {
+                            LuoShuLoadingSkeleton(
+                                Modifier.fillMaxWidth(.58f).height(12.dp),
+                                shape = RoundedCornerShape(999.dp),
+                            )
+                        } else {
+                            Text(
+                                health.summary,
+                                color = accent,
+                                fontSize = 12.sp,
+                                lineHeight = 18.sp,
+                            )
+                        }
+                    }
                 }
                 Icon(Icons.Rounded.ChevronRight, null, tint = tokens.textSecondary, modifier = Modifier.size(22.dp))
             }
@@ -342,15 +364,27 @@ private fun SettingsOverviewCard(health: SystemHealthSnapshot, onClick: () -> Un
                 Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)) {
                     Text("当前字体", color = tokens.textSecondary, fontSize = 12.sp)
                     Spacer(Modifier.height(3.dp))
-                    Text(
-                        if (health.loading) "正在读取…" else if (health.activeFont == "default") "系统默认" else health.activeFont.ifBlank { "尚未选择" },
-                        color = tokens.textPrimary,
-                        fontSize = 16.sp,
-                        lineHeight = 22.sp,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        if (health.loading) {
+                            LuoShuLoadingSkeleton(
+                                Modifier.fillMaxWidth(.52f).height(18.dp),
+                                shape = RoundedCornerShape(999.dp),
+                            )
+                        } else {
+                            Text(
+                                if (health.activeFont == "default") "系统默认" else health.activeFont.ifBlank { "尚未选择" },
+                                color = tokens.textPrimary,
+                                fontSize = 16.sp,
+                                lineHeight = 22.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
                     if (health.rebootRequired) {
                         Spacer(Modifier.height(5.dp))
                         Text("字体变更等待重启生效", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
@@ -787,16 +821,22 @@ private fun selfMountSummary(state: SystemHealthSnapshot): String = listOf(
 private fun InfoLine(label: String, value: String) {
     val technical = label.contains("SHA", ignoreCase = true) || label.endsWith(" ID")
     val scheme = MaterialTheme.colorScheme
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, color = scheme.onSurfaceVariant, fontSize = 13.sp)
-        Spacer(Modifier.width(12.dp))
-        if (technical && value.isNotBlank()) {
-            val clipboard = LocalClipboardManager.current
+    if (technical && value.isNotBlank()) {
+        val clipboard = LocalClipboardManager.current
+        val displayValue = if (
+            label.contains("SHA", ignoreCase = true) && value.length > 16
+        ) {
+            "${value.take(8)}…${value.takeLast(6)}"
+        } else {
+            value
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Text(label, color = scheme.onSurfaceVariant, fontSize = 12.sp)
             Surface(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 color = if (scheme.background.luminance() < .5f) {
                     scheme.surfaceContainerHigh
@@ -810,7 +850,7 @@ private fun InfoLine(label: String, value: String) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        value,
+                        displayValue,
                         modifier = Modifier.weight(1f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -831,7 +871,17 @@ private fun InfoLine(label: String, value: String) {
                     }
                 }
             }
-        } else {
+        }
+    } else {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(label, color = scheme.onSurfaceVariant, fontSize = 13.sp)
+            Spacer(Modifier.width(12.dp))
+            val tabular = value.isNotBlank() && value.all { ch ->
+                ch.isDigit() || ch in ".-+"
+            }
             Text(
                 value.ifBlank { "—" },
                 Modifier.weight(1f),
@@ -841,11 +891,13 @@ private fun InfoLine(label: String, value: String) {
                 fontSize = 13.sp,
                 lineHeight = 19.sp,
                 fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontFeatureSettings = if (tabular) "tnum" else null,
+                ),
             )
         }
     }
 }
-
 @Composable
 private fun NoticeLine(text: String) = Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.Top) { Icon(Icons.Rounded.Info, null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(7.dp)); Text(text, Modifier.weight(1f), fontSize = 13.sp) }
 
@@ -867,7 +919,7 @@ private fun DownloadButton(label: String, url: String, sha: String, onClick: () 
         Text(label, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         if (sha.isNotBlank()) {
             Text(
-                "SHA-256 ${sha.take(16)}…",
+                "SHA-256 ${if (sha.length > 16) "${sha.take(8)}…${sha.takeLast(6)}" else sha}",
                 color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .78f),
                 fontSize = 12.sp,
                 lineHeight = 18.sp,
