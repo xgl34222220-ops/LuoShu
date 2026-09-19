@@ -136,6 +136,28 @@ class HyperOSMetricsTest(unittest.TestCase):
         with TTFont(target) as font:
             self.assertEqual(font['hhea'].ascent, 850)
 
+    def test_manifest_prunes_safe_but_undetected_stale_alias(self):
+        self.inventory({'/product/fonts/Roboto-Regular.ttf': slot(ascent=850, descent=-150)})
+        stale = self.fonts / 'MiSansVF.ttf'
+        font_file(stale, 777)
+        manifest = {
+            'schema': 'device-font-target-manifest-v1',
+            'revision': 1,
+            'buildKey': 'fixture',
+            'romKind': 'hyperos',
+            'targets': [{
+                'path': '/product/fonts/Roboto-Regular.ttf',
+                'partition': 'product',
+                'name': 'Roboto-Regular.ttf',
+                'mode': 'physical',
+            }],
+        }
+        (self.module / 'config/replaceable_font_targets.json').write_text(json.dumps(manifest))
+        result = batch.build(self.module, self.stage, [])
+        self.assertEqual(result['mapped'], 1)
+        self.assertFalse(stale.exists(), 'stale safe alias outside manifest must be removed')
+        self.assertTrue((self.stage / 'product/fonts/Roboto-Regular.ttf').exists())
+
     def test_no_cascade_when_alias_is_source(self):
         (self.fonts / '400.ttf').rename(self.fonts / 'MiSansVF.ttf')
         self.inventory({'/system/fonts/MiSansVF.ttf': slot(),
