@@ -289,6 +289,14 @@ _device_font_inventory_entries() {
     cat "$_dfie_cache"
 }
 
+_device_font_dynamic_partition_allowed() {
+    _dfidp_part="$1"
+    case "$_dfidp_part" in ''|*[!A-Za-z0-9_]*|[0-9]*|_* ) return 1 ;; esac
+    _dfidp_manifest="$(_device_font_inventory_module)/config/device_font_partitions.conf"
+    [ -f "$_dfidp_manifest" ] || return 1
+    grep -Fxq "$_dfidp_part" "$_dfidp_manifest" 2>/dev/null
+}
+
 _device_font_inventory_target() {
     _dfit_path="$1"
     _dfit_module="$(_device_font_inventory_module)"
@@ -331,7 +339,15 @@ _device_font_inventory_target() {
 ' "$_dfit_module" "${_dfit_path#/cust/fonts/}" ;;
         /hw_product/fonts/*) printf '%s/hw_product/fonts/%s
 ' "$_dfit_module" "${_dfit_path#/hw_product/fonts/}" ;;
-        *) return 1 ;;
+        *)
+            _dfit_rel=${_dfit_path#/}
+            _dfit_part=${_dfit_rel%%/*}
+            case "$_dfit_rel" in "$_dfit_part/fonts/"*) ;; *) return 1 ;; esac
+            _dfit_rest=${_dfit_rel#$_dfit_part/fonts/}
+            _device_font_dynamic_partition_allowed "$_dfit_part" || return 1
+            printf '%s/%s/fonts/%s
+' "$_dfit_module" "$_dfit_part" "$_dfit_rest"
+            ;;
     esac
 }
 
@@ -397,7 +413,14 @@ _copy_as_inventory() {
         if [ "${IS_COLOROS:-false}" = true ]; then
             case "$_dfii_logical" in
                 /system/fonts/*|/system_ext/fonts/*|/product/fonts/*) ;;
-                *) _dfii_skipped=$((_dfii_skipped + 1)); continue ;;
+                *)
+                    _dfii_rel=${_dfii_logical#/}
+                    _dfii_part=${_dfii_rel%%/*}
+                    _device_font_dynamic_partition_allowed "$_dfii_part" || {
+                        _dfii_skipped=$((_dfii_skipped + 1))
+                        continue
+                    }
+                    ;;
             esac
         fi
         _dfii_target=$(_device_font_inventory_target "$_dfii_logical") || {
