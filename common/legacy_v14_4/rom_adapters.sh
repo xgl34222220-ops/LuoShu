@@ -47,10 +47,7 @@ _font_anchor() {
     dest_dir="$2"
     key="$3"
     anchor="$dest_dir/.luoshu-font-store/${key}.font"
-    rm -f "$anchor" 2>/dev/null || true
-    # Composite cache and isolated stage normally live on the same /data
-    # filesystem. Share the inode instead of copying the whole CJK composite.
-    ln "$src" "$anchor" 2>/dev/null || cp -f "$src" "$anchor" 2>/dev/null || return 1
+    cp -f "$src" "$anchor" 2>/dev/null || return 1
     chmod 644 "$anchor" 2>/dev/null || true
     echo "$anchor"
 }
