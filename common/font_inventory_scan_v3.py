@@ -287,6 +287,15 @@ def _font_mount_targets() -> list[str]:
     return sorted(targets)
 
 
+def _property_rom_kind() -> str:
+    """Detect the ROM from authoritative Android properties before filename hints."""
+    if base._getprop("ro.build.version.oplusrom") or base._getprop("ro.build.version.opporom"):
+        return "coloros"
+    if base._getprop("ro.mi.os.version.name") or base._getprop("ro.miui.ui.version.name"):
+        return "hyperos"
+    return ""
+
+
 def _rom_markers(names: set[str]) -> dict[str, list[str]]:
     lowered = {name.lower(): name for name in names}
     result: dict[str, list[str]] = {}
@@ -563,10 +572,17 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     # a ColorOS ROM can retain a MiSansVF file which that older selector ranks
     # first. An existing valid ColorOS inventory also keeps this pass ROM-local.
     coloros_cores = {*ROM_FONT_MARKERS["coloros"], "SysFont-Regular.ttf", "SysSans-En-Regular.ttf"}
-    coloros = (existing is not None and existing.get("romKind") == "coloros") or any(
-        entry.get("slotName") in coloros_cores for entry in slots.values()
+    property_rom = _property_rom_kind()
+    coloros = (
+        property_rom == "coloros"
+        or (existing is not None and existing.get("romKind") == "coloros")
+        or any(entry.get("slotName") in coloros_cores for entry in slots.values())
     )
-    hyperos = not coloros and (initial_rom == "hyperos" or bool(_rom_markers(names).get("hyperos")))
+    hyperos = not coloros and (
+        property_rom == "hyperos"
+        or initial_rom == "hyperos"
+        or bool(_rom_markers(names).get("hyperos"))
+    )
     dynamic_aliases = _add_hyperos_physical_slots(slots, replaceable_roots) if hyperos else {}
     retired_physical_slots = {
         path for path, entry in (existing or {}).get("slots", {}).items()
