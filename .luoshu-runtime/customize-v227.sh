@@ -106,118 +106,105 @@ if [ "$UPDATE_PRESERVED" != true ]; then
     printf 'default\n' > "$MODPATH/config/active_font.conf"
 fi
 
-# 必须在新模块覆盖挂载系统字体之前读取原厂槽位。v2 扫描器会分别统计全部原厂
-# 字体文件和可替换 UI 槽位，并读取 system、system_ext、product、my_product、vendor
-# 各分区的 fonts*.xml。相同系统指纹复用；旧扫描器生成的清单会自动升级重扫。
-FONT_INVENTORY_SCRIPT="$MODPATH/common/stock_inventory_scan.py"
-[ -f "$FONT_INVENTORY_SCRIPT" ] || FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory_scan.py"
-[ -f "$FONT_INVENTORY_SCRIPT" ] || FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory.py"
-FONT_INVENTORY_PYTHON="$MODPATH/common/python/bin/luoshu-python"
+# 每台设备、每次刷入都必须在新模块生效前重新冻结本机原厂字体槽位。
+# 不继承旧版本清单，不根据当前是否已经换字体决定是否扫描。当前有旧字体覆盖时，
+# 扫描器只能使用可信 lower / Root mirror / PID1 全局视图；拿不到原厂视图就中止
+# 本次安装，避免以后按错误槽位替换。
+FONT_INVENTORY_MANAGER="$MODPATH/common/font_manager.sh"
 FONT_INVENTORY_OUTPUT="$MODPATH/config/device_font_inventory.json"
 FONT_INVENTORY_LOG="$MODPATH/logs/font-inventory.log"
 FONT_INVENTORY_FLASH_ERR="$MODPATH/logs/font-inventory-flash.err"
-FONT_TARGET_COMPILER="$MODPATH/common/font_target_manifest.py"
 FONT_TARGET_OUTPUT="$MODPATH/config/replaceable_font_targets.json"
 FONT_TARGET_LIST="$MODPATH/config/replaceable_font_targets.list"
-if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_inventory.json" ]; then
-    cp -f "$OLD_MOD/config/device_font_inventory.json" "$FONT_INVENTORY_OUTPUT" 2>/dev/null || true
+FONT_SLOT_SNAPSHOT="$MODPATH/config/font-slot-snapshot.conf"
+
+rm -f "$FONT_INVENTORY_OUTPUT" "$FONT_TARGET_OUTPUT" "$FONT_TARGET_LIST" \
+      "$FONT_SLOT_SNAPSHOT" "$MODPATH/config/stock_inventory_scan_pending" \
+      "$FONT_INVENTORY_FLASH_ERR" 2>/dev/null || true
+
+if [ ! -f "$FONT_INVENTORY_MANAGER" ] || [ ! -x "$MODPATH/common/python/bin/luoshu-python" ]; then
+    ui_print "✗ 缺少设备字体槽位扫描组件，已中止安装"
+    ui_print "• 旧版模块不会被这次不完整安装替换"
+    exit 1
 fi
-chmod 0755 "$FONT_INVENTORY_PYTHON" 2>/dev/null || true
-if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
-    ui_print "• 正在读取本机全部原厂字体与 UI 映射..."
-    _inventory_pyroot="$MODPATH/common/python"
-    _inventory_result=$(
-        PYTHONHOME="$_inventory_pyroot" \
-        PYTHONPATH="$_inventory_pyroot/lib/python3.14:$_inventory_pyroot/lib/python3.14/site-packages:$MODPATH/common" \
-        LD_LIBRARY_PATH="$_inventory_pyroot/lib:$_inventory_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-            "$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan --force \
-                --output "$FONT_INVENTORY_OUTPUT" \
-                --font-check "$MODPATH/common/font_check.sh" \
-                --overlay-module "$OLD_MOD" 2> "$FONT_INVENTORY_FLASH_ERR"
-    )
-    _inventory_rc=$?
-    [ ! -s "$FONT_INVENTORY_FLASH_ERR" ] || cat "$FONT_INVENTORY_FLASH_ERR" >> "$FONT_INVENTORY_LOG" 2>/dev/null || true
-    printf '%s\n' "$_inventory_result" >> "$FONT_INVENTORY_LOG" 2>/dev/null || true
-    if [ "$_inventory_rc" -eq 0 ]; then
-        rm -f "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
-        _inventory_files=$(printf '%s' "$_inventory_result" | sed -n 's/.*"stockFontFileCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
-        _inventory_slots=$(printf '%s' "$_inventory_result" | sed -n 's/.*"slotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
-        _inventory_xml=$(printf '%s' "$_inventory_result" | sed -n 's/.*"xmlSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
-        _inventory_heuristic=$(printf '%s' "$_inventory_result" | sed -n 's/.*"heuristicSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
-        _inventory_rom=$(printf '%s' "$_inventory_result" | sed -n 's/.*"romKind"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | tail -n1)
-        [ -n "$_inventory_files" ] || _inventory_files="未知"
-        [ -n "$_inventory_slots" ] || _inventory_slots="未知"
-        [ -n "$_inventory_xml" ] || _inventory_xml="未知"
-        [ -n "$_inventory_heuristic" ] || _inventory_heuristic="未知"
-        [ -n "$_inventory_rom" ] || _inventory_rom="generic"
-        ui_print "✓ 原厂字体文件：$_inventory_files 个（ROM：$_inventory_rom）"
-        ui_print "✓ 可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / OEM 探测 $_inventory_heuristic）"
 
-        _view_direct=0
-        for _view_name in direct direct-unoverlaid pre-mount-direct explicit; do
-            _view_count=$(grep -c "\"view\": \"$_view_name\"" "$FONT_INVENTORY_OUTPUT" 2>/dev/null)
-            case "$_view_count" in ''|*[!0-9]*) _view_count=0 ;; esac
-            _view_direct=$((_view_direct + _view_count))
-        done
-        _view_lower=$(grep -c '"view": "luoshu-lower"' "$FONT_INVENTORY_OUTPUT" 2>/dev/null)
-        case "$_view_lower" in ''|*[!0-9]*) _view_lower=0 ;; esac
-        _view_mirror=0
-        for _view_name in magisk-mirror kernelsu-mirror apatch-mirror root-mirror; do
-            _view_count=$(grep -c "\"view\": \"$_view_name\"" "$FONT_INVENTORY_OUTPUT" 2>/dev/null)
-            case "$_view_count" in ''|*[!0-9]*) _view_count=0 ;; esac
-            _view_mirror=$((_view_mirror + _view_count))
-        done
-        ui_print "✓ 原厂视图来源：直接 $_view_direct / LuoShu lower $_view_lower / Root mirror $_view_mirror"
+ui_print "• 正在刷入前扫描本机全部原厂字体槽位..."
+_inventory_result=$(
+    MODDIR="$MODPATH" \
+    LUOSHU_PUBLIC_DIR="/sdcard/LuoShu" \
+    LUOSHU_STOCK_SCAN_OVERLAY_MODULE="$OLD_MOD" \
+    LUOSHU_STOCK_SCAN_STRICT=1 \
+        sh "$FONT_INVENTORY_MANAGER" action stock_scan 2> "$FONT_INVENTORY_FLASH_ERR"
+)
+_inventory_rc=$?
+[ ! -s "$FONT_INVENTORY_FLASH_ERR" ] || cat "$FONT_INVENTORY_FLASH_ERR" >> "$FONT_INVENTORY_LOG" 2>/dev/null || true
+printf '%s\n' "$_inventory_result" >> "$FONT_INVENTORY_LOG" 2>/dev/null || true
 
-        # Compile the rich stock inventory into the runtime's single source of truth.
-        # Later switching/mixing reads these exact device paths instead of guessing
-        # MiSans/Roboto/etc. names again.
-        if [ -f "$FONT_TARGET_COMPILER" ]; then
-            _target_result=$(
-                PYTHONHOME="$_inventory_pyroot" \
-                PYTHONPATH="$_inventory_pyroot/lib/python3.14:$_inventory_pyroot/lib/python3.14/site-packages:$MODPATH/common" \
-                LD_LIBRARY_PATH="$_inventory_pyroot/lib:$_inventory_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-                    "$FONT_INVENTORY_PYTHON" "$FONT_TARGET_COMPILER" \
-                        --inventory "$FONT_INVENTORY_OUTPUT" \
-                        --output "$FONT_TARGET_OUTPUT" \
-                        --list-output "$FONT_TARGET_LIST" 2>> "$FONT_INVENTORY_LOG"
-            )
-            _target_rc=$?
-            printf '%s\n' "$_target_result" >> "$FONT_INVENTORY_LOG" 2>/dev/null || true
-            if [ "$_target_rc" -eq 0 ]; then
-                _target_count=$(printf '%s' "$_target_result" | sed -n 's/.*"replaceableCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
-                _target_physical=$(printf '%s' "$_target_result" | sed -n 's/.*"physicalCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
-                [ -n "$_target_count" ] || _target_count="$_inventory_slots"
-                [ -n "$_target_physical" ] || _target_physical=0
-                ui_print "✓ 已生成设备专属替换清单：$_target_count 个槽位（物理直覆 $_target_physical）"
-            else
-                rm -f "$FONT_TARGET_OUTPUT" "$FONT_TARGET_LIST" 2>/dev/null || true
-                ui_print "• 设备专属替换清单生成失败，将使用原厂库存兼容路径"
-            fi
-        fi
-    else
+if [ "$_inventory_rc" -ne 0 ] || [ ! -s "$FONT_INVENTORY_OUTPUT" ] || \
+   [ ! -s "$FONT_TARGET_OUTPUT" ] || [ ! -s "$FONT_TARGET_LIST" ]; then
+    _inventory_error=$(printf '%s\n' "$_inventory_result" | sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' | tail -n1)
+    [ -n "$_inventory_error" ] || \
         _inventory_error=$(sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p' "$FONT_INVENTORY_FLASH_ERR" 2>/dev/null | tail -n1)
-        [ -n "$_inventory_error" ] || _inventory_error="刷入环境无法确认原厂字体视图"
-        _inventory_error=$(printf '%s' "$_inventory_error" | tr '\r\n' '  ' | cut -c1-512)
-        _old_active=$(head -n1 "$OLD_MOD/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
-        _pending_file="$MODPATH/config/stock_inventory_scan_pending"
-        {
-            printf 'state=pending\n'
-            printf 'reason=%s\n' "$_inventory_error"
-            printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
-        } > "$_pending_file" 2>/dev/null || true
-        chmod 0644 "$_pending_file" 2>/dev/null || true
-        if [ -n "$_old_active" ] && [ "$_old_active" != default ]; then
-            ui_print "• 刷入时无法安全读取原厂字体：$_inventory_error"
-            ui_print "• 已安排下次启动在字体挂载前自动重扫，不会把当前覆盖字体当成原厂"
-        else
-            ui_print "• 原厂字体清单暂未完成：$_inventory_error"
-            ui_print "• 已安排下次启动自动重扫"
-        fi
-    fi
-else
-    ui_print "• 字体清单扫描器不可用，本机将自动使用旧静态适配清单"
+    [ -n "$_inventory_error" ] || _inventory_error="无法建立可信原厂字体槽位快照"
+    _inventory_error=$(printf '%s' "$_inventory_error" | tr '\r\n' '  ' | cut -c1-512)
+    rm -f "$FONT_INVENTORY_OUTPUT" "$FONT_TARGET_OUTPUT" "$FONT_TARGET_LIST" "$FONT_SLOT_SNAPSHOT" 2>/dev/null || true
+    ui_print "✗ 刷入前字体槽位扫描失败：$_inventory_error"
+    ui_print "• 为避免以后按错误槽位替换，本次安装已中止"
+    exit 1
 fi
+
+_inventory_files=$(printf '%s' "$_inventory_result" | sed -n 's/.*"stockFontFileCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+_inventory_slots=$(printf '%s' "$_inventory_result" | sed -n 's/.*"slotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+_inventory_xml=$(printf '%s' "$_inventory_result" | sed -n 's/.*"xmlSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+_inventory_heuristic=$(printf '%s' "$_inventory_result" | sed -n 's/.*"heuristicSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
+_inventory_rom=$(printf '%s' "$_inventory_result" | sed -n 's/.*"romKind"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | tail -n1)
+_target_count=$(sed -n 's/^.*"replaceableCount":[[:space:]]*\([0-9][0-9]*\).*$/\1/p' "$FONT_TARGET_OUTPUT" 2>/dev/null | tail -n1)
+_target_physical=$(sed -n 's/^.*"physicalCount":[[:space:]]*\([0-9][0-9]*\).*$/\1/p' "$FONT_TARGET_OUTPUT" 2>/dev/null | tail -n1)
+_snapshot_build=$(sed -n 's/^# buildKey=//p' "$FONT_TARGET_LIST" 2>/dev/null | head -n1)
+
+case "$_inventory_slots" in ''|*[!0-9]*|0) ui_print "✗ 没有扫描到可替换字体槽位，已中止安装"; exit 1 ;; esac
+case "$_target_count" in ''|*[!0-9]*|0) ui_print "✗ 设备专属替换清单为空，已中止安装"; exit 1 ;; esac
+[ -n "$_inventory_files" ] || _inventory_files="未知"
+[ -n "$_inventory_xml" ] || _inventory_xml="未知"
+[ -n "$_inventory_heuristic" ] || _inventory_heuristic="未知"
+[ -n "$_inventory_rom" ] || _inventory_rom="generic"
+[ -n "$_target_physical" ] || _target_physical=0
+[ -n "$_snapshot_build" ] || { ui_print "✗ 槽位快照缺少系统标识，已中止安装"; exit 1; }
+
+{
+    printf 'state=ready\n'
+    printf 'source=flash-preflight\n'
+    printf 'buildKey=%s\n' "$_snapshot_build"
+    printf 'slotCount=%s\n' "$_inventory_slots"
+    printf 'targetCount=%s\n' "$_target_count"
+    printf 'capturedAt=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+} > "$FONT_SLOT_SNAPSHOT" 2>/dev/null || {
+    ui_print "✗ 无法保存设备字体槽位快照，已中止安装"
+    exit 1
+}
+chmod 0644 "$FONT_SLOT_SNAPSHOT" 2>/dev/null || true
+
+_view_direct=0
+for _view_name in direct direct-unoverlaid pre-mount-direct explicit; do
+    _view_count=$(grep -c "\"view\": \"$_view_name\"" "$FONT_INVENTORY_OUTPUT" 2>/dev/null)
+    case "$_view_count" in ''|*[!0-9]*) _view_count=0 ;; esac
+    _view_direct=$((_view_direct + _view_count))
+done
+_view_lower=$(grep -c '"view": "luoshu-lower"' "$FONT_INVENTORY_OUTPUT" 2>/dev/null)
+case "$_view_lower" in ''|*[!0-9]*) _view_lower=0 ;; esac
+_view_mirror=0
+for _view_name in magisk-mirror kernelsu-mirror apatch-mirror root-mirror; do
+    _view_count=$(grep -c "\"view\": \"$_view_name\"" "$FONT_INVENTORY_OUTPUT" 2>/dev/null)
+    case "$_view_count" in ''|*[!0-9]*) _view_count=0 ;; esac
+    _view_mirror=$((_view_mirror + _view_count))
+done
+
+ui_print "✓ 原厂字体文件：$_inventory_files 个（ROM：$_inventory_rom）"
+ui_print "✓ 已冻结可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / OEM 探测 $_inventory_heuristic）"
+ui_print "✓ 设备专属替换目标：$_target_count 个（物理直覆 $_target_physical）"
+ui_print "✓ 原厂视图来源：直接 $_view_direct / LuoShu lower $_view_lower / Root mirror $_view_mirror"
+ui_print "✓ 后续换字体只读取本次槽位快照，不再临时猜槽位"
+
 # 安装安全 CLI，不暴露上一字体回滚、热刷新或重启 SystemUI 命令。
 cp -f "$MODPATH/common/luoshu_cli.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
 chmod 0755 "$MODPATH"/*.sh "$MODPATH/common"/*.sh 2>/dev/null || true
