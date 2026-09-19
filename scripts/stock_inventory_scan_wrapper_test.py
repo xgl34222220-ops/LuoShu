@@ -23,6 +23,8 @@ def main() -> int:
     post_mount = (ROOT / "post-mount.sh").read_text(encoding="utf-8")
     manager = (ROOT / "common/font_manager.sh").read_text(encoding="utf-8")
     assert "stock_inventory_scan_pending" in installer
+    assert "LUOSHU_FRESH_STOCK_SCAN=1" in installer
+    assert "LUOSHU_FRESH_STOCK_SCAN=1" in post_mount
     assert "已中止本次更新" not in installer
     assert "旧字体负载" in installer and "继续安装并重新扫描本机字体槽位" in installer
     assert "兼容迁移视图" in wrapper
