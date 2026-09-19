@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Iterable
@@ -90,6 +91,91 @@ ROM_FONT_MARKERS = {
     "aosp": ("Roboto-Regular.ttf", "NotoSansCJK-Regular.ttc", "NotoSansSC-VF.otf"),
 }
 
+KNOWN_PARTITIONS = {
+    partition for partition, *_rest in (*PRIMARY_FONT_SPECS, *AUX_FONT_SPECS)
+}
+DYNAMIC_PARTITION_DENY = {
+    "acct", "apex", "cache", "config", "data", "data_mirror", "debug_ramdisk",
+    "dev", "linkerconfig", "lost+found", "metadata", "mnt", "proc", "sdcard",
+    "storage", "sys", "tmp", "vendor_dlkm", "odm_dlkm", "system_dlkm",
+}
+DYNAMIC_PARTITION_LIMIT = 16
+DYNAMIC_PARTITION_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_]{0,63}$")
+
+
+def _dynamic_partition_search_bases() -> tuple[Path, ...]:
+    override = os.environ.get("LUOSHU_DYNAMIC_PARTITION_SCAN_ROOTS", "").strip()
+    if override:
+        return tuple(Path(item) for item in override.split(os.pathsep) if item)
+    return (Path("/"), Path("/system"))
+
+
+def _safe_dynamic_partition_name(name: str) -> bool:
+    return bool(DYNAMIC_PARTITION_NAME.fullmatch(name)
+                and name not in KNOWN_PARTITIONS
+                and name.lower() not in DYNAMIC_PARTITION_DENY)
+
+
+def _dynamic_partition_specs() -> list[tuple[str, Path, tuple[Path, ...], Path, tuple[Path, ...]]]:
+    """Discover unknown root-level OEM partitions that actually contain fonts.
+
+    Only direct children of / and /system are considered, and runtime/data/theme
+    trees are denied. A discovered partition is canonicalized to /<name>/fonts;
+    /system/<name>/fonts is treated as an alias for ROMs that expose logical
+    partitions under /system. Results are capped so a malformed filesystem cannot
+    explode scan or mount work.
+    """
+    found: dict[str, dict[str, Path]] = {}
+    for base_dir in _dynamic_partition_search_bases():
+        try:
+            children = sorted(base_dir.iterdir(), key=lambda path: path.name.lower())
+        except OSError:
+            continue
+        for child in children:
+            name = child.name
+            if not _safe_dynamic_partition_name(name):
+                continue
+            font_dir = child / "fonts"
+            if not font_dir.is_dir() or not _contains_font_capped(font_dir, limit=1024):
+                continue
+            entry = found.setdefault(name, {})
+            # Prefer the direct /partition view over a /system/partition alias.
+            key = "direct" if base_dir == Path("/") else "alias"
+            entry[key] = font_dir
+            etc_dir = child / "etc"
+            if etc_dir.is_dir():
+                entry[key + "_etc"] = etc_dir
+            if len(found) >= DYNAMIC_PARTITION_LIMIT:
+                break
+        if len(found) >= DYNAMIC_PARTITION_LIMIT:
+            break
+
+    specs: list[tuple[str, Path, tuple[Path, ...], Path, tuple[Path, ...]]] = []
+    for name in sorted(found):
+        entry = found[name]
+        logical_fonts = Path("/") / name / "fonts"
+        font_aliases = tuple(
+            path for path in (entry.get("direct"), entry.get("alias"))
+            if path is not None and path != logical_fonts
+        )
+        logical_etc = Path("/") / name / "etc"
+        etc_aliases = tuple(
+            path for path in (entry.get("direct_etc"), entry.get("alias_etc"))
+            if path is not None and path != logical_etc
+        )
+        specs.append((name, logical_fonts, font_aliases, logical_etc, etc_aliases))
+    return specs
+
+
+def _write_dynamic_partition_manifest(output: Path, partitions: Iterable[str]) -> None:
+    manifest = output.parent / "device_font_partitions.conf"
+    values = sorted({part for part in partitions if _safe_dynamic_partition_name(part)})
+    temp = manifest.with_name(manifest.name + f".tmp.{os.getpid()}")
+    temp.parent.mkdir(parents=True, exist_ok=True)
+    temp.write_text("".join(f"{part}\n" for part in values), encoding="utf-8")
+    os.replace(temp, manifest)
+
+
 
 def _probe_font_roots(args: Any) -> list[base.FontRoot]:
     """Pick the live/explicit font directories without requiring stock trust.
@@ -108,6 +194,9 @@ def _probe_font_roots(args: Any) -> list[base.FontRoot]:
     for partition, logical, argument in AUX_FONT_SPECS:
         explicit = getattr(args, argument)
         roots.append(base.FontRoot(partition, logical, explicit if explicit is not None else logical))
+    for partition, logical, aliases, _etc_logical, _etc_aliases in _dynamic_partition_specs():
+        actual = next((candidate for candidate in (logical, *aliases) if candidate.is_dir()), logical)
+        roots.append(base.FontRoot(partition, logical, actual))
     return roots
 
 
@@ -193,10 +282,13 @@ def _resolve_primary_font_roots(args: Any, overlay_risk: bool) -> list[base.Font
 
 
 def _resolve_aux_font_roots(args: Any, overlay_risk: bool) -> list[base.FontRoot]:
-    return [
+    roots = [
         base.FontRoot(partition, logical, _resolve_actual(logical, getattr(args, argument), (), overlay_risk))
         for partition, logical, argument in AUX_FONT_SPECS
     ]
+    for partition, logical, aliases, _etc_logical, _etc_aliases in _dynamic_partition_specs():
+        roots.append(base.FontRoot(partition, logical, _resolve_actual(logical, None, aliases, overlay_risk)))
+    return roots
 
 
 def _resolve_etc_roots(args: Any, overlay_risk: bool) -> list[tuple[str, Path, Path]]:
@@ -205,6 +297,8 @@ def _resolve_etc_roots(args: Any, overlay_risk: bool) -> list[tuple[str, Path, P
         roots.append((partition, logical, _resolve_actual(logical, getattr(args, argument), aliases, overlay_risk)))
     for partition, logical, argument in AUX_ETC_SPECS:
         roots.append((partition, logical, _resolve_actual(logical, getattr(args, argument), (), overlay_risk)))
+    for partition, _font_logical, _font_aliases, logical, aliases in _dynamic_partition_specs():
+        roots.append((partition, logical, _resolve_actual(logical, None, aliases, overlay_risk)))
     return roots
 
 
@@ -654,6 +748,9 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "preservedDynamicAliases": dynamic_aliases,
         "retiredPhysicalSlots": sorted(retired_physical_slots),
         "retiredAbsentUpgradeSlots": sorted(retired_absent_upgrade_slots),
+        "discoveredPartitions": sorted(
+            root.partition for root in replaceable_roots if root.partition not in KNOWN_PARTITIONS
+        ),
         "state": "ready",
         "buildKey": build_key,
         "buildFingerprint": fingerprint,
@@ -689,6 +786,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
             names = "、".join(Path(path).name for path in missing[:5])
             raise base.InventoryError(f"原厂字体重扫未完整保留已有槽位（{len(missing)} 个：{names}）")
     base._atomic_write(output, inventory)
+    _write_dynamic_partition_manifest(output, inventory.get("discoveredPartitions", []))
     print(json.dumps({
         "status": "ok",
         "buildKey": build_key,
@@ -700,6 +798,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "genericSlotCount": scan_summary["verifiedScanUiFileCount"],
         "physicalSlotCount": sum(1 for entry in slots.values() if entry.get("source") == "hyperos-physical"),
         "retiredAbsentUpgradeSlotCount": len(retired_absent_upgrade_slots),
+        "dynamicPartitionCount": len(inventory.get("discoveredPartitions", [])),
         "candidatePathCount": int(probe.get("candidateCount", 0)),
         "xmlSourceCount": scan_summary["xmlSourceCount"],
         "themeOverrideCount": len(theme_roots),
