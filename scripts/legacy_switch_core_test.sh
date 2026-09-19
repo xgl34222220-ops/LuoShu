@@ -42,7 +42,10 @@ grep -q 'next-boot-stage' "$SAFE_BACKEND"
 grep -q 'LUOSHU_SWITCH_PROGRESS_FILE' "$SAFE_BACKEND"
 grep -q 'apply_font_by_rom' "$SAFE_BACKEND"
 grep -q 'ensure_target_manifest' "$SAFE_BACKEND"
-grep -q 'action stock_scan' "$SAFE_BACKEND"
+grep -q 'font-slot-snapshot.conf' "$SAFE_BACKEND"
+grep -q 'source.*flash-preflight' "$SAFE_BACKEND"
+grep -q 'runtime rescan forbidden' "$SAFE_BACKEND"
+! grep -q 'action stock_scan' "$SAFE_BACKEND"
 grep -q 'replaceable_font_targets.list' "$SAFE_BACKEND"
 
 # Only the early-boot helper is allowed to activate -next as live, before self-mount.
