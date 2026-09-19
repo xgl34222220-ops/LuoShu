@@ -190,10 +190,217 @@ def compact_routed_source(source: Path, output: Path, routing: frozenset[int],
     return output, removed
 
 
+
+def _sfnt_checksum(data: bytes | bytearray) -> int:
+    raw = bytes(data)
+    padding = (-len(raw)) & 3
+    if padding:
+        raw += b'\0' * padding
+    return sum(struct.unpack(f'>{len(raw) // 4}I', raw)) & 0xFFFFFFFF
+
+
+def _sfnt_records(path: Path) -> dict[str, tuple[int, int, int, int]] | None:
+    try:
+        with path.open('rb') as stream:
+            magic = stream.read(4)
+            if magic not in (b'\x00\x01\x00\x00', b'true', b'OTTO'):
+                return None
+            header = stream.read(8)
+            if len(header) != 8:
+                return None
+            num_tables = struct.unpack('>H', header[:2])[0]
+            if not 1 <= num_tables <= 256:
+                return None
+            records: dict[str, tuple[int, int, int, int]] = {}
+            for index in range(num_tables):
+                record_pos = 12 + index * 16
+                stream.seek(record_pos)
+                raw = stream.read(16)
+                if len(raw) != 16:
+                    return None
+                tag = raw[:4].decode('latin-1')
+                checksum, offset, length = struct.unpack('>III', raw[4:])
+                records[tag] = (record_pos, checksum, offset, length)
+            return records
+    except OSError:
+        return None
+
+
+def _clone_font_fast(source: Path, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.unlink(missing_ok=True)
+    cloned = False
+    try:
+        import fcntl
+        with source.open('rb') as src, output.open('wb') as dst:
+            try:
+                # Linux FICLONE: on F2FS/Btrfs/reflink-capable /data this turns a
+                # 100+ MB font clone into metadata-only work.
+                fcntl.ioctl(dst.fileno(), 0x40049409, src.fileno())
+                cloned = True
+            except OSError:
+                pass
+    except (ImportError, OSError):
+        cloned = False
+    if not cloned:
+        shutil.copyfile(source, output)
+    os.chmod(output, 0o644)
+
+
+def _fast_patch_metrics(source: Path, output: Path, contract: tuple, *,
+                        align_bitmap_bottom: bool = False) -> dict | None:
+    """Patch only head/hhea/OS2 for simple SFNT fonts.
+
+    FontTools save rewrites the entire font even when only a few metric fields
+    change. On large CJK fonts and many physical slots that becomes gigabytes of
+    avoidable I/O. For ordinary TTF/OTF without MVAR we can preserve every glyph
+    byte exactly, clone the file (reflink when supported), patch fixed-size metric
+    tables, update table checksums and checkSumAdjustment, and finish in O(metadata)
+    plus at most one raw clone.
+    """
+    records = _sfnt_records(source)
+    if not records or 'head' not in records or 'hhea' not in records or 'OS/2' not in records:
+        return None
+    if 'MVAR' in records:
+        return None
+    head_rec, hhea_rec, os2_rec = records['head'], records['hhea'], records['OS/2']
+    if head_rec[3] < 54 or hhea_rec[3] < 10 or os2_rec[3] < 78:
+        return None
+    try:
+        with source.open('rb') as stream:
+            def read_table(rec):
+                stream.seek(rec[2])
+                data = bytearray(stream.read(rec[3]))
+                if len(data) != rec[3]:
+                    raise OSError('short sfnt table')
+                return data
+            old_head = read_table(head_rec)
+            old_hhea = read_table(hhea_rec)
+            old_os2 = read_table(os2_rec)
+    except OSError:
+        return None
+
+    os2_version = struct.unpack_from('>H', old_os2, 0)[0]
+    # Older OS/2 tables need structural promotion; keep the safe FontTools path.
+    if os2_version < 4:
+        return None
+    source_upem = struct.unpack_from('>H', old_head, 18)[0]
+    if not 16 <= source_upem <= 16384:
+        return None
+    scale = source_upem / contract[0]
+    values = [round(v * scale) for v in contract[1:9]]
+    if any(not -32768 <= v <= 32767 for v in values[:6]):
+        return None
+    if any(not 0 <= v <= 65535 for v in values[6:]):
+        return None
+
+    new_head = bytearray(old_head)
+    new_hhea = bytearray(old_hhea)
+    new_os2 = bytearray(old_os2)
+    old_adjustment = struct.unpack_from('>I', old_head, 8)[0]
+    # Table checksum for 'head' is always calculated with adjustment zero.
+    struct.pack_into('>I', new_head, 8, 0)
+    source_frame = (struct.unpack_from('>h', old_head, 38)[0],
+                    struct.unpack_from('>h', old_head, 42)[0])
+    bottom_reason = 'stock-preserved'
+    bottom_correction = 0
+    if contract[10] is not None:
+        frame = tuple(round(v * scale) for v in contract[10])
+        if not all(-32768 <= v <= 32767 for v in frame):
+            return None
+        y_min, y_max = frame
+        if align_bitmap_bottom and contract[-1] == 'stock':
+            descent = values[4] if contract[9] else values[1]
+            if descent < 0 and y_min < descent:
+                try:
+                    face = _pick_face(source)
+                    options = {'fontNumber': face} if face >= 0 else {}
+                    with TTFont(source, lazy=True, recalcBBoxes=False,
+                                recalcTimestamp=False, **options) as font:
+                        ink_bottom = _latin_ink_bottom(font)
+                except Exception:
+                    ink_bottom = None
+                if ink_bottom is None:
+                    bottom_reason = 'unproven-latin-ink-bounds'
+                elif ink_bottom < descent:
+                    bottom_reason = 'latin-descender-would-clip'
+                else:
+                    bottom_correction = descent - y_min
+                    y_min = descent
+                    bottom_reason = 'latin-ui-bottom-to-descent'
+            else:
+                bottom_reason = 'no-excess-bottom-padding'
+        struct.pack_into('>h', new_head, 38, y_min)
+        struct.pack_into('>h', new_head, 42, y_max)
+
+    struct.pack_into('>hhh', new_hhea, 4, *values[:3])
+    selection = struct.unpack_from('>H', new_os2, 62)[0]
+    selection = (selection & ~128) | (128 if contract[9] else 0)
+    struct.pack_into('>H', new_os2, 62, selection)
+    struct.pack_into('>hhh', new_os2, 68, *values[3:6])
+    struct.pack_into('>HH', new_os2, 74, *values[6:8])
+
+    old_head_zero = bytearray(old_head)
+    struct.pack_into('>I', old_head_zero, 8, 0)
+    old_checks = {
+        'head': _sfnt_checksum(old_head_zero),
+        'hhea': _sfnt_checksum(old_hhea),
+        'OS/2': _sfnt_checksum(old_os2),
+    }
+    new_checks = {
+        'head': _sfnt_checksum(new_head),
+        'hhea': _sfnt_checksum(new_hhea),
+        'OS/2': _sfnt_checksum(new_os2),
+    }
+    delta_content = sum((new_checks[tag] - old_checks[tag]) for tag in new_checks) & 0xFFFFFFFF
+    delta_directory = sum(
+        (new_checks[tag] - records[tag][1]) for tag in new_checks
+    ) & 0xFFFFFFFF
+    new_adjustment = (old_adjustment - delta_content - delta_directory) & 0xFFFFFFFF
+    struct.pack_into('>I', new_head, 8, new_adjustment)
+
+    try:
+        _clone_font_fast(source, output)
+        with output.open('r+b') as stream:
+            for tag, data in (('head', new_head), ('hhea', new_hhea), ('OS/2', new_os2)):
+                rec = records[tag]
+                stream.seek(rec[2])
+                stream.write(data)
+                stream.seek(rec[0] + 4)
+                stream.write(struct.pack('>I', new_checks[tag]))
+            stream.flush()
+            os.fsync(stream.fileno())
+    except OSError:
+        output.unlink(missing_ok=True)
+        return None
+
+    return {
+        'sourceUpem': source_upem,
+        'sourceHead': list(source_frame),
+        'outputHead': [struct.unpack_from('>h', new_head, 38)[0],
+                       struct.unpack_from('>h', new_head, 42)[0]],
+        'layoutBoundsSource': ('stock-line-descent' if bottom_correction else
+                               'stock' if contract[10] is not None else 'source'),
+        'bitmapBaselineCorrection': bottom_correction,
+        'bitmapBaselineReason': bottom_reason,
+        'layoutBoundsDifferFromSource': source_frame != (
+            struct.unpack_from('>h', new_head, 38)[0],
+            struct.unpack_from('>h', new_head, 42)[0]),
+        'removedCjkMappings': 0,
+        'fastMetricPatch': True,
+    }
+
+
 def write_metrics(source: Path, output: Path, contract: tuple,
                   cjk_fallback_codepoints: frozenset[int] | None = None,
                   stock_cjk_punctuation: frozenset[int] = frozenset(), *,
                   align_bitmap_bottom: bool = False) -> dict:
+    if not cjk_fallback_codepoints:
+        fast = _fast_patch_metrics(
+            source, output, contract, align_bitmap_bottom=align_bitmap_bottom
+        )
+        if fast is not None:
+            return fast
     # lazy + recalcBBoxes=False retains glyf/CFF/gvar as raw tables. Loading glyph
     # bounds just to change hhea/OS2 used to recompile entire CJK fonts per slot.
     face = _pick_face(source)
