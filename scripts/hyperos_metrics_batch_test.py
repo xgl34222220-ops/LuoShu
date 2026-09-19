@@ -136,6 +136,42 @@ class HyperOSMetricsTest(unittest.TestCase):
         with TTFont(target) as font:
             self.assertEqual(font['hhea'].ascent, 850)
 
+    def test_manifest_accepts_future_oem_ui_name_from_xml_evidence(self):
+        logical = '/my_company/fonts/FutureSystemUi-Regular.ttf'
+        entry = slot(ascent=910, descent=-210)
+        entry.update({
+            'source': 'xml',
+            'families': ['system-ui'],
+            'validatedFormat': 'TTF',
+            'format': 'TTF',
+            'faceIndex': 0,
+            'style': 'normal',
+        })
+        entry['metrics']['coverage'] = {
+            'hasHan': False, 'hasLatin': True, 'hanCount': 0,
+            'latinCount': 52, 'unicodeCount': 96, 'cjkPunctuation': [],
+        }
+        self.inventory({logical: entry})
+        manifest = {
+            'schema': 'device-font-target-manifest-v1',
+            'revision': 1,
+            'buildKey': 'fixture',
+            'romKind': 'hyperos',
+            'targets': [{
+                'path': logical,
+                'partition': 'my_company',
+                'name': 'FutureSystemUi-Regular.ttf',
+                'mode': 'physical',
+            }],
+        }
+        (self.module / 'config/replaceable_font_targets.json').write_text(json.dumps(manifest))
+        result = batch.build(self.module, self.stage, [])
+        self.assertEqual(result['mapped'], 1)
+        target = self.stage / 'my_company/fonts/FutureSystemUi-Regular.ttf'
+        self.assertTrue(target.exists())
+        with TTFont(target) as font:
+            self.assertEqual(font['hhea'].ascent, 910)
+
     def test_manifest_prunes_safe_but_undetected_stale_alias(self):
         self.inventory({'/product/fonts/Roboto-Regular.ttf': slot(ascent=850, descent=-150)})
         stale = self.fonts / 'MiSansVF.ttf'
