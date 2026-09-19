@@ -234,8 +234,9 @@ def _local_name(tag: str) -> str:
 
 
 def _is_ui_family(name: str) -> bool:
+    """Classify system UI families without substring false positives."""
     lowered = name.strip().lower().replace("_", "-")
-    if not lowered or any(token in lowered for token in DENY_FAMILY_TOKENS):
+    if not lowered:
         return False
     if lowered == "sans-serif":
         return True
@@ -243,6 +244,10 @@ def _is_ui_family(name: str) -> bool:
         suffix = lowered.removeprefix("sans-serif-")
         parts = [part for part in suffix.split("-") if part]
         return bool(parts) and all(part in SANS_SERIF_UI_SUFFIX_TOKENS for part in parts)
+
+    tokens = {token for token in re.split(r"[^a-z0-9]+", lowered) if token}
+    if tokens.intersection({"serif", "mono", "monospace", "emoji", "symbol", "icon", "math", "music"}):
+        return False
     return any(
         lowered == prefix or lowered.startswith(prefix + "-")
         for prefix in UI_FAMILY_PREFIXES
