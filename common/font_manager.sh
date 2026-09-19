@@ -146,6 +146,12 @@ stock_scan_json() {
     _stock_message=$(printf '%s\n' "$_stock_last" | sed -n 's/^.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*$/\1/p')
     [ -n "$_stock_message" ] || _stock_message="$_stock_out"
     [ -n "$_stock_message" ] || _stock_message='原厂字体扫描失败'
+    {
+        printf 'state=pending\n'
+        printf 'reason=%s\n' "$_stock_message"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
+    chmod 0644 "$MODDIR/config/stock_inventory_scan_pending" 2>/dev/null || true
     stock_scan_lock_release
     trap - EXIT HUP INT TERM
     printf '{"status":"error","message":"%s"}\n' "$(json_escape_router "$_stock_message")"
