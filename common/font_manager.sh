@@ -98,6 +98,9 @@ stock_scan_namespace_exec() {
     [ -x "$_sns_shell" ] || return 125
     [ "${LUOSHU_STOCK_SCAN_NAMESPACE:-}" != pid1 ] || return 125
     [ "${LUOSHU_STOCK_VIEW_VERIFIED:-}" != 1 ] || return 125
+    _sns_active=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+    [ -n "$_sns_active" ] || _sns_active=default
+    [ "$_sns_active" != default ] || return 125
 
     _sns_force="${LUOSHU_STOCK_SCAN_FORCE_NAMESPACE:-0}"
     _sns_self=$(readlink /proc/self/ns/mnt 2>/dev/null)
