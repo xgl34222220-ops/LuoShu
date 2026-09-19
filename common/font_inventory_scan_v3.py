@@ -18,7 +18,7 @@ import font_inventory_scan as v2
 from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, safe_physical_font_name,
                                     DYNAMIC_OVERLAY_PATH, DYNAMIC_OVERLAY_TARGET)
 
-SCANNER_REVISION = 3
+SCANNER_REVISION = 4
 METRICS_REVISION = 3
 # Re-scan trusted stock metrics for Latin UI families restored after v4.3.0.
 HYPEROS_COVERAGE_REVISION = 4
@@ -388,6 +388,7 @@ def scan(args: Any) -> int:
             "stockFontUniqueFileCount": int(summary.get("stockFontUniqueFileCount", 0)),
             "xmlSlotCount": int(summary.get("xmlUiFileCount", 0)),
             "heuristicSlotCount": int(summary.get("heuristicUiFileCount", 0)),
+            "genericSlotCount": int(summary.get("verifiedScanUiFileCount", 0)),
             "themeOverrideCount": len(summary.get("themeOverrideRoots", [])),
             "romKind": existing.get("romKind", "generic"),
         }, ensure_ascii=False))
@@ -434,6 +435,9 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     replaceable_roots = [*primary_roots, *auxiliary_roots]
     families, slots = v2._parse_partition_xml(xml_sources, replaceable_roots)
     base._add_heuristic_slots(slots, replaceable_roots, args.font_check)
+    # Vendor-agnostic final pass: enumerate stock font files and classify real
+    # text faces by cmap/metrics instead of waiting for a hard-coded OEM name.
+    base._add_verified_text_slots(slots, replaceable_roots)
     base._populate_metrics(slots)
     path_total, unique_total, path_counts, unique_counts, names = _stock_file_counts(replaceable_roots)
     try:
@@ -472,6 +476,12 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     theme_roots = _theme_override_roots()
     mount_targets = _font_mount_targets()
     scan_summary = v2._summary(slots, path_total, path_counts, len(xml_sources), v2._count_xml_ui_faces(xml_sources))
+    scan_summary["heuristicUiFileCount"] = sum(
+        1 for entry in slots.values() if entry.get("source") == "heuristic"
+    )
+    scan_summary["verifiedScanUiFileCount"] = sum(
+        1 for entry in slots.values() if entry.get("source") == "verified-scan"
+    )
     scan_summary.update({
         "stockFontUniqueFileCount": unique_total,
         "partitionUniqueFontFileCounts": unique_counts,
@@ -532,6 +542,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "stockFontUniqueFileCount": unique_total,
         "xmlSlotCount": scan_summary["xmlUiFileCount"],
         "heuristicSlotCount": scan_summary["heuristicUiFileCount"],
+        "genericSlotCount": scan_summary["verifiedScanUiFileCount"],
         "xmlSourceCount": scan_summary["xmlSourceCount"],
         "themeOverrideCount": len(theme_roots),
         "fontMountCount": len(mount_targets),
