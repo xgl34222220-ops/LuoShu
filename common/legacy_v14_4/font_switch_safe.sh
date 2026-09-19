@@ -39,7 +39,9 @@ PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
 SWITCH_CACHE_ROOT="$CONFIG_DIR/safe-switch-cache"
 SWITCH_VALIDATION_CACHE_ROOT="$CONFIG_DIR/safe-switch-validation"
 SWITCH_CACHE_SCHEMA="safe-switch-metrics-v1"
+PREWARM_LOCK="$MODDIR/.safe-switch-prewarm.lock"
 LOCK_HELD=false
+PREWARM_LOCK_HELD=false
 
 export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
 [ -f "$LEGACY_DIR/util_functions.sh" ] && . "$LEGACY_DIR/util_functions.sh"
@@ -94,6 +96,23 @@ safe_inventory_identity() {
     else
         safe_source_identity "$_sii_file"
     fi
+}
+
+safe_mapper_identity() {
+    {
+        for _smi_file in "$LEGACY_DIR/rom_adapters.sh" \
+                         "$MODDIR/common/hyperos_stage_complete.sh" \
+                         "$MODDIR/common/coloros_stage_complete.sh"; do
+            [ -f "$_smi_file" ] || continue
+            if command -v cksum >/dev/null 2>&1; then
+                cksum "$_smi_file" 2>/dev/null | awk -v p="$_smi_file" '{print p "|" $1 "|" $2}'
+            elif command -v busybox >/dev/null 2>&1; then
+                busybox cksum "$_smi_file" 2>/dev/null | awk -v p="$_smi_file" '{print p "|" $1 "|" $2}'
+            else
+                printf '%s|%s\n' "$_smi_file" "$(safe_source_identity "$_smi_file" 2>/dev/null)"
+            fi
+        done
+    } | safe_hash_stream
 }
 
 safe_rom_identity() {
@@ -161,6 +180,7 @@ safe_switch_cache_key() {
     _sck_identity=$(safe_source_identity "$_sck_file") || return 1
     _sck_inventory=$(safe_inventory_identity)
     _sck_rom=$(safe_rom_identity)
+    _sck_mapper=$(safe_mapper_identity)
     {
         printf '%s\n' "$SWITCH_CACHE_SCHEMA"
         printf '%s\n' "$_sck_font"
@@ -168,6 +188,7 @@ safe_switch_cache_key() {
         printf '%s\n' "$_sck_identity"
         printf '%s\n' "$_sck_inventory"
         printf '%s\n' "$_sck_rom"
+        printf '%s\n' "$_sck_mapper"
     } | safe_hash_stream
 }
 
@@ -182,6 +203,7 @@ safe_switch_cache_restore() {
     [ "$(read_state_value "$_scr_conf" sourceIdentity)" = "$(safe_source_identity "$_scr_file")" ] || return 1
     [ "$(read_state_value "$_scr_conf" inventoryIdentity)" = "$(safe_inventory_identity)" ] || return 1
     [ "$(read_state_value "$_scr_conf" rom)" = "$(safe_rom_identity)" ] || return 1
+    [ "$(read_state_value "$_scr_conf" mapperIdentity)" = "$(safe_mapper_identity)" ] || return 1
 
     _scr_restored=0
     for _scr_part in $(safe_partition_list); do
@@ -239,6 +261,7 @@ safe_switch_cache_store() {
         printf 'sourceIdentity=%s\n' "$_scs_identity"
         printf 'inventoryIdentity=%s\n' "$(safe_inventory_identity)"
         printf 'rom=%s\n' "$(safe_rom_identity)"
+        printf 'mapperIdentity=%s\n' "$(safe_mapper_identity)"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$_scs_stage/cache.conf" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
     mkdir -p "$SWITCH_CACHE_ROOT" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
@@ -271,10 +294,52 @@ safe_error() {
 lock_cleanup() {
     [ "$LOCK_HELD" = true ] || return 0
     if type luoshu_font_lock_release >/dev/null 2>&1; then
-        luoshu_font_lock_release "$SWITCH_LOCK" "$$" >/dev/null 2>&1 || \
-            luoshu_font_lock_force_clear "$SWITCH_LOCK" "$$" >/dev/null 2>&1 || true
+        luoshu_font_lock_release "$SWITCH_LOCK" "$" >/dev/null 2>&1 || \
+            luoshu_font_lock_force_clear "$SWITCH_LOCK" "$" >/dev/null 2>&1 || true
     fi
     LOCK_HELD=false
+}
+
+prewarm_lock_cleanup() {
+    [ "$PREWARM_LOCK_HELD" = true ] || return 0
+    if type luoshu_font_lock_release >/dev/null 2>&1; then
+        luoshu_font_lock_release "$PREWARM_LOCK" "$" >/dev/null 2>&1 || \
+            luoshu_font_lock_force_clear "$PREWARM_LOCK" "$" >/dev/null 2>&1 || true
+    fi
+    PREWARM_LOCK_HELD=false
+}
+
+prewarm_lock_acquire() {
+    type luoshu_font_lock_acquire >/dev/null 2>&1 || return 1
+    luoshu_font_lock_acquire "$PREWARM_LOCK" "$"
+    _pl_rc=$?
+    [ "$_pl_rc" -eq 0 ] || return "$_pl_rc"
+    PREWARM_LOCK_HELD=true
+    return 0
+}
+
+switch_busy() {
+    if type luoshu_font_lock_active >/dev/null 2>&1; then
+        luoshu_font_lock_active "$SWITCH_LOCK"
+        return $?
+    fi
+    [ -e "$SWITCH_LOCK" ]
+}
+
+safe_switch_cache_ready() {
+    _scrd_file="$1"; _scrd_font="$2"
+    _scrd_key=$(safe_switch_cache_key "$_scrd_file" "$_scrd_font") || return 1
+    _scrd_root="$SWITCH_CACHE_ROOT/$_scrd_key"
+    _scrd_conf="$_scrd_root/cache.conf"
+    [ -s "$_scrd_conf" ] && [ -d "$_scrd_root/tree" ] || return 1
+    [ "$(read_state_value "$_scrd_conf" schema)" = "$SWITCH_CACHE_SCHEMA" ] || return 1
+    [ "$(read_state_value "$_scrd_conf" font)" = "$_scrd_font" ] || return 1
+    [ "$(read_state_value "$_scrd_conf" sourceIdentity)" = "$(safe_source_identity "$_scrd_file")" ] || return 1
+    [ "$(read_state_value "$_scrd_conf" inventoryIdentity)" = "$(safe_inventory_identity)" ] || return 1
+    [ "$(read_state_value "$_scrd_conf" rom)" = "$(safe_rom_identity)" ] || return 1
+    [ "$(read_state_value "$_scrd_conf" mapperIdentity)" = "$(safe_mapper_identity)" ] || return 1
+    find "$_scrd_root/tree" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) \
+        -print -quit 2>/dev/null | grep -q .
 }
 
 lock_acquire() {
@@ -300,10 +365,10 @@ cleanup_stale_stages() {
     done
 }
 
-trap 'cleanup_stage; lock_cleanup' EXIT
-trap 'cleanup_stage; lock_cleanup; exit 129' HUP
-trap 'cleanup_stage; lock_cleanup; exit 130' INT
-trap 'cleanup_stage; lock_cleanup; exit 143' TERM
+trap 'cleanup_stage; prewarm_lock_cleanup; lock_cleanup' EXIT
+trap 'cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 129' HUP
+trap 'cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 130' INT
+trap 'cleanup_stage; prewarm_lock_cleanup; lock_cleanup; exit 143' TERM
 
 find_text_font_file() {
     _wanted="$1"
@@ -538,6 +603,46 @@ write_runtime_state() {
     return 0
 }
 
+prewarm_font() {
+    _font="$1"
+    [ -n "$_font" ] && [ "$_font" != default ] || return 0
+    [ -s "$CONFIG_DIR/device_font_inventory.json" ] || return 0
+    switch_busy && return 0
+
+    prewarm_lock_acquire
+    _prewarm_lock_rc=$?
+    [ "$_prewarm_lock_rc" -eq 0 ] || return 0
+    switch_busy && return 0
+
+    _source="$(find_text_font_file "$_font")"
+    [ -f "$_source" ] || return 0
+    validate_global "$_source" || return 0
+    safe_switch_cache_ready "$_source" "$_font" && return 0
+
+    stage_clone_live || return 0
+    stage_clear_text_payload || return 0
+    switch_busy && return 0
+
+    PAYLOAD_ROOT="$STAGE_PAYLOAD"
+    SYSTEM_FONTS_DIR="$STAGE_PAYLOAD/system/fonts"
+    export PAYLOAD_ROOT SYSTEM_FONTS_DIR
+    type apply_font_by_rom >/dev/null 2>&1 || return 0
+    apply_font_by_rom "$_source" "$SYSTEM_FONTS_DIR" quick "$_font" >> "$LOG_FILE" 2>&1 || return 0
+    mirror_existing_targets
+    switch_busy && return 0
+
+    if [ "${IS_HYPEROS:-false}" = true ]; then
+        stage_hyperos_complete || return 0
+    elif [ "${IS_COLOROS:-false}" = true ]; then
+        stage_coloros_complete || return 0
+    fi
+    stage_verify "$_font" || return 0
+    safe_switch_cache_store "$_source" "$_font" >/dev/null 2>&1 || return 0
+    printf '[%s] [SAFE-SWITCH] prewarm ready font=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_font" >> "$LOG_FILE" 2>/dev/null || true
+    return 0
+}
+
 switch_font() {
     _font="$1"
     [ -n "$_font" ] || { safe_error '未指定字体'; return 1; }
@@ -624,7 +729,8 @@ case "${1:-}" in
     action)
         case "${2:-}" in
             switch) switch_font "${3:-}"; exit $? ;;
-            *) safe_error '安全切换核心只接管字体应用动作'; exit 2 ;;
+            prewarm) prewarm_font "${3:-}"; exit $? ;;
+            *) safe_error '安全切换核心只接管字体应用/预热动作'; exit 2 ;;
         esac
         ;;
     *) safe_error '无效的字体切换命令'; exit 2 ;;
