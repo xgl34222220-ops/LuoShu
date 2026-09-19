@@ -20,7 +20,8 @@ from fontTools import subset
 from font_metrics_normalize import _device_build_key, _pick_face, _promote_os2_for_typo_metrics
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
-from hyperos_physical_policy import preserved_dynamic_alias, safe_physical_font_name
+from hyperos_physical_policy import (preserved_dynamic_alias, safe_physical_font_name,
+                                     safe_physical_inventory_slot)
 
 PARTS = ("system", "system_ext", "product", "mi_ext", "vendor", "odm", "oem",
          "my_product", "my_engineering", "my_company", "my_preload", "my_region",
@@ -411,16 +412,7 @@ def _manifest_physical_paths(module: Path, data: dict) -> list[str]:
         if len(parts) != 4 or parts[0] != '/' or parts[2] != 'fonts':
             continue
         part, name = parts[1], parts[3]
-        if part not in PARTS or not safe_physical_font_name(name):
-            continue
-        if preserved_dynamic_alias(data, logical):
-            continue
-        fmt = str(slot.get('validatedFormat') or slot.get('format') or '').upper()
-        try:
-            face = int(slot.get('faceIndex', 0))
-        except (TypeError, ValueError):
-            continue
-        if fmt not in {'TTF', 'OTF'} or face != 0:
+        if part not in PARTS or not safe_physical_inventory_slot(data, logical):
             continue
         result.append(logical)
     return result
@@ -474,8 +466,8 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
             for alias in staged_fonts.iterdir():
                 logical = f'/{part}/fonts/{alias.name}'
                 if (exact_mode and alias.suffix in ('.ttf', '.otf')
-                        and safe_physical_font_name(alias.name)
-                        and logical not in exact_requests):
+                        and logical not in exact_requests
+                        and safe_physical_inventory_slot(data, logical)):
                     excluded_aliases.append(alias)
                 elif (alias.name.startswith(('NotoSans', 'MiSans', 'DroidSans'))
                         and alias.suffix in ('.ttf', '.otf')
@@ -484,10 +476,12 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
 
     for part, name, logical in _requested_slot_pairs(requests):
         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
-        if not safe_physical_font_name(name):
-            # Never let a stale inventory/target list recreate obsolete
-            # language aliases. Removing only its isolated staged alias
-            # exposes the untouched ROM font when the payload is mounted.
+        if exact_mode:
+            allowed = safe_physical_inventory_slot(data, logical)
+        else:
+            allowed = safe_physical_font_name(name)
+        if not allowed:
+            # Never let a stale or tampered target list recreate unsafe aliases.
             excluded_aliases.append(stage / part / 'fonts' / name)
             continue
         if preserved_dynamic_alias(data, logical):
