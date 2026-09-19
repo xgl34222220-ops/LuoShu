@@ -129,11 +129,11 @@ CHANGELOG.md
 customize.sh
 module.prop
 post-fs-data.sh
-post-fs-data-v4.sh
+.luoshu-runtime/core/post-fs-data.sh
 post-mount.sh
-post-mount-v4.sh
+.luoshu-runtime/core/post-mount.sh
 service.sh
-service_v4.sh
+.luoshu-runtime/core/service.sh
 uninstall.sh
 action.sh
 boot-completed.sh
