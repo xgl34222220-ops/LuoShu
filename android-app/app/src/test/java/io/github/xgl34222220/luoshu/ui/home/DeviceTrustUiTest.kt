@@ -204,6 +204,29 @@ class DeviceTrustUiTest {
     }
 
     @Test
+    fun flashTimeSlotSnapshotIsParsed() {
+        val state = parseDeviceTrustOutput(
+            """
+                activeFont=custom-font
+                inventory=available
+                slotSnapshot=ready
+                slotCount=128
+                targetCount=93
+                engine=installed
+                template=trusted
+                alignment=compatibility
+                mode=compatibility
+                reason=
+                cachePending=no
+            """.trimIndent(),
+        )
+
+        assertEquals("ready", state.slotSnapshot)
+        assertEquals(128, state.slotCount)
+        assertEquals(93, state.targetCount)
+    }
+
+    @Test
     fun emptyBridgeOutputReturnsReadableError() {
         val state = parseDeviceTrustOutput("")
 
