@@ -72,10 +72,10 @@ ok grep -q '完整复合字体后台进程已退出' "$ROOT/common/weighted_mix_
 # into its isolated stage when a hard link is possible.
 ok grep -q 'composite_file_identity' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
 ok grep -q 'COMPOSITE_OUTPUT_HASH=$(composite_report_sha' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
-ok grep -A12 '^_font_anchor()' "$ROOT/common/legacy_v14_4/rom_adapters.sh" | grep -q 'ln "\$src" "\$anchor"'
 ok grep -q 'lazy=True, recalcTimestamp=False, recalcBBoxes=False' "$ROOT/common/legacy_v14_4/composite_font.py"
-ok grep -q 'PREPARED_CACHE=.*axes-mix-prepared-v2' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
-ok grep -q 'ln -s "\$_source" "\$_destination"' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
+ok grep -A10 '^_font_anchor()' "$ROOT/common/legacy_v14_4/rom_adapters.sh" | grep -q 'cp -f "\$src" "\$anchor"'
+ok grep -q '"my_engineering", "my_company", "my_preload", "my_region"' "$ROOT/common/hyperos_metrics_batch.py"
+ok grep -q 'my_stock' "$ROOT/common/hyperos_stage_complete.sh"
 
 # The import action must fit the full Chinese label on one line.
 ok grep -q 'else -> 148.dp' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
