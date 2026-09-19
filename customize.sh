@@ -9,10 +9,10 @@ set +e
 MODPATH="${MODPATH:-$3}"
 LUOSHU_OLD_MOD="${LUOSHU_OLD_MOD:-/data/adb/modules/LuoShu}"
 _lc_source_dir=$(CDPATH= cd -- "${0%/*}" 2>/dev/null && pwd)
-_lc_base="$MODPATH/.luoshu-runtime/customize-v227.sh"
+_lc_base="$MODPATH/.luoshu-runtime/compat/v227/customize.sh"
 _lc_helper="$MODPATH/common/private_payload.sh"
 _lc_temp="$MODPATH/.customize-v227.$$.sh"
-[ -f "$_lc_base" ] || _lc_base="$_lc_source_dir/.luoshu-runtime/customize-v227.sh"
+[ -f "$_lc_base" ] || _lc_base="$_lc_source_dir/.luoshu-runtime/compat/v227/customize.sh"
 [ -f "$_lc_helper" ] || _lc_helper="$_lc_source_dir/common/private_payload.sh"
 [ -f "$_lc_helper" ] && . "$_lc_helper"
 
