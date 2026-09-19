@@ -7,6 +7,7 @@ on:
       - common/font_inventory.py
       - common/font_inventory_scan.py
       - common/font_inventory_scan_v3.py
+      - common/font_target_manifest.py
       - common/stock_inventory_scan.py
       - common/font_manager.sh
       - common/font_metrics_normalize.py
@@ -16,6 +17,7 @@ on:
       - .luoshu-runtime/customize-v227.sh
       - scripts/font_inventory_test.py
       - scripts/font_inventory_scan_v3_test.py
+      - scripts/font_target_manifest_test.py
       - scripts/stock_inventory_scan_wrapper_test.py
       - scripts/rom_adapter_inventory_test.sh
       - scripts/font_metrics_normalization_test.py
@@ -36,11 +38,12 @@ jobs:
       - name: Validate inventory scanners and runtime mapper
         run: |
           set -eu
-          python3 -m py_compile common/font_inventory.py common/font_inventory_scan.py common/font_inventory_scan_v3.py common/stock_inventory_scan.py common/font_metrics_normalize.py
+          python3 -m py_compile common/font_inventory.py common/font_inventory_scan.py common/font_inventory_scan_v3.py common/font_target_manifest.py common/stock_inventory_scan.py common/font_metrics_normalize.py
           FONT="$(find /usr/share/fonts -type f -iname 'DejaVuSans.ttf' -print -quit)"
           test -s "$FONT"
           python3 scripts/font_inventory_test.py --font "$FONT"
           python3 scripts/font_inventory_scan_v3_test.py --font "$FONT"
+          python3 scripts/font_target_manifest_test.py
           python3 scripts/stock_inventory_scan_wrapper_test.py
           sh scripts/rom_adapter_inventory_test.sh "$FONT"
           python3 scripts/font_metrics_normalization_test.py
@@ -65,5 +68,6 @@ jobs:
           grep -qx 'common/font_inventory.py' scripts/module_payload_manifest.txt
           grep -qx 'common/font_inventory_scan.py' scripts/module_payload_manifest.txt
           grep -qx 'common/font_inventory_scan_v3.py' scripts/module_payload_manifest.txt
+          grep -qx 'common/font_target_manifest.py' scripts/module_payload_manifest.txt
           grep -qx 'common/stock_inventory_scan.py' scripts/module_payload_manifest.txt
           grep -qx '.luoshu-runtime' scripts/module_payload_manifest.txt
