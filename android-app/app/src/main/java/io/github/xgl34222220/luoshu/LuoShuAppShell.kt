@@ -326,12 +326,17 @@ internal fun LuoShuAppShell(
             .then(if (blurActive && !liquidGlassSupported) Modifier.hazeSource(state = hazeState) else Modifier)
             .then(if (liquidGlassSupported) Modifier.layerBackdrop(liquidBackdrop) else Modifier)
 
+        val solidPageColor = if (appearance.uiStyle == UiStyle.MIUIX) {
+            LocalMiuixTokens.current.pageBackground
+        } else {
+            MaterialTheme.colorScheme.background
+        }
+
         Box(Modifier.fillMaxSize()) {
             Box(modifier = contentModifier) {
                 AppBackdrop(appearance, dark)
-                // Only the destination page participates in the transition. AnimatedContent kept
-                // the outgoing page alive for 210–360 ms; the backdrop shader then refracted that
-                // stale layer through the dock, producing the one-frame/old-page flash in recordings.
+                // Keep only the destination page alive and keep its root fully opaque.
+                // This prevents the glass backdrop from refracting an outgoing page during navigation.
                 key(page) {
                     val pageDirection = remember(page) {
                         val delta = page.motionIndex() - previousPageForMotion.motionIndex()
@@ -352,8 +357,8 @@ internal fun LuoShuAppShell(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
+                            .background(solidPageColor)
                             .graphicsLayer {
-                                alpha = .94f + (.06f * pageEnter.value)
                                 translationX = (1f - pageEnter.value) * 14.dp.toPx() * pageDirection
                             },
                     ) {

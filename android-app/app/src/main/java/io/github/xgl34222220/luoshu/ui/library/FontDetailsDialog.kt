@@ -408,8 +408,15 @@ private fun StructuredMetadata(
                         maxLines = 1,
                     )
                     SelectionContainer(Modifier.weight(1f)) {
+                        val displayValue = if (
+                            row.label.equals("SHA-256", ignoreCase = true) && row.value.length > 16
+                        ) {
+                            "${row.value.take(8)}…${row.value.takeLast(6)}"
+                        } else {
+                            row.value
+                        }
                         Text(
-                            row.value,
+                            displayValue,
                             color = primaryText,
                             fontSize = 11.5.sp,
                             lineHeight = 16.sp,

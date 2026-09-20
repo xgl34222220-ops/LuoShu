@@ -12,6 +12,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -222,9 +223,10 @@ internal fun NativeFontPreview(
     textSizeSp: Float = 25f,
     gravity: Int = Gravity.START or Gravity.CENTER_VERTICAL,
     maxLines: Int = 2,
+    textColor: Color? = null,
 ) {
     val context = LocalContext.current.applicationContext
-    val textColor = MaterialTheme.colorScheme.onSurface.toArgb()
+    val resolvedTextColor = (textColor ?: MaterialTheme.colorScheme.onSurface).toArgb()
     val errorColor = MaterialTheme.colorScheme.error.toArgb()
     val cleanAxes = remember(axes) { normalizePreviewAxes(axes) }
     val axisKey = remember(cleanAxes) {
@@ -341,7 +343,7 @@ internal fun NativeFontPreview(
     val failure = preview.error.ifBlank { variationError }
     val failed = failure.isNotBlank()
     val renderedText = if (failed) "预览失败 · $failure" else text
-    val renderedColor = if (failed) errorColor else textColor
+    val renderedColor = if (failed) errorColor else resolvedTextColor
     val renderedSize = if (failed) minOf(textSizeSp, 12f) else textSizeSp
 
     AndroidView(
