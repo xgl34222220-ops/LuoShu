@@ -90,12 +90,14 @@ internal fun NativeImportOverlay(
 
     if (embedded) {
         val tokens = LocalMiuixTokens.current
+        val scheme = MaterialTheme.colorScheme
+        val dark = scheme.background.luminance() < .5f
         Surface(
             modifier = modifier.fillMaxWidth(),
             shape = RoundedCornerShape(28.dp),
-            color = if (style == UiStyle.MIUIX) tokens.cardBackground else MaterialTheme.colorScheme.surfaceContainerLow,
-            shadowElevation = if (style == UiStyle.MIUIX) 2.dp else 1.dp,
-            border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = .48f)),
+            color = if (dark) tokens.cardBackground else LuoShuLayoutTokens.SecondaryBlueSurface,
+            shadowElevation = 1.dp,
+            border = BorderStroke(0.5.dp, scheme.primary.copy(alpha = .10f)),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(8.dp),

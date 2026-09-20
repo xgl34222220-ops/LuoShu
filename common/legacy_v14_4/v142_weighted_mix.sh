@@ -17,6 +17,8 @@ CACHE_ROOT="$MODDIR/cache/axes-mix"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
 BASE_ENGINE="$MODDIR/common/font_mix.sh"
 INSTANCE_PY="$MODDIR/common/font_instance.py"
+ROLE_CHECK="$MODDIR/common/font_role_check.sh"
+PREPARED_CACHE="$MODDIR/cache/axes-mix-prepared-v2"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 BASE_TASK_FILE="$CONFIG_DIR/mix_task.conf"
@@ -188,6 +190,44 @@ find_best_source() {
     printf '%s\n' "$_best"
 }
 
+hash_small_text() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+    elif command -v toybox >/dev/null 2>&1; then
+        toybox sha256sum | awk '{print $1}'
+    else
+        cksum | awk '{print $1 "-" $2}'
+    fi
+}
+
+link_cached_font() {
+    _lcf_source="$1"
+    _lcf_dest="$2"
+    rm -f "$_lcf_dest" 2>/dev/null || true
+    ln "$_lcf_source" "$_lcf_dest" 2>/dev/null || cp -f "$_lcf_source" "$_lcf_dest" 2>/dev/null
+}
+
+prune_prepared_cache() {
+    _ppc_count=0
+    _ppc_total=0
+    for _ppc_file in $(ls -1t "$PREPARED_CACHE"/*.font 2>/dev/null); do
+        _ppc_count=$((_ppc_count + 1))
+        _ppc_kb=$(du -k "$_ppc_file" 2>/dev/null | awk '{print $1}')
+        case "$_ppc_kb" in ''|*[!0-9]*) _ppc_kb=0 ;; esac
+        _ppc_total=$((_ppc_total + _ppc_kb))
+        [ "$_ppc_count" -le 12 ] && [ "$_ppc_total" -le 393216 ] && continue
+        rm -f "$_ppc_file" 2>/dev/null || true
+    done
+}
+
+validate_family_roles_async() {
+    [ -f "$ROLE_CHECK" ] || return 0
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$1" cjk >/dev/null 2>&1 || return 2
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$2" latin >/dev/null 2>&1 || return 3
+    MODDIR="$MODDIR" sh "$ROLE_CHECK" "$3" digit >/dev/null 2>&1 || return 4
+    return 0
+}
+
 run_instance() {
     _source="$1"
     _destination="$2"
@@ -228,15 +268,63 @@ prepare_slot() {
     _weight=$(safe_weight "$_axes")
     _source=$(find_best_source "$_family" "$_weight")
     [ -f "$_source" ] || { echo "错误：找不到字体族 $_family" >&2; return 1; }
-    font_validate "$_source" text || { echo "错误：字体 $_family 无效：$FONT_CHECK_ERROR" >&2; return 1; }
-    _destination="$_root/fonts/${_internal}-Regular.ttf"
-    mkdir -p "${_destination%/*}" 2>/dev/null || return 1
-    if [ "$FONT_CHECK_VARIABLE" = true ] || [ "$FONT_CHECK_FORMAT" = TTC ]; then
-        run_instance "$_source" "$_destination" "$_role" "$_axes" || return 1
+
+    # Per-task validation cache: Latin and digit frequently point at the same
+    # family/source. Do not reopen the same large font just to rediscover format.
+    _validation_cache="$_root/.validated-sources"
+    _cached_line=$(grep -F -- "$_source|" "$_validation_cache" 2>/dev/null | head -n1)
+    if [ -n "$_cached_line" ]; then
+        _saved_ifs="$IFS"; IFS='|'
+        set -- $_cached_line
+        IFS="$_saved_ifs"
+        FONT_CHECK_FORMAT="$2"
+        FONT_CHECK_VARIABLE="$3"
     else
-        cp -f "$_source" "$_destination" 2>/dev/null || return 1
-        chmod 0644 "$_destination" 2>/dev/null || true
+        font_validate "$_source" text || { echo "错误：字体 $_family 无效：$FONT_CHECK_ERROR" >&2; return 1; }
+        printf '%s|%s|%s\n' "$_source" "${FONT_CHECK_FORMAT:-UNKNOWN}" "${FONT_CHECK_VARIABLE:-false}" >>"$_validation_cache" 2>/dev/null || true
     fi
+
+    _destination="$_root/fonts/${_internal}-Regular.ttf"
+    mkdir -p "${_destination%/*}" "$PREPARED_CACHE" 2>/dev/null || return 1
+
+    # Static TTF/OTF needs no materialization at all. A temporary symlink is enough
+    # for the composite worker and avoids copying a 50–500 MB font for each role.
+    if [ "${FONT_CHECK_VARIABLE:-false}" != true ] && [ "${FONT_CHECK_FORMAT:-}" != TTC ]; then
+        rm -f "$_destination" 2>/dev/null || true
+        ln -s "$_source" "$_destination" 2>/dev/null || cp -f "$_source" "$_destination" 2>/dev/null || return 1
+        [ -s "$_destination" ] || return 1
+        PREPARED_SOURCE="$_source"
+        PREPARED_FORMAT="${FONT_CHECK_FORMAT:-UNKNOWN}"
+        PREPARED_VARIABLE=false
+        return 0
+    fi
+
+    # Variable/TTC instances are expensive. Persist them by source stat + axes.
+    # For non-TTC variable fonts, Latin and digit instances are byte-identical at
+    # the same axes, so share one cached result across both roles.
+    _stat=$(stat -c '%s:%Y' "$_source" 2>/dev/null)
+    [ -n "$_stat" ] || _stat=unknown
+    _role_key="$_role"
+    [ "${FONT_CHECK_FORMAT:-}" = TTC ] || _role_key=shared
+    _cache_key=$(printf '%s|%s|%s|%s' "$_source" "$_stat" "$_axes" "$_role_key" | hash_small_text)
+    _cached="$PREPARED_CACHE/${_cache_key}.font"
+    if [ ! -s "$_cached" ]; then
+        _tmp="$PREPARED_CACHE/.${_cache_key}.$$.tmp"
+        rm -f "$_tmp" "$_tmp.json" "$_tmp.err" 2>/dev/null || true
+        run_instance "$_source" "$_tmp" "$_role" "$_axes" || {
+            rm -f "$_tmp" "$_tmp.json" "$_tmp.err" 2>/dev/null || true
+            return 1
+        }
+        mv -f "$_tmp" "$_cached" 2>/dev/null || return 1
+        rm -f "$_tmp.json" "$_tmp.err" 2>/dev/null || true
+        chmod 0644 "$_cached" 2>/dev/null || true
+        prune_prepared_cache
+    fi
+    link_cached_font "$_cached" "$_destination" || return 1
+    chmod 0644 "$_destination" 2>/dev/null || true
+    PREPARED_SOURCE="$_source"
+    PREPARED_FORMAT="${FONT_CHECK_FORMAT:-UNKNOWN}"
+    PREPARED_VARIABLE="${FONT_CHECK_VARIABLE:-false}"
     [ -s "$_destination" ]
 }
 
@@ -272,6 +360,15 @@ worker() {
     _latin_axes=$(read_value "$TASK_FILE" latinAxes)
     _digit_axes=$(read_value "$TASK_FILE" digitAxes)
     _root=$(read_value "$TASK_FILE" root)
+
+    update_task "$_wanted" running '正在后台校验组合字体' 2 '' ''
+    validate_family_roles_async "$_cjk" "$_latin" "$_digit"
+    _role_rc=$?
+    case "$_role_rc" in
+        2) update_task "$_wanted" failed '中文基底缺少必要字形' 100 '' "$(date +%s)"; rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1 ;;
+        3) update_task "$_wanted" failed '英文字体缺少必要字形' 100 '' "$(date +%s)"; rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1 ;;
+        4) update_task "$_wanted" failed '数字字体缺少必要字形' 100 '' "$(date +%s)"; rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1 ;;
+    esac
 
     update_task "$_wanted" running '正在准备中文字体' 4 '' ''
     prepare_slot cjk "$_cjk" "$_cjk_axes" "$_root" LuoShuMixCJK || {
