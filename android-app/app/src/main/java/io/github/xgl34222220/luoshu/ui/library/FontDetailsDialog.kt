@@ -418,7 +418,10 @@ private fun StructuredMetadata(
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    if (row.label.equals("SHA-256", ignoreCase = true)) {
+                    val copyableTechnicalValue = row.label.contains("SHA", ignoreCase = true) ||
+                        row.label.contains("ID", ignoreCase = true) ||
+                        row.label.contains("路径")
+                    if (copyableTechnicalValue) {
                         Spacer(Modifier.width(4.dp))
                         IconButton(
                             onClick = {
@@ -429,7 +432,7 @@ private fun StructuredMetadata(
                         ) {
                             Icon(
                                 Icons.Rounded.ContentCopy,
-                                contentDescription = "复制 SHA-256",
+                                contentDescription = "复制 ${row.label}",
                                 modifier = Modifier.size(17.dp),
                                 tint = secondaryText,
                             )
@@ -506,14 +509,60 @@ private fun FontDetailLine(
         )
         val technicalValue = label.contains("ID", ignoreCase = true) ||
             label.contains("SHA", ignoreCase = true)
-        Text(
-            text = value,
-            modifier = Modifier.weight(1f),
-            color = primaryText,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            fontFamily = if (technicalValue) FontFamily.Monospace else FontFamily.Default,
-        )
+        if (technicalValue) {
+            val clipboard = LocalClipboardManager.current
+            val haptic = LocalHapticFeedback.current
+            Surface(
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(10.dp),
+                color = if (MaterialTheme.colorScheme.background.luminance() < .5f) {
+                    MaterialTheme.colorScheme.surfaceContainerHigh
+                } else {
+                    LuoShuLayoutTokens.TechnicalSurface
+                },
+            ) {
+                Row(
+                    modifier = Modifier.padding(start = 9.dp, end = 2.dp, top = 3.dp, bottom = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    SelectionContainer(Modifier.weight(1f)) {
+                        Text(
+                            text = value,
+                            color = primaryText,
+                            fontSize = 11.5.sp,
+                            lineHeight = 16.sp,
+                            fontWeight = FontWeight.Medium,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    IconButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(value))
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        },
+                        modifier = Modifier.size(34.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.ContentCopy,
+                            contentDescription = "复制 $label",
+                            modifier = Modifier.size(16.dp),
+                            tint = secondaryText,
+                        )
+                    }
+                }
+            }
+        } else {
+            Text(
+                text = value,
+                modifier = Modifier.weight(1f),
+                color = primaryText,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
     }
     if (divider) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .36f))

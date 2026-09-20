@@ -67,6 +67,16 @@ no grep -q 'cp -af "$SYSTEM_FONTS_DIR/." "$PAYLOAD_STAGE/"' "$ROOT/common/font_m
 ok grep -q '_progress_message=' "$ROOT/common/weighted_mix_task.sh"
 ok grep -q '完整复合字体后台进程已退出' "$ROOT/common/weighted_mix_task.sh"
 
+# The App still routes fixed combinations through the v14.4 compatibility core.
+# It must not re-read giant files for output SHA or copy the completed composite
+# into its isolated stage when a hard link is possible.
+ok grep -q 'composite_file_identity' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
+ok grep -q 'COMPOSITE_OUTPUT_HASH=$(composite_report_sha' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
+ok grep -q 'lazy=True, recalcTimestamp=False, recalcBBoxes=False' "$ROOT/common/legacy_v14_4/composite_font.py"
+ok grep -A10 '^_font_anchor()' "$ROOT/common/legacy_v14_4/rom_adapters.sh" | grep -q 'cp -f "\$src" "\$anchor"'
+ok grep -q '"my_engineering", "my_company", "my_preload", "my_region"' "$ROOT/common/hyperos_metrics_batch.py"
+ok grep -q 'my_stock' "$ROOT/common/hyperos_stage_complete.sh"
+
 # The import action must fit the full Chinese label on one line.
 ok grep -q 'else -> 148.dp' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
 ok grep -q 'softWrap = false' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
