@@ -12,6 +12,7 @@ printf 'engine-one\n' > "$MOD/common/engine-marker.py"
 printf 'legacy-one\n' > "$MOD/common/legacy_v14_4/legacy-marker.sh"
 printf '{"schema":"device-font-inventory-v1"}\n' > "$MOD/config/device_font_inventory.json"
 printf 'system\n' > "$MOD/config/device_font_partitions.conf"
+printf 'product|vivo/fonts|product-nested-fixture\n' > "$MOD/config/device_font_roots.conf"
 printf 'AAAA\n' > "$PUB/fonts/Demo-Regular.ttf"
 printf 'CJK-A\n' > "$PUB/fonts/CJK-Regular.ttf"
 printf 'LAT-A\n' > "$PUB/fonts/Latin-Regular.ttf"
@@ -45,6 +46,12 @@ printf 'system\nproduct\n' > "$MOD/config/device_font_partitions.conf"
 I2=$(luoshu_provenance_inventory_identity)
 [ "$I1" != "$I2" ] || { echo 'partition inventory change did not invalidate provenance' >&2; exit 1; }
 printf 'system\n' > "$MOD/config/device_font_partitions.conf"
+
+R1=$(luoshu_provenance_inventory_identity)
+printf 'product|vivo/fonts|product-nested-changed\n' > "$MOD/config/device_font_roots.conf"
+R2=$(luoshu_provenance_inventory_identity)
+[ "$R1" != "$R2" ] || { echo 'nested font root change did not invalidate provenance' >&2; exit 1; }
+printf 'product|vivo/fonts|product-nested-fixture\n' > "$MOD/config/device_font_roots.conf"
 
 D1=$(luoshu_provenance_direct_proof "$PUB/fonts/Demo-Regular.ttf" Demo)
 printf 'CCCC\n' > "$PUB/fonts/Demo-Regular.ttf"

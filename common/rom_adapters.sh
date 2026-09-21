@@ -297,58 +297,30 @@ _device_font_dynamic_partition_allowed() {
     grep -Fxq "$_dfidp_part" "$_dfidp_manifest" 2>/dev/null
 }
 
+_device_font_inventory_partition_allowed() {
+    case "$1" in
+        system|system_ext|product|vendor|odm|oem|my_product|my_engineering|my_company|my_preload|my_region|my_stock|oplus_product|oplus_engineering|oplus_version|oplus_region|mi_ext|cust|hw_product)
+            return 0
+            ;;
+        *) _device_font_dynamic_partition_allowed "$1" ;;
+    esac
+}
+
 _device_font_inventory_target() {
     _dfit_path="$1"
     _dfit_module="$(_device_font_inventory_module)"
-    case "$_dfit_path" in
-        /system/fonts/*) printf '%s/system/fonts/%s
-' "$_dfit_module" "${_dfit_path#/system/fonts/}" ;;
-        /system_ext/fonts/*) printf '%s/system_ext/fonts/%s
-' "$_dfit_module" "${_dfit_path#/system_ext/fonts/}" ;;
-        /product/fonts/*) printf '%s/product/fonts/%s
-' "$_dfit_module" "${_dfit_path#/product/fonts/}" ;;
-        /vendor/fonts/*) printf '%s/vendor/fonts/%s
-' "$_dfit_module" "${_dfit_path#/vendor/fonts/}" ;;
-        /odm/fonts/*) printf '%s/odm/fonts/%s
-' "$_dfit_module" "${_dfit_path#/odm/fonts/}" ;;
-        /oem/fonts/*) printf '%s/oem/fonts/%s
-' "$_dfit_module" "${_dfit_path#/oem/fonts/}" ;;
-        /my_product/fonts/*) printf '%s/my_product/fonts/%s
-' "$_dfit_module" "${_dfit_path#/my_product/fonts/}" ;;
-        /my_engineering/fonts/*) printf '%s/my_engineering/fonts/%s
-' "$_dfit_module" "${_dfit_path#/my_engineering/fonts/}" ;;
-        /my_company/fonts/*) printf '%s/my_company/fonts/%s
-' "$_dfit_module" "${_dfit_path#/my_company/fonts/}" ;;
-        /my_preload/fonts/*) printf '%s/my_preload/fonts/%s
-' "$_dfit_module" "${_dfit_path#/my_preload/fonts/}" ;;
-        /my_region/fonts/*) printf '%s/my_region/fonts/%s
-' "$_dfit_module" "${_dfit_path#/my_region/fonts/}" ;;
-        /my_stock/fonts/*) printf '%s/my_stock/fonts/%s
-' "$_dfit_module" "${_dfit_path#/my_stock/fonts/}" ;;
-        /oplus_product/fonts/*) printf '%s/oplus_product/fonts/%s
-' "$_dfit_module" "${_dfit_path#/oplus_product/fonts/}" ;;
-        /oplus_engineering/fonts/*) printf '%s/oplus_engineering/fonts/%s
-' "$_dfit_module" "${_dfit_path#/oplus_engineering/fonts/}" ;;
-        /oplus_version/fonts/*) printf '%s/oplus_version/fonts/%s
-' "$_dfit_module" "${_dfit_path#/oplus_version/fonts/}" ;;
-        /oplus_region/fonts/*) printf '%s/oplus_region/fonts/%s
-' "$_dfit_module" "${_dfit_path#/oplus_region/fonts/}" ;;
-        /mi_ext/fonts/*) printf '%s/mi_ext/fonts/%s
-' "$_dfit_module" "${_dfit_path#/mi_ext/fonts/}" ;;
-        /cust/fonts/*) printf '%s/cust/fonts/%s
-' "$_dfit_module" "${_dfit_path#/cust/fonts/}" ;;
-        /hw_product/fonts/*) printf '%s/hw_product/fonts/%s
-' "$_dfit_module" "${_dfit_path#/hw_product/fonts/}" ;;
-        *)
-            _dfit_rel=${_dfit_path#/}
-            _dfit_part=${_dfit_rel%%/*}
-            case "$_dfit_rel" in "$_dfit_part/fonts/"*) ;; *) return 1 ;; esac
-            _dfit_rest=${_dfit_rel#$_dfit_part/fonts/}
-            _device_font_dynamic_partition_allowed "$_dfit_part" || return 1
-            printf '%s/%s/fonts/%s
-' "$_dfit_module" "$_dfit_part" "$_dfit_rest"
-            ;;
+    case "$_dfit_path" in /*) ;; *) return 1 ;; esac
+    _dfit_rel=${_dfit_path#/}
+    _dfit_part=${_dfit_rel%%/*}
+    [ "$_dfit_part" != "$_dfit_rel" ] || return 1
+    _dfit_rest=${_dfit_rel#$_dfit_part/}
+    _device_font_inventory_partition_allowed "$_dfit_part" || return 1
+    case "/$_dfit_rest/" in *"/../"*|*"/./"*|*"//"*) return 1 ;; esac
+    case "$_dfit_rest" in
+        *.ttf|*.otf|*.ttc|*.otc|*.TTF|*.OTF|*.TTC|*.OTC) ;;
+        *) return 1 ;;
     esac
+    printf '%s/%s/%s\n' "$_dfit_module" "$_dfit_part" "$_dfit_rest"
 }
 
 _device_font_inventory_role() {

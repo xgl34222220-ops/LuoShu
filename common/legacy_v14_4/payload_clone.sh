@@ -44,6 +44,19 @@ luoshu_payload_partitions() (
     done < "$_lpp_manifest"
 )
 
+luoshu_payload_nested_font_roots() (
+    _lpnfr_module="${1:-${REALMOD:-${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}}}"
+    _lpnfr_manifest="$_lpnfr_module/config/device_font_roots.conf"
+    [ -f "$_lpnfr_manifest" ] || return 0
+    while IFS='|' read -r _lpnfr_part _lpnfr_rel _lpnfr_key || \
+          [ -n "$_lpnfr_part$_lpnfr_rel$_lpnfr_key" ]; do
+        luoshu_payload_partition_safe "$_lpnfr_part" || continue
+        case "$_lpnfr_rel" in ''|/*|*'..'*|fonts|etc) continue ;; esac
+        case "/$_lpnfr_rel/" in *"/./"*|*"//"*) continue ;; esac
+        printf '%s|%s\n' "$_lpnfr_part" "$_lpnfr_rel"
+    done < "$_lpnfr_manifest"
+)
+
 luoshu_clone_payload_etc() (
     _lcet_source="$1"; _lcet_dest="$2"
     mkdir -p "$_lcet_dest" 2>/dev/null || return 1
@@ -92,5 +105,15 @@ luoshu_clone_payload_metadata() (
         esac
         luoshu_clone_payload_entry "$_lcpm_entry" "$_lcpm_dest/$_lcpm_name" || return 1
     done
+
+    # Nested OEM font roots are text payload too. They may sit below an
+    # otherwise retained directory (for example product/vivo/fonts), so remove
+    # only the scanner-declared font root after cloning and preserve siblings.
+    while IFS='|' read -r _lcpm_part _lcpm_rel; do
+        [ -n "$_lcpm_part" ] && [ -n "$_lcpm_rel" ] || continue
+        rm -rf "$_lcpm_dest/$_lcpm_part/$_lcpm_rel" 2>/dev/null || return 1
+    done <<EOF_LUOSHU_NESTED_FONT_ROOTS
+$(luoshu_payload_nested_font_roots)
+EOF_LUOSHU_NESTED_FONT_ROOTS
     return 0
 )

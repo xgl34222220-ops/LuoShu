@@ -162,6 +162,9 @@ def main() -> None:
         hidden_stock = stock_root / "system_ext/fonts/HiddenUi-Regular.ttf"
         hidden_stock.parent.mkdir(parents=True)
         shutil.copyfile(args.font, hidden_stock)
+        nested_stock = stock_root / "product/vivo/fonts/VivoFont.ttf"
+        nested_stock.parent.mkdir(parents=True)
+        shutil.copyfile(args.font, nested_stock)
         inventory = {
             "buildKey": "inventory-fixture",
             "romKind": "generic",
@@ -179,6 +182,11 @@ def main() -> None:
                 "/product/fonts/OemCollection.ttc": {
                     "slotName": "OemCollection.ttc", "partition": "product",
                     "source": "verified-scan", "format": "TTC", "weight": 400,
+                    "style": "normal", "families": [],
+                },
+                "/product/vivo/fonts/VivoFont.ttf": {
+                    "slotName": "VivoFont.ttf", "partition": "product",
+                    "source": "verified-scan", "format": "TTF", "weight": 400,
                     "style": "normal", "families": [],
                 },
             },
@@ -246,21 +254,28 @@ def main() -> None:
         assert not missing_slots[0].get("generatedFile"), missing_slots[0]
 
         supplement = inventory_payload["inventorySupplement"]
-        assert supplement["inventorySlotCount"] == 3, supplement
+        assert supplement["inventorySlotCount"] == 4, supplement
         assert supplement["templateMatched"] == 1, supplement
-        assert supplement["directAdded"] == 1, supplement
+        assert supplement["directAdded"] == 2, supplement
         assert supplement["preserved"] == 1, supplement
         dispositions = {item["path"]: item for item in supplement["slots"]}
         assert dispositions["/system_ext/fonts/HiddenUi-Regular.ttf"]["disposition"] == "direct"
         assert dispositions["/product/fonts/OemCollection.ttc"]["disposition"] == "preserved"
         assert dispositions["/product/fonts/OemCollection.ttc"]["reason"] == "preserved-collection"
+        assert dispositions["/product/vivo/fonts/VivoFont.ttf"]["disposition"] == "direct"
         hidden_slots = [
             item for item in inventory_payload["slots"]
             if item.get("inventoryPath") == "/system_ext/fonts/HiddenUi-Regular.ttf"
         ]
         assert len(hidden_slots) == 1 and hidden_slots[0].get("generatedFile"), hidden_slots
         assert hidden_slots[0]["directPhysical"] is True
-        assert inventory_payload["summary"]["mapped"] == 4
+        nested_slots = [
+            item for item in inventory_payload["slots"]
+            if item.get("inventoryPath") == "/product/vivo/fonts/VivoFont.ttf"
+        ]
+        assert len(nested_slots) == 1 and nested_slots[0].get("generatedFile"), nested_slots
+        assert nested_slots[0]["directPhysical"] is True
+        assert inventory_payload["summary"]["mapped"] == 5
         print(json.dumps({
             "baseline": payload["summary"],
             "inventory": inventory_payload["summary"],

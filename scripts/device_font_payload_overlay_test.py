@@ -184,8 +184,8 @@ def main() -> None:
                 roles=["global-ui"],
             ),
         ]
-        slots[-1]["stockPath"] = "/vendor/fonts/ui/NestedUi.ttf"
-        slots[-1]["inventoryPath"] = "/vendor/fonts/ui/NestedUi.ttf"
+        slots[-1]["stockPath"] = "/product/vivo/fonts/NestedUi.ttf"
+        slots[-1]["inventoryPath"] = "/product/vivo/fonts/NestedUi.ttf"
         slots[-1]["directPhysical"] = True
         for index, item in enumerate(slots):
             item["slotIndex"] = index
@@ -268,15 +268,15 @@ def main() -> None:
         assert (output / "system/fonts/LuoShuSlot-google-400.ttf").is_file()
         assert (output / "product/fonts/LuoShuSlot-mi-400.ttf").is_file()
         assert (output / "product/fonts/LuoShuSlot-mono-400.ttf").is_file()
-        assert (output / "vendor/fonts/ui/NestedUi.ttf").is_file()
+        assert (output / "product/vivo/fonts/NestedUi.ttf").is_file()
         direct_results = [
             item for item in report["slotResults"]
-            if item.get("inventoryPath") == "/vendor/fonts/ui/NestedUi.ttf"
+            if item.get("inventoryPath") == "/product/vivo/fonts/NestedUi.ttf"
         ]
         assert len(direct_results) == 1, direct_results
         assert direct_results[0]["state"] == "mapped"
         assert direct_results[0]["route"] == "physical"
-        assert direct_results[0]["targetPath"] == "vendor/fonts/ui/NestedUi.ttf"
+        assert direct_results[0]["targetPath"] == "product/vivo/fonts/NestedUi.ttf"
         preserved = [item for item in report["slotResults"] if item.get("planStatus") == "skipped"]
         assert preserved and all(item["state"] == "preserved" for item in preserved)
         assert report["dynamicMounts"] == [

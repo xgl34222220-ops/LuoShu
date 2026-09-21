@@ -16,7 +16,9 @@ clear_managed_text_fonts() {
         while IFS= read -r _lfrc_rel; do
             case "$_lfrc_rel" in
                 ''|/*|*'..'*) continue ;;
-                */fonts/*) rm -f "$_lfrc_root/$_lfrc_rel" 2>/dev/null || true ;;
+                *.ttf|*.otf|*.ttc|*.otc|*.TTF|*.OTF|*.TTC|*.OTC)
+                    rm -f "$_lfrc_root/$_lfrc_rel" 2>/dev/null || true
+                    ;;
             esac
         done < "$_lfrc_manifest"
     fi

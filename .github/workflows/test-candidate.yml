@@ -163,7 +163,7 @@ jobs:
           unzip -p "$module" common/font_archive_export.sh | grep -q '归档目标目录不受信任'
           unzip -p "$module" common/font_archive_export.sh | grep -q '1073741824'
           unzip -p "$module" common/font_inventory.py | grep -q 'device_font_inventory.json'
-                    unzip -p "$module" common/font_inventory_scan.py | grep -q 'SCANNER_REVISION = 4'
+                    unzip -p "$module" common/font_inventory_scan.py | grep -q 'SCANNER_REVISION = 5'
           unzip -p "$module" common/font_inventory_scan.py | grep -q 'stockFontUniqueFileCount'
           unzip -p "$module" common/font_inventory_scan.py | grep -q 'themeOverrideRoots'
           unzip -p "$module" common/mix_weight_mode.sh | grep -q '快速单文件组合'

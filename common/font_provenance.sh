@@ -67,7 +67,9 @@ _luoshu_provenance_checksum_files() (
 luoshu_provenance_inventory_identity() (
     _lpi_module="$(_luoshu_provenance_module)"
     set --
-    for _lpi_file in "$_lpi_module/config/device_font_inventory.json"                      "$_lpi_module/config/device_font_partitions.conf"; do
+    for _lpi_file in "$_lpi_module/config/device_font_inventory.json" \
+                     "$_lpi_module/config/device_font_partitions.conf" \
+                     "$_lpi_module/config/device_font_roots.conf"; do
         [ ! -f "$_lpi_file" ] || set -- "$@" "$_lpi_file"
     done
     if [ "$#" -eq 0 ]; then

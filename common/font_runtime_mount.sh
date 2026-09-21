@@ -6,6 +6,26 @@ set +e
 type _lfrp_payload_root >/dev/null 2>&1 || return 0 2>/dev/null || exit 0
 type _luoshu_atomic_manifest >/dev/null 2>&1 || return 0 2>/dev/null || exit 0
 
+_luoshu_runtime_extra_font_roots() {
+    _lser_module=$(_luoshu_self_module)
+    _lser_manifest="$_lser_module/config/device_font_roots.conf"
+    [ -f "$_lser_manifest" ] || return 0
+    while IFS='|' read -r _lser_part _lser_rel _lser_key || [ -n "$_lser_part$_lser_rel$_lser_key" ]; do
+        [ -n "$_lser_part" ] && [ -n "$_lser_rel" ] && [ -n "$_lser_key" ] || continue
+        _lser_known=0
+        for _lser_candidate in $(_lfrp_partitions); do
+            [ "$_lser_candidate" = "$_lser_part" ] && { _lser_known=1; break; }
+        done
+        [ "$_lser_known" -eq 1 ] || continue
+        case "/$_lser_rel/" in *"/../"*|*"/./"*|*"//"*) continue ;; esac
+        case "$_lser_rel" in
+            /*|''|fonts|etc) continue ;;
+        esac
+        case "$_lser_key" in ''|*[!A-Za-z0-9_.-]*) continue ;; esac
+        printf '%s|%s|%s\n' "$_lser_part" "$_lser_rel" "$_lser_key"
+    done < "$_lser_manifest"
+}
+
 luoshu_self_mount_ensure() {
     _lsme_module=$(_luoshu_self_module)
     _lsme_payload=$(_lfrp_payload_root)
@@ -109,6 +129,61 @@ luoshu_self_mount_ensure() {
         done
         [ -z "$_lsme_failed" ] || break
     done
+
+    # Mount scanner-discovered nested font roots (for example product/vivo/fonts)
+    # as independent read-only components. The manifest is data-driven and carries
+    # the exact lower-layer key used by future stock rescans.
+    if [ -z "$_lsme_failed" ]; then
+        while IFS='|' read -r _lsme_partition _lsme_rel _lsme_key; do
+            [ -n "$_lsme_partition" ] || continue
+            _lsme_source="$_lsme_payload/$_lsme_partition/$_lsme_rel"
+            [ -d "$_lsme_source" ] && find "$_lsme_source" -type f -print -quit 2>/dev/null | grep -q . || continue
+            _lsme_root=$(_luoshu_partition_root "$_lsme_partition") || {
+                _lsme_failed="$_lsme_partition/$_lsme_rel-root-unavailable"
+                break
+            }
+            _lsme_target="$_lsme_root/$_lsme_rel"
+            [ -d "$_lsme_target" ] || {
+                _lsme_failed="$_lsme_partition/$_lsme_rel-target-missing"
+                break
+            }
+            _lsme_mode=overlay
+            if _luoshu_overlay_mount_dir "$_lsme_source" "$_lsme_target" "$_lsme_key"; then
+                printf '%s\n' "$_lsme_target" >> "$_lsme_mount_list" 2>/dev/null || {
+                    _lsme_failed="$_lsme_partition/$_lsme_rel-record-failed"
+                    break
+                }
+            else
+                _lsme_mode=bind
+                if type _luoshu_capture_lower_dir >/dev/null 2>&1; then
+                    _luoshu_capture_lower_dir "$_lsme_target" "$_lsme_key" ||                         _luoshu_self_log "嵌套字体根无法保留原厂 lower：$_lsme_partition/$_lsme_rel"
+                fi
+                if _luoshu_atomic_bind_tree "$_lsme_source" "$_lsme_target"; then
+                    _lsme_bind_count=$((_lsme_bind_count + 1))
+                else
+                    _lsme_bind_rc=$?
+                    if [ "$_lsme_bind_rc" -eq 2 ] 2>/dev/null; then
+                        _luoshu_self_log "自挂载跳过无本机 bind 目标的嵌套字体根：$_lsme_partition/$_lsme_rel"
+                        continue
+                    fi
+                    _lsme_failed="$_lsme_partition/$_lsme_rel-bind-incomplete"
+                    break
+                fi
+            fi
+            _luoshu_atomic_tree_visible "$_lsme_source" "$_lsme_target" "$_lsme_mode" || {
+                _lsme_failed="$_lsme_partition/$_lsme_rel-visibility-mismatch"
+                break
+            }
+            printf '%s|%s|%s\n' "$_lsme_source" "$_lsme_target" "$_lsme_mode"                 >> "$_lsme_manifest_temp" 2>/dev/null || {
+                _lsme_failed="$_lsme_partition/$_lsme_rel-manifest-failed"
+                break
+            }
+            _lsme_component_count=$((_lsme_component_count + 1))
+            _lsme_mounted="${_lsme_mounted}${_lsme_mounted:+,}${_lsme_partition}/${_lsme_rel}:${_lsme_mode}"
+        done <<EOF_LUOSHU_EXTRA_FONT_ROOTS
+$(_luoshu_runtime_extra_font_roots)
+EOF_LUOSHU_EXTRA_FONT_ROOTS
+    fi
 
     [ "$_lsme_component_count" -gt 0 ] 2>/dev/null || _lsme_failed="${_lsme_failed:-payload-empty}"
     [ "$_lsme_any_fonts_ok" -eq 1 ] 2>/dev/null || _lsme_failed="${_lsme_failed:-font-partition-required}"

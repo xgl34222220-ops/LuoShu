@@ -117,6 +117,27 @@ inventory 仍然只由现有唯一刷写扫描器产生，不新增品牌扫描�
 
 新增/扩展回归验证：stock head frame 在保存后仍完全一致；400 Regular 对齐到 700 stock slot 时 outline weight 不被篡改；HyperOS 只有 400 源而没有 700 时不再生成假 Bold alias；存在真实 700 时仍正常生成对应物理槽。
 
+## 第七批：通用嵌套系统字体普查
+
+### 目标
+
+不再假定 OEM 字体一定位于 `/<partition>/fonts`。唯一 canonical scanner 在可信系统/OEM 分区树内做一次只读 standalone-font census，记录全部 `.ttf/.otf/.ttc/.otc` 路径，再由已有 coverage/metrics/protected-family 规则决定是否进入可替换 inventory。
+
+### 改动
+
+- scanner revision 升到 5。已知系统/OEM 分区与动态发现分区会递归普查 standalone 字体文件；目录 symlink 不跟随，并避免把 `/system/product` 等另一分区视图重复算入 system。
+- `device_font_candidates.json` 现在是更宽的 census：即使字体位于 `/product/assets` 之类非字体根，也会记录为候选证据；只有位于可信 nested font root 且通过已有安全分类的文件才进入 replaceable inventory。
+- nested root 不按 Vivo/OPPO/小米品牌名识别，而按路径结构发现，例如 `/product/vivo/fonts`、`/product/etc/fonts`。App/priv-app/overlay/framework/lib 等目录不会自动晋升为系统替换根。
+- 新增 `device_font_roots.conf`，记录 scanner 发现的 nested root 与稳定 mount key；它进入 provenance/cache identity，根集合变化会使旧对齐结果失效。
+- inventory → payload builder → physical overlay → foreground quick mapper 全部改为保留 `/<partition>/<nested/path>/Font.ttf` 的完整路径，不再强制压成 `/<partition>/fonts/Font.ttf`。
+- self-mount 会把 nested root 当独立原子组件挂载，并为它保存对应 stock lower；后续重扫只信 lower/mirror，不会把当前洛书生成字体当原厂。
+- payload manifest、启动可见性校验、诊断报告、隔离/回滚与恢复清理均支持 nested font path。
+- 模块更新把 scanner、nested builder/overlay/mount 视为生成契约的一部分；这几层变化后保留当前 live 字体，但要求下一次显式应用重建新 payload。
+
+### 边界
+
+这里的“全量”指可信系统/OEM 分区文件系统中的 standalone TTF/OTF/TTC/OTC。APK assets、Web/CSS 字体、Canvas/SVG/图片文字、App 私有下载字体与私有渲染引擎仍不属于系统字体槽普查；它们不会被伪装成可系统级替换。
+
 ## 仍需验证与后续修复
 
 - 逐槽追踪能定位状态栏/锁屏/拨号/第三方 App 到底断在哪一层，但具体真机页面是否命中仍需用这一批生成的 trace 与设备日志验证。

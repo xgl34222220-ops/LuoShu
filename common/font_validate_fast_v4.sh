@@ -81,7 +81,10 @@ luoshu_payload_validate_current() {
             [ "$_lpv_count" -eq "$_lpv_mapped" ] || return 1
             while IFS='|' read -r _lpv_rel _lpv_key _lpv_weight _lpv_family; do
                 [ -n "$_lpv_rel" ] || continue
-                case "$_lpv_rel" in */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;; *) return 1 ;; esac
+                case "$_lpv_rel" in
+                    *.ttf|*.otf|*.ttc|*.otc|*.TTF|*.OTF|*.TTC|*.OTC) ;;
+                    *) return 1 ;;
+                esac
                 _luoshu_v4_font_ok "$_lpv_module/$_lpv_rel" || return 1
             done < "$_lpv_manifest"
         fi
@@ -115,6 +118,21 @@ luoshu_payload_quarantine() {
     _lpq_fail=$((_lpq_fail + 1))
     printf '%s\n' "$_lpq_fail" > "$_lpq_config/font-boot-failures" 2>/dev/null || true
 
+    # Remove every explicitly generated font target first, including nested
+    # scanner-discovered OEM roots such as product/vivo/fonts.
+    for _lpq_targets in "$_lpq_config/font-runtime-targets.conf" "$_lpq_config/font-target-aliases.conf"; do
+        [ -s "$_lpq_targets" ] || continue
+        while IFS='|' read -r _lpq_rel _lpq_rest; do
+            [ -n "$_lpq_rel" ] || continue
+            case "$_lpq_rel" in
+                ''|/*|*'..'*) continue ;;
+                *.ttf|*.otf|*.ttc|*.otc|*.TTF|*.OTF|*.TTC|*.OTC)
+                    rm -f "$_lpq_module/$_lpq_rel" 2>/dev/null || true
+                    ;;
+            esac
+        done < "$_lpq_targets"
+    done
+
     for _lpq_part in $(_luoshu_payload_parts); do
         rm -rf "$_lpq_module/$_lpq_part/fonts" 2>/dev/null || true
         _lpq_etc="$_lpq_module/$_lpq_part/etc"
@@ -127,6 +145,18 @@ luoshu_payload_quarantine() {
     if type luoshu_meta_content_roots >/dev/null 2>&1; then
         for _lpq_root in $(luoshu_meta_content_roots); do
             [ -d "$_lpq_root" ] || continue
+            for _lpq_targets in "$_lpq_config/font-runtime-targets.conf" "$_lpq_config/font-target-aliases.conf"; do
+                [ -s "$_lpq_targets" ] || continue
+                while IFS='|' read -r _lpq_rel _lpq_rest; do
+                    [ -n "$_lpq_rel" ] || continue
+                    case "$_lpq_rel" in
+                        ''|/*|*'..'*) continue ;;
+                        *.ttf|*.otf|*.ttc|*.otc|*.TTF|*.OTF|*.TTC|*.OTC)
+                            rm -f "$_lpq_root/$_lpq_rel" 2>/dev/null || true
+                            ;;
+                    esac
+                done < "$_lpq_targets"
+            done
             for _lpq_part in $(_luoshu_payload_parts); do
                 rm -rf "$_lpq_root/$_lpq_part/fonts" 2>/dev/null || true
                 _lpq_etc="$_lpq_root/$_lpq_part/etc"
@@ -144,7 +174,8 @@ luoshu_payload_quarantine() {
           "$_lpq_config/font-payload-schema.conf" "$_lpq_config/font-payload-rebuild-pending.conf" \
           "$_lpq_config/font-payload-reapply-notified.conf" \
           "$_lpq_config/font-target-aliases.conf" "$_lpq_config/font-target-coverage.conf" \
-          "$_lpq_config/font-config-overlay.conf" "$_lpq_config/text_reboot_required.conf" \
+          "$_lpq_config/font-runtime-targets.conf" "$_lpq_config/font-config-overlay.conf" \
+          "$_lpq_config/text_reboot_required.conf" \
           "$_lpq_config/font-boot-inconclusive.conf" "$_lpq_config/font-mount-verify-failures" 2>/dev/null || true
     {
         printf 'state=quarantined\n'

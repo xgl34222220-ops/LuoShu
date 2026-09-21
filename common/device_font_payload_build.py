@@ -82,19 +82,47 @@ def _inventory_roles(entry: dict[str, Any]) -> list[str]:
 
 
 def _safe_inventory_logical(logical: str, entry: dict[str, Any]) -> tuple[str, Path] | None:
+    """Validate an inventory path anywhere below a trusted system/OEM partition."""
     path = Path(logical)
     parts = path.parts
-    if len(parts) < 4 or parts[0] != "/" or parts[2] != "fonts":
+    if len(parts) < 3 or parts[0] != "/":
         return None
     partition = parts[1]
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_]{0,63}", partition):
         return None
     if str(entry.get("partition") or partition) != partition:
         return None
-    relative = Path(*parts[3:])
-    if not relative.parts or ".." in relative.parts:
+    relative = Path(*parts[2:])
+    if not relative.parts or any(part in ("", ".", "..") for part in relative.parts):
+        return None
+    if relative.suffix.lower() not in {".ttf", ".otf", ".ttc", ".otc"}:
         return None
     return partition, relative
+
+
+def _nested_stock_root(module: Path, partition: str, relative: Path) -> tuple[str, Path] | None:
+    manifest = module / "config/device_font_roots.conf"
+    try:
+        lines = manifest.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    best: tuple[int, str, Path] | None = None
+    for line in lines:
+        fields = line.split("|")
+        if len(fields) != 3 or fields[0] != partition:
+            continue
+        root_rel = Path(fields[1])
+        key = fields[2]
+        if not root_rel.parts or any(part in ("", ".", "..") for part in root_rel.parts):
+            continue
+        try:
+            remainder = relative.relative_to(root_rel)
+        except ValueError:
+            continue
+        candidate = (len(root_rel.parts), key, remainder)
+        if best is None or candidate[0] > best[0]:
+            best = candidate
+    return (best[1], best[2]) if best is not None else None
 
 
 def _stock_slot_file(module: Path, logical: str, entry: dict[str, Any]) -> Path | None:
@@ -110,26 +138,34 @@ def _stock_slot_file(module: Path, logical: str, entry: dict[str, Any]) -> Path 
         return candidate if candidate.is_file() else None
 
     state_root = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))
-    lower = state_root / "lower" / f"{partition}-fonts" / relative
-    if lower.is_file():
-        return lower
+    if relative.parts and relative.parts[0] == "fonts":
+        lower = state_root / "lower" / f"{partition}-fonts" / Path(*relative.parts[1:])
+        if lower.is_file():
+            return lower
+    else:
+        nested = _nested_stock_root(module, partition, relative)
+        if nested is not None:
+            key, remainder = nested
+            lower = state_root / "lower" / key / remainder
+            if lower.is_file():
+                return lower
 
     for prefix in (
         Path("/debug_ramdisk/.magisk/mirror"),
         Path("/sbin/.magisk/mirror"),
         Path("/data/adb/magisk/mirror"),
     ):
-        candidate = prefix / partition / "fonts" / relative
+        candidate = prefix / partition / relative
         if candidate.is_file():
             return candidate
 
     # If LuoShu already owns this exact path in either the compatibility view
-    # or the canonical private payload, the live /partition path may be our overlay.
+    # or the canonical private payload, the live path may be our overlay.
     # Fail closed instead of learning metrics from our own generated output.
-    if ((module / partition / "fonts" / relative).exists()
-            or (module / ".luoshu-payload" / partition / "fonts" / relative).exists()):
+    if ((module / partition / relative).exists()
+            or (module / ".luoshu-payload" / partition / relative).exists()):
         return None
-    live = Path("/") / partition / "fonts" / relative
+    live = Path("/") / partition / relative
     return live if live.is_file() else None
 
 

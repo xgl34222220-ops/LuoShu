@@ -111,7 +111,7 @@ _dfload_manifest_font_count() {
     if [ -s "$_dfload_manifest" ]; then
         while IFS='|' read -r _dfload_rel _dfload_sum _dfload_bytes; do
             case "$_dfload_rel" in
-                */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc)
+                *.ttf|*.otf|*.ttc|*.otc|*.TTF|*.OTF|*.TTC|*.OTC)
                     _dfload_payload_file "$_dfload_rel" >/dev/null 2>&1 && \
                         _dfload_count=$((_dfload_count + 1))
                     ;;
@@ -120,7 +120,7 @@ _dfload_manifest_font_count() {
     fi
     if [ "$_dfload_count" -eq 0 ] 2>/dev/null; then
         _dfload_count=$(find "$_dfload_module_dir/.luoshu-payload" \
-            -type f \( -name '*.ttf' -o -name '*.otf' -o -name '*.ttc' \) \
+            -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' -o -iname '*.otc' \) \
             2>/dev/null | wc -l | tr -d '[:space:]')
         case "$_dfload_count" in ''|*[!0-9]*) _dfload_count=0 ;; esac
     fi
@@ -137,7 +137,7 @@ _dfload_exact_visible_match() {
     _dfload_failed=0
     while IFS='|' read -r _dfload_rel _dfload_manifest_sum _dfload_manifest_size; do
         case "$_dfload_rel" in
-            */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;;
+            *.ttf|*.otf|*.ttc|*.otc|*.TTF|*.OTF|*.TTC|*.OTC) ;;
             *) continue ;;
         esac
         _dfload_source=$(_dfload_payload_file "$_dfload_rel") || {
@@ -242,7 +242,7 @@ _dfload_collect_slot_evidence() {
         while IFS='|' read -r _dfload_kind _dfload_rel _dfload_expected_hash _dfload_expected_size; do
             [ "$_dfload_kind" = file ] || continue
             case "$_dfload_rel" in
-                */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;;
+                *.ttf|*.otf|*.ttc|*.otc|*.TTF|*.OTF|*.TTC|*.OTC) ;;
                 *) continue ;;
             esac
             _dfload_visible=$(_dfload_visible_path "$_dfload_rel")

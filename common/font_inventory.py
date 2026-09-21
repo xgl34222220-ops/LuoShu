@@ -9,6 +9,7 @@ filename heuristics and the existing font_check.sh validator.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -247,9 +248,45 @@ def validate_inventory(data: dict[str, Any], expected_key: str | None = None) ->
         prefix = f"/{partition}/fonts/"
         if prefix not in dynamic_prefixes:
             dynamic_prefixes.append(prefix)
+    nested = data.get("discoveredFontRoots", [])
+    if not isinstance(nested, list) or len(nested) > 128:
+        raise InventoryError("设备字体清单嵌套字体根无效")
+    allowed_partitions = known_partitions | set(discovered)
+    nested_prefixes: list[str] = []
+    seen_nested: set[tuple[str, str]] = set()
+    for item in nested:
+        if not isinstance(item, dict):
+            raise InventoryError("设备字体清单嵌套字体根无效")
+        partition = str(item.get("partition", "")).strip()
+        relative = str(item.get("relative", "")).strip().strip("/")
+        logical_root = str(item.get("logical", "")).strip()
+        mount_key = str(item.get("mountKey", "")).strip()
+        parts = [part for part in relative.split("/") if part]
+        expected_mount_key = (
+            f"{partition}-nested-"
+            + hashlib.sha256(f"{partition}/{relative}".encode("utf-8")).hexdigest()[:16]
+        )
+        if (
+            partition not in allowed_partitions
+            or not relative
+            or relative in {"fonts", "font", "etc"}
+            or not parts
+            or any(part in (".", "..") for part in parts)
+            or any(re.fullmatch(r"[A-Za-z0-9._+-]{1,96}", part) is None for part in parts)
+            or logical_root != f"/{partition}/{relative}"
+            or mount_key != expected_mount_key
+        ):
+            raise InventoryError("设备字体清单嵌套字体根越界")
+        identity = (partition, relative)
+        if identity in seen_nested:
+            raise InventoryError("设备字体清单嵌套字体根重复")
+        seen_nested.add(identity)
+        nested_prefixes.append(logical_root.rstrip("/") + "/")
+
     allowed_prefixes = (
         *(f"{logical}/" for _partition, logical in LOGICAL_FONT_ROOTS),
         *dynamic_prefixes,
+        *nested_prefixes,
     )
     for logical, entry in slots.items():
         if not isinstance(logical, str) or not logical.startswith(allowed_prefixes) or not isinstance(entry, dict):

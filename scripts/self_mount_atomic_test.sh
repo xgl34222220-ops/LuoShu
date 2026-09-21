@@ -173,6 +173,26 @@ fi
 grep -q 'system_ext/fonts-target-missing' "$MODULE_DIR/config/self-mount.conf" || fail 'missing target reason absent'
 
 if [ -n "$FINAL_SCRIPT" ]; then
+    setup_case nested-font-root
+    LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT="$MODULE_DIR/.luoshu-payload"
+    mkdir -p "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/system/fonts" \
+        "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/product/vivo/fonts" \
+        "$CASE_ROOT/root/product/vivo/fonts"
+    printf 'new-font\n' > "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/system/fonts/Roboto.ttf"
+    printf 'new-vivo\n' > "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/product/vivo/fonts/VivoFont.ttf"
+    printf 'stock-font\n' > "$CASE_ROOT/root/system/fonts/Roboto.ttf"
+    printf 'stock-vivo\n' > "$CASE_ROOT/root/product/vivo/fonts/VivoFont.ttf"
+    printf 'product|vivo/fonts|product-nested-fixture\n' > "$MODULE_DIR/config/device_font_roots.conf"
+    FAIL_OVERLAY=product-nested-fixture
+    luoshu_self_mount_ensure || fail 'nested scanner font root failed to mount'
+    test "$(cat "$CASE_ROOT/root/product/vivo/fonts/VivoFont.ttf")" = 'new-vivo' || \
+        fail 'nested OEM font target was not replaced'
+    test "$(cat "$CASE_ROOT/state/lower/product-nested-fixture/VivoFont.ttf")" = 'stock-vivo' || \
+        fail 'nested OEM stock lower was not preserved'
+    grep -q 'product/vivo/fonts' "$MODULE_DIR/config/self-mount-required.conf" || \
+        fail 'nested OEM font root missing from required manifest'
+    luoshu_mount_verify_active custom || fail 'strict verifier rejected nested font root'
+
     setup_case kernelsu-private-payload-missing-optional-target
     LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT="$MODULE_DIR/.luoshu-payload"
     mkdir -p "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/system/fonts" "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/system_ext/fonts" "$CASE_ROOT/root/system_ext"

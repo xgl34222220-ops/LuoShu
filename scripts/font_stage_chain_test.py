@@ -43,12 +43,16 @@ class FontStageChainTest(unittest.TestCase):
         self.source.write_text('source-font-generation-A')
         self.write('config/device_font_inventory.json', '{"state":"ready","slots":{}}')
         self.write('config/device_font_partitions.conf', 'aurora_product\n')
+        self.write('config/device_font_roots.conf',
+                   'product|vivo/fonts|product-nested-fixture\n')
         self.write('common/font_instance.py', '# instance A\n')
         self.write('common/font_metrics_normalize.py', '# metrics A\n')
         self.write('common/legacy_v14_4/font_coverage.py', '# coverage A\n')
         self.write('common/legacy_v14_4/rom_adapters.sh', '# mapper A\n')
         self.write('.luoshu-payload/system/fonts/Old.ttf', 'old-live-font')
         self.write('.luoshu-payload/aurora_product/fonts/OldClock.ttf', 'old-live-clock')
+        self.write('.luoshu-payload/product/vivo/fonts/OldVivo.ttf', 'old-live-vivo')
+        self.write('.luoshu-payload/product/vivo/keep.txt', 'keep-vivo-sibling')
         self.write('.luoshu-payload/aurora_product/etc/fonts_customization.xml',
                    '<familyset><font>LuoShu-400.ttf</font></familyset>')
         self.write('.luoshu-payload/aurora_product/etc/keep.xml', '<settings>luoshu</settings>')
@@ -141,6 +145,8 @@ class FontStageChainTest(unittest.TestCase):
         stage = Path(self.env['STAGE_PAYLOAD'])
         self.assertFalse((stage / 'system/fonts').exists())
         self.assertFalse((stage / 'aurora_product/fonts').exists())
+        self.assertFalse((stage / 'product/vivo/fonts').exists())
+        self.assertTrue((stage / 'product/vivo/keep.txt').is_file())
         self.assertTrue((stage / 'aurora_product/etc/keep.xml').is_file())
 
     def test_clone_omits_old_generated_font_config(self):
@@ -204,6 +210,12 @@ class FontStageChainTest(unittest.TestCase):
     def test_inventory_change_invalidates_cache(self):
         before = self.digest()
         self.write('config/device_font_inventory.json', '{"state":"ready","revision":2}')
+        self.assertNotEqual(before, self.digest())
+
+    def test_nested_root_manifest_change_invalidates_cache(self):
+        before = self.digest()
+        self.write('config/device_font_roots.conf',
+                   'product|vivo/fonts|product-nested-changed\n')
         self.assertNotEqual(before, self.digest())
 
     def test_checker_change_invalidates_validation_cache(self):

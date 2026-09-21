@@ -51,12 +51,29 @@ class BudgetExpired(BaseException):
     """Escape fontTools' broad exception handlers when the total budget expires."""
 
 
+SAFE_PARTITION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_]{0,63}$")
+DENY_PARTITIONS = {
+    "data", "proc", "sys", "dev", "mnt", "storage", "sdcard", "apex",
+    "metadata", "cache", "tmp", "config", "acct", "linkerconfig",
+    "debug_ramdisk", "vendor_dlkm", "odm_dlkm", "system_dlkm",
+}
+
+
 def safe_slot(value: object) -> bool:
+    """Accept only normalized system/OEM font paths, including nested roots."""
     if not isinstance(value, str):
         return False
     path = PurePosixPath(value)
-    return (str(path) == value and path.parent in {root for _, root in LOGICAL_FONT_ROOTS}
-            and SLOT_NAME.fullmatch(path.name) is not None)
+    parts = path.parts
+    return (
+        str(path) == value
+        and len(parts) >= 3
+        and parts[0] == "/"
+        and SAFE_PARTITION.fullmatch(parts[1]) is not None
+        and parts[1].lower() not in DENY_PARTITIONS
+        and all(part not in ("", ".", "..") for part in parts[2:])
+        and SLOT_NAME.fullmatch(path.name) is not None
+    )
 
 
 def metrics_only(value: dict) -> dict:
@@ -297,8 +314,47 @@ class Collector:
         p = PurePosixPath(logical)
         # Never read an inventory actualPath as stock: after reboot that path
         # may be overlaid. Only established read-only lower/mirror roots qualify.
-        roots = [self.physical(f"/data/adb/luoshu/self-mount/lower/{p.parts[1]}-fonts")]
-        roots.extend(self.physical(str(prefix / p.parent.relative_to("/"))) for prefix in MIRROR_PREFIXES)
+        roots: list[Path] = []
+        if len(p.parts) >= 4 and p.parts[2] == "fonts":
+            roots.append(
+                self.physical(
+                    f"/data/adb/luoshu/self-mount/lower/{p.parts[1]}-fonts/"
+                    + "/".join(p.parts[3:-1])
+                )
+            )
+        else:
+            try:
+                manifest = (self.module / "config/device_font_roots.conf").read_text(
+                    encoding="utf-8"
+                ).splitlines()
+            except OSError:
+                manifest = []
+            best: tuple[int, str, PurePosixPath] | None = None
+            rel = PurePosixPath(*p.parts[2:])
+            for line in manifest:
+                fields = line.split("|")
+                if len(fields) != 3 or fields[0] != p.parts[1]:
+                    continue
+                root_rel = PurePosixPath(fields[1])
+                try:
+                    remainder = rel.relative_to(root_rel)
+                except ValueError:
+                    continue
+                candidate = (len(root_rel.parts), fields[2], remainder)
+                if best is None or candidate[0] > best[0]:
+                    best = candidate
+            if best is not None:
+                _depth, key, remainder = best
+                roots.append(
+                    self.physical(
+                        f"/data/adb/luoshu/self-mount/lower/{key}/"
+                        + str(remainder.parent)
+                    )
+                )
+        roots.extend(
+            self.physical(str(prefix / p.parent.relative_to("/")))
+            for prefix in MIRROR_PREFIXES
+        )
         for root in roots:
             path = root / p.name
             if path.is_file() and not path.is_symlink():
