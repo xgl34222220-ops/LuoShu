@@ -241,15 +241,53 @@ def _read_key_values(path: Path | None) -> dict[str, str]:
 
 
 def _mount_bucket(value: str) -> set[str]:
-    return {item.strip().removesuffix(":bind") for item in value.split(",") if item.strip()}
+    result: set[str] = set()
+    for raw in value.split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        stem, sep, suffix = item.rpartition(":")
+        if sep and suffix in {"bind", "overlay"}:
+            item = stem
+        result.add(item)
+    return result
 
 
-def _slot_mount_key(logical: str, entry: dict[str, Any]) -> str:
+def _slot_mount_key(logical: str, entry: dict[str, Any], inventory: dict[str, Any]) -> str:
+    normalized = normalize_path(logical)
+    nested = inventory.get("discoveredFontRoots") or []
+    best = ""
+    for raw in nested:
+        if not isinstance(raw, dict):
+            continue
+        root = normalize_path(raw.get("logical"))
+        if root and (normalized == root or normalized.startswith(root.rstrip("/") + "/")):
+            if len(root) > len(best):
+                best = root
+    if best:
+        return best.lstrip("/")
+
     partition = str(entry.get("partition") or "").strip()
     if not partition:
-        parts = Path(logical).parts
+        parts = Path(normalized).parts
         partition = parts[1] if len(parts) > 1 else ""
     return f"{partition}/fonts" if partition else ""
+
+
+def _physical_preserved_index(physical_root: Path) -> dict[str, str]:
+    manifest = physical_root / ".luoshu-coverage-preserved.tsv"
+    result: dict[str, str] = {}
+    if not manifest.is_file():
+        return result
+    try:
+        for line in manifest.read_text(encoding="utf-8", errors="replace").splitlines():
+            path, sep, reason = line.partition("\t")
+            logical = normalize_path(path)
+            if sep and logical:
+                result[logical] = reason.strip() or "coverage-preserved"
+    except OSError:
+        return {}
+    return result
 
 
 def build_physical_trace(
@@ -276,6 +314,7 @@ def build_physical_trace(
         raise TraceError("当前物理字体负载不存在")
 
     candidate_by_path = _candidate_index(candidates)
+    preserved_by_path = _physical_preserved_index(physical_root)
     mount_info = _read_key_values(mount_state)
     mount_state_name = mount_info.get("state", "")
     mount_backend = mount_info.get("backend", "")
@@ -293,10 +332,13 @@ def build_physical_trace(
         physical = physical_root / relative
         candidate = candidate_by_path.get(logical)
         protected_reason = _physical_protection_reason(logical, candidate)
+        style = str(entry.get("style") or "normal").strip().lower()
+        if not protected_reason and style not in {"", "normal", "regular"}:
+            protected_reason = f"preserved-style-{style}"
 
         routes: list[dict[str, Any]] = []
         if physical.is_file():
-            mount_key = _slot_mount_key(logical, entry)
+            mount_key = _slot_mount_key(logical, entry, inventory)
             mount_failed = bool(mount_key and mount_key in failed_roots and mount_key not in mounted_roots)
             mount_confirmed = bool(
                 confirmed
@@ -335,6 +377,10 @@ def build_physical_trace(
                 "mountState": mount_state_name,
                 "mountBackend": mount_backend,
             })
+        elif logical in preserved_by_path:
+            state = "preserved"
+            reason = preserved_by_path[logical]
+            category, safe_to_retry = "protected", False
         elif protected_reason:
             state = "preserved"
             reason = protected_reason
