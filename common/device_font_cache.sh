@@ -118,13 +118,14 @@ _dfcache_inventory_key() {
 
     _dfc_inventory="$_dfc_module/config/device_font_inventory.json"
     _dfc_partitions="$_dfc_module/config/device_font_partitions.conf"
-    [ -f "$_dfc_inventory" ] || [ -f "$_dfc_partitions" ] || {
+    _dfc_roots="$_dfc_module/config/device_font_roots.conf"
+    [ -f "$_dfc_inventory" ] || [ -f "$_dfc_partitions" ] || [ -f "$_dfc_roots" ] || {
         printf 'no-inventory\n'
         return 0
     }
     {
         printf 'inventory-contract-v1\n'
-        for _dfc_file in "$_dfc_inventory" "$_dfc_partitions"; do
+        for _dfc_file in "$_dfc_inventory" "$_dfc_partitions" "$_dfc_roots"; do
             [ -f "$_dfc_file" ] || continue
             _dfc_digest=$(_dfcache_file_digest "$_dfc_file") || return 1
             printf '%s|%s\n' "${_dfc_file##*/}" "$_dfc_digest"

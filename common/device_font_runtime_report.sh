@@ -105,6 +105,8 @@ device_font_runtime_report_collect() {
 
     for _dfr_pair in \
         "device_font_inventory.json|device-font-inventory.json" \
+        "device_font_partitions.conf|device-font-partitions.conf" \
+        "device_font_roots.conf|device-font-roots.conf" \
         "device-font-template.json|device-font-template.json" \
         "device-font-template.key|device-font-template.key" \
         "device-font-template.state|device-font-template.state" \

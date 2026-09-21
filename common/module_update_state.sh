@@ -37,6 +37,10 @@ luoshu_update_config_value() {
 # explicit apply. Compare only the small builders, never the active font trees.
 luoshu_update_font_builder_compatible() {
     for _lufb_relative in \
+        common/font_inventory_scan.py \
+        common/device_font_payload_build.py \
+        common/device_font_payload_overlay.py \
+        common/font_runtime_mount.sh \
         common/hyperos_physical_policy.py \
         common/hyperos_metrics_batch.py \
         common/legacy_v14_4/hyperos_full_coverage.sh \

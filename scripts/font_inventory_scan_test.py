@@ -42,7 +42,7 @@ def main() -> int:
             path.mkdir(parents=True)
 
         shutil.copy2(args.font, font_dirs["system"] / "Roboto-Regular.ttf")
-        # Absent from XML and every OEM filename heuristic: revision 4 must
+        # Absent from XML and every OEM filename heuristic: revision 5 must
         # discover this slot from real font structure/coverage alone.
         shutil.copy2(args.font, font_dirs["system_ext"] / "MysteryUiFace-Regular.ttf")
         shutil.copy2(args.font, font_dirs["product"] / "ProductUi-Regular.ttf")
@@ -50,6 +50,16 @@ def main() -> int:
         os.link(font_dirs["product"] / "ProductUi-Regular.ttf", font_dirs["odm"] / "DuplicateProduct.ttf")
         shutil.copy2(args.font, font_dirs["oem"] / "OPlusSans3.0.ttf")
         shutil.copy2(args.font, font_dirs["hw_product"] / "HwUi-Regular.ttf")
+
+        # Nested OEM font roots must be discovered generically, without a Vivo
+        # directory/name hard-code. A standalone font elsewhere in the partition
+        # is still recorded by the broad census but is not promoted automatically.
+        vivo_fonts = temp / "product/vivo/fonts"
+        vivo_fonts.mkdir(parents=True)
+        shutil.copy2(args.font, vivo_fonts / "VivoFont.ttf")
+        hidden_assets = temp / "product/assets"
+        hidden_assets.mkdir(parents=True)
+        shutil.copy2(args.font, hidden_assets / "HiddenStandalone.ttf")
 
         dynamic_root = temp / "dynamic-root"
         future_fonts = dynamic_root / "future_oem/fonts"
@@ -97,7 +107,7 @@ def main() -> int:
             "--scan",
             "--output", str(output),
             "--font-check", str(font_check),
-            "--build-key", "inventory-v4-rom",
+            "--build-key", "inventory-v5-rom",
         ]
         for name in primary:
             command.extend(["--" + name.replace("_", "-") + "-fonts", str(font_dirs[name])])
@@ -114,23 +124,29 @@ def main() -> int:
         candidates = json.loads((temp / "device_font_candidates.json").read_text(encoding="utf-8"))
         summary = payload["scanSummary"]
 
-        assert payload["scannerRevision"] == 4
+        assert payload["scannerRevision"] == 5
         assert payload["romKind"] == "coloros"
-        assert result["stockFontFileCount"] == 8
-        assert result["stockFontUniqueFileCount"] == 7
+        assert result["stockFontFileCount"] == 9
+        assert result["stockFontUniqueFileCount"] == 8
         assert result["genericSlotCount"] >= 2
-        assert result["candidatePathCount"] == 8
+        assert result["candidatePathCount"] == 10
+        assert result["fontPathCount"] == 10
+        assert result["nestedFontRootCount"] == 1
         assert candidates["schema"] == "device-font-candidates-v1"
-        assert candidates["fontFileCount"] == 8
-        assert candidates["candidateCount"] == 8
-        assert summary["installCandidatePathCount"] == 8
-        assert summary["stockFontFileCount"] == 8
-        assert summary["stockFontUniqueFileCount"] == 7
+        assert candidates["fontFileCount"] == 10
+        assert candidates["candidateCount"] == 10
+        assert candidates["nestedFontFileCount"] == 2
+        assert summary["installCandidatePathCount"] == 10
+        assert summary["installFontPathCount"] == 10
+        assert summary["installNestedFontPathCount"] == 2
+        assert summary["nestedReplaceableRootCount"] == 1
+        assert summary["stockFontFileCount"] == 9
+        assert summary["stockFontUniqueFileCount"] == 8
         assert summary["verifiedScanUiFileCount"] >= 2
         assert summary["partitionFontFileCounts"]["odm"] == 1
         assert summary["partitionUniqueFontFileCounts"]["odm"] == 0
         assert summary["xmlSourceCount"] == 6
-        assert payload["slotCount"] == 8
+        assert payload["slotCount"] == 9
         assert "/system/fonts/Roboto-Regular.ttf" in payload["slots"]
         mystery = payload["slots"]["/system_ext/fonts/MysteryUiFace-Regular.ttf"]
         assert mystery["source"] == "verified-scan"
@@ -140,7 +156,20 @@ def main() -> int:
         assert "/oem/fonts/OPlusSans3.0.ttf" in payload["slots"]
         assert "/hw_product/fonts/HwUi-Regular.ttf" in payload["slots"]
         assert "/future_oem/fonts/FutureUi-Regular.ttf" in payload["slots"]
+        assert "/product/vivo/fonts/VivoFont.ttf" in payload["slots"]
+        assert "/product/assets/HiddenStandalone.ttf" not in payload["slots"]
+        assert any(
+            item["path"] == "/product/assets/HiddenStandalone.ttf"
+            for item in candidates["paths"]
+        )
         assert payload["discoveredPartitions"] == ["future_oem"]
+        assert len(payload["discoveredFontRoots"]) == 1
+        nested = payload["discoveredFontRoots"][0]
+        assert nested["partition"] == "product"
+        assert nested["relative"] == "vivo/fonts"
+        assert nested["logical"] == "/product/vivo/fonts"
+        root_manifest = (temp / "device_font_roots.conf").read_text(encoding="utf-8").strip()
+        assert root_manifest.startswith("product|vivo/fonts|product-nested-"), root_manifest
         assert summary["partitionFontFileCounts"]["future_oem"] == 1
         assert (temp / "device_font_partitions.conf").read_text(encoding="utf-8") == "future_oem\n"
         assert summary["fontSignatures"]["coloros"] == ["SysFont-Hans-Regular.ttf", "OPlusSans3.0.ttf"]
@@ -151,9 +180,12 @@ def main() -> int:
         assert reused.returncode == 0, reused.stderr
         reused_result = json.loads(reused.stdout)
         assert reused_result["status"] == "reused"
-        assert reused_result["stockFontUniqueFileCount"] == 7
+        assert reused_result["stockFontUniqueFileCount"] == 8
         assert reused_result["genericSlotCount"] >= 2
-        assert reused_result["candidatePathCount"] == 8
+        assert reused_result["candidatePathCount"] == 10
+        assert reused_result["fontPathCount"] == 10
+        assert reused_result["nestedFontPathCount"] == 2
+        assert reused_result["nestedFontRootCount"] == 1
 
         scanner = importlib.import_module("font_inventory_scan")
         theme = temp / "theme/fonts"

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Canonical stock-font inventory scanner.
 
-Revision 4 keeps replaceable slots restricted to the partitions supported by the
-runtime, adds a vendor-independent verified text scan, and persists an install-time
-path probe even when the current boot still has an older font overlay mounted.
+Revision 5 keeps one canonical scanner, adds a bounded standalone-font census
+across trusted system/OEM partition trees, promotes safe nested font roots without
+brand names, and persists the exact roots needed by the runtime mount layer.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ import font_inventory as base
 from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, safe_physical_font_name,
                                     DYNAMIC_OVERLAY_PATH, DYNAMIC_OVERLAY_TARGET)
 
-SCANNER_REVISION = 4
+SCANNER_REVISION = 5
 CANDIDATE_SCHEMA = "device-font-candidates-v1"
 METRICS_REVISION = 3
 # Re-scan trusted stock metrics for Latin UI families restored after v4.3.0.
@@ -237,6 +237,13 @@ DYNAMIC_PARTITION_DENY = {
 }
 DYNAMIC_PARTITION_LIMIT = 16
 DYNAMIC_PARTITION_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_]{0,63}$")
+NESTED_FONT_ROOT_SCHEMA = "device-font-roots-v1"
+NESTED_ROOT_COMPONENT = re.compile(r"^[A-Za-z0-9._+-]{1,96}$")
+NESTED_ROOT_DENY_COMPONENTS = {
+    "app", "priv-app", "overlay", "framework", "lib", "lib64", "bin", "xbin",
+    "media", "lost+found",
+}
+_LIVE_FONT_CENSUS: list[tuple[str, Path, Path]] | None = None
 
 
 def _dynamic_partition_search_bases() -> tuple[Path, ...]:
@@ -344,52 +351,290 @@ def _probe_font_roots(args: Any) -> list[base.FontRoot]:
     return roots
 
 
-def _write_live_candidate_probe(args: Any, output: Path) -> dict[str, Any]:
-    """Persist every visible font path before trusted stock metric resolution.
+def _partition_scan_bases(font_roots: Iterable[base.FontRoot]) -> list[tuple[str, Path, Path]]:
+    """Return one logical/actual partition base for every configured font root.
 
-    A Root manager's merged view still exposes the device's physical filenames even
-    while some files are replaced. This gives installation a device-specific slot
-    map on every phone; the trusted scanner later decides which candidates are safe
-    UI text slots and attaches stock metrics.
+    The canonical root is normally /<partition>/fonts. Explicit test roots and
+    /system/<partition>/fonts aliases are supported by removing the same logical
+    suffix from the actual path. This lets the census see standalone font files
+    anywhere inside the trusted system/OEM partition instead of assuming every
+    vendor stores them directly under /fonts.
     """
-    entries: dict[str, dict[str, Any]] = {}
-    for root in _probe_font_roots(args):
-        if not root.actual.is_dir():
-            continue
+    found: dict[tuple[str, str], tuple[str, Path, Path]] = {}
+    for root in font_roots:
+        logical_partition = Path("/") / root.partition
         try:
-            paths = sorted(root.actual.rglob("*"), key=lambda item: str(item).lower())
+            suffix = root.logical.relative_to(logical_partition)
+        except ValueError:
+            continue
+        actual_partition = root.actual
+        for _part in suffix.parts:
+            actual_partition = actual_partition.parent
+        key = (root.partition, str(actual_partition))
+        found.setdefault(key, (root.partition, logical_partition, actual_partition))
+    return sorted(found.values(), key=lambda item: (item[0], str(item[2])))
+
+
+def _partition_font_census(font_roots: Iterable[base.FontRoot]) -> list[tuple[str, Path, Path]]:
+    """Enumerate every standalone TTF/OTF/TTC/OTC under trusted ROM partitions.
+
+    This is the broad census layer. It intentionally records specialized fonts
+    too; promotion into the replaceable inventory is a later, stricter decision.
+    os.walk never follows directory symlinks, and nested aliases that are already
+    represented by another partition base are pruned to avoid /system/product
+    being misclassified as part of /system.
+    """
+    bases = _partition_scan_bases(font_roots)
+    base_paths = [(partition, actual) for partition, _logical, actual in bases]
+    entries: dict[str, tuple[str, Path, Path]] = {}
+    for partition, logical_base, actual_base in bases:
+        if not actual_base.is_dir():
+            continue
+        other_bases = {
+            str(path)
+            for other_partition, path in base_paths
+            if other_partition != partition and path != actual_base
+        }
+        try:
+            walker = os.walk(actual_base, topdown=True, followlinks=False)
+            for current_raw, dirs, files in walker:
+                current = Path(current_raw)
+                pruned: list[str] = []
+                for name in dirs:
+                    child = current / name
+                    try:
+                        if child.is_symlink():
+                            continue
+                    except OSError:
+                        continue
+                    if str(child) in other_bases:
+                        continue
+                    pruned.append(name)
+                dirs[:] = pruned
+                for name in files:
+                    actual = current / name
+                    if actual.suffix.lower() not in base.FONT_EXTENSIONS:
+                        continue
+                    try:
+                        if not (actual.is_file() or actual.is_symlink()):
+                            continue
+                        relative = actual.relative_to(actual_base)
+                    except (OSError, ValueError):
+                        continue
+                    logical = logical_base / relative
+                    # Canonical font roots may use a physical alias such as
+                    # /system/product/fonts or /system/font. If this file already
+                    # belongs to one of those configured roots, keep the scanner's
+                    # canonical logical namespace instead of inventing a nested
+                    # path from the physical partition walk.
+                    candidates = sorted(
+                        (
+                            root for root in font_roots
+                            if root.partition == partition and root.actual.is_dir()
+                        ),
+                        key=lambda root: len(root.actual.parts),
+                        reverse=True,
+                    )
+                    for root in candidates:
+                        try:
+                            root_relative = actual.relative_to(root.actual)
+                        except ValueError:
+                            continue
+                        logical = root.logical / root_relative
+                        break
+                    entries.setdefault(str(logical), (partition, logical, actual))
         except OSError:
             continue
-        for actual in paths:
-            if actual.suffix.lower() not in base.FONT_EXTENSIONS:
+    return [entries[key] for key in sorted(entries)]
+
+
+def _safe_nested_root(logical_dir: Path, partition: str) -> bool:
+    try:
+        relative = logical_dir.relative_to(Path("/") / partition)
+    except ValueError:
+        return False
+    if not relative.parts or relative.parts[0].lower() in {"font", "fonts"}:
+        # The canonical /partition/fonts root is already recursive. Never create
+        # overlapping child mounts for /partition/fonts/ui/... .
+        return False
+    lowered = [part.lower() for part in relative.parts]
+    if any(part in NESTED_ROOT_DENY_COMPONENTS for part in lowered):
+        return False
+    if any(not NESTED_ROOT_COMPONENT.fullmatch(part) for part in relative.parts):
+        return False
+    # Only nested directories that explicitly identify themselves as font
+    # storage are promoted. The broad candidate census still records standalone
+    # font files in every other system directory for diagnostics.
+    return any("font" in part for part in lowered)
+
+
+def _nested_mount_key(partition: str, relative_dir: Path) -> str:
+    digest = __import__("hashlib").sha256(
+        f"{partition}/{relative_dir.as_posix()}".encode("utf-8")
+    ).hexdigest()[:16]
+    return f"{partition}-nested-{digest}"
+
+
+def _module_owns_nested_root(module: Path | None, partition: str, relative: Path) -> bool:
+    if module is None:
+        return False
+    return (
+        (module / partition / relative).exists()
+        or (module / ".luoshu-payload" / partition / relative).exists()
+    )
+
+
+def _trusted_nested_dir(
+    logical_dir: Path,
+    partition: str,
+    live_dir: Path,
+    overlay_module: Path | None,
+    overlay_risk: bool,
+) -> Path | None:
+    relative = logical_dir.relative_to(Path("/") / partition)
+    key = _nested_mount_key(partition, relative)
+    state_root = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))
+    lower = state_root / "lower" / key
+    if lower.is_dir():
+        return lower
+    for prefix in base.MIRROR_PREFIXES:
+        candidate = prefix / logical_dir.relative_to("/")
+        if candidate.is_dir():
+            return candidate
+    if overlay_risk and _module_owns_nested_root(overlay_module, partition, relative):
+        return None
+    return live_dir if live_dir.is_dir() else None
+
+
+def _discover_nested_font_roots(
+    args: Any,
+    overlay_risk: bool,
+    live_probe_roots: list[base.FontRoot],
+) -> list[base.FontRoot]:
+    """Promote safe nested font directories discovered by the broad census.
+
+    Example: /product/vivo/fonts becomes its own FontRoot without any Vivo/OEM
+    name in the scanner. Files remain subject to the same fontTools coverage and
+    protected-family gates as canonical /partition/fonts entries.
+    """
+    grouped: dict[tuple[str, str], Path] = {}
+    census = _LIVE_FONT_CENSUS
+    if census is None:
+        census = _partition_font_census(live_probe_roots)
+    for partition, logical, actual in census:
+        logical_dir = logical.parent
+        if not _safe_nested_root(logical_dir, partition):
+            continue
+        grouped.setdefault((partition, str(logical_dir)), actual.parent)
+
+    roots: list[base.FontRoot] = []
+    overlay_module = getattr(args, "overlay_module", None)
+    for (partition, logical_raw), live_dir in sorted(grouped.items()):
+        logical_dir = Path(logical_raw)
+        actual = _trusted_nested_dir(
+            logical_dir, partition, live_dir, overlay_module, overlay_risk
+        )
+        if actual is None:
+            continue
+        roots.append(base.FontRoot(partition, logical_dir, actual))
+    return roots
+
+
+def _font_root_records(roots: Iterable[base.FontRoot]) -> list[dict[str, str]]:
+    records: list[dict[str, str]] = []
+    for root in roots:
+        try:
+            relative = root.logical.relative_to(Path("/") / root.partition)
+        except ValueError:
+            continue
+        if relative == Path("fonts") or not _safe_nested_root(root.logical, root.partition):
+            continue
+        records.append({
+            "partition": root.partition,
+            "logical": str(root.logical),
+            "relative": relative.as_posix(),
+            "mountKey": _nested_mount_key(root.partition, relative),
+        })
+    return sorted(records, key=lambda item: (item["partition"], item["relative"]))
+
+
+def _write_font_root_manifest(output: Path, records: Iterable[dict[str, str]]) -> None:
+    manifest = output.parent / "device_font_roots.conf"
+    temp = manifest.with_name(manifest.name + f".tmp.{os.getpid()}")
+    temp.parent.mkdir(parents=True, exist_ok=True)
+    with temp.open("w", encoding="utf-8") as stream:
+        for item in records:
+            partition = item.get("partition", "")
+            relative = item.get("relative", "")
+            key = item.get("mountKey", "")
+            if not partition or not relative or not key:
                 continue
-            try:
-                if not (actual.is_file() or actual.is_symlink()):
-                    continue
-                relative = actual.relative_to(root.actual)
-            except (OSError, ValueError):
-                continue
-            logical = str(root.logical / relative)
-            lowered = actual.name.lower()
-            denied = any(token in lowered for token in base.GENERIC_DENY_FILE_TOKENS)
-            denied = denied or any(token in lowered for token in base.GENERIC_DENY_STYLE_TOKENS)
-            entries[logical] = {
-                "path": logical,
-                "partition": root.partition,
-                "slotName": actual.name,
-                "candidate": not denied,
-                "reason": "specialized-name" if denied else "visible-font-path",
-            }
+            stream.write(f"{partition}|{relative}|{key}\n")
+    os.replace(temp, manifest)
+
+
+def _stock_file_counts_from_census(
+    census: Iterable[tuple[str, Path, Path]],
+) -> tuple[int, int, dict[str, int], dict[str, int], set[str]]:
+    path_total = 0
+    unique_total = 0
+    path_counts: dict[str, int] = {}
+    unique_counts: dict[str, int] = {}
+    identities: set[tuple[Any, ...]] = set()
+    names: set[str] = set()
+    for partition, _logical, actual in census:
+        path_total += 1
+        path_counts[partition] = path_counts.get(partition, 0) + 1
+        names.add(actual.name)
+        identity = _font_identity(actual)
+        if identity in identities:
+            continue
+        identities.add(identity)
+        unique_total += 1
+        unique_counts[partition] = unique_counts.get(partition, 0) + 1
+    return path_total, unique_total, path_counts, unique_counts, names
+
+
+def _write_live_candidate_probe(args: Any, output: Path) -> dict[str, Any]:
+    """Persist every visible standalone font path before trusted stock resolution.
+
+    This is deliberately broader than the replaceable inventory: every
+    TTF/OTF/TTC/OTC under trusted system/OEM partition bases is recorded,
+    including specialized/script fonts and unusual nested vendor directories.
+    The later stock scan decides what can safely be replaced.
+    """
+    global _LIVE_FONT_CENSUS
+    entries: dict[str, dict[str, Any]] = {}
+    roots = _probe_font_roots(args)
+    census = _partition_font_census(roots)
+    _LIVE_FONT_CENSUS = census
+    for partition, logical_path, actual in census:
+        lowered = actual.name.lower()
+        denied = any(token in lowered for token in base.GENERIC_DENY_FILE_TOKENS)
+        denied = denied or any(token in lowered for token in base.GENERIC_DENY_STYLE_TOKENS)
+        logical_dir = logical_path.parent
+        nested = logical_dir != (Path("/") / partition / "fonts")
+        entries[str(logical_path)] = {
+            "path": str(logical_path),
+            "partition": partition,
+            "slotName": actual.name,
+            "candidate": not denied,
+            "nested": nested,
+            "replaceableRootCandidate": (
+                not denied and (not nested or _safe_nested_root(logical_dir, partition))
+            ),
+            "reason": "specialized-name" if denied else "visible-font-path",
+        }
     payload = {
         "schema": CANDIDATE_SCHEMA,
         "generatedAt": int(time.time()),
         "fontFileCount": len(entries),
         "candidateCount": sum(1 for entry in entries.values() if entry["candidate"]),
+        "nestedFontFileCount": sum(1 for entry in entries.values() if entry["nested"]),
         "paths": [entries[path] for path in sorted(entries)],
     }
     base._atomic_write(output, payload)
     return payload
-
 
 def _resolve_actual(logical: Path, explicit: Path | None, aliases: Iterable[Path], overlay_risk: bool) -> Path:
     if explicit is not None:
@@ -625,6 +870,7 @@ def _can_reuse(existing: dict[str, Any], build_key: str) -> bool:
         and "stockFontUniqueFileCount" in summary
         and "themeOverrideRoots" in summary
         and isinstance(existing.get("discoveredPartitions"), list)
+        and isinstance(existing.get("discoveredFontRoots"), list)
     )
 
 
@@ -686,7 +932,7 @@ def _retirable_absent_upgrade_slot(logical: str, *, coloros: bool) -> bool:
 
     Never turn generic "missing from this rescan" into a deletion rule. On ColorOS,
     old mix payloads unconditionally created a small set of compatibility aliases,
-    and older inventories could also admit script-specific fonts that v4 correctly
+    and older inventories could also admit script-specific fonts that the canonical scanner correctly
     excludes from global UI replacement. Those entries may be retired only after
     the exact logical file is proven absent from verified stock.
     """
@@ -750,6 +996,7 @@ def scan(args: Any) -> int:
     if not fresh_scan and not args.force and existing_for_scan is not None and _can_reuse(existing_for_scan, build_key):
         summary = existing_for_scan["scanSummary"]
         _write_dynamic_partition_manifest(output, existing_for_scan.get("discoveredPartitions", []))
+        _write_font_root_manifest(output, existing_for_scan.get("discoveredFontRoots", []))
         print(json.dumps({
             "status": "reused",
             "buildKey": build_key,
@@ -759,6 +1006,9 @@ def scan(args: Any) -> int:
             "xmlSlotCount": int(summary.get("xmlUiFileCount", 0)),
             "heuristicSlotCount": int(summary.get("heuristicUiFileCount", 0)),
             "genericSlotCount": int(summary.get("verifiedScanUiFileCount", 0)),
+            "fontPathCount": int(probe.get("fontFileCount", 0)),
+            "nestedFontPathCount": int(probe.get("nestedFontFileCount", 0)),
+            "nestedFontRootCount": len(existing_for_scan.get("discoveredFontRoots", [])),
             "candidatePathCount": int(probe.get("candidateCount", 0)),
             "themeOverrideCount": len(summary.get("themeOverrideRoots", [])),
             "romKind": existing_for_scan.get("romKind", "generic"),
@@ -803,10 +1053,13 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     etc_roots = _resolve_etc_roots(args, risk)
     if require_verified:
         _verify_upgrade_roots([*primary_roots, *auxiliary_roots], etc_roots)
+
+    live_probe_roots = _probe_font_roots(args)
+    nested_roots = _discover_nested_font_roots(args, risk, live_probe_roots)
     xml_sources = _discover_xml_sources(etc_roots)
 
     base._is_ui_family = _is_ui_family
-    replaceable_roots = [*primary_roots, *auxiliary_roots]
+    replaceable_roots = [*primary_roots, *auxiliary_roots, *nested_roots]
     families, slots = _parse_partition_xml(xml_sources, replaceable_roots)
     base._add_heuristic_slots(slots, replaceable_roots, args.font_check)
     # Vendor-agnostic final pass: enumerate stock font files and classify real
@@ -881,6 +1134,9 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "fontSignatures": _rom_markers(names),
         "stockCountSemantics": "font paths from canonical-or-alias partition roots; theme fonts excluded",
         "installCandidatePathCount": int(probe.get("candidateCount", 0)),
+        "installFontPathCount": int(probe.get("fontFileCount", 0)),
+        "installNestedFontPathCount": int(probe.get("nestedFontFileCount", 0)),
+        "nestedReplaceableRootCount": len(nested_roots),
     })
     inventory = {
         "schema": base.SCHEMA,
@@ -894,9 +1150,10 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "preservedDynamicAliases": dynamic_aliases,
         "retiredPhysicalSlots": sorted(retired_physical_slots),
         "retiredAbsentUpgradeSlots": sorted(retired_absent_upgrade_slots),
-        "discoveredPartitions": sorted(
+        "discoveredPartitions": sorted({
             root.partition for root in replaceable_roots if root.partition not in KNOWN_PARTITIONS
-        ),
+        }),
+        "discoveredFontRoots": _font_root_records(nested_roots),
         "state": "ready",
         "buildKey": build_key,
         "buildFingerprint": fingerprint,
@@ -933,6 +1190,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
             raise base.InventoryError(f"原厂字体重扫未完整保留已有槽位（{len(missing)} 个：{names}）")
     base._atomic_write(output, inventory)
     _write_dynamic_partition_manifest(output, inventory.get("discoveredPartitions", []))
+    _write_font_root_manifest(output, inventory.get("discoveredFontRoots", []))
     print(json.dumps({
         "status": "ok",
         "buildKey": build_key,
@@ -945,6 +1203,8 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "physicalSlotCount": sum(1 for entry in slots.values() if entry.get("source") == "hyperos-physical"),
         "retiredAbsentUpgradeSlotCount": len(retired_absent_upgrade_slots),
         "dynamicPartitionCount": len(inventory.get("discoveredPartitions", [])),
+        "nestedFontRootCount": len(inventory.get("discoveredFontRoots", [])),
+        "fontPathCount": int(probe.get("fontFileCount", 0)),
         "candidatePathCount": int(probe.get("candidateCount", 0)),
         "xmlSourceCount": scan_summary["xmlSourceCount"],
         "themeOverrideCount": len(theme_roots),

@@ -403,17 +403,21 @@ def copy_direct_physical_slots(
             continue
         stock_path = str(slot.get("stockPath", ""))
         parts = Path(stock_path).parts
-        if len(parts) < 4 or parts[0] != "/" or parts[2] != "fonts":
+        if len(parts) < 3 or parts[0] != "/":
             raise OverlayError(f"物理字体槽路径无效：{stock_path}")
         partition = parts[1]
-        relative = Path(*parts[3:])
-        if not relative.parts or ".." in relative.parts:
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_]{0,63}", partition):
+            raise OverlayError(f"物理字体槽分区无效：{stock_path}")
+        relative = Path(*parts[2:])
+        if (not relative.parts
+                or any(part in ("", ".", "..") for part in relative.parts)
+                or relative.suffix.lower() not in {".ttf", ".otf", ".ttc", ".otc"}):
             raise OverlayError(f"物理字体槽相对路径无效：{stock_path}")
         generated_name = str(slot["generatedFile"])
         source = payload_root / "fonts" / generated_name
         if not source.is_file() or source.stat().st_size < 1024:
             raise OverlayError(f"物理槽生成字体不存在：{generated_name}")
-        destination = stage / partition / "fonts" / relative
+        destination = stage / partition / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
             os.link(source, destination)
@@ -463,7 +467,13 @@ def slot_result(slot: dict[str, Any]) -> dict[str, Any]:
 
     stock = Path(result["stockPath"])
     parts = stock.parts
-    if len(parts) >= 4 and parts[0] == "/" and parts[2] == "fonts":
+    if (
+        len(parts) >= 3
+        and parts[0] == "/"
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_]{0,63}", parts[1])
+        and stock.suffix.lower() in {".ttf", ".otf", ".ttc", ".otc"}
+        and all(part not in ("", ".", "..") for part in parts[2:])
+    ):
         result.update(state="mapped", route="physical", targetPath=str(stock).lstrip("/"))
     else:
         result.update(state="mapping-missing", route="physical", targetPath="", reason="invalid-stock-path")

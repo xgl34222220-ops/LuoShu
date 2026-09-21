@@ -140,6 +140,28 @@ class LayoutDiagnosticTest(unittest.TestCase):
         profile = next(p for p in report["profiles"] if p["id"] == profile_id)
         self.assertEqual(profile["probes"]["岁"]["bounds"][3], 820)
 
+    def test_nested_inventory_slot_uses_scanner_root_lower(self):
+        logical = "/product/vivo/fonts/VivoFont.ttf"
+        self.assertTrue(diag.safe_slot(logical))
+        roots = self.module / "config/device_font_roots.conf"
+        roots.write_text(
+            "product|vivo/fonts|product-nested-fixture\n",
+            encoding="utf-8",
+        )
+        lower = (
+            self.root
+            / "data/adb/luoshu/self-mount/lower/product-nested-fixture/VivoFont.ttf"
+        )
+        make_font(lower, 840)
+        collector = diag.Collector(self.module, self.root, 3)
+        observed = collector.stock_glyphs(logical, 0)
+        self.assertEqual(observed["status"], "observed")
+        profile = next(
+            item for item in collector.report["profiles"]
+            if item["id"] == observed["profile"]
+        )
+        self.assertEqual(profile["probes"]["中"]["bounds"][3], 840)
+
     def test_processing_report_comes_only_from_active_and_exports_allowlisted_fields(self):
         filename = ".luoshu-metrics-report.json"
         active_report = self.module / ".luoshu-payload" / filename

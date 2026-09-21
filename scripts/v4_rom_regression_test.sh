@@ -5,8 +5,9 @@ grep -q 'degraded:booting.*degraded:confirmed' common/device_font_load_verify.sh
 ! grep -q '字体挂载连续三次不可见，已安全恢复系统默认字体' .luoshu-runtime/core/service.sh
 ! grep -A25 '^_font_anchor()' common/rom_adapters.sh | grep -q '_hyperos_compact_normalize'
 ! grep -A35 '^sync_secondary_hyperos_dirs()' common/font_mix.sh | grep -q 'LUOSHU_VENDOR_FONTS_ROOT'
-grep -A40 '^_device_font_inventory_target()' common/rom_adapters.sh | grep -q '/mi_ext/fonts/'
-grep -A40 '^_device_font_inventory_target()' common/rom_adapters.sh | grep -q '/hw_product/fonts/'
+grep -q '^_device_font_inventory_partition_allowed()' common/rom_adapters.sh
+grep -A35 '^_device_font_inventory_target()' common/rom_adapters.sh | grep -q '_dfit_rest'
+grep -A35 '^_device_font_inventory_target()' common/rom_adapters.sh | grep -q '\.ttf|\*\.otf|\*\.ttc|\*\.otc'
 grep -q 'Mitype' common/font_inventory.py
 grep -q 'MiClock' common/font_inventory.py
 grep -q 'directPhysicalSlots' common/device_font_payload_overlay.py

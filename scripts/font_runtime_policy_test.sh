@@ -144,10 +144,14 @@ _device_font_inventory_entries() {
     /system/fonts/Roboto-Bold.ttf Roboto-Bold.ttf system TTF 700 normal xml
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     /future_oem/fonts/Roboto-Medium.ttf Roboto-Medium.ttf future_oem TTF 500 normal xml
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    /product/vivo/fonts/VivoGeneric.ttf VivoGeneric.ttf product TTF 400 normal verified-scan
 }
 _copy_as_inventory "$USER_FONTS_DIR/Demo-Regular.ttf" "$MODDIR/.luoshu-payload/system/fonts" quick Demo
 ok cmp "$MODDIR/.luoshu-payload/product/fonts/Roboto-Regular.ttf" "$USER_FONTS_DIR/Demo-Regular.ttf"
 ok cmp "$MODDIR/.luoshu-payload/system/fonts/Roboto-Bold.ttf" "$USER_FONTS_DIR/Demo-Bold.ttf"
+ok cmp "$MODDIR/.luoshu-payload/product/vivo/fonts/VivoGeneric.ttf" "$USER_FONTS_DIR/Demo-Regular.ttf"
+ok grep -qx 'product/vivo/fonts/VivoGeneric.ttf' "$MODDIR/config/font-runtime-targets.conf"
 no test -e "$MODDIR/.luoshu-payload/future_oem/fonts/Roboto-Medium.ttf"
 ok test "${LUOSHU_WEIGHT_PRESERVED_COUNT:-0}" -ge 1
 

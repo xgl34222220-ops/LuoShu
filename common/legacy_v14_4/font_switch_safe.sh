@@ -97,7 +97,9 @@ safe_source_identity() {
 safe_inventory_identity() (
     # Partition routing is part of the installed scan result, not just the JSON.
     set --
-    for _sii_file in "$CONFIG_DIR/device_font_inventory.json" "$CONFIG_DIR/device_font_partitions.conf"; do
+    for _sii_file in "$CONFIG_DIR/device_font_inventory.json" \
+                     "$CONFIG_DIR/device_font_partitions.conf" \
+                     "$CONFIG_DIR/device_font_roots.conf"; do
         [ ! -f "$_sii_file" ] || set -- "$@" "$_sii_file"
     done
     if [ "$#" -eq 0 ]; then printf 'no-inventory\n'; return 0; fi

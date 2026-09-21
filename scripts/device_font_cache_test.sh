@@ -12,6 +12,7 @@ printf 'font-data\n' > "$MODULE/system/fonts/.luoshu-font-store/regular.font"
 printf 'trusted-key\n' > "$MODULE/config/device-font-template.key"
 printf '{"schema":"device-font-inventory-v1","state":"ready","buildKey":"fixture","slotCount":0,"slots":{},"mainSlot":{"slotName":"Fixture.ttf","path":"/system/fonts/Fixture.ttf","partition":"system","format":"TTF","weight":400,"style":"normal","source":"fixture","metrics":{"upem":1000,"hhea":{"ascent":800,"descent":-200}}}}\n' > "$MODULE/config/device_font_inventory.json"
 printf 'system\n' > "$MODULE/config/device_font_partitions.conf"
+printf 'product|vivo/fonts|product-nested-fixture\n' > "$MODULE/config/device_font_roots.conf"
 cat > "$MODULE/common/device_font_template.sh" <<'EOF'
 #!/bin/sh
 [ "${1:-}" = trusted ]
@@ -55,6 +56,12 @@ printf 'system\nproduct\n' > "$MODULE/config/device_font_partitions.conf"
 SECOND_INVENTORY_KEY=$(_dfcache_inventory_key)
 ne "$SECOND_INVENTORY_KEY" "$FIRST_INVENTORY_KEY"
 printf 'system\n' > "$MODULE/config/device_font_partitions.conf"
+eq "$(_dfcache_inventory_key)" "$FIRST_INVENTORY_KEY"
+
+printf 'product|vivo/fonts|product-nested-changed\n' > "$MODULE/config/device_font_roots.conf"
+ROOTS_INVENTORY_KEY=$(_dfcache_inventory_key)
+ne "$ROOTS_INVENTORY_KEY" "$FIRST_INVENTORY_KEY"
+printf 'product|vivo/fonts|product-nested-fixture\n' > "$MODULE/config/device_font_roots.conf"
 eq "$(_dfcache_inventory_key)" "$FIRST_INVENTORY_KEY"
 
 CASE='旧设备缓存没有 inventory proof 不得晋升'

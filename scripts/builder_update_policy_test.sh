@@ -8,7 +8,7 @@ LUOSHU_PAYLOAD_SCHEMA_CURRENT=builder-update-test-schema
 export LUOSHU_PAYLOAD_SCHEMA_CURRENT
 . "$ROOT/common/module_update_state.sh"
 
-BUILDERS='common/hyperos_physical_policy.py common/hyperos_metrics_batch.py common/coloros_metrics_batch.py common/legacy_v14_4/hyperos_full_coverage.sh'
+BUILDERS='common/font_inventory_scan.py common/device_font_payload_build.py common/device_font_payload_overlay.py common/font_runtime_mount.sh common/hyperos_physical_policy.py common/hyperos_metrics_batch.py common/coloros_metrics_batch.py common/legacy_v14_4/hyperos_full_coverage.sh'
 GENERATED_CACHES='cache/full-composite-v12 cache/full-composite-v7 cache/auto-multiweight-mix/composites-v9 cache/auto-multiweight-mix/composites-v3 cache/auto-multiweight-mix/prepared-v8'
 COPY_TRACE="$TMP/copies.log"
 cp() {

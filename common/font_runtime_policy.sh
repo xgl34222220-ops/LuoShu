@@ -256,16 +256,23 @@ _lfrp_payload_font_dir() {
 
 _device_font_inventory_target() {
     _lfrp_logical="$1"
-    for _lfrp_part in $(_lfrp_partitions); do
-        _lfrp_prefix="/${_lfrp_part}/fonts/"
-        case "$_lfrp_logical" in
-            "$_lfrp_prefix"*)
-                printf '%s/%s/fonts/%s\n' "$(_lfrp_payload_root)" "$_lfrp_part" "${_lfrp_logical#$_lfrp_prefix}"
-                return 0
-                ;;
-        esac
+    case "$_lfrp_logical" in /*) ;; *) return 1 ;; esac
+    _lfrp_rel=${_lfrp_logical#/}
+    _lfrp_part=${_lfrp_rel%%/*}
+    [ "$_lfrp_part" != "$_lfrp_rel" ] || return 1
+    _lfrp_rest=${_lfrp_rel#$_lfrp_part/}
+
+    _lfrp_allowed=0
+    for _lfrp_known in $(_lfrp_partitions); do
+        [ "$_lfrp_known" = "$_lfrp_part" ] && { _lfrp_allowed=1; break; }
     done
-    return 1
+    [ "$_lfrp_allowed" -eq 1 ] || return 1
+    case "/$_lfrp_rest/" in *"/../"*|*"/./"*|*"//"*) return 1 ;; esac
+    case "$_lfrp_rest" in
+        *.ttf|*.otf|*.ttc|*.otc|*.TTF|*.OTF|*.TTC|*.OTC) ;;
+        *) return 1 ;;
+    esac
+    printf '%s/%s/%s\n' "$(_lfrp_payload_root)" "$_lfrp_part" "$_lfrp_rest"
 }
 
 _lfrp_target_manifest() {
@@ -610,15 +617,17 @@ luoshu_payload_validate_current() {
     _lfrp_root=$(_lfrp_payload_root)
     _lfrp_fonts=0
     for _lfrp_part in $(_lfrp_partitions); do
-        _lfrp_dir="$_lfrp_root/$_lfrp_part/fonts"
+        _lfrp_dir="$_lfrp_root/$_lfrp_part"
         [ -d "$_lfrp_dir" ] || continue
-        for _lfrp_file in "$_lfrp_dir"/*.ttf "$_lfrp_dir"/*.otf "$_lfrp_dir"/*.ttc "$_lfrp_dir"/*.font; do
+        while IFS= read -r _lfrp_file; do
             [ -f "$_lfrp_file" ] || continue
             _lfrp_size=$(_luoshu_filesize "$_lfrp_file")
             case "$_lfrp_size" in ''|*[!0-9]*) return 1 ;; esac
             [ "$_lfrp_size" -ge 1024 ] || return 1
             _lfrp_fonts=$((_lfrp_fonts + 1))
-        done
+        done <<EOF_LUOSHU_PAYLOAD_FONTS
+$(find "$_lfrp_dir" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' -o -iname '*.otc' -o -iname '*.font' \) 2>/dev/null)
+EOF_LUOSHU_PAYLOAD_FONTS
     done
     [ "$_lfrp_fonts" -gt 0 ] || return 1
     LUOSHU_PAYLOAD_VALIDATED_ACTIVE="$_lfrp_active"
@@ -634,10 +643,13 @@ luoshu_payload_build_manifest() {
     : > "$_lfrp_tmp" 2>/dev/null || return 1
     : > "$_lfrp_checksum_cache" 2>/dev/null || { rm -f "$_lfrp_tmp" 2>/dev/null; return 1; }
     for _lfrp_part in $(_lfrp_partitions); do
-        _lfrp_fonts="$_lfrp_root/$_lfrp_part/fonts"
-        if [ -d "$_lfrp_fonts" ]; then
-            find "$_lfrp_fonts" -type f 2>/dev/null | while IFS= read -r _lfrp_file; do
-                case "$_lfrp_file" in *.ttf|*.otf|*.ttc|*.font|*.TTF|*.OTF|*.TTC) ;; *) continue ;; esac
+        _lfrp_partition_root="$_lfrp_root/$_lfrp_part"
+        if [ -d "$_lfrp_partition_root" ]; then
+            find "$_lfrp_partition_root" -type f 2>/dev/null | while IFS= read -r _lfrp_file; do
+                case "$_lfrp_file" in
+                    *.ttf|*.otf|*.ttc|*.otc|*.font|*.TTF|*.OTF|*.TTC|*.OTC) ;;
+                    *) continue ;;
+                esac
                 _lfrp_rel=${_lfrp_file#$_lfrp_root/}
                 if type _luoshu_cached_checksum >/dev/null 2>&1; then
                     _lfrp_sum=$(_luoshu_cached_checksum "$_lfrp_file" "$_lfrp_checksum_cache")
@@ -679,7 +691,10 @@ luoshu_payload_validate_manifest_full() {
     [ -s "$_lfrp_manifest" ] || return 1
     _lfrp_seen=0
     while IFS='|' read -r _lfrp_rel _lfrp_sum _lfrp_size; do
-        case "$_lfrp_rel" in */fonts/*|*/etc/*.xml) ;; *) return 1 ;; esac
+        case "$_lfrp_rel" in
+            *.ttf|*.otf|*.ttc|*.otc|*.font|*.TTF|*.OTF|*.TTC|*.OTC|*/etc/*.xml) ;;
+            *) return 1 ;;
+        esac
         _lfrp_file="$_lfrp_root/$_lfrp_rel"
         [ -f "$_lfrp_file" ] || return 1
         _lfrp_now=$(_luoshu_checksum "$_lfrp_file")
@@ -699,7 +714,7 @@ luoshu_payload_validate_manifest_fast() {
         _lfrp_file="$_lfrp_root/$_lfrp_rel"
         [ -f "$_lfrp_file" ] || return 1
         case "$_lfrp_rel" in
-            */fonts/*)
+            *.ttf|*.otf|*.ttc|*.otc|*.font|*.TTF|*.OTF|*.TTC|*.OTC)
                 _lfrp_now=$(_luoshu_filesize "$_lfrp_file")
                 case "$_lfrp_now" in ''|*[!0-9]*) return 1 ;; esac
                 [ "$_lfrp_now" -ge 1024 ] && [ "$_lfrp_now" = "$_lfrp_size" ] || return 1
