@@ -8,6 +8,7 @@ common/coloros_global.sh
 common/coloros_metrics_batch.py
 common/coloros_stage_complete.sh
 common/composite_font.py
+common/coverage_payload_remediate.sh
 common/device_font_boot_verify.sh
 common/device_font_cache.sh
 common/device_font_dynamic_guard.sh
