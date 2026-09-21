@@ -9,17 +9,39 @@ STAGE="$MOD/.luoshu-payload-stage.test"
 mkdir -p "$MOD/common/python/bin" "$MOD/common/legacy_v14_4" "$MOD/config" "$MOD/logs"     "$STAGE/system/fonts/.luoshu-font-store"
 printf '{}\n' > "$MOD/config/device_font_inventory.json"
 printf '# fixture\n' > "$MOD/common/font_inventory.py"
+printf '# fixture\n' > "$MOD/common/font_metrics_normalize.py"
 head -c 4096 /dev/zero > "$STAGE/system/fonts/.luoshu-font-store/regular.font"
 
 cat > "$MOD/common/python/bin/luoshu-python" <<'EOF'
 #!/bin/sh
-cat <<'ROWS'
+case "${1##*/}" in
+  font_inventory.py)
+    cat <<'ROWS'
 /system/fonts/A.ttf	A.ttf	system	TTF	400	normal	verified-scan
 /product/vivo/fonts/Vivo.ttf	Vivo.ttf	product	TTF	400	normal	verified-scan
 /system/fonts/Bold.ttf	Bold.ttf	system	TTF	700	normal	verified-scan
 /system/fonts/Italic.ttf	Italic.ttf	system	TTF	400	italic	xml
 /system/fonts/C.ttc	C.ttc	system	TTC	400	normal	xml
 ROWS
+    ;;
+  font_metrics_normalize.py)
+    shift
+    batch=''
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --batch) batch="$2"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    tab=$(printf '\t')
+    while IFS="$tab" read -r source output mono slot; do
+      [ -n "$source" ] && [ -n "$output" ] || continue
+      mkdir -p "${output%/*}"
+      cp -f "$source" "$output"
+    done < "$batch"
+    ;;
+  *) exit 2 ;;
+esac
 EOF
 chmod 0755 "$MOD/common/python/bin/luoshu-python"
 
@@ -74,5 +96,7 @@ grep -q 'coverageRemediate=' "$ROOT/common/legacy_v14_4/mix_router.sh"
 grep -q 'coverage_payload_remediate.sh' "$ROOT/common/legacy_v14_4/mix_router.sh"
 grep -q 'LUOSHU_COVERAGE_REMEDIATE=1' "$ROOT/common/app_bridge.sh"
 grep -q 'LUOSHU_COVERAGE_REMEDIATE' "$ROOT/common/font_switch_task.sh"
+grep -q 'font_metrics_normalize.py' "$ROOT/common/coverage_payload_remediate.sh"
+grep -q -- '--target-slot\|--batch' "$ROOT/common/coverage_payload_remediate.sh"
 
 echo 'coverage_payload_remediate_test: PASS'
