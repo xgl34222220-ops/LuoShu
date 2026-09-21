@@ -395,6 +395,12 @@ internal fun FontCoverageRoute(
         !taskRunning &&
         !state.busy &&
         (data?.summary?.remediable ?: 0) > 0
+    val needsCoverageBootstrap = data == null &&
+        activeFont !in setOf("", "default") &&
+        (
+            state.error.contains("重新应用一次") ||
+                state.error.contains("没有可追踪的设备对齐负载")
+            )
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -513,11 +519,26 @@ internal fun FontCoverageRoute(
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                             )
                             Text(
-                                state.error.ifBlank { "当前字体还没有生成可追踪的设备负载" },
+                                state.error.ifBlank {
+                                    state.message.ifBlank { "当前字体还没有生成可追踪的设备负载" }
+                                },
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                                 fontSize = 12.sp,
                             )
-                            FilledTonalButton(onClick = { load() }) {
+                            if (needsCoverageBootstrap) {
+                                FilledTonalButton(
+                                    onClick = { confirmReapply = true },
+                                    enabled = !state.busy && !taskRunning,
+                                ) {
+                                    Icon(Icons.Rounded.AutoFixHigh, null, Modifier.size(18.dp))
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("重建当前字体覆盖数据")
+                                }
+                            }
+                            TextButton(
+                                onClick = { load() },
+                                enabled = !state.busy && !taskRunning,
+                            ) {
                                 Text("重新读取")
                             }
                         }
@@ -572,11 +593,18 @@ internal fun FontCoverageRoute(
                 )
             },
             title = {
-                Text("补齐所有可安全替换项", fontWeight = FontWeight.Bold)
+                Text(
+                    if (data == null) "重建当前字体覆盖数据" else "补齐所有可安全替换项",
+                    fontWeight = FontWeight.Bold,
+                )
             },
             text = {
                 Text(
-                    "洛书会使用当前字体方案重新生成完整负载，并重试扫描到但尚未正确替换的安全 UI 槽位。Emoji、系统图标、数学/音乐符号、危险 TTC/OTC 集合与缺失真实字重的槽位仍保持原厂。完成后需要完整重启。",
+                    if (data == null) {
+                        "当前字体来自升级保留负载，缺少新版本的逐槽追踪信息。洛书会按当前字体方案重新生成设备对齐负载与覆盖索引；完成后完整重启，再回到这里查看哪些字体已替换、未替换或被系统保护。"
+                    } else {
+                        "洛书会使用当前字体方案重新生成完整负载，并重试扫描到但尚未正确替换的安全 UI 槽位。Emoji、系统图标、数学/音乐符号、危险 TTC/OTC 集合与缺失真实字重的槽位仍保持原厂。完成后需要完整重启。"
+                    },
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
                 )
@@ -597,7 +625,12 @@ internal fun FontCoverageRoute(
                             }.onSuccess {
                                 state = state.copy(
                                     busy = false,
-                                    message = "补齐任务已启动。任务完成后完整重启，再回到这里重新验证。",
+                                    error = "",
+                                    message = if (data == null) {
+                                        "覆盖数据重建任务已启动。任务完成后完整重启，再回到这里重新验证。"
+                                    } else {
+                                        "补齐任务已启动。任务完成后完整重启，再回到这里重新验证。"
+                                    },
                                 )
                                 onTaskStarted()
                             }.onFailure { error ->
@@ -611,7 +644,7 @@ internal fun FontCoverageRoute(
                         }
                     },
                 ) {
-                    Text("开始补齐")
+                    Text(if (data == null) "开始重建" else "开始补齐")
                 }
             },
             dismissButton = {
