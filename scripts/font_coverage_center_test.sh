@@ -97,7 +97,7 @@ grep -q 'coverage_reapply)' "$ROOT/common/app_bridge.sh"
 grep -q 'coverage_verify)' "$ROOT/common/app_bridge.sh"
 grep -q 'coverage_export)' "$ROOT/common/app_bridge.sh"
 grep -q 'device_font_candidates.json' "$ROOT/common/app_bridge.sh"
-grep -Fq '_tmp="${_pending}.tmp.$"' "$ROOT/common/app_bridge.sh"
-grep -Fq '_tmp="${_out}.tmp.$"' "$ROOT/common/app_bridge.sh"
+grep -Fq '_tmp="${_pending}.tmp.$$"' "$ROOT/common/app_bridge.sh"
+grep -Fq '_tmp="${_out}.tmp.$$"' "$ROOT/common/app_bridge.sh"
 
 echo 'Font coverage center backend tests passed.'
