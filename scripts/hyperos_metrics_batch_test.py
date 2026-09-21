@@ -2,6 +2,7 @@
 """Behavioral regressions for actual HyperOS staging and boot repair."""
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
