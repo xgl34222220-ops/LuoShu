@@ -1,0 +1,29 @@
+name: Font instance contract
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - common/font_instance.py
+      - common/legacy_v14_4/font_instance.py
+      - common/font_metrics_normalize.py
+      - scripts/font_instance_contract_test.py
+      - .github/workflows/font-instance-contract.yml
+permissions:
+  contents: read
+jobs:
+  instance-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python: ['3.11', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the runtime's FontTools version
+        run: python -m pip install fonttools==4.63.0
+      - name: Check real glyphs, TTC faces and failure atomicity
+        run: python scripts/font_instance_contract_test.py
