@@ -199,7 +199,9 @@ start=text.index("val canReapply =")
 end=text.index("val needsCoverageBootstrap", start)
 block=text[start:end]
 assert "!taskRunning" not in block, block
+assert "coverageActiveFont" in block, block
 assert '(data?.summary?.remediable ?: 0) > 0' in block, block
+assert 'activeFont = root.optString("activeFont", "")' in text
 assert "正在实时检查任务状态并启动补齐" in text
 assert 'busy -> "正在启动…"' in text
 assert 'taskRunning -> "检查任务状态"' in text
