@@ -128,6 +128,7 @@ private data class CoverageSummary(
 
 private data class CoverageData(
     val rom: String = "generic",
+    val activeFont: String = "",
     val verificationState: String = "not-run",
     val summary: CoverageSummary = CoverageSummary(),
     val slots: List<CoverageSlot> = emptyList(),
@@ -206,6 +207,7 @@ private fun parseCoverage(root: JSONObject): CoverageData {
     val fallback = slots.groupingBy { it.category }.eachCount()
     return CoverageData(
         rom = root.optString("inventoryRomKind", "generic"),
+        activeFont = root.optString("activeFont", ""),
         verificationState = root.optString("verificationState", "not-run"),
         summary = CoverageSummary(
             total = summaryJson.optInt("censusSlots", slots.size),
@@ -391,10 +393,11 @@ internal fun FontCoverageRoute(
     }
     val tokens = LocalMiuixTokens.current
     val data = state.data
-    // Do not silently disable remediation from a possibly stale global task snapshot.
-    // The bridge reconciles the live worker state again inside coverage_reapply and
-    // returns an explicit error if a real task is still running.
-    val canReapply = activeFont !in setOf("", "default") &&
+    val coverageActiveFont = data?.activeFont?.takeIf { it.isNotBlank() } ?: activeFont
+    // Coverage owns a fresher module read than the app-wide snapshot. Never silently
+    // disable remediation because Home still thinks the active font is default or a
+    // task is running; coverage_reapply reconciles the live worker state itself.
+    val canReapply = coverageActiveFont !in setOf("", "default") &&
         !state.busy &&
         (data?.summary?.remediable ?: 0) > 0
     val needsCoverageBootstrap = data == null &&
@@ -427,7 +430,7 @@ internal fun FontCoverageRoute(
                 item(key = "hero") {
                     CoverageHero(
                         data = data,
-                        activeFont = activeFont,
+                        activeFont = coverageActiveFont,
                         rebootRequired = rebootRequired,
                     )
                 }
