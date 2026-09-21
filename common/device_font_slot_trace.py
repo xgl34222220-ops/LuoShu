@@ -226,6 +226,32 @@ def _physical_protection_reason(
     return ""
 
 
+def _read_key_values(path: Path | None) -> dict[str, str]:
+    if path is None or not path.is_file():
+        return {}
+    result: dict[str, str] = {}
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            key, sep, value = line.partition("=")
+            if sep and key.strip():
+                result[key.strip()] = value.strip()
+    except OSError:
+        return {}
+    return result
+
+
+def _mount_bucket(value: str) -> set[str]:
+    return {item.strip().removesuffix(":bind") for item in value.split(",") if item.strip()}
+
+
+def _slot_mount_key(logical: str, entry: dict[str, Any]) -> str:
+    partition = str(entry.get("partition") or "").strip()
+    if not partition:
+        parts = Path(logical).parts
+        partition = parts[1] if len(parts) > 1 else ""
+    return f"{partition}/fonts" if partition else ""
+
+
 def build_physical_trace(
     inventory: dict[str, Any],
     physical_root: Path,
@@ -233,6 +259,7 @@ def build_physical_trace(
     *,
     confirmed: bool = False,
     active_font: str = "",
+    mount_state: Path | None = None,
 ) -> dict[str, Any]:
     """Trace the actual physical-safe payload used by current LuoShu releases.
 
@@ -249,6 +276,11 @@ def build_physical_trace(
         raise TraceError("当前物理字体负载不存在")
 
     candidate_by_path = _candidate_index(candidates)
+    mount_info = _read_key_values(mount_state)
+    mount_state_name = mount_info.get("state", "")
+    mount_backend = mount_info.get("backend", "")
+    mounted_roots = _mount_bucket(mount_info.get("mounted", ""))
+    failed_roots = _mount_bucket(mount_info.get("failed", ""))
     traced: list[dict[str, Any]] = []
     counts: dict[str, int] = defaultdict(int)
 
@@ -264,12 +296,26 @@ def build_physical_trace(
 
         routes: list[dict[str, Any]] = []
         if physical.is_file():
-            state = "loaded" if confirmed else "mapped-unverified"
-            reason = (
-                "active-physical-payload-confirmed"
-                if confirmed
-                else "active-physical-payload-awaiting-mount-confirmation"
+            mount_key = _slot_mount_key(logical, entry)
+            mount_failed = bool(mount_key and mount_key in failed_roots and mount_key not in mounted_roots)
+            mount_confirmed = bool(
+                confirmed
+                and (
+                    mount_backend == "external-mount"
+                    or not mount_key
+                    or mount_key in mounted_roots
+                    or (not mounted_roots and mount_state_name in {"mounted", "confirmed"})
+                )
             )
+            if mount_failed:
+                state = "missing-mount"
+                reason = "physical-payload-present-but-partition-mount-failed"
+            elif mount_confirmed:
+                state = "loaded"
+                reason = "active-physical-payload-and-mount-confirmed"
+            else:
+                state = "mapped-unverified"
+                reason = "active-physical-payload-awaiting-mount-confirmation"
             category, safe_to_retry = classify_slot_state(state, reason)
             routes.append({
                 "slotIndex": -1,
@@ -285,6 +331,9 @@ def build_physical_trace(
                 "reason": reason,
                 "route": "physical-safe",
                 "targetPath": relative,
+                "mountKey": mount_key,
+                "mountState": mount_state_name,
+                "mountBackend": mount_backend,
             })
         elif protected_reason:
             state = "preserved"
@@ -545,6 +594,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--physical-root", type=Path)
     parser.add_argument("--physical-confirmed", action="store_true")
     parser.add_argument("--active-font", default="")
+    parser.add_argument("--mount-state", type=Path)
     parser.add_argument("--verification", type=Path)
     parser.add_argument("--candidates", type=Path)
     parser.add_argument("--output", type=Path)
@@ -563,6 +613,7 @@ def main() -> int:
                 candidates,
                 confirmed=args.physical_confirmed,
                 active_font=args.active_font,
+                mount_state=args.mount_state,
             )
         else:
             if not args.payload or not args.overlay:
