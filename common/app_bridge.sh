@@ -17,6 +17,7 @@ MIX_ENGINE="$MODDIR/common/font_mix_controller.sh"
 NATIVE_IMPORT="$MODDIR/common/native_import.sh"
 AXIS_INFO="$MODDIR/common/font_axis_info.py"
 SLOT_TRACE="$MODDIR/common/device_font_slot_trace.py"
+DEVICE_FONT_CACHE="$MODDIR/common/device_font_cache.sh"
 LOAD_VERIFY="$MODDIR/common/device_font_load_verify.sh"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
@@ -302,16 +303,55 @@ slot_trace_json() {
     }
 
     _cache_id="$(read_prop "$MODDIR/config/device-font-engine.conf" cacheId)"
+    _payload=''
+    _overlay=''
+
+    # 1) Prefer the engine-selected cache, but never let a stale/missing cacheId
+    # make coverage unavailable after an in-place module upgrade.
     if [ -n "$_cache_id" ]; then
         _trace_root="$MODDIR/config/device-font-cache/$_cache_id"
-        _payload="$_trace_root/payload/manifest.json"
-        _overlay="$_trace_root/overlay/overlay-manifest.json"
-    else
-        _payload="$MODDIR/config/device-font-payload/manifest.json"
-        _overlay="$MODDIR/config/device-font-overlay/overlay-manifest.json"
+        if [ -s "$_trace_root/payload/manifest.json" ] && [ -s "$_trace_root/overlay/overlay-manifest.json" ]; then
+            _payload="$_trace_root/payload/manifest.json"
+            _overlay="$_trace_root/overlay/overlay-manifest.json"
+        fi
     fi
+
+    # 2) Older non-cache payloads are still valid trace sources when both
+    # manifests exist.
+    if [ -z "$_payload" ]; then
+        _direct_payload="$MODDIR/config/device-font-payload/manifest.json"
+        _direct_overlay="$MODDIR/config/device-font-overlay/overlay-manifest.json"
+        if [ -s "$_direct_payload" ] && [ -s "$_direct_overlay" ]; then
+            _payload="$_direct_payload"
+            _overlay="$_direct_overlay"
+        fi
+    fi
+
+    # 3) Update migration intentionally clears device-font-engine.conf. If a
+    # content-addressed cache survived and still matches the current template,
+    # source and inventory, recover it through the cache resolver instead of
+    # requiring another font switch merely to populate cacheId again.
+    _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
+    [ -n "$_active" ] || _active=default
+    if [ -z "$_payload" ] && [ "$_active" != default ] && [ -f "$DEVICE_FONT_CACHE" ]; then
+        _lookup_root="$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$DEVICE_FONT_CACHE" lookup "$_active" 2>/dev/null || true)"
+        case "$_lookup_root" in
+            "$MODDIR"/config/device-font-cache/*)
+                if [ -s "$_lookup_root/payload/manifest.json" ] && [ -s "$_lookup_root/overlay/overlay-manifest.json" ]; then
+                    _payload="$_lookup_root/payload/manifest.json"
+                    _overlay="$_lookup_root/overlay/overlay-manifest.json"
+                fi
+                ;;
+        esac
+    fi
+
     [ -s "$_payload" ] && [ -s "$_overlay" ] || {
-        printf '{"status":"error","message":"当前字体还没有可追踪的设备对齐负载"}\n'
+        _pending="$MODDIR/config/font-payload-rebuild-pending.conf"
+        if [ "$_active" != default ] && [ -s "$_pending" ]; then
+            printf '{"status":"error","message":"当前字体是升级保留负载，需要重新应用一次以生成新的设备对齐与覆盖索引"}\n'
+        else
+            printf '{"status":"error","message":"当前字体还没有可追踪的设备对齐负载，可重新应用当前字体生成覆盖数据"}\n'
+        fi
         return 1
     }
 
