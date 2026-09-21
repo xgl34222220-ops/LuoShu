@@ -420,11 +420,11 @@ coverage_reapply() {
             printf '{"status":"error","message":"当前组合字体配置不完整，无法自动补齐"}\n'
             return 1
         fi
-        _out="$(MODDIR="$MODDIR" sh "$MIX_ENGINE" start "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" 2>&1)"
+        _out="$(LUOSHU_FORCE_REBUILD=1 MODDIR="$MODDIR" sh "$MIX_ENGINE" start "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" 2>&1)"
         _rc=$?
     else
         switch_task_ready || { rm -f "$MODDIR/config/font-payload-rebuild-pending.conf"; return 1; }
-        _out="$(MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "$_active" 2>&1)"
+        _out="$(LUOSHU_FORCE_REBUILD=1 MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "$_active" 2>&1)"
         _rc=$?
     fi
     if [ "$_rc" -ne 0 ]; then
