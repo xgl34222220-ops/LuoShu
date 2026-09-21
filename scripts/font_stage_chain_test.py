@@ -18,6 +18,7 @@ ROOT = Path(os.environ.get('LUOSHU_TEST_SOURCE_ROOT', Path(__file__).resolve().p
 SAFE = ROOT / 'common/legacy_v14_4/font_switch_safe.sh'
 CLONE = ROOT / 'common/legacy_v14_4/payload_clone.sh'
 PRIVATE = ROOT / 'common/private_payload.sh'
+PROVENANCE = ROOT / 'common/font_provenance.sh'
 
 
 def functions(text: str) -> str:
@@ -56,7 +57,8 @@ class FontStageChainTest(unittest.TestCase):
         (self.module / 'logs').mkdir()
         self.library = self.root / 'functions.sh'
         text = SAFE.read_text()
-        self.library.write_text(functions(CLONE.read_text()) + '\n' + functions(text))
+        self.library.write_text(functions(CLONE.read_text()) + '\n' +
+                                functions(PROVENANCE.read_text()) + '\n' + functions(text))
         self.schema = re.search(r'^SWITCH_CACHE_SCHEMA="([^"]+)"', text, re.M).group(1)
         self.env = dict(os.environ, MODDIR=str(self.module), MODULE_DIR=str(self.module),
                         CONFIG_DIR=str(self.config), LEGACY_DIR=str(self.legacy),
