@@ -14,7 +14,7 @@ cat > "$MOD/common/font_switch_task.sh" <<EOF
 case "\${1:-}" in
   reconcile) exit 0 ;;
   start)
-    printf 'switch-start|%s\n' "\${2:-}" >> "$CALLS"
+    printf 'switch-start|%s|force=%s\n' "\${2:-}" "\${LUOSHU_FORCE_REBUILD:-0}" >> "$CALLS"
     printf '{"status":"ok","data":{"task":"coverage-direct","font":"%s"}}\n' "\${2:-}"
     exit 0
     ;;
@@ -27,7 +27,7 @@ cat > "$MOD/common/font_mix_controller.sh" <<EOF
 case "\${1:-}" in
   reconcile) exit 0 ;;
   start)
-    printf 'mix-start|%s|%s|%s|%s|%s|%s\n' "\${2:-}" "\${3:-}" "\${4:-}" "\${5:-}" "\${6:-}" "\${7:-}" >> "$CALLS"
+    printf 'mix-start|%s|%s|%s|%s|%s|%s|force=%s\n' "\${2:-}" "\${3:-}" "\${4:-}" "\${5:-}" "\${6:-}" "\${7:-}" "\${LUOSHU_FORCE_REBUILD:-0}" >> "$CALLS"
     printf '{"status":"ok","data":{"task":"coverage-mix"}}\n'
     exit 0
     ;;
@@ -44,7 +44,7 @@ run_bridge() {
 printf 'Demo\n' > "$MOD/config/active_font.conf"
 OUT=$(run_bridge coverage_reapply)
 printf '%s\n' "$OUT" | grep -q '"status":"ok"'
-grep -qx 'switch-start|Demo' "$CALLS"
+grep -qx 'switch-start|Demo|force=1' "$CALLS"
 grep -qx 'state=pending' "$MOD/config/font-payload-rebuild-pending.conf"
 grep -qx 'font=Demo' "$MOD/config/font-payload-rebuild-pending.conf"
 grep -qx 'reason=coverage-remediate' "$MOD/config/font-payload-rebuild-pending.conf"
@@ -88,7 +88,7 @@ EOF
 rm -f "$MOD/config/font-payload-rebuild-pending.conf"
 OUT=$(run_bridge coverage_reapply)
 printf '%s\n' "$OUT" | grep -q '"status":"ok"'
-grep -qx 'mix-start|CJK Demo|Latin Demo|Digit Demo|wght=500,wdth=95|wght=600|wght=700' "$CALLS"
+grep -qx 'mix-start|CJK Demo|Latin Demo|Digit Demo|wght=500,wdth=95|wght=600|wght=700|force=1' "$CALLS"
 grep -qx 'font=mix' "$MOD/config/font-payload-rebuild-pending.conf"
 grep -qx 'reason=coverage-remediate' "$MOD/config/font-payload-rebuild-pending.conf"
 
@@ -101,6 +101,9 @@ grep -Fq '_tmp="${_pending}.tmp.$$"' "$ROOT/common/app_bridge.sh"
 grep -Fq '_tmp="${_out}.tmp.$$"' "$ROOT/common/app_bridge.sh"
 grep -q 'DEVICE_FONT_CACHE=' "$ROOT/common/app_bridge.sh"
 grep -Fq 'sh "$DEVICE_FONT_CACHE" lookup "$_active"' "$ROOT/common/app_bridge.sh"
+grep -Fq '[ "${LUOSHU_FORCE_REBUILD:-0}" != 1 ] && router_verified_noop' "$ROOT/common/font_manager.sh"
+grep -Fq '[ "${LUOSHU_FORCE_REBUILD:-0}" != 1 ] && \' "$ROOT/common/weighted_mix_task.sh"
+grep -Fq '[ "${LUOSHU_FORCE_REBUILD:-0}" != 1 ] && \' "$ROOT/common/multiweight_mix_task.sh"
 
 # Upgrade regression: migration may intentionally clear device-font-engine.conf while
 # a compatible content-addressed cache still exists. Coverage must recover that cache
