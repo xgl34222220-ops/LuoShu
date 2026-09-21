@@ -253,6 +253,18 @@ def _mount_bucket(value: str) -> set[str]:
     return result
 
 
+def _mount_failed(value: str, mount_key: str) -> bool:
+    if not mount_key:
+        return False
+    for raw in value.split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        if item == mount_key or item.startswith(mount_key + "-"):
+            return True
+    return False
+
+
 def _slot_mount_key(logical: str, entry: dict[str, Any], inventory: dict[str, Any]) -> str:
     normalized = normalize_path(logical)
     nested = inventory.get("discoveredFontRoots") or []
@@ -319,7 +331,6 @@ def build_physical_trace(
     mount_state_name = mount_info.get("state", "")
     mount_backend = mount_info.get("backend", "")
     mounted_roots = _mount_bucket(mount_info.get("mounted", ""))
-    failed_roots = _mount_bucket(mount_info.get("failed", ""))
     traced: list[dict[str, Any]] = []
     counts: dict[str, int] = defaultdict(int)
 
@@ -339,7 +350,10 @@ def build_physical_trace(
         routes: list[dict[str, Any]] = []
         if physical.is_file():
             mount_key = _slot_mount_key(logical, entry, inventory)
-            mount_failed = bool(mount_key and mount_key in failed_roots and mount_key not in mounted_roots)
+            mount_failed = bool(
+                _mount_failed(mount_info.get("failed", ""), mount_key)
+                and mount_key not in mounted_roots
+            )
             mount_confirmed = bool(
                 confirmed
                 and (
