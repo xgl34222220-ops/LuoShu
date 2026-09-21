@@ -135,24 +135,15 @@ OUT=$(run_bridge coverage 2>&1)
 printf '%s\n' "$OUT" | grep -q '"schema":"device-font-slot-trace-v1"'
 grep -qx 'lookup|Demo' "$CALLS"
 
-# If the old aligned cache cannot be trusted after a builder/inventory upgrade,
-# the error must tell the App to rebuild the preserved active font rather than
-# suggesting that repeated reads can fix missing manifests.
+# A missing obsolete aligned cache is not itself an error anymore. Current
+# releases are traced from the active physical-safe payload below.
 rm -rf "$MOD/config/device-font-cache/recovered"
 cat > "$MOD/common/device_font_cache.sh" <<'EOF'
 #!/system/bin/sh
 exit 2
 EOF
 chmod 0755 "$MOD/common/device_font_cache.sh"
-cat > "$MOD/config/font-payload-rebuild-pending.conf" <<'EOF'
-state=awaiting-explicit-apply
-mode=preserve-current
-font=Demo
-reason=font-builder-changed
-EOF
-OUT=$(run_bridge coverage 2>&1)
-printf '%s\n' "$OUT" | grep -q '升级保留负载'
-printf '%s\n' "$OUT" | grep -q '重新应用一次'
+rm -f "$MOD/config/font-payload-rebuild-pending.conf"
 
 # Current production runtime is physical-safe: coverage must work from the
 # already-activated .luoshu-payload even when no device-font v2 manifest exists.
