@@ -45,8 +45,13 @@ esac
 }
 
 LEGACY_UTIL="$MODDIR/common/legacy_v14_4/util_functions.sh"
+MODERN_MAPPER="$MODDIR/common/rom_adapters.sh"
+MODULE_DIR="$MODDIR"
+export MODULE_DIR USER_FONTS_DIR LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 [ -f "$LEGACY_UTIL" ] && . "$LEGACY_UTIL" >/dev/null 2>&1 || true
-export USER_FONTS_DIR LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
+# Only reuse the modern mapper's metric-normalized _font_anchor helper here.
+# No apply/mount entry point is called from this remediation process.
+[ -f "$MODERN_MAPPER" ] && . "$MODERN_MAPPER" >/dev/null 2>&1 || true
 
 TMP_ROWS="$MODDIR/config/.coverage-remediate-rows.$$"
 PRESERVED="$STAGE/.luoshu-coverage-preserved.tsv"
@@ -188,8 +193,18 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
         _anchor="$REGULAR"
     else
         _role=$(role_for_weight "$_weight")
-        if has_exact_role "$_role" && [ -s "$STORE/${_role}.font" ]; then
+        if has_exact_role "$_role"; then
             _anchor="$STORE/${_role}.font"
+            if [ ! -s "$_anchor" ] && type get_weight_file >/dev/null 2>&1 && type _font_anchor >/dev/null 2>&1; then
+                _role_source="$(get_weight_file "$FAMILY" "$_role" 2>/dev/null)"
+                if [ -s "$_role_source" ]; then
+                    _anchor="$(_font_anchor "$_role_source" "$STAGE/system/fonts" "$_role" 2>/dev/null)"
+                fi
+            fi
+            if [ ! -s "$_anchor" ]; then
+                record_preserved "$_logical" "missing-real-source-weight-${_weight}" || _failed=$((_failed + 1))
+                continue
+            fi
         else
             record_preserved "$_logical" "missing-real-source-weight-${_weight}" || _failed=$((_failed + 1))
             continue
