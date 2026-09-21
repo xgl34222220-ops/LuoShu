@@ -20,7 +20,7 @@ from fontTools.ttLib import TTFont
 from fontTools.ttLib.scaleUpem import scale_upem
 from fontTools.varLib.instancer import instantiateVariableFont
 
-SCHEMA = "device-font-slot-build-v3"
+SCHEMA = "device-font-slot-build-v4"
 PLAN_SCHEMA = "device-font-slot-plan-v2"
 DROP_AFTER_OUTLINE_CHANGE = ("DSIG", "LTSH", "VDMX", "hdmx")
 PUNCTUATION_FALLBACK = {
@@ -355,6 +355,46 @@ def apply_line_contract(font: TTFont, slot: dict[str, Any]) -> None:
     os2.fsSelection = (int(os2.fsSelection) & ~use_typo_metrics) | (stock_selection & use_typo_metrics)
 
 
+def apply_layout_frame(font: TTFont, slot: dict[str, Any]) -> dict[str, Any]:
+    """Preserve the stock slot's vertical layout envelope.
+
+    Android/Skia consumers on several OEM ROMs use the sfnt head yMin/yMax in
+    addition to hhea/OS2 metrics when computing padded UI/bitmap bounds. The
+    previous aligned builder transformed the UI glyphs and copied line metrics,
+    but then let FontTools recompute head from the replacement font's entire
+    repertoire. A font with taller CJK/Latin accents could therefore remain
+    vertically shifted or clipped even though the slot was correctly mounted.
+    """
+    contract = slot.get("lineContract") if isinstance(slot.get("lineContract"), dict) else {}
+    head = font.get("head")
+    if head is None:
+        return {"mode": "source", "reason": "missing-head"}
+
+    original = (int(head.yMin), int(head.yMax))
+    target_min = rounded(contract.get("headYMin"), original[0])
+    target_max = rounded(contract.get("headYMax"), original[1])
+    if not (-32768 <= target_min < target_max <= 32767):
+        return {
+            "mode": "source",
+            "reason": "invalid-stock-frame",
+            "source": list(original),
+            "output": list(original),
+        }
+
+    head.yMin = target_min
+    head.yMax = target_max
+    # We already recalculate each transformed glyph's own bounds. Disable the
+    # final whole-font head bbox recomputation so the trusted stock UI envelope
+    # is not overwritten during save.
+    font.recalcBBoxes = False
+    return {
+        "mode": "stock",
+        "reason": "stock-head-envelope",
+        "source": list(original),
+        "output": [target_min, target_max],
+    }
+
+
 def set_slot_identity(font: TTFont, slot: dict[str, Any], actual_weight: int) -> None:
     if "name" not in font:
         return
@@ -381,14 +421,17 @@ def validate_saved(output: Path, slot: dict[str, Any], expected_outline_weight: 
         contract = slot["lineContract"]
         checks = {
             "unitsPerEm": int(font["head"].unitsPerEm),
+            "headYMin": int(font["head"].yMin),
+            "headYMax": int(font["head"].yMax),
             "hheaAscent": int(font["hhea"].ascent),
             "hheaDescent": int(font["hhea"].descent),
             "hheaLineGap": int(font["hhea"].lineGap),
             "outlineWeight": outline_weight(font),
         }
-        for key in ("unitsPerEm", "hheaAscent", "hheaDescent", "hheaLineGap"):
+        for key in ("unitsPerEm", "headYMin", "headYMax", "hheaAscent", "hheaDescent", "hheaLineGap"):
             value = checks[key]
-            if value != rounded(contract.get(key), value):
+            expected = contract.get(key)
+            if expected is not None and value != rounded(expected, value):
                 raise BuildError(f"保存后的 {key} 未保持原厂槽位值")
         if checks["outlineWeight"] != expected_outline_weight:
             raise BuildError(
@@ -413,6 +456,7 @@ def build_slot(source: Path, source_index: int, slot: dict[str, Any], output: Pa
         transform_report = apply_outline_transforms(font, slot)
         if transform_report["glyphs"] <= 0:
             raise BuildError("没有任何脚本字形通过安全对齐")
+        layout_frame = apply_layout_frame(font, slot)
         set_slot_identity(font, slot, actual_weight)
         for tag in DROP_AFTER_OUTLINE_CHANGE:
             if tag in font:
@@ -439,6 +483,7 @@ def build_slot(source: Path, source_index: int, slot: dict[str, Any], output: Pa
         "style": slot.get("style", "normal"),
         "roles": slot.get("roles", []),
         "transformed": transform_report,
+        "layoutFrame": layout_frame,
         "checks": checks,
         "bytes": output.stat().st_size,
     }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Packaging contract marker: device-font-slot-build-v3
+# Packaging contract marker: device-font-slot-build-v4
 """Preserve target Android family identity in generated slot fonts."""
 from __future__ import annotations
 

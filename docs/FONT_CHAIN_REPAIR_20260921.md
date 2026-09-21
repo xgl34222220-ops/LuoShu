@@ -97,6 +97,26 @@
 
 inventory 仍然只由现有唯一刷写扫描器产生，不新增品牌扫描器，也不把候选列表里的 Emoji、symbol、专用 script fallback 直接当 UI 槽。新增 direct physical 补槽只消费 canonical inventory 中已经通过原有 UI/字符覆盖筛选的 TTF/OTF；无法证明安全的容器和 stock 来源保持原厂。
 
+## 第六批：HyperOS 垂直布局框与剩余假字重清理
+
+### 已复现的断点
+
+- 逐槽生成器已经复制 stock hhea / OS/2 行高，也会按 stock 探针移动数字、拉丁和 CJK 字形，但保存时仍让 FontTools 从替换字体的完整字形集合重新计算 `head.yMin/yMax`。在 HyperOS 状态栏、锁屏和部分 bitmap/span 布局里，这会让“已经 loaded”的字体继续出现上浮、下沉或裁切。
+- 旧 HyperOS stage-complete 路径仍允许 `Roboto-Bold.ttf / 700.ttf` 在缺少真实 700 源时一路回退到 Regular；这会把 Regular 笔画放进物理粗体槽，和第五批刚修掉的真实字重语义互相打架。
+
+### 改动
+
+- stock-aligned slot builder 升级到 `device-font-slot-build-v4`：在完成脚本字形变换后，明确恢复可信 stock `head.yMin/yMax` 布局框，并关闭最终 save 时的 whole-font bbox 回算；hhea / OS/2 / head 三套垂直契约现在一起保持。
+- 保存后验证新增 `headYMin/headYMax`，如果 stock frame 没被保住会直接判构建失败，不允许带着错误度量进入 overlay。
+- 该布局框处理只改变 sfnt 布局 envelope，不再次移动字形基线，也不重新缩放轮廓；实际数字/CJK/拉丁的脚本变换仍由 v2 probe plan 决定。
+- HyperOS metrics batch 的多字重选择改为 exact-only：700/500/300 等物理槽只接受真实对应静态 source anchor；缺失时删除前面误建的 Regular alias，让 ROM 原厂对应字重从下层透出。
+- 缺少真实物理字重的保留结果写入既有 `.luoshu-metrics-report.json` 的 `preservedWeightAliases`，不新增第二套诊断格式。
+- 现有逐槽 trace、inventory、aligned builder 和 cache 体系继续复用，不新增品牌扫描器。
+
+### 验证重点
+
+新增/扩展回归验证：stock head frame 在保存后仍完全一致；400 Regular 对齐到 700 stock slot 时 outline weight 不被篡改；HyperOS 只有 400 源而没有 700 时不再生成假 Bold alias；存在真实 700 时仍正常生成对应物理槽。
+
 ## 仍需验证与后续修复
 
 - 逐槽追踪能定位状态栏/锁屏/拨号/第三方 App 到底断在哪一层，但具体真机页面是否命中仍需用这一批生成的 trace 与设备日志验证。

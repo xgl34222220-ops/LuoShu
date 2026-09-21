@@ -37,6 +37,10 @@ def main() -> None:
     assert source["probes"]["digits"]["hits"] >= 10
     target = copy.deepcopy(source)
     target["path"] = "/system/fonts/Clockopia.ttf"
+    source_head_min = int(source["metrics"]["headYMin"])
+    source_head_max = int(source["metrics"]["headYMax"])
+    target["metrics"]["headYMin"] = source_head_min - 37
+    target["metrics"]["headYMax"] = source_head_max + 53
     target["probes"]["digits"] = shifted_probe(
         source["probes"]["digits"],
         shift_y=48.0,
@@ -78,14 +82,18 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         output = Path(temporary) / "Clockopia.ttf"
         report = builder.build_slot(args.font, -1, slot, output)
-        assert report["schema"] == "device-font-slot-build-v3"
+        assert report["schema"] == "device-font-slot-build-v4"
         assert report["status"] == "ok", report
         assert report["transformed"]["probes"]["digits"] >= 10, report
         assert output.is_file() and output.stat().st_size > 1024
 
         generated = template_engine.inspect_font(output, -1, hash_fonts=False)
-        for key in ("hheaAscent", "hheaDescent", "hheaLineGap"):
+        for key in ("hheaAscent", "hheaDescent", "hheaLineGap", "headYMin", "headYMax"):
             assert generated["metrics"][key] == target["metrics"][key], (key, generated["metrics"], target["metrics"])
+        assert report["layoutFrame"]["mode"] == "stock", report
+        assert report["layoutFrame"]["output"] == [
+            target["metrics"]["headYMin"], target["metrics"]["headYMax"]
+        ], report
 
         source_digits = source["probes"]["digits"]
         target_digits = target["probes"]["digits"]

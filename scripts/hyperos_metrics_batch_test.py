@@ -100,6 +100,25 @@ class HyperOSMetricsTest(unittest.TestCase):
         with TTFont(self.fonts / 'Roboto-Bold.ttf') as font:
             self.assertEqual(font['head'].yMax, 900)
 
+    def test_missing_static_weight_preserves_stock_instead_of_regular_alias(self):
+        self.inventory({'/system/fonts/Roboto-Regular.ttf': slot(),
+                        '/system/fonts/Roboto-Bold.ttf': slot()})
+        # Simulate the earlier generic mapper having staged Regular bytes under
+        # the Bold filename. The metrics batch must remove that alias when no
+        # genuine 700 source exists, exposing the ROM's real Bold file.
+        shutil.copyfile(self.fonts / '400.ttf', self.fonts / 'Roboto-Bold.ttf')
+        result = batch.build(
+            self.module,
+            self.stage,
+            ['Roboto-Regular.ttf', 'Roboto-Bold.ttf'],
+        )
+        self.assertEqual(result['mapped'], 1)
+        self.assertTrue((self.fonts / 'Roboto-Regular.ttf').is_file())
+        self.assertFalse((self.fonts / 'Roboto-Bold.ttf').exists())
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertEqual(report['schema'], 'luoshu-slot-metrics-v1')
+        self.assertIn('/system/fonts/Roboto-Bold.ttf', report['preservedWeightAliases'])
+
     def test_no_cascade_when_alias_is_source(self):
         (self.fonts / '400.ttf').rename(self.fonts / 'MiSansVF.ttf')
         self.inventory({'/system/fonts/MiSansVF.ttf': slot(),
