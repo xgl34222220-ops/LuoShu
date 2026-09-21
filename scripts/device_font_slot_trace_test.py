@@ -125,7 +125,7 @@ def main() -> None:
     summary = result["summary"]
     assert summary["inventorySlots"] == 5, summary
     assert summary["censusSlots"] == 7, summary
-    assert summary["replaceableSlots"] == 5, summary
+    assert summary["replaceableSlots"] == 3, summary
     assert summary["replaced"] == 1, summary
     assert summary["protected"] == 4, summary
     assert summary["issues"] == 2, summary

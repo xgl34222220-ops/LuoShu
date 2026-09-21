@@ -301,6 +301,11 @@ def build_trace(
         if bool(item.get("safeToRetry")):
             remediable += 1
 
+    eligible = (
+        category_counts.get("replaced", 0)
+        + category_counts.get("pending", 0)
+        + category_counts.get("issue", 0)
+    )
     return {
         "schema": SCHEMA,
         "inventoryBuildKey": str(inventory.get("buildKey") or ""),
@@ -309,7 +314,7 @@ def build_trace(
         "summary": {
             "inventorySlots": len(inventory.get("slots") or {}),
             "censusSlots": len(traced),
-            "replaceableSlots": len(inventory.get("slots") or {}),
+            "replaceableSlots": eligible,
             "replaced": category_counts.get("replaced", 0),
             "pending": category_counts.get("pending", 0),
             "protected": category_counts.get("protected", 0),
