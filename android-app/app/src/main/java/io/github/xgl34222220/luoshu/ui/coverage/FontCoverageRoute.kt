@@ -558,6 +558,8 @@ internal fun FontCoverageRoute(
                 busy = state.busy,
                 taskRunning = taskRunning,
                 canReapply = canReapply,
+                statusText = state.error.ifBlank { state.message },
+                statusIsError = state.error.isNotBlank(),
                 onReapply = { confirmReapply = true },
                 onVerify = { load(verify = true) },
                 onExport = {
@@ -1155,6 +1157,8 @@ private fun CoverageActionBar(
     busy: Boolean,
     taskRunning: Boolean,
     canReapply: Boolean,
+    statusText: String,
+    statusIsError: Boolean,
     onReapply: () -> Unit,
     onVerify: () -> Unit,
     onExport: () -> Unit,
@@ -1169,56 +1173,74 @@ private fun CoverageActionBar(
         color = tokens.elevatedCardBackground.copy(alpha = .98f),
         shadowElevation = 12.dp,
     ) {
-        Row(
+        Column(
             Modifier.padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Button(
-                onClick = onReapply,
-                enabled = canReapply,
-                modifier = Modifier.weight(1.25f).heightIn(min = 48.dp),
-                shape = RoundedCornerShape(19.dp),
-            ) {
-                if (busy) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary,
-                    )
-                } else {
-                    Icon(Icons.Rounded.AutoFixHigh, null, Modifier.size(19.dp))
-                }
-                Spacer(Modifier.width(6.dp))
+            if (statusText.isNotBlank()) {
                 Text(
-                    when {
-                        busy -> "正在启动…"
-                        taskRunning -> "检查任务状态"
-                        remediable > 0 -> "补齐 " + remediable
-                        else -> "无需补齐"
+                    statusText,
+                    color = if (statusIsError) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        tokens.textSecondary
                     },
-                    maxLines = 1,
+                    fontSize = 11.5.sp,
+                    lineHeight = 16.sp,
+                    maxLines = 2,
+                    modifier = Modifier.padding(horizontal = 5.dp),
                 )
             }
-            FilledTonalButton(
-                onClick = onVerify,
-                enabled = !busy && !taskRunning,
-                modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                shape = RoundedCornerShape(19.dp),
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
-                Icon(Icons.Rounded.Verified, null, Modifier.size(19.dp))
-                Spacer(Modifier.width(5.dp))
-                Text("重新验证", maxLines = 1)
-            }
-            Surface(
-                onClick = onExport,
-                enabled = !busy,
-                shape = RoundedCornerShape(19.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                modifier = Modifier.size(48.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Rounded.Description, "导出字体覆盖报告")
+                Button(
+                    onClick = onReapply,
+                    enabled = canReapply,
+                    modifier = Modifier.weight(1.25f).heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(19.dp),
+                ) {
+                    if (busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    } else {
+                        Icon(Icons.Rounded.AutoFixHigh, null, Modifier.size(19.dp))
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        when {
+                            busy -> "正在启动…"
+                            taskRunning -> "检查任务状态"
+                            remediable > 0 -> "补齐 " + remediable
+                            else -> "无需补齐"
+                        },
+                        maxLines = 1,
+                    )
+                }
+                FilledTonalButton(
+                    onClick = onVerify,
+                    enabled = !busy && !taskRunning,
+                    modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                    shape = RoundedCornerShape(19.dp),
+                ) {
+                    Icon(Icons.Rounded.Verified, null, Modifier.size(19.dp))
+                    Spacer(Modifier.width(5.dp))
+                    Text("重新验证", maxLines = 1)
+                }
+                Surface(
+                    onClick = onExport,
+                    enabled = !busy,
+                    shape = RoundedCornerShape(19.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.Description, "导出字体覆盖报告")
+                    }
                 }
             }
         }
