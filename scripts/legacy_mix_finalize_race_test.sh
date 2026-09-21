@@ -149,6 +149,11 @@ grep -q '提交校验失败' "$TMP/status-failed.out"
 
 # A second mix generation must not inherit any prior text aliases from the live
 # payload. Preserve unrelated XML, but clear every font partition and LuoShu XML.
+# The real router sources payload_clone.sh before this function; mirror that
+# dependency so scanner-discovered partition enumeration is available here too.
+REALMOD="$MODULE"
+export REALMOD
+. "$ROOT/common/legacy_v14_4/payload_clone.sh"
 FUNCTION=$(sed -n '/^clear_mix_text_payload()/,/^}/p' "$ROUTER")
 eval "$FUNCTION"
 MIX="$TMP/mix-clean"
