@@ -345,22 +345,51 @@ slot_trace_json() {
         esac
     fi
 
-    [ -s "$_payload" ] && [ -s "$_overlay" ] || {
-        _pending="$MODDIR/config/font-payload-rebuild-pending.conf"
-        if [ "$_active" != default ] && [ -s "$_pending" ]; then
-            printf '{"status":"error","message":"当前字体是升级保留负载，需要重新应用一次以生成新的设备对齐与覆盖索引"}\n'
-        else
-            printf '{"status":"error","message":"当前字体还没有可追踪的设备对齐负载，可重新应用当前字体生成覆盖数据"}\n'
+    _candidates="$MODDIR/config/device_font_candidates.json"
+
+    # Current LuoShu releases use the physical-safe next-boot payload as the
+    # authoritative runtime. It deliberately has no v2 device-font manifest.
+    # Trace that live payload directly instead of making the App depend on an
+    # obsolete manifest that the switch core never creates.
+    if { [ ! -s "$_payload" ] || [ ! -s "$_overlay" ]; } && \
+       [ "$_active" != default ] && [ -d "$MODDIR/.luoshu-payload" ]; then
+        set -- "$SLOT_TRACE" \
+            --inventory "$_inventory" \
+            --physical-root "$MODDIR/.luoshu-payload" \
+            --active-font "$_active" \
+            --output "$MODDIR/config/device-font-slot-trace.json"
+        [ ! -s "$_candidates" ] || set -- "$@" --candidates "$_candidates"
+
+        _load_state="$(read_prop "$MODDIR/config/device-font-load-verification.conf" state)"
+        _boot_state="$(read_prop "$MODDIR/config/font-payload-boot.conf" state)"
+        _mount_state="$(read_prop "$MODDIR/config/self-mount.conf" state)"
+        if [ "$_load_state" = verified ] || \
+           { [ "$_boot_state" = confirmed ] && \
+             { [ "$_mount_state" = mounted ] || [ "$_mount_state" = confirmed ] || [ "$_mount_state" = degraded ]; }; }; then
+            set -- "$@" --physical-confirmed
         fi
+
+        PYTHONHOME="$PYROOT" \
+        PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$PYBIN" "$@"
+        return $?
+    fi
+
+    [ -s "$_payload" ] && [ -s "$_overlay" ] || {
+        printf '{"status":"error","message":"当前物理字体负载不存在，无法生成字体覆盖数据"}\n'
         return 1
     }
 
-    set -- "$SLOT_TRACE" --inventory "$_inventory" --payload "$_payload" --overlay "$_overlay"         --output "$MODDIR/config/device-font-slot-trace.json"
+    set -- "$SLOT_TRACE" --inventory "$_inventory" --payload "$_payload" --overlay "$_overlay" \
+        --output "$MODDIR/config/device-font-slot-trace.json"
     _verification="$MODDIR/config/device-font-load-verification.json"
     [ ! -s "$_verification" ] || set -- "$@" --verification "$_verification"
-    _candidates="$MODDIR/config/device_font_candidates.json"
     [ ! -s "$_candidates" ] || set -- "$@" --candidates "$_candidates"
-    PYTHONHOME="$PYROOT"     PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages"     LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"         "$PYBIN" "$@"
+    PYTHONHOME="$PYROOT" \
+    PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+    LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$PYBIN" "$@"
 }
 
 coverage_busy() {
