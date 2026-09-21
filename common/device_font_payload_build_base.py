@@ -114,6 +114,10 @@ def safe_slot_record(original: dict[str, Any], plan: dict[str, Any]) -> dict[str
         "roles": original.get("roles", []),
         "replaceable": bool(original.get("replaceable")),
         "stockPath": original.get("resolvedPath", ""),
+        "directPhysical": bool(original.get("directPhysical")),
+        "inventoryPath": original.get("inventoryPath", ""),
+        "inventorySource": original.get("inventorySource", ""),
+        "inventoryDisposition": original.get("inventoryDisposition", ""),
         "planStatus": plan.get("status", "unresolved"),
         "planReason": plan.get("reason", ""),
     }
@@ -266,6 +270,7 @@ def build_payload(
             },
             "generated": generated_files,
             "slots": manifest_slots,
+            "inventorySupplement": template.get("inventorySupplement", {}),
             "failures": failures,
         }
         atomic_json(payload, stage / "manifest.json")

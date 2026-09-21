@@ -17,6 +17,9 @@ def fixture() -> tuple[dict, dict, list[dict]]:
             {
                 "family": "google-sans-text",
                 "familyNormalized": "google-sans-text",
+                "slotIndex": 0,
+                "inventoryPath": "/system/fonts/Roboto-Regular.ttf",
+                "stockPath": "/system/fonts/Roboto-Regular.ttf",
                 "weight": 400,
                 "generatedFile": "LuoShuSlot-abc.ttf",
             }
@@ -37,6 +40,24 @@ def fixture() -> tuple[dict, dict, list[dict]]:
             {
                 "source": "/data/fonts/config/config.xml",
                 "removedFamilies": ["google-sans-text"],
+            }
+        ],
+        "slotTraceSchema": "device-font-slot-trace-v1",
+        "slotResults": [
+            {
+                "slotIndex": 0,
+                "inventoryPath": "/system/fonts/Roboto-Regular.ttf",
+                "stockPath": "/system/fonts/Roboto-Regular.ttf",
+                "family": "google-sans-text",
+                "weight": 400,
+                "style": "normal",
+                "sourceXml": "/data/fonts/config/config.xml",
+                "planStatus": "ready",
+                "planReason": "",
+                "generatedFile": "LuoShuSlot-abc.ttf",
+                "state": "mapped",
+                "route": "dynamic",
+                "targetPath": "system/fonts/LuoShuSlot-abc.ttf",
             }
         ],
     }
@@ -66,6 +87,9 @@ def main() -> None:
     assert verified["state"] == "verified", verified
     assert verified["mode"] == "aligned"
     assert verified["summary"]["dynamicFamilyHits"] == 1
+    assert verified["summary"]["slotLoaded"] == 1, verified["summary"]
+    assert verified["slotResults"][0]["loadState"] == "loaded"
+    assert verified["slotResults"][0]["fontManagerConfirmed"] is True
 
     missing_dynamic = verifier.verify(
         payload,
@@ -91,6 +115,8 @@ def main() -> None:
     assert "font-manager-dump-unavailable" in unavailable_dump["reasons"]
     assert "dynamic-family-unconfirmed" in unavailable_dump["reasons"]
     assert "verified-by-visible-mounts" in unavailable_dump["reasons"]
+    assert unavailable_dump["summary"]["slotMountVisible"] == 1
+    assert unavailable_dump["slotResults"][0]["loadState"] == "mount-visible"
 
     bad_mounts = [dict(mounts[0], status="mismatch")]
     mismatch = verifier.verify(
@@ -103,6 +129,8 @@ def main() -> None:
     )
     assert mismatch["state"] == "failed"
     assert "visible-font-hash-mismatch" in mismatch["reasons"]
+    assert mismatch["summary"]["slotMismatch"] == 1
+    assert mismatch["slotResults"][0]["loadState"] == "mismatch"
     print(json.dumps(verified["summary"], ensure_ascii=False, sort_keys=True))
 
 

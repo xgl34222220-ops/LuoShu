@@ -128,6 +128,7 @@ def main() -> None:
             "LuoShuSlot-mi-400.ttf",
             "LuoShuSlot-google-400.ttf",
             "LuoShuSlot-mono-400.ttf",
+            "LuoShuSlot-hidden-400.ttf",
         }
         for name in generated:
             (fonts / name).write_bytes((name.encode("utf-8") + b"\0") * 256)
@@ -172,7 +173,19 @@ def main() -> None:
                 replaceable=False,
                 status="skipped",
             ),
+            slot(
+                "",
+                "inventory-hidden-ui",
+                "NestedUi.ttf",
+                "LuoShuSlot-hidden-400.ttf",
+                roles=["global-ui"],
+            ),
         ]
+        slots[-1]["stockPath"] = "/vendor/fonts/ui/NestedUi.ttf"
+        slots[-1]["inventoryPath"] = "/vendor/fonts/ui/NestedUi.ttf"
+        slots[-1]["directPhysical"] = True
+        for index, item in enumerate(slots):
+            item["slotIndex"] = index
         template = {
             "schema": "device-font-template-v1",
             "fingerprint": "overlay-fixture-rom",
@@ -203,12 +216,12 @@ def main() -> None:
             overlay.PRIMARY_SYSTEM_XMLS = original_primary
 
         assert report["summary"] == {
-            "mappedSlots": 5,
+            "mappedSlots": 6,
             "rewrittenSlots": 4,
             "dynamicSlots": 1,
-            "directPhysicalSlots": 0,
+            "directPhysicalSlots": 1,
             "dynamicInjectedFonts": 2,
-            "uniqueCopiedFonts": 4,
+            "uniqueCopiedFonts": 5,
             "xmlOutputs": 3,
             "incompleteDynamicFamilies": 1,
         }, report["summary"]
@@ -244,6 +257,17 @@ def main() -> None:
         assert (output / "system/fonts/LuoShuSlot-google-400.ttf").is_file()
         assert (output / "product/fonts/LuoShuSlot-mi-400.ttf").is_file()
         assert (output / "product/fonts/LuoShuSlot-mono-400.ttf").is_file()
+        assert (output / "vendor/fonts/ui/NestedUi.ttf").is_file()
+        direct_results = [
+            item for item in report["slotResults"]
+            if item.get("inventoryPath") == "/vendor/fonts/ui/NestedUi.ttf"
+        ]
+        assert len(direct_results) == 1, direct_results
+        assert direct_results[0]["state"] == "mapped"
+        assert direct_results[0]["route"] == "physical"
+        assert direct_results[0]["targetPath"] == "vendor/fonts/ui/NestedUi.ttf"
+        preserved = [item for item in report["slotResults"] if item.get("planStatus") == "skipped"]
+        assert preserved and all(item["state"] == "preserved" for item in preserved)
         assert report["dynamicMounts"] == [
             {"source": "dynamic/data-fonts-config.xml", "target": str(dynamic_xml)}
         ]

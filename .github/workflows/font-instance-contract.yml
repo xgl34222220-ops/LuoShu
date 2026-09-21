@@ -19,6 +19,13 @@ on:
       - common/legacy_v14_4/v142_weighted_mix.sh
       - common/legacy_v14_4/v143_auto_multiweight_mix.sh
       - common/private_payload.sh
+      - common/device_font_payload_build.py
+      - common/device_font_payload_build_base.py
+      - common/device_font_payload_overlay.py
+      - common/device_font_load_verify.py
+      - common/device_font_slot_trace.py
+      - common/device_font_cache.sh
+      - common/device_font_payload_policy.sh
       - scripts/font_instance_contract_test.py
       - scripts/font_stage_chain_test.py
       - scripts/font_active_state_test.sh
@@ -49,3 +56,5 @@ jobs:
         run: |
           sh scripts/font_provenance_test.sh
           sh scripts/font_active_state_test.sh
+      - name: Check per-slot trace joins
+        run: python scripts/device_font_slot_trace_test.py

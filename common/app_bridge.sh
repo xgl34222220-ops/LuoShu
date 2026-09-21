@@ -16,6 +16,7 @@ SAFE_SWITCH="$MODDIR/common/legacy_v14_4/font_switch_safe.sh"
 MIX_ENGINE="$MODDIR/common/font_mix_controller.sh"
 NATIVE_IMPORT="$MODDIR/common/native_import.sh"
 AXIS_INFO="$MODDIR/common/font_axis_info.py"
+SLOT_TRACE="$MODDIR/common/device_font_slot_trace.py"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
@@ -288,6 +289,37 @@ preview_export() {
         "$(json_escape "$_dest")" "$(json_escape "$(basename "$_src")")" "$(json_escape "$_sha")"
 }
 
+slot_trace_json() {
+    [ -x "$PYBIN" ] && [ -f "$SLOT_TRACE" ] || {
+        printf '{"status":"error","message":"字体槽追踪组件不可用"}\n'
+        return 1
+    }
+    _inventory="$MODDIR/config/device_font_inventory.json"
+    [ -s "$_inventory" ] || {
+        printf '{"status":"error","message":"本机字体扫描清单不存在，请重新刷写或执行原厂字体扫描"}\n'
+        return 1
+    }
+
+    _cache_id="$(read_prop "$MODDIR/config/device-font-engine.conf" cacheId)"
+    if [ -n "$_cache_id" ]; then
+        _trace_root="$MODDIR/config/device-font-cache/$_cache_id"
+        _payload="$_trace_root/payload/manifest.json"
+        _overlay="$_trace_root/overlay/overlay-manifest.json"
+    else
+        _payload="$MODDIR/config/device-font-payload/manifest.json"
+        _overlay="$MODDIR/config/device-font-overlay/overlay-manifest.json"
+    fi
+    [ -s "$_payload" ] && [ -s "$_overlay" ] || {
+        printf '{"status":"error","message":"当前字体还没有可追踪的设备对齐负载"}\n'
+        return 1
+    }
+
+    set -- "$SLOT_TRACE" --inventory "$_inventory" --payload "$_payload" --overlay "$_overlay"         --output "$MODDIR/config/device-font-slot-trace.json"
+    _verification="$MODDIR/config/device-font-load-verification.json"
+    [ ! -s "$_verification" ] || set -- "$@" --verification "$_verification"
+    PYTHONHOME="$PYROOT"     PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages"     LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"         "$PYBIN" "$@"
+}
+
 weight_axis_info() {
     _family="$1"
     _src="$(find_preview_source "$_family")"
@@ -335,6 +367,7 @@ case "${1:-status}" in
         sh "$FONT_MANAGER" action validate "${2:-}"
         ;;
     stock_scan) manager_ready || exit 1; sh "$FONT_MANAGER" action stock_scan ;;
+    slot_trace) slot_trace_json ;;
     switch_start) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "${2:-default}" ;;
     switch_status) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" status "${2:-}" ;;
     delete) manager_ready || exit 1; sh "$FONT_MANAGER" action delete "${2:-}" ;;

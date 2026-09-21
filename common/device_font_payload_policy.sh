@@ -287,12 +287,18 @@ device_font_payload_build_install() {
     _dfpp_installed_state=$(sed -n 's/^state=//p' "$_dfpp_state" 2>/dev/null | head -n1)
     _dfpp_installed_font=$(sed -n 's/^font=//p' "$_dfpp_state" 2>/dev/null | head -n1)
     _dfpp_installed_template=$(sed -n 's/^templateKey=//p' "$_dfpp_state" 2>/dev/null | head -n1)
+    _dfpp_installed_inventory=$(sed -n 's/^inventoryKey=//p' "$_dfpp_state" 2>/dev/null | head -n1)
     _dfpp_template_key=$(_device_font_policy_trusted_template_key 2>/dev/null)
+    _dfpp_inventory_key=''
+    if type _dfcache_inventory_key >/dev/null 2>&1; then
+        _dfpp_inventory_key=$(_dfcache_inventory_key 2>/dev/null)
+    fi
 
-    if [ -n "$_dfpp_template_key" ] && \
+    if [ -n "$_dfpp_template_key" ] && [ -n "$_dfpp_inventory_key" ] && \
        [ "$_dfpp_installed_state" = installed ] && \
        [ "$_dfpp_installed_font" = "$_dfpp_font" ] && \
-       [ "$_dfpp_installed_template" = "$_dfpp_template_key" ]; then
+       [ "$_dfpp_installed_template" = "$_dfpp_template_key" ] && \
+       [ "$_dfpp_installed_inventory" = "$_dfpp_inventory_key" ]; then
         if type device_font_payload_validate_installed >/dev/null 2>&1 && device_font_payload_validate_installed; then
             _device_font_policy_log "复用已激活的可信设备字体：$_dfpp_font"
             return 0

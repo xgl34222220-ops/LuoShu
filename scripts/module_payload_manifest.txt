@@ -13,6 +13,7 @@ common/device_font_cache.sh
 common/device_font_dynamic_guard.sh
 common/device_font_load_verify.py
 common/device_font_load_verify.sh
+common/device_font_slot_trace.py
 common/device_font_payload_bridge.sh
 common/device_font_payload_build.py
 common/device_font_payload_build_base.py

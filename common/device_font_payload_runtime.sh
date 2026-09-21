@@ -46,6 +46,19 @@ _dfpr_exec() {
         "$_dfpr_python_bin" "$@"
 }
 
+_dfpr_inventory_key() {
+    _dfpr_module_dir="$(_dfpr_module)"
+    _dfpr_helper="$_dfpr_module_dir/common/font_provenance.sh"
+    if [ -f "$_dfpr_helper" ]; then
+        type luoshu_provenance_inventory_identity >/dev/null 2>&1 || . "$_dfpr_helper" >/dev/null 2>&1 || true
+        if type luoshu_provenance_inventory_identity >/dev/null 2>&1; then
+            luoshu_provenance_inventory_identity
+            return $?
+        fi
+    fi
+    printf 'no-inventory\n'
+}
+
 _dfpr_hash() {
     _dfpr_file="$1"
     if command -v sha256sum >/dev/null 2>&1; then
@@ -344,6 +357,10 @@ device_font_payload_build_install() {
         printf 'state=installed\n'
         printf 'schema=device-font-payload-v1\n'
         printf 'font=%s\n' "$_dfpr_font_id"
+        printf 'templateKey=%s\n' "$(cat "$_dfpr_module_dir/config/device-font-template.key" 2>/dev/null)"
+        printf 'inventoryKey=%s\n' "$(_dfpr_inventory_key 2>/dev/null)"
+        printf 'planRevision=3\n'
+        printf 'slotTraceRevision=1\n'
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "${_dfpr_state}.tmp.$$" 2>/dev/null || {
         rmdir "$_dfpr_lock" 2>/dev/null || true

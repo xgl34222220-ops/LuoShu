@@ -394,21 +394,70 @@ def copy_direct_physical_slots(
         parts = Path(stock_path).parts
         if len(parts) < 4 or parts[0] != "/" or parts[2] != "fonts":
             raise OverlayError(f"物理字体槽路径无效：{stock_path}")
-        partition, target_name = parts[1], parts[-1]
+        partition = parts[1]
+        relative = Path(*parts[3:])
+        if not relative.parts or ".." in relative.parts:
+            raise OverlayError(f"物理字体槽相对路径无效：{stock_path}")
         generated_name = str(slot["generatedFile"])
         source = payload_root / "fonts" / generated_name
         if not source.is_file() or source.stat().st_size < 1024:
             raise OverlayError(f"物理槽生成字体不存在：{generated_name}")
-        destination = stage / partition / "fonts" / target_name
+        destination = stage / partition / "fonts" / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
             os.link(source, destination)
         except OSError:
             shutil.copyfile(source, destination)
         os.chmod(destination, 0o644)
-        copied[(partition, target_name)] = destination
+        copied[(partition, relative.as_posix())] = destination
         count += 1
     return count
+
+
+def slot_result(slot: dict[str, Any]) -> dict[str, Any]:
+    """Describe exactly where one planned slot went in the rendered overlay."""
+    result: dict[str, Any] = {
+        "slotIndex": int(slot.get("slotIndex") or 0),
+        "inventoryPath": str(slot.get("inventoryPath") or ""),
+        "stockPath": str(slot.get("stockPath") or ""),
+        "family": str(slot.get("family") or ""),
+        "weight": int(slot.get("weight") or 400),
+        "style": str(slot.get("style") or "normal"),
+        "sourceXml": str(slot.get("sourceXml") or ""),
+        "planStatus": str(slot.get("planStatus") or "unresolved"),
+        "planReason": str(slot.get("planReason") or ""),
+        "generatedFile": str(slot.get("generatedFile") or ""),
+    }
+    generated = result["generatedFile"]
+    if not generated:
+        result.update(
+            state="preserved",
+            route="stock",
+            reason=result["planReason"] or result["planStatus"] or "not-generated",
+            targetPath="",
+        )
+        return result
+
+    source_xml = result["sourceXml"]
+    if source_xml:
+        if is_dynamic_path(source_xml):
+            result.update(state="mapped", route="dynamic", targetPath=f"system/fonts/{generated}")
+        else:
+            partition = partition_for_xml(source_xml)
+            result.update(state="mapped", route="xml", targetPath=f"{partition}/fonts/{generated}")
+        return result
+
+    stock = Path(result["stockPath"])
+    parts = stock.parts
+    if len(parts) >= 4 and parts[0] == "/" and parts[2] == "fonts":
+        result.update(state="mapped", route="physical", targetPath=str(stock).lstrip("/"))
+    else:
+        result.update(state="mapping-missing", route="physical", targetPath="", reason="invalid-stock-path")
+    return result
+
+
+def build_slot_results(slots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [slot_result(slot) for slot in slots if isinstance(slot, dict)]
 
 
 def commit_directory(stage: Path, output: Path) -> None:
@@ -534,7 +583,8 @@ def render_overlay(
             "copiedFonts": [
                 {
                     "partition": partition,
-                    "filename": filename,
+                    "filename": path.name,
+                    "targetKey": filename,
                     "path": str(path.relative_to(stage)),
                     "bytes": path.stat().st_size,
                 }
@@ -547,6 +597,8 @@ def render_overlay(
                 }
                 for report in dynamic_reports
             ],
+            "slotTraceSchema": "device-font-slot-trace-v1",
+            "slotResults": build_slot_results(slots),
         }
         atomic_json(report, stage / "overlay-manifest.json")
         commit_directory(stage, output_tree)

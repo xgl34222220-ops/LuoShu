@@ -15,6 +15,7 @@ LUOSHU_TRUSTED_TEMPLATE_KEY=fixture-template-key
 export MODDIR MODULE_DIR LUOSHU_TRUSTED_TEMPLATE_KEY
 
 device_font_payload_validate_installed() { return 0; }
+_dfcache_inventory_key() { printf 'fixture-inventory-key\n'; }
 device_font_cache_activate() {
     [ -f "$TMP/cache-ready-$1" ] || return 2
     printf '%s\n' "$1" >> "$TMP/activations"
@@ -37,6 +38,7 @@ cat > "$MODULE/config/device-font-engine.conf" <<'EOF'
 state=installed
 font=SameFont
 templateKey=fixture-template-key
+inventoryKey=fixture-inventory-key
 EOF
 
 device_font_payload_build_install SameFont
@@ -57,8 +59,26 @@ cat > "$MODULE/config/device-font-engine.conf" <<'EOF'
 state=installed
 font=SameFont
 templateKey=old-template-key
+inventoryKey=fixture-inventory-key
 EOF
 
+a=0
+device_font_payload_build_install SameFont || a=$?
+ok test "$a" -eq 0
+ok grep -qx SameFont "$TMP/schedules"
+ok grep -qx SameFont "$TMP/builds"
+ok grep -qx SameFont "$TMP/activations"
+
+# Same template/font but a different scanner inventory must rebuild the aligned payload.
+: > "$TMP/schedules"
+: > "$TMP/builds"
+: > "$TMP/activations"
+cat > "$MODULE/config/device-font-engine.conf" <<'EOF'
+state=installed
+font=SameFont
+templateKey=fixture-template-key
+inventoryKey=old-inventory-key
+EOF
 a=0
 device_font_payload_build_install SameFont || a=$?
 ok test "$a" -eq 0

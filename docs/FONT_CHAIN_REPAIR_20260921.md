@@ -73,9 +73,34 @@
 
 新增 provenance 与 active-reuse 回归：覆盖同路径同名字体换内容、生成代码变化、分区清单变化、组合中单一来源字体变化、旧缓存 schema 隔离、compatibility 动态分区。测试只证明复用/缓存不会因为“名字一样”而继续吃旧结果，不等于状态栏、锁屏、Google 或 Chrome 已完成真机验证。
 
+## 第四批：inventory → 生成 → 映射 → 启动加载逐槽追踪
+
+### 已复现的断点
+
+- 安装扫描器已经能按真实分区和字符覆盖发现可替换 UI 字体，但最终设备对齐构建器仍主要从可信 XML 模板取槽位，只额外补一小组 HyperOS 物理文件名。于是存在“inventory 已扫描到，最终设备对齐 payload 根本没有消费”的真实断点。
+- 对齐缓存的身份只有字体内容、模板和字体源，没有包含 `device_font_inventory.json` / 动态分区清单；扫描结果变化后旧对齐缓存仍可能被认为可用。
+- 直接物理槽映射只保留 basename；如果扫描器发现 `/partition/fonts/subdir/File.ttf`，旧 overlay 会错误落到 `/partition/fonts/File.ttf`。
+- build / overlay / load verify 只有聚合计数，没有一个能回答“这个具体原厂槽为什么没换、换到哪里、重启后有没有真正可见”。
+
+### 改动
+
+- 最终设备对齐构建器改为 inventory-first 补槽：XML 模板仍负责已声明 family 的精确布局契约，inventory 中未被模板消费的已验证 TTF/OTF UI 槽会读取可信 stock lower/mirror 的真实轮廓/度量并加入 direct physical slot。
+- TTC/OTC 容器不会被单个生成 TTF 冒充覆盖；这类 inventory 项明确记录为 `preserved-collection`。italic/oblique 和无法取得可信原厂文件的槽也明确保留并给出原因，而不是静默消失。
+- payload manifest 保留 `inventoryPath / inventorySource / inventoryDisposition / directPhysical`，并附带 `inventorySupplement`，记录每个扫描槽是模板消费、直接补槽还是保留原厂。
+- overlay 生成 `slotResults`，逐项记录 route（xml / dynamic / physical / stock）、targetPath 和映射状态；物理槽保留 `fonts/` 下的完整相对路径，不再只用 basename。
+- 启动加载验证把 mount/hash 与 FontManager 证据回写到同一个 slot result，区分 `loaded`、`mount-visible`、`missing-mount`、`mismatch`、`preserved`。
+- 新增 `device_font_slot_trace.py`，把 install inventory、payload、overlay、boot verification 四层合成一张逐槽诊断表；App bridge 增加 `slot_trace`，运行时报告也会自动尝试生成 `device-font-slot-trace.json`。
+- 设备对齐缓存升级为 `alignment-cache-v6-inventory`，cache/pending/engine state 全部写入 inventoryKey；本机扫描清单变化时旧缓存不再晋升或复用。
+- 已安装设备对齐负载的快速复用也要求当前 inventoryKey 一致，防止 OTA/重扫后继续使用旧槽位集合。
+
+### 安全边界
+
+inventory 仍然只由现有唯一刷写扫描器产生，不新增品牌扫描器，也不把候选列表里的 Emoji、symbol、专用 script fallback 直接当 UI 槽。新增 direct physical 补槽只消费 canonical inventory 中已经通过原有 UI/字符覆盖筛选的 TTF/OTF；无法证明安全的容器和 stock 来源保持原厂。
+
 ## 仍需验证与后续修复
 
-- 后续命名器及 XML 字重声明是否仍改标、以及逐槽目标为什么未映射，需要继续从 inventory 生成逐槽结果和缺失原因。
+- 逐槽追踪能定位状态栏/锁屏/拨号/第三方 App 到底断在哪一层，但具体真机页面是否命中仍需用这一批生成的 trace 与设备日志验证。
+- 后续继续检查命名器及 XML 字重声明是否再次把真实字重改标。
 - 常规系统路径的旧 ROM dispatcher 仍含固定映射；需要继续把实际 inventory 的每个槽位贯通生成与缺失报告，而不是认为分区处理修好就等于字体全覆盖。
 - 系统全局粗细设置的真实渲染验证、多用户设置和恢复。
 - 状态栏/锁屏的真实失败日志、度量偏移/裁切、拨号及部分 App 的覆盖。
