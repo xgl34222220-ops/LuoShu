@@ -61,6 +61,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -80,8 +82,14 @@ private enum class CoverageFilter(val label: String) {
     ALL("全部"),
     REPLACED("已替换"),
     UNREPLACED("未替换"),
+    REMEDIABLE("可补齐"),
     PROTECTED("系统保护"),
     PENDING("待验证"),
+}
+
+private enum class CoverageGroup(val label: String) {
+    STATUS("按状态"),
+    PARTITION("按分区"),
 }
 
 private data class CoverageRouteInfo(
@@ -246,6 +254,7 @@ private fun CoverageSlot.matches(filter: CoverageFilter, query: String): Boolean
         CoverageFilter.ALL -> true
         CoverageFilter.REPLACED -> category == "replaced"
         CoverageFilter.UNREPLACED -> category == "issue"
+        CoverageFilter.REMEDIABLE -> safeToRetry
         CoverageFilter.PROTECTED -> category == "protected"
         CoverageFilter.PENDING -> category == "pending"
     }
@@ -321,6 +330,7 @@ internal fun FontCoverageRoute(
 ) {
     var state by remember { mutableStateOf(CoverageUiState()) }
     var filterName by rememberSaveable { mutableStateOf(CoverageFilter.ALL.name) }
+    var groupName by rememberSaveable { mutableStateOf(CoverageGroup.STATUS.name) }
     var query by rememberSaveable { mutableStateOf("") }
     var expandedPath by rememberSaveable { mutableStateOf("") }
     var confirmReapply by remember { mutableStateOf(false) }
@@ -361,8 +371,21 @@ internal fun FontCoverageRoute(
     LaunchedEffect(activeFont) { load() }
 
     val filter = runCatching { CoverageFilter.valueOf(filterName) }.getOrDefault(CoverageFilter.ALL)
+    val group = runCatching { CoverageGroup.valueOf(groupName) }.getOrDefault(CoverageGroup.STATUS)
     val visibleSlots = remember(state.data, filter, query) {
         state.data?.slots.orEmpty().filter { it.matches(filter, query) }
+    }
+    val groupedSlots = remember(visibleSlots, group) {
+        when (group) {
+            CoverageGroup.STATUS -> visibleSlots
+                .groupBy { slotStatusLabel(it) }
+                .toList()
+                .sortedBy { (label, _) -> statusSortKey(label) }
+            CoverageGroup.PARTITION -> visibleSlots
+                .groupBy { it.partition.ifBlank { "unknown" } }
+                .toList()
+                .sortedBy { (label, _) -> label.lowercase() }
+        }
     }
     val tokens = LocalMiuixTokens.current
     val data = state.data
@@ -410,19 +433,33 @@ internal fun FontCoverageRoute(
                     )
                 }
                 item(key = "filters") {
-                    Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        CoverageFilter.values().forEach { item ->
-                            FilterChip(
-                                selected = filter == item,
-                                onClick = { filterName = item.name },
-                                label = { Text(item.label) },
-                                leadingIcon = if (filter == item) {
-                                    { Icon(Icons.Rounded.FilterAlt, null, Modifier.size(16.dp)) }
-                                } else null,
-                            )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CoverageFilter.values().forEach { item ->
+                                FilterChip(
+                                    selected = filter == item,
+                                    onClick = { filterName = item.name },
+                                    label = { Text(item.label) },
+                                    leadingIcon = if (filter == item) {
+                                        { Icon(Icons.Rounded.FilterAlt, null, Modifier.size(16.dp)) }
+                                    } else null,
+                                )
+                            }
+                        }
+                        Row(
+                            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            CoverageGroup.values().forEach { item ->
+                                FilterChip(
+                                    selected = group == item,
+                                    onClick = { groupName = item.name },
+                                    label = { Text(item.label) },
+                                )
+                            }
                         }
                     }
                 }
@@ -434,14 +471,19 @@ internal fun FontCoverageRoute(
                 if (visibleSlots.isEmpty()) {
                     item(key = "empty") { CoverageEmptyState() }
                 } else {
-                    items(visibleSlots, key = { it.path }) { slot ->
-                        CoverageSlotCard(
-                            slot = slot,
-                            expanded = expandedPath == slot.path,
-                            onToggle = {
-                                expandedPath = if (expandedPath == slot.path) "" else slot.path
-                            },
-                        )
+                    groupedSlots.forEach { (label, slots) ->
+                        item(key = "group-" + group.name + "-" + label) {
+                            CoverageGroupHeader(label = label, count = slots.size)
+                        }
+                        items(slots, key = { it.path }) { slot ->
+                            CoverageSlotCard(
+                                slot = slot,
+                                expanded = expandedPath == slot.path,
+                                onToggle = {
+                                    expandedPath = if (expandedPath == slot.path) "" else slot.path
+                                },
+                            )
+                        }
                     }
                 }
             } else if (state.loading) {
@@ -762,6 +804,7 @@ private fun CoverageSlotCard(
     onToggle: () -> Unit,
 ) {
     val tokens = LocalMiuixTokens.current
+    val clipboard = LocalClipboardManager.current
     val accent = statusAccent(slot)
     Surface(
         modifier = Modifier
@@ -897,8 +940,69 @@ private fun CoverageSlotCard(
                             )
                         }
                     }
+                    TextButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(slotCopyText(slot)))
+                        },
+                        modifier = Modifier.align(Alignment.End),
+                    ) {
+                        Text("复制此项信息")
+                    }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CoverageGroupHeader(label: String, count: Int) {
+    val tokens = LocalMiuixTokens.current
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            color = tokens.textPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            count.toString(),
+            color = tokens.textSecondary,
+            fontSize = 11.sp,
+        )
+    }
+}
+
+private fun statusSortKey(label: String): Int = when (label) {
+    "未进入负载", "映射缺失", "未挂载", "文件不一致", "部分生效", "需要检查" -> 0
+    "等待重启验证", "已挂载待确认", "待确认" -> 1
+    "已替换" -> 2
+    "系统保护" -> 3
+    else -> 4
+}
+
+private fun slotCopyText(slot: CoverageSlot): String = buildString {
+    append("字体：").append(slot.name).append('\n')
+    append("路径：").append(slot.path).append('\n')
+    append("状态：").append(slotStatusLabel(slot)).append('\n')
+    append("原因：").append(reasonLabel(slot.reason)).append('\n')
+    append("分区：").append(slot.partition.ifBlank { "unknown" }).append('\n')
+    append("格式：").append(slot.format.ifBlank { "FONT" }).append('\n')
+    append("字重：").append(slot.weight).append('\n')
+    append("样式：").append(slot.style).append('\n')
+    if (slot.families.isNotEmpty()) {
+        append("字体族：").append(slot.families.joinToString(" · ")).append('\n')
+    }
+    if (slot.routes.isNotEmpty()) {
+        slot.routes.forEachIndexed { index, route ->
+            append("路由").append(index + 1).append("：")
+            append(route.route.ifBlank { "unknown" })
+            if (route.targetPath.isNotBlank()) append(" -> ").append(route.targetPath)
+            if (route.generatedFile.isNotBlank()) append(" [").append(route.generatedFile).append(']')
+            append('\n')
         }
     }
 }

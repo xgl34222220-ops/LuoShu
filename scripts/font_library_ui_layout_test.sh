@@ -48,6 +48,11 @@ grep -q '系统字体覆盖图' "$COVERAGE"
 grep -q '补齐所有可安全替换项' "$COVERAGE"
 grep -q '重新验证' "$COVERAGE"
 grep -q 'coverage_export' "$COVERAGE"
+grep -q 'REMEDIABLE("可补齐")' "$COVERAGE"
+grep -q 'CoverageGroup' "$COVERAGE"
+grep -q '按状态' "$COVERAGE"
+grep -q '按分区' "$COVERAGE"
+grep -q '复制此项信息' "$COVERAGE"
 
 # Font library: management tools are collapsed, the card itself opens details,
 # each card has one readable native preview, and detail viewing is a stable large preview sheet.
