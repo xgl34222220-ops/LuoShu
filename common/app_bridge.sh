@@ -334,7 +334,7 @@ coverage_busy() {
 coverage_mark_rebuild() {
     _font="$1"
     _pending="$MODDIR/config/font-payload-rebuild-pending.conf"
-    _tmp="${_pending}.tmp.$"
+    _tmp="${_pending}.tmp.$$"
     mkdir -p "$MODDIR/config" 2>/dev/null || return 1
     {
         printf 'state=pending\n'
@@ -403,7 +403,7 @@ coverage_verify() {
 coverage_export() {
     _out_dir="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/reports"
     _out="$_out_dir/LuoShu-font-coverage.json"
-    _tmp="${_out}.tmp.$"
+    _tmp="${_out}.tmp.$$"
     mkdir -p "$_out_dir" 2>/dev/null || {
         printf '{"status":"error","message":"无法创建覆盖报告目录"}\n'
         return 1
