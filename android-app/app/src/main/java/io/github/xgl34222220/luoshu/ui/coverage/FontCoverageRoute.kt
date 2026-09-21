@@ -391,8 +391,10 @@ internal fun FontCoverageRoute(
     }
     val tokens = LocalMiuixTokens.current
     val data = state.data
+    // Do not silently disable remediation from a possibly stale global task snapshot.
+    // The bridge reconciles the live worker state again inside coverage_reapply and
+    // returns an explicit error if a real task is still running.
     val canReapply = activeFont !in setOf("", "default") &&
-        !taskRunning &&
         !state.busy &&
         (data?.summary?.remediable ?: 0) > 0
     val needsCoverageBootstrap = data == null &&
@@ -528,7 +530,7 @@ internal fun FontCoverageRoute(
                             if (needsCoverageBootstrap) {
                                 FilledTonalButton(
                                     onClick = { confirmReapply = true },
-                                    enabled = !state.busy && !taskRunning,
+                                    enabled = !state.busy,
                                 ) {
                                     Icon(Icons.Rounded.AutoFixHigh, null, Modifier.size(18.dp))
                                     Spacer(Modifier.width(8.dp))
@@ -617,19 +619,28 @@ internal fun FontCoverageRoute(
                         state = state.copy(
                             busy = true,
                             error = "",
-                            message = "正在启动字体补齐任务…",
+                            message = "正在实时检查任务状态并启动补齐…",
                         )
                         scope.launch {
                             runCatching {
                                 runCoverageAction("coverage_reapply", 30_000L)
-                            }.onSuccess {
+                            }.onSuccess { json ->
+                                val taskId = json.optJSONObject("data")?.optString("task").orEmpty()
                                 state = state.copy(
                                     busy = false,
                                     error = "",
                                     message = if (data == null) {
-                                        "覆盖数据重建任务已启动。任务完成后完整重启，再回到这里重新验证。"
+                                        if (taskId.isBlank()) {
+                                            "覆盖数据重建任务已提交。"
+                                        } else {
+                                            "覆盖数据重建任务已提交 · " + taskId
+                                        }
                                     } else {
-                                        "补齐任务已启动。任务完成后完整重启，再回到这里重新验证。"
+                                        if (taskId.isBlank()) {
+                                            "补齐任务已提交，正在后台处理。"
+                                        } else {
+                                            "补齐任务已提交 · " + taskId
+                                        }
                                     },
                                 )
                                 onTaskStarted()
