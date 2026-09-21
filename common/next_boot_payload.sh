@@ -76,6 +76,9 @@ luoshu_next_boot_activate() {
     _lnba_latin=$(luoshu_next_boot_value "$_lnba_state" latin)
     _lnba_digit=$(luoshu_next_boot_value "$_lnba_state" digit)
     _lnba_digest=$(luoshu_next_boot_value "$_lnba_state" compositeHash)
+    _lnba_provenance_schema=$(luoshu_next_boot_value "$_lnba_state" provenanceSchema)
+    _lnba_proof_kind=$(luoshu_next_boot_value "$_lnba_state" proofKind)
+    _lnba_direct_proof=$(luoshu_next_boot_value "$_lnba_state" directProof)
     [ -n "$_lnba_font" ] || return 1
     [ -n "$_lnba_previous" ] || _lnba_previous=default
     [ "$_lnba_previous_legacy" = true ] || _lnba_previous_legacy=false
@@ -118,6 +121,9 @@ luoshu_next_boot_activate() {
         printf 'requestId=%s\n' "$_lnba_request"
         printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$_lnba_cjk" "$_lnba_latin" "$_lnba_digit"
         printf 'compositeHash=%s\n' "$_lnba_digest"
+        [ -z "$_lnba_provenance_schema" ] || printf 'provenanceSchema=%s\n' "$_lnba_provenance_schema"
+        [ -z "$_lnba_proof_kind" ] || printf 'proofKind=%s\n' "$_lnba_proof_kind"
+        [ -z "$_lnba_direct_proof" ] || printf 'directProof=%s\n' "$_lnba_direct_proof"
         printf 'previousFont=%s\n' "$_lnba_previous"
         printf 'previousLegacy=%s\n' "$_lnba_previous_legacy"
         printf 'retired=%s\n' "$_lnba_retired"

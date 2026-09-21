@@ -55,6 +55,7 @@ export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
 [ -f "$LEGACY_DIR/rom_adapters.sh" ] && . "$LEGACY_DIR/rom_adapters.sh"
 [ -f "$MODDIR/common/font_switch_lock.sh" ] && . "$MODDIR/common/font_switch_lock.sh"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
+[ -f "$MODDIR/common/font_provenance.sh" ] && . "$MODDIR/common/font_provenance.sh"
 [ -f "$LEGACY_DIR/payload_clone.sh" ] && . "$LEGACY_DIR/payload_clone.sh"
 HYPEROS_COMPAT="$LEGACY_DIR/hyperos_full_coverage.sh"
 [ -f "$HYPEROS_COMPAT" ] && . "$HYPEROS_COMPAT"
@@ -621,19 +622,30 @@ resolve_previous_state() {
 }
 
 prepare_next_payload() {
-    _font="$1"; _previous="$2"; _previous_legacy="$3"
-    _next_tmp="${NEXT_STATE}.tmp.$$"
+    _font="$1"; _previous="$2"; _previous_legacy="$3"; _source="${4:-}"
+    _next_tmp="${NEXT_STATE}.tmp.$"
+    _direct_proof=''
+    if [ "$_font" != default ] && [ "$_font" != mix ] && [ -f "$_source" ]; then
+        type luoshu_provenance_direct_proof >/dev/null 2>&1 || return 1
+        _direct_proof=$(luoshu_provenance_direct_proof "$_source" "$_font") || return 1
+        [ -n "$_direct_proof" ] || return 1
+    fi
     rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
     rm -f "$NEXT_STATE" 2>/dev/null || true
     if ! mv "$STAGE_PAYLOAD" "$NEXT_PAYLOAD" 2>/dev/null; then
         return 1
     fi
-    STAGE_PAYLOAD="$MODDIR/.luoshu-payload-stage.committed.$$"
+    STAGE_PAYLOAD="$MODDIR/.luoshu-payload-stage.committed.$"
     {
         printf 'state=prepared\n'
         printf 'font=%s\n' "$_font"
         printf 'previousFont=%s\n' "$_previous"
         printf 'previousLegacy=%s\n' "$_previous_legacy"
+        if [ -n "$_direct_proof" ]; then
+            printf 'provenanceSchema=font-provenance-v1\n'
+            printf 'proofKind=direct\n'
+            printf 'directProof=%s\n' "$_direct_proof"
+        fi
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$_next_tmp" 2>/dev/null || {
         rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
@@ -830,7 +842,7 @@ switch_font() {
         return 1
     fi
     progress 94 '正在提交下一启动字体负载'
-    prepare_next_payload "$_active_label" "$PREVIOUS_FONT" "$PREVIOUS_LEGACY" || {
+    prepare_next_payload "$_active_label" "$PREVIOUS_FONT" "$PREVIOUS_LEGACY" "$_source" || {
         safe_error '下一启动字体负载提交失败，当前启动字体未被改动'
         return 1
     }
