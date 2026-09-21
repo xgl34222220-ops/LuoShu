@@ -368,7 +368,9 @@ internal fun FontCoverageRoute(
         }
     }
 
-    LaunchedEffect(activeFont) { load() }
+    LaunchedEffect(activeFont, taskRunning, rebootRequired) {
+        if (!taskRunning) load()
+    }
 
     val filter = runCatching { CoverageFilter.valueOf(filterName) }.getOrDefault(CoverageFilter.ALL)
     val group = runCatching { CoverageGroup.valueOf(groupName) }.getOrDefault(CoverageGroup.STATUS)
