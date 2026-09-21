@@ -114,13 +114,8 @@ ok grep -qx "$CACHE/overlay" "$INSTALLS"
 ok grep -q '^state=installed$' "$MODULE/config/device-font-engine.conf"
 ok grep -q '^templateKey=trusted-key$' "$MODULE/config/device-font-engine.conf"
 ok grep -q "^inventoryKey=$FIRST_INVENTORY_KEY$" "$MODULE/config/device-font-engine.conf"
-ok grep -q '^planRevision=4 "$MODULE/config/device-font-engine.conf"
-ok grep -q '^slotTraceRevision=1$' "$MODULE/config/device-font-engine.conf"
-no test -e "$PENDING"
-
-sh -n "$ROOT/common/device_font_cache.sh"
-echo 'Device font cache tests passed.'
- "$MODULE/config/device-font-engine.conf"
+ok grep -q '^planRevision=4$' "$MODULE/config/device-font-engine.conf"
+ok grep -q '^weightTruthRevision=1$' "$MODULE/config/device-font-engine.conf"
 ok grep -q '^slotTraceRevision=1$' "$MODULE/config/device-font-engine.conf"
 no test -e "$PENDING"
 

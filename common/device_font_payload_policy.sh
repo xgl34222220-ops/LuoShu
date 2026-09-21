@@ -194,8 +194,30 @@ _device_font_fast_map() {
     return 0
 }
 
-# Override the ROM dispatcher after all OEM adapters have been sourced. Quick mode never enters
-# compact normalization, variable-font instancing or per-weight generation.
+_device_font_stage_originos_critical() {
+    type _luoshu_detect_originos >/dev/null 2>&1 || return 0
+    _luoshu_detect_originos || return 0
+    type _lfrp_alias_originos_critical >/dev/null 2>&1 || return 0
+    _dfso_module="$(_device_font_policy_module)"
+    if type _lfrp_payload_font_dir >/dev/null 2>&1; then
+        _dfso_store="$(_lfrp_payload_font_dir system)"
+    else
+        _dfso_store="$_dfso_module/system/fonts"
+    fi
+    _dfso_anchor="$_dfso_store/.luoshu-font-store/regular.font"
+    [ -s "$_dfso_anchor" ] || return 0
+    _dfso_count=0
+    for _dfso_file in VivoFont.ttf DroidSansFallbackBBK.ttf HYQiHei-50.ttf DroidSansFallbackMonster.ttf DroidSansFallbackZW.ttf; do
+        _dfso_added=$(_lfrp_alias_originos_critical "$_dfso_anchor" "$_dfso_file" 2>/dev/null)
+        case "$_dfso_added" in ''|*[!0-9]*) _dfso_added=0 ;; esac
+        _dfso_count=$((_dfso_count + _dfso_added))
+    done
+    [ "$_dfso_count" -eq 0 ] || _device_font_policy_log "OriginOS 旧 UI/拨号物理槽已补齐：$_dfso_count"
+    return 0
+}
+
+# Override the ROM dispatcher after all OEM adapters have been sourced. Quick mode stages
+# real source anchors only; the final stock-aligned builder still runs exactly once later.
 apply_font_by_rom() {
     _dfabr_src="$1"
     _dfabr_dest="$2"
@@ -218,6 +240,7 @@ apply_font_by_rom() {
             fi
         fi
         [ "$_dfabr_inventory_mapped" -eq 1 ] || _device_font_fast_map "$_dfabr_src" "$_dfabr_family" || return 1
+        _device_font_stage_originos_critical || true
         # This function only stages the source anchors. The outer switch transaction calls
         # font_config_enable_for_payload exactly once after every ROM adapter has finished.
         # Calling it here as well made a single tap enter the full device builder twice.
@@ -226,6 +249,7 @@ apply_font_by_rom() {
 
     if type _copy_as_inventory >/dev/null 2>&1 && \
        _copy_as_inventory "$_dfabr_src" "$_dfabr_dest" "$_dfabr_mode" "$_dfabr_family"; then
+        _device_font_stage_originos_critical || true
         _device_font_policy_log "已按设备清单完成真实槽位映射：$_dfabr_family mode=$_dfabr_mode"
         return 0
     fi
@@ -237,6 +261,9 @@ apply_font_by_rom() {
     else
         copy_as_generic "$_dfabr_src" "$_dfabr_dest" "$_dfabr_mode"
     fi
+    _dfabr_rc=$?
+    [ "$_dfabr_rc" -eq 0 ] && _device_font_stage_originos_critical || true
+    return "$_dfabr_rc"
 }
 
 # Keep the safety contract, but use stat for font aliases instead of reading the same inode dozens

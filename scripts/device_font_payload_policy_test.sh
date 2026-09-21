@@ -90,6 +90,19 @@ ok grep -qx SameFont "$TMP/schedules"
 ok grep -qx SameFont "$TMP/builds"
 ok grep -qx SameFont "$TMP/activations"
 
+CASE='OriginOS final policy keeps legacy dialer slots'
+mkdir -p "$MODULE/system/fonts/.luoshu-font-store"
+printf 'origin-anchor\n' > "$MODULE/system/fonts/.luoshu-font-store/regular.font"
+_luoshu_detect_originos() { return 0; }
+_lfrp_payload_font_dir() { printf '%s/system/fonts\n' "$MODULE"; }
+_lfrp_alias_originos_critical() {
+    printf '%s\n' "$2" >> "$TMP/origin-critical"
+    printf '1\n'
+}
+_device_font_stage_originos_critical
+ok grep -qx VivoFont.ttf "$TMP/origin-critical"
+ok grep -qx DroidSansFallbackBBK.ttf "$TMP/origin-critical"
+
 # Without a trusted stock template, generic ROMs refuse an uncertain per-slot payload.
 # Never instruct the user to restore the system/default font as a prerequisite.
 unset LUOSHU_TRUSTED_TEMPLATE_KEY
