@@ -444,7 +444,8 @@ start_mix() {
     [ -n "$_cjk_axes" ] || _cjk_axes='wght=400'
     [ -n "$_latin_axes" ] || _latin_axes='wght=400'
     [ -n "$_digit_axes" ] || _digit_axes='wght=400'
-    if type luoshu_mix_request_matches_active >/dev/null 2>&1 && \
+    if [ "${LUOSHU_FORCE_REBUILD:-0}" != 1 ] && \
+       type luoshu_mix_request_matches_active >/dev/null 2>&1 && \
        luoshu_mix_request_matches_active "$_cjk" "$_latin" "$_digit" \
            "$_cjk_axes" "$_latin_axes" "$_digit_axes" fixed fixed fixed; then
         _request="axes-reuse-$(date +%s)-$$"
