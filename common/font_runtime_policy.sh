@@ -366,13 +366,16 @@ _lfrp_prepare_family_anchors() {
     _lfrp_pfa_src="$1"
     _lfrp_pfa_family="$2"
     _lfrp_pfa_store="$3"
+
+    # The store belongs to the selected family, not the device. Reusing an old
+    # role anchor after switching from a multiweight family to a single-weight
+    # family would silently feed the previous font's Bold/Medium into the new
+    # payload. Start each foreground staging pass from an empty role store.
+    rm -rf "$_lfrp_pfa_store/.luoshu-font-store" 2>/dev/null || true
     mkdir -p "$_lfrp_pfa_store/.luoshu-font-store" 2>/dev/null || return 1
 
     _lfrp_pfa_regular=$(_lfrp_regular_source "$_lfrp_pfa_src" "$_lfrp_pfa_family") || return 1
-    _lfrp_pfa_regular_anchor="$_lfrp_pfa_store/.luoshu-font-store/regular.font"
-    if [ ! -s "$_lfrp_pfa_regular_anchor" ]; then
-        _lfrp_pfa_regular_anchor=$(_font_anchor "$_lfrp_pfa_regular" "$_lfrp_pfa_store" regular) || return 1
-    fi
+    _lfrp_pfa_regular_anchor=$(_font_anchor "$_lfrp_pfa_regular" "$_lfrp_pfa_store" regular) || return 1
 
     for _lfrp_pfa_pair in \
         '100:thin' '200:extralight' '300:light' '500:medium' \

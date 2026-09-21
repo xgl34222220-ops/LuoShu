@@ -93,6 +93,10 @@ _dfpr_anchor_lines() {
         _dfpr_path="$_dfpr_store/${_dfpr_name}.font"
         [ -s "$_dfpr_path" ] && printf '%s|%s\n' "$_dfpr_weight" "$_dfpr_path"
     done
+    # The final optional weight is commonly absent. Do not leak that probe's
+    # false status to callers using this function in command substitution under
+    # errexit; an emitted sparse list is still a successful enumeration.
+    return 0
 }
 
 _dfpr_nearest_anchor() {

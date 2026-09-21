@@ -35,6 +35,7 @@ get_exact_weight_file() {
   case "$1:$2" in
     Demo:regular) printf '%s\n' "$USER_FONTS_DIR/Demo-Regular.ttf" ;;
     Demo:bold) printf '%s\n' "$USER_FONTS_DIR/Demo-Bold.ttf" ;;
+    Solo:regular) printf '%s\n' "$USER_FONTS_DIR/Solo-Regular.ttf" ;;
     *) return 1 ;;
   esac
 }
@@ -62,12 +63,13 @@ _lfrp_visible_font_dirs() {
   esac
 }
 
-python3 - "$TMP/anchor.ttf" "$USER_FONTS_DIR/Demo-Regular.ttf" "$USER_FONTS_DIR/Demo-Bold.ttf" <<'PY'
+python3 - "$TMP/anchor.ttf" "$USER_FONTS_DIR/Demo-Regular.ttf" "$USER_FONTS_DIR/Demo-Bold.ttf" "$USER_FONTS_DIR/Solo-Regular.ttf" <<'PY'
 from pathlib import Path
 import sys
 Path(sys.argv[1]).write_bytes((b"LuoShu-runtime-policy" * 512) + b"END")
 Path(sys.argv[2]).write_bytes((b"regular-outline" * 900) + b"REG")
 Path(sys.argv[3]).write_bytes((b"bold-outline" * 900) + b"BOLD")
+Path(sys.argv[4]).write_bytes((b"solo-regular-outline" * 900) + b"SOLO")
 PY
 cp "$TMP/anchor.ttf" "$TMP/visible/product/fonts/Roboto-Regular.ttf"
 
@@ -124,6 +126,14 @@ REGULAR=$(_lfrp_prepare_family_anchors "$USER_FONTS_DIR/Demo-Regular.ttf" Demo \
 ok test -s "$REGULAR"
 ok test -s "$MODDIR/.luoshu-payload/system/fonts/.luoshu-font-store/bold.font"
 no test -e "$MODDIR/.luoshu-payload/system/fonts/.luoshu-font-store/medium.font"
+
+# Switching to a single-weight family must not retain Demo's old Bold anchor.
+_lfrp_prepare_family_anchors "$USER_FONTS_DIR/Solo-Regular.ttf" Solo   "$MODDIR/.luoshu-payload/system/fonts" >/dev/null
+no test -e "$MODDIR/.luoshu-payload/system/fonts/.luoshu-font-store/bold.font"
+ok cmp "$MODDIR/.luoshu-payload/system/fonts/.luoshu-font-store/regular.font"   "$USER_FONTS_DIR/Solo-Regular.ttf"
+# Rebuild Demo anchors for the remaining mapping assertions.
+_lfrp_prepare_family_anchors "$USER_FONTS_DIR/Demo-Regular.ttf" Demo   "$MODDIR/.luoshu-payload/system/fonts" >/dev/null
+
 ok test "$(_lfrp_target_weight Roboto-Bold.ttf)" -eq 700
 ok test "$(_lfrp_target_weight 500.ttf)" -eq 500
 
