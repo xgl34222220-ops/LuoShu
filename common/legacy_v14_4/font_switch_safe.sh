@@ -34,6 +34,7 @@ ACTIVE_FONT_CONF="$CONFIG_DIR/active_font.conf"
 LEGACY_MODE_CONF="$CONFIG_DIR/font_runtime_legacy_v14_4.conf"
 TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
+COVERAGE_REMEDIATE_HELPER="$MODDIR/common/coverage_payload_remediate.sh"
 SWITCH_LOCK="$MODDIR/.font_switch.lock"
 PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
 SWITCH_CACHE_ROOT="$CONFIG_DIR/safe-switch-cache"
@@ -829,6 +830,18 @@ switch_font() {
                     safe_error 'ColorOS 字体度量处理失败，请查看字体切换日志'
                     return 1
                 }
+            fi
+        fi
+        if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
+            progress 82 '正在按本机扫描清单补齐安全字体槽位'
+            [ -f "$COVERAGE_REMEDIATE_HELPER" ] || {
+                safe_error '字体覆盖补齐组件缺失，当前启动字体未被改动'
+                return 1
+            }
+            if ! LUOSHU_REAL_MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" \
+                sh "$COVERAGE_REMEDIATE_HELPER" "$STAGE_PAYLOAD" direct "$_font" >> "$LOG_FILE" 2>&1; then
+                safe_error '按本机扫描清单补齐字体槽位失败，当前启动字体未被改动'
+                return 1
             fi
         fi
         progress 86 '正在校验下一启动字体负载'
