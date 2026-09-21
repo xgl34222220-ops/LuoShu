@@ -167,7 +167,7 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         [ -n "$_inventory_rom" ] || _inventory_rom="generic"
         ui_print "✓ 系统/OEM 独立字体路径普查：$_inventory_font_paths 个（嵌套/非标准路径 $_inventory_nested_paths 个）"
         ui_print "✓ 安装阶段可参与 UI 分类的候选：$_inventory_candidates 个"
-        ui_print "✓ 原厂可信字体文件：$_inventory_files 个（ROM：$_inventory_rom）"
+        ui_print "✓ 原厂字体文件（可信视图）：$_inventory_files 个（ROM：$_inventory_rom）"
         ui_print "✓ 最终可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / 通用探测 $_inventory_generic / OEM 规则 $_inventory_heuristic / 物理补充 $_inventory_physical）"
         [ "$_inventory_dynamic" -eq 0 ] 2>/dev/null || ui_print "✓ 自动发现额外 OEM 字体分区：$_inventory_dynamic 个"
         [ "$_inventory_nested_roots" -eq 0 ] 2>/dev/null || ui_print "✓ 自动发现嵌套 OEM 字体根：$_inventory_nested_roots 个"
