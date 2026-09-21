@@ -1177,10 +1177,23 @@ private fun CoverageActionBar(
                 modifier = Modifier.weight(1.25f).heightIn(min = 48.dp),
                 shape = RoundedCornerShape(19.dp),
             ) {
-                Icon(Icons.Rounded.AutoFixHigh, null, Modifier.size(19.dp))
+                if (busy) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Icon(Icons.Rounded.AutoFixHigh, null, Modifier.size(19.dp))
+                }
                 Spacer(Modifier.width(6.dp))
                 Text(
-                    if (remediable > 0) "补齐 " + remediable else "无需补齐",
+                    when {
+                        busy -> "正在启动…"
+                        taskRunning -> "检查任务状态"
+                        remediable > 0 -> "补齐 " + remediable
+                        else -> "无需补齐"
+                    },
                     maxLines = 1,
                 )
             }
