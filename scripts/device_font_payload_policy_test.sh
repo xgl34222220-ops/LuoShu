@@ -70,6 +70,10 @@ ok grep -qx SameFont "$TMP/builds"
 ok grep -qx SameFont "$TMP/activations"
 
 # Same template/font but a different scanner inventory must rebuild the aligned payload.
+# The previous fixture created a ready marker for the old identity; the real cache
+# key includes inventoryKey, so do not let this simplified font-name-only stub
+# pretend that stale marker is a hit for the new inventory.
+rm -f "$TMP/cache-ready-SameFont"
 : > "$TMP/schedules"
 : > "$TMP/builds"
 : > "$TMP/activations"
