@@ -14,7 +14,7 @@ cat > "$MOD/common/font_switch_task.sh" <<EOF
 case "\${1:-}" in
   reconcile) exit 0 ;;
   start)
-    printf 'switch-start|%s|force=%s\n' "\${2:-}" "\${LUOSHU_FORCE_REBUILD:-0}" >> "$CALLS"
+    printf 'switch-start|%s|force=%s|remediate=%s\n' "\${2:-}" "\${LUOSHU_FORCE_REBUILD:-0}" "\${LUOSHU_COVERAGE_REMEDIATE:-0}" >> "$CALLS"
     printf '{"status":"ok","data":{"task":"coverage-direct","font":"%s"}}\n' "\${2:-}"
     exit 0
     ;;
@@ -27,7 +27,7 @@ cat > "$MOD/common/font_mix_controller.sh" <<EOF
 case "\${1:-}" in
   reconcile) exit 0 ;;
   start)
-    printf 'mix-start|%s|%s|%s|%s|%s|%s|force=%s\n' "\${2:-}" "\${3:-}" "\${4:-}" "\${5:-}" "\${6:-}" "\${7:-}" "\${LUOSHU_FORCE_REBUILD:-0}" >> "$CALLS"
+    printf 'mix-start|%s|%s|%s|%s|%s|%s|force=%s|remediate=%s\n' "\${2:-}" "\${3:-}" "\${4:-}" "\${5:-}" "\${6:-}" "\${7:-}" "\${LUOSHU_FORCE_REBUILD:-0}" "\${LUOSHU_COVERAGE_REMEDIATE:-0}" >> "$CALLS"
     printf '{"status":"ok","data":{"task":"coverage-mix"}}\n'
     exit 0
     ;;
@@ -44,7 +44,7 @@ run_bridge() {
 printf 'Demo\n' > "$MOD/config/active_font.conf"
 OUT=$(run_bridge coverage_reapply)
 printf '%s\n' "$OUT" | grep -q '"status":"ok"'
-grep -qx 'switch-start|Demo|force=1' "$CALLS"
+grep -qx 'switch-start|Demo|force=1|remediate=1' "$CALLS"
 grep -qx 'state=pending' "$MOD/config/font-payload-rebuild-pending.conf"
 grep -qx 'font=Demo' "$MOD/config/font-payload-rebuild-pending.conf"
 grep -qx 'reason=coverage-remediate' "$MOD/config/font-payload-rebuild-pending.conf"
@@ -88,7 +88,7 @@ EOF
 rm -f "$MOD/config/font-payload-rebuild-pending.conf"
 OUT=$(run_bridge coverage_reapply)
 printf '%s\n' "$OUT" | grep -q '"status":"ok"'
-grep -qx 'mix-start|CJK Demo|Latin Demo|Digit Demo|wght=500,wdth=95|wght=600|wght=700|force=1' "$CALLS"
+grep -qx 'mix-start|CJK Demo|Latin Demo|Digit Demo|wght=500,wdth=95|wght=600|wght=700|force=1|remediate=1' "$CALLS"
 grep -qx 'font=mix' "$MOD/config/font-payload-rebuild-pending.conf"
 grep -qx 'reason=coverage-remediate' "$MOD/config/font-payload-rebuild-pending.conf"
 
@@ -148,20 +148,22 @@ rm -f "$MOD/config/font-payload-rebuild-pending.conf"
 # Current production runtime is physical-safe: coverage must work from the
 # already-activated .luoshu-payload even when no device-font v2 manifest exists.
 PHYS="$TMP/physical"
-mkdir -p "$PHYS/system/fonts" "$PHYS/product/fonts" "$PHYS/vendor/fonts"
+mkdir -p "$PHYS/system/fonts" "$PHYS/product/fonts" "$PHYS/product/vivo/fonts" "$PHYS/vendor/fonts"
 printf 'font-a\n' > "$PHYS/system/fonts/A.ttf"
+printf 'font-vivo\n' > "$PHYS/product/vivo/fonts/Vivo.ttf"
 printf 'font-d\n' > "$PHYS/vendor/fonts/D.ttf"
+printf '/system/fonts/E.ttf\tmissing-real-source-weight-700\n' > "$PHYS/.luoshu-coverage-preserved.tsv"
 cat > "$TMP/self-mount.conf" <<'EOF'
 state=degraded
 backend=self-overlay-bind
-mounted=system/fonts,product/fonts
-failed=vendor/fonts
+mounted=system/fonts:overlay,product/fonts:overlay,product/vivo/fonts:overlay
+failed=vendor/fonts-bind-incomplete
 EOF
 cat > "$TMP/physical-inventory.json" <<'EOF'
-{"schema":"device-font-inventory-v1","buildKey":"physical-fixture","romKind":"hyperos","slots":{"/system/fonts/A.ttf":{"slotName":"A.ttf","partition":"system","source":"verified-scan","format":"TTF","weight":400,"style":"normal","families":["sans-serif"]},"/system/fonts/B.ttf":{"slotName":"B.ttf","partition":"system","source":"verified-scan","format":"TTF","weight":400,"style":"normal","families":[]},"/product/fonts/C.ttc":{"slotName":"C.ttc","partition":"product","source":"verified-scan","format":"TTC","weight":400,"style":"normal","families":[]},"/vendor/fonts/D.ttf":{"slotName":"D.ttf","partition":"vendor","source":"verified-scan","format":"TTF","weight":400,"style":"normal","families":[]}}}
+{"schema":"device-font-inventory-v1","buildKey":"physical-fixture","romKind":"hyperos","discoveredFontRoots":[{"partition":"product","relative":"vivo/fonts","logical":"/product/vivo/fonts","mountKey":"product-nested-fixture"}],"slots":{"/system/fonts/A.ttf":{"slotName":"A.ttf","partition":"system","source":"verified-scan","format":"TTF","weight":400,"style":"normal","families":["sans-serif"]},"/system/fonts/B.ttf":{"slotName":"B.ttf","partition":"system","source":"verified-scan","format":"TTF","weight":400,"style":"normal","families":[]},"/product/fonts/C.ttc":{"slotName":"C.ttc","partition":"product","source":"verified-scan","format":"TTC","weight":400,"style":"normal","families":[]},"/vendor/fonts/D.ttf":{"slotName":"D.ttf","partition":"vendor","source":"verified-scan","format":"TTF","weight":400,"style":"normal","families":[]},"/product/vivo/fonts/Vivo.ttf":{"slotName":"Vivo.ttf","partition":"product","source":"verified-scan","format":"TTF","weight":400,"style":"normal","families":[]},"/system/fonts/E.ttf":{"slotName":"E.ttf","partition":"system","source":"verified-scan","format":"TTF","weight":700,"style":"normal","families":[]}}}
 EOF
 cat > "$TMP/physical-candidates.json" <<'EOF'
-{"schema":"device-font-candidates-v1","paths":[{"path":"/system/fonts/A.ttf","partition":"system","slotName":"A.ttf","candidate":true,"reason":"visible-font-path"},{"path":"/system/fonts/B.ttf","partition":"system","slotName":"B.ttf","candidate":true,"reason":"visible-font-path"},{"path":"/product/fonts/C.ttc","partition":"product","slotName":"C.ttc","candidate":true,"reason":"visible-font-path"},{"path":"/vendor/fonts/D.ttf","partition":"vendor","slotName":"D.ttf","candidate":true,"reason":"visible-font-path"}]}
+{"schema":"device-font-candidates-v1","paths":[{"path":"/system/fonts/A.ttf","partition":"system","slotName":"A.ttf","candidate":true,"reason":"visible-font-path"},{"path":"/system/fonts/B.ttf","partition":"system","slotName":"B.ttf","candidate":true,"reason":"visible-font-path"},{"path":"/product/fonts/C.ttc","partition":"product","slotName":"C.ttc","candidate":true,"reason":"visible-font-path"},{"path":"/vendor/fonts/D.ttf","partition":"vendor","slotName":"D.ttf","candidate":true,"reason":"visible-font-path"},{"path":"/product/vivo/fonts/Vivo.ttf","partition":"product","slotName":"Vivo.ttf","candidate":true,"reason":"visible-font-path"},{"path":"/system/fonts/E.ttf","partition":"system","slotName":"E.ttf","candidate":true,"reason":"visible-font-path"}]}
 EOF
 python3 "$ROOT/common/device_font_slot_trace.py" \
     --inventory "$TMP/physical-inventory.json" \
@@ -181,9 +183,11 @@ assert states["/system/fonts/A.ttf"] == ("loaded","replaced",False), states
 assert states["/system/fonts/B.ttf"] == ("mapping-missing","issue",True), states
 assert states["/product/fonts/C.ttc"] == ("preserved","protected",False), states
 assert states["/vendor/fonts/D.ttf"] == ("missing-mount","issue",True), states
-assert data["summary"]["replaced"] == 1, data["summary"]
+assert states["/product/vivo/fonts/Vivo.ttf"] == ("loaded","replaced",False), states
+assert states["/system/fonts/E.ttf"] == ("preserved","protected",False), states
+assert data["summary"]["replaced"] == 2, data["summary"]
 assert data["summary"]["issues"] == 2, data["summary"]
-assert data["summary"]["protected"] == 1, data["summary"]
+assert data["summary"]["protected"] == 2, data["summary"]
 PY
 grep -q -- '--physical-root "$MODDIR/.luoshu-payload"' "$ROOT/common/app_bridge.sh"
 grep -q 'traceSource.*physical-safe' "$ROOT/common/device_font_slot_trace.py"
