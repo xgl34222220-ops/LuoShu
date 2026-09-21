@@ -20,7 +20,7 @@ from fontTools.ttLib import TTFont
 from fontTools.ttLib.scaleUpem import scale_upem
 from fontTools.varLib.instancer import instantiateVariableFont
 
-SCHEMA = "device-font-slot-build-v2"
+SCHEMA = "device-font-slot-build-v3"
 PLAN_SCHEMA = "device-font-slot-plan-v2"
 DROP_AFTER_OUTLINE_CHANGE = ("DSIG", "LTSH", "VDMX", "hdmx")
 PUNCTUATION_FALLBACK = {
@@ -45,6 +45,22 @@ def finite(value: Any) -> float | None:
 def rounded(value: Any, fallback: int = 0) -> int:
     parsed = finite(value)
     return int(round(parsed)) if parsed is not None else fallback
+
+
+def outline_weight(font: TTFont, fallback: int = 400) -> int:
+    if "OS/2" not in font:
+        return fallback
+    value = int(getattr(font["OS/2"], "usWeightClass", fallback) or fallback)
+    return max(1, min(1000, value))
+
+
+def weight_label(weight: int) -> str:
+    choices = (
+        (100, "Thin"), (200, "ExtraLight"), (300, "Light"), (400, "Regular"),
+        (500, "Medium"), (600, "SemiBold"), (700, "Bold"), (800, "ExtraBold"),
+        (900, "Black"),
+    )
+    return min(choices, key=lambda item: abs(item[0] - weight))[1]
 
 
 def is_cjk(codepoint: int) -> bool:
@@ -323,25 +339,32 @@ def apply_line_contract(font: TTFont, slot: dict[str, Any]) -> None:
         "usWinDescent": "winDescent",
         "sCapHeight": "capHeight",
         "sxHeight": "xHeight",
-        "usWeightClass": "weightClass",
-        "usWidthClass": "widthClass",
-        "fsSelection": "fsSelection",
     }
     for field, key in field_map.items():
         value = contract.get(key)
         if value is not None and hasattr(os2, field):
             setattr(os2, field, rounded(value, int(getattr(os2, field))))
 
+    # Weight/width describe the selected outlines, not the ROM slot that consumes
+    # them. Copying a stock 700 usWeightClass onto a static Regular outline made
+    # Android believe the face was genuinely bold and suppressed normal weight
+    # synthesis. Preserve the source outline identity. Only USE_TYPO_METRICS is a
+    # line-layout contract and is safe to inherit from the stock slot.
+    stock_selection = rounded(contract.get("fsSelection"), int(os2.fsSelection))
+    use_typo_metrics = 1 << 7
+    os2.fsSelection = (int(os2.fsSelection) & ~use_typo_metrics) | (stock_selection & use_typo_metrics)
 
-def set_slot_identity(font: TTFont, slot: dict[str, Any]) -> None:
+
+def set_slot_identity(font: TTFont, slot: dict[str, Any], actual_weight: int) -> None:
     if "name" not in font:
         return
     family = str(slot.get("familyNormalized") or slot.get("family") or "luoshu-slot")
-    weight = rounded(slot.get("weight"), 400)
-    style = "Italic" if str(slot.get("style", "normal")).lower() == "italic" else "Regular"
+    italic = str(slot.get("style", "normal")).lower() == "italic"
+    role = weight_label(actual_weight)
+    style = f"{role} Italic" if italic and role != "Regular" else ("Italic" if italic else role)
     safe = "".join(char if char.isalnum() else "-" for char in family).strip("-") or "LuoShuSlot"
-    unique_family = f"LuoShuSlot-{safe}-{weight}"
-    full_name = f"{unique_family} {style}"
+    unique_family = f"LuoShuSlot-{safe}-{actual_weight}"
+    full_name = unique_family if style == "Regular" else f"{unique_family} {style}"
     postscript = f"{unique_family}-{style}".replace(" ", "")[:63]
     table = font["name"]
     table.setName(unique_family, 1, 3, 1, 0x409)
@@ -352,7 +375,7 @@ def set_slot_identity(font: TTFont, slot: dict[str, Any]) -> None:
     table.setName(style, 17, 3, 1, 0x409)
 
 
-def validate_saved(output: Path, slot: dict[str, Any]) -> dict[str, Any]:
+def validate_saved(output: Path, slot: dict[str, Any], expected_outline_weight: int) -> dict[str, Any]:
     font = TTFont(str(output), lazy=True, recalcTimestamp=False)
     try:
         contract = slot["lineContract"]
@@ -361,10 +384,16 @@ def validate_saved(output: Path, slot: dict[str, Any]) -> dict[str, Any]:
             "hheaAscent": int(font["hhea"].ascent),
             "hheaDescent": int(font["hhea"].descent),
             "hheaLineGap": int(font["hhea"].lineGap),
+            "outlineWeight": outline_weight(font),
         }
-        for key, value in checks.items():
+        for key in ("unitsPerEm", "hheaAscent", "hheaDescent", "hheaLineGap"):
+            value = checks[key]
             if value != rounded(contract.get(key), value):
                 raise BuildError(f"保存后的 {key} 未保持原厂槽位值")
+        if checks["outlineWeight"] != expected_outline_weight:
+            raise BuildError(
+                f"保存后的真实字重发生漂移：expected={expected_outline_weight} actual={checks['outlineWeight']}"
+            )
         return checks
     finally:
         font.close()
@@ -377,13 +406,14 @@ def build_slot(source: Path, source_index: int, slot: dict[str, Any], output: Pa
         raise BuildError("受保护槽位禁止生成")
     weight = rounded(slot.get("weight"), 400)
     font = read_source(source, source_index, weight)
+    actual_weight = outline_weight(font, weight)
     temporary = output.with_name(f".{output.name}.{os.getpid()}.tmp")
     try:
         apply_line_contract(font, slot)
         transform_report = apply_outline_transforms(font, slot)
         if transform_report["glyphs"] <= 0:
             raise BuildError("没有任何脚本字形通过安全对齐")
-        set_slot_identity(font, slot)
+        set_slot_identity(font, slot, actual_weight)
         for tag in DROP_AFTER_OUTLINE_CHANGE:
             if tag in font:
                 del font[tag]
@@ -396,13 +426,16 @@ def build_slot(source: Path, source_index: int, slot: dict[str, Any], output: Pa
     finally:
         font.close()
         temporary.unlink(missing_ok=True)
-    checks = validate_saved(output, slot)
+    checks = validate_saved(output, slot, actual_weight)
     return {
         "schema": SCHEMA,
         "status": "ok",
         "output": str(output),
         "family": slot.get("family", ""),
         "weight": weight,
+        "targetWeight": weight,
+        "outlineWeight": actual_weight,
+        "weightMatched": abs(actual_weight - weight) <= 50,
         "style": slot.get("style", "normal"),
         "roles": slot.get("roles", []),
         "transformed": transform_report,

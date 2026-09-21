@@ -441,11 +441,38 @@ font_weight_normalize_int() {
 }
 
 font_weight_get_system() {
-    if command -v settings >/dev/null 2>&1; then
-        font_weight_normalize_int "$(settings get secure font_weight_adjustment 2>/dev/null)"
-    else
+    if ! command -v settings >/dev/null 2>&1; then
         printf '0\n'
+        return 0
     fi
+    _fwgs_value=$(settings --user current get secure font_weight_adjustment 2>/dev/null)
+    _fwgs_rc=$?
+    if [ "$_fwgs_rc" -ne 0 ]; then
+        _fwgs_value=$(settings get secure font_weight_adjustment 2>/dev/null)
+        FONT_WEIGHT_SCOPE=legacy-default-user
+    else
+        FONT_WEIGHT_SCOPE=current-user
+    fi
+    export FONT_WEIGHT_SCOPE
+    font_weight_normalize_int "$_fwgs_value"
+}
+
+font_weight_put_system() {
+    _fwps_value="$1"
+    command -v settings >/dev/null 2>&1 || return 5
+    if settings --user current put secure font_weight_adjustment "$_fwps_value" >/dev/null 2>&1; then
+        FONT_WEIGHT_SCOPE=current-user
+        _fwps_read=$(settings --user current get secure font_weight_adjustment 2>/dev/null)
+    elif settings put secure font_weight_adjustment "$_fwps_value" >/dev/null 2>&1; then
+        FONT_WEIGHT_SCOPE=legacy-default-user
+        _fwps_read=$(settings get secure font_weight_adjustment 2>/dev/null)
+    else
+        return 4
+    fi
+    export FONT_WEIGHT_SCOPE
+    _fwps_read=$(font_weight_normalize_int "$_fwps_read")
+    [ "$_fwps_read" = "$_fwps_value" ] || return 6
+    return 0
 }
 
 font_weight_get_saved() {
@@ -480,16 +507,20 @@ font_weight_set() {
     command -v settings >/dev/null 2>&1 || return 5
     _adjustment=$((_weight - 400))
     font_weight_backup_original || return 1
-    settings put secure font_weight_adjustment "$_adjustment" >/dev/null 2>&1 || return 4
+    font_weight_put_system "$_adjustment" || return $?
     {
         printf 'weight=%s\n' "$_weight"
         printf 'adjustment=%s\n' "$_adjustment"
+        printf 'scope=%s\n' "${FONT_WEIGHT_SCOPE:-current-user}"
         printf 'time=%s\n' "$(date +%s)"
     } > "$FONT_WEIGHT_CONF" 2>/dev/null || return 1
     chmod 0644 "$FONT_WEIGHT_CONF" 2>/dev/null || true
     rm -f "$FONT_WEIGHT_REBOOT_REQUIRED" 2>/dev/null || true
-    cmd font system --update >/dev/null 2>&1 || true
-    am broadcast -a android.intent.action.CONFIGURATION_CHANGED >/dev/null 2>&1 || true
+    # font_weight_adjustment is a Configuration setting, not a downloadable-font
+    # database. FontManagerService --update does not apply it. The secure-setting
+    # observer is authoritative; this broadcast is only an OEM UI nudge.
+    command -v am >/dev/null 2>&1 && \
+        am broadcast -a android.intent.action.CONFIGURATION_CHANGED >/dev/null 2>&1 || true
     return 0
 }
 
@@ -498,10 +529,10 @@ font_weight_reset() {
     _restore=0
     [ -f "$FONT_WEIGHT_ORIGINAL_CONF" ] && _restore="$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null | head -n1)"
     _restore="$(font_weight_normalize_int "$_restore")"
-    settings put secure font_weight_adjustment "$_restore" >/dev/null 2>&1 || return 4
+    font_weight_put_system "$_restore" || return $?
     rm -f "$FONT_WEIGHT_CONF" "$FONT_WEIGHT_REBOOT_REQUIRED" 2>/dev/null || true
-    cmd font system --update >/dev/null 2>&1 || true
-    am broadcast -a android.intent.action.CONFIGURATION_CHANGED >/dev/null 2>&1 || true
+    command -v am >/dev/null 2>&1 && \
+        am broadcast -a android.intent.action.CONFIGURATION_CHANGED >/dev/null 2>&1 || true
     return 0
 }
 
@@ -522,8 +553,9 @@ font_weight_status_json() {
     _original=0
     [ -f "$FONT_WEIGHT_ORIGINAL_CONF" ] && _original="$(sed -n 's/^adjustment=//p' "$FONT_WEIGHT_ORIGINAL_CONF" 2>/dev/null | head -n1)"
     _original="$(font_weight_normalize_int "$_original")"
-    printf '{"status":"ok","data":{"supported":%s,"weight":%s,"adjustment":%s,"systemAdjustment":%s,"originalAdjustment":%s,"min":300,"max":700,"step":10}}\n' \
-        "$_supported" "$_desired" "$_saved" "$_system" "$_original"
+    _scope="${FONT_WEIGHT_SCOPE:-current-user}"
+    printf '{"status":"ok","data":{"supported":%s,"weight":%s,"adjustment":%s,"systemAdjustment":%s,"originalAdjustment":%s,"scope":"%s","min":300,"max":700,"step":10}}\n' \
+        "$_supported" "$_desired" "$_saved" "$_system" "$_original" "$(json_escape "$_scope")"
 }
 
 font_index_fingerprint() {

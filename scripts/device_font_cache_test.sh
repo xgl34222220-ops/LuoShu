@@ -33,7 +33,7 @@ device_font_payload_validate_installed() { return 0; }
 . "$ROOT/common/device_font_cache.sh"
 
 ok grep -q 'source-contract-v5-content' "$ROOT/common/device_font_cache.sh"
-ok grep -q 'alignment-cache-v6-inventory' "$ROOT/common/device_font_cache.sh"
+ok grep -q 'alignment-cache-v7-weight-truth' "$ROOT/common/device_font_cache.sh"
 ! device_font_cache_lookup MissingFont >/dev/null 2>&1
 
 CASE='设备缓存键认字体内容与本机清单'
@@ -114,7 +114,13 @@ ok grep -qx "$CACHE/overlay" "$INSTALLS"
 ok grep -q '^state=installed$' "$MODULE/config/device-font-engine.conf"
 ok grep -q '^templateKey=trusted-key$' "$MODULE/config/device-font-engine.conf"
 ok grep -q "^inventoryKey=$FIRST_INVENTORY_KEY$" "$MODULE/config/device-font-engine.conf"
-ok grep -q '^planRevision=3$' "$MODULE/config/device-font-engine.conf"
+ok grep -q '^planRevision=4 "$MODULE/config/device-font-engine.conf"
+ok grep -q '^slotTraceRevision=1$' "$MODULE/config/device-font-engine.conf"
+no test -e "$PENDING"
+
+sh -n "$ROOT/common/device_font_cache.sh"
+echo 'Device font cache tests passed.'
+ "$MODULE/config/device-font-engine.conf"
 ok grep -q '^slotTraceRevision=1$' "$MODULE/config/device-font-engine.conf"
 no test -e "$PENDING"
 

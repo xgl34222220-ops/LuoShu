@@ -137,7 +137,7 @@ _dfcache_id() {
     _dfc_template_key="$2"
     _dfc_source_key="$3"
     _dfc_inventory_key="$4"
-    printf 'alignment-cache-v6-inventory|%s|%s|%s|%s\n'         "$_dfc_font" "$_dfc_template_key" "$_dfc_source_key" "$_dfc_inventory_key" | _dfcache_hash_stream
+    printf 'alignment-cache-v7-weight-truth|%s|%s|%s|%s\n'         "$_dfc_font" "$_dfc_template_key" "$_dfc_source_key" "$_dfc_inventory_key" | _dfcache_hash_stream
 }
 
 _dfcache_root_for() {
@@ -410,7 +410,8 @@ _dfcache_write_engine_state() {
         printf 'sourceKey=%s\n' "$_dfc_source_key"
         printf 'inventoryKey=%s\n' "$_dfc_inventory_key"
         printf 'cacheId=%s\n' "$_dfc_cache_id"
-        printf 'planRevision=3\n'
+        printf 'planRevision=4\n'
+        printf 'weightTruthRevision=1\n'
         printf 'slotTraceRevision=1\n'
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "${_dfc_state}.tmp.$$" 2>/dev/null || return 1
@@ -561,7 +562,7 @@ _dfcache_build_pending_inner() {
             printf 'templateKey=%s\n' "$_dfc_template_key"
             printf 'sourceKey=%s\n' "$_dfc_source_key"
             printf 'inventoryKey=%s\n' "$_dfc_inventory_key"
-            printf 'engine=script-anchor-v3-inventory\n'
+            printf 'engine=script-anchor-v4-weight-truth\n'
             printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
         } > "$_dfc_stage/cache.conf" 2>/dev/null || {
             rm -rf "$_dfc_stage" 2>/dev/null || true

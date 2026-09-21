@@ -115,6 +115,15 @@ def main() -> None:
         }, payload["summary"]
         font_files = sorted((output_dir / "fonts").glob("*.ttf"))
         assert len(font_files) == 2, font_files
+        source_outline_weight = int(source_profile["metrics"].get("weightClass") or 400)
+        clock_slots = [
+            item for item in payload["slots"]
+            if item.get("family") == "clock-family" and item.get("generatedFile")
+        ]
+        assert len(clock_slots) == 1, clock_slots
+        assert clock_slots[0]["weight"] == 700
+        assert clock_slots[0]["outlineWeight"] == source_outline_weight, clock_slots[0]
+        assert clock_slots[0]["weightMatched"] is (abs(source_outline_weight - 700) <= 50)
         manifest_before = (output_dir / "manifest.json").read_bytes()
         files_before = {path.name: path.read_bytes() for path in font_files}
 

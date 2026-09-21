@@ -78,7 +78,7 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as temporary:
         output = Path(temporary) / "Clockopia.ttf"
         report = builder.build_slot(args.font, -1, slot, output)
-        assert report["schema"] == "device-font-slot-build-v2"
+        assert report["schema"] == "device-font-slot-build-v3"
         assert report["status"] == "ok", report
         assert report["transformed"]["probes"]["digits"] >= 10, report
         assert output.is_file() and output.stat().st_size > 1024
@@ -99,7 +99,28 @@ def main() -> None:
         assert report["transformed"]["decomposed"] > 0, report
         assert abs(generated_caps["yMin"] - target_caps["yMin"]) <= 1.0
         assert abs(generated_caps["yMax"] - target_caps["yMax"]) <= 1.0
-        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
+
+        # A static Regular outline aligned into a stock Bold slot must stay
+        # internally Regular. The ROM slot weight is a consumer contract, not
+        # permission to relabel the outline as 700 and suppress synthesis.
+        source_weight = int(source["metrics"].get("weightClass") or 400)
+        bold_target = copy.deepcopy(target)
+        bold_target["metrics"]["weightClass"] = 700
+        bold_target["metrics"]["fsSelection"] = int(bold_target["metrics"].get("fsSelection") or 0) | (1 << 5)
+        bold_template = copy.deepcopy(template)
+        bold_template["slots"][0]["weight"] = 700
+        bold_template["slots"][0]["font"] = bold_target
+        bold_plan = planner.build_plan(bold_template, source)
+        bold_slot = bold_plan["slots"][0]
+        assert bold_slot["status"] == "ready", bold_slot
+        bold_output = Path(temporary) / "Clockopia-Bold.ttf"
+        bold_report = builder.build_slot(args.font, -1, bold_slot, bold_output)
+        assert bold_report["targetWeight"] == 700, bold_report
+        assert bold_report["outlineWeight"] == source_weight, bold_report
+        assert bold_report["weightMatched"] is (abs(source_weight - 700) <= 50), bold_report
+        bold_generated = template_engine.inspect_font(bold_output, -1, hash_fonts=False)
+        assert int(bold_generated["metrics"]["weightClass"]) == source_weight, bold_generated["metrics"]
+        print(json.dumps({"clock": report, "weightTruth": bold_report}, ensure_ascii=False, sort_keys=True))
 
 
 if __name__ == "__main__":

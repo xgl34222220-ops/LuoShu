@@ -26,6 +26,7 @@ def slot(
     *,
     postscript: str = "",
     weight: int = 400,
+    outline_weight: int | None = None,
     roles: list[str] | None = None,
     replaceable: bool = True,
     status: str = "ready",
@@ -51,6 +52,8 @@ def slot(
         result["generatedFile"] = generated
         result["generatedBytes"] = 4096
         result["signature"] = generated
+        result["outlineWeight"] = outline_weight if outline_weight is not None else weight
+        result["weightMatched"] = abs(result["outlineWeight"] - weight) <= 50
     return result
 
 
@@ -83,7 +86,7 @@ def main() -> None:
             system_primary,
             """<?xml version='1.0' encoding='utf-8'?>
 <familyset>
-  <family name='sans-serif'><font weight='400' style='normal'>Roboto-Regular.ttf</font></family>
+  <family name='sans-serif'><font weight='700' style='normal'>Roboto-Regular.ttf</font></family>
   <family name='emoji-family' lang='und-Zsye'><font weight='400' style='normal'>NotoColorEmoji.ttf</font></family>
 </familyset>
 """,
@@ -92,7 +95,7 @@ def main() -> None:
             system_legacy,
             """<?xml version='1.0' encoding='utf-8'?>
 <familyset>
-  <family name='sans-serif'><font weight='400' style='normal'>Roboto-Regular.ttf</font></family>
+  <family name='sans-serif'><font weight='700' style='normal'>Roboto-Regular.ttf</font></family>
 </familyset>
 """,
         )
@@ -134,8 +137,8 @@ def main() -> None:
             (fonts / name).write_bytes((name.encode("utf-8") + b"\0") * 256)
 
         slots = [
-            slot(system_primary, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-400.ttf"),
-            slot(system_legacy, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-400.ttf"),
+            slot(system_primary, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-400.ttf", weight=700, outline_weight=400),
+            slot(system_legacy, "sans-serif", "Roboto-Regular.ttf", "LuoShuSlot-ui-400.ttf", weight=700, outline_weight=400),
             slot(product_xml, "mi-sans", "MiSans-Regular.ttf", "LuoShuSlot-mi-400.ttf"),
             slot(
                 product_xml,
@@ -242,6 +245,14 @@ def main() -> None:
             assert "google-sans" in names
             assert "LuoShuSlot-ui-400.ttf" in texts
             assert "LuoShuSlot-google-400.ttf" in texts
+            tree = ET.parse(path)
+            ui_nodes = [
+                node for node in tree.getroot().iter()
+                if node.tag.rsplit("}", 1)[-1] == "font"
+                and (node.text or "").strip() == "LuoShuSlot-ui-400.ttf"
+            ]
+            assert len(ui_nodes) == 1
+            assert ui_nodes[0].attrib.get("weight") == "400", ui_nodes[0].attrib
         assert "NotoColorEmoji.ttf" in font_texts(output_primary)
         assert "LuoShuSlot-mi-400.ttf" in font_texts(output_product)
         assert "LuoShuSlot-mono-400.ttf" in font_texts(output_product)

@@ -222,6 +222,8 @@ def build_payload(
                     "path": str(destination),
                     "sourceWeight": source_weight,
                     "sourceSha256": source_profile.get("sha256", ""),
+                    "outlineWeight": int(report.get("outlineWeight") or target_weight),
+                    "weightMatched": bool(report.get("weightMatched", True)),
                     "bytes": destination.stat().st_size,
                     "report": report,
                     "references": 0,
@@ -233,6 +235,8 @@ def build_payload(
                     "signature": signature,
                     "generatedFile": generated["filename"],
                     "generatedBytes": generated["bytes"],
+                    "outlineWeight": int(generated.get("outlineWeight") or target_weight),
+                    "weightMatched": bool(generated.get("weightMatched", True)),
                     "plan": plan,
                 }
             )
