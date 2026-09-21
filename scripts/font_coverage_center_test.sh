@@ -97,7 +97,58 @@ grep -q 'coverage_reapply)' "$ROOT/common/app_bridge.sh"
 grep -q 'coverage_verify)' "$ROOT/common/app_bridge.sh"
 grep -q 'coverage_export)' "$ROOT/common/app_bridge.sh"
 grep -q 'device_font_candidates.json' "$ROOT/common/app_bridge.sh"
-grep -Fq '_tmp="${_pending}.tmp.$$"' "$ROOT/common/app_bridge.sh"
-grep -Fq '_tmp="${_out}.tmp.$$"' "$ROOT/common/app_bridge.sh"
+grep -Fq '_tmp="${_pending}.tmp.$"' "$ROOT/common/app_bridge.sh"
+grep -Fq '_tmp="${_out}.tmp.$"' "$ROOT/common/app_bridge.sh"
+grep -q 'DEVICE_FONT_CACHE=' "$ROOT/common/app_bridge.sh"
+grep -q 'device-font-cache.*lookup' "$ROOT/common/app_bridge.sh" || grep -q '"$DEVICE_FONT_CACHE" lookup' "$ROOT/common/app_bridge.sh"
+
+# Upgrade regression: migration may intentionally clear device-font-engine.conf while
+# a compatible content-addressed cache still exists. Coverage must recover that cache
+# instead of failing solely because cacheId disappeared.
+mkdir -p "$MOD/common/python/bin" "$MOD/config/device-font-cache/recovered/payload" "$MOD/config/device-font-cache/recovered/overlay"
+printf '{}\n' > "$MOD/config/device_font_inventory.json"
+printf '{}\n' > "$MOD/config/device-font-cache/recovered/payload/manifest.json"
+printf '{}\n' > "$MOD/config/device-font-cache/recovered/overlay/overlay-manifest.json"
+printf 'Demo\n' > "$MOD/config/active_font.conf"
+rm -f "$MOD/config/device-font-engine.conf" "$MOD/config/font-payload-rebuild-pending.conf"
+cat > "$MOD/common/device_font_slot_trace.py" <<'EOF'
+# test stub: the fake Python launcher below owns the output
+EOF
+cat > "$MOD/common/device_font_cache.sh" <<EOF
+#!/system/bin/sh
+if [ "\${1:-}" = lookup ] && [ "\${2:-}" = Demo ]; then
+    printf 'lookup|%s\\n' "\${2:-}" >> "$CALLS"
+    printf '%s\\n' "$MOD/config/device-font-cache/recovered"
+    exit 0
+fi
+exit 2
+EOF
+cat > "$MOD/common/python/bin/luoshu-python" <<'EOF'
+#!/bin/sh
+printf '{"schema":"device-font-slot-trace-v1","summary":{"inventorySlots":1,"censusSlots":1,"replaceableSlots":1,"replaced":1,"pending":0,"protected":0,"issues":0,"remediable":0},"slots":[]}\n'
+EOF
+chmod 0755 "$MOD/common/device_font_cache.sh" "$MOD/common/python/bin/luoshu-python"
+OUT=$(run_bridge coverage 2>&1)
+printf '%s\n' "$OUT" | grep -q '"schema":"device-font-slot-trace-v1"'
+grep -qx 'lookup|Demo' "$CALLS"
+
+# If the old aligned cache cannot be trusted after a builder/inventory upgrade,
+# the error must tell the App to rebuild the preserved active font rather than
+# suggesting that repeated reads can fix missing manifests.
+rm -rf "$MOD/config/device-font-cache/recovered"
+cat > "$MOD/common/device_font_cache.sh" <<'EOF'
+#!/system/bin/sh
+exit 2
+EOF
+chmod 0755 "$MOD/common/device_font_cache.sh"
+cat > "$MOD/config/font-payload-rebuild-pending.conf" <<'EOF'
+state=awaiting-explicit-apply
+mode=preserve-current
+font=Demo
+reason=font-builder-changed
+EOF
+OUT=$(run_bridge coverage 2>&1)
+printf '%s\n' "$OUT" | grep -q '升级保留负载'
+printf '%s\n' "$OUT" | grep -q '重新应用一次'
 
 echo 'Font coverage center backend tests passed.'
