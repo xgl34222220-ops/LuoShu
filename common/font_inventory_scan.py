@@ -448,24 +448,36 @@ def _partition_font_census(font_roots: Iterable[base.FontRoot]) -> list[tuple[st
     return [entries[key] for key in sorted(entries)]
 
 
-def _safe_nested_root(logical_dir: Path, partition: str) -> bool:
+def _nested_root_for_directory(logical_dir: Path, partition: str) -> Path | None:
+    """Return the unique shallow font-root ancestor for one nested font path.
+
+    If a vendor stores fonts below /product/vivo/fonts/subdir/..., the mount root
+    is /product/vivo/fonts, never both that directory and its descendants.
+    """
     try:
         relative = logical_dir.relative_to(Path("/") / partition)
     except ValueError:
-        return False
+        return None
     if not relative.parts or relative.parts[0].lower() in {"font", "fonts"}:
-        # The canonical /partition/fonts root is already recursive. Never create
-        # overlapping child mounts for /partition/fonts/ui/... .
-        return False
+        # Canonical /partition/fonts is already recursive.
+        return None
+
     lowered = [part.lower() for part in relative.parts]
     if any(part in NESTED_ROOT_DENY_COMPONENTS for part in lowered):
-        return False
+        return None
     if any(not NESTED_ROOT_COMPONENT.fullmatch(part) for part in relative.parts):
-        return False
-    # Only nested directories that explicitly identify themselves as font
-    # storage are promoted. The broad candidate census still records standalone
-    # font files in every other system directory for diagnostics.
-    return any("font" in part for part in lowered)
+        return None
+
+    for index, part in enumerate(lowered):
+        if "font" not in part:
+            continue
+        root_relative = Path(*relative.parts[: index + 1])
+        return Path("/") / partition / root_relative
+    return None
+
+
+def _safe_nested_root(logical_dir: Path, partition: str) -> bool:
+    return _nested_root_for_directory(logical_dir, partition) == logical_dir
 
 
 def _nested_mount_key(partition: str, relative_dir: Path) -> str:
@@ -523,9 +535,17 @@ def _discover_nested_font_roots(
         census = _partition_font_census(live_probe_roots)
     for partition, logical, actual in census:
         logical_dir = logical.parent
-        if not _safe_nested_root(logical_dir, partition):
+        logical_root = _nested_root_for_directory(logical_dir, partition)
+        if logical_root is None:
             continue
-        grouped.setdefault((partition, str(logical_dir)), actual.parent)
+        try:
+            trailing = logical_dir.relative_to(logical_root)
+        except ValueError:
+            continue
+        actual_root = actual.parent
+        for _part in trailing.parts:
+            actual_root = actual_root.parent
+        grouped.setdefault((partition, str(logical_root)), actual_root)
 
     roots: list[base.FontRoot] = []
     overlay_module = getattr(args, "overlay_module", None)
@@ -621,7 +641,11 @@ def _write_live_candidate_probe(args: Any, output: Path) -> dict[str, Any]:
             "candidate": not denied,
             "nested": nested,
             "replaceableRootCandidate": (
-                not denied and (not nested or _safe_nested_root(logical_dir, partition))
+                not denied
+                and (
+                    not nested
+                    or _nested_root_for_directory(logical_dir, partition) is not None
+                )
             ),
             "reason": "specialized-name" if denied else "visible-font-path",
         }

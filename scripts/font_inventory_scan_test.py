@@ -57,6 +57,9 @@ def main() -> int:
         vivo_fonts = temp / "product/vivo/fonts"
         vivo_fonts.mkdir(parents=True)
         shutil.copy2(args.font, vivo_fonts / "VivoFont.ttf")
+        vivo_subdir = vivo_fonts / "subdir"
+        vivo_subdir.mkdir()
+        os.link(vivo_fonts / "VivoFont.ttf", vivo_subdir / "VivoNested.ttf")
         hidden_assets = temp / "product/assets"
         hidden_assets.mkdir(parents=True)
         shutil.copy2(args.font, hidden_assets / "HiddenStandalone.ttf")
@@ -126,27 +129,27 @@ def main() -> int:
 
         assert payload["scannerRevision"] == 5
         assert payload["romKind"] == "coloros"
-        assert result["stockFontFileCount"] == 9
+        assert result["stockFontFileCount"] == 10
         assert result["stockFontUniqueFileCount"] == 8
         assert result["genericSlotCount"] >= 2
-        assert result["candidatePathCount"] == 10
-        assert result["fontPathCount"] == 10
+        assert result["candidatePathCount"] == 11
+        assert result["fontPathCount"] == 11
         assert result["nestedFontRootCount"] == 1
         assert candidates["schema"] == "device-font-candidates-v1"
-        assert candidates["fontFileCount"] == 10
-        assert candidates["candidateCount"] == 10
-        assert candidates["nestedFontFileCount"] == 2
-        assert summary["installCandidatePathCount"] == 10
-        assert summary["installFontPathCount"] == 10
-        assert summary["installNestedFontPathCount"] == 2
+        assert candidates["fontFileCount"] == 11
+        assert candidates["candidateCount"] == 11
+        assert candidates["nestedFontFileCount"] == 3
+        assert summary["installCandidatePathCount"] == 11
+        assert summary["installFontPathCount"] == 11
+        assert summary["installNestedFontPathCount"] == 3
         assert summary["nestedReplaceableRootCount"] == 1
-        assert summary["stockFontFileCount"] == 9
+        assert summary["stockFontFileCount"] == 10
         assert summary["stockFontUniqueFileCount"] == 8
         assert summary["verifiedScanUiFileCount"] >= 2
         assert summary["partitionFontFileCounts"]["odm"] == 1
         assert summary["partitionUniqueFontFileCounts"]["odm"] == 0
         assert summary["xmlSourceCount"] == 6
-        assert payload["slotCount"] == 9
+        assert payload["slotCount"] == 10
         assert "/system/fonts/Roboto-Regular.ttf" in payload["slots"]
         mystery = payload["slots"]["/system_ext/fonts/MysteryUiFace-Regular.ttf"]
         assert mystery["source"] == "verified-scan"
@@ -157,13 +160,14 @@ def main() -> int:
         assert "/hw_product/fonts/HwUi-Regular.ttf" in payload["slots"]
         assert "/future_oem/fonts/FutureUi-Regular.ttf" in payload["slots"]
         assert "/product/vivo/fonts/VivoFont.ttf" in payload["slots"]
+        assert "/product/vivo/fonts/subdir/VivoNested.ttf" in payload["slots"]
         assert "/product/assets/HiddenStandalone.ttf" not in payload["slots"]
         assert any(
             item["path"] == "/product/assets/HiddenStandalone.ttf"
             for item in candidates["paths"]
         )
         assert payload["discoveredPartitions"] == ["future_oem"]
-        assert len(payload["discoveredFontRoots"]) == 1
+        assert len(payload["discoveredFontRoots"]) == 1, payload["discoveredFontRoots"]
         nested = payload["discoveredFontRoots"][0]
         assert nested["partition"] == "product"
         assert nested["relative"] == "vivo/fonts"
@@ -182,9 +186,9 @@ def main() -> int:
         assert reused_result["status"] == "reused"
         assert reused_result["stockFontUniqueFileCount"] == 8
         assert reused_result["genericSlotCount"] >= 2
-        assert reused_result["candidatePathCount"] == 10
-        assert reused_result["fontPathCount"] == 10
-        assert reused_result["nestedFontPathCount"] == 2
+        assert reused_result["candidatePathCount"] == 11
+        assert reused_result["fontPathCount"] == 11
+        assert reused_result["nestedFontPathCount"] == 3
         assert reused_result["nestedFontRootCount"] == 1
 
         scanner = importlib.import_module("font_inventory_scan")
