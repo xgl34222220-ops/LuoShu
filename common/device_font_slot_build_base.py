@@ -366,7 +366,7 @@ def apply_layout_frame(font: TTFont, slot: dict[str, Any]) -> dict[str, Any]:
     vertically shifted or clipped even though the slot was correctly mounted.
     """
     contract = slot.get("lineContract") if isinstance(slot.get("lineContract"), dict) else {}
-    head = font.get("head")
+    head = font["head"] if "head" in font else None
     if head is None:
         return {"mode": "source", "reason": "missing-head"}
 
