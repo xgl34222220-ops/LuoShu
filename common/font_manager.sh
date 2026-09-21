@@ -30,6 +30,35 @@ json_escape_router() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
 
+router_find_text_font() {
+    _rft_wanted="$1"
+    MODULE_DIR="$MODDIR"
+    export MODULE_DIR
+    if ! type detect_font_family >/dev/null 2>&1; then
+        [ -f "$MODDIR/common/util_functions.sh" ] || return 1
+        . "$MODDIR/common/util_functions.sh" >/dev/null 2>&1 || return 1
+    fi
+    for _rft_file in "$LUOSHU_PUBLIC_DIR/fonts"/*.ttf "$LUOSHU_PUBLIC_DIR/fonts"/*.otf "$LUOSHU_PUBLIC_DIR/fonts"/*.ttc \
+                     "$LUOSHU_PUBLIC_DIR/fonts"/*.TTF "$LUOSHU_PUBLIC_DIR/fonts"/*.OTF "$LUOSHU_PUBLIC_DIR/fonts"/*.TTC; do
+        [ -f "$_rft_file" ] || continue
+        _rft_family=$(detect_font_family "${_rft_file##*/}")
+        case "$_rft_family" in SysFont*|SysSans*) continue ;; esac
+        [ "$_rft_family" = "$_rft_wanted" ] && { printf '%s\n' "$_rft_file"; return 0; }
+    done
+    return 1
+}
+
+router_verified_noop() {
+    _rvn_font="$1"
+    _rvn_expected="${2:-$_rvn_font}"
+    [ -n "$_rvn_font" ] && [ "$_rvn_font" != default ] || return 1
+    [ "$_rvn_expected" != mix ] || return 1
+    _rvn_source=$(router_find_text_font "$_rvn_font") || return 1
+    [ -f "$MODDIR/common/font_active_state.sh" ] || return 1
+    . "$MODDIR/common/font_active_state.sh" >/dev/null 2>&1 || return 1
+    luoshu_active_payload_verified "$_rvn_expected" "$_rvn_source"
+}
+
 stock_scan_available() {
     [ -x "$PYBIN" ] && [ -f "$STOCK_SCANNER" ] && [ -f "$MODDIR/common/font_inventory.py" ] && [ -f "$MODDIR/common/font_check.sh" ]
 }
@@ -139,6 +168,13 @@ if [ "${1:-}" = action ] && [ "${2:-}" = switch ]; then
                 export LUOSHU_SWITCH_ACTIVE_LABEL
                 ;;
         esac
+    fi
+    _router_requested="${3:-}"
+    _router_expected="${LUOSHU_SWITCH_ACTIVE_LABEL:-$_router_requested}"
+    if router_verified_noop "$_router_requested" "$_router_expected"; then
+        printf '{"status":"ok","data":{"font":"%s","reused":true,"rebootRequired":false,"message":"当前字体负载与源文件、扫描清单和生成引擎一致"}}\n' \
+            "$(json_escape_router "$_router_expected")"
+        exit 0
     fi
     if [ -f "$SAFE_SWITCH" ]; then
         exec sh "$SAFE_SWITCH" "$@"

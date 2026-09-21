@@ -223,10 +223,7 @@ clear_mix_text_payload() {
     # payload state can be retained. No previous text alias may survive into the
     # new generation: otherwise slots not rediscovered on this pass keep the old
     # digit/Latin source and Android displays two composite generations at once.
-    for _part in system system_ext product vendor odm oem my_product \
-                 my_engineering my_company my_preload my_region my_stock \
-                 oplus_product oplus_engineering oplus_version oplus_region \
-                 mi_ext cust hw_product; do
+    for _part in $(luoshu_payload_partitions "$REALMOD"); do
         rm -rf "$_payload/$_part/fonts" 2>/dev/null || true
         _etc="$_payload/$_part/etc"
         [ -d "$_etc" ] || continue
@@ -465,7 +462,7 @@ setup_runtime() {
     force_link "$_payload" "$RUNTIME/.luoshu-payload" || return 1
     force_link "$REALMOD/module.prop" "$RUNTIME/module.prop" || return 1
 
-    for _part in system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product; do
+    for _part in $(luoshu_payload_partitions "$REALMOD"); do
         mkdir -p "$_payload/$_part" 2>/dev/null || true
         force_link "$_payload/$_part" "$RUNTIME/$_part" || return 1
     done
@@ -490,6 +487,7 @@ setup_runtime() {
     # the complete composite build exits.
     force_link "$REALMOD/common/background_task.sh" "$RUNTIME/common/background_task.sh" || return 1
     force_link "$REALMOD/common/mix_task_handoff.sh" "$RUNTIME/common/mix_task_handoff.sh" || return 1
+    force_link "$REALMOD/common/font_provenance.sh" "$RUNTIME/common/font_provenance.sh" || return 1
     force_link "$REALMOD/common/python" "$RUNTIME/common/python" || return 1
     force_link "$REALMOD/common/font_manager.sh" "$RUNTIME/common/font_manager.sh" || return 1
     force_link "$REALMOD/common/legacy_v14_4_switch.sh" "$RUNTIME/common/legacy_v14_4_switch.sh" || return 1

@@ -15,6 +15,7 @@ LUOSHU_TRUSTED_TEMPLATE_KEY=fixture-template-key
 export MODDIR MODULE_DIR LUOSHU_TRUSTED_TEMPLATE_KEY
 
 device_font_payload_validate_installed() { return 0; }
+_dfcache_inventory_key() { printf 'fixture-inventory-key\n'; }
 device_font_cache_activate() {
     [ -f "$TMP/cache-ready-$1" ] || return 2
     printf '%s\n' "$1" >> "$TMP/activations"
@@ -37,6 +38,7 @@ cat > "$MODULE/config/device-font-engine.conf" <<'EOF'
 state=installed
 font=SameFont
 templateKey=fixture-template-key
+inventoryKey=fixture-inventory-key
 EOF
 
 device_font_payload_build_install SameFont
@@ -57,6 +59,7 @@ cat > "$MODULE/config/device-font-engine.conf" <<'EOF'
 state=installed
 font=SameFont
 templateKey=old-template-key
+inventoryKey=fixture-inventory-key
 EOF
 
 a=0
@@ -65,6 +68,40 @@ ok test "$a" -eq 0
 ok grep -qx SameFont "$TMP/schedules"
 ok grep -qx SameFont "$TMP/builds"
 ok grep -qx SameFont "$TMP/activations"
+
+# Same template/font but a different scanner inventory must rebuild the aligned payload.
+# The previous fixture created a ready marker for the old identity; the real cache
+# key includes inventoryKey, so do not let this simplified font-name-only stub
+# pretend that stale marker is a hit for the new inventory.
+rm -f "$TMP/cache-ready-SameFont"
+: > "$TMP/schedules"
+: > "$TMP/builds"
+: > "$TMP/activations"
+cat > "$MODULE/config/device-font-engine.conf" <<'EOF'
+state=installed
+font=SameFont
+templateKey=fixture-template-key
+inventoryKey=old-inventory-key
+EOF
+a=0
+device_font_payload_build_install SameFont || a=$?
+ok test "$a" -eq 0
+ok grep -qx SameFont "$TMP/schedules"
+ok grep -qx SameFont "$TMP/builds"
+ok grep -qx SameFont "$TMP/activations"
+
+CASE='OriginOS final policy keeps legacy dialer slots'
+mkdir -p "$MODULE/system/fonts/.luoshu-font-store"
+printf 'origin-anchor\n' > "$MODULE/system/fonts/.luoshu-font-store/regular.font"
+_luoshu_detect_originos() { return 0; }
+_lfrp_payload_font_dir() { printf '%s/system/fonts\n' "$MODULE"; }
+_lfrp_alias_originos_critical() {
+    printf '%s\n' "$2" >> "$TMP/origin-critical"
+    printf '1\n'
+}
+_device_font_stage_originos_critical
+ok grep -qx VivoFont.ttf "$TMP/origin-critical"
+ok grep -qx DroidSansFallbackBBK.ttf "$TMP/origin-critical"
 
 # Without a trusted stock template, generic ROMs refuse an uncertain per-slot payload.
 # Never instruct the user to restore the system/default font as a prerequisite.

@@ -168,6 +168,7 @@ exec "$TEST_REAL_CP" "$@"
         for name in ('font_switch_safe.sh', 'payload_clone.sh'):
             shutil.copyfile(ROOT / 'common/legacy_v14_4' / name, legacy / name)
         shutil.copyfile(ROOT / 'common/font_switch_lock.sh', self.module / 'common/font_switch_lock.sh')
+        shutil.copyfile(ROOT / 'common/font_provenance.sh', self.module / 'common/font_provenance.sh')
         (legacy / 'util_functions.sh').write_text('''
 check_coloros() { IS_COLOROS=false; }
 check_hyperos() { IS_HYPEROS=false; }

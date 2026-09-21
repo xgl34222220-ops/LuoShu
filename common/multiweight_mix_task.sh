@@ -12,9 +12,10 @@ if [ -z "$MODDIR" ]; then
 fi
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/auto-multiweight-mix"
-COMPOSITE_CACHE="$CACHE_ROOT/composites-v9"
-PREPARED_CACHE="$CACHE_ROOT/prepared-v8"
-SOURCE_META_CACHE="$CACHE_ROOT/source-meta-v1"
+COMPOSITE_CACHE="$CACHE_ROOT/composites-v10"
+PREPARED_CACHE="$CACHE_ROOT/prepared-v9"
+SOURCE_META_CACHE="$CACHE_ROOT/source-meta-v2"
+MIX_ENGINE_IDENTITY=''
 PUBLIC_ROOT="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 SOURCE_FONTS="$PUBLIC_ROOT/fonts"
 USER_FONTS_DIR="$SOURCE_FONTS"
@@ -40,6 +41,7 @@ LOCK_FILE="$MODDIR/.font_switch.lock"
 [ -f "$MODE_HELPER" ] && . "$MODE_HELPER"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 [ -f "$MODDIR/common/font_boot_state.sh" ] && . "$MODDIR/common/font_boot_state.sh"
+[ -f "$MODDIR/common/font_provenance.sh" ] && . "$MODDIR/common/font_provenance.sh"
 [ -f "$MODDIR/common/font_active_state.sh" ] && . "$MODDIR/common/font_active_state.sh"
 
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
@@ -240,7 +242,10 @@ source_metadata() {
     _signature=$(source_signature "$_source")
     [ -n "$_signature" ] || return 1
     mkdir -p "$SOURCE_META_CACHE" 2>/dev/null || return 1
-    _meta="$SOURCE_META_CACHE/${_signature}.conf"
+    _engine="${MIX_ENGINE_IDENTITY:-}"
+    [ -n "$_engine" ] || _engine=$(luoshu_provenance_engine_identity 2>/dev/null)
+    [ -n "$_engine" ] || return 1
+    _meta="$SOURCE_META_CACHE/${_engine}-${_signature}.conf"
     if [ -s "$_meta" ]; then
         printf '%s\n' "$_signature|$_meta"
         return 0
@@ -254,6 +259,10 @@ source_metadata() {
     } > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$_meta" 2>/dev/null || return 1
     chmod 0644 "$_meta" 2>/dev/null || true
     printf '%s\n' "$_signature|$_meta"
+}
+
+prune_obsolete_cache_schemas() {
+    rm -rf "$CACHE_ROOT/composites-v9" "$CACHE_ROOT/prepared-v8" "$CACHE_ROOT/source-meta-v1" 2>/dev/null || true
 }
 
 prune_prepared_cache() {
@@ -285,7 +294,7 @@ prepare_source() {
     mkdir -p "${_destination%/*}" "$PREPARED_CACHE" 2>/dev/null || return 1
 
     if [ "$_variable" = true ] || [ "$_format" = TTC ]; then
-        _prepared_key=$(printf '%s' "instance-v4-content|$_signature|$_role|$_effective" | hash_text)
+        _prepared_key=$(printf '%s' "instance-v5-provenance|$MIX_ENGINE_IDENTITY|$_signature|$_role|$_effective" | hash_text)
         [ -n "$_prepared_key" ] || return 1
         _cached="$PREPARED_CACHE/${_prepared_key}.font"
         if [ ! -s "$_cached" ]; then
@@ -297,10 +306,10 @@ prepare_source() {
   prune_prepared_cache
         fi
         link_or_copy "$_cached" "$_destination" || return 1
-        _content_key="instance-v4-content|$_prepared_key"
+        _content_key="instance-v5-provenance|$MIX_ENGINE_IDENTITY|$_prepared_key"
     else
         link_or_copy "$_source" "$_destination" || return 1
-        _content_key="static-v3-content|$_signature"
+        _content_key="static-v4-provenance|$MIX_ENGINE_IDENTITY|$_signature"
     fi
     printf '%s\n' "$_content_key" > "${_destination}.source-key" 2>/dev/null || return 1
     chmod 0644 "$_destination" "${_destination}.source-key" 2>/dev/null || true
@@ -351,10 +360,10 @@ build_composite_cached() {
     _latin_key=$(cat "${_latin}.source-key" 2>/dev/null)
     _digit_key=$(cat "${_digit}.source-key" 2>/dev/null)
     if [ -n "$_cjk_key" ] && [ -n "$_latin_key" ] && [ -n "$_digit_key" ]; then
-        _key=$(printf '%s|%s|%s|auto-multiweight-v5-metrics' "$_cjk_key" "$_latin_key" "$_digit_key" | hash_text)
+        _key=$(printf '%s|%s|%s|auto-multiweight-v6-provenance|%s' "$_cjk_key" "$_latin_key" "$_digit_key" "$MIX_ENGINE_IDENTITY" | hash_text)
     else
-        _key=$(printf '%s|%s|%s|auto-multiweight-v5-metrics' \
-  "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" | hash_text)
+        _key=$(printf '%s|%s|%s|auto-multiweight-v6-provenance|%s' \
+  "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" "$MIX_ENGINE_IDENTITY" | hash_text)
     fi
     [ -n "$_key" ] || return 1
     _cached="$COMPOSITE_CACHE/${_key}.font"
@@ -400,13 +409,20 @@ save_mix_config() {
     _xml_overlay=false
     [ "$(sed -n 's/^mode=//p' "$CONFIG_DIR/font-config-overlay.conf" 2>/dev/null | head -n1 | tr -d '\r')" = enabled ] &&
         _xml_overlay=true
+    _mix_proof=''
+    if type luoshu_provenance_mix_proof >/dev/null 2>&1; then
+        _mix_proof=$(luoshu_provenance_mix_proof             "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "$SOURCE_FONTS" 2>/dev/null) || _mix_proof=''
+    fi
     {
         printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$1" "$2" "$3"
         printf 'cjkWeight=%s\nlatinWeight=%s\ndigitWeight=%s\n' "$(safe_weight "$4")" "$(safe_weight "$5")" "$(safe_weight "$6")"
         printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$4" "$5" "$6"
         printf 'cjkMode=%s\nlatinMode=%s\ndigitMode=%s\n' "$7" "$8" "$9"
-        printf 'isolation=auto-multiweight-v3\ncharacterIsolation=true\ncomposite=true\nxmlOverlay=%s\ntime=%s\n' \
-            "$_xml_overlay" "$(date +%s)"
+        printf 'isolation=auto-multiweight-v4\ncharacterIsolation=true\ncomposite=true\nxmlOverlay=%s\ntime=%s\n'             "$_xml_overlay" "$(date +%s)"
+        if [ -n "$_mix_proof" ]; then
+            printf 'provenanceSchema=font-provenance-v1\n'
+            printf 'mixProof=%s\n' "$_mix_proof"
+        fi
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$MIX_CONF" 2>/dev/null || return 1
     cp -f "$MIX_CONF" "$AXES_CONF" 2>/dev/null || true
     printf 'mix\n' >"$ACTIVE_CONF" 2>/dev/null || return 1
@@ -418,7 +434,6 @@ save_mix_config() {
     sed -i '/^LuoShuAutoMix$/d' "$CONFIG_DIR/recent_fonts.conf" 2>/dev/null || true
     chmod 0644 "$MIX_CONF" "$AXES_CONF" "$ACTIVE_CONF" "$REBOOT_CONF" 2>/dev/null || true
 }
-
 worker() {
     trap '' HUP
     _wanted="$1"
@@ -434,6 +449,15 @@ worker() {
     _digit_mode=$(normalize_mode "$(read_value "$TASK_FILE" digitMode)")
     _root=$(read_value "$TASK_FILE" root)
     _family=LuoShuAutoMix
+    type luoshu_provenance_engine_identity >/dev/null 2>&1 || {
+        update_task "$_wanted" failed '字体生成版本核验组件缺失' 100 "$(date +%s)"
+        luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1
+    }
+    MIX_ENGINE_IDENTITY=$(luoshu_provenance_engine_identity 2>/dev/null)
+    [ -n "$MIX_ENGINE_IDENTITY" ] || {
+        update_task "$_wanted" failed '无法核验字体生成版本' 100 "$(date +%s)"
+        luoshu_clear_task_pid "$WORKER_PID" "$_wanted"; exit 1
+    }
     precheck_mix "$_cjk" "$_latin" "$_digit"
     _precheck=$?
     case "$_precheck" in
@@ -558,6 +582,7 @@ start_mix() {
         printf '{"status":"error","message":"无法创建任务目录"}\n'
         return
     }
+    prune_obsolete_cache_schemas
     _task="auto-mix-$(date +%s)-$$"
     _root="$CACHE_ROOT/$_task"
     mkdir -p "$_root" 2>/dev/null || {

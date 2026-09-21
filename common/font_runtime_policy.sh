@@ -308,17 +308,123 @@ _lfrp_alias_existing_targets() {
     printf '%s\n' "$_lfrp_count"
 }
 
+_lfrp_weight_role() {
+    case "$1" in
+        100) printf 'thin\n' ;;
+        200) printf 'extralight\n' ;;
+        300) printf 'light\n' ;;
+        500) printf 'medium\n' ;;
+        600) printf 'semibold\n' ;;
+        700) printf 'bold\n' ;;
+        800) printf 'extrabold\n' ;;
+        900) printf 'black\n' ;;
+        *) printf 'regular\n' ;;
+    esac
+}
+
+_lfrp_target_weight() {
+    _lfrp_tw_name=$(printf '%s' "${1##*/}" | tr '[:upper:]' '[:lower:]')
+    case "$_lfrp_tw_name" in
+        100.ttf|*thin*) printf '100\n' ;;
+        200.ttf|*extralight*|*extra-light*|*ultralight*|*ultra-light*) printf '200\n' ;;
+        300.ttf|*light*) printf '300\n' ;;
+        500.ttf|*medium*) printf '500\n' ;;
+        600.ttf|*semibold*|*semi-bold*|*demibold*) printf '600\n' ;;
+        800.ttf|*extrabold*|*extra-bold*|*ultrabold*|*ultra-bold*) printf '800\n' ;;
+        900.ttf|*black*|*heavy*) printf '900\n' ;;
+        700.ttf|*bold*) printf '700\n' ;;
+        *) printf '400\n' ;;
+    esac
+}
+
+_lfrp_exact_family_source() {
+    _lfrp_efs_family="$1"
+    _lfrp_efs_role="$2"
+    [ -n "$_lfrp_efs_family" ] || return 1
+    if type get_exact_weight_file >/dev/null 2>&1; then
+        get_exact_weight_file "$_lfrp_efs_family" "$_lfrp_efs_role" 2>/dev/null
+        return $?
+    fi
+    return 1
+}
+
+_lfrp_regular_source() {
+    _lfrp_rs_fallback="$1"
+    _lfrp_rs_family="$2"
+    _lfrp_rs_candidate=$(_lfrp_exact_family_source "$_lfrp_rs_family" regular 2>/dev/null)
+    [ -f "$_lfrp_rs_candidate" ] && { printf '%s\n' "$_lfrp_rs_candidate"; return 0; }
+    _lfrp_rs_candidate=$(_lfrp_exact_family_source "$_lfrp_rs_family" variable 2>/dev/null)
+    [ -f "$_lfrp_rs_candidate" ] && { printf '%s\n' "$_lfrp_rs_candidate"; return 0; }
+    [ -f "$_lfrp_rs_fallback" ] || return 1
+    printf '%s\n' "$_lfrp_rs_fallback"
+}
+
+# Foreground staging exposes only weights the selected static family really ships.
+# A variable Regular source stays variable for the final builder, which instances
+# it at the requested wght. Static Regular is never copied into a fake Bold/Thin anchor.
+_lfrp_prepare_family_anchors() {
+    _lfrp_pfa_src="$1"
+    _lfrp_pfa_family="$2"
+    _lfrp_pfa_store="$3"
+
+    # The store belongs to the selected family, not the device. Reusing an old
+    # role anchor after switching from a multiweight family to a single-weight
+    # family would silently feed the previous font's Bold/Medium into the new
+    # payload. Start each foreground staging pass from an empty role store.
+    rm -rf "$_lfrp_pfa_store/.luoshu-font-store" 2>/dev/null || true
+    mkdir -p "$_lfrp_pfa_store/.luoshu-font-store" 2>/dev/null || return 1
+
+    _lfrp_pfa_regular=$(_lfrp_regular_source "$_lfrp_pfa_src" "$_lfrp_pfa_family") || return 1
+    _lfrp_pfa_regular_anchor=$(_font_anchor "$_lfrp_pfa_regular" "$_lfrp_pfa_store" regular) || return 1
+
+    for _lfrp_pfa_pair in \
+        '100:thin' '200:extralight' '300:light' '500:medium' \
+        '600:semibold' '700:bold' '800:extrabold' '900:black'; do
+        _lfrp_pfa_role=${_lfrp_pfa_pair#*:}
+        _lfrp_pfa_source=$(_lfrp_exact_family_source "$_lfrp_pfa_family" "$_lfrp_pfa_role" 2>/dev/null)
+        [ -f "$_lfrp_pfa_source" ] || continue
+        _lfrp_pfa_anchor="$_lfrp_pfa_store/.luoshu-font-store/${_lfrp_pfa_role}.font"
+        rm -f "$_lfrp_pfa_anchor" 2>/dev/null || true
+        ln "$_lfrp_pfa_source" "$_lfrp_pfa_anchor" 2>/dev/null || \
+            cp -f "$_lfrp_pfa_source" "$_lfrp_pfa_anchor" 2>/dev/null || continue
+        chmod 0644 "$_lfrp_pfa_anchor" 2>/dev/null || true
+    done
+    printf '%s\n' "$_lfrp_pfa_regular_anchor"
+}
+
+_lfrp_anchor_for_weight() {
+    _lfrp_afw_store="$1"
+    _lfrp_afw_weight="$2"
+    _lfrp_afw_role=$(_lfrp_weight_role "$_lfrp_afw_weight")
+    _lfrp_afw_path="$_lfrp_afw_store/.luoshu-font-store/${_lfrp_afw_role}.font"
+    [ -s "$_lfrp_afw_path" ] || return 1
+    printf '%s\n' "$_lfrp_afw_path"
+}
+
 # Clear the complete generated font tree, not just a static filename list. The
 # private tree contains only LuoShu overlays, so removing it reveals every stock
 # fallback and prevents an old full-font switch from leaking tofu-producing aliases
 # into a later partial-font switch.
 clear_managed_text_fonts() {
     _lfrp_root=$(_lfrp_payload_root)
+    _lfrp_manifest=$(_lfrp_target_manifest)
+    # Some OEM UI slots live below nested partition directories such as
+    # product/vivo/fonts. Remove every path LuoShu recorded before clearing the
+    # canonical partition/fonts roots so a restore/default switch cannot leave a
+    # stale dialer or lock-screen font behind.
+    if [ -f "$_lfrp_manifest" ]; then
+        while IFS= read -r _lfrp_rel; do
+            case "$_lfrp_rel" in
+                ''|/*|*'..'*) continue ;;
+                */fonts/*) rm -f "$_lfrp_root/$_lfrp_rel" 2>/dev/null || true ;;
+            esac
+        done < "$_lfrp_manifest"
+    fi
     for _lfrp_part in $(_lfrp_partitions); do
         rm -rf "$_lfrp_root/$_lfrp_part/fonts" 2>/dev/null || true
     done
     mkdir -p "$_lfrp_root/system/fonts" 2>/dev/null || true
-    rm -f "$(_lfrp_target_manifest)" 2>/dev/null || true
+    rm -f "$_lfrp_manifest" 2>/dev/null || true
     # Generated XML contains stable LuoShu alias names, not a specific font identity. Keep a
     # boot-validated template during font-to-font switches and only replace its hard-link targets.
     # Restoring the system font still removes every XML overlay.
@@ -342,20 +448,23 @@ _copy_as_inventory() {
     _lfrp_system_fonts=$(_lfrp_payload_font_dir system)
     mkdir -p "$_lfrp_system_fonts" 2>/dev/null || return 1
     [ -d "$_lfrp_system_fonts/.luoshu-font-store" ] || _font_store_reset "$_lfrp_system_fonts"
-    _lfrp_regular=$(_font_anchor "$_lfrp_src" "$_lfrp_system_fonts" regular) || return 1
+    _lfrp_regular=$(_lfrp_prepare_family_anchors "$_lfrp_src" "$_lfrp_family" "$_lfrp_system_fonts") || return 1
     _lfrp_count=0
     _lfrp_bad=0
+    _lfrp_weight_preserved=0
     _lfrp_tab=$(printf '\t')
     while IFS="$_lfrp_tab" read -r _lfrp_logical _lfrp_name _lfrp_partition _lfrp_format _lfrp_weight _lfrp_style _lfrp_source; do
         [ -n "$_lfrp_logical" ] && [ -n "$_lfrp_name" ] || continue
         _lfrp_target_allowed "$_lfrp_name" || continue
         _lfrp_target=$(_device_font_inventory_target "$_lfrp_logical") || continue
         mkdir -p "${_lfrp_target%/*}" 2>/dev/null || continue
+        case "$_lfrp_weight" in ''|*[!0-9]*) _lfrp_weight=400 ;; esac
         _lfrp_anchor="$_lfrp_regular"
-        if [ "$_lfrp_mode" != quick ] && [ "$_lfrp_weight" != 400 ] && \
-           type _device_font_inventory_anchor >/dev/null 2>&1; then
-            _lfrp_anchor=$(_device_font_inventory_anchor "$_lfrp_src" "$_lfrp_system_fonts" \
-                "$_lfrp_family" "$_lfrp_mode" "$_lfrp_weight") || _lfrp_anchor="$_lfrp_regular"
+        if [ "$_lfrp_weight" -ne 400 ] 2>/dev/null; then
+            _lfrp_anchor=$(_lfrp_anchor_for_weight "$_lfrp_system_fonts" "$_lfrp_weight" 2>/dev/null) || {
+                _lfrp_weight_preserved=$((_lfrp_weight_preserved + 1))
+                continue
+            }
         fi
         if _font_alias "$_lfrp_anchor" "$_lfrp_target" && _verify_font_copy "$_lfrp_target"; then
             _lfrp_record_target "$_lfrp_target" >/dev/null 2>&1 || true
@@ -367,11 +476,17 @@ _copy_as_inventory() {
 $_lfrp_entries
 EOF_LUOSHU_RUNTIME_INVENTORY
     LUOSHU_INVENTORY_MAPPED_COUNT="$_lfrp_count"
-    export LUOSHU_INVENTORY_MAPPED_COUNT
+    LUOSHU_WEIGHT_PRESERVED_COUNT="$_lfrp_weight_preserved"
+    export LUOSHU_INVENTORY_MAPPED_COUNT LUOSHU_WEIGHT_PRESERVED_COUNT
     [ "$_lfrp_count" -gt 0 ] || return 2
     _log_step "  已按设备原厂清单覆盖 $_lfrp_count 个真实槽位"
+    [ "$_lfrp_weight_preserved" -eq 0 ] || _log_step "  保留 $_lfrp_weight_preserved 个缺少真实源字重的物理槽，禁止 Regular 冒充粗细"
     [ "$_lfrp_bad" -eq 0 ] || _log_step "  ⚠ $_lfrp_bad 个原厂槽位写入失败"
     return 0
+}
+
+_lfrp_originos_critical_files() {
+    printf '%s\n' 'VivoFont.ttf DroidSansFallbackBBK.ttf HYQiHei-50.ttf DroidSansFallbackMonster.ttf DroidSansFallbackZW.ttf'
 }
 
 _lfrp_static_files() {
@@ -379,14 +494,44 @@ _lfrp_static_files() {
         get_all_hyperos_files
     elif [ "${IS_COLOROS:-false}" = true ]; then
         for _lfrp_name in $(get_all_coloros_names); do printf '%s.ttf\n' "$_lfrp_name"; done
+    elif type _luoshu_detect_originos >/dev/null 2>&1 && _luoshu_detect_originos; then
+        {
+            get_all_generic_files
+            _lfrp_originos_critical_files
+        } | tr ' ' '\n' | awk 'NF && !seen[$0]++'
     else
         get_all_generic_files
     fi
 }
 
-# Inventory and static OEM anchors are complementary. The old early return meant a
-# partial XML inventory could suppress HyperOS' hidden MiSansVF or ColorOS' OEM
-# partition files, producing a successful switch that rebooted into the stock font.
+_lfrp_alias_originos_critical() {
+    _lfrp_aoc_anchor="$1"
+    _lfrp_aoc_file="$2"
+    type _luoshu_originos_root_pairs >/dev/null 2>&1 || { printf '0\n'; return 0; }
+    _lfrp_target_allowed "$_lfrp_aoc_file" || { printf '0\n'; return 0; }
+    _lfrp_aoc_module=$(_lfrp_module)
+    _lfrp_aoc_root=$(_lfrp_payload_root)
+    _lfrp_aoc_count=0
+    while IFS='|' read -r _lfrp_aoc_real_root _lfrp_aoc_overlay_root; do
+        [ -e "$_lfrp_aoc_real_root/$_lfrp_aoc_file" ] || continue
+        case "$_lfrp_aoc_overlay_root" in
+            "$_lfrp_aoc_module"/*)
+                _lfrp_aoc_rel=${_lfrp_aoc_overlay_root#$_lfrp_aoc_module/}
+                _lfrp_aoc_dest="$_lfrp_aoc_root/$_lfrp_aoc_rel/$_lfrp_aoc_file"
+                ;;
+            *) continue ;;
+        esac
+        mkdir -p "${_lfrp_aoc_dest%/*}" 2>/dev/null || continue
+        if _font_alias "$_lfrp_aoc_anchor" "$_lfrp_aoc_dest" && _verify_font_copy "$_lfrp_aoc_dest"; then
+            _lfrp_record_target "$_lfrp_aoc_dest" >/dev/null 2>&1 || true
+            _lfrp_aoc_count=$((_lfrp_aoc_count + 1))
+        fi
+    done <<EOF_LUOSHU_ORIGIN_CRITICAL
+$(_luoshu_originos_root_pairs)
+EOF_LUOSHU_ORIGIN_CRITICAL
+    printf '%s\n' "$_lfrp_aoc_count"
+}
+
 apply_font_by_rom() {
     _lfrp_src="$1"
     _lfrp_mode="${3:-full}"
@@ -394,16 +539,38 @@ apply_font_by_rom() {
     _lfrp_system_fonts=$(_lfrp_payload_font_dir system)
     mkdir -p "$_lfrp_system_fonts" 2>/dev/null || return 1
     _font_store_reset "$_lfrp_system_fonts"
-    _lfrp_regular=$(_font_anchor "$_lfrp_src" "$_lfrp_system_fonts" regular) || return 1
+    _lfrp_regular=$(_lfrp_prepare_family_anchors "$_lfrp_src" "$_lfrp_family" "$_lfrp_system_fonts") || return 1
 
     LUOSHU_INVENTORY_MAPPED_COUNT=0
+    LUOSHU_WEIGHT_PRESERVED_COUNT=0
     _copy_as_inventory "$_lfrp_src" "$_lfrp_system_fonts" "$_lfrp_mode" "$_lfrp_family" >/dev/null 2>&1 || true
     _lfrp_inventory=${LUOSHU_INVENTORY_MAPPED_COUNT:-0}
+    _lfrp_preserved=${LUOSHU_WEIGHT_PRESERVED_COUNT:-0}
     case "$_lfrp_inventory" in ''|*[!0-9]*) _lfrp_inventory=0 ;; esac
+    case "$_lfrp_preserved" in ''|*[!0-9]*) _lfrp_preserved=0 ;; esac
 
     _lfrp_static=0
+    _lfrp_is_origin=false
+    type _luoshu_detect_originos >/dev/null 2>&1 && _luoshu_detect_originos && _lfrp_is_origin=true
     for _lfrp_file in $(_lfrp_static_files); do
-        _lfrp_added=$(_lfrp_alias_existing_targets "$_lfrp_regular" "$_lfrp_file")
+        _lfrp_weight=$(_lfrp_target_weight "$_lfrp_file")
+        _lfrp_anchor="$_lfrp_regular"
+        if [ "$_lfrp_weight" -ne 400 ] 2>/dev/null; then
+            _lfrp_anchor=$(_lfrp_anchor_for_weight "$_lfrp_system_fonts" "$_lfrp_weight" 2>/dev/null) || {
+                _lfrp_preserved=$((_lfrp_preserved + 1))
+                continue
+            }
+        fi
+        if [ "$_lfrp_is_origin" = true ]; then
+            case "$_lfrp_file" in
+                VivoFont.ttf|DroidSansFallbackBBK.ttf|HYQiHei-50.ttf|DroidSansFallbackMonster.ttf|DroidSansFallbackZW.ttf)
+                    _lfrp_added=$(_lfrp_alias_originos_critical "$_lfrp_anchor" "$_lfrp_file")
+                    ;;
+                *) _lfrp_added=$(_lfrp_alias_existing_targets "$_lfrp_anchor" "$_lfrp_file") ;;
+            esac
+        else
+            _lfrp_added=$(_lfrp_alias_existing_targets "$_lfrp_anchor" "$_lfrp_file")
+        fi
         case "$_lfrp_added" in ''|*[!0-9]*) _lfrp_added=0 ;; esac
         _lfrp_static=$((_lfrp_static + _lfrp_added))
     done
@@ -413,8 +580,10 @@ apply_font_by_rom() {
         return 1
     }
     LUOSHU_MAPPED_TARGET_COUNT="$_lfrp_total"
-    export LUOSHU_MAPPED_TARGET_COUNT
+    LUOSHU_WEIGHT_PRESERVED_COUNT="$_lfrp_preserved"
+    export LUOSHU_MAPPED_TARGET_COUNT LUOSHU_WEIGHT_PRESERVED_COUNT
     _log_step "  字体槽位已合并映射：原厂清单 $_lfrp_inventory / ROM 关键槽位 $_lfrp_static"
+    [ "$_lfrp_preserved" -eq 0 ] || _log_step "  字重保护：$_lfrp_preserved 个目标没有真实对应字重，保持原厂直到对齐生成器给出真实实例"
     case "${LUOSHU_FONT_HAS_CJK:-true}:${LUOSHU_FONT_HAS_LATIN:-true}" in
         false:true) _log_step '  当前字体缺少完整中文：中文继续使用系统字体，避免方框' ;;
         true:false) _log_step '  当前字体缺少完整英文数字：英文数字继续使用系统字体' ;;

@@ -459,7 +459,8 @@ scan_family_weights() {
     echo "$sorted"
 }
 
-# 获取字体族中指定字重的文件路径
+# 获取字体族中指定字重的文件路径。保留历史 fallback 语义给非关键调用者；
+# 精确槽位映射必须使用 get_exact_weight_file，不能把 Regular 冒充 Bold/Thin。
 get_weight_file() {
     family="$1"
     target_w="$2"
@@ -474,6 +475,22 @@ get_weight_file() {
         [ "$w" = "$target_w" ] && { echo "$f"; return; }
     done
     [ -n "$fallback_file" ] && echo "$fallback_file"
+}
+
+get_exact_weight_file() {
+    family="$1"
+    target_w="$2"
+    for f in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.TTF "$USER_FONTS_DIR"/*.OTF "$USER_FONTS_DIR"/*.TTC; do
+        [ -f "$f" ] || continue
+        name=$(basename "$f")
+        fam=$(detect_font_family "$name")
+        [ "$fam" = "$family" ] || continue
+        w=$(detect_font_weight "$name")
+        [ "$w" = "$target_w" ] || continue
+        printf '%s\n' "$f"
+        return 0
+    done
+    return 1
 }
 
 # ============================================================

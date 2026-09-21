@@ -1,0 +1,60 @@
+name: Font instance contract
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - common/font_instance.py
+      - common/legacy_v14_4/font_instance.py
+      - common/font_metrics_normalize.py
+      - common/font_provenance.sh
+      - common/font_active_state.sh
+      - common/font_manager.sh
+      - common/next_boot_payload.sh
+      - common/weighted_mix_task.sh
+      - common/multiweight_mix_task.sh
+      - common/legacy_v14_4/font_switch_safe.sh
+      - common/legacy_v14_4/payload_clone.sh
+      - common/legacy_v14_4/mix_router.sh
+      - common/legacy_v14_4/v142_weighted_mix.sh
+      - common/legacy_v14_4/v143_auto_multiweight_mix.sh
+      - common/private_payload.sh
+      - common/device_font_payload_build.py
+      - common/device_font_payload_build_base.py
+      - common/device_font_payload_overlay.py
+      - common/device_font_load_verify.py
+      - common/device_font_slot_trace.py
+      - common/device_font_cache.sh
+      - common/device_font_payload_policy.sh
+      - scripts/font_instance_contract_test.py
+      - scripts/font_stage_chain_test.py
+      - scripts/font_active_state_test.sh
+      - scripts/font_provenance_test.sh
+      - scripts/module_payload_manifest.txt
+      - .github/workflows/font-instance-contract.yml
+permissions:
+  contents: read
+jobs:
+  instance-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python: ['3.11', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install the runtime's FontTools version
+        run: python -m pip install fonttools==4.63.0
+      - name: Check real glyphs, TTC faces and failure atomicity
+        run: python scripts/font_instance_contract_test.py
+      - name: Check scanned partitions, cache freshness and partial-copy recovery
+        run: python scripts/font_stage_chain_test.py
+      - name: Check active proof and composite cache provenance
+        run: |
+          sh scripts/font_provenance_test.sh
+          sh scripts/font_active_state_test.sh
+      - name: Check per-slot trace joins
+        run: python scripts/device_font_slot_trace_test.py

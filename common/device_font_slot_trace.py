@@ -1,0 +1,315 @@
+#!/usr/bin/env python3
+"""Join scan, build, mapping and boot evidence into one per-inventory-slot trace."""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import tempfile
+from collections import defaultdict
+from pathlib import Path
+from typing import Any
+
+SCHEMA = "device-font-slot-trace-v1"
+INVENTORY_SCHEMA = "device-font-inventory-v1"
+PAYLOAD_SCHEMA = "device-font-payload-v1"
+OVERLAY_SCHEMA = "device-font-overlay-v1"
+VERIFY_SCHEMA = "device-font-load-verification-v1"
+
+
+class TraceError(RuntimeError):
+    pass
+
+
+def load(path: Path, schema: str, *, optional: bool = False) -> dict[str, Any]:
+    if optional and not path.is_file():
+        return {}
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError) as exc:
+        raise TraceError(f"无法读取 {path.name}：{exc}") from exc
+    if not isinstance(value, dict) or value.get("schema") != schema:
+        raise TraceError(f"{path.name} 格式无效：{value.get('schema') if isinstance(value, dict) else 'not-object'}")
+    return value
+
+
+def normalize_path(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    path = Path(text)
+    return str(path) if path.is_absolute() else "/" + str(path).lstrip("/")
+
+
+def index_payload(payload: dict[str, Any]) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    by_inventory: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    orphan: list[dict[str, Any]] = []
+    for raw in payload.get("slots") or []:
+        if not isinstance(raw, dict):
+            continue
+        slot = dict(raw)
+        logical = normalize_path(slot.get("inventoryPath") or slot.get("stockPath"))
+        if logical:
+            by_inventory[logical].append(slot)
+        else:
+            orphan.append(slot)
+    return by_inventory, orphan
+
+
+def index_results(document: dict[str, Any]) -> dict[int, list[dict[str, Any]]]:
+    result: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for raw in document.get("slotResults") or []:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            index = int(raw.get("slotIndex"))
+        except (TypeError, ValueError):
+            continue
+        result[index].append(dict(raw))
+    return result
+
+
+def index_supplement(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    supplement = payload.get("inventorySupplement")
+    if not isinstance(supplement, dict):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for raw in supplement.get("slots") or []:
+        if not isinstance(raw, dict):
+            continue
+        path = normalize_path(raw.get("path"))
+        if path:
+            result[path] = dict(raw)
+    return result
+
+
+def route_state(
+    slot: dict[str, Any],
+    overlay_results: dict[int, list[dict[str, Any]]],
+    verify_results: dict[int, list[dict[str, Any]]],
+    verification_present: bool,
+) -> dict[str, Any]:
+    try:
+        index = int(slot.get("slotIndex"))
+    except (TypeError, ValueError):
+        index = -1
+    record: dict[str, Any] = {
+        "slotIndex": index,
+        "family": str(slot.get("family") or ""),
+        "weight": int(slot.get("weight") or 400),
+        "style": str(slot.get("style") or "normal"),
+        "sourceXml": str(slot.get("sourceXml") or ""),
+        "planStatus": str(slot.get("planStatus") or "unresolved"),
+        "planReason": str(slot.get("planReason") or ""),
+        "generatedFile": str(slot.get("generatedFile") or ""),
+        "directPhysical": bool(slot.get("directPhysical")),
+    }
+    if not record["generatedFile"]:
+        record.update(
+            state="preserved",
+            reason=record["planReason"] or record["planStatus"] or "not-generated",
+            route="stock",
+            targetPath="",
+        )
+        return record
+
+    mapped = overlay_results.get(index, [])
+    if not mapped:
+        record.update(state="mapping-missing", reason="generated-slot-not-in-overlay", route="", targetPath="")
+        return record
+
+    # A successful overlay emits one result per payload slot. Keep all evidence if
+    # an old/diagnostic manifest happens to contain more than one.
+    overlay = mapped[0]
+    record["route"] = str(overlay.get("route") or "")
+    record["targetPath"] = str(overlay.get("targetPath") or "")
+    if overlay.get("state") != "mapped":
+        record.update(state="mapping-missing", reason=str(overlay.get("reason") or "overlay-not-mapped"))
+        return record
+
+    if not verification_present:
+        record.update(state="mapped-unverified", reason="boot-verification-not-available")
+        return record
+
+    verified = verify_results.get(index, [])
+    if not verified:
+        record.update(state="unconfirmed", reason="slot-runtime-evidence-missing")
+        return record
+    runtime = verified[0]
+    load_state = str(runtime.get("loadState") or "unconfirmed")
+    record["fontManagerConfirmed"] = bool(runtime.get("fontManagerConfirmed"))
+    record["mountStatus"] = str(runtime.get("mountStatus") or "")
+    record["state"] = load_state
+    if load_state == "missing-mount":
+        record["reason"] = "visible-mount-evidence-missing"
+    elif load_state == "mismatch":
+        record["reason"] = "visible-font-hash-mismatch"
+    elif load_state == "mount-visible":
+        record["reason"] = "visible-bytes-match-font-manager-unconfirmed"
+    elif load_state == "loaded":
+        record["reason"] = "visible-bytes-and-font-manager-confirmed"
+    else:
+        record["reason"] = str(runtime.get("reason") or load_state)
+    return record
+
+
+def aggregate(routes: list[dict[str, Any]], supplement: dict[str, Any] | None) -> tuple[str, str]:
+    if not routes:
+        if supplement and supplement.get("disposition") == "preserved":
+            return "preserved", str(supplement.get("reason") or "inventory-preserved")
+        return "not-consumed", "inventory-slot-not-present-in-payload"
+
+    states = [str(item.get("state") or "unconfirmed") for item in routes]
+    unique = set(states)
+    if len(unique) == 1:
+        state = states[0]
+        reasons = [str(item.get("reason") or "") for item in routes if item.get("reason")]
+        return state, reasons[0] if reasons else ""
+
+    good = {"loaded", "mount-visible", "mapped-unverified"}
+    bad = {"mapping-missing", "missing-mount", "mismatch", "unconfirmed", "not-consumed"}
+    if unique & good and unique & bad:
+        return "partial", ",".join(sorted(unique))
+    if "mismatch" in unique:
+        return "mismatch", ",".join(sorted(unique))
+    if "missing-mount" in unique:
+        return "missing-mount", ",".join(sorted(unique))
+    if "mapping-missing" in unique:
+        return "mapping-missing", ",".join(sorted(unique))
+    if "unconfirmed" in unique:
+        return "unconfirmed", ",".join(sorted(unique))
+    if "mount-visible" in unique:
+        return "mount-visible", ",".join(sorted(unique))
+    if "loaded" in unique:
+        return "loaded", ",".join(sorted(unique))
+    if unique == {"preserved"}:
+        return "preserved", ""
+    return "partial", ",".join(sorted(unique))
+
+
+def build_trace(
+    inventory: dict[str, Any],
+    payload: dict[str, Any],
+    overlay: dict[str, Any],
+    verification: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if inventory.get("schema") != INVENTORY_SCHEMA:
+        raise TraceError("inventory schema 无效")
+    if payload.get("schema") != PAYLOAD_SCHEMA:
+        raise TraceError("payload schema 无效")
+    if overlay.get("schema") != OVERLAY_SCHEMA:
+        raise TraceError("overlay schema 无效")
+    verification = verification or {}
+    if verification and verification.get("schema") != VERIFY_SCHEMA:
+        raise TraceError("verification schema 无效")
+
+    payload_by_path, orphan = index_payload(payload)
+    supplement = index_supplement(payload)
+    overlay_results = index_results(overlay)
+    verify_results = index_results(verification)
+    verification_present = bool(verification)
+
+    traced: list[dict[str, Any]] = []
+    counts: dict[str, int] = defaultdict(int)
+    for logical, entry in sorted((inventory.get("slots") or {}).items()):
+        if not isinstance(entry, dict):
+            continue
+        routes = [
+            route_state(slot, overlay_results, verify_results, verification_present)
+            for slot in payload_by_path.get(normalize_path(logical), [])
+        ]
+        supplement_record = supplement.get(normalize_path(logical))
+        state, reason = aggregate(routes, supplement_record)
+        item = {
+            "path": logical,
+            "slotName": str(entry.get("slotName") or Path(logical).name),
+            "partition": str(entry.get("partition") or ""),
+            "source": str(entry.get("source") or ""),
+            "format": str(entry.get("format") or entry.get("validatedFormat") or ""),
+            "weight": int(entry.get("weight") or 400),
+            "style": str(entry.get("style") or "normal"),
+            "families": list(entry.get("families") or []),
+            "state": state,
+            "reason": reason,
+            "supplementDisposition": str((supplement_record or {}).get("disposition") or ""),
+            "routes": routes,
+        }
+        traced.append(item)
+        counts[state] += 1
+
+    # Template-only routes are useful diagnostics but are not counted as scanner
+    # omissions because the inventory deliberately works at physical-file level.
+    orphan_routes = [
+        route_state(slot, overlay_results, verify_results, verification_present)
+        for slot in orphan
+    ]
+
+    return {
+        "schema": SCHEMA,
+        "inventoryBuildKey": str(inventory.get("buildKey") or ""),
+        "inventoryRomKind": str(inventory.get("romKind") or "generic"),
+        "verificationState": str(verification.get("state") or "not-run"),
+        "summary": {
+            "inventorySlots": len(traced),
+            "consumed": sum(1 for item in traced if item["routes"]),
+            "notConsumed": counts.get("not-consumed", 0),
+            "preserved": counts.get("preserved", 0),
+            "mappedUnverified": counts.get("mapped-unverified", 0),
+            "loaded": counts.get("loaded", 0),
+            "mountVisible": counts.get("mount-visible", 0),
+            "mappingMissing": counts.get("mapping-missing", 0),
+            "missingMount": counts.get("missing-mount", 0),
+            "mismatch": counts.get("mismatch", 0),
+            "unconfirmed": counts.get("unconfirmed", 0),
+            "partial": counts.get("partial", 0),
+            "templateOnlyRoutes": len(orphan_routes),
+        },
+        "slots": traced,
+        "templateOnlyRoutes": orphan_routes,
+    }
+
+
+def atomic_write(payload: dict[str, Any], output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fd, raw = tempfile.mkstemp(prefix=f".{output.name}.", dir=output.parent)
+    os.close(fd)
+    temp = Path(raw)
+    try:
+        temp.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        os.chmod(temp, 0o600)
+        os.replace(temp, output)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--inventory", required=True, type=Path)
+    parser.add_argument("--payload", required=True, type=Path)
+    parser.add_argument("--overlay", required=True, type=Path)
+    parser.add_argument("--verification", type=Path)
+    parser.add_argument("--output", type=Path)
+    return parser.parse_args()
+
+
+def main() -> int:
+    args = parse_args()
+    try:
+        result = build_trace(
+            load(args.inventory, INVENTORY_SCHEMA),
+            load(args.payload, PAYLOAD_SCHEMA),
+            load(args.overlay, OVERLAY_SCHEMA),
+            load(args.verification, VERIFY_SCHEMA, optional=True) if args.verification else {},
+        )
+        if args.output:
+            atomic_write(result, args.output)
+        print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+        return 0
+    except Exception as exc:
+        print(json.dumps({"status": "error", "message": str(exc) or exc.__class__.__name__},
+                         ensure_ascii=False, separators=(",", ":")), file=os.sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

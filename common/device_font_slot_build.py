@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Packaging contract marker: device-font-slot-build-v2
+# Packaging contract marker: device-font-slot-build-v4
 """Preserve target Android family identity in generated slot fonts."""
 from __future__ import annotations
 
@@ -25,13 +25,13 @@ def _postscript(value: str) -> str:
     return (cleaned or "LuoShuFont")[:63]
 
 
-def target_family_identity(slot: dict[str, Any]) -> tuple[str, str, str, str]:
+def target_family_identity(slot: dict[str, Any], actual_weight: int | None = None) -> tuple[str, str, str, str]:
     # The external Android XML owns family selection. A deterministic internal identity lets slots
     # with the same weight/metric/role contract share one generated font safely and dramatically
     # reduces full-outline rewrites on OEM ROMs with many alias families.
     family = "LuoShu System"
     try:
-        weight = int(slot.get("weight") or 400)
+        weight = int(actual_weight if actual_weight is not None else (slot.get("weight") or 400))
     except (TypeError, ValueError):
         weight = 400
     nearest = min(_WEIGHT_NAMES, key=lambda value: abs(value - weight))
@@ -45,12 +45,12 @@ def target_family_identity(slot: dict[str, Any]) -> tuple[str, str, str, str]:
     return family, legacy_style, typographic_style, postscript
 
 
-def set_slot_identity(font: Any, slot: dict[str, Any]) -> None:
+def set_slot_identity(font: Any, slot: dict[str, Any], actual_weight: int | None = None) -> None:
     if "name" not in font:
         return
-    family, legacy_style, typographic_style, postscript = target_family_identity(slot)
+    family, legacy_style, typographic_style, postscript = target_family_identity(slot, actual_weight)
     full_name = f"{family} {typographic_style}".strip()
-    unique_id = _postscript(f"LuoShu-v2.4.0-{postscript}")
+    unique_id = _postscript(f"LuoShu-weight-truth-v1-{postscript}")
     table = font["name"]
     values = {
         1: family,

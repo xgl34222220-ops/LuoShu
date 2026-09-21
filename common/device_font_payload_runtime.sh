@@ -46,6 +46,19 @@ _dfpr_exec() {
         "$_dfpr_python_bin" "$@"
 }
 
+_dfpr_inventory_key() {
+    _dfpr_module_dir="$(_dfpr_module)"
+    _dfpr_helper="$_dfpr_module_dir/common/font_provenance.sh"
+    if [ -f "$_dfpr_helper" ]; then
+        type luoshu_provenance_inventory_identity >/dev/null 2>&1 || . "$_dfpr_helper" >/dev/null 2>&1 || true
+        if type luoshu_provenance_inventory_identity >/dev/null 2>&1; then
+            luoshu_provenance_inventory_identity
+            return $?
+        fi
+    fi
+    printf 'no-inventory\n'
+}
+
 _dfpr_hash() {
     _dfpr_file="$1"
     if command -v sha256sum >/dev/null 2>&1; then
@@ -80,6 +93,10 @@ _dfpr_anchor_lines() {
         _dfpr_path="$_dfpr_store/${_dfpr_name}.font"
         [ -s "$_dfpr_path" ] && printf '%s|%s\n' "$_dfpr_weight" "$_dfpr_path"
     done
+    # The final optional weight is commonly absent. Do not leak that probe's
+    # false status to callers using this function in command substitution under
+    # errexit; an emitted sparse list is still a successful enumeration.
+    return 0
 }
 
 _dfpr_nearest_anchor() {
@@ -115,16 +132,30 @@ _dfpr_prepare_sources() {
     [ -n "$_dfpr_lines" ] || return 2
     rm -rf "$_dfpr_stage" 2>/dev/null || true
     mkdir -p "$_dfpr_stage" 2>/dev/null || return 1
-    for _dfpr_weight in 100 200 300 400 500 600 700 800 900; do
-        _dfpr_anchor="$(_dfpr_nearest_anchor "$_dfpr_weight" "$_dfpr_lines")" || {
-            rm -rf "$_dfpr_stage" 2>/dev/null || true
-            return 2
-        }
+
+    # Preserve the source family's real weight topology. The old code fabricated
+    # nine nominal files by choosing the nearest anchor for every 100..900 target;
+    # a single Regular source therefore became nine byte-identical "weights" and
+    # the slot builder later relabelled that Regular outline as Bold/Thin. Sparse
+    # source sets are intentional: static families expose only real faces, while a
+    # variable Regular file can still be instanced at any supported wght by Python.
+    _dfpr_written=0
+    while IFS='|' read -r _dfpr_weight _dfpr_anchor; do
+        case "$_dfpr_weight" in 100|200|300|400|500|600|700|800|900) ;; *) continue ;; esac
+        [ -s "$_dfpr_anchor" ] || continue
         _dfpr_link_or_copy "$_dfpr_anchor" "$_dfpr_stage/LuoShu-${_dfpr_weight}.ttf" || {
             rm -rf "$_dfpr_stage" 2>/dev/null || true
             return 1
         }
-    done
+        _dfpr_written=$((_dfpr_written + 1))
+    done <<EOF_DFPR_SOURCES
+$_dfpr_lines
+EOF_DFPR_SOURCES
+    [ "$_dfpr_written" -gt 0 ] || {
+        rm -rf "$_dfpr_stage" 2>/dev/null || true
+        return 2
+    }
+
     rm -rf "$_dfpr_output.previous" 2>/dev/null || true
     [ ! -d "$_dfpr_output" ] || mv "$_dfpr_output" "$_dfpr_output.previous" 2>/dev/null || return 1
     if mv "$_dfpr_stage" "$_dfpr_output" 2>/dev/null; then
@@ -344,6 +375,11 @@ device_font_payload_build_install() {
         printf 'state=installed\n'
         printf 'schema=device-font-payload-v1\n'
         printf 'font=%s\n' "$_dfpr_font_id"
+        printf 'templateKey=%s\n' "$(cat "$_dfpr_module_dir/config/device-font-template.key" 2>/dev/null)"
+        printf 'inventoryKey=%s\n' "$(_dfpr_inventory_key 2>/dev/null)"
+        printf 'planRevision=4\n'
+        printf 'weightTruthRevision=1\n'
+        printf 'slotTraceRevision=1\n'
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "${_dfpr_state}.tmp.$$" 2>/dev/null || {
         rmdir "$_dfpr_lock" 2>/dev/null || true

@@ -192,6 +192,121 @@ _dfload_mount_transaction_active() {
     esac
 }
 
+_dfload_exec_python() {
+    _dfload_module_dir="$(_dfload_module)"
+    _dfload_python_root="$_dfload_module_dir/common/python"
+    _dfload_python="$_dfload_python_root/bin/luoshu-python"
+    [ -x "$_dfload_python" ] || return 1
+    PYTHONHOME="$_dfload_python_root" \
+    PYTHONPATH="$_dfload_module_dir/common:$_dfload_python_root/lib/python3.14:$_dfload_python_root/lib/python3.14/site-packages" \
+    LD_LIBRARY_PATH="$_dfload_python_root/lib:$_dfload_python_root/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$_dfload_python" "$@"
+}
+
+_dfload_collect_slot_evidence() {
+    _dfload_active="$1"
+    _dfload_module_dir="$(_dfload_module)"
+    _dfload_config="$_dfload_module_dir/config"
+    _dfload_cache_id=$(_dfload_state_value "$_dfload_config/device-font-engine.conf" cacheId)
+    if [ -n "$_dfload_cache_id" ]; then
+        _dfload_aligned_root="$_dfload_config/device-font-cache/$_dfload_cache_id"
+        _dfload_payload_manifest="$_dfload_aligned_root/payload/manifest.json"
+        _dfload_overlay_manifest="$_dfload_aligned_root/overlay/overlay-manifest.json"
+    else
+        _dfload_payload_manifest="$_dfload_config/device-font-payload/manifest.json"
+        _dfload_overlay_manifest="$_dfload_config/device-font-overlay/overlay-manifest.json"
+    fi
+    [ -s "$_dfload_payload_manifest" ] && [ -s "$_dfload_overlay_manifest" ] || return 2
+
+    _dfload_dump="$_dfload_config/device-font-manager-dump.txt"
+    _dfload_evidence="$_dfload_config/device-font-mount-evidence.txt"
+    _dfload_result="$_dfload_config/device-font-load-verification.json"
+    _dfload_dump_tmp="${_dfload_dump}.tmp.$"
+    _dfload_evidence_tmp="${_dfload_evidence}.tmp.$"
+    : > "$_dfload_dump_tmp" 2>/dev/null || return 1
+    : > "$_dfload_evidence_tmp" 2>/dev/null || {
+        rm -f "$_dfload_dump_tmp" 2>/dev/null || true
+        return 1
+    }
+
+    if command -v cmd >/dev/null 2>&1; then
+        cmd font dump > "$_dfload_dump_tmp" 2>/dev/null || \
+            cmd font system > "$_dfload_dump_tmp" 2>/dev/null || true
+    fi
+    if [ ! -s "$_dfload_dump_tmp" ] && command -v dumpsys >/dev/null 2>&1; then
+        dumpsys font > "$_dfload_dump_tmp" 2>/dev/null || true
+    fi
+
+    _dfload_installed="$_dfload_config/device-font-installed.conf"
+    if [ -s "$_dfload_installed" ]; then
+        while IFS='|' read -r _dfload_kind _dfload_rel _dfload_expected_hash _dfload_expected_size; do
+            [ "$_dfload_kind" = file ] || continue
+            case "$_dfload_rel" in
+                */fonts/*.ttf|*/fonts/*.otf|*/fonts/*.ttc) ;;
+                *) continue ;;
+            esac
+            _dfload_visible=$(_dfload_visible_path "$_dfload_rel")
+            _dfload_source=$(_dfload_payload_file "$_dfload_rel" 2>/dev/null)
+            _dfload_status=missing
+            _dfload_source_fp=''
+            _dfload_visible_fp=''
+            _dfload_visible_bytes=0
+            if [ -f "$_dfload_source" ]; then
+                _dfload_source_fp=$(_dfload_quick_fingerprint "$_dfload_source" 2>/dev/null)
+            fi
+            if [ -f "$_dfload_visible" ]; then
+                _dfload_visible_bytes=$(_dfload_size "$_dfload_visible")
+                case "$_dfload_visible_bytes" in ''|*[!0-9]*) _dfload_visible_bytes=0 ;; esac
+                _dfload_visible_fp=$(_dfload_quick_fingerprint "$_dfload_visible" 2>/dev/null)
+                if [ -n "$_dfload_source_fp" ] && [ "$_dfload_source_fp" = "$_dfload_visible_fp" ]; then
+                    _dfload_status=ok
+                else
+                    _dfload_status=mismatch
+                fi
+            fi
+            printf '%s|%s|%s|%s|%s|%s\n' \
+                "$_dfload_rel" "$_dfload_visible" "$_dfload_status" \
+                "$_dfload_source_fp" "$_dfload_visible_fp" "$_dfload_visible_bytes" \
+                >> "$_dfload_evidence_tmp" 2>/dev/null || true
+        done < "$_dfload_installed"
+    fi
+
+    mv -f "$_dfload_dump_tmp" "$_dfload_dump" 2>/dev/null || {
+        rm -f "$_dfload_dump_tmp" "$_dfload_evidence_tmp" 2>/dev/null || true
+        return 1
+    }
+    mv -f "$_dfload_evidence_tmp" "$_dfload_evidence" 2>/dev/null || {
+        rm -f "$_dfload_evidence_tmp" 2>/dev/null || true
+        return 1
+    }
+    chmod 0600 "$_dfload_dump" "$_dfload_evidence" 2>/dev/null || true
+
+    _dfload_verifier="$_dfload_module_dir/common/device_font_load_verify.py"
+    [ -f "$_dfload_verifier" ] || return 2
+    _dfload_exec_python "$_dfload_verifier" \
+        --payload "$_dfload_payload_manifest" \
+        --overlay "$_dfload_overlay_manifest" \
+        --font-dump "$_dfload_dump" \
+        --mount-evidence "$_dfload_evidence" \
+        --engine-state "$_dfload_config/device-font-engine.conf" \
+        --active-font "$_dfload_active" \
+        --output "$_dfload_result" >/dev/null 2>> "$_dfload_module_dir/logs/device-font-load-verify.log"
+    _dfload_python_rc=$?
+
+    _dfload_trace="$_dfload_module_dir/common/device_font_slot_trace.py"
+    _dfload_inventory="$_dfload_config/device_font_inventory.json"
+    if [ -f "$_dfload_trace" ] && [ -s "$_dfload_inventory" ] && [ -s "$_dfload_result" ]; then
+        _dfload_exec_python "$_dfload_trace" \
+            --inventory "$_dfload_inventory" \
+            --payload "$_dfload_payload_manifest" \
+            --overlay "$_dfload_overlay_manifest" \
+            --verification "$_dfload_result" \
+            --output "$_dfload_config/device-font-slot-trace.json" \
+            >/dev/null 2>> "$_dfload_module_dir/logs/device-font-load-verify.log" || true
+    fi
+    return "$_dfload_python_rc"
+}
+
 device_font_load_status() {
     _dfload_module_dir="$(_dfload_module)"
     _dfload_active=$(_dfload_active_font)
@@ -229,6 +344,11 @@ device_font_load_verify() {
         _dfload_write_simple not-applicable default-font "$_dfload_active" system
         return 2
     fi
+
+    # Collect per-slot evidence after boot settles. This diagnostic pass is not a
+    # destructive gate: the existing mount transaction still decides whether the
+    # active font remains in place.
+    _dfload_collect_slot_evidence "$_dfload_active" >/dev/null 2>&1 || true
 
     if _dfload_exact_visible_match; then
         _dfload_write_simple verified visible-font-files-match "$_dfload_active" mount-verified

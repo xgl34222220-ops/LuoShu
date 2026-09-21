@@ -1,0 +1,132 @@
+# 字体处理链修复记录 · 2026-09-21
+
+基线：`5373f85eb8bf2a5eb89c1f88119374573a911bce`（重构版 1.1.1）。
+本专项不改版本号，不创建正式 Release；代码集中在 PR #240。
+
+## 不变的架构
+
+保留刷写时的唯一原厂扫描器 `font_inventory_scan.py` 和本机 inventory。
+不新增品牌扫描器、不扩大保护字体替换、不修改挂载和原厂配置。
+扫描结果必须沿筛选、生成、映射、加载逐级核验；文件生成成功不是页面验证成功。
+
+## 第一批：真实字重生成
+
+- `--weight` 在未显式提供 `wght` 时实际驱动该轴；显式轴仍优先。
+- 没有 `wght` 的静态字体/可变字体保留实际源字重，不将 Regular 仅改标成 Bold。
+- TTC 选面同时考虑 Unicode 探针覆盖与可变字重的真实可达范围；`.notdef` 不算命中。
+- 实例 JSON 返回请求字重、源字重、实际字重、匹配状态及生成方式。
+- 删除生成结果小于 4096 字节就判失败的规则，改为提交前重读 SFNT、基础表、Unicode 映射与实例状态校验。
+- 参数中的 NaN/Infinity、重复轴及直接覆盖源文件被明确拒绝；异常不替换上一份输出。
+- 旧组合实例化入口委托给共享引擎，保留旧路径的“不先重写度量”行为，避免两个实现继续分叉。
+
+第一批 28 项生成回归在 Python 3.11/3.14 的 CI 已通过。测试使用程序生成的小型字体，比较真实轮廓，但不等于 Android 度量或页面渲染验证。
+
+## 第二批：扫描分区贯通暂存与缓存
+
+### 已复现的问题
+
+- `payload_clone.sh` 只排除固定分区的旧 fonts 树，scanner 新发现的分区可能被作为普通数据复制。组合路径的旧清理名单又可能留下这些字体或生成 XML。
+- safe-switch 的 mapperIdentity 只跟踪三个入口脚本，底层字重/度量/覆盖代码改变不使旧对齐缓存失效。
+- 分区清单 `device_font_partitions.conf` 不在原有缓存身份中；字体校验缓存也没有纳入校验代码身份。
+- cp 硬链接恢复失败后可能留下半个目录；直接普通复制会产生 fonts/fonts 或残留旧文件。恢复返回失败后进入新生成，也未先清掉已恢复部分。
+- 新结果在 stage_verify 之前就被保存为缓存，可能缓存随后验证失败的结果。
+
+### 改动
+
+- 在已有克隆 helper 内集中读取安装扫描产生的分区清单；直接切换和组合克隆都消费它。维持保留目录/非法路径过滤，与私有挂载策略做一致性测试。
+- 暂存克隆不带入已发现分区的旧字体和明确由洛书生成的字体 XML；不修改 live 字体、无关配置或原厂分区。
+- safe-switch 对齐缓存升级 v2，纳入 inventory JSON、分区清单及已分发 Python/Shell 生成代码。校验缓存也纳入代码身份。
+- 生成前固定输入身份，存缓存及提交下一启动负载前重新检查。发现源字体元数据、清单或引擎改变则放弃本次结果，不把半旧结果记成新结果。
+- 源字体身份仍采用原有 inode/size/mtime/ctime 元数据；本批没有宣称解决同秒同尺寸原地篡改或所有同名字重文件复用问题。
+- 小代码文件批量校验；等待预热缓存时复用本次引擎摘要，不反复启动 Python、不对大字体逐次求哈希。
+- 硬链接失败后清掉部分目标再普通复制；整体恢复失败先清理暂存字体再重新生成。
+- 通过现有 stage_verify 后才允许保存缓存。该 verifier 仍不是完整的逐槽渲染校验。
+
+### 验证与边界
+
+`python3 scripts/font_stage_chain_test.py`：本地 Python 3.13.5 / POSIX sh，33/33 通过。
+取修复前的两个原始文件（blob 已核对）运行其中 8 个直接相关用例，8/8 复现失败；修复后全部通过。
+测试调用实际 Shell 函数，模拟额外分区、缓存读写、cp 部分失败、输入中途变化和下一启动事务。硬件/字形操作使用 fixture，不执行 Root 命令、不挂载、不宣称真机已验证。
+本地工作副本仅恢复了相关源码；挂载策略一致性测试使用已读取的原策略函数。完整仓库及完整挂载 helper 由 CI 复验。
+沿用第一批 CI，增加新脚本；不新增第二套构建流水线。
+
+## 第三批：已应用复用与组合缓存来源证明
+
+### 已复现的问题
+
+- 已应用字体的 no-op 判断只看活动字体名、启动状态和挂载验证；同名字体文件内容改变、扫描清单改变或生成代码升级后，仍可能直接返回“无需重新生成”。
+- 组合字体复用只比较中文/英文/数字的字体族名、轴和值模式，没有证明这些字体族的实际文件字节仍与当前负载一致。
+- 自动多字重的 prepared/composite/source-metadata 中间缓存没有生成引擎身份；底层实例器、度量或合成器升级后，旧缓存仍可能绕过新实现。
+- v14.4 兼容自动多字重仍有独立 composite 缓存键，且 compatibility runtime 的清理/目录创建仍使用固定分区列表。
+
+### 改动
+
+- 新增 `font_provenance.sh`，为源字体内容、本机 inventory/分区清单和生成引擎提供稳定摘要；只读取源与小型代码/配置，不改 live payload。
+- 直接字体 no-op 需要上一启动记录的 `directProof` 与当前源字体字节、inventory 和生成引擎全部一致。旧负载没有 proof 时仅失去快速复用资格，不会被删除，会在下一次显式应用时重建并写入 proof。
+- 组合 no-op 在原有字体族/轴/模式比较之外，增加三组所选字体族实际文件字节、inventory 和引擎证明；同名字体被替换后不会继续复用旧组合。
+- 下一启动状态把 direct proof 贯穿到激活记录，避免仅靠活动名称确认来源。
+- 当前自动多字重缓存升级到 `prepared-v9` / `composites-v10` / `source-meta-v2`，中间 key 纳入 engine identity；旧 schema 缓存在新任务开始时清理。
+- v14.4 自动多字重 composite 缓存升级为 v4 并纳入 engine identity；固定多轴和自动多字重都把 mix proof 写回组合配置。
+- compatibility runtime 的清理与分区目录创建改为消费安装扫描产生的分区清单，并显式链接 provenance helper。
+
+### 验证边界
+
+新增 provenance 与 active-reuse 回归：覆盖同路径同名字体换内容、生成代码变化、分区清单变化、组合中单一来源字体变化、旧缓存 schema 隔离、compatibility 动态分区。测试只证明复用/缓存不会因为“名字一样”而继续吃旧结果，不等于状态栏、锁屏、Google 或 Chrome 已完成真机验证。
+
+## 第四批：inventory → 生成 → 映射 → 启动加载逐槽追踪
+
+### 已复现的断点
+
+- 安装扫描器已经能按真实分区和字符覆盖发现可替换 UI 字体，但最终设备对齐构建器仍主要从可信 XML 模板取槽位，只额外补一小组 HyperOS 物理文件名。于是存在“inventory 已扫描到，最终设备对齐 payload 根本没有消费”的真实断点。
+- 对齐缓存的身份只有字体内容、模板和字体源，没有包含 `device_font_inventory.json` / 动态分区清单；扫描结果变化后旧对齐缓存仍可能被认为可用。
+- 直接物理槽映射只保留 basename；如果扫描器发现 `/partition/fonts/subdir/File.ttf`，旧 overlay 会错误落到 `/partition/fonts/File.ttf`。
+- build / overlay / load verify 只有聚合计数，没有一个能回答“这个具体原厂槽为什么没换、换到哪里、重启后有没有真正可见”。
+
+### 改动
+
+- 最终设备对齐构建器改为 inventory-first 补槽：XML 模板仍负责已声明 family 的精确布局契约，inventory 中未被模板消费的已验证 TTF/OTF UI 槽会读取可信 stock lower/mirror 的真实轮廓/度量并加入 direct physical slot。
+- TTC/OTC 容器不会被单个生成 TTF 冒充覆盖；这类 inventory 项明确记录为 `preserved-collection`。italic/oblique 和无法取得可信原厂文件的槽也明确保留并给出原因，而不是静默消失。
+- payload manifest 保留 `inventoryPath / inventorySource / inventoryDisposition / directPhysical`，并附带 `inventorySupplement`，记录每个扫描槽是模板消费、直接补槽还是保留原厂。
+- overlay 生成 `slotResults`，逐项记录 route（xml / dynamic / physical / stock）、targetPath 和映射状态；物理槽保留 `fonts/` 下的完整相对路径，不再只用 basename。
+- 启动加载验证把 mount/hash 与 FontManager 证据回写到同一个 slot result，区分 `loaded`、`mount-visible`、`missing-mount`、`mismatch`、`preserved`。
+- 新增 `device_font_slot_trace.py`，把 install inventory、payload、overlay、boot verification 四层合成一张逐槽诊断表；App bridge 增加 `slot_trace`，运行时报告也会自动尝试生成 `device-font-slot-trace.json`。
+- 设备对齐缓存升级为 `alignment-cache-v6-inventory`，cache/pending/engine state 全部写入 inventoryKey；本机扫描清单变化时旧缓存不再晋升或复用。
+- 已安装设备对齐负载的快速复用也要求当前 inventoryKey 一致，防止 OTA/重扫后继续使用旧槽位集合。
+
+### 安全边界
+
+inventory 仍然只由现有唯一刷写扫描器产生，不新增品牌扫描器，也不把候选列表里的 Emoji、symbol、专用 script fallback 直接当 UI 槽。新增 direct physical 补槽只消费 canonical inventory 中已经通过原有 UI/字符覆盖筛选的 TTF/OTF；无法证明安全的容器和 stock 来源保持原厂。
+
+## 第六批：HyperOS 垂直布局框与剩余假字重清理
+
+### 已复现的断点
+
+- 逐槽生成器已经复制 stock hhea / OS/2 行高，也会按 stock 探针移动数字、拉丁和 CJK 字形，但保存时仍让 FontTools 从替换字体的完整字形集合重新计算 `head.yMin/yMax`。在 HyperOS 状态栏、锁屏和部分 bitmap/span 布局里，这会让“已经 loaded”的字体继续出现上浮、下沉或裁切。
+- 旧 HyperOS stage-complete 路径仍允许 `Roboto-Bold.ttf / 700.ttf` 在缺少真实 700 源时一路回退到 Regular；这会把 Regular 笔画放进物理粗体槽，和第五批刚修掉的真实字重语义互相打架。
+
+### 改动
+
+- stock-aligned slot builder 升级到 `device-font-slot-build-v4`：在完成脚本字形变换后，明确恢复可信 stock `head.yMin/yMax` 布局框，并关闭最终 save 时的 whole-font bbox 回算；hhea / OS/2 / head 三套垂直契约现在一起保持。
+- 保存后验证新增 `headYMin/headYMax`，如果 stock frame 没被保住会直接判构建失败，不允许带着错误度量进入 overlay。
+- 该布局框处理只改变 sfnt 布局 envelope，不再次移动字形基线，也不重新缩放轮廓；实际数字/CJK/拉丁的脚本变换仍由 v2 probe plan 决定。
+- HyperOS metrics batch 的多字重选择改为 exact-only：700/500/300 等物理槽只接受真实对应静态 source anchor；缺失时删除前面误建的 Regular alias，让 ROM 原厂对应字重从下层透出。
+- 缺少真实物理字重的保留结果写入既有 `.luoshu-metrics-report.json` 的 `preservedWeightAliases`，不新增第二套诊断格式。
+- 现有逐槽 trace、inventory、aligned builder 和 cache 体系继续复用，不新增品牌扫描器。
+
+### 验证重点
+
+新增/扩展回归验证：stock head frame 在保存后仍完全一致；400 Regular 对齐到 700 stock slot 时 outline weight 不被篡改；HyperOS 只有 400 源而没有 700 时不再生成假 Bold alias；存在真实 700 时仍正常生成对应物理槽。
+
+## 仍需验证与后续修复
+
+- 逐槽追踪能定位状态栏/锁屏/拨号/第三方 App 到底断在哪一层，但具体真机页面是否命中仍需用这一批生成的 trace 与设备日志验证。
+- 后续继续检查命名器及 XML 字重声明是否再次把真实字重改标。
+- 常规系统路径的旧 ROM dispatcher 仍含固定映射；需要继续把实际 inventory 的每个槽位贯通生成与缺失报告，而不是认为分区处理修好就等于字体全覆盖。
+- 系统全局粗细设置的真实渲染验证、多用户设置和恢复。
+- 状态栏/锁屏的真实失败日志、度量偏移/裁切、拨号及部分 App 的覆盖。
+- Google 兼容冲突状态/灰按钮、中文来源，以及 Chrome 崩溃日志与对照复现。
+- 原厂视图、挂载命名空间、重启后加载、各 ROM 真机回归、性能与容量复测。
+
+参考：FontTools varLib.instancer 官方 API 与 OpenType OS/2 字重定义。
+https://fonttools.readthedocs.io/en/latest/varLib/instancer.html
+https://learn.microsoft.com/en-us/typography/opentype/spec/os2#usweightclass

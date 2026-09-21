@@ -44,17 +44,49 @@ def nonempty(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
 
 
+WEIGHT_ROLES = {
+    100: 'thin', 200: 'extralight', 300: 'light', 400: 'regular',
+    500: 'medium', 600: 'semibold', 700: 'bold', 800: 'extrabold', 900: 'black',
+}
+
+
+class MissingWeightSource(ValueError):
+    pass
+
+
 def pick_source(fonts: Path, name: str) -> Path:
     weight = weight_for_name(name)
     store = fonts / '.luoshu-font-store'
-    # Numeric and exact aliases carry the actual multiweight selection. Do not
-    # replace every weight with regular just because a regular anchor exists.
-    candidates = (fonts / f'LuoShu-{weight}.ttf', store / f'wght-{weight}.font',
-                  fonts / f'{weight}.ttf', fonts / name,
-                  store / 'mix-composite.font', store / 'regular.font',
-                  store / 'compact-regular.font', fonts / '400.ttf',
-                  fonts / 'MiSansVF.ttf', fonts / 'Roboto-Regular.ttf')
-    for path in candidates:
+    role = WEIGHT_ROLES.get(weight, 'regular')
+
+    # Weight-specific physical files must be backed by a real matching static
+    # source. The old fallback chain eventually returned regular.font for
+    # Roboto-Bold/700.ttf, recreating exactly the “status bar digits become
+    # thin” failure even after the aligned builder learned real weight truth.
+    exact = (
+        fonts / f'LuoShu-{weight}.ttf',
+        store / f'wght-{weight}.font',
+        store / f'{role}.font',
+        fonts / f'{weight}.ttf',
+    )
+    for path in exact:
+        if nonempty(path):
+            return path
+
+    if weight != 400:
+        raise MissingWeightSource(f'缺少真实 {weight} 字重源：{name}')
+
+    # Only the Regular class may use generic/staged regular fallbacks.
+    regular = (
+        fonts / name,
+        store / 'mix-composite.font',
+        store / 'regular.font',
+        store / 'compact-regular.font',
+        fonts / '400.ttf',
+        fonts / 'MiSansVF.ttf',
+        fonts / 'Roboto-Regular.ttf',
+    )
+    for path in regular:
         if nonempty(path):
             return path
     raise ValueError(f'没有可用的源字体：{name}')
@@ -388,6 +420,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     data = read_inventory(module)
     jobs = []
     preserved_aliases = []
+    preserved_weight_aliases = []
     excluded_aliases = []
     for part in PARTS:
         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
@@ -412,9 +445,16 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 preserved_aliases.append(stage / part / 'fonts' / name)
                 continue
             if (root / name).exists():
-                jobs.append((pick_source(fonts, name), stage / part / 'fonts' / name,
+                try:
+                    source = pick_source(fonts, name)
+                except MissingWeightSource:
+                    # Remove any generic Regular alias staged earlier so Overlay
+                    # falls through to the ROM's genuine weight file.
+                    preserved_weight_aliases.append(stage / part / 'fonts' / name)
+                    continue
+                jobs.append((source, stage / part / 'fonts' / name,
                              contract_for_slot(data, logical)))
-    if not jobs:
+    if not jobs and not preserved_weight_aliases:
         raise ValueError('没有找到当前 ROM 的 HyperOS 字体目标')
     cjk_fallback = _staged_cjk_fallback(data, jobs, stage)
     store = fonts / '.luoshu-font-store'
@@ -467,10 +507,10 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 **output_reports[key]})
         for output, dest in prepared:
             link_copy(output, dest)
-        for alias in preserved_aliases + excluded_aliases:
-            # Initial generic mapping creates the alias as a regular font. Its
-            # absence exposes the ROM lower symlink in OverlayFS and leaves it
-            # untouched in per-file bind mode. Framework changes keep working.
+        for alias in preserved_aliases + preserved_weight_aliases + excluded_aliases:
+            # Initial generic mapping may have created these as Regular aliases.
+            # Their absence exposes the ROM lower font, preserving the correct
+            # script/weight until a real source face exists.
             alias.unlink(missing_ok=True)
         report = stage / '.luoshu-metrics-report.json'
         report.write_text(json.dumps({'schema': 'luoshu-slot-metrics-v1',
@@ -478,6 +518,9 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                       'preservedDynamicAliases': [
                                           '/' + alias.relative_to(stage).as_posix()
                                           for alias in preserved_aliases],
+                                      'preservedWeightAliases': [
+                                          '/' + alias.relative_to(stage).as_posix()
+                                          for alias in preserved_weight_aliases],
                                       'preservedStockAliases': sorted({
                                           '/' + alias.relative_to(stage).as_posix()
                                           for alias in excluded_aliases if alias.parent.is_dir()})}, ensure_ascii=False), encoding='utf-8')

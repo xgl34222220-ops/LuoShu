@@ -35,6 +35,7 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
+[ -f "$MODDIR/common/font_provenance.sh" ] && . "$MODDIR/common/font_provenance.sh"
 [ -f "$MODDIR/common/mix_task_handoff.sh" ] && . "$MODDIR/common/mix_task_handoff.sh"
 
 json_escape() {
@@ -249,18 +250,25 @@ rewrite_public_config() {
     _cjk_axes=$(read_value "$TASK_FILE" cjkAxes)
     _latin_axes=$(read_value "$TASK_FILE" latinAxes)
     _digit_axes=$(read_value "$TASK_FILE" digitAxes)
+    _mix_proof=''
+    if type luoshu_provenance_mix_proof >/dev/null 2>&1; then
+        _mix_proof=$(luoshu_provenance_mix_proof             "$_cjk" "$_latin" "$_digit"             "$_cjk_axes" "$_latin_axes" "$_digit_axes"             fixed fixed fixed "$USER_FONTS_DIR" 2>/dev/null) || _mix_proof=''
+    fi
     _tmp="$MIX_CONF.axes.$$"
     {
         printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$_cjk" "$_latin" "$_digit"
-        printf 'cjkWeight=%s\nlatinWeight=%s\ndigitWeight=%s\n' \
-            "$(safe_weight "$_cjk_axes")" "$(safe_weight "$_latin_axes")" "$(safe_weight "$_digit_axes")"
+        printf 'cjkWeight=%s\nlatinWeight=%s\ndigitWeight=%s\n'             "$(safe_weight "$_cjk_axes")" "$(safe_weight "$_latin_axes")" "$(safe_weight "$_digit_axes")"
         printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$_cjk_axes" "$_latin_axes" "$_digit_axes"
-        [ ! -f "$MIX_CONF" ] || grep -v -E '^(cjk|latin|digit|cjkWeight|latinWeight|digitWeight|cjkAxes|latinAxes|digitAxes)=' "$MIX_CONF" 2>/dev/null
+        printf 'cjkMode=fixed\nlatinMode=fixed\ndigitMode=fixed\n'
+        if [ -n "$_mix_proof" ]; then
+            printf 'provenanceSchema=font-provenance-v1\n'
+            printf 'mixProof=%s\n' "$_mix_proof"
+        fi
+        [ ! -f "$MIX_CONF" ] || grep -v -E '^(cjk|latin|digit|cjkWeight|latinWeight|digitWeight|cjkAxes|latinAxes|digitAxes|cjkMode|latinMode|digitMode|provenanceSchema|mixProof)=' "$MIX_CONF" 2>/dev/null
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$MIX_CONF" 2>/dev/null
     cp -f "$MIX_CONF" "$AXES_CONF" 2>/dev/null || true
     chmod 0644 "$MIX_CONF" "$AXES_CONF" 2>/dev/null || true
 }
-
 worker() {
     trap '' HUP
     _wanted="$1"

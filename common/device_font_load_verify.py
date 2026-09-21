@@ -75,6 +75,79 @@ def dynamic_families(overlay: dict[str, Any]) -> list[str]:
     return result
 
 
+def verify_slots(
+    overlay: dict[str, Any],
+    font_dump: str,
+    mounts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach runtime evidence to each build/mapping disposition.
+
+    Mount evidence proves the selected bytes are visible at the target path.
+    FontManager dump hits are recorded separately because OEM builds may redact
+    paths/family names even when the mount is correct.
+    """
+    raw = overlay.get("slotResults") if isinstance(overlay.get("slotResults"), list) else []
+    mount_by_rel = {str(item.get("relative") or ""): item for item in mounts if isinstance(item, dict)}
+    dump_lower = font_dump.lower()
+    results: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        current = dict(item)
+        if current.get("state") != "mapped":
+            current["loadState"] = "preserved"
+            current["fontManagerConfirmed"] = False
+            results.append(current)
+            continue
+
+        target = str(current.get("targetPath") or "")
+        generated = str(current.get("generatedFile") or "")
+        evidence = mount_by_rel.get(target)
+        if evidence is None:
+            current["loadState"] = "missing-mount"
+            current["fontManagerConfirmed"] = False
+            results.append(current)
+            continue
+        if evidence.get("status") != "ok":
+            current["loadState"] = "mismatch"
+            current["fontManagerConfirmed"] = False
+            current["mountStatus"] = str(evidence.get("status") or "")
+            results.append(current)
+            continue
+
+        needles = [generated.lower()]
+        family = str(current.get("family") or "")
+        if family:
+            needles.append(safe_family(current).lower())
+        basename = Path(target).name.lower()
+        if basename:
+            needles.append(basename)
+        confirmed = bool(font_dump.strip()) and any(needle and needle in dump_lower for needle in needles)
+        current["fontManagerConfirmed"] = confirmed
+        current["loadState"] = "loaded" if confirmed else "mount-visible"
+        current["mountStatus"] = "ok"
+        results.append(current)
+    return results
+
+
+def slot_summary(results: list[dict[str, Any]]) -> dict[str, int]:
+    states = ("loaded", "mount-visible", "missing-mount", "mismatch", "preserved", "unconfirmed")
+    summary = {f"slot{state.replace('-', '').title()}": 0 for state in states}
+    key_for = {
+        "loaded": "slotLoaded",
+        "mount-visible": "slotMountVisible",
+        "missing-mount": "slotMissingMount",
+        "mismatch": "slotMismatch",
+        "preserved": "slotPreserved",
+        "unconfirmed": "slotUnconfirmed",
+    }
+    result = {value: 0 for value in key_for.values()}
+    for item in results:
+        state = str(item.get("loadState") or "unconfirmed")
+        result[key_for.get(state, "slotUnconfirmed")] += 1
+    return result
+
+
 def verify(
     payload: dict[str, Any],
     overlay: dict[str, Any],
@@ -160,6 +233,8 @@ def verify(
             mode = "compatibility"
 
     summary = overlay.get("summary") if isinstance(overlay.get("summary"), dict) else {}
+    verified_slots = verify_slots(overlay, font_dump, mounts)
+    per_slot = slot_summary(verified_slots)
     return {
         "schema": SCHEMA,
         "state": state,
@@ -178,6 +253,7 @@ def verify(
             "dynamicFamilies": len(dynamic),
             "dynamicFamilyHits": len(dynamic_hits),
             "mappedSlots": int(summary.get("mappedSlots") or 0),
+            **per_slot,
         },
         "reasons": reasons,
         "missingMounts": missing_mounts,
@@ -187,6 +263,8 @@ def verify(
         "dynamicFamilies": dynamic,
         "dynamicFamilyHits": dynamic_hits,
         "dynamicFamilyMissing": dynamic_missing,
+        "slotTraceSchema": "device-font-slot-trace-v1",
+        "slotResults": verified_slots,
     }
 
 

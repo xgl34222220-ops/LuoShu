@@ -209,8 +209,9 @@ def stock_xml_input(template: dict[str, Any], source_xml: str) -> Path:
     return source
 
 
-def clean_font_node(font: ET.Element, filename: str) -> None:
+def clean_font_node(font: ET.Element, filename: str, outline_weight: int) -> None:
     font.text = filename
+    font.attrib["weight"] = str(max(1, min(1000, int(outline_weight))))
     for key in ("index", "name", "postScriptName", "postscriptName"):
         font.attrib.pop(key, None)
     for child in list(font):
@@ -281,7 +282,7 @@ def rewrite_regular_xml(
                 continue
             filename = str(mapped["generatedFile"])
             copy_generated(payload_root, stage, partition, filename, copied)
-            clean_font_node(font, filename)
+            clean_font_node(font, filename, int(mapped.get("outlineWeight") or mapped.get("weight") or 400))
             family.attrib.pop("supportedAxes", None)
             changed += 1
             families.add(family_name)
@@ -364,15 +365,25 @@ def inject_dynamic_families(
         original_name = str(slots[0].get("family") or normalized_family)
         remove_existing_family(root, original_name)
         family = ET.SubElement(root, ns + "family", {"name": original_name})
-        seen: set[tuple[int, str, str]] = set()
-        for slot in sorted(slots, key=lambda item: (int(item.get("weight") or 400), str(item.get("style", "normal")))):
-            weight = int(slot.get("weight") or 400)
+        # A static single-weight source may have been aligned against several
+        # stock target weights. Only expose each real outline weight once so
+        # FontManager can synthesize missing requests instead of seeing the same
+        # Regular outline falsely declared as 500/700/900.
+        chosen: dict[tuple[int, str], dict[str, Any]] = {}
+        for slot in slots:
+            target_weight = int(slot.get("weight") or 400)
+            weight = int(slot.get("outlineWeight") or target_weight)
             style = str(slot.get("style", "normal")).lower()
-            filename = str(slot["generatedFile"])
-            key = (weight, style, filename)
-            if key in seen:
+            key = (weight, style)
+            current = chosen.get(key)
+            if current is None:
+                chosen[key] = slot
                 continue
-            seen.add(key)
+            current_target = int(current.get("weight") or 400)
+            if abs(target_weight - weight) < abs(current_target - weight):
+                chosen[key] = slot
+        for (weight, style), slot in sorted(chosen.items(), key=lambda item: (item[0][0], item[0][1])):
+            filename = str(slot["generatedFile"])
             font = ET.SubElement(
                 family,
                 ns + "font",
@@ -394,21 +405,73 @@ def copy_direct_physical_slots(
         parts = Path(stock_path).parts
         if len(parts) < 4 or parts[0] != "/" or parts[2] != "fonts":
             raise OverlayError(f"物理字体槽路径无效：{stock_path}")
-        partition, target_name = parts[1], parts[-1]
+        partition = parts[1]
+        relative = Path(*parts[3:])
+        if not relative.parts or ".." in relative.parts:
+            raise OverlayError(f"物理字体槽相对路径无效：{stock_path}")
         generated_name = str(slot["generatedFile"])
         source = payload_root / "fonts" / generated_name
         if not source.is_file() or source.stat().st_size < 1024:
             raise OverlayError(f"物理槽生成字体不存在：{generated_name}")
-        destination = stage / partition / "fonts" / target_name
+        destination = stage / partition / "fonts" / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         try:
             os.link(source, destination)
         except OSError:
             shutil.copyfile(source, destination)
         os.chmod(destination, 0o644)
-        copied[(partition, target_name)] = destination
+        copied[(partition, relative.as_posix())] = destination
         count += 1
     return count
+
+
+def slot_result(slot: dict[str, Any]) -> dict[str, Any]:
+    """Describe exactly where one planned slot went in the rendered overlay."""
+    result: dict[str, Any] = {
+        "slotIndex": int(slot.get("slotIndex") or 0),
+        "inventoryPath": str(slot.get("inventoryPath") or ""),
+        "stockPath": str(slot.get("stockPath") or ""),
+        "family": str(slot.get("family") or ""),
+        "weight": int(slot.get("weight") or 400),
+        "targetWeight": int(slot.get("weight") or 400),
+        "outlineWeight": int(slot.get("outlineWeight") or slot.get("weight") or 400),
+        "weightMatched": bool(slot.get("weightMatched", True)),
+        "style": str(slot.get("style") or "normal"),
+        "sourceXml": str(slot.get("sourceXml") or ""),
+        "planStatus": str(slot.get("planStatus") or "unresolved"),
+        "planReason": str(slot.get("planReason") or ""),
+        "generatedFile": str(slot.get("generatedFile") or ""),
+    }
+    generated = result["generatedFile"]
+    if not generated:
+        result.update(
+            state="preserved",
+            route="stock",
+            reason=result["planReason"] or result["planStatus"] or "not-generated",
+            targetPath="",
+        )
+        return result
+
+    source_xml = result["sourceXml"]
+    if source_xml:
+        if is_dynamic_path(source_xml):
+            result.update(state="mapped", route="dynamic", targetPath=f"system/fonts/{generated}")
+        else:
+            partition = partition_for_xml(source_xml)
+            result.update(state="mapped", route="xml", targetPath=f"{partition}/fonts/{generated}")
+        return result
+
+    stock = Path(result["stockPath"])
+    parts = stock.parts
+    if len(parts) >= 4 and parts[0] == "/" and parts[2] == "fonts":
+        result.update(state="mapped", route="physical", targetPath=str(stock).lstrip("/"))
+    else:
+        result.update(state="mapping-missing", route="physical", targetPath="", reason="invalid-stock-path")
+    return result
+
+
+def build_slot_results(slots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [slot_result(slot) for slot in slots if isinstance(slot, dict)]
 
 
 def commit_directory(stage: Path, output: Path) -> None:
@@ -534,7 +597,8 @@ def render_overlay(
             "copiedFonts": [
                 {
                     "partition": partition,
-                    "filename": filename,
+                    "filename": path.name,
+                    "targetKey": filename,
                     "path": str(path.relative_to(stage)),
                     "bytes": path.stat().st_size,
                 }
@@ -547,6 +611,8 @@ def render_overlay(
                 }
                 for report in dynamic_reports
             ],
+            "slotTraceSchema": "device-font-slot-trace-v1",
+            "slotResults": build_slot_results(slots),
         }
         atomic_json(report, stage / "overlay-manifest.json")
         commit_directory(stage, output_tree)

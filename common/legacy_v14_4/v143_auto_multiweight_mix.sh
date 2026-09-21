@@ -12,7 +12,8 @@ if [ -z "$MODDIR" ]; then
 fi
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/auto-multiweight-mix"
-COMPOSITE_CACHE="$CACHE_ROOT/composites-v3"
+COMPOSITE_CACHE="$CACHE_ROOT/composites-v4"
+MIX_ENGINE_IDENTITY=''
 PUBLIC_ROOT="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 SOURCE_FONTS="$PUBLIC_ROOT/fonts"
 USER_FONTS_DIR="$SOURCE_FONTS"
@@ -37,6 +38,7 @@ LOCK_FILE="$MODDIR/.font_switch.lock"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODE_HELPER" ] && . "$MODE_HELPER"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
+[ -f "$MODDIR/common/font_provenance.sh" ] && . "$MODDIR/common/font_provenance.sh"
 
 json_escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '; }
 read_value() { sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'; }
@@ -265,8 +267,8 @@ build_composite_cached() {
     _output="$4"
     _progress="$5"
     mkdir -p "$COMPOSITE_CACHE" "${_output%/*}" 2>/dev/null || return 1
-    _key=$(printf '%s|%s|%s|auto-multiweight-v3-metrics' \
-        "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" | hash_text)
+    _key=$(printf '%s|%s|%s|auto-multiweight-v4-provenance|%s' \
+        "$(hash_file "$_cjk")" "$(hash_file "$_latin")" "$(hash_file "$_digit")" "$MIX_ENGINE_IDENTITY" | hash_text)
     [ -n "$_key" ] || return 1
     _cached="$COMPOSITE_CACHE/${_key}.font"
     if [ -s "$_cached" ]; then
@@ -301,12 +303,20 @@ build_composite_cached() {
 
 save_mix_config() {
     _tmp="$MIX_CONF.auto.$$"
+    _mix_proof=''
+    if type luoshu_provenance_mix_proof >/dev/null 2>&1; then
+        _mix_proof=$(luoshu_provenance_mix_proof             "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9" "$SOURCE_FONTS" 2>/dev/null) || _mix_proof=''
+    fi
     {
         printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$1" "$2" "$3"
         printf 'cjkWeight=%s\nlatinWeight=%s\ndigitWeight=%s\n' "$(safe_weight "$4")" "$(safe_weight "$5")" "$(safe_weight "$6")"
         printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$4" "$5" "$6"
         printf 'cjkMode=%s\nlatinMode=%s\ndigitMode=%s\n' "$7" "$8" "$9"
-        printf 'isolation=auto-multiweight-v1\ncharacterIsolation=true\ncomposite=true\nxmlOverlay=false\ntime=%s\n' "$(date +%s)"
+        printf 'isolation=auto-multiweight-v2\ncharacterIsolation=true\ncomposite=true\nxmlOverlay=false\ntime=%s\n' "$(date +%s)"
+        if [ -n "$_mix_proof" ]; then
+            printf 'provenanceSchema=font-provenance-v1\n'
+            printf 'mixProof=%s\n' "$_mix_proof"
+        fi
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$MIX_CONF" 2>/dev/null || return 1
     cp -f "$MIX_CONF" "$AXES_CONF" 2>/dev/null || true
     printf 'mix\n' >"$ACTIVE_CONF" 2>/dev/null || return 1
@@ -314,7 +324,6 @@ save_mix_config() {
     sed -i '/^LuoShuAutoMix$/d' "$CONFIG_DIR/recent_fonts.conf" 2>/dev/null || true
     chmod 0644 "$MIX_CONF" "$AXES_CONF" "$ACTIVE_CONF" "$REBOOT_CONF" 2>/dev/null || true
 }
-
 worker() {
     trap '' HUP
     _wanted="$1"
@@ -330,6 +339,15 @@ worker() {
     _digit_mode=$(normalize_mode "$(read_value "$TASK_FILE" digitMode)")
     _root=$(read_value "$TASK_FILE" root)
     _family=LuoShuAutoMix
+    type luoshu_provenance_engine_identity >/dev/null 2>&1 || {
+        update_task "$_wanted" failed '字体生成版本核验组件缺失' 100 "$(date +%s)"
+        clear_auto_worker_pid "$_wanted"; exit 1
+    }
+    MIX_ENGINE_IDENTITY=$(luoshu_provenance_engine_identity 2>/dev/null)
+    [ -n "$MIX_ENGINE_IDENTITY" ] || {
+        update_task "$_wanted" failed '无法核验字体生成版本' 100 "$(date +%s)"
+        clear_auto_worker_pid "$_wanted"; exit 1
+    }
     mkdir -p "$_root/fonts" "$_root/prepared" 2>/dev/null || {
         update_task "$_wanted" failed '无法创建自动多字重缓存' 100 "$(date +%s)"
         exit 1
@@ -438,6 +456,7 @@ start_mix() {
         printf '{"status":"error","message":"无法创建任务目录"}\n'
         return
     }
+    rm -rf "$CACHE_ROOT/composites-v3" 2>/dev/null || true
     _task="auto-mix-$(date +%s)-$$"
     _root="$CACHE_ROOT/$_task"
     mkdir -p "$_root" 2>/dev/null || {

@@ -53,6 +53,26 @@ export MODDIR MODULE_DIR LUOSHU_DATA_FONTS_CONFIG_TARGET LUOSHU_PAYLOAD_SCHEMA_C
 . "$MODULE/common/device_font_dynamic_guard.sh"
 set -eu
 
+# Source preparation must preserve the real static family topology. A Regular
+# + Bold family produces only 400/700 sources; it must not fabricate nine
+# byte-identical nominal weights from the nearest face.
+mkdir -p "$MODULE/.luoshu-payload/system/fonts/.luoshu-font-store"
+cp "$FONT" "$MODULE/.luoshu-payload/system/fonts/.luoshu-font-store/regular.font"
+cp "$FONT" "$MODULE/.luoshu-payload/system/fonts/.luoshu-font-store/bold.font"
+_dfpr_prepare_sources
+test -s "$MODULE/config/device-font-sources/LuoShu-400.ttf"
+test -s "$MODULE/config/device-font-sources/LuoShu-700.ttf"
+test ! -e "$MODULE/config/device-font-sources/LuoShu-100.ttf"
+test ! -e "$MODULE/config/device-font-sources/LuoShu-500.ttf"
+test "$(find "$MODULE/config/device-font-sources" -type f | wc -l | tr -d '[:space:]')" -eq 2
+
+# The source-topology fixture above intentionally creates the private canonical
+# root. Remove it before the independent overlay-runtime fixture below so that
+# this older compatibility test continues to exercise the public module root
+# it was written for; otherwise _dfpr_payload_root() correctly switches all
+# later writes to .luoshu-payload and the assertions would inspect the wrong tree.
+rm -rf "$MODULE/.luoshu-payload" "$MODULE/config/device-font-sources"
+
 _dfpr_install_overlay "$OVERLAY"
 test -s "$MODULE/system/fonts/LuoShuSlot-fixture-400.ttf"
 test -s "$MODULE/system/etc/font_fallback.xml"

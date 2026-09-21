@@ -107,6 +107,7 @@ cp "$ROOT/common/device_font_boot_verify.sh" "$MOD/common/"
 cp "$ROOT/common/background_task.sh" "$MOD/common/"
 cat > "$MOD/common/device_font_load_verify.sh" <<'EOF_VERIFY'
 #!/bin/sh
+printf '%s\n' "${1:-status}" > "$MODDIR/config/verify-invocation.txt"
 printf 'state=verified\nmode=mount-verified\nactiveFont=test\n' > "$MODDIR/config/device-font-load-verification.conf"
 exit 0
 EOF_VERIFY
@@ -122,6 +123,7 @@ PATH="$TMP/bin:$PATH" MODDIR="$MOD" \
     LUOSHU_BOOT_VERIFY_POLL_SECONDS=1 \
     sh "$MOD/common/device_font_boot_verify.sh" run trust-test
 grep -q '^state=verified$' "$MOD/config/device-font-load-verification.conf"
+grep -q '^verify$' "$MOD/config/verify-invocation.txt"
 ! grep -q 'device_font_boot_verify.sh.*schedule' "$ROOT/post-fs-data.sh" "$ROOT/.luoshu-runtime/compat/v227/post-fs-data.sh"
 
 echo 'device_font_trust_test: PASS'

@@ -104,6 +104,7 @@ device_font_runtime_report_collect() {
     }
 
     for _dfr_pair in \
+        "device_font_inventory.json|device-font-inventory.json" \
         "device-font-template.json|device-font-template.json" \
         "device-font-template.key|device-font-template.key" \
         "device-font-template.state|device-font-template.state" \
@@ -136,6 +137,28 @@ device_font_runtime_report_collect() {
     fi
     _device_font_report_copy "$_dfr_module/system/etc/.luoshu-data-fonts-config.xml" \
         "$_dfr_stage/data-fonts-config-view.xml" || true
+
+    # Build a compact per-slot chain report from the exact artifacts copied above.
+    # This is diagnostic only; failure never changes the active font.
+    _dfr_trace="$_dfr_module/common/device_font_slot_trace.py"
+    _dfr_python="$_dfr_module/common/python/bin/luoshu-python"
+    if [ -x "$_dfr_python" ] && [ -f "$_dfr_trace" ] && \
+       [ -s "$_dfr_stage/device-font-inventory.json" ] && \
+       [ -s "$_dfr_stage/device-font-payload-manifest.json" ] && \
+       [ -s "$_dfr_stage/device-font-overlay-manifest.json" ]; then
+        set -- "$_dfr_trace" \
+            --inventory "$_dfr_stage/device-font-inventory.json" \
+            --payload "$_dfr_stage/device-font-payload-manifest.json" \
+            --overlay "$_dfr_stage/device-font-overlay-manifest.json" \
+            --output "$_dfr_stage/device-font-slot-trace.json"
+        [ ! -s "$_dfr_stage/device-font-load-verification.json" ] || \
+            set -- "$@" --verification "$_dfr_stage/device-font-load-verification.json"
+        _dfr_pyroot="$_dfr_module/common/python"
+        PYTHONHOME="$_dfr_pyroot" \
+        PYTHONPATH="$_dfr_module/common:$_dfr_pyroot/lib/python3.14:$_dfr_pyroot/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$_dfr_pyroot/lib:$_dfr_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$_dfr_python" "$@" >/dev/null 2>> "$_dfr_module/logs/runtime-report.log" || true
+    fi
 
     if [ ! -s "$_dfr_stage/device-font-manager-dump.txt" ]; then
         if command -v cmd >/dev/null 2>&1; then

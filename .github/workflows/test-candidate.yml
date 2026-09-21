@@ -134,6 +134,7 @@ jobs:
             common/device_font_cache.sh \
             common/device_font_load_verify.py \
             common/device_font_load_verify.sh \
+            common/device_font_slot_trace.py \
             common/device_font_payload_policy.sh \
             common/device_font_transaction_guard.sh \
             common/device_font_dynamic_guard.sh \
@@ -150,9 +151,10 @@ jobs:
           unzip -p "$module" common/background_task.sh | grep -q '_lsd_task'
           unzip -p "$module" common/background_task.sh | grep -q 'every new worker wrote an empty .task sidecar'
           unzip -p "$module" common/device_font_template.sh | grep -q 'CAPTURE_REVISION=2'
-          unzip -p "$module" common/device_font_cache.sh | grep -q 'alignment-cache-v4'
+          unzip -p "$module" common/device_font_cache.sh | grep -q 'alignment-cache-v7-weight-truth'
           unzip -p "$module" common/device_font_cache.sh | grep -q '.font_switch.lock'
           unzip -p "$module" common/device_font_load_verify.py | grep -q 'device-font-load-verification-v1'
+          unzip -p "$module" common/device_font_slot_trace.py | grep -q 'device-font-slot-trace-v1'
           unzip -p "$module" common/device_font_load_verify.sh | grep -q 'device_font_load_verify'
           unzip -p "$module" common/device_font_payload_policy.sh | grep -q '_device_font_fast_map'
           unzip -p "$module" common/device_font_payload_policy.sh | grep -q 'device_font_cache_schedule'
@@ -174,7 +176,7 @@ jobs:
           tmp="$(mktemp -d)"
           trap 'rm -rf "$tmp"' EXIT
           unzip -q "$module" -d "$tmp"
-          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py"
+          python3 -m py_compile "$tmp/common/font_inventory.py" "$tmp/common/font_inventory_scan.py" "$tmp/common/device_font_slot_trace.py"
           sh -n "$tmp/customize.sh"
           sh -n "$tmp/common/background_task.sh"
           sh -n "$tmp/common/device_font_template.sh"

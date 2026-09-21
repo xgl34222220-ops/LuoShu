@@ -152,6 +152,7 @@ jobs:
             common/device_font_template.py common/device_font_slot_plan.py \
             common/device_font_slot_build.py common/device_font_payload_build.py \
             common/device_font_payload_runtime.sh common/device_font_load_verify.py \
+            common/device_font_slot_trace.py \
             common/python/bin/luoshu-python LICENSE NOTICE.md THIRD_PARTY_NOTICES.md README.md; do
             require_member "$member"
           done
