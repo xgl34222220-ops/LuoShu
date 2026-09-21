@@ -203,6 +203,48 @@ def main() -> None:
             else:
                 os.environ["LUOSHU_DEVICE_FONT_STOCK_ROOT"] = old_stock_root
 
+        # A fixed physical 500 slot cannot safely consume a static 400/700
+        # nearest face. Preserve the stock slot unless the selected family has an
+        # exact 500 source (or a true variable wght source).
+        missing_weight_template = copy.deepcopy(template)
+        missing_weight_profile = copy.deepcopy(source_profile)
+        missing_weight_profile["path"] = "/product/fonts/500.ttf"
+        missing_weight_template["slots"].append(
+            {
+                "family": "physical-500.ttf",
+                "familyNormalized": "physical-500.ttf",
+                "familyAttributes": {},
+                "sourceXml": "",
+                "declared": "500.ttf",
+                "postScriptName": "",
+                "weight": 500,
+                "style": "normal",
+                "index": 0,
+                "axes": "",
+                "roles": ["global-ui"],
+                "replaceable": True,
+                "resolvedPath": "/product/fonts/500.ttf",
+                "directPhysical": True,
+                "font": missing_weight_profile,
+            }
+        )
+        missing_output = root / "missing-weight-payload"
+        missing_payload = payload_builder.build_payload(
+            missing_weight_template,
+            source_dir,
+            "LuoShu",
+            missing_output,
+            missing_output / "manifest.json",
+        )
+        missing_slots = [
+            item for item in missing_payload["slots"]
+            if item.get("stockPath") == "/product/fonts/500.ttf"
+        ]
+        assert len(missing_slots) == 1, missing_slots
+        assert missing_slots[0]["planStatus"] == "skipped", missing_slots[0]
+        assert missing_slots[0]["planReason"] == "source-weight-missing", missing_slots[0]
+        assert not missing_slots[0].get("generatedFile"), missing_slots[0]
+
         supplement = inventory_payload["inventorySupplement"]
         assert supplement["inventorySlotCount"] == 3, supplement
         assert supplement["templateMatched"] == 1, supplement
