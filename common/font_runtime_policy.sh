@@ -330,9 +330,9 @@ _lfrp_target_weight() {
         300.ttf|*light*) printf '300\n' ;;
         500.ttf|*medium*) printf '500\n' ;;
         600.ttf|*semibold*|*semi-bold*|*demibold*) printf '600\n' ;;
-        700.ttf|*bold*) printf '700\n' ;;
         800.ttf|*extrabold*|*extra-bold*|*ultrabold*|*ultra-bold*) printf '800\n' ;;
         900.ttf|*black*|*heavy*) printf '900\n' ;;
+        700.ttf|*bold*) printf '700\n' ;;
         *) printf '400\n' ;;
     esac
 }
