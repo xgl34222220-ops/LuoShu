@@ -546,7 +546,8 @@ start_mix() {
         sh "$FALLBACK_ENGINE" start "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes"
         return
     fi
-    if type luoshu_mix_request_matches_active >/dev/null 2>&1 && \
+    if [ "${LUOSHU_FORCE_REBUILD:-0}" != 1 ] && \
+       type luoshu_mix_request_matches_active >/dev/null 2>&1 && \
        luoshu_mix_request_matches_active "$_cjk" "$_latin" "$_digit" \
            "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_cjk_mode" "$_latin_mode" "$_digit_mode"; then
         _task="auto-mix-reuse-$(date +%s)-$$"
