@@ -358,6 +358,7 @@ slot_trace_json() {
             --inventory "$_inventory" \
             --physical-root "$MODDIR/.luoshu-payload" \
             --active-font "$_active" \
+            --mount-state "$MODDIR/config/self-mount.conf" \
             --output "$MODDIR/config/device-font-slot-trace.json"
         [ ! -s "$_candidates" ] || set -- "$@" --candidates "$_candidates"
 
