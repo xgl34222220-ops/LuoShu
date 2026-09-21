@@ -154,4 +154,38 @@ OUT=$(run_bridge coverage 2>&1)
 printf '%s\n' "$OUT" | grep -q '升级保留负载'
 printf '%s\n' "$OUT" | grep -q '重新应用一次'
 
+# Current production runtime is physical-safe: coverage must work from the
+# already-activated .luoshu-payload even when no device-font v2 manifest exists.
+PHYS="$TMP/physical"
+mkdir -p "$PHYS/system/fonts" "$PHYS/product/fonts"
+printf 'font-a\n' > "$PHYS/system/fonts/A.ttf"
+cat > "$TMP/physical-inventory.json" <<'EOF'
+{"schema":"device-font-inventory-v1","buildKey":"physical-fixture","romKind":"hyperos","slots":{"/system/fonts/A.ttf":{"slotName":"A.ttf","partition":"system","source":"verified-scan","format":"TTF","weight":400,"style":"normal","families":["sans-serif"]},"/system/fonts/B.ttf":{"slotName":"B.ttf","partition":"system","source":"verified-scan","format":"TTF","weight":400,"style":"normal","families":[]},"/product/fonts/C.ttc":{"slotName":"C.ttc","partition":"product","source":"verified-scan","format":"TTC","weight":400,"style":"normal","families":[]}}}
+EOF
+cat > "$TMP/physical-candidates.json" <<'EOF'
+{"schema":"device-font-candidates-v1","paths":[{"path":"/system/fonts/A.ttf","partition":"system","slotName":"A.ttf","candidate":true,"reason":"visible-font-path"},{"path":"/system/fonts/B.ttf","partition":"system","slotName":"B.ttf","candidate":true,"reason":"visible-font-path"},{"path":"/product/fonts/C.ttc","partition":"product","slotName":"C.ttc","candidate":true,"reason":"visible-font-path"}]}
+EOF
+python3 "$ROOT/common/device_font_slot_trace.py" \
+    --inventory "$TMP/physical-inventory.json" \
+    --physical-root "$PHYS" \
+    --physical-confirmed \
+    --active-font Demo \
+    --candidates "$TMP/physical-candidates.json" \
+    --output "$TMP/physical-trace.json" >/dev/null
+python3 - "$TMP/physical-trace.json" <<'PY'
+import json, sys
+data=json.load(open(sys.argv[1], encoding="utf-8"))
+assert data["schema"] == "device-font-slot-trace-v1", data
+assert data["traceSource"] == "physical-safe", data
+states={item["path"]:(item["state"], item["category"], item["safeToRetry"]) for item in data["slots"]}
+assert states["/system/fonts/A.ttf"] == ("loaded","replaced",False), states
+assert states["/system/fonts/B.ttf"] == ("mapping-missing","issue",True), states
+assert states["/product/fonts/C.ttc"] == ("preserved","protected",False), states
+assert data["summary"]["replaced"] == 1, data["summary"]
+assert data["summary"]["issues"] == 1, data["summary"]
+assert data["summary"]["protected"] == 1, data["summary"]
+PY
+grep -q -- '--physical-root "$MODDIR/.luoshu-payload"' "$ROOT/common/app_bridge.sh"
+grep -q 'traceSource.*physical-safe' "$ROOT/common/device_font_slot_trace.py"
+
 echo 'Font coverage center backend tests passed.'
