@@ -97,10 +97,10 @@ grep -q 'coverage_reapply)' "$ROOT/common/app_bridge.sh"
 grep -q 'coverage_verify)' "$ROOT/common/app_bridge.sh"
 grep -q 'coverage_export)' "$ROOT/common/app_bridge.sh"
 grep -q 'device_font_candidates.json' "$ROOT/common/app_bridge.sh"
-grep -Fq '_tmp="${_pending}.tmp.$"' "$ROOT/common/app_bridge.sh"
-grep -Fq '_tmp="${_out}.tmp.$"' "$ROOT/common/app_bridge.sh"
+grep -Fq '_tmp="${_pending}.tmp.$$"' "$ROOT/common/app_bridge.sh"
+grep -Fq '_tmp="${_out}.tmp.$$"' "$ROOT/common/app_bridge.sh"
 grep -q 'DEVICE_FONT_CACHE=' "$ROOT/common/app_bridge.sh"
-grep -q 'device-font-cache.*lookup' "$ROOT/common/app_bridge.sh" || grep -q '"$DEVICE_FONT_CACHE" lookup' "$ROOT/common/app_bridge.sh"
+grep -Fq 'sh "$DEVICE_FONT_CACHE" lookup "$_active"' "$ROOT/common/app_bridge.sh"
 
 # Upgrade regression: migration may intentionally clear device-font-engine.conf while
 # a compatible content-addressed cache still exists. Coverage must recover that cache
