@@ -9,6 +9,7 @@ filename heuristics and the existing font_check.sh validator.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -261,6 +262,10 @@ def validate_inventory(data: dict[str, Any], expected_key: str | None = None) ->
         logical_root = str(item.get("logical", "")).strip()
         mount_key = str(item.get("mountKey", "")).strip()
         parts = [part for part in relative.split("/") if part]
+        expected_mount_key = (
+            f"{partition}-nested-"
+            + hashlib.sha256(f"{partition}/{relative}".encode("utf-8")).hexdigest()[:16]
+        )
         if (
             partition not in allowed_partitions
             or not relative
@@ -269,7 +274,7 @@ def validate_inventory(data: dict[str, Any], expected_key: str | None = None) ->
             or any(part in (".", "..") for part in parts)
             or any(re.fullmatch(r"[A-Za-z0-9._+-]{1,96}", part) is None for part in parts)
             or logical_root != f"/{partition}/{relative}"
-            or re.fullmatch(r"[A-Za-z0-9_.-]{1,96}", mount_key) is None
+            or mount_key != expected_mount_key
         ):
             raise InventoryError("设备字体清单嵌套字体根越界")
         identity = (partition, relative)
