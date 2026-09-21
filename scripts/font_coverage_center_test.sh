@@ -201,6 +201,9 @@ block=text[start:end]
 assert "!taskRunning" not in block, block
 assert '(data?.summary?.remediable ?: 0) > 0' in block, block
 assert "正在实时检查任务状态并启动补齐" in text
+assert 'busy -> "正在启动…"' in text
+assert 'taskRunning -> "检查任务状态"' in text
+assert "CircularProgressIndicator(" in text
 assert "onSuccess { json ->" in text
 assert 'optString("task")' in text
 PY
