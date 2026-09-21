@@ -351,7 +351,8 @@ slot_trace_json() {
     # authoritative runtime. It deliberately has no v2 device-font manifest.
     # Trace that live payload directly instead of making the App depend on an
     # obsolete manifest that the switch core never creates.
-    if { [ ! -s "$_payload" ] || [ ! -s "$_overlay" ]; } && \
+    _runtime_core="$(read_prop "$MODDIR/config/font_runtime_legacy_v14_4.conf" core)"
+    if { [ "$_runtime_core" = physical-safe-v1 ] || [ ! -s "$_payload" ] || [ ! -s "$_overlay" ]; } && \
        [ "$_active" != default ] && [ -d "$MODDIR/.luoshu-payload" ]; then
         set -- "$SLOT_TRACE" \
             --inventory "$_inventory" \
