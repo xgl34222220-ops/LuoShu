@@ -171,7 +171,7 @@ if [ "${1:-}" = action ] && [ "${2:-}" = switch ]; then
     fi
     _router_requested="${3:-}"
     _router_expected="${LUOSHU_SWITCH_ACTIVE_LABEL:-$_router_requested}"
-    if router_verified_noop "$_router_requested" "$_router_expected"; then
+    if [ "${LUOSHU_FORCE_REBUILD:-0}" != 1 ] && router_verified_noop "$_router_requested" "$_router_expected"; then
         printf '{"status":"ok","data":{"font":"%s","reused":true,"rebootRequired":false,"message":"当前字体负载与源文件、扫描清单和生成引擎一致"}}\n' \
             "$(json_escape_router "$_router_expected")"
         exit 0
