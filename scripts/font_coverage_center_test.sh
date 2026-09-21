@@ -52,11 +52,8 @@ grep -qx 'reason=coverage-remediate' "$MOD/config/font-payload-rebuild-pending.c
 # Default font has no LuoShu payload to rebuild.
 printf 'default\n' > "$MOD/config/active_font.conf"
 rm -f "$MOD/config/font-payload-rebuild-pending.conf"
-set +e
 OUT=$(run_bridge coverage_reapply 2>&1)
-RC=$?
-set -e
-[ "$RC" -ne 0 ]
+printf '%s\n' "$OUT" | grep -q '"status":"error"'
 printf '%s\n' "$OUT" | grep -q '系统默认字体'
 [ ! -e "$MOD/config/font-payload-rebuild-pending.conf" ]
 
@@ -67,11 +64,8 @@ task=busy
 state=running
 font=Demo
 EOF
-set +e
 OUT=$(run_bridge coverage_reapply 2>&1)
-RC=$?
-set -e
-[ "$RC" -ne 0 ]
+printf '%s\n' "$OUT" | grep -q '"status":"error"'
 printf '%s\n' "$OUT" | grep -q '已有字体任务正在运行'
 rm -f "$MOD/config/switch_task.conf"
 
