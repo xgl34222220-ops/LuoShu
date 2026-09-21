@@ -103,24 +103,40 @@ def main() -> None:
             },
         ],
     }
-    result = trace.build_trace(inventory, payload, overlay, verification)
+    candidates = {
+        "schema": "device-font-candidates-v1",
+        "paths": [
+            {"path": "/system/fonts/A.ttf", "partition": "system", "slotName": "A.ttf", "candidate": True, "reason": "visible-font-path"},
+            {"path": "/system/fonts/NotoColorEmoji.ttf", "partition": "system", "slotName": "NotoColorEmoji.ttf", "candidate": False, "reason": "specialized-name"},
+            {"path": "/product/assets/HiddenStandalone.ttf", "partition": "product", "slotName": "HiddenStandalone.ttf", "candidate": True, "reason": "visible-font-path"},
+        ],
+    }
+    result = trace.build_trace(inventory, payload, overlay, verification, candidates)
     states = {item["path"]: item["state"] for item in result["slots"]}
     assert states["/system/fonts/A.ttf"] == "loaded", states
     assert states["/system/fonts/B.ttf"] == "preserved", states
     assert states["/product/fonts/C.ttc"] == "preserved", states
     assert states["/product/fonts/D.ttf"] == "missing-mount", states
     assert states["/vendor/fonts/E.ttf"] == "mapping-missing", states
+    assert states["/system/fonts/NotoColorEmoji.ttf"] == "protected", states
+    assert states["/product/assets/HiddenStandalone.ttf"] == "protected", states
     c_slot = next(item for item in result["slots"] if item["path"] == "/product/fonts/C.ttc")
     assert c_slot["reason"] == "preserved-collection", c_slot
     summary = result["summary"]
     assert summary["inventorySlots"] == 5, summary
+    assert summary["censusSlots"] == 7, summary
+    assert summary["replaceableSlots"] == 5, summary
+    assert summary["replaced"] == 1, summary
+    assert summary["protected"] == 4, summary
+    assert summary["issues"] == 2, summary
+    assert summary["remediable"] == 2, summary
     assert summary["loaded"] == 1, summary
     assert summary["preserved"] == 2, summary
     assert summary["missingMount"] == 1, summary
     assert summary["mappingMissing"] == 1, summary
     assert summary["notConsumed"] == 0, summary
 
-    no_boot = trace.build_trace(inventory, payload, overlay, None)
+    no_boot = trace.build_trace(inventory, payload, overlay, None, candidates)
     no_boot_states = {item["path"]: item["state"] for item in no_boot["slots"]}
     assert no_boot_states["/system/fonts/A.ttf"] == "mapped-unverified"
     assert no_boot_states["/product/fonts/D.ttf"] == "mapped-unverified"

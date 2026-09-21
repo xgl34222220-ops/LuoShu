@@ -41,6 +41,7 @@ data class HomeActions(
     val refresh: () -> Unit,
     val openFontLibrary: () -> Unit,
     val openFontStudio: () -> Unit,
+    val openCoverage: () -> Unit,
     val openLogs: () -> Unit,
     val openSettings: () -> Unit = {},
     val restoreDefault: () -> Unit,

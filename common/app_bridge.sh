@@ -17,6 +17,7 @@ MIX_ENGINE="$MODDIR/common/font_mix_controller.sh"
 NATIVE_IMPORT="$MODDIR/common/native_import.sh"
 AXIS_INFO="$MODDIR/common/font_axis_info.py"
 SLOT_TRACE="$MODDIR/common/device_font_slot_trace.py"
+LOAD_VERIFY="$MODDIR/common/device_font_load_verify.sh"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
@@ -317,7 +318,113 @@ slot_trace_json() {
     set -- "$SLOT_TRACE" --inventory "$_inventory" --payload "$_payload" --overlay "$_overlay"         --output "$MODDIR/config/device-font-slot-trace.json"
     _verification="$MODDIR/config/device-font-load-verification.json"
     [ ! -s "$_verification" ] || set -- "$@" --verification "$_verification"
+    _candidates="$MODDIR/config/device_font_candidates.json"
+    [ ! -s "$_candidates" ] || set -- "$@" --candidates "$_candidates"
     PYTHONHOME="$PYROOT"     PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages"     LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"         "$PYBIN" "$@"
+}
+
+coverage_busy() {
+    _selected="$(select_task_file)"
+    _task_file="${_selected#*|}"
+    [ -n "$_task_file" ] || return 1
+    _state="$(read_prop "$_task_file" state)"
+    case "$_state" in queued|running) return 0 ;; *) return 1 ;; esac
+}
+
+coverage_mark_rebuild() {
+    _font="$1"
+    _pending="$MODDIR/config/font-payload-rebuild-pending.conf"
+    _tmp="${_pending}.tmp.$"
+    mkdir -p "$MODDIR/config" 2>/dev/null || return 1
+    {
+        printf 'state=pending\n'
+        printf 'font=%s\n' "$_font"
+        printf 'reason=coverage-remediate\n'
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$_tmp" 2>/dev/null || return 1
+    mv -f "$_tmp" "$_pending" 2>/dev/null || { rm -f "$_tmp" 2>/dev/null; return 1; }
+    chmod 0600 "$_pending" 2>/dev/null || true
+}
+
+coverage_reapply() {
+    coverage_busy && {
+        printf '{"status":"error","message":"已有字体任务正在运行，请等待完成"}\n'
+        return 1
+    }
+    _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
+    [ -n "$_active" ] || _active=default
+    [ "$_active" != default ] || {
+        printf '{"status":"error","message":"当前使用系统默认字体，没有可补齐的洛书字体负载"}\n'
+        return 1
+    }
+    coverage_mark_rebuild "$_active" || {
+        printf '{"status":"error","message":"无法创建字体补齐事务"}\n'
+        return 1
+    }
+
+    if [ "$_active" = mix ]; then
+        mix_ready || { rm -f "$MODDIR/config/font-payload-rebuild-pending.conf"; return 1; }
+        _source="$MODDIR/config/axes_mix.conf"
+        [ -s "$_source" ] || _source="$MODDIR/config/font_mix.conf"
+        _cjk="$(read_prop "$_source" cjk)"
+        _latin="$(read_prop "$_source" latin)"
+        _digit="$(read_prop "$_source" digit)"
+        _cjk_weight="$(read_prop "$_source" cjkWeight)"; [ -n "$_cjk_weight" ] || _cjk_weight=400
+        _latin_weight="$(read_prop "$_source" latinWeight)"; [ -n "$_latin_weight" ] || _latin_weight=400
+        _digit_weight="$(read_prop "$_source" digitWeight)"; [ -n "$_digit_weight" ] || _digit_weight=400
+        _cjk_axes="$(read_prop "$_source" cjkAxes)"; [ -n "$_cjk_axes" ] || _cjk_axes="wght=$_cjk_weight"
+        _latin_axes="$(read_prop "$_source" latinAxes)"; [ -n "$_latin_axes" ] || _latin_axes="wght=$_latin_weight"
+        _digit_axes="$(read_prop "$_source" digitAxes)"; [ -n "$_digit_axes" ] || _digit_axes="wght=$_digit_weight"
+        if [ -z "$_cjk" ] || [ -z "$_latin" ] || [ -z "$_digit" ]; then
+            rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" 2>/dev/null || true
+            printf '{"status":"error","message":"当前组合字体配置不完整，无法自动补齐"}\n'
+            return 1
+        fi
+        _out="$(MODDIR="$MODDIR" sh "$MIX_ENGINE" start "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" 2>&1)"
+        _rc=$?
+    else
+        switch_task_ready || { rm -f "$MODDIR/config/font-payload-rebuild-pending.conf"; return 1; }
+        _out="$(MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "$_active" 2>&1)"
+        _rc=$?
+    fi
+    if [ "$_rc" -ne 0 ]; then
+        rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" 2>/dev/null || true
+        printf '%s\n' "$_out"
+        return "$_rc"
+    fi
+    printf '%s\n' "$_out"
+}
+
+coverage_verify() {
+    [ -f "$LOAD_VERIFY" ] && MODDIR="$MODDIR" sh "$LOAD_VERIFY" verify >/dev/null 2>&1 || true
+    slot_trace_json
+}
+
+coverage_export() {
+    _out_dir="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/reports"
+    _out="$_out_dir/LuoShu-font-coverage.json"
+    _tmp="${_out}.tmp.$"
+    mkdir -p "$_out_dir" 2>/dev/null || {
+        printf '{"status":"error","message":"无法创建覆盖报告目录"}\n'
+        return 1
+    }
+    slot_trace_json > "$_tmp" 2>/dev/null || {
+        rm -f "$_tmp" 2>/dev/null || true
+        printf '{"status":"error","message":"字体覆盖报告生成失败"}\n'
+        return 1
+    }
+    grep -q '"schema":"device-font-slot-trace-v1"' "$_tmp" 2>/dev/null || {
+        rm -f "$_tmp" 2>/dev/null || true
+        printf '{"status":"error","message":"字体覆盖报告格式无效"}\n'
+        return 1
+    }
+    mv -f "$_tmp" "$_out" 2>/dev/null || {
+        rm -f "$_tmp" 2>/dev/null || true
+        printf '{"status":"error","message":"字体覆盖报告保存失败"}\n'
+        return 1
+    }
+    chmod 0644 "$_out" 2>/dev/null || true
+    printf '{"status":"ok","data":{"path":"%s"}}\n' "$(json_escape "$_out")"
 }
 
 weight_axis_info() {
@@ -367,7 +474,10 @@ case "${1:-status}" in
         sh "$FONT_MANAGER" action validate "${2:-}"
         ;;
     stock_scan) manager_ready || exit 1; sh "$FONT_MANAGER" action stock_scan ;;
-    slot_trace) slot_trace_json ;;
+    slot_trace|coverage) slot_trace_json ;;
+    coverage_verify) coverage_verify ;;
+    coverage_reapply) coverage_reapply ;;
+    coverage_export) coverage_export ;;
     switch_start) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "${2:-default}" ;;
     switch_status) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" status "${2:-}" ;;
     delete) manager_ready || exit 1; sh "$FONT_MANAGER" action delete "${2:-}" ;;

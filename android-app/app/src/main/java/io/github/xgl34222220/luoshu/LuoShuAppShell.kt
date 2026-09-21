@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Description
+import androidx.compose.material.icons.rounded.FactCheck
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.ListAlt
@@ -89,6 +90,7 @@ import dev.chrisbanes.haze.rememberHazeState
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceSettings
 import io.github.xgl34222220.luoshu.ui.appearance.AppearanceViewModel
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
+import io.github.xgl34222220.luoshu.ui.coverage.FontCoverageRoute
 import io.github.xgl34222220.luoshu.ui.dialogs.FontActionDialogRoute
 import io.github.xgl34222220.luoshu.ui.dialogs.FontActionKind
 import io.github.xgl34222220.luoshu.ui.dialogs.FontPickerDialogRoute
@@ -132,6 +134,7 @@ internal enum class AppPage(
     Home("首页", Icons.Rounded.Home, .94f),
     Library("字体库", Icons.Rounded.ListAlt, 1.00f),
     Studio("组合", Icons.Rounded.Layers, .96f),
+    Coverage("覆盖", Icons.Rounded.FactCheck, .96f),
     Logs("任务", Icons.Rounded.Description, .96f),
     Settings("设置", Icons.Rounded.Settings, .94f),
 }
@@ -148,7 +151,8 @@ private fun AppPage.motionIndex(): Int = when (this) {
     AppPage.Library -> 1
     AppPage.Studio -> 2
     AppPage.Settings -> 3
-    AppPage.Logs -> 4
+    AppPage.Coverage -> 4
+    AppPage.Logs -> 5
 }
 
 @Composable
@@ -179,6 +183,7 @@ internal fun LuoShuAppShell(
                 viewModel.ensureFonts()
                 viewModel.refreshMixConfig()
             }
+            AppPage.Coverage -> viewModel.refresh()
             AppPage.Logs -> viewModel.refreshLogs()
             AppPage.Settings -> Unit
         }
@@ -198,6 +203,7 @@ internal fun LuoShuAppShell(
             },
             openFontLibrary = { page = AppPage.Library },
             openFontStudio = { page = AppPage.Studio },
+            openCoverage = { page = AppPage.Coverage },
             openLogs = {
                 logsReturnPage = AppPage.Home
                 page = AppPage.Logs
@@ -251,7 +257,7 @@ internal fun LuoShuAppShell(
 
     LuoShuTheme(appearance) {
         val dark = MaterialTheme.colorScheme.background.luminance() < .5f
-        val showDock = page != AppPage.Logs && !(page == AppPage.Settings && settingsDetailVisible)
+        val showDock = page !in setOf(AppPage.Logs, AppPage.Coverage) && !(page == AppPage.Settings && settingsDetailVisible)
         val quickReturnEnabled = appearance.floatingDock &&
             showDock &&
             page in listOf(AppPage.Library, AppPage.Studio, AppPage.Settings)
@@ -396,6 +402,36 @@ internal fun LuoShuAppShell(
                                     style = appearance.uiStyle,
                                     state = viewModel.toFontStudioUiState(features),
                                     actions = studioActions,
+                                )
+                            }
+                        }
+                        AppPage.Coverage -> {
+                            val detailShape = RoundedCornerShape(topStart = 32.dp, bottomStart = 32.dp)
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(start = if (appearance.uiStyle == UiStyle.MIUIX) 6.dp else 0.dp)
+                                    .then(
+                                        if (appearance.uiStyle == UiStyle.MIUIX) {
+                                            Modifier
+                                                .shadow(22.dp, detailShape, clip = false)
+                                                .clip(detailShape)
+                                                .background(LocalMiuixTokens.current.pageBackground)
+                                        } else {
+                                            Modifier
+                                        },
+                                    ),
+                            ) {
+                                FontCoverageRoute(
+                                    style = appearance.uiStyle,
+                                    activeFont = viewModel.snapshot.activeFont,
+                                    taskRunning = viewModel.snapshot.taskState in setOf("queued", "running"),
+                                    rebootRequired = viewModel.snapshot.rebootRequired,
+                                    onBack = { page = AppPage.Home },
+                                    onTaskStarted = {
+                                        viewModel.refresh()
+                                        logsReturnPage = AppPage.Coverage
+                                    },
                                 )
                             }
                         }

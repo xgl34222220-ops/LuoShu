@@ -8,6 +8,7 @@ COMPACT="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/lib
 DETAILS="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/library/FontDetailsDialog.kt"
 HOME_ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/HomeRoute.kt"
 HOME_COMPACT="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/HomeScreenCompact.kt"
+COVERAGE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/coverage/FontCoverageRoute.kt"
 ACCEPTANCE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceAcceptanceGuide.kt"
 MATRIX="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/home/DeviceTestMatrix.kt"
 LOGS_ROUTE="$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/logs/LogsRoute.kt"
@@ -40,6 +41,13 @@ grep -q 'StaggeredManagementItem(index = 3)' "$ROUTE"
 grep -q 'index.coerceAtLeast(0) \* 30' "$ROUTE"
 grep -q 'HomeScreenCompact' "$HOME_ROUTE"
 grep -q 'LogsScreenCompact' "$LOGS_ROUTE"
+grep -q '字体覆盖' "$HOME_COMPACT"
+grep -q 'openCoverage' "$HOME_COMPACT"
+grep -q 'FontCoverageRoute' "$SHELL"
+grep -q '系统字体覆盖图' "$COVERAGE"
+grep -q '补齐所有可安全替换项' "$COVERAGE"
+grep -q '重新验证' "$COVERAGE"
+grep -q 'coverage_export' "$COVERAGE"
 
 # Font library: management tools are collapsed, the card itself opens details,
 # each card has one readable native preview, and detail viewing is a stable large preview sheet.
@@ -172,7 +180,7 @@ grep -q 'private val dockPages' "$SHELL"
 [ "$(sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -c 'AppPage\.')" -eq 4 ]
 sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -q 'AppPage.Settings'
 ! sed -n '/private val dockPages = listOf(/,/^)/p' "$SHELL" | grep -q 'AppPage.Logs'
-grep -q 'val showDock = page != AppPage.Logs' "$SHELL"
+grep -q 'val showDock = page !in setOf(AppPage.Logs, AppPage.Coverage)' "$SHELL"
 grep -q 'fontSize = 12.sp' "$SHELL"
 grep -q 'LuoShuIconTokens.DockGlyph' "$SHELL"
 ! grep -q 'targetValue = if (selected) 21.dp else 19.dp' "$SHELL"

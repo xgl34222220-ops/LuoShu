@@ -15,6 +15,7 @@ INVENTORY_SCHEMA = "device-font-inventory-v1"
 PAYLOAD_SCHEMA = "device-font-payload-v1"
 OVERLAY_SCHEMA = "device-font-overlay-v1"
 VERIFY_SCHEMA = "device-font-load-verification-v1"
+CANDIDATE_SCHEMA = "device-font-candidates-v1"
 
 
 class TraceError(RuntimeError):
@@ -187,11 +188,24 @@ def aggregate(routes: list[dict[str, Any]], supplement: dict[str, Any] | None) -
     return "partial", ",".join(sorted(unique))
 
 
+def classify_slot_state(state: str, reason: str) -> tuple[str, bool]:
+    if state == "loaded":
+        return "replaced", False
+    if state in {"mount-visible", "mapped-unverified", "unconfirmed"}:
+        return "pending", False
+    if state == "preserved":
+        return "protected", False
+    if state in {"mapping-missing", "missing-mount", "mismatch", "partial", "not-consumed"}:
+        return "issue", True
+    return "issue", False
+
+
 def build_trace(
     inventory: dict[str, Any],
     payload: dict[str, Any],
     overlay: dict[str, Any],
     verification: dict[str, Any] | None = None,
+    candidates: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if inventory.get("schema") != INVENTORY_SCHEMA:
         raise TraceError("inventory schema 无效")
@@ -202,6 +216,9 @@ def build_trace(
     verification = verification or {}
     if verification and verification.get("schema") != VERIFY_SCHEMA:
         raise TraceError("verification schema 无效")
+    candidates = candidates or {}
+    if candidates and candidates.get("schema") != CANDIDATE_SCHEMA:
+        raise TraceError("candidates schema 无效")
 
     payload_by_path, orphan = index_payload(payload)
     supplement = index_supplement(payload)
@@ -220,6 +237,7 @@ def build_trace(
         ]
         supplement_record = supplement.get(normalize_path(logical))
         state, reason = aggregate(routes, supplement_record)
+        category, safe_to_retry = classify_slot_state(state, reason)
         item = {
             "path": logical,
             "slotName": str(entry.get("slotName") or Path(logical).name),
@@ -230,6 +248,8 @@ def build_trace(
             "style": str(entry.get("style") or "normal"),
             "families": list(entry.get("families") or []),
             "state": state,
+            "category": category,
+            "safeToRetry": safe_to_retry,
             "reason": reason,
             "supplementDisposition": str((supplement_record or {}).get("disposition") or ""),
             "routes": routes,
@@ -237,12 +257,49 @@ def build_trace(
         traced.append(item)
         counts[state] += 1
 
+    # Candidate census can be wider than the replaceable UI inventory. Surface
+    # every census-only font explicitly as protected/unmanaged instead of hiding it
+    # from the App. This keeps "scanned" and "replaceable" counts separate.
+    inventory_paths = {normalize_path(path) for path in (inventory.get("slots") or {})}
+    for raw in candidates.get("paths") or []:
+        if not isinstance(raw, dict):
+            continue
+        logical = normalize_path(raw.get("path"))
+        if not logical or logical in inventory_paths:
+            continue
+        denied = not bool(raw.get("candidate", False))
+        reason = str(raw.get("reason") or ("specialized-name" if denied else "not-promoted-to-ui-inventory"))
+        if not denied and reason == "visible-font-path":
+            reason = "not-promoted-to-ui-inventory"
+        traced.append({
+            "path": logical,
+            "slotName": str(raw.get("slotName") or Path(logical).name),
+            "partition": str(raw.get("partition") or ""),
+            "source": "census",
+            "format": Path(logical).suffix.lower().lstrip(".").upper(),
+            "weight": 400,
+            "style": "normal",
+            "families": [],
+            "state": "protected",
+            "category": "protected",
+            "safeToRetry": False,
+            "reason": reason,
+            "supplementDisposition": "census-only",
+            "routes": [],
+        })
+
     # Template-only routes are useful diagnostics but are not counted as scanner
     # omissions because the inventory deliberately works at physical-file level.
     orphan_routes = [
         route_state(slot, overlay_results, verify_results, verification_present)
         for slot in orphan
     ]
+    category_counts: dict[str, int] = defaultdict(int)
+    remediable = 0
+    for item in traced:
+        category_counts[str(item.get("category") or "issue")] += 1
+        if bool(item.get("safeToRetry")):
+            remediable += 1
 
     return {
         "schema": SCHEMA,
@@ -250,7 +307,14 @@ def build_trace(
         "inventoryRomKind": str(inventory.get("romKind") or "generic"),
         "verificationState": str(verification.get("state") or "not-run"),
         "summary": {
-            "inventorySlots": len(traced),
+            "inventorySlots": len(inventory.get("slots") or {}),
+            "censusSlots": len(traced),
+            "replaceableSlots": len(inventory.get("slots") or {}),
+            "replaced": category_counts.get("replaced", 0),
+            "pending": category_counts.get("pending", 0),
+            "protected": category_counts.get("protected", 0),
+            "issues": category_counts.get("issue", 0),
+            "remediable": remediable,
             "consumed": sum(1 for item in traced if item["routes"]),
             "notConsumed": counts.get("not-consumed", 0),
             "preserved": counts.get("preserved", 0),
@@ -288,6 +352,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--payload", required=True, type=Path)
     parser.add_argument("--overlay", required=True, type=Path)
     parser.add_argument("--verification", type=Path)
+    parser.add_argument("--candidates", type=Path)
     parser.add_argument("--output", type=Path)
     return parser.parse_args()
 
@@ -300,6 +365,7 @@ def main() -> int:
             load(args.payload, PAYLOAD_SCHEMA),
             load(args.overlay, OVERLAY_SCHEMA),
             load(args.verification, VERIFY_SCHEMA, optional=True) if args.verification else {},
+            load(args.candidates, CANDIDATE_SCHEMA, optional=True) if args.candidates else {},
         )
         if args.output:
             atomic_write(result, args.output)

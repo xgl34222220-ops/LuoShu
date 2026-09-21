@@ -25,6 +25,7 @@ import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.ExpandLess
 import androidx.compose.material.icons.rounded.ExpandMore
+import androidx.compose.material.icons.rounded.FactCheck
 import androidx.compose.material.icons.rounded.FontDownload
 import androidx.compose.material.icons.rounded.Layers
 import androidx.compose.material.icons.rounded.Refresh
@@ -220,6 +221,13 @@ internal fun HomeScreenCompact(
                     HomeShortcut("字体组合", "中文 · 英文 · 数字", Icons.Rounded.Layers, actions.openFontStudio,
                         Modifier.weight(1f))
                 }
+                HomeShortcut(
+                    "字体覆盖",
+                    "查看已替换、未替换、系统保护与逐槽原因",
+                    Icons.Rounded.FactCheck,
+                    actions.openCoverage,
+                    Modifier.fillMaxWidth(),
+                )
             }
         }
         item(key = "weight") {
