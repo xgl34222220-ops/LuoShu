@@ -188,4 +188,21 @@ PY
 grep -q -- '--physical-root "$MODDIR/.luoshu-payload"' "$ROOT/common/app_bridge.sh"
 grep -q 'traceSource.*physical-safe' "$ROOT/common/device_font_slot_trace.py"
 
+# The bottom remediation button must never look actionable while being silently
+# disabled only because the App snapshot still says queued/running. Live task
+# reconciliation belongs to coverage_reapply in the bridge.
+python3 - "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/coverage/FontCoverageRoute.kt" <<'PY'
+from pathlib import Path
+import sys
+text=Path(sys.argv[1]).read_text(encoding="utf-8")
+start=text.index("val canReapply =")
+end=text.index("val needsCoverageBootstrap", start)
+block=text[start:end]
+assert "!taskRunning" not in block, block
+assert '(data?.summary?.remediable ?: 0) > 0' in block, block
+assert "正在实时检查任务状态并启动补齐" in text
+assert "onSuccess { json ->" in text
+assert 'optString("task")' in text
+PY
+
 echo 'Font coverage center backend tests passed.'
