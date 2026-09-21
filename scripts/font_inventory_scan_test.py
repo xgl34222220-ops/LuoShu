@@ -110,7 +110,7 @@ def main() -> int:
             "--scan",
             "--output", str(output),
             "--font-check", str(font_check),
-            "--build-key", "inventory-v5-rom",
+            "--build-key", "inventory-v6-rom",
         ]
         for name in primary:
             command.extend(["--" + name.replace("_", "-") + "-fonts", str(font_dirs[name])])

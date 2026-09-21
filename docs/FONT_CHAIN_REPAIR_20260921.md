@@ -138,6 +138,25 @@ inventory 仍然只由现有唯一刷写扫描器产生，不新增品牌扫描�
 
 这里的“全量”指可信系统/OEM 分区文件系统中的 standalone TTF/OTF/TTC/OTC。APK assets、Web/CSS 字体、Canvas/SVG/图片文字、App 私有下载字体与私有渲染引擎仍不属于系统字体槽普查；它们不会被伪装成可系统级替换。
 
+## 第八批：修复“已有洛书挂载后升级，v5 扫描数量仍不变”
+
+### 真机反馈定位
+
+v5 的 nested census 在干净 stock 视图下可以发现 `/product/vivo/fonts` 等路径，但已有洛书负载正在工作时，标准 `/product/fonts` 会被安全解析到 `/data/adb/luoshu/self-mount/lower/product-fonts`。v5 再从这个目录向上推导“product 分区根”时，得到的是 lower 状态目录而不是真正的 stock `/product`，所以 nested OEM 根在升级安装场景中仍然不可见，表现就是“扫描数量和上一版一样”。
+
+### 修复
+
+- scanner revision 升到 6。
+- 广域 census 在开始前先建立 overlay-risk 上下文；安装 wrapper 为 scanner 提供 whole-partition stock resolver。
+- 已有自挂载时，whole-partition census 不再从 `product-fonts` lower 反推分区；按顺序选择完整 stock mirror、已证明隔离的 installer stock namespace、或对 `/product` 等父分区做 non-recursive bind snapshot。
+- non-recursive partition snapshot 会跳过 LuoShu 的子挂载，因此可同时看到真正的 `/product/fonts` 与 `/product/vivo/fonts`，而不修改正在生效的字体。
+- 如果某分区没有 LuoShu payload 且没有相关 mount，允许直接使用 live 分区；不能证明 stock 时宁可不晋升 nested root，等待 pre-mount 扫描重试。
+- 安装日志新增三个独立数字：系统/OEM standalone 字体路径总数、嵌套/非标准路径数、自动晋升的 nested root 数。这样“普查到了多少”和“最终可替换多少”不再混成一个 slotCount。
+
+### 回归
+
+新增 in-place update fixture：标准 product font root 故意指向 `lower/product-fonts`，完整 stock mirror 中同时放置 `/product/fonts/Roboto-Regular.ttf` 和 `/product/vivo/fonts/VivoFont.ttf`。测试要求 census 必须选择完整 product mirror，并且绝不能把 `/state/lower/... ` 伪装成系统逻辑路径。
+
 ## 仍需验证与后续修复
 
 - 逐槽追踪能定位状态栏/锁屏/拨号/第三方 App 到底断在哪一层，但具体真机页面是否命中仍需用这一批生成的 trace 与设备日志验证。
