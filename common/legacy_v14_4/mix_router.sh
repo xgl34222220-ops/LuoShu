@@ -258,9 +258,12 @@ prepare_mix_stage() {
     [ -n "$_previous" ] || _previous=default
     _previous_legacy=false
     [ -f "$LEGACY_MODE" ] && _previous_legacy=true
-    _request="mix-request-$(date +%s 2>/dev/null || echo 0)-$$"
+    _request="mix-request-$(date +%s 2>/dev/null || echo 0)-$"
+    _coverage_remediate=false
+    [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ] && _coverage_remediate=true
     {
         printf 'requestId=%s\n' "$_request"
+        printf 'coverageRemediate=%s\n' "$_coverage_remediate"
         printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$1" "$2" "$3"
         printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$4" "$5" "$6"
         printf 'previousFont=%s\n' "$_previous"
@@ -384,6 +387,12 @@ commit_mix_stage_if_needed() {
     stage_generation_matches || return 1
     complete_hyperos_stage || return 1
     complete_coloros_stage || return 1
+    if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
+        _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
+        [ -f "$_coverage_helper" ] || return 1
+        LUOSHU_REAL_MODDIR="$REALMOD" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+            sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
+    fi
     rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
     mv "$MIX_STAGE" "$NEXT_PAYLOAD" 2>/dev/null || return 1
     if ! write_next_state; then
