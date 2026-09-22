@@ -195,8 +195,15 @@ def classify_slot_state(state: str, reason: str) -> tuple[str, bool]:
         return "pending", False
     if state == "preserved":
         return "protected", False
-    if state in {"mapping-missing", "missing-mount", "mismatch", "partial", "not-consumed"}:
+    # A missing mount means the payload file already exists but Android did not
+    # expose its parent mount. Rebuilding the same payload cannot repair that and
+    # must not be advertised as a "safe retry" in the App.
+    if state == "missing-mount":
+        return "issue", False
+    if state in {"mapping-missing", "mismatch", "not-consumed"}:
         return "issue", True
+    if state == "partial":
+        return "issue", "missing-mount" not in reason
     return "issue", False
 
 
@@ -478,8 +485,8 @@ def build_physical_trace(
             "loaded": counts.get("loaded", 0),
             "mountVisible": 0,
             "mappingMissing": counts.get("mapping-missing", 0),
-            "missingMount": 0,
-            "mismatch": 0,
+            "missingMount": counts.get("missing-mount", 0),
+            "mismatch": counts.get("mismatch", 0),
             "unconfirmed": 0,
             "partial": 0,
             "templateOnlyRoutes": 0,
