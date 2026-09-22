@@ -84,7 +84,9 @@ luoshu_clone_payload_metadata() (
     for _lcpm_entry in "$_lcpm_source"/* "$_lcpm_source"/.[!.]* "$_lcpm_source"/..?*; do
         [ -e "$_lcpm_entry" ] || [ -L "$_lcpm_entry" ] || continue
         _lcpm_name=${_lcpm_entry##*/}
-        case "$_lcpm_name" in .luoshu-metrics-report.json) continue ;; esac
+        case "$_lcpm_name" in
+            .luoshu-metrics-report.json|.luoshu-coverage-preserved.tsv|.luoshu-coverage-remediation.conf) continue ;;
+        esac
         case "$_lcpm_partitions" in
             *" $_lcpm_name "*)
                 if [ -d "$_lcpm_entry" ]; then

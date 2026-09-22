@@ -296,12 +296,15 @@ _dfload_collect_slot_evidence() {
     _dfload_trace="$_dfload_module_dir/common/device_font_slot_trace.py"
     _dfload_inventory="$_dfload_config/device_font_inventory.json"
     if [ -f "$_dfload_trace" ] && [ -s "$_dfload_inventory" ] && [ -s "$_dfload_result" ]; then
-        _dfload_exec_python "$_dfload_trace" \
+        set -- "$_dfload_trace" \
             --inventory "$_dfload_inventory" \
             --payload "$_dfload_payload_manifest" \
             --overlay "$_dfload_overlay_manifest" \
             --verification "$_dfload_result" \
-            --output "$_dfload_config/device-font-slot-trace.json" \
+            --output "$_dfload_config/device-font-slot-trace.json"
+        _dfload_candidates="$_dfload_config/device_font_candidates.json"
+        [ ! -s "$_dfload_candidates" ] || set -- "$@" --candidates "$_dfload_candidates"
+        _dfload_exec_python "$@" \
             >/dev/null 2>> "$_dfload_module_dir/logs/device-font-load-verify.log" || true
     fi
     return "$_dfload_python_rc"

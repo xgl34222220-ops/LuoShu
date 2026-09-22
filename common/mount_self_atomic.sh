@@ -412,6 +412,66 @@ luoshu_self_mount_ensure() {
         [ -z "$_lsme_failed" ] || break
     done
 
+
+    # Scanner-discovered OEM roots (for example /product/vivo/fonts) are real
+    # replaceable slots but are not children of /product/fonts. Mount them as
+    # first-class components using the exact scanner mount key so coverage and
+    # runtime evidence refer to the same target.
+    _lsme_nested_file="$_lsme_state_root/nested-roots.$"
+    : > "$_lsme_nested_file" 2>/dev/null || true
+    if type luoshu_nested_font_roots >/dev/null 2>&1; then
+        luoshu_nested_font_roots > "$_lsme_nested_file" 2>/dev/null || true
+    fi
+    if [ -z "$_lsme_failed" ] && [ -s "$_lsme_nested_file" ]; then
+        while IFS='|' read -r _lsme_nested_part _lsme_nested_rel _lsme_nested_key; do
+            [ -n "$_lsme_nested_part" ] && [ -n "$_lsme_nested_rel" ] && [ -n "$_lsme_nested_key" ] || continue
+            _lsme_source="$_lsme_module/$_lsme_nested_part/$_lsme_nested_rel"
+            [ -d "$_lsme_source" ] && find "$_lsme_source" -type f -print -quit 2>/dev/null | grep -q . || continue
+            _lsme_root=$(_luoshu_partition_root "$_lsme_nested_part") || {
+                _lsme_failed="$_lsme_nested_part/$_lsme_nested_rel-root-unavailable"
+                break
+            }
+            _lsme_target="$_lsme_root/$_lsme_nested_rel"
+            [ -d "$_lsme_target" ] || {
+                _lsme_failed="$_lsme_nested_part/$_lsme_nested_rel-target-missing"
+                break
+            }
+            _lsme_mode=overlay
+            if _luoshu_overlay_mount_dir "$_lsme_source" "$_lsme_target" "$_lsme_nested_key"; then
+                printf '%s\n' "$_lsme_target" >> "$_lsme_mount_list" 2>/dev/null || {
+                    _lsme_failed="$_lsme_nested_part/$_lsme_nested_rel-record-failed"
+                    break
+                }
+            else
+                _lsme_mode=bind
+                if type _luoshu_capture_lower_dir >/dev/null 2>&1; then
+                    _luoshu_capture_lower_dir "$_lsme_target" "$_lsme_nested_key" || {
+                        _lsme_failed="$_lsme_nested_part/$_lsme_nested_rel-lower-capture-failed"
+                        break
+                    }
+                fi
+                if _luoshu_atomic_bind_tree "$_lsme_source" "$_lsme_target"; then
+                    _lsme_bind_count=$((_lsme_bind_count + 1))
+                else
+                    _lsme_failed="$_lsme_nested_part/$_lsme_nested_rel-bind-incomplete"
+                    break
+                fi
+            fi
+            _luoshu_atomic_tree_visible "$_lsme_source" "$_lsme_target" "$_lsme_mode" || {
+                _lsme_failed="$_lsme_nested_part/$_lsme_nested_rel-visibility-mismatch"
+                break
+            }
+            printf '%s|%s|%s\n' "$_lsme_source" "$_lsme_target" "$_lsme_mode" \
+                >> "$_lsme_manifest_temp" 2>/dev/null || {
+                _lsme_failed="$_lsme_nested_part/$_lsme_nested_rel-manifest-failed"
+                break
+            }
+            _lsme_component_count=$((_lsme_component_count + 1))
+            _lsme_mounted="\${_lsme_mounted}\${_lsme_mounted:+,}\${_lsme_nested_part}/\${_lsme_nested_rel}:\${_lsme_mode}"
+        done < "$_lsme_nested_file"
+    fi
+    rm -f "$_lsme_nested_file" 2>/dev/null || true
+
     [ "$_lsme_component_count" -gt 0 ] 2>/dev/null || _lsme_failed="${_lsme_failed:-payload-empty}"
     [ "$_lsme_system_fonts_ok" -eq 1 ] 2>/dev/null || _lsme_failed="${_lsme_failed:-system/fonts-required}"
     if [ -z "$_lsme_failed" ]; then
