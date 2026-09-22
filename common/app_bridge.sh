@@ -25,6 +25,8 @@ USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
 AXES_TASK_FILE="$MODDIR/config/axes_task.conf"
 SWITCH_TASK_FILE="$MODDIR/config/switch_task.conf"
 TEXT_REBOOT_REQUIRED="$MODDIR/config/text_reboot_required.conf"
+NEXT_PAYLOAD="$MODDIR/.luoshu-payload-next"
+NEXT_STATE="$MODDIR/config/font-payload-next.conf"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
 [ -f "$MODDIR/common/font_boot_state.sh" ] && . "$MODDIR/common/font_boot_state.sh"
@@ -353,11 +355,22 @@ slot_trace_json() {
     # Trace that live payload directly instead of making the App depend on an
     # obsolete manifest that the switch core never creates.
     _runtime_core="$(read_prop "$MODDIR/config/font_runtime_legacy_v14_4.conf" core)"
+    _physical_root="$MODDIR/.luoshu-payload"
+    _trace_pending_next=false
+    _pending_font="$(read_prop "$TEXT_REBOOT_REQUIRED" font)"
+    _next_font="$(read_prop "$NEXT_STATE" font)"
+    if [ "$_active" != default ] && [ "$_pending_font" = "$_active" ] && [ "$_next_font" = "$_active" ] && [ -d "$NEXT_PAYLOAD" ]; then
+        # After a successful switch the live Android mounts still point to the
+        # previous boot. Trace the prepared next payload instead, and keep every
+        # slot pending until reboot rather than falsely calling it "未补齐".
+        _physical_root="$NEXT_PAYLOAD"
+        _trace_pending_next=true
+    fi
     if { [ "$_runtime_core" = physical-safe-v1 ] || [ ! -s "$_payload" ] || [ ! -s "$_overlay" ]; } && \
-       [ "$_active" != default ] && [ -d "$MODDIR/.luoshu-payload" ]; then
+       [ "$_active" != default ] && [ -d "$_physical_root" ]; then
         set -- "$SLOT_TRACE" \
             --inventory "$_inventory" \
-            --physical-root "$MODDIR/.luoshu-payload" \
+            --physical-root "$_physical_root" \
             --active-font "$_active" \
             --mount-state "$MODDIR/config/self-mount.conf" \
             --output "$MODDIR/config/device-font-slot-trace.json"
@@ -367,9 +380,9 @@ slot_trace_json() {
         _load_state="$(read_prop "$MODDIR/config/device-font-load-verification.conf" state)"
         _boot_state="$(read_prop "$MODDIR/config/font-payload-boot.conf" state)"
         _mount_state="$(read_prop "$MODDIR/config/self-mount.conf" state)"
-        if [ "$_load_state" = verified ] || \
+        if [ "$_trace_pending_next" != true ] && { [ "$_load_state" = verified ] || \
            { [ "$_boot_state" = confirmed ] && \
-             { [ "$_mount_state" = mounted ] || [ "$_mount_state" = confirmed ] || [ "$_mount_state" = degraded ]; }; }; then
+             { [ "$_mount_state" = mounted ] || [ "$_mount_state" = confirmed ] || [ "$_mount_state" = degraded ]; }; }; }; then
             set -- "$@" --physical-confirmed
         fi
 
