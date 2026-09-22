@@ -209,6 +209,10 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
             _existing=$((_existing + 1))
             continue
         fi
+        # The plan is a mandatory rewrite set, not an allow-list for the final
+        # payload. Composite staging intentionally removes the previous text tree;
+        # every other safe inventory slot that is now missing must be backfilled
+        # too, otherwise "repair one red slot" can silently delete good coverage.
     elif [ -s "$_target" ]; then
         # Legacy/no-plan callers keep the historical "fill only missing" behavior.
         _existing=$((_existing + 1))
@@ -240,18 +244,14 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
     case "${_weight:-400}" in ''|*[!0-9]*) _weight=400 ;; esac
 
     if [ "$MODE" = mix ]; then
-        [ "$PLAN_ENABLED" != true ] || [ "$_requested_slot" = true ] || continue
         _anchor="$MIX"
     elif [ "$_weight" -eq 400 ] 2>/dev/null; then
-        [ "$PLAN_ENABLED" != true ] || [ "$_requested_slot" = true ] || continue
         _anchor="$REGULAR"
     else
         _role=$(role_for_weight "$_weight")
         if has_exact_role "$_role" || has_variable_source; then
-            # In exact-plan mode an unrequested weight with a valid source is left
-            # untouched; an unrequested weight without a valid source still falls
-            # through to record_preserved below so protection survives this rebuild.
-            [ "$PLAN_ENABLED" != true ] || [ "$_requested_slot" = true ] || continue
+            # The remediation plan forces rewrites, but a newly rebuilt stage
+            # still needs every safe missing weight restored from a real source.
             _anchor="$STORE/${_role}.font"
             if [ ! -s "$_anchor" ] && type get_weight_file >/dev/null 2>&1 && type _font_anchor >/dev/null 2>&1; then
                 _role_source="$(get_weight_file "$FAMILY" "$_role" 2>/dev/null)"
