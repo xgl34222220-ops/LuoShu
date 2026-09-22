@@ -238,19 +238,20 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
     esac
 
     case "${_weight:-400}" in ''|*[!0-9]*) _weight=400 ;; esac
-    if [ "$PLAN_ENABLED" = true ] && [ "$_requested_slot" != true ]; then
-        # The exact plan is authoritative. A normal missing slot not requested by
-        # the current trace is left untouched instead of silently broadening repair.
-        continue
-    fi
 
     if [ "$MODE" = mix ]; then
+        [ "$PLAN_ENABLED" != true ] || [ "$_requested_slot" = true ] || continue
         _anchor="$MIX"
     elif [ "$_weight" -eq 400 ] 2>/dev/null; then
+        [ "$PLAN_ENABLED" != true ] || [ "$_requested_slot" = true ] || continue
         _anchor="$REGULAR"
     else
         _role=$(role_for_weight "$_weight")
         if has_exact_role "$_role" || has_variable_source; then
+            # In exact-plan mode an unrequested weight with a valid source is left
+            # untouched; an unrequested weight without a valid source still falls
+            # through to record_preserved below so protection survives this rebuild.
+            [ "$PLAN_ENABLED" != true ] || [ "$_requested_slot" = true ] || continue
             _anchor="$STORE/${_role}.font"
             if [ ! -s "$_anchor" ] && type get_weight_file >/dev/null 2>&1 && type _font_anchor >/dev/null 2>&1; then
                 _role_source="$(get_weight_file "$FAMILY" "$_role" 2>/dev/null)"
