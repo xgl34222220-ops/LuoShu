@@ -1,0 +1,21 @@
+name: Retract refactor v2.0.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/retract-v2.0.0.yml
+
+permissions:
+  contents: write
+
+jobs:
+  retract:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete withdrawn release and tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release delete refactor-v2.0.0 --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
