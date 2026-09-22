@@ -804,7 +804,7 @@ switch_font() {
         SYSTEM_FONTS_DIR="$STAGE_PAYLOAD/system/fonts"
         export PAYLOAD_ROOT SYSTEM_FONTS_DIR
         _cache_restored=false
-        if safe_switch_cache_restore "$_source" "$_font"; then
+        if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" != 1 ] && safe_switch_cache_restore "$_source" "$_font"; then
             _cache_restored=true
             progress 80 '已复用本机字体对齐缓存'
         else
