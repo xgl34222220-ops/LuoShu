@@ -260,10 +260,19 @@ prepare_mix_stage() {
     [ -f "$LEGACY_MODE" ] && _previous_legacy=true
     _request="mix-request-$(date +%s 2>/dev/null || echo 0)-$"
     _coverage_remediate=false
-    [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ] && _coverage_remediate=true
+    _coverage_plan=''
+    if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
+        _coverage_remediate=true
+        _coverage_plan="${LUOSHU_COVERAGE_PLAN:-}"
+        case "$_coverage_plan" in
+            "$REALMOD"/config/*) [ -s "$_coverage_plan" ] || return 1 ;;
+            *) return 1 ;;
+        esac
+    fi
     {
         printf 'requestId=%s\n' "$_request"
         printf 'coverageRemediate=%s\n' "$_coverage_remediate"
+        printf 'coveragePlan=%s\n' "$_coverage_plan"
         printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$1" "$2" "$3"
         printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$4" "$5" "$6"
         printf 'previousFont=%s\n' "$_previous"
@@ -355,6 +364,17 @@ write_next_state() {
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$REBOOT_CONF" 2>/dev/null || true
     chmod 0644 "$REBOOT_CONF" 2>/dev/null || true
+
+    # At this point both .luoshu-payload-next and font-payload-next.conf are
+    # durable. The explicit coverage rebuild has finished; leaving its intent
+    # behind makes post-fs-data treat the freshly generated payload as an old
+    # preserved payload and skip boot verification forever.
+    if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
+        rm -f "$REALMOD/config/font-payload-rebuild-pending.conf" \
+              "$REALMOD/config/font-payload-reapply-notified.conf" \
+              "$REALMOD/config/device-font-load-verification.conf" \
+              "$REALMOD/config/device-font-load-verification.json" 2>/dev/null || true
+    fi
     return 0
 }
 
@@ -389,8 +409,11 @@ commit_mix_stage_if_needed() {
     complete_coloros_stage || return 1
     if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
         _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
-        [ -f "$_coverage_helper" ] || return 1
-        LUOSHU_REAL_MODDIR="$REALMOD" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+        _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
+        [ -f "$_coverage_helper" ] && [ -s "$_coverage_plan" ] || return 1
+        LUOSHU_REAL_MODDIR="$REALMOD" \
+        LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+        LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
             sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
     fi
     rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
@@ -514,10 +537,22 @@ EOF
     return 0
 }
 
+coverage_intent_abort_if_owned() {
+    [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ] || return 0
+    rm -f "$REALMOD/config/font-payload-rebuild-pending.conf" \
+          "$REALMOD/config/font-payload-reapply-notified.conf" \
+          "$REALMOD/config/font-coverage-remediation-paths.txt" 2>/dev/null || true
+}
+
 mark_mix_mode_if_success() {
     _out="$1"
+    if printf '%s\n' "$_out" | grep -q '"state":"failed"'; then
+        coverage_intent_abort_if_owned
+        return 0
+    fi
     printf '%s\n' "$_out" | grep -q '"state":"success"' || return 0
     finalize_mix_stage >/dev/null 2>&1 || return 1
+    rm -f "$REALMOD/config/font-coverage-remediation-paths.txt" 2>/dev/null || true
     return 0
 }
 
