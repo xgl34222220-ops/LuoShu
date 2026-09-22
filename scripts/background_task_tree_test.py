@@ -135,6 +135,27 @@ class BackgroundTreeTest(unittest.TestCase):
         self.assertIn("task=signal-task\n", task)
         self.assertFalse(list((module / "config").glob("*.progress.*")))
 
+    def test_quiesce_font_workers_kills_registered_transients_only(self):
+        module = self.root / "quiesce-module"
+        config = module / "config"
+        config.mkdir(parents=True)
+        task = "axes-cleanup"
+        worker = self.spawn([sys.executable, "-c", "import time; time.sleep(60)", task])
+        unrelated = self.spawn([sys.executable, "-c", "import time; time.sleep(60)", "unrelated-sentinel"])
+        pidfile = config / "axes_worker.pid"
+        pidfile.write_text(str(worker.pid))
+        Path(str(pidfile) + ".task").write_text(task)
+
+        subprocess.run(
+            ["sh", "-c", '. "$1"; luoshu_quiesce_font_workers "$2" "$"', "sh",
+             str(ROOT / "common/background_task.sh"), str(module)],
+            check=True, timeout=5,
+        )
+        self.wait_for(lambda: worker.poll() is not None)
+        self.assertIsNone(unrelated.poll(), "quiesce killed an unrelated process")
+        self.assertFalse(pidfile.exists())
+        self.assertFalse(Path(str(pidfile) + ".task").exists())
+
     def test_provider_service_term_reaps_active_generator_and_releases_singleton(self):
         manager = self.worker_files()
         module = self.root / "module"
