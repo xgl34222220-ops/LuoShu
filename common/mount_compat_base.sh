@@ -69,6 +69,48 @@ luoshu_payload_partitions() {
     done < "$_lpp_manifest"
 }
 
+
+# Scanner revision 6 can promote safe OEM font trees such as
+# /product/vivo/fonts. Canonical partition mounting only knows /<part>/fonts,
+# so expose the scanner-owned nested-root manifest through one strict parser.
+_luoshu_nested_font_root_safe() {
+    _lnfr_part="$1"
+    _lnfr_rel="$2"
+    _lnfr_key="$3"
+    _luoshu_payload_partition_safe "$_lnfr_part" || return 1
+    case "$_lnfr_rel" in
+        ''|/*|.|..|../*|*/../*|*/..|*//*|fonts|font|etc) return 1 ;;
+    esac
+    _lnfr_rest="$_lnfr_rel"
+    while [ -n "$_lnfr_rest" ]; do
+        case "$_lnfr_rest" in
+            */*) _lnfr_component=\${_lnfr_rest%%/*}; _lnfr_rest=\${_lnfr_rest#*/} ;;
+            *) _lnfr_component="$_lnfr_rest"; _lnfr_rest='' ;;
+        esac
+        case "$_lnfr_component" in
+            ''|.|..|*[!A-Za-z0-9._+-]*) return 1 ;;
+        esac
+    done
+    _lnfr_prefix="\${_lnfr_part}-nested-"
+    case "$_lnfr_key" in
+        "$_lnfr_prefix"*) _lnfr_digest=\${_lnfr_key#"$_lnfr_prefix"} ;;
+        *) return 1 ;;
+    esac
+    [ "\${#_lnfr_digest}" -eq 16 ] 2>/dev/null || return 1
+    case "$_lnfr_digest" in *[!0-9a-f]*) return 1 ;; esac
+    return 0
+}
+
+luoshu_nested_font_roots() {
+    _lnfr_manifest="$LUOSHU_MOUNT_MODDIR/config/device_font_roots.conf"
+    [ -s "$_lnfr_manifest" ] || return 0
+    while IFS='|' read -r _lnfr_part _lnfr_rel _lnfr_key _lnfr_extra; do
+        [ -z "$_lnfr_extra" ] || continue
+        _luoshu_nested_font_root_safe "$_lnfr_part" "$_lnfr_rel" "$_lnfr_key" || continue
+        printf '%s|%s|%s\n' "$_lnfr_part" "$_lnfr_rel" "$_lnfr_key"
+    done < "$_lnfr_manifest"
+}
+
 luoshu_detect_root_manager() {
     if [ -n "${APATCH:-}" ] || [ -d /data/adb/ap ] || [ -d /data/adb/apatch ]; then
         printf 'APatch\n'

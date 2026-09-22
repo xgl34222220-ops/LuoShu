@@ -103,6 +103,29 @@ grep -q 'mix-engine-start.*json' "$ROOT/common/legacy_v14_4/font_mix_runtime.sh"
 ! sed -n '/^payload_stage_begin()/,/^}/p' "$ROOT/common/legacy_v14_4/font_mix_engine.sh" | grep -q 'cp -af'
 grep -q 'hyperos_metrics_batch.py' "$ROOT/common/hyperos_stage_complete.sh"
 
+# Compatibility runtime exposes config/logs/system as symlinks. The mix engine
+# must accept a symlink-to-directory without calling mkdir on the symlink itself.
+# Some Android toybox builds report EEXIST for that pattern.
+HELPER="$TMP/ensure-work-dir.sh"
+{
+    echo "set_mix_error(){ LAST_MIX_ERROR=\"\$*\"; }"
+    sed -n '/^ensure_work_dir()/,/^}/p' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
+    cat <<'EOF_WORKDIR'
+mkdir() { return 99; }
+ensure_work_dir "$TEST_LINK" "fixture"
+EOF_WORKDIR
+} > "$HELPER"
+mkdir -p "$TMP/real-workdir"
+ln -s "$TMP/real-workdir" "$TMP/runtime-link"
+TEST_LINK="$TMP/runtime-link" sh "$HELPER"
+
+grep -q '^ensure_work_dir()' "$ROOT/common/font_mix.sh"
+grep -q '^ensure_work_dir()' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
+! grep -Fq 'mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" "$MODDIR/logs"' "$ROOT/common/font_mix.sh"
+! grep -Fq 'mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" "$MODDIR/logs"' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
+sh -n "$ROOT/common/font_mix.sh"
+sh -n "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
+
 # Replacing a task must also stop its old completion monitor promptly. It must
 # neither poll for the former twelve-minute budget nor finalize the new task.
 printf 'task=newer-task\nstate=running\n' > "$MODULE/config/mix_task.conf"

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Canonical stock-font inventory scanner.
 
-Revision 5 keeps one canonical scanner, adds a bounded standalone-font census
-across trusted system/OEM partition trees, promotes safe nested font roots without
-brand names, and persists the exact roots needed by the runtime mount layer.
+Revision 6 keeps the revision-5 generic nested-root census and fixes in-place
+upgrade scanning: the broad census now resolves a trustworthy whole-partition
+stock view instead of walking upward from a per-font lower directory.
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ import font_inventory as base
 from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, safe_physical_font_name,
                                     DYNAMIC_OVERLAY_PATH, DYNAMIC_OVERLAY_TARGET)
 
-SCANNER_REVISION = 5
+SCANNER_REVISION = 6
 CANDIDATE_SCHEMA = "device-font-candidates-v1"
 METRICS_REVISION = 3
 # Re-scan trusted stock metrics for Latin UI families restored after v4.3.0.
@@ -244,6 +244,9 @@ NESTED_ROOT_DENY_COMPONENTS = {
     "media", "lost+found",
 }
 _LIVE_FONT_CENSUS: list[tuple[str, Path, Path]] | None = None
+# Install wrapper may replace this with a stock-partition resolver. Returning
+# None means no trustworthy whole-partition view is available for census.
+PARTITION_CENSUS_ROOT_RESOLVER = None
 
 
 def _dynamic_partition_search_bases() -> tuple[Path, ...]:
@@ -370,6 +373,11 @@ def _partition_scan_bases(font_roots: Iterable[base.FontRoot]) -> list[tuple[str
         actual_partition = root.actual
         for _part in suffix.parts:
             actual_partition = actual_partition.parent
+        resolver = PARTITION_CENSUS_ROOT_RESOLVER
+        if callable(resolver):
+            actual_partition = resolver(root.partition, logical_partition, actual_partition)
+            if actual_partition is None:
+                continue
         key = (root.partition, str(actual_partition))
         found.setdefault(key, (root.partition, logical_partition, actual_partition))
     return sorted(found.values(), key=lambda item: (item[0], str(item[2])))
@@ -1005,6 +1013,11 @@ def _refresh_known_slots(slots: dict[str, dict[str, Any]], families: dict[str, l
 def scan(args: Any) -> int:
     output: Path = args.output
     candidate_output = output.with_name("device_font_candidates.json")
+    # Establish the install wrapper's overlay context before the broad census.
+    # Without this, an in-place update can derive a fake partition root by
+    # walking upward from /data/.../lower/product-fonts and never see nested
+    # stock roots such as /product/vivo/fonts.
+    base._overlay_risk(args.overlay_module)
     probe = _write_live_candidate_probe(args, candidate_output)
     build_key, fingerprint, display_id = base.current_build_key(args.build_key)
     existing = base._load_json(output)

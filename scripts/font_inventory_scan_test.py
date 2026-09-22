@@ -110,7 +110,7 @@ def main() -> int:
             "--scan",
             "--output", str(output),
             "--font-check", str(font_check),
-            "--build-key", "inventory-v5-rom",
+            "--build-key", "inventory-v6-rom",
         ]
         for name in primary:
             command.extend(["--" + name.replace("_", "-") + "-fonts", str(font_dirs[name])])
@@ -127,7 +127,7 @@ def main() -> int:
         candidates = json.loads((temp / "device_font_candidates.json").read_text(encoding="utf-8"))
         summary = payload["scanSummary"]
 
-        assert payload["scannerRevision"] == 5
+        assert payload["scannerRevision"] == 6
         assert payload["romKind"] == "coloros"
         assert result["stockFontFileCount"] == 10
         assert result["stockFontUniqueFileCount"] == 8

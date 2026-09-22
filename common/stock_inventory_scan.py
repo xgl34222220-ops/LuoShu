@@ -44,6 +44,116 @@ def _logical_font_roots(module: Path | None) -> list[tuple[str, Path]]:
     return roots
 
 
+def _private_partition_overlaid(partition: str) -> bool:
+    module = _ACTIVE_OVERLAY_MODULE
+    if module is None:
+        return False
+    for payload in (module / ".luoshu-payload", module / ".luoshu-payload-next", module):
+        root = payload / partition
+        if not root.is_dir():
+            continue
+        try:
+            for path in root.rglob("*"):
+                if path.is_file() and path.suffix.lower() in inventory.FONT_EXTENSIONS:
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def _partition_logical_candidates(partition: str, logical_partition: Path) -> list[Path]:
+    found: list[Path] = []
+
+    def add(path: Path) -> None:
+        if path not in found:
+            found.append(path)
+
+    add(logical_partition)
+    for name, logical, _argument, aliases in scanner.PRIMARY_FONT_SPECS:
+        if name != partition:
+            continue
+        add(logical.parent)
+        for alias in aliases:
+            add(alias.parent)
+    for name, logical, _argument in scanner.AUX_FONT_SPECS:
+        if name == partition:
+            add(logical.parent)
+    try:
+        dynamic = scanner._dynamic_partition_specs()
+    except Exception:
+        dynamic = []
+    for name, logical, aliases, _etc_logical, _etc_aliases in dynamic:
+        if name != partition:
+            continue
+        add(logical.parent)
+        for alias in aliases:
+            add(alias.parent)
+    return found
+
+
+def _partition_has_mount(path: Path) -> bool:
+    root = str(path).rstrip("/")
+    for target in _mount_targets():
+        if target == root or target.startswith(root + "/"):
+            return True
+    return False
+
+
+def _safe_partition_census_root(
+    partition: str,
+    logical_partition: Path,
+    derived_actual: Path,
+) -> Path | None:
+    """Resolve a trustworthy whole-partition view for scanner revision 6.
+
+    Standard font lower directories are intentionally *not* whole partitions.
+    During an in-place LuoShu update, walking upward from
+    /data/adb/luoshu/self-mount/lower/product-fonts would incorrectly census the
+    lower-state directory instead of /product, hiding /product/vivo/fonts and
+    every other nested OEM root. Prefer full mirrors, installer-stock namespaces
+    or a non-recursive parent bind snapshot.
+    """
+    if _ACTIVE_OVERLAY_MODULE is None:
+        return derived_actual if derived_actual.is_dir() else None
+
+    candidates = _partition_logical_candidates(partition, logical_partition)
+
+    # Magisk-style mirrors are the strongest whole-partition stock source.
+    for logical in candidates:
+        try:
+            relative = logical.relative_to("/")
+        except ValueError:
+            continue
+        for prefix in inventory.MIRROR_PREFIXES:
+            mirror = prefix / relative
+            if mirror.is_dir():
+                return mirror
+
+    # KernelSU/SukiSU installers may already see an isolated stock namespace.
+    for logical in candidates:
+        if logical.is_dir() and _installer_namespace_is_stock(logical):
+            return logical
+
+    # A non-recursive bind of the partition parent omits LuoShu's child mounts
+    # (/product/fonts, /product/vivo/fonts, ...), exposing the underlying stock
+    # filesystem without changing the live namespace.
+    for logical in candidates:
+        if not logical.is_dir():
+            continue
+        snapshot = _bind_parent_stock_snapshot(logical)
+        if snapshot is not None:
+            return snapshot
+
+    # If LuoShu has no payload in this partition and there are no mounts at or
+    # below it, the live partition is already a trustworthy stock view.
+    if not _private_partition_overlaid(partition):
+        for logical in candidates:
+            if logical.is_dir() and not _partition_has_mount(logical):
+                return logical
+
+    return None
+
+
 def _private_root_overlaid(logical: Path) -> bool:
     module = _ACTIVE_OVERLAY_MODULE
     if module is None:
@@ -400,9 +510,12 @@ def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: b
 def main() -> int:
     inventory._overlay_risk = _private_overlay_risk
     inventory._pick_actual_root = _safe_pick_actual_root
+    previous_census_resolver = scanner.PARTITION_CENSUS_ROOT_RESOLVER
+    scanner.PARTITION_CENSUS_ROOT_RESOLVER = _safe_partition_census_root
     try:
         return scanner.main()
     finally:
+        scanner.PARTITION_CENSUS_ROOT_RESOLVER = previous_census_resolver
         _cleanup_install_snapshots()
 
 

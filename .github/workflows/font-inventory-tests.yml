@@ -58,8 +58,13 @@ jobs:
           grep -q '"$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan' "$INSTALLER"
           grep -q '_add_verified_text_slots' common/font_inventory.py
           grep -q 'genericSlotCount' "$INSTALLER"
+          grep -q 'fontPathCount' "$INSTALLER"
+          grep -q 'nestedFontRootCount' "$INSTALLER"
+          grep -q '系统/OEM 独立字体路径普查' "$INSTALLER"
           grep -q 'device_font_candidates.json' "$INSTALLER"
           grep -q 'candidatePathCount' common/font_inventory_scan.py
+          grep -q 'PARTITION_CENSUS_ROOT_RESOLVER' common/font_inventory_scan.py
+          grep -q '_safe_partition_census_root' common/stock_inventory_scan.py
           ! grep -q '已中止本次更新' "$INSTALLER"
           grep -q 'stock_inventory_scan.py' common/font_manager.sh
           grep -q '_copy_as_inventory' common/rom_adapters.sh

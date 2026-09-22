@@ -30,6 +30,9 @@ LOCK_FILE="$MODDIR/.font_switch.lock"
 WORKER_PID="$CONFIG_DIR/axes_worker.pid"
 AUTO_WORKER_PID="$CONFIG_DIR/auto_multiweight_worker.pid"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
+REALMOD="${LUOSHU_REAL_MODDIR:-}"
+REAL_MIX_ROUTER="${REALMOD:+$REALMOD/common/legacy_v14_4/mix_router.sh}"
+FINALIZE_ERROR=''
 
 MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
@@ -57,6 +60,59 @@ clear_worker_pid() {
     else
         rm -f "$WORKER_PID" 2>/dev/null || true
     fi
+}
+
+prepare_compat_payload() {
+    FINALIZE_ERROR=''
+    [ -n "$REALMOD" ] && [ "$REALMOD" != "$MODDIR" ] && [ -f "$REAL_MIX_ROUTER" ] || return 0
+    _pcp_out="$CONFIG_DIR/.compat-prepare.$"
+    rm -f "$_pcp_out" 2>/dev/null || true
+    if command -v timeout >/dev/null 2>&1; then
+        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" timeout 300 sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
+        _pcp_rc=$?
+    elif command -v toybox >/dev/null 2>&1 && toybox timeout --help >/dev/null 2>&1; then
+        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" toybox timeout 300 sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
+        _pcp_rc=$?
+    else
+        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
+        _pcp_rc=$?
+    fi
+    cat "$_pcp_out" >>"$LOG_FILE" 2>/dev/null || true
+    if [ "$_pcp_rc" -ne 0 ] || ! grep -q '"status":"ok"' "$_pcp_out" 2>/dev/null; then
+        FINALIZE_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_pcp_out" 2>/dev/null | tail -n1)
+        [ -n "$FINALIZE_ERROR" ] || FINALIZE_ERROR='复合字体预提交处理失败'
+        rm -f "$_pcp_out" 2>/dev/null || true
+        return 1
+    fi
+    rm -f "$_pcp_out" 2>/dev/null || true
+    return 0
+}
+finalize_compat_payload() {
+    FINALIZE_ERROR=''
+    [ -n "$REALMOD" ] && [ "$REALMOD" != "$MODDIR" ] && [ -f "$REAL_MIX_ROUTER" ] || return 0
+    _fcp_out="$CONFIG_DIR/.compat-finalize.$"
+    rm -f "$_fcp_out" 2>/dev/null || true
+    if command -v timeout >/dev/null 2>&1; then
+        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" timeout 180 sh "$REAL_MIX_ROUTER" finalize >"$_fcp_out" 2>&1
+        _fcp_rc=$?
+    elif command -v toybox >/dev/null 2>&1 && toybox timeout --help >/dev/null 2>&1; then
+        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" toybox timeout 180 sh "$REAL_MIX_ROUTER" finalize >"$_fcp_out" 2>&1
+        _fcp_rc=$?
+    else
+        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$REAL_MIX_ROUTER" finalize >"$_fcp_out" 2>&1
+        _fcp_rc=$?
+    fi
+    cat "$_fcp_out" >>"$LOG_FILE" 2>/dev/null || true
+    if [ "$_fcp_rc" -ne 0 ] || ! grep -q '"status":"ok"' "$_fcp_out" 2>/dev/null; then
+        FINALIZE_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_fcp_out" 2>/dev/null | tail -n1)
+        [ -n "$FINALIZE_ERROR" ] || {
+            case "$_fcp_rc" in 124) FINALIZE_ERROR='提交下一启动字体负载超时' ;; *) FINALIZE_ERROR='下一启动字体负载提交失败' ;; esac
+        }
+        rm -f "$_fcp_out" 2>/dev/null || true
+        return 1
+    fi
+    rm -f "$_fcp_out" 2>/dev/null || true
+    return 0
 }
 
 task_worker_alive() {
@@ -355,7 +411,17 @@ worker() {
             [ -n "$_base_message" ] || _base_message='完整复合字体正在后台生成'
             case "$_base_state" in
                 success)
-                    update_task "$_wanted" success "$_base_message" 100 "$_child" "$(date +%s)"
+                    update_task "$_wanted" running '复合字体已生成，正在完成 ROM 槽位与补齐处理' 90 "$_child" ''
+                    if ! prepare_compat_payload; then
+                        update_task "$_wanted" failed "${FINALIZE_ERROR:-复合字体预提交处理失败}" 100 "$_child" "$(date +%s)"
+                        rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
+                    fi
+                    update_task "$_wanted" running '预提交完成，正在原子提交下一启动负载' 99 "$_child" ''
+                    if ! finalize_compat_payload; then
+                        update_task "$_wanted" failed "${FINALIZE_ERROR:-下一启动字体负载提交失败}" 100 "$_child" "$(date +%s)"
+                        rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
+                    fi
+                    update_task "$_wanted" success '完整复合字体负载已提交，完整重启后生效' 100 "$_child" "$(date +%s)"
                     rewrite_public_config
                     rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 0
                     ;;

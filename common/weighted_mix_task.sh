@@ -426,10 +426,26 @@ start_mix() {
         printf '{"status":"error","message":"本次开机已更改文字字体，请先重启手机"}\n'; return
     }
     if [ -s "$WORKER_PID" ]; then
-        _old=$(cat "$WORKER_PID" 2>/dev/null)
-        [ -z "$_old" ] || ! kill -0 "$_old" 2>/dev/null || {
-            printf '{"status":"error","message":"已有字体组合任务正在运行"}\n'; return
-        }
+        _old_task=$(read_value "$TASK_FILE" task)
+        if type luoshu_task_pid_alive >/dev/null 2>&1; then
+            if [ -n "$_old_task" ] && luoshu_task_pid_alive "$WORKER_PID" "$_old_task"; then
+                printf '{"status":"error","message":"已有字体组合任务正在运行"}\n'
+                return
+            fi
+            # A bare PID can be recycled by Android. If task/boot/cmdline identity
+            # does not match the saved LuoShu task, release the stale sidecar now.
+            if type luoshu_clear_task_pid >/dev/null 2>&1; then
+                luoshu_clear_task_pid "$WORKER_PID" "$_old_task"
+            else
+                rm -f "$WORKER_PID" "${WORKER_PID}.task" "${WORKER_PID}.boot" 2>/dev/null || true
+            fi
+        else
+            _old=$(cat "$WORKER_PID" 2>/dev/null)
+            [ -z "$_old" ] || ! kill -0 "$_old" 2>/dev/null || {
+                printf '{"status":"error","message":"已有字体组合任务正在运行"}\n'
+                return
+            }
+        fi
     fi
     if type luoshu_font_lock_busy >/dev/null 2>&1; then
         if luoshu_font_lock_busy "$LOCK_FILE"; then
@@ -444,7 +460,8 @@ start_mix() {
     [ -n "$_cjk_axes" ] || _cjk_axes='wght=400'
     [ -n "$_latin_axes" ] || _latin_axes='wght=400'
     [ -n "$_digit_axes" ] || _digit_axes='wght=400'
-    if type luoshu_mix_request_matches_active >/dev/null 2>&1 && \
+    if [ "${LUOSHU_FORCE_REBUILD:-0}" != 1 ] && \
+       type luoshu_mix_request_matches_active >/dev/null 2>&1 && \
        luoshu_mix_request_matches_active "$_cjk" "$_latin" "$_digit" \
            "$_cjk_axes" "$_latin_axes" "$_digit_axes" fixed fixed fixed; then
         _request="axes-reuse-$(date +%s)-$$"

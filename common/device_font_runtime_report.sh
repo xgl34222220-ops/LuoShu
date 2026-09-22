@@ -105,6 +105,7 @@ device_font_runtime_report_collect() {
 
     for _dfr_pair in \
         "device_font_inventory.json|device-font-inventory.json" \
+        "device_font_candidates.json|device-font-candidates.json" \
         "device_font_partitions.conf|device-font-partitions.conf" \
         "device_font_roots.conf|device-font-roots.conf" \
         "device-font-template.json|device-font-template.json" \
@@ -155,6 +156,8 @@ device_font_runtime_report_collect() {
             --output "$_dfr_stage/device-font-slot-trace.json"
         [ ! -s "$_dfr_stage/device-font-load-verification.json" ] || \
             set -- "$@" --verification "$_dfr_stage/device-font-load-verification.json"
+        [ ! -s "$_dfr_stage/device-font-candidates.json" ] || \
+            set -- "$@" --candidates "$_dfr_stage/device-font-candidates.json"
         _dfr_pyroot="$_dfr_module/common/python"
         PYTHONHOME="$_dfr_pyroot" \
         PYTHONPATH="$_dfr_module/common:$_dfr_pyroot/lib/python3.14:$_dfr_pyroot/lib/python3.14/site-packages" \

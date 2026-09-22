@@ -499,6 +499,39 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
+    fun followCoverageTask(taskId: String, mix: Boolean) {
+        if (taskId.isBlank()) return
+        if (mix) {
+            mixState = mixState.copy(
+                busy = true,
+                taskId = taskId,
+                taskState = "queued",
+                message = "字体补齐任务已启动",
+                progress = 1,
+                error = "",
+            )
+            snapshot = snapshot.copy(
+                taskType = "mix",
+                taskId = taskId,
+                taskState = "queued",
+                taskMessage = "字体补齐任务已启动",
+                taskProgress = 1,
+            )
+            viewModelScope.launch { watchMixTask(taskId) }
+        } else {
+            operationBusy = true
+            operationMessage = "字体补齐任务已启动"
+            snapshot = snapshot.copy(
+                taskType = "switch",
+                taskId = taskId,
+                taskState = "queued",
+                taskMessage = operationMessage,
+                taskProgress = 1,
+            )
+            viewModelScope.launch { watchSwitchTask(taskId, snapshot.activeFont) }
+        }
+    }
+
     fun prewarmFont(fontId: String) {
         if (fontId.isBlank() || fontId == "default" || !snapshot.installed) return
         viewModelScope.launch(Dispatchers.IO) {

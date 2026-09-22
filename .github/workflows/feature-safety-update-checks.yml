@@ -6,6 +6,13 @@ on:
       - 'feat/**'
     paths:
       - 'android-app/**'
+      - 'common/app_bridge.sh'
+      - 'common/device_font_slot_trace.py'
+      - 'common/device_font_load_verify.sh'
+      - 'common/device_font_runtime_report.sh'
+      - 'scripts/font_coverage_center_test.sh'
+      - 'scripts/device_font_slot_trace_test.py'
+      - 'scripts/font_library_ui_layout_test.sh'
       - 'system/bin/luoshu-health'
       - 'scripts/system_health_test.sh'
       - 'scripts/sync_update_metadata.py'
@@ -18,6 +25,13 @@ on:
       - main
     paths:
       - 'android-app/**'
+      - 'common/app_bridge.sh'
+      - 'common/device_font_slot_trace.py'
+      - 'common/device_font_load_verify.sh'
+      - 'common/device_font_runtime_report.sh'
+      - 'scripts/font_coverage_center_test.sh'
+      - 'scripts/device_font_slot_trace_test.py'
+      - 'scripts/font_library_ui_layout_test.sh'
       - 'system/bin/luoshu-health'
       - 'scripts/system_health_test.sh'
       - 'scripts/sync_update_metadata.py'
@@ -40,6 +54,11 @@ jobs:
           sh scripts/system_health_test.sh
           python3 -m py_compile scripts/sync_update_metadata.py
           python3 scripts/sync_update_metadata_test.py
+      - name: Validate font coverage center contracts
+        run: |
+          sh scripts/font_coverage_center_test.sh
+          python3 scripts/device_font_slot_trace_test.py
+          sh scripts/font_library_ui_layout_test.sh
 
   android:
     runs-on: ubuntu-24.04

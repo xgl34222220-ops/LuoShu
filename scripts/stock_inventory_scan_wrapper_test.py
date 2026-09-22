@@ -16,7 +16,7 @@ import stock_inventory_scan as stock  # noqa: E402
 
 
 def main() -> int:
-    assert stock.scanner.SCANNER_REVISION == 5, "manual/install scan must use the full v5 generic inventory"
+    assert stock.scanner.SCANNER_REVISION == 6, "manual/install scan must use the full v6 generic inventory"
     installer = (ROOT / ".luoshu-runtime/compat/v227/customize.sh").read_text(encoding="utf-8")
     wrapper = (ROOT / "customize.sh").read_text(encoding="utf-8")
     service = (ROOT / "service.sh").read_text(encoding="utf-8")
@@ -117,6 +117,47 @@ def main() -> int:
                 os.environ.pop("LUOSHU_SELF_MOUNT_STATE_ROOT", None)
             else:
                 os.environ["LUOSHU_SELF_MOUNT_STATE_ROOT"] = old_state
+
+        # Regression for the real in-place-update failure: the resolved stock
+        # font root may be /data/.../lower/product-fonts. Walking upward from
+        # that directory must never be treated as the /product partition census.
+        # A whole-partition stock mirror must win and expose nested OEM roots.
+        product_lower = temp / "state/lower/product-fonts"
+        product_lower.mkdir(parents=True, exist_ok=True)
+        (product_lower / "Roboto-Regular.ttf").write_bytes(b"stock-regular")
+        mirror_root = temp / "mirror"
+        mirror_product = mirror_root / "product"
+        (mirror_product / "fonts").mkdir(parents=True)
+        (mirror_product / "vivo/fonts").mkdir(parents=True)
+        (mirror_product / "fonts/Roboto-Regular.ttf").write_bytes(b"stock-regular")
+        (mirror_product / "vivo/fonts/VivoFont.ttf").write_bytes(b"stock-vivo")
+        (module / ".luoshu-payload/product/fonts").mkdir(parents=True, exist_ok=True)
+        (module / ".luoshu-payload/product/fonts/Roboto-Regular.ttf").write_bytes(b"overlay")
+        (module / "config/active_font.conf").write_text("mix\n", encoding="utf-8")
+        assert stock._private_overlay_risk(module)
+
+        old_mirrors = inventory.MIRROR_PREFIXES
+        old_resolver = scanner.PARTITION_CENSUS_ROOT_RESOLVER
+        try:
+            inventory.MIRROR_PREFIXES = (mirror_root,)
+            scanner.PARTITION_CENSUS_ROOT_RESOLVER = stock._safe_partition_census_root
+            roots = [
+                inventory.FontRoot(
+                    "product", Path("/product/fonts"), product_lower
+                )
+            ]
+            bases = scanner._partition_scan_bases(roots)
+            assert bases == [("product", Path("/product"), mirror_product)], bases
+            census = {
+                str(logical)
+                for _partition, logical, _actual in scanner._partition_font_census(roots)
+            }
+            assert "/product/fonts/Roboto-Regular.ttf" in census, census
+            assert "/product/vivo/fonts/VivoFont.ttf" in census, census
+            assert not any("/state/lower/" in logical for logical in census), census
+        finally:
+            scanner.PARTITION_CENSUS_ROOT_RESOLVER = old_resolver
+            inventory.MIRROR_PREFIXES = old_mirrors
 
         calls: list[tuple[Path, bool]] = []
         original_picker = inventory._pick_actual_root
