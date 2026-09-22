@@ -250,6 +250,22 @@ sh -n "$ROOT/common/mount_compat_base.sh"
 sh -n "$ROOT/common/mount_self_atomic.sh"
 sh -n "$ROOT/common/mount_self_fallback.sh"
 
+# A normal font change must preserve complete safe coverage, not only explicit
+# remediation runs. Before reboot, Coverage must inspect the prepared next payload
+# and classify it pending rather than comparing the new selection to old live mounts.
+grep -Fq '_physical_root="$NEXT_PAYLOAD"' "$ROOT/common/app_bridge.sh"
+grep -Fq '_trace_pending_next=true' "$ROOT/common/app_bridge.sh"
+grep -Fq 'LUOSHU_COVERAGE_PLAN="${LUOSHU_COVERAGE_PLAN:-}"' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -Fq "LUOSHU_COVERAGE_PLAN='' \\" "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -Fq 'A normal mix switch still backfills the complete safe inventory tree' "$ROOT/common/legacy_v14_4/mix_router.sh"
+grep -Fq 'luoshu_quiesce_font_workers' "$ROOT/common/font_switch_task.sh"
+grep -Fq 'luoshu_quiesce_font_workers' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
+grep -Fq 'luoshu_quiesce_font_workers' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
+sh -n "$ROOT/common/background_task.sh"
+sh -n "$ROOT/common/font_switch_task.sh"
+sh -n "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+sh -n "$ROOT/common/legacy_v14_4/mix_router.sh"
+
 # Coverage remediation must become a first-class tracked task in the App:
 # taskId is mandatory, live progress is shown, a running task cannot be submitted
 # twice, and success turns the primary action into a single full reboot.
