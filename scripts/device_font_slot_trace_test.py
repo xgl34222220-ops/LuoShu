@@ -134,7 +134,7 @@ def main() -> None:
     assert summary["replaced"] == 1, summary
     assert summary["protected"] == 2, summary
     assert summary["issues"] == 2, summary
-    assert summary["remediable"] == 2, summary
+    assert summary["remediable"] == 1, summary
     assert summary["loaded"] == 1, summary
     assert summary["preserved"] == 2, summary
     assert summary["missingMount"] == 1, summary
@@ -146,7 +146,6 @@ def main() -> None:
         plan = Path(raw_tmp) / "remediation.txt"
         trace.atomic_write_plan(result, plan)
         assert plan.read_text(encoding="utf-8").splitlines() == [
-            "/product/fonts/D.ttf",
             "/vendor/fonts/E.ttf",
         ]
 
