@@ -26,6 +26,7 @@ LEGACY_MODE="$REALMOD/config/font_runtime_legacy_v14_4.conf"
 REBOOT_CONF="$REALMOD/config/text_reboot_required.conf"
 LOG_FILE="$REALMOD/logs/fontswitch.log"
 FINALIZE_LOCK="$REALMOD/.mix-stage-finalize.lock"
+PRECOMMIT_STATE="$MIX_STAGE/.luoshu-precommit-ready.conf"
 [ -f "$LEGACY/payload_clone.sh" ] && . "$LEGACY/payload_clone.sh"
 [ -f "$REALMOD/common/background_task.sh" ] && . "$REALMOD/common/background_task.sh"
 
@@ -439,6 +440,46 @@ write_next_state() {
     return 0
 }
 
+precommit_ready() {
+    [ -s "$PRECOMMIT_STATE" ] || return 1
+    _pcr_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    [ -n "$_pcr_request" ] || return 1
+    [ "$(read_value "$PRECOMMIT_STATE" requestId)" = "$_pcr_request" ] || return 1
+    [ "$(read_value "$PRECOMMIT_STATE" state)" = ready ] || return 1
+    return 0
+}
+
+prepare_mix_stage_for_commit() {
+    precommit_ready && return 0
+    stage_has_fonts || return 1
+    stage_generation_matches || return 1
+
+    mix_finalize_state_write running "正在完成 ROM 字体槽位对齐" "$(read_value "$REALMOD/config/axes_task.conf" task)"
+    complete_hyperos_stage || return 1
+    complete_coloros_stage || return 1
+
+    if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
+        mix_finalize_state_write running "正在完成字体补齐批处理" "$(read_value "$REALMOD/config/axes_task.conf" task)"
+        _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
+        _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
+        [ -f "$_coverage_helper" ] && [ -s "$_coverage_plan" ] || return 1
+        LUOSHU_REAL_MODDIR="$REALMOD" \
+        LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+        LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
+            sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
+    fi
+
+    _pm_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    _pm_tmp="${PRECOMMIT_STATE}.tmp.$"
+    {
+        printf "state=ready\n"
+        printf "requestId=%s\n" "$_pm_request"
+        printf "time=%s\n" "$(date +%s 2>/dev/null || echo 0)"
+    } >"$_pm_tmp" 2>/dev/null || return 1
+    mv -f "$_pm_tmp" "$PRECOMMIT_STATE" 2>/dev/null || return 1
+    chmod 0644 "$PRECOMMIT_STATE" 2>/dev/null || true
+    return 0
+}
 commit_mix_stage_if_needed() {
     # Auto-multiweight may already have gone through font_switch_safe.sh. In that
     # case the real next payload is authoritative; discard this compatibility clone.
@@ -464,19 +505,7 @@ commit_mix_stage_if_needed() {
         return 0
     fi
 
-    stage_has_fonts || return 1
-    stage_generation_matches || return 1
-    complete_hyperos_stage || return 1
-    complete_coloros_stage || return 1
-    if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
-        _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
-        _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
-        [ -f "$_coverage_helper" ] && [ -s "$_coverage_plan" ] || return 1
-        LUOSHU_REAL_MODDIR="$REALMOD" \
-        LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-        LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
-            sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
-    fi
+    prepare_mix_stage_for_commit || return 1
     rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
     mv "$MIX_STAGE" "$NEXT_PAYLOAD" 2>/dev/null || return 1
     if ! write_next_state; then
@@ -621,6 +650,14 @@ _cmd="${1:-config}"
 if [ "$_cmd" = finalize-worker ]; then
     mix_finalize_worker "${2:-}"
     exit 0
+fi
+if [ "$_cmd" = prepare-finalize ]; then
+    if prepare_mix_stage_for_commit; then
+        printf '{"status":"ok","data":{"stage":"prepared"}}\n'
+        exit 0
+    fi
+    printf '{"status":"error","message":"复合字体预提交处理失败"}\n'
+    exit 1
 fi
 if [ "$_cmd" = reconcile ]; then
     # Reconcile task ownership without rebuilding compatibility runtime links.
