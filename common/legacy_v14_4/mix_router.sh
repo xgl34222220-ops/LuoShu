@@ -40,7 +40,7 @@ mix_finalize_state_write() {
     _mfs_task="${3:-}"
     _mfs_percent="${4:-}"
     _mfs_file="$REALMOD/config/mix-finalize-state.conf"
-    _mfs_tmp="${_mfs_file}.tmp.$"
+    _mfs_tmp="${_mfs_file}.tmp.$$"
     {
         printf 'state=%s\n' "$_mfs_state"
         printf 'task=%s\n' "$_mfs_task"
@@ -485,7 +485,7 @@ prepare_mix_stage_for_commit() {
     fi
 
     _pm_request=$(read_value "$MIX_STAGE_STATE" requestId)
-    _pm_tmp="${PRECOMMIT_STATE}.tmp.$"
+    _pm_tmp="${PRECOMMIT_STATE}.tmp.$$"
     {
         printf "state=ready\n"
         printf "requestId=%s\n" "$_pm_request"
