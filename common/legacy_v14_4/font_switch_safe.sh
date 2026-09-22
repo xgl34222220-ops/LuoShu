@@ -836,13 +836,14 @@ switch_font() {
             fi
         fi
         progress 82 '正在完成本机全部安全字体槽位'
-        if [ -f "$COVERAGE_REMEDIATE_HELPER" ]; then
+        _coverage_helper="${COVERAGE_REMEDIATE_HELPER:-$MODDIR/common/coverage_payload_remediate.sh}"
+        if [ -f "$_coverage_helper" ]; then
             # An explicit remediation plan forces its red slots to be rewritten.
             # A normal font switch passes no plan and still backfills every other safe
             # inventory slot, so changing font cannot regress a complete current module.
             if ! LUOSHU_REAL_MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" \
                 LUOSHU_COVERAGE_PLAN="${LUOSHU_COVERAGE_PLAN:-}" \
-                sh "$COVERAGE_REMEDIATE_HELPER" "$STAGE_PAYLOAD" direct "$_font" >> "$LOG_FILE" 2>&1; then
+                sh "$_coverage_helper" "$STAGE_PAYLOAD" direct "$_font" >> "$LOG_FILE" 2>&1; then
                 safe_error '按本机扫描清单完成安全字体槽位失败，当前启动字体未被改动'
                 return 1
             fi
