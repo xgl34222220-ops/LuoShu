@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eux
+set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-coverage)
@@ -240,7 +240,8 @@ assert data["summary"]["protected"] == 2, data["summary"]
 assert data["summary"]["remediable"] == 1, data["summary"]
 assert data["summary"]["missingMount"] == 1, data["summary"]
 PY
-grep -q -- '--physical-root "$MODDIR/.luoshu-payload"' "$ROOT/common/app_bridge.sh"
+grep -q -- '--physical-root "$_physical_root"' "$ROOT/common/app_bridge.sh"
+grep -Fq '_physical_root="$MODDIR/.luoshu-payload"' "$ROOT/common/app_bridge.sh"
 grep -q 'traceSource.*physical-safe' "$ROOT/common/device_font_slot_trace.py"
 grep -q 'luoshu_nested_font_roots' "$ROOT/common/mount_compat_base.sh"
 grep -q 'device_font_roots.conf' "$ROOT/common/mount_compat_base.sh"
