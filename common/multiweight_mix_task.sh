@@ -563,11 +563,24 @@ start_mix() {
         return
     }
     if [ -s "$WORKER_PID" ]; then
-        _old=$(cat "$WORKER_PID" 2>/dev/null)
-        [ -z "$_old" ] || ! kill -0 "$_old" 2>/dev/null || {
-            printf '{"status":"error","message":"已有自动多字重任务正在运行"}\n'
-            return
-        }
+        _old_task=$(read_value "$TASK_FILE" task)
+        if type luoshu_task_pid_alive >/dev/null 2>&1; then
+            if [ -n "$_old_task" ] && luoshu_task_pid_alive "$WORKER_PID" "$_old_task"; then
+                printf '{"status":"error","message":"已有自动多字重任务正在运行"}\n'
+                return
+            fi
+            if type luoshu_clear_task_pid >/dev/null 2>&1; then
+                luoshu_clear_task_pid "$WORKER_PID" "$_old_task"
+            else
+                rm -f "$WORKER_PID" "${WORKER_PID}.task" "${WORKER_PID}.boot" 2>/dev/null || true
+            fi
+        else
+            _old=$(cat "$WORKER_PID" 2>/dev/null)
+            [ -z "$_old" ] || ! kill -0 "$_old" 2>/dev/null || {
+                printf '{"status":"error","message":"已有自动多字重任务正在运行"}\n'
+                return
+            }
+        fi
     fi
     if type luoshu_font_lock_busy >/dev/null 2>&1; then
         if luoshu_font_lock_busy "$LOCK_FILE"; then
