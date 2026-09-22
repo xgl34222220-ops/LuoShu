@@ -423,6 +423,7 @@ def build_physical_trace(
         counts[state] += 1
 
     inventory_paths = {normalize_path(path) for path in (inventory.get("slots") or {})}
+    census_only: list[dict[str, Any]] = []
     for raw in candidates.get("paths") or []:
         if not isinstance(raw, dict):
             continue
@@ -432,21 +433,13 @@ def build_physical_trace(
         reason = str(raw.get("reason") or "census-only")
         if bool(raw.get("candidate", False)) and reason == "visible-font-path":
             reason = "not-promoted-to-ui-inventory"
-        traced.append({
+        census_only.append({
             "path": logical,
             "slotName": str(raw.get("slotName") or Path(logical).name),
             "partition": str(raw.get("partition") or ""),
             "source": "census",
             "format": Path(logical).suffix.lower().lstrip(".").upper(),
-            "weight": 400,
-            "style": "normal",
-            "families": [],
-            "state": "protected",
-            "category": "protected",
-            "safeToRetry": False,
             "reason": reason,
-            "supplementDisposition": "census-only",
-            "routes": [],
         })
 
     category_counts: dict[str, int] = defaultdict(int)
@@ -470,7 +463,8 @@ def build_physical_trace(
         "traceSource": "physical-safe",
         "summary": {
             "inventorySlots": len(inventory.get("slots") or {}),
-            "censusSlots": len(traced),
+            "censusSlots": len(traced) + len(census_only),
+            "censusOnlySlots": len(census_only),
             "replaceableSlots": eligible,
             "replaced": category_counts.get("replaced", 0),
             "pending": category_counts.get("pending", 0),
@@ -491,6 +485,7 @@ def build_physical_trace(
             "templateOnlyRoutes": 0,
         },
         "slots": traced,
+        "censusOnly": census_only,
         "templateOnlyRoutes": [],
     }
 
@@ -552,10 +547,11 @@ def build_trace(
         traced.append(item)
         counts[state] += 1
 
-    # Candidate census can be wider than the replaceable UI inventory. Surface
-    # every census-only font explicitly as protected/unmanaged instead of hiding it
-    # from the App. This keeps "scanned" and "replaceable" counts separate.
+    # Candidate census is intentionally wider than the UI-slot inventory. Keep
+    # those paths as separate diagnostics instead of mixing them into "font slots".
+    # The flashing page and the App must use the exact same inventory slot set.
     inventory_paths = {normalize_path(path) for path in (inventory.get("slots") or {})}
+    census_only: list[dict[str, Any]] = []
     for raw in candidates.get("paths") or []:
         if not isinstance(raw, dict):
             continue
@@ -566,21 +562,13 @@ def build_trace(
         reason = str(raw.get("reason") or ("specialized-name" if denied else "not-promoted-to-ui-inventory"))
         if not denied and reason == "visible-font-path":
             reason = "not-promoted-to-ui-inventory"
-        traced.append({
+        census_only.append({
             "path": logical,
             "slotName": str(raw.get("slotName") or Path(logical).name),
             "partition": str(raw.get("partition") or ""),
             "source": "census",
             "format": Path(logical).suffix.lower().lstrip(".").upper(),
-            "weight": 400,
-            "style": "normal",
-            "families": [],
-            "state": "protected",
-            "category": "protected",
-            "safeToRetry": False,
             "reason": reason,
-            "supplementDisposition": "census-only",
-            "routes": [],
         })
 
     # Template-only routes are useful diagnostics but are not counted as scanner
@@ -608,7 +596,8 @@ def build_trace(
         "verificationState": str(verification.get("state") or "not-run"),
         "summary": {
             "inventorySlots": len(inventory.get("slots") or {}),
-            "censusSlots": len(traced),
+            "censusSlots": len(traced) + len(census_only),
+            "censusOnlySlots": len(census_only),
             "replaceableSlots": eligible,
             "replaced": category_counts.get("replaced", 0),
             "pending": category_counts.get("pending", 0),
@@ -629,6 +618,7 @@ def build_trace(
             "templateOnlyRoutes": len(orphan_routes),
         },
         "slots": traced,
+        "censusOnly": census_only,
         "templateOnlyRoutes": orphan_routes,
     }
 
@@ -640,6 +630,24 @@ def atomic_write(payload: dict[str, Any], output: Path) -> None:
     temp = Path(raw)
     try:
         temp.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        os.chmod(temp, 0o600)
+        os.replace(temp, output)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def atomic_write_plan(payload: dict[str, Any], output: Path) -> None:
+    paths = sorted({
+        normalize_path(item.get("path"))
+        for item in payload.get("slots") or []
+        if isinstance(item, dict) and bool(item.get("safeToRetry")) and normalize_path(item.get("path"))
+    })
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fd, raw = tempfile.mkstemp(prefix=f".{output.name}.", dir=output.parent)
+    os.close(fd)
+    temp = Path(raw)
+    try:
+        temp.write_text("".join(f"{path}\n" for path in paths), encoding="utf-8")
         os.chmod(temp, 0o600)
         os.replace(temp, output)
     finally:
@@ -658,6 +666,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--verification", type=Path)
     parser.add_argument("--candidates", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--remediation-plan", type=Path)
     return parser.parse_args()
 
 
@@ -687,6 +696,8 @@ def main() -> int:
             )
         if args.output:
             atomic_write(result, args.output)
+        if args.remediation_plan:
+            atomic_write_plan(result, args.remediation_plan)
         print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
         return 0
     except Exception as exc:
