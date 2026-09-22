@@ -328,6 +328,14 @@ rewrite_public_config() {
 worker() {
     trap '' HUP
     _wanted="$1"
+    _worker_cleanup_all() {
+        if type luoshu_quiesce_font_workers >/dev/null 2>&1; then
+            luoshu_quiesce_font_workers "${LUOSHU_REAL_MODDIR:-$MODDIR}" "$"
+        elif type luoshu_clear_task_pid >/dev/null 2>&1; then
+            luoshu_clear_task_pid "$WORKER_PID" "$_wanted"
+        fi
+    }
+    trap '_worker_cleanup_all' EXIT
     [ "$(read_value "$TASK_FILE" task)" = "$_wanted" ] || exit 0
     _cjk=$(read_value "$TASK_FILE" cjk)
     _latin=$(read_value "$TASK_FILE" latin)

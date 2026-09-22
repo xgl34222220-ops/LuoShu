@@ -240,7 +240,8 @@ assert data["summary"]["protected"] == 2, data["summary"]
 assert data["summary"]["remediable"] == 1, data["summary"]
 assert data["summary"]["missingMount"] == 1, data["summary"]
 PY
-grep -q -- '--physical-root "$MODDIR/.luoshu-payload"' "$ROOT/common/app_bridge.sh"
+grep -q -- '--physical-root "$_physical_root"' "$ROOT/common/app_bridge.sh"
+grep -Fq '_physical_root="$MODDIR/.luoshu-payload"' "$ROOT/common/app_bridge.sh"
 grep -q 'traceSource.*physical-safe' "$ROOT/common/device_font_slot_trace.py"
 grep -q 'luoshu_nested_font_roots' "$ROOT/common/mount_compat_base.sh"
 grep -q 'device_font_roots.conf' "$ROOT/common/mount_compat_base.sh"
@@ -249,6 +250,25 @@ grep -q '_lsme_nested_key' "$ROOT/common/mount_self_fallback.sh"
 sh -n "$ROOT/common/mount_compat_base.sh"
 sh -n "$ROOT/common/mount_self_atomic.sh"
 sh -n "$ROOT/common/mount_self_fallback.sh"
+
+# A normal font change must preserve complete safe coverage, not only explicit
+# remediation runs. Before reboot, Coverage must inspect the prepared next payload
+# and classify it pending rather than comparing the new selection to old live mounts.
+grep -Fq '_physical_root="$NEXT_PAYLOAD"' "$ROOT/common/app_bridge.sh"
+grep -Fq '_trace_pending_next=true' "$ROOT/common/app_bridge.sh"
+grep -Fq 'LUOSHU_COVERAGE_PLAN="${LUOSHU_COVERAGE_PLAN:-}"' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -Fq "progress 82 '正在完成本机全部安全字体槽位'" "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -Fq '_coverage_helper="${COVERAGE_REMEDIATE_HELPER:-$MODDIR/common/coverage_payload_remediate.sh}"' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -Fq 'sh "$_coverage_helper" "$STAGE_PAYLOAD" direct "$_font"' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -Fq 'mix_finalize_state_write running "正在完成全部安全字体槽位"' "$ROOT/common/legacy_v14_4/mix_router.sh"
+grep -Fq "_coverage_plan=''" "$ROOT/common/legacy_v14_4/mix_router.sh"
+grep -Fq 'luoshu_quiesce_font_workers' "$ROOT/common/font_switch_task.sh"
+grep -Fq 'luoshu_quiesce_font_workers' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
+grep -Fq 'luoshu_quiesce_font_workers' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
+sh -n "$ROOT/common/background_task.sh"
+sh -n "$ROOT/common/font_switch_task.sh"
+sh -n "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+sh -n "$ROOT/common/legacy_v14_4/mix_router.sh"
 
 # Coverage remediation must become a first-class tracked task in the App:
 # taskId is mandatory, live progress is shown, a running task cannot be submitted

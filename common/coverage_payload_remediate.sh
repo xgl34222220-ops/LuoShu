@@ -111,10 +111,11 @@ case "$MODE" in
         fi
         ;;
     mix)
-        [ -s "$MIX" ] || {
-            json_error '复合字体暂存负载缺少组合源锚点'
+        if [ ! -s "$MIX" ] && [ ! -s "$REGULAR" ] && \
+           ! find "$STORE" -maxdepth 1 -type f -name '*.font' -size +1023c -print -quit 2>/dev/null | grep -q .; then
+            json_error '复合字体暂存负载缺少可用源锚点'
             exit 1
-        }
+        fi
         ;;
     *)
         json_error '未知字体覆盖补齐模式'
@@ -253,7 +254,20 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
     case "${_weight:-400}" in ''|*[!0-9]*) _weight=400 ;; esac
 
     if [ "$MODE" = mix ]; then
-        _anchor="$MIX"
+        _role=$(role_for_weight "$_weight")
+        _role_anchor="$STORE/${_role}.font"
+        if [ "$_weight" -eq 400 ] 2>/dev/null && [ -s "$REGULAR" ]; then
+            _anchor="$REGULAR"
+        elif [ -s "$_role_anchor" ]; then
+            _anchor="$_role_anchor"
+        elif [ -s "$MIX" ]; then
+            _anchor="$MIX"
+        elif [ -s "$REGULAR" ]; then
+            _anchor="$REGULAR"
+        else
+            record_preserved "$_logical" "missing-real-source-weight-${_weight}" || _failed=$((_failed + 1))
+            continue
+        fi
     elif [ "$_weight" -eq 400 ] 2>/dev/null; then
         _anchor="$REGULAR"
     else

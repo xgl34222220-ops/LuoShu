@@ -118,6 +118,21 @@ grep -q '^matched=2$' "$MIX/.luoshu-coverage-remediation.conf"
 grep -q '^added=3$' "$MIX/.luoshu-coverage-remediation.conf"
 grep -q '^preserved=2$' "$MIX/.luoshu-coverage-remediation.conf"
 
+# 5) Auto-multiweight stages do not necessarily have mix-composite.font. They
+# carry regular/role anchors instead and must still support complete safe backfill.
+AUTO="$MOD/.luoshu-mix-stage"
+rm -rf "$AUTO"
+mkdir -p "$AUTO/system/fonts/.luoshu-font-store"
+head -c 4096 /dev/zero > "$AUTO/system/fonts/.luoshu-font-store/regular.font"
+head -c 4096 /dev/zero > "$AUTO/system/fonts/.luoshu-font-store/bold.font"
+LUOSHU_REAL_MODDIR="$MOD" LUOSHU_PUBLIC_DIR="$TMP/public" LUOSHU_COVERAGE_PLAN='' \
+    sh "$ROOT/common/coverage_payload_remediate.sh" "$AUTO" mix mix > "$TMP/out5"
+grep -q '"status":"ok"' "$TMP/out5"
+test -s "$AUTO/system/fonts/A.ttf"
+test -s "$AUTO/product/vivo/fonts/Vivo.ttf"
+test -s "$AUTO/system/fonts/Bold.ttf"
+grep -q '^added=3$' "$AUTO/.luoshu-coverage-remediation.conf"
+
 # Production wiring and one-reboot convergence contract.
 grep -q 'LUOSHU_COVERAGE_REMEDIATE:-0' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'coverage_payload_remediate.sh' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"

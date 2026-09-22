@@ -465,23 +465,46 @@ precommit_ready() {
 }
 
 prepare_mix_stage_for_commit() {
+    PRECOMMIT_ERROR=''
     precommit_ready && return 0
-    stage_has_fonts || return 1
-    stage_generation_matches || return 1
+    stage_has_fonts || { PRECOMMIT_ERROR="复合字体暂存负载为空"; return 1; }
+    stage_generation_matches || { PRECOMMIT_ERROR="复合字体生成清单与当前任务不一致"; return 1; }
 
     mix_finalize_state_write running "正在完成 ROM 字体槽位对齐" "$(read_value "$REALMOD/config/axes_task.conf" task)"
-    complete_hyperos_stage || return 1
-    complete_coloros_stage || return 1
+    complete_hyperos_stage || { PRECOMMIT_ERROR="HyperOS 字体槽位对齐失败"; return 1; }
+    complete_coloros_stage || { PRECOMMIT_ERROR="ColorOS 字体槽位对齐失败"; return 1; }
 
+    mix_finalize_state_write running "正在完成全部安全字体槽位" "$(read_value "$REALMOD/config/axes_task.conf" task)"
+    _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
+    _coverage_plan=''
+    _coverage_explicit=false
     if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
-        mix_finalize_state_write running "正在完成字体补齐批处理" "$(read_value "$REALMOD/config/axes_task.conf" task)"
-        _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
+        _coverage_explicit=true
         _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
-        [ -f "$_coverage_helper" ] && [ -s "$_coverage_plan" ] || return 1
+        [ -s "$_coverage_plan" ] || { PRECOMMIT_ERROR="字体补齐计划丢失"; return 1; }
+    fi
+    if [ -f "$_coverage_helper" ]; then
+        _coverage_out="$REALMOD/config/.coverage-precommit.$"
+        rm -f "$_coverage_out" 2>/dev/null || true
         LUOSHU_REAL_MODDIR="$REALMOD" \
         LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
         LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
-            sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
+            sh "$_coverage_helper" "$MIX_STAGE" mix mix >"$_coverage_out" 2>&1
+        _coverage_rc=$?
+        cat "$_coverage_out" >>"$LOG_FILE" 2>/dev/null || true
+        if [ "$_coverage_rc" -ne 0 ]; then
+            PRECOMMIT_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_coverage_out" 2>/dev/null | tail -n1)
+            [ -n "$PRECOMMIT_ERROR" ] || PRECOMMIT_ERROR="复合字体安全槽位回填失败"
+            rm -f "$_coverage_out" 2>/dev/null || true
+            return 1
+        fi
+        rm -f "$_coverage_out" 2>/dev/null || true
+    elif [ "$_coverage_explicit" = true ]; then
+        PRECOMMIT_ERROR="字体覆盖补齐组件缺失"
+        return 1
+    else
+        printf '[%s] [MIX] coverage helper unavailable; keeping core compatibility path\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" >> "$LOG_FILE" 2>/dev/null || true
     fi
 
     _pm_request=$(read_value "$MIX_STAGE_STATE" requestId)
@@ -490,8 +513,8 @@ prepare_mix_stage_for_commit() {
         printf "state=ready\n"
         printf "requestId=%s\n" "$_pm_request"
         printf "time=%s\n" "$(date +%s 2>/dev/null || echo 0)"
-    } >"$_pm_tmp" 2>/dev/null || return 1
-    mv -f "$_pm_tmp" "$PRECOMMIT_STATE" 2>/dev/null || return 1
+    } >"$_pm_tmp" 2>/dev/null || { PRECOMMIT_ERROR="无法保存复合字体预提交状态"; return 1; }
+    mv -f "$_pm_tmp" "$PRECOMMIT_STATE" 2>/dev/null || { PRECOMMIT_ERROR="无法提交复合字体预提交状态"; return 1; }
     chmod 0644 "$PRECOMMIT_STATE" 2>/dev/null || true
     mix_finalize_state_write ready '预提交处理完成，正在原子提交下一启动负载' "$(read_value "$REALMOD/config/axes_task.conf" task)" 98
     return 0
@@ -672,7 +695,8 @@ if [ "$_cmd" = prepare-finalize ]; then
         printf '{"status":"ok","data":{"stage":"prepared"}}\n'
         exit 0
     fi
-    printf '{"status":"error","message":"复合字体预提交处理失败"}\n'
+    _prepare_error="${PRECOMMIT_ERROR:-复合字体预提交处理失败}"
+    printf '{"status":"error","message":"%s"}\n' "$(json_escape_router "$_prepare_error")"
     exit 1
 fi
 if [ "$_cmd" = reconcile ]; then
