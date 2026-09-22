@@ -135,6 +135,15 @@ grep -Fq '[ "${LUOSHU_FORCE_REBUILD:-0}" != 1 ] && router_verified_noop' "$ROOT/
 grep -Fq '[ "${LUOSHU_FORCE_REBUILD:-0}" != 1 ] && \' "$ROOT/common/weighted_mix_task.sh"
 grep -Fq '[ "${LUOSHU_FORCE_REBUILD:-0}" != 1 ] && \' "$ROOT/common/multiweight_mix_task.sh"
 
+
+# A stale/recycled Android PID must not block a new coverage-triggered mix task.
+grep -Fq 'luoshu_task_pid_alive "$WORKER_PID" "$_old_task"' "$ROOT/common/weighted_mix_task.sh"
+grep -Fq 'luoshu_clear_task_pid "$WORKER_PID" "$_old_task"' "$ROOT/common/weighted_mix_task.sh"
+grep -Fq 'luoshu_task_pid_alive "$WORKER_PID" "$_old_task"' "$ROOT/common/multiweight_mix_task.sh"
+grep -Fq 'luoshu_clear_task_pid "$WORKER_PID" "$_old_task"' "$ROOT/common/multiweight_mix_task.sh"
+sh -n "$ROOT/common/weighted_mix_task.sh"
+sh -n "$ROOT/common/multiweight_mix_task.sh"
+
 # Upgrade regression: migration may intentionally clear device-font-engine.conf while
 # a compatible content-addressed cache still exists. Coverage must recover that cache
 # instead of failing solely because cacheId disappeared.
