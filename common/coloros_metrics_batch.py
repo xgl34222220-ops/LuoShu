@@ -35,14 +35,26 @@ def eligible_slot(slot: object, logical: str) -> bool:
 def write_report(stage: Path, slots: list[dict]) -> None:
     report = stage / '.luoshu-metrics-report.json'
     temporary = report.with_name(report.name + f'.tmp.{os.getpid()}')
+    covered = stage / '.luoshu-metrics-covered.lst'
+    covered_temporary = covered.with_name(covered.name + f'.tmp.{os.getpid()}')
     try:
         temporary.write_text(json.dumps({'schema': 'luoshu-slot-metrics-v1',
                                          'romKind': 'coloros', 'slots': slots},
                                         ensure_ascii=False), encoding='utf-8')
         temporary.chmod(0o644)
         os.replace(temporary, report)
+        covered_temporary.write_text(
+            ''.join(f"{item['slot']}\n" for item in sorted(
+                (item for item in slots if item.get('metricsSource') == 'stock'),
+                key=lambda item: item['slot'],
+            )),
+            encoding='utf-8',
+        )
+        covered_temporary.chmod(0o644)
+        os.replace(covered_temporary, covered)
     finally:
         temporary.unlink(missing_ok=True)
+        covered_temporary.unlink(missing_ok=True)
 
 
 def build(module: Path, stage: Path) -> dict:
