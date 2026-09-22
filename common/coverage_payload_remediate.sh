@@ -18,6 +18,8 @@ NORMALIZER="$MODDIR/common/font_metrics_normalize.py"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
+PLAN="${LUOSHU_COVERAGE_PLAN:-}"
+PLAN_ENABLED=false
 
 log_line() {
     mkdir -p "$MODDIR/logs" 2>/dev/null || true
@@ -44,6 +46,26 @@ esac
     json_error '本机字体扫描清单或解析器不可用'
     exit 1
 }
+
+if [ -n "$PLAN" ]; then
+    case "$PLAN" in
+        "$MODDIR"/config/*) ;;
+        *) json_error '字体补齐计划路径不受信任'; exit 1 ;;
+    esac
+    [ -s "$PLAN" ] || {
+        json_error '字体补齐计划为空或不存在'
+        exit 1
+    }
+    awk '
+        $0 !~ /^\// || $0 ~ /\/\.\.?\// || $0 ~ /\/\// { bad=1 }
+        seen[$0]++ { bad=1 }
+        END { exit bad }
+    ' "$PLAN" || {
+        json_error '字体补齐计划包含无效或重复槽位'
+        exit 1
+    }
+    PLAN_ENABLED=true
+fi
 
 LEGACY_UTIL="$MODDIR/common/legacy_v14_4/util_functions.sh"
 MODERN_MAPPER="$MODDIR/common/rom_adapters.sh"
@@ -121,6 +143,13 @@ has_exact_role() {
     esac
 }
 
+has_variable_source() {
+    case ",${_exact_weights:-}," in
+        *",variable,"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 record_preserved() {
     _path="$1"; _reason="$2"
     printf '%s\t%s\n' "$_path" "$_reason" >> "$PRESERVED_TMP" 2>/dev/null || return 1
@@ -148,9 +177,16 @@ font_size_ok() {
 _added=0
 _planned=0
 _existing=0
+_rewritten=0
+_requested=0
+_matched=0
 _preserved=0
 _failed=0
 _seen=0
+if [ "$PLAN_ENABLED" = true ]; then
+    _requested=$(grep -c '^/' "$PLAN" 2>/dev/null || true)
+    case "$_requested" in ''|*[!0-9]*) _requested=0 ;; esac
+fi
 _tab=$(printf '\t')
 while IFS="$_tab" read -r _logical _name _partition _format _weight _style _source; do
     [ -n "$_logical" ] && [ -n "$_name" ] || continue
@@ -164,9 +200,17 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
     _target="$STAGE/$_rel"
     case "$_target" in "$STAGE"/*) ;; *) _failed=$((_failed + 1)); continue ;; esac
 
-    # Existing aliases were already produced by the ROM-specific mapper. Do not
-    # rewrite them merely because remediation is enabled.
-    if [ -s "$_target" ]; then
+    _requested_slot=false
+    if [ "$PLAN_ENABLED" = true ]; then
+        if grep -Fqx "$_logical" "$PLAN" 2>/dev/null; then
+            _requested_slot=true
+            _matched=$((_matched + 1))
+        elif [ -s "$_target" ]; then
+            _existing=$((_existing + 1))
+            continue
+        fi
+    elif [ -s "$_target" ]; then
+        # Legacy/no-plan callers keep the historical "fill only missing" behavior.
         _existing=$((_existing + 1))
         continue
     fi
@@ -194,19 +238,31 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
     esac
 
     case "${_weight:-400}" in ''|*[!0-9]*) _weight=400 ;; esac
+    if [ "$PLAN_ENABLED" = true ] && [ "$_requested_slot" != true ]; then
+        # The exact plan is authoritative. A normal missing slot not requested by
+        # the current trace is left untouched instead of silently broadening repair.
+        continue
+    fi
+
     if [ "$MODE" = mix ]; then
         _anchor="$MIX"
     elif [ "$_weight" -eq 400 ] 2>/dev/null; then
         _anchor="$REGULAR"
     else
         _role=$(role_for_weight "$_weight")
-        if has_exact_role "$_role"; then
+        if has_exact_role "$_role" || has_variable_source; then
             _anchor="$STORE/${_role}.font"
             if [ ! -s "$_anchor" ] && type get_weight_file >/dev/null 2>&1 && type _font_anchor >/dev/null 2>&1; then
                 _role_source="$(get_weight_file "$FAMILY" "$_role" 2>/dev/null)"
                 if [ -s "$_role_source" ]; then
                     _anchor="$(_font_anchor "$_role_source" "$STAGE/system/fonts" "$_role" 2>/dev/null)"
                 fi
+            fi
+            # A variable family is itself a real multi-weight source. If a role
+            # anchor could not be materialized separately, normalize from the
+            # variable Regular anchor rather than falsely protecting the slot.
+            if [ ! -s "$_anchor" ] && has_variable_source; then
+                _anchor="$REGULAR"
             fi
             if [ ! -s "$_anchor" ]; then
                 record_preserved "$_logical" "missing-real-source-weight-${_weight}" || _failed=$((_failed + 1))
@@ -222,6 +278,9 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
         _failed=$((_failed + 1))
         continue
     }
+    if [ "$_requested_slot" = true ] && [ -s "$_target" ]; then
+        _rewritten=$((_rewritten + 1))
+    fi
     rm -f "$_target" 2>/dev/null || true
     # One embedded-Python process normalizes every new target against that exact
     # stock inventory slot. This preserves per-slot hhea/OS/2 metrics and avoids
@@ -232,6 +291,11 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
     }
     _planned=$((_planned + 1))
 done < "$TMP_ROWS"
+
+if [ "$PLAN_ENABLED" = true ] && [ "$_matched" -ne "$_requested" ] 2>/dev/null; then
+    _failed=$((_failed + 1))
+    log_line "补齐计划与当前 inventory 不一致：requested=$_requested matched=$_matched"
+fi
 
 if [ "$_failed" -eq 0 ] && [ "$_planned" -gt 0 ]; then
     PYTHONHOME="$PYROOT" \
@@ -261,7 +325,7 @@ if [ "$_failed" -ne 0 ]; then
         [ -z "$_batch_target" ] || rm -f "$_batch_target" 2>/dev/null || true
     done < "$BATCH"
     _added=0
-    log_line "补齐失败：seen=$_seen planned=$_planned added=$_added existing=$_existing preserved=$_preserved failed=$_failed"
+    log_line "补齐失败：seen=$_seen requested=$_requested matched=$_matched planned=$_planned rewritten=$_rewritten added=$_added existing=$_existing preserved=$_preserved failed=$_failed"
     json_error "字体覆盖补齐有 $_failed 个槽位写入失败，已拒绝提交半成品"
     exit 1
 fi
@@ -281,7 +345,10 @@ fi
     printf 'mode=%s\n' "$MODE"
     printf 'font=%s\n' "$FAMILY"
     printf 'inventory=%s\n' "$_seen"
+    printf 'requested=%s\n' "$_requested"
+    printf 'matched=%s\n' "$_matched"
     printf 'planned=%s\n' "$_planned"
+    printf 'rewritten=%s\n' "$_rewritten"
     printf 'added=%s\n' "$_added"
     printf 'existing=%s\n' "$_existing"
     printf 'preserved=%s\n' "$_preserved"
@@ -297,6 +364,8 @@ mv -f "$SUMMARY_TMP" "$SUMMARY" 2>/dev/null || {
 }
 chmod 0644 "$SUMMARY" 2>/dev/null || true
 
-log_line "补齐完成：mode=$MODE font=$FAMILY seen=$_seen planned=$_planned added=$_added existing=$_existing preserved=$_preserved"
-printf '{"status":"ok","data":{"mode":"%s","font":"%s","inventory":%s,"planned":%s,"added":%s,"existing":%s,"preserved":%s}}\n'     "$MODE" "$(printf '%s' "$FAMILY" | sed 's/\\/\\\\/g; s/"/\\"/g')"     "$_seen" "$_planned" "$_added" "$_existing" "$_preserved"
+log_line "补齐完成：mode=$MODE font=$FAMILY seen=$_seen requested=$_requested matched=$_matched planned=$_planned rewritten=$_rewritten added=$_added existing=$_existing preserved=$_preserved"
+printf '{"status":"ok","data":{"mode":"%s","font":"%s","inventory":%s,"requested":%s,"matched":%s,"planned":%s,"rewritten":%s,"added":%s,"existing":%s,"preserved":%s}}\n' \
+    "$MODE" "$(printf '%s' "$FAMILY" | sed 's/\\/\\\\/g; s/"/\\"/g')" \
+    "$_seen" "$_requested" "$_matched" "$_planned" "$_rewritten" "$_added" "$_existing" "$_preserved"
 exit 0
