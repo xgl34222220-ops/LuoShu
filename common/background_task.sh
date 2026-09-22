@@ -103,6 +103,49 @@ luoshu_terminate_task_tree() (
     done
 )
 
+# A completed font operation must not leave transient shell/Python/FontTools
+# workers behind. Kill descendants of the current controller first, then stop
+# every other identity-verified LuoShu font worker and remove its sidecars.
+luoshu_terminate_task_children() (
+    _lttc_root="${1:-$}"
+    case "$_lttc_root" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    _lttc_children=$(ps -A -o PID,PPID 2>/dev/null | awk -v root="$_lttc_root" '
+        $1 ~ /^[0-9]+$/ && $2 == root { print $1 }
+    ')
+    for _lttc_pid in $_lttc_children; do
+        luoshu_terminate_task_tree "$_lttc_pid" >/dev/null 2>&1 || true
+    done
+    return 0
+)
+
+luoshu_quiesce_font_workers() {
+    _lqfw_module="${1:-${MODDIR:-/data/adb/modules/LuoShu}}"
+    _lqfw_current="${2:-$}"
+    _lqfw_config="$_lqfw_module/config"
+
+    # Children can survive a parent shell via FontTools helpers unless explicitly
+    # reaped before the controller exits.
+    luoshu_terminate_task_children "$_lqfw_current" >/dev/null 2>&1 || true
+
+    for _lqfw_file in \
+        "$_lqfw_config/switch_task_worker.pid" \
+        "$_lqfw_config/axes_worker.pid" \
+        "$_lqfw_config/auto_multiweight_worker.pid" \
+        "$_lqfw_config/mix_worker.pid" \
+        "$_lqfw_config/mix_finalize_worker.pid" \
+        "$_lqfw_config"/font-prewarm-*.pid; do
+        [ -f "$_lqfw_file" ] || continue
+        _lqfw_pid=$(luoshu_pid_value "$_lqfw_file")
+        _lqfw_task=$(cat "${_lqfw_file}.task" 2>/dev/null | tr -d '\r\n')
+        if [ -n "$_lqfw_pid" ] && [ "$_lqfw_pid" != "$_lqfw_current" ] && \
+           [ -n "$_lqfw_task" ] && luoshu_task_pid_alive "$_lqfw_file" "$_lqfw_task"; then
+            luoshu_terminate_task_tree "$_lqfw_pid" >/dev/null 2>&1 || true
+        fi
+        luoshu_clear_task_pid "$_lqfw_file" "$_lqfw_task"
+    done
+    return 0
+}
+
 luoshu_start_detached() {
     _lsd_pid_file="$1"
     _lsd_task="$2"
