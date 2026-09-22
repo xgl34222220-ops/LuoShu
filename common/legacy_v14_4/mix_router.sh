@@ -476,27 +476,36 @@ prepare_mix_stage_for_commit() {
 
     mix_finalize_state_write running "正在完成全部安全字体槽位" "$(read_value "$REALMOD/config/axes_task.conf" task)"
     _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
-    [ -f "$_coverage_helper" ] || { PRECOMMIT_ERROR="字体覆盖补齐组件缺失"; return 1; }
     _coverage_plan=''
+    _coverage_explicit=false
     if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
+        _coverage_explicit=true
         _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
         [ -s "$_coverage_plan" ] || { PRECOMMIT_ERROR="字体补齐计划丢失"; return 1; }
     fi
-    _coverage_out="$REALMOD/config/.coverage-precommit.$$"
-    rm -f "$_coverage_out" 2>/dev/null || true
-    LUOSHU_REAL_MODDIR="$REALMOD" \
-    LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-    LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
-        sh "$_coverage_helper" "$MIX_STAGE" mix mix >"$_coverage_out" 2>&1
-    _coverage_rc=$?
-    cat "$_coverage_out" >>"$LOG_FILE" 2>/dev/null || true
-    if [ "$_coverage_rc" -ne 0 ]; then
-        PRECOMMIT_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_coverage_out" 2>/dev/null | tail -n1)
-        [ -n "$PRECOMMIT_ERROR" ] || PRECOMMIT_ERROR="复合字体安全槽位回填失败"
+    if [ -f "$_coverage_helper" ]; then
+        _coverage_out="$REALMOD/config/.coverage-precommit.$"
         rm -f "$_coverage_out" 2>/dev/null || true
+        LUOSHU_REAL_MODDIR="$REALMOD" \
+        LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+        LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
+            sh "$_coverage_helper" "$MIX_STAGE" mix mix >"$_coverage_out" 2>&1
+        _coverage_rc=$?
+        cat "$_coverage_out" >>"$LOG_FILE" 2>/dev/null || true
+        if [ "$_coverage_rc" -ne 0 ]; then
+            PRECOMMIT_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_coverage_out" 2>/dev/null | tail -n1)
+            [ -n "$PRECOMMIT_ERROR" ] || PRECOMMIT_ERROR="复合字体安全槽位回填失败"
+            rm -f "$_coverage_out" 2>/dev/null || true
+            return 1
+        fi
+        rm -f "$_coverage_out" 2>/dev/null || true
+    elif [ "$_coverage_explicit" = true ]; then
+        PRECOMMIT_ERROR="字体覆盖补齐组件缺失"
         return 1
+    else
+        printf '[%s] [MIX] coverage helper unavailable; keeping core compatibility path\n' \
+            "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" >> "$LOG_FILE" 2>/dev/null || true
     fi
-    rm -f "$_coverage_out" 2>/dev/null || true
 
     _pm_request=$(read_value "$MIX_STAGE_STATE" requestId)
     _pm_tmp="${PRECOMMIT_STATE}.tmp.$$"
