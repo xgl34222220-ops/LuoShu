@@ -116,31 +116,7 @@ test ! -e "$MIX/system/fonts/C.ttc"
 grep -q '^requested=2$' "$MIX/.luoshu-coverage-remediation.conf"
 grep -q '^matched=2$' "$MIX/.luoshu-coverage-remediation.conf"
 grep -q '^added=3$' "$MIX/.luoshu-coverage-remediation.conf"
-grep -q '^preserved=2
-# Production wiring and one-reboot convergence contract.
-grep -q 'LUOSHU_COVERAGE_REMEDIATE:-0' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
-grep -q 'coverage_payload_remediate.sh' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
-grep -q 'coverageRemediate=' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -q 'coveragePlan=' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -Fq 'LUOSHU_COVERAGE_PLAN="$_coverage_plan"' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -q 'font-payload-rebuild-pending.conf' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -q 'coverage_intent_abort_if_owned' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -q 'font-coverage-remediation-paths.txt' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -q 'LUOSHU_COVERAGE_REMEDIATE=1' "$ROOT/common/app_bridge.sh"
-grep -q 'LUOSHU_COVERAGE_PLAN=' "$ROOT/common/app_bridge.sh"
-grep -q 'font_metrics_normalize.py' "$ROOT/common/coverage_payload_remediate.sh"
-grep -q 'PLAN_ENABLED' "$ROOT/common/coverage_payload_remediate.sh"
-grep -q -- '--batch' "$ROOT/common/coverage_payload_remediate.sh"
-grep -q 'METRICS_COVERED=' "$ROOT/common/coverage_payload_remediate.sh"
-
-sh -n "$ROOT/common/coverage_payload_remediate.sh"
-sh -n "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
-sh -n "$ROOT/common/legacy_v14_4/mix_router.sh"
-sh -n "$ROOT/common/app_bridge.sh"
-sh -n "$ROOT/common/font_switch_task.sh"
-
-echo 'coverage_payload_remediate_test: PASS'
- "$MIX/.luoshu-coverage-remediation.conf"
+grep -q '^preserved=2$' "$MIX/.luoshu-coverage-remediation.conf"
 
 # 5) Auto-multiweight stages do not necessarily have mix-composite.font. They
 # carry regular/role anchors instead and must still support complete safe backfill.
@@ -155,31 +131,7 @@ grep -q '"status":"ok"' "$TMP/out5"
 test -s "$AUTO/system/fonts/A.ttf"
 test -s "$AUTO/product/vivo/fonts/Vivo.ttf"
 test -s "$AUTO/system/fonts/Bold.ttf"
-grep -q '^added=3
-# Production wiring and one-reboot convergence contract.
-grep -q 'LUOSHU_COVERAGE_REMEDIATE:-0' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
-grep -q 'coverage_payload_remediate.sh' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
-grep -q 'coverageRemediate=' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -q 'coveragePlan=' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -Fq 'LUOSHU_COVERAGE_PLAN="$_coverage_plan"' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -q 'font-payload-rebuild-pending.conf' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -q 'coverage_intent_abort_if_owned' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -q 'font-coverage-remediation-paths.txt' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -q 'LUOSHU_COVERAGE_REMEDIATE=1' "$ROOT/common/app_bridge.sh"
-grep -q 'LUOSHU_COVERAGE_PLAN=' "$ROOT/common/app_bridge.sh"
-grep -q 'font_metrics_normalize.py' "$ROOT/common/coverage_payload_remediate.sh"
-grep -q 'PLAN_ENABLED' "$ROOT/common/coverage_payload_remediate.sh"
-grep -q -- '--batch' "$ROOT/common/coverage_payload_remediate.sh"
-grep -q 'METRICS_COVERED=' "$ROOT/common/coverage_payload_remediate.sh"
-
-sh -n "$ROOT/common/coverage_payload_remediate.sh"
-sh -n "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
-sh -n "$ROOT/common/legacy_v14_4/mix_router.sh"
-sh -n "$ROOT/common/app_bridge.sh"
-sh -n "$ROOT/common/font_switch_task.sh"
-
-echo 'coverage_payload_remediate_test: PASS'
- "$AUTO/.luoshu-coverage-remediation.conf"
+grep -q '^added=3$' "$AUTO/.luoshu-coverage-remediation.conf"
 
 # Production wiring and one-reboot convergence contract.
 grep -q 'LUOSHU_COVERAGE_REMEDIATE:-0' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
