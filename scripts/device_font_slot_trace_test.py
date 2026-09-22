@@ -118,16 +118,21 @@ def main() -> None:
     assert states["/product/fonts/C.ttc"] == "preserved", states
     assert states["/product/fonts/D.ttf"] == "missing-mount", states
     assert states["/vendor/fonts/E.ttf"] == "mapping-missing", states
-    assert states["/system/fonts/NotoColorEmoji.ttf"] == "protected", states
-    assert states["/product/assets/HiddenStandalone.ttf"] == "protected", states
+    assert "/system/fonts/NotoColorEmoji.ttf" not in states, states
+    assert "/product/assets/HiddenStandalone.ttf" not in states, states
+    census_only = {item["path"]: item["reason"] for item in result["censusOnly"]}
+    assert census_only["/system/fonts/NotoColorEmoji.ttf"] == "specialized-name", census_only
+    assert census_only["/product/assets/HiddenStandalone.ttf"] == "not-promoted-to-ui-inventory", census_only
     c_slot = next(item for item in result["slots"] if item["path"] == "/product/fonts/C.ttc")
     assert c_slot["reason"] == "preserved-collection", c_slot
     summary = result["summary"]
     assert summary["inventorySlots"] == 5, summary
     assert summary["censusSlots"] == 7, summary
+    assert summary["censusOnlySlots"] == 2, summary
+    assert len(result["slots"]) == summary["inventorySlots"] == 5, (len(result["slots"]), summary)
     assert summary["replaceableSlots"] == 3, summary
     assert summary["replaced"] == 1, summary
-    assert summary["protected"] == 4, summary
+    assert summary["protected"] == 2, summary
     assert summary["issues"] == 2, summary
     assert summary["remediable"] == 2, summary
     assert summary["loaded"] == 1, summary
@@ -135,6 +140,15 @@ def main() -> None:
     assert summary["missingMount"] == 1, summary
     assert summary["mappingMissing"] == 1, summary
     assert summary["notConsumed"] == 0, summary
+
+    from tempfile import TemporaryDirectory
+    with TemporaryDirectory() as raw_tmp:
+        plan = Path(raw_tmp) / "remediation.txt"
+        trace.atomic_write_plan(result, plan)
+        assert plan.read_text(encoding="utf-8").splitlines() == [
+            "/product/fonts/D.ttf",
+            "/vendor/fonts/E.ttf",
+        ]
 
     no_boot = trace.build_trace(inventory, payload, overlay, None, candidates)
     no_boot_states = {item["path"]: item["state"] for item in no_boot["slots"]}
