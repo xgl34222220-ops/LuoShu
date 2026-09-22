@@ -292,6 +292,7 @@ preview_export() {
 }
 
 slot_trace_json() {
+    _remediation_plan="${1:-}"
     [ -x "$PYBIN" ] && [ -f "$SLOT_TRACE" ] || {
         printf '{"status":"error","message":"字体槽追踪组件不可用"}\n'
         return 1
@@ -361,6 +362,7 @@ slot_trace_json() {
             --mount-state "$MODDIR/config/self-mount.conf" \
             --output "$MODDIR/config/device-font-slot-trace.json"
         [ ! -s "$_candidates" ] || set -- "$@" --candidates "$_candidates"
+        [ -z "$_remediation_plan" ] || set -- "$@" --remediation-plan "$_remediation_plan"
 
         _load_state="$(read_prop "$MODDIR/config/device-font-load-verification.conf" state)"
         _boot_state="$(read_prop "$MODDIR/config/font-payload-boot.conf" state)"
@@ -388,6 +390,7 @@ slot_trace_json() {
     _verification="$MODDIR/config/device-font-load-verification.json"
     [ ! -s "$_verification" ] || set -- "$@" --verification "$_verification"
     [ ! -s "$_candidates" ] || set -- "$@" --candidates "$_candidates"
+    [ -z "$_remediation_plan" ] || set -- "$@" --remediation-plan "$_remediation_plan"
     PYTHONHOME="$PYROOT" \
     PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
     LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
@@ -428,7 +431,27 @@ coverage_reapply() {
         printf '{"status":"error","message":"当前使用系统默认字体，没有可补齐的洛书字体负载"}\n'
         return 1
     }
+    _plan="$MODDIR/config/font-coverage-remediation-paths.txt"
+    _plan_trace="$MODDIR/config/.font-coverage-remediation-trace.$"
+    rm -f "$_plan" "$_plan_trace" 2>/dev/null || true
+    if ! slot_trace_json "$_plan" > "$_plan_trace" 2>&1; then
+        _plan_error="$(tail -n1 "$_plan_trace" 2>/dev/null)"
+        rm -f "$_plan" "$_plan_trace" 2>/dev/null || true
+        [ -n "$_plan_error" ] || _plan_error='{"status":"error","message":"无法生成字体补齐计划"}'
+        printf '%s\n' "$_plan_error"
+        return 1
+    fi
+    rm -f "$_plan_trace" 2>/dev/null || true
+    _plan_count=$(grep -c '^/' "$_plan" 2>/dev/null || true)
+    case "$_plan_count" in ''|*[!0-9]*) _plan_count=0 ;; esac
+    [ "$_plan_count" -gt 0 ] 2>/dev/null || {
+        rm -f "$_plan" 2>/dev/null || true
+        printf '{"status":"error","message":"当前没有可安全补齐的字体槽位，请先重新验证"}\n'
+        return 1
+    }
+
     coverage_mark_rebuild "$_active" || {
+        rm -f "$_plan" 2>/dev/null || true
         printf '{"status":"error","message":"无法创建字体补齐事务"}\n'
         return 1
     }
@@ -451,17 +474,18 @@ coverage_reapply() {
             printf '{"status":"error","message":"当前组合字体配置不完整，无法自动补齐"}\n'
             return 1
         fi
-        _out="$(LUOSHU_FORCE_REBUILD=1 LUOSHU_COVERAGE_REMEDIATE=1 MODDIR="$MODDIR" sh "$MIX_ENGINE" start "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" 2>&1)"
+        _out="$(LUOSHU_FORCE_REBUILD=1 LUOSHU_COVERAGE_REMEDIATE=1 LUOSHU_COVERAGE_PLAN="$_plan" MODDIR="$MODDIR" sh "$MIX_ENGINE" start "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" 2>&1)"
         _rc=$?
     else
-        switch_task_ready || { rm -f "$MODDIR/config/font-payload-rebuild-pending.conf"; return 1; }
-        _out="$(LUOSHU_FORCE_REBUILD=1 LUOSHU_COVERAGE_REMEDIATE=1 MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "$_active" 2>&1)"
+        switch_task_ready || { rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" "$_plan"; return 1; }
+        _out="$(LUOSHU_FORCE_REBUILD=1 LUOSHU_COVERAGE_REMEDIATE=1 LUOSHU_COVERAGE_PLAN="$_plan" MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "$_active" 2>&1)"
         _rc=$?
     fi
-    if [ "$_rc" -ne 0 ]; then
-        rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" 2>/dev/null || true
+    if [ "$_rc" -ne 0 ] || printf '%s\n' "$_out" | grep -q '"status":"error"'; then
+        rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" "$_plan" 2>/dev/null || true
         printf '%s\n' "$_out"
-        return "$_rc"
+        [ "$_rc" -ne 0 ] && return "$_rc"
+        return 1
     fi
     printf '%s\n' "$_out"
 }
