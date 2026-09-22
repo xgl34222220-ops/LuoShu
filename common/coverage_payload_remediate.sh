@@ -81,7 +81,8 @@ BATCH="$MODDIR/config/.coverage-remediate-batch.$"
 PRESERVED="$STAGE/.luoshu-coverage-preserved.tsv"
 PRESERVED_TMP="${PRESERVED}.tmp.$$"
 SUMMARY="$STAGE/.luoshu-coverage-remediation.conf"
-SUMMARY_TMP="${SUMMARY}.tmp.$$"
+SUMMARY_TMP="${SUMMARY}.tmp.$"
+METRICS_COVERED="$STAGE/.luoshu-metrics-covered.lst"
 trap 'rm -f "$TMP_ROWS" "$BATCH" "$PRESERVED_TMP" "$SUMMARY_TMP" 2>/dev/null || true' EXIT HUP INT TERM
 
 PYTHONHOME="$PYROOT" PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"     "$PYBIN" "$INVENTORY_TOOL" --list --output "$INVENTORY" > "$TMP_ROWS" 2>> "$LOG_FILE"
@@ -205,6 +206,14 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
         if grep -Fqx "$_logical" "$PLAN" 2>/dev/null; then
             _requested_slot=true
             _matched=$((_matched + 1))
+            # HyperOS/ColorOS stage completion may already have rebuilt this exact
+            # requested slot against its stock metrics. Do not run the same large
+            # font through fontTools a second time during coverage remediation.
+            if [ -s "$_target" ] && [ -s "$METRICS_COVERED" ] && \
+               grep -Fqx "$_logical" "$METRICS_COVERED" 2>/dev/null; then
+                _existing=$((_existing + 1))
+                continue
+            fi
         elif [ -s "$_target" ]; then
             _existing=$((_existing + 1))
             continue
