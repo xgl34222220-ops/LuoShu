@@ -525,6 +525,12 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                           '/' + alias.relative_to(stage).as_posix()
                                           for alias in excluded_aliases if alias.parent.is_dir()})}, ensure_ascii=False), encoding='utf-8')
         report.chmod(0o644)
+        covered = stage / '.luoshu-metrics-covered.lst'
+        covered.write_text(
+            ''.join(f"{item['slot']}\n" for item in sorted(slot_report, key=lambda item: item['slot'])),
+            encoding='utf-8',
+        )
+        covered.chmod(0o644)
     finally:
         # Every prepared result has its own hard link (or copy) in the final
         # alias. Keeping these temporary names after success only enlarges
