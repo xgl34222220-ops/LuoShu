@@ -27,9 +27,66 @@ REBOOT_CONF="$REALMOD/config/text_reboot_required.conf"
 LOG_FILE="$REALMOD/logs/fontswitch.log"
 FINALIZE_LOCK="$REALMOD/.mix-stage-finalize.lock"
 [ -f "$LEGACY/payload_clone.sh" ] && . "$LEGACY/payload_clone.sh"
+[ -f "$REALMOD/common/background_task.sh" ] && . "$REALMOD/common/background_task.sh"
 
 read_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
+mix_finalize_state_write() {
+    _mfs_state="$1"
+    _mfs_message="$2"
+    _mfs_task="${3:-}"
+    _mfs_file="$REALMOD/config/mix-finalize-state.conf"
+    _mfs_tmp="${_mfs_file}.tmp.$"
+    {
+        printf 'state=%s\n' "$_mfs_state"
+        printf 'task=%s\n' "$_mfs_task"
+        printf 'message=%s\n' "$_mfs_message"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } >"$_mfs_tmp" 2>/dev/null && mv -f "$_mfs_tmp" "$_mfs_file" 2>/dev/null || true
+    chmod 0644 "$_mfs_file" 2>/dev/null || true
+}
+
+mix_finalize_worker() {
+    _mfw_task="$1"
+    mix_finalize_state_write running '正在提交下一启动字体负载' "$_mfw_task"
+    if finalize_mix_stage >>"$LOG_FILE" 2>&1; then
+        mix_finalize_state_write success '复合字体负载已提交，完整重启后生效' "$_mfw_task"
+    else
+        mix_finalize_state_write failed '复合字体已生成，但下一启动负载提交失败' "$_mfw_task"
+    fi
+    if type luoshu_clear_task_pid >/dev/null 2>&1; then
+        luoshu_clear_task_pid "$REALMOD/config/mix_finalize_worker.pid" "mix-finalize-$_mfw_task"
+    else
+        rm -f "$REALMOD/config/mix_finalize_worker.pid" \
+              "$REALMOD/config/mix_finalize_worker.pid.task" \
+              "$REALMOD/config/mix_finalize_worker.pid.boot" 2>/dev/null || true
+    fi
+}
+
+ensure_mix_finalize_worker() {
+    _emfw_task="$1"
+    [ -n "$_emfw_task" ] || return 1
+    [ -s "$MIX_STAGE_STATE" ] || return 1
+    [ -d "$MIX_STAGE" ] || [ -d "$NEXT_PAYLOAD" ] || return 1
+    _emfw_pid="$REALMOD/config/mix_finalize_worker.pid"
+    _emfw_identity="mix-finalize-$_emfw_task"
+    if type luoshu_task_pid_alive >/dev/null 2>&1 && \
+       luoshu_task_pid_alive "$_emfw_pid" "$_emfw_identity"; then
+        return 0
+    fi
+    if type luoshu_start_detached >/dev/null 2>&1; then
+        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" \
+            luoshu_start_detached "$_emfw_pid" "$_emfw_identity" "$LOG_FILE" \
+                sh "$0" finalize-worker "$_emfw_task"
+        _emfw_rc=$?
+        [ "$_emfw_rc" -eq 0 ] || [ "$_emfw_rc" -eq 3 ]
+        return $?
+    fi
+    ( trap '' HUP; MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$0" finalize-worker "$_emfw_task" ) \
+        </dev/null >>"$LOG_FILE" 2>&1 &
+    return 0
 }
 
 json_escape_router() {
@@ -154,8 +211,12 @@ mix_status_json_fast() {
                 _message="${_finalize_message:-复合字体负载提交失败}"
                 _percent=100
             else
+                # The generator is done but the durable next-boot payload is not.
+                # Never leave a successful axes task parked at 99% forever if the
+                # original finalize monitor was reclaimed with its su session.
+                ensure_mix_finalize_worker "$_task" >/dev/null 2>&1 || true
                 _state=running
-                _message="${_finalize_message:-正在提交下一启动字体负载}"
+                _message="${_finalize_message:-字体已生成，正在提交下一启动负载}"
                 _percent=99
             fi
         fi
@@ -557,6 +618,10 @@ mark_mix_mode_if_success() {
 }
 
 _cmd="${1:-config}"
+if [ "$_cmd" = finalize-worker ]; then
+    mix_finalize_worker "${2:-}"
+    exit 0
+fi
 if [ "$_cmd" = reconcile ]; then
     # Reconcile task ownership without rebuilding compatibility runtime links.
     mix_reconcile_fast
