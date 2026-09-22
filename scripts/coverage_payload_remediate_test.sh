@@ -66,9 +66,8 @@ grep -Fqx '/system/fonts/C.ttc	preserved-collection' "$STAGE/.luoshu-coverage-pr
 grep -q '^added=3$' "$STAGE/.luoshu-coverage-remediation.conf"
 grep -q '^preserved=2$' "$STAGE/.luoshu-coverage-remediation.conf"
 
-# 2) Exact-plan mode must rewrite only the App-selected safe slot, even when the
-# target already exists in the cloned stage. This is the contract that fixes
-# "补齐提交成功但重启后还是没变化".
+# 2) Plan mode is a mandatory rewrite set. Existing non-requested safe slots stay
+# untouched, while requested slots are rewritten even when they already exist.
 PLAN="$MOD/config/font-coverage-remediation-paths.txt"
 printf '/system/fonts/A.ttf\n' > "$PLAN"
 LUOSHU_REAL_MODDIR="$MOD" LUOSHU_PUBLIC_DIR="$TMP/public" LUOSHU_COVERAGE_PLAN="$PLAN" \
@@ -90,7 +89,8 @@ set -e
 test "$rc" -ne 0
 grep -q '"status":"error"' "$TMP/out3"
 
-# 4) Composite remediation obeys the same exact plan and supports nested OEM paths.
+# 4) Composite remediation rewrites requested slots and backfills every other
+# safe inventory slot removed by the clean stage, including nested OEM paths.
 MIX="$MOD/.luoshu-mix-stage"
 mkdir -p "$MIX/system/fonts/.luoshu-font-store"
 head -c 4096 /dev/zero > "$MIX/system/fonts/.luoshu-font-store/mix-composite.font"
@@ -100,10 +100,32 @@ LUOSHU_REAL_MODDIR="$MOD" LUOSHU_PUBLIC_DIR="$TMP/public" LUOSHU_COVERAGE_PLAN="
 grep -q '"status":"ok"' "$TMP/out4"
 test -s "$MIX/system/fonts/A.ttf"
 test -s "$MIX/product/vivo/fonts/Vivo.ttf"
-test ! -e "$MIX/system/fonts/Bold.ttf"
+test -s "$MIX/system/fonts/Bold.ttf"
 grep -q '^requested=2$' "$MIX/.luoshu-coverage-remediation.conf"
 grep -q '^matched=2$' "$MIX/.luoshu-coverage-remediation.conf"
-grep -q '^added=2$' "$MIX/.luoshu-coverage-remediation.conf"
+grep -q '^added=3
+
+# Production wiring: remediation must propagate the exact plan through direct and
+# composite workers, and the helper must never mutate the live payload.
+grep -q 'LUOSHU_COVERAGE_REMEDIATE:-0' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q 'coverage_payload_remediate.sh' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q 'coverageRemediate=' "$ROOT/common/legacy_v14_4/mix_router.sh"
+grep -q 'coverage_payload_remediate.sh' "$ROOT/common/legacy_v14_4/mix_router.sh"
+grep -q 'LUOSHU_COVERAGE_REMEDIATE=1' "$ROOT/common/app_bridge.sh"
+grep -q 'LUOSHU_COVERAGE_PLAN=' "$ROOT/common/app_bridge.sh"
+grep -q 'LUOSHU_COVERAGE_PLAN' "$ROOT/common/font_switch_task.sh"
+grep -q 'font_metrics_normalize.py' "$ROOT/common/coverage_payload_remediate.sh"
+grep -q 'PLAN_ENABLED' "$ROOT/common/coverage_payload_remediate.sh"
+grep -q -- '--batch' "$ROOT/common/coverage_payload_remediate.sh"
+
+sh -n "$ROOT/common/coverage_payload_remediate.sh"
+sh -n "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+sh -n "$ROOT/common/legacy_v14_4/mix_router.sh"
+sh -n "$ROOT/common/app_bridge.sh"
+sh -n "$ROOT/common/font_switch_task.sh"
+
+echo 'coverage_payload_remediate_test: PASS'
+ "$MIX/.luoshu-coverage-remediation.conf"
 
 # Production wiring: remediation must propagate the exact plan through direct and
 # composite workers, and the helper must never mutate the live payload.
