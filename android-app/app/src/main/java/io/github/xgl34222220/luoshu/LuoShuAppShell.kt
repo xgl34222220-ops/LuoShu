@@ -425,13 +425,16 @@ internal fun LuoShuAppShell(
                                 FontCoverageRoute(
                                     style = appearance.uiStyle,
                                     activeFont = viewModel.snapshot.activeFont,
-                                    taskRunning = viewModel.snapshot.taskState in setOf("queued", "running"),
+                                    taskState = viewModel.snapshot.taskState,
+                                    taskMessage = viewModel.snapshot.taskMessage,
+                                    taskProgress = viewModel.snapshot.taskProgress,
                                     rebootRequired = viewModel.snapshot.rebootRequired,
                                     onBack = { page = AppPage.Home },
-                                    onTaskStarted = {
-                                        viewModel.refresh()
+                                    onTaskStarted = { taskId, mix ->
+                                        viewModel.followCoverageTask(taskId, mix)
                                         logsReturnPage = AppPage.Coverage
                                     },
+                                    onReboot = viewModel::rebootDevice,
                                 )
                             }
                         }
