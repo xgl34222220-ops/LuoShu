@@ -149,7 +149,7 @@ class BackgroundTreeTest(unittest.TestCase):
         subprocess.run(
             ["sh", "-c", '. "$1"; luoshu_quiesce_font_workers "$2" "$"', "sh",
              str(ROOT / "common/background_task.sh"), str(module)],
-            check=True, timeout=5,
+            env=os.environ.copy(), check=True, timeout=5,
         )
         self.wait_for(lambda: worker.poll() is not None)
         self.assertIsNone(unrelated.poll(), "quiesce killed an unrelated process")
