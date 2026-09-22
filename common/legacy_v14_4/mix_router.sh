@@ -79,12 +79,12 @@ ensure_mix_finalize_worker() {
     if type luoshu_start_detached >/dev/null 2>&1; then
         MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" \
             luoshu_start_detached "$_emfw_pid" "$_emfw_identity" "$LOG_FILE" \
-                sh "$0" finalize-worker "$_emfw_task"
+                sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity"
         _emfw_rc=$?
         [ "$_emfw_rc" -eq 0 ] || [ "$_emfw_rc" -eq 3 ]
         return $?
     fi
-    ( trap '' HUP; MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$0" finalize-worker "$_emfw_task" ) \
+    ( trap '' HUP; MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity" ) \
         </dev/null >>"$LOG_FILE" 2>&1 &
     return 0
 }
