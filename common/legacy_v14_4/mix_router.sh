@@ -231,7 +231,7 @@ mix_status_json_fast() {
         _finalize_message=$(read_value "$REALMOD/config/mix-finalize-state.conf" message)
         _finalize_percent=$(read_value "$REALMOD/config/mix-finalize-state.conf" percent)
         case "$_finalize_percent" in ''|*[!0-9]*) _finalize_percent=0 ;; esac
-        if { [ -z "$_finalize_task" ] || [ "$_finalize_task" = "$_task" ]; } && \
+        if [ -n "$_finalize_task" ] && [ "$_finalize_task" = "$_task" ] && \
            [ "$_finalize_state" != failed ] && [ "$_finalize_percent" -gt "$_percent" ] 2>/dev/null; then
             _percent="$_finalize_percent"
             [ -z "$_finalize_message" ] || _message="$_finalize_message"
