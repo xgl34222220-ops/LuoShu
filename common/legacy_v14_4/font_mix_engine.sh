@@ -48,6 +48,30 @@ json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
 
+ensure_work_dir() {
+    _ewd_dir="$1"
+    _ewd_label="${2:-工作目录}"
+    # Compatibility runtimes intentionally expose config/logs/system through
+    # symlinks. Some Android toybox builds return EEXIST for "mkdir -p" when
+    # the final component itself is a symlink to a directory. Never mkdir an
+    # already valid directory; only create paths that are genuinely absent.
+    [ -d "$_ewd_dir" ] && return 0
+    if [ -L "$_ewd_dir" ]; then
+        _ewd_target=$(readlink "$_ewd_dir" 2>/dev/null)
+        set_mix_error "${_ewd_label}链接失效：${_ewd_dir}${_ewd_target:+ -> $_ewd_target}"
+        return 1
+    fi
+    mkdir -p "$_ewd_dir" 2>/dev/null || {
+        set_mix_error "无法创建${_ewd_label}：$_ewd_dir"
+        return 1
+    }
+    [ -d "$_ewd_dir" ] || {
+        set_mix_error "${_ewd_label}不可用：$_ewd_dir"
+        return 1
+    }
+    return 0
+}
+
 read_conf() {
     _key="$1"; _fallback="$2"; _value=""
     [ -f "$MIX_CONF" ] && _value=$(sed -n "s/^${_key}=//p" "$MIX_CONF" 2>/dev/null | head -n1 | tr -d '\r\n')
@@ -318,7 +342,7 @@ extract_composite_error() {
 
 check_composite_runtime() {
     _runner="$MODDIR/common/luoshu_composite.sh"
-    mkdir -p "$MODDIR/cache" 2>/dev/null || { set_mix_error "无法创建运行时自检目录"; return 1; }
+    ensure_work_dir "$MODDIR/cache" "运行时缓存目录" || return 1
     _runtime_key=$(composite_hash_file "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null)
     [ -n "$_runtime_key" ] || _runtime_key=unknown
     _ok="$MODDIR/cache/runtime_probe.${_runtime_key}.ok"
@@ -503,7 +527,9 @@ apply_mix() {
     validate_source "$_latin_src" 英文 || { set_mix_error "英文字体源文件不可用：${FONT_CHECK_ERROR:-找不到文件}"; return 4; }
     validate_source "$_digit_src" 数字 || { set_mix_error "数字字体源文件不可用：${FONT_CHECK_ERROR:-找不到文件}"; return 4; }
 
-    mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" "$MODDIR/logs" 2>/dev/null || { set_mix_error '无法创建模块工作目录'; return 4; }
+    ensure_work_dir "$SYSTEM_FONTS_DIR" "字体暂存目录" || return 4
+    ensure_work_dir "$CONFIG_DIR" "任务状态目录" || return 4
+    ensure_work_dir "$MODDIR/logs" "日志目录" || return 4
     build_composite_file "$_cjk_src" "$_latin_src" "$_digit_src" || return 5
     payload_stage_begin || { set_mix_error '无法创建字体负载暂存区'; return 5; }
     if [ "$IS_HYPEROS" = "true" ]; then
