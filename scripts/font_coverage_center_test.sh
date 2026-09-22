@@ -250,26 +250,34 @@ sh -n "$ROOT/common/mount_compat_base.sh"
 sh -n "$ROOT/common/mount_self_atomic.sh"
 sh -n "$ROOT/common/mount_self_fallback.sh"
 
-# The bottom remediation button must never look actionable while being silently
-# disabled only because the App snapshot still says queued/running. Live task
-# reconciliation belongs to coverage_reapply in the bridge.
-python3 - "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/coverage/FontCoverageRoute.kt" <<'PY'
+# Coverage remediation must become a first-class tracked task in the App:
+# taskId is mandatory, live progress is shown, a running task cannot be submitted
+# twice, and success turns the primary action into a single full reboot.
+python3 - "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/coverage/FontCoverageRoute.kt" "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt" "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt" <<'PY'
 from pathlib import Path
 import sys
-text=Path(sys.argv[1]).read_text(encoding="utf-8")
-start=text.index("val canReapply =")
-end=text.index("val needsCoverageBootstrap", start)
-block=text[start:end]
-assert "!taskRunning" not in block, block
+coverage=Path(sys.argv[1]).read_text(encoding="utf-8")
+shell=Path(sys.argv[2]).read_text(encoding="utf-8")
+vm=Path(sys.argv[3]).read_text(encoding="utf-8")
+start=coverage.index("val canReapply =")
+end=coverage.index("val needsCoverageBootstrap", start)
+block=coverage[start:end]
+assert "!taskRunning" in block, block
+assert "!rebootRequired" in block, block
 assert "coverageActiveFont" in block, block
 assert '(data?.summary?.remediable ?: 0) > 0' in block, block
-assert 'activeFont = root.optString("activeFont", "")' in text
-assert "正在实时检查任务状态并启动补齐" in text
-assert 'busy -> "正在启动…"' in text
-assert 'taskRunning -> "检查任务状态"' in text
-assert "CircularProgressIndicator(" in text
-assert "onSuccess { json ->" in text
-assert 'optString("task")' in text
+assert 'activeFont = root.optString("activeFont", "")' in coverage
+assert "正在实时检查任务状态并启动补齐" in coverage
+assert "补齐任务没有返回任务 ID" in coverage
+assert 'onTaskStarted(taskId, coverageActiveFont == "mix")' in coverage
+assert 'taskRunning -> "补齐中 " + taskProgress.coerceIn(0, 100) + "%"' in coverage
+assert 'rebootRequired -> "完整重启"' in coverage
+assert "补齐负载已生成并提交。现在完整重启一次" in coverage
+assert "followCoverageTask(taskId, mix)" in shell
+assert "onReboot = viewModel::rebootDevice" in shell
+assert "fun followCoverageTask(taskId: String, mix: Boolean)" in vm
+assert "watchMixTask(taskId)" in vm
+assert "watchSwitchTask(taskId, snapshot.activeFont)" in vm
 PY
 
 echo 'Font coverage center backend tests passed.'
