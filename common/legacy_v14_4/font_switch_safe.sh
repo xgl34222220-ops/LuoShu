@@ -759,12 +759,9 @@ prewarm_font() {
     elif [ "${IS_COLOROS:-false}" = true ]; then
         stage_coloros_complete || return 0
     fi
-    # Every cached direct payload must already contain the complete safe inventory
-    # tree. Otherwise switching to another font restores only core aliases and the
-    # coverage page appears to "lose" slots that were repaired previously.
-    [ -f "$COVERAGE_REMEDIATE_HELPER" ] || return 0
-    LUOSHU_REAL_MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" LUOSHU_COVERAGE_PLAN='' \
-        sh "$COVERAGE_REMEDIATE_HELPER" "$STAGE_PAYLOAD" direct "$_font" >> "$LOG_FILE" 2>&1 || return 0
+    # Prewarm is only an acceleration cache. Complete safe inventory backfill is
+    # performed by the real switch after cache restore, so prewarm stays cheap and
+    # cannot fail merely because coverage helpers/inventory are unavailable yet.
     stage_verify "$_font" || return 0
     safe_switch_cache_store "$_source" "$_font" >/dev/null 2>&1 || return 0
     printf '[%s] [SAFE-SWITCH] prewarm ready font=%s\n' \
