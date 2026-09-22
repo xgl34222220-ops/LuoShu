@@ -183,6 +183,7 @@ _requested=0
 _matched=0
 _preserved=0
 _failed=0
+_fallback=0
 _seen=0
 if [ "$PLAN_ENABLED" = true ]; then
     _requested=$(grep -c '^/' "$PLAN" 2>/dev/null || true)
@@ -314,19 +315,50 @@ if [ "$_failed" -eq 0 ] && [ "$_planned" -gt 0 ]; then
         "$PYBIN" "$NORMALIZER" --batch "$BATCH" --inventory "$INVENTORY" \
         >> "$LOG_FILE" 2>&1
     _batch_rc=$?
-    if [ "$_batch_rc" -ne 0 ]; then
-        _failed=$((_failed + 1))
-    fi
 
+    # font_metrics_normalize.py deliberately returns a non-zero batch status if
+    # even one row fails, while leaving every successful row on disk. Do not turn
+    # that into "17 planned -> 0 added". Keep valid outputs and retry only the
+    # genuinely missing row, then fall back to the real source font if metric
+    # normalization alone is what failed.
     while IFS="$_tab" read -r _batch_source _batch_target _batch_mono _batch_slot; do
         [ -n "$_batch_target" ] || continue
-        if [ "$_batch_rc" -eq 0 ] && font_size_ok "$_batch_target"; then
+        if font_size_ok "$_batch_target"; then
             _added=$((_added + 1))
-        else
-            rm -f "$_batch_target" 2>/dev/null || true
-            [ "$_batch_rc" -ne 0 ] || _failed=$((_failed + 1))
+            continue
         fi
+
+        rm -f "$_batch_target" 2>/dev/null || true
+        PYTHONHOME="$PYROOT" \
+        PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$PYBIN" "$NORMALIZER" --input "$_batch_source" --output "$_batch_target" \
+            --inventory "$INVENTORY" --target-slot "$_batch_slot" >> "$LOG_FILE" 2>&1
+        _single_rc=$?
+        if [ "$_single_rc" -eq 0 ] && font_size_ok "$_batch_target"; then
+            _added=$((_added + 1))
+            log_line "单槽度量重试成功：slot=$_batch_slot target=$_batch_target"
+            continue
+        fi
+
+        rm -f "$_batch_target" 2>/dev/null || true
+        mkdir -p "${_batch_target%/*}" 2>/dev/null || true
+        if cp -f "$_batch_source" "$_batch_target" 2>/dev/null && font_size_ok "$_batch_target"; then
+            chmod 0644 "$_batch_target" 2>/dev/null || true
+            _added=$((_added + 1))
+            _fallback=$((_fallback + 1))
+            log_line "单槽度量归一化失败，已回退真实字体源：slot=$_batch_slot source=$_batch_source target=$_batch_target batchRc=$_batch_rc singleRc=$_single_rc"
+            continue
+        fi
+
+        rm -f "$_batch_target" 2>/dev/null || true
+        _failed=$((_failed + 1))
+        log_line "单槽补齐最终失败：slot=$_batch_slot source=$_batch_source target=$_batch_target batchRc=$_batch_rc singleRc=$_single_rc"
     done < "$BATCH"
+
+    if [ "$_batch_rc" -ne 0 ]; then
+        log_line "批量度量返回非零：rc=$_batch_rc；已逐槽核验，added=$_added fallback=$_fallback failed=$_failed"
+    fi
 fi
 
 if [ "$_failed" -ne 0 ]; then
@@ -335,7 +367,7 @@ if [ "$_failed" -ne 0 ]; then
         [ -z "$_batch_target" ] || rm -f "$_batch_target" 2>/dev/null || true
     done < "$BATCH"
     _added=0
-    log_line "补齐失败：seen=$_seen requested=$_requested matched=$_matched planned=$_planned rewritten=$_rewritten added=$_added existing=$_existing preserved=$_preserved failed=$_failed"
+    log_line "补齐失败：seen=$_seen requested=$_requested matched=$_matched planned=$_planned rewritten=$_rewritten added=$_added fallback=$_fallback existing=$_existing preserved=$_preserved failed=$_failed"
     json_error "字体覆盖补齐有 $_failed 个槽位写入失败，已拒绝提交半成品"
     exit 1
 fi
@@ -360,6 +392,7 @@ fi
     printf 'planned=%s\n' "$_planned"
     printf 'rewritten=%s\n' "$_rewritten"
     printf 'added=%s\n' "$_added"
+    printf 'fallback=%s\n' "$_fallback"
     printf 'existing=%s\n' "$_existing"
     printf 'preserved=%s\n' "$_preserved"
     printf 'failed=0\n'
@@ -374,8 +407,8 @@ mv -f "$SUMMARY_TMP" "$SUMMARY" 2>/dev/null || {
 }
 chmod 0644 "$SUMMARY" 2>/dev/null || true
 
-log_line "补齐完成：mode=$MODE font=$FAMILY seen=$_seen requested=$_requested matched=$_matched planned=$_planned rewritten=$_rewritten added=$_added existing=$_existing preserved=$_preserved"
-printf '{"status":"ok","data":{"mode":"%s","font":"%s","inventory":%s,"requested":%s,"matched":%s,"planned":%s,"rewritten":%s,"added":%s,"existing":%s,"preserved":%s}}\n' \
+log_line "补齐完成：mode=$MODE font=$FAMILY seen=$_seen requested=$_requested matched=$_matched planned=$_planned rewritten=$_rewritten added=$_added fallback=$_fallback existing=$_existing preserved=$_preserved"
+printf '{"status":"ok","data":{"mode":"%s","font":"%s","inventory":%s,"requested":%s,"matched":%s,"planned":%s,"rewritten":%s,"added":%s,"fallback":%s,"existing":%s,"preserved":%s}}\n' \
     "$MODE" "$(printf '%s' "$FAMILY" | sed 's/\\/\\\\/g; s/"/\\"/g')" \
-    "$_seen" "$_requested" "$_matched" "$_planned" "$_rewritten" "$_added" "$_existing" "$_preserved"
+    "$_seen" "$_requested" "$_matched" "$_planned" "$_rewritten" "$_added" "$_fallback" "$_existing" "$_preserved"
 exit 0

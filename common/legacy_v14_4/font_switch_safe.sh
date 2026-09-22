@@ -832,17 +832,25 @@ switch_font() {
                 }
             fi
         fi
-        if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
-            progress 82 '正在按本机扫描清单补齐安全字体槽位'
-            [ -f "$COVERAGE_REMEDIATE_HELPER" ] || {
-                safe_error '字体覆盖补齐组件缺失，当前启动字体未被改动'
-                return 1
-            }
+        # Coverage is part of every font generation, not a one-shot repair.
+        # The staging rebuild above intentionally drops every old text alias, so
+        # re-run inventory completion before commit even for a normal font switch.
+        # Existing complete caches are cheap here: the remediator only fills slots
+        # that are actually absent.
+        if [ -f "$COVERAGE_REMEDIATE_HELPER" ] && [ -s "$CONFIG_DIR/device_font_inventory.json" ]; then
+            if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
+                progress 82 '正在按补齐计划重建本机安全字体槽位'
+            else
+                progress 82 '正在校验并自动补齐本机安全字体槽位'
+            fi
             if ! LUOSHU_REAL_MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" \
                 sh "$COVERAGE_REMEDIATE_HELPER" "$STAGE_PAYLOAD" direct "$_font" >> "$LOG_FILE" 2>&1; then
-                safe_error '按本机扫描清单补齐字体槽位失败，当前启动字体未被改动'
+                safe_error '本机安全字体槽位自动补齐失败，当前启动字体未被改动'
                 return 1
             fi
+        elif [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
+            safe_error '字体覆盖补齐组件或本机扫描清单缺失，当前启动字体未被改动'
+            return 1
         fi
         progress 86 '正在校验下一启动字体负载'
         stage_verify "$_font" || { safe_error '新字体负载校验失败，当前启动字体未被改动'; return 1; }

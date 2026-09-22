@@ -36,11 +36,17 @@ ROWS
       esac
     done
     tab=$(printf '\t')
+    rc=0
     while IFS="$tab" read -r source output mono slot; do
       [ -n "$source" ] && [ -n "$output" ] || continue
+      if [ -n "${LUOSHU_TEST_BATCH_FAIL_SLOT:-}" ] && [ "$slot" = "$LUOSHU_TEST_BATCH_FAIL_SLOT" ]; then
+        rc=2
+        continue
+      fi
       mkdir -p "${output%/*}"
       cp -f "$source" "$output"
     done < "$batch"
+    exit "$rc"
     ;;
   *) exit 2 ;;
 esac
@@ -118,6 +124,24 @@ grep -q '^matched=2$' "$MIX/.luoshu-coverage-remediation.conf"
 grep -q '^added=3$' "$MIX/.luoshu-coverage-remediation.conf"
 grep -q '^preserved=2$' "$MIX/.luoshu-coverage-remediation.conf"
 
+# 5) One bad row from the batch normalizer must not erase every successful row.
+# The shell retries only that row and, if metric normalization still cannot emit
+# it, falls back to the real font source so the coverage transaction still lands.
+PARTIAL="$MOD/.luoshu-payload-stage.partial"
+mkdir -p "$PARTIAL/system/fonts/.luoshu-font-store"
+head -c 4096 /dev/zero > "$PARTIAL/system/fonts/.luoshu-font-store/regular.font"
+head -c 4096 /dev/zero > "$PARTIAL/system/fonts/.luoshu-font-store/bold.font"
+LUOSHU_TEST_BATCH_FAIL_SLOT='/product/vivo/fonts/Vivo.ttf' \
+LUOSHU_REAL_MODDIR="$MOD" LUOSHU_PUBLIC_DIR="$TMP/public" \
+    sh "$ROOT/common/coverage_payload_remediate.sh" "$PARTIAL" direct Demo > "$TMP/out5"
+grep -q '"status":"ok"' "$TMP/out5"
+test -s "$PARTIAL/system/fonts/A.ttf"
+test -s "$PARTIAL/product/vivo/fonts/Vivo.ttf"
+test -s "$PARTIAL/system/fonts/Bold.ttf"
+grep -q '^added=3$' "$PARTIAL/.luoshu-coverage-remediation.conf"
+grep -q '^fallback=1$' "$PARTIAL/.luoshu-coverage-remediation.conf"
+grep -q '^failed=0$' "$PARTIAL/.luoshu-coverage-remediation.conf"
+
 # Production wiring and one-reboot convergence contract.
 grep -q 'LUOSHU_COVERAGE_REMEDIATE:-0' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'coverage_payload_remediate.sh' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
@@ -133,6 +157,9 @@ grep -q 'font_metrics_normalize.py' "$ROOT/common/coverage_payload_remediate.sh"
 grep -q 'PLAN_ENABLED' "$ROOT/common/coverage_payload_remediate.sh"
 grep -q -- '--batch' "$ROOT/common/coverage_payload_remediate.sh"
 grep -q 'METRICS_COVERED=' "$ROOT/common/coverage_payload_remediate.sh"
+grep -q '正在校验并自动补齐本机安全字体槽位' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q '正在校验并自动补齐本机安全字体槽位' "$ROOT/common/legacy_v14_4/mix_router.sh"
+grep -q '单槽度量归一化失败，已回退真实字体源' "$ROOT/common/coverage_payload_remediate.sh"
 
 sh -n "$ROOT/common/coverage_payload_remediate.sh"
 sh -n "$ROOT/common/legacy_v14_4/font_switch_safe.sh"

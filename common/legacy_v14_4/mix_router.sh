@@ -473,14 +473,24 @@ prepare_mix_stage_for_commit() {
     complete_hyperos_stage || return 1
     complete_coloros_stage || return 1
 
+    # A composite rebuild also starts from a clean text tree. Always converge it
+    # back to the scanned inventory before commit so changing fonts can never turn
+    # previously covered slots red again. Explicit repair mode additionally forces
+    # the requested paths to be rewritten.
+    _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
+    _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
     if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
         mix_finalize_state_write running "正在完成字体补齐批处理" "$(read_value "$REALMOD/config/axes_task.conf" task)"
-        _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
-        _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
         [ -f "$_coverage_helper" ] && [ -s "$_coverage_plan" ] || return 1
         LUOSHU_REAL_MODDIR="$REALMOD" \
         LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
         LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
+            sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
+    elif [ -f "$_coverage_helper" ] && [ -s "$REALMOD/config/device_font_inventory.json" ]; then
+        mix_finalize_state_write running "正在校验并自动补齐本机安全字体槽位" "$(read_value "$REALMOD/config/axes_task.conf" task)"
+        LUOSHU_REAL_MODDIR="$REALMOD" \
+        LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+        LUOSHU_COVERAGE_PLAN= \
             sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
     fi
 
