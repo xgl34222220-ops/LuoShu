@@ -212,15 +212,24 @@ states={item["path"]:(item["state"], item["category"], item["safeToRetry"]) for 
 assert states["/system/fonts/A.ttf"] == ("loaded","replaced",False), states
 assert states["/system/fonts/B.ttf"] == ("mapping-missing","issue",True), states
 assert states["/product/fonts/C.ttc"] == ("preserved","protected",False), states
-assert states["/vendor/fonts/D.ttf"] == ("missing-mount","issue",True), states
+assert states["/vendor/fonts/D.ttf"] == ("missing-mount","issue",False), states
 assert states["/product/vivo/fonts/Vivo.ttf"] == ("loaded","replaced",False), states
 assert states["/system/fonts/E.ttf"] == ("preserved","protected",False), states
 assert data["summary"]["replaced"] == 2, data["summary"]
 assert data["summary"]["issues"] == 2, data["summary"]
 assert data["summary"]["protected"] == 2, data["summary"]
+assert data["summary"]["remediable"] == 1, data["summary"]
+assert data["summary"]["missingMount"] == 1, data["summary"]
 PY
 grep -q -- '--physical-root "$MODDIR/.luoshu-payload"' "$ROOT/common/app_bridge.sh"
 grep -q 'traceSource.*physical-safe' "$ROOT/common/device_font_slot_trace.py"
+grep -q 'luoshu_nested_font_roots' "$ROOT/common/mount_compat_base.sh"
+grep -q 'device_font_roots.conf' "$ROOT/common/mount_compat_base.sh"
+grep -q '_lsme_nested_key' "$ROOT/common/mount_self_atomic.sh"
+grep -q '_lsme_nested_key' "$ROOT/common/mount_self_fallback.sh"
+sh -n "$ROOT/common/mount_compat_base.sh"
+sh -n "$ROOT/common/mount_self_atomic.sh"
+sh -n "$ROOT/common/mount_self_fallback.sh"
 
 # The bottom remediation button must never look actionable while being silently
 # disabled only because the App snapshot still says queued/running. Live task
