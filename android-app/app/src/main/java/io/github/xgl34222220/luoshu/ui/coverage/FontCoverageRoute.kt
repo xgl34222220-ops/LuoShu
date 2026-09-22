@@ -306,6 +306,11 @@ private fun reasonLabel(reason: String): String = when (reason) {
     "inventory-slot-not-present-in-payload" -> "扫描到了，但当前字体负载没有消费这个槽位"
     "boot-verification-not-available" -> "等待完整重启后的加载验证"
     "slot-runtime-evidence-missing" -> "缺少该槽位的运行时加载证据"
+    "physical-payload-present-but-partition-mount-failed" ->
+        "补齐文件已经生成，但对应系统字体目录没有成功挂载；这属于挂载故障，不会再重复提交同一份补齐任务"
+    "active-physical-payload-awaiting-mount-confirmation" -> "补齐文件已进入当前负载，等待挂载验证"
+    "active-physical-payload-and-mount-confirmed" -> "当前负载与系统挂载均已确认"
+    "active-physical-payload-missing-slot" -> "当前负载缺少该字体槽，可通过补齐重新生成"
     else -> reason.replace('-', ' ')
 }
 
