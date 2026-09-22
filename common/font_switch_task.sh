@@ -229,7 +229,15 @@ run_worker() {
     _worker_task=$_task
     _output="${TASK_FILE}.output.${_task}"
     _progress="${TASK_FILE}.progress.${_task}"
-    trap 'rm -f "$_progress" 2>/dev/null || true; type luoshu_clear_task_pid >/dev/null 2>&1 && luoshu_clear_task_pid "$WORKER_PID_FILE" "$_worker_task"' EXIT
+    worker_cleanup() {
+        rm -f "$_output" "$_progress" 2>/dev/null || true
+        if type luoshu_quiesce_font_workers >/dev/null 2>&1; then
+            luoshu_quiesce_font_workers "$MODDIR" "$"
+        elif type luoshu_clear_task_pid >/dev/null 2>&1; then
+            luoshu_clear_task_pid "$WORKER_PID_FILE" "$_worker_task"
+        fi
+    }
+    trap 'worker_cleanup' EXIT
     trap 'worker_signal_exit 129' HUP
     trap 'worker_signal_exit 130' INT
     trap 'worker_signal_exit 143' TERM
