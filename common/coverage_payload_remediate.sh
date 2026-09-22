@@ -296,7 +296,10 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
     # One embedded-Python process normalizes every new target against that exact
     # stock inventory slot. This preserves per-slot hhea/OS/2 metrics and avoids
     # both HyperOS vertical drift and one Python cold start per font file.
-    printf '%s\t%s\t\t%s\n' "$_anchor" "$_target" "$_logical" >> "$BATCH" 2>/dev/null || {
+    # Keep an explicit non-empty mono column. POSIX shells collapse adjacent
+    # tab IFS separators, so an empty third field would shift the logical slot
+    # out of _batch_slot during recovery/retry handling.
+    printf '%s\t%s\t-\t%s\n' "$_anchor" "$_target" "$_logical" >> "$BATCH" 2>/dev/null || {
         _failed=$((_failed + 1))
         continue
     }
