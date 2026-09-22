@@ -30,6 +30,7 @@
 - 修复兼容运行时的 `config / logs / system/fonts` 为软链接目录时，`mkdir -p` 误报“无法创建模块工作目录”。
 - 组合生成结束后必须等下一启动 payload 真正提交成功才进入 100%，finalizer 被系统回收时可自动恢复提交。
 - generation manifest 与 requestId 绑定，避免上一轮组合状态误提交到新任务。
+- finalize 进度按 taskId 严格隔离，旧任务或空 task 的 90/96/98% 状态不会污染新任务进度。
 
 ## 补齐末段性能
 
