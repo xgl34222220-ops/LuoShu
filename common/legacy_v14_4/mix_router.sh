@@ -473,16 +473,20 @@ prepare_mix_stage_for_commit() {
     complete_hyperos_stage || return 1
     complete_coloros_stage || return 1
 
+    mix_finalize_state_write running "正在完成全部安全字体槽位" "$(read_value "$REALMOD/config/axes_task.conf" task)"
+    _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
+    [ -f "$_coverage_helper" ] || return 1
+    _coverage_plan=''
     if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
-        mix_finalize_state_write running "正在完成字体补齐批处理" "$(read_value "$REALMOD/config/axes_task.conf" task)"
-        _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
         _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
-        [ -f "$_coverage_helper" ] && [ -s "$_coverage_plan" ] || return 1
-        LUOSHU_REAL_MODDIR="$REALMOD" \
-        LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-        LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
-            sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
+        [ -s "$_coverage_plan" ] || return 1
     fi
+    # A normal mix switch still backfills the complete safe inventory tree.
+    # The explicit remediation plan only forces selected bad slots to rewrite.
+    LUOSHU_REAL_MODDIR="$REALMOD" \
+    LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+    LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
+        sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
 
     _pm_request=$(read_value "$MIX_STAGE_STATE" requestId)
     _pm_tmp="${PRECOMMIT_STATE}.tmp.$$"
