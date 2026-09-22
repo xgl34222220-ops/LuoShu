@@ -332,10 +332,13 @@ private data class MetricSpec(
 internal fun FontCoverageRoute(
     style: UiStyle,
     activeFont: String,
-    taskRunning: Boolean,
+    taskState: String,
+    taskMessage: String,
+    taskProgress: Int,
     rebootRequired: Boolean,
     onBack: () -> Unit,
-    onTaskStarted: () -> Unit,
+    onTaskStarted: (String, Boolean) -> Unit,
+    onReboot: () -> Unit,
 ) {
     var state by remember { mutableStateOf(CoverageUiState()) }
     var filterName by rememberSaveable { mutableStateOf(CoverageFilter.ALL.name) }
@@ -377,7 +380,8 @@ internal fun FontCoverageRoute(
         }
     }
 
-    LaunchedEffect(activeFont, taskRunning, rebootRequired) {
+    val taskRunning = taskState in setOf("queued", "running")
+    LaunchedEffect(activeFont, taskState, rebootRequired) {
         if (!taskRunning) load()
     }
 
@@ -401,11 +405,10 @@ internal fun FontCoverageRoute(
     val tokens = LocalMiuixTokens.current
     val data = state.data
     val coverageActiveFont = data?.activeFont?.takeIf { it.isNotBlank() } ?: activeFont
-    // Coverage owns a fresher module read than the app-wide snapshot. Never silently
-    // disable remediation because Home still thinks the active font is default or a
-    // task is running; coverage_reapply reconciles the live worker state itself.
     val canReapply = coverageActiveFont !in setOf("", "default") &&
         !state.busy &&
+        !taskRunning &&
+        !rebootRequired &&
         (data?.summary?.remediable ?: 0) > 0
     val needsCoverageBootstrap = data == null &&
         activeFont !in setOf("", "default") &&
@@ -560,14 +563,24 @@ internal fun FontCoverageRoute(
         }
 
         if (data != null) {
+            val liveStatusText = when {
+                taskRunning -> taskMessage.ifBlank { "字体补齐正在后台处理" } +
+                    " · " + taskProgress.coerceIn(0, 100) + "%"
+                taskState == "failed" -> taskMessage.ifBlank { "字体补齐任务失败" }
+                rebootRequired -> "补齐负载已生成并提交。现在完整重启一次，开机后会自动验证实际覆盖结果。"
+                else -> state.error.ifBlank { state.message }
+            }
             CoverageActionBar(
                 remediable = data.summary.remediable,
                 busy = state.busy,
-                taskRunning = taskRunning,
+                taskState = taskState,
+                taskProgress = taskProgress,
+                rebootRequired = rebootRequired,
                 canReapply = canReapply,
-                statusText = state.error.ifBlank { state.message },
-                statusIsError = state.error.isNotBlank(),
+                statusText = liveStatusText,
+                statusIsError = state.error.isNotBlank() || taskState == "failed",
                 onReapply = { confirmReapply = true },
+                onReboot = onReboot,
                 onVerify = { load(verify = true) },
                 onExport = {
                     if (state.busy) return@CoverageActionBar
@@ -638,24 +651,24 @@ internal fun FontCoverageRoute(
                                 runCoverageAction("coverage_reapply", 30_000L)
                             }.onSuccess { json ->
                                 val taskId = json.optJSONObject("data")?.optString("task").orEmpty()
+                                if (taskId.isBlank()) {
+                                    state = state.copy(
+                                        busy = false,
+                                        error = "补齐任务没有返回任务 ID，已拒绝进入无法跟踪的后台状态",
+                                        message = "",
+                                    )
+                                    return@onSuccess
+                                }
                                 state = state.copy(
                                     busy = false,
                                     error = "",
                                     message = if (data == null) {
-                                        if (taskId.isBlank()) {
-                                            "覆盖数据重建任务已提交。"
-                                        } else {
-                                            "覆盖数据重建任务已提交 · " + taskId
-                                        }
+                                        "覆盖数据重建已启动 · " + taskId
                                     } else {
-                                        if (taskId.isBlank()) {
-                                            "补齐任务已提交，正在后台处理。"
-                                        } else {
-                                            "补齐任务已提交 · " + taskId
-                                        }
+                                        "字体补齐已启动 · " + taskId
                                     },
                                 )
-                                onTaskStarted()
+                                onTaskStarted(taskId, coverageActiveFont == "mix")
                             }.onFailure { error ->
                                 state = state.copy(
                                     busy = false,
@@ -1172,11 +1185,14 @@ private fun CoverageEmptyState() {
 private fun CoverageActionBar(
     remediable: Int,
     busy: Boolean,
-    taskRunning: Boolean,
+    taskState: String,
+    taskProgress: Int,
+    rebootRequired: Boolean,
     canReapply: Boolean,
     statusText: String,
     statusIsError: Boolean,
     onReapply: () -> Unit,
+    onReboot: () -> Unit,
     onVerify: () -> Unit,
     onExport: () -> Unit,
     modifier: Modifier = Modifier,
@@ -1212,26 +1228,36 @@ private fun CoverageActionBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(7.dp),
             ) {
+                val taskRunning = taskState in setOf("queued", "running")
                 Button(
-                    onClick = onReapply,
-                    enabled = canReapply,
+                    onClick = if (rebootRequired && !taskRunning) onReboot else onReapply,
+                    enabled = when {
+                        taskRunning -> false
+                        rebootRequired -> !busy
+                        else -> canReapply
+                    },
                     modifier = Modifier.weight(1.25f).heightIn(min = 48.dp),
                     shape = RoundedCornerShape(19.dp),
                 ) {
-                    if (busy) {
+                    if (busy || taskRunning) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp,
                             color = MaterialTheme.colorScheme.onPrimary,
                         )
                     } else {
-                        Icon(Icons.Rounded.AutoFixHigh, null, Modifier.size(19.dp))
+                        Icon(
+                            if (rebootRequired) Icons.Rounded.Refresh else Icons.Rounded.AutoFixHigh,
+                            null,
+                            Modifier.size(19.dp),
+                        )
                     }
                     Spacer(Modifier.width(6.dp))
                     Text(
                         when {
                             busy -> "正在启动…"
-                            taskRunning -> "检查任务状态"
+                            taskRunning -> "补齐中 " + taskProgress.coerceIn(0, 100) + "%"
+                            rebootRequired -> "完整重启"
                             remediable > 0 -> "补齐 " + remediable
                             else -> "无需补齐"
                         },
@@ -1240,7 +1266,7 @@ private fun CoverageActionBar(
                 }
                 FilledTonalButton(
                     onClick = onVerify,
-                    enabled = !busy && !taskRunning,
+                    enabled = !busy && !taskRunning && !rebootRequired,
                     modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                     shape = RoundedCornerShape(19.dp),
                 ) {
