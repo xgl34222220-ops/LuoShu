@@ -38,12 +38,14 @@ mix_finalize_state_write() {
     _mfs_state="$1"
     _mfs_message="$2"
     _mfs_task="${3:-}"
+    _mfs_percent="${4:-}"
     _mfs_file="$REALMOD/config/mix-finalize-state.conf"
     _mfs_tmp="${_mfs_file}.tmp.$"
     {
         printf 'state=%s\n' "$_mfs_state"
         printf 'task=%s\n' "$_mfs_task"
         printf 'message=%s\n' "$_mfs_message"
+        [ -z "$_mfs_percent" ] || printf 'percent=%s\n' "$_mfs_percent"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } >"$_mfs_tmp" 2>/dev/null && mv -f "$_mfs_tmp" "$_mfs_file" 2>/dev/null || true
     chmod 0644 "$_mfs_file" 2>/dev/null || true
@@ -51,11 +53,11 @@ mix_finalize_state_write() {
 
 mix_finalize_worker() {
     _mfw_task="$1"
-    mix_finalize_state_write running '正在提交下一启动字体负载' "$_mfw_task"
+    mix_finalize_state_write running '正在提交下一启动字体负载' "$_mfw_task" 99
     if finalize_mix_stage >>"$LOG_FILE" 2>&1; then
-        mix_finalize_state_write success '复合字体负载已提交，完整重启后生效' "$_mfw_task"
+        mix_finalize_state_write success '复合字体负载已提交，完整重启后生效' "$_mfw_task" 100
     else
-        mix_finalize_state_write failed '复合字体已生成，但下一启动负载提交失败' "$_mfw_task"
+        mix_finalize_state_write failed '复合字体已生成，但下一启动负载提交失败' "$_mfw_task" 100
     fi
     if type luoshu_clear_task_pid >/dev/null 2>&1; then
         luoshu_clear_task_pid "$REALMOD/config/mix_finalize_worker.pid" "mix-finalize-$_mfw_task"
@@ -220,6 +222,19 @@ mix_status_json_fast() {
                 _message="${_finalize_message:-字体已生成，正在提交下一启动负载}"
                 _percent=99
             fi
+        fi
+    fi
+
+    if [ "$_state" = running ]; then
+        _finalize_task=$(read_value "$REALMOD/config/mix-finalize-state.conf" task)
+        _finalize_state=$(read_value "$REALMOD/config/mix-finalize-state.conf" state)
+        _finalize_message=$(read_value "$REALMOD/config/mix-finalize-state.conf" message)
+        _finalize_percent=$(read_value "$REALMOD/config/mix-finalize-state.conf" percent)
+        case "$_finalize_percent" in ''|*[!0-9]*) _finalize_percent=0 ;; esac
+        if { [ -z "$_finalize_task" ] || [ "$_finalize_task" = "$_task" ]; } && \
+           [ "$_finalize_state" != failed ] && [ "$_finalize_percent" -gt "$_percent" ] 2>/dev/null; then
+            _percent="$_finalize_percent"
+            [ -z "$_finalize_message" ] || _message="$_finalize_message"
         fi
     fi
 
@@ -478,6 +493,7 @@ prepare_mix_stage_for_commit() {
     } >"$_pm_tmp" 2>/dev/null || return 1
     mv -f "$_pm_tmp" "$PRECOMMIT_STATE" 2>/dev/null || return 1
     chmod 0644 "$PRECOMMIT_STATE" 2>/dev/null || true
+    mix_finalize_state_write ready '预提交处理完成，正在原子提交下一启动负载' "$(read_value "$REALMOD/config/axes_task.conf" task)" 98
     return 0
 }
 commit_mix_stage_if_needed() {
