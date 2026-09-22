@@ -118,6 +118,7 @@ private data class CoverageSlot(
 
 private data class CoverageSummary(
     val total: Int = 0,
+    val scanned: Int = 0,
     val replaceable: Int = 0,
     val replaced: Int = 0,
     val protected: Int = 0,
@@ -210,8 +211,9 @@ private fun parseCoverage(root: JSONObject): CoverageData {
         activeFont = root.optString("activeFont", ""),
         verificationState = root.optString("verificationState", "not-run"),
         summary = CoverageSummary(
-            total = summaryJson.optInt("censusSlots", slots.size),
-            replaceable = summaryJson.optInt("replaceableSlots", summaryJson.optInt("inventorySlots", 0)),
+            total = summaryJson.optInt("inventorySlots", slots.size),
+            scanned = summaryJson.optInt("censusSlots", summaryJson.optInt("inventorySlots", slots.size)),
+            replaceable = summaryJson.optInt("replaceableSlots", summaryJson.optInt("inventorySlots", slots.size)),
             replaced = summaryJson.optInt("replaced", fallback["replaced"] ?: 0),
             protected = summaryJson.optInt("protected", fallback["protected"] ?: 0),
             pending = summaryJson.optInt("pending", fallback["pending"] ?: 0),
@@ -782,7 +784,7 @@ private fun CoverageHero(
 
             val summary = data.summary
             val metrics = listOf(
-                MetricSpec("扫描总数", summary.total, Icons.Rounded.Search, MaterialTheme.colorScheme.primary),
+                MetricSpec("字体槽位", summary.total, Icons.Rounded.Search, MaterialTheme.colorScheme.primary),
                 MetricSpec("可替换", summary.replaceable, Icons.Rounded.AutoFixHigh, Color(0xFF6A67CE)),
                 MetricSpec("已替换", summary.replaced, Icons.Rounded.CheckCircle, Color(0xFF21966C)),
                 MetricSpec("未替换", summary.issues, Icons.Rounded.ErrorOutline, Color(0xFFC74A4A)),
@@ -798,6 +800,16 @@ private fun CoverageHero(
                         CoverageMetric(metric, Modifier.weight(1f))
                     }
                 }
+            }
+
+            if (summary.scanned != summary.total) {
+                Text(
+                    "系统/OEM 共普查 " + summary.scanned + " 个字体路径；其中 " +
+                        summary.total + " 个进入刷写与 App 共用的 UI 字体槽位清单。",
+                    color = tokens.textSecondary,
+                    fontSize = 11.sp,
+                    lineHeight = 16.sp,
+                )
             }
 
             if (summary.remediable > 0) {
