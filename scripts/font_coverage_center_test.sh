@@ -14,7 +14,7 @@ cat > "$MOD/common/font_switch_task.sh" <<EOF
 case "\${1:-}" in
   reconcile) exit 0 ;;
   start)
-    printf 'switch-start|%s|force=%s|remediate=%s\n' "\${2:-}" "\${LUOSHU_FORCE_REBUILD:-0}" "\${LUOSHU_COVERAGE_REMEDIATE:-0}" >> "$CALLS"
+    printf 'switch-start|%s|force=%s|remediate=%s|plan=%s\n' "\${2:-}" "\${LUOSHU_FORCE_REBUILD:-0}" "\${LUOSHU_COVERAGE_REMEDIATE:-0}" "\${LUOSHU_COVERAGE_PLAN:-}" >> "$CALLS"
     printf '{"status":"ok","data":{"task":"coverage-direct","font":"%s"}}\n' "\${2:-}"
     exit 0
     ;;
@@ -27,7 +27,7 @@ cat > "$MOD/common/font_mix_controller.sh" <<EOF
 case "\${1:-}" in
   reconcile) exit 0 ;;
   start)
-    printf 'mix-start|%s|%s|%s|%s|%s|%s|force=%s|remediate=%s\n' "\${2:-}" "\${3:-}" "\${4:-}" "\${5:-}" "\${6:-}" "\${7:-}" "\${LUOSHU_FORCE_REBUILD:-0}" "\${LUOSHU_COVERAGE_REMEDIATE:-0}" >> "$CALLS"
+    printf 'mix-start|%s|%s|%s|%s|%s|%s|force=%s|remediate=%s|plan=%s\n' "\${2:-}" "\${3:-}" "\${4:-}" "\${5:-}" "\${6:-}" "\${7:-}" "\${LUOSHU_FORCE_REBUILD:-0}" "\${LUOSHU_COVERAGE_REMEDIATE:-0}" "\${LUOSHU_COVERAGE_PLAN:-}" >> "$CALLS"
     printf '{"status":"ok","data":{"task":"coverage-mix"}}\n'
     exit 0
     ;;
@@ -37,6 +37,30 @@ esac
 EOF
 chmod 0755 "$MOD/common/font_switch_task.sh" "$MOD/common/font_mix_controller.sh"
 
+# coverage_reapply must always build an exact plan from the same inventory-backed
+# trace shown in the App before it starts any worker.
+mkdir -p "$MOD/common/python/bin" "$MOD/.luoshu-payload/system/fonts"
+printf 'active-font\n' > "$MOD/.luoshu-payload/system/fonts/A.ttf"
+cat > "$MOD/config/device_font_inventory.json" <<'EOF'
+{"schema":"device-font-inventory-v1","buildKey":"fixture","romKind":"generic","slots":{"/system/fonts/A.ttf":{"slotName":"A.ttf","partition":"system","source":"verified-scan","format":"TTF","weight":400,"style":"normal","families":[]}}}
+EOF
+cat > "$MOD/common/device_font_slot_trace.py" <<'EOF'
+# test stub: fake luoshu-python below emits the trace and exact plan
+EOF
+cat > "$MOD/common/python/bin/luoshu-python" <<'EOF'
+#!/bin/sh
+plan=''
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --remediation-plan) plan="$2"; shift 2 ;;
+        *) shift ;;
+    esac
+done
+[ -z "$plan" ] || printf '/system/fonts/A.ttf\n' > "$plan"
+printf '{"schema":"device-font-slot-trace-v1","inventoryRomKind":"generic","activeFont":"Demo","summary":{"inventorySlots":1,"censusSlots":1,"censusOnlySlots":0,"replaceableSlots":1,"replaced":0,"pending":0,"protected":0,"issues":1,"remediable":1},"slots":[{"path":"/system/fonts/A.ttf","slotName":"A.ttf","partition":"system","format":"TTF","weight":400,"style":"normal","source":"verified-scan","families":[],"state":"mapping-missing","category":"issue","safeToRetry":true,"reason":"active-physical-payload-missing-slot","routes":[]}],"censusOnly":[]}\n'
+EOF
+chmod 0755 "$MOD/common/python/bin/luoshu-python"
+
 run_bridge() {
     MODDIR="$MOD" sh "$ROOT/common/app_bridge.sh" "$@"
 }
@@ -44,7 +68,9 @@ run_bridge() {
 printf 'Demo\n' > "$MOD/config/active_font.conf"
 OUT=$(run_bridge coverage_reapply)
 printf '%s\n' "$OUT" | grep -q '"status":"ok"'
-grep -qx 'switch-start|Demo|force=1|remediate=1' "$CALLS"
+PLAN="$MOD/config/font-coverage-remediation-paths.txt"
+grep -qx "switch-start|Demo|force=1|remediate=1|plan=$PLAN" "$CALLS"
+grep -Fqx '/system/fonts/A.ttf' "$PLAN"
 grep -qx 'state=pending' "$MOD/config/font-payload-rebuild-pending.conf"
 grep -qx 'font=Demo' "$MOD/config/font-payload-rebuild-pending.conf"
 grep -qx 'reason=coverage-remediate' "$MOD/config/font-payload-rebuild-pending.conf"
@@ -88,7 +114,8 @@ EOF
 rm -f "$MOD/config/font-payload-rebuild-pending.conf"
 OUT=$(run_bridge coverage_reapply)
 printf '%s\n' "$OUT" | grep -q '"status":"ok"'
-grep -qx 'mix-start|CJK Demo|Latin Demo|Digit Demo|wght=500,wdth=95|wght=600|wght=700|force=1|remediate=1' "$CALLS"
+grep -qx "mix-start|CJK Demo|Latin Demo|Digit Demo|wght=500,wdth=95|wght=600|wght=700|force=1|remediate=1|plan=$PLAN" "$CALLS"
+grep -Fqx '/system/fonts/A.ttf' "$PLAN"
 grep -qx 'font=mix' "$MOD/config/font-payload-rebuild-pending.conf"
 grep -qx 'reason=coverage-remediate' "$MOD/config/font-payload-rebuild-pending.conf"
 
@@ -97,6 +124,9 @@ grep -q 'coverage_reapply)' "$ROOT/common/app_bridge.sh"
 grep -q 'coverage_verify)' "$ROOT/common/app_bridge.sh"
 grep -q 'coverage_export)' "$ROOT/common/app_bridge.sh"
 grep -q 'device_font_candidates.json' "$ROOT/common/app_bridge.sh"
+grep -q -- '--remediation-plan' "$ROOT/common/app_bridge.sh"
+grep -q 'font-coverage-remediation-paths.txt' "$ROOT/common/app_bridge.sh"
+grep -q 'LUOSHU_COVERAGE_PLAN' "$ROOT/common/font_switch_task.sh"
 grep -Fq '_tmp="${_pending}.tmp.$$"' "$ROOT/common/app_bridge.sh"
 grep -Fq '_tmp="${_out}.tmp.$$"' "$ROOT/common/app_bridge.sh"
 grep -q 'DEVICE_FONT_CACHE=' "$ROOT/common/app_bridge.sh"
