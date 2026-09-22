@@ -53,6 +53,9 @@ grep -q 'CoverageGroup' "$COVERAGE"
 grep -q '按状态' "$COVERAGE"
 grep -q '按分区' "$COVERAGE"
 grep -q '复制此项信息' "$COVERAGE"
+grep -q 'MetricSpec("字体槽位", summary.total' "$COVERAGE"
+grep -q 'scanned = summaryJson.optInt("censusSlots"' "$COVERAGE"
+! grep -q 'MetricSpec("扫描总数"' "$COVERAGE"
 
 # Font library: management tools are collapsed, the card itself opens details,
 # each card has one readable native preview, and detail viewing is a stable large preview sheet.
