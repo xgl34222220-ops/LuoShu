@@ -75,6 +75,8 @@ ok grep -q '"$_prepare_task" 95' "$ROOT/common/legacy_v14_4/mix_router.sh"
 ok grep -q '"$_prepare_task" 97' "$ROOT/common/legacy_v14_4/mix_router.sh"
 ok grep -q 'normalized_cache' "$ROOT/common/font_metrics_normalize.py"
 ok grep -q 'batchCacheHit' "$ROOT/common/font_metrics_normalize.py"
+ok grep -q 'source_outline_cache' "$ROOT/common/font_metrics_normalize.py"
+ok grep -q 'precomputed_outline_extremes' "$ROOT/common/font_metrics_normalize.py"
 
 # The import action must fit the full Chinese label on one line.
 ok grep -q 'else -> 148.dp' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"
