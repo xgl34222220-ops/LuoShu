@@ -642,102 +642,93 @@ def _fast_contract_normalize(
     }
 
 
+def _batch_source_identity(path: Path) -> tuple[int, int, int, int]:
+    stat = path.stat()
+    return (int(stat.st_dev), int(stat.st_ino), int(stat.st_size), int(stat.st_mtime_ns))
+
+
+def _batch_contract_identity(contract: dict[str, Any] | None) -> tuple:
+    if contract is None:
+        return ("fallback", TYPO_ASCENDER_RATIO, TYPO_DESCENDER_RATIO)
+    return (
+        "inventory",
+        int(contract.get("upem", 0)),
+        int(contract.get("ascent", 0)),
+        int(contract.get("descent", 0)),
+    )
+
+
+def _reuse_batch_output(source: Path, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.unlink(missing_ok=True)
+    try:
+        os.link(source, output)
+    except OSError:
+        shutil.copyfile(source, output)
+    os.chmod(output, 0o644)
+
+
 def run_batch(manifest: Path, inventory: Path | None = None) -> int:
     """Normalize many fonts in one process.
 
     Lines: input<TAB>output[<TAB>mono[<TAB>slot]].
-    Identical source/stock-metric combinations are generated once and hard-linked
-    to every matching physical slot. This turns the old O(slots * huge-font-save)
-    path into O(distinct metric contracts).
+
+    Coverage remediation often contains dozens of physical slots with identical
+    stock metrics. Normalize each distinct source/metric contract only once, then
+    hard-link (or copy) the already-normalized output for equivalent slots.
     """
     failures = 0
-    inventory_payload = _load_batch_inventory(inventory)
     contracts: dict[str, dict[str, Any] | None] = {}
-    generated: dict[tuple[object, ...], tuple[Path, dict[str, object]]] = {}
-
+    reusable: dict[tuple, Path] = {}
     for raw in manifest.read_text().splitlines():
-        line = raw.rstrip("\r\n")
-        if not line.strip() or line.lstrip().startswith("#"):
+        line = raw.strip()
+        if not line or line.startswith("#"):
             continue
         parts = line.split("\t")
-        if len(parts) < 2:
-            failures += 1
-            print(json.dumps({"status": "error", "message": "批量清单行缺少输入或输出路径"},
-                             ensure_ascii=False, separators=(",", ":")), file=os.sys.stderr)
-            continue
         source, output = Path(parts[0]), Path(parts[1])
         monospaced = len(parts) > 2 and parts[2] == "mono"
         target_slot = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
         contract_key = target_slot or ""
         if contract_key not in contracts:
-            contracts[contract_key] = _batch_contract_from_payload(
-                inventory_payload, target_slot, inventory
-            )
+            contracts[contract_key] = load_inventory_contract(inventory, target_slot=target_slot)
         contract = contracts[contract_key]
-
         try:
-            stat = source.stat()
-            if contract is not None:
-                metric_signature: tuple[object, ...] = (
-                    int(contract["upem"]),
-                    int(contract["ascent"]),
-                    int(contract["descent"]),
-                )
-            else:
-                metric_signature = ("fallback", TYPO_ASCENDER_RATIO, TYPO_DESCENDER_RATIO)
-            cache_key = (
-                stat.st_dev,
-                stat.st_ino,
-                stat.st_size,
-                stat.st_mtime_ns,
-                monospaced,
-                *metric_signature,
+            reuse_key = (
+                _batch_source_identity(source),
+                bool(monospaced),
+                _batch_contract_identity(contract),
             )
-
-            cached = generated.get(cache_key)
-            if cached is not None:
-                cached_output, cached_report = cached
-                _atomic_link_or_copy(cached_output, output)
-                report = dict(cached_report)
-                report.update({
+            cached = reusable.get(reuse_key)
+            if cached is not None and cached.is_file() and cached.stat().st_size >= 1024:
+                _reuse_batch_output(cached, output)
+                print(json.dumps({
                     "status": "ok",
                     "input": str(source),
                     "output": str(output),
+                    "reusedFrom": str(cached),
+                    "metricsSource": contract.get("source", "inventory") if contract else "fixed-fallback",
                     "targetSlot": contract.get("slot", "") if contract else "",
-                    "targetBuildKey": contract.get("buildKey", "") if contract else "",
-                    "targetUpem": int(contract.get("upem", 0)) if contract else 0,
-                    "targetAscent": int(contract.get("ascent", 0)) if contract else 0,
-                    "targetDescent": int(contract.get("descent", 0)) if contract else 0,
-                    "batchReuse": True,
-                })
-            elif monospaced:
-                # Monospace normalization intentionally edits hmtx glyph metrics;
-                # keep the full existing path for these rare aliases.
-                report = normalize_path(
-                    source,
-                    output,
-                    monospaced=True,
-                    inventory=inventory,
-                    target_contract=contract,
-                    target_slot=target_slot,
-                    strict_contract=True,
-                )
-                generated[cache_key] = (output, dict(report))
-            else:
-                report = _fast_contract_normalize(source, output, contract)
-                generated[cache_key] = (output, dict(report))
+                }, ensure_ascii=False, separators=(",", ":")))
+                continue
 
+            report = normalize_path(
+                source,
+                output,
+                monospaced,
+                inventory=inventory,
+                target_contract=contract,
+                # Per-slot inventory metrics are already the authoritative line
+                # contract. Avoid a full-glyph CJK outline scan here. HyperOS
+                # critical UI slots get their head-frame pass separately.
+                strict_contract=contract is not None,
+            )
+            reusable[reuse_key] = output
             print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
         except Exception as error:
             failures += 1
             output.unlink(missing_ok=True)
-            print(json.dumps(
-                {"status": "error", "input": str(source), "output": str(output),
-                 "message": str(error) or error.__class__.__name__},
-                ensure_ascii=False, separators=(",", ":")
-            ), file=os.sys.stderr)
+            print(json.dumps({"status": "error", "input": str(source), "message": str(error) or error.__class__.__name__}, ensure_ascii=False, separators=(",", ":")), file=os.sys.stderr)
     return 2 if failures else 0
-
 
 def main() -> int:
     parser = argparse.ArgumentParser()
