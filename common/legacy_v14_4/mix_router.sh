@@ -455,6 +455,43 @@ write_next_state() {
     return 0
 }
 
+committed_next_payload_matches_stage() {
+    [ -d "$NEXT_PAYLOAD" ] && [ -s "$NEXT_STATE" ] || return 1
+    [ "$(read_value "$NEXT_STATE" font)" = mix ] || return 1
+
+    _cnp_next_request=$(read_value "$NEXT_STATE" requestId)
+    _cnp_next_time=$(read_value "$NEXT_STATE" time)
+    [ -n "$_cnp_next_request" ] || return 1
+
+    # A newer staged generation must never be mistaken for the payload that was
+    # committed by a previous task. If the stage metadata still exists, require
+    # exact generation identity.
+    if [ -s "$MIX_STAGE_STATE" ]; then
+        _cnp_stage_request=$(read_value "$MIX_STAGE_STATE" requestId)
+        [ -n "$_cnp_stage_request" ] && [ "$_cnp_stage_request" = "$_cnp_next_request" ] || return 1
+    else
+        # The winning finalizer removes MIX_STAGE_STATE after the atomic rename.
+        # In that race, reject any obviously stale next payload from before the
+        # current outer axes task.
+        _cnp_task_started=$(read_value "$REALMOD/config/axes_task.conf" started)
+        case "$_cnp_task_started" in ''|*[!0-9]*) _cnp_task_started='' ;; esac
+        case "$_cnp_next_time" in ''|*[!0-9]*) _cnp_next_time='' ;; esac
+        if [ -n "$_cnp_task_started" ] && [ -n "$_cnp_next_time" ] && \
+           [ "$_cnp_next_time" -lt "$_cnp_task_started" ] 2>/dev/null; then
+            return 1
+        fi
+    fi
+
+    # Newer payloads carry the generation manifest across the atomic rename.
+    # Validate it when present, while remaining compatible with older staged
+    # payloads that predate this manifest.
+    _cnp_manifest="$NEXT_PAYLOAD/.luoshu-mix-generation.conf"
+    if [ -s "$_cnp_manifest" ]; then
+        [ "$(read_value "$_cnp_manifest" requestId)" = "$_cnp_next_request" ] || return 1
+    fi
+    return 0
+}
+
 precommit_ready() {
     [ -s "$PRECOMMIT_STATE" ] || return 1
     _pcr_request=$(read_value "$MIX_STAGE_STATE" requestId)
@@ -465,6 +502,15 @@ precommit_ready() {
 }
 
 prepare_mix_stage_for_commit() {
+    # The base v14 monitor and the weighted/auto wrapper can observe generator
+    # success at the same time. If the monitor wins and atomically commits the
+    # stage first, the wrapper must treat prepare-finalize as the same success
+    # instead of reporting "复合字体预提交处理失败".
+    if committed_next_payload_matches_stage; then
+        mix_finalize_state_write success '复合字体负载已提交，完整重启后生效' \
+            "$(read_value "$REALMOD/config/axes_task.conf" task)" 100
+        return 0
+    fi
     precommit_ready && return 0
     stage_has_fonts || return 1
     stage_generation_matches || return 1
