@@ -355,6 +355,17 @@ if [ "$_failed" -eq 0 ] && [ "$_planned" -gt 0 ]; then
         fi
 
         rm -f "$_batch_target" 2>/dev/null || true
+        if [ "$PLAN_ENABLED" != true ]; then
+            # Normal font switching/composite generation treats this pass as
+            # residual coverage enhancement. If one unusual OEM slot cannot be
+            # normalized or copied, leave it absent from the overlay so Android
+            # falls through to the untouched ROM font instead of rejecting the
+            # entire otherwise-valid next-boot payload.
+            if record_preserved "$_batch_slot" 'preserved-normalization-failure'; then
+                log_line "单槽无法安全补齐，已保留 ROM 原字体：slot=$_batch_slot source=$_batch_source target=$_batch_target batchRc=$_batch_rc singleRc=$_single_rc"
+                continue
+            fi
+        fi
         _failed=$((_failed + 1))
         log_line "单槽补齐最终失败：slot=$_batch_slot source=$_batch_source target=$_batch_target batchRc=$_batch_rc singleRc=$_single_rc"
     done < "$BATCH"
