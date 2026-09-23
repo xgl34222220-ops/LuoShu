@@ -28,6 +28,7 @@ LOG_FILE="$REALMOD/logs/fontswitch.log"
 FINALIZE_LOCK="$REALMOD/.mix-stage-finalize.lock"
 PRECOMMIT_STATE="$MIX_STAGE/.luoshu-precommit-ready.conf"
 MIX_POST_CACHE="$REALMOD/cache/mix-postprocess-v1"
+PREPARE_ERROR=''
 [ -f "$LEGACY/payload_clone.sh" ] && . "$LEGACY/payload_clone.sh"
 [ -f "$REALMOD/common/background_task.sh" ] && . "$REALMOD/common/background_task.sh"
 
@@ -679,6 +680,24 @@ precommit_ready() {
     return 0
 }
 
+prepare_fail() {
+    PREPARE_ERROR="$1"
+    _pf_task="$(read_value "$REALMOD/config/axes_task.conf" task)"
+    mix_finalize_state_write failed "$PREPARE_ERROR" "$_pf_task" 100
+    printf '[%s] [MIX] prepare-finalize failed: %s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$PREPARE_ERROR" \
+        >> "$LOG_FILE" 2>/dev/null || true
+    return 1
+}
+
+prepare_helper_error() {
+    _phe_fallback="$1"
+    _phe_line=$(tail -n 12 "$LOG_FILE" 2>/dev/null | \
+        sed -n '/失败\|错误\|Error\|error/p' | tail -n1 | tr -d '\r')
+    [ -n "$_phe_line" ] || _phe_line="$_phe_fallback"
+    printf '%s\n' "$_phe_line"
+}
+
 prepare_mix_stage_for_commit() {
     # The base v14 monitor and the weighted/auto wrapper can observe generator
     # success at the same time. If the monitor wins and atomically commits the
@@ -690,16 +709,22 @@ prepare_mix_stage_for_commit() {
         return 0
     fi
     precommit_ready && return 0
-    stage_has_fonts || return 1
-    stage_generation_matches || return 1
+    stage_has_fonts || { prepare_fail '复合字体暂存负载为空或已丢失'; return 1; }
+    stage_generation_matches || { prepare_fail '复合字体生成代次校验失败，已拒绝提交旧暂存负载'; return 1; }
 
     _prepare_task="$(read_value "$REALMOD/config/axes_task.conf" task)"
     if mix_post_cache_restore; then
         mix_finalize_state_write running "已复用完整 ROM 槽位与补齐缓存" "$_prepare_task" 96
     else
         mix_finalize_state_write running "正在完成 ROM 字体槽位对齐" "$_prepare_task" 92
-        complete_hyperos_stage || return 1
-        complete_coloros_stage || return 1
+        if ! complete_hyperos_stage; then
+            prepare_fail "$(prepare_helper_error 'HyperOS ROM 字体槽位对齐失败')"
+            return 1
+        fi
+        if ! complete_coloros_stage; then
+            prepare_fail "$(prepare_helper_error 'ColorOS ROM 字体槽位对齐失败')"
+            return 1
+        fi
 
         # A composite rebuild also starts from a clean text tree. Always converge it
         # back to the scanned inventory before commit so changing fonts can never turn
@@ -709,17 +734,26 @@ prepare_mix_stage_for_commit() {
         _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
         if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
             mix_finalize_state_write running "正在完成字体补齐批处理" "$_prepare_task" 95
-            [ -f "$_coverage_helper" ] && [ -s "$_coverage_plan" ] || return 1
+            [ -f "$_coverage_helper" ] && [ -s "$_coverage_plan" ] || {
+                prepare_fail '字体补齐计划或补齐组件缺失'
+                return 1
+            }
             LUOSHU_REAL_MODDIR="$REALMOD" \
             LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
             LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
-                sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
+                sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || {
+                    prepare_fail "$(prepare_helper_error '字体槽位补齐批处理失败')"
+                    return 1
+                }
         elif [ -f "$_coverage_helper" ] && [ -s "$REALMOD/config/device_font_inventory.json" ]; then
             mix_finalize_state_write running "正在补齐剩余本机安全字体槽位" "$_prepare_task" 95
             LUOSHU_REAL_MODDIR="$REALMOD" \
             LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
             LUOSHU_COVERAGE_PLAN= \
-                sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
+                sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || {
+                    prepare_fail "$(prepare_helper_error '字体槽位补齐批处理失败')"
+                    return 1
+                }
         fi
         mix_finalize_state_write running "正在保存组合字体快速复用缓存" "$_prepare_task" 97
         mix_post_cache_store >/dev/null 2>&1 || true
@@ -731,8 +765,14 @@ prepare_mix_stage_for_commit() {
         printf "state=ready\n"
         printf "requestId=%s\n" "$_pm_request"
         printf "time=%s\n" "$(date +%s 2>/dev/null || echo 0)"
-    } >"$_pm_tmp" 2>/dev/null || return 1
-    mv -f "$_pm_tmp" "$PRECOMMIT_STATE" 2>/dev/null || return 1
+    } >"$_pm_tmp" 2>/dev/null || {
+        prepare_fail '无法写入复合字体预提交状态'
+        return 1
+    }
+    mv -f "$_pm_tmp" "$PRECOMMIT_STATE" 2>/dev/null || {
+        prepare_fail '无法原子提交复合字体预提交状态'
+        return 1
+    }
     chmod 0644 "$PRECOMMIT_STATE" 2>/dev/null || true
     mix_finalize_state_write ready '预提交处理完成，正在原子提交下一启动负载' "$(read_value "$REALMOD/config/axes_task.conf" task)" 98
     return 0
@@ -913,7 +953,9 @@ if [ "$_cmd" = prepare-finalize ]; then
         printf '{"status":"ok","data":{"stage":"prepared"}}\n'
         exit 0
     fi
-    printf '{"status":"error","message":"复合字体预提交处理失败"}\n'
+    _prepare_message="${PREPARE_ERROR:-$(read_value "$REALMOD/config/mix-finalize-state.conf" message)}"
+    [ -n "$_prepare_message" ] || _prepare_message='复合字体预提交处理失败'
+    printf '{"status":"error","message":"%s"}\n' "$(json_escape_router "$_prepare_message")"
     exit 1
 fi
 if [ "$_cmd" = reconcile ]; then
