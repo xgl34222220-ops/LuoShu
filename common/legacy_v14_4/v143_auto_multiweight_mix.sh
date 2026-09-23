@@ -491,7 +491,7 @@ worker() {
         update_task "$_wanted" failed '无法生成自动多字重提交清单' 100 "$(date +%s)"
         rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
     }
-    update_task "$_wanted" running '自动多字重已生成，正在完成 ROM 槽位与补齐处理' 90 ''
+    update_task "$_wanted" running '自动多字重已生成，正在核验本机扫描槽位并提交' 90 ''
     if ! prepare_compat_payload; then
         update_task "$_wanted" failed "${FINALIZE_ERROR:-复合字体预提交处理失败}" 100 "$(date +%s)"
         rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
