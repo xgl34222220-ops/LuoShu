@@ -336,7 +336,7 @@ if [ "$_planned" -gt 0 ] && { [ "$PLAN_ENABLED" != true ] || [ "$_failed" -eq 0 
         PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
         LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
             "$PYBIN" "$NORMALIZER" --input "$_batch_source" --output "$_batch_target" \
-            --inventory "$INVENTORY" --target-slot "$_batch_slot" >> "$LOG_FILE" 2>&1
+            --inventory "$INVENTORY" --target-slot "$_batch_slot" --strict-contract >> "$LOG_FILE" 2>&1
         _single_rc=$?
         if [ "$_single_rc" -eq 0 ] && font_size_ok "$_batch_target"; then
             _added=$((_added + 1))
