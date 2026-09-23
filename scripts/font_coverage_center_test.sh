@@ -148,7 +148,7 @@ sh -n "$ROOT/common/multiweight_mix_task.sh"
 # Composite coverage must carry the exact App remediation plan across the detached
 # worker/finalize boundary and must consume the rebuild intent before reboot.
 grep -Fq "printf 'coveragePlan=%s\\n' \"\$_coverage_plan\"" "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -Fq 'LUOSHU_COVERAGE_PLAN="$_coverage_plan"' "$ROOT/common/legacy_v14_4/mix_router.sh"
+grep -Fq 'LUOSHU_COVERAGE_PLAN="$_rmch_plan"' "$ROOT/common/legacy_v14_4/mix_router.sh"
 grep -Fq '"$REALMOD/config/font-payload-rebuild-pending.conf"' "$ROOT/common/legacy_v14_4/mix_router.sh"
 grep -Fq 'font-coverage-remediation-paths.txt' "$ROOT/common/legacy_v14_4/mix_router.sh"
 grep -Fq 'coverage_intent_abort_if_owned' "$ROOT/common/legacy_v14_4/mix_router.sh"
