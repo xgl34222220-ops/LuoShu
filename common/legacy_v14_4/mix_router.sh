@@ -27,6 +27,7 @@ REBOOT_CONF="$REALMOD/config/text_reboot_required.conf"
 LOG_FILE="$REALMOD/logs/fontswitch.log"
 FINALIZE_LOCK="$REALMOD/.mix-stage-finalize.lock"
 PRECOMMIT_STATE="$MIX_STAGE/.luoshu-precommit-ready.conf"
+MIX_POST_CACHE="$REALMOD/cache/mix-postprocess-v1"
 [ -f "$LEGACY/payload_clone.sh" ] && . "$LEGACY/payload_clone.sh"
 [ -f "$REALMOD/common/background_task.sh" ] && . "$REALMOD/common/background_task.sh"
 
@@ -492,6 +493,178 @@ committed_next_payload_matches_stage() {
     return 0
 }
 
+mix_post_hash_stream() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum | awk '{print $1}'
+    elif command -v toybox >/dev/null 2>&1; then
+        toybox sha256sum | awk '{print $1}'
+    else
+        cksum | awk '{print $1 "-" $2}'
+    fi
+}
+
+mix_post_checksum_files() (
+    set --
+    for _mpcf_file in "$@"; do
+        [ ! -f "$_mpcf_file" ] || set -- "$@" "$_mpcf_file"
+    done
+    [ "$#" -gt 0 ] || { printf 'none\n'; return 0; }
+    if command -v cksum >/dev/null 2>&1; then
+        cksum "$@" 2>/dev/null | mix_post_hash_stream
+    elif command -v busybox >/dev/null 2>&1; then
+        busybox cksum "$@" 2>/dev/null | mix_post_hash_stream
+    else
+        return 1
+    fi
+)
+
+mix_post_inventory_identity() {
+    mix_post_checksum_files \
+        "$REALMOD/config/device_font_inventory.json" \
+        "$REALMOD/config/device_font_partitions.conf" \
+        "$REALMOD/config/device_font_roots.conf"
+}
+
+mix_post_mapper_identity() {
+    mix_post_checksum_files \
+        "$REALMOD/common/hyperos_stage_complete.sh" \
+        "$REALMOD/common/coloros_stage_complete.sh" \
+        "$REALMOD/common/coverage_payload_remediate.sh" \
+        "$REALMOD/common/hyperos_metrics_batch.py" \
+        "$REALMOD/common/coloros_metrics_batch.py" \
+        "$REALMOD/common/font_metrics_normalize.py" \
+        "$REALMOD/common/rom_adapters.sh" \
+        "$REALMOD/common/hyperos_global.sh" \
+        "$REALMOD/common/legacy_v14_4/hyperos_full_coverage.sh"
+}
+
+mix_post_rom_identity() {
+    {
+        getprop ro.build.fingerprint 2>/dev/null
+        getprop ro.build.version.incremental 2>/dev/null
+        getprop ro.mi.os.version.name 2>/dev/null
+        getprop ro.miui.ui.version.name 2>/dev/null
+        getprop ro.build.version.oplusrom 2>/dev/null
+        getprop ro.build.version.opporom 2>/dev/null
+    } | mix_post_hash_stream
+}
+
+mix_post_cache_key() {
+    # Explicit Coverage repair is a forced rewrite transaction; never satisfy it
+    # from a normal-combination cache.
+    [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" != true ] || return 1
+    MIX_POST_COMPOSITE=$(read_value "$MIX_MANIFEST" compositeHash)
+    [ -n "$MIX_POST_COMPOSITE" ] || return 1
+    MIX_POST_INVENTORY=$(mix_post_inventory_identity) || return 1
+    MIX_POST_MAPPER=$(mix_post_mapper_identity) || return 1
+    MIX_POST_ROM=$(mix_post_rom_identity) || return 1
+    MIX_POST_KEY=$({
+        printf 'mix-postprocess-v1\n'
+        printf '%s\n' "$MIX_POST_COMPOSITE"
+        printf '%s\n' "$MIX_POST_INVENTORY"
+        printf '%s\n' "$MIX_POST_MAPPER"
+        printf '%s\n' "$MIX_POST_ROM"
+    } | mix_post_hash_stream)
+    [ -n "$MIX_POST_KEY" ]
+}
+
+mix_post_cache_restore() {
+    mix_post_cache_key || return 1
+    _mpcr_root="$MIX_POST_CACHE/$MIX_POST_KEY"
+    _mpcr_conf="$_mpcr_root/cache.conf"
+    _mpcr_tree="$_mpcr_root/tree"
+    [ -s "$_mpcr_conf" ] && [ -d "$_mpcr_tree/system/fonts" ] || return 1
+    [ "$(read_value "$_mpcr_conf" schema)" = mix-postprocess-v1 ] || return 1
+    [ "$(read_value "$_mpcr_conf" key)" = "$MIX_POST_KEY" ] || return 1
+    [ "$(read_value "$_mpcr_conf" compositeHash)" = "$MIX_POST_COMPOSITE" ] || return 1
+    [ "$(read_value "$_mpcr_conf" inventoryIdentity)" = "$MIX_POST_INVENTORY" ] || return 1
+    [ "$(read_value "$_mpcr_conf" mapperIdentity)" = "$MIX_POST_MAPPER" ] || return 1
+    [ "$(read_value "$_mpcr_conf" romIdentity)" = "$MIX_POST_ROM" ] || return 1
+
+    for _mpcr_part in $(luoshu_payload_partitions "$REALMOD"); do
+        _mpcr_src="$_mpcr_tree/$_mpcr_part/fonts"
+        [ -d "$_mpcr_src" ] || continue
+        mkdir -p "$MIX_STAGE/$_mpcr_part" 2>/dev/null || return 1
+        rm -rf "$MIX_STAGE/$_mpcr_part/fonts" 2>/dev/null || return 1
+        if ! cp -al "$_mpcr_src" "$MIX_STAGE/$_mpcr_part/fonts" 2>/dev/null; then
+            rm -rf "$MIX_STAGE/$_mpcr_part/fonts" 2>/dev/null || return 1
+            cp -af "$_mpcr_src" "$MIX_STAGE/$_mpcr_part/fonts" 2>/dev/null || return 1
+        fi
+    done
+    for _mpcr_meta in .luoshu-metrics-report.json .luoshu-metrics-covered.lst \
+                      .luoshu-coverage-remediation.conf .luoshu-coverage-preserved.tsv; do
+        [ ! -f "$_mpcr_tree/$_mpcr_meta" ] || cp -f "$_mpcr_tree/$_mpcr_meta" "$MIX_STAGE/$_mpcr_meta" 2>/dev/null || true
+    done
+    touch "$_mpcr_root" 2>/dev/null || true
+    printf '[%s] [MIX] postprocess cache hit key=%s composite=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$MIX_POST_KEY" "$MIX_POST_COMPOSITE" \
+        >> "$LOG_FILE" 2>/dev/null || true
+    return 0
+}
+
+mix_post_cache_prune() {
+    [ -d "$MIX_POST_CACHE" ] || return 0
+    _mpcp_kept=0
+    _mpcp_used=0
+    for _mpcp_dir in $(ls -1dt "$MIX_POST_CACHE"/* 2>/dev/null); do
+        [ -d "$_mpcp_dir" ] || continue
+        _mpcp_kb=$(du -sk "$_mpcp_dir" 2>/dev/null | awk 'NR==1 {print $1}')
+        case "$_mpcp_kb" in ''|*[!0-9]*) _mpcp_kb=0 ;; esac
+        _mpcp_next=$((_mpcp_used + _mpcp_kb))
+        if [ "$_mpcp_kept" -lt 3 ] && [ "$_mpcp_next" -le 786432 ] 2>/dev/null; then
+            _mpcp_kept=$((_mpcp_kept + 1))
+            _mpcp_used=$_mpcp_next
+        else
+            rm -rf "$_mpcp_dir" 2>/dev/null || true
+        fi
+    done
+}
+
+mix_post_cache_store() {
+    mix_post_cache_key || return 0
+    mkdir -p "$MIX_POST_CACHE" 2>/dev/null || return 0
+    _mpcs_root="$MIX_POST_CACHE/$MIX_POST_KEY"
+    _mpcs_stage="$MIX_POST_CACHE/.stage.$MIX_POST_KEY.$"
+    rm -rf "$_mpcs_stage" 2>/dev/null || true
+    mkdir -p "$_mpcs_stage/tree" 2>/dev/null || return 0
+    _mpcs_saved=0
+    for _mpcs_part in $(luoshu_payload_partitions "$REALMOD"); do
+        _mpcs_src="$MIX_STAGE/$_mpcs_part/fonts"
+        [ -d "$_mpcs_src" ] || continue
+        find "$_mpcs_src" -type f -print -quit 2>/dev/null | grep -q . || continue
+        mkdir -p "$_mpcs_stage/tree/$_mpcs_part" 2>/dev/null || { rm -rf "$_mpcs_stage"; return 0; }
+        if ! cp -al "$_mpcs_src" "$_mpcs_stage/tree/$_mpcs_part/fonts" 2>/dev/null; then
+            rm -rf "$_mpcs_stage/tree/$_mpcs_part/fonts" 2>/dev/null || true
+            cp -af "$_mpcs_src" "$_mpcs_stage/tree/$_mpcs_part/fonts" 2>/dev/null || {
+                rm -rf "$_mpcs_stage" 2>/dev/null || true
+                return 0
+            }
+        fi
+        _mpcs_saved=$((_mpcs_saved + 1))
+    done
+    [ "$_mpcs_saved" -gt 0 ] || { rm -rf "$_mpcs_stage"; return 0; }
+    for _mpcs_meta in .luoshu-metrics-report.json .luoshu-metrics-covered.lst \
+                      .luoshu-coverage-remediation.conf .luoshu-coverage-preserved.tsv; do
+        [ ! -f "$MIX_STAGE/$_mpcs_meta" ] || cp -f "$MIX_STAGE/$_mpcs_meta" "$_mpcs_stage/tree/$_mpcs_meta" 2>/dev/null || true
+    done
+    {
+        printf 'schema=mix-postprocess-v1\n'
+        printf 'key=%s\n' "$MIX_POST_KEY"
+        printf 'compositeHash=%s\n' "$MIX_POST_COMPOSITE"
+        printf 'inventoryIdentity=%s\n' "$MIX_POST_INVENTORY"
+        printf 'mapperIdentity=%s\n' "$MIX_POST_MAPPER"
+        printf 'romIdentity=%s\n' "$MIX_POST_ROM"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } >"$_mpcs_stage/cache.conf" 2>/dev/null || { rm -rf "$_mpcs_stage"; return 0; }
+    rm -rf "$_mpcs_root" 2>/dev/null || true
+    mv -f "$_mpcs_stage" "$_mpcs_root" 2>/dev/null || { rm -rf "$_mpcs_stage"; return 0; }
+    mix_post_cache_prune
+    printf '[%s] [MIX] postprocess cache stored key=%s partitions=%s\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$MIX_POST_KEY" "$_mpcs_saved" \
+        >> "$LOG_FILE" 2>/dev/null || true
+    return 0
+}
+
 precommit_ready() {
     [ -s "$PRECOMMIT_STATE" ] || return 1
     _pcr_request=$(read_value "$MIX_STAGE_STATE" requestId)
@@ -515,29 +688,36 @@ prepare_mix_stage_for_commit() {
     stage_has_fonts || return 1
     stage_generation_matches || return 1
 
-    mix_finalize_state_write running "正在完成 ROM 字体槽位对齐" "$(read_value "$REALMOD/config/axes_task.conf" task)"
-    complete_hyperos_stage || return 1
-    complete_coloros_stage || return 1
+    _prepare_task="$(read_value "$REALMOD/config/axes_task.conf" task)"
+    if mix_post_cache_restore; then
+        mix_finalize_state_write running "已复用完整 ROM 槽位与补齐缓存" "$_prepare_task" 96
+    else
+        mix_finalize_state_write running "正在完成 ROM 字体槽位对齐" "$_prepare_task" 92
+        complete_hyperos_stage || return 1
+        complete_coloros_stage || return 1
 
-    # A composite rebuild also starts from a clean text tree. Always converge it
-    # back to the scanned inventory before commit so changing fonts can never turn
-    # previously covered slots red again. Explicit repair mode additionally forces
-    # the requested paths to be rewritten.
-    _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
-    _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
-    if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
-        mix_finalize_state_write running "正在完成字体补齐批处理" "$(read_value "$REALMOD/config/axes_task.conf" task)"
-        [ -f "$_coverage_helper" ] && [ -s "$_coverage_plan" ] || return 1
-        LUOSHU_REAL_MODDIR="$REALMOD" \
-        LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-        LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
-            sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
-    elif [ -f "$_coverage_helper" ] && [ -s "$REALMOD/config/device_font_inventory.json" ]; then
-        mix_finalize_state_write running "正在校验并自动补齐本机安全字体槽位" "$(read_value "$REALMOD/config/axes_task.conf" task)"
-        LUOSHU_REAL_MODDIR="$REALMOD" \
-        LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-        LUOSHU_COVERAGE_PLAN= \
-            sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
+        # A composite rebuild also starts from a clean text tree. Always converge it
+        # back to the scanned inventory before commit so changing fonts can never turn
+        # previously covered slots red again. Explicit repair mode additionally forces
+        # the requested paths to be rewritten.
+        _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
+        _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
+        if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
+            mix_finalize_state_write running "正在完成字体补齐批处理" "$_prepare_task" 95
+            [ -f "$_coverage_helper" ] && [ -s "$_coverage_plan" ] || return 1
+            LUOSHU_REAL_MODDIR="$REALMOD" \
+            LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+            LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
+                sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
+        elif [ -f "$_coverage_helper" ] && [ -s "$REALMOD/config/device_font_inventory.json" ]; then
+            mix_finalize_state_write running "正在补齐剩余本机安全字体槽位" "$_prepare_task" 95
+            LUOSHU_REAL_MODDIR="$REALMOD" \
+            LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+            LUOSHU_COVERAGE_PLAN= \
+                sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || return 1
+        fi
+        mix_finalize_state_write running "正在保存组合字体快速复用缓存" "$_prepare_task" 97
+        mix_post_cache_store >/dev/null 2>&1 || true
     fi
 
     _pm_request=$(read_value "$MIX_STAGE_STATE" requestId)
