@@ -416,7 +416,7 @@ worker() {
             [ -n "$_base_message" ] || _base_message='完整复合字体正在后台生成'
             case "$_base_state" in
                 success)
-                    update_task "$_wanted" running '复合字体已生成，正在完成 ROM 槽位与补齐处理' 90 "$_child" ''
+                    update_task "$_wanted" running '复合字体已生成，正在核验本机扫描槽位并提交' 90 "$_child" ''
                     if ! prepare_compat_payload; then
                         update_task "$_wanted" failed "${FINALIZE_ERROR:-复合字体预提交处理失败}" 100 "$_child" "$(date +%s)"
                         rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
