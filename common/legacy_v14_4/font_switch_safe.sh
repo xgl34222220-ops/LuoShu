@@ -255,7 +255,9 @@ safe_switch_cache_restore() {
         _scr_restored=$((_scr_restored + 1))
     done
     [ "$_scr_restored" -gt 0 ] || return 1
-    [ ! -f "$_scr_root/tree/.luoshu-metrics-report.json" ] ||         cp -f "$_scr_root/tree/.luoshu-metrics-report.json" "$STAGE_PAYLOAD/.luoshu-metrics-report.json" 2>/dev/null || true
+    for _scr_meta in .luoshu-metrics-report.json .luoshu-coverage-remediation.conf .luoshu-coverage-preserved.tsv; do
+        [ ! -f "$_scr_root/tree/$_scr_meta" ] || cp -f "$_scr_root/tree/$_scr_meta" "$STAGE_PAYLOAD/$_scr_meta" 2>/dev/null || true
+    done
     printf '[%s] [SAFE-SWITCH] cache hit font=%s key=%s partitions=%s\n'         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$_scr_font" "$_scr_key" "$_scr_restored"         >> "$LOG_FILE" 2>/dev/null || true
     return 0
 }
@@ -320,7 +322,9 @@ safe_switch_cache_store() {
         _scs_saved=$((_scs_saved + 1))
     done
     [ "$_scs_saved" -gt 0 ] || { rm -rf "$_scs_stage" 2>/dev/null || true; return 1; }
-    [ ! -f "$STAGE_PAYLOAD/.luoshu-metrics-report.json" ] ||         cp -f "$STAGE_PAYLOAD/.luoshu-metrics-report.json" "$_scs_stage/tree/.luoshu-metrics-report.json" 2>/dev/null || true
+    for _scs_meta in .luoshu-metrics-report.json .luoshu-coverage-remediation.conf .luoshu-coverage-preserved.tsv; do
+        [ ! -f "$STAGE_PAYLOAD/$_scs_meta" ] || cp -f "$STAGE_PAYLOAD/$_scs_meta" "$_scs_stage/tree/$_scs_meta" 2>/dev/null || true
+    done
     _scs_identity=$(safe_source_identity "$_scs_file") || { rm -rf "$_scs_stage"; return 1; }
     {
         printf 'schema=%s\n' "$SWITCH_CACHE_SCHEMA"
