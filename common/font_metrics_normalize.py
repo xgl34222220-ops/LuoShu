@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import statistics
 import subprocess
 import tempfile
@@ -309,6 +310,7 @@ def normalize_font_metrics(
     monospaced: bool = False,
     target_contract: dict[str, Any] | None = None,
     enclose_outlines: bool = True,
+    precomputed_outline_extremes: tuple[float, float] | None = None,
 ) -> dict[str, object]:
     if "head" not in font or "hhea" not in font or "OS/2" not in font:
         raise MetricsError("字体缺少 head、hhea 或 OS/2 度量表")
@@ -343,7 +345,11 @@ def normalize_font_metrics(
     # head.yMax/yMin can be stale (composite builds recalc the box only at save time),
     # so enclose the true outline extremes as well; otherwise hhea/typo stay contracted
     # and ink still overflows the line box (标题压热度 / 标签少一截).
-    extremes = _outline_extremes(font) if enclose_outlines else None
+    extremes = (
+        precomputed_outline_extremes
+        if enclose_outlines and precomputed_outline_extremes is not None
+        else (_outline_extremes(font) if enclose_outlines else None)
+    )
     if extremes is not None:
         import math
         y_min = min(y_min, int(math.floor(extremes[0])))
@@ -406,6 +412,8 @@ def normalize_font_metrics(
         "targetAscent": int(target_contract.get("ascent", 0)) if target_contract else 0,
         "targetDescent": int(target_contract.get("descent", 0)) if target_contract else 0,
         "outlineEnclosure": bool(enclose_outlines),
+        "outlineBottom": float(extremes[0]) if extremes is not None else None,
+        "outlineTop": float(extremes[1]) if extremes is not None else None,
     }
 
 
@@ -434,6 +442,7 @@ def normalize_path(
     target_contract: dict[str, Any] | None = None,
     target_slot: str | None = None,
     strict_contract: bool = False,
+    precomputed_outline_extremes: tuple[float, float] | None = None,
 ) -> dict[str, object]:
     contract = (
         target_contract
@@ -447,6 +456,7 @@ def normalize_path(
             monospaced=monospaced,
             target_contract=contract,
             enclose_outlines=not strict_contract,
+            precomputed_outline_extremes=precomputed_outline_extremes,
         )
         atomic_save(font, output)
     finally:
@@ -455,10 +465,44 @@ def normalize_path(
     return report
 
 
+def _batch_contract_identity(contract: dict[str, Any] | None) -> tuple[object, ...]:
+    if contract is None:
+        return ("fixed-fallback",)
+    # normalize_font_metrics only consumes these stock line ratios for the binary
+    # output. Slot names are reporting metadata and must not force another full
+    # CJK outline walk when two Android slots share the same line contract.
+    return (
+        "inventory",
+        int(contract.get("upem", 0)),
+        int(contract.get("ascent", 0)),
+        int(contract.get("descent", 0)),
+    )
+
+
+def _batch_link_or_copy(source: Path, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(f".{output.name}.batch-cache.{os.getpid()}")
+    temporary.unlink(missing_ok=True)
+    try:
+        try:
+            os.link(source, temporary)
+        except OSError:
+            shutil.copyfile(source, temporary)
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def run_batch(manifest: Path, inventory: Path | None = None) -> int:
     """Normalize many fonts in one process. Lines: input<TAB>output[<TAB>mono[<TAB>slot]]."""
     failures = 0
     contracts: dict[str, dict[str, Any] | None] = {}
+    # Many ROM inventories expose dozens of aliases with identical hhea contracts.
+    # A full CJK outline walk is the expensive part of normalization. Reuse one
+    # already-normalized inode for identical source + contract combinations.
+    normalized_cache: dict[tuple[object, ...], tuple[Path, dict[str, object]]] = {}
+    source_outline_cache: dict[tuple[int, int, int, int], tuple[float, float]] = {}
     for raw in manifest.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -470,14 +514,46 @@ def run_batch(manifest: Path, inventory: Path | None = None) -> int:
         contract_key = target_slot or ""
         if contract_key not in contracts:
             contracts[contract_key] = load_inventory_contract(inventory, target_slot=target_slot)
+        contract = contracts[contract_key]
         try:
-            report = normalize_path(
-                source,
-                output,
-                monospaced,
-                inventory=inventory,
-                target_contract=contracts[contract_key],
+            stat = source.stat()
+            source_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+            binary_key = (
+                *source_key,
+                bool(monospaced),
+                *_batch_contract_identity(contract),
             )
+            cached = normalized_cache.get(binary_key)
+            if cached is not None and cached[0].is_file():
+                _batch_link_or_copy(cached[0], output)
+                report = dict(cached[1])
+                report.update({
+                    "status": "ok",
+                    "input": str(source),
+                    "output": str(output),
+                    "batchCacheHit": True,
+                    "targetSlot": contract.get("slot", "") if contract else "",
+                    "targetBuildKey": contract.get("buildKey", "") if contract else "",
+                    "targetUpem": int(contract.get("upem", 0)) if contract else 0,
+                    "targetAscent": int(contract.get("ascent", 0)) if contract else 0,
+                    "targetDescent": int(contract.get("descent", 0)) if contract else 0,
+                })
+            else:
+                report = normalize_path(
+                    source,
+                    output,
+                    monospaced,
+                    inventory=inventory,
+                    target_contract=contract,
+                    precomputed_outline_extremes=source_outline_cache.get(source_key),
+                )
+                report["batchCacheHit"] = False
+                if source_key not in source_outline_cache:
+                    bottom = report.get("outlineBottom")
+                    top = report.get("outlineTop")
+                    if isinstance(bottom, (int, float)) and isinstance(top, (int, float)):
+                        source_outline_cache[source_key] = (float(bottom), float(top))
+                normalized_cache[binary_key] = (output, dict(report))
             print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
         except Exception as error:
             failures += 1

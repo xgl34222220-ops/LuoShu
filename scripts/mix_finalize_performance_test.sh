@@ -66,6 +66,17 @@ ok grep -q "mix_stage manifest '正在生成安全启动清单' 98" "$ROOT/commo
 no grep -q 'cp -af "$SYSTEM_FONTS_DIR/." "$PAYLOAD_STAGE/"' "$ROOT/common/font_mix.sh"
 ok grep -q '_progress_message=' "$ROOT/common/weighted_mix_task.sh"
 ok grep -q '完整复合字体后台进程已退出' "$ROOT/common/weighted_mix_task.sh"
+ok grep -q 'MIX_POST_CACHE=' "$ROOT/common/legacy_v14_4/mix_router.sh"
+ok grep -q 'mix_post_cache_restore' "$ROOT/common/legacy_v14_4/mix_router.sh"
+ok grep -q 'mix_post_cache_store' "$ROOT/common/legacy_v14_4/mix_router.sh"
+ok grep -q '已复用完整 ROM 槽位与补齐缓存' "$ROOT/common/legacy_v14_4/mix_router.sh"
+ok grep -q '"$_prepare_task" 92' "$ROOT/common/legacy_v14_4/mix_router.sh"
+ok grep -q '"$_prepare_task" 95' "$ROOT/common/legacy_v14_4/mix_router.sh"
+ok grep -q '"$_prepare_task" 97' "$ROOT/common/legacy_v14_4/mix_router.sh"
+ok grep -q 'normalized_cache' "$ROOT/common/font_metrics_normalize.py"
+ok grep -q 'batchCacheHit' "$ROOT/common/font_metrics_normalize.py"
+ok grep -q 'source_outline_cache' "$ROOT/common/font_metrics_normalize.py"
+ok grep -q 'precomputed_outline_extremes' "$ROOT/common/font_metrics_normalize.py"
 
 # The import action must fit the full Chinese label on one line.
 ok grep -q 'else -> 148.dp' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/NativeImportOverlay.kt"

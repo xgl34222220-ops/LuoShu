@@ -151,8 +151,17 @@ internal fun LuoShuViewModel.toLogsUiState(): LogsUiState {
         .filter { it.active }
         .map { it.kind }
         .toSet()
+    val committedMixRaceRecovered =
+        snapshot.taskType == "mix" &&
+            snapshot.taskState == "success" &&
+            snapshot.rebootRequired &&
+            snapshot.taskMessage.contains("负载已提交")
     val history = parseTaskLogItems(normalized).filterNot { item ->
-        item.active && item.kind in activeKinds
+        (item.active && item.kind in activeKinds) ||
+            (committedMixRaceRecovered &&
+                item.kind == TaskKind.MIX &&
+                item.phase == TaskPhase.FAILED &&
+                item.message.contains("复合字体预提交处理失败"))
     }
     val tasks = mergeTaskItems(current, history)
 

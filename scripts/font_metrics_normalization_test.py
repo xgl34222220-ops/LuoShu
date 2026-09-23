@@ -20,7 +20,7 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen  # noqa: E402
 from fontTools.ttLib import TTFont  # noqa: E402
 
 from composite_font import build  # noqa: E402
-from font_metrics_normalize import normalize_path  # noqa: E402
+from font_metrics_normalize import normalize_path, run_batch  # noqa: E402
 
 
 def rectangle(x0: int, y0: int, x1: int, y1: int):
@@ -129,6 +129,51 @@ with tempfile.TemporaryDirectory() as directory:
         assert inventory_report["targetSlot"] == "MiSansVF.ttf"
     finally:
         inventory_font.close()
+
+    # Batch remediation must normalize identical source + stock line contracts once.
+    # The second slot should become a hard link to the first normalized result on
+    # the same filesystem instead of walking every CJK outline again.
+    batch_inventory = temp / "batch-inventory.json"
+    shared_metrics = {"upem": 1000, "hhea": {"ascent": 1080, "descent": -280}}
+    batch_inventory.write_text(
+        json.dumps(
+            {
+                "schema": "device-font-inventory-v1",
+                "inventoryRevision": 1,
+                "state": "ready",
+                "buildKey": "",
+                "slots": {
+                    "/system/fonts/SharedA.ttf": {
+                        "slotName": "SharedA.ttf",
+                        "path": "/system/fonts/SharedA.ttf",
+                        "metrics": shared_metrics,
+                    },
+                    "/product/fonts/SharedB.ttf": {
+                        "slotName": "SharedB.ttf",
+                        "path": "/product/fonts/SharedB.ttf",
+                        "metrics": shared_metrics,
+                    },
+                },
+                "mainSlot": {
+                    "slotName": "SharedA.ttf",
+                    "path": "/system/fonts/SharedA.ttf",
+                    "metrics": shared_metrics,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    batch_a = temp / "batch-a.ttf"
+    batch_b = temp / "batch-b.ttf"
+    batch_manifest = temp / "batch.tsv"
+    batch_manifest.write_text(
+        f"{source}\t{batch_a}\t-\t/system/fonts/SharedA.ttf\n"
+        f"{source}\t{batch_b}\t-\t/product/fonts/SharedB.ttf\n",
+        encoding="utf-8",
+    )
+    assert run_batch(batch_manifest, batch_inventory) == 0
+    assert batch_a.is_file() and batch_b.is_file()
+    assert batch_a.stat().st_ino == batch_b.stat().st_ino
 
     clock_normalized = temp / "clock-normalized.ttf"
     clock_report = normalize_path(

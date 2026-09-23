@@ -142,6 +142,30 @@ status_json() {
     [ -n "$_task_state" ] || _task_state='idle'
     [ -n "$_task_message" ] || _task_message='暂无后台任务'
 
+    # Compatibility repair for the legacy composite finalization race: an older
+    # wrapper could persist a precommit failure after the base monitor had already
+    # committed the exact next-boot payload. Only repair this one known signature,
+    # and only when the durable payload/reboot marker are newer than this task.
+    if [ "$_task_type" = mix ] && [ "$_task_state" = failed ] && \
+       [ "$_task_message" = '复合字体预提交处理失败' ] && [ "$_active" = mix ]; then
+        _mix_next_state="$MODDIR/config/font-payload-next.conf"
+        _mix_next_font="$(read_prop "$_mix_next_state" font)"
+        _mix_next_phase="$(read_prop "$_mix_next_state" state)"
+        _mix_next_time="$(read_prop "$_mix_next_state" time)"
+        _mix_task_started="$(read_prop "$_task_file" started)"
+        _mix_reboot_font="$(read_prop "$TEXT_REBOOT_REQUIRED" font)"
+        case "$_mix_next_time" in ''|*[!0-9]*) _mix_next_time=0 ;; esac
+        case "$_mix_task_started" in ''|*[!0-9]*) _mix_task_started=0 ;; esac
+        if [ -d "$MODDIR/.luoshu-payload-next" ] && \
+           [ "$_mix_next_font" = mix ] && [ "$_mix_next_phase" = prepared ] && \
+           [ "$_mix_reboot_font" = mix ] && \
+           { [ "$_mix_task_started" -eq 0 ] 2>/dev/null || [ "$_mix_next_time" -ge "$_mix_task_started" ] 2>/dev/null; }; then
+            _task_state=success
+            _task_message='复合字体负载已提交，完整重启后生效'
+            _task_progress=100
+        fi
+    fi
+
     _reboot_required=false
     [ -f "$TEXT_REBOOT_REQUIRED" ] && _reboot_required=true
 

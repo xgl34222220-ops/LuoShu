@@ -49,6 +49,25 @@ grep -q '^requestId=request-a$' "$MODULE/config/font-payload-next.conf"
 grep -q '^compositeHash=composite-a$' "$MODULE/config/font-payload-next.conf"
 test ! -e "$MODULE/.mix-stage-finalize.lock"
 
+# Regression: the base monitor may win the finalize race before the outer weighted
+# task calls prepare-finalize. The already committed generation must be accepted
+# as idempotent success, never rewritten as "复合字体预提交处理失败".
+cat > "$MODULE/config/axes_task.conf" <<'EOF_AXES_RACE'
+task=axes-race
+state=running
+message=复合字体已生成，正在完成 ROM 槽位与补齐处理
+cjk=CjkA
+latin=LatinA
+digit=DigitA
+started=1
+percent=90
+EOF_AXES_RACE
+MODDIR="$MODULE" sh "$ROUTER" prepare-finalize > "$TMP/prepare-after-commit.out" 2>&1
+grep -q '"status":"ok"' "$TMP/prepare-after-commit.out"
+! grep -q '复合字体预提交处理失败' "$TMP/prepare-after-commit.out"
+grep -q '^font=mix$' "$MODULE/config/font-payload-next.conf"
+grep -q '^requestId=request-a$' "$MODULE/config/font-payload-next.conf"
+
 # Recover the narrow interrupted state: directory rename completed, state write
 # did not. The preserved stage metadata is sufficient to finish without rebuild.
 rm -f "$MODULE/config/font-payload-next.conf"

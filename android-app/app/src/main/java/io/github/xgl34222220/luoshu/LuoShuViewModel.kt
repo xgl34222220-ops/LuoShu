@@ -1,6 +1,7 @@
 package io.github.xgl34222220.luoshu
 
 import android.app.Application
+import android.os.PowerManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -149,7 +150,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     private var refreshJob: Job? = null
     private var logsJob: Job? = null
     private var mixConfigJob: Job? = null
+    private var resumeReconcileJob: Job? = null
     private val foreground = MutableStateFlow(true)
+    private var fontTaskWakeLock: PowerManager.WakeLock? = null
     private var pendingForceRefresh = false
     private var prewarmRequested = false
 
@@ -216,7 +219,52 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun setForeground(visible: Boolean) {
+        val wasVisible = foreground.value
         foreground.value = visible
+        if (visible && !wasVisible &&
+            (operationBusy || mixState.busy || snapshot.taskState in setOf("queued", "running"))
+        ) {
+            reconcileTaskAfterResume()
+        }
+    }
+
+    private fun acquireFontTaskWakeLock() {
+        if (fontTaskWakeLock?.isHeld == true) return
+        val power = getApplication<Application>().getSystemService(PowerManager::class.java) ?: return
+        fontTaskWakeLock = power.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "LuoShu:FontTask",
+        ).apply {
+            setReferenceCounted(false)
+            acquire(12L * 60L * 1_000L)
+        }
+    }
+
+    private fun releaseFontTaskWakeLock() {
+        fontTaskWakeLock?.let { lock ->
+            if (lock.isHeld) runCatching { lock.release() }
+        }
+        fontTaskWakeLock = null
+    }
+
+    private fun reconcileTaskAfterResume() {
+        if (resumeReconcileJob?.isActive == true) return
+        resumeReconcileJob = viewModelScope.launch {
+            try {
+                val result = RootShell.exec(
+                    "sh ${RootShell.quote(bridge)} status",
+                    timeoutMs = 12_000L,
+                )
+                if (result.code != 0) return@launch
+                val parsed = parseSnapshot(result.stdout)
+                if (!parsed.rootGranted) return@launch
+                snapshot = parsed
+                rebootRequired = parsed.rebootRequired
+                resumePendingTask(parsed)
+            } finally {
+                resumeReconcileJob = null
+            }
+        }
     }
 
     fun refresh() {
@@ -550,26 +598,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         operationMessage = if (fontId == "default") "正在准备恢复系统字体…" else "正在验证并应用字体…"
         viewModelScope.launch {
             try {
-                if (fontId != "default") {
-                    val validation = RootShell.exec(
-                        "sh ${RootShell.quote(bridge)} validate ${RootShell.quote(fontId)}",
-                        timeoutMs = 35_000L,
-                    )
-                    if (validation.code != 0) error(validation.stderr.ifBlank { "字体验证失败" })
-                    val validationJson = firstJson(validation.stdout)
-                    if (validationJson.optString("status") != "ok" ||
-                        validationJson.optJSONObject("data")?.optBoolean("valid", true) == false
-                    ) {
-                        error(
-                            validationJson.optString(
-                                "message",
-                                validationJson.optJSONObject("data")?.optString("error", "字体文件不可用")
-                                    ?: "字体文件不可用",
-                            ),
-                        )
-                    }
-                }
-
+                // The detached safe-switch worker performs the same validation and uses
+                // the validation cache. Do not block the UI on a duplicate foreground
+                // validation before the real switch task even starts.
                 val start = RootShell.exec(
                     "sh ${RootShell.quote(bridge)} switch_start ${RootShell.quote(fontId)}",
                     timeoutMs = 20_000L,
@@ -697,6 +728,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         if (watchedTaskId == taskId) return
         watchedTaskId = taskId
         operationBusy = true
+        acquireFontTaskWakeLock()
         try {
             val result = waitForTask("switch_status", taskId, timeoutSeconds = 390) { data ->
                 operationMessage = data.optString("message", "正在处理字体…")
@@ -736,12 +768,14 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         } finally {
             operationBusy = false
             watchedTaskId = ""
+            releaseFontTaskWakeLock()
         }
     }
 
     private suspend fun watchMixTask(taskId: String) {
         if (watchedTaskId == taskId) return
         watchedTaskId = taskId
+        acquireFontTaskWakeLock()
         mixState = mixState.copy(
             busy = true,
             taskId = taskId,
@@ -800,7 +834,13 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             finishMixFailure(error.message ?: "复合字体生成失败")
         } finally {
             watchedTaskId = ""
+            releaseFontTaskWakeLock()
         }
+    }
+
+    override fun onCleared() {
+        releaseFontTaskWakeLock()
+        super.onCleared()
     }
 
     private suspend fun waitForTask(
