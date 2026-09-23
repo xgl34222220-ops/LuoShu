@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import statistics
 import subprocess
 import tempfile
@@ -455,34 +456,286 @@ def normalize_path(
     return report
 
 
+def _load_batch_inventory(path: Path | None) -> dict[str, Any] | None:
+    inventory = path or default_inventory_path()
+    try:
+        payload = json.loads(inventory.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict) or payload.get("schema") != INVENTORY_SCHEMA or payload.get("state") != "ready":
+        return None
+    try:
+        revision = int(payload.get("inventoryRevision", 0))
+    except (TypeError, ValueError):
+        return None
+    if revision != 1:
+        return None
+    current_key = _device_build_key()
+    recorded_key = str(payload.get("buildKey", ""))
+    if current_key and recorded_key != current_key:
+        return None
+    return payload
+
+
+def _batch_contract_from_payload(
+    payload: dict[str, Any] | None,
+    target_slot: str | None,
+    inventory: Path | None,
+) -> dict[str, Any] | None:
+    if payload is None:
+        return None
+    selected_slot = payload.get("mainSlot")
+    if target_slot:
+        slots = payload.get("slots")
+        selected_slot = slots.get(target_slot) if isinstance(slots, dict) else None
+    if not isinstance(selected_slot, dict):
+        return None
+    metrics = selected_slot.get("metrics")
+    if not isinstance(metrics, dict):
+        return None
+    hhea = metrics.get("hhea")
+    if not isinstance(hhea, dict):
+        return None
+    try:
+        upem = int(metrics.get("upem", 0))
+        ascent = int(hhea.get("ascent", 0))
+        descent = int(hhea.get("descent", 0))
+    except (TypeError, ValueError):
+        return None
+    if upem <= 0 or ascent <= 0 or descent >= 0:
+        return None
+    ascent_ratio = ascent / upem
+    descent_ratio = abs(descent) / upem
+    if not (0.40 <= ascent_ratio <= 1.60 and 0.05 <= descent_ratio <= 0.90):
+        return None
+    return {
+        "source": "inventory",
+        "inventory": str(inventory or default_inventory_path()),
+        "buildKey": str(payload.get("buildKey", "")),
+        "slot": str(selected_slot.get("slotName", selected_slot.get("path", target_slot or ""))),
+        "slotPath": str(target_slot or selected_slot.get("path", "")),
+        "upem": upem,
+        "ascent": ascent,
+        "descent": descent,
+        "ascentRatio": ascent_ratio,
+        "descentRatio": descent_ratio,
+    }
+
+
+def _atomic_link_or_copy(source: Path, output: Path) -> None:
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(f".{output.name}.batch.{os.getpid()}")
+    temporary.unlink(missing_ok=True)
+    try:
+        try:
+            os.link(source, temporary)
+        except OSError:
+            shutil.copyfile(source, temporary)
+        if temporary.stat().st_size < 1024:
+            raise MetricsError("批量归一化缓存输出异常为空")
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _fast_contract_normalize(
+    source: Path,
+    output: Path,
+    contract: dict[str, Any] | None,
+) -> dict[str, object]:
+    """Fast per-slot path for coverage aliases.
+
+    Coverage aliases only need their stock line contract rewritten. Re-scanning every
+    glyph outline and recompiling glyf/CFF for 50-200 physical slots made one font
+    switch take minutes. Keep outline tables byte-for-byte and touch only head-adjacent
+    line metric tables. HyperOS-specific slots still go through hyperos_metrics_batch.py.
+    """
+    if not source.is_file() or source.stat().st_size < 12:
+        raise MetricsError(f"字体源文件不可用：{source}")
+    face = _pick_face(source)
+    kwargs: dict[str, object] = {
+        "lazy": True,
+        "recalcTimestamp": False,
+        "recalcBBoxes": False,
+    }
+    if face >= 0:
+        kwargs["fontNumber"] = face
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{output.name}.", dir=output.parent)
+    os.close(descriptor)
+    temporary = Path(temporary_name)
+    try:
+        with source.open("rb") as stream:
+            font = TTFont(stream, **kwargs)
+            try:
+                if "head" not in font or "hhea" not in font or "OS/2" not in font:
+                    raise MetricsError("字体缺少 head、hhea 或 OS/2 度量表")
+                upem = int(font["head"].unitsPerEm)
+                if upem < 16:
+                    raise MetricsError("字体 unitsPerEm 无效")
+
+                if contract is not None:
+                    ascent_ratio = float(contract["ascentRatio"])
+                    descent_ratio = float(contract["descentRatio"])
+                    metrics_source = "inventory"
+                else:
+                    ascent_ratio = TYPO_ASCENDER_RATIO
+                    descent_ratio = TYPO_DESCENDER_RATIO
+                    metrics_source = "fixed-fallback"
+
+                ascender = _clamp_signed(int(round(upem * ascent_ratio)))
+                descender_abs = int(round(upem * descent_ratio))
+                descender = _clamp_signed(-descender_abs)
+
+                hhea = font["hhea"]
+                hhea.ascent = ascender
+                hhea.descent = descender
+                hhea.lineGap = 0
+
+                os2 = font["OS/2"]
+                _promote_os2_for_typo_metrics(os2)
+                os2.sTypoAscender = ascender
+                os2.sTypoDescender = descender
+                os2.sTypoLineGap = 0
+                os2.fsSelection |= 1 << 7
+                os2.usWinAscent = _clamp_unsigned(min(ascender, int(round(upem * WIN_ASCENT_CAP_RATIO))))
+                os2.usWinDescent = _clamp_unsigned(min(descender_abs, int(round(upem * WIN_DESCENT_CAP_RATIO))))
+
+                if "MVAR" in font:
+                    del font["MVAR"]
+
+                # Accessing metric tables must not make fontTools serialize huge CJK
+                # outline tables again. Drop decoded outline objects so save() copies
+                # the original reader bytes.
+                for tag in ("glyf", "CFF ", "CFF2", "gvar"):
+                    font.tables.pop(tag, None)
+
+                font.save(temporary, reorderTables=False)
+            finally:
+                font.close()
+
+        if temporary.stat().st_size < 1024:
+            raise MetricsError("归一化字体输出异常为空")
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+    return {
+        "status": "ok",
+        "input": str(source),
+        "output": str(output),
+        "face": face,
+        "upem": upem,
+        "ascender": ascender,
+        "descender": descender,
+        "lineGap": 0,
+        "metricsSource": metrics_source,
+        "targetSlot": contract.get("slot", "") if contract else "",
+        "targetBuildKey": contract.get("buildKey", "") if contract else "",
+        "targetUpem": int(contract.get("upem", 0)) if contract else 0,
+        "targetAscent": int(contract.get("ascent", 0)) if contract else 0,
+        "targetDescent": int(contract.get("descent", 0)) if contract else 0,
+        "fastContract": True,
+    }
+
+
 def run_batch(manifest: Path, inventory: Path | None = None) -> int:
-    """Normalize many fonts in one process. Lines: input<TAB>output[<TAB>mono[<TAB>slot]]."""
+    """Normalize many fonts in one process.
+
+    Lines: input<TAB>output[<TAB>mono[<TAB>slot]].
+    Identical source/stock-metric combinations are generated once and hard-linked
+    to every matching physical slot. This turns the old O(slots * huge-font-save)
+    path into O(distinct metric contracts).
+    """
     failures = 0
+    inventory_payload = _load_batch_inventory(inventory)
     contracts: dict[str, dict[str, Any] | None] = {}
+    generated: dict[tuple[object, ...], tuple[Path, dict[str, object]]] = {}
+
     for raw in manifest.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
+        line = raw.rstrip("\r\n")
+        if not line.strip() or line.lstrip().startswith("#"):
             continue
         parts = line.split("\t")
+        if len(parts) < 2:
+            failures += 1
+            print(json.dumps({"status": "error", "message": "批量清单行缺少输入或输出路径"},
+                             ensure_ascii=False, separators=(",", ":")), file=os.sys.stderr)
+            continue
         source, output = Path(parts[0]), Path(parts[1])
         monospaced = len(parts) > 2 and parts[2] == "mono"
         target_slot = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
         contract_key = target_slot or ""
         if contract_key not in contracts:
-            contracts[contract_key] = load_inventory_contract(inventory, target_slot=target_slot)
-        try:
-            report = normalize_path(
-                source,
-                output,
-                monospaced,
-                inventory=inventory,
-                target_contract=contracts[contract_key],
+            contracts[contract_key] = _batch_contract_from_payload(
+                inventory_payload, target_slot, inventory
             )
+        contract = contracts[contract_key]
+
+        try:
+            stat = source.stat()
+            if contract is not None:
+                metric_signature: tuple[object, ...] = (
+                    int(contract["upem"]),
+                    int(contract["ascent"]),
+                    int(contract["descent"]),
+                )
+            else:
+                metric_signature = ("fallback", TYPO_ASCENDER_RATIO, TYPO_DESCENDER_RATIO)
+            cache_key = (
+                stat.st_dev,
+                stat.st_ino,
+                stat.st_size,
+                stat.st_mtime_ns,
+                monospaced,
+                *metric_signature,
+            )
+
+            cached = generated.get(cache_key)
+            if cached is not None:
+                cached_output, cached_report = cached
+                _atomic_link_or_copy(cached_output, output)
+                report = dict(cached_report)
+                report.update({
+                    "status": "ok",
+                    "input": str(source),
+                    "output": str(output),
+                    "targetSlot": contract.get("slot", "") if contract else "",
+                    "targetBuildKey": contract.get("buildKey", "") if contract else "",
+                    "targetUpem": int(contract.get("upem", 0)) if contract else 0,
+                    "targetAscent": int(contract.get("ascent", 0)) if contract else 0,
+                    "targetDescent": int(contract.get("descent", 0)) if contract else 0,
+                    "batchReuse": True,
+                })
+            elif monospaced:
+                # Monospace normalization intentionally edits hmtx glyph metrics;
+                # keep the full existing path for these rare aliases.
+                report = normalize_path(
+                    source,
+                    output,
+                    monospaced=True,
+                    inventory=inventory,
+                    target_contract=contract,
+                    target_slot=target_slot,
+                    strict_contract=True,
+                )
+                generated[cache_key] = (output, dict(report))
+            else:
+                report = _fast_contract_normalize(source, output, contract)
+                generated[cache_key] = (output, dict(report))
+
             print(json.dumps(report, ensure_ascii=False, separators=(",", ":")))
         except Exception as error:
             failures += 1
             output.unlink(missing_ok=True)
-            print(json.dumps({"status": "error", "input": str(source), "message": str(error) or error.__class__.__name__}, ensure_ascii=False, separators=(",", ":")), file=os.sys.stderr)
+            print(json.dumps(
+                {"status": "error", "input": str(source), "output": str(output),
+                 "message": str(error) or error.__class__.__name__},
+                ensure_ascii=False, separators=(",", ":")
+            ), file=os.sys.stderr)
     return 2 if failures else 0
 
 
