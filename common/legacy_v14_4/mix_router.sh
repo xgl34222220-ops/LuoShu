@@ -536,7 +536,9 @@ mix_post_mapper_identity() {
         "$REALMOD/common/font_metrics_normalize.py" \
         "$REALMOD/common/rom_adapters.sh" \
         "$REALMOD/common/hyperos_global.sh" \
-        "$REALMOD/common/legacy_v14_4/hyperos_full_coverage.sh"
+        "$REALMOD/common/legacy_v14_4/hyperos_full_coverage.sh" \
+        "$REALMOD/common/legacy_v14_4/payload_clone.sh" \
+        "$REALMOD/common/legacy_v14_4/mix_router.sh"
 }
 
 mix_post_rom_identity() {
