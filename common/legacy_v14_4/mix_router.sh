@@ -698,6 +698,41 @@ prepare_helper_error() {
     printf '%s\n' "$_phe_line"
 }
 
+run_mix_coverage_helper() {
+    _rmch_plan="$1"
+    _rmch_fallback="$2"
+    _rmch_task="$(read_value "$REALMOD/config/axes_task.conf" task)"
+    [ -n "$_rmch_task" ] || _rmch_task=unknown
+    _rmch_out="$REALMOD/config/.mix-coverage-result.$_rmch_task"
+    rm -f "$_rmch_out" 2>/dev/null || true
+
+    if [ -n "$_rmch_plan" ]; then
+        LUOSHU_REAL_MODDIR="$REALMOD" \
+        LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+        LUOSHU_COVERAGE_PLAN="$_rmch_plan" \
+            sh "$REALMOD/common/coverage_payload_remediate.sh" "$MIX_STAGE" mix mix \
+                >"$_rmch_out" 2>&1
+    else
+        LUOSHU_REAL_MODDIR="$REALMOD" \
+        LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+        LUOSHU_COVERAGE_PLAN= \
+            sh "$REALMOD/common/coverage_payload_remediate.sh" "$MIX_STAGE" mix mix \
+                >"$_rmch_out" 2>&1
+    fi
+    _rmch_rc=$?
+    cat "$_rmch_out" >> "$LOG_FILE" 2>/dev/null || true
+    if [ "$_rmch_rc" -ne 0 ]; then
+        _rmch_message=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_rmch_out" 2>/dev/null | tail -n1)
+        [ -n "$_rmch_message" ] || _rmch_message=$(tail -n1 "$_rmch_out" 2>/dev/null | tr -d '\r')
+        [ -n "$_rmch_message" ] || _rmch_message="$_rmch_fallback"
+        PREPARE_ERROR="$_rmch_message"
+        rm -f "$_rmch_out" 2>/dev/null || true
+        return 1
+    fi
+    rm -f "$_rmch_out" 2>/dev/null || true
+    return 0
+}
+
 prepare_mix_stage_for_commit() {
     # The base v14 monitor and the weighted/auto wrapper can observe generator
     # success at the same time. If the monitor wins and atomically commits the
@@ -738,22 +773,16 @@ prepare_mix_stage_for_commit() {
                 prepare_fail '字体补齐计划或补齐组件缺失'
                 return 1
             }
-            LUOSHU_REAL_MODDIR="$REALMOD" \
-            LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-            LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
-                sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || {
-                    prepare_fail "$(prepare_helper_error '字体槽位补齐批处理失败')"
-                    return 1
-                }
+            if ! run_mix_coverage_helper "$_coverage_plan" '字体补齐批处理失败'; then
+                prepare_fail "${PREPARE_ERROR:-字体补齐批处理失败}"
+                return 1
+            fi
         elif [ -f "$_coverage_helper" ] && [ -s "$REALMOD/config/device_font_inventory.json" ]; then
             mix_finalize_state_write running "正在补齐剩余本机安全字体槽位" "$_prepare_task" 95
-            LUOSHU_REAL_MODDIR="$REALMOD" \
-            LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-            LUOSHU_COVERAGE_PLAN= \
-                sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1 || {
-                    prepare_fail "$(prepare_helper_error '字体槽位补齐批处理失败')"
-                    return 1
-                }
+            if ! run_mix_coverage_helper '' '本机安全字体槽位补齐失败'; then
+                prepare_fail "${PREPARE_ERROR:-本机安全字体槽位补齐失败}"
+                return 1
+            fi
         fi
         mix_finalize_state_write running "正在保存组合字体快速复用缓存" "$_prepare_task" 97
         mix_post_cache_store >/dev/null 2>&1 || true
