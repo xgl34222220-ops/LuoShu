@@ -1,6 +1,5 @@
 #!/bin/sh
 set -eu
-echo "coverage-test: start"
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-remediate)
@@ -60,7 +59,6 @@ scan_family_weights() { printf 'regular,bold\n'; }
 EOF
 
 # 1) No-plan behavior fills every safe missing UI slot.
-echo "coverage-test: case1"
 LUOSHU_REAL_MODDIR="$MOD" LUOSHU_PUBLIC_DIR="$TMP/public" \
     sh "$ROOT/common/coverage_payload_remediate.sh" "$STAGE" direct Demo > "$TMP/out1"
 grep -q '"status":"ok"' "$TMP/out1"
@@ -73,7 +71,6 @@ grep -q '^added=3$' "$STAGE/.luoshu-coverage-remediation.conf"
 grep -q '^preserved=2$' "$STAGE/.luoshu-coverage-remediation.conf"
 
 # 2) Plan mode forces requested existing slots to be rewritten.
-echo "coverage-test: case2"
 PLAN="$MOD/config/font-coverage-remediation-paths.txt"
 printf '/system/fonts/A.ttf\n' > "$PLAN"
 LUOSHU_REAL_MODDIR="$MOD" LUOSHU_PUBLIC_DIR="$TMP/public" LUOSHU_COVERAGE_PLAN="$PLAN" \
@@ -86,7 +83,6 @@ grep -q '^rewritten=1$' "$STAGE/.luoshu-coverage-remediation.conf"
 grep -q '^added=1$' "$STAGE/.luoshu-coverage-remediation.conf"
 
 # 2b) If ROM stage completion already normalized the requested slot, remediation
-echo "coverage-test: case2b"
 # must not run the same large font through fontTools a second time.
 printf '/system/fonts/A.ttf\n' > "$PLAN"
 printf '/system/fonts/A.ttf\n' > "$STAGE/.luoshu-metrics-covered.lst"
@@ -100,7 +96,6 @@ grep -q '^rewritten=0$' "$STAGE/.luoshu-coverage-remediation.conf"
 rm -f "$STAGE/.luoshu-metrics-covered.lst"
 
 # 3) Stale plans fail closed.
-echo "coverage-test: case3"
 printf '/system/fonts/DoesNotExist.ttf\n' > "$PLAN"
 set +e
 LUOSHU_REAL_MODDIR="$MOD" LUOSHU_PUBLIC_DIR="$TMP/public" LUOSHU_COVERAGE_PLAN="$PLAN" \
@@ -111,7 +106,6 @@ test "$rc" -ne 0
 grep -q '"status":"error"' "$TMP/out3"
 
 # 4) Composite remediation rewrites requested slots and backfills all other safe
-echo "coverage-test: case4"
 # inventory slots removed by the clean stage, including nested OEM roots.
 MIX="$MOD/.luoshu-mix-stage"
 mkdir -p "$MIX/system/fonts/.luoshu-font-store"
@@ -131,7 +125,6 @@ grep -q '^added=3$' "$MIX/.luoshu-coverage-remediation.conf"
 grep -q '^preserved=2$' "$MIX/.luoshu-coverage-remediation.conf"
 
 # 5) One bad row from the batch normalizer must not erase every successful row.
-echo "coverage-test: case5"
 # The shell retries only that row and, if metric normalization still cannot emit
 # it, falls back to the real font source so the coverage transaction still lands.
 PARTIAL="$MOD/.luoshu-payload-stage.partial"
@@ -150,7 +143,6 @@ grep -q '^fallback=1$' "$PARTIAL/.luoshu-coverage-remediation.conf"
 grep -q '^failed=0$' "$PARTIAL/.luoshu-coverage-remediation.conf"
 
 # Production wiring and one-reboot convergence contract.
-echo "coverage-test: wiring"
 grep -q 'LUOSHU_COVERAGE_REMEDIATE:-0' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'coverage_payload_remediate.sh' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'coverageRemediate=' "$ROOT/common/legacy_v14_4/mix_router.sh"
