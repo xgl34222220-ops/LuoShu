@@ -92,10 +92,10 @@ prepare_compat_payload() {
     _pcp_out="$CONFIG_DIR/.compat-prepare.$"
     rm -f "$_pcp_out" 2>/dev/null || true
     if command -v timeout >/dev/null 2>&1; then
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" timeout 300 sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
+        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" timeout 120 sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
         _pcp_rc=$?
     elif command -v toybox >/dev/null 2>&1 && toybox timeout --help >/dev/null 2>&1; then
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" toybox timeout 300 sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
+        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" toybox timeout 120 sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
         _pcp_rc=$?
     else
         MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
@@ -104,7 +104,12 @@ prepare_compat_payload() {
     cat "$_pcp_out" >>"$LOG_FILE" 2>/dev/null || true
     if [ "$_pcp_rc" -ne 0 ] || ! grep -q '"status":"ok"' "$_pcp_out" 2>/dev/null; then
         FINALIZE_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_pcp_out" 2>/dev/null | tail -n1)
-        [ -n "$FINALIZE_ERROR" ] || FINALIZE_ERROR='复合字体预提交处理失败'
+        [ -n "$FINALIZE_ERROR" ] || {
+            case "$_pcp_rc" in
+                124) FINALIZE_ERROR='复合字体预提交超过 120 秒，已自动终止，不再继续空等' ;;
+                *) FINALIZE_ERROR='复合字体预提交处理失败' ;;
+            esac
+        }
         rm -f "$_pcp_out" 2>/dev/null || true
         return 1
     fi
@@ -117,10 +122,10 @@ finalize_compat_payload() {
     _fcp_out="$CONFIG_DIR/.compat-finalize.$"
     rm -f "$_fcp_out" 2>/dev/null || true
     if command -v timeout >/dev/null 2>&1; then
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" timeout 180 sh "$REAL_MIX_ROUTER" finalize >"$_fcp_out" 2>&1
+        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" timeout 60 sh "$REAL_MIX_ROUTER" finalize >"$_fcp_out" 2>&1
         _fcp_rc=$?
     elif command -v toybox >/dev/null 2>&1 && toybox timeout --help >/dev/null 2>&1; then
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" toybox timeout 180 sh "$REAL_MIX_ROUTER" finalize >"$_fcp_out" 2>&1
+        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" toybox timeout 60 sh "$REAL_MIX_ROUTER" finalize >"$_fcp_out" 2>&1
         _fcp_rc=$?
     else
         MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$REAL_MIX_ROUTER" finalize >"$_fcp_out" 2>&1
@@ -130,7 +135,7 @@ finalize_compat_payload() {
     if [ "$_fcp_rc" -ne 0 ] || ! grep -q '"status":"ok"' "$_fcp_out" 2>/dev/null; then
         FINALIZE_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_fcp_out" 2>/dev/null | tail -n1)
         [ -n "$FINALIZE_ERROR" ] || {
-            case "$_fcp_rc" in 124) FINALIZE_ERROR='提交下一启动字体负载超时' ;; *) FINALIZE_ERROR='下一启动字体负载提交失败' ;; esac
+            case "$_fcp_rc" in 124) FINALIZE_ERROR='提交下一启动字体负载超过 60 秒，已自动终止' ;; *) FINALIZE_ERROR='下一启动字体负载提交失败' ;; esac
         }
         rm -f "$_fcp_out" 2>/dev/null || true
         return 1
