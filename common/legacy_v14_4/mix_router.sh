@@ -625,7 +625,9 @@ mix_post_cache_store() {
     mix_post_cache_key || return 0
     mkdir -p "$MIX_POST_CACHE" 2>/dev/null || return 0
     _mpcs_root="$MIX_POST_CACHE/$MIX_POST_KEY"
-    _mpcs_stage="$MIX_POST_CACHE/.stage.$MIX_POST_KEY.$"
+    _mpcs_task=$(read_value "$REALMOD/config/axes_task.conf" task)
+    [ -n "$_mpcs_task" ] || _mpcs_task=unknown
+    _mpcs_stage="$MIX_POST_CACHE/.stage.$MIX_POST_KEY.$_mpcs_task"
     rm -rf "$_mpcs_stage" 2>/dev/null || true
     mkdir -p "$_mpcs_stage/tree" 2>/dev/null || return 0
     _mpcs_saved=0
