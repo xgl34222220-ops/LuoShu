@@ -837,14 +837,15 @@ switch_font() {
         # re-run inventory completion before commit even for a normal font switch.
         # Existing complete caches are cheap here: the remediator only fills slots
         # that are actually absent.
-        if [ -f "$COVERAGE_REMEDIATE_HELPER" ] && [ -s "$CONFIG_DIR/device_font_inventory.json" ]; then
+        _coverage_remediate_helper="${COVERAGE_REMEDIATE_HELPER:-$MODDIR/common/coverage_payload_remediate.sh}"
+        if [ -f "$_coverage_remediate_helper" ] && [ -s "$CONFIG_DIR/device_font_inventory.json" ]; then
             if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
                 progress 82 '正在按补齐计划重建本机安全字体槽位'
             else
                 progress 82 '正在校验并自动补齐本机安全字体槽位'
             fi
             if ! LUOSHU_REAL_MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" \
-                sh "$COVERAGE_REMEDIATE_HELPER" "$STAGE_PAYLOAD" direct "$_font" >> "$LOG_FILE" 2>&1; then
+                sh "$_coverage_remediate_helper" "$STAGE_PAYLOAD" direct "$_font" >> "$LOG_FILE" 2>&1; then
                 safe_error '本机安全字体槽位自动补齐失败，当前启动字体未被改动'
                 return 1
             fi
