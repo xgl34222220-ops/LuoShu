@@ -311,7 +311,7 @@ if [ "$PLAN_ENABLED" = true ] && [ "$_matched" -ne "$_requested" ] 2>/dev/null; 
     log_line "补齐计划与当前 inventory 不一致：requested=$_requested matched=$_matched"
 fi
 
-if [ "$_failed" -eq 0 ] && [ "$_planned" -gt 0 ]; then
+if [ "$_planned" -gt 0 ] && { [ "$PLAN_ENABLED" != true ] || [ "$_failed" -eq 0 ]; }; then
     PYTHONHOME="$PYROOT" \
     PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
     LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
@@ -364,15 +364,26 @@ if [ "$_failed" -eq 0 ] && [ "$_planned" -gt 0 ]; then
     fi
 fi
 
+_degraded=false
 if [ "$_failed" -ne 0 ]; then
-    # A batch failure must never leave a partially normalized next-boot tree.
-    while IFS="$_tab" read -r _batch_source _batch_target _batch_mono _batch_slot; do
-        [ -z "$_batch_target" ] || rm -f "$_batch_target" 2>/dev/null || true
-    done < "$BATCH"
-    _added=0
-    log_line "补齐失败：seen=$_seen requested=$_requested matched=$_matched planned=$_planned rewritten=$_rewritten added=$_added fallback=$_fallback existing=$_existing preserved=$_preserved failed=$_failed"
-    json_error "字体覆盖补齐有 $_failed 个槽位写入失败，已拒绝提交半成品"
-    exit 1
+    if [ "$PLAN_ENABLED" = true ]; then
+        # Explicit "一键补齐" is transactional: the requested repair set must either
+        # land completely or not at all.
+        while IFS="$_tab" read -r _batch_source _batch_target _batch_mono _batch_slot; do
+            [ -z "$_batch_target" ] || rm -f "$_batch_target" 2>/dev/null || true
+        done < "$BATCH"
+        _added=0
+        log_line "补齐失败：seen=$_seen requested=$_requested matched=$_matched planned=$_planned rewritten=$_rewritten added=$_added fallback=$_fallback existing=$_existing preserved=$_preserved failed=$_failed"
+        json_error "字体覆盖补齐有 $_failed 个槽位写入失败，已拒绝提交半成品"
+        exit 1
+    fi
+
+    # Automatic coverage is a best-effort safety net during a normal font switch.
+    # One exotic/readonly/invalid inventory slot must never turn a fully generated
+    # font into a 10-minute total failure. Keep every successful slot, leave the
+    # failed slot to the stock ROM, and surface it in the summary for Coverage UI.
+    _degraded=true
+    log_line "自动补齐部分降级：保留成功槽位并继续提交，seen=$_seen planned=$_planned added=$_added fallback=$_fallback failed=$_failed"
 fi
 
 if [ -s "$PRESERVED_TMP" ]; then
@@ -398,7 +409,8 @@ fi
     printf 'fallback=%s\n' "$_fallback"
     printf 'existing=%s\n' "$_existing"
     printf 'preserved=%s\n' "$_preserved"
-    printf 'failed=0\n'
+    printf 'failed=%s\n' "$_failed"
+    printf 'degraded=%s\n' "$_degraded"
     printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
 } > "$SUMMARY_TMP" 2>/dev/null || {
     json_error '无法保存字体覆盖补齐摘要'
@@ -410,8 +422,8 @@ mv -f "$SUMMARY_TMP" "$SUMMARY" 2>/dev/null || {
 }
 chmod 0644 "$SUMMARY" 2>/dev/null || true
 
-log_line "补齐完成：mode=$MODE font=$FAMILY seen=$_seen requested=$_requested matched=$_matched planned=$_planned rewritten=$_rewritten added=$_added fallback=$_fallback existing=$_existing preserved=$_preserved"
-printf '{"status":"ok","data":{"mode":"%s","font":"%s","inventory":%s,"requested":%s,"matched":%s,"planned":%s,"rewritten":%s,"added":%s,"fallback":%s,"existing":%s,"preserved":%s}}\n' \
+log_line "补齐完成：mode=$MODE font=$FAMILY seen=$_seen requested=$_requested matched=$_matched planned=$_planned rewritten=$_rewritten added=$_added fallback=$_fallback existing=$_existing preserved=$_preserved failed=$_failed degraded=$_degraded"
+printf '{"status":"ok","data":{"mode":"%s","font":"%s","inventory":%s,"requested":%s,"matched":%s,"planned":%s,"rewritten":%s,"added":%s,"fallback":%s,"existing":%s,"preserved":%s,"failed":%s,"degraded":%s}}\n' \
     "$MODE" "$(printf '%s' "$FAMILY" | sed 's/\\/\\\\/g; s/"/\\"/g')" \
-    "$_seen" "$_requested" "$_matched" "$_planned" "$_rewritten" "$_added" "$_fallback" "$_existing" "$_preserved"
+    "$_seen" "$_requested" "$_matched" "$_planned" "$_rewritten" "$_added" "$_fallback" "$_existing" "$_preserved" "$_failed" "$_degraded"
 exit 0
