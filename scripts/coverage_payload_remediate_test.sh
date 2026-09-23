@@ -147,7 +147,7 @@ grep -q 'LUOSHU_COVERAGE_REMEDIATE:-0' "$ROOT/common/legacy_v14_4/font_switch_sa
 grep -q 'coverage_payload_remediate.sh' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'coverageRemediate=' "$ROOT/common/legacy_v14_4/mix_router.sh"
 grep -q 'coveragePlan=' "$ROOT/common/legacy_v14_4/mix_router.sh"
-grep -Fq 'LUOSHU_COVERAGE_PLAN="$_coverage_plan"' "$ROOT/common/legacy_v14_4/mix_router.sh"
+grep -Fq 'LUOSHU_COVERAGE_PLAN="$_rmch_plan"' "$ROOT/common/legacy_v14_4/mix_router.sh"
 grep -q 'font-payload-rebuild-pending.conf' "$ROOT/common/legacy_v14_4/mix_router.sh"
 grep -q 'coverage_intent_abort_if_owned' "$ROOT/common/legacy_v14_4/mix_router.sh"
 grep -q 'font-coverage-remediation-paths.txt' "$ROOT/common/legacy_v14_4/mix_router.sh"
