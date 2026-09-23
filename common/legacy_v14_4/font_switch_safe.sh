@@ -49,6 +49,7 @@ case "$SWITCH_CACHE_MAX_KB" in ''|*[!0-9]*) SWITCH_CACHE_MAX_KB=786432 ;; esac
 PREWARM_LOCK="$MODDIR/.safe-switch-prewarm.lock"
 LOCK_HELD=false
 PREWARM_LOCK_HELD=false
+SAFE_CACHE_COVERAGE_COMPLETE=false
 
 export MODULE_DIR LUOSHU_PUBLIC_DIR="$USER_ROOT"
 [ -f "$LEGACY_DIR/util_functions.sh" ] && . "$LEGACY_DIR/util_functions.sh"
@@ -225,6 +226,7 @@ safe_switch_cache_key() {
 
 safe_switch_cache_restore() {
     _scr_file="$1"; _scr_font="$2"
+    SAFE_CACHE_COVERAGE_COMPLETE=false
     _scr_key=$(safe_switch_cache_key "$_scr_file" "$_scr_font") || return 1
     _scr_root="$SWITCH_CACHE_ROOT/$_scr_key"
     _scr_conf="$_scr_root/cache.conf"
@@ -235,6 +237,8 @@ safe_switch_cache_restore() {
     [ "$(read_state_value "$_scr_conf" inventoryIdentity)" = "$(safe_inventory_identity)" ] || return 1
     [ "$(read_state_value "$_scr_conf" rom)" = "$(safe_rom_identity)" ] || return 1
     [ "$(read_state_value "$_scr_conf" mapperIdentity)" = "${SAFE_STAGE_ENGINE:-$(safe_mapper_identity)}" ] || return 1
+    SAFE_CACHE_COVERAGE_COMPLETE=$(read_state_value "$_scr_conf" coverageComplete)
+    [ "$SAFE_CACHE_COVERAGE_COMPLETE" = true ] || SAFE_CACHE_COVERAGE_COMPLETE=false
 
     _scr_restored=0
     for _scr_part in $(safe_partition_list); do
@@ -325,6 +329,12 @@ safe_switch_cache_store() {
         printf 'inventoryIdentity=%s\n' "$(safe_inventory_identity)"
         printf 'rom=%s\n' "$(safe_rom_identity)"
         printf 'mapperIdentity=%s\n' "${SAFE_STAGE_ENGINE:-$(safe_mapper_identity)}"
+        _scs_coverage=false
+        if [ -s "$STAGE_PAYLOAD/.luoshu-coverage-remediation.conf" ] && \
+           [ "$(read_state_value "$STAGE_PAYLOAD/.luoshu-coverage-remediation.conf" failed)" = 0 ]; then
+            _scs_coverage=true
+        fi
+        printf 'coverageComplete=%s\n' "$_scs_coverage"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$_scs_stage/cache.conf" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
     mkdir -p "$SWITCH_CACHE_ROOT" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
@@ -412,7 +422,7 @@ wait_for_prewarm_cache() {
     type luoshu_font_lock_active >/dev/null 2>&1 || return 1
     luoshu_font_lock_active "$PREWARM_LOCK" >/dev/null 2>&1 || return 1
     _wfpc_steps=0
-    while [ "$_wfpc_steps" -lt 16 ]; do
+    while [ "$_wfpc_steps" -lt 4 ]; do
         sleep 0.25 2>/dev/null || sleep 1
         safe_switch_cache_ready "$_wfpc_file" "$_wfpc_font" && return 0
         luoshu_font_lock_active "$PREWARM_LOCK" >/dev/null 2>&1 || break
@@ -759,6 +769,11 @@ prewarm_font() {
     elif [ "${IS_COLOROS:-false}" = true ]; then
         stage_coloros_complete || return 0
     fi
+    _prewarm_coverage="$MODDIR/common/coverage_payload_remediate.sh"
+    if [ -f "$_prewarm_coverage" ] && [ -s "$CONFIG_DIR/device_font_inventory.json" ]; then
+        LUOSHU_REAL_MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" LUOSHU_COVERAGE_PLAN= \
+            sh "$_prewarm_coverage" "$STAGE_PAYLOAD" direct "$_font" >> "$LOG_FILE" 2>&1 || return 0
+    fi
     stage_verify "$_font" || return 0
     safe_switch_cache_store "$_source" "$_font" >/dev/null 2>&1 || return 0
     printf '[%s] [SAFE-SWITCH] prewarm ready font=%s\n' \
@@ -804,8 +819,11 @@ switch_font() {
         SYSTEM_FONTS_DIR="$STAGE_PAYLOAD/system/fonts"
         export PAYLOAD_ROOT SYSTEM_FONTS_DIR
         _cache_restored=false
+        _cache_coverage_complete=false
+        _coverage_refreshed=false
         if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" != 1 ] && safe_switch_cache_restore "$_source" "$_font"; then
             _cache_restored=true
+            _cache_coverage_complete="${SAFE_CACHE_COVERAGE_COMPLETE:-false}"
             progress 80 '已复用本机字体对齐缓存'
         else
             # A failed restore may already have populated several partitions.
@@ -838,25 +856,33 @@ switch_font() {
         # Existing complete caches are cheap here: the remediator only fills slots
         # that are actually absent.
         _coverage_remediate_helper="${COVERAGE_REMEDIATE_HELPER:-$MODDIR/common/coverage_payload_remediate.sh}"
-        if [ -f "$_coverage_remediate_helper" ] && [ -s "$CONFIG_DIR/device_font_inventory.json" ]; then
+        _need_coverage=false
+        if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ] || \
+           [ "$_cache_restored" != true ] || [ "$_cache_coverage_complete" != true ]; then
+            _need_coverage=true
+        fi
+        if [ "$_need_coverage" = true ] && [ -f "$_coverage_remediate_helper" ] && [ -s "$CONFIG_DIR/device_font_inventory.json" ]; then
             if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
                 progress 82 '正在按补齐计划重建本机安全字体槽位'
             else
-                progress 82 '正在校验并自动补齐本机安全字体槽位'
+                progress 82 '正在完成本机安全字体槽位缓存'
             fi
             if ! LUOSHU_REAL_MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" \
                 sh "$_coverage_remediate_helper" "$STAGE_PAYLOAD" direct "$_font" >> "$LOG_FILE" 2>&1; then
                 safe_error '本机安全字体槽位自动补齐失败，当前启动字体未被改动'
                 return 1
             fi
+            _coverage_refreshed=true
         elif [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
             safe_error '字体覆盖补齐组件或本机扫描清单缺失，当前启动字体未被改动'
             return 1
+        elif [ "$_cache_restored" = true ] && [ "$_cache_coverage_complete" = true ]; then
+            progress 84 '已复用完整字体槽位缓存，跳过重复补齐'
         fi
         progress 86 '正在校验下一启动字体负载'
         stage_verify "$_font" || { safe_error '新字体负载校验失败，当前启动字体未被改动'; return 1; }
-        if [ "$_cache_restored" != true ]; then
-            progress 90 '正在保存已校验的本机字体对齐缓存'
+        if [ "$_cache_restored" != true ] || [ "$_coverage_refreshed" = true ]; then
+            progress 90 '正在保存完整字体切换缓存'
             safe_switch_cache_store "$_source" "$_font" >/dev/null 2>&1 || true
         fi
     fi
