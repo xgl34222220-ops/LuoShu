@@ -504,10 +504,11 @@ mix_post_hash_stream() {
 }
 
 mix_post_checksum_files() (
-    set --
+    _mpcf_files=''
     for _mpcf_file in "$@"; do
-        [ ! -f "$_mpcf_file" ] || set -- "$@" "$_mpcf_file"
+        [ ! -f "$_mpcf_file" ] || _mpcf_files="$_mpcf_files $_mpcf_file"
     done
+    set -- $_mpcf_files
     [ "$#" -gt 0 ] || { printf 'none\n'; return 0; }
     if command -v cksum >/dev/null 2>&1; then
         cksum "$@" 2>/dev/null | mix_post_hash_stream
