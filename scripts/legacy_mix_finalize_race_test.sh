@@ -242,4 +242,32 @@ test -z "$(find "$MIX" -path '*/fonts/*' -type f -print -quit)"
 grep -q 'clear_mix_text_payload "$MIX_STAGE"' "$ROUTER"
 grep -q 'font_runtime_legacy_v14_4.conf' "$ROOT/boot-completed.sh"
 
-echo 'Composite finalization is idempotent, generation-bound, and repeated mixes drop every old text slot.'
+# The safe switch may already have produced the exact next-boot payload for this
+# mix request. prepare-finalize must recognize it and skip rebuilding/normalizing
+# the compatibility stage a second time.
+rm -rf "$MODULE/.luoshu-mix-stage"
+mkdir -p "$MODULE/.luoshu-payload-next/system/fonts"
+printf 'already-prepared\n' > "$MODULE/.luoshu-payload-next/system/fonts/Ready.ttf"
+cat > "$MODULE/config/mix-stage-next.conf" <<'EOF_REUSE_STAGE'
+requestId=request-reuse
+cjk=CjkReuse
+latin=LatinReuse
+digit=DigitReuse
+previousFont=mix
+previousLegacy=true
+time=5
+EOF_REUSE_STAGE
+cat > "$MODULE/config/font-payload-next.conf" <<'EOF_REUSE_NEXT'
+state=prepared
+font=mix
+requestId=request-reuse
+previousFont=mix
+previousLegacy=true
+time=5
+EOF_REUSE_NEXT
+MODDIR="$MODULE" sh "$ROUTER" prepare-finalize > "$TMP/prepare-reuse.out" 2>&1
+grep -q '"status":"ok"' "$TMP/prepare-reuse.out"
+grep -q 'next_mix_payload_ready_for_request' "$ROUTER"
+grep -q 'LUOSHU_MIX_REQUEST_ID' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+
+echo 'Composite finalization is idempotent, generation-bound, and repeated mixes reuse the already-mapped next payload instead of rebuilding it.'
