@@ -77,7 +77,9 @@ class FontStageChainTest(unittest.TestCase):
                         SWITCH_CACHE_ROOT=str(self.config / 'safe-switch-cache'),
                         SWITCH_VALIDATION_CACHE_ROOT=str(self.config / 'safe-switch-validation'),
                         SWITCH_CACHE_SCHEMA=self.schema, SWITCH_CACHE_MAX_ENTRIES='3',
-                        SWITCH_CACHE_MAX_KB='786432', LOG_FILE=str(self.module / 'logs/fontswitch.log'),
+                        SWITCH_CACHE_MAX_KB='786432',
+                        COVERAGE_REMEDIATE_HELPER=str(self.module / 'common/coverage_payload_remediate.sh'),
+                        LOG_FILE=str(self.module / 'logs/fontswitch.log'),
                         SOURCE=str(self.source), IS_HYPEROS='false', IS_COLOROS='false',
                         PROGRESS_FILE='', LIBRARY=str(self.library), PRIVATE=str(PRIVATE),
                         CP_BIN=shutil.which('cp'), WORK=str(self.root))

@@ -29,24 +29,41 @@ ROWS
   font_metrics_normalize.py)
     shift
     batch=''
+    input=''
+    output=''
+    slot=''
     while [ "$#" -gt 0 ]; do
       case "$1" in
         --batch) batch="$2"; shift 2 ;;
+        --input) input="$2"; shift 2 ;;
+        --output) output="$2"; shift 2 ;;
+        --target-slot) slot="$2"; shift 2 ;;
+        --inventory) shift 2 ;;
+        --strict-contract) shift ;;
         *) shift ;;
       esac
     done
-    tab=$(printf '\t')
-    rc=0
-    while IFS="$tab" read -r source output mono slot; do
-      [ -n "$source" ] && [ -n "$output" ] || continue
-      if [ -n "${LUOSHU_TEST_BATCH_FAIL_SLOT:-}" ] && [ "$slot" = "$LUOSHU_TEST_BATCH_FAIL_SLOT" ]; then
-        rc=2
-        continue
-      fi
-      mkdir -p "${output%/*}"
-      cp -f "$source" "$output"
-    done < "$batch"
-    exit "$rc"
+    if [ -n "$batch" ]; then
+      tab=$(printf '\t')
+      rc=0
+      while IFS="$tab" read -r source target mono row_slot; do
+        [ -n "$source" ] && [ -n "$target" ] || continue
+        if [ -n "${LUOSHU_TEST_BATCH_FAIL_SLOT:-}" ] && [ "$row_slot" = "$LUOSHU_TEST_BATCH_FAIL_SLOT" ]; then
+          rc=2
+          continue
+        fi
+        mkdir -p "${target%/*}"
+        cp -f "$source" "$target"
+      done < "$batch"
+      exit "$rc"
+    fi
+    [ -n "$input" ] && [ -n "$output" ] || exit 2
+    if [ -n "${LUOSHU_TEST_BATCH_FAIL_SLOT:-}" ] && [ "$slot" = "$LUOSHU_TEST_BATCH_FAIL_SLOT" ]; then
+      exit 2
+    fi
+    mkdir -p "${output%/*}"
+    cp -f "$input" "$output"
+    exit 0
     ;;
   *) exit 2 ;;
 esac
@@ -157,8 +174,8 @@ grep -q 'font_metrics_normalize.py' "$ROOT/common/coverage_payload_remediate.sh"
 grep -q 'PLAN_ENABLED' "$ROOT/common/coverage_payload_remediate.sh"
 grep -q -- '--batch' "$ROOT/common/coverage_payload_remediate.sh"
 grep -q 'METRICS_COVERED=' "$ROOT/common/coverage_payload_remediate.sh"
-grep -q '正在校验并自动补齐本机安全字体槽位' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
-grep -q '正在校验并自动补齐本机安全字体槽位' "$ROOT/common/legacy_v14_4/mix_router.sh"
+grep -q '正在按本机扫描清单映射全部可替换字体槽位' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+grep -q '正在按本机扫描清单映射全部可替换字体槽位' "$ROOT/common/legacy_v14_4/mix_router.sh"
 grep -q '单槽度量归一化失败，已回退真实字体源' "$ROOT/common/coverage_payload_remediate.sh"
 
 sh -n "$ROOT/common/coverage_payload_remediate.sh"

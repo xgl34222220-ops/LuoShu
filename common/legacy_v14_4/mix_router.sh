@@ -475,9 +475,30 @@ precommit_ready() {
     return 0
 }
 
+next_mix_payload_ready_for_request() {
+    [ -d "$NEXT_PAYLOAD" ] && [ -s "$NEXT_STATE" ] && [ -s "$MIX_STAGE_STATE" ] || return 1
+    _nmr_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    [ -n "$_nmr_request" ] || return 1
+    [ "$(read_value "$NEXT_STATE" font)" = mix ] || return 1
+    [ "$(read_value "$NEXT_STATE" requestId)" = "$_nmr_request" ] || return 1
+    find "$NEXT_PAYLOAD" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \)         -print -quit 2>/dev/null | grep -q .
+}
+
 prepare_mix_stage_for_commit() {
     PRECOMMIT_ERROR=''
     precommit_ready && return 0
+
+    # v14.2/v14.3 composite workers finish by calling the safe switch core first.
+    # That core already maps the validated device inventory, applies OEM metric
+    # alignment and writes .luoshu-payload-next. If it belongs to this exact mix
+    # request, a second ROM/coverage pass is both redundant and extremely slow.
+    if next_mix_payload_ready_for_request; then
+        _pm_task="$(read_value "$REALMOD/config/axes_task.conf" task)"
+        mix_finalize_state_write ready '本机扫描槽位已在生成阶段一次映射完成，正在提交' "$_pm_task" 98
+        printf '[%s] [MIX] reuse prepared next payload request=%s; skip duplicate precommit mapping\n'             "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)"             "$(read_value "$MIX_STAGE_STATE" requestId)" >>"$LOG_FILE" 2>/dev/null || true
+        return 0
+    fi
+
     stage_has_fonts || {
         precommit_fail '复合字体生成结果为空，未提交任何下一启动负载'
         return 1
@@ -517,7 +538,7 @@ prepare_mix_stage_for_commit() {
             return 1
         fi
     elif [ -f "$_coverage_helper" ] && [ -s "$REALMOD/config/device_font_inventory.json" ]; then
-        mix_finalize_state_write running "正在快速补齐本机安全字体槽位" "$_pm_task"
+        mix_finalize_state_write running "正在按本机扫描清单映射全部可替换字体槽位" "$_pm_task"
         if ! LUOSHU_REAL_MODDIR="$REALMOD" \
             LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
             LUOSHU_COVERAGE_PLAN= \

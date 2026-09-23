@@ -160,6 +160,7 @@ record_preserved() {
 
 font_size_ok() {
     _file="$1"
+    [ -f "$_file" ] || return 1
     _size=$(stat -c '%s' "$_file" 2>/dev/null)
     case "$_size" in ''|*[!0-9]*) _size=$(wc -c < "$_file" 2>/dev/null | tr -d '[:space:]') ;; esac
     case "$_size" in ''|*[!0-9]*) return 1 ;; esac

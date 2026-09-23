@@ -652,6 +652,13 @@ prepare_next_payload() {
         printf 'font=%s\n' "$_font"
         printf 'previousFont=%s\n' "$_previous"
         printf 'previousLegacy=%s\n' "$_previous_legacy"
+        # Composite generation already builds the complete next-boot tree through
+        # this safe switch. Stamp the originating mix request so the compatibility
+        # router can recognize this exact payload and must not rebuild/"补齐" it
+        # a second time during prepare-finalize.
+        if [ "$_font" = mix ] && [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ]; then
+            printf 'requestId=%s\n' "$LUOSHU_MIX_REQUEST_ID"
+        fi
         if [ -n "$_direct_proof" ]; then
             printf 'provenanceSchema=font-provenance-v1\n'
             printf 'proofKind=direct\n'
@@ -864,10 +871,10 @@ switch_font() {
         elif [ "$_cache_restored" = true ]; then
             progress 82 '已复用完整本机字体槽位缓存'
         elif [ -f "$COVERAGE_REMEDIATE_HELPER" ] && [ -s "$CONFIG_DIR/device_font_inventory.json" ]; then
-            progress 82 '正在快速补齐本机安全字体槽位'
+            progress 82 '正在按本机扫描清单映射全部可替换字体槽位'
             LUOSHU_REAL_MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" LUOSHU_COVERAGE_PLAN= \
                 sh "$COVERAGE_REMEDIATE_HELPER" "$STAGE_PAYLOAD" direct "$_font" >> "$LOG_FILE" 2>&1 || {
-                    printf '[%s] [SAFE-SWITCH] optional coverage completion failed; keep ROM core mapping\n' \
+                    printf '[%s] [SAFE-SWITCH] inventory slot mapping had optional failures; keep verified ROM core mapping\n' \
                         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" >> "$LOG_FILE" 2>/dev/null || true
                 }
         fi
