@@ -1,5 +1,6 @@
 #!/system/bin/sh
 # Coverage remediation for the physical-safe next-boot payload.
+# Validation branch marker: coverage persistence candidate.
 #
 # This helper never touches the live .luoshu-payload. It receives an isolated
 # stage, joins it with the validated device inventory, fills only missing safe
