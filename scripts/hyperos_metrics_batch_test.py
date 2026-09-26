@@ -15,10 +15,11 @@ sys.path.insert(0, str(ROOT / 'common'))
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
+from fontTools.ttLib.tables.TupleVariation import TupleVariation
 import hyperos_metrics_batch as batch
 
 
-def font_file(path, top=700):
+def font_file(path, top=700, variable_axes=None):
     pen = TTGlyphPen(None)
     pen.moveTo((0, 0)); pen.lineTo((500, 0)); pen.lineTo((500, top)); pen.closePath()
     fb = FontBuilder(1000, isTTF=True)
@@ -29,7 +30,16 @@ def font_file(path, top=700):
     fb.setupHorizontalHeader(ascent=1600, descent=-600)
     fb.setupOS2(sTypoAscender=1600, sTypoDescender=-600, usWinAscent=1700, usWinDescent=700)
     fb.setupNameTable({'familyName': 'Fixture', 'styleName': 'Regular'})
-    fb.setupPost(); fb.setupMaxp(); fb.save(path)
+    fb.setupPost(); fb.setupMaxp()
+    if variable_axes:
+        fb.font['glyf']['A'] = fb.font['glyf']['.notdef']
+        fb.setupFvar(variable_axes, [])
+        variations = []
+        if any(axis[0] == 'wght' for axis in variable_axes):
+            variations = [TupleVariation({'wght': (0, 1, 1)},
+                          [(0, 0), (100, 0), (100, 0)] + [(0, 0)] * 4)]
+        fb.setupGvar({'.notdef': [], 'A': variations})
+    fb.save(path)
 
 
 def slot(ascent=1100, descent=-350, win=1400, typo=1080, use_typo=True, head=None, upem=1000):
@@ -133,6 +143,97 @@ class HyperOSMetricsTest(unittest.TestCase):
         batch.build(self.module, self.stage, ['Roboto-Regular.ttf', '350.ttf'])
         with TTFont(self.fonts / '350.ttf') as font:
             self.assertEqual(font['head'].yMax, 820)
+
+    def test_variable_anchor_instances_missing_weights_once_per_weight(self):
+        store = self.fonts / '.luoshu-font-store'
+        store.mkdir()
+        source = store / 'regular.font'
+        font_file(source, variable_axes=[('wght', 100, 400, 900, 'Weight'),
+                                        ('wdth', 75, 100, 125, 'Width')])
+        self.inventory({'/system/fonts/Roboto-Regular.ttf': slot(),
+                        '/system/fonts/Roboto-Medium.ttf': slot(),
+                        '/product/fonts/Roboto-Medium.ttf': slot(),
+                        '/system/fonts/Roboto-Bold.ttf': slot()})
+        shutil.copyfile(source, self.fonts / 'Roboto-Medium.ttf')
+        with patch.object(batch.font_instance, 'materialize',
+                          wraps=batch.font_instance.materialize) as materialize:
+            result = batch.build(self.module, self.stage,
+                                 ['Roboto-Regular.ttf', 'Roboto-Medium.ttf', 'Roboto-Bold.ttf'])
+        self.assertEqual(result['mapped'], 4)
+        self.assertEqual(materialize.call_count, 2)
+        for relative, weight, xmax in (('system/fonts/Roboto-Medium.ttf', 500, 520),
+                                       ('product/fonts/Roboto-Medium.ttf', 500, 520),
+                                       ('system/fonts/Roboto-Bold.ttf', 700, 560)):
+            with TTFont(self.stage / relative) as font:
+                self.assertNotIn('fvar', font)
+                self.assertEqual(font['OS/2'].usWeightClass, weight)
+                self.assertEqual(font['glyf']['A'].xMax, xmax)
+        with TTFont(source) as font:
+            self.assertIn('fvar', font)
+            self.assertEqual(font['glyf']['A'].xMax, 500)
+        self.assertEqual(list(store.glob('hyperos-weights-*')), [])
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        self.assertEqual(report['preservedWeightAliases'], [])
+
+    def test_exact_static_anchor_wins_over_variable_fallback(self):
+        store = self.fonts / '.luoshu-font-store'
+        store.mkdir()
+        font_file(store / 'variable.font', variable_axes=[('wght', 100, 400, 900, 'Weight')])
+        font_file(store / 'bold.font', top=930)
+        self.inventory({'/system/fonts/Roboto-Medium.ttf': slot(),
+                        '/system/fonts/Roboto-Bold.ttf': slot()})
+        with patch.object(batch.font_instance, 'materialize',
+                          wraps=batch.font_instance.materialize) as materialize:
+            batch.build(self.module, self.stage, ['Roboto-Medium.ttf', 'Roboto-Bold.ttf'])
+        self.assertEqual(materialize.call_count, 1)
+        with TTFont(self.fonts / 'Roboto-Bold.ttf') as font:
+            self.assertEqual(font['head'].yMax, 930)
+
+    def test_missing_or_out_of_range_axis_keeps_stock_weight(self):
+        store = self.fonts / '.luoshu-font-store'
+        store.mkdir()
+        self.inventory({'/system/fonts/Roboto-Regular.ttf': slot(),
+                        '/system/fonts/Roboto-Bold.ttf': slot()})
+        for axes in (None, [('wdth', 75, 100, 125, 'Width')],
+                     [('wght', 100, 400, 600, 'Weight')]):
+            with self.subTest(axes=axes):
+                font_file(store / 'regular.font', variable_axes=axes)
+                shutil.copyfile(self.fonts / '400.ttf', self.fonts / 'Roboto-Bold.ttf')
+                with patch.object(batch.font_instance, 'materialize',
+                                  side_effect=AssertionError('unavailable weight')):
+                    batch.build(self.module, self.stage, ['Roboto-Regular.ttf', 'Roboto-Bold.ttf'])
+                self.assertFalse((self.fonts / 'Roboto-Bold.ttf').exists())
+                report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+                self.assertEqual(report['preservedWeightAliases'], ['/system/fonts/Roboto-Bold.ttf'])
+
+    def test_static_composite_does_not_restore_a_variable_donor(self):
+        store = self.fonts / '.luoshu-font-store'
+        store.mkdir()
+        font_file(store / 'mix-composite.font', top=880)
+        for name in ('variable.font', 'regular.font'):
+            font_file(store / name, variable_axes=[('wght', 100, 400, 900, 'Weight')])
+        self.inventory({'/system/fonts/Roboto-Regular.ttf': slot(),
+                        '/system/fonts/Roboto-Bold.ttf': slot()})
+        with patch.object(batch.font_instance, 'materialize',
+                          side_effect=AssertionError('must retain composite selection')):
+            batch.build(self.module, self.stage, ['Roboto-Regular.ttf', 'Roboto-Bold.ttf'])
+        self.assertFalse((self.fonts / 'Roboto-Bold.ttf').exists())
+
+    def test_variable_failure_aborts_before_alias_changes_and_cleans_instances(self):
+        store = self.fonts / '.luoshu-font-store'
+        store.mkdir()
+        font_file(store / 'regular.font', variable_axes=[('wght', 100, 400, 900, 'Weight')])
+        self.inventory({'/system/fonts/Roboto-Regular.ttf': slot(),
+                        '/system/fonts/Roboto-Bold.ttf': slot()})
+        for name in ('Roboto-Regular.ttf', 'Roboto-Bold.ttf'):
+            shutil.copyfile(self.fonts / '400.ttf', self.fonts / name)
+        before = (self.fonts / 'Roboto-Bold.ttf').read_bytes()
+        with patch.object(batch.font_instance, 'materialize', side_effect=ValueError('broken gvar')):
+            with self.assertRaisesRegex(ValueError, 'broken gvar'):
+                batch.build(self.module, self.stage, ['Roboto-Regular.ttf', 'Roboto-Bold.ttf'])
+        self.assertEqual((self.fonts / 'Roboto-Bold.ttf').read_bytes(), before)
+        self.assertFalse((self.stage / '.luoshu-metrics-report.json').exists())
+        self.assertEqual(list(store.glob('hyperos-weights-*')), [])
 
     def test_no_cascade_when_alias_is_source(self):
         (self.fonts / '400.ttf').rename(self.fonts / 'MiSansVF.ttf')

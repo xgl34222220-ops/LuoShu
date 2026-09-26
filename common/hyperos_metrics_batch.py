@@ -17,6 +17,7 @@ import tempfile
 
 from fontTools.ttLib import TTFont
 from fontTools import subset
+import font_instance
 from font_metrics_normalize import _device_build_key, _pick_face, _promote_os2_for_typo_metrics
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
@@ -54,7 +55,70 @@ class MissingWeightSource(ValueError):
     pass
 
 
-def pick_source(fonts: Path, name: str) -> Path:
+class VariableWeightSources:
+    """Materialize missing weights from trusted source anchors once per batch."""
+
+    def __init__(self, fonts: Path, outputs: Path):
+        self.store = fonts / '.luoshu-font-store'
+        self.outputs = outputs
+        self.faces = {}
+        self.ranges = {}
+        self.instances = {}
+
+    def pick(self, weight: int) -> Path | None:
+        # A composite is the complete selected CJK/Latin/digit result. Never
+        # substitute one of its original variable donors for that result, or
+        # restore axes which the user explicitly fixed while composing it.
+        names = (('mix-composite.font',) if nonempty(self.store / 'mix-composite.font')
+                 else ('variable.font', 'regular.font', 'compact-regular.font'))
+        for name in names:
+            source = self.store / name
+            if not nonempty(source):
+                continue
+            stat = source.stat()
+            identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+            key = (identity, weight)
+            if key in self.instances:
+                return self.instances[key]
+            # A collection can choose a different real face for each weight.
+            # Axis metadata is still decoded once per physical face, and no
+            # font is instanced once per alias/partition.
+            if key not in self.faces:
+                self.faces[key] = font_instance.pick_face(source, 'cjk', weight)
+            face = self.faces[key]
+            profile_key = (identity, face)
+            if profile_key not in self.ranges:
+                options = {'fontNumber': face} if face >= 0 else {}
+                with TTFont(source, lazy=True, recalcTimestamp=False, **options) as font:
+                    weight_range = None
+                    if 'fvar' in font:
+                        for axis in font['fvar'].axes:
+                            if axis.axisTag != 'wght':
+                                continue
+                            low = font_instance.finite_number(axis.minValue, 'wght 最小值')
+                            default = font_instance.finite_number(axis.defaultValue, 'wght 默认值')
+                            high = font_instance.finite_number(axis.maxValue, 'wght 最大值')
+                            if not low <= default <= high:
+                                raise ValueError('字体 wght 轴范围无效')
+                            weight_range = (low, high)
+                    self.ranges[profile_key] = weight_range
+            weight_range = self.ranges[profile_key]
+            if weight_range is None or not weight_range[0] <= weight <= weight_range[1]:
+                continue
+            output = self.outputs / f'weight-{len(self.instances)}-{weight}.font'
+            # This fixes every other axis at its selected source default and
+            # validates the static result. Corruption/instancing failures abort
+            # the isolated transaction instead of being reported as missing weight.
+            report = font_instance.materialize(source, output, 'cjk', weight,
+                                               {'wght': weight}, preserve_metrics=True)
+            if report['weight'] != weight:
+                raise ValueError(f'可变字体未生成所需 {weight} 字重')
+            self.instances[key] = output
+            return output
+        return None
+
+
+def pick_source(fonts: Path, name: str, variable_sources: VariableWeightSources | None = None) -> Path:
     weight = weight_for_name(name)
     store = fonts / '.luoshu-font-store'
     role = WEIGHT_ROLES.get(weight)
@@ -75,6 +139,10 @@ def pick_source(fonts: Path, name: str) -> Path:
             return path
 
     if weight != 400:
+        if variable_sources is not None:
+            variable = variable_sources.pick(weight)
+            if variable is not None:
+                return variable
         raise MissingWeightSource(f'缺少真实 {weight} 字重源：{name}')
 
     # Only the Regular class may use generic/staged regular fallbacks.
@@ -461,6 +529,16 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     if stage.resolve() == (module / '.luoshu-payload').resolve():
         raise ValueError('拒绝修改本次启动正在使用的字体负载')
     fonts = stage / 'system/fonts'
+    store = fonts / '.luoshu-font-store'
+    store.mkdir(parents=True, exist_ok=True)
+    # Scope the source instances across discovery, generation and linking so a
+    # failed discovery cannot leave large temporary fonts in a reusable stage.
+    with tempfile.TemporaryDirectory(prefix='hyperos-weights-', dir=store) as temporary:
+        return _build(module, stage, names, VariableWeightSources(fonts, Path(temporary)))
+
+
+def _build(module: Path, stage: Path, names: list[str], variable_sources: VariableWeightSources) -> dict:
+    fonts = stage / 'system/fonts'
     data = read_inventory(module)
     jobs = []
     preserved_aliases = []
@@ -490,7 +568,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 continue
             if (root / name).exists():
                 try:
-                    source = pick_source(fonts, name)
+                    source = pick_source(fonts, name, variable_sources)
                 except MissingWeightSource:
                     # Remove any generic Regular alias staged earlier so Overlay
                     # falls through to the ROM's genuine weight file.

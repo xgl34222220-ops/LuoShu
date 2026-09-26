@@ -19,7 +19,7 @@ import font_inventory as base
 from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, safe_physical_font_name,
                                     DYNAMIC_OVERLAY_PATH, DYNAMIC_OVERLAY_TARGET)
 
-SCANNER_REVISION = 7
+SCANNER_REVISION = 8
 CANDIDATE_SCHEMA = "device-font-candidates-v1"
 METRICS_REVISION = 3
 # Re-scan trusted stock metrics for Latin UI families restored after v4.3.0.

@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from fontTools.ttLib import TTFont
-from font_slot_coverage import summarize_coverage, valid_coverage
+from font_slot_coverage import summarize_coverage, unicode_codepoints, valid_coverage
 
 SCHEMA = "device-font-inventory-v1"
 INVENTORY_REVISION = 1
@@ -403,6 +403,8 @@ def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]
 
 
 def _read_metrics_uncached(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]:
+    from fontTools.unicodedata import category as unicode_category, script as unicode_script
+
     fmt = _font_format(path)
     kwargs: dict[str, Any] = {"lazy": True, "recalcTimestamp": False}
     if fmt == "TTC":
@@ -421,6 +423,14 @@ def _read_metrics_uncached(path: Path, face_index: int = 0) -> tuple[str, dict[s
         # table object would unnecessarily decode thousands of glyph names.
         post_data = font.reader["post"] if "post" in font else None
         fixed_pitch = bool(struct.unpack_from(">I", post_data, 12)[0]) if post_data is not None else False
+        # Reuse the already decoded cmap: a language tag cannot tell whether a
+        # physical face is a general UI font or a script fallback with ASCII.
+        letter_scripts: dict[str, int] = {}
+        for point in unicode_codepoints(font):
+            character = chr(point)
+            if unicode_category(character).startswith("L"):
+                script = unicode_script(character)
+                letter_scripts[script] = letter_scripts.get(script, 0) + 1
         upem = int(head.unitsPerEm)
         ascent = int(hhea.ascent)
         descent = int(hhea.descent)
@@ -429,6 +439,7 @@ def _read_metrics_uncached(path: Path, face_index: int = 0) -> tuple[str, dict[s
             "coverage": summarize_coverage(font),
             "weightClass": int(getattr(os2, "usWeightClass", 400)),
             "fontTraits": {
+                "letterScripts": letter_scripts,
                 "color": any(tag in font for tag in ("COLR", "CBDT", "sbix", "SVG ")),
                 "italic": bool(int(getattr(os2, "fsSelection", 0)) & 1
                                or int(getattr(head, "macStyle", 0)) & 2),
@@ -662,6 +673,28 @@ def _logical_path(root: FontRoot, actual: Path) -> str:
     return str(root.logical / actual.relative_to(root.actual))
 
 
+def _language_text_slot_candidate(name: str, language: str, family_is_ui: bool,
+                                  metrics: dict[str, Any]) -> bool:
+    """Validate language-qualified text without enumerating Latin languages."""
+    if not _generic_text_slot_candidate(name, metrics):
+        return False
+    coverage = metrics["coverage"]
+    chinese = any(tag == "zh" or tag.startswith("zh-")
+                  for tag in language.lower().replace(",", " ").split())
+    if coverage["hanCount"] >= 512 and (chinese or family_is_ui):
+        return True
+    if coverage["latinCount"] < 52 or coverage["unicodeCount"] < 96:
+        return False
+    scripts = metrics.get("fontTraits", {}).get("letterScripts", {})
+    western = sum(scripts.get(script, 0) for script in ("Latn", "Grek", "Cyrl"))
+    other = sum(count for script, count in scripts.items()
+                if script not in {"Latn", "Grek", "Cyrl", "Zyyy", "Zinh"})
+    # Ordinary Latin UI fonts often include Greek/Cyrillic, and broad UI faces
+    # may include smaller fallback alphabets. Dedicated Arabic/Hebrew/etc.
+    # faces with only an auxiliary ASCII alphabet must remain stock.
+    return other == 0 or (western >= 128 and western > other)
+
+
 def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot], *,
                         roots_by_xml: dict[Path, list[FontRoot]] | None = None,
                         logical_xmls: dict[Path, str] | None = None,
@@ -669,9 +702,10 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot], *,
     families: dict[str, list[str]] = {}
     all_entries: dict[str, dict[str, Any]] = {}
     aliases: list[tuple[str, str]] = []
-    eligible_targets: set[str] = set()
-    family_contracts: dict[str, dict[str, dict[str, Any]]] = {}
+    eligible_targets: dict[str, dict[str, dict[str, Any]]] = {}
     non_ui_paths: set[str] = set()
+    language_non_ui_paths: set[str] = set()
+    language_entries: dict[str, dict[str, Any]] = {}
     for xml_path in xml_paths:
         if not xml_path.is_file():
             continue
@@ -692,22 +726,14 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot], *,
                 continue
             family_name = (node.get("name") or "").strip()
             family_language = (node.get("lang") or "").strip()
-            family_is_ui = not family_language and _is_ui_family(family_name)
+            named_ui_family = _is_ui_family(family_name)
+            family_is_ui = not family_language and named_ui_family
             # An explicit UI alias may point to a vendor-specific family name.
-            # Language fallbacks and named symbol/serif/mono families are never
-            # promoted merely because another XML document aliases them.
+            # Named symbol/serif/mono families are never promoted merely because
+            # another XML document aliases them. Language faces need cmap proof.
             tokens = set(re.split(r"[^a-z0-9]+", family_name.lower()))
-            languages = family_language.lower().split()
-            # Chinese fallback faces remain eligible for the existing measured
-            # Han-coverage gate. Android often supplies all Chinese text through
-            # an unnamed lang=zh-Hans family instead of the Latin UI family.
-            non_chinese_language = bool(languages and not all(
-                language == "zh" or language.startswith("zh-") for language in languages))
-            protected_family = bool(non_chinese_language or (not family_is_ui and
-                                    tokens.intersection({*DENY_FAMILY_TOKENS, "monospace"})))
-            if (family_name and not family_language
-                    and (family_is_ui or not tokens.intersection({*DENY_FAMILY_TOKENS, "monospace"}))):
-                eligible_targets.add(family_name)
+            protected_family = bool(not named_ui_family and
+                                    tokens.intersection({*DENY_FAMILY_TOKENS, "monospace"}))
             for font_node in node:
                 if _local_name(font_node.tag) != "font":
                     continue
@@ -731,7 +757,26 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot], *,
                     "style": (font_node.get("style") or "normal").strip() or "normal",
                     "faceIndex": _safe_nonnegative_int(font_node.get("index"), 0),
                 }
-                family_contracts.setdefault(family_name, {})[logical] = contract
+                language_metrics = None
+                language_format = None
+                if family_language and not protected_family:
+                    # Known script/icon/italic filenames are already excluded
+                    # by the generic scan. Keep that cheap gate before cmap work.
+                    if _generic_font_name_candidate(actual.name):
+                        try:
+                            language_format, language_metrics = _read_metrics(stock_file, contract["faceIndex"])
+                        except (InventoryError, OSError, ValueError):
+                            pass
+                    if language_metrics is None or not _language_text_slot_candidate(
+                            actual.name, family_language, named_ui_family, language_metrics):
+                        language_non_ui_paths.add(logical)
+                        language_metrics = None
+                face_is_ui = family_is_ui or (named_ui_family and language_metrics is not None)
+                if family_name and not protected_family and (not family_language or language_metrics is not None):
+                    # A TTC path alone is insufficient evidence. Keep the
+                    # accepted face's contract with its eligibility so a later
+                    # rejected language face cannot replace the alias target.
+                    eligible_targets.setdefault(family_name, {}).setdefault(logical, contract)
                 candidate = all_entries.setdefault(
                     logical,
                     {
@@ -744,7 +789,7 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot], *,
                         "weight": _infer_weight(actual.name, font_node.get("weight")),
                         "style": (font_node.get("style") or "normal").strip() or "normal",
                         "faceIndex": _safe_nonnegative_int(font_node.get("index"), 0),
-                        "uiEligible": family_is_ui,
+                        "uiEligible": face_is_ui,
                         "sourceXmls": [],
                     },
                 )
@@ -753,12 +798,20 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot], *,
                     candidate["sourceXmls"].append(source_xml)
                 if family_name and family_name not in candidate["families"]:
                     candidate["families"].append(family_name)
-                if family_is_ui and not candidate.get("uiEligible", False):
+                if face_is_ui and not candidate.get("uiEligible", False):
                     candidate["weight"] = _infer_weight(actual.name, font_node.get("weight"))
                     candidate["style"] = (font_node.get("style") or "normal").strip() or "normal"
                     candidate["faceIndex"] = _safe_nonnegative_int(font_node.get("index"), 0)
-                if family_is_ui:
+                if face_is_ui:
                     candidate["uiEligible"] = True
+                if language_metrics is not None:
+                    # Keep the proven XML face (including a nonzero TTC index).
+                    # A later ja/ko/script reference to this same path cannot
+                    # veto an independently validated Chinese or Latin use.
+                    language_entries.setdefault(logical, {
+                        **candidate, **contract, "format": language_format,
+                        "metrics": language_metrics, "validatedBy": "fontTools-language-stock-scan",
+                    })
 
     unresolved = list(aliases)
     for _round in range(len(aliases) + 1):
@@ -770,13 +823,12 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot], *,
             target_paths = families.get(target_name)
             if target_paths:
                 families[alias_name] = list(target_paths)
-                family_contracts[alias_name] = family_contracts.get(target_name, {})
                 if target_name in eligible_targets:
-                    eligible_targets.add(alias_name)
+                    eligible_targets[alias_name] = dict(eligible_targets[target_name])
                     if _is_ui_family(alias_name):
-                        for logical in target_paths:
+                        for logical, contract in eligible_targets[alias_name].items():
                             if not all_entries[logical]["uiEligible"]:
-                                all_entries[logical].update(family_contracts[alias_name].get(logical, {}))
+                                all_entries[logical].update(contract)
                             all_entries[logical]["uiEligible"] = True
                 changed = True
             else:
@@ -797,8 +849,12 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot], *,
             entry.pop("uiEligible", None)
             if family_name not in entry["families"]:
                 entry["families"].append(family_name)
+    for logical, entry in language_entries.items():
+        if logical not in non_ui_paths and logical not in slots:
+            slots[logical] = {**entry, "families": list(entry["families"])}
+            slots[logical].pop("uiEligible", None)
     if protected_paths is not None:
-        protected_paths.update(non_ui_paths - slots.keys())
+        protected_paths.update((non_ui_paths | language_non_ui_paths) - slots.keys())
     return families, slots
 
 
