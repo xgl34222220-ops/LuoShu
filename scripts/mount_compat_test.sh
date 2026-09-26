@@ -198,8 +198,12 @@ case_diagnostics() {
 case_static_contracts() {
     ok grep -q 'for _enable_dir in "$MODPATH" "$OLD_MOD"' "$ROOT/customize.sh"
     ok grep -q 'rm -f "$_enable_dir/disable"' "$ROOT/customize.sh"
-    ok grep -q 'common/mount_compat.sh' "$ROOT/common/font_mix.sh"
-    ok grep -q 'luoshu_sync_mount_payload' "$ROOT/common/font_mix.sh"
+    # Composite generation prepares -next; actual mounts belong to early boot.
+    ok grep -q 'exec sh "$MIX_ROUTER"' "$ROOT/common/font_mix.sh"
+    ok grep -q 'mv "$MIX_STAGE" "$NEXT_PAYLOAD"' "$ROOT/common/legacy_v14_4/mix_router.sh"
+    ok grep -q 'common/mount_compat.sh' "$ROOT/post-fs-data.sh"
+    ok grep -q 'luoshu_private_self_mount_ensure' "$ROOT/post-fs-data.sh"
+    no grep -q 'luoshu_sync_mount_payload' "$ROOT/common/font_mix.sh"
     no grep -q 'luoshu_sync_mount_payload' "$ROOT/post-fs-data.sh"
     no grep -q 'luoshu_sync_mount_payload' "$ROOT/service.sh"
     no grep -q 'prepare_mount_compat.sh' "$ROOT/scripts/build.sh"

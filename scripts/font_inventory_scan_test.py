@@ -127,14 +127,14 @@ def main() -> int:
         candidates = json.loads((temp / "device_font_candidates.json").read_text(encoding="utf-8"))
         summary = payload["scanSummary"]
 
-        assert payload["scannerRevision"] == 6
-        assert payload["romKind"] == "coloros"
-        assert result["stockFontFileCount"] == 10
-        assert result["stockFontUniqueFileCount"] == 8
+        assert payload["scannerRevision"] == 11
+        assert payload["romKind"] == "generic"
+        assert result["stockFontFileCount"] == 11
+        assert result["stockFontUniqueFileCount"] == 9
         assert result["genericSlotCount"] >= 2
         assert result["candidatePathCount"] == 11
         assert result["fontPathCount"] == 11
-        assert result["nestedFontRootCount"] == 1
+        assert result["nestedFontRootCount"] == 2
         assert candidates["schema"] == "device-font-candidates-v1"
         assert candidates["fontFileCount"] == 11
         assert candidates["candidateCount"] == 11
@@ -142,18 +142,18 @@ def main() -> int:
         assert summary["installCandidatePathCount"] == 11
         assert summary["installFontPathCount"] == 11
         assert summary["installNestedFontPathCount"] == 3
-        assert summary["nestedReplaceableRootCount"] == 1
-        assert summary["stockFontFileCount"] == 10
-        assert summary["stockFontUniqueFileCount"] == 8
+        assert summary["nestedReplaceableRootCount"] == 2
+        assert summary["stockFontFileCount"] == 11
+        assert summary["stockFontUniqueFileCount"] == 9
         assert summary["verifiedScanUiFileCount"] >= 2
         assert summary["partitionFontFileCounts"]["odm"] == 1
         assert summary["partitionUniqueFontFileCounts"]["odm"] == 0
         assert summary["xmlSourceCount"] == 6
-        assert payload["slotCount"] == 10
+        assert payload["slotCount"] == 11
         assert "/system/fonts/Roboto-Regular.ttf" in payload["slots"]
         mystery = payload["slots"]["/system_ext/fonts/MysteryUiFace-Regular.ttf"]
         assert mystery["source"] == "verified-scan"
-        assert mystery["validatedBy"] == "fontTools-generic-stock-scan"
+        assert mystery["validatedBy"] == "fontTools-universal-stock-scan"
         assert "/product/fonts/ProductUi-Regular.ttf" in payload["slots"]
         assert "/my_product/fonts/SysFont-Hans-Regular.ttf" in payload["slots"]
         assert "/oem/fonts/OPlusSans3.0.ttf" in payload["slots"]
@@ -161,35 +161,34 @@ def main() -> int:
         assert "/future_oem/fonts/FutureUi-Regular.ttf" in payload["slots"]
         assert "/product/vivo/fonts/VivoFont.ttf" in payload["slots"]
         assert "/product/vivo/fonts/subdir/VivoNested.ttf" in payload["slots"]
-        assert "/product/assets/HiddenStandalone.ttf" not in payload["slots"]
+        assert "/product/assets/HiddenStandalone.ttf" in payload["slots"]
         assert any(
             item["path"] == "/product/assets/HiddenStandalone.ttf"
             for item in candidates["paths"]
         )
         assert payload["discoveredPartitions"] == ["future_oem"]
-        assert len(payload["discoveredFontRoots"]) == 1, payload["discoveredFontRoots"]
-        nested = payload["discoveredFontRoots"][0]
+        assert len(payload["discoveredFontRoots"]) == 2, payload["discoveredFontRoots"]
+        nested = next(item for item in payload["discoveredFontRoots"] if item["relative"] == "vivo/fonts")
         assert nested["partition"] == "product"
         assert nested["relative"] == "vivo/fonts"
         assert nested["logical"] == "/product/vivo/fonts"
         root_manifest = (temp / "device_font_roots.conf").read_text(encoding="utf-8").strip()
-        assert root_manifest.startswith("product|vivo/fonts|product-nested-"), root_manifest
+        assert any(line.startswith("product|vivo/fonts|product-nested-") for line in root_manifest.splitlines()), root_manifest
         assert summary["partitionFontFileCounts"]["future_oem"] == 1
         assert (temp / "device_font_partitions.conf").read_text(encoding="utf-8") == "future_oem\n"
-        assert summary["fontSignatures"]["coloros"] == ["SysFont-Hans-Regular.ttf", "OPlusSans3.0.ttf"]
-        assert "Roboto-Regular.ttf" in summary["fontSignatures"]["aosp"]
+        assert "fontSignatures" not in summary
         assert all(not path.startswith("/data/") for path in payload["slots"])
 
         reused = run(command, scan_env)
         assert reused.returncode == 0, reused.stderr
         reused_result = json.loads(reused.stdout)
         assert reused_result["status"] == "reused"
-        assert reused_result["stockFontUniqueFileCount"] == 8
+        assert reused_result["stockFontUniqueFileCount"] == 9
         assert reused_result["genericSlotCount"] >= 2
         assert reused_result["candidatePathCount"] == 11
         assert reused_result["fontPathCount"] == 11
         assert reused_result["nestedFontPathCount"] == 3
-        assert reused_result["nestedFontRootCount"] == 1
+        assert reused_result["nestedFontRootCount"] == 2
 
         scanner = importlib.import_module("font_inventory_scan")
         theme = temp / "theme/fonts"

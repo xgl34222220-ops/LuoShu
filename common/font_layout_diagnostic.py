@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -45,6 +46,14 @@ METRIC_FIELDS = {
 COVERAGE_FIELDS = ("hasHan", "hasLatin", "hanCount", "latinCount", "unicodeCount", "cjkPunctuation")
 CJK_ROUTING_REASONS = {"stock-coverage-refresh-pending", "specialized-slot", "stock-han-slot",
                        "not-latin-ui-slot", "no-staged-cjk-fallback", "stock-latin-primary"}
+MIX_PHASES = {"source", "inventory", "selection", "stock", "prepare", "supplement",
+              "metrics", "collection", "cache", "cache-restore", "cache-store", "complete"}
+MIX_STATES = {"running", "ready", "prepared", "complete", "completed", "error", "failed",
+              "cancelled", "canceled", "idle"}
+MIX_COUNTER_LIMITS = {"fileCompleted": 1_000_000, "fileTotal": 1_000_000,
+                      "faceIndex": 255, "faceTotal": 256}
+MIX_DURATION_FIELDS = {"elapsed", "phaseElapsedSeconds"}
+MAX_MIX_STATE_BYTES = 64 * 1024
 
 
 class BudgetExpired(BaseException):
@@ -61,7 +70,7 @@ DENY_PARTITIONS = {
 
 def safe_slot(value: object) -> bool:
     """Accept only normalized system/OEM font paths, including nested roots."""
-    if not isinstance(value, str):
+    if not isinstance(value, str) or len(value) > 1024 or not value.isprintable():
         return False
     path = PurePosixPath(value)
     parts = path.parts
@@ -98,6 +107,69 @@ def load_json(path: Path) -> dict:
     if not isinstance(value, dict):
         raise ValueError("object required")
     return value
+
+
+def mix_progress_only(value: dict, *, configuration: bool = False) -> dict:
+    """Export task performance facts without messages, source names or task IDs."""
+    result = {}
+    for key, allowed in (("phase", MIX_PHASES), ("state", MIX_STATES)):
+        if key in value:
+            result[key] = allowed_label(value[key], allowed)
+    for key in (*MIX_COUNTER_LIMITS, *MIX_DURATION_FIELDS):
+        number = value.get(key)
+        duration = key in MIX_DURATION_FIELDS
+        if configuration and isinstance(number, str):
+            pattern = r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?" if duration else r"(?:0|[1-9][0-9]*)"
+            if len(number) > 24 or re.fullmatch(pattern, number) is None:
+                continue
+            number = float(number) if "." in number else int(number)
+        limit = 7 * 24 * 60 * 60 if duration else MIX_COUNTER_LIMITS[key]
+        if (type(number) not in ((int, float) if duration else (int,))
+                or not 0 <= number <= limit or not math.isfinite(number)):
+            continue
+        result[key] = number
+    # Contradictory counters are not reliable measurements. Keep neither half
+    # of a pair instead of presenting impossible progress as phone evidence.
+    for done, total, inclusive in (("fileCompleted", "fileTotal", True),
+                                   ("faceIndex", "faceTotal", False)):
+        if done in result and total in result:
+            valid = result[done] <= result[total] if inclusive else result[done] < result[total]
+            if not valid:
+                result.pop(done)
+                result.pop(total)
+    if safe_slot(value.get("path")):
+        result["path"] = value["path"]
+    return result
+
+
+def mix_progress_file(path: Path, *, configuration: bool = False) -> dict:
+    """Read one optional, bounded observation; never include raw failure text."""
+    try:
+        if path.is_symlink():
+            return {"status": "invalid"}
+        with path.open("rb") as stream:
+            raw = stream.read(MAX_MIX_STATE_BYTES + 1)
+        if len(raw) > MAX_MIX_STATE_BYTES:
+            return {"status": "invalid"}
+        text = raw.decode("utf-8")
+        if configuration:
+            fields = {*MIX_COUNTER_LIMITS, *MIX_DURATION_FIELDS, "phase", "state", "path"}
+            value = {}
+            for line in text.splitlines():
+                key, separator, content = line.partition("=")
+                if separator and key in fields:
+                    # Repeated keys are ambiguous, even when the last value is
+                    # syntactically valid. Do not choose an arbitrary winner.
+                    value[key] = None if key in value else content
+        else:
+            value = json.loads(text)
+        if not isinstance(value, dict):
+            return {"status": "invalid"}
+        return {"status": "observed", **mix_progress_only(value, configuration=configuration)}
+    except FileNotFoundError:
+        return {"status": "missing"}
+    except (OSError, ValueError, UnicodeError):
+        return {"status": "invalid"}
 
 
 def command(args: list[str], timeout: float = 0.6) -> tuple[str, str]:
@@ -443,6 +515,13 @@ class Collector:
         signal.signal(signal.SIGALRM, expire)
         signal.setitimer(signal.ITIMER_REAL, max(0.001, self.deadline - time.monotonic()))
         try:
+            # Gather tiny current-task observations before glyph probing can
+            # exhaust the report budget. Older modules legitimately lack them.
+            self.report["mixPerformance"] = {
+                "inventoryProgress": mix_progress_file(self.module / "config/mix-inventory-progress.json"),
+                "finalizeState": mix_progress_file(self.module / "config/mix-finalize-state.conf",
+                                                   configuration=True),
+            }
             self.inventory()
             processing = self.processing_report()
             selected = self.selected_slots()

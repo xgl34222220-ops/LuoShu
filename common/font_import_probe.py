@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from fontTools.ttLib import TTFont
+from font_metadata import text_role_counts, italic as font_italic
 
 
 CJK_UI_PROBES = tuple(map(ord, "中文字体系统默认洛书汉字ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"))
@@ -50,12 +51,9 @@ def inspect(path: Path) -> tuple[str, str, int, bool, bool, bool]:
             weight = 400
         weight = max(1, min(1000, weight))
         subfamily = best_subfamily(font)
-        try:
-            italic = bool(int(font["head"].macStyle) & 0x02)
-        except Exception:
-            italic = "italic" in subfamily.lower() or "oblique" in subfamily.lower()
+        italic = font_italic(font)
         cmap = font.getBestCmap() or {}
-        supports_cjk = all(codepoint in cmap for codepoint in CJK_UI_PROBES)
+        supports_cjk = text_role_counts(cmap)["cjk"] > 0
         return best_family(font), subfamily, weight, italic, "fvar" in font, supports_cjk
     finally:
         font.close()

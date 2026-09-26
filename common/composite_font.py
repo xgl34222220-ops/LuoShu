@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """LuoShu full composite font builder.
 
-The CJK font is kept as the complete base. Latin and digit glyph outlines are
-copied into glyph slots which already exist in the base font, so the output
-retains one complete cmap and does not depend on Android fallback behavior.
+The CJK face supplies its actual characters. Latin and digit donors can add
+characters absent from that face. Missing source characters are preserved by
+the subsequent stock-inventory stage, rather than an arbitrary alphabet gate.
 """
 from __future__ import annotations
 
@@ -26,6 +26,8 @@ from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.transformPen import TransformPen
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTCollection, TTFont
+from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
+from fontTools.unicodedata import category as unicode_category, script as unicode_script
 
 from font_metrics_normalize import normalize_font_metrics
 from legacy_v14_4.composite_layout import (_role_transform, clear_imported_metric_variations,
@@ -55,6 +57,14 @@ LATIN_PROBES = tuple(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvw
 DIGIT_PROBES = tuple(map(ord, "0123456789"))
 REQUIRED_LATIN = set(LATIN_PROBES)
 REQUIRED_DIGITS = set(DIGIT_PROBES)
+
+
+def _role_codepoints(cmap, role: str) -> set[int]:
+    if role == 'digit':
+        return {cp for cp in cmap if 0x30 <= cp <= 0x39 or 0xFF10 <= cp <= 0xFF19}
+    wanted = 'Hani' if role == 'cjk' else 'Latn'
+    return {cp for cp in cmap if cp != 0x3007 and unicode_script(chr(cp)) == wanted
+            and unicode_category(chr(cp)).startswith('L')}
 
 
 def _progress(path: str | None, stage: str, message: str, percent: int) -> None:
@@ -94,8 +104,7 @@ def _font_weight(font: TTFont) -> int:
 
 def _score_face(font: TTFont, role: str, target_weight: int) -> tuple[int, int]:
     cmap = font.getBestCmap() or {}
-    probes = CJK_PROBES if role == "cjk" else LATIN_PROBES if role == "latin" else DIGIT_PROBES
-    hits = sum(1 for cp in probes if cp in cmap)
+    hits = len(_role_codepoints(cmap, role))
     return (hits, -abs(_font_weight(font) - target_weight))
 
 
@@ -187,7 +196,10 @@ def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_n
     tag = "CFF " if "CFF " in base else "CFF2"
     cff = base[tag].cff
     top = cff.topDictIndex[0]
-    _old, selector = top.CharStrings.getItemAndSelector(base_name)
+    is_new = base_name not in top.CharStrings.charStrings
+    selector = 0 if hasattr(top, 'FDArray') else None
+    if not is_new:
+        _old, selector = top.CharStrings.getItemAndSelector(base_name)
     if hasattr(top, "FDArray"):
         private = top.FDArray[selector or 0].Private
     else:
@@ -205,11 +217,72 @@ def _replace_cff(base: TTFont, src: TTFont, src_glyph_set, base_name: str, src_n
     char_string = pen.getCharString(private=private, globalSubrs=cff.GlobalSubrs)
     if selector is not None:
         char_string.fdSelectIndex = selector
-    top.CharStrings[base_name] = char_string
+    if is_new:
+        if top.CharStrings.charStringsAreIndexed:
+            top.CharStrings.charStrings[base_name] = len(top.CharStrings.charStringsIndex)
+            top.CharStrings.charStringsIndex.append(char_string)
+        else:
+            top.CharStrings[base_name] = char_string
+        if base_name not in top.charset:
+            top.charset.append(base_name)
+        if hasattr(top, 'FDSelect'):
+            top.FDSelect.gidArray.append(selector or 0)
+    else:
+        top.CharStrings[base_name] = char_string
     enclose_imported_bounds(base, char_string.calcBounds(top.CharStrings))
 
 
-def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], role: str, location: dict[str, float] | None = None, required: set[int] | None = None) -> tuple[int, list[int]]:
+def _new_glyph_name(base: TTFont, cp: int) -> str:
+    order = base.getGlyphOrder()
+    if len(order) >= 65535:
+        raise CompositeError(f'中文基底已达到字形数量上限，无法加入 U+{cp:04X}')
+    used = getattr(base, "_luoshu_glyph_names", None)
+    if used is None:
+        used = base._luoshu_glyph_names = set(order)
+    if 'CFF ' in base and hasattr(base['CFF '].cff.topDictIndex[0], 'ROS'):
+        index = getattr(base, '_luoshu_next_cid', 1)
+        while f'cid{index:05d}' in used:
+            index += 1
+        if index > 65535:
+            raise CompositeError('CID 字形编号已用尽')
+        name = f'cid{index:05d}'
+        base._luoshu_next_cid = index + 1
+        used.add(name)
+        return name
+    name = f'LuoShu.u{cp:06X}'
+    while name in used:
+        name += '_'
+    used.add(name)
+    return name
+
+
+def _add_glyph_mapping(base: TTFont, cp: int, name: str) -> None:
+    order = base.getGlyphOrder()
+    if not order or order[-1] != name:
+        order.append(name)
+    base.setGlyphOrder(order)
+    base['maxp'].numGlyphs = len(order)
+    if 'gvar' in base:
+        base['gvar'].variations[name] = []
+    if 'vmtx' in base:
+        metrics = base['vmtx'].metrics
+        metrics[name] = metrics.get('.notdef', (base['head'].unitsPerEm, 0))
+    if 'VORG' in base:
+        base['VORG'].VOriginRecords[name] = base['VORG'].defaultVertOriginY
+    supported = False
+    for table in base['cmap'].tables:
+        if table.isUnicode() and table.format in (4, 12, 13) and (cp <= 0xFFFF or table.format != 4):
+            table.cmap[cp] = name
+            supported = True
+    if not supported:
+        table = CmapSubtable.newSubtable(12)
+        table.platformID, table.platEncID, table.language = 3, 10, 0
+        table.cmap = dict(base.getBestCmap() or {})
+        table.cmap[cp] = name
+        base['cmap'].tables.append(table)
+
+
+def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], role: str, location: dict[str, float] | None = None, required: set[int] | None = None, capacity_skipped: list[int] | None = None) -> tuple[int, list[int]]:
     required = required or set()
     base_cmap = base.getBestCmap() or {}
     src_cmap = src.getBestCmap() or {}
@@ -222,11 +295,26 @@ def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], ro
     for cp in sorted(codepoints):
         base_name = base_cmap.get(cp)
         src_name = src_cmap.get(cp)
-        if not base_name or not src_name:
+        if not src_name:
             if cp in required:
                 raise CompositeError(f"源字体或中文基底缺少必要字符 U+{cp:04X}")
             missing.append(cp)
             continue
+        is_new = not base_name
+        if is_new:
+            if cp not in required:
+                missing.append(cp)
+                continue
+            # Full CJK fonts can already contain all 65,535 SFNT glyphs.
+            # Their existing text remains replaceable; an unencoded donor
+            # addition must not abort every existing character or evict an
+            # unencoded glyph referenced by shaping/UVS. Record the omission.
+            if len(base.getGlyphOrder()) >= 65535:
+                missing.append(cp)
+                if capacity_skipped is not None:
+                    capacity_skipped.append(cp)
+                continue
+            base_name = _new_glyph_name(base, cp)
         key = f"{base_name}:{src_name}"
         if key in already:
             continue
@@ -252,6 +340,9 @@ def _replace_codepoints(base: TTFont, src: TTFont, codepoints: Iterable[int], ro
             missing.append(cp)
             continue
         base["hmtx"].metrics[base_name] = (advance, lsb)
+        if is_new:
+            _add_glyph_mapping(base, cp, base_name)
+            base_cmap[cp] = base_name
         clear_imported_metric_variations(base, base_name)
         replaced += 1
     return replaced, missing
@@ -275,19 +366,23 @@ def _validate_output(path: Path) -> dict[str, object]:
     font = TTFont(str(path), lazy=False, recalcTimestamp=False)
     try:
         cmap = font.getBestCmap() or {}
-        required = {"cjk": ord("中"), "latin": ord("A"), "digit": ord("1")}
-        missing = [role for role, cp in required.items() if cp not in cmap]
+        candidates = {role: _role_codepoints(cmap, role) for role in ('cjk', 'latin', 'digit')}
+        missing = [role for role, points in candidates.items() if not points]
         if missing:
             raise CompositeError("复合字体缺少必要字符：" + ", ".join(missing))
         glyph_set = font.getGlyphSet()
         bounds = {}
-        for role, cp in required.items():
-            glyph_name = cmap[cp]
-            pen = BoundsPen(glyph_set)
-            glyph_set[glyph_name].draw(pen)
-            if pen.bounds is None:
+        for role, points in candidates.items():
+            found = None
+            for cp in sorted(points):
+                pen = BoundsPen(glyph_set)
+                glyph_set[cmap[cp]].draw(pen)
+                if pen.bounds is not None:
+                    found = list(pen.bounds)
+                    break
+            if found is None:
                 raise CompositeError(f"复合字体的 {role} 字形为空")
-            bounds[role] = list(pen.bounds)
+            bounds[role] = found
         return {
             "tables": list(font.keys()),
             "glyphs": int(font["maxp"].numGlyphs),
@@ -309,19 +404,27 @@ def build(args: argparse.Namespace) -> dict[str, object]:
     latin = digit = None
     latin_face = digit_face = -1
     try:
-        if not all(cp in (base.getBestCmap() or {}) for cp in (ord("中"), ord("A"), ord("1"))):
-            raise CompositeError("中文基础字体必须同时包含中文、英文字母和数字，才能安全生成完整复合字体")
+        if not _role_codepoints(base.getBestCmap() or {}, 'cjk'):
+            raise CompositeError('中文源字体不包含可用的中文字形')
         _progress(args.progress, "latin", "正在导入英文字形", 18)
         latin, latin_face, latin_location = _load_font(latin_path, "latin", args.weight, args.latin_face)
-        latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS, "latin", latin_location, REQUIRED_LATIN)
+        latin_required = _role_codepoints(latin.getBestCmap() or {}, 'latin')
+        if not latin_required:
+            raise CompositeError('英文源字体不包含可用的英文字形')
+        latin_capacity_skipped: list[int] = []
+        latin_replaced, latin_missing = _replace_codepoints(base, latin, LATIN_CODEPOINTS | latin_required, "latin", latin_location, latin_required, latin_capacity_skipped)
         latin.close(); latin = None; gc.collect()
         _progress(args.progress, "digit", "正在导入数字字形", 42)
         digit, digit_face, digit_location = _load_font(digit_path, "digit", args.weight, args.digit_face)
-        digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, "digit", digit_location, REQUIRED_DIGITS)
+        digit_required = _role_codepoints(digit.getBestCmap() or {}, 'digit')
+        if not digit_required:
+            raise CompositeError('数字源字体不包含可用的数字字形')
+        digit_capacity_skipped: list[int] = []
+        digit_replaced, digit_missing = _replace_codepoints(base, digit, DIGIT_CODEPOINTS, "digit", digit_location, digit_required, digit_capacity_skipped)
         digit.close(); digit = None; gc.collect()
-        if latin_replaced < 52:
+        if latin_replaced < 1:
             raise CompositeError(f"英文替换数量异常（仅 {latin_replaced} 个）")
-        if digit_replaced < 10:
+        if digit_replaced < 1:
             raise CompositeError(f"数字替换数量异常（仅 {digit_replaced} 个）")
         for tag in ("DSIG", "LTSH", "hdmx", "VDMX"):
             if tag in base:
@@ -349,6 +452,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
             "faces": {"cjk": cjk_face, "latin": latin_face, "digit": digit_face},
             "replaced": {"latin": latin_replaced, "digit": digit_replaced},
             "missingCounts": {"latin": len(latin_missing), "digit": len(digit_missing)},
+            "glyphCapacitySkipped": {"latin": latin_capacity_skipped, "digit": digit_capacity_skipped},
             "metrics": metrics,
             "validation": validation,
         }

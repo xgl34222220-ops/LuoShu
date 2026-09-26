@@ -38,7 +38,7 @@ done
 # routing ambiguity and are not allowed to return.
 [ -f "$ROOT/common/font_inventory_scan.py" ] || fail "canonical font scanner missing"
 [ ! -e "$ROOT/common/font_inventory_scan_v3.py" ] || fail "versioned font scanner returned"
-grep -q 'SCANNER_REVISION = 6' "$ROOT/common/font_inventory_scan.py" || fail "canonical scanner is not v6"
+grep -q 'SCANNER_REVISION = 11' "$ROOT/common/font_inventory_scan.py" || fail "canonical scanner is not v11"
 
 # Exact copies formerly carried inside legacy_v14_4 must stay deduplicated.
 for duplicate in luoshu_composite.sh font_role_check.sh font_role_check.py; do

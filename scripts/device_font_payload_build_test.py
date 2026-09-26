@@ -51,6 +51,11 @@ def slot(
 
 def main() -> None:
     args = parse_args()
+    opaque_entry = {"partition": "product", "path": "/product/assets/opaque.bin", "format": "TTF"}
+    assert payload_builder._safe_inventory_logical(opaque_entry["path"], opaque_entry) == ("product", Path("assets/opaque.bin"))
+    for invalid in ("/product/assets/../escape.bin", "/product//assets/opaque", "/data/fonts/opaque", "/apex/fonts/opaque", "/product/assets/name\n.ttf"):
+        assert payload_builder._safe_inventory_logical(invalid, {}) is None, invalid
+    assert payload_builder._safe_inventory_logical("/product/assets/different.bin", opaque_entry) is None
     source_profile = template_engine.inspect_font(args.font, -1, hash_fonts=True)
     assert source_profile["probes"]["digits"]["hits"] >= 10
 
@@ -159,7 +164,7 @@ def main() -> None:
         # represented in the XML template. It must be consumed by the final
         # aligned builder, while TTC containers remain stock with an explicit reason.
         stock_root = root / "stock"
-        hidden_stock = stock_root / "system_ext/fonts/HiddenUi-Regular.ttf"
+        hidden_stock = stock_root / "system_ext/fonts/HiddenUiOpaque.bin"
         hidden_stock.parent.mkdir(parents=True)
         shutil.copyfile(args.font, hidden_stock)
         nested_stock = stock_root / "product/vivo/fonts/VivoFont.ttf"
@@ -174,8 +179,8 @@ def main() -> None:
                     "source": "xml", "format": "TTF", "weight": 400,
                     "style": "normal", "families": ["sans-serif"],
                 },
-                "/system_ext/fonts/HiddenUi-Regular.ttf": {
-                    "slotName": "HiddenUi-Regular.ttf", "partition": "system_ext",
+                "/system_ext/fonts/HiddenUiOpaque.bin": {
+                    "slotName": "HiddenUiOpaque.bin", "partition": "system_ext",
                     "source": "verified-scan", "format": "TTF", "weight": 400,
                     "style": "normal", "families": [],
                 },
@@ -259,13 +264,13 @@ def main() -> None:
         assert supplement["directAdded"] == 2, supplement
         assert supplement["preserved"] == 1, supplement
         dispositions = {item["path"]: item for item in supplement["slots"]}
-        assert dispositions["/system_ext/fonts/HiddenUi-Regular.ttf"]["disposition"] == "direct"
+        assert dispositions["/system_ext/fonts/HiddenUiOpaque.bin"]["disposition"] == "direct"
         assert dispositions["/product/fonts/OemCollection.ttc"]["disposition"] == "preserved"
         assert dispositions["/product/fonts/OemCollection.ttc"]["reason"] == "preserved-collection"
         assert dispositions["/product/vivo/fonts/VivoFont.ttf"]["disposition"] == "direct"
         hidden_slots = [
             item for item in inventory_payload["slots"]
-            if item.get("inventoryPath") == "/system_ext/fonts/HiddenUi-Regular.ttf"
+            if item.get("inventoryPath") == "/system_ext/fonts/HiddenUiOpaque.bin"
         ]
         assert len(hidden_slots) == 1 and hidden_slots[0].get("generatedFile"), hidden_slots
         assert hidden_slots[0]["directPhysical"] is True

@@ -22,6 +22,11 @@ mkdir -p \
 cp "$ROOT/uninstall.sh" "$MODDIR/uninstall.sh"
 cp "$ROOT/common/private_payload.sh" "$MODDIR/common/private_payload.sh"
 cp "$ROOT/.luoshu-runtime/compat/v227/uninstall.sh" "$MODDIR/.luoshu-runtime/compat/v227/uninstall.sh"
+cat > "$MODDIR/common/dynamic_font_route_bridge.sh" <<'EOF_ROUTE'
+#!/bin/sh
+[ "$1" = restore ] || exit 1
+printf 'restored\n' > "$LUOSHU_DYNAMIC_RESTORE_TEST"
+EOF_ROUTE
 printf '%s\n' 'version=v-test' > "$MODDIR/module.prop"
 printf '%s\n' 'old log' > "$MODDIR/logs/fontswitch.log"
 printf '%s\n' 'keep sibling' > "$MODULES/OtherModule/module.prop"
@@ -38,6 +43,7 @@ LUOSHU_METAMODULE_MNT="$META_MNT" \
 LUOSHU_MAGIC_MOUNT_CONFIG="$MAGIC_CONFIG" \
 LUOSHU_SELF_MOUNT_STATE="$SELF_STATE" \
 LUOSHU_PRIVATE_STATE_ROOT="$PRIVATE_STATE" \
+LUOSHU_DYNAMIC_RESTORE_TEST="$TMP/dynamic-restored" \
 MODULE_CONTENT_DIR="$CONTENT_BASE" \
 sh "$MODDIR/uninstall.sh"
 
@@ -53,4 +59,5 @@ sh "$MODDIR/uninstall.sh"
 [ ! -e "$MAGIC_CONFIG.luoshu.123" ]
 grep -q 'partitions = \["system", "product"\]' "$MAGIC_CONFIG"
 [ ! -d "$MODULES/LuoShu/logs" ]
+[ "$(cat "$TMP/dynamic-restored")" = restored ]
 echo 'LuoShu uninstall cleanup checks passed.'

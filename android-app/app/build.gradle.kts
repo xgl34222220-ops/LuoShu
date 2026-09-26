@@ -28,6 +28,12 @@ val hasReleaseSigning = listOf(
     releaseKeyAlias,
     releaseKeyPassword,
 ).all { !it.isNullOrBlank() }
+// A stable separate test identity can coexist with old debug builds whose keys
+// came from ephemeral CI runners. Release and ordinary debug IDs stay unchanged.
+val previewBuild = providers.gradleProperty("luoshu.preview").orNull == "true"
+if (previewBuild && !hasReleaseSigning) {
+    error("Preview builds require explicit LUOSHU_KEYSTORE_* signing values; ephemeral debug keys cannot update the stable preview app.")
+}
 
 android {
     namespace = "io.github.xgl34222220.luoshu"
@@ -42,6 +48,7 @@ android {
         // module.prop is the only version source shared by the module, native App and CI artifacts.
         versionCode = moduleVersionCode * 100 + 1
         versionName = appVersionName
+        manifestPlaceholders["appLabel"] = "@string/app_name"
     }
 
     buildFeatures {
@@ -66,7 +73,8 @@ android {
 
     buildTypes {
         getByName("debug") {
-            applicationIdSuffix = ".debug"
+            applicationIdSuffix = if (previewBuild) ".preview" else ".debug"
+            if (previewBuild) manifestPlaceholders["appLabel"] = "洛书测试版"
             versionNameSuffix = "-debug"
             // Test packages remain installable over the existing debug app, but execute with release-like optimization.
             isDebuggable = false

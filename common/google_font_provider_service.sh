@@ -4,7 +4,9 @@ set +e
 
 MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
 BRIDGE="$MODDIR/common/google_font_provider_bridge.sh"
-THEME_BRIDGE="$MODDIR/common/hyperos_theme_font_bridge.sh"
+ROUTE_BRIDGE="$MODDIR/common/dynamic_font_route_bridge.sh"
+LEGACY_THEME_BRIDGE="$MODDIR/common/hyperos_theme_font_bridge.sh"
+LEGACY_THEME_JOURNAL="$MODDIR/config/hyperos-theme-font-namespaces.conf"
 LOCK="$MODDIR/.google-font-provider.lock"
 LOG="$MODDIR/logs/google-font-provider.log"
 
@@ -102,12 +104,20 @@ provider_watch_pause() {
     provider_pause "$1"
 }
 
+provider_cleanup_legacy_theme() {
+    # Upgrade cleanup only. The former fixed-path adapter must never apply again.
+    [ -s "$LEGACY_THEME_JOURNAL" ] || return 0
+    [ -f "$LEGACY_THEME_BRIDGE" ] || return 1
+    provider_restore_bridge "$LEGACY_THEME_BRIDGE"
+}
+
 provider_apply() {
+    provider_cleanup_legacy_theme || return 1
     provider_run "$BRIDGE" apply "$1"
     _provider_google_rc=$?
     _provider_theme_rc=2
-    if [ -f "$THEME_BRIDGE" ]; then
-        provider_run "$THEME_BRIDGE" apply 0
+    if [ -f "$ROUTE_BRIDGE" ]; then
+        provider_run "$ROUTE_BRIDGE" apply 0
         _provider_theme_rc=$?
     fi
     # Either adapter can need repair even when the other has no targets.
@@ -121,17 +131,18 @@ provider_apply() {
 provider_fingerprint() {
     _provider_google_fp=$(MODDIR="$MODDIR" sh "$BRIDGE" fingerprint 2>/dev/null) || return 1
     _provider_theme_fp=
-    if [ -f "$THEME_BRIDGE" ]; then
-        _provider_theme_fp=$(MODDIR="$MODDIR" sh "$THEME_BRIDGE" fingerprint 2>/dev/null) || return 1
+    if [ -f "$ROUTE_BRIDGE" ]; then
+        _provider_theme_fp=$(MODDIR="$MODDIR" sh "$ROUTE_BRIDGE" fingerprint 2>/dev/null) || return 1
     fi
     printf 'google|%s\ntheme|%s\n' "$_provider_google_fp" "$_provider_theme_fp"
 }
 
 provider_restore_theme() {
-    # Restore both adapters. Keep this function name for older lifecycle callers.
+    # Restore both current adapters and any recorded mount from the old theme adapter.
     _provider_cleanup_rc=0
     provider_restore_bridge "$BRIDGE" || _provider_cleanup_rc=1
-    [ ! -f "$THEME_BRIDGE" ] || provider_restore_bridge "$THEME_BRIDGE" || _provider_cleanup_rc=1
+    [ ! -f "$ROUTE_BRIDGE" ] || provider_restore_bridge "$ROUTE_BRIDGE" || _provider_cleanup_rc=1
+    provider_cleanup_legacy_theme || _provider_cleanup_rc=1
     return "$_provider_cleanup_rc"
 }
 

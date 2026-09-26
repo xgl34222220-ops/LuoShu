@@ -49,7 +49,8 @@ write_state() {
         printf 'mode=%s\n' "$MODE"
         printf 'detail=%s\n' "$_detail"
         printf 'updatedAt=%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo unknown)"
-    } > "$STATE" 2>/dev/null || true
+    } > "$STATE.tmp.$$" 2>/dev/null && mv -f "$STATE.tmp.$$" "$STATE" 2>/dev/null || true
+    rm -f "$STATE.tmp.$$" 2>/dev/null || true
 }
 
 if [ ! -s "$APK" ]; then
@@ -65,7 +66,7 @@ APK_SHA256=$(read_prop sha256 "$META")
 
 [ -n "$APP_PACKAGE" ] || APP_PACKAGE="io.github.xgl34222220.luoshu.debug"
 case "$APP_PACKAGE" in
-    io.github.xgl34222220.luoshu|io.github.xgl34222220.luoshu.debug) ;;
+    io.github.xgl34222220.luoshu|io.github.xgl34222220.luoshu.debug|io.github.xgl34222220.luoshu.preview) ;;
     *)
         log_app ERROR "拒绝安装未知包名：$APP_PACKAGE"
         touch "$PENDING" 2>/dev/null || true
@@ -73,6 +74,14 @@ case "$APP_PACKAGE" in
         exit 21
         ;;
 esac
+
+if [ "$APP_PACKAGE" = io.github.xgl34222220.luoshu.preview ]; then
+    if ! printf '%s\n' "$APK_SHA256" | grep -Eq '^[0-9a-f]{64}$' || ! command -v sha256sum >/dev/null 2>&1; then
+        log_app ERROR "测试版内置 APK 缺少可验证的 SHA-256，拒绝安装"
+        printf 'invalid-apk\n'
+        exit 22
+    fi
+fi
 
 case "$APP_VERSION_CODE" in
     ''|*[!0-9]*)
@@ -100,19 +109,55 @@ fi
 PM_BIN=$(resolve_tool "${APP_INSTALL_PM_BIN:-}" pm)
 DUMPSYS_BIN=$(resolve_tool "${APP_INSTALL_DUMPSYS_BIN:-}" dumpsys)
 TIMEOUT_BIN=$(resolve_tool "${APP_INSTALL_TIMEOUT_BIN:-}" timeout)
+QUERY_TIMEOUT=10
+INSTALL_TIMEOUT=60
+if [ "$MODE" = flash ]; then
+    QUERY_TIMEOUT=5
+    INSTALL_TIMEOUT=20
+    # Some recovery/flash namespaces have a reachable but unresponsive binder.
+    # Without a timeout utility even the version query can block the Root manager.
+    if [ -z "$TIMEOUT_BIN" ]; then
+        touch "$PENDING" 2>/dev/null || true
+        write_state deferred "刷写环境无法限制包管理等待时间，改为首次开机补装"
+        log_app INFO "刷写环境缺少 timeout，跳过同步调用包管理器"
+        printf 'deferred\n'
+        exit 10
+    fi
+fi
+
+query_package() {
+    if [ -n "$TIMEOUT_BIN" ]; then
+        "$TIMEOUT_BIN" "$QUERY_TIMEOUT" "$@" 2>/dev/null
+    else
+        # Outside the flashing flow preserve support for old Android toolboxes.
+        "$@" 2>/dev/null
+    fi
+}
 
 installed_version_code() {
     _dump=""
     if [ -n "$DUMPSYS_BIN" ]; then
-        _dump=$($DUMPSYS_BIN package "$APP_PACKAGE" 2>/dev/null)
+        _dump=$(query_package "$DUMPSYS_BIN" package "$APP_PACKAGE")
+        _query_code=$?
+        case "$_query_code" in 124|137) return 10 ;; esac
     fi
     if [ -z "$_dump" ] && [ -n "$PM_BIN" ]; then
-        _dump=$($PM_BIN dump "$APP_PACKAGE" 2>/dev/null)
+        _dump=$(query_package "$PM_BIN" dump "$APP_PACKAGE")
+        _query_code=$?
+        case "$_query_code" in 124|137) return 10 ;; esac
     fi
     printf '%s\n' "$_dump" | sed -n 's/.*versionCode=\([0-9][0-9]*\).*/\1/p' | head -n1
 }
 
 INSTALLED_VERSION=$(installed_version_code)
+_version_query_code=$?
+if [ "$_version_query_code" -eq 10 ]; then
+    touch "$PENDING" 2>/dev/null || true
+    write_state deferred "包管理服务查询超时，等待下次开机重试"
+    log_app INFO "包管理服务未响应，跳过本轮安装"
+    printf 'deferred\n'
+    exit 10
+fi
 if [ "$INSTALLED_VERSION" = "$APP_VERSION_CODE" ]; then
     PREVIOUS_APK_SHA256=$(read_prop apkSha256 "$STATE")
     if [ "$APK_SHA256" = unknown ] || [ "$PREVIOUS_APK_SHA256" = "$APK_SHA256" ]; then
@@ -135,10 +180,13 @@ fi
 
 log_app INFO "开始覆盖安装 $APP_PACKAGE，目标版本 $APP_VERSION_CODE，当前版本 ${INSTALLED_VERSION:-未安装}"
 if [ -n "$TIMEOUT_BIN" ]; then
-    INSTALL_RESULT=$($TIMEOUT_BIN 60 "$PM_BIN" install -r -d --user 0 "$APK" 2>&1)
+    # Only bound our package-manager client; never kill Android's installer service.
+    # A timed-out client may have submitted a session, so retry checks the installed
+    # version again before deciding what to do.
+    INSTALL_RESULT=$("$TIMEOUT_BIN" "$INSTALL_TIMEOUT" "$PM_BIN" install -r -d --user 0 "$APK" 2>&1)
     INSTALL_CODE=$?
 else
-    INSTALL_RESULT=$($PM_BIN install -r -d --user 0 "$APK" 2>&1)
+    INSTALL_RESULT=$("$PM_BIN" install -r -d --user 0 "$APK" 2>&1)
     INSTALL_CODE=$?
 fi
 

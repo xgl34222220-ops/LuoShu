@@ -18,7 +18,6 @@ fi
 LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 CURRENT_MANAGER="$MODDIR/common/font_manager_v4.sh"
 SAFE_SWITCH="$MODDIR/common/legacy_v14_4/font_switch_safe.sh"
-LEGACY_SWITCH="$MODDIR/common/legacy_v14_4_switch.sh"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 STOCK_SCANNER="$MODDIR/common/stock_inventory_scan.py"
@@ -156,6 +155,18 @@ stock_scan_json() {
     return 1
 }
 
+# Compatibility async APIs use the same detached safe-switch worker as the App.
+case "${1:-}:${2:-}" in
+    action:switch_async|action:switch_status)
+        _task_command=start
+        [ "$2" != switch_status ] || _task_command=status
+        [ -f "$MODDIR/common/font_switch_task.sh" ] || {
+            printf '{"status":"error","message":"字体切换任务组件缺失"}\n'; exit 1;
+        }
+        exec sh "$MODDIR/common/font_switch_task.sh" "$_task_command" "${3:-}"
+        ;;
+esac
+
 if [ "${1:-}" = action ] && [ "${2:-}" = switch ]; then
     # The legacy composite runtime creates a temporary family (LuoShuAutoMix etc.)
     # only as a source container. It must never become the persisted active font.
@@ -178,9 +189,6 @@ if [ "${1:-}" = action ] && [ "${2:-}" = switch ]; then
     fi
     if [ -f "$SAFE_SWITCH" ]; then
         exec sh "$SAFE_SWITCH" "$@"
-    fi
-    if [ -f "$LEGACY_SWITCH" ]; then
-        exec sh "$LEGACY_SWITCH" "$@"
     fi
     printf '{"status":"error","message":"%s"}\n' "$(json_escape_router '缺少字体切换核心')"
     exit 1

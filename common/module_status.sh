@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # 洛书：在 Root 管理器中显示简洁的当前字体状态。
-# module.prop 的“当前字体”只描述用户实际选择/挂载结果，不承担设备可信验证 UI。
+# module.prop 区分用户选择、待验证与有字节证据的生效状态。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -35,18 +35,27 @@ esac
 EFFECTIVE_DISPLAY="$DISPLAY"
 if [ "$ACTIVE" != default ]; then
     VERIFY="$MODDIR/config/device-font-load-verification.conf"
+    VERIFY_RC=2
+    if [ -f "$MODDIR/common/device_font_load_verify.sh" ]; then
+        MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
+            sh "$MODDIR/common/device_font_load_verify.sh" status >/dev/null 2>&1
+        VERIFY_RC=$?
+    fi
     VERIFY_STATE=$(sed -n 's/^state=//p' "$VERIFY" 2>/dev/null | head -n1)
+    VERIFY_ACTIVE=$(sed -n 's/^activeFont=//p' "$VERIFY" 2>/dev/null | head -n1)
     MOUNT_STATE=$(sed -n 's/^state=//p' "$MODDIR/config/self-mount.conf" 2>/dev/null | head -n1)
+    MOUNT_BACKEND=$(sed -n 's/^backend=//p' "$MODDIR/config/self-mount.conf" 2>/dev/null | head -n1)
 
-    # Root 管理器这里显示的是“当前字体”，不是验收页面。旧逻辑在字体已经肉眼生效时
-    # 仍会因为 v4 验证文件缺失/模式不同而长期写“待验证”，造成错误状态。现在只在
-    # 明确等待重启或明确失败时附加状态；其余情况直接显示当前字体。
     if [ -f "$MODDIR/config/text_reboot_required.conf" ]; then
         EFFECTIVE_DISPLAY="已配置：$DISPLAY（等待重启）"
-    elif [ "$MOUNT_STATE" = failed ] || [ "$VERIFY_STATE" = failed ]; then
+    elif [ "$MOUNT_STATE:$MOUNT_BACKEND" = failed:rollback ]; then
         EFFECTIVE_DISPLAY="系统默认字体（$DISPLAY 未生效）"
-    else
+    elif [ "$MOUNT_STATE" = failed ] || [ "$VERIFY_STATE" = failed ]; then
+        EFFECTIVE_DISPLAY="已选择：$DISPLAY（验证异常）"
+    elif [ "$VERIFY_STATE" = verified ] && [ "$VERIFY_RC" -eq 0 ] && [ "$VERIFY_ACTIVE" = "$ACTIVE" ]; then
         EFFECTIVE_DISPLAY="$DISPLAY"
+    else
+        EFFECTIVE_DISPLAY="已选择：$DISPLAY（待验证）"
     fi
 fi
 

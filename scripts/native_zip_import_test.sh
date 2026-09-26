@@ -160,6 +160,6 @@ FAMILY_RESULT=$(sh -c '
 ' sh "$ROOT" "$TMP")
 test "$FAMILY_RESULT" = '超级花轮丸|thin,black'
 grep -q '^supports_cjk=false$' "$TMP/public/fonts/超级花轮丸.conf"
-grep -q '_candidate_size.*_source_size' "$ROOT/common/native_import.sh"
+grep -q 'font_import_engine.py' "$ROOT/common/font_import.sh"
 
 echo 'Native font-module ZIP import bridge, internal-weight and italic-family regression tests passed.'

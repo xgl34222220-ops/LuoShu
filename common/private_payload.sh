@@ -164,7 +164,12 @@ luoshu_private_unmount_module_view() {
             _luoshu_private_umount_cmd "$_lpp_target" >/dev/null 2>&1 || true
         done
     fi
-    : > "$_lpp_list" 2>/dev/null || true
+    # A restore-only entry may run before any mount journal was created.
+    # Redirection of the special builtin ':' can terminate a POSIX shell even
+    # with `|| true`; do not create files or abort uninstall in that case.
+    if [ -f "$_lpp_list" ]; then
+        printf '%s' '' > "$_lpp_list" 2>/dev/null || true
+    fi
 
     if [ -s "$_lpp_symlinks" ]; then
         while IFS='|' read -r _lpp_target _lpp_source; do
@@ -177,6 +182,8 @@ luoshu_private_unmount_module_view() {
             [ -e "$_lpp_target" ] || mkdir -p "$_lpp_target" 2>/dev/null || true
         done < "$_lpp_symlinks"
     fi
-    : > "$_lpp_symlinks" 2>/dev/null || true
+    if [ -f "$_lpp_symlinks" ]; then
+        printf '%s' '' > "$_lpp_symlinks" 2>/dev/null || true
+    fi
     return 0
 }

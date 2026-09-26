@@ -5,7 +5,9 @@ ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-legacy-34)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
-MODULE="$TMP/module"
+MODULE="$TMP/module/.legacy-v14-runtime"
+LUOSHU_REAL_MODDIR="$TMP/module"
+export LUOSHU_REAL_MODDIR
 PUBLIC="$TMP/public"
 mkdir -p "$MODULE/common" "$MODULE/config" "$MODULE/cache" "$MODULE/logs" "$PUBLIC/fonts"
 cp "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh" "$MODULE/common/v142_weighted_mix.sh"
@@ -119,7 +121,7 @@ mkdir -p "$TMP/real-workdir"
 ln -s "$TMP/real-workdir" "$TMP/runtime-link"
 TEST_LINK="$TMP/runtime-link" sh "$HELPER"
 
-grep -q '^ensure_work_dir()' "$ROOT/common/font_mix.sh"
+grep -q 'exec sh "$MIX_ROUTER"' "$ROOT/common/font_mix.sh"
 grep -q '^ensure_work_dir()' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
 ! grep -Fq 'mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" "$MODDIR/logs"' "$ROOT/common/font_mix.sh"
 ! grep -Fq 'mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" "$MODDIR/logs"' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"

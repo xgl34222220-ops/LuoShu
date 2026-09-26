@@ -31,7 +31,7 @@ _gfp_locked() {
         luoshu_font_lock_acquire "$MODDIR/.google-font-provider-bridge.lock" "$$" || return 1
         _gfp_lock_held=1
         case "${0##*/}" in
-            google_font_provider_bridge.sh|hyperos_theme_font_bridge.sh)
+            google_font_provider_bridge.sh|hyperos_theme_font_bridge.sh|dynamic_font_route_bridge.sh)
                 # Entry scripts own their traps. A killed apply must release
                 # its lease before the service/installer attempts restore.
                 trap '_gfp_release_lock' EXIT

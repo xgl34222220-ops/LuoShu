@@ -74,15 +74,10 @@ class StockFontLinkTests(unittest.TestCase):
         self.assertTrue(inventory._read_metrics(alias, 0)[1]["coverage"]["hasHan"])
         self.assertEqual(self.resolve(self.system, name), stock)
 
-        checked = []
-        def check(path: Path, _script: Path) -> str:
-            checked.append(path)
-            self.assertFalse(inventory._read_metrics(path, 0)[1]["coverage"]["hasHan"])
-            return "TTF"
         slots = {}
-        with patch.object(inventory, "_font_check", check):
+        with patch.object(inventory, "_read_metrics", wraps=inventory._read_metrics) as reader:
             inventory._add_heuristic_slots(slots, self.roots, self.base / "font_check.sh")
-        self.assertEqual(checked, [stock, stock])
+        self.assertEqual([call.args[0] for call in reader.call_args_list], [stock, stock])
         inventory._populate_metrics(slots)
         system_key, product_key = str(self.system.logical / name), str(self.product.logical / name)
         self.assertEqual(slots[system_key]["metrics"], slots[product_key]["metrics"])

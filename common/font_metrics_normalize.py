@@ -20,6 +20,7 @@ from typing import Any, Iterable
 
 from fontTools.pens.boundsPen import BoundsPen
 from fontTools.ttLib import TTCollection, TTFont
+from fontTools.ttLib.tables.DefaultTable import DefaultTable
 
 CJK_PROBES = tuple(map(ord, "中文字体系统默认洛书国永"))
 UI_PROBES = tuple(map(ord, "中文国永AaHhx0123456789gjpqy"))
@@ -80,59 +81,7 @@ def load_inventory_contract(
     path: Path | None = None,
     target_slot: str | None = None,
 ) -> dict[str, Any] | None:
-    inventory = path or default_inventory_path()
-    try:
-        payload = json.loads(inventory.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return None
-    if not isinstance(payload, dict) or payload.get("schema") != INVENTORY_SCHEMA or payload.get("state") != "ready":
-        return None
-    try:
-        revision = int(payload.get("inventoryRevision", 0))
-    except (TypeError, ValueError):
-        return None
-    if revision != 1:
-        return None
-    current_key = _device_build_key()
-    recorded_key = str(payload.get("buildKey", ""))
-    if current_key and recorded_key != current_key:
-        return None
-    selected_slot = payload.get("mainSlot")
-    if target_slot:
-        slots = payload.get("slots")
-        selected_slot = slots.get(target_slot) if isinstance(slots, dict) else None
-    if not isinstance(selected_slot, dict):
-        return None
-    metrics = selected_slot.get("metrics")
-    if not isinstance(metrics, dict):
-        return None
-    hhea = metrics.get("hhea")
-    if not isinstance(hhea, dict):
-        return None
-    try:
-        upem = int(metrics.get("upem", 0))
-        ascent = int(hhea.get("ascent", 0))
-        descent = int(hhea.get("descent", 0))
-    except (TypeError, ValueError):
-        return None
-    if upem <= 0 or ascent <= 0 or descent >= 0:
-        return None
-    ascent_ratio = ascent / upem
-    descent_ratio = abs(descent) / upem
-    if not (0.40 <= ascent_ratio <= 1.60 and 0.05 <= descent_ratio <= 0.90):
-        return None
-    return {
-        "source": "inventory",
-        "inventory": str(inventory),
-        "buildKey": str(payload.get("buildKey", "")),
-        "slot": str(selected_slot.get("slotName", selected_slot.get("path", target_slot or ""))),
-        "slotPath": str(target_slot or selected_slot.get("path", "")),
-        "upem": upem,
-        "ascent": ascent,
-        "descent": descent,
-        "ascentRatio": ascent_ratio,
-        "descentRatio": descent_ratio,
-    }
+    return _batch_contract_from_payload(_load_batch_inventory(path), target_slot, path)
 
 
 def _is_collection(path: Path) -> bool:
@@ -310,6 +259,7 @@ def normalize_font_metrics(
     monospaced: bool = False,
     target_contract: dict[str, Any] | None = None,
     enclose_outlines: bool = True,
+    probe_bounds: dict[int, tuple[float, float, float, float]] | None = None,
 ) -> dict[str, object]:
     if "head" not in font or "hhea" not in font or "OS/2" not in font:
         raise MetricsError("字体缺少 head、hhea 或 OS/2 度量表")
@@ -317,7 +267,12 @@ def normalize_font_metrics(
     if upem < 16:
         raise MetricsError("字体 unitsPerEm 无效")
 
-    ui_bounds = glyph_bounds(font, UI_PROBES)
+    def bounds_for(points):
+        if probe_bounds is None:
+            return glyph_bounds(font, points)
+        return {cp: probe_bounds[cp] for cp in points if cp in probe_bounds}
+
+    ui_bounds = bounds_for(UI_PROBES)
     tops = [item[3] for item in ui_bounds.values()]
     bottoms = [item[1] for item in ui_bounds.values()]
     ui_top = max(tops, default=upem * 0.82)
@@ -358,6 +313,8 @@ def normalize_font_metrics(
     # includeFontPadding=true spacing unchanged.
     hhea_ascent = _clamp_signed(min(max(ascender, y_max), int(round(upem * HHEA_ASCENT_CAP_RATIO))))
     hhea_descent_abs = min(max(descender_abs, -y_min), int(round(upem * HHEA_DESCENT_CAP_RATIO)))
+    if not enclose_outlines:
+        hhea_ascent, hhea_descent_abs = ascender, descender_abs
     hhea = font["hhea"]
     hhea.ascent = hhea_ascent
     hhea.descent = _clamp_signed(-int(hhea_descent_abs))
@@ -378,8 +335,8 @@ def normalize_font_metrics(
     os2.usWinAscent = _clamp_unsigned(min(max(ascender, y_max), win_ascent_cap))
     os2.usWinDescent = _clamp_unsigned(min(max(descender_abs, -y_min), win_descent_cap))
 
-    cap_bounds = glyph_bounds(font, CAP_PROBES)
-    x_bounds = glyph_bounds(font, XHEIGHT_PROBES)
+    cap_bounds = bounds_for(CAP_PROBES)
+    x_bounds = bounds_for(XHEIGHT_PROBES)
     if cap_bounds:
         os2.sCapHeight = _clamp_signed(int(round(_median((b[3] for b in cap_bounds.values()), ascender))))
     if x_bounds:
@@ -435,12 +392,16 @@ def normalize_path(
     target_contract: dict[str, Any] | None = None,
     target_slot: str | None = None,
     strict_contract: bool = False,
+    _contract_resolved: bool = False,
+    _probe_cache: dict | None = None,
 ) -> dict[str, object]:
     contract = (
         target_contract
-        if target_contract is not None
+        if _contract_resolved or target_contract is not None
         else load_inventory_contract(inventory, target_slot=target_slot)
     )
+    if strict_contract and contract is not None and not monospaced:
+        return _fast_contract_normalize(source, output, contract, _probe_cache)
     font, face = load_font(source)
     try:
         report = normalize_font_metrics(
@@ -497,17 +458,20 @@ def _batch_contract_from_payload(
     if not isinstance(hhea, dict):
         return None
     try:
-        upem = int(metrics.get("upem", 0))
-        ascent = int(hhea.get("ascent", 0))
-        descent = int(hhea.get("descent", 0))
-    except (TypeError, ValueError):
+        values = (metrics["upem"], hhea["ascent"], hhea["descent"])
+        if any(isinstance(value, bool) for value in values):
+            return None
+        upem, ascent, descent = map(int, values)
+        if any(not isinstance(value, (int, str)) and value != int(value) for value in values):
+            return None
+    except (KeyError, TypeError, ValueError, OverflowError):
         return None
-    if upem <= 0 or ascent <= 0 or descent >= 0:
+    # Same FWORD/upem contract as the stock scanner. Clock faces can have a
+    # legitimate zero descent; never replace their metrics with the main slot.
+    if not 16 <= upem <= 16384 or not 0 < ascent <= 32767 or not -32768 <= descent <= 0:
         return None
     ascent_ratio = ascent / upem
     descent_ratio = abs(descent) / upem
-    if not (0.40 <= ascent_ratio <= 1.60 and 0.05 <= descent_ratio <= 0.90):
-        return None
     return {
         "source": "inventory",
         "inventory": str(inventory or default_inventory_path()),
@@ -543,6 +507,7 @@ def _fast_contract_normalize(
     source: Path,
     output: Path,
     contract: dict[str, Any] | None,
+    probe_cache: dict | None = None,
 ) -> dict[str, object]:
     """Fast per-slot path for coverage aliases.
 
@@ -570,49 +535,33 @@ def _fast_contract_normalize(
         with source.open("rb") as stream:
             font = TTFont(stream, **kwargs)
             try:
-                if "head" not in font or "hhea" not in font or "OS/2" not in font:
-                    raise MetricsError("字体缺少 head、hhea 或 OS/2 度量表")
-                upem = int(font["head"].unitsPerEm)
-                if upem < 16:
-                    raise MetricsError("字体 unitsPerEm 无效")
+                # Keep the exact existing line caps, cap/x-height probes and
+                # MVAR handling. Only serialization changes: no glyph geometry
+                # is edited for a strict non-monospace slot, so recompiling the
+                # whole donor is unnecessary (and very costly for CJK CFF).
+                probes = None
+                if probe_cache is not None:
+                    if "bounds" not in probe_cache:
+                        probe_cache["bounds"] = glyph_bounds(font, (*UI_PROBES, *CAP_PROBES, *XHEIGHT_PROBES))
+                    probes = probe_cache["bounds"]
+                report = normalize_font_metrics(
+                    font, target_contract=contract, enclose_outlines=False,
+                    probe_bounds=probes,
+                )
 
-                if contract is not None:
-                    ascent_ratio = float(contract["ascentRatio"])
-                    descent_ratio = float(contract["descentRatio"])
-                    metrics_source = "inventory"
-                else:
-                    ascent_ratio = TYPO_ASCENDER_RATIO
-                    descent_ratio = TYPO_DESCENDER_RATIO
-                    metrics_source = "fixed-fallback"
+                # Compile the changed tables before discarding decoded probes:
+                # OS/2.compile itself consults cmap. Keeping decoded cmap/hmtx
+                # around would recompile huge unmodified tables for every slot.
+                changed = {tag: font.getTableData(tag) for tag in ("head", "hhea", "OS/2")}
+                font.tables.clear()
+                for tag, data in changed.items():
+                    table = DefaultTable(tag)
+                    table.data = data
+                    font[tag] = table
 
-                ascender = _clamp_signed(int(round(upem * ascent_ratio)))
-                descender_abs = int(round(upem * descent_ratio))
-                descender = _clamp_signed(-descender_abs)
-
-                hhea = font["hhea"]
-                hhea.ascent = ascender
-                hhea.descent = descender
-                hhea.lineGap = 0
-
-                os2 = font["OS/2"]
-                _promote_os2_for_typo_metrics(os2)
-                os2.sTypoAscender = ascender
-                os2.sTypoDescender = descender
-                os2.sTypoLineGap = 0
-                os2.fsSelection |= 1 << 7
-                os2.usWinAscent = _clamp_unsigned(min(ascender, int(round(upem * WIN_ASCENT_CAP_RATIO))))
-                os2.usWinDescent = _clamp_unsigned(min(descender_abs, int(round(upem * WIN_DESCENT_CAP_RATIO))))
-
-                if "MVAR" in font:
-                    del font["MVAR"]
-
-                # Accessing metric tables must not make fontTools serialize huge CJK
-                # outline tables again. Drop decoded outline objects so save() copies
-                # the original reader bytes.
-                for tag in ("glyf", "CFF ", "CFF2", "gvar"):
-                    font.tables.pop(tag, None)
-
-                font.save(temporary, reorderTables=False)
+                # Writer dependency order is valid SFNT order. Avoid a second
+                # complete 16+ MB read/checksum/write just to restore tag order.
+                font.save(temporary, reorderTables=None)
             finally:
                 font.close()
 
@@ -624,20 +573,11 @@ def _fast_contract_normalize(
         temporary.unlink(missing_ok=True)
 
     return {
+        **report,
         "status": "ok",
         "input": str(source),
         "output": str(output),
         "face": face,
-        "upem": upem,
-        "ascender": ascender,
-        "descender": descender,
-        "lineGap": 0,
-        "metricsSource": metrics_source,
-        "targetSlot": contract.get("slot", "") if contract else "",
-        "targetBuildKey": contract.get("buildKey", "") if contract else "",
-        "targetUpem": int(contract.get("upem", 0)) if contract else 0,
-        "targetAscent": int(contract.get("ascent", 0)) if contract else 0,
-        "targetDescent": int(contract.get("descent", 0)) if contract else 0,
         "fastContract": True,
     }
 
@@ -659,13 +599,7 @@ def _batch_contract_identity(contract: dict[str, Any] | None) -> tuple:
 
 
 def _reuse_batch_output(source: Path, output: Path) -> None:
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.unlink(missing_ok=True)
-    try:
-        os.link(source, output)
-    except OSError:
-        shutil.copyfile(source, output)
-    os.chmod(output, 0o644)
+    _atomic_link_or_copy(source, output)
 
 
 def run_batch(manifest: Path, inventory: Path | None = None) -> int:
@@ -678,8 +612,12 @@ def run_batch(manifest: Path, inventory: Path | None = None) -> int:
     hard-link (or copy) the already-normalized output for equivalent slots.
     """
     failures = 0
+    # One validated snapshot for the whole batch; do not parse the complete ROM
+    # inventory and spawn getprop again for each physical alias.
+    inventory_payload = _load_batch_inventory(inventory)
     contracts: dict[str, dict[str, Any] | None] = {}
     reusable: dict[tuple, Path] = {}
+    probe_caches: dict[tuple, dict] = {}
     for raw in manifest.read_text().splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
@@ -690,7 +628,7 @@ def run_batch(manifest: Path, inventory: Path | None = None) -> int:
         target_slot = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
         contract_key = target_slot or ""
         if contract_key not in contracts:
-            contracts[contract_key] = load_inventory_contract(inventory, target_slot=target_slot)
+            contracts[contract_key] = _batch_contract_from_payload(inventory_payload, target_slot, inventory)
         contract = contracts[contract_key]
         try:
             reuse_key = (
@@ -717,6 +655,9 @@ def run_batch(manifest: Path, inventory: Path | None = None) -> int:
                 monospaced,
                 inventory=inventory,
                 target_contract=contract,
+                target_slot=target_slot,
+                _contract_resolved=True,
+                _probe_cache=probe_caches.setdefault(reuse_key[0], {}),
                 # Per-slot inventory metrics are already the authoritative line
                 # contract. Avoid a full-glyph CJK outline scan here. HyperOS
                 # critical UI slots get their head-frame pass separately.

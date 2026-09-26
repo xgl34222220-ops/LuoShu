@@ -106,11 +106,10 @@ luoshu_text_reboot_reconcile() {
     _lfbs_verify="$_lfbs_module_dir/common/device_font_load_verify.sh"
     [ -f "$_lfbs_verify" ] || return 2
     if [ "${LUOSHU_BOOT_RECONCILE_CACHED_ONLY:-0}" = 1 ]; then
-        # App connection reads only current-boot evidence. Hashing/comparing the
-        # full payload belongs to the boot verifier, never a 20-second UI query.
-        _lfbs_cached="$_lfbs_config/device-font-load-verification.conf"
-        [ "$(_lfbs_value "$_lfbs_cached" bootId)" = "$_lfbs_current_boot" ] || return 2
-        [ "$(_lfbs_value "$_lfbs_cached" activeFont)" = "$(head -n1 "$_lfbs_config/active_font.conf" 2>/dev/null)" ] || return 2
+        # Validate the small manifest and cached file identities too. Boot and
+        # selection alone cannot identify a newly activated/repaired payload.
+        # This does not hash font bytes during an App connection.
+        MODDIR="$_lfbs_module_dir" MODULE_DIR="$_lfbs_module_dir" sh "$_lfbs_verify" status >/dev/null 2>&1 || return 2
     else
         MODDIR="$_lfbs_module_dir" MODULE_DIR="$_lfbs_module_dir" sh "$_lfbs_verify" verify >/dev/null 2>&1
     fi

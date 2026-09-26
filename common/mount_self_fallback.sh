@@ -466,7 +466,7 @@ luoshu_self_mount_ensure() {
         while IFS='|' read -r _lsme_nested_part _lsme_nested_rel _lsme_nested_key; do
             [ -n "$_lsme_nested_part" ] && [ -n "$_lsme_nested_rel" ] && [ -n "$_lsme_nested_key" ] || continue
             _lsme_root=$(_luoshu_partition_root "$_lsme_nested_part") || {
-                _lsme_failed="\${_lsme_failed}\${_lsme_failed:+,}\${_lsme_nested_part}/\${_lsme_nested_rel}-root-unavailable"
+                _lsme_failed="${_lsme_failed}${_lsme_failed:+,}${_lsme_nested_part}/${_lsme_nested_rel}-root-unavailable"
                 continue
             }
             _lsme_upper="$_lsme_module/$_lsme_nested_part/$_lsme_nested_rel"
@@ -474,16 +474,16 @@ luoshu_self_mount_ensure() {
             [ -d "$_lsme_upper" ] && find "$_lsme_upper" -type f -print -quit 2>/dev/null | grep -q . || continue
             if _luoshu_overlay_mount_dir "$_lsme_upper" "$_lsme_target" "$_lsme_nested_key"; then
                 _lsme_overlay_count=$((_lsme_overlay_count + 1))
-                _lsme_mounted="\${_lsme_mounted}\${_lsme_mounted:+,}\${_lsme_nested_part}/\${_lsme_nested_rel}:overlay"
+                _lsme_mounted="${_lsme_mounted}${_lsme_mounted:+,}${_lsme_nested_part}/${_lsme_nested_rel}:overlay"
                 printf '%s\n' "$_lsme_target" >> "$_lsme_mount_list" 2>/dev/null || true
                 continue
             fi
             if _luoshu_bind_existing_fonts "$_lsme_upper" "$_lsme_target" "$_lsme_bind_list"; then
                 _lsme_bind_count=$((_lsme_bind_count + 1))
                 cat "$_lsme_bind_list" >> "$_lsme_mount_list" 2>/dev/null || true
-                _lsme_mounted="\${_lsme_mounted}\${_lsme_mounted:+,}\${_lsme_nested_part}/\${_lsme_nested_rel}:bind"
+                _lsme_mounted="${_lsme_mounted}${_lsme_mounted:+,}${_lsme_nested_part}/${_lsme_nested_rel}:bind"
             else
-                _lsme_failed="\${_lsme_failed}\${_lsme_failed:+,}\${_lsme_nested_part}/\${_lsme_nested_rel}-bind-incomplete"
+                _lsme_failed="${_lsme_failed}${_lsme_failed:+,}${_lsme_nested_part}/${_lsme_nested_rel}-bind-incomplete"
             fi
         done < "$_lsme_nested_file"
     fi

@@ -7,7 +7,6 @@ MODDIR="${0%/*}"
 MODULE_DIR="$MODDIR"
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
 V4_POST_MOUNT="$MODDIR/.luoshu-runtime/core/post-mount.sh"
-HYPEROS_LEGACY_COMPAT="$MODDIR/common/legacy_v14_4/hyperos_full_coverage.sh"
 
 if [ ! -f "$LEGACY_MODE" ]; then
     [ -f "$V4_POST_MOUNT" ] && exec sh "$V4_POST_MOUNT"
@@ -38,9 +37,8 @@ scan_stock_before_self_mount_postmount() {
 type luoshu_private_mount_module_view >/dev/null 2>&1 && \
     luoshu_private_mount_module_view "$MODDIR" >/dev/null 2>&1 || true
 
-[ -f "$HYPEROS_LEGACY_COMPAT" ] && . "$HYPEROS_LEGACY_COMPAT"
-type luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 && \
-    luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 || true
+# The foreground inventory builder owns all font generation; mounting does not
+# recreate missing files from a ROM filename list.
 
 # App-side su processes may live in a different KernelSU mount namespace and miss
 # captured bind lowers. Persist the stock metrics at the one guaranteed point:

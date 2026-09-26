@@ -59,11 +59,14 @@ ok grep -q "mix_stage weight-map '正在准备九档字体映射' 92" "$ROOT/com
 ok grep -q "mix_stage mono-map '正在生成等宽英文数字映射' 93" "$ROOT/common/font_finalize_hotfix.sh"
 ok test "$(grep -c '_luoshu_config_make_mono_weight .* 400' "$ROOT/common/font_finalize_hotfix.sh")" -eq 1
 
-# Finalization progress must reserve space after glyph generation and expose real stages.
-ok grep -q '完整复合字体已生成", 80' "$ROOT/common/composite_font.py"
-ok grep -q "mix_stage mount-sync '正在同步元模块字体负载' 96" "$ROOT/common/font_mix.sh"
-ok grep -q "mix_stage manifest '正在生成安全启动清单' 98" "$ROOT/common/font_mix.sh"
-no grep -q 'cp -af "$SYSTEM_FONTS_DIR/." "$PAYLOAD_STAGE/"' "$ROOT/common/font_mix.sh"
+# Overall progress stays below completion until inventory mapping and atomic
+# next-boot commit finish, including when glyph generation itself reports 100%.
+ok grep -q '\[ "$_mapped" -le 70 \] || _mapped=70' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
+ok grep -q 'mix_finalize_state_write ready .* 98' "$ROOT/common/legacy_v14_4/mix_router.sh"
+ok grep -q 'mix_finalize_state_write running .* 99' "$ROOT/common/legacy_v14_4/mix_router.sh"
+ok grep -q '正在按本机扫描清单映射全部可替换字体槽位' "$ROOT/common/legacy_v14_4/mix_router.sh"
+no grep -q 'cp -af' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
+no grep -q 'luoshu_sync_mount_payload' "$ROOT/common/font_mix.sh"
 ok grep -q '_progress_message=' "$ROOT/common/weighted_mix_task.sh"
 ok grep -q '完整复合字体后台进程已退出' "$ROOT/common/weighted_mix_task.sh"
 

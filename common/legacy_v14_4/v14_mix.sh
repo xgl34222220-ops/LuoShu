@@ -55,6 +55,11 @@ if [ -f "$WEIGHTED" ]; then
                 _latin_mode=$(infer_mix_weight_mode "$3" "${6:-wght=400}")
                 _digit_mode=$(infer_mix_weight_mode "$4" "${7:-wght=400}")
             fi
+            # Rebuild/compatibility callers may restore an explicit saved mode;
+            # ordinary App requests keep the existing mode inference.
+            case "${8:-}" in fixed|auto) _cjk_mode="$8" ;; esac
+            case "${9:-}" in fixed|auto) _latin_mode="$9" ;; esac
+            case "${10:-}" in fixed|auto) _digit_mode="${10}" ;; esac
             if [ -f "$AUTO_WEIGHTED" ]; then
                 sh "$AUTO_WEIGHTED" start "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" "$_cjk_mode" "$_latin_mode" "$_digit_mode"
             else

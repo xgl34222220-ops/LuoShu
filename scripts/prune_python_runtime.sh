@@ -30,8 +30,8 @@ rm -f \
   "$DYN"/_sqlite3.*.so
 rm -rf "$PYLIB/sqlite3"
 
-# Android font input is restricted to TTF/OTF/TTC. Zstandard is a two-megabyte extension used only
-# for optional archive compression and is absent from every LuoShu/FontTools execution trace.
+# Zstandard is used only for optional archive compression. TTF/OTF/TTC/OTC and
+# WOFF/WOFF2 import uses SFNT, zlib and the separately bundled Brotli decoder.
 rm -f "$DYN"/_zstd.*.so
 rm -rf "$PYLIB/compression/zstd"
 
@@ -110,3 +110,5 @@ test -s "$PYLIB/argparse.py"
 test -s "$PYLIB/hashlib.py"
 test -s "$PYLIB/tempfile.py"
 test -s "$PYLIB/xml/etree/ElementTree.py"
+test -x "$RUNTIME/bin/luoshu-brotli"
+test -s "$PYLIB/site-packages/brotli.py"

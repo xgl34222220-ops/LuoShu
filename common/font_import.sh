@@ -237,143 +237,28 @@ import_list_json() {
     printf ']}}\n'
 }
 
+# One Python process reads every archive member by magic, retains all families,
+# extracts TTC/OTC faces and converts web fonts before publishing validated SFNT.
+import_run_engine() {
+    _engine="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/font_import_engine.py"
+    if [ -n "${LUOSHU_IMPORT_PYTHON:-}" ]; then
+        "$LUOSHU_IMPORT_PYTHON" "$_engine" "$@"
+    elif [ -x "$IMPORT_PYBIN" ]; then
+        TMPDIR="${IMPORT_CACHE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}/cache/import}" \
+        PYTHONHOME="$IMPORT_PYROOT" \
+        PYTHONPATH="$IMPORT_PYROOT/lib/python3.14:$IMPORT_PYROOT/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$IMPORT_PYROOT/lib:$IMPORT_PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$IMPORT_PYBIN" "$_engine" "$@"
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 "$_engine" "$@"
+    else
+        printf '{"status":"error","message":"字体导入运行时不可用"}\n'
+        return 1
+    fi
+}
+
 import_zip_package() {
     _zip=$(find_import_zip "$1") || { printf '{"status":"error","message":"未找到指定 ZIP 字体包"}\n'; return 0; }
-    _zip_name=$(basename "$_zip")
-    _zip_bytes=$(wc -c < "$_zip" 2>/dev/null | tr -d '[:space:]')
-    case "$_zip_bytes" in ''|*[!0-9]*) _zip_bytes=0 ;; esac
-    if [ "$_zip_bytes" -le 0 ] || [ "$_zip_bytes" -gt "$IMPORT_MAX_ZIP_BYTES" ]; then
-        printf '{"status":"error","message":"ZIP 大小异常或超过 256 MB 限制"}\n'; return 0
-    fi
-    if ! command -v unzip >/dev/null 2>&1 && ! command -v busybox >/dev/null 2>&1; then
-        printf '{"status":"error","message":"系统缺少 unzip，无法导入字体包"}\n'; return 0
-    fi
-
-    _listing=$(import_unzip -l "$_zip" 2>/dev/null)
-
-    # 直接采用原模块 module.prop 的 name= 作为原生 App 显示名称。
-    _module_prop=$(import_zip_module_prop "$_zip" "$_listing")
-    _module_name=$(import_prop_value "$_module_prop" name)
-    _module_version=$(import_prop_value "$_module_prop" version)
-    _module_author=$(import_prop_value "$_module_prop" author)
-    [ -n "$_module_name" ] || _module_name="${_zip_name%.*}"
-    _display_name="$_module_name"
-    _package_label=$(import_package_label "$_display_name")
-    _declared=$(printf '%s\n' "$_listing" | awk 'BEGIN{n=0;s=0} $1 ~ /^[0-9]+$/ && tolower($0) ~ /\.(ttf|otf|ttc)([[:space:]]|$)/ {n++; s+=$1} END{printf "%d %d",n,s}')
-    set -- $_declared; _declared_count=${1:-0}; _declared_bytes=${2:-0}
-    case "$_declared_count" in ''|*[!0-9]*) _declared_count=0 ;; esac
-    case "$_declared_bytes" in ''|*[!0-9]*) _declared_bytes=0 ;; esac
-    if [ "$_declared_count" -le 0 ]; then printf '{"status":"error","message":"ZIP 中没有找到 TTF / OTF / TTC 字体"}\n'; return 0; fi
-    if [ "$_declared_count" -gt "$IMPORT_MAX_FILES" ] || [ "$_declared_bytes" -gt "$IMPORT_MAX_EXTRACT_BYTES" ]; then
-        printf '{"status":"error","message":"字体包内容过多（最多 128 个字体、解压后 512 MB）"}\n'; return 0
-    fi
-
-    _tmp="$IMPORT_CACHE_DIR/$(date +%s)-$$"
-    rm -rf "$_tmp" 2>/dev/null || true
-    mkdir -p "$_tmp" "$USER_FONTS_DIR" 2>/dev/null || { printf '{"status":"error","message":"无法创建导入临时目录"}\n'; return 0; }
-    for _pat in '*.ttf' '*.otf' '*.ttc' '*.TTF' '*.OTF' '*.TTC'; do
-        import_unzip -j -o "$_zip" "$_pat" -d "$_tmp" >/dev/null 2>&1 || true
-    done
-    find "$_tmp" -type l -exec rm -f {} \; 2>/dev/null || true
-
-    _manifest="$_tmp/.manifest"; : > "$_manifest"
-    _valid=0; _invalid=0; _ignored=0
-    for _f in "$_tmp"/*; do
-        [ -f "$_f" ] || continue
-        _base=$(basename "$_f")
-        case "$_base" in *'|'*) _ignored=$((_ignored + 1)); continue ;; esac
-        if import_is_icon_name "$_base"; then _ignored=$((_ignored + 1)); continue; fi
-        if ! font_validate "$_f" text 2>/dev/null; then _invalid=$((_invalid + 1)); continue; fi
-        if import_is_color_font_name "$_base" || [ "$FONT_CHECK_COLOR" = true ]; then _ignored=$((_ignored + 1)); continue; fi
-        _valid=$((_valid + 1))
-        _probe=$(import_probe_metadata "$_f" 2>/dev/null)
-        _probe_family=""; _probe_subfamily=""; _probe_weight=""; _probe_italic=""; _probe_variable=""; _probe_supports_cjk=""
-        if [ -n "$_probe" ]; then
-            IFS='|' read -r _probe_family _probe_subfamily _probe_weight _probe_italic _probe_variable _probe_supports_cjk <<EOF_PROBE
-$_probe
-EOF_PROBE
-        fi
-        _family="${_probe_family:-$(import_detect_family "$_base")}"
-        _variable="${_probe_variable:-$FONT_CHECK_VARIABLE}"
-        _size=$(wc -c < "$_f" 2>/dev/null | tr -d '[:space:]'); case "$_size" in ''|*[!0-9]*) _size=0 ;; esac
-        _class=$(import_name_class "$_base")
-        _role=$(import_weight_role_from_class "$_probe_weight" "$_base")
-        _italic="${_probe_italic:-false}"
-        _supports_cjk="${_probe_supports_cjk:-false}"
-        printf '%s|%s|text|%s|%s|%s|%s|%s|%s|%s|%s
-'             "$_family" "$_variable" "$_size" "$_base" "$_f" "$_class" "$_role" "${_probe_weight:-0}" "$_italic" "$_supports_cjk" >> "$_manifest"
-    done
-
-    if [ "$_valid" -le 0 ]; then rm -rf "$_tmp"; printf '{"status":"error","message":"没有字体通过真实格式检测"}\n'; return 0; fi
-
-    # 预选主文字字体：中文名称、字体族完整度和文件体积优先；VF 仅加分，不再无条件压过中文静态字重。
-    _best_score=-999999; _best_path=""; _best_family=""; _best_variable=false; _best_name=""; _best_class=neutral; _best_role=regular; _best_size=0; _best_supports_cjk=false
-    while IFS='|' read -r _family _variable _kind _size _base _path _class _role _weight_class _italic _supports_cjk; do
-        [ "$_kind" = text ] || continue
-        [ "$_italic" = true ] && continue
-        import_is_italic_name "$_base" && continue
-        _family_count=$(awk -F'|' -v f="$_family" '$1==f && $3=="text"{n++} END{print n+0}' "$_manifest")
-        _mb=$((_size / 1048576)); [ "$_mb" -gt 64 ] && _mb=64
-        _score=$((_mb * 120 + _family_count * 260))
-        [ "$_supports_cjk" = true ] && _score=$((_score + 12000))
-        case "$_class" in cjk) _score=$((_score + 7000)) ;; cjk_traditional) _score=$((_score + 4500)) ;; east_asian) _score=$((_score + 2500)) ;; latin) if [ "$_size" -lt 6291456 ]; then _score=$((_score - 5000)); else _score=$((_score - 1000)); fi ;; esac
-        [ "$_variable" = true ] && _score=$((_score + 1500))
-        case "$_role" in regular) _score=$((_score + 1400)) ;; medium) _score=$((_score + 900)) ;; semibold) _score=$((_score + 550)) ;; bold) _score=$((_score + 300)) ;; thin) _score=$((_score - 150)) ;; esac
-        if [ "$_size" -lt 1048576 ]; then _score=$((_score - 5000)); elif [ "$_size" -lt 3145728 ]; then _score=$((_score - 2500)); elif [ "$_size" -lt 6291456 ]; then _score=$((_score - 800)); fi
-        if [ "$_score" -gt "$_best_score" ]; then
-            _best_score=$_score; _best_path=$_path; _best_family=$_family; _best_variable=$_variable; _best_name=$_base; _best_class=$_class; _best_role=$_role; _best_size=$_size; _best_supports_cjk=$_supports_cjk
-        fi
-    done < "$_manifest"
-
-    if [ ! -f "$_best_path" ]; then rm -rf "$_tmp"; printf '{"status":"error","message":"字体包中没有可用文字字体；彩色、图标和符号字体已忽略"}\n'; return 0; fi
-
-    _family_count=$(awk -F'|' -v f="$_best_family" '$1==f && $3=="text"{n++} END{print n+0}' "$_manifest")
-    _imported_text=0; _mode=single; _target_name=""
-
-    if [ "$_best_variable" = true ]; then
-        _mode=variable; _ext=$(import_real_extension "$_best_path"); _target_name="${_package_label}-Variable.${_ext}"
-        _copied=$(import_copy_unique "$_best_path" "$USER_FONTS_DIR" "$_target_name") && { _target_name=$(basename "$_copied"); _imported_text=1; }
-    elif [ "$_family_count" -ge 2 ]; then
-        _mode=family
-        while IFS='|' read -r _family _variable _kind _size _base _path _class _role _weight_class _italic _supports_cjk; do
-            [ "$_kind" = text ] || continue; [ "$_family" = "$_best_family" ] || continue
-            [ "$_italic" = true ] && continue
-            import_is_italic_name "$_base" && continue
-            _label=$(import_weight_label "$_role"); _ext=$(import_real_extension "$_path"); _name="${_package_label}-${_label}.${_ext}"
-            _copied=$(import_copy_unique "$_path" "$USER_FONTS_DIR" "$_name") || continue
-            _imported_text=$((_imported_text + 1))
-            if [ "$_role" = regular ] && [ -z "$_target_name" ]; then _target_name=$(basename "$_copied"); fi
-            [ "$_path" = "$_best_path" ] && [ -z "$_target_name" ] && _target_name=$(basename "$_copied")
-        done < "$_manifest"
-        [ -n "$_target_name" ] || _target_name="${_package_label}-Regular.ttf"
-    else
-        # 单文件模块若存在多个系统别名，只对最终候选做 cmp，不再对全部文件反复 SHA-256。
-        _same=0
-        while IFS='|' read -r _family _variable _kind _size _base _path _class _role _weight_class _italic _supports_cjk; do
-            [ "$_kind" = text ] || continue; [ "$_size" = "$_best_size" ] || continue
-            cmp -s "$_best_path" "$_path" 2>/dev/null && _same=$((_same + 1))
-        done < "$_manifest"
-        [ "$_same" -ge 2 ] && _mode=deduplicated
-        _ext=$(import_real_extension "$_best_path"); _target_name="${_package_label}-Regular.${_ext}"
-        _copied=$(import_copy_unique "$_best_path" "$USER_FONTS_DIR" "$_target_name") && { _target_name=$(basename "$_copied"); _imported_text=1; }
-    fi
-
-    if [ "$_imported_text" -gt 0 ]; then
-        _font_id=$(detect_font_family "$_target_name")
-        _supports_cjk="${_best_supports_cjk:-false}"
-        import_write_font_config "$_font_id" "$_display_name" "$_zip_name" "$_module_version" "$_module_author" "$_supports_cjk" "$_best_variable" || true
-    fi
-
-    rm -rf "$_tmp" 2>/dev/null || true
-    if [ "$_imported_text" -le 0 ]; then printf '{"status":"error","message":"字体复制失败，请检查存储空间和目录权限"}\n'; return 0; fi
-
-    if [ "${_best_supports_cjk:-false}" = true ]; then
-        _reason="字体 cmap 已确认完整中文、拉丁与数字覆盖"
-    else
-        case "$_best_class" in cjk) _reason="中文命名字体缺少部分必要字形" ;; cjk_traditional) _reason="繁体命名字体缺少部分必要字形" ;; east_asian) _reason="东亚字体缺少部分必要字形" ;; latin) _reason="该模块主字体仅适合作为拉丁字体" ;; *) _reason="未检测到完整中文覆盖" ;; esac
-    fi
-    _message="已导入：$_display_name"
-    printf '{"status":"ok","data":{"package":"%s","id":"%s","displayName":"%s","selected":"%s","source":"%s","family":"%s","mode":"%s","supportsCjk":%s,"reason":"%s","familyFiles":%d,"importedText":%d,"valid":%d,"invalid":%d,"ignored":%d,"message":"%s"}}\n' \
-        "$(json_escape "$_zip_name")" "$(json_escape "$_font_id")" "$(json_escape "$_display_name")" "$(json_escape "$_target_name")" "$(json_escape "$_best_name")" "$(json_escape "$_best_family")" "$(json_escape "$_mode")" "${_supports_cjk:-false}" "$(json_escape "$_reason")" \
-        "$_family_count" "$_imported_text" "$_valid" "$_invalid" "$_ignored" "$(json_escape "$_message")"
+    mkdir -p "$IMPORT_CACHE_DIR" "$USER_FONTS_DIR" 2>/dev/null || return 1
+    import_run_engine --input "$_zip" --output-dir "$USER_FONTS_DIR" --label "$(basename "$_zip")"
 }

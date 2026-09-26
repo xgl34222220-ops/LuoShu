@@ -108,11 +108,24 @@ status_json() {
     fi
     _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
     [ -n "$_active" ] || _active='default'
+    # Refresh only cached evidence identities; this never hashes font files.
+    _verification_cache_rc=2
+    if [ -x "$PYBIN" ] && [ -f "$MODDIR/common/physical_font_load_verify.py" ]; then
+        PYTHONHOME="$PYROOT" \
+        PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$PYBIN" "$MODDIR/common/physical_font_load_verify.py" --module "$MODDIR" status >/dev/null 2>&1
+        _verification_cache_rc=$?
+    fi
     _verification_file="$MODDIR/config/device-font-load-verification.conf"
     _verification_state="$(read_prop "$_verification_file" state)"
     _verification_mode="$(read_prop "$_verification_file" mode)"
     _verification_reason="$(read_prop "$_verification_file" reason)"
     _verification_active="$(read_prop "$_verification_file" activeFont)"
+    if [ "$_verification_state" = verified ] && [ "$_verification_cache_rc" -ne 0 ]; then
+        _verification_state=pending
+        _verification_reason=verification-evidence-unavailable
+    fi
     _mount_state="$(read_prop "$MODDIR/config/self-mount.conf" state)"
     _mount_failed="$(read_prop "$MODDIR/config/self-mount.conf" failed)"
     [ -n "$_verification_state" ] || _verification_state='pending'
@@ -157,12 +170,12 @@ status_json() {
         _verification_mode=unknown
         _verification_reason=stale-verification
     elif [ "$_verification_state" = failed ] || [ "$_mount_state" = failed ]; then
-        # The atomic self-mount transaction rolls every LuoShu layer back on
-        # failure, so the only safe effective-font claim is the ROM default.
-        _effective_active=default
+        # A byte mismatch can affect only one slot. It does not prove that
+        # every selected font was replaced by the system default.
         _font_effect_state=failed
         if [ "$_mount_state" = failed ]; then
             _verification_reason=self-mount-failed
+            [ "$(read_prop "$MODDIR/config/self-mount.conf" backend)" != rollback ] || _effective_active=default
         fi
     elif [ "$_verification_state" = verified ]; then
         case "$_verification_mode" in
@@ -208,6 +221,23 @@ mix_ready() {
         return 1
     }
     return 0
+}
+
+mix_status_json() {
+    _mix_status_task="${1:-}"
+    # Older installed Apps poll mix_status for a mix coverage repair. The repair
+    # is now a normal switch task; recognize only its exact persisted identity.
+    # Never initialize/reconcile/finalize a composite engine for this task.
+    if [ -n "$_mix_status_task" ] &&
+       [ "$(read_prop "$SWITCH_TASK_FILE" task)" = "$_mix_status_task" ] &&
+       [ "$(read_prop "$SWITCH_TASK_FILE" font)" = mix ] &&
+       [ "$(read_prop "$SWITCH_TASK_FILE" coverageRemediate)" = true ]; then
+        switch_task_ready || return 1
+        MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" status "$_mix_status_task"
+        return $?
+    fi
+    mix_ready || return 1
+    MODDIR="$MODDIR" sh "$MIX_ENGINE" status "$_mix_status_task"
 }
 
 font_file_sha256() {
@@ -278,7 +308,8 @@ preview_export() {
     _weight="${3:-400}"
     case "$_dest" in
         /data/user/0/io.github.xgl34222220.luoshu/cache/*|/data/data/io.github.xgl34222220.luoshu/cache/*|\
-        /data/user/0/io.github.xgl34222220.luoshu.debug/cache/*|/data/data/io.github.xgl34222220.luoshu.debug/cache/*) ;;
+        /data/user/0/io.github.xgl34222220.luoshu.debug/cache/*|/data/data/io.github.xgl34222220.luoshu.debug/cache/*|\
+        /data/user/0/io.github.xgl34222220.luoshu.preview/cache/*|/data/data/io.github.xgl34222220.luoshu.preview/cache/*) ;;
         *) printf '{"status":"error","message":"预览目标目录不受信任"}\n'; return 1 ;;
     esac
     _src="$(find_preview_source "$_family" "$_weight")"
@@ -302,6 +333,42 @@ slot_trace_json() {
         printf '{"status":"error","message":"本机字体扫描清单不存在，请重新刷写或执行原厂字体扫描"}\n'
         return 1
     }
+
+    _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
+    [ -n "$_active" ] || _active=default
+    _physical_root="$MODDIR/.luoshu-payload"
+    _physical_prepared=false
+    _next_state="$MODDIR/config/font-payload-next.conf"
+    if [ "$(read_prop "$_next_state" state)" = prepared ] && \
+       [ "$(read_prop "$_next_state" font)" = "$_active" ] && \
+       [ -d "$MODDIR/.luoshu-payload-next" ]; then
+        _physical_root="$MODDIR/.luoshu-payload-next"
+        _physical_prepared=true
+    fi
+    _candidates="$MODDIR/config/device_font_candidates.json"
+
+    # The selected font is recorded before reboot. Its prepared tree, rather
+    # than the previous live font or an obsolete v2 cache, owns coverage then.
+    if [ "$_active" != default ] && [ -d "$_physical_root" ]; then
+        set -- "$SLOT_TRACE" \
+            --inventory "$_inventory" \
+            --physical-root "$_physical_root" \
+            --active-font "$_active" \
+            --output "$MODDIR/config/device-font-slot-trace.json"
+        [ ! -s "$_candidates" ] || set -- "$@" --candidates "$_candidates"
+        [ -z "$_remediation_plan" ] || set -- "$@" --remediation-plan "$_remediation_plan"
+        if [ "$_physical_prepared" = true ]; then
+            set -- "$@" --physical-prepared
+        else
+            set -- "$@" --mount-state "$MODDIR/config/self-mount.conf"
+            set -- "$@" --physical-verification "$MODDIR/config/device-font-physical-verification.json"
+        fi
+        PYTHONHOME="$PYROOT" \
+        PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$PYBIN" "$@"
+        return $?
+    fi
 
     _cache_id="$(read_prop "$MODDIR/config/device-font-engine.conf" cacheId)"
     _payload=''
@@ -332,8 +399,6 @@ slot_trace_json() {
     # content-addressed cache survived and still matches the current template,
     # source and inventory, recover it through the cache resolver instead of
     # requiring another font switch merely to populate cacheId again.
-    _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
-    [ -n "$_active" ] || _active=default
     if [ -z "$_payload" ] && [ "$_active" != default ] && [ -f "$DEVICE_FONT_CACHE" ]; then
         _lookup_root="$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$DEVICE_FONT_CACHE" lookup "$_active" 2>/dev/null || true)"
         case "$_lookup_root" in
@@ -344,40 +409,6 @@ slot_trace_json() {
                 fi
                 ;;
         esac
-    fi
-
-    _candidates="$MODDIR/config/device_font_candidates.json"
-
-    # Current LuoShu releases use the physical-safe next-boot payload as the
-    # authoritative runtime. It deliberately has no v2 device-font manifest.
-    # Trace that live payload directly instead of making the App depend on an
-    # obsolete manifest that the switch core never creates.
-    _runtime_core="$(read_prop "$MODDIR/config/font_runtime_legacy_v14_4.conf" core)"
-    if { [ "$_runtime_core" = physical-safe-v1 ] || [ ! -s "$_payload" ] || [ ! -s "$_overlay" ]; } && \
-       [ "$_active" != default ] && [ -d "$MODDIR/.luoshu-payload" ]; then
-        set -- "$SLOT_TRACE" \
-            --inventory "$_inventory" \
-            --physical-root "$MODDIR/.luoshu-payload" \
-            --active-font "$_active" \
-            --mount-state "$MODDIR/config/self-mount.conf" \
-            --output "$MODDIR/config/device-font-slot-trace.json"
-        [ ! -s "$_candidates" ] || set -- "$@" --candidates "$_candidates"
-        [ -z "$_remediation_plan" ] || set -- "$@" --remediation-plan "$_remediation_plan"
-
-        _load_state="$(read_prop "$MODDIR/config/device-font-load-verification.conf" state)"
-        _boot_state="$(read_prop "$MODDIR/config/font-payload-boot.conf" state)"
-        _mount_state="$(read_prop "$MODDIR/config/self-mount.conf" state)"
-        if [ "$_load_state" = verified ] || \
-           { [ "$_boot_state" = confirmed ] && \
-             { [ "$_mount_state" = mounted ] || [ "$_mount_state" = confirmed ] || [ "$_mount_state" = degraded ]; }; }; then
-            set -- "$@" --physical-confirmed
-        fi
-
-        PYTHONHOME="$PYROOT" \
-        PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
-        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-            "$PYBIN" "$@"
-        return $?
     fi
 
     [ -s "$_payload" ] && [ -s "$_overlay" ] || {
@@ -405,22 +436,24 @@ coverage_busy() {
     case "$_state" in queued|running) return 0 ;; *) return 1 ;; esac
 }
 
-coverage_mark_rebuild() {
-    _font="$1"
-    _pending="$MODDIR/config/font-payload-rebuild-pending.conf"
-    _tmp="${_pending}.tmp.$$"
-    mkdir -p "$MODDIR/config" 2>/dev/null || return 1
-    {
-        printf 'state=pending\n'
-        printf 'font=%s\n' "$_font"
-        printf 'reason=coverage-remediate\n'
-        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
-    } > "$_tmp" 2>/dev/null || return 1
-    mv -f "$_tmp" "$_pending" 2>/dev/null || { rm -f "$_tmp" 2>/dev/null; return 1; }
-    chmod 0600 "$_pending" 2>/dev/null || true
-}
-
-coverage_reapply() {
+coverage_reapply() (
+    # Hold the short enqueue transaction through plan creation and worker
+    # acknowledgement. A second tap must never delete the first worker's plan
+    # while that worker is still starting and has not published queued yet.
+    _coverage_start_lock="$MODDIR/.font_coverage_start.lock"
+    if [ ! -f "$MODDIR/common/font_switch_lock.sh" ]; then
+        printf '{"status":"error","message":"字体任务锁组件不可用，请重新安装模块"}\n'
+        return 1
+    fi
+    . "$MODDIR/common/font_switch_lock.sh"
+    if ! luoshu_font_lock_acquire "$_coverage_start_lock" "$$"; then
+        printf '{"status":"error","message":"字体补齐正在启动，请勿重复点击"}\n'
+        return 1
+    fi
+    trap 'luoshu_font_lock_release "$_coverage_start_lock" "$$" >/dev/null 2>&1 || true' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     coverage_busy && {
         printf '{"status":"error","message":"已有字体任务正在运行，请等待完成"}\n'
         return 1
@@ -431,8 +464,22 @@ coverage_reapply() {
         printf '{"status":"error","message":"当前使用系统默认字体，没有可补齐的洛书字体负载"}\n'
         return 1
     }
+    _rebuild="$MODDIR/config/font-payload-rebuild-pending.conf"
+    if [ -f "$_rebuild" ] && [ "$(read_prop "$_rebuild" reason)" != coverage-remediate ]; then
+        _rebuild_font="$(read_prop "$_rebuild" font)"
+        if [ -z "$_rebuild_font" ] || [ "$_rebuild_font" = "$_active" ]; then
+            printf '{"status":"error","message":"模块已更新，请完整重新应用一次当前字体或组合；补齐不会重建旧版整套字体"}\n'
+            return 1
+        fi
+    fi
+    if [ "$(read_prop "$MODDIR/config/font-payload-next.conf" state)" = prepared ] && \
+       [ "$(read_prop "$MODDIR/config/font-payload-next.conf" font)" = "$_active" ] && \
+       [ -d "$MODDIR/.luoshu-payload-next" ]; then
+        printf '{"status":"error","message":"新字体已准备完成，请先完整重启后再验证覆盖，无需重复补齐"}\n'
+        return 1
+    fi
     _plan="$MODDIR/config/font-coverage-remediation-paths.txt"
-    _plan_trace="$MODDIR/config/.font-coverage-remediation-trace.$"
+    _plan_trace="$MODDIR/config/.font-coverage-remediation-trace.$$"
     rm -f "$_plan" "$_plan_trace" 2>/dev/null || true
     if ! slot_trace_json "$_plan" > "$_plan_trace" 2>&1; then
         _plan_error="$(tail -n1 "$_plan_trace" 2>/dev/null)"
@@ -450,45 +497,20 @@ coverage_reapply() {
         return 1
     }
 
-    coverage_mark_rebuild "$_active" || {
-        rm -f "$_plan" 2>/dev/null || true
-        printf '{"status":"error","message":"无法创建字体补齐事务"}\n'
-        return 1
-    }
-
-    if [ "$_active" = mix ]; then
-        mix_ready || { rm -f "$MODDIR/config/font-payload-rebuild-pending.conf"; return 1; }
-        _source="$MODDIR/config/axes_mix.conf"
-        [ -s "$_source" ] || _source="$MODDIR/config/font_mix.conf"
-        _cjk="$(read_prop "$_source" cjk)"
-        _latin="$(read_prop "$_source" latin)"
-        _digit="$(read_prop "$_source" digit)"
-        _cjk_weight="$(read_prop "$_source" cjkWeight)"; [ -n "$_cjk_weight" ] || _cjk_weight=400
-        _latin_weight="$(read_prop "$_source" latinWeight)"; [ -n "$_latin_weight" ] || _latin_weight=400
-        _digit_weight="$(read_prop "$_source" digitWeight)"; [ -n "$_digit_weight" ] || _digit_weight=400
-        _cjk_axes="$(read_prop "$_source" cjkAxes)"; [ -n "$_cjk_axes" ] || _cjk_axes="wght=$_cjk_weight"
-        _latin_axes="$(read_prop "$_source" latinAxes)"; [ -n "$_latin_axes" ] || _latin_axes="wght=$_latin_weight"
-        _digit_axes="$(read_prop "$_source" digitAxes)"; [ -n "$_digit_axes" ] || _digit_axes="wght=$_digit_weight"
-        if [ -z "$_cjk" ] || [ -z "$_latin" ] || [ -z "$_digit" ]; then
-            rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" 2>/dev/null || true
-            printf '{"status":"error","message":"当前组合字体配置不完整，无法自动补齐"}\n'
-            return 1
-        fi
-        _out="$(LUOSHU_FORCE_REBUILD=1 LUOSHU_COVERAGE_REMEDIATE=1 LUOSHU_COVERAGE_PLAN="$_plan" MODDIR="$MODDIR" sh "$MIX_ENGINE" start "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" 2>&1)"
-        _rc=$?
-    else
-        switch_task_ready || { rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" "$_plan"; return 1; }
-        _out="$(LUOSHU_FORCE_REBUILD=1 LUOSHU_COVERAGE_REMEDIATE=1 LUOSHU_COVERAGE_PLAN="$_plan" MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "$_active" 2>&1)"
-        _rc=$?
-    fi
+    # Repair the activated payload, including its pinned composite sources and
+    # per-role weight manifest. Recreating a mix from the mutable font library or
+    # saved UI recipe can change fonts, axes and fixed/auto modes during repair.
+    switch_task_ready || { rm -f "$_plan"; return 1; }
+    _out="$(LUOSHU_FORCE_REBUILD=1 LUOSHU_COVERAGE_REMEDIATE=1 LUOSHU_COVERAGE_PLAN="$_plan" MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" start "$_active" 2>&1)"
+    _rc=$?
     if [ "$_rc" -ne 0 ] || printf '%s\n' "$_out" | grep -q '"status":"error"'; then
-        rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" "$_plan" 2>/dev/null || true
+        rm -f "$_plan" 2>/dev/null || true
         printf '%s\n' "$_out"
         [ "$_rc" -ne 0 ] && return "$_rc"
         return 1
     fi
     printf '%s\n' "$_out"
-}
+)
 
 coverage_verify() {
     [ -f "$LOAD_VERIFY" ] && MODDIR="$MODDIR" sh "$LOAD_VERIFY" verify >/dev/null 2>&1 || true
@@ -577,8 +599,8 @@ case "${1:-status}" in
     switch_status) switch_task_ready || exit 1; MODDIR="$MODDIR" sh "$FONT_SWITCH_TASK" status "${2:-}" ;;
     delete) manager_ready || exit 1; sh "$FONT_MANAGER" action delete "${2:-}" ;;
     mix_config) mix_ready || exit 1; sh "$MIX_ENGINE" config ;;
-    mix_start) mix_ready || exit 1; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" ;;
-    mix_status) mix_ready || exit 1; sh "$MIX_ENGINE" status "${2:-}" ;;
+    mix_start) mix_ready || exit 1; sh "$MIX_ENGINE" start "${2:-}" "${3:-}" "${4:-}" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" "${8:-infer}" "${9:-infer}" "${10:-infer}" ;;
+    mix_status) mix_status_json "${2:-}" ;;
     reboot) manager_ready || exit 1; sh "$FONT_MANAGER" action reboot_device ;;
     logs)
         _lines="${2:-160}"

@@ -53,7 +53,7 @@ grep -q 'CoverageGroup' "$COVERAGE"
 grep -q '按状态' "$COVERAGE"
 grep -q '按分区' "$COVERAGE"
 grep -q '复制此项信息' "$COVERAGE"
-grep -q 'MetricSpec("字体槽位", summary.total' "$COVERAGE"
+grep -q 'MetricSpec("扫描路径", summary.total' "$COVERAGE"
 grep -q 'scanned = summaryJson.optInt("censusSlots"' "$COVERAGE"
 ! grep -q 'MetricSpec("扫描总数"' "$COVERAGE"
 

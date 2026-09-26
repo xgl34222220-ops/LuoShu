@@ -17,6 +17,7 @@ import tempfile
 
 from fontTools.ttLib import TTFont
 from fontTools import subset
+import font_instance
 from font_metrics_normalize import _device_build_key, _pick_face, _promote_os2_for_typo_metrics
 from font_slot_coverage import (is_han, is_cjk_routing_codepoint, remove_cjk_mappings,
                                 preferred_unicode_codepoints, valid_coverage)
@@ -54,26 +55,94 @@ class MissingWeightSource(ValueError):
     pass
 
 
-def pick_source(fonts: Path, name: str) -> Path:
+class VariableWeightSources:
+    """Materialize missing weights from trusted source anchors once per batch."""
+
+    def __init__(self, fonts: Path, outputs: Path):
+        self.store = fonts / '.luoshu-font-store'
+        self.outputs = outputs
+        self.faces = {}
+        self.ranges = {}
+        self.instances = {}
+
+    def pick(self, weight: int) -> Path | None:
+        # A composite is the complete selected CJK/Latin/digit result. Never
+        # substitute one of its original variable donors for that result, or
+        # restore axes which the user explicitly fixed while composing it.
+        names = (('mix-composite.font',) if nonempty(self.store / 'mix-composite.font')
+                 else ('variable.font', 'regular.font', 'compact-regular.font'))
+        for name in names:
+            source = self.store / name
+            if not nonempty(source):
+                continue
+            stat = source.stat()
+            identity = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+            key = (identity, weight)
+            if key in self.instances:
+                return self.instances[key]
+            # A collection can choose a different real face for each weight.
+            # Axis metadata is still decoded once per physical face, and no
+            # font is instanced once per alias/partition.
+            if key not in self.faces:
+                self.faces[key] = font_instance.pick_face(source, 'cjk', weight)
+            face = self.faces[key]
+            profile_key = (identity, face)
+            if profile_key not in self.ranges:
+                options = {'fontNumber': face} if face >= 0 else {}
+                with TTFont(source, lazy=True, recalcTimestamp=False, **options) as font:
+                    weight_range = None
+                    if 'fvar' in font:
+                        for axis in font['fvar'].axes:
+                            if axis.axisTag != 'wght':
+                                continue
+                            low = font_instance.finite_number(axis.minValue, 'wght 最小值')
+                            default = font_instance.finite_number(axis.defaultValue, 'wght 默认值')
+                            high = font_instance.finite_number(axis.maxValue, 'wght 最大值')
+                            if not low <= default <= high:
+                                raise ValueError('字体 wght 轴范围无效')
+                            weight_range = (low, high)
+                    self.ranges[profile_key] = weight_range
+            weight_range = self.ranges[profile_key]
+            if weight_range is None or not weight_range[0] <= weight <= weight_range[1]:
+                continue
+            output = self.outputs / f'weight-{len(self.instances)}-{weight}.font'
+            # This fixes every other axis at its selected source default and
+            # validates the static result. Corruption/instancing failures abort
+            # the isolated transaction instead of being reported as missing weight.
+            report = font_instance.materialize(source, output, 'cjk', weight,
+                                               {'wght': weight}, preserve_metrics=True)
+            if report['weight'] != weight:
+                raise ValueError(f'可变字体未生成所需 {weight} 字重')
+            self.instances[key] = output
+            return output
+        return None
+
+
+def pick_source(fonts: Path, name: str, variable_sources: VariableWeightSources | None = None) -> Path:
     weight = weight_for_name(name)
     store = fonts / '.luoshu-font-store'
-    role = WEIGHT_ROLES.get(weight, 'regular')
+    role = WEIGHT_ROLES.get(weight)
 
     # Weight-specific physical files must be backed by a real matching static
     # source. The old fallback chain eventually returned regular.font for
     # Roboto-Bold/700.ttf, recreating exactly the “status bar digits become
     # thin” failure even after the aligned builder learned real weight truth.
-    exact = (
+    exact = [
         fonts / f'LuoShu-{weight}.ttf',
         store / f'wght-{weight}.font',
-        store / f'{role}.font',
-        fonts / f'{weight}.ttf',
-    )
+    ]
+    if role is not None:
+        exact.append(store / f'{role}.font')
+    exact.append(fonts / f'{weight}.ttf')
     for path in exact:
         if nonempty(path):
             return path
 
     if weight != 400:
+        if variable_sources is not None:
+            variable = variable_sources.pick(weight)
+            if variable is not None:
+                return variable
         raise MissingWeightSource(f'缺少真实 {weight} 字重源：{name}')
 
     # Only the Regular class may use generic/staged regular fallbacks.
@@ -149,14 +218,32 @@ def contract_for_slot(data: dict, logical: str) -> tuple:
         return (1000, 980, -300, 0, 980, -300, 0, 980, 350, True, None, 'fallback')
 
 
-def _latin_ink_bottom(font: TTFont) -> int | None:
-    """Bound Latin descenders without scanning or recompiling CJK outlines."""
+def _latin_ink_bottom(font: TTFont, limit: int | None = None) -> int | None:
+    """Prove the retained face fits before reducing its bitmap envelope.
+
+    A Latin UI alias can still encode extended Latin, Greek, combining marks,
+    protected CJK variations and GSUB alternates. The old ASCII/Latin-only
+    probe could crop these after concluding that the face fit the descent.
+    Stop as soon as any reachable glyph disproves the requested bound.
+    """
     if 'fvar' in font:
         return None  # Default-axis bounds cannot prove other variable instances.
-    cmap = font.getBestCmap() or {}
-    names = {name for cp, name in cmap.items()
-             if 0x20 <= cp <= 0x24f or 0x300 <= cp <= 0x36f}
+    names = set()
+    for table in font['cmap'].tables:
+        if table.format == 14:
+            names.update(name for entries in table.uvsDict.values()
+                         for _, name in entries if name is not None)
+        else:
+            names.update(table.cmap.values())
+    if 'GSUB' in font:
+        closure = subset.Subsetter()
+        closure.glyphs = names
+        font['GSUB'].closure_glyphs(closure)
+        names = closure.glyphs
     if not names:
+        return None
+    # Color and bitmap bounds are not covered by this outline-only proof.
+    if any(tag in font for tag in ('COLR', 'SVG ', 'CBDT', 'sbix')):
         return None
     bottom = 0
     if 'glyf' in font:
@@ -169,6 +256,8 @@ def _latin_ink_bottom(font: TTFont) -> int | None:
             if not 0 <= start <= end - 10 <= len(raw) - 10:
                 raise ValueError('invalid glyph header')
             bottom = min(bottom, struct.unpack_from('>hhhhh', raw, start)[2])
+            if limit is not None and bottom < limit:
+                return bottom
     else:
         from fontTools.pens.boundsPen import BoundsPen
         glyphs = font.getGlyphSet()
@@ -177,6 +266,8 @@ def _latin_ink_bottom(font: TTFont) -> int | None:
             glyphs[name].draw(pen)
             if pen.bounds is not None:
                 bottom = min(bottom, pen.bounds[1])
+                if limit is not None and bottom < limit:
+                    return bottom
     return bottom
 
 
@@ -225,7 +316,8 @@ def compact_routed_source(source: Path, output: Path, routing: frozenset[int],
 def write_metrics(source: Path, output: Path, contract: tuple,
                   cjk_fallback_codepoints: frozenset[int] | None = None,
                   stock_cjk_punctuation: frozenset[int] = frozenset(), *,
-                  align_bitmap_bottom: bool = False) -> dict:
+                  align_bitmap_bottom: bool = False,
+                  ink_bounds_cache: dict | None = None) -> dict:
     # lazy + recalcBBoxes=False retains glyf/CFF/gvar as raw tables. Loading glyph
     # bounds just to change hhea/OS2 used to recompile entire CJK fonts per slot.
     face = _pick_face(source)
@@ -268,7 +360,18 @@ def write_metrics(source: Path, output: Path, contract: tuple,
             descent = values[4] if contract[9] else values[1]
             if descent < 0 and head.yMin < descent:
                 try:
-                    ink_bottom = _latin_ink_bottom(font)
+                    # Probe the common source BEFORE per-slot cmap pruning:
+                    # its punctuation union bounds every slot that reuses this
+                    # cache entry, including a later slot retaining a deep mark.
+                    # Moving remove_cjk_mappings above this point requires the
+                    # routing/punctuation contract in the cache key as well.
+                    bounds_key = (str(source), descent)
+                    if ink_bounds_cache is not None and bounds_key in ink_bounds_cache:
+                        ink_bottom = ink_bounds_cache[bounds_key]
+                    else:
+                        ink_bottom = _latin_ink_bottom(font, descent)
+                        if ink_bounds_cache is not None:
+                            ink_bounds_cache[bounds_key] = ink_bottom
                 except (KeyError, ValueError, IndexError, TypeError, struct.error):
                     ink_bottom = None
                 if ink_bottom is None:
@@ -289,8 +392,9 @@ def write_metrics(source: Path, output: Path, contract: tuple,
         # cmap glyph-name resolution can lazily load CFF to learn the glyph
         # order. Discard only those unmodified decoded tables so save copies
         # their original reader bytes instead of reserializing the outlines.
-        for tag in ('glyf', 'CFF ', 'CFF2', 'gvar'):
-            font.tables.pop(tag, None)
+        for tag in list(font.tables):
+            if tag not in ('head', 'hhea', 'OS/2', 'cmap'):
+                font.tables.pop(tag, None)
         font.save(output, reorderTables=False)
         report = {'sourceUpem': upem, 'sourceHead': list(source_frame),
                   'outputHead': [int(head.yMin), int(head.yMax)],
@@ -320,6 +424,9 @@ def link_copy(source: Path, dest: Path) -> None:
 
 def _specialized_slot(logical: str, slot: dict) -> bool:
     label = ' '.join([Path(logical).name, *slot.get('families', [])]).lower()
+    # "SemiCondensed" contains "icon" across the style word boundary.
+    # It is a regular text family; keep actual additional Icon tokens protected.
+    label = label.replace('semicondensed', '')
     return any(token in label for token in
                ('clock', 'mitype', 'mono', 'symbol', 'icon', 'emoji', 'math', 'music'))
 
@@ -333,7 +440,10 @@ def _latin_ui_slot(logical: str, slot: dict) -> bool:
                                   'oplus-sans')) for family in families)
             or name.startswith(('roboto', 'misanslatin', 'googlesans', 'syssans', 'sysfont',
                                 'sourcesanspro', 'opposans', 'oplussans', 'opsans',
-                                'notosans-', 'notosansui-', 'droidsans')))
+                                'notosans-', 'notosansui-', 'droidsans', 'notosansdisplay',
+                                'notosanscondensed', 'notosanssemicondensed',
+                                'notosansextracondensed', 'notosansvf', 'notosansvariable',
+                                'notosansuivf')))
 
 
 def bitmap_bottom_slot(data: dict, logical: str, contract: tuple) -> bool:
@@ -345,6 +455,8 @@ def bitmap_bottom_slot(data: dict, logical: str, contract: tuple) -> bool:
     coverage = slot.get('metrics', {}).get('coverage')
     if valid_coverage(coverage) and (_stock_has_cjk_ideographs(coverage) or not coverage['hasLatin']):
         return False
+    if valid_coverage(coverage):
+        return _latin_ui_slot(logical, slot)
     name = Path(logical).name.lower()
     return name.startswith(('roboto', 'misanslatin', 'googlesans', 'sysfont-regular',
                             'sysfont-static', 'syssans-en-', 'sysfont-en-',
@@ -417,6 +529,16 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     if stage.resolve() == (module / '.luoshu-payload').resolve():
         raise ValueError('拒绝修改本次启动正在使用的字体负载')
     fonts = stage / 'system/fonts'
+    store = fonts / '.luoshu-font-store'
+    store.mkdir(parents=True, exist_ok=True)
+    # Scope the source instances across discovery, generation and linking so a
+    # failed discovery cannot leave large temporary fonts in a reusable stage.
+    with tempfile.TemporaryDirectory(prefix='hyperos-weights-', dir=store) as temporary:
+        return _build(module, stage, names, VariableWeightSources(fonts, Path(temporary)))
+
+
+def _build(module: Path, stage: Path, names: list[str], variable_sources: VariableWeightSources) -> dict:
+    fonts = stage / 'system/fonts'
     data = read_inventory(module)
     jobs = []
     preserved_aliases = []
@@ -446,7 +568,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 continue
             if (root / name).exists():
                 try:
-                    source = pick_source(fonts, name)
+                    source = pick_source(fonts, name, variable_sources)
                 except MissingWeightSource:
                     # Remove any generic Regular alias staged earlier so Overlay
                     # falls through to the ROM's genuine weight file.
@@ -462,6 +584,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     outputs = Path(tempfile.mkdtemp(prefix='hyperos-metrics-', dir=store))
     cache = {}
     compact_sources = {}
+    ink_bounds_cache = {}
     output_reports = {}
     # Generate every distinct source/contract before replacing even one alias.
     # Thus subsequent sources cannot accidentally refer to earlier outputs.
@@ -469,6 +592,18 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     slot_report = []
     fallback = 0
     try:
+        # Stock Latin slots differ in which CJK punctuation they originally
+        # encode. Subsetting the entire donor for every punctuation contract is
+        # expensive. Retain their small union once, then prune each slot's cmap
+        # independently below; unreachable punctuation outlines are harmless.
+        punctuation_by_source = {}
+        for source, dest, contract in jobs:
+            logical = '/' + dest.relative_to(stage).as_posix()
+            routing, punctuation, _ = _cjk_routing(data, logical, cjk_fallback)
+            if routing and contract[-1] == 'stock':
+                stat = source.stat()
+                source_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, routing)
+                punctuation_by_source.setdefault(source_key, set()).update(punctuation)
         for source, dest, contract in jobs:
             stat = source.stat()
             logical = '/' + dest.relative_to(stage).as_posix()
@@ -483,14 +618,15 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                 metric_source, compact_removed = source, 0
                 if routing:
                     source_key = (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns,
-                                  routing, stock_punctuation)
+                                  routing)
                     if source_key not in compact_sources:
                         compact_sources[source_key] = compact_routed_source(
                             source, outputs / f'source-{len(compact_sources)}.font',
-                            routing, stock_punctuation)
+                            routing, frozenset(punctuation_by_source[source_key]))
                     metric_source, compact_removed = compact_sources[source_key]
                 output_reports[key] = write_metrics(metric_source, output, contract, routing, stock_punctuation,
-                                                    align_bitmap_bottom=align_bottom)
+                                                    align_bitmap_bottom=align_bottom,
+                                                    ink_bounds_cache=ink_bounds_cache)
                 output_reports[key]['removedCjkMappings'] += compact_removed
                 cache[key] = output
             prepared.append((cache[key], dest))

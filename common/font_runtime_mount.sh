@@ -180,6 +180,7 @@ luoshu_self_mount_ensure() {
             }
             _lsme_component_count=$((_lsme_component_count + 1))
             _lsme_mounted="${_lsme_mounted}${_lsme_mounted:+,}${_lsme_partition}/${_lsme_rel}:${_lsme_mode}"
+            _lsme_any_fonts_ok=1
         done <<EOF_LUOSHU_EXTRA_FONT_ROOTS
 $(_luoshu_runtime_extra_font_roots)
 EOF_LUOSHU_EXTRA_FONT_ROOTS

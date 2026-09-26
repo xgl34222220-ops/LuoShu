@@ -21,7 +21,6 @@ import org.json.JSONObject
 
 private const val IMPORT_BRIDGE = "/data/adb/modules/LuoShu/common/app_bridge.sh"
 private const val MAX_IMPORT_BYTES = 268_435_456L
-private val ALLOWED_IMPORT_EXTENSIONS = setOf("ttf", "otf", "ttc", "zip")
 
 internal enum class NativeImportPhase(val wireName: String) {
     IDLE("idle"),
@@ -397,8 +396,9 @@ internal class NativeImportViewModel(application: Application) : AndroidViewMode
 }
 
 private suspend fun importOne(context: android.content.Context, uri: Uri, displayName: String): ImportOutcome {
-    val extension = displayName.substringAfterLast('.', "").lowercase()
-    require(extension in ALLOWED_IMPORT_EXTENSIONS) { "仅支持 TTF、OTF、TTC 和 ZIP" }
+    // The backend recognizes file signatures, including suffixless fonts and renamed modules.
+    val extension = displayName.substringAfterLast('.', "bin").lowercase()
+        .filter { it.isLetterOrDigit() }.take(8).ifBlank { "bin" }
 
     val cacheDir = File(context.cacheDir, "native_import")
     cacheDir.mkdirs()
@@ -408,7 +408,7 @@ private suspend fun importOne(context: android.content.Context, uri: Uri, displa
         val result = RootShell.exec(
             "sh ${RootShell.quote(IMPORT_BRIDGE)} import_file " +
                 "${RootShell.quote(temp.absolutePath)} ${RootShell.quote(displayName)}",
-            timeoutMs = if (extension == "zip") 180_000L else 60_000L,
+            timeoutMs = 180_000L,
         )
         if (result.code != 0) error(result.stderr.ifBlank { "Root 导入失败" })
         val root = firstImportJson(result.stdout)

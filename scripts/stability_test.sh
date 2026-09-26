@@ -14,8 +14,8 @@ cp "$ROOT/common/legacy_v14_4/mix_router.sh" "$MODULE/common/legacy_v14_4/mix_ro
 cp "$ROOT/common/font_mix.sh" "$MODULE/common/font_mix.sh"
 cp "$ROOT/module.prop" "$MODULE/module.prop"
 
-# 状态查询不得触发真正的字体切换；Root 管理器的“当前字体”也不得在字体已
-# 选择/生效后长期显示“待验证”。可信验证属于 App 验收页，不污染模块描述。
+# 状态查询不得触发真正的字体切换；缺少本次启动的字节证据时，
+# Root 管理器保留用户选择并显示待验证，不把已选择冒充已生效。
 printf '#!/bin/sh\ntouch "%s/manager-called"\nprintf '\''{"status":"ok"}\n'\''\n' "$TMP" > "$MODULE/common/font_manager.sh"
 chmod 0755 "$MODULE/common"/*
 cat > "$MODULE/config/switch_task.conf" <<'EOT'
@@ -29,8 +29,8 @@ EOT
 TASK=$(MODDIR="$MODULE" sh "$MODULE/common/font_switch_task.sh" status test-task)
 printf '%s' "$TASK" | grep -q '"state":"success"'
 test ! -e "$TMP/manager-called"
-grep -q '当前字体：Beta$' "$MODULE/module.prop"
-! grep -q '待验证' "$MODULE/module.prop"
+grep -q '当前字体：已选择：Beta（待验证）$' "$MODULE/module.prop"
+grep -q '待验证' "$MODULE/module.prop"
 
 printf 'state=failed\nbackend=rollback\n' >"$MODULE/config/self-mount.conf"
 printf 'state=verified\nmode=mount-verified\nactiveFont=Beta\n' \
@@ -40,7 +40,10 @@ grep -q '系统默认字体（Beta 未生效）' "$MODULE/module.prop"
 
 printf 'state=mounted\nbackend=self-overlay\n' >"$MODULE/config/self-mount.conf"
 MODDIR="$MODULE" sh "$MODULE/common/module_status.sh" Beta >/dev/null
-grep -q '当前字体：Beta$' "$MODULE/module.prop"
+grep -q '当前字体：已选择：Beta（待验证）$' "$MODULE/module.prop"
+printf 'state=failed\nmode=physical-evidence\nactiveFont=Beta\n' > "$MODULE/config/device-font-load-verification.conf"
+MODDIR="$MODULE" sh "$MODULE/common/module_status.sh" Beta >/dev/null
+grep -q '当前字体：已选择：Beta（验证异常）' "$MODULE/module.prop"
 rm -f "$MODULE/config/self-mount.conf" "$MODULE/config/device-font-load-verification.conf"
 
 # Production fast status reads persisted tasks without initializing engines.
@@ -63,8 +66,8 @@ MIX=$(MODDIR="$MODULE" sh "$MODULE/common/font_mix_controller.sh" status mix-tas
 printf '%s' "$MIX" | grep -q '"cjk":"中文甲"'
 test ! -e "$TMP/manager-called"
 MODDIR="$MODULE" sh "$MODULE/common/module_status.sh" mix >/dev/null
-grep -q '当前字体：组合：中文甲 / Latin B / DIN C$' "$MODULE/module.prop"
-! grep -q '待验证' "$MODULE/module.prop"
+grep -q '当前字体：已选择：组合：中文甲 / Latin B / DIN C（待验证）$' "$MODULE/module.prop"
+grep -q '待验证' "$MODULE/module.prop"
 
 # 私有字体负载更新不能依赖刷写进程拥有 bind-mount 权限。KernelSU/SukiSU 的
 # 安装命名空间禁止 mount 时，旧 .luoshu-payload 必须通过只读式临时符号链接

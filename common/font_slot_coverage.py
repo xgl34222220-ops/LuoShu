@@ -41,8 +41,8 @@ def preferred_unicode_codepoints(font) -> set[int]:
     return {cp for cp, glyph in (font.getBestCmap() or {}).items() if glyph != '.notdef'}
 
 
-def summarize_coverage(font) -> dict:
-    points = unicode_codepoints(font)
+def summarize_coverage(font, *, points=None) -> dict:
+    points = unicode_codepoints(font) if points is None else points
     han = sum(is_han(cp) for cp in points)
     latin = sum(0x41 <= cp <= 0x5A or 0x61 <= cp <= 0x7A for cp in points)
     return {'hasHan': bool(han), 'hasLatin': bool(latin), 'hanCount': han,

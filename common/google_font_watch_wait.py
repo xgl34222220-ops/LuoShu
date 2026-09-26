@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import ctypes
 import glob
+import json
 import os
 from pathlib import Path
 import select
@@ -154,13 +155,24 @@ class EventWait:
 
 def configure(watcher: EventWait, module: Path):
     watcher.directory(module, {'disable', 'remove', '.luoshu-payload'})
-    watcher.directory(module / 'config', {'active_font.conf'})
+    watcher.directory(module / 'config', {'active_font.conf', 'device_font_inventory.json'})
     override = os.environ.get('LUOSHU_GOOGLE_FONT_WATCH_ROOTS')
     if override is not None:
         roots = [Path(p) for p in override.splitlines() if p]
     else:
-        roots = [Path('/data/fonts/files'), Path('/data/system/theme/fonts'),
-                 Path('/data/system/fonts/theme_webview')]
+        roots = [Path('/data/fonts/files')]
+        # Inventory routes are file watches, never a recursive walk of arbitrary
+        # data directories. Periodic reconciliation remains the fallback when a
+        # directory is not yet present or inotify is unavailable.
+        try:
+            from dynamic_font_route_patch import route_rows
+            inventory = json.loads((module / 'config/device_font_inventory.json').read_text())
+            for _key, alias, recorded_target in route_rows(inventory):
+                watcher.directory(alias.parent, {alias.name})
+                for target in (recorded_target, alias.resolve(strict=False)):
+                    watcher.directory(target.parent, {target.name})
+        except (OSError, ValueError, TypeError):
+            pass
         # Do not watch unrelated Google databases/caches or traverse all /data.
         homes = {'/data/data', *glob.glob('/data/user/[0-9]*'), *glob.glob('/data/user_de/[0-9]*')}
         for home in sorted(homes):

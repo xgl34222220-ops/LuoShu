@@ -174,13 +174,15 @@ check_coloros() { IS_COLOROS=false; }
 check_hyperos() { IS_HYPEROS=false; }
 detect_font_family() { printf '%s\\n' "${1%.ttf}"; }
 ''')
-        (legacy / 'rom_adapters.sh').write_text('''
-apply_font_by_rom() {
-    [ "${TEST_MAPPING_FAIL:-0}" != 1 ] || return 7
-    mkdir -p "$2/.luoshu-font-store"
-    cp "$1" "$2/.luoshu-font-store/regular.font" || return 1
-    cp "$1" "$2/Roboto-Regular.ttf"
-}
+        (legacy / 'rom_adapters.sh').write_text("exit 91 # ROM mapper must never run\n")
+        (self.module / 'common/inventory_font_stage.sh').write_text('''
+[ "$1" != --ensure-inventory ] || exit 0
+[ "${TEST_MAPPING_FAIL:-0}" != 1 ] || exit 7
+[ "$2" = direct ] || exit 8
+mkdir -p "$1/system/fonts/.luoshu-font-store"
+cp "$4" "$1/system/fonts/.luoshu-font-store/regular.font" || exit 1
+cp "$4" "$1/system/fonts/Roboto-Regular.ttf"
+printf '/system/fonts/Roboto-Regular.ttf\\n' > "$1/.luoshu-metrics-covered.lst"
 ''')
         public = self.root / 'public'
         (public / 'fonts').mkdir(parents=True)

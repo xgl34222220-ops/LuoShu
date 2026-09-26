@@ -46,7 +46,7 @@ font_validate() {
         FONT_CHECK_SIZE=$(wc -c < "$_file" 2>/dev/null | tr -d '[:space:]')
     fi
     case "$FONT_CHECK_SIZE" in ''|*[!0-9]*) FONT_CHECK_SIZE=0 ;; esac
-    if [ "$FONT_CHECK_SIZE" -lt 4096 ]; then
+    if [ "$FONT_CHECK_SIZE" -lt 12 ]; then
         FONT_CHECK_ERROR="字体文件过小（${FONT_CHECK_SIZE} 字节），可能损坏或不是字体"
         return 1
     fi
@@ -116,7 +116,7 @@ font_validate_global() {
     FONT_CHECK_COVERAGE=$(PYTHONHOME="$_pyroot" \
         PYTHONPATH="$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \
         LD_LIBRARY_PATH="$_pyroot/lib:$_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        "$_python" "$_checker" --brief "$_file" 2>/dev/null)
+        "$_python" "$_checker" --donor --brief "$_file" 2>/dev/null)
     _coverage_code=$?
     if [ "$_coverage_code" -ne 0 ]; then
         [ -n "$FONT_CHECK_COVERAGE" ] || FONT_CHECK_COVERAGE="字体缺少全局替换所需字形"

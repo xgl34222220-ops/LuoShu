@@ -10,6 +10,19 @@ if [ -z "$MODDIR" ]; then
         MODDIR="/data/adb/modules/LuoShu"
     fi
 fi
+# Old direct/async APIs are public compatibility routes, not another mapper.
+# Delegate before loading index helpers so missing generation components fail closed.
+case "${1:-}:${2:-}" in
+    action:switch|action:switch_async|action:switch_status)
+        _router="$MODDIR/common/font_manager.sh"
+        [ -f "$_router" ] || {
+            printf '{"status":"error","message":"通用字体管理入口缺失"}\n'; exit 1;
+        }
+        export MODDIR
+        exec sh "$_router" "$@"
+        ;;
+esac
+
 MODULE_DIR="$MODDIR"
 CONFIG_DIR="$MODULE_DIR/config"
 SYSTEM_FONTS_DIR="$MODULE_DIR/system/fonts"
@@ -29,11 +42,7 @@ FONT_INDEX_KEY="$CONFIG_DIR/native_font_index.key"
 [ -f "$MODULE_DIR/common/util_functions.sh" ] && . "$MODULE_DIR/common/util_functions.sh"
 [ -f "$MODULE_DIR/common/font_check.sh" ] && . "$MODULE_DIR/common/font_check.sh"
 [ -f "$MODULE_DIR/common/font_validation_cache.sh" ] && . "$MODULE_DIR/common/font_validation_cache.sh"
-[ -f "$MODULE_DIR/common/rom_adapters.sh" ] && . "$MODULE_DIR/common/rom_adapters.sh"
 [ -f "$MODULE_DIR/common/font_library_cache.sh" ] && . "$MODULE_DIR/common/font_library_cache.sh"
-[ -f "$MODULE_DIR/common/font_config_runtime.sh" ] && . "$MODULE_DIR/common/font_config_runtime.sh"
-[ -f "$MODULE_DIR/common/font_config_weights.sh" ] && . "$MODULE_DIR/common/font_config_weights.sh"
-[ -f "$MODULE_DIR/common/mount_compat.sh" ] && . "$MODULE_DIR/common/mount_compat.sh"
 [ -f "$MODULE_DIR/common/font_boot_state.sh" ] && . "$MODULE_DIR/common/font_boot_state.sh"
 [ -f "$MODULE_DIR/common/font_active_state.sh" ] && . "$MODULE_DIR/common/font_active_state.sh"
 
@@ -41,8 +50,6 @@ case "${1:-}:${2:-}" in
     action:font_weight_status) ;; # A settings read must never migrate /sdcard/Fonts.
     *)
         type ensure_public_storage >/dev/null 2>&1 && ensure_public_storage
-        type check_coloros >/dev/null 2>&1 && check_coloros
-        type check_hyperos >/dev/null 2>&1 && check_hyperos
         mkdir -p "$CONFIG_DIR" "$SYSTEM_FONTS_DIR" "$USER_FONTS_DIR" "$USER_REPORT_DIR" 2>/dev/null || true
         ;;
 esac
@@ -51,23 +58,7 @@ json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
 
-luoshu_switch_perf_begin() {
-    LUOSHU_SWITCH_PERF_START="$(date +%s 2>/dev/null || echo 0)"
-    LUOSHU_SWITCH_PERF_MARK="$LUOSHU_SWITCH_PERF_START"
-}
 
-luoshu_switch_perf_mark() {
-    _lsp_stage="$1"
-    _lsp_now="$(date +%s 2>/dev/null || echo 0)"
-    case "$LUOSHU_SWITCH_PERF_START:$LUOSHU_SWITCH_PERF_MARK:$_lsp_now" in
-        *[!0-9:]*|'') return 0 ;;
-    esac
-    _lsp_stage_seconds=$((_lsp_now - LUOSHU_SWITCH_PERF_MARK))
-    _lsp_total_seconds=$((_lsp_now - LUOSHU_SWITCH_PERF_START))
-    printf '[PERF] switch stage=%s stageSeconds=%s totalSeconds=%s
-'         "$_lsp_stage" "$_lsp_stage_seconds" "$_lsp_total_seconds"
-    LUOSHU_SWITCH_PERF_MARK="$_lsp_now"
-}
 
 format_filesize() {
     _bytes="$1"
@@ -112,28 +103,6 @@ if ! type detect_font_weight >/dev/null 2>&1; then
     }
 fi
 
-if ! type link_or_copy_font >/dev/null 2>&1; then
-    link_or_copy_font() {
-        ln -f "$1" "$2" 2>/dev/null || cp -f "$1" "$2" 2>/dev/null
-    }
-fi
-
-if ! type get_all_coloros_names >/dev/null 2>&1; then
-    get_all_coloros_names() { printf '%s\n' ''; }
-fi
-if ! type get_all_hyperos_files >/dev/null 2>&1; then
-    get_all_hyperos_files() { printf '%s\n' ''; }
-fi
-if ! type apply_font_by_rom >/dev/null 2>&1; then
-    apply_font_by_rom() {
-        _src="$1"
-        _dest="$2"
-        for _name in SysSans-Hant-Regular SysSans-Hans-Regular SysFont-Static-Regular SysFont-Myanmar SysFont-Hant-Regular SysFont-Hans-Regular SysFont-Regular SysSans-En-Regular; do
-            cp -f "$_src" "$_dest/${_name}.ttf" 2>/dev/null || return 1
-        done
-    }
-fi
-
 scan_user_families_lines() {
     [ -d "$USER_FONTS_DIR" ] || return 0
     for _file in "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc \
@@ -163,277 +132,15 @@ find_text_font_file() {
     return 1
 }
 
-get_managed_text_files() {
-    if [ "${IS_COLOROS:-false}" = true ]; then
-        for _name in $(get_all_coloros_names); do printf '%s.ttf\n' "$_name"; done
-    elif [ "${IS_HYPEROS:-false}" = true ]; then
-        get_all_hyperos_files
-    else
-        printf '%s\n' 'Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf Roboto-Light.ttf Roboto-Thin.ttf NotoSansCJK-Regular.ttc NotoSansSC-Regular.otf NotoSansTC-Regular.otf'
-    fi
-}
-
-clear_managed_text_fonts() {
-    if type _lfrp_payload_root >/dev/null 2>&1 && type _lfrp_partitions >/dev/null 2>&1; then
-        _fmt_root=$(_lfrp_payload_root)
-        for _fmt_part in $(_lfrp_partitions); do
-            rm -rf "$_fmt_root/$_fmt_part/fonts" 2>/dev/null || true
-            _fmt_etc="$_fmt_root/$_fmt_part/etc"
-            [ -d "$_fmt_etc" ] || continue
-            for _fmt_xml in "$_fmt_etc"/*.xml; do
-                [ -f "$_fmt_xml" ] || continue
-                grep -Eq 'LuoShu(Mono)?-|LuoShuSlot-' "$_fmt_xml" 2>/dev/null && \
-                    rm -f "$_fmt_xml" 2>/dev/null || true
-            done
-        done
-        mkdir -p "$_fmt_root/system/fonts" 2>/dev/null || true
-        rm -f "$CONFIG_DIR/font-runtime-targets.conf" \
-              "$CONFIG_DIR/font-target-aliases.conf" \
-              "$CONFIG_DIR/font-target-coverage.conf" \
-              "$CONFIG_DIR/font-config-overlay.conf" 2>/dev/null || true
-    else
-        for _file in $(get_managed_text_files); do
-            rm -f "$SYSTEM_FONTS_DIR/$_file" "$MODULE_DIR/system_ext/fonts/$_file" \
-                  "$MODULE_DIR/product/fonts/$_file" 2>/dev/null || true
-        done
-        rm -rf "$SYSTEM_FONTS_DIR/.luoshu-font-store" 2>/dev/null || true
-    fi
-    # Invalidate every late device-alignment commit from an older release. A running worker checks
-    # the pending marker again before activation, so removing it safely cancels the obsolete job.
-    rm -f "$CONFIG_DIR/device-font-cache-pending.conf" \
-          "$CONFIG_DIR/device-font-engine.conf" \
-          "$CONFIG_DIR/device-font-installed.conf" \
-          "$CONFIG_DIR/device-font-dynamic-mount.conf" \
-          "$CONFIG_DIR/device-font-load-verification.conf" \
-          "$CONFIG_DIR/device-font-load-verification.json" 2>/dev/null || true
-    type font_config_disable >/dev/null 2>&1 && font_config_disable
-}
-
 invalidate_font_index_cache() {
     rm -f "$FONT_INDEX_JSON" "$FONT_INDEX_KEY" 2>/dev/null || true
 }
 
-luoshu_switch_cleanup() {
-    type luoshu_payload_transaction_abort >/dev/null 2>&1 && luoshu_payload_transaction_abort
-    type luoshu_font_lock_release >/dev/null 2>&1 && \
-        luoshu_font_lock_release "$MODULE_DIR/.font_switch.lock" "$$" >/dev/null 2>&1 || true
-}
-
-luoshu_switch_signal_exit() {
-    _lsse_code="$1"
-    trap - EXIT HUP INT TERM
-    luoshu_switch_cleanup
-    exit "$_lsse_code"
-}
-
 switch_font() {
-    _font_id="$1"
-    LUOSHU_SWITCH_REUSED=false
-    [ -n "$_font_id" ] || { echo '错误：未指定字体' >&2; return 1; }
-
-    # A complete boot already proved this exact payload. Reapplying it must be a metadata-only
-    # no-op: clearing the live tree first discarded the proof and forced the 94% FontTools rebuild.
-    if [ "$_font_id" != default ] && type luoshu_active_payload_verified >/dev/null 2>&1 && \
-       luoshu_active_payload_verified "$_font_id"; then
-        LUOSHU_SWITCH_REUSED=true
-        printf '%s\n' "$_font_id" > "$CONFIG_DIR/last_switch_result.conf" 2>/dev/null || true
-        date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
-        printf '[PERF] switch reuse=verified-active font=%s totalSeconds=0\n' "$_font_id"
-        return 0
-    fi
-
-    _lock="$MODULE_DIR/.font_switch.lock"
-    if [ -e "$_lock" ]; then
-        if type luoshu_font_lock_busy >/dev/null 2>&1 && luoshu_font_lock_busy "$_lock"; then
-            echo '错误：字体正在切换中，请稍候' >&2
-            return 2
-        fi
-        type luoshu_font_lock_reap_stale >/dev/null 2>&1 && \
-            luoshu_font_lock_reap_stale "$_lock" >/dev/null 2>&1 || true
-    fi
-    if [ -f "$TEXT_REBOOT_REQUIRED" ]; then
-        echo '错误：本次开机已更改文字字体，请先重启手机后再切换' >&2
-        return 3
-    fi
-
-    type luoshu_font_lock_acquire >/dev/null 2>&1 || return 1
-    luoshu_font_lock_acquire "$_lock" "$$"
-    _lock_rc=$?
-    if [ "$_lock_rc" -ne 0 ]; then
-        [ "$_lock_rc" -eq 2 ] && echo '错误：字体正在切换中，请稍候' >&2
-        return "$_lock_rc"
-    fi
-    trap 'luoshu_switch_cleanup' EXIT
-    trap 'luoshu_switch_signal_exit 129' HUP
-    trap 'luoshu_switch_signal_exit 130' INT
-    trap 'luoshu_switch_signal_exit 143' TERM
-    luoshu_switch_perf_begin
-
-    _source=''
-    if [ "$_font_id" != default ]; then
-        _source="$(find_text_font_file "$_font_id")"
-        [ -f "$_source" ] || { echo "错误：字体 $_font_id 不存在" >&2; return 1; }
-                if type luoshu_font_validate_global_cached >/dev/null 2>&1; then
-    luoshu_font_validate_global_cached "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
-        elif type font_validate_global >/dev/null 2>&1; then
-    font_validate_global "$_source" || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
-        elif type font_validate >/dev/null 2>&1; then
-    font_validate "$_source" text || { echo "错误：$FONT_CHECK_ERROR" >&2; return 4; }
-        fi
-    fi
-    luoshu_switch_perf_mark validation
-
-    if [ "$_font_id" != default ] && [ -f "$MODULE_DIR/common/device_font_template.sh" ]; then
-        MODDIR="$MODULE_DIR" MODULE_DIR="$MODULE_DIR" \
-            sh "$MODULE_DIR/common/device_font_template.sh" ensure >/dev/null 2>&1
-        _template_rc=$?
-        if [ "$_template_rc" -ne 0 ]; then
-            if [ "$_template_rc" -eq 2 ]; then
-                echo '错误：缺少可信原厂字体模板；请先恢复系统默认字体并完整重启一次，再应用字体' >&2
-            else
-                echo '错误：无法读取本机原厂字体槽位，未开始切换' >&2
-            fi
-            return 5
-        fi
-    fi
-    luoshu_switch_perf_mark template_ready
-
-    if ! type luoshu_payload_transaction_begin >/dev/null 2>&1 || ! luoshu_payload_transaction_begin; then
-        echo '错误：无法创建字体负载安全快照' >&2
-        return 5
-    fi
-    luoshu_switch_perf_mark transaction_snapshot
-    if [ "$_font_id" != default ]; then
-        LUOSHU_KEEP_XML_OVERLAY=1
-    else
-        LUOSHU_KEEP_XML_OVERLAY=0
-    fi
-    export LUOSHU_KEEP_XML_OVERLAY
-    clear_managed_text_fonts
-    if [ "$_font_id" != default ]; then
-        # Direct switches stay within one foreground transaction. Physical slots and the lightweight
-        # reusable XML family template are committed together; no worker may rewrite them later.
-        LUOSHU_FOREGROUND_QUICK_SWITCH=1
-        export LUOSHU_FOREGROUND_QUICK_SWITCH
-        apply_font_by_rom "$_source" "$SYSTEM_FONTS_DIR" quick "$_font_id" || {
-            echo '错误：ROM 字体映射失败' >&2
-            return 5
-        }
-        if [ "${IS_COLOROS:-false}" = true ]; then
-            mkdir -p "$MODULE_DIR/system_ext/fonts" "$MODULE_DIR/product/fonts" 2>/dev/null || true
-            for _name in $(get_all_coloros_names); do
-                _mapped="$SYSTEM_FONTS_DIR/${_name}.ttf"
-                [ -f "$_mapped" ] || continue
-                [ -e "/system_ext/fonts/${_name}.ttf" ] && link_or_copy_font "$_mapped" "$MODULE_DIR/system_ext/fonts/${_name}.ttf" 2>/dev/null || true
-                [ -e "/product/fonts/${_name}.ttf" ] && link_or_copy_font "$_mapped" "$MODULE_DIR/product/fonts/${_name}.ttf" 2>/dev/null || true
-            done
-        fi
-    fi
-
-    luoshu_switch_perf_mark map_slots
-    # Build/activate the final per-device UI, Latin/digit and monospace roles in this transaction.
-    # A raw physical-slot map is only staging input and must never be committed as a success.
-    if [ "$_font_id" != default ] && type font_config_enable_for_payload >/dev/null 2>&1; then
-        if ! font_config_enable_for_payload "$_font_id"; then
-            _payload_error="${LUOSHU_DEVICE_PAYLOAD_ERROR:-设备原厂槽位对齐失败}"
-            echo "错误：$_payload_error" >&2
-            return 6
-        fi
-    fi
-    LUOSHU_FOREGROUND_QUICK_SWITCH=0
-    LUOSHU_KEEP_XML_OVERLAY=0
-    export LUOSHU_FOREGROUND_QUICK_SWITCH
-    export LUOSHU_KEEP_XML_OVERLAY
-    luoshu_switch_perf_mark xml_overlay
-    if ! type luoshu_payload_validate_current >/dev/null 2>&1 || ! luoshu_payload_validate_current "$_font_id"; then
-    echo '错误：字体负载覆盖校验失败，已恢复上一个字体' >&2
-    return 6
-fi
-luoshu_switch_perf_mark payload_validate
-printf '%s\n' "$_font_id" > "$ACTIVE_FONT_CONF" || {
-    echo '错误：无法保存当前字体状态' >&2
-    return 7
-}
-if type luoshu_text_reboot_mark >/dev/null 2>&1; then
-    luoshu_text_reboot_mark "$_font_id"
-else
-    printf 'font=%s\ntime=%s\n' "$_font_id" "$(date +%s)" > "$TEXT_REBOOT_REQUIRED"
-fi || {
-    echo '错误：无法保存本次重启事务状态' >&2
-    return 7
-}
-chmod 0644 "$ACTIVE_FONT_CONF" "$SYSTEM_FONTS_DIR"/* 2>/dev/null || true
-chmod 0644 "$TEXT_REBOOT_REQUIRED" 2>/dev/null || true
-if type luoshu_sync_mount_payload >/dev/null 2>&1 && ! luoshu_sync_mount_payload; then
-    echo '错误：元模块真实挂载目录同步失败，已恢复上一个字体' >&2
-    return 7
-fi
-luoshu_switch_perf_mark mount_sync
-if ! luoshu_payload_transaction_commit "$_font_id"; then
-    echo '错误：无法提交字体负载事务，已恢复上一个字体' >&2
-    return 7
-fi
-luoshu_switch_perf_mark transaction_commit
-# Downloadable Fonts（GMS Fonts Provider）缓存劫持：Play 商店等 Google 系应用
-# 不读系统分区字体，需同步 /data/fonts/files 并 force-stop 后才会应用。
-if [ -f "$MODULE_DIR/common/font_provider_cache.sh" ]; then
-    . "$MODULE_DIR/common/font_provider_cache.sh"
-    if [ "$_font_id" != default ]; then
-        luoshu_provider_cache_sync "$SYSTEM_FONTS_DIR/.luoshu-font-store/regular.font" >/dev/null 2>&1 || true
-    else
-        luoshu_provider_cache_restore >/dev/null 2>&1 || true
-    fi
-fi
-    if [ "$_font_id" != default ]; then
-        _recent="$CONFIG_DIR/recent_fonts.conf"
-        _tmp="${_recent}.tmp.$$"
-        {
-            printf '%s\n' "$_font_id"
-            if [ -f "$_recent" ]; then
-                awk -v selected="$_font_id" 'NF && $0 != selected && !seen[$0]++ { print; if (++count >= 9) exit }' "$_recent"
-            fi
-        } > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$_recent" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
-    fi
-
-    printf '%s\n' "$_font_id" > "$CONFIG_DIR/last_switch_result.conf"
-    date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
-    invalidate_font_index_cache
-    luoshu_switch_perf_mark complete
-    trap - EXIT HUP INT TERM
-    luoshu_font_lock_release "$_lock" "$$" >/dev/null 2>&1 || true
-    return 0
-}
-
-write_switch_task() {
-    _task_id="$1"
-    _task_state="$2"
-    _task_font="$3"
-    _task_message="$4"
-    _task_started="$5"
-    _task_finished="$6"
-    _tmp="${SWITCH_TASK_FILE}.tmp.$$"
-    {
-        printf 'task=%s\n' "$_task_id"
-        printf 'state=%s\n' "$_task_state"
-        printf 'font=%s\n' "$_task_font"
-        printf 'message=%s\n' "$_task_message"
-        printf 'started=%s\n' "$_task_started"
-        printf 'finished=%s\n' "$_task_finished"
-    } > "$_tmp" 2>/dev/null && mv -f "$_tmp" "$SWITCH_TASK_FILE" 2>/dev/null || rm -f "$_tmp" 2>/dev/null
-    chmod 0644 "$SWITCH_TASK_FILE" 2>/dev/null || true
-}
-
-read_switch_task_value() {
-    sed -n "s/^${1}=//p" "$SWITCH_TASK_FILE" 2>/dev/null | head -n1 | tr -d '\r\n'
-}
-
-notify_user() {
-    _title="$1"
-    _message="$2"
-    _tag="${3:-luoshu}"
-    command -v cmd >/dev/null 2>&1 || return 1
-    cmd notification post -S bigtext -t "$_title" "$_tag" "$_message" >/dev/null 2>&1 || \
-        cmd notification post -t "$_title" "$_tag" "$_message" >/dev/null 2>&1
+    # Deleting the selected family must queue default through the same safe path.
+    # The live payload remains pinned until boot even after its library source is deleted.
+    [ -f "$MODULE_DIR/common/font_manager.sh" ] || return 1
+    MODDIR="$MODULE_DIR" sh "$MODULE_DIR/common/font_manager.sh" action switch "$1"
 }
 
 font_weight_normalize_int() {
@@ -756,58 +463,6 @@ validate_font_json() {
     fi
 }
 
-start_switch_task() {
-    _font_id="$1"
-    [ -n "$_font_id" ] || { printf '{"status":"error","message":"未指定字体"}\n'; return 0; }
-    [ ! -f "$TEXT_REBOOT_REQUIRED" ] || { printf '{"status":"error","message":"本次开机已更改文字字体，请先重启手机"}\n'; return 0; }
-
-    if [ -e "$MODULE_DIR/.font_switch.lock" ]; then
-        if type luoshu_font_lock_active >/dev/null 2>&1 && \
-           luoshu_font_lock_active "$MODULE_DIR/.font_switch.lock"; then
-            printf '{"status":"error","message":"字体正在切换中，请稍候"}\n'
-            return 0
-        fi
-        type luoshu_font_lock_reap_stale >/dev/null 2>&1 && \
-            luoshu_font_lock_reap_stale "$MODULE_DIR/.font_switch.lock" >/dev/null 2>&1 || true
-    fi
-
-    mkdir -p "$MODULE_DIR/logs" "$CONFIG_DIR" 2>/dev/null || true
-    _task_id="$(date +%s)-$$"
-    _started="$(date +%s)"
-    write_switch_task "$_task_id" running "$_font_id" '正在应用字体' "$_started" ''
-    (
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] async switch start: $_font_id task=$_task_id" >> "$MODULE_DIR/logs/fontswitch.log" 2>/dev/null
-        if switch_font "$_font_id" >> "$MODULE_DIR/logs/fontswitch.log" 2>&1; then
-            _finished="$(date +%s)"
-            write_switch_task "$_task_id" success "$_font_id" '字体已准备，必须重启手机后全局生效' "$_started" "$_finished"
-            notify_user '洛书' "文字字体已准备：$_font_id。请完整重启手机。" luoshu-text || true
-        else
-            _code=$?
-            _finished="$(date +%s)"
-            write_switch_task "$_task_id" failed "$_font_id" "切换失败（代码 $_code）" "$_started" "$_finished"
-        fi
-    ) &
-    printf '{"status":"ok","data":{"font":"%s","task":"%s","message":"任务已开始"}}\n' "$(json_escape "$_font_id")" "$(json_escape "$_task_id")"
-}
-
-switch_task_status_json() {
-    _wanted="$1"
-    [ -s "$SWITCH_TASK_FILE" ] || { printf '{"status":"error","message":"暂无切换任务"}\n'; return 0; }
-    _task="$(read_switch_task_value task)"
-    if [ -n "$_wanted" ] && [ "$_wanted" != "$_task" ]; then
-        printf '{"status":"error","message":"任务不存在或已被新任务替换"}\n'
-        return 0
-    fi
-    _state="$(read_switch_task_value state)"
-    _font="$(read_switch_task_value font)"
-    _message="$(read_switch_task_value message)"
-    _started="$(read_switch_task_value started)"
-    _finished="$(read_switch_task_value finished)"
-    printf '{"status":"ok","data":{"task":"%s","state":"%s","font":"%s","message":"%s","started":%s,"finished":%s}}\n' \
-        "$(json_escape "$_task")" "$(json_escape "$_state")" "$(json_escape "$_font")" "$(json_escape "$_message")" \
-        "${_started:-0}" "${_finished:-0}"
-}
-
 delete_font_json() {
     _font_id="$1"
     _current="$(get_current_font_id)"
@@ -853,8 +508,8 @@ handle_action() {
                 printf '{"status":"error","message":"切换失败"}\n'
             fi
             ;;
-        switch_async) start_switch_task "$_param" ;;
-        switch_status) switch_task_status_json "$_param" ;;
+        switch_async) MODDIR="$MODULE_DIR" sh "$MODULE_DIR/common/font_switch_task.sh" start "$_param" ;;
+        switch_status) MODDIR="$MODULE_DIR" sh "$MODULE_DIR/common/font_switch_task.sh" status "$_param" ;;
         delete) delete_font_json "$_param" ;;
         font_weight_status) font_weight_status_json ;;
         font_weight_set)

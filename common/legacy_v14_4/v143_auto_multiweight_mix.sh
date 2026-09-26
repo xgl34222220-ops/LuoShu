@@ -10,6 +10,17 @@ if [ -z "$MODDIR" ]; then
         MODDIR="/data/adb/modules/LuoShu"
     fi
 fi
+# The router supplies partition symlinks into a disposable stage.
+case "$MODDIR" in
+    "${LUOSHU_REAL_MODDIR:-}/.legacy-v14-runtime") ;;
+    *)
+        case "${1:-config}" in
+            start|config|status|recover) exec sh "$MODDIR/common/font_mix.sh" "$@" ;;
+            *) printf '{"status":"error","message":"字体组合任务需要隔离暂存目录"}\n'; exit 1 ;;
+        esac
+        ;;
+esac
+
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/auto-multiweight-mix"
 COMPOSITE_CACHE="$CACHE_ROOT/composites-v4"
@@ -17,7 +28,6 @@ MIX_ENGINE_IDENTITY=''
 PUBLIC_ROOT="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 SOURCE_FONTS="$PUBLIC_ROOT/fonts"
 USER_FONTS_DIR="$SOURCE_FONTS"
-FONT_MANAGER="$MODDIR/common/font_manager.sh"
 FALLBACK_ENGINE="$MODDIR/common/v142_weighted_mix.sh"
 MODE_HELPER="$MODDIR/common/mix_weight_mode.sh"
 ROLE_CHECK="$MODDIR/common/font_role_check.sh"
@@ -57,6 +67,56 @@ clear_auto_worker_pid() {
     fi
 }
 
+write_auto_source_weights() {
+    _was_helper="$REALMOD/common/mix_source_manifest.py"
+    [ -f "$_was_helper" ] || return 1
+    _was_key=$(anchor_key "$2")
+    _was_cjk_axes="$_cjk_axes"; _was_latin_axes="$_latin_axes"; _was_digit_axes="$_digit_axes"
+    [ "$_cjk_mode" != auto ] || _was_cjk_axes=$(with_weight "$_cjk_axes" "$2")
+    [ "$_latin_mode" != auto ] || _was_latin_axes=$(with_weight "$_latin_axes" "$2")
+    [ "$_digit_mode" != auto ] || _was_digit_axes=$(with_weight "$_digit_axes" "$2")
+    PYTHONHOME="$PYROOT" \
+    PYTHONPATH="$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+    LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$PYBIN" "$_was_helper" --manifest "$1/.luoshu-mix-source-weights.json" \
+        --anchor "${_was_key}.font" --target-weight "$2" --composite "$3" \
+        --cjk "$4/cjk.ttf" --latin "$4/latin.ttf" --digit "$4/digit.ttf" \
+        --cjk-mode "$_cjk_mode" --latin-mode "$_latin_mode" --digit-mode "$_digit_mode" \
+        --cjk-axes "$_was_cjk_axes" --latin-axes "$_was_latin_axes" --digit-axes "$_was_digit_axes"
+}
+
+stage_auto_sources() (
+    _sas_input="$1/fonts"
+    _sas_stage="$MODDIR/.auto-mix-sources.$$"
+    _sas_dest="$MODDIR/system/fonts"
+    _sas_backup="$MODDIR/.auto-mix-sources-backup.$$"
+    rm -rf "$_sas_stage" "$_sas_backup" 2>/dev/null || true
+    mkdir -p "$_sas_stage/.luoshu-font-store" "${_sas_dest%/*}" 2>/dev/null || exit 1
+    [ -s "$1/weights.list" ] || { rm -rf "$_sas_stage"; exit 1; }
+    for _sas_weight in $(cat "$1/weights.list"); do
+        _sas_role=$(weight_role "$_sas_weight")
+        _sas_key=$(anchor_key "$_sas_weight")
+        _sas_source="$_sas_input/LuoShuAutoMix-${_sas_role}.otf"
+        [ "$_sas_weight" != 400 ] || _sas_source="$_sas_input/LuoShuAutoMix-Regular.ttf"
+        [ -s "$_sas_source" ] || { rm -rf "$_sas_stage"; exit 1; }
+        link_or_copy "$_sas_source" "$_sas_stage/.luoshu-font-store/${_sas_key}.font" || {
+            rm -rf "$_sas_stage"; exit 1;
+        }
+    done
+    cp -f "$1/.luoshu-mix-source-weights.json" "$_sas_stage/.luoshu-font-store/" 2>/dev/null || {
+        rm -rf "$_sas_stage"; exit 1;
+    }
+    # No partial source set reaches the router, and no live payload is touched.
+    if [ -d "$_sas_dest" ]; then
+        mv "$_sas_dest" "$_sas_backup" 2>/dev/null || { rm -rf "$_sas_stage"; exit 1; }
+    fi
+    if ! mv "$_sas_stage" "$_sas_dest" 2>/dev/null; then
+        [ ! -d "$_sas_backup" ] || mv "$_sas_backup" "$_sas_dest" 2>/dev/null || true
+        rm -rf "$_sas_stage"; exit 1
+    fi
+    rm -rf "$_sas_backup" 2>/dev/null || true
+)
+
 write_auto_generation_manifest() {
     _agm_manifest="${LUOSHU_MIX_MANIFEST:-}"
     _agm_request="${LUOSHU_MIX_REQUEST_ID:-}"
@@ -72,7 +132,7 @@ write_auto_generation_manifest() {
     [ -n "$_agm_hash_input" ] || return 1
     _agm_composite_hash=$(printf '%s' "$_agm_hash_input" | hash_text)
     [ -n "$_agm_composite_hash" ] || return 1
-    _agm_tmp="${_agm_manifest}.tmp.$"
+    _agm_tmp="${_agm_manifest}.tmp.$$"
     {
         printf 'requestId=%s\n' "$_agm_request"
         printf 'cjk=%s\nlatin=%s\ndigit=%s\n'             "${LUOSHU_MIX_EXPECTED_CJK:-$2}" "${LUOSHU_MIX_EXPECTED_LATIN:-$3}" "${LUOSHU_MIX_EXPECTED_DIGIT:-$4}"
@@ -86,27 +146,34 @@ write_auto_generation_manifest() {
     return 0
 }
 
+compat_failure_message() {
+    _cfm_state="$REALMOD/config/mix-finalize-state.conf"
+    if [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] && \
+       [ "$(read_value "$_cfm_state" requestId)" = "$LUOSHU_MIX_REQUEST_ID" ] && \
+       [ "$(read_value "$_cfm_state" state)" = failed ]; then
+        # Read the plain persisted reason; parsing a JSON string with sed loses
+        # everything after an escaped quote in a font path or glyph name.
+        read_value "$_cfm_state" message
+    else
+        sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$1" 2>/dev/null | tail -n1
+    fi
+}
+
 prepare_compat_payload() {
     FINALIZE_ERROR=''
     [ -n "$REALMOD" ] && [ "$REALMOD" != "$MODDIR" ] && [ -f "$REAL_MIX_ROUTER" ] || return 0
-    _pcp_out="$CONFIG_DIR/.compat-prepare.$"
+    _pcp_out="$CONFIG_DIR/.compat-prepare.$$"
     rm -f "$_pcp_out" 2>/dev/null || true
-    if command -v timeout >/dev/null 2>&1; then
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" timeout 120 sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
-        _pcp_rc=$?
-    elif command -v toybox >/dev/null 2>&1 && toybox timeout --help >/dev/null 2>&1; then
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" toybox timeout 120 sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
-        _pcp_rc=$?
-    else
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
-        _pcp_rc=$?
-    fi
+    # The mapper owns progress/CPU supervision. A fixed outer timeout used to
+    # kill a healthy large-font operation while its child kept writing.
+    MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
+    _pcp_rc=$?
     cat "$_pcp_out" >>"$LOG_FILE" 2>/dev/null || true
     if [ "$_pcp_rc" -ne 0 ] || ! grep -q '"status":"ok"' "$_pcp_out" 2>/dev/null; then
-        FINALIZE_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_pcp_out" 2>/dev/null | tail -n1)
+        FINALIZE_ERROR=$(compat_failure_message "$_pcp_out")
         [ -n "$FINALIZE_ERROR" ] || {
             case "$_pcp_rc" in
-                124) FINALIZE_ERROR='复合字体预提交超过 120 秒，已自动终止，不再继续空等' ;;
+                124) FINALIZE_ERROR='本机字体生成长时间没有进展，已停止任务' ;;
                 *) FINALIZE_ERROR='复合字体预提交处理失败' ;;
             esac
         }
@@ -119,7 +186,7 @@ prepare_compat_payload() {
 finalize_compat_payload() {
     FINALIZE_ERROR=''
     [ -n "$REALMOD" ] && [ "$REALMOD" != "$MODDIR" ] && [ -f "$REAL_MIX_ROUTER" ] || return 0
-    _fcp_out="$CONFIG_DIR/.compat-finalize.$"
+    _fcp_out="$CONFIG_DIR/.compat-finalize.$$"
     rm -f "$_fcp_out" 2>/dev/null || true
     if command -v timeout >/dev/null 2>&1; then
         MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" timeout 60 sh "$REAL_MIX_ROUTER" finalize >"$_fcp_out" 2>&1
@@ -133,7 +200,7 @@ finalize_compat_payload() {
     fi
     cat "$_fcp_out" >>"$LOG_FILE" 2>/dev/null || true
     if [ "$_fcp_rc" -ne 0 ] || ! grep -q '"status":"ok"' "$_fcp_out" 2>/dev/null; then
-        FINALIZE_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_fcp_out" 2>/dev/null | tail -n1)
+        FINALIZE_ERROR=$(compat_failure_message "$_fcp_out")
         [ -n "$FINALIZE_ERROR" ] || {
             case "$_fcp_rc" in 124) FINALIZE_ERROR='提交下一启动字体负载超过 60 秒，已自动终止' ;; *) FINALIZE_ERROR='下一启动字体负载提交失败' ;; esac
         }
@@ -213,8 +280,25 @@ weight_role() {
     case "$1" in
         100) echo Thin ;; 200) echo ExtraLight ;; 300) echo Light ;; 500) echo Medium ;;
         600) echo SemiBold ;; 700) echo Bold ;; 800) echo ExtraBold ;; 900) echo Black ;;
-        *) echo Regular ;;
+        400) echo Regular ;;
+        *) echo "Wght$1" ;;
     esac
+}
+
+anchor_key() {
+    case "$1" in
+        100|200|300|400|500|600|700|800|900) weight_role "$1" | tr '[:upper:]' '[:lower:]' ;;
+        *) printf 'wght-%s\n' "$1" ;;
+    esac
+}
+
+inventory_weights() {
+    MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" \
+        sh "$REALMOD/common/inventory_font_stage.sh" --ensure-inventory || return 1
+    PYTHONHOME="$PYROOT" \
+    PYTHONPATH="$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+    LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$PYBIN" "$REALMOD/common/mix_inventory_weights.py" "$REALMOD/config/device_font_inventory.json"
 }
 
 write_task() {
@@ -294,7 +378,7 @@ run_instance() {
     chmod 0644 "$_destination" 2>/dev/null || true
 }
 
-prepare_source() {
+prepare_source() (
     _role="$1"
     _family="$2"
     _axes="$3"
@@ -304,17 +388,26 @@ prepare_source() {
     _effective="$_axes"
     [ "$_mode" != auto ] || _effective=$(with_weight "$_axes" "$_target")
     _lookup=$(safe_weight "$_effective")
+    # Fixed roles are identical across every target weight. Materialize them
+    # once per request, retaining the chosen outlines instead of reopening a
+    # large variable/TTC source nine times.
+    _prepared="$_root/prepared-sources/$_role-$(printf '%s' "$_effective" | hash_text).font"
+    mkdir -p "${_prepared%/*}" "${_destination%/*}" 2>/dev/null || return 1
+    if [ -s "$_prepared" ]; then
+        link_or_copy "$_prepared" "$_destination"
+        return $?
+    fi
     _source=$(find_best_source "$_family" "$_lookup")
     [ -f "$_source" ] || return 1
     font_validate "$_source" text || return 1
     if [ "$FONT_CHECK_VARIABLE" = true ] || [ "$FONT_CHECK_FORMAT" = TTC ]; then
-        run_instance "$_source" "$_destination" "$_role" "$_effective"
+        run_instance "$_source" "$_prepared" "$_role" "$_effective" || return 1
     else
-        mkdir -p "${_destination%/*}" 2>/dev/null || return 1
-        cp -f "$_source" "$_destination" 2>/dev/null || return 1
-        chmod 0644 "$_destination" 2>/dev/null || true
+        cp -f "$_source" "$_prepared" 2>/dev/null || return 1
+        chmod 0644 "$_prepared" 2>/dev/null || true
     fi
-}
+    link_or_copy "$_prepared" "$_destination"
+)
 
 hash_file() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -350,7 +443,7 @@ prune_composite_cache() {
     done
 }
 
-build_composite_cached() {
+build_composite_cached() (
     _cjk="$1"
     _latin="$2"
     _digit="$3"
@@ -389,7 +482,7 @@ build_composite_cached() {
     link_or_copy "$_cached" "$_output" || return 1
     chmod 0644 "$_output" 2>/dev/null || true
     prune_composite_cache
-}
+)
 
 save_mix_config() {
     _tmp="$MIX_CONF.auto.$$"
@@ -443,10 +536,17 @@ worker() {
         exit 1
     }
 
+    _weights=$(inventory_weights) || {
+        update_task "$_wanted" failed '无法读取本机字体字重清单，请重新检测系统字体' 100 "$(date +%s)"
+        rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
+    }
+    printf '%s\n' "$_weights" >"$_root/weights.list" || exit 1
+    set -- $_weights
+    _weight_count=$#
     _index=0
-    for _weight in 100 200 300 400 500 600 700 800 900; do
+    for _weight in $_weights; do
         _index=$((_index + 1))
-        _percent=$((4 + _index * 8))
+        _percent=$((4 + _index * 60 / _weight_count))
         _role=$(weight_role "$_weight")
         update_task "$_wanted" running "正在生成 ${_weight} 字重复合字体" "$_percent" ''
         _dir="$_root/prepared/$_weight"
@@ -472,26 +572,23 @@ worker() {
             update_task "$_wanted" failed "${_weight} 字重复合失败" 100 "$(date +%s)"
             rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
+        write_auto_source_weights "$_root" "$_weight" "$_output" "$_dir" || {
+            update_task "$_wanted" failed "${_weight} 字重角色记录失败" 100 "$(date +%s)"
+            rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
+        }
         rm -rf "$_dir" 2>/dev/null || true
     done
 
-    update_task "$_wanted" running '正在应用自动多字重字体族' 88 ''
-    _result=$(LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$FONT_MANAGER" action switch "$_family" 2>&1)
-    printf '%s\n' "$_result" >>"$LOG_FILE" 2>/dev/null || true
-    printf '%s\n' "$_result" | grep -q '"status":"ok"' || {
-        update_task "$_wanted" failed '自动多字重字体族应用失败' 100 "$(date +%s)"
-        rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
-    }
-    save_mix_config "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" \
-        "$_cjk_mode" "$_latin_mode" "$_digit_mode" || {
-        update_task "$_wanted" failed '组合配置保存失败' 100 "$(date +%s)"
+    update_task "$_wanted" running '正在保存自动多字重组合源' 68 ''
+    stage_auto_sources "$_root" || {
+        update_task "$_wanted" failed '自动多字重组合源保存失败' 100 "$(date +%s)"
         rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
     }
     write_auto_generation_manifest "$_root" "$_cjk" "$_latin" "$_digit" || {
         update_task "$_wanted" failed '无法生成自动多字重提交清单' 100 "$(date +%s)"
         rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
     }
-    update_task "$_wanted" running '自动多字重已生成，正在核验本机扫描槽位并提交' 90 ''
+    update_task "$_wanted" running '自动多字重已生成，正在核验本机扫描槽位并提交' 70 ''
     if ! prepare_compat_payload; then
         update_task "$_wanted" failed "${FINALIZE_ERROR:-复合字体预提交处理失败}" 100 "$(date +%s)"
         rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
@@ -501,6 +598,11 @@ worker() {
         update_task "$_wanted" failed "${FINALIZE_ERROR:-下一启动字体负载提交失败}" 100 "$(date +%s)"
         rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
     fi
+    save_mix_config "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" \
+        "$_cjk_mode" "$_latin_mode" "$_digit_mode" || {
+        update_task "$_wanted" failed '字体负载已提交，但组合配置保存失败，请重启后重新选择' 100 "$(date +%s)"
+        rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
+    }
     update_task "$_wanted" success '自动多字重负载已提交，完整重启后生效' 100 "$(date +%s)"
     rm -rf "$_root" 2>/dev/null || true
     clear_auto_worker_pid "$_wanted"
@@ -610,11 +712,8 @@ config_json() {
 }
 
 recover_task() {
-    if [ -s "$WORKER_PID" ]; then
-        _pid=$(cat "$WORKER_PID" 2>/dev/null)
-        [ -z "$_pid" ] || ! kill -0 "$_pid" 2>/dev/null || kill "$_pid" 2>/dev/null || true
-    fi
-    clear_auto_worker_pid ''
+    # The shared fixed controller stops both owned process trees, including the
+    # inventory watchdog and all FontTools descendants, before clearing sources.
     sh "$FALLBACK_ENGINE" recover
 }
 

@@ -59,7 +59,7 @@ import org.json.JSONObject
 private const val FONT_WATCH_SCHEMA = 1
 private const val FONT_WATCH_MAX_DOCUMENTS = 2_048
 private const val FONT_WATCH_MAX_DEPTH = 6
-private val FONT_WATCH_EXTENSIONS = setOf("ttf", "otf", "ttc", "zip")
+private val FONT_WATCH_EXTENSIONS = setOf("ttf", "otf", "ttc", "otc", "woff", "woff2", "zip")
 
 @Immutable
 internal data class WatchedFontDocument(

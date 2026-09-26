@@ -36,4 +36,15 @@ mix_variable_default_weight() { echo 400; }
 [ "$(mix_axis_weight 'wdth=95,wght=400')" = 400 ]
 [ "$(mix_static_default_weight Family)" = 400 ]
 
-echo 'Automatic multiweight mode tests passed.'
+# The runtime's historical selection policy also supports automatic static-family
+# composition at its default weight. Test that actual helper explicitly rather
+# than inferring its behavior from the unused v4 helper above.
+. "$ROOT/common/legacy_v14_4/mix_weight_mode.sh"
+mix_variable_default_weight() { echo 400; }
+[ "$(infer_mix_weight_mode Family wght=400)" = auto ]
+[ "$(infer_mix_weight_mode Family wght=700)" = fixed ]
+[ "$(infer_mix_weight_mode Single wght=400)" = fixed ]
+[ "$(infer_mix_weight_mode Variable wght=400)" = auto ]
+[ "$(infer_mix_weight_mode Variable wght=500)" = fixed ]
+
+echo 'Automatic multiweight mode tests passed for both preserved and active helpers.'

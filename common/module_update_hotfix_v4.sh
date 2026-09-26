@@ -113,11 +113,18 @@ luoshu_v4_update_rebuild_selected() {
         _lvr_latin=$(sed -n 's/^latin=//p' "$_lvr_conf" 2>/dev/null | head -n1 | tr -d '\r\n')
         _lvr_digit=$(sed -n 's/^digit=//p' "$_lvr_conf" 2>/dev/null | head -n1 | tr -d '\r\n')
         [ -n "$_lvr_cjk" ] && [ -n "$_lvr_latin" ] && [ -n "$_lvr_digit" ] || return 1
-        MODDIR="$_lvr_module" sh "$_lvr_module/common/font_mix.sh" worker \
+        # The public worker waits for the router's matching task and its next-boot
+        # commit. Auto/weighted jobs report axes_task.conf; mix_task.conf can be a
+        # nested task or a stale earlier generation and is not a completion signal.
+        if ! MODDIR="$_lvr_module" sh "$_lvr_module/common/font_mix.sh" worker \
             "update-rebuild-${_lvr_started}-$$" "$_lvr_cjk" "$_lvr_latin" "$_lvr_digit" "$_lvr_started" \
-            >> "$_lvr_module/logs/fontswitch.log" 2>&1
-        _lvr_state=$(sed -n 's/^state=//p' "$_lvr_module/config/mix_task.conf" 2>/dev/null | head -n1)
-        [ "$_lvr_state" = success ] || return 1
+            >> "$_lvr_module/logs/fontswitch.log" 2>&1; then
+            return 1
+        fi
+        _lvr_next="$_lvr_module/config/font-payload-next.conf"
+        [ -d "$_lvr_module/.luoshu-payload-next" ] || return 1
+        [ "$(sed -n 's/^state=//p' "$_lvr_next" | head -n1)" = prepared ] || return 1
+        [ "$(sed -n 's/^font=//p' "$_lvr_next" | head -n1)" = mix ] || return 1
     else
         _lvr_output=$(MODDIR="$_lvr_module" sh "$_lvr_module/common/font_manager.sh" action switch "$_lvr_active" 2>&1)
         printf '%s\n' "$_lvr_output" >> "$_lvr_module/logs/fontswitch.log" 2>/dev/null || true

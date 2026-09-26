@@ -29,8 +29,20 @@ python3 -m py_compile \
   "$ROOT/common/font_metadata.py" \
   "$ROOT/common/font_extract_faces.py" \
   "$ROOT/common/font_import_probe.py" \
+  "$ROOT/common/font_import_engine.py" \
+  "$ROOT/common/mix_inventory_weights.py" \
+  "$ROOT/common/mix_stage_watchdog.py" \
+  "$ROOT/common/mix_output_cache.py" \
   "$ROOT/common/font_inventory.py" \
-  "$ROOT/common/device_font_slot_trace.py"
+  "$ROOT/common/device_font_slot_trace.py" \
+  "$ROOT/common/inventory_font_stage.py" \
+  "$ROOT/common/inventory_font_metrics.py" \
+  "$ROOT/common/inventory_stock_source.py" \
+  "$ROOT/common/inventory_font_supplement.py" \
+  "$ROOT/common/font_charstring_compile.py" \
+  "$ROOT/common/physical_font_load_verify.py" \
+  "$ROOT/common/dynamic_font_route_patch.py" \
+  "$ROOT/common/mix_source_manifest.py"
 
 # App-only 活跃源码清单。WebUI 前端及其准备脚本必须彻底不存在。
 for file in \
@@ -38,6 +50,8 @@ for file in \
   README.md LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
   common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py common/font_inventory.py common/device_font_slot_trace.py \
+  common/inventory_stock_source.py common/inventory_font_supplement.py common/font_charstring_compile.py common/physical_font_load_verify.py \
+  common/font_import_engine.py common/mix_inventory_weights.py common/mix_stage_watchdog.py common/mix_output_cache.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
   common/multiweight_mix_task.sh common/mix_weight_mode.sh \
@@ -127,13 +141,13 @@ grep -q 'native_font_index.json' "$ROOT/service.sh"
 ! grep -qE '重启界面|刷新字体缓存|回滚' "$ROOT/common/luoshu_cli.sh"
 
 # 字体处理、安全门禁和原生桥能力必须保留。
-grep -q 'full-composite-v12' "$ROOT/common/font_mix.sh"
-grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
+grep -q 'full-composite-v8' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
+grep -q 'build_composite_file' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
 sh "$ROOT/scripts/mix_entry_router_test.sh"
-grep -q 'for _weight in 100 200 300 400 500 600 700 800 900' "$ROOT/common/multiweight_mix_task.sh"
-grep -q 'build_composite_cached' "$ROOT/common/multiweight_mix_task.sh"
-grep -q 'LuoShuAutoMix' "$ROOT/common/multiweight_mix_task.sh"
-grep -q 'cjkMode=%s' "$ROOT/common/multiweight_mix_task.sh"
+grep -q 'for _weight in $_weights' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
+grep -q 'build_composite_cached' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
+grep -q 'LuoShuAutoMix' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
+grep -q 'cjkMode=%s' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
 grep -q 'mix_variable_default_weight' "$ROOT/common/mix_weight_mode.sh"
 grep -q 'common/font_mix_controller.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'native_import.sh' "$ROOT/common/app_bridge.sh"
@@ -149,8 +163,8 @@ grep -q 'coverage_export)' "$ROOT/common/app_bridge.sh"
 grep -q 'device_font_candidates.json' "$ROOT/common/app_bridge.sh"
 grep -q 'trusted_source' "$ROOT/common/native_import.sh"
 grep -q 'MAX_BYTES=268435456' "$ROOT/common/native_import.sh"
-grep -q 'font_validate' "$ROOT/common/native_import.sh"
-grep -q 'font_extract_faces.py' "$ROOT/common/native_import.sh"
+grep -q 'import_run_engine' "$ROOT/common/native_import.sh"
+grep -q 'font_detect_format' "$ROOT/common/native_import.sh"
 grep -q 'font_check_cli' "$ROOT/common/font_check.sh"
 grep -q 'source 时，必须只定义函数' "$ROOT/common/font_check.sh"
 grep -q 'instantiateVariableFont' "$ROOT/common/font_instance.py"
@@ -190,13 +204,11 @@ grep -q 'indicatorBackdrop = dockSurfaceBackdrop' "$ROOT/android-app/app/src/mai
 grep -q 'isRuntimeShaderSupported()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
 grep -q 'chromaticAberration' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/glass/LiquidGlassLens.kt"
 
-# HyperOS 必须保留紧凑控件的原厂度量壳，并按真实分区写入 MiSans 与数字字重目标。
-grep -q '_hyperos_metric_shell_files' "$ROOT/common/hyperos_global.sh"
-grep -q 'LUOSHU_PRODUCT_FONTS_ROOT' "$ROOT/common/hyperos_global.sh"
-grep -q 'font_instance.py' "$ROOT/common/hyperos_global.sh"
-grep -q 'hyperos_global.sh' "$ROOT/common/font_library_cache.sh"
-grep -q 'hyperos_global.sh' "$ROOT/common/mount_compat.sh"
-! grep -q '_font_alias.*Roboto' "$ROOT/common/hyperos_global.sh"
+# 字体目标与原厂度量由统一清单决定，实际换字体和预提交入口不得按 ROM 分发。
+! grep -q 'apply_font_by_rom\|IS_HYPEROS\|IS_COLOROS' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+! grep -q 'hyperos_global.sh' "$ROOT/common/font_library_cache.sh"
+! grep -q 'hyperos_global.sh' "$ROOT/common/mount_compat.sh"
+grep -q 'inventory_font_stage.sh' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 
 # 禁止重新引入高风险热刷新；字体 XML 只能由运行时事务层生成，不能作为静态系统负载提交。
 ! grep -q 'cmd font system --update' "$ROOT/service.sh"
@@ -239,10 +251,29 @@ grep -q '^                                 Apache License$' "$ROOT/licenses/Apac
 grep -q 'Miuix 与 AndroidLiquidGlass' "$ROOT/THIRD_PARTY_NOTICES.md"
 
 # 功能回归脚本。
+python3 "$ROOT/scripts/font_import_engine_test.py"
+python3 "$ROOT/scripts/mix_stage_watchdog_test.py"
+python3 "$ROOT/scripts/brotli_runtime_test.py"
+python3 "$ROOT/scripts/composite_sparse_roles_test.py"
 sh "$ROOT/scripts/native_preview_source_test.sh"
 sh "$ROOT/scripts/app_bridge_status_test.sh"
 sh "$ROOT/scripts/font_coverage_center_test.sh"
 sh "$ROOT/scripts/coverage_payload_remediate_test.sh"
+python3 "$ROOT/scripts/font_coverage_switch_regression_test.py"
+python3 "$ROOT/scripts/physical_slot_trace_test.py"
+python3 "$ROOT/scripts/coverage_rom_preservation_test.py"
+python3 "$ROOT/scripts/inventory_font_stage_test.py"
+python3 "$ROOT/scripts/inventory_stock_source_test.py"
+python3 "$ROOT/scripts/inventory_font_supplement_test.py"
+python3 "$ROOT/scripts/font_charstring_compile_test.py"
+python3 "$ROOT/scripts/merger_serialization_integration_test.py"
+python3 "$ROOT/scripts/coverage_inventory_integration_test.py"
+python3 "$ROOT/scripts/inventory_stage_bridge_test.py"
+python3 "$ROOT/scripts/coverage_repair_regression_test.py"
+python3 "$ROOT/scripts/coverage_repair_transaction_test.py"
+python3 "$ROOT/scripts/dynamic_font_route_test.py"
+python3 "$ROOT/scripts/mix_inventory_source_test.py"
+python3 "$ROOT/scripts/font_metrics_batch_raw_test.py"
 sh "$ROOT/scripts/font_active_state_test.sh"
 sh "$ROOT/scripts/font_provenance_test.sh"
 sh "$ROOT/scripts/font_boot_state_test.sh"
@@ -250,6 +281,7 @@ sh "$ROOT/scripts/native_zip_import_test.sh"
 sh "$ROOT/scripts/font_index_delete_regression_test.sh"
 sh "$ROOT/scripts/v2_source_audit.sh"
 sh "$ROOT/scripts/customize_reenable_test.sh"
+python3 "$ROOT/scripts/installer_flow_test.py"
 python3 "$ROOT/scripts/device_validation_gate_test.py"
 python3 "$ROOT/scripts/sync_update_metadata_test.py"
 python3 "$ROOT/scripts/release_branch_cleanup_test.py"
@@ -274,8 +306,11 @@ python3 "$ROOT/scripts/status_provider_hotfix_test.py"
 python3 "$ROOT/scripts/legacy_mix_status_lifecycle_test.py"
 python3 "$ROOT/scripts/scanner_refresh_test.py"
 sh "$ROOT/scripts/builder_update_policy_test.sh"
+python3 "$ROOT/scripts/module_update_rebuild_route_test.py"
+python3 "$ROOT/scripts/font_mutation_entry_test.py"
 python3 "$ROOT/scripts/font_layout_diagnostic_test.py"
 python3 "$ROOT/scripts/font_inventory_scan_test.py" --font "$FONT_INVENTORY_TEST_FONT"
+python3 "$ROOT/scripts/font_inventory_compat_test.py"
 python3 "$ROOT/scripts/stock_inventory_scan_wrapper_test.py"
 sh "$ROOT/scripts/rom_adapter_inventory_test.sh" "$FONT_INVENTORY_TEST_FONT"
 # The per-device engine is the release-critical HyperOS/KernelSU path. These
@@ -325,6 +360,8 @@ sh "$ROOT/scripts/app_installer_test.sh"
 sh "$ROOT/scripts/nested_mix_task_handoff_test.sh"
 sh "$ROOT/scripts/legacy_mix_34_progress_test.sh"
 sh "$ROOT/scripts/legacy_mix_finalize_race_test.sh"
+python3 "$ROOT/scripts/mix_precommit_integration_test.py"
+python3 "$ROOT/scripts/mix_output_cache_test.py"
 sh "$ROOT/scripts/stock_scan_lock_test.sh"
 
 test -x "$ROOT/common/python/bin/luoshu-python"

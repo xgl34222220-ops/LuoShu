@@ -9,15 +9,81 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import sys
 import tempfile
 
-from font_inventory import FONT_EXTENSIONS, LOGICAL_FONT_ROOTS, _heuristic_candidate
-from font_inventory_scan import _is_ui_family
+from font_inventory import FONT_EXTENSIONS, LOGICAL_FONT_ROOTS
 from hyperos_metrics_batch import (bitmap_bottom_slot, contract_for_slot, link_copy,
                                   read_inventory, write_metrics)
+
+
+# Historical adapter compatibility only. The active scanner and inventory engine
+# do not import this filename allowlist or branch on device manufacturers.
+HEURISTIC_PATTERNS = (
+    re.compile(r"^MiSans(?:VF(?:_Overlay)?|LatinVF|TCVF|L3|Clock[A-Za-z0-9_.-]*)\.(?:ttf|otf|ttc|otc)$", re.I),
+    re.compile(r"^(?:Mitype[A-Za-z0-9_.-]*|MiClock[A-Za-z0-9_.-]*|AndroidClock[A-Za-z0-9_.-]*|Clockopia)\.(?:ttf|otf|ttc|otc)$", re.I),
+    re.compile(r"^(?:100|200|300|350|400|500|600|700|800|900)\.ttf$", re.I),
+    re.compile(
+        r"^(?:Sys(?:Sans|Font)|OppoSans|Opposans|OPSans|OPlusSans|GoogleSans(?:Text|Flex)?|"
+        r"Roboto(?:Flex|Static)?|SourceSansPro|DIN(?:Pro|Condensed)?|OPPODIN(?:Condensed)?)[A-Za-z0-9_.-]*"
+        r"\.(?:ttf|otf|ttc|otc)$",
+        re.I,
+    ),
+)
+
+def _heuristic_candidate(name: str) -> bool:
+    if any(token in name.lower() for token in ('emoji', 'icon', 'symbol', 'math', 'music', 'serif')):
+        return False
+    return any(pattern.fullmatch(name) for pattern in HEURISTIC_PATTERNS)
+
+
+UI_FAMILY_PREFIXES = (
+    "sans-serif",
+    "system-ui",
+    "system-sans",
+    "roboto",
+    "google-sans",
+    "googlesans",
+    "mi-sans",
+    "misans",
+    "sys-sans",
+    "syssans",
+    "sysfont",
+    "oplus-sans",
+    "oplussans",
+    "oppo-sans",
+    "opposans",
+    "coloros-sans",
+)
+DENY_FAMILY_TOKENS = ("serif", "mono", "emoji", "symbol", "icon", "math", "music")
+SANS_SERIF_UI_SUFFIX_TOKENS = {
+    "thin", "extralight", "extra-light", "light", "regular", "normal", "book", "medium",
+    "semibold", "semi-bold", "bold", "extrabold", "extra-bold", "black", "heavy",
+    "condensed", "compact", "smallcaps", "small-caps", "display", "text", "flex", "static",
+}
+
+def _is_ui_family(name: str) -> bool:
+    lowered = name.strip().lower().replace("_", "-")
+    if not lowered:
+        return False
+    if lowered == "sans-serif":
+        return True
+    if lowered.startswith("sans-serif-"):
+        suffix = lowered.removeprefix("sans-serif-")
+        parts = [part for part in suffix.split("-") if part]
+        return bool(parts) and all(part in SANS_SERIF_UI_SUFFIX_TOKENS for part in parts)
+    tokens = {token for token in re.split(r"[^a-z0-9]+", lowered) if token}
+    if tokens.intersection({*DENY_FAMILY_TOKENS, "monospace"}):
+        return False
+    return any(
+        lowered == prefix or lowered.startswith(prefix + "-")
+        for prefix in UI_FAMILY_PREFIXES
+        if prefix != "sans-serif"
+    )
+
 
 
 def eligible_slot(slot: object, logical: str) -> bool:

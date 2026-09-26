@@ -274,12 +274,18 @@ class StockMetricContractTest(unittest.TestCase):
         for name, (ascent, descent) in values.items():
             path = fonts / name
             make_font(path, ascent=ascent, descent=descent)
-            if name.startswith(("NotoSansSC", "NotoSansTC")):
-                with TTFont(path) as font:
-                    for table in font["cmap"].tables:
-                        if table.isUnicode():
+            with TTFont(path) as font:
+                for table in font["cmap"].tables:
+                    if table.isUnicode():
+                        table.cmap.update({point: "zero" for point in range(32, 127)})
+                        if name.startswith(("NotoSansSC", "NotoSansTC")):
                             table.cmap[0x4E2D] = "zero"
-                    font.save(path)
+                font.save(path)
+        with TTFont(fonts / main) as font:
+            for table in font["cmap"].tables:
+                if table.isUnicode():
+                    table.cmap.update({point: "zero" for point in range(32, 127)})
+            font.save(fonts / main)
         (etc / "font_fallback.xml").write_text(
             f'<familyset><family name="sans-serif"><font>{main}</font></family>'
             '<family lang="zh-Hans"><font>NotoSansSC-VF.otf</font></family>'
@@ -294,12 +300,12 @@ class StockMetricContractTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(scanner.scan(args), 0)
         result = json.loads(args.output.read_text())
-        self.assertEqual(result["romKind"], "hyperos")
-        self.assertEqual(result["hyperosCoverageRevision"], scanner.HYPEROS_COVERAGE_REVISION)
+        self.assertEqual(result["romKind"], "generic")
+        self.assertEqual(result["detectionPolicy"], "measured-font-capabilities-v1")
         for name, (ascent, descent) in values.items():
             with self.subTest(name=name):
                 entry = result["slots"][f"/system/fonts/{name}"]
-                self.assertEqual(entry["source"], "hyperos-physical")
+                self.assertIn(entry["source"], {"xml", "verified-scan"})
                 self.assertEqual((entry["metrics"]["hhea"]["ascent"], entry["metrics"]["hhea"]["descent"]),
                                  (ascent, descent))
                 self.assertIn("head", entry["metrics"])
@@ -313,9 +319,10 @@ class StockMetricContractTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(scanner.scan(args), 0)
         result = json.loads(args.output.read_text())
-        self.assertEqual(result["romKind"], "coloros")
-        self.assertEqual(set(result["slots"]), {"/system/fonts/SysSans-Hans-Regular.ttf"})
-        result.pop("hyperosCoverageRevision")
+        self.assertEqual(result["romKind"], "generic")
+        self.assertEqual(set(result["slots"]), {"/system/fonts/SysSans-Hans-Regular.ttf",
+            *("/system/fonts/" + name for name in _values)})
+        result.pop("hyperosCoverageRevision", None)
         self.assertTrue(scanner._can_reuse(result, "stock-metrics-test"),
                         "this HyperOS-only refresh must not invalidate ColorOS metrics")
 
@@ -330,11 +337,12 @@ class StockMetricContractTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(scanner.scan(args), 0)
         result = json.loads(args.output.read_text())
-        self.assertEqual(set(result["slots"]), {
-            "/system/fonts/SysSans-Hans-Regular.ttf", "/system/fonts/MiSansVF.ttf",
-        })
+        self.assertIn("/system/fonts/SysSans-Hans-Regular.ttf", result["slots"])
+        self.assertIn("/system/fonts/MiSansVF.ttf", result["slots"])
+        self.assertIn("/system/fonts/NotoSansSC-VF.otf", result["slots"])
+        self.assertIn("/system/fonts/XiaomiSansVF.ttf", result["slots"])
         self.assertEqual(result["mainSlotPath"], "/system/fonts/SysSans-Hans-Regular.ttf")
-        self.assertEqual(result["romKind"], "coloros")
+        self.assertEqual(result["romKind"], "generic")
         self.assertTrue(scanner._can_reuse(result, "stock-metrics-test"))
 
     def test_initial_coloros_scan_with_misans_does_not_expand_hyperos_scope(self) -> None:
@@ -347,8 +355,8 @@ class StockMetricContractTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(scanner.scan(args), 0)
         previous = json.loads(args.output.read_text())
-        previous.pop("hyperosCoverageRevision")
-        self.assertEqual(previous["romKind"], "coloros")
+        previous.pop("hyperosCoverageRevision", None)
+        self.assertEqual(previous["romKind"], "generic")
         args.output.write_text(json.dumps(previous))
         self.add_unused_misans_to_coloros(args)
         args.force = True  # Matches an installer/manual rescan of a valid old inventory.
@@ -377,7 +385,7 @@ class StockMetricContractTest(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(scanner.scan(args), 0)
         refreshed = json.loads(args.output.read_text(encoding="utf-8"))
-        self.assertEqual(refreshed["romKind"], "coloros")
+        self.assertEqual(refreshed["romKind"], "generic")
         self.assertNotIn(stale_path, refreshed["slots"])
         self.assertIn(stale_path, refreshed["retiredAbsentUpgradeSlots"])
 
@@ -405,7 +413,7 @@ class StockMetricContractTest(unittest.TestCase):
                 self.assertEqual(scanner.scan(args), 0)
 
         refreshed = json.loads(args.output.read_text(encoding="utf-8"))
-        self.assertEqual(refreshed["romKind"], "coloros")
+        self.assertEqual(refreshed["romKind"], "generic")
         self.assertNotIn(stale_path, refreshed["slots"])
         self.assertFalse(refreshed.get("retiredAbsentUpgradeSlots"),
                          "fresh install scan must not depend on previous inventory retirement")
@@ -434,16 +442,23 @@ class StockMetricContractTest(unittest.TestCase):
         self.assertNotIn(stale_path, refreshed["slots"])
         self.assertIn(stale_path, refreshed["retiredAbsentUpgradeSlots"])
 
-    def test_hyperos_extra_collection_obeys_mapper_partitions_and_font_exclusions(self) -> None:
+    def test_extra_collection_uses_measured_text_and_protects_symbol_metadata(self) -> None:
         args, _values = self.physical_scan_fixture()
-        excluded = ("NotoSansCJKJP.otf", "NotoSansCJKKR.otf", "NotoSansArabic-Regular.ttf",
-                    "NotoSansThai-Regular.ttf", "NotoSans-RegularItalic.ttf", "NotoSansSymbols.ttf",
-                    "NotoSansSC-Regular.ttc", "NotoSansEmoji.ttf", "NotoSansAdlam-VF.ttf",
+        text_names = ("NotoSansCJKJP.otf", "NotoSansCJKKR.otf", "NotoSansArabic-Regular.ttf",
+                    "NotoSansThai-Regular.ttf", "NotoSans-RegularItalic.ttf",
+                    "NotoSansSC-Regular.ttc", "NotoSansAdlam-VF.ttf",
                     "NotoSansAhom-Regular.otf", "NotoSansCuneiform-Regular.ttf",
                     "NotoSansEgyptianHieroglyphs-Regular.ttf", "MiSansOdiaVF.ttf",
-                    "NotoSansSemiCondensed-Icons.ttf", "NotoSansMono-Italic.ttf")
-        for name in excluded:
+                    "NotoSansMono-Italic.ttf")
+        protected_names = ("NotoSansSymbols.ttf", "NotoSansEmoji.ttf", "NotoSansSemiCondensed-Icons.ttf")
+        # These fixtures contain a real digit, regardless of their filenames.
+        # A partial digit font is usable; symbol protection needs real evidence.
+        for name in (*text_names, *protected_names):
             make_font(args.system_fonts / name)
+        for name in protected_names:
+            with TTFont(args.system_fonts / name) as font:
+                font['OS/2'].sFamilyClass = 12 << 8
+                font.save(args.system_fonts / name)
         disguised_collection = "NotoSansCollection.ttf"
         with TTFont(args.system_fonts / "MiSansVF.ttf") as font:
             collection = TTCollection()
@@ -452,18 +467,29 @@ class StockMetricContractTest(unittest.TestCase):
         for partition in ("mi_ext", "product", "oplus_product"):
             directory = self.root / partition / "fonts"
             directory.mkdir(parents=True)
-            make_font(directory / "NotoSansSC-Regular.otf", ascent=1190, descent=-290)
+            path = directory / "NotoSansSC-Regular.otf"
+            make_font(path, ascent=1190, descent=-290)
+            with TTFont(path) as font:
+                for table in font["cmap"].tables:
+                    if table.isUnicode():
+                        table.cmap[0x4e2d] = "zero"
+                font.save(path)
             setattr(args, f"{partition}_fonts", directory)
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(scanner.scan(args), 0)
         slots = json.loads(args.output.read_text())["slots"]
-        for name in (*excluded, disguised_collection):
+        for name in protected_names:
             self.assertNotIn(f"/system/fonts/{name}", slots)
+        for name in text_names:
+            self.assertEqual(slots[f"/system/fonts/{name}"]["metrics"]["fontTraits"]["digitCount"], 1)
         self.assertIn("/system/fonts/DroidSansMono.ttf", slots)
         self.assertIn("/system/fonts/NotoSansSemiCondensed-Regular.ttf", slots)
         self.assertIn("/mi_ext/fonts/NotoSansSC-Regular.otf", slots)
         self.assertIn("/product/fonts/NotoSansSC-Regular.otf", slots)
-        self.assertNotIn("/oplus_product/fonts/NotoSansSC-Regular.otf", slots)
+        self.assertIn("/oplus_product/fonts/NotoSansSC-Regular.otf", slots)
+        collection = slots["/system/fonts/" + disguised_collection]
+        self.assertEqual(collection["format"], "TTC")
+        self.assertEqual(len(collection["faces"]), 1)
 
     def test_hyperos_additional_alias_reads_stock_partition_and_rejects_theme_target(self) -> None:
         args, _values = self.physical_scan_fixture()
@@ -504,7 +530,7 @@ class StockMetricContractTest(unittest.TestCase):
         result = json.loads(args.output.read_text())
         self.assertNotIn(logical, result["slots"])
         self.assertEqual(result["preservedDynamicAliases"][logical], {
-            "source": "hyperos-framework-symlink", "target": target})
+            "source": "dynamic-font-alias", "reason": "dynamic-font-alias", "target": target})
         self.assertTrue(scanner._can_reuse(result, "stock-metrics-test"))
         paths = [Path(call.args[0]) for call in reader.call_args_list]
         self.assertNotIn(Path(target), paths)
@@ -513,7 +539,7 @@ class StockMetricContractTest(unittest.TestCase):
         # Test6's valid-shaped Roboto assumption migrates to a preserved alias;
         # no other old slot may disappear through this exception.
         previous = copy.deepcopy(result)
-        previous["hyperosCoverageRevision"] = 1
+        previous["scannerRevision"] = 8
         previous.pop("preservedDynamicAliases")
         previous["slots"][logical] = {**copy.deepcopy(previous["mainSlot"]),
             "path": logical, "slotName": "MiSansVF_Overlay.ttf",
@@ -536,11 +562,16 @@ class StockMetricContractTest(unittest.TestCase):
             self.assertEqual(scanner.scan(args), 0)
         different = json.loads(args.output.read_text())
         self.assertNotIn(logical, different["slots"])
-        self.assertNotIn(logical, different["preservedDynamicAliases"])
+        self.assertIn(logical, different["preservedDynamicAliases"])
 
         # A real Overlay font on another ROM keeps its own original contract.
         overlay.unlink()
         make_font(overlay, ascent=1110, descent=-310)
+        with TTFont(overlay) as font:
+            for table in font["cmap"].tables:
+                if table.isUnicode():
+                    table.cmap.update({point: "zero" for point in range(32, 127)})
+            font.save(overlay)
         args.output = self.root / "static-overlay.json"
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(scanner.scan(args), 0)
@@ -552,9 +583,9 @@ class StockMetricContractTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(scanner.scan(args), 0)
         data = json.loads(args.output.read_text())
-        data.pop("hyperosCoverageRevision")
+        data["scannerRevision"] = 8
         data["slots"] = {path: entry for path, entry in data["slots"].items()
-                         if entry["source"] != "hyperos-physical"}
+                         if entry["source"] == "xml"}
         data["slotCount"] = len(data["slots"])
         args.output.write_text(json.dumps(data), encoding="utf-8")
         self.assertTrue(scanner._has_current_metrics(data), "this fixture already has Test4 metrics")
@@ -580,7 +611,7 @@ class StockMetricContractTest(unittest.TestCase):
                 self.assertEqual(scanner.scan(args), 0)
             data = json.loads(args.output.read_text())
             self.assertTrue(scanner._can_reuse(data, "stock-metrics-test"))
-            self.assertEqual(data["metricsRevision"], 3)
+            self.assertEqual(data["metricsRevision"], 5)
             self.assertTrue(all(f"/system/fonts/{name}" in data["slots"] for name in values))
             with mock.patch.object(inventory, "_read_metrics") as reader, contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(scanner.scan(args), 0)

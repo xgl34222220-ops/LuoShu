@@ -41,51 +41,51 @@ fi
     [ -n "$_active" ] || _active=default
     _mount_state=$(sed -n 's/^state=//p' "$MOUNT_STATE_FILE" 2>/dev/null | head -n1 | tr -d '\r\n')
     _mount_failed=$(sed -n 's/^failed=//p' "$MOUNT_STATE_FILE" 2>/dev/null | head -n1 | tr -d '\r\n')
-    _boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
-    _now=$(date +%s 2>/dev/null || echo 0)
+    _verified_generation=$(cksum "$MODDIR/config/font-payload-activated.conf" 2>/dev/null)
 
-    rm -f "$MODDIR/config/text_reboot_required.conf" 2>/dev/null || true
-
-    _verify_state=pending
-    _verify_mode=compatibility
-    _verify_reason=awaiting-mount-confirmation
-    if [ "$_active" = default ]; then
-        _verify_state=not-applicable
-        _verify_mode=system
-        _verify_reason=default-font
-    else
-        case "$_mount_state" in
-            mounted|degraded|confirmed|verified)
-                _verify_state=verified
-                _verify_mode=mount-confirmed
-                _verify_reason=physical-self-mount-active
-                ;;
-            failed)
-                _verify_state=failed
-                _verify_mode=compatibility
-                _verify_reason="self-mount-failed${_mount_failed:+:$_mount_failed}"
-                ;;
-            *)
-                _verify_state=pending
-                _verify_mode=compatibility
-                _verify_reason=mount-state-not-confirmed
-                ;;
-        esac
+    # A mount transaction or partition nonce does not prove the selected bytes
+    # reached Android's font namespace. Verify once after boot, retaining both
+    # active and retired payloads on missing or mismatched evidence.
+    _verify_rc=2
+    if [ -f "$MODDIR/common/device_font_load_verify.sh" ]; then
+        MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
+            sh "$MODDIR/common/device_font_load_verify.sh" verify >> "$LOG" 2>&1
+        _verify_rc=$?
     fi
-
-    {
-        printf 'state=%s\n' "$_verify_state"
-        printf 'mode=%s\n' "$_verify_mode"
-        printf 'activeFont=%s\n' "$_active"
-        printf 'reason=%s\n' "$_verify_reason"
-        printf 'bootId=%s\n' "$_boot_id"
-        printf 'time=%s\n' "$_now"
-    } > "${VERIFY}.tmp.$$" 2>/dev/null && mv -f "${VERIFY}.tmp.$$" "$VERIFY" 2>/dev/null || true
-    chmod 0644 "$VERIFY" 2>/dev/null || true
+    _verify_state=$(sed -n 's/^state=//p' "$VERIFY" 2>/dev/null | head -n1)
+    [ -n "$_verify_state" ] || _verify_state=pending
+    # A crashed/missing verifier cannot promote an older success record.
+    case "$_verify_rc:$_verify_state" in
+        0:verified|0:not-applicable|1:failed|2:pending) ;;
+        *) _verify_state=pending ;;
+    esac
 
     case "$_verify_state" in
         verified|not-applicable)
-            rm -rf "$MODDIR/.luoshu-retired" "$MODDIR"/.luoshu-payload-stage.* 2>/dev/null || true
+            # Foreground transactions own their stage directories. Cleanup may
+            # only retire this verified generation while holding their shared
+            # lock; a new selection or prepared generation keeps its recovery copy.
+            _verified_manifest=$(sed -n 's/^manifestDigest=//p' "$VERIFY" 2>/dev/null | head -n1)
+            if [ -f "$MODDIR/common/font_switch_lock.sh" ]; then
+                . "$MODDIR/common/font_switch_lock.sh"
+                _cleanup_owner=$(sh -c 'printf "%s\n" "$PPID"')
+                case "$_cleanup_owner" in ''|*[!0-9]*) _cleanup_owner=$$ ;; esac
+                if luoshu_font_lock_acquire "$MODDIR/.font_switch.lock" "$_cleanup_owner"; then
+                    _cleanup_active=$(sed -n '1p' "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
+                    [ -n "$_cleanup_active" ] || _cleanup_active=default
+                    _cleanup_generation=$(cksum "$MODDIR/config/font-payload-activated.conf" 2>/dev/null)
+                    _cleanup_next=$(sed -n 's/^state=//p' "$MODDIR/config/font-payload-next.conf" 2>/dev/null | head -n1)
+                    if [ "$_cleanup_active" = "$_active" ] && \
+                       [ "$_cleanup_generation" = "$_verified_generation" ] && \
+                       [ "$_cleanup_next" != prepared ] && [ ! -d "$MODDIR/.luoshu-payload-next" ] && \
+                       MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$MODDIR/common/device_font_load_verify.sh" status >/dev/null 2>&1 && \
+                       [ "$(sed -n 's/^manifestDigest=//p' "$VERIFY" 2>/dev/null | head -n1)" = "$_verified_manifest" ]; then
+                        rm -f "$MODDIR/config/text_reboot_required.conf" 2>/dev/null || true
+                        rm -rf "$MODDIR/.luoshu-retired" 2>/dev/null || true
+                    fi
+                    luoshu_font_lock_release "$MODDIR/.font_switch.lock" "$_cleanup_owner" >/dev/null 2>&1 || true
+                fi
+            fi
             printf '[%s] font load confirmed: active=%s mount=%s\n' \
                 "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_active" "$_mount_state" >> "$LOG" 2>/dev/null
             ;;

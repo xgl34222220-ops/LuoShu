@@ -234,34 +234,61 @@ class ColorOSMetricsTest(unittest.TestCase):
         self.assertEqual(calls.read_text().splitlines(), ['called'])
         self.assertEqual(json.loads(result.stdout)['mapped'], 1)
 
-    def test_both_legacy_entrypoints_propagate_metric_failures(self):
-        helper = self.module / 'common/coloros_stage_complete.sh'
-        helper.parent.mkdir(parents=True)
+    def test_inventory_entrypoints_propagate_metric_failures(self):
+        helper = self.module / 'common/inventory_font_stage.sh'
+        helper.parent.mkdir(parents=True, exist_ok=True)
         helper.write_text('printf "called\\n" >> "$TEST_CALLS"\nexit 7\n')
+        runtime = self.module / 'common/python/bin'
+        runtime.mkdir(parents=True, exist_ok=True)
+        (self.module / 'common/mix_stage_watchdog.py').write_text('fixture')
+        python = runtime / 'luoshu-python'
+        python.write_text('#!/bin/sh\nwhile [ "$1" != -- ]; do shift; done\nshift\nexec "$@"\n')
+        python.chmod(0o755)
         marker = self.root / 'calls'
-        for filename, function in (('font_switch_safe.sh', 'stage_coloros_complete'),
-                                   ('mix_router.sh', 'complete_coloros_stage')):
+        stub = '\n'.join((
+            'mix_request_is_current() { return 0; }',
+            'precommit_ready() { return 1; }',
+            'precommit_failed() { return 1; }',
+            'next_mix_payload_ready_for_request() { return 1; }',
+            'stage_has_fonts() { return 0; }',
+            'stage_generation_matches() { return 0; }',
+            'read_value() { :; }',
+            'mix_finalize_state_write() { :; }',
+            'precommit_fail() { return 1; }',
+        ))
+        for filename, function in (('font_switch_safe.sh', 'stage_inventory_map'),
+                                   ('mix_router.sh', 'prepare_mix_stage_for_commit')):
             source = (ROOT / 'common/legacy_v14_4' / filename).read_text()
             start = source.index(function + '() {')
             code = source[start:source.index('\n}', start) + 2]
-            getprop = '\ngetprop() { [ "$1" != ro.build.version.oplusrom ] || echo 16; }\n'
-            result = subprocess.run(['sh', '-c', code + getprop + function],
-                env={**os.environ, 'IS_COLOROS': 'true', 'MODDIR': str(self.module),
-                     'REALMOD': str(self.module), 'STAGE_PAYLOAD': str(self.stage),
-                     'MIX_STAGE': str(self.stage), 'LOG_FILE': str(self.root / 'log'),
-                     'TEST_CALLS': str(marker)})
+            result = subprocess.run(['sh', '-c', code + '\n' + stub + '\n' + function + ' source Demo'],
+                env={**os.environ, 'IS_COLOROS': 'true', 'IS_HYPEROS': 'true',
+                     'MODDIR': str(self.module), 'REALMOD': str(self.module),
+                     'INVENTORY_STAGE_HELPER': str(helper), 'USER_ROOT': str(self.root),
+                     'STAGE_PAYLOAD': str(self.stage), 'MIX_STAGE': str(self.stage),
+                     'LOG_FILE': str(self.root / 'log'), 'TEST_CALLS': str(marker)})
             self.assertNotEqual(result.returncode, 0, filename)
         self.assertEqual(marker.read_text().splitlines(), ['called', 'called'])
 
-    def test_coloros_postpass_leaves_hyperos_on_its_working_path(self):
-        source = (ROOT / 'common/legacy_v14_4/mix_router.sh').read_text()
-        start = source.index('complete_coloros_stage() {')
+    def test_inventory_mapping_has_no_second_brand_postpass(self):
+        # With overlapping vendor markers, the safe entry still invokes exactly
+        # one inventory pass. Unexpected old helpers terminate with a clear code.
+        helper = self.module / 'common/inventory_font_stage.sh'
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        helper.write_text('printf "mapped\\n" >> "$TEST_CALLS"\n')
+        source = (ROOT / 'common/legacy_v14_4/font_switch_safe.sh').read_text()
+        start = source.index('stage_inventory_map() {')
         code = source[start:source.index('\n}', start) + 2]
-        # A HyperOS device may also expose OEM markers. Never run a second
-        # ColorOS pass over the already aligned clock/UI payload.
-        result = subprocess.run(['sh', '-c', code + '\ngetprop() { echo marker; }\ncomplete_coloros_stage'],
-            env={**os.environ, 'REALMOD': str(self.module), 'MIX_STAGE': str(self.stage)})
+        marker = self.root / 'calls'
+        result = subprocess.run(['sh', '-c', code + '\n' +
+            'getprop() { echo marker; }; stage_hyperos_complete() { exit 91; }; ' +
+            'stage_coloros_complete() { exit 92; }; stage_inventory_map source Demo'],
+            env={**os.environ, 'IS_HYPEROS': 'true', 'IS_COLOROS': 'true',
+                 'MODDIR': str(self.module), 'USER_ROOT': str(self.root),
+                 'INVENTORY_STAGE_HELPER': str(helper), 'STAGE_PAYLOAD': str(self.stage),
+                 'LOG_FILE': str(self.root / 'log'), 'TEST_CALLS': str(marker)})
         self.assertEqual(result.returncode, 0)
+        self.assertEqual(marker.read_text().splitlines(), ['mapped'])
 
 
 if __name__ == '__main__':

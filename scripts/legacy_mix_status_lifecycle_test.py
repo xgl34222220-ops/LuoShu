@@ -73,6 +73,24 @@ class MixStatusLifecycleTest(unittest.TestCase):
         self.assertIn('childTask=mix-child\n', saved)
         self.assertFalse(path.exists())
 
+    def test_status_preserves_selected_axes_weight_and_auto_mode(self):
+        self.write_task(state='queued', started=int(time.time()))
+        with self.task_file.open('a') as stream:
+            stream.write('cjkMode=auto\nlatinAxes=wght=550,wdth=90\nlatinMode=auto\ndigitMode=fixed\n')
+        data = self.call()['data']
+        self.assertEqual(data['cjkWeight'], 440)
+        self.assertEqual(data['latinWeight'], 550)
+        self.assertEqual(data['cjkMode'], 'auto')
+        self.assertEqual(data['latinMode'], 'auto')
+        self.assertEqual(data['digitMode'], 'fixed')
+
+    def test_config_preserves_explicit_auto_mode_without_loading_fonts(self):
+        (self.config / 'axes_mix.conf').write_text('cjk=CJK\nlatin=Latin\ndigit=Digits\n'
+            'cjkMode=auto\nlatinMode=fixed\ndigitMode=auto\ncjkWeight=550\n')
+        data = self.call('config')['data']
+        self.assertEqual(data['cjkWeight'], 550)
+        self.assertEqual((data['cjkMode'], data['latinMode'], data['digitMode']), ('auto', 'fixed', 'auto'))
+
     def test_home_reconcile_also_releases_dead_task(self):
         self.assertEqual(self.call('reconcile'), {'status': 'ok'})
         self.assertIn('state=failed\n', self.task_file.read_text())

@@ -38,7 +38,7 @@ rm -f "$MODDIR/config/active_emoji.conf" "$MODDIR/config/emoji_task.conf" "$MODD
 rm -f "$MODDIR/config"/v*_axes_task.conf "$MODDIR/config"/v*_axes_mix.conf "$MODDIR/config"/v*_axes_worker.pid 2>/dev/null || true
 rm -f "$MODDIR/config/device-font-boot-verify.pid" "$MODDIR/config/device-font-boot-verify.pid.task" \
       "$MODDIR/config/device-font-boot-verify.pid.boot" 2>/dev/null || true
-chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
+chmod 0755 "$MODDIR/common/python/bin/luoshu-python" "$MODDIR/common/python/bin/luoshu-brotli" 2>/dev/null || true
 
 # 通过统一桥恢复中断的原子负载，并清理独立字重暂存任务。
 if [ -f "$MODDIR/common/font_mix_controller.sh" ]; then

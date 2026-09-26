@@ -13,7 +13,6 @@ type luoshu_next_boot_activate >/dev/null 2>&1 && \
 
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
 V4_POST_FS="$MODDIR/.luoshu-runtime/core/post-fs-data.sh"
-HYPEROS_LEGACY_COMPAT="$MODDIR/common/legacy_v14_4/hyperos_full_coverage.sh"
 
 load_self_mount_runtime() {
     [ -f "$MODDIR/common/private_payload.sh" ] && . "$MODDIR/common/private_payload.sh"
@@ -90,12 +89,8 @@ load_self_mount_runtime
 type luoshu_private_mount_module_view >/dev/null 2>&1 && \
     luoshu_private_mount_module_view "$MODDIR" >/dev/null 2>&1 || true
 
-# HyperOS 3 uses additional upright UI/typeface/clock slots across system_ext,
-# product and mi_ext. Discover every safe physical slot that exists on this ROM
-# before self-mount, rather than relying on a short static filename list.
-[ -f "$HYPEROS_LEGACY_COMPAT" ] && . "$HYPEROS_LEGACY_COMPAT"
-type luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 && \
-    luoshu_hyperos_full_payload_ensure >/dev/null 2>&1 || true
+# Only activate the inventory-validated foreground payload. Boot must not add
+# filename-based aliases that were excluded by the current scan or source font.
 
 type luoshu_self_mount_stage_for_manager >/dev/null 2>&1 || {
     record_mount_loader_failure
