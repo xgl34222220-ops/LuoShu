@@ -58,7 +58,7 @@ jobs:
           grep -q '"$FONT_INVENTORY_PYTHON" "$FONT_INVENTORY_SCRIPT" --scan' "$INSTALLER"
           grep -q '_add_verified_text_slots' common/font_inventory.py
           grep -q 'genericSlotCount' "$INSTALLER"
-          grep -q 'fontPathCount' "$INSTALLER"
+          grep -q 'fontFileCount' "$INSTALLER"
           grep -q 'nestedFontRootCount' "$INSTALLER"
           python3 scripts/installer_flow_test.py
           grep -q 'device_font_candidates.json' "$INSTALLER"
