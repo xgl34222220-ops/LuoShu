@@ -441,6 +441,8 @@ def normalize_path(
         if target_contract is not None
         else load_inventory_contract(inventory, target_slot=target_slot)
     )
+    if strict_contract and contract is not None and not monospaced:
+        return _fast_contract_normalize(source, output, contract)
     font, face = load_font(source)
     try:
         report = normalize_font_metrics(
@@ -570,41 +572,13 @@ def _fast_contract_normalize(
         with source.open("rb") as stream:
             font = TTFont(stream, **kwargs)
             try:
-                if "head" not in font or "hhea" not in font or "OS/2" not in font:
-                    raise MetricsError("字体缺少 head、hhea 或 OS/2 度量表")
-                upem = int(font["head"].unitsPerEm)
-                if upem < 16:
-                    raise MetricsError("字体 unitsPerEm 无效")
-
-                if contract is not None:
-                    ascent_ratio = float(contract["ascentRatio"])
-                    descent_ratio = float(contract["descentRatio"])
-                    metrics_source = "inventory"
-                else:
-                    ascent_ratio = TYPO_ASCENDER_RATIO
-                    descent_ratio = TYPO_DESCENDER_RATIO
-                    metrics_source = "fixed-fallback"
-
-                ascender = _clamp_signed(int(round(upem * ascent_ratio)))
-                descender_abs = int(round(upem * descent_ratio))
-                descender = _clamp_signed(-descender_abs)
-
-                hhea = font["hhea"]
-                hhea.ascent = ascender
-                hhea.descent = descender
-                hhea.lineGap = 0
-
-                os2 = font["OS/2"]
-                _promote_os2_for_typo_metrics(os2)
-                os2.sTypoAscender = ascender
-                os2.sTypoDescender = descender
-                os2.sTypoLineGap = 0
-                os2.fsSelection |= 1 << 7
-                os2.usWinAscent = _clamp_unsigned(min(ascender, int(round(upem * WIN_ASCENT_CAP_RATIO))))
-                os2.usWinDescent = _clamp_unsigned(min(descender_abs, int(round(upem * WIN_DESCENT_CAP_RATIO))))
-
-                if "MVAR" in font:
-                    del font["MVAR"]
+                # Keep the exact existing line caps, cap/x-height probes and
+                # MVAR handling. Only serialization changes: no glyph geometry
+                # is edited for a strict non-monospace slot, so recompiling the
+                # whole donor is unnecessary (and very costly for CJK CFF).
+                report = normalize_font_metrics(
+                    font, target_contract=contract, enclose_outlines=False,
+                )
 
                 # Accessing metric tables must not make fontTools serialize huge CJK
                 # outline tables again. Drop decoded outline objects so save() copies
@@ -624,20 +598,11 @@ def _fast_contract_normalize(
         temporary.unlink(missing_ok=True)
 
     return {
+        **report,
         "status": "ok",
         "input": str(source),
         "output": str(output),
         "face": face,
-        "upem": upem,
-        "ascender": ascender,
-        "descender": descender,
-        "lineGap": 0,
-        "metricsSource": metrics_source,
-        "targetSlot": contract.get("slot", "") if contract else "",
-        "targetBuildKey": contract.get("buildKey", "") if contract else "",
-        "targetUpem": int(contract.get("upem", 0)) if contract else 0,
-        "targetAscent": int(contract.get("ascent", 0)) if contract else 0,
-        "targetDescent": int(contract.get("descent", 0)) if contract else 0,
         "fastContract": True,
     }
 

@@ -564,7 +564,7 @@ prepare_mix_stage_for_commit() {
         precommit_fail '复合字体任务标识丢失，已拒绝提交'
         return 1
     }
-    _pm_tmp="${PRECOMMIT_STATE}.tmp.$"
+    _pm_tmp="${PRECOMMIT_STATE}.tmp.$$"
     {
         printf "state=ready\n"
         printf "requestId=%s\n" "$_pm_request"
@@ -622,7 +622,10 @@ commit_mix_stage_if_needed() {
 
 finalize_lock_acquire() {
     _tries=0
-    while [ "$_tries" -lt 20 ]; do
+    # A live peer can be doing the bounded 120-second precommit. Wait for its
+    # result within that same budget instead of failing at 20 seconds or doing
+    # the work concurrently. The controller's outer timeout remains unchanged.
+    while [ "$_tries" -lt 120 ]; do
         if mkdir "$FINALIZE_LOCK" 2>/dev/null; then
             printf '%s\n' "$$" > "$FINALIZE_LOCK/pid" 2>/dev/null || {
                 rmdir "$FINALIZE_LOCK" 2>/dev/null || true
@@ -651,6 +654,27 @@ finalize_lock_release() {
     rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
     rmdir "$FINALIZE_LOCK" 2>/dev/null || true
 }
+
+prepare_mix_stage_locked() (
+    # The weighted controller's prepare call and the legacy monitor's finalize
+    # call must share the same owner. Checking only the ready marker lets both
+    # processes enter the expensive ROM/coverage passes before it is written.
+    finalize_lock_acquire || {
+        printf '{"status":"error","message":"复合字体预提交锁正在使用，请稍后重试"}\n'
+        return 1
+    }
+    trap 'finalize_lock_release >/dev/null 2>&1 || true' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    if prepare_mix_stage_for_commit; then
+        printf '{"status":"ok","data":{"stage":"prepared"}}\n'
+        return 0
+    fi
+    printf '{"status":"error","message":"%s"}\n' \
+        "$(json_escape_router "${PRECOMMIT_ERROR:-复合字体预提交处理失败}")"
+    return 1
+)
 
 write_legacy_mix_mode() {
     _tmp="$REALMOD/config/font_runtime_legacy_v14_4.conf.tmp.$$"
@@ -754,13 +778,8 @@ if [ "$_cmd" = finalize-worker ]; then
     exit 0
 fi
 if [ "$_cmd" = prepare-finalize ]; then
-    if prepare_mix_stage_for_commit; then
-        printf '{"status":"ok","data":{"stage":"prepared"}}\n'
-        exit 0
-    fi
-    _prepare_error="${PRECOMMIT_ERROR:-复合字体预提交处理失败}"
-    printf '{"status":"error","message":"%s"}\n' "$(json_escape_router "$_prepare_error")"
-    exit 1
+    prepare_mix_stage_locked
+    exit $?
 fi
 if [ "$_cmd" = reconcile ]; then
     # Reconcile task ownership without rebuilding compatibility runtime links.
