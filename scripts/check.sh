@@ -30,7 +30,11 @@ python3 -m py_compile \
   "$ROOT/common/font_extract_faces.py" \
   "$ROOT/common/font_import_probe.py" \
   "$ROOT/common/font_inventory.py" \
-  "$ROOT/common/device_font_slot_trace.py"
+  "$ROOT/common/device_font_slot_trace.py" \
+  "$ROOT/common/inventory_font_stage.py" \
+  "$ROOT/common/inventory_font_metrics.py" \
+  "$ROOT/common/dynamic_font_route_patch.py" \
+  "$ROOT/common/mix_source_manifest.py"
 
 # App-only 活跃源码清单。WebUI 前端及其准备脚本必须彻底不存在。
 for file in \
@@ -127,13 +131,13 @@ grep -q 'native_font_index.json' "$ROOT/service.sh"
 ! grep -qE '重启界面|刷新字体缓存|回滚' "$ROOT/common/luoshu_cli.sh"
 
 # 字体处理、安全门禁和原生桥能力必须保留。
-grep -q 'full-composite-v12' "$ROOT/common/font_mix.sh"
-grep -q 'build_composite_file' "$ROOT/common/font_mix.sh"
+grep -q 'full-composite-v7' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
+grep -q 'build_composite_file' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
 sh "$ROOT/scripts/mix_entry_router_test.sh"
-grep -q 'for _weight in 100 200 300 400 500 600 700 800 900' "$ROOT/common/multiweight_mix_task.sh"
-grep -q 'build_composite_cached' "$ROOT/common/multiweight_mix_task.sh"
-grep -q 'LuoShuAutoMix' "$ROOT/common/multiweight_mix_task.sh"
-grep -q 'cjkMode=%s' "$ROOT/common/multiweight_mix_task.sh"
+grep -q 'for _weight in 100 200 300 400 500 600 700 800 900' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
+grep -q 'build_composite_cached' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
+grep -q 'LuoShuAutoMix' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
+grep -q 'cjkMode=%s' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
 grep -q 'mix_variable_default_weight' "$ROOT/common/mix_weight_mode.sh"
 grep -q 'common/font_mix_controller.sh' "$ROOT/common/app_bridge.sh"
 grep -q 'native_import.sh' "$ROOT/common/app_bridge.sh"
@@ -190,13 +194,11 @@ grep -q 'indicatorBackdrop = dockSurfaceBackdrop' "$ROOT/android-app/app/src/mai
 grep -q 'isRuntimeShaderSupported()' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuAppShell.kt"
 grep -q 'chromaticAberration' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/ui/glass/LiquidGlassLens.kt"
 
-# HyperOS 必须保留紧凑控件的原厂度量壳，并按真实分区写入 MiSans 与数字字重目标。
-grep -q '_hyperos_metric_shell_files' "$ROOT/common/hyperos_global.sh"
-grep -q 'LUOSHU_PRODUCT_FONTS_ROOT' "$ROOT/common/hyperos_global.sh"
-grep -q 'font_instance.py' "$ROOT/common/hyperos_global.sh"
-grep -q 'hyperos_global.sh' "$ROOT/common/font_library_cache.sh"
-grep -q 'hyperos_global.sh' "$ROOT/common/mount_compat.sh"
-! grep -q '_font_alias.*Roboto' "$ROOT/common/hyperos_global.sh"
+# 字体目标与原厂度量由统一清单决定，实际换字体和预提交入口不得按 ROM 分发。
+! grep -q 'apply_font_by_rom\|IS_HYPEROS\|IS_COLOROS' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+! grep -q 'hyperos_global.sh' "$ROOT/common/font_library_cache.sh"
+! grep -q 'hyperos_global.sh' "$ROOT/common/mount_compat.sh"
+grep -q 'inventory_font_stage.sh' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 
 # 禁止重新引入高风险热刷新；字体 XML 只能由运行时事务层生成，不能作为静态系统负载提交。
 ! grep -q 'cmd font system --update' "$ROOT/service.sh"
@@ -245,6 +247,10 @@ sh "$ROOT/scripts/font_coverage_center_test.sh"
 sh "$ROOT/scripts/coverage_payload_remediate_test.sh"
 python3 "$ROOT/scripts/font_coverage_switch_regression_test.py"
 python3 "$ROOT/scripts/coverage_rom_preservation_test.py"
+python3 "$ROOT/scripts/inventory_font_stage_test.py"
+python3 "$ROOT/scripts/inventory_stage_bridge_test.py"
+python3 "$ROOT/scripts/dynamic_font_route_test.py"
+python3 "$ROOT/scripts/mix_inventory_source_test.py"
 python3 "$ROOT/scripts/font_metrics_batch_raw_test.py"
 sh "$ROOT/scripts/font_active_state_test.sh"
 sh "$ROOT/scripts/font_provenance_test.sh"
@@ -278,6 +284,8 @@ python3 "$ROOT/scripts/status_provider_hotfix_test.py"
 python3 "$ROOT/scripts/legacy_mix_status_lifecycle_test.py"
 python3 "$ROOT/scripts/scanner_refresh_test.py"
 sh "$ROOT/scripts/builder_update_policy_test.sh"
+python3 "$ROOT/scripts/module_update_rebuild_route_test.py"
+python3 "$ROOT/scripts/font_mutation_entry_test.py"
 python3 "$ROOT/scripts/font_layout_diagnostic_test.py"
 python3 "$ROOT/scripts/font_inventory_scan_test.py" --font "$FONT_INVENTORY_TEST_FONT"
 python3 "$ROOT/scripts/font_inventory_compat_test.py"

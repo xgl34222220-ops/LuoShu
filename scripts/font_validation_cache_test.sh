@@ -64,12 +64,12 @@ luoshu_font_validate_global_cached "$font"
 [ "${LUOSHU_FONT_VALIDATION_CACHE_HIT:-false}" = true ]
 [ "$(wc -l < "$calls" | tr -d ' ')" -eq 4 ]
 
-# The preserved v4 manager still owns and tests the cached full validator. Final App apply is
-# intentionally routed around it to the v14.4 lightweight validator, so the root router must not
-# regain a cache call that would drag the newer switch pipeline back into the critical path.
-ok grep -q 'luoshu_font_validate_global_cached "$_source"' "$ROOT/common/font_manager_v4.sh"
-ok grep -q 'legacy_v14_4_switch.sh' "$ROOT/common/font_manager.sh"
-ok grep -q 'legacy_validate_global "$_source"' "$ROOT/common/legacy_v14_4_switch.sh"
-! grep -q 'luoshu_font_validate_global_cached' "$ROOT/common/legacy_v14_4_switch.sh"
+# Library validation keeps its full-validation cache; applying a font uses the
+# safe backend's source validation cache and cannot fall back to a ROM mapper.
+ok grep -q 'luoshu_font_validate_global_cached "$_file"' "$ROOT/common/font_manager_v4.sh"
+ok grep -q 'font_switch_safe.sh' "$ROOT/common/font_manager.sh"
+ok grep -q 'safe_validation_restore "$_file"' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
+ok grep -q 'exec sh "$SAFE_SWITCH" "$@"' "$ROOT/common/legacy_v14_4_switch.sh"
+! grep -q 'apply_font_by_rom' "$ROOT/common/legacy_v14_4_switch.sh"
 ok grep -q 'luoshu_font_validation_cache_restore "$_lfrp_font"' "$ROOT/common/font_runtime_policy.sh"
 echo 'font_validation_cache_test: PASS'

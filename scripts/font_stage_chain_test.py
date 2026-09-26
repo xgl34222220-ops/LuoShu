@@ -79,6 +79,7 @@ class FontStageChainTest(unittest.TestCase):
                         SWITCH_CACHE_SCHEMA=self.schema, SWITCH_CACHE_MAX_ENTRIES='3',
                         SWITCH_CACHE_MAX_KB='786432',
                         COVERAGE_REMEDIATE_HELPER=str(self.module / 'common/coverage_payload_remediate.sh'),
+                        INVENTORY_STAGE_HELPER=str(self.module / 'common/inventory_font_stage.sh'),
                         LOG_FILE=str(self.module / 'logs/fontswitch.log'),
                         SOURCE=str(self.source), IS_HYPEROS='false', IS_COLOROS='false',
                         PROGRESS_FILE='', LIBRARY=str(self.library), PRIVATE=str(PRIVATE),
@@ -109,8 +110,85 @@ class FontStageChainTest(unittest.TestCase):
             mkdir -p "$STAGE_PAYLOAD/system/fonts" "$STAGE_PAYLOAD/aurora_product/fonts"
             cp "$SOURCE" "$STAGE_PAYLOAD/system/fonts/Ready.ttf"
             cp "$SOURCE" "$STAGE_PAYLOAD/aurora_product/fonts/ReadyClock.ttf"
+            printf '/system/fonts/Ready.ttf\n/aurora_product/fonts/ReadyClock.ttf\n' > "$STAGE_PAYLOAD/.luoshu-metrics-covered.lst"
             safe_switch_cache_store "$SOURCE" Demo
         ''')
+
+    def test_family_file_add_remove_rename_and_edit_invalidate_cache(self):
+        baseline = self.digest()
+        bold = self.source.with_name('Demo Bold.TtF')
+        bold.write_text('bold-generation-A')
+        added = self.digest()
+        self.assertNotEqual(added, baseline)
+        bold.write_text('bold-generation-B')
+        edited = self.digest()
+        self.assertNotEqual(edited, added)
+        renamed = bold.with_name('Demo Semibold.TtF')
+        bold.rename(renamed)
+        self.assertNotEqual(self.digest(), edited)
+        renamed.unlink()
+        self.assertEqual(self.digest(), baseline)
+
+    def test_family_symlink_target_edit_invalidates_cache(self):
+        external = self.root / 'external-bold.ttf'
+        external.write_text('bold-generation-A')
+        self.source.with_name('Demo-Bold.ttf').symlink_to(external)
+        previous = self.digest()
+        external.write_text('bold-generation-B')
+        self.assertNotEqual(self.digest(), previous)
+
+    def test_linked_source_discovers_real_parent_siblings(self):
+        real_directory = self.root / 'external'
+        real_directory.mkdir()
+        real_source = real_directory / 'Demo.ttf'
+        real_source.write_text('regular-source')
+        self.source.unlink()
+        self.source.symlink_to(real_source)
+        before = self.digest()
+        (real_directory / '.Demo-Bold.ttf').write_text('hidden-bold')
+        self.assertNotEqual(self.digest(), before)
+
+    def test_family_metadata_uses_one_batched_stat(self):
+        for index in range(15):
+            self.source.with_name(f'Demo-{index}.ttf').write_text('font')
+        self.run_sh('''
+            stat() {
+                printf 'called\n' >> "$WORK/family-stat-calls"
+                command stat "$@"
+            }
+            safe_source_family_identity "$SOURCE"
+        ''')
+        self.assertEqual((self.root / 'family-stat-calls').read_text(), 'called\n')
+
+    def test_non_font_siblings_do_not_invalidate_cache(self):
+        before = self.digest()
+        self.source.with_name('notes.txt').write_text('notes')
+        self.assertEqual(self.digest(), before)
+
+    def test_family_change_during_generation_rejects_commit(self):
+        self.write('.luoshu-payload-next/system/fonts/Queued.ttf', 'queued')
+        result = self.switch_fixture('''
+            stage_verify() {
+                printf new-bold > "${SOURCE%/*}/Demo-Bold.ttf"
+                return 0
+            }
+        ''')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.module / '.luoshu-payload-next/system/fonts/Queued.ttf').read_text(), 'queued')
+        self.assertFalse((self.config / 'safe-switch-cache').exists())
+
+    def test_cache_roundtrip_preserves_inventory_output_manifest(self):
+        manifest = '{"schema":"inventory-font-output-v1","files":{"/system/fonts/Ready.ttf":"digest"}}'
+        self.write('.luoshu-payload-stage.fixture/.luoshu-inventory-output-manifest.json', manifest)
+        self.write('.luoshu-payload-stage.fixture/.luoshu-coverage-summary.conf', 'mapped=2\n')
+        self.seed_cache()
+        self.run_sh('rm -rf "$STAGE_PAYLOAD"; safe_stage_begin "$SOURCE" Demo; safe_switch_cache_restore "$SOURCE" Demo')
+        stage = Path(self.env['STAGE_PAYLOAD'])
+        self.assertEqual((stage / '.luoshu-inventory-output-manifest.json').read_text(), manifest)
+        self.assertEqual((stage / '.luoshu-coverage-summary.conf').read_text(), 'mapped=2\n')
+        self.run_sh('stage_clear_text_payload')
+        self.assertFalse((stage / '.luoshu-inventory-output-manifest.json').exists())
+        self.assertFalse((stage / '.luoshu-coverage-summary.conf').exists())
 
     def test_partition_manifest_is_consumed(self):
         parts = self.run_sh('safe_partition_list').stdout.split()
@@ -146,7 +224,7 @@ class FontStageChainTest(unittest.TestCase):
         self.assertEqual((stage / 'product/vivo/keep.txt').read_text(), 'sibling')
         self.assertFalse(list(stage.glob('.luoshu-*')))
 
-    def test_repair_uses_valid_cache_without_rebuilding_rom_core(self):
+    def test_repair_uses_valid_cache_without_full_inventory_rebuild(self):
         helper = self.write('common/coverage_payload_remediate.sh',
                             '#!/bin/sh\nprintf repaired > "$1/system/fonts/Repaired.ttf"\n')
         # The helper is part of the engine identity: generate the cache after it
@@ -155,7 +233,7 @@ class FontStageChainTest(unittest.TestCase):
         result = self.switch_fixture('''
             LUOSHU_COVERAGE_REMEDIATE=1
             export LUOSHU_COVERAGE_REMEDIATE
-            apply_font_by_rom() { echo unexpected-full-rebuild >&2; return 1; }
+            stage_inventory_map() { echo unexpected-full-rebuild >&2; return 1; }
         ''')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(helper.is_file())
@@ -425,14 +503,25 @@ class FontStageChainTest(unittest.TestCase):
         return self.run_sh('''
             lock_acquire() { return 0; }
             validate_global() { return 0; }
-            mirror_existing_targets() { return 0; }
-            apply_font_by_rom() {
+            safe_inventory_ready() { return 0; }
+            stage_inventory_map() {
                 mkdir -p "$STAGE_PAYLOAD/system/fonts/.luoshu-font-store" "$STAGE_PAYLOAD/aurora_product/fonts"
                 cp "$SOURCE" "$STAGE_PAYLOAD/system/fonts/New.ttf"
                 cp "$SOURCE" "$STAGE_PAYLOAD/system/fonts/.luoshu-font-store/regular.font"
                 cp "$SOURCE" "$STAGE_PAYLOAD/aurora_product/fonts/NewClock.ttf"
+                printf '/system/fonts/New.ttf\n/aurora_product/fonts/NewClock.ttf\n' > "$STAGE_PAYLOAD/.luoshu-metrics-covered.lst"
             }
         ''' + extra + '\nswitch_font Demo\n', check=False)
+
+    def test_verification_accepts_nested_extensionless_inventory_output(self):
+        self.write('.luoshu-payload-stage.fixture/nebula/assets/typefaces/Text', 'valid-font')
+        self.write('.luoshu-payload-stage.fixture/.luoshu-metrics-covered.lst',
+                   '/nebula/assets/typefaces/Text\n')
+        self.run_sh('stage_verify Demo')
+        self.write('.luoshu-payload-stage.fixture/.luoshu-metrics-covered.lst',
+                   '/nebula/assets/typefaces/Text\n/nebula/assets/typefaces/Missing\n')
+        result = self.run_sh('stage_verify Demo', check=False)
+        self.assertNotEqual(result.returncode, 0)
 
     def test_failed_partial_restore_is_cleared_before_rebuild(self):
         result = self.switch_fixture('''

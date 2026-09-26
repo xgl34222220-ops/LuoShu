@@ -309,8 +309,8 @@ def _physical_preserved_index(physical_root: Path) -> dict[str, str]:
     return result
 
 
-def rom_preserved_index(physical_root: Path, inventory: dict[str, Any], *, strict: bool = False) -> dict[str, str]:
-    """Keep the ROM mapper's intentional omissions through generic coverage.
+def payload_preserved_index(physical_root: Path, inventory: dict[str, Any], *, strict: bool = False) -> dict[str, str]:
+    """Read capability decisions from this exact staged or active generation.
 
     The report belongs to this isolated payload, not the live or previous font.
     Only exact inventory paths can become protection entries; never interpret a
@@ -323,6 +323,22 @@ def rom_preserved_index(physical_root: Path, inventory: dict[str, Any], *, stric
         data = load(report, "luoshu-slot-metrics-v1")
         result: dict[str, str] = {}
         slots = inventory.get("slots") or {}
+        if data.get("engine") == "inventory-font-stage-v1":
+            preserved = data.get("preservedFonts", {})
+            if not isinstance(preserved, dict):
+                raise TraceError("字体能力保留清单格式无效")
+            for logical, reason in preserved.items():
+                if (not isinstance(logical, str) or logical not in slots
+                        or not logical.startswith("/") or logical.startswith("//")
+                        or any(c in logical for c in "\x00\t\r\n")
+                        or any(part in {"", ".", ".."} for part in logical[1:].split("/"))
+                        or not isinstance(reason, str) or any(c in reason for c in "\t\r\n")):
+                    continue
+                result[logical] = reason or "source-capability-missing"
+            return result
+        # Read-only compatibility for the font already active during an update.
+        # A new inventory generation writes its own report and never inherits
+        # these old ROM decisions as instructions to the new builder.
         reasons = {
             "preservedDynamicAliases": "ROM 动态字体别名保持原厂",
             "preservedWeightAliases": "source-weight-missing",
@@ -344,6 +360,44 @@ def rom_preserved_index(physical_root: Path, inventory: dict[str, Any], *, stric
         if strict:
             raise
         return {}
+
+
+def rom_preserved_index(physical_root: Path, inventory: dict[str, Any], *, strict: bool = False) -> dict[str, str]:
+    """Compatibility name for external readers of older reports."""
+    return payload_preserved_index(physical_root, inventory, strict=strict)
+
+
+def capability_reason_label(reason: str) -> str:
+    if reason.startswith("preserved-collection:"):
+        return "集合中有字体面无法替换：" + capability_reason_label(reason.partition(":")[2])
+    labels = {
+        "source-style-missing": "当前字体缺少对应的斜体样式，保持原厂",
+        "source-monospaced-missing": "当前字体缺少等宽字形，保持原厂",
+        "source-mono-missing": "当前字体缺少等宽字形，保持原厂",
+        "source-script-missing": "当前字体不包含目标文字所需的字形，保持原厂",
+        "source-script-coverage-missing": "当前字体缺少目标文字或数字字形，保持原厂",
+        "source-digits-missing": "当前字体缺少完整数字字形，保持原厂",
+        "source-capability-missing": "当前字体不满足此文件的替换要求，保持原厂",
+        "source-variable-range-missing": "当前字体无法满足此文件的可变字重范围，保持原厂",
+        "preserved-collection": "字体集合信息不完整，保持原厂",
+        "xml-symbol-family": "系统符号或图标字体，保持原厂",
+        "color-font": "彩色或表情字体，保持原厂",
+        "symbol-font-metadata": "符号或图标字体，保持原厂",
+        "private-use-symbol-font": "专用图标字体，保持原厂",
+        "non-text-cmap": "不包含可替换的文字或数字，保持原厂",
+        "invalid-cmap": "字体字符映射无效，保持原厂",
+    }
+    code, _, detail = reason.partition(":")
+    if code in labels:
+        return labels[code] + (f"（{detail}）" if detail else "")
+    return reason
+
+
+def census_reason(inventory: dict[str, Any], logical: str, fallback: str) -> str:
+    """The measured scan takes precedence over the old filename-only census."""
+    entry = (inventory.get("preservedFonts") or {}).get(logical)
+    reason = entry.get("reason") if isinstance(entry, dict) else entry
+    return capability_reason_label(str(reason)) if reason else fallback
 
 
 def build_physical_trace(
@@ -372,7 +426,8 @@ def build_physical_trace(
 
     candidate_by_path = _candidate_index(candidates)
     preserved_by_path = _physical_preserved_index(physical_root)
-    preserved_by_path.update(rom_preserved_index(physical_root, inventory))
+    preserved_by_path.update(payload_preserved_index(physical_root, inventory))
+    measured_inventory = int(inventory.get("scannerRevision", 0) or 0) >= 9
     # A previous boot's mount evidence cannot confirm or invalidate a new tree.
     confirmed = confirmed and not prepared
     mount_info = {} if prepared else _read_key_values(mount_state)
@@ -390,9 +445,11 @@ def build_physical_trace(
         relative = logical.lstrip("/")
         physical = physical_root / relative
         candidate = candidate_by_path.get(logical)
-        protected_reason = _physical_protection_reason(logical, candidate)
+        # The content scanner has already measured every face. Its eligible
+        # records must not be vetoed by the old filename/TTC/style heuristics.
+        protected_reason = "" if measured_inventory else _physical_protection_reason(logical, candidate)
         style = str(entry.get("style") or "normal").strip().lower()
-        if not protected_reason and style not in {"", "normal", "regular"}:
+        if not measured_inventory and not protected_reason and style not in {"", "normal", "regular"}:
             protected_reason = f"preserved-style-{style}"
 
         routes: list[dict[str, Any]] = []
@@ -467,7 +524,8 @@ def build_physical_trace(
             "state": state,
             "category": category,
             "safeToRetry": safe_to_retry,
-            "reason": reason,
+            "reason": capability_reason_label(reason),
+            "reasonCode": reason,
             "supplementDisposition": "physical-safe",
             "routes": routes,
         })
@@ -484,6 +542,7 @@ def build_physical_trace(
         reason = str(raw.get("reason") or "census-only")
         if bool(raw.get("candidate", False)) and reason == "visible-font-path":
             reason = "not-promoted-to-ui-inventory"
+        reason = census_reason(inventory, logical, reason)
         census_only.append({
             "path": logical,
             "slotName": str(raw.get("slotName") or Path(logical).name),
@@ -614,6 +673,7 @@ def build_trace(
         reason = str(raw.get("reason") or ("specialized-name" if denied else "not-promoted-to-ui-inventory"))
         if not denied and reason == "visible-font-path":
             reason = "not-promoted-to-ui-inventory"
+        reason = census_reason(inventory, logical, reason)
         census_only.append({
             "path": logical,
             "slotName": str(raw.get("slotName") or Path(logical).name),

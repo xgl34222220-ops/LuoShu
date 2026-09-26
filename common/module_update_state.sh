@@ -37,7 +37,16 @@ luoshu_update_config_value() {
 # explicit apply. Compare only the small builders, never the active font trees.
 luoshu_update_font_builder_compatible() {
     for _lufb_relative in \
+        common/font_inventory.py \
         common/font_inventory_scan.py \
+        common/inventory_font_stage.py \
+        common/inventory_font_metrics.py \
+        common/inventory_font_stage.sh \
+        common/mix_source_manifest.py \
+        common/legacy_v14_4/font_mix_engine.sh \
+        common/legacy_v14_4/v143_auto_multiweight_mix.sh \
+        common/coverage_payload_remediate.sh \
+        common/legacy_v14_4/font_switch_safe.sh \
         common/device_font_payload_build.py \
         common/device_font_payload_overlay.py \
         common/font_runtime_mount.sh \

@@ -7,7 +7,6 @@ MODULE_VERSION=$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | he
 [ -n "$MODULE_VERSION" ] || MODULE_VERSION="unknown"
 MODULE_DIR="$MODPATH"
 [ -f "$MODPATH/common/util_functions.sh" ] && . "$MODPATH/common/util_functions.sh"
-[ -f "$MODPATH/common/rom_adapters.sh" ] && . "$MODPATH/common/rom_adapters.sh"
 # customize.sh runs before the normal font runtime bridge is loaded. Keep this in
 # lockstep with device_font_payload_bridge.sh so upgrades are classified once.
 LUOSHU_PAYLOAD_SCHEMA_CURRENT=device-template-v2-baseline-v9-rolegraph-v2
@@ -18,16 +17,8 @@ if type ensure_public_storage >/dev/null 2>&1; then
 else
     mkdir -p /sdcard/LuoShu/fonts /sdcard/LuoShu/import /sdcard/LuoShu/reports 2>/dev/null || true
 fi
-type check_coloros >/dev/null 2>&1 && check_coloros
-type check_hyperos >/dev/null 2>&1 && check_hyperos
-
-if [ "${IS_COLOROS:-false}" = true ]; then
-    _install_rom="ColorOS ${COLOROS_VERSION:-未知}"
-elif [ "${IS_HYPEROS:-false}" = true ]; then
-    _install_rom="HyperOS/MIUI ${HYPEROS_VERSION:-未知}"
-else
-    _install_rom='通用 Android'
-fi
+_install_android=$(getprop ro.build.version.release 2>/dev/null)
+_install_rom="Android ${_install_android:-未知} · 自动识别本机字体"
 
 ROOT_MANAGER="Root"
 if command -v apd >/dev/null 2>&1 || [ -d /data/adb/apatch ]; then
@@ -38,7 +29,7 @@ elif command -v magisk >/dev/null 2>&1 || [ -d /data/adb/magisk ]; then
     ROOT_MANAGER="Magisk"
 fi
 ui_print "系统：$_install_rom · $ROOT_MANAGER"
-ui_print "保护：Emoji、图标、衬线与斜体保留原样"
+ui_print "按实际字体文件判断替换能力；Emoji、图标与纯符号保留"
 
 OLD_MOD="${LUOSHU_OLD_MOD:-/data/adb/modules/LuoShu}"
 mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" 2>/dev/null || true

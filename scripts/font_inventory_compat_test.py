@@ -93,7 +93,7 @@ class InventoryCompatibilityTests(unittest.TestCase):
         self.assertEqual(slot["metrics"]["ascent"], 1300)
         self.assertEqual(slot["sourceXmls"], ["/product/etc/fonts_customization.xml"])
 
-    def test_ui_alias_does_not_promote_language_or_symbol_families(self):
+    def test_script_fonts_are_measured_and_symbol_families_are_protected(self):
         self.seed_ui()
         for name in ("LanguageFace.ttf", "Pictograms.ttf"):
             path = self.fonts / name
@@ -109,9 +109,9 @@ class InventoryCompatibilityTests(unittest.TestCase):
             '<alias name="system-ui" to="acme-local" />'
             '<alias name="google-sans" to="acme-symbol" /></familyset>')
         data, _ = self.scan()
-        self.assertEqual(list(data["slots"]), ["/system/fonts/UnknownUi.ttf"])
-        self.assertEqual(set(data["preservedXmlPaths"]), {
-            "/system/fonts/LanguageFace.ttf", "/system/fonts/Pictograms.ttf"})
+        self.assertEqual(set(data["slots"]), {"/system/fonts/UnknownUi.ttf", "/system/fonts/LanguageFace.ttf"})
+        self.assertIn("Arab", data["slots"]["/system/fonts/LanguageFace.ttf"]["requiresScripts"])
+        self.assertEqual(set(data["preservedXmlPaths"]), {"/system/fonts/Pictograms.ttf"})
         # A policy refresh must also retire an older generic false positive,
         # instead of resurrecting it through the known-slot preservation pass.
         key = "/system/fonts/LanguageFace.ttf"
@@ -123,7 +123,7 @@ class InventoryCompatibilityTests(unittest.TestCase):
         data["scannerRevision"] = 6
         self.args.output.write_text(json.dumps(data))
         refreshed, _ = self.scan()
-        self.assertNotIn(key, refreshed["slots"])
+        self.assertIn(key, refreshed["slots"])
 
     def test_malformed_lazy_table_cannot_abort_other_valid_slots(self):
         self.seed_ui()
@@ -185,7 +185,7 @@ class InventoryCompatibilityTests(unittest.TestCase):
             self.assertEqual(inventory._read_metrics(collection_path, 0)[1]["ascent"], 1500)
             self.assertEqual(inventory._read_metrics(collection_path, 1)[1]["ascent"], 1200)
 
-    def test_generic_unknown_italic_and_fixed_pitch_faces_remain_stock(self):
+    def test_generic_unknown_styles_record_capabilities_for_source_matching(self):
         self.seed_ui()
         for name, trait in (("UnnamedSlant.ttf", "italic"), ("UnnamedFixed.ttf", "mono"),
                             ("UnnamedText.ttf", "normal")):
@@ -203,7 +203,10 @@ class InventoryCompatibilityTests(unittest.TestCase):
                     font["post"].isFixedPitch = 1
                 font.save(path)
         data, _ = self.scan()
-        self.assertEqual(set(data["slots"]), {"/system/fonts/UnknownUi.ttf", "/system/fonts/UnnamedText.ttf"})
+        self.assertEqual(set(data["slots"]), {"/system/fonts/UnknownUi.ttf", "/system/fonts/UnnamedText.ttf",
+            "/system/fonts/UnnamedSlant.ttf", "/system/fonts/UnnamedFixed.ttf"})
+        self.assertTrue(data["slots"]["/system/fonts/UnnamedSlant.ttf"]["metrics"]["fontTraits"]["italic"])
+        self.assertTrue(data["slots"]["/system/fonts/UnnamedFixed.ttf"]["metrics"]["fontTraits"]["monospaced"])
 
     def test_no_xml_unknown_rom_chooses_real_regular_weight(self):
         for name, weight in (("A-face.ttf", 800), ("Z-face.ttf", 400)):
@@ -266,7 +269,7 @@ class InventoryCompatibilityTests(unittest.TestCase):
         self.assertEqual(set(data["slots"]), expected)
         self.assertFalse(data["preservedXmlPaths"])
 
-    def test_named_ui_and_aliases_cannot_promote_dedicated_script_faces_with_ascii(self):
+    def test_named_ui_and_aliases_record_script_faces_with_ascii(self):
         self.seed_ui()
         families = []
         expected = set()
@@ -284,9 +287,9 @@ class InventoryCompatibilityTests(unittest.TestCase):
         families.append('<alias name="google-sans" to="sans-serif" />')
         (self.etc / "font_fallback.xml").write_text('<familyset>' + ''.join(families) + '</familyset>')
         data, _ = self.scan()
-        self.assertEqual(set(data["slots"]), {
+        self.assertEqual(set(data["slots"]), expected | {
             "/system/fonts/UnknownUi.ttf", "/system/fonts/LocalLatin.ttf"})
-        self.assertEqual(set(data["preservedXmlPaths"]), expected)
+        self.assertFalse(data["preservedXmlPaths"])
 
     def test_shared_cjk_collection_keeps_proven_chinese_face_in_either_xml_order(self):
         self.seed_ui()
@@ -371,13 +374,15 @@ class InventoryCompatibilityTests(unittest.TestCase):
             name = f"RoleFace{index}.ttf"
             self.make_text_face(self.fonts / name, set(range(32, 129)) | set(range(0x4e00, 0x5100)))
             families.append(f'<family name="vendor-{role}" lang="zh-Hans en"><font>{name}</font></family>')
-            protected.add(f"/system/fonts/{name}")
+            if role not in {"serif", "monospace"}:
+                protected.add(f"/system/fonts/{name}")
         (self.etc / "font_fallback.xml").write_text('<familyset>' + ''.join(families) + '</familyset>')
         data, _ = self.scan()
-        self.assertEqual(set(data["slots"]), {"/system/fonts/UnknownUi.ttf"})
+        self.assertEqual(set(data["slots"]), {"/system/fonts/UnknownUi.ttf",
+            "/system/fonts/RoleFace0.ttf", "/system/fonts/RoleFace1.ttf"})
         self.assertEqual(set(data["preservedXmlPaths"]), protected)
 
-    def test_language_scan_keeps_early_name_filter_and_reuses_shared_face_metrics(self):
+    def test_language_scan_measures_every_script_and_reuses_shared_face_metrics(self):
         self.seed_ui()
         self.make_text_face(self.fonts / "SharedLatin.ttf", range(32, 129))
         self.make_text_face(self.fonts / "NotoSansArabic.ttf", range(0x621, 0x64b))
@@ -390,9 +395,157 @@ class InventoryCompatibilityTests(unittest.TestCase):
         parsed = [Path(call.args[0]).name for call in reader.call_args_list]
         self.assertEqual(parsed.count("SharedLatin.ttf"), 1)
         self.assertEqual(parsed.count("UnknownUi.ttf"), 1)
-        self.assertNotIn("NotoSansArabic.ttf", parsed)
+        self.assertEqual(parsed.count("NotoSansArabic.ttf"), 1)
         self.assertEqual(set(data["slots"]), {
-            "/system/fonts/UnknownUi.ttf", "/system/fonts/SharedLatin.ttf"})
+            "/system/fonts/UnknownUi.ttf", "/system/fonts/SharedLatin.ttf", "/system/fonts/NotoSansArabic.ttf"})
+
+    def test_unknown_clock_and_misleading_filenames_use_measured_capabilities(self):
+        self.seed_ui()
+        self.make_text_face(self.fonts / "FutureBrandClock.ttf", range(48, 58))
+        self.make_text_face(self.fonts / "IconicSerifMusicArabic.ttf", range(32, 127))
+        self.make_text_face(self.fonts / "TotallyNormal.ttf", range(0xe000, 0xe100))
+        data, _ = self.scan()
+        self.assertEqual(data["slots"]["/system/fonts/FutureBrandClock.ttf"]["replacementRole"], "digits")
+        self.assertIn("/system/fonts/IconicSerifMusicArabic.ttf", data["slots"])
+        self.assertEqual(data["preservedFonts"]["/system/fonts/TotallyNormal.ttf"]["reason"], "private-use-symbol-font")
+
+    def test_legacy_xml_and_modern_axis_references_survive(self):
+        self.make_text_face(self.fonts / "LegacyFace.ttf", range(32, 127))
+        self.make_text_face(self.fonts / "VariableFace.ttf", range(32, 127))
+        (self.etc / "system_fonts.xml").write_text(
+            '<familyset><family><nameset><name>sans-serif</name><name>system-ui</name></nameset>'
+            '<fileset><file>LegacyFace.ttf</file></fileset></family></familyset>')
+        (self.etc / "fonts.xml").write_text(
+            '<familyset><family name="future-ui" lang="en,fr">'
+            '<font weight="300" supportedAxes="wght,ital">VariableFace.ttf<axis tag="wght" stylevalue="300" /></font>'
+            '<font weight="700" style="italic" supportedAxes="wght,ital">VariableFace.ttf<axis tag="wght" stylevalue="700" /></font>'
+            '</family></familyset>')
+        data, _ = self.scan()
+        self.assertEqual(data["families"]["system-ui"], ["/system/fonts/LegacyFace.ttf"])
+        entry = data["slots"]["/system/fonts/VariableFace.ttf"]
+        self.assertEqual(entry["supportedAxes"], ["wght", "ital"])
+        self.assertEqual(entry["familyLanguages"], ["en", "fr"])
+        self.assertEqual([ref["axes"]["wght"] for ref in entry["faces"][0]["xmlReferences"]], [300, 700])
+        self.assertEqual([ref["weight"] for ref in entry["faces"][0]["xmlReferences"]], [300, 700])
+
+    def test_dynamic_aliases_are_generic_and_never_read_mutable_targets(self):
+        self.seed_ui()
+        (self.fonts / "FutureOverlay.ttf").symlink_to("/data/vendor/future-theme/font.ttf")
+        (self.fonts / "Chained.ttf").symlink_to("FutureOverlay.ttf")
+        (self.product_fonts / "Another.ttf").symlink_to("/system/fonts/Chained.ttf")
+        with patch.object(inventory, "_read_metrics", wraps=inventory._read_metrics) as reader:
+            data, _ = self.scan()
+        expected = {"/system/fonts/FutureOverlay.ttf", "/system/fonts/Chained.ttf", "/product/fonts/Another.ttf"}
+        self.assertEqual(set(data["preservedDynamicAliases"]), expected)
+        self.assertEqual({entry["alias"] for entry in data["dynamicFontRoutes"]}, expected)
+        self.assertTrue(all(entry["target"] == "/data/vendor/future-theme/font.ttf" for entry in data["dynamicFontRoutes"]))
+        self.assertTrue(all(not str(call.args[0]).startswith("/data/") for call in reader.call_args_list))
+
+    def test_arbitrary_nested_assets_in_unknown_partition_are_discovered(self):
+        self.seed_ui()
+        partition = self.root / "partitions/future_os/assets/glyphs"
+        partition.mkdir(parents=True)
+        self.make_text_face(partition / "OpaqueName.otf", range(32, 127))
+        with patch.dict(os.environ, {"LUOSHU_DYNAMIC_PARTITION_SCAN_ROOTS": str(self.root / "partitions")}):
+            data, _ = self.scan()
+        self.assertIn("/future_os/assets/glyphs/OpaqueName.otf", data["slots"])
+        self.assertIn("future_os", data["discoveredPartitions"])
+        self.assertTrue(any(root["logical"] == "/future_os/assets/glyphs" for root in data["discoveredFontRoots"]))
+
+    def test_fallback_targets_require_real_xml_route(self):
+        self.make_text_face(self.fonts / "Latin.ttf", range(32, 127))
+        self.make_text_face(self.fonts / "Han.ttf", range(0x4e00, 0x5000))
+        self.make_text_face(self.fonts / "Unreferenced.ttf", range(32, 127))
+        (self.etc / "fonts.xml").write_text('<familyset>'
+            '<family name="future-ui"><font>Latin.ttf</font></family>'
+            '<family lang="zh-Hans"><font fallbackFor="future-ui">Han.ttf</font></family>'
+            '</familyset>')
+        data, _ = self.scan()
+        latin = data["slots"]["/system/fonts/Latin.ttf"]
+        self.assertTrue(latin["fallbackReachable"])
+        self.assertEqual(latin["fallbackTargets"], ["/system/fonts/Han.ttf"])
+        self.assertFalse(data["slots"]["/system/fonts/Unreferenced.ttf"]["fallbackReachable"])
+
+    def test_rom_properties_and_renaming_cannot_change_detected_capabilities(self):
+        self.seed_ui()
+        self.make_text_face(self.fonts / "MiSansVF.ttf", range(32, 127))
+        self.make_text_face(self.fonts / "SysSans-Hans-Regular.ttf", range(32, 127))
+        snapshots = []
+        for property_values in ({"ro.mi.os.version.name": "3"}, {"ro.build.version.oplusrom": "16"}, {}):
+            self.args.force = True
+            with patch.object(inventory, "_getprop", side_effect=lambda key: property_values.get(key, "")):
+                data, _ = self.scan()
+            self.assertEqual(data["romKind"], "generic")
+            snapshots.append((set(data["slots"]), data["mainSlotPath"]))
+        self.assertEqual(snapshots[0], snapshots[1])
+        self.assertEqual(snapshots[1], snapshots[2])
+
+    def test_symbol_metadata_and_collection_all_faces_are_retained(self):
+        self.seed_ui()
+        self.make_text_face(self.fonts / "Ordinary.ttf", range(32, 127))
+        with TTFont(self.fonts / "Ordinary.ttf") as font:
+            font["OS/2"].sFamilyClass = 12 << 8
+            font.save(self.fonts / "Ordinary.ttf")
+        first = self.root / "first.ttf"
+        self.make_text_face(first, range(32, 127))
+        with TTFont(first) as text_face, TTFont(self.fonts / "Ordinary.ttf") as icon_face:
+            collection = TTCollection()
+            collection.fonts = [text_face, icon_face]
+            collection.save(self.fonts / "SharedFaces.ttc")
+        data, _ = self.scan()
+        self.assertEqual(data["preservedFonts"]["/system/fonts/Ordinary.ttf"]["reason"], "symbol-font-metadata")
+        faces = data["slots"]["/system/fonts/SharedFaces.ttc"]["faces"]
+        self.assertEqual([face["faceIndex"] for face in faces], [0, 1])
+        self.assertEqual(faces[1]["preservedReason"], "symbol-font-metadata")
+        self.assertNotIn("preservedReason", faces[0])
+
+    def test_xml_can_reference_an_extensionless_sfnt_and_path_validation_rejects_escape(self):
+        self.seed_ui()
+        self.make_text_face(self.fonts / "opaque", range(32, 127))
+        (self.etc / "font_fallback.xml").write_text(
+            '<familyset><family name="future-ui"><font>opaque</font></family></familyset>')
+        data, _ = self.scan()
+        key = "/system/fonts/opaque"
+        self.assertIn(key, data["slots"])
+        escaped = "/system/fonts/../../data/external.ttf"
+        data["slots"][escaped] = {**data["slots"][key], "path": escaped}
+        data["slotCount"] = len(data["slots"])
+        with self.assertRaises(inventory.InventoryError):
+            inventory.validate_inventory(data)
+
+    def test_xml_absolute_binary_reference_discovers_a_new_trusted_root(self):
+        self.seed_ui()
+        assets = self.root / "product/assets/typefaces"
+        assets.mkdir(parents=True)
+        self.make_text_face(assets / "blob.bin", range(32, 127))
+        (self.etc / "fonts.xml").write_text('<familyset><family name="sans-serif">'
+            '<font>/product/assets/typefaces/blob.bin</font></family></familyset>')
+        data, _ = self.scan()
+        key = "/product/assets/typefaces/blob.bin"
+        self.assertIn(key, data["slots"])
+        self.assertEqual(data["slots"][key]["format"], "TTF")
+        self.assertTrue(data["slots"][key]["faces"])
+        self.assertTrue(any(root["logical"] == "/product/assets/typefaces" for root in data["discoveredFontRoots"]))
+        self.assertIn("product|assets/typefaces|", (self.root / "device_font_roots.conf").read_text())
+        candidates = json.loads((self.root / "device_font_candidates.json").read_text())
+        self.assertTrue(any(entry["path"] == key and entry["candidate"] for entry in candidates["paths"]))
+        self.assertEqual(data["scanSummary"]["stockFontFileCount"], 2)
+        reused, status = self.scan()
+        self.assertEqual(status["status"], "reused")
+        self.assertEqual(data, reused)
+
+    def test_xml_binary_reference_does_not_allow_data_or_unverified_links(self):
+        self.seed_ui()
+        assets = self.root / "product/assets/typefaces"
+        assets.mkdir(parents=True)
+        (assets / "blob.bin").symlink_to("/data/user/theme/font.ttf")
+        (self.etc / "font_fallback.xml").write_text('<familyset><family name="other-ui">'
+            '<font>/product/assets/typefaces/blob.bin</font><font>/data/user/theme/font.ttf</font>'
+            '</family></familyset>')
+        with patch.object(inventory, "_read_metrics", wraps=inventory._read_metrics) as reader:
+            data, _ = self.scan()
+        self.assertEqual(set(data["slots"]), {"/system/fonts/UnknownUi.ttf"})
+        self.assertTrue(all(not str(call.args[0]).startswith("/data/") for call in reader.call_args_list))
 
 
 if __name__ == "__main__":

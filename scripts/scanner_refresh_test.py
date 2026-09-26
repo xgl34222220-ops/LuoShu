@@ -64,7 +64,7 @@ class ScannerRefreshTest(unittest.TestCase):
             f'<family name="oplus-sans"><font>{known}</font></family></familyset>')
         rc, previous, error = self.scan()
         self.assertEqual(rc, 0, error)
-        self.assertEqual(previous["romKind"], "coloros")
+        self.assertEqual(previous["romKind"], "generic")
         previous.pop("metricsRevision")
         for entry in (*previous["slots"].values(), previous["mainSlot"]):
             entry["metrics"].pop("head")
@@ -110,6 +110,7 @@ class ScannerRefreshTest(unittest.TestCase):
         previous = json.loads(self.args.output.read_text())
         entry = previous["slots"]["/system/fonts/" + known]
         entry.update(format="TTC", faceIndex=1, weight=650)
+        entry.pop("faces", None)  # Legacy inventories did not retain the collection face list.
         self.args.output.write_text(json.dumps(previous))
         rc, refreshed, error = self.scan()
         self.assertEqual(rc, 0, error)
@@ -141,44 +142,21 @@ class ScannerRefreshTest(unittest.TestCase):
         self.assertNotIn(theme, [Path(call.args[0]) for call in reader.call_args_list])
         self.assertEqual(self.args.output.read_bytes(), original)
 
-    def test_policy_upgrade_retires_only_excluded_physical_slots(self) -> None:
-        make_font(self.fonts / "MiSansVF.ttf", ascent=1100, descent=-300)
-        (self.etc / "fonts.xml").write_text(
-            '<familyset><family name="sans-serif"><font>MiSansVF.ttf</font></family></familyset>')
-        rc, previous, error = self.scan()
+    def test_policy_upgrade_measures_unknown_script_name_instead_of_brand_filtering(self) -> None:
+        self.seed_coloros()
+        path = self.fonts / "NotoSansAdlam-Regular.ttf"
+        make_font(path)
+        with TTFont(path) as font:
+            for table in font["cmap"].tables:
+                if table.isUnicode():
+                    table.cmap = {point: "zero" for point in range(0x621, 0x64b)}
+            font.save(path)
+        rc, refreshed, error = self.scan()
         self.assertEqual(rc, 0, error)
-        path = "/system/fonts/NotoSansAdlam-Regular.ttf"
-        # Simulate a valid old broad-coverage inventory from this same ROM build.
-        previous["hyperosCoverageRevision"] = 2
-        previous["slots"][path] = {
-            **copy.deepcopy(previous["mainSlot"]), "path": path,
-            "slotName": Path(path).name, "source": "hyperos-physical",
-        }
-        previous["slotCount"] = len(previous["slots"])
-        self.args.output.write_text(json.dumps(previous))
-        make_font(self.fonts / Path(path).name, ascent=1550, descent=-550)
-        with mock.patch.object(inventory, "_read_metrics", wraps=inventory._read_metrics) as reader:
-            rc, refreshed, error = self.scan()
-        self.assertEqual(rc, 0, error)
-        self.assertNotIn(path, refreshed["slots"])
-        self.assertIn(path, refreshed["retiredPhysicalSlots"])
-        self.assertNotIn(self.fonts / Path(path).name, [Path(call.args[0]) for call in reader.call_args_list])
+        key = "/system/fonts/" + path.name
+        self.assertIn(key, refreshed["slots"])
+        self.assertIn("Arab", refreshed["slots"][key]["requiresScripts"])
         self.assertTrue(scanner._can_reuse(refreshed, "same-build"))
-
-        # A needed UI file is not covered by the script-fallback exclusion.
-        path = "/system/fonts/MiClock-Missing.ttf"
-        refreshed["hyperosCoverageRevision"] = 2
-        refreshed["slots"][path] = {
-            **copy.deepcopy(refreshed["mainSlot"]), "path": path,
-            "slotName": Path(path).name, "source": "hyperos-physical",
-        }
-        refreshed["slotCount"] = len(refreshed["slots"])
-        self.args.output.write_text(json.dumps(refreshed))
-        original = self.args.output.read_bytes()
-        rc, _result, error = self.scan()
-        self.assertEqual(rc, 2)
-        self.assertIn(Path(path).name, error)
-        self.assertEqual(self.args.output.read_bytes(), original)
 
 
 if __name__ == "__main__":

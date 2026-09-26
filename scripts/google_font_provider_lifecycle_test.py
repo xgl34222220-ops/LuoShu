@@ -80,7 +80,7 @@ esac
 
     def theme_fixture(self):
         (self.root / 'theme-snapshot').write_text('theme-one\n')
-        (self.module / 'common/hyperos_theme_font_bridge.sh').write_text('''
+        (self.module / 'common/dynamic_font_route_bridge.sh').write_text('''
 case "$1" in
     fingerprint) cat "$TEST_ROOT/theme-snapshot" ;;
     apply)
@@ -108,6 +108,23 @@ if [ "$count" = 2 ]; then echo theme-two > "$TEST_ROOT/theme-snapshot"; fi
         self.service(20)
         self.assertEqual((self.root / 'theme-applied').read_text().splitlines(), ['theme-one'])
 
+    def test_legacy_theme_adapter_only_restores_before_inventory_routes_apply(self):
+        self.theme_fixture()
+        journal = self.module / 'config/hyperos-theme-font-namespaces.conf'
+        journal.write_text('old-owned-mount\n')
+        (self.module / 'common/hyperos_theme_font_bridge.sh').write_text('''
+case "$1" in
+    restore)
+        echo restore >> "$TEST_ROOT/legacy-events"
+        rm -f "$MODDIR/config/hyperos-theme-font-namespaces.conf"
+        ;;
+    *) echo forbidden >> "$TEST_ROOT/legacy-events"; exit 99 ;;
+esac
+''')
+        self.service(4)
+        self.assertEqual((self.root / 'legacy-events').read_text().splitlines(), ['restore'])
+        self.assertEqual((self.root / 'theme-applied').read_text().splitlines(), ['theme-one'])
+
     def test_theme_failure_gets_backoff_even_when_google_succeeds(self):
         self.theme_fixture()
         self.service(11, TEST_THEME_RC='1')
@@ -133,7 +150,8 @@ if [ "$count" = 1 ]; then echo default > "$MODDIR/config/active_font.conf"; fi
 
     def test_default_disable_and_remove_report_bounded_restore_failure(self):
         self.theme_fixture()
-        journal = self.module / 'config/hyperos-theme-font-namespaces.conf'
+        journal = self.module / 'config/dynamic-font-routes/test/namespaces.conf'
+        journal.parent.mkdir(parents=True)
         for stop in ('default', 'disable', 'remove'):
             with self.subTest(stop=stop):
                 self.active.write_text('custom\n')

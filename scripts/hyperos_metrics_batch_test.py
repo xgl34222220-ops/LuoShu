@@ -393,22 +393,34 @@ _hyperos_clock_ui_files() { :; }
             with TTFont(target) as font:
                 self.assertEqual(font['hhea'].ascent, ascent)
 
-    def test_stage_failure_propagates_through_both_callers(self):
-        helper = self.module / 'common/hyperos_stage_complete.sh'
-        helper.parent.mkdir(parents=True)
-        helper.write_text('exit 7\n')
-        for relative, function in (
-            ('common/legacy_v14_4/font_switch_safe.sh', 'stage_hyperos_complete'),
-            ('common/legacy_v14_4/mix_router.sh', 'complete_hyperos_stage'),
-        ):
-            source = (ROOT / relative).read_text()
+    def test_inventory_failure_propagates_through_both_callers(self):
+        helper = self.module / 'common/inventory_font_stage.sh'
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        helper.write_text('printf "called\\n" >> "$TEST_CALLS"\nexit 7\n')
+        marker = self.root / 'calls'
+        stub = '\n'.join((
+            'mix_request_is_current() { return 0; }',
+            'precommit_ready() { return 1; }',
+            'next_mix_payload_ready_for_request() { return 1; }',
+            'stage_has_fonts() { return 0; }',
+            'stage_generation_matches() { return 0; }',
+            'read_value() { :; }',
+            'mix_finalize_state_write() { :; }',
+            'precommit_fail() { return 1; }',
+        ))
+        for filename, function in (('font_switch_safe.sh', 'stage_inventory_map'),
+                                   ('mix_router.sh', 'prepare_mix_stage_for_commit')):
+            source = (ROOT / 'common/legacy_v14_4' / filename).read_text()
             start = source.index(function + '() {')
             code = source[start:source.index('\n}', start) + 2]
-            result = subprocess.run(['sh', '-c', code + '\ngetprop() { echo HyperOS; }\n' + function],
-                env={**os.environ, 'IS_HYPEROS': 'true', 'MODDIR': str(self.module),
-                     'REALMOD': str(self.module), 'LOG_FILE': str(self.root / 'log'),
-                     'STAGE_PAYLOAD': str(self.stage), 'MIX_STAGE': str(self.stage)})
-            self.assertNotEqual(result.returncode, 0, relative)
+            result = subprocess.run(['sh', '-c', code + '\n' + stub + '\n' + function + ' source Demo'],
+                env={**os.environ, 'IS_COLOROS': 'true', 'IS_HYPEROS': 'true',
+                     'MODDIR': str(self.module), 'REALMOD': str(self.module),
+                     'INVENTORY_STAGE_HELPER': str(helper), 'USER_ROOT': str(self.root),
+                     'STAGE_PAYLOAD': str(self.stage), 'MIX_STAGE': str(self.stage),
+                     'LOG_FILE': str(self.root / 'log'), 'TEST_CALLS': str(marker)})
+            self.assertNotEqual(result.returncode, 0, filename)
+        self.assertEqual(marker.read_text().splitlines(), ['called', 'called'])
 
     def test_shell_entry_uses_one_python_process(self):
         self.inventory({'/system/fonts/MiSansVF.ttf': slot(),

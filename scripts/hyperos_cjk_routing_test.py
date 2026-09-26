@@ -610,6 +610,9 @@ class RoutingTest(unittest.TestCase):
                     'mainSlot': self.slots['/system/fonts/Roboto-Regular.ttf']}
         self.assertFalse(scanner._has_current_metrics(previous))
         previous['metricsRevision'] = scanner.METRICS_REVISION
+        self.assertFalse(scanner._has_current_metrics(previous), 'all physical face contracts are required')
+        for entry in previous['slots'].values():
+            entry['faces'] = [{'faceIndex': 0, 'metrics': entry['metrics']}]
         self.assertTrue(scanner._has_current_metrics(previous))
 
     def test_host_freetype_primary_han_missing_and_fallback_han_renderable(self):

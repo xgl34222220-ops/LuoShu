@@ -995,8 +995,7 @@ luoshu_mount_status_json() {
         "${_lmsj_duration:-0}" "${_lmsj_time:-0}"
 }
 
-_luoshu_hyperos_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/hyperos_global.sh"
-[ -f "$_luoshu_hyperos_helper" ] && . "$_luoshu_hyperos_helper"
+# Mount discovery must not redefine the inventory font application entry point.
 _luoshu_font_config_partitions="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/font_config_partitions.sh"
 [ -f "$_luoshu_font_config_partitions" ] && . "$_luoshu_font_config_partitions"
 

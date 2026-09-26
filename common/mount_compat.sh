@@ -2,7 +2,7 @@
 # LuoShu mount compatibility loader.
 # The v2.2.7 implementation remains in mount_compat_base.sh; this loader always
 # applies the non-invasive self-mount compatibility and final engine policy afterwards.
-# hyperos_global.sh remains loaded by the base implementation.
+# Font application remains owned by the inventory runtime policy.
 set +e
 
 _lmcl_module="${MODULE_DIR:-${MODDIR:-}}"

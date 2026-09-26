@@ -20,7 +20,7 @@ MOUNT_COMPAT="$ROOT/common/mount_compat.sh"
 
 grep -q 'font_manager_v4.sh' "$ROUTER"
 grep -q 'font_switch_safe.sh' "$ROUTER"
-grep -q 'legacy_v14_4_switch.sh' "$ROUTER"
+! grep -q 'LEGACY_SWITCH=' "$ROUTER"
 grep -q 'exec sh "$SAFE_SWITCH" "$@"' "$ROUTER"
 grep -q 'exec sh "$CURRENT_MANAGER" "$@"' "$ROUTER"
 
@@ -39,7 +39,9 @@ grep -q 'mv "$STAGE_PAYLOAD" "$NEXT_PAYLOAD"' "$SAFE_BACKEND"
 ! grep -q 'rm -rf "$LIVE_PAYLOAD"' "$SAFE_BACKEND"
 grep -q 'next-boot-stage' "$SAFE_BACKEND"
 grep -q 'LUOSHU_SWITCH_PROGRESS_FILE' "$SAFE_BACKEND"
-grep -q 'apply_font_by_rom' "$SAFE_BACKEND"
+grep -q 'stage_inventory_map' "$SAFE_BACKEND"
+grep -q 'inventory_font_stage.sh' "$SAFE_BACKEND"
+! grep -qE 'apply_font_by_rom|mirror_existing_targets|stage_hyperos_complete|stage_coloros_complete|rom_adapters.sh' "$SAFE_BACKEND"
 
 # Only the early-boot helper is allowed to activate -next as live, before self-mount.
 test -f "$NEXT_BOOT"
@@ -82,25 +84,24 @@ test ! -d "$NEXT_TMP/module/.luoshu-payload-next"
 find "$NEXT_TMP/module/.luoshu-retired" -type f -name Roboto-Regular.ttf -exec grep -q '^old-live$' {} \;
 rm -rf "$NEXT_TMP"
 
-# Old compatibility backend remains available only as fallback/reference.
-grep -q 'apply_font_by_rom' "$LEGACY_BACKEND"
-grep -q '\.luoshu-payload' "$LEGACY_BACKEND"
-grep -q 'physical-file-map' "$LEGACY_BACKEND"
+# The old compatibility path is an alias to the same safe inventory backend.
+grep -q 'exec sh "$SAFE_SWITCH" "$@"' "$LEGACY_BACKEND"
+! grep -qE 'apply_font_by_rom|physical-file-map|rom_adapters.sh' "$LEGACY_BACKEND"
 grep -q 'MiSansLatinVF.ttf' "$ROM"
 grep -q 'GoogleSans' "$ROM"
 grep -q 'Roboto' "$ROM"
 
-# HyperOS 3 coverage is dynamic across real partitions, but only for safe upright
-# TTF/OTF slots. TTC containers remain stock until their face-index layout is proven.
+# The archived ROM helper retains its historical safety contract, but no active
+# boot entry may run it or recreate mappings after the inventory stage commits.
 test -f "$HYPEROS_COMPAT"
 grep -q 'XiaomiSans\*\.ttf' "$HYPEROS_COMPAT"
 grep -q 'MiLanPro\*\.ttf' "$HYPEROS_COMPAT"
 grep -q 'Mitype\*\.ttf' "$HYPEROS_COMPAT"
 ! grep -q 'MiSans\*\.ttc' "$HYPEROS_COMPAT"
-grep -q 'hyperos_full_coverage.sh' "$POSTFS"
-grep -q 'luoshu_hyperos_full_payload_ensure' "$POSTFS"
-grep -q 'hyperos_full_coverage.sh' "$POSTMOUNT"
-grep -q 'luoshu_hyperos_full_payload_ensure' "$POSTMOUNT"
+! grep -q 'hyperos_full_coverage.sh' "$POSTFS"
+! grep -q 'luoshu_hyperos_full_payload_ensure' "$POSTFS"
+! grep -q 'hyperos_full_coverage.sh' "$POSTMOUNT"
+! grep -q 'luoshu_hyperos_full_payload_ensure' "$POSTMOUNT"
 ! grep -qE 'font_validate_fast_v4|device_font_template|device_font_slot|font_config_overlay|font_config_batch|device_font_payload_build' "$HYPEROS_COMPAT"
 
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-safe-switch)
@@ -155,10 +156,12 @@ grep -q 'font_mix.sh' "$LEGACY_MIX_BRIDGE"
 grep -q 'for _weight in 100 200 300 400 500 600 700 800 900' "$LEGACY_AUTO"
 grep -q 'build_composite_cached' "$LEGACY_AUTO"
 grep -q 'LuoShuAutoMix' "$LEGACY_AUTO"
-grep -q 'action switch' "$LEGACY_AUTO"
+grep -q 'stage_auto_sources' "$LEGACY_AUTO"
+! grep -q 'action switch' "$LEGACY_AUTO"
 grep -q 'BASE_ENGINE=.*font_mix.sh' "$LEGACY_WEIGHTED"
 grep -q '中文字体保留为完整基底' "$LEGACY_MIX_ENGINE"
-grep -q '不裁剪 ROM 字体槽' "$LEGACY_MIX_ENGINE"
+grep -q 'mix-composite.font' "$LEGACY_MIX_ENGINE"
+! grep -qE 'populate_(hyperos|coloros|generic)_payload|sync_secondary_(coloros|hyperos)' "$LEGACY_MIX_ENGINE"
 grep -q '\.legacy-v14-runtime' "$LEGACY_MIX_ROUTER"
 grep -q '\.luoshu-payload' "$LEGACY_MIX_ROUTER"
 grep -q 'font_mix_engine.sh' "$LEGACY_MIX_ROUTER"
@@ -210,4 +213,4 @@ sh -n "$ROOT/.luoshu-runtime/core/service.sh"
 sh -n "$ROOT/.luoshu-runtime/core/post-fs-data.sh"
 sh -n "$ROOT/.luoshu-runtime/core/post-mount.sh"
 
-echo 'foreground switch and composite staging both support repeat payload cloning without mutating live payload; early boot activates next payload; real self-mount runtime is loaded before legacy boot mount; HyperOS physical UI coverage remains guarded.'
+echo 'foreground switch and composite staging both support repeat payload cloning without mutating live payload; early boot activates next payload; real self-mount runtime is loaded before legacy boot mount; inventory mappings are generated before commit and never expanded by boot ROM helpers.'

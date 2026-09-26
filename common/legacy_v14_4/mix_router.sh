@@ -390,6 +390,8 @@ prepare_mix_stage() {
 
 stage_has_fonts() {
     [ -d "$MIX_STAGE" ] || return 1
+    [ -s "$MIX_STAGE/system/fonts/.luoshu-font-store/mix-composite.font" ] && return 0
+    [ -s "$MIX_STAGE/system/fonts/.luoshu-font-store/regular.font" ] && return 0
     find "$MIX_STAGE" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) \
         -print -quit 2>/dev/null | grep -q .
 }
@@ -404,34 +406,6 @@ stage_generation_matches() {
         [ "$(read_value "$MIX_MANIFEST" "$_field")" = "$(read_value "$MIX_STAGE_STATE" "$_field")" ] || return 1
     done
     [ -n "$(read_value "$MIX_MANIFEST" compositeHash)" ] || return 1
-    return 0
-}
-
-complete_hyperos_stage() {
-    _helper="$REALMOD/common/hyperos_stage_complete.sh"
-    if [ -e /system/fonts/MiSansVF.ttf ] || [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)" ] || \
-       [ -n "$(getprop ro.miui.ui.version.name 2>/dev/null)" ]; then
-        [ -f "$_helper" ] || return 1
-        LUOSHU_REAL_MODDIR="$REALMOD" sh "$_helper" "$MIX_STAGE" >> "$LOG_FILE" 2>&1 || return 1
-    fi
-}
-
-complete_coloros_stage() {
-    # The composite worker runs in a separate shell. Detect the same ROM markers
-    # as legacy util_functions instead of relying on its unexported IS_COLOROS.
-    _helper="$REALMOD/common/coloros_stage_complete.sh"
-    if [ -e /system/fonts/MiSansVF.ttf ] || [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)" ] || \
-       [ -n "$(getprop ro.miui.ui.version.name 2>/dev/null)" ]; then
-        return 0
-    fi
-    if [ -n "$(getprop ro.build.version.oplusrom 2>/dev/null)" ] || \
-       [ -n "$(getprop ro.build.version.opporom 2>/dev/null)" ] || \
-       [ -d /data/oplus/os ] || [ -d /system_ext/oplus ] || \
-       [ -e /system/fonts/SysSans-En-Regular.ttf ] || \
-       [ -e /system/fonts/SysFont-Regular.ttf ]; then
-        [ -f "$_helper" ] || return 1
-        LUOSHU_REAL_MODDIR="$REALMOD" sh "$_helper" "$MIX_STAGE" >> "$LOG_FILE" 2>&1 || return 1
-    fi
     return 0
 }
 
@@ -507,7 +481,18 @@ next_mix_payload_ready_for_request() {
     [ -n "$_nmr_request" ] || return 1
     [ "$(read_value "$NEXT_STATE" font)" = mix ] || return 1
     [ "$(read_value "$NEXT_STATE" requestId)" = "$_nmr_request" ] || return 1
-    find "$NEXT_PAYLOAD" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \)         -print -quit 2>/dev/null | grep -q .
+    if [ -s "$NEXT_PAYLOAD/.luoshu-metrics-covered.lst" ]; then
+        # Current inventory output may use arbitrary directories or no extension.
+        while IFS= read -r _nmr_slot || [ -n "$_nmr_slot" ]; do
+            case "$_nmr_slot" in /*) ;; *) return 1 ;; esac
+            case "$_nmr_slot" in *'/../'*|*'/./'*|*'//'*) return 1 ;; esac
+            [ -f "$NEXT_PAYLOAD$_nmr_slot" ] && [ -s "$NEXT_PAYLOAD$_nmr_slot" ] || return 1
+        done < "$NEXT_PAYLOAD/.luoshu-metrics-covered.lst"
+        return 0
+    fi
+    # Recovery for already-prepared payloads written by an older installed build.
+    find "$NEXT_PAYLOAD" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' -o -iname '*.otc' \) \
+        -print -quit 2>/dev/null | grep -q .
 }
 
 prepare_mix_stage_for_commit() {
@@ -519,9 +504,9 @@ prepare_mix_stage_for_commit() {
     precommit_ready && return 0
 
     # v14.2/v14.3 composite workers finish by calling the safe switch core first.
-    # That core already maps the validated device inventory, applies OEM metric
-    # alignment and writes .luoshu-payload-next. If it belongs to this exact mix
-    # request, a second ROM/coverage pass is both redundant and extremely slow.
+    # That core already maps the validated device inventory with stock metrics
+    # and writes .luoshu-payload-next. Reuse only this exact mix request so a
+    # second inventory pass cannot rebuild the same composite.
     if next_mix_payload_ready_for_request; then
         _pm_task="$(read_value "$REALMOD/config/axes_task.conf" task)"
         mix_finalize_state_write ready '本机扫描槽位已在生成阶段一次映射完成，正在提交' "$_pm_task" 98
@@ -539,44 +524,25 @@ prepare_mix_stage_for_commit() {
     }
 
     _pm_task="$(read_value "$REALMOD/config/axes_task.conf" task)"
-    mix_finalize_state_write running "正在完成 ROM 字体槽位对齐" "$_pm_task"
-    complete_hyperos_stage || {
-        precommit_fail 'HyperOS 字体槽位对齐失败，请导出字体切换日志'
-        return 1
-    }
-    complete_coloros_stage || {
-        precommit_fail 'ColorOS 字体槽位对齐失败，请导出字体切换日志'
-        return 1
-    }
-
-    # Explicit repair is transactional. Normal switching is best-effort here:
-    # coverage extras may fall back to the stock ROM, but they must never turn a
-    # fully generated composite into a many-minute total failure.
-    _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
+    _inventory_helper="$REALMOD/common/inventory_font_stage.sh"
     _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
-    if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
-        mix_finalize_state_write running "正在完成字体补齐批处理" "$_pm_task"
-        if [ ! -f "$_coverage_helper" ] || [ ! -s "$_coverage_plan" ]; then
-            precommit_fail '字体补齐组件或补齐计划缺失，未提交半成品'
-            return 1
-        fi
-        if ! LUOSHU_REAL_MODDIR="$REALMOD" \
-            LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-            LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
-                sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1; then
-            precommit_fail '字体补齐批处理失败，未提交半成品'
-            return 1
-        fi
-    elif [ -f "$_coverage_helper" ] && [ -s "$REALMOD/config/device_font_inventory.json" ]; then
-        mix_finalize_state_write running "正在按本机扫描清单映射全部可替换字体槽位" "$_pm_task"
-        if ! LUOSHU_REAL_MODDIR="$REALMOD" \
-            LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-            LUOSHU_COVERAGE_PLAN= \
-                sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1; then
-            printf '[%s] [MIX] optional coverage completion failed; continue with ROM-aligned core slots\n' \
-                "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" >> "$LOG_FILE" 2>/dev/null || true
-            mix_finalize_state_write running '附加字体槽位补齐未完成，正在提交已校验核心字体' "$_pm_task" 97
-        fi
+    if [ ! -f "$_inventory_helper" ]; then
+        precommit_fail '通用字体生成组件缺失，未提交半成品'
+        return 1
+    fi
+    if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ] && [ ! -s "$_coverage_plan" ]; then
+        precommit_fail '字体补齐计划缺失，未提交半成品'
+        return 1
+    fi
+    mix_finalize_state_write running "正在按本机扫描清单映射全部可替换字体槽位" "$_pm_task"
+    # Composition starts from new source anchors, so map the full inventory once.
+    # Passing a repair-only plan here would omit every unrequested slot.
+    if ! LUOSHU_REAL_MODDIR="$REALMOD" \
+        LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
+        LUOSHU_COVERAGE_PLAN= \
+            sh "$_inventory_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1; then
+        precommit_fail '按本机清单生成字体失败，未提交半成品'
+        return 1
     fi
 
     _pm_request=$(read_value "$MIX_STAGE_STATE" requestId)
@@ -701,7 +667,7 @@ finalize_lock_release() {
 prepare_mix_stage_locked() (
     # The weighted controller's prepare call and the legacy monitor's finalize
     # call must share the same owner. Checking only the ready marker lets both
-    # processes enter the expensive ROM/coverage passes before it is written.
+    # processes enter the inventory mapping pass before it is written.
     finalize_lock_acquire || {
         printf '{"status":"error","message":"复合字体预提交锁正在使用，请稍后重试"}\n'
         return 1
@@ -775,7 +741,6 @@ setup_runtime() {
     force_link "$REALMOD/common/font_role_check.py" "$RUNTIME/common/font_role_check.py" || return 1
     force_link "$LEGACY/util_functions.sh" "$RUNTIME/common/util_functions.sh" || return 1
     force_link "$LEGACY/font_check.sh" "$RUNTIME/common/font_check.sh" || return 1
-    force_link "$LEGACY/rom_adapters.sh" "$RUNTIME/common/rom_adapters.sh" || return 1
     # Keep the v14.4 font engine, but use the current detached-task and nested-task
     # handoff helpers. Without them Android can keep the public task at 34% until
     # the complete composite build exits.
@@ -788,7 +753,6 @@ setup_runtime() {
     force_link "$REALMOD/common/font_switch_lock.sh" "$RUNTIME/common/font_switch_lock.sh" || return 1
     force_link "$LEGACY" "$RUNTIME/common/legacy_v14_4" || return 1
     force_link "$REALMOD/common/module_status.sh" "$RUNTIME/common/module_status.sh" || true
-    force_link "$REALMOD/common/hyperos_stage_complete.sh" "$RUNTIME/common/hyperos_stage_complete.sh" || true
 
     cat >"$RUNTIME/common/mount_compat.sh" <<'EOF'
 #!/system/bin/sh

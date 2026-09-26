@@ -14,14 +14,14 @@ if type luoshu_font_lock_active >/dev/null 2>&1 && type luoshu_terminate_task_tr
         if luoshu_font_lock_active "$_provider_lock"; then
             _provider_pid=$(luoshu_font_lock_pid "$_provider_lock")
             case "$_provider_pid" in ''|*[!0-9]*|0|1) continue ;; esac
-            if grep -aq -e 'google_font_provider_service.sh' -e 'google_font_provider_bridge.sh' -e 'hyperos_theme_font_bridge.sh' \
+            if grep -aq -e 'google_font_provider_service.sh' -e 'google_font_provider_bridge.sh' -e 'hyperos_theme_font_bridge.sh' -e 'dynamic_font_route_bridge.sh' \
                 "/proc/$_provider_pid/cmdline" 2>/dev/null; then
                 luoshu_terminate_task_tree "$_provider_pid"
             fi
         fi
     done
 fi
-for _bridge in google_font_provider_bridge.sh hyperos_theme_font_bridge.sh; do
+for _bridge in google_font_provider_bridge.sh dynamic_font_route_bridge.sh hyperos_theme_font_bridge.sh; do
     [ ! -f "$MODDIR/common/$_bridge" ] || MODDIR="$MODDIR" sh "$MODDIR/common/$_bridge" restore >/dev/null 2>&1 || true
 done
 [ -f "$MODDIR/common/private_payload.sh" ] && . "$MODDIR/common/private_payload.sh"

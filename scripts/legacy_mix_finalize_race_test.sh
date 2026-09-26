@@ -10,6 +10,12 @@ MODULE="$TMP/module"
 mkdir -p "$MODULE/.luoshu-mix-stage/system/fonts" "$MODULE/config" "$MODULE/common" "$MODULE/logs"
 cp "$ROOT/common/background_task.sh" "$MODULE/common/background_task.sh"
 chmod 0755 "$MODULE/common/background_task.sh"
+cat > "$MODULE/common/inventory_font_stage.sh" <<'EOF_INVENTORY_STAGE'
+#!/bin/sh
+[ "$2" = mix ] || exit 1
+[ -s "$1/system/fonts/MiSansVF.ttf" ] || exit 1
+printf 'mapped\n' >> "$LUOSHU_REAL_MODDIR/inventory-stage-calls"
+EOF_INVENTORY_STAGE
 printf 'module\n' > "$MODULE/module.prop"
 printf 'new-composite\n' > "$MODULE/.luoshu-mix-stage/system/fonts/MiSansVF.ttf"
 printf 'default\n' > "$MODULE/config/active_font.conf"
@@ -48,6 +54,7 @@ grep -q '^font=mix$' "$MODULE/config/font-payload-next.conf"
 grep -q '^requestId=request-a$' "$MODULE/config/font-payload-next.conf"
 grep -q '^compositeHash=composite-a$' "$MODULE/config/font-payload-next.conf"
 test ! -e "$MODULE/.mix-stage-finalize.lock"
+test "$(wc -l < "$MODULE/inventory-stage-calls" | tr -d '[:space:]')" = 1
 
 # The monitor can commit and remove stage metadata before the outer weighted
 # worker reaches prepare-finalize. The worker's inherited request identity must

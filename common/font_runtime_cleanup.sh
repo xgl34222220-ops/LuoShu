@@ -14,12 +14,8 @@ clear_managed_text_fonts() {
     # before deleting the ordinary partition/fonts trees.
     if [ -f "$_lfrc_manifest" ]; then
         while IFS= read -r _lfrc_rel; do
-            case "$_lfrc_rel" in
-                ''|/*|*'..'*) continue ;;
-                *.ttf|*.otf|*.ttc|*.otc|*.TTF|*.OTF|*.TTC|*.OTC)
-                    rm -f "$_lfrc_root/$_lfrc_rel" 2>/dev/null || true
-                    ;;
-            esac
+            _lfrp_managed_text_target_safe "$_lfrc_rel" || continue
+            rm -f "$_lfrc_root/$_lfrc_rel" 2>/dev/null || true
         done < "$_lfrc_manifest"
     fi
     for _lfrc_part in $(_lfrp_partitions); do

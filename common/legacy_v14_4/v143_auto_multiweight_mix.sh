@@ -10,6 +10,17 @@ if [ -z "$MODDIR" ]; then
         MODDIR="/data/adb/modules/LuoShu"
     fi
 fi
+# The router supplies partition symlinks into a disposable stage.
+case "$MODDIR" in
+    "${LUOSHU_REAL_MODDIR:-}/.legacy-v14-runtime") ;;
+    *)
+        case "${1:-config}" in
+            start|config|status|recover) exec sh "$MODDIR/common/font_mix.sh" "$@" ;;
+            *) printf '{"status":"error","message":"字体组合任务需要隔离暂存目录"}\n'; exit 1 ;;
+        esac
+        ;;
+esac
+
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/auto-multiweight-mix"
 COMPOSITE_CACHE="$CACHE_ROOT/composites-v4"
@@ -17,7 +28,6 @@ MIX_ENGINE_IDENTITY=''
 PUBLIC_ROOT="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}"
 SOURCE_FONTS="$PUBLIC_ROOT/fonts"
 USER_FONTS_DIR="$SOURCE_FONTS"
-FONT_MANAGER="$MODDIR/common/font_manager.sh"
 FALLBACK_ENGINE="$MODDIR/common/v142_weighted_mix.sh"
 MODE_HELPER="$MODDIR/common/mix_weight_mode.sh"
 ROLE_CHECK="$MODDIR/common/font_role_check.sh"
@@ -56,6 +66,55 @@ clear_auto_worker_pid() {
         rm -f "$WORKER_PID" 2>/dev/null || true
     fi
 }
+
+write_auto_source_weights() {
+    _was_helper="$REALMOD/common/mix_source_manifest.py"
+    [ -f "$_was_helper" ] || return 1
+    _was_key=$(weight_role "$2" | tr '[:upper:]' '[:lower:]')
+    _was_cjk_axes="$_cjk_axes"; _was_latin_axes="$_latin_axes"; _was_digit_axes="$_digit_axes"
+    [ "$_cjk_mode" != auto ] || _was_cjk_axes=$(with_weight "$_cjk_axes" "$2")
+    [ "$_latin_mode" != auto ] || _was_latin_axes=$(with_weight "$_latin_axes" "$2")
+    [ "$_digit_mode" != auto ] || _was_digit_axes=$(with_weight "$_digit_axes" "$2")
+    PYTHONHOME="$PYROOT" \
+    PYTHONPATH="$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+    LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$PYBIN" "$_was_helper" --manifest "$1/.luoshu-mix-source-weights.json" \
+        --anchor "${_was_key}.font" --target-weight "$2" --composite "$3" \
+        --cjk "$4/cjk.ttf" --latin "$4/latin.ttf" --digit "$4/digit.ttf" \
+        --cjk-mode "$_cjk_mode" --latin-mode "$_latin_mode" --digit-mode "$_digit_mode" \
+        --cjk-axes "$_was_cjk_axes" --latin-axes "$_was_latin_axes" --digit-axes "$_was_digit_axes"
+}
+
+stage_auto_sources() (
+    _sas_input="$1/fonts"
+    _sas_stage="$MODDIR/.auto-mix-sources.$$"
+    _sas_dest="$MODDIR/system/fonts"
+    _sas_backup="$MODDIR/.auto-mix-sources-backup.$$"
+    rm -rf "$_sas_stage" "$_sas_backup" 2>/dev/null || true
+    mkdir -p "$_sas_stage/.luoshu-font-store" "${_sas_dest%/*}" 2>/dev/null || exit 1
+    for _sas_weight in 100 200 300 400 500 600 700 800 900; do
+        _sas_role=$(weight_role "$_sas_weight")
+        _sas_key=$(printf '%s' "$_sas_role" | tr '[:upper:]' '[:lower:]')
+        _sas_source="$_sas_input/LuoShuAutoMix-${_sas_role}.otf"
+        [ "$_sas_weight" != 400 ] || _sas_source="$_sas_input/LuoShuAutoMix-Regular.ttf"
+        [ -s "$_sas_source" ] || { rm -rf "$_sas_stage"; exit 1; }
+        link_or_copy "$_sas_source" "$_sas_stage/.luoshu-font-store/${_sas_key}.font" || {
+            rm -rf "$_sas_stage"; exit 1;
+        }
+    done
+    cp -f "$1/.luoshu-mix-source-weights.json" "$_sas_stage/.luoshu-font-store/" 2>/dev/null || {
+        rm -rf "$_sas_stage"; exit 1;
+    }
+    # No partial source set reaches the router, and no live payload is touched.
+    if [ -d "$_sas_dest" ]; then
+        mv "$_sas_dest" "$_sas_backup" 2>/dev/null || { rm -rf "$_sas_stage"; exit 1; }
+    fi
+    if ! mv "$_sas_stage" "$_sas_dest" 2>/dev/null; then
+        [ ! -d "$_sas_backup" ] || mv "$_sas_backup" "$_sas_dest" 2>/dev/null || true
+        rm -rf "$_sas_stage"; exit 1
+    fi
+    rm -rf "$_sas_backup" 2>/dev/null || true
+)
 
 write_auto_generation_manifest() {
     _agm_manifest="${LUOSHU_MIX_MANIFEST:-}"
@@ -294,7 +353,7 @@ run_instance() {
     chmod 0644 "$_destination" 2>/dev/null || true
 }
 
-prepare_source() {
+prepare_source() (
     _role="$1"
     _family="$2"
     _axes="$3"
@@ -314,7 +373,7 @@ prepare_source() {
         cp -f "$_source" "$_destination" 2>/dev/null || return 1
         chmod 0644 "$_destination" 2>/dev/null || true
     fi
-}
+)
 
 hash_file() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -350,7 +409,7 @@ prune_composite_cache() {
     done
 }
 
-build_composite_cached() {
+build_composite_cached() (
     _cjk="$1"
     _latin="$2"
     _digit="$3"
@@ -389,7 +448,7 @@ build_composite_cached() {
     link_or_copy "$_cached" "$_output" || return 1
     chmod 0644 "$_output" 2>/dev/null || true
     prune_composite_cache
-}
+)
 
 save_mix_config() {
     _tmp="$MIX_CONF.auto.$$"
@@ -472,14 +531,16 @@ worker() {
             update_task "$_wanted" failed "${_weight} 字重复合失败" 100 "$(date +%s)"
             rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
+        write_auto_source_weights "$_root" "$_weight" "$_output" "$_dir" || {
+            update_task "$_wanted" failed "${_weight} 字重角色记录失败" 100 "$(date +%s)"
+            rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
+        }
         rm -rf "$_dir" 2>/dev/null || true
     done
 
-    update_task "$_wanted" running '正在应用自动多字重字体族' 88 ''
-    _result=$(LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$FONT_MANAGER" action switch "$_family" 2>&1)
-    printf '%s\n' "$_result" >>"$LOG_FILE" 2>/dev/null || true
-    printf '%s\n' "$_result" | grep -q '"status":"ok"' || {
-        update_task "$_wanted" failed '自动多字重字体族应用失败' 100 "$(date +%s)"
+    update_task "$_wanted" running '正在保存自动多字重组合源' 88 ''
+    stage_auto_sources "$_root" || {
+        update_task "$_wanted" failed '自动多字重组合源保存失败' 100 "$(date +%s)"
         rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
     }
     save_mix_config "$_cjk" "$_latin" "$_digit" "$_cjk_axes" "$_latin_axes" "$_digit_axes" \

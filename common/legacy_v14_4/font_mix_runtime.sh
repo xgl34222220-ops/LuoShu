@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # v14.4 composite engine compatibility wrapper.
-# The original v14.1 font_mix engine is preserved byte-for-byte as font_mix_engine.sh.
+# font_mix_engine.sh generates source anchors for inventory-driven mapping.
 # This wrapper only bridges its async task lifecycle to the current private payload boot mode.
 set +e
 RUNTIME="${MODDIR:-}"

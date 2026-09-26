@@ -176,9 +176,17 @@ mkdir -p "$MODDIR/.luoshu-payload/system/etc"
 cp "$TMP/anchor.ttf" "$MODDIR/.luoshu-payload/system/fonts/OldAlias.ttf"
 printf '%s\n' '<family><font>LuoShu-400.ttf</font></family>' \
   > "$MODDIR/.luoshu-payload/system/etc/fonts.xml"
+mkdir -p "$MODDIR/.luoshu-payload/future_oem/assets/typefaces" "$TMP/outside"
+cp "$TMP/anchor.ttf" "$MODDIR/.luoshu-payload/future_oem/assets/typefaces/Unusual.bin"
+cp "$TMP/anchor.ttf" "$TMP/outside/Keep.ttf"
+ln -s "$TMP/outside" "$MODDIR/.luoshu-payload/future_oem/escape"
+printf '%s\n' 'future_oem/assets/typefaces/Unusual.bin' 'future_oem/escape/Keep.ttf' \
+    '../outside/Keep.ttf' >> "$MODDIR/config/font-runtime-targets.conf"
 clear_managed_text_fonts
 no test -e "$MODDIR/.luoshu-payload/product/vivo/fonts/VivoFont.ttf"
 no test -e "$MODDIR/.luoshu-payload/system/fonts/OldAlias.ttf"
+no test -e "$MODDIR/.luoshu-payload/future_oem/assets/typefaces/Unusual.bin"
+ok test -f "$TMP/outside/Keep.ttf"
 no test -e "$MODDIR/.luoshu-payload/system/etc/fonts.xml"
 ok test -d "$MODDIR/.luoshu-payload/system/fonts"
 

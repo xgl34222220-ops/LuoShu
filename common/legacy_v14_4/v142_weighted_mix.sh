@@ -12,6 +12,17 @@ if [ -z "$MODDIR" ]; then
     fi
 fi
 
+# The router supplies partition symlinks into a disposable stage.
+case "$MODDIR" in
+    "${LUOSHU_REAL_MODDIR:-}/.legacy-v14-runtime") ;;
+    *)
+        case "${1:-config}" in
+            start|config|status|recover) exec sh "$MODDIR/common/font_mix.sh" "$@" ;;
+            *) printf '{"status":"error","message":"字体组合任务需要隔离暂存目录"}\n'; exit 1 ;;
+        esac
+        ;;
+esac
+
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/axes-mix"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"

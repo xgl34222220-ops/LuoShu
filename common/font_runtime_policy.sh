@@ -412,6 +412,31 @@ _lfrp_anchor_for_weight() {
 # private tree contains only LuoShu overlays, so removing it reveals every stock
 # fallback and prevents an old full-font switch from leaking tofu-producing aliases
 # into a later partial-font switch.
+_lfrp_managed_text_target_safe() (
+    _lmts_rel="$1"
+    case "/$_lmts_rel/" in *"/../"*|*"/./"*|*"//"*) return 1 ;; esac
+    case "$_lmts_rel" in ''|/*) return 1 ;; esac
+    _lmts_part=${_lmts_rel%%/*}
+    _lmts_known=0
+    for _lmts_candidate in $(_lfrp_partitions); do
+        [ "$_lmts_candidate" = "$_lmts_part" ] && { _lmts_known=1; break; }
+    done
+    [ "$_lmts_known" -eq 1 ] || return 1
+    # The generated target manifest is exact. Text roots may be named assets or
+    # typefaces, so the literal component "fonts" is not an eligibility rule.
+    _lmts_parent=${_lmts_rel%/*}
+    _lmts_walk="$(_lfrp_payload_root)"
+    while [ -n "$_lmts_parent" ]; do
+        case "$_lmts_parent" in
+            */*) _lmts_component=${_lmts_parent%%/*}; _lmts_parent=${_lmts_parent#*/} ;;
+            *) _lmts_component="$_lmts_parent"; _lmts_parent='' ;;
+        esac
+        _lmts_walk="$_lmts_walk/$_lmts_component"
+        [ ! -L "$_lmts_walk" ] || return 1
+    done
+    return 0
+)
+
 clear_managed_text_fonts() {
     _lfrp_root=$(_lfrp_payload_root)
     _lfrp_manifest=$(_lfrp_target_manifest)
@@ -421,10 +446,8 @@ clear_managed_text_fonts() {
     # stale dialer or lock-screen font behind.
     if [ -f "$_lfrp_manifest" ]; then
         while IFS= read -r _lfrp_rel; do
-            case "$_lfrp_rel" in
-                ''|/*|*'..'*) continue ;;
-                */fonts/*) rm -f "$_lfrp_root/$_lfrp_rel" 2>/dev/null || true ;;
-            esac
+            _lfrp_managed_text_target_safe "$_lfrp_rel" || continue
+            rm -f "$_lfrp_root/$_lfrp_rel" 2>/dev/null || true
         done < "$_lfrp_manifest"
     fi
     for _lfrp_part in $(_lfrp_partitions); do
