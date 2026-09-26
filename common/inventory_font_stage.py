@@ -7,6 +7,7 @@ The scanner owns targets; actual source faces own weight/style/script capability
 from __future__ import annotations
 
 import argparse
+import gc
 import hashlib
 from contextlib import ExitStack, closing
 from dataclasses import dataclass
@@ -29,9 +30,9 @@ from font_slot_coverage import (preferred_unicode_codepoints, is_han,
                                 is_cjk_routing_codepoint, is_cjk_punctuation, valid_coverage)
 from inventory_font_metrics import compact_routed_source, write_metrics, link_copy, contract_for_face, restrict_unicode_scope
 from inventory_stock_source import StockSourceResolver
-from inventory_font_supplement import supplement, UnsupportedSupplementError
+from inventory_font_supplement import supplement, plan_stock_glyph_union, UnsupportedSupplementError
 
-REVISION = 1
+REVISION = 2
 EXTENSIONS = {'.ttf', '.otf', '.ttc', '.otc', '.font'}
 ROLES = {100: 'thin', 200: 'extralight', 300: 'light', 400: 'regular',
          500: 'medium', 600: 'semibold', 700: 'bold', 800: 'extrabold', 900: 'black'}
@@ -48,14 +49,25 @@ class StageProgress:
         configured = os.environ.get('LUOSHU_INVENTORY_PROGRESS_FILE', '')
         self.path = Path(configured) if configured else None
         self.total = total
+        self.phase = ''
+        self.phase_started = time.monotonic()
 
-    def update(self, completed: int, phase: str, logical: str = '') -> None:
+    def update(self, completed: int, phase: str, logical: str = '', *,
+               file_completed: int = 0, file_total: int = 0,
+               face_index: int | None = None, face_total: int = 0) -> None:
         if self.path is None:
             return
         temporary = self.path.with_name(self.path.name + f'.{os.getpid()}.tmp')
         try:
-            temporary.write_text(json.dumps({'updatedAt': time.time(), 'completed': completed,
-                'total': self.total, 'phase': phase, 'path': logical}, ensure_ascii=False))
+            if phase != self.phase:
+                self.phase, self.phase_started = phase, time.monotonic()
+            payload = {'updatedAt': time.time(), 'completed': completed,
+                'total': self.total, 'phase': phase, 'path': logical,
+                'fileCompleted': file_completed, 'fileTotal': file_total,
+                'phaseElapsedSeconds': round(time.monotonic() - self.phase_started, 3)}
+            if face_index is not None:
+                payload.update(faceIndex=face_index, faceTotal=face_total)
+            temporary.write_text(json.dumps(payload, ensure_ascii=False))
             os.replace(temporary, self.path)
         except OSError:
             # Telemetry failure must never change transaction semantics.
@@ -103,7 +115,8 @@ def preservation_digest(path: Path, face_index: int, cache: dict) -> str:
     exact same outlines and shaping tables. Copying those raw tables already
     preserves every unselected script; no subset/merge is needed for them.
     """
-    key = (identity(path), face_index)
+    file_key = identity(path)
+    key = (file_key, face_index)
     if key in cache:
         return cache[key]
     options = {'fontNumber': face_index} if face_index >= 0 else {}
@@ -112,17 +125,27 @@ def preservation_digest(path: Path, face_index: int, cache: dict) -> str:
         for tag in sorted(font.reader.keys()):
             if tag in {'name', 'DSIG', 'FFTM'}:
                 continue
-            raw = bytearray(font.reader[tag])
-            if tag == 'head':
-                for start, end in ((8, 12), (20, 36), (38, 40), (42, 44)):
-                    raw[start:end] = b'\0' * (end - start)
-            elif tag == 'hhea':
-                raw[4:10] = b'\0' * 6
-            elif tag == 'OS/2' and len(raw) >= 78:
-                selection = struct.unpack_from('>H', raw, 62)[0] & ~128
-                struct.pack_into('>H', raw, 62, selection)
-                raw[68:78] = b'\0' * 10
-            digest.update(tag.encode('ascii')); digest.update(struct.pack('>I', len(raw))); digest.update(raw)
+            entry = font.reader.tables[tag]
+            table_key = ('preservation-table', file_key, tag, entry.offset, entry.length)
+            if table_key not in cache:
+                raw = font.reader[tag]
+                if tag in {'head', 'hhea', 'OS/2'}:
+                    raw = bytearray(raw)
+                    if tag == 'head':
+                        for start, end in ((8, 12), (20, 36), (38, 40), (42, 44)):
+                            raw[start:end] = b'\0' * (end - start)
+                    elif tag == 'hhea':
+                        raw[4:10] = b'\0' * 6
+                    elif len(raw) >= 78:
+                        selection = struct.unpack_from('>H', raw, 62)[0] & ~128
+                        struct.pack_into('>H', raw, 62, selection)
+                        raw[68:78] = b'\0' * 10
+                cache[table_key] = hashlib.sha256(raw).digest()
+            # TTC faces commonly share a 16 MB CFF table. Cache its verified
+            # file range, not the face index; regional cmap/layout tables still
+            # contribute their own digest and can never alias different faces.
+            digest.update(tag.encode('ascii')); digest.update(struct.pack('>I', entry.length))
+            digest.update(cache[table_key])
     cache[key] = digest.hexdigest()
     return cache[key]
 
@@ -539,7 +562,8 @@ def faces_for_slot(slot: dict) -> list[dict]:
     return [{**slot, **face} for face in faces]
 
 
-def face_table_fingerprint(font: TTFont) -> dict[str, bytes]:
+def face_table_fingerprint(font: TTFont, cache: dict | None = None,
+                           file_key: tuple | None = None) -> dict[str, bytes]:
     """Compare SFNT contents across TTC packing without interpreting glyph names.
 
     All outline, layout, metadata, cmap and variation tables must stay identical.
@@ -547,10 +571,17 @@ def face_table_fingerprint(font: TTFont) -> dict[str, bytes]:
     """
     result = {}
     for tag in font.reader.keys():
+        entry = font.reader.tables[tag]
+        key = (file_key, tag, entry.offset, entry.length)
+        if cache is not None and file_key is not None and key in cache:
+            result[tag] = cache[key]
+            continue
         raw = font.reader[tag]
         if tag == 'head':
             raw = raw[:8] + b'\0' * 4 + raw[12:]
         result[tag] = hashlib.sha256(raw).digest()
+        if cache is not None and file_key is not None:
+            cache[key] = result[tag]
     return result
 
 
@@ -639,7 +670,7 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         progress = StageProgress(3 * len(data['slots']))
         progress.update(0, 'source')
         pool = SourcePool(module, stage, pool_mode, source, temporary)
-        progress.update(0, 'inventory')
+        progress.update(0, 'inventory', file_total=len(data['slots']))
         if mode != 'mix':
             for face in pool.faces:
                 face.role_weights = None
@@ -651,7 +682,8 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                 counts_cache[points] = replacement_counts(points)
             return counts_cache[points]
         for slot_index, (logical, slot) in enumerate(sorted(data['slots'].items())):
-            progress.update(slot_index, 'inventory', logical)
+            progress.update(slot_index, 'inventory', logical,
+                            file_completed=slot_index, file_total=len(data['slots']))
             if requested is not None and logical not in requested:
                 continue
             if requested is not None:
@@ -751,9 +783,65 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         # An unsupported optional collection must never prove CJK reachability.
         supplemented, scoped, anchors, role_anchors = {}, {}, {}, {}
         prepared_sources = {}
+        union_plans = {}
+        for logical, selected in jobs.items():
+            if len(selected) < 2:
+                continue
+            groups = {}
+            for face, src, weight, contract, variable in selected:
+                if src is None or variable or not face['_needsSupplement']:
+                    continue
+                stock = face['_stock']
+                stock.verify_unchanged()
+                with TTFont(stock.path, fontNumber=stock.face_index, lazy=True,
+                            recalcTimestamp=False) as original:
+                    if 'CFF ' not in original or 'CFF2' in original or 'fvar' in original:
+                        continue
+                    # Shared raw outlines alone do not prove shared advances
+                    # or vertical origins. Every inherited metric table must
+                    # come from the same verified TTC range as well.
+                    tables = tuple((tag, original.reader.tables[tag].offset,
+                                    original.reader.tables[tag].length) if tag in original else (tag, None, None)
+                                   for tag in ('CFF ', 'hmtx', 'vmtx', 'VORG', 'vhea'))
+                italic = bool(face['metrics'].get('fontTraits', {}).get('italic')
+                              or face.get('style') in {'italic', 'oblique'})
+                anchor = pool.materialize(src, weight, variable, italic)
+                group_key = (str(anchor), stock.digest, contract[0], weight,
+                             face['_replacePoints'], tables)
+                groups.setdefault(group_key, []).append(face)
+            for group_key, members in groups.items():
+                if len(members) < 2:
+                    continue
+                indices = tuple(member['_stock'].face_index for member in members)
+                plan_key = (group_key, indices)
+                if plan_key not in union_plans:
+                    progress.update(len(data['slots']), 'supplement', logical,
+                                    file_total=len(jobs), face_index=indices[0], face_total=len(selected))
+                    stock = members[0]['_stock']
+                    try:
+                        union_plans[plan_key] = plan_stock_glyph_union(
+                            Path(group_key[0]), stock.path, stock_face_indices=indices,
+                            replace_codepoints=set(group_key[4]), stock_weight=group_key[3])
+                    except UnsupportedSupplementError:
+                        # Unsupported grouping remains an ordinary independent
+                        # per-face replacement; it cannot discard a target.
+                        union_plans[plan_key] = None
+                    # FontTools CFFFontSet points back to its TTFont. Closing
+                    # the reader does not release that cycle; reclaim finished
+                    # planning graphs before allocating the large donor face.
+                    gc.collect()
+                    for member in members:
+                        member['_stock'].verify_unchanged()
+                union = union_plans[plan_key]
+                if union is not None:
+                    for member in members:
+                        member['_stockUnionGlyphs'] = union
+        supplement_total = len(jobs)
         for slot_index, (logical, selected) in enumerate(list(jobs.items())):
-            progress.update(len(data['slots']) + slot_index, 'supplement', logical)
             for index, (face, src, weight, contract, variable) in enumerate(selected):
+                progress.update(len(data['slots']) + slot_index, 'supplement', logical,
+                                file_completed=slot_index, file_total=supplement_total,
+                                face_index=index, face_total=len(selected))
                 if src is None:
                     continue
                 try:
@@ -763,7 +851,8 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                     stock = face['_stock']
                     stock_content = preservation_digest(stock.path, stock.face_index, preservation_cache)
                     stock_weight = weight if face['metrics'].get('variationAxes') else None
-                    patch_key = (str(anchor), stock_content, face['_replacePoints'], stock_weight)
+                    patch_key = (str(anchor), stock_content, face['_replacePoints'], stock_weight,
+                                 face.get('_stockUnionGlyphs'))
                     metric_anchor = anchor
                     supplement_report = {'replacedCodepoints': len(face['_replacePoints']),
                                          'retainedStockCodepoints': len(stock.codepoints - face['_replacePoints']),
@@ -775,6 +864,7 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                             patch_report = supplement(anchor, stock.path, patched,
                                 stock_face_index=stock.face_index, stock_weight=weight,
                                 replace_codepoints=set(face['_replacePoints']),
+                                retained_stock_glyphs=face.get('_stockUnionGlyphs'),
                                 prepared_cache=prepared_sources)
                             stock.verify_unchanged()
                             with TTFont(patched, lazy=True, recalcTimestamp=False) as patched_font:
@@ -783,6 +873,12 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                                     raise StageError('原厂字符补齐未能保留动态字体轴，已取消本次应用')
                                 if not stock.codepoints.issubset(preferred_unicode_codepoints(patched_font)):
                                     raise StageError('原厂字符补齐丢失字符，已取消本次应用')
+                            # Cmap verification can load an entire CFF outline
+                            # table. Drop the final local reference before
+                            # collecting its closed TTFont/CFFFontSet cycle.
+                            # Cache hits never repeat this collection work.
+                            del patched_font
+                            gc.collect()
                             supplemented[patch_key] = patched, patch_report
                         metric_anchor, supplement_report = supplemented[patch_key]
                     elif src.points - stock.codepoints:
@@ -850,11 +946,13 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                 if routing:
                     punctuation.setdefault((src.key, weight, variable, routing), set()).update(face['metrics']['coverage']['cjkPunctuation'])
         cache, compact, ink_bounds = {}, {}, {}
+        collections, collection_contents, table_fingerprints = {}, {}, {}
         prepared = []
         existing = len(reusable)
         rewritten = 0
         for slot_index, (logical, selected) in enumerate(jobs.items()):
-            progress.update(2 * len(data['slots']) + slot_index, 'metrics', logical)
+            progress.update(2 * len(data['slots']) + slot_index, 'metrics', logical,
+                            file_completed=slot_index, file_total=len(jobs))
             destination = safe_destination(stage, logical)
             rewritten += int(destination.is_file())
             generated_faces = []
@@ -922,6 +1020,10 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                     'replacedCodepoints': supplement_report['replacedCodepoints'],
                     'retainedStockCodepoints': supplement_report['retainedStockCodepoints'],
                     'supplemented': bool(face['_needsSupplement']),
+                    'selectedVariantFallbacks': supplement_report.get('selectedVariantFallbacks', 0),
+                    'selectedVariantFallbackRanges': supplement_report.get('selectedVariantFallbackRanges', {}),
+                    'selectedVariantFallbackSource': supplement_report.get('selectedVariantFallbackSource'),
+                    'sharedStockGlyphCount': len(face.get('_stockUnionGlyphs') or ()),
                     'stockSourceVerifiedBy': stock.verified_by,
                     'compositeRoleWeights': src.role_weights or {},
                     'requestedVariableAxes': face.get('supportedAxes', []),
@@ -930,21 +1032,34 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
             target_collection = (len(selected) > 1 or
                                  str(data['slots'][logical].get('format', '')).upper() in {'TTC', 'OTC'})
             if target_collection:
-                output = temporary / f'collection-{len(prepared)}.font'
-                collection = TTCollection()
-                collection.fonts = [TTFont(path, lazy=True, recalcBBoxes=False,
-                                           recalcTimestamp=False, fontNumber=index)
-                                    for path, index in generated_faces]
-                fingerprints = [face_table_fingerprint(font) for font in collection.fonts]
-                try:
-                    collection.save(output, shareTables=True)
-                finally:
-                    collection.close()
-                with TTCollection(output, lazy=True) as check:
-                    if len(check.fonts) != len(selected):
-                        raise StageError('生成的字体集合面数不一致')
-                    if [face_table_fingerprint(font) for font in check.fonts] != fingerprints:
-                        raise StageError('生成的字体集合面顺序或原始数据表发生变化')
+                # A collection alias must preserve the complete ordered face
+                # sequence, including untouched mono/symbol faces. Reuse the
+                # already verified package when every input identity/index
+                # matches, or when all ordered face tables prove identical
+                # across physical copies. No regional cmap/metric is ignored.
+                collection_key = tuple((identity(path), index) for path, index in generated_faces)
+                if collection_key not in collections:
+                    with ExitStack() as opened:
+                        collection = TTCollection()
+                        collection.fonts = [opened.enter_context(TTFont(path, lazy=True, recalcBBoxes=False,
+                            recalcTimestamp=False, fontNumber=index)) for path, index in generated_faces]
+                        fingerprints = [face_table_fingerprint(font, table_fingerprints, key[0])
+                                        for font, key in zip(collection.fonts, collection_key)]
+                        content_key = tuple(tuple(sorted(value.items())) for value in fingerprints)
+                        if content_key not in collection_contents:
+                            output = temporary / f'collection-{len(collection_contents)}.font'
+                            collection.save(output, shareTables=True)
+                            with TTCollection(output, lazy=True) as check:
+                                if len(check.fonts) != len(selected):
+                                    raise StageError('生成的字体集合面数不一致')
+                                output_identity = identity(output)
+                                if [face_table_fingerprint(font, table_fingerprints, output_identity)
+                                        for font in check.fonts] != fingerprints:
+                                    raise StageError('生成的字体集合面顺序或原始数据表发生变化')
+                            collection_contents[content_key] = output
+                        output = collection_contents[content_key]
+                    collections[collection_key] = output
+                output = collections[collection_key]
                 for face, src, *_rest in selected:
                     face['_stock'].verify_unchanged()
             else:
@@ -1085,6 +1200,8 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                    'inventorySlots': len(data['slots']), 'sourceInstances': len(pool.materialized),
                    'fallbackSlots': 0, 'engineRevision': REVISION}
         summary.update({'supplementedSources': len(supplemented),
+                        'generatedCollections': len(collection_contents),
+                        'sharedCollectionGlyphPlans': sum(value is not None for value in union_plans.values()),
                         'primaryTextMapped': len(primary_replaced)})
         summary.update({'mode': mode, 'operation': 'repair' if requested is not None else 'apply',
                         'font': family, 'inventory': len(data['slots']),
@@ -1098,6 +1215,10 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
             report_slots += [row for row in old_report.get('slots', [])
                              if isinstance(row, dict) and row.get('slot') in mapped_paths
                              and row['slot'] not in newly_written]
+        variant_rows = [row for row in report_slots if row.get('selectedVariantFallbacks', 0)]
+        summary.update({'selectedVariantFallbacks': sum(row['selectedVariantFallbacks'] for row in variant_rows),
+                        'selectedVariantFallbackFaces': len(variant_rows),
+                        'selectedVariantFallbackSlots': len({row['slot'] for row in variant_rows})})
         report = {'schema': 'luoshu-slot-metrics-v1', 'engine': 'inventory-font-stage-v1',
                   'slots': report_slots, 'preservedFonts': preserved, 'summary': summary,
                   'partialSlots': sorted({row['slot'] for row in report_slots
@@ -1110,12 +1231,14 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         (stage / '.luoshu-coverage-remediation.conf').write_text(''.join(
             f'{key}={str(value).lower() if isinstance(value, bool) else str(value).replace(chr(10), " ").replace(chr(13), " ")}\n'
             for key, value in summary.items()))
-        manifest = {'schema': 'inventory-font-output-v1', 'inventory': inventory_digest, 'mode': mode,
+        manifest = {'schema': 'inventory-font-output-v1', 'engineRevision': REVISION,
+                    'inventory': inventory_digest, 'mode': mode,
                     'anchors': anchors_digest(store, digest_cache),
                     'files': {logical: file_digest(safe_destination(stage, logical), digest_cache)
                               for logical in mapped_paths}}
         (stage / '.luoshu-inventory-output-manifest.json').write_text(json.dumps(manifest, sort_keys=True))
-        progress.update(progress.total, 'complete')
+        progress.update(progress.total, 'complete',
+                        file_completed=len(mapped_paths), file_total=len(mapped_paths))
     return summary
 
 

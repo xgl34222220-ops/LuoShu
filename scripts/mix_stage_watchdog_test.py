@@ -77,6 +77,19 @@ time.sleep(30)
         path = Path(f'/proc/{pid}/stat')
         self.assertTrue(not path.exists() or path.read_text().rsplit(') ', 1)[1].startswith('Z '))
 
+    def test_multiphase_work_does_not_misreport_number_of_font_files(self):
+        publish(self.module, 'current', 'test', dict(completed=365, total=849,
+            phase='supplement', fileCompleted=82, fileTotal=190,
+            path='/system/fonts/NotoSansCJK-Regular.ttc', faceIndex=2, faceTotal=5), 385)
+        state = values(self.module / 'config/mix-finalize-state.conf')
+        self.assertIn('生成系统字形（2/3）', state['message'])
+        self.assertIn('82/190 个文件', state['message'])
+        self.assertIn('字体面 3/5', state['message'])
+        self.assertNotIn('365/849', state['message'])
+        self.assertEqual(state['fileTotal'], '190')
+        self.assertEqual(state['total'], '849')
+        self.assertEqual(state['percent'], '81')
+
     def test_busy_loop_still_has_absolute_limit(self):
         result, error = self.run_worker('while True: pass', idle=2, maximum=.65)
         self.assertEqual(result, 124)

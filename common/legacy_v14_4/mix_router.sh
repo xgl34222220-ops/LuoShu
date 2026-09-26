@@ -618,8 +618,8 @@ prepare_mix_stage_for_commit() {
         return 1
     fi
     mix_finalize_state_write running "正在按本机扫描清单映射全部可替换字体槽位" "$_pm_task"
-    # Composition starts from new source anchors, so map the full inventory once.
-    # Passing a repair-only plan here would omit every unrequested slot.
+    # A cache hit reuses verified output for these exact sources and inventory.
+    # A miss still maps the full inventory; a repair-only plan would omit slots.
     _pm_output="$MIX_STAGE/.luoshu-precommit-output.log"
     _pm_pyroot="$REALMOD/common/python"
     _pm_watchdog="$REALMOD/common/mix_stage_watchdog.py"
@@ -627,6 +627,11 @@ prepare_mix_stage_for_commit() {
         precommit_fail '字体生成监督组件缺失，未启动无界后台任务'
         return 1
     }
+    set -- sh "$_inventory_helper" "$MIX_STAGE" mix mix
+    if [ -f "$REALMOD/common/mix_output_cache.py" ]; then
+        set -- "$_pm_pyroot/bin/luoshu-python" "$REALMOD/common/mix_output_cache.py" apply \
+            --module "$REALMOD" --stage "$MIX_STAGE" --request "$(read_value "$MIX_STAGE_STATE" requestId)"
+    fi
     PYTHONHOME="$_pm_pyroot" \
     PYTHONPATH="$_pm_pyroot/lib/python3.14:$_pm_pyroot/lib/python3.14/site-packages" \
     LD_LIBRARY_PATH="$_pm_pyroot/lib:$_pm_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
@@ -635,7 +640,7 @@ prepare_mix_stage_for_commit() {
         "$_pm_pyroot/bin/luoshu-python" "$_pm_watchdog" --module "$REALMOD" \
         --request "$(read_value "$MIX_STAGE_STATE" requestId)" --task "$_pm_task" \
         --progress "$REALMOD/config/mix-inventory-progress.json" \
-        -- sh "$_inventory_helper" "$MIX_STAGE" mix mix >"$_pm_output" 2>&1 &
+        -- "$@" >"$_pm_output" 2>&1 &
     MIX_MAPPING_PID=$!
     wait "$MIX_MAPPING_PID"
     _pm_rc=$?

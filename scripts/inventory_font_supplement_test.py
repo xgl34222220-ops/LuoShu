@@ -15,6 +15,7 @@ from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.pens.recordingPen import DecomposingRecordingPen, RecordingPen
+from fontTools.pens.boundsPen import BoundsPen
 from fontTools.ttLib import TTFont, TTCollection, newTable
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 from fontTools.ttLib.tables._k_e_r_n import KernTable_format_0
@@ -26,7 +27,7 @@ from fontTools.otlLib.builder import buildMathTable
 from fontTools.cffLib.CFFToCFF2 import convertCFFToCFF2
 from fontTools.cffLib import SubrsIndex
 from fontTools.misc.psCharStrings import T2CharString
-from inventory_font_supplement import supplement, SupplementError, UnsupportedSupplementError, _merged_cff_table, _cff_global_layout, _subset
+from inventory_font_supplement import supplement, SupplementError, UnsupportedSupplementError, _merged_cff_table, _cff_global_layout, _subset, plan_stock_glyph_union, _cache_prepared_source
 from fontTools.misc.psCharStrings import calcSubrBias
 
 
@@ -384,6 +385,210 @@ HorizAxis.BaseScriptList latn romn 0;
             self.assertEqual(outline(stock, stock.getBestCmap()[65]), outline(result, result.getBestCmap()[65]))
             self.assertEqual(outline(source, source.getBestCmap()[66]), outline(result, result.getBestCmap()[66]))
 
+    def test_proven_nonfitting_prepared_font_is_not_serialized(self):
+        fixture(self.source, source=True, cff=True)
+        with TTFont(self.source) as font:
+            font._luoshu_encoded_cff_size = len(font.getTableData('CFF '))
+            # The cache's recorded byte budget is authoritative; no large
+            # allocation is needed to exercise a one-byte budget shortfall.
+            cache = {'outline_entries': {'used': {
+                'size': 64 * 1024 * 1024 - font._luoshu_encoded_cff_size + 1}}}
+            with patch.object(font, 'save', side_effect=AssertionError('nonfitting cache serialized font')):
+                _cache_prepared_source(cache, 'target', font, 0)
+            self.assertNotIn('entries', cache)
+
+    def test_outline_cache_shares_conversion_but_not_regional_scope_or_vertical_contract(self):
+        fixture(self.source, source=True); fixture(self.stock, cff=True)
+        for path in (self.source, self.stock):
+            with TTFont(path) as font:
+                for table in font['cmap'].tables:
+                    if table.isUnicode():
+                        table.cmap.update({cp: 'A' for cp in range(0x100, 0x118)})
+                font.save(path)
+        cache = {}
+        requested = set(range(0x100, 0x118)) | {32, 48, 65, 66}
+        for index, excluded in enumerate((65, 66)):
+            with TTFont(self.stock) as font:
+                builder = FontBuilder(font=font)
+                builder.setupVerticalMetrics({name: (1100, 130 + 211 * index)
+                                              for name in font.getGlyphOrder()})
+                builder.setupVerticalHeader(ascent=950 + index, descent=-300)
+                table = newTable('VORG'); table.majorVersion, table.minorVersion = 1, 0
+                table.defaultVertOriginY = 880; table.VOriginRecords = {}
+                font['VORG'] = table
+                font.save(self.stock)
+            report = supplement(self.source, self.stock, self.output, prepared_cache=cache,
+                                replace_codepoints=requested - {excluded})
+            self.assertFalse(report['preparedSourceCacheHit'])
+            self.assertEqual(report['outlineSourceCacheHit'], bool(index))
+            with TTFont(self.stock) as stock, TTFont(self.source) as source, TTFont(self.output) as result:
+                points = result.getBestCmap()
+                for cp in (65, 66, 0x100):
+                    expected = stock if cp == excluded else source
+                    self.assertEqual(outline(expected, expected.getBestCmap()[cp]), outline(result, points[cp]))
+                    if cp != excluded:
+                        glyphs = result.getGlyphSet(); pen = BoundsPen(glyphs)
+                        glyphs[points[cp]].draw(pen)
+                        expected_origin = round(pen.bounds[3] + 130 + 211 * index)
+                        self.assertEqual(result['VORG'].VOriginRecords.get(
+                            points[cp], result['VORG'].defaultVertOriginY), expected_origin)
+            self.assertEqual(shape(self.stock, 'باَ'), shape(self.output, 'باَ'))
+        self.assertEqual(len(cache['outline_entries']), 1)
+        self.assertLessEqual(sum(item['size'] for item in cache['outline_entries'].values())
+                             + sum(len(item[0]) for item in cache['entries'].values()), 64 * 1024 * 1024)
+
+    def test_capacity_fallback_keeps_every_character_and_selector_without_cache_leakage(self):
+        start, source_count, stock_count = 0x20000, 35000, 40000
+        def large_font(path, count, width):
+            names = ['.notdef', *(f'g{i}' for i in range(count))]
+            builder = FontBuilder(1000, isTTF=True)
+            builder.setupGlyphOrder(names)
+            builder.setupCharacterMap({start + i: f'g{i}' for i in range(count)})
+            empty = TTGlyphPen(None).glyph()
+            builder.setupGlyf({name: empty for name in names})
+            builder.setupHorizontalMetrics({name: (width, 0) for name in names})
+            builder.setupHorizontalHeader(ascent=900, descent=-250)
+            builder.setupOS2(sTypoAscender=900, sTypoDescender=-250,
+                            usWinAscent=900, usWinDescent=250, usWeightClass=400)
+            builder.setupNameTable({'familyName': 'Capacity', 'styleName': 'Regular'})
+            builder.setupPost(); builder.setupMaxp(); builder.save(path)
+        large_font(self.source, source_count, 700)
+        large_font(self.stock, stock_count, 600)
+        with TTFont(self.source) as font:
+            table = CmapSubtable.newSubtable(14)
+            table.platformID, table.platEncID, table.language = 0, 5, 0
+            table.cmap = {}; table.uvsDict = {0xE0100: [(start, 'g1')]}
+            font['cmap'].tables.append(table); font.save(self.source)
+        cache = {}
+        for index, selector in enumerate((0xE0100, 0xE0101)):
+            with TTFont(self.stock) as font:
+                font['cmap'].tables = [table for table in font['cmap'].tables if table.format != 14]
+                table = CmapSubtable.newSubtable(14)
+                table.platformID, table.platEncID, table.language = 0, 5, 0
+                table.cmap = {}
+                table.uvsDict = {selector: [(start + i, f'g{i}') for i in range(30000)] + [
+                    (start + source_count, None), (start + source_count + 1, 'g39999')]}
+                font['cmap'].tables.append(table); font.save(self.stock)
+            report = supplement(self.source, self.stock, self.output, prepared_cache=cache,
+                                replace_codepoints=set(range(start, start + source_count)))
+            expected_fallbacks = 29999 if index == 0 else 30000
+            self.assertEqual(report['selectedVariantFallbacks'], expected_fallbacks)
+            self.assertEqual(report['selectedVariantFallbackSource'], 'selected-base-glyph')
+            self.assertEqual(report['preparedSourceCacheHit'], bool(index))
+            with TTFont(self.output) as result:
+                self.assertEqual(set(result.getBestCmap()), set(range(start, start + stock_count)))
+                self.assertLessEqual(len(result.getGlyphOrder()), 65535)
+                variants = {(vs, cp): glyph for table in result['cmap'].tables if table.format == 14
+                            for vs, entries in table.uvsDict.items() for cp, glyph in entries}
+                expected_pairs = {(selector, start + i) for i in range(30000)} | {
+                    (selector, start + source_count), (selector, start + source_count + 1), (0xE0100, start)}
+                self.assertEqual(set(variants), expected_pairs)
+                self.assertEqual(variants[(selector, start + 100)] or result.getBestCmap()[start + 100],
+                                 result.getBestCmap()[start + 100])
+                self.assertIsNone(variants[(selector, start + source_count)])
+                self.assertEqual(result['hmtx'].metrics[variants[(selector, start + source_count + 1)]][0], 600)
+                self.assertEqual(result['hmtx'].metrics[variants[(0xE0100, start)]][0], 700)
+                for cp, advance in ((start, 700), (start + source_count, 600)):
+                    self.assertEqual(result['hmtx'].metrics[result.getBestCmap()[cp]][0], advance)
+
+    def test_identical_vertical_tables_with_regional_cmap_do_not_share_prepared_metrics(self):
+        fixture(self.source, source=True); fixture(self.stock, cff=True)
+        with TTFont(self.stock) as font:
+            builder = FontBuilder(font=font)
+            metrics = {name: (1100, 130) for name in font.getGlyphOrder()}
+            metrics['B'] = (1100, 330)
+            builder.setupVerticalMetrics(metrics)
+            builder.setupVerticalHeader(ascent=950, descent=-300)
+            table = newTable('VORG'); table.majorVersion, table.minorVersion = 1, 0
+            table.defaultVertOriginY = 880; table.VOriginRecords = {}
+            font['VORG'] = table; font.save(self.stock)
+        cache, vertical_tables = {}, None
+        for index in range(2):
+            if index:
+                with TTFont(self.stock) as font:
+                    for table in font['cmap'].tables:
+                        if table.isUnicode() and table.format != 14:
+                            table.cmap[65], table.cmap[66] = 'B', 'A'
+                    font.save(self.stock)
+            with TTFont(self.stock) as font:
+                actual_tables = (font.getTableData('vhea'), font.getTableData('vmtx'))
+                if vertical_tables is not None:
+                    self.assertEqual(actual_tables, vertical_tables)
+                vertical_tables = actual_tables
+            report = supplement(self.source, self.stock, self.output, prepared_cache=cache)
+            self.assertFalse(report['preparedSourceCacheHit'])
+            self.assertEqual(report['outlineSourceCacheHit'], bool(index))
+            with TTFont(self.output) as result:
+                name = result.getBestCmap()[65]
+                self.assertEqual(result['vmtx'].metrics[name], (1100, 330 if index else 130))
+                self.assertEqual(result['VORG'].VOriginRecords.get(name, result['VORG'].defaultVertOriginY),
+                                 750 if index else 550)
+
+    def test_vertical_rounding_boundary_uses_exact_serialized_cff_curve(self):
+        fixture(self.source, source=True); fixture(self.stock, cff=True)
+        with TTFont(self.source) as font:
+            pen = TTGlyphPen(None)
+            pen.moveTo((0, 0)); pen.qCurveTo((100, 1), (200, 0)); pen.closePath()
+            font['glyf']['A'] = pen.glyph(); font.save(self.source)
+        with TTFont(self.stock) as font:
+            builder = FontBuilder(font=font)
+            builder.setupVerticalMetrics({name: (1100, 130) for name in font.getGlyphOrder()})
+            builder.setupVerticalHeader(ascent=950, descent=-300)
+            table = newTable('VORG'); table.majorVersion, table.minorVersion = 1, 0
+            table.defaultVertOriginY = 880; table.VOriginRecords = {}
+            font['VORG'] = table; font.save(self.stock)
+        cache = {}
+        for _ in range(2):
+            supplement(self.source, self.stock, self.output, prepared_cache=cache)
+            with TTFont(self.output) as result:
+                glyphs = result.getGlyphSet(); name = result.getBestCmap()[65]
+                pen = BoundsPen(glyphs); glyphs[name].draw(pen)
+                self.assertEqual(result['VORG'].VOriginRecords.get(name, result['VORG'].defaultVertOriginY),
+                                 round(pen.bounds[3] + result['vmtx'].metrics[name][1]))
+
+    def test_collection_union_shares_outlines_while_preserving_regional_mapping_and_shaping(self):
+        fixture(self.source, source=True); fixture(self.stock, cff=True)
+        with TTFont(self.stock) as font:
+            font['CFF '] = _merged_cff_table([font])
+            font['post'].formatType = 3; font.recalcBBoxes = False; font.save(self.stock)
+        collection = TTCollection(); collection.fonts = [TTFont(self.stock), TTFont(self.stock)]
+        regional = collection.fonts[1]
+        replacement = regional.getBestCmap()[65]
+        for table in regional['cmap'].tables:
+            if table.isUnicode() and table.format != 14:
+                table.cmap[0x391] = replacement
+        path = self.root / 'regional.ttc'; collection.save(path)
+        for font in collection.fonts:
+            font.close()
+        plan = plan_stock_glyph_union(self.source, path, [0, 1], {65, 66, 48}, 400)
+        self.assertIsNotNone(plan)
+        outputs = []
+        for index in range(2):
+            baseline, result = self.root / f'independent-{index}.otf', self.root / f'union-{index}.otf'
+            supplement(self.source, path, baseline, stock_face_index=index, replace_codepoints={65, 66, 48})
+            report = supplement(self.source, path, result, stock_face_index=index,
+                replace_codepoints={65, 66, 48}, retained_stock_glyphs=plan)
+            self.assertEqual(report['sharedStockGlyphCount'], len(plan))
+            with TTFont(baseline) as reference, TTFont(result) as actual:
+                for cp, name in reference.getBestCmap().items():
+                    self.assertEqual(outline(reference, name), outline(actual, actual.getBestCmap()[cp]))
+                    self.assertEqual(reference['hmtx'].metrics[name], actual['hmtx'].metrics[actual.getBestCmap()[cp]])
+            for text in ('AB0ΑΒ', 'باَ'):
+                self.assertEqual(shape(baseline, text), shape(result, text))
+            outputs.append(result)
+        with TTFont(outputs[0]) as first, TTFont(outputs[1]) as second:
+            self.assertEqual(first.getTableData('CFF '), second.getTableData('CFF '))
+            self.assertNotEqual(first.getTableData('cmap'), second.getTableData('cmap'))
+        # Equal file names or glyph counts cannot prove metric compatibility.
+        changed = TTCollection(path)
+        name = changed.fonts[1].getGlyphOrder()[1]
+        width, lsb = changed.fonts[1]['hmtx'].metrics[name]
+        changed.fonts[1]['hmtx'].metrics[name] = (width + 1, lsb)
+        incompatible = self.root / 'different-metrics.ttc'; changed.save(incompatible)
+        for font in changed.fonts:
+            font.close()
+        self.assertIsNone(plan_stock_glyph_union(self.source, incompatible, [0, 1], {65, 66, 48}, 400))
+
     def test_exact_collection_face_is_used(self):
         fixture(self.source, source=True); fixture(self.stock)
         alternate = self.root / 'other.ttf'
@@ -529,7 +734,7 @@ HorizAxis.BaseScriptList latn romn 0;
     def test_cff_bias_boundaries_keep_largest_program_bytes_and_both_shapes(self):
         # A realistic CJK subset can cross either Type2 bias boundary. Global
         # pool order may change; stock-first glyph IDs and both outlines cannot.
-        for stock_count, source_count in ((1239, 1), (33899, 1), (1, 1240), (0, 2), (1, 1)):
+        for stock_count, source_count in ((1239, 1), (33899, 1), (1, 1240), (0, 2), (0, 1240), (1, 1)):
             with self.subTest(stock_count=stock_count, source_count=source_count):
                 fixture(self.stock, cff=True); fixture(self.source, source=True, cff=True)
                 fonts = [TTFont(self.stock), TTFont(self.source)]
@@ -558,7 +763,8 @@ HorizAxis.BaseScriptList latn romn 0;
                     stock_size = len(fonts[0].getGlyphOrder())
                     glyph_ids = [fonts[0].getGlyphID('A'), stock_size + fonts[1].getGlyphID('A')]
                     offsets, count = _cff_global_layout(fonts)
-                    unchanged = calcSubrBias(range(stock_count)) + offsets[0] == calcSubrBias(range(count))
+                    unchanged = (not stock_count or
+                        calcSubrBias(range(stock_count)) + offsets[0] == calcSubrBias(range(count)))
                     self.assertEqual(unchanged, stock_count != 33899)
                     raw = _merged_cff_table(fonts)
                     with TTFont(recalcBBoxes=False) as container:

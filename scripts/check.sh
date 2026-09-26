@@ -32,12 +32,14 @@ python3 -m py_compile \
   "$ROOT/common/font_import_engine.py" \
   "$ROOT/common/mix_inventory_weights.py" \
   "$ROOT/common/mix_stage_watchdog.py" \
+  "$ROOT/common/mix_output_cache.py" \
   "$ROOT/common/font_inventory.py" \
   "$ROOT/common/device_font_slot_trace.py" \
   "$ROOT/common/inventory_font_stage.py" \
   "$ROOT/common/inventory_font_metrics.py" \
   "$ROOT/common/inventory_stock_source.py" \
   "$ROOT/common/inventory_font_supplement.py" \
+  "$ROOT/common/font_charstring_compile.py" \
   "$ROOT/common/physical_font_load_verify.py" \
   "$ROOT/common/dynamic_font_route_patch.py" \
   "$ROOT/common/mix_source_manifest.py"
@@ -48,8 +50,8 @@ for file in \
   README.md LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
   common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py common/font_inventory.py common/device_font_slot_trace.py \
-  common/inventory_stock_source.py common/inventory_font_supplement.py common/physical_font_load_verify.py \
-  common/font_import_engine.py common/mix_inventory_weights.py common/mix_stage_watchdog.py \
+  common/inventory_stock_source.py common/inventory_font_supplement.py common/font_charstring_compile.py common/physical_font_load_verify.py \
+  common/font_import_engine.py common/mix_inventory_weights.py common/mix_stage_watchdog.py common/mix_output_cache.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
   common/multiweight_mix_task.sh common/mix_weight_mode.sh \
@@ -263,6 +265,7 @@ python3 "$ROOT/scripts/coverage_rom_preservation_test.py"
 python3 "$ROOT/scripts/inventory_font_stage_test.py"
 python3 "$ROOT/scripts/inventory_stock_source_test.py"
 python3 "$ROOT/scripts/inventory_font_supplement_test.py"
+python3 "$ROOT/scripts/font_charstring_compile_test.py"
 python3 "$ROOT/scripts/merger_serialization_integration_test.py"
 python3 "$ROOT/scripts/coverage_inventory_integration_test.py"
 python3 "$ROOT/scripts/inventory_stage_bridge_test.py"
@@ -358,6 +361,7 @@ sh "$ROOT/scripts/nested_mix_task_handoff_test.sh"
 sh "$ROOT/scripts/legacy_mix_34_progress_test.sh"
 sh "$ROOT/scripts/legacy_mix_finalize_race_test.sh"
 python3 "$ROOT/scripts/mix_precommit_integration_test.py"
+python3 "$ROOT/scripts/mix_output_cache_test.py"
 sh "$ROOT/scripts/stock_scan_lock_test.sh"
 
 test -x "$ROOT/common/python/bin/luoshu-python"

@@ -222,6 +222,136 @@ class InventoryStageTest(unittest.TestCase):
         with TTCollection(self.stage / 'system/fonts/Shared.ttc') as fonts:
             self.assertEqual([font['OS/2'].usWeightClass for font in fonts.fonts], [400, 700])
 
+    def test_identical_collection_aliases_share_one_verified_package(self):
+        source_font(self.source.parent / 'bold.ttf', 700)
+        target = self.slot(format='TTC', faces=[dict(self.slot(), faceIndex=0),
+                                              dict(self.slot(700), faceIndex=1)])
+        paths = ['/system/fonts/First.ttc', '/product/fonts/Second.ttc']
+        self.inventory({path: copy.deepcopy(target) for path in paths})
+        result = self.run_engine()
+        self.assertEqual((result['mapped'], result['generatedCollections']), (2, 1))
+        self.assertEqual(len({(self.stage / path[1:]).stat().st_ino for path in paths}), 1)
+        with TTCollection(self.stage / paths[0][1:]) as output:
+            self.assertEqual([font['OS/2'].usWeightClass for font in output.fonts], [400, 700])
+
+    def test_collection_cache_keeps_distinct_order_and_metric_contracts(self):
+        source_font(self.source.parent / 'bold.ttf', 700)
+        normal = [dict(self.slot(), faceIndex=0), dict(self.slot(700), faceIndex=1)]
+        reversed_faces = [dict(normal[1], faceIndex=0), dict(normal[0], faceIndex=1)]
+        distinct = copy.deepcopy(normal)
+        distinct[1]['metrics']['hhea']['ascent'] += 35
+        targets = {'/system/fonts/First.ttc': self.slot(format='TTC', faces=normal),
+                   '/system/fonts/Reversed.ttc': self.slot(format='TTC', faces=reversed_faces),
+                   '/product/fonts/Different.ttc': self.slot(format='TTC', faces=distinct)}
+        self.inventory(targets)
+        result = self.run_engine()
+        self.assertEqual((result['mapped'], result['generatedCollections']), (3, 3))
+        for logical, weights, ascents in [('/system/fonts/First.ttc', [400, 700], [950, 950]),
+                ('/system/fonts/Reversed.ttc', [700, 400], [950, 950]),
+                ('/product/fonts/Different.ttc', [400, 700], [950, 985])]:
+            with TTCollection(self.stage / logical[1:]) as output:
+                self.assertEqual([font['OS/2'].usWeightClass for font in output.fonts], weights)
+                self.assertEqual([font['hhea'].ascent for font in output.fonts], ascents)
+
+    def test_collection_alias_reuses_identical_retained_stock_tables(self):
+        target = self.slot(format='TTC', faces=[dict(self.slot(), faceIndex=0),
+                                              dict(self.slot(700), faceIndex=1)])
+        paths = ['/system/fonts/First.ttc', '/product/fonts/Second.ttc']
+        self.inventory({path: copy.deepcopy(target) for path in paths})
+        first, second = [self.root / 'stock' / path[1:] for path in paths]
+        shutil.copyfile(first, second)
+        inventory = self.module / 'config/device_font_inventory.json'
+        data = json.loads(inventory.read_text())
+        first_evidence = data['slots'][paths[0]]['stockSource']
+        data['slots'][paths[1]]['stockSource'] = first_evidence
+        for face in data['slots'][paths[1]]['faces']:
+            face['stockSource'] = first_evidence
+        inventory.write_text(json.dumps(data))
+        self.assertNotEqual(engine.identity(first), engine.identity(second))
+        result = self.run_engine()
+        self.assertEqual(result['generatedCollections'], 1)
+        self.assertEqual(len({(self.stage / path[1:]).stat().st_ino for path in paths}), 1)
+        with TTCollection(first, lazy=True) as original, TTCollection(self.stage / paths[1][1:], lazy=True) as output:
+            self.assertEqual(engine.face_table_fingerprint(original.fonts[1]),
+                             engine.face_table_fingerprint(output.fonts[1]))
+
+    def test_collection_table_cache_retains_different_regional_cmaps(self):
+        first = self.root / 'region-a.otf'
+        second = self.root / 'region-b.otf'
+        source_font(first, cff=True)
+        shutil.copyfile(first, second)
+        with TTFont(second, recalcTimestamp=False) as font:
+            for table in font['cmap'].tables:
+                if table.isUnicode():
+                    table.cmap = dict(table.cmap)
+                    table.cmap[0x4e00], table.cmap[0x4e01] = table.cmap[0x4e01], table.cmap[0x4e00]
+            font.save(second)
+        path = self.root / 'regional.ttc'
+        collection = TTCollection()
+        collection.fonts = [TTFont(first, lazy=True), TTFont(second, lazy=True)]
+        collection.save(path, shareTables=True); collection.close()
+        cache = {}
+        with TTCollection(path, lazy=True) as original:
+            self.assertEqual(original.fonts[0].reader.tables['CFF '].offset,
+                             original.fonts[1].reader.tables['CFF '].offset)
+            cached = [engine.face_table_fingerprint(font, cache, engine.identity(path))
+                      for font in original.fonts]
+            self.assertEqual(cached, [engine.face_table_fingerprint(font) for font in original.fonts])
+            self.assertNotEqual(cached[0]['cmap'], cached[1]['cmap'])
+            self.assertEqual(cached[0]['CFF '], cached[1]['CFF '])
+        preservation = {}
+        self.assertNotEqual(engine.preservation_digest(path, 0, preservation),
+                            engine.preservation_digest(path, 1, preservation))
+        cff_tables = [key for key in preservation if key[0] == 'preservation-table' and key[2] == 'CFF ']
+        self.assertEqual(len(cff_tables), 1)
+
+    def test_collection_union_shares_outlines_and_keeps_each_regional_cmap(self):
+        from inventory_font_supplement import _merged_cff_table
+        source_font(self.source, right=450)
+        prototype = self.slot(points=LATIN | HAN | {0x3a9, 0x416})
+        path = Path(prototype['_testStockFile'])
+        source_font(path, points=LATIN | HAN | {0x3a9, 0x416}, cff=True)
+        with TTFont(path, recalcBBoxes=False, recalcTimestamp=False) as font:
+            top = font['CFF '].cff[0]
+            pen = T2CharStringPen(600, None)
+            pen.moveTo((30, -80)); pen.lineTo((710, -80)); pen.lineTo((710, 760)); pen.closePath()
+            top.CharStrings['uni0416'] = pen.getCharString(private=top.Private,
+                                                        globalSubrs=top.GlobalSubrs)
+            font['CFF '] = _merged_cff_table([font])
+            font['post'].formatType = 3
+            font.save(path)
+        second_path = self.root / 'regional-second.font'
+        shutil.copyfile(path, second_path)
+        for index, filename in enumerate((path, second_path)):
+            with TTFont(filename, recalcBBoxes=False, recalcTimestamp=False) as font:
+                for table in font['cmap'].tables:
+                    if table.isUnicode():
+                        table.cmap = dict(table.cmap)
+                        alternate = table.cmap.pop(0x416)
+                        if index:
+                            table.cmap[0x3a9] = alternate
+                font.save(filename)
+        first = {**prototype, 'metrics': font_inventory._read_metrics(path)[1], 'faceIndex': 0}
+        second = {**prototype, '_testStockFile': str(second_path),
+                  'metrics': font_inventory._read_metrics(second_path)[1], 'faceIndex': 1}
+        logical = '/system/fonts/Regional.ttc'
+        self.inventory({logical: self.slot(format='TTC', faces=[first, second])})
+        with patch.object(engine, 'plan_stock_glyph_union', wraps=engine.plan_stock_glyph_union) as planner:
+            result = self.run_engine()
+        self.assertEqual(planner.call_count, 1)
+        self.assertEqual(result['sharedCollectionGlyphPlans'], 1)
+        with TTCollection(self.root / 'stock' / logical[1:]) as stock, \
+                TTCollection(self.stage / logical[1:]) as output, TTFont(self.source) as source:
+            self.assertNotEqual(drawn_glyph(stock.fonts[0], 0x3a9), drawn_glyph(stock.fonts[1], 0x3a9))
+            self.assertEqual(output.fonts[0].reader.tables['CFF '].offset,
+                             output.fonts[1].reader.tables['CFF '].offset)
+            for before, after in zip(stock.fonts, output.fonts):
+                self.assertEqual(set(before.getBestCmap()), set(after.getBestCmap()))
+                self.assertEqual(drawn_glyph(before, 0x3a9), drawn_glyph(after, 0x3a9))
+                self.assertEqual(drawn_glyph(source, 0x4e00), drawn_glyph(after, 0x4e00))
+        rows = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots']
+        self.assertTrue(all(row['sharedStockGlyphCount'] == 3 for row in rows))
+
     def test_incomplete_collection_replaces_available_face_and_preserves_stock_face(self):
         source_font(self.source, right=450)
         retained = dict(self.slot(700), faceIndex=1)
@@ -545,6 +675,11 @@ class InventoryStageTest(unittest.TestCase):
         self.assertEqual(sorted(row['completed'] for row in entries), [row['completed'] for row in entries])
         self.assertIn('supplement', {row['phase'] for row in entries})
         self.assertIn('metrics', {row['phase'] for row in entries})
+        self.assertEqual((entries[-1]['fileCompleted'], entries[-1]['fileTotal']), (2, 2))
+        self.assertTrue(all(row['fileTotal'] == 2 for row in entries if row['phase'] != 'source'))
+        self.assertTrue(all(row['fileCompleted'] <= row['fileTotal'] for row in entries))
+        self.assertTrue(all((row['faceIndex'], row['faceTotal']) == (0, 1)
+                            for row in entries if row['phase'] == 'supplement'))
         self.assertTrue((self.stage / '.luoshu-inventory-output-manifest.json').is_file())
 
     def mix_store(self, mode='fixed'):
@@ -695,6 +830,12 @@ class InventoryStageTest(unittest.TestCase):
         self.inventory({path: self.slot(repairRegressionExcluded=index >= 11)
                         for index, path in enumerate(paths)})
         self.run_engine()
+        # Test8 manifests predate the descriptive generation revision. Exact
+        # existing font/anchor hashes still authorize an incremental repair.
+        manifest_path = self.stage / '.luoshu-inventory-output-manifest.json'
+        manifest = json.loads(manifest_path.read_text())
+        manifest.pop('engineRevision', None)
+        manifest_path.write_text(json.dumps(manifest))
         before = {path: (self.stage / path[1:]).read_bytes() for path in paths}
         plan = self.root / 'repair.lst'; plan.write_text(paths[0] + '\n')
         original = engine.SourcePool.pick

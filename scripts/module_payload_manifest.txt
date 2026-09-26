@@ -60,10 +60,12 @@ common/inventory_font_stage.py
 common/inventory_font_metrics.py
 common/inventory_stock_source.py
 common/inventory_font_supplement.py
+common/font_charstring_compile.py
 common/inventory_font_stage.sh
 common/dynamic_font_route_bridge.sh
 common/dynamic_font_route_patch.py
 common/mix_source_manifest.py
+common/mix_output_cache.py
 common/mix_stage_watchdog.py
 common/mix_inventory_weights.py
 common/font_layout_diagnostic.py

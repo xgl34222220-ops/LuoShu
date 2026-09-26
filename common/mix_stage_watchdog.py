@@ -95,19 +95,36 @@ def publish(module: Path, request: str, task: str, work: dict, elapsed: int) -> 
     current_task = values(module / 'config/axes_task.conf').get('task')
     if current_task and current_task != task:
         return
-    names = {'selection': '核对原厂字形', 'supplement': '组合字体', 'metrics': '匹配系统度量',
+    names = {'selection': '核对原厂字形', 'supplement': '生成系统字形（2/3）', 'metrics': '装配系统字体（3/3）',
              'complete': '核验生成结果', 'stock': '核对原厂字形', 'prepare': '准备字体',
-             'source': '读取选中字体', 'inventory': '核对扫描清单'}
+             'source': '读取选中字体', 'inventory': '核对扫描清单（1/3）',
+             'cache': '复用已验证字体'}
     phase = names.get(str(work.get('phase', '')), str(work.get('phase') or '准备本机字体清单'))
     done, total = work.get('completed', 0), work.get('total', 0)
-    message = f'{phase}：{done}/{total}，已用 {elapsed} 秒' if total else f'{phase}，已用 {elapsed} 秒'
+    # completed/total counts internal work across three passes. It is not a
+    # count of files: showing 365/849 concealed that the device has 283 paths.
+    file_done, file_total = work.get('fileCompleted'), work.get('fileTotal')
+    valid_files = (type(file_done) is int and type(file_total) is int
+                   and 0 <= file_done <= file_total and file_total > 0)
+    if valid_files:
+        message = f'{phase}：已处理 {file_done}/{file_total} 个文件，已用 {elapsed} 秒'
+    elif total:
+        message = f'{phase}：{done}/{total} 步，已用 {elapsed} 秒'
+    else:
+        message = f'{phase}，已用 {elapsed} 秒'
     if work.get('path'):
         message += ' · ' + Path(str(work['path'])).name
+    face_index, face_total = work.get('faceIndex'), work.get('faceTotal')
+    if (type(face_index) is int and type(face_total) is int
+            and 0 <= face_index < face_total and face_total > 1):
+        message += f'（字体面 {face_index + 1}/{face_total}）'
     # No elapsed-time estimate pretending to be completion percentage.
     percent = 70 + (27 * done // total if total else 0)
     fields = {'state': 'running', 'task': task, 'requestId': request, 'message': message,
               'percent': str(percent), 'elapsed': str(elapsed), 'completed': str(done),
               'total': str(total), 'time': str(int(time.time()))}
+    if valid_files:
+        fields.update(fileCompleted=file_done, fileTotal=file_total)
     output = module / 'config/mix-finalize-state.conf'
     temporary = output.with_name(output.name + f'.tmp.{os.getpid()}')
     temporary.write_text(''.join(f'{key}={str(value).replace(chr(10), " ").replace(chr(13), " ")}\n'
@@ -131,7 +148,8 @@ def supervise(module: Path, request: str, task: str, progress_file: Path, comman
         while process.poll() is None:
             now = time.monotonic()
             work = progress(progress_file)
-            token = (work.get('completed'), work.get('total'), work.get('phase'), work.get('path'))
+            token = tuple(work.get(key) for key in ('completed', 'total', 'phase', 'path',
+                                                   'fileCompleted', 'faceIndex', 'faceTotal'))
             cpu = cpu_snapshot(process.pid)
             if token != last_progress or cpu != last_cpu:
                 last_work, last_progress, last_cpu = now, token, cpu

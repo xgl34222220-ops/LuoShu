@@ -8,12 +8,15 @@ glyphs prevent an unreplaced composite from inheriting a replacement outline.
 from __future__ import annotations
 
 import copy
+from array import array
 from contextlib import ExitStack
 import hashlib
 from io import BytesIO
+import math
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 
 from fontTools import subset
 from fontTools.cffLib import CharStrings, FDArrayIndex, FDSelect, FontDict, GlobalSubrsIndex
@@ -32,6 +35,7 @@ from fontTools.unicodedata import script
 from fontTools.varLib.instancer import instantiateVariableFont
 
 from font_slot_coverage import preferred_unicode_codepoints, unicode_codepoints
+from font_charstring_compile import compile_static_pen
 
 
 class SupplementError(RuntimeError):
@@ -101,6 +105,34 @@ def _consolidate_stock_cmap(font: TTFont) -> None:
         table.cmap = {cp: glyph for cp, glyph in mapping.items() if fmt == 12 or cp <= 0xFFFF}
         tables.append(table)
     font['cmap'].tables = tables
+    _split_default_uvs_runs(font)
+
+
+def _split_default_uvs_runs(font: TTFont) -> None:
+    """Keep format-14 default runs within its eight-bit additionalCount."""
+    mapping = font.getBestCmap() or {}
+    for table in font['cmap'].tables:
+        if table.format != 14:
+            continue
+        for selector, entries in table.uvsDict.items():
+            rewritten = []
+            previous, run = -2, 0
+            for cp, glyph in sorted(entries):
+                if glyph is None:
+                    run = run + 1 if cp == previous + 1 else 1
+                    if run > 256:
+                        # Both representations resolve to the exact same GID.
+                        # A non-default record breaks a too-long default run
+                        # that FontTools otherwise attempts to encode in u8.
+                        glyph = mapping.get(cp)
+                        if glyph is None:
+                            raise SupplementError('default variation sequence has no base glyph')
+                        run = 0
+                    previous = cp
+                else:
+                    previous, run = -2, 0
+                rewritten.append((cp, glyph))
+            table.uvsDict[selector] = rewritten
 
 
 def _uvs_pairs(font: TTFont) -> set[tuple[int, int]]:
@@ -144,6 +176,128 @@ def _limit_source_cmap(font: TTFont, replace: set[int]) -> None:
             table.cmap = {cp: glyph for cp, glyph in table.cmap.items() if cp in replace}
 
 
+def _add_selected_variants(font: TTFont, pairs: set[tuple[int, int]]) -> None:
+    """Keep each selector addressable using the selected font's base glyph."""
+    if not pairs:
+        return
+    mapping = font.getBestCmap() or {}
+    if any(cp not in mapping for _selector, cp in pairs):
+        raise SupplementError('selected variation fallback has no selected base glyph')
+    table = next((table for table in font['cmap'].tables if table.format == 14), None)
+    if table is None:
+        table = CmapSubtable.newSubtable(14)
+        table.platformID, table.platEncID, table.language = 0, 5, 0
+        table.cmap, table.uvsDict = {}, {}
+        font['cmap'].tables.append(table)
+    existing = _uvs_pairs(font)
+    for selector, cp in sorted(pairs - existing):
+        # An explicit reference resolves to exactly the selected default glyph.
+        # It also avoids FontTools' format-14 encoder overflow for a run of
+        # more than 256 consecutive default-UVS entries. The merger remaps this
+        # glyph name with the donor's other references.
+        table.uvsDict.setdefault(selector, []).append((cp, mapping[cp]))
+    for entries in table.uvsDict.values():
+        entries.sort()
+
+
+def _variant_ranges(pairs: set[tuple[int, int]]) -> dict[str, list[list[int]]]:
+    result = {}
+    for selector, cp in sorted(pairs):
+        ranges = result.setdefault(str(selector), [])
+        if ranges and ranges[-1][1] + 1 == cp:
+            ranges[-1][1] = cp
+        else:
+            ranges.append([cp, cp])
+    return result
+
+
+def _subset_stock(font, stock_points, replace, source_variants):
+    retained_variant_bases = _stock_variants(font, replace, source_variants)
+    for table in font['cmap'].tables:
+        if table.isUnicode() and table.format != 14:
+            table.cmap = {cp: glyph for cp, glyph in table.cmap.items() if cp not in replace}
+    _subset(font, (stock_points - replace) | retained_variant_bases, preserve_base=True)
+
+
+def plan_stock_glyph_union(source: Path, stock: Path, stock_face_indices,
+                          replace_codepoints: set[int], stock_weight: int | None = None):
+    """Plan one proven shared CID outline pool without sharing regional layout.
+
+    No glyph conversion is performed here. Only identical original CFF and
+    glyph-metric tables qualify; every face keeps its own cmap, UVS and shaping.
+    None means that this collection must use independent face generation.
+    """
+    source, stock = Path(source), Path(stock)
+    with _open_static(source, -1, preserve_axes=True) as donor:
+        if 'fvar' in donor:
+            return None
+        source_points = set(preferred_unicode_codepoints(donor))
+        replace = set(replace_codepoints) & source_points
+        if not replace:
+            return None
+        _subset(donor, replace)
+        donor_variants = _uvs_pairs(donor)
+        donor_count = len(donor.getGlyphOrder())
+        weight = int(donor['OS/2'].usWeightClass) if stock_weight is None else int(stock_weight)
+        union, original_order, signature = set(), None, None
+        for index in stock_face_indices:
+            with ExitStack() as faces:
+                font = faces.enter_context(_open_static(stock, int(index), weight))
+                if _outline(font) != 'CFF-CID':
+                    return None
+                actual_signature = tuple(hashlib.sha256(font.reader[tag]).digest() if tag in font else None
+                                         for tag in ('CFF ', 'hmtx', 'vmtx', 'VORG'))
+                order = tuple(font.getGlyphOrder())
+                if signature is None:
+                    signature, original_order = actual_signature, order
+                elif actual_signature != signature or order != original_order:
+                    return None
+                points = unicode_codepoints(font)
+                if not replace.issubset(points):
+                    return None
+                _consolidate_stock_cmap(font)
+                variants = _uvs_pairs(font)
+                _subset_stock(font, points, replace, donor_variants)
+                if len(font.getGlyphOrder()) + donor_count > 65535:
+                    fallback = {(selector, cp) for selector, cp in variants - donor_variants if cp in replace}
+                    if fallback:
+                        font = faces.enter_context(_open_static(stock, int(index), weight))
+                        _consolidate_stock_cmap(font)
+                        _subset_stock(font, points, replace, donor_variants | fallback)
+                union.update(font.getGlyphOrder())
+                if len(union) + donor_count > 65535:
+                    return None
+        return tuple(name for name in original_order or () if name in union) or None
+
+
+def _restore_stock_outline_union(font, full_stock, names):
+    """Add proven unencoded CID glyphs without expanding this face's GSUB."""
+    names = set(names)
+    current = set(font.getGlyphOrder())
+    full_order = full_stock.getGlyphOrder()
+    if (_outline(full_stock) != 'CFF-CID' or not current.issubset(names)
+            or not names.issubset(full_order)):
+        raise SupplementError('shared stock outline plan does not contain this face dependency closure')
+    order = [name for name in full_order if name in names]
+    # FontTools' CFF glyph-table subset keeps raw subroutine pools and selected
+    # FD indices. Deliberately do not run GSUB closure on the union: another
+    # region's extra glyph must not expand this region's layout repertoire.
+    cff = full_stock['CFF ']
+    cff.subset_glyphs(SimpleNamespace(glyphs=names, glyphs_emptied=set(),
+                                    options=SimpleNamespace(retain_gids=False)))
+    font['CFF '] = cff
+    for tag in ('hmtx', 'vmtx'):
+        if tag in full_stock:
+            metrics = full_stock[tag].metrics
+            font[tag].metrics = {name: metrics[name] for name in order}
+    if 'VORG' in full_stock:
+        font['VORG'] = copy.deepcopy(full_stock['VORG'])
+        font['VORG'].VOriginRecords = {name: value for name, value in font['VORG'].VOriginRecords.items()
+                                      if name in names}
+    font.setGlyphOrder(order)
+    font['maxp'].numGlyphs = len(order)
+
+
 def _subset(font: TTFont, points: set[int], *, preserve_base: bool = False) -> None:
     options = subset.Options()
     options.layout_features = ['*']
@@ -184,7 +338,8 @@ def _subset(font: TTFont, points: set[int], *, preserve_base: bool = False) -> N
     selectors = {selector for selector, cp in _uvs_pairs(font) if cp in points}
     worker.populate(unicodes=points | selectors, glyphs=base_glyphs)
     cff = font.get('CFF ')
-    raw_cid = cff is not None and hasattr(cff.cff[0], 'FDSelect')
+    raw_cid = cff is not None and (hasattr(cff.cff[0], 'FDSelect')
+        or getattr(font, '_luoshu_cff_closed_outlines', False))
     if raw_cid:
         # CID Type2 cannot use name-based seac components. Its outline closure
         # therefore needs no charstring interpreter. Deleting glyphs changes
@@ -231,7 +386,42 @@ def _outline(font: TTFont) -> str:
     raise SupplementError('font has no supported outline table')
 
 
-def _mergeable_cff(font: TTFont) -> int:
+def _drop_truetype_outlines(font: TTFont) -> None:
+    for tag in ('glyf', 'loca', 'CFF ', 'CFF2', 'fpgm', 'prep', 'cvt ', 'gasp',
+                'VORG', 'hdmx', 'LTSH', 'VDMX'):
+        if tag in font:
+            del font[tag]
+
+
+class _BoundedT2Pen(T2CharStringPen):
+    """Measure the converted curves during their existing drawing pass."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bounds_pen = BoundsPen(None)
+
+    def _moveTo(self, point):
+        self.bounds_pen.moveTo(point)
+        super()._moveTo(point)
+
+    def _lineTo(self, point):
+        self.bounds_pen.lineTo(point)
+        super()._lineTo(point)
+
+    def _curveToOne(self, first, second, last):
+        self.bounds_pen.curveTo(first, second, last)
+        super()._curveToOne(first, second, last)
+
+    def _closePath(self):
+        self.bounds_pen.closePath()
+        super()._closePath()
+
+    def _endPath(self):
+        self.bounds_pen.endPath()
+        super()._endPath()
+
+
+def _mergeable_cff(font: TTFont, *, outline_cache=None, outline_key=None) -> int:
     """Convert only selected TTF/CFF2 glyphs; existing CFF programs stay intact."""
     kind = _outline(font)
     if kind == 'CFF-CID':
@@ -262,20 +452,55 @@ def _mergeable_cff(font: TTFont) -> int:
             glyphs[name].draw(pen)
             top.CharStrings[name] = pen.getCharString(private=char.private, globalSubrs=char.globalSubrs)
             converted += 1
+        font._luoshu_cff_closed_outlines = True
         return converted
+    # Conversion depends on the source outline and its scale, never on the
+    # target's cmap, regional layout or inherited vertical contract. Reusing a
+    # whole prepared donor conflates those concerns and repeats this expensive
+    # pass for each regional TTC face with a different character repertoire.
+    entry = (outline_cache.get('outline_entries', {}).get(outline_key)
+             if outline_cache is not None and outline_key is not None else None)
+    if entry is not None:
+        _drop_truetype_outlines(font)
+        table = newTable('CFF ')
+        table.decompile(entry['data'], font)
+        font['CFF '] = table
+        font.sfntVersion = 'OTTO'
+        FontBuilder(font=font).setupMaxp()
+        font['post'].formatType = 3.0
+        font._luoshu_cff_ymax = entry['ymax']
+        font._luoshu_encoded_cff_size = len(entry['data'])
+        font._luoshu_outline_cache_hit = True
+        font._luoshu_cff_closed_outlines = True
+        return entry['converted']
     glyphs = font.getGlyphSet()
     order = font.getGlyphOrder()
     strings = {}
+    measured_ymax = array('d') if 'vmtx' in font else None
     for name in order:
         glyph = font['glyf'].glyphs[name] if kind == 'TTF' else None
         raw_glyph = getattr(glyph, 'data', None)
-        pen = T2CharStringPen(font['hmtx'].metrics[name][0], glyphs, roundTolerance=0)
+        pen_class = _BoundedT2Pen if measured_ymax is not None else T2CharStringPen
+        pen = pen_class(font['hmtx'].metrics[name][0], glyphs, roundTolerance=0)
         glyphs[name].draw(pen)
-        charstring = pen.getCharString()
+        compiled, token_count = compile_static_pen(pen)
+        charstring = T2CharString(bytecode=compiled)
+        if measured_ymax is not None:
+            bounds = pen.bounds_pen.bounds
+            ymax = bounds[3] if bounds else 0
+            # Type2 serializes relative real operands as 16.16 numbers. Their
+            # accumulated coordinate error is bounded by half an ulp per
+            # operand; use a full ulp per token as a conservative bound. A
+            # Bezier curve stays within its control points' error envelope.
+            # Only a result near a half-integer can alter VORG's integer
+            # rounding after adding an integer vmtx bearing. Those rare
+            # boundaries are measured from the exact compiled CFF below.
+            error = token_count / 65536.0 + 1e-9
+            near_boundary = abs(ymax - (math.floor(ymax) + 0.5)) <= error
+            measured_ymax.append(float('nan') if near_boundary else ymax)
         # Retaining 50k Python command lists alongside expanded TrueType
         # coordinates can exceed a gigabyte. The exact serialized Type2 bytes
         # are all subsequent stages need, so finish each program immediately.
-        charstring.compile()
         strings[name] = charstring
         if glyph is not None:
             if raw_glyph is not None:
@@ -283,14 +508,34 @@ def _mergeable_cff(font: TTFont) -> int:
                 glyph.data = raw_glyph
             else:
                 glyph.compact(font['glyf'], recalcBBoxes=False)
-    for tag in ('glyf', 'loca', 'CFF ', 'CFF2', 'fpgm', 'prep', 'cvt ', 'gasp',
-                'VORG', 'hdmx', 'LTSH', 'VDMX'):
-        if tag in font:
-            del font[tag]
+    _drop_truetype_outlines(font)
     builder = FontBuilder(font=font)
     builder.setupCFF('LuoShuTextSubset', {}, strings, {})
     builder.setupMaxp()
     font['post'].formatType = 3.0
+    font._luoshu_cff_closed_outlines = True
+    if measured_ymax is not None:
+        font._luoshu_cff_ymax = measured_ymax
+    if outline_cache is not None and outline_key is not None:
+        data = font.getTableData('CFF ')
+        font._luoshu_encoded_cff_size = len(data)
+        size = len(data) + len(order) * 8
+        limit = 64 * 1024 * 1024
+        if size <= limit:
+            entries = outline_cache.setdefault('outline_entries', {})
+            total = sum(item['size'] for item in entries.values())
+            while entries and total + size > limit:
+                total -= entries.pop(next(iter(entries)))['size']
+            prepared = outline_cache.get('entries', {})
+            prepared_size = sum(len(item[0]) for item in prepared.values())
+            while prepared and total + size + prepared_size > limit:
+                prepared_size -= len(prepared.pop(next(iter(prepared)))[0])
+            ymax = measured_ymax if measured_ymax is not None else array('d')
+            entries[outline_key] = {'data': data, 'size': size, 'converted': len(order), 'ymax': ymax}
+            # Store outline bounds independently of target vertical bearings.
+            # The first VORG pass fills this array; later regional faces only
+            # add their own exact inherited vmtx bearings to these same bounds.
+            font._luoshu_cff_ymax = ymax
     return len(order)
 
 
@@ -304,7 +549,12 @@ def _cff_global_layout(fonts: list[TTFont]) -> tuple[list[int], int]:
     """
     counts = [len(font['CFF '].cff.GlobalSubrs) for font in fonts]
     total = sum(counts)
-    anchor = max(range(len(fonts)), key=lambda index: len(fonts[index].getGlyphOrder()))
+    # A converted TrueType donor has no global subroutines at all. Choosing it
+    # as anchor only adds padding and forces every retained stock charstring to
+    # be decoded and rebased. Preserve the largest program that actually calls
+    # this pool; a font with an empty pool has no operands to protect.
+    candidates = [index for index, count in enumerate(counts) if count]
+    anchor = max(candidates or range(len(fonts)), key=lambda index: len(fonts[index].getGlyphOrder()))
     old_bias = calcSubrBias(fonts[anchor]['CFF '].cff.GlobalSubrs)
     for bias in (107, 1131, 32768):
         padding = bias - old_bias
@@ -434,12 +684,22 @@ def _merged_vorg(fonts: list[TTFont], merged_names: list[str]):
         else:
             glyphs = font.getGlyphSet()
             values = {}
-            for name in order:
+            cached_ymax = getattr(font, '_luoshu_cff_ymax', None)
+            bounds_ready = cached_ymax is not None and len(cached_ymax) == len(order)
+            for index, name in enumerate(order):
+                if bounds_ready and not math.isnan(cached_ymax[index]):
+                    values[name] = int(round(cached_ymax[index] + font['vmtx'].metrics[name][1]))
+                    continue
                 charstring = font['CFF '].cff[0].CharStrings[name] if 'CFF ' in font else None
                 bytecode = charstring.bytecode if charstring is not None else None
                 pen = BoundsPen(glyphs)
                 glyphs[name].draw(pen)
                 ymax = pen.bounds[3] if pen.bounds else 0
+                if cached_ymax is not None:
+                    if bounds_ready:
+                        cached_ymax[index] = ymax
+                    else:
+                        cached_ymax.append(ymax)
                 values[name] = int(round(ymax + font['vmtx'].metrics[name][1]))
                 if bytecode is not None:
                     # Bounds extraction expands Type2 tokens too. Release that
@@ -523,6 +783,13 @@ class _SupplementMerger(Merger):
         self.required_features = {}
 
     def _openFonts(self, files):
+        # Merger opens each font once to copy its glyph names, then reopens it
+        # for remapped tables. Keeping both passes retains another complete
+        # large CFF buffer even though the first pass will never be read again.
+        for font in self._opened_inputs:
+            font.close()
+            font.tables.clear()
+        self._opened_inputs.clear()
         fonts = super()._openFonts(files)
         self._opened_inputs.extend(fonts)
         return fonts
@@ -592,7 +859,12 @@ class _SupplementMerger(Merger):
     def close_inputs(self):
         for font in self._opened_inputs:
             font.close()
+            font.tables.clear()
         self._opened_inputs.clear()
+        self.retained_tables.clear()
+        self.variation_tables.clear()
+        self.required_features.clear()
+        self.source_kern = None
 
 
 def _prepared_source_key(source, index, donor, stock, replace, upem, use_cff):
@@ -607,32 +879,51 @@ def _prepared_source_key(source, index, donor, stock, replace, upem, use_cff):
         else:
             # Horizontal-only sources inherit these exact target metrics. They
             # cannot reuse a donor prepared for a different vertical contract.
-            vertical = hashlib.sha256(stock.getTableData('vhea') + stock.getTableData('vmtx')).digest()
+            vertical = hashlib.sha256(stock.getTableData('vhea') + stock.getTableData('vmtx')
+                                      + stock.getTableData('cmap')).digest()
     return (digest.digest(), index, frozenset(replace), upem, use_cff, vertical)
 
 
-def _cache_prepared_source(cache, key, font, converted):
+def _cache_prepared_source(cache, key, font, converted, *, subset_complete=False,
+                           source_cmap=None):
     if cache is None:
         return
-    stream = BytesIO()
-    font.save(stream, reorderTables=False)
-    data = stream.getvalue()
     limit = 64 * 1024 * 1024
-    if len(data) > limit:
+    outline_size = sum(entry['size'] for entry in cache.get('outline_entries', {}).values())
+    # A prepared font cannot be smaller than its already-encoded CFF table.
+    # Avoid serializing 60+ MiB twice per regional face just to reject that
+    # cache entry once the shared outline cache has consumed the same budget.
+    if getattr(font, '_luoshu_encoded_cff_size', 0) + outline_size > limit:
+        return
+    stream = BytesIO()
+    augmented_cmap = None
+    if source_cmap is not None:
+        augmented_cmap = font['cmap']
+        font['cmap'] = newTable('cmap')
+        font['cmap'].decompile(source_cmap, font)
+    try:
+        _split_default_uvs_runs(font)
+        font.save(stream, reorderTables=False)
+    finally:
+        if augmented_cmap is not None:
+            font['cmap'] = augmented_cmap
+    data = stream.getvalue()
+    if len(data) + outline_size > limit:
         return
     entries = cache.setdefault('entries', {})
     total = sum(len(entry[0]) for entry in entries.values())
-    while entries and total + len(data) > limit:
+    while entries and total + len(data) + outline_size > limit:
         oldest = next(iter(entries))
         total -= len(entries.pop(oldest)[0])
-    entries[key] = (data, converted)
+    entries[key] = (data, converted, subset_complete)
 
 
 def supplement(source: Path, stock: Path, output: Path, *, source_face_index: int = -1,
                stock_face_index: int = -1,
                replace_codepoints: set[int] | None = None,
                stock_weight: int | None = None,
-               prepared_cache: dict | None = None) -> dict:
+               prepared_cache: dict | None = None,
+               retained_stock_glyphs=None) -> dict:
     source, stock, output = Path(source), Path(stock), Path(output)
     if output.resolve() in {source.resolve(), stock.resolve()}:
         raise SupplementError('supplement output cannot overwrite either original font')
@@ -667,37 +958,86 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
             # requested repertoire. Re-closing its 50k glyph GSUB graph needlessly
             # costs tens of seconds. Its full graph is already valid as-is.
             donor_subset_skipped = len(unicode_codepoints(donor) - replace) <= len(source_points) // 20
+            source_subset_complete = False
             if cached is not None:
                 stream = BytesIO(cached[0])
                 stream.name = '<luoshu-prepared-source>'
                 donor = inputs.enter_context(TTFont(stream, lazy=True,
                                                    recalcBBoxes=False, recalcTimestamp=False))
+                source_subset_complete = bool(len(cached) > 2 and cached[2])
+                if 'CFF ' in donor:
+                    # Every prepared CFF has passed _mergeable_cff, so all
+                    # name-based seac components have already been expanded.
+                    donor._luoshu_cff_closed_outlines = True
             else:
                 if donor_subset_skipped:
                     _limit_source_cmap(donor, replace)
                 else:
                     _subset(donor, replace)
+                    source_subset_complete = True
                 if int(donor['head'].unitsPerEm) != upem:
                     scale_upem(donor, upem)
                 _match_vertical_contract(donor, original)
+            if retained_stock_glyphs is not None and not source_subset_complete:
+                # The collection planner uses one complete donor closure for
+                # every face, so their common CFF table has identical GIDs.
+                _subset(donor, replace)
+                source_subset_complete = True
             stock_variants = _uvs_pairs(original)
-            retained_variant_bases = _stock_variants(original, replace, _uvs_pairs(donor))
-            _subset(original, retain | retained_variant_bases, preserve_base=True)
-            for table in original['cmap'].tables:
-                if table.isUnicode() and table.format != 14:
-                    table.cmap = {cp: glyph for cp, glyph in table.cmap.items() if cp not in replace}
-            if donor_subset_skipped and len(donor.getGlyphOrder()) + len(original.getGlyphOrder()) > 65535:
+            _subset_stock(original, stock_points, replace, _uvs_pairs(donor))
+            if (donor_subset_skipped and not source_subset_complete
+                    and len(donor.getGlyphOrder()) + len(original.getGlyphOrder()) > 65535):
                 # Unencoded unused source glyphs might otherwise consume the
                 # remaining IDs; take the normal closure before refusing it.
+                prior_order = tuple(donor.getGlyphOrder())
                 _subset(donor, replace)
+                source_subset_complete = True
+                # No removed glyph means its complete outline dependency graph
+                # is still the original graph; cmap/layout pruning does not
+                # prevent reusing the independently converted outlines.
+                donor_subset_skipped = tuple(donor.getGlyphOrder()) == prior_order
+            selected_variant_fallbacks = set()
+            if len(donor.getGlyphOrder()) + len(original.getGlyphOrder()) > 65535:
+                # A regional stock CJK face can retain tens of thousands of
+                # replaced glyphs solely for variation selectors absent from
+                # the user's source. At the glyph-ID capacity limit, keep all
+                # selector pairs but resolve those selected characters to the
+                # selected base glyph. Non-selected characters and their UVS
+                # remain exact stock glyphs. This policy is reported explicitly.
+                donor_variants = _uvs_pairs(donor)
+                selected_variant_fallbacks = {(selector, cp)
+                    for selector, cp in stock_variants - donor_variants if cp in replace}
+                if selected_variant_fallbacks:
+                    original.close()
+                    original = inputs.enter_context(_open_static(
+                        stock, stock_face_index, requested_stock_weight))
+                    _consolidate_stock_cmap(original)
+                    _subset_stock(original, stock_points, replace, donor_variants | selected_variant_fallbacks)
+            if retained_stock_glyphs is not None:
+                if len(retained_stock_glyphs) + len(donor.getGlyphOrder()) > 65535:
+                    raise UnsupportedSupplementError('shared collection outline pool exceeds the OpenType glyph limit')
+                full_stock = inputs.enter_context(_open_static(stock, stock_face_index, requested_stock_weight))
+                _restore_stock_outline_union(original, full_stock, retained_stock_glyphs)
             converted_source = converted_stock = 0
             if use_cff:
                 converted_stock = _mergeable_cff(original)
-                converted_source = cached[1] if cached is not None else _mergeable_cff(donor)
+                # A source hash, face, scale and exact subset contract fully
+                # determine its outline graph. Target cmap and vertical tables
+                # do not: regional TTC faces must not repeat this conversion.
+                outline_key = ((cache_key[0], source_face_index, upem, tuple(donor.getGlyphOrder()),
+                                frozenset(replace) if source_subset_complete else None)
+                               if cache_key is not None else None)
+                converted_source = cached[1] if cached is not None else _mergeable_cff(
+                    donor, outline_cache=prepared_cache, outline_key=outline_key)
             if cached is None and prepared_cache is not None:
-                _cache_prepared_source(prepared_cache, cache_key, donor, converted_source)
+                _cache_prepared_source(prepared_cache, cache_key, donor, converted_source,
+                                       subset_complete=source_subset_complete)
             if len(donor.getGlyphOrder()) + len(original.getGlyphOrder()) > 65535:
                 raise UnsupportedSupplementError('preserving both layout closures exceeds the OpenType glyph limit')
+            # Keep regional selector additions out of both reusable donor
+            # caches. They belong to this target face's final cmap only.
+            source_cmap = donor.getTableData('cmap') if selected_variant_fallbacks else None
+            _add_selected_variants(donor, selected_variant_fallbacks)
             options = MergeOptions()
             # MATH/BASE/kern have no complete merger. Preserve their parsed
             # references from the merger's actual serialized glyph-ID mapping.
@@ -710,6 +1050,8 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
             with tempfile.TemporaryDirectory(prefix='.font-supplement-', dir=output.parent) as directory:
                 directory = Path(directory)
                 stock_file, source_file = directory / 'stock.otf', directory / 'source.otf'
+                _split_default_uvs_runs(original)
+                _split_default_uvs_runs(donor)
                 original.save(stock_file, reorderTables=False)
                 donor.save(source_file, reorderTables=False)
                 merger = _SupplementMerger(options, variable_source=variable_source)
@@ -736,7 +1078,8 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                             # CFF pool merging its programs may be rebased.
                             # Cache exact measured origins so other stock
                             # contracts do not redraw the same 50k outlines.
-                            _cache_prepared_source(prepared_cache, cache_key, donor, converted_source)
+                            _cache_prepared_source(prepared_cache, cache_key, donor, converted_source,
+                                subset_complete=source_subset_complete, source_cmap=source_cmap)
                         merged['CFF '] = _merged_cff_table([original, donor])
                         merged['post'].formatType = 3.0
                     source_kern = merger.source_kern
@@ -755,10 +1098,12 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                     merged.recalcBBoxes = False
                     merged.recalcTimestamp = False
                     temporary = directory / 'complete.otf'
+                    _split_default_uvs_runs(merged)
                     merged.save(temporary, reorderTables=False)
                 finally:
                     if merged is not None:
                         merged.close()
+                        merged.tables.clear()
                     merger.close_inputs()
                 with TTFont(temporary, lazy=True, recalcBBoxes=False, recalcTimestamp=False) as checked:
                     actual_points = set(preferred_unicode_codepoints(checked))
@@ -779,6 +1124,11 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                     'convertedSourceGlyphs': converted_source,
                     'convertedStockGlyphs': converted_stock, 'unitsPerEm': upem,
                     'preparedSourceCacheHit': cached is not None,
+                    'outlineSourceCacheHit': bool(getattr(donor, '_luoshu_outline_cache_hit', False)),
+                    'selectedVariantFallbacks': len(selected_variant_fallbacks),
+                    'selectedVariantFallbackRanges': _variant_ranges(selected_variant_fallbacks),
+                    'selectedVariantFallbackSource': ('selected-base-glyph' if selected_variant_fallbacks else None),
+                    'sharedStockGlyphCount': len(retained_stock_glyphs) if retained_stock_glyphs is not None else None,
                     'sourceWeight': source_weight, 'retainsStockLayout': True,
                     'stockWeight': requested_stock_weight,
                     'preservedAxes': preserved_axes,
