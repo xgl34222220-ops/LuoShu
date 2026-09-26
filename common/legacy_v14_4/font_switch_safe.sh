@@ -39,7 +39,7 @@ SWITCH_LOCK="$MODDIR/.font_switch.lock"
 PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
 SWITCH_CACHE_ROOT="$CONFIG_DIR/safe-switch-cache"
 SWITCH_VALIDATION_CACHE_ROOT="$CONFIG_DIR/safe-switch-validation"
-SWITCH_CACHE_SCHEMA="safe-switch-metrics-v3-coverage"
+SWITCH_CACHE_SCHEMA="safe-switch-metrics-v4-all-roots"
 SWITCH_CACHE_MAX_ENTRIES="${LUOSHU_SWITCH_CACHE_MAX_ENTRIES:-3}"
 SWITCH_CACHE_MAX_KB="${LUOSHU_SWITCH_CACHE_MAX_KB:-786432}"
 case "$SWITCH_CACHE_MAX_ENTRIES" in ''|*[!0-9]*) SWITCH_CACHE_MAX_ENTRIES=3 ;; esac
@@ -166,6 +166,18 @@ safe_partition_list() {
     luoshu_payload_partitions "$MODDIR"
 }
 
+safe_font_roots() {
+    for _sfr_part in $(safe_partition_list); do
+        printf '%s/fonts\n' "$_sfr_part"
+    done
+    # Use the same scanner manifest as staging and mounting. A cache containing
+    # only /<partition>/fonts loses OEM trees after the next cache hit.
+    luoshu_payload_nested_font_roots "$MODDIR" | while IFS='|' read -r _sfr_part _sfr_rel; do
+        [ -n "$_sfr_part" ] && [ -n "$_sfr_rel" ] || continue
+        printf '%s/%s\n' "$_sfr_part" "$_sfr_rel"
+    done
+}
+
 safe_validation_key() {
     _svk_file="$1"
     _svk_identity=$(safe_source_identity "$_svk_file") || return 1
@@ -237,19 +249,22 @@ safe_switch_cache_restore() {
     [ "$(read_state_value "$_scr_conf" mapperIdentity)" = "${SAFE_STAGE_ENGINE:-$(safe_mapper_identity)}" ] || return 1
 
     _scr_restored=0
-    for _scr_part in $(safe_partition_list); do
-        _scr_src="$_scr_root/tree/$_scr_part/fonts"
+    while IFS= read -r _scr_rel; do
+        _scr_src="$_scr_root/tree/$_scr_rel"
         [ -d "$_scr_src" ] || continue
-        mkdir -p "$STAGE_PAYLOAD/$_scr_part" 2>/dev/null || return 1
-        rm -rf "$STAGE_PAYLOAD/$_scr_part/fonts" 2>/dev/null || true
-        if ! cp -al "$_scr_src" "$STAGE_PAYLOAD/$_scr_part/fonts" 2>/dev/null; then
+        _scr_dest="$STAGE_PAYLOAD/$_scr_rel"
+        mkdir -p "${_scr_dest%/*}" 2>/dev/null || return 1
+        rm -rf "$_scr_dest" 2>/dev/null || return 1
+        if ! cp -al "$_scr_src" "$_scr_dest" 2>/dev/null; then
             # cp can leave a partial destination behind. Remove it before the
             # fallback, otherwise cp may create fonts/fonts and retain stale data.
-            rm -rf "$STAGE_PAYLOAD/$_scr_part/fonts" 2>/dev/null || return 1
-            cp -af "$_scr_src" "$STAGE_PAYLOAD/$_scr_part/fonts" 2>/dev/null || return 1
+            rm -rf "$_scr_dest" 2>/dev/null || return 1
+            cp -af "$_scr_src" "$_scr_dest" 2>/dev/null || return 1
         fi
         _scr_restored=$((_scr_restored + 1))
-    done
+    done <<EOF_SAFE_CACHE_ROOTS
+$(safe_font_roots)
+EOF_SAFE_CACHE_ROOTS
     [ "$_scr_restored" -gt 0 ] || return 1
     for _scr_meta in .luoshu-metrics-report.json .luoshu-metrics-covered.lst \
         .luoshu-coverage-remediation.conf .luoshu-coverage-preserved.tsv; do
@@ -305,20 +320,23 @@ safe_switch_cache_store() {
     rm -rf "$_scs_stage" 2>/dev/null || true
     mkdir -p "$_scs_stage/tree" 2>/dev/null || return 1
     _scs_saved=0
-    for _scs_part in $(safe_partition_list); do
-        _scs_src="$STAGE_PAYLOAD/$_scs_part/fonts"
+    while IFS= read -r _scs_rel; do
+        _scs_src="$STAGE_PAYLOAD/$_scs_rel"
         [ -d "$_scs_src" ] || continue
         find "$_scs_src" -type f -print -quit 2>/dev/null | grep -q . || continue
-        mkdir -p "$_scs_stage/tree/$_scs_part" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
-        if ! cp -al "$_scs_src" "$_scs_stage/tree/$_scs_part/fonts" 2>/dev/null; then
-            rm -rf "$_scs_stage/tree/$_scs_part/fonts" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
-            cp -af "$_scs_src" "$_scs_stage/tree/$_scs_part/fonts" 2>/dev/null || {
+        _scs_dest="$_scs_stage/tree/$_scs_rel"
+        mkdir -p "${_scs_dest%/*}" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
+        if ! cp -al "$_scs_src" "$_scs_dest" 2>/dev/null; then
+            rm -rf "$_scs_dest" 2>/dev/null || { rm -rf "$_scs_stage"; return 1; }
+            cp -af "$_scs_src" "$_scs_dest" 2>/dev/null || {
                 rm -rf "$_scs_stage" 2>/dev/null || true
                 return 1
             }
         fi
         _scs_saved=$((_scs_saved + 1))
-    done
+    done <<EOF_SAFE_CACHE_ROOTS
+$(safe_font_roots)
+EOF_SAFE_CACHE_ROOTS
     [ "$_scs_saved" -gt 0 ] || { rm -rf "$_scs_stage" 2>/dev/null || true; return 1; }
     for _scs_meta in .luoshu-metrics-report.json .luoshu-metrics-covered.lst \
         .luoshu-coverage-remediation.conf .luoshu-coverage-preserved.tsv; do
@@ -547,9 +565,16 @@ stage_clone_live() {
 }
 
 stage_clear_text_payload() {
-    rm -f "$STAGE_PAYLOAD/.luoshu-metrics-report.json" 2>/dev/null || return 1
+    rm -f "$STAGE_PAYLOAD/.luoshu-metrics-report.json" \
+          "$STAGE_PAYLOAD/.luoshu-metrics-covered.lst" \
+          "$STAGE_PAYLOAD/.luoshu-coverage-preserved.tsv" \
+          "$STAGE_PAYLOAD/.luoshu-coverage-remediation.conf" 2>/dev/null || return 1
+    while IFS= read -r _sctp_rel; do
+        rm -rf "$STAGE_PAYLOAD/$_sctp_rel" 2>/dev/null || return 1
+    done <<EOF_SAFE_CLEAR_ROOTS
+$(safe_font_roots)
+EOF_SAFE_CLEAR_ROOTS
     for _part in $(safe_partition_list); do
-        rm -rf "$STAGE_PAYLOAD/$_part/fonts" 2>/dev/null || true
         _etc="$STAGE_PAYLOAD/$_part/etc"
         [ -d "$_etc" ] || continue
         rm -f "$_etc/fonts.xml" "$_etc/font_fallback.xml" \
@@ -826,7 +851,7 @@ switch_font() {
         SYSTEM_FONTS_DIR="$STAGE_PAYLOAD/system/fonts"
         export PAYLOAD_ROOT SYSTEM_FONTS_DIR
         _cache_restored=false
-        if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" != 1 ] && safe_switch_cache_restore "$_source" "$_font"; then
+        if safe_switch_cache_restore "$_source" "$_font"; then
             _cache_restored=true
             progress 80 '已复用本机字体对齐缓存'
         else
@@ -880,7 +905,7 @@ switch_font() {
         fi
         progress 86 '正在校验下一启动字体负载'
         stage_verify "$_font" || { safe_error '新字体负载校验失败，当前启动字体未被改动'; return 1; }
-        if [ "$_cache_restored" != true ]; then
+        if [ "$_cache_restored" != true ] || [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
             progress 90 '正在保存已校验的本机字体对齐缓存'
             safe_switch_cache_store "$_source" "$_font" >/dev/null 2>&1 || true
         fi

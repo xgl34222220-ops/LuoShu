@@ -49,6 +49,22 @@ grep -q '^requestId=request-a$' "$MODULE/config/font-payload-next.conf"
 grep -q '^compositeHash=composite-a$' "$MODULE/config/font-payload-next.conf"
 test ! -e "$MODULE/.mix-stage-finalize.lock"
 
+# The monitor can commit and remove stage metadata before the outer weighted
+# worker reaches prepare-finalize. The worker's inherited request identity must
+# recognize its own completed tree, without accepting an unrelated/old task.
+test ! -e "$MODULE/config/mix-stage-next.conf"
+MODDIR="$MODULE" LUOSHU_MIX_REQUEST_ID=request-a sh "$ROUTER" prepare-finalize > "$TMP/prepare-after-commit.out" 2>&1
+grep -q '"status":"ok"' "$TMP/prepare-after-commit.out"
+if MODDIR="$MODULE" LUOSHU_MIX_REQUEST_ID=request-other sh "$ROUTER" prepare-finalize > "$TMP/prepare-wrong-request.out" 2>&1; then
+    echo 'A different request reused the already committed mix' >&2
+    exit 1
+fi
+if MODDIR="$MODULE" LUOSHU_MIX_REQUEST_ID= sh "$ROUTER" prepare-finalize > "$TMP/prepare-no-request.out" 2>&1; then
+    echo 'A caller without generation identity reused the already committed mix' >&2
+    exit 1
+fi
+grep -q '^requestId=request-a$' "$MODULE/config/font-payload-next.conf"
+
 # Recover the narrow interrupted state: directory rename completed, state write
 # did not. The preserved stage metadata is sufficient to finish without rebuild.
 rm -f "$MODULE/config/font-payload-next.conf"

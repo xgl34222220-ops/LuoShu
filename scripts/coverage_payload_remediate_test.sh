@@ -141,6 +141,19 @@ grep -q '^matched=2$' "$MIX/.luoshu-coverage-remediation.conf"
 grep -q '^added=3$' "$MIX/.luoshu-coverage-remediation.conf"
 grep -q '^preserved=2$' "$MIX/.luoshu-coverage-remediation.conf"
 
+# Auto multiweight output has regular/bold anchors but no mix-composite.font.
+# It must preserve the real selected weight and complete the same inventory.
+AUTO="$MOD/.luoshu-payload-stage.auto"
+mkdir -p "$AUTO/system/fonts/.luoshu-font-store"
+head -c 4096 /dev/zero > "$AUTO/system/fonts/.luoshu-font-store/regular.font"
+{ printf 'real-bold-source'; head -c 4096 /dev/zero; } > "$AUTO/system/fonts/.luoshu-font-store/bold.font"
+LUOSHU_REAL_MODDIR="$MOD" LUOSHU_COVERAGE_PLAN="$PLAN" \
+    sh "$ROOT/common/coverage_payload_remediate.sh" "$AUTO" mix mix > "$TMP/out-auto"
+grep -q '"status":"ok"' "$TMP/out-auto"
+cmp "$AUTO/system/fonts/A.ttf" "$AUTO/system/fonts/.luoshu-font-store/regular.font"
+cmp "$AUTO/system/fonts/Bold.ttf" "$AUTO/system/fonts/.luoshu-font-store/bold.font"
+test -s "$AUTO/product/vivo/fonts/Vivo.ttf"
+
 # 5) One bad row from the batch normalizer must not erase every successful row.
 # The shell retries only that row and, if metric normalization still cannot emit
 # it, falls back to the real font source so the coverage transaction still lands.

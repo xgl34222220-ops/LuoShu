@@ -309,6 +309,7 @@ private fun reasonLabel(reason: String): String = when (reason) {
     "physical-payload-present-but-partition-mount-failed" ->
         "补齐文件已经生成，但对应系统字体目录没有成功挂载；这属于挂载故障，不会再重复提交同一份补齐任务"
     "active-physical-payload-awaiting-mount-confirmation" -> "补齐文件已进入当前负载，等待挂载验证"
+    "next-boot-payload-awaiting-reboot" -> "新字体已准备好，完整重启后验证，无需重复补齐"
     "active-physical-payload-and-mount-confirmed" -> "当前负载与系统挂载均已确认"
     "active-physical-payload-missing-slot" -> "当前负载缺少该字体槽，可通过补齐重新生成"
     else -> reason.replace('-', ' ')
@@ -1291,7 +1292,7 @@ private fun CoverageActionBar(
 }
 
 private fun verificationLabel(state: String, rebootRequired: Boolean): String = when {
-    rebootRequired -> "等待完整重启"
+    rebootRequired || state == "pending-reboot" -> "等待完整重启"
     state == "verified" -> "启动验证完成"
     state == "failed" -> "启动验证异常"
     state == "not-run" -> "尚未验证"

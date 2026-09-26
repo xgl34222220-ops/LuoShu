@@ -157,6 +157,7 @@ sh -n "$ROOT/common/legacy_v14_4/mix_router.sh"
 # Upgrade regression: migration may intentionally clear device-font-engine.conf while
 # a compatible content-addressed cache still exists. Coverage must recover that cache
 # instead of failing solely because cacheId disappeared.
+mv "$MOD/.luoshu-payload" "$MOD/physical-fixture-saved"
 mkdir -p "$MOD/common/python/bin" "$MOD/config/device-font-cache/recovered/payload" "$MOD/config/device-font-cache/recovered/overlay"
 printf '{}\n' > "$MOD/config/device_font_inventory.json"
 printf '{}\n' > "$MOD/config/device-font-cache/recovered/payload/manifest.json"
@@ -183,6 +184,7 @@ chmod 0755 "$MOD/common/device_font_cache.sh" "$MOD/common/python/bin/luoshu-pyt
 OUT=$(run_bridge coverage 2>&1)
 printf '%s\n' "$OUT" | grep -q '"schema":"device-font-slot-trace-v1"'
 grep -qx 'lookup|Demo' "$CALLS"
+mv "$MOD/physical-fixture-saved" "$MOD/.luoshu-payload"
 
 # A missing obsolete aligned cache is not itself an error anymore. Current
 # releases are traced from the active physical-safe payload below.
@@ -240,7 +242,7 @@ assert data["summary"]["protected"] == 2, data["summary"]
 assert data["summary"]["remediable"] == 1, data["summary"]
 assert data["summary"]["missingMount"] == 1, data["summary"]
 PY
-grep -q -- '--physical-root "$MODDIR/.luoshu-payload"' "$ROOT/common/app_bridge.sh"
+grep -q -- '--physical-root "$_physical_root"' "$ROOT/common/app_bridge.sh"
 grep -q 'traceSource.*physical-safe' "$ROOT/common/device_font_slot_trace.py"
 grep -q 'luoshu_nested_font_roots' "$ROOT/common/mount_compat_base.sh"
 grep -q 'device_font_roots.conf' "$ROOT/common/mount_compat_base.sh"

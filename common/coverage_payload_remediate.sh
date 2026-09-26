@@ -76,12 +76,12 @@ export MODULE_DIR USER_FONTS_DIR LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard
 # No apply/mount entry point is called from this remediation process.
 [ -f "$MODERN_MAPPER" ] && . "$MODERN_MAPPER" >/dev/null 2>&1 || true
 
-TMP_ROWS="$MODDIR/config/.coverage-remediate-rows.$"
-BATCH="$MODDIR/config/.coverage-remediate-batch.$"
+TMP_ROWS="$MODDIR/config/.coverage-remediate-rows.$$"
+BATCH="$MODDIR/config/.coverage-remediate-batch.$$"
 PRESERVED="$STAGE/.luoshu-coverage-preserved.tsv"
 PRESERVED_TMP="${PRESERVED}.tmp.$$"
 SUMMARY="$STAGE/.luoshu-coverage-remediation.conf"
-SUMMARY_TMP="${SUMMARY}.tmp.$"
+SUMMARY_TMP="${SUMMARY}.tmp.$$"
 METRICS_COVERED="$STAGE/.luoshu-metrics-covered.lst"
 trap 'rm -f "$TMP_ROWS" "$BATCH" "$PRESERVED_TMP" "$SUMMARY_TMP" 2>/dev/null || true' EXIT HUP INT TERM
 
@@ -99,6 +99,7 @@ awk -F '\t' 'NF != 7 || $1 !~ /^\// || $2 == "" { bad=1 } END { exit bad }' "$TM
 STORE="$STAGE/system/fonts/.luoshu-font-store"
 REGULAR="$STORE/regular.font"
 MIX="$STORE/mix-composite.font"
+MIX_ROLE_ANCHORS=false
 case "$MODE" in
     direct)
         [ -s "$REGULAR" ] || {
@@ -111,6 +112,13 @@ case "$MODE" in
         fi
         ;;
     mix)
+        # Auto/weighted composites keep real role anchors rather than a single
+        # mix-composite.font. Resolve those generated anchors before rejecting
+        # the entire repair after the expensive composition has already finished.
+        if [ ! -s "$MIX" ]; then
+            MIX="$REGULAR"
+            MIX_ROLE_ANCHORS=true
+        fi
         [ -s "$MIX" ] || {
             json_error '复合字体暂存负载缺少组合源锚点'
             exit 1
@@ -256,6 +264,10 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
 
     if [ "$MODE" = mix ]; then
         _anchor="$MIX"
+        _role=$(role_for_weight "$_weight")
+        if [ "$MIX_ROLE_ANCHORS" = true ] && [ -s "$STORE/${_role}.font" ]; then
+            _anchor="$STORE/${_role}.font"
+        fi
     elif [ "$_weight" -eq 400 ] 2>/dev/null; then
         _anchor="$REGULAR"
     else

@@ -678,6 +678,9 @@ def run_batch(manifest: Path, inventory: Path | None = None) -> int:
     hard-link (or copy) the already-normalized output for equivalent slots.
     """
     failures = 0
+    # One validated snapshot for the whole batch; do not parse the complete ROM
+    # inventory and spawn getprop again for each physical alias.
+    inventory_payload = _load_batch_inventory(inventory)
     contracts: dict[str, dict[str, Any] | None] = {}
     reusable: dict[tuple, Path] = {}
     for raw in manifest.read_text().splitlines():
@@ -690,7 +693,7 @@ def run_batch(manifest: Path, inventory: Path | None = None) -> int:
         target_slot = parts[3].strip() if len(parts) > 3 and parts[3].strip() else None
         contract_key = target_slot or ""
         if contract_key not in contracts:
-            contracts[contract_key] = load_inventory_contract(inventory, target_slot=target_slot)
+            contracts[contract_key] = _batch_contract_from_payload(inventory_payload, target_slot, inventory)
         contract = contracts[contract_key]
         try:
             reuse_key = (

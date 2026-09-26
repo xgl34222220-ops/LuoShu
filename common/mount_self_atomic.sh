@@ -417,7 +417,7 @@ luoshu_self_mount_ensure() {
     # replaceable slots but are not children of /product/fonts. Mount them as
     # first-class components using the exact scanner mount key so coverage and
     # runtime evidence refer to the same target.
-    _lsme_nested_file="$_lsme_state_root/nested-roots.$"
+    _lsme_nested_file="$_lsme_state_root/nested-roots.$$"
     : > "$_lsme_nested_file" 2>/dev/null || true
     if type luoshu_nested_font_roots >/dev/null 2>&1; then
         luoshu_nested_font_roots > "$_lsme_nested_file" 2>/dev/null || true
@@ -467,7 +467,7 @@ luoshu_self_mount_ensure() {
                 break
             }
             _lsme_component_count=$((_lsme_component_count + 1))
-            _lsme_mounted="\${_lsme_mounted}\${_lsme_mounted:+,}\${_lsme_nested_part}/\${_lsme_nested_rel}:\${_lsme_mode}"
+            _lsme_mounted="${_lsme_mounted}${_lsme_mounted:+,}${_lsme_nested_part}/${_lsme_nested_rel}:${_lsme_mode}"
         done < "$_lsme_nested_file"
     fi
     rm -f "$_lsme_nested_file" 2>/dev/null || true

@@ -303,6 +303,49 @@ slot_trace_json() {
         return 1
     }
 
+    _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
+    [ -n "$_active" ] || _active=default
+    _physical_root="$MODDIR/.luoshu-payload"
+    _physical_prepared=false
+    _next_state="$MODDIR/config/font-payload-next.conf"
+    if [ "$(read_prop "$_next_state" state)" = prepared ] && \
+       [ "$(read_prop "$_next_state" font)" = "$_active" ] && \
+       [ -d "$MODDIR/.luoshu-payload-next" ]; then
+        _physical_root="$MODDIR/.luoshu-payload-next"
+        _physical_prepared=true
+    fi
+    _candidates="$MODDIR/config/device_font_candidates.json"
+
+    # The selected font is recorded before reboot. Its prepared tree, rather
+    # than the previous live font or an obsolete v2 cache, owns coverage then.
+    if [ "$_active" != default ] && [ -d "$_physical_root" ]; then
+        set -- "$SLOT_TRACE" \
+            --inventory "$_inventory" \
+            --physical-root "$_physical_root" \
+            --active-font "$_active" \
+            --output "$MODDIR/config/device-font-slot-trace.json"
+        [ ! -s "$_candidates" ] || set -- "$@" --candidates "$_candidates"
+        [ -z "$_remediation_plan" ] || set -- "$@" --remediation-plan "$_remediation_plan"
+        if [ "$_physical_prepared" = true ]; then
+            set -- "$@" --physical-prepared
+        else
+            set -- "$@" --mount-state "$MODDIR/config/self-mount.conf"
+            _load_state="$(read_prop "$MODDIR/config/device-font-load-verification.conf" state)"
+            _boot_state="$(read_prop "$MODDIR/config/font-payload-boot.conf" state)"
+            _mount_state="$(read_prop "$MODDIR/config/self-mount.conf" state)"
+            if [ "$_load_state" = verified ] || \
+               { [ "$_boot_state" = confirmed ] && \
+                 { [ "$_mount_state" = mounted ] || [ "$_mount_state" = confirmed ] || [ "$_mount_state" = degraded ]; }; }; then
+                set -- "$@" --physical-confirmed
+            fi
+        fi
+        PYTHONHOME="$PYROOT" \
+        PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            "$PYBIN" "$@"
+        return $?
+    fi
+
     _cache_id="$(read_prop "$MODDIR/config/device-font-engine.conf" cacheId)"
     _payload=''
     _overlay=''
@@ -332,8 +375,6 @@ slot_trace_json() {
     # content-addressed cache survived and still matches the current template,
     # source and inventory, recover it through the cache resolver instead of
     # requiring another font switch merely to populate cacheId again.
-    _active="$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')"
-    [ -n "$_active" ] || _active=default
     if [ -z "$_payload" ] && [ "$_active" != default ] && [ -f "$DEVICE_FONT_CACHE" ]; then
         _lookup_root="$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$DEVICE_FONT_CACHE" lookup "$_active" 2>/dev/null || true)"
         case "$_lookup_root" in
@@ -344,40 +385,6 @@ slot_trace_json() {
                 fi
                 ;;
         esac
-    fi
-
-    _candidates="$MODDIR/config/device_font_candidates.json"
-
-    # Current LuoShu releases use the physical-safe next-boot payload as the
-    # authoritative runtime. It deliberately has no v2 device-font manifest.
-    # Trace that live payload directly instead of making the App depend on an
-    # obsolete manifest that the switch core never creates.
-    _runtime_core="$(read_prop "$MODDIR/config/font_runtime_legacy_v14_4.conf" core)"
-    if { [ "$_runtime_core" = physical-safe-v1 ] || [ ! -s "$_payload" ] || [ ! -s "$_overlay" ]; } && \
-       [ "$_active" != default ] && [ -d "$MODDIR/.luoshu-payload" ]; then
-        set -- "$SLOT_TRACE" \
-            --inventory "$_inventory" \
-            --physical-root "$MODDIR/.luoshu-payload" \
-            --active-font "$_active" \
-            --mount-state "$MODDIR/config/self-mount.conf" \
-            --output "$MODDIR/config/device-font-slot-trace.json"
-        [ ! -s "$_candidates" ] || set -- "$@" --candidates "$_candidates"
-        [ -z "$_remediation_plan" ] || set -- "$@" --remediation-plan "$_remediation_plan"
-
-        _load_state="$(read_prop "$MODDIR/config/device-font-load-verification.conf" state)"
-        _boot_state="$(read_prop "$MODDIR/config/font-payload-boot.conf" state)"
-        _mount_state="$(read_prop "$MODDIR/config/self-mount.conf" state)"
-        if [ "$_load_state" = verified ] || \
-           { [ "$_boot_state" = confirmed ] && \
-             { [ "$_mount_state" = mounted ] || [ "$_mount_state" = confirmed ] || [ "$_mount_state" = degraded ]; }; }; then
-            set -- "$@" --physical-confirmed
-        fi
-
-        PYTHONHOME="$PYROOT" \
-        PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
-        LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-            "$PYBIN" "$@"
-        return $?
     fi
 
     [ -s "$_payload" ] && [ -s "$_overlay" ] || {
@@ -431,8 +438,14 @@ coverage_reapply() {
         printf '{"status":"error","message":"当前使用系统默认字体，没有可补齐的洛书字体负载"}\n'
         return 1
     }
+    if [ "$(read_prop "$MODDIR/config/font-payload-next.conf" state)" = prepared ] && \
+       [ "$(read_prop "$MODDIR/config/font-payload-next.conf" font)" = "$_active" ] && \
+       [ -d "$MODDIR/.luoshu-payload-next" ]; then
+        printf '{"status":"error","message":"新字体已准备完成，请先完整重启后再验证覆盖，无需重复补齐"}\n'
+        return 1
+    fi
     _plan="$MODDIR/config/font-coverage-remediation-paths.txt"
-    _plan_trace="$MODDIR/config/.font-coverage-remediation-trace.$"
+    _plan_trace="$MODDIR/config/.font-coverage-remediation-trace.$$"
     rm -f "$_plan" "$_plan_trace" 2>/dev/null || true
     if ! slot_trace_json "$_plan" > "$_plan_trace" 2>&1; then
         _plan_error="$(tail -n1 "$_plan_trace" 2>/dev/null)"

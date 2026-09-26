@@ -84,19 +84,19 @@ _luoshu_nested_font_root_safe() {
     _lnfr_rest="$_lnfr_rel"
     while [ -n "$_lnfr_rest" ]; do
         case "$_lnfr_rest" in
-            */*) _lnfr_component=\${_lnfr_rest%%/*}; _lnfr_rest=\${_lnfr_rest#*/} ;;
+            */*) _lnfr_component=${_lnfr_rest%%/*}; _lnfr_rest=${_lnfr_rest#*/} ;;
             *) _lnfr_component="$_lnfr_rest"; _lnfr_rest='' ;;
         esac
         case "$_lnfr_component" in
             ''|.|..|*[!A-Za-z0-9._+-]*) return 1 ;;
         esac
     done
-    _lnfr_prefix="\${_lnfr_part}-nested-"
+    _lnfr_prefix="${_lnfr_part}-nested-"
     case "$_lnfr_key" in
-        "$_lnfr_prefix"*) _lnfr_digest=\${_lnfr_key#"$_lnfr_prefix"} ;;
+        "$_lnfr_prefix"*) _lnfr_digest=${_lnfr_key#"$_lnfr_prefix"} ;;
         *) return 1 ;;
     esac
-    [ "\${#_lnfr_digest}" -eq 16 ] 2>/dev/null || return 1
+    [ "${#_lnfr_digest}" -eq 16 ] 2>/dev/null || return 1
     case "$_lnfr_digest" in *[!0-9a-f]*) return 1 ;; esac
     return 0
 }

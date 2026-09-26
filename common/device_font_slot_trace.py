@@ -315,6 +315,7 @@ def build_physical_trace(
     candidates: dict[str, Any] | None = None,
     *,
     confirmed: bool = False,
+    prepared: bool = False,
     active_font: str = "",
     mount_state: Path | None = None,
 ) -> dict[str, Any]:
@@ -334,7 +335,9 @@ def build_physical_trace(
 
     candidate_by_path = _candidate_index(candidates)
     preserved_by_path = _physical_preserved_index(physical_root)
-    mount_info = _read_key_values(mount_state)
+    # A previous boot's mount evidence cannot confirm or invalidate a new tree.
+    confirmed = confirmed and not prepared
+    mount_info = {} if prepared else _read_key_values(mount_state)
     mount_state_name = mount_info.get("state", "")
     mount_backend = mount_info.get("backend", "")
     mounted_roots = _mount_bucket(mount_info.get("mounted", ""))
@@ -370,7 +373,10 @@ def build_physical_trace(
                     or (not mounted_roots and mount_state_name in {"mounted", "confirmed"})
                 )
             )
-            if mount_failed:
+            if prepared:
+                state = "mapped-unverified"
+                reason = "next-boot-payload-awaiting-reboot"
+            elif mount_failed:
                 state = "missing-mount"
                 reason = "physical-payload-present-but-partition-mount-failed"
             elif mount_confirmed:
@@ -409,7 +415,7 @@ def build_physical_trace(
         else:
             state = "mapping-missing"
             reason = "active-physical-payload-missing-slot"
-            category, safe_to_retry = "issue", True
+            category, safe_to_retry = "issue", not prepared
 
         traced.append({
             "path": logical,
@@ -465,9 +471,10 @@ def build_physical_trace(
         "schema": SCHEMA,
         "inventoryBuildKey": str(inventory.get("buildKey") or ""),
         "inventoryRomKind": str(inventory.get("romKind") or "generic"),
-        "verificationState": "verified" if confirmed else "pending",
+        "verificationState": "pending-reboot" if prepared else ("verified" if confirmed else "pending"),
+        "rebootRequired": prepared,
         "activeFont": active_font,
-        "traceSource": "physical-safe",
+        "traceSource": "physical-prepared" if prepared else "physical-safe",
         "summary": {
             "inventorySlots": len(inventory.get("slots") or {}),
             "censusSlots": len(traced) + len(census_only),
@@ -668,6 +675,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--overlay", type=Path)
     parser.add_argument("--physical-root", type=Path)
     parser.add_argument("--physical-confirmed", action="store_true")
+    parser.add_argument("--physical-prepared", action="store_true")
     parser.add_argument("--active-font", default="")
     parser.add_argument("--mount-state", type=Path)
     parser.add_argument("--verification", type=Path)
@@ -688,6 +696,7 @@ def main() -> int:
                 args.physical_root,
                 candidates,
                 confirmed=args.physical_confirmed,
+                prepared=args.physical_prepared,
                 active_font=args.active_font,
                 mount_state=args.mount_state,
             )

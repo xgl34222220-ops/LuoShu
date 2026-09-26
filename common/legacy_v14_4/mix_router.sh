@@ -476,8 +476,18 @@ precommit_ready() {
 }
 
 next_mix_payload_ready_for_request() {
-    [ -d "$NEXT_PAYLOAD" ] && [ -s "$NEXT_STATE" ] && [ -s "$MIX_STAGE_STATE" ] || return 1
-    _nmr_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    [ -d "$NEXT_PAYLOAD" ] && [ -s "$NEXT_STATE" ] || return 1
+    [ "$(read_value "$NEXT_STATE" state)" = prepared ] || return 1
+    _nmr_request="${LUOSHU_MIX_REQUEST_ID:-}"
+    if [ -s "$MIX_STAGE_STATE" ]; then
+        _nmr_stage_request=$(read_value "$MIX_STAGE_STATE" requestId)
+        [ -n "$_nmr_stage_request" ] || return 1
+        [ -z "$_nmr_request" ] || [ "$_nmr_request" = "$_nmr_stage_request" ] || return 1
+        _nmr_request="$_nmr_stage_request"
+    fi
+    # The winning finalizer removes stage metadata after the atomic commit.
+    # The outer worker still carries the request exported when it was launched;
+    # require that exact identity, never infer ownership from task timestamps.
     [ -n "$_nmr_request" ] || return 1
     [ "$(read_value "$NEXT_STATE" font)" = mix ] || return 1
     [ "$(read_value "$NEXT_STATE" requestId)" = "$_nmr_request" ] || return 1
@@ -495,7 +505,7 @@ prepare_mix_stage_for_commit() {
     if next_mix_payload_ready_for_request; then
         _pm_task="$(read_value "$REALMOD/config/axes_task.conf" task)"
         mix_finalize_state_write ready '本机扫描槽位已在生成阶段一次映射完成，正在提交' "$_pm_task" 98
-        printf '[%s] [MIX] reuse prepared next payload request=%s; skip duplicate precommit mapping\n'             "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)"             "$(read_value "$MIX_STAGE_STATE" requestId)" >>"$LOG_FILE" 2>/dev/null || true
+        printf '[%s] [MIX] reuse prepared next payload request=%s; skip duplicate precommit mapping\n'             "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)"             "$(read_value "$NEXT_STATE" requestId)" >>"$LOG_FILE" 2>/dev/null || true
         return 0
     fi
 
