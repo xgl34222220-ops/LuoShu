@@ -145,6 +145,19 @@ write_auto_generation_manifest() {
     return 0
 }
 
+compat_failure_message() {
+    _cfm_state="$REALMOD/config/mix-finalize-state.conf"
+    if [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] && \
+       [ "$(read_value "$_cfm_state" requestId)" = "$LUOSHU_MIX_REQUEST_ID" ] && \
+       [ "$(read_value "$_cfm_state" state)" = failed ]; then
+        # Read the plain persisted reason; parsing a JSON string with sed loses
+        # everything after an escaped quote in a font path or glyph name.
+        read_value "$_cfm_state" message
+    else
+        sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$1" 2>/dev/null | tail -n1
+    fi
+}
+
 prepare_compat_payload() {
     FINALIZE_ERROR=''
     [ -n "$REALMOD" ] && [ "$REALMOD" != "$MODDIR" ] && [ -f "$REAL_MIX_ROUTER" ] || return 0
@@ -162,7 +175,7 @@ prepare_compat_payload() {
     fi
     cat "$_pcp_out" >>"$LOG_FILE" 2>/dev/null || true
     if [ "$_pcp_rc" -ne 0 ] || ! grep -q '"status":"ok"' "$_pcp_out" 2>/dev/null; then
-        FINALIZE_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_pcp_out" 2>/dev/null | tail -n1)
+        FINALIZE_ERROR=$(compat_failure_message "$_pcp_out")
         [ -n "$FINALIZE_ERROR" ] || {
             case "$_pcp_rc" in
                 124) FINALIZE_ERROR='复合字体预提交超过 120 秒，已自动终止，不再继续空等' ;;
@@ -192,7 +205,7 @@ finalize_compat_payload() {
     fi
     cat "$_fcp_out" >>"$LOG_FILE" 2>/dev/null || true
     if [ "$_fcp_rc" -ne 0 ] || ! grep -q '"status":"ok"' "$_fcp_out" 2>/dev/null; then
-        FINALIZE_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_fcp_out" 2>/dev/null | tail -n1)
+        FINALIZE_ERROR=$(compat_failure_message "$_fcp_out")
         [ -n "$FINALIZE_ERROR" ] || {
             case "$_fcp_rc" in 124) FINALIZE_ERROR='提交下一启动字体负载超过 60 秒，已自动终止' ;; *) FINALIZE_ERROR='下一启动字体负载提交失败' ;; esac
         }

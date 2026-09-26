@@ -410,6 +410,14 @@ def capability_reason_label(reason: str) -> str:
         "private-use-symbol-font": "专用图标字体，保持原厂",
         "non-text-cmap": "不包含可替换的文字或数字，保持原厂",
         "invalid-cmap": "字体字符映射无效，保持原厂",
+        "specialized-name": "表情、图标或专用符号字体，保持原厂",
+        "dynamic-font-alias": "此路径由系统主题动态管理，保持原厂",
+        "unreadable-stock-font": "无法读取或解析原厂字体，尚未替换",
+        "untrusted-stock-root": "尚未取得此路径的可信原厂字体，尚未替换",
+        "not-promoted-to-ui-inventory": "已扫描到此文件，但尚未完成文字字形检测，未替换",
+        "census-only": "已扫描到此文件，但尚未完成文字字形检测，未替换",
+        "collection-faces-partially-replaced": "集合内部分字体面已替换，其余面保持原厂，请查看各面原因",
+        "target-characters-partially-replaced": "部分中英数字形已替换，其余字形保持原厂，请查看各项数量",
     }
     code, _, detail = reason.partition(":")
     if code in labels:
@@ -422,6 +430,96 @@ def census_reason(inventory: dict[str, Any], logical: str, fallback: str) -> str
     entry = (inventory.get("preservedFonts") or {}).get(logical)
     reason = entry.get("reason") if isinstance(entry, dict) else entry
     return capability_reason_label(str(reason)) if reason else fallback
+
+
+def census_entries(inventory: dict[str, Any], candidates: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expose every scanned path to old Apps, without making it a repair target."""
+    known = {normalize_path(path) for path in (inventory.get("slots") or {})}
+    paths = _candidate_index(candidates)
+    preserved = inventory.get("preservedFonts") or {}
+    for logical in preserved:
+        paths.setdefault(normalize_path(logical), {})
+    protected = {"specialized-name", "xml-symbol-family", "color-font",
+                 "symbol-font-metadata", "private-use-symbol-font", "non-text-cmap",
+                 "dynamic-font-alias", "no-requested-text-role", "scanner-protected"}
+    entries = []
+    for logical, raw in sorted(paths.items()):
+        if not logical or logical in known:
+            continue
+        measured = preserved.get(logical)
+        reason = measured.get("reason") if isinstance(measured, dict) else measured
+        reason = str(reason or raw.get("reason") or "census-only")
+        if reason == "visible-font-path":
+            reason = "not-promoted-to-ui-inventory"
+        category = "protected" if reason.partition(":")[0] in protected else "issue"
+        entries.append({
+            "path": logical, "slotName": str(raw.get("slotName") or Path(logical).name),
+            "partition": str(raw.get("partition") or (Path(logical).parts[1] if len(Path(logical).parts) > 1 else "")),
+            "source": "census", "format": Path(logical).suffix.lower().lstrip(".").upper(),
+            "weight": 400, "style": "normal", "families": [],
+            "state": "preserved" if category == "protected" else "not-inspected",
+            "category": category, "safeToRetry": False, "censusOnly": True,
+            "reason": capability_reason_label(reason), "reasonCode": reason,
+            "sourceUnavailable": False, "retainedFaces": [], "routes": [],
+        })
+    return entries
+
+
+def payload_faces_index(physical_root: Path, inventory: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Use this generation's face decisions to distinguish partial collections."""
+    try:
+        report = load(physical_root / ".luoshu-metrics-report.json", "luoshu-slot-metrics-v1", optional=True)
+    except TraceError:
+        return {}
+    if report.get("engine") != "inventory-font-stage-v1":
+        return {}
+    result: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    seen: set[tuple[str, int]] = set()
+    for row in report.get("slots") or []:
+        if not isinstance(row, dict) or row.get("slot") not in (inventory.get("slots") or {}):
+            continue
+        logical = row["slot"]
+        try:
+            face_index = int(row.get("faceIndex", 0))
+        except (TypeError, ValueError):
+            continue
+        if face_index < 0 or (logical, face_index) in seen:
+            continue
+        seen.add((logical, face_index))
+        result[logical].append(dict(row, faceIndex=face_index))
+    return {path: sorted(rows, key=lambda row: row["faceIndex"]) for path, rows in result.items()}
+
+
+def physical_face_routes(routes: list[dict[str, Any]], rows: list[dict[str, Any]],
+                         state: str, *, prepared: bool) -> list[dict[str, Any]]:
+    if not rows or not routes:
+        return routes
+    result = []
+    for row in rows:
+        retained = row.get("state") == "retained-stock"
+        if retained:
+            status = "保留原厂"
+            reason = capability_reason_label(str(row.get("reason") or "source-capability-missing"))
+        else:
+            status = "待重启" if prepared else "已替换" if state in {"loaded", "partial"} else "待验证"
+            counts = row.get("replacedRoleCounts") or {}
+            counts_text = "、".join(f"{label} {counts[role]} 个字形" for role, label in
+                                   (("cjk", "中文"), ("latin", "英文"), ("digit", "数字"))
+                                   if isinstance(counts.get(role), int) and counts[role] > 0)
+            reason = ("已生成：" if prepared else "替换内容：") + counts_text if counts_text else "使用所选字体"
+            retained_counts = row.get("retainedTargetRoleCounts") or {}
+            retained_text = "、".join(f"{label} {retained_counts[role]} 个字形" for role, label in
+                                      (("cjk", "中文"), ("latin", "英文"), ("digit", "数字"))
+                                      if isinstance(retained_counts.get(role), int) and retained_counts[role] > 0)
+            if retained_text:
+                reason += "；保留原厂：" + retained_text
+                if state == "partial" and not prepared:
+                    status = "部分替换"
+        result.append(dict(routes[0], faceIndex=row["faceIndex"],
+                           family=f"第 {row['faceIndex'] + 1} 面 · {status}",
+                           planReason=reason, state="retained-stock" if retained else state,
+                           weight=row.get("weight", routes[0].get("weight", 400))))
+    return result
 
 
 def build_physical_trace(
@@ -453,6 +551,7 @@ def build_physical_trace(
     candidate_by_path = _candidate_index(candidates)
     preserved_by_path = _physical_preserved_index(physical_root)
     preserved_by_path.update(payload_preserved_index(physical_root, inventory))
+    face_rows = payload_faces_index(physical_root, inventory)
     measured_inventory = int(inventory.get("scannerRevision", 0) or 0) >= 9
     # Global boot/mount flags cannot prove which font bytes Android sees.
     # Only observations bound to this payload, boot and runtime namespace count.
@@ -500,6 +599,16 @@ def build_physical_trace(
             protected_reason = f"preserved-style-{style}"
 
         routes: list[dict[str, Any]] = []
+        rows = face_rows.get(logical, [])
+        retained_faces = [{"faceIndex": row["faceIndex"],
+                           "reasonCode": str(row.get("reason") or "source-capability-missing"),
+                           "reason": capability_reason_label(str(row.get("reason") or "source-capability-missing"))}
+                          for row in rows if row.get("state") == "retained-stock"]
+        retained_target_counts = {role: sum(row.get("retainedTargetRoleCounts", {}).get(role, 0)
+                                  for row in rows if isinstance(row.get("retainedTargetRoleCounts"), dict)
+                                  and isinstance(row["retainedTargetRoleCounts"].get(role, 0), int))
+                                  for role in ("cjk", "latin", "digit")}
+        retained_targets = any(count > 0 for count in retained_target_counts.values())
         if physical.is_file():
             mount_key = _slot_mount_key(logical, entry, inventory)
             mount_failed = bool(
@@ -514,8 +623,10 @@ def build_physical_trace(
                 state = "mapped-unverified"
                 reason = "next-boot-payload-awaiting-reboot"
             elif evidence.get("state") == "verified":
-                state = "loaded"
-                reason = "runtime-visible-digest-match"
+                state = "partial" if retained_faces or retained_targets else "loaded"
+                reason = ("collection-faces-partially-replaced" if retained_faces else
+                          "target-characters-partially-replaced" if retained_targets else
+                          "runtime-visible-digest-match")
             elif evidence.get("state") == "mismatch":
                 state = "mismatch"
                 reason = "runtime-visible-digest-mismatch"
@@ -529,6 +640,8 @@ def build_physical_trace(
                 state = "mapped-unverified"
                 reason = "active-physical-payload-awaiting-byte-verification"
             category, safe_to_retry = classify_slot_state(state, reason)
+            if state == "partial":
+                safe_to_retry = False
             if state == "mismatch":
                 safe_to_retry = reason == "payload-digest-mismatch" and not prepared
             routes.append({
@@ -549,6 +662,7 @@ def build_physical_trace(
                 "mountState": mount_state_name,
                 "mountBackend": mount_backend,
             })
+            routes = physical_face_routes(routes, rows, state, prepared=prepared)
         elif logical in preserved_by_path:
             reason = preserved_by_path[logical]
             state = "source-unavailable" if source_capability_missing(reason) else "preserved"
@@ -581,31 +695,17 @@ def build_physical_trace(
             "reason": capability_reason_label(reason),
             "reasonCode": reason,
             "sourceUnavailable": state == "source-unavailable" or source_capability_missing(reason),
+            "retainedFaces": retained_faces,
+            "retainedTargetRoleCounts": retained_target_counts,
             "supplementDisposition": "physical-safe",
             "routes": routes,
         })
         counts[state] += 1
 
-    inventory_paths = {normalize_path(path) for path in (inventory.get("slots") or {})}
-    census_only: list[dict[str, Any]] = []
-    for raw in candidates.get("paths") or []:
-        if not isinstance(raw, dict):
-            continue
-        logical = normalize_path(raw.get("path"))
-        if not logical or logical in inventory_paths:
-            continue
-        reason = str(raw.get("reason") or "census-only")
-        if bool(raw.get("candidate", False)) and reason == "visible-font-path":
-            reason = "not-promoted-to-ui-inventory"
-        reason = census_reason(inventory, logical, reason)
-        census_only.append({
-            "path": logical,
-            "slotName": str(raw.get("slotName") or Path(logical).name),
-            "partition": str(raw.get("partition") or ""),
-            "source": "census",
-            "format": Path(logical).suffix.lower().lstrip(".").upper(),
-            "reason": reason,
-        })
+    census_only = census_entries(inventory, candidates)
+    traced.extend(census_only)
+    for item in census_only:
+        counts[item["state"]] += 1
 
     category_counts: dict[str, int] = defaultdict(int)
     remediable = 0
@@ -614,32 +714,30 @@ def build_physical_trace(
         if bool(item.get("safeToRetry")):
             remediable += 1
 
-    eligible = (
-        category_counts.get("replaced", 0)
-        + category_counts.get("pending", 0)
-        + category_counts.get("issue", 0)
-        - counts.get("source-unavailable", 0)
-    )
+    eligible = sum(1 for item in traced if not item.get("censusOnly")
+                   and item["category"] != "protected" and not item.get("sourceUnavailable"))
     return {
         "schema": SCHEMA,
         "inventoryBuildKey": str(inventory.get("buildKey") or ""),
         "inventoryRomKind": str(inventory.get("romKind") or "generic"),
         "verificationState": "pending-reboot" if prepared else (
             "failed" if counts.get("mismatch") or counts.get("missing-mount") or counts.get("mapping-missing")
-            else ("partial" if counts.get("source-unavailable") else "verified")
-            if verification.get("state") == "verified" and counts.get("loaded", 0)
+            else ("partial" if counts.get("source-unavailable") or counts.get("partial")
+                  or counts.get("not-inspected") else "verified")
+            if verification.get("state") == "verified" and (counts.get("loaded", 0) or counts.get("partial", 0))
             and not counts.get("mapped-unverified") else "pending"
         ),
         "verificationReason": capability_reason_label("font-payload-reapply-required") if reapply_required
-            else "部分字体尚未替换，请查看各项原因" if counts.get("source-unavailable")
+            else "部分字体或字体面尚未替换，请查看各项原因" if counts.get("source-unavailable") or counts.get("partial")
             else str(verification.get("reason") or ""),
         "reapplyRequired": reapply_required,
         "rebootRequired": prepared,
         "activeFont": active_font,
         "traceSource": "physical-prepared" if prepared else "physical-safe",
         "summary": {
-            "inventorySlots": len(inventory.get("slots") or {}),
-            "censusSlots": len(traced) + len(census_only),
+            "inventorySlots": len(traced),
+            "textInventorySlots": len(inventory.get("slots") or {}),
+            "censusSlots": len(traced),
             "censusOnlySlots": len(census_only),
             "replaceableSlots": eligible,
             "replaced": category_counts.get("replaced", 0),
@@ -658,7 +756,7 @@ def build_physical_trace(
             "missingMount": counts.get("missing-mount", 0),
             "mismatch": counts.get("mismatch", 0),
             "unconfirmed": 0,
-            "partial": 0,
+            "partial": counts.get("partial", 0),
             "templateOnlyRoutes": 0,
         },
         "slots": traced,
@@ -724,30 +822,12 @@ def build_trace(
         traced.append(item)
         counts[state] += 1
 
-    # Candidate census is intentionally wider than the UI-slot inventory. Keep
-    # those paths as separate diagnostics instead of mixing them into "font slots".
-    # The flashing page and the App must use the exact same inventory slot set.
-    inventory_paths = {normalize_path(path) for path in (inventory.get("slots") or {})}
-    census_only: list[dict[str, Any]] = []
-    for raw in candidates.get("paths") or []:
-        if not isinstance(raw, dict):
-            continue
-        logical = normalize_path(raw.get("path"))
-        if not logical or logical in inventory_paths:
-            continue
-        denied = not bool(raw.get("candidate", False))
-        reason = str(raw.get("reason") or ("specialized-name" if denied else "not-promoted-to-ui-inventory"))
-        if not denied and reason == "visible-font-path":
-            reason = "not-promoted-to-ui-inventory"
-        reason = census_reason(inventory, logical, reason)
-        census_only.append({
-            "path": logical,
-            "slotName": str(raw.get("slotName") or Path(logical).name),
-            "partition": str(raw.get("partition") or ""),
-            "source": "census",
-            "format": Path(logical).suffix.lower().lstrip(".").upper(),
-            "reason": reason,
-        })
+    # Old Apps consume only slots[]. Include the wider scan there too, while
+    # its nonreplaceable entries stay outside every remediation plan.
+    census_only = census_entries(inventory, candidates)
+    traced.extend(census_only)
+    for item in census_only:
+        counts[item["state"]] += 1
 
     # Template-only routes are useful diagnostics but are not counted as scanner
     # omissions because the inventory deliberately works at physical-file level.
@@ -762,19 +842,17 @@ def build_trace(
         if bool(item.get("safeToRetry")):
             remediable += 1
 
-    eligible = (
-        category_counts.get("replaced", 0)
-        + category_counts.get("pending", 0)
-        + category_counts.get("issue", 0)
-    )
+    eligible = sum(1 for item in traced if not item.get("censusOnly")
+                   and item["category"] != "protected" and not source_capability_missing(item.get("reason", "")))
     return {
         "schema": SCHEMA,
         "inventoryBuildKey": str(inventory.get("buildKey") or ""),
         "inventoryRomKind": str(inventory.get("romKind") or "generic"),
         "verificationState": str(verification.get("state") or "not-run"),
         "summary": {
-            "inventorySlots": len(inventory.get("slots") or {}),
-            "censusSlots": len(traced) + len(census_only),
+            "inventorySlots": len(traced),
+            "textInventorySlots": len(inventory.get("slots") or {}),
+            "censusSlots": len(traced),
             "censusOnlySlots": len(census_only),
             "replaceableSlots": eligible,
             "replaced": category_counts.get("replaced", 0),

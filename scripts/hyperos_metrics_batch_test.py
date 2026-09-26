@@ -401,6 +401,7 @@ _hyperos_clock_ui_files() { :; }
         stub = '\n'.join((
             'mix_request_is_current() { return 0; }',
             'precommit_ready() { return 1; }',
+            'precommit_failed() { return 1; }',
             'next_mix_payload_ready_for_request() { return 1; }',
             'stage_has_fonts() { return 0; }',
             'stage_generation_matches() { return 0; }',

@@ -127,7 +127,7 @@ def main() -> int:
         candidates = json.loads((temp / "device_font_candidates.json").read_text(encoding="utf-8"))
         summary = payload["scanSummary"]
 
-        assert payload["scannerRevision"] == 9
+        assert payload["scannerRevision"] == 10
         assert payload["romKind"] == "generic"
         assert result["stockFontFileCount"] == 11
         assert result["stockFontUniqueFileCount"] == 9

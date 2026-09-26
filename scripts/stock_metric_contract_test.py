@@ -442,16 +442,23 @@ class StockMetricContractTest(unittest.TestCase):
         self.assertNotIn(stale_path, refreshed["slots"])
         self.assertIn(stale_path, refreshed["retiredAbsentUpgradeSlots"])
 
-    def test_hyperos_extra_collection_obeys_mapper_partitions_and_font_exclusions(self) -> None:
+    def test_extra_collection_uses_measured_text_and_protects_symbol_metadata(self) -> None:
         args, _values = self.physical_scan_fixture()
-        excluded = ("NotoSansCJKJP.otf", "NotoSansCJKKR.otf", "NotoSansArabic-Regular.ttf",
-                    "NotoSansThai-Regular.ttf", "NotoSans-RegularItalic.ttf", "NotoSansSymbols.ttf",
-                    "NotoSansSC-Regular.ttc", "NotoSansEmoji.ttf", "NotoSansAdlam-VF.ttf",
+        text_names = ("NotoSansCJKJP.otf", "NotoSansCJKKR.otf", "NotoSansArabic-Regular.ttf",
+                    "NotoSansThai-Regular.ttf", "NotoSans-RegularItalic.ttf",
+                    "NotoSansSC-Regular.ttc", "NotoSansAdlam-VF.ttf",
                     "NotoSansAhom-Regular.otf", "NotoSansCuneiform-Regular.ttf",
                     "NotoSansEgyptianHieroglyphs-Regular.ttf", "MiSansOdiaVF.ttf",
-                    "NotoSansSemiCondensed-Icons.ttf", "NotoSansMono-Italic.ttf")
-        for name in excluded:
+                    "NotoSansMono-Italic.ttf")
+        protected_names = ("NotoSansSymbols.ttf", "NotoSansEmoji.ttf", "NotoSansSemiCondensed-Icons.ttf")
+        # These fixtures contain a real digit, regardless of their filenames.
+        # A partial digit font is usable; symbol protection needs real evidence.
+        for name in (*text_names, *protected_names):
             make_font(args.system_fonts / name)
+        for name in protected_names:
+            with TTFont(args.system_fonts / name) as font:
+                font['OS/2'].sFamilyClass = 12 << 8
+                font.save(args.system_fonts / name)
         disguised_collection = "NotoSansCollection.ttf"
         with TTFont(args.system_fonts / "MiSansVF.ttf") as font:
             collection = TTCollection()
@@ -471,8 +478,10 @@ class StockMetricContractTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(scanner.scan(args), 0)
         slots = json.loads(args.output.read_text())["slots"]
-        for name in excluded:
+        for name in protected_names:
             self.assertNotIn(f"/system/fonts/{name}", slots)
+        for name in text_names:
+            self.assertEqual(slots[f"/system/fonts/{name}"]["metrics"]["fontTraits"]["digitCount"], 1)
         self.assertIn("/system/fonts/DroidSansMono.ttf", slots)
         self.assertIn("/system/fonts/NotoSansSemiCondensed-Regular.ttf", slots)
         self.assertIn("/mi_ext/fonts/NotoSansSC-Regular.otf", slots)
@@ -602,7 +611,7 @@ class StockMetricContractTest(unittest.TestCase):
                 self.assertEqual(scanner.scan(args), 0)
             data = json.loads(args.output.read_text())
             self.assertTrue(scanner._can_reuse(data, "stock-metrics-test"))
-            self.assertEqual(data["metricsRevision"], 4)
+            self.assertEqual(data["metricsRevision"], 5)
             self.assertTrue(all(f"/system/fonts/{name}" in data["slots"] for name in values))
             with mock.patch.object(inventory, "_read_metrics") as reader, contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(scanner.scan(args), 0)

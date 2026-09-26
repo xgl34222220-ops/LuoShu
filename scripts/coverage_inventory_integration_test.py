@@ -180,15 +180,17 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
 
     def assert_mapping(self):
         f = self.f
-        for logical in (REGULAR, BOLD, COLLECTION, DIGITS, NESTED, UNKNOWN, SCRIPT):
+        for logical in (REGULAR, BOLD, COLLECTION, PARTIAL, DIGITS, NESTED, UNKNOWN, SCRIPT):
             self.assertTrue(f.path(logical).is_file(), logical)
-        for logical in (HEAVY, PARTIAL):
-            self.assertFalse(f.path(logical).exists(), logical)
+        self.assertFalse(f.path(HEAVY).exists(), HEAVY)
         report = f.report()
         protected = report.get("preservedFonts", report.get("preserved", {}))
         self.assertEqual(protected[HEAVY], "source-weight-missing")
         self.assertNotIn(SCRIPT, protected)
-        self.assertIn("source-weight-missing", protected[PARTIAL])
+        self.assertNotIn(PARTIAL, protected)
+        partial_faces = [row for row in report["slots"] if row["slot"] == PARTIAL]
+        self.assertEqual([row["state"] for row in partial_faces], ["replaced", "retained-stock"])
+        self.assertEqual(partial_faces[1]["reason"], "source-weight-missing")
         with TTFont(f.path(SCRIPT)) as font:
             self.assertTrue(ARABIC.issubset(font.getBestCmap()))
         with TTFont(f.path(BOLD)) as font:
@@ -198,6 +200,10 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
         with TTCollection(f.path(COLLECTION)) as collection:
             self.assertEqual([font["OS/2"].usWeightClass for font in collection.fonts], [400, 700])
             self.assertEqual([font["hhea"].ascent for font in collection.fonts], [1000, 1050])
+        with TTCollection(f.path(PARTIAL)) as partial, TTCollection(f.stock / PARTIAL.lstrip("/")) as stock:
+            self.assertEqual([font["OS/2"].usWeightClass for font in partial.fonts], [400, 900])
+            for tag in ("glyf", "cmap", "name", "hmtx", "OS/2"):
+                self.assertEqual(partial.fonts[1].reader[tag], stock.fonts[1].reader[tag], tag)
 
     def test_direct_measures_unknown_system_nested_roots_and_real_collection_faces(self):
         self.assertEqual(set(self.f.inventory["slots"]), {
@@ -237,7 +243,7 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
         before = (other.stat().st_ino, other.stat().st_mtime_ns, other.read_bytes())
         summary = self.assert_success(self.f.invoke(plan=[REGULAR], source=False))
         self.assertEqual((summary["requested"], summary["matched"]), (1, 1))
-        self.assertEqual((summary["planned"], summary["rewritten"], summary["existing"]), (1, 1, 6))
+        self.assertEqual((summary["planned"], summary["rewritten"], summary["existing"]), (1, 1, 7))
         self.assertEqual((other.stat().st_ino, other.stat().st_mtime_ns, other.read_bytes()), before)
         self.assert_mapping()
 
@@ -277,7 +283,7 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue((self.f.stage / ".luoshu-inventory-output-manifest.json").is_file())
         summary = self.assert_success(self.f.invoke(plan=[REGULAR], source=False))
-        self.assertEqual((summary["planned"], summary["existing"], summary["rewritten"]), (1, 6, 1))
+        self.assertEqual((summary["planned"], summary["existing"], summary["rewritten"]), (1, 7, 1))
         self.assert_mapping()
 
     def test_stale_or_traversing_plan_cannot_invent_targets(self):
@@ -338,7 +344,7 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
         self.assertEqual(set(scripts), {"Latn", "Grek", "Cyrl"})
         before = self.assert_success(self.f.invoke())
         self.assertEqual(before["inventorySlots"], 9)
-        self.assertEqual((before["mapped"], before["preserved"]), (7, 2))
+        self.assertEqual((before["mapped"], before["preserved"]), (8, 1))
         self.assertTrue(self.f.path(REGULAR).is_file())
         self.assertNotIn(REGULAR, self.f.report()["preservedFonts"])
         status = trace.build_physical_trace(self.f.inventory, self.f.stage, prepared=True)
@@ -351,7 +357,7 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
                   points=LATIN | greek | cyrillic | han, advance=880)
         after = self.assert_success(self.f.invoke())
         self.assertEqual(after["inventorySlots"], before["inventorySlots"])
-        self.assertEqual((after["mapped"], after["preserved"]), (7, 2))
+        self.assertEqual((after["mapped"], after["preserved"]), (8, 1))
         self.assertNotIn(REGULAR, self.f.report()["preservedFonts"])
         with TTFont(self.f.path(REGULAR)) as font:
             self.assertTrue((LATIN | greek | cyrillic).issubset(font.getBestCmap()))
@@ -540,9 +546,15 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
         for logical in (HEAVY, PARTIAL):
             self.assertEqual(slots[logical]["category"], "issue", slots[logical])
             self.assertFalse(slots[logical]["safeToRetry"])
-            self.assertTrue(slots[logical]["sourceUnavailable"])
+        self.assertTrue(slots[HEAVY]["sourceUnavailable"])
+        self.assertFalse(slots[PARTIAL]["sourceUnavailable"])
+        self.assertEqual(slots[PARTIAL]["state"], "partial")
+        self.assertEqual(slots[PARTIAL]["retainedFaces"][0]["faceIndex"], 1)
+        self.assertIn("第 1 面 · 已替换", slots[PARTIAL]["routes"][0]["family"])
+        self.assertIn("第 2 面 · 保留原厂", slots[PARTIAL]["routes"][1]["family"])
         self.assertEqual(result["summary"]["issues"], 2)
-        self.assertEqual(result["summary"]["sourceUnavailable"], 2)
+        self.assertEqual(result["summary"]["sourceUnavailable"], 1)
+        self.assertEqual(result["summary"]["partial"], 1)
         self.assertEqual(result["summary"]["remediable"], 0)
         self.assertEqual(result["summary"]["inventorySlots"], 9)
         self.assertEqual(result["summary"]["replaced"], 7)

@@ -86,7 +86,7 @@ class InventoryCompatibilityTests(unittest.TestCase):
             '</family></fonts-modification>')
         data, _ = self.scan()
         key = "/product/fonts/VendorCollection.ttf"
-        self.assertEqual(list(data["slots"]), [key])
+        self.assertEqual(set(data["slots"]), {key, "/system/fonts/VendorCollection.ttf"})
         self.assertEqual(data["families"]["system-ui"], [key])
         slot = data["slots"][key]
         self.assertEqual((slot["faceIndex"], slot["weight"]), (1, 450))
@@ -408,6 +408,60 @@ class InventoryCompatibilityTests(unittest.TestCase):
         self.assertEqual(data["slots"]["/system/fonts/FutureBrandClock.ttf"]["replacementRole"], "digits")
         self.assertIn("/system/fonts/IconicSerifMusicArabic.ttf", data["slots"])
         self.assertEqual(data["preservedFonts"]["/system/fonts/TotallyNormal.ttf"]["reason"], "private-use-symbol-font")
+
+    def test_unlisted_partial_and_fullwidth_digits_are_scanned_and_actually_replaced(self):
+        import inventory_font_stage as engine
+        self.seed_ui()
+        for name, points in (("PartialDigits.ttf", {0x30, 0x31}),
+                             ("FullwidthDigits.ttf", {0xFF10, 0xFF11})):
+            self.make_text_face(self.fonts / name, points)
+        self.make_text_face(self.fonts / "SymbolDigits.ttf", {0x30})
+        with TTFont(self.fonts / "SymbolDigits.ttf") as font:
+            font["OS/2"].sFamilyClass = 12 << 8
+            font.save(self.fonts / "SymbolDigits.ttf")
+        data, _ = self.scan()
+        for name in ("PartialDigits.ttf", "FullwidthDigits.ttf"):
+            slot = data["slots"]["/system/fonts/" + name]
+            self.assertEqual(slot["replacementRole"], "digits")
+            self.assertEqual(slot["metrics"]["fontTraits"]["digitCount"], 2)
+        self.assertEqual(data["preservedFonts"]["/system/fonts/SymbolDigits.ttf"]["reason"],
+                         "symbol-font-metadata")
+        source = self.root / "source.ttf"
+        self.make_text_face(source, {0x30, 0xFF10})
+        with TTFont(source) as font:
+            glyph = font["glyf"]["zero"]
+            glyph.coordinates = type(glyph.coordinates)((x - 200 if x == 640 else x, y)
+                                                         for x, y in glyph.coordinates)
+            font.save(source)
+        module = self.root / "module"
+        (module / "config").mkdir(parents=True)
+        (module / "config/device_font_inventory.json").write_text(json.dumps(data))
+        stage = module / ".luoshu-payload-stage"
+        with patch.dict(os.environ, {"LUOSHU_BUILD_KEY": "compat-stock"}):
+            summary = engine.run(module, stage, "direct", source)
+        self.assertEqual(summary["mapped"], 3)
+        report = json.loads((stage / ".luoshu-metrics-report.json").read_text())
+        for name, replaced, retained in (("PartialDigits.ttf", 0x30, 0x31),
+                                         ("FullwidthDigits.ttf", 0xFF10, 0xFF11)):
+            row = next(row for row in report["slots"] if row["slot"].endswith(name))
+            self.assertEqual(row["replacedRoleCounts"]["digit"], 1)
+            self.assertEqual(row["retainedTargetRoleCounts"]["digit"], 1)
+            with TTFont(stage / "system/fonts" / name) as output:
+                glyphs, cmap = output["glyf"], output.getBestCmap()
+                self.assertEqual(max(x for x, _ in glyphs[cmap[replaced]].getCoordinates(glyphs)[0]), 440)
+                self.assertEqual(max(x for x, _ in glyphs[cmap[retained]].getCoordinates(glyphs)[0]), 640)
+        self.assertFalse((stage / "system/fonts/SymbolDigits.ttf").exists())
+
+    def test_previous_digit_scan_revision_cannot_reuse_incomplete_inventory(self):
+        self.seed_ui()
+        data, _ = self.scan()
+        self.make_text_face(self.fonts / "NewDigits.ttf", {0x31})
+        data["scannerRevision"], data["metricsRevision"] = 9, 4
+        self.args.output.write_text(json.dumps(data))
+        self.assertFalse(scanner._can_reuse(data, "compat-stock"))
+        refreshed, _ = self.scan()
+        self.assertIn("/system/fonts/NewDigits.ttf", refreshed["slots"])
+        self.assertEqual((refreshed["scannerRevision"], refreshed["metricsRevision"]), (10, 5))
 
     def test_legacy_xml_and_modern_axis_references_survive(self):
         self.make_text_face(self.fonts / "LegacyFace.ttf", range(32, 127))

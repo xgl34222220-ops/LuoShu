@@ -399,7 +399,7 @@ def _cmap_metrics(font: TTFont) -> dict[str, Any]:
             letter_scripts[script] = letter_scripts.get(script, 0) + 1
     return {"points": points, "letterScripts": letter_scripts,
             "coverage": summarize_coverage(font, points=points),
-            "digitCount": sum(0x30 <= point <= 0x39 for point in points),
+            "digitCount": sum(0x30 <= point <= 0x39 or 0xFF10 <= point <= 0xFF19 for point in points),
             "privateUseCount": sum(unicode_category(chr(point)) == "Co" for point in points),
             "cmapSha256": hashlib.sha256(font.reader["cmap"]).hexdigest(),
             "codepointSha256": point_digest.hexdigest()}
@@ -832,7 +832,7 @@ def _text_face_reason(metrics: dict[str, Any], *, declared_text: bool = False) -
     digits = int(traits.get("digitCount", 0))
     if int(traits.get("privateUseCount", 0)) > max(128, letters * 4):
         return "private-use-symbol-font"
-    if letters or (digits == 10 and coverage["unicodeCount"] <= 128) or (declared_text and digits and coverage["unicodeCount"] <= 128):
+    if letters or (digits > 0 and coverage["unicodeCount"] <= 128):
         return ""
     return "non-text-cmap"
 
@@ -931,7 +931,8 @@ def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontR
                 continue
             selected = min(usable, key=lambda face: (
                 not any(tag == "zh" or tag.startswith("zh-") for tag in face["familyLanguages"]),
-                -int(face["metrics"]["coverage"]["hanCount"]), face["faceIndex"]))
+                -int(face["metrics"]["coverage"]["hanCount"]),
+                not bool(face["xmlReferences"]), face["faceIndex"]))
             slots[logical] = {
                 **previous, **selected,
                 "slotName": actual.name, "path": logical, "partition": root.partition,

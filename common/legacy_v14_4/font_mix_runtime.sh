@@ -50,10 +50,21 @@ finalize_next_payload() {
 write_finalize_state() {
     _mfs_state="$1"
     _mfs_message="$2"
+    # An old monitor must not clobber a newer request. A same-request failure
+    # keeps the actual inventory error instead of the generic commit summary.
+    _mfs_request="${LUOSHU_MIX_REQUEST_ID:-}"
+    _mfs_current=$(sed -n 's/^requestId=//p' "$REALMOD/config/mix-stage-next.conf" 2>/dev/null | head -n1)
+    [ -n "$_mfs_current" ] || _mfs_current=$(sed -n 's/^requestId=//p' "$REALMOD/config/font-payload-next.conf" 2>/dev/null | head -n1)
+    [ -n "$_mfs_request" ] && [ "$_mfs_request" = "$_mfs_current" ] || return 0
+    _mfs_existing=$(sed -n 's/^requestId=//p' "$FINALIZE_STATE" 2>/dev/null | head -n1)
+    if [ "$_mfs_existing" = "$_mfs_request" ] && grep -q '^state=failed$' "$FINALIZE_STATE" 2>/dev/null; then
+        return 0
+    fi
     _mfs_tmp="${FINALIZE_STATE}.tmp.$$"
     {
         printf 'state=%s\n' "$_mfs_state"
-        printf 'requestId=%s\n' "${LUOSHU_MIX_REQUEST_ID:-}"
+        printf 'requestId=%s\n' "$_mfs_request"
+        printf 'task=%s\n' "$(read_task_value task)"
         printf 'message=%s\n' "$_mfs_message"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } >"$_mfs_tmp" 2>/dev/null && mv -f "$_mfs_tmp" "$FINALIZE_STATE" 2>/dev/null || true
@@ -109,14 +120,17 @@ case "${1:-status}" in
         mkdir -p "$RUNTIME/cache" 2>/dev/null || true
         _response="$RUNTIME/cache/mix-engine-start.$$.json"
         rm -f "$_response" 2>/dev/null || true
-        rm -f "$FINALIZE_STATE" 2>/dev/null || true
+        [ "${LUOSHU_MIX_CONTROLLER_OWNS_COMMIT:-false}" = true ] || \
+            rm -f "$FINALIZE_STATE" 2>/dev/null || true
         MODDIR="$RUNTIME" LUOSHU_REAL_MODDIR="$REALMOD" \
             sh "$ENGINE" "$@" >"$_response" 2>&1
         _rc=$?
         cat "$_response" 2>/dev/null || true
         if [ "$_rc" -eq 0 ]; then
             _task=$(sed -n 's/^.*"task":"\([^"]*\)".*$/\1/p' "$_response" 2>/dev/null | tail -n1)
-            if [ -n "$_task" ]; then
+            # The weighted controller owns prepare/finalize for nested source
+            # generation. A second monitor used to rerun failed inventory work.
+            if [ -n "$_task" ] && [ "${LUOSHU_MIX_CONTROLLER_OWNS_COMMIT:-false}" != true ]; then
                 ( trap '' HUP; MODDIR="$RUNTIME" LUOSHU_REAL_MODDIR="$REALMOD" sh "$0" monitor "$_task" ) </dev/null >>"$LOG_FILE" 2>&1 &
             fi
         fi

@@ -361,6 +361,46 @@ def _merged_vorg(fonts: list[TTFont], merged_names: list[str]):
     return table
 
 
+class _SupplementMerger(Merger):
+    """Retain layout using the names decoded from the serialized glyph IDs.
+
+    A post-format-3 TrueType font has no persisted glyph names. Saving a subset
+    without a replaced character's cmap entry can therefore rename a retained
+    component from e.g. ``A`` to ``glyph00001`` when the merger reopens it. The
+    glyph ID and outline have not changed. Load the otherwise dropped tables
+    only after Merger has installed its final (collision-free) glyph names, so
+    every MATH/BASE/kern reference is decoded against the same ID/name mapping
+    as glyf, GSUB and GPOS. Never transplant pre-serialization name references.
+    """
+
+    def __init__(self, options):
+        super().__init__(options)
+        self.input_orders = []
+        self.retained_tables = {}
+        self.source_kern = None
+        self._opened_inputs = []
+
+    def _openFonts(self, files):
+        fonts = super()._openFonts(files)
+        self._opened_inputs.extend(fonts)
+        return fonts
+
+    def _preMerge(self, font):
+        index = len(self.input_orders)
+        self.input_orders.append(list(font.getGlyphOrder()))
+        if index == 0:
+            self.retained_tables = {tag: font[tag] for tag in ('MATH', 'BASE', 'kern')
+                                    if tag in font}
+        elif index == 1 and 'kern' in font:
+            self.source_kern = font['kern']
+        super()._preMerge(font)
+
+    def close_inputs(self):
+        for font in self._opened_inputs:
+            font.close()
+        self._opened_inputs.clear()
+
+
 def supplement(source: Path, stock: Path, output: Path, *, source_face_index: int = -1,
                stock_face_index: int = -1,
                replace_codepoints: set[int] | None = None,
@@ -415,13 +455,9 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
             if len(donor.getGlyphOrder()) + len(original.getGlyphOrder()) > 65535:
                 raise UnsupportedSupplementError('preserving both layout closures exceeds the OpenType glyph limit')
             options = MergeOptions()
-            # The merger has no complete MATH/BASE/kern merger. Stock goes first,
-            # so its post-subset glyph names/IDs remain stable and these layout
-            # tables can be retained verbatim as parsed table objects.
-            retained_tables = {tag: copy.deepcopy(original[tag])
-                               for tag in ('MATH', 'BASE', 'kern') if tag in original}
-            source_kern = copy.deepcopy(donor['kern']) if 'kern' in donor else None
-            stock_order, source_order = original.getGlyphOrder(), donor.getGlyphOrder()
+            # MATH/BASE/kern have no complete merger. Preserve their parsed
+            # references from the merger's actual serialized glyph-ID mapping.
+            stock_count, source_count = len(original.getGlyphOrder()), len(donor.getGlyphOrder())
             options.drop_tables = ['DSIG', 'FFTM', 'STAT', 'MATH', 'BASE', 'kern', 'VORG']
             if use_cff:
                 options.drop_tables.append('CFF ')
@@ -430,12 +466,15 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                 stock_file, source_file = directory / 'stock.otf', directory / 'source.otf'
                 original.save(stock_file, reorderTables=False)
                 donor.save(source_file, reorderTables=False)
-                merged = Merger(options).merge([stock_file, source_file])
+                merger = _SupplementMerger(options)
+                merged = None
                 try:
+                    merged = merger.merge([stock_file, source_file])
                     order = merged.getGlyphOrder()
-                    if order[:len(stock_order)] != stock_order:
-                        raise SupplementError('merger changed the retained stock glyph order')
-                    for tag, table in retained_tables.items():
+                    if ([len(names) for names in merger.input_orders] != [stock_count, source_count]
+                            or order != [name for names in merger.input_orders for name in names]):
+                        raise SupplementError('merger changed the serialized glyph IDs')
+                    for tag, table in merger.retained_tables.items():
                         merged[tag] = table
                     if use_cff:
                         vorg = _merged_vorg([original, donor], order)
@@ -443,13 +482,11 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                             merged['VORG'] = vorg
                         merged['CFF '] = _merged_cff_table([original, donor])
                         merged['post'].formatType = 3.0
+                    source_kern = merger.source_kern
                     if source_kern is not None:
-                        renamed = dict(zip(source_order, order[len(stock_order):]))
                         for table in source_kern.kernTables:
                             if table.format != 0:
                                 raise UnsupportedSupplementError('unsupported source legacy kerning format')
-                            table.kernTable = {(renamed[a], renamed[b]): value
-                                               for (a, b), value in table.kernTable.items()}
                         if 'kern' in merged:
                             merged['kern'].kernTables.extend(source_kern.kernTables)
                         else:
@@ -463,7 +500,9 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                     temporary = directory / 'complete.otf'
                     merged.save(temporary, reorderTables=False)
                 finally:
-                    merged.close()
+                    if merged is not None:
+                        merged.close()
+                    merger.close_inputs()
                 with TTFont(temporary, lazy=True, recalcBBoxes=False, recalcTimestamp=False) as checked:
                     actual_points = set(preferred_unicode_codepoints(checked))
                     if actual_points != stock_points:

@@ -27,6 +27,7 @@ REBOOT_CONF="$REALMOD/config/text_reboot_required.conf"
 LOG_FILE="$REALMOD/logs/fontswitch.log"
 FINALIZE_LOCK="$REALMOD/.mix-stage-finalize.lock"
 PRECOMMIT_STATE="$MIX_STAGE/.luoshu-precommit-ready.conf"
+PRECOMMIT_FAILED_STATE="$MIX_STAGE/.luoshu-precommit-failed.conf"
 PRECOMMIT_ERROR=""
 [ -f "$LEGACY/payload_clone.sh" ] && . "$LEGACY/payload_clone.sh"
 [ -f "$REALMOD/common/background_task.sh" ] && . "$REALMOD/common/background_task.sh"
@@ -58,6 +59,7 @@ mix_finalize_state_write() {
     {
         printf 'state=%s\n' "$_mfs_state"
         printf 'task=%s\n' "$_mfs_task"
+        printf 'requestId=%s\n' "${LUOSHU_MIX_REQUEST_ID:-$(read_value "$MIX_STAGE_STATE" requestId)}"
         printf 'message=%s\n' "$_mfs_message"
         [ -z "$_mfs_percent" ] || printf 'percent=%s\n' "$_mfs_percent"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
@@ -67,11 +69,20 @@ mix_finalize_state_write() {
 
 mix_finalize_worker() {
     _mfw_task="$1"
+    # A terminal generation error belongs to this request. Do not overwrite it
+    # with a new running record when an older monitor reaches the same result.
+    if precommit_failed; then
+        mix_finalize_state_write failed "$PRECOMMIT_ERROR" "$_mfw_task" 100
+        return 1
+    fi
     mix_finalize_state_write running '正在提交下一启动字体负载' "$_mfw_task" 99
+    _mfw_rc=0
     if finalize_mix_stage >>"$LOG_FILE" 2>&1; then
         mix_finalize_state_write success '复合字体负载已提交，完整重启后生效' "$_mfw_task" 100
     else
-        mix_finalize_state_write failed '复合字体已生成，但下一启动负载提交失败' "$_mfw_task" 100
+        _mfw_rc=1
+        precommit_failed || true
+        mix_finalize_state_write failed "${PRECOMMIT_ERROR:-复合字体已生成，但下一启动负载提交失败}" "$_mfw_task" 100
     fi
     if type luoshu_clear_task_pid >/dev/null 2>&1; then
         luoshu_clear_task_pid "$REALMOD/config/mix_finalize_worker.pid" "mix-finalize-$_mfw_task"
@@ -80,6 +91,7 @@ mix_finalize_worker() {
               "$REALMOD/config/mix_finalize_worker.pid.task" \
               "$REALMOD/config/mix_finalize_worker.pid.boot" 2>/dev/null || true
     fi
+    return "$_mfw_rc"
 }
 
 ensure_mix_finalize_worker() {
@@ -87,6 +99,15 @@ ensure_mix_finalize_worker() {
     [ -n "$_emfw_task" ] || return 1
     [ -s "$MIX_STAGE_STATE" ] || return 1
     [ -d "$MIX_STAGE" ] || [ -d "$NEXT_PAYLOAD" ] || return 1
+    # Polling can finish an interrupted atomic rename only. It must never start
+    # font generation, or retry a deterministic generation failure.
+    precommit_failed && return 1
+    if ! precommit_ready; then
+        [ ! -d "$MIX_STAGE" ] && [ -s "$NEXT_PAYLOAD/.luoshu-precommit-ready.conf" ] || return 1
+        [ "$(read_value "$NEXT_PAYLOAD/.luoshu-precommit-ready.conf" state)" = ready ] || return 1
+        [ "$(read_value "$NEXT_PAYLOAD/.luoshu-precommit-ready.conf" requestId)" = \
+          "$(read_value "$MIX_STAGE_STATE" requestId)" ] || return 1
+    fi
     _emfw_pid="$REALMOD/config/mix_finalize_worker.pid"
     _emfw_identity="mix-finalize-$_emfw_task"
     _emfw_request=$(read_value "$MIX_STAGE_STATE" requestId)
@@ -104,7 +125,7 @@ ensure_mix_finalize_worker() {
         [ "$_emfw_rc" -eq 0 ] || [ "$_emfw_rc" -eq 3 ]
         return $?
     fi
-    ( trap '' HUP; MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" LUOSHU_MIX_REQUEST_ID="$_emfw_request" sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity" ) \
+    ( trap '' HUP; MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" LUOSHU_MIX_REQUEST_ID="$_emfw_request" sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity") \
         </dev/null >>"$LOG_FILE" 2>&1 &
     return 0
 }
@@ -113,9 +134,32 @@ json_escape_router() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
 
+precommit_failed() {
+    [ -s "$PRECOMMIT_FAILED_STATE" ] || return 1
+    mix_request_is_current || return 1
+    _pcf_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    [ -n "$_pcf_request" ] || return 1
+    [ "$(read_value "$PRECOMMIT_FAILED_STATE" requestId)" = "$_pcf_request" ] || return 1
+    PRECOMMIT_ERROR=$(read_value "$PRECOMMIT_FAILED_STATE" message)
+    [ -n "$PRECOMMIT_ERROR" ] || PRECOMMIT_ERROR='本次字体生成已失败，请重新应用'
+    return 0
+}
+
 precommit_fail() {
     PRECOMMIT_ERROR="$1"
+    mix_request_is_current || return 1
     _pf_task="$(read_value "$REALMOD/config/axes_task.conf" task)"
+    [ -n "$_pf_task" ] || _pf_task="$(read_value "$REALMOD/config/mix_task.conf" task)"
+    _pf_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    # The same request may have a controller and a legacy completion monitor.
+    # Persist failure under their shared lock, just as we persist ready state.
+    # A new user request gets its own stage and can try again.
+    if [ -n "$_pf_request" ]; then
+        _pf_tmp="${PRECOMMIT_FAILED_STATE}.tmp.$$"
+        {
+            printf 'state=failed\nrequestId=%s\nmessage=%s\n' "$_pf_request" "$PRECOMMIT_ERROR"
+        } >"$_pf_tmp" 2>/dev/null && mv -f "$_pf_tmp" "$PRECOMMIT_FAILED_STATE" 2>/dev/null || true
+    fi
     mix_finalize_state_write failed "$PRECOMMIT_ERROR" "$_pf_task" 100
     printf '[%s] [MIX] precommit failed: %s\n' \
         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" \
@@ -229,40 +273,55 @@ mix_status_json_fast() {
     _percent=$(read_value "$_task_file" percent)
     case "$_percent" in ''|*[!0-9]*) _percent=0 ;; esac
 
-    if [ "$_state" = success ]; then
-        _next_font=$(read_value "$NEXT_STATE" font)
-        if [ -d "$NEXT_PAYLOAD" ] && [ "$_next_font" = mix ]; then
-            _percent=100
-        else
-            _finalize_state=$(read_value "$REALMOD/config/mix-finalize-state.conf" state)
-            _finalize_message=$(read_value "$REALMOD/config/mix-finalize-state.conf" message)
-            if [ "$_finalize_state" = failed ]; then
-                _state=failed
-                _message="${_finalize_message:-复合字体负载提交失败}"
-                _percent=100
-            else
-                # The generator is done but the durable next-boot payload is not.
-                # Never leave a successful axes task parked at 99% forever if the
-                # original finalize monitor was reclaimed with its su session.
-                ensure_mix_finalize_worker "$_task" >/dev/null 2>&1 || true
-                _state=running
-                _message="${_finalize_message:-字体已生成，正在提交下一启动负载}"
-                _percent=99
-            fi
+    _finalize_file="$REALMOD/config/mix-finalize-state.conf"
+    _finalize_task=$(read_value "$_finalize_file" task)
+    _finalize_request=$(read_value "$_finalize_file" requestId)
+    _stage_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    _current_request="$_stage_request"
+    [ -n "$_current_request" ] || _current_request=$(read_value "$NEXT_STATE" requestId)
+    _finalize_matches=false
+    if [ "$_finalize_task" = "$_task" ]; then
+        if [ -z "$_finalize_request" ] || [ "$_finalize_request" = "$_current_request" ]; then
+            _finalize_matches=true
         fi
     fi
-
-    if [ "$_state" = running ]; then
-        _finalize_task=$(read_value "$REALMOD/config/mix-finalize-state.conf" task)
-        _finalize_state=$(read_value "$REALMOD/config/mix-finalize-state.conf" state)
-        _finalize_message=$(read_value "$REALMOD/config/mix-finalize-state.conf" message)
-        _finalize_percent=$(read_value "$REALMOD/config/mix-finalize-state.conf" percent)
+    _finalize_state=''
+    _finalize_message=''
+    _finalize_percent=0
+    if [ "$_finalize_matches" = true ]; then
+        _finalize_state=$(read_value "$_finalize_file" state)
+        _finalize_message=$(read_value "$_finalize_file" message)
+        _finalize_percent=$(read_value "$_finalize_file" percent)
         case "$_finalize_percent" in ''|*[!0-9]*) _finalize_percent=0 ;; esac
-        if [ -n "$_finalize_task" ] && [ "$_finalize_task" = "$_task" ] && \
-           [ "$_finalize_state" != failed ] && [ "$_finalize_percent" -gt "$_percent" ] 2>/dev/null; then
-            _percent="$_finalize_percent"
-            [ -z "$_finalize_message" ] || _message="$_finalize_message"
+    fi
+    if precommit_failed; then
+        _finalize_state=failed
+        _finalize_message="$PRECOMMIT_ERROR"
+    fi
+    if [ "$_finalize_state" = failed ]; then
+        _state=failed
+        _message="${_finalize_message:-复合字体负载提交失败}"
+        _percent=100
+    elif [ "$_state" = success ]; then
+        _next_font=$(read_value "$NEXT_STATE" font)
+        _next_request=$(read_value "$NEXT_STATE" requestId)
+        if [ -d "$NEXT_PAYLOAD" ] && [ "$_next_font" = mix ] && \
+           { [ -z "$_stage_request" ] || [ "$_next_request" = "$_stage_request" ]; }; then
+            _percent=100
+        elif ensure_mix_finalize_worker "$_task" >/dev/null 2>&1; then
+            # Recovery can only finish a ready payload's atomic commit. A status
+            # request must not launch the expensive inventory mapper.
+            _state=running
+            _message="${_finalize_message:-字体已生成，正在提交下一启动负载}"
+            _percent=99
+        else
+            _state=failed
+            _message='字体生成已结束，但本机字体负载未完成，请重新应用'
+            _percent=100
         fi
+    elif [ "$_state" = running ] && [ "$_finalize_percent" -gt "$_percent" ] 2>/dev/null; then
+        _percent="$_finalize_percent"
+        [ -z "$_finalize_message" ] || _message="$_finalize_message"
     fi
 
     _cjk=$(read_value "$_task_file" cjk)
@@ -501,6 +560,7 @@ prepare_mix_stage_for_commit() {
         PRECOMMIT_ERROR='字体组合任务已被新请求替换，已忽略旧任务提交'
         return 1
     }
+    precommit_failed && return 1
     precommit_ready && return 0
 
     # v14.2/v14.3 composite workers finish by calling the safe switch core first.
@@ -537,13 +597,24 @@ prepare_mix_stage_for_commit() {
     mix_finalize_state_write running "正在按本机扫描清单映射全部可替换字体槽位" "$_pm_task"
     # Composition starts from new source anchors, so map the full inventory once.
     # Passing a repair-only plan here would omit every unrequested slot.
-    if ! LUOSHU_REAL_MODDIR="$REALMOD" \
+    _pm_output="$MIX_STAGE/.luoshu-precommit-output.log"
+    LUOSHU_REAL_MODDIR="$REALMOD" \
         LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
         LUOSHU_COVERAGE_PLAN= \
-            sh "$_inventory_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1; then
-        precommit_fail '按本机清单生成字体失败，未提交半成品'
+            sh "$_inventory_helper" "$MIX_STAGE" mix mix >"$_pm_output" 2>&1
+    _pm_rc=$?
+    cat "$_pm_output" >>"$LOG_FILE" 2>/dev/null || true
+    if [ "$_pm_rc" -ne 0 ]; then
+        _pm_detail=$(sed -n 's/^通用字体生成失败：[[:space:]]*//p' "$_pm_output" 2>/dev/null | tail -n1)
+        [ -n "$_pm_detail" ] || _pm_detail=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_pm_output" 2>/dev/null | tail -n1)
+        if [ -n "$_pm_detail" ]; then
+            precommit_fail "按本机清单生成字体失败：$_pm_detail（未提交半成品）"
+        else
+            precommit_fail '按本机清单生成字体失败，未提交半成品'
+        fi
         return 1
     fi
+    rm -f "$_pm_output" 2>/dev/null || true
 
     _pm_request=$(read_value "$MIX_STAGE_STATE" requestId)
     [ -n "$_pm_request" ] || {
@@ -568,6 +639,61 @@ prepare_mix_stage_for_commit() {
     mix_finalize_state_write ready '预提交处理完成，正在原子提交下一启动负载' "$_pm_task" 98
     return 0
 }
+commit_mix_payload_transaction() (
+    _txn_dir="$REALMOD/.luoshu-mix-commit.$$"
+    mkdir "$_txn_dir" 2>/dev/null || return 1
+    _txn_mutated=false
+    _txn_installed=false
+    _txn_committed=false
+    rollback_mix_commit() {
+        _txn_restored=true
+        if [ "$_txn_committed" != true ] && [ "$_txn_mutated" = true ]; then
+            if [ "$_txn_installed" = true ] && [ -d "$NEXT_PAYLOAD" ] && [ ! -e "$MIX_STAGE" ]; then
+                mv "$NEXT_PAYLOAD" "$MIX_STAGE" 2>/dev/null || _txn_restored=false
+            fi
+            if [ -d "$_txn_dir/previous-next" ]; then
+                if [ ! -e "$NEXT_PAYLOAD" ] && [ ! -L "$NEXT_PAYLOAD" ]; then
+                    mv "$_txn_dir/previous-next" "$NEXT_PAYLOAD" 2>/dev/null || _txn_restored=false
+                else
+                    _txn_restored=false
+                fi
+            fi
+            for _txn_name in font-payload-next.conf active_font.conf text_reboot_required.conf; do
+                if [ -f "$_txn_dir/$_txn_name" ] || [ -L "$_txn_dir/$_txn_name" ]; then
+                    mv -f "$_txn_dir/$_txn_name" "$REALMOD/config/$_txn_name" 2>/dev/null || _txn_restored=false
+                else
+                    rm -f "$REALMOD/config/$_txn_name" 2>/dev/null || _txn_restored=false
+                fi
+            done
+        fi
+        if [ "$_txn_restored" = true ]; then
+            rm -rf "$_txn_dir" 2>/dev/null || true
+        else
+            printf '[MIX] commit rollback incomplete; previous payload retained at %s\n' "$_txn_dir" >>"$LOG_FILE" 2>/dev/null || true
+        fi
+    }
+    trap 'rollback_mix_commit' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    # Preserve the queued selection and its small metadata before replacing it.
+    # Font trees are renamed, so this adds no font copies or mapping passes.
+    for _txn_name in font-payload-next.conf active_font.conf text_reboot_required.conf; do
+        if [ -e "$REALMOD/config/$_txn_name" ] || [ -L "$REALMOD/config/$_txn_name" ]; then
+            cp -p "$REALMOD/config/$_txn_name" "$_txn_dir/$_txn_name" 2>/dev/null || return 1
+        fi
+    done
+    _txn_mutated=true
+    if [ -e "$NEXT_PAYLOAD" ] || [ -L "$NEXT_PAYLOAD" ]; then
+        mv "$NEXT_PAYLOAD" "$_txn_dir/previous-next" 2>/dev/null || return 1
+    fi
+    _txn_installed=true
+    mv "$MIX_STAGE" "$NEXT_PAYLOAD" 2>/dev/null || return 1
+    write_next_state || return 1
+    _txn_committed=true
+    return 0
+)
+
 commit_mix_stage_if_needed() {
     mix_request_is_current || return 1
     # Auto-multiweight may already have gone through font_switch_safe.sh. In that
@@ -599,12 +725,7 @@ commit_mix_stage_if_needed() {
     fi
 
     prepare_mix_stage_for_commit || return 1
-    rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
-    mv "$MIX_STAGE" "$NEXT_PAYLOAD" 2>/dev/null || return 1
-    if ! write_next_state; then
-        mv "$NEXT_PAYLOAD" "$MIX_STAGE" 2>/dev/null || true
-        return 1
-    fi
+    commit_mix_payload_transaction || return 1
     rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
     printf '[%s] legacy composite staged for next boot: mix\n' \
         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" >> "$LOG_FILE" 2>/dev/null || true
@@ -619,11 +740,17 @@ finalize_lock_acquire() {
     # the work concurrently. The controller's outer timeout remains unchanged.
     while [ "$_tries" -lt "$_limit" ]; do
         if mkdir "$FINALIZE_LOCK" 2>/dev/null; then
-            printf '%s\n' "$$" > "$FINALIZE_LOCK/pid" 2>/dev/null || {
-                rmdir "$FINALIZE_LOCK" 2>/dev/null || true
-                return 1
-            }
-            return 0
+            # Publish the owner atomically. A reader must never mistake the
+            # empty file between open/truncate and printf for a stale lock.
+            _owner_tmp="$FINALIZE_LOCK/pid.$$.tmp"
+            if printf '%s\n' "$$" >"$_owner_tmp" 2>/dev/null && \
+               mv -f "$_owner_tmp" "$FINALIZE_LOCK/pid" 2>/dev/null; then
+                return 0
+            fi
+            rm -f "$_owner_tmp" 2>/dev/null || true
+            rmdir "$FINALIZE_LOCK" 2>/dev/null || true
+            _tries=$((_tries + 1))
+            continue
         fi
         _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
         case "$_owner" in
@@ -636,16 +763,39 @@ finalize_lock_acquire() {
             _tries=$((_tries + 1))
             _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
             case "$_owner" in
-                ''|*[!0-9]*) rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true ;;
+                ''|*[!0-9]*) ;;
                 *) continue ;;
             esac
+            # Only an empty directory may be reclaimed in this window. Never
+            # unlink a pid that another process may just have published. Remove
+            # only initializer/reclaimer artifacts whose named owner is dead.
+            for _abandoned in "$FINALIZE_LOCK"/pid.*.tmp "$FINALIZE_LOCK"/reclaim.*; do
+                [ -e "$_abandoned" ] || continue
+                _abandoned_pid=${_abandoned##*/}
+                case "$_abandoned_pid" in
+                    pid.*.tmp) _abandoned_pid=${_abandoned_pid#pid.}; _abandoned_pid=${_abandoned_pid%.tmp} ;;
+                    reclaim.*) _abandoned_pid=${_abandoned_pid#reclaim.} ;;
+                esac
+                case "$_abandoned_pid" in ''|*[!0-9]*) continue ;; esac
+                kill -0 "$_abandoned_pid" 2>/dev/null && continue
+                if [ -d "$_abandoned" ]; then rmdir "$_abandoned" 2>/dev/null || true
+                else rm -f "$_abandoned" 2>/dev/null || true
+                fi
+            done
             rmdir "$FINALIZE_LOCK" 2>/dev/null || true
             continue
         fi
         if ! kill -0 "$_owner" 2>/dev/null; then
-            # Recheck before unlinking: a peer may already have recovered it.
-            if [ "$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)" = "$_owner" ]; then
-                rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
+            # Pin the directory while recovering a dead owner. A second
+            # reclaimer cannot remove/recreate it between our PID check and
+            # unlink. Name the pin by PID so an interrupted reclaim is recoverable.
+            _reclaim="$FINALIZE_LOCK/reclaim.$$"
+            if mkdir "$_reclaim" 2>/dev/null; then
+                if [ "$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)" = "$_owner" ] && \
+                   ! kill -0 "$_owner" 2>/dev/null; then
+                    rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
+                fi
+                rmdir "$_reclaim" 2>/dev/null || true
                 rmdir "$FINALIZE_LOCK" 2>/dev/null || true
             fi
             _tries=$((_tries + 1))
@@ -705,7 +855,8 @@ finalize_mix_stage() (
     commit_mix_stage_if_needed
     _commit_rc=$?
     if [ "$_commit_rc" -ne 0 ]; then
-        printf '{"status":"error","message":"复合字体已生成但下一启动负载提交失败"}\n'
+        printf '{"status":"error","message":"%s"}\n' \
+            "$(json_escape_router "${PRECOMMIT_ERROR:-复合字体已生成但下一启动负载提交失败}")"
         return 1
     fi
     write_legacy_mix_mode
@@ -785,7 +936,7 @@ mark_mix_mode_if_success() {
 _cmd="${1:-config}"
 if [ "$_cmd" = finalize-worker ]; then
     mix_finalize_worker "${2:-}"
-    exit 0
+    exit $?
 fi
 if [ "$_cmd" = prepare-finalize ]; then
     prepare_mix_stage_locked

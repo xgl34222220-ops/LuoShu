@@ -197,18 +197,203 @@ fi
                 first.kill()
             first.wait()
 
-    def test_failed_mapping_releases_lock_for_retry(self):
-        self.script("common/inventory_font_stage.sh", "#!/bin/sh\nexit 1\n")
-        result = subprocess.run(["sh", str(ROUTER), "prepare-finalize"],
-            env=self.env, capture_output=True, text=True, timeout=5)
-        self.assertNotEqual(result.returncode, 0)
+    def test_failed_commit_restores_previous_queued_payload_and_selection(self):
+        next_path = self.module / ".luoshu-payload-next"
+        (next_path / "system/fonts").mkdir(parents=True)
+        (next_path / "system/fonts/Previous.ttf").write_bytes(b"previous-selected-font")
+        old_state = "state=prepared\nfont=Previous\nrequestId=previous-request\n"
+        (self.module / "config/font-payload-next.conf").write_text(old_state)
+        (self.module / "config/active_font.conf").write_text("Previous\n")
+        (self.module / "config/text_reboot_required.conf").write_text("font=Previous\nbootId=old\n")
+        real_mv = shutil.which("mv")
+        # Fail after NEXT_STATE has changed, but before the active selection can
+        # be written. Rollback must restore all three metadata files and the tree.
+        self.script("bin/mv", f'''#!/bin/sh
+"{real_mv}" "$@" || exit $?
+for target do :; done
+if [ "$target" = "$MODDIR/config/font-payload-next.conf" ] && [ ! -e "$MODDIR/commit-write-failed" ]; then
+    touch "$MODDIR/commit-write-failed"
+    rm -f "$MODDIR/config/active_font.conf"
+    ln -s /dev/full "$MODDIR/config/active_font.conf"
+fi
+''')
+        result = self.run_router("finalize")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((next_path / "system/fonts/Previous.ttf").read_bytes(), b"previous-selected-font")
+        self.assertEqual((self.module / "config/font-payload-next.conf").read_text(), old_state)
+        self.assertEqual((self.module / "config/active_font.conf").read_text(), "Previous\n")
+        self.assertEqual((self.module / "config/text_reboot_required.conf").read_text(), "font=Previous\nbootId=old\n")
+        self.assertTrue((self.stage / "system/fonts/MiSansVF.ttf").is_file())
+        self.assertFalse(list(self.module.glob(".luoshu-mix-commit.*")))
         self.assertFalse((self.module / ".mix-stage-finalize.lock").exists())
-        self.assertFalse((self.stage / ".luoshu-precommit-ready.conf").exists())
-        self.script("common/inventory_font_stage.sh", "#!/bin/sh\nexit 0\n")
-        result = subprocess.run(["sh", str(ROUTER), "finalize"],
-            env=self.env, capture_output=True, text=True, timeout=5)
+        # Retrying only the now-ready atomic commit does not regenerate fonts.
+        result = self.run_router("finalize")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len((self.module / "mapping-calls").read_text().splitlines()), 1)
+        self.assertTrue((next_path / "system/fonts/MiSansVF.ttf").is_file())
+
+    def test_abandoned_lock_initializer_and_reclaimer_are_recovered(self):
+        lock = self.module / ".mix-stage-finalize.lock"
+        lock.mkdir()
+        (lock / "pid.99999999.tmp").write_text("99999999\n")
+        (lock / "reclaim.99999998").mkdir()
+        result = self.run_router("prepare-finalize")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len((self.module / "mapping-calls").read_text().splitlines()), 1)
+        self.assertFalse(lock.exists())
+
+    def test_two_dead_owner_reclaimers_do_not_remove_new_live_owner(self):
+        lock = self.module / ".mix-stage-finalize.lock"
+        lock.mkdir()
+        (lock / "pid").write_text("99999999\n")
+        workers = [subprocess.Popen(["sh", str(ROUTER), command], env=self.env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                   for command in ("prepare-finalize", "finalize", "finalize", "prepare-finalize")]
+        try:
+            for worker in workers:
+                out, err = worker.communicate(timeout=10)
+                self.assertEqual(worker.returncode, 0, out + err)
+            self.assertEqual(len((self.module / "mapping-calls").read_text().splitlines()), 1)
+            self.assertFalse(lock.exists())
+        finally:
+            for worker in workers:
+                if worker.poll() is None:
+                    worker.kill()
+                worker.wait()
+
+    def failing_mapper(self):
+        self.script("common/inventory_font_stage.sh", """#!/bin/sh
+printf '%s\n' "$$" >> "$LUOSHU_REAL_MODDIR/mapping-calls"
+touch "$LUOSHU_REAL_MODDIR/mapping-entered"
+sleep 0.2
+printf '%s\n' '通用字体生成失败：merger changed the retained stock glyph order' >&2
+exit 1
+""")
+
+    def test_failed_mapping_is_terminal_for_request_and_next_request_can_retry(self):
+        self.failing_mapper()
+        result = self.run_router("prepare-finalize")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("merger changed the retained stock glyph order", json.loads(result.stdout)["message"])
+        self.assertFalse((self.module / ".mix-stage-finalize.lock").exists())
+        self.assertTrue((self.stage / ".luoshu-precommit-failed.conf").exists())
+        # Even changing the helper cannot silently retry this failed request.
+        self.script("common/inventory_font_stage.sh", "#!/bin/sh\nprintf 'called\\n' >> \"$LUOSHU_REAL_MODDIR/mapping-calls\"\nexit 0\n")
+        for command in ("finalize", "prepare-finalize", "finalize"):
+            result = self.run_router(command)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("merger changed the retained stock glyph order", json.loads(result.stdout)["message"])
+        self.assertEqual(len((self.module / "mapping-calls").read_text().splitlines()), 1)
+        self.assertFalse((self.module / ".luoshu-payload-next").exists())
+        # A new explicit request has a new generation identity and may proceed.
+        for path in (self.module / "config/mix-stage-next.conf", self.stage / ".luoshu-mix-generation.conf"):
+            path.write_text(path.read_text().replace("request-test", "request-next"))
+        result = self.run_router("finalize", request="request-next")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue((self.module / ".luoshu-payload-next/system/fonts/MiSansVF.ttf").is_file())
+        self.assertEqual(len((self.module / "mapping-calls").read_text().splitlines()), 2)
+
+    def test_parallel_failed_prepare_and_monitor_map_once_and_keep_cause(self):
+        self.failing_mapper()
+        workers = [subprocess.Popen(["sh", str(ROUTER), "prepare-finalize"],
+                   env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)]
+        try:
+            self.wait_for(self.module / "mapping-entered")
+            for command in ("finalize", "prepare-finalize", "finalize"):
+                workers.append(subprocess.Popen(["sh", str(ROUTER), command],
+                    env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True))
+            for worker in workers:
+                out, err = worker.communicate(timeout=10)
+                self.assertNotEqual(worker.returncode, 0, out + err)
+                self.assertIn("merger changed the retained stock glyph order", json.loads(out)["message"])
+            self.assertEqual(len((self.module / "mapping-calls").read_text().splitlines()), 1)
+            self.assertEqual((self.module / "logs/fontswitch.log").read_text().count("[MIX] precommit failed:"), 1)
+            self.assertFalse((self.module / ".luoshu-payload-next").exists())
+        finally:
+            for worker in workers:
+                if worker.poll() is None:
+                    worker.kill()
+                worker.wait()
+
+    def test_repeated_status_never_generates_unprepared_or_failed_stage(self):
+        self.failing_mapper()
+        task = self.module / "config/axes_task.conf"
+        task.write_text("task=axes-test\nstate=success\npercent=100\n")
+        for _ in range(3):
+            result = self.run_router("status")
+            self.assertEqual(json.loads(result.stdout)["data"]["state"], "failed")
+        self.assertFalse((self.module / "mapping-calls").exists())
+        self.run_router("prepare-finalize")
+        for _ in range(3):
+            result = self.run_router("status")
+            data = json.loads(result.stdout)["data"]
+            self.assertEqual(data["state"], "failed")
+            self.assertIn("merger changed the retained stock glyph order", data["message"])
+        self.assertEqual(len((self.module / "mapping-calls").read_text().splitlines()), 1)
+
+    def test_weighted_controller_owns_commit_and_surfaces_exact_mapper_failure(self):
+        self.failing_mapper()
+        shutil.copyfile(ROUTER, self.module / "common/legacy_v14_4/mix_router.sh")
+        runtime = self.module / ".legacy-v14-runtime"
+        (runtime / "common").mkdir(parents=True)
+        for name in ("config", "cache", "logs"):
+            (runtime / name).symlink_to(self.module / name, target_is_directory=True)
+        shutil.copyfile(ROOT / "common/legacy_v14_4/font_mix_runtime.sh", runtime / "common/font_mix.sh")
+        self.script(".legacy-v14-runtime/common/util_functions.sh", """detect_font_family() { printf '%s\n' "${1%%-*}"; }
+detect_font_weight() { echo regular; }
+is_variable_font() { return 1; }
+""")
+        self.script(".legacy-v14-runtime/common/font_check.sh", """font_validate() { FONT_CHECK_VARIABLE=false; FONT_CHECK_FORMAT=TTF; return 0; }
+""")
+        self.script(".legacy-v14-runtime/common/font_mix_engine.sh", """#!/bin/sh
+[ "$1" = start ] || exit 1
+printf '%s\n' "$LUOSHU_MIX_CONTROLLER_OWNS_COMMIT" > "$LUOSHU_REAL_MODDIR/controller-owns-commit"
+cat > "$MODDIR/config/mix_task.conf" <<EOF_TASK
+task=mix-child
+state=success
+cjk=$2
+latin=$3
+digit=$4
+EOF_TASK
+printf '%s\n' '{"status":"ok","data":{"task":"mix-child"}}'
+""")
+        public = self.module / "public"
+        (public / "fonts").mkdir(parents=True)
+        for family in ("CJK", "Latin", "Digit"):
+            (public / "fonts" / (family + "-Regular.ttf")).write_text("font-source")
+        task_root = self.module / "cache/axes-root"
+        (self.module / "config/axes_task.conf").write_text(
+            "task=axes-test\nstate=queued\npercent=0\ncjk=CJK\nlatin=Latin\ndigit=Digit\n"
+            f"root={task_root}\nstarted={int(time.time())}\n"
+            "cjkAxes=wght=400\nlatinAxes=wght=400\ndigitAxes=wght=400\n")
+        result = subprocess.run(["sh", str(ROOT / "common/legacy_v14_4/v142_weighted_mix.sh"),
+                                 "worker", "axes-test"],
+                                env={**self.env, "MODDIR": str(runtime), "LUOSHU_PUBLIC_DIR": str(public)},
+                                text=True, capture_output=True, timeout=12)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.module / "controller-owns-commit").read_text().strip(), "true")
+        self.assertEqual(len((self.module / "mapping-calls").read_text().splitlines()), 1)
+        state = (self.module / "config/axes_task.conf").read_text()
+        self.assertIn("state=failed\n", state)
+        self.assertIn("merger changed the retained stock glyph order", state)
+        self.assertNotIn("legacy-v14 composite task finished", (self.module / "logs/fontswitch.log").read_text())
+        self.assertFalse((self.module / ".luoshu-payload-next").exists())
+        status = json.loads(self.run_router("status").stdout)["data"]
+        self.assertEqual(status["state"], "failed")
+        self.assertIn("merger changed the retained stock glyph order", status["message"])
+
+    def test_late_legacy_monitor_preserves_failure_and_skips_second_mapping(self):
+        self.failing_mapper()
+        shutil.copyfile(ROUTER, self.module / "common/legacy_v14_4/mix_router.sh")
+        self.run_router("prepare-finalize")
+        (self.module / "config/mix_task.conf").write_text("task=mix-child\nstate=success\n")
+        result = subprocess.run(["sh", str(ROOT / "common/legacy_v14_4/font_mix_runtime.sh"),
+                                 "monitor", "mix-child"], env=self.env,
+                                text=True, capture_output=True, timeout=5)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len((self.module / "mapping-calls").read_text().splitlines()), 1)
+        self.assertIn("merger changed the retained stock glyph order",
+                      (self.module / "config/mix-finalize-state.conf").read_text())
 
     def test_timed_out_finalize_releases_its_lock(self):
         self.script("common/inventory_font_stage.sh", "#!/bin/sh\nsleep 30\n")

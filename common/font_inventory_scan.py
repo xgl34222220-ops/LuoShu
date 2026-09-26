@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Canonical stock-font inventory scanner.
 
-Revision 9 discovers physical text capabilities from trusted stock files and
+Revision 10 discovers physical text capabilities from trusted stock files and
 XML contracts, without vendor properties or ROM-specific filename lists.
 """
 from __future__ import annotations
@@ -15,9 +15,9 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import font_inventory as base
-SCANNER_REVISION = 9
+SCANNER_REVISION = 10
 CANDIDATE_SCHEMA = "device-font-candidates-v1"
-METRICS_REVISION = 4
+METRICS_REVISION = 5
 PRIMARY_FONT_SPECS = (
     ("system", Path("/system/fonts"), "system_fonts", (Path("/system/font"),)),
     ("system_ext", Path("/system_ext/fonts"), "system_ext_fonts", (Path("/system/system_ext/fonts"),)),

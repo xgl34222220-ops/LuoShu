@@ -166,14 +166,15 @@ rm -rf "$MODULE/.luoshu-payload-next"
 rm -f "$MODULE/config/font-payload-next.conf"
 cat > "$MODULE/config/mix-finalize-state.conf" <<'EOF_FINALIZE_FAIL'
 state=failed
+task=axes-fast
 message=提交校验失败
 EOF_FINALIZE_FAIL
 MODDIR="$MODULE" sh "$ROUTER" status axes-fast > "$TMP/status-failed.out"
 grep -q '"state":"failed"' "$TMP/status-failed.out"
 grep -q '提交校验失败' "$TMP/status-failed.out"
 
-# A successful generator without a durable next payload must never remain at 99%
-# forever. Status polling starts an identity-bound detached finalize recovery worker.
+# Status polling may recover the atomic commit of an already mapped payload.
+# It must never restart inventory generation merely because a child succeeded.
 rm -f "$MODULE/config/mix-finalize-state.conf"
 rm -rf "$MODULE/.luoshu-payload-next"
 rm -f "$MODULE/config/font-payload-next.conf"
@@ -195,6 +196,7 @@ latin=LatinRecovery
 digit=DigitRecovery
 compositeHash=composite-recovery
 EOF_MANIFEST_RECOVERY
+printf 'state=ready\nrequestId=request-recovery\n' > "$MODULE/.luoshu-mix-stage/.luoshu-precommit-ready.conf"
 cat > "$MODULE/config/axes_task.conf" <<'EOF_AXES_RECOVERY'
 task=axes-recovery
 state=success

@@ -134,7 +134,7 @@ def load_inventory(module: Path) -> dict:
         raise StageError('原厂字体清单不可用，请重新扫描') from exc
     if (not isinstance(data, dict) or data.get('schema') != 'device-font-inventory-v1'
             or data.get('state') != 'ready' or data.get('inventoryRevision') != 1
-            or data.get('scannerRevision') != 9 or data.get('metricsRevision') != 4
+            or data.get('scannerRevision') != 10 or data.get('metricsRevision') != 5
             or not isinstance(data.get('slots'), dict) or not data['slots']):
         raise StageError('原厂字体清单无效，请重新扫描')
     build_key = _device_build_key()
@@ -166,7 +166,7 @@ def family_names(font: TTFont) -> frozenset[str]:
 
 
 def character_role(point: int) -> str | None:
-    if is_han(point):
+    if is_han(point) and point != 0x3007:
         return 'cjk'
     if 48 <= point <= 57 or 0xFF10 <= point <= 0xFF19:
         return 'digit'
@@ -358,9 +358,15 @@ class SourcePool:
             raise StageError('未知换字体模式')
         if not self.faces:
             raise StageError('没有可用的字体源')
-        self.capabilities = {face.key: (sum(is_han(cp) for cp in face.points),
-            all(cp in face.points for cp in (*range(65, 91), *range(97, 123))),
-            all(cp in face.points for cp in range(48, 58))) for face in self.faces}
+        self.capabilities = {}
+        for face in self.faces:
+            points_by_role = {role: set() for role in TARGET_ROLES}
+            for point in face.points:
+                role = character_role(point)
+                if role:
+                    points_by_role[role].add(point)
+            self.capabilities[face.key] = {role: frozenset(points)
+                                           for role, points in points_by_role.items()}
 
     def pick(self, target: dict) -> tuple[SourceFace | None, int, str]:
         metrics = target.get('metrics') or {}
@@ -396,18 +402,13 @@ class SourcePool:
         if not candidates:
             return None, weight, 'source-style-missing'
         def capable_roles(face):
-            roles = set()
-            han_count, has_latin, has_digits = self.capabilities[face.key]
-            if 'cjk' in wanted and han_count >= min(8, coverage['hanCount']):
-                roles.add('cjk')
-            if 'latin' in wanted and has_latin:
-                roles.add('latin')
-            if 'digit' in wanted and has_digits:
-                roles.add('digit')
-            return roles
+            stock_points = target.get('_stockPoints')
+            return {role for role in wanted if self.capabilities[face.key][role]
+                    and (stock_points is None or not self.capabilities[face.key][role].isdisjoint(stock_points))}
         candidates = [face for face in candidates if capable_roles(face)]
         if not candidates:
-            return None, weight, 'source-script-coverage-missing'
+            return None, weight, ('source-target-characters-missing' if '_stockPoints' in target
+                                  else 'source-script-coverage-missing')
         def supported_roles(face):
             roles = capable_roles(face)
             if face.role_weights:
@@ -502,9 +503,25 @@ def faces_for_slot(slot: dict) -> list[dict]:
         return [slot]
     if not all(isinstance(face, dict) for face in faces):
         raise StageError('字体集合面记录无效')
-    if len(faces) > 1 and [face.get('faceIndex') for face in faces] != list(range(len(faces))):
+    if ((len(faces) > 1 or str(slot.get('format', '')).upper() in {'TTC', 'OTC'})
+            and [face.get('faceIndex') for face in faces] != list(range(len(faces)))):
         raise StageError('字体集合面顺序无效')
     return [{**slot, **face} for face in faces]
+
+
+def face_table_fingerprint(font: TTFont) -> dict[str, bytes]:
+    """Compare SFNT contents across TTC packing without interpreting glyph names.
+
+    All outline, layout, metadata, cmap and variation tables must stay identical.
+    Packing a face into a collection only changes head.checkSumAdjustment.
+    """
+    result = {}
+    for tag in font.reader.keys():
+        raw = font.reader[tag]
+        if tag == 'head':
+            raw = raw[:8] + b'\0' * 4 + raw[12:]
+        result[tag] = hashlib.sha256(raw).digest()
+    return result
 
 
 def run(module: Path, stage: Path, mode: str, source: Path | None = None,
@@ -609,23 +626,45 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
             if not faces:
                 preserved[logical] = 'preserved-collection'
                 continue
+            # A definitely unsupported optional file does not need its stock
+            # view opened or hashed. Collections only need all original faces
+            # when at least one face has a possible source replacement.
+            candidates = [(face, *pool.pick(face)) for face in faces]
+            if not any(src is not None for _face, src, _weight, _reason in candidates):
+                reason = candidates[0][3]
+                preserved[logical] = ('preserved-collection:' if len(faces) > 1 else '') + reason
+                continue
             selected = []
-            for face in faces:
-                contract = contract_for_face(face)
-                src, weight, reason = pool.pick(face)
-                if src is None:
-                    preserved[logical] = reason if len(faces) == 1 else 'preserved-collection:' + reason
-                    break
+            for face, src, weight, reason in candidates:
+                # Source capability is the actual stock/source character
+                # intersection, never a minimum alphabet or Han sample size.
                 stock = stock_sources.resolve(logical, face)
+                face['_stock'] = stock
+                face['_stockPoints'] = stock.codepoints
+                if len(faces) > 1 or str(slot.get('format', '')).upper() in {'TTC', 'OTC'}:
+                    with stock.path.open('rb') as stream:
+                        header = stream.read(12)
+                    if (len(header) != 12 or header[:4] != b'ttcf'
+                            or struct.unpack_from('>I', header, 8)[0] != len(faces)):
+                        raise StageError('原厂字体集合面数与清单不一致，请重新扫描')
+                    if selected and stock.digest != selected[0][0]['_stock'].digest:
+                        raise StageError('原厂字体集合各面来自不同文件，请重新扫描')
+                if src is not None:
+                    src, weight, reason = pool.pick(face)
+                if src is None:
+                    face['_retainedReason'] = reason
+                    selected.append((face, None, weight, None, False))
+                    continue
+                contract = contract_for_face(face)
                 replacement_key = (src.key, stock.codepoints, tuple(face['_replacementRoles']))
                 if replacement_key not in replacement_cache:
                     points = replacement_points(src.points, stock.codepoints, face['_replacementRoles'])
                     replacement_cache[replacement_key] = points, replacement_counts(points)
                 points, counts = replacement_cache[replacement_key]
                 if not sum(counts.values()):
-                    preserved[logical] = 'source-target-characters-missing'
-                    break
-                face['_stock'] = stock
+                    face['_retainedReason'] = 'source-target-characters-missing'
+                    selected.append((face, None, weight, contract, False))
+                    continue
                 face['_replacePoints'] = points
                 face['_replaceCounts'] = counts
                 same_face = (file_digest(src.path, digest_cache) == stock.digest
@@ -654,11 +693,15 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                 if not fixed_roles and ((len(weights) > 1 and (not preserve_variable or 'wght' not in src.axes
                         or min(weights) < src.axes['wght'][0] or max(weights) > src.axes['wght'][2]))
                         or (auto_composite and dynamic_weight and 'wght' not in src.axes)):
-                    preserved[logical] = 'source-variable-range-missing'
-                    break
+                    face['_retainedReason'] = 'source-variable-range-missing'
+                    selected.append((face, None, weight, contract, False))
+                    continue
                 selected.append((face, src, weight, contract, preserve_variable))
-            if logical not in preserved:
+            if any(src is not None for _face, src, *_rest in selected):
                 jobs[logical] = selected
+            else:
+                reason = selected[0][0]['_retainedReason']
+                preserved[logical] = ('preserved-collection:' if len(faces) > 1 else '') + reason
         if requested is not None and set(jobs) != requested:
             reasons = ', '.join(f'{path}: {preserved.get(path, "source-unavailable")}'
                                 for path in sorted(requested - jobs.keys()))
@@ -670,8 +713,10 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         # An unsupported optional collection must never prove CJK reachability.
         supplemented, scoped, anchors, role_anchors = {}, {}, {}, {}
         for logical, selected in list(jobs.items()):
-            try:
-                for face, src, weight, contract, variable in selected:
+            for index, (face, src, weight, contract, variable) in enumerate(selected):
+                if src is None:
+                    continue
+                try:
                     italic = bool(face['metrics'].get('fontTraits', {}).get('italic')
                                   or face.get('style') in {'italic', 'oblique'})
                     anchor = pool.materialize(src, weight, variable, italic)
@@ -706,11 +751,14 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                         metric_anchor = scoped[scope_key]
                     face.update(_anchor=anchor, _metricAnchor=metric_anchor,
                                 _supplementReport=supplement_report, _patchKey=patch_key, _italic=italic)
-            except UnsupportedSupplementError as exc:
+                except UnsupportedSupplementError:
+                    face['_retainedReason'] = ('source-variable-supplement-unavailable' if variable
+                                               else 'source-supplement-capability-missing')
+                    selected[index] = (face, None, weight, contract, False)
+            if not any(src is not None for _face, src, *_rest in selected):
+                reason = selected[0][0]['_retainedReason']
                 if requested is not None:
-                    raise StageError(f'所选字体无法完成请求的补齐，已保留原负载：{logical}: {exc}') from exc
-                reason = ('source-variable-supplement-unavailable' if any(item[4] for item in selected)
-                          else 'source-supplement-capability-missing')
+                    raise StageError(f'所选字体无法完成请求的补齐，已保留原负载：{logical}: {reason}')
                 preserved[logical] = ('preserved-collection:' if len(selected) > 1 else '') + reason
                 del jobs[logical]
         if not jobs:
@@ -744,6 +792,8 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                 if target in reusable:
                     points.update(verified_fallback_points(target))
                 for other, src, _weight, _contract, _variable in jobs.get(target, []):
+                    if src is None:
+                        continue
                     cv = other['metrics']['coverage']
                     if cv['hanCount'] > int(0x3007 in cv['cjkPunctuation']):
                         points.update(cp for cp in other['_resultPoints'] if is_cjk_routing_codepoint(cp))
@@ -752,6 +802,8 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         punctuation = {}
         for logical, selected in jobs.items():
             for face, src, weight, contract, variable in selected:
+                if src is None:
+                    continue
                 routing = route(logical, face)
                 if routing:
                     punctuation.setdefault((src.key, weight, variable, routing), set()).update(face['metrics']['coverage']['cjkPunctuation'])
@@ -764,6 +816,18 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
             rewritten += int(destination.is_file())
             generated_faces = []
             for face, src, weight, contract, variable in selected:
+                if src is None:
+                    stock = face['_stock']
+                    stock.verify_unchanged()
+                    generated_faces.append((stock.path, stock.face_index))
+                    report_slots.append({'slot': logical, 'faceIndex': face.get('faceIndex', 0),
+                        'state': 'retained-stock', 'reason': face['_retainedReason'],
+                        'weight': face.get('weight', face['metrics'].get('weightClass', weight)),
+                        'replacedRoleCounts': {}, 'replacedRoles': [], 'replacedCodepoints': 0,
+                        'retainedTargetRoleCounts': replacement_counts(stock.codepoints),
+                        'retainedStockCodepoints': len(stock.codepoints),
+                        'stockSourceVerifiedBy': stock.verified_by})
+                    continue
                 italic = face['_italic']
                 anchor = face['_anchor']
                 anchors[(src.key, weight, variable, italic)] = anchor
@@ -803,13 +867,15 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                     details['removedCjkMappings'] += removed
                     cache[key] = output, details
                 output, details = cache[key]
-                generated_faces.append(output)
+                generated_faces.append((output, -1))
                 report_slots.append({'slot': logical, 'faceIndex': face.get('faceIndex', 0),
+                    'state': 'replaced',
                     'weight': weight, 'metricsSource': 'stock', 'hhea': list(contract[1:4]),
                     'variableAxesPreserved': pool.materialized_axes[anchor],
                     'sourceWeight': src.weight,
                     'replacedRoles': [role for role, count in face['_replaceCounts'].items() if count],
                     'replacedRoleCounts': face['_replaceCounts'],
+                    'retainedTargetRoleCounts': replacement_counts(stock.codepoints - face['_replacePoints']),
                     'replacedCodepoints': supplement_report['replacedCodepoints'],
                     'retainedStockCodepoints': supplement_report['retainedStockCodepoints'],
                     'supplemented': bool(face['_needsSupplement']),
@@ -824,7 +890,9 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                 output = temporary / f'collection-{len(prepared)}.font'
                 collection = TTCollection()
                 collection.fonts = [TTFont(path, lazy=True, recalcBBoxes=False,
-                                           recalcTimestamp=False) for path in generated_faces]
+                                           recalcTimestamp=False, fontNumber=index)
+                                    for path, index in generated_faces]
+                fingerprints = [face_table_fingerprint(font) for font in collection.fonts]
                 try:
                     collection.save(output, shareTables=True)
                 finally:
@@ -832,8 +900,12 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                 with TTCollection(output, lazy=True) as check:
                     if len(check.fonts) != len(selected):
                         raise StageError('生成的字体集合面数不一致')
+                    if [face_table_fingerprint(font) for font in check.fonts] != fingerprints:
+                        raise StageError('生成的字体集合面顺序或原始数据表发生变化')
+                for face, src, *_rest in selected:
+                    face['_stock'].verify_unchanged()
             else:
-                output = generated_faces[0]
+                output = generated_faces[0][0]
             prepared.append((output, safe_destination(stage, logical)))
 
         mapped_paths = set(jobs) | reusable
@@ -860,10 +932,8 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         for source_face in pool.faces:
             if source_face.color:
                 continue
-            if any(is_han(cp) for cp in source_face.points):
-                available_roles.add('cjk')
-            if all(cp in source_face.points for cp in (*range(65, 91), *range(97, 123))):
-                available_roles.add('latin')
+            available_roles.update(role for role in ('cjk', 'latin')
+                                   if pool.capabilities[source_face.key][role])
         mapped_roles = {}
         for row in report_slots:
             mapped_roles.setdefault(row['slot'], set()).update(
@@ -892,6 +962,15 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         if main_path in primary:
             missing_roles.update(slot_roles(data['slots'][main_path]).intersection(available_roles, {'cjk', 'latin'})
                                  - mapped_roles.get(main_path, set()))
+            # A replacement of an unrelated TTC face must not hide a retained
+            # main UI face, even when both happen to contain the same script.
+            main_slot = data['slots'][main_path]
+            main_index = main_slot.get('faceIndex', 0)
+            main_rows = [row for row in (previous_rows.get(main_path, []) if main_path in reusable else report_slots)
+                         if row.get('slot') == main_path and row.get('faceIndex', 0) == main_index]
+            if main_rows and all(isinstance(row.get('replacedRoleCounts'), dict) for row in main_rows):
+                main_roles = {role for row in main_rows for role, count in row.get('replacedRoleCounts', {}).items() if count}
+                missing_roles.update(slot_roles(main_slot).intersection(available_roles, {'cjk', 'latin'}) - main_roles)
         primary_replaced = {logical for logical in primary
                             if mapped_roles.get(logical, set()).intersection({'cjk', 'latin'})}
         if missing_roles or (primary and not primary_replaced):
@@ -905,6 +984,14 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
             for logical in reusable:
                 if file_digest(safe_destination(stage, logical), digest_cache) != old_manifest['files'][logical]:
                     raise StageError('补齐期间现有字体发生变化，已取消本次补齐')
+            current_rows = {(row['slot'], row.get('faceIndex', 0)): row for row in report_slots}
+            for logical in requested:
+                for previous in previous_rows.get(logical, []):
+                    current = current_rows.get((logical, previous.get('faceIndex', 0)), {})
+                    counts = current.get('replacedRoleCounts', {})
+                    if any(count > counts.get(role, 0)
+                           for role, count in previous.get('replacedRoleCounts', {}).items()):
+                        raise StageError(f'补齐减少了字体集合已有的字形替换，已保留原负载：{logical}')
         # All generation has succeeded. Mutations affect only this isolated tree.
         for output, destination in prepared:
             link_copy(output, destination)
@@ -967,6 +1054,9 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                              and row['slot'] not in newly_written]
         report = {'schema': 'luoshu-slot-metrics-v1', 'engine': 'inventory-font-stage-v1',
                   'slots': report_slots, 'preservedFonts': preserved, 'summary': summary,
+                  'partialSlots': sorted({row['slot'] for row in report_slots
+                                          if row.get('state') == 'retained-stock'
+                                          or any(row.get('retainedTargetRoleCounts', {}).values())}),
                   'preservedWeightAliases': [path for path, reason in preserved.items() if reason == 'source-weight-missing'],
                   'preservedDynamicAliases': [], 'preservedStockAliases': []}
         (stage / '.luoshu-metrics-report.json').write_text(json.dumps(report, ensure_ascii=False), encoding='utf-8')

@@ -16,7 +16,9 @@ sys.path.insert(0, str(ROOT / 'common'))
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.pens.t2CharStringPen import T2CharStringPen
+from fontTools.pens.recordingPen import RecordingPen
 from fontTools.ttLib import TTCollection, TTFont, getTableClass
+from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 import font_inventory
 import inventory_font_stage as engine
 
@@ -25,7 +27,7 @@ HAN = set(range(0x4e00, 0x5000))
 
 
 def source_font(path, weight=400, points=None, family='User chosen family',
-                cff=False, variable=False, italic=False, mono=False):
+                cff=False, variable=False, italic=False, mono=False, right=570):
     points = LATIN | HAN if points is None else points
     cmap = {point: f'uni{point:04X}' for point in sorted(points)}
     order = ['.notdef', *cmap.values()]
@@ -35,7 +37,7 @@ def source_font(path, weight=400, points=None, family='User chosen family',
     glyphs = {}
     for name in order:
         pen = T2CharStringPen(600, None) if cff else TTGlyphPen(None)
-        pen.moveTo((30, -80)); pen.lineTo((570, -80)); pen.lineTo((570, 760)); pen.closePath()
+        pen.moveTo((30, -80)); pen.lineTo((right, -80)); pen.lineTo((right, 760)); pen.closePath()
         glyphs[name] = pen.getCharString() if cff else pen.glyph()
     if cff:
         builder.setupCFF('Fixture', {'FullName': 'Fixture'}, glyphs, {})
@@ -52,6 +54,13 @@ def source_font(path, weight=400, points=None, family='User chosen family',
         builder.setupGvar({name: [] for name in order})
     path.parent.mkdir(parents=True, exist_ok=True)
     builder.save(path)
+
+
+def drawn_glyph(font, point):
+    glyphs = font.getGlyphSet()
+    pen = RecordingPen()
+    glyphs[font.getBestCmap()[point]].draw(pen)
+    return pen.value
 
 
 class InventoryStageTest(unittest.TestCase):
@@ -118,7 +127,7 @@ class InventoryStageTest(unittest.TestCase):
             roots[parent] = {'partition': Path(logical).parts[1], 'logical': parent,
                              'actual': str(output.parent)}
         data = {'schema': 'device-font-inventory-v1', 'state': 'ready', 'inventoryRevision': 1,
-                'scannerRevision': 9, 'metricsRevision': 4, 'buildKey': 'fixture',
+                'scannerRevision': 10, 'metricsRevision': 5, 'buildKey': 'fixture',
                 'slots': slots, 'mainSlotPath': next(iter(slots)), 'sourceRoots': list(roots.values())}
         (self.module / 'config/device_font_inventory.json').write_text(json.dumps(data))
 
@@ -180,12 +189,166 @@ class InventoryStageTest(unittest.TestCase):
         with TTCollection(self.stage / 'system/fonts/Shared.ttc') as fonts:
             self.assertEqual([font['OS/2'].usWeightClass for font in fonts.fonts], [400, 700])
 
-    def test_incomplete_collection_is_preserved_as_whole(self):
-        target = self.slot(format='TTC', faces=[dict(self.slot(), faceIndex=0), dict(self.slot(700), faceIndex=1)])
+    def test_incomplete_collection_replaces_available_face_and_preserves_stock_face(self):
+        source_font(self.source, right=450)
+        retained = dict(self.slot(700), faceIndex=1)
+        with TTFont(retained['_testStockFile']) as font:
+            uvs = CmapSubtable.newSubtable(14)
+            uvs.platformID, uvs.platEncID, uvs.language = 0, 5, 0
+            uvs.cmap = {}; uvs.uvsDict = {0xFE00: [(0x4e00, 'uni4E00')]}
+            font['cmap'].tables.append(uvs)
+            font.save(retained['_testStockFile'])
+        target = self.slot(format='TTC', faces=[dict(self.slot(), faceIndex=0), retained])
         self.inventory({'/system/fonts/Regular.ttf': self.slot(), '/system/fonts/Shared.ttc': target})
+        result = self.run_engine()
+        self.assertEqual((result['mapped'], result['preserved']), (2, 0))
+        with TTCollection(self.stage / 'system/fonts/Shared.ttc') as output, \
+                TTCollection(self.root / 'stock/system/fonts/Shared.ttc') as stock, TTFont(self.source) as donor:
+            self.assertEqual(len(output.fonts), 2)
+            self.assertEqual(drawn_glyph(output.fonts[0], 0x41), drawn_glyph(donor, 0x41))
+            self.assertNotEqual(drawn_glyph(output.fonts[0], 0x41), drawn_glyph(stock.fonts[0], 0x41))
+            self.assertEqual([font['OS/2'].usWeightClass for font in output.fonts], [400, 700])
+            # All retained SFNT table bytes, including cmap format 14, layout,
+            # naming and the outline glyph order, survive TTC repacking.
+            self.assertEqual(set(output.fonts[1].reader.keys()), set(stock.fonts[1].reader.keys()))
+            for tag in stock.fonts[1].reader.keys():
+                actual, expected = output.fonts[1].reader[tag], stock.fonts[1].reader[tag]
+                if tag == 'head':
+                    actual, expected = actual[:8] + actual[12:], expected[:8] + expected[12:]
+                self.assertEqual(actual, expected, tag)
+            self.assertEqual([table.uvsDict for table in output.fonts[1]['cmap'].tables if table.format == 14],
+                             [{0xFE00: [(0x4e00, 'uni4E00')]}])
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        rows = [row for row in report['slots'] if row['slot'].endswith('Shared.ttc')]
+        self.assertEqual([row['state'] for row in rows], ['replaced', 'retained-stock'])
+        self.assertEqual(rows[1]['reason'], 'source-weight-missing')
+        self.assertEqual(rows[1]['replacedRoleCounts'], {})
+        self.assertEqual(report['partialSlots'], ['/system/fonts/Shared.ttc'])
+
+    def test_partial_chinese_latin_digits_replace_only_real_intersection(self):
+        selected = {0x41, 0x30, 0x4e00}
+        source_font(self.source, points=selected, right=420)
+        path = '/system/fonts/Main.ttf'
+        self.inventory({path: self.slot()})
         self.run_engine()
+        with TTFont(self.stage / path[1:]) as output, TTFont(self.root / 'stock' / path[1:]) as stock, \
+                TTFont(self.source) as donor:
+            self.assertEqual(set(output.getBestCmap()), set(stock.getBestCmap()))
+            for point in selected:
+                self.assertEqual(drawn_glyph(output, point), drawn_glyph(donor, point))
+                self.assertNotEqual(drawn_glyph(output, point), drawn_glyph(stock, point))
+            for point in {0x42, 0x31, 0x4e01}:
+                self.assertEqual(drawn_glyph(output, point), drawn_glyph(stock, point))
+        row = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots'][0]
+        self.assertEqual(row['replacedRoleCounts'], {'cjk': 1, 'latin': 1, 'digit': 1})
+        self.assertEqual(row['retainedTargetRoleCounts'], {'cjk': len(HAN) - 1, 'latin': 51, 'digit': 9})
+        self.assertEqual(row['replacedCodepoints'], 3)
+
+    def test_unavailable_optional_stock_does_not_block_certain_source_capability_rejections(self):
+        paths = ['/system/fonts/Heavy.ttf', '/system/fonts/Italic.ttf', '/system/fonts/Unused.ttc']
+        collection = self.slot(format='TTC', faces=[dict(self.slot(700), faceIndex=0),
+            dict(self.slot(900), faceIndex=1)])
+        self.inventory({'/system/fonts/Main.ttf': self.slot(), paths[0]: self.slot(700),
+                        paths[1]: self.slot(style='italic'), paths[2]: collection})
+        for path in paths:
+            (self.root / 'stock' / path[1:]).unlink()
+        with patch.object(engine.StockSourceResolver, 'resolve', autospec=True,
+                          side_effect=engine.StockSourceResolver.resolve) as resolver:
+            result = self.run_engine()
+        self.assertEqual((result['mapped'], result['preserved']), (1, 3))
+        self.assertEqual([call.args[1] for call in resolver.call_args_list], ['/system/fonts/Main.ttf'])
+
+    def test_role_without_any_actual_intersection_does_not_count_as_replacement(self):
+        source_font(self.source, points={0x41}, right=420)
+        self.inventory({'/system/fonts/Main.ttf': self.slot(points={0x41}),
+                        '/system/fonts/Other.ttf': self.slot(points={0x42})})
+        result = self.run_engine()
+        self.assertEqual((result['mapped'], result['preserved']), (1, 1))
+        self.assertFalse((self.stage / 'system/fonts/Other.ttf').exists())
+        self.assertIn('source-target-characters-missing', (self.stage / '.luoshu-coverage-preserved.tsv').read_text())
+
+    def test_one_digit_is_enough_for_a_matching_digit_slot(self):
+        source_font(self.source, points={0x30}, right=420)
+        self.inventory({'/system/fonts/Digit.ttf': self.slot(points=set(range(48, 58)))})
+        result = self.run_engine()
+        self.assertEqual(result['mapped'], 1)
+        row = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots'][0]
+        self.assertEqual(row['replacedRoleCounts'], {'cjk': 0, 'latin': 0, 'digit': 1})
+
+    def test_collection_protected_symbol_face_keeps_original_glyphs(self):
+        source_font(self.source, right=420)
+        target = self.slot(format='TTC', faces=[dict(self.slot(), faceIndex=0),
+            dict(self.slot(points={0x2605}), faceIndex=1, preservedReason='protected-symbol-font')])
+        self.inventory({'/system/fonts/Shared.ttc': target})
+        self.run_engine()
+        with TTCollection(self.stage / 'system/fonts/Shared.ttc') as output, \
+                TTCollection(self.root / 'stock/system/fonts/Shared.ttc') as stock:
+            self.assertEqual(output.fonts[1].reader['glyf'], stock.fonts[1].reader['glyf'])
+            self.assertEqual(output.fonts[1].getBestCmap(), stock.fonts[1].getBestCmap())
+        rows = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots']
+        self.assertEqual(rows[1]['state'], 'retained-stock')
+        self.assertEqual(rows[1]['reason'], 'protected-symbol-font')
+
+    def test_collection_cannot_hide_main_face_failure_with_secondary_face(self):
+        target = self.slot(format='TTC', faces=[dict(self.slot(), faceIndex=0, supportedAxes=['wght'],
+            xmlReferences=[{'weight': 400}, {'weight': 700}]), dict(self.slot(), faceIndex=1)])
+        self.inventory({'/system/fonts/Shared.ttc': target})
+        with self.assertRaisesRegex(engine.StageError, '主要中文或英文字体'):
+            self.run_engine()
         self.assertFalse((self.stage / 'system/fonts/Shared.ttc').exists())
-        self.assertIn('preserved-collection:source-weight-missing', (self.stage / '.luoshu-coverage-preserved.tsv').read_text())
+
+    def test_collection_packing_rejects_face_reordering_before_payload_write(self):
+        target = self.slot(format='TTC', faces=[dict(self.slot(), faceIndex=0), dict(self.slot(700), faceIndex=1)])
+        self.inventory({'/system/fonts/Shared.ttc': target})
+        original = TTCollection.save
+        def reverse_faces(collection, output, *args, **kwargs):
+            collection.fonts.reverse()
+            return original(collection, output, *args, **kwargs)
+        with patch.object(TTCollection, 'save', reverse_faces):
+            with self.assertRaisesRegex(engine.StageError, '集合面顺序'):
+                self.run_engine()
+        self.assertFalse((self.stage / 'system/fonts/Shared.ttc').exists())
+
+    def test_collection_inventory_must_include_every_original_face(self):
+        target = self.slot(format='TTC', faces=[dict(self.slot(), faceIndex=0), dict(self.slot(700), faceIndex=1)])
+        self.inventory({'/system/fonts/Shared.ttc': target})
+        inventory = self.module / 'config/device_font_inventory.json'
+        data = json.loads(inventory.read_text())
+        data['slots']['/system/fonts/Shared.ttc']['faces'].pop()
+        inventory.write_text(json.dumps(data))
+        with self.assertRaisesRegex(engine.StageError, '原厂字体集合面数'):
+            self.run_engine()
+        self.assertFalse((self.stage / 'system/fonts/Shared.ttc').exists())
+
+    def test_collection_repair_cannot_reduce_previously_replaced_face_roles(self):
+        source_font(self.source.parent / 'bold.ttf', 700)
+        path = '/system/fonts/Shared.ttc'
+        target = self.slot(format='TTC', faces=[dict(self.slot(), faceIndex=0), dict(self.slot(700), faceIndex=1)])
+        self.inventory({path: target})
+        self.run_engine()
+        before = self.stage_snapshot()
+        plan = self.root / 'plan.lst'; plan.write_text(path + '\n')
+        original = engine.SourcePool.pick
+        def decline_bold(pool, face):
+            if face['faceIndex'] == 1:
+                return None, 700, 'source-weight-missing'
+            return original(pool, face)
+        with patch.object(engine.SourcePool, 'pick', decline_bold):
+            with self.assertRaisesRegex(engine.StageError, '减少了字体集合已有的字形替换'):
+                engine.run(self.module, self.stage, 'direct', plan=plan)
+        self.assertEqual(self.stage_snapshot(), before)
+
+    def test_optional_collection_supplement_limit_preserves_only_affected_face(self):
+        source_font(self.source, variable=True)
+        optional = self.slot(format='TTC', faces=[dict(self.slot(), faceIndex=0),
+            dict(self.slot(points=LATIN | HAN | {0x3a9}), faceIndex=1, supportedAxes=['wght'])])
+        self.inventory({'/system/fonts/Main.ttf': self.slot(), '/system/fonts/Shared.ttc': optional})
+        result = self.run_engine()
+        self.assertEqual(result['mapped'], 2)
+        report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
+        rows = [row for row in report['slots'] if row['slot'].endswith('Shared.ttc')]
+        self.assertEqual([row['state'] for row in rows], ['replaced', 'retained-stock'])
+        self.assertEqual(rows[1]['reason'], 'source-variable-supplement-unavailable')
 
     def test_script_style_and_monospace_require_actual_source_capability(self):
         arabic = self.slot(points=LATIN | set(range(0x620, 0x650)))
@@ -460,7 +623,8 @@ class InventoryStageTest(unittest.TestCase):
             return original(pool, face)
         with patch.object(engine.SourcePool, 'pick', deny_nonrequested):
             result = engine.run(self.module, self.stage, 'direct', plan=plan)
-        self.assertEqual(len(visited), 1)
+        self.assertEqual(len(visited), 2)  # preflight, then actual stock intersection
+        self.assertIs(visited[0], visited[1])
         self.assertEqual((result['mapped'], result['preserved'], result['planned']), (15, 0, 1))
         for path in paths[1:]:
             self.assertEqual((self.stage / path[1:]).read_bytes(), before[path])

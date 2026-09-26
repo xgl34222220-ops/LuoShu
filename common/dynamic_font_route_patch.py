@@ -223,6 +223,7 @@ def _build_view(module: Path, alias: Path, target: Path, output: Path, route_cac
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.dynamic-source-', dir=output.parent) as directory:
         pool = SourcePool(module, live, 'mix', None, Path(directory))
+        face['_stockPoints'] = stock.codepoints
         source, weight, reason = pool.pick(face)
         if source is None:
             raise ValueError(reason)
