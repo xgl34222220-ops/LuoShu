@@ -60,7 +60,7 @@ jobs:
           grep -q 'genericSlotCount' "$INSTALLER"
           grep -q 'fontPathCount' "$INSTALLER"
           grep -q 'nestedFontRootCount' "$INSTALLER"
-          grep -q '系统/OEM 独立字体路径普查' "$INSTALLER"
+          python3 scripts/installer_flow_test.py
           grep -q 'device_font_candidates.json' "$INSTALLER"
           grep -q 'candidatePathCount' common/font_inventory_scan.py
           grep -q 'PARTITION_CENSUS_ROOT_RESOLVER' common/font_inventory_scan.py

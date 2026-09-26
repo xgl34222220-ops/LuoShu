@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import unittest
+import fontTools
 
 ROOT = Path(os.environ.get("LUOSHU_TEST_SOURCE_ROOT", Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(ROOT / "common"))
@@ -66,7 +67,11 @@ class CoverageRomProtectionTest(unittest.TestCase):
             shutil.copyfile(ROOT / "common" / name, common / name)
         launcher = common / "python/bin/luoshu-python"
         launcher.parent.mkdir(parents=True)
-        launcher.write_text("#!/bin/sh\nunset PYTHONHOME PYTHONPATH\nexec " +
+        # CI loads the shipped FontTools through PYTHONPATH rather than a
+        # system-wide install. Preserve that resolved dependency in subprocesses.
+        fonttools_site = str(Path(fontTools.__file__).resolve().parent.parent)
+        launcher.write_text("#!/bin/sh\nunset PYTHONHOME\nexport PYTHONPATH=" +
+                            shlex.quote(fonttools_site) + "\nexec " +
                             shlex.quote(sys.executable) + ' "$@"\n')
         launcher.chmod(0o755)
 
