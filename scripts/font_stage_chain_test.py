@@ -230,6 +230,18 @@ class FontStageChainTest(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertFalse((Path(self.env['STAGE_PAYLOAD']) / 'aurora_product/fonts').exists())
 
+    def test_stale_mix_child_cannot_replace_current_queued_payload(self):
+        self.write("config/mix-stage-next.conf", "requestId=request-new\n")
+        self.write(".luoshu-payload-next/system/fonts/Current.ttf", "current-request")
+        self.write("config/font-payload-next.conf", "state=prepared\nrequestId=request-new\nfont=mix\n")
+        self.write(".luoshu-payload-stage.fixture/system/fonts/Old.ttf", "stale-child")
+        self.run_sh('''
+            if prepare_next_payload mix default false "$SOURCE"; then exit 1; fi
+        ''', LUOSHU_MIX_REQUEST_ID="request-old")
+        self.assertEqual((self.module / ".luoshu-payload-next/system/fonts/Current.ttf").read_text(),
+                         "current-request")
+        self.assertIn("requestId=request-new\n", (self.config / "font-payload-next.conf").read_text())
+
     def test_same_inputs_retain_cache_key(self):
         self.assertEqual(self.digest(), self.digest())
 
@@ -282,6 +294,43 @@ class FontStageChainTest(unittest.TestCase):
         self.run_sh('rm -rf "$STAGE_PAYLOAD"; safe_stage_begin "$SOURCE" Demo; safe_switch_cache_restore "$SOURCE" Demo')
         output = Path(self.env['STAGE_PAYLOAD']) / 'aurora_product/fonts/ReadyClock.ttf'
         self.assertEqual(output.read_bytes(), self.source.read_bytes())
+
+    def test_partial_cache_is_rejected_before_restore(self):
+        for damage in ("missing-partition", "truncated-font", "same-size-edit"):
+            with self.subTest(damage=damage):
+                self.seed_cache()
+                cache = next((self.config / "safe-switch-cache").glob("*/tree"))
+                font = cache / "aurora_product/fonts/ReadyClock.ttf"
+                if damage == "missing-partition":
+                    shutil.rmtree(cache / "aurora_product")
+                elif damage == "truncated-font":
+                    font.write_bytes(b"")
+                else:
+                    old_mtime = font.stat().st_mtime_ns
+                    font.write_bytes(b"x" * font.stat().st_size)
+                    os.utime(font, ns=(old_mtime + 1, old_mtime + 1))
+                self.run_sh('''
+                    rm -rf "$STAGE_PAYLOAD"
+                    safe_stage_begin "$SOURCE" Demo
+                    if safe_switch_cache_restore "$SOURCE" Demo; then exit 1; fi
+                ''')
+                self.assertFalse(Path(self.env["STAGE_PAYLOAD"]).exists())
+
+    def test_symlink_source_identity_tracks_real_font(self):
+        link = self.source.with_name("Linked.ttf")
+        link.symlink_to(self.source.name)
+        before = self.run_sh('safe_source_identity "$SOURCE"', SOURCE=str(link)).stdout
+        self.source.write_bytes(b"updated-target-font-with-other-size")
+        after = self.run_sh('safe_source_identity "$SOURCE"', SOURCE=str(link)).stdout
+        self.assertNotEqual(before, after)
+
+    def test_same_size_source_edit_within_second_invalidates_cache(self):
+        stamp = 1700000000 * 1_000_000_000
+        os.utime(self.source, ns=(stamp + 100, stamp + 100))
+        before = self.digest()
+        self.source.write_text("source-font-generation-B")
+        os.utime(self.source, ns=(stamp + 200, stamp + 200))
+        self.assertNotEqual(before, self.digest())
 
     def test_old_cache_rejected_after_engine_update(self):
         self.seed_cache()

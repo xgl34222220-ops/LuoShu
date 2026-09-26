@@ -5,6 +5,7 @@ FreeType checks the actual character-to-glyph lookup used by font selection.
 This verifies the routing contract, not QQ/Coolapk rendering on a K80 device.
 """
 import ctypes as C
+from contextlib import nullcontext
 import json
 import os
 import subprocess
@@ -26,7 +27,7 @@ import font_inventory as inventory
 import font_inventory_scan as scanner
 import hyperos_metrics_batch as batch
 from font_slot_coverage import valid_coverage
-from hyperos_layout_freetype_test import FreeType, Face
+from hyperos_layout_freetype_test import FreeType, Face, fixture_font
 
 HAN = 0x4E2D
 OTHER_HAN = 0x20000
@@ -101,12 +102,13 @@ class RoutingTest(unittest.TestCase):
                                'families': list(families), 'format': fmt, 'metrics': metrics}
         return self.slots[logical]
 
-    def build(self, names=None):
+    def build(self, names=None, allow_ink_probe=False):
         (self.module / 'config/device_font_inventory.json').write_text(json.dumps({
             'schema': inventory.SCHEMA, 'inventoryRevision': 1, 'metricsRevision': 3,
             'state': 'ready', 'buildKey': 'routing-test', 'slots': self.slots,
             'preservedDynamicAliases': self.dynamic_aliases}))
-        with patch.object(TTFont, 'getGlyphSet', side_effect=AssertionError('rebuild outlines')):
+        with (nullcontext() if allow_ink_probe else
+              patch.object(TTFont, 'getGlyphSet', side_effect=AssertionError('rebuild outlines'))):
             result = batch.build(self.module, self.stage,
                                  names or [Path(logical).name for logical in (*self.slots, *self.dynamic_aliases)])
         self.reports = {entry['slot']: entry for entry in json.loads(
@@ -198,6 +200,69 @@ class RoutingTest(unittest.TestCase):
         self.assertEqual(result['mapped'], 22)
         self.assertEqual(compact.call_count, 1)
         self.assertFalse(list((self.fonts / '.luoshu-font-store').glob('hyperos-metrics-*')))
+
+    def test_different_stock_punctuation_contracts_share_compaction(self):
+        self.default_pair(cff=True)
+        punctuation = (PUNCT, 0x3002, 0xFF01)
+        make_font(self.fonts / '400.ttf', (*DEFAULT_POINTS, 0x3002, 0xFF01), cff=True)
+        for index, cp in enumerate(punctuation):
+            self.stock(f'Roboto-Case{index}.ttf', (LATIN, 48, cp))
+        with patch.object(batch, 'compact_routed_source', wraps=batch.compact_routed_source) as compact:
+            self.build()
+        self.assertEqual(compact.call_count, 1,
+                         'per-slot punctuation must not trigger repeated CJK subsetting')
+        for index, cp in enumerate(punctuation):
+            with TTFont(self.fonts / f'Roboto-Case{index}.ttf') as font:
+                cmap = font.getBestCmap()
+                self.assertIn(cp, cmap)
+                self.assertNotIn(HAN, cmap)
+                for other in set(punctuation) - {cp}:
+                    self.assertNotIn(other, cmap, 'slot-specific punctuation routing changed')
+        with TTFont(self.fonts / 'Roboto-Regular.ttf') as font:
+            self.assertTrue(set(punctuation).isdisjoint(font.getBestCmap()))
+
+    def test_noto_latin_ui_contracts_receive_safe_bitmap_alignment(self):
+        self.default_pair()
+        names = ('NotoSans.ttf', 'NotoSansUI.otf', 'NotoSansDisplay-Regular.ttf',
+                 'NotoSansCondensed-Regular.ttf', 'NotoSansSemiCondensed-Regular.ttf',
+                 'NotoSansExtraCondensed-Regular.ttf', 'NotoSansVF.ttf')
+        for name in names:
+            stock = self.stock(name, (LATIN, 48), ())
+            stock['metrics']['head']['yMin'] = -430
+        self.build()
+        for name in names:
+            with self.subTest(name=name), TTFont(self.fonts / name) as font:
+                self.assertNotIn(HAN, font.getBestCmap())
+                self.assertEqual(font['head'].yMin, font['hhea'].descent)
+            self.assertEqual(self.reports['/system/fonts/' + name]['bitmapBaselineReason'],
+                             'latin-ui-bottom-to-descent')
+
+    def test_cached_union_ink_protects_later_slot_retaining_deep_punctuation(self):
+        for cff in (False, True):
+            with self.subTest(cff=cff):
+                self.default_pair(cff=cff)
+                source = self.fonts / '400.ttf'
+                fixture_font(source, 1000, cff, extra_codepoint=PUNCT)
+                with TTFont(source) as font:
+                    for table in font['cmap'].tables:
+                        if table.isUnicode() and table.format != 14:
+                            table.cmap[HAN] = 'A'
+                    font.save(source)
+                # The first Latin slot does not retain the deep punctuation;
+                # the later slot does. Both share donor, descent and ink cache.
+                self.stock('Roboto-WithPunctuation.ttf', (LATIN, 48, PUNCT))
+                for name in ('Roboto-Regular.ttf', 'Roboto-WithPunctuation.ttf'):
+                    self.slots['/system/fonts/' + name]['metrics']['head']['yMin'] = -430
+                with patch.object(batch, '_latin_ink_bottom', wraps=batch._latin_ink_bottom) as probe:
+                    self.build(allow_ink_probe=True)
+                self.assertEqual(probe.call_count, 1)
+                for name, retains in (('Roboto-Regular.ttf', False),
+                                      ('Roboto-WithPunctuation.ttf', True)):
+                    with TTFont(self.fonts / name) as font:
+                        self.assertEqual(PUNCT in font.getBestCmap(), retains)
+                        self.assertEqual(font['head'].yMin, -430,
+                                         'union proof must protect the retained deep glyph')
+                    self.assertEqual(self.reports['/system/fonts/' + name]['bitmapBaselineCorrection'], 0)
 
     def test_dali_dynamic_overlay_is_not_frozen_to_the_init_roboto_seed(self):
         self.default_pair()

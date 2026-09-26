@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -80,6 +81,101 @@ test -s "$1/system/fonts/MiSansVF.ttf"
                     worker.kill()
                 worker.wait()
 
+    def run_router(self, command, request="request-test", timeout=8):
+        return subprocess.run(["sh", str(ROUTER), command],
+            env={**self.env, "LUOSHU_MIX_REQUEST_ID": request},
+            capture_output=True, text=True, timeout=timeout)
+
+    def test_old_worker_cannot_prepare_or_commit_new_ready_stage(self):
+        (self.stage / ".luoshu-precommit-ready.conf").write_text(
+            "state=ready\nrequestId=request-test\n")
+        state = self.module / "config/mix-finalize-state.conf"
+        state.write_text("state=ready\ntask=axes-test\nmessage=current-task\n")
+        for command in ("prepare-finalize", "finalize"):
+            result = self.run_router(command, request="request-old")
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(state.read_text(),
+                "state=ready\ntask=axes-test\nmessage=current-task\n")
+            self.assertTrue((self.stage / "system/fonts/MiSansVF.ttf").is_file())
+            self.assertFalse((self.module / ".luoshu-payload-next").exists())
+        self.assertFalse((self.module / "mapping-calls").exists())
+
+    def test_old_worker_cannot_claim_other_already_committed_next(self):
+        result = self.run_router("finalize")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        for command in ("prepare-finalize", "finalize"):
+            result = self.run_router(command, request="request-old")
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("requestId=request-test\n",
+                      (self.module / "config/font-payload-next.conf").read_text())
+
+    def test_recovery_requires_matching_generation_manifest(self):
+        next_path = self.module / ".luoshu-payload-next"
+        self.stage.rename(next_path)
+        (next_path / ".luoshu-mix-generation.conf").write_text(
+            "requestId=request-old\ncompositeHash=old\n")
+        result = self.run_router("finalize")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse((self.module / "config/font-payload-next.conf").exists())
+        self.assertTrue((self.module / "config/mix-stage-next.conf").is_file())
+
+    def test_recovery_replaces_previous_state_after_directory_rename(self):
+        self.stage.rename(self.module / ".luoshu-payload-next")
+        state = self.module / "config/font-payload-next.conf"
+        state.write_text("state=prepared\nfont=mix\nrequestId=request-old\n")
+        result = self.run_router("finalize")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("requestId=request-test\n", state.read_text())
+        self.assertFalse((self.module / "config/mix-stage-next.conf").exists())
+        self.assertFalse((self.module / "mapping-calls").exists())
+
+    def test_second_start_does_not_erase_running_stage(self):
+        before = (self.stage / "system/fonts/MiSansVF.ttf").read_bytes()
+        result = subprocess.run(["sh", str(ROUTER), "start", "Other", "Latin", "Digit"],
+            env=self.env, capture_output=True, text=True, timeout=8)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.stage / "system/fonts/MiSansVF.ttf").read_bytes(), before)
+        self.assertIn("requestId=request-test\n",
+                      (self.module / "config/mix-stage-next.conf").read_text())
+
+    def test_same_second_starts_have_distinct_request_ids(self):
+        (self.module / "config/axes_task.conf").write_text("state=failed\n")
+        shutil.copyfile(ROOT / "common/legacy_v14_4/payload_clone.sh",
+                        self.module / "common/legacy_v14_4/payload_clone.sh")
+        self.script("bin/date", "#!/bin/sh\necho 1700000000\n")
+        self.script("common/legacy_v14_4/v14_mix.sh",
+                    "#!/bin/sh\necho '{\"status\":\"ok\"}'\n")
+        requests = []
+        for _ in range(2):
+            result = subprocess.run(["sh", str(ROUTER), "start", "CJK", "Latin", "Digit"],
+                env=self.env, capture_output=True, text=True, timeout=8)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            requests.append((self.module / "config/mix-stage-next.conf").read_text().splitlines()[0])
+        self.assertNotEqual(requests[0], requests[1])
+
+    def test_lock_initialization_window_cannot_start_second_mapping(self):
+        real_mkdir = shutil.which("mkdir")
+        self.script("bin/mkdir", f'''#!/bin/sh
+"{real_mkdir}" "$@" || exit $?
+if [ "$1" = "$MODDIR/.mix-stage-finalize.lock" ] && [ ! -e "$MODDIR/delayed-lock" ]; then
+    touch "$MODDIR/delayed-lock"
+    sleep 0.35
+fi
+''')
+        first = subprocess.Popen(["sh", str(ROUTER), "prepare-finalize"],
+            env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            self.wait_for(self.module / "delayed-lock")
+            result = self.run_router("finalize")
+            out, error = first.communicate(timeout=8)
+            self.assertEqual(first.returncode, 0, out + error)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(len((self.module / "mapping-calls").read_text().splitlines()), 1)
+        finally:
+            if first.poll() is None:
+                first.kill()
+            first.wait()
+
     def test_failed_mapping_releases_lock_for_retry(self):
         self.script("common/hyperos_stage_complete.sh", "#!/bin/sh\nexit 1\n")
         result = subprocess.run(["sh", str(ROUTER), "prepare-finalize"],
@@ -92,6 +188,14 @@ test -s "$1/system/fonts/MiSansVF.ttf"
             env=self.env, capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue((self.module / ".luoshu-payload-next/system/fonts/MiSansVF.ttf").is_file())
+
+    def test_timed_out_finalize_releases_its_lock(self):
+        self.script("common/hyperos_stage_complete.sh", "#!/bin/sh\nsleep 30\n")
+        result = subprocess.run(["timeout", "1", "sh", str(ROUTER), "finalize"],
+            env=self.env, capture_output=True, text=True, timeout=5)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.module / ".mix-stage-finalize.lock").exists())
+        self.assertFalse((self.module / ".luoshu-payload-next").exists())
 
     def test_timed_out_prepare_releases_its_lock(self):
         self.script("common/hyperos_stage_complete.sh", "#!/bin/sh\nsleep 30\n")

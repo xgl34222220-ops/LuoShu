@@ -39,7 +39,7 @@ SWITCH_LOCK="$MODDIR/.font_switch.lock"
 PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
 SWITCH_CACHE_ROOT="$CONFIG_DIR/safe-switch-cache"
 SWITCH_VALIDATION_CACHE_ROOT="$CONFIG_DIR/safe-switch-validation"
-SWITCH_CACHE_SCHEMA="safe-switch-metrics-v4-all-roots"
+SWITCH_CACHE_SCHEMA="safe-switch-metrics-v5-tree-manifest"
 SWITCH_CACHE_MAX_ENTRIES="${LUOSHU_SWITCH_CACHE_MAX_ENTRIES:-3}"
 SWITCH_CACHE_MAX_KB="${LUOSHU_SWITCH_CACHE_MAX_KB:-786432}"
 case "$SWITCH_CACHE_MAX_ENTRIES" in ''|*[!0-9]*) SWITCH_CACHE_MAX_ENTRIES=3 ;; esac
@@ -87,10 +87,10 @@ safe_hash_stream() {
 safe_source_identity() {
     _ssi_file="$1"
     if command -v stat >/dev/null 2>&1; then
-        stat -c '%d:%i:%s:%Y:%Z' "$_ssi_file" 2>/dev/null && return 0
+        stat -L -c '%d:%i:%s:%y:%z' "$_ssi_file" 2>/dev/null && return 0
     fi
     if command -v toybox >/dev/null 2>&1; then
-        toybox stat -c '%d:%i:%s:%Y:%Z' "$_ssi_file" 2>/dev/null && return 0
+        toybox stat -L -c '%d:%i:%s:%y:%z' "$_ssi_file" 2>/dev/null && return 0
     fi
     return 1
 }
@@ -235,6 +235,16 @@ safe_switch_cache_key() {
     } | safe_hash_stream
 }
 
+safe_cache_tree_manifest() (
+    # Verify the complete saved tree using metadata in one batched stat process.
+    # Missing/truncated OEM aliases must cause a rebuild, without hashing each
+    # hard-linked large CJK font again during the foreground switch.
+    cd "$1" 2>/dev/null || return 1
+    _sctm_rows=$(find . -type f -exec stat -c '%s %y %n' {} + 2>/dev/null) || return 1
+    [ -n "$_sctm_rows" ] || return 1
+    printf '%s\n' "$_sctm_rows" | LC_ALL=C sort
+)
+
 safe_switch_cache_restore() {
     _scr_file="$1"; _scr_font="$2"
     _scr_key=$(safe_switch_cache_key "$_scr_file" "$_scr_font") || return 1
@@ -247,6 +257,10 @@ safe_switch_cache_restore() {
     [ "$(read_state_value "$_scr_conf" inventoryIdentity)" = "$(safe_inventory_identity)" ] || return 1
     [ "$(read_state_value "$_scr_conf" rom)" = "$(safe_rom_identity)" ] || return 1
     [ "$(read_state_value "$_scr_conf" mapperIdentity)" = "${SAFE_STAGE_ENGINE:-$(safe_mapper_identity)}" ] || return 1
+
+    [ -s "$_scr_root/tree.manifest" ] || return 1
+    _scr_manifest=$(safe_cache_tree_manifest "$_scr_root/tree") || return 1
+    [ "$_scr_manifest" = "$(cat "$_scr_root/tree.manifest" 2>/dev/null)" ] || return 1
 
     _scr_restored=0
     while IFS= read -r _scr_rel; do
@@ -343,6 +357,10 @@ EOF_SAFE_CACHE_ROOTS
         [ ! -f "$STAGE_PAYLOAD/$_scs_meta" ] || \
             cp -f "$STAGE_PAYLOAD/$_scs_meta" "$_scs_stage/tree/$_scs_meta" 2>/dev/null || true
     done
+    safe_cache_tree_manifest "$_scs_stage/tree" > "$_scs_stage/tree.manifest" || {
+        rm -rf "$_scs_stage" 2>/dev/null || true
+        return 1
+    }
     _scs_identity=$(safe_source_identity "$_scs_file") || { rm -rf "$_scs_stage"; return 1; }
     {
         printf 'schema=%s\n' "$SWITCH_CACHE_SCHEMA"
@@ -659,7 +677,12 @@ resolve_previous_state() {
 
 prepare_next_payload() {
     _font="$1"; _previous="$2"; _previous_legacy="$3"; _source="${4:-}"
-    _next_tmp="${NEXT_STATE}.tmp.$"
+    _next_tmp="${NEXT_STATE}.tmp.$$"
+    # An orphaned auto-weight child can outlive its controller. It must not
+    # replace the current request's queued payload even if its font is valid.
+    if [ "$_font" = mix ] && [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ]; then
+        [ "$(read_state_value "$CONFIG_DIR/mix-stage-next.conf" requestId)" = "$LUOSHU_MIX_REQUEST_ID" ] || return 1
+    fi
     _direct_proof=''
     if [ "$_font" != default ] && [ "$_font" != mix ] && [ -f "$_source" ]; then
         type luoshu_provenance_direct_proof >/dev/null 2>&1 || return 1
@@ -671,7 +694,7 @@ prepare_next_payload() {
     if ! mv "$STAGE_PAYLOAD" "$NEXT_PAYLOAD" 2>/dev/null; then
         return 1
     fi
-    STAGE_PAYLOAD="$MODDIR/.luoshu-payload-stage.committed.$"
+    STAGE_PAYLOAD="$MODDIR/.luoshu-payload-stage.committed.$$"
     {
         printf 'state=prepared\n'
         printf 'font=%s\n' "$_font"

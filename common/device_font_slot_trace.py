@@ -309,6 +309,43 @@ def _physical_preserved_index(physical_root: Path) -> dict[str, str]:
     return result
 
 
+def rom_preserved_index(physical_root: Path, inventory: dict[str, Any], *, strict: bool = False) -> dict[str, str]:
+    """Keep the ROM mapper's intentional omissions through generic coverage.
+
+    The report belongs to this isolated payload, not the live or previous font.
+    Only exact inventory paths can become protection entries; never interpret a
+    report path as a filesystem destination on its own.
+    """
+    report = physical_root / ".luoshu-metrics-report.json"
+    if not report.is_file():
+        return {}
+    try:
+        data = load(report, "luoshu-slot-metrics-v1")
+        result: dict[str, str] = {}
+        slots = inventory.get("slots") or {}
+        reasons = {
+            "preservedDynamicAliases": "ROM 动态字体别名保持原厂",
+            "preservedWeightAliases": "source-weight-missing",
+            "preservedStockAliases": "specialized-name",
+        }
+        for key, reason in reasons.items():
+            paths = data.get(key, [])
+            if not isinstance(paths, list):
+                raise TraceError("ROM 字体保护清单格式无效")
+            for logical in paths:
+                if (not isinstance(logical, str) or logical not in slots
+                        or not logical.startswith("/") or logical.startswith("//")
+                        or any(char in logical for char in "\t\r\n")
+                        or any(part in {"", ".", ".."} for part in logical[1:].split("/"))):
+                    continue
+                result[logical] = reason
+        return result
+    except TraceError:
+        if strict:
+            raise
+        return {}
+
+
 def build_physical_trace(
     inventory: dict[str, Any],
     physical_root: Path,
@@ -335,6 +372,7 @@ def build_physical_trace(
 
     candidate_by_path = _candidate_index(candidates)
     preserved_by_path = _physical_preserved_index(physical_root)
+    preserved_by_path.update(rom_preserved_index(physical_root, inventory))
     # A previous boot's mount evidence cannot confirm or invalidate a new tree.
     confirmed = confirmed and not prepared
     mount_info = {} if prepared else _read_key_values(mount_state)
@@ -676,6 +714,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--physical-root", type=Path)
     parser.add_argument("--physical-confirmed", action="store_true")
     parser.add_argument("--physical-prepared", action="store_true")
+    parser.add_argument("--rom-preserves", action="store_true", help="以 TSV 输出当前负载的 ROM 保护槽位")
     parser.add_argument("--active-font", default="")
     parser.add_argument("--mount-state", type=Path)
     parser.add_argument("--verification", type=Path)
@@ -689,6 +728,12 @@ def main() -> int:
     args = parse_args()
     try:
         inventory = load(args.inventory, INVENTORY_SCHEMA)
+        if args.rom_preserves:
+            if not args.physical_root:
+                raise TraceError("ROM 保护清单缺少 physical-root")
+            for logical, reason in sorted(rom_preserved_index(args.physical_root, inventory, strict=True).items()):
+                print(f"{logical}\t{reason}")
+            return 0
         candidates = load(args.candidates, CANDIDATE_SCHEMA, optional=True) if args.candidates else {}
         if args.physical_root:
             result = build_physical_trace(

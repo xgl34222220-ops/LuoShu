@@ -120,6 +120,20 @@ class HyperOSMetricsTest(unittest.TestCase):
         self.assertEqual(report['schema'], 'luoshu-slot-metrics-v1')
         self.assertIn('/system/fonts/Roboto-Bold.ttf', report['preservedWeightAliases'])
 
+    def test_nonstandard_weight_requires_its_own_source(self):
+        self.inventory({'/system/fonts/Roboto-Regular.ttf': slot(),
+                        '/system/fonts/350.ttf': slot()})
+        store = self.fonts / '.luoshu-font-store'
+        store.mkdir()
+        shutil.copyfile(self.fonts / '400.ttf', store / 'regular.font')
+        batch.build(self.module, self.stage, ['Roboto-Regular.ttf', '350.ttf'])
+        self.assertFalse((self.fonts / '350.ttf').exists(),
+                         '350 must not silently take the regular 400 source')
+        font_file(store / 'wght-350.font', top=820)
+        batch.build(self.module, self.stage, ['Roboto-Regular.ttf', '350.ttf'])
+        with TTFont(self.fonts / '350.ttf') as font:
+            self.assertEqual(font['head'].yMax, 820)
+
     def test_no_cascade_when_alias_is_source(self):
         (self.fonts / '400.ttf').rename(self.fonts / 'MiSansVF.ttf')
         self.inventory({'/system/fonts/MiSansVF.ttf': slot(),

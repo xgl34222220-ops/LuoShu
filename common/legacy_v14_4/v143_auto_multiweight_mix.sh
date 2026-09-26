@@ -72,7 +72,7 @@ write_auto_generation_manifest() {
     [ -n "$_agm_hash_input" ] || return 1
     _agm_composite_hash=$(printf '%s' "$_agm_hash_input" | hash_text)
     [ -n "$_agm_composite_hash" ] || return 1
-    _agm_tmp="${_agm_manifest}.tmp.$"
+    _agm_tmp="${_agm_manifest}.tmp.$$"
     {
         printf 'requestId=%s\n' "$_agm_request"
         printf 'cjk=%s\nlatin=%s\ndigit=%s\n'             "${LUOSHU_MIX_EXPECTED_CJK:-$2}" "${LUOSHU_MIX_EXPECTED_LATIN:-$3}" "${LUOSHU_MIX_EXPECTED_DIGIT:-$4}"
@@ -89,7 +89,7 @@ write_auto_generation_manifest() {
 prepare_compat_payload() {
     FINALIZE_ERROR=''
     [ -n "$REALMOD" ] && [ "$REALMOD" != "$MODDIR" ] && [ -f "$REAL_MIX_ROUTER" ] || return 0
-    _pcp_out="$CONFIG_DIR/.compat-prepare.$"
+    _pcp_out="$CONFIG_DIR/.compat-prepare.$$"
     rm -f "$_pcp_out" 2>/dev/null || true
     if command -v timeout >/dev/null 2>&1; then
         MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" timeout 120 sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
@@ -119,7 +119,7 @@ prepare_compat_payload() {
 finalize_compat_payload() {
     FINALIZE_ERROR=''
     [ -n "$REALMOD" ] && [ "$REALMOD" != "$MODDIR" ] && [ -f "$REAL_MIX_ROUTER" ] || return 0
-    _fcp_out="$CONFIG_DIR/.compat-finalize.$"
+    _fcp_out="$CONFIG_DIR/.compat-finalize.$$"
     rm -f "$_fcp_out" 2>/dev/null || true
     if command -v timeout >/dev/null 2>&1; then
         MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" timeout 60 sh "$REAL_MIX_ROUTER" finalize >"$_fcp_out" 2>&1

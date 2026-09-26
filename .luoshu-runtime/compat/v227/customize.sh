@@ -21,20 +21,12 @@ fi
 type check_coloros >/dev/null 2>&1 && check_coloros
 type check_hyperos >/dev/null 2>&1 && check_hyperos
 
-ui_print ""
-ui_print "╔══════════════════════════════════╗"
-ui_print "║  洛书 $MODULE_VERSION"
-ui_print "║  Android 全局字体管理"
-ui_print "╚══════════════════════════════════╝"
-ui_print "• 用于管理和应用 Android 全局文字字体"
-ui_print "• 支持单字体、多字重以及中英数字复合字体"
-ui_print "• Emoji、图标、衬线与斜体保持系统原样"
 if [ "${IS_COLOROS:-false}" = true ]; then
-    ui_print "✓ 系统：ColorOS ${COLOROS_VERSION:-未知}"
+    _install_rom="ColorOS ${COLOROS_VERSION:-未知}"
 elif [ "${IS_HYPEROS:-false}" = true ]; then
-    ui_print "✓ 系统：HyperOS/MIUI ${HYPEROS_VERSION:-未知}"
+    _install_rom="HyperOS/MIUI ${HYPEROS_VERSION:-未知}"
 else
-    ui_print "✓ 系统：通用 Android"
+    _install_rom='通用 Android'
 fi
 
 ROOT_MANAGER="Root"
@@ -45,8 +37,8 @@ elif command -v ksud >/dev/null 2>&1 || [ -d /data/adb/ksu ]; then
 elif command -v magisk >/dev/null 2>&1 || [ -d /data/adb/magisk ]; then
     ROOT_MANAGER="Magisk"
 fi
-ui_print "✓ Root：$ROOT_MANAGER"
-ui_print "✓ 挂载：洛书私有自挂载"
+ui_print "系统：$_install_rom · $ROOT_MANAGER"
+ui_print "保护：Emoji、图标、衬线与斜体保留原样"
 
 OLD_MOD="${LUOSHU_OLD_MOD:-/data/adb/modules/LuoShu}"
 mkdir -p "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" 2>/dev/null || true
@@ -112,7 +104,10 @@ fi
 
 # 必须在新模块覆盖挂载系统字体之前读取原厂槽位。v2 扫描器会分别统计全部原厂
 # 字体文件和可替换 UI 槽位，并读取 system、system_ext、product、my_product、vendor
-# 各分区的 fonts*.xml。相同系统指纹复用；旧扫描器生成的清单会自动升级重扫。
+# 各分区的 fonts*.xml。刷写时重新验证可信原厂视图，日常操作再复用有效清单。
+luoshu_install_stage 2 '检测原厂字体与 UI 槽位'
+_inventory_started=$(date +%s 2>/dev/null)
+LUOSHU_INSTALL_SCAN_SUMMARY='待首次启动补扫'
 FONT_INVENTORY_SCRIPT="$MODPATH/common/stock_inventory_scan.py"
 [ -f "$FONT_INVENTORY_SCRIPT" ] || FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory_scan.py"
 [ -f "$FONT_INVENTORY_SCRIPT" ] || FONT_INVENTORY_SCRIPT="$MODPATH/common/font_inventory.py"
@@ -125,7 +120,7 @@ if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_invent
 fi
 chmod 0755 "$FONT_INVENTORY_PYTHON" 2>/dev/null || true
 if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
-    ui_print "• 正在读取本机全部原厂字体与 UI 映射..."
+    ui_print "正在读取可信原厂视图；首次扫描按字体数量耗时。"
     _inventory_pyroot="$MODPATH/common/python"
     _inventory_result=$(
         LUOSHU_FRESH_STOCK_SCAN=1 \
@@ -148,11 +143,7 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         _inventory_generic=$(printf '%s' "$_inventory_result" | sed -n 's/.*"genericSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
         _inventory_physical=$(printf '%s' "$_inventory_result" | sed -n 's/.*"physicalSlotCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
         _inventory_dynamic=$(printf '%s' "$_inventory_result" | sed -n 's/.*"dynamicPartitionCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
-        _inventory_candidates=$(printf '%s' "$_inventory_result" | sed -n 's/.*"candidatePathCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
-        _inventory_font_paths=$(printf '%s' "$_inventory_result" | sed -n 's/.*"fontPathCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
-        _inventory_nested_paths=$(printf '%s' "$_inventory_result" | sed -n 's/.*"nestedFontPathCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
         _inventory_nested_roots=$(printf '%s' "$_inventory_result" | sed -n 's/.*"nestedFontRootCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | tail -n1)
-        _inventory_rom=$(printf '%s' "$_inventory_result" | sed -n 's/.*"romKind"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | tail -n1)
         [ -n "$_inventory_files" ] || _inventory_files="未知"
         [ -n "$_inventory_slots" ] || _inventory_slots="未知"
         [ -n "$_inventory_xml" ] || _inventory_xml="未知"
@@ -160,17 +151,14 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         [ -n "$_inventory_generic" ] || _inventory_generic="0"
         [ -n "$_inventory_physical" ] || _inventory_physical="0"
         [ -n "$_inventory_dynamic" ] || _inventory_dynamic="0"
-        [ -n "$_inventory_candidates" ] || _inventory_candidates="0"
-        [ -n "$_inventory_font_paths" ] || _inventory_font_paths="0"
-        [ -n "$_inventory_nested_paths" ] || _inventory_nested_paths="0"
         [ -n "$_inventory_nested_roots" ] || _inventory_nested_roots="0"
-        [ -n "$_inventory_rom" ] || _inventory_rom="generic"
-        ui_print "✓ 系统/OEM 独立字体路径普查：$_inventory_font_paths 个（嵌套/非标准路径 $_inventory_nested_paths 个）"
-        ui_print "✓ 安装阶段可参与 UI 分类的候选：$_inventory_candidates 个"
-        ui_print "✓ 原厂字体文件（可信视图）：$_inventory_files 个（ROM：$_inventory_rom）"
-        ui_print "✓ 最终可替换 UI 槽位：$_inventory_slots 个（XML $_inventory_xml / 通用探测 $_inventory_generic / OEM 规则 $_inventory_heuristic / 物理补充 $_inventory_physical）"
-        [ "$_inventory_dynamic" -eq 0 ] 2>/dev/null || ui_print "✓ 自动发现额外 OEM 字体分区：$_inventory_dynamic 个"
-        [ "$_inventory_nested_roots" -eq 0 ] 2>/dev/null || ui_print "✓ 自动发现嵌套 OEM 字体根：$_inventory_nested_roots 个"
+        _inventory_elapsed=$(luoshu_install_elapsed "$_inventory_started")
+        LUOSHU_INSTALL_SCAN_SUMMARY="$_inventory_files 个原厂字体 / $_inventory_slots 个可替换槽位"
+        ui_print "✓ 原厂字体 $_inventory_files 个 · UI 槽位 $_inventory_slots 个${_inventory_elapsed:+ · $_inventory_elapsed 秒}"
+        ui_print "  XML $_inventory_xml / 通用 $_inventory_generic / OEM $_inventory_heuristic / 补充 $_inventory_physical"
+        if [ "$_inventory_dynamic" -gt 0 ] 2>/dev/null || [ "$_inventory_nested_roots" -gt 0 ] 2>/dev/null; then
+            ui_print "  额外 OEM 分区 $_inventory_dynamic 个 · 嵌套字体目录 $_inventory_nested_roots 个"
+        fi
     else
         # The install must remain successful even when the current flash namespace
         # cannot expose a verified stock lower/mirror. Keep a retry marker so the
@@ -178,21 +166,20 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
         _inventory_candidates=$(sed -n 's/.*"candidateCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$FONT_INVENTORY_CANDIDATES" 2>/dev/null | head -n1)
         _inventory_font_paths=$(sed -n 's/.*"fontFileCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$FONT_INVENTORY_CANDIDATES" 2>/dev/null | head -n1)
-        _inventory_nested_paths=$(sed -n 's/.*"nestedFontFileCount"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$FONT_INVENTORY_CANDIDATES" 2>/dev/null | head -n1)
         [ -n "$_inventory_candidates" ] || _inventory_candidates="0"
         [ -n "$_inventory_font_paths" ] || _inventory_font_paths="0"
-        [ -n "$_inventory_nested_paths" ] || _inventory_nested_paths="0"
-        ui_print "✓ 系统/OEM 独立字体路径普查：$_inventory_font_paths 个（嵌套/非标准路径 $_inventory_nested_paths 个）"
-        ui_print "✓ 安装阶段可参与 UI 分类的候选：$_inventory_candidates 个"
+        ui_print "! 原厂字体视图尚未通过验证"
+        ui_print "  已找到 $_inventory_font_paths 个路径 / $_inventory_candidates 个候选"
         _inventory_error=$(tail -n 3 "$FONT_INVENTORY_LOG" 2>/dev/null | sed -n 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | tail -n1)
-        [ -z "$_inventory_error" ] || ui_print "• 原厂视图校验失败：$_inventory_error"
-        ui_print "• 本次刷写环境没有拿到完整可信原厂视图；最终可替换槽位待重启前确认"
-        ui_print "• 已安排洛书自挂载前自动补扫，不中止安装"
+        [ -z "$_inventory_error" ] || ui_print "  原因：$_inventory_error"
+        ui_print "  将在下次启动、挂载字体前重试；当前安装继续。"
+        ui_print "  详情：logs/font-inventory.log"
     fi
 else
     : > "$MODPATH/config/stock_inventory_scan_pending" 2>/dev/null || true
-    ui_print "• 字体扫描组件暂不可用；已安排开机前自动重试，不中止安装"
+    ui_print "! 扫描组件暂不可用；已安排下次启动、挂载前重试。"
 fi
+luoshu_install_stage 3 '配置模块与洛书 App'
 # 安装安全 CLI，不暴露上一字体回滚、热刷新或重启 SystemUI 命令。
 cp -f "$MODPATH/common/luoshu_cli.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
 chmod 0755 "$MODPATH"/*.sh "$MODPATH/common"/*.sh 2>/dev/null || true
@@ -204,49 +191,53 @@ chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MOD
 [ ! -f "$MODPATH/bundled/LuoShu-App.apk" ] || chmod 0644 "$MODPATH/bundled/LuoShu-App.apk" "$MODPATH/bundled/app.prop" 2>/dev/null || true
 touch "$MODPATH/magic" 2>/dev/null || true
 
-ui_print "✓ 模块文件已部署"
-[ "$UPDATE_REENABLED" = true ] && ui_print "✓ 已解除旧版误设的 disable 标记"
+ui_print "✓ 模块文件已准备"
+[ "$UPDATE_REENABLED" = true ] && ui_print "✓ 已重新启用模块"
 if [ "$UPDATE_PRESERVED" = true ]; then
     _preserved_font=$(head -n1 "$MODPATH/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
     [ -n "$_preserved_font" ] || _preserved_font=default
-    ui_print "✓ 已继承当前字体配置：$_preserved_font"
-    if [ "${LUOSHU_UPDATE_REBUILD_REQUIRED:-false}" = true ]; then
-        ui_print "✓ 本次重启继续使用当前字体，不会后台切回默认字体"
-        ui_print "• 重启后在洛书中应用一次当前字体，即可升级到新版引擎"
-    else
-        ui_print "✓ 更新后只需重启一次，无需重新应用字体"
-    fi
-else
-    if [ "$RUNTIME_RECOVERY_RESET" = true ]; then
-        ui_print "✓ 已清除 3.1–3.3 生成的旧字体负载"
-        ui_print "✓ 字体选择与组合偏好已保留，首次开机保持系统字体"
-    else
-        ui_print "✓ 当前保持系统默认字体"
-    fi
+    ui_print "✓ 已继承当前字体：$_preserved_font"
+elif [ "$RUNTIME_RECOVERY_RESET" = true ]; then
+    ui_print "• 已清理不兼容的旧引擎负载，保留选择与组合偏好"
 fi
 
+LUOSHU_INSTALL_APP_SUMMARY='需要重新下载完整模块包'
 if [ -s "$MODPATH/bundled/LuoShu-App.apk" ] && [ -f "$MODPATH/common/app_installer.sh" ]; then
+    ui_print '正在检查 App 版本与安装状态...'
     _app_result=$(MODDIR="$MODPATH" APP_INSTALL_LOG="$MODPATH/logs/app-install.log" sh "$MODPATH/common/app_installer.sh" flash 2>/dev/null)
     _app_code=$?
-    case "$_app_result" in
-        installed) ui_print "✓ 洛书 App 已自动安装或更新" ;;
-        already-current) ui_print "✓ 洛书 App 已是当前版本，无需重复安装" ;;
+    case "$_app_result:$_app_code" in
+        installed:0)
+            LUOSHU_INSTALL_APP_SUMMARY='已安装或更新'
+            ui_print "✓ 洛书 App 已安装或更新"
+            ;;
+        already-current:0)
+            LUOSHU_INSTALL_APP_SUMMARY='已是当前版本'
+            ui_print "✓ 洛书 App 已是当前版本"
+            ;;
+        permanent-failure:*)
+            LUOSHU_INSTALL_APP_SUMMARY='安装受阻，请查看安装日志'
+            ui_print '! App 安装包或签名不兼容，自动重试无法解决'
+            ui_print '  模块保留；详情见 logs/app-install.log。'
+            ;;
+        invalid-package:*|invalid-apk:*|not-bundled:*)
+            LUOSHU_INSTALL_APP_SUMMARY='校验失败，请重新下载完整模块包'
+            ui_print '! 内置 App 校验失败，已拒绝安装'
+            ui_print '  请重新下载完整模块包；详情见 logs/app-install.log。'
+            ;;
+        deferred:*|failed:*)
+            LUOSHU_INSTALL_APP_SUMMARY='待首次启动自动补装'
+            ui_print '• App 安装暂未完成，将在首次启动后重试'
+            ui_print '  也可重启后点击模块“操作”按钮重试。'
+            ;;
         *)
-            ui_print "• 当前刷写环境无法完成 App 安装，将在首次开机后自动补装"
-            ui_print "• 也可以重启后点击模块“操作”按钮手动重试"
-            [ "$_app_code" -eq 0 ] || true
+            LUOSHU_INSTALL_APP_SUMMARY='安装状态未知，请查看安装日志'
+            ui_print "! App 安装器未返回有效状态（退出码 $_app_code）"
+            ui_print '  重启后可点击模块“操作”按钮重试。'
             ;;
     esac
 else
-    ui_print "✗ 模块内置 App 或安装器缺失，请重新下载洛书模块包"
+    ui_print "! 内置 App 或安装器缺失，请重新下载完整模块包"
 fi
-if [ "$UPDATE_PRESERVED" = true ] && [ "${LUOSHU_UPDATE_REBUILD_REQUIRED:-false}" = true ]; then
-    ui_print "请完整重启；当前字体会保留。之后只需明确应用一次并重启一次。"
-elif [ "$UPDATE_PRESERVED" = true ]; then
-    ui_print "请完整重启一次，新版字体会直接生效。"
-else
-    ui_print "请完整重启后进入洛书 App 配置字体。"
-fi
-ui_print ""
 [ -f "$MODPATH/common/module_status.sh" ] && MODDIR="$MODPATH" sh "$MODPATH/common/module_status.sh" "$(head -n1 "$MODPATH/config/active_font.conf" 2>/dev/null)" >/dev/null 2>&1 || true
 exit 0

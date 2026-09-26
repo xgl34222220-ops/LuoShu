@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -42,6 +43,8 @@ class CoverageBridgeTest(unittest.TestCase):
         launcher.chmod(0o755)
         shutil.copyfile(ROOT / "common/device_font_slot_trace.py",
                         self.module / "common/device_font_slot_trace.py")
+        shutil.copyfile(ROOT / "common/font_switch_lock.sh",
+                        self.module / "common/font_switch_lock.sh")
         self.live = self.module / ".luoshu-payload"
         self.nxt = self.module / ".luoshu-payload-next"
         for tree in (self.live, self.nxt):
@@ -99,6 +102,47 @@ class CoverageBridgeTest(unittest.TestCase):
         result = self.bridge("coverage")
         self.assertEqual(result["traceSource"], "physical-safe")
         self.assertEqual(result["summary"]["mappingMissing"], 1)
+
+    def test_duplicate_repair_cannot_remove_starting_workers_plan(self):
+        (self.config / "font-payload-next.conf").unlink()
+        (self.config / "self-mount.conf").write_text(
+            "state=mounted\nbackend=self-overlay-bind\nmounted=system/fonts:overlay\n")
+        (self.module / "common/font_switch_task.sh").write_text('''#!/bin/sh
+case "$1" in
+  reconcile) exit 0 ;;
+  start)
+    if ! mkdir "$MODDIR/worker-started" 2>/dev/null; then
+      printf '{"status":"error","message":"busy"}\\n'; exit 1
+    fi
+    sleep 1
+    test -s "$LUOSHU_COVERAGE_PLAN" || exit 2
+    printf 'state=queued\\n' > "$MODDIR/config/switch_task.conf"
+    printf '{"status":"ok"}\\n'
+    ;;
+esac
+''')
+        first = subprocess.Popen(["sh", str(ROOT / "common/app_bridge.sh"), "coverage_reapply"],
+                                 env={**os.environ, "MODDIR": str(self.module)},
+                                 text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        try:
+            deadline = time.monotonic() + 5
+            while not (self.module / "worker-started").exists():
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(.01)
+            second = self.bridge("coverage_reapply")
+            output, errors = first.communicate(timeout=8)
+            self.assertEqual(first.returncode, 0, output + errors)
+            self.assertEqual(json.loads(output)["status"], "ok")
+            self.assertEqual(second["status"], "error")
+            self.assertIn("重复点击", second["message"])
+            self.assertEqual((self.config / "font-coverage-remediation-paths.txt").read_text(),
+                             "/system/fonts/B.ttf\n")
+            self.assertTrue((self.config / "font-payload-rebuild-pending.conf").exists())
+            self.assertFalse((self.module / ".font_coverage_start.lock").exists())
+        finally:
+            if first.poll() is None:
+                first.kill()
+            first.communicate()
 
     def test_after_boot_live_tree_is_verified_instead_of_pending(self):
         shutil.rmtree(self.live)

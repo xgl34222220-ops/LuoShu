@@ -427,7 +427,24 @@ coverage_mark_rebuild() {
     chmod 0600 "$_pending" 2>/dev/null || true
 }
 
-coverage_reapply() {
+coverage_reapply() (
+    # Hold the short enqueue transaction through plan creation and worker
+    # acknowledgement. A second tap must never delete the first worker's plan
+    # while that worker is still starting and has not published queued yet.
+    _coverage_start_lock="$MODDIR/.font_coverage_start.lock"
+    if [ ! -f "$MODDIR/common/font_switch_lock.sh" ]; then
+        printf '{"status":"error","message":"字体任务锁组件不可用，请重新安装模块"}\n'
+        return 1
+    fi
+    . "$MODDIR/common/font_switch_lock.sh"
+    if ! luoshu_font_lock_acquire "$_coverage_start_lock" "$$"; then
+        printf '{"status":"error","message":"字体补齐正在启动，请勿重复点击"}\n'
+        return 1
+    fi
+    trap 'luoshu_font_lock_release "$_coverage_start_lock" "$$" >/dev/null 2>&1 || true' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     coverage_busy && {
         printf '{"status":"error","message":"已有字体任务正在运行，请等待完成"}\n'
         return 1
@@ -470,7 +487,7 @@ coverage_reapply() {
     }
 
     if [ "$_active" = mix ]; then
-        mix_ready || { rm -f "$MODDIR/config/font-payload-rebuild-pending.conf"; return 1; }
+        mix_ready || { rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" "$_plan"; return 1; }
         _source="$MODDIR/config/axes_mix.conf"
         [ -s "$_source" ] || _source="$MODDIR/config/font_mix.conf"
         _cjk="$(read_prop "$_source" cjk)"
@@ -483,7 +500,7 @@ coverage_reapply() {
         _latin_axes="$(read_prop "$_source" latinAxes)"; [ -n "$_latin_axes" ] || _latin_axes="wght=$_latin_weight"
         _digit_axes="$(read_prop "$_source" digitAxes)"; [ -n "$_digit_axes" ] || _digit_axes="wght=$_digit_weight"
         if [ -z "$_cjk" ] || [ -z "$_latin" ] || [ -z "$_digit" ]; then
-            rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" 2>/dev/null || true
+            rm -f "$MODDIR/config/font-payload-rebuild-pending.conf" "$_plan" 2>/dev/null || true
             printf '{"status":"error","message":"当前组合字体配置不完整，无法自动补齐"}\n'
             return 1
         fi
@@ -501,7 +518,7 @@ coverage_reapply() {
         return 1
     fi
     printf '%s\n' "$_out"
-}
+)
 
 coverage_verify() {
     [ -f "$LOAD_VERIFY" ] && MODDIR="$MODDIR" sh "$LOAD_VERIFY" verify >/dev/null 2>&1 || true

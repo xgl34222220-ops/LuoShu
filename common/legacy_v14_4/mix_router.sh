@@ -35,7 +35,20 @@ read_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
 
+mix_request_is_current() {
+    [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] || return 0
+    if [ -s "$MIX_STAGE_STATE" ]; then
+        [ "$(read_value "$MIX_STAGE_STATE" requestId)" = "$LUOSHU_MIX_REQUEST_ID" ]
+    else
+        [ "$(read_value "$NEXT_STATE" requestId)" = "$LUOSHU_MIX_REQUEST_ID" ]
+    fi
+}
+
 mix_finalize_state_write() {
+    # A late controller must not overwrite the current task's progress/failure.
+    mix_request_is_current || return 0
+    _mfs_current_task=$(read_value "$REALMOD/config/axes_task.conf" task)
+    [ -z "${3:-}" ] || [ -z "$_mfs_current_task" ] || [ "$3" = "$_mfs_current_task" ] || return 0
     _mfs_state="$1"
     _mfs_message="$2"
     _mfs_task="${3:-}"
@@ -76,19 +89,22 @@ ensure_mix_finalize_worker() {
     [ -d "$MIX_STAGE" ] || [ -d "$NEXT_PAYLOAD" ] || return 1
     _emfw_pid="$REALMOD/config/mix_finalize_worker.pid"
     _emfw_identity="mix-finalize-$_emfw_task"
+    _emfw_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    [ -n "$_emfw_request" ] || return 1
+    [ "$(read_value "$REALMOD/config/axes_task.conf" task)" = "$_emfw_task" ] || return 1
     if type luoshu_task_pid_alive >/dev/null 2>&1 && \
        luoshu_task_pid_alive "$_emfw_pid" "$_emfw_identity"; then
         return 0
     fi
     if type luoshu_start_detached >/dev/null 2>&1; then
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" \
+        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" LUOSHU_MIX_REQUEST_ID="$_emfw_request" \
             luoshu_start_detached "$_emfw_pid" "$_emfw_identity" "$LOG_FILE" \
                 sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity"
         _emfw_rc=$?
         [ "$_emfw_rc" -eq 0 ] || [ "$_emfw_rc" -eq 3 ]
         return $?
     fi
-    ( trap '' HUP; MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity" ) \
+    ( trap '' HUP; MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" LUOSHU_MIX_REQUEST_ID="$_emfw_request" sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity" ) \
         </dev/null >>"$LOG_FILE" 2>&1 &
     return 0
 }
@@ -346,7 +362,7 @@ prepare_mix_stage() {
     [ -n "$_previous" ] || _previous=default
     _previous_legacy=false
     [ -f "$LEGACY_MODE" ] && _previous_legacy=true
-    _request="mix-request-$(date +%s 2>/dev/null || echo 0)-$"
+    _request="mix-request-$(date +%s 2>/dev/null || echo 0)-$$"
     _coverage_remediate=false
     _coverage_plan=''
     if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
@@ -496,6 +512,10 @@ next_mix_payload_ready_for_request() {
 
 prepare_mix_stage_for_commit() {
     PRECOMMIT_ERROR=''
+    mix_request_is_current || {
+        PRECOMMIT_ERROR='字体组合任务已被新请求替换，已忽略旧任务提交'
+        return 1
+    }
     precommit_ready && return 0
 
     # v14.2/v14.3 composite workers finish by calling the safe switch core first.
@@ -583,13 +603,14 @@ prepare_mix_stage_for_commit() {
     return 0
 }
 commit_mix_stage_if_needed() {
+    mix_request_is_current || return 1
     # Auto-multiweight may already have gone through font_switch_safe.sh. In that
     # case the real next payload is authoritative; discard this compatibility clone.
     if [ -d "$NEXT_PAYLOAD" ] && [ -s "$NEXT_STATE" ]; then
         _next_font=$(read_value "$NEXT_STATE" font)
         _stage_request=$(read_value "$MIX_STAGE_STATE" requestId)
         _next_request=$(read_value "$NEXT_STATE" requestId)
-        if [ "$_next_font" = mix ]; then
+        if [ "$_next_font" = mix ] && [ "$(read_value "$NEXT_STATE" state)" = prepared ]; then
             if [ ! -s "$MIX_STAGE_STATE" ] || { [ -n "$_stage_request" ] && [ "$_next_request" = "$_stage_request" ]; }; then
                 rm -rf "$MIX_STAGE" 2>/dev/null || true
                 rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
@@ -601,7 +622,11 @@ commit_mix_stage_if_needed() {
     # Recover a process killed after the stage directory was atomically renamed
     # but before its small state file was committed. MIX_STAGE_STATE is retained
     # until both pieces are durable, so the next status poll can finish the commit.
-    if [ -d "$NEXT_PAYLOAD" ] && [ ! -s "$NEXT_STATE" ] && [ -s "$MIX_STAGE_STATE" ]; then
+    # The old NEXT_STATE may still exist when replacing a queued selection.
+    if [ -d "$NEXT_PAYLOAD" ] && [ ! -d "$MIX_STAGE" ] && [ -s "$MIX_STAGE_STATE" ]; then
+        _recover_request=$(read_value "$MIX_STAGE_STATE" requestId)
+        [ -n "$_recover_request" ] || return 1
+        [ "$(read_value "$NEXT_PAYLOAD/.luoshu-mix-generation.conf" requestId)" = "$_recover_request" ] || return 1
         write_next_state || return 1
         rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
         return 0
@@ -622,10 +647,11 @@ commit_mix_stage_if_needed() {
 
 finalize_lock_acquire() {
     _tries=0
+    _limit="${1:-120}"
     # A live peer can be doing the bounded 120-second precommit. Wait for its
     # result within that same budget instead of failing at 20 seconds or doing
     # the work concurrently. The controller's outer timeout remains unchanged.
-    while [ "$_tries" -lt 120 ]; do
+    while [ "$_tries" -lt "$_limit" ]; do
         if mkdir "$FINALIZE_LOCK" 2>/dev/null; then
             printf '%s\n' "$$" > "$FINALIZE_LOCK/pid" 2>/dev/null || {
                 rmdir "$FINALIZE_LOCK" 2>/dev/null || true
@@ -637,9 +663,26 @@ finalize_lock_acquire() {
         case "$_owner" in
             ''|*[!0-9]*) _owner='' ;;
         esac
-        if [ -z "$_owner" ] || ! kill -0 "$_owner" 2>/dev/null; then
-            rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
+        if [ -z "$_owner" ]; then
+            # mkdir is atomic, but publishing pid is a separate operation. Never
+            # remove a peer's freshly created directory in that startup window.
+            sleep 1
+            _tries=$((_tries + 1))
+            _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
+            case "$_owner" in
+                ''|*[!0-9]*) rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true ;;
+                *) continue ;;
+            esac
             rmdir "$FINALIZE_LOCK" 2>/dev/null || true
+            continue
+        fi
+        if ! kill -0 "$_owner" 2>/dev/null; then
+            # Recheck before unlinking: a peer may already have recovered it.
+            if [ "$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)" = "$_owner" ]; then
+                rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
+                rmdir "$FINALIZE_LOCK" 2>/dev/null || true
+            fi
+            _tries=$((_tries + 1))
             continue
         fi
         sleep 1
@@ -650,7 +693,7 @@ finalize_lock_acquire() {
 
 finalize_lock_release() {
     _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
-    [ -z "$_owner" ] || [ "$_owner" = "$$" ] || return 1
+    [ "$_owner" = "$$" ] || return 1
     rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
     rmdir "$FINALIZE_LOCK" 2>/dev/null || true
 }
@@ -684,14 +727,17 @@ write_legacy_mix_mode() {
     chmod 0600 "$REALMOD/config/font_runtime_legacy_v14_4.conf" 2>/dev/null || true
 }
 
-finalize_mix_stage() {
+finalize_mix_stage() (
     if ! finalize_lock_acquire; then
         printf '{"status":"error","message":"复合字体已生成但提交锁不可用，请稍后重试"}\n'
         return 1
     fi
+    trap 'finalize_lock_release >/dev/null 2>&1 || true' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     commit_mix_stage_if_needed
     _commit_rc=$?
-    finalize_lock_release >/dev/null 2>&1 || true
     if [ "$_commit_rc" -ne 0 ]; then
         printf '{"status":"error","message":"复合字体已生成但下一启动负载提交失败"}\n'
         return 1
@@ -699,7 +745,7 @@ finalize_mix_stage() {
     write_legacy_mix_mode
     printf '{"status":"ok","data":{"font":"mix","rebootRequired":true,"pipeline":"atomic-next-boot-composite"}}\n'
     return 0
-}
+)
 
 setup_runtime() {
     _payload="$1"
@@ -801,6 +847,23 @@ if [ "$_cmd" = status ]; then
 fi
 case "$_cmd" in
     start)
+        # Admission and finalization share the same lock. Do not erase a live
+        # worker's stage merely because a second tap will later be rejected.
+        finalize_lock_acquire 1 || {
+            printf '{"status":"error","message":"字体组合正在提交，请稍后重试"}\n'
+            exit 1
+        }
+        trap 'finalize_lock_release >/dev/null 2>&1 || true' EXIT
+        trap 'exit 129' HUP
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        mix_reconcile_fast
+        case "$(read_value "$REALMOD/config/axes_task.conf" state)" in
+            queued|running)
+                printf '{"status":"error","message":"已有字体组合任务正在运行，请等待完成"}\n'
+                exit 1
+                ;;
+        esac
         prepare_mix_stage "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" || {
             printf '{"status":"error","message":"无法创建复合字体下一启动暂存负载"}\n'
             exit 1

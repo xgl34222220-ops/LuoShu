@@ -28,6 +28,25 @@ if [ ! -f "$_lc_base" ]; then
     return 1 2>/dev/null || exit 1
 fi
 
+# Keep the flash transcript readable in narrow Magisk/KernelSU/APatch windows.
+# These are real work stages, not simulated percentages or terminal escapes.
+luoshu_install_stage() {
+    ui_print ''
+    ui_print "[$1/4] $2"
+}
+luoshu_install_elapsed() {
+    _lie_now=$(date +%s 2>/dev/null)
+    case "$1:$_lie_now" in *[!0-9:]*|:*|*:) return ;; esac
+    [ "$_lie_now" -ge "$1" ] 2>/dev/null || return
+    printf '%s' "$((_lie_now - $1))"
+}
+_lc_started=$(date +%s 2>/dev/null)
+_lc_version=$(sed -n 's/^version=//p' "$MODPATH/module.prop" 2>/dev/null | head -n1)
+ui_print ''
+ui_print "洛书 ${_lc_version:-unknown}"
+ui_print '全局字体 · 单字体 / 多字重 / 中英数组合'
+luoshu_install_stage 1 '检查环境与保留配置'
+
 # A legacy physical payload is not an obsolete font cache: it is the exact source
 # tree that the current boot is using. Older 4.0 builds did not give that payload a
 # schema understood by the delegated installer, so an update could classify it as
@@ -57,13 +76,14 @@ _lc_real_old_mod="$LUOSHU_OLD_MOD"
 _lc_old_view=''
 if [ -d "$LUOSHU_OLD_MOD/.luoshu-payload" ]; then
     if ! luoshu_private_mount_module_view "$LUOSHU_OLD_MOD" >/dev/null 2>&1; then
-        _lc_old_view="$MODPATH/.luoshu-old-view.$"
+        _lc_old_view="$MODPATH/.luoshu-old-view.$$"
         rm -rf "$_lc_old_view" 2>/dev/null || true
         mkdir -p "$_lc_old_view/config" 2>/dev/null || _lc_old_view=''
         if [ -n "$_lc_old_view" ]; then
             [ ! -f "$LUOSHU_OLD_MOD/module.prop" ] || cp -f "$LUOSHU_OLD_MOD/module.prop" "$_lc_old_view/module.prop" 2>/dev/null || true
             if [ -d "$LUOSHU_OLD_MOD/config" ]; then
-                cp -af "$LUOSHU_OLD_MOD/config/." "$_lc_old_view/config/" 2>/dev/null ||                     cp -rfp "$LUOSHU_OLD_MOD/config/." "$_lc_old_view/config/" 2>/dev/null || true
+                cp -af "$LUOSHU_OLD_MOD/config/." "$_lc_old_view/config/" 2>/dev/null || \
+                    cp -rfp "$LUOSHU_OLD_MOD/config/." "$_lc_old_view/config/" 2>/dev/null || true
             fi
             for _lc_part in $(luoshu_private_partitions); do
                 _lc_src="$LUOSHU_OLD_MOD/.luoshu-payload/$_lc_part"
@@ -84,6 +104,12 @@ if [ -d "$LUOSHU_OLD_MOD/.luoshu-payload" ]; then
     fi
 fi
 
+luoshu_install_cleanup() {
+    rm -f "$_lc_temp" 2>/dev/null || true
+    ( luoshu_private_unmount_module_view "$_lc_real_old_mod" >/dev/null 2>&1 ) || true
+    [ -z "$_lc_old_view" ] || rm -rf "$_lc_old_view" 2>/dev/null || true
+}
+
 # Run the delegated installer by sourcing it so its migration state remains visible
 # to this wrapper, but convert its top-level exit statements into returns. This is
 # essential for APatch (which sources customize.sh) and guarantees cleanup of the
@@ -91,15 +117,14 @@ fi
 sed -e 's/^[[:space:]]*exit 1[[:space:]]*$/        return 1/' \
     -e 's/^[[:space:]]*exit 0[[:space:]]*$/return 0/' \
     "$_lc_base" > "$_lc_temp" 2>/dev/null || {
+    luoshu_install_cleanup
     abort '安装入口准备失败'
     return 1 2>/dev/null || exit 1
 }
 
 . "$_lc_temp"
 _lc_rc=$?
-rm -f "$_lc_temp" 2>/dev/null || true
-( luoshu_private_unmount_module_view "$_lc_real_old_mod" >/dev/null 2>&1 ) || true
-[ -z "$_lc_old_view" ] || rm -rf "$_lc_old_view" 2>/dev/null || true
+luoshu_install_cleanup
 if [ "$_lc_rc" -ne 0 ]; then
     return "$_lc_rc" 2>/dev/null || exit "$_lc_rc"
 fi
@@ -112,10 +137,28 @@ if [ "${LUOSHU_UPDATE_REBUILD_REQUIRED:-false}" = true ]; then
     ui_print '• 本次刷写不会同步重建字体；重启后可在洛书中重新应用以升级引擎'
 fi
 
+luoshu_install_stage 4 '部署字体挂载与完成检查'
 if ! luoshu_private_install_migrate "$MODPATH"; then
     abort '洛书私有挂载树部署失败'
     return 1 2>/dev/null || exit 1
 fi
-ui_print '✓ 私有字体负载已部署'
-ui_print '✓ 洛书将独立完成字体挂载'
+ui_print '✓ 字体负载已就绪，下次完整启动时挂载'
+ui_print ''
+_lc_elapsed=$(luoshu_install_elapsed "$_lc_started")
+ui_print "安装完成${_lc_elapsed:+ · 用时 $_lc_elapsed 秒}"
+ui_print "检测：${LUOSHU_INSTALL_SCAN_SUMMARY:-待首次启动确认}"
+ui_print "App：${LUOSHU_INSTALL_APP_SUMMARY:-待确认}"
+if [ "${UPDATE_PRESERVED:-false}" = true ]; then
+    ui_print "字体：保留 ${_preserved_font:-当前字体}"
+else
+    ui_print '字体：系统默认'
+fi
+if [ "${UPDATE_PRESERVED:-false}" = true ] && [ "${LUOSHU_UPDATE_REBUILD_REQUIRED:-false}" = true ]; then
+    ui_print '下一步：完整重启；之后应用一次当前字体并重启，升级字体引擎。'
+elif [ "${UPDATE_PRESERVED:-false}" = true ]; then
+    ui_print '下一步：完整重启一次，保留的字体直接生效。'
+else
+    ui_print '下一步：完整重启，再进入洛书 App 选择字体。'
+fi
+ui_print ''
 return 0 2>/dev/null || exit 0

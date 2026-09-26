@@ -78,12 +78,13 @@ export MODULE_DIR USER_FONTS_DIR LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard
 
 TMP_ROWS="$MODDIR/config/.coverage-remediate-rows.$$"
 BATCH="$MODDIR/config/.coverage-remediate-batch.$$"
+ROM_PRESERVED="$MODDIR/config/.coverage-rom-preserved.$$"
 PRESERVED="$STAGE/.luoshu-coverage-preserved.tsv"
 PRESERVED_TMP="${PRESERVED}.tmp.$$"
 SUMMARY="$STAGE/.luoshu-coverage-remediation.conf"
 SUMMARY_TMP="${SUMMARY}.tmp.$$"
 METRICS_COVERED="$STAGE/.luoshu-metrics-covered.lst"
-trap 'rm -f "$TMP_ROWS" "$BATCH" "$PRESERVED_TMP" "$SUMMARY_TMP" 2>/dev/null || true' EXIT HUP INT TERM
+trap 'rm -f "$TMP_ROWS" "${TMP_ROWS}.policy" "$BATCH" "$ROM_PRESERVED" "$PRESERVED_TMP" "$SUMMARY_TMP" 2>/dev/null || true' EXIT HUP INT TERM
 
 PYTHONHOME="$PYROOT" PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"     "$PYBIN" "$INVENTORY_TOOL" --list --output "$INVENTORY" > "$TMP_ROWS" 2>> "$LOG_FILE"
 _rc=$?
@@ -95,6 +96,31 @@ awk -F '\t' 'NF != 7 || $1 !~ /^\// || $2 == "" { bad=1 } END { exit bad }' "$TM
     json_error '本机字体槽位清单行格式异常'
     exit 1
 }
+
+# ROM staging can deliberately remove a dynamic framework alias, a specialized
+# script font or a weight for which there is no real source. Preserve that
+# decision when the generic inventory pass runs afterwards, including upgrades
+# whose older inventory still contains the protected path.
+: > "$ROM_PRESERVED" || { json_error '无法创建 ROM 字体保护清单'; exit 1; }
+if [ -s "$STAGE/.luoshu-metrics-report.json" ]; then
+    PYTHONHOME="$PYROOT" \
+    PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
+    LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$PYBIN" "$MODDIR/common/device_font_slot_trace.py" --inventory "$INVENTORY" \
+        --physical-root "$STAGE" --rom-preserves > "$ROM_PRESERVED" 2>> "$LOG_FILE" || {
+            json_error '无法读取本次 ROM 字体保护清单，已保留原厂字体'
+            exit 1
+        }
+fi
+if [ -s "$ROM_PRESERVED" ]; then
+    awk -F '\t' 'NR == FNR { reasons[$1]=$2; next }
+        { print $0 "\t" ($1 in reasons ? reasons[$1] : "-") }' \
+        "$ROM_PRESERVED" "$TMP_ROWS" > "${TMP_ROWS}.policy" && \
+        mv -f "${TMP_ROWS}.policy" "$TMP_ROWS" || {
+            json_error '无法合并 ROM 字体保护清单'
+            exit 1
+        }
+fi
 
 STORE="$STAGE/system/fonts/.luoshu-font-store"
 REGULAR="$STORE/regular.font"
@@ -199,7 +225,7 @@ if [ "$PLAN_ENABLED" = true ]; then
     case "$_requested" in ''|*[!0-9]*) _requested=0 ;; esac
 fi
 _tab=$(printf '\t')
-while IFS="$_tab" read -r _logical _name _partition _format _weight _style _source; do
+while IFS="$_tab" read -r _logical _name _partition _format _weight _style _source _rom_reason; do
     [ -n "$_logical" ] && [ -n "$_name" ] || continue
     _seen=$((_seen + 1))
     case "$_logical" in
@@ -210,6 +236,20 @@ while IFS="$_tab" read -r _logical _name _partition _format _weight _style _sour
     _rel=${_logical#/}
     _target="$STAGE/$_rel"
     case "$_target" in "$STAGE"/*) ;; *) _failed=$((_failed + 1)); continue ;; esac
+
+    if [ -n "$_rom_reason" ] && [ "$_rom_reason" != - ]; then
+        if [ "$PLAN_ENABLED" = true ] && grep -Fqx "$_logical" "$PLAN" 2>/dev/null; then
+            _matched=$((_matched + 1))
+        fi
+        # This is an isolated tree. Removing a stale initial alias exposes the
+        # unchanged stock face once this generation is activated at next boot.
+        if rm -f "$_target" 2>/dev/null; then
+            record_preserved "$_logical" "$_rom_reason" || _failed=$((_failed + 1))
+        else
+            _failed=$((_failed + 1))
+        fi
+        continue
+    fi
 
     _requested_slot=false
     if [ "$PLAN_ENABLED" = true ]; then

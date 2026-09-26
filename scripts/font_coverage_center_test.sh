@@ -6,6 +6,7 @@ TMP=$(mktemp -d 2>/dev/null || mktemp -d -t luoshu-coverage)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MOD="$TMP/module"
 mkdir -p "$MOD/common" "$MOD/config" "$MOD/logs"
+cp "$ROOT/common/font_switch_lock.sh" "$MOD/common/font_switch_lock.sh"
 CALLS="$TMP/calls"
 : > "$CALLS"
 

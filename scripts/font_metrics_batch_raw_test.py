@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import contextlib
+import io
+import json
 import sys
 import tempfile
 import unittest
@@ -73,8 +76,10 @@ class RawMetricsTest(unittest.TestCase):
                 font.close()
             output = root / "output.font"
             tag = "CFF " if cff else "glyf"
-            with mock.patch.object(getTableClass(tag), "compile",
-                    side_effect=AssertionError("strict slot recompiled the full donor")):
+            with contextlib.ExitStack() as stack:
+                for unchanged in (tag, "hmtx", "cmap", "maxp", "post", "name"):
+                    stack.enter_context(mock.patch.object(getTableClass(unchanged), "compile",
+                        side_effect=AssertionError("strict slot recompiled " + unchanged)))
                 report = metrics.normalize_path(source, output, target_contract=contract,
                                                 strict_contract=True)
             for key, value in expected.items():
@@ -99,6 +104,43 @@ class RawMetricsTest(unittest.TestCase):
     def test_variable_ttf_preserves_variation_tables(self):
         self.exercise(variable=True)
 
+    def test_cff2_and_opaque_vendor_tables_keep_raw_bytes_and_valid_checksum(self):
+        from fontTools.cffLib.CFFToCFF2 import convertCFFToCFF2
+        from fontTools.ttLib.sfnt import calcChecksum
+        from fontTools.ttLib.tables.DefaultTable import DefaultTable
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "source.otf", root / "output.otf"
+            make_source(source, cff=True)
+            with TTFont(source) as font:
+                convertCFFToCFF2(font)
+                vendor = DefaultTable("TEST")
+                vendor.data = b"opaque vendor payload"
+                font["TEST"] = vendor
+                font.save(source)
+            original = source.read_bytes()
+            contract = {"source": "inventory", "upem": 1000,
+                        "ascent": 900, "descent": 0,
+                        "ascentRatio": .9, "descentRatio": 0}
+            with mock.patch.object(getTableClass("CFF2"), "compile",
+                    side_effect=AssertionError("strict slot recompiled CFF2")):
+                metrics.normalize_path(source, output, target_contract=contract,
+                                       strict_contract=True)
+            with TTFont(source) as donor, TTFont(output, checkChecksums=2) as result:
+                self.assertIn("CFF2", result)
+                for tag in donor.reader.keys():
+                    if tag not in {"head", "hhea", "OS/2", "MVAR"}:
+                        self.assertEqual(result.reader[tag], donor.reader[tag], tag)
+                # Force table decoding as well as raw comparisons: a byte copy
+                # must still produce a complete, parseable standalone font.
+                for tag in result.keys():
+                    if tag != "GlyphOrder":
+                        result[tag]
+                self.assertEqual((result["hhea"].ascent, result["hhea"].descent), (900, 0))
+            self.assertEqual(calcChecksum(output.read_bytes()), 0xB1B0AFBA)
+            self.assertEqual(source.read_bytes(), original)
+
     def test_missing_contract_keeps_outline_enclosure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -119,6 +161,51 @@ class RawMetricsTest(unittest.TestCase):
                 report = metrics.normalize_path(source, root / "out.ttf", monospaced=True,
                                                  strict_contract=True)
             self.assertGreater(report["monoGlyphs"], 0)
+
+    def test_clock_zero_descent_survives_batch_and_does_not_use_main_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, output = root / "source.ttf", root / "clock.ttf"
+            make_source(source)
+            clock = {"path": "/system/fonts/Clock.ttf", "slotName": "Clock.ttf",
+                     "metrics": {"upem": 1000, "hhea": {"ascent": 850, "descent": 0}}}
+            main = {"slotName": "Main.ttf", "metrics": {
+                "upem": 1000, "hhea": {"ascent": 1100, "descent": -300}}}
+            inventory = root / "inventory.json"
+            inventory.write_text(json.dumps({"schema": metrics.INVENTORY_SCHEMA,
+                "state": "ready", "inventoryRevision": 1, "mainSlot": main,
+                "slots": {clock["path"]: clock}}))
+            manifest = root / "batch.tsv"
+            manifest.write_text(f"{source}\t{output}\t-\t{clock['path']}\n")
+            with mock.patch.object(metrics, "_device_build_key", return_value=""):
+                self.assertEqual(metrics.load_inventory_contract(inventory, clock["path"])["descent"], 0)
+                with contextlib.redirect_stdout(io.StringIO()) as log:
+                    self.assertEqual(metrics.run_batch(manifest, inventory), 0)
+            report = json.loads(log.getvalue())
+            self.assertEqual(report["targetSlot"], "Clock.ttf")
+            self.assertFalse(report["outlineEnclosure"])
+            with TTFont(output) as font:
+                self.assertEqual((font["hhea"].ascent, font["hhea"].descent), (850, 0))
+
+    def test_missing_slot_contract_never_silently_uses_main_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.ttf"
+            make_source(source)
+            inventory = root / "inventory.json"
+            inventory.write_text(json.dumps({"schema": metrics.INVENTORY_SCHEMA,
+                "state": "ready", "inventoryRevision": 1, "slots": {},
+                "mainSlot": {"slotName": "Main.ttf", "metrics": {
+                    "upem": 1000, "hhea": {"ascent": 1100, "descent": -300}}}}))
+            manifest = root / "batch.tsv"
+            manifest.write_text(f"{source}\t{root / 'out.ttf'}\t-\t/system/fonts/Missing.ttf\n")
+            with mock.patch.object(metrics, "_device_build_key", return_value="") as build_key:
+                with contextlib.redirect_stdout(io.StringIO()) as log:
+                    self.assertEqual(metrics.run_batch(manifest, inventory), 0)
+            report = json.loads(log.getvalue())
+            self.assertEqual(report["metricsSource"], "fixed-fallback")
+            self.assertEqual(report["targetSlot"], "")
+            self.assertEqual(build_key.call_count, 1)
 
 
 if __name__ == "__main__":
