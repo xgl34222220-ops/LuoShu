@@ -24,7 +24,7 @@ from fontTools.fontBuilder import FontBuilder
 from fontTools.merge import Merger
 from fontTools.merge.options import Options as MergeOptions
 from fontTools.pens.t2CharStringPen import T2CharStringPen
-from fontTools.ttLib import TTFont, newTable
+from fontTools.ttLib import TTFont, newTable, getTableClass
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 from fontTools.ttLib.tables import otTables
 from fontTools.ttLib.tables.DefaultTable import DefaultTable
@@ -374,6 +374,25 @@ def _match_vertical_contract(donor: TTFont, stock: TTFont) -> None:
     donor['vhea'] = copy.deepcopy(stock['vhea'])
     donor['vmtx'] = newTable('vmtx')
     donor['vmtx'].metrics = {glyph: by_glyph.get(glyph, fallback) for glyph in donor.getGlyphOrder()}
+
+
+def prepare_source_subset(source: Path, output: Path, points: set[int]) -> Path:
+    """Prepare one small donor for the union of several Latin/digit targets.
+
+    Layout and outline dependencies stay with their selected entry points;
+    target-specific metrics and exact cmap filtering still happen later.
+    The original source anchor remains the transaction's authoritative source.
+    """
+    with _open_static(Path(source), -1, preserve_axes=True) as font:
+        if 'fvar' in font:
+            raise SupplementError('shared role preparation requires a static instance')
+        try:
+            _subset(font, points)
+            _split_default_uvs_runs(font)
+            font.save(output, reorderTables=False)
+        finally:
+            font.tables.clear()
+    return output
 
 
 def _outline(font: TTFont) -> str:
@@ -759,6 +778,39 @@ def _restore_variations(merged, tables, source_order, stock_order):
             mapping.mapping.update({glyph: otTables.NO_VARIATION_INDEX for glyph in stock_order})
 
 
+def _write_layout_font(font, output):
+    """Serialize the layout merger's input without discarded CFF outlines.
+
+    The explicit glyph order is the ID contract for these temporary tables.
+    The real outline table is merged separately and restored before validation.
+    These intermediate files are never eligible for a staged system payload.
+    """
+    order = tuple(font.getGlyphOrder())
+    excluded = {'GlyphOrder', 'CFF ', 'CFF2'}
+    compiled, visited = {}, set()
+    def compile_table(tag):
+        if tag in visited or tag in excluded or tag not in font:
+            return
+        visited.add(tag)
+        # Match TTFont's dependency order: hmtx/vmtx compilation updates the
+        # compact metric counts subsequently serialized by hhea/vhea.
+        for dependency in getattr(getTableClass(tag), 'dependencies', ()):
+            compile_table(dependency)
+        compiled[tag] = font.getTableData(tag)
+    for tag in font.keys():
+        compile_table(tag)
+    del compile_table
+    with TTFont(recalcBBoxes=False, recalcTimestamp=False) as layout:
+        layout.sfntVersion = font.sfntVersion
+        layout.setGlyphOrder(list(order))
+        for tag, data in compiled.items():
+            table = DefaultTable(tag)
+            table.data = data
+            layout[tag] = table
+        layout.save(output, reorderTables=False)
+    return order
+
+
 class _SupplementMerger(Merger):
     """Retain layout using the names decoded from the serialized glyph IDs.
 
@@ -771,7 +823,7 @@ class _SupplementMerger(Merger):
     as glyf, GSUB and GPOS. Never transplant pre-serialization name references.
     """
 
-    def __init__(self, options, *, variable_source=False):
+    def __init__(self, options, *, variable_source=False, layout_orders=None):
         super().__init__(options)
         self.input_orders = []
         self.retained_tables = {}
@@ -781,6 +833,7 @@ class _SupplementMerger(Merger):
         self.stock_index = 1 if variable_source else 0
         self.variation_tables = {}
         self.required_features = {}
+        self.layout_orders = layout_orders
 
     def _openFonts(self, files):
         # Merger opens each font once to copy its glyph names, then reopens it
@@ -792,6 +845,15 @@ class _SupplementMerger(Merger):
         self._opened_inputs.clear()
         fonts = super()._openFonts(files)
         self._opened_inputs.extend(fonts)
+        if self.layout_orders is not None:
+            if len(fonts) != len(self.layout_orders):
+                raise SupplementError('layout input order count changed')
+            for font, order in zip(fonts, self.layout_orders):
+                if int(font['maxp'].numGlyphs) != len(order):
+                    raise SupplementError('layout input glyph IDs changed')
+                # Install names before any cmap/layout/hmtx is decoded. Merger
+                # then applies its own collision-free order on the second pass.
+                font.setGlyphOrder(list(order))
         return fonts
 
     def _preMerge(self, font):
@@ -867,11 +929,33 @@ class _SupplementMerger(Merger):
         self.source_kern = None
 
 
-def _prepared_source_key(source, index, donor, stock, replace, upem, use_cff):
+def _file_stamp(path):
+    stat = path.stat()
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+
+def _source_facts(source, index, donor, cache):
+    key = (_file_stamp(source), index)
+    previous = cache.get('source_facts') if cache is not None else None
+    if previous is not None and previous[0] == key:
+        return previous[1]
     digest = hashlib.sha256()
     with source.open('rb') as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b''):
             digest.update(block)
+    preferred = frozenset(preferred_unicode_codepoints(donor))
+    all_points = frozenset(unicode_codepoints(donor))
+    facts = (digest.digest(), preferred, preferred if all_points == preferred else all_points,
+             _outline(donor))
+    if _file_stamp(source) != key[0]:
+        raise SupplementError('source changed during character archive preparation')
+    if cache is not None:
+        # Keep one descriptor, not an unbounded copy of every imported cmap.
+        cache['source_facts'] = (key, facts)
+    return facts
+
+
+def _prepared_source_key(source_digest, index, donor, stock, replace, upem, use_cff):
     vertical = None
     if 'vhea' in stock and 'vmtx' in stock:
         if 'vhea' in donor and 'vmtx' in donor:
@@ -881,7 +965,7 @@ def _prepared_source_key(source, index, donor, stock, replace, upem, use_cff):
             # cannot reuse a donor prepared for a different vertical contract.
             vertical = hashlib.sha256(stock.getTableData('vhea') + stock.getTableData('vmtx')
                                       + stock.getTableData('cmap')).digest()
-    return (digest.digest(), index, frozenset(replace), upem, use_cff, vertical)
+    return (source_digest, index, frozenset(replace), upem, use_cff, vertical)
 
 
 def _cache_prepared_source(cache, key, font, converted, *, subset_complete=False,
@@ -918,6 +1002,46 @@ def _cache_prepared_source(cache, key, font, converted, *, subset_complete=False
     entries[key] = (data, converted, subset_complete)
 
 
+def _shared_cff_key(stock, original, source_digest, source_index, upem, replace, union, cache):
+    """Identify a proven common outline pool, independent of regional layout."""
+    if cache is None or union is None or 'CFF ' not in original:
+        return None
+    entry = original.reader.tables['CFF ']
+    stamp = _file_stamp(stock)
+    table_key = (stamp, entry.offset, entry.length)
+    fingerprints = cache.setdefault('stock_cff_fingerprints', {})
+    if table_key not in fingerprints:
+        value = hashlib.sha256(original.reader['CFF ']).digest()
+        if _file_stamp(stock) != stamp:
+            raise SupplementError('stock outlines changed during shared collection preparation')
+        if len(fingerprints) >= 32:
+            fingerprints.pop(next(iter(fingerprints)))
+        fingerprints[table_key] = value
+    return (fingerprints[table_key], source_digest, source_index, upem,
+            frozenset(replace), tuple(union))
+
+
+def _read_shared_cff(cache, key):
+    if key is None:
+        return None
+    entry = cache.get('merged_cff', {}).get(key)
+    if entry is None:
+        return None
+    path, stamp, expected_digest = entry
+    try:
+        if _file_stamp(path) != stamp:
+            return None
+        with TTFont(path, lazy=True, recalcTimestamp=False) as font:
+            raw = font.reader['CFF ']
+        if _file_stamp(path) != stamp or hashlib.sha256(raw).digest() != expected_digest:
+            return None
+    except (OSError, KeyError):
+        return None
+    result = DefaultTable('CFF ')
+    result.data = raw
+    return result
+
+
 def supplement(source: Path, stock: Path, output: Path, *, source_face_index: int = -1,
                stock_face_index: int = -1,
                replace_codepoints: set[int] | None = None,
@@ -936,7 +1060,8 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
             variable_source = 'fvar' in donor
             if variable_source:
                 _check_variable_source(donor, original)
-            source_points = set(preferred_unicode_codepoints(donor))
+            source_digest, source_points, source_all_points, source_outline = _source_facts(
+                source, source_face_index, donor, prepared_cache)
             stock_points = unicode_codepoints(original)
             _consolidate_stock_cmap(original)
             requested = replacement_codepoints(source_points) if replace_codepoints is None else set(replace_codepoints)
@@ -949,15 +1074,15 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
             # Scale only the replacement font. Its inherited vertical metrics
             # below are already in stock units and must not be scaled twice.
             upem = int(original['head'].unitsPerEm)
-            source_outline = _outline(donor)
             use_cff = source_outline != 'TTF' or _outline(original) != 'TTF'
-            cache_key = (_prepared_source_key(source, source_face_index, donor, original, replace, upem, use_cff)
+            cache_key = (_prepared_source_key(source_digest, source_face_index, donor, original, replace, upem, use_cff)
                          if prepared_cache is not None else None)
             cached = prepared_cache.get('entries', {}).get(cache_key) if prepared_cache is not None else None
             # A user-supplied CJK subset often already contains precisely the
             # requested repertoire. Re-closing its 50k glyph GSUB graph needlessly
             # costs tens of seconds. Its full graph is already valid as-is.
-            donor_subset_skipped = len(unicode_codepoints(donor) - replace) <= len(source_points) // 20
+            donor_subset_skipped = (len(source_points) >= 2048
+                                    and len(source_all_points - replace) <= len(source_points) // 20)
             source_subset_complete = False
             if cached is not None:
                 stream = BytesIO(cached[0])
@@ -1018,6 +1143,10 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                     raise UnsupportedSupplementError('shared collection outline pool exceeds the OpenType glyph limit')
                 full_stock = inputs.enter_context(_open_static(stock, stock_face_index, requested_stock_weight))
                 _restore_stock_outline_union(original, full_stock, retained_stock_glyphs)
+            shared_cff_key = (_shared_cff_key(stock, original, source_digest, source_face_index,
+                upem, replace, retained_stock_glyphs, prepared_cache) if use_cff else None)
+            shared_cff_digest = None
+            shared_cff_hit = False
             converted_source = converted_stock = 0
             if use_cff:
                 converted_stock = _mergeable_cff(original)
@@ -1052,9 +1181,15 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                 stock_file, source_file = directory / 'stock.otf', directory / 'source.otf'
                 _split_default_uvs_runs(original)
                 _split_default_uvs_runs(donor)
-                original.save(stock_file, reorderTables=False)
-                donor.save(source_file, reorderTables=False)
-                merger = _SupplementMerger(options, variable_source=variable_source)
+                layout_orders = None
+                if use_cff:
+                    layout_orders = [_write_layout_font(font, path)
+                                     for font, path in ((original, stock_file), (donor, source_file))]
+                else:
+                    original.save(stock_file, reorderTables=False)
+                    donor.save(source_file, reorderTables=False)
+                merger = _SupplementMerger(options, variable_source=variable_source,
+                                           layout_orders=layout_orders)
                 merged = None
                 try:
                     files = [source_file, stock_file] if variable_source else [stock_file, source_file]
@@ -1080,7 +1215,11 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                             # contracts do not redraw the same 50k outlines.
                             _cache_prepared_source(prepared_cache, cache_key, donor, converted_source,
                                 subset_complete=source_subset_complete, source_cmap=source_cmap)
-                        merged['CFF '] = _merged_cff_table([original, donor])
+                        shared_cff = _read_shared_cff(prepared_cache, shared_cff_key)
+                        shared_cff_hit = shared_cff is not None
+                        merged['CFF '] = shared_cff if shared_cff_hit else _merged_cff_table([original, donor])
+                        if shared_cff_key is not None:
+                            shared_cff_digest = hashlib.sha256(merged['CFF '].data).digest()
                         merged['post'].formatType = 3.0
                     source_kern = merger.source_kern
                     if source_kern is not None:
@@ -1118,6 +1257,13 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                     preserved_axes = ([axis.axisTag for axis in checked['fvar'].axes]
                                       if variable_source else [])
                 os.replace(temporary, output)
+                if shared_cff_key is not None:
+                    entries = prepared_cache.setdefault('merged_cff', {})
+                    if len(entries) >= 32 and shared_cff_key not in entries:
+                        entries.pop(next(iter(entries)))
+                    # Refer to an existing validated intermediate, not another
+                    # in-memory 60+ MiB copy for every shared collection.
+                    entries[shared_cff_key] = (output, _file_stamp(output), shared_cff_digest)
             return {'replacedCodepoints': len(replace), 'retainedStockCodepoints': len(retain),
                     'coveredCodepoints': len(stock_points), 'sourceCodepoints': sorted(replace),
                     'actualFormat': actual_format, 'glyphCount': glyph_count,
@@ -1125,6 +1271,7 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                     'convertedStockGlyphs': converted_stock, 'unitsPerEm': upem,
                     'preparedSourceCacheHit': cached is not None,
                     'outlineSourceCacheHit': bool(getattr(donor, '_luoshu_outline_cache_hit', False)),
+                    'mergedOutlineCacheHit': shared_cff_hit,
                     'selectedVariantFallbacks': len(selected_variant_fallbacks),
                     'selectedVariantFallbackRanges': _variant_ranges(selected_variant_fallbacks),
                     'selectedVariantFallbackSource': ('selected-base-glyph' if selected_variant_fallbacks else None),

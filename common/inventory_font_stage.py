@@ -30,9 +30,10 @@ from font_slot_coverage import (preferred_unicode_codepoints, is_han,
                                 is_cjk_routing_codepoint, is_cjk_punctuation, valid_coverage)
 from inventory_font_metrics import compact_routed_source, write_metrics, link_copy, contract_for_face, restrict_unicode_scope
 from inventory_stock_source import StockSourceResolver
-from inventory_font_supplement import supplement, plan_stock_glyph_union, UnsupportedSupplementError
+from inventory_font_supplement import (supplement, plan_stock_glyph_union,
+                                       prepare_source_subset, UnsupportedSupplementError)
 
-REVISION = 2
+REVISION = 3
 EXTENSIONS = {'.ttf', '.otf', '.ttc', '.otc', '.font'}
 ROLES = {100: 'thin', 200: 'extralight', 300: 'light', 400: 'regular',
          500: 'medium', 600: 'semibold', 700: 'bold', 800: 'extrabold', 900: 'black'}
@@ -783,6 +784,36 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         # An unsupported optional collection must never prove CJK reachability.
         supplemented, scoped, anchors, role_anchors = {}, {}, {}, {}
         prepared_sources = {}
+        # A Latin/digit target must not repeatedly subset the entire Chinese
+        # source. Prepare its shared entry-point union once, then let each
+        # target keep its exact scope, stock layout and metric contract.
+        light_groups = {}
+        for logical, selected in jobs.items():
+            for face, src, weight, contract, variable in selected:
+                if (src is None or variable or not face['_needsSupplement']
+                        or any(is_han(point) for point in face['_replacePoints'])):
+                    continue
+                italic = bool(face['metrics'].get('fontTraits', {}).get('italic')
+                              or face.get('style') in {'italic', 'oblique'})
+                anchor = pool.materialize(src, weight, variable, italic)
+                group = light_groups.setdefault(anchor, {'points': set(), 'members': [],
+                    'contracts': set(), 'sourcePoints': len(src.points)})
+                group['points'].update(face['_replacePoints'])
+                group['members'].append(face)
+                stock = face['_stock']
+                group['contracts'].add(preservation_digest(stock.path, stock.face_index, preservation_cache))
+        role_source_count = 0
+        for anchor, group in light_groups.items():
+            if (len(group['contracts']) < 2 or group['sourcePoints'] < 2048
+                    or len(group['points']) * 2 >= group['sourcePoints']):
+                continue
+            progress.update(len(data['slots']), 'prepare', file_total=len(jobs))
+            output = temporary / f'role-source-{role_source_count}.font'
+            prepare_source_subset(anchor, output, group['points'])
+            role_source_count += 1
+            for face in group['members']:
+                face['_supplementAnchor'] = output
+            gc.collect()
         union_plans = {}
         for logical, selected in jobs.items():
             if len(selected) < 2:
@@ -861,7 +892,8 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                         stock.verify_unchanged()
                         if patch_key not in supplemented:
                             patched = temporary / f'supplement-{len(supplemented)}.font'
-                            patch_report = supplement(anchor, stock.path, patched,
+                            donor_path = face.get('_supplementAnchor', anchor)
+                            patch_report = supplement(donor_path, stock.path, patched,
                                 stock_face_index=stock.face_index, stock_weight=weight,
                                 replace_codepoints=set(face['_replacePoints']),
                                 retained_stock_glyphs=face.get('_stockUnionGlyphs'),
@@ -878,7 +910,14 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                             # collecting its closed TTFont/CFFFontSet cycle.
                             # Cache hits never repeat this collection work.
                             del patched_font
-                            gc.collect()
+                            # Large CFF graphs must be released promptly. Small
+                            # Latin/digit jobs are bounded and can be collected
+                            # in batches instead of scanning the entire heap
+                            # after every few-kilobyte output.
+                            if (max(donor_path.stat().st_size, stock.path.stat().st_size,
+                                    patched.stat().st_size) >= 4 * 1024 * 1024
+                                    or len(supplemented) % 16 == 15):
+                                gc.collect()
                             supplemented[patch_key] = patched, patch_report
                         metric_anchor, supplement_report = supplemented[patch_key]
                     elif src.points - stock.codepoints:
@@ -1200,6 +1239,7 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                    'inventorySlots': len(data['slots']), 'sourceInstances': len(pool.materialized),
                    'fallbackSlots': 0, 'engineRevision': REVISION}
         summary.update({'supplementedSources': len(supplemented),
+                        'preparedRoleSources': role_source_count,
                         'generatedCollections': len(collection_contents),
                         'sharedCollectionGlyphPlans': sum(value is not None for value in union_plans.values()),
                         'primaryTextMapped': len(primary_replaced)})

@@ -399,14 +399,17 @@ HorizAxis.BaseScriptList latn romn 0;
 
     def test_outline_cache_shares_conversion_but_not_regional_scope_or_vertical_contract(self):
         fixture(self.source, source=True); fixture(self.stock, cff=True)
+        # Exercise the large-repertoire shortcut with a genuinely large cmap;
+        # small donors are now always pruned to their exact selected closure.
+        aliases = set(range(0x1000, 0x1800))
         for path in (self.source, self.stock):
             with TTFont(path) as font:
                 for table in font['cmap'].tables:
                     if table.isUnicode():
-                        table.cmap.update({cp: 'A' for cp in range(0x100, 0x118)})
+                        table.cmap.update({cp: 'A' for cp in aliases})
                 font.save(path)
         cache = {}
-        requested = set(range(0x100, 0x118)) | {32, 48, 65, 66}
+        requested = aliases | {32, 48, 65, 66}
         for index, excluded in enumerate((65, 66)):
             with TTFont(self.stock) as font:
                 builder = FontBuilder(font=font)
@@ -423,7 +426,7 @@ HorizAxis.BaseScriptList latn romn 0;
             self.assertEqual(report['outlineSourceCacheHit'], bool(index))
             with TTFont(self.stock) as stock, TTFont(self.source) as source, TTFont(self.output) as result:
                 points = result.getBestCmap()
-                for cp in (65, 66, 0x100):
+                for cp in (65, 66, 0x1000):
                     expected = stock if cp == excluded else source
                     self.assertEqual(outline(expected, expected.getBestCmap()[cp]), outline(result, points[cp]))
                     if cp != excluded:
@@ -436,6 +439,26 @@ HorizAxis.BaseScriptList latn romn 0;
         self.assertEqual(len(cache['outline_entries']), 1)
         self.assertLessEqual(sum(item['size'] for item in cache['outline_entries'].values())
                              + sum(len(item[0]) for item in cache['entries'].values()), 64 * 1024 * 1024)
+
+    def test_small_nearly_complete_donor_drops_unused_source_glyph(self):
+        fixture(self.source, source=True); fixture(self.stock, cff=True)
+        aliases = set(range(0x100, 0x118))
+        for path in (self.source, self.stock):
+            with TTFont(path) as font:
+                for table in font['cmap'].tables:
+                    if table.isUnicode():
+                        table.cmap.update({cp: 'A' for cp in aliases})
+                font.save(path)
+        report = supplement(self.source, self.stock, self.output,
+                            replace_codepoints=aliases | {32, 48, 65})
+        # .notdef, space, zero, A; the unused donor B must not be converted
+        # or consume a glyph ID even though only one codepoint was omitted.
+        self.assertEqual(report['convertedSourceGlyphs'], 4)
+        with TTFont(self.stock) as stock, TTFont(self.source) as source, TTFont(self.output) as result:
+            self.assertEqual(set(result.getBestCmap()), set(stock.getBestCmap()))
+            self.assertEqual(outline(stock, 'B'), outline(result, result.getBestCmap()[66]))
+            self.assertEqual(outline(source, 'A'), outline(result, result.getBestCmap()[65]))
+        self.assertEqual(shape(self.stock, 'باَ'), shape(self.output, 'باَ'))
 
     def test_capacity_fallback_keeps_every_character_and_selector_without_cache_leakage(self):
         start, source_count, stock_count = 0x20000, 35000, 40000
@@ -563,12 +586,14 @@ HorizAxis.BaseScriptList latn romn 0;
         plan = plan_stock_glyph_union(self.source, path, [0, 1], {65, 66, 48}, 400)
         self.assertIsNotNone(plan)
         outputs = []
+        cache = {}
         for index in range(2):
             baseline, result = self.root / f'independent-{index}.otf', self.root / f'union-{index}.otf'
             supplement(self.source, path, baseline, stock_face_index=index, replace_codepoints={65, 66, 48})
             report = supplement(self.source, path, result, stock_face_index=index,
-                replace_codepoints={65, 66, 48}, retained_stock_glyphs=plan)
+                replace_codepoints={65, 66, 48}, retained_stock_glyphs=plan, prepared_cache=cache)
             self.assertEqual(report['sharedStockGlyphCount'], len(plan))
+            self.assertEqual(report['mergedOutlineCacheHit'], bool(index))
             with TTFont(baseline) as reference, TTFont(result) as actual:
                 for cp, name in reference.getBestCmap().items():
                     self.assertEqual(outline(reference, name), outline(actual, actual.getBestCmap()[cp]))
@@ -579,6 +604,13 @@ HorizAxis.BaseScriptList latn romn 0;
         with TTFont(outputs[0]) as first, TTFont(outputs[1]) as second:
             self.assertEqual(first.getTableData('CFF '), second.getTableData('CFF '))
             self.assertNotEqual(first.getTableData('cmap'), second.getTableData('cmap'))
+        # A vanished/corrupted intermediate cannot supply a shared outline.
+        outputs[1].write_bytes(b'corrupt')
+        result = self.root / 'regenerated.otf'
+        report = supplement(self.source, path, result, stock_face_index=1,
+            replace_codepoints={65, 66, 48}, retained_stock_glyphs=plan, prepared_cache=cache)
+        self.assertFalse(report['mergedOutlineCacheHit'])
+        self.assertEqual(shape(baseline, 'AB0ΑΒ'), shape(result, 'AB0ΑΒ'))
         # Equal file names or glyph counts cannot prove metric compatibility.
         changed = TTCollection(path)
         name = changed.fonts[1].getGlyphOrder()[1]

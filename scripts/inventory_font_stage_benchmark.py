@@ -128,7 +128,8 @@ def main():
                     value['seconds'] += seconds
                     if label == 'supplement' and isinstance(result, dict):
                         details = {key: result.get(key) for key in ('glyphCount', 'preparedSourceCacheHit',
-                            'outlineSourceCacheHit', 'convertedSourceGlyphs', 'selectedVariantFallbacks')}
+                            'outlineSourceCacheHit', 'mergedOutlineCacheHit',
+                            'convertedSourceGlyphs', 'selectedVariantFallbacks')}
                         details.update(seconds=seconds, stockFaceIndex=kwargs.get('stock_face_index'))
                         cache = kwargs.get('prepared_cache') or {}
                         details.update(preparedCacheBytes=sum(len(item[0]) for item in cache.get('entries', {}).values()),
@@ -137,8 +138,10 @@ def main():
                         print(json.dumps({'supplement': details}), flush=True)
             setattr(owner, name, timed)
         for name in ('preservation_digest', 'file_digest', 'inspect_faces', 'supplement', 'write_metrics',
-                     'replacement_points', 'replacement_counts', 'has_unicode_variations', 'link_copy'):
-            instrument(engine, name, name)
+                     'prepare_source_subset', 'replacement_points', 'replacement_counts',
+                     'has_unicode_variations', 'link_copy'):
+            if hasattr(engine, name):
+                instrument(engine, name, name)
         for name in ('__init__', 'pick', 'materialize'):
             instrument(engine.SourcePool, name, 'SourcePool.' + name)
         instrument(engine.StockSourceResolver, 'resolve', 'StockSourceResolver.resolve')

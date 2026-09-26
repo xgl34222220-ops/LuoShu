@@ -352,6 +352,36 @@ class InventoryStageTest(unittest.TestCase):
         rows = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots']
         self.assertTrue(all(row['sharedStockGlyphCount'] == 3 for row in rows))
 
+    def test_many_latin_targets_prepare_large_chinese_source_once_without_losing_stock(self):
+        source_font(self.source, points=LATIN | set(range(0x4e00, 0x4e00 + 2300)), right=430)
+        first = '/system/fonts/ForeignText.ttf'
+        second = '/product/fonts/OtherText.ttf'
+        self.inventory({first: self.slot(points=LATIN | {0x3a9}),
+                        second: self.slot(points=LATIN | {0x416})})
+        observed = []
+        original = engine.supplement
+        def collect_donor(source, *args, **kwargs):
+            with TTFont(source) as font:
+                observed.append((len(font.getGlyphOrder()), set(font.getBestCmap())))
+            return original(source, *args, **kwargs)
+        with patch.object(engine, 'supplement', side_effect=collect_donor):
+            result = self.run_engine()
+        self.assertEqual(result['mapped'], 2)
+        self.assertEqual(result['preparedRoleSources'], 1)
+        self.assertEqual(len(observed), 2)
+        self.assertTrue(all(count < 200 and not any(engine.is_han(cp) for cp in points)
+                            for count, points in observed))
+        with TTFont(self.source) as source:
+            for logical, retained in ((first, 0x3a9), (second, 0x416)):
+                with TTFont(self.root / 'stock' / logical[1:]) as stock, \
+                        TTFont(self.stage / logical[1:]) as output:
+                    self.assertEqual(set(stock.getBestCmap()), set(output.getBestCmap()))
+                    self.assertEqual(drawn_glyph(stock, retained), drawn_glyph(output, retained))
+                    self.assertEqual(drawn_glyph(source, 65), drawn_glyph(output, 65))
+        # Persisted source anchors remain complete for later Chinese repairs.
+        anchors = list((self.stage / 'system/fonts/.luoshu-font-store').glob('*.font'))
+        self.assertTrue(any(0x4e00 in face.points for path in anchors for face in engine.inspect_faces(path)))
+
     def test_incomplete_collection_replaces_available_face_and_preserves_stock_face(self):
         source_font(self.source, right=450)
         retained = dict(self.slot(700), faceIndex=1)
