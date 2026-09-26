@@ -339,6 +339,73 @@ class StockSourceTests(unittest.TestCase):
         with self.assertRaisesRegex(StockSourceError, 'hhea'):
             resolver.resolve(second_path)
 
+    def archive_slot(self, logical):
+        slot = self.data['slots'][logical]
+        with TTFont(self.stock, lazy=True) as font:
+            points = sorted(inventory._cmap_metrics(font)['points'])
+        ranges = []
+        for point in points:
+            if ranges and point == ranges[-1][1] + 1:
+                ranges[-1][1] = point
+            else:
+                ranges.append([point, point])
+        slot['stockSource'].update(codepointRanges=ranges,
+            codepointSha256=slot['metrics']['stockCodepointSha256'])
+        return slot
+
+    def test_hash_bound_archive_avoids_glyph_charset_but_checks_live_headers(self):
+        self.archive_slot(self.logical)
+        with patch.object(inventory, '_cmap_metrics', side_effect=AssertionError('unnecessary charset parse')):
+            result = self.resolver().resolve(self.logical)
+            self.assertEqual(result.codepoints, frozenset({65, 66, 0x391, 0x4E2D}))
+            self.data['slots'][self.logical]['metrics']['hhea']['ascent'] += 1
+            with self.assertRaisesRegex(StockSourceError, 'hhea'):
+                self.resolver().resolve(self.logical)
+
+    def test_corrupted_archive_cannot_announce_wrong_replacement_characters(self):
+        archived = self.archive_slot(self.logical)
+        pristine = copy.deepcopy(archived)
+        corruptions = [lambda slot: slot['stockSource']['codepointRanges'][0].__setitem__(0, 64),
+            lambda slot: slot['stockSource'].__setitem__('codepointRanges', [[66, 65]]),
+            lambda slot: slot['stockSource'].__setitem__('codepointRanges', [[65, 66], [66, 67]]),
+            lambda slot: slot['stockSource'].__setitem__('codepointRanges', [[True, 66]]),
+            lambda slot: slot['stockSource'].__setitem__('cmapSha256', '0' * 64),
+            lambda slot: slot['stockSource'].__setitem__('codepointSha256', '0' * 64)]
+        for corrupt in corruptions:
+            with self.subTest(corrupt=corrupt):
+                self.data['slots'][self.logical] = copy.deepcopy(pristine)
+                corrupt(self.data['slots'][self.logical])
+                with self.assertRaises(StockSourceError):
+                    self.resolver().resolve(self.logical)
+
+    def test_archive_is_not_used_without_matching_full_file_hash(self):
+        self.archive_slot(self.logical)
+        lower = self.lower_copy()
+        self.data['slots'][self.logical]['stockSource'].pop('sha256')
+        with patch.object(inventory, '_cmap_metrics', wraps=inventory._cmap_metrics) as reader:
+            self.assertEqual(self.resolver().resolve(self.logical).path, lower)
+        self.assertEqual(reader.call_count, 1)
+        self.archive_slot(self.logical)
+        self.data['slots'][self.logical]['stockSource']['sha256'] = file_digest(self.stock)
+        make_font(self.stock, points=(65, 66, 0x391, 0x4E2D), weight=700)
+        shutil.copy2(self.stock, lower)
+        with self.assertRaisesRegex(StockSourceError, 'SHA256'):
+            self.resolver().resolve(self.logical)
+
+    def test_byte_identical_copies_share_profile_without_trusting_changed_bytes(self):
+        other = self.actual / 'Copy.ttf'
+        shutil.copyfile(self.stock, other)
+        logical = '/system/fonts/Copy.ttf'
+        self.set_slot(logical, other)
+        resolver = self.resolver()
+        with patch.object(inventory, '_read_metrics_uncached', wraps=inventory._read_metrics_uncached) as reader:
+            resolver.resolve(self.logical)
+            resolver.resolve(logical)
+            self.assertEqual(reader.call_count, 1)
+        make_font(other, weight=700)
+        with self.assertRaisesRegex(StockSourceError, 'SHA256'):
+            resolver.resolve(logical)
+
     def test_scanner_captures_optional_proofs_for_every_face(self):
         root = inventory.FontRoot('system', Path('/system/fonts'), self.actual)
         slots = {}

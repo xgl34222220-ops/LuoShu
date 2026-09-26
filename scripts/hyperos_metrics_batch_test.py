@@ -397,6 +397,12 @@ _hyperos_clock_ui_files() { :; }
         helper = self.module / 'common/inventory_font_stage.sh'
         helper.parent.mkdir(parents=True, exist_ok=True)
         helper.write_text('printf "called\\n" >> "$TEST_CALLS"\nexit 7\n')
+        runtime = self.module / 'common/python/bin'
+        runtime.mkdir(parents=True, exist_ok=True)
+        (self.module / 'common/mix_stage_watchdog.py').write_text('fixture')
+        python = runtime / 'luoshu-python'
+        python.write_text('#!/bin/sh\nwhile [ "$1" != -- ]; do shift; done\nshift\nexec "$@"\n')
+        python.chmod(0o755)
         marker = self.root / 'calls'
         stub = '\n'.join((
             'mix_request_is_current() { return 0; }',

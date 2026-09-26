@@ -10,6 +10,14 @@ MODULE="$TMP/module"
 mkdir -p "$MODULE/.luoshu-mix-stage/system/fonts" "$MODULE/config" "$MODULE/common" "$MODULE/logs"
 cp "$ROOT/common/background_task.sh" "$MODULE/common/background_task.sh"
 chmod 0755 "$MODULE/common/background_task.sh"
+mkdir -p "$MODULE/common/python/bin"
+cp "$ROOT/common/mix_stage_watchdog.py" "$MODULE/common/mix_stage_watchdog.py"
+cat > "$MODULE/common/python/bin/luoshu-python" <<'EOF_PYTHON'
+#!/bin/sh
+unset PYTHONHOME PYTHONPATH LD_LIBRARY_PATH
+exec python3 "$@"
+EOF_PYTHON
+chmod 0755 "$MODULE/common/python/bin/luoshu-python"
 cat > "$MODULE/common/inventory_font_stage.sh" <<'EOF_INVENTORY_STAGE'
 #!/bin/sh
 [ "$2" = mix ] || exit 1
@@ -231,7 +239,7 @@ grep -q 'ensure_mix_finalize_worker' "$ROUTER"
 grep -q 'prepare_mix_stage_for_commit' "$ROUTER"
 grep -q 'PRECOMMIT_STATE=' "$ROUTER"
 grep -q 'prepare-finalize' "$ROUTER"
-grep -q " 90 " "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
+grep -q " 70 " "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
 grep -q " 99 " "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
 grep -q 'prepare_compat_payload' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
 grep -q 'prepare_compat_payload' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"

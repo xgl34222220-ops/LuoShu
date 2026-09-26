@@ -176,7 +176,7 @@ luoshu_install_stage 3 '配置模块与洛书 App'
 cp -f "$MODPATH/common/luoshu_cli.sh" "$MODPATH/system/bin/洛书" 2>/dev/null || true
 chmod 0755 "$MODPATH"/*.sh "$MODPATH/common"/*.sh 2>/dev/null || true
 chmod 0644 "$MODPATH/common"/*.py 2>/dev/null || true
-chmod 0755 "$MODPATH/common/python/bin/luoshu-python" "$MODPATH/system/bin/洛书" 2>/dev/null || true
+chmod 0755 "$MODPATH/common/python/bin/luoshu-python" "$MODPATH/common/python/bin/luoshu-brotli" "$MODPATH/system/bin/洛书" 2>/dev/null || true
 [ ! -f "$MODPATH/system/bin/luoshud" ] || chmod 0755 "$MODPATH/system/bin/luoshud" 2>/dev/null || true
 find "$MODPATH/system/fonts" -type f -exec chmod 0644 {} \; 2>/dev/null || true
 chmod 0755 "$MODPATH/system/fonts" "$MODPATH/system/bin" "$MODPATH/config" "$MODPATH/logs" 2>/dev/null || true

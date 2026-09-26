@@ -219,7 +219,7 @@ safe_validation_key() {
     _svk_engine=${SAFE_STAGE_ENGINE:-$(safe_mapper_identity)}
     [ -n "$_svk_engine" ] || return 1
     {
-        printf 'safe-validation-v2\n'
+        printf 'safe-validation-v3-actual-role\n'
         printf '%s\n' "$_svk_file"
         printf '%s\n' "$_svk_identity"
         printf '%s\n' "$_svk_engine"
@@ -562,7 +562,7 @@ validate_global() {
         _coverage=$(PYTHONHOME="$_pyroot" \
             PYTHONPATH="$_pyroot/lib/python3.14:$_pyroot/lib/python3.14/site-packages" \
             LD_LIBRARY_PATH="$_pyroot/lib:$_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-            "$_python" "$_checker" --brief "$_file" 2>/dev/null)
+            "$_python" "$_checker" --donor --brief "$_file" 2>/dev/null)
         _rc=$?
         if [ "$_rc" -ne 0 ]; then
             FONT_CHECK_ERROR="${_coverage:-字体缺少全局替换所需字形}"

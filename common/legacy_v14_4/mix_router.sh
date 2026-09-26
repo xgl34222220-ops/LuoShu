@@ -36,6 +36,18 @@ read_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
 
+axis_weight_router() {
+    _awr_value=$(printf '%s' "$1" | tr ',' '\n' | sed -n 's/^wght=//p' | head -n1)
+    _awr_value=${_awr_value%%.*}
+    case "$_awr_value" in ''|*[!0-9]*) _awr_value=400 ;; esac
+    [ "$_awr_value" -ge 1 ] 2>/dev/null && [ "$_awr_value" -le 1000 ] 2>/dev/null || _awr_value=400
+    printf '%s' "$_awr_value"
+}
+
+mix_mode_router() {
+    case "$1" in auto) printf auto ;; *) printf fixed ;; esac
+}
+
 mix_request_is_current() {
     [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] || return 0
     if [ -s "$MIX_STAGE_STATE" ]; then
@@ -118,14 +130,15 @@ ensure_mix_finalize_worker() {
         return 0
     fi
     if type luoshu_start_detached >/dev/null 2>&1; then
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" LUOSHU_MIX_REQUEST_ID="$_emfw_request" \
+        ( exec 9>&-
+          MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" LUOSHU_MIX_REQUEST_ID="$_emfw_request" \
             luoshu_start_detached "$_emfw_pid" "$_emfw_identity" "$LOG_FILE" \
-                sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity"
+                sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity" )
         _emfw_rc=$?
         [ "$_emfw_rc" -eq 0 ] || [ "$_emfw_rc" -eq 3 ]
         return $?
     fi
-    ( trap '' HUP; MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" LUOSHU_MIX_REQUEST_ID="$_emfw_request" sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity") \
+    ( exec 9>&-; trap '' HUP; MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" LUOSHU_MIX_REQUEST_ID="$_emfw_request" sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity") \
         </dev/null >>"$LOG_FILE" 2>&1 &
     return 0
 }
@@ -192,10 +205,13 @@ mix_config_json_fast() {
     [ -n "$_digit_axes" ] || _digit_axes="wght=$_digit_weight"
     _enabled=false
     [ "$(head -n1 "$ACTIVE_CONF" 2>/dev/null | tr -d '\r\n')" = mix ] && _enabled=true
-    printf '{"status":"ok","data":{"enabled":%s,"cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s"}}\n' \
+    printf '{"status":"ok","data":{"enabled":%s,"cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","cjkMode":"%s","latinMode":"%s","digitMode":"%s"}}\n' \
         "$_enabled" "$(json_escape_router "$_cjk")" "$(json_escape_router "$_latin")" "$(json_escape_router "$_digit")" \
         "$_cjk_weight" "$_latin_weight" "$_digit_weight" \
-        "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")"
+        "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")" \
+        "$(mix_mode_router "$(read_value "$_source" cjkMode)")" \
+        "$(mix_mode_router "$(read_value "$_source" latinMode)")" \
+        "$(mix_mode_router "$(read_value "$_source" digitMode)")"
 }
 
 # Reconcile only the detached axes controller used by the App. Its PID sidecars
@@ -319,8 +335,8 @@ mix_status_json_fast() {
             _message='字体生成已结束，但本机字体负载未完成，请重新应用'
             _percent=100
         fi
-    elif [ "$_state" = running ] && [ "$_finalize_percent" -gt "$_percent" ] 2>/dev/null; then
-        _percent="$_finalize_percent"
+    elif [ "$_state" = running ] && { [ "$_finalize_state" = running ] || [ "$_finalize_state" = ready ]; }; then
+        [ "$_finalize_percent" -le "$_percent" ] 2>/dev/null || _percent="$_finalize_percent"
         [ -z "$_finalize_message" ] || _message="$_finalize_message"
     fi
 
@@ -330,10 +346,14 @@ mix_status_json_fast() {
     _cjk_axes=$(read_value "$_task_file" cjkAxes); [ -n "$_cjk_axes" ] || _cjk_axes=wght=400
     _latin_axes=$(read_value "$_task_file" latinAxes); [ -n "$_latin_axes" ] || _latin_axes=wght=400
     _digit_axes=$(read_value "$_task_file" digitAxes); [ -n "$_digit_axes" ] || _digit_axes=wght=400
-    printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":400,"latinWeight":400,"digitWeight":400,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","timeout":720,"progress":{"message":"%s","percent":%s}}}\n' \
+    printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","cjkMode":"%s","latinMode":"%s","digitMode":"%s","timeout":720,"progress":{"message":"%s","percent":%s}}}\n' \
         "$(json_escape_router "$_task")" "$(json_escape_router "$_state")" "$(json_escape_router "$_message")" \
         "$(json_escape_router "$_cjk")" "$(json_escape_router "$_latin")" "$(json_escape_router "$_digit")" \
+        "$(axis_weight_router "$_cjk_axes")" "$(axis_weight_router "$_latin_axes")" "$(axis_weight_router "$_digit_axes")" \
         "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")" \
+        "$(mix_mode_router "$(read_value "$_task_file" cjkMode)")" \
+        "$(mix_mode_router "$(read_value "$_task_file" latinMode)")" \
+        "$(mix_mode_router "$(read_value "$_task_file" digitMode)")" \
         "$(json_escape_router "$_message")" "$_percent"
 }
 
@@ -451,6 +471,9 @@ stage_has_fonts() {
     [ -d "$MIX_STAGE" ] || return 1
     [ -s "$MIX_STAGE/system/fonts/.luoshu-font-store/mix-composite.font" ] && return 0
     [ -s "$MIX_STAGE/system/fonts/.luoshu-font-store/regular.font" ] && return 0
+    if [ -s "$MIX_STAGE/system/fonts/.luoshu-font-store/.luoshu-mix-source-weights.json" ]; then
+        find "$MIX_STAGE/system/fonts/.luoshu-font-store" -type f -name '*.font' -print -quit 2>/dev/null | grep -q . && return 0
+    fi
     find "$MIX_STAGE" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) \
         -print -quit 2>/dev/null | grep -q .
 }
@@ -598,11 +621,25 @@ prepare_mix_stage_for_commit() {
     # Composition starts from new source anchors, so map the full inventory once.
     # Passing a repair-only plan here would omit every unrequested slot.
     _pm_output="$MIX_STAGE/.luoshu-precommit-output.log"
+    _pm_pyroot="$REALMOD/common/python"
+    _pm_watchdog="$REALMOD/common/mix_stage_watchdog.py"
+    [ -x "$_pm_pyroot/bin/luoshu-python" ] && [ -f "$_pm_watchdog" ] || {
+        precommit_fail '字体生成监督组件缺失，未启动无界后台任务'
+        return 1
+    }
+    PYTHONHOME="$_pm_pyroot" \
+    PYTHONPATH="$_pm_pyroot/lib/python3.14:$_pm_pyroot/lib/python3.14/site-packages" \
+    LD_LIBRARY_PATH="$_pm_pyroot/lib:$_pm_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     LUOSHU_REAL_MODDIR="$REALMOD" \
-        LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-        LUOSHU_COVERAGE_PLAN= \
-            sh "$_inventory_helper" "$MIX_STAGE" mix mix >"$_pm_output" 2>&1
+    LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" LUOSHU_COVERAGE_PLAN= \
+        "$_pm_pyroot/bin/luoshu-python" "$_pm_watchdog" --module "$REALMOD" \
+        --request "$(read_value "$MIX_STAGE_STATE" requestId)" --task "$_pm_task" \
+        --progress "$REALMOD/config/mix-inventory-progress.json" \
+        -- sh "$_inventory_helper" "$MIX_STAGE" mix mix >"$_pm_output" 2>&1 &
+    MIX_MAPPING_PID=$!
+    wait "$MIX_MAPPING_PID"
     _pm_rc=$?
+    MIX_MAPPING_PID=''
     cat "$_pm_output" >>"$LOG_FILE" 2>/dev/null || true
     if [ "$_pm_rc" -ne 0 ]; then
         _pm_detail=$(sed -n 's/^通用字体生成失败：[[:space:]]*//p' "$_pm_output" 2>/dev/null | tail -n1)
@@ -735,9 +772,8 @@ commit_mix_stage_if_needed() {
 finalize_lock_acquire() {
     _tries=0
     _limit="${1:-120}"
-    # A live peer can be doing the bounded 120-second precommit. Wait for its
-    # result within that same budget instead of failing at 20 seconds or doing
-    # the work concurrently. The controller's outer timeout remains unchanged.
+    # A duplicate caller waits for the existing owner without starting a second
+    # mapper. The mapper has its own CPU/progress supervision and total bound.
     while [ "$_tries" -lt "$_limit" ]; do
         if mkdir "$FINALIZE_LOCK" 2>/dev/null; then
             # Publish the owner atomically. A reader must never mistake the
@@ -814,6 +850,15 @@ finalize_lock_release() {
     rmdir "$FINALIZE_LOCK" 2>/dev/null || true
 }
 
+stop_mix_mapping() {
+    [ -n "${MIX_MAPPING_PID:-}" ] || return 0
+    # The supervisor owns a separate FontTools process group. Let it stop that
+    # group before releasing the stage lock or deleting task source files.
+    kill -TERM "$MIX_MAPPING_PID" 2>/dev/null || true
+    wait "$MIX_MAPPING_PID" 2>/dev/null || true
+    MIX_MAPPING_PID=''
+}
+
 prepare_mix_stage_locked() (
     # The weighted controller's prepare call and the legacy monitor's finalize
     # call must share the same owner. Checking only the ready marker lets both
@@ -822,7 +867,7 @@ prepare_mix_stage_locked() (
         printf '{"status":"error","message":"复合字体预提交锁正在使用，请稍后重试"}\n'
         return 1
     }
-    trap 'finalize_lock_release >/dev/null 2>&1 || true' EXIT
+    trap 'stop_mix_mapping; finalize_lock_release >/dev/null 2>&1 || true' EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
@@ -848,7 +893,7 @@ finalize_mix_stage() (
         printf '{"status":"error","message":"复合字体已生成但提交锁不可用，请稍后重试"}\n'
         return 1
     fi
-    trap 'finalize_lock_release >/dev/null 2>&1 || true' EXIT
+    trap 'stop_mix_mapping; finalize_lock_release >/dev/null 2>&1 || true' EXIT
     trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
@@ -934,6 +979,29 @@ mark_mix_mode_if_success() {
 }
 
 _cmd="${1:-config}"
+# Kernel ownership serializes the complete mutating transaction. The old
+# directory remains useful for diagnostics/older installations, but its pathname
+# alone cannot protect against a stale reclaimer deleting a new empty lock.
+if [ "${LUOSHU_MIX_KERNEL_LOCK_HELD:-}" = 1 ]; then
+    unset LUOSHU_MIX_KERNEL_LOCK_HELD
+else
+    case "$_cmd" in
+        start|recover|prepare-finalize|finalize|finalize-worker)
+            _kernel_wait=120
+            case "$_cmd" in start|recover) _kernel_wait=1 ;; esac
+            _kernel_python="$REALMOD/common/python"
+            [ -x "$_kernel_python/bin/luoshu-python" ] && [ -f "$REALMOD/common/mix_stage_watchdog.py" ] || {
+                printf '{"status":"error","message":"字体事务锁组件缺失"}\n'
+                exit 1
+            }
+            PYTHONHOME="$_kernel_python" \
+            PYTHONPATH="$_kernel_python/lib/python3.14:$_kernel_python/lib/python3.14/site-packages" \
+            LD_LIBRARY_PATH="$_kernel_python/lib:$_kernel_python/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+                exec "$_kernel_python/bin/luoshu-python" "$REALMOD/common/mix_stage_watchdog.py" \
+                --module "$REALMOD" --lock --wait "$_kernel_wait" -- sh "$0" "$@"
+            ;;
+    esac
+fi
 if [ "$_cmd" = finalize-worker ]; then
     mix_finalize_worker "${2:-}"
     exit $?
@@ -1022,7 +1090,9 @@ case "$_cmd" in
         exit "$_rc"
         ;;
     start)
-        _out="$(sh "$RUNTIME/common/v14_mix.sh" "$@" 2>&1)"
+        # The admission transaction retains FD 9 in this shell, but the command
+        # that launches detached generation must not pass it to those workers.
+        _out="$(exec 9>&-; sh "$RUNTIME/common/v14_mix.sh" "$@" 2>&1)"
         _rc=$?
         printf '%s\n' "$_out"
         if [ "$_rc" -ne 0 ] || ! printf '%s\n' "$_out" | grep -q '"status":"ok"'; then

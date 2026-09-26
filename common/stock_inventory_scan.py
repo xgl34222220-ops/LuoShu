@@ -55,7 +55,7 @@ def _private_partition_overlaid(partition: str) -> bool:
             continue
         try:
             for path in root.rglob("*"):
-                if path.is_file() and path.suffix.lower() in inventory.FONT_EXTENSIONS:
+                if inventory._font_file_candidate(path):
                     return True
         except OSError:
             continue

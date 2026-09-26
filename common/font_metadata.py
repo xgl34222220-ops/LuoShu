@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -104,7 +105,7 @@ def os2_weight(font: TTFont) -> int:
 
 def italic(font: TTFont) -> bool:
     try:
-        return bool(int(font["head"].macStyle) & 0x02)
+        return bool(int(font["head"].macStyle) & 0x02 or int(font["OS/2"].fsSelection) & 0x01 or float(font["post"].italicAngle))
     except Exception:
         return "italic" in best_subfamily(font).lower() or "oblique" in best_subfamily(font).lower()
 
@@ -113,31 +114,42 @@ def hit_count(cmap: dict[int, str], probes: tuple[int, ...]) -> int:
     return sum(1 for codepoint in probes if codepoint in cmap)
 
 
+def protected_text_font(font: TTFont) -> bool:
+    return any(tag in font for tag in ("COLR", "CBDT", "sbix", "SVG ")) or bool(
+        re.search(r"emoji|dingbat|fontawesome|material.?icons|fontello|(?:^|[ _-])(?:icons?|symbols?)(?:$|[ _-])", best_family(font), re.I)
+    )
+
+
+def text_role_counts(cmap: dict[int, str]) -> dict[str, int]:
+    """Identify actual text repertoire; a partial font is still a usable donor."""
+    cmap = {cp: glyph for cp, glyph in cmap.items() if glyph != ".notdef"}
+    return {
+        "cjk": sum(0x3400 <= cp <= 0x4DBF or 0x4E00 <= cp <= 0x9FFF or 0xF900 <= cp <= 0xFAFF or 0x20000 <= cp <= 0x323AF for cp in cmap),
+        "latin": sum(0x41 <= cp <= 0x5A or 0x61 <= cp <= 0x7A or (0xC0 <= cp <= 0x24F and cp not in (0xD7, 0xF7)) or 0x1E00 <= cp <= 0x1EFF or 0xFF21 <= cp <= 0xFF3A or 0xFF41 <= cp <= 0xFF5A for cp in cmap),
+        "digit": sum(0x30 <= cp <= 0x39 or 0xFF10 <= cp <= 0xFF19 for cp in cmap),
+    }
+
+
 def coverage(font: TTFont) -> dict[str, Any]:
     cmap = font.getBestCmap() or {}
     cjk_hits = hit_count(cmap, CJK_PROBES)
     latin_hits = hit_count(cmap, LATIN_PROBES)
     digit_hits = hit_count(cmap, DIGIT_PROBES)
     punct_hits = hit_count(cmap, PUNCT_PROBES)
-    cjk_count = sum(
-        1
-        for codepoint in cmap
-        if 0x3400 <= codepoint <= 0x4DBF
-        or 0x4E00 <= codepoint <= 0x9FFF
-        or 0xF900 <= codepoint <= 0xFAFF
-        or 0x20000 <= codepoint <= 0x3134F
-    )
+    role_counts = text_role_counts(cmap)
+    cjk_count = role_counts["cjk"]
     return {
         "codepoints": len(cmap),
+        "roleCounts": role_counts,
         "cjkCount": cjk_count,
         "cjkProbe": {"present": cjk_hits, "required": len(CJK_PROBES)},
         "latinProbe": {"present": latin_hits, "required": len(LATIN_PROBES)},
         "digitProbe": {"present": digit_hits, "required": len(DIGIT_PROBES)},
         "punctProbe": {"present": punct_hits, "required": len(PUNCT_PROBES)},
         "roles": {
-            "cjk": cjk_hits == len(CJK_PROBES) and latin_hits == len(LATIN_PROBES) and digit_hits == len(DIGIT_PROBES),
-            "latin": latin_hits == len(LATIN_PROBES),
-            "digit": digit_hits == len(DIGIT_PROBES),
+            "cjk": role_counts["cjk"] > 0,
+            "latin": role_counts["latin"] > 0,
+            "digit": role_counts["digit"] > 0,
         },
     }
 

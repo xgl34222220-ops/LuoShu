@@ -22,6 +22,15 @@
 
 发布运行时不会使用 FontTools 测试字体作为洛书内置字体，但仍保留上游外部声明以便完整追溯。
 
+## Brotli
+
+- 用途：离线解码 WOFF2 导入文件中的 Brotli 数据。
+- 来源：Google 官方 [`google/brotli`](https://github.com/google/brotli)，版本 1.2.0，提交 `028fb5a23661f123017c060daa546b55cf4bde29`。
+- 许可证：MIT License，完整文本：[`licenses/Brotli-LICENSE.txt`](licenses/Brotli-LICENSE.txt)。
+- 构建：`scripts/prepare_brotli_runtime.sh` 校验固定上游归档 SHA-256，以 Android NDK 为 ARM64 API 26 编译仅解码程序；不包含主机平台二进制或联网依赖。
+- 洛书的解码入口和 Python 适配器位于 `scripts/runtime/`，限制输入、输出、内存及执行时间；上游解码器未修改。
+- 静态链接的 Android Bionic 与编译器运行库保留 NDK 原始声明：[`licenses/Android-NDK-sysroot-NOTICE.txt`](licenses/Android-NDK-sysroot-NOTICE.txt)、[`licenses/Android-NDK-toolchain-NOTICE.txt`](licenses/Android-NDK-toolchain-NOTICE.txt)。
+
 ## Miuix 与 AndroidLiquidGlass
 
 - 用途：Android 13 及以上悬浮底栏的背景取样、RuntimeShader 模糊与折射、边缘高光和平滑连续圆角。

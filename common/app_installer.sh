@@ -66,7 +66,7 @@ APK_SHA256=$(read_prop sha256 "$META")
 
 [ -n "$APP_PACKAGE" ] || APP_PACKAGE="io.github.xgl34222220.luoshu.debug"
 case "$APP_PACKAGE" in
-    io.github.xgl34222220.luoshu|io.github.xgl34222220.luoshu.debug) ;;
+    io.github.xgl34222220.luoshu|io.github.xgl34222220.luoshu.debug|io.github.xgl34222220.luoshu.preview) ;;
     *)
         log_app ERROR "拒绝安装未知包名：$APP_PACKAGE"
         touch "$PENDING" 2>/dev/null || true
@@ -74,6 +74,14 @@ case "$APP_PACKAGE" in
         exit 21
         ;;
 esac
+
+if [ "$APP_PACKAGE" = io.github.xgl34222220.luoshu.preview ]; then
+    if ! printf '%s\n' "$APK_SHA256" | grep -Eq '^[0-9a-f]{64}$' || ! command -v sha256sum >/dev/null 2>&1; then
+        log_app ERROR "测试版内置 APK 缺少可验证的 SHA-256，拒绝安装"
+        printf 'invalid-apk\n'
+        exit 22
+    fi
+fi
 
 case "$APP_VERSION_CODE" in
     ''|*[!0-9]*)

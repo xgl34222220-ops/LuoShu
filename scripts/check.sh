@@ -29,6 +29,9 @@ python3 -m py_compile \
   "$ROOT/common/font_metadata.py" \
   "$ROOT/common/font_extract_faces.py" \
   "$ROOT/common/font_import_probe.py" \
+  "$ROOT/common/font_import_engine.py" \
+  "$ROOT/common/mix_inventory_weights.py" \
+  "$ROOT/common/mix_stage_watchdog.py" \
   "$ROOT/common/font_inventory.py" \
   "$ROOT/common/device_font_slot_trace.py" \
   "$ROOT/common/inventory_font_stage.py" \
@@ -46,6 +49,7 @@ for file in \
   common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py common/font_inventory.py common/device_font_slot_trace.py \
   common/inventory_stock_source.py common/inventory_font_supplement.py common/physical_font_load_verify.py \
+  common/font_import_engine.py common/mix_inventory_weights.py common/mix_stage_watchdog.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
   common/multiweight_mix_task.sh common/mix_weight_mode.sh \
@@ -135,10 +139,10 @@ grep -q 'native_font_index.json' "$ROOT/service.sh"
 ! grep -qE '重启界面|刷新字体缓存|回滚' "$ROOT/common/luoshu_cli.sh"
 
 # 字体处理、安全门禁和原生桥能力必须保留。
-grep -q 'full-composite-v7' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
+grep -q 'full-composite-v8' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
 grep -q 'build_composite_file' "$ROOT/common/legacy_v14_4/font_mix_engine.sh"
 sh "$ROOT/scripts/mix_entry_router_test.sh"
-grep -q 'for _weight in 100 200 300 400 500 600 700 800 900' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
+grep -q 'for _weight in $_weights' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
 grep -q 'build_composite_cached' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
 grep -q 'LuoShuAutoMix' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
 grep -q 'cjkMode=%s' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"
@@ -157,8 +161,8 @@ grep -q 'coverage_export)' "$ROOT/common/app_bridge.sh"
 grep -q 'device_font_candidates.json' "$ROOT/common/app_bridge.sh"
 grep -q 'trusted_source' "$ROOT/common/native_import.sh"
 grep -q 'MAX_BYTES=268435456' "$ROOT/common/native_import.sh"
-grep -q 'font_validate' "$ROOT/common/native_import.sh"
-grep -q 'font_extract_faces.py' "$ROOT/common/native_import.sh"
+grep -q 'import_run_engine' "$ROOT/common/native_import.sh"
+grep -q 'font_detect_format' "$ROOT/common/native_import.sh"
 grep -q 'font_check_cli' "$ROOT/common/font_check.sh"
 grep -q 'source 时，必须只定义函数' "$ROOT/common/font_check.sh"
 grep -q 'instantiateVariableFont' "$ROOT/common/font_instance.py"
@@ -245,6 +249,10 @@ grep -q '^                                 Apache License$' "$ROOT/licenses/Apac
 grep -q 'Miuix 与 AndroidLiquidGlass' "$ROOT/THIRD_PARTY_NOTICES.md"
 
 # 功能回归脚本。
+python3 "$ROOT/scripts/font_import_engine_test.py"
+python3 "$ROOT/scripts/mix_stage_watchdog_test.py"
+python3 "$ROOT/scripts/brotli_runtime_test.py"
+python3 "$ROOT/scripts/composite_sparse_roles_test.py"
 sh "$ROOT/scripts/native_preview_source_test.sh"
 sh "$ROOT/scripts/app_bridge_status_test.sh"
 sh "$ROOT/scripts/font_coverage_center_test.sh"

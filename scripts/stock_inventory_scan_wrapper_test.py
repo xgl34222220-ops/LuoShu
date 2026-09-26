@@ -16,7 +16,7 @@ import stock_inventory_scan as stock  # noqa: E402
 
 
 def main() -> int:
-    assert stock.scanner.SCANNER_REVISION == 10, "manual/install scan must use the full v10 generic inventory"
+    assert stock.scanner.SCANNER_REVISION == 11, "manual/install scan must use the full v11 generic inventory"
     installer = (ROOT / ".luoshu-runtime/compat/v227/customize.sh").read_text(encoding="utf-8")
     wrapper = (ROOT / "customize.sh").read_text(encoding="utf-8")
     service = (ROOT / "service.sh").read_text(encoding="utf-8")

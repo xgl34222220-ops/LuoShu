@@ -47,6 +47,7 @@ luoshu_update_font_builder_compatible() {
         common/physical_font_load_verify.py \
         common/inventory_font_stage.sh \
         common/mix_source_manifest.py \
+        common/mix_inventory_weights.py \
         common/legacy_v14_4/font_mix_engine.sh \
         common/legacy_v14_4/v143_auto_multiweight_mix.sh \
         common/coverage_payload_remediate.sh \
@@ -199,6 +200,7 @@ luoshu_migrate_update_cache() {
         cache/full-composite-v12 \
         cache/auto-multiweight-mix/composites-v9 \
         cache/auto-multiweight-mix/prepared-v8 \
+        cache/full-composite-v8 \
         cache/full-composite-v7 \
         cache/auto-multiweight-mix/composites-v3; do
         rm -rf "$_new/$_relative" 2>/dev/null || true

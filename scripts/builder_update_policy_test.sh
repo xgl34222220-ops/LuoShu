@@ -8,8 +8,8 @@ LUOSHU_PAYLOAD_SCHEMA_CURRENT=builder-update-test-schema
 export LUOSHU_PAYLOAD_SCHEMA_CURRENT
 . "$ROOT/common/module_update_state.sh"
 
-BUILDERS='common/font_inventory.py common/font_inventory_scan.py common/stock_inventory_scan.py common/inventory_font_stage.py common/inventory_font_metrics.py common/inventory_stock_source.py common/inventory_font_supplement.py common/physical_font_load_verify.py common/inventory_font_stage.sh common/mix_source_manifest.py common/legacy_v14_4/font_mix_engine.sh common/legacy_v14_4/v143_auto_multiweight_mix.sh common/coverage_payload_remediate.sh common/legacy_v14_4/font_switch_safe.sh common/device_font_payload_build.py common/device_font_payload_overlay.py common/font_runtime_mount.sh common/hyperos_physical_policy.py common/hyperos_metrics_batch.py common/coloros_metrics_batch.py common/legacy_v14_4/hyperos_full_coverage.sh'
-GENERATED_CACHES='cache/full-composite-v12 cache/full-composite-v7 cache/auto-multiweight-mix/composites-v9 cache/auto-multiweight-mix/composites-v3 cache/auto-multiweight-mix/prepared-v8'
+BUILDERS='common/font_inventory.py common/font_inventory_scan.py common/stock_inventory_scan.py common/inventory_font_stage.py common/inventory_font_metrics.py common/inventory_stock_source.py common/inventory_font_supplement.py common/physical_font_load_verify.py common/inventory_font_stage.sh common/mix_source_manifest.py common/mix_inventory_weights.py common/legacy_v14_4/font_mix_engine.sh common/legacy_v14_4/v143_auto_multiweight_mix.sh common/coverage_payload_remediate.sh common/legacy_v14_4/font_switch_safe.sh common/device_font_payload_build.py common/device_font_payload_overlay.py common/font_runtime_mount.sh common/hyperos_physical_policy.py common/hyperos_metrics_batch.py common/coloros_metrics_batch.py common/legacy_v14_4/hyperos_full_coverage.sh'
+GENERATED_CACHES='cache/full-composite-v12 cache/full-composite-v8 cache/full-composite-v7 cache/auto-multiweight-mix/composites-v9 cache/auto-multiweight-mix/composites-v3 cache/auto-multiweight-mix/prepared-v8'
 COPY_TRACE="$TMP/copies.log"
 cp() {
     printf '%s\n' "$@" >> "$COPY_TRACE"

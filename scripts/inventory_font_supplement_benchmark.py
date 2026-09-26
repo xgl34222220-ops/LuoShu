@@ -15,6 +15,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'common'))
 from fontTools.ttLib import TTFont
 from fontTools.pens.t2CharStringPen import T2CharStringPen
+from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.pens.transformPen import TransformPen
 from inventory_font_supplement import supplement, _subset, replacement_codepoints
 from font_slot_coverage import preferred_unicode_codepoints
@@ -33,16 +34,25 @@ def main():
             parser.error('preparation will not overwrite an existing source')
         with TTFont(args.stock, recalcBBoxes=False, recalcTimestamp=False) as font:
             _subset(font, replacement_codepoints(preferred_unicode_codepoints(font)))
-            if 'CFF ' not in font:
-                parser.error('preparation fixture currently expects a static CFF stock')
+            if 'fvar' in font:
+                parser.error('instantiate a real variable stock separately before preparing this static benchmark')
             glyphs = font.getGlyphSet()
             name = font.getBestCmap()[ord('A')]
-            top = font['CFF '].cff[0]
-            old = top.CharStrings[name]
             width = font['hmtx'].metrics[name][0]
-            pen = T2CharStringPen(width - old.private.nominalWidthX, glyphs, roundTolerance=0)
-            glyphs[name].draw(TransformPen(pen, (1, 0, 0, 1, 100, 0)))
-            top.CharStrings[name] = pen.getCharString(private=old.private, globalSubrs=old.globalSubrs)
+            if 'CFF ' in font:
+                top = font['CFF '].cff[0]
+                old = top.CharStrings[name]
+                pen = T2CharStringPen(width - old.private.nominalWidthX, glyphs, roundTolerance=0)
+                glyphs[name].draw(TransformPen(pen, (1, 0, 0, 1, 100, 0)))
+                top.CharStrings[name] = pen.getCharString(private=old.private, globalSubrs=old.globalSubrs)
+            elif 'glyf' in font:
+                pen = TTGlyphPen(glyphs)
+                glyphs[name].draw(TransformPen(pen, (1, 0, 0, 1, 100, 0)))
+                font['glyf'][name] = pen.glyph()
+                font['glyf'][name].recalcBounds(font['glyf'])
+                font['hmtx'].metrics[name] = (width, font['hmtx'].metrics[name][1] + 100)
+            else:
+                parser.error('preparation expects a static glyf or CFF stock')
             font.save(args.source)
         return
     if args.output is None:

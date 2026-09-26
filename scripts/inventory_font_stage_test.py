@@ -21,6 +21,7 @@ from fontTools.ttLib import TTCollection, TTFont, getTableClass
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 import font_inventory
 import inventory_font_stage as engine
+import inventory_font_metrics as metric_writer
 
 LATIN = set(range(32, 127))
 HAN = set(range(0x4e00, 0x5000))
@@ -149,12 +150,44 @@ class InventoryStageTest(unittest.TestCase):
             self.assertEqual((out['hhea'].ascent, out['hhea'].descent), (950, -250))
             self.assertEqual((out['head'].yMin, out['head'].yMax), (-330, 1100))
 
+    def test_metric_only_cff_alias_does_not_decode_character_map_or_outlines(self):
+        source_font(self.source, cff=True)
+        contract = metric_writer.contract_for_face(self.slot())
+        output = self.root / 'metric-only.otf'
+        with patch.object(getTableClass('cmap'), 'decompile', side_effect=AssertionError('cmap decode')), \
+             patch.object(getTableClass('CFF '), 'decompile', side_effect=AssertionError('CFF decode')):
+            metric_writer.write_metrics(self.source, output, contract)
+        with TTFont(self.source, lazy=True) as source, TTFont(output, lazy=True) as result:
+            for tag in ('cmap', 'CFF ', 'hmtx', 'maxp'):
+                self.assertEqual(source.reader[tag], result.reader[tag])
+            self.assertEqual(result['OS/2'].usFirstCharIndex, source['OS/2'].usFirstCharIndex)
+            self.assertEqual(result['OS/2'].usLastCharIndex, source['OS/2'].usLastCharIndex)
+            self.assertEqual((result['hhea'].ascent, result['hhea'].descent), (950, -250))
+
+    def test_metric_cmap_pruning_recalculates_os2_character_range(self):
+        source_font(self.source, points=LATIN | HAN, cff=True)
+        output = self.root / 'latin-routed.otf'
+        metric_writer.write_metrics(self.source, output, metric_writer.contract_for_face(self.slot()),
+                                    frozenset(HAN))
+        with TTFont(output) as font:
+            self.assertEqual(font['OS/2'].usFirstCharIndex, min(LATIN))
+            self.assertEqual(font['OS/2'].usLastCharIndex, max(LATIN))
+            self.assertEqual(set(font.getBestCmap()), LATIN)
+
     def test_missing_weight_never_labels_regular_as_bold(self):
         self.inventory({'/system/fonts/Text.ttf': self.slot(), '/system/fonts/Bold.ttf': self.slot(700)})
         result = self.run_engine()
         self.assertEqual((result['mapped'], result['preserved']), (1, 1))
         self.assertFalse((self.stage / 'system/fonts/Bold.ttf').exists())
         self.assertIn('source-weight-missing', (self.stage / '.luoshu-coverage-preserved.tsv').read_text())
+
+    def test_materialized_cache_cannot_make_regular_satisfy_unavailable_weight(self):
+        temporary = self.root / 'anchors'; temporary.mkdir()
+        pool = engine.SourcePool(self.module, self.stage, 'direct', self.source, temporary)
+        face = pool.faces[0]
+        pool.materialize(face, 400)
+        with self.assertRaisesRegex(engine.StageError, '字重与请求不一致'):
+            pool.materialize(face, 700)
 
     def test_metadata_family_weight_search_and_unrelated_font_not_selected(self):
         source_font(self.source.parent / 'unrelated.ttf', 500, family='Other')
@@ -338,7 +371,7 @@ class InventoryStageTest(unittest.TestCase):
                 engine.run(self.module, self.stage, 'direct', plan=plan)
         self.assertEqual(self.stage_snapshot(), before)
 
-    def test_optional_collection_supplement_limit_preserves_only_affected_face(self):
+    def test_variable_collection_face_preserves_axis_and_supplements_stock_characters(self):
         source_font(self.source, variable=True)
         optional = self.slot(format='TTC', faces=[dict(self.slot(), faceIndex=0),
             dict(self.slot(points=LATIN | HAN | {0x3a9}), faceIndex=1, supportedAxes=['wght'])])
@@ -347,8 +380,12 @@ class InventoryStageTest(unittest.TestCase):
         self.assertEqual(result['mapped'], 2)
         report = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())
         rows = [row for row in report['slots'] if row['slot'].endswith('Shared.ttc')]
-        self.assertEqual([row['state'] for row in rows], ['replaced', 'retained-stock'])
-        self.assertEqual(rows[1]['reason'], 'source-variable-supplement-unavailable')
+        self.assertEqual([row['state'] for row in rows], ['replaced', 'replaced'])
+        self.assertEqual(rows[1]['variableAxesPreserved'], ['wght'])
+        original_path = self.root / 'stock/system/fonts/Shared.ttc'
+        with TTCollection(original_path) as original, TTCollection(self.stage / 'system/fonts/Shared.ttc') as result:
+            self.assertIn('fvar', result.fonts[1])
+            self.assertEqual(drawn_glyph(original.fonts[1], 0x3a9), drawn_glyph(result.fonts[1], 0x3a9))
 
     def test_script_style_and_monospace_require_actual_source_capability(self):
         arabic = self.slot(points=LATIN | set(range(0x620, 0x650)))
@@ -474,8 +511,41 @@ class InventoryStageTest(unittest.TestCase):
         self.inventory({'/system/fonts/A.ttf': self.slot(), '/system/fonts/B.ttf': self.slot(700)})
         result = engine.run(self.module, self.stage, 'mix')
         self.assertEqual(result['mapped'], 2)
+        self.assertEqual(result['sourceInstances'], 1)
+        self.assertEqual(result['generated'], 1)
         with TTFont(self.stage / 'system/fonts/B.ttf') as font:
             self.assertEqual(font['OS/2'].usWeightClass, 400)
+
+    def test_variable_face_is_materialized_once_for_all_preserved_axis_targets(self):
+        source_font(self.source, variable=True)
+        self.inventory({'/system/fonts/First.ttf': self.slot(supportedAxes=['wght']),
+                        '/system/fonts/Second.ttf': self.slot(700, supportedAxes=['wght'])})
+        result = self.run_engine()
+        self.assertEqual(result['sourceInstances'], 1)
+        self.assertEqual(result['generated'], 1)
+        with TTFont(self.source, lazy=True) as source, TTFont(self.stage / 'system/fonts/Second.ttf') as font:
+            self.assertIn('fvar', font)
+            self.assertEqual(source.reader['gvar'], font.reader['gvar'])
+            self.assertEqual(font['OS/2'].usWeightClass, 400)
+
+    def test_task_progress_is_atomic_monotonic_and_reaches_complete_after_commit(self):
+        self.inventory({'/system/fonts/First.ttf': self.slot(), '/product/fonts/Second.ttf': self.slot()})
+        progress_file = self.module / 'config/progress.json'
+        entries = []
+        replace = engine.os.replace
+        def record_replace(source, destination):
+            replace(source, destination)
+            if Path(destination) == progress_file:
+                entries.append(json.loads(progress_file.read_text()))
+        with patch.dict(os.environ, {'LUOSHU_INVENTORY_PROGRESS_FILE': str(progress_file)}), \
+             patch.object(engine.os, 'replace', side_effect=record_replace):
+            self.run_engine()
+        self.assertEqual(entries[-1]['phase'], 'complete')
+        self.assertEqual(entries[-1]['completed'], entries[-1]['total'])
+        self.assertEqual(sorted(row['completed'] for row in entries), [row['completed'] for row in entries])
+        self.assertIn('supplement', {row['phase'] for row in entries})
+        self.assertIn('metrics', {row['phase'] for row in entries})
+        self.assertTrue((self.stage / '.luoshu-inventory-output-manifest.json').is_file())
 
     def mix_store(self, mode='fixed'):
         store = self.stage / 'system/fonts/.luoshu-font-store'; store.mkdir(parents=True)
@@ -536,11 +606,27 @@ class InventoryStageTest(unittest.TestCase):
         rows = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots']
         self.assertEqual(set(rows[0]['replacedRoles']), {'cjk', 'latin', 'digit'})
 
+    def test_digits_only_source_replaces_main_ui_digits_and_retains_original_text(self):
+        source_font(self.source, points={48, 49, 50}, right=350)
+        logical = '/system/fonts/Main.ttf'
+        self.inventory({logical: self.slot()})
+        self.assertEqual(self.run_engine()['mapped'], 1)
+        data = json.loads((self.module / 'config/device_font_inventory.json').read_text())
+        stock = Path(data['sourceRoots'][0]['actual']) / 'Main.ttf'
+        with TTFont(stock) as original, TTFont(self.source) as source, TTFont(self.stage / logical[1:]) as result:
+            self.assertEqual(drawn_glyph(source, 48), drawn_glyph(result, 48))
+            self.assertNotEqual(drawn_glyph(original, 48), drawn_glyph(result, 48))
+            for point in (65, 51, 0x4e00):
+                self.assertEqual(drawn_glyph(original, point), drawn_glyph(result, point))
+        rows = json.loads((self.stage / '.luoshu-metrics-report.json').read_text())['slots']
+        self.assertEqual(rows[0]['replacedRoleCounts'], {'cjk': 0, 'latin': 0, 'digit': 3})
+
     def test_known_optional_supplement_limit_is_preserved_but_unknown_failure_aborts(self):
         source_font(self.source, variable=True)
         main, optional = '/system/fonts/Main.ttf', '/system/fonts/Optional.ttf'
         self.inventory({main: self.slot(), optional: self.slot(points=LATIN | HAN | {0x3a9}, supportedAxes=['wght'])})
-        result = self.run_engine()
+        with patch.object(engine, 'supplement', side_effect=engine.UnsupportedSupplementError('unsupported fixture')):
+            result = self.run_engine()
         self.assertEqual(result['mapped'], 1)
         self.assertIn('source-variable-supplement-unavailable', (self.stage / '.luoshu-coverage-preserved.tsv').read_text())
         source_font(self.source)

@@ -385,7 +385,7 @@ def capability_reason_label(reason: str) -> str:
         "source-mono-missing": "当前字体缺少等宽字形，保持原厂",
         "source-script-missing": "当前字体不包含目标文字所需的字形，保持原厂",
         "source-script-coverage-missing": "当前字体缺少目标文字或数字字形，保持原厂",
-        "source-digits-missing": "当前字体缺少完整数字字形，保持原厂",
+        "source-digits-missing": "当前字体缺少可用于此文件的数字字形，保持原厂",
         "source-capability-missing": "当前字体不满足此文件的替换要求，保持原厂",
         "source-variable-range-missing": "当前字体无法满足此文件的可变字重范围，保持原厂",
         "source-target-roles-missing": "当前字体没有可用于此文件的中文、英文或数字字形，尚未替换",
@@ -412,6 +412,12 @@ def capability_reason_label(reason: str) -> str:
         "invalid-cmap": "字体字符映射无效，保持原厂",
         "specialized-name": "表情、图标或专用符号字体，保持原厂",
         "dynamic-font-alias": "此路径由系统主题动态管理，保持原厂",
+        "mutable-theme-font": "系统主题动态字体，未纳入静态系统字体替换，尚未替换",
+        "unreadable-dynamic-font": "无法读取或解析动态字体，尚未替换",
+        "runtime-font-container": "运行容器字体路径，需要独立挂载支持，尚未替换",
+        "runtime-font-alias": "运行容器字体链接，需要独立挂载支持，尚未替换",
+        "unreadable-runtime-font": "无法读取或解析运行容器字体，尚未替换",
+        "unsupported-mount-root-path": "已识别字体内容，但当前挂载方式尚不支持此目录路径，未替换",
         "unreadable-stock-font": "无法读取或解析原厂字体，尚未替换",
         "untrusted-stock-root": "尚未取得此路径的可信原厂字体，尚未替换",
         "not-promoted-to-ui-inventory": "已扫描到此文件，但尚未完成文字字形检测，未替换",
@@ -423,6 +429,120 @@ def capability_reason_label(reason: str) -> str:
     if code in labels:
         return labels[code] + (f"（{detail}）" if detail else "")
     return reason
+
+
+def archived_roles(entry: dict[str, Any]) -> tuple[list[str], bool, str]:
+    """Read device capabilities independently of the currently selected font."""
+    roles = entry.get("replacementRoles")
+    if isinstance(roles, list):
+        return [role for role in ("cjk", "latin", "digit") if role in roles], True, "archived-roles"
+    faces = entry.get("faces")
+    if isinstance(faces, list) and faces:
+        results = [archived_roles(face) for face in faces if isinstance(face, dict)
+                   and not face.get("preservedReason")]
+        if not results:
+            return [], True, "measured-faces"
+        if any(known for _roles, known, _basis in results):
+            present = {role for face_roles, _known, _basis in results for role in face_roles}
+            return [role for role in ("cjk", "latin", "digit") if role in present], True, "measured-faces"
+    metrics = entry.get("metrics") if isinstance(entry.get("metrics"), dict) else entry
+    coverage = metrics.get("coverage") if isinstance(metrics.get("coverage"), dict) else {}
+    traits = metrics.get("fontTraits") if isinstance(metrics.get("fontTraits"), dict) else {}
+    letter_scripts = traits.get("letterScripts") if isinstance(traits.get("letterScripts"), dict) else {}
+    known = (any(key in coverage for key in ("hanCount", "latinCount", "hasHan", "hasLatin"))
+             or "digitCount" in traits or "letterScripts" in traits)
+    def positive(value: Any) -> bool:
+        return isinstance(value, (int, float)) and value > 0
+    present = set()
+    if positive(coverage.get("hanCount")) or coverage.get("hasHan") is True:
+        present.add("cjk")
+    if (positive(coverage.get("latinCount")) or coverage.get("hasLatin") is True
+            or positive(letter_scripts.get("Latn"))):
+        present.add("latin")
+    if positive(traits.get("digitCount")):
+        present.add("digit")
+    source = entry.get("stockSource") if isinstance(entry.get("stockSource"), dict) else {}
+    for pair in source.get("codepointRanges") or []:
+        if (isinstance(pair, list) and len(pair) == 2 and all(type(cp) is int for cp in pair)
+                and (pair[0] <= 0x39 and pair[1] >= 0x30 or pair[0] <= 0xFF19 and pair[1] >= 0xFF10)):
+            present.add("digit")
+            known = True
+            break
+    return [role for role in ("cjk", "latin", "digit") if role in present], known, (
+        "measured-coverage" if known else "legacy-estimate")
+
+
+def slot_capabilities(entry: dict[str, Any], category: str, *, stock: bool = True) -> dict[str, Any]:
+    roles, known, basis = archived_roles(entry)
+    faces = entry.get("faces") or ([entry] if any(key in entry for key in
+             ("metrics", "replacementRoles", "coverage")) else [])
+    displayed = []
+    for index, face in enumerate(faces):
+        if not isinstance(face, dict):
+            continue
+        metrics = face.get("metrics") if isinstance(face.get("metrics"), dict) else face
+        axes = metrics.get("variationAxes") or {}
+        face_roles, face_known, _basis = archived_roles(face)
+        displayed.append({
+            "faceIndex": face.get("faceIndex", index),
+            "replacementRoles": face_roles, "capabilityKnown": face_known,
+            "weight": face.get("weight", metrics.get("weightClass", entry.get("weight", 400))),
+            "style": face.get("style", entry.get("style", "normal")),
+            "format": face.get("format", entry.get("format", "")),
+            "variationAxes": axes,
+            "variationInstances": metrics.get("variationInstances") or [],
+            "preservedReason": capability_reason_label(str(face.get("preservedReason") or "")),
+        })
+    return {
+        "replacementRoles": roles, "capabilityKnown": known, "capabilityBasis": basis,
+        "intrinsicallyReplaceable": stock and (bool(roles) if known else category != "protected"),
+        "fontFaces": displayed,
+        "faceCount": len(displayed),
+        "variable": any(bool(face["variationAxes"]) for face in displayed),
+    }
+
+
+def observed_entries(inventory: dict[str, Any], known_paths: set[str]) -> list[dict[str, Any]]:
+    result = []
+    seen = set(known_paths)
+    for key, source, state, default_reason in (
+        ("dynamicFontFiles", "dynamic-font", "unreplaced-dynamic", "mutable-theme-font"),
+        ("runtimeFontFiles", "runtime-font", "unreplaced-runtime", "runtime-font-container"),
+    ):
+        for raw in inventory.get(key) or []:
+            if not isinstance(raw, dict):
+                continue
+            logical = normalize_path(raw.get("path"))
+            if not logical or logical in seen:
+                continue
+            seen.add(logical)
+            reason = str(raw.get("reason") or default_reason)
+            faces = raw.get("faces") or []
+            first = faces[0] if faces and isinstance(faces[0], dict) else {}
+            result.append({
+                "path": logical, "slotName": str(raw.get("slotName") or Path(logical).name),
+                "partition": str(raw.get("partition") or ("data" if source == "dynamic-font" else "apex")),
+                "source": source, "format": str(first.get("format") or ""),
+                "weight": first.get("weight", 400), "style": first.get("style", "normal"),
+                "families": [], "state": state, "category": "issue", "safeToRetry": False,
+                "observationOnly": True, "scope": raw.get("scope", ""),
+                "reason": capability_reason_label(reason), "reasonCode": reason,
+                "sourceUnavailable": False, "retainedFaces": [], "routes": [],
+                **slot_capabilities(raw, "issue", stock=False),
+            })
+    return result
+
+
+def count_capabilities(traced: list[dict[str, Any]]) -> dict[str, Any]:
+    eligible = [item for item in traced if item.get("intrinsicallyReplaceable")]
+    estimated = sum(item.get("capabilityBasis") == "legacy-estimate" for item in eligible)
+    return {
+        "replaceableSlots": len(eligible), "replaceableEstimatedSlots": estimated,
+        "replaceableCountBasis": "archived-stock-capabilities" if not estimated else "includes-legacy-estimates",
+        "dynamicSlots": sum(item.get("source") == "dynamic-font" for item in traced),
+        "runtimeSlots": sum(item.get("source") == "runtime-font" for item in traced),
+        "stockCensusSlots": sum(not item.get("observationOnly") for item in traced),
+    }
 
 
 def census_reason(inventory: dict[str, Any], logical: str, fallback: str) -> str:
@@ -461,6 +581,7 @@ def census_entries(inventory: dict[str, Any], candidates: dict[str, Any]) -> lis
             "category": category, "safeToRetry": False, "censusOnly": True,
             "reason": capability_reason_label(reason), "reasonCode": reason,
             "sourceUnavailable": False, "retainedFaces": [], "routes": [],
+            **slot_capabilities(measured if isinstance(measured, dict) else {}, category, stock=False),
         })
     return entries
 
@@ -699,12 +820,15 @@ def build_physical_trace(
             "retainedTargetRoleCounts": retained_target_counts,
             "supplementDisposition": "physical-safe",
             "routes": routes,
+            **slot_capabilities(entry, category),
         })
         counts[state] += 1
 
     census_only = census_entries(inventory, candidates)
     traced.extend(census_only)
-    for item in census_only:
+    observations = observed_entries(inventory, {item["path"] for item in traced})
+    traced.extend(observations)
+    for item in [*census_only, *observations]:
         counts[item["state"]] += 1
 
     category_counts: dict[str, int] = defaultdict(int)
@@ -714,8 +838,6 @@ def build_physical_trace(
         if bool(item.get("safeToRetry")):
             remediable += 1
 
-    eligible = sum(1 for item in traced if not item.get("censusOnly")
-                   and item["category"] != "protected" and not item.get("sourceUnavailable"))
     return {
         "schema": SCHEMA,
         "inventoryBuildKey": str(inventory.get("buildKey") or ""),
@@ -739,7 +861,7 @@ def build_physical_trace(
             "textInventorySlots": len(inventory.get("slots") or {}),
             "censusSlots": len(traced),
             "censusOnlySlots": len(census_only),
-            "replaceableSlots": eligible,
+            **count_capabilities(traced),
             "replaced": category_counts.get("replaced", 0),
             "pending": category_counts.get("pending", 0),
             "protected": category_counts.get("protected", 0),
@@ -818,6 +940,7 @@ def build_trace(
             "reason": reason,
             "supplementDisposition": str((supplement_record or {}).get("disposition") or ""),
             "routes": routes,
+            **slot_capabilities(entry, category),
         }
         traced.append(item)
         counts[state] += 1
@@ -826,7 +949,9 @@ def build_trace(
     # its nonreplaceable entries stay outside every remediation plan.
     census_only = census_entries(inventory, candidates)
     traced.extend(census_only)
-    for item in census_only:
+    observations = observed_entries(inventory, {item["path"] for item in traced})
+    traced.extend(observations)
+    for item in [*census_only, *observations]:
         counts[item["state"]] += 1
 
     # Template-only routes are useful diagnostics but are not counted as scanner
@@ -842,8 +967,6 @@ def build_trace(
         if bool(item.get("safeToRetry")):
             remediable += 1
 
-    eligible = sum(1 for item in traced if not item.get("censusOnly")
-                   and item["category"] != "protected" and not source_capability_missing(item.get("reason", "")))
     return {
         "schema": SCHEMA,
         "inventoryBuildKey": str(inventory.get("buildKey") or ""),
@@ -854,7 +977,7 @@ def build_trace(
             "textInventorySlots": len(inventory.get("slots") or {}),
             "censusSlots": len(traced),
             "censusOnlySlots": len(census_only),
-            "replaceableSlots": eligible,
+            **count_capabilities(traced),
             "replaced": category_counts.get("replaced", 0),
             "pending": category_counts.get("pending", 0),
             "protected": category_counts.get("protected", 0),

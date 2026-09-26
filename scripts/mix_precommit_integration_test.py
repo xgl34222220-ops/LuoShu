@@ -7,6 +7,7 @@ import os
 import shutil
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -24,6 +25,9 @@ class PrecommitOwnershipTest(unittest.TestCase):
                      ".luoshu-mix-stage/system/fonts"):
             (self.module / path).mkdir(parents=True, exist_ok=True)
         (self.module / "module.prop").write_text("id=LuoShu\n")
+        (self.module / "common/python/bin").mkdir(parents=True)
+        shutil.copyfile(ROOT / "common/mix_stage_watchdog.py", self.module / "common/mix_stage_watchdog.py")
+        self.script("common/python/bin/luoshu-python", f'#!/bin/sh\nunset PYTHONHOME PYTHONPATH LD_LIBRARY_PATH\nexec {sys.executable} "$@"\n')
         self.stage = self.module / ".luoshu-mix-stage"
         (self.stage / "system/fonts/MiSansVF.ttf").write_text("new-composite")
         identity = "requestId=request-test\ncjk=CJK\nlatin=Latin\ndigit=Digit\n"
@@ -99,6 +103,19 @@ cp "$1/system/fonts/.luoshu-font-store/mix-composite.font" "$1/system/fonts/Dete
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((self.module / ".luoshu-payload-next/system/fonts/Detected.ttf").read_text(),
                          "composite-source")
+
+    def test_nonstandard_auto_weight_anchor_reaches_inventory_mapper(self):
+        (self.stage / "system/fonts/MiSansVF.ttf").unlink()
+        anchors = self.stage / "system/fonts/.luoshu-font-store"
+        anchors.mkdir()
+        (anchors / "wght-550.font").write_text("real-550-composite")
+        (anchors / ".luoshu-mix-source-weights.json").write_text('{"schema":"luoshu-mix-source-weights-v1"}')
+        self.script("common/inventory_font_stage.sh", """#!/bin/sh
+cp "$1/system/fonts/.luoshu-font-store/wght-550.font" "$1/system/fonts/Detected.ttf"
+""")
+        result = self.run_router("finalize")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.module / ".luoshu-payload-next/system/fonts/Detected.ttf").read_text(), "real-550-composite")
 
     def test_missing_inventory_mapper_cannot_commit_core_only_tree(self):
         (self.module / "common/inventory_font_stage.sh").unlink()
@@ -260,6 +277,112 @@ fi
                 if worker.poll() is None:
                     worker.kill()
                 worker.wait()
+
+    def test_paused_stale_rmdir_cannot_admit_another_mapper(self):
+        lock = self.module / '.mix-stage-finalize.lock'
+        lock.mkdir()
+        (lock / 'pid').write_text('99999999\n')
+        real_rmdir = shutil.which('rmdir')
+        self.script('bin/rmdir', f'''#!/bin/sh
+if [ "$1" = "$MODDIR/.mix-stage-finalize.lock" ] && mkdir "$MODDIR/rmdir-paused" 2>/dev/null; then
+    while [ ! -e "$MODDIR/release-rmdir" ]; do sleep 0.05; done
+fi
+exec "{real_rmdir}" "$@"
+''')
+        workers = []
+        try:
+            workers.append(subprocess.Popen(['sh', str(ROUTER), 'prepare-finalize'],
+                env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True))
+            self.wait_for(self.module / 'rmdir-paused')
+            workers.append(subprocess.Popen(['sh', str(ROUTER), 'finalize'],
+                env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True))
+            # Old code lets this peer reclaim the empty directory after its
+            # one-second initializer grace, then start mapping before the stale
+            # rmdir resumes. Kernel ownership keeps it outside the mutation.
+            time.sleep(1.3)
+            self.assertFalse((self.module / 'mapping-entered').exists())
+            (self.module / 'release-rmdir').touch()
+            for worker in workers:
+                out, err = worker.communicate(timeout=8)
+                self.assertEqual(worker.returncode, 0, out + err)
+            self.assertEqual(len((self.module / 'mapping-calls').read_text().splitlines()), 1)
+        finally:
+            (self.module / 'release-rmdir').touch()
+            for worker in workers:
+                if worker.poll() is None:
+                    worker.kill()
+                worker.wait()
+
+    def test_start_does_not_pass_kernel_lock_to_detached_generation(self):
+        (self.module / 'config/axes_task.conf').write_text('state=failed\n')
+        shutil.copyfile(ROOT / 'common/legacy_v14_4/payload_clone.sh',
+                        self.module / 'common/legacy_v14_4/payload_clone.sh')
+        self.script('common/legacy_v14_4/v14_mix.sh', '''#!/bin/sh
+( while [ ! -e "$LUOSHU_REAL_MODDIR/release-daemon" ]; do sleep 0.05; done ) </dev/null >/dev/null 2>&1 &
+printf '{"status":"ok"}\n'
+''')
+        try:
+            result = subprocess.run(['sh', str(ROUTER), 'start', 'CJK', 'Latin', 'Digit'],
+                env=self.env, capture_output=True, text=True, timeout=4)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            request = (self.module / 'config/mix-stage-next.conf').read_text().splitlines()[0].split('=', 1)[1]
+            result = self.run_router('prepare-finalize', request=request, timeout=3)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('生成结果为空', result.stdout)
+            self.assertNotIn('正在提交', result.stdout)
+        finally:
+            (self.module / 'release-daemon').touch()
+
+    def test_recovery_does_not_delete_an_active_inventory_transaction(self):
+        self.script('common/inventory_font_stage.sh', '''#!/bin/sh
+touch "$LUOSHU_REAL_MODDIR/mapping-entered"
+while [ ! -e "$LUOSHU_REAL_MODDIR/release-mapping" ]; do sleep 0.05; done
+test -s "$1/system/fonts/MiSansVF.ttf"
+''')
+        first = subprocess.Popen(['sh', str(ROUTER), 'prepare-finalize'],
+            env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            self.wait_for(self.module / 'mapping-entered')
+            result = self.run_router('recover', timeout=4)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('正在提交', result.stdout)
+            self.assertTrue((self.stage / 'system/fonts/MiSansVF.ttf').is_file())
+            self.assertTrue((self.module / 'config/mix-stage-next.conf').is_file())
+            (self.module / 'release-mapping').touch()
+            out, error = first.communicate(timeout=5)
+            self.assertEqual(first.returncode, 0, out + error)
+        finally:
+            (self.module / 'release-mapping').touch()
+            if first.poll() is None:
+                first.kill()
+            first.wait()
+
+    def check_finalize_worker_drops_inherited_lock(self, detached_helper):
+        (self.stage / '.luoshu-precommit-ready.conf').write_text(
+            'state=ready\nrequestId=request-test\n')
+        (self.module / 'router-functions.sh').write_text(
+            ROUTER.read_text().split('_cmd="${1:-config}"', 1)[0])
+        if detached_helper:
+            shutil.copyfile(ROOT / 'common/background_task.sh',
+                            self.module / 'common/background_task.sh')
+        self.script('spawn-finalize.sh', f'''#!/bin/sh
+if [ "$1" = finalize-worker ]; then exec timeout 3 sh "{ROUTER}" "$@"; fi
+unset LUOSHU_MIX_KERNEL_LOCK_HELD
+. "$MODDIR/router-functions.sh"
+ensure_mix_finalize_worker axes-test
+''')
+        result = subprocess.run([sys.executable,
+            str(ROOT / 'common/mix_stage_watchdog.py'), '--module', str(self.module),
+            '--lock', '--wait', '1', '--', 'sh', str(self.module / 'spawn-finalize.sh')],
+            env=self.env, capture_output=True, text=True, timeout=4)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.wait_for(self.module / '.luoshu-payload-next/system/fonts/MiSansVF.ttf', seconds=2)
+
+    def test_fallback_finalize_worker_does_not_keep_parent_kernel_lock(self):
+        self.check_finalize_worker_drops_inherited_lock(False)
+
+    def test_detached_finalize_worker_does_not_keep_parent_kernel_lock(self):
+        self.check_finalize_worker_drops_inherited_lock(True)
 
     def failing_mapper(self):
         self.script("common/inventory_font_stage.sh", """#!/bin/sh

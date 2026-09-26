@@ -17,6 +17,7 @@ import shutil
 import struct
 import sys
 import tempfile
+import time
 
 from fontTools.ttLib import TTCollection, TTFont
 from fontTools.unicodedata import category, script
@@ -39,6 +40,29 @@ TARGET_ROLES = ('cjk', 'latin', 'digit')
 
 class StageError(RuntimeError):
     pass
+
+
+class StageProgress:
+    """Best-effort, atomic progress for the existing task supervisor."""
+    def __init__(self, total: int):
+        configured = os.environ.get('LUOSHU_INVENTORY_PROGRESS_FILE', '')
+        self.path = Path(configured) if configured else None
+        self.total = total
+
+    def update(self, completed: int, phase: str, logical: str = '') -> None:
+        if self.path is None:
+            return
+        temporary = self.path.with_name(self.path.name + f'.{os.getpid()}.tmp')
+        try:
+            temporary.write_text(json.dumps({'updatedAt': time.time(), 'completed': completed,
+                'total': self.total, 'phase': phase, 'path': logical}, ensure_ascii=False))
+            os.replace(temporary, self.path)
+        except OSError:
+            # Telemetry failure must never change transaction semantics.
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def identity(path: Path) -> tuple:
@@ -134,7 +158,7 @@ def load_inventory(module: Path) -> dict:
         raise StageError('原厂字体清单不可用，请重新扫描') from exc
     if (not isinstance(data, dict) or data.get('schema') != 'device-font-inventory-v1'
             or data.get('state') != 'ready' or data.get('inventoryRevision') != 1
-            or data.get('scannerRevision') != 10 or data.get('metricsRevision') != 5
+            or data.get('scannerRevision') not in {10, 11} or data.get('metricsRevision') != 5
             or not isinstance(data.get('slots'), dict) or not data['slots']):
         raise StageError('原厂字体清单无效，请重新扫描')
     build_key = _device_build_key()
@@ -432,7 +456,13 @@ class SourcePool:
 
     def materialize(self, face: SourceFace, weight: int, variable: bool = False,
                     italic: bool | None = None) -> Path:
-        key = (face.key, weight, variable, italic)
+        if not variable and not face.axes and not face.role_weights and weight != face.weight:
+            raise StageError('生成的字重与请求不一致')
+        # Fixed composite roles retain the chosen designer weight, while a
+        # preserved variable face carries every reachable weight in one file.
+        # Neither needs nine byte-identical snapshots for nine target labels.
+        instance_weight = weight if face.axes and not variable else face.weight
+        key = (face.key, instance_weight, variable, italic)
         if key in self.materialized:
             return self.materialized[key]
         if identity(face.path) != face.key[:-1]:
@@ -606,14 +636,22 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
             pool_mode = 'mix'
         else:
             pool_mode = mode
+        progress = StageProgress(3 * len(data['slots']))
+        progress.update(0, 'source')
         pool = SourcePool(module, stage, pool_mode, source, temporary)
+        progress.update(0, 'inventory')
         if mode != 'mix':
             for face in pool.faces:
                 face.role_weights = None
         jobs = {}
         stock_sources = resources.enter_context(closing(StockSourceResolver(module, data)))
-        preservation_cache, replacement_cache = {}, {}
-        for logical, slot in sorted(data['slots'].items()):
+        preservation_cache, replacement_cache, counts_cache = {}, {}, {}
+        def count_roles(points):
+            if points not in counts_cache:
+                counts_cache[points] = replacement_counts(points)
+            return counts_cache[points]
+        for slot_index, (logical, slot) in enumerate(sorted(data['slots'].items())):
+            progress.update(slot_index, 'inventory', logical)
             if requested is not None and logical not in requested:
                 continue
             if requested is not None:
@@ -659,7 +697,7 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                 replacement_key = (src.key, stock.codepoints, tuple(face['_replacementRoles']))
                 if replacement_key not in replacement_cache:
                     points = replacement_points(src.points, stock.codepoints, face['_replacementRoles'])
-                    replacement_cache[replacement_key] = points, replacement_counts(points)
+                    replacement_cache[replacement_key] = points, count_roles(points)
                 points, counts = replacement_cache[replacement_key]
                 if not sum(counts.values()):
                     face['_retainedReason'] = 'source-target-characters-missing'
@@ -712,7 +750,9 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         # Prepare actual character-preserving sources before resolving routes.
         # An unsupported optional collection must never prove CJK reachability.
         supplemented, scoped, anchors, role_anchors = {}, {}, {}, {}
-        for logical, selected in list(jobs.items()):
+        prepared_sources = {}
+        for slot_index, (logical, selected) in enumerate(list(jobs.items())):
+            progress.update(len(data['slots']) + slot_index, 'supplement', logical)
             for index, (face, src, weight, contract, variable) in enumerate(selected):
                 if src is None:
                     continue
@@ -722,7 +762,8 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                     anchor = pool.materialize(src, weight, variable, italic)
                     stock = face['_stock']
                     stock_content = preservation_digest(stock.path, stock.face_index, preservation_cache)
-                    patch_key = (src.key, weight, variable, italic, stock_content, face['_replacePoints'])
+                    stock_weight = weight if face['metrics'].get('variationAxes') else None
+                    patch_key = (str(anchor), stock_content, face['_replacePoints'], stock_weight)
                     metric_anchor = anchor
                     supplement_report = {'replacedCodepoints': len(face['_replacePoints']),
                                          'retainedStockCodepoints': len(stock.codepoints - face['_replacePoints']),
@@ -733,7 +774,8 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                             patched = temporary / f'supplement-{len(supplemented)}.font'
                             patch_report = supplement(anchor, stock.path, patched,
                                 stock_face_index=stock.face_index, stock_weight=weight,
-                                replace_codepoints=set(face['_replacePoints']))
+                                replace_codepoints=set(face['_replacePoints']),
+                                prepared_cache=prepared_sources)
                             stock.verify_unchanged()
                             with TTFont(patched, lazy=True, recalcTimestamp=False) as patched_font:
                                 patch_axes = {axis.axisTag for axis in patched_font['fvar'].axes} if 'fvar' in patched_font else set()
@@ -811,7 +853,8 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         prepared = []
         existing = len(reusable)
         rewritten = 0
-        for logical, selected in jobs.items():
+        for slot_index, (logical, selected) in enumerate(jobs.items()):
+            progress.update(2 * len(data['slots']) + slot_index, 'metrics', logical)
             destination = safe_destination(stage, logical)
             rewritten += int(destination.is_file())
             generated_faces = []
@@ -824,7 +867,7 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                         'state': 'retained-stock', 'reason': face['_retainedReason'],
                         'weight': face.get('weight', face['metrics'].get('weightClass', weight)),
                         'replacedRoleCounts': {}, 'replacedRoles': [], 'replacedCodepoints': 0,
-                        'retainedTargetRoleCounts': replacement_counts(stock.codepoints),
+                        'retainedTargetRoleCounts': count_roles(stock.codepoints),
                         'retainedStockCodepoints': len(stock.codepoints),
                         'stockSourceVerifiedBy': stock.verified_by})
                     continue
@@ -875,7 +918,7 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                     'sourceWeight': src.weight,
                     'replacedRoles': [role for role, count in face['_replaceCounts'].items() if count],
                     'replacedRoleCounts': face['_replaceCounts'],
-                    'retainedTargetRoleCounts': replacement_counts(stock.codepoints - face['_replacePoints']),
+                    'retainedTargetRoleCounts': count_roles(stock.codepoints - face['_replacePoints']),
                     'replacedCodepoints': supplement_report['replacedCodepoints'],
                     'retainedStockCodepoints': supplement_report['retainedStockCodepoints'],
                     'supplemented': bool(face['_needsSupplement']),
@@ -910,11 +953,12 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
 
         mapped_paths = set(jobs) | reusable
         # A digit clock or peripheral Latin face cannot mask a failed primary
-        # Chinese face. Require each role the chosen sources can actually offer.
+        # Chinese face. A genuinely digits-only source may replace UI digits
+        # while retaining the original Chinese/Latin outlines.
         candidates, primary = set(), set()
         for logical, slot in data['slots'].items():
             traits = slot.get('metrics', {}).get('fontTraits', {})
-            if (not slot_roles(slot).intersection({'cjk', 'latin'})
+            if (not slot_roles(slot).intersection(TARGET_ROLES)
                     or slot.get('style', 'normal') != 'normal' or traits.get('italic')
                     or int(slot.get('weight', slot.get('metrics', {}).get('weightClass', 400))) != 400):
                 continue
@@ -932,7 +976,7 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         for source_face in pool.faces:
             if source_face.color:
                 continue
-            available_roles.update(role for role in ('cjk', 'latin')
+            available_roles.update(role for role in TARGET_ROLES
                                    if pool.capabilities[source_face.key][role])
         mapped_roles = {}
         for row in report_slots:
@@ -955,12 +999,14 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                     mapped_roles[logical].add('cjk')
                 if all(cp in points for cp in (*range(65, 91), *range(97, 123))):
                     mapped_roles[logical].add('latin')
+                if any(character_role(cp) == 'digit' for cp in points):
+                    mapped_roles[logical].add('digit')
         demanded = {role for logical in primary for role in slot_roles(data['slots'][logical])
-                    if role in available_roles and role in {'cjk', 'latin'}}
+                    if role in available_roles}
         missing_roles = {role for role in demanded
                          if not any(role in mapped_roles.get(logical, set()) for logical in primary)}
         if main_path in primary:
-            missing_roles.update(slot_roles(data['slots'][main_path]).intersection(available_roles, {'cjk', 'latin'})
+            missing_roles.update(slot_roles(data['slots'][main_path]).intersection(available_roles)
                                  - mapped_roles.get(main_path, set()))
             # A replacement of an unrelated TTC face must not hide a retained
             # main UI face, even when both happen to contain the same script.
@@ -970,9 +1016,9 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                          if row.get('slot') == main_path and row.get('faceIndex', 0) == main_index]
             if main_rows and all(isinstance(row.get('replacedRoleCounts'), dict) for row in main_rows):
                 main_roles = {role for row in main_rows for role, count in row.get('replacedRoleCounts', {}).items() if count}
-                missing_roles.update(slot_roles(main_slot).intersection(available_roles, {'cjk', 'latin'}) - main_roles)
+                missing_roles.update(slot_roles(main_slot).intersection(available_roles) - main_roles)
         primary_replaced = {logical for logical in primary
-                            if mapped_roles.get(logical, set()).intersection({'cjk', 'latin'})}
+                            if mapped_roles.get(logical, set()).intersection(available_roles)}
         if missing_roles or (primary and not primary_replaced):
             detail = ','.join(sorted(missing_roles)) or 'text'
             raise StageError('主要中文或英文字体尚未替换，已取消本次应用并保留原字体：' + detail)
@@ -1026,7 +1072,7 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                 for old in store.glob('*.font'):
                     old.unlink()
                 (store / '.luoshu-mix-source-weights.json').unlink(missing_ok=True)
-            for anchor in anchors.values():
+            for anchor in set(anchors.values()):
                 link_copy(anchor, store / f'source-{file_digest(anchor, digest_cache)}.font')
             for weight, anchor in role_anchors.items():
                 link_copy(anchor, store / f'wght-{weight}.font')
@@ -1069,6 +1115,7 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                     'files': {logical: file_digest(safe_destination(stage, logical), digest_cache)
                               for logical in mapped_paths}}
         (stage / '.luoshu-inventory-output-manifest.json').write_text(json.dumps(manifest, sort_keys=True))
+        progress.update(progress.total, 'complete')
     return summary
 
 

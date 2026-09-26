@@ -5,10 +5,10 @@
 set +e
 
 # Increment whenever the meaning of a successful global-font validation changes.
-# v4 reflects the HyperOS policy where usable letters + complete digits qualify Latin UI slots;
-# punctuation remains fallback-capable. Old v3 results used punctuation as a hard gate and must not
-# be restored or the upgraded build can still leave English/digits on the stock font.
-LUOSHU_FONT_VALIDATION_SCHEMA="${LUOSHU_FONT_VALIDATION_SCHEMA:-global-v4-latin-digits}"
+# v5 accepts actual CJK, Latin or digit subsets for inventory-backed replacement.
+# Missing source characters retain verified stock glyphs, so old full-repertoire
+# capability results must not suppress a newly usable partial source.
+LUOSHU_FONT_VALIDATION_SCHEMA="${LUOSHU_FONT_VALIDATION_SCHEMA:-global-v5-actual-text}"
 
 luoshu_font_validation_hash() {
     if command -v sha256sum >/dev/null 2>&1; then
@@ -138,7 +138,7 @@ luoshu_font_validation_fast_preflight() {
         FONT_CHECK_SIZE=0
     fi
     case "$FONT_CHECK_SIZE" in ''|*[!0-9]*) FONT_CHECK_SIZE=0 ;; esac
-    if [ "$FONT_CHECK_SIZE" -lt 4096 ] 2>/dev/null; then
+    if [ "$FONT_CHECK_SIZE" -lt 12 ] 2>/dev/null; then
         FONT_CHECK_ERROR='字体文件过小'
         return 1
     fi

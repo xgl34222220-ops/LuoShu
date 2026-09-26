@@ -92,7 +92,7 @@ private enum class CoverageGroup(val label: String) {
     PARTITION("按分区"),
 }
 
-private data class CoverageRouteInfo(
+internal data class CoverageRouteInfo(
     val family: String = "",
     val targetPath: String = "",
     val generatedFile: String = "",
@@ -100,7 +100,7 @@ private data class CoverageRouteInfo(
     val planReason: String = "",
 )
 
-private data class CoverageSlot(
+internal data class CoverageSlot(
     val path: String,
     val name: String,
     val partition: String,
@@ -114,11 +114,19 @@ private data class CoverageSlot(
     val reason: String,
     val safeToRetry: Boolean,
     val routes: List<CoverageRouteInfo>,
+    val replacementRoles: List<String> = emptyList(),
+    val capabilityKnown: Boolean = false,
+    val faceDetails: List<String> = emptyList(),
 )
 
-private data class CoverageSummary(
+internal data class CoverageSummary(
     val total: Int = 0,
     val scanned: Int = 0,
+    val textInventory: Int = 0,
+    val dynamic: Int = 0,
+    val runtime: Int = 0,
+    val partial: Int = 0,
+    val estimated: Int = 0,
     val replaceable: Int = 0,
     val replaced: Int = 0,
     val protected: Int = 0,
@@ -127,7 +135,7 @@ private data class CoverageSummary(
     val remediable: Int = 0,
 )
 
-private data class CoverageData(
+internal data class CoverageData(
     val rom: String = "generic",
     val activeFont: String = "",
     val verificationState: String = "not-run",
@@ -175,7 +183,82 @@ private fun fallbackCategory(state: String): String = when (state) {
     else -> "issue"
 }
 
-private fun parseCoverage(root: JSONObject): CoverageData {
+internal fun coverageDetectionLabel(rom: String): String =
+    if (rom.isBlank() || rom.equals("generic", ignoreCase = true)) "自动检测" else rom
+
+internal fun coverageSourceLabel(source: String): String = when (source) {
+    "dynamic-font" -> "动态字体"
+    "runtime-font" -> "运行容器"
+    "xml" -> "系统字体配置与文件检测"
+    "verified-scan" -> "字体文件内容检测"
+    "census" -> "全系统字体普查"
+    "heuristic" -> "旧版扫描记录"
+    else -> "系统字体归档"
+}
+
+private fun coverageStyleLabel(style: String): String = when (style) {
+    "normal", "regular", "" -> "常规"
+    "italic" -> "斜体"
+    "oblique" -> "倾斜"
+    else -> style
+}
+
+private fun coverageRouteLabel(route: String): String = when (route) {
+    "physical-safe", "physical" -> "系统文件替换"
+    "xml" -> "系统字体配置"
+    "stock" -> "原厂字体"
+    else -> "字体处理记录"
+}
+
+internal fun coverageRoleLabels(roles: List<String>): String = roles.mapNotNull {
+    when (it) {
+        "cjk" -> "中文"
+        "latin" -> "英文"
+        "digit" -> "数字"
+        else -> null
+    }
+}.distinct().joinToString(" · ")
+
+private fun axisNumber(value: Double): String =
+    if (value == value.toLong().toDouble()) value.toLong().toString() else value.toString()
+
+private fun JSONObject.fontFaceDetails(): List<String> = buildList {
+    val faces = optJSONArray("fontFaces") ?: return@buildList
+    for (index in 0 until faces.length()) {
+        val face = faces.optJSONObject(index) ?: continue
+        val axes = face.optJSONObject("variationAxes") ?: JSONObject()
+        val axisDescriptions = axes.keys().asSequence().sorted().mapNotNull { tag ->
+            val axis = axes.optJSONObject(tag) ?: return@mapNotNull null
+            val minimum = axis.optDouble("min")
+            val maximum = axis.optDouble("max")
+            if (!minimum.isFinite() || !maximum.isFinite()) return@mapNotNull null
+            val name = when (tag) {
+                "wght" -> "字重"
+                "wdth" -> "字宽"
+                "ital" -> "斜体"
+                "slnt" -> "倾斜"
+                "opsz" -> "字号"
+                else -> tag
+            }
+            name + " " + axisNumber(minimum) + "–" + axisNumber(maximum)
+        }.toList()
+        add(buildString {
+            append("第 ").append(face.optInt("faceIndex", index) + 1).append(" 面")
+            val roles = coverageRoleLabels(face.stringList("replacementRoles"))
+            if (roles.isNotBlank()) append(" · ").append(roles)
+            append(" · ").append(coverageStyleLabel(face.optString("style", "normal")))
+            if (axisDescriptions.isEmpty()) {
+                append(" · 字重 ").append(face.optInt("weight", 400))
+            } else {
+                append("\n可变字体：").append(axisDescriptions.joinToString(" · "))
+            }
+            val reason = face.optString("preservedReason")
+            if (reason.isNotBlank()) append("\n").append(reasonLabel(reason))
+        })
+    }
+}
+
+internal fun parseCoverage(root: JSONObject): CoverageData {
     require(root.optString("schema") == "device-font-slot-trace-v1") {
         "模块返回了不支持的字体覆盖数据"
     }
@@ -200,6 +283,9 @@ private fun parseCoverage(root: JSONObject): CoverageData {
                     reason = item.optString("reason"),
                     safeToRetry = item.optBoolean("safeToRetry", false),
                     routes = (item.optJSONArray("routes") ?: JSONArray()).routeList(),
+                    replacementRoles = item.stringList("replacementRoles"),
+                    capabilityKnown = item.optBoolean("capabilityKnown", false),
+                    faceDetails = item.fontFaceDetails(),
                 ),
             )
         }
@@ -213,6 +299,11 @@ private fun parseCoverage(root: JSONObject): CoverageData {
         summary = CoverageSummary(
             total = summaryJson.optInt("inventorySlots", slots.size),
             scanned = summaryJson.optInt("censusSlots", summaryJson.optInt("inventorySlots", slots.size)),
+            textInventory = summaryJson.optInt("textInventorySlots", summaryJson.optInt("inventorySlots", slots.size)),
+            dynamic = summaryJson.optInt("dynamicSlots", slots.count { it.source == "dynamic-font" }),
+            runtime = summaryJson.optInt("runtimeSlots", slots.count { it.source == "runtime-font" }),
+            partial = summaryJson.optInt("partial", slots.count { it.state == "partial" }),
+            estimated = summaryJson.optInt("replaceableEstimatedSlots", 0),
             replaceable = summaryJson.optInt("replaceableSlots", summaryJson.optInt("inventorySlots", slots.size)),
             replaced = summaryJson.optInt("replaced", fallback["replaced"] ?: 0),
             protected = summaryJson.optInt("protected", fallback["protected"] ?: 0),
@@ -288,14 +379,24 @@ private fun slotStatusLabel(slot: CoverageSlot): String = when (slot.state) {
     "missing-mount" -> "未挂载"
     "mismatch" -> "文件不一致"
     "partial" -> "部分生效"
+    "source-unavailable" -> "当前字体不匹配"
+    "not-inspected" -> "尚未替换"
+    "unreplaced-dynamic" -> "动态字体未替换"
+    "unreplaced-runtime" -> "运行容器未替换"
     else -> "需要检查"
 }
 
 private fun reasonLabel(reason: String): String = when (reason) {
     "" -> "暂无额外说明"
-    "preserved-collection" -> "多字体集合保持原厂，避免破坏 TTC/OTC face 契约"
+    "preserved-collection" -> "字体集合信息不完整，保持原厂"
     "preserved-style" -> "特殊样式保持原厂"
     "source-weight-missing" -> "当前字体缺少真实对应字重，保持原厂"
+    "physical-safe-current-payload" -> "已生成对应系统文件的替换字体"
+    "mutable-theme-font" -> "主题动态字体，尚未替换"
+    "runtime-font-container", "runtime-font-alias" -> "运行容器字体需要独立挂载支持，尚未替换"
+    "unreadable-dynamic-font" -> "无法读取动态字体，尚未替换"
+    "unreadable-runtime-font" -> "无法读取运行容器字体，尚未替换"
+    "unsupported-mount-root-path" -> "已识别字体，但当前挂载方式尚不支持此目录路径"
     "specialized-name" -> "Emoji、图标、符号或专用字体，系统保护"
     "not-promoted-to-ui-inventory" -> "已扫描到，但未判定为系统 UI 可替换字体"
     "visible-mount-evidence-missing" -> "重启后没有发现该目标的可见挂载"
@@ -776,7 +877,7 @@ private fun CoverageHero(
                         color = tokens.textPrimary,
                     )
                     Text(
-                        data.rom.uppercase() + " · " +
+                        coverageDetectionLabel(data.rom) + " · " +
                             verificationLabel(data.verificationState, rebootRequired),
                         color = tokens.textSecondary,
                         fontSize = 11.sp,
@@ -803,10 +904,10 @@ private fun CoverageHero(
 
             val summary = data.summary
             val metrics = listOf(
-                MetricSpec("字体槽位", summary.total, Icons.Rounded.Search, MaterialTheme.colorScheme.primary),
+                MetricSpec("扫描路径", summary.total, Icons.Rounded.Search, MaterialTheme.colorScheme.primary),
                 MetricSpec("可替换", summary.replaceable, Icons.Rounded.AutoFixHigh, Color(0xFF6A67CE)),
                 MetricSpec("已替换", summary.replaced, Icons.Rounded.CheckCircle, Color(0xFF21966C)),
-                MetricSpec("未替换", summary.issues, Icons.Rounded.ErrorOutline, Color(0xFFC74A4A)),
+                MetricSpec("未完全替换", summary.issues, Icons.Rounded.ErrorOutline, Color(0xFFC74A4A)),
                 MetricSpec("系统保护", summary.protected, Icons.Rounded.Security, Color(0xFF687386)),
                 MetricSpec("待验证", summary.pending, Icons.Rounded.HourglassTop, Color(0xFFB7791F)),
             )
@@ -821,15 +922,21 @@ private fun CoverageHero(
                 }
             }
 
-            if (summary.scanned != summary.total) {
-                Text(
-                    "系统/OEM 共普查 " + summary.scanned + " 个字体路径；其中 " +
-                        summary.total + " 个进入刷写与 App 共用的 UI 字体槽位清单。",
-                    color = tokens.textSecondary,
-                    fontSize = 11.sp,
-                    lineHeight = 16.sp,
-                )
-            }
+            Text(
+                buildString {
+                    append("已归档 ").append(summary.textInventory).append(" 个系统文字字体文件。")
+                    append("可替换数量按本机中英数能力统计，当前字体缺少字重或字形不会减少此数。")
+                    if (summary.dynamic > 0 || summary.runtime > 0) {
+                        append("另有动态字体 ").append(summary.dynamic)
+                        append(" 个、运行容器字体 ").append(summary.runtime).append(" 个，已单列原因。")
+                    }
+                    if (summary.partial > 0) append("其中 ").append(summary.partial).append(" 个文件部分生效。")
+                    if (summary.estimated > 0) append("旧清单中 ").append(summary.estimated).append(" 项仍按旧记录估算。")
+                },
+                color = tokens.textSecondary,
+                fontSize = 11.sp,
+                lineHeight = 16.sp,
+            )
 
             if (summary.remediable > 0) {
                 Surface(
@@ -984,8 +1091,14 @@ private fun CoverageSlotCard(
                     HorizontalDivider(
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .45f),
                     )
-                    CoverageDetailRow("来源", slot.source.ifBlank { "unknown" })
-                    CoverageDetailRow("样式", slot.style)
+                    CoverageDetailRow("来源", coverageSourceLabel(slot.source))
+                    CoverageDetailRow("样式", coverageStyleLabel(slot.style))
+                    if (slot.capabilityKnown) {
+                        CoverageDetailRow("文件能力", coverageRoleLabels(slot.replacementRoles).ifBlank { "不含中英数字形" })
+                    }
+                    slot.faceDetails.forEach { detail ->
+                        CoverageDetailRow("字体面", detail)
+                    }
                     if (slot.families.isNotEmpty()) {
                         CoverageDetailRow("字体族", slot.families.joinToString(" · "))
                     }
@@ -994,7 +1107,7 @@ private fun CoverageSlotCard(
                     } else {
                         slot.routes.forEachIndexed { index, route ->
                             val value = buildString {
-                                append(route.route.ifBlank { "unknown" })
+                                append(coverageRouteLabel(route.route))
                                 if (route.family.isNotBlank()) {
                                     append(" · ")
                                     append(route.family)
@@ -1074,7 +1187,7 @@ private fun slotCopyText(slot: CoverageSlot): String = buildString {
     append("分区：").append(slot.partition.ifBlank { "unknown" }).append('\n')
     append("格式：").append(slot.format.ifBlank { "FONT" }).append('\n')
     append("字重：").append(slot.weight).append('\n')
-    append("样式：").append(slot.style).append('\n')
+    append("样式：").append(coverageStyleLabel(slot.style)).append('\n')
     if (slot.families.isNotEmpty()) {
         append("字体族：").append(slot.families.joinToString(" · ")).append('\n')
     }
@@ -1291,10 +1404,12 @@ private fun CoverageActionBar(
     }
 }
 
-private fun verificationLabel(state: String, rebootRequired: Boolean): String = when {
+internal fun verificationLabel(state: String, rebootRequired: Boolean): String = when {
     rebootRequired || state == "pending-reboot" -> "等待完整重启"
     state == "verified" -> "启动验证完成"
+    state == "partial" -> "部分字体生效"
+    state == "pending" -> "等待验证"
     state == "failed" -> "启动验证异常"
     state == "not-run" -> "尚未验证"
-    else -> "验证状态 " + state
+    else -> "验证结果待确认"
 }

@@ -11,6 +11,26 @@ from fontTools import subset
 from font_metrics_normalize import _pick_face, _promote_os2_for_typo_metrics
 from font_slot_coverage import remove_cjk_mappings
 
+
+class _UnchangedCmapFont:
+    """Compile OS/2 line metrics without recomputing an unchanged character range.
+
+    OS/2.compile otherwise opens cmap just to reproduce usFirst/LastCharIndex.
+    CFF glyph-name lookup then decodes the entire charset for every metric-only
+    alias. The two values already describe the identical, retained cmap.
+    """
+    def __init__(self, font):
+        self.font = font
+
+    def __contains__(self, tag):
+        return tag != 'cmap' and tag in self.font
+
+    def __getitem__(self, tag):
+        return self.font[tag]
+
+    def __getattr__(self, name):
+        return getattr(self.font, name)
+
 def _latin_ink_bottom(font: TTFont, limit: int | None = None) -> int | None:
     """Prove the retained face fits before reducing its bitmap envelope.
 
@@ -201,8 +221,11 @@ def write_metrics(source: Path, output: Path, contract: tuple,
         # cmap glyph-name resolution can lazily load CFF to learn the glyph
         # order. Discard only those unmodified decoded tables so save copies
         # their original reader bytes instead of reserializing the outlines.
-        changed = {tag: font.getTableData(tag) for tag in
-                   ('head', 'hhea', 'OS/2', *(('cmap',) if removed else ()))}
+        changed = {tag: font.getTableData(tag) for tag in ('head', 'hhea')}
+        changed['OS/2'] = (font.getTableData('OS/2') if removed
+                          else os2.compile(_UnchangedCmapFont(font)))
+        if removed:
+            changed['cmap'] = font.getTableData('cmap')
         font.tables.clear()
         for tag, raw in changed.items():
             table = DefaultTable(tag)

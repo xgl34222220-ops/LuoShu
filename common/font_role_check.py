@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 from fontTools.ttLib import TTCollection, TTFont
+from font_metadata import text_role_counts, protected_text_font
 
 CJK = tuple(map(ord, "中文字体系统默认洛书汉字"))
 LATIN = tuple(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"))
@@ -33,11 +34,10 @@ def faces(path: Path) -> range:
 
 
 def required(role: str) -> tuple[int, ...]:
-    # The CJK source is the complete cmap base. It must provide the slots that
-    # are mandatory for replacement, but punctuation replacement is optional
-    # in composite_font.py and must not reject otherwise usable fonts.
+    # Probe counts are diagnostic only; partial donors are valid when they
+    # contain actual characters for the selected role.
     if role == "cjk":
-        return CJK + LATIN + DIGITS
+        return CJK
     if role == "latin":
         return LATIN
     return DIGITS
@@ -52,22 +52,26 @@ def inspect_face(path: Path, index: int, role: str) -> dict[str, object]:
         cmap = font.getBestCmap() or {}
         probes = required(role)
         missing = [codepoint for codepoint in probes if codepoint not in cmap]
+        role_count = text_role_counts(cmap)[role]
+        protected = protected_text_font(font)
         return {
+            "roleCodepoints": role_count,
+            "reason": "彩色或图标字体不可用于文字替换" if protected else "" if role_count else "字体没有所选角色的字形",
             "face": index if is_collection(path) else -1,
             "required": len(probes),
             "present": len(probes) - len(missing),
             "missing": [f"U+{codepoint:04X}" for codepoint in missing[:16]],
-            "valid": not missing,
+            "valid": role_count > 0 and not protected,
         }
     finally:
         font.close()
 
 
 def check(path: Path, role: str) -> dict[str, object]:
-    if not path.is_file() or path.stat().st_size < 4096:
+    if not path.is_file() or path.stat().st_size < 12:
         raise RoleCheckError("字体文件不存在或文件过小")
     results = [inspect_face(path, index, role) for index in faces(path)]
-    best = max(results, key=lambda item: int(item["present"]), default=None)
+    best = max(results, key=lambda item: (bool(item["valid"]), int(item["roleCodepoints"])), default=None)
     if best is None:
         raise RoleCheckError("字体中没有可读取的字体面")
     return {

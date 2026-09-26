@@ -121,55 +121,38 @@ font_validate_global() {
     _lfrp_result=$(PYTHONHOME="$_lfrp_pyroot" \
         PYTHONPATH="$_lfrp_pyroot/lib/python3.14:$_lfrp_pyroot/lib/python3.14/site-packages" \
         LD_LIBRARY_PATH="$_lfrp_pyroot/lib:$_lfrp_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-        "$_lfrp_python" "$_lfrp_checker" "$_lfrp_font" 2>/dev/null)
+        "$_lfrp_python" "$_lfrp_checker" --donor "$_lfrp_font" 2>/dev/null)
+    _lfrp_rc=$?
     [ -n "$_lfrp_result" ] || {
         FONT_CHECK_ERROR='字形覆盖分析失败'
         return 1
     }
 
-    _lfrp_han=$(_lfrp_json_number "$_lfrp_result" coreHan)
-    _lfrp_cjk=$(_lfrp_json_number "$_lfrp_result" cjk)
-    _lfrp_latin=$(_lfrp_json_number "$_lfrp_result" latin)
-    _lfrp_digits=$(_lfrp_json_number "$_lfrp_result" digits)
-    _lfrp_punct=$(_lfrp_json_number "$_lfrp_result" punctuation)
+    [ "$_lfrp_rc" -eq 0 ] || {
+        FONT_CHECK_ERROR='没有可替换的中英数字形，或字体为受保护图标/彩色字体'
+        return 1
+    }
+    _lfrp_han=$(_lfrp_json_number "$_lfrp_result" cjkCodepoints)
+    _lfrp_latin=$(_lfrp_json_number "$_lfrp_result" latinCodepoints)
+    _lfrp_digits=$(_lfrp_json_number "$_lfrp_result" digitCodepoints)
     case "$_lfrp_han" in ''|*[!0-9]*) _lfrp_han=0 ;; esac
-    case "$_lfrp_cjk" in ''|*[!0-9]*) _lfrp_cjk=0 ;; esac
     case "$_lfrp_latin" in ''|*[!0-9]*) _lfrp_latin=0 ;; esac
     case "$_lfrp_digits" in ''|*[!0-9]*) _lfrp_digits=0 ;; esac
-    case "$_lfrp_punct" in ''|*[!0-9]*) _lfrp_punct=0 ;; esac
-
     LUOSHU_FONT_HAS_CJK=false
     LUOSHU_FONT_HAS_LATIN=false
     LUOSHU_FONT_HAS_MIXED=false
-    [ "$_lfrp_han" -ge 6000 ] && [ "$_lfrp_cjk" -ge 95 ] && LUOSHU_FONT_HAS_CJK=true
-    # HyperOS splits CJK, Latin and numeric UI glyphs across independent physical slots.
-    # Punctuation coverage varies wildly between otherwise complete CJK fonts, so using it as a
-    # hard gate left Roboto/MiSansLatin/100-900 on the stock font even though A-Z/a-z/0-9 were
-    # present. Keep punctuation in the diagnostic, but let usable letters + all digits drive the
-    # Latin slot decision.
-    [ "$_lfrp_latin" -ge 90 ] && [ "$_lfrp_digits" -eq 100 ] && LUOSHU_FONT_HAS_LATIN=true
-    [ "$LUOSHU_FONT_HAS_CJK" = true ] && [ "$LUOSHU_FONT_HAS_LATIN" = true ] && \
-        LUOSHU_FONT_HAS_MIXED=true
+    [ "$_lfrp_han" -gt 0 ] && LUOSHU_FONT_HAS_CJK=true
+    # Legacy capability has a combined Latin/numeric flag. Actual per-character
+    # replacement and stock preservation are always resolved by inventory staging.
+    { [ "$_lfrp_latin" -gt 0 ] || [ "$_lfrp_digits" -gt 0 ]; } && LUOSHU_FONT_HAS_LATIN=true
+    [ "$LUOSHU_FONT_HAS_CJK" = true ] && [ "$LUOSHU_FONT_HAS_LATIN" = true ] && LUOSHU_FONT_HAS_MIXED=true
     export LUOSHU_FONT_HAS_CJK LUOSHU_FONT_HAS_LATIN LUOSHU_FONT_HAS_MIXED
-
-    FONT_CHECK_COVERAGE="核心汉字 ${_lfrp_han} 个、中文 ${_lfrp_cjk}%、英文 ${_lfrp_latin}%、数字 ${_lfrp_digits}%、标点 ${_lfrp_punct}%"
-    case "$LUOSHU_FONT_HAS_CJK:$LUOSHU_FONT_HAS_LATIN" in
-        true:true)
-            FONT_CHECK_WARNING="${FONT_CHECK_WARNING:+$FONT_CHECK_WARNING；}字形覆盖完整"
-            [ "$_lfrp_punct" -ge 75 ] || \
-                FONT_CHECK_WARNING="${FONT_CHECK_WARNING}；部分标点将由系统回退字体补齐"
-            ;;
-        true:false)
-            FONT_CHECK_WARNING="${FONT_CHECK_WARNING:+$FONT_CHECK_WARNING；}字体缺少完整英文或数字，洛书将只替换中文槽位并保留系统英文"
-            ;;
-        false:true)
-            FONT_CHECK_WARNING="${FONT_CHECK_WARNING:+$FONT_CHECK_WARNING；}字体缺少完整中文，洛书将只替换英文数字槽位并保留系统中文"
-            ;;
-        *)
-            FONT_CHECK_ERROR="$FONT_CHECK_COVERAGE；字体既不具备可用中文覆盖，也不具备完整英文数字覆盖"
-            return 1
-            ;;
-    esac
+    [ "$LUOSHU_FONT_HAS_CJK" = true ] || [ "$LUOSHU_FONT_HAS_LATIN" = true ] || {
+        FONT_CHECK_ERROR='字体没有可替换的中英数字形'
+        return 1
+    }
+    FONT_CHECK_COVERAGE="可替换字形：中文 ${_lfrp_han}、英文 ${_lfrp_latin}、数字 ${_lfrp_digits}"
+    FONT_CHECK_WARNING="${FONT_CHECK_WARNING:+$FONT_CHECK_WARNING；}只替换实际具备的字形，其余保留系统字形"
     FONT_CHECK_ERROR=''
     return 0
 }

@@ -320,7 +320,7 @@ build_composite_file() {
     [ -f "$MODDIR/common/composite_font.py" ] && [ -f "$_runner" ] || { set_mix_error '完整复合字体引擎缺失'; return 1; }
     [ -x "$MODDIR/common/python/bin/luoshu-python" ] || chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     check_composite_runtime || return 1
-    _cache="$MODDIR/cache/full-composite-v7"
+    _cache="$MODDIR/cache/full-composite-v8"
     mkdir -p "$_cache" "$MODDIR/cache/tmp" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
     _cjk_hash=$(composite_hash_file "$_cjk_src")
     _latin_hash=$(composite_hash_file "$_latin_src")
@@ -328,7 +328,7 @@ build_composite_file() {
     COMPOSITE_CJK_HASH="$_cjk_hash"
     COMPOSITE_LATIN_HASH="$_latin_hash"
     COMPOSITE_DIGIT_HASH="$_digit_hash"
-    _key_src="${_cjk_hash}-${_latin_hash}-${_digit_hash}-full-composite-v7-metrics"
+    _key_src="${_cjk_hash}-${_latin_hash}-${_digit_hash}-full-composite-v8-metrics"
     _key=$(printf '%s' "$_key_src" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; elif command -v toybox >/dev/null 2>&1; then toybox sha256sum; else cksum; fi; } | awk '{print $1}')
     _cached="$_cache/${_key}.otf"; _report="$_cache/${_key}.json"; _progress="$CONFIG_DIR/composite_progress.json"
     rm -f "$_cache"/.*.tmp.* 2>/dev/null || true
@@ -413,7 +413,7 @@ prepare_mix_config() {
         printf 'cjk=%s\n' "$_cjk"
         printf 'latin=%s\n' "$_latin"
         printf 'digit=%s\n' "$_digit"
-        printf 'isolation=full-composite-v7\n'
+        printf 'isolation=full-composite-v8\n'
         printf 'characterIsolation=true\n'
         printf 'composite=true\n'
         printf 'xmlOverlay=false\n'
@@ -467,9 +467,15 @@ apply_mix() {
         set_mix_error '记录组合源真实字重失败'; return 6;
     }
     write_mix_generation_manifest "$_cjk" "$_latin" "$_digit" || { set_mix_error '无法写入本次组合字体校验清单'; return 6; }
-    prepare_mix_config "$_cjk" "$_latin" "$_digit" || { set_mix_error '无法准备字体组合状态'; return 6; }
+    if [ "${LUOSHU_MIX_CONTROLLER_OWNS_COMMIT:-false}" != true ]; then
+        prepare_mix_config "$_cjk" "$_latin" "$_digit" || { set_mix_error '无法准备字体组合状态'; return 6; }
+    fi
     payload_stage_activate || { set_mix_error '无法原子替换字体负载'; return 6; }
-    if ! commit_mix_config; then
+    if [ "${LUOSHU_MIX_CONTROLLER_OWNS_COMMIT:-false}" = true ]; then
+        # Only the source handoff is committed here. Device mapping can still
+        # fail; the public selection/reboot state belongs to the outer commit.
+        printf 'time=%s\n' "$(date +%s)" > "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || return 6
+    elif ! commit_mix_config; then
         set_mix_error '无法提交字体组合状态，已恢复旧字体负载'
         return 6
     fi
@@ -513,8 +519,11 @@ case "${1:-status}" in
                 _finished=$(date +%s)
                 _message='完整复合字体已准备，完整重启后生效'
                 [ "$COMPOSITE_CACHE_HIT" = true ] && _message='已使用验证缓存准备字体组合，完整重启后生效'
+                [ "${LUOSHU_MIX_CONTROLLER_OWNS_COMMIT:-false}" != true ] || _message='组合源已生成，正在按本机清单生成系统字体'
                 write_task "$_task" success "$_message" "$_cjk" "$_latin" "$_digit" "$_started" "$_finished"
-                command -v cmd >/dev/null 2>&1 && cmd notification post -t 洛书 luoshu-mix "字体组合已准备，请完整重启手机。" >/dev/null 2>&1 || true
+                if [ "${LUOSHU_MIX_CONTROLLER_OWNS_COMMIT:-false}" != true ]; then
+                    command -v cmd >/dev/null 2>&1 && cmd notification post -t 洛书 luoshu-mix "字体组合已准备，请完整重启手机。" >/dev/null 2>&1 || true
+                fi
             else
                 _rc=$?; _finished=$(date +%s)
                 _failure="${LAST_MIX_ERROR:-}"

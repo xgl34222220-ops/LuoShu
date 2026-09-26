@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -13,7 +14,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from fontTools.ttLib import TTCollection, TTFont
+from fontTools.ttLib import TTCollection, TTFont, newTable
+from fontTools.ttLib.tables._f_v_a_r import Axis, NamedInstance
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "common"))
@@ -461,7 +463,7 @@ class InventoryCompatibilityTests(unittest.TestCase):
         self.assertFalse(scanner._can_reuse(data, "compat-stock"))
         refreshed, _ = self.scan()
         self.assertIn("/system/fonts/NewDigits.ttf", refreshed["slots"])
-        self.assertEqual((refreshed["scannerRevision"], refreshed["metricsRevision"]), (10, 5))
+        self.assertEqual((refreshed["scannerRevision"], refreshed["metricsRevision"]), (11, 5))
 
     def test_legacy_xml_and_modern_axis_references_survive(self):
         self.make_text_face(self.fonts / "LegacyFace.ttf", range(32, 127))
@@ -600,6 +602,146 @@ class InventoryCompatibilityTests(unittest.TestCase):
             data, _ = self.scan()
         self.assertEqual(set(data["slots"]), {"/system/fonts/UnknownUi.ttf"})
         self.assertTrue(all(not str(call.args[0]).startswith("/data/") for call in reader.call_args_list))
+
+    def test_unreferenced_sfnt_bytes_are_discovered_inside_any_trusted_directory(self):
+        self.seed_ui()
+        expected = {"/system/fonts/UnknownUi.ttf"}
+        for relative in ("product/framework/cache/opaque.bin", "product/app/Clock/assets/Face",
+                         "product/media/nested/opaque.fontdata", "system/fonts/no_suffix"):
+            path = self.root / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self.make_text_face(path, {0x41, 0x31, 0x4e00})
+            expected.add("/" + relative)
+        # A SFNT-looking suffix cannot promote malformed content; an unrelated
+        # executable or a FIFO cannot be opened by the magic-byte census.
+        (self.product_fonts / "wrong.ttf").write_bytes(b"not a font" * 2)
+        (self.product_fonts / "binary").write_bytes(b"\x7fELF" + b"0" * 64)
+        os.mkfifo(self.product_fonts / "pipe")
+        data, _ = self.scan()
+        self.assertEqual(set(data["slots"]), expected)
+        self.assertEqual(data["preservedFonts"]["/product/fonts/wrong.ttf"]["reason"], "unreadable-stock-font")
+        candidates = json.loads((self.root / "device_font_candidates.json").read_text())
+        self.assertEqual({item["path"] for item in candidates["paths"]}, expected | {"/product/fonts/wrong.ttf"})
+        for logical in expected - {"/system/fonts/UnknownUi.ttf"}:
+            self.assertEqual(set(data["slots"][logical]["replacementRoles"]), {"cjk", "latin", "digit"})
+
+    def test_digit_replacement_is_not_limited_by_other_retained_character_count(self):
+        self.seed_ui()
+        points = {0x30} | set(range(0x2500, 0x2600))
+        self.make_text_face(self.fonts / "SparseDigits.ttf", points)
+        self.make_text_face(self.fonts / "LinesOnly.ttf", points - {0x30})
+        data, _ = self.scan()
+        slot = data["slots"]["/system/fonts/SparseDigits.ttf"]
+        self.assertEqual(slot["replacementRoles"], ["digit"])
+        self.assertGreater(slot["metrics"]["coverage"]["unicodeCount"], 128)
+        self.assertEqual(data["preservedFonts"]["/system/fonts/LinesOnly.ttf"]["reason"], "non-text-cmap")
+
+    def test_archive_keeps_complete_face_coverage_axes_and_weight_instances(self):
+        self.seed_ui()
+        source = self.fonts / "Variable.ttf"
+        points = {0x30, 0x31, 0x33, 0x41, 0x4e00, 0x4e01}
+        self.make_text_face(source, points)
+        with TTFont(source) as font:
+            font["fvar"] = newTable("fvar")
+            axis = Axis()
+            axis.axisTag, axis.minValue, axis.defaultValue, axis.maxValue = "wght", 100, 400, 900
+            axis.flags, axis.axisNameID = 0, font["name"].addName("Weight")
+            instance = NamedInstance()
+            instance.subfamilyNameID = font["name"].addName("Bold")
+            instance.coordinates, instance.flags = {"wght": 700}, 0
+            font["fvar"].axes, font["fvar"].instances = [axis], [instance]
+            font.save(source)
+        data, _ = self.scan()
+        slot = data["slots"]["/system/fonts/Variable.ttf"]
+        face = slot["faces"][0]
+        archived = face["stockSource"]
+        restored = {cp for start, end in archived["codepointRanges"] for cp in range(start, end + 1)}
+        self.assertEqual(restored, points)
+        self.assertEqual(archived["codepointRanges"], [[48, 49], [51, 51], [65, 65], [19968, 19969]])
+        digest = hashlib.sha256(b"".join(struct.pack(">I", cp) for cp in sorted(points))).hexdigest()
+        self.assertEqual(archived["codepointSha256"], digest)
+        self.assertEqual(archived["sha256"], hashlib.sha256(source.read_bytes()).hexdigest())
+        self.assertEqual(face["metrics"]["stockCodepointSha256"], digest)
+        self.assertEqual(face["metrics"]["variationAxes"]["wght"], {"min": 100, "default": 400, "max": 900})
+        self.assertEqual(face["metrics"]["variationInstances"][0]["coordinates"], {"wght": 700})
+        self.assertTrue(slot["variable"])
+        self.assertEqual(slot["faceCount"], 1)
+
+    def test_mutable_theme_files_are_observations_not_stock_replacement_contracts(self):
+        self.seed_ui()
+        theme = self.root / "mutable/theme/fonts"
+        theme.mkdir(parents=True)
+        self.make_text_face(theme / "opaque", {0x30, 0x41})
+        (theme / "broken.ttf").write_bytes(b"invalid")
+        (theme / "alias.ttf").symlink_to("/data/vendor/new-theme/font.ttf")
+        with patch.object(scanner, "THEME_FONT_ROOTS", (theme.parent, theme)):
+            data, _ = self.scan()
+        entries = {entry["path"]: entry for entry in data["dynamicFontFiles"]}
+        self.assertEqual(len(entries), 3)
+        self.assertEqual(set(data["slots"]), {"/system/fonts/UnknownUi.ttf"})
+        opaque = entries[str(theme / "opaque")]
+        self.assertEqual(opaque["reason"], "mutable-theme-font")
+        self.assertFalse(opaque["candidate"])
+        self.assertEqual(opaque["faces"][0]["replacementRoles"], ["latin", "digit"])
+        self.assertEqual(entries[str(theme / "broken.ttf")]["reason"], "unreadable-dynamic-font")
+        self.assertEqual(entries[str(theme / "alias.ttf")]["reason"], "dynamic-font-alias")
+        self.assertEqual(data["scanSummary"]["dynamicFontFileCount"], 3)
+
+    def test_protected_xml_collection_face_does_not_hide_other_text_faces(self):
+        self.seed_ui()
+        text, icons = self.root / "text.ttf", self.root / "icons.ttf"
+        self.make_text_face(text, {0x41, 0x31})
+        self.make_text_face(icons, {0x41, 0x4e00})
+        with TTFont(text) as first, TTFont(icons) as second:
+            collection = TTCollection()
+            collection.fonts = [first, second]
+            collection.save(self.fonts / "Shared.ttc")
+        (self.etc / "font_fallback.xml").write_text(
+            '<familyset><family name="vendor-text"><font index="0">Shared.ttc</font></family>'
+            '<family name="vendor-icons"><font index="1">Shared.ttc</font></family></familyset>')
+        data, _ = self.scan()
+        slot = data["slots"]["/system/fonts/Shared.ttc"]
+        self.assertEqual(slot["faceCount"], 2)
+        self.assertEqual(slot["replacementRoles"], ["digit", "latin"])
+        self.assertNotIn("preservedReason", slot["faces"][0])
+        self.assertEqual(slot["faces"][1]["preservedReason"], "xml-symbol-family")
+        self.assertEqual(slot["faces"][1]["replacementRoles"], ["cjk", "latin"])
+
+    def test_runtime_apex_fonts_are_discovered_but_not_promoted_to_static_slots(self):
+        self.seed_ui()
+        apex = self.root / "apex"
+        fonts = apex / "com.example.fonts@42/assets"
+        fonts.mkdir(parents=True)
+        self.make_text_face(fonts / "opaque", {0x31, 0x41, 0x4e00})
+        (fonts / "broken.ttf").write_bytes(b"not font")
+        (apex / "com.example.fonts").symlink_to("com.example.fonts@42")
+        with patch.object(scanner, "RUNTIME_FONT_ROOTS", (apex,)):
+            data, _ = self.scan()
+        entries = {entry["path"]: entry for entry in data["runtimeFontFiles"]}
+        self.assertEqual(set(data["slots"]), {"/system/fonts/UnknownUi.ttf"})
+        self.assertEqual(len(entries), 4)
+        canonical = entries[str(apex / "com.example.fonts/assets/opaque")]
+        self.assertEqual(canonical["scope"], "runtime-container")
+        self.assertEqual(canonical["reason"], "runtime-font-container")
+        self.assertEqual(canonical["faces"][0]["replacementRoles"], ["cjk", "latin", "digit"])
+        self.assertFalse(canonical["candidate"])
+        self.assertEqual(entries[str(fonts / "broken.ttf")]["reason"], "unreadable-runtime-font")
+
+    def test_valid_spaced_directory_is_reported_with_mount_transport_limitation(self):
+        self.seed_ui()
+        path = self.root / "product/app/My Clock/assets/opaque"
+        path.parent.mkdir(parents=True)
+        self.make_text_face(path, {0x30, 0x31})
+        data, _ = self.scan()
+        logical = "/product/app/My Clock/assets/opaque"
+        self.assertNotIn(logical, data["slots"])
+        entry = data["preservedFonts"][logical]
+        self.assertEqual(entry["reason"], "unsupported-mount-root-path")
+        self.assertEqual(entry["faces"][0]["replacementRoles"], ["digit"])
+        candidates = json.loads((self.root / "device_font_candidates.json").read_text())
+        candidate = next(item for item in candidates["paths"] if item["path"] == logical)
+        self.assertEqual(candidate["reason"], "unsupported-mount-root-path")
+        self.assertFalse(candidate["candidate"])
 
 
 if __name__ == "__main__":

@@ -61,7 +61,7 @@ ok test "$(grep -c '_luoshu_config_make_mono_weight .* 400' "$ROOT/common/font_f
 
 # Overall progress stays below completion until inventory mapping and atomic
 # next-boot commit finish, including when glyph generation itself reports 100%.
-ok grep -q '\[ "$_mapped" -le 99 \] || _mapped=99' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
+ok grep -q '\[ "$_mapped" -le 70 \] || _mapped=70' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
 ok grep -q 'mix_finalize_state_write ready .* 98' "$ROOT/common/legacy_v14_4/mix_router.sh"
 ok grep -q 'mix_finalize_state_write running .* 99' "$ROOT/common/legacy_v14_4/mix_router.sh"
 ok grep -q '正在按本机扫描清单映射全部可替换字体槽位' "$ROOT/common/legacy_v14_4/mix_router.sh"

@@ -100,6 +100,74 @@ class PhysicalTraceTest(unittest.TestCase):
         self.assertEqual(result["summary"]["sourceUnavailable"], 1)
         self.assertFalse(result["slots"][0]["safeToRetry"])
 
+    def test_archived_replaceable_count_cannot_shrink_from_15_to_11(self):
+        self.inventory["scannerRevision"] = 11
+        self.inventory["slots"][self.name]["replacementRoles"] = ["latin", "digit"]
+        extra = []
+        for index in range(14):
+            logical = f"/system/fonts/Face{index}.ttf"
+            self.inventory["slots"][logical] = {"replacementRoles": ["latin"], "weight": 700}
+            destination = self.payload / logical.lstrip("/")
+            os.link(self.font, destination)
+            extra.append(logical)
+        before = self.result()
+        self.assertEqual(before["summary"]["replaceableSlots"], 15)
+        self.assertEqual(before["summary"]["pending"], 15)
+        missing = extra[:4]
+        for logical in missing:
+            (self.payload / logical.lstrip("/")).unlink()
+        (self.payload / ".luoshu-metrics-report.json").write_text(json.dumps({
+            "schema": "luoshu-slot-metrics-v1", "engine": "inventory-font-stage-v1",
+            "preservedFonts": {logical: "source-weight-missing:700" for logical in missing}}))
+        after = self.result()
+        self.assertEqual(after["summary"]["replaceableSlots"], 15)
+        self.assertEqual(after["summary"]["pending"], 11)
+        self.assertEqual(after["summary"]["sourceUnavailable"], 4)
+        self.assertEqual(after["summary"]["issues"], 4)
+        self.assertEqual(after["summary"]["replaceableEstimatedSlots"], 0)
+        self.assertTrue(all(row["intrinsicallyReplaceable"] for row in after["slots"]))
+
+    def test_old_measured_inventory_counts_partial_latin_and_digits_by_actual_presence(self):
+        self.inventory["slots"] = {
+            "/system/fonts/Partial.ttf": {"metrics": {"coverage": {"latinCount": 1, "hanCount": 0}}},
+            "/system/fonts/Clock.ttf": {"metrics": {"fontTraits": {"digitCount": 1}}},
+            "/system/fonts/OtherScript.ttf": {"metrics": {"coverage": {"latinCount": 0, "hanCount": 0},
+                                                               "fontTraits": {"letterScripts": {"Arab": 100}}}},
+        }
+        result = self.result()
+        self.assertEqual(result["summary"]["replaceableSlots"], 2)
+        self.assertEqual(result["summary"]["replaceableEstimatedSlots"], 0)
+        by_path = {row["path"]: row for row in result["slots"]}
+        self.assertEqual(by_path["/system/fonts/Clock.ttf"]["replacementRoles"], ["digit"])
+        self.assertFalse(by_path["/system/fonts/OtherScript.ttf"]["intrinsicallyReplaceable"])
+
+    def test_dynamic_and_runtime_paths_are_unique_unreplaced_observations(self):
+        self.inventory["slots"][self.name]["replacementRoles"] = ["latin"]
+        dynamic = {"path": "/data/themes/fonts/selected.ttf", "reason": "mutable-theme-font",
+                   "faces": [{"faceIndex": 0, "format": "TTF", "weight": 400, "replacementRoles": ["latin"],
+                              "variationAxes": {"wght": {"min": 100, "max": 900, "default": 400}}}]}
+        runtime = {"path": "/apex/com.example.fonts/font.ttf", "reason": "runtime-font-container",
+                   "faces": [{"faceIndex": 0, "format": "TTF", "replacementRoles": ["digit"]}]}
+        self.inventory["dynamicFontFiles"] = [dynamic, dynamic, {"path": self.name}]
+        self.inventory["runtimeFontFiles"] = [runtime, runtime, dynamic]
+        self.verify()
+        result = self.result()
+        summary = result["summary"]
+        self.assertEqual((summary["replaceableSlots"], summary["replaced"], summary["dynamicSlots"],
+                          summary["runtimeSlots"], summary["stockCensusSlots"]), (1, 1, 1, 1, 1))
+        self.assertEqual(summary["inventorySlots"], 3)
+        by_path = {row["path"]: row for row in result["slots"]}
+        for path in (dynamic["path"], runtime["path"]):
+            self.assertFalse(by_path[path]["intrinsicallyReplaceable"])
+            self.assertFalse(by_path[path]["safeToRetry"])
+            self.assertEqual(by_path[path]["category"], "issue")
+            self.assertIn("尚未替换", by_path[path]["reason"])
+        self.assertTrue(by_path[dynamic["path"]]["variable"])
+        self.assertEqual(by_path[runtime["path"]]["source"], "runtime-font")
+        plan = self.root / "observed.plan"
+        trace.atomic_write_plan(result, plan)
+        self.assertEqual(plan.read_text(), "")
+
     def test_prepared_tree_never_inherits_live_confirmation(self):
         self.verify()
         result = self.result(confirmed=True, prepared=True)

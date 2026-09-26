@@ -122,6 +122,7 @@ class StockSourceResolver:
         self.views: dict[Path, list[_View]] = {}
         self._profile_cache: dict[tuple, tuple[dict, str, frozenset[int]]] = {}
         self._cmap_cache: dict[tuple, dict] = {}
+        self._range_cache: dict[tuple, frozenset[int]] = {}
         self._digest_cache: dict[tuple, str] = {}
         self._recovery_attempted = False
         self._snapshot_cleanup = None
@@ -215,9 +216,71 @@ class StockSourceResolver:
             atexit.register(self._snapshot_cleanup)
         return recovered
 
-    def _measure(self, path: Path, face_index: int, identity: tuple) -> tuple[dict, str, frozenset[int]]:
+    def _archived_cmap(self, font: TTFont, target: dict, evidence: dict) -> dict | None:
+        """Reuse scan-time character facts only after the entire SFNT hash matched.
+
+        Android copies and metric aliases of a 65k-glyph CFF used to decode its
+        charset again at each switch. The scanner archives a canonical range
+        set; the full file SHA, raw cmap SHA and point digest bind that set to
+        this exact face. Header metrics are still read from the current file.
+        """
         import font_inventory as base
-        key = identity, face_index
+        from fontTools.unicodedata import category, script
+        ranges = evidence.get('codepointRanges')
+        if ranges is None:
+            return None
+        expected = target.get('metrics') or {}
+        point_digest = evidence.get('codepointSha256')
+        cmap_digest = hashlib.sha256(font.reader['cmap']).hexdigest()
+        if (not isinstance(point_digest, str) or not re.fullmatch('[0-9a-f]{64}', point_digest)
+                or expected.get('stockCodepointSha256') != point_digest
+                or expected.get('stockCmapSha256') != cmap_digest
+                or evidence.get('cmapSha256') != cmap_digest):
+            raise StockSourceError('存档字体字符指纹与原厂文件不一致，请重新扫描')
+        if not isinstance(ranges, list) or len(ranges) > 0x110000:
+            raise StockSourceError('存档字体字符范围无效，请重新扫描')
+        previous = -2
+        canonical = []
+        for pair in ranges:
+            if (not isinstance(pair, list) or len(pair) != 2
+                    or any(type(point) is not int for point in pair)
+                    or not 0 <= pair[0] <= pair[1] <= 0x10FFFF
+                    or pair[0] <= previous + 1):
+                raise StockSourceError('存档字体字符范围无效，请重新扫描')
+            canonical.append(tuple(pair))
+            previous = pair[1]
+        range_key = (point_digest, tuple(canonical))
+        points = self._range_cache.get(range_key)
+        if points is None:
+            points = frozenset(point for start, end in canonical for point in range(start, end + 1))
+            if codepoint_digest(points) != point_digest:
+                raise StockSourceError('存档字体字符集合校验失败，请重新扫描')
+            self._range_cache[range_key] = points
+        key = ('archived', point_digest)
+        facts = self._cmap_cache.get(key)
+        if facts is None:
+            scripts = {}
+            for point in points:
+                char = chr(point)
+                if category(char).startswith('L'):
+                    value = script(char)
+                    scripts[value] = scripts.get(value, 0) + 1
+            facts = {'points': points, 'letterScripts': scripts,
+                     'codepointRanges': [list(pair) for pair in canonical],
+                     'coverage': base.summarize_coverage(font, points=points),
+                     'digitCount': sum(0x30 <= p <= 0x39 or 0xFF10 <= p <= 0xFF19 for p in points),
+                     'privateUseCount': sum(category(chr(p)) == 'Co' for p in points),
+                     'codepointSha256': point_digest}
+            self._cmap_cache[key] = facts
+        return {**facts, 'cmapSha256': cmap_digest}
+
+    def _measure(self, path: Path, face_index: int, identity: tuple, *,
+                 digest: str = '', target: dict | None = None,
+                 evidence: dict | None = None) -> tuple[dict, str, frozenset[int]]:
+        import font_inventory as base
+        # A whole-file SHA was verified before reaching this method. Independent
+        # copied aliases therefore share the same measurements as hardlinks.
+        key = digest or identity, face_index
         if key not in self._profile_cache:
             with path.open('rb') as stream:
                 collection = stream.read(4) == b'ttcf'
@@ -229,12 +292,16 @@ class StockSourceResolver:
                 # charset. Fonts differing only in line metrics share those
                 # expensive character facts, while every header is still read
                 # and checked against its own exact stock contract below.
-                signature = tuple((tag, hashlib.sha256(font.reader[tag]).digest())
-                                  for tag in ('cmap', 'maxp', 'post', 'CFF ', 'CFF2') if tag in font)
-                cmap = self._cmap_cache.get(signature)
+                cmap = (self._archived_cmap(font, target, evidence)
+                        if digest and target is not None and evidence and evidence.get('sha256') == digest
+                        else None)
                 if cmap is None:
-                    cmap = base._cmap_metrics(font)
-                    self._cmap_cache[signature] = cmap
+                    signature = tuple((tag, hashlib.sha256(font.reader[tag]).digest())
+                                      for tag in ('cmap', 'maxp', 'post', 'CFF ', 'CFF2') if tag in font)
+                    cmap = self._cmap_cache.get(signature)
+                    if cmap is None:
+                        cmap = base._cmap_metrics(font)
+                        self._cmap_cache[signature] = cmap
                 _format, metrics = base._read_metrics_uncached(path, face_index, _font=font, _cmap=cmap)
                 cmap_digest, points = cmap['cmapSha256'], cmap['points']
             self._profile_cache[key] = metrics, cmap_digest, points
@@ -337,7 +404,8 @@ class StockSourceResolver:
             self._digest_cache[identity] = digest
         if wanted_digest and digest != wanted_digest:
             raise StockSourceError('原厂文件SHA256与扫描清单不一致')
-        measured, cmap_digest, points = self._measure(physical, face_index, identity)
+        measured, cmap_digest, points = self._measure(physical, face_index, identity,
+            digest=digest, target=target, evidence=evidence)
         self._check_metrics(target.get('metrics') or slot.get('metrics') or {}, measured)
         if evidence.get('cmapSha256') and evidence['cmapSha256'] != cmap_digest:
             raise StockSourceError('原厂字体面cmap指纹不一致')

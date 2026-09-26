@@ -179,4 +179,41 @@ test ! -e "$CALLS"
 test ! -e "$TMP/timeout.calls"
 test -z "$(find "$MOD/config" -name 'app_install_state.conf.tmp.*' -print)"
 
+# A stable preview identity coexists with old debug installations. It still
+# verifies the exact APK hash and never removes another package.
+sed -i 's/luoshu.debug/luoshu.preview/' "$MOD/bundled/app.prop"
+rm -f "$CALLS"
+MOCK_VERSION=0 MOCK_PM_CALLS="$CALLS" \
+APP_INSTALL_PM_BIN="$BIN/pm" APP_INSTALL_DUMPSYS_BIN="$BIN/dumpsys" \
+MODDIR="$MOD" sh "$MOD/common/app_installer.sh" test-preview > "$TMP/preview.out"
+grep -qx installed "$TMP/preview.out"
+grep -qx 'package=io.github.xgl34222220.luoshu.preview' "$MOD/config/app_install_state.conf"
+! grep -q uninstall "$CALLS"
+sed -i 's/^sha256=.*/sha256=broken/' "$MOD/bundled/app.prop"
+rm -f "$CALLS"
+set +e
+MOCK_VERSION=0 MOCK_PM_CALLS="$CALLS" \
+APP_INSTALL_PM_BIN="$BIN/pm" APP_INSTALL_DUMPSYS_BIN="$BIN/dumpsys" \
+MODDIR="$MOD" sh "$MOD/common/app_installer.sh" test-preview-bad-hash > "$TMP/preview-bad.out"
+PREVIEW_CODE=$?
+set -e
+test "$PREVIEW_CODE" -eq 22
+grep -qx invalid-apk "$TMP/preview-bad.out"
+test ! -e "$CALLS"
+
+# Root-manager action resolves the actual bundled package, including the full
+# activity class because the preview application ID differs from its namespace.
+cp "$ROOT/action.sh" "$MOD/action.sh"
+cat > "$BIN/am" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" > "$MOCK_AM_CALLS"
+EOF
+chmod 0755 "$BIN/am"
+cat > "$MOD/common/app_installer.sh" <<'EOF'
+#!/bin/sh
+echo installed
+EOF
+PATH="$BIN:$PATH" MOCK_AM_CALLS="$TMP/am.calls" sh "$MOD/action.sh" > "$TMP/action.out"
+grep -qx 'start -n io.github.xgl34222220.luoshu.preview/io.github.xgl34222220.luoshu.MainActivity' "$TMP/am.calls"
+
 printf 'Bundled App installer tests passed.\n'

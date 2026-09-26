@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Canonical stock-font inventory scanner.
 
-Revision 10 discovers physical text capabilities from trusted stock files and
+Revision 11 discovers physical text capabilities from trusted stock files and
 XML contracts, without vendor properties or ROM-specific filename lists.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import font_inventory as base
-SCANNER_REVISION = 10
+SCANNER_REVISION = 11
 CANDIDATE_SCHEMA = "device-font-candidates-v1"
 METRICS_REVISION = 5
 PRIMARY_FONT_SPECS = (
@@ -74,6 +74,7 @@ THEME_FONT_ROOTS = (
     Path("/data/oplus/uxres/theme"),
     Path("/data/skin/fonts"),
 )
+RUNTIME_FONT_ROOTS = (Path("/apex"),)
 XML_PATTERNS = (
     "fonts.xml",
     "font_fallback.xml",
@@ -208,10 +209,10 @@ DYNAMIC_PARTITION_LIMIT = 16
 DYNAMIC_PARTITION_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_]{0,63}$")
 NESTED_FONT_ROOT_SCHEMA = "device-font-roots-v1"
 NESTED_ROOT_COMPONENT = re.compile(r"^[A-Za-z0-9._+-]{1,96}$")
-NESTED_ROOT_DENY_COMPONENTS = {
-    "app", "priv-app", "overlay", "framework", "lib", "lib64", "bin", "xbin",
-    "media", "lost+found",
-}
+# A standalone font below app/assets or framework is still a font. Eligibility
+# comes from its tables, not the name of a parent directory. Only filesystem
+# recovery storage is excluded from normal mounted font roots.
+NESTED_ROOT_DENY_COMPONENTS = {"lost+found"}
 _LIVE_FONT_CENSUS: list[tuple[str, Path, Path]] | None = None
 # Install wrapper may replace this with a stock-partition resolver. Returning
 # None means no trustworthy whole-partition view is available for census.
@@ -404,7 +405,7 @@ def _partition_font_census(font_roots: Iterable[base.FontRoot]) -> list[tuple[st
                 dirs[:] = pruned
                 for name in files:
                     actual = current / name
-                    if actual.suffix.lower() not in base.FONT_EXTENSIONS:
+                    if not base._font_file_candidate(actual):
                         continue
                     try:
                         if not (actual.is_file() or actual.is_symlink()):
@@ -791,7 +792,7 @@ def _stock_file_counts(font_roots: Iterable[base.FontRoot], slots: dict[str, dic
         partition_unique = 0
         if root.actual.is_dir():
             candidates = {path for path in root.actual.rglob("*")
-                          if path.is_file() and path.suffix.lower() in base.FONT_EXTENSIONS}
+                          if path.is_file() and base._font_file_candidate(path)}
             for logical in slots or {}:
                 if Path(logical).is_relative_to(root.logical):
                     actual = root.actual / Path(logical).relative_to(root.logical)
@@ -815,10 +816,10 @@ def _stock_file_counts(font_roots: Iterable[base.FontRoot], slots: dict[str, dic
 def _contains_font_capped(root: Path, limit: int = 4096) -> bool:
     seen = 0
     try:
-        for _directory, _subdirs, files in os.walk(root):
+        for directory, _subdirs, files in os.walk(root):
             for name in files:
                 seen += 1
-                if Path(name).suffix.lower() in base.FONT_EXTENSIONS:
+                if base._font_file_candidate(Path(directory) / name):
                     return True
                 if seen >= limit:
                     return False
@@ -833,6 +834,90 @@ def _theme_override_roots() -> list[str]:
         if root.is_dir() and _contains_font_capped(root):
             found.append(str(root))
     return found
+
+
+def _diagnostic_font_faces(path: Path) -> list[dict[str, Any]]:
+    faces: list[dict[str, Any]] = []
+    for index in range(base._collection_count(path)):
+        fmt, metrics = base._read_metrics(path, index)
+        traits = metrics["fontTraits"]
+        faces.append({
+            "faceIndex": index, "format": fmt,
+            "replacementRoles": [role for role, count in (
+                ("cjk", metrics["coverage"]["hanCount"]),
+                ("latin", traits.get("letterScripts", {}).get("Latn", 0)),
+                ("digit", traits.get("digitCount", 0))) if count],
+            "coverage": metrics["coverage"],
+            "weight": metrics["weightClass"],
+            "style": "italic" if traits.get("italic") else "normal",
+            "variationAxes": metrics["variationAxes"],
+            "variationInstances": metrics["variationInstances"],
+            "preservedReason": base._text_face_reason(metrics),
+        })
+    return faces
+
+
+def _observed_font_files(roots: Iterable[Path], *, scope: str, reason: str,
+                         partition: str) -> list[dict[str, Any]]:
+    """Describe mutable theme files separately from the immutable stock archive.
+
+    These observations can be shown in coverage diagnostics but never authorize
+    replacement of a system slot or become a trusted stock metric source.
+    Overlapping theme roots are deduplicated and directory links are not walked.
+    """
+    entries: dict[str, dict[str, Any]] = {}
+    unreadable_reason = "unreadable-dynamic-font" if scope == "mutable-theme" else "unreadable-runtime-font"
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for directory, subdirs, files in os.walk(root, followlinks=False):
+            parent = Path(directory)
+            subdirs[:] = [name for name in subdirs if not (parent / name).is_symlink()]
+            for name in files:
+                path = parent / name
+                if str(path) in entries or not base._font_file_candidate(path):
+                    continue
+                entry: dict[str, Any] = {
+                    "path": str(path), "partition": partition, "slotName": name,
+                    "scope": scope, "candidate": False,
+                    "reason": reason, "faces": [],
+                }
+                entries[str(path)] = entry
+                if path.is_symlink():
+                    # Mutable link destinations are not a stock identity.
+                    entry["reason"] = "dynamic-font-alias" if scope == "mutable-theme" else "runtime-font-alias"
+                    try:
+                        entry["target"] = os.readlink(path)
+                    except OSError as error:
+                        entry.update(reason=unreadable_reason, detail=str(error))
+                    continue
+                try:
+                    entry["faces"] = _diagnostic_font_faces(path)
+                except (base.InventoryError, OSError, ValueError) as error:
+                    entry.update(reason=unreadable_reason, detail=str(error))
+    return [entries[path] for path in sorted(entries)]
+
+
+def _dynamic_font_files() -> list[dict[str, Any]]:
+    return _observed_font_files(THEME_FONT_ROOTS, scope="mutable-theme",
+                                reason="mutable-theme-font", partition="data")
+
+
+def _runtime_font_files() -> list[dict[str, Any]]:
+    # APEX packages have an independent mount/update lifecycle. Record actual
+    # capabilities and both versioned and canonical paths without pretending a
+    # partition/fonts overlay can replace them.
+    roots = list(RUNTIME_FONT_ROOTS)
+    for root in RUNTIME_FONT_ROOTS:
+        try:
+            for child in root.iterdir():
+                if (child.is_symlink() and child.is_dir()
+                        and child.resolve().is_relative_to(root.resolve())):
+                    roots.append(child)
+        except OSError:
+            continue
+    return _observed_font_files(roots, scope="runtime-container",
+                                reason="runtime-font-container", partition="apex")
 
 
 def _font_mount_targets() -> list[str]:
@@ -1086,6 +1171,22 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
                         paths.append(logical)
     base._add_verified_text_slots(slots, replaceable_roots, protected_paths, preserved_fonts)
     preserved_fonts.update(dynamic_aliases)
+    for partition, logical, actual in _LIVE_FONT_CENSUS or []:
+        if (str(logical) in slots or str(logical) in preserved_fonts
+                or logical.parent == Path("/") / partition / "fonts"
+                or _nested_root_for_directory(logical.parent, partition) is not None):
+            continue
+        # Some valid paths cannot be represented by the current shell mount
+        # manifest (for example a directory containing spaces). Preserve their
+        # measured facts and explicit transport limitation instead of calling
+        # them system-protected or silently dropping them from the census.
+        entry: dict[str, Any] = {"reason": "unsupported-mount-root-path", "faces": []}
+        if not actual.is_symlink():
+            try:
+                entry["faces"] = _diagnostic_font_faces(actual)
+            except (base.InventoryError, OSError, ValueError) as error:
+                entry.update(reason="unreadable-stock-font", detail=str(error))
+        preserved_fonts[str(logical)] = entry
     base._populate_metrics(slots)
     path_total, unique_total, path_counts, unique_counts, _names = _stock_file_counts(replaceable_roots, slots)
     preserved_paths = {path for path, entry in preserved_fonts.items()
@@ -1118,7 +1219,10 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     probe["candidateCount"] = len(slots)
     base._atomic_write(output.with_name("device_font_candidates.json"), probe)
 
-    theme_roots = _theme_override_roots()
+    dynamic_font_files = _dynamic_font_files()
+    runtime_font_files = _runtime_font_files()
+    theme_roots = sorted({str(root) for root in THEME_FONT_ROOTS
+                         if any(Path(item["path"]).is_relative_to(root) for item in dynamic_font_files)})
     mount_targets = _font_mount_targets()
     scan_summary = _summary(slots, path_total, path_counts, len(xml_sources), _count_xml_ui_faces(xml_sources))
     scan_summary["heuristicUiFileCount"] = sum(
@@ -1132,6 +1236,8 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "partitionUniqueFontFileCounts": unique_counts,
         "themeOverrideRoots": theme_roots,
         "fontMountTargets": mount_targets,
+        "dynamicFontFileCount": len(dynamic_font_files),
+        "runtimeFontFileCount": len(runtime_font_files),
         "stockCountSemantics": "font paths from canonical-or-alias partition roots; theme fonts excluded",
         "installCandidatePathCount": int(probe.get("candidateCount", 0)),
         "installFontPathCount": int(probe.get("fontFileCount", 0)),
@@ -1145,6 +1251,8 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "metricsRevision": METRICS_REVISION,
         "detectionPolicy": "measured-font-capabilities-v1",
         "preservedDynamicAliases": dynamic_aliases,
+        "dynamicFontFiles": dynamic_font_files,
+        "runtimeFontFiles": runtime_font_files,
         "preservedFonts": preserved_fonts,
         "dynamicFontRoutes": [{"alias": path, **entry, "status": "preserved"}
                               for path, entry in sorted(dynamic_aliases.items())],

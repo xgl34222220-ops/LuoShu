@@ -33,6 +33,7 @@ from font_slot_coverage import summarize_coverage, unicode_codepoints, valid_cov
 SCHEMA = "device-font-inventory-v1"
 INVENTORY_REVISION = 1
 FONT_EXTENSIONS = {".ttf", ".otf", ".ttc", ".otc"}
+SFNT_SIGNATURES = {b"\x00\x01\x00\x00", b"true", b"\x00\x02\x00\x00", b"OTTO", b"ttcf"}
 LOGICAL_FONT_ROOTS = (
     ("system", Path("/system/fonts")),
     ("system_ext", Path("/system_ext/fonts")),
@@ -60,7 +61,7 @@ MIRROR_PREFIXES = (
     Path("/data/adb/magisk/mirror"),
 )
 # Family labels describe usage; they never identify a ROM or select filenames.
-DENY_FAMILY_TOKENS = ("emoji", "symbol", "icon", "math", "music", "dingbat")
+DENY_FAMILY_TOKENS = ("emoji", "emojis", "symbol", "symbols", "icon", "icons", "math", "music", "dingbat", "dingbats")
 SANS_SERIF_UI_SUFFIX_TOKENS = {
     "thin", "extralight", "extra-light", "light", "regular", "normal", "book", "medium",
     "semibold", "semi-bold", "bold", "extrabold", "extra-bold", "black", "heavy",
@@ -332,6 +333,41 @@ def _font_format(path: Path) -> str:
     raise InventoryError(f"无法识别字体格式：{path}")
 
 
+def _font_file_candidate(path: Path) -> bool:
+    """Find standalone SFNTs by their bytes, including opaque OEM filenames.
+
+    Known suffixes are kept even when corrupt, so the measured pass can record
+    their actual parse failure. Header probing never follows an arbitrary link
+    or opens a device/FIFO; stock-link resolution belongs to the measured pass.
+    """
+    try:
+        status = path.lstat()
+        if path.suffix.lower() in FONT_EXTENSIONS:
+            return stat.S_ISREG(status.st_mode) or stat.S_ISLNK(status.st_mode)
+        if not stat.S_ISREG(status.st_mode) or status.st_size < 12:
+            return False
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return False
+            return os.read(descriptor, 4) in SFNT_SIGNATURES
+        finally:
+            os.close(descriptor)
+    except OSError:
+        return False
+
+
+def _codepoint_ranges(points: Iterable[int]) -> list[list[int]]:
+    """Compact, canonical inclusive ranges for the immutable stock archive."""
+    ranges: list[list[int]] = []
+    for point in sorted(points):
+        if ranges and point == ranges[-1][1] + 1:
+            ranges[-1][1] = point
+        else:
+            ranges.append([point, point])
+    return ranges
+
+
 _METRICS_CACHE: dict[tuple[int, ...], tuple[str, dict[str, Any]]] | None = None
 _STOCK_DIGEST_CACHE: dict[tuple[int, ...], str] | None = None
 
@@ -398,6 +434,7 @@ def _cmap_metrics(font: TTFont) -> dict[str, Any]:
             script = unicode_script(character)
             letter_scripts[script] = letter_scripts.get(script, 0) + 1
     return {"points": points, "letterScripts": letter_scripts,
+            "codepointRanges": _codepoint_ranges(points),
             "coverage": summarize_coverage(font, points=points),
             "digitCount": sum(0x30 <= point <= 0x39 or 0xFF10 <= point <= 0xFF19 for point in points),
             "privateUseCount": sum(unicode_category(chr(point)) == "Co" for point in points),
@@ -451,10 +488,15 @@ def _read_metrics_uncached(path: Path, face_index: int = 0, *, _font: TTFont | N
             # merely to obtain these newer, stronger stock-byte proofs.
             "stockCmapSha256": cmap["cmapSha256"],
             "stockCodepointSha256": cmap["codepointSha256"],
+            "stockCodepointRanges": copy.deepcopy(cmap["codepointRanges"])
+                if "codepointRanges" in cmap else _codepoint_ranges(cmap["points"]),
             "coverage": copy.deepcopy(cmap["coverage"]),
             "weightClass": int(getattr(os2, "usWeightClass", 400)),
             "variationAxes": {axis.axisTag: {"min": axis.minValue, "default": axis.defaultValue,
                                "max": axis.maxValue} for axis in font["fvar"].axes} if "fvar" in font else {},
+            "variationInstances": [{"coordinates": dict(instance.coordinates),
+                                    "subfamilyNameId": instance.subfamilyNameID}
+                                   for instance in font["fvar"].instances] if "fvar" in font else [],
             "fontTraits": {
                 "letterScripts": dict(cmap["letterScripts"]),
                 "symbol": symbol_metadata,
@@ -764,6 +806,7 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot], *,
                             axes[axis.get("tag")] = value
                 contract = {
                     "supportedAxes": supported_axes, "axes": axes,
+                    "protectedXmlFamily": specialized,
                     "faceIndex": face_index,
                     "weight": _infer_weight(actual.name, font_node.get("weight")),
                     "style": (font_node.get("style") or "normal").strip() or "normal",
@@ -792,6 +835,7 @@ def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot], *,
                     if reference not in references:
                         references.append(reference)
                     target["xmlFallback"] = target.get("xmlFallback", False) or contract["xmlFallback"]
+                    target["protectedXmlFamily"] = bool(target.get("protectedXmlFamily") or specialized)
     unresolved = list(aliases)
     for _round in range(len(aliases) + 1):
         remaining = []
@@ -832,7 +876,7 @@ def _text_face_reason(metrics: dict[str, Any], *, declared_text: bool = False) -
     digits = int(traits.get("digitCount", 0))
     if int(traits.get("privateUseCount", 0)) > max(128, letters * 4):
         return "private-use-symbol-font"
-    if letters or (digits > 0 and coverage["unicodeCount"] <= 128):
+    if letters or digits > 0:
         return ""
     return "non-text-cmap"
 
@@ -871,8 +915,7 @@ def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontR
         if not root.actual.is_dir():
             continue
         try:
-            candidates_set = {path for path in root.actual.rglob("*")
-                if path.suffix.lower() in FONT_EXTENSIONS and (path.is_file() or path.is_symlink())}
+            candidates_set = {path for path in root.actual.rglob("*") if _font_file_candidate(path)}
             # XML is an authoritative font reference even when the filename has
             # an unusual suffix; the sfnt parser remains the content gate.
             for logical, entry in slots.items():
@@ -885,10 +928,7 @@ def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontR
             continue
         for actual in candidates:
             logical = _logical_path(root, actual)
-            if logical in (protected_paths or ()):
-                preserved[logical] = {"reason": "xml-symbol-family"}
-                slots.pop(logical, None)
-                continue
+            protected = logical in (protected_paths or ())
             previous = slots.get(logical, {})
             try:
                 stock_file = _stock_font_path(root, actual, roots)
@@ -897,12 +937,22 @@ def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontR
                 for index in range(_collection_count(stock_file)):
                     fmt, metrics = _read_metrics(stock_file, index)
                     contract = previous.get("xmlFaces", {}).get(str(index), {})
-                    reason = _text_face_reason(metrics, declared_text=bool(contract))
+                    protected_face = protected and (
+                        not previous.get("xmlFaces") or contract.get("protectedXmlFamily", False))
+                    reason = ("xml-symbol-family" if protected_face else
+                              _text_face_reason(metrics, declared_text=bool(contract)))
                     traits = metrics.get("fontTraits", {})
                     face = {
                         **contract, "faceIndex": index, "format": fmt, "metrics": metrics,
                         "stockSource": {"sha256": stock_digest,
-                                        "cmapSha256": metrics["stockCmapSha256"]},
+                                        "cmapSha256": metrics["stockCmapSha256"],
+                                        "codepointSha256": metrics["stockCodepointSha256"],
+                                        "codepointRanges": copy.deepcopy(metrics["stockCodepointRanges"])},
+                        "replacementRoles": [role for role, count in (
+                            ("cjk", metrics["coverage"]["hanCount"]),
+                            ("latin", traits.get("letterScripts", {}).get("Latn", 0)),
+                            ("digit", traits.get("digitCount", 0))) if count],
+                        "variable": bool(metrics.get("variationAxes")),
                         "weight": contract.get("weight", metrics.get("weightClass", 400)),
                         "style": contract.get("style", "italic" if traits.get("italic") else "normal"),
                         "replacementRole": "text" if traits.get("letterScripts") else "digits",
@@ -948,6 +998,10 @@ def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontR
                 slots[logical][key] = list(dict.fromkeys(value for face in faces for value in face[key]))
             slots[logical]["xmlFallback"] = any(face["xmlFallback"] for face in faces)
             slots[logical]["xmlReferences"] = [ref for face in faces for ref in face["xmlReferences"]]
+            slots[logical]["replacementRoles"] = sorted({role for face in usable
+                                                          for role in face["replacementRoles"]})
+            slots[logical]["variable"] = any(face["variable"] for face in usable)
+            slots[logical]["faceCount"] = len(faces)
             preserved.pop(logical, None)
     for logical, entry in slots.items():
         for face in entry.get("faces", [entry]):

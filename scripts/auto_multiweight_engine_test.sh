@@ -11,7 +11,7 @@ sh -n "$ENGINE"
 sh -n "$BRIDGE"
 sh -n "$MODE"
 
-grep -q 'for _weight in 100 200 300 400 500 600 700 800 900' "$ENGINE"
+grep -q 'for _weight in \$_weights' "$ENGINE"
 grep -q 'build_composite_cached' "$ENGINE"
 # The production engine caches complete composites by immutable input hashes.
 # The real worker/source/cache behavior is exercised by mix_inventory_source_test.py.

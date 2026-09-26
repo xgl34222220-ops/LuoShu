@@ -8,6 +8,9 @@ glyphs prevent an unreplaced composite from inheriting a replacement outline.
 from __future__ import annotations
 
 import copy
+from contextlib import ExitStack
+import hashlib
+from io import BytesIO
 import os
 from pathlib import Path
 import tempfile
@@ -20,9 +23,10 @@ from fontTools.merge.options import Options as MergeOptions
 from fontTools.pens.t2CharStringPen import T2CharStringPen
 from fontTools.ttLib import TTFont, newTable
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
+from fontTools.ttLib.tables import otTables
 from fontTools.ttLib.tables.DefaultTable import DefaultTable
 from fontTools.ttLib.scaleUpem import scale_upem
-from fontTools.misc.psCharStrings import calcSubrBias, T2WidthExtractor
+from fontTools.misc.psCharStrings import calcSubrBias, T2CharString, T2WidthExtractor
 from fontTools.pens.boundsPen import BoundsPen
 from fontTools.unicodedata import script
 from fontTools.varLib.instancer import instantiateVariableFont
@@ -45,7 +49,7 @@ def replacement_codepoints(points) -> set[int]:
             or 0x3000 <= cp <= 0x303F or 0xFF01 <= cp <= 0xFF60}
 
 
-def _open_static(path: Path, index: int, weight: int | None = None) -> TTFont:
+def _open_static(path: Path, index: int, weight: int | None = None, *, preserve_axes=False) -> TTFont:
     with path.open('rb') as stream:
         collection = stream.read(4) == b'ttcf'
     if collection and index < 0:
@@ -58,6 +62,8 @@ def _open_static(path: Path, index: int, weight: int | None = None) -> TTFont:
         font.close()
         raise UnsupportedSupplementError('color fonts cannot enter text supplementation')
     if 'fvar' in font:
+        if preserve_axes:
+            return font
         if weight is None:
             font.close()
             raise UnsupportedSupplementError('variable source supplementation would lose its axes; an explicit static instance is required')
@@ -123,6 +129,21 @@ def _stock_variants(font: TTFont, replace: set[int], source_variants: set[tuple[
     return keep
 
 
+def _limit_source_cmap(font: TTFont, replace: set[int]) -> None:
+    """Restrict entry points while retaining an already-valid outline graph.
+
+    A near-complete CJK source need not traverse 50k charstrings to remove a few
+    non-target encodings. Unencoded glyphs remain available to layout and
+    composite dependencies, but cannot replace any additional stock character.
+    """
+    for table in font['cmap'].tables:
+        if table.format == 14:
+            table.uvsDict = {selector: [(cp, glyph) for cp, glyph in entries if cp in replace]
+                             for selector, entries in table.uvsDict.items()}
+        elif table.isUnicode():
+            table.cmap = {cp: glyph for cp, glyph in table.cmap.items() if cp in replace}
+
+
 def _subset(font: TTFont, points: set[int], *, preserve_base: bool = False) -> None:
     options = subset.Options()
     options.layout_features = ['*']
@@ -162,7 +183,21 @@ def _subset(font: TTFont, points: set[int], *, preserve_base: bool = False) -> N
     # Requesting only the base silently removes every cmap format-14 record.
     selectors = {selector for selector, cp in _uvs_pairs(font) if cp in points}
     worker.populate(unicodes=points | selectors, glyphs=base_glyphs)
-    worker.subset(font)
+    cff = font.get('CFF ')
+    raw_cid = cff is not None and hasattr(cff.cff[0], 'FDSelect')
+    if raw_cid:
+        # CID Type2 cannot use name-based seac components. Its outline closure
+        # therefore needs no charstring interpreter. Deleting glyphs changes
+        # neither local nor global subroutine indices; keeping unused pools
+        # and FDs is valid and preserves raw programs/hints. FontTools' normal
+        # post-prune decodes every remaining outline only to shrink these pools.
+        cff.closure_glyphs = lambda worker: None
+        cff.prune_post_subset = lambda font, options: True
+    try:
+        worker.subset(font)
+    finally:
+        if raw_cid:
+            del cff.closure_glyphs, cff.prune_post_subset
     if base is not None:
         font['BASE'] = base
 
@@ -232,9 +267,22 @@ def _mergeable_cff(font: TTFont) -> int:
     order = font.getGlyphOrder()
     strings = {}
     for name in order:
+        glyph = font['glyf'].glyphs[name] if kind == 'TTF' else None
+        raw_glyph = getattr(glyph, 'data', None)
         pen = T2CharStringPen(font['hmtx'].metrics[name][0], glyphs, roundTolerance=0)
         glyphs[name].draw(pen)
-        strings[name] = pen.getCharString()
+        charstring = pen.getCharString()
+        # Retaining 50k Python command lists alongside expanded TrueType
+        # coordinates can exceed a gigabyte. The exact serialized Type2 bytes
+        # are all subsequent stages need, so finish each program immediately.
+        charstring.compile()
+        strings[name] = charstring
+        if glyph is not None:
+            if raw_glyph is not None:
+                glyph.__dict__.clear()
+                glyph.data = raw_glyph
+            else:
+                glyph.compact(font['glyf'], recalcBBoxes=False)
     for tag in ('glyf', 'loca', 'CFF ', 'CFF2', 'fpgm', 'prep', 'cvt ', 'gasp',
                 'VORG', 'hdmx', 'LTSH', 'VDMX'):
         if tag in font:
@@ -244,6 +292,39 @@ def _mergeable_cff(font: TTFont) -> int:
     builder.setupMaxp()
     font['post'].formatType = 3.0
     return len(order)
+
+
+def _cff_global_layout(fonts: list[TTFont]) -> tuple[list[int], int]:
+    """Keep the largest outline program's global-subroutine operands unchanged.
+
+    Global subroutine order is independent of glyph order. At a Type2 bias
+    boundary a short prefix of unused ``return`` programs can preserve the
+    largest input's exact operands. This avoids decoding and recompiling tens
+    of thousands of CJK charstrings merely to shift a subroutine number.
+    """
+    counts = [len(font['CFF '].cff.GlobalSubrs) for font in fonts]
+    total = sum(counts)
+    anchor = max(range(len(fonts)), key=lambda index: len(fonts[index].getGlyphOrder()))
+    old_bias = calcSubrBias(fonts[anchor]['CFF '].cff.GlobalSubrs)
+    for bias in (107, 1131, 32768):
+        padding = bias - old_bias
+        count = total + padding
+        if padding < 0 or count > 65535 or calcSubrBias(range(count)) != bias:
+            continue
+        offsets = [0] * len(fonts)
+        offset = padding
+        for index in [anchor, *(i for i in range(len(fonts)) if i != anchor)]:
+            offsets[index] = offset
+            offset += counts[index]
+        return offsets, count
+    # Very large pools need the compact layout even if every operand changes.
+    offsets, offset = [], 0
+    for count in counts:
+        offsets.append(offset)
+        offset += count
+    if offset > 65535:
+        raise UnsupportedSupplementError('CFF global subroutines exceed the format limit')
+    return offsets, offset
 
 
 def _merged_cff_table(fonts: list[TTFont]) -> DefaultTable:
@@ -257,13 +338,16 @@ def _merged_cff_table(fonts: list[TTFont]) -> DefaultTable:
     select = FDSelect()
     global_subrs = GlobalSubrsIndex()
     glyphs = []
-    global_count = sum(len(font['CFF '].cff.GlobalSubrs) for font in fonts)
+    global_offsets, global_count = _cff_global_layout(fonts)
     new_bias = calcSubrBias([None] * global_count)
-    global_offset = 0
+    # Distinct objects: later changes to an individual program must not mutate
+    # every padding entry. All padding is unreachable from the input programs.
+    global_subrs.items = [T2CharString(bytecode=b'\x0b', globalSubrs=global_subrs)
+                         for _ in range(global_count)]
     matrices = {tuple(font['CFF '].cff[0].FontMatrix) for font in fonts}
     if len(matrices) != 1:
         raise UnsupportedSupplementError('CFF top-level coordinate matrices differ after scaling')
-    for font in fonts:
+    for font, global_offset in zip(fonts, global_offsets):
         cff = font['CFF '].cff
         top = cff[0]
         old_global = cff.GlobalSubrs
@@ -280,11 +364,13 @@ def _merged_cff_table(fonts: list[TTFont]) -> DefaultTable:
         if fd_offset + len(fds) > 256:
             raise UnsupportedSupplementError('CFF private dictionaries exceed the format limit')
         charstrings = [top.CharStrings[name] for name in font.getGlyphOrder()]
-        # Decode every reachable subroutine in its glyph's FD context before
-        # changing any global index. A shared subroutine can itself call local
-        # subroutines and cannot be decoded independently with an empty private.
-        for charstring in charstrings:
-            charstring.decompile()
+        # Decode only when operands actually change. Untouched CID programs
+        # and their hints stay byte-for-byte intact in the common large-source
+        # case. Changed pools still need each glyph's FD context, since a
+        # global subroutine can itself call private local subroutines.
+        if shift and len(old_global):
+            for charstring in charstrings:
+                charstring.decompile()
         programs = [*charstrings, *old_global]
         for fd in fds:
             programs.extend(getattr(fd.Private, 'Subrs', []))
@@ -296,15 +382,14 @@ def _merged_cff_table(fonts: list[TTFont]) -> DefaultTable:
             seen.add(id(program))
             # A raw subroutine left here is unreachable from every glyph;
             # retain its unused bytes without inventing a decoding FD context.
-            if shift and not program.needsDecompilation():
+            if shift and len(old_global) and not program.needsDecompilation():
                 for index, token in enumerate(program.program):
                     if token == 'callgsubr':
                         if index == 0 or not isinstance(program.program[index - 1], int):
                             raise UnsupportedSupplementError('computed CFF global subroutine operand')
                         program.program[index - 1] += shift
             program.globalSubrs = global_subrs
-        global_subrs.items.extend(list(old_global))
-        global_offset += len(old_global)
+        global_subrs.items[global_offset:global_offset + len(old_global)] = list(old_global)
         glyphs.extend(charstrings)
         select.gidArray.extend(fd_offset + index for index in indexes)
     table = fonts[0]['CFF ']
@@ -350,15 +435,68 @@ def _merged_vorg(fonts: list[TTFont], merged_names: list[str]):
             glyphs = font.getGlyphSet()
             values = {}
             for name in order:
+                charstring = font['CFF '].cff[0].CharStrings[name] if 'CFF ' in font else None
+                bytecode = charstring.bytecode if charstring is not None else None
                 pen = BoundsPen(glyphs)
                 glyphs[name].draw(pen)
                 ymax = pen.bounds[3] if pen.bounds else 0
                 values[name] = int(round(ymax + font['vmtx'].metrics[name][1]))
+                if bytecode is not None:
+                    # Bounds extraction expands Type2 tokens too. Release that
+                    # temporary program instead of accumulating the full CJK
+                    # library a second time after outline conversion.
+                    charstring.setBytecode(bytecode)
+            source = newTable('VORG')
+            source.majorVersion, source.minorVersion = 1, 0
+            source.defaultVertOriginY = table.defaultVertOriginY
+            source.VOriginRecords = {name: value for name, value in values.items()
+                                    if value != source.defaultVertOriginY}
+            font['VORG'] = source
         origins.update({merged_names[offset + index]: values[name] for index, name in enumerate(order)
                         if values[name] != table.defaultVertOriginY})
         offset += len(order)
     table.VOriginRecords = origins
     return table
+
+
+_VARIATION_TABLES = ('fvar', 'avar', 'STAT', 'gvar', 'HVAR', 'VVAR', 'MVAR', 'cvar')
+
+
+def _check_variable_source(font, stock):
+    if 'glyf' not in font or 'gvar' not in font or 'glyf' not in stock or 'VARC' in font:
+        raise UnsupportedSupplementError('variable supplementation requires glyf/gvar source and glyf stock')
+    for tag in ('GDEF', 'BASE'):
+        if tag in font and getattr(font[tag].table, 'VarStore', None) is not None:
+            raise UnsupportedSupplementError('variable layout stores need a separate layout-preserving merger')
+    for tag in ('GSUB', 'GPOS'):
+        if tag in font and getattr(font[tag].table, 'FeatureVariations', None) is not None:
+            raise UnsupportedSupplementError('conditional variable layout needs a separate layout-preserving merger')
+    if 'VVAR' in font and ('vhea' not in stock or 'vmtx' not in stock):
+        raise UnsupportedSupplementError('variable vertical metrics require a stock vertical contract')
+
+
+def _restore_variations(merged, tables, source_order, stock_order):
+    for tag, table in tables.items():
+        merged[tag] = table
+    merged['gvar'].variations.update({name: [] for name in stock_order})
+    for tag, advance, maps in (
+        ('HVAR', 'AdvWidthMap', ('AdvWidthMap', 'LsbMap', 'RsbMap')),
+        ('VVAR', 'AdvHeightMap', ('AdvHeightMap', 'TsbMap', 'BsbMap', 'VOrgMap')),
+    ):
+        if tag not in merged:
+            continue
+        table = merged[tag].table
+        for name in maps:
+            mapping = getattr(table, name, None)
+            if mapping is None and name != advance:
+                continue
+            if mapping is None:
+                # An absent advance map means implicit glyph-ID indices. Make
+                # that mapping explicit before appending invariant stock IDs.
+                mapping = otTables.VarIdxMap()
+                mapping.mapping = {glyph: index for index, glyph in enumerate(source_order)}
+                setattr(table, name, mapping)
+            mapping.mapping.update({glyph: otTables.NO_VARIATION_INDEX for glyph in stock_order})
 
 
 class _SupplementMerger(Merger):
@@ -373,12 +511,16 @@ class _SupplementMerger(Merger):
     as glyf, GSUB and GPOS. Never transplant pre-serialization name references.
     """
 
-    def __init__(self, options):
+    def __init__(self, options, *, variable_source=False):
         super().__init__(options)
         self.input_orders = []
         self.retained_tables = {}
         self.source_kern = None
         self._opened_inputs = []
+        self.variable_source = variable_source
+        self.stock_index = 1 if variable_source else 0
+        self.variation_tables = {}
+        self.required_features = {}
 
     def _openFonts(self, files):
         fonts = super()._openFonts(files)
@@ -388,12 +530,64 @@ class _SupplementMerger(Merger):
     def _preMerge(self, font):
         index = len(self.input_orders)
         self.input_orders.append(list(font.getGlyphOrder()))
-        if index == 0:
+        if index == self.stock_index:
             self.retained_tables = {tag: font[tag] for tag in ('MATH', 'BASE', 'kern')
                                     if tag in font}
-        elif index == 1 and 'kern' in font:
+        elif 'kern' in font:
             self.source_kern = font['kern']
+        if self.variable_source:
+            if index == 0:
+                self.variation_tables = {tag: font[tag] for tag in _VARIATION_TABLES if tag in font}
+            font['glyf'].axisTags = [axis.axisTag for axis in self.variation_tables['fvar'].axes]
         super()._preMerge(font)
+        # FontTools cannot combine LangSys records with required features.
+        # Keep their already-remapped lookup objects and restore a required
+        # feature for each merged script/language before final index mapping.
+        for tag in ('GSUB', 'GPOS'):
+            if tag not in font or font[tag].table.ScriptList is None:
+                continue
+            for record in font[tag].table.ScriptList.ScriptRecord:
+                languages = [(None, record.Script.DefaultLangSys),
+                             *((lang.LangSysTag, lang.LangSys) for lang in record.Script.LangSysRecord)]
+                for language, system in languages:
+                    if system is None or system.ReqFeatureIndex == 0xFFFF:
+                        continue
+                    key = (tag, record.ScriptTag, language)
+                    self.required_features.setdefault(key, []).append(system.ReqFeatureIndex)
+                    system.ReqFeatureIndex = 0xFFFF
+
+    def _postMerge(self, font):
+        for tag in ('GSUB', 'GPOS'):
+            if tag not in font or font[tag].table.ScriptList is None:
+                continue
+            table = font[tag].table
+            for record in table.ScriptList.ScriptRecord:
+                languages = [(None, record.Script.DefaultLangSys),
+                             *((lang.LangSysTag, lang.LangSys) for lang in record.Script.LangSysRecord)]
+                for language, system in languages:
+                    required = self.required_features.get((tag, record.ScriptTag, language), [])
+                    if not required:
+                        continue
+                    feature = otTables.FeatureRecord()
+                    feature.FeatureTag = required[0].FeatureTag
+                    feature.Feature = otTables.Feature()
+                    params = [item.Feature.FeatureParams for item in required]
+                    if len(required) > 1 and any(value is not None for value in params):
+                        raise UnsupportedSupplementError('required layout features have incompatible parameters')
+                    feature.Feature.FeatureParams = params[0]
+                    lookups, seen = [], set()
+                    for item in required:
+                        for lookup in item.Feature.LookupListIndex:
+                            if id(lookup) not in seen:
+                                lookups.append(lookup)
+                                seen.add(id(lookup))
+                    feature.Feature.LookupListIndex = lookups
+                    feature.Feature.LookupCount = len(lookups)
+                    system.ReqFeatureIndex = feature
+                    table.FeatureList.FeatureRecord.append(feature)
+            if table.FeatureList is not None:
+                table.FeatureList.FeatureRecord.sort(key=lambda feature: feature.FeatureTag)
+        super()._postMerge(font)
 
     def close_inputs(self):
         for font in self._opened_inputs:
@@ -401,18 +595,56 @@ class _SupplementMerger(Merger):
         self._opened_inputs.clear()
 
 
+def _prepared_source_key(source, index, donor, stock, replace, upem, use_cff):
+    digest = hashlib.sha256()
+    with source.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(block)
+    vertical = None
+    if 'vhea' in stock and 'vmtx' in stock:
+        if 'vhea' in donor and 'vmtx' in donor:
+            vertical = 'source-vertical'
+        else:
+            # Horizontal-only sources inherit these exact target metrics. They
+            # cannot reuse a donor prepared for a different vertical contract.
+            vertical = hashlib.sha256(stock.getTableData('vhea') + stock.getTableData('vmtx')).digest()
+    return (digest.digest(), index, frozenset(replace), upem, use_cff, vertical)
+
+
+def _cache_prepared_source(cache, key, font, converted):
+    if cache is None:
+        return
+    stream = BytesIO()
+    font.save(stream, reorderTables=False)
+    data = stream.getvalue()
+    limit = 64 * 1024 * 1024
+    if len(data) > limit:
+        return
+    entries = cache.setdefault('entries', {})
+    total = sum(len(entry[0]) for entry in entries.values())
+    while entries and total + len(data) > limit:
+        oldest = next(iter(entries))
+        total -= len(entries.pop(oldest)[0])
+    entries[key] = (data, converted)
+
+
 def supplement(source: Path, stock: Path, output: Path, *, source_face_index: int = -1,
                stock_face_index: int = -1,
                replace_codepoints: set[int] | None = None,
-               stock_weight: int | None = None) -> dict:
+               stock_weight: int | None = None,
+               prepared_cache: dict | None = None) -> dict:
     source, stock, output = Path(source), Path(stock), Path(output)
     if output.resolve() in {source.resolve(), stock.resolve()}:
         raise SupplementError('supplement output cannot overwrite either original font')
     output.parent.mkdir(parents=True, exist_ok=True)
-    with _open_static(source, source_face_index) as donor:
+    with ExitStack() as inputs:
+        donor = inputs.enter_context(_open_static(source, source_face_index, preserve_axes=True))
         source_weight = int(donor['OS/2'].usWeightClass)
         requested_stock_weight = source_weight if stock_weight is None else int(stock_weight)
         with _open_static(stock, stock_face_index, requested_stock_weight) as original:
+            variable_source = 'fvar' in donor
+            if variable_source:
+                _check_variable_source(donor, original)
             source_points = set(preferred_unicode_codepoints(donor))
             stock_points = unicode_codepoints(original)
             _consolidate_stock_cmap(original)
@@ -426,16 +658,28 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
             # Scale only the replacement font. Its inherited vertical metrics
             # below are already in stock units and must not be scaled twice.
             upem = int(original['head'].unitsPerEm)
+            source_outline = _outline(donor)
+            use_cff = source_outline != 'TTF' or _outline(original) != 'TTF'
+            cache_key = (_prepared_source_key(source, source_face_index, donor, original, replace, upem, use_cff)
+                         if prepared_cache is not None else None)
+            cached = prepared_cache.get('entries', {}).get(cache_key) if prepared_cache is not None else None
             # A user-supplied CJK subset often already contains precisely the
             # requested repertoire. Re-closing its 50k glyph GSUB graph needlessly
             # costs tens of seconds. Its full graph is already valid as-is.
-            donor_subset_skipped = (source_points == replace == unicode_codepoints(donor)
-                                    and all(cp in replace for _selector, cp in _uvs_pairs(donor)))
-            if not donor_subset_skipped:
-                _subset(donor, replace)
-            if int(donor['head'].unitsPerEm) != upem:
-                scale_upem(donor, upem)
-            _match_vertical_contract(donor, original)
+            donor_subset_skipped = len(unicode_codepoints(donor) - replace) <= len(source_points) // 20
+            if cached is not None:
+                stream = BytesIO(cached[0])
+                stream.name = '<luoshu-prepared-source>'
+                donor = inputs.enter_context(TTFont(stream, lazy=True,
+                                                   recalcBBoxes=False, recalcTimestamp=False))
+            else:
+                if donor_subset_skipped:
+                    _limit_source_cmap(donor, replace)
+                else:
+                    _subset(donor, replace)
+                if int(donor['head'].unitsPerEm) != upem:
+                    scale_upem(donor, upem)
+                _match_vertical_contract(donor, original)
             stock_variants = _uvs_pairs(original)
             retained_variant_bases = _stock_variants(original, replace, _uvs_pairs(donor))
             _subset(original, retain | retained_variant_bases, preserve_base=True)
@@ -446,12 +690,12 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                 # Unencoded unused source glyphs might otherwise consume the
                 # remaining IDs; take the normal closure before refusing it.
                 _subset(donor, replace)
-            source_outline, stock_outline = _outline(donor), _outline(original)
             converted_source = converted_stock = 0
-            use_cff = source_outline != 'TTF' or stock_outline != 'TTF'
             if use_cff:
                 converted_stock = _mergeable_cff(original)
-                converted_source = _mergeable_cff(donor)
+                converted_source = cached[1] if cached is not None else _mergeable_cff(donor)
+            if cached is None and prepared_cache is not None:
+                _cache_prepared_source(prepared_cache, cache_key, donor, converted_source)
             if len(donor.getGlyphOrder()) + len(original.getGlyphOrder()) > 65535:
                 raise UnsupportedSupplementError('preserving both layout closures exceeds the OpenType glyph limit')
             options = MergeOptions()
@@ -459,6 +703,8 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
             # references from the merger's actual serialized glyph-ID mapping.
             stock_count, source_count = len(original.getGlyphOrder()), len(donor.getGlyphOrder())
             options.drop_tables = ['DSIG', 'FFTM', 'STAT', 'MATH', 'BASE', 'kern', 'VORG']
+            if variable_source:
+                options.drop_tables.extend(_VARIATION_TABLES)
             if use_cff:
                 options.drop_tables.append('CFF ')
             with tempfile.TemporaryDirectory(prefix='.font-supplement-', dir=output.parent) as directory:
@@ -466,20 +712,31 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                 stock_file, source_file = directory / 'stock.otf', directory / 'source.otf'
                 original.save(stock_file, reorderTables=False)
                 donor.save(source_file, reorderTables=False)
-                merger = _SupplementMerger(options)
+                merger = _SupplementMerger(options, variable_source=variable_source)
                 merged = None
                 try:
-                    merged = merger.merge([stock_file, source_file])
+                    files = [source_file, stock_file] if variable_source else [stock_file, source_file]
+                    expected_counts = [source_count, stock_count] if variable_source else [stock_count, source_count]
+                    merged = merger.merge(files)
                     order = merged.getGlyphOrder()
-                    if ([len(names) for names in merger.input_orders] != [stock_count, source_count]
+                    if ([len(names) for names in merger.input_orders] != expected_counts
                             or order != [name for names in merger.input_orders for name in names]):
                         raise SupplementError('merger changed the serialized glyph IDs')
                     for tag, table in merger.retained_tables.items():
                         merged[tag] = table
+                    if variable_source:
+                        _restore_variations(merged, merger.variation_tables, *merger.input_orders)
                     if use_cff:
+                        cache_vertical = 'VORG' not in donor
                         vorg = _merged_vorg([original, donor], order)
                         if vorg is not None:
                             merged['VORG'] = vorg
+                        if cache_vertical and 'VORG' in donor and prepared_cache is not None:
+                            # This is still the independent source font; after
+                            # CFF pool merging its programs may be rebased.
+                            # Cache exact measured origins so other stock
+                            # contracts do not redraw the same 50k outlines.
+                            _cache_prepared_source(prepared_cache, cache_key, donor, converted_source)
                         merged['CFF '] = _merged_cff_table([original, donor])
                         merged['post'].formatType = 3.0
                     source_kern = merger.source_kern
@@ -513,14 +770,17 @@ def supplement(source: Path, stock: Path, output: Path, *, source_face_index: in
                         checked[tag]
                     actual_format = 'TTF' if 'glyf' in checked else 'OTF'
                     glyph_count = len(checked.getGlyphOrder())
+                    preserved_axes = ([axis.axisTag for axis in checked['fvar'].axes]
+                                      if variable_source else [])
                 os.replace(temporary, output)
             return {'replacedCodepoints': len(replace), 'retainedStockCodepoints': len(retain),
                     'coveredCodepoints': len(stock_points), 'sourceCodepoints': sorted(replace),
                     'actualFormat': actual_format, 'glyphCount': glyph_count,
                     'convertedSourceGlyphs': converted_source,
                     'convertedStockGlyphs': converted_stock, 'unitsPerEm': upem,
+                    'preparedSourceCacheHit': cached is not None,
                     'sourceWeight': source_weight, 'retainsStockLayout': True,
                     'stockWeight': requested_stock_weight,
-                    'preservedAxes': [],
+                    'preservedAxes': preserved_axes,
                     'stockInstanceAxes': getattr(original, '_luoshu_stock_instance_axes', {}),
                     'retainedStockUvsRecords': len(stock_variants)}

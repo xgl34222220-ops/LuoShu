@@ -6,6 +6,7 @@ from ctypes.util import find_library
 import tempfile
 import sys
 import unittest
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'common'))
@@ -13,15 +14,20 @@ from fontTools.fontBuilder import FontBuilder
 from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.pens.t2CharStringPen import T2CharStringPen
-from fontTools.pens.recordingPen import DecomposingRecordingPen
+from fontTools.pens.recordingPen import DecomposingRecordingPen, RecordingPen
 from fontTools.ttLib import TTFont, TTCollection, newTable
 from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
 from fontTools.ttLib.tables._k_e_r_n import KernTable_format_0
+from fontTools.ttLib.tables import otTables
+from fontTools.ttLib.tables.TupleVariation import TupleVariation
+from fontTools.varLib.builder import buildVarRegionList, buildVarData, buildVarStore
+from fontTools.varLib.instancer import instantiateVariableFont
 from fontTools.otlLib.builder import buildMathTable
 from fontTools.cffLib.CFFToCFF2 import convertCFFToCFF2
 from fontTools.cffLib import SubrsIndex
 from fontTools.misc.psCharStrings import T2CharString
-from inventory_font_supplement import supplement, SupplementError, UnsupportedSupplementError, _merged_cff_table
+from inventory_font_supplement import supplement, SupplementError, UnsupportedSupplementError, _merged_cff_table, _cff_global_layout, _subset
+from fontTools.misc.psCharStrings import calcSubrBias
 
 
 def fixture(path, *, source=False, cff=False, upem=1000, cff2=False):
@@ -169,6 +175,25 @@ class SupplementTest(unittest.TestCase):
         self.assertEqual(shape(self.stock, '\u0628\u0627\u064e'), shape(self.output, '\u0628\u0627\u064e'))
         self.assertLess(shape(self.stock, '\u0391\u0392')[0][1], 600)
         self.assertLess(len(shape(self.stock, '\u0628\u0627')), 2)
+
+    def test_required_layout_features_from_both_fonts_remain_required(self):
+        fixture(self.source, source=True); fixture(self.stock)
+        for path, expression in ((self.source, 'sub A by B;'), (self.stock, 'sub alpha by beta;')):
+            with TTFont(path) as font:
+                addOpenTypeFeaturesFromString(font, 'languagesystem DFLT dflt; languagesystem grek dflt; '
+                                              'feature rlig {' + expression + '} rlig;')
+                table = font['GSUB'].table
+                for record in table.ScriptList.ScriptRecord:
+                    system = record.Script.DefaultLangSys
+                    system.ReqFeatureIndex = system.FeatureIndex[0]
+                    system.FeatureIndex = []; system.FeatureCount = 0
+                font.save(path)
+        supplement(self.source, self.stock, self.output)
+        self.assertEqual(shape(self.source, 'AB0'), shape(self.output, 'AB0'))
+        self.assertEqual(shape(self.stock, 'ΑΒ'), shape(self.output, 'ΑΒ'))
+        with TTFont(self.output) as font:
+            for record in font['GSUB'].table.ScriptList.ScriptRecord:
+                self.assertNotEqual(record.Script.DefaultLangSys.ReqFeatureIndex, 0xFFFF)
 
     def test_post3_serialization_preserves_retained_components_and_shaping(self):
         # No glyph names are persisted. Removing the replaced Latin cmap entry
@@ -331,6 +356,34 @@ HorizAxis.BaseScriptList latn romn 0;
         supplement(self.source, self.stock, self.output)
         self.assertEqual(before, (self.source.read_bytes(), self.stock.read_bytes()))
 
+    def test_prepared_source_cache_reuses_conversion_without_reusing_stock_layout(self):
+        fixture(self.source, source=True); fixture(self.stock, cff=True)
+        cache = {}
+        first = supplement(self.source, self.stock, self.output, prepared_cache=cache)
+        expected = shape(self.output, 'AB0ΑΒ')
+        self.assertFalse(first['preparedSourceCacheHit'])
+        self.assertGreater(first['convertedSourceGlyphs'], 0)
+        second = supplement(self.source, self.stock, self.output, prepared_cache=cache)
+        self.assertTrue(second['preparedSourceCacheHit'])
+        self.assertEqual(first['convertedSourceGlyphs'], second['convertedSourceGlyphs'])
+        self.assertEqual(expected, shape(self.output, 'AB0ΑΒ'))
+        self.assertEqual(shape(self.stock, 'باَ'), shape(self.output, 'باَ'))
+        # Same path, new font contents: a path-only key would use stale glyphs.
+        fixture(self.source, source=True, upem=2000)
+        third = supplement(self.source, self.stock, self.output, prepared_cache=cache)
+        self.assertFalse(third['preparedSourceCacheHit'])
+        self.assertNotEqual(expected, shape(self.output, 'AB0ΑΒ'))
+
+    def test_prepared_source_cache_cannot_cross_requested_repertoires(self):
+        fixture(self.source, source=True); fixture(self.stock, cff=True)
+        cache = {}
+        supplement(self.source, self.stock, self.output, prepared_cache=cache, replace_codepoints={65})
+        report = supplement(self.source, self.stock, self.output, prepared_cache=cache, replace_codepoints={66})
+        self.assertFalse(report['preparedSourceCacheHit'])
+        with TTFont(self.stock) as stock, TTFont(self.source) as source, TTFont(self.output) as result:
+            self.assertEqual(outline(stock, stock.getBestCmap()[65]), outline(result, result.getBestCmap()[65]))
+            self.assertEqual(outline(source, source.getBestCmap()[66]), outline(result, result.getBestCmap()[66]))
+
     def test_exact_collection_face_is_used(self):
         fixture(self.source, source=True); fixture(self.stock)
         alternate = self.root / 'other.ttf'
@@ -380,16 +433,68 @@ HorizAxis.BaseScriptList latn romn 0;
             self.assertEqual(outline(stock, 'A'), outline(result, variant))
             self.assertNotEqual(outline(result, variant), outline(result, result.getBestCmap()[65]))
 
-    def test_variable_source_is_rejected_instead_of_silently_pinning_default_weight(self):
+    def test_variable_source_retains_real_gvar_hvar_and_avar_across_weights(self):
         fixture(self.source, source=True); fixture(self.stock)
+        for path in (self.source, self.stock):
+            with TTFont(path) as font:
+                builder = FontBuilder(font=font)
+                builder.setupVerticalMetrics({name: (1000, 80) for name in font.getGlyphOrder()})
+                builder.setupVerticalHeader(ascent=900, descent=-250)
+                font.save(path)
         with TTFont(self.source) as font:
             builder = FontBuilder(font=font)
             builder.setupFvar([('wght', 100, 400, 900, 'Weight')], [])
-            builder.setupGvar({name: [] for name in font.getGlyphOrder()})
+            supports = [{'wght': (-1, -1, 0)}, {'wght': (0, 1, 1)}]
+            variations = {}
+            for name in font.getGlyphOrder():
+                count = len(font['glyf'][name].getCoordinates(font['glyf'])[0])
+                variations[name] = [TupleVariation(support, [(index * x, x) for index in range(count)] +
+                                                   [(0, 0), (advance, 0), (0, 0), (0, -advance // 2)])
+                                    for support, x, advance in zip(supports, (-20, 80), (-60, 120))]
+            builder.setupGvar(variations)
+            font['avar'] = newTable('avar')
+            font['avar'].segments = {'wght': {-1: -1, 0: 0, 0.6: 0.8, 1: 1}}
+            hvar = newTable('HVAR'); hvar.table = otTables.HVAR()
+            hvar.table.Version = 0x10000
+            hvar.table.VarStore = buildVarStore(buildVarRegionList(supports, ['wght']),
+                                               [buildVarData([0, 1], [[-60, 120] for _ in font.getGlyphOrder()])])
+            hvar.table.AdvWidthMap = hvar.table.LsbMap = hvar.table.RsbMap = None
+            font['HVAR'] = hvar
+            vvar = newTable('VVAR'); vvar.table = otTables.VVAR()
+            vvar.table.Version = 0x10000
+            vvar.table.VarStore = buildVarStore(buildVarRegionList(supports, ['wght']),
+                                               [buildVarData([0, 1], [[-30, 60] for _ in font.getGlyphOrder()])])
+            vvar.table.AdvHeightMap = vvar.table.TsbMap = vvar.table.BsbMap = vvar.table.VOrgMap = None
+            font['VVAR'] = vvar
+            font['post'].formatType = 3
             font.save(self.source)
-        with self.assertRaisesRegex(UnsupportedSupplementError, 'lose its axes'):
-            supplement(self.source, self.stock, self.output)
-        self.assertFalse(self.output.exists())
+        cache = {}
+        for cached in (False, True):
+            report = supplement(self.source, self.stock, self.output, prepared_cache=cache)
+            self.assertEqual(report['preservedAxes'], ['wght'])
+            self.assertEqual(report['preparedSourceCacheHit'], cached)
+            widths = []
+            for weight in (100, 400, 700, 900):
+                with TTFont(self.source) as source, TTFont(self.stock) as stock, TTFont(self.output) as result:
+                    self.assertEqual(source['avar'].segments, result['avar'].segments)
+                    source = instantiateVariableFont(source, {'wght': weight}, inplace=True)
+                    result = instantiateVariableFont(result, {'wght': weight}, inplace=True)
+                    for cp in (65, 66, 48):
+                        expected, actual = source.getBestCmap()[cp], result.getBestCmap()[cp]
+                        self.assertEqual(outline(source, expected), outline(result, actual))
+                        self.assertEqual(source['hmtx'][expected], result['hmtx'][actual])
+                        self.assertEqual(source['vmtx'][expected], result['vmtx'][actual])
+                    widths.append(result['hmtx'][result.getBestCmap()[65]][0])
+                    for cp in (0x391, 0x392, 0x410, 0x627, 0x628):
+                        expected, actual = stock.getBestCmap()[cp], result.getBestCmap()[cp]
+                        self.assertEqual(outline(stock, expected), outline(result, actual))
+                        self.assertEqual(stock['hmtx'][expected], result['hmtx'][actual])
+                        self.assertEqual(stock['vmtx'][expected], result['vmtx'][actual])
+                    instance = self.root / f'instance-{weight}.ttf'
+                    result.save(instance)
+                    self.assertEqual(shape(self.stock, 'باَ'), shape(instance, 'باَ'))
+                    self.assertEqual(shape(self.stock, 'ΑΒ'), shape(instance, 'ΑΒ'))
+            self.assertEqual(len(set(widths)), 4)
 
     def test_cid_cff_local_and_global_subroutines_keep_independent_programs(self):
         fixture(self.source, source=True, cff=True); fixture(self.stock, cff=True)
@@ -420,6 +525,75 @@ HorizAxis.BaseScriptList latn romn 0;
             self.assertEqual(outline(stock, stock.getBestCmap()[0x391]), outline(result, result.getBestCmap()[0x391]))
             self.assertEqual(len(result['CFF '].cff[0].FDArray), 2)
         self.assertEqual(shape(self.stock, 'ΑΒ'), shape(self.output, 'ΑΒ'))
+
+    def test_cff_bias_boundaries_keep_largest_program_bytes_and_both_shapes(self):
+        # A realistic CJK subset can cross either Type2 bias boundary. Global
+        # pool order may change; stock-first glyph IDs and both outlines cannot.
+        for stock_count, source_count in ((1239, 1), (33899, 1), (1, 1240), (0, 2), (1, 1)):
+            with self.subTest(stock_count=stock_count, source_count=source_count):
+                fixture(self.stock, cff=True); fixture(self.source, source=True, cff=True)
+                fonts = [TTFont(self.stock), TTFont(self.source)]
+                try:
+                    expected, original_bytes = [], []
+                    for font, count, x in zip(fonts, (stock_count, source_count), (35, 170)):
+                        cff = font['CFF '].cff
+                        top, global_subrs = cff[0], cff.GlobalSubrs
+                        private = top.Private
+                        global_subrs.items = [T2CharString(bytecode=b'\x0b', private=private,
+                                                         globalSubrs=global_subrs) for _ in range(count)]
+                        path = [x, 70, 'rmoveto', 100, 0, 0, 220, -100, -220, 'rlineto']
+                        if count:
+                            global_subrs.items[0] = T2CharString(program=[*path, 'return'],
+                                                                private=private, globalSubrs=global_subrs)
+                            program = [600, -calcSubrBias(global_subrs), 'callgsubr', 'endchar']
+                        else:
+                            program = [600, *path, 'endchar']
+                        char = T2CharString(program=program, private=private, globalSubrs=global_subrs)
+                        pen = RecordingPen(); char.draw(pen); expected.append(pen.value)
+                        char.compile(); original_bytes.append(char.bytecode)
+                        # Reload raw bytes: preserving names alone cannot prove
+                        # that the expensive large program was left untouched.
+                        top.CharStrings['A'] = T2CharString(bytecode=char.bytecode, private=private,
+                                                           globalSubrs=global_subrs)
+                    stock_size = len(fonts[0].getGlyphOrder())
+                    glyph_ids = [fonts[0].getGlyphID('A'), stock_size + fonts[1].getGlyphID('A')]
+                    offsets, count = _cff_global_layout(fonts)
+                    unchanged = calcSubrBias(range(stock_count)) + offsets[0] == calcSubrBias(range(count))
+                    self.assertEqual(unchanged, stock_count != 33899)
+                    raw = _merged_cff_table(fonts)
+                    with TTFont(recalcBBoxes=False) as container:
+                        table = newTable('CFF '); table.decompile(raw.data, container)
+                        top = table.cff[0]
+                        for i, gid in enumerate(glyph_ids):
+                            char = top.CharStrings[top.charset[gid]]
+                            if i == 0 and unchanged:
+                                self.assertEqual(char.bytecode, original_bytes[0])
+                            pen = RecordingPen(); char.draw(pen)
+                            self.assertEqual(pen.value, expected[i])
+                finally:
+                    for font in fonts:
+                        font.close()
+
+    def test_cid_subset_keeps_raw_programs_without_executing_type2_interpreter(self):
+        fixture(self.stock, cff=True)
+        with TTFont(self.stock) as font:
+            cff = font['CFF '].cff
+            cff.GlobalSubrs.append(T2CharString(bytecode=b'\x0b', globalSubrs=cff.GlobalSubrs))
+            font['CFF '] = _merged_cff_table([font])
+            font['post'].formatType = 3
+            font.recalcBBoxes = False
+            font.save(self.stock)
+        requested = {65, 48, 0x391}
+        with TTFont(self.stock, lazy=True, recalcBBoxes=False) as font:
+            before = {cp: font['CFF '].cff[0].CharStrings[font.getBestCmap()[cp]].bytecode for cp in requested}
+            with patch.object(T2CharString, 'decompile', side_effect=AssertionError('unexpected Type2 decoding')):
+                _subset(font, requested)
+                font.save(self.output, reorderTables=False)
+        with TTFont(self.output) as result:
+            self.assertEqual(set(result.getBestCmap()), requested)
+            self.assertEqual(len(result['CFF '].cff.GlobalSubrs), 1)
+            for cp in requested:
+                self.assertEqual(result['CFF '].cff[0].CharStrings[result.getBestCmap()[cp]].bytecode, before[cp])
 
     def test_stock_baseline_table_keeps_original_glyph_point_reference(self):
         fixture(self.source, source=True); fixture(self.stock)
