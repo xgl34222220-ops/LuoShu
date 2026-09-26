@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import fontTools
 from fontTools.ttLib import TTCollection, TTFont
@@ -179,15 +180,17 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
 
     def assert_mapping(self):
         f = self.f
-        for logical in (REGULAR, BOLD, COLLECTION, DIGITS, NESTED, UNKNOWN):
+        for logical in (REGULAR, BOLD, COLLECTION, DIGITS, NESTED, UNKNOWN, SCRIPT):
             self.assertTrue(f.path(logical).is_file(), logical)
-        for logical in (HEAVY, SCRIPT, PARTIAL):
+        for logical in (HEAVY, PARTIAL):
             self.assertFalse(f.path(logical).exists(), logical)
         report = f.report()
         protected = report.get("preservedFonts", report.get("preserved", {}))
         self.assertEqual(protected[HEAVY], "source-weight-missing")
-        self.assertEqual(protected[SCRIPT], "source-script-coverage-missing")
+        self.assertNotIn(SCRIPT, protected)
         self.assertIn("source-weight-missing", protected[PARTIAL])
+        with TTFont(f.path(SCRIPT)) as font:
+            self.assertTrue(ARABIC.issubset(font.getBestCmap()))
         with TTFont(f.path(BOLD)) as font:
             self.assertEqual(font["OS/2"].usWeightClass, 700)
             self.assertEqual(font["hmtx"].metrics["zero"][0], 920)
@@ -219,22 +222,22 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
         self.assertEqual(report.get("preservedFonts", report.get("preserved", {}))[BOLD],
                          "source-weight-missing")
 
-    def test_plan_rebuilds_requested_slot_and_fills_clean_stage(self):
+    def test_plan_cannot_turn_unproven_stage_into_full_rebuild(self):
         self.f.path(REGULAR).parent.mkdir(parents=True, exist_ok=True)
         self.f.path(REGULAR).write_bytes(b"stale staged data")
-        summary = self.assert_success(self.f.invoke(plan=[REGULAR, NESTED]))
-        self.assertEqual((summary["requested"], summary["matched"]), (2, 2))
-        self.assertEqual((summary["planned"], summary["rewritten"], summary["added"]), (6, 1, 5))
-        self.assertEqual((summary["preserved"], summary["fallback"], summary["failed"]), (3, 0, 0))
-        self.assert_mapping()
+        result = self.f.invoke(plan=[REGULAR, NESTED], source=False)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.f.path(REGULAR).read_bytes(), b"stale staged data")
+        self.assertFalse(self.f.path(NESTED).exists())
+        self.assertEqual(self.f.snapshot_live(), self.before_live)
 
     def test_plan_reuses_other_completed_files_without_regenerating_them(self):
         self.assert_success(self.f.invoke())
         other = self.f.path(NESTED)
         before = (other.stat().st_ino, other.stat().st_mtime_ns, other.read_bytes())
-        summary = self.assert_success(self.f.invoke(plan=[REGULAR, SCRIPT], source=False))
-        self.assertEqual((summary["requested"], summary["matched"]), (2, 2))
-        self.assertEqual((summary["planned"], summary["rewritten"], summary["existing"]), (1, 1, 5))
+        summary = self.assert_success(self.f.invoke(plan=[REGULAR], source=False))
+        self.assertEqual((summary["requested"], summary["matched"]), (1, 1))
+        self.assertEqual((summary["planned"], summary["rewritten"], summary["existing"]), (1, 1, 6))
         self.assertEqual((other.stat().st_ino, other.stat().st_mtime_ns, other.read_bytes()), before)
         self.assert_mapping()
 
@@ -244,16 +247,9 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
         corrupt.unlink()
         corrupt.write_bytes(b"interrupted or damaged font output")
         result = self.f.invoke(plan=[REGULAR], source=False)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(self.f.snapshot_live(), self.before_live)
-        if result.returncode == 0:
-            # Either rebuild the untrusted output or abort the isolated stage.
-            # Merely finding its pathname is not proof that coverage exists.
-            try:
-                with TTFont(corrupt) as font:
-                    self.assertEqual(font["OS/2"].usWeightClass, 400)
-                    self.assertEqual(font["hhea"].ascent, 980)
-            except Exception as error:
-                self.fail(f"plan reported success with a corrupt unrequested font: {error}")
+        self.assertEqual(corrupt.read_bytes(), b"interrupted or damaged font output")
 
     def test_cache_roundtrip_retains_proof_for_incremental_repair(self):
         from font_stage_chain_test import functions
@@ -281,7 +277,7 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue((self.f.stage / ".luoshu-inventory-output-manifest.json").is_file())
         summary = self.assert_success(self.f.invoke(plan=[REGULAR], source=False))
-        self.assertEqual((summary["planned"], summary["existing"], summary["rewritten"]), (1, 5, 1))
+        self.assertEqual((summary["planned"], summary["existing"], summary["rewritten"]), (1, 6, 1))
         self.assert_mapping()
 
     def test_stale_or_traversing_plan_cannot_invent_targets(self):
@@ -330,7 +326,7 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
             self.assertEqual(output["hmtx"].metrics["zero"][0], 660,
                              "the selected usable face must take priority over a sibling variant")
 
-    def test_multiscript_slot_stays_detected_until_source_supports_all_scripts(self):
+    def test_multiscript_slot_changes_latin_while_retaining_other_scripts(self):
         greek = set(range(0x391, 0x3aa)) - {0x3a2}
         cyrillic = set(range(0x410, 0x430))
         han = set(range(0x4e00, 0x5000))
@@ -342,27 +338,117 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
         self.assertEqual(set(scripts), {"Latn", "Grek", "Cyrl"})
         before = self.assert_success(self.f.invoke())
         self.assertEqual(before["inventorySlots"], 9)
-        self.assertEqual((before["mapped"], before["preserved"]), (5, 4))
-        self.assertFalse(self.f.path(REGULAR).exists())
-        self.assertEqual(self.f.report()["preservedFonts"][REGULAR],
-                         "source-script-coverage-missing")
+        self.assertEqual((before["mapped"], before["preserved"]), (7, 2))
+        self.assertTrue(self.f.path(REGULAR).is_file())
+        self.assertNotIn(REGULAR, self.f.report()["preservedFonts"])
         status = trace.build_physical_trace(self.f.inventory, self.f.stage, prepared=True)
         slot = next(item for item in status["slots"] if item["path"] == REGULAR)
-        self.assertEqual(slot["category"], "protected")
+        self.assertEqual(slot["category"], "pending")
         self.assertFalse(slot["safeToRetry"])
-        # No scanner change is needed when the same family gains a real face
-        # with the required scripts. Its glyphs must actually be present.
+        # An unrelated-script sibling must not replace the selected Latin face;
+        # non-target scripts continue to use their original stock glyphs.
         text_font(self.f.library / "multilingual-regular.ttf",
                   points=LATIN | greek | cyrillic | han, advance=880)
         after = self.assert_success(self.f.invoke())
         self.assertEqual(after["inventorySlots"], before["inventorySlots"])
-        self.assertEqual((after["mapped"], after["preserved"]), (6, 3))
+        self.assertEqual((after["mapped"], after["preserved"]), (7, 2))
         self.assertNotIn(REGULAR, self.f.report()["preservedFonts"])
         with TTFont(self.f.path(REGULAR)) as font:
             self.assertTrue((LATIN | greek | cyrillic).issubset(font.getBestCmap()))
-            self.assertEqual(font["hmtx"].metrics["zero"][0], 880)
+            self.assertEqual(font["hmtx"].metrics[font.getBestCmap()[65]][0], 660)
         with TTFont(self.f.path(NESTED)) as font:
             self.assertEqual(font["hmtx"].metrics["zero"][0], 660)
+
+    def test_real_targeted_replacement_keeps_greek_arabic_hiragana_layout(self):
+        from inventory_font_supplement_test import fixture, outline, shape
+        stock_path = self.f.stock / REGULAR.lstrip("/")
+        fixture(stock_path)
+        fixture(self.f.source, source=True)
+        han = set(range(0x4e00, 0x5000))
+        for path, source in ((stock_path, False), (self.f.source, True)):
+            with TTFont(path) as font:
+                for table in font["cmap"].tables:
+                    if table.isUnicode() and table.format != 14:
+                        for cp in LATIN | han:
+                            table.cmap.setdefault(cp, "A" if source else "B")
+                        if not source:
+                            table.cmap[0x3042] = "cyrillic"
+                font.save(path)
+        self.f.scan()
+        originals = {path: path.read_bytes() for path in (stock_path, self.f.source)}
+        expected_shapes = {text: shape(stock_path, text) for text in ("ΑΒ", "بَا", "あ")}
+        self.assert_success(self.f.invoke())
+        output_path = self.f.path(REGULAR)
+        with TTFont(stock_path) as stock, TTFont(self.f.source) as donor, TTFont(output_path) as output:
+            self.assertTrue(set(stock.getBestCmap()).issubset(output.getBestCmap()))
+            for cp in (65, 48, 0x4e00):
+                self.assertEqual(outline(output, output.getBestCmap()[cp]),
+                                 outline(donor, donor.getBestCmap()[cp]))
+                self.assertNotEqual(outline(output, output.getBestCmap()[cp]),
+                                    outline(stock, stock.getBestCmap()[cp]))
+            for cp in (0x391, 0x392, 0x410, 0x627, 0x628, 0x64e, 0x3042):
+                self.assertEqual(outline(output, output.getBestCmap()[cp]),
+                                 outline(stock, stock.getBestCmap()[cp]))
+        for text, expected in expected_shapes.items():
+            self.assertEqual(shape(output_path, text), expected, text)
+        row = next(row for row in self.f.report()["slots"] if row["slot"] == REGULAR)
+        self.assertEqual(set(row["replacedRoles"]), {"cjk", "latin", "digit"})
+        self.assertTrue(row["supplemented"])
+        self.assertGreaterEqual(row["retainedStockCodepoints"], 7)
+        for path, original in originals.items():
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_digit_changes_cannot_report_success_when_main_text_did_not_change(self):
+        etc = self.f.stock / "system/etc"
+        etc.mkdir(parents=True, exist_ok=True)
+        (etc / "fonts.xml").write_text('<familyset><family name="sans-serif">'
+            '<font weight="400">Unknown-Regular.ttf</font></family></familyset>')
+        self.f.scan()
+        self.assertEqual(self.f.inventory["mainSlotPath"], REGULAR)
+        text_font(self.f.source, points=set(range(48, 58)))
+        result = self.f.invoke()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("主要中文或英文字体尚未替换", result.stderr)
+        self.assertFalse(self.f.path(DIGITS).exists())
+        self.assertFalse(self.f.path(REGULAR).exists())
+        self.assertEqual(self.f.snapshot_live(), self.before_live)
+
+    def test_full_base_character_coverage_keeps_original_unicode_variants(self):
+        from fontTools.ttLib.tables._c_m_a_p import CmapSubtable
+        from inventory_font_supplement_test import fixture, outline, shape
+        stock_path = self.f.stock / REGULAR.lstrip("/")
+        fixture(stock_path)
+        fixture(self.f.source, source=True)
+        for path in (stock_path, self.f.source):
+            with TTFont(path) as font:
+                for table in font["cmap"].tables:
+                    if table.isUnicode() and table.format != 14:
+                        table.cmap = {cp: table.cmap.get(cp, "A") for cp in LATIN}
+                if path == stock_path:
+                    uvs = CmapSubtable.newSubtable(14)
+                    uvs.platformID, uvs.platEncID, uvs.language = 0, 5, 0
+                    uvs.cmap = {}
+                    uvs.uvsDict = {0xFE00: [(65, None)], 0xFE01: [(66, "B")]}
+                    font["cmap"].tables.append(uvs)
+                font.save(path)
+        self.f.scan()
+        expected = {text: shape(stock_path, text) for text in ("A\ufe00", "B\ufe01")}
+        self.assert_success(self.f.invoke())
+        output_path = self.f.path(REGULAR)
+        with TTFont(stock_path) as stock, TTFont(self.f.source) as donor, TTFont(output_path) as output:
+            self.assertEqual(set(stock.getBestCmap()), set(donor.getBestCmap()))
+            self.assertEqual(outline(output, output.getBestCmap()[65]), outline(donor, "A"))
+            self.assertNotEqual(outline(output, output.getBestCmap()[65]), outline(stock, "A"))
+            variants = next(table for table in output["cmap"].tables if table.format == 14).uvsDict
+            for selector, cp, name in ((0xFE00, 65, "A"), (0xFE01, 66, "B")):
+                variant = dict(variants[selector])[cp]
+                self.assertIsNotNone(variant)
+                self.assertEqual(outline(output, variant), outline(stock, name))
+        for text, original in expected.items():
+            self.assertEqual(shape(output_path, text), original, text)
+        row = next(row for row in self.f.report()["slots"] if row["slot"] == REGULAR)
+        self.assertTrue(row["supplemented"])
+        self.assertEqual(row["retainedStockCodepoints"], 0)
 
     def test_cff2_source_keeps_outline_bytes_and_stock_layout(self):
         from fontTools.cffLib.CFFToCFF2 import convertCFFToCFF2
@@ -442,13 +528,25 @@ class CoverageInventoryIntegrationTest(unittest.TestCase):
 
     def test_trace_explains_unsupported_fonts_without_offering_futile_repair(self):
         self.assert_success(self.f.invoke())
-        result = trace.build_physical_trace(self.f.inventory, self.f.stage, prepared=False)
+        import physical_font_load_verify as physical_verify
+        with patch.dict(os.environ, {"LUOSHU_VISIBLE_ROOT": str(self.f.stage),
+                                     "LUOSHU_TEST_BOOT_ID": "coverage-integration-boot"}):
+            proof = physical_verify.verify(self.f.module, self.f.stage, "selected")
+            self.assertEqual(proof["state"], "verified", proof)
+            physical_verify.save_result(self.f.module, proof, True)
+            result = trace.build_physical_trace(self.f.inventory, self.f.stage,
+                                                prepared=False, active_font="selected")
         slots = {item["path"]: item for item in result["slots"]}
-        for logical in (HEAVY, SCRIPT, PARTIAL):
-            self.assertEqual(slots[logical]["category"], "protected", slots[logical])
+        for logical in (HEAVY, PARTIAL):
+            self.assertEqual(slots[logical]["category"], "issue", slots[logical])
             self.assertFalse(slots[logical]["safeToRetry"])
-        self.assertEqual(result["summary"]["issues"], 0)
+            self.assertTrue(slots[logical]["sourceUnavailable"])
+        self.assertEqual(result["summary"]["issues"], 2)
+        self.assertEqual(result["summary"]["sourceUnavailable"], 2)
+        self.assertEqual(result["summary"]["remediable"], 0)
         self.assertEqual(result["summary"]["inventorySlots"], 9)
+        self.assertEqual(result["summary"]["replaced"], 7)
+        self.assertEqual(result["verificationState"], "partial")
 
 
 if __name__ == "__main__":

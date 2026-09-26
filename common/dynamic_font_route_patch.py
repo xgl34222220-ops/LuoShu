@@ -7,8 +7,14 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import shutil
 import stat
 import tempfile
+
+from fontTools.ttLib import TTFont, TTLibError
+from font_slot_coverage import preferred_unicode_codepoints, unicode_codepoints
+from inventory_stock_source import StockFont, file_digest, file_identity
 
 
 def clean_path(value: object) -> Path:
@@ -115,28 +121,104 @@ def patch(source: Path, target: Path, output: Path, *, stock_face: dict | None =
     return {'status': 'ok', 'outputBytes': output.stat().st_size, **report}
 
 
-def build_view(module: Path, alias: Path, target: Path, output: Path) -> dict:
-    from inventory_font_stage import SourcePool
-    authorized_target(module, alias, target)
-    original_stamp = target.stat()
-    observed = f'{original_stamp.st_dev}:{original_stamp.st_ino}:{original_stamp.st_size}'
-    key = hashlib.sha256(os.fsencode(alias)).hexdigest()[:24]
-    route_cache = module / 'config/dynamic-font-routes' / key
-    evidence = route_cache / 'stock-face.json'
+def _atomic_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix='.' + path.name + '-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'w') as stream:
+            json.dump(value, stream, ensure_ascii=False)
+        os.replace(name, path)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+def _target_is_owned(route_cache: Path, target: Path) -> bool:
+    observed = ':'.join(map(str, file_identity(target)[:3]))
     journal = route_cache / 'namespaces.conf'
-    owned = False
     if journal.is_file():
-        owned = any(len(row) == 4 and row[1] == observed and row[3] == str(target)
-                    for row in (line.split('|') for line in journal.read_text().splitlines()))
+        if any(len(row) == 4 and row[1] == observed and row[3] == str(target)
+               for row in (line.split('|') for line in journal.read_text().splitlines())):
+            return True
+    # A failed/lost journal must not turn one of our cached views into stock.
+    for clone in route_cache.glob('*.ttf'):
+        if clone.is_file() and ':'.join(map(str, file_identity(clone)[:3])) == observed:
+            return True
+    # A file mount without ownership evidence cannot certify original bytes.
+    # This also covers a lost journal whose unlinked clone still has a bind.
+    mountinfo = Path(os.environ.get('LUOSHU_MOUNTINFO', '/proc/self/mountinfo'))
+    for line in mountinfo.read_text().splitlines():
+        fields = line.split()
+        if len(fields) > 5:
+            mountpoint = re.sub(r'\\([0-7]{3})', lambda match: chr(int(match[1], 8)), fields[4])
+            if mountpoint == str(target):
+                raise ValueError('dynamic font is mounted without verifiable original bytes')
+    return False
+
+
+def _stock_snapshot(route_cache: Path, target: Path, owned: bool) -> tuple[StockFont, dict]:
+    """Pin the actual unoverlaid dynamic target, never a generated consumer view.
+
+    Dynamic /data files are outside the read-only inventory resolver's domain.
+    Retain their original bytes before our first bind and use the same complete
+    file/cmap/identity proofs as StockSourceResolver on subsequent generations.
+    """
+    evidence = route_cache / 'stock-face.json'
     if owned:
-        # A shared namespace can expose our previous view here. Its cmap may
-        # contain extra scripts from the old source: that is not stock evidence.
         saved = json.loads(evidence.read_text())
-        if saved.get('target') != str(target) or not isinstance(saved.get('face'), dict):
-            raise RuntimeError('owned dynamic view has no matching stock contract')
+        digest = str(saved.get('sha256', '')) if isinstance(saved, dict) else ''
+        if (not isinstance(saved, dict) or saved.get('schema') != 'dynamic-font-stock-v1'
+                or saved.get('target') != str(target) or not isinstance(saved.get('face'), dict)
+                or not isinstance(saved['face'].get('metrics'), dict) or not re.fullmatch('[0-9a-f]{64}', digest)):
+            raise ValueError('owned dynamic view has no verified original font snapshot; preserving current route')
+        snapshot = route_cache / f'stock-{digest}.font'
+        stamp = file_identity(snapshot)
+        if snapshot.is_symlink() or not snapshot.is_file() or file_digest(snapshot) != digest:
+            raise ValueError('original dynamic font snapshot is missing or changed; preserving current route')
         face = saved['face']
     else:
-        face = target_face(target)
+        route_cache.mkdir(parents=True, exist_ok=True)
+        before = file_identity(target)
+        fd, name = tempfile.mkstemp(prefix='.stock-font-', dir=route_cache)
+        os.close(fd)
+        temporary = Path(name)
+        try:
+            shutil.copyfile(target, temporary)
+            if file_identity(target) != before:
+                raise ValueError('dynamic font changed while saving its original bytes')
+            face = target_face(temporary)
+            digest = file_digest(temporary)
+            snapshot = route_cache / f'stock-{digest}.font'
+            os.chmod(temporary, 0o400)
+            os.replace(temporary, snapshot)
+            stamp = file_identity(snapshot)
+            _atomic_json(evidence, {'schema': 'dynamic-font-stock-v1', 'target': str(target),
+                                   'sha256': digest, 'face': face})
+            for stale in route_cache.glob('stock-*.font'):
+                if stale != snapshot:
+                    stale.unlink(missing_ok=True)
+        finally:
+            temporary.unlink(missing_ok=True)
+    # Metrics-only legacy records cannot prove stock glyph bytes. Even a valid
+    # hash is checked against the saved metric contract before supplementation.
+    from inventory_stock_source import StockSourceResolver
+    StockSourceResolver._check_metrics(face['metrics'], target_face(snapshot)['metrics'])
+    with TTFont(snapshot, lazy=True, recalcTimestamp=False) as font:
+        points = frozenset(unicode_codepoints(font))
+        cmap_digest = hashlib.sha256(font.reader['cmap']).hexdigest()
+    stock = StockFont(snapshot, 0, digest, cmap_digest, points, 'dynamic-stock-snapshot', stamp)
+    stock.verify_unchanged()
+    return stock, face
+
+
+def _build_view(module: Path, alias: Path, target: Path, output: Path, route_cache: Path) -> dict:
+    from inventory_font_stage import SourcePool, replacement_points, replacement_counts
+    from inventory_font_supplement import supplement
+    from inventory_font_metrics import restrict_unicode_scope
+    authorized_target(module, alias, target)
+    if output.resolve() == target.resolve():
+        raise ValueError('refusing to replace original dynamic font')
+    original_stamp = file_identity(target)
+    stock, face = _stock_snapshot(route_cache, target, _target_is_owned(route_cache, target))
     live = module / '.luoshu-payload'
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.dynamic-source-', dir=output.parent) as directory:
@@ -145,24 +227,60 @@ def build_view(module: Path, alias: Path, target: Path, output: Path) -> dict:
         if source is None:
             raise ValueError(reason)
         try:
-            result = patch(pool.materialize(source, weight), target, output, stock_face=face)
+            points = replacement_points(source.points, stock.codepoints, face['_replacementRoles'])
+            if not points:
+                raise ValueError('selected source supplies no requested dynamic text glyphs')
+            anchor = pool.materialize(source, weight)
+            retained = stock.codepoints - points
+            def variants(path):
+                with TTFont(path, lazy=True, recalcTimestamp=False) as font:
+                    return {(selector, cp) for table in font['cmap'].tables if table.format == 14
+                            for selector, entries in table.uvsDict.items() for cp, _glyph in entries}
+            missing_variants = variants(stock.path) - variants(anchor)
+            needs_supplement = bool(retained or missing_variants)
+            detail = {'replacedCodepoints': len(points), 'retainedStockCodepoints': len(retained),
+                      'supplemented': needs_supplement, 'roles': replacement_counts(points)}
+            if needs_supplement:
+                supplemented = Path(directory) / 'supplemented.font'
+                detail.update(supplement(anchor, stock.path, supplemented,
+                                         stock_face_index=stock.face_index, stock_weight=weight,
+                                         replace_codepoints=set(points)))
+                anchor = supplemented
+            elif source.points - stock.codepoints:
+                # A larger donor must not steal scripts routed to other system
+                # fonts. Restrict cmap only; retain its original outline bytes.
+                anchor = restrict_unicode_scope(anchor, Path(directory) / 'scoped.font', stock.codepoints)
+            stock.verify_unchanged()
+            result = patch(anchor, target, output, stock_face=face)
+            with TTFont(output, lazy=True, recalcTimestamp=False) as font:
+                if stock.codepoints != frozenset(preferred_unicode_codepoints(font)):
+                    raise ValueError('dynamic view would change the original character scope')
+            result.update(detail)
+            result.update({'stockSha256': stock.digest, 'stockVerifiedBy': stock.verified_by,
+                           'alias': str(alias), 'target': str(target)})
             # The framework may rebuild its router while FontTools is working.
             # Never mount a clone aligned against a superseded generation.
             authorized_target(module, alias, target)
-            now = target.stat()
-            if (original_stamp.st_dev, original_stamp.st_ino, original_stamp.st_size,
-                    original_stamp.st_mtime_ns, original_stamp.st_ctime_ns) != (
-                    now.st_dev, now.st_ino, now.st_size, now.st_mtime_ns, now.st_ctime_ns):
+            if original_stamp != file_identity(target):
                 raise RuntimeError('dynamic font changed while preparing its view')
-            route_cache.mkdir(parents=True, exist_ok=True)
-            fd, name = tempfile.mkstemp(prefix='.stock-face-', dir=route_cache)
-            with os.fdopen(fd, 'w') as stream:
-                json.dump({'target': str(target), 'face': face}, stream)
-            os.replace(name, evidence)
+            stock.verify_unchanged()
             return result
         except Exception:
             output.unlink(missing_ok=True)
             raise
+
+
+def build_view(module: Path, alias: Path, target: Path, output: Path) -> dict:
+    key = hashlib.sha256(os.fsencode(alias)).hexdigest()[:24]
+    route_cache = module / 'config/dynamic-font-routes' / key
+    try:
+        result = _build_view(module, alias, target, output, route_cache)
+    except (ValueError, OSError, RuntimeError, TTLibError) as error:
+        _atomic_json(route_cache / 'result.json', {'status': 'preserved', 'replaced': False,
+                     'alias': str(alias), 'target': str(target), 'reason': str(error)})
+        raise
+    _atomic_json(route_cache / 'result.json', result)
+    return result
 
 
 def main() -> int:
@@ -182,7 +300,7 @@ def main() -> int:
                 parser.error('a view requires module, alias, target and output')
             print(json.dumps(build_view(args.module, args.alias, args.target, args.output)))
         return 0
-    except (ValueError, OSError) as error:
+    except (ValueError, OSError, RuntimeError, TTLibError) as error:
         print(json.dumps({'status': 'preserved', 'reason': str(error)}))
         return 2
 

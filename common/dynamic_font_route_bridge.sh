@@ -91,7 +91,7 @@ _dfr_fingerprint() {
     _dfr_donor=$(_dfr_source) || { printf 'dynamic-font:source-pending\n'; return 0; }
     _dfr_proc="${LUOSHU_PROC_ROOT:-/proc}"
     {
-        printf 'dynamic-font:v1|%s|%s|%s\n' "$_dfr_donor" "$DFR_ALIAS" "$DFR_TARGET"
+        printf 'dynamic-font:v2-stock-supplement|%s|%s|%s\n' "$_dfr_donor" "$DFR_ALIAS" "$DFR_TARGET"
         _dfr_stamp "$_dfr_donor"
         _dfr_stamp "${_dfr_donor%/*}"
         _dfr_stamp "$DFR_TARGET"
@@ -108,7 +108,7 @@ _dfr_fingerprint() {
 
 _dfr_prepare() {
     _dfr_donor=$(_dfr_source) || return 2
-    _dfr_source_stamp="$(_dfr_stamp "$_dfr_donor"):$(_dfr_stamp "${_dfr_donor%/*}")"
+    _dfr_source_stamp="v2-stock-supplement:$(_dfr_stamp "$_dfr_donor"):$(_dfr_stamp "${_dfr_donor%/*}")"
     _dfr_target_stamp=$(_dfr_stamp "$DFR_TARGET")
     [ -n "$_dfr_source_stamp" ] && [ -n "$_dfr_target_stamp" ] || return 1
     mkdir -p "$DFR_CACHE" "$MODDIR/logs" 2>/dev/null || return 1
@@ -124,7 +124,7 @@ _dfr_prepare() {
             fi
         fi
     fi
-    _dfr_key=$(printf 'dynamic-view-v1|%s|%s|%s|%s' "$DFR_TARGET" "$_dfr_donor" "$_dfr_source_stamp" "$_dfr_target_stamp" | _gfp_hash_text)
+    _dfr_key=$(printf 'dynamic-view-v2-stock-supplement|%s|%s|%s|%s' "$DFR_TARGET" "$_dfr_donor" "$_dfr_source_stamp" "$_dfr_target_stamp" | _gfp_hash_text)
     DFR_CLONE="$DFR_CACHE/$_dfr_key.ttf"
     if ! _gfp_valid_font "$DFR_CLONE"; then
         _dfr_saved_patcher=$PATCHER

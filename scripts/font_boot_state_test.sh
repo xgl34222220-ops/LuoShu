@@ -11,6 +11,10 @@ cp "$ROOT/common/font_boot_state.sh" "$MODULE/common/font_boot_state.sh"
 
 cat >"$MODULE/common/device_font_load_verify.sh" <<'EOF_VERIFY'
 #!/bin/sh
+if [ "${LUOSHU_TEST_STALE_PROOF:-0}" = 1 ] && [ "$1" = status ]; then
+    printf 'status\n' > "$MODDIR/config/status-called"
+    exit 2
+fi
 mkdir -p "$MODDIR/config"
 cat >"$MODDIR/config/device-font-load-verification.conf" <<'EOF_STATE'
 state=verified
@@ -42,6 +46,18 @@ MODDIR="$MODULE" LUOSHU_TEST_BOOT_ID=boot-b sh "$MODULE/common/font_boot_state.s
 test ! -e "$CONFIG/text_reboot_required.conf"
 grep -q '^state=confirmed$' "$CONFIG/font-payload-boot.conf"
 grep -q '^bootId=boot-b$' "$CONFIG/font-payload-boot.conf"
+
+# Matching boot/selection in the old text file cannot bypass a stale manifest.
+MODDIR="$MODULE" LUOSHU_TEST_BOOT_ID=boot-a sh "$MODULE/common/font_boot_state.sh" mark DemoFont
+printf 'DemoFont\n' > "$CONFIG/active_font.conf"
+printf 'state=verified\nbootId=boot-b\nactiveFont=DemoFont\n' > "$CONFIG/device-font-load-verification.conf"
+if MODDIR="$MODULE" LUOSHU_TEST_BOOT_ID=boot-b LUOSHU_BOOT_RECONCILE_CACHED_ONLY=1 \
+   LUOSHU_TEST_STALE_PROOF=1 sh "$MODULE/common/font_boot_state.sh" reconcile; then
+    echo 'stale manifest evidence consumed reboot marker' >&2
+    exit 1
+fi
+test -s "$CONFIG/text_reboot_required.conf"
+grep -qx status "$CONFIG/status-called"
 
 # A successful newer payload commit invalidates an older migration marker.
 printf 'DemoFont\n' >"$CONFIG/active_font.conf"

@@ -333,18 +333,41 @@ def _font_format(path: Path) -> str:
 
 
 _METRICS_CACHE: dict[tuple[int, ...], tuple[str, dict[str, Any]]] | None = None
+_STOCK_DIGEST_CACHE: dict[tuple[int, ...], str] | None = None
 
 
 @contextmanager
 def _scan_metrics_cache():
     """Keep shared stock faces once per scan, never across ROM refreshes."""
-    global _METRICS_CACHE
+    global _METRICS_CACHE, _STOCK_DIGEST_CACHE
     previous = _METRICS_CACHE
+    previous_digests = _STOCK_DIGEST_CACHE
     _METRICS_CACHE = {}
+    _STOCK_DIGEST_CACHE = {}
     try:
         yield
     finally:
         _METRICS_CACHE = previous
+        _STOCK_DIGEST_CACHE = previous_digests
+
+
+def _stock_file_digest(path: Path) -> str:
+    """Pin the immutable stock bytes, including outlines, once per scan inode."""
+    status = path.stat()
+    identity = (status.st_dev, status.st_ino, status.st_size, status.st_mtime_ns, status.st_ctime_ns)
+    if _STOCK_DIGEST_CACHE is not None and identity in _STOCK_DIGEST_CACHE:
+        return _STOCK_DIGEST_CACHE[identity]
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    after = path.stat()
+    if identity != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+        raise InventoryError("原厂字体在扫描期间发生变化")
+    result = digest.hexdigest()
+    if _STOCK_DIGEST_CACHE is not None:
+        _STOCK_DIGEST_CACHE[identity] = result
+    return result
 
 
 def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]:
@@ -362,15 +385,35 @@ def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]
     return result
 
 
-def _read_metrics_uncached(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]:
+def _cmap_metrics(font: TTFont) -> dict[str, Any]:
+    """Character facts that can be shared by byte-identical cmap/glyph orders."""
     from fontTools.unicodedata import category as unicode_category, script as unicode_script
+    points = frozenset(unicode_codepoints(font))
+    letter_scripts: dict[str, int] = {}
+    point_digest = hashlib.sha256()
+    for point in sorted(points):
+        point_digest.update(struct.pack(">I", point))
+        character = chr(point)
+        if unicode_category(character).startswith("L"):
+            script = unicode_script(character)
+            letter_scripts[script] = letter_scripts.get(script, 0) + 1
+    return {"points": points, "letterScripts": letter_scripts,
+            "coverage": summarize_coverage(font, points=points),
+            "digitCount": sum(0x30 <= point <= 0x39 for point in points),
+            "privateUseCount": sum(unicode_category(chr(point)) == "Co" for point in points),
+            "cmapSha256": hashlib.sha256(font.reader["cmap"]).hexdigest(),
+            "codepointSha256": point_digest.hexdigest()}
+
+
+def _read_metrics_uncached(path: Path, face_index: int = 0, *, _font: TTFont | None = None,
+                           _cmap: dict[str, Any] | None = None) -> tuple[str, dict[str, Any]]:
 
     fmt = _font_format(path)
     kwargs: dict[str, Any] = {"lazy": True, "recalcTimestamp": False}
     if fmt == "TTC":
         kwargs["fontNumber"] = max(0, face_index)
     try:
-        font = TTFont(str(path), **kwargs)
+        font = _font if _font is not None else TTFont(str(path), **kwargs)
     except Exception as error:  # fontTools raises several format-specific exceptions
         raise InventoryError(f"fontTools 无法解析字体：{path.name}: {error}") from error
     try:
@@ -385,13 +428,7 @@ def _read_metrics_uncached(path: Path, face_index: int = 0) -> tuple[str, dict[s
         fixed_pitch = bool(struct.unpack_from(">I", post_data, 12)[0]) if post_data is not None else False
         # Reuse the already decoded cmap: a language tag cannot tell whether a
         # physical face is a general UI font or a script fallback with ASCII.
-        letter_scripts: dict[str, int] = {}
-        points = unicode_codepoints(font)
-        for point in points:
-            character = chr(point)
-            if unicode_category(character).startswith("L"):
-                script = unicode_script(character)
-                letter_scripts[script] = letter_scripts.get(script, 0) + 1
+        cmap = _cmap if _cmap is not None else _cmap_metrics(font)
         family_tokens = set()
         if "name" in font:
             for record in font["name"].names:
@@ -409,15 +446,20 @@ def _read_metrics_uncached(path: Path, face_index: int = 0) -> tuple[str, dict[s
         descent = int(hhea.descent)
         metrics = {
             "upem": upem,
-            "coverage": summarize_coverage(font),
+            # Optional identity evidence: older revision-9 inventories remain
+            # usable through verified lower/mirror views. No rescan is needed
+            # merely to obtain these newer, stronger stock-byte proofs.
+            "stockCmapSha256": cmap["cmapSha256"],
+            "stockCodepointSha256": cmap["codepointSha256"],
+            "coverage": copy.deepcopy(cmap["coverage"]),
             "weightClass": int(getattr(os2, "usWeightClass", 400)),
             "variationAxes": {axis.axisTag: {"min": axis.minValue, "default": axis.defaultValue,
                                "max": axis.maxValue} for axis in font["fvar"].axes} if "fvar" in font else {},
             "fontTraits": {
-                "letterScripts": letter_scripts,
+                "letterScripts": dict(cmap["letterScripts"]),
                 "symbol": symbol_metadata,
-                "digitCount": sum(0x30 <= point <= 0x39 for point in points),
-                "privateUseCount": sum(unicode_category(chr(point)) == "Co" for point in points),
+                "digitCount": cmap["digitCount"],
+                "privateUseCount": cmap["privateUseCount"],
                 "color": any(tag in font for tag in ("COLR", "CBDT", "sbix", "SVG ")),
                 "italic": bool(int(getattr(os2, "fsSelection", 0)) & 1
                                or int(getattr(head, "macStyle", 0)) & 2),
@@ -455,7 +497,8 @@ def _read_metrics_uncached(path: Path, face_index: int = 0) -> tuple[str, dict[s
         # head, or metrics table is decoded. Reject that file, not the ROM scan.
         raise InventoryError(f"字体表损坏：{path.name}: {error}") from error
     finally:
-        font.close()
+        if _font is None:
+            font.close()
     return fmt, metrics
 
 
@@ -849,6 +892,7 @@ def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontR
             previous = slots.get(logical, {})
             try:
                 stock_file = _stock_font_path(root, actual, roots)
+                stock_digest = _stock_file_digest(stock_file)
                 faces = []
                 for index in range(_collection_count(stock_file)):
                     fmt, metrics = _read_metrics(stock_file, index)
@@ -857,6 +901,8 @@ def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontR
                     traits = metrics.get("fontTraits", {})
                     face = {
                         **contract, "faceIndex": index, "format": fmt, "metrics": metrics,
+                        "stockSource": {"sha256": stock_digest,
+                                        "cmapSha256": metrics["stockCmapSha256"]},
                         "weight": contract.get("weight", metrics.get("weightClass", 400)),
                         "style": contract.get("style", "italic" if traits.get("italic") else "normal"),
                         "replacementRole": "text" if traits.get("letterScripts") else "digits",

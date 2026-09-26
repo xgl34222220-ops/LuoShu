@@ -13,6 +13,7 @@ import font_inventory_scan as scanner
 
 _ACTIVE_OVERLAY_MODULE: Path | None = None
 _INSTALL_SNAPSHOTS: list[Path] = []
+_SNAPSHOT_NAMESPACE_READY = False
 
 
 def _dynamic_manifest_partitions(module: Path | None) -> list[str]:
@@ -236,9 +237,37 @@ def _child_mount_targets(logical: Path) -> list[str]:
     # If the directory itself is a mountpoint, a plain bind snapshot would only
     # duplicate that overlay. The recovery below is intentionally for per-file
     # bind layouts where the parent remains the stock filesystem.
-    if root in targets:
+    if root in targets and not _readonly_partition_mount(logical):
         return []
     return sorted(target for target in targets if target.startswith(root + "/"))
+
+
+def _readonly_partition_mount(logical: Path) -> bool:
+    """Only a block-backed read-only partition is safe to snapshot as a parent.
+
+    A /product erofs mount itself is normal; a non-recursive bind still omits
+    overlays mounted under /product/fonts. An overlay/tmpfs/file bind at the
+    selected parent can instead contain replacement bytes and is rejected.
+    """
+    source = Path(os.environ.get("LUOSHU_MOUNTINFO", "/proc/self/mountinfo"))
+    try:
+        lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return False
+    found = []
+    for line in lines:
+        fields = line.split()
+        try:
+            split = fields.index("-")
+            if _unescape_mount_path(fields[4]) != str(logical).rstrip("/"):
+                continue
+            found.append(fields[split + 1] in {"erofs", "ext4", "squashfs", "f2fs"}
+                         and fields[split + 2].startswith("/dev/block/")
+                         and _unescape_mount_path(fields[3]) in {"/", "/" + logical.name}
+                         and "ro" in fields[5].split(","))
+        except (ValueError, IndexError):
+            continue
+    return bool(found) and all(found)
 
 
 def _run_mount(*args: str) -> bool:
@@ -263,6 +292,23 @@ def _run_umount(path: Path) -> None:
         pass
 
 
+def _private_snapshot_namespace() -> bool:
+    """Keep temporary stock bind mounts private even if the worker is killed."""
+    global _SNAPSHOT_NAMESPACE_READY
+    if _SNAPSHOT_NAMESPACE_READY:
+        return True
+    try:
+        os.unshare(os.CLONE_NEWNS)
+    except (AttributeError, OSError):
+        return False
+    # A new mount namespace can still share propagation with its parent. Detach
+    # every inherited mount before making even the first temporary stock bind.
+    if not _run_mount("--make-rprivate", "/"):
+        return False
+    _SNAPSHOT_NAMESPACE_READY = True
+    return True
+
+
 def _bind_parent_stock_snapshot(logical: Path) -> Path | None:
     """Recover stock bytes hidden only by per-file bind mounts.
 
@@ -275,6 +321,8 @@ def _bind_parent_stock_snapshot(logical: Path) -> Path | None:
     """
     children = _child_mount_targets(logical)
     if not children or not logical.is_dir():
+        return None
+    if not _private_snapshot_namespace():
         return None
 
     parts = [part for part in logical.parts if part not in ("/", "")]

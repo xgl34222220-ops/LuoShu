@@ -72,9 +72,7 @@ printf '%s\n' "$OUT" | grep -q '"status":"ok"'
 PLAN="$MOD/config/font-coverage-remediation-paths.txt"
 grep -qx "switch-start|Demo|force=1|remediate=1|plan=$PLAN" "$CALLS"
 grep -Fqx '/system/fonts/A.ttf' "$PLAN"
-grep -qx 'state=pending' "$MOD/config/font-payload-rebuild-pending.conf"
-grep -qx 'font=Demo' "$MOD/config/font-payload-rebuild-pending.conf"
-grep -qx 'reason=coverage-remediate' "$MOD/config/font-payload-rebuild-pending.conf"
+[ ! -e "$MOD/config/font-payload-rebuild-pending.conf" ]
 
 # Default font has no LuoShu payload to rebuild.
 printf 'default\n' > "$MOD/config/active_font.conf"
@@ -96,8 +94,8 @@ printf '%s\n' "$OUT" | grep -q '"status":"error"'
 printf '%s\n' "$OUT" | grep -q '已有字体任务正在运行'
 rm -f "$MOD/config/switch_task.conf"
 
-# Composite remediation must replay the current persisted mix configuration,
-# not invent a new selection or flatten the axes.
+# Composite remediation uses the existing pinned payload. It must never replay
+# a mutable mix recipe or re-infer fixed/auto modes from the current library.
 cat > "$MOD/config/active_font.conf" <<'EOF'
 mix
 EOF
@@ -115,10 +113,10 @@ EOF
 rm -f "$MOD/config/font-payload-rebuild-pending.conf"
 OUT=$(run_bridge coverage_reapply)
 printf '%s\n' "$OUT" | grep -q '"status":"ok"'
-grep -qx "mix-start|CJK Demo|Latin Demo|Digit Demo|wght=500,wdth=95|wght=600|wght=700|force=1|remediate=1|plan=$PLAN" "$CALLS"
+grep -qx "switch-start|mix|force=1|remediate=1|plan=$PLAN" "$CALLS"
+! grep -q '^mix-start|' "$CALLS"
 grep -Fqx '/system/fonts/A.ttf' "$PLAN"
-grep -qx 'font=mix' "$MOD/config/font-payload-rebuild-pending.conf"
-grep -qx 'reason=coverage-remediate' "$MOD/config/font-payload-rebuild-pending.conf"
+[ ! -e "$MOD/config/font-payload-rebuild-pending.conf" ]
 
 sh -n "$ROOT/common/app_bridge.sh"
 grep -q 'coverage_reapply)' "$ROOT/common/app_bridge.sh"
@@ -128,7 +126,6 @@ grep -q 'device_font_candidates.json' "$ROOT/common/app_bridge.sh"
 grep -q -- '--remediation-plan' "$ROOT/common/app_bridge.sh"
 grep -q 'font-coverage-remediation-paths.txt' "$ROOT/common/app_bridge.sh"
 grep -q 'LUOSHU_COVERAGE_PLAN' "$ROOT/common/font_switch_task.sh"
-grep -Fq '_tmp="${_pending}.tmp.$$"' "$ROOT/common/app_bridge.sh"
 grep -Fq '_tmp="${_out}.tmp.$$"' "$ROOT/common/app_bridge.sh"
 grep -q 'DEVICE_FONT_CACHE=' "$ROOT/common/app_bridge.sh"
 grep -Fq 'sh "$DEVICE_FONT_CACHE" lookup "$_active"' "$ROOT/common/app_bridge.sh"
@@ -233,13 +230,14 @@ data=json.load(open(sys.argv[1], encoding="utf-8"))
 assert data["schema"] == "device-font-slot-trace-v1", data
 assert data["traceSource"] == "physical-safe", data
 states={item["path"]:(item["state"], item["category"], item["safeToRetry"]) for item in data["slots"]}
-assert states["/system/fonts/A.ttf"] == ("loaded","replaced",False), states
+assert states["/system/fonts/A.ttf"] == ("mapped-unverified","pending",False), states
 assert states["/system/fonts/B.ttf"] == ("mapping-missing","issue",True), states
 assert states["/product/fonts/C.ttc"] == ("preserved","protected",False), states
 assert states["/vendor/fonts/D.ttf"] == ("missing-mount","issue",False), states
-assert states["/product/vivo/fonts/Vivo.ttf"] == ("loaded","replaced",False), states
+assert states["/product/vivo/fonts/Vivo.ttf"] == ("mapped-unverified","pending",False), states
 assert states["/system/fonts/E.ttf"] == ("preserved","protected",False), states
-assert data["summary"]["replaced"] == 2, data["summary"]
+assert data["summary"]["replaced"] == 0, data["summary"]
+assert data["summary"]["pending"] == 2, data["summary"]
 assert data["summary"]["issues"] == 2, data["summary"]
 assert data["summary"]["protected"] == 2, data["summary"]
 assert data["summary"]["remediable"] == 1, data["summary"]

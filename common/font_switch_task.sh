@@ -64,9 +64,19 @@ write_task() {
     [ "$_percent" -ge 0 ] 2>/dev/null || _percent=0
     [ "$_percent" -le 100 ] 2>/dev/null || _percent=100
     mkdir -p "${TASK_FILE%/*}" 2>/dev/null || return 1
+    _task_repair=false
+    _task_plan=''
+    if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
+        _task_repair=true
+        _task_plan="${LUOSHU_COVERAGE_PLAN:-}"
+    elif [ "$(read_value task)" = "$_task" ] && [ "$(read_value coverageRemediate)" = true ]; then
+        _task_repair=true
+        _task_plan=$(read_value coveragePlan)
+    fi
     _tmp="${TASK_FILE}.tmp.$$"
     {
         printf 'task=%s\n' "$_task"
+        printf 'coverageRemediate=%s\ncoveragePlan=%s\n' "$_task_repair" "$_task_plan"
         printf 'state=%s\n' "$_state"
         printf 'font=%s\n' "$_font"
         printf 'message=%s\n' "$_message"
@@ -250,7 +260,9 @@ run_worker() {
             mark_load_verification_pending "$_font" || true
             write_task "$_task" success "$_font" '100% · 字体已准备完成，完整重启后生效' \
                 "$_started" "$_finished" '' '' '' 0 '' false 100
-            [ -f "$HISTORY_TOOL" ] && MODDIR="$MODDIR" sh "$HISTORY_TOOL" record-direct "$_font" >/dev/null 2>&1 || true
+            if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" != 1 ]; then
+                [ -f "$HISTORY_TOOL" ] && MODDIR="$MODDIR" sh "$HISTORY_TOOL" record-direct "$_font" >/dev/null 2>&1 || true
+            fi
         fi
     elif [ "$_rc" -eq 124 ] || [ "$_rc" -eq 137 ]; then
         cat "$_output" >> "$LOG_FILE" 2>/dev/null || true
@@ -291,6 +303,10 @@ start_task() {
         printf '{"status":"error","message":"无法创建字体切换任务"}\n'; return 0
     }
 
+    if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
+        # The manager's verified-noop shortcut must not swallow a repair plan.
+        LUOSHU_FORCE_REBUILD=1
+    fi
     export MODDIR LUOSHU_FONT_MANAGER="$MANAGER" LUOSHU_SWITCH_TASK_FILE="$TASK_FILE" \
         LUOSHU_SWITCH_LOG="$LOG_FILE" LUOSHU_SWITCH_TIMEOUT_SECONDS="$TIMEOUT_SECONDS" \
         LUOSHU_SWITCH_HEARTBEAT_INTERVAL="$HEARTBEAT_INTERVAL" LUOSHU_SWITCH_WORKER_PID_FILE="$WORKER_PID_FILE" \

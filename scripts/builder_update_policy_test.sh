@@ -8,7 +8,7 @@ LUOSHU_PAYLOAD_SCHEMA_CURRENT=builder-update-test-schema
 export LUOSHU_PAYLOAD_SCHEMA_CURRENT
 . "$ROOT/common/module_update_state.sh"
 
-BUILDERS='common/font_inventory.py common/font_inventory_scan.py common/inventory_font_stage.py common/inventory_font_metrics.py common/inventory_font_stage.sh common/mix_source_manifest.py common/legacy_v14_4/font_mix_engine.sh common/legacy_v14_4/v143_auto_multiweight_mix.sh common/coverage_payload_remediate.sh common/legacy_v14_4/font_switch_safe.sh common/device_font_payload_build.py common/device_font_payload_overlay.py common/font_runtime_mount.sh common/hyperos_physical_policy.py common/hyperos_metrics_batch.py common/coloros_metrics_batch.py common/legacy_v14_4/hyperos_full_coverage.sh'
+BUILDERS='common/font_inventory.py common/font_inventory_scan.py common/stock_inventory_scan.py common/inventory_font_stage.py common/inventory_font_metrics.py common/inventory_stock_source.py common/inventory_font_supplement.py common/physical_font_load_verify.py common/inventory_font_stage.sh common/mix_source_manifest.py common/legacy_v14_4/font_mix_engine.sh common/legacy_v14_4/v143_auto_multiweight_mix.sh common/coverage_payload_remediate.sh common/legacy_v14_4/font_switch_safe.sh common/device_font_payload_build.py common/device_font_payload_overlay.py common/font_runtime_mount.sh common/hyperos_physical_policy.py common/hyperos_metrics_batch.py common/coloros_metrics_batch.py common/legacy_v14_4/hyperos_full_coverage.sh'
 GENERATED_CACHES='cache/full-composite-v12 cache/full-composite-v7 cache/auto-multiweight-mix/composites-v9 cache/auto-multiweight-mix/composites-v3 cache/auto-multiweight-mix/prepared-v8'
 COPY_TRACE="$TMP/copies.log"
 cp() {
@@ -106,8 +106,33 @@ fi
 
 # A same-font request must not reuse this old confirmed payload while the new
 # builder is pending. Check a complete proof first to exclude unrelated guards.
-printf 'state=verified\nmode=aligned\nactiveFont=mix\n' > "$NEW/config/device-font-load-verification.conf"
+# Supply real byte evidence for the modern active-state guard. A handcrafted
+# "verified" config alone no longer proves the font visible to Android.
+cp "$ROOT/common/device_font_load_verify.sh" "$NEW/common/device_font_load_verify.sh"
+cp "$ROOT/common/physical_font_load_verify.py" "$NEW/common/physical_font_load_verify.py"
+mkdir -p "$NEW/common/python/bin" "$NEW/.luoshu-payload/system/fonts" "$TMP/visible/system/fonts"
+cat > "$NEW/common/python/bin/luoshu-python" <<'EOF_VERIFY_PYTHON'
+#!/bin/sh
+unset PYTHONHOME
+exec python3 "$@"
+EOF_VERIFY_PYTHON
+chmod 0755 "$NEW/common/python/bin/luoshu-python"
+cp "$NEW/system/fonts/Roboto-Regular.ttf" "$NEW/.luoshu-payload/system/fonts/Roboto-Regular.ttf"
+cp "$NEW/system/fonts/Roboto-Regular.ttf" "$TMP/visible/system/fonts/Roboto-Regular.ttf"
+python3 - "$NEW/.luoshu-payload" <<'PY_OUTPUT_MANIFEST'
+import hashlib, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+logical = '/system/fonts/Roboto-Regular.ttf'
+(root / '.luoshu-inventory-output-manifest.json').write_text(json.dumps({
+    'schema': 'inventory-font-output-v1', 'files': {
+        logical: hashlib.sha256((root / logical.lstrip('/')).read_bytes()).hexdigest()}}))
+PY_OUTPUT_MANIFEST
+LUOSHU_VISIBLE_ROOT="$TMP/visible"
+LUOSHU_TEST_BOOT_ID=builder-update-test-boot
+export LUOSHU_VISIBLE_ROOT LUOSHU_TEST_BOOT_ID
 mv "$NEW/config/font-payload-rebuild-pending.conf" "$TMP/pending.conf"
+MODDIR="$NEW" sh "$NEW/common/device_font_load_verify.sh" verify >/dev/null
 MODULE_DIR="$NEW" sh -c '. "$1/common/font_active_state.sh"; luoshu_active_payload_verified mix' sh "$ROOT"
 mv "$TMP/pending.conf" "$NEW/config/font-payload-rebuild-pending.conf"
 if MODULE_DIR="$NEW" sh -c '. "$1/common/font_active_state.sh"; luoshu_active_payload_verified mix' sh "$ROOT"; then

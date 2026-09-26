@@ -33,6 +33,12 @@ luoshu_active_payload_verified() {
     _las_boot_state=$(_luoshu_active_state_value "$_las_config/font-payload-boot.conf" state)
     [ "$_las_boot_state" = confirmed ] || return 1
 
+    # Reuse only byte evidence still bound to this boot and payload manifest.
+    # This status path checks metadata; it never reads large font files again.
+    [ -f "$_las_module/common/device_font_load_verify.sh" ] || return 1
+    MODDIR="$_las_module" MODULE_DIR="$_las_module" \
+        sh "$_las_module/common/device_font_load_verify.sh" status >/dev/null 2>&1 || return 1
+
     _las_verify="$_las_config/device-font-load-verification.conf"
     _las_verify_state=$(_luoshu_active_state_value "$_las_verify" state)
     _las_verify_mode=$(_luoshu_active_state_value "$_las_verify" mode)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from fontTools.ttLib import TTFont
 
 from coverage_inventory_integration_test import (
     ARABIC, LATIN, REGULAR, BOLD, HEAVY, SCRIPT, NESTED,
@@ -43,7 +44,10 @@ class CoverageRomProtectionTest(unittest.TestCase):
         slots = {slot["path"]: slot for slot in result["slots"]}
         for logical in (REGULAR, BOLD, NESTED):
             self.assertNotEqual(slots[logical]["category"], "protected", slots[logical])
-        self.assertEqual(result["summary"]["issues"], 0)
+        preserved = self.f.report()["preservedFonts"]
+        self.assertEqual(result["summary"]["issues"], len(preserved))
+        self.assertEqual(result["summary"]["sourceUnavailable"], len(preserved))
+        self.assertEqual(result["summary"]["remediable"], 0)
 
     def test_direct_reassesses_old_dynamic_weight_and_filename_protection(self):
         preserved = self.run_coverage()
@@ -51,24 +55,30 @@ class CoverageRomProtectionTest(unittest.TestCase):
         self.assertNotIn(REGULAR, preserved)
         self.assertNotIn(BOLD, preserved)
         self.assertNotIn(NESTED, preserved)
-        self.assertEqual(preserved[SCRIPT], "source-script-coverage-missing")
+        self.assertNotIn(SCRIPT, preserved)
+        self.assertTrue(self.f.path(SCRIPT).is_file())
         self.assertEqual(preserved[HEAVY], "source-weight-missing")
 
-    def test_mix_plan_reassesses_every_requested_old_rom_omission(self):
+    def test_full_mix_reapply_reassesses_old_rom_omissions(self):
         self.f.seed_mix()
-        preserved = self.run_coverage("mix", plan=[REGULAR, BOLD, SCRIPT, NESTED])
+        preserved = self.run_coverage("mix")
         self.assert_restored()
-        self.assertEqual(preserved[SCRIPT], "source-script-coverage-missing")
-        self.assertFalse(self.f.path(SCRIPT).exists())
+        self.assertNotIn(SCRIPT, preserved)
+        self.assertTrue(self.f.path(SCRIPT).is_file())
 
-    def test_new_source_script_capability_restores_previously_preserved_font(self):
-        # Real Arabic cmap capability is added to the selected face; changing
-        # ROM labels or filename allowlists is unnecessary.
-        text_font(self.f.source, points=LATIN | ARABIC)
+    def test_non_target_arabic_remains_stock_even_if_source_also_has_arabic(self):
+        # User glyphs replace Chinese, Latin and digits. Arabic remains the
+        # original stock script even when the selected file contains it too.
+        text_font(self.f.source, points=LATIN | ARABIC, advance=999)
         preserved = self.run_coverage()
         self.assert_restored()
         self.assertTrue(self.f.path(SCRIPT).is_file())
         self.assertNotIn(SCRIPT, preserved)
+        with TTFont(self.f.path(SCRIPT)) as font, TTFont(self.f.stock / SCRIPT.lstrip("/")) as stock:
+            cmap = font.getBestCmap()
+            self.assertEqual(font["hmtx"].metrics[cmap[65]][0], 999)
+            self.assertEqual(font["hmtx"].metrics[cmap[0x627]],
+                             stock["hmtx"].metrics[stock.getBestCmap()[0x627]])
 
     def test_cached_direct_repair_uses_real_source_anchors_without_rom_mapper(self):
         self.f.seed_mix()

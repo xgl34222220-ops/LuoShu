@@ -626,6 +626,7 @@ def _font_root_records(roots: Iterable[base.FontRoot]) -> list[dict[str, str]]:
         records.append({
             "partition": root.partition,
             "logical": str(root.logical),
+            "actual": str(root.actual),
             "relative": relative.as_posix(),
             "mountKey": _nested_mount_key(root.partition, relative),
         })

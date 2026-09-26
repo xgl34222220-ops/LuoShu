@@ -39,8 +39,12 @@ luoshu_update_font_builder_compatible() {
     for _lufb_relative in \
         common/font_inventory.py \
         common/font_inventory_scan.py \
+        common/stock_inventory_scan.py \
         common/inventory_font_stage.py \
         common/inventory_font_metrics.py \
+        common/inventory_stock_source.py \
+        common/inventory_font_supplement.py \
+        common/physical_font_load_verify.py \
         common/inventory_font_stage.sh \
         common/mix_source_manifest.py \
         common/legacy_v14_4/font_mix_engine.sh \
@@ -80,7 +84,7 @@ luoshu_update_config_is_volatile() {
         composite_progress.json|mix_last_error.txt|app_install_pending|app_install_state.conf|\
         app_install_manual|font-payload-rebuild-pending.conf|font-payload-reapply-notified.conf|font-boot-failures|\
         font-payload-quarantine.conf|mount_compat.conf|self-mount.conf|\
-        self-mount-required.conf|device-font-load-verification.conf|\
+        self-mount-required.conf|device-font-load-verification.conf|device-font-physical-verification.json|\
         device-font-cache-pending.conf|device-font-cache-failures.conf|\
         device-font-engine.conf|device-font-installed.conf|device-font-dynamic-mount.conf|\
         device-font-load-verification.json|device-font-manager-dump.txt|\
@@ -151,6 +155,7 @@ luoshu_clear_update_volatile() {
         "$_module/config/self-mount.conf" \
         "$_module/config/self-mount-required.conf" \
         "$_module/config/device-font-load-verification.conf" \
+        "$_module/config/device-font-physical-verification.json" \
         "$_module/config/device-font-load-verification.json" \
         "$_module/config/device-font-manager-dump.txt" \
         "$_module/config/device-font-mount-evidence.txt" \

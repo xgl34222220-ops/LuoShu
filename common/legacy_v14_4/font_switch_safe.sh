@@ -34,7 +34,6 @@ ACTIVE_FONT_CONF="$CONFIG_DIR/active_font.conf"
 LEGACY_MODE_CONF="$CONFIG_DIR/font_runtime_legacy_v14_4.conf"
 TEXT_REBOOT_REQUIRED="$CONFIG_DIR/text_reboot_required.conf"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
-COVERAGE_REMEDIATE_HELPER="$MODDIR/common/coverage_payload_remediate.sh"
 INVENTORY_STAGE_HELPER="$MODDIR/common/inventory_font_stage.sh"
 SWITCH_LOCK="$MODDIR/.font_switch.lock"
 PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
@@ -762,6 +761,163 @@ write_runtime_state() {
     return 0
 }
 
+repair_clone_live_payload() {
+    [ -d "$LIVE_PAYLOAD" ] && [ ! -L "$LIVE_PAYLOAD" ] || return 1
+    cleanup_stage
+    if ! cp -al "$LIVE_PAYLOAD" "$STAGE_PAYLOAD" 2>/dev/null; then
+        rm -rf "$STAGE_PAYLOAD" 2>/dev/null || return 1
+        cp -R "$LIVE_PAYLOAD" "$STAGE_PAYLOAD" 2>/dev/null || return 1
+    fi
+    # Fonts can share immutable inodes until a requested slot is atomically
+    # replaced. JSON/conf/list writers truncate files, so detach their inodes.
+    for _rcl_meta in "$STAGE_PAYLOAD"/.luoshu-*; do
+        [ -f "$_rcl_meta" ] && [ ! -L "$_rcl_meta" ] || continue
+        cp -p "$_rcl_meta" "${_rcl_meta}.repair.$$" 2>/dev/null && \
+            mv -f "${_rcl_meta}.repair.$$" "$_rcl_meta" 2>/dev/null || return 1
+    done
+}
+
+repair_preserves_effective_slots() {
+    _rpes_seen=0
+    while IFS= read -r _rpes_slot || [ -n "$_rpes_slot" ]; do
+        case "$_rpes_slot" in /*) ;; *) return 1 ;; esac
+        case "$_rpes_slot" in *'/../'*|*'/./'*|*'//'*) return 1 ;; esac
+        # An absent slot is the reason for repair; every currently valid slot
+        # must remain a nonempty output and be accounted for in the new report.
+        [ -f "$LIVE_PAYLOAD$_rpes_slot" ] && [ -s "$LIVE_PAYLOAD$_rpes_slot" ] || continue
+        [ -f "$STAGE_PAYLOAD$_rpes_slot" ] && [ -s "$STAGE_PAYLOAD$_rpes_slot" ] || return 1
+        grep -Fqx "$_rpes_slot" "$STAGE_PAYLOAD/.luoshu-metrics-covered.lst" || return 1
+        _rpes_seen=$((_rpes_seen + 1))
+    done < "$LIVE_PAYLOAD/.luoshu-metrics-covered.lst"
+    [ "$_rpes_seen" -gt 0 ]
+}
+
+repair_commit_rollback() {
+    [ "${_rcp_done:-false}" != true ] || return 0
+    if [ -d "$_rcp_backup/next" ]; then
+        rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
+        mv "$_rcp_backup/next" "$NEXT_PAYLOAD" 2>/dev/null || return 1
+    elif [ "$_rcp_had_next" = false ]; then
+        rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
+    fi
+    for _rcp_name in state reboot; do
+        case "$_rcp_name" in state) _rcp_dest="$NEXT_STATE" ;; reboot) _rcp_dest="$TEXT_REBOOT_REQUIRED" ;; esac
+        if [ -f "$_rcp_backup/$_rcp_name" ]; then
+            cp -p "$_rcp_backup/$_rcp_name" "$_rcp_dest" 2>/dev/null || return 1
+        else
+            rm -f "$_rcp_dest" 2>/dev/null || true
+        fi
+    done
+    rm -rf "$_rcp_backup" 2>/dev/null || true
+}
+
+repair_commit_payload() (
+    _rcp_font="$1"
+    _rcp_backup="$MODDIR/.luoshu-repair-commit.$$"
+    _rcp_done=false
+    _rcp_had_next=false
+    [ ! -e "$_rcp_backup" ] || return 1
+    mkdir "$_rcp_backup" 2>/dev/null || return 1
+    # Snapshot tiny state files before moving an existing pending generation.
+    # Selection remains unchanged throughout a repair, including rollback.
+    [ ! -f "$NEXT_STATE" ] || cp -p "$NEXT_STATE" "$_rcp_backup/state" || { rm -rf "$_rcp_backup"; return 1; }
+    [ ! -f "$TEXT_REBOOT_REQUIRED" ] || cp -p "$TEXT_REBOOT_REQUIRED" "$_rcp_backup/reboot" || { rm -rf "$_rcp_backup"; return 1; }
+    [ ! -d "$NEXT_PAYLOAD" ] || _rcp_had_next=true
+    trap 'repair_commit_rollback' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    _rcp_activated="$CONFIG_DIR/font-payload-activated.conf"
+    _rcp_previous_legacy=false
+    [ ! -f "$LEGACY_MODE_CONF" ] || _rcp_previous_legacy=true
+    {
+        printf 'state=prepared\nfont=%s\npreviousFont=%s\npreviousLegacy=%s\n' \
+            "$_rcp_font" "$_rcp_font" "$_rcp_previous_legacy"
+        printf 'coverageRemediate=true\n'
+        for _rcp_key in requestId cjk latin digit compositeHash provenanceSchema proofKind directProof; do
+            _rcp_value=$(read_state_value "$_rcp_activated" "$_rcp_key")
+            if [ -z "$_rcp_value" ] && [ "$_rcp_font" = mix ]; then
+                _rcp_value=$(read_state_value "$LIVE_PAYLOAD/.luoshu-mix-generation.conf" "$_rcp_key")
+            fi
+            [ -z "$_rcp_value" ] || printf '%s=%s\n' "$_rcp_key" "$_rcp_value"
+        done
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$_rcp_backup/new-state" || return 1
+    {
+        printf 'font=%s\nreason=next-boot-coverage-repair\n' "$_rcp_font"
+        printf 'bootId=%s\n' "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')"
+        printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+    } > "$_rcp_backup/new-reboot" || return 1
+    [ "$_rcp_had_next" != true ] || mv "$NEXT_PAYLOAD" "$_rcp_backup/next" || return 1
+    mv "$STAGE_PAYLOAD" "$NEXT_PAYLOAD" || return 1
+    mv -f "$_rcp_backup/new-state" "$NEXT_STATE" || return 1
+    mv -f "$_rcp_backup/new-reboot" "$TEXT_REBOOT_REQUIRED" || return 1
+    _rcp_done=true
+    rm -rf "$_rcp_backup" 2>/dev/null || true
+    return 0
+)
+
+repair_font_payload() {
+    _repair_font="$1"
+    [ -n "$_repair_font" ] && [ "$_repair_font" != default ] || {
+        safe_error '默认字体没有可补齐的已生效负载'; return 1;
+    }
+    [ -n "${LUOSHU_COVERAGE_PLAN:-}" ] && [ -s "$LUOSHU_COVERAGE_PLAN" ] || {
+        safe_error '补齐计划缺失，请重新检测覆盖情况'; return 1;
+    }
+    progress 8 '正在读取已生效字体及补齐计划'
+    lock_acquire || return 1
+    [ "$(head -n1 "$ACTIVE_FONT_CONF" 2>/dev/null | tr -d '\r\n')" = "$_repair_font" ] || {
+        safe_error '当前字体选择已变化，请刷新后重试'; return 1;
+    }
+    _repair_activated=$(read_state_value "$CONFIG_DIR/font-payload-activated.conf" font)
+    [ -z "$_repair_activated" ] || [ "$_repair_activated" = "$_repair_font" ] || {
+        safe_error '所选字体尚未生效，请完成重启后再补齐'; return 1;
+    }
+    [ -s "$LIVE_PAYLOAD/.luoshu-metrics-covered.lst" ] && \
+    [ -s "$LIVE_PAYLOAD/.luoshu-inventory-output-manifest.json" ] || {
+        safe_error '已生效字体缺少可核验的补齐记录，请重新应用一次字体'; return 1;
+    }
+    safe_inventory_ready || { safe_error '本机字体清单不可用，已保留当前字体'; return 1; }
+    _repair_inventory=$(safe_inventory_identity) || return 1
+    _repair_engine=$(safe_mapper_identity) || return 1
+    _repair_live=$(safe_cache_tree_manifest "$LIVE_PAYLOAD") || return 1
+    progress 24 '正在保留已生效字体和全部字重源'
+    repair_clone_live_payload || { safe_error '无法建立补齐暂存区，已保留当前字体'; return 1; }
+    _repair_mode=direct
+    [ "$_repair_font" != mix ] || _repair_mode=mix
+    progress 48 '正在只修复计划中的字体槽位'
+    if ! LUOSHU_REAL_MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" \
+        sh "$INVENTORY_STAGE_HELPER" "$STAGE_PAYLOAD" "$_repair_mode" "$_repair_font" >> "$LOG_FILE" 2>&1; then
+        safe_error '增量补齐失败，已保留当前字体和原有待重启负载'
+        return 1
+    fi
+    progress 84 '正在确认现有字体覆盖没有减少'
+    if ! stage_verify "$_repair_font" || ! repair_preserves_effective_slots; then
+        safe_error '补齐结果会减少现有覆盖，已拒绝提交并保留当前字体'
+        return 1
+    fi
+    [ "$_repair_inventory" = "$(safe_inventory_identity)" ] && \
+    [ "$_repair_engine" = "$(safe_mapper_identity)" ] && \
+    [ "$_repair_live" = "$(safe_cache_tree_manifest "$LIVE_PAYLOAD")" ] || {
+        safe_error '补齐期间字体或检测结果发生变化，已保留当前字体'; return 1;
+    }
+    progress 94 '正在提交补齐结果并保留原字体身份'
+    repair_commit_payload "$_repair_font" || {
+        safe_error '补齐提交失败，已恢复原有待重启负载'; return 1;
+    }
+    # A narrow repair does not satisfy a module/builder migration. Only retire
+    # the old repair-specific request; leave unrelated update intent intact.
+    if [ "$(read_state_value "$CONFIG_DIR/font-payload-rebuild-pending.conf" reason)" = coverage-remediate ]; then
+        rm -f "$CONFIG_DIR/font-payload-rebuild-pending.conf" \
+              "$CONFIG_DIR/font-payload-reapply-notified.conf" 2>/dev/null || true
+    fi
+    progress 100 '补齐已准备完成，完整重启后生效'
+    printf '{"status":"ok","data":{"font":"%s","rebootRequired":true,"coverageRemediate":true,"pipeline":"next-boot-repair"}}\n' \
+        "$(json_escape "$_repair_font")"
+    return 0
+}
+
 prewarm_start() {
     _font="$1"
     [ -n "$_font" ] && [ "$_font" != default ] || return 0
@@ -825,6 +981,10 @@ prewarm_font() {
 }
 
 switch_font() {
+    if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
+        repair_font_payload "$1"
+        return $?
+    fi
     _font="$1"
     [ -n "$_font" ] || { safe_error '未指定字体'; return 1; }
     _active_label="${LUOSHU_SWITCH_ACTIVE_LABEL:-$_font}"
@@ -879,25 +1039,12 @@ switch_font() {
                 return 1
             fi
         fi
-        # A cache miss has already generated every eligible slot in one pass.
-        # Only a restored complete tree needs the requested incremental repair.
-        if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ] && [ "$_cache_restored" = true ]; then
-            progress 82 '正在按补齐计划重建本机安全字体槽位'
-            if [ ! -f "$COVERAGE_REMEDIATE_HELPER" ]; then
-                safe_error '字体覆盖补齐组件缺失，当前启动字体未被改动'
-                return 1
-            fi
-            if ! LUOSHU_REAL_MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="$USER_ROOT" \
-                sh "$COVERAGE_REMEDIATE_HELPER" "$STAGE_PAYLOAD" direct "$_font" >> "$LOG_FILE" 2>&1; then
-                safe_error '按补齐计划重建字体槽位失败，当前启动字体未被改动'
-                return 1
-            fi
-        elif [ "$_cache_restored" = true ]; then
+        if [ "$_cache_restored" = true ]; then
             progress 82 '已复用完整本机字体槽位缓存'
         fi
         progress 86 '正在校验下一启动字体负载'
         stage_verify "$_font" || { safe_error '新字体负载校验失败，当前启动字体未被改动'; return 1; }
-        if [ "$_cache_restored" != true ] || [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
+        if [ "$_cache_restored" != true ]; then
             progress 90 '正在保存已校验的本机字体对齐缓存'
             safe_switch_cache_store "$_source" "$_font" >/dev/null 2>&1 || true
         fi

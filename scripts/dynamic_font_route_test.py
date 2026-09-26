@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / 'common'))
 from fontTools.ttLib import TTFont
 from hyperos_cjk_routing_test import make_font, HAN, UVS_HAN
 from dynamic_font_route_patch import patch, route_rows, authorized_target, build_view
+from inventory_font_supplement_test import fixture as supplement_fixture, outline, shape
 
 
 class DynamicRouteViewTest(unittest.TestCase):
@@ -411,13 +412,180 @@ _dfr_apply_all_internal || exit 13
             info = first.stat()
             (cache / 'namespaces.conf').write_text(
                 f'mnt:[17]|{info.st_dev}:{info.st_ino}:{info.st_size}|{first}|{self.target}\n')
-            # The old view contains Han from the previous source. The original
-            # target was Latin, so the next Latin source remains replaceable.
+            # The original target was Latin. Neither the previous larger donor
+            # nor its generated view may expand stock coverage to Han.
             self.source.unlink()
             make_font(self.source, points=range(32, 127))
             build_view(self.module, self.alias, self.target, second)
         with TTFont(second) as result:
             self.assertNotIn(HAN, result.getBestCmap())
+
+    def build_dynamic(self, name='view.ttf'):
+        key = route_rows(self.inventory)[0][0]
+        cache = self.config / 'dynamic-font-routes' / key
+        output = cache / name
+        with mock.patch.dict(os.environ, {'LUOSHU_DYNAMIC_DATA_ROOT': str(self.root / 'data')}):
+            result = build_view(self.module, self.alias, self.target, output)
+        return cache, output, result
+
+    def own_dynamic(self, output, *, journal=True):
+        self.target.unlink()
+        os.link(output, self.target)
+        if journal:
+            info = output.stat()
+            (output.parent / 'namespaces.conf').write_text(
+                f'mnt:[17]|{info.st_dev}:{info.st_ino}:{info.st_size}|{output}|{self.target}\n')
+
+    def test_selective_dynamic_view_retains_greek_and_arabic_shapes_and_layout(self):
+        supplement_fixture(self.target)
+        original = self.target.read_bytes()
+        cache, output, report = self.build_dynamic()
+        self.assertTrue(report['supplemented'])
+        self.assertGreater(report['retainedStockCodepoints'], 0)
+        self.assertGreater(report['roles']['latin'], 0)
+        self.assertGreater(report['roles']['digit'], 0)
+        with TTFont(self.source) as source, TTFont(self.target) as stock, TTFont(output) as result:
+            self.assertEqual(set(result.getBestCmap()), set(stock.getBestCmap()))
+            self.assertEqual(outline(source, source.getBestCmap()[65]), outline(result, result.getBestCmap()[65]))
+            self.assertNotEqual(outline(stock, stock.getBestCmap()[65]), outline(result, result.getBestCmap()[65]))
+            for cp in (0x391, 0x410, 0x627, 0x628):
+                self.assertEqual(outline(stock, stock.getBestCmap()[cp]), outline(result, result.getBestCmap()[cp]))
+        for text in ('\u0391\u0392', '\u0628\u0627\u064e'):
+            self.assertEqual(shape(self.target, text), shape(output, text))
+        self.assertEqual(self.target.read_bytes(), original)
+        snapshot = next(cache.glob('stock-*.font'))
+        self.assertEqual(snapshot.read_bytes(), original)
+        self.assertNotEqual(snapshot.stat().st_ino, self.target.stat().st_ino)
+        self.assertEqual(json.loads((cache / 'result.json').read_text())['status'], 'ok')
+
+    def test_partial_cjk_source_replaces_han_without_dropping_latin_or_greek(self):
+        make_font(self.target, points=(*range(32, 127), HAN, 0x391, 0x627))
+        make_font(self.source, points=(HAN,))
+        with TTFont(self.source) as font:
+            glyph = font['glyf'][font.getBestCmap()[HAN]]
+            glyph.coordinates.translate((135, 20))
+            font.save(self.source)
+        _cache, output, report = self.build_dynamic()
+        self.assertEqual(report['roles'], {'cjk': 1, 'latin': 0, 'digit': 0})
+        with TTFont(self.source) as source, TTFont(self.target) as stock, TTFont(output) as result:
+            self.assertEqual(outline(source, source.getBestCmap()[HAN]), outline(result, result.getBestCmap()[HAN]))
+            for cp in (65, 48, 0x391, 0x627):
+                self.assertEqual(outline(stock, stock.getBestCmap()[cp]), outline(result, result.getBestCmap()[cp]))
+
+    def test_full_base_coverage_still_retains_missing_stock_variants(self):
+        points = (*range(32, 127), HAN, UVS_HAN)
+        make_font(self.target, points=points, uvs=True)
+        make_font(self.source, points=points, uvs=False)
+        _cache, output, report = self.build_dynamic()
+        self.assertTrue(report['supplemented'])
+        self.assertEqual(report['retainedStockCodepoints'], 0)
+        with TTFont(output) as view:
+            variants = {(selector, cp) for table in view['cmap'].tables if table.format == 14
+                        for selector, entries in table.uvsDict.items() for cp, _glyph in entries}
+            self.assertTrue({(0xFE00, UVS_HAN), (0xFE00, 65)}.issubset(variants))
+
+    def test_owned_snapshot_is_used_even_after_journal_loss(self):
+        supplement_fixture(self.target)
+        cache, first, _report = self.build_dynamic('first.ttf')
+        original = next(cache.glob('stock-*.font')).read_bytes()
+        self.own_dynamic(first, journal=False)
+        # A cached view's inode still identifies our self-bind if the journal
+        # was lost. An unrelated source change must not recapture that view.
+        make_font(self.source, points=range(32, 127))
+        _cache, second, report = self.build_dynamic('second.ttf')
+        self.assertTrue(report['supplemented'])
+        self.assertEqual(next(cache.glob('stock-*.font')).read_bytes(), original)
+        self.assertEqual(shape(first, '\u0628\u0627\u064e'), shape(second, '\u0628\u0627\u064e'))
+
+    def test_superset_source_does_not_expand_dynamic_fallback_character_scope(self):
+        make_font(self.target, points=range(32, 127), uvs=True)
+        make_font(self.source, points=(*range(32, 127), HAN, UVS_HAN, 0x391, 0x627), uvs=True)
+        with mock.patch.object(TTFont, 'getGlyphSet', side_effect=AssertionError('raw scoping rebuilt outlines')):
+            _cache, output, report = self.build_dynamic()
+        self.assertFalse(report['supplemented'])
+        with TTFont(self.source) as source, TTFont(self.target) as stock, TTFont(output) as view:
+            self.assertEqual(set(view.getBestCmap()), set(stock.getBestCmap()))
+            self.assertEqual(source.reader['glyf'], view.reader['glyf'])
+            variants = {(selector, cp) for table in view['cmap'].tables if table.format == 14
+                        for selector, entries in table.uvsDict.items() for cp, _glyph in entries}
+            self.assertEqual(variants, {(0xFE00, 65)})
+
+    def test_missing_tampered_or_legacy_stock_snapshot_reports_preserved(self):
+        for failure in ('missing', 'tampered', 'legacy'):
+            with self.subTest(failure=failure):
+                # Restore an unmounted framework generation before each case.
+                self.target.unlink()
+                supplement_fixture(self.target)
+                cache, first, _report = self.build_dynamic('first.ttf')
+                self.own_dynamic(first)
+                snapshot = next(cache.glob('stock-*.font'))
+                if failure == 'missing':
+                    snapshot.unlink()
+                elif failure == 'tampered':
+                    snapshot.chmod(0o600)
+                    snapshot.write_bytes(self.source.read_bytes())
+                else:
+                    saved = json.loads((cache / 'stock-face.json').read_text())
+                    (cache / 'stock-face.json').write_text(json.dumps({'target': str(self.target), 'face': saved['face']}))
+                current = self.target.read_bytes()
+                output = cache / 'failed.ttf'
+                command = [sys.executable, str(ROOT / 'common/dynamic_font_route_patch.py'),
+                           '--module', str(self.module), '--alias', str(self.alias),
+                           '--target', str(self.target), '--output', str(output)]
+                result = subprocess.run(command, env=self.env, capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(json.loads(result.stdout)['status'], 'preserved')
+                self.assertFalse(output.exists())
+                saved = json.loads((cache / 'result.json').read_text())
+                self.assertEqual(saved['status'], 'preserved')
+                self.assertIs(saved['replaced'], False)
+                self.assertEqual(self.target.read_bytes(), current)
+                (cache / 'namespaces.conf').unlink(missing_ok=True)
+                first.unlink(missing_ok=True)
+
+    def test_unknown_file_mount_never_supplies_original_font_bytes(self):
+        mountinfo = self.root / 'mountinfo'
+        mountinfo.write_text(f'12 1 0:6 /generated.font {self.target} rw - tmpfs tmpfs rw\n')
+        with mock.patch.dict(os.environ, {'LUOSHU_MOUNTINFO': str(mountinfo)}):
+            with self.assertRaisesRegex(ValueError, 'mounted without verifiable'):
+                self.build_dynamic()
+        key = route_rows(self.inventory)[0][0]
+        cache = self.config / 'dynamic-font-routes' / key
+        self.assertFalse(list(cache.glob('stock-*.font')))
+        self.assertEqual(json.loads((cache / 'result.json').read_text())['status'], 'preserved')
+
+    def test_target_change_during_supplement_discards_output(self):
+        supplement_fixture(self.target)
+        from inventory_font_supplement import supplement
+        def changing_target(*args, **kwargs):
+            answer = supplement(*args, **kwargs)
+            replacement = self.target.with_suffix('.replacement')
+            replacement.write_bytes(self.source.read_bytes())
+            replacement.replace(self.target)
+            return answer
+        with mock.patch('inventory_font_supplement.supplement', side_effect=changing_target):
+            with self.assertRaisesRegex(RuntimeError, 'changed while preparing'):
+                self.build_dynamic()
+        key = route_rows(self.inventory)[0][0]
+        cache = self.config / 'dynamic-font-routes' / key
+        self.assertFalse((cache / 'view.ttf').exists())
+        self.assertEqual(self.target.read_bytes(), self.source.read_bytes())
+
+    def test_legacy_full_donor_cache_is_regenerated_with_stock_supplement(self):
+        supplement_fixture(self.target)
+        result = self.shell('''
+mkdir -p "$DFR_CACHE"
+source=$(_dfr_source)
+cp "$source" "$DFR_CACHE/legacy.ttf"
+printf '%s|%s|%s\n' "$(_dfr_stamp "$source"):$(_dfr_stamp "${source%/*}")" \
+    "$(_dfr_stamp "$DFR_TARGET")" "$DFR_CACHE/legacy.ttf" > "$DFR_STATE"
+_dfr_prepare || exit 10
+[ "$DFR_CLONE" != "$DFR_CACHE/legacy.ttf" ] || exit 11
+printf '%s' "$DFR_CLONE"
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with TTFont(Path(result.stdout)) as view:
+            self.assertTrue({0x391, 0x410, 0x627, 0x628}.issubset(view.getBestCmap()))
 
 
 if __name__ == '__main__':

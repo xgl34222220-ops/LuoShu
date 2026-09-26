@@ -1,6 +1,7 @@
 #!/bin/sh
 set -eu
-grep -q 'degraded:booting.*degraded:confirmed' common/device_font_load_verify.sh
+! grep -q 'mount-active-visible-layout-differs' common/device_font_load_verify.sh
+grep -q 'physical_font_load_verify.py' common/device_font_load_verify.sh
 ! grep -A45 '^luoshu_payload_quarantine()' common/font_runtime_policy.sh | grep -q "printf 'default"
 ! grep -q '字体挂载连续三次不可见，已安全恢复系统默认字体' .luoshu-runtime/core/service.sh
 ! grep -A25 '^_font_anchor()' common/rom_adapters.sh | grep -q '_hyperos_compact_normalize'
@@ -8,8 +9,8 @@ grep -q 'degraded:booting.*degraded:confirmed' common/device_font_load_verify.sh
 grep -q '^_device_font_inventory_partition_allowed()' common/rom_adapters.sh
 grep -A35 '^_device_font_inventory_target()' common/rom_adapters.sh | grep -q '_dfit_rest'
 grep -A35 '^_device_font_inventory_target()' common/rom_adapters.sh | grep -q '\.ttf|\*\.otf|\*\.ttc|\*\.otc'
-grep -q 'Mitype' common/font_inventory.py
-grep -q 'MiClock' common/font_inventory.py
+grep -q '^def _text_face_reason' common/font_inventory.py
+grep -q 'monospaced.*fixed_pitch' common/font_inventory.py
 grep -q 'directPhysicalSlots' common/device_font_payload_overlay.py
 grep -q 'physical-{name}' common/device_font_payload_build.py
 ! grep -A20 '^_luoshu_coloros_root_pairs()' common/coloros_global.sh | grep -Eq '/vendor/fonts|/odm/fonts|/oem/fonts|/oplus_'

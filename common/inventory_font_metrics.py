@@ -64,6 +64,23 @@ def _latin_ink_bottom(font: TTFont, limit: int | None = None) -> int | None:
     return bottom
 
 
+def restrict_unicode_scope(source: Path, output: Path, allowed: frozenset[int]) -> Path:
+    """Trim newly introduced mappings without decoding/recompiling outlines."""
+    with TTFont(source, lazy=True, recalcBBoxes=False, recalcTimestamp=False) as font:
+        for table in font['cmap'].tables:
+            if table.format == 14:
+                table.uvsDict = {selector: [(point, glyph) for point, glyph in entries if point in allowed]
+                                 for selector, entries in table.uvsDict.items()}
+                table.uvsDict = {selector: entries for selector, entries in table.uvsDict.items() if entries}
+            elif table.isUnicode():
+                table.cmap = {point: glyph for point, glyph in table.cmap.items() if point in allowed}
+        raw = font.getTableData('cmap')
+        font.tables.clear()
+        table = DefaultTable('cmap'); table.data = raw; font['cmap'] = table
+        font.save(output, reorderTables=None)
+    return output
+
+
 def compact_routed_source(source: Path, output: Path, routing: frozenset[int],
                           stock_punctuation: frozenset[int]) -> tuple[Path, int]:
     """Drop unreachable CJK outlines once per donor, before per-slot metrics.

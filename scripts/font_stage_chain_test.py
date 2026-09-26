@@ -224,22 +224,29 @@ class FontStageChainTest(unittest.TestCase):
         self.assertEqual((stage / 'product/vivo/keep.txt').read_text(), 'sibling')
         self.assertFalse(list(stage.glob('.luoshu-*')))
 
-    def test_repair_uses_valid_cache_without_full_inventory_rebuild(self):
-        helper = self.write('common/coverage_payload_remediate.sh',
-                            '#!/bin/sh\nprintf repaired > "$1/system/fonts/Repaired.ttf"\n')
-        # The helper is part of the engine identity: generate the cache after it
-        # has been installed, as a real module does.
+    def test_repair_uses_live_payload_without_any_cache_rebuild(self):
+        self.write('config/active_font.conf', 'Demo\n')
+        self.write('config/font-payload-activated.conf', 'font=Demo\n')
+        self.write('config/repair-plan.txt', '/system/fonts/Old.ttf\n')
+        self.write('.luoshu-payload/.luoshu-metrics-covered.lst', '/system/fonts/Old.ttf\n')
+        self.write('.luoshu-payload/.luoshu-inventory-output-manifest.json', '{}')
+        self.write('common/inventory_font_stage.sh',
+                   '#!/bin/sh\nprintf repaired > "$1/system/fonts/Repaired.ttf"\n'
+                   'printf "/system/fonts/Repaired.ttf\\n" >> "$1/.luoshu-metrics-covered.lst"\n')
         self.seed_cache()
         result = self.switch_fixture('''
             LUOSHU_COVERAGE_REMEDIATE=1
-            export LUOSHU_COVERAGE_REMEDIATE
+            LUOSHU_COVERAGE_PLAN="$CONFIG_DIR/repair-plan.txt"
+            export LUOSHU_COVERAGE_REMEDIATE LUOSHU_COVERAGE_PLAN
             stage_inventory_map() { echo unexpected-full-rebuild >&2; return 1; }
+            safe_switch_cache_restore() { echo unexpected-cache-restore >&2; return 1; }
         ''')
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertTrue(helper.is_file())
-        self.assertEqual((self.module / '.luoshu-payload-next/system/fonts/Repaired.ttf').read_text(),
-                         'repaired')
-        self.assertTrue(list((self.config / 'safe-switch-cache').rglob('Repaired.ttf')))
+        next_root = self.module / '.luoshu-payload-next'
+        self.assertEqual((next_root / 'system/fonts/Repaired.ttf').read_text(), 'repaired')
+        self.assertEqual((next_root / 'system/fonts/Old.ttf').read_text(), 'old-live-font')
+        self.assertFalse((next_root / 'system/fonts/Ready.ttf').exists())
+        self.assertFalse(list((self.config / 'safe-switch-cache').rglob('Repaired.ttf')))
 
     def test_partition_manifest_deduplicates(self):
         self.write('config/device_font_partitions.conf', 'system\naurora_product\naurora_product\n')

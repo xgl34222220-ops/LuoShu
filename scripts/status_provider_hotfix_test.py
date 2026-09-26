@@ -106,13 +106,16 @@ esac
         (config / 'active_font.conf').write_text('fixture\n')
         (config / 'text_reboot_required.conf').write_text('bootId=previous-boot\n')
         (config / 'font-payload-boot.conf').write_text('state=booting\n')
-        (self.common / 'device_font_load_verify.sh').write_text('touch "$TEST_ROOT/deep-verify"\n')
+        (self.common / 'device_font_load_verify.sh').write_text(
+            'case "$1" in verify|deep) touch "$TEST_ROOT/deep-verify" ;; '
+            'status) touch "$TEST_ROOT/lightweight-status" ;; esac\nexit 2\n')
         self.command('ksud', 'touch "$TEST_ROOT/daemon"\n')
         self.command('getprop', 'echo test\n')
         result = json.loads(self.run_shell(self.common / 'app_bridge.sh', 'status'))
         self.assertTrue(result['data']['installed'])
         self.assertTrue(result['data']['rebootRequired'], 'unverified state must remain pending')
         self.assertFalse((self.root / 'deep-verify').exists())
+        self.assertTrue((self.root / 'lightweight-status').exists())
         self.assertFalse((self.root / 'daemon').exists())
 
     def test_provider_watch_includes_chrome_consumers_but_not_shell_arguments(self):

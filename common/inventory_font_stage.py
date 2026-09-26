@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+from contextlib import ExitStack, closing
 from dataclasses import dataclass
 import json
 import os
@@ -16,7 +17,6 @@ import shutil
 import struct
 import sys
 import tempfile
-from typing import Any
 
 from fontTools.ttLib import TTCollection, TTFont
 from fontTools.unicodedata import category, script
@@ -25,13 +25,16 @@ from fontTools.ttLib.tables.DefaultTable import DefaultTable
 
 from font_metrics_normalize import _device_build_key
 from font_slot_coverage import (preferred_unicode_codepoints, is_han,
-                                is_cjk_routing_codepoint, valid_coverage)
-from inventory_font_metrics import compact_routed_source, write_metrics, link_copy, contract_for_face
+                                is_cjk_routing_codepoint, is_cjk_punctuation, valid_coverage)
+from inventory_font_metrics import compact_routed_source, write_metrics, link_copy, contract_for_face, restrict_unicode_scope
+from inventory_stock_source import StockSourceResolver
+from inventory_font_supplement import supplement, UnsupportedSupplementError
 
 REVISION = 1
 EXTENSIONS = {'.ttf', '.otf', '.ttc', '.otc', '.font'}
 ROLES = {100: 'thin', 200: 'extralight', 300: 'light', 400: 'regular',
          500: 'medium', 600: 'semibold', 700: 'bold', 800: 'extrabold', 900: 'black'}
+TARGET_ROLES = ('cjk', 'latin', 'digit')
 
 
 class StageError(RuntimeError):
@@ -67,6 +70,49 @@ def anchors_digest(store: Path, cache: dict) -> str:
     if manifest.is_file():
         entries[manifest.name] = file_digest(manifest, cache)
     return hashlib.sha256(json.dumps(entries, sort_keys=True).encode()).hexdigest()
+
+
+def preservation_digest(path: Path, face_index: int, cache: dict) -> str:
+    """Prove glyph/layout identity while allowing the metric edits we restore.
+
+    Different paths with different hhea/head contracts can still contain the
+    exact same outlines and shaping tables. Copying those raw tables already
+    preserves every unselected script; no subset/merge is needed for them.
+    """
+    key = (identity(path), face_index)
+    if key in cache:
+        return cache[key]
+    options = {'fontNumber': face_index} if face_index >= 0 else {}
+    digest = hashlib.sha256()
+    with TTFont(path, lazy=True, recalcTimestamp=False, **options) as font:
+        for tag in sorted(font.reader.keys()):
+            if tag in {'name', 'DSIG', 'FFTM'}:
+                continue
+            raw = bytearray(font.reader[tag])
+            if tag == 'head':
+                for start, end in ((8, 12), (20, 36), (38, 40), (42, 44)):
+                    raw[start:end] = b'\0' * (end - start)
+            elif tag == 'hhea':
+                raw[4:10] = b'\0' * 6
+            elif tag == 'OS/2' and len(raw) >= 78:
+                selection = struct.unpack_from('>H', raw, 62)[0] & ~128
+                struct.pack_into('>H', raw, 62, selection)
+                raw[68:78] = b'\0' * 10
+            digest.update(tag.encode('ascii')); digest.update(struct.pack('>I', len(raw))); digest.update(raw)
+    cache[key] = digest.hexdigest()
+    return cache[key]
+
+
+def has_unicode_variations(path: Path, face_index: int, cache: dict) -> bool:
+    key = ('uvs', identity(path), face_index)
+    if key not in cache:
+        options = {'fontNumber': face_index} if face_index >= 0 else {}
+        with TTFont(path, lazy=True, recalcTimestamp=False, **options) as font:
+            raw = font.reader['cmap']
+            count = struct.unpack_from('>H', raw, 2)[0]
+            cache[key] = any(struct.unpack_from('>H', raw, struct.unpack_from('>I', raw, 8 + 8 * index)[0])[0] == 14
+                             for index in range(count))
+    return cache[key]
 
 
 def logical_path(value: str) -> str:
@@ -117,6 +163,49 @@ def family_names(font: TTFont) -> frozenset[str]:
         if values:
             break
     return frozenset(values)
+
+
+def character_role(point: int) -> str | None:
+    if is_han(point):
+        return 'cjk'
+    if 48 <= point <= 57 or 0xFF10 <= point <= 0xFF19:
+        return 'digit'
+    if category(chr(point)).startswith('L') and script(chr(point)) == 'Latn':
+        return 'latin'
+    return None
+
+
+def slot_roles(target: dict) -> set[str]:
+    metrics = target.get('metrics') or {}
+    coverage, traits = metrics.get('coverage') or {}, metrics.get('fontTraits') or {}
+    roles = set()
+    if coverage.get('hanCount', 0) > int(0x3007 in coverage.get('cjkPunctuation', [])):
+        roles.add('cjk')
+    if coverage.get('hasLatin') or traits.get('letterScripts', {}).get('Latn', 0):
+        roles.add('latin')
+    if traits.get('digitCount', 0) or target.get('replacementRole') == 'digits':
+        roles.add('digit')
+    return roles
+
+
+def replacement_points(source_points, stock_points, roles) -> frozenset[int]:
+    roles = set(roles)
+    result = set()
+    for point in set(source_points).intersection(stock_points):
+        role = character_role(point)
+        if (role in roles or (roles and 32 <= point <= 126 and role is None)
+                or ('cjk' in roles and is_cjk_punctuation(point))):
+            result.add(point)
+    return frozenset(result)
+
+
+def replacement_counts(points) -> dict[str, int]:
+    counts = dict.fromkeys(TARGET_ROLES, 0)
+    for point in points:
+        role = character_role(point)
+        if role:
+            counts[role] += 1
+    return counts
 
 
 def validate_source_structure(font: TTFont, file_size: int) -> None:
@@ -269,6 +358,9 @@ class SourcePool:
             raise StageError('未知换字体模式')
         if not self.faces:
             raise StageError('没有可用的字体源')
+        self.capabilities = {face.key: (sum(is_han(cp) for cp in face.points),
+            all(cp in face.points for cp in (*range(65, 91), *range(97, 123))),
+            all(cp in face.points for cp in range(48, 58))) for face in self.faces}
 
     def pick(self, target: dict) -> tuple[SourceFace | None, int, str]:
         metrics = target.get('metrics') or {}
@@ -286,14 +378,10 @@ class SourcePool:
             raise StageError('原厂字重无效') from exc
         if not 1 <= weight <= 1000:
             raise StageError('原厂字重超出范围')
-        required = set(target.get('requiresScripts') or (traits.get('letterScripts') or {}).keys()) - {'Zyyy', 'Zinh'}
-        if not required:
-            if coverage['hasHan']:
-                required.add('Hani')
-            if coverage['hasLatin']:
-                required.add('Latn')
+        wanted = slot_roles(target)
+        if not wanted:
+            return None, weight, 'no-requested-text-role'
         italic = bool(traits.get('italic') or target.get('style') in {'italic', 'oblique'})
-        digits = target.get('replacementRole') == 'digits'
         def supports_style(face):
             if face.italic == italic:
                 return True
@@ -307,27 +395,38 @@ class SourcePool:
                       and supports_style(face) and (not traits.get('monospaced') or face.mono)]
         if not candidates:
             return None, weight, 'source-style-missing'
-        candidates = [face for face in candidates if required.issubset(face.scripts)
-                      and (not coverage['hasLatin'] or all(cp in face.points for cp in range(65, 91))
-                           and all(cp in face.points for cp in range(97, 123)))
-                      and (not digits or all(cp in face.points for cp in range(48, 58)))]
+        def capable_roles(face):
+            roles = set()
+            han_count, has_latin, has_digits = self.capabilities[face.key]
+            if 'cjk' in wanted and han_count >= min(8, coverage['hanCount']):
+                roles.add('cjk')
+            if 'latin' in wanted and has_latin:
+                roles.add('latin')
+            if 'digit' in wanted and has_digits:
+                roles.add('digit')
+            return roles
+        candidates = [face for face in candidates if capable_roles(face)]
         if not candidates:
             return None, weight, 'source-script-coverage-missing'
-        def supported(face):
+        def supported_roles(face):
+            roles = capable_roles(face)
             if face.role_weights:
-                role = 'cjk' if coverage['hasHan'] else 'digit' if digits else 'latin'
-                actual = face.role_weights.get(role + 'Weight', face.weight)
-                return actual == weight or face.role_weights.get(role + 'Mode') == 'fixed'
-            return (face.axes.get('wght', (face.weight, face.weight, face.weight))[0]
-                    <= weight <= face.axes.get('wght', (face.weight, face.weight, face.weight))[2])
-        eligible = [face for face in candidates if supported(face)]
+                return {role for role in roles if
+                        face.role_weights.get(role + 'Weight', face.weight) == weight
+                        or face.role_weights.get(role + 'Mode') == 'fixed'}
+            if (face.axes.get('wght', (face.weight, face.weight, face.weight))[0]
+                    <= weight <= face.axes.get('wght', (face.weight, face.weight, face.weight))[2]):
+                return roles
+            return set()
+        eligible = [face for face in candidates if supported_roles(face)]
         if not eligible:
             return None, weight, 'source-weight-missing'
         # Exact static faces preserve designer interpolation. Otherwise a real
         # reachable axis instance is mandatory; never relabel Regular as Bold.
-        best = min(eligible, key=lambda face: (
+        best = min(eligible, key=lambda face: (-len(supported_roles(face)),
                                              bool(face.role_weights and face.role_weights.get('targetWeight') != weight),
                                              self.faces.index(face), bool(face.axes), face.weight != weight))
+        target['_replacementRoles'] = sorted(supported_roles(best))
         return best, weight, ''
 
     def materialize(self, face: SourceFace, weight: int, variable: bool = False,
@@ -423,6 +522,8 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         requested = {logical_path(line.strip()) for line in plan.read_text().splitlines() if line.strip()}
         if not requested or requested - data['slots'].keys():
             raise StageError('补齐计划与当前字体清单不一致')
+        if source is not None:
+            raise StageError('补齐不能更换字体源，请先重新应用所选字体')
     stage.mkdir(parents=True, exist_ok=True)
     for logical in data['slots']:
         safe_destination(stage, logical)
@@ -451,17 +552,36 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
     except (OSError, ValueError):
         pass
     reusable = set()
-    if (requested is not None and source is None
-            and old_manifest.get('schema') == 'inventory-font-output-v1'
-            and old_manifest.get('inventory') == inventory_digest
-            and old_manifest.get('anchors') == anchors_digest(store, digest_cache)):
+    repair_anchor_digest = ''
+    if requested is not None:
+        if (old_manifest.get('schema') != 'inventory-font-output-v1'
+                or old_report.get('engine') != 'inventory-font-stage-v1'
+                or not isinstance(old_manifest.get('files'), dict)
+                or not isinstance(old_report.get('preservedFonts'), dict)):
+            raise StageError('补齐缺少当前字体的完整校验记录，请重新应用字体')
+        if old_manifest.get('inventory') != inventory_digest:
+            raise StageError('字体清单已变化，补齐已取消，请重新应用字体')
+        previous_mode = old_manifest.get('mode', old_report.get('summary', {}).get('mode'))
+        if previous_mode != mode:
+            raise StageError('补齐模式与当前字体不一致，已取消本次补齐')
+        repair_anchor_digest = anchors_digest(store, digest_cache)
+        if old_manifest.get('anchors') != repair_anchor_digest:
+            raise StageError('当前字体源校验不一致，补齐已取消，请重新应用字体')
+        # A repair is an incremental transaction. Reassessing every old slot
+        # through a freshly reconstructed SourcePool used to turn four valid
+        # outputs into "preserved" and delete them (15 mapped -> 11). Actual
+        # verified files are authoritative outside the explicit repair set.
         for logical, digest in old_manifest.get('files', {}).items():
             if logical not in data['slots']:
-                continue
+                raise StageError('当前负载与字体清单不一致，已取消本次补齐')
             path = safe_destination(stage, logical)
-            if path.is_file() and file_digest(path, digest_cache) == digest:
-                reusable.add(logical)
-    with tempfile.TemporaryDirectory(prefix='inventory-stage-', dir=store) as directory:
+            if logical in requested:
+                continue
+            if not path.is_file() or file_digest(path, digest_cache) != digest:
+                raise StageError(f'未请求补齐的字体校验失败，需重新生成补齐计划：{logical}')
+            reusable.add(logical)
+        preserved = dict(old_report['preservedFonts'])
+    with tempfile.TemporaryDirectory(prefix='inventory-stage-', dir=store) as directory, ExitStack() as resources:
         temporary = Path(directory)
         if mode == 'direct' and source is None:
             # Incremental coverage repair uses pinned source anchors from the
@@ -474,7 +594,15 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
             for face in pool.faces:
                 face.role_weights = None
         jobs = {}
+        stock_sources = resources.enter_context(closing(StockSourceResolver(module, data)))
+        preservation_cache, replacement_cache = {}, {}
         for logical, slot in sorted(data['slots'].items()):
+            if requested is not None and logical not in requested:
+                continue
+            if requested is not None:
+                preserved.pop(logical, None)
+                if logical in (data.get('preservedFonts') or {}):
+                    raise StageError(f'补齐目标是受保护的系统字体：{logical}')
             if logical in preserved:
                 continue
             faces = faces_for_slot(slot)
@@ -488,20 +616,124 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                 if src is None:
                     preserved[logical] = reason if len(faces) == 1 else 'preserved-collection:' + reason
                     break
+                stock = stock_sources.resolve(logical, face)
+                replacement_key = (src.key, stock.codepoints, tuple(face['_replacementRoles']))
+                if replacement_key not in replacement_cache:
+                    points = replacement_points(src.points, stock.codepoints, face['_replacementRoles'])
+                    replacement_cache[replacement_key] = points, replacement_counts(points)
+                points, counts = replacement_cache[replacement_key]
+                if not sum(counts.values()):
+                    preserved[logical] = 'source-target-characters-missing'
+                    break
+                face['_stock'] = stock
+                face['_replacePoints'] = points
+                face['_replaceCounts'] = counts
+                same_face = (file_digest(src.path, digest_cache) == stock.digest
+                             and max(src.index, 0) == max(stock.face_index, 0))
+                preserve_variants = has_unicode_variations(stock.path, stock.face_index, preservation_cache)
+                if not same_face and (stock.codepoints - points or preserve_variants):
+                    same_face = (preservation_digest(src.path, src.index, preservation_cache)
+                                 == preservation_digest(stock.path, stock.face_index, preservation_cache))
+                # A full raw donor is valid only when every original character
+                # is covered and no unselected script/symbol is overwritten.
+                # Identical original faces are already proof of preservation.
+                needs_supplement = not same_face and bool(stock.codepoints - points or preserve_variants)
+                face['_needsSupplement'] = needs_supplement
+                face['_resultPoints'] = stock.codepoints
                 weights = {int(ref.get('axes', {}).get('wght', ref.get('weight', weight)))
                            for ref in face.get('xmlReferences', [])}
                 axes = face.get('supportedAxes') or []
                 preserve_variable = bool(src.axes and ('wght' in axes or 'ital' in axes
                     or face.get('metrics', {}).get('variationAxes') or len(weights) > 1))
-                if len(weights) > 1 and (not preserve_variable or 'wght' not in src.axes
-                        or min(weights) < src.axes['wght'][0] or max(weights) > src.axes['wght'][2]):
+                fixed_roles = bool(src.role_weights) and all(
+                    src.role_weights.get(role + 'Mode') == 'fixed'
+                    for role in face['_replacementRoles'])
+                dynamic_weight = ('wght' in axes or 'wght' in face.get('metrics', {}).get('variationAxes', {})
+                                  or len(weights) > 1)
+                auto_composite = bool(src.role_weights) and not fixed_roles
+                if not fixed_roles and ((len(weights) > 1 and (not preserve_variable or 'wght' not in src.axes
+                        or min(weights) < src.axes['wght'][0] or max(weights) > src.axes['wght'][2]))
+                        or (auto_composite and dynamic_weight and 'wght' not in src.axes)):
                     preserved[logical] = 'source-variable-range-missing'
                     break
                 selected.append((face, src, weight, contract, preserve_variable))
             if logical not in preserved:
                 jobs[logical] = selected
+        if requested is not None and set(jobs) != requested:
+            reasons = ', '.join(f'{path}: {preserved.get(path, "source-unavailable")}'
+                                for path in sorted(requested - jobs.keys()))
+            raise StageError('所选字体无法完成请求的补齐，已保留原负载：' + reasons)
         if not jobs:
             raise StageError('所选字体不支持当前任何系统槽位：' + ', '.join(sorted(set(preserved.values()))))
+
+        # Prepare actual character-preserving sources before resolving routes.
+        # An unsupported optional collection must never prove CJK reachability.
+        supplemented, scoped, anchors, role_anchors = {}, {}, {}, {}
+        for logical, selected in list(jobs.items()):
+            try:
+                for face, src, weight, contract, variable in selected:
+                    italic = bool(face['metrics'].get('fontTraits', {}).get('italic')
+                                  or face.get('style') in {'italic', 'oblique'})
+                    anchor = pool.materialize(src, weight, variable, italic)
+                    stock = face['_stock']
+                    stock_content = preservation_digest(stock.path, stock.face_index, preservation_cache)
+                    patch_key = (src.key, weight, variable, italic, stock_content, face['_replacePoints'])
+                    metric_anchor = anchor
+                    supplement_report = {'replacedCodepoints': len(face['_replacePoints']),
+                                         'retainedStockCodepoints': len(stock.codepoints - face['_replacePoints']),
+                                         'mode': 'raw-full-coverage'}
+                    if face['_needsSupplement']:
+                        stock.verify_unchanged()
+                        if patch_key not in supplemented:
+                            patched = temporary / f'supplement-{len(supplemented)}.font'
+                            patch_report = supplement(anchor, stock.path, patched,
+                                stock_face_index=stock.face_index, stock_weight=weight,
+                                replace_codepoints=set(face['_replacePoints']))
+                            stock.verify_unchanged()
+                            with TTFont(patched, lazy=True, recalcTimestamp=False) as patched_font:
+                                patch_axes = {axis.axisTag for axis in patched_font['fvar'].axes} if 'fvar' in patched_font else set()
+                                if variable and not set(pool.materialized_axes[anchor]).issubset(patch_axes):
+                                    raise StageError('原厂字符补齐未能保留动态字体轴，已取消本次应用')
+                                if not stock.codepoints.issubset(preferred_unicode_codepoints(patched_font)):
+                                    raise StageError('原厂字符补齐丢失字符，已取消本次应用')
+                            supplemented[patch_key] = patched, patch_report
+                        metric_anchor, supplement_report = supplemented[patch_key]
+                    elif src.points - stock.codepoints:
+                        scope_key = (str(anchor), stock.codepoints)
+                        if scope_key not in scoped:
+                            scoped[scope_key] = restrict_unicode_scope(anchor,
+                                temporary / f'scoped-{len(scoped)}.font', stock.codepoints)
+                        metric_anchor = scoped[scope_key]
+                    face.update(_anchor=anchor, _metricAnchor=metric_anchor,
+                                _supplementReport=supplement_report, _patchKey=patch_key, _italic=italic)
+            except UnsupportedSupplementError as exc:
+                if requested is not None:
+                    raise StageError(f'所选字体无法完成请求的补齐，已保留原负载：{logical}: {exc}') from exc
+                reason = ('source-variable-supplement-unavailable' if any(item[4] for item in selected)
+                          else 'source-supplement-capability-missing')
+                preserved[logical] = ('preserved-collection:' if len(selected) > 1 else '') + reason
+                del jobs[logical]
+        if not jobs:
+            raise StageError('所选字体不支持当前任何系统槽位：' + ', '.join(sorted(set(preserved.values()))))
+
+        existing_fallback_points = {}
+
+        def verified_fallback_points(target: str) -> frozenset[int]:
+            if target not in existing_fallback_points:
+                points = set()
+                path = safe_destination(stage, target)
+                with path.open('rb') as stream:
+                    collection = stream.read(4) == b'ttcf'
+                for face in faces_for_slot(data['slots'][target]):
+                    coverage = face['metrics']['coverage']
+                    if coverage['hanCount'] <= int(0x3007 in coverage['cjkPunctuation']):
+                        continue
+                    kwargs = {'fontNumber': face.get('faceIndex', 0)} if collection else {}
+                    with TTFont(path, lazy=True, recalcTimestamp=False, **kwargs) as font:
+                        points.update(cp for cp in preferred_unicode_codepoints(font)
+                                      if is_cjk_routing_codepoint(cp))
+                existing_fallback_points[target] = frozenset(points)
+            return existing_fallback_points[target]
 
         def route(logical: str, face: dict) -> frozenset[int]:
             coverage = face['metrics']['coverage']
@@ -509,10 +741,12 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                 return frozenset()
             points = set()
             for target in face.get('fallbackTargets', []):
+                if target in reusable:
+                    points.update(verified_fallback_points(target))
                 for other, src, _weight, _contract, _variable in jobs.get(target, []):
                     cv = other['metrics']['coverage']
                     if cv['hanCount'] > int(0x3007 in cv['cjkPunctuation']):
-                        points.update(cp for cp in src.points if is_cjk_routing_codepoint(cp))
+                        points.update(cp for cp in other['_resultPoints'] if is_cjk_routing_codepoint(cp))
             return frozenset(points)
 
         punctuation = {}
@@ -523,35 +757,33 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                     punctuation.setdefault((src.key, weight, variable, routing), set()).update(face['metrics']['coverage']['cjkPunctuation'])
         cache, compact, ink_bounds = {}, {}, {}
         prepared = []
-        anchors = {}
-        role_anchors = {}
-        existing = 0
+        existing = len(reusable)
         rewritten = 0
         for logical, selected in jobs.items():
             destination = safe_destination(stage, logical)
-            if requested is not None and logical not in requested and logical in reusable:
-                existing += 1
-                continue
             rewritten += int(destination.is_file())
             generated_faces = []
             for face, src, weight, contract, variable in selected:
-                italic = bool(face['metrics'].get('fontTraits', {}).get('italic')
-                              or face.get('style') in {'italic', 'oblique'})
-                anchor = pool.materialize(src, weight, variable, italic)
+                italic = face['_italic']
+                anchor = face['_anchor']
                 anchors[(src.key, weight, variable, italic)] = anchor
                 if not italic and not src.mono:
                     role_anchors.setdefault(weight, anchor)
                 routing = route(logical, face)
                 stock_punctuation = frozenset(face['metrics']['coverage']['cjkPunctuation'])
-                # Only routed non-Han faces can prove a compact Latin bitmap.
                 align_bottom = bool(routing) and not face['metrics'].get('fontTraits', {}).get('monospaced', False)
-                key = (src.key, weight, variable, italic, contract, routing, stock_punctuation, align_bottom)
+                stock = face['_stock']
+                patch_key = face['_patchKey']
+                metric_anchor = face['_metricAnchor']
+                supplement_report = face['_supplementReport']
+                key = (str(metric_anchor),
+                       contract, routing, stock_punctuation, align_bottom)
                 if key not in cache:
-                    metric_source, removed = anchor, 0
+                    metric_source, removed = metric_anchor, 0
                     if routing:
-                        compact_key = (src.key, weight, variable, italic, routing)
+                        compact_key = (str(metric_anchor), routing)
                         if compact_key not in compact:
-                            compact[compact_key] = compact_routed_source(anchor,
+                            compact[compact_key] = compact_routed_source(metric_anchor,
                                 temporary / f'compact-{len(compact)}.font', routing,
                                 frozenset(punctuation[(src.key, weight, variable, routing)]))
                         metric_source, removed = compact[compact_key]
@@ -576,6 +808,12 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                     'weight': weight, 'metricsSource': 'stock', 'hhea': list(contract[1:4]),
                     'variableAxesPreserved': pool.materialized_axes[anchor],
                     'sourceWeight': src.weight,
+                    'replacedRoles': [role for role, count in face['_replaceCounts'].items() if count],
+                    'replacedRoleCounts': face['_replaceCounts'],
+                    'replacedCodepoints': supplement_report['replacedCodepoints'],
+                    'retainedStockCodepoints': supplement_report['retainedStockCodepoints'],
+                    'supplemented': bool(face['_needsSupplement']),
+                    'stockSourceVerifiedBy': stock.verified_by,
                     'compositeRoleWeights': src.role_weights or {},
                     'requestedVariableAxes': face.get('supportedAxes', []),
                     'typo': list(contract[4:7]), 'win': list(contract[7:9]),
@@ -598,19 +836,89 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                 output = generated_faces[0]
             prepared.append((output, safe_destination(stage, logical)))
 
+        mapped_paths = set(jobs) | reusable
+        # A digit clock or peripheral Latin face cannot mask a failed primary
+        # Chinese face. Require each role the chosen sources can actually offer.
+        candidates, primary = set(), set()
+        for logical, slot in data['slots'].items():
+            traits = slot.get('metrics', {}).get('fontTraits', {})
+            if (not slot_roles(slot).intersection({'cjk', 'latin'})
+                    or slot.get('style', 'normal') != 'normal' or traits.get('italic')
+                    or int(slot.get('weight', slot.get('metrics', {}).get('weightClass', 400))) != 400):
+                continue
+            candidates.add(logical)
+            if set(slot.get('families') or []).intersection({'sans-serif', 'system-ui', 'default'}):
+                primary.add(logical)
+        main_path = data.get('mainSlotPath')
+        if main_path in candidates:
+            primary.add(main_path)
+        primary = primary or candidates
+        for logical in tuple(primary):
+            for face in faces_for_slot(data['slots'][logical]):
+                primary.update(target for target in face.get('fallbackTargets', []) if target in candidates)
+        available_roles = set()
+        for source_face in pool.faces:
+            if source_face.color:
+                continue
+            if any(is_han(cp) for cp in source_face.points):
+                available_roles.add('cjk')
+            if all(cp in source_face.points for cp in (*range(65, 91), *range(97, 123))):
+                available_roles.add('latin')
+        mapped_roles = {}
+        for row in report_slots:
+            mapped_roles.setdefault(row['slot'], set()).update(
+                role for role, count in row['replacedRoleCounts'].items() if count)
+        previous_rows = {}
+        for row in old_report.get('slots', []):
+            if isinstance(row, dict):
+                previous_rows.setdefault(row.get('slot'), []).append(row)
+        for logical in primary.intersection(reusable):
+            rows = previous_rows.get(logical, [])
+            if rows and all(isinstance(row.get('replacedRoleCounts'), dict) for row in rows):
+                mapped_roles[logical] = {role for row in rows for role, count in row['replacedRoleCounts'].items() if count}
+            else:
+                # Test5 proofs predate role counts. Verify the existing output's
+                # real cmap before retaining that generation's primary coverage.
+                points = set().union(*(face.points for face in inspect_faces(safe_destination(stage, logical))))
+                mapped_roles[logical] = set()
+                if any(is_han(cp) for cp in points):
+                    mapped_roles[logical].add('cjk')
+                if all(cp in points for cp in (*range(65, 91), *range(97, 123))):
+                    mapped_roles[logical].add('latin')
+        demanded = {role for logical in primary for role in slot_roles(data['slots'][logical])
+                    if role in available_roles and role in {'cjk', 'latin'}}
+        missing_roles = {role for role in demanded
+                         if not any(role in mapped_roles.get(logical, set()) for logical in primary)}
+        if main_path in primary:
+            missing_roles.update(slot_roles(data['slots'][main_path]).intersection(available_roles, {'cjk', 'latin'})
+                                 - mapped_roles.get(main_path, set()))
+        primary_replaced = {logical for logical in primary
+                            if mapped_roles.get(logical, set()).intersection({'cjk', 'latin'})}
+        if missing_roles or (primary and not primary_replaced):
+            detail = ','.join(sorted(missing_roles)) or 'text'
+            raise StageError('主要中文或英文字体尚未替换，已取消本次应用并保留原字体：' + detail)
+        # Recheck evidence immediately before mutation. A source/other output
+        # changing during generation cancels this isolated repair altogether.
+        if requested is not None:
+            if anchors_digest(store, digest_cache) != repair_anchor_digest:
+                raise StageError('补齐期间字体源发生变化，已取消本次补齐')
+            for logical in reusable:
+                if file_digest(safe_destination(stage, logical), digest_cache) != old_manifest['files'][logical]:
+                    raise StageError('补齐期间现有字体发生变化，已取消本次补齐')
         # All generation has succeeded. Mutations affect only this isolated tree.
         for output, destination in prepared:
             link_copy(output, destination)
-        for logical in old_manifest.get('files', {}):
-            if logical not in jobs:
-                safe_destination(stage, logical).unlink(missing_ok=True)
+        if requested is None:
+            for logical in old_manifest.get('files', {}):
+                if logical not in jobs:
+                    safe_destination(stage, logical).unlink(missing_ok=True)
         font_roots = {root / 'fonts' for root in stage.iterdir()
                       if root.is_dir() and not root.is_symlink() and not root.name.startswith('.')}
         for field in ('sourceRoots', 'auxiliaryRoots', 'discoveredFontRoots'):
             for item in data.get(field, []):
                 if isinstance(item, dict) and isinstance(item.get('logical'), str):
                     font_roots.add(safe_destination(stage, item['logical']))
-        for fonts in font_roots:
+        for fonts in font_roots if requested is None else ():
             if not fonts.is_dir() or fonts.is_symlink():
                 continue
             for path in fonts.rglob('*'):
@@ -623,9 +931,10 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                         font_file = stream.read(4) in (b'\x00\x01\x00\x00', b'OTTO', b'ttcf', b'true')
                 if logical not in jobs and font_file:
                     path.unlink()
-        for logical in preserved:
-            safe_destination(stage, logical).unlink(missing_ok=True)
-        if mode == 'direct':
+        if requested is None:
+            for logical in preserved:
+                safe_destination(stage, logical).unlink(missing_ok=True)
+        if mode == 'direct' and requested is None:
             if source is not None:
                 for old in store.glob('*.font'):
                     old.unlink()
@@ -638,11 +947,14 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
                     link_copy(anchor, store / f'{ROLES[weight]}.font')
         preserved_text = ''.join(f'{path}\t{reason}\n' for path, reason in sorted(preserved.items()))
         (stage / '.luoshu-coverage-preserved.tsv').write_text(preserved_text, encoding='utf-8')
-        (stage / '.luoshu-metrics-covered.lst').write_text(''.join(path + '\n' for path in sorted(jobs)), encoding='utf-8')
-        summary = {'mapped': len(jobs), 'generated': len(cache), 'preserved': len(preserved),
+        (stage / '.luoshu-metrics-covered.lst').write_text(''.join(path + '\n' for path in sorted(mapped_paths)), encoding='utf-8')
+        summary = {'mapped': len(mapped_paths), 'generated': len(cache), 'preserved': len(preserved),
                    'inventorySlots': len(data['slots']), 'sourceInstances': len(pool.materialized),
                    'fallbackSlots': 0, 'engineRevision': REVISION}
-        summary.update({'mode': mode, 'font': family, 'inventory': len(data['slots']),
+        summary.update({'supplementedSources': len(supplemented),
+                        'primaryTextMapped': len(primary_replaced)})
+        summary.update({'mode': mode, 'operation': 'repair' if requested is not None else 'apply',
+                        'font': family, 'inventory': len(data['slots']),
                         'requested': len(requested or []), 'matched': len(requested or []),
                         'planned': len(prepared), 'rewritten': rewritten,
                         'added': len(prepared) - rewritten, 'fallback': 0,
@@ -651,7 +963,7 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         if old_report.get('engine') == 'inventory-font-stage-v1':
             newly_written = {row['slot'] for row in report_slots}
             report_slots += [row for row in old_report.get('slots', [])
-                             if isinstance(row, dict) and row.get('slot') in jobs
+                             if isinstance(row, dict) and row.get('slot') in mapped_paths
                              and row['slot'] not in newly_written]
         report = {'schema': 'luoshu-slot-metrics-v1', 'engine': 'inventory-font-stage-v1',
                   'slots': report_slots, 'preservedFonts': preserved, 'summary': summary,
@@ -662,10 +974,10 @@ def run(module: Path, stage: Path, mode: str, source: Path | None = None,
         (stage / '.luoshu-coverage-remediation.conf').write_text(''.join(
             f'{key}={str(value).lower() if isinstance(value, bool) else str(value).replace(chr(10), " ").replace(chr(13), " ")}\n'
             for key, value in summary.items()))
-        manifest = {'schema': 'inventory-font-output-v1', 'inventory': inventory_digest,
+        manifest = {'schema': 'inventory-font-output-v1', 'inventory': inventory_digest, 'mode': mode,
                     'anchors': anchors_digest(store, digest_cache),
                     'files': {logical: file_digest(safe_destination(stage, logical), digest_cache)
-                              for logical in jobs}}
+                              for logical in mapped_paths}}
         (stage / '.luoshu-inventory-output-manifest.json').write_text(json.dumps(manifest, sort_keys=True))
     return summary
 

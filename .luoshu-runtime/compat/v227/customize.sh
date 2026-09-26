@@ -111,7 +111,7 @@ if [ ! -s "$FONT_INVENTORY_OUTPUT" ] && [ -s "$OLD_MOD/config/device_font_invent
 fi
 chmod 0755 "$FONT_INVENTORY_PYTHON" 2>/dev/null || true
 if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
-    ui_print "正在读取可信原厂视图；首次扫描按字体数量耗时。"
+    ui_print "正在扫描全部系统字体文件和字体配置，包含各分区与嵌套目录。"
     _inventory_pyroot="$MODPATH/common/python"
     _inventory_result=$(
         LUOSHU_FRESH_STOCK_SCAN=1 \
@@ -144,8 +144,9 @@ if [ -f "$FONT_INVENTORY_SCRIPT" ] && [ -x "$FONT_INVENTORY_PYTHON" ]; then
         [ -n "$_inventory_dynamic" ] || _inventory_dynamic="0"
         [ -n "$_inventory_nested_roots" ] || _inventory_nested_roots="0"
         _inventory_elapsed=$(luoshu_install_elapsed "$_inventory_started")
-        LUOSHU_INSTALL_SCAN_SUMMARY="$_inventory_files 个原厂字体 / $_inventory_slots 个可替换槽位"
-        ui_print "✓ 原厂字体 $_inventory_files 个 · UI 槽位 $_inventory_slots 个${_inventory_elapsed:+ · $_inventory_elapsed 秒}"
+        LUOSHU_INSTALL_SCAN_SUMMARY="$_inventory_files 个原厂字体 / $_inventory_slots 个已识别文字槽位"
+        ui_print "✓ 原厂字体 $_inventory_files 个 · 文字槽位 $_inventory_slots 个${_inventory_elapsed:+ · $_inventory_elapsed 秒}"
+        ui_print "  应用字体时逐个替换其中可用的中文、英文与数字，其余字形保留。"
         ui_print "  XML $_inventory_xml / 通用 $_inventory_generic / OEM $_inventory_heuristic / 补充 $_inventory_physical"
         if [ "$_inventory_dynamic" -gt 0 ] 2>/dev/null || [ "$_inventory_nested_roots" -gt 0 ] 2>/dev/null; then
             ui_print "  额外 OEM 分区 $_inventory_dynamic 个 · 嵌套字体目录 $_inventory_nested_roots 个"

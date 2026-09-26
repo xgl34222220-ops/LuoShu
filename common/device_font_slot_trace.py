@@ -10,6 +10,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from physical_font_load_verify import digest, load_cached_verification, manifest_data
+
 SCHEMA = "device-font-slot-trace-v1"
 INVENTORY_SCHEMA = "device-font-inventory-v1"
 PAYLOAD_SCHEMA = "device-font-payload-v1"
@@ -188,13 +190,19 @@ def aggregate(routes: list[dict[str, Any]], supplement: dict[str, Any] | None) -
     return "partial", ",".join(sorted(unique))
 
 
+def source_capability_missing(reason: str) -> bool:
+    while reason.startswith("preserved-collection:"):
+        reason = reason.partition(":")[2]
+    return reason.startswith("source-")
+
+
 def classify_slot_state(state: str, reason: str) -> tuple[str, bool]:
     if state == "loaded":
         return "replaced", False
     if state in {"mount-visible", "mapped-unverified", "unconfirmed"}:
         return "pending", False
     if state == "preserved":
-        return "protected", False
+        return ("issue" if source_capability_missing(reason) else "protected"), False
     # A missing mount means the payload file already exists but Android did not
     # expose its parent mount. Rebuilding the same payload cannot repair that and
     # must not be advertised as a "safe retry" in the App.
@@ -371,6 +379,7 @@ def capability_reason_label(reason: str) -> str:
     if reason.startswith("preserved-collection:"):
         return "集合中有字体面无法替换：" + capability_reason_label(reason.partition(":")[2])
     labels = {
+        "source-weight-missing": "当前字体缺少所需的真实字重，尚未替换",
         "source-style-missing": "当前字体缺少对应的斜体样式，保持原厂",
         "source-monospaced-missing": "当前字体缺少等宽字形，保持原厂",
         "source-mono-missing": "当前字体缺少等宽字形，保持原厂",
@@ -379,6 +388,21 @@ def capability_reason_label(reason: str) -> str:
         "source-digits-missing": "当前字体缺少完整数字字形，保持原厂",
         "source-capability-missing": "当前字体不满足此文件的替换要求，保持原厂",
         "source-variable-range-missing": "当前字体无法满足此文件的可变字重范围，保持原厂",
+        "source-target-roles-missing": "当前字体没有可用于此文件的中文、英文或数字字形，尚未替换",
+        "source-target-characters-missing": "当前字体与此文件没有可替换的中英数字形，尚未替换",
+        "source-supplement-unavailable": "当前字体无法同时保留此文件的其他字形或动态字重，尚未替换",
+        "source-supplement-capability-missing": "当前字体无法安全合并此文件需要保留的字形，尚未替换",
+        "source-variable-supplement-unavailable": "当前字体无法在保留其他字形的同时保留动态字重，尚未替换",
+        "no-requested-text-role": "此文件不含可替换的中文、英文或数字，保持原厂",
+        "runtime-visible-digest-match": "系统可见文件与所选字体一致",
+        "runtime-visible-digest-mismatch": "系统可见字体与所选字体不一致，需要检查挂载",
+        "runtime-visible-file-missing": "系统中未见此字体的替换文件",
+        "payload-digest-mismatch": "已生成的字体文件损坏，可重新补齐",
+        "active-physical-payload-awaiting-byte-verification": "尚未取得系统可见字体的验证结果",
+        "next-boot-payload-awaiting-reboot": "新字体已准备，完整重启后验证",
+        "active-physical-payload-missing-slot": "缺少已生成的字体文件",
+        "physical-payload-present-but-partition-mount-failed": "字体文件已生成，但所在分区挂载失败",
+        "font-payload-reapply-required": "请完整重新应用一次当前字体，以更新整套替换文件",
         "preserved-collection": "字体集合信息不完整，保持原厂",
         "xml-symbol-family": "系统符号或图标字体，保持原厂",
         "color-font": "彩色或表情字体，保持原厂",
@@ -409,6 +433,8 @@ def build_physical_trace(
     prepared: bool = False,
     active_font: str = "",
     mount_state: Path | None = None,
+    physical_verification: Path | None = None,
+    verify_payload: bool = False,
 ) -> dict[str, Any]:
     """Trace the actual physical-safe payload used by current LuoShu releases.
 
@@ -428,8 +454,29 @@ def build_physical_trace(
     preserved_by_path = _physical_preserved_index(physical_root)
     preserved_by_path.update(payload_preserved_index(physical_root, inventory))
     measured_inventory = int(inventory.get("scannerRevision", 0) or 0) >= 9
-    # A previous boot's mount evidence cannot confirm or invalidate a new tree.
-    confirmed = confirmed and not prepared
+    # Global boot/mount flags cannot prove which font bytes Android sees.
+    # Only observations bound to this payload, boot and runtime namespace count.
+    module = physical_root.parent
+    verification = {} if prepared else load_cached_verification(module, physical_root, active_font)
+    if physical_verification is not None and physical_verification != module / "config/device-font-physical-verification.json":
+        verification = {}
+    verified_files = verification.get("files") or {}
+    reapply_required = verification.get("reason") == "font-payload-reapply-required"
+    damaged_payload: set[str] = set()
+    if verify_payload:
+        # A repair must include corrupted outputs as well as missing ones. Hash
+        # shared/hardlinked fonts only once; do not do this on ordinary polling.
+        try:
+            _, expected_files = manifest_data(module, physical_root)
+        except (OSError, ValueError, TypeError):
+            expected_files = {}
+        hash_cache: dict = {}
+        for logical, expected in expected_files.items():
+            try:
+                if digest(physical_root / logical.lstrip("/"), hash_cache) != expected:
+                    damaged_payload.add(logical)
+            except (OSError, ValueError):
+                damaged_payload.add(logical)
     mount_info = {} if prepared else _read_key_values(mount_state)
     mount_state_name = mount_info.get("state", "")
     mount_backend = mount_info.get("backend", "")
@@ -459,28 +506,31 @@ def build_physical_trace(
                 _mount_failed(mount_info.get("failed", ""), mount_key)
                 and mount_key not in mounted_roots
             )
-            mount_confirmed = bool(
-                confirmed
-                and (
-                    mount_backend == "external-mount"
-                    or not mount_key
-                    or mount_key in mounted_roots
-                    or (not mounted_roots and mount_state_name in {"mounted", "confirmed"})
-                )
-            )
-            if prepared:
+            evidence = verified_files.get(logical) or {}
+            if logical in damaged_payload or str(evidence.get("reason", "")).startswith("payload-"):
+                state = "mismatch"
+                reason = "payload-digest-mismatch"
+            elif prepared:
                 state = "mapped-unverified"
                 reason = "next-boot-payload-awaiting-reboot"
+            elif evidence.get("state") == "verified":
+                state = "loaded"
+                reason = "runtime-visible-digest-match"
+            elif evidence.get("state") == "mismatch":
+                state = "mismatch"
+                reason = "runtime-visible-digest-mismatch"
+            elif evidence.get("state") == "missing":
+                state = "missing-mount"
+                reason = "runtime-visible-file-missing"
             elif mount_failed:
                 state = "missing-mount"
                 reason = "physical-payload-present-but-partition-mount-failed"
-            elif mount_confirmed:
-                state = "loaded"
-                reason = "active-physical-payload-and-mount-confirmed"
             else:
                 state = "mapped-unverified"
-                reason = "active-physical-payload-awaiting-mount-confirmation"
+                reason = "active-physical-payload-awaiting-byte-verification"
             category, safe_to_retry = classify_slot_state(state, reason)
+            if state == "mismatch":
+                safe_to_retry = reason == "payload-digest-mismatch" and not prepared
             routes.append({
                 "slotIndex": -1,
                 "family": str((entry.get("families") or [""])[0] if (entry.get("families") or []) else ""),
@@ -500,9 +550,9 @@ def build_physical_trace(
                 "mountBackend": mount_backend,
             })
         elif logical in preserved_by_path:
-            state = "preserved"
             reason = preserved_by_path[logical]
-            category, safe_to_retry = "protected", False
+            state = "source-unavailable" if source_capability_missing(reason) else "preserved"
+            category, safe_to_retry = classify_slot_state("preserved", reason)
         elif protected_reason:
             state = "preserved"
             reason = protected_reason
@@ -512,6 +562,10 @@ def build_physical_trace(
             reason = "active-physical-payload-missing-slot"
             category, safe_to_retry = "issue", not prepared
 
+        if reapply_required:
+            safe_to_retry = False
+            if category == "issue":
+                reason = "font-payload-reapply-required"
         traced.append({
             "path": logical,
             "slotName": str(entry.get("slotName") or Path(logical).name),
@@ -526,6 +580,7 @@ def build_physical_trace(
             "safeToRetry": safe_to_retry,
             "reason": capability_reason_label(reason),
             "reasonCode": reason,
+            "sourceUnavailable": state == "source-unavailable" or source_capability_missing(reason),
             "supplementDisposition": "physical-safe",
             "routes": routes,
         })
@@ -563,12 +618,22 @@ def build_physical_trace(
         category_counts.get("replaced", 0)
         + category_counts.get("pending", 0)
         + category_counts.get("issue", 0)
+        - counts.get("source-unavailable", 0)
     )
     return {
         "schema": SCHEMA,
         "inventoryBuildKey": str(inventory.get("buildKey") or ""),
         "inventoryRomKind": str(inventory.get("romKind") or "generic"),
-        "verificationState": "pending-reboot" if prepared else ("verified" if confirmed else "pending"),
+        "verificationState": "pending-reboot" if prepared else (
+            "failed" if counts.get("mismatch") or counts.get("missing-mount") or counts.get("mapping-missing")
+            else ("partial" if counts.get("source-unavailable") else "verified")
+            if verification.get("state") == "verified" and counts.get("loaded", 0)
+            and not counts.get("mapped-unverified") else "pending"
+        ),
+        "verificationReason": capability_reason_label("font-payload-reapply-required") if reapply_required
+            else "部分字体尚未替换，请查看各项原因" if counts.get("source-unavailable")
+            else str(verification.get("reason") or ""),
+        "reapplyRequired": reapply_required,
         "rebootRequired": prepared,
         "activeFont": active_font,
         "traceSource": "physical-prepared" if prepared else "physical-safe",
@@ -580,6 +645,7 @@ def build_physical_trace(
             "replaced": category_counts.get("replaced", 0),
             "pending": category_counts.get("pending", 0),
             "protected": category_counts.get("protected", 0),
+            "sourceUnavailable": counts.get("source-unavailable", 0),
             "issues": category_counts.get("issue", 0),
             "remediable": remediable,
             "consumed": sum(1 for item in traced if item["routes"]),
@@ -773,6 +839,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--overlay", type=Path)
     parser.add_argument("--physical-root", type=Path)
     parser.add_argument("--physical-confirmed", action="store_true")
+    parser.add_argument("--physical-verification", type=Path)
     parser.add_argument("--physical-prepared", action="store_true")
     parser.add_argument("--rom-preserves", action="store_true", help="以 TSV 输出当前负载的 ROM 保护槽位")
     parser.add_argument("--active-font", default="")
@@ -804,6 +871,8 @@ def main() -> int:
                 prepared=args.physical_prepared,
                 active_font=args.active_font,
                 mount_state=args.mount_state,
+                physical_verification=args.physical_verification,
+                verify_payload=bool(args.remediation_plan),
             )
         else:
             if not args.payload or not args.overlay:

@@ -33,6 +33,9 @@ python3 -m py_compile \
   "$ROOT/common/device_font_slot_trace.py" \
   "$ROOT/common/inventory_font_stage.py" \
   "$ROOT/common/inventory_font_metrics.py" \
+  "$ROOT/common/inventory_stock_source.py" \
+  "$ROOT/common/inventory_font_supplement.py" \
+  "$ROOT/common/physical_font_load_verify.py" \
   "$ROOT/common/dynamic_font_route_patch.py" \
   "$ROOT/common/mix_source_manifest.py"
 
@@ -42,6 +45,7 @@ for file in \
   README.md LICENSE NOTICE.md THIRD_PARTY_NOTICES.md CHANGELOG.md SECURITY.md CONTRIBUTING.md \
   common/composite_font.py common/font_instance.py common/font_metrics_normalize.py common/font_coverage.py common/font_axis_info.py \
   common/font_role_check.py common/font_metadata.py common/font_extract_faces.py common/font_import_probe.py common/font_inventory.py common/device_font_slot_trace.py \
+  common/inventory_stock_source.py common/inventory_font_supplement.py common/physical_font_load_verify.py \
   common/font_role_check.sh common/native_import.sh common/font_details.sh common/luoshu_cli.sh \
   common/luoshu_composite.sh common/font_mix.sh common/font_mix_controller.sh common/weighted_mix_task.sh \
   common/multiweight_mix_task.sh common/mix_weight_mode.sh \
@@ -246,9 +250,14 @@ sh "$ROOT/scripts/app_bridge_status_test.sh"
 sh "$ROOT/scripts/font_coverage_center_test.sh"
 sh "$ROOT/scripts/coverage_payload_remediate_test.sh"
 python3 "$ROOT/scripts/font_coverage_switch_regression_test.py"
+python3 "$ROOT/scripts/physical_slot_trace_test.py"
 python3 "$ROOT/scripts/coverage_rom_preservation_test.py"
 python3 "$ROOT/scripts/inventory_font_stage_test.py"
+python3 "$ROOT/scripts/inventory_stock_source_test.py"
+python3 "$ROOT/scripts/inventory_font_supplement_test.py"
 python3 "$ROOT/scripts/inventory_stage_bridge_test.py"
+python3 "$ROOT/scripts/coverage_repair_regression_test.py"
+python3 "$ROOT/scripts/coverage_repair_transaction_test.py"
 python3 "$ROOT/scripts/dynamic_font_route_test.py"
 python3 "$ROOT/scripts/mix_inventory_source_test.py"
 python3 "$ROOT/scripts/font_metrics_batch_raw_test.py"

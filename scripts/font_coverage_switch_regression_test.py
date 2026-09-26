@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -45,6 +46,8 @@ class CoverageBridgeTest(unittest.TestCase):
                         self.module / "common/device_font_slot_trace.py")
         shutil.copyfile(ROOT / "common/font_switch_lock.sh",
                         self.module / "common/font_switch_lock.sh")
+        shutil.copyfile(ROOT / "common/physical_font_load_verify.py",
+                        self.module / "common/physical_font_load_verify.py")
         self.live = self.module / ".luoshu-payload"
         self.nxt = self.module / ".luoshu-payload-next"
         for tree in (self.live, self.nxt):
@@ -69,8 +72,8 @@ class CoverageBridgeTest(unittest.TestCase):
             '#!/bin/sh\ntouch "$MODDIR/unexpected-cache-lookup"\nexit 1\n')
         (self.config / "device-font-engine.conf").write_text("cacheId=obsolete\n")
 
-    def bridge(self, command):
-        result = subprocess.run(["sh", str(ROOT / "common/app_bridge.sh"), command],
+    def bridge(self, command, *arguments):
+        result = subprocess.run(["sh", str(ROOT / "common/app_bridge.sh"), command, *arguments],
                                 env={**os.environ, "MODDIR": str(self.module)},
                                 text=True, capture_output=True, timeout=10)
         self.assertTrue(result.stdout.strip(), result.stderr)
@@ -137,12 +140,119 @@ esac
             self.assertIn("重复点击", second["message"])
             self.assertEqual((self.config / "font-coverage-remediation-paths.txt").read_text(),
                              "/system/fonts/B.ttf\n")
-            self.assertTrue((self.config / "font-payload-rebuild-pending.conf").exists())
+            self.assertFalse((self.config / "font-payload-rebuild-pending.conf").exists())
             self.assertFalse((self.module / ".font_coverage_start.lock").exists())
         finally:
             if first.poll() is None:
                 first.kill()
             first.communicate()
+
+    def test_mix_repair_uses_pinned_payload_even_without_recipe_or_library(self):
+        (self.config / "font-payload-next.conf").unlink()
+        (self.config / "active_font.conf").write_text("mix\n")
+        (self.config / "self-mount.conf").write_text(
+            "state=mounted\nbackend=self-overlay-bind\nmounted=system/fonts:overlay\n")
+        (self.module / "common/font_mix_controller.sh").write_text('''#!/bin/sh
+case "$1" in reconcile) exit 0 ;; esac
+touch "$MODDIR/unexpected-mix-rebuild"
+printf '{"status":"error","message":"must not recompose"}\\n'
+exit 1
+''')
+        (self.module / "common/font_switch_task.sh").write_text('''#!/bin/sh
+case "$1" in
+reconcile) exit 0 ;;
+start)
+    printf '%s\\n' "$2" "$LUOSHU_FORCE_REBUILD" "$LUOSHU_COVERAGE_REMEDIATE" "$LUOSHU_COVERAGE_PLAN" > "$MODDIR/repair-args"
+    printf '{"status":"ok","data":{"task":"repair-switch","font":"mix"}}\\n'
+    ;;
+esac
+''')
+        result = self.bridge("coverage_reapply")
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["data"]["task"], "repair-switch")
+        arguments = (self.module / "repair-args").read_text().splitlines()
+        self.assertEqual(arguments[:3], ["mix", "1", "1"])
+        self.assertEqual(Path(arguments[3]).read_text(), "/system/fonts/B.ttf\n")
+        self.assertFalse((self.module / "unexpected-mix-rebuild").exists())
+        self.assertFalse((self.config / "axes_mix.conf").exists())
+        self.assertFalse((self.config / "font_mix.conf").exists())
+        self.assertEqual((self.live / "system/fonts/A.ttf").read_text(), "font-A")
+
+    def test_current_font_upgrade_requires_full_apply_without_enqueuing_repair(self):
+        (self.config / "font-payload-next.conf").unlink()
+        marker = self.config / "font-payload-rebuild-pending.conf"
+        saved = "state=awaiting-explicit-apply\nfont=Selected\nreason=font-builder-changed\ntime=12345\n"
+        marker.write_text(saved)
+        (self.module / "common/font_switch_task.sh").write_text(
+            '#!/bin/sh\n[ "$1" = reconcile ] && exit 0\ntouch "$MODDIR/unexpected-repair-start"\n')
+        result = self.bridge("coverage_reapply")
+        self.assertEqual(result['status'], 'error')
+        self.assertIn('完整重新应用', result['message'])
+        self.assertFalse((self.module / "unexpected-repair-start").exists())
+        self.assertFalse((self.config / "font-coverage-remediation-paths.txt").exists())
+        self.assertEqual(marker.read_text(), saved)
+
+    def test_repair_enqueue_preserves_upgrade_marker_for_different_font(self):
+        (self.config / "font-payload-next.conf").unlink()
+        marker = self.config / "font-payload-rebuild-pending.conf"
+        saved = "state=awaiting-explicit-apply\nfont=Other\nreason=font-builder-changed\ntime=12345\n"
+        for fails in (False, True):
+            marker.write_text(saved)
+            response = json.dumps({"status": "error" if fails else "ok", "message": "fixture"})
+            script = '#!/bin/sh\n[ "$1" = reconcile ] && exit 0\ntouch "$MODDIR/repair-started"\n'
+            script += "printf '%s\\n' " + shlex.quote(response) + "\n"
+            script += "exit " + ("1" if fails else "0") + "\n"
+            (self.module / "common/font_switch_task.sh").write_text(script)
+            result = self.bridge("coverage_reapply")
+            self.assertEqual(result['status'], 'error' if fails else 'ok')
+            self.assertTrue((self.module / "repair-started").exists())
+            (self.module / "repair-started").unlink()
+            self.assertEqual(marker.read_text(), saved)
+
+    def test_old_app_mix_status_reads_only_matching_switch_repair(self):
+        (self.config / "switch_task.conf").write_text(
+            "task=repair-id\nfont=mix\ncoverageRemediate=true\nstate=running\npercent=63\n")
+        (self.module / "common/font_mix_controller.sh").write_text('''#!/bin/sh
+touch "$MODDIR/mix-status-called"
+printf '{"status":"error","message":"composite status"}\\n'
+''')
+        (self.module / "common/font_switch_task.sh").write_text('''#!/bin/sh
+[ "$1" = status ] && [ "$2" = repair-id ] || exit 1
+printf '{"status":"ok","data":{"task":"repair-id","state":"running","percent":63,"message":"repair progress"}}\\n'
+''')
+        result = self.bridge("mix_status", "repair-id")
+        self.assertEqual(result["data"]["state"], "running")
+        self.assertEqual(result["data"]["percent"], 63)
+        self.assertFalse((self.module / "mix-status-called").exists())
+        # Similar task prefixes, non-mix fonts and non-repair switches are never
+        # adopted by the compatibility route.
+        self.assertEqual(self.bridge("mix_status", "repair")['status'], 'error')
+        self.assertTrue((self.module / "mix-status-called").exists())
+        for font, repair in (("Demo", "true"), ("mix", "false")):
+            (self.module / "mix-status-called").unlink()
+            (self.config / "switch_task.conf").write_text(
+                f"task=repair-id\nfont={font}\ncoverageRemediate={repair}\nstate=running\n")
+            self.assertEqual(self.bridge("mix_status", "repair-id")['status'], 'error')
+            self.assertTrue((self.module / "mix-status-called").exists())
+
+    def test_explicit_mix_start_keeps_axes_and_modes_through_real_bridge(self):
+        runtime = self.module / "runtime/common"
+        runtime.mkdir(parents=True)
+        (runtime / "font_role_check.sh").write_text("exit 0\n")
+        (runtime / "v142_weighted_mix.sh").write_text("exit 99\n")
+        (runtime / "mix_weight_mode.sh").write_text("infer_mix_weight_mode() { echo auto; }\n")
+        (runtime / "v143_auto_multiweight_mix.sh").write_text('''#!/bin/sh
+printf '%s\\n' "$@" > "$MODDIR/request-args"
+printf '{"status":"ok","data":{"task":"explicit-mode"}}\\n'
+''')
+        engine = shlex.quote(str(ROOT / "common/legacy_v14_4/v14_mix.sh"))
+        (self.module / "common/font_mix_controller.sh").write_text(
+            'MODDIR="$MODDIR/runtime" sh ' + engine + ' "$@"\n')
+        arguments = ("CJK", "Latin", "Digit", "wght=400,wdth=90", "wght=550", "wght=400", "fixed", "auto", "fixed")
+        result = self.bridge("mix_start", *arguments)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual((self.module / "runtime/request-args").read_text().splitlines(),
+                         ["start", *arguments])
 
     def test_after_boot_live_tree_is_verified_instead_of_pending(self):
         shutil.rmtree(self.live)
@@ -150,7 +260,16 @@ esac
         (self.config / "font-payload-next.conf").unlink()
         (self.config / "self-mount.conf").write_text(
             "state=mounted\nbackend=self-overlay-bind\nmounted=system/fonts:overlay\n")
-        result = self.bridge("coverage")
+        files = {"/" + str(path.relative_to(self.live)): hashlib.sha256(path.read_bytes()).hexdigest()
+                 for path in self.live.rglob("*.ttf")}
+        (self.live / ".luoshu-inventory-output-manifest.json").write_text(json.dumps({
+            "schema": "inventory-font-output-v1", "files": files}))
+        with mock.patch.dict(os.environ, LUOSHU_VISIBLE_ROOT=str(self.live)):
+            checked = subprocess.run([sys.executable, str(self.module / "common/physical_font_load_verify.py"),
+                                      "--module", str(self.module), "verify"],
+                                     capture_output=True, text=True, timeout=5)
+            self.assertEqual(checked.returncode, 0, checked.stderr)
+            result = self.bridge("coverage")
         self.assertEqual(result["traceSource"], "physical-safe")
         self.assertEqual(result["summary"]["replaced"], 2)
         self.assertEqual(result["summary"]["remediable"], 0)

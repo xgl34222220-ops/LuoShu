@@ -73,7 +73,7 @@ exit "${MOCK_APP_CODE:-0}"
         positions = [result.stdout.index(f"[{number}/4]") for number in range(1, 5)]
         self.assertEqual(positions, sorted(positions))
         self.assertGreater(result.stdout.index("安装完成"), result.stdout.index("MOCK_DEPLOY_REACHED"))
-        self.assertIn("检测：45 个原厂字体 / 12 个可替换槽位", result.stdout)
+        self.assertIn("检测：45 个原厂字体 / 12 个已识别文字槽位", result.stdout)
         self.assertIn("App：已是当前版本", result.stdout)
         self.assertNotIn("\x1b", result.stdout)
         self.assert_cleaned()

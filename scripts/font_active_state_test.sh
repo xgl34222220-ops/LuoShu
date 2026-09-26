@@ -9,7 +9,7 @@ CFG="$MOD/config"
 PUB="$TMP/public"
 mkdir -p "$CFG" "$MOD/common" "$PUB/fonts"
 
-for file in font_active_state.sh font_provenance.sh util_functions.sh util_functions_core.sh; do
+for file in font_active_state.sh font_provenance.sh util_functions.sh util_functions_core.sh device_font_load_verify.sh physical_font_load_verify.py; do
     cp "$ROOT/common/$file" "$MOD/common/$file"
 done
 printf 'engine-v1\n' > "$MOD/common/provenance-engine-marker.py"
@@ -24,6 +24,26 @@ export MODDIR MODULE_DIR LUOSHU_PUBLIC_DIR
 . "$MOD/common/util_functions.sh"
 . "$MOD/common/font_provenance.sh"
 . "$MOD/common/font_active_state.sh"
+mkdir -p "$MOD/common/python/bin" "$MOD/.luoshu-payload/system/fonts" "$TMP/visible/system/fonts"
+cat > "$MOD/common/python/bin/luoshu-python" <<'EOF_PYTHON'
+#!/bin/sh
+unset PYTHONHOME
+exec python3 "$@"
+EOF_PYTHON
+chmod 0755 "$MOD/common/python/bin/luoshu-python"
+printf 'actual-visible-font\n' > "$MOD/.luoshu-payload/system/fonts/Demo.ttf"
+cp "$MOD/.luoshu-payload/system/fonts/Demo.ttf" "$TMP/visible/system/fonts/Demo.ttf"
+python3 - "$MOD/.luoshu-payload" <<'PY_MANIFEST'
+import hashlib, json, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+(root / '.luoshu-inventory-output-manifest.json').write_text(json.dumps({
+    'schema': 'inventory-font-output-v1', 'files': {
+        '/system/fonts/Demo.ttf': hashlib.sha256((root / 'system/fonts/Demo.ttf').read_bytes()).hexdigest()}}))
+PY_MANIFEST
+LUOSHU_VISIBLE_ROOT="$TMP/visible"
+LUOSHU_TEST_BOOT_ID=active-test-boot
+export LUOSHU_VISIBLE_ROOT LUOSHU_TEST_BOOT_ID
 
 write_direct_proof() {
     _proof=$(luoshu_provenance_direct_proof "$PUB/fonts/Demo-Regular.ttf" Demo)
@@ -38,11 +58,16 @@ EOF_PROOF
 printf 'Demo\n' > "$CFG/active_font.conf"
 printf 'state=confirmed\nfont=Demo\n' > "$CFG/font-payload-boot.conf"
 printf 'system/fonts/Demo.ttf|hash|1234\n' > "$CFG/font-payload-manifest.conf"
-printf 'state=verified\nmode=mount-confirmed\nactiveFont=Demo\n' > "$CFG/device-font-load-verification.conf"
+sh "$MOD/common/device_font_load_verify.sh" verify
 printf 'state=mounted\n' > "$CFG/self-mount.conf"
 write_direct_proof
 
 luoshu_active_payload_verified Demo "$PUB/fonts/Demo-Regular.ttf"
+if LUOSHU_TEST_BOOT_ID=different-boot luoshu_active_payload_verified Demo "$PUB/fonts/Demo-Regular.ttf"; then
+    echo 'previous boot verification reused active payload' >&2
+    exit 1
+fi
+sh "$MOD/common/device_font_load_verify.sh" verify
 if luoshu_active_payload_verified Demo; then
     echo 'direct payload reused without a source proof input' >&2
     exit 1
@@ -104,7 +129,7 @@ printf 'latin-A\n' > "$PUB/fonts/Latin-Regular.ttf"
 printf 'digit-A\n' > "$PUB/fonts/Digit-Regular.ttf"
 printf 'mix\n' > "$CFG/active_font.conf"
 printf 'state=confirmed\nfont=mix\n' > "$CFG/font-payload-boot.conf"
-printf 'state=verified\nmode=mount-confirmed\nactiveFont=mix\n' > "$CFG/device-font-load-verification.conf"
+sh "$MOD/common/device_font_load_verify.sh" verify
 cat > "$CFG/font_mix.conf" <<'EOF_MIX'
 cjk=CJK
 latin=Latin
