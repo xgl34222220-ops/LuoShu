@@ -111,15 +111,15 @@ esac
         slots = payload["slots"]
         assert payload["schema"] == "device-font-inventory-v1"
         assert payload["buildKey"] == "rom-a"
-        assert payload["mainSlot"]["slotName"] == "MiSansVF.ttf"
-        assert payload["romKind"] == "hyperos"
+        assert payload["mainSlot"]["slotName"] == "Roboto-Regular.ttf"
+        assert payload["romKind"] == "generic"
         assert "/system/fonts/Roboto-Regular.ttf" in slots
         assert "/system/fonts/MiSansVF.ttf" in slots
         assert "/system/fonts/400.ttf" in slots
         assert "/system_ext/fonts/GoogleSansText-Regular.ttf" in slots
         assert "/product/fonts/SysFont-Hans-Regular.ttf" in slots
-        assert "/system/fonts/NotoSerif-Regular.ttf" not in slots
-        assert "/system/fonts/NotoSansArabic-Regular.ttf" not in slots
+        assert "/system/fonts/NotoSerif-Regular.ttf" in slots
+        assert "/system/fonts/NotoSansArabic-Regular.ttf" in slots
         assert "/system/fonts/MiSansTCVF.ttf" not in slots
         metrics = payload["mainSlot"]["metrics"]
         assert metrics["upem"] > 0
@@ -137,15 +137,15 @@ esac
         reused = run([*base, "--build-key", "rom-a"])
         assert reused.returncode == 0, reused.stderr
         assert json.loads(reused.stdout)["status"] == "reused"
-        assert json.loads(output.read_text(encoding="utf-8"))["mainSlot"]["slotName"] == "MiSansVF.ttf"
+        assert json.loads(output.read_text(encoding="utf-8"))["mainSlot"]["slotName"] == "Roboto-Regular.ttf"
 
         # A new fingerprint forces a rescan and therefore selects the remaining AOSP main slot.
         refreshed = run([*base, "--build-key", "rom-b"])
         assert refreshed.returncode == 0, refreshed.stderr
         refreshed_payload = json.loads(output.read_text(encoding="utf-8"))
         assert refreshed_payload["buildKey"] == "rom-b"
-        assert refreshed_payload["mainSlot"]["slotName"] == "SysFont-Hans-Regular.ttf"
-        assert refreshed_payload["romKind"] == "coloros"
+        assert refreshed_payload["mainSlot"]["slotName"] == "Roboto-Regular.ttf"
+        assert refreshed_payload["romKind"] == "generic"
         assert "/system/fonts/MiSansVF.ttf" not in refreshed_payload["slots"]
 
         # When a changed build cannot be rescanned safely, the stale file is removed so both the

@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # 洛书 v14.1：完整复合字体引擎。
 # 中文字体保留为完整基底，仅把英文与数字的对应字形写入同一份字体。
-# 不裁剪 ROM 字体槽、不覆盖 fonts.xml / font_fallback.xml。
+# 仅生成组合源，实际替换路径由本机字体清单决定；不覆盖系统 XML。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -12,6 +12,18 @@ if [ -z "$MODDIR" ]; then
         MODDIR="/data/adb/modules/LuoShu"
     fi
 fi
+
+# All mutating engine work must be hosted by the isolated router runtime.
+case "$MODDIR" in
+    "${LUOSHU_REAL_MODDIR:-}/.legacy-v14-runtime") ;;
+    *)
+        case "${1:-status}" in
+            start|recover) exec sh "$MODDIR/common/font_mix.sh" "$@" ;;
+            status) exec sh "$MODDIR/common/font_mix.sh" config ;;
+            *) printf '{"status":"error","message":"字体源引擎需要隔离暂存目录"}\n'; exit 1 ;;
+        esac
+        ;;
+esac
 
 CONFIG_DIR="$MODDIR/config"
 SYSTEM_FONTS_DIR="$MODDIR/system/fonts"
@@ -38,11 +50,8 @@ LAST_MIX_ERROR=""
 
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
-[ -f "$MODDIR/common/rom_adapters.sh" ] && . "$MODDIR/common/rom_adapters.sh"
 [ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
 
-type check_coloros >/dev/null 2>&1 && check_coloros
-type check_hyperos >/dev/null 2>&1 && check_hyperos
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
@@ -129,49 +138,6 @@ validate_source() {
     return 0
 }
 
-all_text_targets() {
-    _files=""
-    type get_all_hyperos_files >/dev/null 2>&1 && _files="$_files $(get_all_hyperos_files)"
-    type get_all_generic_files >/dev/null 2>&1 && _files="$_files $(get_all_generic_files)"
-    if type get_all_coloros_names >/dev/null 2>&1; then
-        for _name in $(get_all_coloros_names); do _files="$_files ${_name}.ttf"; done
-    fi
-    printf '%s\n' "$_files"
-}
-
-clear_text_targets_in_dir() {
-    _dir="$1"
-    [ -d "$_dir" ] || return 0
-    for _file in $(all_text_targets); do rm -f "$_dir/$_file" 2>/dev/null || true; done
-    rm -rf "$_dir/.luoshu-font-store" 2>/dev/null || true
-}
-
-alias_core() {
-    _anchor="$1"; shift
-    for _file in "$@"; do
-        _font_alias "$_anchor" "$SYSTEM_FONTS_DIR/$_file" >/dev/null 2>&1 || return 1
-    done
-}
-
-alias_existing_list() {
-    _anchor="$1"; shift
-    for _file in "$@"; do
-        _rom_exact_target_exists "$_file" || continue
-        _font_alias "$_anchor" "$SYSTEM_FONTS_DIR/$_file" >/dev/null 2>&1 || true
-    done
-}
-
-verify_core_files() {
-    _dir="$1"; shift
-    for _file in "$@"; do
-        [ -s "$_dir/$_file" ] || return 1
-        _size=$(wc -c < "$_dir/$_file" 2>/dev/null | tr -d '[:space:]')
-        case "$_size" in ''|*[!0-9]*) _size=0 ;; esac
-        [ "$_size" -ge 1024 ] || return 1
-    done
-    return 0
-}
-
 recover_interrupted_payload() {
     if [ -f "$PAYLOAD_COMMIT_MARKER" ]; then
         rm -rf "$MODDIR"/.font-payload-backup.* "$MODDIR"/.font-payload-stage.* 2>/dev/null || true
@@ -192,11 +158,9 @@ payload_stage_begin() {
     PAYLOAD_BACKUP="$MODDIR/.font-payload-backup.$$"
     PAYLOAD_ACTIVATED=0
     rm -rf "$PAYLOAD_STAGE" "$PAYLOAD_BACKUP" "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || true
-    # The compatibility router already cloned the live payload and this engine
-    # replaces every text target. Copying the current font tree here again can
-    # expand dozens of large aliases into hundreds of MB on toybox cp, only for
-    # clear_text_targets_in_dir to delete them immediately. Start empty instead;
-    # PAYLOAD_BACKUP still provides the atomic rollback point during activation.
+    # This directory belongs to the isolated mix stage. Start with only the
+    # selected source; physical targets are populated once by the inventory stage.
+    # PAYLOAD_BACKUP remains the atomic rollback point for this source handoff.
     mkdir -p "$PAYLOAD_STAGE" 2>/dev/null || return 1
     return 0
 }
@@ -246,66 +210,30 @@ cleanup_mix_process() {
     rm -f "$LOCK_FILE" 2>/dev/null || true
 }
 
-populate_coloros_payload() (
-    SYSTEM_FONTS_DIR="$1"; _composite="$2"
-    _font_store_reset "$SYSTEM_FONTS_DIR" || exit 1
-    _ma=$(_font_anchor "$_composite" "$SYSTEM_FONTS_DIR" mix-composite) || exit 1
-    alias_core "$_ma" SysSans-Hans-Regular.ttf SysSans-Hant-Regular.ttf SysFont-Hans-Regular.ttf SysFont-Hant-Regular.ttf SysFont-Static-Regular.ttf SysFont-Regular.ttf SysSans-En-Regular.ttf Roboto-Regular.ttf GoogleSans-Regular.ttf GoogleSansText-Regular.ttf || exit 1
-    alias_existing_list "$_ma" Opposans-Hans-Regular.ttf Opposans-Hans-Bold.ttf Opposans-Hans-Medium.ttf Opposans-Hans-Light.ttf SysSans-Hans-Bold.ttf SysSans-Hans-Medium.ttf SysSans-Hans-Light.ttf SysSans-Hant-Bold.ttf SysSans-Hant-Medium.ttf SysSans-Hant-Light.ttf SysFont-Hans-Bold.ttf SysFont-Hans-Medium.ttf SysFont-Hans-Light.ttf SysFont-Hant-Bold.ttf SysFont-Hant-Medium.ttf SysFont-Hant-Light.ttf SysFont-Static-Bold.ttf SysFont-Static-Medium.ttf SysFont-Static-Light.ttf SysFont-Bold.ttf SysFont-Medium.ttf SysFont-Light.ttf SysFont-Thin.ttf SysFont-Black.ttf SysSans-En-Bold.ttf SysSans-En-Medium.ttf SysSans-En-Light.ttf SysSans-En-Thin.ttf SysSans-En-Black.ttf Opposans-En-Regular.ttf Opposans-En-Bold.ttf Opposans-En-Medium.ttf Opposans-En-Light.ttf OPSans-En-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf Roboto-Light.ttf Roboto-Thin.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Medium.ttf GoogleSans-Bold.ttf GoogleSansText-Medium.ttf GoogleSansText-Bold.ttf GoogleSansFlex-Regular.ttf SourceSansPro-Regular.ttf SourceSansPro-SemiBold.ttf SourceSansPro-Bold.ttf DINCondensedBold.ttf DINPro-Regular.ttf DINPro-Medium.ttf DINPro-Bold.ttf OPPODIN-Regular.ttf OPPODIN-Medium.ttf OPPODIN-Bold.ttf OPPODINCondensed-Regular.ttf OPPODINCondensed-Medium.ttf OPPODINCondensed-Bold.ttf
-    verify_core_files "$SYSTEM_FONTS_DIR" SysSans-Hans-Regular.ttf SysSans-En-Regular.ttf Roboto-Regular.ttf || exit 1
-)
-
-populate_hyperos_payload() (
-    SYSTEM_FONTS_DIR="$1"; _composite="$2"
-    _font_store_reset "$SYSTEM_FONTS_DIR" || exit 1
-    _ma=$(_font_anchor "$_composite" "$SYSTEM_FONTS_DIR" mix-composite) || exit 1
-    alias_core "$_ma" MiSansVF.ttf MiSansVF_Overlay.ttf MiSansTCVF.ttf MiSansL3.otf MiSansLatinVF.ttf Roboto-Regular.ttf GoogleSans-Regular.ttf GoogleSansText-Regular.ttf 100.ttf 200.ttf 300.ttf 350.ttf 400.ttf 500.ttf 600.ttf 700.ttf 800.ttf 900.ttf || exit 1
-    alias_existing_list "$_ma" Roboto-Medium.ttf Roboto-Bold.ttf Roboto-Light.ttf Roboto-Thin.ttf RobotoFlex-Regular.ttf RobotoStatic-Regular.ttf GoogleSans-Medium.ttf GoogleSans-Bold.ttf GoogleSansText-Medium.ttf GoogleSansText-Bold.ttf GoogleSansFlex-Regular.ttf
-    verify_core_files "$SYSTEM_FONTS_DIR" MiSansVF.ttf MiSansLatinVF.ttf Roboto-Regular.ttf 400.ttf 700.ttf || exit 1
-)
-
-populate_generic_payload() (
-    SYSTEM_FONTS_DIR="$1"; _composite="$2"
-    _font_store_reset "$SYSTEM_FONTS_DIR" || exit 1
-    _ma=$(_font_anchor "$_composite" "$SYSTEM_FONTS_DIR" mix-composite) || exit 1
-    alias_core "$_ma" NotoSansCJK-Regular.ttc NotoSansSC-Regular.otf NotoSansTC-Regular.otf NotoSans-Regular.ttf Roboto-Regular.ttf Roboto-Medium.ttf Roboto-Bold.ttf Roboto-Light.ttf GoogleSans-Regular.ttf GoogleSansText-Regular.ttf DroidSans.ttf || exit 1
-    verify_core_files "$SYSTEM_FONTS_DIR" NotoSansCJK-Regular.ttc Roboto-Regular.ttf || exit 1
-)
-
-sync_secondary_partition() {
-    _part="$1"; _real_root="$2"; _dest="$MODDIR/$_part/fonts"
-    _stage="$MODDIR/.${_part}-fonts-stage.$$"; _backup="$MODDIR/.${_part}-fonts-backup.$$"
-    rm -rf "$_stage" "$_backup" 2>/dev/null || true
-    mkdir -p "$_stage" 2>/dev/null || return 1
-    if [ -d "$_dest" ]; then
-        cp -af "$_dest/." "$_stage/" 2>/dev/null || cp -rfp "$_dest/." "$_stage/" 2>/dev/null || true
-    fi
-    clear_text_targets_in_dir "$_stage"
-    for _src in "$SYSTEM_FONTS_DIR"/*; do
-        [ -f "$_src" ] || continue
-        _file=$(basename "$_src")
-        [ -e "$_real_root/$_file" ] || continue
-        link_or_copy_font "$_src" "$_stage/$_file" 2>/dev/null || { rm -rf "$_stage"; return 1; }
-    done
-    mkdir -p "${_dest%/*}" 2>/dev/null || { rm -rf "$_stage"; return 1; }
-    [ ! -d "$_dest" ] || mv "$_dest" "$_backup" 2>/dev/null || { rm -rf "$_stage"; return 1; }
-    if mv "$_stage" "$_dest" 2>/dev/null; then
-        rm -rf "$_backup" 2>/dev/null || true
-        chmod -R u=rwX,go=rX "$_dest" 2>/dev/null || true
-        return 0
-    fi
-    rm -rf "$_dest" 2>/dev/null || true
-    [ ! -d "$_backup" ] || mv "$_backup" "$_dest" 2>/dev/null || true
-    rm -rf "$_stage" 2>/dev/null || true
-    return 1
+write_fixed_source_weights() {
+    _wfs_helper="$LUOSHU_REAL_MODDIR/common/mix_source_manifest.py"
+    _wfs_python="$MODDIR/common/python"
+    [ -f "$_wfs_helper" ] || return 1
+    PYTHONHOME="$_wfs_python" \
+    PYTHONPATH="$_wfs_python/lib/python3.14:$_wfs_python/lib/python3.14/site-packages" \
+    LD_LIBRARY_PATH="$_wfs_python/lib:$_wfs_python/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "$_wfs_python/bin/luoshu-python" "$_wfs_helper" \
+        --manifest "$PAYLOAD_STAGE/.luoshu-font-store/.luoshu-mix-source-weights.json" \
+        --anchor mix-composite.font --composite "$COMPOSITE_RESULT" \
+        --cjk "$1" --latin "$2" --digit "$3"
 }
 
-sync_secondary_coloros_dirs() {
-    [ "$IS_COLOROS" = "true" ] || return 0
-    sync_secondary_partition system_ext /system_ext/fonts || return 1
-    sync_secondary_partition product /product/fonts || return 1
-    return 0
-}
+stage_composite_source() (
+    _scs_store="$1/.luoshu-font-store"
+    _scs_source="$2"
+    [ -s "$_scs_source" ] || exit 1
+    mkdir -p "$_scs_store" 2>/dev/null || exit 1
+    # Keep one immutable source; the inventory stage derives only real targets.
+    ln "$_scs_source" "$_scs_store/mix-composite.font" 2>/dev/null ||
+        cp -f "$_scs_source" "$_scs_store/mix-composite.font" 2>/dev/null || exit 1
+    chmod 0644 "$_scs_store/mix-composite.font" 2>/dev/null || true
+    [ -s "$_scs_store/mix-composite.font" ]
+)
 
 composite_hash_file() {
     _hf="$1"
@@ -392,7 +320,7 @@ build_composite_file() {
     [ -f "$MODDIR/common/composite_font.py" ] && [ -f "$_runner" ] || { set_mix_error '完整复合字体引擎缺失'; return 1; }
     [ -x "$MODDIR/common/python/bin/luoshu-python" ] || chmod 0755 "$MODDIR/common/python/bin/luoshu-python" 2>/dev/null || true
     check_composite_runtime || return 1
-    _cache="$MODDIR/cache/full-composite-v7"
+    _cache="$MODDIR/cache/full-composite-v8"
     mkdir -p "$_cache" "$MODDIR/cache/tmp" 2>/dev/null || { set_mix_error '无法创建复合字体缓存目录'; return 1; }
     _cjk_hash=$(composite_hash_file "$_cjk_src")
     _latin_hash=$(composite_hash_file "$_latin_src")
@@ -400,7 +328,7 @@ build_composite_file() {
     COMPOSITE_CJK_HASH="$_cjk_hash"
     COMPOSITE_LATIN_HASH="$_latin_hash"
     COMPOSITE_DIGIT_HASH="$_digit_hash"
-    _key_src="${_cjk_hash}-${_latin_hash}-${_digit_hash}-full-composite-v7-metrics"
+    _key_src="${_cjk_hash}-${_latin_hash}-${_digit_hash}-full-composite-v8-metrics"
     _key=$(printf '%s' "$_key_src" | { if command -v sha256sum >/dev/null 2>&1; then sha256sum; elif command -v toybox >/dev/null 2>&1; then toybox sha256sum; else cksum; fi; } | awk '{print $1}')
     _cached="$_cache/${_key}.otf"; _report="$_cache/${_key}.json"; _progress="$CONFIG_DIR/composite_progress.json"
     rm -f "$_cache"/.*.tmp.* 2>/dev/null || true
@@ -485,7 +413,7 @@ prepare_mix_config() {
         printf 'cjk=%s\n' "$_cjk"
         printf 'latin=%s\n' "$_latin"
         printf 'digit=%s\n' "$_digit"
-        printf 'isolation=full-composite-v7\n'
+        printf 'isolation=full-composite-v8\n'
         printf 'characterIsolation=true\n'
         printf 'composite=true\n'
         printf 'xmlOverlay=false\n'
@@ -532,27 +460,28 @@ apply_mix() {
     ensure_work_dir "$MODDIR/logs" "日志目录" || return 4
     build_composite_file "$_cjk_src" "$_latin_src" "$_digit_src" || return 5
     payload_stage_begin || { set_mix_error '无法创建字体负载暂存区'; return 5; }
-    if [ "$IS_HYPEROS" = "true" ]; then
-        populate_hyperos_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成 HyperOS 字体负载失败'; return 5; }
-    elif [ "$IS_COLOROS" = "true" ]; then
-        populate_coloros_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成 ColorOS 字体负载失败'; return 5; }
-    else
-        populate_generic_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成通用 Android 字体负载失败'; return 5; }
-    fi
+    stage_composite_source "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || {
+        set_mix_error '保存组合字体源失败'; return 5;
+    }
+    write_fixed_source_weights "$_cjk_src" "$_latin_src" "$_digit_src" || {
+        set_mix_error '记录组合源真实字重失败'; return 6;
+    }
     write_mix_generation_manifest "$_cjk" "$_latin" "$_digit" || { set_mix_error '无法写入本次组合字体校验清单'; return 6; }
-    prepare_mix_config "$_cjk" "$_latin" "$_digit" || { set_mix_error '无法准备字体组合状态'; return 6; }
+    if [ "${LUOSHU_MIX_CONTROLLER_OWNS_COMMIT:-false}" != true ]; then
+        prepare_mix_config "$_cjk" "$_latin" "$_digit" || { set_mix_error '无法准备字体组合状态'; return 6; }
+    fi
     payload_stage_activate || { set_mix_error '无法原子替换字体负载'; return 6; }
-    if ! commit_mix_config; then
+    if [ "${LUOSHU_MIX_CONTROLLER_OWNS_COMMIT:-false}" = true ]; then
+        # Only the source handoff is committed here. Device mapping can still
+        # fail; the public selection/reboot state belongs to the outer commit.
+        printf 'time=%s\n' "$(date +%s)" > "$PAYLOAD_COMMIT_MARKER" 2>/dev/null || return 6
+    elif ! commit_mix_config; then
         set_mix_error '无法提交字体组合状态，已恢复旧字体负载'
         return 6
     fi
     payload_stage_finalize
     chmod 0755 "$SYSTEM_FONTS_DIR" 2>/dev/null || true
     chmod 0644 "$SYSTEM_FONTS_DIR"/* 2>/dev/null || true
-    if [ "$IS_COLOROS" = "true" ]; then
-        sync_secondary_coloros_dirs || echo '警告：ColorOS 辅助分区字体同步未完全成功，主字体负载已保留' >&2
-    fi
-    type luoshu_sync_mount_payload >/dev/null 2>&1 && luoshu_sync_mount_payload 2>/dev/null || true
     rm -f "$LOCK_FILE" 2>/dev/null || true
     trap - EXIT INT TERM
     return 0
@@ -590,8 +519,11 @@ case "${1:-status}" in
                 _finished=$(date +%s)
                 _message='完整复合字体已准备，完整重启后生效'
                 [ "$COMPOSITE_CACHE_HIT" = true ] && _message='已使用验证缓存准备字体组合，完整重启后生效'
+                [ "${LUOSHU_MIX_CONTROLLER_OWNS_COMMIT:-false}" != true ] || _message='组合源已生成，正在按本机清单生成系统字体'
                 write_task "$_task" success "$_message" "$_cjk" "$_latin" "$_digit" "$_started" "$_finished"
-                command -v cmd >/dev/null 2>&1 && cmd notification post -t 洛书 luoshu-mix "字体组合已准备，请完整重启手机。" >/dev/null 2>&1 || true
+                if [ "${LUOSHU_MIX_CONTROLLER_OWNS_COMMIT:-false}" != true ]; then
+                    command -v cmd >/dev/null 2>&1 && cmd notification post -t 洛书 luoshu-mix "字体组合已准备，请完整重启手机。" >/dev/null 2>&1 || true
+                fi
             else
                 _rc=$?; _finished=$(date +%s)
                 _failure="${LAST_MIX_ERROR:-}"

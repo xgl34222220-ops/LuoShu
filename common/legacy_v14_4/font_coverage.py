@@ -77,9 +77,18 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("font", type=Path)
     parser.add_argument("--brief", action="store_true")
+    parser.add_argument("--donor", action="store_true")
     args = parser.parse_args()
     try:
-        result = inspect(args.font)
+        if args.donor:
+            # Canonical donor policy is shared with the inventory engine entry.
+            import runpy
+            import sys
+            common = Path(__file__).resolve().parents[1]
+            sys.path.insert(0, str(common))
+            result = runpy.run_path(str(common / "font_coverage.py"))["inspect_donor"](args.font)
+        else:
+            result = inspect(args.font)
     except Exception as error:  # corrupted fonts must never reach Android's renderer
         result = {"safe": False, "message": f"无法读取字形覆盖：{error}"}
     if args.brief:

@@ -197,6 +197,99 @@ class LayoutDiagnosticTest(unittest.TestCase):
             self.assertNotIn("private-source-name", json.dumps(report))
             self.assertNotIn("private-font.ttf", json.dumps(report))
 
+    def test_mix_performance_exports_file_face_counts_without_private_task_data(self):
+        progress = self.module / "config/mix-inventory-progress.json"
+        finalize = self.module / "config/mix-finalize-state.conf"
+        progress.write_text(json.dumps({
+            "phase": "supplement", "path": "/system/fonts/NotoSansCJK-Regular.ttc",
+            "fileCompleted": 82, "fileTotal": 283, "faceIndex": 3, "faceTotal": 10,
+            "phaseElapsedSeconds": 385.125, "updatedAt": 1790453269,
+            "task": "private-task-id", "requestId": "private-request-id",
+            "source": "/sdcard/Private-user-selected.ttf", "build": "private-device-info",
+        }), encoding="utf-8")
+        finalize.write_text(
+            "state=running\nelapsed=385\nfileCompleted=82\nfileTotal=283\n"
+            "phase=supplement\nphaseElapsedSeconds=384.5\nfaceIndex=3\nfaceTotal=10\n"
+            "path=/system/fonts/NotoSansCJK-Regular.ttc\n"
+            "task=private-task-id\nrequestId=private-request-id\n"
+            "message=Private-user-selected.ttf 1790453269 private-device-info\n"
+            "time=1790453269\n", encoding="utf-8")
+        original = {path: path.read_bytes() for path in (progress, finalize)}
+        report = self.collect()
+        observed = report["mixPerformance"]
+        self.assertEqual(observed["inventoryProgress"], {
+            "status": "observed", "phase": "supplement",
+            "path": "/system/fonts/NotoSansCJK-Regular.ttc",
+            "fileCompleted": 82, "fileTotal": 283, "faceIndex": 3, "faceTotal": 10,
+            "phaseElapsedSeconds": 385.125,
+        })
+        self.assertEqual(observed["finalizeState"], {
+            **observed["inventoryProgress"], "state": "running", "elapsed": 385,
+            "phaseElapsedSeconds": 384.5,
+        })
+        self.assertEqual(report["status"], "complete")
+        text = json.dumps(report, allow_nan=False)
+        for secret in ("private-task-id", "private-request-id", "Private-user-selected",
+                       "private-device-info", "1790453269"):
+            self.assertNotIn(secret, text)
+        for path, data in original.items():
+            self.assertEqual(path.read_bytes(), data)
+
+    def test_mix_performance_missing_or_invalid_optional_files_do_not_mark_partial(self):
+        report = self.collect()
+        self.assertEqual(report["mixPerformance"], {
+            "inventoryProgress": {"status": "missing"}, "finalizeState": {"status": "missing"}})
+        self.assertEqual(report["status"], "complete")
+        progress = self.module / "config/mix-inventory-progress.json"
+        for payload in (b"[]", b"{", b"\xff", b" " * (diag.MAX_MIX_STATE_BYTES + 1)):
+            with self.subTest(payload=payload[:20]):
+                progress.write_bytes(payload)
+                report = self.collect()
+                self.assertEqual(report["mixPerformance"]["inventoryProgress"], {"status": "invalid"})
+                self.assertEqual(report["status"], "complete")
+        progress.unlink()
+        progress.symlink_to(self.inventory_path)
+        report = self.collect()
+        self.assertEqual(report["mixPerformance"]["inventoryProgress"], {"status": "invalid"})
+        self.assertEqual(report["status"], "complete")
+
+    def test_mix_performance_rejects_malformed_json_fields(self):
+        for field in (*diag.MIX_COUNTER_LIMITS, *diag.MIX_DURATION_FIELDS):
+            invalid = [True, False, -1, "12", None, {}, [], float("inf"), float("nan"), 10**100]
+            if field in diag.MIX_COUNTER_LIMITS:
+                invalid += [1.5, diag.MIX_COUNTER_LIMITS[field] + 1]
+            else:
+                invalid += [7 * 24 * 60 * 60 + 1]
+            for value in invalid:
+                with self.subTest(field=field, value=value):
+                    self.assertNotIn(field, diag.mix_progress_only({field: value}))
+        self.assertEqual(diag.mix_progress_only({"phase": ["private-font"], "state": "private-task"}),
+                         {"phase": "unknown", "state": "unknown"})
+        for values in ({"fileCompleted": 4, "fileTotal": 3}, {"faceIndex": 3, "faceTotal": 3},
+                       {"faceIndex": 0, "faceTotal": 0}):
+            self.assertEqual(diag.mix_progress_only(values), {})
+
+    def test_mix_performance_conf_requires_strict_numeric_values_and_unambiguous_keys(self):
+        finalize = self.module / "config/mix-finalize-state.conf"
+        finalize.write_text(
+            "elapsed=1e3\nphaseElapsedSeconds=NaN\nfileCompleted=+3\nfileTotal=12.0\n"
+            "faceIndex=02\nfaceTotal=1000000000000000000000000000000000000000000000\n",
+            encoding="utf-8")
+        self.assertEqual(diag.mix_progress_file(finalize, configuration=True), {"status": "observed"})
+        finalize.write_text("elapsed=1\nelapsed=2\nelapsed=3\nfileTotal=12\n", encoding="utf-8")
+        self.assertEqual(diag.mix_progress_file(finalize, configuration=True),
+                         {"status": "observed", "fileTotal": 12})
+
+    def test_mix_performance_accepts_only_safe_system_slot_paths(self):
+        for value in ("/sdcard/Private.ttf", "/data/fonts/Private.ttf", "/apex/font/Private.ttf",
+                      "/system/fonts/../Private.ttf", "/system//fonts/Private.ttf",
+                      "/system/secret\nfolder/Private.ttf", "/system/fonts/Private.woff2",
+                      "/system/" + "x" * 1100 + "/Private.ttf", {"path": "/system/fonts/Private.ttf"}):
+            with self.subTest(value=value):
+                self.assertNotIn("path", diag.mix_progress_only({"path": value}))
+        path = "/product/nested/fonts/Font.otc"
+        self.assertEqual(diag.mix_progress_only({"path": path}), {"path": path})
+
     def test_stock_coverage_uses_validated_allowlisted_fields_only(self):
         coverage = {"hasHan": True, "hasLatin": True, "hanCount": 6, "latinCount": 4,
                     "unicodeCount": 18, "cjkPunctuation": [0x3002],

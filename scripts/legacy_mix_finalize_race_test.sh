@@ -10,6 +10,20 @@ MODULE="$TMP/module"
 mkdir -p "$MODULE/.luoshu-mix-stage/system/fonts" "$MODULE/config" "$MODULE/common" "$MODULE/logs"
 cp "$ROOT/common/background_task.sh" "$MODULE/common/background_task.sh"
 chmod 0755 "$MODULE/common/background_task.sh"
+mkdir -p "$MODULE/common/python/bin"
+cp "$ROOT/common/mix_stage_watchdog.py" "$MODULE/common/mix_stage_watchdog.py"
+cat > "$MODULE/common/python/bin/luoshu-python" <<'EOF_PYTHON'
+#!/bin/sh
+unset PYTHONHOME PYTHONPATH LD_LIBRARY_PATH
+exec python3 "$@"
+EOF_PYTHON
+chmod 0755 "$MODULE/common/python/bin/luoshu-python"
+cat > "$MODULE/common/inventory_font_stage.sh" <<'EOF_INVENTORY_STAGE'
+#!/bin/sh
+[ "$2" = mix ] || exit 1
+[ -s "$1/system/fonts/MiSansVF.ttf" ] || exit 1
+printf 'mapped\n' >> "$LUOSHU_REAL_MODDIR/inventory-stage-calls"
+EOF_INVENTORY_STAGE
 printf 'module\n' > "$MODULE/module.prop"
 printf 'new-composite\n' > "$MODULE/.luoshu-mix-stage/system/fonts/MiSansVF.ttf"
 printf 'default\n' > "$MODULE/config/active_font.conf"
@@ -48,6 +62,23 @@ grep -q '^font=mix$' "$MODULE/config/font-payload-next.conf"
 grep -q '^requestId=request-a$' "$MODULE/config/font-payload-next.conf"
 grep -q '^compositeHash=composite-a$' "$MODULE/config/font-payload-next.conf"
 test ! -e "$MODULE/.mix-stage-finalize.lock"
+test "$(wc -l < "$MODULE/inventory-stage-calls" | tr -d '[:space:]')" = 1
+
+# The monitor can commit and remove stage metadata before the outer weighted
+# worker reaches prepare-finalize. The worker's inherited request identity must
+# recognize its own completed tree, without accepting an unrelated/old task.
+test ! -e "$MODULE/config/mix-stage-next.conf"
+MODDIR="$MODULE" LUOSHU_MIX_REQUEST_ID=request-a sh "$ROUTER" prepare-finalize > "$TMP/prepare-after-commit.out" 2>&1
+grep -q '"status":"ok"' "$TMP/prepare-after-commit.out"
+if MODDIR="$MODULE" LUOSHU_MIX_REQUEST_ID=request-other sh "$ROUTER" prepare-finalize > "$TMP/prepare-wrong-request.out" 2>&1; then
+    echo 'A different request reused the already committed mix' >&2
+    exit 1
+fi
+if MODDIR="$MODULE" LUOSHU_MIX_REQUEST_ID= sh "$ROUTER" prepare-finalize > "$TMP/prepare-no-request.out" 2>&1; then
+    echo 'A caller without generation identity reused the already committed mix' >&2
+    exit 1
+fi
+grep -q '^requestId=request-a$' "$MODULE/config/font-payload-next.conf"
 
 # Recover the narrow interrupted state: directory rename completed, state write
 # did not. The preserved stage metadata is sufficient to finish without rebuild.
@@ -143,14 +174,15 @@ rm -rf "$MODULE/.luoshu-payload-next"
 rm -f "$MODULE/config/font-payload-next.conf"
 cat > "$MODULE/config/mix-finalize-state.conf" <<'EOF_FINALIZE_FAIL'
 state=failed
+task=axes-fast
 message=提交校验失败
 EOF_FINALIZE_FAIL
 MODDIR="$MODULE" sh "$ROUTER" status axes-fast > "$TMP/status-failed.out"
 grep -q '"state":"failed"' "$TMP/status-failed.out"
 grep -q '提交校验失败' "$TMP/status-failed.out"
 
-# A successful generator without a durable next payload must never remain at 99%
-# forever. Status polling starts an identity-bound detached finalize recovery worker.
+# Status polling may recover the atomic commit of an already mapped payload.
+# It must never restart inventory generation merely because a child succeeded.
 rm -f "$MODULE/config/mix-finalize-state.conf"
 rm -rf "$MODULE/.luoshu-payload-next"
 rm -f "$MODULE/config/font-payload-next.conf"
@@ -172,6 +204,7 @@ latin=LatinRecovery
 digit=DigitRecovery
 compositeHash=composite-recovery
 EOF_MANIFEST_RECOVERY
+printf 'state=ready\nrequestId=request-recovery\n' > "$MODULE/.luoshu-mix-stage/.luoshu-precommit-ready.conf"
 cat > "$MODULE/config/axes_task.conf" <<'EOF_AXES_RECOVERY'
 task=axes-recovery
 state=success
@@ -206,7 +239,7 @@ grep -q 'ensure_mix_finalize_worker' "$ROUTER"
 grep -q 'prepare_mix_stage_for_commit' "$ROUTER"
 grep -q 'PRECOMMIT_STATE=' "$ROUTER"
 grep -q 'prepare-finalize' "$ROUTER"
-grep -q " 90 " "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
+grep -q " 70 " "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
 grep -q " 99 " "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
 grep -q 'prepare_compat_payload' "$ROOT/common/legacy_v14_4/v142_weighted_mix.sh"
 grep -q 'prepare_compat_payload' "$ROOT/common/legacy_v14_4/v143_auto_multiweight_mix.sh"

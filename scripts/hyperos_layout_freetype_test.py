@@ -145,13 +145,18 @@ class FreeType:
             self.check(self.api.FT_Done_Face(face), 'close font')
 
 
-def fixture_font(path, upem, cff, latin_bottom=-80, combining_bottom=None, variable=False):
+def fixture_font(path, upem, cff, latin_bottom=-80, combining_bottom=None, variable=False,
+                 extra_codepoint=None, substitution=False):
     """Include a distant, unused glyph to model a large donor's global bounds."""
     names = ['.notdef', 'A', 'zero', 'two', 'unused.extreme']
     cmap = {65: 'A', 48: 'zero', 50: 'two'}
     if combining_bottom is not None:
         names.append('combining.low')
         cmap[0x323] = 'combining.low'
+    if extra_codepoint is not None or substitution:
+        names.append('extra.low')
+        if extra_codepoint is not None:
+            cmap[extra_codepoint] = 'extra.low'
     scale = upem / 1000
     width = round(600 * scale)
     fb = FontBuilder(upem, isTTF=not cff)
@@ -164,6 +169,8 @@ def fixture_font(path, upem, cff, latin_bottom=-80, combining_bottom=None, varia
             bottom, top = (-500, 1500) if name == 'unused.extreme' else (latin_bottom, 720)
             if name == 'combining.low':
                 bottom, top = combining_bottom, combining_bottom + 40
+            if name == 'extra.low':
+                bottom, top = -350, 720
             for method, point in (
                     ('moveTo', (0, bottom)), ('lineTo', (500, bottom)),
                     ('lineTo', (400, top)), ('lineTo', (100, top))):
@@ -185,6 +192,9 @@ def fixture_font(path, upem, cff, latin_bottom=-80, combining_bottom=None, varia
         fb.setupMaxp()
     if variable:
         fb.setupFvar([('wght', 100, 400, 900, 'Weight')], [])
+    if substitution:
+        from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+        addOpenTypeFeaturesFromString(fb.font, 'feature liga { sub A A by extra.low; } liga;')
     fb.save(path)
 
 
@@ -377,6 +387,13 @@ class HyperOSLayoutFreeTypeTest(unittest.TestCase):
         for cff in (False, True):
             for options in ({'latin_bottom': -350}, {'combining_bottom': -350},
                             {'variable': True}):
+                with self.subTest(cff=cff, options=options):
+                    self.assert_bitmap_preserved(self.bitmap_contract(), cff=cff, **options)
+
+    def test_qq_bitmap_alignment_protects_all_retained_and_substituted_ink(self):
+        for cff in (False, True):
+            for options in ({'extra_codepoint': 0x1E9E}, {'extra_codepoint': 0x3B2},
+                            {'extra_codepoint': 0x1AB0}, {'substitution': True}):
                 with self.subTest(cff=cff, options=options):
                     self.assert_bitmap_preserved(self.bitmap_contract(), cff=cff, **options)
 

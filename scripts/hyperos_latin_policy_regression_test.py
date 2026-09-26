@@ -123,40 +123,39 @@ class LatinPolicyRegressionTest(unittest.TestCase):
             self.assertEqual(len(actual), len(set(actual)))
             self.assertEqual(set(actual), set(RESTORED + PRESERVED))
 
-    @staticmethod
-    def coverage_checker():
-        # Execute the actual pure revision predicates, isolated from fontTools
-        # and filesystem scanning. Full scanner integration stays in its suite.
+    def test_scanner_revision_invalidates_all_old_vendor_inventories(self):
+        # This workflow intentionally has no FontTools dependency. Execute only
+        # the literal revisions; scanner_refresh_test covers actual validation.
         path = ROOT / 'common/font_inventory_scan.py'
         tree = ast.parse(path.read_text(), filename=str(path))
-        selected = [ast.ImportFrom(module='__future__',
-                                   names=[ast.alias(name='annotations')], level=0)]
+        revisions = {}
         for node in tree.body:
-            if isinstance(node, ast.Assign) and any(
-                    isinstance(target, ast.Name) and target.id == 'HYPEROS_COVERAGE_REVISION'
-                    for target in node.targets):
-                selected.append(node)
-            elif isinstance(node, ast.FunctionDef) and node.name in (
-                    '_is_hyperos_inventory', '_has_current_hyperos_coverage'):
-                selected.append(node)
-        namespace = {}
-        module = ast.fix_missing_locations(ast.Module(body=selected, type_ignores=[]))
-        exec(compile(module, str(path), 'exec'), namespace)
-        return namespace['_has_current_hyperos_coverage']
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id in (
+                            'SCANNER_REVISION', 'METRICS_REVISION'):
+                        revisions[target.id] = ast.literal_eval(node.value)
+        self.assertGreaterEqual(revisions['SCANNER_REVISION'], 9)
+        self.assertGreaterEqual(revisions['METRICS_REVISION'], 4)
 
-    def test_v430_inventory_requires_refresh_and_new_inventory_is_reusable(self):
-        current = self.coverage_checker()
-        self.assertFalse(current({'romKind': 'hyperos', 'hyperosCoverageRevision': 3}))
-        self.assertFalse(current({'romKind': 'hyperos'}))
-        self.assertTrue(current({'romKind': 'hyperos', 'hyperosCoverageRevision': 4}))
-        self.assertFalse(current({'romKind': 'generic', 'hyperosCoverageRevision': 3,
-                                  'scanSummary': {'fontSignatures': {'hyperos': ['MiSansVF.ttf']}}}))
-
-    def test_coverage_upgrade_does_not_force_coloros_or_generic_refresh(self):
-        current = self.coverage_checker()
-        self.assertTrue(current({'romKind': 'coloros', 'hyperosCoverageRevision': 3,
-                                 'scanSummary': {'fontSignatures': {'hyperos': ['MiSansVF.ttf']}}}))
-        self.assertTrue(current({'romKind': 'generic', 'hyperosCoverageRevision': 3}))
+    def test_scanner_does_not_select_coverage_by_vendor(self):
+        for filename in ('font_inventory.py', 'font_inventory_scan.py'):
+            source = (ROOT / 'common' / filename).read_text()
+            tree = ast.parse(source, filename=filename)
+            functions = {node.name for node in ast.walk(tree)
+                         if isinstance(node, ast.FunctionDef)}
+            self.assertTrue(functions.isdisjoint({
+                '_is_hyperos_inventory', '_has_current_hyperos_coverage',
+                '_heuristic_candidate', '_font_signatures'}))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom):
+                    self.assertNotIn(node.module, (
+                        'hyperos_physical_policy', 'coloros_metrics_batch',
+                        'hyperos_metrics_batch'))
+                if isinstance(node, ast.Compare):
+                    # Compatibility reports may retain romKind='generic', but
+                    # it must never be used as a branch selecting coverage.
+                    self.assertNotIn('romKind', ast.unparse(node))
 
     def test_dynamic_hyperos_overlay_exemption_is_unchanged(self):
         logical = '/system/fonts/MiSansVF_Overlay.ttf'

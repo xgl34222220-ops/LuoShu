@@ -97,7 +97,6 @@ luoshu_self_mount_ensure
 luoshu_used_partitions
 luoshu_write_mount_probe
 luoshu_write_mount_probes
-prune_composite_cache
 python_run
 read_prop
 read_value

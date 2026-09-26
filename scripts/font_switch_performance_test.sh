@@ -19,17 +19,13 @@ grep -q 'mark_load_verification_pending' "$ROOT/common/font_switch_task.sh"
 grep -q 'heartbeat=%s' "$ROOT/common/font_switch_task.sh"
 grep -q 'timeout=%s' "$ROOT/common/font_switch_task.sh"
 
-# The full v4 manager is preserved behind the router for inventory and regression coverage.
-# Its performance markers remain pinned here, but final App apply no longer enters this body.
-grep -q 'luoshu_switch_perf_mark complete' "$ROOT/common/font_manager_v4.sh"
-grep -q 'LUOSHU_FOREGROUND_QUICK_SWITCH=1' "$ROOT/common/font_manager_v4.sh"
-grep -q 'luoshu_font_lock_acquire' "$ROOT/common/font_manager_v4.sh"
-grep -q 'luoshu_switch_signal_exit 143' "$ROOT/common/font_manager_v4.sh"
-
-# Final apply is intentionally the v14.4 physical-file path. Keep the modern identity lock,
-# but never reconnect the device-template/slot/XML payload pipeline that caused the 94% stall.
-grep -q 'legacy_v14_4_switch.sh' "$ROOT/common/font_manager.sh"
-grep -q 'legacy_lock_acquire' "$ROOT/common/legacy_v14_4_switch.sh"
+# The index backend may no longer contain a second live-mutating mapper.
+# All direct, compatibility and async entry behavior is covered by
+# font_mutation_entry_test.py; the safe backend owns caching, locks and metrics.
+grep -q 'font_switch_safe.sh' "$ROOT/common/font_manager.sh"
+grep -q 'exec sh "$SAFE_SWITCH" "$@"' "$ROOT/common/legacy_v14_4_switch.sh"
+! grep -qE 'apply_font_by_rom|device_font_template|font_config_enable_for_payload' "$ROOT/common/font_manager_v4.sh"
+grep -q 'lock_acquire' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'safe_switch_cache_restore' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'safe_switch_cache_store' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'LUOSHU_SWITCH_CACHE_MAX_KB:-786432' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
@@ -38,7 +34,8 @@ grep -q 'safe_validation_restore' "$ROOT/common/legacy_v14_4/font_switch_safe.sh
 grep -q "progress 80 '已复用本机字体对齐缓存'" "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'prewarm_font()' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'prewarm) prewarm_font' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
-grep -q 'schedule_font_prewarm' "$ROOT/common/native_import.sh"
+! grep -q 'schedule_font_prewarm' "$ROOT/common/native_import.sh"
+grep -q 'import_run_engine' "$ROOT/common/native_import.sh"
 grep -q 'prewarm-start' "$ROOT/common/app_bridge.sh"
 grep -q 'ionice -c 3 nice -n 19' "$ROOT/common/legacy_v14_4/font_switch_safe.sh"
 grep -q 'fun prewarmFont' "$ROOT/android-app/app/src/main/java/io/github/xgl34222220/luoshu/LuoShuViewModel.kt"
@@ -108,11 +105,12 @@ _fsp_tmp="$(mktemp -d)"
 )
 rm -rf "$_fsp_tmp"
 
-# The ROM adapter stages anchors only; the preserved v4 manager owns one final builder invocation.
+# Archived policy fixture stays separate from the active manager entry.
 quick_body="$(awk '/^apply_font_by_rom\(\)/,/^}/' "$ROOT/common/device_font_payload_policy.sh")"
 ! printf '%s\n' "$quick_body" | grep -q 'font_config_enable_for_payload'
 manager_switch_body="$(awk '/^switch_font\(\)/,/^}/' "$ROOT/common/font_manager_v4.sh")"
-test "$(printf '%s\n' "$manager_switch_body" | grep -c 'font_config_enable_for_payload')" -eq 2
+! printf '%s\n' "$manager_switch_body" | grep -q 'font_config_enable_for_payload'
+printf '%s\n' "$manager_switch_body" | grep -q 'action switch "$1"'
 
 # The final source-order manifest builder must checksum one inode once even when HyperOS exposes
 # it through dozens of hard-link aliases. This remains a regression guard for the preserved v4

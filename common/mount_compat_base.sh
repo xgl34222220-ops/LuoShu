@@ -84,19 +84,19 @@ _luoshu_nested_font_root_safe() {
     _lnfr_rest="$_lnfr_rel"
     while [ -n "$_lnfr_rest" ]; do
         case "$_lnfr_rest" in
-            */*) _lnfr_component=\${_lnfr_rest%%/*}; _lnfr_rest=\${_lnfr_rest#*/} ;;
+            */*) _lnfr_component=${_lnfr_rest%%/*}; _lnfr_rest=${_lnfr_rest#*/} ;;
             *) _lnfr_component="$_lnfr_rest"; _lnfr_rest='' ;;
         esac
         case "$_lnfr_component" in
             ''|.|..|*[!A-Za-z0-9._+-]*) return 1 ;;
         esac
     done
-    _lnfr_prefix="\${_lnfr_part}-nested-"
+    _lnfr_prefix="${_lnfr_part}-nested-"
     case "$_lnfr_key" in
-        "$_lnfr_prefix"*) _lnfr_digest=\${_lnfr_key#"$_lnfr_prefix"} ;;
+        "$_lnfr_prefix"*) _lnfr_digest=${_lnfr_key#"$_lnfr_prefix"} ;;
         *) return 1 ;;
     esac
-    [ "\${#_lnfr_digest}" -eq 16 ] 2>/dev/null || return 1
+    [ "${#_lnfr_digest}" -eq 16 ] 2>/dev/null || return 1
     case "$_lnfr_digest" in *[!0-9a-f]*) return 1 ;; esac
     return 0
 }
@@ -995,8 +995,7 @@ luoshu_mount_status_json() {
         "${_lmsj_duration:-0}" "${_lmsj_time:-0}"
 }
 
-_luoshu_hyperos_helper="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/hyperos_global.sh"
-[ -f "$_luoshu_hyperos_helper" ] && . "$_luoshu_hyperos_helper"
+# Mount discovery must not redefine the inventory font application entry point.
 _luoshu_font_config_partitions="${MODULE_DIR:-${MODDIR:-/data/adb/modules/LuoShu}}/common/font_config_partitions.sh"
 [ -f "$_luoshu_font_config_partitions" ] && . "$_luoshu_font_config_partitions"
 

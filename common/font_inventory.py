@@ -2,19 +2,23 @@
 """Discover the stock Android UI font slots for the current ROM.
 
 The scanner is intentionally read-only. It runs while the module is being installed, before the
-new LuoShu overlay is mounted, and records only replaceable UI text slots. Explicit family mappings
-come from the stock fonts XML. OEM files that bypass fonts.xml are admitted only by conservative
-filename heuristics and the existing font_check.sh validator.
+new LuoShu overlay is mounted, and records every measured text/font-face contract. XML contributes
+usage, language and variation metadata; physical files are classified by cmap and font tables.
+The replacement engine matches these contracts to the actual selected source font.
 """
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+import copy
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import tempfile
 import time
@@ -24,11 +28,12 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from fontTools.ttLib import TTFont
-from font_slot_coverage import summarize_coverage, valid_coverage
+from font_slot_coverage import summarize_coverage, unicode_codepoints, valid_coverage
 
 SCHEMA = "device-font-inventory-v1"
 INVENTORY_REVISION = 1
 FONT_EXTENSIONS = {".ttf", ".otf", ".ttc", ".otc"}
+SFNT_SIGNATURES = {b"\x00\x01\x00\x00", b"true", b"\x00\x02\x00\x00", b"OTTO", b"ttcf"}
 LOGICAL_FONT_ROOTS = (
     ("system", Path("/system/fonts")),
     ("system_ext", Path("/system_ext/fonts")),
@@ -55,55 +60,18 @@ MIRROR_PREFIXES = (
     Path("/sbin/.magisk/mirror"),
     Path("/data/adb/magisk/mirror"),
 )
-UI_FAMILY_PREFIXES = (
-    "sans-serif",
-    "system-ui",
-    "system-sans",
-    "roboto",
-    "google-sans",
-    "googlesans",
-    "mi-sans",
-    "misans",
-    "sys-sans",
-    "syssans",
-    "sysfont",
-    "oplus-sans",
-    "oplussans",
-    "oppo-sans",
-    "opposans",
-    "coloros-sans",
-)
-DENY_FAMILY_TOKENS = ("serif", "mono", "emoji", "symbol", "icon", "math", "music")
+# Family labels describe usage; they never identify a ROM or select filenames.
+DENY_FAMILY_TOKENS = ("emoji", "emojis", "symbol", "symbols", "icon", "icons", "math", "music", "dingbat", "dingbats")
 SANS_SERIF_UI_SUFFIX_TOKENS = {
     "thin", "extralight", "extra-light", "light", "regular", "normal", "book", "medium",
     "semibold", "semi-bold", "bold", "extrabold", "extra-bold", "black", "heavy",
     "condensed", "compact", "smallcaps", "small-caps", "display", "text", "flex", "static",
 }
-DENY_FILE_TOKENS = ("emoji", "icon", "symbol", "math", "music", "serif")
-GENERIC_DENY_FILE_TOKENS = (
-    "emoji", "icon", "symbol", "math", "music", "serif", "mono", "monospace",
-    "clock", "dingbat", "barcode", "qrcode", "materialicons", "notocoloremoji",
-    # Script-specific Android fallbacks are real fonts but are not global UI
-    # replacement slots. Keep them visible in device_font_candidates.json while
-    # excluding them from the replaceable inventory.
-    "adlam", "arabic", "hebrew", "thai", "devanagari", "bengali", "tamil",
-    "telugu", "malayalam", "gujarati", "gurmukhi", "kannada", "khmer", "lao",
-    "tibetan", "myanmar", "sinhala", "ethiopic", "georgian", "armenian",
-    "japanese", "korean", "hangul", "hiragana", "katakana", "odia", "oriya",
-    "cjkjp", "cjkkr",
-)
-GENERIC_DENY_STYLE_TOKENS = ("italic", "oblique")
-HEURISTIC_PATTERNS = (
-    re.compile(r"^MiSans(?:VF(?:_Overlay)?|LatinVF|TCVF|L3|Clock[A-Za-z0-9_.-]*)\.(?:ttf|otf|ttc|otc)$", re.I),
-    re.compile(r"^(?:Mitype[A-Za-z0-9_.-]*|MiClock[A-Za-z0-9_.-]*|AndroidClock[A-Za-z0-9_.-]*|Clockopia)\.(?:ttf|otf|ttc|otc)$", re.I),
-    re.compile(r"^(?:100|200|300|350|400|500|600|700|800|900)\.ttf$", re.I),
-    re.compile(
-        r"^(?:Sys(?:Sans|Font)|OppoSans|Opposans|OPSans|OPlusSans|GoogleSans(?:Text|Flex)?|"
-        r"Roboto(?:Flex|Static)?|SourceSansPro|DIN(?:Pro|Condensed)?|OPPODIN(?:Condensed)?)[A-Za-z0-9_.-]*"
-        r"\.(?:ttf|otf|ttc|otc)$",
-        re.I,
-    ),
-)
+# Kept as empty compatibility exports for external diagnostics. Filename text
+# is not evidence that a font is safe or unsafe to replace.
+GENERIC_DENY_FILE_TOKENS = ()
+GENERIC_DENY_STYLE_TOKENS = ()
+
 WEIGHT_WORDS = {
     "thin": 100,
     "extralight": 200,
@@ -291,11 +259,22 @@ def validate_inventory(data: dict[str, Any], expected_key: str | None = None) ->
     for logical, entry in slots.items():
         if not isinstance(logical, str) or not logical.startswith(allowed_prefixes) or not isinstance(entry, dict):
             raise InventoryError("设备字体清单包含越界槽位")
-        if str(entry.get("path", logical)) != logical:
+        if (str(entry.get("path", logical)) != logical
+                or str(Path(os.path.abspath(os.path.normpath(logical)))) != logical):
             raise InventoryError("设备字体清单槽位路径不一致")
         if str(entry.get("format", "")) not in {"TTF", "OTF", "TTC"}:
             raise InventoryError("设备字体清单包含无效字体格式")
         _validate_metrics(entry.get("metrics"))
+        if "faces" in entry:
+            faces = entry["faces"]
+            if (not isinstance(faces, list) or not 1 <= len(faces) <= 256
+                    or any(not isinstance(face, dict) or face.get("faceIndex") != index
+                           for index, face in enumerate(faces))):
+                raise InventoryError("设备字体清单集合索引无效")
+            for face in faces:
+                _validate_metrics(face.get("metrics"))
+            if not 0 <= int(entry.get("faceIndex", 0)) < len(faces):
+                raise InventoryError("设备字体清单主字体面越界")
 
     indexed_main = slots[main_path]
     if str(main_slot.get("slotName", "")) != str(indexed_main.get("slotName", "")):
@@ -308,20 +287,8 @@ def _local_name(tag: str) -> str:
 
 
 def _is_ui_family(name: str) -> bool:
-    lowered = name.strip().lower().replace("_", "-")
-    if not lowered or any(token in lowered for token in DENY_FAMILY_TOKENS):
-        return False
-    if lowered == "sans-serif":
-        return True
-    if lowered.startswith("sans-serif-"):
-        suffix = lowered.removeprefix("sans-serif-")
-        parts = [part for part in suffix.split("-") if part]
-        return bool(parts) and all(part in SANS_SERIF_UI_SUFFIX_TOKENS for part in parts)
-    return any(
-        lowered == prefix or lowered.startswith(prefix + "-")
-        for prefix in UI_FAMILY_PREFIXES
-        if prefix != "sans-serif"
-    )
+    tokens = set(re.split(r"[^a-z0-9]+", name.strip().lower()))
+    return bool(name.strip()) and not tokens.intersection(DENY_FAMILY_TOKENS)
 
 
 def _infer_weight(name: str, declared: str | None = None) -> int:
@@ -366,13 +333,124 @@ def _font_format(path: Path) -> str:
     raise InventoryError(f"无法识别字体格式：{path}")
 
 
+def _font_file_candidate(path: Path) -> bool:
+    """Find standalone SFNTs by their bytes, including opaque OEM filenames.
+
+    Known suffixes are kept even when corrupt, so the measured pass can record
+    their actual parse failure. Header probing never follows an arbitrary link
+    or opens a device/FIFO; stock-link resolution belongs to the measured pass.
+    """
+    try:
+        status = path.lstat()
+        if path.suffix.lower() in FONT_EXTENSIONS:
+            return stat.S_ISREG(status.st_mode) or stat.S_ISLNK(status.st_mode)
+        if not stat.S_ISREG(status.st_mode) or status.st_size < 12:
+            return False
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return False
+            return os.read(descriptor, 4) in SFNT_SIGNATURES
+        finally:
+            os.close(descriptor)
+    except OSError:
+        return False
+
+
+def _codepoint_ranges(points: Iterable[int]) -> list[list[int]]:
+    """Compact, canonical inclusive ranges for the immutable stock archive."""
+    ranges: list[list[int]] = []
+    for point in sorted(points):
+        if ranges and point == ranges[-1][1] + 1:
+            ranges[-1][1] = point
+        else:
+            ranges.append([point, point])
+    return ranges
+
+
+_METRICS_CACHE: dict[tuple[int, ...], tuple[str, dict[str, Any]]] | None = None
+_STOCK_DIGEST_CACHE: dict[tuple[int, ...], str] | None = None
+
+
+@contextmanager
+def _scan_metrics_cache():
+    """Keep shared stock faces once per scan, never across ROM refreshes."""
+    global _METRICS_CACHE, _STOCK_DIGEST_CACHE
+    previous = _METRICS_CACHE
+    previous_digests = _STOCK_DIGEST_CACHE
+    _METRICS_CACHE = {}
+    _STOCK_DIGEST_CACHE = {}
+    try:
+        yield
+    finally:
+        _METRICS_CACHE = previous
+        _STOCK_DIGEST_CACHE = previous_digests
+
+
+def _stock_file_digest(path: Path) -> str:
+    """Pin the immutable stock bytes, including outlines, once per scan inode."""
+    status = path.stat()
+    identity = (status.st_dev, status.st_ino, status.st_size, status.st_mtime_ns, status.st_ctime_ns)
+    if _STOCK_DIGEST_CACHE is not None and identity in _STOCK_DIGEST_CACHE:
+        return _STOCK_DIGEST_CACHE[identity]
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    after = path.stat()
+    if identity != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+        raise InventoryError("原厂字体在扫描期间发生变化")
+    result = digest.hexdigest()
+    if _STOCK_DIGEST_CACHE is not None:
+        _STOCK_DIGEST_CACHE[identity] = result
+    return result
+
+
 def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]:
+    try:
+        status = path.stat()
+        key = (status.st_dev, status.st_ino, status.st_size, status.st_mtime_ns,
+               status.st_ctime_ns, face_index)
+    except OSError as error:
+        raise InventoryError(f"无法读取字体文件：{path}") from error
+    if _METRICS_CACHE is not None and key in _METRICS_CACHE:
+        return copy.deepcopy(_METRICS_CACHE[key])
+    result = _read_metrics_uncached(path, face_index)
+    if _METRICS_CACHE is not None:
+        _METRICS_CACHE[key] = copy.deepcopy(result)
+    return result
+
+
+def _cmap_metrics(font: TTFont) -> dict[str, Any]:
+    """Character facts that can be shared by byte-identical cmap/glyph orders."""
+    from fontTools.unicodedata import category as unicode_category, script as unicode_script
+    points = frozenset(unicode_codepoints(font))
+    letter_scripts: dict[str, int] = {}
+    point_digest = hashlib.sha256()
+    for point in sorted(points):
+        point_digest.update(struct.pack(">I", point))
+        character = chr(point)
+        if unicode_category(character).startswith("L"):
+            script = unicode_script(character)
+            letter_scripts[script] = letter_scripts.get(script, 0) + 1
+    return {"points": points, "letterScripts": letter_scripts,
+            "codepointRanges": _codepoint_ranges(points),
+            "coverage": summarize_coverage(font, points=points),
+            "digitCount": sum(0x30 <= point <= 0x39 or 0xFF10 <= point <= 0xFF19 for point in points),
+            "privateUseCount": sum(unicode_category(chr(point)) == "Co" for point in points),
+            "cmapSha256": hashlib.sha256(font.reader["cmap"]).hexdigest(),
+            "codepointSha256": point_digest.hexdigest()}
+
+
+def _read_metrics_uncached(path: Path, face_index: int = 0, *, _font: TTFont | None = None,
+                           _cmap: dict[str, Any] | None = None) -> tuple[str, dict[str, Any]]:
+
     fmt = _font_format(path)
     kwargs: dict[str, Any] = {"lazy": True, "recalcTimestamp": False}
     if fmt == "TTC":
         kwargs["fontNumber"] = max(0, face_index)
     try:
-        font = TTFont(str(path), **kwargs)
+        font = _font if _font is not None else TTFont(str(path), **kwargs)
     except Exception as error:  # fontTools raises several format-specific exceptions
         raise InventoryError(f"fontTools 无法解析字体：{path.name}: {error}") from error
     try:
@@ -381,12 +459,54 @@ def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]
         head = font["head"]
         hhea = font["hhea"]
         os2 = font["OS/2"]
+        # isFixedPitch is a scalar in the post header. Reading it through the
+        # table object would unnecessarily decode thousands of glyph names.
+        post_data = font.reader["post"] if "post" in font else None
+        fixed_pitch = bool(struct.unpack_from(">I", post_data, 12)[0]) if post_data is not None else False
+        # Reuse the already decoded cmap: a language tag cannot tell whether a
+        # physical face is a general UI font or a script fallback with ASCII.
+        cmap = _cmap if _cmap is not None else _cmap_metrics(font)
+        family_tokens = set()
+        if "name" in font:
+            for record in font["name"].names:
+                if record.nameID in {1, 16}:
+                    try:
+                        family_tokens.update(re.split(r"[^a-z0-9]+", record.toUnicode().lower()))
+                    except (UnicodeError, ValueError):
+                        continue
+        symbol_metadata = (int(getattr(os2, "sFamilyClass", 0)) >> 8 == 12
+                           or int(getattr(getattr(os2, "panose", None), "bFamilyType", 0)) == 5
+                           or bool(family_tokens.intersection({"icon", "icons", "symbol", "symbols",
+                                                              "emoji", "math", "dingbat", "dingbats", "fontawesome"})))
         upem = int(head.unitsPerEm)
         ascent = int(hhea.ascent)
         descent = int(hhea.descent)
         metrics = {
             "upem": upem,
-            "coverage": summarize_coverage(font),
+            # Optional identity evidence: older revision-9 inventories remain
+            # usable through verified lower/mirror views. No rescan is needed
+            # merely to obtain these newer, stronger stock-byte proofs.
+            "stockCmapSha256": cmap["cmapSha256"],
+            "stockCodepointSha256": cmap["codepointSha256"],
+            "stockCodepointRanges": copy.deepcopy(cmap["codepointRanges"])
+                if "codepointRanges" in cmap else _codepoint_ranges(cmap["points"]),
+            "coverage": copy.deepcopy(cmap["coverage"]),
+            "weightClass": int(getattr(os2, "usWeightClass", 400)),
+            "variationAxes": {axis.axisTag: {"min": axis.minValue, "default": axis.defaultValue,
+                               "max": axis.maxValue} for axis in font["fvar"].axes} if "fvar" in font else {},
+            "variationInstances": [{"coordinates": dict(instance.coordinates),
+                                    "subfamilyNameId": instance.subfamilyNameID}
+                                   for instance in font["fvar"].instances] if "fvar" in font else [],
+            "fontTraits": {
+                "letterScripts": dict(cmap["letterScripts"]),
+                "symbol": symbol_metadata,
+                "digitCount": cmap["digitCount"],
+                "privateUseCount": cmap["privateUseCount"],
+                "color": any(tag in font for tag in ("COLR", "CBDT", "sbix", "SVG ")),
+                "italic": bool(int(getattr(os2, "fsSelection", 0)) & 1
+                               or int(getattr(head, "macStyle", 0)) & 2),
+                "monospaced": fixed_pitch,
+            },
             "ascent": ascent,
             "descent": descent,
             "head": {
@@ -412,8 +532,15 @@ def _read_metrics(path: Path, face_index: int = 0) -> tuple[str, dict[str, Any]]
             },
         }
         _validate_metrics(metrics)
+    except InventoryError:
+        raise
+    except Exception as error:
+        # Lazy fonts can open successfully but fail only when a malformed cmap,
+        # head, or metrics table is decoded. Reject that file, not the ROM scan.
+        raise InventoryError(f"字体表损坏：{path.name}: {error}") from error
     finally:
-        font.close()
+        if _font is None:
+            font.close()
     return fmt, metrics
 
 
@@ -609,212 +736,294 @@ def _logical_path(root: FontRoot, actual: Path) -> str:
     return str(root.logical / actual.relative_to(root.actual))
 
 
-def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot]) -> tuple[dict[str, list[str]], dict[str, dict[str, Any]]]:
+def _language_text_slot_candidate(name: str, language: str, family_is_ui: bool,
+                                  metrics: dict[str, Any]) -> bool:
+    return _generic_text_slot_candidate(name, metrics)
+
+
+def _parse_xml_mappings(xml_paths: Iterable[Path], roots: list[FontRoot], *,
+                        roots_by_xml: dict[Path, list[FontRoot]] | None = None,
+                        logical_xmls: dict[Path, str] | None = None,
+                        protected_paths: set[str] | None = None) -> tuple[dict[str, list[str]], dict[str, dict[str, Any]]]:
+    """Record font use, language and face contracts without a vendor allow-list."""
     families: dict[str, list[str]] = {}
-    all_entries: dict[str, dict[str, Any]] = {}
+    entries: dict[str, dict[str, Any]] = {}
     aliases: list[tuple[str, str]] = []
+    protected: set[str] = set()
     for xml_path in xml_paths:
-        if not xml_path.is_file():
-            continue
         try:
             document = ET.parse(xml_path)
         except (OSError, ET.ParseError):
             continue
+        selected_roots = (roots_by_xml or {}).get(xml_path, roots)
+        source_xml = (logical_xmls or {}).get(xml_path, str(xml_path))
         for node in document.getroot().iter():
             tag = _local_name(node.tag)
             if tag == "alias":
-                alias_name = (node.get("name") or "").strip()
-                target_name = (node.get("to") or "").strip()
-                if alias_name and target_name:
-                    aliases.append((alias_name, target_name))
+                alias, target = (node.get("name") or "").strip(), (node.get("to") or "").strip()
+                if alias and target:
+                    aliases.append((alias, target))
                 continue
             if tag != "family":
                 continue
-            family_name = (node.get("name") or "").strip()
-            family_language = (node.get("lang") or "").strip()
-            family_is_ui = not family_language and _is_ui_family(family_name)
-            for font_node in node:
-                if _local_name(font_node.tag) != "font":
-                    continue
-                raw_name = (font_node.text or "").strip()
-                resolved = _resolve_file(raw_name, roots)
+            legacy_names = [(child.text or "").strip() for nameset in node
+                            if _local_name(nameset.tag) == "nameset" for child in nameset
+                            if _local_name(child.tag) == "name" and (child.text or "").strip()]
+            name = (node.get("name") or (legacy_names[0] if legacy_names else "")).strip()
+            languages = (node.get("lang") or "").replace(",", " ").split()
+            tokens = set(re.split(r"[^a-z0-9]+", name.lower()))
+            specialized = bool(tokens.intersection(DENY_FAMILY_TOKENS))
+            font_nodes = [child for child in node if _local_name(child.tag) == "font"]
+            for fileset in node:
+                if _local_name(fileset.tag) == "fileset":
+                    font_nodes.extend(child for child in fileset if _local_name(child.tag) == "file")
+            for font_node in font_nodes:
+                resolved = _resolve_file((font_node.text or "").strip(), selected_roots)
                 if not resolved:
                     continue
                 root, actual = resolved
                 logical = _logical_path(root, actual)
                 try:
-                    stock_file = _stock_font_path(root, actual, roots)
+                    stock_file = _stock_font_path(root, actual, selected_roots)
                 except InventoryError:
                     continue
-                families.setdefault(family_name, [])
-                if logical not in families[family_name]:
-                    families[family_name].append(logical)
-                candidate = all_entries.setdefault(
-                    logical,
-                    {
-                        "slotName": actual.name,
-                        "path": logical,
-                        "partition": root.partition,
-                        "actualPath": str(stock_file),
-                        "source": "xml",
-                        "families": [],
-                        "weight": _infer_weight(actual.name, font_node.get("weight")),
-                        "style": (font_node.get("style") or "normal").strip() or "normal",
-                        "faceIndex": _safe_nonnegative_int(font_node.get("index"), 0),
-                        "uiEligible": family_is_ui,
-                    },
-                )
-                if family_name and family_name not in candidate["families"]:
-                    candidate["families"].append(family_name)
-                if family_is_ui and not candidate.get("uiEligible", False):
-                    candidate["weight"] = _infer_weight(actual.name, font_node.get("weight"))
-                    candidate["style"] = (font_node.get("style") or "normal").strip() or "normal"
-                    candidate["faceIndex"] = _safe_nonnegative_int(font_node.get("index"), 0)
-                if family_is_ui:
-                    candidate["uiEligible"] = True
-
+                if specialized:
+                    protected.add(logical)
+                family_paths = families.setdefault(name, [])
+                if logical not in family_paths:
+                    family_paths.append(logical)
+                fallback_for = (font_node.get("fallbackFor") or node.get("fallbackFor") or "").split()
+                face_index = _safe_nonnegative_int(font_node.get("index"), 0)
+                supported_axes = (font_node.get("supportedAxes") or "").replace(",", " ").split()
+                axes = {}
+                for axis in font_node:
+                    if _local_name(axis.tag) == "axis":
+                        try:
+                            value = float(axis.get("stylevalue", ""))
+                        except ValueError:
+                            continue
+                        if len(axis.get("tag", "")) == 4 and math.isfinite(value):
+                            axes[axis.get("tag")] = value
+                contract = {
+                    "supportedAxes": supported_axes, "axes": axes,
+                    "protectedXmlFamily": specialized,
+                    "faceIndex": face_index,
+                    "weight": _infer_weight(actual.name, font_node.get("weight")),
+                    "style": (font_node.get("style") or "normal").strip() or "normal",
+                    "families": list(dict.fromkeys(([name] if name else []) + legacy_names)),
+                    "familyLanguages": list(languages),
+                    "xmlFallback": not name or bool(fallback_for),
+                    "fallbackFor": fallback_for,
+                    "sourceXmls": [source_xml],
+                }
+                reference = {**contract}
+                contract["xmlReferences"] = [reference]
+                for legacy_name in legacy_names[1:]:
+                    legacy_paths = families.setdefault(legacy_name, [])
+                    if logical not in legacy_paths:
+                        legacy_paths.append(logical)
+                entry = entries.setdefault(logical, {
+                    "slotName": actual.name, "path": logical, "partition": root.partition,
+                    "actualPath": str(stock_file), "source": "xml", **contract,
+                    "xmlFaces": {},
+                })
+                face = entry["xmlFaces"].setdefault(str(face_index), {**contract})
+                for target in (entry, face):
+                    for key in ("families", "familyLanguages", "fallbackFor", "sourceXmls", "supportedAxes"):
+                        target[key] = list(dict.fromkeys([*target.get(key, []), *contract[key]]))
+                    references = target.setdefault("xmlReferences", [])
+                    if reference not in references:
+                        references.append(reference)
+                    target["xmlFallback"] = target.get("xmlFallback", False) or contract["xmlFallback"]
+                    target["protectedXmlFamily"] = bool(target.get("protectedXmlFamily") or specialized)
     unresolved = list(aliases)
     for _round in range(len(aliases) + 1):
-        if not unresolved:
+        remaining = []
+        for alias, target in unresolved:
+            if target not in families:
+                remaining.append((alias, target))
+                continue
+            families[alias] = list(families[target])
+            for logical in families[target]:
+                entry = entries.get(logical)
+                if entry is None:
+                    continue
+                for face in (entry, *entry["xmlFaces"].values()):
+                    if target in face.get("families", []) and alias not in face["families"]:
+                        face["families"].append(alias)
+        if len(remaining) == len(unresolved):
             break
-        next_round: list[tuple[str, str]] = []
-        changed = False
-        for alias_name, target_name in unresolved:
-            target_paths = families.get(target_name)
-            if target_paths:
-                families[alias_name] = list(target_paths)
-                changed = True
-            else:
-                next_round.append((alias_name, target_name))
-        unresolved = next_round
-        if not changed:
-            break
-
-    slots: dict[str, dict[str, Any]] = {}
-    for family_name, paths in families.items():
-        if not _is_ui_family(family_name):
-            continue
-        for logical in paths:
-            candidate = all_entries.get(logical)
-            if not candidate or not candidate.get("uiEligible", False):
-                continue
-            entry = slots.setdefault(logical, {**candidate, "families": list(candidate.get("families", []))})
-            entry.pop("uiEligible", None)
-            if family_name not in entry["families"]:
-                entry["families"].append(family_name)
-    return families, slots
-
-
-def _heuristic_candidate(name: str) -> bool:
-    lowered = name.lower()
-    if any(token in lowered for token in DENY_FILE_TOKENS):
-        return False
-    return any(pattern.fullmatch(name) for pattern in HEURISTIC_PATTERNS)
-
-
-def _add_heuristic_slots(slots: dict[str, dict[str, Any]], roots: list[FontRoot], font_check: Path) -> None:
-    for root in roots:
-        if not root.actual.is_dir():
-            continue
-        for actual in sorted(root.actual.iterdir(), key=lambda item: item.name.lower()):
-            if actual.suffix.lower() not in FONT_EXTENSIONS or not _heuristic_candidate(actual.name):
-                continue
-            logical = _logical_path(root, actual)
-            if logical in slots:
-                continue
-            try:
-                stock_file = _stock_font_path(root, actual, roots)
-                checked_format = _font_check(stock_file, font_check)
-            except InventoryError:
-                continue
-            slots[logical] = {
-                "slotName": actual.name,
-                "path": logical,
-                "partition": root.partition,
-                "actualPath": str(stock_file),
-                "source": "heuristic",
-                "families": [],
-                "weight": _infer_weight(actual.name),
-                "style": "italic" if "italic" in actual.stem.lower() else "normal",
-                "faceIndex": 0,
-                "validatedBy": "font_check.sh",
-                "validatedFormat": checked_format,
-            }
+        unresolved = remaining
+    if protected_paths is not None:
+        protected_paths.update(protected)
+    return families, entries
 
 
 def _generic_font_name_candidate(name: str) -> bool:
-    """Cheap preflight used before opening a font with fontTools."""
-    lowered = name.lower()
-    if any(token in lowered for token in GENERIC_DENY_FILE_TOKENS):
-        return False
-    if any(token in lowered for token in GENERIC_DENY_STYLE_TOKENS):
-        return False
-    return True
+    return Path(name).suffix.lower() in FONT_EXTENSIONS
+
+
+def _text_face_reason(metrics: dict[str, Any], *, declared_text: bool = False) -> str:
+    traits = metrics.get("fontTraits", {})
+    if traits.get("color"):
+        return "color-font"
+    if traits.get("symbol"):
+        return "symbol-font-metadata"
+    coverage = metrics.get("coverage")
+    if not valid_coverage(coverage):
+        return "invalid-cmap"
+    letters = sum(traits.get("letterScripts", {}).values())
+    digits = int(traits.get("digitCount", 0))
+    if int(traits.get("privateUseCount", 0)) > max(128, letters * 4):
+        return "private-use-symbol-font"
+    if letters or digits > 0:
+        return ""
+    return "non-text-cmap"
 
 
 def _generic_text_slot_candidate(name: str, metrics: dict[str, Any]) -> bool:
-    """Accept an upright stock text face by measured coverage, not by OEM filename.
+    return not _text_face_reason(metrics)
 
-    Some ROMs address physical UI font files directly without declaring them in
-    fonts.xml. Specialized/icon/emoji/mono/italic/script-fallback faces stay stock.
+
+def _collection_count(path: Path) -> int:
+    with path.open("rb") as stream:
+        header = stream.read(12)
+    if header[:4] != b"ttcf":
+        return 1
+    if len(header) != 12:
+        raise InventoryError("字体集合头损坏")
+    count = struct.unpack_from(">I", header, 8)[0]
+    if not 1 <= count <= 256:
+        raise InventoryError("字体集合面数无效")
+    return count
+
+
+def _add_heuristic_slots(slots: dict[str, dict[str, Any]], roots: list[FontRoot], font_check: Path,
+                         protected_paths: set[str] | None = None) -> None:
+    # Legacy callers share the canonical measured scan, never a filename list.
+    _add_verified_text_slots(slots, roots, protected_paths)
+
+
+def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontRoot],
+                             protected_paths: set[str] | None = None,
+                             preserved_fonts: dict[str, dict[str, Any]] | None = None) -> None:
+    """Measure every physical face. The engine decides whether the user's source
+    satisfies its script/style/weight contract; scanner never guesses a ROM.
     """
-    if not _generic_font_name_candidate(name):
-        return False
-    coverage = metrics.get("coverage")
-    if not valid_coverage(coverage):
-        return False
-    han = int(coverage.get("hanCount", 0))
-    latin = int(coverage.get("latinCount", 0))
-    total = int(coverage.get("unicodeCount", 0))
-    # Measured coverage is the gate: substantial Han coverage or a complete
-    # Latin alphabet. No OEM filename allow-list is required.
-    return han >= 512 or (latin >= 52 and total >= 96)
-
-
-def _add_verified_text_slots(slots: dict[str, dict[str, Any]], roots: list[FontRoot]) -> None:
-    """Enumerate supported stock font roots and add verified text candidates."""
+    preserved = preserved_fonts if preserved_fonts is not None else {}
     for root in roots:
         if not root.actual.is_dir():
             continue
         try:
-            candidates = sorted(
-                (path for path in root.actual.rglob("*")
-                 if path.is_file() and path.suffix.lower() in FONT_EXTENSIONS),
-                key=lambda item: str(item).lower(),
-            )
+            candidates_set = {path for path in root.actual.rglob("*") if _font_file_candidate(path)}
+            # XML is an authoritative font reference even when the filename has
+            # an unusual suffix; the sfnt parser remains the content gate.
+            for logical, entry in slots.items():
+                if entry.get("source") == "xml" and Path(logical).is_relative_to(root.logical):
+                    actual = root.actual / Path(logical).relative_to(root.logical)
+                    if actual.is_file() or actual.is_symlink():
+                        candidates_set.add(actual)
+            candidates = sorted(candidates_set, key=lambda item: str(item).lower())
         except OSError:
             continue
         for actual in candidates:
             logical = _logical_path(root, actual)
-            if logical in slots:
-                continue
-            # Reject known-specialized names before fontTools opens the file.
-            # This is important on ROMs with hundreds of Noto script fallbacks:
-            # they are recorded by the install path probe, but are never promoted
-            # to replaceable global UI slots or read during a policy refresh.
-            if not _generic_font_name_candidate(actual.name):
-                continue
+            protected = logical in (protected_paths or ())
+            previous = slots.get(logical, {})
             try:
                 stock_file = _stock_font_path(root, actual, roots)
-                fmt, metrics = _read_metrics(stock_file, 0)
-            except (InventoryError, OSError, ValueError):
+                stock_digest = _stock_file_digest(stock_file)
+                faces = []
+                for index in range(_collection_count(stock_file)):
+                    fmt, metrics = _read_metrics(stock_file, index)
+                    contract = previous.get("xmlFaces", {}).get(str(index), {})
+                    protected_face = protected and (
+                        not previous.get("xmlFaces") or contract.get("protectedXmlFamily", False))
+                    reason = ("xml-symbol-family" if protected_face else
+                              _text_face_reason(metrics, declared_text=bool(contract)))
+                    traits = metrics.get("fontTraits", {})
+                    face = {
+                        **contract, "faceIndex": index, "format": fmt, "metrics": metrics,
+                        "stockSource": {"sha256": stock_digest,
+                                        "cmapSha256": metrics["stockCmapSha256"],
+                                        "codepointSha256": metrics["stockCodepointSha256"],
+                                        "codepointRanges": copy.deepcopy(metrics["stockCodepointRanges"])},
+                        "replacementRoles": [role for role, count in (
+                            ("cjk", metrics["coverage"]["hanCount"]),
+                            ("latin", traits.get("letterScripts", {}).get("Latn", 0)),
+                            ("digit", traits.get("digitCount", 0))) if count],
+                        "variable": bool(metrics.get("variationAxes")),
+                        "weight": contract.get("weight", metrics.get("weightClass", 400)),
+                        "style": contract.get("style", "italic" if traits.get("italic") else "normal"),
+                        "replacementRole": "text" if traits.get("letterScripts") else "digits",
+                        "requiresScripts": sorted(key for key in traits.get("letterScripts", {})
+                                                  if key not in {"Zyyy", "Zinh"}),
+                        "families": contract.get("families", []),
+                        "familyLanguages": contract.get("familyLanguages", []),
+                        "xmlFallback": contract.get("xmlFallback", False),
+                        "fallbackFor": contract.get("fallbackFor", []),
+                        "sourceXmls": contract.get("sourceXmls", []),
+                        "fallbackReachable": False, "fallbackTargets": [],
+                        "supportedAxes": contract.get("supportedAxes", []),
+                        "axes": contract.get("axes", {}), "xmlReferences": contract.get("xmlReferences", []),
+                    }
+                    if reason:
+                        face["preservedReason"] = reason
+                    faces.append(face)
+            except (InventoryError, OSError, ValueError) as error:
+                preserved[logical] = {"reason": "unreadable-stock-font", "detail": str(error)}
+                slots.pop(logical, None)
                 continue
-            if not _generic_text_slot_candidate(actual.name, metrics):
+            usable = [face for face in faces if not face.get("preservedReason")]
+            if not usable:
+                preserved[logical] = {"reason": faces[0]["preservedReason"], "faces": faces}
+                slots.pop(logical, None)
                 continue
+            selected = min(usable, key=lambda face: (
+                not any(tag == "zh" or tag.startswith("zh-") for tag in face["familyLanguages"]),
+                -int(face["metrics"]["coverage"]["hanCount"]),
+                not bool(face["xmlReferences"]), face["faceIndex"]))
             slots[logical] = {
-                "slotName": actual.name,
-                "path": logical,
-                "partition": root.partition,
-                "source": "verified-scan",
-                "families": [],
-                "weight": _infer_weight(actual.name),
-                "style": "normal",
-                "faceIndex": 0,
-                "validatedBy": "fontTools-generic-stock-scan",
-                "validatedFormat": fmt,
-                "format": fmt,
-                "metrics": metrics,
+                **previous, **selected,
+                "slotName": actual.name, "path": logical, "partition": root.partition,
+                "source": previous.get("source", "verified-scan"),
+                "validatedBy": "fontTools-universal-stock-scan", "validatedFormat": fmt,
+                "faces": faces,
             }
+            slots[logical].pop("actualPath", None)
+            slots[logical].pop("xmlFaces", None)
+            # The path-level fields retain all XML uses; selected face metadata
+            # remains independent in faces[] (particularly important for TTC).
+            for key in ("families", "familyLanguages", "fallbackFor", "sourceXmls", "supportedAxes"):
+                slots[logical][key] = list(dict.fromkeys(value for face in faces for value in face[key]))
+            slots[logical]["xmlFallback"] = any(face["xmlFallback"] for face in faces)
+            slots[logical]["xmlReferences"] = [ref for face in faces for ref in face["xmlReferences"]]
+            slots[logical]["replacementRoles"] = sorted({role for face in usable
+                                                          for role in face["replacementRoles"]})
+            slots[logical]["variable"] = any(face["variable"] for face in usable)
+            slots[logical]["faceCount"] = len(faces)
+            preserved.pop(logical, None)
+    for logical, entry in slots.items():
+        for face in entry.get("faces", [entry]):
+            targets = []
+            for fallback_path, fallback in slots.items():
+                if fallback_path == logical:
+                    continue
+                for fallback_face in fallback.get("faces", [fallback]):
+                    if (not fallback_face.get("xmlFallback")
+                            or not fallback_face.get("metrics", {}).get("coverage", {}).get("hasHan")
+                            or not set(face.get("sourceXmls", [])) & set(fallback_face.get("sourceXmls", []))):
+                        continue
+                    required = fallback_face.get("fallbackFor", [])
+                    if required and not set(required) & set(face.get("families", [])):
+                        continue
+                    targets.append(fallback_path)
+                    break
+            face["fallbackTargets"] = sorted(set(targets))
+            face["fallbackReachable"] = bool(targets)
+        selected = next((face for face in entry.get("faces", []) if face["faceIndex"] == entry["faceIndex"]), entry)
+        entry["fallbackTargets"] = selected.get("fallbackTargets", [])
+        entry["fallbackReachable"] = selected.get("fallbackReachable", False)
 
 
 def _populate_metrics(slots: dict[str, dict[str, Any]]) -> None:
@@ -837,28 +1046,19 @@ def _populate_metrics(slots: dict[str, dict[str, Any]]) -> None:
 
 
 def _pick_main_slot(slots: dict[str, dict[str, Any]], families: dict[str, list[str]]) -> tuple[str, dict[str, Any], str]:
-    preferences = (
-        ("MiSansVF.ttf", "hyperos"),
-        ("SysSans-Hans-Regular.ttf", "coloros"),
-        ("SysFont-Hans-Regular.ttf", "coloros"),
-        ("Roboto-Regular.ttf", "aosp"),
-    )
-    for filename, rom in preferences:
-        for logical, entry in slots.items():
-            if entry.get("slotName") == filename:
-                return logical, entry, rom
-    for family_name in ("sans-serif", "system-ui", "google-sans-text"):
-        candidates = [
-            (logical, slots[logical])
-            for logical in families.get(family_name, [])
-            if logical in slots
-        ]
-        if candidates:
-            logical, entry = min(candidates, key=lambda item: (abs(int(item[1].get("weight", 400)) - 400), item[0]))
-            return logical, entry, "generic"
     if not slots:
-        raise InventoryError("没有发现可替换的系统 UI 字体槽位")
-    logical = sorted(slots)[0]
+        raise InventoryError("没有发现可替换的系统文本字体槽位")
+    # Prefer a normal regular XML UI face, then broad Han coverage. Names and
+    # Android vendor properties never enter this ordering.
+    logical = min(slots, key=lambda path: (
+        slots[path].get("replacementRole") == "digits",
+        slots[path].get("style", "normal") != "normal",
+        abs(int(slots[path].get("weight", 400)) - 400),
+        not any(name in {"sans-serif", "system-ui"} for name in slots[path].get("families", [])),
+        slots[path].get("xmlFallback", False),
+        -int(slots[path].get("metrics", {}).get("coverage", {}).get("hanCount", 0)),
+        path,
+    ))
     return logical, slots[logical], "generic"
 
 
@@ -897,9 +1097,11 @@ def scan(args: argparse.Namespace) -> int:
     risk = _overlay_risk(overlay_module)
     roots, system_etc = _resolve_roots(args, risk)
     xml_paths = [system_etc / "fonts.xml", system_etc / "font_fallback.xml"]
-    families, slots = _parse_xml_mappings(xml_paths, roots)
-    _add_heuristic_slots(slots, roots, args.font_check)
-    _populate_metrics(slots)
+    protected_paths: set[str] = set()
+    families, slots = _parse_xml_mappings(xml_paths, roots, protected_paths=protected_paths)
+    with _scan_metrics_cache():
+        _add_verified_text_slots(slots, roots, protected_paths)
+        _populate_metrics(slots)
     main_path, main_entry, rom = _pick_main_slot(slots, families)
     inventory = {
         "schema": SCHEMA,

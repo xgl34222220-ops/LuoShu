@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
 """Host inotify + real-shell regressions; not Android rendering validation."""
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'common'))
 spec = importlib.util.spec_from_file_location('font_watch', ROOT / 'common/google_font_watch_wait.py')
 watch = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(watch)
@@ -77,6 +80,24 @@ class EventTest(unittest.TestCase):
         (self.module / 'config/google-font-provider-mounts.conf').write_text('journal')
         self.assertFalse(self.event.changed())
         (self.module / 'config/active_font.conf').write_text('custom')
+        self.assertTrue(self.event.changed())
+
+    def test_inventory_dynamic_target_is_watched_without_scanning_its_directory(self):
+        aliases = self.root / 'system/fonts'
+        aliases.mkdir(parents=True)
+        target = self.fonts / 'unbranded-active-font'
+        target.write_text('notification fixture')
+        alias = aliases / 'BodyAlias.ttf'
+        alias.symlink_to(target)
+        inventory = {'schema': 'device-font-inventory-v1', 'state': 'ready',
+                     'sourceRoots': [{'logical': str(aliases)}],
+                     'dynamicFontRoutes': [{'alias': str(alias), 'target': str(target)}]}
+        (self.module / 'config/device_font_inventory.json').write_text(json.dumps(inventory))
+        with patch.dict(os.environ, {}, clear=True):
+            watch.configure(self.event, self.module)
+        (self.fonts / 'unrelated-private-file').write_text('ignore')
+        self.assertFalse(self.event.changed())
+        target.write_text('changed font generation')
         self.assertTrue(self.event.changed())
 
     def test_disable_and_remove_are_observed(self):

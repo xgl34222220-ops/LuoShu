@@ -27,6 +27,7 @@ REBOOT_CONF="$REALMOD/config/text_reboot_required.conf"
 LOG_FILE="$REALMOD/logs/fontswitch.log"
 FINALIZE_LOCK="$REALMOD/.mix-stage-finalize.lock"
 PRECOMMIT_STATE="$MIX_STAGE/.luoshu-precommit-ready.conf"
+PRECOMMIT_FAILED_STATE="$MIX_STAGE/.luoshu-precommit-failed.conf"
 PRECOMMIT_ERROR=""
 [ -f "$LEGACY/payload_clone.sh" ] && . "$LEGACY/payload_clone.sh"
 [ -f "$REALMOD/common/background_task.sh" ] && . "$REALMOD/common/background_task.sh"
@@ -35,7 +36,32 @@ read_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
 
+axis_weight_router() {
+    _awr_value=$(printf '%s' "$1" | tr ',' '\n' | sed -n 's/^wght=//p' | head -n1)
+    _awr_value=${_awr_value%%.*}
+    case "$_awr_value" in ''|*[!0-9]*) _awr_value=400 ;; esac
+    [ "$_awr_value" -ge 1 ] 2>/dev/null && [ "$_awr_value" -le 1000 ] 2>/dev/null || _awr_value=400
+    printf '%s' "$_awr_value"
+}
+
+mix_mode_router() {
+    case "$1" in auto) printf auto ;; *) printf fixed ;; esac
+}
+
+mix_request_is_current() {
+    [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] || return 0
+    if [ -s "$MIX_STAGE_STATE" ]; then
+        [ "$(read_value "$MIX_STAGE_STATE" requestId)" = "$LUOSHU_MIX_REQUEST_ID" ]
+    else
+        [ "$(read_value "$NEXT_STATE" requestId)" = "$LUOSHU_MIX_REQUEST_ID" ]
+    fi
+}
+
 mix_finalize_state_write() {
+    # A late controller must not overwrite the current task's progress/failure.
+    mix_request_is_current || return 0
+    _mfs_current_task=$(read_value "$REALMOD/config/axes_task.conf" task)
+    [ -z "${3:-}" ] || [ -z "$_mfs_current_task" ] || [ "$3" = "$_mfs_current_task" ] || return 0
     _mfs_state="$1"
     _mfs_message="$2"
     _mfs_task="${3:-}"
@@ -45,6 +71,7 @@ mix_finalize_state_write() {
     {
         printf 'state=%s\n' "$_mfs_state"
         printf 'task=%s\n' "$_mfs_task"
+        printf 'requestId=%s\n' "${LUOSHU_MIX_REQUEST_ID:-$(read_value "$MIX_STAGE_STATE" requestId)}"
         printf 'message=%s\n' "$_mfs_message"
         [ -z "$_mfs_percent" ] || printf 'percent=%s\n' "$_mfs_percent"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
@@ -54,11 +81,20 @@ mix_finalize_state_write() {
 
 mix_finalize_worker() {
     _mfw_task="$1"
+    # A terminal generation error belongs to this request. Do not overwrite it
+    # with a new running record when an older monitor reaches the same result.
+    if precommit_failed; then
+        mix_finalize_state_write failed "$PRECOMMIT_ERROR" "$_mfw_task" 100
+        return 1
+    fi
     mix_finalize_state_write running '正在提交下一启动字体负载' "$_mfw_task" 99
+    _mfw_rc=0
     if finalize_mix_stage >>"$LOG_FILE" 2>&1; then
         mix_finalize_state_write success '复合字体负载已提交，完整重启后生效' "$_mfw_task" 100
     else
-        mix_finalize_state_write failed '复合字体已生成，但下一启动负载提交失败' "$_mfw_task" 100
+        _mfw_rc=1
+        precommit_failed || true
+        mix_finalize_state_write failed "${PRECOMMIT_ERROR:-复合字体已生成，但下一启动负载提交失败}" "$_mfw_task" 100
     fi
     if type luoshu_clear_task_pid >/dev/null 2>&1; then
         luoshu_clear_task_pid "$REALMOD/config/mix_finalize_worker.pid" "mix-finalize-$_mfw_task"
@@ -67,6 +103,7 @@ mix_finalize_worker() {
               "$REALMOD/config/mix_finalize_worker.pid.task" \
               "$REALMOD/config/mix_finalize_worker.pid.boot" 2>/dev/null || true
     fi
+    return "$_mfw_rc"
 }
 
 ensure_mix_finalize_worker() {
@@ -74,21 +111,34 @@ ensure_mix_finalize_worker() {
     [ -n "$_emfw_task" ] || return 1
     [ -s "$MIX_STAGE_STATE" ] || return 1
     [ -d "$MIX_STAGE" ] || [ -d "$NEXT_PAYLOAD" ] || return 1
+    # Polling can finish an interrupted atomic rename only. It must never start
+    # font generation, or retry a deterministic generation failure.
+    precommit_failed && return 1
+    if ! precommit_ready; then
+        [ ! -d "$MIX_STAGE" ] && [ -s "$NEXT_PAYLOAD/.luoshu-precommit-ready.conf" ] || return 1
+        [ "$(read_value "$NEXT_PAYLOAD/.luoshu-precommit-ready.conf" state)" = ready ] || return 1
+        [ "$(read_value "$NEXT_PAYLOAD/.luoshu-precommit-ready.conf" requestId)" = \
+          "$(read_value "$MIX_STAGE_STATE" requestId)" ] || return 1
+    fi
     _emfw_pid="$REALMOD/config/mix_finalize_worker.pid"
     _emfw_identity="mix-finalize-$_emfw_task"
+    _emfw_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    [ -n "$_emfw_request" ] || return 1
+    [ "$(read_value "$REALMOD/config/axes_task.conf" task)" = "$_emfw_task" ] || return 1
     if type luoshu_task_pid_alive >/dev/null 2>&1 && \
        luoshu_task_pid_alive "$_emfw_pid" "$_emfw_identity"; then
         return 0
     fi
     if type luoshu_start_detached >/dev/null 2>&1; then
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" \
+        ( exec 9>&-
+          MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" LUOSHU_MIX_REQUEST_ID="$_emfw_request" \
             luoshu_start_detached "$_emfw_pid" "$_emfw_identity" "$LOG_FILE" \
-                sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity"
+                sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity" )
         _emfw_rc=$?
         [ "$_emfw_rc" -eq 0 ] || [ "$_emfw_rc" -eq 3 ]
         return $?
     fi
-    ( trap '' HUP; MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity" ) \
+    ( exec 9>&-; trap '' HUP; MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" LUOSHU_MIX_REQUEST_ID="$_emfw_request" sh "$0" finalize-worker "$_emfw_task" "$_emfw_identity") \
         </dev/null >>"$LOG_FILE" 2>&1 &
     return 0
 }
@@ -97,9 +147,32 @@ json_escape_router() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
 
+precommit_failed() {
+    [ -s "$PRECOMMIT_FAILED_STATE" ] || return 1
+    mix_request_is_current || return 1
+    _pcf_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    [ -n "$_pcf_request" ] || return 1
+    [ "$(read_value "$PRECOMMIT_FAILED_STATE" requestId)" = "$_pcf_request" ] || return 1
+    PRECOMMIT_ERROR=$(read_value "$PRECOMMIT_FAILED_STATE" message)
+    [ -n "$PRECOMMIT_ERROR" ] || PRECOMMIT_ERROR='本次字体生成已失败，请重新应用'
+    return 0
+}
+
 precommit_fail() {
     PRECOMMIT_ERROR="$1"
+    mix_request_is_current || return 1
     _pf_task="$(read_value "$REALMOD/config/axes_task.conf" task)"
+    [ -n "$_pf_task" ] || _pf_task="$(read_value "$REALMOD/config/mix_task.conf" task)"
+    _pf_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    # The same request may have a controller and a legacy completion monitor.
+    # Persist failure under their shared lock, just as we persist ready state.
+    # A new user request gets its own stage and can try again.
+    if [ -n "$_pf_request" ]; then
+        _pf_tmp="${PRECOMMIT_FAILED_STATE}.tmp.$$"
+        {
+            printf 'state=failed\nrequestId=%s\nmessage=%s\n' "$_pf_request" "$PRECOMMIT_ERROR"
+        } >"$_pf_tmp" 2>/dev/null && mv -f "$_pf_tmp" "$PRECOMMIT_FAILED_STATE" 2>/dev/null || true
+    fi
     mix_finalize_state_write failed "$PRECOMMIT_ERROR" "$_pf_task" 100
     printf '[%s] [MIX] precommit failed: %s\n' \
         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" \
@@ -132,10 +205,13 @@ mix_config_json_fast() {
     [ -n "$_digit_axes" ] || _digit_axes="wght=$_digit_weight"
     _enabled=false
     [ "$(head -n1 "$ACTIVE_CONF" 2>/dev/null | tr -d '\r\n')" = mix ] && _enabled=true
-    printf '{"status":"ok","data":{"enabled":%s,"cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s"}}\n' \
+    printf '{"status":"ok","data":{"enabled":%s,"cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","cjkMode":"%s","latinMode":"%s","digitMode":"%s"}}\n' \
         "$_enabled" "$(json_escape_router "$_cjk")" "$(json_escape_router "$_latin")" "$(json_escape_router "$_digit")" \
         "$_cjk_weight" "$_latin_weight" "$_digit_weight" \
-        "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")"
+        "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")" \
+        "$(mix_mode_router "$(read_value "$_source" cjkMode)")" \
+        "$(mix_mode_router "$(read_value "$_source" latinMode)")" \
+        "$(mix_mode_router "$(read_value "$_source" digitMode)")"
 }
 
 # Reconcile only the detached axes controller used by the App. Its PID sidecars
@@ -213,40 +289,55 @@ mix_status_json_fast() {
     _percent=$(read_value "$_task_file" percent)
     case "$_percent" in ''|*[!0-9]*) _percent=0 ;; esac
 
-    if [ "$_state" = success ]; then
-        _next_font=$(read_value "$NEXT_STATE" font)
-        if [ -d "$NEXT_PAYLOAD" ] && [ "$_next_font" = mix ]; then
-            _percent=100
-        else
-            _finalize_state=$(read_value "$REALMOD/config/mix-finalize-state.conf" state)
-            _finalize_message=$(read_value "$REALMOD/config/mix-finalize-state.conf" message)
-            if [ "$_finalize_state" = failed ]; then
-                _state=failed
-                _message="${_finalize_message:-复合字体负载提交失败}"
-                _percent=100
-            else
-                # The generator is done but the durable next-boot payload is not.
-                # Never leave a successful axes task parked at 99% forever if the
-                # original finalize monitor was reclaimed with its su session.
-                ensure_mix_finalize_worker "$_task" >/dev/null 2>&1 || true
-                _state=running
-                _message="${_finalize_message:-字体已生成，正在提交下一启动负载}"
-                _percent=99
-            fi
+    _finalize_file="$REALMOD/config/mix-finalize-state.conf"
+    _finalize_task=$(read_value "$_finalize_file" task)
+    _finalize_request=$(read_value "$_finalize_file" requestId)
+    _stage_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    _current_request="$_stage_request"
+    [ -n "$_current_request" ] || _current_request=$(read_value "$NEXT_STATE" requestId)
+    _finalize_matches=false
+    if [ "$_finalize_task" = "$_task" ]; then
+        if [ -z "$_finalize_request" ] || [ "$_finalize_request" = "$_current_request" ]; then
+            _finalize_matches=true
         fi
     fi
-
-    if [ "$_state" = running ]; then
-        _finalize_task=$(read_value "$REALMOD/config/mix-finalize-state.conf" task)
-        _finalize_state=$(read_value "$REALMOD/config/mix-finalize-state.conf" state)
-        _finalize_message=$(read_value "$REALMOD/config/mix-finalize-state.conf" message)
-        _finalize_percent=$(read_value "$REALMOD/config/mix-finalize-state.conf" percent)
+    _finalize_state=''
+    _finalize_message=''
+    _finalize_percent=0
+    if [ "$_finalize_matches" = true ]; then
+        _finalize_state=$(read_value "$_finalize_file" state)
+        _finalize_message=$(read_value "$_finalize_file" message)
+        _finalize_percent=$(read_value "$_finalize_file" percent)
         case "$_finalize_percent" in ''|*[!0-9]*) _finalize_percent=0 ;; esac
-        if [ -n "$_finalize_task" ] && [ "$_finalize_task" = "$_task" ] && \
-           [ "$_finalize_state" != failed ] && [ "$_finalize_percent" -gt "$_percent" ] 2>/dev/null; then
-            _percent="$_finalize_percent"
-            [ -z "$_finalize_message" ] || _message="$_finalize_message"
+    fi
+    if precommit_failed; then
+        _finalize_state=failed
+        _finalize_message="$PRECOMMIT_ERROR"
+    fi
+    if [ "$_finalize_state" = failed ]; then
+        _state=failed
+        _message="${_finalize_message:-复合字体负载提交失败}"
+        _percent=100
+    elif [ "$_state" = success ]; then
+        _next_font=$(read_value "$NEXT_STATE" font)
+        _next_request=$(read_value "$NEXT_STATE" requestId)
+        if [ -d "$NEXT_PAYLOAD" ] && [ "$_next_font" = mix ] && \
+           { [ -z "$_stage_request" ] || [ "$_next_request" = "$_stage_request" ]; }; then
+            _percent=100
+        elif ensure_mix_finalize_worker "$_task" >/dev/null 2>&1; then
+            # Recovery can only finish a ready payload's atomic commit. A status
+            # request must not launch the expensive inventory mapper.
+            _state=running
+            _message="${_finalize_message:-字体已生成，正在提交下一启动负载}"
+            _percent=99
+        else
+            _state=failed
+            _message='字体生成已结束，但本机字体负载未完成，请重新应用'
+            _percent=100
         fi
+    elif [ "$_state" = running ] && { [ "$_finalize_state" = running ] || [ "$_finalize_state" = ready ]; }; then
+        [ "$_finalize_percent" -le "$_percent" ] 2>/dev/null || _percent="$_finalize_percent"
+        [ -z "$_finalize_message" ] || _message="$_finalize_message"
     fi
 
     _cjk=$(read_value "$_task_file" cjk)
@@ -255,10 +346,14 @@ mix_status_json_fast() {
     _cjk_axes=$(read_value "$_task_file" cjkAxes); [ -n "$_cjk_axes" ] || _cjk_axes=wght=400
     _latin_axes=$(read_value "$_task_file" latinAxes); [ -n "$_latin_axes" ] || _latin_axes=wght=400
     _digit_axes=$(read_value "$_task_file" digitAxes); [ -n "$_digit_axes" ] || _digit_axes=wght=400
-    printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":400,"latinWeight":400,"digitWeight":400,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","timeout":720,"progress":{"message":"%s","percent":%s}}}\n' \
+    printf '{"status":"ok","data":{"task":"%s","state":"%s","message":"%s","cjk":"%s","latin":"%s","digit":"%s","cjkWeight":%s,"latinWeight":%s,"digitWeight":%s,"cjkAxes":"%s","latinAxes":"%s","digitAxes":"%s","cjkMode":"%s","latinMode":"%s","digitMode":"%s","timeout":720,"progress":{"message":"%s","percent":%s}}}\n' \
         "$(json_escape_router "$_task")" "$(json_escape_router "$_state")" "$(json_escape_router "$_message")" \
         "$(json_escape_router "$_cjk")" "$(json_escape_router "$_latin")" "$(json_escape_router "$_digit")" \
+        "$(axis_weight_router "$_cjk_axes")" "$(axis_weight_router "$_latin_axes")" "$(axis_weight_router "$_digit_axes")" \
         "$(json_escape_router "$_cjk_axes")" "$(json_escape_router "$_latin_axes")" "$(json_escape_router "$_digit_axes")" \
+        "$(mix_mode_router "$(read_value "$_task_file" cjkMode)")" \
+        "$(mix_mode_router "$(read_value "$_task_file" latinMode)")" \
+        "$(mix_mode_router "$(read_value "$_task_file" digitMode)")" \
         "$(json_escape_router "$_message")" "$_percent"
 }
 
@@ -346,7 +441,7 @@ prepare_mix_stage() {
     [ -n "$_previous" ] || _previous=default
     _previous_legacy=false
     [ -f "$LEGACY_MODE" ] && _previous_legacy=true
-    _request="mix-request-$(date +%s 2>/dev/null || echo 0)-$"
+    _request="mix-request-$(date +%s 2>/dev/null || echo 0)-$$"
     _coverage_remediate=false
     _coverage_plan=''
     if [ "${LUOSHU_COVERAGE_REMEDIATE:-0}" = 1 ]; then
@@ -374,6 +469,11 @@ prepare_mix_stage() {
 
 stage_has_fonts() {
     [ -d "$MIX_STAGE" ] || return 1
+    [ -s "$MIX_STAGE/system/fonts/.luoshu-font-store/mix-composite.font" ] && return 0
+    [ -s "$MIX_STAGE/system/fonts/.luoshu-font-store/regular.font" ] && return 0
+    if [ -s "$MIX_STAGE/system/fonts/.luoshu-font-store/.luoshu-mix-source-weights.json" ]; then
+        find "$MIX_STAGE/system/fonts/.luoshu-font-store" -type f -name '*.font' -print -quit 2>/dev/null | grep -q . && return 0
+    fi
     find "$MIX_STAGE" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) \
         -print -quit 2>/dev/null | grep -q .
 }
@@ -388,34 +488,6 @@ stage_generation_matches() {
         [ "$(read_value "$MIX_MANIFEST" "$_field")" = "$(read_value "$MIX_STAGE_STATE" "$_field")" ] || return 1
     done
     [ -n "$(read_value "$MIX_MANIFEST" compositeHash)" ] || return 1
-    return 0
-}
-
-complete_hyperos_stage() {
-    _helper="$REALMOD/common/hyperos_stage_complete.sh"
-    if [ -e /system/fonts/MiSansVF.ttf ] || [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)" ] || \
-       [ -n "$(getprop ro.miui.ui.version.name 2>/dev/null)" ]; then
-        [ -f "$_helper" ] || return 1
-        LUOSHU_REAL_MODDIR="$REALMOD" sh "$_helper" "$MIX_STAGE" >> "$LOG_FILE" 2>&1 || return 1
-    fi
-}
-
-complete_coloros_stage() {
-    # The composite worker runs in a separate shell. Detect the same ROM markers
-    # as legacy util_functions instead of relying on its unexported IS_COLOROS.
-    _helper="$REALMOD/common/coloros_stage_complete.sh"
-    if [ -e /system/fonts/MiSansVF.ttf ] || [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)" ] || \
-       [ -n "$(getprop ro.miui.ui.version.name 2>/dev/null)" ]; then
-        return 0
-    fi
-    if [ -n "$(getprop ro.build.version.oplusrom 2>/dev/null)" ] || \
-       [ -n "$(getprop ro.build.version.opporom 2>/dev/null)" ] || \
-       [ -d /data/oplus/os ] || [ -d /system_ext/oplus ] || \
-       [ -e /system/fonts/SysSans-En-Regular.ttf ] || \
-       [ -e /system/fonts/SysFont-Regular.ttf ]; then
-        [ -f "$_helper" ] || return 1
-        LUOSHU_REAL_MODDIR="$REALMOD" sh "$_helper" "$MIX_STAGE" >> "$LOG_FILE" 2>&1 || return 1
-    fi
     return 0
 }
 
@@ -476,26 +548,52 @@ precommit_ready() {
 }
 
 next_mix_payload_ready_for_request() {
-    [ -d "$NEXT_PAYLOAD" ] && [ -s "$NEXT_STATE" ] && [ -s "$MIX_STAGE_STATE" ] || return 1
-    _nmr_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    [ -d "$NEXT_PAYLOAD" ] && [ -s "$NEXT_STATE" ] || return 1
+    [ "$(read_value "$NEXT_STATE" state)" = prepared ] || return 1
+    _nmr_request="${LUOSHU_MIX_REQUEST_ID:-}"
+    if [ -s "$MIX_STAGE_STATE" ]; then
+        _nmr_stage_request=$(read_value "$MIX_STAGE_STATE" requestId)
+        [ -n "$_nmr_stage_request" ] || return 1
+        [ -z "$_nmr_request" ] || [ "$_nmr_request" = "$_nmr_stage_request" ] || return 1
+        _nmr_request="$_nmr_stage_request"
+    fi
+    # The winning finalizer removes stage metadata after the atomic commit.
+    # The outer worker still carries the request exported when it was launched;
+    # require that exact identity, never infer ownership from task timestamps.
     [ -n "$_nmr_request" ] || return 1
     [ "$(read_value "$NEXT_STATE" font)" = mix ] || return 1
     [ "$(read_value "$NEXT_STATE" requestId)" = "$_nmr_request" ] || return 1
-    find "$NEXT_PAYLOAD" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \)         -print -quit 2>/dev/null | grep -q .
+    if [ -s "$NEXT_PAYLOAD/.luoshu-metrics-covered.lst" ]; then
+        # Current inventory output may use arbitrary directories or no extension.
+        while IFS= read -r _nmr_slot || [ -n "$_nmr_slot" ]; do
+            case "$_nmr_slot" in /*) ;; *) return 1 ;; esac
+            case "$_nmr_slot" in *'/../'*|*'/./'*|*'//'*) return 1 ;; esac
+            [ -f "$NEXT_PAYLOAD$_nmr_slot" ] && [ -s "$NEXT_PAYLOAD$_nmr_slot" ] || return 1
+        done < "$NEXT_PAYLOAD/.luoshu-metrics-covered.lst"
+        return 0
+    fi
+    # Recovery for already-prepared payloads written by an older installed build.
+    find "$NEXT_PAYLOAD" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' -o -iname '*.otc' \) \
+        -print -quit 2>/dev/null | grep -q .
 }
 
 prepare_mix_stage_for_commit() {
     PRECOMMIT_ERROR=''
+    mix_request_is_current || {
+        PRECOMMIT_ERROR='字体组合任务已被新请求替换，已忽略旧任务提交'
+        return 1
+    }
+    precommit_failed && return 1
     precommit_ready && return 0
 
     # v14.2/v14.3 composite workers finish by calling the safe switch core first.
-    # That core already maps the validated device inventory, applies OEM metric
-    # alignment and writes .luoshu-payload-next. If it belongs to this exact mix
-    # request, a second ROM/coverage pass is both redundant and extremely slow.
+    # That core already maps the validated device inventory with stock metrics
+    # and writes .luoshu-payload-next. Reuse only this exact mix request so a
+    # second inventory pass cannot rebuild the same composite.
     if next_mix_payload_ready_for_request; then
         _pm_task="$(read_value "$REALMOD/config/axes_task.conf" task)"
         mix_finalize_state_write ready '本机扫描槽位已在生成阶段一次映射完成，正在提交' "$_pm_task" 98
-        printf '[%s] [MIX] reuse prepared next payload request=%s; skip duplicate precommit mapping\n'             "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)"             "$(read_value "$MIX_STAGE_STATE" requestId)" >>"$LOG_FILE" 2>/dev/null || true
+        printf '[%s] [MIX] reuse prepared next payload request=%s; skip duplicate precommit mapping\n'             "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)"             "$(read_value "$NEXT_STATE" requestId)" >>"$LOG_FILE" 2>/dev/null || true
         return 0
     fi
 
@@ -509,52 +607,63 @@ prepare_mix_stage_for_commit() {
     }
 
     _pm_task="$(read_value "$REALMOD/config/axes_task.conf" task)"
-    mix_finalize_state_write running "正在完成 ROM 字体槽位对齐" "$_pm_task"
-    complete_hyperos_stage || {
-        precommit_fail 'HyperOS 字体槽位对齐失败，请导出字体切换日志'
-        return 1
-    }
-    complete_coloros_stage || {
-        precommit_fail 'ColorOS 字体槽位对齐失败，请导出字体切换日志'
-        return 1
-    }
-
-    # Explicit repair is transactional. Normal switching is best-effort here:
-    # coverage extras may fall back to the stock ROM, but they must never turn a
-    # fully generated composite into a many-minute total failure.
-    _coverage_helper="$REALMOD/common/coverage_payload_remediate.sh"
+    _inventory_helper="$REALMOD/common/inventory_font_stage.sh"
     _coverage_plan=$(read_value "$MIX_STAGE_STATE" coveragePlan)
-    if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ]; then
-        mix_finalize_state_write running "正在完成字体补齐批处理" "$_pm_task"
-        if [ ! -f "$_coverage_helper" ] || [ ! -s "$_coverage_plan" ]; then
-            precommit_fail '字体补齐组件或补齐计划缺失，未提交半成品'
-            return 1
-        fi
-        if ! LUOSHU_REAL_MODDIR="$REALMOD" \
-            LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-            LUOSHU_COVERAGE_PLAN="$_coverage_plan" \
-                sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1; then
-            precommit_fail '字体补齐批处理失败，未提交半成品'
-            return 1
-        fi
-    elif [ -f "$_coverage_helper" ] && [ -s "$REALMOD/config/device_font_inventory.json" ]; then
-        mix_finalize_state_write running "正在按本机扫描清单映射全部可替换字体槽位" "$_pm_task"
-        if ! LUOSHU_REAL_MODDIR="$REALMOD" \
-            LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-            LUOSHU_COVERAGE_PLAN= \
-                sh "$_coverage_helper" "$MIX_STAGE" mix mix >> "$LOG_FILE" 2>&1; then
-            printf '[%s] [MIX] optional coverage completion failed; continue with ROM-aligned core slots\n' \
-                "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" >> "$LOG_FILE" 2>/dev/null || true
-            mix_finalize_state_write running '附加字体槽位补齐未完成，正在提交已校验核心字体' "$_pm_task" 97
-        fi
+    if [ ! -f "$_inventory_helper" ]; then
+        precommit_fail '通用字体生成组件缺失，未提交半成品'
+        return 1
     fi
+    if [ "$(read_value "$MIX_STAGE_STATE" coverageRemediate)" = true ] && [ ! -s "$_coverage_plan" ]; then
+        precommit_fail '字体补齐计划缺失，未提交半成品'
+        return 1
+    fi
+    mix_finalize_state_write running "正在按本机扫描清单映射全部可替换字体槽位" "$_pm_task"
+    # A cache hit reuses verified output for these exact sources and inventory.
+    # A miss still maps the full inventory; a repair-only plan would omit slots.
+    _pm_output="$MIX_STAGE/.luoshu-precommit-output.log"
+    _pm_pyroot="$REALMOD/common/python"
+    _pm_watchdog="$REALMOD/common/mix_stage_watchdog.py"
+    [ -x "$_pm_pyroot/bin/luoshu-python" ] && [ -f "$_pm_watchdog" ] || {
+        precommit_fail '字体生成监督组件缺失，未启动无界后台任务'
+        return 1
+    }
+    set -- sh "$_inventory_helper" "$MIX_STAGE" mix mix
+    if [ -f "$REALMOD/common/mix_output_cache.py" ]; then
+        set -- "$_pm_pyroot/bin/luoshu-python" "$REALMOD/common/mix_output_cache.py" apply \
+            --module "$REALMOD" --stage "$MIX_STAGE" --request "$(read_value "$MIX_STAGE_STATE" requestId)"
+    fi
+    PYTHONHOME="$_pm_pyroot" \
+    PYTHONPATH="$_pm_pyroot/lib/python3.14:$_pm_pyroot/lib/python3.14/site-packages" \
+    LD_LIBRARY_PATH="$_pm_pyroot/lib:$_pm_pyroot/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+    LUOSHU_REAL_MODDIR="$REALMOD" \
+    LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" LUOSHU_COVERAGE_PLAN= \
+        "$_pm_pyroot/bin/luoshu-python" "$_pm_watchdog" --module "$REALMOD" \
+        --request "$(read_value "$MIX_STAGE_STATE" requestId)" --task "$_pm_task" \
+        --progress "$REALMOD/config/mix-inventory-progress.json" \
+        -- "$@" >"$_pm_output" 2>&1 &
+    MIX_MAPPING_PID=$!
+    wait "$MIX_MAPPING_PID"
+    _pm_rc=$?
+    MIX_MAPPING_PID=''
+    cat "$_pm_output" >>"$LOG_FILE" 2>/dev/null || true
+    if [ "$_pm_rc" -ne 0 ]; then
+        _pm_detail=$(sed -n 's/^通用字体生成失败：[[:space:]]*//p' "$_pm_output" 2>/dev/null | tail -n1)
+        [ -n "$_pm_detail" ] || _pm_detail=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_pm_output" 2>/dev/null | tail -n1)
+        if [ -n "$_pm_detail" ]; then
+            precommit_fail "按本机清单生成字体失败：$_pm_detail（未提交半成品）"
+        else
+            precommit_fail '按本机清单生成字体失败，未提交半成品'
+        fi
+        return 1
+    fi
+    rm -f "$_pm_output" 2>/dev/null || true
 
     _pm_request=$(read_value "$MIX_STAGE_STATE" requestId)
     [ -n "$_pm_request" ] || {
         precommit_fail '复合字体任务标识丢失，已拒绝提交'
         return 1
     }
-    _pm_tmp="${PRECOMMIT_STATE}.tmp.$"
+    _pm_tmp="${PRECOMMIT_STATE}.tmp.$$"
     {
         printf "state=ready\n"
         printf "requestId=%s\n" "$_pm_request"
@@ -572,14 +681,70 @@ prepare_mix_stage_for_commit() {
     mix_finalize_state_write ready '预提交处理完成，正在原子提交下一启动负载' "$_pm_task" 98
     return 0
 }
+commit_mix_payload_transaction() (
+    _txn_dir="$REALMOD/.luoshu-mix-commit.$$"
+    mkdir "$_txn_dir" 2>/dev/null || return 1
+    _txn_mutated=false
+    _txn_installed=false
+    _txn_committed=false
+    rollback_mix_commit() {
+        _txn_restored=true
+        if [ "$_txn_committed" != true ] && [ "$_txn_mutated" = true ]; then
+            if [ "$_txn_installed" = true ] && [ -d "$NEXT_PAYLOAD" ] && [ ! -e "$MIX_STAGE" ]; then
+                mv "$NEXT_PAYLOAD" "$MIX_STAGE" 2>/dev/null || _txn_restored=false
+            fi
+            if [ -d "$_txn_dir/previous-next" ]; then
+                if [ ! -e "$NEXT_PAYLOAD" ] && [ ! -L "$NEXT_PAYLOAD" ]; then
+                    mv "$_txn_dir/previous-next" "$NEXT_PAYLOAD" 2>/dev/null || _txn_restored=false
+                else
+                    _txn_restored=false
+                fi
+            fi
+            for _txn_name in font-payload-next.conf active_font.conf text_reboot_required.conf; do
+                if [ -f "$_txn_dir/$_txn_name" ] || [ -L "$_txn_dir/$_txn_name" ]; then
+                    mv -f "$_txn_dir/$_txn_name" "$REALMOD/config/$_txn_name" 2>/dev/null || _txn_restored=false
+                else
+                    rm -f "$REALMOD/config/$_txn_name" 2>/dev/null || _txn_restored=false
+                fi
+            done
+        fi
+        if [ "$_txn_restored" = true ]; then
+            rm -rf "$_txn_dir" 2>/dev/null || true
+        else
+            printf '[MIX] commit rollback incomplete; previous payload retained at %s\n' "$_txn_dir" >>"$LOG_FILE" 2>/dev/null || true
+        fi
+    }
+    trap 'rollback_mix_commit' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    # Preserve the queued selection and its small metadata before replacing it.
+    # Font trees are renamed, so this adds no font copies or mapping passes.
+    for _txn_name in font-payload-next.conf active_font.conf text_reboot_required.conf; do
+        if [ -e "$REALMOD/config/$_txn_name" ] || [ -L "$REALMOD/config/$_txn_name" ]; then
+            cp -p "$REALMOD/config/$_txn_name" "$_txn_dir/$_txn_name" 2>/dev/null || return 1
+        fi
+    done
+    _txn_mutated=true
+    if [ -e "$NEXT_PAYLOAD" ] || [ -L "$NEXT_PAYLOAD" ]; then
+        mv "$NEXT_PAYLOAD" "$_txn_dir/previous-next" 2>/dev/null || return 1
+    fi
+    _txn_installed=true
+    mv "$MIX_STAGE" "$NEXT_PAYLOAD" 2>/dev/null || return 1
+    write_next_state || return 1
+    _txn_committed=true
+    return 0
+)
+
 commit_mix_stage_if_needed() {
+    mix_request_is_current || return 1
     # Auto-multiweight may already have gone through font_switch_safe.sh. In that
     # case the real next payload is authoritative; discard this compatibility clone.
     if [ -d "$NEXT_PAYLOAD" ] && [ -s "$NEXT_STATE" ]; then
         _next_font=$(read_value "$NEXT_STATE" font)
         _stage_request=$(read_value "$MIX_STAGE_STATE" requestId)
         _next_request=$(read_value "$NEXT_STATE" requestId)
-        if [ "$_next_font" = mix ]; then
+        if [ "$_next_font" = mix ] && [ "$(read_value "$NEXT_STATE" state)" = prepared ]; then
             if [ ! -s "$MIX_STAGE_STATE" ] || { [ -n "$_stage_request" ] && [ "$_next_request" = "$_stage_request" ]; }; then
                 rm -rf "$MIX_STAGE" 2>/dev/null || true
                 rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
@@ -591,19 +756,18 @@ commit_mix_stage_if_needed() {
     # Recover a process killed after the stage directory was atomically renamed
     # but before its small state file was committed. MIX_STAGE_STATE is retained
     # until both pieces are durable, so the next status poll can finish the commit.
-    if [ -d "$NEXT_PAYLOAD" ] && [ ! -s "$NEXT_STATE" ] && [ -s "$MIX_STAGE_STATE" ]; then
+    # The old NEXT_STATE may still exist when replacing a queued selection.
+    if [ -d "$NEXT_PAYLOAD" ] && [ ! -d "$MIX_STAGE" ] && [ -s "$MIX_STAGE_STATE" ]; then
+        _recover_request=$(read_value "$MIX_STAGE_STATE" requestId)
+        [ -n "$_recover_request" ] || return 1
+        [ "$(read_value "$NEXT_PAYLOAD/.luoshu-mix-generation.conf" requestId)" = "$_recover_request" ] || return 1
         write_next_state || return 1
         rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
         return 0
     fi
 
     prepare_mix_stage_for_commit || return 1
-    rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
-    mv "$MIX_STAGE" "$NEXT_PAYLOAD" 2>/dev/null || return 1
-    if ! write_next_state; then
-        mv "$NEXT_PAYLOAD" "$MIX_STAGE" 2>/dev/null || true
-        return 1
-    fi
+    commit_mix_payload_transaction || return 1
     rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
     printf '[%s] legacy composite staged for next boot: mix\n' \
         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" >> "$LOG_FILE" 2>/dev/null || true
@@ -612,21 +776,70 @@ commit_mix_stage_if_needed() {
 
 finalize_lock_acquire() {
     _tries=0
-    while [ "$_tries" -lt 20 ]; do
+    _limit="${1:-120}"
+    # A duplicate caller waits for the existing owner without starting a second
+    # mapper. The mapper has its own CPU/progress supervision and total bound.
+    while [ "$_tries" -lt "$_limit" ]; do
         if mkdir "$FINALIZE_LOCK" 2>/dev/null; then
-            printf '%s\n' "$$" > "$FINALIZE_LOCK/pid" 2>/dev/null || {
-                rmdir "$FINALIZE_LOCK" 2>/dev/null || true
-                return 1
-            }
-            return 0
+            # Publish the owner atomically. A reader must never mistake the
+            # empty file between open/truncate and printf for a stale lock.
+            _owner_tmp="$FINALIZE_LOCK/pid.$$.tmp"
+            if printf '%s\n' "$$" >"$_owner_tmp" 2>/dev/null && \
+               mv -f "$_owner_tmp" "$FINALIZE_LOCK/pid" 2>/dev/null; then
+                return 0
+            fi
+            rm -f "$_owner_tmp" 2>/dev/null || true
+            rmdir "$FINALIZE_LOCK" 2>/dev/null || true
+            _tries=$((_tries + 1))
+            continue
         fi
         _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
         case "$_owner" in
             ''|*[!0-9]*) _owner='' ;;
         esac
-        if [ -z "$_owner" ] || ! kill -0 "$_owner" 2>/dev/null; then
-            rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
+        if [ -z "$_owner" ]; then
+            # mkdir is atomic, but publishing pid is a separate operation. Never
+            # remove a peer's freshly created directory in that startup window.
+            sleep 1
+            _tries=$((_tries + 1))
+            _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
+            case "$_owner" in
+                ''|*[!0-9]*) ;;
+                *) continue ;;
+            esac
+            # Only an empty directory may be reclaimed in this window. Never
+            # unlink a pid that another process may just have published. Remove
+            # only initializer/reclaimer artifacts whose named owner is dead.
+            for _abandoned in "$FINALIZE_LOCK"/pid.*.tmp "$FINALIZE_LOCK"/reclaim.*; do
+                [ -e "$_abandoned" ] || continue
+                _abandoned_pid=${_abandoned##*/}
+                case "$_abandoned_pid" in
+                    pid.*.tmp) _abandoned_pid=${_abandoned_pid#pid.}; _abandoned_pid=${_abandoned_pid%.tmp} ;;
+                    reclaim.*) _abandoned_pid=${_abandoned_pid#reclaim.} ;;
+                esac
+                case "$_abandoned_pid" in ''|*[!0-9]*) continue ;; esac
+                kill -0 "$_abandoned_pid" 2>/dev/null && continue
+                if [ -d "$_abandoned" ]; then rmdir "$_abandoned" 2>/dev/null || true
+                else rm -f "$_abandoned" 2>/dev/null || true
+                fi
+            done
             rmdir "$FINALIZE_LOCK" 2>/dev/null || true
+            continue
+        fi
+        if ! kill -0 "$_owner" 2>/dev/null; then
+            # Pin the directory while recovering a dead owner. A second
+            # reclaimer cannot remove/recreate it between our PID check and
+            # unlink. Name the pin by PID so an interrupted reclaim is recoverable.
+            _reclaim="$FINALIZE_LOCK/reclaim.$$"
+            if mkdir "$_reclaim" 2>/dev/null; then
+                if [ "$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)" = "$_owner" ] && \
+                   ! kill -0 "$_owner" 2>/dev/null; then
+                    rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
+                fi
+                rmdir "$_reclaim" 2>/dev/null || true
+                rmdir "$FINALIZE_LOCK" 2>/dev/null || true
+            fi
+            _tries=$((_tries + 1))
             continue
         fi
         sleep 1
@@ -637,10 +850,40 @@ finalize_lock_acquire() {
 
 finalize_lock_release() {
     _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
-    [ -z "$_owner" ] || [ "$_owner" = "$$" ] || return 1
+    [ "$_owner" = "$$" ] || return 1
     rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
     rmdir "$FINALIZE_LOCK" 2>/dev/null || true
 }
+
+stop_mix_mapping() {
+    [ -n "${MIX_MAPPING_PID:-}" ] || return 0
+    # The supervisor owns a separate FontTools process group. Let it stop that
+    # group before releasing the stage lock or deleting task source files.
+    kill -TERM "$MIX_MAPPING_PID" 2>/dev/null || true
+    wait "$MIX_MAPPING_PID" 2>/dev/null || true
+    MIX_MAPPING_PID=''
+}
+
+prepare_mix_stage_locked() (
+    # The weighted controller's prepare call and the legacy monitor's finalize
+    # call must share the same owner. Checking only the ready marker lets both
+    # processes enter the inventory mapping pass before it is written.
+    finalize_lock_acquire || {
+        printf '{"status":"error","message":"复合字体预提交锁正在使用，请稍后重试"}\n'
+        return 1
+    }
+    trap 'stop_mix_mapping; finalize_lock_release >/dev/null 2>&1 || true' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    if prepare_mix_stage_for_commit; then
+        printf '{"status":"ok","data":{"stage":"prepared"}}\n'
+        return 0
+    fi
+    printf '{"status":"error","message":"%s"}\n' \
+        "$(json_escape_router "${PRECOMMIT_ERROR:-复合字体预提交处理失败}")"
+    return 1
+)
 
 write_legacy_mix_mode() {
     _tmp="$REALMOD/config/font_runtime_legacy_v14_4.conf.tmp.$$"
@@ -650,22 +893,26 @@ write_legacy_mix_mode() {
     chmod 0600 "$REALMOD/config/font_runtime_legacy_v14_4.conf" 2>/dev/null || true
 }
 
-finalize_mix_stage() {
+finalize_mix_stage() (
     if ! finalize_lock_acquire; then
         printf '{"status":"error","message":"复合字体已生成但提交锁不可用，请稍后重试"}\n'
         return 1
     fi
+    trap 'stop_mix_mapping; finalize_lock_release >/dev/null 2>&1 || true' EXIT
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
     commit_mix_stage_if_needed
     _commit_rc=$?
-    finalize_lock_release >/dev/null 2>&1 || true
     if [ "$_commit_rc" -ne 0 ]; then
-        printf '{"status":"error","message":"复合字体已生成但下一启动负载提交失败"}\n'
+        printf '{"status":"error","message":"%s"}\n' \
+            "$(json_escape_router "${PRECOMMIT_ERROR:-复合字体已生成但下一启动负载提交失败}")"
         return 1
     fi
     write_legacy_mix_mode
     printf '{"status":"ok","data":{"font":"mix","rebootRequired":true,"pipeline":"atomic-next-boot-composite"}}\n'
     return 0
-}
+)
 
 setup_runtime() {
     _payload="$1"
@@ -695,7 +942,6 @@ setup_runtime() {
     force_link "$REALMOD/common/font_role_check.py" "$RUNTIME/common/font_role_check.py" || return 1
     force_link "$LEGACY/util_functions.sh" "$RUNTIME/common/util_functions.sh" || return 1
     force_link "$LEGACY/font_check.sh" "$RUNTIME/common/font_check.sh" || return 1
-    force_link "$LEGACY/rom_adapters.sh" "$RUNTIME/common/rom_adapters.sh" || return 1
     # Keep the v14.4 font engine, but use the current detached-task and nested-task
     # handoff helpers. Without them Android can keep the public task at 34% until
     # the complete composite build exits.
@@ -708,7 +954,6 @@ setup_runtime() {
     force_link "$REALMOD/common/font_switch_lock.sh" "$RUNTIME/common/font_switch_lock.sh" || return 1
     force_link "$LEGACY" "$RUNTIME/common/legacy_v14_4" || return 1
     force_link "$REALMOD/common/module_status.sh" "$RUNTIME/common/module_status.sh" || true
-    force_link "$REALMOD/common/hyperos_stage_complete.sh" "$RUNTIME/common/hyperos_stage_complete.sh" || true
 
     cat >"$RUNTIME/common/mount_compat.sh" <<'EOF'
 #!/system/bin/sh
@@ -739,18 +984,36 @@ mark_mix_mode_if_success() {
 }
 
 _cmd="${1:-config}"
+# Kernel ownership serializes the complete mutating transaction. The old
+# directory remains useful for diagnostics/older installations, but its pathname
+# alone cannot protect against a stale reclaimer deleting a new empty lock.
+if [ "${LUOSHU_MIX_KERNEL_LOCK_HELD:-}" = 1 ]; then
+    unset LUOSHU_MIX_KERNEL_LOCK_HELD
+else
+    case "$_cmd" in
+        start|recover|prepare-finalize|finalize|finalize-worker)
+            _kernel_wait=120
+            case "$_cmd" in start|recover) _kernel_wait=1 ;; esac
+            _kernel_python="$REALMOD/common/python"
+            [ -x "$_kernel_python/bin/luoshu-python" ] && [ -f "$REALMOD/common/mix_stage_watchdog.py" ] || {
+                printf '{"status":"error","message":"字体事务锁组件缺失"}\n'
+                exit 1
+            }
+            PYTHONHOME="$_kernel_python" \
+            PYTHONPATH="$_kernel_python/lib/python3.14:$_kernel_python/lib/python3.14/site-packages" \
+            LD_LIBRARY_PATH="$_kernel_python/lib:$_kernel_python/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+                exec "$_kernel_python/bin/luoshu-python" "$REALMOD/common/mix_stage_watchdog.py" \
+                --module "$REALMOD" --lock --wait "$_kernel_wait" -- sh "$0" "$@"
+            ;;
+    esac
+fi
 if [ "$_cmd" = finalize-worker ]; then
     mix_finalize_worker "${2:-}"
-    exit 0
+    exit $?
 fi
 if [ "$_cmd" = prepare-finalize ]; then
-    if prepare_mix_stage_for_commit; then
-        printf '{"status":"ok","data":{"stage":"prepared"}}\n'
-        exit 0
-    fi
-    _prepare_error="${PRECOMMIT_ERROR:-复合字体预提交处理失败}"
-    printf '{"status":"error","message":"%s"}\n' "$(json_escape_router "$_prepare_error")"
-    exit 1
+    prepare_mix_stage_locked
+    exit $?
 fi
 if [ "$_cmd" = reconcile ]; then
     # Reconcile task ownership without rebuilding compatibility runtime links.
@@ -772,6 +1035,23 @@ if [ "$_cmd" = status ]; then
 fi
 case "$_cmd" in
     start)
+        # Admission and finalization share the same lock. Do not erase a live
+        # worker's stage merely because a second tap will later be rejected.
+        finalize_lock_acquire 1 || {
+            printf '{"status":"error","message":"字体组合正在提交，请稍后重试"}\n'
+            exit 1
+        }
+        trap 'finalize_lock_release >/dev/null 2>&1 || true' EXIT
+        trap 'exit 129' HUP
+        trap 'exit 130' INT
+        trap 'exit 143' TERM
+        mix_reconcile_fast
+        case "$(read_value "$REALMOD/config/axes_task.conf" state)" in
+            queued|running)
+                printf '{"status":"error","message":"已有字体组合任务正在运行，请等待完成"}\n'
+                exit 1
+                ;;
+        esac
         prepare_mix_stage "$2" "$3" "$4" "${5:-wght=400}" "${6:-wght=400}" "${7:-wght=400}" || {
             printf '{"status":"error","message":"无法创建复合字体下一启动暂存负载"}\n'
             exit 1
@@ -815,7 +1095,9 @@ case "$_cmd" in
         exit "$_rc"
         ;;
     start)
-        _out="$(sh "$RUNTIME/common/v14_mix.sh" "$@" 2>&1)"
+        # The admission transaction retains FD 9 in this shell, but the command
+        # that launches detached generation must not pass it to those workers.
+        _out="$(exec 9>&-; sh "$RUNTIME/common/v14_mix.sh" "$@" 2>&1)"
         _rc=$?
         printf '%s\n' "$_out"
         if [ "$_rc" -ne 0 ] || ! printf '%s\n' "$_out" | grep -q '"status":"ok"'; then

@@ -37,7 +37,21 @@ luoshu_update_config_value() {
 # explicit apply. Compare only the small builders, never the active font trees.
 luoshu_update_font_builder_compatible() {
     for _lufb_relative in \
+        common/font_inventory.py \
         common/font_inventory_scan.py \
+        common/stock_inventory_scan.py \
+        common/inventory_font_stage.py \
+        common/inventory_font_metrics.py \
+        common/inventory_stock_source.py \
+        common/inventory_font_supplement.py \
+        common/physical_font_load_verify.py \
+        common/inventory_font_stage.sh \
+        common/mix_source_manifest.py \
+        common/mix_inventory_weights.py \
+        common/legacy_v14_4/font_mix_engine.sh \
+        common/legacy_v14_4/v143_auto_multiweight_mix.sh \
+        common/coverage_payload_remediate.sh \
+        common/legacy_v14_4/font_switch_safe.sh \
         common/device_font_payload_build.py \
         common/device_font_payload_overlay.py \
         common/font_runtime_mount.sh \
@@ -71,7 +85,7 @@ luoshu_update_config_is_volatile() {
         composite_progress.json|mix_last_error.txt|app_install_pending|app_install_state.conf|\
         app_install_manual|font-payload-rebuild-pending.conf|font-payload-reapply-notified.conf|font-boot-failures|\
         font-payload-quarantine.conf|mount_compat.conf|self-mount.conf|\
-        self-mount-required.conf|device-font-load-verification.conf|\
+        self-mount-required.conf|device-font-load-verification.conf|device-font-physical-verification.json|\
         device-font-cache-pending.conf|device-font-cache-failures.conf|\
         device-font-engine.conf|device-font-installed.conf|device-font-dynamic-mount.conf|\
         device-font-load-verification.json|device-font-manager-dump.txt|\
@@ -142,6 +156,7 @@ luoshu_clear_update_volatile() {
         "$_module/config/self-mount.conf" \
         "$_module/config/self-mount-required.conf" \
         "$_module/config/device-font-load-verification.conf" \
+        "$_module/config/device-font-physical-verification.json" \
         "$_module/config/device-font-load-verification.json" \
         "$_module/config/device-font-manager-dump.txt" \
         "$_module/config/device-font-mount-evidence.txt" \
@@ -185,6 +200,7 @@ luoshu_migrate_update_cache() {
         cache/full-composite-v12 \
         cache/auto-multiweight-mix/composites-v9 \
         cache/auto-multiweight-mix/prepared-v8 \
+        cache/full-composite-v8 \
         cache/full-composite-v7 \
         cache/auto-multiweight-mix/composites-v3; do
         rm -rf "$_new/$_relative" 2>/dev/null || true

@@ -60,6 +60,7 @@ LUOSHU_MODULES_DIR="$TMP/modules" \
 LUOSHU_MODULES_UPDATE_DIR="$TMP/modules-update" \
 LUOSHU_METAMODULE_MNT="$TMP/metamodule" \
 LUOSHU_SELF_MOUNT_STATE="$TMP/luoshu/self-mount" \
+LUOSHU_PRIVATE_STATE_ROOT="$TMP/missing-private-state" \
     sh "$MODULE/uninstall.sh"
 
 grep -qx "$TARGET" "$TMP/umount.log"
@@ -68,6 +69,7 @@ test ! -e "$PROVIDER/GoogleSans-Regular.ttf.luoshu-bak"
 test "$(sha256sum "$DATA/flymeFont.ttf" | awk '{print $1}')" = "$ORIGINAL_HASH"
 test ! -e "$MODULE/config/flyme-data-original"
 test ! -e "$MODULE/config/flyme-data-pending.conf"
+test ! -e "$TMP/missing-private-state"
 
 CORE="$ROOT/.luoshu-runtime/compat/v227/uninstall.sh"
 sh -n "$ROOT/uninstall.sh"

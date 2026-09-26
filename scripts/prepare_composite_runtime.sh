@@ -85,6 +85,9 @@ find "$R/lib/python3.14/site-packages" -type f -name '*.so' -delete
 cp -a "$R"/. "$ROOT/common/python/"
 chmod 0755 "$ROOT/common/python/bin/luoshu-python"
 
+# FontTools' WOFF2 reader needs a real Android decoder, not a host pip extension.
+ANDROID_NDK_HOME="$NDK" sh "$ROOT/scripts/prepare_brotli_runtime.sh"
+
 # Copy exact upstream license files. Do not use a broad find over the combined
 # runtime tree: after FontTools is installed, that can select the wrong file.
 cp "$R/lib/python3.14/LICENSE.txt" "$ROOT/licenses/CPython-LICENSE.txt"

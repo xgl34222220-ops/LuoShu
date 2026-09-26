@@ -125,4 +125,95 @@ test -f "$MOD/config/app_install_pending"
 grep -q '^status=blocked$' "$MOD/config/app_install_state.conf"
 grep -q 'INSTALL_FAILED_UPDATE_INCOMPATIBLE' "$MOD/logs/app-install.log"
 
+# Flashing must bound both binder queries and package installation. The fake
+# timeout records budgets and can model a stuck query without sleeping in tests.
+cat > "$BIN/timeout" <<'EOF'
+#!/bin/sh
+printf '%s %s\n' "$1" "$3" >> "$MOCK_TIMEOUT_CALLS"
+shift
+case "${MOCK_TIMEOUT_MODE:-}:$2" in
+  query:package|query:dump) exit 124 ;;
+  install:install) exit 124 ;;
+esac
+exec "$@"
+EOF
+chmod 0755 "$BIN/timeout"
+rm -f "$CALLS" "$TMP/timeout.calls"
+set +e
+MOCK_VERSION=0 MOCK_PM_CALLS="$CALLS" MOCK_TIMEOUT_CALLS="$TMP/timeout.calls" MOCK_TIMEOUT_MODE=query \
+APP_INSTALL_PM_BIN="$BIN/pm" APP_INSTALL_DUMPSYS_BIN="$BIN/dumpsys" APP_INSTALL_TIMEOUT_BIN="$BIN/timeout" \
+MODDIR="$MOD" sh "$MOD/common/app_installer.sh" flash > "$TMP/flash-query.out"
+FLASH_QUERY_CODE=$?
+set -e
+test "$FLASH_QUERY_CODE" -eq 10
+grep -qx deferred "$TMP/flash-query.out"
+grep -qx '5 package' "$TMP/timeout.calls"
+test "$(wc -l < "$TMP/timeout.calls" | tr -d ' ')" -eq 1
+test ! -e "$CALLS"
+
+rm -f "$CALLS" "$TMP/timeout.calls"
+set +e
+MOCK_VERSION=0 MOCK_PM_CALLS="$CALLS" MOCK_TIMEOUT_CALLS="$TMP/timeout.calls" MOCK_TIMEOUT_MODE=install \
+APP_INSTALL_PM_BIN="$BIN/pm" APP_INSTALL_DUMPSYS_BIN="$BIN/dumpsys" APP_INSTALL_TIMEOUT_BIN="$BIN/timeout" \
+MODDIR="$MOD" sh "$MOD/common/app_installer.sh" flash > "$TMP/flash-timeout.out"
+FLASH_TIMEOUT_CODE=$?
+set -e
+test "$FLASH_TIMEOUT_CODE" -eq 10
+grep -qx '20 install' "$TMP/timeout.calls"
+grep -qx deferred "$TMP/flash-timeout.out"
+test -f "$MOD/config/app_install_pending"
+grep -q '^status=deferred$' "$MOD/config/app_install_state.conf"
+test ! -e "$CALLS"
+
+# A recovery lacking timeout must defer before even querying the package manager.
+rm -f "$CALLS" "$TMP/timeout.calls"
+set +e
+MOCK_VERSION=0 MOCK_PM_CALLS="$CALLS" MOCK_TIMEOUT_CALLS="$TMP/timeout.calls" \
+APP_INSTALL_PM_BIN="$BIN/pm" APP_INSTALL_DUMPSYS_BIN="$BIN/dumpsys" APP_INSTALL_TIMEOUT_BIN="$TMP/no-timeout" \
+MODDIR="$MOD" sh "$MOD/common/app_installer.sh" flash > "$TMP/no-timeout.out"
+NO_TIMEOUT_CODE=$?
+set -e
+test "$NO_TIMEOUT_CODE" -eq 10
+grep -qx deferred "$TMP/no-timeout.out"
+test ! -e "$CALLS"
+test ! -e "$TMP/timeout.calls"
+test -z "$(find "$MOD/config" -name 'app_install_state.conf.tmp.*' -print)"
+
+# A stable preview identity coexists with old debug installations. It still
+# verifies the exact APK hash and never removes another package.
+sed -i 's/luoshu.debug/luoshu.preview/' "$MOD/bundled/app.prop"
+rm -f "$CALLS"
+MOCK_VERSION=0 MOCK_PM_CALLS="$CALLS" \
+APP_INSTALL_PM_BIN="$BIN/pm" APP_INSTALL_DUMPSYS_BIN="$BIN/dumpsys" \
+MODDIR="$MOD" sh "$MOD/common/app_installer.sh" test-preview > "$TMP/preview.out"
+grep -qx installed "$TMP/preview.out"
+grep -qx 'package=io.github.xgl34222220.luoshu.preview' "$MOD/config/app_install_state.conf"
+! grep -q uninstall "$CALLS"
+sed -i 's/^sha256=.*/sha256=broken/' "$MOD/bundled/app.prop"
+rm -f "$CALLS"
+set +e
+MOCK_VERSION=0 MOCK_PM_CALLS="$CALLS" \
+APP_INSTALL_PM_BIN="$BIN/pm" APP_INSTALL_DUMPSYS_BIN="$BIN/dumpsys" \
+MODDIR="$MOD" sh "$MOD/common/app_installer.sh" test-preview-bad-hash > "$TMP/preview-bad.out"
+PREVIEW_CODE=$?
+set -e
+test "$PREVIEW_CODE" -eq 22
+grep -qx invalid-apk "$TMP/preview-bad.out"
+test ! -e "$CALLS"
+
+# Root-manager action resolves the actual bundled package, including the full
+# activity class because the preview application ID differs from its namespace.
+cp "$ROOT/action.sh" "$MOD/action.sh"
+cat > "$BIN/am" <<'EOF'
+#!/bin/sh
+printf '%s\n' "$*" > "$MOCK_AM_CALLS"
+EOF
+chmod 0755 "$BIN/am"
+cat > "$MOD/common/app_installer.sh" <<'EOF'
+#!/bin/sh
+echo installed
+EOF
+PATH="$BIN:$PATH" MOCK_AM_CALLS="$TMP/am.calls" sh "$MOD/action.sh" > "$TMP/action.out"
+grep -qx 'start -n io.github.xgl34222220.luoshu.preview/io.github.xgl34222220.luoshu.MainActivity' "$TMP/am.calls"
+
 printf 'Bundled App installer tests passed.\n'

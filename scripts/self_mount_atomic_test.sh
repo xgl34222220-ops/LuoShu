@@ -46,7 +46,7 @@ _luoshu_self_state_write() {
 _luoshu_self_state_value() {
     sed -n "s/^${1}=//p" "$MODULE_DIR/config/self-mount.conf" 2>/dev/null | head -n1
 }
-luoshu_payload_partitions() { printf '%s\n' 'system product system_ext'; }
+luoshu_payload_partitions() { printf '%s\n' 'system product system_ext nebula'; }
 _lfrp_partitions() { luoshu_payload_partitions; }
 _lfrp_payload_root() {
     printf '%s\n' "${LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT:-$MODULE_DIR}"
@@ -57,7 +57,7 @@ _luoshu_partition_root() {
             test -d "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/system" || return 1
             printf '%s/system\n' "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT"
             ;;
-        product|system_ext)
+        product|system_ext|nebula)
             test -d "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT/$1" || return 1
             printf '%s/%s\n' "$LUOSHU_SELF_MOUNT_VISIBLE_ROOT" "$1"
             ;;
@@ -192,6 +192,23 @@ if [ -n "$FINAL_SCRIPT" ]; then
     grep -q 'product/vivo/fonts' "$MODULE_DIR/config/self-mount-required.conf" || \
         fail 'nested OEM font root missing from required manifest'
     luoshu_mount_verify_active custom || fail 'strict verifier rejected nested font root'
+
+    for unknown_mode in overlay bind; do
+        setup_case "unknown-nested-only-$unknown_mode"
+        LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT="$MODULE_DIR/.luoshu-payload"
+        mkdir -p "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/nebula/assets/typefaces" \
+            "$CASE_ROOT/root/nebula/assets/typefaces"
+        printf 'new-font\n' > "$LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT/nebula/assets/typefaces/Opaque.ttf"
+        printf 'stock-font\n' > "$CASE_ROOT/root/nebula/assets/typefaces/Opaque.ttf"
+        printf 'nebula|assets/typefaces|nebula-nested-fixture\n' > "$MODULE_DIR/config/device_font_roots.conf"
+        [ "$unknown_mode" != bind ] || FAIL_OVERLAY=nebula-nested-fixture
+        luoshu_self_mount_ensure || fail 'unknown nested-only payload was rejected'
+        test "$(cat "$CASE_ROOT/root/nebula/assets/typefaces/Opaque.ttf")" = new-font || \
+            fail 'unknown nested-only font was not visible'
+        grep -q 'nebula/assets/typefaces' "$MODULE_DIR/config/self-mount-required.conf" || \
+            fail 'unknown nested-only font missing from committed manifest'
+        luoshu_mount_verify_active custom || fail 'unknown nested-only font failed verification'
+    done
 
     setup_case kernelsu-private-payload-missing-optional-target
     LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT="$MODULE_DIR/.luoshu-payload"

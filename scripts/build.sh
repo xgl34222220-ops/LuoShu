@@ -46,9 +46,9 @@ esac
 case "$APP_PACKAGE" in
   io.github.xgl34222220.luoshu)
     ;;
-  io.github.xgl34222220.luoshu.debug)
+  io.github.xgl34222220.luoshu.debug|io.github.xgl34222220.luoshu.preview)
     [ "$ALLOW_DEBUG_APP" = "1" ] || {
-      echo 'Debug App packaging requires LUOSHU_ALLOW_DEBUG_APP=1.' >&2
+      echo 'Debug/preview App packaging requires LUOSHU_ALLOW_DEBUG_APP=1.' >&2
       exit 68
     }
     ;;
@@ -102,7 +102,7 @@ rm -f "$STAGE/common/stability.sh" "$STAGE/common/fonts_xml_template.sh" \
 sh "$ROOT/scripts/prune_python_runtime.sh" "$STAGE"
 
 find "$STAGE/common" -maxdepth 1 -type f -exec chmod 0755 {} +
-chmod 0755 "$STAGE"/*.sh "$STAGE/system/bin/luoshud" "$STAGE/common/python/bin/luoshu-python"
+chmod 0755 "$STAGE"/*.sh "$STAGE/system/bin/luoshud" "$STAGE/common/python/bin/luoshu-python" "$STAGE/common/python/bin/luoshu-brotli"
 find "$STAGE/system/fonts" -type f -exec chmod 0644 {} + 2>/dev/null || true
 
 # App-only single-package gates: no WebUI and the native App must always be bundled.

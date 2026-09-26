@@ -74,9 +74,15 @@ find "$DYN" -maxdepth 1 -type f -name '_codecs_cn.*.so' -print -quit | grep -q .
 find "$DYN" -maxdepth 1 -type f -name '_codecs_jp.*.so' -print -quit | grep -q .
 find "$DYN" -maxdepth 1 -type f -name '_bz2.*.so' -print -quit | grep -q .
 find "$DYN" -maxdepth 1 -type f -name '_lzma.*.so' -print -quit | grep -q .
+# Mix transactions use a persistent kernel lock; dropping this extension would
+# make host tests pass while every Android start/finalize fails on import.
+_fcntl=$(find "$DYN" -maxdepth 1 -type f -name 'fcntl.*.so' -print -quit)
+test -n "$_fcntl" && test -s "$_fcntl"
 test -d "$PYLIB/site-packages/fontTools/ttLib"
 test -d "$PYLIB/site-packages/fontTools/cffLib"
 test -d "$PYLIB/site-packages/fontTools/varLib/instancer"
+test -x "$STAGE/common/python/bin/luoshu-brotli"
+test -s "$PYLIB/site-packages/brotli.py"
 test -s "$PYLIB/xml/etree/ElementTree.py"
 test -s "$PYLIB/argparse.py"
 test -s "$PYLIB/hashlib.py"
@@ -85,6 +91,8 @@ test -s "$PYLIB/tempfile.py"
 # Every retained extension that requests a private OpenSSL/SQLite soname must still find it in the
 # runtime library directory. System libraries such as libc/libm/libdl are intentionally ignored.
 if command -v readelf >/dev/null 2>&1; then
+    readelf -h "$_fcntl" | grep -q 'Machine:.*AArch64'
+    readelf -Ws "$_fcntl" | grep -q 'PyInit_fcntl'
     _needed="$TMP/needed.txt"
     : > "$_needed"
     find "$STAGE/common/python" -type f -name '*.so' | while IFS= read -r _so; do

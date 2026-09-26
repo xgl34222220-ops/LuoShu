@@ -111,13 +111,45 @@ def inspect(path: Path) -> dict[str, object]:
     }
 
 
+def inspect_donor(path: Path) -> dict[str, object]:
+    """A donor supplies its real text subset; inventory staging preserves other glyphs."""
+    from font_metadata import text_role_counts, protected_text_font
+    with path.open("rb") as stream:
+        collection = stream.read(4) == b"ttcf"
+    handle = TTCollection(path, lazy=True) if collection else TTFont(path, lazy=True, recalcTimestamp=False)
+    fonts = handle.fonts if collection else [handle]
+    totals = {"cjkCodepoints": 0, "latinCodepoints": 0, "digitCodepoints": 0}
+    usable = []
+    try:
+        for index, font in enumerate(fonts):
+            if protected_text_font(font):
+                continue
+            if not all(tag in font for tag in ("head", "maxp", "cmap", "hhea", "hmtx")):
+                continue
+            if not any(tag in font for tag in ("glyf", "CFF ", "CFF2")):
+                continue
+            roles = text_role_counts(font.getBestCmap() or {})
+            if any(roles.values()):
+                usable.append(index)
+            for role, count in roles.items():
+                totals[role + "Codepoints"] += count
+        accepted = bool(usable)
+        return {"safe": accepted, "face": usable[0] if usable else -1, "faces": len(fonts),
+                "replacementMode": "inventory-complement", **totals,
+                "message": (f"可替换字形：中文 {totals['cjkCodepoints']}、英文 {totals['latinCodepoints']}、数字 {totals['digitCodepoints']}；其余字形保留系统原字形"
+                            if accepted else "未找到可替换的中英数字形，或字体为受保护图标/彩色字体")}
+    finally:
+        handle.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("font", type=Path)
     parser.add_argument("--brief", action="store_true")
+    parser.add_argument("--donor", action="store_true", help="Validate actual text roles for inventory-complement replacement")
     args = parser.parse_args()
     try:
-        result = inspect(args.font)
+        result = inspect_donor(args.font) if args.donor else inspect(args.font)
     except Exception as error:  # corrupted fonts must never reach Android's renderer
         result = {"safe": False, "message": f"无法读取字形覆盖：{error}"}
     if args.brief:

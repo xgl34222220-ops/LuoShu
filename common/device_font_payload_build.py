@@ -83,6 +83,11 @@ def _inventory_roles(entry: dict[str, Any]) -> list[str]:
 
 def _safe_inventory_logical(logical: str, entry: dict[str, Any]) -> tuple[str, Path] | None:
     """Validate an inventory path anywhere below a trusted system/OEM partition."""
+    if (not isinstance(logical, str) or not logical.startswith("/")
+            or logical.startswith("//") or any(c in logical for c in "\r\n\t\x00")
+            or any(part in ("", ".", "..") for part in logical[1:].split("/"))
+            or str(entry.get("path", logical)) != logical):
+        return None
     path = Path(logical)
     parts = path.parts
     if len(parts) < 3 or parts[0] != "/":
@@ -90,13 +95,16 @@ def _safe_inventory_logical(logical: str, entry: dict[str, Any]) -> tuple[str, P
     partition = parts[1]
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_]{0,63}", partition):
         return None
+    if partition in {"data", "data_mirror", "storage", "sdcard", "mnt", "proc", "sys", "dev", "apex", "cache", "tmp"}:
+        return None
     if str(entry.get("partition") or partition) != partition:
         return None
     relative = Path(*parts[2:])
     if not relative.parts or any(part in ("", ".", "..") for part in relative.parts):
         return None
-    if relative.suffix.lower() not in {".ttf", ".otf", ".ttc", ".otc"}:
-        return None
+    # This is called only for entries of a validated stock inventory. Font
+    # tables established the format during scanning; an OEM .bin or opaque
+    # filename must retain the same eligibility as a .ttf spelling.
     return partition, relative
 
 

@@ -30,23 +30,17 @@ assert names["monospace"] == ["LuoShuMono-400.ttf"], names
 assert names["sans-serif"] == ["LuoShu-400.ttf"], names
 PY
 
-# XML/monospace generation remains implemented and regression-tested in the preserved
-# current v4 manager. The App-facing root manager is now only a router, so asking it to
-# contain the old generation body would accidentally reconnect final apply to the 94% path.
-grep -q 'font_config_enable_for_payload' "$ROOT/common/font_mix.sh" || fail 'font_mix.sh missing XML overlay'
-grep -q 'font_config_enable_for_payload' "$ROOT/common/font_manager_v4.sh" || fail 'v4 switch manager missing XML overlay'
-grep -q '\[ "\$_font_id" != default \] && type font_config_enable_for_payload' "$ROOT/common/font_manager_v4.sh" || fail 'v4 switch manager missing default guard'
-grep -q 'font_config_disable' "$ROOT/common/font_manager_v4.sh" || fail 'v4 manager missing disable path'
-grep -q '设备原厂槽位对齐失败' "$ROOT/common/font_manager_v4.sh" || fail 'v4 switch manager missing atomic aligned-payload error'
-grep -q 'return 6' "$ROOT/common/font_manager_v4.sh" || fail 'v4 switch manager must reject a partial XML/slot payload'
-grep -q '警告：无 Hook XML 未安全启用，已保留文件槽映射' "$ROOT/common/font_manager_v4.sh" && fail 'v4 manager still commits a partial fail-open payload' || true
-
-# Final App apply must stay on the isolated v14.4 physical-file backend and therefore
-# must not invoke any XML overlay generator or the v4 device-template/slot pipeline.
-grep -q 'legacy_v14_4_switch.sh' "$ROOT/common/font_manager.sh" || fail 'root manager missing legacy switch route'
-! grep -q 'font_config_enable_for_payload' "$ROOT/common/font_manager.sh" || fail 'root manager still owns XML generation'
-! grep -qE 'font_config_enable_for_payload|font_config_overlay|device_font_template|device_font_slot|device_font_payload_build' \
-    "$ROOT/common/legacy_v14_4_switch.sh" || fail 'legacy switch re-entered v4 XML/slot pipeline'
+# The legacy XML helper above keeps its regression fixture, while every active
+# App/backend mutation now maps the measured inventory without rewriting full XML.
+grep -q 'inventory_font_stage.sh' "$ROOT/common/legacy_v14_4/mix_router.sh" || fail 'composite missing inventory mapping'
+grep -q 'font_switch_safe.sh' "$ROOT/common/font_manager.sh" || fail 'root manager missing universal switch route'
+for _entry in "$ROOT/common/font_mix.sh" "$ROOT/common/legacy_v14_4/mix_router.sh" \
+              "$ROOT/common/font_manager.sh" "$ROOT/common/font_manager_v4.sh" \
+              "$ROOT/common/legacy_v14_4_switch.sh"; do
+    ! grep -qE 'font_config_enable_for_payload|font_config_overlay|device_font_template|device_font_slot|device_font_payload_build|apply_font_by_rom' \
+        "$_entry" || fail 'active entry re-entered the retired XML/ROM mapper'
+done
+grep -q 'action switch "$1"' "$ROOT/common/font_manager_v4.sh" || fail 'active font deletion bypasses safe reset'
 
 grep -q 'xmlOverlay=false' "$ROOT/common/multiweight_mix_task.sh" && fail 'multiweight still hard-codes xmlOverlay=false' || true
 grep -q 'font-config-overlay.conf' "$ROOT/common/multiweight_mix_task.sh" || fail 'multiweight does not read actual XML overlay state'

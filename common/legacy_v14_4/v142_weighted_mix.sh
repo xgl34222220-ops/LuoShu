@@ -12,6 +12,17 @@ if [ -z "$MODDIR" ]; then
     fi
 fi
 
+# The router supplies partition symlinks into a disposable stage.
+case "$MODDIR" in
+    "${LUOSHU_REAL_MODDIR:-}/.legacy-v14-runtime") ;;
+    *)
+        case "${1:-config}" in
+            start|config|status|recover) exec sh "$MODDIR/common/font_mix.sh" "$@" ;;
+            *) printf '{"status":"error","message":"字体组合任务需要隔离暂存目录"}\n'; exit 1 ;;
+        esac
+        ;;
+esac
+
 CONFIG_DIR="$MODDIR/config"
 CACHE_ROOT="$MODDIR/cache/axes-mix"
 USER_FONTS_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}/fonts"
@@ -62,27 +73,34 @@ clear_worker_pid() {
     fi
 }
 
+compat_failure_message() {
+    _cfm_state="$REALMOD/config/mix-finalize-state.conf"
+    if [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] && \
+       [ "$(read_value "$_cfm_state" requestId)" = "$LUOSHU_MIX_REQUEST_ID" ] && \
+       [ "$(read_value "$_cfm_state" state)" = failed ]; then
+        # Read the plain persisted reason; parsing a JSON string with sed loses
+        # everything after an escaped quote in a font path or glyph name.
+        read_value "$_cfm_state" message
+    else
+        sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$1" 2>/dev/null | tail -n1
+    fi
+}
+
 prepare_compat_payload() {
     FINALIZE_ERROR=''
     [ -n "$REALMOD" ] && [ "$REALMOD" != "$MODDIR" ] && [ -f "$REAL_MIX_ROUTER" ] || return 0
-    _pcp_out="$CONFIG_DIR/.compat-prepare.$"
+    _pcp_out="$CONFIG_DIR/.compat-prepare.$$"
     rm -f "$_pcp_out" 2>/dev/null || true
-    if command -v timeout >/dev/null 2>&1; then
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" timeout 120 sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
-        _pcp_rc=$?
-    elif command -v toybox >/dev/null 2>&1 && toybox timeout --help >/dev/null 2>&1; then
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" toybox timeout 120 sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
-        _pcp_rc=$?
-    else
-        MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
-        _pcp_rc=$?
-    fi
+    # The mapper owns progress/CPU supervision. A fixed outer timeout used to
+    # kill a healthy large-font operation while its child kept writing.
+    MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" sh "$REAL_MIX_ROUTER" prepare-finalize >"$_pcp_out" 2>&1
+    _pcp_rc=$?
     cat "$_pcp_out" >>"$LOG_FILE" 2>/dev/null || true
     if [ "$_pcp_rc" -ne 0 ] || ! grep -q '"status":"ok"' "$_pcp_out" 2>/dev/null; then
-        FINALIZE_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_pcp_out" 2>/dev/null | tail -n1)
+        FINALIZE_ERROR=$(compat_failure_message "$_pcp_out")
         [ -n "$FINALIZE_ERROR" ] || {
             case "$_pcp_rc" in
-                124) FINALIZE_ERROR='复合字体预提交超过 120 秒，已自动终止，不再继续空等' ;;
+                124) FINALIZE_ERROR='本机字体生成长时间没有进展，已停止任务' ;;
                 *) FINALIZE_ERROR='复合字体预提交处理失败' ;;
             esac
         }
@@ -95,7 +113,7 @@ prepare_compat_payload() {
 finalize_compat_payload() {
     FINALIZE_ERROR=''
     [ -n "$REALMOD" ] && [ "$REALMOD" != "$MODDIR" ] && [ -f "$REAL_MIX_ROUTER" ] || return 0
-    _fcp_out="$CONFIG_DIR/.compat-finalize.$"
+    _fcp_out="$CONFIG_DIR/.compat-finalize.$$"
     rm -f "$_fcp_out" 2>/dev/null || true
     if command -v timeout >/dev/null 2>&1; then
         MODDIR="$REALMOD" LUOSHU_REAL_MODDIR="$REALMOD" timeout 60 sh "$REAL_MIX_ROUTER" finalize >"$_fcp_out" 2>&1
@@ -109,7 +127,7 @@ finalize_compat_payload() {
     fi
     cat "$_fcp_out" >>"$LOG_FILE" 2>/dev/null || true
     if [ "$_fcp_rc" -ne 0 ] || ! grep -q '"status":"ok"' "$_fcp_out" 2>/dev/null; then
-        FINALIZE_ERROR=$(sed -n 's/^.*"message":"\([^"]*\)".*$/\1/p' "$_fcp_out" 2>/dev/null | tail -n1)
+        FINALIZE_ERROR=$(compat_failure_message "$_fcp_out")
         [ -n "$FINALIZE_ERROR" ] || {
             case "$_fcp_rc" in 124) FINALIZE_ERROR='提交下一启动字体负载超过 60 秒，已自动终止' ;; *) FINALIZE_ERROR='下一启动字体负载提交失败' ;; esac
         }
@@ -364,6 +382,7 @@ worker() {
     : >"$_response_file" 2>/dev/null || true
     (
         trap '' HUP
+        LUOSHU_MIX_CONTROLLER_OWNS_COMMIT=true \
         LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$BASE_ENGINE" start \
             LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit >"$_response_file" 2>&1
     ) &
@@ -411,12 +430,12 @@ worker() {
                 _base_percent=$(sed -n 's/^.*"percent":\([0-9][0-9]*\).*$/\1/p' "$PROGRESS_FILE" 2>/dev/null | head -n1)
             fi
             case "$_base_percent" in ''|*[!0-9]*) _base_percent=0 ;; esac
-            _mapped=$((36 + (_base_percent * 64 / 100)))
-            [ "$_mapped" -le 99 ] || _mapped=99
+            _mapped=$((36 + (_base_percent * 34 / 100)))
+            [ "$_mapped" -le 70 ] || _mapped=70
             [ -n "$_base_message" ] || _base_message='完整复合字体正在后台生成'
             case "$_base_state" in
                 success)
-                    update_task "$_wanted" running '复合字体已生成，正在核验本机扫描槽位并提交' 90 "$_child" ''
+                    update_task "$_wanted" running '复合字体已生成，正在核验本机扫描槽位并提交' 70 "$_child" ''
                     if ! prepare_compat_payload; then
                         update_task "$_wanted" failed "${FINALIZE_ERROR:-复合字体预提交处理失败}" 100 "$_child" "$(date +%s)"
                         rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
@@ -542,6 +561,13 @@ start_mix() {
 }
 
 recover_task() {
+    # Stop descendants before removing their source root or releasing ownership.
+    # A bare kill of the controller leaves FontTools running against deleted files.
+    if type luoshu_stop_task_pid >/dev/null 2>&1; then
+        luoshu_stop_task_pid "$WORKER_PID"
+        luoshu_stop_task_pid "$AUTO_WORKER_PID"
+        [ -z "$REALMOD" ] || luoshu_stop_task_pid "$REALMOD/config/mix_finalize_worker.pid"
+    fi
     MODDIR="$MODDIR" sh "$BASE_ENGINE" recover >/dev/null 2>&1 || true
     if [ -s "$TASK_FILE" ]; then
         _state=$(read_value "$TASK_FILE" state)
