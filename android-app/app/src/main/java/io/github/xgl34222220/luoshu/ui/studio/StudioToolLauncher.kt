@@ -63,8 +63,8 @@ internal fun StudioToolLauncher(
     val tokens = LocalMiuixTokens.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val parentScale by animateFloatAsState(
-        targetValue = if (childLayerActive) .96f else 1f,
-        animationSpec = spring(dampingRatio = .86f, stiffness = Spring.StiffnessMediumLow),
+        targetValue = if (childLayerActive) .95f else 1f,
+        animationSpec = spring(dampingRatio = .85f, stiffness = Spring.StiffnessMediumLow),
         label = "studioToolParentScale",
     )
     val parentAlpha by animateFloatAsState(

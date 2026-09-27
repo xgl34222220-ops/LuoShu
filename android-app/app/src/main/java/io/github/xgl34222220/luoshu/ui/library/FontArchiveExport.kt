@@ -38,6 +38,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +50,7 @@ import io.github.xgl34222220.luoshu.RootShell
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuGlyph
 import io.github.xgl34222220.luoshu.ui.theme.LuoShuIconTokens
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 import java.io.File
 import java.security.MessageDigest
 import java.time.LocalDateTime
@@ -181,6 +183,11 @@ internal fun FontArchiveExportTool(
     }
 
     val scheme = MaterialTheme.colorScheme
+    val toolContainer = if (scheme.background.luminance() < .5f) {
+        scheme.surfaceContainerLow
+    } else {
+        LuoShuLayoutTokens.SecondaryBlueSurface
+    }
     Surface(
         onClick = {
             val favoriteDefaults = collections.favoriteIds.intersect(validFonts.map { it.id }.toSet())
@@ -194,9 +201,9 @@ internal fun FontArchiveExportTool(
         enabled = enabled && validFonts.isNotEmpty(),
         modifier = modifier,
         shape = RoundedCornerShape(if (style == UiStyle.MIUIX) 22.dp else 19.dp),
-        color = scheme.surfaceContainerLow,
+        color = toolContainer,
         contentColor = scheme.onSurface,
-        border = BorderStroke(0.5.dp, scheme.outlineVariant.copy(alpha = .48f)),
+        border = BorderStroke(0.5.dp, scheme.primary.copy(alpha = .10f)),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 11.dp),

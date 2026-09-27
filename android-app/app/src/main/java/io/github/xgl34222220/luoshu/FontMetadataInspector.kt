@@ -74,10 +74,10 @@ internal fun FontMetadataInspector(
         enabled = viewModel.snapshot.installed && viewModel.fonts.isNotEmpty() && !busy,
         modifier = modifier.size(52.dp),
         shape = if (style == UiStyle.MIUIX) RoundedCornerShape(18.dp) else CircleShape,
-        color = if (style == UiStyle.MIUIX) tokens.elevatedCardBackground else MaterialTheme.colorScheme.surface.copy(alpha = .96f),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = .07f),
         contentColor = MaterialTheme.colorScheme.primary,
-        shadowElevation = if (style == UiStyle.MIUIX) 16.dp else 12.dp,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = .10f)),
+        shadowElevation = if (style == UiStyle.MIUIX) 2.dp else 1.dp,
+        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = .10f)),
     ) {
         Box(contentAlignment = Alignment.Center) {
             if (busy) {

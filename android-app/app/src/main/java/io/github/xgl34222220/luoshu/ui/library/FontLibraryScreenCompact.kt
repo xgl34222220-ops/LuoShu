@@ -360,6 +360,21 @@ private fun CompactFontRow(
     ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    modifier = Modifier.size(36.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    color = scheme.primary.copy(alpha = .08f),
+                    contentColor = scheme.primary,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            font.name.trim().take(1).ifBlank { "Aa" },
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(
                         font.name, color = textPrimary, fontSize = 16.sp, lineHeight = 22.sp,

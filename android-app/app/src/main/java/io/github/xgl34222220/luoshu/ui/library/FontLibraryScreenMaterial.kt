@@ -58,6 +58,8 @@ import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.NativeFontPreview
 import io.github.xgl34222220.luoshu.ui.font.fontCapabilityLabel
 import io.github.xgl34222220.luoshu.ui.font.fontPreviewText
+import io.github.xgl34222220.luoshu.ui.theme.LocalDockContentPadding
+import io.github.xgl34222220.luoshu.ui.theme.LuoShuLayoutTokens
 
 @Composable
 internal fun FontLibraryScreenMaterial(
@@ -67,7 +69,12 @@ internal fun FontLibraryScreenMaterial(
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 28.dp),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            top = 10.dp,
+            end = 16.dp,
+            bottom = maxOf(LocalDockContentPadding.current, LuoShuLayoutTokens.FloatingDockSafeBottom),
+        ),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item { MaterialLibraryHeader(state, actions.refresh) }

@@ -84,7 +84,7 @@ data class MiuixTokens(
 
 val LocalMiuixTokens = staticCompositionLocalOf {
     MiuixTokens(
-        pageBackground = Color(0xFFF1F5F9),
+        pageBackground = Color(0xFFF8FAFC),
         cardBackground = Color.White,
         elevatedCardBackground = Color.White,
         textPrimary = Color(0xFF16171B),
@@ -144,12 +144,12 @@ private fun ProvideMiuixTokens(settings: AppearanceSettings, content: @Composabl
         pageBackground = when {
             pureBlack -> Color.Black
             dark -> scheme.surfaceContainerLowest
-            else -> lerp(Color(0xFFF1F5F9), scheme.primaryContainer, .05f)
+            else -> Color(0xFFF8FAFC)
         },
         cardBackground = when {
             pureBlack -> Color(0xFF111214)
             dark -> scheme.surfaceContainerLow
-            else -> scheme.surfaceContainerLowest
+            else -> Color.White
         },
         elevatedCardBackground = when {
             pureBlack -> Color(0xFF1B1C20)
