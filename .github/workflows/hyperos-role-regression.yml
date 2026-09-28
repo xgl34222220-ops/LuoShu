@@ -2,9 +2,13 @@ name: HyperOS role regression - test only
 on:
   push:
     branches: [fix/hyperos-latin-role-20260928]
-    paths: [.github/workflows/hyperos-role-regression.yml, .github/coverage-role.patch]
+    paths: [.github/coverage-role.patch, .github/coverage-role-followup.patch]
+  workflow_dispatch:
 permissions:
   contents: write
+concurrency:
+  group: hyperos-role-regression-test-only
+  cancel-in-progress: true
 jobs:
   regression:
     runs-on: ubuntu-24.04
@@ -22,37 +26,35 @@ jobs:
           unzip -oq "$RUNNER_TEMP/baseline.zip" 'common/python/*'
           chmod +x common/python/bin/luoshu-python
           mkdir -p verification
-      - name: Reproduce then apply the narrow source correction
+      - name: Apply reviewed test-branch patches
         shell: bash
         env:
           PYTHONPATH: common/python/lib/python3.14/site-packages:common:scripts
         run: |
           set -euo pipefail
-          if [[ -f .github/coverage-role.patch ]]; then
-            set +e
-            python3 scripts/hyperos_role_regression_test.py > verification/before.log 2>&1
-            before=$?
-            set -e
-            test "$before" = 1
-            grep -Fq 'FAILED (failures=3)' verification/before.log
-            git apply --check .github/coverage-role.patch
-            git apply .github/coverage-role.patch
-            git rm .github/coverage-role.patch
-            git add common/font_role_policy.py common/hyperos_metrics_batch.py common/legacy_v14_4/font_switch_safe.sh scripts/stable111_round2_test.py
+          for patch in .github/coverage-role.patch .github/coverage-role-followup.patch; do
+            if [[ -f "$patch" ]]; then
+              git apply --check "$patch"
+              git apply "$patch"
+              git rm "$patch"
+            fi
+          done
+          git add -u
+          if ! git diff --cached --quiet; then
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git commit -m 'fix: avoid fixed-pitch UI exclusion and complete verified HyperOS names; invalidate old payload cache'
+            git commit -m 'test: model absent fallback and withdrawn update notice without weakening release authorization'
             git push origin HEAD:fix/hyperos-latin-role-20260928
           fi
           git rev-parse HEAD > verification/commit.txt
           test "$(sed -n 's/^scope=//p' config/stable_release_authorization.conf)" = withdrawn
-      - name: Coverage regression and complete backend checks
+      - name: Coverage, process cleanup and complete backend checks
         shell: bash
         env:
           PYTHONPATH: common/python/lib/python3.14/site-packages:common:scripts
         run: |
           set -euo pipefail
-          python3 scripts/hyperos_role_regression_test.py 2>&1 | tee verification/role-regression.log
+          python3 -m unittest -v stable111_repair_test stable111_round2_test hyperos_role_regression_test hyperos_metrics_batch_test hyperos_cjk_routing_test hyperos_latin_policy_regression_test 2>&1 | tee verification/role-regression.log
           sh scripts/check.sh 2>&1 | tee verification/full-backend.log
           git archive --format=zip HEAD > verification/LuoShu-HyperOS-RoleFix-source.zip
           printf '%s\n' 'Host tests only. No Android device validation. No release or online rollout performed.' > verification/scope.txt
