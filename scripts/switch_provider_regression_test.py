@@ -165,6 +165,7 @@ exec "$TEST_REAL_CP" "$@"
     def test_real_switch_router_commits_only_successful_stages(self):
         install_task_scope(self.module)
         shutil.copyfile(ROOT / 'common/font_role_policy.py', self.module / 'common/font_role_policy.py')
+        shutil.copyfile(ROOT / 'common/font_config_overlay.py', self.module / 'common/font_config_overlay.py')
         legacy = self.module / 'common/legacy_v14_4'
         legacy.mkdir()
         for name in ('font_switch_safe.sh', 'payload_clone.sh'):

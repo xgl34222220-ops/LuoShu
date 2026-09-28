@@ -265,7 +265,7 @@ class Round2(unittest.TestCase):
         self.assertFalse(result['changed']);self.assertEqual(before,ET.tostring(tree.getroot()))
 
     def test_known_fixed_pitch_metadata_protects_unknown_name(self):
-        self.stock('VendorFixedFace.ttf')
+        self.stock('VendorFixedFace.ttf', family='')  # No explicit Android UI role.
         self.slots['/system/fonts/VendorFixedFace.ttf']['metrics']['isFixedPitch']=True
         make_font(self.fonts/'VendorFixedFace.ttf');self.build()
         self.assertFalse((self.fonts/'VendorFixedFace.ttf').exists())

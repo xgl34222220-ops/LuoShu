@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+from font_config_overlay import is_safe_family
 
 
 def families(slot: dict | None) -> list[str]:
@@ -25,6 +26,16 @@ def is_clock_slot(name: str, slot: dict | None = None) -> bool:
     return any(word in label for word in ('clock', 'mitype', 'lockscreen', 'lock-screen', 'numeral'))
 
 
+def _mono_name(value: str) -> bool:
+    # Match semantic words, not "mono" inside a foundry name like Monotype.
+    # Split CamelCase as used by DroidSansMono / RobotoMonoVF first.
+    value = re.sub(r'([a-z0-9])([A-Z])', r'\1-\2', value)
+    tokens = re.split(r'[^a-z0-9]+', value.lower())
+    return any(token in {'mono', 'monospace', 'courier', 'consolas', 'monaco', 'sourcecode'}
+               or token.endswith(('mono', 'monovf', 'monovariable'))
+               for token in tokens) or 'source-code' in '-'.join(tokens)
+
+
 def is_code_monospace(name: str, slot: dict | None = None) -> bool:
     names = families(slot)
     # An explicit code-family assignment wins even for an OEM clock filename.
@@ -35,11 +46,15 @@ def is_code_monospace(name: str, slot: dict | None = None) -> bool:
         return True
     if is_clock_slot(name, slot):
         return False
-    if any('mono' in f for f in names):
+    if any(_mono_name(f) for f in names):
         return True
-    lowered = name.lower()
-    if any(word in lowered for word in ('mono', 'courier', 'consolas', 'sourcecode')):
+    if _mono_name(Path(name).stem):
         return True
+    # A pitch flag describes spacing, not Android's family role. Trusted UI
+    # assignments must not be deleted merely because the ROM uses fixed widths.
+    # Explicit code families/names above still win, including shared files.
+    if any(is_safe_family(f) for f in names):
+        return False
     # Optional evidence captured from trusted stock; do not inspect the active
     # replacement under /system and mistake its metrics for original metrics.
     metrics = (slot or {}).get('metrics', {})
