@@ -310,21 +310,11 @@ private fun MiuixSlotCard(
 
             if (font != null) {
                 Spacer(Modifier.height(9.dp))
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(17.dp),
-                    color = tokens.textPrimary.copy(alpha = .035f),
-                ) {
-                    NativeFontPreview(
-                        font = font,
-                        text = slotState.sample,
-                        axes = slotState.axes,
-                        modifier = Modifier.fillMaxWidth().height(84.dp).padding(horizontal = 12.dp),
-                        textSizeSp = 23f,
-                        gravity = Gravity.CENTER,
-                        maxLines = 1,
-                    )
-                }
+                StudioSlotPreview(
+                    font = font,
+                    text = slotState.sample,
+                    axes = slotState.axes,
+                )
                 Spacer(Modifier.height(10.dp))
                 MiuixStudioAxisControls(
                     font = font,

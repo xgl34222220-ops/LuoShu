@@ -256,21 +256,11 @@ private fun MaterialSlotCard(
 
             if (font != null) {
                 Spacer(Modifier.height(13.dp))
-                Surface(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.large,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = .62f),
-                ) {
-                    NativeFontPreview(
-                        font = font,
-                        text = slotState.sample,
-                        axes = slotState.axes,
-                        modifier = Modifier.fillMaxWidth().height(82.dp).padding(horizontal = 15.dp),
-                        textSizeSp = 25f,
-                        gravity = Gravity.CENTER,
-                        maxLines = 1,
-                    )
-                }
+                StudioSlotPreview(
+                    font = font,
+                    text = slotState.sample,
+                    axes = slotState.axes,
+                )
                 Spacer(Modifier.height(14.dp))
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .55f))
                 Spacer(Modifier.height(14.dp))
