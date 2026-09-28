@@ -81,7 +81,13 @@ def cleanup(proc: subprocess.Popen) -> tuple[int, int, list[int]]:
     terminated = reaped = 0
     started = time.monotonic()
     deadline = started + 3.0
-    term_sent: set[tuple[int, int]] = set()
+    # Signal the initial worker tree once, then allow EXIT traps to launch
+    # their short cleanup utilities. Re-signalling every newly spawned `rm`,
+    # `awk` or `sleep` used to abort those traps and leave a live-lease lock.
+    # Only the grace period changes; the total cleanup deadline stays bounded.
+    graceful_until = started + (2.0 if proc.poll() is None else 0.6)
+    initial = descendants()
+    terminated += signal_owned(initial, signal.SIGTERM)
     while True:
         reaped += reap(proc)
         children = descendants()
@@ -90,12 +96,7 @@ def cleanup(proc: subprocess.Popen) -> tuple[int, int, list[int]]:
         now = time.monotonic()
         if now >= deadline:
             return terminated, reaped, sorted(children)
-        if now - started < 0.6:
-            new = {pid: info for pid, info in children.items()
-                   if (pid, info[1]) not in term_sent}
-            terminated += signal_owned(new, signal.SIGTERM)
-            term_sent.update((pid, info[1]) for pid, info in new.items())
-        else:
+        if now >= graceful_until:
             terminated += signal_owned(children, signal.SIGKILL)
         time.sleep(0.04)
 

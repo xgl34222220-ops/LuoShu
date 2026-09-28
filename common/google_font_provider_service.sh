@@ -71,6 +71,42 @@ provider_pause() {
     _provider_child=
 }
 
+provider_wait_theme_ready() {
+    # One bounded prerequisite wait in this task, NOT a resident observer.
+    # No existing retry/watch preference can make this wait unbounded.
+    [ -f "$THEME_BRIDGE" ] || return 0
+    _theme_limit=${LUOSHU_THEME_SETTLE_SECONDS:-30}
+    case "$_theme_limit" in ''|*[!0-9]*) _theme_limit=30 ;; esac
+    [ "$_theme_limit" -le 60 ] 2>/dev/null || _theme_limit=60
+    _theme_elapsed=0
+    _theme_previous=
+    while :; do
+        [ -d "$MODDIR" ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || return 1
+        _theme_probe=$(MODDIR="$MODDIR" sh "$THEME_BRIDGE" readiness 2>/dev/null) || _theme_probe=pending
+        case "$_theme_probe" in
+            inactive|'') return 0 ;;
+            ready\|*)
+                [ "$_theme_probe" != "$_theme_previous" ] || return 0
+                _theme_previous=$_theme_probe
+                ;;
+            *) _theme_previous= ;;
+        esac
+        [ "$_theme_elapsed" -lt "$_theme_limit" ] || return 2
+        provider_pause 1
+        _theme_elapsed=$((_theme_elapsed + 1))
+    done
+}
+
+provider_record_result() {
+    [ -d "$MODDIR/config" ] || return 0
+    _provider_result="$MODDIR/config/font-provider-one-shot.conf"
+    {
+        printf 'state=%s\nreason=%s\n' "$1" "$2"
+        printf 'resident=false\n'
+    } > "${_provider_result}.tmp.$$" && \
+        mv -f "${_provider_result}.tmp.$$" "$_provider_result"
+}
+
 provider_apply() {
     provider_run "$BRIDGE" apply "$1"
     _provider_google_rc=$?
@@ -146,11 +182,17 @@ while [ "$(getprop sys.boot_completed 2>/dev/null)" != 1 ] && [ "$_waited" -lt 6
 done
 [ "$(getprop sys.boot_completed 2>/dev/null)" = 1 ] || exit 0
 
-# There is no discovery timer in 2.0.0. Existing static mounts do not require
-# an observer process; newly downloaded fonts wait for an explicit operation.
+# Existing static mounts do not require an observer. Finish the bounded boot
+# prerequisite wait before applying once; never schedule work after exit.
 [ -d "$MODDIR" ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || { provider_restore_theme; exit $?; }
 provider_selection_ready
 case "$?" in 1) exit 1 ;; 2) exit 0 ;; esac
+provider_wait_theme_ready
+_theme_ready_rc=$?
+if [ "$_theme_ready_rc" = 1 ]; then
+    provider_restore_theme
+    exit $?
+fi
 provider_apply 0
 _rc=$?
 case "$_rc" in
@@ -158,10 +200,21 @@ case "$_rc" in
     *)
         mkdir -p "${LOG%/*}" 2>/dev/null || true
         printf '[%s] one-shot font apply failed; no automatic rebuild loop\n' "$(date '+%F %T' 2>/dev/null)" >> "$LOG"
+        provider_record_result failed apply-failed
         exit 1
         ;;
 esac
 if [ -s "$MODDIR/config/google-font-refresh-pending.conf" ]; then
-    provider_run "$BRIDGE" refresh 0 || exit 1
+    provider_run "$BRIDGE" refresh 0 || { provider_record_result failed refresh-failed; exit 1; }
+fi
+if [ "$_theme_ready_rc" = 2 ]; then
+    provider_record_result partial theme-route-not-ready
+    mkdir -p "${LOG%/*}" 2>/dev/null || true
+    printf '[WARN] HyperOS 主题字体路由未就绪：本次英数补齐未确认，任务已退出，无常驻重试\n' >> "$LOG"
+    printf '[WARN] HyperOS 主题字体路由未就绪：本次英数补齐未确认，任务已退出，无常驻重试\n' >> "$MODDIR/logs/fontswitch.log"
+elif [ "$_rc" = 2 ]; then
+    provider_record_result not-applicable no-existing-font-targets
+else
+    provider_record_result complete one-shot-apply-finished
 fi
 exit 0

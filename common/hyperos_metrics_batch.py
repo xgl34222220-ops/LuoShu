@@ -403,7 +403,32 @@ def inventory_target(data: dict, logical: str) -> bool:
                 (coverage['hanCount'] >= 512 or
                  (coverage['latinCount'] >= 52 and coverage['unicodeCount'] >= 96))))
     return role and (coverage['hasLatin'] or coverage['hasHan']
-                     or (coverage.get('hasDigits', False) and is_clock_slot(path.name, slot)))
+                     or coverage.get('hasDigits', False))
+
+
+def verify_text_coverage(output: Path, data: dict, logical: str,
+                         cache: dict) -> dict:
+    """A file existing on disk is not proof of English/numeral coverage.
+
+    No outline walks: share the output cmap facts across identical aliases.
+    Old inventories without complete character facts remain explicitly unknown.
+    """
+    coverage = slot_for(data, logical).get('metrics', {}).get('coverage')
+    if not valid_coverage(coverage):
+        return {'textCoverage': 'unverified-no-stock-character-facts'}
+    key = str(output)
+    if key not in cache:
+        with TTFont(output, lazy=True, recalcBBoxes=False, recalcTimestamp=False) as font:
+            cache[key] = set(font.getBestCmap() or {})
+    points = cache[key]
+    letters = set(range(65,91)) | set(range(97,123))
+    digits = set(range(48,58))
+    if coverage['latinCount'] == 52 and not letters <= points:
+        raise ValueError(f'{logical}: 英文覆盖不完整，缺失 {len(letters-points)} 个字母；未提交字体负载')
+    if coverage.get('digitCount') == 10 and not digits <= points:
+        raise ValueError(f'{logical}: 数字覆盖不完整，缺失 {len(digits-points)} 个数字；未提交字体负载')
+    return {'textCoverage': 'checked', 'latinCount': len(letters & points),
+            'digitCount': len(digits & points)}
 
 
 def build(module: Path, stage: Path, names: list[str]) -> dict:
@@ -457,6 +482,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     cache = {}
     compact_sources = {}
     weight_sources = {}
+    coverage_facts = {}
     output_reports = {}
     # Generate every distinct source/contract before replacing even one alias.
     # Thus subsequent sources cannot accidentally refer to earlier outputs.
@@ -497,6 +523,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                                     align_bitmap_bottom=align_bottom)
                 output_reports[key]['removedCjkMappings'] += compact_removed
                 cache[key] = output
+            text_report = verify_text_coverage(cache[key], data, logical, coverage_facts)
             prepared.append((cache[key], dest))
             fallback += contract[-1] == 'fallback'
             slot_report.append({'slot': '/' + dest.relative_to(stage).as_posix(),
@@ -508,7 +535,7 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
                                 'useTypoMetrics': contract[9],
                                 'cjkRoutingSource': 'stock-fallback' if routing else 'source',
                                 'cjkRoutingReason': routing_reason,
-                                **output_reports[key], **weight_report,
+                                **output_reports[key], **weight_report, **text_report,
                                 'targetDiscovery': 'inventory' if logical in trusted else 'physical-policy'})
         for output, dest in prepared:
             link_copy(output, dest)

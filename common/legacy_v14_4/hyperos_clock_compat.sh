@@ -167,7 +167,8 @@ _lhcc_safe_dynamic_name() {
     _lhcc_name="$1"
     _lhcc_lower=$(printf '%s' "$_lhcc_name" | tr '[:upper:]' '[:lower:]')
     case "$_lhcc_lower" in
-        *mono*) case "$_lhcc_lower" in *clock*|*mitype*) ;; *) return 1 ;; esac ;;
+        droidsansmono*|notosansmono*|notoserifmono*|notomono*|robotomono*|\
+        cutivemono*|sourcecodepro*|courier*|consolas*|monaco*) return 1 ;;
     esac
     case "$_lhcc_name" in
         *Italic*|*Oblique*|*Emoji*|*Symbol*|*Icon*|*Serif*) return 1 ;;

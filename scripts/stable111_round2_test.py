@@ -58,7 +58,9 @@ class Round2(unittest.TestCase):
             root=self.root/'stock'/part; root.mkdir(parents=True)
             self.env[f'LUOSHU_{part.upper()}_FONTS_ROOT']=str(root)
         context=patch.dict(os.environ,self.env);context.start();self.addCleanup(context.stop)
-        make_font(self.fonts/'400.ttf')
+        # A valid UI donor carries the full ASCII range. Incomplete donors
+        # are covered explicitly by hyperos_coverage_regression_test.
+        make_font(self.fonts/'400.ttf', tuple(dict.fromkeys((*DEFAULT_POINTS, *range(32,127)))))
         self.stock('MiSansVF.ttf')
 
     def stock(self,name,part='system',family='sans-serif',weight=400,variable=False,points=DEFAULT_POINTS):
@@ -264,11 +266,12 @@ class Round2(unittest.TestCase):
         result=rewrite_tree(tree,'LuoShu')
         self.assertFalse(result['changed']);self.assertEqual(before,ET.tostring(tree.getroot()))
 
-    def test_known_fixed_pitch_metadata_protects_unknown_name(self):
+    def test_fixed_pitch_ui_metadata_does_not_override_ui_family(self):
         self.stock('VendorFixedFace.ttf')
         self.slots['/system/fonts/VendorFixedFace.ttf']['metrics']['isFixedPitch']=True
         make_font(self.fonts/'VendorFixedFace.ttf');self.build()
-        self.assertFalse((self.fonts/'VendorFixedFace.ttf').exists())
+        self.assertTrue((self.fonts/'VendorFixedFace.ttf').exists())
+        self.assertIn('/system/fonts/VendorFixedFace.ttf', self.by_slot)
 
     def test_new_stock_metadata_captures_axis_weight_and_digits(self):
         source=self.fonts/'400.ttf';variable_font(source);_,metrics=inventory._read_metrics(source)

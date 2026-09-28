@@ -31,6 +31,24 @@ _htf_active() {
     [ ! -L "$HTF_TARGET" ] && [ -s "$HTF_TARGET" ]
 }
 
+_htf_readiness() {
+    # Cheap boot readiness only: no font generation or /proc consumer walk.
+    # A framework route may appear after sys.boot_completed. Missing is not
+    # evidence that this ROM has no theme-font path.
+    [ "$(_gfp_active_font)" != default ] || { echo inactive; return 0; }
+    if _htf_active; then
+        printf 'ready|%s|%s|%s\n' "$HTF_TARGET" \
+            "$(stat -L -c '%d:%i:%s:%y:%z' "$HTF_TARGET" 2>/dev/null)" \
+            "$(stat -L -c '%d:%i:%y:%z' "${HTF_ROUTER%/*}" 2>/dev/null)"
+        return 0
+    fi
+    if [ -L "$HTF_ALIAS" ] || [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)$(getprop ro.miui.ui.version.name 2>/dev/null)" ]; then
+        echo pending
+    else
+        echo inactive
+    fi
+}
+
 _htf_source() {
     # Only the boot-activated payload is authoritative. A pending selection
     # must not change Chrome before its system font generation is activated.
@@ -267,6 +285,7 @@ _htf_restore() { _gfp_locked _htf_restore_internal; }
 
 if [ "${0##*/}" = hyperos_theme_font_bridge.sh ]; then
     case "${1:-apply}" in
+        readiness) _htf_readiness ;;
         fingerprint) _htf_fingerprint ;;
         apply) _htf_apply ;;
         restore) _htf_restore ;;

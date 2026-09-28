@@ -35,15 +35,16 @@ def is_code_monospace(name: str, slot: dict | None = None) -> bool:
         return True
     if is_clock_slot(name, slot):
         return False
-    if any('mono' in f for f in names):
+    # A fixed-pitch metadata bit describes advances, not a code/terminal role.
+    # Some OEM UI/numeral fonts are fixed-pitch too. Substring "mono" also
+    # matches foundry names such as Monotype. Require an actual code family.
+    if any(re.search(r'(?:^|-)(?:mono|monospace)(?:$|-)', f) for f in names):
         return True
-    lowered = name.lower()
-    if any(word in lowered for word in ('mono', 'courier', 'consolas', 'sourcecode')):
-        return True
-    # Optional evidence captured from trusted stock; do not inspect the active
-    # replacement under /system and mistake its metrics for original metrics.
-    metrics = (slot or {}).get('metrics', {})
-    return isinstance(metrics, dict) and metrics.get('isFixedPitch') is True
+    stem = re.sub(r'[-_ ]+', '', Path(name).stem.lower())
+    code_roots = ('droidsansmono', 'notosansmono', 'notoserifmono', 'notomono',
+                  'robotomono', 'cutivemono', 'sourcecodepro', 'courier',
+                  'consolas', 'monaco')
+    return any(stem.startswith(root) for root in code_roots)
 
 
 def slot_for(data: dict, logical: str) -> dict:
