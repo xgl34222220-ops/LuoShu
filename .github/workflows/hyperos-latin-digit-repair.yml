@@ -1,0 +1,97 @@
+name: HyperOS Latin digit test repair
+on:
+  push:
+    branches: [fix/hyperos-latin-digit-20260928]
+permissions:
+  contents: read
+concurrency:
+  group: hyperos-latin-digit-test
+  cancel-in-progress: true
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Import verified source fix only on the test branch
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/fix/hyperos-latin-digit-20260928
+          if [ -f .github/hyperos-test1.patch.b64 ]; then
+            test "$(git rev-parse HEAD:scripts/hyperos_coverage_regression_test.py)" = cf12d8898d597c24f2ca4d7245814d9a48469468
+            python3 - <<'PY'
+          import base64, gzip, hashlib, os
+          from pathlib import Path
+          data=base64.b64decode(Path('.github/hyperos-test1.patch.b64').read_text(),validate=True)
+          assert hashlib.sha256(data).hexdigest()=='7182be7ffdcfd36e9f90b9e862d36bcc2bb75f261a4b15861c81bb46a8ff597f'
+          patch=gzip.decompress(data)
+          assert hashlib.sha256(patch).hexdigest()=='51a62b0a4b6fa99f24adc0d0e271e44620fabc37d2ae4ff867da5a7ef3410afa'
+          Path(os.environ['RUNNER_TEMP'],'hyperos-source.patch').write_bytes(patch)
+          PY
+            rm scripts/hyperos_coverage_regression_test.py
+            git apply --check "$RUNNER_TEMP/hyperos-source.patch"
+            git apply "$RUNNER_TEMP/hyperos-source.patch"
+            python3 - <<'PY'
+          from pathlib import Path
+          def replace(path, old, new):
+              p=Path(path); text=p.read_text(); assert text.count(old)==1,(path,'source drift');p.write_text(text.replace(old,new))
+          replace('scripts/stable111_round2_test.py',"self.stock('VendorFixedFace.ttf')", "# A genuinely unclassified fixed-pitch face must remain stock.\n        self.stock('VendorFixedFace.ttf', family='')")
+          replace('scripts/hyperos_cjk_routing_test.py',"    def test_no_staged_fallback_keeps_primary_han(self):\n        self.default_pair()\n        self.build(['Roboto-Regular.ttf'])", "    def test_no_staged_fallback_keeps_primary_han(self):\n        self.default_pair()\n        # Inventory discovery now fills omitted known UI slots. Model an actual\n        # missing stock target, not merely omission from the caller's name list.\n        (self.root / 'stock/system/MiSansVF.ttf').unlink()\n        self.build(['Roboto-Regular.ttf'])\n        self.assertNotIn('/system/fonts/MiSansVF.ttf', self.reports)")
+          replace('common/hyperos_metrics_batch.py','memo[identity] = preferred_unicode_codepoints(font)', '# Retain only the 62 core code points, not a CJK cmap per alias.\n            memo[identity] = frozenset(cp for cp in preferred_unicode_codepoints(font)\n                                       if 48 <= cp <= 57 or 65 <= cp <= 90 or 97 <= cp <= 122)')
+          PY
+            git rm .github/hyperos-test1.patch.b64
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add common/ scripts/
+            git commit -m 'fix: preserve HyperOS UI Latin digits and finish bounded boot routing with clean exit'
+            git push origin HEAD:fix/hyperos-latin-digit-20260928
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  checks:
+    needs: import
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.import.outputs.sha }}
+          persist-credentials: false
+      - name: Prepare immutable FontTools runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk fonts-dejavu-core zip unzip file >/dev/null
+          curl -fL --retry 2 --max-time 120 https://github.com/xgl34222220-ops/LuoShu/releases/download/refactor-v1.1.1/LuoShu-v1.1.1.zip -o "$RUNNER_TEMP/baseline.zip"
+          echo 'c5c8fa86af4ac196107ba05c5ee8cc1944140ae033cc9e763cec8c76f40c848a  '"$RUNNER_TEMP/baseline.zip" | sha256sum -c -
+          unzip -oq "$RUNNER_TEMP/baseline.zip" 'common/python/*'
+          chmod +x common/python/bin/luoshu-python
+          mkdir -p verification
+          git rev-parse HEAD > verification/commit.txt
+          git archive --format=zip HEAD > verification/HyperOS-LatinDigits-Test1-Source.zip
+      - name: Coverage and task lifecycle regression suite
+        shell: bash
+        run: |
+          set -o pipefail
+          export PYTHONPATH="$PWD/common/python/lib/python3.14/site-packages:$PWD/common:$PWD/scripts"
+          python3 -m unittest -v hyperos_coverage_regression_test stable111_repair_test stable111_round2_test hyperos_cjk_routing_test hyperos_metrics_batch_test hyperos_theme_font_bridge_test font_inventory_symlink_test google_font_provider_lifecycle_test google_font_provider_journal_test google_font_refresh_test release_v2_retirement_test 2>&1 | tee verification/focused-tests.log
+      - name: Whole repository backend checks
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -o pipefail
+          sh scripts/check.sh 2>&1 | tee verification/whole-repository.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: HyperOS-LatinDigits-Test1-Verification
+          path: verification/
+          retention-days: 14
