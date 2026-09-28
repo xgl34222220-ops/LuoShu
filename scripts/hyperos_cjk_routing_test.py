@@ -324,7 +324,11 @@ class RoutingTest(unittest.TestCase):
 
     def test_no_staged_fallback_keeps_primary_han(self):
         self.default_pair()
+        # Inventory discovery now fills omitted known UI slots. Model an actual
+        # missing stock target, not merely omission from the caller's name list.
+        (self.root / 'stock/system/MiSansVF.ttf').unlink()
         self.build(['Roboto-Regular.ttf'])
+        self.assertNotIn('/system/fonts/MiSansVF.ttf', self.reports)
         with TTFont(self.fonts / 'Roboto-Regular.ttf') as font:
             self.assertIn(HAN, font.getBestCmap())
         self.assertEqual(self.reports['/system/fonts/Roboto-Regular.ttf']['cjkRoutingReason'],

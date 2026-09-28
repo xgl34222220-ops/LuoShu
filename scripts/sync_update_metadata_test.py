@@ -24,6 +24,17 @@ assert meta == {
     "changelog": "https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/v4.0.0/RELEASE_NOTES_v4.0.0.md",
 }
 
+authorization = dict(line.split('=', 1) for line in
+    (ROOT / 'config/stable_release_authorization.conf').read_text().splitlines()
+    if '=' in line and not line.lstrip().startswith('#'))
+withdrawn = authorization.get('scope') == 'withdrawn'
+if withdrawn:
+    # Withdrawal deliberately links the notice rather than old release notes.
+    # This is a strict stop-rollout contract, not a way to bypass version checks.
+    assert authorization.get('version') == 'v2.0.0'
+    assert authorization.get('allowPendingDeviceMatrix') == 'false'
+    assert (ROOT / 'docs/WITHDRAWN_2.0.0.md').is_file()
+
 # Published channels may lag module.prop until signed assets are available.
 for metadata_file in ("update.json", "update-prerelease.json"):
     actual = json.loads((ROOT / metadata_file).read_text(encoding="utf-8"))
@@ -39,6 +50,9 @@ for metadata_file in ("update.json", "update-prerelease.json"):
         repository="xgl34222220-ops/LuoShu", version=version,
         version_code=actual['versionCode'], tag=release_tag, notes_file=notes_file,
     )
+    if withdrawn:
+        assert (version, actual['versionCode'], release_tag) == ('v1.1.1', 60101, 'refactor-v1.1.1')
+        expected['changelog'] = 'https://raw.githubusercontent.com/xgl34222220-ops/LuoShu/main/docs/WITHDRAWN_2.0.0.md'
     assert actual == expected, (metadata_file, actual)
 
 for kwargs in (
@@ -64,4 +78,4 @@ with tempfile.TemporaryDirectory() as directory:
     assert not mod.advance_fallback_channel(newer, preview)
     assert preview.read_bytes() == before
 
-print("update metadata tests passed")
+print("update metadata tests passed (withdrawn rollout protected)" if withdrawn else "update metadata tests passed")

@@ -58,7 +58,8 @@ class Round2(unittest.TestCase):
             root=self.root/'stock'/part; root.mkdir(parents=True)
             self.env[f'LUOSHU_{part.upper()}_FONTS_ROOT']=str(root)
         context=patch.dict(os.environ,self.env);context.start();self.addCleanup(context.stop)
-        make_font(self.fonts/'400.ttf')
+        # Full UI donor: cases below include stock slots with all 52 letters/10 digits.
+        make_font(self.fonts/'400.ttf', tuple(dict.fromkeys((*DEFAULT_POINTS, *range(32,127)))))
         self.stock('MiSansVF.ttf')
 
     def stock(self,name,part='system',family='sans-serif',weight=400,variable=False,points=DEFAULT_POINTS):
@@ -265,7 +266,8 @@ class Round2(unittest.TestCase):
         self.assertFalse(result['changed']);self.assertEqual(before,ET.tostring(tree.getroot()))
 
     def test_known_fixed_pitch_metadata_protects_unknown_name(self):
-        self.stock('VendorFixedFace.ttf')
+        # A genuinely unclassified fixed-pitch face must remain stock.
+        self.stock('VendorFixedFace.ttf', family='')
         self.slots['/system/fonts/VendorFixedFace.ttf']['metrics']['isFixedPitch']=True
         make_font(self.fonts/'VendorFixedFace.ttf');self.build()
         self.assertFalse((self.fonts/'VendorFixedFace.ttf').exists())

@@ -166,7 +166,14 @@ EOF_LHCC_STATIC
 _lhcc_safe_dynamic_name() {
     _lhcc_name="$1"
     _lhcc_lower=$(printf '%s' "$_lhcc_name" | tr '[:upper:]' '[:lower:]')
-    case "$_lhcc_lower" in
+    _lhcc_role_name=$_lhcc_lower
+    while :; do
+        case "$_lhcc_role_name" in
+            *monotype*) _lhcc_role_name=${_lhcc_role_name%%monotype*}${_lhcc_role_name#*monotype} ;;
+            *) break ;;
+        esac
+    done
+    case "$_lhcc_role_name" in
         *mono*) case "$_lhcc_lower" in *clock*|*mitype*) ;; *) return 1 ;; esac ;;
     esac
     case "$_lhcc_name" in

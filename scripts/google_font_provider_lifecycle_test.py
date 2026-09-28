@@ -77,6 +77,7 @@ esac
 
     def theme_fixture(self):
         (self.module/'common/hyperos_theme_font_bridge.sh').write_text('''case "$1" in
+readiness) echo 'ready|fixture';;
 apply) echo apply >> "$TEST_ROOT/theme-applied"; exit "${TEST_THEME_RC:-0}";;
 restore) echo restore >> "$TEST_ROOT/theme-restored"; exit "${TEST_RESTORE_RC:-0}";;
 esac

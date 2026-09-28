@@ -1,0 +1,90 @@
+name: HyperOS coverage repair - TEST ONLY
+on:
+  push:
+    branches: [fix/hyperos-latin-digit-20260928]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: hyperos-coverage-test-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read retained signed build artifact, not the withdrawn release
+        uses: actions/download-artifact@v4
+        with:
+          name: v2-signed-candidate
+          run-id: 36435160874
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/signed
+      - name: Prepare exact runtime and unchanged signed App
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk fonts-dejavu-core zip unzip file >/dev/null
+          curl -fL --retry 2 --max-time 120 https://github.com/xgl34222220-ops/LuoShu/releases/download/refactor-v1.1.1/LuoShu-v1.1.1.zip -o "$RUNNER_TEMP/runtime.zip"
+          echo 'c5c8fa86af4ac196107ba05c5ee8cc1944140ae033cc9e763cec8c76f40c848a  '"$RUNNER_TEMP/runtime.zip" | sha256sum -c -
+          unzip -oq "$RUNNER_TEMP/runtime.zip" 'common/python/*'
+          chmod +x common/python/bin/luoshu-python
+          cp "$RUNNER_TEMP/signed/verification/LuoShu-App-v2.0.0.apk" "$RUNNER_TEMP/app.apk"
+          echo '57d86a4b5d87a7baf2f4cba8c13fcabb940ffd6d00f662d2313d91da2f4950b8  '"$RUNNER_TEMP/app.apk" | sha256sum -c -
+          python3 - <<'PY'
+          import os, zipfile
+          from pathlib import Path
+          source = Path(os.environ['RUNNER_TEMP'])/'signed/verification/LuoShu-v2.0.0-source.zip'
+          with zipfile.ZipFile(source) as z:
+              expected = {n for n in z.namelist() if n.startswith('android-app/') and not n.endswith('/')}
+              actual = {p.as_posix() for p in Path('android-app').rglob('*') if p.is_file()}
+              assert actual == expected, 'Android source paths changed'
+              for name in expected:
+                  assert Path(name).read_bytes() == z.read(name), name
+          PY
+      - name: Full module checks and build - not a public release
+        env:
+          LUOSHU_APP_APK: ${{ runner.temp }}/app.apk
+          LUOSHU_APP_PACKAGE: io.github.xgl34222220.luoshu
+          LUOSHU_APP_VERSION_CODE: '7000001'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p verification
+          git rev-parse HEAD > verification/commit.txt
+          sh scripts/build.sh 2>&1 | tee verification/build.log
+          PYTHONPATH="$PWD/common/python/lib/python3.14/site-packages" python3 scripts/hyperos_coverage_regression_test.py 2>&1 | tee verification/focused.log
+          python3 - <<'PY'
+          import hashlib, json, zipfile
+          from pathlib import Path
+          source = Path('dist/LuoShu-v2.0.0.zip')
+          dest = Path('verification/LuoShu-HyperOS-Coverage-Test1.zip')
+          runtime = {}
+          with zipfile.ZipFile(source) as old, zipfile.ZipFile(dest, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as new:
+              for info in old.infolist():
+                  data = old.read(info.filename)
+                  if info.filename == 'module.prop':
+                      text = data.decode()
+                      text = text.replace('name=洛书·重构版', 'name=洛书·英数覆盖测试1')
+                      text = '\n'.join('description=仅测试：修复 UI 英数误排除及有界主题就绪等待；2.0.0 正式版已撤回，未经真机验收' if line.startswith('description=') else line for line in text.splitlines()) + '\n'
+                      data = text.encode()
+                  new.writestr(info, data)
+                  if info.filename.startswith('common/') and info.filename.endswith(('.py','.sh')):
+                      runtime[info.filename] = hashlib.sha256(data).hexdigest()
+          with zipfile.ZipFile(dest) as z:
+              assert z.testzip() is None
+              assert hashlib.sha256(z.read('bundled/LuoShu-App.apk')).hexdigest() == '57d86a4b5d87a7baf2f4cba8c13fcabb940ffd6d00f662d2313d91da2f4950b8'
+          report = {'profile':'HyperOS-coverage-test1','sourceCommit':Path('verification/commit.txt').read_text().strip(),'androidDeviceValidated':False,'publishedRelease':False,'runtimeSha256':runtime,'moduleSha256':hashlib.sha256(dest.read_bytes()).hexdigest(),'moduleBytes':dest.stat().st_size,'apkUnchanged':True}
+          Path('verification/report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2)+'\n')
+          PY
+          git archive --format=zip HEAD > verification/LuoShu-HyperOS-Coverage-Test1-source.zip
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: HyperOS-Coverage-Test1-NOT-A-RELEASE
+          path: verification/
+          retention-days: 14
