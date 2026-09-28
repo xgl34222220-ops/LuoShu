@@ -1,0 +1,91 @@
+diff --git a/common/font_role_policy.py b/common/font_role_policy.py
+index 0f6725f..033522c 100644
+--- a/common/font_role_policy.py
++++ b/common/font_role_policy.py
+@@ -12,6 +12,7 @@ import json
+ import os
+ from pathlib import Path
+ import re
++from font_config_overlay import is_safe_family
+ 
+ 
+ def families(slot: dict | None) -> list[str]:
+@@ -25,6 +26,16 @@ def is_clock_slot(name: str, slot: dict | None = None) -> bool:
+     return any(word in label for word in ('clock', 'mitype', 'lockscreen', 'lock-screen', 'numeral'))
+ 
+ 
++def _mono_name(value: str) -> bool:
++    # Match semantic words, not "mono" inside a foundry name like Monotype.
++    # Split CamelCase as used by DroidSansMono / RobotoMonoVF first.
++    value = re.sub(r'([a-z0-9])([A-Z])', r'\1-\2', value)
++    tokens = re.split(r'[^a-z0-9]+', value.lower())
++    return any(token in {'mono', 'monospace', 'courier', 'consolas', 'monaco', 'sourcecode'}
++               or token.endswith(('mono', 'monovf', 'monovariable'))
++               for token in tokens) or 'source-code' in '-'.join(tokens)
++
++
+ def is_code_monospace(name: str, slot: dict | None = None) -> bool:
+     names = families(slot)
+     # An explicit code-family assignment wins even for an OEM clock filename.
+@@ -35,11 +46,15 @@ def is_code_monospace(name: str, slot: dict | None = None) -> bool:
+         return True
+     if is_clock_slot(name, slot):
+         return False
+-    if any('mono' in f for f in names):
++    if any(_mono_name(f) for f in names):
+         return True
+-    lowered = name.lower()
+-    if any(word in lowered for word in ('mono', 'courier', 'consolas', 'sourcecode')):
++    if _mono_name(Path(name).stem):
+         return True
++    # A pitch flag describes spacing, not Android's family role. Trusted UI
++    # assignments must not be deleted merely because the ROM uses fixed widths.
++    # Explicit code families/names above still win, including shared files.
++    if any(is_safe_family(f) for f in names):
++        return False
+     # Optional evidence captured from trusted stock; do not inspect the active
+     # replacement under /system and mistake its metrics for original metrics.
+     metrics = (slot or {}).get('metrics', {})
+diff --git a/common/hyperos_metrics_batch.py b/common/hyperos_metrics_batch.py
+index 79bf9d0..46e66fb 100644
+--- a/common/hyperos_metrics_batch.py
++++ b/common/hyperos_metrics_batch.py
+@@ -414,8 +414,10 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
+     preserved_aliases = []
+     excluded_aliases = protected_aliases(stage, data)
+     trusted = {logical for logical in data.get('slots', {}) if inventory_target(data, logical)}
+-    names = list(dict.fromkeys([*names, *(Path(logical).name for logical in sorted(trusted)
+-                                                if not safe_physical_font_name(Path(logical).name))]))
++    # A verified inventory is authoritative even when an older shell enumerator
++    # omitted a known name. Deduplicate by name; per-partition existence/role
++    # checks below still prevent inventing paths or replacing code fonts.
++    names = list(dict.fromkeys([*names, *(Path(logical).name for logical in sorted(trusted))]))
+     for part in PARTS:
+         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
+         staged_fonts = stage / part / 'fonts'
+diff --git a/common/legacy_v14_4/font_switch_safe.sh b/common/legacy_v14_4/font_switch_safe.sh
+index 1ddf255..edc0035 100644
+--- a/common/legacy_v14_4/font_switch_safe.sh
++++ b/common/legacy_v14_4/font_switch_safe.sh
+@@ -38,7 +38,7 @@ SWITCH_LOCK="$MODDIR/.font_switch.lock"
+ PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
+ SWITCH_CACHE_ROOT="$CONFIG_DIR/safe-switch-cache"
+ SWITCH_VALIDATION_CACHE_ROOT="$CONFIG_DIR/safe-switch-validation"
+-SWITCH_CACHE_SCHEMA="safe-switch-metrics-v3-roles-real-weights"
++SWITCH_CACHE_SCHEMA="safe-switch-metrics-v4-ui-role-coverage"
+ SWITCH_CACHE_MAX_ENTRIES="${LUOSHU_SWITCH_CACHE_MAX_ENTRIES:-3}"
+ SWITCH_CACHE_MAX_KB="${LUOSHU_SWITCH_CACHE_MAX_KB:-786432}"
+ case "$SWITCH_CACHE_MAX_ENTRIES" in ''|*[!0-9]*) SWITCH_CACHE_MAX_ENTRIES=3 ;; esac
+diff --git a/scripts/stable111_round2_test.py b/scripts/stable111_round2_test.py
+index 8f77335..2b0af7c 100644
+--- a/scripts/stable111_round2_test.py
++++ b/scripts/stable111_round2_test.py
+@@ -265,7 +265,7 @@ class Round2(unittest.TestCase):
+         self.assertFalse(result['changed']);self.assertEqual(before,ET.tostring(tree.getroot()))
+ 
+     def test_known_fixed_pitch_metadata_protects_unknown_name(self):
+-        self.stock('VendorFixedFace.ttf')
++        self.stock('VendorFixedFace.ttf', family='')  # No explicit Android UI role.
+         self.slots['/system/fonts/VendorFixedFace.ttf']['metrics']['isFixedPitch']=True
+         make_font(self.fonts/'VendorFixedFace.ttf');self.build()
+         self.assertFalse((self.fonts/'VendorFixedFace.ttf').exists())
