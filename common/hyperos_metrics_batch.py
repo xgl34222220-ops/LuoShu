@@ -414,8 +414,10 @@ def build(module: Path, stage: Path, names: list[str]) -> dict:
     preserved_aliases = []
     excluded_aliases = protected_aliases(stage, data)
     trusted = {logical for logical in data.get('slots', {}) if inventory_target(data, logical)}
-    names = list(dict.fromkeys([*names, *(Path(logical).name for logical in sorted(trusted)
-                                                if not safe_physical_font_name(Path(logical).name))]))
+    # A verified inventory is authoritative even when an older shell enumerator
+    # omitted a known name. Deduplicate by name; per-partition existence/role
+    # checks below still prevent inventing paths or replacing code fonts.
+    names = list(dict.fromkeys([*names, *(Path(logical).name for logical in sorted(trusted))]))
     for part in PARTS:
         root = Path(os.environ.get(f'LUOSHU_{part.upper()}_FONTS_ROOT', f'/{part}/fonts'))
         staged_fonts = stage / part / 'fonts'
