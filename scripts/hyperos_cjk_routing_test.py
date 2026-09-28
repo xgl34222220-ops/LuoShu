@@ -324,6 +324,9 @@ class RoutingTest(unittest.TestCase):
 
     def test_no_staged_fallback_keeps_primary_han(self):
         self.default_pair()
+        # A verified slot is now discovered without the caller's name list.
+        # Remove the actual stock target to model a genuinely absent fallback.
+        (self.root / 'stock/system/MiSansVF.ttf').unlink()
         self.build(['Roboto-Regular.ttf'])
         with TTFont(self.fonts / 'Roboto-Regular.ttf') as font:
             self.assertIn(HAN, font.getBestCmap())

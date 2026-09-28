@@ -39,6 +39,19 @@ for metadata_file in ("update.json", "update-prerelease.json"):
         repository="xgl34222220-ops/LuoShu", version=version,
         version_code=actual['versionCode'], tag=release_tag, notes_file=notes_file,
     )
+    # A withdrawn build must keep the older package URL while explaining why
+    # the rollout stopped. Do not turn the old channel back into a v2 release.
+    auth = dict(line.split('=', 1) for line in
+                (ROOT / 'config/stable_release_authorization.conf').read_text().splitlines()
+                if '=' in line)
+    if auth.get('scope') == 'withdrawn':
+        withdrawn = mod.artifact_version(auth['version']).removeprefix('v')
+        assert auth.get('allowPendingDeviceMatrix') == 'false'
+        assert actual['version'] != auth['version']
+        notice = f'docs/WITHDRAWN_{withdrawn}.md'
+        assert (ROOT / notice).is_file()
+        expected['changelog'] = ('https://raw.githubusercontent.com/'
+                                 'xgl34222220-ops/LuoShu/main/' + notice)
     assert actual == expected, (metadata_file, actual)
 
 for kwargs in (
