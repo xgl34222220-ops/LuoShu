@@ -1,0 +1,64 @@
+name: HyperOS role regression - test only
+on:
+  push:
+    branches: [fix/hyperos-latin-role-20260928]
+    paths: [.github/workflows/hyperos-role-regression.yml, .github/coverage-role.patch]
+permissions:
+  contents: write
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare immutable FontTools runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-noto-cjk fonts-dejavu-core zip unzip file >/dev/null
+          curl --fail --location --retry 2 --max-time 120 https://github.com/xgl34222220-ops/LuoShu/releases/download/refactor-v1.1.1/LuoShu-v1.1.1.zip -o "$RUNNER_TEMP/baseline.zip"
+          echo 'c5c8fa86af4ac196107ba05c5ee8cc1944140ae033cc9e763cec8c76f40c848a  '"$RUNNER_TEMP/baseline.zip" | sha256sum -c -
+          unzip -oq "$RUNNER_TEMP/baseline.zip" 'common/python/*'
+          chmod +x common/python/bin/luoshu-python
+          mkdir -p verification
+      - name: Reproduce then apply the narrow source correction
+        shell: bash
+        env:
+          PYTHONPATH: common/python/lib/python3.14/site-packages:common:scripts
+        run: |
+          set -euo pipefail
+          if [[ -f .github/coverage-role.patch ]]; then
+            set +e
+            python3 scripts/hyperos_role_regression_test.py > verification/before.log 2>&1
+            before=$?
+            set -e
+            test "$before" = 1
+            grep -Fq 'FAILED (failures=3)' verification/before.log
+            git apply --check .github/coverage-role.patch
+            git apply .github/coverage-role.patch
+            git rm .github/coverage-role.patch
+            git add common/font_role_policy.py common/hyperos_metrics_batch.py common/legacy_v14_4/font_switch_safe.sh scripts/stable111_round2_test.py
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'fix: avoid fixed-pitch UI exclusion and complete verified HyperOS names; invalidate old payload cache'
+            git push origin HEAD:fix/hyperos-latin-role-20260928
+          fi
+          git rev-parse HEAD > verification/commit.txt
+          test "$(sed -n 's/^scope=//p' config/stable_release_authorization.conf)" = withdrawn
+      - name: Coverage regression and complete backend checks
+        shell: bash
+        env:
+          PYTHONPATH: common/python/lib/python3.14/site-packages:common:scripts
+        run: |
+          set -euo pipefail
+          python3 scripts/hyperos_role_regression_test.py 2>&1 | tee verification/role-regression.log
+          sh scripts/check.sh 2>&1 | tee verification/full-backend.log
+          git archive --format=zip HEAD > verification/LuoShu-HyperOS-RoleFix-source.zip
+          printf '%s\n' 'Host tests only. No Android device validation. No release or online rollout performed.' > verification/scope.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hyperos-role-regression-evidence
+          path: verification/
+          retention-days: 14
