@@ -138,7 +138,9 @@ def effective_family_name(
 
 def is_protected_file(value: str, mono: bool = False) -> bool:
     filename = os.path.basename(value.strip()).lower()
-    tokens = PROTECTED_MONO_FILE_TOKENS if mono else PROTECTED_UI_FILE_TOKENS
+    tokens = PROTECTED_MONO_FILE_TOKENS if mono else tuple(t for t in PROTECTED_UI_FILE_TOKENS if t != 'mono')
+    if not mono and 'mono' in filename.replace('monotype', ''):
+        return True
     return not filename.endswith(FONT_SUFFIXES) or any(token in filename for token in tokens)
 
 

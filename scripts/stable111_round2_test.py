@@ -58,8 +58,7 @@ class Round2(unittest.TestCase):
             root=self.root/'stock'/part; root.mkdir(parents=True)
             self.env[f'LUOSHU_{part.upper()}_FONTS_ROOT']=str(root)
         context=patch.dict(os.environ,self.env);context.start();self.addCleanup(context.stop)
-        # A valid UI donor carries the full ASCII range. Incomplete donors
-        # are covered explicitly by hyperos_coverage_regression_test.
+        # Full UI donor: cases below include stock slots with all 52 letters/10 digits.
         make_font(self.fonts/'400.ttf', tuple(dict.fromkeys((*DEFAULT_POINTS, *range(32,127)))))
         self.stock('MiSansVF.ttf')
 
@@ -266,12 +265,12 @@ class Round2(unittest.TestCase):
         result=rewrite_tree(tree,'LuoShu')
         self.assertFalse(result['changed']);self.assertEqual(before,ET.tostring(tree.getroot()))
 
-    def test_fixed_pitch_ui_metadata_does_not_override_ui_family(self):
-        self.stock('VendorFixedFace.ttf')
+    def test_known_fixed_pitch_metadata_protects_unknown_name(self):
+        # A genuinely unclassified fixed-pitch face must remain stock.
+        self.stock('VendorFixedFace.ttf', family='')
         self.slots['/system/fonts/VendorFixedFace.ttf']['metrics']['isFixedPitch']=True
         make_font(self.fonts/'VendorFixedFace.ttf');self.build()
-        self.assertTrue((self.fonts/'VendorFixedFace.ttf').exists())
-        self.assertIn('/system/fonts/VendorFixedFace.ttf', self.by_slot)
+        self.assertFalse((self.fonts/'VendorFixedFace.ttf').exists())
 
     def test_new_stock_metadata_captures_axis_weight_and_digits(self):
         source=self.fonts/'400.ttf';variable_font(source);_,metrics=inventory._read_metrics(source)

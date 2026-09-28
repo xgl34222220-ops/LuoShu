@@ -1,7 +1,7 @@
 #!/system/bin/sh
 # HyperOS routes Chrome/WebView through a framework-owned theme symlink.
 # Keep that router intact; replace only its exact active theme file in consumer
-# namespaces. Invoked by the existing provider watcher, with no extra daemon.
+# namespaces. Invoked by the bounded boot task, with no resident daemon.
 set +e
 
 MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
@@ -32,21 +32,19 @@ _htf_active() {
 }
 
 _htf_readiness() {
-    # Cheap boot readiness only: no font generation or /proc consumer walk.
-    # A framework route may appear after sys.boot_completed. Missing is not
-    # evidence that this ROM has no theme-font path.
-    [ "$(_gfp_active_font)" != default ] || { echo inactive; return 0; }
-    if _htf_active; then
-        printf 'ready|%s|%s|%s\n' "$HTF_TARGET" \
-            "$(stat -L -c '%d:%i:%s:%y:%z' "$HTF_TARGET" 2>/dev/null)" \
-            "$(stat -L -c '%d:%i:%y:%z' "${HTF_ROUTER%/*}" 2>/dev/null)"
+    if [ ! -L "$HTF_ALIAS" ]; then
+        # On HyperOS the framework can create the alias itself after boot.
+        if [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)$(getprop ro.miui.ui.version.name 2>/dev/null)" ]; then
+            printf 'pending\n'
+        else
+            printf 'not-applicable\n'
+        fi
         return 0
     fi
-    if [ -L "$HTF_ALIAS" ] || [ -n "$(getprop ro.mi.os.version.name 2>/dev/null)$(getprop ro.miui.ui.version.name 2>/dev/null)" ]; then
-        echo pending
-    else
-        echo inactive
-    fi
+    _htf_active || { printf 'pending\n'; return 0; }
+    _htf_ready_stamp=$(_htf_stamp "$HTF_TARGET")
+    [ -n "$_htf_ready_stamp" ] || { printf 'pending\n'; return 0; }
+    printf 'ready|%s|%s\n' "$HTF_TARGET" "$_htf_ready_stamp"
 }
 
 _htf_source() {

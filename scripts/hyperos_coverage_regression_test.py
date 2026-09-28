@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regressions for the withdrawn 2.0.0 candidate; synthetic, not phone QA."""
+"""Regressions for withdrawn 2.0.0; synthetic fixtures, not phone QA."""
 import json
 import os
 from pathlib import Path
@@ -9,7 +9,6 @@ import sys
 import time
 import unittest
 from unittest.mock import patch
-
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT/'common'), str(ROOT/'scripts')]
 from fontTools.ttLib import TTFont
@@ -23,6 +22,11 @@ class CoverageRegression(unittest.TestCase):
     def setUp(self):
         round2.Round2.setUp(self)
         make_font(self.fonts/'400.ttf', tuple(range(32,127)))
+        with TTFont(self.fonts/'400.ttf') as donor:
+            for glyph in donor['glyf'].glyphs.values():
+                if getattr(glyph, 'numberOfContours', 0) > 0:
+                    glyph.coordinates.translate((37, 0))
+            donor.save(self.fonts/'400.ttf')
     stock = round2.Round2.stock
     save_inventory = round2.Round2.save_inventory
     build = round2.Round2.build
@@ -35,10 +39,9 @@ class CoverageRegression(unittest.TestCase):
         self.build(['MiSansVF.ttf', name])
         self.assertTrue((self.fonts/name).is_file(), 'UI alias silently excluded as code')
         self.assertIn('/system/fonts/'+name, self.by_slot)
-        self.assertNotIn('/system/fonts/'+name,
-                         (self.stage/'.luoshu-stock-preserved.paths').read_text())
+        self.assertNotIn('/system/fonts/'+name, (self.stage/'.luoshu-stock-preserved.paths').read_text())
         with TTFont(self.fonts/name) as generated, TTFont(self.fonts/'400.ttf') as donor:
-            for cp in [65, 97, *range(48, 58)]:
+            for cp in [65, 97, *range(48,58)]:
                 self.assertIn(cp, generated.getBestCmap())
                 self.assertEqual(generated['glyf'][generated.getBestCmap()[cp]].compile(generated['glyf']),
                                  donor['glyf'][donor.getBestCmap()[cp]].compile(donor['glyf']))
@@ -50,11 +53,11 @@ class CoverageRegression(unittest.TestCase):
             {'families':['monospace'], 'metrics':{'isFixedPitch':True}}))
 
     def test_monotype_word_is_not_monospace(self):
-        self.assertFalse(roles.is_code_monospace('MiSansMonotype-Regular.ttf',
-            {'families':['sans-serif']}))
+        self.assertFalse(roles.is_code_monospace('MiSansMonotype-Regular.ttf', {'families':['sans-serif']}))
         from hyperos_physical_policy import safe_physical_font_name
         self.assertTrue(safe_physical_font_name('MiSansMonotype-Regular.ttf'))
-        for n in ('DroidSansMono.ttf','NotoSansMono-Regular.ttf','RobotoMono-Regular.ttf'):
+        for n in ('DroidSansMono.ttf','NotoSansMono-Regular.ttf','RobotoMono-Regular.ttf',
+                  'robotomono-regular.ttf','sourcecodepro-bold.ttf'):
             self.assertTrue(roles.is_code_monospace(n))
 
     def test_digit_only_named_ui_font_is_discovered(self):
@@ -81,10 +84,44 @@ class CoverageRegression(unittest.TestCase):
         self.assertFalse((self.fonts/name).exists())
         self.assertFalse(list((self.fonts/'.luoshu-font-store').glob('hyperos-metrics-*')))
 
+    def test_safe_named_slot_is_not_lost_when_shell_list_omits_it(self):
+        self.stock('MiSansLatinVF.ttf', family='sys-sans-en', points=tuple(range(32,127)))
+        self.build(['MiSansVF.ttf'])
+        self.assertIn('/system/fonts/MiSansLatinVF.ttf', self.by_slot)
+
+    def test_reapply_removes_only_obsolete_preservation_record(self):
+        name='MiSansLatinVF.ttf';logical='/system/fonts/'+name
+        self.stock(name, family='sans-serif', points=tuple(range(32,127)))
+        self.slots[logical]['metrics']['isFixedPitch']=True
+        side=self.stage/'.luoshu-stock-preserved.paths'
+        side.write_text(logical+'\n/system/fonts/DroidSansMono.ttf\n')
+        self.build(['MiSansVF.ttf',name])
+        self.assertNotIn(logical,side.read_text())
+        self.assertIn('/system/fonts/DroidSansMono.ttf',side.read_text())
+        self.assertTrue(self.by_slot[logical]['coreLatinChecked'])
+        self.assertTrue(self.by_slot[logical]['coreDigitsChecked'])
+
+    def test_readable_monotype_file_can_be_routed_in_xml(self):
+        from font_config_overlay import is_protected_file
+        self.assertFalse(is_protected_file('MiSansMonotype-Regular.ttf'))
+        self.assertTrue(is_protected_file('RobotoMono-Regular.ttf'))
+
+    def test_missing_digit_preflight_preserves_live_and_staged_payload(self):
+        name='Roboto-Regular.ttf'
+        self.stock(name, family='sans-serif',points=tuple(range(32,127)))
+        target=self.fonts/name; make_font(target)
+        original=target.read_bytes()
+        live=self.module/'.luoshu-payload/system/fonts';live.mkdir(parents=True)
+        (live/name).write_bytes(original)
+        make_font(self.fonts/'400.ttf', tuple([*range(65,91),*range(97,123),*range(48,57)]))
+        self.save_inventory()
+        with self.assertRaisesRegex(ValueError,r'U\+0039'):
+            batch.build(self.module,self.stage,['MiSansVF.ttf',name])
+        self.assertEqual(original,target.read_bytes())
+        self.assertEqual(original,(live/name).read_bytes())
 
 class BootRouteRegression(unittest.TestCase):
     setUp = repair.ShellIntegration.setUp
-
     def service(self, theme):
         path = self.module/'common/google_font_provider_service.sh'
         shutil.copyfile(ROOT/'common/google_font_provider_service.sh', path)
@@ -92,87 +129,74 @@ class BootRouteRegression(unittest.TestCase):
         (self.module/'common/google_font_provider_bridge.sh').write_text('exit 2\n')
         (self.module/'common/hyperos_theme_font_bridge.sh').write_text(theme)
         return path
-
     def run_service(self, service, **extra):
         return subprocess.run(['sh',str(service),'boot'], env={**self.env,
-            'LUOSHU_THEME_SETTLE_SECONDS':'3', **extra}, capture_output=True,
-            text=True, timeout=7)
-
+            'LUOSHU_THEME_SETTLE_SECONDS':'3', **extra}, capture_output=True,text=True,timeout=7)
     def assert_clean(self, result):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('"leftoverPids": []', result.stderr)
         self.assertFalse((self.module/'.google-font-provider.lock').exists())
-
     def test_theme_created_after_boot_is_not_silently_skipped(self):
         service=self.service('''case "$1" in
-readiness) if [ -s "$MODDIR/config/theme-ready" ]; then echo 'ready|stable'; else echo pending; fi;;
-apply) [ -s "$MODDIR/config/theme-ready" ] || exit 2
+readiness) echo 1 > "$MODDIR/logs/probed"; if [ -s "$MODDIR/config/theme-ready" ]; then echo 'ready|stable'; else echo pending; fi;;
+apply) echo 1 > "$MODDIR/logs/probed"; [ -s "$MODDIR/config/theme-ready" ] || exit 2
        echo applied > "$MODDIR/logs/theme-applied";;
 restore) exit 0;;
 esac
 ''')
         creator=subprocess.Popen([sys.executable,'-c',
-            'import time,sys; from pathlib import Path; time.sleep(.2); Path(sys.argv[1]).write_text("ready")',
-            str(self.module/'config/theme-ready')])
-        try:
-            result=self.run_service(service)
-        finally:
-            creator.wait(timeout=3)
+            'import time,sys; from pathlib import Path\n'
+            'end=time.monotonic()+3\n'
+            'while not Path(sys.argv[2]).exists() and time.monotonic()<end: time.sleep(.01)\n'
+            'time.sleep(.25); Path(sys.argv[1]).write_text("ready")',
+            str(self.module/'config/theme-ready'), str(self.module/'logs/probed')])
+        try: result=self.run_service(service)
+        finally: creator.wait(timeout=3)
         self.assert_clean(result)
-        self.assertTrue((self.module/'logs/theme-applied').exists(),
-                        'old service exited before framework route appeared')
-
+        self.assertTrue((self.module/'logs/theme-applied').exists(), 'service exited before route appeared')
     def test_missing_route_reports_partial_and_exits_without_retry_daemon(self):
         service=self.service('case "$1" in readiness) echo 1 > "$MODDIR/logs/probed"; echo pending;; apply) exit 2;; esac\n')
         start=time.monotonic()
-        result=self.run_service(service, LUOSHU_THEME_SETTLE_SECONDS='1',
-                                 LUOSHU_GOOGLE_FONT_WATCH_CYCLES='-1')
+        result=self.run_service(service, LUOSHU_THEME_SETTLE_SECONDS='1', LUOSHU_GOOGLE_FONT_WATCH_CYCLES='-1')
         self.assert_clean(result)
-        self.assertLess(time.monotonic()-start, 4)
+        self.assertLess(time.monotonic()-start,4)
         report=(self.module/'config/font-provider-one-shot.conf').read_text()
         self.assertIn('state=partial',report)
         self.assertIn('theme-route-not-ready',report)
         self.assertIn('resident=false',report)
-
     def test_theme_wait_cancellation_reaps_all_children(self):
         service=self.service('case "$1" in readiness) echo 1 > "$MODDIR/logs/probed"; echo pending;; apply) exit 2;; esac\n')
-        proc=subprocess.Popen(['sh',str(service),'boot'],env={**self.env,
-            'LUOSHU_THEME_SETTLE_SECONDS':'30'}, stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
+        proc=subprocess.Popen(['sh',str(service),'boot'],env={**self.env,'LUOSHU_THEME_SETTLE_SECONDS':'30'},
+            stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         try:
             deadline=time.monotonic()+4
-            while not (self.module/'logs/probed').exists() and time.monotonic()<deadline:
-                time.sleep(.02)
+            while not (self.module/'logs/probed').exists() and time.monotonic()<deadline: time.sleep(.02)
             self.assertTrue((self.module/'logs/probed').exists())
-            proc.terminate()
-            out,err=proc.communicate(timeout=5)
+            proc.terminate(); out,err=proc.communicate(timeout=5)
             self.assertEqual(proc.returncode,143,(out,err))
             self.assertIn('"leftoverPids": []',err)
-            self.assertFalse((self.module/'.google-font-provider.lock').exists(),
-                             'supervisor interrupted the worker EXIT trap')
-            # A cancelled task must not leave a fresh lease blocking the next task.
-            recovery=self.run_service(service, LUOSHU_THEME_SETTLE_SECONDS='0',
-                                      LUOSHU_FONT_LOCK_INIT_GRACE_SECONDS='0.01')
+            self.assertFalse((self.module/'.google-font-provider.lock').exists(), 'worker EXIT trap interrupted')
+            recovery=self.run_service(service, LUOSHU_THEME_SETTLE_SECONDS='0',LUOSHU_FONT_LOCK_INIT_GRACE_SECONDS='0.01')
             self.assert_clean(recovery)
         finally:
             if proc.poll() is None: proc.kill();proc.wait()
-
     def test_real_bridge_readiness_rejects_unrelated_router(self):
         for name in ('google_font_provider_bridge.sh','hyperos_theme_font_bridge.sh'):
             shutil.copyfile(ROOT/'common'/name,self.module/'common'/name)
         (self.module/'config/active_font.conf').write_text('custom\n')
         root=self.module/'route';root.mkdir()
-        target=root/'theme.ttf'; router=root/'router.ttf'; alias=root/'alias.ttf'
+        target=root/'theme.ttf';router=root/'router.ttf';alias=root/'alias.ttf'
         router.symlink_to(target);alias.symlink_to(router)
-        env={**self.env,'LUOSHU_THEME_FONT_TARGET':str(target),
-             'LUOSHU_THEME_FONT_ALIAS':str(alias),'LUOSHU_THEME_FONT_ROUTER':str(router)}
+        env={**self.env,'LUOSHU_THEME_FONT_TARGET':str(target), 'LUOSHU_THEME_FONT_ALIAS':str(alias),
+             'LUOSHU_THEME_FONT_ROUTER':str(router)}
         def probe():
             return subprocess.run(['sh',str(self.module/'common/hyperos_theme_font_bridge.sh'),'readiness'],
                 env=env,capture_output=True,text=True,check=True,timeout=3).stdout.strip()
         self.assertEqual(probe(),'pending')
-        target.write_bytes(b'fixture')
-        self.assertTrue(probe().startswith('ready|'))
+        target.write_bytes(b'fixture'); self.assertTrue(probe().startswith('ready|'))
         alias.unlink();other=root/'other.ttf';other.write_bytes(b'foreign');alias.symlink_to(other)
-        self.assertEqual(probe(),'pending')
-        self.assertEqual(other.read_bytes(),b'foreign')
+        self.assertEqual(probe(),'pending');self.assertEqual(other.read_bytes(),b'foreign')
+        alias.unlink()
+        self.assertEqual(probe(),'pending', 'known HyperOS may create alias after boot')
 
-if __name__ == '__main__': unittest.main(verbosity=2)
+if __name__=='__main__': unittest.main(verbosity=2)
