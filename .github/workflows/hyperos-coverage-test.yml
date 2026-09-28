@@ -4,51 +4,26 @@ on:
     branches: [fix/hyperos-latin-digit-20260928]
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: hyperos-coverage-test-${{ github.ref }}
   cancel-in-progress: true
 jobs:
-  source:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: write
-    outputs:
-      sha: ${{ steps.import.outputs.sha }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - id: import
-        name: Apply reviewed patch only to test branch
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REF" = refs/heads/fix/hyperos-latin-digit-20260928
-          if test -f .github/coverage-runtime.patch; then
-            echo 'ddea6ebef9a33668111d313e3640958279b0eba3b249a476c6ba016f1a5f8021  .github/coverage-runtime.patch' | sha256sum -c -
-            git apply --unidiff-zero --check .github/coverage-runtime.patch
-            git apply --unidiff-zero .github/coverage-runtime.patch
-            git rm .github/coverage-runtime.patch
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add common scripts
-            git commit -m 'fix: distinguish UI digit fonts from code monospace and await bounded theme readiness'
-            git push origin HEAD:fix/hyperos-latin-digit-20260928
-          fi
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   checks:
-    needs: source
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.source.outputs.sha }}
           persist-credentials: false
+      - name: Read retained signed build artifact, not the withdrawn release
+        uses: actions/download-artifact@v4
+        with:
+          name: v2-signed-candidate
+          run-id: 36435160874
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/signed
       - name: Prepare exact runtime and unchanged signed App
-        env:
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -58,8 +33,19 @@ jobs:
           echo 'c5c8fa86af4ac196107ba05c5ee8cc1944140ae033cc9e763cec8c76f40c848a  '"$RUNNER_TEMP/runtime.zip" | sha256sum -c -
           unzip -oq "$RUNNER_TEMP/runtime.zip" 'common/python/*'
           chmod +x common/python/bin/luoshu-python
-          gh api repos/xgl34222220-ops/LuoShu/releases/assets/595629528 -H 'Accept: application/octet-stream' > "$RUNNER_TEMP/app.apk"
+          cp "$RUNNER_TEMP/signed/verification/LuoShu-App-v2.0.0.apk" "$RUNNER_TEMP/app.apk"
           echo '57d86a4b5d87a7baf2f4cba8c13fcabb940ffd6d00f662d2313d91da2f4950b8  '"$RUNNER_TEMP/app.apk" | sha256sum -c -
+          python3 - <<'PY'
+          import os, zipfile
+          from pathlib import Path
+          source = Path(os.environ['RUNNER_TEMP'])/'signed/verification/LuoShu-v2.0.0-source.zip'
+          with zipfile.ZipFile(source) as z:
+              expected = {n for n in z.namelist() if n.startswith('android-app/') and not n.endswith('/')}
+              actual = {p.as_posix() for p in Path('android-app').rglob('*') if p.is_file()}
+              assert actual == expected, 'Android source paths changed'
+              for name in expected:
+                  assert Path(name).read_bytes() == z.read(name), name
+          PY
       - name: Full module checks and build - not a public release
         env:
           LUOSHU_APP_APK: ${{ runner.temp }}/app.apk
