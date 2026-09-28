@@ -19,14 +19,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Import verified source fix only on the test branch
+      - name: Reconcile reviewed source fix only on the test branch
         id: source
         shell: bash
         run: |
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/fix/hyperos-latin-digit-20260928
           if [ -f .github/hyperos-test1.patch.b64 ]; then
-            test "$(git rev-parse HEAD:scripts/hyperos_coverage_regression_test.py)" = cf12d8898d597c24f2ca4d7245814d9a48469468
             python3 - <<'PY'
           import base64, gzip, hashlib, os
           from pathlib import Path
@@ -36,22 +35,15 @@ jobs:
           assert hashlib.sha256(patch).hexdigest()=='51a62b0a4b6fa99f24adc0d0e271e44620fabc37d2ae4ff867da5a7ef3410afa'
           Path(os.environ['RUNNER_TEMP'],'hyperos-source.patch').write_bytes(patch)
           PY
-            rm scripts/hyperos_coverage_regression_test.py
-            git apply --check "$RUNNER_TEMP/hyperos-source.patch"
-            git apply "$RUNNER_TEMP/hyperos-source.patch"
-            python3 - <<'PY'
-          from pathlib import Path
-          def replace(path, old, new):
-              p=Path(path); text=p.read_text(); assert text.count(old)==1,(path,'source drift');p.write_text(text.replace(old,new))
-          replace('scripts/stable111_round2_test.py',"self.stock('VendorFixedFace.ttf')", "# A genuinely unclassified fixed-pitch face must remain stock.\n        self.stock('VendorFixedFace.ttf', family='')")
-          replace('scripts/hyperos_cjk_routing_test.py',"    def test_no_staged_fallback_keeps_primary_han(self):\n        self.default_pair()\n        self.build(['Roboto-Regular.ttf'])", "    def test_no_staged_fallback_keeps_primary_han(self):\n        self.default_pair()\n        # Inventory discovery now fills omitted known UI slots. Model an actual\n        # missing stock target, not merely omission from the caller's name list.\n        (self.root / 'stock/system/MiSansVF.ttf').unlink()\n        self.build(['Roboto-Regular.ttf'])\n        self.assertNotIn('/system/fonts/MiSansVF.ttf', self.reports)")
-          replace('common/hyperos_metrics_batch.py','memo[identity] = preferred_unicode_codepoints(font)', '# Retain only the 62 core code points, not a CJK cmap per alias.\n            memo[identity] = frozenset(cp for cp in preferred_unicode_codepoints(font)\n                                       if 48 <= cp <= 57 or 65 <= cp <= 90 or 97 <= cp <= 122)')
-          PY
-            git rm .github/hyperos-test1.patch.b64
+            git worktree add --detach "$RUNNER_TEMP/coverage-source" fca518e9a00aa0f37daf2b993db80a3bb6b232b6
+            git -C "$RUNNER_TEMP/coverage-source" apply --check "$RUNNER_TEMP/hyperos-source.patch"
+            git -C "$RUNNER_TEMP/coverage-source" apply "$RUNNER_TEMP/hyperos-source.patch"
+            python3 .github/hyperos-reconcile.py "$RUNNER_TEMP/coverage-source"
+            git rm .github/hyperos-test1.patch.b64 .github/hyperos-reconcile.py
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
             git add common/ scripts/
-            git commit -m 'fix: preserve HyperOS UI Latin digits and finish bounded boot routing with clean exit'
+            git commit -m 'fix: reconcile HyperOS UI core coverage, stale exclusions and bounded clean-exit routing'
             git push origin HEAD:fix/hyperos-latin-digit-20260928
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
