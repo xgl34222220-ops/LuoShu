@@ -2,10 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!--
-      Miuix Blur only executes behind the API 33 RuntimeShader capability gate.
-      Keep the app installable on API 28-32, where LuoShu uses the safe Haze fallback.
-    -->
     <uses-sdk tools:overrideLibrary="top.yukonga.miuix.kmp.blur" />
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -23,6 +19,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.LuoShuHybrid"
         android:usesCleartextTraffic="false">
+
+        <!-- Optional app-private font compatibility layer. LSPosed supplies the runtime;
+             without LSPosed these metadata entries have no effect on normal LuoShu use. -->
+        <meta-data android:name="xposedmodule" android:value="true" />
+        <meta-data android:name="xposeddescription" android:value="洛书：让目标应用的自带文本字体跟随系统字体（不替换图标/Emoji/代码等宽字体）" />
+        <meta-data android:name="xposedminversion" android:value="82" />
 
         <activity
             android:name=".MainActivity"
