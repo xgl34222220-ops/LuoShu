@@ -11,6 +11,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Compile-only legacy Xposed API. The runtime classes are provided by LSPosed.
+        maven(url = "https://api.xposed.info/")
     }
 }
 
