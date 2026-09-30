@@ -14,7 +14,8 @@ Gates:
 4. System-global module mounts, root-manager namespaces, FontManager startup and
    real HyperOS/ColorOS rendering remain **not tested by this harness**.
 
-The workflow uses existing KVM permissions only, with software acceleration as a
-fallback. It installs a separate probe only on its disposable CI emulator.
+The workflow requires KVM and fails before boot if it is inaccessible. The
+explicitly authorized one-time push marker can grant only the current runner
+user an ACL on its disposable VM; later pushes do not inherit that approval. It installs a separate probe only on its disposable CI emulator.
 No test APK is delivered to the user. Evidence includes JSON and original
 synthetic-glyph screenshots, even when a capability gate is blocked.

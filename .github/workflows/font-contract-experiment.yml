@@ -34,15 +34,23 @@ jobs:
       - name: Build CI-only font probe
         working-directory: experiments/android-font-contract
         run: gradle --no-daemon --stacktrace :app:assembleDebug
-      - name: Use existing acceleration only
+      - name: Require accelerated emulator
         id: accel
+        env:
+          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '18b878f54da788ceddbd80a43414d843eb7b6be5' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
         shell: bash
         run: |
-          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
-            echo 'disabled=false' >> "$GITHUB_OUTPUT"
-          else
-            echo 'disabled=true' >> "$GITHUB_OUTPUT"
+          if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
+            if [ "$KVM_APPROVED_FOR_THIS_RUN" != true ]; then
+              echo 'KVM unavailable; hardware test blocked before emulator startup' >&2
+              exit 1
+            fi
+            test -c /dev/kvm
+            command -v setfacl
+            sudo setfacl -m "u:$(id -un):rw" /dev/kvm
           fi
+          test -r /dev/kvm && test -w /dev/kvm
+          echo 'disabled=false' >> "$GITHUB_OUTPUT"
       - name: Verify actual Android font rendering and reboot persistence
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -52,7 +60,7 @@ jobs:
           profile: pixel_7_pro
           ram-size: 2048M
           heap-size: 512M
-          emulator-boot-timeout: 1200
+          emulator-boot-timeout: 300
           disable-animations: false
           disable-linux-hw-accel: ${{ steps.accel.outputs.disabled }}
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none

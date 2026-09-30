@@ -3,17 +3,43 @@
 Never roots the emulator, changes hidden API policy, or mounts system partitions.
 """
 from pathlib import Path
-import argparse,json,subprocess,time
+import argparse,json,subprocess,time,atexit,sys
 PACKAGE='io.github.xgl34222220.luoshu.fontcontract'
 p=argparse.ArgumentParser();p.add_argument('--apk',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
 args=p.parse_args();args.output.mkdir(parents=True,exist_ok=True)
+stage='initializing'
+started=time.monotonic()
+def status(value, **extra):
+ global stage
+ stage=value
+ (args.output/'progress.json').write_text(json.dumps({'stage':stage,'elapsedSeconds':round(time.monotonic()-started,3),**extra},indent=2)+'\n')
 def adb(*values,timeout=120):
- r=subprocess.run(['adb',*values],capture_output=True,timeout=timeout)
- if r.returncode:raise RuntimeError(r.stderr.decode(errors='replace'))
+ begin=time.monotonic()
+ try:
+  r=subprocess.run(['adb',*values],capture_output=True,timeout=timeout)
+ except subprocess.TimeoutExpired as error:
+  status(stage,status='failed',error='adb-timeout',command=list(values),timeoutSeconds=timeout)
+  raise
+ with (args.output/'commands.jsonl').open('a') as stream:
+  stream.write(json.dumps({'command':list(values),'durationSeconds':round(time.monotonic()-begin,3),'returncode':r.returncode})+'\n')
+ if r.returncode:
+  status(stage,status='failed',error='adb-nonzero',command=list(values),returncode=r.returncode)
+  raise RuntimeError(r.stderr.decode(errors='replace'))
  return r.stdout
+def diagnostics():
+ # Bounded collection also runs before a failed test exits; no device mutation.
+ for name,command in [('devices',['devices','-l']),('boot',['shell','getprop','sys.boot_completed']),('logcat',['logcat','-d','-t','400'])]:
+  try:
+   r=subprocess.run(['adb',*command],capture_output=True,timeout=10)
+   (args.output/('diagnostic-'+name+'.txt')).write_bytes(r.stdout+r.stderr)
+  except Exception as error:
+   (args.output/('diagnostic-'+name+'.txt')).write_text(type(error).__name__+': '+str(error))
+atexit.register(diagnostics)
+status('installing-probe')
 adb('wait-for-device');adb('install','-r','-t',str(args.apk))
 reports=[]
 for phase in ['before','after']:
+ status('native-font-contract-'+phase)
  if phase=='after':
   adb('reboot');adb('wait-for-device',timeout=240)
   until=time.monotonic()+240
@@ -28,6 +54,7 @@ for phase in ['before','after']:
  for i in range(3):(args.output/('role-'+str(i)+'-'+phase+'.png')).write_bytes(adb('exec-out','run-as',PACKAGE,'cat','files/role-'+str(i)+'.png'))
  if report.get('status')!='passed-native-data-gate':raise RuntimeError(report)
 framework=all(r.get('frameworkXmlConsumer',{}).get('status')=='passed' for r in reports)
+status('completed-native-probe')
 summary={'nativeDataGate':'passed','frameworkXmlGate':'passed' if framework else 'blocked',
  'emulatorReboot':'passed','moduleGlobalMountAndBootGate':'not-tested','noHook':True,
  'note':'App-owned configuration test; no system font config/SELinux/root settings changed',
