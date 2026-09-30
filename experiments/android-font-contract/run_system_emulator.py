@@ -15,7 +15,7 @@ a.output.mkdir(parents=True,exist_ok=True)
 report={'scope':'disposable API36 userdebug CI emulator','rootManagerTested':False,'hardwareRomCoverage':False,'restored':False}
 phase='preflight';started=time.monotonic();backups={};touched=False;new_fonts={};expected_roles={};asset='/system/fonts/LuoShuContractExperiment.ttf'
 def save():
- report.update(stage=phase,elapsedSeconds=round(time.monotonic()-started,3))
+ report.update(stage=phase,elapsedSeconds=round(time.monotonic()-started,3),systemFilesTouched=touched)
  (a.output/'system-summary.json').write_text(json.dumps(report,indent=2)+'\n')
 def adb(*args,timeout=120,check=True):
  begin=time.monotonic();r=subprocess.run(['adb',*args],capture_output=True,timeout=timeout)
@@ -108,17 +108,17 @@ try:
  if a.production_payload:
   phase='production-compile';save()
   work=Path(__file__).parent/'.work-production';(work/'stock').mkdir(parents=True,exist_ok=True)
+  import sys
+  sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'xml-first'))
+  from build_production_case import build,required_stock_paths
   captured={}
-  for sample in ['A','中']:
-   logical=report['baseline']['actualDefaultFonts'][sample][0]['file']
-   if not logical.startswith('/system/fonts/') or Path(logical).name not in {'Roboto-Regular.ttf','NotoSansCJK-Regular.ttc'}:
-    raise RuntimeError('unrecognized disposable SDK fixture target: '+logical)
+  captured_xml={remote:a.output/('original-'+Path(remote).name) for remote in backups}
+  for logical in required_stock_paths(captured_xml,report['baseline']):
+   if Path(logical).name not in {'Roboto-Regular.ttf','Roboto-Italic.ttf','NotoSansCJK-Regular.ttc','NotoSerifCJK-Regular.ttc'}:
+    raise RuntimeError('unrecognized disposable SDK family member: '+logical)
    local=work/'stock'/Path(logical).name;adb('pull',logical,str(local));captured[logical]=local
   config='/data/fonts/config/config.xml';exists=subprocess.run(['adb','shell','test','-f',config]).returncode==0
   generation={'path':config,'exists':exists,'sha256':hashlib.sha256(read_system_file(config)).hexdigest() if exists else ''}
-  import sys
-  sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'xml-first'))
-  from build_production_case import build
   payload,manifest,expected_roles,case_report=build(work/'generated',
     {remote:a.output/('original-'+Path(remote).name) for remote in backups},captured,
     report['baseline'],assets/'composite.ttf',generation)

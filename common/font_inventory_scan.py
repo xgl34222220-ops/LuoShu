@@ -24,6 +24,7 @@ from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, stock_phy
                                     DYNAMIC_OVERLAY_PATH, DYNAMIC_OVERLAY_TARGET)
 
 SCANNER_REVISION = 6
+XML_MEMBER_SNAPSHOT_REVISION = 1
 CANDIDATE_SCHEMA = "device-font-candidates-v1"
 XML_GRAPH_SCHEMA = "device-font-xml-graph-v1"
 METRICS_REVISION = 3
@@ -713,8 +714,85 @@ def _can_reuse(existing: dict[str, Any], build_key: str) -> bool:
     )
 
 
+def has_xml_member_snapshots(inventory: dict[str, Any]) -> bool:
+    if inventory.get("xmlMemberSnapshotRevision") != XML_MEMBER_SNAPSHOT_REVISION:
+        return False
+    snapshots = inventory.get("xmlMemberSnapshots")
+    if not isinstance(snapshots, dict):
+        return False
+    for ref in (inventory.get("xmlGraph") or {}).get("refs", []):
+        logical = str(ref.get("resolvedPath") or "")
+        if not logical:
+            continue
+        face = str(ref.get("index", 0))
+        entry = (snapshots.get(logical) or {}).get(face)
+        if not isinstance(entry, dict) or entry.get("state") not in {"ready", "unavailable"}:
+            return False
+        if entry["state"] == "ready":
+            identity = entry.get("stockIdentity") or {}
+            if (identity.get("logicalPath") != logical or str(identity.get("faceIndex")) != face
+                    or identity.get("captureRevision") != STOCK_CAPTURE_REVISION
+                    or (identity.get("provenance") or {}).get("verified") is not True):
+                return False
+        elif not entry.get("reason"):
+            return False
+    return True
+
+
+def _capture_xml_member_snapshots(graph, roots, build_key, slots):
+    """Seal XML members separately; protected faces never become legacy slots."""
+    snapshots = {}
+    def views(target):
+        for root in roots:
+            for name in base._font_root_names(root):
+                try:
+                    yield root.actual / Path(target).relative_to(name)
+                except ValueError:
+                    continue
+    for ref in graph.get("refs", []):
+        logical = str(ref.get("resolvedPath") or "")
+        if not logical:
+            continue
+        face = int(ref.get("index", 0))
+        bucket = snapshots.setdefault(logical, {})
+        if str(face) in bucket:
+            continue
+        entry = {"faceIndex": face, "state": "unavailable"}
+        bucket[str(face)] = entry
+        try:
+            if face < 0:
+                raise ValueError("negative XML face index")
+            resolved = base._resolve_file(logical, roots)
+            if resolved is None:
+                raise ValueError("XML member original file unavailable")
+            root, actual = resolved
+            stock = base._stock_font_path(root, actual, roots)
+            with stock.open("rb") as stream:
+                collection = stream.read(4) == b"ttcf"
+            if not collection and face != 0:
+                raise ValueError("standalone XML member face index must be zero")
+            kwargs = {"lazy": True, "recalcTimestamp": False, "recalcBBoxes": False}
+            if collection:
+                kwargs["fontNumber"] = face
+            with base.TTFont(str(stock), **kwargs) as font:
+                if "head" not in font:
+                    raise ValueError("XML member font has no head table")
+            existing = (slots.get(logical) or {}).get("stockIdentity") or {}
+            identity = (dict(existing) if existing.get("faceIndex") == face else
+                        stock_identity(logical, stock, face, build_key,
+                                       provenance_path=actual, view_resolver=views))
+            entry["stockIdentity"] = identity
+            if (identity.get("provenance") or {}).get("verified") is not True:
+                raise ValueError((identity.get("provenance") or {}).get("reason") or "XML member original view unproven")
+            entry["state"] = "ready"
+        except Exception as error:
+            entry["reason"] = f"{type(error).__name__}: {error}"
+    return snapshots
+
+
 def _has_current_metrics(existing: dict[str, Any]) -> bool:
-    return (all(isinstance(entry.get("stockIdentity"), dict) and entry["stockIdentity"].get("captureRevision") == STOCK_CAPTURE_REVISION and isinstance(entry.get("stockGeometryProfile"), dict) for entry in existing.get("slots", {}).values())
+    return (has_xml_member_snapshots(existing)
+            and all(isinstance(entry.get("stockIdentity"), dict) and entry["stockIdentity"].get("captureRevision") == STOCK_CAPTURE_REVISION and isinstance(entry.get("stockGeometryProfile"), dict) for entry in existing.get("slots", {}).values())
             and existing.get("metricsRevision") == METRICS_REVISION
             and all(isinstance(entry.get("metrics", {}).get("head"), dict)
                     and base.valid_coverage(entry.get("metrics", {}).get("coverage"))
@@ -985,6 +1063,8 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
             }
 
 
+    xml_member_snapshots = _capture_xml_member_snapshots(xml_graph, replaceable_roots, build_key, slots)
+
     theme_roots = _theme_override_roots()
     mount_targets = _font_mount_targets()
     scan_summary = _summary(slots, path_total, path_counts, len(xml_sources), _count_xml_ui_faces(xml_sources))
@@ -1040,6 +1120,8 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         ],
         "xmlSources": [str(logical) for _partition, logical, _actual in xml_sources],
         "xmlGraph": xml_graph,
+        "xmlMemberSnapshotRevision": XML_MEMBER_SNAPSHOT_REVISION,
+        "xmlMemberSnapshots": xml_member_snapshots,
         "families": {name: paths for name, paths in sorted(families.items()) if name and paths},
         "slots": {logical: slots[logical] for logical in sorted(slots)},
         "slotCount": len(slots),

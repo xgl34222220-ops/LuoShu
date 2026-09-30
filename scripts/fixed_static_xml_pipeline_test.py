@@ -65,6 +65,33 @@ class PipelineTest(unittest.TestCase):
   self.assertEqual({a['report']['renderContract']['stock']['faceIndex'] for a in manifest['artifacts']},{0,1})
   tampered=copy.deepcopy(second);tampered['target']['xmlRefs']=[]
   with self.assertRaisesRegex(compiler.CompilerError,'frozen XML node'):static.verify_original_face(tampered['target'],collection,1)
+ def test_protected_family_member_uses_scanned_face_identity(self):
+  import universal_font_compiler_test as f
+  import universal_font_plan as planner
+  import minimal_xml_router as legacy
+  protected=self.root/'Serif.ttf';shutil.copy(self.case.stock,protected)
+  protected_path='/system/fonts/Serif.ttf';xml=self.root/'protected-family.xml'
+  xml.write_text('<familyset><family name="sans-serif"><font>SyntheticOEM.ttf</font><font fallbackFor="serif">Serif.ttf</font></family></familyset>')
+  slots={}
+  for logical,path in [(self.case.logical,self.case.stock),(protected_path,protected)]:
+   slots[logical]=f.slot_from_stock(logical,path,family='sans-serif',source_xml='/system/etc/fonts.xml',declared=Path(logical).name)
+  identity=slots[protected_path].pop('stockIdentity');slots[protected_path]['stockIdentities']={'0':identity}
+  slots[protected_path]['xmlRefs'][0]['fontAttributes']={'fallbackFor':'serif'}
+  profile=f.font_source_profile.build([self.case.source])
+  for file in profile['files']:
+   for face in file['faces']:face['mixedSelection']=copy.deepcopy(self.case.unit()['target']['source']['mixedSelection'])
+  topology={'schema':planner.TOPOLOGY_SCHEMA,'state':'ready','topologyRevision':3,'buildKey':'phase6-test','slots':slots,'summary':{},'families':{},'xmlAliases':[],'unresolvedXmlRefs':[]}
+  roles={'schema':planner.ROLES_SCHEMA,'state':'ready','roleRevision':3,'buildKey':'phase6-test','slots':{self.case.logical:f.role_map('latin'),protected_path:f.role_map('serif','preserve')}}
+  plan=planner.build_plan(topology,roles,profile);base=legacy.build_route_plan(plan,{'/system/etc/fonts.xml':xml},None,False)
+  route=router.build_route_plan(plan,base)
+  self.assertEqual(plan['targets'][protected_path]['action'],'preserve')
+  retained=next(v for v in route['retainedOriginals'].values() if v['targetPath']==protected_path)
+  self.assertEqual(retained['target']['targetContract']['stockIdentity'],identity)
+  self.mapping.write_text(json.dumps({self.case.logical:str(self.case.stock),protected_path:str(protected)}))
+  artifacts=compiler.compile_all(plan,route,{self.case.logical:self.case.stock,protected_path:protected},self.root/'protected-compiled',False)
+  payload=self.root/'protected-payload';manifest=deploy.build_deployment(plan,route,artifacts,payload)
+  original=next(f for f in manifest['files'] if f['kind']=='xml-original' and retained['originalId'] in f['originalIds'])
+  self.assertEqual((payload/original['payloadPath']).read_bytes(),protected.read_bytes())
  def test_new_asset_registration_is_required_not_old_family_name(self):
   result=self.verify('sans-serif SyntheticOEM.ttf')
   self.assertEqual(result['grade'],'WARN',result)

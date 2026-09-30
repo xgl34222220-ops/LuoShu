@@ -12,6 +12,16 @@ def selection(i):
  return {'ordinal':i,'nodeDigest':digest(ET.tostring(node,encoding='unicode')),
          'role':'ui-sans','renderContract':copy.deepcopy(CONTRACT)}
 class Tests(unittest.TestCase):
+ def test_production_capture_closes_selected_families(self):
+  import tempfile
+  from pathlib import Path
+  from build_production_case import required_stock_paths
+  with tempfile.TemporaryDirectory() as d:
+   xml=Path(d)/'font_fallback.xml'
+   xml.write_text('<familyset><family name="sans-serif"><font>Ui.ttf</font><font style="italic">UiItalic.ttf</font></family><family lang="zh-Hans"><font index="2">Cjk.ttc</font><font index="2" fallbackFor="serif">Serif.ttc</font></family><family><font>Emoji.ttf</font></family></familyset>')
+   baseline={'actualDefaultFonts':{'A':[{'file':'/system/fonts/Ui.ttf'}],'中':[{'file':'/system/fonts/Cjk.ttc'}]}}
+   self.assertEqual(required_stock_paths({'/system/etc/font_fallback.xml':xml},baseline),
+    ['/system/fonts/Cjk.ttc','/system/fonts/Serif.ttc','/system/fonts/Ui.ttf','/system/fonts/UiItalic.ttf'])
  def test_groups_before_render_preserves_protected(self):
   p=plan(XML,SHA,[selection(0),selection(1)]);calls=[]
   compile_groups(p,lambda g:calls.append(g['id']) or b'synthetic-render-result')

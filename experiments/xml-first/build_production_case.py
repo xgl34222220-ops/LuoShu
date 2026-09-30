@@ -19,14 +19,36 @@ import universal_font_deployment as deployment
 import universal_font_compiler_test as fixture
 
 
+def required_stock_paths(xml_paths, baseline):
+    """Capture complete direct family membership, including protected siblings."""
+    selected={Path(baseline['actualDefaultFonts'][c][0]['file']).name for c in ['A','中']}
+    required=set()
+    for actual in xml_paths.values():
+        tree=legacy._parse_xml(Path(actual));root=tree.getroot()
+        for family in root.iter():
+            if legacy._local(family.tag)!='family':continue
+            fonts=[f for f in family if legacy._local(f.tag)=='font']
+            if not any((f.text or '').strip() in selected for f in fonts):continue
+            for font in fonts:
+                name=(font.text or '').strip()
+                if not legacy.SAFE_FILE_RE.fullmatch(name):raise RuntimeError('unsupported SDK family filename: '+name)
+                required.add('/system/fonts/'+name)
+    return sorted(required)
+
+
 def build(work, xml_paths, stock_paths, baseline, source, generation):
     work=Path(work);work.mkdir(parents=True,exist_ok=True);started=time.monotonic()
     build_key=baseline['fingerprint'];slots={};roles={}
     # The rendered baseline identifies the exact default physical face. Other
     # captured XML indices in the same immutable collection remain distinct.
-    for role,sample in [('ui-sans','A'),('cjk','中')]:
-        observed=baseline['actualDefaultFonts'][sample][0]
-        logical=observed['file'];face=observed['ttcIndex'];stock=Path(stock_paths[logical])
+    selected={baseline['actualDefaultFonts'][sample][0]['file']:(role,baseline['actualDefaultFonts'][sample][0]['ttcIndex'])
+              for role,sample in [('ui-sans','A'),('cjk','中')]}
+    for logical in required_stock_paths(xml_paths,baseline):
+        role,face=selected.get(logical,('special-fallback',None));stock=Path(stock_paths[logical])
+        if face is None:
+            face=next(node['index'] for xml,actual in xml_paths.items()
+                for node in legacy._document_nodes(xml,legacy._parse_xml(Path(actual)))
+                if node['declared']==Path(logical).name)
         slot=fixture.slot_from_stock(logical,stock,family='',source_xml=None,declared=Path(logical).name,face_index=face)
         refs=[];names=set()
         for xml_logical,actual in xml_paths.items():

@@ -77,7 +77,7 @@ class AliasPipelineTests(unittest.TestCase):
         self.assertEqual(result['status'],'blocked');self.assertIn('digest mismatch',result['reason']);self.assertEqual(render.call_count,0)
     def test_capture_revision_requires_trusted_rescan_once(self):
         target=self.capture();metrics={'head':{},'coverage':{'synthetic':True}}
-        inventory_data={'metricsRevision':scanner.METRICS_REVISION,'slots':{'x':{'metrics':metrics,'stockIdentity':target['targetContract']['stockIdentity'],'stockGeometryProfile':{}}},'mainSlot':{'metrics':metrics}}
+        inventory_data={'xmlMemberSnapshotRevision':1,'xmlMemberSnapshots':{},'metricsRevision':scanner.METRICS_REVISION,'slots':{'x':{'metrics':metrics,'stockIdentity':target['targetContract']['stockIdentity'],'stockGeometryProfile':{}}},'mainSlot':{'metrics':metrics}}
         with patch.object(scanner.base,'valid_coverage',return_value=True):
             self.assertTrue(scanner._has_current_metrics(inventory_data))
             inventory_data['slots']['x']['stockIdentity'].pop('captureRevision')

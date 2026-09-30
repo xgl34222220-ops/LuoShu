@@ -343,6 +343,29 @@ def build_topology(
             current["physicalCandidate"] = raw.get("candidate") is True
             current["physicalReason"] = str(raw.get("reason") or "")
 
+    # XML family closure may copy protected members unchanged. Their sealed
+    # identities come from the trusted scan, never the live candidate probe.
+    for logical, faces in (inventory.get("xmlMemberSnapshots") or {}).items():
+        if not isinstance(faces, dict):
+            continue
+        current = slots.setdefault(logical, {
+            "slotName": Path(logical).name, "path": logical,
+            "partition": _partition_for_path(logical, slots),
+            "source": "xml-member-snapshot", "families": [],
+        })
+        current["xmlMemberSnapshots"] = copy.deepcopy(faces)
+        identities = {str(face): copy.deepcopy(entry["stockIdentity"])
+                      for face, entry in faces.items()
+                      if isinstance(entry, dict) and entry.get("state") == "ready"
+                      and isinstance(entry.get("stockIdentity"), dict)
+                      and (entry["stockIdentity"].get("provenance") or {}).get("verified") is True}
+        if identities:
+            current["stockIdentities"] = identities
+        if len(faces) == 1 and len(identities) == 1 and "stockIdentity" not in current:
+            identity = next(iter(identities.values()))
+            current["stockIdentity"] = copy.deepcopy(identity)
+            current["faceIndex"] = identity["faceIndex"]
+
     if not slots:
         raise TopologyError("原厂字体清单槽位为空")
 
@@ -510,11 +533,14 @@ def validate_inventory_current(inventory: dict[str, Any]) -> None:
     # A cached buildKey cannot establish the currently running firmware. This
     # uses the same Android property rule as capture, without reading font bytes.
     from font_inventory import current_build_key
+    from font_inventory_scan import has_xml_member_snapshots
     current, _fingerprint, _display = current_build_key(None)
     if not current or current == "unknown":
         raise CurrentBuildUnavailable("无法读取当前系统构建身份，保留原厂缓存")
     if inventory.get("buildKey") != current:
         raise TopologyError("系统构建已变化，需要可信重扫原厂字体")
+    if not has_xml_member_snapshots(inventory):
+        raise TopologyError("XML 家族成员原厂身份缺失，需要可信重扫")
     if inventory.get("scannerRevision") != 6:
         raise TopologyError("字体扫描版本已过期")
     if not all(isinstance(slot.get("stockIdentity"), dict)

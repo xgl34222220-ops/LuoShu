@@ -671,6 +671,13 @@ def route_target(target: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]
         "style": style,
         "axes": copy.deepcopy(node.get("axes") or []),
     })
+    # Protected XML siblings may have no legacy replaceable slot. The scanner
+    # seals their exact faces separately; use that evidence only when the old
+    # physical-face identity is absent, preserving existing metric contracts.
+    if not isinstance(contract.get("stockIdentity"), dict):
+        identity = (contract.get("stockIdentities") or {}).get(str(contract["faceIndex"]))
+        if isinstance(identity, dict):
+            contract["stockIdentity"] = copy.deepcopy(identity)
     slot = {
         "slotName": target.get("slotName"),
         "metrics": contract.get("metrics", {}),
@@ -724,6 +731,8 @@ def _plan_slot(
         "runtimeEvidence": dict(slot.get("runtimeEvidence") or {}) if isinstance(slot.get("runtimeEvidence"), dict) else {},
         "legacyReplaceable": slot.get("legacyReplaceable") if isinstance(slot.get("legacyReplaceable"), bool) else None,
         "targetContract": {
+            **({"stockIdentities": copy.deepcopy(slot["stockIdentities"])}
+               if isinstance(slot.get("stockIdentities"), dict) else {}),
             **({"stockGeometryProfile": copy.deepcopy(slot["stockGeometryProfile"])}
                if isinstance(slot.get("stockGeometryProfile"), dict) else {}),
             **({"stockIdentity": copy.deepcopy(slot["stockIdentity"])}

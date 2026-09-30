@@ -564,6 +564,9 @@ class RoutingTest(unittest.TestCase):
             path = self.root / 'stock/system' / Path(logical).name
             slot['stockIdentity'] = synthetic_identity(logical, path, 0, 'routing-test')
             slot['stockGeometryProfile'] = capture_geometry_profile(path, 0, slot['stockIdentity'])
+        self.assertFalse(scanner._has_current_metrics(previous), 'protected XML member evidence is also required')
+        previous.update(xmlGraph={'refs': []}, xmlMemberSnapshotRevision=scanner.XML_MEMBER_SNAPSHOT_REVISION,
+                        xmlMemberSnapshots={})
         self.assertTrue(scanner._has_current_metrics(previous))
 
     def test_host_freetype_primary_han_missing_and_fallback_han_renderable(self):
