@@ -19,3 +19,9 @@ explicitly authorized one-time push marker can grant only the current runner
 user an ACL on its disposable VM; later pushes do not inherit that approval. It installs a separate probe only on its disposable CI emulator.
 No test APK is delivered to the user. Evidence includes JSON and original
 synthetic-glyph screenshots, even when a capability gate is blocked.
+
+The pixel oracle is built independently from explicit expected aligned glyph
+coordinates and advances. Raw donors remain separate identity discriminators;
+they are not expected to match after the compositor scales Latin/digits to its
+826-unit UI top. Host generation checks the complete expected coordinates before
+Android performs the pixel comparison.

@@ -33,6 +33,32 @@ with TTFont(OUT/'composite.ttf') as f:
  for cp,expected in [(ord('A'),3),(ord('1'),5),(ord('中'),6)]:
   glyph=f['glyf'][f.getBestCmap()[cp]];assert len(glyph.getCoordinates(f['glyf'])[0])==expected
  assert 0x03a9 not in f.getBestCmap() and 0x1f600 not in f.getBestCmap()
+# Independent expected geometry for this fixed fixture: the compositor's
+# documented Latin/digit UI top is 826, so 700-unit donors scale by 1.18.
+# Horizontal origin is the scaled 40-unit LSB (47 after integer rounding).
+# Do not copy glyphs or metrics from the composite under test.
+expected={
+ 'latin':(65,[(47,0),(637,0),(342,826)],(732,47)),
+ 'digit':(49,[(47,0),(637,0),(637,614),(342,826),(47,614)],(732,47)),
+ 'cjk':(0x4e2d,shapes['cjk'],(620,40))}
+for role,(cp,outline,metrics) in expected.items():
+ path=OUT/('expected-'+role+'.ttf')
+ fixture.make_font(path,family='LuoShuExpected'+role)
+ with TTFont(path) as reference:
+  name=reference.getBestCmap()[cp];pen=TTGlyphPen(None);pen.moveTo(outline[0])
+  for point in outline[1:]:pen.lineTo(point)
+  pen.closePath();reference['glyf'][name]=pen.glyph();reference['hmtx'].metrics[name]=metrics
+  # The compositor fixes the family line box and disables the xMin=LSB hint.
+  reference['head'].flags=1
+  reference['hhea'].ascent=928;reference['hhea'].descent=-244
+  os2=reference['OS/2'];os2.version=4;os2.fsSelection=128
+  os2.sTypoAscender=928;os2.sTypoDescender=-244
+  os2.usWinAscent=928;os2.usWinDescent=244;os2.sxHeight=826;os2.sCapHeight=826
+  reference.save(path)
+ with TTFont(OUT/'composite.ttf') as actual:
+  name=actual.getBestCmap()[cp]
+  assert list(actual['glyf'][name].getCoordinates(actual['glyf'])[0])==outline
+  assert actual['hmtx'].metrics[name]==metrics
 report={'postScriptName':TTFont(OUT/'composite.ttf')['name'].getDebugName(6),'synthetic':True,'static':True,'compositor':result,'sha256':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in OUT.glob('*.ttf')}}
 (OUT/'fixture.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
 print(json.dumps({'status':'pass','static':True,'donorPointCounts':[3,5,6],'bytes':(OUT/'composite.ttf').stat().st_size}))

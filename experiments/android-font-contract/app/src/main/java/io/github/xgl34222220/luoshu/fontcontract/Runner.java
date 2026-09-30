@@ -97,10 +97,10 @@ public final class Runner extends Instrumentation {
             JSONObject fixture;try(InputStream in=context.getAssets().open("fixture.json")){fixture=new JSONObject(new String(in.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8));}
             File composite=asset("composite.ttf"),latin=asset("latin.ttf"),digit=asset("digit.ttf"),cjk=asset("cjk.ttf");
             Typeface mixed=face(composite,400,true);JSONObject renders=new JSONObject();
-            String[] text={"A","1","中"};File[] donor={latin,digit,cjk};
+            String[] text={"A","1","中"};File[] donor={asset("expected-latin.ttf"),asset("expected-digit.ttf"),asset("expected-cjk.ttf")};
             for(int i=0;i<text.length;i++){
                 String mixedHash=draw(mixed,text[i],"role-"+i+".png");
-                require(mixedHash.equals(draw(face(donor[i],400,false),text[i],null)),"donor identity mismatch "+text[i]);
+                require(mixedHash.equals(draw(face(donor[i],400,false),text[i],null)),"aligned donor identity mismatch "+text[i]);
                 renders.put(text[i],mixedHash);
             }
             require(!draw(mixed,"A",null).equals(draw(face(cjk,400,false),"A",null)),"identity check is not discriminating");
