@@ -186,6 +186,7 @@ _ud_stage_prepared() {
     if [ "${LUOSHU_SWITCH_ACTIVE_LABEL:-}" = mix ]; then
         _uds_request=$(_ud_value "$CONFIG_DIR/mix-stage-next.conf" requestId)
         [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] && [ "$_uds_request" = "$LUOSHU_MIX_REQUEST_ID" ] || return 1
+        [ "$(_ud_value "$CONFIG_DIR/mix-stage-next.conf" state)" != cancelled ] || return 1
         _uds_label=mix
         # Fixed compositor may already have written its configured selection.
         _uds_previous=$(_ud_value "$CONFIG_DIR/mix-stage-next.conf" previousFont)
@@ -203,7 +204,7 @@ _ud_stage_prepared() {
         return 1
     }
 
-    if [ "$_uds_label" = mix ] && [ "$(_ud_value "$CONFIG_DIR/mix-stage-next.conf" requestId)" != "$LUOSHU_MIX_REQUEST_ID" ]; then
+    if [ "$_uds_label" = mix ] && { [ "$(_ud_value "$CONFIG_DIR/mix-stage-next.conf" requestId)" != "$LUOSHU_MIX_REQUEST_ID" ] || [ "$(_ud_value "$CONFIG_DIR/mix-stage-next.conf" state)" = cancelled ]; }; then
         rm -rf "$_uds_stage" 2>/dev/null || true
         return 1
     fi

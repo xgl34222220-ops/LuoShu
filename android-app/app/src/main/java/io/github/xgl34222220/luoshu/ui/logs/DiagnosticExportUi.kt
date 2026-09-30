@@ -100,6 +100,19 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
             printf 'time=%s\n' "${'$'}(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)"
             printf 'moduleVersion=%s\n' "${'$'}{version:-unknown}"
             printf 'moduleVersionCode=%s\n' "${'$'}{versionCode:-0}"
+            printf 'testBuildId=%s\n' "${'$'}(read_value "${'$'}MOD/module.prop" testBuildId)"
+            for item in axes_task.conf mix_task.conf universal-font-cutover.conf universal-mixed-progress.conf mix-finalize-state.conf; do
+                printf '[%s]\n' "${'$'}item"
+                for field in state percent reason updated; do
+                    printf '%s=%s\n' "${'$'}field" "${'$'}(read_value "${'$'}CFG/${'$'}item" "${'$'}field")"
+                done
+            done
+            for item in axes_worker.pid mix_worker.pid auto_multiweight_worker.pid; do
+                pid="${'$'}(sed -n '1{s/[^0-9].*${'$'}//;p;}' "${'$'}CFG/${'$'}item" 2>/dev/null)"
+                alive=false
+                case "${'$'}pid" in ''|*[!0-9]*) ;; *) kill -0 "${'$'}pid" 2>/dev/null && alive=true ;; esac
+                printf '%s.alive=%s\n' "${'$'}item" "${'$'}alive"
+            done
             printf 'activeFontType=%s\n' "${'$'}activeType"
             printf 'inventory=%s\n' "${'$'}inventory"
             printf 'engineState=%s\n' "${'$'}{engine:-missing}"

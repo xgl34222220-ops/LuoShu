@@ -127,6 +127,7 @@ role_weight() {
 write_task() {
     _tmp="$TASK_FILE.tmp.$$"
     {
+        printf 'requestId=%s\n' "${LUOSHU_MIX_REQUEST_ID:-}"
         printf 'task=%s\n' "$1"
         printf 'state=%s\n' "$2"
         printf 'message=%s\n' "$3"
@@ -261,6 +262,33 @@ rewrite_public_config() {
     chmod 0644 "$MIX_CONF" "$AXES_CONF" 2>/dev/null || true
 }
 
+cancel_nested_mix() {
+    _cnm_child="$1"
+    # A fully committed matching generation wins a completion/deadline race.
+    # Never report failure then silently activate a successfully staged payload.
+    for _cnm_next in "$CONFIG_DIR/universal-font-next.conf" "$CONFIG_DIR/font-payload-next.conf"; do
+        if [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] && [ ! -f "$CONFIG_DIR/mix-cancelled-requests/$LUOSHU_MIX_REQUEST_ID" ] && [ "$(read_value "$_cnm_next" requestId)" = "$LUOSHU_MIX_REQUEST_ID" ] && \
+           [ "$(read_value "$_cnm_next" state)" = prepared ] && [ -d "${LUOSHU_REAL_MODDIR:-$MODDIR}/.luoshu-payload-next" ]; then
+            return 2
+        fi
+    done
+    # Revoke only this request before terminating descendants; a late worker
+    # must not commit after its user-visible controller reports failure.
+    _cnm_state="$CONFIG_DIR/mix-stage-next.conf"
+    if [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] && [ "$(read_value "$_cnm_state" requestId)" = "$LUOSHU_MIX_REQUEST_ID" ]; then
+        case "$LUOSHU_MIX_REQUEST_ID" in
+            *[!A-Za-z0-9._-]*) ;;
+            *) mkdir -p "$CONFIG_DIR/mix-cancelled-requests" 2>/dev/null && \
+               printf 'cancelled\n' > "$CONFIG_DIR/mix-cancelled-requests/$LUOSHU_MIX_REQUEST_ID" ;;
+        esac
+        sed '/^state=/d' "$_cnm_state" > "$_cnm_state.cancel.$$" && \
+            printf 'state=cancelled\n' >> "$_cnm_state.cancel.$$" && mv -f "$_cnm_state.cancel.$$" "$_cnm_state"
+    fi
+    if luoshu_task_pid_alive "$CONFIG_DIR/mix_worker.pid" "$_cnm_child"; then
+        luoshu_stop_task_pid "$CONFIG_DIR/mix_worker.pid"
+    fi
+}
+
 worker() {
     trap '' HUP
     _wanted="$1"
@@ -332,7 +360,10 @@ worker() {
 
     update_task "$_wanted" running '完整复合字体正在后台生成' 36 "$_child" ''
     _loops=0
-    while [ "$_loops" -lt 360 ]; do
+    _child_owned=false
+    _wait_loops="${LUOSHU_MIX_WAIT_LOOPS:-360}"
+    case "$_wait_loops" in ''|*[!0-9]*) _wait_loops=360 ;; esac
+    while [ "$_loops" -lt "$_wait_loops" ]; do
         _base_task=$(read_value "$BASE_TASK_FILE" task)
         _base_state=$(read_value "$BASE_TASK_FILE" state)
         if [ "$_base_task" = "$_child" ]; then
@@ -342,11 +373,43 @@ worker() {
                 _base_percent=$(sed -n 's/^.*"percent":\([0-9][0-9]*\).*$/\1/p' "$PROGRESS_FILE" 2>/dev/null | head -n1)
             fi
             case "$_base_percent" in ''|*[!0-9]*) _base_percent=0 ;; esac
-            _mapped=$((36 + (_base_percent * 64 / 100)))
+            _mapped=$((36 + (_base_percent * 40 / 100)))
             [ "$_mapped" -le 99 ] || _mapped=99
             [ -n "$_base_message" ] || _base_message='完整复合字体正在后台生成'
+            _phase="$CONFIG_DIR/universal-mixed-progress.conf"
+            if [ "$_base_state" = running ] && [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] && [ "$(read_value "$_phase" requestId)" = "$LUOSHU_MIX_REQUEST_ID" ]; then
+                _phase_percent=$(read_value "$_phase" percent)
+                case "$_phase_percent" in ''|*[!0-9]*) ;; *) _mapped="$_phase_percent" ;; esac
+                _phase_message=$(read_value "$_phase" message)
+                [ -z "$_phase_message" ] || _base_message="$_phase_message"
+            fi
+
+            # The controller being alive does not prove its nested compositor
+            # survived. New workers have task/boot ownership sidecars; retain
+            # compatibility with older workers that did not write them.
+            [ "$(cat "$CONFIG_DIR/mix_worker.pid.task" 2>/dev/null)" != "$_child" ] || _child_owned=true
+            _cleanup_child=$(sed -n 's/^.*"task":[[:space:]]*"\([^"]*\)".*$/\1/p' "$CONFIG_DIR/mix_worker.pid.cleanup.json" 2>/dev/null | head -n1)
+            if [ "$_base_state" = running ] && { [ "$_child_owned" = true ] || [ "$_cleanup_child" = "$_child" ]; } && \
+               ! luoshu_task_pid_alive "$CONFIG_DIR/mix_worker.pid" "$_child"; then
+                cancel_nested_mix "$_child"
+                if [ "$?" -eq 2 ]; then
+                    update_task "$_wanted" success '复合字体负载已提交，完整重启后生效' 100 "$_child" "$(date +%s)"
+                    rewrite_public_config
+                    rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 0
+                fi
+                update_task "$_wanted" failed '完整复合字体子进程已退出，已停止等待；请查看日志中的退出原因' 100 "$_child" "$(date +%s)"
+                rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
+            fi
             case "$_base_state" in
                 success)
+                    _finalize_router="${LUOSHU_REAL_MODDIR:-}/common/legacy_v14_4/mix_router.sh"
+                    if [ -n "${LUOSHU_REAL_MODDIR:-}" ] && [ -f "$_finalize_router" ]; then
+                        update_task "$_wanted" running '正在提交下一启动字体负载' 97 "$_child" ''
+                        if ! MODDIR="$LUOSHU_REAL_MODDIR" sh "$_finalize_router" finalize >> "$LOG_FILE" 2>&1; then
+                            update_task "$_wanted" failed '复合字体已生成，但下一启动负载提交失败' 100 "$_child" "$(date +%s)"
+                            rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 1
+                        fi
+                    fi
                     update_task "$_wanted" success "$_base_message" 100 "$_child" "$(date +%s)"
                     rewrite_public_config
                     rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 0
@@ -362,7 +425,13 @@ worker() {
         _loops=$((_loops + 1))
     done
 
-    update_task "$_wanted" failed '完整复合字体生成超时' 100 "$_child" "$(date +%s)"
+    cancel_nested_mix "$_child"
+    if [ "$?" -eq 2 ]; then
+        update_task "$_wanted" success '复合字体负载已提交，完整重启后生效' 100 "$_child" "$(date +%s)"
+        rewrite_public_config
+        rm -rf "$_root"; clear_worker_pid "$_wanted"; exit 0
+    fi
+    update_task "$_wanted" failed '完整复合字体生成超时，子进程已停止' 100 "$_child" "$(date +%s)"
     rm -rf "$_root"; clear_worker_pid "$_wanted"
     exit 1
 }
@@ -450,7 +519,7 @@ start_mix() {
     write_task "$_request" queued '任务已进入后台队列' "$_cjk" "$_latin" "$_digit" \
         "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_root" '' "$(date +%s)" '' 1
     if type luoshu_start_detached >/dev/null 2>&1; then
-        luoshu_start_detached "$WORKER_PID" "$_request" "$LOG_FILE" sh "$0" worker "$_request" || {
+        LUOSHU_TASK_TIMEOUT_SECONDS=660 luoshu_start_detached "$WORKER_PID" "$_request" "$LOG_FILE" sh "$0" worker "$_request" || {
             update_task "$_request" failed '无法启动独立后台任务' 100 '' "$(date +%s)"
             printf '{"status":"error","message":"无法启动独立后台任务"}\n'
             return

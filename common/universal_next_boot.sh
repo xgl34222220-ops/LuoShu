@@ -93,6 +93,19 @@ universal_font_next_boot_activate() {
         _ufnb_previous_font=$(head -n1 "$_ufnb_cfg/active_font.conf" 2>/dev/null | tr -d '\r\n')
         [ -n "$_ufnb_previous_font" ] || _ufnb_previous_font=default
     }
+    # Cancellation can race the last foreground stage rename. Its durable
+    # request tombstone remains authoritative even if a new selection replaced
+    # mix-stage-next.conf before reboot; never activate that cancelled payload.
+    _ufnb_request=$(_ufnb_value "$_ufnb_state" requestId)
+    case "$_ufnb_request" in
+        ''|*[!A-Za-z0-9._-]*) ;;
+        *)
+            if [ -f "$_ufnb_cfg/mix-cancelled-requests/$_ufnb_request" ]; then
+                _ufnb_discard_invalid_next "$_ufnb_state" "$_ufnb_next" composite-request-cancelled "$_ufnb_previous_font"
+                return 1
+            fi
+            ;;
+    esac
     if [ -z "$_ufnb_previous_mode" ]; then
         if [ -s "$_ufnb_cfg/universal-font-runtime.conf" ]; then
             _ufnb_previous_mode=universal

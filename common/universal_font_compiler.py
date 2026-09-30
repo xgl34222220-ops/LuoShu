@@ -431,7 +431,8 @@ def _stock_geometry_font(
     weight: int,
     axes: dict[str, float],
 ) -> tuple[TTFont, dict[str, float]]:
-    original = _open_face(stock, face_index)
+    # Geometry probes are read-only; keep unprobed CJK glyphs compressed.
+    original = _open_face(stock, face_index, lazy=True)
     if "fvar" not in original:
         return original, {}
     known = {str(axis.axisTag): axis for axis in original["fvar"].axes}
@@ -1198,7 +1199,7 @@ def _validate_output_face(
     *,
     variable_natural: bool = False,
 ) -> dict[str, Any]:
-    raw = _open_face(output, face_index)
+    raw = _open_face(output, face_index, lazy=True)
     instance: TTFont | None = None
     try:
         instance = _instance_for_validation(
@@ -1677,6 +1678,45 @@ def _manifest_id(
     return f"sha256:{_canonical_hash(_manifest_semantic(font_plan_id, route_id, artifacts, deferred))}"
 
 
+def _mixed_preflight(units: list[dict[str, Any]], stock_paths: dict[str, Path], allow_live_stock: bool) -> None:
+    """Reject provably impossible atomic mixed deployments before touching fonts."""
+    for unit in units:
+        target, artifact = unit["target"], unit["artifact"]
+        path = str(target.get("path") or "")
+        source = target.get("source") or {}
+        contract = target.get("targetContract") or {}
+        if target.get("status") == "blocked":
+            raise CompilerError(f"mixed-preflight: blocked target: {path}")
+        risks = set(target.get("risks") or []) & {
+            "static-weight-fallback", "italic-style-mismatch", "source-weight-axis-out-of-range"}
+        if risks:
+            raise CompilerError(f"mixed-preflight: {','.join(sorted(risks))}: {path}")
+        if (contract.get("variable") is True and source.get("variable") is not True
+                and unit.get("deploymentKinds") == ["physical-slot"]
+                and target.get("role") not in SPECIALIZED_ROLES
+                and not _axis_values(artifact.get("requiredAxes"))):
+            # Actual collection magic, not a possibly abbreviated topology
+            # format label, determines _choose_mode's stock-shell exception.
+            stock = _resolve_stock(path, stock_paths, allow_live_stock)
+            if _magic(stock) != COLLECTION_MAGIC:
+                raise CompilerError(f"mixed-preflight: static source cannot preserve physical variable target: {path}")
+
+
+def _mixed_compile_progress(index: int, total: int) -> None:
+    raw = os.environ.get("LUOSHU_SWITCH_PROGRESS_FILE", "")
+    request = os.environ.get("LUOSHU_MIX_REQUEST_ID", "")
+    if not raw or not request or os.environ.get("LUOSHU_UNIVERSAL_MIX_STRICT") != "1":
+        return
+    path = Path(raw)
+    temporary = path.with_name(path.name + f".tmp.{os.getpid()}")
+    try:
+        temporary.write_text(f"requestId={request}\nstate=running\npercent={82 + index * 9 // max(total, 1)}\n"
+                             f"message=通用引擎正在编译字体槽 {index + 1}/{total}\nupdated={int(time.time())}\n")
+        os.replace(temporary, path)
+    except OSError:
+        temporary.unlink(missing_ok=True)
+
+
 def compile_all(
     font_plan: dict[str, Any],
     route_plan: dict[str, Any],
@@ -1693,10 +1733,17 @@ def compile_all(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     units = _collect_units(font_plan, route_plan)
-    artifacts = [
-        _compile_unit(unit, stock_paths, output_dir, allow_live_stock)
-        for unit in units
-    ]
+    if os.environ.get("LUOSHU_UNIVERSAL_MIX_STRICT") == "1":
+        for path, target in (font_plan.get("targets") or {}).items():
+            if target.get("action") == "blocked" or target.get("status") == "blocked":
+                raise CompilerError(f"mixed-preflight: blocked plan target: {path}")
+        if route_plan.get("summary", {}).get("routingComplete") is not True:
+            raise CompilerError("mixed-preflight: incomplete atomic routing")
+        _mixed_preflight(units, stock_paths, allow_live_stock)
+    artifacts = []
+    for index, unit in enumerate(units):
+        _mixed_compile_progress(index, len(units))
+        artifacts.append(_compile_unit(unit, stock_paths, output_dir, allow_live_stock))
     ready = sum(item["status"] == "ready" for item in artifacts)
     blocked = sum(item["status"] == "blocked" for item in artifacts)
     deferred = list(route_plan.get("deferredDynamicTargets") or [])

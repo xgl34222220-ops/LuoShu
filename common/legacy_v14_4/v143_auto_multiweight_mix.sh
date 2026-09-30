@@ -128,6 +128,7 @@ weight_role() {
 write_task() {
     _tmp="$TASK_FILE.tmp.$$"
     {
+        printf 'requestId=%s\n' "${LUOSHU_MIX_REQUEST_ID:-}"
         printf 'task=%s\nstate=%s\nmessage=%s\n' "$1" "$2" "$3"
         printf 'cjk=%s\nlatin=%s\ndigit=%s\n' "$4" "$5" "$6"
         printf 'cjkAxes=%s\nlatinAxes=%s\ndigitAxes=%s\n' "$7" "$8" "$9"
@@ -377,7 +378,7 @@ worker() {
         rm -rf "$_dir" 2>/dev/null || true
     done
 
-    update_task "$_wanted" running '正在应用自动多字重字体族' 88 ''
+    update_task "$_wanted" running '正在检查自动多字重字体族' 78 ''
     _universal_bridge="${LUOSHU_REAL_MODDIR:-$MODDIR}/common/universal_mixed_font.sh"
     _result=''
     if [ -f "$_universal_bridge" ]; then
@@ -469,7 +470,7 @@ start_mix() {
         "$_cjk_axes" "$_latin_axes" "$_digit_axes" "$_cjk_mode" "$_latin_mode" "$_digit_mode" \
         "$_root" '' "$(date +%s)" '' 1
     if type luoshu_start_detached >/dev/null 2>&1; then
-        luoshu_start_detached "$WORKER_PID" "$_task" "$LOG_FILE" sh "$0" worker "$_task" || {
+        LUOSHU_TASK_TIMEOUT_SECONDS=660 luoshu_start_detached "$WORKER_PID" "$_task" "$LOG_FILE" sh "$0" worker "$_task" || {
             update_task "$_task" failed '无法启动独立后台任务' 100 "$(date +%s)"
             printf '{"status":"error","message":"无法启动独立后台任务"}\n'
             return

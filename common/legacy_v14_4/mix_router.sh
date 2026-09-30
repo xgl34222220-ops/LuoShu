@@ -105,10 +105,21 @@ mix_reconcile_fast() (
     # Preserve that startup window, including a worker already marked running.
     _mrf_age=$((_mrf_now - _mrf_started))
     [ "$_mrf_age" -ge 20 ] 2>/dev/null || return 0
+    _mrf_terminal=failed
+    _mrf_message='字体组合后台进程已退出，任务已自动释放，请查看日志后重新应用'
+    _mrf_request=$(read_value "$_mrf_file" requestId)
+    if [ -n "$_mrf_request" ] && [ ! -f "$REALMOD/config/mix-cancelled-requests/$_mrf_request" ] && [ -d "$NEXT_PAYLOAD" ]; then
+        for _mrf_next in "$REALMOD/config/universal-font-next.conf" "$NEXT_STATE"; do
+            if [ "$(read_value "$_mrf_next" requestId)" = "$_mrf_request" ] && [ "$(read_value "$_mrf_next" state)" = prepared ]; then
+                _mrf_terminal=success
+                _mrf_message='复合字体负载已提交，完整重启后生效'
+            fi
+        done
+    fi
     _mrf_tmp="${_mrf_file}.reconcile.$$"
-    printf '%s\n' "$_mrf_snapshot" | awk -F '=' -v now="$_mrf_now" '
+    printf '%s\n' "$_mrf_snapshot" | awk -F '=' -v now="$_mrf_now" -v terminal="$_mrf_terminal" -v message="$_mrf_message" '
         $1 != "state" && $1 != "message" && $1 != "percent" && $1 != "finished" {print}
-        END {print "state=failed"; print "message=字体组合后台进程已退出，任务已自动释放，请重新应用";
+        END {print "state=" terminal; print "message=" message;
              print "percent=100"; print "finished=" now}' > "$_mrf_tmp" || return 0
     # A new request or worker may have arrived while the lightweight checks ran.
     # Do not publish a stale failure over its task record or erase its sidecars.
@@ -159,6 +170,17 @@ mix_status_json_fast() {
     _message=$(read_value "$_task_file" message)
     _percent=$(read_value "$_task_file" percent)
     case "$_percent" in ''|*[!0-9]*) _percent=0 ;; esac
+    _phase="$REALMOD/config/universal-mixed-progress.conf"
+    _phase_request=$(read_value "$_phase" requestId)
+    _task_request=$(read_value "$_task_file" requestId)
+    [ -n "$_task_request" ] || _task_request=$(read_value "$MIX_STAGE_STATE" requestId)
+    if [ "$_state" = running ] && [ "$_percent" -lt 97 ] && [ -n "$_phase_request" ] && \
+       [ "$_phase_request" = "$_task_request" ] && [ "$_phase_request" = "$(read_value "$MIX_STAGE_STATE" requestId)" ]; then
+        _phase_percent=$(read_value "$_phase" percent)
+        case "$_phase_percent" in ''|*[!0-9]*) ;; *) _percent="$_phase_percent" ;; esac
+        _phase_message=$(read_value "$_phase" message)
+        [ -z "$_phase_message" ] || _message="$_phase_message"
+    fi
 
     if [ "$_state" = success ]; then
         _next_font=$(read_value "$NEXT_STATE" font)
@@ -377,6 +399,7 @@ write_next_state() {
 }
 
 commit_mix_stage_if_needed() {
+    [ "$(read_value "$MIX_STAGE_STATE" state)" != cancelled ] || return 1
     if universal_mix_pending; then
         # Leave MIX_STAGE_STATE for identity checks on subsequent finalizers/status.
         rm -rf "$MIX_STAGE" 2>/dev/null || true
@@ -517,6 +540,9 @@ setup_runtime() {
     # handoff helpers. Without them Android can keep the public task at 34% until
     # the complete composite build exits.
     force_link "$REALMOD/common/background_task.sh" "$RUNTIME/common/background_task.sh" || return 1
+    for _scope_file in task_scope.sh task_scope.py; do
+        [ ! -f "$REALMOD/common/$_scope_file" ] || force_link "$REALMOD/common/$_scope_file" "$RUNTIME/common/$_scope_file" || return 1
+    done
     force_link "$REALMOD/common/mix_task_handoff.sh" "$RUNTIME/common/mix_task_handoff.sh" || return 1
     force_link "$REALMOD/common/python" "$RUNTIME/common/python" || return 1
     force_link "$REALMOD/common/font_manager.sh" "$RUNTIME/common/font_manager.sh" || return 1

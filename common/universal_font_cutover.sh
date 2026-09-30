@@ -33,6 +33,10 @@ _uc_progress() {
     _ucp_percent="$1"; shift
     [ -n "$PROGRESS_FILE" ] || return 0
     {
+        if [ "${UC_COMPOSITE_REQUEST:-false}" = true ]; then
+            printf 'requestId=%s\nstate=running\nupdated=%s\n' "$LUOSHU_MIX_REQUEST_ID" "$(date +%s)"
+            _ucp_percent=$((80 + _ucp_percent * 16 / 100))
+        fi
         printf 'percent=%s\n' "$_ucp_percent"
         printf 'message=%s\n' "$*"
     } > "$PROGRESS_FILE.tmp.$$" 2>/dev/null && mv -f "$PROGRESS_FILE.tmp.$$" "$PROGRESS_FILE" 2>/dev/null || true
@@ -167,12 +171,22 @@ _uc_switch() {
     _uc_write_state preparing "$_uc_font" universal preparing
     _uc_progress 8 "通用引擎正在分析设备字体拓扑"
     _uc_log "universal prepare start font=$_uc_font"
-    _uc_prepare_output=$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
-        LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" sh "$DEPLOYMENT" prepare "$_uc_font" 2>&1)
-    _uc_prepare_rc=$?
+    if [ "${UC_COMPOSITE_REQUEST:-false}" = true ] && [ -f "$MODDIR/common/task_scope.py" ]; then
+        _uc_prepare_output=$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
+            LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" _uc_python "$MODDIR/common/task_scope.py" \
+            --task "$LUOSHU_MIX_REQUEST_ID" --timeout "${LUOSHU_MIX_PREPARE_TIMEOUT:-180}" \
+            -- sh "$DEPLOYMENT" prepare "$_uc_font" 2>&1)
+        _uc_prepare_rc=$?
+    else
+        _uc_prepare_output=$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
+            LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" sh "$DEPLOYMENT" prepare "$_uc_font" 2>&1)
+        _uc_prepare_rc=$?
+    fi
     if [ "$_uc_prepare_rc" -ne 0 ]; then
         _uc_log "universal prepare failed font=$_uc_font rc=$_uc_prepare_rc output=$(printf '%s' "$_uc_prepare_output" | tail -c 600)"
-        _uc_legacy "$_uc_font" universal-prepare-failed
+        _uc_reason=universal-prepare-failed
+        [ "$_uc_prepare_rc" -ne 124 ] || _uc_reason=universal-prepare-timeout
+        _uc_legacy "$_uc_font" "$_uc_reason"
         return $?
     fi
 

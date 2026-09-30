@@ -21,7 +21,7 @@ def conf(path: Path) -> dict[str, str]:
 
 def current(module: Path, request: str) -> dict[str, str]:
     state = conf(module / 'config/mix-stage-next.conf')
-    if not request or state.get('requestId') != request:
+    if not request or '/' in request or '\\' in request or state.get('requestId') != request or state.get('state') == 'cancelled' or (module / 'config/mix-cancelled-requests' / request).is_file():
         raise ValueError('composite request was superseded')
     return state
 

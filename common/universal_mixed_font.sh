@@ -19,6 +19,9 @@ _um_fail() {
         > "$MODDIR/config/universal-font-cutover.conf.tmp.$$" && \
         mv -f "$MODDIR/config/universal-font-cutover.conf.tmp.$$" "$MODDIR/config/universal-font-cutover.conf"
 }
+export LUOSHU_SWITCH_PROGRESS_FILE="$MODDIR/config/universal-mixed-progress.conf"
+export LUOSHU_UNIVERSAL_MIX_STRICT=1
+printf 'requestId=%s\nstate=running\npercent=78\nmessage=正在检查组合字体源\nupdated=%s\n' "$REQUEST" "$(date +%s)" > "$LUOSHU_SWITCH_PROGRESS_FILE"
 _um_root=$(_um_python "$MODDIR/common/universal_mixed_font.py" --module "$MODDIR" \
     --request "$REQUEST" --mode "$1" --source "$2") || { _um_fail mixed-source-freeze-failed; exit 1; }
 # Older installed modules may not yet have collected topology/role snapshots.
@@ -33,6 +36,9 @@ MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$MODDIR/config" \
     sh "$MODDIR/common/universal_font_cutover.sh" prepare-mixed LuoShuMix
 
 _um_rc=$?
+if [ "$_um_rc" -ne 0 ]; then
+    printf 'requestId=%s\nstate=fallback\npercent=82\nmessage=通用引擎条件未满足，正在生成兼容负载\nupdated=%s\n' "$REQUEST" "$(date +%s)" > "$LUOSHU_SWITCH_PROGRESS_FILE"
+fi
 # Compilation has copied all accepted artifacts into a self-contained deployment.
 # Keep diagnostic provenance, but do not accumulate nine CJK masters on each try.
 case "$_um_root" in

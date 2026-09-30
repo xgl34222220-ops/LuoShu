@@ -40,6 +40,7 @@ LAST_MIX_ERROR=""
 [ -f "$MODDIR/common/font_check.sh" ] && . "$MODDIR/common/font_check.sh"
 [ -f "$MODDIR/common/rom_adapters.sh" ] && . "$MODDIR/common/rom_adapters.sh"
 [ -f "$MODDIR/common/mount_compat.sh" ] && . "$MODDIR/common/mount_compat.sh"
+[ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 
 type check_coloros >/dev/null 2>&1 && check_coloros
 type check_hyperos >/dev/null 2>&1 && check_hyperos
@@ -59,6 +60,7 @@ write_task() {
     _task="$1"; _state="$2"; _message="$3"; _cjk="$4"; _latin="$5"; _digit="$6"; _started="$7"; _finished="$8"
     _tmp="$TASK_FILE.tmp.$$"
     {
+        printf 'requestId=%s\n' "${LUOSHU_MIX_REQUEST_ID:-}"
         printf 'task=%s\n' "$_task"
         printf 'state=%s\n' "$_state"
         printf 'message=%s\n' "$_message"
@@ -494,7 +496,8 @@ apply_mix() {
     fi
     [ ! -f "$TEXT_REBOOT_REQUIRED" ] || { set_mix_error '本次开机已更改文字字体，请先重启手机'; return 3; }
     echo $$ > "$LOCK_FILE"
-    trap cleanup_mix_process EXIT INT TERM
+    trap cleanup_mix_process EXIT
+    trap 'cleanup_mix_process; exit 143' INT TERM
 
     _cjk_src=$(find_family_file "$_cjk")
     _latin_src=$(find_family_file "$_latin")
@@ -556,6 +559,29 @@ status_json() {
         "$_enabled" "$(json_escape "$_cjk")" "$(json_escape "$_latin")" "$(json_escape "$_digit")"
 }
 
+run_mix_worker() {
+    trap '' HUP
+    _task="$1"; _cjk="$2"; _latin="$3"; _digit="$4"; _started="$5"
+    [ "$(sed -n 's/^task=//p' "$TASK_FILE" | head -n1)" = "$_task" ] || return 1
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] mix start: cjk=$_cjk latin=$_latin digit=$_digit task=$_task"
+            if MODDIR="$MODDIR" apply_mix "$_cjk" "$_latin" "$_digit"; then
+                _worker_rc=0
+                _finished=$(date +%s)
+                _message='完整复合字体已准备，完整重启后生效'
+                [ "$COMPOSITE_CACHE_HIT" = true ] && _message='已使用验证缓存准备字体组合，完整重启后生效'
+                write_task "$_task" success "$_message" "$_cjk" "$_latin" "$_digit" "$_started" "$_finished"
+                command -v cmd >/dev/null 2>&1 && cmd notification post -t 洛书 luoshu-mix "字体组合已准备，请完整重启手机。" >/dev/null 2>&1 || true
+            else
+                _rc=$?; _worker_rc="$_rc"; _finished=$(date +%s)
+                _failure="${LAST_MIX_ERROR:-}"
+                [ -n "$_failure" ] || _failure=$(tail -n1 "$CONFIG_DIR/mix_last_error.txt" 2>/dev/null | tr -d '\r')
+                [ -n "$_failure" ] || _failure="字体组合失败（阶段代码 $_rc）"
+                write_task "$_task" failed "$_failure" "$_cjk" "$_latin" "$_digit" "$_started" "$_finished"
+            fi
+            luoshu_clear_task_pid "$CONFIG_DIR/mix_worker.pid" "$_task"
+            return "$_worker_rc"
+}
+
 case "${1:-status}" in
     start)
         _cjk="$2"; _latin="$3"; _digit="$4"
@@ -572,27 +598,15 @@ case "${1:-status}" in
         rm -f "$CONFIG_DIR/mix_last_error.txt" "$CONFIG_DIR/composite_progress.json" 2>/dev/null || true
         _task="mix-$(date +%s)-$$"; _started=$(date +%s)
         write_task "$_task" running '正在生成完整复合字体' "$_cjk" "$_latin" "$_digit" "$_started" ''
-        (
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] mix start: cjk=$_cjk latin=$_latin digit=$_digit task=$_task"
-            if MODDIR="$MODDIR" apply_mix "$_cjk" "$_latin" "$_digit"; then
-                _finished=$(date +%s)
-                _message='完整复合字体已准备，完整重启后生效'
-                [ "$COMPOSITE_CACHE_HIT" = true ] && _message='已使用验证缓存准备字体组合，完整重启后生效'
-                write_task "$_task" success "$_message" "$_cjk" "$_latin" "$_digit" "$_started" "$_finished"
-                command -v cmd >/dev/null 2>&1 && cmd notification post -t 洛书 luoshu-mix "字体组合已准备，请完整重启手机。" >/dev/null 2>&1 || true
-            else
-                _rc=$?; _finished=$(date +%s)
-                _failure="${LAST_MIX_ERROR:-}"
-                [ -n "$_failure" ] || _failure=$(tail -n1 "$CONFIG_DIR/mix_last_error.txt" 2>/dev/null | tr -d '\r')
-                [ -n "$_failure" ] || _failure="字体组合失败（阶段代码 $_rc）"
-                write_task "$_task" failed "$_failure" "$_cjk" "$_latin" "$_digit" "$_started" "$_finished"
-            fi
-            rm -f "$CONFIG_DIR/mix_worker.pid" 2>/dev/null || true
-        ) </dev/null >> "$LOG_FILE" 2>&1 &
-        _bg=$!
-        printf '%s\n' "$_bg" > "$CONFIG_DIR/mix_worker.pid" 2>/dev/null || true
+        if ! luoshu_start_detached "$CONFIG_DIR/mix_worker.pid" "$_task" "$LOG_FILE" \
+            sh "$0" worker "$_task" "$_cjk" "$_latin" "$_digit" "$_started"; then
+            write_task "$_task" failed '无法启动完整复合字体工作进程' "$_cjk" "$_latin" "$_digit" "$_started" "$(date +%s)"
+            printf '{"status":"error","message":"无法启动完整复合字体工作进程"}\n'
+            exit 1
+        fi
         printf '{"status":"ok","data":{"task":"%s"}}\n' "$(json_escape "$_task")"
         ;;
+    worker) run_mix_worker "$2" "$3" "$4" "$5" "$6"; exit $? ;;
     status) status_json ;;
     recover) recover_interrupted_payload; printf '{"status":"ok"}\n' ;;
     *) printf '{"status":"error","message":"未知组合命令"}\n' ;;
