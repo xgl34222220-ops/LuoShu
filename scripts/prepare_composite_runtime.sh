@@ -149,6 +149,8 @@ PYTHONPATH="$ROOT/common/python/lib/python3.14/site-packages" \
   python3 -S - <<'PY'
 from fontTools.ttLib import TTFont, TTCollection
 from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.varLib import build
+from fontTools.designspaceLib import DesignSpaceDocument
 print('FontTools payload import OK')
 PY
 

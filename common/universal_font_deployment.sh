@@ -182,6 +182,17 @@ _ud_stage_prepared() {
     [ -n "$_uds_id" ] && [ -n "$_uds_digest" ] || return 1
 
     _ud_capture_previous
+    _uds_label="$_uds_family"
+    if [ "${LUOSHU_SWITCH_ACTIVE_LABEL:-}" = mix ]; then
+        _uds_request=$(_ud_value "$CONFIG_DIR/mix-stage-next.conf" requestId)
+        [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] && [ "$_uds_request" = "$LUOSHU_MIX_REQUEST_ID" ] || return 1
+        _uds_label=mix
+        # Fixed compositor may already have written its configured selection.
+        _uds_previous=$(_ud_value "$CONFIG_DIR/mix-stage-next.conf" previousFont)
+        if [ ! -s "$CONFIG_DIR/universal-font-next.conf" ] && [ ! -s "$CONFIG_DIR/font-payload-next.conf" ]; then
+            [ -z "$_uds_previous" ] || UD_PREVIOUS_FONT="$_uds_previous"
+        fi
+    fi
 
     _uds_next="$MODDIR/.luoshu-payload-next"
     _uds_stage="$MODDIR/.luoshu-payload-next.stage.$$"
@@ -192,6 +203,10 @@ _ud_stage_prepared() {
         return 1
     }
 
+    if [ "$_uds_label" = mix ] && [ "$(_ud_value "$CONFIG_DIR/mix-stage-next.conf" requestId)" != "$LUOSHU_MIX_REQUEST_ID" ]; then
+        rm -rf "$_uds_stage" 2>/dev/null || true
+        return 1
+    fi
     # Universal and legacy next-boot markers are mutually exclusive.
     rm -f "$CONFIG_DIR/font-payload-next.conf" 2>/dev/null || true
     rm -rf "$_uds_next" 2>/dev/null || true
@@ -203,7 +218,8 @@ _ud_stage_prepared() {
     _uds_state="$CONFIG_DIR/universal-font-next.conf"
     {
         printf 'state=prepared\n'
-        printf 'font=%s\n' "$_uds_family"
+        printf 'font=%s\n' "$_uds_label"
+        [ "$_uds_label" != mix ] || printf 'requestId=%s\n' "$LUOSHU_MIX_REQUEST_ID"
         printf 'deploymentId=%s\n' "$_uds_id"
         printf 'payloadDigest=%s\n' "$_uds_digest"
         printf 'previousFont=%s\n' "$UD_PREVIOUS_FONT"
@@ -224,7 +240,7 @@ _ud_stage_prepared() {
     # boot already renders it. Keep it in sync immediately; App status uses the
     # reboot marker/effectiveActive to distinguish configured vs. effective font.
     _uds_active="$CONFIG_DIR/active_font.conf"
-    printf '%s\n' "$_uds_family" > "$_uds_active.tmp.$$" 2>/dev/null && \
+    printf '%s\n' "$_uds_label" > "$_uds_active.tmp.$$" 2>/dev/null && \
         mv -f "$_uds_active.tmp.$$" "$_uds_active" 2>/dev/null || {
             rm -f "$_uds_state" "$_uds_active.tmp.$$" "$CONFIG_DIR/text_reboot_required.conf" 2>/dev/null || true
             rm -rf "$_uds_next" 2>/dev/null || true
@@ -235,7 +251,8 @@ _ud_stage_prepared() {
 
     _uds_reboot="$CONFIG_DIR/text_reboot_required.conf"
     {
-        printf 'font=%s\n' "$_uds_family"
+        printf 'font=%s\n' "$_uds_label"
+        [ "$_uds_label" != mix ] || printf 'requestId=%s\n' "$LUOSHU_MIX_REQUEST_ID"
         printf 'reason=universal-next-boot-prepared\n'
         printf 'pipeline=universal-font-deployment-v1\n'
         printf 'deploymentId=%s\n' "$_uds_id"

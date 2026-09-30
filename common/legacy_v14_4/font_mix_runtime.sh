@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # v14.4 composite engine compatibility wrapper.
-# The original v14.1 font_mix engine is preserved byte-for-byte as font_mix_engine.sh.
+# The legacy compositor in font_mix_engine.sh offers generated sources to Universal.
 # This wrapper only bridges its async task lifecycle to the current private payload boot mode.
 set +e
 RUNTIME="${MODDIR:-}"
@@ -79,7 +79,10 @@ monitor_task() {
                     write_finalize_state running '正在提交下一启动字体负载'
                     if finalize_next_payload; then
                         write_finalize_state success '复合字体已准备，完整重启后生效'
-                        mark_legacy_mix_mode
+                        _universal_request=$(sed -n 's/^requestId=//p' "$REALMOD/config/universal-font-next.conf" 2>/dev/null | head -n1)
+                        if [ -z "${LUOSHU_MIX_REQUEST_ID:-}" ] || [ "$_universal_request" != "$LUOSHU_MIX_REQUEST_ID" ]; then
+                            mark_legacy_mix_mode
+                        fi
                         printf '[%s] legacy-v14 composite task committed for next boot: %s\n' \
                             "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_wanted" >>"$LOG_FILE" 2>/dev/null || true
                     else

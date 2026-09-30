@@ -195,7 +195,7 @@ run_instance() {
     LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
     TMPDIR="$MODDIR/cache/tmp" \
         "$PYBIN" "$INSTANCE_PY" --input "$_source" --output "$_destination" \
-        --role "$_role" --weight "$_weight" --axes "$_axes" >/dev/null 2>"${_destination}.err"
+        --role "$_role" --weight "$_weight" --axes "$_axes" >"${_destination}.instance.json" 2>"${_destination}.err"
     _code=$?
     [ "$_code" -eq 0 ] && [ -s "$_destination" ] || return 1
     rm -f "${_destination}.err" 2>/dev/null || true
@@ -221,6 +221,8 @@ prepare_source() {
         mkdir -p "${_destination%/*}" 2>/dev/null || return 1
         cp -f "$_source" "$_destination" 2>/dev/null || return 1
         chmod 0644 "$_destination" 2>/dev/null || true
+        printf '{"role":"%s","variable":false,"location":{},"ignoredAxes":[]}\n' "$_role" \
+            > "${_destination}.instance.json" || return 1
     fi
 }
 
@@ -310,7 +312,9 @@ save_mix_config() {
     } >"$_tmp" 2>/dev/null && mv -f "$_tmp" "$MIX_CONF" 2>/dev/null || return 1
     cp -f "$MIX_CONF" "$AXES_CONF" 2>/dev/null || true
     printf 'mix\n' >"$ACTIVE_CONF" 2>/dev/null || return 1
-    printf 'font=mix\ntime=%s\n' "$(date +%s)" >"$REBOOT_CONF" 2>/dev/null || return 1
+    if [ ! -s "$CONFIG_DIR/universal-font-next.conf" ]; then
+        printf 'font=mix\ntime=%s\n' "$(date +%s)" >"$REBOOT_CONF" 2>/dev/null || return 1
+    fi
     sed -i '/^LuoShuAutoMix$/d' "$CONFIG_DIR/recent_fonts.conf" 2>/dev/null || true
     chmod 0644 "$MIX_CONF" "$AXES_CONF" "$ACTIVE_CONF" "$REBOOT_CONF" 2>/dev/null || true
 }
@@ -364,11 +368,28 @@ worker() {
             update_task "$_wanted" failed "${_weight} 字重复合失败" 100 "$(date +%s)"
             rm -rf "$_root"; clear_auto_worker_pid "$_wanted"; exit 1
         }
+        # Keep actual clamped instance locations for the Universal source record.
+        mkdir -p "$_root/axis-provenance/$_weight" 2>/dev/null || true
+        for _instance_report in "$_dir"/*.instance.json; do
+            [ -f "$_instance_report" ] || continue
+            cp -f "$_instance_report" "$_root/axis-provenance/$_weight/" 2>/dev/null || true
+        done
         rm -rf "$_dir" 2>/dev/null || true
     done
 
     update_task "$_wanted" running '正在应用自动多字重字体族' 88 ''
-    _result=$(LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$FONT_MANAGER" action switch "$_family" 2>&1)
+    _universal_bridge="${LUOSHU_REAL_MODDIR:-$MODDIR}/common/universal_mixed_font.sh"
+    _result=''
+    if [ -f "$_universal_bridge" ]; then
+        _result=$(sh "$_universal_bridge" auto "$_root" 2>&1)
+        _universal_rc=$?
+    else
+        _universal_rc=1
+    fi
+    if [ "$_universal_rc" -ne 0 ]; then
+        printf '%s\n' "$_result" >>"$LOG_FILE" 2>/dev/null || true
+        _result=$(LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$FONT_MANAGER" action switch "$_family" 2>&1)
+    fi
     printf '%s\n' "$_result" >>"$LOG_FILE" 2>/dev/null || true
     printf '%s\n' "$_result" | grep -q '"status":"ok"' || {
         update_task "$_wanted" failed '自动多字重字体族应用失败' 100 "$(date +%s)"

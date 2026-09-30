@@ -77,6 +77,12 @@ find "$DYN" -maxdepth 1 -type f -name '_lzma.*.so' -print -quit | grep -q .
 test -d "$PYLIB/site-packages/fontTools/ttLib"
 test -d "$PYLIB/site-packages/fontTools/cffLib"
 test -d "$PYLIB/site-packages/fontTools/varLib/instancer"
+test -s "$PYLIB/site-packages/fontTools/varLib/__init__.py"
+test -s "$PYLIB/site-packages/fontTools/designspaceLib/__init__.py"
+# Execute an actual variable family build against staged FontTools, rather than
+# only proving that the instancer subpackage exists. Host execution is not an
+# Android ABI test; device acceptance remains a separate requirement.
+PYTHONPATH="$PYLIB/site-packages${PYTHONPATH:+:$PYTHONPATH}" python3 "$ROOT/scripts/universal_mixed_variable_test.py"
 test -s "$PYLIB/xml/etree/ElementTree.py"
 test -s "$PYLIB/argparse.py"
 test -s "$PYLIB/hashlib.py"

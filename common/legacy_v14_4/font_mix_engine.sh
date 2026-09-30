@@ -505,6 +505,20 @@ apply_mix() {
 
     mkdir -p "$SYSTEM_FONTS_DIR" "$CONFIG_DIR" "$MODDIR/logs" 2>/dev/null || { set_mix_error '无法创建模块工作目录'; return 4; }
     build_composite_file "$_cjk_src" "$_latin_src" "$_digit_src" || return 5
+    # Preserve the existing role/axis compositor, then offer its validated output
+    # to Universal before creating any ROM-specific aliases.
+    write_mix_generation_manifest "$_cjk" "$_latin" "$_digit" || return 6
+    _universal_bridge="${LUOSHU_REAL_MODDIR:-$MODDIR}/common/universal_mixed_font.sh"
+    if [ -f "$_universal_bridge" ] && sh "$_universal_bridge" fixed "$COMPOSITE_RESULT" >> "$LOG_FILE" 2>&1; then
+        prepare_mix_config "$_cjk" "$_latin" "$_digit" || return 6
+        # Universal already owns next-boot and reboot markers. Save composition
+        # preferences only; never overwrite its deployment identity.
+        mv -f "$MIX_CONF_TMP" "$MIX_CONF" || return 6
+        rm -f "$ACTIVE_CONF_TMP" "$REBOOT_CONF_TMP" 2>/dev/null || true
+        rm -f "$LOCK_FILE" 2>/dev/null || true
+        trap - EXIT INT TERM
+        return 0
+    fi
     payload_stage_begin || { set_mix_error '无法创建字体负载暂存区'; return 5; }
     if [ "$IS_HYPEROS" = "true" ]; then
         populate_hyperos_payload "$PAYLOAD_STAGE" "$COMPOSITE_RESULT" || { set_mix_error '生成 HyperOS 字体负载失败'; return 5; }

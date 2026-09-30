@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Freeze generated composite sources for Universal; never reads user font libraries.
+
+The composition workers already resolved each role's axes and fixed/auto choice.
+This bridge only accepts their current request's generated output inside cache.
+"""
+from __future__ import annotations
+import argparse
+import hashlib
+import json
+import math
+import os
+from pathlib import Path
+import shutil
+import tempfile
+
+
+def conf(path: Path) -> dict[str, str]:
+    return dict(line.split('=', 1) for line in path.read_text().splitlines() if '=' in line)
+
+
+def current(module: Path, request: str) -> dict[str, str]:
+    state = conf(module / 'config/mix-stage-next.conf')
+    if not request or state.get('requestId') != request:
+        raise ValueError('composite request was superseded')
+    return state
+
+
+def digest(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            h.update(block)
+    return h.hexdigest()
+
+
+def freeze(module: Path, request: str, mode: str, source: Path) -> Path:
+    module = module.resolve()
+    state = current(module, request)
+    source = source.resolve(strict=True)
+    source.relative_to((module / 'cache').resolve())
+    if mode == 'fixed':
+        generation = conf(module / '.luoshu-mix-stage/.luoshu-mix-generation.conf')
+        if generation.get('requestId') != request or any(generation.get(k) != state.get(k) for k in ('cjk', 'latin', 'digit')):
+            raise ValueError('composite generation identity mismatch')
+        if generation.get('compositeHash') != digest(source):
+            raise ValueError('composite generation hash mismatch')
+        files = [source]
+    else:
+        task = conf(module / 'config/axes_task.conf')
+        if Path(task.get('root', '')).resolve() != source:
+            raise ValueError('multiweight root does not belong to current worker')
+        if any(task.get(k) != state.get(k) for k in ('cjk', 'latin', 'digit', 'cjkAxes', 'latinAxes', 'digitAxes')):
+            raise ValueError('multiweight request identity mismatch')
+        files = sorted((source / 'fonts').glob('LuoShuAutoMix-*'))
+        if len(files) != 9 or any(p.suffix.lower() not in {'.ttf', '.otf'} for p in files):
+            raise ValueError('incomplete multiweight generated family')
+        for path in files:
+            path.resolve(strict=True).relative_to((module / 'cache').resolve())
+    hashes = {p.name: digest(p) for p in files}
+    identity = hashlib.sha256(json.dumps([request, state, hashes], sort_keys=True).encode()).hexdigest()
+    parent = module / 'cache/universal-mixed-sources'
+    parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix='.stage-', dir=parent))
+    # Never overwrite sources referenced by an earlier frozen plan.
+    destination = parent / (identity + '-' + stage.name.removeprefix('.stage-'))
+    try:
+        fonts = stage / 'fonts'
+        fonts.mkdir()
+        for p in files:
+            name = 'LuoShuMix-Regular' + p.suffix if mode == 'fixed' else p.name.replace('LuoShuAutoMix-', 'LuoShuMix-')
+            shutil.copyfile(p, fonts / name)
+            if digest(fonts / name) != hashes[p.name]:
+                raise ValueError('source changed during composite freeze')
+        report = {'schema': 'universal-mixed-source-v1', 'requestId': request, 'mode': mode, 'selection': state, 'sourceHashes': hashes}
+        if mode == 'auto':
+            report['axisProvenance'] = {str(p.relative_to(source / 'axis-provenance')): json.loads(p.read_text()) for p in (source / 'axis-provenance').glob('*/*.json')}
+            from universal_mixed_variable import build_variable_family, discover_masters
+            try:
+                expected = {f'{weight}/{role}.ttf.instance.json' for weight in range(100, 901, 100) for role in ('cjk', 'latin', 'digit')}
+                if set(report['axisProvenance']) != expected:
+                    raise ValueError('missing component axis provenance')
+                for key, instance in report['axisProvenance'].items():
+                    weight = int(key.split('/')[0])
+                    role = str(instance.get('role', ''))
+                    if key.split('/')[1] != role + '.ttf.instance.json':
+                        raise ValueError('component axis provenance role mismatch: ' + key)
+                    if instance.get('ignoredAxes'):
+                        raise ValueError('unsupported selected component axis: ' + key)
+                    if instance.get('variable'):
+                        selected = dict(entry.split('=', 1) for entry in task.get(role + 'Axes', '').split(',') if entry)
+                        if task.get(role + 'Mode') == 'auto':
+                            selected['wght'] = str(weight)
+                        for tag, raw in selected.items():
+                            wanted = float(raw)
+                            actual = instance.get('location', {}).get(tag)
+                            if not math.isfinite(wanted) or actual is None or float(actual) != wanted:
+                                raise ValueError('component axis range does not cover selection: ' + key + ':' + tag)
+                # Builder consumes legacy names; use the original validated copied masters.
+                masters = discover_masters(fonts, family='LuoShuMix')
+                variable = stage / 'variable.ttf'
+                report['variable'] = build_variable_family(masters, variable)
+                report['variable']['output'] = 'fonts/LuoShuMix-Regular.ttf'
+                report['variable'].pop('path', None)
+                # Prefer the actual variable source for every route. Static masters may
+                # intentionally carry the fixed CJK base's weight metadata.
+                for p in list(fonts.iterdir()):
+                    p.unlink()
+                os.replace(variable, fonts / 'LuoShuMix-Regular.ttf')
+            except Exception as error:
+                report['variableError'] = str(error)
+                (stage / 'variable.ttf').unlink(missing_ok=True)
+        (stage / 'source.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+        current(module, request)
+        os.replace(stage, destination)
+        return destination
+    finally:
+        if stage.exists():
+            shutil.rmtree(stage)
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument('--module', required=True, type=Path)
+    p.add_argument('--request', required=True)
+    p.add_argument('--mode', choices=['fixed', 'auto'])
+    p.add_argument('--source', type=Path)
+    p.add_argument('--check', action='store_true')
+    args = p.parse_args()
+    try:
+        if args.check:
+            current(args.module, args.request)
+        else:
+            if not args.mode or args.source is None:
+                raise ValueError('mode/source required')
+            print(freeze(args.module, args.request, args.mode, args.source))
+        return 0
+    except Exception as error:
+        import sys
+        print(str(error), file=sys.stderr)
+        return 1
+
+if __name__ == '__main__':
+    raise SystemExit(main())

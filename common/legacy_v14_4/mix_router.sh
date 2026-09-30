@@ -123,6 +123,24 @@ mix_reconcile_fast() (
     done
 )
 
+# A temporary source-family name must never replace the public mix identity.
+# Tie finalization to the same generation, including after the stage is removed.
+universal_mix_pending() {
+    _ump_state="$REALMOD/config/universal-font-next.conf"
+    if [ ! -s "$_ump_state" ]; then
+        _ump_state="$REALMOD/config/universal-font-runtime.conf"
+        [ "$(read_value "$_ump_state" state)" = active ] && [ -d "$LIVE_PAYLOAD" ] || return 1
+    else
+        [ -d "$NEXT_PAYLOAD" ] || return 1
+    fi
+    [ "$(read_value "$_ump_state" font)" = mix ] || return 1
+    _ump_request=$(read_value "$_ump_state" requestId)
+    [ -n "$_ump_request" ] || return 1
+    _ump_expected=$(read_value "$MIX_STAGE_STATE" requestId)
+    [ -n "$_ump_expected" ] || _ump_expected=$(read_value "$REALMOD/config/mix-finalize-state.conf" requestId)
+    [ "$_ump_request" = "$_ump_expected" ]
+}
+
 mix_status_json_fast() {
     mix_reconcile_fast
     _wanted="$1"
@@ -144,7 +162,7 @@ mix_status_json_fast() {
 
     if [ "$_state" = success ]; then
         _next_font=$(read_value "$NEXT_STATE" font)
-        if [ -d "$NEXT_PAYLOAD" ] && [ "$_next_font" = mix ]; then
+        if universal_mix_pending || { [ -d "$NEXT_PAYLOAD" ] && [ "$_next_font" = mix ]; }; then
             _percent=100
         else
             _finalize_state=$(read_value "$REALMOD/config/mix-finalize-state.conf" state)
@@ -359,6 +377,11 @@ write_next_state() {
 }
 
 commit_mix_stage_if_needed() {
+    if universal_mix_pending; then
+        # Leave MIX_STAGE_STATE for identity checks on subsequent finalizers/status.
+        rm -rf "$MIX_STAGE" 2>/dev/null || true
+        return 0
+    fi
     # Auto-multiweight may already have gone through font_switch_safe.sh. In that
     # case the real next payload is authoritative; discard this compatibility clone.
     if [ -d "$NEXT_PAYLOAD" ] && [ -s "$NEXT_STATE" ]; then
@@ -377,7 +400,7 @@ commit_mix_stage_if_needed() {
     # Recover a process killed after the stage directory was atomically renamed
     # but before its small state file was committed. MIX_STAGE_STATE is retained
     # until both pieces are durable, so the next status poll can finish the commit.
-    if [ -d "$NEXT_PAYLOAD" ] && [ ! -s "$NEXT_STATE" ] && [ -s "$MIX_STAGE_STATE" ]; then
+    if [ -d "$NEXT_PAYLOAD" ] && [ ! -s "$NEXT_STATE" ] && [ ! -s "$REALMOD/config/universal-font-next.conf" ] && [ -s "$MIX_STAGE_STATE" ]; then
         write_next_state || return 1
         rm -f "$MIX_STAGE_STATE" 2>/dev/null || true
         return 0
@@ -387,6 +410,7 @@ commit_mix_stage_if_needed() {
     stage_generation_matches || return 1
     complete_hyperos_stage || return 1
     complete_coloros_stage || return 1
+    rm -f "$REALMOD/config/universal-font-next.conf" 2>/dev/null || true
     rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
     mv "$MIX_STAGE" "$NEXT_PAYLOAD" 2>/dev/null || return 1
     if ! write_next_state; then
@@ -450,6 +474,10 @@ finalize_mix_stage() {
     if [ "$_commit_rc" -ne 0 ]; then
         printf '{"status":"error","message":"复合字体已生成但下一启动负载提交失败"}\n'
         return 1
+    fi
+    if universal_mix_pending; then
+        printf '{"status":"ok","data":{"font":"mix","rebootRequired":true,"pipeline":"universal","fallback":false}}\n'
+        return 0
     fi
     write_legacy_mix_mode
     printf '{"status":"ok","data":{"font":"mix","rebootRequired":true,"pipeline":"atomic-next-boot-composite"}}\n'

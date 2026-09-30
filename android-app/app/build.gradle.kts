@@ -67,7 +67,9 @@ android {
     buildTypes {
         getByName("debug") {
             applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
+            val testBuildId = providers.environmentVariable("LUOSHU_TEST_BUILD_ID").orNull
+            require(testBuildId == null || testBuildId.matches(Regex("[A-Za-z0-9._-]+")))
+            versionNameSuffix = if (testBuildId == null) "-debug" else "-debug-$testBuildId"
             // Test packages remain installable over the existing debug app, but execute with release-like optimization.
             isDebuggable = false
             isMinifyEnabled = true

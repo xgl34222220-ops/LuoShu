@@ -1,5 +1,8 @@
 name: Build Test Candidate
 on:
+  push:
+    branches:
+      - feat/universal-mixed-integration-20260930
   workflow_dispatch:
   pull_request:
     branches:
@@ -23,6 +26,8 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     timeout-minutes: 65
+    env:
+      LUOSHU_TEST_BUILD_ID: umix-${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
@@ -240,10 +245,32 @@ jobs:
           sh -n "$tmp/service.sh"
           sh -n scripts/pre_release_readiness.sh
 
+      - name: Verify mixed engine and mark test artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          . ./scripts/version.sh
+          module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
+          test "$(unzip -p "$module" module.prop | sed -n 's/^testBuildId=//p')" = "$LUOSHU_TEST_BUILD_ID"
+          for file in universal_mixed_font.py universal_mixed_font.sh universal_mixed_variable.py; do
+            cmp <(unzip -p "$module" "common/$file") "common/$file"
+          done
+          PYTHONPATH=common/python/lib/python3.14/site-packages python3 scripts/universal_mixed_variable_test.py
+          PYTHONPATH=common/python/lib/python3.14/site-packages python3 scripts/universal_mixed_pipeline_test.py
+          sh scripts/universal_mixed_lifecycle_test.sh
+          sh scripts/python_runtime_prune_test.sh
+          for file in dist/*.zip dist/*.apk; do
+            renamed="${file%.*}-${LUOSHU_TEST_BUILD_ID}.${file##*.}"
+            mv "$file" "$renamed"
+            rm -f "$file.sha256"
+            (cd dist && sha256sum "$(basename "$renamed")" > "$(basename "$renamed").sha256")
+          done
+          printf 'commit=%s\nbuildId=%s\nexperimental=true\nhardwareValidated=false\n' "$GITHUB_SHA" "$LUOSHU_TEST_BUILD_ID" > dist/test-build.conf
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: LuoShu-Test-Candidate
+          name: LuoShu-Mixed-Test-${{ github.sha }}
           path: dist/*
           if-no-files-found: error
           retention-days: 14

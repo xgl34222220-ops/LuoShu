@@ -166,6 +166,7 @@ universal_font_next_boot_activate() {
         printf 'state=active\n'
         printf 'pipeline=universal-font-deployment-v1\n'
         printf 'font=%s\n' "$_ufnb_font"
+        printf 'requestId=%s\n' "$(_ufnb_value "$_ufnb_state" requestId)"
         printf 'deploymentId=%s\n' "$_ufnb_id"
         printf 'payloadDigest=%s\n' "$_ufnb_digest"
         printf 'bootId=%s\n' "$_ufnb_boot"
@@ -184,6 +185,7 @@ universal_font_next_boot_activate() {
 
     {
         printf 'font=%s\n' "$_ufnb_font"
+        printf 'requestId=%s\n' "$(_ufnb_value "$_ufnb_state" requestId)"
         printf 'deploymentId=%s\n' "$_ufnb_id"
         printf 'payloadDigest=%s\n' "$_ufnb_digest"
         printf 'previousFont=%s\n' "$_ufnb_previous_font"

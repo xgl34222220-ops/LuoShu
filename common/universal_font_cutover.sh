@@ -67,6 +67,7 @@ PY
 
 _uc_write_state() {
     _ucs_state="$1"; _ucs_font="$2"; _ucs_decision="$3"; _ucs_reason="$4"
+    [ "${UC_COMPOSITE_REQUEST:-false}" != true ] || _ucs_font=mix
     mkdir -p "$CONFIG_DIR" 2>/dev/null || true
     {
         printf 'state=%s\n' "$_ucs_state"
@@ -89,6 +90,9 @@ _uc_legacy() {
     _uc_log "legacy fallback font=$_ucl_font reason=$_ucl_reason"
     _uc_write_state fallback "$_ucl_font" legacy "$_ucl_reason"
     _uc_progress 25 "通用引擎未接管，正在使用兼容切换路径"
+    # Composite caller owns its already-generated legacy fallback. Leave an
+    # existing queued payload untouched until that caller can commit successfully.
+    [ "${UC_COMPOSITE_REQUEST:-false}" != true ] || return 2
 
     # A queued Universal request updates active_font.conf to the user's configured
     # choice before reboot. If this new request falls back to legacy, restore the
@@ -145,13 +149,15 @@ _uc_switch() {
         _uc_legacy "$_uc_font" default-font
         return $?
     fi
-    if [ -n "${LUOSHU_REAL_MODDIR:-}" ]; then
+    if [ -n "${LUOSHU_REAL_MODDIR:-}" ] && [ "${UC_COMPOSITE_REQUEST:-false}" != true ]; then
         _uc_legacy "$_uc_font" composite-runtime
         return $?
     fi
-    case "$_uc_font" in
-        mix|LuoShuAutoMix|LuoShuMix*) _uc_legacy "$_uc_font" composite-family; return $? ;;
-    esac
+    if [ "${UC_COMPOSITE_REQUEST:-false}" != true ]; then
+        case "$_uc_font" in
+            mix|LuoShuAutoMix|LuoShuMix*) _uc_legacy "$_uc_font" composite-family; return $? ;;
+        esac
+    fi
 
     if ! _uc_precondition; then
         _uc_legacy "$_uc_font" universal-precondition-missing
@@ -398,6 +404,13 @@ _uc_schedule_rollback() {
 
 case "${1:-switch}" in
     switch) _uc_switch "${2:-}" ;;
+    prepare-mixed)
+        [ "${LUOSHU_SWITCH_ACTIVE_LABEL:-}" = mix ] && [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ] || exit 1
+        _uc_python "$MODDIR/common/universal_mixed_font.py" --module "$MODDIR" \
+            --request "$LUOSHU_MIX_REQUEST_ID" --check || exit 1
+        UC_COMPOSITE_REQUEST=true
+        _uc_switch "${2:-}"
+        ;;
     rollback-from-fail) _uc_schedule_rollback "${2:-}" ;;
     status)
         if [ -s "$CUTOVER_STATE" ]; then cat "$CUTOVER_STATE"

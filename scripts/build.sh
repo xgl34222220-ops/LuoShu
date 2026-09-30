@@ -74,6 +74,13 @@ while IFS= read -r path || [ -n "$path" ]; do
 done < "$PAYLOAD_MANIFEST"
 [ ! -f "$STAGE/config/version_notes.conf" ] || sed -i "s/^version=.*/version=$LUOSHU_VERSION/" "$STAGE/config/version_notes.conf"
 
+# Experimental candidate identity is independent of stable version/update metadata.
+if [ -n "${LUOSHU_TEST_BUILD_ID:-}" ]; then
+  case "$LUOSHU_TEST_BUILD_ID" in *[!A-Za-z0-9._-]*) echo 'Invalid test build ID.' >&2; exit 91 ;; esac
+  printf 'testBuildId=%s\n' "$LUOSHU_TEST_BUILD_ID" >> "$STAGE/module.prop"
+  sed -i "s/^name=.*/& [TEST $LUOSHU_TEST_BUILD_ID]/" "$STAGE/module.prop"
+fi
+
 mkdir -p "$STAGE/bundled"
 cp -f "$APP_APK" "$STAGE/bundled/LuoShu-App.apk"
 APP_SHA256=$(sha256sum "$STAGE/bundled/LuoShu-App.apk" | awk '{print $1}')
