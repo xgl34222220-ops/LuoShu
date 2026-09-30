@@ -17,6 +17,10 @@ public final class PlatformXmlProbe {
         report.put("context","adb-shell-app_process");
         report.put("systemConfigurationChanged",false);
         try {
+            // app_process does not inherit Zygote font preloading. Initialize
+            // only this process from its existing system configuration.
+            Typeface.class.getMethod("loadPreinstalledSystemFontMap").invoke(null);
+            report.put("processFontMapInitialized",true);
             File source=new File(args[0]), config=new File(args[1]);
             StringBuilder xml=new StringBuilder("<familyset><family name=\"sans-serif\">");
             for(int w=100;w<=900;w+=100)xml.append("<font weight=\"").append(w)
