@@ -12,6 +12,7 @@ import org.json.JSONObject;
 import java.io.*;
 import java.lang.reflect.*;
 import java.nio.file.*;
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.*;
 
@@ -64,7 +65,7 @@ public final class Runner extends Instrumentation {
             for(int w=100;w<=900;w+=100)xml.append("<font weight=\"").append(w).append("\" style=\"normal\" index=\"0\" postScriptName=\"")
                 .append(psName).append("\">").append(source.getName()).append("</font>");
             xml.append("</family></familyset>");
-            File config=new File(root,"fixed-fonts.xml");Files.writeString(config.toPath(),xml.toString());
+            File config=new File(root,"fixed-fonts.xml");Files.write(config.toPath(),xml.toString().getBytes(StandardCharsets.UTF_8));
             Class<?> parser=Class.forName("android.graphics.FontListParser");Method parse=null;
             for(Method m:parser.getMethods()) {
                 Class<?>[] p=m.getParameterTypes();
@@ -116,15 +117,15 @@ public final class Runner extends Instrumentation {
             require(draw(face(composite,400,true),"A",null).equals(renders.getString("A")),"rollback asset differs");
             report.put("immutablePathSwitchAndReturn","passed");
             File baseline=new File(root,"baseline.json");
-            if(phase.equals("before"))Files.writeString(baseline.toPath(),renders.toString());
-            else {JSONObject old=new JSONObject(Files.readString(baseline.toPath()));for(String key:text)require(old.getString(key).equals(renders.getString(key)),"reboot raster changed");report.put("emulatorRebootPersistence","passed");}
+            if(phase.equals("before"))Files.write(baseline.toPath(),renders.toString().getBytes(StandardCharsets.UTF_8));
+            else {JSONObject old=new JSONObject(new String(Files.readAllBytes(baseline.toPath()),StandardCharsets.UTF_8));for(String key:text)require(old.getString(key).equals(renders.getString(key)),"reboot raster changed");report.put("emulatorRebootPersistence","passed");}
             report.put("frameworkXmlConsumer",frameworkXml(composite,fixture.getString("postScriptName")));
             report.put("status","passed-native-data-gate");resultCode=Activity.RESULT_OK;
         } catch(Throwable error) {
             if(report==null)report=new JSONObject();
             try{report.put("status","failed");report.put("error",error.toString());StringWriter trace=new StringWriter();error.printStackTrace(new PrintWriter(trace));report.put("trace",trace.toString());}catch(Exception ignored){}
         }
-        try{Files.writeString(new File(root,"report-"+phase+".json").toPath(),report.toString(2));}catch(Exception ignored){}
+        try{Files.write(new File(root,"report-"+phase+".json").toPath(),report.toString(2).getBytes(StandardCharsets.UTF_8));}catch(Exception ignored){}
         Bundle output=new Bundle();output.putString("stream",report.toString());finish(resultCode,output);
     }
 }
