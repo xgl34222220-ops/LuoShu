@@ -37,6 +37,7 @@ internal data class ModuleSnapshot(
     val mountFailure: String = "",
     val cutoverState: String = "idle",
     val cutoverDecision: String = "none",
+    val cutoverReason: String = "none",
     val rollbackState: String = "none",
     val rollbackPending: Boolean = false,
     val rollbackTargetFont: String = "",
@@ -63,6 +64,22 @@ internal data class ModuleSnapshot(
             "", "unknown" -> "上一份可用字体"
             "default" -> "系统默认字体"
             else -> rollbackTargetFont
+        }
+
+    val cutoverFallback: Boolean
+        get() = cutoverState == "fallback" || cutoverDecision == "legacy"
+
+    val cutoverFallbackLabel: String
+        get() = when (cutoverReason) {
+            "universal-precondition-missing" -> "设备拓扑/角色证据尚未就绪"
+            "universal-prepare-failed" -> "Universal 构建失败"
+            "universal-artifacts-missing" -> "Universal 产物不完整"
+            "universal-readiness-gate-rejected" -> "Universal 安全门禁未通过"
+            "universal-stage-failed" -> "Universal 下一启动负载提交失败"
+            "default-font" -> "恢复系统默认字体"
+            "composite-runtime", "composite-family" -> "复合字体使用兼容路径"
+            "", "none" -> "原因未记录"
+            else -> cutoverReason
         }
 
     val effectiveLabel: String
@@ -701,10 +718,12 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
             if (result.optString("state") != "success") error(result.optString("message", "字体应用失败"))
             val applied = result.optString("font", fontId).ifBlank { fontId }
             val reused = result.optBoolean("reused", false)
+            val finalTaskMessage = result.optString("message", "").trim()
             operationMessage = when {
+                finalTaskMessage.contains("Universal 未接管") -> finalTaskMessage
                 reused -> "当前字体已验证，无需重新生成或重启"
                 applied == "default" -> "已准备恢复系统字体，重启后生效"
-                else -> "字体已准备完成，重启后全局生效"
+                else -> finalTaskMessage.ifBlank { "字体已准备完成，重启后全局生效" }
             }
             val nextRebootRequired = if (reused) rebootRequired else true
             rebootRequired = nextRebootRequired
@@ -893,6 +912,7 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 mountFailure = data.optString("mountFailure", ""),
                 cutoverState = data.optString("cutoverState", "idle"),
                 cutoverDecision = data.optString("cutoverDecision", "none"),
+                cutoverReason = data.optString("cutoverReason", "none"),
                 rollbackState = data.optString("rollbackState", "none"),
                 rollbackPending = data.optBoolean("rollbackPending", false),
                 rollbackTargetFont = data.optString("rollbackTargetFont", ""),
