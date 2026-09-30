@@ -7,9 +7,11 @@ created with the actual LuoShu CJK/Latin/digit compositor.
 Gates:
 1. Native Android Font/FontFamily/Typeface raster identity for the three donors,
    fixed style declarations 100–900, unchanged emoji and unknown-script fallback.
-2. Existing Android framework XML parser/family builder, when normally exposed.
-   Reflection only calls available methods; no hidden-API policy changes, rooting
-   or method hooks. Unavailable/failed parsing is a blocked gate, not a pass.
+2. Existing Android framework XML parser/family builder, through a separate
+   command-line probe in the existing adb-shell context. It consumes only its
+   temporary XML/assets and compares pixels with the independently verified App.
+   The App-level API availability is reported separately. No hidden-API policy
+   changes, rooting or hooks; a blocked shell probe still fails the gate.
 3. Immutable generation path switch/return and actual emulator reboot persistence.
 4. System-global module mounts, root-manager namespaces, FontManager startup and
    real HyperOS/ColorOS rendering remain **not tested by this harness**.

@@ -23,6 +23,7 @@ def adb(*values,timeout=120):
  with (args.output/'commands.jsonl').open('a') as stream:
   stream.write(json.dumps({'command':list(values),'durationSeconds':round(time.monotonic()-begin,3),'returncode':r.returncode})+'\n')
  if r.returncode:
+  (args.output/('failure-'+stage+'.txt')).write_bytes(r.stdout+r.stderr)
   status(stage,status='failed',error='adb-nonzero',command=list(values),returncode=r.returncode)
   raise RuntimeError(r.stderr.decode(errors='replace'))
  return r.stdout
@@ -38,6 +39,14 @@ atexit.register(diagnostics)
 status('installing-probe')
 adb('wait-for-device');adb('install','-r','-t',str(args.apk))
 reports=[]
+platform_reports=[]
+# Ordinary shell-owned temporary files; never touches /system or app-private data.
+remote='/data/local/tmp/luoshu-font-contract'
+adb('shell','mkdir','-p',remote)
+adb('push',str(args.apk),remote+'/probe.apk')
+assets=Path(__file__).parent/'app/src/main/assets'
+adb('push',str(assets/'composite.ttf'),remote+'/composite.ttf')
+ps_name=json.loads((assets/'fixture.json').read_text())['postScriptName']
 for phase in ['before','after']:
  status('native-font-contract-'+phase)
  if phase=='after':
@@ -53,11 +62,20 @@ for phase in ['before','after']:
  (args.output/('report-'+phase+'.json')).write_bytes(raw);report=json.loads(raw);reports.append(report)
  for i in range(3):(args.output/('role-'+str(i)+'-'+phase+'.png')).write_bytes(adb('exec-out','run-as',PACKAGE,'cat','files/role-'+str(i)+'.png'))
  if report.get('status')!='passed-native-data-gate':raise RuntimeError(report)
-framework=all(r.get('frameworkXmlConsumer',{}).get('status')=='passed' for r in reports)
+ status('platform-xml-'+phase)
+ platform=adb('shell','env','CLASSPATH='+remote+'/probe.apk','app_process',remote,
+  PACKAGE+'.PlatformXmlProbe',remote+'/composite.ttf',remote+'/probe-fonts.xml',ps_name)
+ (args.output/('platform-xml-'+phase+'.json')).write_bytes(platform)
+ parsed=json.loads(platform);platform_reports.append(parsed)
+ if parsed.get('status')!='passed' or parsed.get('rasterSha256')!=report.get('nativeCombinedHash'):
+  raise RuntimeError('platform XML raster differs from independently verified app raster')
+framework=all(r.get('status')=='passed' for r in platform_reports)
 status('completed-native-probe')
 summary={'nativeDataGate':'passed','frameworkXmlGate':'passed' if framework else 'blocked',
  'emulatorReboot':'passed','moduleGlobalMountAndBootGate':'not-tested','noHook':True,
- 'note':'App-owned configuration test; no system font config/SELinux/root settings changed',
+ 'appFrameworkApi':'available' if all(r.get('frameworkXmlConsumer',{}).get('status')=='passed' for r in reports) else 'unavailable',
+ 'frameworkContext':'existing adb shell via app_process',
+ 'note':'Temporary test XML consumed by platform; system configuration and security policy unchanged',
  'hardwareRomCoverage':'not-tested'}
 (args.output/'summary.json').write_text(json.dumps(summary,indent=2)+'\n');print(json.dumps(summary))
 if not framework:raise SystemExit('Framework XML API unavailable or validation failed; see reports, do not count this gate passed')

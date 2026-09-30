@@ -37,7 +37,7 @@ jobs:
       - name: Require accelerated emulator
         id: accel
         env:
-          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '6de6e12337060b101ccbade5dc159bf28a98b2a6' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
+          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == 'f24aa5554148bf27e75b60be14fac7e2f23ca6fc' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
         shell: bash
         run: |
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then

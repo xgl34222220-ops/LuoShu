@@ -110,7 +110,7 @@ public final class Runner extends Instrumentation {
                 require(value.equals(draw(Typeface.DEFAULT,untouched,null)),"fallback changed "+untouched);
                 renders.put(untouched,value);
             }
-            report.put("nativeStaticRoleIdentity","passed");report.put("fixedWeights100to900","passed");
+            report.put("nativeCombinedHash",draw(mixed,"A1中",null));report.put("nativeStaticRoleIdentity","passed");report.put("fixedWeights100to900","passed");
             report.put("emojiAndUnknownScriptFallback","passed");report.put("renders",renders);
             // Fresh generation paths avoid mutating bytes under a cached Typeface.
             Typeface alternate=face(cjk,400,true);require(!draw(alternate,"A",null).equals(draw(mixed,"A",null)),"alternate asset not visible");
