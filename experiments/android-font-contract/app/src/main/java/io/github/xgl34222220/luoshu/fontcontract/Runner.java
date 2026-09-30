@@ -90,6 +90,19 @@ public final class Runner extends Instrumentation {
     private void systemPhase(String phase) throws Exception {
         JSONObject renders=new JSONObject();
         for(String text:new String[]{"A","1","中","Ω","😀"})renders.put(text,draw(Typeface.DEFAULT,text,null));
+        report.put("renders",renders);
+        JSONObject actualFonts=new JSONObject();
+        for(String sample:new String[]{"A","1","中","Ω","😀"}){
+            Paint inspect=new Paint();inspect.setTypeface(Typeface.DEFAULT);inspect.setTextSize(72);
+            android.graphics.text.PositionedGlyphs glyphs=android.graphics.text.TextRunShaper.shapeTextRun(sample,0,sample.length(),0,sample.length(),0,0,false,inspect);
+            org.json.JSONArray paths=new org.json.JSONArray();
+            for(int i=0;i<glyphs.glyphCount();i++){
+                android.graphics.fonts.Font font=glyphs.getFont(i);
+                JSONObject entry=new JSONObject();entry.put("file",String.valueOf(font.getFile()));entry.put("ttcIndex",font.getTtcIndex());entry.put("style",font.getStyle().toString());paths.put(entry);
+            }
+            actualFonts.put(sample,paths);
+        }
+        report.put("actualDefaultFonts",actualFonts);
         File baseline=new File(root,"system-baseline.json");
         if(phase.equals("system-baseline"))Files.write(baseline.toPath(),renders.toString().getBytes(StandardCharsets.UTF_8));
         else {

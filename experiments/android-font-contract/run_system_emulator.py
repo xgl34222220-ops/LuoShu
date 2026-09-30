@@ -8,7 +8,7 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 PACKAGE='io.github.xgl34222220.luoshu.fontcontract'
-p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');a=p.parse_args()
 if os.environ.get('LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED')!='true':
  raise SystemExit('disposable system mutation not authorized for this run')
 a.output.mkdir(parents=True,exist_ok=True)
@@ -72,6 +72,13 @@ try:
   raw=adb('exec-out','cat',remote);backups[remote]=raw
   (a.output/('original-'+Path(remote).name)).write_bytes(raw)
  if not backups:raise RuntimeError('no system font config found')
+ for name,cmd in [('font-manager',['shell','dumpsys','font']),('font-files',['shell','find','/system/etc','/product/etc','/vendor/etc','/system_ext/etc','/apex','-maxdepth','4','-iname','*font*'])]:
+  (a.output/(name+'.txt')).write_bytes(adb(*cmd,timeout=30,check=False))
+ for remote in ['/product/etc/fonts_customization.xml','/product/etc/font_fallback.xml','/system_ext/etc/font_fallback.xml']:
+  r=subprocess.run(['adb','shell','test','-f',remote])
+  if r.returncode==0:(a.output/('observed-'+remote.strip('/').replace('/','_'))).write_bytes(adb('exec-out','cat',remote))
+ if a.inventory_only:
+  report['inventoryOnly']=True;report['takeover']='not-tested';phase='inventory-complete';save();raise SystemExit(0)
  report['originalConfigHashes']={k:hashlib.sha256(v).hexdigest() for k,v in backups.items()}
  phase='authorized-remount';save();root()
  old_boot=adb('shell','cat','/proc/sys/kernel/random/boot_id').strip()
