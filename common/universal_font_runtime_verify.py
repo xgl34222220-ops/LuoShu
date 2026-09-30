@@ -11,11 +11,16 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
 
 from fontTools.ttLib import TTFont
+
+def _canonical_hash(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
 
 SCHEMA = "universal-font-runtime-verification-v1"
 REVISION = 1
@@ -253,6 +258,9 @@ def _font_manager_tokens(
     target: dict[str, Any],
     snapshot: dict[str, Any],
 ) -> list[str]:
+    if artifact.get("mode") == "fixed-static-xml-v1":
+        binding = artifact.get("staticXmlContract") or {}
+        return [value for value in [str(logical_path), Path(logical_path).name, str(binding.get("postScriptName") or "")] if len(value) >= 3]
     tokens: set[str] = {Path(logical_path).name}
     contract = artifact.get("contract") if isinstance(artifact.get("contract"), dict) else {}
     required_ps = str(contract.get("requiredPostScriptName") or "").strip()
@@ -319,10 +327,25 @@ def _assess_font(
         report["message"] = str(error)
         return report
 
+    is_static_xml = artifact.get("mode") == "fixed-static-xml-v1"
+    static_binding = artifact.get("staticXmlContract") or {}
+    static_contract = artifact.get("report", {}).get("renderContract", {})
     coverage_report: dict[str, Any] = {}
-    for group in _coverage_requirements(target):
+    required_groups = _coverage_requirements(target)
+    if is_static_xml:
+        coverage = static_contract.get("coverage") or {}
+        required_groups = ["digits" if value == "digit" else value for value in coverage.get("exposedRoles", [])]
+        points = sorted(snapshot["codepoints"])
+        if (coverage.get("codepointCount") != len(points)
+                or coverage.get("codepointSha256") != _canonical_hash(points)):
+            failures.append(f"static-coverage-seal-mismatch:{logical_path}")
+        if (static_binding.get("postScriptName") not in snapshot["names"] or snapshot["axes"]
+                or snapshot["italic"] or static_binding.get("fontItalic") is not False):
+            failures.append(f"static-xml-metadata-mismatch:{logical_path}")
+    for group in required_groups:
         probes = PROBES[group]
-        shared = artifact.get("report", {}).get("geometry", {}).get("sharedProbePoints", {}).get(group)
+        shared = ((static_contract.get("geometry", {}).get("sharedProbePoints") or {}).get(group)
+                  if is_static_xml else artifact.get("report", {}).get("geometry", {}).get("sharedProbePoints", {}).get(group))
         if group == "cjk" and shared is not None:
             import device_font_slot_build_base as slot_build
             if (not isinstance(shared, list) or not 4 <= len(shared) <= 64
@@ -356,13 +379,14 @@ def _assess_font(
         if value is not None and not (axis["min"] <= value <= axis["max"]):
             failures.append(f"required-axis-out-of-range:{logical_path}:{tag}")
 
-    variable_required = (bool(required_axes) or str(artifact.get("mode") or "") == "source-variable-preserve"
+    variable_required = (not is_static_xml and (bool(required_axes) or str(artifact.get("mode") or "") == "source-variable-preserve"
                          or (bool(artifact.get("report", {}).get("fixedSelection"))
-                             and target.get("targetContract", {}).get("variable") is True))
+                             and target.get("targetContract", {}).get("variable") is True)))
     if variable_required and not axes:
         failures.append(f"variable-contract-missing:{logical_path}")
 
-    required_weight = int(contract.get("requiredWeight") or target.get("targetContract", {}).get("weight") or 400)
+    required_weight = int(static_binding.get("fontWeight") if is_static_xml else
+                          contract.get("requiredWeight") or target.get("targetContract", {}).get("weight") or 400)
     if "wght" in axes:
         axis = axes["wght"]
         if not (axis["min"] <= required_weight <= axis["max"]):
@@ -382,8 +406,13 @@ def _assess_font(
 
     tokens = _font_manager_tokens(logical_path, artifact, target, snapshot)
     hits = [token for token in tokens if token.lower() in font_dump_lower]
+    if is_static_xml:
+        registered = set(re.findall(r"(?m)^\s*style\s*=\s*FontStyle\s*\{[^}]+\},\s*path\s*=\s*([^,\s]+)", font_dump_lower))
+        hits = [logical_path] if logical_path.lower() in registered else []
     report["fontManagerTokens"] = tokens
     report["fontManagerHits"] = hits
+    if is_static_xml and not hits:
+        warnings.append(f"static-font-manager-path-unconfirmed:{logical_path}")
     return report
 
 
@@ -399,6 +428,7 @@ def verify(
     active_font: str,
     visible_root: Path | None = None,
     boot_id: str = "",
+    fixed_route: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if plan.get("schema") != PLAN_SCHEMA:
         raise VerificationError("FontPlan schema mismatch")
@@ -417,6 +447,38 @@ def verify(
     warnings: list[str] = []
     artifact_by_id = _artifact_index(artifacts)
     target_by_path = _target_index(plan)
+    originals = {}
+    if "fixedStaticRoute" in (deployment.get("verificationContracts") or {}):
+        import font_route_contract
+        if fixed_route is None:
+            raise VerificationError("frozen fixed-static route missing")
+        font_route_contract.validate_route_plan(fixed_route)
+        if fixed_route.get("routeId") != deployment.get("routeId") or fixed_route.get("fontPlanId") != plan.get("planId"):
+            raise VerificationError("frozen fixed-static route identity mismatch")
+        originals = fixed_route.get("retainedOriginals") or {}
+        import universal_font_deployment as deployment_contract
+        import universal_font_compiler as compiler_contract
+        deployment_contract.validate_payload_integrity(deployment)
+        if fixed_route.get("dynamicFontGeneration") != deployment["verificationContracts"]["fixedStaticRoute"].get("dynamicFontGeneration"):
+            raise VerificationError("fixed-static dynamic generation differs from frozen route")
+        deployment_contract.validate_dynamic_generation(deployment, visible_root)
+        if artifacts.get("manifestId") != compiler_contract._manifest_id(plan["planId"], fixed_route["routeId"], artifacts["artifacts"], artifacts.get("deferredDynamicTargets") or []):
+            raise VerificationError("frozen static artifact semantic identity mismatch")
+        expected_static = {}; expected_original = {}
+        bindings = artifacts.get("staticXmlBindings") or {}
+        for document in fixed_route["documents"].values():
+            for operation in document["operations"]:
+                if operation["artifact"].get("representation") != "fixed-static-xml-v1": continue
+                identity = operation["artifact"]["artifactId"]; binding = bindings.get(identity) or {}
+                logical = operation["assetRoot"] + "/" + str(binding.get("fileName") or "")
+                expected_static.setdefault(logical, set()).add(identity)
+        for identity, original in originals.items():
+            expected_original.setdefault(original["assetRoot"] + "/" + original["fileName"], set()).add(identity)
+        actual_static = {f["logicalPath"]: set(f.get("artifactIds") or []) for f in deployment["files"] if f.get("kind") == "xml-static-font"}
+        actual_original = {f["logicalPath"]: set(f.get("originalIds") or []) for f in deployment["files"] if f.get("kind") == "xml-original"}
+        if expected_static != actual_static or expected_original != actual_original:
+            raise VerificationError("fixed-static runtime route membership incomplete")
+        warnings.append("fixed-static-consumer-proof-pending")
 
     deployment_id = str(deployment.get("deploymentId") or "")
     payload_digest = str(deployment.get("payloadDigest") or "")
@@ -477,23 +539,47 @@ def verify(
         if str(item.get("kind") or "") == "xml":
             continue
         font_file_count += 1
-        artifact_id = str(item.get("artifactId") or "")
-        artifact = artifact_by_id.get(artifact_id)
-        if artifact is None:
-            failures.append(f"artifact-missing:{artifact_id or logical}")
+        if item.get("kind") == "xml-original":
+            ids = item.get("originalIds") or []
+            if not ids: failures.append(f"retained-original-contract-missing:{logical}")
+            for identity in ids:
+                original = originals.get(identity) or {}
+                if (original.get("sha256") != expected_sha or
+                        original.get("assetRoot", "") + "/" + original.get("fileName", "") != logical):
+                    failures.append(f"retained-original-identity-mismatch:{logical}")
+                    continue
+                try: _font_snapshot(visible, int(original["faceIndex"]))
+                except (VerificationError, KeyError): failures.append(f"retained-original-face-invalid:{logical}")
+            registered = set(re.findall(r"(?m)^\s*style\s*=\s*FontStyle\s*\{[^}]+\},\s*path\s*=\s*([^,\s]+)", font_dump_lower))
+            if logical.lower() in registered: font_manager_hits += 1
+            else: warnings.append(f"retained-original-path-unconfirmed:{logical}")
             continue
-        target_path = str(artifact.get("targetPath") or "")
-        target = target_by_path.get(target_path)
-        if target is None:
-            failures.append(f"fontplan-target-missing:{target_path or logical}")
+        ids = item.get("artifactIds") if item.get("kind") == "xml-static-font" else [str(item.get("artifactId") or "")]
+        if not isinstance(ids, list) or not ids:
+            failures.append(f"static-route-artifacts-missing:{logical}")
             continue
-        font_report = _assess_font(
-            logical, visible, artifact, target, expected_sha,
-            font_dump_lower, failures, warnings,
-        )
-        font_reports.append(font_report)
-        if font_report.get("fontManagerHits"):
-            font_manager_hits += 1
+        any_hit = False
+        for artifact_id in ids:
+            artifact = artifact_by_id.get(artifact_id)
+            if artifact is None:
+                failures.append(f"artifact-missing:{artifact_id or logical}")
+                continue
+            if item.get("kind") == "xml-static-font" and artifact.get("sha256") != expected_sha:
+                failures.append(f"static-route-file-digest-mismatch:{logical}")
+                continue
+            if item.get("kind") == "xml-static-font" and artifact.get("mode") != "fixed-static-xml-v1":
+                failures.append(f"static-artifact-representation-mismatch:{logical}")
+                continue
+            target_path = str(artifact.get("targetPath") or "")
+            target = target_by_path.get(target_path)
+            if target is None:
+                failures.append(f"fontplan-target-missing:{target_path or logical}")
+                continue
+            font_report = _assess_font(logical, visible, artifact, target, expected_sha,
+                                       font_dump_lower, failures, warnings)
+            font_reports.append(font_report)
+            any_hit = any_hit or bool(font_report.get("fontManagerHits"))
+        if any_hit: font_manager_hits += 1
 
     dynamic_reports: list[dict[str, Any]] = []
     for item in deployment.get("dynamicMounts") or []:
@@ -708,6 +794,11 @@ def main() -> int:
             "manifestId",
             str(artifacts.get("manifestId") or ""),
         )
+        fixed_route = None
+        if "fixedStaticRoute" in (deployment.get("verificationContracts") or {}):
+            route_path = args.deployment.parent / "fixed-static-route-plan.json"
+            fixed_route = _load(route_path, "fixed-static-xml-route-plan-v1")
+            _validate_frozen_contract(deployment, "fixedStaticRoute", route_path, "routeId", fixed_route["routeId"])
         font_dump = (
             args.font_dump.read_text(encoding="utf-8", errors="replace")
             if args.font_dump and args.font_dump.is_file()
@@ -723,7 +814,7 @@ def main() -> int:
             mountinfo=_mounts(args.mountinfo),
             active_font=args.active_font,
             visible_root=args.visible_root,
-            boot_id=args.boot_id,
+            boot_id=args.boot_id, fixed_route=fixed_route,
         )
     except Exception as error:
         result = _error_result(args.active_font, args.boot_id, str(error) or error.__class__.__name__)

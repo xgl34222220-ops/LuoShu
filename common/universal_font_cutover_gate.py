@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import minimal_xml_router
+import font_route_contract
 import universal_font_compiler
 import universal_font_deployment
 import universal_font_plan
@@ -48,7 +48,7 @@ def evaluate(
 
     try:
         universal_font_plan.validate_plan(plan)
-        minimal_xml_router.validate_route_plan(route, font_plan=plan)
+        font_route_contract.validate_route_plan(route, font_plan=plan)
         universal_font_compiler.validate_manifest(artifacts, plan, route)
         universal_font_deployment.validate_deployment(
             deployment, plan, route, artifacts, payload_root
@@ -130,6 +130,9 @@ def evaluate(
         warnings.append(f"partial-coverage:preserved-math-glyphs:{preserved_math}")
     if preserved_marks:
         warnings.append(f"partial-coverage:preserved-shared-marks:{preserved_marks}")
+    static_deferred = int(route_summary.get("representationDeferralCount") or 0)
+    if static_deferred:
+        warnings.append(f"partial-coverage:fixed-static-xml-deferred:{static_deferred}")
     eligible = not reasons
     return {
         "schema": SCHEMA,
@@ -142,8 +145,11 @@ def evaluate(
         "payloadDigest": str(deployment.get("payloadDigest") or ""),
         "summary": {
             "slotCount": len(targets),
-            "coverage": ("partial-protected-typography" if preserved_math or preserved_marks else
+            "coverage": ("mixed-static-and-retained-adapters" if static_deferred else
+                         "partial-protected-typography" if preserved_math or preserved_marks else
                          "partial-style-preserved" if preserved_count else "planned-targets"),
+            "fixedStaticOperationCount": int(route_summary.get("fixedStaticOperationCount") or 0),
+            "fixedStaticDeferralCount": static_deferred,
             "preservedSharedMarks": preserved_marks,
             "preservedMathGlyphs": preserved_math,
             "preservedStyleRouteCount": preserved_count,

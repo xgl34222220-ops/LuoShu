@@ -174,3 +174,7 @@ common/install_ui.sh
 common/universal_mixed_font.py
 common/universal_mixed_font.sh
 common/universal_mixed_variable.py
+common/font_route_contract.py
+common/fixed_static_xml_router.py
+common/fixed_static_xml_router.sh
+common/fixed_static_xml_compiler.py

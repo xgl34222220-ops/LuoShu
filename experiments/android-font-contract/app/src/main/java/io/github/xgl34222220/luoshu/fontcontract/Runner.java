@@ -87,6 +87,24 @@ public final class Runner extends Instrumentation {
         }
         return result;
     }
+    private Typeface expectedSystemRole(String role) throws Exception {
+        String path=arguments.getString("expected"+role+"Path","");
+        if(path.isEmpty())return face(asset("composite.ttf"),400,true);
+        Font.Builder builder=new Font.Builder(new File(path))
+            .setTtcIndex(Integer.parseInt(arguments.getString("expected"+role+"Face","0")))
+            .setWeight(400).setSlant(FontStyle.FONT_SLANT_UPRIGHT);
+        String raw=arguments.getString("expected"+role+"Axes","");
+        if(!raw.isEmpty()) {
+            ArrayList<android.graphics.fonts.FontVariationAxis> axes=new ArrayList<>();
+            for(String item:raw.split(",")) {String[] pair=item.split("=",2);axes.add(new android.graphics.fonts.FontVariationAxis(pair[0],Float.parseFloat(pair[1])));}
+            builder.setFontVariationSettings(axes.toArray(new android.graphics.fonts.FontVariationAxis[0]));
+        }
+        return new Typeface.CustomFallbackBuilder(new FontFamily.Builder(builder.build()).build()).setSystemFallback("sans-serif").build();
+    }
+    private String fontBufferHash(Font font) throws Exception {
+        MessageDigest digest=MessageDigest.getInstance("SHA-256");java.nio.ByteBuffer data=font.getBuffer().duplicate();data.rewind();digest.update(data);
+        StringBuilder result=new StringBuilder();for(byte value:digest.digest())result.append(String.format(Locale.ROOT,"%02x",value&255));return result.toString();
+    }
     private void systemPhase(String phase) throws Exception {
         JSONObject renders=new JSONObject();
         for(String text:new String[]{"A","1","中","Ω","😀"})renders.put(text,draw(Typeface.DEFAULT,text,null));
@@ -98,7 +116,7 @@ public final class Runner extends Instrumentation {
             org.json.JSONArray paths=new org.json.JSONArray();
             for(int i=0;i<glyphs.glyphCount();i++){
                 android.graphics.fonts.Font font=glyphs.getFont(i);
-                JSONObject entry=new JSONObject();entry.put("file",String.valueOf(font.getFile()));entry.put("ttcIndex",font.getTtcIndex());entry.put("style",font.getStyle().toString());paths.put(entry);
+                JSONObject entry=new JSONObject();entry.put("file",String.valueOf(font.getFile()));entry.put("ttcIndex",font.getTtcIndex());entry.put("style",font.getStyle().toString());entry.put("sha256",fontBufferHash(font));entry.put("glyphId",glyphs.getGlyphId(i));paths.put(entry);
             }
             actualFonts.put(sample,paths);
         }
@@ -109,8 +127,13 @@ public final class Runner extends Instrumentation {
             JSONObject old=new JSONObject(new String(Files.readAllBytes(baseline.toPath()),StandardCharsets.UTF_8));
             for(String text:new String[]{"Ω","😀"})require(old.getString(text).equals(renders.getString(text)),"system fallback changed "+text);
             if(phase.equals("system-applied")) {
-                Typeface selected=face(asset("composite.ttf"),400,true);
-                for(String text:new String[]{"A","1","中"})require(draw(selected,text,null).equals(renders.getString(text)),"system default did not take selected glyph "+text);
+                String[] samples={"A","1","中"};String[] roles={"Latin","Digit","Cjk"};
+                for(int i=0;i<samples.length;i++){
+                    String text=samples[i];Typeface selected=expectedSystemRole(roles[i]);
+                    require(draw(selected,text,null).equals(renders.getString(text)),"system default did not take selected glyph "+text);
+                    String expected=arguments.getString("expected"+roles[i]+"Path","");
+                    if(!expected.isEmpty())require(expected.equals(actualFonts.getJSONArray(text).getJSONObject(0).getString("file")),"unexpected actual default font path "+text);
+                }
                 require(!old.getString("A").equals(renders.getString("A")),"system mutation was not discriminating");
             } else if(phase.equals("system-restored")) {
                 for(String text:new String[]{"A","1","中"})require(old.getString(text).equals(renders.getString(text)),"system restoration differs "+text);

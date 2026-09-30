@@ -63,7 +63,7 @@ from legacy_v14_4.composite_layout import (
 )
 
 SCHEMA = "universal-font-artifacts-v1"
-COMPILER_REVISION = 4
+COMPILER_REVISION = 5
 FONT_PLAN_SCHEMA = "universal-font-plan-v1"
 ROUTE_SCHEMA = "minimal-xml-route-plan-v1"
 ROUTABLE_ACTIONS = {"replace", "compile", "compile-specialized"}
@@ -2052,6 +2052,10 @@ def _choose_mode(
     deployment_kinds: list[str],
     stock: Path,
 ) -> str:
+    if artifact.get("representation") == "fixed-static-xml-v1":
+        if deployment_kinds != ["xml-route"]:
+            raise CompilerError("fixed static representation is XML-only")
+        return "fixed-static-xml-v1"
     role = str(target.get("role") or "")
     dynamic_routes = artifact.get("requiredDynamicRoutes") or []
     dynamic_contracts = {(str(r.get("style") or "normal"), _int(r.get("weight"), 400),
@@ -2127,6 +2131,24 @@ def _compile_unit_in_view(
                 "source-style-axis-missing", "source-style-axis-out-of-range",
             }:
                 raise CompilerError(f"FontPlan 风险不能由编译器安全消除：{risk}")
+
+        if artifact.get("representation") == "fixed-static-xml-v1":
+            import fixed_static_xml_compiler as fixed_static
+            prepared = unit.get("_fixedStaticPrepared")
+            if prepared is None:
+                prepared = fixed_static.prepare_unit(unit, stock_paths, allow_live_stock)
+            fixed_result = fixed_static.compile_prepared(prepared, output_dir,
+                                                        render_cache if render_cache is not None else {})
+            output = Path(fixed_result["output"])
+            result.update(status="ready", output=str(output), sha256=_sha256(output),
+                          bytes=int(output.stat().st_size), mode=fixed_static.REPRESENTATION,
+                          report=fixed_result["report"], staticXmlContract=fixed_result["staticXmlContract"],
+                          stock={"logicalPath": target_path, "sourcePath": prepared["stockPath"],
+                                 "sha256": prepared["contract"]["stock"]["sha256"],
+                                 "faceIndex": artifact["originalStockFaceIndex"]})
+            _compile_trace(artifact, "unit-end", status="ready", reason="",
+                           elapsedSeconds=round(time.monotonic() - started, 6))
+            return result
 
         stock = _resolve_stock(target_path, stock_paths, allow_live_stock)
         stock_face = max(0, _int(artifact.get("requiredFaceIndex"), 0))
@@ -2227,7 +2249,14 @@ def _mixed_preflight(units: list[dict[str, Any]], stock_paths: dict[str, Path], 
             raise CompilerError(f"mixed-preflight: {','.join(sorted(risks))}: {path}")
         stock = _resolve_stock(path, stock_paths, allow_live_stock)
         try:
-            _verify_stock_identity(target, stock, max(0, _int(artifact.get("requiredFaceIndex"), 0)))
+            stock_face = (artifact.get("originalStockFaceIndex")
+                          if artifact.get("representation") == "fixed-static-xml-v1"
+                          else artifact.get("requiredFaceIndex"))
+            if artifact.get("representation") == "fixed-static-xml-v1":
+                import fixed_static_xml_compiler
+                fixed_static_xml_compiler.verify_original_face(target, stock, max(0, _int(stock_face, 0)))
+            else:
+                _verify_stock_identity(target, stock, max(0, _int(stock_face, 0)))
         except CompilerError as error:
             _compile_trace(artifact, "preflight-blocked", reason=str(error))
             raise CompilerError("mixed-preflight: " + str(error)) from error
@@ -2261,7 +2290,7 @@ def _compile_trace(artifact: dict[str, Any], event: str, **details: Any) -> None
         pass
 
 
-def _mixed_compile_progress(index: int, total: int) -> None:
+def _mixed_compile_progress(index: int, total: int, *, base=82, span=9, label="通用引擎正在编译字体槽") -> None:
     raw = os.environ.get("LUOSHU_SWITCH_PROGRESS_FILE", "")
     request = os.environ.get("LUOSHU_MIX_REQUEST_ID", "")
     if not raw or not request or os.environ.get("LUOSHU_UNIVERSAL_MIX_STRICT") != "1":
@@ -2269,8 +2298,8 @@ def _mixed_compile_progress(index: int, total: int) -> None:
     path = Path(raw)
     temporary = path.with_name(path.name + f".tmp.{os.getpid()}")
     try:
-        temporary.write_text(f"requestId={request}\nstate=running\npercent={82 + index * 9 // max(total, 1)}\n"
-                             f"message=通用引擎正在编译字体槽 {index + 1}/{total}\nupdated={int(time.time())}\n")
+        temporary.write_text(f"requestId={request}\nstate=running\npercent={base + index * span // max(total, 1)}\n"
+                             f"message={label} {index + 1}/{total}\nupdated={int(time.time())}\n")
         os.replace(temporary, path)
     except OSError:
         temporary.unlink(missing_ok=True)
@@ -2291,12 +2320,31 @@ def _compile_all_in_view(
     if font_plan.get("schema") != FONT_PLAN_SCHEMA:
         raise CompilerError("不支持的 FontPlan")
     universal_font_plan.validate_plan(font_plan)
-    if route_plan.get("schema") != ROUTE_SCHEMA:
+    if route_plan.get("schema") not in {ROUTE_SCHEMA, "fixed-static-xml-route-plan-v1"}:
         raise CompilerError("不支持的 XML RoutePlan")
-    minimal_xml_router.validate_route_plan(route_plan, font_plan=font_plan)
+    if route_plan.get("schema") == ROUTE_SCHEMA:
+        minimal_xml_router.validate_route_plan(route_plan, font_plan=font_plan)
+    else:
+        import font_route_contract
+        font_route_contract.validate_route_plan(route_plan, font_plan=font_plan)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     units = _collect_units(font_plan, route_plan)
+    # Every new static route is measured and sealed before the first outline
+    # render. Legacy physical/dynamic units retain their existing contracts.
+    static_units = [unit for unit in units if unit["artifact"].get("representation") == "fixed-static-xml-v1"]
+    for measure_index, unit in enumerate(static_units):
+        import fixed_static_xml_compiler as fixed_static
+        _mixed_compile_progress(measure_index, len(static_units), base=82, span=3, label="正在测量原厂槽位")
+        measure_started = time.monotonic()
+        _compile_trace(unit["artifact"], "fixed-static-measure-start", index=measure_index, total=len(static_units))
+        try:
+            unit["_fixedStaticPrepared"] = fixed_static.prepare_unit(unit, stock_paths, allow_live_stock)
+        except CompilerError as error:
+            _compile_trace(unit["artifact"], "fixed-static-measure-blocked", reason=str(error), elapsed=time.monotonic()-measure_started)
+            raise CompilerError(f"fixed-static-measure {unit['target'].get('path')} face={unit['artifact'].get('originalStockFaceIndex')}: {error}") from error
+        _compile_trace(unit["artifact"], "fixed-static-measure-ready", elapsed=time.monotonic()-measure_started,
+                       renderContractId=unit["_fixedStaticPrepared"]["binding"]["renderContractId"])
     if os.environ.get("LUOSHU_UNIVERSAL_MIX_STRICT") == "1":
         for path, target in (font_plan.get("targets") or {}).items():
             if target.get("action") == "blocked" or target.get("status") == "blocked":
@@ -2318,7 +2366,10 @@ def _compile_all_in_view(
                 "reason":"skipped-after-atomic-failure:" + failed_artifact})
             _compile_trace(artifact, "unit-skipped", reason="atomic failure", failedArtifactId=failed_artifact)
             continue
-        _mixed_compile_progress(index, len(units))
+        if static_units:
+            _mixed_compile_progress(index, len(units), base=85, span=6, label="正在生成和验证字体资产")
+        else:
+            _mixed_compile_progress(index, len(units))
         artifacts.append(_compile_unit(unit, stock_paths, output_dir, allow_live_stock, render_cache))
         if os.environ.get("LUOSHU_UNIVERSAL_MIX_STRICT") == "1" and artifacts[-1]["status"] == "blocked":
             failed_artifact = str(artifacts[-1]["artifactId"])
@@ -2356,7 +2407,7 @@ def _compile_all_in_view(
         for item in artifacts
         if item.get("status") == "ready" and "dynamic-slot" in (item.get("deploymentKinds") or [])
     }
-    return {
+    payload = {
         "schema": SCHEMA,
         "compilerRevision": COMPILER_REVISION,
         "state": "compiled" if blocked == 0 else "partial",
@@ -2381,6 +2432,12 @@ def _compile_all_in_view(
         "dynamicTargetMap": dict(sorted(dynamic_target_map.items())),
         "artifacts": artifacts,
     }
+    if route_plan.get("schema") == "fixed-static-xml-route-plan-v1":
+        payload["staticXmlBindings"] = {
+            item["artifactId"]: copy.deepcopy(item["staticXmlContract"])
+            for item in artifacts if item["status"] == "ready" and "staticXmlContract" in item
+        }
+    return payload
 
 
 def validate_manifest(
@@ -2413,6 +2470,8 @@ def validate_manifest(
     expected_artifact_map: dict[str, str] = {}
     expected_physical_map: dict[str, str] = {}
     expected_dynamic_map: dict[str, str] = {}
+    expected_static_bindings: dict[str, Any] = {}
+    expected_units = {unit["artifact"]["artifactId"]: unit for unit in _collect_units(font_plan, route_plan)}
     ready = blocked = 0
     for artifact in artifacts:
         if not isinstance(artifact, dict):
@@ -2421,6 +2480,13 @@ def validate_manifest(
         if not artifact_id.startswith("ufc:") or artifact_id in ids:
             raise CompilerError("Artifact manifest artifactId 无效或重复")
         ids.add(artifact_id)
+        if route_plan.get("schema") == "fixed-static-xml-route-plan-v1":
+            expected_unit = expected_units.get(artifact_id)
+            if (expected_unit is None or artifact.get("contract") != expected_unit["artifact"]
+                    or artifact.get("deploymentKinds") != expected_unit["deploymentKinds"]
+                    or artifact.get("routeNodes") != expected_unit["routeNodes"]
+                    or artifact.get("targetPath") != expected_unit["target"].get("path")):
+                raise CompilerError("Explicit XML artifact does not match its complete route unit")
         status = str(artifact.get("status") or "")
         if status == "ready":
             ready += 1
@@ -2428,6 +2494,15 @@ def validate_manifest(
             if not path.is_file() or _sha256(path) != artifact.get("sha256"):
                 raise CompilerError(f"Artifact 文件缺失或摘要不一致：{artifact_id}")
             expected_artifact_map[artifact_id] = path.name
+            if artifact.get("contract", {}).get("representation") == "fixed-static-xml-v1":
+                import fixed_static_xml_compiler as fixed_static
+                unit = expected_units.get(artifact_id)
+                if route_plan.get("schema") != "fixed-static-xml-route-plan-v1" or unit is None:
+                    raise CompilerError("fixed static artifact requires its explicit XML route plan")
+                if artifact.get("contract") != unit["artifact"] or artifact.get("deploymentKinds") != ["xml-route"]:
+                    raise CompilerError("fixed static artifact differs from its route contract")
+                fixed_static.validate_artifact(artifact, unit)
+                expected_static_bindings[artifact_id] = copy.deepcopy(artifact["staticXmlContract"])
             if "physical-slot" in (artifact.get("deploymentKinds") or []):
                 expected_physical_map[str(artifact.get("targetPath") or "")] = artifact_id
             if "dynamic-slot" in (artifact.get("deploymentKinds") or []):
@@ -2439,6 +2514,8 @@ def validate_manifest(
         else:
             raise CompilerError(f"Artifact 状态无效：{artifact_id}")
 
+    if route_plan.get("schema") == "fixed-static-xml-route-plan-v1" and ids != set(expected_units):
+        raise CompilerError("Explicit XML artifact set is incomplete")
     expected = {
         "artifactCount": len(artifacts),
         "readyCount": ready,
@@ -2460,6 +2537,8 @@ def validate_manifest(
         raise CompilerError("Artifact manifest physicalTargetMap 与 ready artifacts 不一致")
     if dynamic_map != dict(sorted(expected_dynamic_map.items())):
         raise CompilerError("Artifact manifest dynamicTargetMap 与 ready artifacts 不一致")
+    if manifest.get("staticXmlBindings", {}) != expected_static_bindings:
+        raise CompilerError("Artifact staticXmlBindings differs from compiled fixed static assets")
     if manifest.get("preservedRoutes", []) != route_plan.get("preservedRoutes", []):
         raise CompilerError("Artifact preserved route coverage differs from RoutePlan")
     expected_manifest_id = _manifest_id(

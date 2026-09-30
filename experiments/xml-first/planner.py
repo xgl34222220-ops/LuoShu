@@ -19,6 +19,7 @@ def plan(xml_bytes, expected_sha, selections):
     nodes = list(root.iter('font'))
     parents = {child: parent for parent in root.iter() for child in parent}
     groups, routes, seen = {}, [], set()
+    retained_families = {}
     for selected in selections:
         ordinal = selected['ordinal']
         if not isinstance(ordinal, int) or ordinal < 0 or ordinal >= len(nodes) or ordinal in seen:
@@ -32,6 +33,12 @@ def plan(xml_bytes, expected_sha, selections):
         before = ET.tostring(node, encoding='unicode')
         if digest(before) != selected['nodeDigest']:
             raise ValueError('XML node contract changed')
+        if family.get('variant') or family.get('fallbackFor') or family.get('fallbackfor'):
+            raise ValueError('specialized family cannot become a general static route')
+        # Capture stock fallback before the first mutation in this family. The
+        # primary static composite intentionally does not cover every script.
+        if family not in retained_families:
+            retained_families[family] = copy.deepcopy(family)
         if selected['role'] not in {'cjk', 'latin', 'digit', 'ui-sans'}:
             raise ValueError('protected or unknown role cannot be selected')
         if node.get('style', 'normal') != 'normal':
@@ -64,11 +71,28 @@ def plan(xml_bytes, expected_sha, selections):
     for i, node in enumerate(nodes):
         if i not in seen and ET.tostring(node) != ET.tostring(old_nodes[i]):
             raise AssertionError('unselected font changed')
+    retained = []
+    for family, source in retained_families.items():
+        parent = parents.get(family)
+        if parent is None:
+            raise ValueError('primary family has no stable parent')
+        # AOSP recognizes unnamed fallback families. The original named family,
+        # aliases and existing locale fallback order remain intact. This prototype
+        # still requires immutable stock asset materialization before deployment.
+        name = source.attrib.pop('name')
+        position = list(parent).index(family) + 1
+        parent.insert(position, source)
+        retained.append({'family': name,
+                         'stockFamilyDigest': digest(ET.tostring(source, encoding='unicode')),
+                         'fontReferences': [(node.text or '').strip() for node in source.iter('font')],
+                         'requiresImmutableStockAssets': True})
     return {'schema': 'experimental-fixed-xml-plan-v1', 'deviceDeployable': False,
             'stockXmlSha256': expected_sha, 'groups': list(groups.values()), 'routes': routes,
             'xml': ET.tostring(root, encoding='unicode'),
+            'retainedFallbacks': retained,
             'limits': ['upright fixed selections only', 'caller verifies geometry',
-                       'no global mount or OEM deployment evidence']}
+                       'immutable stock fallback copies not materialized',
+                       'planner not yet wired to proven system experiment or production boot mounting']}
 
 
 def compile_groups(planned, renderer):

@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 
 import minimal_xml_router
+import font_route_contract
+import stock_font_view
 import universal_font_compiler
 import universal_font_plan
 
@@ -235,6 +237,8 @@ def _payload_digest(files: list[dict[str, Any]], dynamics: list[dict[str, Any]])
                 "bytes": item["bytes"],
                 "artifactId": item.get("artifactId", ""),
                 "sourceXml": item.get("sourceXml", ""),
+                **({"artifactIds": item["artifactIds"], "sourceXmls": item["sourceXmls"]} if "artifactIds" in item else {}),
+                **({"originalIds": item["originalIds"]} if "originalIds" in item else {}),
             }
             for item in sorted(files, key=lambda value: value["logicalPath"])
         ],
@@ -252,6 +256,48 @@ def _payload_digest(files: list[dict[str, Any]], dynamics: list[dict[str, Any]])
     return f"sha256:{_canonical_hash(material)}"
 
 
+def _record_shared_static(records, logical, relative, details, artifact_id, source_xml):
+    prior = records.get(logical)
+    if prior is None:
+        _record_file(records, logical, relative, kind="xml-static-font",
+                     sha256=details["sha256"], bytes_count=details["bytes"], artifact_id=artifact_id)
+        prior = records[logical]; prior["artifactIds"] = []; prior["sourceXmls"] = []
+    if (prior.get("kind") != "xml-static-font" or prior.get("sha256") != details["sha256"]
+            or prior.get("payloadPath") != relative or prior.get("bytes") != details["bytes"]):
+        raise DeploymentError("shared static render conflicts at " + logical)
+    prior["artifactIds"] = sorted(set(prior["artifactIds"] + [artifact_id]))
+    prior["artifactId"] = prior["artifactIds"][0]
+    prior["sourceXmls"] = sorted(set(prior["sourceXmls"] + [source_xml]))
+
+
+def _copy_retained_originals(route_plan, stage, records):
+    if route_plan.get("schema") != "fixed-static-xml-route-plan-v1":
+        return
+    raw_map = os.environ.get("LUOSHU_STOCK_FONT_MAP")
+    stock_paths = universal_font_compiler._stock_map(Path(raw_map) if raw_map else None)
+    with stock_font_view.session(stage.parent):
+        for original_id, original in sorted(route_plan["retainedOriginals"].items()):
+            target = original["target"]
+            stock = universal_font_compiler._resolve_stock(original["targetPath"], stock_paths, False)
+            import fixed_static_xml_compiler
+            evidence = fixed_static_xml_compiler.verify_original_face(target, stock, original["faceIndex"])
+            if evidence.get("sha256") != original["sha256"]:
+                raise DeploymentError("retained fallback differs from captured original")
+            face = universal_font_compiler._open_face(stock, original["faceIndex"], lazy=True)
+            face.close()
+            logical = _safe_logical(original["assetRoot"] + "/" + original["fileName"])
+            relative = str(_payload_relative(logical))
+            details = _copy_verified(stock, original["sha256"], stage / relative)
+            prior = records.get(str(logical))
+            if prior is None:
+                _record_file(records, str(logical), relative, kind="xml-original",
+                             sha256=details["sha256"], bytes_count=details["bytes"])
+                prior = records[str(logical)]; prior["originalIds"] = []
+            if prior.get("kind") != "xml-original" or prior.get("sha256") != original["sha256"]:
+                raise DeploymentError("retained original collides with generated payload")
+            prior["originalIds"] = sorted(set(prior["originalIds"] + [original_id]))
+
+
 def build_deployment(
     font_plan: dict[str, Any],
     route_plan: dict[str, Any],
@@ -259,7 +305,7 @@ def build_deployment(
     output_root: Path,
 ) -> dict[str, Any]:
     universal_font_plan.validate_plan(font_plan)
-    minimal_xml_router.validate_route_plan(route_plan, font_plan=font_plan)
+    font_route_contract.validate_route_plan(route_plan, font_plan=font_plan)
     universal_font_compiler.validate_manifest(artifact_manifest, font_plan, route_plan)
 
     summary = artifact_manifest.get("summary") if isinstance(artifact_manifest.get("summary"), dict) else {}
@@ -285,10 +331,11 @@ def build_deployment(
     try:
         # Render Phase 5 XML first. The renderer checks source XML digests and
         # proves that only planned font.text nodes change.
-        minimal_xml_router.render_all(
+        font_route_contract.render_all(
             route_plan,
             {str(k): str(v) for k, v in artifact_map.items()},
             stage,
+            compiled_bindings=artifact_manifest.get("staticXmlBindings") or {},
         )
 
         documents = route_plan.get("documents") if isinstance(route_plan.get("documents"), dict) else {}
@@ -319,10 +366,10 @@ def build_deployment(
                 filename = str(artifact_map.get(artifact_id) or "")
                 if not filename or Path(filename).name != filename:
                     raise DeploymentError(f"XML artifact 文件名无效：{artifact_id}")
-                logical_font = _artifact_destination_for_xml(
-                    str(operation.get("targetPath") or ""),
-                    filename,
-                )
+                if artifact.get("representation") == "fixed-static-xml-v1":
+                    logical_font = _safe_logical(str(operation.get("assetRoot") or "") + "/" + filename)
+                else:
+                    logical_font = _artifact_destination_for_xml(str(operation.get("targetPath") or ""), filename)
                 rel = _payload_relative(logical_font)
                 destination = stage / rel
                 details = _copy_verified(
@@ -330,16 +377,14 @@ def build_deployment(
                     str(compiled["sha256"]),
                     destination,
                 )
-                _record_file(
-                    files,
-                    str(logical_font),
-                    str(rel),
-                    kind="xml-font",
-                    sha256=details["sha256"],
-                    bytes_count=details["bytes"],
-                    artifact_id=artifact_id,
-                    source_xml=str(source_xml),
-                )
+                if artifact.get("representation") == "fixed-static-xml-v1":
+                    _record_shared_static(files, str(logical_font), str(rel), details, artifact_id, str(source_xml))
+                else:
+                    _record_file(files, str(logical_font), str(rel), kind="xml-font",
+                                 sha256=details["sha256"], bytes_count=details["bytes"],
+                                 artifact_id=artifact_id, source_xml=str(source_xml))
+
+        _copy_retained_originals(route_plan, stage, files)
 
         # Physical-only targets keep the exact ROM logical path.
         for logical_value, artifact_id_raw in sorted(physical_map.items()):
@@ -431,6 +476,17 @@ def build_deployment(
             },
         }
 
+        if route_plan.get("schema") == "fixed-static-xml-route-plan-v1":
+            route_snapshot = contract_root / "fixed-static-route-plan.json"
+            frozen_route = copy.deepcopy(route_plan)
+            for doc in frozen_route["documents"].values(): doc.pop("sourcePath", None)
+            for doc in frozen_route["legacyRoutePlan"]["documents"].values(): doc.pop("sourcePath", None)
+            _atomic_json(route_snapshot, frozen_route)
+            verification_contracts["fixedStaticRoute"] = {
+                "payloadPath": ".luoshu-runtime/deployment/fixed-static-route-plan.json",
+                "sha256": _sha256(route_snapshot), "routeId": route_plan["routeId"],
+                "dynamicFontGeneration": copy.deepcopy(route_plan["dynamicFontGeneration"])}
+
         file_list = sorted(files.values(), key=lambda value: value["logicalPath"])
         payload_digest = _payload_digest(file_list, dynamic_mounts)
         partitions = sorted({
@@ -498,6 +554,16 @@ def build_deployment(
 
 def validate_dynamic_generation(deployment: dict[str, Any], visible_root: Path | None = None) -> None:
     """Check the authoritative dynamic generation again immediately before boot binding."""
+    fixed = (deployment.get("verificationContracts") or {}).get("fixedStaticRoute")
+    if fixed is not None:
+        generation = fixed.get("dynamicFontGeneration") or {}
+        if generation.get("path") != "/data/fonts/config/config.xml" or type(generation.get("exists")) is not bool:
+            raise DeploymentError("fixed-static dynamic generation contract missing")
+        path = (visible_root / generation["path"].lstrip("/")) if visible_root else Path(generation["path"])
+        if path.is_symlink() or path.is_file() != generation["exists"]:
+            raise DeploymentError("font update generation appeared or disappeared")
+        if path.is_file() and _sha256(path) != generation.get("sha256"):
+            raise DeploymentError("font update generation changed before activation")
     for item in deployment.get("dynamicMounts") or []:
         identity = item.get("dynamicIdentity")
         if not identity:  # Backwards-compatible sealed synthetic/older payloads.
@@ -633,6 +699,11 @@ def validate_payload_integrity(
             ("fontPlan", "planId", deployment.get("fontPlanId"), ".luoshu-runtime/deployment/font-plan.json"),
             ("artifactManifest", "manifestId", deployment.get("artifactManifestId"), ".luoshu-runtime/deployment/artifact-manifest.json"),
         )
+        if "fixedStaticRoute" in verification_contracts:
+            specs += (("fixedStaticRoute", "routeId", deployment.get("routeId"),
+                       ".luoshu-runtime/deployment/fixed-static-route-plan.json"),)
+        if set(verification_contracts) != {entry[0] for entry in specs}:
+            raise DeploymentError("Deployment contains an unknown verification contract")
         for name, id_key, expected_id_value, expected_path in specs:
             contract = verification_contracts.get(name)
             if not isinstance(contract, dict):
@@ -735,7 +806,7 @@ def main() -> int:
         route_plan = _load(args.route_plan)
         artifacts = _load(args.artifact_manifest)
         universal_font_plan.validate_plan(font_plan)
-        minimal_xml_router.validate_route_plan(route_plan, font_plan=font_plan)
+        font_route_contract.validate_route_plan(route_plan, font_plan=font_plan)
         universal_font_compiler.validate_manifest(artifacts, font_plan, route_plan)
 
         if args.validate is not None:

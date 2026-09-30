@@ -8,12 +8,12 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 PACKAGE='io.github.xgl34222220.luoshu.fontcontract'
-p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');a=p.parse_args()
 if os.environ.get('LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED')!='true':
  raise SystemExit('disposable system mutation not authorized for this run')
 a.output.mkdir(parents=True,exist_ok=True)
 report={'scope':'disposable API36 userdebug CI emulator','rootManagerTested':False,'hardwareRomCoverage':False,'restored':False}
-phase='preflight';started=time.monotonic();backups={};touched=False;asset='/system/fonts/LuoShuContractExperiment.ttf'
+phase='preflight';started=time.monotonic();backups={};touched=False;new_fonts={};expected_roles={};asset='/system/fonts/LuoShuContractExperiment.ttf'
 def save():
  report.update(stage=phase,elapsedSeconds=round(time.monotonic()-started,3))
  (a.output/'system-summary.json').write_text(json.dumps(report,indent=2)+'\n')
@@ -40,11 +40,21 @@ def reboot():
 def root():
  adb('root');adb('wait-for-device');assert adb('shell','id','-u').strip()==b'0','adbd root unavailable'
 def probe(name):
- log=adb('shell','am','instrument','-w','-e','phase',name,PACKAGE+'/.Runner',timeout=180)
+ extras=[]
+ if name=='system-applied':
+  for role,contract in expected_roles.items():
+   axes=','.join(str(x['tag'])+'='+str(x.get('stylevalue',x.get('value'))) for x in contract['axes'])
+   extras+=['-e','expected'+role+'Path',contract['path'],'-e','expected'+role+'Face',str(contract['face'])]
+   if axes:extras+=['-e','expected'+role+'Axes',axes]
+ log=adb('shell','am','instrument','-w','-e','phase',name,*extras,PACKAGE+'/.Runner',timeout=180)
  (a.output/(name+'.txt')).write_bytes(log)
  raw=adb('exec-out','run-as',PACKAGE,'cat','files/report-'+name+'.json')
  (a.output/(name+'.json')).write_bytes(raw);r=json.loads(raw)
  if r.get('status')!='passed-system-gate':raise RuntimeError(r)
+ if name=='system-applied':
+  for role,sample in [('Latin','A'),('Digit','1'),('Cjk','中')]:
+   if role in expected_roles and r['actualDefaultFonts'][sample][0].get('sha256')!=expected_roles[role]['sha256']:
+    raise RuntimeError('actual mapped font buffer differs from compiled artifact: '+role)
  return r
 
 def rewrite(raw,ps):
@@ -93,6 +103,33 @@ try:
  if a.inventory_only:
   report['inventoryOnly']=True;report['takeover']='not-tested';phase='inventory-complete';save();raise SystemExit(0)
  report['originalConfigHashes']={k:hashlib.sha256(v).hexdigest() for k,v in backups.items()}
+ assets=Path(__file__).parent/'app/src/main/assets'
+ production=None
+ if a.production_payload:
+  phase='production-compile';save()
+  work=Path(__file__).parent/'.work-production';(work/'stock').mkdir(parents=True,exist_ok=True)
+  captured={}
+  for sample in ['A','中']:
+   logical=report['baseline']['actualDefaultFonts'][sample][0]['file']
+   if not logical.startswith('/system/fonts/') or Path(logical).name not in {'Roboto-Regular.ttf','NotoSansCJK-Regular.ttc'}:
+    raise RuntimeError('unrecognized disposable SDK fixture target: '+logical)
+   local=work/'stock'/Path(logical).name;adb('pull',logical,str(local));captured[logical]=local
+  config='/data/fonts/config/config.xml';exists=subprocess.run(['adb','shell','test','-f',config]).returncode==0
+  generation={'path':config,'exists':exists,'sha256':hashlib.sha256(read_system_file(config)).hexdigest() if exists else ''}
+  import sys
+  sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'xml-first'))
+  from build_production_case import build
+  payload,manifest,expected_roles,case_report=build(work/'generated',
+    {remote:a.output/('original-'+Path(remote).name) for remote in backups},captured,
+    report['baseline'],assets/'composite.ttf',generation)
+  (a.output/'production-pipeline.json').write_text(json.dumps(case_report,indent=2))
+  generated={f['logicalPath']:payload/f['payloadPath'] for f in manifest['files'] if f['kind']=='xml'}
+  new_fonts={f['logicalPath']:payload/f['payloadPath'] for f in manifest['files'] if f['kind']!='xml'}
+  if set(generated)-set(backups):raise RuntimeError('production XML escaped snapshotted configs')
+  for logical in new_fonts:
+   if not logical.startswith('/system/fonts/LuoShu') or subprocess.run(['adb','shell','test','-e',logical]).returncode==0:
+    raise RuntimeError('production font escaped unique experimental assets')
+  production=case_report
  phase='authorized-remount';save();root()
  old_boot=adb('shell','cat','/proc/sys/kernel/random/boot_id').strip()
  # -R may return nonzero because adbd disconnects during the requested reboot.
@@ -106,22 +143,27 @@ try:
   time.sleep(2)
  else:raise RuntimeError('remount preparation did not produce a new boot')
  boot();root();adb('remount')
- assets=Path(__file__).parent/'app/src/main/assets';fixture=json.loads((assets/'fixture.json').read_text())
- generated={};counts={}
- for remote,raw in backups.items():
-  output,count=rewrite(raw,fixture['postScriptName']);counts[remote]=count
-  if count:
-   file=a.output/('patched-'+Path(remote).name);file.write_bytes(output);generated[remote]=file
+ if production is None:
+  fixture=json.loads((assets/'fixture.json').read_text());generated={};counts={}
+  for remote,raw in backups.items():
+   output,count=rewrite(raw,fixture['postScriptName']);counts[remote]=count
+   if count:
+    file=a.output/('patched-'+Path(remote).name);file.write_bytes(output);generated[remote]=file
+  new_fonts={asset:assets/'composite.ttf'}
+  report['changedRouteCounts']=counts
+ else:report['productionPipeline']=production
  if not generated:raise RuntimeError('no explicit upright sans-serif config routes')
- report['changedRouteCounts']=counts;phase='apply';save();touched=True
- adb('push',str(assets/'composite.ttf'),asset);adb('shell','chmod','0644',asset);adb('shell','restorecon',asset)
+ phase='apply';save();touched=True
+ for logical,local in new_fonts.items():
+  adb('push',str(local),logical);adb('shell','chmod','0644',logical);adb('shell','restorecon',logical)
  for remote,file in generated.items():adb('push',str(file),remote);adb('shell','restorecon',remote)
  adb('shell','sync');phase='applied-reboot';save();reboot()
  root()
  report['appliedConfigHashes']={remote:hashlib.sha256(read_system_file(remote)).hexdigest() for remote in generated}
  for remote,file in generated.items():
   if report['appliedConfigHashes'][remote]!=hashlib.sha256(file.read_bytes()).hexdigest():raise RuntimeError('applied XML did not survive reboot: '+remote)
- if read_system_file(asset)!=(assets/'composite.ttf').read_bytes():raise RuntimeError('new font bytes did not survive reboot')
+ for logical,local in new_fonts.items():
+  if read_system_file(logical)!=local.read_bytes():raise RuntimeError('new font bytes did not survive reboot: '+logical)
  (a.output/'applied-font-manager.txt').write_bytes(adb('shell','dumpsys','font'))
  report['applied']=probe('system-applied');report['takeover']='passed'
 except Exception as error:
@@ -132,7 +174,8 @@ finally:
    phase='restoring';save();root();adb('remount')
    for remote,raw in backups.items():
     file=a.output/('original-'+Path(remote).name);adb('push',str(file),remote);adb('shell','restorecon',remote)
-   adb('shell','rm',asset);adb('shell','sync');reboot()
+   for logical in new_fonts:adb('shell','rm','-f',logical)
+   adb('shell','sync');reboot()
    root()  # adbd drops root across reboot; protected XML must be read as root.
    for remote,raw in backups.items():
     if read_system_file(remote)!=raw:raise RuntimeError('restored XML bytes differ: '+remote)

@@ -8,12 +8,13 @@ import universal_font_compiler_test as fixture
 from fontTools.ttLib import TTFont
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 import composite_font
+import font_coverage
 OUT=Path(__file__).parent/'app/src/main/assets'
 OUT.mkdir(parents=True,exist_ok=True)
-points=tuple(sorted(set(range(32,127))|set(range(0x4e00,0x4e00+6100))))
+points=tuple(sorted(set(range(32,127))|set(range(0x4e00,0x4e00+6100))|set(font_coverage.CJK_COMMON)))
 fixture.ASCII_POINTS=points
 shapes={
- 'cjk':[(50,0),(480,0),(550,160),(550,540),(300,700),(50,540)],
+ 'cjk':[(50,-100),(480,-100),(550,60),(550,700),(300,800),(50,700)],
  'latin':[(50,0),(550,0),(300,700)],
  'digit':[(50,0),(550,0),(550,520),(300,700),(50,520)]}
 for role,shape in shapes.items():
@@ -22,9 +23,14 @@ for role,shape in shapes.items():
   for cp in points:
    is_role=(cp>=0x4e00 if role=='cjk' else (48<=cp<=57 if role=='digit' else (65<=cp<=90 or 97<=cp<=122)))
    if not is_role:continue
-   pen=TTGlyphPen(None);pen.moveTo(shape[0])
-   for p in shape[1:]:pen.lineTo(p)
+   current_shape=shape
+   if role=='latin' and 97<=cp<=122:
+    bottom=-200 if chr(cp) in 'gjpqy' else 0
+    current_shape=[(50,bottom),(550,bottom),(300,500)]
+   pen=TTGlyphPen(None);pen.moveTo(current_shape[0])
+   for p in current_shape[1:]:pen.lineTo(p)
    pen.closePath();name=f.getBestCmap()[cp];f['glyf'][name]=pen.glyph()
+   if role=='cjk':f['hmtx'].metrics[name]=(1000,50)
   f.save(path)
 result=composite_font.build(Namespace(cjk=str(OUT/'cjk.ttf'),latin=str(OUT/'latin.ttf'),digit=str(OUT/'digit.ttf'),
  output=str(OUT/'composite.ttf'),weight=400,cjk_face=0,latin_face=0,digit_face=0,progress=None))
@@ -40,7 +46,7 @@ with TTFont(OUT/'composite.ttf') as f:
 expected={
  'latin':(65,[(47,0),(637,0),(342,826)],(732,47)),
  'digit':(49,[(47,0),(637,0),(637,614),(342,826),(47,614)],(732,47)),
- 'cjk':(0x4e2d,shapes['cjk'],(620,40))}
+ 'cjk':(0x4e2d,shapes['cjk'],(1000,50))}
 for role,(cp,outline,metrics) in expected.items():
  path=OUT/('expected-'+role+'.ttf')
  fixture.make_font(path,family='LuoShuExpected'+role)
