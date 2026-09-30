@@ -136,7 +136,7 @@ class BackgroundTreeTest(unittest.TestCase):
         self.assertIn("task=signal-task\n", task)
         self.assertFalse(list((module / "config").glob("*.progress.*")))
 
-    def test_provider_service_term_reaps_active_generator_and_releases_singleton(self):
+    def start_provider(self, stale_lock=False):
         manager = self.worker_files()
         module = self.root / "module"
         (module / "common").mkdir(parents=True)
@@ -150,13 +150,70 @@ class BackgroundTreeTest(unittest.TestCase):
         getprop = self.bin / "getprop"
         getprop.write_text("#!/bin/sh\necho 1\n")
         getprop.chmod(0o755)
+        if stale_lock:
+            lock = module / ".google-font-provider.lock"
+            lock.mkdir()
+            # A reused live PID from another boot must neither block nor be killed.
+            (lock / "pid").write_text(f"{os.getpid()}\nboot_id=previous-boot\n")
         service = self.spawn(["sh", str(ROOT / "common/google_font_provider_service.sh")],
                              env={**self.env, "MODDIR": str(module)})
         leaf, _, proc_id = self.snapshot()
+        return module, service, leaf, proc_id
+
+    def test_provider_service_term_reaps_active_generator_and_releases_singleton(self):
+        module, service, leaf, proc_id = self.start_provider()
+        sentinel = self.spawn([sys.executable, "-c", "import time; time.sleep(60)"])
+        # A second invocation must not enter the generator or release the first
+        # worker's singleton. Snapshot its complete identity, including token.
+        lock = module / ".google-font-provider.lock/pid"
+        owner = lock.read_text()
+        duplicate = subprocess.run(
+            ["sh", str(ROOT / "common/google_font_provider_service.sh")],
+            env={**self.env, "MODDIR": str(module)}, timeout=5,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.assertEqual(duplicate.returncode, 0)
+        self.assertEqual(lock.read_text(), owner)
+        self.assertIsNone(service.poll())
         service.terminate()
         self.assertEqual(service.wait(timeout=5), 143)
         self.wait_for(lambda: not alive(leaf, proc_id))
         self.assertFalse((module / ".google-font-provider.lock").exists())
+        self.assertIsNone(sentinel.poll(), "provider cancellation killed an unrelated process")
+
+    def test_provider_reclaims_old_boot_identity_and_cancels_cleanly(self):
+        module, service, leaf, proc_id = self.start_provider(stale_lock=True)
+        self.assertNotIn("previous-boot", (module / ".google-font-provider.lock/pid").read_text())
+        service.terminate()
+        self.assertEqual(service.wait(timeout=5), 143)
+        self.wait_for(lambda: not alive(leaf, proc_id))
+        self.assertFalse((module / ".google-font-provider.lock").exists())
+
+    def test_scope_deadline_kills_uncooperative_worker_within_cleanup_budget(self):
+        code = "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+        started = time.monotonic()
+        result = subprocess.run(
+            [sys.executable, str(ROOT / "common/task_scope.py"), "--timeout", "0.2", "--",
+             sys.executable, "-c", code], capture_output=True, text=True, timeout=5)
+        self.assertEqual(result.returncode, 124, result.stderr)
+        report = json.loads(next(line.removeprefix("[TASK-CLEANUP] ")
+                                 for line in result.stderr.splitlines()
+                                 if line.startswith("[TASK-CLEANUP] ")))
+        self.assertTrue(report["deadlineExceeded"])
+        self.assertEqual(report["leftoverPids"], [])
+        self.assertLess(time.monotonic() - started, 4.5)
+
+    def test_provider_cancel_preserves_replacement_lock_token(self):
+        module, service, leaf, proc_id = self.start_provider()
+        lock = module / ".google-font-provider.lock/pid"
+        owner = lock.read_text()
+        # Same PID/starttime, newer token: stale cleanup may not remove it.
+        replacement = "\n".join("token=replacement-owner" if line.startswith("token=")
+                                else line for line in owner.splitlines()) + "\n"
+        lock.write_text(replacement)
+        service.terminate()
+        self.assertEqual(service.wait(timeout=5), 143)
+        self.wait_for(lambda: not alive(leaf, proc_id))
+        self.assertEqual(lock.read_text(), replacement)
 
 
 if __name__ == "__main__":

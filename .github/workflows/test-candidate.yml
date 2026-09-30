@@ -132,6 +132,9 @@ jobs:
           app="dist/LuoShu-App-${LUOSHU_ARTIFACT_VERSION}-Debug.apk"
           test -s "$module"
           test -s "$app"
+          signer="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n1)"
+          test -x "$signer"
+          "$signer" verify --verbose --print-certs "$app" > dist/apk-signature.txt
           test "$(apkanalyzer manifest application-id "$app")" = io.github.xgl34222220.luoshu.audit
           apkanalyzer manifest print "$app" | grep -q '洛书·核心验收测试'
           test "$(unzip -p "$module" bundled/app.prop | sed -n 's/^installPolicy=//p')" = manual-only

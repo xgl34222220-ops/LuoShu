@@ -82,6 +82,15 @@ def cleanup(proc: subprocess.Popen) -> tuple[int, int, list[int]]:
     started = time.monotonic()
     deadline = started + 3.0
     term_sent: set[tuple[int, int]] = set()
+    # Let the directly supervised worker run its TERM/EXIT handlers before
+    # signalling helpers those handlers start (lock release uses shell tools).
+    # Provider cancellation itself has a one-second descendant TERM grace.
+    # Killing the whole scope at 0.6s used to preempt its EXIT lock release.
+    worker = descendants().get(proc.pid)
+    if worker is not None and worker[2] != 'Z':
+        terminated += signal_owned({proc.pid: worker}, signal.SIGTERM)
+    cooperative_until = started + 1.5
+    force_started = None
     while True:
         reaped += reap(proc)
         children = descendants()
@@ -90,7 +99,15 @@ def cleanup(proc: subprocess.Popen) -> tuple[int, int, list[int]]:
         now = time.monotonic()
         if now >= deadline:
             return terminated, reaped, sorted(children)
-        if now - started < 0.6:
+        worker_now = identity(proc.pid)
+        if (force_started is None and now < cooperative_until
+                and worker_now is not None and worker is not None
+                and worker_now[1] == worker[1] and worker_now[2] != 'Z'):
+            time.sleep(0.04)
+            continue
+        if force_started is None:
+            force_started = now
+        if now - force_started < 0.6:
             new = {pid: info for pid, info in children.items()
                    if (pid, info[1]) not in term_sent}
             terminated += signal_owned(new, signal.SIGTERM)
