@@ -17,10 +17,6 @@ public final class PlatformXmlProbe {
         report.put("context","adb-shell-app_process");
         report.put("systemConfigurationChanged",false);
         try {
-            // app_process does not inherit Zygote font preloading. Initialize
-            // only this process from its existing system configuration.
-            Typeface.class.getMethod("loadPreinstalledSystemFontMap").invoke(null);
-            report.put("processFontMapInitialized",true);
             File source=new File(args[0]), config=new File(args[1]);
             StringBuilder xml=new StringBuilder("<familyset><family name=\"sans-serif\">");
             for(int w=100;w<=900;w+=100)xml.append("<font weight=\"").append(w)
@@ -38,11 +34,20 @@ public final class PlatformXmlProbe {
             Object familyArray=((Map<?,?>)builder.invoke(null,parsed)).get("sans-serif");
             if(familyArray==null||Array.getLength(familyArray)==0)throw new AssertionError("empty parsed family");
             FontFamily family=(FontFamily)Array.get(familyArray,0);
-            Typeface face=new Typeface.CustomFallbackBuilder(family).setSystemFallback("sans-serif").build();
+            android.graphics.fonts.Font font=null;
+            for(int i=0;i<family.getSize();i++)if(family.getFont(i).getStyle().getWeight()==400)font=family.getFont(i);
+            if(font==null)throw new AssertionError("XML missing declared weight 400");
+            JSONObject fixture=new JSONObject(new String(Files.readAllBytes(new File(args[3]).toPath()),StandardCharsets.UTF_8));
+            int[] glyphs=new int[3];float[] positions=new float[6];float x=24;
+            for(int i=0;i<3;i++){
+                glyphs[i]=fixture.getJSONArray("nativeGlyphIds").getInt(i);
+                positions[2*i]=x;positions[2*i+1]=96;
+                x+=fixture.getJSONArray("nativeAdvances").getInt(i)*72.0f/fixture.getInt("unitsPerEm");
+            }
             Bitmap bitmap=Bitmap.createBitmap(192,128,Bitmap.Config.ARGB_8888);
-            Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);paint.setTypeface(face);paint.setTextSize(72);
+            Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);paint.setTextSize(72);
             paint.setColor(Color.BLACK);paint.setHinting(Paint.HINTING_OFF);
-            new Canvas(bitmap).drawText("A1中",24,96,paint);
+            new Canvas(bitmap).drawGlyphs(glyphs,0,positions,0,3,font,paint);
             int[] pixels=new int[192*128];bitmap.getPixels(pixels,0,192,0,0,192,128);
             ByteArrayOutputStream bytes=new ByteArrayOutputStream();DataOutputStream data=new DataOutputStream(bytes);
             for(int pixel:pixels)data.writeInt(pixel);

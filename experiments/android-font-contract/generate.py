@@ -60,5 +60,9 @@ for role,(cp,outline,metrics) in expected.items():
   assert list(actual['glyf'][name].getCoordinates(actual['glyf'])[0])==outline
   assert actual['hmtx'].metrics[name]==metrics
 report={'postScriptName':TTFont(OUT/'composite.ttf')['name'].getDebugName(6),'synthetic':True,'static':True,'compositor':result,'sha256':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in OUT.glob('*.ttf')}}
+with TTFont(OUT/'composite.ttf') as f:
+ report['nativeGlyphIds']=[f.getGlyphID(f.getBestCmap()[cp]) for cp in [65,49,0x4e2d]]
+ report['nativeAdvances']=[f['hmtx'].metrics[f.getBestCmap()[cp]][0] for cp in [65,49,0x4e2d]]
+ report['unitsPerEm']=f['head'].unitsPerEm
 (OUT/'fixture.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
 print(json.dumps({'status':'pass','static':True,'donorPointCounts':[3,5,6],'bytes':(OUT/'composite.ttf').stat().st_size}))

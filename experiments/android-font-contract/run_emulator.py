@@ -46,6 +46,7 @@ adb('shell','mkdir','-p',remote)
 adb('push',str(args.apk),remote+'/probe.apk')
 assets=Path(__file__).parent/'app/src/main/assets'
 adb('push',str(assets/'composite.ttf'),remote+'/composite.ttf')
+adb('push',str(assets/'fixture.json'),remote+'/fixture.json')
 ps_name=json.loads((assets/'fixture.json').read_text())['postScriptName']
 for phase in ['before','after']:
  status('native-font-contract-'+phase)
@@ -64,7 +65,7 @@ for phase in ['before','after']:
  if report.get('status')!='passed-native-data-gate':raise RuntimeError(report)
  status('platform-xml-'+phase)
  platform=adb('shell','env','CLASSPATH='+remote+'/probe.apk','app_process',remote,
-  PACKAGE+'.PlatformXmlProbe',remote+'/composite.ttf',remote+'/probe-fonts.xml',ps_name)
+  PACKAGE+'.PlatformXmlProbe',remote+'/composite.ttf',remote+'/probe-fonts.xml',ps_name,remote+'/fixture.json')
  (args.output/('platform-xml-'+phase+'.json')).write_bytes(platform)
  parsed=json.loads(platform);platform_reports.append(parsed)
  if parsed.get('status')!='passed' or parsed.get('rasterSha256')!=report.get('nativeCombinedHash'):
