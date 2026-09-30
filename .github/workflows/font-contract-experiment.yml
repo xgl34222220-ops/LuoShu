@@ -33,13 +33,14 @@ jobs:
           python3 -m pip install --break-system-packages fonttools==4.63.0
           python3 experiments/android-font-contract/generate.py
           python3 experiments/xml-first/test_planner.py
+          python3 experiments/android-font-contract/test_system_file_read.py
       - name: Build CI-only font probe
         working-directory: experiments/android-font-contract
         run: gradle --no-daemon --stacktrace :app:assembleDebug
       - name: Require accelerated emulator
         id: accel
         env:
-          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '45e8480ea0013903bf82ca5d9d6a602e28c6e296' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
+          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '1ae07a3875e351a281e5142dcfda411e1286924a' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
         shell: bash
         run: |
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
@@ -56,7 +57,7 @@ jobs:
       - name: Verify actual Android font rendering and reboot persistence
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '45e8480ea0013903bf82ca5d9d6a602e28c6e296' && contains(github.event.head_commit.message, '[system-test-approved-once]') }}
+          LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '1ae07a3875e351a281e5142dcfda411e1286924a' && contains(github.event.head_commit.message, '[system-test-approved-once]') }}
         with:
           api-level: 36
           target: google_apis

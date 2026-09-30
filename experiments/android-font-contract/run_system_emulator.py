@@ -23,6 +23,12 @@ def adb(*args,timeout=120,check=True):
  if check and r.returncode:raise RuntimeError('adb '+str(args)+': '+(r.stdout+r.stderr).decode(errors='replace'))
  return r.stdout
 
+def read_system_file(remote):
+ # exec-out can report exit 0 while cat prints a permission error on Android.
+ # Check readability through shell-v2 first, before comparing any file bytes.
+ adb('shell','test','-r',remote)
+ return adb('exec-out','cat',remote)
+
 def boot():
  adb('wait-for-device',timeout=120);until=time.monotonic()+240
  while time.monotonic()<until:
@@ -76,14 +82,14 @@ try:
  for remote in ['/system/etc/fonts.xml','/system/etc/font_fallback.xml']:
   r=subprocess.run(['adb','shell','test','-f',remote])
   if r.returncode:continue
-  raw=adb('exec-out','cat',remote);backups[remote]=raw
+  raw=read_system_file(remote);backups[remote]=raw
   (a.output/('original-'+Path(remote).name)).write_bytes(raw)
  if not backups:raise RuntimeError('no system font config found')
  for name,cmd in [('font-manager',['shell','dumpsys','font']),('font-files',['shell','find','-H','/system/etc','/product/etc','/vendor/etc','/system_ext/etc','/apex','-maxdepth','4','-iname','*font*'])]:
   (a.output/(name+'.txt')).write_bytes(adb(*cmd,timeout=30,check=False))
  for remote in ['/product/etc/fonts_customization.xml','/product/etc/font_fallback.xml','/system_ext/etc/font_fallback.xml']:
   r=subprocess.run(['adb','shell','test','-f',remote])
-  if r.returncode==0:(a.output/('observed-'+remote.strip('/').replace('/','_'))).write_bytes(adb('exec-out','cat',remote))
+  if r.returncode==0:(a.output/('observed-'+remote.strip('/').replace('/','_'))).write_bytes(read_system_file(remote))
  if a.inventory_only:
   report['inventoryOnly']=True;report['takeover']='not-tested';phase='inventory-complete';save();raise SystemExit(0)
  report['originalConfigHashes']={k:hashlib.sha256(v).hexdigest() for k,v in backups.items()}
@@ -112,10 +118,10 @@ try:
  for remote,file in generated.items():adb('push',str(file),remote);adb('shell','restorecon',remote)
  adb('shell','sync');phase='applied-reboot';save();reboot()
  root()
- report['appliedConfigHashes']={remote:hashlib.sha256(adb('exec-out','cat',remote)).hexdigest() for remote in generated}
+ report['appliedConfigHashes']={remote:hashlib.sha256(read_system_file(remote)).hexdigest() for remote in generated}
  for remote,file in generated.items():
   if report['appliedConfigHashes'][remote]!=hashlib.sha256(file.read_bytes()).hexdigest():raise RuntimeError('applied XML did not survive reboot: '+remote)
- if adb('exec-out','cat',asset)!=(assets/'composite.ttf').read_bytes():raise RuntimeError('new font bytes did not survive reboot')
+ if read_system_file(asset)!=(assets/'composite.ttf').read_bytes():raise RuntimeError('new font bytes did not survive reboot')
  (a.output/'applied-font-manager.txt').write_bytes(adb('shell','dumpsys','font'))
  report['applied']=probe('system-applied');report['takeover']='passed'
 except Exception as error:
@@ -127,8 +133,9 @@ finally:
    for remote,raw in backups.items():
     file=a.output/('original-'+Path(remote).name);adb('push',str(file),remote);adb('shell','restorecon',remote)
    adb('shell','rm',asset);adb('shell','sync');reboot()
+   root()  # adbd drops root across reboot; protected XML must be read as root.
    for remote,raw in backups.items():
-    if adb('exec-out','cat',remote)!=raw:raise RuntimeError('restored XML bytes differ: '+remote)
+    if read_system_file(remote)!=raw:raise RuntimeError('restored XML bytes differ: '+remote)
    report['restoredProbe']=probe('system-restored');report['restored']=True
   except Exception as error:report['restorationFailure']=type(error).__name__+': '+str(error)
  phase='finished';report['vmDisposal']='emulator action teardown and ephemeral runner deletion';save()
