@@ -27,3 +27,16 @@ coordinates and advances. Raw donors remain separate identity discriminators;
 they are not expected to match after the compositor scales Latin/digits to its
 826-unit UI top. Host generation checks the complete expected coordinates before
 Android performs the pixel comparison.
+
+Authorized system integration experiment (separate explicit one-run marker):
+- Runs only on a disposable API36 userdebug emulator verified by properties
+- Saves both existing system font XML files and SHA256, plus default App rasters
+- Uses adb root/remount; remount -R may disable verity and reboot this VM
+- Adds one synthetic asset; changes only upright primary sans-serif font nodes
+- Reboots and compares actual ordinary-App Typeface.DEFAULT with selected roles
+- Restores original XML bytes, removes the one new asset, reboots and compares
+  original SHA256 and all five default/fallback rasters
+- On failure still attempts restoration and saves the result; emulator teardown
+  and ephemeral runner deletion remove the test VM
+- Never changes hidden API or SELinux policy. This does not test a root manager
+  or an OEM phone, and failures remain failures even when recovery succeeds

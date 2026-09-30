@@ -87,6 +87,27 @@ public final class Runner extends Instrumentation {
         }
         return result;
     }
+    private void systemPhase(String phase) throws Exception {
+        JSONObject renders=new JSONObject();
+        for(String text:new String[]{"A","1","中","Ω","😀"})renders.put(text,draw(Typeface.DEFAULT,text,null));
+        File baseline=new File(root,"system-baseline.json");
+        if(phase.equals("system-baseline"))Files.write(baseline.toPath(),renders.toString().getBytes(StandardCharsets.UTF_8));
+        else {
+            JSONObject old=new JSONObject(new String(Files.readAllBytes(baseline.toPath()),StandardCharsets.UTF_8));
+            for(String text:new String[]{"Ω","😀"})require(old.getString(text).equals(renders.getString(text)),"system fallback changed "+text);
+            if(phase.equals("system-applied")) {
+                Typeface selected=face(asset("composite.ttf"),400,true);
+                for(String text:new String[]{"A","1","中"})require(draw(selected,text,null).equals(renders.getString(text)),"system default did not take selected glyph "+text);
+                require(!old.getString("A").equals(renders.getString("A")),"system mutation was not discriminating");
+            } else if(phase.equals("system-restored")) {
+                for(String text:new String[]{"A","1","中"})require(old.getString(text).equals(renders.getString(text)),"system restoration differs "+text);
+            } else throw new AssertionError("unknown system phase");
+        }
+        report.put("renders",renders);report.put("status","passed-system-gate");
+        report.put("systemConfigurationChanged",phase.equals("system-applied"));report.put("systemFontConfigMutated",phase.equals("system-applied"));
+        Files.write(new File(root,"report-"+phase+".json").toPath(),report.toString(2).getBytes(StandardCharsets.UTF_8));
+        Bundle output=new Bundle();output.putString("stream",report.toString());finish(Activity.RESULT_OK,output);
+    }
     @Override public void onStart() {
         int resultCode=Activity.RESULT_CANCELED;
         String phase=arguments==null?"before":arguments.getString("phase","before");
@@ -94,6 +115,7 @@ public final class Runner extends Instrumentation {
             context=getTargetContext();root=context.getFilesDir();report=new JSONObject();
             report.put("phase",phase);report.put("sdk",Build.VERSION.SDK_INT);report.put("fingerprint",Build.FINGERPRINT);
             report.put("moduleMountTested",false);report.put("systemFontConfigMutated",false);report.put("hookUsed",false);
+            if(phase.startsWith("system-")){systemPhase(phase);return;}
             JSONObject fixture;try(InputStream in=context.getAssets().open("fixture.json")){fixture=new JSONObject(new String(in.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8));}
             File composite=asset("composite.ttf"),latin=asset("latin.ttf"),digit=asset("digit.ttf"),cjk=asset("cjk.ttf");
             Typeface mixed=face(composite,400,true);JSONObject renders=new JSONObject();

@@ -5,6 +5,7 @@ on:
     branches: [feat/universal-mixed-integration-20260930]
     paths:
       - experiments/android-font-contract/**
+      - experiments/xml-first/**
       - .github/workflows/font-contract-experiment.yml
 permissions:
   contents: read
@@ -31,13 +32,14 @@ jobs:
         run: |
           python3 -m pip install --break-system-packages fonttools==4.63.0
           python3 experiments/android-font-contract/generate.py
+          python3 experiments/xml-first/test_planner.py
       - name: Build CI-only font probe
         working-directory: experiments/android-font-contract
         run: gradle --no-daemon --stacktrace :app:assembleDebug
       - name: Require accelerated emulator
         id: accel
         env:
-          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '3cdc731537a6e2d4939ec1c57b4cf3dd1dbda4bb' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
+          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '21e1b0e2dd8073355df11090a858e8b6c877e1a0' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
         shell: bash
         run: |
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
@@ -53,6 +55,8 @@ jobs:
           echo 'disabled=false' >> "$GITHUB_OUTPUT"
       - name: Verify actual Android font rendering and reboot persistence
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '21e1b0e2dd8073355df11090a858e8b6c877e1a0' && contains(github.event.head_commit.message, '[system-test-approved-once]') }}
         with:
           api-level: 36
           target: google_apis
@@ -63,8 +67,10 @@ jobs:
           emulator-boot-timeout: 300
           disable-animations: false
           disable-linux-hw-accel: ${{ steps.accel.outputs.disabled }}
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: python3 experiments/android-font-contract/run_emulator.py --apk experiments/android-font-contract/app/build/outputs/apk/debug/app-debug.apk --output experiments/android-font-contract/output
+          emulator-options: -writable-system -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
+            python3 experiments/android-font-contract/run_emulator.py --apk experiments/android-font-contract/app/build/outputs/apk/debug/app-debug.apk --output experiments/android-font-contract/output
+            if [ "$LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED" = true ]; then python3 experiments/android-font-contract/run_system_emulator.py --output experiments/android-font-contract/output/system; fi
       - name: Save native evidence, including blocked capability gates
         if: always()
         uses: actions/upload-artifact@v4
