@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any, Iterable
 
-from stock_font_provenance import stock_identity
+from stock_font_provenance import stock_identity, STOCK_CAPTURE_REVISION
 from stock_geometry_profile import capture_geometry_profile, GeometryIdentityError
 
 import font_inventory as base
@@ -714,7 +714,7 @@ def _can_reuse(existing: dict[str, Any], build_key: str) -> bool:
 
 
 def _has_current_metrics(existing: dict[str, Any]) -> bool:
-    return (all(isinstance(entry.get("stockIdentity"), dict) and isinstance(entry.get("stockGeometryProfile"), dict) for entry in existing.get("slots", {}).values())
+    return (all(isinstance(entry.get("stockIdentity"), dict) and entry["stockIdentity"].get("captureRevision") == STOCK_CAPTURE_REVISION and isinstance(entry.get("stockGeometryProfile"), dict) for entry in existing.get("slots", {}).values())
             and existing.get("metricsRevision") == METRICS_REVISION
             and all(isinstance(entry.get("metrics", {}).get("head"), dict)
                     and base.valid_coverage(entry.get("metrics", {}).get("coverage"))
@@ -952,20 +952,29 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
     if hyperos:
         rom = "hyperos"
 
+    def stock_views(target):
+        target = Path(target)
+        for selected in replaceable_roots:
+            for name in base._font_root_names(selected):
+                try:
+                    yield selected.actual / target.relative_to(name)
+                except ValueError:
+                    continue
+
     for logical, entry in slots.items():
         resolved = base._resolve_file(logical, replaceable_roots)
         if resolved is None:
             raise base.InventoryError(f"无法绑定原厂字体身份：{logical}")
         root, actual = resolved
         stock_file = base._stock_font_path(root, actual, replaceable_roots)
-        entry["stockIdentity"] = stock_identity(logical, stock_file, entry.get("faceIndex", 0), build_key, provenance_path=actual)
+        entry["stockIdentity"] = stock_identity(logical, stock_file, entry.get("faceIndex", 0), build_key, provenance_path=actual, view_resolver=stock_views)
         try:
             entry["stockGeometryProfile"] = capture_geometry_profile(
                 stock_file, int(entry.get("faceIndex", 0)), entry["stockIdentity"])
         except GeometryIdentityError as exc:
             raise base.InventoryError(f"原厂字体身份发生变化：{logical}: {exc}") from exc
         except Exception as exc:
-            current = stock_identity(logical, stock_file, entry.get("faceIndex", 0), build_key, provenance_path=actual)
+            current = stock_identity(logical, stock_file, entry.get("faceIndex", 0), build_key, provenance_path=actual, view_resolver=stock_views)
             if current["sha256"] != entry["stockIdentity"]["sha256"]:
                 raise base.InventoryError(f"采集期间原厂字体发生变化：{logical}") from exc
             entry["stockGeometryProfile"] = {

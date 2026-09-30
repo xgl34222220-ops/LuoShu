@@ -76,7 +76,7 @@ class ProvenanceTests(unittest.TestCase):
         outside.symlink_to(self.font)
         alias = self.lower / 'Alias.ttf'
         alias.symlink_to(outside)
-        with self.assertRaisesRegex(ValueError, 'alias-link-unproven'):
+        with self.assertRaisesRegex(ValueError, 'alias-(link|target)-unproven'):
             proof.verify_stock_path('/system/fonts/Alias.ttf', alias)
     def test_lower_under_whole_partition_overlay_is_proven(self):
         for fs, source in [('tmpfs', 'tmpfs'), ('overlay', 'overlay')]:
@@ -93,6 +93,105 @@ class ProvenanceTests(unittest.TestCase):
                    + self.good.replace('/fonts ', '/unrelated '))
         with self.assertRaisesRegex(ValueError, 'lineage-mismatch'):
             proof.verify_stock_path('/system/fonts/Original.ttf', self.font)
+    def cross_rom(self):
+        target_root = self.root / 'product-lower'
+        target_root.mkdir()
+        target = target_root / 'Target.ttf'
+        target.write_bytes(b'product-original')
+        alias = self.lower / 'Alias.ttf'
+        alias.symlink_to('/product/fonts/Target.ttf')
+        self.write(self.good + '4 1 253:1 / /product ro - erofs /dev/block/dm-1 ro\n'
+                   + f'5 1 253:1 /fonts {target_root} ro - erofs /dev/block/dm-1 ro\n')
+        return alias, target
+    def test_absolute_cross_rom_alias_maps_to_proven_lower(self):
+        alias, target = self.cross_rom()
+        calls = []
+        def candidate(logical):
+            calls.append(str(logical))
+            return [target]
+        result = proof.resolve_stock_path('/system/fonts/Alias.ttf', alias, view_resolver=candidate)
+        self.assertEqual(result['resolvedPath'], str(target))
+        self.assertEqual(result['resolvedLogicalPath'], '/product/fonts/Target.ttf')
+        self.assertEqual(result['terminalProvenance']['device'], '253:1')
+        self.assertEqual(calls, ['/product/fonts/Target.ttf'])
+        self.assertEqual(len(result['aliasChain']), 1)
+        identity = proof.stock_identity('/system/fonts/Alias.ttf', target, 0, 'build',
+                                        provenance_path=alias, view_resolver=candidate)
+        self.assertTrue(identity['provenance']['verified'])
+        self.assertEqual(identity['captureRevision'], 2)
+        self.assertEqual(identity['sha256'], proof.hashlib.sha256(target.read_bytes()).hexdigest())
+        # Legacy open(alias) cannot silently be approved when remapping is needed.
+        with self.assertRaises(ValueError):
+            proof.verify_stock_path('/system/fonts/Alias.ttf', alias)
+    def test_relative_cross_rom_alias_maps_without_using_live_tree(self):
+        alias, target = self.cross_rom()
+        alias.unlink()
+        alias.symlink_to('../../product/fonts/Target.ttf')
+        result = proof.resolve_stock_path('/system/fonts/Alias.ttf', alias, view_resolver=lambda p: target)
+        self.assertEqual(result['resolvedPath'], str(target))
+    def test_untrusted_candidate_does_not_hide_proven_rom_view(self):
+        alias, target = self.cross_rom()
+        bad = self.root / 'bad.ttf'
+        bad.write_bytes(b'generated')
+        result = proof.resolve_stock_path('/system/fonts/Alias.ttf', alias,
+                                         view_resolver=lambda p: [bad, target])
+        self.assertEqual(result['resolvedPath'], str(target))
+        with self.assertRaisesRegex(ValueError, 'alias-target-unproven'):
+            proof.resolve_stock_path('/system/fonts/Alias.ttf', alias, view_resolver=lambda p: [bad])
+    def test_proven_partition_wrong_target_file_is_rejected(self):
+        alias, target = self.cross_rom()
+        other = target.parent / 'Wrong.ttf'
+        other.write_bytes(b'other-original')
+        with self.assertRaisesRegex(ValueError, 'alias-target-unproven'):
+            proof.resolve_stock_path('/system/fonts/Alias.ttf', alias, view_resolver=lambda p: other)
+    def test_data_target_never_invokes_candidate_resolver(self):
+        alias, target = self.cross_rom()
+        alias.unlink()
+        alias.symlink_to('/data/fonts/Target.ttf')
+        with patch.object(proof, '_mounts', wraps=proof._mounts):
+            resolver = unittest.mock.Mock(return_value=target)
+            with self.assertRaisesRegex(ValueError, 'alias-target-unproven'):
+                proof.resolve_stock_path('/system/fonts/Alias.ttf', alias, view_resolver=resolver)
+            resolver.assert_not_called()
+    def test_cross_rom_chain_rechecks_every_alias(self):
+        alias, target = self.cross_rom()
+        target.unlink()
+        target.symlink_to('/system/fonts/Original.ttf')
+        result = proof.resolve_stock_path('/system/fonts/Alias.ttf', alias,
+            view_resolver=lambda p: target if str(p).startswith('/product/') else self.font)
+        self.assertEqual(result['resolvedPath'], str(self.font))
+        self.assertEqual(len(result['aliasChain']), 2)
+    def test_cross_rom_alias_cycle_is_rejected(self):
+        alias, target = self.cross_rom()
+        target.unlink()
+        target.symlink_to('/system/fonts/Alias.ttf')
+        with self.assertRaisesRegex(ValueError, 'alias-loop'):
+            proof.resolve_stock_path('/system/fonts/Alias.ttf', alias,
+                view_resolver=lambda p: target if str(p).startswith('/product/') else alias)
+    def test_resolver_created_mount_is_visible_to_proof(self):
+        alias, target = self.cross_rom()
+        full_mountinfo = self.info.read_text()
+        self.write(self.good)
+        def restore(logical):
+            self.info.write_text(full_mountinfo)
+            yield target
+            raise AssertionError('proved first candidate must stop lazy recovery')
+        result = proof.resolve_stock_path('/system/fonts/Alias.ttf', alias, view_resolver=restore)
+        self.assertEqual(result['resolvedPath'], str(target))
+    def test_mapped_identity_cannot_hash_another_file(self):
+        alias, target = self.cross_rom()
+        identity = proof.stock_identity('/system/fonts/Alias.ttf', self.font, 0, 'build',
+            provenance_path=alias, view_resolver=lambda p: target)
+        self.assertFalse(identity['provenance']['verified'])
+        self.assertIn('resolved-file-mismatch', identity['provenance']['reason'])
+    def test_nested_system_product_partition_alias(self):
+        alias, target = self.cross_rom()
+        alias.unlink()
+        alias.symlink_to('/system/product/fonts/Target.ttf')
+        self.info.write_text(self.info.read_text().replace(' /product ro ', ' /system/product ro '))
+        result = proof.resolve_stock_path('/system/fonts/Alias.ttf', alias, view_resolver=lambda p: target)
+        self.assertEqual(result['resolvedPath'], str(target))
+        self.assertEqual(result['terminalProvenance']['device'], '253:1')
     def test_naked_lower_rejected(self):
         self.write()
         with self.assertRaisesRegex(ValueError, 'lineage-mismatch'):

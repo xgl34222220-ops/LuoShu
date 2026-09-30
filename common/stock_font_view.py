@@ -24,12 +24,14 @@ class StockView:
         self.base = None
         self.owned = []
         self.roots = {}
+        self.alias_origins = {}
 
     def recover(self, logical: Path):
         # Only the established partition/fonts hierarchy supports this recovery.
-        if len(logical.parts) < 4 or logical.parts[2] != "fonts":
+        if len(logical.parts) < 4 or "fonts" not in logical.parts[2:]:
             return None
-        root = Path(*logical.parts[:3])
+        font_index = logical.parts.index("fonts", 2)
+        root = Path(*logical.parts[:font_index + 1])
         if root not in self.roots:
             if self.base is None:
                 self.parent.mkdir(parents=True, exist_ok=True)

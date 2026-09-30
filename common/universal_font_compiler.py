@@ -389,13 +389,14 @@ def _stock_map(path: Path | None) -> dict[str, Path]:
 
 def _lower_stock_candidate(logical: Path) -> Path | None:
     parts = logical.parts
-    if len(parts) < 4 or parts[0] != "/" or parts[2] != "fonts":
+    if len(parts) < 4 or parts[0] != "/" or "fonts" not in parts[2:]:
         return None
+    font_index = parts.index("fonts", 2)
     state_root = Path(
         os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount")
     )
-    candidate = state_root / "lower" / f"{parts[1]}-fonts" / Path(*parts[3:])
-    return candidate if candidate.is_file() else None
+    candidate = state_root / "lower" / f"{parts[font_index - 1]}-fonts" / Path(*parts[font_index + 1:])
+    return candidate if candidate.is_file() or candidate.is_symlink() else None
 
 
 def _current_stock_view(logical: Path, candidate: Path) -> bool:
@@ -416,6 +417,33 @@ def _mirror_stock_candidate(logical: Path) -> Path | None:
     return None
 
 
+def _alias_view_candidates(logical):
+    logical = Path(logical)
+    lower = _lower_stock_candidate(logical)
+    if lower is not None:
+        yield lower
+    for prefix in font_inventory.MIRROR_PREFIXES:
+        yield prefix / logical.relative_to("/")
+    yield logical
+    view = stock_font_view.current_view()
+    if view is not None:
+        recovered = view.recover(logical)
+        if recovered is not None:
+            yield recovered
+
+
+def _resolve_stock_proof(logical, candidate):
+    try:
+        return stock_font_provenance.verify_stock_path(logical, candidate)
+    except ValueError as error:
+        if not str(error).startswith("stock-provenance-alias-"):
+            raise
+        # An original absolute symlink may escape a lower into a replaced live
+        # target. Rebind each logical hop to independently proven stock views.
+        return stock_font_provenance.resolve_stock_path(
+            logical, candidate, view_resolver=_alias_view_candidates)
+
+
 def _resolve_stock(
     logical_value: str,
     explicit: dict[str, Path],
@@ -424,24 +452,32 @@ def _resolve_stock(
     logical = Path(logical_value)
     failures = []
     def accept(label, candidate):
-        if candidate is None or not candidate.is_file():
+        if candidate is None or not (candidate.is_file() or candidate.is_symlink()):
             failures.append(label + ":missing")
             return None
         try:
             if str(logical).startswith("/data/fonts/"):
                 # Mandatory config/font identity validation follows resolution.
                 return candidate
-            proof = stock_font_provenance.verify_stock_path(logical, candidate)
+            proof = _resolve_stock_proof(logical, candidate)
             if proof.get("verified") is not True:
                 raise ValueError("unverified")
+            terminal = Path(proof.get("resolvedPath") or candidate)
+            view = stock_font_view.current_view()
+            if view is not None:
+                view.alias_origins[(str(logical), str(terminal))] = candidate
+                return terminal
+            if terminal != candidate and candidate.resolve(strict=True) != terminal:
+                raise ValueError("stock-provenance-alias-request-session-required")
             return candidate
         except (ValueError, OSError) as error:
             failures.append(label + ":" + str(error)[:160])
             return None
     candidate = explicit.get(logical_value)
-    if candidate is not None and candidate.is_file():
-        # Test/CLI maps are still subject to mandatory identity validation.
-        return candidate
+    if candidate is not None and (candidate.is_file() or candidate.is_symlink()):
+        candidate = accept("explicit", candidate)
+        if candidate is not None:
+            return candidate
     candidate = accept("lower", _lower_stock_candidate(logical))
     if candidate is not None:
         return candidate
@@ -492,7 +528,12 @@ def _verify_stock_identity(target: dict[str, Any], stock: Path, face_index: int)
     try:
         # Preserve the lexical candidate, including an original ROM alias inode.
         # Kernel mount IDs/namespace IDs can legitimately change across boots.
-        current = stock_font_provenance.verify_stock_path(logical, stock)
+        view = stock_font_view.current_view()
+        lexical = view.alias_origins.get((logical, str(stock)), stock) if view is not None else stock
+        current = _resolve_stock_proof(logical, lexical)
+        terminal = Path(current.get("resolvedPath") or lexical)
+        if terminal.resolve(strict=True) != stock.resolve(strict=True):
+            raise ValueError("stock-provenance-resolved-file-mismatch")
     except (ValueError, OSError) as error:
         raise CompilerError("current stock provenance rejected: " + str(error)) from error
     if current.get("verified") is not True:
@@ -2041,7 +2082,12 @@ def _choose_mode(
     return "stock-shell"
 
 
-def _compile_unit(
+def _compile_unit(unit, stock_paths, output_dir, allow_live_stock, render_cache=None):
+    with stock_font_view.session(Path(output_dir).parent):
+        return _compile_unit_in_view(unit, stock_paths, output_dir, allow_live_stock, render_cache)
+
+
+def _compile_unit_in_view(
     unit: dict[str, Any],
     stock_paths: dict[str, Path],
     output_dir: Path,

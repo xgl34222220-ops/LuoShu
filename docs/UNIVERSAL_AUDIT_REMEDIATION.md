@@ -98,3 +98,28 @@ Whole-directory overlays without a proven lower/mirror remain blocked. SIGKILL o
 an unmount failure can leave a private recovery mount; it is never accepted merely
 because its directory exists. Candidate diagnostics now distinguish missing views
 from failed provenance. The original 317 audit APK remains byte-identical.
+
+### R5: independently prove ROM aliases across partition views
+
+HyperOS 3 feedback identified `stock-provenance-alias-target-unproven` for both
+lower and current candidates of `MiSansLatinVF.ttf`. The log did not contain its
+actual link target. A reproduced defect required every terminal to share the
+starting partition device, rejecting valid system-to-product ROM links.
+
+Resolution now proves each alias inode and each target against that target's
+read-only ROM partition and exact filesystem location. Absolute links are mapped
+to the selected original lower/mirror/recovered view; compilation opens that
+proven terminal rather than following the old alias into a live replacement.
+The original alias chain is revalidated immediately before SHA/face validation.
+Loops, user-data targets, mismatched filesystem locations and changed terminal
+paths/bytes remain rejected. Nested `/system/product/fonts` partition aliases
+also retain their own partition proof. An unproven view is never accepted solely
+because the proposed filename exists.
+
+Scanner identities now have capture revision 2. Old identities are rebuilt once
+through the existing stock-safe scan; protected or unprovable entries do not
+become trusted merely because the cache is current. Focused tests combine actual
+scanner path mapping, sealed geometry, two-partition/two-hop resolution, compiled
+font output, cache migration, changed-alias and changed-byte rejection. Kernel
+mount rows are modeled on the host; the user's exact symlink and native Android
+mount behavior remain unverified until device evidence confirms them.
