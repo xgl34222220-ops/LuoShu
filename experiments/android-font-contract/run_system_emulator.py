@@ -3,7 +3,7 @@
 Never usable without the explicit CI authorization marker. No hidden API or
 SELinux policy changes. Failure still attempts restoration and records evidence.
 """
-import argparse, hashlib, json, os, subprocess, time
+import argparse, copy, hashlib, json, os, subprocess, time
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -42,7 +42,7 @@ def probe(name):
  return r
 
 def rewrite(raw,ps):
- tree=ET.fromstring(raw);parents={child:parent for parent in tree.iter() for child in parent};count=0
+ tree=ET.fromstring(raw);original_primary=[copy.deepcopy(f) for f in list(tree) if f.tag=='family' and f.get('name')=='sans-serif'];parents={child:parent for parent in tree.iter() for child in parent};count=0
  for font in tree.iter('font'):
   current=parents.get(font);family=None
   while current is not None:
@@ -56,6 +56,12 @@ def rewrite(raw,ps):
   for child in list(font):
    if child.tag=='axis':font.remove(child)
   count+=1
+ # The new primary asset intentionally lacks protected script coverage. Keep
+ # the original primary immediately in fallback order for those missing glyphs.
+ # Its bytes and axes remain unchanged; only the clone's family name is removed.
+ if count:
+  for source in reversed(original_primary):
+   source.attrib.pop('name',None);tree.insert(1,source)
  return ET.tostring(tree,encoding='utf-8',xml_declaration=True),count
 
 try:
@@ -105,6 +111,12 @@ try:
  adb('push',str(assets/'composite.ttf'),asset);adb('shell','chmod','0644',asset);adb('shell','restorecon',asset)
  for remote,file in generated.items():adb('push',str(file),remote);adb('shell','restorecon',remote)
  adb('shell','sync');phase='applied-reboot';save();reboot()
+ root()
+ report['appliedConfigHashes']={remote:hashlib.sha256(adb('exec-out','cat',remote)).hexdigest() for remote in generated}
+ for remote,file in generated.items():
+  if report['appliedConfigHashes'][remote]!=hashlib.sha256(file.read_bytes()).hexdigest():raise RuntimeError('applied XML did not survive reboot: '+remote)
+ if adb('exec-out','cat',asset)!=(assets/'composite.ttf').read_bytes():raise RuntimeError('new font bytes did not survive reboot')
+ (a.output/'applied-font-manager.txt').write_bytes(adb('shell','dumpsys','font'))
  report['applied']=probe('system-applied');report['takeover']='passed'
 except Exception as error:
  report['failure']=type(error).__name__+': '+str(error);report['takeover']=report.get('takeover','failed')
