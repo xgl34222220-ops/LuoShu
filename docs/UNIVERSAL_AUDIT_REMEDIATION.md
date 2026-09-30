@@ -58,3 +58,5 @@
 ## 强制候选门禁发现的既有退出缺陷
 
 R1：后台provider的TERM处理需要约1秒回收子树，但原task scope在0.6秒就SIGKILL整树，导致EXIT未能释放单例锁。修正为先给直接worker有界协作退出机会，再清理剩余子孙；总清理仍有界。新增重复启动、旧boot/PID复用、新token保护和TERM-ignore子孙测试。没有恢复continue-on-error绕过失败。
+
+R2：31731dc 真机反馈暴露 mksh 的私有 FD 不随外部 exec 继承；真实 mksh R59 + Toybox 0.8.9 复现 `flock: flock: Bad file descriptor`、返回码1，原实现把错误误当竞争而等待。现在显式把同一打开文件描述映射到标准 FD0，native 失败后用 Python fcntl 的 errno 区分竞争与异常，异常立即停止。新增真实 mksh/Toybox、关闭 FD、fallback 失败及既有互斥/崩溃释放回归；仍非 Android ARM/SELinux 真机验收。module-only 构建固定复用已验证的31731dc APK，核对其 SHA256 和 App 源码未变，不重签也不要求用户重装 App。

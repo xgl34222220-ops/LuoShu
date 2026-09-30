@@ -76,6 +76,8 @@ test -f "$MOD/config/font_runtime_legacy_v14_4.conf" || exit 7
         with tempfile.TemporaryDirectory() as raw:
             t=Path(raw); mod=t/'module'; cfg=mod/'config'; retired=mod/'.luoshu-retired/universal-test'
             put(retired/'old', 'oldpayload')
+            py=mod/'common/python/bin/luoshu-python'
+            put(py, '#!/bin/sh\nunset PYTHONHOME PYTHONPATH\nexec '+sys.executable+' "$@"\n'); py.chmod(0o755)
             put(cfg/'universal-font-runtime-verification.conf','grade=FAIL\nbootId=boot-test\n')
             put(cfg/'universal-font-activated.conf',f'bootId=boot-test\npreviousFont=OldFont\nfont=FailedFont\npreviousMode=legacy\nretired={retired}\n')
             if (ROOT/'common/payload_commit_lock.sh').exists():
@@ -178,6 +180,10 @@ sleep 1
 
     def test_commit_lease_crash_nested_and_background(self):
         import time
+        shell=os.environ.get('LUOSHU_LOCK_TEST_SHELL') or shutil.which('mksh') or 'sh'
+        def lease_run(script, env):
+            return subprocess.run([shell,str(script)], env=os.environ|env,
+                                  text=True,capture_output=True,timeout=25)
         with tempfile.TemporaryDirectory() as raw:
             t=Path(raw); mod=t/'module'
             # Host stand-in for the bundled Android Python; real packaged fcntl
@@ -185,6 +191,12 @@ sleep 1
             py=mod/'common/python/bin/luoshu-python'
             put(py, '#!/bin/sh\nunset PYTHONHOME PYTHONPATH\nexec '+sys.executable+' "$@"\n'); py.chmod(0o755)
             helper=ROOT/'common/payload_commit_lock.sh'
+            native=os.environ.get('LUOSHU_LOCK_TEST_FLOCK') or shutil.which('toybox')
+            native_path=os.environ['PATH']
+            if native:
+                (t/'native-bin').mkdir()
+                (t/'native-bin/flock').symlink_to(Path(native).resolve())
+                native_path=str(t/'native-bin')+':'+native_path
             for backend in ['auto','python']:
                 script=t/'lease.sh'
                 script.write_text(f'''#!/bin/sh
@@ -199,8 +211,8 @@ luoshu_payload_commit_run "$MOD" nested || exit 8
 LUOSHU_PAYLOAD_LOCK_TIMEOUT=1 luoshu_payload_commit_run "$MOD" true || exit 9
 kill "$(cat "$MOD/background.pid")" 2>/dev/null || true
 ''')
-                env={'MOD':str(mod),'LUOSHU_PAYLOAD_LOCK_BACKEND':backend}
-                result=run(script,env=env)
+                env={'MOD':str(mod),'LUOSHU_PAYLOAD_LOCK_BACKEND':backend,'PATH':native_path}
+                result=lease_run(script,env=env)
                 self.assertEqual(result.returncode,0,backend+result.stderr)
                 # Kill an active lock body. No owner/reaper files need recovery.
                 script.write_text(f'''#!/bin/sh
@@ -209,19 +221,81 @@ hold() {{ touch "$MOD/ready"; sleep 30; }}
 luoshu_payload_commit_run "$MOD" hold
 ''')
                 (mod/'ready').unlink(missing_ok=True)
-                process=subprocess.Popen(['sh',str(script)],env=os.environ|env,start_new_session=True)
+                process=subprocess.Popen([shell,str(script)],env=os.environ|env,start_new_session=True)
                 try:
                     deadline=time.monotonic()+3
                     while not (mod/'ready').exists() and time.monotonic()<deadline: time.sleep(.02)
                     self.assertTrue((mod/'ready').exists())
                     probe=t/'probe.sh';probe.write_text(f'. "{helper}"\nluoshu_payload_commit_run "$MOD" true\n')
-                    self.assertNotEqual(run(probe,env=env|{'LUOSHU_PAYLOAD_LOCK_TIMEOUT':'0'}).returncode,0)
+                    self.assertNotEqual(lease_run(probe,env=env|{'LUOSHU_PAYLOAD_LOCK_TIMEOUT':'0'}).returncode,0)
                     import signal
                     os.killpg(process.pid,signal.SIGKILL);process.wait()
-                    self.assertEqual(run(probe,env=env|{'LUOSHU_PAYLOAD_LOCK_TIMEOUT':'1'}).returncode,0)
+                    self.assertEqual(lease_run(probe,env=env|{'LUOSHU_PAYLOAD_LOCK_TIMEOUT':'1'}).returncode,0)
                 finally:
                     if process.poll() is None:
                         os.killpg(process.pid,9); process.wait()
+
+    def test_commit_lock_exec_fd_and_native_ebadf_fallback(self):
+        import time
+        with tempfile.TemporaryDirectory() as raw:
+            t=Path(raw); mod=t/'module'; bin_dir=t/'bin'; bin_dir.mkdir()
+            py=mod/'common/python/bin/luoshu-python'
+            put(py, '#!/bin/sh\nunset PYTHONHOME PYTHONPATH\nexec '+sys.executable+' "$@"\n')
+            py.chmod(0o755)
+            # This is a real executable doing real fcntl, with shell-private
+            # descriptors closed as on mksh exec. Toybox-compatible error rc=1.
+            native=bin_dir/'flock'
+            put(native, '#!'+sys.executable+"\n"+"""import fcntl, os, sys
+from pathlib import Path
+with open(os.environ['LOCK_CALLS'], 'a') as log: log.write('native\\n')
+for fd in range(3, 20):
+    try: os.close(fd)
+    except OSError: pass
+fd=int(sys.argv[-1])
+if os.environ.get('BREAK_NATIVE') == '1':
+    try: os.close(fd)
+    except OSError: pass
+try: fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except OSError as error:
+    print('flock: flock: '+error.strerror, file=sys.stderr)
+    sys.exit(1)
+""")
+            native.chmod(0o755)
+            script=t/'probe.sh'
+            put(script, f'. "{ROOT}/common/payload_commit_lock.sh"\n'
+                'body() { printf committed > "$MOD/committed"; }\n'
+                'luoshu_payload_commit_run "$MOD" body\n')
+            env={'MOD':str(mod), 'PATH':str(bin_dir)+':'+os.environ['PATH'],
+                 'LOCK_CALLS':str(t/'calls'), 'LUOSHU_PAYLOAD_LOCK_TIMEOUT':'120'}
+            shells=['sh']
+            if os.environ.get('LUOSHU_LOCK_TEST_SHELL'):
+                shells.append(os.environ['LUOSHU_LOCK_TEST_SHELL'])
+            elif shutil.which('mksh'):
+                shells.append(shutil.which('mksh'))
+            for shell in shells:
+                for broken in ['0','1']:
+                    (mod/'committed').unlink(missing_ok=True)
+                    (t/'calls').unlink(missing_ok=True)
+                    result=subprocess.run([shell,str(script)], env=os.environ|env|{'BREAK_NATIVE':broken},
+                                          text=True,capture_output=True,timeout=4)
+                    self.assertEqual(result.returncode,0,result.stderr)
+                    self.assertEqual((mod/'committed').read_text(),'committed')
+                    self.assertEqual((t/'calls').read_text(),'native\n')
+                    self.assertNotIn('Bad file descriptor',result.stderr)
+                # Both native and fallback lose their target descriptor: fail
+                # once, never retry EBADF for the configured 120 seconds.
+                put(py, '#!/bin/sh\nunset PYTHONHOME PYTHONPATH\nexec 0<&-\nexec '+sys.executable+' "$@"\n')
+                (mod/'committed').unlink(missing_ok=True)
+                (t/'calls').unlink(missing_ok=True)
+                started=time.monotonic()
+                result=subprocess.run([shell,str(script)],env=os.environ|env|{'BREAK_NATIVE':'1'},
+                                      text=True,capture_output=True,timeout=4)
+                self.assertNotEqual(result.returncode,0)
+                self.assertFalse((mod/'committed').exists())
+                self.assertIn('commit lock failed',result.stderr)
+                self.assertLess(time.monotonic()-started,3)
+                self.assertEqual((t/'calls').read_text(),'native\n')
+                put(py, '#!/bin/sh\nunset PYTHONHOME PYTHONPATH\nexec '+sys.executable+' "$@"\n')
 
     def test_protected_typography_is_reported_partial(self):
         source=(ROOT/'common/universal_font_cutover.sh').read_text()

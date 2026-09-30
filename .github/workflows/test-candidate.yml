@@ -22,6 +22,7 @@ on:
       - .github/workflows/test-candidate.yml
 permissions:
   contents: read
+  actions: read
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -31,6 +32,7 @@ jobs:
       LUOSHU_REQUIRE_BROTLI_TEST: '1'
       LUOSHU_REQUIRE_SHAPING_TEST: '1'
       LUOSHU_AUDIT_APP: '1'
+      LUOSHU_REUSE_AUDIT_APP: ${{ contains(github.event.head_commit.message, '[module-only]') && '1' || '0' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -50,7 +52,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv python3-brotli python3-pil libraqm0 fonts-noto-cjk fonts-noto-core fonts-dejavu-core >/dev/null
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file mksh toybox python3-venv python3-brotli python3-pil libraqm0 fonts-noto-cjk fonts-noto-core fonts-dejavu-core >/dev/null
 
       - uses: actions/cache@v4
         with:
@@ -98,7 +100,32 @@ jobs:
         shell: bash
         run: sh scripts/pre_release_readiness.sh --enforce --output "$RUNNER_TEMP/pre-release-readiness"
 
+      - name: Test Android shell lock semantics
+        run: |
+          export PYTHONPATH="$PWD/common/python/lib/python3.14/site-packages${PYTHONPATH:+:$PYTHONPATH}"
+          LUOSHU_LOCK_TEST_SHELL="$(command -v mksh)" LUOSHU_LOCK_TEST_FLOCK="$(command -v toybox)" python3 scripts/universal_lifecycle_regression_test.py
+
+      - name: Retrieve unchanged installed audit App
+        if: env.LUOSHU_REUSE_AUDIT_APP == '1'
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 36713630252
+          name: LuoShu-Mixed-Test-31731dc060612c266e76180f306ea3beab610c8f
+          path: retained-audit-app
+
+      - name: Verify retained audit App provenance
+        if: env.LUOSHU_REUSE_AUDIT_APP == '1'
+        run: |
+          git fetch --depth=1 origin 31731dc060612c266e76180f306ea3beab610c8f
+          git diff --exit-code 31731dc060612c266e76180f306ea3beab610c8f HEAD -- android-app
+          apk=retained-audit-app/LuoShu-Core-Audit-v2.0.0-umix-31731dc060612c266e76180f306ea3beab610c8f.apk
+          echo "8d1ba7aaa892bdf98dcf2881842995f4f27e8f920024d22973cf8bb2e44e74e0  $apk" | sha256sum -c -
+          mkdir -p android-app/app/build/outputs/apk/debug
+          cp "$apk" android-app/app/build/outputs/apk/debug/app-debug.apk
+
       - name: Build debug App
+        if: env.LUOSHU_REUSE_AUDIT_APP != '1'
         working-directory: android-app
         shell: bash
         run: |
@@ -271,11 +298,17 @@ jobs:
           for file in dist/*.zip dist/*.apk; do
             renamed="${file%.*}-${LUOSHU_TEST_BUILD_ID}.${file##*.}"
             case "$file" in *.apk) renamed="dist/LuoShu-Core-Audit-${LUOSHU_ARTIFACT_VERSION}-${LUOSHU_TEST_BUILD_ID}.apk" ;; esac
+            if [ "$LUOSHU_REUSE_AUDIT_APP" = 1 ] && [ "${file##*.}" = apk ]; then
+              renamed="dist/LuoShu-Core-Audit-${LUOSHU_ARTIFACT_VERSION}-umix-31731dc060612c266e76180f306ea3beab610c8f.apk"
+            fi
             mv "$file" "$renamed"
             rm -f "$file.sha256"
             (cd dist && sha256sum "$(basename "$renamed")" > "$(basename "$renamed").sha256")
           done
           printf 'commit=%s\nbuildId=%s\nexperimental=true\nhardwareValidated=false\n' "$GITHUB_SHA" "$LUOSHU_TEST_BUILD_ID" > dist/test-build.conf
+          if [ "$LUOSHU_REUSE_AUDIT_APP" = 1 ]; then
+            printf 'appSourceCommit=31731dc060612c266e76180f306ea3beab610c8f\nappUnchanged=true\n' >> dist/test-build.conf
+          fi
 
       - uses: actions/upload-artifact@v4
         if: always()
