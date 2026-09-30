@@ -246,6 +246,23 @@ run_worker() {
         if grep -q '"reused":true' "$_output" 2>/dev/null; then
             write_task "$_task" success "$_font" '100% · 当前字体已验证，无需重新生成或重启' \
                 "$_started" "$_finished" '' '' '' 0 '' true 100
+        elif grep -q '"fallback":true' "$_output" 2>/dev/null; then
+            _fallback_reason=$(sed -n 's/.*"fallbackReason":"\([^"]*\)".*/\1/p' "$_output" 2>/dev/null | tail -n1)
+            case "$_fallback_reason" in
+                universal-precondition-missing) _fallback_label='设备拓扑/角色证据尚未就绪' ;;
+                universal-prepare-failed) _fallback_label='Universal 构建失败' ;;
+                universal-artifacts-missing) _fallback_label='Universal 产物不完整' ;;
+                universal-readiness-gate-rejected) _fallback_label='Universal 安全门禁未通过' ;;
+                universal-stage-failed) _fallback_label='Universal 下一启动负载提交失败' ;;
+                default-font) _fallback_label='恢复系统默认字体' ;;
+                composite-runtime|composite-family) _fallback_label='复合字体仍使用兼容路径' ;;
+                '') _fallback_label='原因未记录' ;;
+                *) _fallback_label="$_fallback_reason" ;;
+            esac
+            mark_load_verification_pending "$_font" || true
+            write_task "$_task" success "$_font" "100% · 已使用兼容引擎；Universal 未接管：$_fallback_label" \
+                "$_started" "$_finished" '' '' '' 0 '' false 100
+            [ -f "$HISTORY_TOOL" ] && MODDIR="$MODDIR" sh "$HISTORY_TOOL" record-direct "$_font" >/dev/null 2>&1 || true
         elif grep -q '"pipeline":"universal"' "$_output" 2>/dev/null; then
             # Phase 9 owns the pending state for Universal. Do not write the
             # legacy load-verification marker or the App could confuse two engines.
