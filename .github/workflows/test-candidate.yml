@@ -83,6 +83,7 @@ jobs:
 
       - name: Run supplemental candidate gates
         run: |
+          export PYTHONPATH="$PWD/common/python/lib/python3.14/site-packages${PYTHONPATH:+:$PYTHONPATH}"
           sh -x scripts/background_task_test.sh
           sh -x scripts/device_font_foreground_quick_test.sh
           sh -x scripts/font_switch_task_test.sh
