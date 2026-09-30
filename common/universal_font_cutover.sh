@@ -15,6 +15,11 @@ ROUTE_BRIDGE="$MODDIR/common/minimal_xml_router.sh"
 COMPILER_BRIDGE="$MODDIR/common/universal_font_compiler.sh"
 GATE="$MODDIR/common/universal_font_cutover_gate.py"
 DEPLOYER="$MODDIR/common/universal_font_deployment.py"
+TOPOLOGY_REFRESH="$MODDIR/common/font_topology_snapshot.sh"
+ROLE_REFRESH="$MODDIR/common/font_role_shadow.sh"
+STOCK_INVENTORY="$CONFIG_DIR/device_font_inventory.json"
+TOPOLOGY_JSON="$CONFIG_DIR/device_font_topology.json"
+ROLES_JSON="$CONFIG_DIR/device_font_roles.json"
 ACTIVATED_CONF="$CONFIG_DIR/universal-font-activated.conf"
 VERIFY_CONF="$CONFIG_DIR/universal-font-runtime-verification.conf"
 ROLLBACK_STATE="$CONFIG_DIR/universal-font-rollback.conf"
@@ -48,6 +53,30 @@ _uc_python() {
     PYTHONPATH="$MODDIR/common:$PYROOT/lib/python3.14:$PYROOT/lib/python3.14/site-packages" \
     LD_LIBRARY_PATH="$PYROOT/lib:$PYROOT/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
         "$PYBIN" "$@"
+}
+
+_uc_json_escape() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
+}
+
+_uc_repair_prerequisites() {
+    # Phase 9 should not silently fall back just because install/boot-time
+    # discovery has not materialized its derived files yet. Repair only the
+    # read-only discovery products here; never mutate the live font payload.
+    if [ ! -s "$TOPOLOGY_JSON" ] && [ -s "$STOCK_INVENTORY" ] && [ -f "$TOPOLOGY_REFRESH" ]; then
+        _uc_log "repairing missing topology before cutover"
+        MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
+            sh "$TOPOLOGY_REFRESH" refresh >>"$LOG_FILE" 2>&1 || true
+    fi
+
+    if [ -s "$TOPOLOGY_JSON" ] && [ -f "$ROLE_REFRESH" ]; then
+        if [ ! -s "$ROLES_JSON" ] || ! MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
+            sh "$ROLE_REFRESH" validate >/dev/null 2>&1; then
+            _uc_log "repairing missing/stale role map before cutover"
+            MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
+                sh "$ROLE_REFRESH" refresh >>"$LOG_FILE" 2>&1 || true
+        fi
+    fi
 }
 
 _uc_value() {
@@ -88,7 +117,7 @@ _uc_legacy() {
     _ucl_font="$1"; _ucl_reason="$2"
     _uc_log "legacy fallback font=$_ucl_font reason=$_ucl_reason"
     _uc_write_state fallback "$_ucl_font" legacy "$_ucl_reason"
-    _uc_progress 25 "通用引擎未接管，正在使用兼容切换路径"
+    _uc_progress 25 "Universal 未接管，正在使用兼容引擎"
 
     # A queued Universal request updates active_font.conf to the user's configured
     # choice before reboot. If this new request falls back to legacy, restore the
@@ -97,8 +126,8 @@ _uc_legacy() {
     if [ -s "$CONFIG_DIR/universal-font-next.conf" ]; then
         _ucl_live_font=$(_uc_value "$CONFIG_DIR/universal-font-next.conf" previousFont)
         if [ -n "$_ucl_live_font" ]; then
-            printf '%s\n' "$_ucl_live_font" > "$CONFIG_DIR/active_font.conf.tmp.$$" 2>/dev/null && \
-                mv -f "$CONFIG_DIR/active_font.conf.tmp.$$" "$CONFIG_DIR/active_font.conf" 2>/dev/null || true
+            printf '%s\n' "$_ucl_live_font" > "$CONFIG_DIR/active_font.conf.tmp.$" 2>/dev/null && \
+                mv -f "$CONFIG_DIR/active_font.conf.tmp.$" "$CONFIG_DIR/active_font.conf" 2>/dev/null || true
             chmod 0644 "$CONFIG_DIR/active_font.conf" 2>/dev/null || true
         fi
     fi
@@ -108,13 +137,25 @@ _uc_legacy() {
         printf '{"status":"error","message":"缺少兼容字体切换核心"}\n'
         return 1
     }
-    MODDIR="$MODDIR" MODULE_DIR="$MODDIR" LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
-        sh "$LEGACY_SWITCH" action switch "$_ucl_font"
+
+    _ucl_output=$(MODDIR="$MODDIR" MODULE_DIR="$MODDIR" LUOSHU_PUBLIC_DIR="$PUBLIC_DIR" \
+        sh "$LEGACY_SWITCH" action switch "$_ucl_font" 2>&1)
+    _ucl_rc=$?
+    if [ "$_ucl_rc" -eq 0 ] && printf '%s\n' "$_ucl_output" | grep -q '"status":"ok"'; then
+        _ucl_message=$(printf '%s\n' "$_ucl_output" | sed -n 's/.*"message":"\([^"]*\)".*/\1/p' | tail -n1)
+        [ -n "$_ucl_message" ] || _ucl_message="兼容字体引擎已准备完成"
+        printf '{"status":"ok","state":"legacy-fallback","pipeline":"legacy","fallback":true,"fallbackReason":"%s","message":"%s"}\n' \
+            "$(_uc_json_escape "$_ucl_reason")" "$(_uc_json_escape "$_ucl_message")"
+        return 0
+    fi
+    printf '%s\n' "$_ucl_output"
+    return "$_ucl_rc"
 }
 
 _uc_precondition() {
-    [ -s "$CONFIG_DIR/device_font_topology.json" ] || return 1
-    [ -s "$CONFIG_DIR/device_font_roles.json" ] || return 1
+    _uc_repair_prerequisites
+    [ -s "$TOPOLOGY_JSON" ] || return 1
+    [ -s "$ROLES_JSON" ] || return 1
     [ -f "$DEPLOYMENT" ] || return 1
     [ -f "$GATE" ] || return 1
     [ -f "$PLAN_BRIDGE" ] || return 1
