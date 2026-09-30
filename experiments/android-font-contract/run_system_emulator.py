@@ -74,7 +74,18 @@ try:
  if not backups:raise RuntimeError('no system font config found')
  report['originalConfigHashes']={k:hashlib.sha256(v).hexdigest() for k,v in backups.items()}
  phase='authorized-remount';save();root()
- adb('remount','-R',timeout=120);time.sleep(2);boot();root();adb('remount')
+ old_boot=adb('shell','cat','/proc/sys/kernel/random/boot_id').strip()
+ # -R may return nonzero because adbd disconnects during the requested reboot.
+ # Do not treat its text as readiness: prove the boot identity changed, then
+ # require a fresh remount command to succeed before touching any font file.
+ remount_output=adb('remount','-R',timeout=120,check=False)
+ until=time.monotonic()+240
+ while time.monotonic()<until:
+  current_boot=adb('shell','cat','/proc/sys/kernel/random/boot_id',timeout=10,check=False).strip()
+  if current_boot and current_boot!=old_boot:break
+  time.sleep(2)
+ else:raise RuntimeError('remount preparation did not produce a new boot')
+ boot();root();adb('remount')
  assets=Path(__file__).parent/'app/src/main/assets';fixture=json.loads((assets/'fixture.json').read_text())
  generated={};counts={}
  for remote,raw in backups.items():
