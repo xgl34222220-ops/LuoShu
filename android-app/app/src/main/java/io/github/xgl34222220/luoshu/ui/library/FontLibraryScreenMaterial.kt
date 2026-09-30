@@ -781,7 +781,7 @@ private fun MaterialLibraryEmpty(state: FontLibraryUiState) {
                 when {
                     state.query.isNotBlank() -> "换一个关键词，或者清空搜索条件"
                     filtered -> "切换到“全部”查看其他字体"
-                    else -> "使用页面上方的导入工具栏添加 TTF、OTF、TTC 或模块 ZIP"
+                    else -> "使用页面上方的导入工具栏添加 TTF、OTF、TTC、OTC、WOFF、WOFF2 或模块 ZIP"
                 },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,

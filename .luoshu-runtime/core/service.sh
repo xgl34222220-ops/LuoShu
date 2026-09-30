@@ -116,6 +116,10 @@ MODULE_DIR="$MODDIR"
             _app_result=$(MODDIR="$MODDIR" APP_INSTALL_LOG="$MODDIR/logs/app-install.log" sh "$MODDIR/common/app_installer.sh" first-boot 2>/dev/null)
             _app_code=$?
             case "$_app_result" in
+  audit-manual-only)
+      rm -f "$MODDIR/config/app_install_pending" "$_app_retry_file" 2>/dev/null || true
+      log_service "INFO" "独立核心验收测试 App 保持手动安装，不替换已有 App"
+      ;;
   installed|already-current)
       rm -f "$MODDIR/config/app_install_manual" "$_app_retry_file" 2>/dev/null || true
       log_service "INFO" "洛书 App 已安装并与模块内置版本一致"

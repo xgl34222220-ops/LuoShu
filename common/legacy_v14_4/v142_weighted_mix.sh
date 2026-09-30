@@ -37,6 +37,12 @@ MODULE_DIR="$MODDIR"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 [ -f "$MODDIR/common/mix_task_handoff.sh" ] && . "$MODDIR/common/mix_task_handoff.sh"
 
+
+# Shared short-lived commit lease; source beside this script for host fixtures too.
+for _lpc_helper in "${LUOSHU_REAL_MODDIR:-$MODDIR}/common/payload_commit_lock.sh" "${0%/*}/payload_commit_lock.sh" "${0%/*}/../payload_commit_lock.sh"; do
+    [ ! -f "$_lpc_helper" ] || { . "$_lpc_helper"; break; }
+done
+
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
@@ -262,7 +268,7 @@ rewrite_public_config() {
     chmod 0644 "$MIX_CONF" "$AXES_CONF" 2>/dev/null || true
 }
 
-cancel_nested_mix() {
+cancel_nested_mix_locked() {
     _cnm_child="$1"
     # A fully committed matching generation wins a completion/deadline race.
     # Never report failure then silently activate a successfully staged payload.
@@ -287,6 +293,11 @@ cancel_nested_mix() {
     if luoshu_task_pid_alive "$CONFIG_DIR/mix_worker.pid" "$_cnm_child"; then
         luoshu_stop_task_pid "$CONFIG_DIR/mix_worker.pid"
     fi
+}
+
+cancel_nested_mix() {
+    type luoshu_payload_commit_run >/dev/null 2>&1 || return 1
+    luoshu_payload_commit_run "${LUOSHU_REAL_MODDIR:-$MODDIR}" cancel_nested_mix_locked "$@"
 }
 
 worker() {

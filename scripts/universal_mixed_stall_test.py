@@ -66,6 +66,7 @@ class StallTest(unittest.TestCase):
     def setup_nested(self, scenario: str):
         self.copy('common/legacy_v14_4/v142_weighted_mix.sh', 'common/v142_weighted_mix.sh')
         self.copy('common/background_task.sh')
+        self.copy('common/payload_commit_lock.sh')
         self.copy('common/mix_task_handoff.sh')
         write(self.module / 'common/util_functions.sh', '''detect_font_family() { printf '%s\\n' "${1%%-*}"; }
 detect_font_weight() { printf 'regular\\n'; }

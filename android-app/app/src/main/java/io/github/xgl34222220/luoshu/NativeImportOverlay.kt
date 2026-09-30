@@ -299,7 +299,7 @@ private fun ImportResultDialog(
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(state.summary)
                     Text(
-                        "支持 TTF、OTF、TTC、WOFF、WOFF2 与字体模块 ZIP。网页字体会先转换为真实 SFNT；ZIP 不执行包内脚本。",
+                        "支持 TTF、OTF、TTC、OTC、WOFF、WOFF2 与字体模块 ZIP。网页字体会先转换为真实 SFNT；ZIP 不执行包内脚本。",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodySmall,
                     )

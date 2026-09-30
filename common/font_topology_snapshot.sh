@@ -90,7 +90,30 @@ _topology_refresh() {
     return "$_tf_rc"
 }
 
+# Upgrade the scanner through the existing locked, stock-safe entry point. Do
+# not promote a mounted replacement to stock merely to make migration pass.
+_topology_ensure() {
+    _topology_exec "$SCRIPT" --validate-current --inventory "$INVENTORY" --output "$OUTPUT" >>"$LOG" 2>&1
+    _tfe_current_rc=$?
+    # Do not overwrite sealed original evidence with our visible bind overlay.
+    [ "$_tfe_current_rc" -ne 3 ] || return 1
+    if [ "$_tfe_current_rc" -ne 0 ]; then
+        if ! _topology_exec -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("scannerRevision")==6 else 1)' "$INVENTORY" >/dev/null 2>&1; then
+            [ -f "$MODDIR/common/font_manager.sh" ] || return 1
+            MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action stock_scan >>"$LOG" 2>&1 || return 1
+        fi
+        _topology_refresh >/dev/null || return 1
+    fi
+    # Role evidence is cheap to recompute and must describe this exact topology.
+    MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$MODDIR/common/font_role_shadow.sh" refresh >/dev/null || return 1
+    _topology_exec "$SCRIPT" --validate-current --inventory "$INVENTORY" --output "$OUTPUT"
+}
+
 case "${1:-refresh}" in
+    ensure)
+        mkdir -p "$MODDIR/logs" 2>/dev/null || true
+        _topology_ensure
+        ;;
     refresh|build)
         _topology_refresh
         ;;
@@ -102,7 +125,7 @@ case "${1:-refresh}" in
         printf '%s\n' "$OUTPUT"
         ;;
     *)
-        echo "Usage: $0 {refresh|validate|status|path}" >&2
+        echo "Usage: $0 {ensure|refresh|validate|status|path}" >&2
         exit 2
         ;;
 esac

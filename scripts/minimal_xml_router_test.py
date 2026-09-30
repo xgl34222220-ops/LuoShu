@@ -242,7 +242,7 @@ def build_font_plan(*, missing_bold_ref: bool = False, duplicate_xml_ref: bool =
 
     topology = {
         "schema": "device-font-topology-v1",
-        "topologyRevision": 2,
+        "topologyRevision": 3,
         "state": "ready",
         "buildKey": "phase5-test-build",
         "romKind": "generic",
@@ -263,7 +263,7 @@ def build_font_plan(*, missing_bold_ref: bool = False, duplicate_xml_ref: bool =
     }
     roles = {
         "schema": "device-font-roles-v1",
-        "roleRevision": 1,
+        "roleRevision": 3,
         "state": "ready",
         "buildKey": "phase5-test-build",
         "romKind": "generic",

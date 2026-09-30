@@ -67,7 +67,7 @@ def main() -> int:
         profile = font_source_profile.build([source])
         topology = {
             "schema": "device-font-topology-v1",
-            "topologyRevision": 2,
+            "topologyRevision": 3,
             "state": "ready",
             "buildKey": "phase7-test",
             "romKind": "generic",
@@ -92,7 +92,7 @@ def main() -> int:
         }
         roles = {
             "schema": "device-font-roles-v1",
-            "roleRevision": 1,
+            "roleRevision": 3,
             "state": "ready",
             "buildKey": "phase7-test",
             "romKind": "generic",

@@ -7,6 +7,7 @@ font files, mounts paths, or changes /data/fonts.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = "universal-font-plan-v1"
-PLAN_REVISION = 1
+PLAN_REVISION = 3
 TOPOLOGY_SCHEMA = "device-font-topology-v1"
 ROLES_SCHEMA = "device-font-roles-v1"
 SOURCE_SCHEMA = "source-font-profile-v1"
@@ -192,14 +193,23 @@ def _target_weight(slot: dict[str, Any]) -> int:
 
 
 def _target_italic(slot: dict[str, Any]) -> bool:
+    # A physical face may back both normal and italic XML routes. Their style
+    # is a per-reference contract, not an OR over the physical slot's users.
+    metrics = slot.get("metrics")
+    if isinstance(metrics, dict):
+        os2 = metrics.get("os2")
+        if isinstance(os2, dict):
+            flags = _int(os2.get("fsSelection"))
+            if flags is not None:
+                return bool(flags & (1 | (1 << 9)))
     refs = slot.get("xmlRefs")
     if isinstance(refs, list):
-        for ref in refs:
-            if not isinstance(ref, dict):
-                continue
-            style = str(ref.get("style") or "").lower()
-            if style in {"italic", "oblique"}:
-                return True
+        styles = {
+            str(ref.get("style") or "normal").lower() in {"italic", "oblique"}
+            for ref in refs if isinstance(ref, dict)
+        }
+        if len(styles) == 1:
+            return styles.pop()
     name = str(slot.get("slotName") or "").lower()
     return "italic" in name or "oblique" in name
 
@@ -270,7 +280,64 @@ def _wght_axis(face: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _weight_distance(face: dict[str, Any], target_weight: int) -> tuple[float, str]:
+def _route_axis_values(raw: Any) -> dict[str, float]:
+    result: dict[str, float] = {}
+    for axis in raw if isinstance(raw, list) else []:
+        if not isinstance(axis, dict):
+            continue
+        tag = str(axis.get("tag") or "")
+        for key in ("stylevalue", "styleValue", "value"):
+            value = _float(axis.get(key))
+            if value is not None:
+                result[tag] = value
+                break
+    return result
+
+
+def _source_style_contract(
+    face: dict[str, Any], target_italic: bool, requested: dict[str, float],
+) -> dict[str, Any]:
+    axes = {
+        str(axis.get("tag")): axis
+        for axis in _face_variation(face).get("axes", [])
+        if isinstance(axis, dict)
+    }
+    source_axes = {tag: value for tag, value in requested.items() if tag in axes}
+    risks: list[str] = []
+    style_values: dict[str, float] = {}
+    for tag in ("ital", "slnt"):
+        axis = axes.get(tag)
+        if axis is None:
+            # A static italic face can satisfy ital=1, but its boolean style
+            # alone does not establish an exact nonzero slant angle.
+            if tag == "slnt" and requested.get(tag, 0) != 0:
+                risks.append("source-style-axis-missing")
+            continue
+        minimum, maximum = _float(axis.get("min")), _float(axis.get("max"))
+        default = _float(axis.get("default"), 0.0) or 0.0
+        value = requested.get(tag)
+        if value is None:
+            value = default
+            if not target_italic:
+                value = 0.0
+            elif tag == "ital" and "slnt" not in requested:
+                value = 1.0
+        if minimum is None or maximum is None or not minimum <= value <= maximum:
+            risks.append("source-style-axis-out-of-range")
+        source_axes[tag] = value
+        style_values[tag] = value
+    source_italic = (
+        any(value != 0 for value in style_values.values())
+        if style_values else _face_style(face).get("italic") is True
+    )
+    return {
+        "italicMatch": source_italic == target_italic,
+        "sourceAxes": dict(sorted(source_axes.items())),
+        "styleAxisRisks": sorted(set(risks)),
+    }
+
+
+def _weight_distance(face: dict[str, Any], target_weight: float) -> tuple[float, str]:
     axis = _wght_axis(face)
     if axis is not None:
         minimum = _float(axis.get("min"))
@@ -321,16 +388,19 @@ def _candidate_score(
     face: dict[str, Any],
     role: str,
     slot: dict[str, Any],
-    target_weight: int,
+    target_weight: float,
     target_italic: bool,
+    target_axes: dict[str, float] | None = None,
 ) -> tuple[tuple[float, float, float, float, str, int], dict[str, Any]] | None:
     compatible, reasons = _face_meets_role(face, role, slot)
     if not compatible:
         return None
 
     style = _face_style(face)
-    source_italic = style.get("italic") is True
-    italic_penalty = 0.0 if source_italic == target_italic else 10000.0
+    style_contract = _source_style_contract(face, target_italic, target_axes or {})
+    italic_penalty = (0.0 if style_contract["italicMatch"] else 10000.0) + (
+        10000.0 * len(style_contract["styleAxisRisks"])
+    )
     weight_distance, weight_mode = _weight_distance(face, target_weight)
     web_penalty = 5000.0 if face.get("_conversionRequired") is True else 0.0
     source_weight = _int(style.get("weight"), 400) or 400
@@ -364,7 +434,7 @@ def _candidate_score(
         "roleReasons": reasons,
         "weightMode": weight_mode,
         "weightDistance": round(weight_distance, 4),
-        "italicMatch": source_italic == target_italic,
+        **style_contract,
     }
     return score, details
 
@@ -373,9 +443,13 @@ def _select_face(
     faces: list[dict[str, Any]],
     role: str,
     slot: dict[str, Any],
+    *,
+    target_weight: float | None = None,
+    target_italic: bool | None = None,
+    target_axes: dict[str, float] | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    target_weight = _target_weight(slot)
-    target_italic = _target_italic(slot)
+    target_weight = _target_weight(slot) if target_weight is None else target_weight
+    target_italic = _target_italic(slot) if target_italic is None else target_italic
     ranked: list[tuple[tuple[float, float, float, float, str, int], dict[str, Any], dict[str, Any]]] = []
     rejected: dict[str, int] = {}
 
@@ -385,7 +459,7 @@ def _select_face(
             for reason in reject_reasons:
                 rejected[reason] = rejected.get(reason, 0) + 1
             continue
-        candidate = _candidate_score(face, role, slot, target_weight, target_italic)
+        candidate = _candidate_score(face, role, slot, target_weight, target_italic, target_axes)
         if candidate is None:
             continue
         score, details = candidate
@@ -416,7 +490,7 @@ def _source_ref(face: dict[str, Any]) -> dict[str, Any]:
     coverage = face.get("coverage") if isinstance(face.get("coverage"), dict) else {}
     capabilities = _face_capabilities(face)
     warnings = face.get("warnings") if isinstance(face.get("warnings"), list) else []
-    return {
+    result = {
         "uid": str(face.get("uid") or ""),
         "fileUid": str(face.get("fileUid") or ""),
         "sourcePath": str(face.get("_sourcePath") or ""),
@@ -435,6 +509,22 @@ def _source_ref(face: dict[str, Any]) -> dict[str, Any]:
         "capabilities": dict(capabilities),
         "warnings": list(warnings),
     }
+    if isinstance(face.get("mixedSelection"), dict):
+        result["mixedSelection"] = copy.deepcopy(face["mixedSelection"])
+    return result
+
+
+def _face_from_source_ref(source: dict[str, Any]) -> dict[str, Any]:
+    face = copy.deepcopy(source)
+    face.update({
+        "_sourcePath": source.get("sourcePath", ""),
+        "_sourceContainer": source.get("sourceContainer", ""),
+        "_conversionRequired": source.get("sourceContainer") in {"WOFF", "WOFF2"},
+        "style": {"weight": source.get("weight", 400), "italic": source.get("italic") is True},
+        "variation": {"variable": source.get("variable") is True, "axes": source.get("axes", [])},
+        "names": {key: source.get(key, "") for key in ("family", "subfamily", "postScriptName")},
+    })
+    return face
 
 
 def _xml_refs(slot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -474,6 +564,29 @@ def _source_metrics_ready(face: dict[str, Any]) -> bool:
     )
 
 
+def is_fixed_composite_selection(source: dict[str, Any]) -> bool:
+    """Recognize only frozen, hash-bound fixed-role intent, never generic static fonts."""
+    policy = source.get("mixedSelection")
+    if not isinstance(policy, dict) or policy.get("policy") != "fixed-composite-selection-v1":
+        return False
+    digest = str(policy.get("fontSha256") or "")
+    if (len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest)
+            or source.get("fileUid") != f"sha256:{digest}" or not policy.get("requestId")):
+        return False
+    if source.get("variable") is True or _face_variation(source).get("variable") is True:
+        return False
+    roles = policy.get("roles")
+    if not isinstance(roles, dict) or set(roles) != {"cjk", "latin", "digit"}:
+        return False
+    for value in roles.values():
+        if not isinstance(value, dict) or value.get("mode") != "fixed":
+            return False
+        axes = value.get("selectedAxes")
+        if not isinstance(axes, dict) or any(_float(number) is None for number in axes.values()):
+            return False
+    return True
+
+
 def _compile_requirements(
     role: str,
     slot: dict[str, Any],
@@ -482,12 +595,16 @@ def _compile_requirements(
 ) -> tuple[str, list[str], list[str]]:
     requirements: list[str] = []
     risks: list[str] = []
-    target_weight = int(selection["targetWeight"])
+    target_weight = float(selection["targetWeight"])
     style = _face_style(face)
     source_weight = _int(style.get("weight"), 400) or 400
     weight_mode = str(selection.get("weightMode") or "static")
     target_variable = _target_variable(slot)
     source_variable = _face_variation(face).get("variable") is True
+    fixed_selection = is_fixed_composite_selection(face)
+
+    if fixed_selection:
+        requirements.append("fixed-composite-selection")
 
     if face.get("_conversionRequired") is True:
         requirements.append("sfnt-conversion")
@@ -509,13 +626,14 @@ def _compile_requirements(
     elif weight_mode == "variable-clamped":
         requirements.append("variable-instance")
         risks.append("source-weight-axis-out-of-range")
-    elif source_weight != target_weight:
+    elif source_weight != target_weight and not fixed_selection:
         risks.append("static-weight-fallback")
 
     if target_variable and not source_variable:
         risks.append("static-source-for-variable-target")
     if selection.get("italicMatch") is not True:
         risks.append("italic-style-mismatch")
+    risks.extend(selection.get("styleAxisRisks") or [])
 
     requirements = sorted(set(requirements))
     risks = sorted(set(risks))
@@ -526,6 +644,63 @@ def _compile_requirements(
     else:
         compiler = "direct"
     return compiler, requirements, risks
+
+
+def route_target(target: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    """Resolve a fresh source and safety contract for one exact XML reference.
+
+    Candidate identities are part of FontPlan's hash. Both the router and the
+    compiler recompute this mapping; physical-only targets retain their own
+    contract and cannot borrow another route's successful selection.
+    """
+    # Avoid copying the entire shared reference graph into every route artifact.
+    result = copy.deepcopy({key: value for key, value in target.items()
+                            if key not in {"sourceCandidates", "xmlRefs"}})
+    result["xmlRefs"] = [copy.deepcopy(node)]
+    contract = result.setdefault("targetContract", {})
+    axes = _route_axis_values(node.get("axes"))
+    style = str(node.get("style") or "normal").lower()
+    italic = style in {"italic", "oblique"}
+    if "ital" in axes or "slnt" in axes:
+        italic = axes.get("ital", 0) != 0 or axes.get("slnt", 0) != 0
+    xml_weight = _int(node.get("weight"), 400) or 400
+    contract.update({
+        "weight": xml_weight,
+        "italic": italic,
+        "faceIndex": max(0, _int(node.get("index"), 0) or 0),
+        "style": style,
+        "axes": copy.deepcopy(node.get("axes") or []),
+    })
+    slot = {
+        "slotName": target.get("slotName"),
+        "metrics": contract.get("metrics", {}),
+        "xmlRefs": [node],
+    }
+    raw_candidates = target.get("sourceCandidates")
+    if not isinstance(raw_candidates, list):
+        # Old plans can only recheck their frozen source, never invent one.
+        raw_candidates = [target["source"]] if isinstance(target.get("source"), dict) else []
+    faces = [_face_from_source_ref(source) for source in raw_candidates if isinstance(source, dict)]
+    role = str(target.get("role") or "")
+    face, selection = _select_face(
+        faces, role, slot, target_weight=axes.get("wght", xml_weight),
+        target_italic=italic, target_axes=axes,
+    )
+    result["selection"] = selection
+    if face is None:
+        result.update(action="blocked", status="blocked", compiler="none", source=None,
+                      requirements=[], risks=sorted((selection.get("rejected") or {}).keys()),
+                      reasons=["no-compatible-source-face"])
+        return result
+    compiler, requirements, risks = _compile_requirements(role, slot, face, selection)
+    result.update(
+        source=_source_ref(face), compiler=compiler, requirements=requirements, risks=risks,
+        reasons=list(selection.get("roleReasons") or []),
+        status="conditional" if risks else "ready",
+        action=("compile-specialized" if role in SPECIALIZED_ROLES else
+                "replace" if compiler == "direct" else "compile"),
+    )
+    return result
 
 
 def _plan_slot(
@@ -556,6 +731,9 @@ def _plan_slot(
             "variable": _target_variable(slot),
             "metrics": dict(slot.get("metrics") or {}) if isinstance(slot.get("metrics"), dict) else {},
             "coverage": dict(_coverage(slot)),
+            **({"dynamicIdentity": copy.deepcopy(slot["dynamicIdentity"]),
+                 "dynamicReferences": copy.deepcopy(_xml_refs(slot))}
+               if isinstance(slot.get("dynamicIdentity"), dict) else {}),
         },
         "action": "review",
         "status": "review",
@@ -588,6 +766,14 @@ def _plan_slot(
         return base
 
     face, selection = _select_face(faces, role, slot)
+    base["sourceCandidates"] = [
+        _source_ref(candidate)
+        for candidate in sorted(faces, key=lambda item: (
+            str(item.get("uid") or ""), _int(item.get("faceIndex"), 0) or 0,
+            str(item.get("_sourcePath") or ""),
+        ))
+        if _face_meets_role(candidate, role, slot)[0]
+    ]
     base["selection"] = selection
     if face is None:
         base.update(
@@ -630,6 +816,10 @@ def _validate_inputs(
         raise UniversalPlanError("设备字体拓扑未就绪")
     if roles.get("schema") != ROLES_SCHEMA or roles.get("state") != "ready":
         raise UniversalPlanError("字体角色映射未就绪")
+    if _int(topology.get("topologyRevision"), 0) != 3:
+        raise UniversalPlanError("设备字体拓扑版本已过期，需要重新采集")
+    if _int(roles.get("roleRevision"), 0) != 3:
+        raise UniversalPlanError("字体角色版本已过期，需要重新分类")
     if profile.get("schema") != SOURCE_SCHEMA or profile.get("state") != "ready":
         raise UniversalPlanError("源字体 Profile 未就绪")
 
@@ -670,8 +860,13 @@ def _global_constraints(
             if isinstance(refs, list):
                 data_font_refs = len(refs)
 
+    dynamic = runtime.get("dynamicFontsEvidence")
+    dynamic_incomplete = isinstance(dynamic, dict) and dynamic.get("complete") is not True
     requirements: list[str] = []
     risks: list[str] = []
+    if dynamic_incomplete:
+        requirements.append("resolve-dynamic-font-discovery")
+        risks.append("dynamic-font-discovery-incomplete")
     if data_font_files or data_font_refs:
         requirements.append("data-font-layer-review")
         risks.append("data-font-layer-active")
@@ -684,6 +879,8 @@ def _global_constraints(
     return {
         "requirements": sorted(requirements),
         "risks": sorted(risks),
+        "dynamicDiscoveryComplete": not dynamic_incomplete,
+        "dynamicUnresolvedCount": len(dynamic.get("unresolved") or []) if isinstance(dynamic, dict) else 0,
         "dataFontFileCount": data_font_files,
         "dataFontConfigReferenceCount": data_font_refs,
         "unresolvedXmlRefCount": unresolved_count,

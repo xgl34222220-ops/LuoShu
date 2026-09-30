@@ -48,6 +48,10 @@ _ufp_profile_path() {
 _ufp_build() {
     _ufb_family="$1"
     [ -n "$_ufb_family" ] || { printf '{"status":"error","message":"未指定字体家族"}\n'; return 1; }
+    MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$MODDIR/common/font_topology_snapshot.sh" ensure >/dev/null 2>&1 || {
+        printf '{"status":"error","message":"字体拓扑升级或动态配置解析未完成"}\n'
+        return 1
+    }
     [ -s "$TOPOLOGY" ] || { printf '{"status":"error","message":"设备字体拓扑尚未生成"}\n'; return 1; }
     [ -s "$ROLES" ] || { printf '{"status":"error","message":"字体角色映射尚未生成"}\n'; return 1; }
     [ -f "$PROFILE_BRIDGE" ] || { printf '{"status":"error","message":"源字体 Profile 组件不可用"}\n'; return 1; }

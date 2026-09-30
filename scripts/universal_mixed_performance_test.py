@@ -115,13 +115,13 @@ def run(root: Path, han: int, contours: int, slot_count: int) -> dict:
     shutil.copyfile(source, stock)
     paths = [f'/system/fonts/Ui{index:03d}-Regular.ttf' for index in range(slot_count)]
     stocks = {path: stock for path in paths}
-    topology = dict(schema='device-font-topology-v1', topologyRevision=2, state='ready',
+    topology = dict(schema='device-font-topology-v1', topologyRevision=3, state='ready',
                     buildKey='lazy-probe-test', romKind='hyperos', summary={}, families={},
                     xmlAliases=[], unresolvedXmlRefs=[], runtime={}, slots={
                         path: fixture.slot_from_stock(path, stock, family='sans-serif',
                                                       source_xml=None, declared=Path(path).name)
                         for path in paths})
-    roles = dict(schema='device-font-roles-v1', roleRevision=1, state='ready',
+    roles = dict(schema='device-font-roles-v1', roleRevision=3, state='ready',
                  buildKey='lazy-probe-test', romKind='hyperos',
                  slots={path: fixture.role_map('ui-sans') for path in paths})
     profile = font_source_profile.build([source])

@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # 洛书 v2.0.0：原生 App 文件选择器导入桥。
-# 只接受 App 私有缓存中的 TTF/OTF/TTC/WOFF/WOFF2/ZIP；网页字体先安全转换为 SFNT。
+# 只接受 App 私有缓存中的 TTF/OTF/TTC/OTC/WOFF/WOFF2/ZIP；网页字体先安全转换为 SFNT。
 set +e
 
 MODDIR="${MODDIR:-}"
@@ -34,14 +34,10 @@ fail_json() {
     return 1
 }
 
+[ -f "$MODDIR/common/app_cache_guard.sh" ] && . "$MODDIR/common/app_cache_guard.sh"
 trusted_source() {
-    case "$1" in
-        /data/user/0/io.github.xgl34222220.luoshu/cache/native_import/*|\
-        /data/data/io.github.xgl34222220.luoshu/cache/native_import/*|\
-        /data/user/0/io.github.xgl34222220.luoshu.debug/cache/native_import/*|\
-        /data/data/io.github.xgl34222220.luoshu.debug/cache/native_import/*) return 0 ;;
-    esac
-    return 1
+    type luoshu_app_cache_guard >/dev/null 2>&1 || return 1
+    luoshu_app_cache_guard "$1" native_import
 }
 
 file_hash() {
@@ -219,7 +215,7 @@ import_web_font_file() {
         return
     fi
 
-    _iwf_converted=$(find "$_iwf_tmp" -maxdepth 1 -type f \( -name '*.ttf' -o -name '*.otf' \) -print 2>/dev/null | head -n1)
+    _iwf_converted=$(find "$_iwf_tmp" -maxdepth 1 -type f \( -name '*.ttf' -o -name '*.otf' -o -name '*.ttc' \) -print 2>/dev/null | head -n1)
     if [ ! -f "$_iwf_converted" ]; then
         rm -rf "$_iwf_tmp" 2>/dev/null || true
         fail_json "网页字体转换没有生成可用 SFNT"
@@ -275,6 +271,7 @@ source_path="${1:-}"
 display_name="${2:-}"
 [ -n "$source_path" ] || { fail_json "未指定待导入文件"; exit 0; }
 trusted_source "$source_path" || { fail_json "导入来源目录不受信任"; exit 0; }
+source_path="$LUOSHU_TRUSTED_CACHE_PATH"
 [ -f "$source_path" ] || { fail_json "待导入文件不存在"; exit 0; }
 _bytes=$(wc -c < "$source_path" 2>/dev/null | tr -d '[:space:]')
 case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
@@ -282,9 +279,9 @@ case "$_bytes" in ''|*[!0-9]*) _bytes=0 ;; esac
 [ -n "$display_name" ] || display_name=$(basename "$source_path")
 _ext=$(printf '%s' "${display_name##*.}" | tr '[:upper:]' '[:lower:]')
 case "$_ext" in
-    ttf|otf|ttc) import_font_file "$source_path" "$display_name" ;;
+    ttf|otf|ttc|otc) import_font_file "$source_path" "$display_name" ;;
     woff|woff2) import_web_font_file "$source_path" "$display_name" ;;
     zip) import_zip_file "$source_path" "$display_name" ;;
-    *) fail_json "仅支持 TTF、OTF、TTC、WOFF、WOFF2 和字体模块 ZIP" ;;
+    *) fail_json "仅支持 TTF、OTF、TTC、OTC、WOFF、WOFF2 和字体模块 ZIP" ;;
 esac
 exit 0

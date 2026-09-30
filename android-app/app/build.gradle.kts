@@ -42,6 +42,7 @@ android {
         // module.prop is the only version source shared by the module, native App and CI artifacts.
         versionCode = moduleVersionCode * 100 + 1
         versionName = appVersionName
+        manifestPlaceholders["luoshuAppLabel"] = "@string/app_name"
     }
 
     buildFeatures {
@@ -66,11 +67,13 @@ android {
 
     buildTypes {
         getByName("debug") {
-            applicationIdSuffix = ".debug"
+            val auditApp = providers.environmentVariable("LUOSHU_AUDIT_APP").orNull == "1"
+            applicationIdSuffix = if (auditApp) ".audit" else ".debug"
+            if (auditApp) manifestPlaceholders["luoshuAppLabel"] = "洛书·核心验收测试"
             val testBuildId = providers.environmentVariable("LUOSHU_TEST_BUILD_ID").orNull
             require(testBuildId == null || testBuildId.matches(Regex("[A-Za-z0-9._-]+")))
             versionNameSuffix = if (testBuildId == null) "-debug" else "-debug-$testBuildId"
-            // Test packages remain installable over the existing debug app, but execute with release-like optimization.
+            // Audit builds install beside existing apps; ephemeral CI signing is not an upgrade identity.
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true

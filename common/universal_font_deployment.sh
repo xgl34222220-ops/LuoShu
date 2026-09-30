@@ -14,6 +14,12 @@ DEPLOY_ROOT="$CONFIG_DIR/universal-font-deployments"
 PYROOT="$MODDIR/common/python"
 PYBIN="$PYROOT/bin/luoshu-python"
 
+
+# Shared short-lived commit lease; source beside this script for host fixtures too.
+for _lpc_helper in "$MODDIR/common/payload_commit_lock.sh" "${0%/*}/payload_commit_lock.sh" "${0%/*}/../payload_commit_lock.sh"; do
+    [ ! -f "$_lpc_helper" ] || { . "$_lpc_helper"; break; }
+done
+
 _ud_exec() {
     if [ -n "${LUOSHU_PYTHON:-}" ]; then
         "$LUOSHU_PYTHON" "$@"
@@ -78,6 +84,22 @@ _ud_prepare() {
         printf '{"status":"error","message":"Phase 4/5/6 产物不完整"}\n'
         return 1
     }
+    # Preserve actionable blocked reasons in the existing log before the
+    # deployment's all-or-nothing gate returns its aggregate rejection.
+    mkdir -p "$MODDIR/logs" 2>/dev/null || true
+    _ud_exec - "$UD_ARTIFACT_MANIFEST" >> "$MODDIR/logs/fontswitch.log" 2>/dev/null <<'PYBLOCK'
+import json, re, sys
+from pathlib import Path
+manifest = json.loads(Path(sys.argv[1]).read_text())
+blocked = [a for a in manifest.get('artifacts', []) if a.get('status') == 'blocked']
+for item in blocked[:50]:
+    print('[UNIVERSAL-BLOCKED] ' + json.dumps({
+        'targetPath': item.get('targetPath'), 'role': item.get('role'),
+        'reason': re.sub(r'/[^\s]+', '<path>', str(item.get('reason', '')))
+    }, ensure_ascii=False, separators=(',', ':')))
+if blocked:
+    print('[UNIVERSAL-BLOCKED] count=' + str(len(blocked)))
+PYBLOCK
     _udp_dir=$(_ud_dir "$_udp_family") || return 1
     _udp_manifest=$(_ud_manifest "$_udp_family") || return 1
     _udp_payload=$(_ud_payload "$_udp_family") || return 1
@@ -169,7 +191,7 @@ _ud_capture_previous() {
     UD_PREVIOUS_PAYLOAD_DIGEST=$(_ud_value "$CONFIG_DIR/universal-font-runtime.conf" payloadDigest)
 }
 
-_ud_stage_prepared() {
+_ud_stage_prepared_locked() {
     _uds_family="$1"
     [ -n "$_uds_family" ] || return 1
     _uds_manifest=$(_ud_manifest "$_uds_family") || return 1
@@ -266,9 +288,19 @@ _ud_stage_prepared() {
         return 1
     }
     chmod 0644 "$_uds_reboot" 2>/dev/null || true
+    rm -f "$CONFIG_DIR/universal-font-rollback.conf" 2>/dev/null || true
+    {
+        printf 'state=staged\nfont=%s\ndecision=universal\nreason=ready-next-boot\n' "$_uds_label"
+    } > "$CONFIG_DIR/universal-font-cutover.conf.tmp.$$" &&
+        mv -f "$CONFIG_DIR/universal-font-cutover.conf.tmp.$$" "$CONFIG_DIR/universal-font-cutover.conf" || true
 
     printf '{"status":"ok","state":"staged-next-boot","pipeline":"universal","fallback":false,"deploymentId":"%s","previousMode":"%s"}\n' \
         "$_uds_id" "$UD_PREVIOUS_MODE"
+}
+
+_ud_stage_prepared() {
+    type luoshu_payload_commit_run >/dev/null 2>&1 || return 1
+    luoshu_payload_commit_run "$MODDIR" _ud_stage_prepared_locked "$@"
 }
 
 _ud_stage_next() {

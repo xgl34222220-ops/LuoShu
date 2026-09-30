@@ -28,6 +28,12 @@ LOG_FILE="$REALMOD/logs/fontswitch.log"
 FINALIZE_LOCK="$REALMOD/.mix-stage-finalize.lock"
 [ -f "$LEGACY/payload_clone.sh" ] && . "$LEGACY/payload_clone.sh"
 
+
+# Shared short-lived commit lease; source beside this script for host fixtures too.
+for _lpc_helper in "$REALMOD/common/payload_commit_lock.sh" "${0%/*}/payload_commit_lock.sh" "${0%/*}/../payload_commit_lock.sh"; do
+    [ ! -f "$_lpc_helper" ] || { . "$_lpc_helper"; break; }
+done
+
 read_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
@@ -201,6 +207,14 @@ mix_status_json_fast() {
         fi
     fi
 
+    if [ "$_state" = success ] && universal_mix_pending; then
+        _coverage="$REALMOD/config/universal-mixed-coverage.conf"
+        if [ "$(read_value "$_coverage" requestId)" = "$_task_request" ]; then
+            _coverage_message=$(read_value "$_coverage" message)
+            [ -z "$_coverage_message" ] || _message="$_coverage_message"
+        fi
+    fi
+
     _cjk=$(read_value "$_task_file" cjk)
     _latin=$(read_value "$_task_file" latin)
     _digit=$(read_value "$_task_file" digit)
@@ -280,7 +294,7 @@ clear_mix_text_payload() {
     return 0
 }
 
-prepare_mix_stage() {
+prepare_mix_stage_locked() {
     mkdir -p "$REALMOD/config" "$REALMOD/cache" "$REALMOD/logs" 2>/dev/null || return 1
     rm -rf "$MIX_STAGE" 2>/dev/null || true
     mkdir -p "$MIX_STAGE" 2>/dev/null || return 1
@@ -313,6 +327,11 @@ prepare_mix_stage() {
         mv -f "${MIX_STAGE_STATE}.tmp.$$" "$MIX_STAGE_STATE" 2>/dev/null || return 1
     chmod 0644 "$MIX_STAGE_STATE" 2>/dev/null || true
     return 0
+}
+
+prepare_mix_stage() {
+    type luoshu_payload_commit_run >/dev/null 2>&1 || return 1
+    luoshu_payload_commit_run "$REALMOD" prepare_mix_stage_locked "$@"
 }
 
 stage_has_fonts() {
@@ -395,10 +414,11 @@ write_next_state() {
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "$REBOOT_CONF" 2>/dev/null || true
     chmod 0644 "$REBOOT_CONF" 2>/dev/null || true
+    rm -f "$REALMOD/config/universal-font-rollback.conf" 2>/dev/null || true
     return 0
 }
 
-commit_mix_stage_if_needed() {
+commit_mix_stage_locked() {
     [ "$(read_value "$MIX_STAGE_STATE" state)" != cancelled ] || return 1
     if universal_mix_pending; then
         # Leave MIX_STAGE_STATE for identity checks on subsequent finalizers/status.
@@ -444,6 +464,11 @@ commit_mix_stage_if_needed() {
     printf '[%s] legacy composite staged for next boot: mix\n' \
         "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" >> "$LOG_FILE" 2>/dev/null || true
     return 0
+}
+
+commit_mix_stage_if_needed() {
+    type luoshu_payload_commit_run >/dev/null 2>&1 || return 1
+    luoshu_payload_commit_run "$REALMOD" commit_mix_stage_locked "$@"
 }
 
 finalize_lock_acquire() {
@@ -540,7 +565,7 @@ setup_runtime() {
     # handoff helpers. Without them Android can keep the public task at 34% until
     # the complete composite build exits.
     force_link "$REALMOD/common/background_task.sh" "$RUNTIME/common/background_task.sh" || return 1
-    for _scope_file in task_scope.sh task_scope.py; do
+    for _scope_file in task_scope.sh task_scope.py payload_commit_lock.sh; do
         [ ! -f "$REALMOD/common/$_scope_file" ] || force_link "$REALMOD/common/$_scope_file" "$RUNTIME/common/$_scope_file" || return 1
     done
     force_link "$REALMOD/common/mix_task_handoff.sh" "$RUNTIME/common/mix_task_handoff.sh" || return 1

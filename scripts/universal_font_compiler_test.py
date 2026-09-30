@@ -171,7 +171,7 @@ def build_plans(
     source_profile = font_source_profile.build([source])
     topology = {
         "schema": "device-font-topology-v1",
-        "topologyRevision": 2,
+        "topologyRevision": 3,
         "state": "ready",
         "buildKey": "phase6-test",
         "romKind": "generic",
@@ -189,7 +189,7 @@ def build_plans(
     }
     roles = {
         "schema": "device-font-roles-v1",
-        "roleRevision": 1,
+        "roleRevision": 3,
         "state": "ready",
         "buildKey": "phase6-test",
         "romKind": "generic",

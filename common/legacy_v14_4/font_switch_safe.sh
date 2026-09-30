@@ -62,6 +62,12 @@ type check_coloros >/dev/null 2>&1 && check_coloros
 type check_hyperos >/dev/null 2>&1 && check_hyperos
 mkdir -p "$CONFIG_DIR" "$MODDIR/logs" "$USER_FONTS_DIR" 2>/dev/null || true
 
+
+# Shared short-lived commit lease; source beside this script for host fixtures too.
+for _lpc_helper in "$MODDIR/common/payload_commit_lock.sh" "${0%/*}/payload_commit_lock.sh" "${0%/*}/../payload_commit_lock.sh"; do
+    [ ! -f "$_lpc_helper" ] || { . "$_lpc_helper"; break; }
+done
+
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g' | tr '\n\r' '  '
 }
@@ -566,7 +572,12 @@ resolve_previous_state() {
     [ -n "$PREVIOUS_FONT" ] || PREVIOUS_FONT=default
     PREVIOUS_LEGACY=false
     [ -f "$LEGACY_MODE_CONF" ] && PREVIOUS_LEGACY=true
-    if [ -s "$NEXT_STATE" ]; then
+    if [ -s "$CONFIG_DIR/universal-font-next.conf" ]; then
+        _queued_previous=$(read_state_value "$CONFIG_DIR/universal-font-next.conf" previousFont)
+        _queued_legacy=$(read_state_value "$CONFIG_DIR/universal-font-next.conf" previousLegacy)
+        [ -n "$_queued_previous" ] && PREVIOUS_FONT="$_queued_previous"
+        [ "$_queued_legacy" = true ] && PREVIOUS_LEGACY=true || PREVIOUS_LEGACY=false
+    elif [ -s "$NEXT_STATE" ]; then
         _queued_previous=$(read_state_value "$NEXT_STATE" previousFont)
         _queued_legacy=$(read_state_value "$NEXT_STATE" previousLegacy)
         [ -n "$_queued_previous" ] && PREVIOUS_FONT="$_queued_previous"
@@ -577,6 +588,7 @@ resolve_previous_state() {
 prepare_next_payload() {
     _font="$1"; _previous="$2"; _previous_legacy="$3"
     _next_tmp="${NEXT_STATE}.tmp.$$"
+    rm -f "$CONFIG_DIR/universal-font-next.conf" 2>/dev/null || true
     rm -rf "$NEXT_PAYLOAD" 2>/dev/null || true
     rm -f "$NEXT_STATE" 2>/dev/null || true
     if ! mv "$STAGE_PAYLOAD" "$NEXT_PAYLOAD" 2>/dev/null; then
@@ -702,17 +714,8 @@ switch_font() {
         stage_verify "$_font" || { safe_error '新字体负载校验失败，当前启动字体未被改动'; return 1; }
     fi
 
-    progress 94 '正在提交下一启动字体负载'
-    prepare_next_payload "$_active_label" "$PREVIOUS_FONT" "$PREVIOUS_LEGACY" || {
-        safe_error '下一启动字体负载提交失败，当前启动字体未被改动'
-        return 1
-    }
-    progress 98 '正在保存字体选择状态'
-    if ! write_runtime_state "$_active_label"; then
-        cancel_next_payload
-        safe_error '字体状态保存失败，下一启动负载已取消'
-        return 1
-    fi
+    type luoshu_payload_commit_run >/dev/null 2>&1 || return 1
+    luoshu_payload_commit_run "$MODDIR" commit_safe_payload "$_active_label" || return 1
 
     printf '%s\n' "$_active_label" > "$CONFIG_DIR/last_switch_result.conf" 2>/dev/null || true
     date '+%Y-%m-%d %H:%M:%S' > "$CONFIG_DIR/last_switch_time.conf" 2>/dev/null || true
@@ -720,6 +723,19 @@ switch_font() {
     printf '{"status":"ok","data":{"font":"%s","rebootRequired":true,"core":"physical-safe-v1","pipeline":"next-boot-stage"}}\n' \
         "$(json_escape "$_active_label")"
     return 0
+}
+
+commit_safe_payload() {
+    _commit_label="$1"
+    resolve_previous_state
+    prepare_next_payload "$_commit_label" "$PREVIOUS_FONT" "$PREVIOUS_LEGACY" || {
+        safe_error '下一启动字体负载提交失败，当前启动字体未被改动'; return 1;
+    }
+    if ! write_runtime_state "$_commit_label"; then
+        cancel_next_payload
+        safe_error '字体状态保存失败，下一启动负载已取消'; return 1
+    fi
+    rm -f "$CONFIG_DIR/universal-font-rollback.conf" 2>/dev/null || true
 }
 
 case "${1:-}" in

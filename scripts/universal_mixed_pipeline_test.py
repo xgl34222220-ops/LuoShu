@@ -16,6 +16,7 @@ from fontTools.ttLib import TTFont
 import device_font_template_base as template
 import font_coverage
 import font_source_profile
+import font_topology_snapshot
 import minimal_xml_router
 import universal_font_compiler as compiler
 import universal_font_compiler_test as fixture
@@ -70,13 +71,18 @@ def plans(source: Path, stocks: dict[str, Path], roles_by_path: dict[str, str], 
     profile = font_source_profile.build([source])
     slots = {path: fixture.slot_from_stock(path, stock, family='sans-serif', source_xml=None,
              declared=Path(path).name) for path, stock in stocks.items()}
-    topology = {'schema': 'device-font-topology-v1', 'topologyRevision': 2, 'state': 'ready',
+    topology = {'schema': 'device-font-topology-v1', 'topologyRevision': 3, 'state': 'ready',
                 'buildKey': 'mixed-pipeline-test', 'romKind': 'hyperos', 'summary': {},
                 'slots': slots, 'families': {}, 'xmlAliases': [], 'unresolvedXmlRefs': [], 'runtime': {}}
-    roles = {'schema': 'device-font-roles-v1', 'roleRevision': 1, 'state': 'ready',
+    roles = {'schema': 'device-font-roles-v1', 'roleRevision': 3, 'state': 'ready',
              'buildKey': 'mixed-pipeline-test', 'romKind': 'hyperos',
              'slots': {p: fixture.role_map(r) for p, r in roles_by_path.items()}}
     if module is not None:
+        inventory = dict(schema='device-font-inventory-v1', state='ready', scannerRevision=6,
+                         buildKey=topology['buildKey'], romKind=topology['romKind'], slots=slots,
+                         families={}, xmlGraph={'refs': [], 'aliases': []})
+        topology = font_topology_snapshot.build_topology(inventory, None, '', None, None, '')
+        (module / 'config/device_font_inventory.json').write_text(json.dumps(inventory))
         (module / 'config/device_font_topology.json').write_text(json.dumps(topology))
         (module / 'config/device_font_roles.json').write_text(json.dumps(roles))
     plan = universal_font_plan.build_plan(topology, roles, profile)

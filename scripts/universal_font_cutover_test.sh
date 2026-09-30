@@ -39,6 +39,7 @@ case "$1" in
   manifest|path) printf '%s\n' "$MODDIR/config/deployment.json" ;;
   payload) printf '%s\n' "$MODDIR/config/prepared-payload" ;;
   stage-prepared)
+    printf 'state=staged\nfont=%s\ndecision=universal\n' "$2" > "$MODDIR/config/universal-font-cutover.conf"
     previous=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null || printf 'default')
     [ -n "$previous" ] || previous=default
     mkdir -p "$MODDIR/.luoshu-payload-next"
@@ -60,6 +61,11 @@ SH
 cat > "$MOD/common/legacy_v14_4/font_switch_safe.sh" <<'SH'
 #!/bin/sh
 previous=$(head -n1 "$MODDIR/config/active_font.conf" 2>/dev/null || printf 'default')
+if [ -s "$MODDIR/config/universal-font-next.conf" ]; then
+  previous=$(sed -n 's/^previousFont=//p' "$MODDIR/config/universal-font-next.conf")
+fi
+rm -f "$MODDIR/config/universal-font-next.conf"
+rm -rf "$MODDIR/.luoshu-payload-next"
 [ -n "$previous" ] || previous=default
 printf '%s\n' "${3:-unknown}" >> "$MODDIR/config/legacy-called"
 mkdir -p "$MODDIR/.luoshu-payload-next"

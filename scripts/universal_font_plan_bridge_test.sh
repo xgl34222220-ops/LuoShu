@@ -18,11 +18,18 @@ case "$1" in
 esac
 SH
 chmod 0755 "$MOD/common/font_source_profile.sh"
+# Isolated planner-shell contract test; full real cache migration is exercised
+# by discovery and mixed pipeline tests, not this source-profile stub fixture.
+cat > "$MOD/common/font_topology_snapshot.sh" <<'SH'
+#!/bin/sh
+[ "$1" = ensure ] || exit 2
+printf called > "$MODDIR/config/topology-ensure-called"
+SH
 
 cat > "$MOD/config/device_font_topology.json" <<'JSON'
 {
   "schema": "device-font-topology-v1",
-  "topologyRevision": 2,
+  "topologyRevision": 3,
   "state": "ready",
   "buildKey": "bridge-test",
   "romKind": "generic",
@@ -63,7 +70,7 @@ JSON
 cat > "$MOD/config/device_font_roles.json" <<'JSON'
 {
   "schema": "device-font-roles-v1",
-  "roleRevision": 1,
+  "roleRevision": 3,
   "state": "ready",
   "buildKey": "bridge-test",
   "romKind": "generic",
@@ -168,4 +175,5 @@ VALID=$(MODDIR="$MOD" MODULE_DIR="$MOD" LUOSHU_PYTHON=python3 \
   sh "$MOD/common/universal_font_plan.sh" validate Bridge-Regular)
 printf '%s\n' "$VALID" | grep -q '"status":"ok"'
 
+test -s "$MOD/config/topology-ensure-called"
 echo "universal_font_plan_bridge_test: PASS"

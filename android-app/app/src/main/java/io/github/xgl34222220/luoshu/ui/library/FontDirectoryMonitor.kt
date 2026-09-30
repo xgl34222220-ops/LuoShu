@@ -59,7 +59,7 @@ import org.json.JSONObject
 private const val FONT_WATCH_SCHEMA = 1
 private const val FONT_WATCH_MAX_DOCUMENTS = 2_048
 private const val FONT_WATCH_MAX_DEPTH = 6
-private val FONT_WATCH_EXTENSIONS = setOf("ttf", "otf", "ttc", "zip")
+private val FONT_WATCH_EXTENSIONS = io.github.xgl34222220.luoshu.NativeFontFormats.importExtensions
 
 @Immutable
 internal data class WatchedFontDocument(
@@ -419,7 +419,7 @@ private fun FontDirectoryMonitorDialog(
                         )
                         Text(
                             when {
-                                scanning -> "正在读取受支持的 TTF、OTF、TTC 与 ZIP 文件"
+                                scanning -> "正在读取受支持的 TTF、OTF、TTC、OTC、WOFF、WOFF2 与 ZIP 文件"
                                 scan != null -> "发现 ${scan.documents.size} 个文件 · 新增 ${diff.added.size} · 变更 ${diff.changed.size} · 移除 ${diff.removed.size}"
                                 else -> "选择目录后会建立安全扫描基线"
                             },

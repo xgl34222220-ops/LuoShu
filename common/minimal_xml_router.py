@@ -26,9 +26,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import universal_font_plan
+from device_font_template_base import effective_family_context
 
 SCHEMA = "minimal-xml-route-plan-v1"
-ROUTE_REVISION = 1
+ROUTE_REVISION = 3
 FONT_PLAN_SCHEMA = "universal-font-plan-v1"
 ROUTABLE_ACTIONS = {"replace", "compile", "compile-specialized"}
 DYNAMIC_PREFIX = "/data/fonts/"
@@ -220,18 +221,19 @@ def _document_nodes(source_xml: str, tree: ET.ElementTree) -> list[dict[str, Any
     root = tree.getroot()
     parents = {child: parent for parent in root.iter() for child in list(parent)}
     result: list[dict[str, Any]] = []
-    ordinal = 0
+    ordinals = {node: i for i, node in enumerate(
+        node for node in root.iter() if _local(node.tag) == "font")}
     for family in root.iter():
         if _local(family.tag) != "family":
             continue
-        family_name = _effective_family_name(family, parents)
+        family_name, family_attrs = effective_family_context(family, parents)
         for font in list(family):
             if _local(font.tag) != "font":
                 continue
-            record = _node_record(source_xml, ordinal, family, family_name, font)
+            record = _node_record(source_xml, ordinals[font], family, family_name, font)
+            record["familyAttributes"] = family_attrs
             record["fingerprint"] = _node_fingerprint(record)
             result.append(record)
-            ordinal += 1
     return result
 
 
@@ -290,7 +292,7 @@ def _ref_locator(ref: dict[str, Any]) -> dict[str, Any]:
     family = _ref_value(ref, "family", "familyName")
     declared = _ref_value(ref, "declared", "file", "filename")
     postscript = _ref_value(ref, "postScriptName", "postscriptName")
-    return {
+    result = {
         "family": family,
         "familyNormalized": _normalize(family),
         "familyAttributes": dict(ref.get("familyAttributes") or {}) if isinstance(ref.get("familyAttributes"), dict) else {},
@@ -300,11 +302,31 @@ def _ref_locator(ref: dict[str, Any]) -> dict[str, Any]:
         "declared": declared,
         "postScriptName": postscript,
     }
+    if "ordinal" in ref:
+        result["ordinal"] = _int(ref["ordinal"], -1)
+    if isinstance(ref.get("axes"), list):
+        result["axes"] = ref["axes"]
+    if isinstance(ref.get("fontAttributes"), dict):
+        result["fontAttributes"] = ref["fontAttributes"]
+    return result
 
 
 def _match_score(locator: dict[str, Any], node: dict[str, Any]) -> tuple[int, list[str]] | None:
     reasons: list[str] = []
     score = 0
+    for key in ("ordinal", "fontAttributes"):
+        if key in locator and locator[key] != node.get(key):
+            return None
+    if "axes" in locator:
+        expected_axes, actual_axes = locator["axes"], node.get("axes", [])
+        if len(expected_axes) != len(actual_axes):
+            return None
+        for expected, actual in zip(expected_axes, actual_axes):
+            if any(str(expected.get(key, "")) != str(actual.get(key, ""))
+                   for key in ("tag", "stylevalue")):
+                return None
+            if "attributes" in expected and expected["attributes"] != actual.get("attributes"):
+                return None
 
     family = str(locator.get("familyNormalized") or "")
     if family:
@@ -414,6 +436,8 @@ def _artifact_contract(font_plan: dict[str, Any], target: dict[str, Any], node: 
         "role": target.get("role"),
         "compiler": target.get("compiler"),
         "requirements": target.get("requirements"),
+        "selection": target.get("selection"),
+        "risks": target.get("risks"),
         "source": target.get("source"),
         "targetContract": target.get("targetContract"),
         "xmlContract": {
@@ -438,6 +462,18 @@ def _artifact_contract(font_plan: dict[str, Any], target: dict[str, Any], node: 
         "preserveXmlAttributes": True,
         "preserveAxisChildren": True,
     }
+
+
+def _preserve_fixed_italic(target: dict[str, Any]) -> bool:
+    hard_risks = set(target.get("risks") or []) & {
+        "static-weight-fallback", "italic-style-mismatch", "source-weight-axis-out-of-range",
+        "source-style-axis-missing", "source-style-axis-out-of-range",
+    }
+    return (universal_font_plan.is_fixed_composite_selection(target.get("source") or {})
+            and target.get("targetContract", {}).get("italic") is True
+            and bool(hard_risks)
+            and hard_risks <= {"italic-style-mismatch", "source-style-axis-missing",
+                               "source-style-axis-out-of-range"})
 
 
 def _target_route_refs(target: dict[str, Any]) -> list[dict[str, Any]]:
@@ -564,6 +600,7 @@ def build_route_plan(
     conflicts: list[dict[str, Any]] = []
     physical_only: list[str] = []
     deferred_dynamic: list[str] = []
+    preserved_routes: list[dict[str, Any]] = []
     node_artifacts: dict[tuple[str, int], str] = {}
 
     for target_path in sorted(targets):
@@ -613,7 +650,8 @@ def build_route_plan(
                 })
                 continue
 
-            artifact = _artifact_contract(font_plan, target, node)
+            route_target = universal_font_plan.route_target(target, node)
+            artifact = _artifact_contract(font_plan, route_target, node)
             key = (source_xml, int(node["ordinal"]))
             previous = node_artifacts.get(key)
             if previous is not None:
@@ -630,14 +668,28 @@ def build_route_plan(
                 continue
             node_artifacts[key] = artifact["artifactId"]
 
+            if _preserve_fixed_italic(route_target):
+                preserved_routes.append({
+                    "sourceXml": source_xml,
+                    "targetPath": target_path,
+                    "role": str(target.get("role") or ""),
+                    "reason": "fixed-composite-italic-preserved",
+                    "node": copy.deepcopy(node),
+                    "nodeFingerprint": node["fingerprint"],
+                    "artifact": artifact,
+                    "risks": list(route_target.get("risks") or []),
+                })
+                continue
+
             operation = {
                 "operation": "replace-font-reference",
                 "targetPath": target_path,
                 "role": str(target.get("role") or ""),
-                "targetStatus": str(target.get("status") or ""),
-                "compiler": str(target.get("compiler") or ""),
-                "requirements": list(target.get("requirements") or []),
-                "risks": list(target.get("risks") or []),
+                "targetStatus": str(route_target.get("status") or ""),
+                "compiler": str(route_target.get("compiler") or ""),
+                "requirements": list(route_target.get("requirements") or []),
+                "risks": list(route_target.get("risks") or []),
+                "routeTarget": route_target,
                 "locator": locator,
                 "match": match,
                 "node": node,
@@ -680,6 +732,10 @@ def build_route_plan(
         review_reasons.append("font-plan-has-unresolved-xml-routes")
     if plan_constraints.get("dataFontFileCount") or plan_constraints.get("dataFontConfigReferenceCount"):
         review_reasons.append("data-font-layer-deferred")
+    if preserved_routes:
+        review_reasons.append("fixed-composite-italic-preserved")
+
+    preserved_routes.sort(key=lambda item: (item["sourceXml"], item["node"]["ordinal"], item["targetPath"]))
 
     route_semantic = {
         "fontPlanId": font_plan["planId"],
@@ -689,6 +745,7 @@ def build_route_plan(
         "physicalOnlyTargets": physical_only,
         "deferredDynamicTargets": deferred_dynamic,
         "reviewReasons": sorted(set(review_reasons)),
+        "preservedRoutes": preserved_routes,
     }
     route_id = f"sha256:{_canonical_hash(route_semantic)}"
     operation_count = sum(
@@ -712,6 +769,7 @@ def build_route_plan(
             "missingDocumentCount": len(missing_documents),
             "physicalOnlyTargetCount": len(physical_only),
             "deferredDynamicTargetCount": len(deferred_dynamic),
+            "preservedRouteCount": len(preserved_routes),
             "routingComplete": not unresolved and not conflicts and not missing_documents,
             "executableNow": False,
         },
@@ -719,6 +777,7 @@ def build_route_plan(
         "missingDocuments": sorted(missing_documents),
         "physicalOnlyTargets": sorted(set(physical_only)),
         "deferredDynamicTargets": sorted(set(deferred_dynamic)),
+        "preservedRoutes": preserved_routes,
         "unresolved": unresolved,
         "conflicts": conflicts,
         "documents": documents,
@@ -751,6 +810,7 @@ def _recompute_route_id(plan: dict[str, Any]) -> str:
         "physicalOnlyTargets": plan.get("physicalOnlyTargets"),
         "deferredDynamicTargets": plan.get("deferredDynamicTargets"),
         "reviewReasons": plan.get("reviewReasons"),
+        "preservedRoutes": plan.get("preservedRoutes"),
     }
     return f"sha256:{_canonical_hash(semantic)}"
 
@@ -809,6 +869,16 @@ def validate_route_plan(
                     raise RouterError(f"Phase 5 不得放宽 XML 保留策略：{source_xml}")
             if operation.get("nodeFingerprint") != _node_fingerprint(node):
                 raise RouterError(f"Route Plan 节点指纹无效：{source_xml}")
+            if font_plan is not None:
+                target = font_plan["targets"].get(str(operation.get("targetPath") or ""))
+                if not isinstance(target, dict):
+                    raise RouterError(f"Route Plan 目标不在 FontPlan 中：{source_xml}")
+                resolved = universal_font_plan.route_target(target, node)
+                if operation.get("routeTarget") != resolved or artifact != _artifact_contract(font_plan, resolved, node):
+                    raise RouterError(f"Route Plan 源 face/编译契约与 XML route 不一致：{source_xml}")
+                for key in ("compiler", "requirements", "risks"):
+                    if operation.get(key) != resolved.get(key):
+                        raise RouterError(f"Route Plan route {key} 不一致：{source_xml}")
             artifact_id = str(artifact.get("artifactId") or "")
             if not artifact_id.startswith("ufc:"):
                 raise RouterError(f"Route Plan 缺少编译 artifactId：{source_xml}")
@@ -828,8 +898,33 @@ def validate_route_plan(
     physical = plan.get("physicalOnlyTargets")
     dynamic = plan.get("deferredDynamicTargets")
     review = plan.get("reviewReasons")
-    if not all(isinstance(value, list) for value in (unresolved, conflicts, missing, physical, dynamic, review)):
+    preserved = plan.get("preservedRoutes")
+    if not all(isinstance(value, list) for value in (unresolved, conflicts, missing, physical, dynamic, review, preserved)):
         raise RouterError("Route Plan 摘要集合无效")
+    for route in preserved:
+        if not isinstance(route, dict) or route.get("reason") != "fixed-composite-italic-preserved":
+            raise RouterError("Route Plan 保留路由原因无效")
+        node = route.get("node")
+        source_xml = str(route.get("sourceXml") or "")
+        if not isinstance(node, dict) or route.get("nodeFingerprint") != _node_fingerprint(node):
+            raise RouterError("Route Plan 保留路由指纹无效")
+        if source_xml not in documents or node.get("sourceXml") != source_xml:
+            raise RouterError("Route Plan 保留路由文档无效")
+        key = (source_xml, int(node.get("ordinal") or 0))
+        if key in seen_nodes:
+            raise RouterError("Route Plan 保留路由与替换路由冲突")
+        seen_nodes[key] = "preserved"
+        if font_plan is not None:
+            target = font_plan["targets"].get(str(route.get("targetPath") or ""))
+            if not isinstance(target, dict):
+                raise RouterError("Route Plan 保留目标不在 FontPlan 中")
+            resolved = universal_font_plan.route_target(target, node)
+            if (not _preserve_fixed_italic(resolved)
+                    or route.get("artifact") != _artifact_contract(font_plan, resolved, node)
+                    or route.get("risks") != resolved.get("risks")):
+                raise RouterError("Route Plan 不允许保留此 fixed-composite 路由")
+    if bool(preserved) != ("fixed-composite-italic-preserved" in review):
+        raise RouterError("Route Plan 缺少保留路由覆盖范围说明")
 
     expected_summary = {
         "documentCount": len(documents),
@@ -839,6 +934,7 @@ def validate_route_plan(
         "missingDocumentCount": len(missing),
         "physicalOnlyTargetCount": len(physical),
         "deferredDynamicTargetCount": len(dynamic),
+        "preservedRouteCount": len(preserved),
         "routingComplete": not unresolved and not conflicts and not missing,
         "executableNow": False,
     }

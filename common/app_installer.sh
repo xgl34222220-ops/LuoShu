@@ -64,8 +64,15 @@ APP_VERSION_CODE=$(read_prop versionCode "$META")
 APK_SHA256=$(read_prop sha256 "$META")
 
 [ -n "$APP_PACKAGE" ] || APP_PACKAGE="io.github.xgl34222220.luoshu.debug"
+AUDIT_APP=0
 case "$APP_PACKAGE" in
     io.github.xgl34222220.luoshu|io.github.xgl34222220.luoshu.debug) ;;
+    io.github.xgl34222220.luoshu.audit)
+        [ "$(read_prop installPolicy "$META")" = manual-only ] && \
+        [ -n "$(read_prop testBuildId "$META")" ] && \
+        [ "$(read_prop testBuildId "$META")" = "$(read_prop testBuildId "$MODDIR/module.prop")" ] || { printf 'invalid-package\n'; exit 21; }
+        AUDIT_APP=1
+        ;;
     *)
         log_app ERROR "拒绝安装未知包名：$APP_PACKAGE"
         touch "$PENDING" 2>/dev/null || true
@@ -95,6 +102,14 @@ if command -v sha256sum >/dev/null 2>&1; then
     [ -n "$APK_SHA256" ] || APK_SHA256="$ACTUAL_SHA256"
 else
     [ -n "$APK_SHA256" ] || APK_SHA256="unknown"
+fi
+
+if [ "$AUDIT_APP" = 1 ]; then
+    rm -f "$PENDING" "$RETRY_STATE" 2>/dev/null || true
+    write_state manual_only "独立核心验收测试 App 仅供手动安装；保留原 App 和私有设置"
+    log_app INFO "独立测试包不自动安装、替换或卸载现有 App"
+    printf 'audit-manual-only\n'
+    exit 0
 fi
 
 PM_BIN=$(resolve_tool "${APP_INSTALL_PM_BIN:-}" pm)

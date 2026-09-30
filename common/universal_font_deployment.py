@@ -203,6 +203,7 @@ def _payload_digest(files: list[dict[str, Any]], dynamics: list[dict[str, Any]])
                 "sourcePayloadPath": item["sourcePayloadPath"],
                 "sha256": item["sha256"],
                 "artifactId": item["artifactId"],
+                **({"dynamicIdentity": item["dynamicIdentity"]} if item.get("dynamicIdentity") else {}),
             }
             for item in sorted(dynamics, key=lambda value: value["targetPath"])
         ],
@@ -350,6 +351,8 @@ def build_deployment(
                 "bytes": details["bytes"],
                 "artifactId": artifact_id,
                 "readOnly": True,
+                **({"dynamicIdentity": copy.deepcopy(font_plan["targets"][target_text]["targetContract"]["dynamicIdentity"])}
+                   if font_plan.get("targets", {}).get(target_text, {}).get("targetContract", {}).get("dynamicIdentity") else {}),
             })
 
         _write_dynamic_runtime(stage, dynamic_mounts)
@@ -450,6 +453,67 @@ def build_deployment(
     finally:
         if stage is not None and stage.exists():
             shutil.rmtree(stage, ignore_errors=True)
+
+
+def validate_dynamic_generation(deployment: dict[str, Any], visible_root: Path | None = None) -> None:
+    """Check the authoritative dynamic generation again immediately before boot binding."""
+    for item in deployment.get("dynamicMounts") or []:
+        identity = item.get("dynamicIdentity")
+        if not identity:  # Backwards-compatible sealed synthetic/older payloads.
+            continue
+        if not isinstance(identity, dict) or identity.get("fontPath") != item.get("targetPath"):
+            raise DeploymentError("动态字体 generation identity 不匹配")
+        for path_key, digest_key in (("configPath", "configSha256"), ("fontPath", "fontSha256")):
+            logical = _safe_logical(str(identity.get(path_key) or ""), dynamic=True)
+            path = visible_root / str(logical).lstrip("/") if visible_root else logical
+            digest = str(identity.get(digest_key) or "")
+            if len(digest) != 64 or not path.is_file():
+                raise DeploymentError(f"动态字体 generation 证据缺失：{logical}")
+            actual = _sha256(path)
+            # A repeated hook may observe our already-bound compiled file; the
+            # shell separately requires same-boot ownership and read-only mount.
+            allowed = {digest, str(item.get("sha256") or "")} if path_key == "fontPath" else {digest}
+            if actual not in allowed:
+                raise DeploymentError(f"动态字体 generation 已变化：{logical}")
+
+
+def _validate_execution_tree(deployment: dict[str, Any], root: Path) -> None:
+    """The mount backend exposes whole trees: no undeclared bytes may enter them."""
+    expected = {".luoshu-runtime/deployment/dynamic-mounts.conf",
+                ".luoshu-runtime/deployment/deployment.json"}
+    for item in deployment["files"]:
+        logical = _safe_logical(str(item["logicalPath"]))
+        relative = str(_payload_relative(logical))
+        if len(logical.parts) < 4 or logical.parts[2] not in {"fonts", "etc"}:
+            raise DeploymentError(f"挂载后端无法精确暴露计划路径：{logical}")
+        if item.get("payloadPath") != relative:
+            raise DeploymentError(f"payload 与逻辑挂载路径不一致：{logical}")
+        expected.add(relative)
+    for item in deployment["dynamicMounts"]:
+        relative = str(item.get("sourcePayloadPath") or "")
+        path = Path(relative)
+        if path.is_absolute() or ".." in path.parts or not relative.startswith(".luoshu-dynamic/"):
+            raise DeploymentError("动态挂载源路径不受信任")
+        expected.add(relative)
+    for item in (deployment.get("verificationContracts") or {}).values():
+        expected.add(str(item["payloadPath"]))
+    actual: set[str] = set()
+    for entry in root.rglob("*"):
+        if entry.is_symlink() or (not entry.is_file() and not entry.is_dir()):
+            raise DeploymentError(f"payload 不允许链接或特殊文件：{entry}")
+        if entry.is_file():
+            actual.add(entry.relative_to(root).as_posix())
+    if actual != expected:
+        raise DeploymentError("payload 执行集合与冻结计划不一致：" +
+                              str({"extra": sorted(actual - expected), "missing": sorted(expected - actual)}))
+    instructions = "".join(
+        f"{item['sourcePayloadPath']}|{item['targetPath']}|{item['sha256']}\n"
+        for item in deployment["dynamicMounts"]
+    )
+    if (root / ".luoshu-runtime/deployment/dynamic-mounts.conf").read_text(encoding="utf-8") != instructions:
+        raise DeploymentError("动态实际挂载指令与冻结计划不一致")
+    if _load(root / ".luoshu-runtime/deployment/deployment.json") != deployment:
+        raise DeploymentError("运行时 deployment 与已验证 manifest 不一致")
 
 
 def validate_payload_integrity(
@@ -570,6 +634,9 @@ def validate_payload_integrity(
             if not runtime_path.is_file():
                 raise DeploymentError("Deployment runtime manifest 文件缺失")
 
+    if payload_root is not None:
+        _validate_execution_tree(deployment, payload_root)
+
 
 def validate_deployment(
     deployment: dict[str, Any],
@@ -596,12 +663,22 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--validate", type=Path)
     parser.add_argument("--validate-payload-only", type=Path)
+    parser.add_argument("--validate-dynamic-generation", action="store_true")
+    parser.add_argument("--visible-root", type=Path)
+    parser.add_argument("--expected-deployment-id")
+    parser.add_argument("--expected-payload-digest")
     args = parser.parse_args()
 
     try:
         if args.validate_payload_only is not None:
             deployment = _load(args.validate_payload_only)
             validate_payload_integrity(deployment, args.payload_root)
+            if args.expected_deployment_id is not None and args.expected_deployment_id != deployment.get("deploymentId"):
+                raise DeploymentError("运行状态与实际 deploymentId 不一致")
+            if args.expected_payload_digest is not None and args.expected_payload_digest != deployment.get("payloadDigest"):
+                raise DeploymentError("运行状态与实际 payloadDigest 不一致")
+            if args.validate_dynamic_generation:
+                validate_dynamic_generation(deployment, args.visible_root)
             print(json.dumps({
                 "status": "ok",
                 "schema": deployment["schema"],

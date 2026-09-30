@@ -24,6 +24,12 @@ CUTOVER_STATE="$CONFIG_DIR/universal-font-cutover.conf"
 LOG_FILE="$MODDIR/logs/fontswitch.log"
 PROGRESS_FILE="${LUOSHU_SWITCH_PROGRESS_FILE:-}"
 
+
+# Shared short-lived commit lease; source beside this script for host fixtures too.
+for _lpc_helper in "$MODDIR/common/payload_commit_lock.sh" "${0%/*}/payload_commit_lock.sh" "${0%/*}/../payload_commit_lock.sh"; do
+    [ ! -f "$_lpc_helper" ] || { . "$_lpc_helper"; break; }
+done
+
 _uc_log() {
     mkdir -p "$MODDIR/logs" 2>/dev/null || true
     printf '[%s] [CUTOVER] %s\n' "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown)" "$*" >> "$LOG_FILE" 2>/dev/null || true
@@ -102,16 +108,8 @@ _uc_legacy() {
     # choice before reboot. If this new request falls back to legacy, restore the
     # queued request's previousFont first so the legacy switcher records the real
     # current-boot font as its rollback source.
-    if [ -s "$CONFIG_DIR/universal-font-next.conf" ]; then
-        _ucl_live_font=$(_uc_value "$CONFIG_DIR/universal-font-next.conf" previousFont)
-        if [ -n "$_ucl_live_font" ]; then
-            printf '%s\n' "$_ucl_live_font" > "$CONFIG_DIR/active_font.conf.tmp.$$" 2>/dev/null && \
-                mv -f "$CONFIG_DIR/active_font.conf.tmp.$$" "$CONFIG_DIR/active_font.conf" 2>/dev/null || true
-            chmod 0644 "$CONFIG_DIR/active_font.conf" 2>/dev/null || true
-        fi
-    fi
 
-    _uc_cleanup_universal_next
+    # Legacy commits supersede pending payloads only after successful preparation.
     [ -f "$LEGACY_SWITCH" ] || {
         printf '{"status":"error","message":"缺少兼容字体切换核心"}\n'
         return 1
@@ -121,6 +119,11 @@ _uc_legacy() {
 }
 
 _uc_precondition() {
+    mkdir -p "$MODDIR/logs" 2>/dev/null || return 1
+    if [ -f "$MODDIR/common/font_topology_snapshot.sh" ]; then
+        MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$CONFIG_DIR" \
+            sh "$MODDIR/common/font_topology_snapshot.sh" ensure >> "$LOG_FILE" 2>&1 || return 1
+    fi
     [ -s "$CONFIG_DIR/device_font_topology.json" ] || return 1
     [ -s "$CONFIG_DIR/device_font_roles.json" ] || return 1
     [ -f "$DEPLOYMENT" ] || return 1
@@ -219,7 +222,31 @@ _uc_switch() {
         return $?
     fi
 
-    _uc_write_state staged "$_uc_font" universal ready-next-boot
+    if [ "${UC_COMPOSITE_REQUEST:-false}" = true ]; then
+        _uc_python - "$UC_ROUTE" "$CONFIG_DIR/universal-mixed-coverage.conf" "$LUOSHU_MIX_REQUEST_ID" "$UC_ARTIFACTS" <<'PYCOVER'
+import json,os,sys
+from pathlib import Path
+route=json.loads(Path(sys.argv[1]).read_text())
+count=len(route.get('preservedRoutes') or [])
+artifacts=json.loads(Path(sys.argv[4]).read_text())
+math_count=sum(int((item.get('report', {}).get('transformed', {}).get('layout', {}) or {}).get('preservedMathGlyphs') or 0)
+               for item in artifacts.get('artifacts', []))
+mark_count=sum(int((item.get('report', {}).get('transformed', {}).get('layout', {}) or {}).get('preservedSharedMarks') or 0)
+               for item in artifacts.get('artifacts', []))
+coverage='partial-protected-typography' if math_count or mark_count else ('partial-style-preserved' if count else 'planned-targets')
+parts=[]
+if count: parts.append('保留 %s 条原厂斜体路由' % count)
+if math_count: parts.append('保留 %s 处数学/专用字形' % math_count)
+if mark_count: parts.append('保留 %s 处跨文字共享标记' % mark_count)
+message=('通用引擎已准备，'+ '，'.join(parts)+'（部分覆盖），请完整重启'
+         if parts else '通用引擎字体负载已准备，请完整重启')
+p=Path(sys.argv[2]);tmp=p.with_name(p.name+'.tmp.'+str(os.getpid()))
+tmp.write_text('requestId='+sys.argv[3]+'\ncoverage='+coverage+'\npreservedStyleRoutes='+str(count)+'\npreservedMathGlyphs='+str(math_count)+'\npreservedSharedMarks='+str(mark_count)+'\nmessage='+message+'\n')
+os.replace(tmp,p)
+PYCOVER
+        _uc_log "mixed coverage: $(_uc_value "$CONFIG_DIR/universal-mixed-coverage.conf" message)"
+    fi
+    # Deployment commits the staged selection/status under the shared lease.
     _uc_progress 96 "通用字体负载已准备，完整重启后自动验收"
     printf '%s\n' "$_uc_stage_output"
     return 0
@@ -269,7 +296,7 @@ _uc_prepare_empty_next() {
     return 0
 }
 
-_uc_schedule_rollback() {
+_uc_schedule_rollback_locked() {
     _ucr_boot="${1:-}"
     [ -s "$VERIFY_CONF" ] || return 2
     [ "$(_uc_value "$VERIFY_CONF" grade)" = FAIL ] || return 2
@@ -414,6 +441,11 @@ _uc_schedule_rollback() {
     _uc_log "runtime FAIL rollback staged target=$_ucr_previous_font mode=$_ucr_previous_mode source=$_ucr_retired"
     printf '{"status":"ok","state":"rollback-staged","targetFont":"%s","targetMode":"%s"}\n' "$_ucr_previous_font" "$_ucr_previous_mode"
     return 0
+}
+
+_uc_schedule_rollback() {
+    type luoshu_payload_commit_run >/dev/null 2>&1 || return 1
+    luoshu_payload_commit_run "$MODDIR" _uc_schedule_rollback_locked "$@"
 }
 
 case "${1:-switch}" in

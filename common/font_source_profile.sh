@@ -65,6 +65,9 @@ _profile_family() {
     }
     _pf_output=$(_profile_output_for_family "$_pf_family") || return 1
     set -- "$ANALYZER" --output "$_pf_output"
+    if [ -n "${LUOSHU_MIX_SELECTION_FILE:-}" ]; then
+        set -- "$@" --mixed-selection "$LUOSHU_MIX_SELECTION_FILE"
+    fi
     _pf_count=0
     for _pf_file in \
         "$USER_FONTS_DIR"/*.ttf "$USER_FONTS_DIR"/*.otf "$USER_FONTS_DIR"/*.ttc "$USER_FONTS_DIR"/*.otc \

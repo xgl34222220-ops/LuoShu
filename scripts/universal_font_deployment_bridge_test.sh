@@ -5,7 +5,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MOD="$TMP/module"
 mkdir -p "$MOD/common" "$MOD/config/universal-font-plans" "$MOD/config/minimal-xml-route-plans" "$MOD/config/universal-font-artifact-manifests"
-cp "$ROOT/common/universal_font_deployment.sh" "$MOD/common/"
+cp "$ROOT/common/universal_font_deployment.sh" "$ROOT/common/payload_commit_lock.sh" "$MOD/common/"
 cp "$ROOT/common/universal_next_boot.sh" "$MOD/common/"
 
 cat > "$MOD/common/universal_font_plan.sh" <<'SH'
@@ -41,6 +41,7 @@ p.add_argument("--payload-root")
 p.add_argument("--manifest")
 p.add_argument("--validate")
 p.add_argument("--validate-payload-only")
+p.add_argument("--validate-dynamic-generation", action="store_true")
 a=p.parse_args()
 if a.validate_payload_only:
     m=json.load(open(a.validate_payload_only,encoding="utf-8"))

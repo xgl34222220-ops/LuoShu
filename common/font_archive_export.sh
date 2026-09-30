@@ -27,14 +27,10 @@ dest="${2:-}"
 [ -n "$family" ] || fail "未指定字体 Family"
 [ -n "$dest" ] || fail "未指定归档缓存目录"
 
-case "$dest" in
-    *'/../'*|*/..|../*) fail "归档缓存路径无效" ;;
-    /data/user/0/io.github.xgl34222220.luoshu/cache/font_archive/*|\
-    /data/data/io.github.xgl34222220.luoshu/cache/font_archive/*|\
-    /data/user/0/io.github.xgl34222220.luoshu.debug/cache/font_archive/*|\
-    /data/data/io.github.xgl34222220.luoshu.debug/cache/font_archive/*) ;;
-    *) fail "归档目标目录不受信任" ;;
-esac
+[ -f "$MODDIR/common/app_cache_guard.sh" ] && . "$MODDIR/common/app_cache_guard.sh"
+type luoshu_app_cache_guard >/dev/null 2>&1 || fail "缺少 App 缓存隔离组件"
+luoshu_app_cache_guard "$dest" font_archive || fail "归档目标目录不受信任"
+dest="$LUOSHU_TRUSTED_CACHE_PATH"
 
 [ -d "$USER_FONTS_DIR" ] || fail "字体库目录不存在"
 rm -rf "$dest" 2>/dev/null || fail "无法清理归档缓存"

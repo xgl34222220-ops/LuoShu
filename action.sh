@@ -32,6 +32,11 @@ print_line "正在检查洛书 App 版本…"
 _result=$(MODDIR="$MODDIR" APP_INSTALL_LOG="$LOG" sh "$HELPER" manual 2>/dev/null)
 _code=$?
 case "$_result" in
+    audit-manual-only)
+        print_line "此模块内置洛书·核心验收测试 App，需手动安装独立测试 APK。"
+        print_line "请保留原 App；原有私有设置不会自动迁移，字体库和模块仍共用。"
+        exit 0
+        ;;
     installed)
         rm -f "$MODDIR/config/app_install_manual" 2>/dev/null || true
         print_line "洛书 App 已安装或更新，原有数据和界面设置已保留。"
@@ -50,7 +55,7 @@ case "$_result" in
     *)
         print_line "App 安装或更新失败，详情已写入："
         print_line "$LOG"
-        print_line "若提示签名不一致，请先卸载旧测试版 App 后重试。"
+        print_line "若提示签名不一致，请保留旧 App 和数据，改用签名兼容或独立测试包。"
         print_line "错误代码：$_code"
         exit 1
         ;;

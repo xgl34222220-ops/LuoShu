@@ -13,7 +13,8 @@ Compiler modes:
   gvar / HVAR only when their natural geometry already matches the stock slot
   after UPEM + line-contract normalization.
 
-No mode silently relabels a wrong static weight as another weight.
+An explicit verified fixed-composite contract keeps selected outlines fixed in an
+OEM shell; generic static sources may never masquerade as another weight.
 """
 from __future__ import annotations
 
@@ -50,13 +51,14 @@ import font_inventory
 import font_web_convert
 import minimal_xml_router
 import universal_font_plan
+import universal_font_semantics as semantics
 from legacy_v14_4.composite_layout import (
     clear_imported_metric_variations,
     enclose_imported_bounds,
 )
 
 SCHEMA = "universal-font-artifacts-v1"
-COMPILER_REVISION = 1
+COMPILER_REVISION = 3
 FONT_PLAN_SCHEMA = "universal-font-plan-v1"
 ROUTE_SCHEMA = "minimal-xml-route-plan-v1"
 ROUTABLE_ACTIONS = {"replace", "compile", "compile-specialized"}
@@ -251,6 +253,25 @@ def _profile_from_font(font: TTFont) -> dict[str, Any]:
     }
 
 
+
+def _paired_geometry_profiles(stock: TTFont, source: TTFont, role: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    target_profile, source_profile = _profile_from_font(stock), _profile_from_font(source)
+    # A regional/rare-Han subset may legitimately omit every canonical probe.
+    # Use actual shared Han outlines, never a fallback Latin/symbol measurement.
+    if role == "cjk" and min(int(p["probes"]["cjk"].get("boundsHits") or 0)
+                             for p in (target_profile, source_profile)) < 4:
+        shared = sorted(cp for cp in set(stock.getBestCmap() or {}) & set(source.getBestCmap() or {})
+                        if slot_build.is_cjk(cp))
+        if len(shared) > 64:
+            shared = [shared[i * (len(shared) - 1) // 63] for i in range(64)]
+        for font, profile in ((stock, target_profile), (source, source_profile)):
+            profile["probes"]["cjk"] = template_engine.glyph_group(font, shared)
+            profile["sharedProbePoints"] = {"cjk": shared}
+        if min(int(p["probes"]["cjk"].get("boundsHits") or 0)
+               for p in (target_profile, source_profile)) < 4:
+            raise CompilerError("CJK slot requires at least four shared Han outline probes")
+    return target_profile, source_profile
+
 def _instantiate(font: TTFont, weight: int, axes: dict[str, float]) -> tuple[TTFont, dict[str, float]]:
     if "fvar" not in font:
         if axes:
@@ -414,8 +435,9 @@ def _validate_stock_contract(target: dict[str, Any], stock: Path, face_index: in
         font.close()
 
 
-def _source_axis_spec_for_route(source: TTFont, artifact: dict[str, Any], weight: int) -> dict[str, float]:
-    requested = _axis_values(artifact.get("requiredAxes"))
+def _source_axis_spec_for_route(source: TTFont, artifact: dict[str, Any], weight: int, target: dict[str, Any] | None = None) -> dict[str, float]:
+    requested = dict((target or {}).get("selection", {}).get("sourceAxes") or {})
+    requested.update(_axis_values(artifact.get("requiredAxes")))
     if "fvar" not in source:
         return {}
     known = {str(axis.axisTag) for axis in source["fvar"].axes}
@@ -490,6 +512,8 @@ def _geometry_plan(
         else:
             reason = str(plan.get("reason") or plan.get("status") or "unresolved")
         raise CompilerError(f"目标槽位几何计划不可安全编译：{reason}")
+    if stock_profile.get("sharedProbePoints"):
+        plan["sharedProbePoints"] = copy.deepcopy(stock_profile["sharedProbePoints"])
     return plan
 
 
@@ -566,6 +590,7 @@ def _replace_glyf_outline(
         glyph = source_glyf[source_name]
         if glyph.numberOfContours >= 0:
             copied = copy.deepcopy(glyph)
+            semantics.strip_glyph_hints(copied)
             if copied.numberOfContours > 0:
                 copied.coordinates.transform(((transform.xx, transform.xy), (transform.yx, transform.yy)))
                 copied.coordinates.translate((transform.dx, transform.dy))
@@ -657,6 +682,7 @@ def _replace_role_glyphs(
     base_hmtx = base["hmtx"].metrics
     source_hmtx = source["hmtx"].metrics
     exact_mismatches = 0
+    imported_y: list[float] = []
 
     required: set[int]
     if role in SPECIALIZED_ROLES:
@@ -664,16 +690,41 @@ def _replace_role_glyphs(
     elif role == "latin":
         required = set(map(ord, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"))
     elif role == "cjk":
-        required = set(template_engine.PROBE_GROUPS["cjk"])
+        required = set((geometry.get("sharedProbePoints") or {}).get("cjk", template_engine.PROBE_GROUPS["cjk"]))
     else:
         required = set(map(ord, "AaHhx0123456789"))
         if any(cp in base_cmap for cp in template_engine.PROBE_GROUPS["cjk"]):
             required.update(template_engine.PROBE_GROUPS["cjk"])
 
+    source_bounds_cache = {}
+    def source_bounds_for(name):
+        if name not in source_bounds_cache:
+            source_bounds_cache[name] = _bounds(source_glyph_set, name)
+        return source_bounds_cache[name]
+    selected_points = {cp for cp in set(base_cmap).intersection(source_cmap)
+                       if _eligible_codepoint(role, cp) and
+                       source_bounds_for(source_cmap[cp]) is not None}
+    imported_names = {}
+    for cp in selected_points:
+        name, source_name = base_cmap[cp], source_cmap[cp]
+        if name in imported_names and imported_names[name] != source_name:
+            raise CompilerError("shared OEM glyph has conflicting selected source mappings")
+        imported_names[name] = source_name
+    protected_math = semantics.protected_math_glyphs(base).intersection(imported_names)
+    protected_marks = semantics.protected_shared_marks(base, imported_names).intersection(imported_names)
+    protected_names = protected_math | protected_marks
+    if any(base_cmap.get(cp) in protected_names for cp in required):
+        raise CompilerError("required role probes overlap protected layout glyphs")
+    selected_points = {cp for cp in selected_points if base_cmap[cp] not in protected_names}
+    imported_names = {name: source_name for name,source_name in imported_names.items() if name not in protected_names}
+    isolation = semantics.isolate_stock_dependencies(base, imported_names, selected_points)
+
     for cp in sorted(set(base_cmap).intersection(source_cmap)):
         if not _eligible_codepoint(role, cp):
             continue
         base_name = base_cmap[cp]
+        if base_name in protected_names:
+            continue
         source_name = source_cmap[cp]
         pair = (base_name, source_name)
         if pair in seen:
@@ -681,7 +732,7 @@ def _replace_role_glyphs(
         seen.add(pair)
         if base_name not in base_hmtx or source_name not in source_hmtx:
             continue
-        source_bounds = _bounds(source_glyph_set, source_name)
+        source_bounds = source_bounds_for(source_name)
         if source_bounds is None:
             if cp in required:
                 missing_required.append(cp)
@@ -699,7 +750,7 @@ def _replace_role_glyphs(
             new_advance = target_advance
         else:
             shift_x = 0.0
-            new_advance = max(1, min(65535, int(round(float(source_advance) * float(geometry.get("upemScale") or 1.0)))))
+            new_advance = max(0, min(65535, int(round(float(source_advance) * float(geometry.get("upemScale") or 1.0)))))
             new_lsb = int(round(float(source_lsb) * float(geometry.get("upemScale") or 1.0)))
 
         transform = Transform(scale_x, 0, 0, scale_y, shift_x, shift_y)
@@ -712,6 +763,7 @@ def _replace_role_glyphs(
                 base, source, source_glyph_set, base_name, source_name, transform, new_advance
             )
         if bounds is not None:
+            imported_y.extend((float(bounds[1]), float(bounds[3])))
             enclose_imported_bounds(base, bounds)
             if exact:
                 new_lsb = int(round(float(bounds[0])))
@@ -736,6 +788,10 @@ def _replace_role_glyphs(
         "baseOutline": base_kind,
         "sourceOutline": source_kind,
         "replacedGlyphs": replaced,
+        "dependencyIsolation": isolation,
+        "layout": {"preservedMathGlyphs":len(protected_math), "preservedSharedMarks":len(protected_marks)},
+        "importedYMin": min(imported_y) if imported_y else None,
+        "importedYMax": max(imported_y) if imported_y else None,
         "exactAdvance": exact,
         "exactAdvanceMismatches": exact_mismatches,
     }
@@ -746,7 +802,13 @@ def _apply_cff_source_transforms(font: TTFont, geometry: dict[str, Any]) -> dict
     if kind not in {"cff", "cff2"}:
         raise CompilerError("CFF transform 仅接受 CFF/CFF2")
     glyph_set = font.getGlyphSet()
-    probe_map = slot_build.glyph_probe_map(font)
+    probe_map, protected_layout = slot_build.layout_probe_contract(font, geometry)
+    semantics.transform_layout(font, {name:(1.0,1.0,0.0,0.0) for name in probe_map}, materialize_points=True)
+    derived_names = set(probe_map) - set(slot_build.glyph_probe_map(font))
+    selected = {cp for cp,name in (font.getBestCmap() or {}).items()
+                if (name in derived_names or slot_build.probe_for_codepoint(cp) is not None or any(a <= cp <= b for a,b in LATIN_COMBINING_RANGES)) and name in probe_map}
+    semantics.isolate_stock_dependencies(font, probe_map, selected, preserve_uvs=False)
+    actual_transforms = {}
     hmtx = font["hmtx"].metrics
     tag = "CFF " if "CFF " in font else "CFF2"
     cff = font[tag].cff
@@ -808,10 +870,13 @@ def _apply_cff_source_transforms(font: TTFont, geometry: dict[str, Any]) -> dict
                     new_lsb = int(round(float(bounds_after[0])))
         except Exception:
             pass
-        hmtx[glyph_name] = (max(1, min(65535, new_advance)), new_lsb)
+        hmtx[glyph_name] = (max(0, min(65535, new_advance)), new_lsb)
+        actual_transforms[glyph_name] = (scale_x, scale_y, shift_x, shift_y)
         clear_imported_metric_variations(font, glyph_name)
         changed += 1
-    return {"glyphs": changed, "outline": kind, "upemScale": upem_scale}
+    layout_report = semantics.transform_layout(font, actual_transforms)
+    layout_report.update(protected_layout)
+    return {"glyphs": changed, "outline": kind, "upemScale": upem_scale, "layout": layout_report}
 
 
 def _set_postscript_name(font: TTFont, required: str, artifact_id: str) -> str:
@@ -944,6 +1009,55 @@ def _artifact_extension(target: dict[str, Any]) -> str:
     return ".ttf"
 
 
+def _validate_dynamic_output(font: TTFont, artifact: dict[str, Any]) -> None:
+    routes = artifact.get("requiredDynamicRoutes") or []
+    if not routes:
+        return
+    names = template_engine.font_names(font)
+    known = {str(a.axisTag): a for a in font["fvar"].axes} if "fvar" in font else {}
+    styles = {str(ref.get("style") or "normal") for ref in routes}
+    if len(styles) > 1 and not {"ital", "slnt"}.intersection(known):
+        raise CompilerError("dynamic mixed styles require a genuine style axis")
+    for ref in routes:
+        if _int(ref.get("index"), 0) != _int(artifact.get("requiredFaceIndex"), 0):
+            raise CompilerError("dynamic route face mismatch")
+        ps = str(ref.get("postScriptName") or "")
+        if ps and ps not in names:
+            raise CompilerError("dynamic route PostScript identity mismatch")
+        axes = ref.get("axes") or []
+        parsed = _axis_values(axes)
+        if len(parsed) != len(axes):
+            raise CompilerError("dynamic route contains invalid or duplicate axes")
+        requested_italic = str(ref.get("style") or "normal") == "italic"
+        if "ital" in known:
+            parsed.setdefault("ital", 1.0 if requested_italic else 0.0)
+        elif "slnt" in known:
+            if "slnt" not in parsed:
+                axis = known["slnt"]
+                if requested_italic:
+                    nonzero = [float(v) for v in (axis.minValue,axis.maxValue) if float(v) != 0]
+                    if not nonzero:
+                        raise CompilerError("dynamic italic route has no nonzero slant range")
+                    parsed["slnt"] = min(nonzero, key=abs)
+                else:
+                    parsed["slnt"] = 0.0
+        else:
+            actual_italic = bool((int(getattr(font.get("OS/2"), "fsSelection", 0)) & 1) or
+                                 (int(font["head"].macStyle) & 2) or
+                                 float(getattr(font.get("post"), "italicAngle", 0)))
+            if actual_italic != requested_italic:
+                raise CompilerError("dynamic route static style mismatch")
+        weight = _int(ref.get("weight"), _int(artifact.get("requiredWeight"), 400))
+        if "wght" in known:
+            parsed.setdefault("wght", float(weight))
+        elif "OS/2" in font and int(font["OS/2"].usWeightClass) != weight:
+            raise CompilerError("dynamic route static weight mismatch")
+        for tag, value in parsed.items():
+            axis = known.get(tag)
+            if axis is None or not float(axis.minValue) <= value <= float(axis.maxValue):
+                raise CompilerError("dynamic route axis cannot be satisfied: " + tag)
+
+
 def _physical_artifact(target: dict[str, Any], font_plan: dict[str, Any]) -> dict[str, Any]:
     contract = target.get("targetContract") if isinstance(target.get("targetContract"), dict) else {}
     semantic = {
@@ -956,6 +1070,11 @@ def _physical_artifact(target: dict[str, Any], font_plan: dict[str, Any]) -> dic
         "source": target.get("source"),
         "targetContract": contract,
     }
+    dynamic_identity = contract.get("dynamicIdentity") or {}
+    dynamic_routes = contract.get("dynamicReferences") or []
+    if dynamic_identity and _int(dynamic_identity.get("faceIndex"), -1) != _int(contract.get("faceIndex"), 0):
+        raise CompilerError("dynamic identity face disagrees with physical target")
+    dynamic_axes = copy.deepcopy(dynamic_routes[0].get("axes") or []) if len(dynamic_routes) == 1 else []
     digest = _canonical_hash(semantic)
     ext = _artifact_extension(target)
     return {
@@ -963,8 +1082,9 @@ def _physical_artifact(target: dict[str, Any], font_plan: dict[str, Any]) -> dic
         "suggestedFileName": f"LuoShu-UF-{digest[:20]}{ext}",
         "container": "collection" if ext in {".ttc", ".otc"} else "sfnt",
         "requiredFaceIndex": max(0, _int(contract.get("faceIndex"), 0)),
-        "requiredPostScriptName": "",
-        "requiredAxes": [],
+        "requiredPostScriptName": str(dynamic_identity.get("postScriptName") or ""),
+        "requiredAxes": dynamic_axes,
+        "requiredDynamicRoutes": copy.deepcopy(dynamic_routes),
         "requiredWeight": _int(contract.get("weight"), 400),
         "requiredStyle": "italic" if contract.get("italic") else "normal",
         "preserveXmlAttributes": False,
@@ -993,6 +1113,7 @@ def _collect_units(font_plan: dict[str, Any], route_plan: dict[str, Any]) -> lis
             if not isinstance(artifact, dict) or not isinstance(target, dict):
                 continue
             artifact_id = str(artifact.get("artifactId") or "")
+            target = universal_font_plan.route_target(target, operation.get("node") or {})
             unit = units.setdefault(artifact_id, {
                 "artifact": copy.deepcopy(artifact),
                 "target": copy.deepcopy(target),
@@ -1202,6 +1323,8 @@ def _validate_output_face(
     raw = _open_face(output, face_index, lazy=True)
     instance: TTFont | None = None
     try:
+        reopened_ink_safety = semantics.conservative_variable_ink_bounds(raw) if variable_natural else None
+        _validate_dynamic_output(raw, artifact)
         instance = _instance_for_validation(
             raw,
             _int(artifact.get("requiredWeight"), _int(target.get("targetContract", {}).get("weight"), 400)),
@@ -1210,6 +1333,10 @@ def _validate_output_face(
         if instance is raw:
             raw = None
         profile = _profile_from_font(instance)
+        for name, points in (stock_profile.get("sharedProbePoints") or {}).items():
+            profile["probes"][name] = template_engine.glyph_group(instance, points)
+            if int(profile["probes"][name].get("boundsHits") or 0) < 4:
+                raise CompilerError("compiled CJK output lost shared Han probes")
         required_ps = str(artifact.get("requiredPostScriptName") or "")
         if required_ps:
             names = template_engine.font_names(instance)
@@ -1242,6 +1369,7 @@ def _validate_output_face(
                 "probeSchema": profile["probeSchema"],
             },
             "alignment": alignment,
+            "variableInkSafety": reopened_ink_safety,
         }
     finally:
         if instance is not None:
@@ -1276,8 +1404,9 @@ def _compile_source_as_base(
     compiled: TTFont | None = None
     stock_geometry: TTFont | None = None
     try:
-        source_axes = _source_axis_spec_for_route(source_original, artifact, weight)
-        compiled, source_location = _instantiate(source_original, weight, source_axes)
+        source_axes = _source_axis_spec_for_route(source_original, artifact, weight, target)
+        source_weight = _int(target.get("selection", {}).get("targetWeight"), weight)
+        compiled, source_location = _instantiate(source_original, source_weight, source_axes)
         if compiled is source_original:
             source_original = None
 
@@ -1287,8 +1416,7 @@ def _compile_source_as_base(
             weight,
             route_axes,
         )
-        stock_profile = _profile_from_font(stock_geometry)
-        source_profile = _profile_from_font(compiled)
+        stock_profile, source_profile = _paired_geometry_profiles(stock_geometry, compiled, str(target.get("role") or ""))
         geometry = _geometry_plan(target, stock_profile, source_profile, weight)
 
         target_kind = _outline_kind(stock_geometry)
@@ -1342,6 +1470,41 @@ def _compile_source_as_base(
             source_original.close()
 
 
+
+def _fixed_shell_line_budget(font: TTFont, replaced: dict[str, Any]) -> dict[str, Any]:
+    """Conservative all-location MVAR bounds, without expensive full instancing.
+
+    Every variation region scalar lies in [0,1]. Summing each signed delta's
+    worst contribution is conservative even when its regions cannot coincide.
+    """
+    if "VARC" in font:
+        raise CompilerError("fixed composite does not support VARC glyph variations")
+    low, high = replaced.get("importedYMin"), replaced.get("importedYMax")
+    if low is None or high is None:
+        raise CompilerError("fixed composite has no measured imported bounds")
+    ranges: dict[str, tuple[float, float]] = {}
+    if "MVAR" in font:
+        table = font["MVAR"].table
+        for record in table.ValueRecord:
+            index = int(record.VarIdx)
+            if index == 0xFFFFFFFF:
+                continue
+            outer, inner = index >> 16, index & 0xFFFF
+            deltas = table.VarStore.VarData[outer].Item[inner]
+            ranges[str(record.ValueTag)] = (sum(min(0, d) for d in deltas), sum(max(0, d) for d in deltas))
+    os2 = font["OS/2"]
+    min_top = min(float(font["hhea"].ascent),
+                  float(os2.sTypoAscender) + ranges.get("hasc", (0, 0))[0],
+                  float(os2.usWinAscent) + ranges.get("hcla", (0, 0))[0])
+    max_bottom = max(float(font["hhea"].descent),
+                     float(os2.sTypoDescender) + ranges.get("hdsc", (0, 0))[1],
+                     -(float(os2.usWinDescent) + ranges.get("hcld", (0, 0))[0]))
+    if float(high) > min_top or float(low) < max_bottom:
+        raise CompilerError("fixed composite outlines exceed conservative OEM variable line budget")
+    return {"status": "ready", "method": "conservative-mvar-region-bounds",
+            "minAscent": min_top, "maxDescent": max_bottom,
+            "importedYMin": low, "importedYMax": high}
+
 def _compile_stock_shell(
     target: dict[str, Any],
     artifact: dict[str, Any],
@@ -1363,14 +1526,17 @@ def _compile_stock_shell(
         conversion = font_web_convert.convert(source_path, temp_root / "web")
         materialized = Path(str(conversion["outputPath"]))
 
-    source_original = _open_face(materialized, max(0, _int(source_info.get("faceIndex"), 0)))
+    source_original = _open_face(materialized, max(0, _int(source_info.get("faceIndex"), 0)), lazy=True)
     source_instance: TTFont | None = None
     stock_geometry: TTFont | None = None
     base: TTFont | None = None
     collection: TTCollection | None = None
     try:
-        source_axes = _source_axis_spec_for_route(source_original, artifact, weight)
-        source_instance, source_location = _instantiate(source_original, weight, source_axes)
+        source_axes = _source_axis_spec_for_route(source_original, artifact, weight, target)
+        fixed_selection = _fixed_mixed_selection(target)
+        source_weight = (_int(source_info.get("weight"), 400) if fixed_selection
+                         else _int(target.get("selection", {}).get("targetWeight"), weight))
+        source_instance, source_location = _instantiate(source_original, source_weight, source_axes)
         if source_instance is source_original:
             source_original = None
 
@@ -1380,8 +1546,7 @@ def _compile_stock_shell(
             weight,
             route_axes,
         )
-        stock_profile = _profile_from_font(stock_geometry)
-        source_profile = _profile_from_font(source_instance)
+        stock_profile, source_profile = _paired_geometry_profiles(stock_geometry, source_instance, str(target.get("role") or ""))
         geometry = _geometry_plan(target, stock_profile, source_profile, weight)
 
         base, collection = _open_stock_container(
@@ -1393,6 +1558,7 @@ def _compile_stock_shell(
             str(target.get("role") or ""),
             geometry,
         )
+        line_budget = _fixed_shell_line_budget(base, replaced) if fixed_selection else None
         _drop_stale_tables(base)
 
         required_ps = str(artifact.get("requiredPostScriptName") or "")
@@ -1419,11 +1585,16 @@ def _compile_stock_shell(
         )
         return {
             "mode": "stock-shell",
+            "fixedSelection": fixed_selection,
+            "fixedLineBudget": line_budget,
+            "sourceWeight": source_weight,
+            "targetWeight": weight,
             "sourceContainer": source_container,
             "sourceLocation": source_location,
             "stockLocation": stock_location,
             "geometry": geometry,
             "replaced": replaced,
+            "transformed": {"layout": replaced["layout"]},
             "conversion": conversion,
             "validation": validation,
         }
@@ -1480,6 +1651,7 @@ def _compile_source_variable_preserve(
         if int(source["head"].unitsPerEm) != target_upem:
             scale_upem(source, target_upem)
         _apply_target_line_contract(source, target, stock_profile)
+        semantics.conservative_variable_ink_bounds(source)
 
         # Validate natural source geometry at the representative target weight.
         validation_instance = _instance_for_validation(source, weight, {})
@@ -1510,6 +1682,7 @@ def _compile_source_variable_preserve(
             _apply_target_line_contract(source, target, stock_profile)
             variable_font = source
 
+        _set_postscript_name(variable_font, str(artifact.get("requiredPostScriptName") or ""), str(artifact["artifactId"]))
         _drop_stale_tables(variable_font)
         _copy_compiled_face_into_stock_container(
             stock,
@@ -1533,6 +1706,7 @@ def _compile_source_variable_preserve(
             "stockLocation": stock_location,
             "axisCompatibility": compatibility,
             "naturalAlignment": alignment,
+            "variableInkSafety": validation["variableInkSafety"],
             "conversion": conversion,
             "validation": validation,
         }
@@ -1545,6 +1719,24 @@ def _compile_source_variable_preserve(
             source.close()
 
 
+def _fixed_mixed_selection(target: dict[str, Any]) -> dict[str, Any] | None:
+    source = target.get("source") or {}
+    policy = source.get("mixedSelection")
+    if not isinstance(policy, dict) or policy.get("policy") != "fixed-composite-selection-v1":
+        return None
+    if source.get("variable") is True or not policy.get("requestId"):
+        raise CompilerError("invalid fixed-composite source contract")
+    if set(policy.get("roles") or {}) != {"cjk", "latin", "digit"}:
+        raise CompilerError("incomplete fixed-composite role contract")
+    if any(role.get("mode") != "fixed" for role in policy["roles"].values()):
+        raise CompilerError("non-fixed role in fixed-composite contract")
+    expected = str(policy.get("fontSha256") or "")
+    uid = str(source.get("fileUid") or "").removeprefix("sha256:")
+    if len(expected) != 64 or uid != expected:
+        raise CompilerError("fixed-composite hash is not bound to source profile")
+    return policy
+
+
 def _choose_mode(
     target: dict[str, Any],
     artifact: dict[str, Any],
@@ -1552,10 +1744,21 @@ def _choose_mode(
     stock: Path,
 ) -> str:
     role = str(target.get("role") or "")
+    dynamic_routes = artifact.get("requiredDynamicRoutes") or []
+    dynamic_contracts = {(str(r.get("style") or "normal"), _int(r.get("weight"), 400),
+                          tuple(sorted(_axis_values(r.get("axes")).items()))) for r in dynamic_routes}
+    if _fixed_mixed_selection(target) is not None:
+        if any(str(r.get("style") or "normal") == "italic" for r in dynamic_routes) and not (target.get("source") or {}).get("italic"):
+            raise CompilerError("fixed upright composite cannot replace an italic dynamic route")
+        return "stock-shell"
     contract = target.get("targetContract") if isinstance(target.get("targetContract"), dict) else {}
     target_variable = contract.get("variable") is True
     is_collection = _magic(stock) == COLLECTION_MAGIC
     fixed_axes = bool(_axis_values(artifact.get("requiredAxes")))
+    if len(dynamic_contracts) > 1:
+        if target_variable and not is_collection and (target.get("source") or {}).get("variable") is True:
+            return "source-variable-preserve"
+        raise CompilerError("multiple dynamic route contracts require a supported genuine variable source")
     if role in SPECIALIZED_ROLES or is_collection or fixed_axes:
         return "stock-shell"
     if target_variable and deployment_kinds == ["physical-slot"]:
@@ -1604,6 +1807,7 @@ def _compile_unit(
                 "static-weight-fallback",
                 "italic-style-mismatch",
                 "source-weight-axis-out-of-range",
+                "source-style-axis-missing", "source-style-axis-out-of-range",
             }:
                 raise CompilerError(f"FontPlan 风险不能由编译器安全消除：{risk}")
 
@@ -1643,6 +1847,13 @@ def _compile_unit(
     except Exception as error:
         output.unlink(missing_ok=True)
         result["reason"] = str(error) or error.__class__.__name__
+        import traceback
+        frames = traceback.extract_tb(error.__traceback__)
+        if frames:
+            last = frames[-1]
+            result["errorContext"] = {"type": error.__class__.__name__,
+                                      "file": Path(last.filename).name,
+                                      "function": last.name, "line": last.lineno}
     finally:
         shutil.rmtree(output_dir / ".tmp" / artifact_id.replace(":", "-"), ignore_errors=True)
     return result
@@ -1688,12 +1899,14 @@ def _mixed_preflight(units: list[dict[str, Any]], stock_paths: dict[str, Path], 
         if target.get("status") == "blocked":
             raise CompilerError(f"mixed-preflight: blocked target: {path}")
         risks = set(target.get("risks") or []) & {
-            "static-weight-fallback", "italic-style-mismatch", "source-weight-axis-out-of-range"}
+            "static-weight-fallback", "italic-style-mismatch", "source-weight-axis-out-of-range",
+            "source-style-axis-missing", "source-style-axis-out-of-range"}
         if risks:
             raise CompilerError(f"mixed-preflight: {','.join(sorted(risks))}: {path}")
         if (contract.get("variable") is True and source.get("variable") is not True
                 and unit.get("deploymentKinds") == ["physical-slot"]
                 and target.get("role") not in SPECIALIZED_ROLES
+                and _fixed_mixed_selection(target) is None
                 and not _axis_values(artifact.get("requiredAxes"))):
             # Actual collection magic, not a possibly abbreviated topology
             # format label, determines _choose_mode's stock-shell exception.
@@ -1797,6 +2010,7 @@ def compile_all(
             "executableNow": False,
         },
         "deferredDynamicTargets": deferred,
+        "preservedRoutes": copy.deepcopy(route_plan.get("preservedRoutes") or []),
         "artifactMap": dict(sorted(artifact_map.items())),
         "physicalTargetMap": dict(sorted(physical_target_map.items())),
         "dynamicTargetMap": dict(sorted(dynamic_target_map.items())),
@@ -1881,6 +2095,8 @@ def validate_manifest(
         raise CompilerError("Artifact manifest physicalTargetMap 与 ready artifacts 不一致")
     if dynamic_map != dict(sorted(expected_dynamic_map.items())):
         raise CompilerError("Artifact manifest dynamicTargetMap 与 ready artifacts 不一致")
+    if manifest.get("preservedRoutes", []) != route_plan.get("preservedRoutes", []):
+        raise CompilerError("Artifact preserved route coverage differs from RoutePlan")
     expected_manifest_id = _manifest_id(
         str(font_plan.get("planId") or ""),
         str(route_plan.get("routeId") or ""),

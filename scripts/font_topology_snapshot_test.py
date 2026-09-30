@@ -38,7 +38,7 @@ def main() -> int:
                 {
                     "schema": "device-font-inventory-v1",
                     "inventoryRevision": 1,
-                    "scannerRevision": 5,
+                    "scannerRevision": 6,
                     "state": "ready",
                     "buildKey": "topology-test-build",
                     "romKind": "hyperos",
@@ -207,7 +207,7 @@ FontManagerService:
 
         assert result["status"] == "ok"
         assert payload["schema"] == "device-font-topology-v1"
-        assert payload["topologyRevision"] == 2
+        assert payload["topologyRevision"] == 3
         assert payload["state"] == "ready"
         assert payload["buildKey"] == "topology-test-build"
         assert payload["romKind"] == "hyperos"

@@ -11,11 +11,11 @@ SIZE_REPORT="$OUT/LuoShu-${VERSION}-size.txt"
 APP_APK="${LUOSHU_APP_APK:-}"
 ALLOW_DEBUG_APP="${LUOSHU_ALLOW_DEBUG_APP:-0}"
 EXPECTED_VERSION_CODE=$((LUOSHU_VERSION_CODE * 100 + 1))
-# Phase 1-9 adds the production Universal Font Engine while keeping the legacy
-# fail-safe path. The direct new runtime code is ~90 KiB compressed; keep a tight
-# 10.75 MiB ceiling instead of weakening Python/FontTools coverage to stay at the
-# old 10.50 MiB budget.
-MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-11272192}"
+# Audited topology, glyph semantics and commit-lock helpers are mandatory runtime
+# code, not optional test baggage. The previous 10.75 MiB candidate had only
+# ~7 KiB headroom; current code alone adds >20 KiB compressed before the new App.
+# Keep a bounded 11 MiB package ceiling without deleting correctness dependencies.
+MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-11534336}"
 
 sh "$ROOT/scripts/check.sh"
 [ -n "$APP_APK" ] || {
@@ -27,40 +27,9 @@ sh "$ROOT/scripts/check.sh"
   exit 65
 }
 
-APP_PACKAGE="${LUOSHU_APP_PACKAGE:-}"
-APP_VERSION_CODE="${LUOSHU_APP_VERSION_CODE:-}"
-if command -v apkanalyzer >/dev/null 2>&1; then
-  [ -n "$APP_PACKAGE" ] || APP_PACKAGE=$(apkanalyzer manifest application-id "$APP_APK" 2>/dev/null || true)
-  [ -n "$APP_VERSION_CODE" ] || APP_VERSION_CODE=$(apkanalyzer manifest version-code "$APP_APK" 2>/dev/null || true)
-fi
-[ -n "$APP_PACKAGE" ] || {
-  echo 'Unable to read APK package name. Install apkanalyzer or set LUOSHU_APP_PACKAGE.' >&2
-  exit 66
-}
-case "$APP_VERSION_CODE" in
-  ''|*[!0-9]*)
-    echo 'Unable to read APK versionCode. Install apkanalyzer or set LUOSHU_APP_VERSION_CODE.' >&2
-    exit 66
-    ;;
-esac
-[ "$APP_VERSION_CODE" -eq "$EXPECTED_VERSION_CODE" ] || {
-  echo "APK versionCode mismatch: expected $EXPECTED_VERSION_CODE, got $APP_VERSION_CODE" >&2
-  exit 67
-}
-case "$APP_PACKAGE" in
-  io.github.xgl34222220.luoshu)
-    ;;
-  io.github.xgl34222220.luoshu.debug)
-    [ "$ALLOW_DEBUG_APP" = "1" ] || {
-      echo 'Debug App packaging requires LUOSHU_ALLOW_DEBUG_APP=1.' >&2
-      exit 68
-    }
-    ;;
-  *)
-    echo "Unexpected APK package: $APP_PACKAGE" >&2
-    exit 68
-    ;;
-esac
+APP_IDENTITY=$(sh "$ROOT/scripts/read_app_identity.sh" "$APP_APK" "$EXPECTED_VERSION_CODE")
+APP_PACKAGE=$(printf '%s\n' "$APP_IDENTITY" | sed -n '1p')
+APP_VERSION_CODE=$(printf '%s\n' "$APP_IDENTITY" | sed -n '2p')
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE" "$OUT"
@@ -89,6 +58,9 @@ APP_SHA256=$(sha256sum "$STAGE/bundled/LuoShu-App.apk" | awk '{print $1}')
   printf 'versionCode=%s\n' "$APP_VERSION_CODE"
   printf 'versionName=%s\n' "$LUOSHU_VERSION"
   printf 'sha256=%s\n' "$APP_SHA256"
+  if [ "$APP_PACKAGE" = io.github.xgl34222220.luoshu.audit ]; then
+    printf 'installPolicy=manual-only\ntestBuildId=%s\n' "$LUOSHU_TEST_BUILD_ID"
+  fi
 } > "$STAGE/bundled/app.prop"
 chmod 0644 "$STAGE/bundled/LuoShu-App.apk" "$STAGE/bundled/app.prop"
 

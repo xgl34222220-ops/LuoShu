@@ -69,12 +69,12 @@ internal data class ModuleSnapshot(
         get() = when {
             rollbackPending || fontEffectState == "rollback-pending" ->
                 "${activeLabel}（验证失败，待重启恢复 ${rollbackTargetLabel}）"
+            fontEffectState == "pending-reboot" -> "${activeLabel}（等待完整重启）"
             activeFont in setOf("", "default") || fontEffectState == "system" -> "系统默认字体"
             fontEffectState == "verified" && effectiveFont == activeFont -> activeLabel
             fontEffectState == "failed" && verificationMode.startsWith("universal") ->
                 "${activeLabel}（运行验证失败）"
             fontEffectState == "failed" -> "系统默认字体（${activeLabel}未生效）"
-            fontEffectState == "pending-reboot" -> "${activeLabel}（等待完整重启）"
             else -> "${activeLabel}（已准备，待本次启动验证）"
         }
 

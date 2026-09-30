@@ -44,7 +44,9 @@ _ufmr_validate_payload() {
     [ -f "$_ufmr_deployer" ] && [ -s "$_ufmr_manifest" ] || return 1
     _ufmr_python "$_ufmr_deployer" \
         --payload-root "$PAYLOAD" \
-        --validate-payload-only "$_ufmr_manifest" >/dev/null 2>&1
+        --expected-deployment-id "$(_ufmr_value "$RUNTIME_CONF" deploymentId)" \
+        --expected-payload-digest "$(_ufmr_value "$RUNTIME_CONF" payloadDigest)" \
+        --validate-dynamic-generation --validate-payload-only "$_ufmr_manifest" >/dev/null 2>&1
 }
 
 _ufmr_has_partition_payload() {
@@ -154,7 +156,7 @@ _ufmr_rollback_dynamic() {
     [ -s "$DYNAMIC_LIST" ] || return 0
     awk '{item[NR]=$0} END {for(i=NR;i>=1;i--) print item[i]}' "$DYNAMIC_LIST" 2>/dev/null | while IFS= read -r _ufmr_target; do
         [ -n "$_ufmr_target" ] || continue
-        case "$_ufmr_target" in /data/fonts/*) _ufmr_umount "$_ufmr_target" >/dev/null 2>&1 || true ;; esac
+        case "$_ufmr_target" in "${LUOSHU_UNIVERSAL_TEST_VISIBLE_ROOT:-}/data/fonts/"*) _ufmr_umount "$_ufmr_target" >/dev/null 2>&1 || true ;; esac
     done
     : > "$DYNAMIC_LIST" 2>/dev/null || true
 }
@@ -162,8 +164,15 @@ _ufmr_rollback_dynamic() {
 _ufmr_apply_dynamic() {
     _ufmr_conf="$PAYLOAD/.luoshu-runtime/deployment/dynamic-mounts.conf"
     mkdir -p "$STATE_ROOT" 2>/dev/null || return 1
+    _ufmr_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+    _ufmr_owned="$STATE_ROOT/dynamic.previous.$$"
+    : > "$_ufmr_owned" 2>/dev/null || return 1
+    if [ "$(cat "$STATE_ROOT/boot-id" 2>/dev/null)" = "$_ufmr_boot" ] && [ -f "$DYNAMIC_LIST" ]; then
+        cp -f "$DYNAMIC_LIST" "$_ufmr_owned" || return 1
+    fi
+    printf '%s\n' "$_ufmr_boot" > "$STATE_ROOT/boot-id" || return 1
     : > "$DYNAMIC_LIST" 2>/dev/null || return 1
-    [ -s "$_ufmr_conf" ] || return 0
+    [ -s "$_ufmr_conf" ] || { rm -f "$_ufmr_owned"; return 0; }
     while IFS='|' read -r _ufmr_source_rel _ufmr_target _ufmr_expected; do
         [ -n "$_ufmr_source_rel" ] && [ -n "$_ufmr_target" ] && [ -n "$_ufmr_expected" ] || continue
         case "$_ufmr_source_rel" in .luoshu-dynamic/*) ;; *) return 1 ;; esac
@@ -174,9 +183,16 @@ _ufmr_apply_dynamic() {
         _ufmr_actual_target=$(_ufmr_real_target "$_ufmr_actual_target")
         [ -f "$_ufmr_actual_target" ] || return 1
         [ "$(_ufmr_hash "$_ufmr_source")" = "$_ufmr_expected" ] || return 1
+        case "$_ufmr_actual_target" in
+            "${LUOSHU_UNIVERSAL_TEST_VISIBLE_ROOT:-}/data/fonts/"*) ;;
+            *) return 1 ;;
+        esac
         if _ufmr_is_mounted "$_ufmr_actual_target"; then
+            # Equal bytes do not grant ownership of another producer's mount.
+            grep -Fqx "$_ufmr_actual_target" "$_ufmr_owned" || return 1
+            printf '%s\n' "$_ufmr_actual_target" >> "$DYNAMIC_LIST" || return 1
+            _ufmr_is_readonly "$_ufmr_actual_target" || return 1
             [ "$(_ufmr_hash "$_ufmr_actual_target")" = "$_ufmr_expected" ] || return 1
-            printf '%s\n' "$_ufmr_actual_target" >> "$DYNAMIC_LIST"
             continue
         fi
         _ufmr_mount --bind "$_ufmr_source" "$_ufmr_actual_target" >/dev/null 2>&1 || \
@@ -196,6 +212,7 @@ _ufmr_apply_dynamic() {
         }
         printf '%s\n' "$_ufmr_actual_target" >> "$DYNAMIC_LIST" || return 1
     done < "$_ufmr_conf"
+    rm -f "$_ufmr_owned" 2>/dev/null || true
     return 0
 }
 

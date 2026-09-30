@@ -8,6 +8,7 @@ modifies the source font.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -534,12 +535,119 @@ def _group_families(files: list[dict[str, Any]]) -> dict[str, Any]:
     return dict(sorted(groups.items()))
 
 
+FIXED_SELECTION_POLICY = "fixed-composite-selection-v1"
+MIXED_ROLES = {"cjk", "latin", "digit"}
+
+
+def _selection_axes(value: Any) -> dict[str, float]:
+    if not isinstance(value, dict):
+        raise ProfileError("固定混合选择缺少轴信息")
+    result = {}
+    for tag, number in value.items():
+        if not isinstance(tag, str) or not re.fullmatch(r"[ -~]{4}", tag):
+            raise ProfileError("固定混合选择轴标签无效")
+        if isinstance(number, bool) or not isinstance(number, (float, int)) or not math.isfinite(number):
+            raise ProfileError("固定混合选择轴数值无效")
+        result[tag] = float(number)
+    return result
+
+
+def _validate_mixed_selection(selection: Any, file_info: dict[str, Any], face: dict[str, Any]) -> None:
+    if not isinstance(selection, dict) or selection.get("policy") != FIXED_SELECTION_POLICY:
+        raise ProfileError("固定混合选择 policy 无效")
+    request = selection.get("requestId")
+    if not isinstance(request, str) or not re.fullmatch(r"[A-Za-z0-9._-]+", request):
+        raise ProfileError("固定混合选择 requestId 无效")
+    sha = selection.get("fontSha256")
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{64}", sha) or sha != file_info.get("sha256"):
+        raise ProfileError("固定混合选择字体哈希不匹配")
+    if face.get("fileUid") != "sha256:" + sha:
+        raise ProfileError("固定混合选择字体面哈希不匹配")
+    if selection.get("fontPath") != file_info.get("sourcePath"):
+        raise ProfileError("固定混合选择字体路径不匹配")
+    report_hash = selection.get("reportSha256")
+    if not isinstance(report_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", report_hash):
+        raise ProfileError("固定混合选择报告哈希无效")
+    if file_info.get("collection") or file_info.get("faceCount") != 1 or file_info.get("container") not in {"TTF", "OTF"}:
+        raise ProfileError("固定混合选择必须绑定单个 SFNT 字体面")
+    if face.get("variation", {}).get("variable") or {"fvar", "gvar", "HVAR", "VVAR", "MVAR", "avar", "cvar"}.intersection(face.get("tables", {}).get("all", [])):
+        raise ProfileError("固定混合选择不能用于可变字体")
+    roles = selection.get("roles")
+    if not isinstance(roles, dict) or set(roles) != MIXED_ROLES:
+        raise ProfileError("固定混合选择必须包含中文、英文和数字")
+    for role, entry in roles.items():
+        if not isinstance(entry, dict) or entry.get("mode") != "fixed":
+            raise ProfileError("固定混合选择不能包含 auto 组件")
+        axes = _selection_axes(entry.get("selectedAxes"))
+        provenance = entry.get("axisProvenance")
+        if provenance not in {"generation-hash-only", "verified-instance-report", "static-instance-report", "static-component"}:
+            raise ProfileError("固定混合选择轴来源无效")
+        actual = _selection_axes(entry.get("effectiveAxes"))
+        if provenance == "verified-instance-report":
+            if any(actual.get(tag) != number for tag, number in axes.items()):
+                raise ProfileError("固定混合选择包含被截断的组件轴：" + role)
+        elif actual or "actualAxes" in entry:
+            raise ProfileError("固定混合选择不能把静态权重冒充实际轴坐标")
+        if provenance in {"static-instance-report", "static-component"} and any(tag != "wght" for tag in axes):
+            raise ProfileError("静态混合组件不支持所选轴")
+        if "componentWeightClass" in entry:
+            weight = entry["componentWeightClass"]
+            if type(weight) is not int or not 1 <= weight <= 1000:
+                raise ProfileError("固定混合组件静态字重无效")
+        if provenance != "generation-hash-only":
+            keys = ("componentSha256",) if provenance == "static-component" else ("componentSha256", "instanceReportSha256")
+            for key in keys:
+                if not re.fullmatch(r"[0-9a-f]{64}", str(entry.get(key, ""))):
+                    raise ProfileError("固定混合组件来源哈希无效")
+
+
+def _attach_mixed_selection(files: list[dict[str, Any]], path: Path) -> None:
+    """Explicit-only metadata opt-in: never discover an adjacent source.json."""
+    report_path = path.resolve(strict=True)
+    try:
+        raw = report_path.read_bytes()
+        report = json.loads(raw)
+    except (OSError, ValueError) as error:
+        raise ProfileError("无法读取固定混合选择报告") from error
+    if not isinstance(report, dict) or report.get("schema") != "universal-mixed-source-v1" or report.get("mode") != "fixed":
+        raise ProfileError("固定混合选择报告格式无效")
+    selection = copy.deepcopy(report.get("mixedSelection"))
+    if not isinstance(selection, dict) or selection.get("requestId") != report.get("requestId"):
+        raise ProfileError("固定混合选择报告请求不匹配")
+    relative = Path(str(selection.get("fontPath", "")))
+    if relative.is_absolute() or len(relative.parts) != 2 or relative.parts[0] != "fonts" or relative.parts[1] in {".", ".."} or relative.suffix.lower() not in {".ttf", ".otf"}:
+        raise ProfileError("固定混合选择报告字体路径无效")
+    fonts_dir = report_path.parent / "fonts"
+    if fonts_dir.resolve(strict=True) != fonts_dir:
+        raise ProfileError("固定混合选择字体越出冻结目录")
+    font_path = (report_path.parent / relative).resolve(strict=True)
+    if font_path.parent != fonts_dir:
+        raise ProfileError("固定混合选择字体越出冻结目录")
+    matches = [item for item in files if item.get("sourcePath") == str(font_path)]
+    if len(matches) != 1:
+        raise ProfileError("固定混合选择报告没有匹配的冻结字体")
+    file_info = matches[0]
+    if _sha256(font_path) != selection.get("fontSha256") or file_info.get("sha256") != selection.get("fontSha256"):
+        raise ProfileError("固定混合选择冻结字体内容已变化")
+    selection["fontPath"] = str(font_path)
+    selection["reportSha256"] = hashlib.sha256(raw).hexdigest()
+    for face in file_info["faces"]:
+        _validate_mixed_selection(selection, file_info, face)
+        face["mixedSelection"] = copy.deepcopy(selection)
+
+
 def _profile_id(files: list[dict[str, Any]]) -> str:
     material = "|".join(sorted(str(file_info["sha256"]) for file_info in files))
+    selections = [
+        {"fileSha256": file_info["sha256"], "faceIndex": face["faceIndex"], "selection": face["mixedSelection"]}
+        for file_info in files for face in file_info["faces"] if "mixedSelection" in face
+    ]
+    if selections:
+        material += "|mixed-selection:" + json.dumps(sorted(selections, key=lambda item: (item["fileSha256"], item["faceIndex"])), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(material.encode("ascii")).hexdigest()
 
 
-def build(paths: list[Path]) -> dict[str, Any]:
+def build(paths: list[Path], mixed_selection: Path | None = None) -> dict[str, Any]:
     unique: list[Path] = []
     seen: set[str] = set()
     for path in paths:
@@ -553,6 +661,8 @@ def build(paths: list[Path]) -> dict[str, Any]:
         raise ProfileError("没有指定字体文件")
 
     files = [_inspect_file(path) for path in unique]
+    if mixed_selection is not None:
+        _attach_mixed_selection(files, mixed_selection)
     faces = [face for file_info in files for face in file_info["faces"]]
     families = _group_families(files)
     axis_tags = sorted({
@@ -617,6 +727,11 @@ def validate(profile: dict[str, Any]) -> None:
                 raise ProfileError("源字体 Profile 缺少覆盖信息")
             if not isinstance(face.get("capabilities"), dict):
                 raise ProfileError("源字体 Profile 缺少能力信息")
+            if "mixedSelection" in face:
+                _validate_mixed_selection(face["mixedSelection"], file_info, face)
+    if any("mixedSelection" in face for item in files for face in item["faces"]):
+        if profile.get("profileId") != "sha256:" + _profile_id(files):
+            raise ProfileError("固定混合选择 Profile 身份哈希不匹配")
 
 
 def _atomic_write(path: Path, value: dict[str, Any]) -> None:
@@ -647,6 +762,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--font", action="append", default=[], type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--mixed-selection", type=Path)
     parser.add_argument("--validate", type=Path)
     args = parser.parse_args()
 
@@ -657,7 +773,7 @@ def main() -> int:
                 raise ProfileError("源字体 Profile 根节点无效")
             validate(profile)
         else:
-            profile = build(args.font)
+            profile = build(args.font, mixed_selection=args.mixed_selection)
             if args.output is not None:
                 _atomic_write(args.output, profile)
     except (ProfileError, OSError, json.JSONDecodeError) as error:

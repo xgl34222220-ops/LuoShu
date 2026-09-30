@@ -121,7 +121,7 @@ def main() -> int:
             json.dumps(
                 {
                     "schema": "device-font-topology-v1",
-                    "topologyRevision": 2,
+                    "topologyRevision": 3,
                     "state": "ready",
                     "buildKey": "role-shadow-test",
                     "romKind": "generic",

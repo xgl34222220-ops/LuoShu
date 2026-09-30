@@ -134,6 +134,30 @@ internal suspend fun exportSanitizedDiagnostic(): DiagnosticExportState {
             printf 'recentErrorCount=%s\n' "${'$'}errorCount"
             printf 'privacy=device identifiers, accounts, chat content and source font names omitted; system slots and APK font resource names may be included\n'
         } > "${'$'}OUT" 2>/dev/null || exit 21
+        # Read the existing failed compilation; never regenerate fonts for diagnosis.
+        PYHOME="${'$'}MOD/common/python"
+        if [ -x "${'$'}PYHOME/bin/luoshu-python" ]; then
+            PYTHONHOME="${'$'}PYHOME" \
+            PYTHONPATH="${'$'}MOD/common:${'$'}PYHOME/lib/python3.14:${'$'}PYHOME/lib/python3.14/site-packages" \
+            LD_LIBRARY_PATH="${'$'}PYHOME/lib:${'$'}PYHOME/lib/python3.14/lib-dynload" \
+            "${'$'}PYHOME/bin/luoshu-python" - "${'$'}CFG" >> "${'$'}OUT" 2>/dev/null <<'PYDIAG'
+        import hashlib, json, re, sys
+        from pathlib import Path
+        cfg = Path(sys.argv[1])
+        key = hashlib.sha256(b'LuoShuMix').hexdigest()[:24]
+        path = cfg / 'universal-font-artifact-manifests' / (key + '.json')
+        print('\n[universal-artifact-blockers]')
+        if path.is_file():
+            manifest = json.loads(path.read_text())
+            blockers = [a for a in manifest.get('artifacts', []) if a.get('status') == 'blocked']
+            print(json.dumps({'blockedCount': len(blockers), 'items': [
+                {'targetPath': a.get('targetPath'), 'role': a.get('role'),
+                 'reason': re.sub(r'/[^\s]+', '<path>', str(a.get('reason', '')))}
+                for a in blockers[:50]]}, ensure_ascii=False))
+        else:
+            print('{"state":"manifest-missing"}')
+        PYDIAG
+        fi
         LAYOUT_HELPER="${'$'}MOD/common/font_layout_diagnostic.sh"
         LAYOUT_OUT="${'$'}OUT_DIR/LuoShu-font-layout.json"
         if [ -f "${'$'}LAYOUT_HELPER" ]; then

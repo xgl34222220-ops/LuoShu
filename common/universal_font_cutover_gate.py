@@ -111,14 +111,25 @@ def evaluate(
     constraints = plan.get("constraints") if isinstance(plan.get("constraints"), dict) else {}
     for risk in constraints.get("risks") or []:
         risk_text = str(risk)
-        if risk_text == "missing-role-evidence":
-            reasons.append("missing-role-evidence")
+        if risk_text in {"missing-role-evidence", "dynamic-font-discovery-incomplete"}:
+            reasons.append(risk_text)
         elif risk_text and risk_text not in {
             "data-font-layer-active",
             "unresolved-xml-routes",
         }:
             warnings.append(f"plan-risk:{risk_text}")
 
+    preserved_math = sum(int((item.get("report") or {}).get("transformed", {}).get("layout", {}).get("preservedMathGlyphs") or 0)
+                         for item in artifacts.get("artifacts", []) if isinstance(item, dict))
+    preserved_marks = sum(int((item.get("report") or {}).get("transformed", {}).get("layout", {}).get("preservedSharedMarks") or 0)
+                          for item in artifacts.get("artifacts", []) if isinstance(item, dict))
+    preserved_count = len(route.get("preservedRoutes") or [])
+    if preserved_count:
+        warnings.append(f"partial-coverage:preserved-original-style-routes:{preserved_count}")
+    if preserved_math:
+        warnings.append(f"partial-coverage:preserved-math-glyphs:{preserved_math}")
+    if preserved_marks:
+        warnings.append(f"partial-coverage:preserved-shared-marks:{preserved_marks}")
     eligible = not reasons
     return {
         "schema": SCHEMA,
@@ -131,6 +142,11 @@ def evaluate(
         "payloadDigest": str(deployment.get("payloadDigest") or ""),
         "summary": {
             "slotCount": len(targets),
+            "coverage": ("partial-protected-typography" if preserved_math or preserved_marks else
+                         "partial-style-preserved" if preserved_count else "planned-targets"),
+            "preservedSharedMarks": preserved_marks,
+            "preservedMathGlyphs": preserved_math,
+            "preservedStyleRouteCount": preserved_count,
             "replacementCount": replacement_count,
             "roleCounts": dict(sorted(role_counts.items())),
             "actionCounts": dict(sorted(action_counts.items())),

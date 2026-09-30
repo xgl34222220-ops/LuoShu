@@ -60,7 +60,8 @@ def is_latin(codepoint: int) -> bool:
     return (
         0x0041 <= codepoint <= 0x005A
         or 0x0061 <= codepoint <= 0x007A
-        or 0x00C0 <= codepoint <= 0x024F
+        or 0x00C0 <= codepoint <= 0x02AF
+        or 0xFB00 <= codepoint <= 0xFB06
         or 0x1E00 <= codepoint <= 0x1EFF
         or 0xAB30 <= codepoint <= 0xAB6F
     )
@@ -208,9 +209,40 @@ def transform_for_probe(slot: dict[str, Any], probe: str) -> dict[str, Any] | No
     return transform
 
 
+def layout_probe_contract(font: TTFont, slot: dict[str, Any]):
+    import universal_font_semantics as semantics
+    initial = glyph_probe_map(font)
+    for cp, name in (font.getBestCmap() or {}).items():
+        if any(a <= cp <= b for a,b in ((0x300,0x36F),(0x1AB0,0x1AFF),(0x1DC0,0x1DFF))):
+            initial.setdefault(name, "latinX")
+    def signature(probe):
+        data = transform_for_probe(slot, probe) or {}
+        return (finite(data.get("relativeScaleY")) or 1.0,
+                finite(data.get("shiftY")) or 0.0,
+                finite(data.get("relativeAdvanceScale")) or 1.0,
+                finite(data.get("relativeInkScaleX")) or 1.0)
+    resolved = semantics.complete_layout_probe_map(font, initial, signature)
+    math_glyphs = semantics.protected_math_glyphs(font)
+    shared_marks = semantics.protected_shared_marks(font,resolved)
+    protected = math_glyphs | shared_marks
+    return ({name: probe for name,probe in resolved.items() if name not in protected},
+            {"preservedMathGlyphs":len(math_glyphs), "preservedSharedMarks":len(shared_marks)})
+
+
+def layout_probe_map(font: TTFont, slot: dict[str, Any]) -> dict[str, str]:
+    return layout_probe_contract(font,slot)[0]
+
+
 def apply_outline_transforms(font: TTFont, slot: dict[str, Any]) -> dict[str, Any]:
     roles = set(slot.get("roles") or [])
-    probe_map = glyph_probe_map(font)
+    import universal_font_semantics as semantics
+    probe_map, protected_layout = layout_probe_contract(font, slot)
+    semantics.transform_layout(font, {name:(1.0,1.0,0.0,0.0) for name in probe_map}, materialize_points=True)
+    derived_names = set(probe_map) - set(glyph_probe_map(font))
+    selected = {cp for cp,name in (font.getBestCmap() or {}).items()
+                if (name in derived_names or probe_for_codepoint(cp) is not None or any(a <= cp <= b for a,b in ((0x300,0x36F),(0x1AB0,0x1AFF),(0x1DC0,0x1DFF)))) and name in probe_map}
+    semantics.isolate_stock_dependencies(font, probe_map, selected, preserve_uvs=False)
+    actual_transforms = {}
     glyf = font["glyf"]
     hmtx = font["hmtx"].metrics
     # Capture only composite outlines, and do it before mutating any simple base
@@ -248,7 +280,7 @@ def apply_outline_transforms(font: TTFont, slot: dict[str, Any]) -> dict[str, An
         relative_advance = finite(transform_data.get("relativeAdvanceScale")) or 1.0
         target_advance = finite(transform_data.get("targetAdvance"))
         new_advance = int(round(target_advance if exact_advance and target_advance is not None else old_advance * relative_advance))
-        new_advance = max(1, min(65535, new_advance))
+        new_advance = max(0, min(65535, new_advance))
 
         source_glyph = glyf[glyph_name]
         bounds = glyph_bounds(source_glyph, glyf)
@@ -268,6 +300,7 @@ def apply_outline_transforms(font: TTFont, slot: dict[str, Any]) -> dict[str, An
         # Composite glyphs retain the conservative decomposing path so nested component transforms
         # cannot be applied twice.
         if source_glyph.numberOfContours > 0:
+            semantics.strip_glyph_hints(source_glyph)
             source_glyph.coordinates.transform(((scale_x, 0.0), (0.0, scale_y)))
             source_glyph.coordinates.translate((shift_x, shift_y))
             source_glyph.coordinates.toInt()
@@ -285,11 +318,15 @@ def apply_outline_transforms(font: TTFont, slot: dict[str, Any]) -> dict[str, An
         if bounds_after is not None and exact_advance:
             new_lsb = int(bounds_after[0])
         hmtx[glyph_name] = (new_advance, new_lsb)
+        actual_transforms[glyph_name] = (scale_x, scale_y, shift_x, shift_y)
         changed += 1
         advances += int(new_advance != old_advance)
         probe_counts[probe] = probe_counts.get(probe, 0) + 1
 
+    layout_report = semantics.transform_layout(font, actual_transforms)
+    layout_report.update(protected_layout)
     return {
+        "layout": layout_report,
         "glyphs": changed,
         "centered": centered,
         "advances": advances,

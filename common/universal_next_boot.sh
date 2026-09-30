@@ -44,9 +44,9 @@ PY
 }
 
 _ufnb_restore_file() {
-    _ufnb_backup="$1"; _ufnb_target="$2"
-    rm -f "$_ufnb_target" 2>/dev/null || true
-    [ -f "$_ufnb_backup" ] && cp -fp "$_ufnb_backup" "$_ufnb_target" 2>/dev/null || true
+    _ufnb_restore_source="$1"; _ufnb_restore_target="$2"
+    rm -f "$_ufnb_restore_target" 2>/dev/null || true
+    [ -f "$_ufnb_restore_source" ] && cp -fp "$_ufnb_restore_source" "$_ufnb_restore_target" 2>/dev/null || true
 }
 
 _ufnb_restore_previous_selection() {
@@ -132,7 +132,7 @@ universal_font_next_boot_activate() {
         _ufnb_discard_invalid_next "$_ufnb_state" "$_ufnb_next" deployer-missing "$_ufnb_previous_font"
         return 1
     }
-    _ufnb_python "$_ufnb_deployer" --payload-root "$_ufnb_next" --validate-payload-only "$_ufnb_manifest" >/dev/null 2>&1 || {
+    _ufnb_python "$_ufnb_deployer" --payload-root "$_ufnb_next" --validate-dynamic-generation --validate-payload-only "$_ufnb_manifest" >/dev/null 2>&1 || {
         _ufnb_log "staged payload validation failed"
         _ufnb_discard_invalid_next "$_ufnb_state" "$_ufnb_next" payload-validation-failed "$_ufnb_previous_font"
         return 1

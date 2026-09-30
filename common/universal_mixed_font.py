@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 import shutil
 import tempfile
@@ -34,6 +35,104 @@ def digest(path: Path) -> str:
     return h.hexdigest()
 
 
+FIXED_SELECTION_POLICY = 'fixed-composite-selection-v1'
+ROLES = ('cjk', 'latin', 'digit')
+
+
+def selected_axes(spec: str) -> dict[str, float]:
+    result = {}
+    for item in spec.split(','):
+        if not item.strip():
+            continue
+        if '=' not in item:
+            raise ValueError('invalid fixed component axis selection')
+        tag, value = (part.strip() for part in item.split('=', 1))
+        if not re.fullmatch(r'[ -~]{4}', tag) or tag in result:
+            raise ValueError('invalid or duplicate fixed component axis: ' + tag)
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError('non-finite fixed component axis: ' + tag)
+        result[tag] = number
+    return result
+
+
+def fixed_roles(module: Path, request: str, state: dict[str, str], generation: dict[str, str]) -> dict:
+    """Record intent separately from any verified component axis location.
+
+    The static copy path does not emit instance reports. In that case a
+    generation hash binds the chosen composite content, but cannot prove that
+    a selected weight was an actual variable-axis coordinate.
+    """
+    task_path = module / 'config/axes_task.conf'
+    task = conf(task_path) if task_path.is_file() else {}
+    root = None
+    if task.get('requestId') == request:
+        if any(task.get(key, '') != state.get(key, '') for key in
+               ('cjk', 'latin', 'digit', 'cjkAxes', 'latinAxes', 'digitAxes')):
+            raise ValueError('fixed component request identity mismatch')
+        root = Path(task.get('root', '')).resolve(strict=True)
+        root.relative_to((module / 'cache').resolve())
+    result = {}
+    for role, internal in zip(ROLES, ('LuoShuMixCJK', 'LuoShuMixLatin', 'LuoShuMixDigit')):
+        if state.get(role + 'Mode', 'fixed') != 'fixed':
+            raise ValueError('fixed selection contains an auto component: ' + role)
+        axes = selected_axes(state.get(role + 'Axes', ''))
+        entry = {'mode': 'fixed', 'selectedAxes': axes,
+                 'family': state.get(role, ''), 'effectiveAxes': {},
+                 'axisProvenance': 'generation-hash-only'}
+        component = root / 'fonts' / (internal + '-Regular.ttf') if root is not None else None
+        report_path = Path(str(component) + '.json') if component is not None else None
+        if component is not None and component.is_file():
+            component.resolve(strict=True).relative_to(root)
+            component_hash = digest(component)
+            if generation.get(role + 'Hash') and generation[role + 'Hash'] != component_hash:
+                raise ValueError('fixed component generation hash mismatch: ' + role)
+            from fontTools.ttLib import TTFont
+            with TTFont(component, lazy=True, recalcTimestamp=False) as prepared:
+                if 'fvar' in prepared:
+                    raise ValueError('fixed component was not fully instanced: ' + role)
+                if 'OS/2' in prepared:
+                    entry['componentWeightClass'] = int(prepared['OS/2'].usWeightClass)
+            entry['componentSha256'] = component_hash
+            if report_path is not None and not report_path.is_file():
+                if any(tag != 'wght' for tag in axes):
+                    raise ValueError('static fixed component cannot satisfy selected axes: ' + role)
+                entry['axisProvenance'] = 'static-component'
+        if report_path is not None and report_path.is_file():
+            if not generation.get(role + 'Hash'):
+                raise ValueError('fixed component generation hash missing: ' + role)
+            instance = json.loads(report_path.read_text())
+            if not isinstance(instance, dict) or instance.get('status') != 'ok' or instance.get('role') != role:
+                raise ValueError('invalid fixed component axis report: ' + role)
+            if not component.is_file() or Path(str(instance.get('output', ''))).resolve() != component.resolve():
+                raise ValueError('fixed component report output mismatch: ' + role)
+            component.resolve(strict=True).relative_to(root)
+            if instance.get('size') != component.stat().st_size:
+                raise ValueError('fixed component report size mismatch: ' + role)
+            if instance.get('ignoredAxes'):
+                raise ValueError('unsupported selected fixed component axis: ' + role)
+            if type(instance.get('variable')) is not bool:
+                raise ValueError('invalid fixed component variable status: ' + role)
+            location = instance.get('location')
+            if not isinstance(location, dict):
+                raise ValueError('invalid fixed component axis location: ' + role)
+            if instance['variable']:
+                for tag, wanted in axes.items():
+                    actual = location.get(tag)
+                    if isinstance(actual, bool) or not isinstance(actual, (int, float)) or not math.isfinite(actual) or float(actual) != wanted:
+                        raise ValueError('fixed component axis range does not cover selection: ' + role + ':' + tag)
+                entry['effectiveAxes'] = dict(location)
+                entry['axisProvenance'] = 'verified-instance-report'
+            else:
+                if location or any(tag != 'wght' for tag in axes):
+                    raise ValueError('static fixed component cannot satisfy selected axes: ' + role)
+                entry['axisProvenance'] = 'static-instance-report'
+            entry['componentSha256'] = digest(component)
+            entry['instanceReportSha256'] = digest(report_path)
+        result[role] = entry
+    return result
+
+
 def freeze(module: Path, request: str, mode: str, source: Path) -> Path:
     module = module.resolve()
     state = current(module, request)
@@ -45,6 +144,7 @@ def freeze(module: Path, request: str, mode: str, source: Path) -> Path:
             raise ValueError('composite generation identity mismatch')
         if generation.get('compositeHash') != digest(source):
             raise ValueError('composite generation hash mismatch')
+        role_selection = fixed_roles(module, request, state, generation)
         files = [source]
     else:
         task = conf(module / 'config/axes_task.conf')
@@ -73,6 +173,13 @@ def freeze(module: Path, request: str, mode: str, source: Path) -> Path:
             if digest(fonts / name) != hashes[p.name]:
                 raise ValueError('source changed during composite freeze')
         report = {'schema': 'universal-mixed-source-v1', 'requestId': request, 'mode': mode, 'selection': state, 'sourceHashes': hashes}
+        if mode == 'fixed':
+            report['mixedSelection'] = {
+                'policy': FIXED_SELECTION_POLICY, 'requestId': request,
+                'roles': role_selection,
+                'fontPath': 'fonts/' + next(fonts.iterdir()).name,
+                'fontSha256': hashes[source.name],
+            }
         if mode == 'auto':
             report['axisProvenance'] = {str(p.relative_to(source / 'axis-provenance')): json.loads(p.read_text()) for p in (source / 'axis-provenance').glob('*/*.json')}
             from universal_mixed_variable import build_variable_family, discover_masters

@@ -122,6 +122,14 @@ status_json() {
             _verification_grade="$(read_prop "$_verification_file" grade)"
             _verification_reason="$(read_prop "$_verification_file" reason)"
             _verification_active="$(read_prop "$_verification_file" activeFont)"
+            _verification_boot="$(read_prop "$_verification_file" bootId)"
+            _current_boot="$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')"
+            if [ -z "$_verification_boot" ] || [ "$_verification_boot" != "$_current_boot" ] ||
+               [ "$(read_prop "$_verification_file" deploymentId)" != "$(read_prop "$_universal_runtime" deploymentId)" ] ||
+               [ "$(read_prop "$_verification_file" payloadDigest)" != "$(read_prop "$_universal_runtime" payloadDigest)" ]; then
+                _verification_grade=PENDING
+                _verification_reason=awaiting-current-boot-verification
+            fi
         fi
         case "$_verification_grade" in
             PASS) _verification_state=verified; _verification_mode=universal-pass ;;
@@ -199,11 +207,11 @@ status_json() {
     if [ "$_rollback_pending" = true ]; then
         _effective_active=unknown
         _font_effect_state=rollback-pending
+    elif [ "$_reboot_required" = true ]; then
+        _font_effect_state=pending-reboot
     elif [ "$_active" = default ]; then
         _effective_active=default
         _font_effect_state=system
-    elif [ "$_reboot_required" = true ]; then
-        _font_effect_state=pending-reboot
     elif [ -n "$_verification_active" ] && [ "$_verification_active" != "$_active" ]; then
         _verification_state=pending
         _verification_mode=unknown
@@ -339,11 +347,12 @@ preview_export() {
     _family="$1"
     _dest="$2"
     _weight="${3:-400}"
-    case "$_dest" in
-        /data/user/0/io.github.xgl34222220.luoshu/cache/*|/data/data/io.github.xgl34222220.luoshu/cache/*|\
-        /data/user/0/io.github.xgl34222220.luoshu.debug/cache/*|/data/data/io.github.xgl34222220.luoshu.debug/cache/*) ;;
-        *) printf '{"status":"error","message":"预览目标目录不受信任"}\n'; return 1 ;;
-    esac
+    [ -f "$MODDIR/common/app_cache_guard.sh" ] && . "$MODDIR/common/app_cache_guard.sh"
+    type luoshu_app_cache_guard >/dev/null 2>&1 && luoshu_app_cache_guard "$_dest" preview || {
+        printf '{"status":"error","message":"预览缓存目录不受信任"}\n'; return 1;
+    }
+    _dest="$LUOSHU_TRUSTED_CACHE_PATH"
+
     _src="$(find_preview_source "$_family" "$_weight")"
     [ -f "$_src" ] || { printf '{"status":"error","message":"找不到预览字体"}\n'; return 1; }
     mkdir -p "${_dest%/*}" 2>/dev/null || true

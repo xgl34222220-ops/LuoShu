@@ -13,6 +13,12 @@ assert_status() {
     _expected_effective="$1"
     _expected_state="$2"
     _expected_reason="$3"
+    if [ -s "$CONFIG/universal-font-runtime-verification.conf" ]; then
+        sed '/^bootId=/d; /^deploymentId=/d; /^payloadDigest=/d' "$CONFIG/universal-font-runtime-verification.conf" > "$TMP/verification.current"
+        printf 'bootId=%s\n' "$(cat /proc/sys/kernel/random/boot_id)" >> "$TMP/verification.current"
+        grep -E '^(deploymentId|payloadDigest)=' "$CONFIG/universal-font-runtime.conf" >> "$TMP/verification.current" || true
+        mv "$TMP/verification.current" "$CONFIG/universal-font-runtime-verification.conf"
+    fi
     _output=$(MODDIR="$MODULE" sh "$ROOT/common/app_bridge.sh" status)
     printf '%s' "$_output" | python3 -c '
 import json

@@ -134,6 +134,8 @@ _uvr_terminal_failure() {
         printf 'mode=universal-runtime\n'
         printf 'reason=%s\n' "$_uvr_reason"
         printf 'activeFont=%s\n' "$_uvr_font"
+        printf 'deploymentId=%s\n' "$(_uvr_value "$RUNTIME_CONF" deploymentId)"
+        printf 'payloadDigest=%s\n' "$(_uvr_value "$RUNTIME_CONF" payloadDigest)"
         printf 'bootId=%s\n' "$_uvr_boot"
         printf 'failureCount=1\n'
         printf 'warningCount=0\n'
@@ -182,6 +184,8 @@ _uvr_run() {
     [ -s "$RUNTIME_CONF" ] || { _uvr_terminal_failure runtime-state-missing "$_uvr_font" "$_uvr_boot"; rm -f "$PID_FILE"; return 1; }
 
     _uvr_collect_font_dump || true
+    # A crashed interpreter must never leave an earlier successful result usable.
+    rm -f "$OUTPUT_JSON" "$OUTPUT_CONF" 2>/dev/null || true
     if [ -n "${LUOSHU_VERIFY_VISIBLE_ROOT:-}" ]; then
         _uvr_python "$VERIFIER" \
             --font-plan "$_uvr_plan" \
@@ -211,11 +215,28 @@ _uvr_run() {
             --output-conf "$OUTPUT_CONF"
     fi
     _uvr_rc=$?
+    if [ "$_uvr_rc" -gt 2 ]; then
+        _uvr_terminal_failure verifier-execution-failed "$_uvr_font" "$_uvr_boot"
+        rm -f "$PID_FILE" 2>/dev/null || true
+        return 1
+    fi
+    if [ "$(_uvr_value "$OUTPUT_CONF" bootId)" != "$_uvr_boot" ] ||
+       [ "$(_uvr_value "$OUTPUT_CONF" activeFont)" != "$_uvr_font" ] ||
+       [ "$(_uvr_value "$OUTPUT_CONF" deploymentId)" != "$(_uvr_value "$RUNTIME_CONF" deploymentId)" ] ||
+       [ "$(_uvr_value "$OUTPUT_CONF" payloadDigest)" != "$(_uvr_value "$RUNTIME_CONF" payloadDigest)" ]; then
+        _uvr_terminal_failure verifier-result-identity-mismatch "$_uvr_font" "$_uvr_boot"
+        rm -f "$PID_FILE" 2>/dev/null || true
+        return 1
+    fi
     _uvr_grade=$(_uvr_value "$OUTPUT_CONF" grade)
+    case "$_uvr_rc:$_uvr_grade" in
+        0:PASS|2:WARN|1:FAIL) ;;
+        *) _uvr_terminal_failure verifier-execution-failed "$_uvr_font" "$_uvr_boot"; rm -f "$PID_FILE"; return 1 ;;
+    esac
     _uvr_reason=$(_uvr_value "$OUTPUT_CONF" reason)
     _uvr_log "result=${_uvr_grade:-FAIL} reason=${_uvr_reason:-unknown} font=$_uvr_font rc=$_uvr_rc"
 
-    if [ "$_uvr_grade" = PASS ]; then
+    if [ "$_uvr_grade" = PASS ] && [ "$_uvr_rc" -eq 0 ]; then
         _uvr_cleanup_retired_on_pass
     elif [ "$_uvr_grade" = FAIL ] && [ -f "$CUTOVER_CONTROLLER" ]; then
         MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
@@ -231,7 +252,7 @@ _uvr_schedule() {
     if [ -s "$OUTPUT_CONF" ] && [ "$(_uvr_value "$OUTPUT_CONF" bootId)" = "$_uvr_boot" ]; then
         case "$(_uvr_value "$OUTPUT_CONF" grade)" in PASS|WARN|FAIL) return 0 ;; esac
     fi
-    if [ -s "$PID_FILE" ]; then
+    if [ -s "$PID_FILE" ] && [ "$(cat "$PID_FILE.boot" 2>/dev/null)" = "$_uvr_boot" ]; then
         _uvr_pid=$(head -n1 "$PID_FILE" 2>/dev/null)
         case "$_uvr_pid" in
             ''|*[!0-9]*) ;;
@@ -241,6 +262,7 @@ _uvr_schedule() {
     ( trap '' HUP; exec sh "$0" run ) </dev/null >> "$LOG_FILE" 2>&1 &
     _uvr_pid=$!
     printf '%s\n' "$_uvr_pid" > "$PID_FILE" 2>/dev/null || true
+    printf '%s\n' "$_uvr_boot" > "$PID_FILE.boot" 2>/dev/null || true
     return 0
 }
 

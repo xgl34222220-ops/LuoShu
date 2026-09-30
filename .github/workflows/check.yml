@@ -37,6 +37,9 @@ jobs:
   check:
     runs-on: ubuntu-24.04
     timeout-minutes: 65
+    env:
+      LUOSHU_REQUIRE_BROTLI_TEST: '1'
+      LUOSHU_REQUIRE_SHAPING_TEST: '1'
     steps:
       - uses: actions/checkout@v4
 
@@ -59,7 +62,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv fonts-noto-cjk fonts-dejavu-core >/dev/null
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip file python3-venv python3-brotli python3-pil libraqm0 fonts-noto-cjk fonts-noto-core fonts-dejavu-core >/dev/null
 
       - uses: actions/cache@v4
         with:

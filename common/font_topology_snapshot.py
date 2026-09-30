@@ -9,6 +9,7 @@ hard-coding ROM-specific filenames.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -19,16 +20,39 @@ from pathlib import Path
 from typing import Any, Iterable
 
 SCHEMA = "device-font-topology-v1"
-TOPOLOGY_REVISION = 2
+TOPOLOGY_REVISION = 3
 FONT_EXTENSIONS = (".ttf", ".otf", ".ttc", ".otc")
 ABS_FONT_PATH_RE = re.compile(
-    r"(/[A-Za-z0-9_./+@=-]+\.(?:ttf|otf|ttc|otc))",
+    r"(/[A-Za-z0-9_./+@=~-]+\.(?:ttf|otf|ttc|otc))",
     re.IGNORECASE,
 )
 
 
 class TopologyError(RuntimeError):
     pass
+
+
+class TopologyRefreshBlocked(TopologyError):
+    """Visible dynamic bytes are overlaid; preserve sealed stock evidence."""
+
+
+def _inventory_digest(inventory: dict[str, Any]) -> str:
+    # A new capture timestamp is not new evidence. Everything else, including
+    # routes, metrics and trusted roots, contributes to cache identity.
+    material = {key: value for key, value in inventory.items() if key != "generatedAt"}
+    blob = json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return "sha256:" + hashlib.sha256(blob).hexdigest()
+
+
+def _dynamic_mount_targets(mount_text: str) -> set[str]:
+    result: set[str] = set()
+    for line in mount_text.splitlines():
+        fields = line.split()
+        if len(fields) > 5 and " - " in line:
+            target = fields[4].replace(r"\040", " ").replace(r"\134", "\\")
+            if target.startswith("/data/fonts/"):
+                result.add(target)
+    return result
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -285,6 +309,8 @@ def build_topology(
 ) -> dict[str, Any]:
     if inventory.get("schema") != "device-font-inventory-v1" or inventory.get("state") != "ready":
         raise TopologyError("原厂字体清单尚未就绪，不能生成字体拓扑")
+    if inventory.get("scannerRevision") != 6:
+        raise TopologyError("原厂字体清单扫描版本已过期，需要可信原厂重扫")
     raw_slots = inventory.get("slots")
     if not isinstance(raw_slots, dict) or not raw_slots:
         raise TopologyError("原厂字体清单没有可用槽位")
@@ -294,7 +320,7 @@ def build_topology(
         logical = str(path).strip()
         if not logical or not isinstance(value, dict):
             continue
-        slots[logical] = dict(value)
+        slots[logical] = copy.deepcopy(value)
 
     # The legacy inventory intentionally contains only replaceable UI slots.
     # Topology must describe *all* visible stock fonts, including protected
@@ -351,6 +377,20 @@ def build_topology(
                 if family not in names:
                     names.append(family)
 
+    data_config = _xml_font_references(data_fonts_config)
+    data_files = _scan_data_fonts(data_fonts_dir)
+    from font_dynamic_topology import discover as discover_dynamic_fonts
+    reported_data = sorted({match.group(1) for match in ABS_FONT_PATH_RE.finditer(font_manager_dump)
+                            if match.group(1).startswith("/data/fonts/")})
+    dynamic_mounts = _dynamic_mount_targets(mount_text)
+    dynamic_slots, dynamic_evidence = discover_dynamic_fonts(
+        data_fonts_config, data_fonts_dir, inventory, reported_data, data_files, dynamic_mounts)
+    slots.update(dynamic_slots)
+    for logical, entry in dynamic_slots.items():
+        for family in entry.get("families", []):
+            if logical not in families.setdefault(family, []):
+                families[family].append(logical)
+
     slot_families = _slot_family_index(families)
     manager = _font_manager_evidence(font_manager_dump, slots, families)
     mounts = _mount_evidence(mount_text, slots)
@@ -387,8 +427,6 @@ def build_topology(
             "runtimeConfirmed": family in manager_families,
         }
 
-    data_config = _xml_font_references(data_fonts_config)
-    data_files = _scan_data_fonts(data_fonts_dir)
     partitions = sorted({
         str(entry.get("partition") or _partition_for_path(path, slots))
         for path, entry in normalized_slots.items()
@@ -413,6 +451,7 @@ def build_topology(
         "romKind": str(inventory.get("romKind") or "generic"),
         "scannerRevision": inventory.get("scannerRevision"),
         "inventoryRevision": inventory.get("inventoryRevision"),
+        "inventoryDigest": _inventory_digest(inventory),
         "summary": {
             "slotCount": len(normalized_slots),
             "legacyUiSlotCount": len(raw_slots),
@@ -427,6 +466,8 @@ def build_topology(
             "runtimeConfirmedFamilyCount": len(manager_families),
             "dataFontFileCount": len(data_files),
             "dataFontConfigReferenceCount": len(data_config.get("fontReferences") or []),
+            "dynamicResolvedTargetCount": len(dynamic_slots),
+            "dynamicUnresolvedCount": len(dynamic_evidence["unresolved"]),
         },
         "partitions": partitions,
         "xmlSources": [str(value) for value in xml_sources],
@@ -440,6 +481,7 @@ def build_topology(
             "mounts": mounts,
             "dataFontsConfig": data_config,
             "dataFontFiles": data_files,
+            "dynamicFontsEvidence": dynamic_evidence,
         },
     }
     validate_topology(payload, str(inventory.get("buildKey") or "unknown"))
@@ -470,15 +512,52 @@ def main() -> int:
     parser.add_argument("--data-fonts-dir", type=Path)
     parser.add_argument("--mountinfo", type=Path)
     parser.add_argument("--validate", action="store_true")
+    parser.add_argument("--validate-current", action="store_true")
     args = parser.parse_args()
 
-    if args.validate:
+    if args.validate or args.validate_current:
         try:
             topology = _load_json(args.output)
             expected = None
             if args.inventory and args.inventory.is_file():
                 expected = str(_load_json(args.inventory).get("buildKey") or "unknown")
             validate_topology(topology, expected)
+            if args.validate_current:
+                inventory = _load_json(args.inventory) if args.inventory else {}
+                if inventory.get("scannerRevision") != 6 or topology.get("scannerRevision") != 6:
+                    raise TopologyError("字体扫描版本已过期")
+                dynamic = topology.get("runtime", {}).get("dynamicFontsEvidence", {})
+                current_config = args.data_fonts_config or Path("/data/fonts/config/config.xml")
+                current_files = args.data_fonts_dir or Path("/data/fonts/files")
+                mounts = _dynamic_mount_targets(_read_text(args.mountinfo or Path("/proc/self/mountinfo")))
+                if "/data/fonts/config/config.xml" in mounts:
+                    raise TopologyRefreshBlocked("动态字体配置已覆盖，需要恢复可信原始配置后重试")
+                for logical, slot in topology.get("slots", {}).items():
+                    if not str(logical).startswith("/data/fonts/"):
+                        continue
+                    identity = slot.get("dynamicIdentity") or {}
+                    try:
+                        relative = Path(logical).relative_to("/data/fonts/files")
+                    except ValueError as error:
+                        raise TopologyError("动态字体缓存路径无效") from error
+                    if ".." in relative.parts:
+                        raise TopologyError("动态字体缓存路径无效")
+                    current_font = current_files / relative
+                    changed = (not identity.get("fontSha256") or
+                               identity.get("fontSha256") != _sha256(current_font))
+                    if changed and logical in mounts:
+                        raise TopologyRefreshBlocked("动态字体已覆盖，需要恢复可信原始字体后重试：" + str(logical))
+                    if changed:
+                        raise TopologyError("动态字体内容已变化，需要重新采集：" + str(logical))
+                if topology.get("inventoryDigest") != _inventory_digest(inventory):
+                    raise TopologyError("原厂字体清单内容已变化，需要重新采集拓扑")
+                if dynamic.get("complete") is not True or dynamic.get("configSha256", "") != _sha256(current_config):
+                    raise TopologyError("动态字体配置已变化或尚未解析")
+                if not current_config.is_file() and _scan_data_fonts(current_files):
+                    raise TopologyError("动态字体存在但缺少权威配置")
+        except TopologyRefreshBlocked as error:
+            print(json.dumps({"status": "blocked", "reason": "dynamic-original-view-required", "message": str(error)}, ensure_ascii=False))
+            return 3
         except TopologyError as error:
             print(json.dumps({"status": "error", "message": str(error)}, ensure_ascii=False))
             return 1

@@ -20,7 +20,7 @@ import device_font_template as template
 from hyperos_physical_policy import (PARTITIONS as HYPEROS_PARTITIONS, stock_physical_font_name,
                                     DYNAMIC_OVERLAY_PATH, DYNAMIC_OVERLAY_TARGET)
 
-SCANNER_REVISION = 5
+SCANNER_REVISION = 6
 CANDIDATE_SCHEMA = "device-font-candidates-v1"
 XML_GRAPH_SCHEMA = "device-font-xml-graph-v1"
 METRICS_REVISION = 3
@@ -173,7 +173,7 @@ def _parse_full_xml_graph(
     """Capture every XML font reference without changing legacy UI-slot semantics."""
     refs: list[dict[str, Any]] = []
     aliases: list[dict[str, str]] = []
-    seen_refs: set[tuple[str, str, str, int, str, str]] = set()
+    seen_refs: set[tuple[str, int]] = set()
     seen_aliases: set[tuple[str, str, str]] = set()
 
     for partition, logical_xml, actual_xml in xml_sources:
@@ -191,20 +191,17 @@ def _parse_full_xml_graph(
                 if resolved is not None:
                     resolved_root, resolved_actual = resolved
                     resolved_path = base._logical_path(resolved_root, resolved_actual)
-            key = (
-                str(logical_xml),
-                template.normalize(ref.family),
-                ref.declared or ref.postscript_name,
-                int(ref.index),
-                str(ref.style),
-                str(ref.axes),
-            )
+            # A graph records XML nodes, not distinct physical files. Weights,
+            # languages and child axes may differ while sharing a file/face.
+            key = (str(logical_xml), ref.ordinal)
             if key in seen_refs:
                 continue
             seen_refs.add(key)
             refs.append({
                 "sourceXml": str(logical_xml),
                 "sourcePartition": partition,
+                "ordinal": ref.ordinal,
+                "fontAttributes": dict(ref.font_attrs),
                 "family": ref.family,
                 "familyNormalized": template.normalize(ref.family),
                 "familyAttributes": dict(ref.family_attrs),
@@ -859,7 +856,8 @@ def scan(args: Any) -> int:
         else:
             valid_existing = existing_for_scan
     upgrade = valid_existing is not None and (
-        not _has_current_metrics(valid_existing) or not _has_current_hyperos_coverage(valid_existing)
+        int(valid_existing.get("scannerRevision", 0) or 0) != SCANNER_REVISION
+        or not _has_current_metrics(valid_existing) or not _has_current_hyperos_coverage(valid_existing)
     )
     try:
         return _scan_current_roots(args, build_key, fingerprint, display_id, valid_existing, upgrade, probe)

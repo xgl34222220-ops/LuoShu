@@ -17,7 +17,7 @@ from typing import Any
 
 ROLE_SCHEMA = "device-font-roles-v1"
 PLAN_SCHEMA = "device-font-shadow-plan-v1"
-ROLE_REVISION = 1
+ROLE_REVISION = 3
 PLAN_REVISION = 1
 
 PROTECTED_ROLES = {"emoji", "symbol-icon", "serif", "monospace", "special-fallback"}
@@ -64,6 +64,7 @@ SPECIAL_SCRIPT_TOKENS = (
     "tibetan", "myanmar", "sinhala", "ethiopic", "georgian", "armenian",
     "japanese", "korean", "hangul", "hiragana", "katakana", "odia", "oriya",
     "adlam", "jpan", "kore", "arab", "hebr", "thai", "deva",
+    "olditalic", "old-italic", "miao", "hanifirohingya", "hanifi-rohingya",
 )
 
 
@@ -149,23 +150,51 @@ def _xml_semantics(slot: dict[str, Any]) -> dict[str, list[str]]:
 
 
 def _language_kind(values: list[str]) -> str:
-    tokens: list[str] = []
+    """Classify primary languages and explicit BCP-47 scripts separately.
+
+    Prefix matching every subtag confuses Ital with Italian (it), Plrd with
+    Polish (pl), and Rohg with Romanian (ro). Unsupported explicit scripts
+    remain protected even if a face also contains ASCII compatibility glyphs.
+    """
+    kinds: set[str] = set()
+    cjk_scripts = {"hans", "hant", "hani"}
     for value in values:
-        normalized = normalize(value)
-        for separator in (",", ";", ":"):
-            normalized = normalized.replace(separator, "-")
-        tokens.extend(item for item in normalized.split("-") if item)
-        if normalized:
-            tokens.append(normalized)
-    for token in tokens:
-        if token.startswith(SPECIAL_LANG_PREFIXES):
-            return "special"
-    for token in tokens:
-        if token.startswith(CJK_LANG_PREFIXES):
-            return "cjk"
-    for token in tokens:
-        if token.startswith(LATIN_LANG_PREFIXES):
-            return "latin"
+        for tag in re.split(r"[,;:\s]+", value.strip().lower().replace("_", "-")):
+            parts = [part for part in tag.split("-") if part]
+            if not parts:
+                continue
+            primary = parts[0]
+            script = primary if len(primary) == 4 and primary.isalpha() else ""
+            if not script:
+                for part in parts[1:]:
+                    if len(part) == 1:
+                        break  # Extension/private-use subtags are not script evidence.
+                    if len(part) == 4 and part.isalpha():
+                        script = part
+                        break
+            if script:
+                if script in cjk_scripts:
+                    kinds.add("cjk")
+                elif script == "latn":
+                    kinds.add("latin")
+                else:
+                    kinds.add("special")
+                continue
+            if primary in SPECIAL_LANG_PREFIXES:
+                kinds.add("special")
+            elif primary in CJK_LANG_PREFIXES:
+                kinds.add("cjk")
+            elif primary in LATIN_LANG_PREFIXES:
+                kinds.add("latin")
+            else:
+                # An explicit unfamiliar language is not proof of Latin use.
+                # Compatibility ASCII must not authorize replacing its script.
+                kinds.add("special")
+    # A shared physical face with protected-script evidence cannot be treated
+    # as a generic Latin/CJK replacement merely because another ref is Latin.
+    for kind in ("special", "cjk", "latin"):
+        if kind in kinds:
+            return kind
     return ""
 
 
@@ -222,13 +251,21 @@ def _serif_family(families: list[str]) -> bool:
     return False
 
 
+def _decorative_family(families: list[str]) -> bool:
+    # Preserve explicit generic typography as we do serif/monospace. A face
+    # shared with a core or other named family needs route-level treatment;
+    # one decorative alias must not remove that face from UI replacement.
+    named = {normalize(value) for value in families if normalize(value)}
+    return bool(named) and named.issubset({"cursive", "casual", "fantasy"})
+
+
 def _ui_family(families: list[str]) -> bool:
     for raw in families:
         family = normalize(raw)
         if family in UI_FAMILIES:
             return True
         if family.startswith("sans-serif-") and not any(
-            token in family for token in ("mono", "serif")
+            token in family.removeprefix("sans-serif-") for token in ("mono", "serif")
         ):
             return True
         if family.startswith("system-ui-") or family.startswith("ui-sans-"):
@@ -317,22 +354,30 @@ def _classification(
         role = "serif"
         confidence = 85
         reasons.append("serif-filename")
+    elif _decorative_family(families):
+        role = "special-fallback"
+        confidence = 100
+        reasons.append("explicit-decorative-family")
     elif _code_mono_identity(path, families):
         role = "monospace"
         confidence = 88
         reasons.append("monospace-file-identity")
-    elif _contains_phrase(text, CLOCK_TOKENS):
-        role = "clock"
-        confidence = 95 if families else 85
-        reasons.append("clock-or-numeral-identity")
-    elif _contains_phrase(text, NUMERIC_TOKENS) or (has_digits and not has_latin and not has_han):
-        role = "numeric"
-        confidence = 90 if _contains_phrase(text, NUMERIC_TOKENS) else 75
-        reasons.append("numeric-identity" if confidence >= 90 else "digits-only-coverage")
     elif language_kind == "special":
         role = "special-fallback"
         confidence = 100
         reasons.append("xml-language-special-fallback")
+    elif _contains_phrase(text, CLOCK_TOKENS):
+        role = "clock"
+        confidence = 95 if families else 85
+        reasons.append("clock-or-numeral-identity")
+    elif _is_special_script(text):
+        role = "special-fallback"
+        confidence = 95
+        reasons.append("script-specific-fallback")
+    elif _contains_phrase(text, NUMERIC_TOKENS) or (has_digits and not has_latin and not has_han):
+        role = "numeric"
+        confidence = 90 if _contains_phrase(text, NUMERIC_TOKENS) else 75
+        reasons.append("numeric-identity" if confidence >= 90 else "digits-only-coverage")
     elif language_kind == "cjk":
         role = "cjk"
         confidence = 100 if has_han else 90
@@ -347,10 +392,6 @@ def _classification(
         role = "special-fallback"
         confidence = 92
         reasons.append("xml-fallbackfor-without-supported-script")
-    elif _is_special_script(text):
-        role = "special-fallback"
-        confidence = 95
-        reasons.append("script-specific-fallback")
     elif _is_cjk_identity(text):
         role = "cjk"
         confidence = 95 if has_han else 82

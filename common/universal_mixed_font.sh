@@ -24,12 +24,14 @@ export LUOSHU_UNIVERSAL_MIX_STRICT=1
 printf 'requestId=%s\nstate=running\npercent=78\nmessage=正在检查组合字体源\nupdated=%s\n' "$REQUEST" "$(date +%s)" > "$LUOSHU_SWITCH_PROGRESS_FILE"
 _um_root=$(_um_python "$MODDIR/common/universal_mixed_font.py" --module "$MODDIR" \
     --request "$REQUEST" --mode "$1" --source "$2") || { _um_fail mixed-source-freeze-failed; exit 1; }
-# Older installed modules may not yet have collected topology/role snapshots.
-if [ ! -s "$MODDIR/config/device_font_topology.json" ]; then
-    MODDIR="$MODDIR" sh "$MODDIR/common/font_topology_snapshot.sh" refresh >/dev/null 2>&1 || true
+# Validate revisions and current dynamic generation, not merely file presence.
+if ! MODDIR="$MODDIR" sh "$MODDIR/common/font_topology_snapshot.sh" ensure >/dev/null 2>&1; then
+    _um_fail topology-upgrade-or-refresh-required
+    exit 1
 fi
-if [ ! -s "$MODDIR/config/device_font_roles.json" ]; then
-    MODDIR="$MODDIR" sh "$MODDIR/common/font_role_shadow.sh" refresh >/dev/null 2>&1 || true
+unset LUOSHU_MIX_SELECTION_FILE
+if [ "$1" = fixed ]; then
+    export LUOSHU_MIX_SELECTION_FILE="$_um_root/source.json"
 fi
 MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$MODDIR/config" \
     LUOSHU_PUBLIC_DIR="$_um_root" LUOSHU_SWITCH_ACTIVE_LABEL=mix \

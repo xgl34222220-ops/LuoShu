@@ -17,7 +17,7 @@ import re
 import statistics
 import sys
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
@@ -93,9 +93,11 @@ class FontRef:
     weight: int
     style: str
     index: int
-    axes: str
+    axes: list[dict[str, object]] | str
     source_xml: Path
     dynamic: bool
+    ordinal: int = -1
+    font_attrs: dict[str, str] = field(default_factory=dict)
 
 
 def local_name(tag: str) -> str:
@@ -135,6 +137,24 @@ def effective_family_context(
         if candidate:
             name = candidate
     return name, attrs
+
+
+def exact_weight(raw: str | None) -> int:
+    """Retain XML identity; source selection may approximate separately."""
+    try:
+        return max(1, min(1000, int(raw or "400")))
+    except ValueError:
+        return 400
+
+
+def font_axes(font: ET.Element) -> list[dict[str, object]] | str:
+    axes = []
+    for child in font:
+        if local_name(child.tag) == "axis":
+            axes.append({"tag": str(child.get("tag") or ""),
+                         "stylevalue": str(child.get("stylevalue") or child.get("styleValue") or child.get("value") or ""),
+                         "attributes": dict(sorted(child.attrib.items()))})
+    return axes if axes else font.get("axis", font.get("axes", ""))
 
 
 def nearest_weight(raw: str | None) -> int:
@@ -258,6 +278,8 @@ def parse_xml(path: Path) -> list[FontRef]:
     refs: list[FontRef] = []
     root = tree.getroot()
     parents = element_parents(root)
+    ordinals = {node: i for i, node in enumerate(
+        node for node in root.iter() if local_name(node.tag) == "font")}
     for family in root.iter():
         if local_name(family.tag) != "family":
             continue
@@ -266,7 +288,7 @@ def parse_xml(path: Path) -> list[FontRef]:
             if local_name(child.tag) != "font":
                 continue
             declared = (child.text or "").strip()
-            postscript_name = child.attrib.get("name", "").strip()
+            postscript_name = (child.get("name") or child.get("postScriptName") or child.get("postscriptName") or "").strip()
             if not declared and not postscript_name:
                 continue
             try:
@@ -278,12 +300,14 @@ def parse_xml(path: Path) -> list[FontRef]:
                 family_attrs=family_attrs,
                 declared=declared,
                 postscript_name=postscript_name,
-                weight=nearest_weight(child.attrib.get("weight")),
+                weight=exact_weight(child.attrib.get("weight")),
                 style=child.attrib.get("style", "normal").lower(),
                 index=max(0, index),
-                axes=child.attrib.get("axis", child.attrib.get("axes", "")),
+                axes=font_axes(child),
                 source_xml=path,
                 dynamic=dynamic,
+                ordinal=ordinals[child],
+                font_attrs=dict(child.attrib),
             ))
     return refs
 
@@ -452,7 +476,7 @@ def build_template(
             continue
         for ref in refs:
             resolved, face_index = resolve_ref(ref, postscript_index)
-            key = (str(xml_path), normalize(ref.family), ref.weight, ref.style, ref.declared or ref.postscript_name)
+            key = (str(xml_path), ref.ordinal)
             if key in seen:
                 continue
             seen.add(key)

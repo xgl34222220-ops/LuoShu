@@ -71,6 +71,7 @@ class SwitchProviderTest(unittest.TestCase):
         service = self.module / 'common/google_font_provider_service.sh'
         shutil.copyfile(ROOT / 'common/google_font_provider_service.sh', service)
         shutil.copyfile(ROOT / 'common/font_switch_lock.sh', self.module / 'common/font_switch_lock.sh')
+        shutil.copyfile(ROOT / 'common/payload_commit_lock.sh', self.module / 'common/payload_commit_lock.sh')
         (self.module / 'common/google_font_provider_bridge.sh').write_text(
             'case "$1" in fingerprint) echo unchanged;; '
             'apply) printf "applied\\n" >> "$TEST_APPLIED";; esac\n')
@@ -164,6 +165,7 @@ exec "$TEST_REAL_CP" "$@"
 
     def test_real_switch_router_commits_only_successful_stages(self):
         install_task_scope(self.module)
+        shutil.copyfile(ROOT / 'common/payload_commit_lock.sh', self.module / 'common/payload_commit_lock.sh')
         shutil.copyfile(ROOT / 'common/font_role_policy.py', self.module / 'common/font_role_policy.py')
         legacy = self.module / 'common/legacy_v14_4'
         legacy.mkdir()

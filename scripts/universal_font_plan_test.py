@@ -298,7 +298,7 @@ def fixture() -> tuple[dict, dict]:
     slots["/system/fonts/MissingMetrics.ttf"]["metrics"].pop("hhea", None)
     topology = {
         "schema": "device-font-topology-v1",
-        "topologyRevision": 2,
+        "topologyRevision": 3,
         "state": "ready",
         "generatedAt": 1,
         "buildKey": "universal-plan-test",
@@ -324,7 +324,7 @@ def fixture() -> tuple[dict, dict]:
     }
     role_map = {
         "schema": "device-font-roles-v1",
-        "roleRevision": 1,
+        "roleRevision": 3,
         "state": "ready",
         "generatedAt": 1,
         "buildKey": "universal-plan-test",

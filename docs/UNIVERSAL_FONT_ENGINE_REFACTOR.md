@@ -4,6 +4,8 @@
 
 长期追踪 Issue：#254。Phase 2 实现 PR：#255。
 
+> 验收说明（2026-09-30）：下文“已完成”表示阶段代码已经合入，不表示所有 ROM / Root 后端已经真机验收。当前审计与修复证据见 `UNIVERSAL_AUDIT_REMEDIATION.md`；`device_validation.json` 的待测状态不得被 CI 绿勾替代。显式授权的实验包只供受控测试，不能宣传全系统/全字形覆盖。
+
 ## 最终目标
 
 把洛书从“按 ROM / 文件名堆规则的字体替换模块”重构为：
@@ -67,6 +69,8 @@
 - 不修改任何实际字体
 - 能表达 family → slot → partition → XML → runtime 的关系
 - 未知 OEM 分区可以进入拓扑
+- 路由图身份必须保留原始 weight/style/index/lang/variant/fallbackFor/axis 与节点定位信息；相同路径不能吞掉不同引用
+- 发现的 `/data/fonts` 文件必须形成有来源证据的动态槽，不能只计数而无法规划
 
 ### Phase 2 — Role Classifier + Shadow Replacement Plan
 状态：**已完成 / PR #255 / device-font-roles-v1 + device-font-shadow-plan-v1**
@@ -169,6 +173,7 @@ Shadow 动作：
 - 哪些角色需要独立编译
 - 为什么这么决定
 - 风险与回退方案
+- 同一物理槽的每条 XML 引用必须单独选择/核对 source face、原始字重和 ital/slnt/wght 等轴，不能把任意斜体引用风险传给全部正常引用
 
 ### Phase 5 — Minimal XML Router
 状态：**已完成 / PR #258 / minimal-xml-route-plan-v1**
@@ -200,6 +205,8 @@ Shadow 动作：
 - 找不到唯一节点、原厂快照缺失、同一节点发生 artifact 冲突时必须 fail-closed，禁止部分 XML 渲染
 - 允许的 XML 变化只有目标 `<font>` 的文本引用；family/family-list/alias/fallback 顺序、全部属性、TTC index、postScriptName、axis 子节点必须保持
 - XML 原有 index/axis/postScriptName 不再被删除，转成 Phase 6 的 artifact contract，由编译器满足
+- 扫描器与路由器必须共享 wrapper 继承属性、精确节点和原始数值语义；450 等合法原值不能先取整再拿来找节点
+- 显式固定组合不支持的真斜体可记录为 `preservedRoutes` 并保持原节点/文件，必须报告部分覆盖；`routingComplete` 只表示计划执行集合完整，不表示全部字体已替换
 - `/data/fonts` 动态层只标记 deferred，不在 Phase 5 修改
 - Phase 5 不发布系统 XML、不 mount，仍强制 `mutatesSystem=false`、`executableNow=false`
 
@@ -227,7 +234,10 @@ Shadow 动作：
 - Phase 6 只能编译 Phase 4/5 已冻结的 target/artifact contract，不得重新选择目标槽位
 - 普通静态 UI 优先保留用户字体自身 GSUB/GPOS，再按原厂脚本几何与 line contract 编译
 - Clock/Numeric、collection、XML 固定 axis 目标优先保留原厂容器/advance/face contract，只替换目标脚本字形
-- 纯物理 variable 目标只有在 axis range 与天然几何均通过原厂校验时才保持 variable；不允许静默静态化
+- 纯物理 variable 目标只有在 axis range 与天然几何均通过原厂校验时才保持 variable；不允许静默静态化。不能只检查默认实例，须覆盖真实变化区域的边界/内部极值与行框风险
+- 验证过的 `fixed-composite-selection-v1` 是独立显式契约：requestId、合成源 SHA256、各角色固定选择与实际轴来源必须绑定。可在原厂容器中固定所选轮廓，但不得宣称这些轮廓继续随 OEM 轴变化；普通静态源不能借此伪造多字重
+- 字形依赖和布局必须闭合：非 cmap 的 GSUB 输出、GPOS 定位、共享轮廓及反向复合字形依赖不得因局部改写失配；真实不支持的语义必须明确拒绝或保留，不得只因少量探针通过宣布全部安全
+- 外来 glyf 的 hint 程序不能引用未携带的来源 fpgm/cvt；导入必须保持独立合法依赖或执行可验证的去 hint 处理
 - TTF/glyf 与 OTF/CFF/CFF2 都必须显式处理，禁止靠扩展名伪装轮廓格式
 - TTC/OTC 必须保留非目标 face，按 FontPlan/RoutePlan 指定 face index 编译
 - 编译产物仍不得发布或 mount；Phase 6 强制 `mutatesSystem=false`、`executableNow=false`
@@ -253,6 +263,8 @@ Shadow 动作：
 - XML route artifact、physical-only artifact、`/data/fonts` dynamic artifact 均来自 Phase 6 manifest，Mount Backend 不得重新扫描或重新选槽
 - XML route artifact 放在原 target font 目录并由 Phase 5 XML 指向；physical-only 保持原逻辑路径；dynamic artifact 只读 bind 回原 `/data/fonts` 目标
 - system/product/vendor 等 payload 与 dynamic bind 必须视为同一事务；任一动态 bind 失败必须回滚本次 systemless mount
+- 真正用于挂载的配置和 payload 文件集合必须受冻结 manifest 约束，拒绝额外目标/文件；不能只验证声明文件
+- 重用已有动态挂载也必须核对只读、内容和本事务归属，不能凭同 hash 接受 rw 或误卸载外部挂载
 - 新部署通过 `.luoshu-payload-next` 在 next boot 原子切换，旧 payload 保留到 Phase 8 验证完成
 - 当前迁移阶段正式换字体按钮仍不自动 stage-next；只有显式内部 stage-next 才进入新 runtime
 
@@ -278,7 +290,7 @@ Shadow 动作：
 - `PASS`：payload 身份、可见哈希、动态挂载、脚本覆盖、字重/轴和编译几何证据均成立
 - `WARN`：systemless payload 已被强证据确认，但 FontManager dump 被 OEM 隐藏/裁剪等软证据不足
 - `FAIL`：部署身份、文件哈希、动态挂载、脚本覆盖、字重/轴或几何 contract 任一关键条件失败
-- 只有 `PASS` 才释放 Phase 7 保留的 retired payload；`WARN/FAIL` 必须继续保留回滚材料
+- 只有本次验证进程成功返回、结果绑定当前 bootId/deploymentId/payloadDigest 且为 `PASS` 才释放 Phase 7 保留的 retired payload；异常/缺失结果/旧 PASS 均不得释放。`WARN/FAIL` 必须继续保留回滚材料
 - 验证器是一次性 boot-scoped 任务，禁止常驻 watcher 和无限重试
 
 最终给用户 PASS / WARN / FAIL，而不是让用户盲测。
@@ -293,13 +305,14 @@ Shadow 动作：
 生产切换顺序：
 
 1. 正式入口先进入统一 Cutover Controller，不再直接调用旧 `font_switch_safe.sh`
-2. `default`、复合字体临时 family、Universal 前置条件缺失时继续走旧引擎
+2. `default` 与 Universal 前置条件缺失时继续走安全兼容路径；已验证的组合请求通过独立固定/自动合成契约尝试 Universal，未满足条件时明确报告兼容回退
 3. 普通单字体优先执行 Universal prepare → readiness gate → stage-next
 4. Universal prepare / route / compile / deployment / gate 任一步失败时，清理未提交的新引擎 next payload，并在同一任务中回退旧引擎
 5. Universal 成功只写 next-boot payload；当前 Android boot 的 live payload 永远不原地改写
 6. 重启后由 Phase 8 自动验证；PASS 才释放 retired payload，WARN 保留回滚材料
-7. FAIL 不允许继续宣称字体已生效，必须安全准备上一生产 payload 的 next-boot rollback；禁止当前 boot 强拆挂载、禁止自动重启、禁止回滚循环
-8. 旧 HyperOS / ColorOS / Generic 路由在 Cutover 稳定前继续保留，只能作为 fallback，不再作为新入口的第一选择
+7. 所有 stage/cancel/自动 rollback 对下一启动负载的提交必须使用统一并发约束和请求身份，迟到操作不得覆盖更新请求；失败恢复函数不得污染调用者备份状态。default 恢复排队也必须显示待完整重启
+8. FAIL 不允许继续宣称字体已生效，必须安全准备上一生产 payload 的 next-boot rollback；禁止当前 boot 强拆挂载、禁止自动重启、禁止回滚循环
+9. 旧 HyperOS / ColorOS / Generic 路由在 Cutover 稳定前继续保留，只能作为 fallback，不再作为新入口的第一选择
 
 Cutover readiness gate 必须至少满足：
 
@@ -344,7 +357,7 @@ Phase 2 只有满足以下条件才允许进入 Phase 3：
 - Clock/Numeric 不出现普通 `replace`
 - Serif/Monospace 默认不被系统字体替换
 - CJK fallback 只有明确 CJK 证据才成为候选
-- Latin fallback 只有明确 Latin 证据才成为候选
+- Latin fallback 只有明确 Latin 证据才成为候选；BCP47 主语言和脚本独立解析，未知语言不得仅凭 ASCII 字形变成 Latin
 - HyperOS / ColorOS 合成测试可重复
 - Shadow 计划本身不修改任何系统文件
 - CI 能报告旧引擎过度替换与漏替换差异

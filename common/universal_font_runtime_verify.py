@@ -322,6 +322,15 @@ def _assess_font(
     coverage_report: dict[str, Any] = {}
     for group in _coverage_requirements(target):
         probes = PROBES[group]
+        shared = artifact.get("report", {}).get("geometry", {}).get("sharedProbePoints", {}).get(group)
+        if group == "cjk" and shared is not None:
+            import device_font_slot_build_base as slot_build
+            if (not isinstance(shared, list) or not 4 <= len(shared) <= 64
+                    or len(set(shared)) != len(shared)
+                    or any(not isinstance(cp, int) or not slot_build.is_cjk(cp) for cp in shared)):
+                failures.append(f"shared-cjk-probe-contract-invalid:{logical_path}")
+            else:
+                probes = shared
         hits = sum(cp in snapshot["codepoints"] for cp in probes)
         coverage_report[group] = {"hits": hits, "total": len(probes)}
         if hits == 0:
@@ -347,7 +356,9 @@ def _assess_font(
         if value is not None and not (axis["min"] <= value <= axis["max"]):
             failures.append(f"required-axis-out-of-range:{logical_path}:{tag}")
 
-    variable_required = bool(required_axes) or str(artifact.get("mode") or "") == "source-variable-preserve"
+    variable_required = (bool(required_axes) or str(artifact.get("mode") or "") == "source-variable-preserve"
+                         or (bool(artifact.get("report", {}).get("fixedSelection"))
+                             and target.get("targetContract", {}).get("variable") is True))
     if variable_required and not axes:
         failures.append(f"variable-contract-missing:{logical_path}")
 
