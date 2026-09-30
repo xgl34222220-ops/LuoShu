@@ -155,7 +155,18 @@ def _run_umount(path: Path) -> None:
         pass
 
 
-def _bind_parent_stock_snapshot(logical: Path) -> Path | None:
+def _remove_empty_snapshot(path: Path) -> None:
+    # A mount syscall may time out after succeeding. Never recursively remove
+    # a recovery tree, including failure paths where unmount was unsuccessful.
+    try:
+        if str(path) not in _mount_targets():
+            path.rmdir()
+    except OSError:
+        pass
+
+
+def _bind_parent_stock_snapshot(logical: Path, *, snapshot_base: Path | None = None,
+                                owned_snapshots: list[Path] | None = None) -> Path | None:
     """Recover stock bytes hidden only by per-file bind mounts.
 
     A non-recursive bind of the parent filesystem does not clone child mounts.
@@ -171,7 +182,7 @@ def _bind_parent_stock_snapshot(logical: Path) -> Path | None:
 
     parts = [part for part in logical.parts if part not in ("/", "")]
     key = "-".join(parts[-2:] or ["root"])
-    base = Path(os.environ.get("LUOSHU_INSTALL_STOCK_SNAPSHOT_ROOT",
+    base = snapshot_base if snapshot_base is not None else Path(os.environ.get("LUOSHU_INSTALL_STOCK_SNAPSHOT_ROOT",
                                f"/data/adb/luoshu/install-stock-scan/{os.getpid()}"))
     snapshot = base / key
     try:
@@ -179,10 +190,17 @@ def _bind_parent_stock_snapshot(logical: Path) -> Path | None:
     except OSError:
         return None
 
+    # Request owners register before the syscall so TERM after a successful bind
+    # cannot strand an untracked mount between subprocess return and append.
+    if owned_snapshots is not None:
+        owned_snapshots.append(snapshot)
     if not _run_mount("--bind", str(logical), str(snapshot)):
-        shutil.rmtree(snapshot, ignore_errors=True)
+        if owned_snapshots is None:
+            _remove_empty_snapshot(snapshot)
         return None
-    _run_mount("--make-private", str(snapshot))
+    private = _run_mount("--make-private", str(snapshot))
+    if owned_snapshots is not None and not private:
+        return None
 
     proven = False
     for child in children:
@@ -202,11 +220,13 @@ def _bind_parent_stock_snapshot(logical: Path) -> Path | None:
             break
 
     if not proven:
-        _run_umount(snapshot)
-        shutil.rmtree(snapshot, ignore_errors=True)
+        if owned_snapshots is None:
+            _run_umount(snapshot)
+            _remove_empty_snapshot(snapshot)
         return None
 
-    _INSTALL_SNAPSHOTS.append(snapshot)
+    if owned_snapshots is None:
+        _INSTALL_SNAPSHOTS.append(snapshot)
     return snapshot
 
 
@@ -217,8 +237,9 @@ def _cleanup_install_snapshots() -> None:
             continue
         seen.add(snapshot)
         _run_umount(snapshot)
+        _remove_empty_snapshot(snapshot)
     if _INSTALL_SNAPSHOTS:
-        shutil.rmtree(_INSTALL_SNAPSHOTS[0].parents[0], ignore_errors=True)
+        _remove_empty_snapshot(_INSTALL_SNAPSHOTS[0].parents[0])
     _INSTALL_SNAPSHOTS.clear()
 
 

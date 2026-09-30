@@ -73,3 +73,28 @@ R3：685411f 真机“通用准备超时后提交失败”对应嵌套 axes 与�
 - 扫描时保存每槽原始字节SHA、face、轴与度量、默认轴真实字形探针；可信升级时补齐旧档案。应用复用匹配的默认轴档案，其他轴或共享稀有汉字按需测量，不将当前替换字体回收为原厂
 - 来源证明是当前内核挂载视图、只读ROM文件系统位置与字节身份核验，不是密码学OEM认证。合法同目录ROM符号链接可验证；无法证明的跨分区绝对链接明确受限，不猜测或套用其他ROM的偏移常量
 - 初次升级补建档案可能增加一次扫描耗时；后续相同系统/字体代次复用。失败日志保留最后编译槽位与阶段，避免必须重跑才能诊断
+
+### R4: scan-to-compile ROM view continuity
+
+Device feedback for `bdc67d0` showed a fast preparation failure resolving
+`/system/fonts/SysFont-Hant-Regular.ttf`, followed by successful legacy staging.
+The log does not include mountinfo, so it does not establish the exact device
+mount condition. Two independently reproduced implementation gaps are corrected:
+
+- Scanning could recover a temporary non-recursive parent bind, seal the original
+  SHA/face/geometry, and unmount that view. Compilation previously could not
+  recreate it. One request-owned view now survives preflight and compilation.
+- A clean installer namespace without a lower/mirror could be scanned, but its
+  current path was excluded by the compiler's old opt-in flag. Current paths now
+  require the same kernel ROM lineage proof and sealed SHA/face checks as other
+  candidates. Replacement bind mounts still fail.
+
+Eight focused tests cover scan cleanup followed by recovery and real font output,
+changed bytes/face rejection, covering-directory rejection, exception/SIGTERM
+cleanup, and failed mount/unmount paths that must never recursively delete font
+contents. Mount syscalls are modeled on the host; this is not a device mount test.
+Recovery only handles per-file overlays with an intact original parent filesystem.
+Whole-directory overlays without a proven lower/mirror remain blocked. SIGKILL or
+an unmount failure can leave a private recovery mount; it is never accepted merely
+because its directory exists. Candidate diagnostics now distinguish missing views
+from failed provenance. The original 317 audit APK remains byte-identical.

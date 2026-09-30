@@ -2,7 +2,8 @@
 """LuoShu Phase 6 universal metrics / variable font compiler.
 
 Consumes validated Phase 4/5 plans. It compiles artifacts but never publishes
-them into Android partitions and never mounts anything.
+them into Android partitions. Request-owned, verified read-only ROM views may
+be recovered for input access; live font mounts are never changed.
 
 Compiler modes:
 - source-as-base: static general UI fonts keep the user's own shaping/layout.
@@ -54,6 +55,7 @@ import universal_font_plan
 import universal_font_semantics as semantics
 import stock_font_provenance
 import stock_geometry_profile
+import stock_font_view
 from legacy_v14_4.composite_layout import (
     clear_imported_metric_variations,
     enclose_imported_bounds,
@@ -420,18 +422,47 @@ def _resolve_stock(
     allow_live: bool,
 ) -> Path:
     logical = Path(logical_value)
+    failures = []
+    def accept(label, candidate):
+        if candidate is None or not candidate.is_file():
+            failures.append(label + ":missing")
+            return None
+        try:
+            if str(logical).startswith("/data/fonts/"):
+                # Mandatory config/font identity validation follows resolution.
+                return candidate
+            proof = stock_font_provenance.verify_stock_path(logical, candidate)
+            if proof.get("verified") is not True:
+                raise ValueError("unverified")
+            return candidate
+        except (ValueError, OSError) as error:
+            failures.append(label + ":" + str(error)[:160])
+            return None
     candidate = explicit.get(logical_value)
     if candidate is not None and candidate.is_file():
+        # Test/CLI maps are still subject to mandatory identity validation.
         return candidate
-    candidate = _lower_stock_candidate(logical)
-    if candidate is not None and _current_stock_view(logical, candidate):
-        return candidate
-    candidate = _mirror_stock_candidate(logical)
+    candidate = accept("lower", _lower_stock_candidate(logical))
     if candidate is not None:
         return candidate
-    if allow_live and logical.is_file() and _current_stock_view(logical, logical):
-        return logical
-    raise CompilerError(f"找不到可验证的原厂字体快照：{logical_value}")
+    for index, prefix in enumerate(font_inventory.MIRROR_PREFIXES):
+        candidate = accept("mirror" + str(index), prefix / logical.relative_to("/"))
+        if candidate is not None:
+            return candidate
+    # A clean installer namespace may have no lower/mirror. Current kernel
+    # lineage, then sealed capture SHA/face, are mandatory regardless of the old
+    # --allow-live-stock flag; a replacement bind cannot pass this proof.
+    candidate = accept("current", logical)
+    if candidate is not None:
+        return candidate
+    view = stock_font_view.current_view()
+    if view is not None:
+        candidate = accept("recovered", view.recover(logical))
+        if candidate is not None:
+            return candidate
+    else:
+        failures.append("recovered:no-request-session")
+    raise CompilerError(f"找不到可验证的原厂字体快照：{logical_value}; " + "; ".join(failures[:10]))
 
 
 def _verify_stock_identity(target: dict[str, Any], stock: Path, face_index: int) -> dict[str, Any]:
@@ -2195,7 +2226,12 @@ def _mixed_compile_progress(index: int, total: int) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def compile_all(
+def compile_all(font_plan, route_plan, stock_paths, output_dir, allow_live_stock):
+    with stock_font_view.session(Path(output_dir).parent):
+        return _compile_all_in_view(font_plan, route_plan, stock_paths, output_dir, allow_live_stock)
+
+
+def _compile_all_in_view(
     font_plan: dict[str, Any],
     route_plan: dict[str, Any],
     stock_paths: dict[str, Path],

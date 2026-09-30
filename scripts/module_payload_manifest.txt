@@ -165,6 +165,7 @@ common/font_topology_snapshot.py
 common/font_dynamic_topology.py
 common/stock_font_provenance.py
 common/stock_geometry_profile.py
+common/stock_font_view.py
 common/font_topology_snapshot.sh
 common/font_weight_retire.sh
 common/install_ui.sh
