@@ -7,6 +7,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from stock_font_provenance import verify_stock_path
+
 import font_inventory as inventory
 import font_inventory_scan as scanner
 
@@ -368,19 +370,31 @@ def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: b
         state_root = Path(os.environ.get("LUOSHU_SELF_MOUNT_STATE_ROOT", "/data/adb/luoshu/self-mount"))
         lower = state_root / "lower" / f"{parts[1]}-{parts[2]}"
         if lower.is_dir():
-            return lower
+            try:
+                verify_stock_path(logical, lower)
+                return lower
+            except (ValueError, OSError):
+                pass
 
     for prefix in inventory.MIRROR_PREFIXES:
         candidate = prefix / logical.relative_to("/")
         if candidate.is_dir():
-            return candidate
+            try:
+                verify_stock_path(logical, candidate)
+                return candidate
+            except (ValueError, OSError):
+                pass
 
     # KernelSU/SukiSU installers may be isolated from the active system mount
     # namespace. If PID 1 still sees LuoShu's payload while this process sees
     # different bytes at the same font path, the installer-visible tree is a
     # verified stock view and can be scanned immediately.
     if _installer_namespace_is_stock(logical):
-        return logical
+        try:
+            verify_stock_path(logical, logical)
+            return logical
+        except (ValueError, OSError):
+            pass
 
     # Old ColorOS/OPlus LuoShu builds often used per-file bind mounts and did not
     # persist a lower directory. Recover the parent stock filesystem in-place by
@@ -388,7 +402,11 @@ def _safe_pick_actual_root(logical: Path, explicit: Path | None, overlay_risk: b
     # untouched and makes install-time universal scanning possible.
     snapshot = _bind_parent_stock_snapshot(logical)
     if snapshot is not None:
-        return snapshot
+        try:
+            verify_stock_path(logical, snapshot)
+            return snapshot
+        except (ValueError, OSError):
+            _cleanup_install_snapshots()
 
     # A ROM is not required to expose every optional OEM partition. Missing logical
     # roots are harmless; an existing root without a verifiable stock view is not.

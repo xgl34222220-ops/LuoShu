@@ -52,13 +52,15 @@ import font_web_convert
 import minimal_xml_router
 import universal_font_plan
 import universal_font_semantics as semantics
+import stock_font_provenance
+import stock_geometry_profile
 from legacy_v14_4.composite_layout import (
     clear_imported_metric_variations,
     enclose_imported_bounds,
 )
 
 SCHEMA = "universal-font-artifacts-v1"
-COMPILER_REVISION = 3
+COMPILER_REVISION = 4
 FONT_PLAN_SCHEMA = "universal-font-plan-v1"
 ROUTE_SCHEMA = "minimal-xml-route-plan-v1"
 ROUTABLE_ACTIONS = {"replace", "compile", "compile-specialized"}
@@ -83,6 +85,9 @@ MAX_POST_ALIGNMENT_EM = 0.05
 MAX_POST_HEIGHT_DELTA = 0.14
 MAX_VARIABLE_NATURAL_ALIGNMENT_EM = 0.055
 MAX_VARIABLE_HEIGHT_DELTA = 0.12
+_PROBE_ONLY_ENABLED = True
+_SOURCE_BOUNDS_CACHE_BYTES = 16 * 1024 * 1024
+_PREPARED_GLYPH_CACHE_BYTES = 32 * 1024 * 1024
 
 
 class CompilerError(RuntimeError):
@@ -217,6 +222,9 @@ def _axis_values(raw_axes: Any) -> dict[str, float]:
 
 
 def _profile_from_font(font: TTFont) -> dict[str, Any]:
+    archived = getattr(font, "_luoshu_archived_profile", None)
+    if archived is not None:
+        return copy.deepcopy(archived)
     if "head" not in font or "hhea" not in font:
         raise CompilerError("字体缺少 head/hhea")
     head = font["head"]
@@ -254,13 +262,16 @@ def _profile_from_font(font: TTFont) -> dict[str, Any]:
 
 
 
-def _paired_geometry_profiles(stock: TTFont, source: TTFont, role: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    target_profile, source_profile = _profile_from_font(stock), _profile_from_font(source)
+def _paired_geometry_profiles(stock: TTFont, source: TTFont, role: str,
+                              source_profile: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    target_profile = _profile_from_font(stock)
+    source_profile = copy.deepcopy(source_profile) if source_profile is not None else _profile_from_font(source)
     # A regional/rare-Han subset may legitimately omit every canonical probe.
     # Use actual shared Han outlines, never a fallback Latin/symbol measurement.
     if role == "cjk" and min(int(p["probes"]["cjk"].get("boundsHits") or 0)
                              for p in (target_profile, source_profile)) < 4:
-        shared = sorted(cp for cp in set(stock.getBestCmap() or {}) & set(source.getBestCmap() or {})
+        stock_cmap = getattr(stock, "_luoshu_geometry_cmap", None) or stock.getBestCmap() or {}
+        shared = sorted(cp for cp in set(stock_cmap) & set(source.getBestCmap() or {})
                         if slot_build.is_cjk(cp))
         if len(shared) > 64:
             shared = [shared[i * (len(shared) - 1) // 63] for i in range(64)]
@@ -385,10 +396,20 @@ def _lower_stock_candidate(logical: Path) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
+def _current_stock_view(logical: Path, candidate: Path) -> bool:
+    if str(logical).startswith("/data/fonts/"):
+        # The independent dynamic identity/config digest is mandatory later.
+        return True
+    try:
+        return stock_font_provenance.verify_stock_path(logical, candidate).get("verified") is True
+    except (ValueError, OSError):
+        return False
+
+
 def _mirror_stock_candidate(logical: Path) -> Path | None:
     for prefix in font_inventory.MIRROR_PREFIXES:
         candidate = prefix / logical.relative_to("/")
-        if candidate.is_file():
+        if candidate.is_file() and _current_stock_view(logical, candidate):
             return candidate
     return None
 
@@ -403,22 +424,65 @@ def _resolve_stock(
     if candidate is not None and candidate.is_file():
         return candidate
     candidate = _lower_stock_candidate(logical)
-    if candidate is not None:
+    if candidate is not None and _current_stock_view(logical, candidate):
         return candidate
     candidate = _mirror_stock_candidate(logical)
     if candidate is not None:
         return candidate
-    if allow_live and logical.is_file():
+    if allow_live and logical.is_file() and _current_stock_view(logical, logical):
         return logical
     raise CompilerError(f"找不到可验证的原厂字体快照：{logical_value}")
 
 
+def _verify_stock_identity(target: dict[str, Any], stock: Path, face_index: int) -> dict[str, Any]:
+    contract = target.get("targetContract") or {}
+    logical = str(target.get("path") or "")
+    if logical.startswith("/data/fonts/"):
+        identity = contract.get("dynamicIdentity")
+        if not isinstance(identity, dict):
+            raise CompilerError("dynamic stock identity missing")
+        if str(identity.get("fontPath") or "") != logical or _int(identity.get("faceIndex"), -1) != face_index:
+            raise CompilerError("dynamic stock identity path/face mismatch")
+        expected = str(identity.get("fontSha256") or "")
+        config = Path(str(identity.get("configPath") or ""))
+        if (len(expected) != 64 or not config.is_file() or
+                _sha256(config) != str(identity.get("configSha256") or "")):
+            raise CompilerError("dynamic stock configuration identity changed")
+        if _sha256(stock) != expected:
+            raise CompilerError("dynamic stock bytes changed")
+        return {"kind": "dynamic", "sha256": expected, "faceIndex": face_index}
+    identity = contract.get("stockIdentity")
+    if not isinstance(identity, dict):
+        raise CompilerError("missing sealed stock identity")
+    if identity.get("logicalPath") != logical or _int(identity.get("faceIndex"), -1) != face_index:
+        raise CompilerError("sealed stock identity path/face mismatch")
+    if (identity.get("provenance") or {}).get("verified") is not True:
+        raise CompilerError("stock capture provenance was not verified")
+    try:
+        # Preserve the lexical candidate, including an original ROM alias inode.
+        # Kernel mount IDs/namespace IDs can legitimately change across boots.
+        current = stock_font_provenance.verify_stock_path(logical, stock)
+    except (ValueError, OSError) as error:
+        raise CompilerError("current stock provenance rejected: " + str(error)) from error
+    if current.get("verified") is not True:
+        raise CompilerError("current stock provenance was not verified")
+    expected = str(identity.get("sha256") or "")
+    if len(expected) != 64 or _sha256(stock) != expected:
+        raise CompilerError("sealed stock content digest mismatch")
+    return {"kind": "rom", "sha256": expected, "faceIndex": face_index, "currentProvenance": current}
+
+
 def _validate_stock_contract(target: dict[str, Any], stock: Path, face_index: int) -> dict[str, Any]:
     contract = target.get("targetContract") if isinstance(target.get("targetContract"), dict) else {}
+    verified = _verify_stock_identity(target, stock, face_index)
     font = _open_face(stock, face_index, lazy=True)
     try:
         actual = _profile_from_font(font)
         metrics = actual["metrics"]
+        if verified.get("kind") == "dynamic":
+            required_ps = str((contract.get("dynamicIdentity") or {}).get("postScriptName") or "")
+            if required_ps and required_ps not in actual["names"]:
+                raise CompilerError("dynamic stock face PostScript identity mismatch")
         frozen = contract.get("metrics") if isinstance(contract.get("metrics"), dict) else {}
         expected_upem = _int(frozen.get("upem"), 0)
         expected_hhea = frozen.get("hhea") if isinstance(frozen.get("hhea"), dict) else {}
@@ -430,6 +494,7 @@ def _validate_stock_contract(target: dict[str, Any], stock: Path, face_index: in
             raise CompilerError("原厂字体 hhea ascent 与 FontPlan 不一致")
         if expected_descent and int(metrics["hheaDescent"]) != expected_descent:
             raise CompilerError("原厂字体 hhea descent 与 FontPlan 不一致")
+        actual["verifiedStockIdentity"] = verified
         return actual
     finally:
         font.close()
@@ -447,30 +512,97 @@ def _source_axis_spec_for_route(source: TTFont, artifact: dict[str, Any], weight
     return result
 
 
+def _geometry_probe_points(stock: TTFont | None = None, source: TTFont | None = None,
+                           role: str = "", shared: dict[str, Any] | None = None) -> set[int]:
+    points = {cp for group in template_engine.PROBE_GROUPS.values() for cp in group}
+    for group in (shared or {}).values():
+        points.update(group)
+    if role == "cjk" and stock is not None and source is not None:
+        common = sorted(cp for cp in set(stock.getBestCmap() or {}) & set(source.getBestCmap() or {})
+                        if slot_build.is_cjk(cp))
+        if len(common) > 64:
+            common = [common[i * (len(common) - 1) // 63] for i in range(64)]
+        points.update(common)
+    return points
+
+
+def _instantiate_probe_font(font: TTFont, location: dict[str, float], points: set[int]) -> TTFont:
+    """Subset an exclusively owned read-only measurement face before instancing.
+
+    The compiler output/source object is never passed here. FontTools retains
+    glyph component closure and remaps gvar/HVAR/VVAR; MVAR/avar remain intact.
+    No proof or output table is replaced by the subset. Unknown outline engines
+    use the existing full-instance path instead.
+    """
+    if not _PROBE_ONLY_ENABLED or "glyf" not in font or "VARC" in font:
+        return instantiateVariableFont(font, location, inplace=False, optimize=True)
+    from fontTools import subset
+    options = subset.Options()
+    options.recalc_bounds = False
+    options.recalc_timestamp = False
+    options.hinting = False
+    options.layout_features = []
+    options.name_IDs = ["*"]
+    options.name_languages = ["*"]
+    options.name_legacy = True
+    options.notdef_outline = True
+    options.drop_tables += [tag for tag in ("GSUB", "GPOS", "GDEF", "BASE", "JSTF", "MATH")
+                            if tag not in options.drop_tables]
+    original_cmap = dict(font.getBestCmap() or {})
+    subsetter = subset.Subsetter(options=options)
+    subsetter.populate(unicodes=points)
+    subsetter.subset(font)
+    result = instantiateVariableFont(font, location, inplace=True, optimize=True)
+    result._luoshu_geometry_cmap = original_cmap
+    return result
+
+
 def _stock_geometry_font(
     stock: Path,
     face_index: int,
     weight: int,
     axes: dict[str, float],
+    *, source_font: TTFont | None = None, role: str = "",
+    target_contract: dict[str, Any] | None = None, verified_identity: dict[str, Any] | None = None,
 ) -> tuple[TTFont, dict[str, float]]:
     # Geometry probes are read-only; keep unprobed CJK glyphs compressed.
     original = _open_face(stock, face_index, lazy=True)
-    if "fvar" not in original:
-        return original, {}
-    known = {str(axis.axisTag): axis for axis in original["fvar"].axes}
+    known = {str(axis.axisTag): axis for axis in original["fvar"].axes} if "fvar" in original else {}
     location: dict[str, float] = {}
     for tag, axis in known.items():
         requested = axes.get(tag)
         if requested is None:
             requested = weight if tag == "wght" else float(axis.defaultValue)
-        requested = max(float(axis.minValue), min(float(axis.maxValue), float(requested)))
-        location[tag] = requested
+        location[tag] = max(float(axis.minValue), min(float(axis.maxValue), float(requested)))
+    archive = (target_contract or {}).get("stockGeometryProfile")
+    if (verified_identity and verified_identity.get("kind") == "rom" and isinstance(archive, dict)
+            and archive.get("schema") == stock_geometry_profile.SCHEMA
+            and archive.get("stockSha256") == verified_identity.get("sha256")
+            and _int(archive.get("faceIndex"), -1) == face_index
+            and archive.get("location") == location):
+        profile = archive.get("profile") or {}
+        probes = profile.get("probes") or {}
+        complete = (profile.get("probeSchema") == template_engine.PROBE_SCHEMA
+                    and isinstance(profile.get("metrics"), dict)
+                    and set(template_engine.PROBE_GROUPS).issubset(probes))
+        if role == "cjk":
+            source_hits = (template_engine.glyph_group(source_font, template_engine.PROBE_GROUPS["cjk"])
+                           if source_font is not None else {})
+            complete = (complete and _int(probes.get("cjk", {}).get("boundsHits"), 0) >= 4
+                        and _int(source_hits.get("boundsHits"), 0) >= 4)
+        if complete:
+            original._luoshu_archived_profile = copy.deepcopy(profile)
+            return original, location
+    if not known:
+        return original, {}
     try:
-        instance = instantiateVariableFont(original, location, inplace=False, optimize=True)
+        points = _geometry_probe_points(original, source_font, role)
+        instance = _instantiate_probe_font(original, location, points)
     except Exception as error:
         original.close()
         raise CompilerError(f"原厂 variable geometry 实例化失败：{error}") from error
-    original.close()
+    if instance is not original:
+        original.close()
     return instance, location
 
 
@@ -576,6 +708,20 @@ def _transform_for_codepoint(
     return float(scale_x), float(scale_y), float(shift_y)
 
 
+def _fixed_source_cache(cache: dict[str, Any] | None, source: dict[str, Any],
+                        location: dict[str, float], font: TTFont) -> dict[str, Any] | None:
+    if cache is None:
+        return None
+    key = _canonical_hash({"uid": source.get("fileUid"), "face": source.get("faceIndex", 0),
+                           "location": location, "revision": COMPILER_REVISION})
+    result = cache.get("_sourceMeasurements")
+    if result is None or result["key"] != key:
+        result = {"key": key, "profile": _profile_from_font(font), "bounds": {}, "boundsBytes": 0,
+                  "glyphs": {}, "glyphBytes": 0, "glyphHits": 0, "glyphMisses": 0}
+        cache["_sourceMeasurements"] = result
+    return result
+
+
 def _replace_glyf_outline(
     base: TTFont,
     source: TTFont,
@@ -583,7 +729,35 @@ def _replace_glyf_outline(
     base_name: str,
     source_name: str,
     transform: Transform,
+    prepared_cache: dict[str, Any] | None = None,
 ) -> tuple[int, int, int, int] | None:
+    # Decode/remove original deltas before changing the glyph's point count.
+    # Lazy gvar decoding uses the current glyf topology, so doing this after
+    # replacement misreads OEM tuples when donor and OEM point counts differ.
+    if "gvar" in base:
+        variations = base["gvar"].variations
+        if base_name in variations:
+            # Deletion does not decode a LazyDict value we are discarding.
+            del variations[base_name]
+    glyph_key = (source_name, int(base["head"].unitsPerEm), tuple(transform))
+    cached = prepared_cache["glyphs"].get(glyph_key) if prepared_cache is not None else None
+    if cached is not None:
+        from fontTools.ttLib.tables._g_l_y_f import Glyph
+        base["glyf"][base_name] = Glyph(cached[0])
+        prepared_cache["glyphHits"] += 1
+        return cached[1]
+    if prepared_cache is not None:
+        prepared_cache["glyphMisses"] += 1
+    def complete(glyph):
+        bounds = (int(glyph.xMin), int(glyph.yMin), int(glyph.xMax), int(glyph.yMax))
+        if prepared_cache is not None and prepared_cache["glyphBytes"] < _PREPARED_GLYPH_CACHE_BYTES:
+            raw = bytes(glyph.compile(base["glyf"]))
+            # Includes a conservative allowance for Python tuple/dict/name overhead.
+            estimate = len(raw) + 768 + len(source_name) * 2
+            if prepared_cache["glyphBytes"] + estimate <= _PREPARED_GLYPH_CACHE_BYTES:
+                prepared_cache["glyphs"][glyph_key] = (raw, bounds)
+                prepared_cache["glyphBytes"] += estimate
+        return bounds
     source_kind = _outline_kind(source)
     source_glyf = source["glyf"] if source_kind == "glyf" else None
     if source_glyf is not None:
@@ -599,9 +773,7 @@ def _replace_glyf_outline(
             copied.recalcBounds(base["glyf"])
             if not hasattr(copied, "xMin"):
                 copied.xMin = copied.yMin = copied.xMax = copied.yMax = 0
-            if "gvar" in base:
-                base["gvar"].variations.pop(base_name, None)
-            return int(copied.xMin), int(copied.yMin), int(copied.xMax), int(copied.yMax)
+            return complete(copied)
 
     pen = TTGlyphPen(None)
     output_pen: Any = pen
@@ -619,9 +791,7 @@ def _replace_glyf_outline(
     glyph.recalcBounds(base["glyf"])
     if not hasattr(glyph, "xMin"):
         glyph.xMin = glyph.yMin = glyph.xMax = glyph.yMax = 0
-    if "gvar" in base:
-        base["gvar"].variations.pop(base_name, None)
-    return int(glyph.xMin), int(glyph.yMin), int(glyph.xMax), int(glyph.yMax)
+    return complete(glyph)
 
 
 def _replace_cff_outline(
@@ -669,6 +839,7 @@ def _replace_role_glyphs(
     source: TTFont,
     role: str,
     geometry: dict[str, Any],
+    source_cache: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     base_cmap = base.getBestCmap() or {}
     source_cmap = source.getBestCmap() or {}
@@ -696,11 +867,18 @@ def _replace_role_glyphs(
         if any(cp in base_cmap for cp in template_engine.PROBE_GROUPS["cjk"]):
             required.update(template_engine.PROBE_GROUPS["cjk"])
 
-    source_bounds_cache = {}
+    source_bounds_cache = source_cache["bounds"] if source_cache is not None else {}
+    prior_hits = source_cache["glyphHits"] if source_cache is not None else 0
     def source_bounds_for(name):
-        if name not in source_bounds_cache:
-            source_bounds_cache[name] = _bounds(source_glyph_set, name)
-        return source_bounds_cache[name]
+        if name in source_bounds_cache:
+            return source_bounds_cache[name]
+        bounds = _bounds(source_glyph_set, name)
+        estimate = 256 + len(name) * 2
+        if source_cache is None or source_cache["boundsBytes"] + estimate <= _SOURCE_BOUNDS_CACHE_BYTES:
+            source_bounds_cache[name] = bounds
+            if source_cache is not None:
+                source_cache["boundsBytes"] += estimate
+        return bounds
     selected_points = {cp for cp in set(base_cmap).intersection(source_cmap)
                        if _eligible_codepoint(role, cp) and
                        source_bounds_for(source_cmap[cp]) is not None}
@@ -756,7 +934,7 @@ def _replace_role_glyphs(
         transform = Transform(scale_x, 0, 0, scale_y, shift_x, shift_y)
         if base_kind == "glyf":
             bounds = _replace_glyf_outline(
-                base, source, source_glyph_set, base_name, source_name, transform
+                base, source, source_glyph_set, base_name, source_name, transform, source_cache
             )
         else:
             bounds = _replace_cff_outline(
@@ -789,6 +967,9 @@ def _replace_role_glyphs(
         "sourceOutline": source_kind,
         "replacedGlyphs": replaced,
         "dependencyIsolation": isolation,
+        "preparedDonorReuse": {"hits": source_cache["glyphHits"] - prior_hits if source_cache is not None else 0,
+                               "estimatedGlyphBytes": source_cache["glyphBytes"] if source_cache is not None else 0,
+                               "estimatedBoundsBytes": source_cache["boundsBytes"] if source_cache is not None else 0},
         "layout": {"preservedMathGlyphs":len(protected_math), "preservedSharedMarks":len(protected_marks)},
         "importedYMin": min(imported_y) if imported_y else None,
         "importedYMax": max(imported_y) if imported_y else None,
@@ -957,11 +1138,14 @@ def _open_stock_container(stock: Path, face_index: int) -> tuple[TTFont, TTColle
     if _magic(stock) != COLLECTION_MAGIC:
         if face_index > 0:
             raise CompilerError("目标要求 collection face，但原厂字体不是集合")
-        return _open_face(stock, 0), None
+        font = _open_face(stock, 0)
+        font.lazy = None  # Lazy glyph/delta decoding, normal save-time bbox/maxp recalculation.
+        return font, None
     collection = TTCollection(str(stock), lazy=False)
     if face_index < 0 or face_index >= len(collection.fonts):
         collection.close()
         raise CompilerError(f"原厂 collection faceIndex={face_index} 越界")
+    collection.fonts[face_index].lazy = None
     return collection.fonts[face_index], collection
 
 
@@ -1296,7 +1480,8 @@ def _probe_alignment(
     }
 
 
-def _instance_for_validation(font: TTFont, weight: int, axes: dict[str, float]) -> TTFont:
+def _instance_for_validation(font: TTFont, weight: int, axes: dict[str, float],
+                             *, probe_points: set[int] | None = None) -> TTFont:
     if "fvar" not in font:
         return font
     known = {str(axis.axisTag): axis for axis in font["fvar"].axes}
@@ -1306,6 +1491,8 @@ def _instance_for_validation(font: TTFont, weight: int, axes: dict[str, float]) 
         if value is None:
             value = weight if tag == "wght" else float(axis.defaultValue)
         location[tag] = max(float(axis.minValue), min(float(axis.maxValue), float(value)))
+    if probe_points is not None:
+        return _instantiate_probe_font(font, location, probe_points)
     return instantiateVariableFont(font, location, inplace=False, optimize=True)
 
 
@@ -1329,6 +1516,7 @@ def _validate_output_face(
             raw,
             _int(artifact.get("requiredWeight"), _int(target.get("targetContract", {}).get("weight"), 400)),
             geometry_axes,
+            probe_points=_geometry_probe_points(shared=stock_profile.get("sharedProbePoints")),
         )
         if instance is raw:
             raw = None
@@ -1384,6 +1572,7 @@ def _compile_source_as_base(
     stock: Path,
     output: Path,
     temp_root: Path,
+    verified_stock: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_info = target.get("source") if isinstance(target.get("source"), dict) else {}
     weight = _int(artifact.get("requiredWeight"), _int(target.get("targetContract", {}).get("weight"), 400))
@@ -1415,6 +1604,8 @@ def _compile_source_as_base(
             max(0, _int(artifact.get("requiredFaceIndex"), 0)),
             weight,
             route_axes,
+            source_font=compiled, role=str(target.get("role") or ""),
+            target_contract=target.get("targetContract"), verified_identity=verified_stock,
         )
         stock_profile, source_profile = _paired_geometry_profiles(stock_geometry, compiled, str(target.get("role") or ""))
         geometry = _geometry_plan(target, stock_profile, source_profile, weight)
@@ -1511,7 +1702,10 @@ def _compile_stock_shell(
     stock: Path,
     output: Path,
     temp_root: Path,
+    render_cache: dict[str, Any] | None = None,
+    verified_stock: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    stock_digest = _sha256(stock) if render_cache is not None else ""
     source_info = target.get("source") if isinstance(target.get("source"), dict) else {}
     weight = _int(artifact.get("requiredWeight"), _int(target.get("targetContract", {}).get("weight"), 400))
     route_axes = _axis_values(artifact.get("requiredAxes"))
@@ -1540,40 +1734,71 @@ def _compile_stock_shell(
         if source_instance is source_original:
             source_original = None
 
+        _compile_trace(artifact, "phase", phase="stock-probes")
         stock_geometry, stock_location = _stock_geometry_font(
             stock,
             max(0, _int(artifact.get("requiredFaceIndex"), 0)),
             weight,
             route_axes,
+            source_font=source_instance, role=str(target.get("role") or ""),
+            target_contract=target.get("targetContract"), verified_identity=verified_stock,
         )
-        stock_profile, source_profile = _paired_geometry_profiles(stock_geometry, source_instance, str(target.get("role") or ""))
+        source_cache = _fixed_source_cache(render_cache, source_info, source_location, source_instance) if fixed_selection else None
+        stock_profile, source_profile = _paired_geometry_profiles(
+            stock_geometry, source_instance, str(target.get("role") or ""),
+            source_profile=source_cache["profile"] if source_cache is not None else None)
         geometry = _geometry_plan(target, stock_profile, source_profile, weight)
 
-        base, collection = _open_stock_container(
-            stock, max(0, _int(artifact.get("requiredFaceIndex"), 0))
-        )
-        replaced = _replace_role_glyphs(
-            base,
-            source_instance,
-            str(target.get("role") or ""),
-            geometry,
-        )
-        line_budget = _fixed_shell_line_budget(base, replaced) if fixed_selection else None
-        _drop_stale_tables(base)
-
-        required_ps = str(artifact.get("requiredPostScriptName") or "")
-        if required_ps:
-            names = template_engine.font_names(base)
-            if required_ps not in names:
-                raise CompilerError(
-                    f"原厂目标 face 不包含 required PostScriptName：{required_ps}"
-                )
-
-        if collection is None:
-            _save_font(base, output)
+        # Only fixed composite rendering is reusable. Route contracts and
+        # geometry are still measured/validated independently for every unit.
+        render_key = ""
+        cached = None
+        if fixed_selection and render_cache is not None:
+            render_key = _canonical_hash({
+                "revision": COMPILER_REVISION, "stockSha256": stock_digest,
+                "sourceUid": source_info.get("fileUid"), "sourceFace": source_info.get("faceIndex", 0),
+                "targetFace": artifact.get("requiredFaceIndex", 0),
+                "fixedSelection": fixed_selection, "sourceLocation": source_location,
+                "role": target.get("role"), "upemScale": geometry.get("upemScale"),
+                "transforms": geometry.get("transforms"),
+                "sharedProbePoints": geometry.get("sharedProbePoints"),
+            })
+            cached = render_cache.get(render_key)
+        if cached:
+            cached_path = Path(cached["output"])
+            if not cached_path.is_file() or _sha256(cached_path) != cached["sha256"]:
+                raise CompilerError("request-local compiled render cache integrity mismatch")
+            _compile_trace(artifact, "phase", phase="render-cache-copy")
+            if cached_path.resolve() != output.resolve():
+                temporary = output.with_name(output.name + f".cache.{os.getpid()}")
+                try:
+                    shutil.copyfile(cached_path, temporary)
+                    os.chmod(temporary, 0o644)
+                    os.replace(temporary, output)
+                finally:
+                    temporary.unlink(missing_ok=True)
+            replaced = copy.deepcopy(cached["replaced"])
+            line_budget = copy.deepcopy(cached["lineBudget"])
         else:
-            _save_collection(collection, output)
+            base, collection = _open_stock_container(
+                stock, max(0, _int(artifact.get("requiredFaceIndex"), 0))
+            )
+            _compile_trace(artifact, "phase", phase="outline-replacement")
+            replaced = _replace_role_glyphs(
+                base, source_instance, str(target.get("role") or ""), geometry, source_cache,
+            )
+            line_budget = _fixed_shell_line_budget(base, replaced) if fixed_selection else None
+            _drop_stale_tables(base)
+            required_ps = str(artifact.get("requiredPostScriptName") or "")
+            if required_ps and required_ps not in template_engine.font_names(base):
+                raise CompilerError(f"原厂目标 face 不包含 required PostScriptName：{required_ps}")
+            _compile_trace(artifact, "phase", phase="serialize")
+            if collection is None:
+                _save_font(base, output)
+            else:
+                _save_collection(collection, output)
 
+        _compile_trace(artifact, "phase", phase="output-validation")
         validation = _validate_output_face(
             output,
             max(0, _int(artifact.get("requiredFaceIndex"), 0)),
@@ -1583,8 +1808,17 @@ def _compile_stock_shell(
             route_axes,
             str(target.get("role") or ""),
         )
+        if render_key:
+            # Recheck content identities after all reads; never cache a render
+            # spanning a changed stock/source generation.
+            _file_uid_matches(source_info, source_path)
+            if _sha256(stock) != stock_digest:
+                raise CompilerError("stock content changed during fixed composite compilation")
+            render_cache[render_key] = {"output": str(output), "sha256": _sha256(output),
+                                        "replaced": copy.deepcopy(replaced), "lineBudget": copy.deepcopy(line_budget)}
         return {
             "mode": "stock-shell",
+            "renderReuse": {"hit": bool(cached), "scope": "this-compile-request", "key": render_key},
             "fixedSelection": fixed_selection,
             "fixedLineBudget": line_budget,
             "sourceWeight": source_weight,
@@ -1620,6 +1854,7 @@ def _compile_source_variable_preserve(
     stock: Path,
     output: Path,
     temp_root: Path,
+    verified_stock: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_info = target.get("source") if isinstance(target.get("source"), dict) else {}
     source_path = Path(str(source_info.get("sourcePath") or ""))
@@ -1644,7 +1879,8 @@ def _compile_source_variable_preserve(
 
         stock_face = max(0, _int(target.get("targetContract", {}).get("faceIndex"), 0))
         weight = _int(target.get("targetContract", {}).get("weight"), 400)
-        stock_geometry, stock_location = _stock_geometry_font(stock, stock_face, weight, {})
+        stock_geometry, stock_location = _stock_geometry_font(stock, stock_face, weight, {}, source_font=source,
+            role=str(target.get("role") or ""), target_contract=target.get("targetContract"), verified_identity=verified_stock)
         stock_profile = _profile_from_font(stock_geometry)
 
         target_upem = int(stock_profile["metrics"]["unitsPerEm"])
@@ -1779,7 +2015,9 @@ def _compile_unit(
     stock_paths: dict[str, Path],
     output_dir: Path,
     allow_live_stock: bool,
+    render_cache: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    started = time.monotonic()
     artifact = unit["artifact"]
     target = unit["target"]
     target_path = str(target.get("path") or "")
@@ -1799,6 +2037,7 @@ def _compile_unit(
         "reason": "",
     }
 
+    _compile_trace(artifact, "unit-start", target=target_path, role=str(target.get("role") or ""))
     try:
         if str(target.get("status") or "") == "blocked":
             raise CompilerError("FontPlan 目标已经 blocked")
@@ -1813,7 +2052,7 @@ def _compile_unit(
 
         stock = _resolve_stock(target_path, stock_paths, allow_live_stock)
         stock_face = max(0, _int(artifact.get("requiredFaceIndex"), 0))
-        _validate_stock_contract(target, stock, stock_face)
+        verified_stock = _validate_stock_contract(target, stock, stock_face)["verifiedStockIdentity"]
         mode = _choose_mode(
             target,
             artifact,
@@ -1824,11 +2063,11 @@ def _compile_unit(
         temp_root.mkdir(parents=True, exist_ok=True)
 
         if mode == "source-as-base":
-            report = _compile_source_as_base(target, artifact, stock, output, temp_root)
+            report = _compile_source_as_base(target, artifact, stock, output, temp_root, verified_stock)
         elif mode == "source-variable-preserve":
-            report = _compile_source_variable_preserve(target, artifact, stock, output, temp_root)
+            report = _compile_source_variable_preserve(target, artifact, stock, output, temp_root, verified_stock)
         else:
-            report = _compile_stock_shell(target, artifact, stock, output, temp_root)
+            report = _compile_stock_shell(target, artifact, stock, output, temp_root, render_cache, verified_stock)
 
         result.update(
             status="ready",
@@ -1856,6 +2095,8 @@ def _compile_unit(
                                       "function": last.name, "line": last.lineno}
     finally:
         shutil.rmtree(output_dir / ".tmp" / artifact_id.replace(":", "-"), ignore_errors=True)
+    _compile_trace(artifact, "unit-end", status=result["status"], reason=result.get("reason", ""),
+                   elapsedSeconds=round(time.monotonic() - started, 6))
     return result
 
 
@@ -1903,6 +2144,12 @@ def _mixed_preflight(units: list[dict[str, Any]], stock_paths: dict[str, Path], 
             "source-style-axis-missing", "source-style-axis-out-of-range"}
         if risks:
             raise CompilerError(f"mixed-preflight: {','.join(sorted(risks))}: {path}")
+        stock = _resolve_stock(path, stock_paths, allow_live_stock)
+        try:
+            _verify_stock_identity(target, stock, max(0, _int(artifact.get("requiredFaceIndex"), 0)))
+        except CompilerError as error:
+            _compile_trace(artifact, "preflight-blocked", reason=str(error))
+            raise CompilerError("mixed-preflight: " + str(error)) from error
         if (contract.get("variable") is True and source.get("variable") is not True
                 and unit.get("deploymentKinds") == ["physical-slot"]
                 and target.get("role") not in SPECIALIZED_ROLES
@@ -1913,6 +2160,24 @@ def _mixed_preflight(units: list[dict[str, Any]], stock_paths: dict[str, Path], 
             stock = _resolve_stock(path, stock_paths, allow_live_stock)
             if _magic(stock) != COLLECTION_MAGIC:
                 raise CompilerError(f"mixed-preflight: static source cannot preserve physical variable target: {path}")
+
+
+def _compile_trace(artifact: dict[str, Any], event: str, **details: Any) -> None:
+    progress = os.environ.get("LUOSHU_SWITCH_PROGRESS_FILE", "")
+    request = os.environ.get("LUOSHU_MIX_REQUEST_ID", "")
+    if not progress or not request or os.environ.get("LUOSHU_UNIVERSAL_MIX_STRICT") != "1":
+        return
+    path = Path(progress).with_name("universal-compile-trace.jsonl")
+    record = {"requestId": request, "artifactId": artifact.get("artifactId", ""),
+              "event": event, "epoch": round(time.time(), 3),
+              "monotonic": round(time.monotonic(), 6), **details}
+    try:
+        # Append rather than overwrite: timeout/fallback cannot erase the last
+        # in-flight stage. The caller owns diagnostic retention/rotation.
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+    except OSError:
+        pass
 
 
 def _mixed_compile_progress(index: int, total: int) -> None:
@@ -1954,9 +2219,23 @@ def compile_all(
             raise CompilerError("mixed-preflight: incomplete atomic routing")
         _mixed_preflight(units, stock_paths, allow_live_stock)
     artifacts = []
+    render_cache: dict[str, Any] = {}
+    failed_artifact = ""
     for index, unit in enumerate(units):
+        if failed_artifact:
+            artifact, target = unit["artifact"], unit["target"]
+            artifacts.append({"artifactId":artifact["artifactId"],"targetPath":target.get("path", ""),
+                "role":target.get("role", ""),"deploymentKinds":list(unit.get("deploymentKinds") or []),
+                "routeNodes":copy.deepcopy(unit.get("routeNodes") or []),"contract":copy.deepcopy(artifact),
+                "status":"blocked","output":"","sha256":"","bytes":0,
+                "compileDisposition":"skipped-after-atomic-failure",
+                "reason":"skipped-after-atomic-failure:" + failed_artifact})
+            _compile_trace(artifact, "unit-skipped", reason="atomic failure", failedArtifactId=failed_artifact)
+            continue
         _mixed_compile_progress(index, len(units))
-        artifacts.append(_compile_unit(unit, stock_paths, output_dir, allow_live_stock))
+        artifacts.append(_compile_unit(unit, stock_paths, output_dir, allow_live_stock, render_cache))
+        if os.environ.get("LUOSHU_UNIVERSAL_MIX_STRICT") == "1" and artifacts[-1]["status"] == "blocked":
+            failed_artifact = str(artifacts[-1]["artifactId"])
     ready = sum(item["status"] == "ready" for item in artifacts)
     blocked = sum(item["status"] == "blocked" for item in artifacts)
     deferred = list(route_plan.get("deferredDynamicTargets") or [])

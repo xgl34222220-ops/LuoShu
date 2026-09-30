@@ -48,6 +48,12 @@ finalize_next_payload() {
 }
 
 write_finalize_state() {
+    if [ -n "${LUOSHU_MIX_REQUEST_ID:-}" ]; then
+        _mfs_current=$(sed -n 's/^requestId=//p' "$REALMOD/config/mix-stage-next.conf" 2>/dev/null | head -n1)
+        [ -n "$_mfs_current" ] || _mfs_current=$(sed -n 's/^requestId=//p' "$REALMOD/config/universal-font-next.conf" 2>/dev/null | head -n1)
+        [ -n "$_mfs_current" ] || _mfs_current=$(sed -n 's/^requestId=//p' "$REALMOD/config/font-payload-next.conf" 2>/dev/null | head -n1)
+        [ "$_mfs_current" = "$LUOSHU_MIX_REQUEST_ID" ] || return 1
+    fi
     _mfs_state="$1"
     _mfs_message="$2"
     _mfs_tmp="${FINALIZE_STATE}.tmp.$$"
@@ -78,7 +84,7 @@ monitor_task() {
                     # module's next-boot payload from this background monitor too.
                     write_finalize_state running '正在提交下一启动字体负载'
                     if finalize_next_payload; then
-                        write_finalize_state success '复合字体已准备，完整重启后生效'
+                        write_finalize_state success '复合字体已准备，完整重启后生效' || exit 0
                         _universal_request=$(sed -n 's/^requestId=//p' "$REALMOD/config/universal-font-next.conf" 2>/dev/null | head -n1)
                         if [ -z "${LUOSHU_MIX_REQUEST_ID:-}" ] || [ "$_universal_request" != "$LUOSHU_MIX_REQUEST_ID" ]; then
                             mark_legacy_mix_mode
@@ -119,8 +125,11 @@ case "${1:-status}" in
         cat "$_response" 2>/dev/null || true
         if [ "$_rc" -eq 0 ]; then
             _task=$(sed -n 's/^.*"task":"\([^"]*\)".*$/\1/p' "$_response" 2>/dev/null | tail -n1)
-            if [ -n "$_task" ]; then
-                ( trap '' HUP; MODDIR="$RUNTIME" LUOSHU_REAL_MODDIR="$REALMOD" sh "$0" monitor "$_task" ) </dev/null >>"$LOG_FILE" 2>&1 &
+            # Nested axes already waits for base generation and owns the final
+            # commit. A second monitor used to race that same slow ROM stage,
+            # fail its 20-second PID lock, and cancel the still-valid owner.
+            if [ -n "$_task" ] && [ "${LUOSHU_MIX_FINALIZE_OWNER:-}" != axes ]; then
+                ( trap '' HUP; export MODDIR="$RUNTIME" LUOSHU_REAL_MODDIR="$REALMOD"; exec sh "$0" monitor "$_task" ) </dev/null >>"$LOG_FILE" 2>&1 &
             fi
         fi
         rm -f "$_response" 2>/dev/null || true

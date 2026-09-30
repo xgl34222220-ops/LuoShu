@@ -334,7 +334,7 @@ worker() {
     : >"$_response_file" 2>/dev/null || true
     (
         trap '' HUP
-        LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$BASE_ENGINE" start \
+        LUOSHU_MIX_FINALIZE_OWNER=axes LUOSHU_PUBLIC_DIR="$_root" MODDIR="$MODDIR" sh "$BASE_ENGINE" start \
             LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit >"$_response_file" 2>&1
     ) &
     _starter_pid=$!

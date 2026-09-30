@@ -55,12 +55,12 @@ def isolate_stock_dependencies(font, imported, selected_codepoints, *, preserve_
         return {'clonedGlyphs': 0}
     glyf = font['glyf']; original_order = list(font.getGlyphOrder())
     for name in original_order:
-        if name not in imported and glyf[name].isComposite():
+        if name not in imported and glyf.glyphs[name].isComposite():
             aliases.update(c.glyphName for c in glyf[name].components if c.glyphName in imported)
     pending = list(aliases)
     while pending:
         name = pending.pop()
-        if glyf[name].isComposite():
+        if glyf.glyphs[name].isComposite():
             for c in glyf[name].components:
                 if c.glyphName in imported and c.glyphName not in aliases:
                     aliases.add(c.glyphName); pending.append(c.glyphName)
@@ -99,7 +99,7 @@ def isolate_stock_dependencies(font, imported, selected_codepoints, *, preserve_
             font['VORG'].VOriginRecords[new] = font['VORG'].VOriginRecords[old]
     font.setGlyphOrder(original_order + list(clones.values()))
     for name in original_order + list(clones.values()):
-        if name not in imported and glyf[name].isComposite():
+        if name not in imported and glyf.glyphs[name].isComposite():
             for c in glyf[name].components: c.glyphName = clones.get(c.glyphName, c.glyphName)
     for table in font['cmap'].tables:
         if table.isUnicode() and hasattr(table, 'cmap'):

@@ -557,6 +557,13 @@ class RoutingTest(unittest.TestCase):
                     'mainSlot': self.slots['/system/fonts/Roboto-Regular.ttf']}
         self.assertFalse(scanner._has_current_metrics(previous))
         previous['metricsRevision'] = scanner.METRICS_REVISION
+        self.assertFalse(scanner._has_current_metrics(previous), 'new metrics alone are not a sealed stock archive')
+        from stock_provenance_fixture import synthetic_identity
+        from stock_geometry_profile import capture_geometry_profile
+        for logical, slot in self.slots.items():
+            path = self.root / 'stock/system' / Path(logical).name
+            slot['stockIdentity'] = synthetic_identity(logical, path, 0, 'routing-test')
+            slot['stockGeometryProfile'] = capture_geometry_profile(path, 0, slot['stockIdentity'])
         self.assertTrue(scanner._has_current_metrics(previous))
 
     def test_host_freetype_primary_han_missing_and_fallback_han_renderable(self):

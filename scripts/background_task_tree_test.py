@@ -188,6 +188,35 @@ class BackgroundTreeTest(unittest.TestCase):
         self.wait_for(lambda: not alive(leaf, proc_id))
         self.assertFalse((module / ".google-font-provider.lock").exists())
 
+    def test_scoped_cancel_never_erases_or_kills_new_request_owner(self):
+        pidfile = self.root / 'owned.pid'
+        worker = self.root / 'cooperative.py'
+        worker.write_text('import signal,time\nfrom pathlib import Path\n'
+                          'def stop(sig,frame):\n'
+                          f' Path({str(self.root / "stopping")!r}).write_text("yes")\n'
+                          ' time.sleep(.4)\n raise SystemExit(0)\n'
+                          'signal.signal(signal.SIGTERM,stop)\n'
+                          f'Path({str(self.root / "scope-ready")!r}).write_text("yes")\n'
+                          'while True: time.sleep(.05)\n')
+        scope = self.spawn([sys.executable, str(ROOT / 'common/task_scope.py'),
+                            '--pid-file', str(pidfile), '--task', 'old-request',
+                            '--', sys.executable, str(worker)])
+        pidfile.write_text(str(scope.pid))
+        Path(str(pidfile)+'.task').write_text('old-request')
+        Path(str(pidfile)+'.boot').write_text(Path('/proc/sys/kernel/random/boot_id').read_text())
+        self.wait_for(lambda: (self.root / 'scope-ready').exists())
+        cancel = self.spawn(['sh', '-c', '. "$1"; luoshu_stop_task_pid "$2"',
+                             'cancel', str(ROOT / 'common/background_task.sh'), str(pidfile)])
+        self.wait_for(lambda: (self.root / 'stopping').exists())
+        sentinel = self.spawn([sys.executable, '-c', 'import time; time.sleep(60)', 'new-request'])
+        pidfile.write_text(str(sentinel.pid))
+        Path(str(pidfile)+'.task').write_text('new-request')
+        cancel.wait(timeout=6)
+        scope.wait(timeout=6)
+        self.assertEqual(pidfile.read_text(), str(sentinel.pid))
+        self.assertEqual(Path(str(pidfile)+'.task').read_text(), 'new-request')
+        self.assertIsNone(sentinel.poll())
+
     def test_scope_deadline_kills_uncooperative_worker_within_cleanup_budget(self):
         code = "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
         started = time.monotonic()

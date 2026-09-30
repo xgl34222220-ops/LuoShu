@@ -221,6 +221,8 @@ def main() -> int:
         if leftovers:
             result = 125
         report = {'schema': 'luoshu-task-cleanup-v1', 'task': args.task,
+                  'pid': os.getpid(), 'starttime': identity(os.getpid())[1],
+                  'bootId': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
                   'result': result, 'deadlineExceeded': timed_out,
                   'terminationSignal': interrupted, 'terminated': terminated,
                   'reaped': reaped, 'leftoverPids': leftovers,

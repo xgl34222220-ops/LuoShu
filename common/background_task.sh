@@ -56,14 +56,58 @@ luoshu_clear_task_pid() {
     rm -f "$_lctp_pid_file" "${_lctp_pid_file}.task" "${_lctp_pid_file}.boot" 2>/dev/null || true
 }
 
+luoshu_task_starttime() {
+    IFS= read -r _ltst_stat < "/proc/$1/stat" 2>/dev/null || return 1
+    _ltst_tail="${_ltst_stat##*) }"
+    [ "$_ltst_tail" != "$_ltst_stat" ] || return 1
+    set -- $_ltst_tail
+    [ "$#" -ge 20 ] || return 1
+    shift 19
+    printf '%s\n' "$1"
+}
+
 luoshu_stop_task_pid() {
     _lstp_pid_file="$1"
     _lstp_pid=$(luoshu_pid_value "$_lstp_pid_file")
     _lstp_task=$(cat "${_lstp_pid_file}.task" 2>/dev/null)
     if luoshu_task_pid_alive "$_lstp_pid_file" "$_lstp_task"; then
-        luoshu_terminate_task_tree "$_lstp_pid"
+        _lstp_start=$(luoshu_task_starttime "$_lstp_pid")
+        _lstp_cmdline=$(tr '\000' ' ' < "/proc/$_lstp_pid/cmdline" 2>/dev/null)
+        case "$_lstp_cmdline" in
+            *"/task_scope.py --pid-file $_lstp_pid_file --task $_lstp_task "*)
+                # The supervisor owns descendants even after reparenting. Its
+                # cleanup needs up to 3s; the generic tree killer's 1s KILL used
+                # to destroy the supervisor before it could reap a finalizer.
+                [ -n "$_lstp_start" ] || return 1
+                _lstp_boot=$(luoshu_current_boot_id)
+                [ "$(luoshu_task_starttime "$_lstp_pid")" = "$_lstp_start" ] || return 1
+                kill -TERM "$_lstp_pid" 2>/dev/null || true
+                _lstp_wait=0
+                while [ "$_lstp_wait" -lt 40 ] && \
+                      [ "$(luoshu_task_starttime "$_lstp_pid" 2>/dev/null)" = "$_lstp_start" ] && \
+                      luoshu_task_pid_alive "$_lstp_pid_file" "$_lstp_task"; do
+                    sleep .1
+                    _lstp_wait=$((_lstp_wait + 1))
+                done
+                if [ "$(luoshu_task_starttime "$_lstp_pid" 2>/dev/null)" = "$_lstp_start" ] && \
+                   luoshu_task_pid_alive "$_lstp_pid_file" "$_lstp_task"; then
+                    luoshu_terminate_task_tree "$_lstp_pid"
+                fi
+                _lstp_proof="${_lstp_pid_file}.cleanup.json"
+                # A stale report must not certify cancellation of this owner.
+                grep -Fq "\"task\": \"$_lstp_task\"" "$_lstp_proof" 2>/dev/null && \
+                grep -Fq "\"pid\": $_lstp_pid," "$_lstp_proof" && \
+                grep -Fq "\"starttime\": $_lstp_start," "$_lstp_proof" && \
+                grep -Fq "\"bootId\": \"$_lstp_boot\"" "$_lstp_proof" && \
+                grep -Fq '"leftoverPids": []' "$_lstp_proof" || return 1
+                ;;
+            *) luoshu_terminate_task_tree "$_lstp_pid" ;;
+        esac
     fi
-    luoshu_clear_task_pid "$_lstp_pid_file"
+    # A new request may already have installed its own sidecars while this
+    # cancellation waited. Never erase that newer owner.
+    [ "$(luoshu_pid_value "$_lstp_pid_file")" = "$_lstp_pid" ] || return 0
+    luoshu_clear_task_pid "$_lstp_pid_file" "$_lstp_task"
 }
 
 # Cancellation is rare: take one process-tree snapshot, rather than running a

@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 import sys
 
@@ -25,6 +26,7 @@ import universal_font_deployment as deployment
 import universal_font_cutover_gate as gate
 from fontTools.ttLib import TTFont
 from universal_font_compiler_test import make_font, make_collection
+from stock_provenance_fixture import synthetic_identity
 
 
 class DiscoveryPipelineTest(unittest.TestCase):
@@ -32,6 +34,16 @@ class DiscoveryPipelineTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        # Host-only filesystem mapping. Keep the logical config identity sealed
+        # as /data/fonts/config/config.xml and still verify its real bytes/hash.
+        def compiler_path(*parts):
+            value = Path(*parts)
+            if str(value) == '/data/fonts/config/config.xml':
+                return self.root / 'data/fonts/config/config.xml'
+            return value
+        path_view = patch.object(compiler, 'Path', side_effect=compiler_path)
+        path_view.start()
+        self.addCleanup(path_view.stop)
         self.fonts = self.root / 'system/fonts'
         self.etc = self.root / 'system/etc'
         self.fonts.mkdir(parents=True)
@@ -57,6 +69,10 @@ class DiscoveryPipelineTest(unittest.TestCase):
         families, slots = scanner._parse_partition_xml(sources, self.roots)
         inventory._add_verified_text_slots(slots, self.roots)
         inventory._populate_metrics(slots)
+        for logical, slot in slots.items():
+            actual = self.fonts / Path(logical).name
+            slot['stockIdentity'] = synthetic_identity(logical, actual, slot.get('faceIndex', 0), 'discovery-pipeline')
+            slot['stockGeometryProfile'] = scanner.capture_geometry_profile(actual, slot.get('faceIndex', 0), slot['stockIdentity'])
         graph = scanner._parse_full_xml_graph(sources, self.roots)
         inv = {'schema': inventory.SCHEMA, 'state': 'ready', 'buildKey': 'discovery-pipeline',
                'scannerRevision': scanner.SCANNER_REVISION, 'slots': slots, 'families': families,

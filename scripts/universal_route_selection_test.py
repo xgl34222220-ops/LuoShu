@@ -6,6 +6,7 @@ import copy
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -85,6 +86,16 @@ def fixed_face() -> dict:
 
 
 class RouteSelectionTest(unittest.TestCase):
+    def setUp(self):
+        # These are metadata-only route/weight/style unit tests. Concrete stock
+        # files and origin failures are covered by stock_contract/provenance and
+        # the full mixed pipeline, not by these deliberately synthetic faces.
+        for name, value in (('_resolve_stock', Path('/synthetic-stock.ttf')),
+                            ('_verify_stock_identity', {'kind': 'rom'})):
+            hook = patch.object(compiler, name, return_value=value)
+            hook.start()
+            self.addCleanup(hook.stop)
+
     def test_shared_normal_italic_and_weights_choose_independent_sources(self):
         nodes = [node(400), node(400, "italic"), node(700), node(700, "italic")]
         sources = [face("regular"), face("italic", italic=True),

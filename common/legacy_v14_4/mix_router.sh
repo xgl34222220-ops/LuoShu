@@ -25,7 +25,6 @@ ACTIVE_CONF="$REALMOD/config/active_font.conf"
 LEGACY_MODE="$REALMOD/config/font_runtime_legacy_v14_4.conf"
 REBOOT_CONF="$REALMOD/config/text_reboot_required.conf"
 LOG_FILE="$REALMOD/logs/fontswitch.log"
-FINALIZE_LOCK="$REALMOD/.mix-stage-finalize.lock"
 [ -f "$LEGACY/payload_clone.sh" ] && . "$LEGACY/payload_clone.sh"
 
 
@@ -419,6 +418,16 @@ write_next_state() {
 }
 
 commit_mix_stage_locked() {
+    # A queued finalizer must never publish a newer request's shared stage.
+    _commit_expected="${LUOSHU_MIX_REQUEST_ID:-}"
+    if [ -n "$_commit_expected" ]; then
+        _commit_current=$(read_value "$MIX_STAGE_STATE" requestId)
+        if [ -z "$_commit_current" ]; then
+            _commit_current=$(read_value "$REALMOD/config/universal-font-next.conf" requestId)
+            [ -n "$_commit_current" ] || _commit_current=$(read_value "$NEXT_STATE" requestId)
+        fi
+        [ "$_commit_current" = "$_commit_expected" ] || return 1
+    fi
     [ "$(read_value "$MIX_STAGE_STATE" state)" != cancelled ] || return 1
     if universal_mix_pending; then
         # Leave MIX_STAGE_STATE for identity checks on subsequent finalizers/status.
@@ -471,38 +480,6 @@ commit_mix_stage_if_needed() {
     luoshu_payload_commit_run "$REALMOD" commit_mix_stage_locked "$@"
 }
 
-finalize_lock_acquire() {
-    _tries=0
-    while [ "$_tries" -lt 20 ]; do
-        if mkdir "$FINALIZE_LOCK" 2>/dev/null; then
-            printf '%s\n' "$$" > "$FINALIZE_LOCK/pid" 2>/dev/null || {
-                rmdir "$FINALIZE_LOCK" 2>/dev/null || true
-                return 1
-            }
-            return 0
-        fi
-        _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
-        case "$_owner" in
-            ''|*[!0-9]*) _owner='' ;;
-        esac
-        if [ -z "$_owner" ] || ! kill -0 "$_owner" 2>/dev/null; then
-            rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
-            rmdir "$FINALIZE_LOCK" 2>/dev/null || true
-            continue
-        fi
-        sleep 1
-        _tries=$((_tries + 1))
-    done
-    return 1
-}
-
-finalize_lock_release() {
-    _owner=$(sed -n '1p' "$FINALIZE_LOCK/pid" 2>/dev/null)
-    [ -z "$_owner" ] || [ "$_owner" = "$$" ] || return 1
-    rm -f "$FINALIZE_LOCK/pid" 2>/dev/null || true
-    rmdir "$FINALIZE_LOCK" 2>/dev/null || true
-}
-
 write_legacy_mix_mode() {
     _tmp="$REALMOD/config/font_runtime_legacy_v14_4.conf.tmp.$$"
     {
@@ -512,13 +489,11 @@ write_legacy_mix_mode() {
 }
 
 finalize_mix_stage() {
-    if ! finalize_lock_acquire; then
-        printf '{"status":"error","message":"复合字体已生成但提交锁不可用，请稍后重试"}\n'
-        return 1
-    fi
+    # Monitor and axes controller may arrive together. One kernel lease owns
+    # both ROM completion and publication; a second mkdir/PID lock used to fail
+    # after 20 seconds while the first valid ColorOS finalizer was still working.
     commit_mix_stage_if_needed
     _commit_rc=$?
-    finalize_lock_release >/dev/null 2>&1 || true
     if [ "$_commit_rc" -ne 0 ]; then
         printf '{"status":"error","message":"复合字体已生成但下一启动负载提交失败"}\n'
         return 1

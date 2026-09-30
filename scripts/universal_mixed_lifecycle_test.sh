@@ -5,6 +5,13 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MOD="$TMP/module"
 mkdir -p "$MOD/config" "$MOD/.luoshu-payload-next/system/fonts" "$MOD/.luoshu-mix-stage/system/fonts"
+mkdir -p "$MOD/common/python/bin"
+cat > "$MOD/common/python/bin/luoshu-python" <<EOF_PYTHON
+#!/bin/sh
+unset PYTHONHOME PYTHONPATH LD_LIBRARY_PATH
+exec "$(command -v python3)" "\$@"
+EOF_PYTHON
+chmod +x "$MOD/common/python/bin/luoshu-python"
 printf 'id=LuoShu\n' > "$MOD/module.prop"
 printf 'universal-compiled\n' > "$MOD/.luoshu-payload-next/system/fonts/UI.ttf"
 printf 'legacy-alias\n' > "$MOD/.luoshu-mix-stage/system/fonts/UI.ttf"

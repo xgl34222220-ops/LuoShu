@@ -24,6 +24,12 @@ export LUOSHU_UNIVERSAL_MIX_STRICT=1
 printf 'requestId=%s\nstate=running\npercent=78\nmessage=正在检查组合字体源\nupdated=%s\n' "$REQUEST" "$(date +%s)" > "$LUOSHU_SWITCH_PROGRESS_FILE"
 _um_root=$(_um_python "$MODDIR/common/universal_mixed_font.py" --module "$MODDIR" \
     --request "$REQUEST" --mode "$1" --source "$2") || { _um_fail mixed-source-freeze-failed; exit 1; }
+# Keep one completed/failed request trace without unbounded log growth. Rotation
+# happens only after the freezer has accepted this request's generation.
+_um_trace="$MODDIR/config/universal-compile-trace.jsonl"
+if [ -s "$_um_trace" ]; then
+    mv -f "$_um_trace" "${_um_trace%.jsonl}.previous.jsonl" 2>/dev/null || true
+fi
 # Validate revisions and current dynamic generation, not merely file presence.
 if ! MODDIR="$MODDIR" sh "$MODDIR/common/font_topology_snapshot.sh" ensure >/dev/null 2>&1; then
     _um_fail topology-upgrade-or-refresh-required

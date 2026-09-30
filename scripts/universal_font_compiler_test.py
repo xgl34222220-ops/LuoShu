@@ -117,6 +117,7 @@ def slot_from_stock(
     weight: int = 400,
     postscript: str = "",
 ) -> dict:
+    from stock_provenance_fixture import synthetic_identity
     fmt, metrics = font_inventory._read_metrics(stock, face_index)
     refs = []
     if source_xml:
@@ -145,6 +146,8 @@ def slot_from_stock(
         "faceIndex": face_index,
         "format": fmt,
         "metrics": metrics,
+        "stockIdentity": (synthetic_identity(logical, stock, face_index)
+                          if Path(logical).parts[1] != 'data' else None),
         "xmlRefs": refs,
         "legacyReplaceable": True,
         "runtimeEvidence": {"fontManager": True, "mount": False},

@@ -8,6 +8,13 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 
 MODULE="$TMP/module"
 mkdir -p "$MODULE/.luoshu-mix-stage/system/fonts" "$MODULE/config"
+mkdir -p "$MODULE/common/python/bin"
+cat > "$MODULE/common/python/bin/luoshu-python" <<EOF_PYTHON
+#!/bin/sh
+unset PYTHONHOME PYTHONPATH LD_LIBRARY_PATH
+exec "$(command -v python3)" "\$@"
+EOF_PYTHON
+chmod +x "$MODULE/common/python/bin/luoshu-python"
 printf 'module\n' > "$MODULE/module.prop"
 printf 'new-composite\n' > "$MODULE/.luoshu-mix-stage/system/fonts/MiSansVF.ttf"
 printf 'default\n' > "$MODULE/config/active_font.conf"

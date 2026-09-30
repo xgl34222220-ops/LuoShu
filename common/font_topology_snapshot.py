@@ -526,6 +526,8 @@ def main() -> int:
                 inventory = _load_json(args.inventory) if args.inventory else {}
                 if inventory.get("scannerRevision") != 6 or topology.get("scannerRevision") != 6:
                     raise TopologyError("字体扫描版本已过期")
+                if not all(isinstance(slot.get("stockIdentity"), dict) and isinstance(slot.get("stockGeometryProfile"), dict) for slot in inventory.get("slots", {}).values()):
+                    raise TopologyError("原厂字体身份缺失，需要可信重扫")
                 dynamic = topology.get("runtime", {}).get("dynamicFontsEvidence", {})
                 current_config = args.data_fonts_config or Path("/data/fonts/config/config.xml")
                 current_files = args.data_fonts_dir or Path("/data/fonts/files")

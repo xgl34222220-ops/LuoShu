@@ -724,6 +724,10 @@ def _plan_slot(
         "runtimeEvidence": dict(slot.get("runtimeEvidence") or {}) if isinstance(slot.get("runtimeEvidence"), dict) else {},
         "legacyReplaceable": slot.get("legacyReplaceable") if isinstance(slot.get("legacyReplaceable"), bool) else None,
         "targetContract": {
+            **({"stockGeometryProfile": copy.deepcopy(slot["stockGeometryProfile"])}
+               if isinstance(slot.get("stockGeometryProfile"), dict) else {}),
+            **({"stockIdentity": copy.deepcopy(slot["stockIdentity"])}
+               if isinstance(slot.get("stockIdentity"), dict) else {}),
             "format": str(slot.get("format") or slot.get("validatedFormat") or ""),
             "faceIndex": max(0, _int(slot.get("faceIndex"), 0) or 0),
             "weight": _target_weight(slot),

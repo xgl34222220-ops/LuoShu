@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,8 @@ import universal_font_cutover_gate as gate
 import universal_font_deployment as deployment
 import universal_font_plan
 import universal_mixed_font as mixed
+from stock_font_provenance import stock_identity
+from stock_geometry_profile import capture_geometry_profile
 
 
 def write_conf(path: Path, values: dict) -> None:
@@ -68,6 +71,27 @@ def point_count(font: TTFont, char: str) -> int:
 
 
 def plans(source: Path, stocks: dict[str, Path], roles_by_path: dict[str, str], module: Path | None = None):
+    if module is not None:
+        # Model kernel ROM/file-bind lineage explicitly. Ordinary host temp
+        # directories are not production OEM evidence, nor should they be.
+        roots = module / 'config/test-stock-views'
+        roots.mkdir(parents=True, exist_ok=True)
+        partitions = sorted({Path(p).parts[1] for p in stocks})
+        devices = {part: f'253:{i+1}' for i, part in enumerate(partitions)}
+        mounts = [f'{10+i} 1 {devices[part]} / /{part} ro - erofs /dev/block/test-{part} ro'
+                  for i, part in enumerate(partitions)]
+        for index, (logical, original) in enumerate(list(stocks.items())):
+            target = roots / str(index) / original.name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.resolve() != original.resolve():
+                shutil.copyfile(original, target)
+            stocks[logical] = target
+            partition = Path(logical).parts[1]
+            relative = '/' + '/'.join(Path(logical).parts[2:])
+            mounts.append(f'{100+index} 1 {devices[partition]} {relative} {target} ro - erofs /dev/block/test-{partition} ro')
+        mountinfo = module / 'config/test-stock-mountinfo'
+        mountinfo.write_text('\n'.join(mounts) + '\n')
+        os.environ['LUOSHU_MOUNTINFO'] = str(mountinfo)
     profile = font_source_profile.build([source])
     slots = {path: fixture.slot_from_stock(path, stock, family='sans-serif', source_xml=None,
              declared=Path(path).name) for path, stock in stocks.items()}
@@ -78,6 +102,11 @@ def plans(source: Path, stocks: dict[str, Path], roles_by_path: dict[str, str], 
              'buildKey': 'mixed-pipeline-test', 'romKind': 'hyperos',
              'slots': {p: fixture.role_map(r) for p, r in roles_by_path.items()}}
     if module is not None:
+        for logical, slot in slots.items():
+            identity = stock_identity(logical, stocks[logical], 0, topology['buildKey'])
+            assert identity['provenance']['verified'] is True
+            slot['stockIdentity'] = identity
+            slot['stockGeometryProfile'] = capture_geometry_profile(stocks[logical], 0, identity)
         inventory = dict(schema='device-font-inventory-v1', state='ready', scannerRevision=6,
                          buildKey=topology['buildKey'], romKind=topology['romKind'], slots=slots,
                          families={}, xmlGraph={'refs': [], 'aliases': []})
@@ -240,8 +269,9 @@ def main() -> int:
                     for index, (x, y) in enumerate(glyph.coordinates):
                         glyph.coordinates[index] = (x + (weight - 400) // divisor if x > 100 else x, y)
                 font.save(master)
-        plans(frozen, {vf_logical: vf}, {vf_logical: 'ui-sans'}, module)
-        stock_map.write_text(json.dumps({vf_logical: str(vf)}))
+        auto_stocks = {vf_logical: vf}
+        plans(frozen, auto_stocks, {vf_logical: 'ui-sans'}, module)
+        stock_map.write_text(json.dumps({path: str(file) for path, file in auto_stocks.items()}))
         auto_env = dict(env, LUOSHU_MIX_REQUEST_ID=auto_request)
         auto_result = subprocess.run(['sh', str(module / 'common/universal_mixed_font.sh'), 'auto', str(auto_root)],
                                      env=auto_env, text=True, capture_output=True, timeout=120)

@@ -6,6 +6,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "common"))
@@ -92,8 +93,20 @@ def main() -> int:
         try:
             os.environ["LUOSHU_SELF_MOUNT_STATE_ROOT"] = str(state_root)
             inventory.MIRROR_PREFIXES = ()
-            resolved = stock._safe_pick_actual_root(logical, None, True)
-            assert resolved == lower, (resolved, lower)
+            # This test owns wrapper selection, not kernel provenance. The
+            # separate stock_font_provenance_test suite exercises real verifier
+            # positive mounted-ROM and negative naked/data-origin fixtures.
+            with patch.object(stock, 'verify_stock_path', return_value={'verified': True}) as verified:
+                resolved = stock._safe_pick_actual_root(logical, None, True)
+                verified.assert_called_once_with(logical, lower)
+                assert resolved == lower, (resolved, lower)
+            with patch.object(stock, 'verify_stock_path', side_effect=ValueError('unproven')):
+                try:
+                    stock._safe_pick_actual_root(logical, None, True)
+                except inventory.InventoryError:
+                    pass
+                else:
+                    raise AssertionError('unproven lower must not be accepted')
 
             untouched = temp / "vendor/fonts"
             untouched.mkdir(parents=True)

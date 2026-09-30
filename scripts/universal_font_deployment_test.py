@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "common"))
@@ -63,6 +65,14 @@ def main() -> int:
             source_xml="/data/fonts/config/config.xml",
             declared="Runtime-Regular.ttf",
         )
+        dynamic_config = temp / 'dynamic-config.xml'
+        dynamic_config.write_text('<fontConfig generation="1"/>')
+        dynamic_slot['dynamicIdentity'] = {
+            'fontPath': dynamic_logical, 'faceIndex': 0, 'postScriptName': 'RuntimeUI-Regular',
+            'fontSha256': hashlib.sha256(stock_dynamic.read_bytes()).hexdigest(),
+            'configPath': '/data/fonts/config/config.xml',
+            'configSha256': hashlib.sha256(dynamic_config.read_bytes()).hexdigest(),
+        }
 
         profile = font_source_profile.build([source])
         topology = {
@@ -116,17 +126,23 @@ def main() -> int:
         assert route_plan["physicalOnlyTargets"] == [physical_logical]
         assert route_plan["deferredDynamicTargets"] == [dynamic_logical]
 
-        artifact_manifest = compiler.compile_all(
-            font_plan,
-            route_plan,
-            {
-                xml_logical: stock_xml_font,
-                physical_logical: stock_physical,
-                dynamic_logical: stock_dynamic,
-            },
-            temp / "compiled",
-            False,
-        )
+        def compiler_path(*parts):
+            value = Path(*parts)
+            return dynamic_config if str(value) == '/data/fonts/config/config.xml' else value
+        # Model host access to the sealed logical config without weakening its
+        # real-byte digest or the production /data identity contract.
+        with patch.object(compiler, 'Path', side_effect=compiler_path):
+            artifact_manifest = compiler.compile_all(
+                font_plan,
+                route_plan,
+                {
+                    xml_logical: stock_xml_font,
+                    physical_logical: stock_physical,
+                    dynamic_logical: stock_dynamic,
+                },
+                temp / "compiled",
+                False,
+            )
         compiler.validate_manifest(artifact_manifest, font_plan, route_plan)
         assert artifact_manifest["summary"]["blockedCount"] == 0, artifact_manifest
         assert artifact_manifest["summary"]["compiledDynamicTargetCount"] == 1

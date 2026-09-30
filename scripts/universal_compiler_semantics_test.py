@@ -244,10 +244,16 @@ class SemanticCompilerTest(unittest.TestCase):
     def test_dynamic_identity_and_every_route_contract_are_checked(self):
         source,stock=self.fonts(True);self.add_deltas(source,20)
         logical='/data/fonts/files/semantic.ttf'
+        with TTFont(stock) as font:
+            font['name'].setName('AuthoritativePS',6,3,1,0x409);font.save(stock)
+        config=self.root/'dynamic-config.xml'
+        config.write_text('<fontConfig><font path="semantic.ttf" postScriptName="AuthoritativePS"/></fontConfig>')
         slot=fixture.slot_from_stock(logical,stock,family='sans-serif',source_xml=None,declared='Semantic.ttf')
         plan,route=fixture.build_plans(source,slot,'latin',None)
         target=plan['targets'][logical]
-        target['targetContract']['dynamicIdentity']={'faceIndex':0,'postScriptName':'AuthoritativePS'}
+        target['targetContract']['dynamicIdentity']={'faceIndex':0,'postScriptName':'AuthoritativePS',
+            'fontPath':logical,'fontSha256':hashlib.sha256(stock.read_bytes()).hexdigest(),
+            'configPath':str(config),'configSha256':hashlib.sha256(config.read_bytes()).hexdigest()}
         target['targetContract']['dynamicReferences']=[{'index':0,'postScriptName':'AuthoritativePS','weight':weight,'style':'normal','axes':[]} for weight in (400,700)]
         artifact=compiler._physical_artifact(target,plan)
         self.assertEqual(len(artifact['requiredDynamicRoutes']),2)

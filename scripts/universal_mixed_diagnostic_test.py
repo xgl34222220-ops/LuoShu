@@ -5,8 +5,10 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 from pathlib import Path
 import sys
+import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,4 +47,27 @@ with tempfile.TemporaryDirectory() as raw:
         assert 'static-weight-fallback' in stream.getvalue() and 'private-name' not in stream.getvalue()
     finally:
         sys.argv = old_argv
-print('universal_mixed_diagnostic_test: PASS (read-only existing manifest, private paths redacted)')
+with tempfile.TemporaryDirectory() as raw:
+    module = Path(raw)
+    (module / 'config').mkdir()
+    progress = module / 'config/progress.conf'
+    progress.write_text('requestId=current\npercent=87\nmessage=compiling slot 14/35\nupdated=123\n')
+    (module / 'config/universal-compile-trace.jsonl').write_text(
+        '{"requestId":"current","event":"phase","phase":"outline-replacement"}\n'
+        '{"requestId":"other","event":"phase","phase":"wrong-phase"}\n')
+    shell = (ROOT / 'common/universal_font_cutover.sh').read_text().split('case "${1:-switch}" in', 1)[0]
+    env = dict(os.environ, MODDIR=str(module), CONFIG_DIR=str(module / 'config'),
+               LUOSHU_SWITCH_PROGRESS_FILE=str(progress), LUOSHU_MIX_REQUEST_ID='current')
+    subprocess.run(['sh', '-c', shell + '\nUC_COMPOSITE_REQUEST=true\n_uc_capture_prepare_failure\n_uc_progress 25 fallback\n'], env=env, check=True)
+    saved = module / 'config/universal-mixed-last-prepare.conf'
+    assert 'compiling slot 14/35' in saved.read_text()
+    assert 'fallback' in progress.read_text()
+    assert 'compiling slot 14/35' in (module / 'logs/fontswitch.log').read_text()
+    assert 'outline-replacement' in (module / 'logs/fontswitch.log').read_text()
+    assert 'wrong-phase' not in (module / 'logs/fontswitch.log').read_text()
+    # Never attach a newer task's phase to a cancelled/older request.
+    progress.write_text('requestId=newer\nmessage=newer task\n')
+    subprocess.run(['sh', '-c', shell + '\nUC_COMPOSITE_REQUEST=true\n_uc_capture_prepare_failure\n'], env=env, check=True)
+    assert 'compiling slot 14/35' in saved.read_text()
+    assert 'newer task' not in (module / 'logs/fontswitch.log').read_text()
+print('universal_mixed_diagnostic_test: PASS (manifest redaction and request-bound last phase survive fallback)')

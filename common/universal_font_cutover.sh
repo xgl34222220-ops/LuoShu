@@ -64,6 +64,29 @@ _uc_value() {
     sed -n "s/^${2}=//p" "$1" 2>/dev/null | head -n1 | tr -d '\r\n'
 }
 
+_uc_capture_prepare_failure() {
+    [ "${UC_COMPOSITE_REQUEST:-false}" = true ] || return 0
+    [ -n "$PROGRESS_FILE" ] && [ -s "$PROGRESS_FILE" ] || return 0
+    # Fallback updates the UI phase. Keep the last actual compiler phase first,
+    # so a timeout can be diagnosed without running another long compilation.
+    _uc_last="$CONFIG_DIR/universal-mixed-last-prepare.conf"
+    cp -f "$PROGRESS_FILE" "$_uc_last.tmp.$$" 2>/dev/null || return 0
+    if [ "$(_uc_value "$_uc_last.tmp.$$" requestId)" != "${LUOSHU_MIX_REQUEST_ID:-}" ]; then
+        rm -f "$_uc_last.tmp.$$"
+        return 0
+    fi
+    mv -f "$_uc_last.tmp.$$" "$_uc_last" 2>/dev/null || return 0
+    _uc_log "universal prepare last phase request=$LUOSHU_MIX_REQUEST_ID percent=$(_uc_value "$_uc_last" percent) message=$(_uc_value "$_uc_last" message) updated=$(_uc_value "$_uc_last" updated)"
+    # The existing App already exports fontswitch.log. Include bounded phase
+    # records (no font filenames) so this evidence needs no APK update.
+    if [ -s "$CONFIG_DIR/universal-compile-trace.jsonl" ]; then
+        grep -F "\"requestId\":\"$LUOSHU_MIX_REQUEST_ID\"" "$CONFIG_DIR/universal-compile-trace.jsonl" | \
+            grep -F '"event":"phase"' | tail -n 4 | while IFS= read -r _uc_trace; do
+                _uc_log "universal prepare phase trace $_uc_trace"
+            done
+    fi
+}
+
 _uc_json_identity() {
     _ucj_manifest="$1"
     _uc_python - "$_ucj_manifest" <<'PY'
@@ -186,6 +209,7 @@ _uc_switch() {
         _uc_prepare_rc=$?
     fi
     if [ "$_uc_prepare_rc" -ne 0 ]; then
+        _uc_capture_prepare_failure
         _uc_log "universal prepare failed font=$_uc_font rc=$_uc_prepare_rc output=$(printf '%s' "$_uc_prepare_output" | tail -c 600)"
         _uc_reason=universal-prepare-failed
         [ "$_uc_prepare_rc" -ne 124 ] || _uc_reason=universal-prepare-timeout
