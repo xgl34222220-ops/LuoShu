@@ -1,7 +1,7 @@
 """Build only original synthetic donors with the real LuoShu compositor."""
 from pathlib import Path
 from argparse import Namespace
-import hashlib,json,sys
+import hashlib,json,sys,unicodedata
 ROOT=Path(__file__).resolve().parents[2]
 sys.path[:0]=[str(ROOT/'common'),str(ROOT/'common/legacy_v14_4'),str(ROOT/'scripts')]
 import universal_font_compiler_test as fixture
@@ -9,6 +9,7 @@ from fontTools.ttLib import TTFont
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 import composite_font
 import font_coverage
+import device_font_template as template
 OUT=Path(__file__).parent/'app/src/main/assets'
 OUT.mkdir(parents=True,exist_ok=True)
 points=tuple(sorted(set(range(32,127))|set(range(0x4e00,0x4e00+6100))|set(font_coverage.CJK_COMMON)))
@@ -21,12 +22,29 @@ for role,shape in shapes.items():
  path=OUT/(role+'.ttf');fixture.make_font(path,family='LuoShuSynthetic'+role)
  with TTFont(path) as f:
   for cp in points:
-   is_role=(cp>=0x4e00 if role=='cjk' else (48<=cp<=57 if role=='digit' else (65<=cp<=90 or 97<=cp<=122)))
+   if cp==32:
+    f['glyf'][f.getBestCmap()[cp]]=TTGlyphPen(None).glyph()
+    continue
+   punctuation=role=='latin' and cp<127 and unicodedata.category(chr(cp))[0] in 'PS'
+   is_role=(cp>=0x4e00 if role=='cjk' else (48<=cp<=57 if role=='digit' else (65<=cp<=90 or 97<=cp<=122 or punctuation)))
    if not is_role:continue
    current_shape=shape
    if role=='latin' and 97<=cp<=122:
     bottom=-200 if chr(cp) in 'gjpqy' else 0
     current_shape=[(50,bottom),(550,bottom),(300,500)]
+   if punctuation:
+    # Synthetic punctuation has punctuation-sized bounds, not the old almost
+    # one-em filled rectangle used for every period, comma and separator.
+    bottom,top=0,460
+    if chr(cp) in '.':bottom,top=0,90
+    elif chr(cp) in ',':bottom,top=-100,90
+    elif chr(cp) in ';':bottom,top=-100,460
+    elif chr(cp) in '_':bottom,top=-100,-30
+    elif chr(cp) in '!?':bottom,top=0,600
+    elif chr(cp) in '()[]{}':bottom,top=-150,650
+    elif chr(cp) in '+-=<>':bottom,top=150,500
+    elif chr(cp) in '/%':bottom,top=-30,670
+    current_shape=[(50,bottom),(250,bottom),(250,top),(50,top)]
    pen=TTGlyphPen(None);pen.moveTo(current_shape[0])
    for p in current_shape[1:]:pen.lineTo(p)
    pen.closePath();name=f.getBestCmap()[cp];f['glyf'][name]=pen.glyph()
@@ -39,6 +57,11 @@ with TTFont(OUT/'composite.ttf') as f:
  for cp,expected in [(ord('A'),3),(ord('1'),5),(ord('中'),6)]:
   glyph=f['glyf'][f.getBestCmap()[cp]];assert len(glyph.getCoordinates(f['glyf'])[0])==expected
  assert 0x03a9 not in f.getBestCmap() and 0x1f600 not in f.getBestCmap()
+ assert f['glyf'][f.getBestCmap()[32]].numberOfContours==0
+ baseline=template.glyph_group(f,template.PROBE_GROUPS['punctuationBaseline'])
+ centered=template.glyph_group(f,template.PROBE_GROUPS['punctuationCenter'])
+ assert 500 <= baseline['height'] <= 600, baseline
+ assert 700 <= centered['height'] <= 850, centered
 # Independent expected geometry for this fixed fixture: the compositor's
 # documented Latin/digit UI top is 826, so 700-unit donors scale by 1.18.
 # Horizontal origin is the scaled 40-unit LSB (47 after integer rounding).

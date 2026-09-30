@@ -8,6 +8,7 @@ This representation never grants permission to replace a physical/variable slot.
 from __future__ import annotations
 
 import copy
+import json
 import math
 import unicodedata
 from pathlib import Path
@@ -270,7 +271,14 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
         for probe in sorted(needed):
             transform = slot_build.transform_for_probe(geometry, probe)
             if not transform or transform.get("status") != "ready":
-                raise api.CompilerError("fixed static XML missing verified role geometry: " + probe)
+                details = {"probe": probe, "transform": {key: (transform or {}).get(key)
+                           for key in ("status", "reason", "risks", "relativeScaleY", "shiftYEm")},
+                           "sourceHeight": slot_plan.select_probe(source_profile["probes"], probe).get("height"),
+                           "stockHeight": slot_plan.select_probe(stock_profile["probes"], probe).get("height"),
+                           "sourceUpem": source_profile["metrics"].get("unitsPerEm"),
+                           "stockUpem": stock_profile["metrics"].get("unitsPerEm")}
+                raise api.CompilerError("fixed static XML missing verified role geometry: " + probe +
+                                        " " + json.dumps(details, sort_keys=True, separators=(",", ":")))
             for profile in (stock_profile, source_profile):
                 sample = slot_plan.select_probe(profile["probes"], probe)
                 if int(sample.get("boundsHits") or 0) < slot_plan.minimum_hits(probe):
