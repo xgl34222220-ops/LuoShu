@@ -35,7 +35,7 @@ router retains its text-only invariants.
 
 | Gate | Evidence | Limit |
 |---|---|---|
-| Static compiler | 17 focused host tests | Synthetic fonts; no phone performance claim |
+| Static compiler | 18 focused host tests | Synthetic fonts; no phone performance claim |
 | Exact XML representation | 11 host tests | Actual platform parser still covered separately |
 | Planner → compiler → payload → runtime | 10 host tests | Includes originals/tamper/membership/dynamic change; consumer remains pending |
 | Existing source gate | Passed at protected-family snapshot; PostScript-key correction targeted regressions rerun | CI rerun required on final snapshot |
@@ -73,3 +73,18 @@ name separately. Original byte/face provenance and inactive-update-generation
 checks remain mandatory; generated output still has its exact new PostScript name.
 Both runs stopped before system-file writes and their VMs were destroyed. Neither
 is a passing production-output default-consumer result.
+
+## OEM variation coordinates
+
+The explicit static adapter measures OEM reference coordinates using Skia's
+[bounded-axis behavior](https://skia.googlesource.com/skia.git/+/d4e23f36a05f770612d6f4baca9efe403d5f6508/src/ports/SkFontHost_FreeType.cpp): a finite coordinate outside a known fvar axis is pinned to its endpoint. The
+artifact reports requested/effective coordinates and actual ranges separately.
+Unknown/nonfinite axes and non-upright effective locations remain rejected. This
+does not permit changing the user's selected donor axes.
+
+The next native experiment records actual SDK fvar metadata and requires public
+Font/Canvas raster equivalence between each out-of-range OEM request and its
+endpoint, plus a discriminating opposite endpoint, before production compilation.
+A full-batch metadata preflight now precedes expensive geometry measurement.
+The previous 311-second preparation ended before any system write; it is not a
+successful performance benchmark or proof of phone latency.

@@ -36,8 +36,38 @@ def required_stock_paths(xml_paths, baseline):
     return sorted(required)
 
 
-def build(work, xml_paths, stock_paths, baseline, source, generation):
+def stock_axis_cases(xml_paths, stock_paths):
+    from fontTools.ttLib import TTFont
+    metadata=[];cases=[];seen=set()
+    for logical, path in stock_paths.items():
+        nodes=[n for xml,actual in xml_paths.items() for n in legacy._document_nodes(xml,legacy._parse_xml(Path(actual)))
+               if n['declared']==Path(logical).name]
+        for face in sorted({n['index'] for n in nodes}):
+            with Path(path).open('rb') as stream:collection=stream.read(4)==b'ttcf'
+            with TTFont(path,fontNumber=face if collection else -1,lazy=True) as font:
+                axes={a.axisTag:{'min':float(a.minValue),'default':float(a.defaultValue),'max':float(a.maxValue)} for a in font['fvar'].axes} if 'fvar' in font else {}
+                sha=hashlib.sha256(Path(path).read_bytes()).hexdigest()
+                metadata.append({'path':logical,'face':face,'sha256':sha,'axes':axes,'tables':list(font.keys())})
+                cmap=font.getBestCmap() or {};cp=0x4e2d if 0x4e2d in cmap else 65
+                for node in nodes:
+                    if node['index']!=face:continue
+                    requested=compiler._axis_values(node['axes'])
+                    if 'wght' in axes:requested.setdefault('wght',node['weight'])
+                    for tag,value in requested.items():
+                        if tag not in axes:continue
+                        axis=axes[tag];effective=min(axis['max'],max(axis['min'],value))
+                        key=(logical,face,tag,value)
+                        if value==effective or key in seen:continue
+                        seen.add(key)
+                        cases.append({'path':logical,'face':face,'tag':tag,'requested':value,'effective':effective,
+                            'min':axis['min'],'max':axis['max'],'opposite':axis['max'] if effective==axis['min'] else axis['min'],
+                            'glyphId':font.getGlyphID(cmap[cp]),'sha256':sha})
+    return metadata,cases
+
+
+def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostics=None):
     work=Path(work);work.mkdir(parents=True,exist_ok=True);started=time.monotonic()
+    trace_dir=Path(diagnostics) if diagnostics is not None else work;trace_dir.mkdir(parents=True,exist_ok=True)
     build_key=baseline['fingerprint'];slots={};roles={}
     # The rendered baseline identifies the exact default physical face. Other
     # captured XML indices in the same immutable collection remain distinct.
@@ -73,7 +103,7 @@ def build(work, xml_paths, stock_paths, baseline, source, generation):
     mapping=work/'stock-map.json';mapping.write_text(json.dumps({k:str(v) for k,v in stock_paths.items()}))
     # Namespace translation is confined to this experiment. Production calls
     # always read the real current mount/config state and contain no bypass.
-    with patch.object(router,'_dynamic_generation',return_value=generation),patch.dict(os.environ,{'LUOSHU_STOCK_FONT_MAP':str(mapping),'LUOSHU_UNIVERSAL_MIX_STRICT':'1'}):
+    with patch.object(router,'_dynamic_generation',return_value=generation),patch.dict(os.environ,{'LUOSHU_STOCK_FONT_MAP':str(mapping),'LUOSHU_UNIVERSAL_MIX_STRICT':'1','LUOSHU_MIX_REQUEST_ID':'native-production-fixture','LUOSHU_SWITCH_PROGRESS_FILE':str(trace_dir/'production-progress.json')}):
         route=router.build_route_plan(plan,base)
         artifacts=compiler.compile_all(plan,route,{k:Path(v) for k,v in stock_paths.items()},work/'compiled',False)
         (work/'artifacts.json').write_text(json.dumps(artifacts,ensure_ascii=False,indent=2))

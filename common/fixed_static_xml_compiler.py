@@ -63,7 +63,7 @@ def _upright(font):
             and float(font["post"].italicAngle) == 0)
 
 
-def _strict_location(font, axes, weight):
+def _original_location(font, axes, weight):
     api = _api()
     if not isinstance(axes, list):
         raise api.CompilerError("fixed static original axes must be a list")
@@ -79,15 +79,34 @@ def _strict_location(font, axes, weight):
     known = {str(axis.axisTag): axis for axis in font["fvar"].axes} if "fvar" in font else {}
     if set(requested) - set(known):
         raise api.CompilerError("fixed static original axis is absent from OEM face")
-    location = {}
+    location, ranges, selected = {}, {}, {}
     for tag, axis in known.items():
         value = requested.get(tag, weight if tag == "wght" else float(axis.defaultValue))
-        if not math.isfinite(value) or not float(axis.minValue) <= value <= float(axis.maxValue):
-            raise api.CompilerError("fixed static original axis is outside OEM range: " + tag)
-        location[tag] = float(value)
+        lower, upper = float(axis.minValue), float(axis.maxValue)
+        if not all(math.isfinite(v) for v in (value, lower, upper, float(axis.defaultValue))) or lower > upper:
+            raise api.CompilerError("fixed static original axis has invalid finite bounds: " + tag)
+        # Skia pins an OEM XML coordinate to the face's fvar range. This is
+        # reference measurement only; selected user/source axes stay strict.
+        ranges[tag] = {"min": lower, "default": float(axis.defaultValue), "max": upper}
+        selected[tag] = float(value)
+        location[tag] = min(upper, max(lower, float(value)))
     if location.get("ital", 0) != 0 or location.get("slnt", 0) != 0:
         raise api.CompilerError("fixed static XML requires upright OEM location")
-    return location
+    return location, {"policy": "skia-oem-reference-clamp-v1", "requested": selected,
+                      "effective": location, "ranges": ranges,
+                      "clampedAxes": sorted(tag for tag in selected if selected[tag] != location[tag])}
+
+
+def preflight_unit(unit, stock_paths, allow_live_stock):
+    """Reject invalid metadata before measuring any full batch geometry."""
+    api = _api()
+    _validate_unit(unit)
+    target, artifact = unit["target"], unit["artifact"]
+    stock = api._resolve_stock(str(target["path"]), stock_paths, allow_live_stock)
+    face = artifact["originalStockFaceIndex"]
+    verify_original_face(target, stock, face, metadata_only=True)
+    with api._open_face(stock, face, lazy=True) as font:
+        return _original_location(font, artifact["originalStockAxes"], api._int(artifact.get("requiredWeight"), 400))[1]
 
 
 def _profile_contract(profile):
@@ -148,7 +167,7 @@ def _validate_unit(unit):
         raise api.CompilerError("fixed static XML cannot bypass blocked source/style gates")
 
 
-def verify_original_face(target, stock, face_index):
+def verify_original_face(target, stock, face_index, *, metadata_only=False):
     """Verify another sealed XML face inside an unchanged original collection.
 
     The capture face hint remains unchanged. Its whole-file digest seals every
@@ -160,15 +179,18 @@ def verify_original_face(target, stock, face_index):
     captured = identity.get("faceIndex")
     if type(captured) is not int or type(face_index) is not int or face_index < 0:
         raise api.CompilerError("original face identity missing")
+    def verify_face(index):
+        return (api._verify_stock_identity(target, stock, index) if metadata_only else
+                api._validate_stock_contract(target, stock, index)["verifiedStockIdentity"])
     if captured == face_index:
-        return api._validate_stock_contract(target, stock, face_index)["verifiedStockIdentity"]
+        return verify_face(face_index)
     if api._magic(stock) != api.COLLECTION_MAGIC:
         raise api.CompilerError("another original face requires a sealed collection")
     if (target.get("targetContract", {}).get("faceIndex") != face_index or
             not any(ref.get("index") == face_index and ref.get("fingerprint")
                     for ref in target.get("xmlRefs") or [])):
         raise api.CompilerError("original collection face is not bound to a frozen XML node")
-    evidence = api._validate_stock_contract(target, stock, captured)["verifiedStockIdentity"]
+    evidence = verify_face(captured)
     selected = api._open_face(stock, face_index, lazy=True)
     selected.close()
     return {**evidence, "scope":"sealed-container-xml-face-v1", "captureFaceIndex":captured,
@@ -214,7 +236,7 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
         if "VARC" in stock_font:
             raise api.CompilerError("fixed static XML OEM VARC geometry is unsupported")
         weight = api._int(artifact.get("requiredWeight"), 400)
-        location = _strict_location(stock_font, artifact["originalStockAxes"], weight)
+        location, axis_evidence = _original_location(stock_font, artifact["originalStockAxes"], weight)
         source_points = set(original.getBestCmap() or {})
         stock_points = set(stock_font.getBestCmap() or {})
         role = str(target["role"])
@@ -304,7 +326,7 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
                        "fixedSelection": copy.deepcopy(source["mixedSelection"]),
                        "profile": _profile_contract(source_profile)},
             "stock": {"sha256": verified["sha256"], "faceIndex": stock_face,
-                      "location": location, "profile": _profile_contract(stock_profile)},
+                      "location": location, "axisRanges": axis_evidence["ranges"], "profile": _profile_contract(stock_profile)},
             "role": role, "coverage": coverage,
             "geometry": {key: copy.deepcopy(geometry.get(key)) for key in
                          ("roles", "lineContract", "transforms", "upemScale", "sharedProbePoints",
@@ -322,7 +344,7 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
             raise api.CompilerError("fixed static XML OEM bytes changed during preparation")
         return {"contract": contract, "binding": binding, "points": points,
                 "sourcePath": str(path), "stockPath": str(stock), "stockProfile": stock_profile,
-                "geometry": geometry, "stockXmlIdentity": xml_identity, "unit": copy.deepcopy(unit)}
+                "geometry": geometry, "stockXmlIdentity": xml_identity, "stockAxisEvidence": axis_evidence, "unit": copy.deepcopy(unit)}
     finally:
         original.close()
         if stock_font is not None:
@@ -406,6 +428,7 @@ def compile_prepared(prepared, output_dir, cache):
         return {"output": str(output), "staticXmlContract": copy.deepcopy(binding),
                 "report": {"mode": REPRESENTATION, "renderContract": contract, "validation": validation,
                            "stockXmlIdentity": copy.deepcopy(prepared["stockXmlIdentity"]),
+                           "stockAxisEvidence": copy.deepcopy(prepared["stockAxisEvidence"]),
                            "renderReuse": {"hit": True}}}
     font = api._open_face(Path(prepared["sourcePath"]), contract["source"]["faceIndex"])
     try:
@@ -436,6 +459,7 @@ def compile_prepared(prepared, output_dir, cache):
         return {"output": str(output), "staticXmlContract": copy.deepcopy(binding),
                 "report": {"mode": REPRESENTATION, "renderContract": contract, "validation": validation,
                            "stockXmlIdentity": copy.deepcopy(prepared["stockXmlIdentity"]),
+                           "stockAxisEvidence": copy.deepcopy(prepared["stockAxisEvidence"]),
                            "transformed": transformed, "renderReuse": {"hit": False}}}
     except Exception:
         output.unlink(missing_ok=True)

@@ -9,6 +9,7 @@ import android.graphics.fonts.FontFamily;
 import android.graphics.fonts.FontStyle;
 import android.os.*;
 import org.json.JSONObject;
+import org.json.JSONArray;
 import java.io.*;
 import java.lang.reflect.*;
 import java.nio.file.*;
@@ -105,6 +106,38 @@ public final class Runner extends Instrumentation {
         MessageDigest digest=MessageDigest.getInstance("SHA-256");java.nio.ByteBuffer data=font.getBuffer().duplicate();data.rewind();digest.update(data);
         StringBuilder result=new StringBuilder();for(byte value:digest.digest())result.append(String.format(Locale.ROOT,"%02x",value&255));return result.toString();
     }
+    private String drawOriginalAxis(JSONObject item,double value) throws Exception {
+        Font font=new Font.Builder(new File(item.getString("path"))).setTtcIndex(item.getInt("face"))
+            .setWeight(400).setSlant(FontStyle.FONT_SLANT_UPRIGHT)
+            .setFontVariationSettings(new android.graphics.fonts.FontVariationAxis[]{
+                new android.graphics.fonts.FontVariationAxis(item.getString("tag"),(float)value)}).build();
+        require(fontBufferHash(font).equals(item.getString("sha256")),"OEM axis probe bytes changed");
+        Bitmap bitmap=Bitmap.createBitmap(192,128,Bitmap.Config.ARGB_8888);
+        Paint paint=new Paint(Paint.ANTI_ALIAS_FLAG);paint.setTextSize(72);paint.setColor(Color.BLACK);paint.setHinting(Paint.HINTING_OFF);
+        new Canvas(bitmap).drawGlyphs(new int[]{item.getInt("glyphId")},0,new float[]{24,96},0,1,font,paint);
+        int[] pixels=new int[192*128];bitmap.getPixels(pixels,0,192,0,0,192,128);
+        ByteArrayOutputStream raw=new ByteArrayOutputStream();DataOutputStream bytes=new DataOutputStream(raw);boolean ink=false;
+        for(int pixel:pixels){bytes.writeInt(pixel);ink|=(pixel>>>24)!=0;}
+        bitmap.recycle();require(ink,"empty OEM axis probe");return hash(raw.toByteArray());
+    }
+    private void stockAxisPhase() throws Exception {
+        JSONArray cases=new JSONArray(new String(Base64.getDecoder().decode(arguments.getString("axisCases")),StandardCharsets.UTF_8));
+        require(cases.length()<=64,"too many OEM axis probe cases");JSONArray proofs=new JSONArray();
+        for(int i=0;i<cases.length();i++) {
+            JSONObject item=cases.getJSONObject(i);
+            require(item.getString("path").startsWith("/system/fonts/"),"OEM probe escaped system font scope");
+            String requested=drawOriginalAxis(item,item.getDouble("requested"));
+            String endpoint=drawOriginalAxis(item,item.getDouble("effective"));
+            String opposite=drawOriginalAxis(item,item.getDouble("opposite"));
+            require(requested.equals(endpoint),"OEM out-of-range coordinate differs from boundary: "+item);
+            require(!endpoint.equals(opposite),"OEM axis probe was not discriminating: "+item);
+            JSONObject proof=new JSONObject(item.toString());proof.put("requestedRaster",requested);proof.put("endpointRaster",endpoint);
+            proof.put("oppositeRaster",opposite);proofs.put(proof);
+        }
+        report.put("cases",proofs);report.put("status","passed-stock-axis-gate");
+        Files.write(new File(root,"report-stock-axis.json").toPath(),report.toString(2).getBytes(StandardCharsets.UTF_8));
+        Bundle output=new Bundle();output.putString("stream",report.toString());finish(Activity.RESULT_OK,output);
+    }
     private void systemPhase(String phase) throws Exception {
         JSONObject renders=new JSONObject();
         for(String text:new String[]{"A","1","中","Ω","😀"})renders.put(text,draw(Typeface.DEFAULT,text,null));
@@ -151,6 +184,7 @@ public final class Runner extends Instrumentation {
             context=getTargetContext();root=context.getFilesDir();report=new JSONObject();
             report.put("phase",phase);report.put("sdk",Build.VERSION.SDK_INT);report.put("fingerprint",Build.FINGERPRINT);
             report.put("moduleMountTested",false);report.put("systemFontConfigMutated",false);report.put("hookUsed",false);
+            if(phase.equals("stock-axis")){stockAxisPhase();return;}
             if(phase.startsWith("system-")){systemPhase(phase);return;}
             JSONObject fixture;try(InputStream in=context.getAssets().open("fixture.json")){fixture=new JSONObject(new String(in.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8));}
             File composite=asset("composite.ttf"),latin=asset("latin.ttf"),digit=asset("digit.ttf"),cjk=asset("cjk.ttf");

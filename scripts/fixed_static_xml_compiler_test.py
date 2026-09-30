@@ -180,7 +180,7 @@ class FixedStaticCompilerTest(unittest.TestCase):
             with self.subTest(kind=unit["deploymentKinds"], style=unit["artifact"]["requiredStyle"]):
                 self.assertEqual(self.compile(unit)["status"], "blocked")
 
-    def test_nondefault_oem_axis_is_measured_and_out_of_range_rejected(self):
+    def test_oem_reference_clamps_like_skia_and_unknown_axis_is_rejected(self):
         fixture.make_font(self.stock, family="Synthetic OEM", variable=True)
         unit = self.unit(weight=700)
         unit["artifact"]["originalStockAxes"] = [{"tag": "wght", "stylevalue": "650"}]
@@ -190,9 +190,28 @@ class FixedStaticCompilerTest(unittest.TestCase):
         with TTFont(result["output"]) as font:
             self.assertNotIn("fvar", font)
         unit["artifact"]["originalStockAxes"][0]["stylevalue"] = "950"
-        self.assertIn("outside OEM range", self.compile(unit)["reason"])
+        bounded = self.compile(unit)
+        self.assertEqual(bounded["status"], "ready", bounded)
+        self.assertEqual(bounded["report"]["stockAxisEvidence"]["requested"], {"wght": 950})
+        self.assertEqual(bounded["report"]["stockAxisEvidence"]["effective"], {"wght": 900})
+        self.assertEqual(bounded["report"]["stockAxisEvidence"]["clampedAxes"], ["wght"])
+        bounded_bytes = Path(bounded["output"]).read_bytes()
+        unit["artifact"]["originalStockAxes"][0]["stylevalue"] = "900"
+        endpoint = self.compile(unit)
+        self.assertEqual(bounded_bytes, Path(endpoint["output"]).read_bytes())
+        unit["artifact"]["originalStockAxes"][0]["stylevalue"] = "NaN"
+        self.assertIn("nonfinite", self.compile(unit)["reason"])
         unit["artifact"]["originalStockAxes"] = [{"tag": "wdth", "stylevalue": "100"}]
         self.assertIn("absent", self.compile(unit)["reason"])
+
+    def test_batch_contract_failure_precedes_all_geometry_measurements(self):
+        plan, route = self.routed_plan()
+        units = compiler._collect_units(plan, route)
+        units[-1]["artifact"]["originalStockAxes"] = [{"tag": "wdth", "stylevalue": "100"}]
+        with patch.object(compiler, "_collect_units", return_value=units), patch.object(fixed, "prepare_unit", wraps=fixed.prepare_unit) as measure:
+            with self.assertRaisesRegex(compiler.CompilerError, "fixed-static-preflight.*absent"):
+                compiler.compile_all(plan, route, {self.logical: self.stock}, self.root / "preflight", False)
+            self.assertEqual(measure.call_count, 0)
 
     def test_unmeasured_han_and_unprobed_clipping_fail_closed(self):
         add_points(self.source, [ord("中")])

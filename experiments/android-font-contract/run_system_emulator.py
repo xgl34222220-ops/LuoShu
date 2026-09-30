@@ -17,6 +17,7 @@ phase='preflight';started=time.monotonic();backups={};touched=False;new_fonts={}
 def save():
  report.update(stage=phase,elapsedSeconds=round(time.monotonic()-started,3),systemFilesTouched=touched)
  (a.output/'system-summary.json').write_text(json.dumps(report,indent=2)+'\n')
+ print(json.dumps({'stage':phase,'elapsedSeconds':report['elapsedSeconds'],'systemFilesTouched':touched}),flush=True)
 def adb(*args,timeout=120,check=True):
  begin=time.monotonic();r=subprocess.run(['adb',*args],capture_output=True,timeout=timeout)
  with (a.output/'system-commands.jsonl').open('a') as f:f.write(json.dumps({'args':args,'returncode':r.returncode,'seconds':round(time.monotonic()-begin,3),'output':(r.stdout+r.stderr).decode(errors='replace')[-4000:]})+'\n')
@@ -39,8 +40,8 @@ def reboot():
  adb('reboot');time.sleep(2);boot()
 def root():
  adb('root');adb('wait-for-device');assert adb('shell','id','-u').strip()==b'0','adbd root unavailable'
-def probe(name):
- extras=[]
+def probe(name, extra_args=None):
+ extras=list(extra_args or [])
  if name=='system-applied':
   for role,contract in expected_roles.items():
    axes=','.join(str(x['tag'])+'='+str(x.get('stylevalue',x.get('value'))) for x in contract['axes'])
@@ -50,7 +51,7 @@ def probe(name):
  (a.output/(name+'.txt')).write_bytes(log)
  raw=adb('exec-out','run-as',PACKAGE,'cat','files/report-'+name+'.json')
  (a.output/(name+'.json')).write_bytes(raw);r=json.loads(raw)
- if r.get('status')!='passed-system-gate':raise RuntimeError(r)
+ if r.get('status')!=('passed-stock-axis-gate' if name=='stock-axis' else 'passed-system-gate'):raise RuntimeError(r)
  if name=='system-applied':
   for role,sample in [('Latin','A'),('Digit','1'),('Cjk','中')]:
    if role in expected_roles and r['actualDefaultFonts'][sample][0].get('sha256')!=expected_roles[role]['sha256']:
@@ -110,18 +111,23 @@ try:
   work=Path(__file__).parent/'.work-production';(work/'stock').mkdir(parents=True,exist_ok=True)
   import sys
   sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'xml-first'))
-  from build_production_case import build,required_stock_paths
+  from build_production_case import build,required_stock_paths,stock_axis_cases
   captured={}
   captured_xml={remote:a.output/('original-'+Path(remote).name) for remote in backups}
   for logical in required_stock_paths(captured_xml,report['baseline']):
    if Path(logical).name not in {'Roboto-Regular.ttf','Roboto-Italic.ttf','NotoSansCJK-Regular.ttc','NotoSerifCJK-Regular.ttc'}:
     raise RuntimeError('unrecognized disposable SDK family member: '+logical)
    local=work/'stock'/Path(logical).name;adb('pull',logical,str(local));captured[logical]=local
+  metadata,axis_cases=stock_axis_cases(captured_xml,captured)
+  (a.output/'stock-axis-metadata.json').write_text(json.dumps({'fonts':metadata,'cases':axis_cases},indent=2))
+  if axis_cases:
+   import base64
+   report['stockAxisProof']=probe('stock-axis',['-e','axisCases',base64.b64encode(json.dumps(axis_cases).encode()).decode()])
   config='/data/fonts/config/config.xml';exists=subprocess.run(['adb','shell','test','-f',config]).returncode==0
   generation={'path':config,'exists':exists,'sha256':hashlib.sha256(read_system_file(config)).hexdigest() if exists else ''}
   payload,manifest,expected_roles,case_report=build(work/'generated',
     {remote:a.output/('original-'+Path(remote).name) for remote in backups},captured,
-    report['baseline'],assets/'composite.ttf',generation)
+    report['baseline'],assets/'composite.ttf',generation,diagnostics=a.output)
   (a.output/'production-pipeline.json').write_text(json.dumps(case_report,indent=2))
   generated={f['logicalPath']:payload/f['payloadPath'] for f in manifest['files'] if f['kind']=='xml'}
   new_fonts={f['logicalPath']:payload/f['payloadPath'] for f in manifest['files'] if f['kind']!='xml'}

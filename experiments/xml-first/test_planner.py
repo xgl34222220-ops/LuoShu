@@ -22,6 +22,18 @@ class Tests(unittest.TestCase):
    baseline={'actualDefaultFonts':{'A':[{'file':'/system/fonts/Ui.ttf'}],'中':[{'file':'/system/fonts/Cjk.ttc'}]}}
    self.assertEqual(required_stock_paths({'/system/etc/font_fallback.xml':xml},baseline),
     ['/system/fonts/Cjk.ttc','/system/fonts/Serif.ttc','/system/fonts/Ui.ttf','/system/fonts/UiItalic.ttf'])
+ def test_oem_axis_probe_cases_are_real_fvar_bounds(self):
+  import tempfile
+  from pathlib import Path
+  from build_production_case import stock_axis_cases
+  import universal_font_compiler_test as fonts
+  with tempfile.TemporaryDirectory() as d:
+   root=Path(d);font=root/'OEM.ttf';fonts.make_font(font,family='Probe',variable=True,axis_min=300,axis_max=800)
+   xml=root/'fonts.xml';xml.write_text('<familyset><family name="sans-serif"><font weight="100">OEM.ttf</font><font weight="400">OEM.ttf</font><font weight="900">OEM.ttf</font></family></familyset>')
+   metadata,cases=stock_axis_cases({'/system/etc/fonts.xml':xml},{'/system/fonts/OEM.ttf':font})
+   self.assertEqual(metadata[0]['axes']['wght'],{'min':300,'default':400,'max':800})
+   self.assertEqual([(c['requested'],c['effective'],c['opposite']) for c in cases],[(100,300,800),(900,800,300)])
+   self.assertTrue(all(c['glyphId']>0 and len(c['sha256'])==64 for c in cases))
  def test_groups_before_render_preserves_protected(self):
   p=plan(XML,SHA,[selection(0),selection(1)]);calls=[]
   compile_groups(p,lambda g:calls.append(g['id']) or b'synthetic-render-result')

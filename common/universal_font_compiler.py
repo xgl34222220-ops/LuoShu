@@ -2333,6 +2333,13 @@ def _compile_all_in_view(
     # Every new static route is measured and sealed before the first outline
     # render. Legacy physical/dynamic units retain their existing contracts.
     static_units = [unit for unit in units if unit["artifact"].get("representation") == "fixed-static-xml-v1"]
+    for contract_index, unit in enumerate(static_units):
+        import fixed_static_xml_compiler as fixed_static
+        _mixed_compile_progress(contract_index, len(static_units), base=80, span=2, label="正在核对原厂字体契约")
+        try:
+            fixed_static.preflight_unit(unit, stock_paths, allow_live_stock)
+        except CompilerError as error:
+            raise CompilerError(f"fixed-static-preflight {unit['target'].get('path')} face={unit['artifact'].get('originalStockFaceIndex')}: {error}") from error
     for measure_index, unit in enumerate(static_units):
         import fixed_static_xml_compiler as fixed_static
         _mixed_compile_progress(measure_index, len(static_units), base=82, span=3, label="正在测量原厂槽位")
