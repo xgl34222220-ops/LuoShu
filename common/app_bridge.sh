@@ -159,6 +159,7 @@ status_json() {
     _rollback_file="$MODDIR/config/universal-font-rollback.conf"
     _cutover_state="$(read_prop "$_cutover_file" state)"
     _cutover_decision="$(read_prop "$_cutover_file" decision)"
+    _cutover_reason="$(read_prop "$_cutover_file" reason)"
     _rollback_state="$(read_prop "$_rollback_file" state)"
     _rollback_target_font="$(read_prop "$_rollback_file" targetFont)"
     _rollback_target_mode="$(read_prop "$_rollback_file" targetMode)"
@@ -166,6 +167,7 @@ status_json() {
     [ "$_rollback_state" = staged ] && _rollback_pending=true
     [ -n "$_cutover_state" ] || _cutover_state=idle
     [ -n "$_cutover_decision" ] || _cutover_decision=none
+    [ -n "$_cutover_reason" ] || _cutover_reason=none
     [ -n "$_rollback_state" ] || _rollback_state=none
 
     _selected="$(select_task_file)"
@@ -237,12 +239,13 @@ status_json() {
         _font_effect_state=unverified
     fi
 
-    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationGrade":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","mountFailure":"%s","cutoverState":"%s","cutoverDecision":"%s","rollbackState":"%s","rollbackPending":%s,"rollbackTargetFont":"%s","rollbackTargetMode":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
+    printf '{"status":"ok","data":{"root":true,"installed":%s,"version":"%s","versionCode":%s,"active":"%s","effectiveActive":"%s","fontEffectState":"%s","verificationState":"%s","verificationGrade":"%s","verificationMode":"%s","verificationReason":"%s","mountState":"%s","mountFailure":"%s","cutoverState":"%s","cutoverDecision":"%s","cutoverReason":"%s","rollbackState":"%s","rollbackPending":%s,"rollbackTargetFont":"%s","rollbackTargetMode":"%s","taskType":"%s","taskId":"%s","taskState":"%s","taskMessage":"%s","taskProgress":%s,"rebootRequired":%s,"rootManager":"%s","mountEngine":"%s","moduleDir":"%s"}}\n' \
         "$_installed" "$(json_escape "$_version")" "${_version_code:-0}" "$(json_escape "$_active")" \
         "$(json_escape "$_effective_active")" "$(json_escape "$_font_effect_state")" \
         "$(json_escape "$_verification_state")" "$(json_escape "$_verification_grade")" "$(json_escape "$_verification_mode")" \
         "$(json_escape "$_verification_reason")" "$(json_escape "$_mount_state")" "$(json_escape "$_mount_failed")" \
-        "$(json_escape "$_cutover_state")" "$(json_escape "$_cutover_decision")" "$(json_escape "$_rollback_state")" "$_rollback_pending" \
+        "$(json_escape "$_cutover_state")" "$(json_escape "$_cutover_decision")" "$(json_escape "$_cutover_reason")" \
+        "$(json_escape "$_rollback_state")" "$_rollback_pending" \
         "$(json_escape "$_rollback_target_font")" "$(json_escape "$_rollback_target_mode")" \
         "$(json_escape "$_task_type")" "$(json_escape "$_task_id")" "$(json_escape "$_task_state")" \
         "$(json_escape "$_task_message")" "$_task_progress" "$_reboot_required" \
