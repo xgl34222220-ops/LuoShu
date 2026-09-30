@@ -63,6 +63,7 @@ try:
  assert adb('shell','getprop','ro.build.type').strip()==b'userdebug','not userdebug'
  assert adb('shell','getprop','ro.build.version.sdk').strip()==b'36','unexpected API'
  report['baseline']=probe('system-baseline');phase='snapshot';save()
+ root()  # Authorized disposable VM; snapshot system-only configuration too.
  # Refuse collision using the actual command exit status.
  exists=subprocess.run(['adb','shell','test','-e',asset]).returncode==0
  if exists:raise RuntimeError('experiment asset already exists')
@@ -72,7 +73,7 @@ try:
   raw=adb('exec-out','cat',remote);backups[remote]=raw
   (a.output/('original-'+Path(remote).name)).write_bytes(raw)
  if not backups:raise RuntimeError('no system font config found')
- for name,cmd in [('font-manager',['shell','dumpsys','font']),('font-files',['shell','find','/system/etc','/product/etc','/vendor/etc','/system_ext/etc','/apex','-maxdepth','4','-iname','*font*'])]:
+ for name,cmd in [('font-manager',['shell','dumpsys','font']),('font-files',['shell','find','-H','/system/etc','/product/etc','/vendor/etc','/system_ext/etc','/apex','-maxdepth','4','-iname','*font*'])]:
   (a.output/(name+'.txt')).write_bytes(adb(*cmd,timeout=30,check=False))
  for remote in ['/product/etc/fonts_customization.xml','/product/etc/font_fallback.xml','/system_ext/etc/font_fallback.xml']:
   r=subprocess.run(['adb','shell','test','-f',remote])
