@@ -98,7 +98,10 @@ _topology_ensure() {
     # Do not overwrite sealed original evidence with our visible bind overlay.
     [ "$_tfe_current_rc" -ne 3 ] || return 1
     if [ "$_tfe_current_rc" -ne 0 ]; then
-        if ! _topology_exec -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("scannerRevision")==6 and all(isinstance(s.get("stockIdentity"),dict) and s["stockIdentity"].get("captureRevision")==2 and isinstance(s.get("stockGeometryProfile"),dict) for s in d.get("slots",{}).values()) else 1)' "$INVENTORY" >/dev/null 2>&1; then
+        _topology_exec "$SCRIPT" --validate-inventory-current --inventory "$INVENTORY" --output "$OUTPUT" >>"$LOG" 2>&1
+        _tfe_inventory_rc=$?
+        [ "$_tfe_inventory_rc" -ne 3 ] || return 1
+        if [ "$_tfe_inventory_rc" -ne 0 ]; then
             [ -f "$MODDIR/common/font_manager.sh" ] || return 1
             MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action stock_scan >>"$LOG" 2>&1 || return 1
         fi

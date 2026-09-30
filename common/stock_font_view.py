@@ -3,8 +3,11 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
+import ctypes
+import errno
+import os
 import signal
-import subprocess
+import sys
 import tempfile
 import threading
 
@@ -16,6 +19,22 @@ _LOCAL = threading.local()
 
 def current_view():
     return getattr(_LOCAL, "view", None)
+
+
+def detach_snapshot(path: Path) -> bool:
+    """Detach only a request-owned input bind without spawning a killable helper.
+
+    MNT_DETACH removes this namespace entry immediately even while a reader is
+    closing its fd; it does not unmount or modify the original ROM filesystem.
+    """
+    try:
+        unmount = ctypes.CDLL(None, use_errno=True).umount2
+        unmount.argtypes = [ctypes.c_char_p, ctypes.c_int]
+        unmount.restype = ctypes.c_int
+        result = unmount(os.fsencode(path), 2)  # Linux/Android MNT_DETACH
+        return result == 0 or ctypes.get_errno() in {errno.EINVAL, errno.ENOENT}
+    except (AttributeError, OSError):
+        return False
 
 
 class StockView:
@@ -44,11 +63,11 @@ class StockView:
     def close(self):
         # No recursive deletion: a failed unmount must never walk ROM contents.
         for path in reversed(self.owned):
-            try:
-                subprocess.run(["umount", str(path)], timeout=1, check=False,
-                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except (OSError, subprocess.SubprocessError):
-                pass
+            if self.base is None or path.parent != self.base or path.is_symlink():
+                continue
+            detached = detach_snapshot(path)
+            if not detached and str(path) in recovery._mount_targets():
+                print("[STOCK-VIEW-CLEANUP] retained request mount: " + str(path), file=sys.stderr)
             try:
                 if str(path) not in recovery._mount_targets():
                     path.rmdir()

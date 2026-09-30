@@ -1,0 +1,9 @@
+.gradle/
+**/build/
+app/src/main/assets/*.ttf
+app/src/main/assets/fixture.json
+local.properties
+output/
+
+__pycache__/
+*.pyc

@@ -502,6 +502,28 @@ def _summary(payload: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+class CurrentBuildUnavailable(TopologyError):
+    pass
+
+
+def validate_inventory_current(inventory: dict[str, Any]) -> None:
+    # A cached buildKey cannot establish the currently running firmware. This
+    # uses the same Android property rule as capture, without reading font bytes.
+    from font_inventory import current_build_key
+    current, _fingerprint, _display = current_build_key(None)
+    if not current or current == "unknown":
+        raise CurrentBuildUnavailable("无法读取当前系统构建身份，保留原厂缓存")
+    if inventory.get("buildKey") != current:
+        raise TopologyError("系统构建已变化，需要可信重扫原厂字体")
+    if inventory.get("scannerRevision") != 6:
+        raise TopologyError("字体扫描版本已过期")
+    if not all(isinstance(slot.get("stockIdentity"), dict)
+               and slot["stockIdentity"].get("captureRevision") == 2
+               and isinstance(slot.get("stockGeometryProfile"), dict)
+               for slot in inventory.get("slots", {}).values()):
+        raise TopologyError("原厂字体身份缺失，需要可信重扫")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--inventory", type=Path)
@@ -513,7 +535,20 @@ def main() -> int:
     parser.add_argument("--mountinfo", type=Path)
     parser.add_argument("--validate", action="store_true")
     parser.add_argument("--validate-current", action="store_true")
+    parser.add_argument("--validate-inventory-current", action="store_true")
     args = parser.parse_args()
+
+    if args.validate_inventory_current:
+        try:
+            validate_inventory_current(_load_json(args.inventory) if args.inventory else {})
+        except CurrentBuildUnavailable as error:
+            print(json.dumps({"status": "blocked", "reason": "current-build-unavailable", "message": str(error)}, ensure_ascii=False))
+            return 3
+        except (TopologyError, OSError) as error:
+            print(json.dumps({"status": "error", "message": str(error)}, ensure_ascii=False))
+            return 1
+        print(json.dumps({"status": "ok"}))
+        return 0
 
     if args.validate or args.validate_current:
         try:
@@ -524,10 +559,9 @@ def main() -> int:
             validate_topology(topology, expected)
             if args.validate_current:
                 inventory = _load_json(args.inventory) if args.inventory else {}
-                if inventory.get("scannerRevision") != 6 or topology.get("scannerRevision") != 6:
+                validate_inventory_current(inventory)
+                if topology.get("scannerRevision") != 6:
                     raise TopologyError("字体扫描版本已过期")
-                if not all(isinstance(slot.get("stockIdentity"), dict) and slot["stockIdentity"].get("captureRevision") == 2 and isinstance(slot.get("stockGeometryProfile"), dict) for slot in inventory.get("slots", {}).values()):
-                    raise TopologyError("原厂字体身份缺失，需要可信重扫")
                 dynamic = topology.get("runtime", {}).get("dynamicFontsEvidence", {})
                 current_config = args.data_fonts_config or Path("/data/fonts/config/config.xml")
                 current_files = args.data_fonts_dir or Path("/data/fonts/files")
@@ -557,6 +591,9 @@ def main() -> int:
                     raise TopologyError("动态字体配置已变化或尚未解析")
                 if not current_config.is_file() and _scan_data_fonts(current_files):
                     raise TopologyError("动态字体存在但缺少权威配置")
+        except CurrentBuildUnavailable as error:
+            print(json.dumps({"status": "blocked", "reason": "current-build-unavailable", "message": str(error)}, ensure_ascii=False))
+            return 3
         except TopologyRefreshBlocked as error:
             print(json.dumps({"status": "blocked", "reason": "dynamic-original-view-required", "message": str(error)}, ensure_ascii=False))
             return 3

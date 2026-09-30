@@ -123,3 +123,35 @@ scanner path mapping, sealed geometry, two-partition/two-hop resolution, compile
 font output, cache migration, changed-alias and changed-byte rejection. Kernel
 mount rows are modeled on the host; the user's exact symlink and native Android
 mount behavior remain unverified until device evidence confirms them.
+
+### R6: repeated application, cancellation and actionable geometry failures
+
+- Current topology validation now checks the running Android build identity,
+  rather than comparing two copies of the cached identity. An OTA mismatch uses
+  the locked stock-safe scan before rebuilding topology. An unreadable current
+  identity preserves the old evidence and blocks; it cannot authorize recapture.
+  Same-build content changes still meet the compiler's mandatory SHA gate.
+- Physical bind planning now checks all logical targets across components before
+  any payload bind. Different payload bytes sharing one real target cannot be
+  reported successful. Equal-byte aliases can share a bind; directory overlays
+  that make the logical targets independent still support distinct outputs.
+  Visibility uses full-byte comparison, including the middle of the font.
+- Request-owned recovery views use in-process lazy detach. A real private Linux
+  mount-namespace regression reproduced cancellation killing the old slow
+  unmount helper while reporting no child processes left; the corrected path
+  removes the view, preserves original bytes and permits the second request.
+  This is Linux kernel evidence, not Android/root-manager device certification.
+- Fixed-outline MVAR line budgets use exact extrema on a bounded Cartesian grid
+  of continuous region breakpoints. Mutually exclusive negative regions are no
+  longer falsely accumulated as simultaneous extrema. Discontinuous or oversized
+  grids retain the conservative signed-delta bounds. Genuine clipping is still
+  rejected, and the original MVAR table remains intact.
+- Blocked deployment errors now include bounded, sanitized root causes and the
+  artifact-manifest location in the existing prepare log. Real failures and
+  artifacts skipped after an atomic failure are counted separately. Line-budget
+  failures persist measured imported bounds, allowed bounds and envelope method.
+
+The reported device failure supplied one line-budget error followed by skipped
+artifacts, but no source/OEM font bytes or numeric bounds. The mutually exclusive
+MVAR defect is independently reproduced; it is not claimed to be the unique cause
+of that device's failure. No failed slot or clipping gate is silently waived.

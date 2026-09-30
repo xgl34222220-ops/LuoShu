@@ -33,7 +33,7 @@ class ViewTests(unittest.TestCase):
         self.fs=patch.object(Path,'stat',stat);self.fs.start();self.addCleanup(self.fs.stop)
         self.mount=patch.object(scan,'_run_mount',side_effect=self.mount_call);self.mount.start();self.addCleanup(self.mount.stop)
         self.unmount=patch.object(scan,'_run_umount',side_effect=self.unmount_call);self.unmount.start();self.addCleanup(self.unmount.stop)
-        self.command=patch.object(view.subprocess,'run',side_effect=self.command_call);self.command.start();self.addCleanup(self.command.stop)
+        self.command=patch.object(view,'detach_snapshot',side_effect=self.unmount_call);self.command.start();self.addCleanup(self.command.stop)
         self.mirrors=patch.object(compiler.font_inventory,'MIRROR_PREFIXES',());self.mirrors.start();self.addCleanup(self.mirrors.stop)
     def sync(self):self.info.write_text(self.base+''.join(self.rows.values()))
     def mount_call(self,*args):
@@ -88,7 +88,7 @@ class ViewTests(unittest.TestCase):
         self.assertFalse(self.rows);self.assertEqual((old/'keep').read_text(),'keep')
     def test_unmount_failure_never_deletes_mounted_contents(self):
         self.captured_target()
-        with patch.object(view.subprocess,'run',return_value=subprocess.CompletedProcess(['umount'],1)):
+        with patch.object(view,'detach_snapshot',return_value=False):
             with view.session(self.root) as current:
                 stock=compiler._resolve_stock(str(self.logical),{},False);before=stock.read_bytes()
             self.assertEqual(stock.read_bytes(),before);self.assertTrue(self.rows)
@@ -130,7 +130,7 @@ class SignalTests(unittest.TestCase):
     def test_sigterm_cleans_owned_view_and_restores_session(self):
         with tempfile.TemporaryDirectory() as raw:
             root=Path(raw);marker=root/'unmounted'
-            script=f'''import sys,time,subprocess\nfrom pathlib import Path\nsys.path.insert(0,{str(ROOT/'common')!r})\nimport stock_font_view as v\ndef unmount(*a,**k):\n Path({str(marker)!r}).write_text('cleaned')\n return subprocess.CompletedProcess(a,0)\nv.subprocess.run=unmount\nwith v.session(Path({raw!r})) as s:\n s.base=Path({raw!r})/'owned';s.base.mkdir()\n p=s.base/'system-fonts';p.mkdir();s.owned.append(p)\n print('ready',flush=True)\n time.sleep(30)\n'''
+            script=f'''import sys,time,subprocess\nfrom pathlib import Path\nsys.path.insert(0,{str(ROOT/'common')!r})\nimport stock_font_view as v\ndef unmount(*a,**k):\n Path({str(marker)!r}).write_text('cleaned')\n return subprocess.CompletedProcess(a,0)\nv.detach_snapshot=unmount\nwith v.session(Path({raw!r})) as s:\n s.base=Path({raw!r})/'owned';s.base.mkdir()\n p=s.base/'system-fonts';p.mkdir();s.owned.append(p)\n print('ready',flush=True)\n time.sleep(30)\n'''
             p=subprocess.Popen([sys.executable,'-c',script],stdout=subprocess.PIPE,text=True)
             try:
                 self.assertEqual(p.stdout.readline().strip(),'ready');p.send_signal(signal.SIGTERM)

@@ -34,6 +34,14 @@ class DiscoveryPipelineTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
+        prop_bin = self.root / 'property-bin'
+        prop_bin.mkdir()
+        getprop = prop_bin / 'getprop'
+        getprop.write_text('#!/bin/sh\nprintf "%s\\n" discovery-pipeline\n')
+        getprop.chmod(0o755)
+        properties = patch.dict(os.environ, {'PATH': str(prop_bin) + os.pathsep + os.environ.get('PATH', '')})
+        properties.start()
+        self.addCleanup(properties.stop)
         # Host-only filesystem mapping. Keep the logical config identity sealed
         # as /data/fonts/config/config.xml and still verify its real bytes/hash.
         def compiler_path(*parts):

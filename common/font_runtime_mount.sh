@@ -81,34 +81,21 @@ luoshu_self_mount_ensure() {
                         _luoshu_self_log \
                             "私有字体挂载无法保留原厂 lower：$_lsme_partition/$_lsme_subdir"
                 fi
-                if _luoshu_atomic_bind_tree "$_lsme_source" "$_lsme_target"; then
-                    _lsme_bind_count=$((_lsme_bind_count + 1))
-                else
-                    _lsme_bind_rc=$?
-                    if [ "$_lsme_bind_rc" -eq 2 ] 2>/dev/null; then
-                        _luoshu_self_log \
-                            "自挂载跳过无本机 bind 目标的附加组件：$_lsme_partition/$_lsme_subdir"
-                        continue
-                    fi
-                    _lsme_failed="$_lsme_partition/$_lsme_subdir-bind-incomplete"
-                    break
-                fi
             fi
-            _luoshu_atomic_tree_visible "$_lsme_source" "$_lsme_target" "$_lsme_mode" || {
-                _lsme_failed="$_lsme_partition/$_lsme_subdir-visibility-mismatch"
-                break
-            }
             printf '%s|%s|%s\n' "$_lsme_source" "$_lsme_target" "$_lsme_mode" \
                 >> "$_lsme_manifest_temp" 2>/dev/null || {
                 _lsme_failed="$_lsme_partition/$_lsme_subdir-manifest-failed"
                 break
             }
-            _lsme_component_count=$((_lsme_component_count + 1))
-            _lsme_mounted="${_lsme_mounted}${_lsme_mounted:+,}${_lsme_partition}/${_lsme_subdir}:${_lsme_mode}"
-            [ "$_lsme_subdir" = fonts ] && _lsme_any_fonts_ok=1
+
         done
         [ -z "$_lsme_failed" ] || break
     done
+
+    if [ -z "$_lsme_failed" ]; then
+        _luoshu_atomic_finish_plan "$_lsme_manifest_temp" "$_lsme_payload" any || \
+            _lsme_failed="${_lsme_failed:-bind-plan-failed}"
+    fi
 
     [ "$_lsme_component_count" -gt 0 ] 2>/dev/null || _lsme_failed="${_lsme_failed:-payload-empty}"
     [ "$_lsme_any_fonts_ok" -eq 1 ] 2>/dev/null || _lsme_failed="${_lsme_failed:-font-partition-required}"

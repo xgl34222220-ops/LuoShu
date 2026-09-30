@@ -150,6 +150,25 @@ class FixedMixedShellTest(unittest.TestCase):
                 self.assertIn('MVAR', font)
                 self.assertEqual(font['MVAR'].table.VarStore.VarData[0].Item[0], [delta])
 
+    def test_mutually_exclusive_mvar_regions_fit_without_weakening_clip_gate(self):
+        from variable_line_budget_test import font_with_regions
+        with TTFont(self.stock) as font:
+            variation = font_with_regions([{'wght': (-1, -1, 0)}, {'wght': (0, 1, 1)}],
+                                          [-200, -200], tuple(a.axisTag for a in font['fvar'].axes))
+            font['MVAR'] = variation['MVAR']
+            font['hhea'].ascent = font['OS/2'].sTypoAscender = font['OS/2'].usWinAscent = 1000
+            font['hhea'].descent = font['OS/2'].sTypoDescender = -200
+            font['OS/2'].usWinDescent = 200
+            before = font['MVAR'].compile(font)
+            result = compiler._fixed_shell_line_budget(font, {'importedYMin': -100, 'importedYMax': 750})
+            self.assertEqual(result['minAscent'], 800)
+            self.assertEqual(result['method'], 'exact-mvar-breakpoint-grid')
+            with self.assertRaises(compiler.FontGeometryError) as caught:
+                compiler._fixed_shell_line_budget(font, {'importedYMin': -100, 'importedYMax': 801})
+            self.assertEqual(caught.exception.details['minAscent'], 800)
+            self.assertEqual(caught.exception.details['importedYMax'], 801)
+            self.assertEqual(font['MVAR'].compile(font), before)
+
     def test_unsupported_varc_is_rejected(self):
         with TTFont(self.stock) as font:
             font['VARC'] = newTable('VARC')

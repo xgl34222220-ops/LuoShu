@@ -1,0 +1,67 @@
+name: Android font contract experiment
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/universal-mixed-integration-20260930]
+    paths:
+      - experiments/android-font-contract/**
+      - .github/workflows/font-contract-experiment.yml
+permissions:
+  contents: read
+concurrency:
+  group: font-contract-experiment-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  native-fonts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+      - name: Generate original synthetic donor assets
+        run: |
+          python3 -m pip install --break-system-packages fonttools==4.63.0
+          python3 experiments/android-font-contract/generate.py
+      - name: Build CI-only font probe
+        working-directory: experiments/android-font-contract
+        run: gradle --no-daemon --stacktrace :app:assembleDebug
+      - name: Use existing acceleration only
+        id: accel
+        shell: bash
+        run: |
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            echo 'disabled=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'disabled=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Verify actual Android font rendering and reboot persistence
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          ram-size: 2048M
+          heap-size: 512M
+          emulator-boot-timeout: 1200
+          disable-animations: false
+          disable-linux-hw-accel: ${{ steps.accel.outputs.disabled }}
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: python3 experiments/android-font-contract/run_emulator.py --apk experiments/android-font-contract/app/build/outputs/apk/debug/app-debug.apk --output experiments/android-font-contract/output
+      - name: Save native evidence, including blocked capability gates
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Android-Font-Contract-${{ github.sha }}
+          path: experiments/android-font-contract/output/
+          if-no-files-found: warn
+          retention-days: 14

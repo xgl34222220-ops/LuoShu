@@ -12,6 +12,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -39,6 +40,46 @@ BACKEND_PROFILES = {
 
 class DeploymentError(RuntimeError):
     pass
+
+
+class BlockedArtifactError(DeploymentError):
+    def __init__(self, manifest):
+        self.items = [item for item in manifest.get("artifacts", []) if item.get("status") == "blocked"]
+        self.count = int((manifest.get("summary") or {}).get("blockedCount") or len(self.items))
+        super().__init__("存在 blocked artifact，拒绝生成部署 payload")
+
+    def message(self, manifest_path=None):
+        def clean(value, limit):
+            value = re.sub(r"(?:[A-Za-z]:[\\/]|/)[^\s,;]+", "<path>", str(value))
+            value = " ".join(value.split())
+            return value.encode("utf-8")[:limit].decode("utf-8", errors="ignore")
+        items = [item for item in self.items if not str(item.get("reason", "")).startswith("skipped-after-atomic-failure")]
+        skipped = len(self.items) - len(items)
+        examples = []
+        for item in items[:2]:
+            target = clean(Path(str(item.get("targetPath") or "unknown")).name, 48)
+            details = item.get("errorDetails") or {}
+            if item.get("errorCode") == "fixed-line-budget":
+                reason = "fixed-line-budget bounds=[%s,%s] limit=[%s,%s]" % (
+                    details.get("importedYMin"), details.get("importedYMax"),
+                    details.get("maxDescent"), details.get("minAscent"))
+            else:
+                reason = item.get("reason") or item.get("errorType") or "unknown"
+            reason = clean(reason, 85)
+            examples.append(target + ":" + reason)
+        parts = [str(self), "blocked=" + str(self.count), "failed=" + str(len(items)), "skipped=" + str(skipped), *examples]
+        if manifest_path is not None:
+            name = Path(manifest_path).name
+            if not re.fullmatch(r"[a-f0-9]{24}\.json", name):
+                name = "<artifact-manifest>.json"
+            parts.append("manifest=config/universal-font-artifact-manifests/" + name)
+        return "; ".join(parts)
+
+
+def _error_payload(error, manifest_path=None):
+    if isinstance(error, BlockedArtifactError):
+        return {"status": "error", "code": "blocked-artifacts", "message": error.message(manifest_path)}
+    return {"status": "error", "message": str(error) or error.__class__.__name__}
 
 
 def _load(path: Path) -> dict[str, Any]:
@@ -223,7 +264,7 @@ def build_deployment(
 
     summary = artifact_manifest.get("summary") if isinstance(artifact_manifest.get("summary"), dict) else {}
     if int(summary.get("blockedCount") or 0) != 0:
-        raise DeploymentError("存在 blocked artifact，拒绝生成部署 payload")
+        raise BlockedArtifactError(artifact_manifest)
     if route_plan.get("summary", {}).get("routingComplete") is not True:
         raise DeploymentError("XML RoutePlan 不完整，拒绝生成部署 payload")
 
@@ -722,10 +763,8 @@ def main() -> int:
         }, ensure_ascii=False, separators=(",", ":")))
         return 0
     except Exception as error:
-        print(json.dumps({
-            "status": "error",
-            "message": str(error) or error.__class__.__name__,
-        }, ensure_ascii=False, separators=(",", ":")))
+        print(json.dumps(_error_payload(error, args.artifact_manifest),
+                         ensure_ascii=False, separators=(",", ":")))
         return 1
 
 

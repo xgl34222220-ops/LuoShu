@@ -112,6 +112,17 @@ _uc_write_state() {
     chmod 0644 "$CUTOVER_STATE" 2>/dev/null || true
 }
 
+# Scope cleanup is appended after the compiler JSON. Preserve the actionable
+# error before applying the short log budget, rather than truncating it away.
+_uc_failure_summary() {
+    _ucfs_error=$(printf '%s\n' "$1" | grep -E '"status"[[:space:]]*:[[:space:]]*"error"' | tail -n 1)
+    if [ -n "$_ucfs_error" ]; then
+        printf '%s' "$_ucfs_error" | tail -c 600
+    else
+        printf '%s' "$1" | tail -c 600
+    fi
+}
+
 _uc_cleanup_universal_next() {
     rm -f "$CONFIG_DIR/universal-font-next.conf" 2>/dev/null || true
     # A switch request supersedes any previously queued next-boot payload.
@@ -210,7 +221,9 @@ _uc_switch() {
     fi
     if [ "$_uc_prepare_rc" -ne 0 ]; then
         _uc_capture_prepare_failure
-        _uc_log "universal prepare failed font=$_uc_font rc=$_uc_prepare_rc output=$(printf '%s' "$_uc_prepare_output" | tail -c 600)"
+        _uc_log "universal prepare failed font=$_uc_font rc=$_uc_prepare_rc output=$(_uc_failure_summary "$_uc_prepare_output")"
+        _uc_scope_cleanup=$(printf '%s\n' "$_uc_prepare_output" | grep '^\[TASK-CLEANUP\]' | tail -n 1)
+        [ -z "$_uc_scope_cleanup" ] || _uc_log "universal prepare cleanup: $_uc_scope_cleanup"
         _uc_reason=universal-prepare-failed
         [ "$_uc_prepare_rc" -ne 124 ] || _uc_reason=universal-prepare-timeout
         _uc_legacy "$_uc_font" "$_uc_reason"

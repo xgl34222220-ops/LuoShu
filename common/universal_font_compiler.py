@@ -56,6 +56,7 @@ import universal_font_semantics as semantics
 import stock_font_provenance
 import stock_geometry_profile
 import stock_font_view
+from variable_line_budget import mvar_ranges
 from legacy_v14_4.composite_layout import (
     clear_imported_metric_variations,
     enclose_imported_bounds,
@@ -94,6 +95,13 @@ _PREPARED_GLYPH_CACHE_BYTES = 32 * 1024 * 1024
 
 class CompilerError(RuntimeError):
     pass
+
+
+class FontGeometryError(CompilerError):
+    def __init__(self, message, code, details):
+        super().__init__(message)
+        self.code = code
+        self.details = details
 
 
 def _int(value: Any, default: int = 0) -> int:
@@ -1735,26 +1743,17 @@ def _compile_source_as_base(
 
 
 def _fixed_shell_line_budget(font: TTFont, replaced: dict[str, Any]) -> dict[str, Any]:
-    """Conservative all-location MVAR bounds, without expensive full instancing.
+    """All-location MVAR bounds, exact where bounded enumeration is provable.
 
-    Every variation region scalar lies in [0,1]. Summing each signed delta's
-    worst contribution is conservative even when its regions cannot coincide.
+    Complex/discontinuous regions retain conservative signed-delta bounds.
+    Neither XML fixed-axis settings nor missing probe hits bypass this gate.
     """
     if "VARC" in font:
         raise CompilerError("fixed composite does not support VARC glyph variations")
     low, high = replaced.get("importedYMin"), replaced.get("importedYMax")
     if low is None or high is None:
         raise CompilerError("fixed composite has no measured imported bounds")
-    ranges: dict[str, tuple[float, float]] = {}
-    if "MVAR" in font:
-        table = font["MVAR"].table
-        for record in table.ValueRecord:
-            index = int(record.VarIdx)
-            if index == 0xFFFFFFFF:
-                continue
-            outer, inner = index >> 16, index & 0xFFFF
-            deltas = table.VarStore.VarData[outer].Item[inner]
-            ranges[str(record.ValueTag)] = (sum(min(0, d) for d in deltas), sum(max(0, d) for d in deltas))
+    ranges, range_proof = mvar_ranges(font, ("hasc", "hdsc", "hcla", "hcld"))
     os2 = font["OS/2"]
     min_top = min(float(font["hhea"].ascent),
                   float(os2.sTypoAscender) + ranges.get("hasc", (0, 0))[0],
@@ -1763,8 +1762,10 @@ def _fixed_shell_line_budget(font: TTFont, replaced: dict[str, Any]) -> dict[str
                      float(os2.sTypoDescender) + ranges.get("hdsc", (0, 0))[1],
                      -(float(os2.usWinDescent) + ranges.get("hcld", (0, 0))[0]))
     if float(high) > min_top or float(low) < max_bottom:
-        raise CompilerError("fixed composite outlines exceed conservative OEM variable line budget")
-    return {"status": "ready", "method": "conservative-mvar-region-bounds",
+        raise FontGeometryError("fixed composite outlines exceed conservative OEM variable line budget",
+                                "fixed-line-budget", {"importedYMin": low, "importedYMax": high,
+                                "minAscent": min_top, "maxDescent": max_bottom, "mvarEnvelope": range_proof})
+    return {"status": "ready", "method": range_proof["method"], "mvarEnvelope": range_proof,
             "minAscent": min_top, "maxDescent": max_bottom,
             "importedYMin": low, "importedYMax": high}
 
@@ -2163,6 +2164,9 @@ def _compile_unit_in_view(
     except Exception as error:
         output.unlink(missing_ok=True)
         result["reason"] = str(error) or error.__class__.__name__
+        if isinstance(error, FontGeometryError):
+            result["errorCode"] = error.code
+            result["errorDetails"] = copy.deepcopy(error.details)
         import traceback
         frames = traceback.extract_tb(error.__traceback__)
         if frames:

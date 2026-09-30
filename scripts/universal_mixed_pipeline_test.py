@@ -187,9 +187,15 @@ def main() -> int:
         (module / 'logs').mkdir()
         stock_map = temp / 'stock-map.json'
         stock_map.write_text(json.dumps({p: str(f) for p, f in stocks.items()}))
+        property_bin = temp / 'property-bin'
+        property_bin.mkdir()
+        getprop = property_bin / 'getprop'
+        getprop.write_text('#!/bin/sh\necho mixed-pipeline-test\n')
+        getprop.chmod(0o755)
         env = dict(os.environ, MODDIR=str(module), MODULE_DIR=str(module),
                    LUOSHU_REAL_MODDIR=str(module), LUOSHU_MIX_REQUEST_ID=request,
-                   LUOSHU_PYTHON=sys.executable, LUOSHU_STOCK_FONT_MAP=str(stock_map))
+                   LUOSHU_PYTHON=sys.executable, LUOSHU_STOCK_FONT_MAP=str(stock_map),
+                   PATH=str(property_bin)+os.pathsep+os.environ.get("PATH", ""))
         # A queued B must not replace the true live A identity used for rollback.
         write_conf(module / 'config/universal-font-next.conf',
                    {'font': 'Queued B', 'previousFont': 'Live A', 'previousMode': 'classic', 'previousLegacy': 'false'})

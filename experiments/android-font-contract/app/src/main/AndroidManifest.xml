@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:label="LuoShu Font Contract Experiment" android:allowBackup="false" />
+    <instrumentation android:name=".Runner" android:targetPackage="io.github.xgl34222220.luoshu.fontcontract" android:functionalTest="true" />
+</manifest>

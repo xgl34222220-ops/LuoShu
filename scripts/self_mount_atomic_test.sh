@@ -204,7 +204,7 @@ luoshu_mount_verify_active custom || fail 'strict verifier rejected compatible b
 
 setup_case bind-symlink-alias
 mkdir -p "$MODULE_DIR/system/fonts"
-printf 'font-alias\n' > "$MODULE_DIR/system/fonts/Alias.ttf"
+printf 'font-canonical\n' > "$MODULE_DIR/system/fonts/Alias.ttf"
 printf 'font-canonical\n' > "$MODULE_DIR/system/fonts/Canonical.ttf"
 printf 'stock-canonical\n' > "$CASE_ROOT/root/system/fonts/Canonical.ttf"
 ln -s Canonical.ttf "$CASE_ROOT/root/system/fonts/Alias.ttf"
@@ -214,6 +214,58 @@ grep -q '^state=mounted$' "$MODULE_DIR/config/self-mount.conf" || fail 'symlink 
 test "$(cat "$CASE_ROOT/root/system/fonts/Canonical.ttf")" = 'font-canonical' || fail 'canonical bind target was overwritten by its alias'
 test "$(cat "$CASE_ROOT/root/system/fonts/Alias.ttf")" = 'font-canonical' || fail 'ROM alias does not expose the canonical bound font'
 luoshu_mount_verify_active custom || fail 'strict verifier rejected a deduplicated symlink bind'
+
+# Distinct requested bytes cannot share a physical bind terminal. Reject before
+# any payload bind, rather than silently choosing the canonical role.
+setup_case bind-symlink-conflict
+mkdir -p "$MODULE_DIR/system/fonts"
+printf 'font-alias\n' > "$MODULE_DIR/system/fonts/Alias.ttf"
+printf 'font-canonical\n' > "$MODULE_DIR/system/fonts/Canonical.ttf"
+printf 'stock-canonical\n' > "$CASE_ROOT/root/system/fonts/Canonical.ttf"
+ln -s Canonical.ttf "$CASE_ROOT/root/system/fonts/Alias.ttf"
+FAIL_OVERLAY=system-fonts
+if luoshu_self_mount_ensure; then fail 'conflicting alias bind was accepted'; fi
+test "$(cat "$CASE_ROOT/root/system/fonts/Canonical.ttf")" = stock-canonical || fail 'conflict mutated ROM before preflight'
+grep -q 'physical-target-conflict' "$MODULE_DIR/config/self-mount.conf" || fail 'alias conflict reason missing'
+# The verifier must inspect every logical alias even when the canonical bytes
+# happen to match; this is the original false PASS reproducer.
+cp "$MODULE_DIR/system/fonts/Canonical.ttf" "$CASE_ROOT/root/system/fonts/Canonical.ttf"
+if _luoshu_atomic_tree_visible "$MODULE_DIR/system/fonts" "$CASE_ROOT/root/system/fonts" bind; then
+    fail 'visibility skipped different bytes on duplicate terminal'
+fi
+
+# Cross-partition symlinks belong to the same transaction preflight too.
+setup_case bind-cross-partition-conflict
+mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/product/fonts" "$CASE_ROOT/root/product/fonts"
+printf 'system-output\n' > "$MODULE_DIR/system/fonts/Canonical.ttf"
+printf 'product-output\n' > "$MODULE_DIR/product/fonts/Alias.ttf"
+printf 'stock-output\n' > "$CASE_ROOT/root/system/fonts/Canonical.ttf"
+ln -s ../../system/fonts/Canonical.ttf "$CASE_ROOT/root/product/fonts/Alias.ttf"
+FAIL_OVERLAY=all
+if luoshu_self_mount_ensure; then fail 'cross-partition alias conflict was accepted'; fi
+test "$(cat "$CASE_ROOT/root/system/fonts/Canonical.ttf")" = stock-output || fail 'cross-partition preflight ran after first bind'
+
+# Different terminal paths remain independently replaceable under bind.
+setup_case bind-independent-alias
+mkdir -p "$MODULE_DIR/system/fonts"
+printf 'alias-output\n' > "$MODULE_DIR/system/fonts/Alias.ttf"
+printf 'canonical-output\n' > "$MODULE_DIR/system/fonts/Canonical.ttf"
+printf 'stock-a\n' > "$CASE_ROOT/root/system/fonts/Alias.ttf"
+printf 'stock-c\n' > "$CASE_ROOT/root/system/fonts/Canonical.ttf"
+FAIL_OVERLAY=all
+luoshu_self_mount_ensure || fail 'independent physical targets were rejected'
+test "$(cat "$CASE_ROOT/root/system/fonts/Alias.ttf")" = alias-output || fail 'independent alias bytes lost'
+
+# Same-length edits in the middle cannot pass visibility just because head/tail
+# samples match. Use a large fixture with equal first and last 64 KiB.
+setup_case full-byte-visibility
+mkdir -p "$MODULE_DIR/system/fonts"
+dd if=/dev/zero of="$MODULE_DIR/system/fonts/Large.ttf" bs=65536 count=3 2>/dev/null
+cp "$MODULE_DIR/system/fonts/Large.ttf" "$CASE_ROOT/root/system/fonts/Large.ttf"
+printf x | dd of="$CASE_ROOT/root/system/fonts/Large.ttf" bs=1 seek=70000 conv=notrunc 2>/dev/null
+if _luoshu_atomic_tree_visible "$MODULE_DIR/system/fonts" "$CASE_ROOT/root/system/fonts" overlay; then
+    fail 'middle-of-font corruption passed visibility'
+fi
 
 setup_case bind-additive-etc
 mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/system/etc/luoshu"

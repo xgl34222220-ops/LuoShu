@@ -116,9 +116,16 @@ _luoshu_atomic_files_equal() {
     _lsafe_left_size=$(_luoshu_atomic_file_size "$_lsafe_left")
     _lsafe_right_size=$(_luoshu_atomic_file_size "$_lsafe_right")
     [ -n "$_lsafe_left_size" ] && [ "$_lsafe_left_size" = "$_lsafe_right_size" ] || return 1
-    _lsafe_left_fingerprint=$(_luoshu_atomic_quick_fingerprint "$_lsafe_left")
-    _lsafe_right_fingerprint=$(_luoshu_atomic_quick_fingerprint "$_lsafe_right")
-    [ -n "$_lsafe_left_fingerprint" ] && [ "$_lsafe_left_fingerprint" = "$_lsafe_right_fingerprint" ]
+    # Head/tail sampling can miss a different cmap, outline, or table in the
+    # middle of a font. Visibility and physical-target compatibility require
+    # identical complete bytes; cmp is provided by Android toybox.
+    if command -v cmp >/dev/null 2>&1; then
+        cmp -s "$_lsafe_left" "$_lsafe_right"
+    elif command -v busybox >/dev/null 2>&1; then
+        busybox cmp -s "$_lsafe_left" "$_lsafe_right"
+    else
+        return 1
+    fi
 }
 
 _luoshu_atomic_pid1_target() {
@@ -188,13 +195,7 @@ _luoshu_atomic_tree_visible() {
         fi
         if [ "$_lsatv_mode" = bind ]; then
             _lsatv_dst=$(_luoshu_atomic_real_target "$_lsatv_dst")
-            if _luoshu_atomic_target_seen "$_lsatv_seen" "$_lsatv_dst"; then
-                continue
-            fi
-            printf '%s\n' "$_lsatv_dst" >> "$_lsatv_seen" 2>/dev/null || {
-                _lsatv_failed=1
-                break
-            }
+
         fi
         _lsatv_total=$((_lsatv_total + 1))
         _luoshu_atomic_files_equal "$_lsatv_src" "$_lsatv_dst" || {
@@ -211,12 +212,21 @@ _luoshu_atomic_bind_tree() {
     _lsabt_target="$2"
     _lsabt_state=$(_luoshu_self_state_root)
     _lsabt_files="$_lsabt_state/bind-files.$$"
-    _lsabt_seen="$_lsabt_state/bind-targets.$$"
+    _lsabt_seen="${_lsme_bind_targets:-$_lsabt_state/bind-targets.$$}"
+    _lsabt_total=0
     _lsabt_expected=0
     _lsabt_mounted=0
     _lsabt_failed=0
     mkdir -p "$_lsabt_state" 2>/dev/null || return 1
-    : > "$_lsabt_seen" 2>/dev/null || return 1
+    if [ -z "${_lsme_bind_targets:-}" ]; then
+        : > "$_lsabt_seen" 2>/dev/null || return 1
+        _lsabt_plan="$_lsabt_state/bind-preflight.$$"
+        printf '%s|%s|bind\n' "$_lsabt_source" "$_lsabt_target" > "$_lsabt_plan" || return 1
+        _luoshu_atomic_preflight_targets "$_lsabt_plan"
+        _lsabt_preflight_rc=$?
+        rm -f "$_lsabt_plan"
+        [ "$_lsabt_preflight_rc" -eq 0 ] || return 1
+    fi
     _luoshu_atomic_bind_file_order "$_lsabt_source" "$_lsabt_target" "$_lsabt_files" || return 1
     while IFS= read -r _lsabt_src; do
         [ -n "$_lsabt_src" ] || continue
@@ -230,6 +240,7 @@ _luoshu_atomic_bind_tree() {
             _lsabt_failed=1
             break
         }
+        _lsabt_total=$((_lsabt_total + 1))
         _lsabt_dst=$(_luoshu_atomic_real_target "$_lsabt_dst")
         if _luoshu_atomic_target_seen "$_lsabt_seen" "$_lsabt_dst"; then
             continue
@@ -250,13 +261,107 @@ _luoshu_atomic_bind_tree() {
             break
         fi
     done < "$_lsabt_files"
-    rm -f "$_lsabt_files" "$_lsabt_seen" 2>/dev/null || true
+    rm -f "$_lsabt_files" 2>/dev/null || true
+    [ -n "${_lsme_bind_targets:-}" ] || rm -f "$_lsabt_seen" 2>/dev/null || true
     [ "$_lsabt_failed" -eq 0 ] || return 1
     [ "$_lsabt_mounted" -eq "$_lsabt_expected" ] || return 1
     # Distinguish an actual bind failure from an additive-only component whose
     # files have no pre-existing ROM inode. The caller may skip the latter for
     # non-core components, but system/fonts remains mandatory.
-    [ "$_lsabt_mounted" -gt 0 ] 2>/dev/null || return 2
+    [ "$_lsabt_total" -gt 0 ] 2>/dev/null || return 2
+    return 0
+}
+
+# Validate every logical path before issuing any payload bind. Successful
+# directory overlays are already present, so independently covered aliases now
+# resolve to distinct paths and remain supported. Failed overlays retain the
+# ROM symlink graph and must agree on the bytes for each shared terminal.
+_luoshu_atomic_preflight_targets() (
+    _lsap_plan="$1"
+    _lsap_state=$(_luoshu_self_state_root)
+    _lsap_map="$_lsap_state/preflight-targets.$$"
+    _lsap_files="$_lsap_state/preflight-files.$$"
+    trap 'rm -f "$_lsap_map" "$_lsap_files"' EXIT
+    : > "$_lsap_map" || exit 1
+    while IFS='|' read -r _lsap_source _lsap_target _lsap_mode; do
+        find "$_lsap_source" -type f > "$_lsap_files" 2>/dev/null || exit 1
+        while IFS= read -r _lsap_src; do
+            _lsap_rel=${_lsap_src#$_lsap_source/}
+            _lsap_dst="$_lsap_target/$_lsap_rel"
+            if [ ! -f "$_lsap_dst" ]; then
+                _luoshu_atomic_missing_target_allowed "$_lsap_rel" "$_lsap_mode" && continue
+                exit 1
+            fi
+            _lsap_real=$(_luoshu_atomic_real_target "$_lsap_dst")
+            _lsap_prior=$(awk -F '|' -v target="$_lsap_real" '$1 == target {print $2; exit}' "$_lsap_map")
+            if [ -n "$_lsap_prior" ]; then
+                if ! _luoshu_atomic_files_equal "$_lsap_prior" "$_lsap_src"; then
+                    _luoshu_self_log "自挂载目标冲突：$_lsap_prior 与 $_lsap_src 解析到 $_lsap_real，无法同时满足"
+                    exit 1
+                fi
+            else
+                printf '%s|%s\n' "$_lsap_real" "$_lsap_src" >> "$_lsap_map" || exit 1
+            fi
+        done < "$_lsap_files"
+    done < "$_lsap_plan"
+)
+
+# Shared by the module-tree and private-payload entry points. Bind fallback is
+# deferred until all components have been planned, preventing cross-partition
+# aliases from overwriting a previously verified target later in the transaction.
+_luoshu_atomic_finish_plan() {
+    _lsafp_plan="$1"
+    _lsafp_payload="$2"
+    _lsafp_required="$3"
+    _lsafp_ready="${_lsafp_plan}.ready"
+    if ! _luoshu_atomic_preflight_targets "$_lsafp_plan"; then
+        _lsme_failed=physical-target-conflict
+        return 1
+    fi
+    : > "$_lsafp_ready" || return 1
+    _lsme_bind_targets="$_lsme_state_root/transaction-bind-targets.$$"
+    : > "$_lsme_bind_targets" || return 1
+    _lsme_component_count=0
+    _lsme_bind_count=0
+    _lsme_any_fonts_ok=0
+    _lsme_system_fonts_ok=0
+    _lsme_mounted=''
+    while IFS='|' read -r _lsafp_source _lsafp_target _lsafp_mode; do
+        _lsafp_component=${_lsafp_source#$_lsafp_payload/}
+        if [ "$_lsafp_mode" = bind ]; then
+            _luoshu_atomic_bind_tree "$_lsafp_source" "$_lsafp_target"
+            _lsafp_rc=$?
+            if [ "$_lsafp_rc" -eq 2 ]; then
+                if [ "$_lsafp_required" = system ] && [ "$_lsafp_component" = system/fonts ]; then
+                    _lsme_failed=system/fonts-bind-empty
+                    break
+                fi
+                continue
+            elif [ "$_lsafp_rc" -ne 0 ]; then
+                _lsme_failed="$_lsafp_component-bind-incomplete"
+                break
+            fi
+            _lsme_bind_count=$((_lsme_bind_count + 1))
+        fi
+        if ! _luoshu_atomic_tree_visible "$_lsafp_source" "$_lsafp_target" "$_lsafp_mode"; then
+            _lsme_failed="$_lsafp_component-visibility-mismatch"
+            break
+        fi
+        printf '%s|%s|%s\n' "$_lsafp_source" "$_lsafp_target" "$_lsafp_mode" >> "$_lsafp_ready" || {
+            _lsme_failed="$_lsafp_component-manifest-failed"; break;
+        }
+        _lsme_component_count=$((_lsme_component_count + 1))
+        _lsme_mounted="${_lsme_mounted}${_lsme_mounted:+,}$_lsafp_component:$_lsafp_mode"
+        [ "$_lsafp_component" != system/fonts ] || _lsme_system_fonts_ok=1
+        case "$_lsafp_component" in */fonts) _lsme_any_fonts_ok=1 ;; esac
+    done < "$_lsafp_plan"
+    rm -f "$_lsme_bind_targets" 2>/dev/null || true
+    _lsme_bind_targets=''
+    if [ -n "$_lsme_failed" ]; then
+        rm -f "$_lsafp_ready"
+        return 1
+    fi
+    mv -f "$_lsafp_ready" "$_lsafp_plan" || { _lsme_failed=manifest-commit-failed; return 1; }
     return 0
 }
 
@@ -378,39 +483,21 @@ luoshu_self_mount_ensure() {
                         _luoshu_self_log \
                             "自挂载无法保留原厂 lower：$_lsme_partition/$_lsme_subdir"
                 fi
-                if _luoshu_atomic_bind_tree "$_lsme_source" "$_lsme_target"; then
-                    _lsme_bind_count=$((_lsme_bind_count + 1))
-                else
-                    _lsme_bind_rc=$?
-                    if [ "$_lsme_bind_rc" -eq 2 ] 2>/dev/null; then
-                        if [ "$_lsme_partition/$_lsme_subdir" = system/fonts ]; then
-                            _lsme_failed=system/fonts-bind-empty
-                            break
-                        fi
-                        _luoshu_self_log \
-                            "自挂载跳过无本机 bind 目标的附加组件：$_lsme_partition/$_lsme_subdir"
-                        continue
-                    else
-                        _lsme_failed="$_lsme_partition/$_lsme_subdir-bind-incomplete"
-                        break
-                    fi
-                fi
             fi
-            _luoshu_atomic_tree_visible "$_lsme_source" "$_lsme_target" "$_lsme_mode" || {
-                _lsme_failed="$_lsme_partition/$_lsme_subdir-visibility-mismatch"
-                break
-            }
             printf '%s|%s|%s\n' "$_lsme_source" "$_lsme_target" "$_lsme_mode" \
                 >> "$_lsme_manifest_temp" 2>/dev/null || {
                 _lsme_failed="$_lsme_partition/$_lsme_subdir-manifest-failed"
                 break
             }
-            _lsme_component_count=$((_lsme_component_count + 1))
-            _lsme_mounted="${_lsme_mounted}${_lsme_mounted:+,}${_lsme_partition}/${_lsme_subdir}:${_lsme_mode}"
-            [ "$_lsme_partition/$_lsme_subdir" = system/fonts ] && _lsme_system_fonts_ok=1
+
         done
         [ -z "$_lsme_failed" ] || break
     done
+
+    if [ -z "$_lsme_failed" ]; then
+        _luoshu_atomic_finish_plan "$_lsme_manifest_temp" "$_lsme_module" system || \
+            _lsme_failed="${_lsme_failed:-bind-plan-failed}"
+    fi
 
     [ "$_lsme_component_count" -gt 0 ] 2>/dev/null || _lsme_failed="${_lsme_failed:-payload-empty}"
     [ "$_lsme_system_fonts_ok" -eq 1 ] 2>/dev/null || _lsme_failed="${_lsme_failed:-system/fonts-required}"
