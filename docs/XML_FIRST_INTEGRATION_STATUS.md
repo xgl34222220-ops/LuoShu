@@ -35,10 +35,10 @@ router retains its text-only invariants.
 
 | Gate | Evidence | Limit |
 |---|---|---|
-| Static compiler | 16 focused host tests | Synthetic fonts; no phone performance claim |
+| Static compiler | 17 focused host tests | Synthetic fonts; no phone performance claim |
 | Exact XML representation | 11 host tests | Actual platform parser still covered separately |
-| Planner → compiler → payload → runtime | 9 host tests | Includes originals/tamper/membership/dynamic change; consumer remains pending |
-| Existing source gate | Passed before final focused additions; targeted additions rerun | CI rerun required on final snapshot |
+| Planner → compiler → payload → runtime | 10 host tests | Includes originals/tamper/membership/dynamic change; consumer remains pending |
+| Existing source gate | Passed at protected-family snapshot; PostScript-key correction targeted regressions rerun | CI rerun required on final snapshot |
 | API36 system proof | Earlier `2eaa285`, separate experimental rewrite | Not this production generator |
 | Production-output API36 proof | Next experiment uses actual production modules and root-captured SDK fonts | Host namespace proof uses a test-only capture model; not Android Python execution |
 
@@ -56,3 +56,20 @@ active `/data/fonts` overrides are not silently accepted by this representation.
 Root-manager mount timing, app namespaces, OEM behavior, real user-font geometry
 and all-app coverage remain unproven. An app using embedded/private fonts is
 outside a no-hook system fallback guarantee.
+
+## Native production preflight corrections
+
+Run `36786654701` exposed missing protected siblings in the experiment capture;
+real scanner inspection also found that physical candidates lacked sealed original
+identities. The scanner now captures XML family members separately from legacy
+replaceable slots. Protected siblings remain preserved, including per-face TTC
+identities and immutable byte copies.
+
+Run `36789363916` reached CJK collection measurement and rejected a valid XML
+PostScript lookup key. AOSP's [FontListParser](https://android.googlesource.com/platform/frameworks/base.git/+/master/graphics/java/android/graphics/FontListParser.java)
+uses that field to select an updated file, separately from its collection index.
+The fixed-static contract binds this key to sealed XML and records the actual face
+name separately. Original byte/face provenance and inactive-update-generation
+checks remain mandatory; generated output still has its exact new PostScript name.
+Both runs stopped before system-file writes and their VMs were destroyed. Neither
+is a passing production-output default-consumer result.

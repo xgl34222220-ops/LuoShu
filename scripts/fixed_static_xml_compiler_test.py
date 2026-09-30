@@ -309,7 +309,27 @@ class FixedStaticCompilerTest(unittest.TestCase):
         self.assertEqual(result["staticXmlContract"]["faceIndex"], 0)
         self.assertNotEqual(Path(result["output"]).read_bytes()[:4], b"ttcf")
 
-    def test_source_variations_and_wrong_original_name_are_rejected(self):
+    def test_collection_xml_update_key_is_not_selected_face_name(self):
+        first = self.root / "jp.ttf"
+        fixture.make_font(first, family="Container JP", ascent=1000)
+        collection = self.root / "locale.ttc"
+        fixture.make_collection(collection, first, self.stock)
+        logical = "/system/fonts/Locale.ttc"
+        unit = self.unit(stock=collection, logical=logical, face=1)
+        with TTFont(first) as font:
+            key = next(n.toUnicode() for n in font["name"].names if n.nameID == 6)
+        unit["artifact"]["originalStockPostScriptName"] = key
+        unit["target"]["xmlRefs"] = [{"index": 1, "postScriptName": key, "fingerprint": "sha256:sealed-xml"}]
+        result = self.compile(unit, mapping={logical: collection})
+        self.assertEqual(result["status"], "ready", result)
+        proof = result["report"]["stockXmlIdentity"]
+        self.assertEqual(proof["declaredPostScriptName"], key)
+        self.assertNotIn(key, proof["actualFacePostScriptNames"])
+        self.assertEqual(proof["faceIndex"], 1)
+        unit["target"]["xmlRefs"][0]["postScriptName"] = "DifferentKey"
+        self.assertIn("sealed XML", self.compile(unit, mapping={logical: collection})["reason"])
+
+    def test_source_variations_and_unsealed_xml_update_key_are_rejected(self):
         unit = self.unit()
         unit["artifact"]["originalStockPostScriptName"] = "WrongOEMFace"
         self.assertIn("PostScript", self.compile(unit)["reason"])

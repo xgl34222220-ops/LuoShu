@@ -198,8 +198,18 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
         verified = verify_original_face(target, stock, stock_face)
         stock_font = api._open_face(stock, stock_face, lazy=True)
         original_ps = str(artifact.get("originalStockPostScriptName") or "")
-        if original_ps and original_ps not in {record.toUnicode() for record in stock_font["name"].names if record.nameID == 6}:
-            raise api.CompilerError("fixed static XML original PostScript identity mismatch")
+        # AOSP FontListParser uses XML postScriptName as a font-update file
+        # lookup key, independently from the TTC index. Its CJK configuration
+        # intentionally repeats the JP key for SC/TC/KR collection faces.
+        # Bind the key to the frozen XML, while bytes and actual face remain
+        # protected by verify_original_face. This representation excludes an
+        # active update layer and rechecks that generation before activation.
+        if original_ps and not any(str(ref.get("postScriptName") or "") == original_ps
+                                   for ref in target.get("xmlRefs") or []):
+            raise api.CompilerError("fixed static XML PostScript update key differs from sealed XML")
+        xml_identity = {"kind": "aosp-font-update-lookup-key", "declaredPostScriptName": original_ps,
+                        "actualFacePostScriptNames": sorted({record.toUnicode() for record in stock_font["name"].names
+                                                             if record.nameID == 6}), "faceIndex": stock_face}
         if "VARC" in stock_font:
             raise api.CompilerError("fixed static XML OEM VARC geometry is unsupported")
         weight = api._int(artifact.get("requiredWeight"), 400)
@@ -304,7 +314,7 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
             raise api.CompilerError("fixed static XML OEM bytes changed during preparation")
         return {"contract": contract, "binding": binding, "points": points,
                 "sourcePath": str(path), "stockPath": str(stock), "stockProfile": stock_profile,
-                "geometry": geometry, "unit": copy.deepcopy(unit)}
+                "geometry": geometry, "stockXmlIdentity": xml_identity, "unit": copy.deepcopy(unit)}
     finally:
         original.close()
         if stock_font is not None:
@@ -387,6 +397,7 @@ def compile_prepared(prepared, output_dir, cache):
         validation = _validate_saved(output, prepared)
         return {"output": str(output), "staticXmlContract": copy.deepcopy(binding),
                 "report": {"mode": REPRESENTATION, "renderContract": contract, "validation": validation,
+                           "stockXmlIdentity": copy.deepcopy(prepared["stockXmlIdentity"]),
                            "renderReuse": {"hit": True}}}
     font = api._open_face(Path(prepared["sourcePath"]), contract["source"]["faceIndex"])
     try:
@@ -416,6 +427,7 @@ def compile_prepared(prepared, output_dir, cache):
         cache[key] = {"sha256": api._sha256(output)}
         return {"output": str(output), "staticXmlContract": copy.deepcopy(binding),
                 "report": {"mode": REPRESENTATION, "renderContract": contract, "validation": validation,
+                           "stockXmlIdentity": copy.deepcopy(prepared["stockXmlIdentity"]),
                            "transformed": transformed, "renderReuse": {"hit": False}}}
     except Exception:
         output.unlink(missing_ok=True)
