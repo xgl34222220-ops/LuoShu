@@ -45,8 +45,9 @@ umount "$TMP/visible/system/fonts/Canonical.ttf"
 # same logical names with distinct content must remain supported in this mode.
 printf different-output > "$TMP/payload/system/fonts/Alias.ttf"
 ln -s Canonical.ttf "$TMP/visible/system/fonts/Alias.ttf"
-mkdir "$TMP/work"
-mount -t overlay overlay -o "lowerdir=$TMP/visible/system/fonts,upperdir=$TMP/payload/system/fonts,workdir=$TMP/work,userxattr" "$TMP/visible/system/fonts"
+# Match production: a read-only union of payload plus original directories.
+# This also avoids requiring the workspace filesystem to support an upperdir.
+mount -t overlay overlay -o "ro,lowerdir=$TMP/payload/system/fonts:$TMP/visible/system/fonts" "$TMP/visible/system/fonts"
 [ ! -L "$TMP/visible/system/fonts/Alias.ttf" ]
 printf '%s|%s|overlay\n' "$TMP/payload/system/fonts" "$TMP/visible/system/fonts" > "$TMP/overlay-plan"
 _lsme_failed=''

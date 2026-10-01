@@ -8,6 +8,7 @@ def verify(module,phase):
  report_path=module/'namespace-result.json'
  report=json.loads(report_path.read_text()) if report_path.exists() else {'scope':'private Android mount namespace','moduleBootTested':False,'rootManagerTested':False,'globalAppConsumerTested':False,'phases':[]}
  payload=module/'.luoshu-payload';manifest=json.loads((payload/'.luoshu-runtime/deployment/deployment.json').read_text())
+ report.update(deploymentId=manifest.get('deploymentId'),payloadDigest=manifest.get('payloadDigest'),verifiedFileCount=len(manifest['files']),architecture=os.uname().machine,shippedArm64RuntimeExecuted=False)
  new=contract['newAssetPaths']
  first=next(f for f in manifest['files'] if f['logicalPath'] in new)
  asset=payload/first['payloadPath'];hidden=module/'temporarily-hidden-font'

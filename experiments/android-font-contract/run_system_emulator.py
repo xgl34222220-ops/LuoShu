@@ -213,6 +213,9 @@ try:
  report['takeover']='passed'
 except Exception as error:
  report['failure']=type(error).__name__+': '+str(error);report['failureTrace']=traceback.format_exc(limit=16);report['takeover']=report.get('takeover','failed')
+ if a.module_namespace_only and (a.output/'module-namespace-summary.json').exists():
+  report['moduleNamespace']=json.loads((a.output/'module-namespace-summary.json').read_text())
+  report['restored']=bool(report['moduleNamespace'].get('outsideNamespaceUnchanged') and report['moduleNamespace'].get('rebootOriginalsUnchanged'))
 finally:
  if touched:
   try:

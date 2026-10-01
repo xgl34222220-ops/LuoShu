@@ -15,8 +15,7 @@ _luoshu_umount_cmd() { return 1; }
 _luoshu_mount_cmd() {
  printf '%s\\n' "$*" >> "$r/calls"
  case "$1" in
-  -o) cp -a "$3/." "$4/" ;;
-  --make-private) [ "${FAIL_PRIVATE:-0}" != 1 ] ;;
+  -o) if [ "$2" = private ]; then [ "${FAIL_PRIVATE:-0}" != 1 ]; else cp -a "$3/." "$4/"; fi ;;
   -t) [ "${FAIL_OVERLAY:-0}" != 1 ] ;;
   *) return 1 ;;
  esac
@@ -36,5 +35,5 @@ _lsme_mount_list="$r/owned"
  def test_private_failure_rejects_capture_and_records_owned_mount(self):
   self.run_case('FAIL_PRIVATE=1\nif _luoshu_capture_lower_dir "$r/target" system-fonts; then exit 8; fi\ntest "$(cat "$r/state/lower/system-fonts/font.ttf")" = original\ngrep -Fqx "$r/state/lower/system-fonts" "$r/owned"\n')
  def test_private_capture_success_keeps_original_and_ownership(self):
-  self.run_case('_luoshu_capture_lower_dir "$r/target" system-fonts\ntest "$(cat "$r/state/lower/system-fonts/font.ttf")" = original\ngrep -q -- --make-private "$r/calls"\ngrep -Fqx "$r/state/lower/system-fonts" "$r/owned"\n')
+  self.run_case('_luoshu_capture_lower_dir "$r/target" system-fonts\ntest "$(cat "$r/state/lower/system-fonts/font.ttf")" = original\ngrep -q -- "-o private none" "$r/calls"\ngrep -Fqx "$r/state/lower/system-fonts" "$r/owned"\n')
 if __name__=='__main__':unittest.main()

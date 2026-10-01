@@ -37,7 +37,7 @@ class ViewTests(unittest.TestCase):
         self.mirrors=patch.object(compiler.font_inventory,'MIRROR_PREFIXES',());self.mirrors.start();self.addCleanup(self.mirrors.stop)
     def sync(self):self.info.write_text(self.base+''.join(self.rows.values()))
     def mount_call(self,*args):
-        if args[0]=='--make-private':return True
+        if args[:2]==('-o','private'):return True
         self.calls+=1;dest=Path(args[-1]);dest.mkdir(parents=True,exist_ok=True)
         shutil.copyfile(self.case.stock,dest/self.logical.name)
         self.rows[str(dest)]=f'{10+self.calls} 1 253:0 /fonts {dest} rw - erofs /dev/block/dm-0 ro\n';self.sync();return True

@@ -198,7 +198,7 @@ def _bind_parent_stock_snapshot(logical: Path, *, snapshot_base: Path | None = N
         if owned_snapshots is None:
             _remove_empty_snapshot(snapshot)
         return None
-    private = _run_mount("--make-private", str(snapshot))
+    private = _run_mount("-o", "private", "none", str(snapshot))
     if owned_snapshots is not None and not private:
         return None
 

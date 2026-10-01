@@ -48,6 +48,8 @@ exit "$rc"
   parsed=json.loads(data)
   module_report['transaction']=parsed
   if parsed.get('state')!='passed':raise RuntimeError('namespace transaction did not pass every phase')
+  if parsed.get('deploymentId')!=manifest['deploymentId'] or parsed.get('payloadDigest')!=manifest['payloadDigest']:
+   raise RuntimeError('namespace result belongs to a different sealed deployment')
   unchanged();module_report['outsideNamespaceUnchanged']=True
   reboot();root();unchanged();module_report['rebootOriginalsUnchanged']=True
   module_report['state']='passed'
@@ -68,7 +70,8 @@ exit "$rc"
      (output/('module-'+name)).write_bytes(adb('exec-out','cat',REMOTE+'/'+name,check=False))
     adb('shell','rm','-rf',REMOTE);adb('shell','test','!','-e',REMOTE)
     module_report['temporaryStageRemoved']=True
-   except Exception as error:module_report['cleanupFailure']=str(error)
+   except Exception as error:
+    module_report['state']='failed';module_report['cleanupFailure']=str(error)
   (output/'module-namespace-summary.json').write_text(json.dumps(module_report,indent=2))
  if module_report.get('cleanupFailure'):raise RuntimeError(module_report['cleanupFailure'])
  return module_report

@@ -156,3 +156,14 @@ owned lower mounts before a cancellable bind, rejects failed private propagation
 and requests an explicitly read-only overlay. Four failure-injection cases and
 a real Linux namespace bind/private-overlay/rollback case cover this change.
 Actual Android results for this new backend are still pending.
+
+
+The first Android namespace attempt (`2aa054f`, 36832614587) stopped before
+font mounting: Toybox treated single-target `mount --make-rprivate /` as a
+fstab lookup. Outside-namespace originals, reboot originals, staging removal
+and VM destruction were verified. This was a failed gate, not mount success.
+The portable form supplies an explicit ignored source: `mount -o rprivate none /`
+and `mount -o private none <lower>`. The scanner's temporary recovery view had
+the same single-target issue and is corrected too. Real GNU and Toybox namespace
+tests inspect private propagation and read-only overlay flags; the disposable
+Android script independently rejects shared/master propagation after isolation.

@@ -35,8 +35,8 @@ cat > "$FAKE_MOUNT" <<'EOF_FAKE_MOUNT'
 set -eu
 mountinfo=${LUOSHU_TEST_MOUNTINFO:?}
 case "$1" in
-    --make-private) exit 0 ;;
     -o)
+        [ "$2" != private ] || exit 0
         [ "$2" = bind ]
         src="$3"
         dst="$4"

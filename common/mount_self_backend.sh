@@ -33,7 +33,7 @@ _luoshu_bind_private_lower() (
         printf '%s\n' "$point" >> "$_lsme_mount_list" || exit 1
     fi
     if ! _luoshu_mount_cmd -o bind "$source" "$point" >/dev/null 2>&1 ||
-       ! _luoshu_mount_cmd --make-private "$point" >/dev/null 2>&1; then
+       ! _luoshu_mount_cmd -o private none "$point" >/dev/null 2>&1; then
         _luoshu_umount_cmd "$point" >/dev/null 2>&1 || true
         rmdir "$point" 2>/dev/null || true
         exit 1

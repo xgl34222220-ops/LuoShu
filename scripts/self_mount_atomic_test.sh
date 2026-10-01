@@ -69,7 +69,7 @@ _luoshu_overlay_mount_dir() {
     cp -R "$1/." "$2/"
 }
 _luoshu_mount_cmd() {
-    if test "$1" = --make-private; then
+    if test "$1" = -o && test "$2" = private; then
         return 0
     fi
     test "$1" = -o && test "$2" = bind || return 1

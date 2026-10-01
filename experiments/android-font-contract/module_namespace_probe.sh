@@ -6,7 +6,10 @@ mod="$1"
 [ "$(getprop ro.build.version.sdk)" = 36 ]
 [ "$(id -u)" = 0 ]
 [ "$(readlink /proc/self/ns/mnt)" != "$LUOSHU_PARENT_MOUNT_NAMESPACE" ]
-mount --make-rprivate /
+printf '%s\n' '{"namespacePhase":"isolation","state":"starting"}'
+mount -o rprivate none /
+# Confirm isolation instead of trusting a mount tool's option parser alone.
+awk '{for(i=7;i<=NF&&$i!="-";i++)if($i ~ /^(shared|master):/)bad=1} END{exit bad}' /proc/self/mountinfo || { echo 'private propagation was not established' >&2; exit 20; }
 export MODDIR="$mod" MODULE_DIR="$mod" CONFIG_DIR="$mod/config"
 export LUOSHU_SELF_MOUNT_STATE_ROOT="$mod/state/self"
 export LUOSHU_PRIVATE_STATE_ROOT="$mod/state/private"
