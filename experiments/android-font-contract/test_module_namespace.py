@@ -7,6 +7,13 @@ import run_module_namespace as runner
 
 class NamespaceProtocolTest(unittest.TestCase):
  def setUp(self):
+  # These are host protocol fixtures, not root/native namespace evidence.
+  # GitHub's unprivileged runner cannot inspect init's mount namespace.
+  readlink=verify.os.readlink
+  def host_namespace(path):
+   if str(path) in ('/proc/self/ns/mnt','/proc/1/ns/mnt'):return 'host-protocol-fixture'
+   return readlink(path)
+  scoped=patch.object(verify.os,'readlink',side_effect=host_namespace);scoped.start();self.addCleanup(scoped.stop)
   self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
   self.root=Path(self.tmp.name);self.module=self.root/'module';self.module.mkdir()
   self.visible=self.root/'new.ttf';self.visible.write_bytes(b'compiled')
