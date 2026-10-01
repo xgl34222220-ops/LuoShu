@@ -163,7 +163,8 @@ _luoshu_atomic_prepare_boot_state() {
         return 0
     fi
     : > "$_lsapbs_list" 2>/dev/null || true
-    rm -rf "$_lsapbs_state/lower" "$_lsapbs_state/work" 2>/dev/null || true
+    rm -f "$_lsapbs_state/overlay-intents"/* 2>/dev/null || true
+    _luoshu_atomic_empty_state_dirs "$_lsapbs_state"
     printf '%s\n' "$_lsapbs_current" > "${_lsapbs_file}.tmp.$$" 2>/dev/null && \
         mv -f "${_lsapbs_file}.tmp.$$" "$_lsapbs_file" 2>/dev/null || true
     return 1
@@ -368,18 +369,84 @@ _luoshu_atomic_finish_plan() {
     return 0
 }
 
+# Query the mount that path resolution actually reaches. mountinfo row order
+# is not an ownership guarantee. FD0 survives Android mksh's CLOEXEC high FDs.
+_luoshu_visible_mount_id() (
+    exec 8< "$1" || exit 1
+    id=$(awk '/^mnt_id:/{print $2;found=1;exit}END{if(!found)exit 1}' /proc/self/fdinfo/0 0<&8) || exit 1
+    case "$id" in ''|*[!0-9]*) exit 1 ;; esac
+    printf '%s\n' "$id"
+)
+
+# Never recursively remove a directory after a failed unmount. These trees
+# contain only mount points; any nonempty/busy point remains for diagnosis.
+_luoshu_atomic_empty_state_dirs() (
+    state="$1"
+    for dir in "$state/lower" "$state/work" "$state/memory-layers"; do
+        [ -d "$dir" ] || continue
+        for point in "$dir"/*; do [ ! -d "$point" ] || rmdir "$point" 2>/dev/null || true; done
+        rmdir "$dir" 2>/dev/null || true
+    done
+    # Retain the budget if a memory mount remains (e.g. an unmount failure).
+    [ -d "$state/memory-layers" ] || rm -f "$state/memory-layer-kb"
+)
+
 _luoshu_atomic_rollback() {
     _lsar_list="$1"
     _lsar_state=$(_luoshu_self_state_root)
+    _lsar_incomplete=0
+    _lsar_skip="${_lsar_list}.owned.$$"
+    : > "$_lsar_skip" || return 1
+    for _lsar_intent in "$_lsar_state/overlay-intents"/*; do
+        [ -f "$_lsar_intent" ] || continue
+        IFS='|' read -r _lsar_source _lsar_lower _lsar_target _lsar_baseline _lsar_owned < "$_lsar_intent" || { _lsar_incomplete=1; continue; }
+        # This target is handled by its ownership record, never by bare path.
+        printf '%s\n' "$_lsar_target" >> "$_lsar_skip"
+        _lsar_current=$(_luoshu_visible_mount_id "$_lsar_target")
+        if [ "$_lsar_current" != "$_lsar_baseline" ]; then
+            if { [ -z "$_lsar_owned" ] || [ "$_lsar_current" = "$_lsar_owned" ]; } && awk -v p="$_lsar_target" -v visible="$_lsar_current" -v layers="lowerdir=$_lsar_source:$_lsar_lower" '$5==p&&$1==visible{row=$0}END{at=index(row,layers);tail=substr(row,at+length(layers),1);ok=index(row," - overlay KSU ") && at && (tail=="," || tail==" " || tail=="");exit !ok}' /proc/self/mountinfo; then
+                _luoshu_umount_cmd "$_lsar_target" >/dev/null 2>&1 || true
+                _lsar_current=$(_luoshu_visible_mount_id "$_lsar_target")
+            fi
+        fi
+        if [ "$_lsar_current" = "$_lsar_baseline" ]; then
+            awk -v p="$_lsar_target" '$0!=p' "$_lsar_list" > "$_lsar_list.pruned.$$" &&
+                mv "$_lsar_list.pruned.$$" "$_lsar_list" || { _lsar_incomplete=1; continue; }
+            rm -f "$_lsar_intent"
+        else
+            _lsar_incomplete=1
+        fi
+    done
+    if [ "$_lsar_incomplete" -ne 0 ]; then
+        rm -f "$_lsar_skip"
+        return 1
+    fi
+    _lsar_remaining="${_lsar_list}.remaining.$$"
+    : > "$_lsar_remaining" || return 1
     if [ -s "$_lsar_list" ]; then
-        awk '{ item[NR]=$0 } END { for (i=NR; i>=1; i--) print item[i] }' "$_lsar_list" 2>/dev/null | \
+        awk '{ item[NR]=$0 } END { for (i=NR; i>=1; i--) if(!seen[item[i]]++) print item[i] }' "$_lsar_list" 2>/dev/null | \
         while IFS= read -r _lsar_target; do
             [ -n "$_lsar_target" ] || continue
+            if grep -Fqx "$_lsar_target" "$_lsar_skip"; then
+                # Retain only if its ownership record could not restore baseline.
+                if grep -Fq "|$_lsar_target|" "$_lsar_state/overlay-intents"/* 2>/dev/null; then
+                    printf '%s\n' "$_lsar_target" >> "$_lsar_remaining"
+                fi
+                continue
+            fi
             _luoshu_umount_cmd "$_lsar_target" >/dev/null 2>&1 || true
+            if awk -v p="$_lsar_target" '$5==p {found=1} END{exit !found}' /proc/self/mountinfo; then
+                printf '%s\n' "$_lsar_target" >> "$_lsar_remaining"
+            fi
         done
     fi
-    : > "$_lsar_list" 2>/dev/null || true
-    rm -rf "$_lsar_state/lower" "$_lsar_state/work" 2>/dev/null || true
+    # Restore original journal order for another cleanup attempt.
+    awk '{ item[NR]=$0 } END { for(i=NR;i>=1;i--)print item[i] }' "$_lsar_remaining" > "$_lsar_list"
+    rm -f "$_lsar_remaining"
+    rm -f "$_lsar_skip"
+    _luoshu_atomic_empty_state_dirs "$_lsar_state"
+    [ ! -s "$_lsar_list" ] && [ "$_lsar_incomplete" -eq 0 ]
+
 }
 
 _luoshu_atomic_verify_manifest() {
@@ -425,7 +492,7 @@ luoshu_self_mount_ensure() {
     _luoshu_atomic_prepare_boot_state "$_lsme_mount_list" && _lsme_same_boot=1
 
     if [ "$_lsme_active" = default ]; then
-        [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list"
+        [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list" || return 1
         : > "$_lsme_mount_list" 2>/dev/null || true
         rm -f "$_lsme_manifest" "$_lsme_manifest_temp" 2>/dev/null || true
         _luoshu_self_state_write idle none '' ''
@@ -439,7 +506,7 @@ luoshu_self_mount_ensure() {
         return 0
     fi
 
-    [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list"
+    [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list" || return 1
     : > "$_lsme_mount_list" 2>/dev/null || return 1
     : > "$_lsme_manifest_temp" 2>/dev/null || return 1
     _lsme_mounted=''
@@ -509,7 +576,11 @@ luoshu_self_mount_ensure() {
     fi
 
     if [ -n "$_lsme_failed" ]; then
-        _luoshu_atomic_rollback "$_lsme_mount_list"
+        if ! _luoshu_atomic_rollback "$_lsme_mount_list"; then
+            _luoshu_self_state_write failed rollback-incomplete "$_lsme_mounted" "$_lsme_failed"
+            _luoshu_self_log "自挂载失败，回滚未完成；保留挂载记录"
+            return 1
+        fi
         rm -f "$_lsme_manifest" "$_lsme_manifest_temp" 2>/dev/null || true
         _luoshu_self_state_write failed rollback "$_lsme_mounted" "$_lsme_failed"
         _luoshu_self_log "自挂载事务失败并已完整回滚：failed=$_lsme_failed mounted=$_lsme_mounted"
@@ -517,7 +588,10 @@ luoshu_self_mount_ensure() {
     fi
 
     mv -f "$_lsme_manifest_temp" "$_lsme_manifest" 2>/dev/null || {
-        _luoshu_atomic_rollback "$_lsme_mount_list"
+        if ! _luoshu_atomic_rollback "$_lsme_mount_list"; then
+            _luoshu_self_state_write failed rollback-incomplete "$_lsme_mounted" manifest-commit-failed
+            return 1
+        fi
         rm -f "$_lsme_manifest_temp" 2>/dev/null || true
         _luoshu_self_state_write failed rollback "$_lsme_mounted" manifest-commit-failed
         return 1

@@ -127,6 +127,11 @@ sh -c '
     luoshu_private_mount_module_view "$MODDIR"
     . "$MODDIR/common/mount_compat.sh"
     . "$MODDIR/common/mount_self_backend.sh"
+    # This copy-based fixture has no kernel mounts. Model identity here only;
+    # production identity and rollback are exercised by the namespace tests.
+    _luoshu_visible_mount_id() {
+        awk -v p="$1" "\$3==p{id=NR}END{print id+0}" "$LUOSHU_TEST_MOUNTINFO"
+    }
     set -eu
 
     touch "$MODDIR/mount_error"

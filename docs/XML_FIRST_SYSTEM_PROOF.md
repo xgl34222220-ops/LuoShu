@@ -183,3 +183,30 @@ syscall failure, or remaining propagation is rejected. Production single-lower
 The failed run verified outside-namespace original bytes, original bytes after
 reboot, temporary stage removal, and emulator termination. It is not mount
 acceptance evidence. Upstream source: https://github.com/landley/toybox/blob/master/toys/lsb/mount.c
+
+### Casefold lower-layer compatibility (2b628ab evidence)
+
+Android run 36845014575 established the private namespace, then the production
+hook safely refused deployment. Kernel evidence reports `case-insensitive
+capable filesystem ... not supported` for both payload lower directories on
+`/data`. Bind/private operations succeeded; required new assets prevented an
+incomplete bind fallback. Original bytes outside the namespace, their reboot
+state, stage removal and VM teardown were verified. No font takeover occurred.
+
+A scoped production fallback now retries a sealed Universal payload directory
+through an owned case-sensitive tmpfs copy, only after direct overlay failure.
+The total reserved size is capped at 256 MiB and one eighth of currently available
+RAM; symlinks and insufficient budget are refused. Every copied file is compared
+fully before the layer is remounted read-only; the original source remains intact.
+The real mount journal includes the memory layer. Failed unmounts retain their
+journal and block a new transaction; cleanup never recursively deletes a lower
+view. Host kernel tests cover readonly overlay, corrupted-copy rejection,
+failed-unmount byte preservation and subsequent rollback. Android validation is
+pending; this is not yet root-manager boot or App SELinux accessibility proof.
+
+Overlay ownership records persist both the original and newly resolved mount
+IDs. They are read through an opened target FD's kernel `mnt_id`, rather than
+assuming mountinfo line ordering. Rollback refuses a foreign top layer, accepts
+the restored original mounted directory, and retains incomplete state. A real
+SIGKILL immediately after successful overlay creation tests the pre-journal
+intent recovery; a second rollback leaves the original mount ID unchanged.

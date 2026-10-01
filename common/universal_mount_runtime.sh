@@ -222,7 +222,7 @@ _ufmr_apply_dynamic() {
 _ufmr_rollback_system() {
     if type _luoshu_atomic_rollback >/dev/null 2>&1 && type _luoshu_self_state_root >/dev/null 2>&1; then
         _ufmr_system_list="$(_luoshu_self_state_root)/mounts.list"
-        _luoshu_atomic_rollback "$_ufmr_system_list" >/dev/null 2>&1 || true
+        _luoshu_atomic_rollback "$_ufmr_system_list" >/dev/null 2>&1 || return 1
     fi
 }
 
@@ -300,7 +300,10 @@ case "${1:-hook}" in
     service) exit 0 ;;
     rollback)
         _ufmr_rollback_dynamic
-        _ufmr_rollback_system
+        if ! _ufmr_rollback_system; then
+            _ufmr_write_state rollback-failed unknown manual 0 system-unmount-incomplete
+            exit 1
+        fi
         _ufmr_write_state rolled-back "$(type luoshu_detect_root_manager >/dev/null 2>&1 && luoshu_detect_root_manager || echo unknown)" manual 0 manual
         ;;
     *) echo "Usage: $0 {hook <post-fs-data|post-mount>|service|rollback}" >&2; exit 2 ;;
