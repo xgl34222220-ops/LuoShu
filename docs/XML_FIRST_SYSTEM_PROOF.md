@@ -132,3 +132,27 @@ bind, while a complete directory overlay may introduce them. Both mount entry
 points and the existing real Linux namespace suite pass locally. This remains
 host evidence; the system experiment uses temporary XML/file replacement, not
 root-manager module mounting.
+
+
+Revision 4 passed the real system 74-case matrix at `e6acece8` / Actions
+36828969013, including the two condensed Greek cases with wdth=75. All 74
+original cases and XML bytes were restored, and the VM was terminated. The
+host production preparation took 108.616 seconds (60 artifacts, 48 unique
+compiled files, 67,828,207 payload bytes). This is not an ARM phone benchmark.
+The x86 Android production-runtime smoke also passed independently.
+
+The next experiment confines the actual production mount backend and sealed
+payload to a disposable VM's private mount namespace. Its verifier explicitly
+uses that namespace instead of init's view and does not claim root-manager boot
+or global App consumption. It requires all payload hashes and read-only mounts,
+idempotent reapplication, real rollback, partial-overlay failure rollback, and
+integrity rejection before any mount. Parent-namespace original bytes and
+absence of added assets must survive a reboot. SELinux and hidden API policy
+remain unchanged; no root manager or init script is installed.
+
+Preparation for this experiment reproduced unsafe cleanup after a failed lower
+unmount. The backend now removes only empty mount points, records attempted
+owned lower mounts before a cancellable bind, rejects failed private propagation,
+and requests an explicitly read-only overlay. Four failure-injection cases and
+a real Linux namespace bind/private-overlay/rollback case cover this change.
+Actual Android results for this new backend are still pending.

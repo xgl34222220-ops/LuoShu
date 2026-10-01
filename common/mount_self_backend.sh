@@ -17,6 +17,29 @@ luoshu_self_mount_stage_for_manager() {
     esac
 }
 
+# Only remove an empty mount point. An unsuccessful unmount must never turn
+# stock-view cleanup into recursive deletion of the still-visible original tree.
+_luoshu_prepare_lower_mountpoint() (
+    point="$1"
+    _luoshu_umount_cmd "$point" >/dev/null 2>&1 || true
+    if [ -e "$point" ]; then rmdir "$point" 2>/dev/null || exit 1; fi
+    mkdir -p "$point" 2>/dev/null
+)
+
+_luoshu_bind_private_lower() (
+    source="$1";point="$2"
+    # Register our empty prepared mount point before a cancellable mount call.
+    if [ -n "${_lsme_mount_list:-}" ]; then
+        printf '%s\n' "$point" >> "$_lsme_mount_list" || exit 1
+    fi
+    if ! _luoshu_mount_cmd -o bind "$source" "$point" >/dev/null 2>&1 ||
+       ! _luoshu_mount_cmd --make-private "$point" >/dev/null 2>&1; then
+        _luoshu_umount_cmd "$point" >/dev/null 2>&1 || true
+        rmdir "$point" 2>/dev/null || true
+        exit 1
+    fi
+)
+
 _luoshu_overlay_mount_dir() {
     _lsomb_source="$1"
     _lsomb_target="$2"
@@ -25,29 +48,19 @@ _luoshu_overlay_mount_dir() {
     _lsomb_lower="$_lsomb_state/lower/$_lsomb_key"
 
     [ -d "$_lsomb_source" ] && [ -d "$_lsomb_target" ] || return 1
-    _luoshu_umount_cmd "$_lsomb_lower" >/dev/null 2>&1 || true
-    rm -rf "$_lsomb_lower" 2>/dev/null || true
-    mkdir -p "$_lsomb_lower" 2>/dev/null || return 1
-
-    # Keep a stable reference to the currently visible stock/metamodule tree before
-    # placing LuoShu's own layer on the same target.
-    _luoshu_mount_cmd -o bind "$_lsomb_target" "$_lsomb_lower" >/dev/null 2>&1 || return 1
+    _luoshu_prepare_lower_mountpoint "$_lsomb_lower" || return 1
+    _luoshu_bind_private_lower "$_lsomb_target" "$_lsomb_lower" || return 1
 
     # No upperdir/workdir is needed: LuoShu only needs a merged read-only boot view.
     # Changes made by the App are intentionally picked up after the requested reboot.
     if _luoshu_mount_cmd -t overlay KSU \
-        -o "lowerdir=$_lsomb_source:$_lsomb_lower" \
+        -o "ro,lowerdir=$_lsomb_source:$_lsomb_lower" \
         "$_lsomb_target" >/dev/null 2>&1; then
-        # self_mount_ensure appends the visible target too. Recording the captured
-        # lower first guarantees reverse-order uninstall: target, then lower bind.
-        if [ -n "${_lsme_mount_list:-}" ]; then
-            printf '%s\n' "$_lsomb_lower" >> "$_lsme_mount_list" 2>/dev/null || true
-        fi
         return 0
     fi
 
     _luoshu_umount_cmd "$_lsomb_lower" >/dev/null 2>&1 || true
-    rm -rf "$_lsomb_lower" 2>/dev/null || true
+    rmdir "$_lsomb_lower" 2>/dev/null || true
     return 1
 }
 
@@ -63,20 +76,6 @@ _luoshu_capture_lower_dir() {
     _lscld_lower="$_lscld_state/lower/$_lscld_key"
 
     [ -d "$_lscld_target" ] || return 1
-    _luoshu_umount_cmd "$_lscld_lower" >/dev/null 2>&1 || true
-    rm -rf "$_lscld_lower" 2>/dev/null || true
-    mkdir -p "$_lscld_lower" 2>/dev/null || return 1
-    _luoshu_mount_cmd -o bind "$_lscld_target" "$_lscld_lower" >/dev/null 2>&1 || {
-        rm -rf "$_lscld_lower" 2>/dev/null || true
-        return 1
-    }
-    _luoshu_mount_cmd --make-private "$_lscld_lower" >/dev/null 2>&1 || true
-    if [ -n "${_lsme_mount_list:-}" ]; then
-        printf '%s\n' "$_lscld_lower" >> "$_lsme_mount_list" 2>/dev/null || {
-            _luoshu_umount_cmd "$_lscld_lower" >/dev/null 2>&1 || true
-            rm -rf "$_lscld_lower" 2>/dev/null || true
-            return 1
-        }
-    fi
-    return 0
+    _luoshu_prepare_lower_mountpoint "$_lscld_lower" || return 1
+    _luoshu_bind_private_lower "$_lscld_target" "$_lscld_lower"
 }

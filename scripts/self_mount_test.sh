@@ -35,6 +35,7 @@ cat > "$FAKE_MOUNT" <<'EOF_FAKE_MOUNT'
 set -eu
 mountinfo=${LUOSHU_TEST_MOUNTINFO:?}
 case "$1" in
+    --make-private) exit 0 ;;
     -o)
         [ "$2" = bind ]
         src="$3"
@@ -52,7 +53,7 @@ case "$1" in
         [ "$4" = -o ]
         opts="$5"
         target="$6"
-        layers=$(printf '%s' "$opts" | sed -n 's/^lowerdir=//p')
+        layers=$(printf '%s' "$opts" | sed -n 's/^ro,lowerdir=//p')
         source=${layers%%:*}
         stock=${layers#*:}
         backup="${target}.luoshu-test-stock"
