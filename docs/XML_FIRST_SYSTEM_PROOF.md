@@ -492,3 +492,19 @@ or path-bearing hops, loops, dangling links, directory aliases and all symlinks
 in generated payloads. Labels are read from the terminal original and written
 only to the owned copy. This is a narrow compatibility correction, not a general
 cross-partition alias-label resolver or a change to SELinux policy.
+
+[ae4117ac / run 36903843998](https://github.com/xgl34222220-ops/LuoShu/actions/runs/36903843998)
+then published the Android-prepared payload successfully. Literal Typeface.DEFAULT
+samples and all 74 default style cases passed, including actual font path/SHA,
+selected face and raster checks. The style probe ran as UID 10216 in untrusted_app
+with SELinux Enforcing. Native preparation took 134.752 seconds for the same
+small synthetic workload. These measurements remain run-specific, not a latency
+promise for phones.
+
+The overall run still failed: the subsequent direct-file probe retained its old
+new-asset-only whitelist and rejected AndroidClock.ttf before reading it. The
+probe now also permits exactly the four existing physical font targets already
+snapshotted by the host; file hashes, inode comparisons and ordinary UID checks
+remain mandatory. Failure recovery verified original hashes/aliases after reboot
+and removed staging; this run did not complete the normal restored-pixel matrix.
+The next run must finish that remaining direct-read and normal-restoration gate.

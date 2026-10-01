@@ -164,7 +164,7 @@ public final class Runner extends Instrumentation {
         HashMap<String,String> approved=new HashMap<>();
         for(int n=0;n<files.length();n++) {
             JSONObject item=files.getJSONObject(n);String path=item.getString("path");
-            require((path.startsWith("/system/fonts/LuoShu")||path.equals("/system/fonts/NotoColorEmoji.ttf"))&&!path.contains(".."),"unexpected direct font path");
+            require(DirectFontPaths.allowed(path),"unexpected direct font path: "+path);
             File file=new File(path);String sha=fileHash(file);require(sha.equals(item.getString("sha256")),"direct-read file hash differs");
             android.system.StructStat stat=android.system.Os.stat(path);
             JSONObject proof=new JSONObject();proof.put("path",path);proof.put("sha256",sha);proof.put("device",stat.st_dev);proof.put("inode",stat.st_ino);readFiles.put(proof);approved.put(path,sha);
