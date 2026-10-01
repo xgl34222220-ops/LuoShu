@@ -68,7 +68,9 @@ _ufp_build() {
     rm -rf "$CONFIG_DIR/minimal-xml-route-plans" 2>/dev/null || true
     mkdir -p "$PLAN_DIR" 2>/dev/null || { printf '{"status":"error","message":"无法创建 FontPlan 缓存目录"}\n'; return 1; }
     _ufb_output=$(_ufp_output "$_ufb_family") || return 1
-    _ufp_exec "$PLANNER" \
+    set --
+    [ "${LUOSHU_FIXED_XML_MIX:-0}" != 1 ] || set -- --fixed-xml-scopes
+    _ufp_exec "$PLANNER" "$@" \
         --topology "$TOPOLOGY" \
         --roles "$ROLES" \
         --source-profile "$_ufb_profile" \

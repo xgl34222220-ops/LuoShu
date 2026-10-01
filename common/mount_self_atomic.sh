@@ -600,6 +600,11 @@ luoshu_self_mount_ensure() {
                 # before reporting success; do not append a logical alias here.
                 :
             else
+                _lsme_overlay_rc=$?
+                if [ "$_lsme_overlay_rc" -eq 3 ]; then
+                    _lsme_failed="$_lsme_partition/$_lsme_subdir-sealed-xml-proof-failed"
+                    break
+                fi
                 _lsme_mode=bind
                 if type _luoshu_capture_lower_dir >/dev/null 2>&1; then
                     _luoshu_capture_lower_dir "$_lsme_target" \

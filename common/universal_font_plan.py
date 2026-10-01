@@ -1176,6 +1176,7 @@ def main() -> int:
     parser.add_argument("--source-profile", required=True, type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--validate", type=Path)
+    parser.add_argument("--fixed-xml-scopes", action="store_true")
     args = parser.parse_args()
 
     try:
@@ -1195,7 +1196,7 @@ def main() -> int:
                 _int(profile.get("profileRevision")),
             )
         else:
-            plan = build_plan(topology, roles, profile)
+            plan = build_plan(topology, roles, profile, fixed_xml_scopes=args.fixed_xml_scopes)
             if args.output is not None:
                 _atomic_write(args.output, plan)
     except (UniversalPlanError, OSError, json.JSONDecodeError) as error:

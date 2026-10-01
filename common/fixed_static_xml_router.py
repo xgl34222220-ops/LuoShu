@@ -366,15 +366,27 @@ def main():
     parser.add_argument('--base-route',type=Path)
     parser.add_argument('--output',type=Path)
     parser.add_argument('--validate',type=Path)
+    parser.add_argument('--expand-styles',action='store_true')
+    parser.add_argument('--matching-weights',action='store_true')
+    parser.add_argument('--allow-physical-only',action='store_true')
     args=parser.parse_args()
     try:
         font_plan=legacy._load(args.font_plan)
         if args.validate:
-            plan=legacy._load(args.validate);validate_route_plan(plan,font_plan)
+            plan=legacy._load(args.validate)
+            if args.allow_physical_only and plan.get('schema')==legacy.SCHEMA and not plan.get('documents'):
+                legacy.validate_route_plan(plan,font_plan)
+            else:validate_route_plan(plan,font_plan)
         else:
             if not args.base_route or not args.output:raise ERROR('missing fixed-static route paths')
-            plan=build_route_plan(font_plan,legacy._load(args.base_route));legacy._atomic_json(args.output,plan)
-        print(json.dumps({'status':'ok','schema':SCHEMA,'routeId':plan['routeId'],**plan['summary']},separators=(',',':')))
+            base=legacy._load(args.base_route)
+            if args.allow_physical_only and not base.get('documents'):
+                legacy.validate_route_plan(base,font_plan)
+                plan=base  # No XML is consumed; keep the existing physical contract.
+            else:
+                plan=build_route_plan(font_plan,base,expand_styles=args.expand_styles,matching_weights=args.matching_weights)
+            legacy._atomic_json(args.output,plan)
+        print(json.dumps({'status':'ok','schema':plan['schema'],'routeId':plan['routeId'],**plan['summary']},separators=(',',':')))
         return 0
     except Exception as error:
         print(json.dumps({'status':'error','message':str(error)},ensure_ascii=False,separators=(',',':')))

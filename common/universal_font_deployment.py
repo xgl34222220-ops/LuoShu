@@ -617,6 +617,64 @@ def validate_dynamic_generation(deployment: dict[str, Any], visible_root: Path |
                 raise DeploymentError(f"动态字体 generation 已变化：{logical}")
 
 
+def validate_system_xml_copy_scope(
+    deployment: dict[str, Any], payload_root: Path, stock_root: Path,
+    source_root: Path | None = None, copy_root: Path | None = None,
+) -> None:
+    """Prove the two system XML copies against the frozen deployment and ROM.
+
+    This function only reads files. SELinux, private-lower ownership and the
+    transaction boundary are checked by the shell before any mount or chcon.
+    """
+    validate_payload_integrity(deployment, payload_root)
+    contract = (deployment.get("verificationContracts") or {}).get("fixedStaticRoute")
+    if not isinstance(contract, dict):
+        raise DeploymentError("system XML copy requires a sealed fixed-static route")
+    snapshot = payload_root / ".luoshu-runtime/deployment/fixed-static-route-plan.json"
+    route = _load(snapshot)
+    import fixed_static_xml_router
+    try:
+        fixed_static_xml_router.validate_route_plan(route)
+    except (ValueError, KeyError, TypeError, minimal_xml_router.RouterError) as error:
+        raise DeploymentError("system XML fixed-static route proof is invalid") from error
+    if route.get("routeId") != contract.get("routeId") or route.get("fontPlanId") != deployment.get("fontPlanId"):
+        raise DeploymentError("system XML route identity differs from deployment")
+    expected_root = payload_root / "system/etc"
+    source_root = expected_root if source_root is None else source_root
+    if source_root.absolute() != expected_root.absolute():
+        raise DeploymentError("system XML source is not the active payload tree")
+    for root in (payload_root, source_root, stock_root):
+        if root.is_symlink() or not root.is_dir():
+            raise DeploymentError("system XML source or stock root is not a regular directory")
+    allowed = {"/system/etc/fonts.xml", "/system/etc/font_fallback.xml"}
+    files = [item for item in deployment["files"] if item.get("kind") == "xml"]
+    if not files or any(item.get("logicalPath") not in allowed for item in files):
+        raise DeploymentError("system XML copy scope exceeds the two supported documents")
+    names = {Path(item["logicalPath"]).name for item in files}
+    for root in (source_root, copy_root):
+        if root is None:
+            continue
+        if root.is_symlink() or not root.is_dir() or {p.name for p in root.iterdir()} != names:
+            raise DeploymentError("system XML copy inventory differs from sealed scope")
+        if any(p.is_symlink() or not p.is_file() for p in root.iterdir()):
+            raise DeploymentError("system XML copy contains a link or non-file")
+    for item in files:
+        logical = item["logicalPath"]
+        name = Path(logical).name
+        document = route["documents"].get(logical)
+        if (item.get("payloadPath") != "system/etc/" + name or item.get("sourceXml") != logical
+                or not isinstance(document, dict) or not document.get("operations")
+                or document.get("sourceXml") != logical):
+            raise DeploymentError("system XML entry is not bound to its sealed route")
+        stock = stock_root / name
+        if stock.is_symlink() or not stock.is_file():
+            raise DeploymentError("system XML requires the exact regular stock reference")
+        if document.get("sourceDigest") != "sha256:" + _sha256(stock):
+            raise DeploymentError("system XML stock bytes differ from sealed sourceDigest")
+        if copy_root is not None and _sha256(copy_root / name) != item.get("sha256"):
+            raise DeploymentError("system XML memory copy differs from sealed payload")
+
+
 def _validate_execution_tree(deployment: dict[str, Any], root: Path) -> None:
     """The mount backend exposes whole trees: no undeclared bytes may enter them."""
     expected = {".luoshu-runtime/deployment/dynamic-mounts.conf",
@@ -810,6 +868,9 @@ def main() -> int:
     parser.add_argument("--validate-payload-only", type=Path)
     parser.add_argument("--validate-dynamic-generation", action="store_true")
     parser.add_argument("--validate-device-generation", action="store_true")
+    parser.add_argument("--system-xml-stock-root", type=Path)
+    parser.add_argument("--system-xml-source-root", type=Path)
+    parser.add_argument("--system-xml-copy-root", type=Path)
     parser.add_argument("--visible-root", type=Path)
     parser.add_argument("--expected-deployment-id")
     parser.add_argument("--expected-payload-digest")
@@ -818,7 +879,15 @@ def main() -> int:
     try:
         if args.validate_payload_only is not None:
             deployment = _load(args.validate_payload_only)
-            validate_payload_integrity(deployment, args.payload_root)
+            if args.system_xml_stock_root is not None:
+                if args.payload_root is None:
+                    raise DeploymentError("system XML proof requires payload root")
+                validate_system_xml_copy_scope(deployment, args.payload_root, args.system_xml_stock_root,
+                                               args.system_xml_source_root, args.system_xml_copy_root)
+            else:
+                if args.system_xml_source_root is not None or args.system_xml_copy_root is not None:
+                    raise DeploymentError("system XML proof requires stock root")
+                validate_payload_integrity(deployment, args.payload_root)
             if args.expected_deployment_id is not None and args.expected_deployment_id != deployment.get("deploymentId"):
                 raise DeploymentError("运行状态与实际 deploymentId 不一致")
             if args.expected_payload_digest is not None and args.expected_payload_digest != deployment.get("payloadDigest"):

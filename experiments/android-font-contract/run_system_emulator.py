@@ -227,7 +227,7 @@ try:
     literal=probe('system-applied' if phase=='mounted' else 'system-restored')
     matrix=style_probe('mounted-default-'+phase,case_report['styleMatrixCases'] if phase=='mounted' else restored_cases,'passed-style-matrix')
     return {'literalDefault':literal,'styleMatrix':matrix}
-  report['moduleNamespace']=run_namespace(adb,root,reboot,read_system_file,payload,manifest,captured,backups,a.output,direct=direct,framework=framework,default_probe=default_probe,staged_hooks=a.module_staged_hooks)
+  report['moduleNamespace']=run_namespace(adb,root,reboot,read_system_file,payload,manifest,captured,backups,a.output,direct=direct,framework=framework,default_probe=default_probe,staged_hooks=a.module_staged_hooks,prepared_state=native_summary['nextState'] if a.native_prepared_root else None)
   report['restored']=report['moduleNamespace'].get('rebootOriginalsUnchanged') is True
   report['takeover']='passed-mounted-default-framework-cycle' if a.module_app_default else 'not-tested-direct-app-read-only' if a.module_app_direct else 'not-tested-namespace-only'
   report['restoredProbe']=probe('system-restored')

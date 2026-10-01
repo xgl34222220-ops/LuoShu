@@ -23,6 +23,14 @@ class DeviceGenerationTest(unittest.TestCase):
   for name in ('self','private','universal'):(self.root/'state'/name).mkdir(parents=True)
   self.env.update(LUOSHU_SELF_MOUNT_STATE_ROOT=str(self.root/'state/self'),LUOSHU_PRIVATE_STATE_ROOT=str(self.root/'state/private'),LUOSHU_UNIVERSAL_MOUNT_STATE_ROOT=str(self.root/'state/universal'))
   self.property(self.key)
+  # Fixed XML mounting now requires the actual stock snapshot and readable
+  # Enforcing labels before the (mocked) system mount callback is reached.
+  self.stock_etc=self.root/'stock-visible/system/etc';self.stock_etc.mkdir(parents=True)
+  for logical,doc in self.fixture.route['documents'].items():
+   if doc['operations']:shutil.copyfile(doc['sourcePath'],self.stock_etc/Path(logical).name)
+  self.env['LUOSHU_SELF_MOUNT_VISIBLE_ROOT']=str(self.root/'stock-visible')
+  for name,body in [('getenforce','echo Enforcing'),('id','echo 0'),('ls','case "$1" in -Zd) echo "u:object_r:system_file:s0 $2" ;; *) exec /bin/ls "$@" ;; esac')]:
+   tool=self.bin/name;tool.write_text('#!/bin/sh\n'+body+'\n');tool.chmod(0o755)
  def property(self,value,exitcode=0):
   self.getprop.write_text('#!/bin/sh\nprintf "%s\\n" '+repr(value)+'\nexit '+str(exitcode)+'\n');self.getprop.chmod(0o755)
  def activate(self):

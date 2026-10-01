@@ -35,9 +35,13 @@ if ! MODDIR="$MODDIR" sh "$MODDIR/common/font_topology_snapshot.sh" ensure >/dev
     _um_fail topology-upgrade-or-refresh-required
     exit 1
 fi
-unset LUOSHU_MIX_SELECTION_FILE
+unset LUOSHU_MIX_SELECTION_FILE LUOSHU_FIXED_XML_MIX
+# Only this accepted fixed-composite request selects the new representation.
+# Ordinary fonts and the real variable multiweight path retain their contracts.
 if [ "$1" = fixed ]; then
     export LUOSHU_MIX_SELECTION_FILE="$_um_root/source.json"
+    export LUOSHU_FIXED_XML_MIX=1
+    export LUOSHU_ROUTE_BRIDGE="$MODDIR/common/fixed_static_xml_router.sh"
 fi
 MODDIR="$MODDIR" MODULE_DIR="$MODDIR" CONFIG_DIR="$MODDIR/config" \
     LUOSHU_PUBLIC_DIR="$_um_root" LUOSHU_SWITCH_ACTIVE_LABEL=mix \

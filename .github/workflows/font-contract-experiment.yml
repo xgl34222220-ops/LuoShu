@@ -42,16 +42,19 @@ jobs:
           python3 scripts/fixed_static_xml_pipeline_test.py
           python3 scripts/fixed_static_style_expansion_test.py
           python3 scripts/fixed_matching_xml_pipeline_test.py
+          python3 scripts/fixed_mixed_entry_test.py
+          python3 scripts/universal_xml_copy_guard_test.py
+          sh scripts/sealed_xml_mount_guard_test.sh
       - name: Prepare CI-only Android x86 runtime
         run: sh experiments/android-font-contract/prepare_native_runtime.sh
       - name: Build CI-only font probe
-        if: ${{ !(github.event_name == 'push' && github.event.before == 'ae4117acf36ef4f1e2248671a2715391b64e77b3' && contains(github.event.head_commit.message, '[native-prepare-approved-once]') && !contains(github.event.head_commit.message, '[native-consumer-approved-once]')) }}
+        if: ${{ !(github.event_name == 'push' && github.event.before == '85e62abe0bf2f7be1716bc4d11e73f991e8e1e52' && contains(github.event.head_commit.message, '[native-prepare-approved-once]') && !contains(github.event.head_commit.message, '[native-consumer-approved-once]')) }}
         working-directory: experiments/android-font-contract
         run: gradle --no-daemon --stacktrace :app:assembleDebug
       - name: Require accelerated emulator
         id: accel
         env:
-          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == 'ae4117acf36ef4f1e2248671a2715391b64e77b3' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
+          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '85e62abe0bf2f7be1716bc4d11e73f991e8e1e52' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
         shell: bash
         run: |
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
@@ -68,12 +71,12 @@ jobs:
       - name: Verify actual Android font rendering and reboot persistence
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == 'ae4117acf36ef4f1e2248671a2715391b64e77b3' && contains(github.event.head_commit.message, '[system-test-approved-once]') }}
-          LUOSHU_FONT_COPY_LABEL_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == 'ae4117acf36ef4f1e2248671a2715391b64e77b3' && contains(github.event.head_commit.message, '[font-label-approved-once]') }}
-          LUOSHU_FRAMEWORK_XML_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == 'ae4117acf36ef4f1e2248671a2715391b64e77b3' && contains(github.event.head_commit.message, '[framework-xml-approved-once]') }}
-          LUOSHU_STAGED_HOOK_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == 'ae4117acf36ef4f1e2248671a2715391b64e77b3' && contains(github.event.head_commit.message, '[staged-hooks-test-once]') }}
-          LUOSHU_NATIVE_PREPARE_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == 'ae4117acf36ef4f1e2248671a2715391b64e77b3' && contains(github.event.head_commit.message, '[native-prepare-approved-once]') }}
-          LUOSHU_NATIVE_CONSUMER_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == 'ae4117acf36ef4f1e2248671a2715391b64e77b3' && contains(github.event.head_commit.message, '[native-consumer-approved-once]') }}
+          LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '85e62abe0bf2f7be1716bc4d11e73f991e8e1e52' && contains(github.event.head_commit.message, '[system-test-approved-once]') }}
+          LUOSHU_FONT_COPY_LABEL_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '85e62abe0bf2f7be1716bc4d11e73f991e8e1e52' && contains(github.event.head_commit.message, '[font-label-approved-once]') }}
+          LUOSHU_FRAMEWORK_XML_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '85e62abe0bf2f7be1716bc4d11e73f991e8e1e52' && contains(github.event.head_commit.message, '[framework-xml-approved-once]') }}
+          LUOSHU_STAGED_HOOK_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '85e62abe0bf2f7be1716bc4d11e73f991e8e1e52' && contains(github.event.head_commit.message, '[staged-hooks-test-once]') }}
+          LUOSHU_NATIVE_PREPARE_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '85e62abe0bf2f7be1716bc4d11e73f991e8e1e52' && contains(github.event.head_commit.message, '[native-prepare-approved-once]') }}
+          LUOSHU_NATIVE_CONSUMER_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '85e62abe0bf2f7be1716bc4d11e73f991e8e1e52' && contains(github.event.head_commit.message, '[native-consumer-approved-once]') }}
         with:
           api-level: 36
           target: google_apis

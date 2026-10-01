@@ -23,6 +23,7 @@ case "$action" in
     if [ "${LUOSHU_STAGED_HOOK_TEST_APPROVED:-false}" = true ]; then
         export LUOSHU_UNIVERSAL_TEST_MANAGER=KernelSU
         expected_id=$(sed -n 's/^deploymentId=//p' "$mod/config/universal-font-next.conf")
+        expected_request=$(sed -n 's/^requestId=//p' "$mod/config/universal-font-next.conf")
         expected_digest=$(sed -n 's/^payloadDigest=//p' "$mod/config/universal-font-next.conf")
         [ -n "$expected_id" ] && [ -n "$expected_digest" ]
         sh "$mod/post-fs-data.sh"
@@ -30,6 +31,7 @@ case "$action" in
         grep -qx 'state=active' "$mod/config/universal-font-runtime.conf"
         [ "$(sed -n 's/^deploymentId=//p' "$mod/config/universal-font-runtime.conf")" = "$expected_id" ]
         [ "$(sed -n 's/^payloadDigest=//p' "$mod/config/universal-font-runtime.conf")" = "$expected_digest" ]
+        [ -z "$expected_request" ] || [ "$(sed -n 's/^requestId=//p' "$mod/config/universal-font-runtime.conf")" = "$expected_request" ]
         # An early hook for the simulated manager must not publish any font.
         verify before
         sh "$mod/post-mount.sh"

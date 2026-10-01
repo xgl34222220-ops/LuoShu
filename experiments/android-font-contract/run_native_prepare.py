@@ -68,7 +68,9 @@ def main():
    export=Path(__file__).parent/'.work-native-prepared'
    if export.exists():raise RuntimeError('native export destination already exists')
    export.mkdir();shutil.copytree(a.output/'results',export/'results')
-   adb('pull',REMOTE+'/prepared-payload',str(export/'payload'),timeout=180)
+   relative=summary.get('preparedPayloadRelative','prepared-payload')
+   if relative not in ('prepared-payload','.luoshu-payload-next'):raise RuntimeError('native payload export escaped owned path')
+   adb('pull',REMOTE+'/'+relative,str(export/'payload'),timeout=180)
    from native_payload_case import read_prepared
    read_prepared(export,summary['fingerprint'])
    report['exportedPreparedPayload']={'deploymentId':summary['deploymentId'],'payloadDigest':summary['payloadDigest'],'hostCompilation':False}

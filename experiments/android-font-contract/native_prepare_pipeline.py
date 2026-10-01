@@ -3,7 +3,7 @@
 No fixture topology, mocked provenance, property override, mount hook, system
 write or legacy fallback is used. Inputs are the three generated test fonts.
 """
-import argparse,hashlib,json,os,platform,resource,subprocess,sys,time,traceback
+import argparse,hashlib,json,os,platform,resource,shutil,subprocess,sys,time,traceback
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -82,17 +82,43 @@ def main():
   font_topology_snapshot.validate_inventory_current(inventory);font_role_shadow.validate_role_map(roles,report['fingerprint'])
   for name,data in [('inventory.json',inventory),('topology.json',topology),('roles.json',roles)]:write(name,data)
   report.update(inventorySlotCount=len(inventory['slots']),topologySlotCount=len(topology['slots']),xmlMemberCount=len(inventory.get('xmlMemberSnapshots',{})),specializedSnapshots=inventory.get('specializedSnapshots',{}))
-  plan=timed('plan',lambda:universal_font_plan.build_plan(topology,roles,profile,fixed_xml_scopes=True));write('font-plan.json',plan);report['planSummary']=plan['summary']
-  def route():
-   base=minimal_xml_router.build_route_plan(plan,{},None,True)
-   return fixed_static_xml_router.build_route_plan(plan,base,expand_styles=True,matching_weights=True)
-  route=timed('route',route);write('route-plan.json',route);report['routeSummary']=route['summary']
-  if not route['summary'].get('fixedMatchingOperationCount'):raise RuntimeError('SDK fixture did not exercise fixed-outline weight matching')
-  artifacts=timed('compile',lambda:universal_font_compiler.compile_all(plan,route,{},module/'compiled',False));write('artifact-manifest.json',artifacts)
+  # Exercise the shipping fixed-composite entry, including freezer, shell
+  # planner/router selection, bounded prepare, gate and atomic stage-next.
+  from universal_mixed_font import conf
+  request='android-native-prepare'
+  selected={'requestId':request,'state':'prepared','previousFont':'default'}
+  components=module/'cache/native-components';(components/'fonts').mkdir(parents=True)
+  for role,internal in [('cjk','LuoShuMixCJK'),('latin','LuoShuMixLatin'),('digit','LuoShuMixDigit')]:
+   selected.update({role:'synthetic-'+role,role+'Axes':'wght=400',role+'Mode':'fixed'})
+   shutil.copyfile(module/'inputs'/(role+'.ttf'),components/'fonts'/(internal+'-Regular.ttf'))
+  def write_conf(path,values):
+   path.parent.mkdir(parents=True,exist_ok=True);path.write_text(''.join(str(k)+'='+str(v)+'\n' for k,v in values.items()))
+  (module/'module.prop').write_text('id=LuoShu\n')
+  (config/'active_font.conf').write_text('default\n')
+  generated=module/'cache/native-generated/composite.ttf';generated.parent.mkdir(parents=True)
+  shutil.copyfile(module/'source/fonts/composite.ttf',generated)
+  write_conf(config/'mix-stage-next.conf',selected)
+  write_conf(config/'axes_task.conf',dict(selected,root=str(components)))
+  write_conf(module/'.luoshu-mix-stage/.luoshu-mix-generation.conf',dict(selected,compositeHash=sha(generated),**{r+'Hash':sha(module/'inputs'/(r+'.ttf')) for r in ('cjk','latin','digit')}))
+  os.environ['LUOSHU_REAL_MODDIR']=str(module)
+  timed('production-mixed-entry',lambda:command('production-mixed-entry',['sh',str(module/'common/universal_mixed_font.sh'),'fixed',str(generated)],240))
+  response=json.loads((out/'production-mixed-entry.log').read_text().strip().splitlines()[-1])
+  if response.get('pipeline')!='universal' or response.get('fallback') is not False:raise RuntimeError('real mixed entry did not stage Universal payload')
+  key=hashlib.sha256(b'LuoShuMix').hexdigest()[:24]
+  plan=json.loads((config/'universal-font-plans'/(key+'.json')).read_text());write('font-plan.json',plan);report['planSummary']=plan['summary']
+  route=json.loads((config/'minimal-xml-route-plans'/(key+'.json')).read_text());write('route-plan.json',route);report['routeSummary']=route['summary']
+  if route.get('schema')!='fixed-static-xml-route-plan-v1' or not route['summary'].get('fixedMatchingOperationCount'):raise RuntimeError('real mixed entry did not select fixed matching XML representation')
+  artifacts=json.loads((config/'universal-font-artifact-manifests'/(key+'.json')).read_text());write('artifact-manifest.json',artifacts)
   report['artifactSummary']=artifacts['summary'];report['blocked']=[{'targetPath':a.get('targetPath'),'role':a.get('role'),'reason':a.get('reason')} for a in artifacts['artifacts'] if a.get('status')!='ready']
-  if not artifacts['summary']['deploymentReady']:raise RuntimeError('native artifacts are blocked; no deployment or legacy fallback')
+  if not artifacts['summary']['deploymentReady']:raise RuntimeError('real mixed entry contains blocked artifacts')
   report['preparedDonorRoles']=verify_prepared_roles(artifacts)
-  payload=module/'prepared-payload';deployment=timed('deployment',lambda:universal_font_deployment.build_deployment(plan,route,artifacts,payload));write('deployment.json',deployment)
+  payload=module/'.luoshu-payload-next'
+  deployment=json.loads((payload/'.luoshu-runtime/deployment/deployment.json').read_text());write('deployment.json',deployment)
+  next_state=conf(config/'universal-font-next.conf')
+  if next_state.get('requestId')!=request or next_state.get('deploymentId')!=deployment['deploymentId'] or next_state.get('payloadDigest')!=deployment['payloadDigest']:raise RuntimeError('real mixed stage identity differs')
+  report.update(productionEntry='common/universal_mixed_font.sh fixed',prepareBudgetSeconds=180,preparedPayloadRelative='.luoshu-payload-next',nextState=next_state)
+  for source,name in [(config/'universal-compile-trace.jsonl','universal-compile-trace.jsonl'),(module/'logs/fontswitch.log','fontswitch.log')]:
+   if source.is_file():shutil.copyfile(source,out/name)
   universal_font_deployment.validate_deployment(deployment,plan,route,artifacts,payload)
   universal_font_deployment.validate_device_generation(deployment,payload)
   universal_font_deployment.validate_dynamic_generation(deployment)

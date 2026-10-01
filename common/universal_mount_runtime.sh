@@ -11,6 +11,8 @@ RUNTIME_CONF="$CONFIG_DIR/universal-font-runtime.conf"
 MOUNT_STATE="$CONFIG_DIR/universal-font-mount.conf"
 STATE_ROOT="${LUOSHU_UNIVERSAL_MOUNT_STATE_ROOT:-/data/adb/luoshu/universal-mount}"
 DYNAMIC_LIST="$STATE_ROOT/dynamic.mounts"
+_ufmr_validated_deployment_id=''
+_ufmr_validated_payload_digest=''
 
 [ -f "$MODDIR/common/private_payload.sh" ] && . "$MODDIR/common/private_payload.sh"
 [ -f "$MODDIR/common/util_functions.sh" ] && . "$MODDIR/common/util_functions.sh"
@@ -42,10 +44,12 @@ _ufmr_validate_payload() {
     _ufmr_deployer="$MODDIR/common/universal_font_deployment.py"
     _ufmr_manifest="$PAYLOAD/.luoshu-runtime/deployment/deployment.json"
     [ -f "$_ufmr_deployer" ] && [ -s "$_ufmr_manifest" ] || return 1
+    _ufmr_validated_deployment_id=$(_ufmr_value "$RUNTIME_CONF" deploymentId)
+    _ufmr_validated_payload_digest=$(_ufmr_value "$RUNTIME_CONF" payloadDigest)
     _ufmr_validation_output=$(_ufmr_python "$_ufmr_deployer" \
         --payload-root "$PAYLOAD" \
-        --expected-deployment-id "$(_ufmr_value "$RUNTIME_CONF" deploymentId)" \
-        --expected-payload-digest "$(_ufmr_value "$RUNTIME_CONF" payloadDigest)" \
+        --expected-deployment-id "$_ufmr_validated_deployment_id" \
+        --expected-payload-digest "$_ufmr_validated_payload_digest" \
         --validate-dynamic-generation --validate-device-generation --validate-payload-only "$_ufmr_manifest" 2>&1)
     _ufmr_validation_rc=$?
     if [ "$_ufmr_validation_rc" -ne 0 ]; then
@@ -124,10 +128,94 @@ _ufmr_stage_for_manager() {
     esac
 }
 
+_ufmr_xml_labels() (
+    source="$1"; stock="$2"
+    [ "$(id -u)" = 0 ] && [ "$(getenforce 2>/dev/null)" = Enforcing ] || exit 1
+    [ -d "$stock" ] && [ ! -L "$stock" ] || exit 1
+    label=$(_luoshu_file_context "$stock") || exit 1
+    printf '.|%s\n' "$label"
+    for file in "$source"/* "$source"/.[!.]* "$source"/..?*; do
+        [ -e "$file" ] || [ -L "$file" ] || continue
+        name="${file##*/}"
+        case "$name" in fonts.xml|font_fallback.xml) ;; *) exit 1 ;; esac
+        [ -f "$file" ] && [ ! -L "$file" ] || exit 1
+        [ -f "$stock/$name" ] && [ ! -L "$stock/$name" ] || exit 1
+        label=$(_luoshu_file_context "$stock/$name") || exit 1
+        printf '%s|%s\n' "$name" "$label"
+    done
+)
+
+_ufmr_validate_xml_scope() (
+    source="$1"; stock="$2"; copy="${3:-}"
+    [ -n "$_ufmr_validated_deployment_id" ] && [ -n "$_ufmr_validated_payload_digest" ] || exit 1
+    [ "$(_ufmr_value "$RUNTIME_CONF" deploymentId)" = "$_ufmr_validated_deployment_id" ] &&
+    [ "$(_ufmr_value "$RUNTIME_CONF" payloadDigest)" = "$_ufmr_validated_payload_digest" ] || {
+        _ufmr_log 'system XML transaction identity changed after validation'; exit 1;
+    }
+    set -- --payload-root "$PAYLOAD" --system-xml-source-root "$source" \
+        --system-xml-stock-root "$stock" \
+        --expected-deployment-id "$_ufmr_validated_deployment_id" \
+        --expected-payload-digest "$_ufmr_validated_payload_digest" \
+        --validate-device-generation --validate-dynamic-generation \
+        --validate-payload-only "$PAYLOAD/.luoshu-runtime/deployment/deployment.json"
+    [ -z "$copy" ] || set -- "$@" --system-xml-copy-root "$copy"
+    output=$(_ufmr_python "$MODDIR/common/universal_font_deployment.py" "$@" 2>&1)
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        _ufmr_log "system XML proof failed: $(printf '%s' "$output" | head -c 1024)"
+    fi
+    return "$rc"
+)
+
+# A repeated hook may see our published XML. Reuse only this boot's exact
+# owned overlay and its private lower; never a loose stale directory of files.
+_ufmr_xml_stock_root() (
+    state=$(_luoshu_self_state_root) || exit 1
+    target="$(_luoshu_partition_root system)/etc"
+    intent="$state/overlay-intents/system-etc"
+    boot=$(_luoshu_atomic_boot_id)
+    if [ -f "$intent" ] && [ -n "$boot" ] && [ "$boot" != unknown ] &&
+       [ "$(cat "$state/boot-id" 2>/dev/null)" = "$boot" ]; then
+        IFS='|' read -r source lower saved_target baseline owned < "$intent" || exit 1
+        [ "$saved_target" = "$(_ufmr_real_target "$target")" ] || exit 1
+        [ "$lower" = "$state/lower/system-etc" ] || exit 1
+        case "$source" in "$PAYLOAD/system/etc"|"$state/memory-layers/system-etc") ;; *) exit 1 ;; esac
+        [ -n "$owned" ] && [ "$(_luoshu_visible_mount_id "$saved_target")" = "$owned" ] || exit 1
+        _luoshu_owned_mount_matches overlay "$saved_target" "$owned" "$source" "$lower" || exit 1
+        grep -Fqx "$lower" "$state/mounts.list" || exit 1
+        awk -v p="$lower" '$5==p{ok=1}END{exit !ok}' /proc/self/mountinfo || exit 1
+        printf '%s\n' "$lower"
+    else
+        printf '%s\n' "$target"
+    fi
+)
+
 _ufmr_system_mount() (
     # Scope the strict requirement to this validated deployment transaction.
     # Subshell keeps legacy mounts from inheriting a persistent policy change.
     export LUOSHU_REQUIRED_PAYLOAD_FILES=1
+    # Presence is trustworthy only after the whole execution tree was validated.
+    # This proof runs before the self-mount engine can mount even its first font.
+    if [ -f "$PAYLOAD/.luoshu-runtime/deployment/fixed-static-route-plan.json" ]; then
+        _ufmr_xml_stock=$(_ufmr_xml_stock_root) || { _ufmr_log 'system XML stock ownership proof failed'; return 1; }
+        _ufmr_validate_xml_scope "$PAYLOAD/system/etc" "$_ufmr_xml_stock" >/dev/null || return 1
+        _ufmr_xml_original_labels=$(_ufmr_xml_labels "$PAYLOAD/system/etc" "$_ufmr_xml_stock") || {
+            _ufmr_log 'system XML preflight requires root, Enforcing and readable original labels'; return 1;
+        }
+        _luoshu_universal_xml_copy_check() (
+            source="$1"; lower="$2"; copy="${3:-}"
+            state=$(_luoshu_self_state_root) || exit 1
+            [ "$lower" = "$state/lower/system-etc" ] || exit 1
+            grep -Fqx "$lower" "$_lsme_mount_list" || exit 1
+            awk -v p="$lower" '$5==p{ok=1}END{exit !ok}' /proc/self/mountinfo || exit 1
+            _ufmr_validate_xml_scope "$source" "$lower" "$copy" >/dev/null || exit 1
+            [ "$(_ufmr_xml_labels "$source" "$lower")" = "$_ufmr_xml_original_labels" ] || exit 1
+            if [ -n "$copy" ]; then
+                [ "$copy" = "$state/memory-layers/system-etc" ] || exit 1
+                [ "$(_ufmr_xml_labels "$source" "$copy")" = "$_ufmr_xml_original_labels" ] || exit 1
+            fi
+        )
+    fi
     if [ -n "${LUOSHU_UNIVERSAL_TEST_SYSTEM_MOUNT_COMMAND:-}" ]; then
         "$LUOSHU_UNIVERSAL_TEST_SYSTEM_MOUNT_COMMAND"
     else

@@ -264,7 +264,8 @@ _uc_switch() {
 import json,os,sys
 from pathlib import Path
 route=json.loads(Path(sys.argv[1]).read_text())
-count=len(route.get('preservedRoutes') or [])
+count=len(route.get('preservedRoutes') or [])+int(route.get('summary',{}).get('preservedOriginalStyleCount') or 0)
+deferred=int(route.get('summary',{}).get('representationDeferralCount') or 0)
 artifacts=json.loads(Path(sys.argv[4]).read_text())
 math_count=sum(int((item.get('report', {}).get('transformed', {}).get('layout', {}) or {}).get('preservedMathGlyphs') or 0)
                for item in artifacts.get('artifacts', []))
@@ -272,16 +273,17 @@ mark_count=sum(int((item.get('report', {}).get('transformed', {}).get('layout', 
                for item in artifacts.get('artifacts', []))
 clock_count=sum(int((item.get('report', {}).get('transformed', {}).get('layout', {}) or {}).get('preservedClockPunctuation') or 0)
                 for item in artifacts.get('artifacts', []))
-coverage='partial-protected-typography' if math_count or mark_count or clock_count else ('partial-style-preserved' if count else 'planned-targets')
+coverage='partial-protected-typography' if math_count or mark_count or clock_count else ('partial-style-preserved' if count or deferred else 'planned-targets')
 parts=[]
-if count: parts.append('保留 %s 条原厂斜体路由' % count)
+if count: parts.append('保留 %s 条原厂样式路由' % count)
+if deferred: parts.append('%s 条路由仍使用已验证兼容表示' % deferred)
 if math_count: parts.append('保留 %s 处数学/专用字形' % math_count)
 if mark_count: parts.append('保留 %s 处跨文字共享标记' % mark_count)
 if clock_count: parts.append('保留 %s 处原厂钟表标点' % clock_count)
 message=('通用引擎已准备，'+ '，'.join(parts)+'（部分覆盖），请完整重启'
          if parts else '通用引擎字体负载已准备，请完整重启')
 p=Path(sys.argv[2]);tmp=p.with_name(p.name+'.tmp.'+str(os.getpid()))
-tmp.write_text('requestId='+sys.argv[3]+'\ncoverage='+coverage+'\npreservedStyleRoutes='+str(count)+'\npreservedMathGlyphs='+str(math_count)+'\npreservedSharedMarks='+str(mark_count)+'\npreservedClockPunctuation='+str(clock_count)+'\nmessage='+message+'\n')
+tmp.write_text('requestId='+sys.argv[3]+'\ncoverage='+coverage+'\npreservedStyleRoutes='+str(count)+'\nrepresentationDeferrals='+str(deferred)+'\npreservedMathGlyphs='+str(math_count)+'\npreservedSharedMarks='+str(mark_count)+'\npreservedClockPunctuation='+str(clock_count)+'\nmessage='+message+'\n')
 os.replace(tmp,p)
 PYCOVER
         _uc_log "mixed coverage: $(_uc_value "$CONFIG_DIR/universal-mixed-coverage.conf" message)"

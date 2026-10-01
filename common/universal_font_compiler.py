@@ -2618,7 +2618,8 @@ def main() -> int:
         font_plan = _load(args.font_plan)
         route_plan = _load(args.route_plan)
         universal_font_plan.validate_plan(font_plan)
-        minimal_xml_router.validate_route_plan(route_plan, font_plan=font_plan)
+        import font_route_contract
+        font_route_contract.validate_route_plan(route_plan, font_plan=font_plan)
 
         if args.validate is not None:
             manifest = _load(args.validate)

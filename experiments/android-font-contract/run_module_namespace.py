@@ -63,7 +63,7 @@ def original_aliases(adb, paths):
   result[logical]={'resolvedPath':resolved,'linkTarget':raw}
  return result
 
-def run(adb,root,reboot,read_system_file,payload,manifest,captured,backups,output,direct=None,framework=None,default_probe=None,staged_hooks=False):
+def run(adb,root,reboot,read_system_file,payload,manifest,captured,backups,output,direct=None,framework=None,default_probe=None,staged_hooks=False,prepared_state=None):
  output=Path(output);module_report={'scope':'disposable API36 private mount namespace','globalAppConsumerTested':False,'rootManagerTested':False,'moduleBootTested':False,'state':'running'}
  created=False;global_attempted=False;global_restored=False;app_started=False;apply_completed=False
  if staged_hooks and framework is None:raise RuntimeError('staged hook experiment requires the approved framework protocol')
@@ -95,7 +95,11 @@ def run(adb,root,reboot,read_system_file,payload,manifest,captured,backups,outpu
   with tempfile.TemporaryDirectory() as td:
    local=Path(td);(local/'config').mkdir()
    (local/'config/active_font.conf').write_text('default\n' if staged_hooks else 'mix\n')
-   if staged_hooks:
+   if staged_hooks and prepared_state is not None:
+    from native_payload_case import validate_next_state
+    state=validate_next_state(prepared_state,manifest)
+    (local/'config/universal-font-next.conf').write_text(''.join(k+'='+v+'\n' for k,v in state.items()))
+   elif staged_hooks:
     (local/'config/universal-font-next.conf').write_text('state=prepared\nfont=mix\npreviousFont=default\npreviousMode=default\ndeploymentId='+manifest['deploymentId']+'\npayloadDigest='+manifest['payloadDigest']+'\n')
    else:
     (local/'config/universal-font-runtime.conf').write_text('state=active\npipeline=universal-font-deployment-v1\nfont=mix\ndeploymentId='+manifest['deploymentId']+'\npayloadDigest='+manifest['payloadDigest']+'\n')
@@ -137,7 +141,9 @@ exit "$rc"
    (output/'original-font-labels.txt').write_bytes(adb('shell','ls','-ldZ','/system/fonts','/system/etc',*backups.keys(),*captured.keys(),check=False))
    if framework is not None:framework.stop()
    global_attempted=True;module_report['globalMountAttempted']=True
-   env_args=('env','LUOSHU_XML_COPY_LABEL_TEST_APPROVED=true') if framework is not None else ()
+   env_args=('env',) if framework is not None else ()
+   if framework is not None and prepared_state is None:env_args+=('LUOSHU_XML_COPY_LABEL_TEST_APPROVED=true',)
+   module_report['productionXmlCopyProofRequired']=prepared_state is not None
    if staged_hooks:env_args+=('LUOSHU_STAGED_HOOK_TEST_APPROVED=true',)
    raw=adb('shell',*env_args,'timeout','-k','5','150','sh',REMOTE+'/module_global_probe.sh',REMOTE,'apply',timeout=180)
    apply_completed=True

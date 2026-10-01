@@ -7,8 +7,9 @@ class NativePayloadTest(unittest.TestCase):
  def fixture(self, root):
   results=root/'results';results.mkdir();payload=root/'payload';payload.mkdir()
   summary={'state':'passed','androidPythonExecuted':True,'fingerprint':'sdk','deploymentId':'d','payloadDigest':'p',
+   'productionEntry':'common/universal_mixed_font.sh fixed','nextState':{'state':'prepared','font':'mix','previousFont':'default','previousMode':'default','requestId':'test-request','deploymentId':'d','payloadDigest':'p'},
    'preparedDonorRoles':{r:{'character':c,'pointCount':n} for r,c,n in [('cjk','中',6),('latin','A',3),('digit','1',5)]}}
-  docs={'plan':{},'route':{},'artifacts':{'summary':{'deploymentReady':True}}}
+  docs={'plan':{'targets':{'target':{'source':{'mixedSelection':{'policy':'fixed-composite-selection-v1','requestId':'test-request'}}}}},'route':{},'artifacts':{'summary':{'deploymentReady':True}}}
   manifest={'deploymentId':'d','payloadDigest':'p','verificationContracts':{}}
   for key, sealed, filename in [('plan','fontPlan','font-plan.json'),('route','fixedStaticRoute','route-plan.json'),('artifacts','artifactManifest','artifact-manifest.json')]:
    (results/filename).write_text(json.dumps(docs[key]));(payload/filename).write_text(json.dumps(dict(docs[key],sealed=True)))
@@ -22,16 +23,27 @@ class NativePayloadTest(unittest.TestCase):
     payload,docs,_=case.read_prepared(root,'sdk');validate.assert_called_once()
    self.assertTrue(all(docs[k]['sealed'] for k in ('plan','route','artifacts')))
  def test_firmware_native_proof_donors_and_summary_identity_fail_closed(self):
-  for changes in [{'fingerprint':'old'},{'androidPythonExecuted':False},{'state':'failed'},{'preparedDonorRoles':{}},{'payloadDigest':'wrong'}]:
+  for changes in [{'productionEntry':'manual-compile'},{'fingerprint':'old'},{'androidPythonExecuted':False},{'state':'failed'},{'preparedDonorRoles':{}},{'payloadDigest':'wrong'}]:
    with self.subTest(changes=changes),tempfile.TemporaryDirectory() as td:
     root=Path(td);results,summary=self.fixture(root);summary.update(changes)
     (results/'native-prepare-summary.json').write_text(json.dumps(summary))
     with patch.object(case.deployment,'validate_deployment') as validate,self.assertRaises(ValueError):case.read_prepared(root,'sdk')
     validate.assert_not_called()
+ def test_legal_but_different_request_cannot_replace_sealed_request(self):
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);results,summary=self.fixture(root);summary['nextState']['requestId']='other-legal-request'
+   (results/'native-prepare-summary.json').write_text(json.dumps(summary))
+   with patch.object(case.deployment,'validate_deployment'),self.assertRaisesRegex(ValueError,'sealed fixed selection'):case.read_prepared(root,'sdk')
  def test_payload_integrity_rejection_is_not_swallowed(self):
   with tempfile.TemporaryDirectory() as td:
    root=Path(td);self.fixture(root)
    with patch.object(case.deployment,'validate_deployment',side_effect=ValueError('tampered')),self.assertRaisesRegex(ValueError,'tampered'):case.read_prepared(root,'sdk')
+ def test_stage_identity_and_config_fields_cannot_be_forged(self):
+  with tempfile.TemporaryDirectory() as td:
+   root=Path(td);_,summary=self.fixture(root);state=summary['nextState'];manifest={'deploymentId':'d','payloadDigest':'p'}
+   self.assertEqual(case.validate_next_state(state,manifest),state)
+   for changes in [{'requestId':'../other'},{'deploymentId':'wrong'},{'previousFont':'other'},{'previousMode':'legacy'},{'state=active':'x'},{'requestId':'valid\nfont=other'}]:
+    with self.subTest(changes=changes),self.assertRaises(ValueError):case.validate_next_state(dict(state,**changes),manifest)
  def test_default_route_ambiguity_is_not_first_match_wins(self):
   op={'targetPath':'stock','node':{'index':0,'weight':400,'style':'normal','family':'sans-serif'},'artifact':{'artifactId':'a'}}
   route={'documents':{'/system/etc/font_fallback.xml':{'operations':[op]}}}

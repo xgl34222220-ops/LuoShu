@@ -288,11 +288,14 @@ jobs:
           . ./scripts/version.sh
           module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
           test "$(unzip -p "$module" module.prop | sed -n 's/^testBuildId=//p')" = "$LUOSHU_TEST_BUILD_ID"
-          for file in universal_mixed_font.py universal_mixed_font.sh universal_mixed_variable.py; do
+          for file in universal_mixed_font.py universal_mixed_font.sh universal_mixed_variable.py universal_font_plan.py universal_font_plan.sh fixed_static_xml_router.py fixed_static_xml_router.sh universal_font_compiler.py universal_font_deployment.py universal_mount_runtime.sh mount_self_backend.sh; do
             cmp <(unzip -p "$module" "common/$file") "common/$file"
           done
           PYTHONPATH=common/python/lib/python3.14/site-packages python3 scripts/universal_mixed_variable_test.py
           PYTHONPATH=common/python/lib/python3.14/site-packages python3 scripts/universal_mixed_pipeline_test.py
+          python3 scripts/fixed_mixed_entry_test.py
+          python3 scripts/universal_xml_copy_guard_test.py
+          sh scripts/sealed_xml_mount_guard_test.sh
           sh scripts/universal_mixed_lifecycle_test.sh
           sh scripts/python_runtime_prune_test.sh
           for file in dist/*.zip dist/*.apk; do
@@ -305,7 +308,7 @@ jobs:
             rm -f "$file.sha256"
             (cd dist && sha256sum "$(basename "$renamed")" > "$(basename "$renamed").sha256")
           done
-          printf 'commit=%s\nbuildId=%s\nexperimental=true\nhardwareValidated=false\n' "$GITHUB_SHA" "$LUOSHU_TEST_BUILD_ID" > dist/test-build.conf
+          printf 'commit=%s\nbuildId=%s\nexperimental=true\nhardwareValidated=false\nfixedMixedEntry=fixed-matching-xml-v1\n' "$GITHUB_SHA" "$LUOSHU_TEST_BUILD_ID" > dist/test-build.conf
           if [ "$LUOSHU_REUSE_AUDIT_APP" = 1 ]; then
             printf 'appSourceCommit=31731dc060612c266e76180f306ea3beab610c8f\nappUnchanged=true\n' >> dist/test-build.conf
           fi

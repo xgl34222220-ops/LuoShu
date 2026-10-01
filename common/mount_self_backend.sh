@@ -202,15 +202,13 @@ _luoshu_overlay_try() (
     exit 1
 )
 
-# Experimental config-copy labeling is confined to the approved disposable VM
-# and the two snapshotted system font XML filenames. Production default is off.
+# A production grant is a transaction-scoped verifier, never an environment
+# switch. The original disposable-VM permission remains a separate test path.
 _luoshu_config_copy_labels_allowed() (
     source="$1";key="$2";lower="$3"
+    [ -d "$source" ] && [ ! -L "$source" ] || exit 1
     [ -d "$lower" ] && [ ! -L "$lower" ] || exit 1
-    [ "${LUOSHU_XML_COPY_LABEL_TEST_APPROVED:-false}" = true ] || exit 1
     [ "$key" = system-etc ] || exit 1
-    [ "$(getprop ro.kernel.qemu 2>/dev/null)" = 1 ] || exit 1
-    [ "$(getprop ro.build.version.sdk 2>/dev/null)" = 36 ] || exit 1
     [ "$(id -u)" = 0 ] && [ "$(getenforce 2>/dev/null)" = Enforcing ] || exit 1
     count=0
     for entry in "$source"/* "$source"/.[!.]* "$source"/..?*; do
@@ -220,7 +218,25 @@ _luoshu_config_copy_labels_allowed() (
         [ -f "$lower/${entry##*/}" ] && [ ! -L "$lower/${entry##*/}" ] || exit 1
         count=$((count+1))
     done
-    [ "$count" -gt 0 ]
+    [ "$count" -gt 0 ] || exit 1
+    if [ "${LUOSHU_REQUIRED_PAYLOAD_FILES:-0}" = 1 ] && type _luoshu_universal_xml_copy_check >/dev/null 2>&1; then
+        _luoshu_universal_xml_copy_check "$source" "$lower"
+    else
+        [ "${LUOSHU_XML_COPY_LABEL_TEST_APPROVED:-false}" = true ] || exit 1
+        [ "$(getprop ro.kernel.qemu 2>/dev/null)" = 1 ] || exit 1
+        [ "$(getprop ro.build.version.sdk 2>/dev/null)" = 36 ]
+    fi
+)
+
+_luoshu_config_contexts_match() (
+    source="$1";lower="$2"
+    label=$(_luoshu_file_context "$lower") || exit 1
+    [ "$(_luoshu_file_context "$source")" = "$label" ] || exit 1
+    for entry in "$source"/*; do
+        [ -f "$entry" ] && [ ! -L "$entry" ] || exit 1
+        label=$(_luoshu_file_context "$lower/${entry##*/}") || exit 1
+        [ "$(_luoshu_file_context "$entry")" = "$label" ] || exit 1
+    done
 )
 
 _luoshu_overlay_mount_dir() {
@@ -230,33 +246,53 @@ _luoshu_overlay_mount_dir() {
     _lsomb_state=$(_luoshu_self_state_root)
     _lsomb_lower="$_lsomb_state/lower/$_lsomb_key"
 
-    [ -d "$_lsomb_source" ] && [ -d "$_lsomb_target" ] || return 1
-    _luoshu_prepare_lower_mountpoint "$_lsomb_lower" || return 1
-    _luoshu_bind_private_lower "$_lsomb_target" "$_lsomb_lower" || return 1
-
+    _lsomb_guarded_xml=0
+    _lsomb_failure=1
+    if [ "$_lsomb_key" = system-etc ] && [ "${LUOSHU_REQUIRED_PAYLOAD_FILES:-0}" = 1 ] &&
+       type _luoshu_universal_xml_copy_check >/dev/null 2>&1; then
+        _lsomb_guarded_xml=1
+        _lsomb_failure=3
+    fi
+    [ -d "$_lsomb_source" ] && [ -d "$_lsomb_target" ] || return "$_lsomb_failure"
+    _luoshu_prepare_lower_mountpoint "$_lsomb_lower" || return "$_lsomb_failure"
+    _luoshu_bind_private_lower "$_lsomb_target" "$_lsomb_lower" || return "$_lsomb_failure"
+    if [ "$_lsomb_guarded_xml" = 1 ]; then
+        _luoshu_config_copy_labels_allowed "$_lsomb_source" "$_lsomb_key" "$_lsomb_lower" || return 3
+    fi
     # No upperdir/workdir is needed: LuoShu only needs a merged read-only boot view.
     # Changes made by the App are intentionally picked up after the requested reboot.
-    if _luoshu_overlay_try "$_lsomb_source" "$_lsomb_lower" "$_lsomb_target" "$_lsomb_key" "$_lsomb_state"; then
-        return 0
+    # A direct source with different labels must take the owned-copy route.
+    if [ "$_lsomb_guarded_xml" = 0 ] || _luoshu_config_contexts_match "$_lsomb_source" "$_lsomb_lower"; then
+        if _luoshu_overlay_try "$_lsomb_source" "$_lsomb_lower" "$_lsomb_target" "$_lsomb_key" "$_lsomb_state"; then
+            return 0
+        fi
     fi
 
     _lsomb_memory="$_lsomb_state/memory-layers/$_lsomb_key"
-    # Font copies are the default scope. A separate, explicit disposable-VM
-    # authorization is required for the two sealed system XML copies.
+    # Only the sealed production callback or the existing approved VM test can
+    # authorize relabeling these two owned XML copies.
     _lsomb_label_fonts=0
     case "$_lsomb_key" in
         *-fonts) _lsomb_label_fonts=1 ;;
         system-etc)
-            if [ "${LUOSHU_XML_COPY_LABEL_TEST_APPROVED:-false}" = true ]; then
+            if [ "$_lsomb_guarded_xml" = 1 ]; then
+                _lsomb_label_fonts=1
+            elif [ "${LUOSHU_XML_COPY_LABEL_TEST_APPROVED:-false}" = true ]; then
                 _luoshu_config_copy_labels_allowed "$_lsomb_source" "$_lsomb_key" "$_lsomb_lower" || return 1
                 _lsomb_label_fonts=1
             fi ;;
     esac
-    if _luoshu_overlay_memory_layer "$_lsomb_source" "$_lsomb_memory" "$_lsomb_state" "$_lsomb_lower" "$_lsomb_label_fonts" &&
-       _luoshu_overlay_try "$_lsomb_memory" "$_lsomb_lower" "$_lsomb_target" "$_lsomb_key" "$_lsomb_state"; then
-        return 0
+    if _luoshu_overlay_memory_layer "$_lsomb_source" "$_lsomb_memory" "$_lsomb_state" "$_lsomb_lower" "$_lsomb_label_fonts"; then
+        if [ "$_lsomb_guarded_xml" = 1 ]; then
+            _luoshu_universal_xml_copy_check "$_lsomb_source" "$_lsomb_lower" "$_lsomb_memory" || return 3
+        fi
+        if _luoshu_overlay_try "$_lsomb_memory" "$_lsomb_lower" "$_lsomb_target" "$_lsomb_key" "$_lsomb_state"; then
+            return 0
+        fi
     fi
 
+    # 3 is a proof/publication failure, never a request for file-bind fallback.
+    [ "$_lsomb_guarded_xml" = 0 ] || return 3
     _luoshu_umount_cmd "$_lsomb_lower" >/dev/null 2>&1 || true
     rmdir "$_lsomb_lower" 2>/dev/null || true
     return 1

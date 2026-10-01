@@ -17,12 +17,14 @@ case "${1:-build}" in
         if [ "$status" -ne 0 ]; then printf '%s\n' "$result"; exit "$status"; fi
         route=$(sh "$LEGACY" path "${2:-}") || exit 1
         plan=$(sh "$MODDIR/common/universal_font_plan.sh" path "${2:-}") || exit 1
-        _fsr_python "$MODDIR/common/fixed_static_xml_router.py" --font-plan "$plan" --base-route "$route" --output "$route"
+        set --
+        [ "${LUOSHU_FIXED_XML_MIX:-0}" != 1 ] || set -- --expand-styles --matching-weights --allow-physical-only
+        _fsr_python "$MODDIR/common/fixed_static_xml_router.py" --font-plan "$plan" --base-route "$route" --output "$route" "$@"
         ;;
     validate)
         route=$(sh "$LEGACY" path "${2:-}") || exit 1
         plan=$(sh "$MODDIR/common/universal_font_plan.sh" path "${2:-}") || exit 1
-        _fsr_python "$MODDIR/common/fixed_static_xml_router.py" --font-plan "$plan" --validate "$route"
+        _fsr_python "$MODDIR/common/fixed_static_xml_router.py" --font-plan "$plan" --validate "$route" --allow-physical-only
         ;;
     *) exit 2 ;;
 esac
