@@ -477,7 +477,8 @@ def _preserve_fixed_italic(target: dict[str, Any]) -> bool:
 
 
 def _target_route_refs(target: dict[str, Any]) -> list[dict[str, Any]]:
-    refs = target.get("xmlRefs")
+    scoped = target.get("xmlScopedTarget")
+    refs = (scoped if isinstance(scoped, dict) else target).get("xmlRefs")
     if not isinstance(refs, list):
         return []
     result: list[dict[str, Any]] = []
@@ -504,7 +505,7 @@ def _source_xmls(font_plan: dict[str, Any]) -> list[str]:
     for target in targets.values():
         if not isinstance(target, dict):
             continue
-        if str(target.get("action") or "") not in ROUTABLE_ACTIONS:
+        if str(target.get("action") or "") not in ROUTABLE_ACTIONS and not isinstance(target.get("xmlScopedTarget"), dict):
             continue
         for ref in _target_route_refs(target):
             source_xml = str(ref.get("sourceXml") or "")
@@ -608,7 +609,7 @@ def build_route_plan(
         if not isinstance(target, dict):
             continue
         action = str(target.get("action") or "")
-        if action not in ROUTABLE_ACTIONS:
+        if action not in ROUTABLE_ACTIONS and not isinstance(target.get("xmlScopedTarget"), dict):
             continue
 
         all_refs = target.get("xmlRefs")
@@ -651,6 +652,8 @@ def build_route_plan(
                 continue
 
             route_target = universal_font_plan.route_target(target, node)
+            if route_target.get("action") not in ROUTABLE_ACTIONS:
+                raise RouterError("XML route escaped its scoped replacement contract")
             artifact = _artifact_contract(font_plan, route_target, node)
             key = (source_xml, int(node["ordinal"]))
             previous = node_artifacts.get(key)
@@ -684,7 +687,7 @@ def build_route_plan(
             operation = {
                 "operation": "replace-font-reference",
                 "targetPath": target_path,
-                "role": str(target.get("role") or ""),
+                "role": str(route_target.get("role") or ""),
                 "targetStatus": str(route_target.get("status") or ""),
                 "compiler": str(route_target.get("compiler") or ""),
                 "requirements": list(route_target.get("requirements") or []),
@@ -874,9 +877,11 @@ def validate_route_plan(
                 if not isinstance(target, dict):
                     raise RouterError(f"Route Plan 目标不在 FontPlan 中：{source_xml}")
                 resolved = universal_font_plan.route_target(target, node)
+                if resolved.get("action") not in ROUTABLE_ACTIONS:
+                    raise RouterError("XML operation has no scoped replacement permission")
                 if operation.get("routeTarget") != resolved or artifact != _artifact_contract(font_plan, resolved, node):
                     raise RouterError(f"Route Plan 源 face/编译契约与 XML route 不一致：{source_xml}")
-                for key in ("compiler", "requirements", "risks"):
+                for key in ("role", "compiler", "requirements", "risks"):
                     if operation.get(key) != resolved.get(key):
                         raise RouterError(f"Route Plan route {key} 不一致：{source_xml}")
             artifact_id = str(artifact.get("artifactId") or "")
@@ -925,6 +930,21 @@ def validate_route_plan(
                 raise RouterError("Route Plan 不允许保留此 fixed-composite 路由")
     if bool(preserved) != ("fixed-composite-italic-preserved" in review):
         raise RouterError("Route Plan 缺少保留路由覆盖范围说明")
+
+    if font_plan is not None and summary.get("routingComplete") is True:
+        handled = [(op.get("targetPath"), op.get("node") or {})
+                   for doc in documents.values() for op in doc.get("operations", [])]
+        handled += [(op.get("targetPath"), op.get("node") or {}) for op in preserved]
+        for path, target in font_plan["targets"].items():
+            scoped = target.get("xmlScopedTarget")
+            if not isinstance(scoped, dict):
+                continue
+            if path in physical:
+                raise RouterError("XML-scoped target cannot replace its protected physical container")
+            for ref in scoped["xmlRefs"]:
+                if not any(path == actual_path and universal_font_plan._scoped_reference_key(ref) ==
+                           universal_font_plan._scoped_reference_key(node) for actual_path, node in handled):
+                    raise RouterError("XML-scoped target has an unaccounted reference")
 
     expected_summary = {
         "documentCount": len(documents),

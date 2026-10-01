@@ -28,6 +28,13 @@ class ClockPunctuationTest(unittest.TestCase):
    plan,route=fixture.build_plans(source,slot,'clock',None)
    result=compiler.compile_all(plan,route,{logical:stock},root/'out',False)
    self.assertTrue(result['summary']['deploymentReady'],result)
+   import universal_font_deployment as deployment, universal_font_cutover_gate as gate
+   payload=root/'payload';deployed=deployment.build_deployment(plan,route,result,payload)
+   decision=gate.evaluate(plan,route,result,deployed,payload)
+   self.assertTrue(decision['eligible'],decision)
+   self.assertEqual(decision['summary']['coverage'],'partial-protected-typography')
+   self.assertEqual(decision['summary']['preservedClockPunctuation'],1)
+   self.assertIn('partial-coverage:preserved-clock-punctuation:1',decision['warnings'])
    artifact=result['artifacts'][0];preserved=artifact['report']['replaced']['preservedOptionalPunctuation']
    self.assertEqual([x['codepoint'] for x in preserved],[ord(':')]);self.assertIn('advance-width',preserved[0]['risks'])
    with TTFont(stock) as original,TTFont(artifact['output']) as output:

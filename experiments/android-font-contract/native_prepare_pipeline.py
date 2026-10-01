@@ -32,6 +32,22 @@ def build_composite(module):
  report=source/'source.json';report.write_text(json.dumps({'schema':'universal-mixed-source-v1','mode':'fixed','requestId':selection['requestId'],'mixedSelection':selection}))
  return font_source_profile.build([output],mixed_selection=report)
 
+def verify_prepared_roles(artifacts):
+ from fontTools.ttLib import TTFont
+ checks={}
+ for role,character,points,allowed in [('cjk','中',6,{'cjk'}),('latin','A',3,{'latin','ui-sans'}),('digit','1',5,{'clock','numeric','latin','ui-sans'})]:
+  for artifact in artifacts['artifacts']:
+   if artifact.get('status')!='ready' or artifact.get('role') not in allowed:continue
+   with TTFont(artifact['output'],fontNumber=int(artifact['contract'].get('requiredFaceIndex') or 0)) as font:
+    name=(font.getBestCmap() or {}).get(ord(character))
+    if not name or 'glyf' not in font:continue
+    actual=len(font['glyf'][name].getCoordinates(font['glyf'])[0])
+    if actual!=points:raise RuntimeError('prepared '+role+' donor outline identity changed')
+    checks[role]={'targetPath':artifact['targetPath'],'character':character,'pointCount':actual};break
+  if role not in checks:raise RuntimeError('prepared payload did not exercise requested '+role+' role')
+ return checks
+
+
 def main():
  parser=argparse.ArgumentParser();parser.add_argument('--module',type=Path,required=True);args=parser.parse_args()
  module=args.module.resolve();out=module/'results';out.mkdir(exist_ok=True)
@@ -66,7 +82,7 @@ def main():
   font_topology_snapshot.validate_inventory_current(inventory);font_role_shadow.validate_role_map(roles,report['fingerprint'])
   for name,data in [('inventory.json',inventory),('topology.json',topology),('roles.json',roles)]:write(name,data)
   report.update(inventorySlotCount=len(inventory['slots']),topologySlotCount=len(topology['slots']),xmlMemberCount=len(inventory.get('xmlMemberSnapshots',{})),specializedSnapshots=inventory.get('specializedSnapshots',{}))
-  plan=timed('plan',lambda:universal_font_plan.build_plan(topology,roles,profile));write('font-plan.json',plan);report['planSummary']=plan['summary']
+  plan=timed('plan',lambda:universal_font_plan.build_plan(topology,roles,profile,fixed_xml_scopes=True));write('font-plan.json',plan);report['planSummary']=plan['summary']
   def route():
    base=minimal_xml_router.build_route_plan(plan,{},None,True)
    return fixed_static_xml_router.build_route_plan(plan,base,expand_styles=True,matching_weights=True)
@@ -75,6 +91,7 @@ def main():
   artifacts=timed('compile',lambda:universal_font_compiler.compile_all(plan,route,{},module/'compiled',False));write('artifact-manifest.json',artifacts)
   report['artifactSummary']=artifacts['summary'];report['blocked']=[{'targetPath':a.get('targetPath'),'role':a.get('role'),'reason':a.get('reason')} for a in artifacts['artifacts'] if a.get('status')!='ready']
   if not artifacts['summary']['deploymentReady']:raise RuntimeError('native artifacts are blocked; no deployment or legacy fallback')
+  report['preparedDonorRoles']=verify_prepared_roles(artifacts)
   payload=module/'prepared-payload';deployment=timed('deployment',lambda:universal_font_deployment.build_deployment(plan,route,artifacts,payload));write('deployment.json',deployment)
   universal_font_deployment.validate_deployment(deployment,plan,route,artifacts,payload)
   universal_font_deployment.validate_device_generation(deployment,payload)

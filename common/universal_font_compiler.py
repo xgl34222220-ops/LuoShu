@@ -2160,6 +2160,8 @@ def _compile_unit_in_view(
 
     _compile_trace(artifact, "unit-start", target=target_path, role=str(target.get("role") or ""))
     try:
+        if target.get("xmlScopePolicy") and artifact.get("representation") not in fixed_match.REPRESENTATIONS:
+            raise CompilerError("scoped Chinese reference requires fixed static XML with original fallback")
         if str(target.get("status") or "") == "blocked":
             raise CompilerError("FontPlan 目标已经 blocked")
         for risk in target.get("risks") or []:
@@ -2279,6 +2281,8 @@ def _mixed_preflight(units: list[dict[str, Any]], stock_paths: dict[str, Path], 
         path = str(target.get("path") or "")
         source = target.get("source") or {}
         contract = target.get("targetContract") or {}
+        if target.get("xmlScopePolicy") and artifact.get("representation") not in fixed_match.REPRESENTATIONS:
+            raise CompilerError("scoped Chinese reference requires fixed static XML with original fallback")
         if target.get("status") == "blocked":
             raise CompilerError(f"mixed-preflight: blocked target: {path}")
         risks = set(target.get("risks") or []) & {

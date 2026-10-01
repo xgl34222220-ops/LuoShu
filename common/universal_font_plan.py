@@ -646,6 +646,31 @@ def _compile_requirements(
     return compiler, requirements, risks
 
 
+def _scoped_chinese_reference(ref: dict[str, Any]) -> bool:
+    """Only explicit, unnamed Chinese fallback refs can opt out of file-wide protection."""
+    import font_role_shadow
+    attrs = ref.get("familyAttributes") or {}
+    font_attrs = ref.get("fontAttributes") or {}
+    if (str(ref.get("sourceXml") or "") not in {"/system/etc/fonts.xml", "/system/etc/font_fallback.xml"}
+            or ref.get("family") or attrs.get("name") or attrs.get("variant")
+            or any(str(key).lower() in {"fallbackfor", "fallback-for"} and value
+                   for bucket in (attrs, font_attrs) for key, value in bucket.items())):
+        return False
+    if (_int(ref.get("ordinal"), -1) or 0) < 0:
+        return False
+    lang = str(attrs.get("lang") or "")
+    return bool(lang) and font_role_shadow._language_kind([lang]) == "cjk"
+
+
+def _scoped_reference_key(ref: dict[str, Any]):
+    return (str(ref.get("sourceXml") or ""), _int(ref.get("ordinal"), -1),
+            str(ref.get("family") or ""), str(ref.get("familyNormalized") or ""),
+            str(ref.get("declared") or "").strip(), _int(ref.get("index"), 0),
+            _int(ref.get("weight"), 400), str(ref.get("style") or "normal"),
+            str(ref.get("postScriptName") or ""), ref.get("familyAttributes") or {},
+            ref.get("fontAttributes") or {}, _route_axis_values(ref.get("axes")))
+
+
 def route_target(target: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
     """Resolve a fresh source and safety contract for one exact XML reference.
 
@@ -653,9 +678,16 @@ def route_target(target: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]
     compiler recompute this mapping; physical-only targets retain their own
     contract and cannot borrow another route's successful selection.
     """
+    scoped = target.get("xmlScopedTarget")
+    scoped_preserved = False
+    if isinstance(scoped, dict):
+        if any(_scoped_reference_key(node) == _scoped_reference_key(ref) for ref in scoped.get("xmlRefs") or []):
+            target = scoped
+        else:
+            scoped_preserved = True
     # Avoid copying the entire shared reference graph into every route artifact.
     result = copy.deepcopy({key: value for key, value in target.items()
-                            if key not in {"sourceCandidates", "xmlRefs"}})
+                            if key not in {"sourceCandidates", "xmlRefs", "xmlScopedTarget"}})
     result["xmlRefs"] = [copy.deepcopy(node)]
     contract = result.setdefault("targetContract", {})
     axes = _route_axis_values(node.get("axes"))
@@ -678,6 +710,8 @@ def route_target(target: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]
         identity = (contract.get("stockIdentities") or {}).get(str(contract["faceIndex"]))
         if isinstance(identity, dict):
             contract["stockIdentity"] = copy.deepcopy(identity)
+    if scoped_preserved:
+        return result
     slot = {
         "slotName": target.get("slotName"),
         "metrics": contract.get("metrics", {}),
@@ -715,6 +749,7 @@ def _plan_slot(
     slot: dict[str, Any],
     role_info: dict[str, Any],
     faces: list[dict[str, Any]],
+    *, allow_xml_scope: bool = False,
 ) -> dict[str, Any]:
     role = str(role_info.get("role") or "unknown-protected")
     confidence = _int(role_info.get("confidence"), 0) or 0
@@ -762,6 +797,16 @@ def _plan_slot(
             status="ready",
             reasons=["protected-role"],
         )
+        refs = [ref for ref in base["xmlRefs"] if _scoped_chinese_reference(ref)]
+        fixed_faces = [face for face in faces if is_fixed_composite_selection(_source_ref(face))]
+        if allow_xml_scope and role == "special-fallback" and refs and fixed_faces:
+            scoped_slot = copy.deepcopy(slot)
+            scoped_slot["xmlRefs"] = refs
+            scoped_slot["families"] = []
+            scoped = _plan_slot(path, scoped_slot, {"role":"cjk", "confidence":100, "action":"conditional"}, fixed_faces)
+            if scoped.get("source"):
+                scoped["xmlScopePolicy"] = "fixed-chinese-reference-v1"
+                base["xmlScopedTarget"] = scoped
         return base
     if role == "unknown-protected" or role_action == "review":
         base.update(
@@ -905,6 +950,7 @@ def build_plan(
     topology: dict[str, Any],
     roles: dict[str, Any],
     profile: dict[str, Any],
+    *, fixed_xml_scopes: bool = False,
 ) -> dict[str, Any]:
     build_key, profile_id = _validate_inputs(topology, roles, profile)
     slots = _topology_slots(topology)
@@ -922,7 +968,7 @@ def build_plan(
                 "confidence": 0,
                 "action": "review",
             }
-        targets[path] = _plan_slot(path, slots[path], role_info, faces)
+        targets[path] = _plan_slot(path, slots[path], role_info, faces, allow_xml_scope=fixed_xml_scopes)
 
     action_counts: dict[str, int] = {}
     status_counts: dict[str, int] = {}
@@ -944,6 +990,8 @@ def build_plan(
         "sourceDigest": _source_digest(profile),
     }
     constraints = _global_constraints(topology, missing_role_slots)
+    if fixed_xml_scopes:
+        constraints["xmlScopePolicy"] = "fixed-chinese-reference-v1"
     semantic = {
         "inputs": inputs,
         "buildKey": build_key,
@@ -1054,6 +1102,25 @@ def validate_plan(
         if role not in PROTECTED_ROLES | TEXT_ROLES | SPECIALIZED_ROLES | {"unknown-protected"}:
             if action != "preserve":
                 raise UniversalPlanError(f"未知扩展角色不得自动替换：{path}")
+        scoped = item.get("xmlScopedTarget")
+        if scoped is not None:
+            if (not isinstance(scoped, dict) or role != "special-fallback" or action != "preserve"
+                    or (plan.get("constraints") or {}).get("xmlScopePolicy") != "fixed-chinese-reference-v1"
+                    or scoped.get("path") != path or scoped.get("role") != "cjk"
+                    or scoped.get("xmlScopePolicy") != "fixed-chinese-reference-v1"
+                    or scoped.get("action") not in {"replace", "compile"}
+                    or not is_fixed_composite_selection(scoped.get("source") or {})
+                    or not scoped.get("xmlRefs") or scoped.get("xmlScopedTarget") is not None):
+                raise UniversalPlanError(f"XML-scoped Chinese target contract invalid: {path}")
+            for key in ("stockIdentity", "stockIdentities", "stockGeometryProfile", "metrics", "coverage", "format"):
+                if scoped.get("targetContract", {}).get(key) != item.get("targetContract", {}).get(key):
+                    raise UniversalPlanError(f"XML-scoped Chinese target changed original evidence: {path}")
+            for ref in scoped["xmlRefs"]:
+                if (not _scoped_chinese_reference(ref) or not any(
+                        _scoped_reference_key(ref) == _scoped_reference_key(parent) for parent in item.get("xmlRefs") or [])):
+                    raise UniversalPlanError(f"XML-scoped Chinese reference escaped frozen evidence: {path}")
+            if any(not is_fixed_composite_selection(candidate) for candidate in scoped.get("sourceCandidates") or []):
+                raise UniversalPlanError(f"XML-scoped Chinese source is not fixed composite: {path}")
         if action in {"replace", "compile", "compile-specialized"} and not isinstance(item.get("source"), dict):
             raise UniversalPlanError(f"替换目标缺少源 face：{path}")
 

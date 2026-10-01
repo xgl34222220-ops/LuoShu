@@ -62,6 +62,7 @@ def evaluate(
 
     targets = plan.get("targets") if isinstance(plan.get("targets"), dict) else {}
     replacement_count = 0
+    scoped_count = 0
     role_counts: dict[str, int] = {}
     action_counts: dict[str, int] = {}
     for path, target in sorted(targets.items()):
@@ -81,6 +82,14 @@ def evaluate(
             replacement_count += 1
             if role not in ALLOWED_REPLACEMENT_ROLES:
                 reasons.append(f"replacement-role-not-allowed:{role}:{path}")
+        scoped = target.get("xmlScopedTarget")
+        if isinstance(scoped, dict):
+            scoped_count += 1
+            replacement_count += 1
+            if not any(item.get("targetPath") == path and item.get("role") == "cjk"
+                       and item.get("status") == "ready" and item.get("deploymentKinds") == ["xml-route"]
+                       for item in artifacts.get("artifacts", [])):
+                reasons.append(f"scoped-chinese-artifact-missing:{path}")
         if role in PROTECTED_ROLES and action != "preserve":
             reasons.append(f"protected-role-not-preserved:{role}:{path}")
         if role == "unknown-protected" and action != "review":
@@ -123,6 +132,8 @@ def evaluate(
                          for item in artifacts.get("artifacts", []) if isinstance(item, dict))
     preserved_marks = sum(int((item.get("report") or {}).get("transformed", {}).get("layout", {}).get("preservedSharedMarks") or 0)
                           for item in artifacts.get("artifacts", []) if isinstance(item, dict))
+    preserved_clock = sum(int((item.get("report") or {}).get("transformed", {}).get("layout", {}).get("preservedClockPunctuation") or 0)
+                          for item in artifacts.get("artifacts", []) if isinstance(item, dict))
     preserved_count = len(route.get("preservedRoutes") or [])
     if preserved_count:
         warnings.append(f"partial-coverage:preserved-original-style-routes:{preserved_count}")
@@ -130,6 +141,8 @@ def evaluate(
         warnings.append(f"partial-coverage:preserved-math-glyphs:{preserved_math}")
     if preserved_marks:
         warnings.append(f"partial-coverage:preserved-shared-marks:{preserved_marks}")
+    if preserved_clock:
+        warnings.append(f"partial-coverage:preserved-clock-punctuation:{preserved_clock}")
     static_deferred = int(route_summary.get("representationDeferralCount") or 0)
     if static_deferred:
         warnings.append(f"partial-coverage:fixed-static-xml-deferred:{static_deferred}")
@@ -146,14 +159,16 @@ def evaluate(
         "summary": {
             "slotCount": len(targets),
             "coverage": ("mixed-static-and-retained-adapters" if static_deferred else
-                         "partial-protected-typography" if preserved_math or preserved_marks else
+                         "partial-protected-typography" if preserved_math or preserved_marks or preserved_clock else
                          "partial-style-preserved" if preserved_count else "planned-targets"),
             "fixedStaticOperationCount": int(route_summary.get("fixedStaticOperationCount") or 0),
             "fixedStaticDeferralCount": static_deferred,
             "preservedSharedMarks": preserved_marks,
             "preservedMathGlyphs": preserved_math,
+            "preservedClockPunctuation": preserved_clock,
             "preservedStyleRouteCount": preserved_count,
             "replacementCount": replacement_count,
+            "xmlScopedTargetCount": scoped_count,
             "roleCounts": dict(sorted(role_counts.items())),
             "actionCounts": dict(sorted(action_counts.items())),
             "reasonCount": len(set(reasons)),

@@ -425,3 +425,29 @@ use identical shared codepoints on source, original and reopened output. This
 preservation is not full replacement of the clock face. The failed run's scan was
 32.352 seconds and compilation 48.692 seconds; original files, cleanup and
 Enforcing state were preserved.
+
+### Native preparation passed structurally, but exposed a missing CJK route
+
+[e028dd86 / run 36891178565](https://github.com/xgl34222220-ops/LuoShu/actions/runs/36891178565)
+completed actual Android scan/planning/compilation/deployment validation: 38/38
+artifacts ready, 49 payload files, 130.694 seconds total. Scan was 39.497 seconds,
+compilation 61.876 seconds, peak process RSS 181,308 KiB. Input was a 287,612-byte
+synthetic composite; these timings do not establish performance for large user
+fonts or ARM devices. Original XML-member bytes, Enforcing state and cleanup were
+verified. Clock U+003A remained original with an explicit advance-width reason.
+
+Reviewing role participation then found no compiled CJK artifact: the shared
+NotoSansCJK collection was protected as a whole because it also serves Japanese,
+Korean and Bopomofo. This structural prepare pass is therefore not proof that all
+three requested donor roles participated. The next native oracle requires actual
+compiled CJK, Latin and digit donor outlines before accepting preparation.
+
+An opt-in fixed-XML plan can now select only frozen, unnamed, explicitly Chinese
+references inside an otherwise protected file. Its physical action stays
+`preserve`; Japanese, Korean, mixed Bopomofo, serif/fallbackFor and variant refs
+remain unchanged. Scope is bound to complete node attributes, axes, weight and
+face evidence. The legacy text-only representation cannot execute these scoped
+references: original fallback closure is mandatory. Default production planning
+has not enabled this experimental option. Synthetic collection tests cover
+nonzero face selection, exact original container preservation, absent/nonfixed
+scope rejection and prevention of silent route omission or physical promotion.

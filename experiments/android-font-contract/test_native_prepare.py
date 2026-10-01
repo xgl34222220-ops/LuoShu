@@ -16,6 +16,16 @@ class NativePrepareTest(unittest.TestCase):
    self.assertEqual(set(selection['roles']),{'cjk','latin','digit'})
    self.assertEqual(selection['fontSha256'],native.sha(root/'source/fonts/composite.ttf'))
    self.assertTrue(all(x['axisProvenance']=='static-component' and x['effectiveAxes']=={} for x in selection['roles'].values()))
+ def test_ready_artifacts_without_cjk_do_not_satisfy_the_requested_roles(self):
+  with tempfile.TemporaryDirectory() as temp:
+   root=Path(temp);(root/'inputs').mkdir();assets=Path(__file__).parent/'app/src/main/assets'
+   for role in ('cjk','latin','digit'):shutil.copy2(assets/(role+'.ttf'),root/'inputs'/(role+'.ttf'))
+   native.build_composite(root)
+   items=[{'role':role,'status':'ready','targetPath':'/system/fonts/'+role+'.ttf','output':str(root/'source/fonts/composite.ttf'),'contract':{'requiredFaceIndex':0}} for role in ('cjk','latin','clock')]
+   self.assertEqual(set(native.verify_prepared_roles({'artifacts':items})),{'cjk','latin','digit'})
+   with self.assertRaisesRegex(RuntimeError,'requested cjk role'):
+    native.verify_prepared_roles({'artifacts':items[1:]})
+
  def test_host_or_unowned_root_is_rejected_before_scanning(self):
   with tempfile.TemporaryDirectory() as temp,patch.object(sys,'argv',['native','--module',temp]),patch.object(native.subprocess,'run') as command:
    self.assertEqual(native.main(),1);command.assert_not_called()
