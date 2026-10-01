@@ -277,6 +277,15 @@ def _paired_geometry_profiles(stock: TTFont, source: TTFont, role: str,
                               source_profile: dict[str, Any] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
     target_profile = _profile_from_font(stock)
     source_profile = copy.deepcopy(source_profile) if source_profile is not None else _profile_from_font(source)
+    if role in SPECIALIZED_ROLES:
+        common = set(stock.getBestCmap() or {}) & set(source.getBestCmap() or {})
+        shared = {name: [cp for cp in template_engine.PROBE_GROUPS[name]
+                         if cp in common and _eligible_codepoint(role, cp)]
+                  for name in ("digits", "punctuationBaseline", "punctuationCenter")}
+        for font, profile in ((stock, target_profile), (source, source_profile)):
+            for name, points in shared.items():
+                profile["probes"][name] = template_engine.glyph_group(font, points)
+            profile["sharedProbePoints"] = {name: points for name, points in shared.items() if points}
     # A regional/rare-Han subset may legitimately omit every canonical probe.
     # Use actual shared Han outlines, never a fallback Latin/symbol measurement.
     if role == "cjk" and min(int(p["probes"]["cjk"].get("boundsHits") or 0)
@@ -783,6 +792,9 @@ def _transform_for_codepoint(
         else:
             probe = "punctuationCenter"
     transform = slot_build.transform_for_probe(geometry, probe)
+    declared = (geometry.get("transforms") or {}).get(probe) or {}
+    if exact_advance and declared.get("status") == "unsafe":
+        raise CompilerError("rejected glyph transform cannot fall back to UPEM scaling: " + probe)
     if not isinstance(transform, dict):
         return upem_scale, upem_scale, 0.0
     scale_y = _float(transform.get("outlineScaleY"), upem_scale) or upem_scale
@@ -968,6 +980,24 @@ def _replace_role_glyphs(
     selected_points = {cp for cp in set(base_cmap).intersection(source_cmap)
                        if _eligible_codepoint(role, cp) and
                        source_bounds_for(source_cmap[cp]) is not None}
+    preserved_punctuation = []
+    preserved_points = set()
+    if exact:
+        for cp in sorted(set(base_cmap) & CLOCK_PUNCTUATION):
+            probe = slot_build.probe_for_codepoint(cp)
+            transform = slot_build.transform_for_probe(geometry, probe)
+            if cp not in selected_points or transform is None:
+                raw_transform = (geometry.get("transforms") or {}).get(probe) or {}
+                preserved_points.add(cp)
+                preserved_punctuation.append({"codepoint": cp, "probe": probe,
+                    "reason": "source-outline-missing" if cp not in selected_points else "unsafe-or-missing-transform",
+                    "risks": list(raw_transform.get("risks") or [])})
+        # Decimal digits are mandatory. Optional punctuation must never use an
+        # implicit UPEM-only fallback after its transform was rejected.
+        for cp in required & selected_points:
+            if slot_build.transform_for_probe(geometry, slot_build.probe_for_codepoint(cp)) is None:
+                raise CompilerError("required clock digit has no safe geometry transform")
+        selected_points -= preserved_points
     imported_names = {}
     for cp in selected_points:
         name, source_name = base_cmap[cp], source_cmap[cp]
@@ -984,7 +1014,7 @@ def _replace_role_glyphs(
     isolation = semantics.isolate_stock_dependencies(base, imported_names, selected_points)
 
     for cp in sorted(set(base_cmap).intersection(source_cmap)):
-        if not _eligible_codepoint(role, cp):
+        if not _eligible_codepoint(role, cp) or cp in preserved_points:
             continue
         base_name = base_cmap[cp]
         if base_name in protected_names:
@@ -1056,7 +1086,9 @@ def _replace_role_glyphs(
         "preparedDonorReuse": {"hits": source_cache["glyphHits"] - prior_hits if source_cache is not None else 0,
                                "estimatedGlyphBytes": source_cache["glyphBytes"] if source_cache is not None else 0,
                                "estimatedBoundsBytes": source_cache["boundsBytes"] if source_cache is not None else 0},
-        "layout": {"preservedMathGlyphs":len(protected_math), "preservedSharedMarks":len(protected_marks)},
+        "layout": {"preservedMathGlyphs":len(protected_math), "preservedSharedMarks":len(protected_marks),
+                   "preservedClockPunctuation":len(preserved_punctuation)},
+        "preservedOptionalPunctuation": preserved_punctuation,
         "importedYMin": min(imported_y) if imported_y else None,
         "importedYMax": max(imported_y) if imported_y else None,
         "exactAdvance": exact,
@@ -1609,8 +1641,9 @@ def _validate_output_face(
         profile = _profile_from_font(instance)
         for name, points in (stock_profile.get("sharedProbePoints") or {}).items():
             profile["probes"][name] = template_engine.glyph_group(instance, points)
-            if int(profile["probes"][name].get("boundsHits") or 0) < 4:
-                raise CompilerError("compiled CJK output lost shared Han probes")
+            minimum = slot_plan_engine.minimum_hits(name)
+            if int(profile["probes"][name].get("boundsHits") or 0) < minimum:
+                raise CompilerError("compiled CJK output lost shared Han probes" if name == "cjk" else "compiled output lost shared outline probes: " + name)
         required_ps = str(artifact.get("requiredPostScriptName") or "")
         if required_ps:
             names = template_engine.font_names(instance)

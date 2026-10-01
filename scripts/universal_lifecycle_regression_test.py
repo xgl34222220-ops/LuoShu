@@ -303,12 +303,14 @@ except OSError as error:
         with tempfile.TemporaryDirectory() as raw:
             t=Path(raw);route=t/'route.json';artifacts=t/'artifacts.json';output=t/'coverage.conf'
             route.write_text(json.dumps({'preservedRoutes':[{}]}))
-            artifacts.write_text(json.dumps({'artifacts':[{'report':{'transformed':{'layout':{'preservedMathGlyphs':3,'preservedSharedMarks':2}}}}]}))
+            artifacts.write_text(json.dumps({'artifacts':[{'report':{'transformed':{'layout':{'preservedMathGlyphs':3,'preservedSharedMarks':2,'preservedClockPunctuation':1}}}}]}))
             result=subprocess.run([sys.executable,'-',str(route),str(output),'request-test',str(artifacts)],input=body,text=True,capture_output=True)
             self.assertEqual(result.returncode,0,result.stderr)
             content=output.read_text()
             self.assertIn('coverage=partial-protected-typography',content)
             self.assertIn('preservedMathGlyphs=3',content)
+            self.assertIn('preservedClockPunctuation=1',content)
+            self.assertIn('原厂钟表标点',content)
             self.assertIn('preservedSharedMarks=2',content)
             self.assertIn('部分覆盖',content)
 

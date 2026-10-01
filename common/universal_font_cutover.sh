@@ -270,15 +270,18 @@ math_count=sum(int((item.get('report', {}).get('transformed', {}).get('layout', 
                for item in artifacts.get('artifacts', []))
 mark_count=sum(int((item.get('report', {}).get('transformed', {}).get('layout', {}) or {}).get('preservedSharedMarks') or 0)
                for item in artifacts.get('artifacts', []))
-coverage='partial-protected-typography' if math_count or mark_count else ('partial-style-preserved' if count else 'planned-targets')
+clock_count=sum(int((item.get('report', {}).get('transformed', {}).get('layout', {}) or {}).get('preservedClockPunctuation') or 0)
+                for item in artifacts.get('artifacts', []))
+coverage='partial-protected-typography' if math_count or mark_count or clock_count else ('partial-style-preserved' if count else 'planned-targets')
 parts=[]
 if count: parts.append('保留 %s 条原厂斜体路由' % count)
 if math_count: parts.append('保留 %s 处数学/专用字形' % math_count)
 if mark_count: parts.append('保留 %s 处跨文字共享标记' % mark_count)
+if clock_count: parts.append('保留 %s 处原厂钟表标点' % clock_count)
 message=('通用引擎已准备，'+ '，'.join(parts)+'（部分覆盖），请完整重启'
          if parts else '通用引擎字体负载已准备，请完整重启')
 p=Path(sys.argv[2]);tmp=p.with_name(p.name+'.tmp.'+str(os.getpid()))
-tmp.write_text('requestId='+sys.argv[3]+'\ncoverage='+coverage+'\npreservedStyleRoutes='+str(count)+'\npreservedMathGlyphs='+str(math_count)+'\npreservedSharedMarks='+str(mark_count)+'\nmessage='+message+'\n')
+tmp.write_text('requestId='+sys.argv[3]+'\ncoverage='+coverage+'\npreservedStyleRoutes='+str(count)+'\npreservedMathGlyphs='+str(math_count)+'\npreservedSharedMarks='+str(mark_count)+'\npreservedClockPunctuation='+str(clock_count)+'\nmessage='+message+'\n')
 os.replace(tmp,p)
 PYCOVER
         _uc_log "mixed coverage: $(_uc_value "$CONFIG_DIR/universal-mixed-coverage.conf" message)"

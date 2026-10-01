@@ -413,3 +413,15 @@ after that atomic failure. This is not a passed native prepare or phone result.
 Original bytes, Enforcing state, process cleanup, owned directory removal and VM
 teardown were verified. The delimiters require their own measured OEM geometry;
 shifting the whole operator/punctuation group cannot fit both its top and bottom.
+
+Run [36888443718](https://github.com/xgl34222220-ops/LuoShu/actions/runs/36888443718)
+(c1c84dd5) passed that delimiter case and reached 13 ready artifacts. The next
+failure was clock punctuation: a rejected exact-width colon transform silently
+fell back to UPEM-only replacement, then correctly failed output alignment.
+Required decimal digits must remain fully safe. Optional punctuation with missing
+source outlines or rejected transforms now retains its sealed original outline
+and advance, with explicit partial-coverage reporting. Clock probe measurements
+use identical shared codepoints on source, original and reopened output. This
+preservation is not full replacement of the clock face. The failed run's scan was
+32.352 seconds and compilation 48.692 seconds; original files, cleanup and
+Enforcing state were preserved.
