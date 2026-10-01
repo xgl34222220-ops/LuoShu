@@ -54,9 +54,10 @@ def direct_contract(manifest, cases, baseline,metadata=None,xml_bytes=None):
  if not {'A','1','中'}.issubset({x['sample'] for x in selected}):raise RuntimeError('direct contract lacks selected role coverage')
  return {'files':files,'cases':selected}
 
-def run(adb,root,reboot,read_system_file,payload,manifest,captured,backups,output,direct=None,framework=None,default_probe=None):
+def run(adb,root,reboot,read_system_file,payload,manifest,captured,backups,output,direct=None,framework=None,default_probe=None,staged_hooks=False):
  output=Path(output);module_report={'scope':'disposable API36 private mount namespace','globalAppConsumerTested':False,'rootManagerTested':False,'moduleBootTested':False,'state':'running'}
  created=False;global_attempted=False;global_restored=False;app_started=False;apply_completed=False
+ if staged_hooks and framework is None:raise RuntimeError('staged hook experiment requires the approved framework protocol')
  if framework is not None and (direct is None or default_probe is None):raise RuntimeError('framework experiment requires explicit global consumer contracts')
  original_key='originalsAfterRollback' if direct is not None else 'outsideNamespaceUnchanged'
  if direct is not None:
@@ -77,11 +78,16 @@ def run(adb,root,reboot,read_system_file,payload,manifest,captured,backups,outpu
   adb('shell','test','!','-e',REMOTE);adb('shell','mkdir',REMOTE);created=True
   runtime=Path(__file__).parent/'.runtime-x86'
   adb('push',str(runtime/'common'),REMOTE+'/common',timeout=180)
-  adb('push',str(payload),REMOTE+'/.luoshu-payload',timeout=180)
+  adb('push',str(payload),REMOTE+('/.luoshu-payload-next' if staged_hooks else '/.luoshu-payload'),timeout=180)
+  if staged_hooks:
+   for name in ('post-fs-data.sh','post-mount.sh'):adb('push',str(Path(__file__).resolve().parents[2]/name),REMOTE+'/'+name)
   with tempfile.TemporaryDirectory() as td:
    local=Path(td);(local/'config').mkdir()
-   (local/'config/active_font.conf').write_text('mix\n')
-   (local/'config/universal-font-runtime.conf').write_text('state=active\npipeline=universal-font-deployment-v1\nfont=mix\ndeploymentId='+manifest['deploymentId']+'\npayloadDigest='+manifest['payloadDigest']+'\n')
+   (local/'config/active_font.conf').write_text('default\n' if staged_hooks else 'mix\n')
+   if staged_hooks:
+    (local/'config/universal-font-next.conf').write_text('state=prepared\nfont=mix\npreviousFont=default\npreviousMode=default\ndeploymentId='+manifest['deploymentId']+'\npayloadDigest='+manifest['payloadDigest']+'\n')
+   else:
+    (local/'config/universal-font-runtime.conf').write_text('state=active\npipeline=universal-font-deployment-v1\nfont=mix\ndeploymentId='+manifest['deploymentId']+'\npayloadDigest='+manifest['payloadDigest']+'\n')
    (local/'namespace-contract.json').write_text(json.dumps({'originalHashes':original,'newAssetPaths':new,'mountScope':module_report['scope']}))
    # This observer delegates every call to the real Android mount executable;
    # it cannot convert failure into success or synthesize a mount result.
@@ -121,8 +127,12 @@ exit "$rc"
    if framework is not None:framework.stop()
    global_attempted=True;module_report['globalMountAttempted']=True
    env_args=('env','LUOSHU_XML_COPY_LABEL_TEST_APPROVED=true') if framework is not None else ()
+   if staged_hooks:env_args+=('LUOSHU_STAGED_HOOK_TEST_APPROVED=true',)
    raw=adb('shell',*env_args,'timeout','-k','5','150','sh',REMOTE+'/module_global_probe.sh',REMOTE,'apply',timeout=180)
    apply_completed=True
+   if staged_hooks:
+    if b'STAGED_HOOKS next-to-live and deferred post-mount verified' not in raw:raise RuntimeError('top-level activation and hook proof missing')
+    module_report.update(manualTopLevelHooksTested=True,rootManagerStageSimulation='KernelSU',actualBootActivationTested=False)
    if framework is not None:
     (output/'mounted-config-labels.txt').write_bytes(adb('shell','ls','-lZ',*backups.keys()))
     module_report['appliedFrameworkCycle']=framework.start()

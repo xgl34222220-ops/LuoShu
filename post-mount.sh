@@ -12,6 +12,15 @@ if [ -s "$UNIVERSAL_MODE" ]; then
         sh "$UNIVERSAL_RUNTIME" hook post-mount >/dev/null 2>&1 || true
     exit 0
 fi
+
+# Do not reinterpret a rejected Universal request as permission to mount legacy.
+[ ! -f "$MODDIR/common/universal_next_boot.sh" ] || . "$MODDIR/common/universal_next_boot.sh"
+if type universal_font_next_boot_blocks_legacy >/dev/null 2>&1 && universal_font_next_boot_blocks_legacy; then
+    universal_font_next_boot_record_legacy_block
+    _ufnb_log "queued Universal activation rejected; legacy hooks blocked for this boot"
+    exit 1
+fi
+
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
 V4_POST_MOUNT="$MODDIR/.luoshu-runtime/core/post-mount.sh"
 HYPEROS_LEGACY_COMPAT="$MODDIR/common/legacy_v14_4/hyperos_full_coverage.sh"

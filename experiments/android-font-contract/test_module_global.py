@@ -90,6 +90,30 @@ class FrameworkGlobalTest(unittest.TestCase):
   report=json.loads((self.out/'module-namespace-summary.json').read_text())
   self.assertTrue(report['recoveryRebootAfterFrameworkFailure']);self.assertEqual(report['state'],'failed')
 
+class StagedHookTest(unittest.TestCase):
+ setUp=GlobalProbeTest.setUp
+ adb=GlobalProbeTest.adb
+ cycle=FrameworkGlobalTest.cycle
+ good_adb=FrameworkGlobalTest.good_adb
+ def test_staged_payload_has_no_precreated_active_runtime(self):
+  self.apply_fails=False;captured={}
+  def adb(*args,**kwargs):
+   if args[:1]==('push',) and args[-1]==runner.REMOTE+'/config':
+    directory=Path(args[1]);captured.update({p.name:p.read_text() for p in directory.iterdir()})
+   if args[-1:]==('apply',):
+    self.calls.append(args);return b'STAGED_HOOKS next-to-live and deferred post-mount verified'
+   return self.good_adb(*args,**kwargs)
+  result=runner.run(adb,lambda:None,lambda:self.calls.append(('reboot',)),lambda p:b'',self.out,{'files':[],'deploymentId':'test','payloadDigest':'test'},{},{},self.out,direct={'files':[],'cases':[]},framework=self.cycle(),default_probe=lambda phase:{'status':'passed-style-matrix'},staged_hooks=True)
+  self.assertIn('universal-font-next.conf',captured);self.assertNotIn('universal-font-runtime.conf',captured)
+  self.assertEqual(captured['active_font.conf'],'default\n')
+  self.assertTrue(any(x[0]=='push' and x[-1]==runner.REMOTE+'/.luoshu-payload-next' for x in self.calls))
+  self.assertTrue(result['manualTopLevelHooksTested']);self.assertFalse(result['actualBootActivationTested']);self.assertFalse(result['rootManagerTested'])
+ def test_missing_hook_proof_cannot_succeed(self):
+  self.apply_fails=False
+  with self.assertRaisesRegex(RuntimeError,'hook proof missing'):
+   runner.run(self.good_adb,lambda:None,lambda:self.calls.append(('reboot',)),lambda p:b'',self.out,{'files':[],'deploymentId':'test','payloadDigest':'test'},{},{},self.out,direct={'files':[],'cases':[]},framework=self.cycle(),default_probe=lambda phase:{},staged_hooks=True)
+  self.assertIn(('reboot',),self.calls)
+
 class DirectContractTest(unittest.TestCase):
  def test_roles_and_preserved_axes_are_explicit(self):
   selected=[];baseline=[];files=[];metadata=[];nodes=[]

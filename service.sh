@@ -24,6 +24,15 @@ if [ -s "$UNIVERSAL_MODE" ]; then
     exit 0
 fi
 
+# Do not reinterpret a rejected Universal request as permission to mount legacy.
+[ ! -f "$MODDIR/common/universal_next_boot.sh" ] || . "$MODDIR/common/universal_next_boot.sh"
+if type universal_font_next_boot_blocks_legacy >/dev/null 2>&1 && universal_font_next_boot_blocks_legacy; then
+    universal_font_next_boot_record_legacy_block
+    _ufnb_log "queued Universal activation rejected; legacy hooks blocked for this boot"
+    exit 1
+fi
+
+
 # Legacy/current production paths keep the Google provider compatibility service.
 if [ -f "$MODDIR/common/google_font_provider_service.sh" ]; then
     (

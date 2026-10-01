@@ -333,3 +333,37 @@ label change, init file modification, SELinux policy change or root manager was
 used. Host compilation took 136.319 seconds; this is not a phone latency result.
 The APK remains the byte-identical 317 audit App. The checked module candidate
 is retained while default-consumer and boot integration remain unproved.
+
+### Mounted default consumers with a bounded framework cycle (6fe98967)
+
+[Android run 36870305437](https://github.com/xgl34222220-ops/LuoShu/actions/runs/36870305437)
+passed with artifact 11167019674. After the production mount transaction, an
+explicit stop/start of the disposable VM's Zygote produced a new system_server.
+The ordinary App's default Typeface/TextRunShaper matrix passed 74/74 cases.
+After normal rollback and a second bounded framework cycle, a separate fresh
+request passed all 74 original-source/raster cases. The two request identities
+are different. Direct reads also passed 66 cases over 52 fonts, and bind ownership,
+original-byte verification after reboot, staging deletion and VM teardown passed.
+SELinux stayed Enforcing. Only new copies received labels from original font/XML
+references. Host preparation was 141.018 seconds; whole experiment time was
+367.141 seconds, neither a phone apply-time measurement.
+
+This is temporary global mounting plus framework restart on API36 x86_64, not a
+root-manager boot, ARM64 execution or vendor-ROM proof. Earlier run 36867038856
+restarted the framework but its consumer process crashed; the crash did not recur
+in this successful run and its unique cause remains undiagnosed. Per-invocation
+report identity and pre-recovery crash capture now prevent stale reports from
+being accepted and preserve future failure evidence.
+
+### Queue-to-boot firmware identity
+
+A subsequent host counterexample used a real sealed plan with buildKey
+`phase6-test`, then supplied `different-OTA-build` through the current property
+command. Both the original activation and mount entrypoint accepted it. Device
+identity is now re-read and matched to the already sealed FontPlan immediately
+before activation and mounting. Empty/unknown identity, missing sealed evidence
+and failed property commands are rejected; an invalid next payload cannot replace
+the previous live payload. This does not substitute for current font-update
+configuration validation, which remains independently required. The new tests
+use synthetic property output and mock only the system mount operation; they do
+not claim an actual OTA or boot integration.

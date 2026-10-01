@@ -62,6 +62,7 @@ _ufnb_discard_invalid_next() {
     _ufnb_failed="${_ufnb_state%.conf}.failed.conf"
     {
         printf 'state=failed\n'
+        printf 'bootId=%s\n' "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || echo unknown)"
         printf 'reason=%s\n' "$_ufnb_reason"
         printf 'previousFont=%s\n' "${_ufnb_previous:-default}"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
@@ -69,6 +70,33 @@ _ufnb_discard_invalid_next() {
     _ufnb_restore_previous_selection "${_ufnb_state%/universal-font-next.conf}" "$_ufnb_previous"
     rm -f "$_ufnb_state" 2>/dev/null || true
     rm -rf "$_ufnb_next" 2>/dev/null || true
+}
+
+# A rejected queued Universal payload cannot fall through to an unverified
+# legacy mount during this boot. Verified previous Universal payloads retain
+# their own current-device/integrity checks in the ordinary runtime branch.
+universal_font_next_boot_blocks_legacy() {
+    _ufnb_block_file="$(_ufnb_module)/config/universal-font-next.failed.conf"
+    [ -s "$_ufnb_block_file" ] || return 1
+    _ufnb_failed_boot=$(_ufnb_value "$_ufnb_block_file" bootId)
+    [ -n "$_ufnb_failed_boot" ] || return 1
+    _ufnb_current_boot=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)
+    [ -n "$_ufnb_current_boot" ] || return 0
+    [ "$_ufnb_failed_boot" = unknown ] || [ "$_ufnb_failed_boot" = "$_ufnb_current_boot" ]
+}
+
+universal_font_next_boot_record_legacy_block() {
+    _ufnb_block_cfg="$(_ufnb_module)/config"
+    _ufnb_block_active=$(head -n1 "$_ufnb_block_cfg/active_font.conf" 2>/dev/null)
+    {
+        printf 'state=failed\nbackend=none\nfailed=universal-activation-rejected\n'
+    } > "$_ufnb_block_cfg/self-mount.conf.tmp.$$" &&
+        mv -f "$_ufnb_block_cfg/self-mount.conf.tmp.$$" "$_ufnb_block_cfg/self-mount.conf"
+    {
+        printf 'state=failed\nmode=universal-activation-rejected\nreason=queued-payload-rejected-before-mount\n'
+        printf 'activeFont=%s\n' "${_ufnb_block_active:-default}"
+    } > "$_ufnb_block_cfg/device-font-load-verification.conf.tmp.$$" &&
+        mv -f "$_ufnb_block_cfg/device-font-load-verification.conf.tmp.$$" "$_ufnb_block_cfg/device-font-load-verification.conf"
 }
 
 universal_font_next_boot_activate() {
@@ -132,8 +160,8 @@ universal_font_next_boot_activate() {
         _ufnb_discard_invalid_next "$_ufnb_state" "$_ufnb_next" deployer-missing "$_ufnb_previous_font"
         return 1
     }
-    _ufnb_python "$_ufnb_deployer" --payload-root "$_ufnb_next" --validate-dynamic-generation --validate-payload-only "$_ufnb_manifest" >/dev/null 2>&1 || {
-        _ufnb_log "staged payload validation failed"
+    _ufnb_validation=$(_ufnb_python "$_ufnb_deployer" --payload-root "$_ufnb_next" --validate-dynamic-generation --validate-device-generation --validate-payload-only "$_ufnb_manifest" 2>&1) || {
+        _ufnb_log "staged payload validation failed: $(printf '%s' "$_ufnb_validation" | head -c 1024)"
         _ufnb_discard_invalid_next "$_ufnb_state" "$_ufnb_next" payload-validation-failed "$_ufnb_previous_font"
         return 1
     }
@@ -234,6 +262,7 @@ universal_font_next_boot_activate() {
           "$_ufnb_cfg/universal-font-mount.conf" \
           "$_ufnb_cfg/universal-font-rollback.conf" 2>/dev/null || true
     rm -rf "$_ufnb_backup" 2>/dev/null || true
+    rm -f "$_ufnb_cfg/universal-font-next.failed.conf" 2>/dev/null || true
     _ufnb_log "activated deployment=$_ufnb_id font=$_ufnb_font previous=$_ufnb_previous_font mode=$_ufnb_previous_mode recovery=$_ufnb_recovery retired=$_ufnb_retired"
     return 0
 }

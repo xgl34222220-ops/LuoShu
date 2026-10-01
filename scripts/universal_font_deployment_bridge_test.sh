@@ -42,8 +42,10 @@ p.add_argument("--manifest")
 p.add_argument("--validate")
 p.add_argument("--validate-payload-only")
 p.add_argument("--validate-dynamic-generation", action="store_true")
+p.add_argument("--validate-device-generation", action="store_true")
 a=p.parse_args()
 if a.validate_payload_only:
+    assert a.validate_dynamic_generation and a.validate_device_generation
     m=json.load(open(a.validate_payload_only,encoding="utf-8"))
     assert Path(a.payload_root,".luoshu-runtime/deployment/deployment.json").is_file()
     print(json.dumps({"status":"ok","deploymentId":m["deploymentId"]}))

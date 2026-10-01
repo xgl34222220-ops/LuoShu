@@ -42,11 +42,16 @@ _ufmr_validate_payload() {
     _ufmr_deployer="$MODDIR/common/universal_font_deployment.py"
     _ufmr_manifest="$PAYLOAD/.luoshu-runtime/deployment/deployment.json"
     [ -f "$_ufmr_deployer" ] && [ -s "$_ufmr_manifest" ] || return 1
-    _ufmr_python "$_ufmr_deployer" \
+    _ufmr_validation_output=$(_ufmr_python "$_ufmr_deployer" \
         --payload-root "$PAYLOAD" \
         --expected-deployment-id "$(_ufmr_value "$RUNTIME_CONF" deploymentId)" \
         --expected-payload-digest "$(_ufmr_value "$RUNTIME_CONF" payloadDigest)" \
-        --validate-dynamic-generation --validate-payload-only "$_ufmr_manifest" >/dev/null 2>&1
+        --validate-dynamic-generation --validate-device-generation --validate-payload-only "$_ufmr_manifest" 2>&1)
+    _ufmr_validation_rc=$?
+    if [ "$_ufmr_validation_rc" -ne 0 ]; then
+        _ufmr_log "payload validation detail: $(printf '%s' "$_ufmr_validation_output" | head -c 1024)"
+    fi
+    return "$_ufmr_validation_rc"
 }
 
 _ufmr_has_partition_payload() {

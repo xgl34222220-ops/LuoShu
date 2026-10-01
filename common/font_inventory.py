@@ -145,7 +145,7 @@ def _getprop(name: str) -> str:
         )
     except (OSError, subprocess.SubprocessError):
         return ""
-    return result.stdout.strip()
+    return result.stdout.strip() if result.returncode == 0 else ""
 
 
 def current_build_key(explicit: str | None = None) -> tuple[str, str, str]:

@@ -53,7 +53,7 @@ jobs:
       - name: Require accelerated emulator
         id: accel
         env:
-          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '1e21ab0416a2e5875f71e2d8cbc815bdc9105ac4' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
+          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '6fe989673e4490652b6f3fa5163c21e656a5afd2' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
         shell: bash
         run: |
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
@@ -70,9 +70,10 @@ jobs:
       - name: Verify actual Android font rendering and reboot persistence
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '1e21ab0416a2e5875f71e2d8cbc815bdc9105ac4' && contains(github.event.head_commit.message, '[system-test-approved-once]') }}
-          LUOSHU_FONT_COPY_LABEL_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '1e21ab0416a2e5875f71e2d8cbc815bdc9105ac4' && contains(github.event.head_commit.message, '[font-label-approved-once]') }}
-          LUOSHU_FRAMEWORK_XML_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '1e21ab0416a2e5875f71e2d8cbc815bdc9105ac4' && contains(github.event.head_commit.message, '[framework-xml-approved-once]') }}
+          LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '6fe989673e4490652b6f3fa5163c21e656a5afd2' && contains(github.event.head_commit.message, '[system-test-approved-once]') }}
+          LUOSHU_FONT_COPY_LABEL_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '6fe989673e4490652b6f3fa5163c21e656a5afd2' && contains(github.event.head_commit.message, '[font-label-approved-once]') }}
+          LUOSHU_FRAMEWORK_XML_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '6fe989673e4490652b6f3fa5163c21e656a5afd2' && contains(github.event.head_commit.message, '[framework-xml-approved-once]') }}
+          LUOSHU_STAGED_HOOK_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '6fe989673e4490652b6f3fa5163c21e656a5afd2' && contains(github.event.head_commit.message, '[staged-hooks-test-once]') }}
         with:
           api-level: 36
           target: google_apis
@@ -87,7 +88,7 @@ jobs:
           script: |
             python3 experiments/android-font-contract/run_emulator.py --apk experiments/android-font-contract/app/build/outputs/apk/debug/app-debug.apk --output experiments/android-font-contract/output
             python3 experiments/android-font-contract/run_native_runtime.py --runtime experiments/android-font-contract/.runtime-x86 --source experiments/android-font-contract/app/src/main/assets/composite.ttf --output experiments/android-font-contract/output/android-runtime
-            if [ "$LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED" = true ]; then python3 experiments/android-font-contract/run_system_emulator.py --production-payload --matching-weight-family --module-app-default --output experiments/android-font-contract/output/system; fi
+            if [ "$LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED" = true ]; then python3 experiments/android-font-contract/run_system_emulator.py --production-payload --matching-weight-family --module-app-default --module-staged-hooks --output experiments/android-font-contract/output/system; fi
       - name: Save native evidence, including blocked capability gates
         if: always()
         uses: actions/upload-artifact@v4

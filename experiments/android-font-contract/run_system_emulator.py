@@ -8,7 +8,8 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 PACKAGE='io.github.xgl34222220.luoshu.fontcontract'
-p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');p.add_argument('--explicit-style-matrix',action='store_true');p.add_argument('--matching-weight-family',action='store_true');p.add_argument('--module-namespace-only',action='store_true');p.add_argument('--module-app-direct',action='store_true');p.add_argument('--module-app-default',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');p.add_argument('--explicit-style-matrix',action='store_true');p.add_argument('--matching-weight-family',action='store_true');p.add_argument('--module-namespace-only',action='store_true');p.add_argument('--module-app-direct',action='store_true');p.add_argument('--module-app-default',action='store_true');p.add_argument('--module-staged-hooks',action='store_true');a=p.parse_args()
+if a.module_staged_hooks and (not a.module_app_default or os.environ.get('LUOSHU_STAGED_HOOK_TEST_APPROVED')!='true'):raise SystemExit('manual staged-hook experiment was not approved')
 if a.module_app_default:a.module_app_direct=True
 if a.module_namespace_only and a.module_app_direct:raise SystemExit('choose one module experiment mode')
 if (a.module_namespace_only or a.module_app_direct) and not (a.matching_weight_family and a.production_payload):raise SystemExit('namespace experiment requires the explicit production matching payload')
@@ -196,7 +197,7 @@ try:
    framework=FrameworkCycle(adb,approved=os.environ.get('LUOSHU_FRAMEWORK_XML_TEST_APPROVED')=='true')
    def default_probe(phase):
     return style_probe('mounted-default-'+phase,case_report['styleMatrixCases'] if phase=='mounted' else restored_cases,'passed-style-matrix')
-  report['moduleNamespace']=run_namespace(adb,root,reboot,read_system_file,payload,manifest,captured,backups,a.output,direct=direct,framework=framework,default_probe=default_probe)
+  report['moduleNamespace']=run_namespace(adb,root,reboot,read_system_file,payload,manifest,captured,backups,a.output,direct=direct,framework=framework,default_probe=default_probe,staged_hooks=a.module_staged_hooks)
   report['restored']=report['moduleNamespace'].get('rebootOriginalsUnchanged') is True
   report['takeover']='passed-mounted-default-framework-cycle' if a.module_app_default else 'not-tested-direct-app-read-only' if a.module_app_direct else 'not-tested-namespace-only'
   report['restoredProbe']=probe('system-restored')

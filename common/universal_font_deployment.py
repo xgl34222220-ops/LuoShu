@@ -555,6 +555,36 @@ def build_deployment(
             shutil.rmtree(stage, ignore_errors=True)
 
 
+def validate_device_generation(deployment: dict[str, Any], payload_root: Path | None) -> None:
+    """Refuse a queued or live payload prepared for a different firmware build.
+
+    Read the existing sealed FontPlan, not mutable inventory or caller-supplied
+    expected identity. This check is repeated before activation and mounting.
+    """
+    if payload_root is None:
+        raise DeploymentError("设备构建校验缺少 payload root")
+    contract = (deployment.get("verificationContracts") or {}).get("fontPlan")
+    expected_path = ".luoshu-runtime/deployment/font-plan.json"
+    if not isinstance(contract, dict) or contract.get("payloadPath") != expected_path:
+        raise DeploymentError("设备构建封印缺失，需要重新生成字体负载")
+    snapshot = payload_root / expected_path
+    if not snapshot.is_file() or snapshot.is_symlink() or _sha256(snapshot) != contract.get("sha256"):
+        raise DeploymentError("设备构建封印不完整，拒绝激活")
+    plan = _load(snapshot)
+    if plan.get("planId") != deployment.get("fontPlanId") or plan.get("planId") != contract.get("planId"):
+        raise DeploymentError("设备构建封印身份不一致")
+    expected = (plan.get("device") or {}).get("buildKey")
+    if not isinstance(expected, str) or not expected.strip() or expected.strip().lower() == "unknown":
+        raise DeploymentError("原设备构建身份未知，需要重新生成字体负载")
+    from font_inventory import current_build_key
+    current, _fingerprint, _display = current_build_key(None)
+    if not current or current.strip().lower() == "unknown":
+        raise DeploymentError("无法读取当前系统构建，拒绝激活字体负载")
+    if current != expected:
+        raise DeploymentError("系统构建已变化，拒绝旧字体负载；请重新扫描并生成")
+    universal_font_plan.validate_plan(plan, expected_build_key=current)
+
+
 def validate_dynamic_generation(deployment: dict[str, Any], visible_root: Path | None = None) -> None:
     """Check the authoritative dynamic generation again immediately before boot binding."""
     fixed = (deployment.get("verificationContracts") or {}).get("fixedStaticRoute")
@@ -779,6 +809,7 @@ def main() -> int:
     parser.add_argument("--validate", type=Path)
     parser.add_argument("--validate-payload-only", type=Path)
     parser.add_argument("--validate-dynamic-generation", action="store_true")
+    parser.add_argument("--validate-device-generation", action="store_true")
     parser.add_argument("--visible-root", type=Path)
     parser.add_argument("--expected-deployment-id")
     parser.add_argument("--expected-payload-digest")
@@ -792,6 +823,8 @@ def main() -> int:
                 raise DeploymentError("运行状态与实际 deploymentId 不一致")
             if args.expected_payload_digest is not None and args.expected_payload_digest != deployment.get("payloadDigest"):
                 raise DeploymentError("运行状态与实际 payloadDigest 不一致")
+            if args.validate_device_generation:
+                validate_device_generation(deployment, args.payload_root)
             if args.validate_dynamic_generation:
                 validate_dynamic_generation(deployment, args.visible_root)
             print(json.dumps({
