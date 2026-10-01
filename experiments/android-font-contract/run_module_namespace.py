@@ -66,7 +66,7 @@ exit "$rc"
     if not module_report.get('rebootOriginalsUnchanged'):
      reboot();root();unchanged();module_report['rebootOriginalsUnchanged']=True
     adb('shell','test','!','-f',REMOTE+'/temporarily-hidden-font') if module_report['state']=='passed' else None
-    for name in ('namespace-result.json','mount-calls.jsonl'):
+    for name in ('namespace-result.json','namespace-isolation.json','mount-calls.jsonl'):
      (output/('module-'+name)).write_bytes(adb('exec-out','cat',REMOTE+'/'+name,check=False))
     adb('shell','rm','-rf',REMOTE);adb('shell','test','!','-e',REMOTE)
     module_report['temporaryStageRemoved']=True

@@ -167,3 +167,19 @@ and `mount -o private none <lower>`. The scanner's temporary recovery view had
 the same single-target issue and is corrected too. Real GNU and Toybox namespace
 tests inspect private propagation and read-only overlay flags; the disposable
 Android script independently rejects shared/master propagation after isolation.
+
+### Namespace propagation follow-up (cfca5dd)
+
+Android run 36841069885 stopped before any font mount: its mountinfo still
+contained master propagation after Toybox accepted `rprivate`. Toybox upstream
+`toys/lsb/mount.c` maps that spelling to `MS_SLAVE|MS_REC`. A nested real Linux
+namespace with an inherited shared parent reproduces the residual master; an
+already-private host fixture had concealed it. The disposable probe now calls
+the explicit `MS_PRIVATE|MS_REC` syscall through the staged Android Python and
+independently verifies every mountinfo optional field. Same-namespace entry,
+syscall failure, or remaining propagation is rejected. Production single-lower
+`private` commands are unchanged. The new Android transaction remains pending.
+
+The failed run verified outside-namespace original bytes, original bytes after
+reboot, temporary stage removal, and emulator termination. It is not mount
+acceptance evidence. Upstream source: https://github.com/landley/toybox/blob/master/toys/lsb/mount.c

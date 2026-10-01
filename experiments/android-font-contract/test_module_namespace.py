@@ -1,5 +1,5 @@
 """Host protocol regressions; Android mount evidence is a separate CI gate."""
-import hashlib,json,tempfile,unittest
+import hashlib,json,tempfile,unittest,subprocess,os,shutil
 from pathlib import Path
 from unittest.mock import patch
 import module_namespace_verify as verify
@@ -43,6 +43,18 @@ class NamespaceProtocolTest(unittest.TestCase):
  def test_integrity_rejection_must_precede_all_mounts(self):
   self.visible.unlink();(self.module/'mount-calls.jsonl').write_text('{}\n')
   with self.assertRaisesRegex(AssertionError,'called mount'):verify.verify(self.module,'integrity-failure')
+ def test_isolation_syscall_error_stops(self):
+  with patch.dict(os.environ,{'LUOSHU_PARENT_MOUNT_NAMESPACE':'parent'}),patch('ctypes.CDLL') as libc:
+   libc.return_value.mount.return_value=-1
+   with self.assertRaises(OSError):verify.isolate(self.module)
+ def test_isolation_retained_master_stops(self):
+  with patch.dict(os.environ,{'LUOSHU_PARENT_MOUNT_NAMESPACE':'parent'}),patch('ctypes.CDLL') as libc,patch.object(Path,'read_text',return_value='1 0 0:1 / / rw master:7 - rootfs rootfs rw\n'):
+   libc.return_value.mount.return_value=0
+   with self.assertRaisesRegex(RuntimeError,'not established'):verify.isolate(self.module)
+ def test_isolation_refuses_same_namespace(self):
+  with patch.dict(os.environ,{'LUOSHU_PARENT_MOUNT_NAMESPACE':'host-protocol-fixture'}),patch('ctypes.CDLL') as libc:
+   with self.assertRaisesRegex(RuntimeError,'new child'):verify.isolate(self.module)
+   libc.assert_not_called()
  def test_unowned_staging_collision_is_never_deleted(self):
   calls=[]
   def adb(*args,**kwargs):
@@ -52,4 +64,28 @@ class NamespaceProtocolTest(unittest.TestCase):
   with self.assertRaisesRegex(RuntimeError,'already exists'):
    runner.run(adb,lambda:None,lambda:None,lambda p:b'',self.payload,{'files':[]},{},{},self.root)
   self.assertFalse(any('rm' in args for args in calls))
+class RealNamespaceIsolationTest(unittest.TestCase):
+ def test_recursive_private_syscall_clears_inherited_master(self):
+  if not shutil.which('unshare'):self.skipTest('unshare unavailable')
+  probe=subprocess.run(['unshare','-Urnm','true'],capture_output=True)
+  if probe.returncode:self.skipTest('user/mount namespace unavailable')
+  with tempfile.TemporaryDirectory() as td:
+   env=os.environ.copy();env.update(ISOLATION_HELPER=str(Path(verify.__file__).resolve()),ISOLATION_OUTPUT=td,ISOLATION_PYTHON=os.sys.executable)
+   child=Path(td)/'child.sh'
+   child.write_text("""set -eu
+mount --make-rslave /
+awk '{for(i=7;i<=NF&&$i!="-";i++)if($i ~ /^master:/)found=1} END{exit !found}' /proc/self/mountinfo
+"$ISOLATION_PYTHON" "$ISOLATION_HELPER" "$ISOLATION_OUTPUT" isolate
+""")
+   env['ISOLATION_CHILD']=str(child)
+   script="""set -eu
+mount --make-rshared /
+export LUOSHU_PARENT_MOUNT_NAMESPACE="$(readlink /proc/self/ns/mnt)"
+unshare -m --propagation unchanged sh "$ISOLATION_CHILD"
+"""
+   result=subprocess.run(['unshare','-Urnm','sh','-c',script],env=env,capture_output=True,text=True,timeout=20)
+   self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+   proof=json.loads((Path(td)/'namespace-isolation.json').read_text())
+   self.assertEqual(proof['state'],'passed');self.assertEqual(proof['remainingPropagationPaths'],[])
+
 if __name__=='__main__':unittest.main()
