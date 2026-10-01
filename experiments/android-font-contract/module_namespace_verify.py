@@ -49,6 +49,10 @@ def verify(module,phase):
   state=(module/'config/universal-font-mount.conf').read_text();assert 'state=mounted\n' in state,state
  else:
   for logical,sha in contract['originalHashes'].items():assert digest(logical)==sha,logical
+  for logical,identity in contract.get('originalAliases',{}).items():
+   path=Path(logical)
+   assert str(path.resolve(strict=True))==identity['resolvedPath'],logical
+   assert (os.readlink(path) if path.is_symlink() else '')==identity['linkTarget'],logical
   for logical in new:assert not Path(logical).exists(),logical
   if phase=='partial-failure':
    calls=[json.loads(line) for line in (module/'mount-calls.jsonl').read_text().splitlines()]

@@ -1,5 +1,5 @@
 """Run the full production prepare path on disposable Android x86, without apply."""
-import argparse,json,os,subprocess,time,traceback
+import argparse,json,os,shutil,subprocess,time,traceback
 from pathlib import Path
 REMOTE='/data/local/tmp/luoshu-native-prepare'
 TASK='ci-native-full-prepare'
@@ -24,7 +24,7 @@ def ensure_root(adb):
  raise RuntimeError('disposable root verification failed')
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('--runtime',type=Path,required=True);p.add_argument('--fixtures',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args();a.output.mkdir(parents=True,exist_ok=True)
+ p=argparse.ArgumentParser();p.add_argument('--runtime',type=Path,required=True);p.add_argument('--fixtures',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--export-prepared',action='store_true');a=p.parse_args();a.output.mkdir(parents=True,exist_ok=True)
  if os.environ.get('LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED')!='true' or os.environ.get('LUOSHU_NATIVE_PREPARE_TEST_APPROVED')!='true':raise SystemExit('native prepare experiment was not approved')
  report={'state':'running','scope':'disposable API36 Android x86 full prepare only','shippedArm64RuntimeExecuted':False,'systemFontMutation':False,'mountHookExecuted':False};owned=False;scope_done=False;before=None;results_pulled=False
  def adb(*args,timeout=60,check=True):
@@ -64,6 +64,14 @@ def main():
   after=originals();(a.output/'original-sha256-after.txt').write_bytes(after)
   if after!=before:raise RuntimeError('original SDK font/config bytes changed')
   if adb('shell','getenforce').stdout.strip()!=b'Enforcing':raise RuntimeError('SELinux state changed')
+  if a.export_prepared:
+   export=Path(__file__).parent/'.work-native-prepared'
+   if export.exists():raise RuntimeError('native export destination already exists')
+   export.mkdir();shutil.copytree(a.output/'results',export/'results')
+   adb('pull',REMOTE+'/prepared-payload',str(export/'payload'),timeout=180)
+   from native_payload_case import read_prepared
+   read_prepared(export,summary['fingerprint'])
+   report['exportedPreparedPayload']={'deploymentId':summary['deploymentId'],'payloadDigest':summary['payloadDigest'],'hostCompilation':False}
   report.update(state='passed',originalsUnchanged=True,runtimeOrigin=origin)
  except Exception as e:
   report.update(state='failed',error=str(e),trace=traceback.format_exc(limit=12))
@@ -78,7 +86,7 @@ def main():
     ensure_root(adb)
     if not results_pulled:adb('pull',REMOTE+'/results',str(a.output/'results'),timeout=120,check=False)
     mounts=adb('shell','cat','/proc/self/mountinfo').stdout.decode()
-    if any(line.split()[4].startswith(REMOTE+'/') for line in mounts.splitlines()):raise RuntimeError('owned stock view is still mounted; refuse recursive deletion')
+    if any((line.split()[4]==REMOTE or line.split()[4].startswith(REMOTE+'/')) for line in mounts.splitlines()):raise RuntimeError('owned stock view is still mounted; refuse recursive deletion')
     if before is not None:
      after=originals();(a.output/'original-sha256-after-cleanup.txt').write_bytes(after)
      if after!=before:raise RuntimeError('originals changed before cleanup')

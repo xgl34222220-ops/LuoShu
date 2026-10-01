@@ -57,6 +57,12 @@ class GlobalProbeTest(unittest.TestCase):
    return self.adb(*args,**kwargs)
   with self.assertRaisesRegex(RuntimeError,'injected mount failure'):self.run_probe(adb)
   self.assertFalse(any(x[:3]==('shell','rm','-rf') for x in self.calls))
+ def test_exact_staging_root_mount_never_removed(self):
+  def adb(*args,**kwargs):
+   if args==('shell','cat','/proc/self/mountinfo'):return ('1 0 0:1 / '+runner.REMOTE+' ro - tmpfs tmpfs ro\n').encode()
+   return self.adb(*args,**kwargs)
+  with self.assertRaisesRegex(RuntimeError,'injected mount failure'):self.run_probe(adb)
+  self.assertFalse(any(x[:3]==('shell','rm','-rf') for x in self.calls))
 
 class FrameworkGlobalTest(unittest.TestCase):
  setUp=GlobalProbeTest.setUp

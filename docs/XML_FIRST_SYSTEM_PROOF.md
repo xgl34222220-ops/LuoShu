@@ -451,3 +451,26 @@ references: original fallback closure is mandatory. Default production planning
 has not enabled this experimental option. Synthetic collection tests cover
 nonzero face selection, exact original container preservation, absent/nonfixed
 scope rejection and prevention of silent route omission or physical promotion.
+
+### Android preparation exercised all three donors
+
+[6afdf6b0 / run 36896775341](https://github.com/xgl34222220-ops/LuoShu/actions/runs/36896775341)
+passed actual Android preparation with 48/48 artifacts ready. Readback found the
+synthetic Chinese, Latin and digit donors (6, 3 and 5 outline points respectively)
+in compiled assets. Total preparation was 162.266 seconds: composition 8.694,
+scan 34.382, topology 1.417, planning 0.168, routing 1.118, compilation 90.891,
+deployment 17.804 and gate 4.041 seconds. Peak process RSS was 458,196 KiB.
+The input remains a 287,612-byte synthetic composite on x86_64 Android, not a
+large-font or ARM performance result. One scoped Chinese target was enabled;
+29 original style routes and one clock punctuation glyph remained protected.
+Original bytes, Enforcing state, process cleanup and VM destruction passed.
+This run did not activate the payload or test its consumers.
+
+The next bounded experiment exports those Android-produced bytes into a private
+CI working directory, verifies the sealed payload again, and consumes it without
+host recompilation. It uses the existing manual staged-hook/framework protocol,
+74 style cases and literal Typeface.DEFAULT samples. Four existing physical font
+paths are explicitly snapshotted in addition to the XML and family originals;
+restoration checks original hashes and alias targets, while new assets must
+vanish. A failed prepare cannot proceed to installation or mounting. This remains
+a disposable VM experiment, not real boot/root-manager/vendor-ROM qualification.

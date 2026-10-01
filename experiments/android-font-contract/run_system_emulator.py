@@ -8,7 +8,8 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 PACKAGE='io.github.xgl34222220.luoshu.fontcontract'
-p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');p.add_argument('--explicit-style-matrix',action='store_true');p.add_argument('--matching-weight-family',action='store_true');p.add_argument('--module-namespace-only',action='store_true');p.add_argument('--module-app-direct',action='store_true');p.add_argument('--module-app-default',action='store_true');p.add_argument('--module-staged-hooks',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');p.add_argument('--explicit-style-matrix',action='store_true');p.add_argument('--matching-weight-family',action='store_true');p.add_argument('--module-namespace-only',action='store_true');p.add_argument('--module-app-direct',action='store_true');p.add_argument('--module-app-default',action='store_true');p.add_argument('--module-staged-hooks',action='store_true');p.add_argument('--native-prepared-root',type=Path);a=p.parse_args()
+if a.native_prepared_root and not a.module_staged_hooks:raise SystemExit('native payload consumption requires staged module hooks')
 if a.module_staged_hooks and (not a.module_app_default or os.environ.get('LUOSHU_STAGED_HOOK_TEST_APPROVED')!='true'):raise SystemExit('manual staged-hook experiment was not approved')
 if a.module_app_default:a.module_app_direct=True
 if a.module_namespace_only and a.module_app_direct:raise SystemExit('choose one module experiment mode')
@@ -72,7 +73,10 @@ def probe(name, extra_args=None):
    axes=','.join(str(x['tag'])+'='+str(x.get('stylevalue',x.get('value'))) for x in contract['axes'])
    extras+=['-e','expected'+role+'Path',contract['path'],'-e','expected'+role+'Face',str(contract['face'])]
    if axes:extras+=['-e','expected'+role+'Axes',axes]
+ from probe_result import require_instrumentation_success
+ adb('shell','run-as',PACKAGE,'rm','-f','files/report-'+name+'.json')
  log=adb('shell','am','instrument','-w','-e','phase',name,*extras,PACKAGE+'/.Runner',timeout=180)
+ require_instrumentation_success(log)
  (a.output/(name+'.txt')).write_bytes(log)
  raw=adb('exec-out','run-as',PACKAGE,'cat','files/report-'+name+'.json')
  (a.output/(name+'.json')).write_bytes(raw);r=json.loads(raw)
@@ -166,20 +170,44 @@ try:
    report['stockAxisProof']=probe('stock-axis',['-e','axisCases',base64.b64encode(json.dumps(axis_cases).encode()).decode()]);save()
   config='/data/fonts/config/config.xml';exists=subprocess.run(['adb','shell','test','-f',config]).returncode==0
   generation={'path':config,'exists':exists,'sha256':hashlib.sha256(read_system_file(config)).hexdigest() if exists else ''}
-  def compile_deadline(_signal,_frame):raise TimeoutError('production compilation exceeded 600-second experimental budget')
-  previous_alarm=signal.signal(signal.SIGALRM,compile_deadline);signal.alarm(600)
-  try:
-   payload,manifest,expected_roles,case_report=build(work/'generated',
-     {remote:a.output/('original-'+Path(remote).name) for remote in backups},captured,
-     report['baseline'],assets/'composite.ttf',generation,diagnostics=a.output,prove_cff2=not a.explicit_style_matrix,
-     style_baseline=report.get('styleBaseline'),matching_weights=a.matching_weight_family)
-  finally:
-   signal.alarm(0);signal.signal(signal.SIGALRM,previous_alarm)
+  if a.native_prepared_root:
+   from native_payload_case import read_prepared,expected_defaults
+   payload,docs,native_summary=read_prepared(a.native_prepared_root,adb('shell','getprop','ro.build.fingerprint').decode().strip())
+   manifest=docs['manifest']
+   for logical,document in docs['route']['documents'].items():
+    if logical not in backups or document.get('sourceDigest')!='sha256:'+hashlib.sha256(backups[logical]).hexdigest():raise RuntimeError('native XML source changed before consumption: '+logical)
+   from style_matrix import expected_cases
+   expected_roles=expected_defaults(docs['route'],docs['artifacts'],manifest,report['baseline'])
+   case_report={'androidPythonExecuted':True,'hostCompilation':False,'deploymentId':manifest['deploymentId'],
+                'payloadDigest':manifest['payloadDigest'],'nativePrepareSeconds':native_summary['elapsedSeconds'],
+                'styleMatrixCases':expected_cases(docs['route'],docs['artifacts'],manifest,report['styleBaseline']),
+                'expectedDefaultConsumers':expected_roles}
+   physical={'/system/fonts/'+name for name in ('AndroidClock.ttf','DroidSans.ttf','DroidSans-Bold.ttf','RobotoStatic-Regular.ttf')}
+   for file in manifest['files']:
+    logical=file['logicalPath']
+    if file['kind']=='xml' or logical.startswith('/system/fonts/LuoShu'):continue
+    if logical not in physical:raise RuntimeError('native physical target escaped experimental whitelist: '+logical)
+    local=work/'stock'/Path(logical).name;adb('pull',logical,str(local));captured[logical]=local
+    target=docs['plan']['targets'][logical]
+    identity=target['targetContract']['stockIdentity']
+    if identity.get('sha256')!=hashlib.sha256(local.read_bytes()).hexdigest():raise RuntimeError('native original identity changed before consumption: '+logical)
+   report['nativePreparedPayload']=case_report
+  else:
+   def compile_deadline(_signal,_frame):raise TimeoutError('production compilation exceeded 600-second experimental budget')
+   previous_alarm=signal.signal(signal.SIGALRM,compile_deadline);signal.alarm(600)
+   try:
+    payload,manifest,expected_roles,case_report=build(work/'generated',
+      {remote:a.output/('original-'+Path(remote).name) for remote in backups},captured,
+      report['baseline'],assets/'composite.ttf',generation,diagnostics=a.output,prove_cff2=not a.explicit_style_matrix,
+      style_baseline=report.get('styleBaseline'),matching_weights=a.matching_weight_family)
+   finally:
+    signal.alarm(0);signal.signal(signal.SIGALRM,previous_alarm)
   (a.output/'production-pipeline.json').write_text(json.dumps(case_report,indent=2))
   generated={f['logicalPath']:payload/f['payloadPath'] for f in manifest['files'] if f['kind']=='xml'}
   new_fonts={f['logicalPath']:payload/f['payloadPath'] for f in manifest['files'] if f['kind']!='xml'}
   if set(generated)-set(backups):raise RuntimeError('production XML escaped snapshotted configs')
   for logical in new_fonts:
+   if a.native_prepared_root and logical in captured:continue
    if not logical.startswith('/system/fonts/LuoShu') or subprocess.run(['adb','shell','test','-e',logical]).returncode==0:
     raise RuntimeError('production font escaped unique experimental assets')
   production=case_report
@@ -196,7 +224,9 @@ try:
    from framework_cycle import FrameworkCycle
    framework=FrameworkCycle(adb,approved=os.environ.get('LUOSHU_FRAMEWORK_XML_TEST_APPROVED')=='true')
    def default_probe(phase):
-    return style_probe('mounted-default-'+phase,case_report['styleMatrixCases'] if phase=='mounted' else restored_cases,'passed-style-matrix')
+    literal=probe('system-applied' if phase=='mounted' else 'system-restored')
+    matrix=style_probe('mounted-default-'+phase,case_report['styleMatrixCases'] if phase=='mounted' else restored_cases,'passed-style-matrix')
+    return {'literalDefault':literal,'styleMatrix':matrix}
   report['moduleNamespace']=run_namespace(adb,root,reboot,read_system_file,payload,manifest,captured,backups,a.output,direct=direct,framework=framework,default_probe=default_probe,staged_hooks=a.module_staged_hooks)
   report['restored']=report['moduleNamespace'].get('rebootOriginalsUnchanged') is True
   report['takeover']='passed-mounted-default-framework-cycle' if a.module_app_default else 'not-tested-direct-app-read-only' if a.module_app_direct else 'not-tested-namespace-only'

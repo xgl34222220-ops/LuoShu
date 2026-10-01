@@ -40,6 +40,17 @@ class NamespaceProtocolTest(unittest.TestCase):
  def test_restore_rejects_late_visible_asset(self):
   with self.assertRaises(AssertionError):verify.verify(self.module,'restored')
   self.visible.unlink();verify.verify(self.module,'restored')
+ def test_same_bytes_with_changed_alias_target_is_not_restoration(self):
+  self.visible.unlink()
+  alias=self.root/'font-alias.ttf';alias.symlink_to(self.original.name)
+  contract=json.loads((self.module/'namespace-contract.json').read_text())
+  contract['originalAliases']={str(alias):{'resolvedPath':str(self.original),'linkTarget':self.original.name}}
+  (self.module/'namespace-contract.json').write_text(json.dumps(contract))
+  verify.verify(self.module,'restored')
+  alias.unlink();alias.symlink_to(str(self.original))
+  with self.assertRaises(AssertionError):verify.verify(self.module,'restored')
+  alias.unlink();alias.write_bytes(self.original.read_bytes())
+  with self.assertRaises(AssertionError):verify.verify(self.module,'restored')
  def test_integrity_rejection_must_precede_all_mounts(self):
   self.visible.unlink();(self.module/'mount-calls.jsonl').write_text('{}\n')
   with self.assertRaisesRegex(AssertionError,'called mount'):verify.verify(self.module,'integrity-failure')

@@ -4,6 +4,18 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$ROOT"
+if [ "${LUOSHU_NATIVE_CONSUMER_TEST_APPROVED:-false}" = true ]; then
+    test "${LUOSHU_NATIVE_PREPARE_TEST_APPROVED:-false}" = true
+    python3 experiments/android-font-contract/run_native_prepare.py \
+        --runtime experiments/android-font-contract/.runtime-x86 \
+        --fixtures experiments/android-font-contract/app/src/main/assets \
+        --export-prepared --output experiments/android-font-contract/output/android-native-prepare
+    timeout -k 5 120 adb install -r -t experiments/android-font-contract/app/build/outputs/apk/debug/app-debug.apk
+    exec python3 experiments/android-font-contract/run_system_emulator.py \
+        --production-payload --matching-weight-family --module-app-default --module-staged-hooks \
+        --native-prepared-root experiments/android-font-contract/.work-native-prepared \
+        --output experiments/android-font-contract/output/system
+fi
 if [ "${LUOSHU_NATIVE_PREPARE_TEST_APPROVED:-false}" = true ]; then
     exec python3 experiments/android-font-contract/run_native_prepare.py \
         --runtime experiments/android-font-contract/.runtime-x86 \

@@ -54,6 +54,15 @@ def direct_contract(manifest, cases, baseline,metadata=None,xml_bytes=None):
  if not {'A','1','中'}.issubset({x['sample'] for x in selected}):raise RuntimeError('direct contract lacks selected role coverage')
  return {'files':files,'cases':selected}
 
+def original_aliases(adb, paths):
+ result={}
+ for logical in paths:
+  resolved=adb('shell','readlink','-f',logical).decode().strip()
+  if not resolved:raise RuntimeError('original path did not resolve: '+logical)
+  raw=adb('shell','readlink',logical,check=False).decode().strip()
+  result[logical]={'resolvedPath':resolved,'linkTarget':raw}
+ return result
+
 def run(adb,root,reboot,read_system_file,payload,manifest,captured,backups,output,direct=None,framework=None,default_probe=None,staged_hooks=False):
  output=Path(output);module_report={'scope':'disposable API36 private mount namespace','globalAppConsumerTested':False,'rootManagerTested':False,'moduleBootTested':False,'state':'running'}
  created=False;global_attempted=False;global_restored=False;app_started=False;apply_completed=False
@@ -65,10 +74,12 @@ def run(adb,root,reboot,read_system_file,payload,manifest,captured,backups,outpu
  if framework is not None:module_report.update(scope='temporary global mounts with restarted default font consumers',frameworkRestartTested=False)
  original={k:hashlib.sha256(v).hexdigest() for k,v in backups.items()}
  original.update({k:hashlib.sha256(Path(v).read_bytes()).hexdigest() for k,v in captured.items()})
- new=[f['logicalPath'] for f in manifest['files'] if f['kind']!='xml']
+ new=[f['logicalPath'] for f in manifest['files'] if f['kind']!='xml' and f['logicalPath'] not in original]
+ aliases=original_aliases(adb,sorted(original))
  def unchanged():
   for logical,sha in original.items():
    if hashlib.sha256(read_system_file(logical)).hexdigest()!=sha:raise RuntimeError('outside namespace original changed: '+logical)
+  if original_aliases(adb,sorted(original))!=aliases:raise RuntimeError('original alias identity changed')
   for logical in new:adb('shell','test','!','-e',logical)
  try:
   root()
@@ -88,7 +99,7 @@ def run(adb,root,reboot,read_system_file,payload,manifest,captured,backups,outpu
     (local/'config/universal-font-next.conf').write_text('state=prepared\nfont=mix\npreviousFont=default\npreviousMode=default\ndeploymentId='+manifest['deploymentId']+'\npayloadDigest='+manifest['payloadDigest']+'\n')
    else:
     (local/'config/universal-font-runtime.conf').write_text('state=active\npipeline=universal-font-deployment-v1\nfont=mix\ndeploymentId='+manifest['deploymentId']+'\npayloadDigest='+manifest['payloadDigest']+'\n')
-   (local/'namespace-contract.json').write_text(json.dumps({'originalHashes':original,'newAssetPaths':new,'mountScope':module_report['scope']}))
+   (local/'namespace-contract.json').write_text(json.dumps({'originalHashes':original,'originalAliases':aliases,'newAssetPaths':new,'mountScope':module_report['scope']}))
    # This observer delegates every call to the real Android mount executable;
    # it cannot convert failure into success or synthesize a mount result.
    (local/'observe-mount.sh').write_text('''#!/system/bin/sh
@@ -213,7 +224,7 @@ exit "$rc"
     for name in ('namespace-result.json','namespace-isolation.json','mount-calls.jsonl','mount-kernel-tail.txt','mount-failure-mountinfo.txt','logs/universal-mount.log','config/universal-font-mount.conf'):
      (output/('module-'+name.replace('/','-'))).write_bytes(adb('exec-out','cat',REMOTE+'/'+name,check=False))
     mountinfo=adb('shell','cat','/proc/self/mountinfo').decode()
-    if any(line.split()[4].startswith(REMOTE+'/') for line in mountinfo.splitlines()):raise RuntimeError('refuse removal while staging mount remains')
+    if any((line.split()[4]==REMOTE or line.split()[4].startswith(REMOTE+'/')) for line in mountinfo.splitlines()):raise RuntimeError('refuse removal while staging mount remains')
     adb('shell','rm','-rf',REMOTE);adb('shell','test','!','-e',REMOTE)
     module_report['temporaryStageRemoved']=True
    except Exception as error:
