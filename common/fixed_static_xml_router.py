@@ -16,7 +16,7 @@ import fixed_outline_weight_match as fixed_match
 SCHEMA = 'fixed-static-xml-route-plan-v1'
 REVISION = 1
 STYLE_REVISION = 2
-MATCHING_REVISION = 3
+MATCHING_REVISION = 4
 STYLE_WEIGHTS = tuple(sorted(set(range(100, 1000, 100)) | {450, 520}))
 REPRESENTATION = 'fixed-static-xml-v1'
 ERROR = legacy.RouterError
@@ -111,7 +111,8 @@ def build_route_plan(font_plan, base, *, expand_styles=False, matching_weights=F
     if expand_styles:
         plan.update(routeRevision=MATCHING_REVISION if matching_weights else STYLE_REVISION,
                     styleExpansion={'policy':'fixed-normal-original-italic-v1','weights':list(weights)})
-        if matching_weights:plan['styleExpansion']['matchingAxis']='constant-outline-selection'
+        if matching_weights:
+            plan['styleExpansion'].update(matchingAxis='constant-outline-selection',namedFallbackPolicy='local-original-chain-v1')
     static_count=0;clone_count=0
     for source_xml,document in plan['documents'].items():
         selected=[op for op in document['operations'] if _eligible(op,expand_styles)]
@@ -226,7 +227,7 @@ def validate_route_plan(plan,font_plan=None):
     matching=plan.get('routeRevision')==MATCHING_REVISION
     expansion=plan.get('routeRevision') in {STYLE_REVISION,MATCHING_REVISION}
     expected_policy={'policy':'fixed-normal-original-italic-v1','weights':[400] if matching else list(STYLE_WEIGHTS)}
-    if matching:expected_policy['matchingAxis']='constant-outline-selection'
+    if matching:expected_policy.update(matchingAxis='constant-outline-selection',namedFallbackPolicy='local-original-chain-v1')
     if expansion and plan.get('styleExpansion')!=expected_policy:
         raise ERROR('invalid fixed-static style expansion policy')
     if not expansion and plan.get('styleExpansion'):raise ERROR('unexpected style expansion on old representation')
@@ -268,7 +269,8 @@ def render_document(plan,source_xml,artifact_map,output,bindings):
     tree=legacy._parse_xml(path);root=tree.getroot();fonts=legacy._font_elements(tree)
     parents={child:parent for parent in root.iter() for child in parent}
     records=legacy._document_nodes(source_xml,tree)
-    clones=[]
+    clones=[];named_clones=[]
+    matching=plan.get('routeRevision')==MATCHING_REVISION
     for fallback in doc.get('fallbackCopies',[]):
         family=parents[fonts[fallback['anchorOrdinal']]];clone=copy.deepcopy(family)
         if not fallback['insideFamilyList']:
@@ -276,12 +278,20 @@ def render_document(plan,source_xml,artifact_map,output,bindings):
         clone.attrib.pop('name',None)
         clone_fonts=[f for f in list(clone) if legacy._local(f.tag)=='font']
         if len(clone_fonts)!=len(fallback['references']):raise ERROR('fallback family changed')
+        local_named=matching and not fallback['insideFamilyList'] and bool(fallback['familyName'])
+        if local_named and any(font.get('fallbackFor') is not None for font in clone_fonts):
+            raise ERROR('named local fallback has an ambiguous explicit fallbackFor')
         for font,ref in zip(clone_fonts,fallback['references']):
             original=plan['retainedOriginals'][ref['originalId']]
             font.text=original['fileName']
-            if not fallback['insideFamilyList'] and fallback['familyName'] and fallback['familyName']!='sans-serif':
+            if not local_named and not fallback['insideFamilyList'] and fallback['familyName'] and fallback['familyName']!='sans-serif':
                 if font.get('fallbackFor') not in (None,fallback['familyName']):raise ERROR('ambiguous named fallbackFor contract')
                 font.set('fallbackFor',fallback['familyName'])
+        if local_named:
+            named_clones.append((parents[family],family,copy.deepcopy(clone),fallback['familyName']))
+            # The original default family remains the global fallback for other
+            # names. Each changed named primary gets its own original first.
+            if fallback['familyName']!='sans-serif':continue
         clones.append((parents[family],family,clone))
     expanded_fonts={}
     for operation in doc['operations']:
@@ -324,7 +334,15 @@ def render_document(plan,source_xml,artifact_map,output,bindings):
     for ref in doc.get('retainedReferences',[]):
         if records[ref['ordinal']]['fingerprint']!=ref['nodeFingerprint']:raise ERROR('retained XML node changed')
         fonts[ref['ordinal']].text=plan['retainedOriginals'][ref['originalId']]['fileName']
-    for parent,anchor,clone in reversed(clones):parent.insert(list(parent).index(anchor)+1,clone)
+    anchors={}
+    for parent,family,clone,name in named_clones:
+        position=list(parent).index(family)
+        tag=family.tag[:-len('family')]+'family-list'
+        wrapper=ET.Element(tag,{'name':name})
+        family.attrib.pop('name',None)
+        parent.remove(family);wrapper.append(family);wrapper.append(clone);parent.insert(position,wrapper)
+        anchors[family]=wrapper
+    for parent,anchor,clone in reversed(clones):parent.insert(list(parent).index(anchors.get(anchor,anchor))+1,clone)
     legacy._atomic_tree(Path(output),tree)
     return {'sourceXml':source_xml,'output':str(output),'changedFonts':len(doc['operations']),
             'sourceDigest':doc['sourceDigest'],'representation':REPRESENTATION}

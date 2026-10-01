@@ -27,6 +27,9 @@ _luoshu_atomic_missing_target_allowed() {
     _lsamta_rel="$1"
     _lsamta_mode="${2:-overlay}"
     _luoshu_atomic_file_optional "$_lsamta_rel" && return 0
+    # A sealed Universal payload has no optional font/XML aliases: its XML may
+    # reference newly compiled assets that a per-file bind cannot create.
+    [ "${LUOSHU_REQUIRED_PAYLOAD_FILES:-0}" != 1 ] || return 1
     # A per-file bind can only replace an inode that already exists in the ROM
     # view. Payloads intentionally contain additive aliases for several ROM
     # families, so an alias absent on this device is not a failed replacement.

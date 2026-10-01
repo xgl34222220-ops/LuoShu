@@ -281,6 +281,26 @@ test "$(cat "$CASE_ROOT/root/system/fonts/A.ttf")" = 'font-a' || fail 'font bind
 test ! -e "$CASE_ROOT/root/system/etc/.luoshu-data-fonts-config.xml" || fail 'bind fallback created a missing dynamic config target'
 luoshu_mount_verify_active custom || fail 'strict verifier rejected the font-only compatible bind'
 
+# Universal XML assets are required even when old additive aliases were optional.
+setup_case bind-required-new-asset
+mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/system/etc"
+printf original-font > "$CASE_ROOT/root/system/fonts/A.ttf"
+printf original-xml > "$CASE_ROOT/root/system/etc/fonts.xml"
+printf replacement-font > "$MODULE_DIR/system/fonts/A.ttf"
+printf selected-new-font > "$MODULE_DIR/system/fonts/LuoShu-Fixed-required.ttf"
+printf changed-xml > "$MODULE_DIR/system/etc/fonts.xml"
+FAIL_OVERLAY=all
+export LUOSHU_REQUIRED_PAYLOAD_FILES=1
+if luoshu_self_mount_ensure; then fail 'missing required XML asset was accepted by bind'; fi
+test "$(cat "$CASE_ROOT/root/system/fonts/A.ttf")" = original-font || fail 'required asset rejection occurred after a font bind'
+test "$(cat "$CASE_ROOT/root/system/etc/fonts.xml")" = original-xml || fail 'required asset rejection occurred after an XML bind'
+if _luoshu_atomic_tree_visible "$MODULE_DIR/system/fonts" "$CASE_ROOT/root/system/fonts" bind; then fail 'required asset visibility falsely passed'; fi
+FAIL_OVERLAY=''
+luoshu_self_mount_ensure || fail 'complete overlay of required assets was blocked'
+test "$(cat "$CASE_ROOT/root/system/fonts/LuoShu-Fixed-required.ttf")" = selected-new-font || fail 'new required asset was not visible through overlay'
+luoshu_mount_verify_active custom || fail 'complete required asset overlay failed visibility'
+unset LUOSHU_REQUIRED_PAYLOAD_FILES
+
 setup_case bind-no-compatible-target
 mkdir -p "$MODULE_DIR/system/fonts"
 printf 'font-a\n' > "$MODULE_DIR/system/fonts/A.ttf"

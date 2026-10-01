@@ -30,6 +30,7 @@ EOF
 
 cat > "$TMP/system-mount-ok.sh" <<EOF
 #!/bin/sh
+[ "\${LUOSHU_REQUIRED_PAYLOAD_FILES:-0}" = 1 ] || exit 7
 printf mounted > "$TMP/system-mounted"
 exit 0
 EOF

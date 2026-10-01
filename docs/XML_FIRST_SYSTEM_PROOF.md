@@ -107,3 +107,28 @@ and actual Android x86 Python/FontTools execution passed at `25e1d3c`
 The Python API-level field describes its build target; device API level is
 checked independently. Runtime consumer confirmation remains pending on phones,
 and warnings retain recovery state rather than being converted to success.
+
+
+The revision-3 system run `b092660` / Actions 36826607502 produced 72 passing
+cases out of 74, including normal/italic selected roles and the 450/520 matching
+cases. The two failures were the original Greek glyph in sans-serif-condensed:
+its copied source bytes and face were correct, but a preceding global default
+fallback selected wdth=100 instead of the original named-family wdth=75. All 74
+baseline cases and the original XML were restored, and the VM was terminated.
+The test therefore failed overall; the remaining cases were not dropped.
+
+Revision 4 explicitly uses a local named `family-list` containing the selected
+family followed by its full sealed original family. Existing named family-list
+contexts stay intact. The original default copy also remains a global fallback
+for other names; scoped named originals no longer depend on a later global
+position. This follows Android 16 SystemFonts' named-chain-before-global-chain
+construction. The next full native matrix must verify this correction. Older
+platforms without this XML capability are not established by this adapter.
+
+A separate module-mount regression found that legacy per-file bind fallback
+accepted absent additive paths. Every file in a sealed Universal deployment is
+now required: missing assets reject the transaction before any payload file
+bind, while a complete directory overlay may introduce them. Both mount entry
+points and the existing real Linux namespace suite pass locally. This remains
+host evidence; the system experiment uses temporary XML/file replacement, not
+root-manager module mounting.

@@ -23,7 +23,7 @@ class MatrixTest(unittest.TestCase):
             item['actualFonts']=[{'file':'/system/fonts/'+name,'face':2 if name=='Cjk.ttc' else 0,
                                   'weight':case['weight'],'slant':int(case['italic']), 'sha256':name.split('.')[0]}]
             observed.append(item)
-        route={'routeRevision':3 if matching else 2,'documents':{'/system/etc/font_fallback.xml':{'operations':operations,'styleExpansions':expansions}}}
+        route={'routeRevision':4 if matching else 2,'documents':{'/system/etc/font_fallback.xml':{'operations':operations,'styleExpansions':expansions}}}
         return route,{'artifacts':artifacts},{'files':files},{'cases':observed}
 
     def test_all_styles_use_new_static_or_explicit_original(self):

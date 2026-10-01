@@ -19,8 +19,8 @@ def cases(extended=False):
 
 
 def expected_cases(route,artifacts,manifest,baseline):
-    if route.get('routeRevision') not in (2,3):raise ValueError('matrix requires explicit style representation')
-    matching=route['routeRevision']==3
+    if route.get('routeRevision') not in (2,4):raise ValueError('matrix requires explicit style representation')
+    matching=route['routeRevision']==4
     keys=('family','weight','italic','sample')
     expected_keys={tuple(c[k] for k in keys) for c in cases(matching)}
     actual_keys=[tuple(c[k] for k in keys) for c in baseline['cases']]

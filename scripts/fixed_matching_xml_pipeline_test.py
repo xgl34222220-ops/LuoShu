@@ -30,7 +30,7 @@ class MatchingPipelineTest(unittest.TestCase):
         manifest=self.build();self.assertTrue(manifest['summary']['deploymentReady'])
         self.assertEqual(len(manifest['artifacts']),1);artifact=manifest['artifacts'][0]
         self.assertEqual(artifact['mode'],matching.MATCHING)
-        self.assertEqual(self.route['routeRevision'],3)
+        self.assertEqual(self.route['routeRevision'],4)
         self.assertEqual(self.route['summary']['fixedMatchingOperationCount'],1)
         self.assertEqual(self.route['summary']['fixedStaticOperationCount'],0)
         self.assertFalse(self.route['summary']['normalSourceVariationPreserved'])
@@ -43,7 +43,9 @@ class MatchingPipelineTest(unittest.TestCase):
             deploy.validate_deployment(deployment,self.plan,self.route,manifest,payload)
         self.assertEqual(len([x for x in deployment['files'] if x['kind']=='xml-matching-font']),1)
         tree=ET.parse(payload/'system/etc/fonts.xml').getroot();self.assertEqual(len(tree[0]),2)
-        normal,italic=tree[0];self.assertEqual(normal.get('supportedAxes'),'wght')
+        self.assertEqual(tree[0].tag,'family-list');self.assertEqual(tree[0].get('name'),'sans-serif')
+        self.assertEqual(len(tree[0][0]),2);self.assertTrue(tree[0][1][0].text.startswith('LuoShu-Original-'))
+        normal,italic=tree[0][0];self.assertEqual(normal.get('supportedAxes'),'wght')
         self.assertEqual(italic.get('supportedAxes'),'wght');self.assertEqual(italic.get('style'),'italic')
         self.assertEqual({a.get('tag'):a.get('stylevalue') for a in italic},{'wdth':'100','ital':'1'})
         self.assertEqual((payload/'system/fonts'/italic.text).read_bytes(),self.case.f.stock.read_bytes())
@@ -54,6 +56,34 @@ class MatchingPipelineTest(unittest.TestCase):
             mountinfo={},active_font='mix',visible_root=payload,boot_id='synthetic-boot',fixed_route=snapshot)
         self.assertEqual(result['grade'],'WARN',result)
         self.assertIn('fixed-static-consumer-proof-pending',result['warnings'])
+
+    def test_named_condensed_fallback_precedes_global_default_original(self):
+        tree=ET.parse(self.case.xml);root=tree.getroot();condensed=copy.deepcopy(root[0])
+        condensed.set('name','sans-serif-condensed');condensed[0][0].set('stylevalue','75')
+        root.append(condensed);tree.write(self.case.xml)
+        slot=f.fixture.slot_from_stock(self.case.f.logical,self.case.f.stock,family='sans-serif',source_xml='/system/etc/fonts.xml',declared='SyntheticUiVF.ttf')
+        slot['xmlRefs'].append(dict(slot['xmlRefs'][0],family='sans-serif-condensed',familyNormalized='sans-serif-condensed'))
+        profile=f.fixture.font_source_profile.build([self.case.f.source])
+        for file in profile['files']:
+            for face in file['faces']:face['mixedSelection']=copy.deepcopy(self.case.f.target['source']['mixedSelection'])
+        with patch.object(f.fixture.font_source_profile,'build',return_value=profile):
+            self.plan,base=f.fixture.build_plans(self.case.f.source,slot,'latin',self.case.xml)
+        self.route=router.build_route_plan(self.plan,base,matching_weights=True)
+        manifest=self.build();self.assertTrue(manifest['summary']['deploymentReady'],manifest['summary'])
+        out=self.root/'rendered'
+        router.render_all(self.route,manifest['artifactMap'],out,manifest['staticXmlBindings'])
+        rendered=ET.parse(out/'system/etc/fonts.xml').getroot()
+        named={x.get('name'):x for x in rendered if x.tag=='family-list'}
+        self.assertEqual(set(named),{'sans-serif','sans-serif-condensed'})
+        for name,width in [('sans-serif','100'),('sans-serif-condensed','75')]:
+            primary,original=named[name]
+            self.assertTrue(original[0].text.startswith('LuoShu-Original-'))
+            self.assertEqual(original[0].get('supportedAxes'),'wght,ital')
+            self.assertEqual(original[0][0].get('stylevalue'),width)
+            self.assertIsNone(original[0].get('fallbackFor'))
+        global_originals=[x for x in rendered if x.tag=='family' and x.get('name') is None]
+        self.assertEqual(len(global_originals),1)
+        self.assertEqual(global_originals[0][0][0].get('stylevalue'),'100')
 
     def test_nonconstant_variation_cannot_pass_structural_proof(self):
         artifact=self.build()['artifacts'][0]

@@ -119,14 +119,17 @@ _ufmr_stage_for_manager() {
     esac
 }
 
-_ufmr_system_mount() {
+_ufmr_system_mount() (
+    # Scope the strict requirement to this validated deployment transaction.
+    # Subshell keeps legacy mounts from inheriting a persistent policy change.
+    export LUOSHU_REQUIRED_PAYLOAD_FILES=1
     if [ -n "${LUOSHU_UNIVERSAL_TEST_SYSTEM_MOUNT_COMMAND:-}" ]; then
         "$LUOSHU_UNIVERSAL_TEST_SYSTEM_MOUNT_COMMAND"
     else
         type luoshu_private_self_mount_ensure >/dev/null 2>&1 || return 1
         luoshu_private_self_mount_ensure
     fi
-}
+)
 
 _ufmr_system_rollback() {
     if [ -n "${LUOSHU_UNIVERSAL_TEST_SYSTEM_ROLLBACK_COMMAND:-}" ]; then
