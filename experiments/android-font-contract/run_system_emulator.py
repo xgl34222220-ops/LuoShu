@@ -3,7 +3,7 @@
 Never usable without the explicit CI authorization marker. No hidden API or
 SELinux policy changes. Failure still attempts restoration and records evidence.
 """
-import argparse, copy, hashlib, json, os, signal, subprocess, time
+import argparse, copy, hashlib, json, os, signal, subprocess, time, traceback
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -178,7 +178,7 @@ try:
  (a.output/'applied-font-manager.txt').write_bytes(adb('shell','dumpsys','font'))
  report['applied']=probe('system-applied');report['takeover']='passed'
 except Exception as error:
- report['failure']=type(error).__name__+': '+str(error);report['takeover']=report.get('takeover','failed')
+ report['failure']=type(error).__name__+': '+str(error);report['failureTrace']=traceback.format_exc(limit=16);report['takeover']=report.get('takeover','failed')
 finally:
  if touched:
   try:

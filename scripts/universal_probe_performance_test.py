@@ -81,6 +81,10 @@ class ProbePerformanceTest(unittest.TestCase):
                 source.copyInfo=weight==400 and width==100;source.copyLib=source.copyInfo;source.copyFeatures=source.copyInfo;design.addSource(source)
         variable,_,_=build(design)
         avar=variable['avar']=newTable('avar');avar.segments={'wght':{-1:-1,0:0,.5:.8,1:1},'wdth':{-1:-1,0:0,.5:.7,1:1}}
+        for fd in variable['CFF2'].cff.topDictIndex[0].FDArray:
+            fd.Private.BlueValues=[-120,0,700,720]
+            fd.Private.OtherBlues=[-250,-240]
+            fd.Private.StemSnapH=[50,80]
         vorg=variable['VORG']=newTable('VORG');vorg.majorVersion=1;vorg.minorVersion=0;vorg.defaultVertOriginY=880
         vorg.VOriginRecords={'u0041':903,'u4E2D':917}
         path=self.root/'cff2-variable.otf';variable.save(path);variable.close();before=path.read_bytes()

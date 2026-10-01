@@ -35,7 +35,7 @@ router retains its text-only invariants.
 
 | Gate | Evidence | Limit |
 |---|---|---|
-| Static compiler | 18 focused host tests | Synthetic fonts; no phone performance claim |
+| Static compiler | 19 focused host tests | Synthetic fonts; no phone performance claim |
 | Exact XML representation | 11 host tests | Actual platform parser still covered separately |
 | Planner → compiler → payload → runtime | 10 host tests | Includes originals/tamper/membership/dynamic change; consumer remains pending |
 | Existing source gate | Passed at protected-family snapshot; PostScript-key correction targeted regressions rerun | CI rerun required on final snapshot |
@@ -105,3 +105,14 @@ instance before compiling the production payload. A 600-second experimental
 compile budget leaves room to record failure and dispose of the VM; the phone's
 existing preparation deadline is unchanged. Global consumer/restore proof remains
 pending until the new run completes.
+
+Run `36798047398` stopped in the actual SDK full/probe equivalence gate before
+application. A hinted CFF2 fixture reproduces the same FontTools 4.63 failure:
+removing hints leaves optional Private arrays as `None`, and the later variable
+instancer iterates them. Read-only CFF2 measurement now preserves these hint
+dictionaries. Outline measurement does not execute raster hinting. The expanded
+five-location profile/readback regression passes with BlueValues, OtherBlues and
+StemSnapH present. The native comparison tries the optimized path first and records
+full exception chains, so a format incompatibility fails before the expensive
+reference measurement. Whole-plan fatal conditions also precede all static-route
+measurements; a blocked-plan regression requires zero measurement calls.

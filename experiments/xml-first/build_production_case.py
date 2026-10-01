@@ -47,7 +47,7 @@ def stock_axis_cases(xml_paths, stock_paths):
             with TTFont(path,fontNumber=face if collection else -1,lazy=True) as font:
                 axes={a.axisTag:{'min':float(a.minValue),'default':float(a.defaultValue),'max':float(a.maxValue)} for a in font['fvar'].axes} if 'fvar' in font else {}
                 sha=hashlib.sha256(Path(path).read_bytes()).hexdigest()
-                metadata.append({'path':logical,'face':face,'sha256':sha,'axes':axes,'tables':list(font.keys())})
+                metadata.append({'path':logical,'face':face,'sha256':sha,'axes':axes,'tables':list(font.keys()),'cff2PrivateHintKeys':[[name for name in ('BlueValues','OtherBlues','FamilyBlues','FamilyOtherBlues','StemSnapH','StemSnapV') if getattr(fd.Private,name,None) is not None] for fd in font['CFF2'].cff.topDictIndex[0].FDArray] if 'CFF2' in font else []})
                 cmap=font.getBestCmap() or {};cp=0x4e2d if 0x4e2d in cmap else 65
                 for node in nodes:
                     if node['index']!=face:continue
@@ -73,25 +73,25 @@ def verify_actual_probe_equivalence(stock_paths, source, diagnostics):
         with TTFont(path,fontNumber=0 if collection else -1,lazy=True) as font:
             if 'CFF2' not in font or 'fvar' not in font:continue
             axes={a.axisTag:(float(a.minValue)+float(a.maxValue))/2 for a in font['fvar'].axes}
-        before=hashlib.sha256(Path(path).read_bytes()).hexdigest();profiles=[];vertical=[];origins=[];times=[];counts=[]
+        before=hashlib.sha256(Path(path).read_bytes()).hexdigest();profiles={};vertical={};origins={};times={};counts={}
         print(json.dumps({'phase':'actual-cff2-probe-equivalence','state':'start','path':logical,'axes':axes}),flush=True)
-        for enabled in (False,True):
+        for enabled in (True,False):
             started=time.monotonic()
             with TTFont(source) as donor,patch.object(compiler,'_PROBE_ONLY_ENABLED',enabled):
                 instance,location=compiler._stock_geometry_font(Path(path),0,int(axes.get('wght',400)),axes,source_font=donor,role='cjk')
                 try:
-                    profiles.append(compiler._profile_from_font(instance));counts.append(len(instance.getGlyphOrder()))
-                    vertical.append(dict(instance['vmtx'].metrics) if 'vmtx' in instance else {})
-                    origins.append({name:instance['VORG'][name] for name in instance.getGlyphOrder()} if 'VORG' in instance else {})
+                    profiles[enabled]=compiler._profile_from_font(instance);counts[enabled]=len(instance.getGlyphOrder())
+                    vertical[enabled]=dict(instance['vmtx'].metrics) if 'vmtx' in instance else {}
+                    origins[enabled]={name:instance['VORG'][name] for name in instance.getGlyphOrder()} if 'VORG' in instance else {}
                 finally:instance.close()
-            times.append(time.monotonic()-started)
-        if profiles[0]!=profiles[1]:raise RuntimeError('actual SDK CFF2 probe profile differs from full instance')
-        if any(vertical[0].get(k)!=v for k,v in vertical[1].items()):raise RuntimeError('actual SDK CFF2 vertical metric differs')
-        if any(origins[0].get(k)!=v for k,v in origins[1].items()):raise RuntimeError('actual SDK CFF2 vertical origin differs')
+            times[enabled]=time.monotonic()-started
+        if profiles[False]!=profiles[True]:raise RuntimeError('actual SDK CFF2 probe profile differs from full instance')
+        if any(vertical[False].get(k)!=v for k,v in vertical[True].items()):raise RuntimeError('actual SDK CFF2 vertical metric differs')
+        if any(origins[False].get(k)!=v for k,v in origins[True].items()):raise RuntimeError('actual SDK CFF2 vertical origin differs')
         if hashlib.sha256(Path(path).read_bytes()).hexdigest()!=before:raise RuntimeError('actual SDK probe changed original bytes')
         result={'state':'passed','path':logical,'face':0,'location':axes,'sha256':before,
-                'fullSeconds':round(times[0],3),'probeSeconds':round(times[1],3),'glyphCounts':counts,
-                'profileDigest':compiler._canonical_hash(profiles[0]),'profileEqual':True,'verticalMetricsEqual':True,'originalUnchanged':True}
+                'fullSeconds':round(times[False],3),'probeSeconds':round(times[True],3),'glyphCounts':[counts[False],counts[True]],
+                'profileDigest':compiler._canonical_hash(profiles[False]),'profileEqual':True,'verticalMetricsEqual':True,'originalUnchanged':True}
         (Path(diagnostics)/'actual-cff2-probe-equivalence.json').write_text(json.dumps(result,indent=2))
         print(json.dumps(result),flush=True);return result
     return {'state':'not-applicable','reason':'no CFF2 variable SDK target'}

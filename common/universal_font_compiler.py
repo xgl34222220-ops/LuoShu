@@ -622,7 +622,10 @@ def _instantiate_probe_font(font: TTFont, location: dict[str, float], points: se
     options = subset.Options()
     options.recalc_bounds = False
     options.recalc_timestamp = False
-    options.hinting = False
+    # CFF2 dehinting replaces Private hint arrays with None; FontTools 4.63's
+    # later instancer iterates those arrays. Measurement never raster-hints, so
+    # preserve CFF2 hint dictionaries through subset/instancing instead.
+    options.hinting = "CFF2" in font
     options.layout_features = []
     options.name_IDs = ["*"]
     options.name_languages = ["*"]
@@ -2332,6 +2335,13 @@ def _compile_all_in_view(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     units = _collect_units(font_plan, route_plan)
+    if os.environ.get("LUOSHU_UNIVERSAL_MIX_STRICT") == "1":
+        for path, target in (font_plan.get("targets") or {}).items():
+            if target.get("action") == "blocked" or target.get("status") == "blocked":
+                raise CompilerError(f"mixed-preflight: blocked plan target: {path}")
+        if route_plan.get("summary", {}).get("routingComplete") is not True:
+            raise CompilerError("mixed-preflight: incomplete atomic routing")
+        _mixed_preflight(units, stock_paths, allow_live_stock)
     # Every new static route is measured and sealed before the first outline
     # render. Legacy physical/dynamic units retain their existing contracts.
     static_units = [unit for unit in units if unit["artifact"].get("representation") == "fixed-static-xml-v1"]
@@ -2356,13 +2366,6 @@ def _compile_all_in_view(
             raise CompilerError(f"fixed-static-measure {unit['target'].get('path')} face={unit['artifact'].get('originalStockFaceIndex')}: {error}") from error
         _compile_trace(unit["artifact"], "fixed-static-measure-ready", elapsed=time.monotonic()-measure_started,
                        renderContractId=unit["_fixedStaticPrepared"]["binding"]["renderContractId"])
-    if os.environ.get("LUOSHU_UNIVERSAL_MIX_STRICT") == "1":
-        for path, target in (font_plan.get("targets") or {}).items():
-            if target.get("action") == "blocked" or target.get("status") == "blocked":
-                raise CompilerError(f"mixed-preflight: blocked plan target: {path}")
-        if route_plan.get("summary", {}).get("routingComplete") is not True:
-            raise CompilerError("mixed-preflight: incomplete atomic routing")
-        _mixed_preflight(units, stock_paths, allow_live_stock)
     artifacts = []
     render_cache: dict[str, Any] = {}
     failed_artifact = ""

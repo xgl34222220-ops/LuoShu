@@ -213,6 +213,26 @@ class FixedStaticCompilerTest(unittest.TestCase):
                 compiler.compile_all(plan, route, {self.logical: self.stock}, self.root / "preflight", False)
             self.assertEqual(measure.call_count, 0)
 
+    def test_atomic_blocked_plan_never_measures_other_static_routes(self):
+        import universal_font_plan as planner
+        import minimal_xml_router as legacy
+        import fixed_static_xml_router as router
+        import os
+        xml=self.root/'atomic.xml';xml.write_text('<familyset><family name="sans-serif"><font>SyntheticOEM.ttf</font></family></familyset>')
+        good=fixture.slot_from_stock(self.logical,self.stock,family='sans-serif',source_xml='/system/etc/fonts.xml',declared='SyntheticOEM.ttf')
+        bad_path='/system/fonts/Cjk.ttf';bad=fixture.slot_from_stock(bad_path,self.stock,family='',source_xml=None,declared='Cjk.ttf')
+        profile=fixture.font_source_profile.build([self.source])
+        for file in profile['files']:
+            for face in file['faces']:face['mixedSelection']=deepcopy(self.unit()['target']['source']['mixedSelection'])
+        topology={'schema':planner.TOPOLOGY_SCHEMA,'state':'ready','topologyRevision':3,'buildKey':'phase6-test','slots':{self.logical:good,bad_path:bad},'summary':{},'families':{},'xmlAliases':[],'unresolvedXmlRefs':[]}
+        roles={'schema':planner.ROLES_SCHEMA,'state':'ready','roleRevision':3,'buildKey':'phase6-test','slots':{self.logical:fixture.role_map('latin'),bad_path:fixture.role_map('cjk')}}
+        plan=planner.build_plan(topology,roles,profile);self.assertEqual(plan['targets'][bad_path]['status'],'blocked')
+        base=legacy.build_route_plan(plan,{'/system/etc/fonts.xml':xml},None,False);route=router.build_route_plan(plan,base)
+        with patch.dict(os.environ,{'LUOSHU_UNIVERSAL_MIX_STRICT':'1'}),patch.object(fixed,'prepare_unit',wraps=fixed.prepare_unit) as measure:
+            with self.assertRaisesRegex(compiler.CompilerError,'blocked plan target'):
+                compiler.compile_all(plan,route,{self.logical:self.stock,bad_path:self.stock},self.root/'atomic-out',False)
+            self.assertEqual(measure.call_count,0)
+
     def test_unmeasured_han_and_unprobed_clipping_fail_closed(self):
         add_points(self.source, [ord("中")])
         add_points(self.stock, [ord("中")])
