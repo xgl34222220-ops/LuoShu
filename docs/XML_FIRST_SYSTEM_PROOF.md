@@ -210,3 +210,48 @@ assuming mountinfo line ordering. Rollback refuses a foreign top layer, accepts
 the restored original mounted directory, and retains incomplete state. A real
 SIGKILL immediately after successful overlay creation tests the pre-journal
 intent recovery; a second rollback leaves the original mount ID unchanged.
+
+### Verified production namespace transaction: 48ef641
+
+Android run https://github.com/xgl34222220-ops/LuoShu/actions/runs/36849124616
+and candidate run 36849124617 succeeded. Downloaded evidence artifact 11154314631
+has ZIP SHA256 `72b1cfdbca05dbc2e10b2e0869ebe625ce17c1102db332140fa664a3e93013e6`.
+The real API36 x86_64 child namespace verified all 53 sealed files read-only,
+idempotent reapplication, normal rollback, rollback after a partial mount
+failure, and integrity rejection before mounts. Outside-namespace originals,
+the same originals after reboot, all 74 restored consumer cases, temporary stage
+removal and emulator termination were verified.
+
+Host production preparation took 120.563 seconds (60 artifacts, 48 unique files,
+67,828,207 payload bytes). The Android transaction protocol took 68.483 seconds,
+including repeated verification and fault cases; neither number is a phone
+single-apply benchmark. Compilation ran on the host, while production payload
+validation and mount scripts ran with the Android x86 runtime.
+
+This closes private-namespace mount compatibility for this fixture. It does not
+establish shipped ARM64 execution, root-manager boot integration, or ordinary
+App SELinux access to the memory-backed layer. The earlier global 74-case proof
+used system-file replacement and remains a separate result. Matching XML
+revision 4 remains experiment-selected; no phone-wide acceptance claim follows.
+
+### Next bounded check: ordinary App access to mounted assets
+
+The next experiment uses the existing disposable root VM, requires adbd's
+namespace to already equal init's namespace, and never enters another namespace.
+SELinux must remain Enforcing. The same production transaction is temporarily
+applied globally, and the ordinary test App reads every mounted font through
+public file/Font APIs. Its UID/domain, full file and font-buffer hashes, actual
+file device/inode identity, and selected glyph sources are checked independently
+of the root verifier. Selected normal/italic weights plus representative original
+Greek/emoji glyphs are exercised by direct Font.Builder consumers. This does not
+claim default Typeface or boot-time takeover: the existing zygote/font-manager
+map may still cache old fonts.
+
+Only the owned test App is stopped before rollback to release its test mappings.
+The production rollback, original bytes, absence of new assets, reboot baseline
+consumers, staging cleanup and VM disposal remain required. Failure to roll back
+prevents recursive staging deletion. No root manager, init edit, policy change,
+or user device is involved. Android results for this new direct-read mode are
+still pending. ARM64 execution also remains unproved; the currently available
+runner/runtime experiment is x86_64, and the packaged ARM ELF requires Android's
+Bionic linker, not a Linux ARM interpreter.

@@ -29,7 +29,7 @@ def digest(path):return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 def verify(module,phase):
  module=Path(module);contract=json.loads((module/'namespace-contract.json').read_text())
  report_path=module/'namespace-result.json'
- report=json.loads(report_path.read_text()) if report_path.exists() else {'scope':'private Android mount namespace','moduleBootTested':False,'rootManagerTested':False,'globalAppConsumerTested':False,'phases':[]}
+ report=json.loads(report_path.read_text()) if report_path.exists() else {'scope':contract.get('mountScope','private Android mount namespace'),'moduleBootTested':False,'rootManagerTested':False,'globalAppConsumerTested':False,'phases':[]}
  payload=module/'.luoshu-payload';manifest=json.loads((payload/'.luoshu-runtime/deployment/deployment.json').read_text())
  report.update(deploymentId=manifest.get('deploymentId'),payloadDigest=manifest.get('payloadDigest'),verifiedFileCount=len(manifest['files']),architecture=os.uname().machine,shippedArm64RuntimeExecuted=False)
  new=contract['newAssetPaths']

@@ -144,6 +144,55 @@ public final class Runner extends Instrumentation {
         result.put("scope","App-only public variable-family selection; no system XML or module activation");
         result.put("normalShapeResponse","constant; matching axis is not donor weight variation");return result;
     }
+    private String fileHash(File file) throws Exception {
+        MessageDigest digest=MessageDigest.getInstance("SHA-256");byte[] buffer=new byte[65536];
+        try(InputStream in=new FileInputStream(file)){int count;while((count=in.read(buffer))!=-1)digest.update(buffer,0,count);}
+        StringBuilder value=new StringBuilder();for(byte b:digest.digest())value.append(String.format(Locale.ROOT,"%02x",b&255));return value.toString();
+    }
+    private void directMountedPhase() throws Exception {
+        int uid=android.os.Process.myUid();report.put("uid",uid);report.put("pid",android.os.Process.myPid());require(uid>=10000,"direct-read probe must be an ordinary App UID");
+        String contextValue=Files.readString(new File("/proc/self/attr/current").toPath()).trim();
+        report.put("selinuxContext",contextValue);require(contextValue.contains(":untrusted_app"),"unexpected privileged probe SELinux domain: "+contextValue);
+        JSONObject input=new JSONObject(new String(Base64.getDecoder().decode(arguments.getString("directContract")),StandardCharsets.UTF_8));
+        JSONArray files=input.getJSONArray("files"),cases=input.getJSONArray("cases"),readFiles=new JSONArray(),renders=new JSONArray();
+        require(files.length()>0&&files.length()<=128&&cases.length()>0&&cases.length()<=96,"invalid direct-read contract size");
+        report.put("uid",uid);report.put("pid",android.os.Process.myPid());report.put("selinuxContext",contextValue);
+        try{report.put("mountNamespace",android.system.Os.readlink("/proc/self/ns/mnt"));}catch(Exception error){report.put("mountNamespaceReadError",error.toString());}
+        report.put("consumer","ordinary App public Font.Builder and TextRunShaper");
+        report.put("defaultTypefaceTakeoverTested",false);report.put("moduleBootTested",false);
+        report.put("files",readFiles);report.put("cases",renders);
+        HashMap<String,String> approved=new HashMap<>();
+        for(int n=0;n<files.length();n++) {
+            JSONObject item=files.getJSONObject(n);String path=item.getString("path");
+            require((path.startsWith("/system/fonts/LuoShu")||path.equals("/system/fonts/NotoColorEmoji.ttf"))&&!path.contains(".."),"unexpected direct font path");
+            File file=new File(path);String sha=fileHash(file);require(sha.equals(item.getString("sha256")),"direct-read file hash differs");
+            android.system.StructStat stat=android.system.Os.stat(path);
+            JSONObject proof=new JSONObject();proof.put("path",path);proof.put("sha256",sha);proof.put("device",stat.st_dev);proof.put("inode",stat.st_ino);readFiles.put(proof);approved.put(path,sha);
+        }
+        for(int n=0;n<cases.length();n++) {
+            JSONObject item=cases.getJSONObject(n),expected=item.getJSONObject("expected");String path=expected.getString("path"),sample=item.getString("sample");
+            require(approved.containsKey(path),"case escaped mounted sealed files");
+            Font.Builder builder=new Font.Builder(new File(path)).setTtcIndex(expected.getInt("face"))
+                .setWeight(expected.optInt("referenceWeight",expected.getInt("fontWeight"))).setSlant(expected.getInt("fontSlant"));
+            JSONObject coordinates=expected.getJSONObject("axes");ArrayList<android.graphics.fonts.FontVariationAxis> axes=new ArrayList<>();
+            for(Iterator<String> it=coordinates.keys();it.hasNext();){String tag=it.next();axes.add(new android.graphics.fonts.FontVariationAxis(tag,(float)coordinates.getDouble(tag)));}
+            builder.setFontVariationSettings(axes.toArray(new android.graphics.fonts.FontVariationAxis[0]));
+            Font loaded=builder.build();require(fontBufferHash(loaded).equals(approved.get(path)),"mapped font buffer differs");
+            Typeface selected=new Typeface.CustomFallbackBuilder(new FontFamily.Builder(loaded).build())
+                .setStyle(new FontStyle(item.getInt("weight"),item.getBoolean("italic")?1:0)).build();
+            Paint paint=new Paint();paint.setTypeface(selected);paint.setTextSize(72);
+            android.graphics.text.PositionedGlyphs glyphs=android.graphics.text.TextRunShaper.shapeTextRun(sample,0,sample.length(),0,sample.length(),0,0,false,paint);
+            require(glyphs.glyphCount()>0,"empty direct glyph run");
+            for(int g=0;g<glyphs.glyphCount();g++){require(glyphs.getGlyphId(g)!=0,"direct glyph is .notdef");require(fontBufferHash(glyphs.getFont(g)).equals(approved.get(path)),"direct glyph came from fallback");}
+            String raster=draw(selected,sample,null);
+            if(expected.has("raster"))require(raster.equals(expected.getString("raster")),"preserved direct glyph raster changed");
+            JSONObject proof=new JSONObject(item.toString());proof.put("raster",raster);proof.put("verification","direct-unprivileged-file-buffer-and-glyph-read");renders.put(proof);
+        }
+        report.put("status","passed-direct-mounted-read");
+        Files.write(new File(root,"report-direct-mounted.json").toPath(),report.toString(2).getBytes(StandardCharsets.UTF_8));
+        Bundle output=new Bundle();output.putString("stream",report.toString());finish(Activity.RESULT_OK,output);
+    }
+
     private void styleMatrixPhase() throws Exception {
         JSONArray cases=new JSONArray(new String(Base64.getDecoder().decode(arguments.getString("styleCases")),StandardCharsets.UTF_8));
         require(cases.length()>0&&cases.length()<=96,"invalid style matrix size");
@@ -277,6 +326,7 @@ public final class Runner extends Instrumentation {
             context=getTargetContext();root=context.getFilesDir();report=new JSONObject();
             report.put("phase",phase);report.put("sdk",Build.VERSION.SDK_INT);report.put("fingerprint",Build.FINGERPRINT);
             report.put("moduleMountTested",false);report.put("systemFontConfigMutated",false);report.put("hookUsed",false);
+            if(phase.equals("direct-mounted")){directMountedPhase();return;}
             if(phase.equals("stock-axis")){stockAxisPhase();return;}
             if(phase.equals("style-matrix")){styleMatrixPhase();return;}
             if(phase.startsWith("system-")){systemPhase(phase);return;}

@@ -8,8 +8,9 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 PACKAGE='io.github.xgl34222220.luoshu.fontcontract'
-p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');p.add_argument('--explicit-style-matrix',action='store_true');p.add_argument('--matching-weight-family',action='store_true');p.add_argument('--module-namespace-only',action='store_true');a=p.parse_args()
-if a.module_namespace_only and not (a.matching_weight_family and a.production_payload):raise SystemExit('namespace experiment requires the explicit production matching payload')
+p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');p.add_argument('--explicit-style-matrix',action='store_true');p.add_argument('--matching-weight-family',action='store_true');p.add_argument('--module-namespace-only',action='store_true');p.add_argument('--module-app-direct',action='store_true');a=p.parse_args()
+if a.module_namespace_only and a.module_app_direct:raise SystemExit('choose one module experiment mode')
+if (a.module_namespace_only or a.module_app_direct) and not (a.matching_weight_family and a.production_payload):raise SystemExit('namespace experiment requires the explicit production matching payload')
 if a.matching_weight_family:a.explicit_style_matrix=True
 if a.explicit_style_matrix and not a.production_payload:raise SystemExit('style matrix requires production payload')
 if os.environ.get('LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED')!='true':
@@ -158,12 +159,13 @@ try:
    if not logical.startswith('/system/fonts/LuoShu') or subprocess.run(['adb','shell','test','-e',logical]).returncode==0:
     raise RuntimeError('production font escaped unique experimental assets')
   production=case_report
- if a.module_namespace_only:
+ if a.module_namespace_only or a.module_app_direct:
   phase='module-private-namespace';save()
-  from run_module_namespace import run as run_namespace
-  report['moduleNamespace']=run_namespace(adb,root,reboot,read_system_file,payload,manifest,captured,backups,a.output)
+  from run_module_namespace import run as run_namespace,direct_contract
+  direct=direct_contract(manifest,case_report['styleMatrixCases'],report['styleBaseline']) if a.module_app_direct else None
+  report['moduleNamespace']=run_namespace(adb,root,reboot,read_system_file,payload,manifest,captured,backups,a.output,direct=direct)
   report['restored']=report['moduleNamespace'].get('rebootOriginalsUnchanged') is True
-  report['takeover']='not-tested-namespace-only'
+  report['takeover']='not-tested-direct-app-read-only' if a.module_app_direct else 'not-tested-namespace-only'
   report['restoredProbe']=probe('system-restored')
   restored_cases=[]
   for old in report['styleBaseline']['cases']:
@@ -213,9 +215,9 @@ try:
  report['takeover']='passed'
 except Exception as error:
  report['failure']=type(error).__name__+': '+str(error);report['failureTrace']=traceback.format_exc(limit=16);report['takeover']=report.get('takeover','failed')
- if a.module_namespace_only and (a.output/'module-namespace-summary.json').exists():
+ if (a.module_namespace_only or a.module_app_direct) and (a.output/'module-namespace-summary.json').exists():
   report['moduleNamespace']=json.loads((a.output/'module-namespace-summary.json').read_text())
-  report['restored']=bool(report['moduleNamespace'].get('outsideNamespaceUnchanged') and report['moduleNamespace'].get('rebootOriginalsUnchanged'))
+  report['restored']=bool((report['moduleNamespace'].get('outsideNamespaceUnchanged') or report['moduleNamespace'].get('originalsAfterRollback')) and report['moduleNamespace'].get('rebootOriginalsUnchanged'))
 finally:
  if touched:
   try:
