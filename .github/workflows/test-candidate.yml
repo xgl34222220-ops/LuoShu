@@ -285,6 +285,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export PYTHONPATH="$PWD/common/python/lib/python3.14/site-packages${PYTHONPATH:+:$PYTHONPATH}"
           . ./scripts/version.sh
           module="dist/LuoShu-${LUOSHU_ARTIFACT_VERSION}.zip"
           test "$(unzip -p "$module" module.prop | sed -n 's/^testBuildId=//p')" = "$LUOSHU_TEST_BUILD_ID"
