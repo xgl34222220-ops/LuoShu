@@ -1,4 +1,4 @@
-import json,shutil,subprocess,sys,tempfile,unittest
+import json,os,shutil,subprocess,sys,tempfile,unittest
 from pathlib import Path
 from unittest.mock import patch
 ROOT=Path(__file__).resolve().parents[2];sys.path.insert(0,str(ROOT/'common'))
@@ -26,6 +26,14 @@ class NativePrepareTest(unittest.TestCase):
   self.assertEqual(host.cleanup_proof(('[TASK-CLEANUP] '+json.dumps(proof)).encode()),proof)
   for value in [b'',b'[TASK-CLEANUP] {"task":"other","leftoverPids":[]}',b'[TASK-CLEANUP] {"task":"ci-native-full-prepare","leftoverPids":[22]}']:
    with self.assertRaises(RuntimeError):host.cleanup_proof(value)
+ def test_native_shell_branch_is_one_process_and_no_app_fallthrough(self):
+  with tempfile.TemporaryDirectory() as temp:
+   root=Path(temp);fake=root/'python3';log=root/'calls'
+   fake.write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "'+str(log)+'"\nexit 7\n');fake.chmod(0o755)
+   env=dict(os.environ,PATH=str(root)+':'+os.environ['PATH'],LUOSHU_NATIVE_PREPARE_TEST_APPROVED='true',LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED='true')
+   result=subprocess.run(['sh',str(Path(__file__).with_name('run_selected_experiment.sh'))],env=env,capture_output=True,text=True)
+   self.assertEqual(result.returncode,7)
+   self.assertEqual(log.read_text().splitlines(),['experiments/android-font-contract/run_native_prepare.py'])
  def test_explicit_root_refusal_is_not_retried(self):
   calls=[]
   def adb(*args,**kwargs):
