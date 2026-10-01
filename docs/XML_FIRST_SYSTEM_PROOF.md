@@ -367,3 +367,17 @@ the previous live payload. This does not substitute for current font-update
 configuration validation, which remains independently required. The new tests
 use synthetic property output and mock only the system mount operation; they do
 not claim an actual OTA or boot integration.
+
+### Manual top-level hook activation (cdf12542)
+
+[Android run 36876289494](https://github.com/xgl34222220-ops/LuoShu/actions/runs/36876289494),
+artifact 11168944304, passed next-payload activation through the real top-level
+post-fs-data script. The explicitly simulated KernelSU stage left originals
+visible until manual post-mount invocation. Default system-family consumers
+passed 74 cases, restored consumers passed 74, and direct reads passed 66.
+Original bytes after reboot, staging deletion and VM teardown were verified.
+The test manually invokes scripts in an owned temporary directory; it does not
+register boot hooks or install a root manager. Host preparation was 129.916
+seconds and whole experiment time was 370.141 seconds. Firmware matching follows
+the scanner's fingerprint/display-ID rule; it is not a collision-proof ROM
+attestation. The failed-activation legacy guard is scoped to its boot identity.
