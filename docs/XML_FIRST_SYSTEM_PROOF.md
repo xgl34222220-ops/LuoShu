@@ -381,3 +381,24 @@ register boot hooks or install a root manager. Host preparation was 129.916
 seconds and whole experiment time was 370.141 seconds. Firmware matching follows
 the scanner's fingerprint/display-ID rule; it is not a collision-proof ROM
 attestation. The failed-activation legacy guard is scoped to its boot identity.
+
+### Native Android preparation exposed an unsealed physical slot (8cfc8a6e)
+
+[Run 36882335419](https://github.com/xgl34222220-ops/LuoShu/actions/runs/36882335419)
+actually executed the production scan, topology, source profile, plan and router
+on Android x86_64 Python. It failed before outline compilation: AndroidClock.ttf
+was discovered as a specialized physical slot but had no sealed stock identity.
+Legacy UI import checks can exclude valid small numeric fonts, and a font absent
+from XML also escapes the XML member archive. A separate specialized snapshot
+now records its original identity, metrics and measured geometry without adding
+it to legacy global UI slots. Unproven views remain unavailable, and prior caches
+must be upgraded through the trusted scanner.
+
+That run's scan took 223.304 seconds; child peak RSS was 3,106,712 KiB. The scan
+archive still fully instanced CFF2 faces while the compiler already measured a
+bounded glyph subset. The archive now uses the same bounded measurement approach,
+preserving CFF2 hint dictionaries and validating exact profile equality against
+full instances with MVAR/HVAR/VVAR. These are host regression results until the
+next native run establishes the actual scan cost. No font mount or consumer test
+ran in this failed preparation experiment; task cleanup reported no remaining
+processes, the owned directory was removed, and the VM was destroyed.

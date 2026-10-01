@@ -48,6 +48,40 @@ class MemberTests(unittest.TestCase):
         rolemap,_=roles.build(tp)
         plan=planner.build_plan(tp,rolemap,profiles.build([self.fonts/'Ui.ttf']))
         return data,tp,plan
+    def test_non_xml_clock_has_sealed_specialized_contract(self):
+        clock=self.fonts/'AndroidClock.ttf';make_font(clock,family='Android Clock')
+        from fontTools.ttLib import TTFont
+        from fontTools import subset
+        with TTFont(clock) as font:
+            sub=subset.Subsetter();sub.populate(text='0123456789');sub.subset(font);font.save(clock)
+        self.assertLess(clock.stat().st_size,4096)
+        original=self.check.read_text()
+        self.check.write_text('#!/bin/sh\ncase "$2" in *AndroidClock.ttf) exec sh '+str(ROOT/'common/font_check.sh')+' "$@" ;; esac\n'+original.split('\n',1)[1])
+        data,tp,plan=self.scan('')
+        logical='/system/fonts/AndroidClock.ttf'
+        self.assertNotIn(logical,data['slots'])
+        target=plan['targets'][logical]
+        self.assertEqual(target['action'],'compile-specialized')
+        contract=target['targetContract']
+        self.assertEqual(contract['stockIdentity']['sha256'],hashlib.sha256(clock.read_bytes()).hexdigest())
+        self.assertTrue(contract['stockIdentity']['provenance']['verified'])
+        self.assertEqual(contract['stockGeometryProfile']['stockSha256'],contract['stockIdentity']['sha256'])
+        self.assertTrue(contract['metrics'])
+
+    def test_specialized_snapshot_rejects_overlay_and_requires_cache_upgrade(self):
+        clock=self.fonts/'AndroidClock.ttf';make_font(clock,family='Android Clock')
+        self.check.write_text('#!/bin/sh\ncase "$2" in *AndroidClock.ttf) exit 1 ;; esac\n'+self.check.read_text().split("\n",1)[1])
+        self.info.write_text(self.mounts+f'4 3 253:9 /replacement {clock} ro - ext4 /dev/block/userdata rw\n')
+        data,tp,plan=self.scan('')
+        logical='/system/fonts/AndroidClock.ttf'
+        self.assertEqual(data['specializedSnapshots'][logical]['0']['state'],'unavailable')
+        self.assertNotIn('stockIdentity',plan['targets'][logical]['targetContract'])
+        old=copy.deepcopy(data);old.pop('specializedSnapshotRevision')
+        self.assertFalse(scanner._can_reuse(old,'member-fixture'))
+        with patch.object(inventory,'current_build_key',return_value=('member-fixture','','')):
+            with self.assertRaisesRegex(topology.TopologyError,'专用物理'):
+                topology.validate_inventory_current(old)
+
     def test_api36_family_preserved_member_has_sealed_contract(self):
         data,tp,plan=self.scan('<font fallbackFor="serif">NotoSerifCJK-Regular.ttf</font>')
         logical='/system/fonts/NotoSerifCJK-Regular.ttf'

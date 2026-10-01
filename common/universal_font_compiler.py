@@ -2265,7 +2265,7 @@ def _mixed_preflight(units: list[dict[str, Any]], stock_paths: dict[str, Path], 
                 _verify_stock_identity(target, stock, max(0, _int(stock_face, 0)))
         except CompilerError as error:
             _compile_trace(artifact, "preflight-blocked", reason=str(error))
-            raise CompilerError("mixed-preflight: " + str(error)) from error
+            raise CompilerError("mixed-preflight: " + path + ": " + str(error)) from error
         if (contract.get("variable") is True and source.get("variable") is not True
                 and unit.get("deploymentKinds") == ["physical-slot"]
                 and target.get("role") not in SPECIALIZED_ROLES

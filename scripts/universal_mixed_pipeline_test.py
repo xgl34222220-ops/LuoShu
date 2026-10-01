@@ -110,7 +110,7 @@ def plans(source: Path, stocks: dict[str, Path], roles_by_path: dict[str, str], 
         inventory = dict(schema='device-font-inventory-v1', state='ready', scannerRevision=6,
                          buildKey=topology['buildKey'], romKind=topology['romKind'], slots=slots,
                          families={}, xmlGraph={'refs': [], 'aliases': []},
-                         xmlMemberSnapshotRevision=1, xmlMemberSnapshots={})
+                         specializedSnapshotRevision=1, specializedSnapshots={}, xmlMemberSnapshotRevision=1, xmlMemberSnapshots={})
         topology = font_topology_snapshot.build_topology(inventory, None, '', None, None, '')
         (module / 'config/device_font_inventory.json').write_text(json.dumps(inventory))
         (module / 'config/device_font_topology.json').write_text(json.dumps(topology))

@@ -103,6 +103,17 @@ class ProbePerformanceTest(unittest.TestCase):
             self.assertGreater(counts[0],6000);self.assertLess(counts[1],300)
             for name,value in origins[1].items():self.assertEqual(value,origins[0][name])
             for name,value in vertical[1].items():self.assertEqual(value,vertical[0][name])
+        import stock_geometry_profile as archive
+        import hashlib
+        real_instance=archive.instantiateVariableFont
+        measured_counts=[]
+        def bounded_instance(font,*args,**kwargs):
+            measured_counts.append(len(font.getGlyphOrder()))
+            return real_instance(font,*args,**kwargs)
+        with patch.object(archive,'instantiateVariableFont',side_effect=bounded_instance):
+            captured=archive.capture_geometry_profile(path,0,{'sha256':hashlib.sha256(before).hexdigest(),'faceIndex':0})
+        self.assertEqual(captured['profile'],profiles[0])
+        self.assertLess(max(measured_counts),300)
         self.assertEqual(before,path.read_bytes())
 
     def test_shared_han_sampling_uses_full_cmap_even_when_only_probes_are_instanced(self):

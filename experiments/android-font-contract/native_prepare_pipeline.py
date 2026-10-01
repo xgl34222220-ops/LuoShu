@@ -65,7 +65,7 @@ def main():
   inventory=json.loads((config/'device_font_inventory.json').read_text());topology=json.loads((config/'device_font_topology.json').read_text());roles=json.loads((config/'device_font_roles.json').read_text())
   font_topology_snapshot.validate_inventory_current(inventory);font_role_shadow.validate_role_map(roles,report['fingerprint'])
   for name,data in [('inventory.json',inventory),('topology.json',topology),('roles.json',roles)]:write(name,data)
-  report.update(inventorySlotCount=len(inventory['slots']),topologySlotCount=len(topology['slots']),xmlMemberCount=len(inventory.get('xmlMemberSnapshots',{})))
+  report.update(inventorySlotCount=len(inventory['slots']),topologySlotCount=len(topology['slots']),xmlMemberCount=len(inventory.get('xmlMemberSnapshots',{})),specializedSnapshots=inventory.get('specializedSnapshots',{}))
   plan=timed('plan',lambda:universal_font_plan.build_plan(topology,roles,profile));write('font-plan.json',plan);report['planSummary']=plan['summary']
   def route():
    base=minimal_xml_router.build_route_plan(plan,{},None,True)

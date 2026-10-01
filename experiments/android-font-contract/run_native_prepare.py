@@ -65,7 +65,12 @@ def main():
   if after!=before:raise RuntimeError('original SDK font/config bytes changed')
   if adb('shell','getenforce').stdout.strip()!=b'Enforcing':raise RuntimeError('SELinux state changed')
   report.update(state='passed',originalsUnchanged=True,runtimeOrigin=origin)
- except Exception as e:report.update(state='failed',error=str(e),trace=traceback.format_exc(limit=12))
+ except Exception as e:
+  report.update(state='failed',error=str(e),trace=traceback.format_exc(limit=12))
+  if owned:
+   for name,args in [('kernel-before-recovery',('shell','dmesg')),('mountinfo-before-recovery',('shell','cat','/proc/self/mountinfo')),('crash-before-recovery',('logcat','-b','crash','-d','-t','200'))]:
+    try:(a.output/(name+'.txt')).write_bytes(adb(*args,timeout=10,check=False).stdout[-128000:])
+    except Exception as diagnostic:report[name+'Error']=str(diagnostic)
  finally:
   if owned:
    try:
@@ -74,7 +79,12 @@ def main():
     if not results_pulled:adb('pull',REMOTE+'/results',str(a.output/'results'),timeout=120,check=False)
     mounts=adb('shell','cat','/proc/self/mountinfo').stdout.decode()
     if any(line.split()[4].startswith(REMOTE+'/') for line in mounts.splitlines()):raise RuntimeError('owned stock view is still mounted; refuse recursive deletion')
-    if before is not None and originals()!=before:raise RuntimeError('originals changed before cleanup')
+    if before is not None:
+     after=originals();(a.output/'original-sha256-after-cleanup.txt').write_bytes(after)
+     if after!=before:raise RuntimeError('originals changed before cleanup')
+     report['originalsUnchanged']=True
+    if adb('shell','getenforce').stdout.strip()!=b'Enforcing':raise RuntimeError('SELinux state changed before cleanup')
+    report['selinuxAfterCleanup']='Enforcing'
     adb('shell','rm','-rf',REMOTE);adb('shell','test','!','-e',REMOTE)
     report['temporaryModuleRemoved']=True
    except Exception as e:report.update(state='failed',cleanupError=str(e))

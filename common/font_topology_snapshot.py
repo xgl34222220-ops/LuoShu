@@ -343,6 +343,17 @@ def build_topology(
             current["physicalCandidate"] = raw.get("candidate") is True
             current["physicalReason"] = str(raw.get("reason") or "")
 
+    # Specialized physical faces have their own trusted scan archive. They do
+    # not become legacy UI replacement slots merely by being measured.
+    for logical, faces in (inventory.get("specializedSnapshots") or {}).items():
+        entry = faces.get("0", {}) if isinstance(faces, dict) else {}
+        current = slots.setdefault(logical, {"path": logical, "slotName": Path(logical).name,
+            "partition": _partition_for_path(logical, slots), "families": [], "source": "specialized-snapshot"})
+        current["specializedSnapshot"] = copy.deepcopy(entry)
+        if entry.get("state") == "ready":
+            for key in ("stockIdentity", "stockGeometryProfile", "metrics", "format", "faceIndex"):
+                current[key] = copy.deepcopy(entry[key])
+
     # XML family closure may copy protected members unchanged. Their sealed
     # identities come from the trusted scan, never the live candidate probe.
     for logical, faces in (inventory.get("xmlMemberSnapshots") or {}).items():
@@ -543,6 +554,8 @@ def validate_inventory_current(inventory: dict[str, Any]) -> None:
         raise TopologyError("XML 家族成员原厂身份缺失，需要可信重扫")
     if inventory.get("scannerRevision") != 6:
         raise TopologyError("字体扫描版本已过期")
+    if inventory.get("specializedSnapshotRevision") != 1 or not isinstance(inventory.get("specializedSnapshots"), dict):
+        raise TopologyError("专用物理字体原厂档案缺失，需要可信重扫")
     if not all(isinstance(slot.get("stockIdentity"), dict)
                and slot["stockIdentity"].get("captureRevision") == 2
                and isinstance(slot.get("stockGeometryProfile"), dict)

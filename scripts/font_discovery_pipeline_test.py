@@ -83,7 +83,7 @@ class DiscoveryPipelineTest(unittest.TestCase):
             slot['stockGeometryProfile'] = scanner.capture_geometry_profile(actual, slot.get('faceIndex', 0), slot['stockIdentity'])
         graph = scanner._parse_full_xml_graph(sources, self.roots)
         snapshots = scanner._capture_xml_member_snapshots(graph, self.roots, 'discovery-pipeline', slots)
-        inv = {'xmlMemberSnapshotRevision': scanner.XML_MEMBER_SNAPSHOT_REVISION, 'xmlMemberSnapshots': snapshots, 'schema': inventory.SCHEMA, 'state': 'ready', 'buildKey': 'discovery-pipeline',
+        inv = {'specializedSnapshotRevision':1, 'specializedSnapshots':{}, 'xmlMemberSnapshotRevision': scanner.XML_MEMBER_SNAPSHOT_REVISION, 'xmlMemberSnapshots': snapshots, 'schema': inventory.SCHEMA, 'state': 'ready', 'buildKey': 'discovery-pipeline',
                'scannerRevision': scanner.SCANNER_REVISION, 'slots': slots, 'families': families,
                'sourceRoots': [{'partition': 'system', 'logical': '/system/fonts', 'actual': str(self.fonts)}],
                'xmlSources': ['/system/etc/fonts.xml'], 'xmlGraph': graph}

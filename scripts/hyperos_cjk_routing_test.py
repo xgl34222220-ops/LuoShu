@@ -565,7 +565,7 @@ class RoutingTest(unittest.TestCase):
             slot['stockIdentity'] = synthetic_identity(logical, path, 0, 'routing-test')
             slot['stockGeometryProfile'] = capture_geometry_profile(path, 0, slot['stockIdentity'])
         self.assertFalse(scanner._has_current_metrics(previous), 'protected XML member evidence is also required')
-        previous.update(xmlGraph={'refs': []}, xmlMemberSnapshotRevision=scanner.XML_MEMBER_SNAPSHOT_REVISION,
+        previous.update(specializedSnapshotRevision=1, specializedSnapshots={}, xmlGraph={'refs': []}, xmlMemberSnapshotRevision=scanner.XML_MEMBER_SNAPSHOT_REVISION,
                         xmlMemberSnapshots={})
         self.assertTrue(scanner._has_current_metrics(previous))
 

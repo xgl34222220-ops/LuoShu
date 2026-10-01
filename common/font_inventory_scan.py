@@ -790,8 +790,39 @@ def _capture_xml_member_snapshots(graph, roots, build_key, slots):
     return snapshots
 
 
+def _capture_specialized_snapshots(probe, roots, build_key, slots):
+    """Numeric physical faces are not global UI slots or necessarily XML members."""
+    import font_role_shadow
+    refs = []
+    for item in probe.get("paths", []):
+        logical = str(item.get("path") or "")
+        if logical in slots:
+            continue
+        role = font_role_shadow._classification(logical, item)
+        if role["role"] in font_role_shadow.SPECIALIZED_ROLES:
+            refs.append({"resolvedPath": logical, "index": 0})
+    snapshots = _capture_xml_member_snapshots({"refs": refs}, roots, build_key, slots)
+    for logical, faces in snapshots.items():
+        entry = faces["0"]
+        if entry["state"] != "ready":
+            continue
+        identity = entry["stockIdentity"]
+        stock = Path(identity["provenance"]["resolvedPath"])
+        try:
+            fmt, metrics = base._read_metrics(stock, 0)
+            geometry = capture_geometry_profile(stock, 0, identity)
+            entry.update(format=fmt, metrics=metrics, stockGeometryProfile=geometry)
+        except GeometryIdentityError:
+            raise
+        except Exception as error:
+            entry.update(state="unavailable", reason=f"{type(error).__name__}: {error}")
+    return snapshots
+
+
 def _has_current_metrics(existing: dict[str, Any]) -> bool:
-    return (has_xml_member_snapshots(existing)
+    return (existing.get("specializedSnapshotRevision") == 1
+            and isinstance(existing.get("specializedSnapshots"), dict)
+            and has_xml_member_snapshots(existing)
             and all(isinstance(entry.get("stockIdentity"), dict) and entry["stockIdentity"].get("captureRevision") == STOCK_CAPTURE_REVISION and isinstance(entry.get("stockGeometryProfile"), dict) for entry in existing.get("slots", {}).values())
             and existing.get("metricsRevision") == METRICS_REVISION
             and all(isinstance(entry.get("metrics", {}).get("head"), dict)
@@ -1064,6 +1095,7 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
 
 
     xml_member_snapshots = _capture_xml_member_snapshots(xml_graph, replaceable_roots, build_key, slots)
+    specialized_snapshots = _capture_specialized_snapshots(probe, replaceable_roots, build_key, slots)
 
     theme_roots = _theme_override_roots()
     mount_targets = _font_mount_targets()
@@ -1122,6 +1154,8 @@ def _scan_current_roots(args: Any, build_key: str, fingerprint: str, display_id:
         "xmlGraph": xml_graph,
         "xmlMemberSnapshotRevision": XML_MEMBER_SNAPSHOT_REVISION,
         "xmlMemberSnapshots": xml_member_snapshots,
+        "specializedSnapshotRevision": 1,
+        "specializedSnapshots": specialized_snapshots,
         "families": {name: paths for name, paths in sorted(families.items()) if name and paths},
         "slots": {logical: slots[logical] for logical in sorted(slots)},
         "slotCount": len(slots),

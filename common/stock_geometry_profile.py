@@ -82,12 +82,12 @@ def capture_geometry_profile(path: Path, face_index: int, identity: dict[str, An
         if location:
             # Default-axis archive is precise; non-default route measurements
             # remain compiler work. Subsetting is measurement-only, never saved.
-            if "glyf" in font and "VARC" not in font:
+            if ("glyf" in font or ("CFF2" in font and not any(tag in font for tag in ("COLR", "SVG ")))) and "VARC" not in font:
                 from fontTools import subset
                 opts = subset.Options()
                 opts.recalc_bounds = False
                 opts.recalc_timestamp = False
-                opts.hinting = False
+                opts.hinting = "CFF2" in font
                 opts.layout_features = []
                 opts.name_IDs = ["*"]
                 opts.name_languages = ["*"]

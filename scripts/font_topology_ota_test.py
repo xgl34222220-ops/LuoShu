@@ -18,7 +18,7 @@ class OtaTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.inv = {'xmlMemberSnapshotRevision':1, 'xmlMemberSnapshots':{}, 'buildKey':'old-build', 'scannerRevision':6, 'slots':{'/system/fonts/A.ttf':{
+        self.inv = {'specializedSnapshotRevision':1, 'specializedSnapshots':{}, 'xmlMemberSnapshotRevision':1, 'xmlMemberSnapshots':{}, 'buildKey':'old-build', 'scannerRevision':6, 'slots':{'/system/fonts/A.ttf':{
             'stockIdentity':{'captureRevision':2}, 'stockGeometryProfile':{}}}}
     def test_current_properties_must_match_without_reading_font_bytes(self):
         with patch.object(inventory, 'current_build_key', return_value=('new-build','new-build','display')), \
