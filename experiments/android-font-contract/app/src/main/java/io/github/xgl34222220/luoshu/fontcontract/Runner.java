@@ -151,7 +151,7 @@ public final class Runner extends Instrumentation {
     }
     private void directMountedPhase() throws Exception {
         int uid=android.os.Process.myUid();report.put("uid",uid);report.put("pid",android.os.Process.myPid());require(uid>=10000,"direct-read probe must be an ordinary App UID");
-        String contextValue=Files.readString(new File("/proc/self/attr/current").toPath()).trim();
+        String contextValue=new String(Files.readAllBytes(new File("/proc/self/attr/current").toPath()),StandardCharsets.UTF_8).trim();
         report.put("selinuxContext",contextValue);require(contextValue.contains(":untrusted_app"),"unexpected privileged probe SELinux domain: "+contextValue);
         JSONObject input=new JSONObject(new String(Base64.getDecoder().decode(arguments.getString("directContract")),StandardCharsets.UTF_8));
         JSONArray files=input.getJSONArray("files"),cases=input.getJSONArray("cases"),readFiles=new JSONArray(),renders=new JSONArray();
