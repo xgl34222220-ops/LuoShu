@@ -300,3 +300,14 @@ symlink targets and child-bind-before-parent-overlay rollback. The
 next Android experiment runs these same cases in an isolated child namespace
 before the ordinary-App direct-read check. This does not add root-manager boot
 or ARM64 execution evidence.
+
+The first Android bind regression attempt (f2a6e08), and its trace-only retry
+(b6f7731), stopped before global publication. The trace reaches the final mixed
+layer case after the original bind, foreign-top, cancellation and file-alias
+assertions. Its synthetic original directory was on Android /data; unlike the
+production ROM lower, it retained the casefold filesystem underneath the captured
+bind. The fixture now uses a verified 1 MiB tmpfs for its synthetic original and
+selected files. The production backend and every rollback assertion stay in use.
+Android confirmation of that fixture correction remains pending. Both failed
+attempts verified original bytes after reboot, removed their stage and destroyed
+the VM; neither supplies new ordinary-App style evidence.

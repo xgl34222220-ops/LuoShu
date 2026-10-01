@@ -10,6 +10,10 @@ if [ "${1:-}" != --inside ]; then
 fi
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 r=$(mktemp -d)
+# Model an overlay-capable original filesystem, not Android /data's casefold
+# filesystem. The production original lower is a read-only ROM view.
+mount -t tmpfs -o size=1m,nosuid,nodev,noexec luoshu-bind-fixture "$r"
+awk -v p="$r" '$5==p&&$0~/ - tmpfs /{ok=1}END{exit !ok}' /proc/self/mountinfo
 mkdir -p "$r/source" "$r/target" "$r/state"
 printf underlying > "$r/target/font.ttf"
 printf original > "$r/original.ttf"
@@ -80,5 +84,6 @@ _luoshu_atomic_rollback "$_lsme_mount_list"
 test ! -s "$_lsme_mount_list"
 test "$(_luoshu_visible_mount_id "$r/target-alias")" = "$baseline"
 test "$(cat "$r/target/font.ttf")" = underlying
-rm -rf "$r"
+umount "$r"
+rmdir "$r"
 echo 'bind_ownership_namespace_test: PASS (original bind, foreign top, cancellation, repeated rollback, legacy rejection, symlink target, overlay-child dependency)'
