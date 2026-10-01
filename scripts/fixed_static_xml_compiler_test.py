@@ -245,6 +245,39 @@ class FixedStaticCompilerTest(unittest.TestCase):
         self.assertEqual(result["status"], "blocked", result)
         self.assertIn("line budget", result["reason"])
 
+    def test_tall_brackets_use_their_actual_oem_geometry(self):
+        with TTFont(self.source) as font:
+            for cp in map(ord,'()[]{}'):
+                font['glyf'][font.getBestCmap()[cp]].coordinates.translate((0,-60))
+            font.save(self.source)
+        with TTFont(self.stock) as font:
+            font['OS/2'].sTypoDescender=-150;font.save(self.stock)
+        original=self.source.read_bytes()
+        result=self.compile();self.assertEqual(result['status'],'ready',result)
+        geometry=result['report']['renderContract']['geometry']
+        self.assertEqual(geometry['extraProbePoints']['punctuationBrackets'],sorted(map(ord,'()[]{}')))
+        with TTFont(result['output']) as output,TTFont(self.source) as source:
+            for cp in map(ord,'()[]{}'):
+                name=output.getBestCmap()[cp]
+                self.assertGreaterEqual(compiler._bounds(output.getGlyphSet(),name)[1],-150)
+                self.assertEqual(output['hmtx'].metrics[name][0],source['hmtx'].metrics[source.getBestCmap()[cp]][0])
+            for cp in map(ord,'A1'):
+                self.assertEqual(compiler._bounds(output.getGlyphSet(),output.getBestCmap()[cp]),compiler._bounds(source.getGlyphSet(),source.getBestCmap()[cp]))
+        self.assertEqual(self.source.read_bytes(),original)
+        with TTFont(self.source) as font:
+            for cp in map(ord,'()[]{}'):font['glyf'][font.getBestCmap()[cp]].coordinates.scale((1,3))
+            font.save(self.source)
+        bad=self.compile();self.assertEqual(bad['status'],'blocked',bad)
+
+    def test_delimiter_shared_with_letter_is_not_reassigned_silently(self):
+        with TTFont(self.source) as font:
+            name=font.getBestCmap()[ord('A')]
+            for table in font['cmap'].tables:
+                if table.isUnicode() and hasattr(table,'cmap'):table.cmap[ord('(')]=name
+            font.save(self.source)
+        result=self.compile();self.assertEqual(result['status'],'blocked',result)
+        self.assertIn('incompatible source glyph',result['reason'])
+
     def test_shaping_closure_survives_without_expanding_cmap(self):
         with TTFont(self.source) as font:
             order = list(font.getGlyphOrder())

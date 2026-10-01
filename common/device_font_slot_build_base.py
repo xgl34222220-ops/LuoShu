@@ -212,6 +212,12 @@ def transform_for_probe(slot: dict[str, Any], probe: str) -> dict[str, Any] | No
 def layout_probe_contract(font: TTFont, slot: dict[str, Any]):
     import universal_font_semantics as semantics
     initial = glyph_probe_map(font)
+    cmap = font.getBestCmap() or {}
+    for cp, probe in (slot.get("codepointProbeOverrides") or {}).items():
+        if int(cp) in cmap:
+            if transform_for_probe(slot, probe) is None:
+                raise BuildError("explicit codepoint probe lacks a verified transform")
+            initial[cmap[int(cp)]] = probe
     for cp, name in (font.getBestCmap() or {}).items():
         if any(a <= cp <= b for a,b in ((0x300,0x36F),(0x1AB0,0x1AFF),(0x1DC0,0x1DFF))):
             initial.setdefault(name, "latinX")

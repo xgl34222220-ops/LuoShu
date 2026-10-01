@@ -318,7 +318,28 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
             if previous_cjk is not None:
                 filtered["cjk"] = previous_cjk
             profile["probes"] = filtered
+        # Tall paired delimiters must not inherit the median transform of
+        # operators such as + and =. Measure the same selected pairs on both
+        # fonts, with no filename/ROM constants and no change to line metrics.
+        brackets = sorted(cp for pair in ("()", "[]", "{}")
+                          if all(ord(char) in selected_points for char in pair)
+                          for cp in map(ord, pair))
+        if brackets:
+            selected_cmap = original.getBestCmap() or {}
+            bracket_names = {selected_cmap[cp] for cp in brackets}
+            if any(cp not in brackets and selected_cmap.get(cp) in bracket_names for cp in selected_points):
+                raise api.CompilerError("fixed static XML delimiter shares an incompatible source glyph")
+            for font, profile in ((stock_geometry, stock_profile), (original, source_profile)):
+                profile["probes"]["punctuationBrackets"] = api.template_engine.glyph_group(font, brackets)
+            needed.add("punctuationBrackets")
         geometry = api._geometry_plan(target, stock_profile, source_profile, weight)
+        if brackets:
+            geometry["transforms"]["punctuationBrackets"] = slot_plan.probe_transform(
+                "punctuationBrackets", stock_profile["probes"]["punctuationBrackets"],
+                source_profile["probes"]["punctuationBrackets"], source_profile["metrics"]["unitsPerEm"],
+                stock_profile["metrics"]["unitsPerEm"], set(geometry["roles"]), geometry["lineContract"])
+            geometry["codepointProbeOverrides"] = {str(cp): "punctuationBrackets" for cp in brackets}
+            geometry["extraProbePoints"] = {"punctuationBrackets": brackets}
         for probe in sorted(needed):
             transform = slot_build.transform_for_probe(geometry, probe)
             if not transform or transform.get("status") != "ready":
@@ -359,7 +380,7 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
             "role": role, "coverage": coverage,
             "geometry": {key: copy.deepcopy(geometry.get(key)) for key in
                          ("roles", "lineContract", "transforms", "upemScale", "sharedProbePoints",
-                          "targetAdvancePolicy", "targetOutlinePolicy")},
+                          "targetAdvancePolicy", "targetOutlinePolicy", "codepointProbeOverrides", "extraProbePoints")},
             "staticMetadata": {"weightClass": int(original["OS/2"].usWeightClass),
                                "widthClass": int(original["OS/2"].usWidthClass),
                                "fsSelection": int(original["OS/2"].fsSelection),
@@ -437,6 +458,15 @@ def _validate_saved(path, prepared):
                                        {"yMin": low, "yMax": high, "minDescent": floor, "maxAscent": ceiling})
         for name, points in (prepared["stockProfile"].get("sharedProbePoints") or {}).items():
             profile["probes"][name] = api.template_engine.glyph_group(font, points)
+        for name, points in (prepared["geometry"].get("extraProbePoints") or {}).items():
+            profile["probes"][name] = api.template_engine.glyph_group(font, points)
+            actual = profile["probes"][name]
+            expected = prepared["stockProfile"]["probes"][name]
+            if (actual.get("centerY") is None or expected.get("centerY") is None
+                    or abs(actual["centerY"] - expected["centerY"]) / float(line["unitsPerEm"]) > api.MAX_POST_ALIGNMENT_EM
+                    or not expected.get("height") or not actual.get("height")
+                    or abs(actual["height"] - expected["height"]) / expected["height"] > api.MAX_POST_HEIGHT_DELTA):
+                raise api.CompilerError("fixed static XML delimiter alignment exceeds its limit")
         for name in prepared["contract"]["geometry"]["requiredProbes"]:
             sample = slot_plan.select_probe(profile["probes"], name)
             if int(sample.get("boundsHits") or 0) < slot_plan.minimum_hits(name):

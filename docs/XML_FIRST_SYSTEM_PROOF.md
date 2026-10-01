@@ -402,3 +402,14 @@ full instances with MVAR/HVAR/VVAR. These are host regression results until the
 next native run establishes the actual scan cost. No font mount or consumer test
 ran in this failed preparation experiment; task cleanup reported no remaining
 processes, the owned directory was removed, and the VM was destroyed.
+
+The following native run, [36885696461](https://github.com/xgl34222220-ops/LuoShu/actions/runs/36885696461)
+(b687b106), verified the AndroidClock archive and entered compilation. Actual
+Android scan time decreased to 30.027 seconds, with child peak RSS 105,424 KiB.
+Compilation took 36.224 seconds but stopped after 8 ready artifacts: the first
+failure was SourceSansPro-SemiBold, whose tall delimiter glyphs reached -287
+against the sealed -250 line floor. Another 29 artifacts were explicitly skipped
+after that atomic failure. This is not a passed native prepare or phone result.
+Original bytes, Enforcing state, process cleanup, owned directory removal and VM
+teardown were verified. The delimiters require their own measured OEM geometry;
+shifting the whole operator/punctuation group cannot fit both its top and bottom.
