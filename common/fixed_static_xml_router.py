@@ -14,6 +14,8 @@ import universal_font_plan
 
 SCHEMA = 'fixed-static-xml-route-plan-v1'
 REVISION = 1
+STYLE_REVISION = 2
+STYLE_WEIGHTS = tuple(sorted(set(range(100, 1000, 100)) | {450, 520}))
 REPRESENTATION = 'fixed-static-xml-v1'
 ERROR = legacy.RouterError
 SHA = re.compile(r'^[a-f0-9]{64}$')
@@ -34,13 +36,14 @@ def _artifact(original):
     return result
 
 
-def _eligible(operation):
+def _eligible(operation, expand_styles=False):
     node = operation['node']; target = operation['routeTarget']
     attrs = node.get('familyAttributes') or {}
     implicit_axes = set(str((node.get('fontAttributes') or {}).get('supportedAxes') or '').replace(' ', '').split(','))
     return (universal_font_plan.is_fixed_composite_selection(target.get("source") or {})
             and node.get('style') == 'normal'
-            and not implicit_axes.intersection({'ital','slnt'})
+            and (implicit_axes in ({''},{'wght'}) or
+                 (expand_styles and implicit_axes == {'wght','ital'}))
             and not attrs.get('variant')
             and str(operation.get('role')) in {'ui-sans', 'latin', 'digit', 'cjk'}
             and not str(operation.get('targetPath')).startswith('/data/'))
@@ -56,10 +59,12 @@ def _root_for_document(source_xml):
 def _id(plan):
     docs = copy.deepcopy(plan['documents'])
     for doc in docs.values():doc.pop('sourcePath', None)
-    return 'sha256:' + legacy._canonical_hash({'schema':SCHEMA,'revision':REVISION,
+    semantic={'schema':SCHEMA,'revision':plan['routeRevision'],
         'legacyRouteId':plan['legacyRoutePlan']['routeId'],'documents':docs,
         'retainedOriginals':plan['retainedOriginals'],'summary':plan['summary'],
-        'dynamicFontGeneration':plan['dynamicFontGeneration']})
+        'dynamicFontGeneration':plan['dynamicFontGeneration']}
+    if plan.get('styleExpansion'):semantic['styleExpansion']=plan['styleExpansion']
+    return 'sha256:' + legacy._canonical_hash(semantic)
 
 
 def _bindings(font_plan, source_xml, records):
@@ -92,20 +97,22 @@ def _dynamic_generation():
     return result
 
 
-def build_route_plan(font_plan, base):
+def build_route_plan(font_plan, base, *, expand_styles=False):
     legacy.validate_route_plan(base,font_plan)
     constraints=font_plan.get('constraints') or {}
     if constraints.get('dataFontFileCount') or constraints.get('dataFontConfigReferenceCount') or constraints.get('dynamicDiscoveryComplete') is False:
         raise ERROR('fixed-static original fallback has unresolved or active dynamic font overrides')
     plan=copy.deepcopy(base)
     plan.update(schema=SCHEMA,routeRevision=REVISION,legacyRoutePlan=copy.deepcopy(base),retainedOriginals={},dynamicFontGeneration=_dynamic_generation())
+    if expand_styles:
+        plan.update(routeRevision=STYLE_REVISION,styleExpansion={'policy':'fixed-normal-original-italic-v1','weights':list(STYLE_WEIGHTS)})
     static_count=0;clone_count=0
     for source_xml,document in plan['documents'].items():
-        selected=[op for op in document['operations'] if _eligible(op)]
+        selected=[op for op in document['operations'] if _eligible(op,expand_styles)]
         document['fallbackCopies']=[];document['retainedReferences']=[]
         document['representationDeferrals']=[]
         for op in document['operations']:
-            if universal_font_plan.is_fixed_composite_selection(op.get('routeTarget',{}).get('source') or {}) and not _eligible(op):
+            if universal_font_plan.is_fixed_composite_selection(op.get('routeTarget',{}).get('source') or {}) and not _eligible(op,expand_styles):
                 axes=str((op['node'].get('fontAttributes') or {}).get('supportedAxes') or '')
                 reason='implicit-variable-style' if any(tag in axes.split(',') for tag in ('ital','slnt')) else 'unsupported-role-style-or-variant'
                 document['representationDeferrals'].append({'ordinal':op['node']['ordinal'],'targetPath':op['targetPath'],'reason':reason})
@@ -162,21 +169,55 @@ def build_route_plan(font_plan, base):
             document['fallbackCopies'].append({'anchorOrdinal':ordinals[0],
                 'insideFamilyList':parents[family] is not root,'familyName':family_name,'effectiveFamilyAttributes':copy.deepcopy(records[ordinals[0]]['familyAttributes']),'references':original_refs})
             clone_count+=1
+        if expand_styles:
+            expanded=[];document['styleExpansions']=[]
+            for operation in document['operations']:
+                node=operation['node'];tags=set(str((node.get('fontAttributes') or {}).get('supportedAxes') or '').replace(' ','').split(','))
+                if operation.get('operation')!='replace-fixed-static-reference' or tags not in ({'wght'},{'wght','ital'}):
+                    expanded.append(operation);continue
+                ordinal=node['ordinal'];family=parents[fonts[ordinal]];group=fonts[ordinal].get('fallbackFor')
+                if any(f is not fonts[ordinal] and legacy._local(f.tag)=='font' and f.get('fallbackFor')==group for f in family):
+                    raise ERROR('implicit style expansion has ambiguous same-group peers')
+                originals=[r for f in document['fallbackCopies'] for r in f['references'] if r['ordinal']==ordinal]
+                if len(originals)!=1:raise ERROR('implicit style expansion lacks one sealed original')
+                document['styleExpansions'].append({'ordinal':ordinal,'weights':list(STYLE_WEIGHTS),
+                    'preserveItalic':'ital' in tags,'originalId':originals[0]['originalId'],
+                    'nodeFingerprint':operation['nodeFingerprint']})
+                for weight in STYLE_WEIGHTS:
+                    op=copy.deepcopy(operation);artifact=op['artifact']
+                    axes=[copy.deepcopy(a) for a in artifact['originalStockAxes'] if a['tag'] not in tags]
+                    for tag,value in [('wght',weight)]+([('ital',0)] if 'ital' in tags else []):
+                        axes.append({'tag':tag,'stylevalue':str(value),'attributes':{'tag':tag,'stylevalue':str(value)}})
+                    artifact.update(requiredWeight=weight,originalStockAxes=axes,
+                                    styleExpansion={'policy':'fixed-normal-original-italic-v1','declaredWeight':weight,'implicitAxes':sorted(tags)})
+                    artifact.pop('artifactId',None);artifact.pop('suggestedFileName',None)
+                    key=legacy._canonical_hash(artifact);artifact['artifactId']='ufc:'+key[:32];artifact['suggestedFileName']='LuoShu-Fixed-'+key[:32]+'.ttf'
+                    op['expandedWeight']=weight;expanded.append(op)
+                static_count+=len(STYLE_WEIGHTS)-1
+            document['operations']=expanded
     plan['summary'].update(fixedStaticOperationCount=static_count,retainedOriginalCount=len(plan['retainedOriginals']),fallbackFamilyCount=clone_count,representationDeferralCount=sum(len(d['representationDeferrals']) for d in plan['documents'].values()))
+    if expand_styles:
+        plan['summary'].update(styleWeightDomain='discrete-declared-weights',declaredStyleWeights=list(STYLE_WEIGHTS),
+            preservedOriginalStyleCount=sum(len(e['weights']) for d in plan['documents'].values()
+                                           for e in d.get('styleExpansions',[]) if e['preserveItalic']))
     if not static_count:raise ERROR('no eligible explicitly fixed upright XML route')
     plan['routeId']=_id(plan)
     return plan
 
 
 def validate_route_plan(plan,font_plan=None):
-    if plan.get('schema')!=SCHEMA or plan.get('routeRevision')!=REVISION or plan.get('state')!='planned' or plan.get('mutatesSystem') is not False:
+    if plan.get('schema')!=SCHEMA or plan.get('routeRevision') not in {REVISION,STYLE_REVISION} or plan.get('state')!='planned' or plan.get('mutatesSystem') is not False:
         raise ERROR('invalid fixed-static XML representation')
+    expansion=plan.get('routeRevision')==STYLE_REVISION
+    if expansion and plan.get('styleExpansion')!={'policy':'fixed-normal-original-italic-v1','weights':list(STYLE_WEIGHTS)}:
+        raise ERROR('invalid fixed-static style expansion policy')
+    if not expansion and plan.get('styleExpansion'):raise ERROR('unexpected style expansion on old representation')
     base=plan.get('legacyRoutePlan')
     if not isinstance(base,dict):raise ERROR('missing original legacy route proof')
     legacy.validate_route_plan(base,font_plan)
     if plan.get('routeId')!=_id(plan):raise ERROR('fixed-static route identity changed')
     if font_plan is not None:
-        expected=build_route_plan(font_plan,base)
+        expected=build_route_plan(font_plan,base,expand_styles=expansion)
         if expected!=plan:raise ERROR('fixed-static route differs from sealed source plan')
     for document in plan['documents'].values():
         for op in document['operations']:
@@ -219,20 +260,41 @@ def render_document(plan,source_xml,artifact_map,output,bindings):
                 if font.get('fallbackFor') not in (None,fallback['familyName']):raise ERROR('ambiguous named fallbackFor contract')
                 font.set('fallbackFor',fallback['familyName'])
         clones.append((parents[family],family,clone))
+    expanded_fonts={}
     for operation in doc['operations']:
         ordinal=operation['node']['ordinal']
         if records[ordinal]['fingerprint']!=operation['nodeFingerprint']:raise ERROR('fixed XML node changed')
-        font=fonts[ordinal];identity=operation['artifact']['artifactId']
+        font=copy.deepcopy(fonts[ordinal]) if 'expandedWeight' in operation else fonts[ordinal]
+        identity=operation['artifact']['artifactId']
         if operation.get('operation')=='replace-fixed-static-reference':
             binding=_compiled_binding(operation,artifact_map,bindings);font.text=binding['fileName'];font.set('index','0')
             for key in ('postScriptName','postscriptName','name','supportedAxes'):font.attrib.pop(key,None)
             font.set('postScriptName',binding['postScriptName'])
             for child in list(font):
                 if legacy._local(child.tag)=='axis':font.remove(child)
+            if 'expandedWeight' in operation:
+                font.set('weight',str(operation['expandedWeight']));font.set('style','normal')
+                expanded_fonts.setdefault(ordinal,[]).append(font)
         else:
             name=artifact_map.get(identity)
             if not name or not legacy.SAFE_FILE_RE.fullmatch(name):raise ERROR('missing legacy compiled font')
             font.text=name
+    for expansion in doc.get('styleExpansions',[]):
+        ordinal=expansion['ordinal'];original=fonts[ordinal];parent=parents[original]
+        children=expanded_fonts.pop(ordinal,[])
+        if len(children)!=len(expansion['weights']):raise ERROR('incomplete normal style expansion')
+        if expansion['preserveItalic']:
+            for weight in expansion['weights']:
+                font=copy.deepcopy(original);font.attrib.pop('supportedAxes',None)
+                font.set('weight',str(weight));font.set('style','italic')
+                font.text=plan['retainedOriginals'][expansion['originalId']]['fileName']
+                for child in list(font):
+                    if legacy._local(child.tag)=='axis' and child.get('tag') in {'wght','ital'}:font.remove(child)
+                ET.SubElement(font,'axis',tag='wght',stylevalue=str(weight));ET.SubElement(font,'axis',tag='ital',stylevalue='1')
+                children.append(font)
+        position=list(parent).index(original);parent.remove(original)
+        for offset,font in enumerate(children):parent.insert(position+offset,font)
+    if expanded_fonts:raise ERROR('unbound style expansion')
     for ref in doc.get('retainedReferences',[]):
         if records[ref['ordinal']]['fingerprint']!=ref['nodeFingerprint']:raise ERROR('retained XML node changed')
         fonts[ref['ordinal']].text=plan['retainedOriginals'][ref['originalId']]['fileName']

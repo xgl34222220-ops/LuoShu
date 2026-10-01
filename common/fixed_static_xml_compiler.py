@@ -106,7 +106,26 @@ def preflight_unit(unit, stock_paths, allow_live_stock):
     face = artifact["originalStockFaceIndex"]
     verify_original_face(target, stock, face, metadata_only=True)
     with api._open_face(stock, face, lazy=True) as font:
+        _verify_style_expansion(artifact, font)
         return _original_location(font, artifact["originalStockAxes"], api._int(artifact.get("requiredWeight"), 400))[1]
+
+
+def _verify_style_expansion(artifact, font):
+    expansion = artifact.get("styleExpansion")
+    if expansion is None:
+        return
+    api = _api()
+    if (expansion.get("policy") != "fixed-normal-original-italic-v1"
+            or expansion.get("declaredWeight") != artifact.get("requiredWeight")
+            or expansion.get("implicitAxes") not in (["wght"], ["ital", "wght"])):
+        raise api.CompilerError("invalid explicit style expansion")
+    axes = {a.axisTag: a for a in font["fvar"].axes} if "fvar" in font else {}
+    if "wght" not in axes:
+        raise api.CompilerError("implicit weight expansion requires an actual OEM weight axis")
+    if "ital" in expansion["implicitAxes"]:
+        italic = axes.get("ital")
+        if italic is None or not float(italic.minValue) <= 0 < 1 <= float(italic.maxValue):
+            raise api.CompilerError("original OEM face cannot preserve exact italic axis state")
 
 
 def _profile_contract(profile):
@@ -220,6 +239,7 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
         stock_face = artifact["originalStockFaceIndex"]
         verified = verify_original_face(target, stock, stock_face)
         stock_font = api._open_face(stock, stock_face, lazy=True)
+        _verify_style_expansion(artifact, stock_font)
         original_ps = str(artifact.get("originalStockPostScriptName") or "")
         # AOSP FontListParser uses XML postScriptName as a font-update file
         # lookup key, independently from the TTC index. Its CJK configuration

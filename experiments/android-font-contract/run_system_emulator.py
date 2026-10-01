@@ -8,7 +8,8 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 PACKAGE='io.github.xgl34222220.luoshu.fontcontract'
-p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');p.add_argument('--explicit-style-matrix',action='store_true');a=p.parse_args()
+if a.explicit_style_matrix and not a.production_payload:raise SystemExit('style matrix requires production payload')
 if os.environ.get('LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED')!='true':
  raise SystemExit('disposable system mutation not authorized for this run')
 a.output.mkdir(parents=True,exist_ok=True)
@@ -58,6 +59,16 @@ def probe(name, extra_args=None):
     raise RuntimeError('actual mapped font buffer differs from compiled artifact: '+role)
  return r
 
+def style_probe(name,cases,expected_status):
+ import base64
+ raw=base64.b64encode(json.dumps(cases).encode()).decode()
+ log=adb('shell','am','instrument','-w','-e','phase','style-matrix','-e','styleCases',raw,PACKAGE+'/.Runner',timeout=180)
+ (a.output/(name+'.txt')).write_bytes(log)
+ result=adb('exec-out','run-as',PACKAGE,'cat','files/report-style-matrix.json')
+ (a.output/(name+'.json')).write_bytes(result);parsed=json.loads(result)
+ if parsed.get('status')!=expected_status:raise RuntimeError(parsed)
+ return parsed
+
 def rewrite(raw,ps):
  tree=ET.fromstring(raw);original_primary=[copy.deepcopy(f) for f in list(tree) if f.tag=='family' and f.get('name')=='sans-serif'];parents={child:parent for parent in tree.iter() for child in parent};count=0
  for font in tree.iter('font'):
@@ -86,6 +97,9 @@ try:
  assert adb('shell','getprop','ro.build.type').strip()==b'userdebug','not userdebug'
  assert adb('shell','getprop','ro.build.version.sdk').strip()==b'36','unexpected API'
  report['baseline']=probe('system-baseline');phase='snapshot';save()
+ if a.explicit_style_matrix:
+  from style_matrix import cases
+  report['styleBaseline']=style_probe('style-baseline',cases(),'observed-style-matrix')
  root()  # Authorized disposable VM; snapshot system-only configuration too.
  # Refuse collision using the actual command exit status.
  exists=subprocess.run(['adb','shell','test','-e',asset]).returncode==0
@@ -130,7 +144,8 @@ try:
   try:
    payload,manifest,expected_roles,case_report=build(work/'generated',
      {remote:a.output/('original-'+Path(remote).name) for remote in backups},captured,
-     report['baseline'],assets/'composite.ttf',generation,diagnostics=a.output,prove_cff2=True)
+     report['baseline'],assets/'composite.ttf',generation,diagnostics=a.output,prove_cff2=not a.explicit_style_matrix,
+     style_baseline=report.get('styleBaseline'))
   finally:
    signal.alarm(0);signal.signal(signal.SIGALRM,previous_alarm)
   (a.output/'production-pipeline.json').write_text(json.dumps(case_report,indent=2))
@@ -176,7 +191,10 @@ try:
  for logical,local in new_fonts.items():
   if read_system_file(logical)!=local.read_bytes():raise RuntimeError('new font bytes did not survive reboot: '+logical)
  (a.output/'applied-font-manager.txt').write_bytes(adb('shell','dumpsys','font'))
- report['applied']=probe('system-applied');report['takeover']='passed'
+ report['applied']=probe('system-applied')
+ if a.explicit_style_matrix:
+  report['styleApplied']=style_probe('style-applied',production['styleMatrixCases'],'passed-style-matrix')
+ report['takeover']='passed'
 except Exception as error:
  report['failure']=type(error).__name__+': '+str(error);report['failureTrace']=traceback.format_exc(limit=16);report['takeover']=report.get('takeover','failed')
 finally:
@@ -190,7 +208,15 @@ finally:
    root()  # adbd drops root across reboot; protected XML must be read as root.
    for remote,raw in backups.items():
     if read_system_file(remote)!=raw:raise RuntimeError('restored XML bytes differ: '+remote)
-   report['restoredProbe']=probe('system-restored');report['restored']=True
+   report['restoredProbe']=probe('system-restored')
+   if a.explicit_style_matrix:
+    restored_cases=[]
+    for old in report['styleBaseline']['cases']:
+     case={key:old[key] for key in ('family','weight','italic','sample')};font=old['actualFonts'][0]
+     case['expected']={'path':font['file'],'sha256':font['sha256'],'face':font['face'],
+      'fontWeight':font['weight'],'fontSlant':font['slant'],'raster':old['raster']};restored_cases.append(case)
+    report['styleRestored']=style_probe('style-restored',restored_cases,'passed-style-matrix')
+   report['restored']=True
   except Exception as error:report['restorationFailure']=type(error).__name__+': '+str(error)
  phase='finished';report['vmDisposal']='emulator action teardown and ephemeral runner deletion';save()
  for name,cmd in [('logcat',['logcat','-d','-t','400']),('mounts',['shell','cat','/proc/mounts'])]:

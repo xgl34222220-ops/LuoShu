@@ -106,6 +106,57 @@ public final class Runner extends Instrumentation {
         MessageDigest digest=MessageDigest.getInstance("SHA-256");java.nio.ByteBuffer data=font.getBuffer().duplicate();data.rewind();digest.update(data);
         StringBuilder result=new StringBuilder();for(byte value:digest.digest())result.append(String.format(Locale.ROOT,"%02x",value&255));return result.toString();
     }
+    private void styleMatrixPhase() throws Exception {
+        JSONArray cases=new JSONArray(new String(Base64.getDecoder().decode(arguments.getString("styleCases")),StandardCharsets.UTF_8));
+        require(cases.length()>0&&cases.length()<=64,"invalid style matrix size");
+        JSONArray results=new JSONArray();boolean allVerified=true;
+        for(int c=0;c<cases.length();c++) {
+            JSONObject item=cases.getJSONObject(c);int weight=item.getInt("weight");boolean italic=item.getBoolean("italic");
+            String family=item.getString("family"),sample=item.getString("sample");
+            require(weight>=1&&weight<=1000,"invalid style matrix weight");
+            require(Arrays.asList("sans-serif","sans-serif-condensed","roboto").contains(family),"unsupported matrix family");
+            require(Arrays.asList("A","1","中","Ω","😀").contains(sample),"unsupported matrix sample");
+            Typeface selected=Typeface.create(Typeface.create(family,Typeface.NORMAL),weight,italic);
+            String raster=draw(selected,sample,null);Paint paint=new Paint();paint.setTypeface(selected);paint.setTextSize(72);
+            android.graphics.text.PositionedGlyphs glyphs=android.graphics.text.TextRunShaper.shapeTextRun(sample,0,sample.length(),0,sample.length(),0,0,false,paint);
+            require(glyphs.glyphCount()>0,"empty matrix glyph run");JSONArray actual=new JSONArray();
+            for(int g=0;g<glyphs.glyphCount();g++) {
+                Font font=glyphs.getFont(g);JSONObject found=new JSONObject();
+                found.put("file",String.valueOf(font.getFile()));found.put("face",font.getTtcIndex());
+                found.put("weight",font.getStyle().getWeight());found.put("slant",font.getStyle().getSlant());
+                found.put("sha256",fontBufferHash(font));found.put("glyphId",glyphs.getGlyphId(g));
+                JSONObject axes=new JSONObject();if(font.getAxes()!=null)for(android.graphics.fonts.FontVariationAxis axis:font.getAxes())axes.put(axis.getTag(),axis.getStyleValue());
+                found.put("axes",axes);actual.put(found);
+            }
+            JSONObject result=new JSONObject(item.toString());result.put("raster",raster);result.put("actualFonts",actual);
+            JSONObject expected=item.optJSONObject("expected");
+            if(expected==null){allVerified=false;result.put("verification","observation-only");}
+            else {
+                require(actual.length()==1,"unexpected matrix glyph splitting");JSONObject font=actual.getJSONObject(0);
+                require(font.getString("file").equals(expected.getString("path")),"matrix source path differs: "+item);
+                require(font.getString("sha256").equals(expected.getString("sha256")),"matrix source bytes differ: "+item);
+                require(font.getInt("face")==expected.getInt("face"),"matrix face differs: "+item);
+                require(font.getInt("weight")==expected.getInt("fontWeight"),"matrix declared font weight differs: "+item);
+                require(font.getInt("slant")==expected.getInt("fontSlant"),"matrix declared font slant differs: "+item);
+                if(expected.has("raster"))require(raster.equals(expected.getString("raster")),"matrix preserved raster differs: "+item);
+                else {
+                    Font.Builder builder=new Font.Builder(new File(expected.getString("path"))).setTtcIndex(expected.getInt("face"))
+                        .setWeight(expected.getInt("fontWeight")).setSlant(expected.getInt("fontSlant"));
+                    JSONObject coordinates=expected.getJSONObject("axes");ArrayList<android.graphics.fonts.FontVariationAxis> axes=new ArrayList<>();
+                    for(Iterator<String> it=coordinates.keys();it.hasNext();){String tag=it.next();axes.add(new android.graphics.fonts.FontVariationAxis(tag,(float)coordinates.getDouble(tag)));}
+                    builder.setFontVariationSettings(axes.toArray(new android.graphics.fonts.FontVariationAxis[0]));
+                    Typeface reference=new Typeface.CustomFallbackBuilder(new FontFamily.Builder(builder.build()).build())
+                        .setStyle(new FontStyle(weight,italic?FontStyle.FONT_SLANT_ITALIC:FontStyle.FONT_SLANT_UPRIGHT)).build();
+                    require(raster.equals(draw(reference,sample,null)),"matrix expected glyph/shape differs: "+item);
+                }
+                result.put("verification","passed");
+            }
+            results.put(result);
+        }
+        report.put("cases",results);report.put("status",allVerified?"passed-style-matrix":"observed-style-matrix");
+        Files.write(new File(root,"report-style-matrix.json").toPath(),report.toString(2).getBytes(StandardCharsets.UTF_8));
+        Bundle output=new Bundle();output.putString("stream",report.toString());finish(Activity.RESULT_OK,output);
+    }
     private String drawOriginalAxis(JSONObject item,double value) throws Exception {
         Font font=new Font.Builder(new File(item.getString("path"))).setTtcIndex(item.getInt("face"))
             .setWeight(400).setSlant(FontStyle.FONT_SLANT_UPRIGHT)
@@ -185,6 +236,7 @@ public final class Runner extends Instrumentation {
             report.put("phase",phase);report.put("sdk",Build.VERSION.SDK_INT);report.put("fingerprint",Build.FINGERPRINT);
             report.put("moduleMountTested",false);report.put("systemFontConfigMutated",false);report.put("hookUsed",false);
             if(phase.equals("stock-axis")){stockAxisPhase();return;}
+            if(phase.equals("style-matrix")){styleMatrixPhase();return;}
             if(phase.startsWith("system-")){systemPhase(phase);return;}
             JSONObject fixture;try(InputStream in=context.getAssets().open("fixture.json")){fixture=new JSONObject(new String(in.readAllBytes(),java.nio.charset.StandardCharsets.UTF_8));}
             File composite=asset("composite.ttf"),latin=asset("latin.ttf"),digit=asset("digit.ttf"),cjk=asset("cjk.ttf");

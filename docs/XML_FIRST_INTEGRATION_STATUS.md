@@ -38,9 +38,9 @@ router retains its text-only invariants.
 | Static compiler | 19 focused host tests | Synthetic fonts; no phone performance claim |
 | Exact XML representation | 11 host tests | Actual platform parser still covered separately |
 | Planner → compiler → payload → runtime | 10 host tests | Includes originals/tamper/membership/dynamic change; consumer remains pending |
-| Existing source gate | Passed at protected-family snapshot; PostScript-key correction targeted regressions rerun | CI rerun required on final snapshot |
+| Existing source gate | Full local and exact-head candidate CI passed at `9643c61` | Host and packaged-runtime checks; no OEM device claim |
 | API36 system proof | Earlier `2eaa285`, separate experimental rewrite | Not this production generator |
-| Production-output API36 proof | Next experiment uses actual production modules and root-captured SDK fonts | Host namespace proof uses a test-only capture model; not Android Python execution |
+| Production-output API36 proof | `9643c61`, run `36803617022`: default A/1/中 provenance, reboot, exact configuration and raster restoration passed | Mixed representation: CJK uses new static route; default Latin/digit use existing adapter. Host compiler, not Android Python or root-manager mounting |
 
 ## Explicit gaps
 
@@ -116,3 +116,62 @@ StemSnapH present. The native comparison tries the optimized path first and reco
 full exception chains, so a format incompatibility fails before the expensive
 reference measurement. Whole-plan fatal conditions also precede all static-route
 measurements; a blocked-plan regression requires zero measurement calls.
+
+## Production-output result (2026-10-01)
+
+[Run 36803617022](https://github.com/xgl34222220-ops/LuoShu/actions/runs/36803617022)
+passed on exact commit `9643c61a053d713b659ef65398ae2895fe4b26b4`.
+Production planner, compiler and deployment generated 60 artifacts from 58
+fixed-static operations and the retained adapter routes, yielding 44 unique
+compiled files and a 71,564,763-byte payload including immutable originals.
+After actual AOSP/API36 reboot, default A/1/中 used the expected artifact file,
+face and byte hash. A/1/中 pixels changed; Ω and emoji pixels did not. Restoring
+both original XML files and rebooting restored all five raster hashes and font
+provenance exactly. Emulator termination is recorded in the completed job log.
+
+The real SDK CFF2 font had 65,535 glyphs. At weight 650, full instancing took
+141.897 seconds; the 192-glyph probe instance took 0.981 seconds. Complete probe
+profiles and selected vertical metrics/origins matched; input bytes were unchanged.
+Total host preparation was 267.796 seconds, including that full comparison.
+Arithmetic subtraction gives 125.899 seconds excluding the full reference, or
+124.918 seconds excluding both measured comparison paths. These are not separate
+benchmark runs. Trace-observed measurement of 58 routes took 55.077 seconds and
+processing of 60 artifacts took 28.029 seconds; remaining work includes planning,
+source profiling, original copies and deployment validation. No phone timing is
+inferred from these numbers.
+
+The three representation deferrals are `font_fallback.xml` nodes 0, 6 and 7:
+`sans-serif`, `sans-serif-condensed` and `roboto`, each with implicit
+`supportedAxes="wght,ital"`. Default Latin and digits therefore used the existing
+UF original-shell adapter; Chinese used the new standalone fixed-static asset.
+This is a passing mixed production pipeline, not full new-representation coverage.
+
+Next gates remain explicit weight/style expansion with actual default consumer
+proof (normal/bold/italic/bold-italic and intermediate weights), production module
+asset mounting before FontManager starts, cancellation/reapply/OTA recovery, and
+an App consumer-evidence handoff. The ordinary phone bridge remains opt-in/off.
+
+## Opt-in style expansion under native verification
+
+Route revision 2 is currently selected only by the explicit CI style experiment.
+The ordinary router call continues producing revision 1. Revision 2 expands an
+otherwise eligible implicit wght node into 100–900 declarations plus 450 and 520.
+Each normal asset is measured against its own original reference coordinate.
+For a real wght+ital original, explicit italic references keep the sealed OEM
+container with weight and ital=1 axes. Pure wght CJK fonts retain platform
+synthetic italic behavior; they are not relabeled as genuine italic donors.
+
+This distinction follows AOSP
+[SystemFonts.resolveVarFamilyType](https://github.com/aosp-mirror/platform_frameworks_base/blob/master/graphics/java/android/graphics/fonts/SystemFonts.java):
+a family containing a static entry no longer receives the automatic variable
+family treatment. Retaining one implicit italic entry beside static normals
+therefore would not establish all requested style/weight behavior.
+
+Five host regressions exercise production compile/deployment, unchanged original
+italic bytes, weight-only behavior, missing italic capability, ambiguous peers and
+tampered mapping. The CI-only public API consumer adds 54 bounded cases spanning
+default and named families, 100/300/400/450/520/700/900 requests, both styles, and
+protected Greek/emoji. Every passing case must have an expected path, SHA, face,
+FontStyle and raster contract. An observation-only result cannot pass this gate.
+This native matrix has not run yet. Discrete declarations do not claim continuous
+weight coverage, and retained OEM italics are explicitly partial donor coverage.

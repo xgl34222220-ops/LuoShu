@@ -97,7 +97,7 @@ def verify_actual_probe_equivalence(stock_paths, source, diagnostics):
     return {'state':'not-applicable','reason':'no CFF2 variable SDK target'}
 
 
-def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostics=None, prove_cff2=False):
+def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostics=None, prove_cff2=False, style_baseline=None):
     work=Path(work);work.mkdir(parents=True,exist_ok=True);started=time.monotonic()
     trace_dir=Path(diagnostics) if diagnostics is not None else work;trace_dir.mkdir(parents=True,exist_ok=True)
     probe_proof=verify_actual_probe_equivalence(stock_paths,source,trace_dir) if prove_cff2 else None
@@ -137,7 +137,7 @@ def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostic
     # Namespace translation is confined to this experiment. Production calls
     # always read the real current mount/config state and contain no bypass.
     with patch.object(router,'_dynamic_generation',return_value=generation),patch.dict(os.environ,{'LUOSHU_STOCK_FONT_MAP':str(mapping),'LUOSHU_UNIVERSAL_MIX_STRICT':'1','LUOSHU_MIX_REQUEST_ID':'native-production-fixture','LUOSHU_SWITCH_PROGRESS_FILE':str(trace_dir/'production-progress.json')}):
-        route=router.build_route_plan(plan,base)
+        route=router.build_route_plan(plan,base,expand_styles=style_baseline is not None)
         artifacts=compiler.compile_all(plan,route,{k:Path(v) for k,v in stock_paths.items()},work/'compiled',False)
         (work/'artifacts.json').write_text(json.dumps(artifacts,ensure_ascii=False,indent=2))
         if not artifacts['summary']['deploymentReady']:
@@ -153,6 +153,7 @@ def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostic
         observed=baseline['actualDefaultFonts'][sample][0]
         candidates=[op for op in operations if op['targetPath']==observed['file']
                     and op['node']['index']==observed['ttcIndex'] and op['node']['weight']==400
+                    and op.get('expandedWeight',400)==400
                     and op['node']['style']=='normal' and (role=='Cjk' or op['node']['family']=='sans-serif')]
         if not candidates:raise RuntimeError('no explicit production default route for '+role)
         op=candidates[0];item=by_id[op['artifact']['artifactId']]
@@ -168,4 +169,12 @@ def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostic
             'deferredRepresentationCount':route['summary']['representationDeferralCount'],
             'payloadBytes':sum(f['bytes'] for f in manifest['files']),
             'expectedDefaultConsumers':expected,'deploymentId':manifest['deploymentId']}
+    if style_baseline is not None:
+        sys.path.insert(0,str(ROOT/'experiments/android-font-contract'))
+        from style_matrix import expected_cases
+        report['styleMatrixCases']=expected_cases(route,artifacts,manifest,style_baseline)
+        report['explicitStyleRepresentationRevision']=route['routeRevision']
+        report['preservedOriginalStyleCount']=route['summary']['preservedOriginalStyleCount']
+        report['styleWeightDomain']=route['summary']['styleWeightDomain']
+        report['declaredStyleWeights']=route['summary']['declaredStyleWeights']
     return payload,manifest,expected,report
