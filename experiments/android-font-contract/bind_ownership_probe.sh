@@ -12,4 +12,8 @@ export LD_LIBRARY_PATH="$PYTHONHOME/lib:$PYTHONHOME/lib/python3.14/lib-dynload"
 export TMPDIR="$mod/bind-namespace"
 mkdir "$TMPDIR"
 "$PYTHONHOME/bin/luoshu-python" "$mod/module_namespace_verify.py" "$TMPDIR" isolate
-sh "$mod/scripts/bind_ownership_namespace_test.sh" --inside
+set +e
+sh -x "$mod/scripts/bind_ownership_namespace_test.sh" --inside > "$mod/bind-ownership-trace.txt" 2>&1
+rc=$?
+tail -80 "$mod/bind-ownership-trace.txt"
+exit "$rc"

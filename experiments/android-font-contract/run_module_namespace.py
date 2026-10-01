@@ -105,7 +105,10 @@ exit "$rc"
   if direct is not None:
    adb('shell','mkdir',REMOTE+'/scripts')
    adb('push',str(Path(__file__).resolve().parents[2]/'scripts/bind_ownership_namespace_test.sh'),REMOTE+'/scripts/bind_ownership_namespace_test.sh')
-   bind_log=adb('shell','env','LUOSHU_PARENT_MOUNT_NAMESPACE='+parent,'timeout','-k','5','60','unshare','-m','sh',REMOTE+'/bind_ownership_probe.sh',REMOTE,timeout=80)
+   try:
+    bind_log=adb('shell','env','LUOSHU_PARENT_MOUNT_NAMESPACE='+parent,'timeout','-k','5','60','unshare','-m','sh',REMOTE+'/bind_ownership_probe.sh',REMOTE,timeout=80)
+   finally:
+    adb('pull',REMOTE+'/bind-ownership-trace.txt',str(output/'android-bind-ownership-trace.txt'),check=False)
    (output/'android-bind-ownership.txt').write_bytes(bind_log)
    if b'bind_ownership_namespace_test: PASS' not in bind_log:raise RuntimeError('Android bind ownership proof did not complete')
    module_report['bindOwnershipPrivateNamespaceTested']=True
