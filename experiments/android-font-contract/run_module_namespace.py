@@ -1,10 +1,36 @@
 """Stage a real production payload in the approved disposable Android VM."""
-import base64,copy,hashlib,json,shutil,tempfile
+import base64,copy,hashlib,json,shutil,tempfile,math
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 REMOTE='/data/local/tmp/luoshu-module-namespace'
 
-def direct_contract(manifest, cases, baseline):
+def original_direct_axes(case, observed, metadata, xml_bytes):
+ """Construct an explicit Font.Builder location from the frozen XML contract.
+ Font.getAxes reports declared XML axes, not implicit supportedAxes selection.
+ """
+ matches=[m for m in metadata if m['path']==observed['file'] and m['face']==observed['face'] and m['sha256']==observed['sha256']]
+ if len(matches)!=1:raise RuntimeError('direct original face lacks unique sealed axis metadata')
+ nodes=[]
+ for family in ET.fromstring(xml_bytes).findall('family'):
+  if family.get('name')!=case['family']:continue
+  for node in family.findall('font'):
+   if (node.text or '').strip()==Path(observed['file']).name and int(node.get('index','0'))==observed['face']:nodes.append(node)
+ if len(nodes)!=1:raise RuntimeError('direct original font lacks unique frozen family node')
+ node=nodes[0];supported={x.strip() for x in node.get('supportedAxes','').split(',') if x.strip()}
+ if supported-{'wght','ital'}:raise RuntimeError('unsupported direct original implicit axes')
+ axes={a.get('tag'):float(a.get('stylevalue')) for a in node.findall('axis')}
+ if len(axes)!=len(node.findall('axis')):raise RuntimeError('duplicate direct original XML axes')
+ for tag,value in axes.items():
+  if not math.isfinite(value) or observed.get('axes',{}).get(tag)!=value:raise RuntimeError('direct original declared axes differ from observed XML axes')
+ selected={'wght':case['weight'],'ital':1 if case['italic'] else 0}
+ for tag in supported:
+  domain=matches[0]['axes'].get(tag)
+  if domain is None:raise RuntimeError('declared implicit axis is absent from sealed face')
+  axes[tag]=max(domain['min'],min(domain['max'],selected[tag]))
+ return axes
+
+def direct_contract(manifest, cases, baseline,metadata=None,xml_bytes=None):
  files=[{'path':f['logicalPath'],'sha256':f['sha256']} for f in manifest['files'] if f['kind']!='xml']
  known={f['path'] for f in files};selected=[]
  base={(x['family'],x['weight'],x['italic'],x['sample']):x for x in baseline['cases']}
@@ -13,7 +39,12 @@ def direct_contract(manifest, cases, baseline):
   if case['expected']['path'] not in known:continue
   item=copy.deepcopy(case)
   if 'axes' not in item['expected']:
-   item['expected']['axes']=base[(case['family'],case['weight'],case['italic'],case['sample'])]['actualFonts'][0]['axes']
+   observed=base[(case['family'],case['weight'],case['italic'],case['sample'])]['actualFonts'][0]
+   if metadata is None or xml_bytes is None:raise RuntimeError('direct original glyph needs frozen XML and axis metadata')
+   item['expected']['axes']=original_direct_axes(case,observed,metadata,xml_bytes)
+   # Match the already-instanced outline's descriptor to avoid synthetic bold
+   # being added again by CustomFallbackBuilder at the requested weight.
+   item['expected']['referenceWeight']=case['weight']
   selected.append(item)
  emoji=base[('sans-serif',400,False,'😀')];font=emoji['actualFonts'][0]
  if font['file']!='/system/fonts/NotoColorEmoji.ttf':raise RuntimeError('unexpected protected emoji path')
@@ -66,11 +97,18 @@ rm -f "$err"
 exit "$rc"
 ''')
    for path in local.iterdir():adb('push',str(path),REMOTE+'/'+path.name)
-  for name in ('module_namespace_probe.sh','module_namespace_verify.py','module_global_probe.sh'):
+  for name in ('module_namespace_probe.sh','module_namespace_verify.py','module_global_probe.sh','bind_ownership_probe.sh'):
    adb('push',str(Path(__file__).with_name(name)),REMOTE+'/'+name)
   adb('shell','chmod','0755',REMOTE+'/observe-mount.sh',REMOTE+'/module_namespace_probe.sh')
   parent=adb('shell','readlink','/proc/self/ns/mnt').decode().strip()
   module_report['parentNamespace']=parent
+  if direct is not None:
+   adb('shell','mkdir',REMOTE+'/scripts')
+   adb('push',str(Path(__file__).resolve().parents[2]/'scripts/bind_ownership_namespace_test.sh'),REMOTE+'/scripts/bind_ownership_namespace_test.sh')
+   bind_log=adb('shell','env','LUOSHU_PARENT_MOUNT_NAMESPACE='+parent,'timeout','-k','5','60','unshare','-m','sh',REMOTE+'/bind_ownership_probe.sh',REMOTE,timeout=80)
+   (output/'android-bind-ownership.txt').write_bytes(bind_log)
+   if b'bind_ownership_namespace_test: PASS' not in bind_log:raise RuntimeError('Android bind ownership proof did not complete')
+   module_report['bindOwnershipPrivateNamespaceTested']=True
   if direct is None:
    raw=adb('shell','env','LUOSHU_PARENT_MOUNT_NAMESPACE='+parent,'timeout','-k','5','180','unshare','-m','/system/bin/sh',REMOTE+'/module_namespace_probe.sh',REMOTE,timeout=200)
   else:

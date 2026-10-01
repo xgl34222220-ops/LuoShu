@@ -179,7 +179,7 @@ try:
  if a.module_namespace_only or a.module_app_direct:
   phase='module-private-namespace';save()
   from run_module_namespace import run as run_namespace,direct_contract
-  direct=direct_contract(manifest,case_report['styleMatrixCases'],report['styleBaseline']) if a.module_app_direct else None
+  direct=direct_contract(manifest,case_report['styleMatrixCases'],report['styleBaseline'],metadata,backups['/system/etc/font_fallback.xml']) if a.module_app_direct else None
   report['moduleNamespace']=run_namespace(adb,root,reboot,read_system_file,payload,manifest,captured,backups,a.output,direct=direct)
   report['restored']=report['moduleNamespace'].get('rebootOriginalsUnchanged') is True
   report['takeover']='not-tested-direct-app-read-only' if a.module_app_direct else 'not-tested-namespace-only'

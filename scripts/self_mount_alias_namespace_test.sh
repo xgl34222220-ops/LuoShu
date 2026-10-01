@@ -23,6 +23,7 @@ _luoshu_self_log() { printf '%s\n' "$*" >> "$TMP/log"; }
 _luoshu_mount_cmd() { mount "$@"; }
 _luoshu_umount_cmd() { umount "$@"; }
 . "$ROOT/common/mount_self_atomic.sh"
+. "$ROOT/common/mount_self_backend.sh"
 set -e
 _lsme_state_root="$TMP/state"
 _lsme_mount_list="$TMP/state/mounts.list"
@@ -40,14 +41,14 @@ _lsme_failed=''
 _luoshu_atomic_finish_plan "$TMP/plan" "$TMP/payload" any
 test "$(wc -l < "$_lsme_mount_list" | tr -d ' ')" = 1
 cmp "$TMP/payload/product/fonts/Alias.ttf" "$TMP/visible/product/fonts/Alias.ttf"
-umount "$TMP/visible/system/fonts/Canonical.ttf"
+_luoshu_atomic_rollback "$_lsme_mount_list"
 # An actual overlay supplies independent regular files over a ROM alias. The
 # same logical names with distinct content must remain supported in this mode.
 printf different-output > "$TMP/payload/system/fonts/Alias.ttf"
 ln -s Canonical.ttf "$TMP/visible/system/fonts/Alias.ttf"
 # Match production: a read-only union of payload plus original directories.
 # This also avoids requiring the workspace filesystem to support an upperdir.
-mount -t overlay overlay -o "ro,lowerdir=$TMP/payload/system/fonts:$TMP/visible/system/fonts" "$TMP/visible/system/fonts"
+_luoshu_overlay_mount_dir "$TMP/payload/system/fonts" "$TMP/visible/system/fonts" system-fonts
 [ ! -L "$TMP/visible/system/fonts/Alias.ttf" ]
 printf '%s|%s|overlay\n' "$TMP/payload/system/fonts" "$TMP/visible/system/fonts" > "$TMP/overlay-plan"
 _lsme_failed=''
@@ -58,7 +59,6 @@ cmp "$TMP/payload/system/fonts/Alias.ttf" "$TMP/visible/system/fonts/Alias.ttf"
 printf product-conflict > "$TMP/payload/product/fonts/Alias.ttf"
 printf '%s|%s|overlay\n' "$TMP/payload/system/fonts" "$TMP/visible/system/fonts" > "$TMP/mixed-plan"
 printf '%s|%s|bind\n' "$TMP/payload/product/fonts" "$TMP/visible/product/fonts" >> "$TMP/mixed-plan"
-printf '%s\n' "$TMP/visible/system/fonts" > "$_lsme_mount_list"
 _lsme_failed=''
 if _luoshu_atomic_finish_plan "$TMP/mixed-plan" "$TMP/payload" any; then
     echo 'cross-partition bind invalidated an overlay contract' >&2; exit 1

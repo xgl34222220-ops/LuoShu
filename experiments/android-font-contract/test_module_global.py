@@ -12,6 +12,7 @@ class GlobalProbeTest(unittest.TestCase):
   if args[:2]==('shell','readlink'):return b'mnt:[1]\n'
   if args==('shell','getenforce'):return b'Enforcing\n'
   if args[-1:] == ('apply',) and self.apply_fails:raise RuntimeError('injected mount failure')
+  if 'unshare' in args:return b'bind_ownership_namespace_test: PASS'
   if args[:2]==('exec-out','run-as'):return b'{"status":"failed","error":"injected App refusal"}'
   if args[:2]==('exec-out','cat'):return b'{}'
   return b''
@@ -59,22 +60,41 @@ class GlobalProbeTest(unittest.TestCase):
 
 class DirectContractTest(unittest.TestCase):
  def test_roles_and_preserved_axes_are_explicit(self):
-  selected=[];baseline=[];files=[]
+  selected=[];baseline=[];files=[];metadata=[];nodes=[]
   for sample in ('A','1','中','Ω','😀'):
    path='/system/fonts/NotoColorEmoji.ttf' if sample=='😀' else '/system/fonts/LuoShu-'+sample+'.ttf'
    case={'family':'sans-serif','weight':400,'italic':False,'sample':sample}
    font={'file':path,'sha256':'hash','face':0,'weight':400,'slant':0,'axes':{'wdth':75}}
    baseline.append({**case,'actualFonts':[font],'raster':'pixels'})
    if sample!='😀':
+    metadata.append({'path':path,'face':0,'sha256':'hash','axes':{'wght':{'min':100,'max':900},'ital':{'min':0,'max':1}}})
+    nodes.append('<font supportedAxes="wght,ital">'+Path(path).name+'<axis tag="wdth" stylevalue="75"/></font>')
     files.append({'logicalPath':path,'kind':'font','sha256':'hash'})
     selected.append({**case,'expected':{'path':path,'sha256':'hash','face':0,'fontWeight':400,'fontSlant':0}})
-  result=runner.direct_contract({'files':files},selected,{'cases':baseline})
+  result=runner.direct_contract({'files':files},selected,{'cases':baseline},metadata,('<familyset><family name="sans-serif">'+''.join(nodes)+'</family></familyset>').encode())
   self.assertEqual({x['sample'] for x in result['cases']},{'A','1','中','Ω','😀'})
-  self.assertTrue(all(x['expected']['axes']=={'wdth':75} for x in result['cases']))
+  self.assertTrue(all(x['expected']['axes']=={'wdth':75,'wght':400,'ital':0} for x in result['cases'] if x['sample']!='😀'))
   self.assertNotIn('axes',selected[0]['expected'])
   self.assertEqual(len(result['files']),5)
  def test_missing_role_is_not_a_valid_direct_probe(self):
   emoji={'family':'sans-serif','weight':400,'italic':False,'sample':'😀','actualFonts':[{'file':'/system/fonts/NotoColorEmoji.ttf','sha256':'h','face':0,'weight':400,'slant':0,'axes':{}}],'raster':'r'}
   with self.assertRaisesRegex(RuntimeError,'lacks selected role'):runner.direct_contract({'files':[]},[],{'cases':[emoji]})
+
+class OriginalDirectAxesTest(unittest.TestCase):
+ def setUp(self):
+  self.case={'family':'sans-serif','weight':1,'italic':True}
+  self.font={'file':'/system/fonts/Original.ttf','face':0,'sha256':'sealed','axes':{'wdth':75}}
+  self.meta=[{'path':self.font['file'],'face':0,'sha256':'sealed','axes':{'wght':{'min':100,'max':900},'ital':{'min':0,'max':1}}}]
+  self.xml=b'<familyset><family name="sans-serif"><font supportedAxes="wght,ital">Original.ttf<axis tag="wdth" stylevalue="75"/></font></family></familyset>'
+ def test_implicit_weight_and_real_italic_are_explicit_and_clamped(self):
+  self.assertEqual(runner.original_direct_axes(self.case,self.font,self.meta,self.xml),{'wdth':75,'wght':100,'ital':1})
+  self.case.update(weight=1000,italic=False)
+  self.assertEqual(runner.original_direct_axes(self.case,self.font,self.meta,self.xml),{'wdth':75,'wght':900,'ital':0})
+ def test_wrong_original_hash_is_rejected(self):
+  self.meta[0]['sha256']='different'
+  with self.assertRaisesRegex(RuntimeError,'sealed axis'):runner.original_direct_axes(self.case,self.font,self.meta,self.xml)
+ def test_wrong_declared_width_is_rejected(self):
+  self.font['axes']['wdth']=100
+  with self.assertRaisesRegex(RuntimeError,'declared axes'):runner.original_direct_axes(self.case,self.font,self.meta,self.xml)
 
 if __name__=='__main__':unittest.main()

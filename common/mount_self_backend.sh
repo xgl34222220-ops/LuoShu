@@ -161,7 +161,7 @@ _luoshu_overlay_memory_layer() (
 # Persist the exact attempted overlay before mount(2), so cancellation between
 # kernel success and the ordinary journal append still has a recoverable owner.
 _luoshu_overlay_try() (
-    source="$1";lower="$2";target="$3";key="$4";state="$5"
+    source="$1";lower="$2";target=$(_luoshu_atomic_real_target "$3");key="$4";state="$5"
     mkdir -p "$state/overlay-intents" || exit 1
     intent="$state/overlay-intents/$key"
     [ ! -e "$intent" ] || exit 1

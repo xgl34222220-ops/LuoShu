@@ -163,7 +163,7 @@ _luoshu_atomic_prepare_boot_state() {
         return 0
     fi
     : > "$_lsapbs_list" 2>/dev/null || true
-    rm -f "$_lsapbs_state/overlay-intents"/* 2>/dev/null || true
+    rm -f "$_lsapbs_state/overlay-intents"/* "$_lsapbs_state/bind-intents"/* 2>/dev/null || true
     _luoshu_atomic_empty_state_dirs "$_lsapbs_state"
     printf '%s\n' "$_lsapbs_current" > "${_lsapbs_file}.tmp.$$" 2>/dev/null && \
         mv -f "${_lsapbs_file}.tmp.$$" "$_lsapbs_file" 2>/dev/null || true
@@ -211,6 +211,45 @@ _luoshu_atomic_tree_visible() {
     [ "$_lsatv_total" -gt 0 ] 2>/dev/null && [ "$_lsatv_failed" -eq 0 ]
 }
 
+_luoshu_inode_identity() { stat -Lc '%d:%i' "$1"; }
+_luoshu_owned_mount_matches() (
+    kind="$1";target="$2";current="$3";source="$4";detail="$5"
+    if [ "$kind" = bind ]; then
+        [ "$(_luoshu_inode_identity "$target" 2>/dev/null)" = "$detail" ] || exit 1
+        awk -v p="$target" -v id="$current" '$5==p&&$1==id{ok=1}END{exit !ok}' /proc/self/mountinfo
+    else
+        awk -v p="$target" -v visible="$current" -v layers="lowerdir=$source:$detail" '$5==p&&$1==visible{row=$0}END{at=index(row,layers);tail=substr(row,at+length(layers),1);ok=index(row," - overlay KSU ") && at && (tail=="," || tail==" " || tail=="");exit !ok}' /proc/self/mountinfo
+    fi
+)
+
+# Every logical file bind retains its original and owned mount identities.
+# A persisted pre-mount source inode closes the cancellation-before-journal gap.
+_luoshu_atomic_bind_one() (
+    source="$1";target=$(_luoshu_atomic_real_target "$2");state=$(_luoshu_self_state_root)
+    [ -f "$source" ] && [ -f "$target" ] || exit 1
+    key=$(printf '%s' "$target" | sha256sum | awk '{print $1}') || exit 1
+    case "$key" in ''|*[!0-9a-f]*) exit 1 ;; esac
+    mkdir -p "$state/bind-intents" || exit 1
+    intent="$state/bind-intents/$key"
+    [ ! -e "$intent" ] || exit 1
+    baseline=$(_luoshu_visible_mount_id "$target") || exit 1
+    identity=$(_luoshu_inode_identity "$source") || exit 1
+    printf '%s|%s|%s|%s\n' "$source" "$identity" "$target" "$baseline" > "$intent.tmp.$$" || exit 1
+    mv "$intent.tmp.$$" "$intent" || exit 1
+    if _luoshu_mount_cmd -o bind "$source" "$target" >/dev/null 2>&1; then
+        owned=$(_luoshu_visible_mount_id "$target") || exit 1
+        [ "$owned" != "$baseline" ] || exit 1
+        [ "$(_luoshu_inode_identity "$target")" = "$identity" ] || exit 1
+        printf '%s|%s|%s|%s|%s\n' "$source" "$identity" "$target" "$baseline" "$owned" > "$intent.tmp.$$" || exit 1
+        mv "$intent.tmp.$$" "$intent" || exit 1
+        printf '%s\n' "$target" >> "$_lsme_mount_list" || exit 1
+        exit 0
+    fi
+    current=$(_luoshu_visible_mount_id "$target")
+    [ "$current" != "$baseline" ] || rm -f "$intent"
+    exit 1
+)
+
 _luoshu_atomic_bind_tree() {
     _lsabt_source="$1"
     _lsabt_target="$2"
@@ -254,11 +293,7 @@ _luoshu_atomic_bind_tree() {
             _lsabt_failed=1
             break
         }
-        if _luoshu_mount_cmd -o bind "$_lsabt_src" "$_lsabt_dst" >/dev/null 2>&1; then
-            printf '%s\n' "$_lsabt_dst" >> "$_lsme_mount_list" 2>/dev/null || {
-                _lsabt_failed=1
-                break
-            }
+        if _luoshu_atomic_bind_one "$_lsabt_src" "$_lsabt_dst"; then
             _lsabt_mounted=$((_lsabt_mounted + 1))
         else
             _lsabt_failed=1
@@ -397,14 +432,19 @@ _luoshu_atomic_rollback() {
     _lsar_incomplete=0
     _lsar_skip="${_lsar_list}.owned.$$"
     : > "$_lsar_skip" || return 1
-    for _lsar_intent in "$_lsar_state/overlay-intents"/*; do
+    for _lsar_intent in "$_lsar_state/bind-intents"/* "$_lsar_state/overlay-intents"/*; do
         [ -f "$_lsar_intent" ] || continue
         IFS='|' read -r _lsar_source _lsar_lower _lsar_target _lsar_baseline _lsar_owned < "$_lsar_intent" || { _lsar_incomplete=1; continue; }
         # This target is handled by its ownership record, never by bare path.
         printf '%s\n' "$_lsar_target" >> "$_lsar_skip"
         _lsar_current=$(_luoshu_visible_mount_id "$_lsar_target")
         if [ "$_lsar_current" != "$_lsar_baseline" ]; then
-            if { [ -z "$_lsar_owned" ] || [ "$_lsar_current" = "$_lsar_owned" ]; } && awk -v p="$_lsar_target" -v visible="$_lsar_current" -v layers="lowerdir=$_lsar_source:$_lsar_lower" '$5==p&&$1==visible{row=$0}END{at=index(row,layers);tail=substr(row,at+length(layers),1);ok=index(row," - overlay KSU ") && at && (tail=="," || tail==" " || tail=="");exit !ok}' /proc/self/mountinfo; then
+            _lsar_matches=0
+            if [ -z "$_lsar_owned" ] || [ "$_lsar_current" = "$_lsar_owned" ]; then
+                case "$_lsar_intent" in "$_lsar_state/bind-intents/"*) _lsar_kind=bind ;; *) _lsar_kind=overlay ;; esac
+                _luoshu_owned_mount_matches "$_lsar_kind" "$_lsar_target" "$_lsar_current" "$_lsar_source" "$_lsar_lower" && _lsar_matches=1
+            fi
+            if [ "$_lsar_matches" = 1 ]; then
                 _luoshu_umount_cmd "$_lsar_target" >/dev/null 2>&1 || true
                 _lsar_current=$(_luoshu_visible_mount_id "$_lsar_target")
             fi
@@ -429,11 +469,20 @@ _luoshu_atomic_rollback() {
             [ -n "$_lsar_target" ] || continue
             if grep -Fqx "$_lsar_target" "$_lsar_skip"; then
                 # Retain only if its ownership record could not restore baseline.
-                if grep -Fq "|$_lsar_target|" "$_lsar_state/overlay-intents"/* 2>/dev/null; then
+                if grep -Fq "|$_lsar_target|" "$_lsar_state/overlay-intents"/* "$_lsar_state/bind-intents"/* 2>/dev/null; then
                     printf '%s\n' "$_lsar_target" >> "$_lsar_remaining"
                 fi
                 continue
             fi
+            # A legacy bare logical-path entry cannot prove ownership. Retain
+            # it for diagnosis/reboot instead of unmounting someone else's top.
+            case "$_lsar_target" in
+                "$_lsar_state/lower/"*|"$_lsar_state/memory-layers/"*) ;;
+                *)
+                    type _luoshu_self_log >/dev/null 2>&1 && _luoshu_self_log "旧挂载记录缺少所有权，保留目标并等待重启：$_lsar_target" || true
+                    printf '%s\n' "$_lsar_target" >> "$_lsar_remaining"; continue ;;
+
+            esac
             _luoshu_umount_cmd "$_lsar_target" >/dev/null 2>&1 || true
             if awk -v p="$_lsar_target" '$5==p {found=1} END{exit !found}' /proc/self/mountinfo; then
                 printf '%s\n' "$_lsar_target" >> "$_lsar_remaining"
@@ -492,7 +541,10 @@ luoshu_self_mount_ensure() {
     _luoshu_atomic_prepare_boot_state "$_lsme_mount_list" && _lsme_same_boot=1
 
     if [ "$_lsme_active" = default ]; then
-        [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list" || return 1
+        [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list" || {
+            _luoshu_self_state_write failed rollback-incomplete '' previous-mount-ownership-unresolved
+            return 1
+        }
         : > "$_lsme_mount_list" 2>/dev/null || true
         rm -f "$_lsme_manifest" "$_lsme_manifest_temp" 2>/dev/null || true
         _luoshu_self_state_write idle none '' ''
@@ -506,7 +558,10 @@ luoshu_self_mount_ensure() {
         return 0
     fi
 
-    [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list" || return 1
+    [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list" || {
+            _luoshu_self_state_write failed rollback-incomplete '' previous-mount-ownership-unresolved
+            return 1
+        }
     : > "$_lsme_mount_list" 2>/dev/null || return 1
     : > "$_lsme_manifest_temp" 2>/dev/null || return 1
     _lsme_mounted=''
@@ -541,10 +596,9 @@ luoshu_self_mount_ensure() {
             _lsme_mode=overlay
             if _luoshu_overlay_mount_dir "$_lsme_source" "$_lsme_target" \
                 "${_lsme_partition}-${_lsme_subdir}"; then
-                printf '%s\n' "$_lsme_target" >> "$_lsme_mount_list" 2>/dev/null || {
-                    _lsme_failed="$_lsme_partition/$_lsme_subdir-record-failed"
-                    break
-                }
+                # The backend persists canonical target ownership and journal
+                # before reporting success; do not append a logical alias here.
+                :
             else
                 _lsme_mode=bind
                 if type _luoshu_capture_lower_dir >/dev/null 2>&1; then

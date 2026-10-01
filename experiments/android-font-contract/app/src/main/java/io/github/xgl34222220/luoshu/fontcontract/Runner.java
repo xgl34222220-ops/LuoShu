@@ -171,6 +171,7 @@ public final class Runner extends Instrumentation {
         }
         for(int n=0;n<cases.length();n++) {
             JSONObject item=cases.getJSONObject(n),expected=item.getJSONObject("expected");String path=expected.getString("path"),sample=item.getString("sample");
+            report.put("activeDirectCase",new JSONObject(item.toString()));
             require(approved.containsKey(path),"case escaped mounted sealed files");
             Font.Builder builder=new Font.Builder(new File(path)).setTtcIndex(expected.getInt("face"))
                 .setWeight(expected.optInt("referenceWeight",expected.getInt("fontWeight"))).setSlant(expected.getInt("fontSlant"));
@@ -185,10 +186,11 @@ public final class Runner extends Instrumentation {
             require(glyphs.glyphCount()>0,"empty direct glyph run");
             for(int g=0;g<glyphs.glyphCount();g++){require(glyphs.getGlyphId(g)!=0,"direct glyph is .notdef");require(fontBufferHash(glyphs.getFont(g)).equals(approved.get(path)),"direct glyph came from fallback");}
             String raster=draw(selected,sample,null);
-            if(expected.has("raster"))require(raster.equals(expected.getString("raster")),"preserved direct glyph raster changed");
+            report.getJSONObject("activeDirectCase").put("actualRaster",raster);
+            if(expected.has("raster"))require(raster.equals(expected.getString("raster")),"preserved direct glyph raster changed: "+item);
             JSONObject proof=new JSONObject(item.toString());proof.put("raster",raster);proof.put("verification","direct-unprivileged-file-buffer-and-glyph-read");renders.put(proof);
         }
-        report.put("status","passed-direct-mounted-read");
+        report.remove("activeDirectCase");report.put("status","passed-direct-mounted-read");
         Files.write(new File(root,"report-direct-mounted.json").toPath(),report.toString(2).getBytes(StandardCharsets.UTF_8));
         Bundle output=new Bundle();output.putString("stream",report.toString());finish(Activity.RESULT_OK,output);
     }

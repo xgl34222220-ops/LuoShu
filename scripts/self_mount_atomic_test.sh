@@ -27,6 +27,7 @@ setup_case() {
         "$CASE_ROOT/root/system/etc" "$CASE_ROOT/state"
     printf 'custom\n' > "$MODULE_DIR/config/active_font.conf"
     : > "$CASE_ROOT/unmount.log"
+    : > "$CASE_ROOT/fake-mount-ids"
     FAIL_OVERLAY=''
     FAIL_BIND=''
     LUOSHU_TEST_PRIVATE_PAYLOAD_ROOT=''
@@ -80,8 +81,11 @@ _luoshu_mount_cmd() {
     else
         cp -f "$3" "$4"
     fi
+    id=$(( $(wc -l < "$CASE_ROOT/fake-mount-ids") + 100 ))
+    printf '%s|%s\n' "$4" "$id" >> "$CASE_ROOT/fake-mount-ids"
 }
 _luoshu_umount_cmd() {
+    printf '%s|0\n' "$1" >> "$CASE_ROOT/fake-mount-ids"
     printf '%s\n' "$1" >> "$CASE_ROOT/unmount.log"
     return 0
 }
@@ -92,10 +96,20 @@ luoshu_mount_record() {
 . "$BACKEND_SCRIPT"
 . "$ATOMIC_SCRIPT"
 [ -z "$FINAL_SCRIPT" ] || . "$FINAL_SCRIPT"
-# The production backend owns the OverlayFS helper. Keep tests deterministic.
+# These copy-based fixtures model mount identities only for orchestration.
+# Real kernel ownership, cancellation and foreign-layer tests run separately.
+_luoshu_visible_mount_id() { awk -F '|' -v p="$1" '$1==p{id=$2}END{print id+0}' "$CASE_ROOT/fake-mount-ids"; }
+_luoshu_inode_identity() { sha256sum "$1" | awk '{print $1}'; }
+_luoshu_owned_mount_matches() { [ "$(_luoshu_visible_mount_id "$2")" = "$3" ]; }
 _luoshu_overlay_mount_dir() {
     test "${FAIL_OVERLAY:-}" != all && test "${FAIL_OVERLAY:-}" != "$3" || return 1
+    baseline=$(_luoshu_visible_mount_id "$2")
     cp -R "$1/." "$2/"
+    id=$(( $(wc -l < "$CASE_ROOT/fake-mount-ids") + 100 ))
+    printf '%s|%s\n' "$2" "$id" >> "$CASE_ROOT/fake-mount-ids"
+    mkdir -p "$CASE_ROOT/state/overlay-intents"
+    printf '%s|fixture|%s|%s|%s\n' "$1" "$2" "$baseline" "$id" > "$CASE_ROOT/state/overlay-intents/$3"
+    printf '%s\n' "$2" >> "$_lsme_mount_list"
 }
 CURRENT_BOOT_ID=test-boot
 _luoshu_atomic_boot_id() { printf '%s\n' "$CURRENT_BOOT_ID"; }
@@ -127,8 +141,8 @@ setup_case same-boot-journal
 printf 'default\n' > "$MODULE_DIR/config/active_font.conf"
 printf '%s\n' "$CURRENT_BOOT_ID" > "$CASE_ROOT/state/boot-id"
 printf '%s\n' "$CASE_ROOT/root/system/fonts" > "$CASE_ROOT/state/mounts.list"
-luoshu_self_mount_ensure || fail 'same-boot journal cleanup failed'
-test -s "$CASE_ROOT/unmount.log" || fail 'same-boot LuoShu mount was not rolled back'
+if luoshu_self_mount_ensure; then fail 'bare same-boot journal was treated as ownership'; fi
+test ! -s "$CASE_ROOT/unmount.log" || fail 'bare journal unmounted an unproven target'
 
 setup_case rollback
 mkdir -p "$MODULE_DIR/system/fonts" "$MODULE_DIR/system/etc" "$MODULE_DIR/product/etc" \

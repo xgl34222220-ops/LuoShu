@@ -273,3 +273,30 @@ modes on copies are restricted to 0644 and directories to 0755. Host label tests
 mock chcon and do not substitute for Android verification. The adb root helper
 now reconnects within a fixed budget and requires actual UID 0, rather than
 failing solely because adbd closed the transport during its root restart.
+
+### Font access proved; direct-style construction corrected
+
+Run 36855896971 (0907585) read all 52 font files as UID 10216 in
+`untrusted_app` under Enforcing SELinux. Their file hashes and device/inode pairs
+matched the root snapshot. Temporary font labels matched the stock system_file
+label; no configuration XML labels were changed. The first A/1/Han glyph cases
+passed, then the first preserved italic raster check failed. Complete rollback,
+reboot original-byte verification, staging removal and VM teardown succeeded.
+
+The direct Font.Builder oracle had copied Font.getAxes output, which omits
+implicit XML supportedAxes values. The corrected direct contract independently
+resolves the frozen original family node, its supportedAxes and SHA-bound fvar
+limits, then supplies requested/clamped wght and ital plus explicit wdth. Its
+font descriptor uses the requested weight to avoid additional synthetic bold.
+The preserved pixel comparison remains mandatory. Native retest is pending.
+
+A separate real-kernel regression exposed that bare per-file bind journals could
+unmount an original pre-existing bind on a second rollback. Bind transactions
+now retain the original/new actual FD mount IDs and source device/inode, including
+a pre-mount cancellation intent. Foreign tops and unproven legacy journals are
+refused; original baselines survive repeated rollback. Host tests exercise the
+actual bind-tree writer, SIGKILL window, foreign layer, legacy refusal, canonical
+symlink targets and child-bind-before-parent-overlay rollback. The
+next Android experiment runs these same cases in an isolated child namespace
+before the ordinary-App direct-read check. This does not add root-manager boot
+or ARM64 execution evidence.

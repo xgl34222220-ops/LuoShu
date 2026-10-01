@@ -20,7 +20,10 @@ luoshu_self_mount_ensure() {
     _luoshu_atomic_prepare_boot_state "$_lsme_mount_list" && _lsme_same_boot=1
 
     if [ "$_lsme_active" = default ]; then
-        [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list" || return 1
+        [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list" || {
+            _luoshu_self_state_write failed rollback-incomplete '' previous-mount-ownership-unresolved
+            return 1
+        }
         : > "$_lsme_mount_list" 2>/dev/null || true
         rm -f "$_lsme_manifest" "$_lsme_manifest_temp" 2>/dev/null || true
         _luoshu_self_state_write idle none '' ''
@@ -34,7 +37,10 @@ luoshu_self_mount_ensure() {
         return 0
     fi
 
-    [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list" || return 1
+    [ "$_lsme_same_boot" -eq 0 ] || _luoshu_atomic_rollback "$_lsme_mount_list" || {
+            _luoshu_self_state_write failed rollback-incomplete '' previous-mount-ownership-unresolved
+            return 1
+        }
     : > "$_lsme_mount_list" 2>/dev/null || return 1
     : > "$_lsme_manifest_temp" 2>/dev/null || return 1
     _lsme_mounted=''
@@ -69,10 +75,9 @@ luoshu_self_mount_ensure() {
             _lsme_mode=overlay
             if _luoshu_overlay_mount_dir "$_lsme_source" "$_lsme_target" \
                 "${_lsme_partition}-${_lsme_subdir}"; then
-                printf '%s\n' "$_lsme_target" >> "$_lsme_mount_list" 2>/dev/null || {
-                    _lsme_failed="$_lsme_partition/$_lsme_subdir-record-failed"
-                    break
-                }
+                # The backend persists canonical target ownership and journal
+                # before reporting success; do not append a logical alias here.
+                :
             else
                 _lsme_mode=bind
                 if type _luoshu_capture_lower_dir >/dev/null 2>&1; then
