@@ -331,7 +331,7 @@ public final class Runner extends Instrumentation {
         String phase=arguments==null?"before":arguments.getString("phase","before");
         try {
             context=getTargetContext();root=context.getFilesDir();report=new JSONObject();
-            report.put("phase",phase);report.put("sdk",Build.VERSION.SDK_INT);report.put("fingerprint",Build.FINGERPRINT);
+            report.put("phase",phase);report.put("probeRequestId",arguments.getString("probeRequestId",""));report.put("sdk",Build.VERSION.SDK_INT);report.put("fingerprint",Build.FINGERPRINT);
             report.put("moduleMountTested",false);report.put("systemFontConfigMutated",false);report.put("hookUsed",false);
             if(phase.equals("direct-mounted")){directMountedPhase();return;}
             if(phase.equals("stock-axis")){stockAxisPhase();return;}

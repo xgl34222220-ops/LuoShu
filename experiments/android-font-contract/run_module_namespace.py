@@ -126,6 +126,9 @@ exit "$rc"
    if framework is not None:
     (output/'mounted-config-labels.txt').write_bytes(adb('shell','ls','-lZ',*backups.keys()))
     module_report['appliedFrameworkCycle']=framework.start()
+    server_pid=module_report['appliedFrameworkCycle']['newSystemServer'][0]
+    (output/'framework-system-server-namespace.txt').write_bytes(adb('shell','readlink','/proc/'+server_pid+'/ns/mnt'))
+    (output/'framework-system-server-files.txt').write_bytes(adb('shell','ls','-lZ',*('/proc/'+server_pid+'/root'+path for path in [*backups.keys(),*new]),check=False))
     module_report['defaultApplied']=default_probe('mounted')
     module_report.update(frameworkRestartTested=True,defaultTypefaceTakeoverTested=True,globalAppConsumerTested=True)
    paths=[f['path'] for f in direct['files']]
@@ -166,6 +169,9 @@ exit "$rc"
   module_report['state']='failed'
   module_report['failure']=type(error).__name__+': '+str(error)
   if global_attempted:
+   for name,args in [('framework-crash-logcat',('logcat','-b','crash','-d','-t','400')),('framework-pre-recovery-logcat',('logcat','-b','all','-d','-t','1200')),('framework-font-manager',('shell','dumpsys','font'))]:
+    try:(output/(name+'.txt')).write_bytes(adb(*args,timeout=15,check=False)[-192000:])
+    except Exception as diagnostic_error:module_report[name+'Error']=str(diagnostic_error)
    try:(output/'ordinary-app-kernel-tail.txt').write_bytes(adb('shell','dmesg',timeout=15,check=False)[-24000:])
    except Exception as diagnostic_error:module_report['diagnosticFailure']=str(diagnostic_error)
   raise

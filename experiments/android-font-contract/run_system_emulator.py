@@ -83,14 +83,17 @@ def probe(name, extra_args=None):
  return r
 
 def style_probe(name,cases,expected_status):
- import base64
+ import base64,uuid
+ from probe_result import validate_probe_result,require_instrumentation_success
+ request_id=uuid.uuid4().hex
+ adb('shell','run-as',PACKAGE,'rm','-f','files/report-style-matrix.json')
  raw=base64.b64encode(json.dumps(cases).encode()).decode()
- log=adb('shell','am','instrument','-w','-e','phase','style-matrix','-e','styleCases',raw,PACKAGE+'/.Runner',timeout=180)
+ log=adb('shell','am','instrument','-w','-e','phase','style-matrix','-e','styleCases',raw,'-e','probeRequestId',request_id,PACKAGE+'/.Runner',timeout=180)
  (a.output/(name+'.txt')).write_bytes(log)
+ require_instrumentation_success(log)
  result=adb('exec-out','run-as',PACKAGE,'cat','files/report-style-matrix.json')
  (a.output/(name+'.json')).write_bytes(result);parsed=json.loads(result)
- if parsed.get('status')!=expected_status:raise RuntimeError(parsed)
- return parsed
+ return validate_probe_result(log,parsed,request_id,expected_status)
 
 def rewrite(raw,ps):
  tree=ET.fromstring(raw);original_primary=[copy.deepcopy(f) for f in list(tree) if f.tag=='family' and f.get('name')=='sans-serif'];parents={child:parent for parent in tree.iter() for child in parent};count=0
