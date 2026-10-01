@@ -63,6 +63,11 @@ for phase in ['before','after']:
  (args.output/('report-'+phase+'.json')).write_bytes(raw);report=json.loads(raw);reports.append(report)
  for i in range(3):(args.output/('role-'+str(i)+'-'+phase+'.png')).write_bytes(adb('exec-out','run-as',PACKAGE,'cat','files/role-'+str(i)+'.png'))
  if report.get('status')!='passed-native-data-gate':raise RuntimeError(report)
+ matching=report.get('fixedMatchingAxisProof') or {}
+ if matching.get('status')!='passed' or len(matching.get('cases') or [])!=48:
+  raise RuntimeError('fixed-outline matching-axis capability was not verified')
+ if phase=='after' and matching['cases']!=reports[0]['fixedMatchingAxisProof']['cases']:
+  raise RuntimeError('matching-axis consumer evidence changed after reboot')
  status('platform-xml-'+phase)
  platform=adb('shell','env','CLASSPATH='+remote+'/probe.apk','app_process',remote,
   PACKAGE+'.PlatformXmlProbe',remote+'/composite.ttf',remote+'/probe-fonts.xml',ps_name,remote+'/fixture.json')
@@ -73,6 +78,7 @@ for phase in ['before','after']:
 framework=all(r.get('status')=='passed' for r in platform_reports)
 status('completed-native-probe')
 summary={'nativeDataGate':'passed','frameworkXmlGate':'passed' if framework else 'blocked',
+ 'fixedOutlineMatchingAxisGate':'passed-48-app-only-cases-before-and-after-reboot',
  'emulatorReboot':'passed','moduleGlobalMountAndBootGate':'not-tested','noHook':True,
  'appFrameworkApi':'available' if all(r.get('frameworkXmlConsumer',{}).get('status')=='passed' for r in reports) else 'unavailable',
  'frameworkContext':'existing adb shell via app_process',

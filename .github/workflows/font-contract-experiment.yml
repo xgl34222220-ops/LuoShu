@@ -36,6 +36,7 @@ jobs:
           python3 experiments/android-font-contract/test_system_file_read.py
           python3 experiments/android-font-contract/test_style_matrix.py
           python3 experiments/xml-first/test_style_expansion.py
+          python3 experiments/xml-first/test_fixed_weight_match.py
           python3 scripts/fixed_static_xml_router_test.py
           python3 scripts/fixed_static_xml_compiler_test.py
           python3 scripts/fixed_static_xml_pipeline_test.py
@@ -46,7 +47,7 @@ jobs:
       - name: Require accelerated emulator
         id: accel
         env:
-          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '9643c61a053d713b659ef65398ae2895fe4b26b4' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
+          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '6be17a9ea8a996721e54f19e2f1511d5cf1a0aa9' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
         shell: bash
         run: |
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then

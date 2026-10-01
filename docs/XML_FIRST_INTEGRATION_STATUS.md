@@ -173,5 +173,33 @@ tampered mapping. The CI-only public API consumer adds 54 bounded cases spanning
 default and named families, 100/300/400/450/520/700/900 requests, both styles, and
 protected Greek/emoji. Every passing case must have an expected path, SHA, face,
 FontStyle and raster contract. An observation-only result cannot pass this gate.
-This native matrix has not run yet. Discrete declarations do not claim continuous
-weight coverage, and retained OEM italics are explicitly partial donor coverage.
+Run `36806453735` applied this candidate, then failed the normal-weight-450
+Latin source-path assertion. Default A/1/中 used new static assets, but the wider
+matrix did not pass. All original XML bytes and all 54 baseline style cases were
+restored successfully; the VM was terminated. Discrete declarations therefore
+cannot yet be presented as correct intermediate-weight selection.
+
+## Static weight matching limitation and isolated alternative
+
+The failed run registered 450 and 520 successfully in FontManager. Android 16
+[Minikin FontFamily](https://android.googlesource.com/platform/frameworks/minikin/+/refs/heads/android16-release/libs/minikin/FontFamily.cpp)
+scores static fonts by hundred-weight buckets and retains the first equal score.
+Thus an earlier 400 entry can shadow 450, and 500 can shadow 520; reordering
+cannot make both members of a bucket independently reachable. The next probe
+retains every observed case and failure detail instead of losing partial results
+at the first assertion. No failed expectation is changed into a success.
+
+A separate, non-deployable experiment adds a constant-response wght selection
+axis to an already static upright asset. This axis is explicitly NOT donor weight
+variation, nor an assertion that a physical OEM VF has been reproduced. All glyph
+coordinates, advances, line metrics and static shaping tables must remain
+unchanged at eight coordinates including 450/520. Existing variable fonts cannot
+enter this constructor. The experiment stays outside production helpers.
+
+The next native run is App-only: public API35+ `buildVariableFamily` combines the
+constant normal candidate with the original variable italic, and separately tests
+a CJK normal candidate with platform synthetic italic. Forty-eight cases compare
+actual source files/hashes and independently constructed raster references before
+and after reboot. It changes no system XML, performs no root/remount test, and
+does not establish OEM geometry or module deployment. Production integration must
+wait for a sound geometry contract and explicit fixed-selection semantics.

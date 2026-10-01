@@ -106,10 +106,49 @@ public final class Runner extends Instrumentation {
         MessageDigest digest=MessageDigest.getInstance("SHA-256");java.nio.ByteBuffer data=font.getBuffer().duplicate();data.rewind();digest.update(data);
         StringBuilder result=new StringBuilder();for(byte value:digest.digest())result.append(String.format(Locale.ROOT,"%02x",value&255));return result.toString();
     }
+    private Typeface variableFamily(Font normal,Font italic) throws Exception {
+        FontFamily.Builder builder=new FontFamily.Builder(normal);if(italic!=null)builder.addFont(italic);
+        FontFamily family=builder.buildVariableFamily();require(family!=null,"variable matching family rejected");
+        return new Typeface.CustomFallbackBuilder(family).setSystemFallback("sans-serif").build();
+    }
+    private JSONObject fixedMatchingAxisProof() throws Exception {
+        require(Build.VERSION.SDK_INT>=35,"matching experiment requires public API35");
+        File normal=asset("normal-weight-match.ttf"),cjkMatch=asset("cjk-weight-match.ttf");
+        File original=new File("/system/fonts/Roboto-Regular.ttf");
+        Font italic=new Font.Builder(original).setWeight(400).setSlant(FontStyle.FONT_SLANT_ITALIC)
+            .setFontVariationSettings(new android.graphics.fonts.FontVariationAxis[]{new android.graphics.fonts.FontVariationAxis("ital",1),new android.graphics.fonts.FontVariationAxis("wdth",100)}).build();
+        String originalSha=fontBufferHash(italic);
+        Typeface normalFamily=variableFamily(new Font.Builder(normal).setWeight(400).setSlant(0).build(),italic);
+        Typeface cjkFamily=variableFamily(new Font.Builder(cjkMatch).setWeight(400).setSlant(0).build(),null);
+        JSONArray evidence=new JSONArray();
+        for(int weight:new int[]{1,100,400,450,520,700,900,1000})for(boolean slant:new boolean[]{false,true})for(String sample:new String[]{"A","1","中"}) {
+            boolean han=sample.equals("中"),kept=slant&&!han;
+            File reference=kept?original:asset(han?"cjk-fixed-reference.ttf":"normal-fixed-reference.ttf");
+            Font.Builder rb=new Font.Builder(reference).setWeight(weight).setSlant(kept?1:0);
+            if(kept)rb.setFontVariationSettings(new android.graphics.fonts.FontVariationAxis[]{new android.graphics.fonts.FontVariationAxis("wght",weight),new android.graphics.fonts.FontVariationAxis("ital",1),new android.graphics.fonts.FontVariationAxis("wdth",100)});
+            Typeface expected=new Typeface.CustomFallbackBuilder(new FontFamily.Builder(rb.build()).build())
+                .setSystemFallback("sans-serif").setStyle(new FontStyle(weight,slant?1:0)).build();
+            Typeface actual=Typeface.create(han?cjkFamily:normalFamily,weight,slant);
+            String raster=draw(actual,sample,null);require(raster.equals(draw(expected,sample,null)),"constant-match/italic raster differs: "+sample+"/"+weight+"/"+slant);
+            Paint p=new Paint();p.setTypeface(actual);p.setTextSize(72);
+            android.graphics.text.PositionedGlyphs run=android.graphics.text.TextRunShaper.shapeTextRun(sample,0,sample.length(),0,sample.length(),0,0,false,p);
+            require(run.glyphCount()==1,"unexpected matching glyph split");Font selected=run.getFont(0);
+            String expectedPath=(kept?original:han?cjkMatch:normal).toString();
+            require(String.valueOf(selected.getFile()).equals(expectedPath),"constant-match selected wrong source");
+            String expectedSha=kept?originalSha:hash(Files.readAllBytes((han?cjkMatch:normal).toPath()));
+            require(fontBufferHash(selected).equals(expectedSha),"constant-match source bytes differ");
+            JSONObject item=new JSONObject();item.put("sample",sample);item.put("weight",weight);item.put("italic",slant);
+            item.put("file",expectedPath);item.put("sha256",expectedSha);item.put("raster",raster);item.put("kind",kept?"original-italic-variation":"fixed-selected-outline");evidence.put(item);
+        }
+        JSONObject result=new JSONObject();result.put("status","passed");result.put("cases",evidence);
+        result.put("scope","App-only public variable-family selection; no system XML or module activation");
+        result.put("normalShapeResponse","constant; matching axis is not donor weight variation");return result;
+    }
     private void styleMatrixPhase() throws Exception {
         JSONArray cases=new JSONArray(new String(Base64.getDecoder().decode(arguments.getString("styleCases")),StandardCharsets.UTF_8));
         require(cases.length()>0&&cases.length()<=64,"invalid style matrix size");
-        JSONArray results=new JSONArray();boolean allVerified=true;
+        JSONArray results=new JSONArray();boolean allVerified=true;int failures=0;
+        report.put("cases",results);
         for(int c=0;c<cases.length();c++) {
             JSONObject item=cases.getJSONObject(c);int weight=item.getInt("weight");boolean italic=item.getBoolean("italic");
             String family=item.getString("family"),sample=item.getString("sample");
@@ -129,9 +168,10 @@ public final class Runner extends Instrumentation {
                 found.put("axes",axes);actual.put(found);
             }
             JSONObject result=new JSONObject(item.toString());result.put("raster",raster);result.put("actualFonts",actual);
+            results.put(result);report.put("activeCase",result);
             JSONObject expected=item.optJSONObject("expected");
             if(expected==null){allVerified=false;result.put("verification","observation-only");}
-            else {
+            else try {
                 require(actual.length()==1,"unexpected matrix glyph splitting");JSONObject font=actual.getJSONObject(0);
                 require(font.getString("file").equals(expected.getString("path")),"matrix source path differs: "+item);
                 require(font.getString("sha256").equals(expected.getString("sha256")),"matrix source bytes differ: "+item);
@@ -150,10 +190,12 @@ public final class Runner extends Instrumentation {
                     require(raster.equals(draw(reference,sample,null)),"matrix expected glyph/shape differs: "+item);
                 }
                 result.put("verification","passed");
+            } catch(AssertionError error) {
+                failures++;result.put("verification","failed");result.put("error",error.getMessage());
             }
-            results.put(result);
         }
-        report.put("cases",results);report.put("status",allVerified?"passed-style-matrix":"observed-style-matrix");
+        report.remove("activeCase");report.put("failedCaseCount",failures);
+        report.put("status",failures>0?"failed-style-matrix":allVerified?"passed-style-matrix":"observed-style-matrix");
         Files.write(new File(root,"report-style-matrix.json").toPath(),report.toString(2).getBytes(StandardCharsets.UTF_8));
         Bundle output=new Bundle();output.putString("stream",report.toString());finish(Activity.RESULT_OK,output);
     }
@@ -264,6 +306,7 @@ public final class Runner extends Instrumentation {
             if(phase.equals("before"))Files.write(baseline.toPath(),renders.toString().getBytes(StandardCharsets.UTF_8));
             else {JSONObject old=new JSONObject(new String(Files.readAllBytes(baseline.toPath()),StandardCharsets.UTF_8));for(String key:text)require(old.getString(key).equals(renders.getString(key)),"reboot raster changed");report.put("emulatorRebootPersistence","passed");}
             report.put("frameworkXmlConsumer",frameworkXml(composite,fixture.getString("postScriptName")));
+            report.put("fixedMatchingAxisProof",fixedMatchingAxisProof());
             report.put("status","passed-native-data-gate");resultCode=Activity.RESULT_OK;
         } catch(Throwable error) {
             if(report==null)report=new JSONObject();
