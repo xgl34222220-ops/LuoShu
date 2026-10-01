@@ -311,3 +311,25 @@ selected files. The production backend and every rollback assertion stay in use.
 Android confirmation of that fixture correction remains pending. Both failed
 attempts verified original bytes after reboot, removed their stage and destroyed
 the VM; neither supplies new ordinary-App style evidence.
+
+### Mounted fonts consumed by an ordinary App (5cabc217)
+
+[Android run 36863726733](https://github.com/xgl34222220-ops/LuoShu/actions/runs/36863726733)
+and candidate run 36863726778 completed successfully. The evidence artifact is
+11162874488. On API36 x86_64, UID10216 in `untrusted_app` under Enforcing read all
+52 approved font files and passed 66 direct Font.Builder/TextRunShaper cases.
+The cases cover A/1/Han, protected Greek/emoji, normal/italic and requested
+weights 1,100,300,400,450,520,700,900,1000 across sans-serif,
+sans-serif-condensed and roboto. All 26 preserved raster references matched.
+Actual buffer hashes and nonzero glyph IDs are required for every direct case.
+This confirms explicit direct reads, not default Typeface registration or boot.
+
+The same run passed the real Android bind ownership suite, including original
+bind preservation, foreign top refusal, post-mount SIGKILL, repeated rollback,
+logical symlink resolution and child bind before parent overlay restoration.
+The production transaction validated 53 files. Normal rollback, reboot original
+byte checks, owned staging deletion and VM teardown all completed. No XML-copy
+label change, init file modification, SELinux policy change or root manager was
+used. Host compilation took 136.319 seconds; this is not a phone latency result.
+The APK remains the byte-identical 317 audit App. The checked module candidate
+is retained while default-consumer and boot integration remain unproved.

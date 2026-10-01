@@ -58,6 +58,38 @@ class GlobalProbeTest(unittest.TestCase):
   with self.assertRaisesRegex(RuntimeError,'injected mount failure'):self.run_probe(adb)
   self.assertFalse(any(x[:3]==('shell','rm','-rf') for x in self.calls))
 
+class FrameworkGlobalTest(unittest.TestCase):
+ setUp=GlobalProbeTest.setUp
+ adb=GlobalProbeTest.adb
+ def cycle(self):
+  parent=self
+  class Cycle:
+   stopped=False
+   def stop(self):self.stopped=True;parent.calls.append(('framework-stop',))
+   def start(self):self.stopped=False;parent.calls.append(('framework-start',));return {'newSystemServer':['2','200']}
+  return Cycle()
+ def good_adb(self,*args,**kwargs):
+  if args[:2]==('exec-out','run-as'):
+   self.calls.append(args);return b'{"status":"passed-direct-mounted-read","files":[]}'
+  if args==('exec-out','cat',runner.REMOTE+'/namespace-result.json'):
+   return b'{"state":"passed","deploymentId":"test","payloadDigest":"test"}'
+  return self.adb(*args,**kwargs)
+ def framework_probe(self,callback):
+  self.apply_fails=False
+  return runner.run(self.good_adb,lambda:None,lambda:self.calls.append(('reboot',)),lambda p:b'',self.out,{'files':[],'deploymentId':'test','payloadDigest':'test'},{},{},self.out,direct={'files':[],'cases':[]},framework=self.cycle(),default_probe=callback)
+ def test_default_consumers_surround_real_rollback_protocol(self):
+  result=self.framework_probe(lambda phase:self.calls.append(('default',phase)) or {'status':'passed-style-matrix'})
+  order=[x for x in self.calls if x[0].startswith('framework') or x[0]=='default' or x[-1:] in [('apply',),('rollback',)]]
+  self.assertEqual([x if x[0]!='shell' else (x[-1],) for x in order],[('framework-stop',),('apply',),('framework-start',),('default','mounted'),('framework-stop',),('rollback',),('framework-start',),('default','restored')])
+  self.assertTrue(result['defaultTypefaceTakeoverTested']);self.assertTrue(result['rebootOriginalsUnchanged'])
+ def test_failed_default_consumer_reboots_before_removing_stage(self):
+  def fail(phase):raise RuntimeError('default consumer failed')
+  with self.assertRaisesRegex(RuntimeError,'default consumer failed'):self.framework_probe(fail)
+  reboot=self.calls.index(('reboot',));removal=next(i for i,x in enumerate(self.calls) if x[:3]==('shell','rm','-rf'))
+  self.assertLess(reboot,removal)
+  report=json.loads((self.out/'module-namespace-summary.json').read_text())
+  self.assertTrue(report['recoveryRebootAfterFrameworkFailure']);self.assertEqual(report['state'],'failed')
+
 class DirectContractTest(unittest.TestCase):
  def test_roles_and_preserved_axes_are_explicit(self):
   selected=[];baseline=[];files=[];metadata=[];nodes=[]

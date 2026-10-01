@@ -196,6 +196,11 @@ public final class Runner extends Instrumentation {
     }
 
     private void styleMatrixPhase() throws Exception {
+        int uid=android.os.Process.myUid();report.put("uid",uid);report.put("pid",android.os.Process.myPid());
+        require(uid>=10000,"style matrix must run as an ordinary App UID");
+        String domain=new String(Files.readAllBytes(new File("/proc/self/attr/current").toPath()),StandardCharsets.UTF_8).trim();
+        report.put("selinuxContext",domain);require(domain.contains(":untrusted_app"),"unexpected style matrix domain");
+        report.put("consumer","ordinary App default Typeface.create and TextRunShaper");
         JSONArray cases=new JSONArray(new String(Base64.getDecoder().decode(arguments.getString("styleCases")),StandardCharsets.UTF_8));
         require(cases.length()>0&&cases.length()<=96,"invalid style matrix size");
         JSONArray results=new JSONArray();boolean allVerified=true;int failures=0;

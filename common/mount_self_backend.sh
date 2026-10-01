@@ -183,6 +183,27 @@ _luoshu_overlay_try() (
     exit 1
 )
 
+# Experimental config-copy labeling is confined to the approved disposable VM
+# and the two snapshotted system font XML filenames. Production default is off.
+_luoshu_config_copy_labels_allowed() (
+    source="$1";key="$2";lower="$3"
+    [ -d "$lower" ] && [ ! -L "$lower" ] || exit 1
+    [ "${LUOSHU_XML_COPY_LABEL_TEST_APPROVED:-false}" = true ] || exit 1
+    [ "$key" = system-etc ] || exit 1
+    [ "$(getprop ro.kernel.qemu 2>/dev/null)" = 1 ] || exit 1
+    [ "$(getprop ro.build.version.sdk 2>/dev/null)" = 36 ] || exit 1
+    [ "$(id -u)" = 0 ] && [ "$(getenforce 2>/dev/null)" = Enforcing ] || exit 1
+    count=0
+    for entry in "$source"/* "$source"/.[!.]* "$source"/..?*; do
+        [ -e "$entry" ] || [ -L "$entry" ] || continue
+        [ -f "$entry" ] && [ ! -L "$entry" ] || exit 1
+        case "${entry##*/}" in fonts.xml|font_fallback.xml) ;; *) exit 1 ;; esac
+        [ -f "$lower/${entry##*/}" ] && [ ! -L "$lower/${entry##*/}" ] || exit 1
+        count=$((count+1))
+    done
+    [ "$count" -gt 0 ]
+)
+
 _luoshu_overlay_mount_dir() {
     _lsomb_source="$1"
     _lsomb_target="$2"
@@ -201,10 +222,17 @@ _luoshu_overlay_mount_dir() {
     fi
 
     _lsomb_memory="$_lsomb_state/memory-layers/$_lsomb_key"
-    # The current explicit relabel authorization covers font copies only.
-    # Font configuration XML copies keep their existing labels in this phase.
+    # Font copies are the default scope. A separate, explicit disposable-VM
+    # authorization is required for the two sealed system XML copies.
     _lsomb_label_fonts=0
-    case "$_lsomb_key" in *-fonts) _lsomb_label_fonts=1 ;; esac
+    case "$_lsomb_key" in
+        *-fonts) _lsomb_label_fonts=1 ;;
+        system-etc)
+            if [ "${LUOSHU_XML_COPY_LABEL_TEST_APPROVED:-false}" = true ]; then
+                _luoshu_config_copy_labels_allowed "$_lsomb_source" "$_lsomb_key" "$_lsomb_lower" || return 1
+                _lsomb_label_fonts=1
+            fi ;;
+    esac
     if _luoshu_overlay_memory_layer "$_lsomb_source" "$_lsomb_memory" "$_lsomb_state" "$_lsomb_lower" "$_lsomb_label_fonts" &&
        _luoshu_overlay_try "$_lsomb_memory" "$_lsomb_lower" "$_lsomb_target" "$_lsomb_key" "$_lsomb_state"; then
         return 0

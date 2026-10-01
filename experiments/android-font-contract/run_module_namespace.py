@@ -54,12 +54,14 @@ def direct_contract(manifest, cases, baseline,metadata=None,xml_bytes=None):
  if not {'A','1','中'}.issubset({x['sample'] for x in selected}):raise RuntimeError('direct contract lacks selected role coverage')
  return {'files':files,'cases':selected}
 
-def run(adb,root,reboot,read_system_file,payload,manifest,captured,backups,output,direct=None):
+def run(adb,root,reboot,read_system_file,payload,manifest,captured,backups,output,direct=None,framework=None,default_probe=None):
  output=Path(output);module_report={'scope':'disposable API36 private mount namespace','globalAppConsumerTested':False,'rootManagerTested':False,'moduleBootTested':False,'state':'running'}
  created=False;global_attempted=False;global_restored=False;app_started=False;apply_completed=False
+ if framework is not None and (direct is None or default_probe is None):raise RuntimeError('framework experiment requires explicit global consumer contracts')
  original_key='originalsAfterRollback' if direct is not None else 'outsideNamespaceUnchanged'
  if direct is not None:
   module_report.update(scope='temporary global mounts with ordinary App direct font reads',ordinaryAppDirectReadTested=False,defaultTypefaceTakeoverTested=False)
+ if framework is not None:module_report.update(scope='temporary global mounts with restarted default font consumers',frameworkRestartTested=False)
  original={k:hashlib.sha256(v).hexdigest() for k,v in backups.items()}
  original.update({k:hashlib.sha256(Path(v).read_bytes()).hexdigest() for k,v in captured.items()})
  new=[f['logicalPath'] for f in manifest['files'] if f['kind']!='xml']
@@ -116,9 +118,16 @@ exit "$rc"
    raw=adb('shell','env','LUOSHU_PARENT_MOUNT_NAMESPACE='+parent,'timeout','-k','5','180','unshare','-m','/system/bin/sh',REMOTE+'/module_namespace_probe.sh',REMOTE,timeout=200)
   else:
    (output/'original-font-labels.txt').write_bytes(adb('shell','ls','-ldZ','/system/fonts','/system/etc',*backups.keys(),*captured.keys(),check=False))
+   if framework is not None:framework.stop()
    global_attempted=True;module_report['globalMountAttempted']=True
-   raw=adb('shell','timeout','-k','5','150','sh',REMOTE+'/module_global_probe.sh',REMOTE,'apply',timeout=180)
+   env_args=('env','LUOSHU_XML_COPY_LABEL_TEST_APPROVED=true') if framework is not None else ()
+   raw=adb('shell',*env_args,'timeout','-k','5','150','sh',REMOTE+'/module_global_probe.sh',REMOTE,'apply',timeout=180)
    apply_completed=True
+   if framework is not None:
+    (output/'mounted-config-labels.txt').write_bytes(adb('shell','ls','-lZ',*backups.keys()))
+    module_report['appliedFrameworkCycle']=framework.start()
+    module_report['defaultApplied']=default_probe('mounted')
+    module_report.update(frameworkRestartTested=True,defaultTypefaceTakeoverTested=True,globalAppConsumerTested=True)
    paths=[f['path'] for f in direct['files']]
    stat_before=adb('shell','stat','-c','%d:%i',*paths).decode().splitlines()
    (output/'ordinary-app-file-labels.txt').write_bytes(adb('shell','ls','-lZ',*paths,check=False))
@@ -137,7 +146,11 @@ exit "$rc"
    module_report.update(ordinaryAppDirectReadTested=True,ordinaryApp=app)
    adb('shell','am','force-stop',package);app_started=False
    module_report['testAppStoppedBeforeRollback']=True
+   if framework is not None:framework.stop()
    adb('shell','timeout','-k','5','90','sh',REMOTE+'/module_global_probe.sh',REMOTE,'rollback',timeout=120);global_restored=True
+   if framework is not None:
+    module_report['restoredFrameworkCycle']=framework.start()
+    module_report['defaultRestored']=default_probe('restored')
   (output/'module-namespace-stdout.txt').write_bytes(raw)
   data=adb('exec-out','cat',REMOTE+'/namespace-result.json',check=False)
   (output/'module-namespace-result.json').write_bytes(data)
@@ -162,6 +175,11 @@ exit "$rc"
    # no test mounts may be reachable from this parent before removing staging.
    try:
     root()
+    if framework is not None and (framework.stopped or (global_attempted and not global_restored)):
+     # A failed cycle can leave the framework unavailable or still consuming
+     # temporary XML. Reboot cancels pending work and removes ephemeral mounts.
+     reboot();root();unchanged();global_restored=True;framework.stopped=False
+     module_report.update(recoveryRebootAfterFrameworkFailure=True,rebootOriginalsUnchanged=True)
     if app_started:
      adb('shell','am','force-stop','io.github.xgl34222220.luoshu.fontcontract');app_started=False
      module_report['testAppStoppedBeforeRollback']=True

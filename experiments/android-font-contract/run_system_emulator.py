@@ -8,7 +8,8 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 PACKAGE='io.github.xgl34222220.luoshu.fontcontract'
-p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');p.add_argument('--explicit-style-matrix',action='store_true');p.add_argument('--matching-weight-family',action='store_true');p.add_argument('--module-namespace-only',action='store_true');p.add_argument('--module-app-direct',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');p.add_argument('--explicit-style-matrix',action='store_true');p.add_argument('--matching-weight-family',action='store_true');p.add_argument('--module-namespace-only',action='store_true');p.add_argument('--module-app-direct',action='store_true');p.add_argument('--module-app-default',action='store_true');a=p.parse_args()
+if a.module_app_default:a.module_app_direct=True
 if a.module_namespace_only and a.module_app_direct:raise SystemExit('choose one module experiment mode')
 if (a.module_namespace_only or a.module_app_direct) and not (a.matching_weight_family and a.production_payload):raise SystemExit('namespace experiment requires the explicit production matching payload')
 if a.matching_weight_family:a.explicit_style_matrix=True
@@ -17,6 +18,8 @@ if os.environ.get('LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED')!='true':
  raise SystemExit('disposable system mutation not authorized for this run')
 if a.module_app_direct and os.environ.get('LUOSHU_FONT_COPY_LABEL_TEST_APPROVED')!='true':
  raise SystemExit('font-copy relabel experiment not authorized for this run')
+if a.module_app_default and os.environ.get('LUOSHU_FRAMEWORK_XML_TEST_APPROVED')!='true':
+ raise SystemExit('framework restart and XML-copy labels not authorized for this run')
 a.output.mkdir(parents=True,exist_ok=True)
 report={'scope':'disposable API36 userdebug CI emulator','rootManagerTested':False,'hardwareRomCoverage':False,'restored':False}
 phase='preflight';started=time.monotonic();backups={};touched=False;new_fonts={};expected_roles={};asset='/system/fonts/LuoShuContractExperiment.ttf'
@@ -180,9 +183,19 @@ try:
   phase='module-private-namespace';save()
   from run_module_namespace import run as run_namespace,direct_contract
   direct=direct_contract(manifest,case_report['styleMatrixCases'],report['styleBaseline'],metadata,backups['/system/etc/font_fallback.xml']) if a.module_app_direct else None
-  report['moduleNamespace']=run_namespace(adb,root,reboot,read_system_file,payload,manifest,captured,backups,a.output,direct=direct)
+  restored_cases=[]
+  for old in report['styleBaseline']['cases']:
+   case={key:old[key] for key in ('family','weight','italic','sample')};font=old['actualFonts'][0]
+   case['expected']={'path':font['file'],'sha256':font['sha256'],'face':font['face'],'fontWeight':font['weight'],'fontSlant':font['slant'],'raster':old['raster']};restored_cases.append(case)
+  framework=None;default_probe=None
+  if a.module_app_default:
+   from framework_cycle import FrameworkCycle
+   framework=FrameworkCycle(adb,approved=os.environ.get('LUOSHU_FRAMEWORK_XML_TEST_APPROVED')=='true')
+   def default_probe(phase):
+    return style_probe('mounted-default-'+phase,case_report['styleMatrixCases'] if phase=='mounted' else restored_cases,'passed-style-matrix')
+  report['moduleNamespace']=run_namespace(adb,root,reboot,read_system_file,payload,manifest,captured,backups,a.output,direct=direct,framework=framework,default_probe=default_probe)
   report['restored']=report['moduleNamespace'].get('rebootOriginalsUnchanged') is True
-  report['takeover']='not-tested-direct-app-read-only' if a.module_app_direct else 'not-tested-namespace-only'
+  report['takeover']='passed-mounted-default-framework-cycle' if a.module_app_default else 'not-tested-direct-app-read-only' if a.module_app_direct else 'not-tested-namespace-only'
   report['restoredProbe']=probe('system-restored')
   restored_cases=[]
   for old in report['styleBaseline']['cases']:

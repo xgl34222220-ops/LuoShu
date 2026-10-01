@@ -47,4 +47,24 @@ _luoshu_set_file_context() { printf changed >> "$r/labels"; }
 : > "$r/labels"
 _luoshu_restore_memory_labels "$r/copy" "$r/stock" "$r/inventory" 0
 test ! -s "$r/labels"
+
+# Only the explicitly approved synthetic API36 system XML scope can opt in.
+mkdir "$r/config-copy" "$r/config-stock"
+printf original > "$r/config-stock/font_fallback.xml"
+printf xml > "$r/config-copy/font_fallback.xml"
+getprop() { case "$1" in ro.kernel.qemu) echo 1 ;; ro.build.version.sdk) echo 36 ;; esac; }
+getenforce() { echo Enforcing; }
+id() { echo 0; }
+if _luoshu_config_copy_labels_allowed "$r/config-copy" system-etc "$r/config-stock"; then exit 1; fi
+LUOSHU_XML_COPY_LABEL_TEST_APPROVED=true
+_luoshu_config_copy_labels_allowed "$r/config-copy" system-etc "$r/config-stock"
+if _luoshu_config_copy_labels_allowed "$r/config-copy" vendor-etc "$r/config-stock"; then exit 1; fi
+printf other > "$r/config-copy/unrelated.xml"
+if _luoshu_config_copy_labels_allowed "$r/config-copy" system-etc "$r/config-stock"; then exit 1; fi
+rm "$r/config-copy/unrelated.xml"
+getenforce() { echo Permissive; }
+if _luoshu_config_copy_labels_allowed "$r/config-copy" system-etc "$r/config-stock"; then exit 1; fi
+getenforce() { echo Enforcing; }
+rm "$r/config-stock/font_fallback.xml"
+if _luoshu_config_copy_labels_allowed "$r/config-copy" system-etc "$r/config-stock"; then exit 1; fi
 printf 'memory_layer_context_test: PASS (mock-only exact/ancestor contexts, modes, denial and readback)\n'
