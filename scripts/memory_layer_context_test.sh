@@ -29,6 +29,36 @@ test "$(stat -c %a "$r/copy/sub/new.ttf")" = 644
 test "$(stat -c %a "$r/copy/sub")" = 755
 test "$(cat "$r/stock/existing.xml")" = original
 ! grep -F "$r/stock|" "$r/labels"
+# A real same-directory ROM font alias supplies the terminal file's label.
+printf font > "$r/stock/Roboto-Regular.ttf"
+ln -s Roboto-Regular.ttf "$r/stock/DroidSans.ttf"
+ln -s DroidSans.ttf "$r/stock/DroidSans-Bold.ttf"
+printf selected > "$r/copy/DroidSans.ttf"
+printf selected > "$r/copy/DroidSans-Bold.ttf"
+printf 'f|DroidSans.ttf\nf|DroidSans-Bold.ttf\n' > "$r/alias-inventory"
+printf '%s|%s\n' "$r/stock/Roboto-Regular.ttf" u:object_r:system_font:s0 >> "$r/labels"
+test "$(_luoshu_stock_label_reference "$r/stock" DroidSans.ttf)" = "$r/stock/Roboto-Regular.ttf"
+test "$(_luoshu_stock_label_reference "$r/stock" DroidSans-Bold.ttf)" = "$r/stock/Roboto-Regular.ttf"
+_luoshu_restore_memory_labels "$r/copy" "$r/stock" "$r/alias-inventory"
+test "$(_luoshu_file_context "$r/copy/DroidSans.ttf")" = u:object_r:system_font:s0
+test "$(_luoshu_file_context "$r/copy/DroidSans-Bold.ttf")" = u:object_r:system_font:s0
+test "$(readlink "$r/stock/DroidSans.ttf")" = Roboto-Regular.ttf
+test "$(cat "$r/stock/Roboto-Regular.ttf")" = font
+# Loops, dangling names, directory aliases and any path-bearing hop stay blocked.
+ln -s cycle-b "$r/stock/cycle-a"; ln -s cycle-a "$r/stock/cycle-b"
+ln -s missing.ttf "$r/stock/dangling.ttf"
+ln -s sub "$r/stock/directory.ttf"
+ln -s ../stock/Roboto-Regular.ttf "$r/stock/escape-return.ttf"
+ln -s sub/new.ttf "$r/stock/path.ttf"
+for rel in cycle-a dangling.ttf directory.ttf escape-return.ttf path.ttf ../stock/Roboto-Regular.ttf ./Roboto-Regular.ttf; do
+    if _luoshu_stock_label_reference "$r/stock" "$rel"; then echo "unsafe label reference accepted: $rel" >&2; exit 1; fi
+done
+ln -s "$r/stock/sub" "$r/stock/parent-link"
+if _luoshu_stock_label_reference "$r/stock" parent-link/new.ttf; then exit 1; fi
+# A source payload symlink is never legalized by accepting a stock alias.
+ln -s existing.xml "$r/copy/forbidden.ttf"
+if _luoshu_memory_tree_inventory "$r/copy" "$r/bad-inventory"; then exit 1; fi
+rm "$r/copy/forbidden.ttf"
 # Denied relabel or mismatched readback cannot be published as success.
 _luoshu_set_file_context() { return 1; }
 if _luoshu_restore_memory_labels "$r/copy" "$r/stock" "$r/inventory"; then exit 1; fi

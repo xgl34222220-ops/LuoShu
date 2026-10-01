@@ -59,6 +59,8 @@ _luoshu_file_context() {
 }
 _luoshu_stock_label_reference() (
     lower="$1";rel="$2"
+    [ -d "$lower" ] && [ ! -L "$lower" ] || exit 1
+    case "$rel" in /*|.|..|./*|../*|*/./*|*/../*|*/.|*/..) exit 1 ;; esac
     candidate="$lower${rel:+/$rel}"
     while [ ! -e "$candidate" ]; do
         [ ! -L "$candidate" ] || exit 1
@@ -66,12 +68,26 @@ _luoshu_stock_label_reference() (
         candidate="${candidate%/*}"
         case "$candidate" in "$lower"|"$lower"/*) ;; *) exit 1 ;; esac
     done
+    # Parent directories must be the captured stock view, never a link out of it.
     check="$candidate"
+    [ "$check" = "$lower" ] || check="${check%/*}"
     while [ "$check" != "$lower" ]; do
         [ ! -L "$check" ] || exit 1
         check="${check%/*}"
     done
-    [ ! -L "$lower" ] || exit 1
+    # Android's DroidSans aliases point to a regular font in the same directory.
+    # Resolve only such filename-only hops; no absolute/path traversal or guessed
+    # context. Every hop remains in the unchanged captured directory. The copy
+    # itself is still required to be a regular file by the tree inventory gate.
+    hops=0
+    while [ -L "$candidate" ]; do
+        hops=$((hops + 1)); [ "$hops" -le 32 ] || exit 1
+        link=$(readlink "$candidate") || exit 1
+        case "$link" in ''|.|..|*/*) exit 1 ;; esac
+        candidate="${candidate%/*}/$link"
+        [ -e "$candidate" ] || [ -L "$candidate" ] || exit 1
+    done
+    if [ "$hops" -gt 0 ]; then [ -f "$candidate" ] || exit 1; fi
     printf '%s\n' "$candidate"
 )
 _luoshu_set_file_context() { chcon "$1" "$2"; }
@@ -97,7 +113,10 @@ _luoshu_restore_memory_labels() (
         dest="$point/$rel"
         chmod "$mode" "$dest" || exit 1
         if [ "$active" = 1 ]; then
-            reference=$(_luoshu_stock_label_reference "$lower" "$rel") || exit 1
+            reference=$(_luoshu_stock_label_reference "$lower" "$rel") || {
+                type _luoshu_self_log >/dev/null 2>&1 && _luoshu_self_log "memory-label-reference-unavailable: $rel"
+                exit 1
+            }
             label=$(_luoshu_file_context "$reference") || exit 1
             _luoshu_set_file_context "$label" "$dest" || exit 1
             [ "$(_luoshu_file_context "$dest")" = "$label" ] || exit 1

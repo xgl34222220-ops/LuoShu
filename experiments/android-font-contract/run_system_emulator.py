@@ -152,7 +152,7 @@ try:
  assets=Path(__file__).parent/'app/src/main/assets'
  production=None
  if a.production_payload:
-  phase='production-compile';save()
+  phase='native-payload-validation' if a.native_prepared_root else 'production-compile';save()
   work=Path(__file__).parent/'.work-production';(work/'stock').mkdir(parents=True,exist_ok=True)
   import sys
   sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'xml-first'))

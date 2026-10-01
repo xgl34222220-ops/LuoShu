@@ -474,3 +474,21 @@ paths are explicitly snapshotted in addition to the XML and family originals;
 restoration checks original hashes and alias targets, while new assets must
 vanish. A failed prepare cannot proceed to installation or mounting. This remains
 a disposable VM experiment, not real boot/root-manager/vendor-ROM qualification.
+
+The first native-payload consumer attempt,
+[0f45ca3e / run 36901054338](https://github.com/xgl34222220-ops/LuoShu/actions/runs/36901054338),
+passed Android preparation again (48 artifacts, 183.826 seconds) and verified the
+exported payload. Mount publication failed before ordinary App consumption.
+The SDK's physical DroidSans aliases refer to Roboto-Regular.ttf in the same
+original directory; the label-reference helper rejected all symlinks, including
+these captured original aliases. The font memory layer therefore never reached
+read-only publication. The transaction rolled back; XML visibility verification
+correctly refused success. Recovery reboot verified original hashes and alias
+targets, removed owned staging and destroyed the VM.
+
+Label lookup now permits bounded filename-only alias chains within the same
+captured original directory, ending at a regular file. It still rejects absolute
+or path-bearing hops, loops, dangling links, directory aliases and all symlinks
+in generated payloads. Labels are read from the terminal original and written
+only to the owned copy. This is a narrow compatibility correction, not a general
+cross-partition alias-label resolver or a change to SELinux policy.

@@ -221,7 +221,7 @@ exit "$rc"
     if not module_report.get('rebootOriginalsUnchanged'):
      reboot();root();unchanged();module_report['rebootOriginalsUnchanged']=True
     adb('shell','test','!','-f',REMOTE+'/temporarily-hidden-font') if module_report['state']=='passed' else None
-    for name in ('namespace-result.json','namespace-isolation.json','mount-calls.jsonl','mount-kernel-tail.txt','mount-failure-mountinfo.txt','logs/universal-mount.log','config/universal-font-mount.conf'):
+    for name in ('namespace-result.json','namespace-isolation.json','mount-calls.jsonl','mount-kernel-tail.txt','mount-failure-mountinfo.txt','logs/universal-mount.log','logs/self-mount.log','config/universal-font-mount.conf'):
      (output/('module-'+name.replace('/','-'))).write_bytes(adb('exec-out','cat',REMOTE+'/'+name,check=False))
     mountinfo=adb('shell','cat','/proc/self/mountinfo').decode()
     if any((line.split()[4]==REMOTE or line.split()[4].startswith(REMOTE+'/')) for line in mountinfo.splitlines()):raise RuntimeError('refuse removal while staging mount remains')
