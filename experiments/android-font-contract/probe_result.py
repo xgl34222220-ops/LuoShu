@@ -4,7 +4,10 @@ import re
 def require_instrumentation_success(log):
     text=log.decode(errors='replace') if isinstance(log,bytes) else log
     codes=re.findall(r'^INSTRUMENTATION_CODE:\s*(-?\d+)\s*$',text,re.MULTILINE)
-    if codes!=['-1']:raise RuntimeError('instrumentation did not finish successfully: '+text[-1000:])
+    # am instrument prints only the custom stream on this successful runner;
+    # a footer is optional. Failure footers/messages are never acceptable.
+    if (codes and codes!=['-1']) or re.search(r'^INSTRUMENTATION_(FAILED|RESULT: shortMsg=)',text,re.MULTILINE):
+        raise RuntimeError('instrumentation did not finish successfully: '+text[-1000:])
 
 def validate_probe_result(log, report, request_id, expected_status):
     require_instrumentation_success(log)

@@ -13,3 +13,9 @@ class ProbeResultTest(unittest.TestCase):
  def test_current_failed_gate_remains_failure(self):
   with self.assertRaisesRegex(RuntimeError,'did not satisfy'):
    validate_probe_result('INSTRUMENTATION_CODE: -1\n',{'probeRequestId':'new','status':'failed'},'new','passed')
+
+ def test_custom_stream_success_requires_fresh_report_without_footer(self):
+  r={'probeRequestId':'new','status':'passed'}
+  self.assertIs(validate_probe_result('{"status":"passed"}\n',r,'new','passed'),r)
+  with self.assertRaisesRegex(RuntimeError,'stale'):
+   validate_probe_result('{"status":"passed"}\n',r,'different','passed')
