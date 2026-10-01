@@ -40,6 +40,71 @@ _luoshu_bind_private_lower() (
     fi
 )
 
+# 0=active, 1=disabled/non-Android host, 2=unknown: unknown must not skip labels.
+_luoshu_selinux_active() {
+    if command -v getenforce >/dev/null 2>&1; then
+        _lss=$(getenforce 2>/dev/null) || return 2
+        case "$_lss" in Enforcing|Permissive) return 0 ;; Disabled) return 1 ;; *) return 2 ;; esac
+    fi
+    if [ -e /sys/fs/selinux/enforce ]; then
+        _lss=$(cat /sys/fs/selinux/enforce 2>/dev/null) || return 2
+        case "$_lss" in 0|1) return 0 ;; *) return 2 ;; esac
+    fi
+    command -v getprop >/dev/null 2>&1 && return 2
+    return 1
+}
+_luoshu_file_context() {
+    _lsctx=$(ls -Zd "$1" 2>/dev/null) || return 1
+    printf '%s\n' "$_lsctx" | awk '{for(i=1;i<=NF;i++)if($i ~ /^[A-Za-z0-9_]+:object_r:[A-Za-z0-9_]+:s[0-9]/){print $i;ok=1;exit}}END{if(!ok)exit 1}'
+}
+_luoshu_stock_label_reference() (
+    lower="$1";rel="$2"
+    candidate="$lower${rel:+/$rel}"
+    while [ ! -e "$candidate" ]; do
+        [ ! -L "$candidate" ] || exit 1
+        [ "$candidate" != "$lower" ] || exit 1
+        candidate="${candidate%/*}"
+        case "$candidate" in "$lower"|"$lower"/*) ;; *) exit 1 ;; esac
+    done
+    check="$candidate"
+    while [ "$check" != "$lower" ]; do
+        [ ! -L "$check" ] || exit 1
+        check="${check%/*}"
+    done
+    [ ! -L "$lower" ] || exit 1
+    printf '%s\n' "$candidate"
+)
+_luoshu_set_file_context() { chcon "$1" "$2"; }
+
+# Modify only the owned temporary copy. Existing originals and SELinux policy
+# are never changed. New assets use the nearest actual stock directory label.
+_luoshu_restore_memory_labels() (
+    point="$1";lower="$2";inventory="$3";label_fonts="${4:-1}"
+    case "$label_fonts" in 0|1) ;; *) exit 1 ;; esac
+    [ -d "$lower" ] && [ ! -L "$lower" ] || exit 1
+    chmod 0755 "$point" || exit 1
+    active=0
+    if _luoshu_selinux_active; then active="$label_fonts"
+    else [ "$?" = 1 ] || exit 1
+    fi
+    if [ "$active" = 1 ]; then
+        label=$(_luoshu_file_context "$lower") || exit 1
+        _luoshu_set_file_context "$label" "$point" || exit 1
+        [ "$(_luoshu_file_context "$point")" = "$label" ] || exit 1
+    fi
+    while IFS='|' read -r kind rel; do
+        case "$kind" in f) mode=0644 ;; d) mode=0755 ;; *) exit 1 ;; esac
+        dest="$point/$rel"
+        chmod "$mode" "$dest" || exit 1
+        if [ "$active" = 1 ]; then
+            reference=$(_luoshu_stock_label_reference "$lower" "$rel") || exit 1
+            label=$(_luoshu_file_context "$reference") || exit 1
+            _luoshu_set_file_context "$label" "$dest" || exit 1
+            [ "$(_luoshu_file_context "$dest")" = "$label" ] || exit 1
+        fi
+    done < "$inventory"
+)
+
 _luoshu_memory_tree_inventory() (
     root="$1"; output="$2"
     find "$root" -print > "$output.paths" 2>/dev/null || exit 1
@@ -60,7 +125,7 @@ _luoshu_memory_tree_inventory() (
 # every lower on that filesystem. For a sealed Universal transaction only, use
 # an owned, bounded tmpfs copy. No source bytes or filesystem flags are changed.
 _luoshu_overlay_memory_layer() (
-    source="$1"; point="$2"; state="$3"
+    source="$1"; point="$2"; state="$3"; stock="${4:-}"; label_fonts="${5:-0}"
     [ "${LUOSHU_REQUIRED_PAYLOAD_FILES:-0}" = 1 ] || exit 1
     [ -n "${_lsme_mount_list:-}" ] || exit 1
     # Record the complete tree, including directories; no links/special files.
@@ -88,6 +153,7 @@ _luoshu_overlay_memory_layer() (
     _luoshu_memory_tree_inventory "$point" "$inventory.copy" || exit 1
     cmp -s "$inventory" "$inventory.after" && cmp -s "$inventory" "$inventory.copy" || exit 1
     _luoshu_atomic_tree_visible "$source" "$point" overlay || exit 1
+    _luoshu_restore_memory_labels "$point" "$stock" "$inventory" "$label_fonts" || exit 1
     _luoshu_mount_cmd -o remount,ro,nosuid,nodev,noexec luoshu-layer "$point" >/dev/null 2>&1 || exit 1
     awk -v p="$point" '$5==p && $6 ~ /(^|,)ro(,|$)/ {ok=1} END{exit !ok}' /proc/self/mountinfo
 )
@@ -135,7 +201,11 @@ _luoshu_overlay_mount_dir() {
     fi
 
     _lsomb_memory="$_lsomb_state/memory-layers/$_lsomb_key"
-    if _luoshu_overlay_memory_layer "$_lsomb_source" "$_lsomb_memory" "$_lsomb_state" &&
+    # The current explicit relabel authorization covers font copies only.
+    # Font configuration XML copies keep their existing labels in this phase.
+    _lsomb_label_fonts=0
+    case "$_lsomb_key" in *-fonts) _lsomb_label_fonts=1 ;; esac
+    if _luoshu_overlay_memory_layer "$_lsomb_source" "$_lsomb_memory" "$_lsomb_state" "$_lsomb_lower" "$_lsomb_label_fonts" &&
        _luoshu_overlay_try "$_lsomb_memory" "$_lsomb_lower" "$_lsomb_target" "$_lsomb_key" "$_lsomb_state"; then
         return 0
     fi

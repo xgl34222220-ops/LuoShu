@@ -15,6 +15,8 @@ if a.matching_weight_family:a.explicit_style_matrix=True
 if a.explicit_style_matrix and not a.production_payload:raise SystemExit('style matrix requires production payload')
 if os.environ.get('LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED')!='true':
  raise SystemExit('disposable system mutation not authorized for this run')
+if a.module_app_direct and os.environ.get('LUOSHU_FONT_COPY_LABEL_TEST_APPROVED')!='true':
+ raise SystemExit('font-copy relabel experiment not authorized for this run')
 a.output.mkdir(parents=True,exist_ok=True)
 report={'scope':'disposable API36 userdebug CI emulator','rootManagerTested':False,'hardwareRomCoverage':False,'restored':False}
 phase='preflight';started=time.monotonic();backups={};touched=False;new_fonts={};expected_roles={};asset='/system/fonts/LuoShuContractExperiment.ttf'
@@ -43,7 +45,22 @@ def boot():
 def reboot():
  adb('reboot');time.sleep(2);boot()
 def root():
- adb('root');adb('wait-for-device');assert adb('shell','id','-u').strip()==b'0','adbd root unavailable'
+ # adbd can close the transport while a successful root restart is in flight.
+ # Reconnect and verify the actual UID; never treat the root command as proof.
+ last='no response'
+ for attempt in range(2):
+  try:
+   adb('wait-for-device',timeout=15)
+   if adb('shell','id','-u',timeout=5,check=False).strip()==b'0':return
+   response=adb('root',timeout=10,check=False)
+   if b'cannot run as root' in response:raise PermissionError('adbd explicitly refused root')
+   adb('wait-for-device',timeout=15)
+   uid=adb('shell','id','-u',timeout=5,check=False).strip()
+   if uid==b'0':return
+   last='observed uid='+repr(uid)
+  except PermissionError:raise
+  except Exception as error:last=type(error).__name__+': '+str(error)
+ raise RuntimeError('adbd root verification failed after bounded reconnect: '+last)
 def probe(name, extra_args=None):
  extras=list(extra_args or [])
  if name=='system-applied':

@@ -74,6 +74,7 @@ exit "$rc"
   if direct is None:
    raw=adb('shell','env','LUOSHU_PARENT_MOUNT_NAMESPACE='+parent,'timeout','-k','5','180','unshare','-m','/system/bin/sh',REMOTE+'/module_namespace_probe.sh',REMOTE,timeout=200)
   else:
+   (output/'original-font-labels.txt').write_bytes(adb('shell','ls','-ldZ','/system/fonts','/system/etc',*backups.keys(),*captured.keys(),check=False))
    global_attempted=True;module_report['globalMountAttempted']=True
    raw=adb('shell','timeout','-k','5','150','sh',REMOTE+'/module_global_probe.sh',REMOTE,'apply',timeout=180)
    apply_completed=True

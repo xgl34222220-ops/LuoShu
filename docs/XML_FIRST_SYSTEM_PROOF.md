@@ -255,3 +255,21 @@ or user device is involved. Android results for this new direct-read mode are
 still pending. ARM64 execution also remains unproved; the currently available
 runner/runtime experiment is x86_64, and the packaged ARM ELF requires Android's
 Bionic linker, not a Linux ARM interpreter.
+
+### Ordinary-App label failure and scoped correction pending verification
+
+Run 36853045919 reached the real App (UID 10216, `untrusted_app`, Enforcing).
+Opening the first mounted font failed with EACCES; the kernel AVC identifies its
+`appdomain_tmpfs:s0` target label. Root readability therefore was insufficient.
+Production rollback restored the original bytes, but a post-reboot adbd transport
+closure interrupted final verification and explicit staging cleanup. Emulator
+teardown was confirmed; this attempt is not recorded as a successful recovery.
+
+The authorized correction restores labels only on owned temporary font-layer
+copies (configuration XML copies are not relabeled in this phase), using the captured original counterpart or nearest existing original
+directory for a new asset. Each label is read back before the memory layer becomes
+read-only. Original files and SELinux policy/enforcing state are unchanged. File
+modes on copies are restricted to 0644 and directories to 0755. Host label tests
+mock chcon and do not substitute for Android verification. The adb root helper
+now reconnects within a fixed budget and requires actual UID 0, rather than
+failing solely because adbd closed the transport during its root restart.
