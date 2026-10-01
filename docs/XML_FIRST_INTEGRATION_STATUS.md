@@ -203,3 +203,24 @@ actual source files/hashes and independently constructed raster references befor
 and after reboot. It changes no system XML, performs no root/remount test, and
 does not establish OEM geometry or module deployment. Production integration must
 wait for a sound geometry contract and explicit fixed-selection semantics.
+
+## App-only matching capability result
+
+[Run 36809070207](https://github.com/xgl34222220-ops/LuoShu/actions/runs/36809070207),
+commit `83eb0ec747b43323fefc19be398721b0c0de74d9`, passed all 48 cases before
+and after reboot, with identical evidence arrays. Across eight requested weights,
+normal A/1/中 each retained one raster hash; original A/1 italics produced six
+distinct rasters, with endpoint clamping. CJK synthetic italic also stayed fixed.
+Actual file and buffer hash checks passed. The disposable VM was terminated.
+The workflow's system-test authorization flag was false: this did not mutate
+system configuration and does not repair the failed revision-two global matrix.
+
+The next isolated gate uses the official Python.org Android x86_64 package at the
+same Python 3.14.6 version and pinned FontTools 4.63.0 as production. A CI-only
+launcher uses the same C source and pruning policy as the shipped ARM64 runtime.
+As ordinary adb shell, it will compare actual SDK CFF2 measurement with a same-byte
+host reference, build and reopen a real nine-master variable font, and test the
+production commit lock in actual Android sh with both backend choices. All work
+is under one new temporary directory and is removed on exit. This gate is not
+yet run; it cannot establish shipped ARM64 execution, root-manager integration
+or system mounting. No package runtime ABI or phone installer is changed.
