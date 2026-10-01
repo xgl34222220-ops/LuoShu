@@ -2390,6 +2390,9 @@ def _compile_all_in_view(
             fixed_static.preflight_unit(unit, stock_paths, allow_live_stock)
         except CompilerError as error:
             raise CompilerError(f"fixed-static-preflight {unit['target'].get('path')} face={unit['artifact'].get('originalStockFaceIndex')}: {error}") from error
+    # Never escape this compile request. Identity and per-route geometry gates
+    # remain independent; only immutable source probe values are reused.
+    static_measurements: dict[str, Any] = {}
     for measure_index, unit in enumerate(static_units):
         import fixed_static_xml_compiler as fixed_static
         _mixed_compile_progress(measure_index, len(static_units), base=82, span=3, label="正在测量原厂槽位")
@@ -2398,7 +2401,7 @@ def _compile_all_in_view(
                        targetPath=unit["target"].get("path"), faceIndex=unit["artifact"].get("originalStockFaceIndex"),
                        weight=unit["artifact"].get("requiredWeight"), axes=unit["artifact"].get("originalStockAxes"))
         try:
-            unit["_fixedStaticPrepared"] = fixed_static.prepare_unit(unit, stock_paths, allow_live_stock)
+            unit["_fixedStaticPrepared"] = fixed_static.prepare_unit(unit, stock_paths, allow_live_stock, cache=static_measurements)
         except CompilerError as error:
             _compile_trace(unit["artifact"], "fixed-static-measure-blocked", reason=str(error), elapsed=time.monotonic()-measure_started)
             raise CompilerError(f"fixed-static-measure {unit['target'].get('path')} face={unit['artifact'].get('originalStockFaceIndex')}: {error}") from error

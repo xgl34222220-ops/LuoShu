@@ -144,6 +144,58 @@ def _binding(contract):
     return result
 
 
+def _source_measurements(cache, source, path):
+    """One request's value-only measurements; never retain a mutable TTFont.
+
+    The caller has just rehashed the source. Fixed selection/request identity,
+    face and probe/compiler revisions prevent reuse across different inputs.
+    Keep at most one source and a bounded number of probe groups in memory.
+    """
+    if cache is None:
+        return None
+    api = _api()
+    key = api._canonical_hash({
+        "sourceSha256": source["fileUid"], "path": str(path),
+        "faceIndex": int(source.get("faceIndex", 0)),
+        "fixedSelection": source["mixedSelection"],
+        "compilerRevision": api.COMPILER_REVISION, "revision": REVISION,
+        "probeSchema": api.template_engine.PROBE_SCHEMA,
+    })
+    entry = cache.get("_fixedStaticSourceMeasurements")
+    if entry is None or entry["key"] != key:
+        entry = {"key": key, "cmap": None, "profile": None, "groups": {}}
+        cache["_fixedStaticSourceMeasurements"] = entry
+    return entry
+
+
+def _source_cmap(font, measurements):
+    if measurements is None:
+        return font.getBestCmap() or {}
+    if measurements["cmap"] is None:
+        measurements["cmap"] = dict(font.getBestCmap() or {})
+    return measurements["cmap"]
+
+
+def _source_profile(font, measurements):
+    if measurements["profile"] is None:
+        measurements["profile"] = _api()._profile_from_font(font)
+    # Later role/intersection filtering must never mutate a cached profile.
+    return copy.deepcopy(measurements["profile"])
+
+
+def _probe_group(font, points, measurements=None):
+    if measurements is None:
+        return _api().template_engine.glyph_group(font, points)
+    key = tuple(points)
+    groups = measurements["groups"]
+    if key not in groups:
+        value = _api().template_engine.glyph_group(font, points)
+        if len(groups) < 128:
+            groups[key] = copy.deepcopy(value)
+        return value
+    return copy.deepcopy(groups[key])
+
+
 def _subset(font, points):
     opts = subset.Options()
     opts.recalc_timestamp = False
@@ -225,7 +277,7 @@ def verify_original_face(target, stock, face_index, *, metadata_only=False):
             "faceIndex":face_index}
 
 
-def prepare_unit(unit, stock_paths, allow_live_stock):
+def prepare_unit(unit, stock_paths, allow_live_stock, *, cache=None):
     """Verify and measure one route. No output font or source mutation occurs."""
     api = _api()
     _validate_unit(unit)
@@ -236,9 +288,12 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
     if api._font_container(path) != "TTF":
         raise api.CompilerError("fixed static XML currently requires a standalone TrueType source")
     face = int(source.get("faceIndex", 0))
-    original = api._open_face(path, face)
+    # Measurement only reads selected outlines. Eager glyf decoding expands the
+    # entire CJK source for each XML route even when only a few probes are used.
+    original = api._open_face(path, face, lazy=True)
     stock_font = stock_geometry = None
     try:
+        source_measurements = _source_measurements(cache, source, path)
         if (VARIABLE_TABLES & set(original.keys()) or "glyf" not in original
                 or any(tag not in original for tag in ("head", "hhea", "OS/2", "post", "name"))):
             raise api.CompilerError("fixed static XML source must be a complete static glyf face")
@@ -266,7 +321,8 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
             raise api.CompilerError("fixed static XML OEM VARC geometry is unsupported")
         weight = api._int(artifact.get("requiredWeight"), 400)
         location, axis_evidence = _original_location(stock_font, artifact["originalStockAxes"], weight)
-        source_points = set(original.getBestCmap() or {})
+        source_cmap = _source_cmap(original, source_measurements)
+        source_points = set(source_cmap)
         stock_points = set(stock_font.getBestCmap() or {})
         role = str(target["role"])
         allowed_stock = {cp for cp in stock_points if _allowed(role, cp)}
@@ -284,7 +340,8 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
         if actual_location != location:
             raise api.CompilerError("fixed static XML OEM measurement location changed")
         stock_profile, source_profile = api._paired_geometry_profiles(
-            stock_geometry, original, "cjk" if has_han else role)
+            stock_geometry, original, "cjk" if has_han else role,
+            source_profile=_source_profile(original, source_measurements) if source_measurements is not None else None)
         if has_han:
             # The old shared-probe fallback can accept different canonical
             # subsets on each side. This asset exposes only their intersection,
@@ -293,7 +350,7 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
             if len(shared) > 64:
                 shared = [shared[i * (len(shared) - 1) // 63] for i in range(64)]
             for font, profile in ((stock_geometry, stock_profile), (original, source_profile)):
-                profile["probes"]["cjk"] = api.template_engine.glyph_group(font, shared)
+                profile["probes"]["cjk"] = _probe_group(font, shared, source_measurements if font is original else None)
                 profile["sharedProbePoints"] = {"cjk": shared}
         needed = set()
         for cp in points:
@@ -314,7 +371,7 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
             for probe, canonical in api.template_engine.PROBE_GROUPS.items():
                 selected = [cp for cp in canonical if cp in selected_points]
                 if selected:
-                    filtered[probe] = api.template_engine.glyph_group(font, selected)
+                    filtered[probe] = _probe_group(font, selected, source_measurements if font is original else None)
             if previous_cjk is not None:
                 filtered["cjk"] = previous_cjk
             profile["probes"] = filtered
@@ -325,12 +382,12 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
                           if all(ord(char) in selected_points for char in pair)
                           for cp in map(ord, pair))
         if brackets:
-            selected_cmap = original.getBestCmap() or {}
+            selected_cmap = source_cmap
             bracket_names = {selected_cmap[cp] for cp in brackets}
             if any(cp not in brackets and selected_cmap.get(cp) in bracket_names for cp in selected_points):
                 raise api.CompilerError("fixed static XML delimiter shares an incompatible source glyph")
             for font, profile in ((stock_geometry, stock_profile), (original, source_profile)):
-                profile["probes"]["punctuationBrackets"] = api.template_engine.glyph_group(font, brackets)
+                profile["probes"]["punctuationBrackets"] = _probe_group(font, brackets, source_measurements if font is original else None)
             needed.add("punctuationBrackets")
         geometry = api._geometry_plan(target, stock_profile, source_profile, weight)
         if brackets:
