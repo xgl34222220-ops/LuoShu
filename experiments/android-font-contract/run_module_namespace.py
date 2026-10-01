@@ -30,6 +30,10 @@ def run(adb,root,reboot,read_system_file,payload,manifest,captured,backups,outpu
 err="$MODDIR/mount-error.$$"
 /system/bin/mount "$@" 2> "$err"
 rc=$?
+if [ "$rc" -ne 0 ]; then
+  /system/bin/dmesg 2>&1 | tail -n 120 > "$MODDIR/mount-kernel-tail.txt"
+  cat /proc/self/mountinfo > "$MODDIR/mount-failure-mountinfo.txt"
+fi
 cat "$err" >&2
 "$PYTHONHOME/bin/luoshu-python" -c 'import json,sys,pathlib; f=open(sys.argv[1],"a");f.write(json.dumps({"rc":int(sys.argv[2]),"stderr":pathlib.Path(sys.argv[3]).read_text(errors="replace")[-4000:],"args":sys.argv[4:]})+"\\n")' "$MODDIR/mount-calls.jsonl" "$rc" "$err" "$@"
 rm -f "$err"
@@ -66,8 +70,8 @@ exit "$rc"
     if not module_report.get('rebootOriginalsUnchanged'):
      reboot();root();unchanged();module_report['rebootOriginalsUnchanged']=True
     adb('shell','test','!','-f',REMOTE+'/temporarily-hidden-font') if module_report['state']=='passed' else None
-    for name in ('namespace-result.json','namespace-isolation.json','mount-calls.jsonl'):
-     (output/('module-'+name)).write_bytes(adb('exec-out','cat',REMOTE+'/'+name,check=False))
+    for name in ('namespace-result.json','namespace-isolation.json','mount-calls.jsonl','mount-kernel-tail.txt','mount-failure-mountinfo.txt','logs/universal-mount.log','config/universal-font-mount.conf'):
+     (output/('module-'+name.replace('/','-'))).write_bytes(adb('exec-out','cat',REMOTE+'/'+name,check=False))
     adb('shell','rm','-rf',REMOTE);adb('shell','test','!','-e',REMOTE)
     module_report['temporaryStageRemoved']=True
    except Exception as error:

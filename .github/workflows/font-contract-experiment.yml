@@ -53,7 +53,7 @@ jobs:
       - name: Require accelerated emulator
         id: accel
         env:
-          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == 'cfca5dd3494742676487191318e52bc8e3dd00b3' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
+          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == 'd5de49210f9d495b6cc83f6e761bb5aa9c30e463' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
         shell: bash
         run: |
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
@@ -70,7 +70,7 @@ jobs:
       - name: Verify actual Android font rendering and reboot persistence
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == 'cfca5dd3494742676487191318e52bc8e3dd00b3' && contains(github.event.head_commit.message, '[system-test-approved-once]') }}
+          LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == 'd5de49210f9d495b6cc83f6e761bb5aa9c30e463' && contains(github.event.head_commit.message, '[system-test-approved-once]') }}
         with:
           api-level: 36
           target: google_apis
