@@ -614,7 +614,9 @@ def _instantiate_probe_font(font: TTFont, location: dict[str, float], points: se
     No proof or output table is replaced by the subset. Unknown outline engines
     use the existing full-instance path instead.
     """
-    if not _PROBE_ONLY_ENABLED or "glyf" not in font or "VARC" in font:
+    supported_outline = ("glyf" in font or
+                         ("CFF2" in font and not any(tag in font for tag in ("COLR", "SVG "))))
+    if not _PROBE_ONLY_ENABLED or not supported_outline or "VARC" in font:
         return instantiateVariableFont(font, location, inplace=False, optimize=True)
     from fontTools import subset
     options = subset.Options()
@@ -2344,7 +2346,9 @@ def _compile_all_in_view(
         import fixed_static_xml_compiler as fixed_static
         _mixed_compile_progress(measure_index, len(static_units), base=82, span=3, label="正在测量原厂槽位")
         measure_started = time.monotonic()
-        _compile_trace(unit["artifact"], "fixed-static-measure-start", index=measure_index, total=len(static_units))
+        _compile_trace(unit["artifact"], "fixed-static-measure-start", index=measure_index, total=len(static_units),
+                       targetPath=unit["target"].get("path"), faceIndex=unit["artifact"].get("originalStockFaceIndex"),
+                       weight=unit["artifact"].get("requiredWeight"), axes=unit["artifact"].get("originalStockAxes"))
         try:
             unit["_fixedStaticPrepared"] = fixed_static.prepare_unit(unit, stock_paths, allow_live_stock)
         except CompilerError as error:

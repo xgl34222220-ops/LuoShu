@@ -88,3 +88,20 @@ endpoint, plus a discriminating opposite endpoint, before production compilation
 A full-batch metadata preflight now precedes expensive geometry measurement.
 The previous 311-second preparation ended before any system write; it is not a
 successful performance benchmark or proof of phone latency.
+
+## Confirmed SDK CFF2 measurement bottleneck
+
+Run `36793572819` passed all twelve native OEM endpoint comparisons: the SDK CJK
+font has a real 400–900 wght range, so XML requests 100/200/300 render exactly as
+400 across its four used faces, and differ from 900. It then hit the workflow
+limit during measurement 21/58, before any system-file write. Fifteen completed
+CFF2 measurements took 124–146 seconds each (median 132 seconds).
+
+The probe subset optimization now includes monochrome CFF2. A multi-axis fixture
+with avar, MVAR, HVAR, VVAR and VORG checks complete profiles, output readback,
+vertical advances/origins and unchanged input bytes at five locations. The next
+experiment additionally compares a full actual SDK CFF2 instance with the probe
+instance before compiling the production payload. A 600-second experimental
+compile budget leaves room to record failure and dispose of the VM; the phone's
+existing preparation deadline is unchanged. Global consumer/restore proof remains
+pending until the new run completes.

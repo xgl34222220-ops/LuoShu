@@ -61,6 +61,46 @@ class ProbePerformanceTest(unittest.TestCase):
             self.assertEqual(measurements[0],measurements[1],axes)
             for name,value in vertical[1].items():self.assertEqual(value,vertical[0][name])
         self.assertEqual(self.case.stock.read_bytes(),before)
+    def test_cff2_profiles_match_full_instances_with_metric_and_axis_variations(self):
+        from fontTools.designspaceLib import DesignSpaceDocument, AxisDescriptor, SourceDescriptor
+        from fontTools.varLib import build
+        from fontTools.fontBuilder import FontBuilder
+        design=DesignSpaceDocument()
+        for name,tag,lower,default,upper in [('Weight','wght',100,400,900),('Width','wdth',80,100,120)]:
+            axis=AxisDescriptor();axis.name=name;axis.tag=tag;axis.minimum=lower;axis.default=default;axis.maximum=upper;design.addAxis(axis)
+        points=tuple(sorted(set(fixture.ASCII_POINTS)|set(range(0x4e00,0x4e00+6000))))
+        with patch.object(fixture,'ASCII_POINTS',points):
+            for weight,width,height in [(100,100,690),(400,100,720),(900,100,770),(400,80,710),(400,120,735)]:
+                path=self.root/f'cff-{weight}-{width}.otf';delta=(weight-400)//20+(width-100)
+                fixture.make_font(path,family='CFF2 Probe',cff=True,weight=weight,y_max=height,advance=620+delta,ascent=900+delta)
+                with TTFont(path) as font:
+                    builder=FontBuilder(font=font)
+                    builder.setupVerticalMetrics({name:(1000+delta,100+delta) for name in font.getGlyphOrder()})
+                    builder.setupVerticalHeader(ascent=900+delta,descent=-120);font.save(path)
+                source=SourceDescriptor();source.path=str(path);source.name=f'{weight}-{width}';source.location={'Weight':weight,'Width':width}
+                source.copyInfo=weight==400 and width==100;source.copyLib=source.copyInfo;source.copyFeatures=source.copyInfo;design.addSource(source)
+        variable,_,_=build(design)
+        avar=variable['avar']=newTable('avar');avar.segments={'wght':{-1:-1,0:0,.5:.8,1:1},'wdth':{-1:-1,0:0,.5:.7,1:1}}
+        vorg=variable['VORG']=newTable('VORG');vorg.majorVersion=1;vorg.minorVersion=0;vorg.defaultVertOriginY=880
+        vorg.VOriginRecords={'u0041':903,'u4E2D':917}
+        path=self.root/'cff2-variable.otf';variable.save(path);variable.close();before=path.read_bytes()
+        with TTFont(path) as font:self.assertTrue({'CFF2','MVAR','HVAR','VVAR','avar','fvar'}<=set(font.keys()))
+        for weight,width in [(100,80),(900,120),(550,110),(650,90),(400,100)]:
+            profiles=[];vertical=[];origins=[];counts=[];validation=[];axes={'wght':weight,'wdth':width}
+            for enabled in (False,True):
+                with patch.object(compiler,'_PROBE_ONLY_ENABLED',enabled):
+                    font,location=compiler._stock_geometry_font(path,0,weight,axes)
+                    try:
+                        profiles.append(compiler._profile_from_font(font));vertical.append(dict(font['vmtx'].metrics));origins.append({name:font['VORG'][name] for name in font.getGlyphOrder()});counts.append(len(font.getGlyphOrder()))
+                    finally:font.close()
+                    artifact={'requiredWeight':weight,'requiredAxes':[{'tag':k,'stylevalue':v} for k,v in axes.items()]}
+                    validation.append(compiler._validate_output_face(path,0,{},artifact,profiles[-1],axes,'latin'))
+            self.assertEqual(profiles[0],profiles[1],axes);self.assertEqual(validation[0],validation[1],axes)
+            self.assertGreater(counts[0],6000);self.assertLess(counts[1],300)
+            for name,value in origins[1].items():self.assertEqual(value,origins[0][name])
+            for name,value in vertical[1].items():self.assertEqual(value,vertical[0][name])
+        self.assertEqual(before,path.read_bytes())
+
     def test_shared_han_sampling_uses_full_cmap_even_when_only_probes_are_instanced(self):
         points=tuple(range(0x9F00,0xA000))
         old=fixture.ASCII_POINTS

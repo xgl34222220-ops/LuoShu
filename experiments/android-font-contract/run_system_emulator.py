@@ -3,7 +3,7 @@
 Never usable without the explicit CI authorization marker. No hidden API or
 SELinux policy changes. Failure still attempts restoration and records evidence.
 """
-import argparse, copy, hashlib, json, os, subprocess, time
+import argparse, copy, hashlib, json, os, signal, subprocess, time
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
@@ -122,12 +122,17 @@ try:
   (a.output/'stock-axis-metadata.json').write_text(json.dumps({'fonts':metadata,'cases':axis_cases},indent=2))
   if axis_cases:
    import base64
-   report['stockAxisProof']=probe('stock-axis',['-e','axisCases',base64.b64encode(json.dumps(axis_cases).encode()).decode()])
+   report['stockAxisProof']=probe('stock-axis',['-e','axisCases',base64.b64encode(json.dumps(axis_cases).encode()).decode()]);save()
   config='/data/fonts/config/config.xml';exists=subprocess.run(['adb','shell','test','-f',config]).returncode==0
   generation={'path':config,'exists':exists,'sha256':hashlib.sha256(read_system_file(config)).hexdigest() if exists else ''}
-  payload,manifest,expected_roles,case_report=build(work/'generated',
-    {remote:a.output/('original-'+Path(remote).name) for remote in backups},captured,
-    report['baseline'],assets/'composite.ttf',generation,diagnostics=a.output)
+  def compile_deadline(_signal,_frame):raise TimeoutError('production compilation exceeded 600-second experimental budget')
+  previous_alarm=signal.signal(signal.SIGALRM,compile_deadline);signal.alarm(600)
+  try:
+   payload,manifest,expected_roles,case_report=build(work/'generated',
+     {remote:a.output/('original-'+Path(remote).name) for remote in backups},captured,
+     report['baseline'],assets/'composite.ttf',generation,diagnostics=a.output,prove_cff2=True)
+  finally:
+   signal.alarm(0);signal.signal(signal.SIGALRM,previous_alarm)
   (a.output/'production-pipeline.json').write_text(json.dumps(case_report,indent=2))
   generated={f['logicalPath']:payload/f['payloadPath'] for f in manifest['files'] if f['kind']=='xml'}
   new_fonts={f['logicalPath']:payload/f['payloadPath'] for f in manifest['files'] if f['kind']!='xml'}

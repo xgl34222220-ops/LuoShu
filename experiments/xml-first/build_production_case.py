@@ -65,9 +65,42 @@ def stock_axis_cases(xml_paths, stock_paths):
     return metadata,cases
 
 
-def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostics=None):
+def verify_actual_probe_equivalence(stock_paths, source, diagnostics):
+    """One actual SDK CFF2 non-default instance, full vs optimized measurement."""
+    from fontTools.ttLib import TTFont
+    for logical,path in stock_paths.items():
+        with Path(path).open('rb') as stream:collection=stream.read(4)==b'ttcf'
+        with TTFont(path,fontNumber=0 if collection else -1,lazy=True) as font:
+            if 'CFF2' not in font or 'fvar' not in font:continue
+            axes={a.axisTag:(float(a.minValue)+float(a.maxValue))/2 for a in font['fvar'].axes}
+        before=hashlib.sha256(Path(path).read_bytes()).hexdigest();profiles=[];vertical=[];origins=[];times=[];counts=[]
+        print(json.dumps({'phase':'actual-cff2-probe-equivalence','state':'start','path':logical,'axes':axes}),flush=True)
+        for enabled in (False,True):
+            started=time.monotonic()
+            with TTFont(source) as donor,patch.object(compiler,'_PROBE_ONLY_ENABLED',enabled):
+                instance,location=compiler._stock_geometry_font(Path(path),0,int(axes.get('wght',400)),axes,source_font=donor,role='cjk')
+                try:
+                    profiles.append(compiler._profile_from_font(instance));counts.append(len(instance.getGlyphOrder()))
+                    vertical.append(dict(instance['vmtx'].metrics) if 'vmtx' in instance else {})
+                    origins.append({name:instance['VORG'][name] for name in instance.getGlyphOrder()} if 'VORG' in instance else {})
+                finally:instance.close()
+            times.append(time.monotonic()-started)
+        if profiles[0]!=profiles[1]:raise RuntimeError('actual SDK CFF2 probe profile differs from full instance')
+        if any(vertical[0].get(k)!=v for k,v in vertical[1].items()):raise RuntimeError('actual SDK CFF2 vertical metric differs')
+        if any(origins[0].get(k)!=v for k,v in origins[1].items()):raise RuntimeError('actual SDK CFF2 vertical origin differs')
+        if hashlib.sha256(Path(path).read_bytes()).hexdigest()!=before:raise RuntimeError('actual SDK probe changed original bytes')
+        result={'state':'passed','path':logical,'face':0,'location':axes,'sha256':before,
+                'fullSeconds':round(times[0],3),'probeSeconds':round(times[1],3),'glyphCounts':counts,
+                'profileDigest':compiler._canonical_hash(profiles[0]),'profileEqual':True,'verticalMetricsEqual':True,'originalUnchanged':True}
+        (Path(diagnostics)/'actual-cff2-probe-equivalence.json').write_text(json.dumps(result,indent=2))
+        print(json.dumps(result),flush=True);return result
+    return {'state':'not-applicable','reason':'no CFF2 variable SDK target'}
+
+
+def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostics=None, prove_cff2=False):
     work=Path(work);work.mkdir(parents=True,exist_ok=True);started=time.monotonic()
     trace_dir=Path(diagnostics) if diagnostics is not None else work;trace_dir.mkdir(parents=True,exist_ok=True)
+    probe_proof=verify_actual_probe_equivalence(stock_paths,source,trace_dir) if prove_cff2 else None
     build_key=baseline['fingerprint'];slots={};roles={}
     # The rendered baseline identifies the exact default physical face. Other
     # captured XML indices in the same immutable collection remain distinct.
@@ -127,7 +160,7 @@ def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostic
         contract=item['contract'];binding=item.get('staticXmlContract')
         expected[role]={'path':file['logicalPath'],'face':0 if binding else contract['requiredFaceIndex'],
                         'axes':[] if binding else contract['requiredAxes'],'sha256':file['sha256']}
-    report={'productionModulesUsed':True,'androidPythonExecuted':False,
+    report={'actualCff2ProbeProof':probe_proof,'productionModulesUsed':True,'androidPythonExecuted':False,
             'originProofContext':'root-captured SDK bytes with test-only host namespace model',
             'seconds':round(time.monotonic()-started,3),'artifactCount':len(artifacts['artifacts']),
             'uniqueCompiledFiles':len(set(artifacts['artifactMap'].values())),
