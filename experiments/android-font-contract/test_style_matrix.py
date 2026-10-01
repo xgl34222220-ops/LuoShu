@@ -4,25 +4,26 @@ import style_matrix as matrix
 
 
 class MatrixTest(unittest.TestCase):
-    def fixture(self):
+    def fixture(self,matching=False):
         operations=[];expansions=[];artifacts=[];files=[];ordinal=0
         for family,path,face in [('sans-serif','/system/fonts/Roboto.ttf',0),('sans-serif-condensed','/system/fonts/Roboto.ttf',0),('roboto','/system/fonts/Roboto.ttf',0),('','/system/fonts/Cjk.ttc',2)]:
             expansions.append({'ordinal':ordinal,'preserveItalic':bool(family)})
-            for weight in (100,200,300,400,450,500,520,600,700,800,900):
+            for weight in ((400,) if matching else (100,200,300,400,450,500,520,600,700,800,900)):
                 aid=family+str(weight)
                 operations.append({'targetPath':path,'node':{'index':face,'weight':400,'family':family,'ordinal':ordinal},'expandedWeight':weight,'artifact':{'artifactId':aid}})
-                artifacts.append({'artifactId':aid,'staticXmlContract':{'faceIndex':0}})
+                artifacts.append({'artifactId':aid,'staticXmlContract':{'faceIndex':0,**({'weightMatching':{'shapeResponse':'constant'}} if matching else {})},
+                                  **({'mode':'fixed-outline-weight-match-xml-v1'} if matching else {})})
                 files.append({'logicalPath':'/system/fonts/LuoShuFixed-'+aid+'.ttf','sha256':'new-'+aid,'kind':'xml-static-font','artifactIds':[aid]})
             ordinal+=1
         files.append({'logicalPath':'/system/fonts/LuoShu-Original-Roboto.ttf','sha256':'Roboto','kind':'xml-original'})
         observed=[]
-        for case in matrix.cases():
+        for case in matrix.cases(matching):
             name='Cjk.ttc' if case['sample']=='中' else 'Emoji.ttf' if case['sample']=='😀' else 'Roboto.ttf'
             item=copy.deepcopy(case);item['raster']='original-raster-'+str(case)
             item['actualFonts']=[{'file':'/system/fonts/'+name,'face':2 if name=='Cjk.ttc' else 0,
                                   'weight':case['weight'],'slant':int(case['italic']), 'sha256':name.split('.')[0]}]
             observed.append(item)
-        route={'routeRevision':2,'documents':{'/system/etc/font_fallback.xml':{'operations':operations,'styleExpansions':expansions}}}
+        route={'routeRevision':3 if matching else 2,'documents':{'/system/etc/font_fallback.xml':{'operations':operations,'styleExpansions':expansions}}}
         return route,{'artifacts':artifacts},{'files':files},{'cases':observed}
 
     def test_all_styles_use_new_static_or_explicit_original(self):
@@ -54,6 +55,20 @@ class MatrixTest(unittest.TestCase):
     def test_wrong_original_face_cannot_pick_another_route(self):
         values=self.fixture();values[3]['cases'][0]['actualFonts'][0]['face']=1
         with self.assertRaisesRegex(ValueError,'unique'):matrix.expected_cases(*values)
+
+    def test_matching_keeps_base_style_separate_from_requested_reference(self):
+        result=matrix.expected_cases(*self.fixture(True));self.assertEqual(len(result),74)
+        for case in result:
+            if case['coverage'].startswith('fixed-selected-outline'):
+                self.assertEqual(case['expected']['fontWeight'],400)
+                self.assertEqual(case['expected']['referenceWeight'],case['weight'])
+                self.assertEqual(case['expected']['axes'],{'wght':case['weight']})
+        a=[x for x in result if x['family']=='sans-serif' and x['sample']=='A' and not x['italic']]
+        self.assertEqual(len({x['expected']['path'] for x in a}),1)
+
+    def test_matching_cannot_accept_old_static_binding(self):
+        values=self.fixture(True);values[1]['artifacts'][0]['staticXmlContract'].pop('weightMatching')
+        with self.assertRaisesRegex(ValueError,'constant-response'):matrix.expected_cases(*values)
 
 
 if __name__=='__main__':unittest.main()

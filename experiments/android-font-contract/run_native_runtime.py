@@ -31,6 +31,7 @@ def main():
         adb('push',str(Path(__file__).with_name('native_runtime_smoke.py')),remote+'/smoke.py')
         sdk_font='/system/fonts/NotoSansCJK-Regular.ttc'
         report['fingerprint']=adb('shell','getprop','ro.build.fingerprint').stdout.decode().strip()
+        report['deviceApiLevel']=36
         # Compare actual Android measurements to the already native/full-proven
         # host implementation using the SAME freshly captured SDK bytes.
         with tempfile.TemporaryDirectory(prefix='luoshu-native-reference-') as work:

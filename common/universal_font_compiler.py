@@ -24,6 +24,7 @@ import copy
 import hashlib
 import json
 import math
+import fixed_outline_weight_match as fixed_match
 import os
 import re
 import shutil
@@ -63,7 +64,7 @@ from legacy_v14_4.composite_layout import (
 )
 
 SCHEMA = "universal-font-artifacts-v1"
-COMPILER_REVISION = 5
+COMPILER_REVISION = 6
 FONT_PLAN_SCHEMA = "universal-font-plan-v1"
 ROUTE_SCHEMA = "minimal-xml-route-plan-v1"
 ROUTABLE_ACTIONS = {"replace", "compile", "compile-specialized"}
@@ -2057,10 +2058,10 @@ def _choose_mode(
     deployment_kinds: list[str],
     stock: Path,
 ) -> str:
-    if artifact.get("representation") == "fixed-static-xml-v1":
+    if artifact.get("representation") in fixed_match.REPRESENTATIONS:
         if deployment_kinds != ["xml-route"]:
             raise CompilerError("fixed static representation is XML-only")
-        return "fixed-static-xml-v1"
+        return artifact["representation"]
     role = str(target.get("role") or "")
     dynamic_routes = artifact.get("requiredDynamicRoutes") or []
     dynamic_contracts = {(str(r.get("style") or "normal"), _int(r.get("weight"), 400),
@@ -2137,7 +2138,7 @@ def _compile_unit_in_view(
             }:
                 raise CompilerError(f"FontPlan 风险不能由编译器安全消除：{risk}")
 
-        if artifact.get("representation") == "fixed-static-xml-v1":
+        if artifact.get("representation") in fixed_match.REPRESENTATIONS:
             import fixed_static_xml_compiler as fixed_static
             prepared = unit.get("_fixedStaticPrepared")
             if prepared is None:
@@ -2146,7 +2147,7 @@ def _compile_unit_in_view(
                                                         render_cache if render_cache is not None else {})
             output = Path(fixed_result["output"])
             result.update(status="ready", output=str(output), sha256=_sha256(output),
-                          bytes=int(output.stat().st_size), mode=fixed_static.REPRESENTATION,
+                          bytes=int(output.stat().st_size), mode=artifact["representation"],
                           report=fixed_result["report"], staticXmlContract=fixed_result["staticXmlContract"],
                           stock={"logicalPath": target_path, "sourcePath": prepared["stockPath"],
                                  "sha256": prepared["contract"]["stock"]["sha256"],
@@ -2255,9 +2256,9 @@ def _mixed_preflight(units: list[dict[str, Any]], stock_paths: dict[str, Path], 
         stock = _resolve_stock(path, stock_paths, allow_live_stock)
         try:
             stock_face = (artifact.get("originalStockFaceIndex")
-                          if artifact.get("representation") == "fixed-static-xml-v1"
+                          if artifact.get("representation") in fixed_match.REPRESENTATIONS
                           else artifact.get("requiredFaceIndex"))
-            if artifact.get("representation") == "fixed-static-xml-v1":
+            if artifact.get("representation") in fixed_match.REPRESENTATIONS:
                 import fixed_static_xml_compiler
                 fixed_static_xml_compiler.verify_original_face(target, stock, max(0, _int(stock_face, 0)))
             else:
@@ -2344,7 +2345,7 @@ def _compile_all_in_view(
         _mixed_preflight(units, stock_paths, allow_live_stock)
     # Every new static route is measured and sealed before the first outline
     # render. Legacy physical/dynamic units retain their existing contracts.
-    static_units = [unit for unit in units if unit["artifact"].get("representation") == "fixed-static-xml-v1"]
+    static_units = [unit for unit in units if unit["artifact"].get("representation") in fixed_match.REPRESENTATIONS]
     for contract_index, unit in enumerate(static_units):
         import fixed_static_xml_compiler as fixed_static
         _mixed_compile_progress(contract_index, len(static_units), base=80, span=2, label="正在核对原厂字体契约")
@@ -2508,7 +2509,7 @@ def validate_manifest(
             if not path.is_file() or _sha256(path) != artifact.get("sha256"):
                 raise CompilerError(f"Artifact 文件缺失或摘要不一致：{artifact_id}")
             expected_artifact_map[artifact_id] = path.name
-            if artifact.get("contract", {}).get("representation") == "fixed-static-xml-v1":
+            if artifact.get("contract", {}).get("representation") in fixed_match.REPRESENTATIONS:
                 import fixed_static_xml_compiler as fixed_static
                 unit = expected_units.get(artifact_id)
                 if route_plan.get("schema") != "fixed-static-xml-route-plan-v1" or unit is None:

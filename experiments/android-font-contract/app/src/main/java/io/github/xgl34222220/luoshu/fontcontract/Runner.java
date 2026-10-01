@@ -146,7 +146,7 @@ public final class Runner extends Instrumentation {
     }
     private void styleMatrixPhase() throws Exception {
         JSONArray cases=new JSONArray(new String(Base64.getDecoder().decode(arguments.getString("styleCases")),StandardCharsets.UTF_8));
-        require(cases.length()>0&&cases.length()<=64,"invalid style matrix size");
+        require(cases.length()>0&&cases.length()<=96,"invalid style matrix size");
         JSONArray results=new JSONArray();boolean allVerified=true;int failures=0;
         report.put("cases",results);
         for(int c=0;c<cases.length();c++) {
@@ -181,7 +181,7 @@ public final class Runner extends Instrumentation {
                 if(expected.has("raster"))require(raster.equals(expected.getString("raster")),"matrix preserved raster differs: "+item);
                 else {
                     Font.Builder builder=new Font.Builder(new File(expected.getString("path"))).setTtcIndex(expected.getInt("face"))
-                        .setWeight(expected.getInt("fontWeight")).setSlant(expected.getInt("fontSlant"));
+                        .setWeight(expected.optInt("referenceWeight",expected.getInt("fontWeight"))).setSlant(expected.getInt("fontSlant"));
                     JSONObject coordinates=expected.getJSONObject("axes");ArrayList<android.graphics.fonts.FontVariationAxis> axes=new ArrayList<>();
                     for(Iterator<String> it=coordinates.keys();it.hasNext();){String tag=it.next();axes.add(new android.graphics.fonts.FontVariationAxis(tag,(float)coordinates.getDouble(tag)));}
                     builder.setFontVariationSettings(axes.toArray(new android.graphics.fonts.FontVariationAxis[0]));

@@ -19,6 +19,7 @@ from fontTools.ttLib import TTFont
 import device_font_slot_build_base as slot_build
 import device_font_slot_plan_base as slot_plan
 import universal_font_plan
+import fixed_outline_weight_match as fixed_match
 
 REPRESENTATION = "fixed-static-xml-v1"
 RENDER_SCHEMA = "fixed-static-xml-render-v1"
@@ -135,9 +136,12 @@ def _profile_contract(profile):
 
 def _binding(contract):
     key = _api()._canonical_hash(contract)
-    return {"renderContractId": "sha256:" + key, "postScriptName": "LuoShuFixed-" + key[:40],
+    result={"renderContractId": "sha256:" + key, "postScriptName": "LuoShuFixed-" + key[:40],
             "faceIndex": 0, "axes": [], "fileName": "LuoShuFixed-" + key + ".ttf",
             "fontWeight": contract["staticMetadata"]["weightClass"], "fontItalic": False}
+    if contract.get('weightMatching'):
+        result['weightMatching']=copy.deepcopy(contract['weightMatching'])
+    return result
 
 
 def _subset(font, points):
@@ -164,8 +168,13 @@ def _validate_unit(unit):
     api = _api()
     artifact, target = unit["artifact"], unit["target"]
     source = target.get("source") or {}
-    if artifact.get("representation") != REPRESENTATION:
+    if artifact.get("representation") not in fixed_match.REPRESENTATIONS:
         raise api.CompilerError("fixed static XML representation missing")
+    if artifact.get('representation')==fixed_match.MATCHING and artifact.get('weightMatching')!={'policy':'fixed-normal-original-italic-v1','referenceWeight':400}:
+        raise api.CompilerError('fixed matching XML selection policy missing')
+    if artifact.get('representation')==fixed_match.MATCHING and (artifact.get('requiredWeight')!=400 or
+            api._axis_values(artifact.get('originalStockAxes')).get('wght')!=400):
+        raise api.CompilerError('fixed matching XML reference coordinate changed')
     if unit.get("deploymentKinds") != ["xml-route"] or not unit.get("routeNodes"):
         raise api.CompilerError("fixed static representation is XML-only")
     if (artifact.get("requiredFaceIndex") != 0 or artifact.get("requiredAxes") != []
@@ -357,6 +366,12 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
                                "macStyle": int(original["head"].macStyle)},
         }
         contract["geometry"]["requiredProbes"] = sorted(needed)
+        if artifact['representation']==fixed_match.MATCHING:
+            contract['representation']=fixed_match.MATCHING
+            contract['weightMatching']=fixed_match.policy(contract['staticMetadata']['weightClass'])
+            contract['referencePolicy']={'kind':'fixed-oem-reference','requestedWeight':400,
+                                         'effectiveLocation':copy.deepcopy(location),
+                                         'runtimeGeometryResponse':'constant'}
         binding = _binding(contract)
         # Guard concurrent edits between source validation and measurement.
         api._file_uid_matches(source, path)
@@ -376,7 +391,12 @@ def prepare_unit(unit, stock_paths, allow_live_stock):
 def _validate_saved(path, prepared):
     api = _api()
     with TTFont(path, lazy=False, recalcTimestamp=False) as font:
-        if VARIABLE_TABLES & set(font.keys()) or "glyf" not in font or not _upright(font):
+        matching=prepared['contract'].get('weightMatching')
+        matching_proof=None
+        if matching:
+            matching_proof=fixed_match.validate(font,matching)
+        if ((VARIABLE_TABLES - ({'fvar','gvar'} if matching else set())) & set(font.keys())
+                or "glyf" not in font or not _upright(font)):
             raise api.CompilerError("fixed static XML output retained variable or italic metadata")
         actual_points = set()
         for table in font["cmap"].tables:
@@ -424,8 +444,10 @@ def _validate_saved(path, prepared):
         alignment = api._probe_alignment(prepared["stockProfile"], profile, prepared["contract"]["role"])
         if alignment["status"] != "ready":
             raise api.CompilerError("fixed static XML output alignment failed: " + ",".join(alignment["issues"]))
-        return {"lineBudget": {"yMin": low, "yMax": high, "minDescent": floor, "maxAscent": ceiling},
+        result={"lineBudget": {"yMin": low, "yMax": high, "minDescent": floor, "maxAscent": ceiling},
                 "alignment": alignment, "coverage": prepared["contract"]["coverage"]}
+        if matching_proof:result['constantWeightResponse']=matching_proof
+        return result
 
 
 def compile_prepared(prepared, output_dir, cache):
@@ -446,7 +468,7 @@ def compile_prepared(prepared, output_dir, cache):
             raise api.CompilerError("fixed static XML grouped asset integrity mismatch")
         validation = _validate_saved(output, prepared)
         return {"output": str(output), "staticXmlContract": copy.deepcopy(binding),
-                "report": {"mode": REPRESENTATION, "renderContract": contract, "validation": validation,
+                "report": {"mode": contract.get("representation", REPRESENTATION), "renderContract": contract, "validation": validation,
                            "stockXmlIdentity": copy.deepcopy(prepared["stockXmlIdentity"]),
                            "stockAxisEvidence": copy.deepcopy(prepared["stockAxisEvidence"]),
                            "renderReuse": {"hit": True}}}
@@ -473,11 +495,13 @@ def compile_prepared(prepared, output_dir, cache):
         for name_id in (1, 3, 4, 6, 16):
             font["name"].setName(name, name_id, 3, 1, 0x409)
         api._drop_stale_tables(font)
+        if contract.get('weightMatching'):
+            fixed_match.attach(font,contract['weightMatching'])
         api._save_font(font, output)
         validation = _validate_saved(output, prepared)
         cache[key] = {"sha256": api._sha256(output)}
         return {"output": str(output), "staticXmlContract": copy.deepcopy(binding),
-                "report": {"mode": REPRESENTATION, "renderContract": contract, "validation": validation,
+                "report": {"mode": contract.get("representation", REPRESENTATION), "renderContract": contract, "validation": validation,
                            "stockXmlIdentity": copy.deepcopy(prepared["stockXmlIdentity"]),
                            "stockAxisEvidence": copy.deepcopy(prepared["stockAxisEvidence"]),
                            "transformed": transformed, "renderReuse": {"hit": False}}}
@@ -497,6 +521,9 @@ def validate_artifact(artifact, unit):
         raise api.CompilerError("fixed static artifact missing versioned render contract")
     if contract.get("compilerRevision") != api.COMPILER_REVISION:
         raise api.CompilerError("fixed static artifact compiler revision differs")
+    matching=unit['artifact']['representation']==fixed_match.MATCHING
+    if bool(contract.get('weightMatching'))!=matching or (matching and contract.get('representation')!=fixed_match.MATCHING):
+        raise api.CompilerError('fixed matching representation differs from route')
     binding = artifact.get("staticXmlContract")
     if binding != _binding(contract) or Path(str(artifact.get("output") or "")).name != binding["fileName"]:
         raise api.CompilerError("fixed static artifact binding differs from its render contract")

@@ -8,7 +8,8 @@ from pathlib import Path
 import xml.etree.ElementTree as ET
 
 PACKAGE='io.github.xgl34222220.luoshu.fontcontract'
-p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');p.add_argument('--explicit-style-matrix',action='store_true');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--inventory-only',action='store_true');p.add_argument('--production-payload',action='store_true');p.add_argument('--explicit-style-matrix',action='store_true');p.add_argument('--matching-weight-family',action='store_true');a=p.parse_args()
+if a.matching_weight_family:a.explicit_style_matrix=True
 if a.explicit_style_matrix and not a.production_payload:raise SystemExit('style matrix requires production payload')
 if os.environ.get('LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED')!='true':
  raise SystemExit('disposable system mutation not authorized for this run')
@@ -99,7 +100,7 @@ try:
  report['baseline']=probe('system-baseline');phase='snapshot';save()
  if a.explicit_style_matrix:
   from style_matrix import cases
-  report['styleBaseline']=style_probe('style-baseline',cases(),'observed-style-matrix')
+  report['styleBaseline']=style_probe('style-baseline',cases(a.matching_weight_family),'observed-style-matrix')
  root()  # Authorized disposable VM; snapshot system-only configuration too.
  # Refuse collision using the actual command exit status.
  exists=subprocess.run(['adb','shell','test','-e',asset]).returncode==0
@@ -145,7 +146,7 @@ try:
    payload,manifest,expected_roles,case_report=build(work/'generated',
      {remote:a.output/('original-'+Path(remote).name) for remote in backups},captured,
      report['baseline'],assets/'composite.ttf',generation,diagnostics=a.output,prove_cff2=not a.explicit_style_matrix,
-     style_baseline=report.get('styleBaseline'))
+     style_baseline=report.get('styleBaseline'),matching_weights=a.matching_weight_family)
   finally:
    signal.alarm(0);signal.signal(signal.SIGALRM,previous_alarm)
   (a.output/'production-pipeline.json').write_text(json.dumps(case_report,indent=2))

@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import fixed_outline_weight_match as fixed_match
+
 from fontTools.ttLib import TTFont
 
 def _canonical_hash(value):
@@ -258,7 +260,7 @@ def _font_manager_tokens(
     target: dict[str, Any],
     snapshot: dict[str, Any],
 ) -> list[str]:
-    if artifact.get("mode") == "fixed-static-xml-v1":
+    if artifact.get("mode") in fixed_match.REPRESENTATIONS:
         binding = artifact.get("staticXmlContract") or {}
         return [value for value in [str(logical_path), Path(logical_path).name, str(binding.get("postScriptName") or "")] if len(value) >= 3]
     tokens: set[str] = {Path(logical_path).name}
@@ -327,7 +329,7 @@ def _assess_font(
         report["message"] = str(error)
         return report
 
-    is_static_xml = artifact.get("mode") == "fixed-static-xml-v1"
+    is_static_xml = artifact.get("mode") in fixed_match.REPRESENTATIONS
     static_binding = artifact.get("staticXmlContract") or {}
     static_contract = artifact.get("report", {}).get("renderContract", {})
     coverage_report: dict[str, Any] = {}
@@ -339,7 +341,19 @@ def _assess_font(
         if (coverage.get("codepointCount") != len(points)
                 or coverage.get("codepointSha256") != _canonical_hash(points)):
             failures.append(f"static-coverage-seal-mismatch:{logical_path}")
-        if (static_binding.get("postScriptName") not in snapshot["names"] or snapshot["axes"]
+        matching=artifact.get('mode')==fixed_match.MATCHING
+        axes_ok=not snapshot['axes']
+        if matching:
+            try:
+                if static_binding.get('weightMatching')!=fixed_match.policy(static_binding.get('fontWeight')):
+                    raise ValueError('matching binding weight differs')
+                with TTFont(visible,lazy=True,recalcTimestamp=False) as matching_font:
+                    report['constantWeightResponse']=fixed_match.validate(matching_font,static_binding.get('weightMatching'))
+                axes_ok=True
+            except Exception as error:
+                failures.append(f'matching-axis-contract-invalid:{logical_path}')
+                report['matchingError']=str(error);axes_ok=False
+        if (static_binding.get("postScriptName") not in snapshot["names"] or not axes_ok
                 or snapshot["italic"] or static_binding.get("fontItalic") is not False):
             failures.append(f"static-xml-metadata-mismatch:{logical_path}")
     for group in required_groups:
@@ -468,13 +482,13 @@ def verify(
         bindings = artifacts.get("staticXmlBindings") or {}
         for document in fixed_route["documents"].values():
             for operation in document["operations"]:
-                if operation["artifact"].get("representation") != "fixed-static-xml-v1": continue
+                if operation["artifact"].get("representation") not in fixed_match.REPRESENTATIONS: continue
                 identity = operation["artifact"]["artifactId"]; binding = bindings.get(identity) or {}
                 logical = operation["assetRoot"] + "/" + str(binding.get("fileName") or "")
                 expected_static.setdefault(logical, set()).add(identity)
         for identity, original in originals.items():
             expected_original.setdefault(original["assetRoot"] + "/" + original["fileName"], set()).add(identity)
-        actual_static = {f["logicalPath"]: set(f.get("artifactIds") or []) for f in deployment["files"] if f.get("kind") == "xml-static-font"}
+        actual_static = {f["logicalPath"]: set(f.get("artifactIds") or []) for f in deployment["files"] if f.get("kind") in fixed_match.PAYLOAD_KINDS}
         actual_original = {f["logicalPath"]: set(f.get("originalIds") or []) for f in deployment["files"] if f.get("kind") == "xml-original"}
         if expected_static != actual_static or expected_original != actual_original:
             raise VerificationError("fixed-static runtime route membership incomplete")
@@ -554,7 +568,7 @@ def verify(
             if logical.lower() in registered: font_manager_hits += 1
             else: warnings.append(f"retained-original-path-unconfirmed:{logical}")
             continue
-        ids = item.get("artifactIds") if item.get("kind") == "xml-static-font" else [str(item.get("artifactId") or "")]
+        ids = item.get("artifactIds") if item.get("kind") in fixed_match.PAYLOAD_KINDS else [str(item.get("artifactId") or "")]
         if not isinstance(ids, list) or not ids:
             failures.append(f"static-route-artifacts-missing:{logical}")
             continue
@@ -564,10 +578,10 @@ def verify(
             if artifact is None:
                 failures.append(f"artifact-missing:{artifact_id or logical}")
                 continue
-            if item.get("kind") == "xml-static-font" and artifact.get("sha256") != expected_sha:
+            if item.get("kind") in fixed_match.PAYLOAD_KINDS and artifact.get("sha256") != expected_sha:
                 failures.append(f"static-route-file-digest-mismatch:{logical}")
                 continue
-            if item.get("kind") == "xml-static-font" and artifact.get("mode") != "fixed-static-xml-v1":
+            if item.get("kind") in fixed_match.PAYLOAD_KINDS and artifact.get("mode")!=('fixed-outline-weight-match-xml-v1' if item['kind']=='xml-matching-font' else 'fixed-static-xml-v1'):
                 failures.append(f"static-artifact-representation-mismatch:{logical}")
                 continue
             target_path = str(artifact.get("targetPath") or "")

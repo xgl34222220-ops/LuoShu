@@ -178,3 +178,4 @@ common/font_route_contract.py
 common/fixed_static_xml_router.py
 common/fixed_static_xml_router.sh
 common/fixed_static_xml_compiler.py
+common/fixed_outline_weight_match.py

@@ -68,3 +68,42 @@ The existing `experiments/xml-first/planner.py` remains non-deployable. Its smal
 host suite establishes contract grouping, not production readiness. The current
 proof uses its own test XML rewrite and must not be reported as that planner's
 end-to-end integration.
+
+## Subsequent production evidence and next weight contract
+
+Production-generated XML, compiled files and copied original fallback assets
+passed the default `A` / `1` / `中` reboot-and-restoration experiment at
+`9643c61a053d713b659ef65398ae2895fe4b26b4` (Actions 36803617022). That payload
+still used the older verified adapter for default Latin/digits. It was a mixed
+path, not complete adoption of the static XML representation.
+
+The explicit static weight expansion at `6be17a9` failed the global 450 case
+(Actions 36806453735). Android's static font matching groups weights by hundreds;
+registering separate 400 and 450 files did not prove the 450 file was selected.
+Original XML and all baseline cases were restored successfully. That failed
+representation is not enabled for phone deployment.
+
+The next explicit opt-in representation is
+`fixed-outline-weight-match-xml-v1` / route revision 3. It gives a deliberately
+fixed upright selection a constant-outline `wght` selection axis, spanning
+1–1000. This is not preservation of donor variation. Geometry is measured at
+an explicit frozen OEM reference (400 plus the node's other fixed axes); runtime
+weight requests do not reshape the chosen fixed outlines. Genuine italics
+reference the sealed original variable container. The original script fallback
+family remains present. Generic variable sources and physical-only slots do not
+acquire permission to use this representation.
+
+The representation requires empty glyph variations and no variable metrics or
+axis-dependent shaping, rather than relying only on sampled outlines. Payload
+membership, original SHA/face proof, reopened geometry and cancellation/OTA gates
+remain mandatory. Local integration tests cover positive staging and rejection of
+nonconstant variations, variable layout, metric variation, wrong representation,
+and changed reference coordinates. The 74-case global matrix is the next native
+gate; its result must be recorded separately before claiming system success.
+
+The earlier app-only matching-family test passed at `83eb0ec` (36809070207),
+and actual Android x86 Python/FontTools execution passed at `25e1d3c`
+(36811011982). Neither is ARM64 execution or module/root-manager mounting proof.
+The Python API-level field describes its build target; device API level is
+checked independently. Runtime consumer confirmation remains pending on phones,
+and warnings retain recovery state rather than being converted to success.

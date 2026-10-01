@@ -19,6 +19,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import fixed_outline_weight_match as fixed_match
+
 import minimal_xml_router
 import font_route_contract
 import stock_font_view
@@ -256,13 +258,13 @@ def _payload_digest(files: list[dict[str, Any]], dynamics: list[dict[str, Any]])
     return f"sha256:{_canonical_hash(material)}"
 
 
-def _record_shared_static(records, logical, relative, details, artifact_id, source_xml):
+def _record_shared_static(records, logical, relative, details, artifact_id, source_xml, kind='xml-static-font'):
     prior = records.get(logical)
     if prior is None:
-        _record_file(records, logical, relative, kind="xml-static-font",
+        _record_file(records, logical, relative, kind=kind,
                      sha256=details["sha256"], bytes_count=details["bytes"], artifact_id=artifact_id)
         prior = records[logical]; prior["artifactIds"] = []; prior["sourceXmls"] = []
-    if (prior.get("kind") != "xml-static-font" or prior.get("sha256") != details["sha256"]
+    if (prior.get("kind") != kind or prior.get("sha256") != details["sha256"]
             or prior.get("payloadPath") != relative or prior.get("bytes") != details["bytes"]):
         raise DeploymentError("shared static render conflicts at " + logical)
     prior["artifactIds"] = sorted(set(prior["artifactIds"] + [artifact_id]))
@@ -366,7 +368,7 @@ def build_deployment(
                 filename = str(artifact_map.get(artifact_id) or "")
                 if not filename or Path(filename).name != filename:
                     raise DeploymentError(f"XML artifact 文件名无效：{artifact_id}")
-                if artifact.get("representation") == "fixed-static-xml-v1":
+                if artifact.get("representation") in fixed_match.REPRESENTATIONS:
                     logical_font = _safe_logical(str(operation.get("assetRoot") or "") + "/" + filename)
                 else:
                     logical_font = _artifact_destination_for_xml(str(operation.get("targetPath") or ""), filename)
@@ -377,8 +379,9 @@ def build_deployment(
                     str(compiled["sha256"]),
                     destination,
                 )
-                if artifact.get("representation") == "fixed-static-xml-v1":
-                    _record_shared_static(files, str(logical_font), str(rel), details, artifact_id, str(source_xml))
+                if artifact.get("representation") in fixed_match.REPRESENTATIONS:
+                    _record_shared_static(files, str(logical_font), str(rel), details, artifact_id, str(source_xml),
+                                          'xml-matching-font' if artifact['representation']==fixed_match.MATCHING else 'xml-static-font')
                 else:
                     _record_file(files, str(logical_font), str(rel), kind="xml-font",
                                  sha256=details["sha256"], bytes_count=details["bytes"],

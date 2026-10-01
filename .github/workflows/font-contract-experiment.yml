@@ -42,6 +42,7 @@ jobs:
           python3 scripts/fixed_static_xml_compiler_test.py
           python3 scripts/fixed_static_xml_pipeline_test.py
           python3 scripts/fixed_static_style_expansion_test.py
+          python3 scripts/fixed_matching_xml_pipeline_test.py
       - name: Prepare CI-only Android x86 runtime
         run: sh experiments/android-font-contract/prepare_native_runtime.sh
       - name: Build CI-only font probe
@@ -50,7 +51,7 @@ jobs:
       - name: Require accelerated emulator
         id: accel
         env:
-          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '83eb0ec747b43323fefc19be398721b0c0de74d9' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
+          KVM_APPROVED_FOR_THIS_RUN: ${{ github.event_name == 'push' && github.event.before == '25e1d3cc5c378900622151f439f6596f1bf0914d' && contains(github.event.head_commit.message, '[kvm-approved-once]') }}
         shell: bash
         run: |
           if [ ! -r /dev/kvm ] || [ ! -w /dev/kvm ]; then
@@ -67,7 +68,7 @@ jobs:
       - name: Verify actual Android font rendering and reboot persistence
         uses: reactivecircus/android-emulator-runner@v2
         env:
-          LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '9643c61a053d713b659ef65398ae2895fe4b26b4' && contains(github.event.head_commit.message, '[system-test-approved-once]') }}
+          LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED: ${{ github.event_name == 'push' && github.event.before == '25e1d3cc5c378900622151f439f6596f1bf0914d' && contains(github.event.head_commit.message, '[system-test-approved-once]') }}
         with:
           api-level: 36
           target: google_apis
@@ -82,7 +83,7 @@ jobs:
           script: |
             python3 experiments/android-font-contract/run_emulator.py --apk experiments/android-font-contract/app/build/outputs/apk/debug/app-debug.apk --output experiments/android-font-contract/output
             python3 experiments/android-font-contract/run_native_runtime.py --runtime experiments/android-font-contract/.runtime-x86 --source experiments/android-font-contract/app/src/main/assets/composite.ttf --output experiments/android-font-contract/output/android-runtime
-            if [ "$LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED" = true ]; then python3 experiments/android-font-contract/run_system_emulator.py --production-payload --explicit-style-matrix --output experiments/android-font-contract/output/system; fi
+            if [ "$LUOSHU_DISPOSABLE_SYSTEM_TEST_APPROVED" = true ]; then python3 experiments/android-font-contract/run_system_emulator.py --production-payload --matching-weight-family --output experiments/android-font-contract/output/system; fi
       - name: Save native evidence, including blocked capability gates
         if: always()
         uses: actions/upload-artifact@v4

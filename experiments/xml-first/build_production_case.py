@@ -97,7 +97,7 @@ def verify_actual_probe_equivalence(stock_paths, source, diagnostics):
     return {'state':'not-applicable','reason':'no CFF2 variable SDK target'}
 
 
-def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostics=None, prove_cff2=False, style_baseline=None):
+def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostics=None, prove_cff2=False, style_baseline=None, matching_weights=False):
     work=Path(work);work.mkdir(parents=True,exist_ok=True);started=time.monotonic()
     trace_dir=Path(diagnostics) if diagnostics is not None else work;trace_dir.mkdir(parents=True,exist_ok=True)
     probe_proof=verify_actual_probe_equivalence(stock_paths,source,trace_dir) if prove_cff2 else None
@@ -137,7 +137,7 @@ def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostic
     # Namespace translation is confined to this experiment. Production calls
     # always read the real current mount/config state and contain no bypass.
     with patch.object(router,'_dynamic_generation',return_value=generation),patch.dict(os.environ,{'LUOSHU_STOCK_FONT_MAP':str(mapping),'LUOSHU_UNIVERSAL_MIX_STRICT':'1','LUOSHU_MIX_REQUEST_ID':'native-production-fixture','LUOSHU_SWITCH_PROGRESS_FILE':str(trace_dir/'production-progress.json')}):
-        route=router.build_route_plan(plan,base,expand_styles=style_baseline is not None)
+        route=router.build_route_plan(plan,base,expand_styles=style_baseline is not None,matching_weights=matching_weights)
         artifacts=compiler.compile_all(plan,route,{k:Path(v) for k,v in stock_paths.items()},work/'compiled',False)
         (work/'artifacts.json').write_text(json.dumps(artifacts,ensure_ascii=False,indent=2))
         if not artifacts['summary']['deploymentReady']:
@@ -166,6 +166,7 @@ def build(work, xml_paths, stock_paths, baseline, source, generation, diagnostic
             'seconds':round(time.monotonic()-started,3),'artifactCount':len(artifacts['artifacts']),
             'uniqueCompiledFiles':len(set(artifacts['artifactMap'].values())),
             'staticRouteCount':route['summary']['fixedStaticOperationCount'],
+            'matchingRouteCount':route['summary'].get('fixedMatchingOperationCount',0),
             'deferredRepresentationCount':route['summary']['representationDeferralCount'],
             'payloadBytes':sum(f['bytes'] for f in manifest['files']),
             'expectedDefaultConsumers':expected,'deploymentId':manifest['deploymentId']}

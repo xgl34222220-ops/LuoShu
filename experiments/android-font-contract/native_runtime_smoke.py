@@ -26,12 +26,19 @@ def make_master(path,weight):
 
 def variable_data_check(directory):
     import universal_mixed_variable
+    import fixed_outline_weight_match
     root=Path(directory);root.mkdir(parents=True,exist_ok=True);masters=[]
     for weight in range(100,901,100):
         path=root/f'{weight}.ttf';make_master(path,weight);masters.append((weight,path))
     result=universal_mixed_variable.build_variable_family(masters,root/'real-variable.ttf')
     if result['variableGlyphCount']<1:raise RuntimeError('native variable builder produced no variation')
-    return {k:result[k] for k in ('state','glyphCount','variableGlyphCount','validatedWeights')}
+    with TTFont(root/'400.ttf',recalcTimestamp=False) as font:
+        policy=fixed_outline_weight_match.policy(400);fixed_outline_weight_match.attach(font,policy)
+        font.save(root/'fixed-matching.ttf')
+    with TTFont(root/'fixed-matching.ttf') as font:
+        proof=fixed_outline_weight_match.validate(font,policy)
+    return {**{k:result[k] for k in ('state','glyphCount','variableGlyphCount','validatedWeights')},
+            'separateConstantMatchingContract':proof}
 
 
 def lock_check(module):
@@ -70,7 +77,7 @@ def run(module,source,stock):
         variable=variable_data_check(work)
     return {'schema':'android-production-runtime-smoke-v1','state':'passed','androidPythonExecuted':True,
             'architecture':platform.machine(),'pythonVersion':sys.version,'fontToolsVersion':fontTools.__version__,
-            'apiLevel':sys.getandroidapilevel(),
+            'pythonBuildApiLevel':sys.getandroidapilevel(),
             'shippedArm64RuntimeExecuted':False,'systemMutation':False,'moduleMountTested':False,
             'actualCff2Probe':{'stockSha256':before,'face':0,'location':location,'glyphCount':glyphs,
                 'profileDigest':universal_font_compiler._canonical_hash(profile),'profile':profile,'seconds':round(probe_seconds,3)},

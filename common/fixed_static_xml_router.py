@@ -11,10 +11,12 @@ import re
 import xml.etree.ElementTree as ET
 import minimal_xml_router as legacy
 import universal_font_plan
+import fixed_outline_weight_match as fixed_match
 
 SCHEMA = 'fixed-static-xml-route-plan-v1'
 REVISION = 1
 STYLE_REVISION = 2
+MATCHING_REVISION = 3
 STYLE_WEIGHTS = tuple(sorted(set(range(100, 1000, 100)) | {450, 520}))
 REPRESENTATION = 'fixed-static-xml-v1'
 ERROR = legacy.RouterError
@@ -97,7 +99,9 @@ def _dynamic_generation():
     return result
 
 
-def build_route_plan(font_plan, base, *, expand_styles=False):
+def build_route_plan(font_plan, base, *, expand_styles=False, matching_weights=False):
+    if matching_weights:expand_styles=True
+    weights=(400,) if matching_weights else STYLE_WEIGHTS
     legacy.validate_route_plan(base,font_plan)
     constraints=font_plan.get('constraints') or {}
     if constraints.get('dataFontFileCount') or constraints.get('dataFontConfigReferenceCount') or constraints.get('dynamicDiscoveryComplete') is False:
@@ -105,7 +109,9 @@ def build_route_plan(font_plan, base, *, expand_styles=False):
     plan=copy.deepcopy(base)
     plan.update(schema=SCHEMA,routeRevision=REVISION,legacyRoutePlan=copy.deepcopy(base),retainedOriginals={},dynamicFontGeneration=_dynamic_generation())
     if expand_styles:
-        plan.update(routeRevision=STYLE_REVISION,styleExpansion={'policy':'fixed-normal-original-italic-v1','weights':list(STYLE_WEIGHTS)})
+        plan.update(routeRevision=MATCHING_REVISION if matching_weights else STYLE_REVISION,
+                    styleExpansion={'policy':'fixed-normal-original-italic-v1','weights':list(weights)})
+        if matching_weights:plan['styleExpansion']['matchingAxis']='constant-outline-selection'
     static_count=0;clone_count=0
     for source_xml,document in plan['documents'].items():
         selected=[op for op in document['operations'] if _eligible(op,expand_styles)]
@@ -180,36 +186,48 @@ def build_route_plan(font_plan, base, *, expand_styles=False):
                     raise ERROR('implicit style expansion has ambiguous same-group peers')
                 originals=[r for f in document['fallbackCopies'] for r in f['references'] if r['ordinal']==ordinal]
                 if len(originals)!=1:raise ERROR('implicit style expansion lacks one sealed original')
-                document['styleExpansions'].append({'ordinal':ordinal,'weights':list(STYLE_WEIGHTS),
+                document['styleExpansions'].append({'ordinal':ordinal,'weights':list(weights),
                     'preserveItalic':'ital' in tags,'originalId':originals[0]['originalId'],
                     'nodeFingerprint':operation['nodeFingerprint']})
-                for weight in STYLE_WEIGHTS:
+                if matching_weights:document['styleExpansions'][-1]['matchingAxis']=True
+                for weight in weights:
                     op=copy.deepcopy(operation);artifact=op['artifact']
                     axes=[copy.deepcopy(a) for a in artifact['originalStockAxes'] if a['tag'] not in tags]
                     for tag,value in [('wght',weight)]+([('ital',0)] if 'ital' in tags else []):
                         axes.append({'tag':tag,'stylevalue':str(value),'attributes':{'tag':tag,'stylevalue':str(value)}})
                     artifact.update(requiredWeight=weight,originalStockAxes=axes,
                                     styleExpansion={'policy':'fixed-normal-original-italic-v1','declaredWeight':weight,'implicitAxes':sorted(tags)})
+                    if matching_weights:
+                        artifact.update(representation=fixed_match.MATCHING,
+                                        weightMatching={'policy':'fixed-normal-original-italic-v1','referenceWeight':400})
                     artifact.pop('artifactId',None);artifact.pop('suggestedFileName',None)
                     key=legacy._canonical_hash(artifact);artifact['artifactId']='ufc:'+key[:32];artifact['suggestedFileName']='LuoShu-Fixed-'+key[:32]+'.ttf'
                     op['expandedWeight']=weight;expanded.append(op)
-                static_count+=len(STYLE_WEIGHTS)-1
+                static_count+=len(weights)-1
             document['operations']=expanded
     plan['summary'].update(fixedStaticOperationCount=static_count,retainedOriginalCount=len(plan['retainedOriginals']),fallbackFamilyCount=clone_count,representationDeferralCount=sum(len(d['representationDeferrals']) for d in plan['documents'].values()))
     if expand_styles:
-        plan['summary'].update(styleWeightDomain='discrete-declared-weights',declaredStyleWeights=list(STYLE_WEIGHTS),
+        plan['summary'].update(styleWeightDomain='constant-normal-continuous-selection' if matching_weights else 'discrete-declared-weights',declaredStyleWeights=list(weights),
             preservedOriginalStyleCount=sum(len(e['weights']) for d in plan['documents'].values()
                                            for e in d.get('styleExpansions',[]) if e['preserveItalic']))
+    if matching_weights:
+        matching_count=sum(op['artifact'].get('representation')==fixed_match.MATCHING for d in plan['documents'].values() for op in d['operations'])
+        plan['summary'].update(fixedXmlOperationCount=static_count,fixedMatchingOperationCount=matching_count,
+                               fixedStaticOperationCount=static_count-matching_count,
+                               normalSourceVariationPreserved=False)
     if not static_count:raise ERROR('no eligible explicitly fixed upright XML route')
     plan['routeId']=_id(plan)
     return plan
 
 
 def validate_route_plan(plan,font_plan=None):
-    if plan.get('schema')!=SCHEMA or plan.get('routeRevision') not in {REVISION,STYLE_REVISION} or plan.get('state')!='planned' or plan.get('mutatesSystem') is not False:
+    if plan.get('schema')!=SCHEMA or plan.get('routeRevision') not in {REVISION,STYLE_REVISION,MATCHING_REVISION} or plan.get('state')!='planned' or plan.get('mutatesSystem') is not False:
         raise ERROR('invalid fixed-static XML representation')
-    expansion=plan.get('routeRevision')==STYLE_REVISION
-    if expansion and plan.get('styleExpansion')!={'policy':'fixed-normal-original-italic-v1','weights':list(STYLE_WEIGHTS)}:
+    matching=plan.get('routeRevision')==MATCHING_REVISION
+    expansion=plan.get('routeRevision') in {STYLE_REVISION,MATCHING_REVISION}
+    expected_policy={'policy':'fixed-normal-original-italic-v1','weights':[400] if matching else list(STYLE_WEIGHTS)}
+    if matching:expected_policy['matchingAxis']='constant-outline-selection'
+    if expansion and plan.get('styleExpansion')!=expected_policy:
         raise ERROR('invalid fixed-static style expansion policy')
     if not expansion and plan.get('styleExpansion'):raise ERROR('unexpected style expansion on old representation')
     base=plan.get('legacyRoutePlan')
@@ -217,12 +235,13 @@ def validate_route_plan(plan,font_plan=None):
     legacy.validate_route_plan(base,font_plan)
     if plan.get('routeId')!=_id(plan):raise ERROR('fixed-static route identity changed')
     if font_plan is not None:
-        expected=build_route_plan(font_plan,base,expand_styles=expansion)
+        expected=build_route_plan(font_plan,base,expand_styles=expansion,matching_weights=matching)
         if expected!=plan:raise ERROR('fixed-static route differs from sealed source plan')
     for document in plan['documents'].values():
         for op in document['operations']:
             if op.get('operation')=='replace-fixed-static-reference':
-                if op['artifact'].get('representation')!=REPRESENTATION or op['node'].get('style')!='normal':raise ERROR('invalid fixed-static operation')
+                if op['artifact'].get('representation') not in fixed_match.REPRESENTATIONS or op['node'].get('style')!='normal':raise ERROR('invalid fixed-static operation')
+                if op['artifact'].get('representation')==fixed_match.MATCHING and not matching:raise ERROR('matching artifact in wrong route revision')
                 if op['artifact'].get('requiredFaceIndex')!=0 or op['artifact'].get('requiredAxes')!=[]:raise ERROR('static output cannot inherit source collection/axes')
 
 
@@ -235,6 +254,10 @@ def _compiled_binding(operation,artifact_map,bindings):
         raise ERROR('static XML filename differs from compiled binding')
     if not isinstance(ps,str) or not PS.fullmatch(ps):raise ERROR('invalid static XML PostScript identity')
     if not str(binding.get('renderContractId','')).startswith('sha256:'):raise ERROR('missing measured render contract')
+    matching=operation['artifact'].get('representation')==fixed_match.MATCHING
+    if matching and binding.get('weightMatching')!=fixed_match.policy(binding.get('fontWeight')):
+        raise ERROR('missing constant-outline matching contract')
+    if not matching and binding.get('weightMatching'):raise ERROR('unexpected matching axis on static route')
     return binding
 
 
@@ -274,6 +297,7 @@ def render_document(plan,source_xml,artifact_map,output,bindings):
                 if legacy._local(child.tag)=='axis':font.remove(child)
             if 'expandedWeight' in operation:
                 font.set('weight',str(operation['expandedWeight']));font.set('style','normal')
+                if operation['artifact'].get('representation')==fixed_match.MATCHING:font.set('supportedAxes','wght')
                 expanded_fonts.setdefault(ordinal,[]).append(font)
         else:
             name=artifact_map.get(identity)
@@ -287,10 +311,12 @@ def render_document(plan,source_xml,artifact_map,output,bindings):
             for weight in expansion['weights']:
                 font=copy.deepcopy(original);font.attrib.pop('supportedAxes',None)
                 font.set('weight',str(weight));font.set('style','italic')
+                if expansion.get('matchingAxis'):font.set('supportedAxes','wght')
                 font.text=plan['retainedOriginals'][expansion['originalId']]['fileName']
                 for child in list(font):
                     if legacy._local(child.tag)=='axis' and child.get('tag') in {'wght','ital'}:font.remove(child)
-                ET.SubElement(font,'axis',tag='wght',stylevalue=str(weight));ET.SubElement(font,'axis',tag='ital',stylevalue='1')
+                if not expansion.get('matchingAxis'):ET.SubElement(font,'axis',tag='wght',stylevalue=str(weight))
+                ET.SubElement(font,'axis',tag='ital',stylevalue='1')
                 children.append(font)
         position=list(parent).index(original);parent.remove(original)
         for offset,font in enumerate(children):parent.insert(position+offset,font)
