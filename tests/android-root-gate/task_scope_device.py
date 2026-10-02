@@ -44,6 +44,17 @@ def main():
         spec = importlib.util.spec_from_file_location('scope_under_test', args.helper)
         scope = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(scope)
+        report['pidfd_backend'] = {'open_supported': False, 'send_zero_supported': False}
+        try:
+            fd = scope.pidfd_open(os.getpid())
+            report['pidfd_backend']['open_supported'] = True
+            try:
+                scope.pidfd_send(fd, 0)
+                report['pidfd_backend']['send_zero_supported'] = True
+            finally:
+                os.close(fd)
+        except OSError as error:
+            report['pidfd_backend']['errno'] = error.errno
         report['boot_id'] = scope.boot_id()
         report['selinux'] = subprocess.check_output(['/system/bin/getenforce'], text=True).strip()
         with tempfile.TemporaryDirectory(prefix='luoshu-task-gate-', dir='/data/local/tmp') as temp:

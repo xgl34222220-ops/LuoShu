@@ -28,7 +28,10 @@ jobs:
           echo "c5c8fa86af4ac196107ba05c5ee8cc1944140ae033cc9e763cec8c76f40c848a  $RUNNER_TEMP/LuoShu-v1.1.1.zip" | sha256sum -c -
           python3 -m unittest discover -s tests/android-root-gate -p 'test_*.py'
       - name: Check existing KVM access without altering security settings
-        run: test -r /dev/kvm && test -w /dev/kvm
+        shell: bash
+        run: |
+          set -o pipefail
+          bash tests/android-root-gate/check_kvm.sh 2>&1 | tee root-gate-output/kvm-environment.txt
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
