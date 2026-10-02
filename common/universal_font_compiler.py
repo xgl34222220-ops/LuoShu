@@ -232,7 +232,7 @@ def _axis_values(raw_axes: Any) -> dict[str, float]:
     return result
 
 
-def _profile_from_font(font: TTFont) -> dict[str, Any]:
+def _profile_from_font(font: TTFont, *, measure_probes: bool = True) -> dict[str, Any]:
     archived = getattr(font, "_luoshu_archived_profile", None)
     if archived is not None:
         return copy.deepcopy(archived)
@@ -267,7 +267,7 @@ def _profile_from_font(font: TTFont) -> dict[str, Any]:
         "probeSchema": template_engine.PROBE_SCHEMA,
         "probes": {
             name: template_engine.glyph_group(font, points)
-            for name, points in template_engine.PROBE_GROUPS.items()
+            for name, points in template_engine.PROBE_GROUPS.items() if measure_probes
         },
     }
 
@@ -562,12 +562,13 @@ def _verify_stock_identity(target: dict[str, Any], stock: Path, face_index: int)
     return {"kind": "rom", "sha256": expected, "faceIndex": face_index, "currentProvenance": current}
 
 
-def _validate_stock_contract(target: dict[str, Any], stock: Path, face_index: int) -> dict[str, Any]:
+def _validate_stock_contract(target: dict[str, Any], stock: Path, face_index: int,
+                             *, measure_probes: bool = True) -> dict[str, Any]:
     contract = target.get("targetContract") if isinstance(target.get("targetContract"), dict) else {}
     verified = _verify_stock_identity(target, stock, face_index)
     font = _open_face(stock, face_index, lazy=True)
     try:
-        actual = _profile_from_font(font)
+        actual = _profile_from_font(font, measure_probes=measure_probes)
         metrics = actual["metrics"]
         if verified.get("kind") == "dynamic":
             required_ps = str((contract.get("dynamicIdentity") or {}).get("postScriptName") or "")

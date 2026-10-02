@@ -1,0 +1,113 @@
+{
+  "scope": "Synthetic Linux-host fixed-static preparation only; no Android timing or device validation.",
+  "baselineCommit": "e3b7d0f827184b2d84a9440a793dfa60b51a20ca",
+  "fontTools": "4.63.0",
+  "fixture": {
+    "han": 20000,
+    "contours": 16,
+    "routes": 67,
+    "distinctMeasurementKeys": 8,
+    "sourceBytes": 4183944,
+    "variableBytes": 5833196
+  },
+  "before": {
+    "seconds": 16.771199729000728,
+    "hashBytes": 1513770376,
+    "stages": {
+      "prepare": {
+        "calls": 67,
+        "seconds": 16.766955784004494,
+        "exclusiveSeconds": 3.036453573002291
+      },
+      "sha256": {
+        "calls": 335,
+        "seconds": 1.027778317999946,
+        "exclusiveSeconds": 1.027778317999946
+      },
+      "openFace": {
+        "calls": 268,
+        "seconds": 0.03900085200712056,
+        "exclusiveSeconds": 0.03900085200712056
+      },
+      "validateStock": {
+        "calls": 67,
+        "seconds": 5.39260397399903,
+        "exclusiveSeconds": 0.028461518001677177
+      },
+      "glyphGroup": {
+        "calls": 1682,
+        "seconds": 9.251533270994514,
+        "exclusiveSeconds": 9.251533270994514
+      },
+      "stockGeometry": {
+        "calls": 67,
+        "seconds": 3.366152778999094,
+        "exclusiveSeconds": 2.910075629995845
+      },
+      "instantiate": {
+        "calls": 34,
+        "seconds": 0.4433404260007592,
+        "exclusiveSeconds": 0.4433404260007592
+      },
+      "pairedProfiles": {
+        "calls": 67,
+        "seconds": 3.1420640999986063,
+        "exclusiveSeconds": 0.030312196002341807
+      }
+    }
+  },
+  "after": {
+    "seconds": 4.699604968000131,
+    "hashBytes": 1513770376,
+    "stages": {
+      "prepare": {
+        "calls": 67,
+        "seconds": 4.695899462001762,
+        "exclusiveSeconds": 2.702534819001812
+      },
+      "sha256": {
+        "calls": 335,
+        "seconds": 1.0206964689941742,
+        "exclusiveSeconds": 1.0206964689941742
+      },
+      "openFace": {
+        "calls": 209,
+        "seconds": 0.02195625200511131,
+        "exclusiveSeconds": 0.02195625200511131
+      },
+      "validateStock": {
+        "calls": 67,
+        "seconds": 0.260572948997833,
+        "exclusiveSeconds": 0.024730721997912042
+      },
+      "stockGeometry": {
+        "calls": 8,
+        "seconds": 0.5388687820022824,
+        "exclusiveSeconds": 0.4579771270036872
+      },
+      "instantiate": {
+        "calls": 6,
+        "seconds": 0.0797586560001946,
+        "exclusiveSeconds": 0.0797586560001946
+      },
+      "glyphGroup": {
+        "calls": 150,
+        "seconds": 0.3857197989955239,
+        "exclusiveSeconds": 0.3857197989955239
+      },
+      "pairedProfiles": {
+        "calls": 8,
+        "seconds": 0.19383814100092422,
+        "exclusiveSeconds": 0.002525618003346608
+      }
+    }
+  },
+  "equivalence": {
+    "all67BindingsEqual": true,
+    "all67ContractHashesEqual": true,
+    "largeRenderedBytesEqual": true,
+    "renderedBytes": 4002460,
+    "renderedSha256": "e37ec01ca80a05b8107b3996f6cd660956c55d3915a1139a2040d480ba0e8868"
+  },
+  "androidValidated": false
+}

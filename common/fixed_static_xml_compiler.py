@@ -259,9 +259,11 @@ def verify_original_face(target, stock, face_index, *, metadata_only=False):
     captured = identity.get("faceIndex")
     if type(captured) is not int or type(face_index) is not int or face_index < 0:
         raise api.CompilerError("original face identity missing")
+    # Frozen contract checks consume metadata only. The exact selected face
+    # and location are outline-measured below before every geometry gate.
     def verify_face(index):
         return (api._verify_stock_identity(target, stock, index) if metadata_only else
-                api._validate_stock_contract(target, stock, index)["verifiedStockIdentity"])
+                api._validate_stock_contract(target, stock, index, measure_probes=False)["verifiedStockIdentity"])
     if captured == face_index:
         return verify_face(face_index)
     if api._magic(stock) != api.COLLECTION_MAGIC:
@@ -277,66 +279,17 @@ def verify_original_face(target, stock, face_index, *, metadata_only=False):
             "faceIndex":face_index}
 
 
-def prepare_unit(unit, stock_paths, allow_live_stock, *, cache=None):
-    """Verify and measure one route. No output font or source mutation occurs."""
+def _measure_route_profiles(stock, stock_face, weight, location, original, source_cmap,
+                            source_measurements, points, role, has_han):
+    """Measure immutable profile values; never cache a live/subset font."""
     api = _api()
-    _validate_unit(unit)
-    target, artifact = unit["target"], unit["artifact"]
-    source = target["source"]
-    path = Path(str(source.get("sourcePath") or ""))
-    api._file_uid_matches(source, path)
-    if api._font_container(path) != "TTF":
-        raise api.CompilerError("fixed static XML currently requires a standalone TrueType source")
-    face = int(source.get("faceIndex", 0))
-    # Measurement only reads selected outlines. Eager glyf decoding expands the
-    # entire CJK source for each XML route even when only a few probes are used.
-    original = api._open_face(path, face, lazy=True)
-    stock_font = stock_geometry = None
+    # Measure actual bytes at the exact original location, never trust a
+    # caller-supplied geometryVerified flag or archived profile alone.
+    stock_geometry, actual_location = api._stock_geometry_font(
+        stock, stock_face, weight, location, source_font=original,
+        role="cjk" if has_han else role,
+    )
     try:
-        source_measurements = _source_measurements(cache, source, path)
-        if (VARIABLE_TABLES & set(original.keys()) or "glyf" not in original
-                or any(tag not in original for tag in ("head", "hhea", "OS/2", "post", "name"))):
-            raise api.CompilerError("fixed static XML source must be a complete static glyf face")
-        if not _upright(original):
-            raise api.CompilerError("fixed static XML source metadata is not upright")
-        stock = api._resolve_stock(str(target["path"]), stock_paths, allow_live_stock)
-        stock_face = artifact["originalStockFaceIndex"]
-        verified = verify_original_face(target, stock, stock_face)
-        stock_font = api._open_face(stock, stock_face, lazy=True)
-        _verify_style_expansion(artifact, stock_font)
-        original_ps = str(artifact.get("originalStockPostScriptName") or "")
-        # AOSP FontListParser uses XML postScriptName as a font-update file
-        # lookup key, independently from the TTC index. Its CJK configuration
-        # intentionally repeats the JP key for SC/TC/KR collection faces.
-        # Bind the key to the frozen XML, while bytes and actual face remain
-        # protected by verify_original_face. This representation excludes an
-        # active update layer and rechecks that generation before activation.
-        if original_ps and not any(str(ref.get("postScriptName") or "") == original_ps
-                                   for ref in target.get("xmlRefs") or []):
-            raise api.CompilerError("fixed static XML PostScript update key differs from sealed XML")
-        xml_identity = {"kind": "aosp-font-update-lookup-key", "declaredPostScriptName": original_ps,
-                        "actualFacePostScriptNames": sorted({record.toUnicode() for record in stock_font["name"].names
-                                                             if record.nameID == 6}), "faceIndex": stock_face}
-        if "VARC" in stock_font:
-            raise api.CompilerError("fixed static XML OEM VARC geometry is unsupported")
-        weight = api._int(artifact.get("requiredWeight"), 400)
-        location, axis_evidence = _original_location(stock_font, artifact["originalStockAxes"], weight)
-        source_cmap = _source_cmap(original, source_measurements)
-        source_points = set(source_cmap)
-        stock_points = set(stock_font.getBestCmap() or {})
-        role = str(target["role"])
-        allowed_stock = {cp for cp in stock_points if _allowed(role, cp)}
-        points = sorted(allowed_stock & source_points)
-        if not points:
-            raise api.CompilerError("fixed static XML has no selected shared coverage")
-        exposed = sorted({_role(cp) for cp in points})
-        has_han = any(slot_build.is_cjk(cp) for cp in points)
-        # Measure actual bytes at the exact original location, never trust a
-        # caller-supplied geometryVerified flag or archived profile alone.
-        stock_geometry, actual_location = api._stock_geometry_font(
-            stock, stock_face, weight, location, source_font=original,
-            role="cjk" if has_han else role,
-        )
         if actual_location != location:
             raise api.CompilerError("fixed static XML OEM measurement location changed")
         stock_profile, source_profile = api._paired_geometry_profiles(
@@ -389,6 +342,85 @@ def prepare_unit(unit, stock_paths, allow_live_stock, *, cache=None):
             for font, profile in ((stock_geometry, stock_profile), (original, source_profile)):
                 profile["probes"]["punctuationBrackets"] = _probe_group(font, brackets, source_measurements if font is original else None)
             needed.add("punctuationBrackets")
+        return stock_profile, source_profile, needed, brackets
+    finally:
+        stock_geometry.close()
+
+
+def prepare_unit(unit, stock_paths, allow_live_stock, *, cache=None):
+    """Verify and measure one route. No output font or source mutation occurs."""
+    api = _api()
+    _validate_unit(unit)
+    target, artifact = unit["target"], unit["artifact"]
+    source = target["source"]
+    path = Path(str(source.get("sourcePath") or ""))
+    api._file_uid_matches(source, path)
+    if api._font_container(path) != "TTF":
+        raise api.CompilerError("fixed static XML currently requires a standalone TrueType source")
+    face = int(source.get("faceIndex", 0))
+    # Measurement only reads selected outlines. Eager glyf decoding expands the
+    # entire CJK source for each XML route even when only a few probes are used.
+    original = api._open_face(path, face, lazy=True)
+    stock_font = None
+    try:
+        source_measurements = _source_measurements(cache, source, path)
+        if (VARIABLE_TABLES & set(original.keys()) or "glyf" not in original
+                or any(tag not in original for tag in ("head", "hhea", "OS/2", "post", "name"))):
+            raise api.CompilerError("fixed static XML source must be a complete static glyf face")
+        if not _upright(original):
+            raise api.CompilerError("fixed static XML source metadata is not upright")
+        stock = api._resolve_stock(str(target["path"]), stock_paths, allow_live_stock)
+        stock_face = artifact["originalStockFaceIndex"]
+        verified = verify_original_face(target, stock, stock_face)
+        stock_font = api._open_face(stock, stock_face, lazy=True)
+        _verify_style_expansion(artifact, stock_font)
+        original_ps = str(artifact.get("originalStockPostScriptName") or "")
+        # AOSP FontListParser uses XML postScriptName as a font-update file
+        # lookup key, independently from the TTC index. Its CJK configuration
+        # intentionally repeats the JP key for SC/TC/KR collection faces.
+        # Bind the key to the frozen XML, while bytes and actual face remain
+        # protected by verify_original_face. This representation excludes an
+        # active update layer and rechecks that generation before activation.
+        if original_ps and not any(str(ref.get("postScriptName") or "") == original_ps
+                                   for ref in target.get("xmlRefs") or []):
+            raise api.CompilerError("fixed static XML PostScript update key differs from sealed XML")
+        xml_identity = {"kind": "aosp-font-update-lookup-key", "declaredPostScriptName": original_ps,
+                        "actualFacePostScriptNames": sorted({record.toUnicode() for record in stock_font["name"].names
+                                                             if record.nameID == 6}), "faceIndex": stock_face}
+        if "VARC" in stock_font:
+            raise api.CompilerError("fixed static XML OEM VARC geometry is unsupported")
+        weight = api._int(artifact.get("requiredWeight"), 400)
+        location, axis_evidence = _original_location(stock_font, artifact["originalStockAxes"], weight)
+        source_cmap = _source_cmap(original, source_measurements)
+        source_points = set(source_cmap)
+        stock_points = set(stock_font.getBestCmap() or {})
+        role = str(target["role"])
+        allowed_stock = {cp for cp in stock_points if _allowed(role, cp)}
+        points = sorted(allowed_stock & source_points)
+        if not points:
+            raise api.CompilerError("fixed static XML has no selected shared coverage")
+        exposed = sorted({_role(cp) for cp in points})
+        has_han = any(slot_build.is_cjk(cp) for cp in points)
+        # Identity, metadata, axes and coverage are checked anew for every
+        # route. Only exact byte/face/location/intersection probe values reuse
+        # a request-local bounded cache; geometry gates below always run.
+        measurement_key = api._canonical_hash({
+            "stockSha256": verified["sha256"], "face": stock_face,
+            "location": location, "source": source["fileUid"],
+            "sourceFace": face, "selection": source["mixedSelection"],
+            "role": role, "points": points,
+            "revision": REVISION, "compilerRevision": api.COMPILER_REVISION,
+            "probeSchema": api.template_engine.PROBE_SCHEMA,
+        })
+        measurements = cache.setdefault("_fixedStaticRouteProfiles", {}) if cache is not None else {}
+        if measurement_key in measurements:
+            stock_profile, source_profile, needed, brackets = copy.deepcopy(measurements[measurement_key])
+        else:
+            measured = _measure_route_profiles(stock, stock_face, weight, location, original,
+                source_cmap, source_measurements, points, role, has_han)
+            stock_profile, source_profile, needed, brackets = measured
+            if cache is not None and len(measurements) < 32:
+                measurements[measurement_key] = copy.deepcopy(measured)
         geometry = api._geometry_plan(target, stock_profile, source_profile, weight)
         if brackets:
             geometry["transforms"]["punctuationBrackets"] = slot_plan.probe_transform(
@@ -462,8 +494,6 @@ def prepare_unit(unit, stock_paths, allow_live_stock, *, cache=None):
         original.close()
         if stock_font is not None:
             stock_font.close()
-        if stock_geometry is not None:
-            stock_geometry.close()
 
 
 def _validate_saved(path, prepared):
