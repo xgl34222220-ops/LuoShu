@@ -119,6 +119,10 @@ def main():
                     from magisk_avd import prepare, verify
                     patched = prepare(args.magisk_apk, args.magisk_patch_script, sdk, output, adb)
                     subprocess.run([adb, '-s', 'emulator-5554', 'emu', 'kill'], capture_output=True, timeout=10)
+                    # Console 'kill' can stall in graphics/network teardown. Use
+                    # the same owned-supervisor cancellation path as final cleanup.
+                    if launcher.poll() is None:
+                        launcher.terminate()
                     launcher.wait(timeout=45)
                     if not json.loads(root_report.read_text()).get('emulator_reaped'):
                         raise RuntimeError('Stock emulator did not confirm cleanup')
