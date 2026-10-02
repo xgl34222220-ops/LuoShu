@@ -36,7 +36,7 @@ class BackgroundTreeTest(unittest.TestCase):
         ps.write_text(f"#!/bin/sh\ncat '{self.root / 'process-tree'}'\n")
         ps.chmod(0o755)
         self.env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}",
-                    "LUOSHU_PROC_ROOT": str(self.proc)}
+                    "LUOSHU_TASK_HELPER": str(ROOT / "common/task_scope.py")}
 
     def spawn(self, command, **kwargs):
         process = subprocess.Popen(command, start_new_session=True,
@@ -99,8 +99,9 @@ class BackgroundTreeTest(unittest.TestCase):
         worker = self.spawn(["sh", str(manager)])
         sentinel = self.spawn([sys.executable, "-c", "import time; time.sleep(60)"])
         leaf, _, proc_id = self.snapshot()
-        subprocess.run(["sh", "-c", '. "$1"; luoshu_terminate_task_tree "$2"', "sh",
-                        str(ROOT / "common/background_task.sh"), str(worker.pid)],
+        subprocess.run(["sh", "-c", '. "$1"; luoshu_terminate_task_tree "$2" "$3"', "sh",
+                        str(ROOT / "common/background_task.sh"), str(worker.pid),
+                        Path(f"/proc/{worker.pid}/stat").read_text().rsplit(") ", 1)[1].split()[19]],
                        env=self.env, check=True, timeout=5)
         self.wait_for(lambda: not alive(leaf, proc_id))
         self.assertIsNotNone(worker.poll())
@@ -113,7 +114,7 @@ class BackgroundTreeTest(unittest.TestCase):
         Path(str(pidfile) + ".task").write_text("old-task")
         Path(str(pidfile) + ".boot").write_text("previous-boot")
         subprocess.run(["sh", "-c", '. "$1"; luoshu_stop_task_pid "$2"', "sh",
-                        str(ROOT / "common/background_task.sh"), str(pidfile)], check=True, timeout=5)
+                        str(ROOT / "common/background_task.sh"), str(pidfile)], env=self.env, check=True, timeout=5)
         self.assertIsNone(sentinel.poll())
         self.assertFalse(pidfile.exists())
 

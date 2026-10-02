@@ -48,7 +48,7 @@ class HotfixTest(unittest.TestCase):
         self.assertFalse((self.module / '.legacy-v14-runtime').exists())
         self.assertFalse((self.module / '.luoshu-payload').exists())
 
-    def test_weight_read_does_not_migrate_fonts_and_queries_settings_once(self):
+    def test_retired_weight_api_does_not_migrate_fonts_or_query_settings(self):
         for name in ('font_manager_v4.sh', 'util_functions.sh', 'util_functions_core.sh'):
             self.copy(name)
         legacy = self.root / 'legacy'
@@ -57,8 +57,8 @@ class HotfixTest(unittest.TestCase):
         self.env['LEGACY_FONTS_DIR'] = str(legacy)
         self.command('settings', 'echo call >> "$TEST_ROOT/settings-calls"\necho 50\n')
         result = json.loads(self.run_shell(self.common / 'font_manager_v4.sh', 'action', 'font_weight_status'))
-        self.assertEqual(result['data']['weight'], 450)
-        self.assertEqual((self.root / 'settings-calls').read_text().splitlines(), ['call'])
+        self.assertEqual(result['status'], 'error')
+        self.assertFalse((self.root / 'settings-calls').exists())
         self.assertFalse((self.root / 'public').exists(), 'status migrated public fonts')
 
     def test_status_does_not_start_deep_verifier_or_root_manager_daemon(self):

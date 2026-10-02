@@ -126,21 +126,23 @@ private fun previewMemoryPut(key: String, entry: PreviewMemoryEntry) = synchroni
 
 @Composable
 internal fun rememberWeightAxisInfo(font: FontItem?): WeightAxisInfo {
-    val cached = remember(font?.id) { font?.id?.let(axisInfoCache::get) }
+    val revision = font?.sourceRevision
+    val cached = remember(revision) { revision?.let(axisInfoCache::get) }
     val info by produceState(
         initialValue = cached ?: WeightAxisInfo(loading = font?.variable == true),
-        key1 = font?.id,
+        key1 = revision,
         key2 = font?.variable,
     ) {
+        value = cached ?: WeightAxisInfo(loading = font?.variable == true)
         value = when {
             font == null -> WeightAxisInfo(loading = false, error = "未选择字体")
             !font.variable -> WeightAxisInfo(loading = false, hasWeight = false)
             cached != null -> cached
             else -> {
-                val lock = axisInfoLocks.computeIfAbsent(font.id) { Mutex() }
+                val lock = axisInfoLocks.computeIfAbsent(font.sourceRevision) { Mutex() }
                 lock.withLock {
-                    axisInfoCache[font.id] ?: loadWeightAxisInfo(font).also { loaded ->
-                        axisInfoCache[font.id] = loaded
+                    axisInfoCache[font.sourceRevision] ?: loadWeightAxisInfo(font).also { loaded ->
+                        if (loaded.error.isBlank()) axisInfoCache[font.sourceRevision] = loaded
                     }
                 }
             }
@@ -241,7 +243,7 @@ internal fun NativeFontPreview(
     val sourceRevision = remember(font, requestedWeight) {
         font?.let {
             val staticRevision = if (it.variable) "" else "|wght=$requestedWeight"
-            "${it.id}|${it.size}|${it.date}$staticRevision"
+            "${it.sourceRevision}$staticRevision"
         }
     }
     val extension = remember(font?.format) {
@@ -265,6 +267,7 @@ internal fun NativeFontPreview(
             ?: PreviewTypefaceState(),
         key1 = previewKey,
     ) {
+        value = memoryEntry?.let { PreviewTypefaceState(it.typeface, it.file) } ?: PreviewTypefaceState()
         value = withContext(Dispatchers.IO) {
             when {
                 font == null -> PreviewTypefaceState(error = "未选择字体")

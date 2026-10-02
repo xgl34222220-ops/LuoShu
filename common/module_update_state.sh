@@ -71,7 +71,7 @@ luoshu_update_config_is_volatile() {
         device-font-cache-pending.conf|device-font-cache-failures.conf|\
         device-font-engine.conf|device-font-installed.conf|device-font-dynamic-mount.conf|\
         device-font-load-verification.json|device-font-manager-dump.txt|\
-        device-font-mount-evidence.txt|*.pid|*.pid.task|*.tmp|*.tmp.*)
+        device-font-mount-evidence.txt|*.pid|*.pid.task|*.pid.boot|*.pid.start|*.pid.scope|*.pid.identity|*.pid.launch-lock|*.tmp|*.tmp.*)
             return 0
             ;;
     esac
@@ -143,7 +143,8 @@ luoshu_clear_update_volatile() {
         "$_module/config/device-font-mount-evidence.txt" \
         "$_module/.font_switch.lock" \
         "$_module/.font-payload-commit.ok" 2>/dev/null || true
-    rm -f "$_module/config"/*.pid "$_module/config"/*.pid.task \
+    rm -f "$_module/config"/*.pid "$_module/config"/*.pid.task "$_module/config"/*.pid.boot \
+        "$_module/config"/*.pid.start "$_module/config"/*.pid.scope "$_module/config"/*.pid.identity \
         "$_module/config"/*.tmp "$_module/config"/*.tmp.* 2>/dev/null || true
     rm -rf "$_module"/.font-payload-stage.* "$_module"/.font-payload-backup.* 2>/dev/null || true
     if [ -e "$_module/.device-font-cache.lock" ]; then
@@ -200,7 +201,7 @@ luoshu_migrate_update_cache() {
     # regular files from config/*, silently dropping the entire device alignment cache on update.
     # Metric/source caches are content-addressed and safe across releases. A device payload cache is
     # retained only when its payload schema and physical-font builder agree.
-    for _relative in cache/auto-multiweight-mix/source-meta-v1 config/metrics_cache config/font-config-source; do
+    for _relative in cache/auto-multiweight-mix/source-meta-v1 config/metrics_cache config/font-config-source config/recovery config/safe-switch-validation; do
         [ -d "$_old/$_relative" ] || continue
         rm -rf "$_new/$_relative" 2>/dev/null || true
         mkdir -p "${_new}/${_relative%/*}" 2>/dev/null || continue

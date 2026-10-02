@@ -2,6 +2,9 @@
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 . "$ROOT/scripts/version.sh"
+# Fixture modules intentionally copy only their tested shell entrypoints.
+LUOSHU_TASK_HELPER="$ROOT/common/task_scope.py"
+export LUOSHU_TASK_HELPER
 
 # Source checks run with the host Python, while release workflows prepare the
 # pure-Python FontTools payload for the bundled Android runtime.  Make that
@@ -120,7 +123,7 @@ for runtime in customize.sh post-fs-data.sh service.sh action.sh common/font_man
   ! grep -q 'webroot' "$ROOT/$runtime"
 done
 grep -q 'native_font_index.json' "$ROOT/common/font_manager.sh"
-grep -q 'native_font_index.json' "$ROOT/service.sh"
+! grep -q 'action list' "$ROOT/service.sh"
 ! grep -qE 'restart_ui|previous_font|sync_preview_fonts' "$ROOT/common/font_manager.sh"
 ! grep -qE '重启界面|刷新字体缓存|回滚' "$ROOT/common/luoshu_cli.sh"
 
@@ -325,3 +328,8 @@ grep -q 'native-v3' common/font_manager.sh
 grep -q 'manifest-fast' common/font_manager.sh
 grep -q 'font-index-v3.json' android-app/app/src/main/java/io/github/xgl34222220/luoshu/FontIndexStore.kt
 grep -q 'prepared-v8' common/multiweight_mix_task.sh
+
+python3 "$ROOT/scripts/stable_mount_boundary_test.py"
+python3 "$ROOT/scripts/stable_cleanup_policy_test.py"
+
+python3 "$ROOT/scripts/task_scope_test.py"

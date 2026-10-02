@@ -42,6 +42,11 @@ case "$_result" in
         print_line "洛书 App 已是模块内置的当前版本。"
         exit 0
         ;;
+    test-manual-only)
+        print_line "这是独立的洛书稳定重构测试 App，请手动安装配套 APK。"
+        print_line "无需卸载原 App 或清除数据。"
+        exit 0
+        ;;
     deferred)
         print_line "当前环境无法调用 Android 包管理器。"
         print_line "请在系统启动完成后再次点击模块“操作”按钮。"
@@ -50,7 +55,7 @@ case "$_result" in
     *)
         print_line "App 安装或更新失败，详情已写入："
         print_line "$LOG"
-        print_line "若提示签名不一致，请先卸载旧测试版 App 后重试。"
+        print_line "若提示签名不一致，请保留现有 App 和数据，使用配套独立测试 App。"
         print_line "错误代码：$_code"
         exit 1
         ;;

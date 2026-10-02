@@ -537,12 +537,9 @@ start_mix() {
         printf '{"status":"error","message":"本次开机已更改文字字体，请先重启手机"}\n'
         return
     }
-    if [ -s "$WORKER_PID" ]; then
-        _old=$(cat "$WORKER_PID" 2>/dev/null)
-        [ -z "$_old" ] || ! kill -0 "$_old" 2>/dev/null || {
-            printf '{"status":"error","message":"已有自动多字重任务正在运行"}\n'
-            return
-        }
+    if type luoshu_task_pid_alive >/dev/null 2>&1 && luoshu_task_pid_alive "$WORKER_PID"; then
+        printf '{"status":"error","message":"已有自动多字重任务正在运行"}\n'
+        return
     fi
     if type luoshu_font_lock_busy >/dev/null 2>&1; then
         if luoshu_font_lock_busy "$LOCK_FILE"; then

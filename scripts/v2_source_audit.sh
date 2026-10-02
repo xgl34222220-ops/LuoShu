@@ -48,7 +48,7 @@ find "$ROOT/system" -type f -iname '*emoji*' -print -quit 2>/dev/null | grep -q 
 ! grep -RIn 'LUOSHU_VARIANT' "$ROOT/scripts" "$ROOT/.github/workflows" >/dev/null 2>&1
 ! grep -q '^webroot=' "$ROOT/module.prop"
 grep -q 'native_font_index.json' "$ROOT/common/font_manager.sh"
-grep -q 'native_font_index.json' "$ROOT/service.sh"
+! grep -q 'action list' "$ROOT/service.sh"
 
 # 卸载脚本不能在删除阶段重新创建模块日志目录或写回持久文件。
 ! grep -q 'mkdir -p .*MODDIR.*/logs' "$ROOT/uninstall.sh"

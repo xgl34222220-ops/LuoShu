@@ -13,126 +13,119 @@ luoshu_pid_value() {
     sed -n '1{s/[^0-9].*$//;p;}' "$_lpv_file" 2>/dev/null
 }
 
-luoshu_task_pid_alive() {
+# /proc stat field 22 is a process birth identity, unlike a reusable numeric PID.
+luoshu_pid_start() (
+    case "$1" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    IFS= read -r _lps_stat 2>/dev/null < "${LUOSHU_PROC_ROOT:-/proc}/$1/stat" || return 1
+    _lps_tail=${_lps_stat##*) }
+    [ "$_lps_tail" != "$_lps_stat" ] || return 1
+    set -- $_lps_tail
+    [ "$#" -ge 20 ] || return 1
+    case "$1" in Z|X) return 1 ;; esac
+    shift 19
+    printf '%s\n' "$1"
+)
+
+luoshu_task_pid_alive() (
     _ltpa_pid_file="$1"
     _ltpa_task="${2:-}"
     _ltpa_pid=$(luoshu_pid_value "$_ltpa_pid_file")
-    [ -n "$_ltpa_pid" ] || return 1
-
-    # PID 在完整重启后可能被复用。带 boot sidecar 的任务必须属于当前启动周期。
-    if [ -s "${_ltpa_pid_file}.boot" ]; then
-        _ltpa_expected_boot=$(cat "${_ltpa_pid_file}.boot" 2>/dev/null | tr -d '\r\n')
-        _ltpa_current_boot=$(luoshu_current_boot_id)
-        [ -n "$_ltpa_expected_boot" ] && [ "$_ltpa_expected_boot" = "$_ltpa_current_boot" ] || return 1
-    fi
-
-    kill -0 "$_ltpa_pid" 2>/dev/null || return 1
-    if [ -n "$_ltpa_task" ]; then
-        # A numeric PID can be recycled by Android. The task sidecar and, when available,
-        # the worker command line must both still belong to the same LuoShu task.
+    case "$_ltpa_pid" in ''|*[!0-9]*|0|1) return 1 ;; esac
+    # Missing identity fails closed. A bare old PID is never authority to keep
+    # a task busy or to signal any process (even if its command line matches).
+    [ -s "${_ltpa_pid_file}.boot" ] && [ -s "${_ltpa_pid_file}.start" ] &&
         [ -s "${_ltpa_pid_file}.task" ] || return 1
-        [ "$(cat "${_ltpa_pid_file}.task" 2>/dev/null)" = "$_ltpa_task" ] || return 1
-        if [ -r "/proc/$_ltpa_pid/cmdline" ]; then
-            _ltpa_cmdline=$(tr '\000' ' ' < "/proc/$_ltpa_pid/cmdline" 2>/dev/null)
-            case "$_ltpa_cmdline" in *"$_ltpa_task"*) ;; *) return 1 ;; esac
-        fi
-    fi
-    return 0
-}
+    [ "$(cat "${_ltpa_pid_file}.boot" 2>/dev/null)" = "$(luoshu_current_boot_id)" ] || return 1
+    _ltpa_start=$(luoshu_pid_start "$_ltpa_pid") || return 1
+    [ "$_ltpa_start" = "$(cat "${_ltpa_pid_file}.start" 2>/dev/null)" ] || return 1
+    [ -z "$_ltpa_task" ] || [ "$(cat "${_ltpa_pid_file}.task" 2>/dev/null)" = "$_ltpa_task" ] || return 1
+    kill -0 "$_ltpa_pid" 2>/dev/null
+)
 
-luoshu_clear_task_pid() {
+luoshu_clear_task_pid() (
     _lctp_pid_file="$1"
     _lctp_task="${2:-}"
     if [ -n "$_lctp_task" ] && [ -s "${_lctp_pid_file}.task" ] && [ "$(cat "${_lctp_pid_file}.task" 2>/dev/null)" != "$_lctp_task" ]; then
         return 0
     fi
-    rm -f "$_lctp_pid_file" "${_lctp_pid_file}.task" "${_lctp_pid_file}.boot" 2>/dev/null || true
-}
+    # Workers cannot erase their supervisor before orphan cleanup has finished.
+    # The supervisor removes these files after reaping its complete scope.
+    [ -z "${LUOSHU_TASK_SCOPE:-}" ] || [ "$(cat "${_lctp_pid_file}.scope" 2>/dev/null)" != "$LUOSHU_TASK_SCOPE" ] || return 0
+    luoshu_task_pid_alive "$_lctp_pid_file" "$_lctp_task" && return 0
+    # A dead reaper can leave proven descendants; keep its recovery manifest.
+    [ ! -s "${_lctp_pid_file}.identity" ] || return 0
+    rm -f "$_lctp_pid_file" "${_lctp_pid_file}.task" "${_lctp_pid_file}.boot" \
+        "${_lctp_pid_file}.start" "${_lctp_pid_file}.scope" 2>/dev/null || true
+)
 
-luoshu_stop_task_pid() {
-    _lstp_pid_file="$1"
-    _lstp_pid=$(luoshu_pid_value "$_lstp_pid_file")
-    _lstp_task=$(cat "${_lstp_pid_file}.task" 2>/dev/null)
-    if luoshu_task_pid_alive "$_lstp_pid_file" "$_lstp_task"; then
-        luoshu_terminate_task_tree "$_lstp_pid"
+# Resolve the real module even through the frozen legacy runtime symlinks.
+# The final two candidates also support the repository's standalone host tests.
+luoshu_task_runtime() {
+    _ltr_helper="${LUOSHU_TASK_HELPER:-}"
+    for _ltr_base in "${LUOSHU_REAL_MODDIR:-}" "${MODDIR:-}" "${0%/*}" "${0%/*}/.."; do
+        [ -n "$_ltr_helper" ] && break
+        [ -n "$_ltr_base" ] || continue
+        if [ -f "$_ltr_base/common/task_scope.py" ]; then
+            _ltr_helper="$_ltr_base/common/task_scope.py"
+        elif [ -f "$_ltr_base/task_scope.py" ]; then
+            _ltr_helper="$_ltr_base/task_scope.py"
+        fi
+    done
+    [ -f "$_ltr_helper" ] || return 1
+    _ltr_helper=$(readlink -f "$_ltr_helper" 2>/dev/null) || return 1
+    _ltr_root=${_ltr_helper%/*}/python
+    if [ ! -e /system/bin/sh ] && command -v python3 >/dev/null 2>&1; then
+        _ltr_python=$(command -v python3)
+        _ltr_bundled=0
+    elif [ -x "$_ltr_root/bin/luoshu-python" ]; then
+        _ltr_python="$_ltr_root/bin/luoshu-python"
+        _ltr_bundled=1
+    else
+        return 1
     fi
-    luoshu_clear_task_pid "$_lstp_pid_file"
 }
 
-# Cancellation is rare: take one process-tree snapshot, rather than running a
-# pgrep for every child. Keep the descendants after their parents exit so a
-# grandchild FontTools worker cannot escape the final KILL by being reparented.
-# Start-time checks keep the saved list from signalling a recycled PID.
+luoshu_task_helper() (
+    luoshu_task_runtime || { echo '[task-scope] missing bounded task runtime' >&2; return 1; }
+    if [ "$_ltr_bundled" = 1 ]; then
+        export PYTHONHOME="$_ltr_root"
+        export PYTHONPATH="$_ltr_root/lib/python3.14:$_ltr_root/lib/python3.14/site-packages"
+        export LD_LIBRARY_PATH="$_ltr_root/lib:$_ltr_root/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    fi
+    exec "$_ltr_python" "$_ltr_helper" "$@"
+)
+
+luoshu_stop_task_pid() (
+    _lstp_pid_file="$1"
+    _lstp_task="${2:-$(cat "${_lstp_pid_file}.task" 2>/dev/null)}"
+    if [ -s "${_lstp_pid_file}.identity" ]; then
+        luoshu_task_helper stop "$_lstp_pid_file" "$_lstp_task"
+        return $?
+    fi
+    # Legacy sidecars cannot prove scope; do not signal their numeric PID.
+    luoshu_clear_task_pid "$_lstp_pid_file" "$_lstp_task"
+)
+
+# Compatibility for a known freshly launched child. The helper pins every
+# external PID with pidfd; no process-name/ps-grep or unverified group signals.
+# New managed tasks use their subreaper scope, which also covers lost parents.
 luoshu_terminate_task_tree() (
     _ltt_root="$1"
     case "$_ltt_root" in ''|*[!0-9]*|0|1) return 1 ;; esac
-    [ "$_ltt_root" != "$$" ] || return 1
-    _ltt_proc_root="${LUOSHU_PROC_ROOT:-/proc}"
-    _ltt_identity() {
-        IFS= read -r _ltt_stat 2>/dev/null < "$_ltt_proc_root/$1/stat" || return 1
-        _ltt_tail=${_ltt_stat##*) }
-        [ "$_ltt_tail" != "$_ltt_stat" ] || return 1
-        set -- $_ltt_tail
-        [ "$#" -ge 20 ] || return 1
-        shift 19
-        printf '%s\n' "$1"
-    }
-    _ltt_pids=$(ps -A -o PID,PPID 2>/dev/null | awk -v root="$_ltt_root" '
-        $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ { parent[$1] = $2 }
-        function children(p, child) {
-            if (seen[p]++) return
-            for (child in parent) if (parent[child] == p) children(child)
-            print p
-        }
-        END { children(root) }
-    ')
-    _ltt_saved=$(
-        for _ltt_pid in $_ltt_pids; do
-            _ltt_start=$(_ltt_identity "$_ltt_pid") || continue
-            printf '%s:%s\n' "$_ltt_pid" "$_ltt_start"
-        done
-    )
-    for _ltt_signal in TERM KILL; do
-        for _ltt_record in $_ltt_saved; do
-            _ltt_pid=${_ltt_record%%:*}
-            _ltt_start=${_ltt_record#*:}
-            [ "$(_ltt_identity "$_ltt_pid" 2>/dev/null)" = "$_ltt_start" ] || continue
-            kill -"$_ltt_signal" "$_ltt_pid" 2>/dev/null || true
-        done
-        [ "$_ltt_signal" != TERM ] || sleep 1
-    done
+    [ "$_ltt_root" != "$$" ] && [ -n "${2:-}" ] || return 1
+    luoshu_task_helper tree "$_ltt_root" "$2"
 )
 
-luoshu_start_detached() {
+luoshu_start_detached() (
     _lsd_pid_file="$1"
     _lsd_task="$2"
     _lsd_log_file="$3"
     shift 3
     [ "$#" -gt 0 ] || return 2
-    mkdir -p "${_lsd_pid_file%/*}" "${_lsd_log_file%/*}" 2>/dev/null || return 1
-    if luoshu_task_pid_alive "$_lsd_pid_file" "$_lsd_task"; then
-        return 3
-    fi
-
-    # Shell function variables are global on Android /system/bin/sh. Keep function-specific
-    # names here: the old generic _task variable was cleared by luoshu_clear_task_pid(), so
-    # every new worker wrote an empty .task sidecar and was falsely recovered as interrupted.
-    luoshu_clear_task_pid "$_lsd_pid_file"
-
-    if command -v nohup >/dev/null 2>&1 && command -v setsid >/dev/null 2>&1; then
-        MODDIR="${MODDIR:-}" nohup setsid "$@" </dev/null >>"$_lsd_log_file" 2>&1 &
-    elif command -v toybox >/dev/null 2>&1 && toybox nohup --help >/dev/null 2>&1 && toybox setsid --help >/dev/null 2>&1; then
-        MODDIR="${MODDIR:-}" toybox nohup toybox setsid "$@" </dev/null >>"$_lsd_log_file" 2>&1 &
-    elif command -v nohup >/dev/null 2>&1; then
-        MODDIR="${MODDIR:-}" nohup "$@" </dev/null >>"$_lsd_log_file" 2>&1 &
-    else
-        ( trap '' HUP; exec "$@" ) </dev/null >>"$_lsd_log_file" 2>&1 &
-    fi
-    _lsd_pid=$!
-    case "$_lsd_pid" in ''|*[!0-9]*) return 1 ;; esac
-    printf '%s\n' "$_lsd_pid" >"$_lsd_pid_file" 2>/dev/null || return 1
-    printf '%s\n' "$_lsd_task" >"${_lsd_pid_file}.task" 2>/dev/null || true
-    luoshu_current_boot_id >"${_lsd_pid_file}.boot" 2>/dev/null || true
-    chmod 0644 "$_lsd_pid_file" "${_lsd_pid_file}.task" "${_lsd_pid_file}.boot" 2>/dev/null || true
-    return 0
-}
+    # Cache prewarming is optional. Never create another job after a font
+    # transaction, or outside one: switching must return the module to idle.
+    case "${_lsd_pid_file##*/}" in font-prewarm-*.pid) return 0 ;; esac
+    # Python start_new_session is the equivalent of nohup setsid, with a finite
+    # child subreaper added. It NEVER calls unshare or creates a mount namespace.
+    luoshu_task_helper launch "$_lsd_pid_file" "$_lsd_task" "$_lsd_log_file" -- "$@"
+)

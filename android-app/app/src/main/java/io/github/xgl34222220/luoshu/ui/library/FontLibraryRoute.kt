@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -23,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import io.github.xgl34222220.luoshu.FontLoadDiagnostics
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.ui.appearance.UiStyle
 
@@ -33,6 +36,15 @@ internal fun FontLibraryRoute(
     actions: FontLibraryActions,
     topActions: @Composable () -> Unit = {},
 ) {
+    LaunchedEffect(state.loading, state.totalCount, state.verified) {
+        if (!state.loading) {
+            // A composed list is not a presented frame. Wait across a frame boundary before
+            // reporting the observation; this remains an App signal, not a GPU timing claim.
+            withFrameNanos { }
+            withFrameNanos { }
+            FontLoadDiagnostics.mark("library_frame", state.totalCount, state.verified)
+        }
+    }
     val context = LocalContext.current
     val collectionStore = remember(context.applicationContext) {
         FontLibraryCollectionStore(context.applicationContext)
@@ -80,7 +92,7 @@ internal fun FontLibraryRoute(
                     style = style,
                     fonts = state.allFonts,
                     collections = collections,
-                    enabled = !state.loading && !state.operationBusy,
+                    enabled = !state.loading && !state.operationBusy && state.verified,
                     onCollectionsChange = ::persistCollections,
                 )
             }
@@ -89,7 +101,7 @@ internal fun FontLibraryRoute(
                     style = style,
                     fonts = state.allFonts,
                     collections = collections,
-                    enabled = !state.loading && !state.operationBusy,
+                    enabled = !state.loading && !state.operationBusy && state.verified,
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -106,7 +118,12 @@ internal fun FontLibraryRoute(
         }
     }
 
-    val childLayerActive = showManagement || detailFont != null
+    LaunchedEffect(state.allFonts) {
+        if (detailFont != null && state.allFonts.none { it.id == detailFont?.id }) detailFont = null
+    }
+    val childLayerActive = showManagement || detailFont?.let { selected ->
+        state.allFonts.any { it.id == selected.id }
+    } == true
     val pageScale by animateFloatAsState(
         targetValue = if (childLayerActive) .96f else 1f,
         animationSpec = spring(dampingRatio = .86f, stiffness = Spring.StiffnessMediumLow),
@@ -149,12 +166,13 @@ internal fun FontLibraryRoute(
         )
     }
 
-    detailFont?.let { font ->
+    detailFont?.let { selected ->
+        val font = state.allFonts.firstOrNull { it.id == selected.id } ?: return@let
         FontDetailsDialogRoute(
             style = style,
             font = font,
             active = state.activeFontId == font.id,
-            busy = state.operationBusy,
+            busy = state.operationBusy || !state.verified,
             onDismiss = { detailFont = null },
             onApply = {
                 detailFont = null

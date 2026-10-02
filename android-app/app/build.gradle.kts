@@ -42,6 +42,7 @@ android {
         // module.prop is the only version source shared by the module, native App and CI artifacts.
         versionCode = moduleVersionCode * 100 + 1
         versionName = appVersionName
+        buildConfigField("boolean", "STARTUP_DIAGNOSTICS", "false")
     }
 
     buildFeatures {
@@ -66,9 +67,11 @@ android {
 
     buildTypes {
         getByName("debug") {
-            applicationIdSuffix = ".debug"
-            versionNameSuffix = "-debug"
-            // Test packages remain installable over the existing debug app, but execute with release-like optimization.
+            applicationIdSuffix = ".stabletest"
+            versionNameSuffix = "-stabletest"
+            buildConfigField("boolean", "STARTUP_DIAGNOSTICS", "true")
+            // Isolated candidate identity: never replace the official, .debug or .audit app.
+            // Keep release-like optimization while allowing local startup acceptance markers.
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
@@ -76,9 +79,6 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            if (hasReleaseSigning) {
-                signingConfig = signingConfigs.getByName("release")
-            }
         }
         getByName("release") {
             isMinifyEnabled = true

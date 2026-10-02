@@ -67,6 +67,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
@@ -110,7 +114,16 @@ internal fun FontLibraryScreenCompact(
     val filtered = state.query.isNotBlank() || state.filter != FontLibraryFilter.ALL
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize()
+            .testTag("luoshu_font_library")
+            .semantics {
+                testTagsAsResourceId = true
+                stateDescription = "字体列表：${state.totalCount}；" + when {
+                    state.loading -> "加载中"
+                    state.verified -> "已核查"
+                    else -> "待核查"
+                }
+            },
         contentPadding = PaddingValues(
             start = LuoShuLayoutTokens.PageHorizontal,
             end = LuoShuLayoutTokens.PageHorizontal,
@@ -124,8 +137,8 @@ internal fun FontLibraryScreenCompact(
                     icon = Icons.Rounded.Refresh,
                     contentDescription = "刷新字体库",
                     onClick = actions.refresh,
-                    enabled = !state.loading && !state.operationBusy,
-                    loading = state.loading,
+                    enabled = !state.loading && !state.refreshing && !state.operationBusy,
+                    loading = state.loading || state.refreshing,
                     containerColor = elevatedColor,
                 )
             }
@@ -229,6 +242,10 @@ internal fun FontLibraryScreenCompact(
                     )
                 }
             }
+        } else if (state.refreshing || (!state.verified && state.error.isBlank())) {
+            item(key = "checking") {
+                Text("已显示保存的字体列表，正在后台核查变化…", color = textSecondary, fontSize = 12.sp)
+            }
         } else if (state.operationBusy) {
             item(key = "loading") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -286,7 +303,7 @@ internal fun FontLibraryScreenCompact(
         }
         items(state.fonts, key = { "font:${it.id}" }, contentType = { "font" }) { font ->
             CompactFontRow(
-                font = font, active = state.activeFontId == font.id, busy = state.operationBusy,
+                font = font, active = state.activeFontId == font.id, busy = state.operationBusy || !state.verified,
                 cardColor = cardColor, textPrimary = textPrimary, textSecondary = textSecondary,
                 onDetails = { actions.details(font) }, onApply = { actions.apply(font) },
                 onDelete = { actions.delete(font) },

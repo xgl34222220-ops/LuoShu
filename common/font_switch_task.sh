@@ -162,10 +162,11 @@ reconcile_task() {
 }
 
 terminate_child_tree() {
+    [ -n "${_switch_child_start:-}" ] || return 1
     if type luoshu_terminate_task_tree >/dev/null 2>&1; then
-        luoshu_terminate_task_tree "$1"
+        luoshu_terminate_task_tree "$1" "$_switch_child_start"
     else
-        kill -TERM "$1" 2>/dev/null || true
+        return 1
     fi
 }
 
@@ -187,10 +188,13 @@ progress_message() {
 run_bounded() {
     _font="$1"; _output="$2"; _task="$3"; _started="$4"; _progress_file="$5"
     LUOSHU_SWITCH_PROGRESS_FILE="$_progress_file" sh "$MANAGER" action switch "$_font" > "$_output" 2>&1 &
-    _child=$!; _switch_child=$_child; _elapsed=0; _next_heartbeat=0
-    while pid_alive "$_child"; do
+    _child=$!; _switch_child=$_child; _switch_child_start=$(luoshu_pid_start "$_child" 2>/dev/null); _elapsed=0; _next_heartbeat=0
+    while [ -n "$_switch_child_start" ] && [ "$(luoshu_pid_start "$_child" 2>/dev/null)" = "$_switch_child_start" ]; do
         if [ "$_elapsed" -ge "$TIMEOUT_SECONDS" ]; then
-            terminate_child_tree "$_child"; wait "$_child" 2>/dev/null || true
+            # No-pidfd kernels may refuse external tree signalling. In that
+            # case exit this worker so its owning subreaper can adopt and reap
+            # the generator; never wait forever on an uninterruptible child.
+            terminate_child_tree "$_child" && wait "$_child" 2>/dev/null || true
             _switch_child=
             return 124
         fi
@@ -215,8 +219,7 @@ worker_signal_exit() {
     _switch_signal_code="$1"
     trap '' HUP INT TERM
     if [ -n "${_switch_child:-}" ]; then
-        terminate_child_tree "$_switch_child"
-        wait "$_switch_child" 2>/dev/null || true
+        terminate_child_tree "$_switch_child" && wait "$_switch_child" 2>/dev/null || true
         _switch_child=
     fi
     write_task "$_worker_task" failed "$_font" '字体切换已终止，当前启动字体未被改动' \
@@ -282,7 +285,19 @@ start_task() {
     trap 'start_lock_release' EXIT
     reconcile_task
     _state=$(read_value state); _task_old=$(read_value task); _pid=$(read_value pid)
-    if { [ "$_state" = queued ] || [ "$_state" = running ]; } && worker_alive "$_task_old" "$_pid"; then
+    # Terminal publication can precede the supervisor's final waitpid by a
+    # fraction of a second. Do not overwrite the old record or treat launcher
+    # code 3 (another scope still alive) as acceptance of this new request.
+    _settle=0
+    case "$_state" in
+        success|failed)
+            while worker_alive "$_task_old" "$_pid" && [ "$_settle" -lt 50 ]; do
+                sleep 0.1
+                _settle=$((_settle + 1))
+            done
+            ;;
+    esac
+    if worker_alive "$_task_old" "$_pid"; then
         printf '{"status":"error","message":"已有字体任务在运行中，请查看当前进度"}\n'; return 0
     fi
 
@@ -298,7 +313,7 @@ start_task() {
     if type luoshu_start_detached >/dev/null 2>&1; then
         luoshu_start_detached "$WORKER_PID_FILE" "$_task" "$LOG_FILE" sh "$0" run "$_task" "$_font" "$_started"
         _start_rc=$?
-        if [ "$_start_rc" -ne 0 ] && [ "$_start_rc" -ne 3 ]; then
+        if [ "$_start_rc" -ne 0 ]; then
             write_task "$_task" failed "$_font" '无法启动独立字体切换任务' "$_started" "$(date +%s 2>/dev/null || echo 0)" '' '' '' 0 '' false 100
             printf '{"status":"error","message":"无法启动独立字体切换任务"}\n'; return 0
         fi
@@ -308,7 +323,8 @@ start_task() {
         _worker=$!
     fi
     case "$_worker" in ''|*[!0-9]*) _worker='' ;; esac
-    write_task "$_task" running "$_font" '2% · 正在启动字体切换任务' "$_started" '' "$_worker" '' '' 0 '' false 2 || true
+    # The worker owns running/terminal publication; a fast worker may already
+    # have completed before the launcher returns. Never overwrite its result.
     printf '{"status":"ok","data":{"font":"%s","task":"%s","message":"任务已开始"}}\n' \
         "$(json_escape "$_font")" "$(json_escape "$_task")"
 }

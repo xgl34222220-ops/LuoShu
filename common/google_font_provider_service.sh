@@ -1,5 +1,5 @@
 #!/system/bin/sh
-# Apply during startup, then maintain lazily downloaded fonts for this boot.
+# Bounded startup repair. No default resident watcher or consumer restart.
 set +e
 
 MODDIR="${MODDIR:-${MODULE_DIR:-/data/adb/modules/LuoShu}}"
@@ -13,16 +13,18 @@ LOG="$MODDIR/logs/google-font-provider.log"
 [ -f "$MODDIR/common/background_task.sh" ] && . "$MODDIR/common/background_task.sh"
 
 _provider_child=
+_provider_child_start=
 provider_signal_exit() {
     _provider_signal_code="$1"
     trap '' HUP INT TERM
     if [ -n "$_provider_child" ]; then
         if type luoshu_terminate_task_tree >/dev/null 2>&1; then
-            luoshu_terminate_task_tree "$_provider_child"
-        else
-            kill -TERM "$_provider_child" 2>/dev/null || true
+            if luoshu_terminate_task_tree "$_provider_child" "$_provider_child_start"; then
+                wait "$_provider_child" 2>/dev/null || true
+            fi
         fi
-        wait "$_provider_child" 2>/dev/null || true
+        # If pidfd is unavailable, exit into our owning subreaper. It safely
+        # adopts children and never sends a signal to an unproven numeric PID.
     fi
     exit "$_provider_signal_code"
 }
@@ -31,6 +33,7 @@ provider_run() {
     MODDIR="$MODDIR" MODULE_DIR="$MODDIR" LUOSHU_GOOGLE_FONT_ALLOW_RESTART="$3" \
         sh "$1" "$2" >/dev/null 2>&1 &
     _provider_child=$!
+    _provider_child_start=$(luoshu_pid_start "$_provider_child" 2>/dev/null)
     wait "$_provider_child"
     _provider_apply_rc=$?
     _provider_child=
@@ -62,6 +65,7 @@ provider_selection_ready() {
 provider_pause() {
     sleep "$1" &
     _provider_child=$!
+    _provider_child_start=$(luoshu_pid_start "$_provider_child" 2>/dev/null)
     wait "$_provider_child"
     _provider_child=
 }
@@ -82,6 +86,7 @@ provider_watch_pause() {
         LD_LIBRARY_PATH="$_provider_wait_home/lib:$_provider_wait_home/lib/python3.14/lib-dynload${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
             "$_provider_wait_py" "$_provider_wait_helper" "$MODDIR" "$1" >/dev/null 2>&1 &
         _provider_child=$!
+    _provider_child_start=$(luoshu_pid_start "$_provider_child" 2>/dev/null)
         wait "$_provider_child"
         _provider_wait_rc=$?
         _provider_child=
@@ -151,6 +156,7 @@ provider_restore_bridge() {
         # handler as apply/restore; disabling must never leave a waiting worker.
         sleep 3 &
         _provider_child=$!
+    _provider_child_start=$(luoshu_pid_start "$_provider_child" 2>/dev/null)
         wait "$_provider_child"
         _provider_child=
         _provider_restore_attempt=$((_provider_restore_attempt + 1))
@@ -178,9 +184,10 @@ done
 [ "$(getprop sys.boot_completed 2>/dev/null)" = 1 ] || exit 0
 
 _attempt=1
-_limit="${LUOSHU_GOOGLE_FONT_RETRIES:-24}"
-case "$_limit" in ''|*[!0-9]*) _limit=24 ;; esac
+_limit="${LUOSHU_GOOGLE_FONT_RETRIES:-1}"
+case "$_limit" in ''|*[!0-9]*) _limit=1 ;; esac
 [ "$_limit" -ge 1 ] 2>/dev/null || _limit=1
+[ "$_limit" -le 24 ] 2>/dev/null || _limit=24
 _fingerprint=
 _boot_retry_age=0
 
@@ -207,14 +214,14 @@ while [ "$_attempt" -le "$_limit" ]; do
         *) [ "$_boot_retry_age" -lt 30 ] || _repair=1 ;;
     esac
     if [ "$_repair" = 1 ]; then
-        provider_apply "${LUOSHU_GOOGLE_FONT_ALLOW_RESTART:-1}"
+        provider_apply "${LUOSHU_GOOGLE_FONT_ALLOW_RESTART:-0}"
         _rc=$?
         _boot_retry_age=0
         # Keep the PRE-apply view, including at the handoff to the long-lived
         # watch. Downloads arriving during apply must remain visible changes.
         _fingerprint=$_observed
     fi
-    [ ! -s "$MODDIR/config/google-font-refresh-pending.conf" ] || provider_run "$BRIDGE" refresh 0
+    # Do not recycle unrelated consumer apps to refresh old font descriptors.
     # GMS downloads families lazily. One mounted family must not end the boot
     # discovery window before Play opens or another font weight arrives. Binds
     # are idempotent; old consumer FDs use only the deferred background queue.
@@ -232,13 +239,14 @@ done
 _interval="${LUOSHU_GOOGLE_FONT_WATCH_INTERVAL:-30}"
 case "$_interval" in ''|*[!0-9]*) _interval=30 ;; esac
 [ "$_interval" -ge 15 ] 2>/dev/null || _interval=15
-_watch_limit="${LUOSHU_GOOGLE_FONT_WATCH_CYCLES:--1}"
-case "$_watch_limit" in -1) ;; ''|*[!0-9]*) _watch_limit=-1 ;; esac
+_watch_limit="${LUOSHU_GOOGLE_FONT_WATCH_CYCLES:-0}"
+case "$_watch_limit" in ''|*[!0-9]*) _watch_limit=0 ;; esac
+[ "$_watch_limit" -le 20 ] 2>/dev/null || _watch_limit=20
 [ "$_watch_limit" != 0 ] || exit 0
 _watch_count=0
 _retry_age=0
 _fingerprint="${_fingerprint:-}"
-while [ "$_watch_limit" = -1 ] || [ "$_watch_count" -lt "$_watch_limit" ]; do
+while [ "$_watch_count" -lt "$_watch_limit" ]; do
     provider_watch_pause "$_interval"
     _watch_count=$((_watch_count + 1))
     [ -d "$MODDIR" ] && [ ! -f "$MODDIR/disable" ] && [ ! -f "$MODDIR/remove" ] || { provider_restore_theme; exit $?; }
@@ -268,6 +276,6 @@ while [ "$_watch_limit" = -1 ] || [ "$_watch_count" -lt "$_watch_limit" ]; do
         # Our own binds may cause one extra idempotent pass, then settle.
         _fingerprint="$_observed"
     fi
-    [ ! -s "$MODDIR/config/google-font-refresh-pending.conf" ] || provider_run "$BRIDGE" refresh 0
+    # Do not recycle unrelated consumer apps to refresh old font descriptors.
 done
 exit 0

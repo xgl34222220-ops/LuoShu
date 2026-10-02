@@ -25,37 +25,8 @@ internal class FontIndexStore(context: Context) {
             val raw = atomicFile.openRead().bufferedReader().use { it.readText() }
             val root = JSONObject(raw)
             if (root.optInt("schema", 0) != SCHEMA_VERSION) return@synchronized null
-            val array = root.optJSONArray("fonts") ?: JSONArray()
-            val fonts = buildList {
-                for (index in 0 until array.length()) {
-                    val item = array.optJSONObject(index) ?: continue
-                    val id = item.optString("id").trim()
-                    if (id.isBlank() || id == "default") continue
-                    val weightsArray = item.optJSONArray("weights") ?: JSONArray()
-                    val weights = buildList {
-                        for (weightIndex in 0 until weightsArray.length()) {
-                            weightsArray.optString(weightIndex)
-                                .trim()
-                                .takeIf { it.isNotBlank() }
-                                ?.let(::add)
-                        }
-                    }
-                    add(
-                        FontItem(
-                            id = id,
-                            name = item.optString("name", id),
-                            format = item.optString("format", "TTF"),
-                            size = item.optString("size", ""),
-                            date = item.optString("date", ""),
-                            variable = item.optBoolean("variable", weights.contains("variable")),
-                            valid = item.optBoolean("valid", true),
-                            error = item.optString("error", ""),
-                            weights = weights,
-                            supportsCjk = item.optBoolean("supportsCjk", true),
-                        ),
-                    )
-                }
-            }
+            val array = root.optJSONArray("fonts") ?: return@synchronized null
+            val fonts = parseFontItems(array)
             CachedFontIndex(
                 fingerprint = root.optString("fingerprint", ""),
                 currentFont = root.optString("current", "default"),
@@ -86,7 +57,8 @@ internal class FontIndexStore(context: Context) {
                                 .put("valid", font.valid)
                                 .put("error", font.error)
                                 .put("weights", JSONArray(font.weights))
-                                .put("supportsCjk", font.supportsCjk),
+                                .put("supportsCjk", font.supportsCjk)
+                                .put("revision", font.revision),
                         )
                     }
                 },

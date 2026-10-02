@@ -319,8 +319,7 @@ worker() {
             [ -z "$_progress_message" ] || _base_message="$_progress_message"
             [ -n "$_base_message" ] || _base_message='完整复合字体正在后台生成'
             if [ "$_base_state" = running ] && [ "$_loops" -ge 3 ]; then
-                _inner_pid=$(cat "$CONFIG_DIR/mix_worker.pid" 2>/dev/null)
-                if [ -z "$_inner_pid" ] || ! kill -0 "$_inner_pid" 2>/dev/null; then
+                if ! luoshu_task_pid_alive "$CONFIG_DIR/mix_worker.pid" "$_child"; then
                     _dead_message=$(tail -n1 "$CONFIG_DIR/mix_last_error.txt" 2>/dev/null | tr -d '\r')
                     [ -n "$_dead_message" ] || _dead_message='完整复合字体后台进程已退出，请查看日志'
                     update_task "$_wanted" failed "$_dead_message" 100 "$_child" "$(date +%s)"
@@ -417,11 +416,8 @@ start_mix() {
     [ ! -f "$TEXT_REBOOT_REQUIRED" ] || {
         printf '{"status":"error","message":"本次开机已更改文字字体，请先重启手机"}\n'; return
     }
-    if [ -s "$WORKER_PID" ]; then
-        _old=$(cat "$WORKER_PID" 2>/dev/null)
-        [ -z "$_old" ] || ! kill -0 "$_old" 2>/dev/null || {
-            printf '{"status":"error","message":"已有字体组合任务正在运行"}\n'; return
-        }
+    if type luoshu_task_pid_alive >/dev/null 2>&1 && luoshu_task_pid_alive "$WORKER_PID"; then
+        printf '{"status":"error","message":"已有字体组合任务正在运行"}\n'; return
     fi
     if type luoshu_font_lock_busy >/dev/null 2>&1; then
         if luoshu_font_lock_busy "$LOCK_FILE"; then
@@ -470,6 +466,9 @@ start_mix() {
 }
 
 recover_task() {
+    if type luoshu_stop_task_pid >/dev/null 2>&1; then
+        luoshu_stop_task_pid "$WORKER_PID" || return 1
+    fi
     MODDIR="$MODDIR" sh "$BASE_ENGINE" recover >/dev/null 2>&1 || true
     if [ -s "$TASK_FILE" ]; then
         _state=$(read_value "$TASK_FILE" state)

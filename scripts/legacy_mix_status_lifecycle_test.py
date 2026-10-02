@@ -59,6 +59,8 @@ class MixStatusLifecycleTest(unittest.TestCase):
         path.write_text(f'{process.pid}\n')
         Path(str(path) + '.task').write_text((sidecar_task or task) + '\n')
         Path(str(path) + '.boot').write_text((boot or self.boot) + '\n')
+        start = Path(f'/proc/{process.pid}/stat').read_text().rsplit(') ', 1)[1].split()[19]
+        Path(str(path) + '.start').write_text(start + '\n')
         return process, path
 
     def test_dead_worker_is_failed_and_metadata_is_preserved(self):
@@ -85,7 +87,7 @@ class MixStatusLifecycleTest(unittest.TestCase):
                 self.assertEqual(self.call()['data']['state'], 'running')
                 process.terminate()
                 process.communicate(timeout=3)
-                for suffix in ('', '.task', '.boot'):
+                for suffix in ('', '.task', '.boot', '.start'):
                     Path(str(path) + suffix).unlink(missing_ok=True)
 
     def test_started_worker_without_sidecars_has_grace(self):

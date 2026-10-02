@@ -140,19 +140,7 @@ MODULE_DIR="$MODDIR"
         MODDIR="$MODDIR" sh "$MODDIR/common/module_status.sh" >/dev/null 2>&1 || true
     fi
 
-    # 字体列表在后台预热。轻量指纹未变化时跳过轮廓解析；变化后重建原生索引。
-    if [ -f "$MODDIR/common/font_library_cache.sh" ] && [ -f "$MODDIR/common/font_manager.sh" ]; then
-        _font_fp=$(MODDIR="$MODDIR" sh "$MODDIR/common/font_library_cache.sh" value 2>/dev/null)
-        _font_fp_old=$(cat "$MODDIR/config/native_font_index.key" 2>/dev/null)
-        case "$_font_fp_old" in native-v1\|*) _font_fp_old="${_font_fp_old##*|}" ;; esac
-        if [ -n "$_font_fp" ] && { [ "$_font_fp" != "$_font_fp_old" ] || [ ! -s "$MODDIR/config/native_font_index.json" ]; }; then
-            if MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list refresh >/dev/null 2>&1; then
-                log_service "INFO" "原生字体索引后台预热完成"
-            else
-                log_service "INFO" "字体索引后台预热失败，App 将继续使用已有本地索引"
-            fi
-        fi
-    fi
+    # Font indexes are loaded and reconciled on demand by the App.
 
     # 架构升级或 ROM 动态字体配置变化时，保留本次启动正在使用的完整旧负载。
     # 后台服务绝不改写 active_font、绝不激活缓存、也绝不创建第二个重启事务。
@@ -177,18 +165,8 @@ MODULE_DIR="$MODDIR"
         fi
     fi
 
-    # 恢复用户保存的 Android 全局字重调节；组合槽字重已固化到字体轮廓。
-    if [ -f "$MODDIR/config/font_weight.conf" ] && command -v settings >/dev/null 2>&1; then
-        FW_ADJ=$(sed -n 's/^adjustment=//p' "$MODDIR/config/font_weight.conf" 2>/dev/null | head -n1)
-        case "$FW_ADJ" in ''|*[!0-9-]*) FW_ADJ=0 ;; esac
-        if [ "$FW_ADJ" -ge -100 ] 2>/dev/null && [ "$FW_ADJ" -le 300 ] 2>/dev/null; then
-            if settings --user current put secure font_weight_adjustment "$FW_ADJ" >/dev/null 2>&1 || settings put secure font_weight_adjustment "$FW_ADJ" >/dev/null 2>&1; then
-                log_service "INFO" "已恢复系统字体粗细调整：$FW_ADJ"
-            else
-                log_service "INFO" "字体粗细调整恢复失败"
-            fi
-        fi
-    fi
+    # Global weight was retired. Restore only a setting still owned by LuoShu.
+    [ ! -f "$MODDIR/common/retire_global_weight.sh" ] || sh "$MODDIR/common/retire_global_weight.sh" "$MODDIR"
 
     # 只有系统主命名空间中的字体挂载真实可见，才能确认本次启动事务。
     # 验证失败时将 booting 恢复为 prepared，保留负载并在下次完整开机重试；

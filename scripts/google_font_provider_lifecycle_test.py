@@ -42,9 +42,11 @@ case "$1" in
         ;;
 esac
 ''')
+        shutil.copyfile(ROOT / 'common/background_task.sh', self.module / 'common/background_task.sh')
+        shutil.copyfile(ROOT / 'common/task_scope.py', self.module / 'common/task_scope.py')
         self.env = {**os.environ, "MODDIR": str(self.module),
                     "PATH": f"{self.bin}:{os.environ['PATH']}",
-                    "TEST_ROOT": str(self.root), "TEST_SNAPSHOT": str(self.snapshot),
+                    "LUOSHU_GOOGLE_FONT_ALLOW_RESTART": "1", "TEST_ROOT": str(self.root), "TEST_SNAPSHOT": str(self.snapshot),
                     "TEST_APPLIED": str(self.marker), "LUOSHU_GOOGLE_FONT_RETRIES": "1",
                     "LUOSHU_GOOGLE_FONT_WATCH_INTERVAL": "30"}
 

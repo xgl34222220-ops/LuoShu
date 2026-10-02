@@ -90,15 +90,8 @@ _luoshu_cleanup_self_mount() {
     rmdir "$_lucsm_parent" 2>/dev/null || true
 }
 
-# 恢复安装洛书前记录的 Android 全局字体粗细设置。
-if command -v settings >/dev/null 2>&1; then
-    _fw_restore=0
-    [ -f "$MODDIR/config/font_weight_original.conf" ] && \
-        _fw_restore=$(sed -n 's/^adjustment=//p' "$MODDIR/config/font_weight_original.conf" 2>/dev/null | head -n1)
-    case "$_fw_restore" in ''|*[!0-9-]*) _fw_restore=0 ;; esac
-    settings --user current put secure font_weight_adjustment "$_fw_restore" >/dev/null 2>&1 || \
-        settings put secure font_weight_adjustment "$_fw_restore" >/dev/null 2>&1 || true
-fi
+# Restore the retired adjustment only when it still matches LuoShu ownership.
+[ ! -f "$MODDIR/common/retire_global_weight.sh" ] || sh "$MODDIR/common/retire_global_weight.sh" "$MODDIR"
 
 # 只撤销洛书记录的 /data/fonts/config/config.xml bind。目标内容、源内容和记录哈希
 # 必须完全一致，避免误卸载其他模块或系统自己的挂载；这里不写入动态字体数据库。

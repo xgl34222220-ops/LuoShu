@@ -89,12 +89,12 @@ internal fun FontDetailsDialogRoute(
     val secondaryText = if (miuix) tokens.textSecondary else scheme.onSurfaceVariant
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val detailScrollState = rememberScrollState()
-    var deepMetadata by remember(font.id) { mutableStateOf<FontDeepMetadata?>(null) }
-    var deepLoading by remember(font.id) { mutableStateOf(true) }
+    var deepMetadata by remember(font) { mutableStateOf<FontDeepMetadata?>(null) }
+    var deepLoading by remember(font) { mutableStateOf(true) }
     var metadataExpanded by rememberSaveable(font.id) { mutableStateOf(false) }
     var previewMode by remember(font.id) { mutableStateOf(FontPreviewMode.Mixed) }
 
-    LaunchedEffect(font.id) {
+    LaunchedEffect(font) {
         detailScrollState.scrollTo(0)
         deepLoading = true
         deepMetadata = loadFontDeepMetadata(font)

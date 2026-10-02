@@ -38,6 +38,8 @@ class SwitchProviderTest(unittest.TestCase):
 
     def test_both_service_routes_launch_provider_once(self):
         shutil.copyfile(ROOT / 'service.sh', self.module / 'service.sh')
+        shutil.copyfile(ROOT / 'common/background_task.sh', self.module / 'common/background_task.sh')
+        self.env['LUOSHU_TASK_HELPER'] = str(ROOT / 'common/task_scope.py')
         (self.module / '.luoshu-runtime/core').mkdir(parents=True)
         (self.module / '.luoshu-runtime/core/service.sh').write_text('exit 0\n')
         marker = self.root / 'provider-starts'
@@ -58,6 +60,10 @@ class SwitchProviderTest(unittest.TestCase):
                     time.sleep(.01)
                 self.assertTrue(marker.exists(), 'provider service was never launched')
                 self.assertEqual(marker.read_text().splitlines(), ['started'])
+                deadline = time.monotonic() + 3
+                while (self.module / 'config/provider_boot.pid').exists() and time.monotonic() < deadline:
+                    time.sleep(.02)
+                self.assertFalse((self.module / 'config/provider_boot.pid').exists(), 'finite provider task did not exit')
 
     def provider_source(self, weight):
         return subprocess.run(['sh', '-c', '. "$1"; _gfp_source_for_weight "$2"',

@@ -1,5 +1,15 @@
 name: Build Test Candidate
 on:
+  push:
+    branches: [feat/stable-runtime-cleanup-20261002]
+    paths:
+      - common/**
+      - android-app/**
+      - scripts/**
+      - .luoshu-runtime/**
+      - service.sh
+      - action.sh
+      - .github/workflows/test-candidate.yml
   workflow_dispatch:
   pull_request:
     branches:
@@ -98,6 +108,10 @@ jobs:
             exit 1
           fi
 
+      - name: Verify independent stable-test identity
+        run: |
+          test "$(apkanalyzer manifest application-id android-app/app/build/outputs/apk/debug/app-debug.apk)" = io.github.xgl34222220.luoshu.stabletest
+
       - name: Build module candidate
         shell: bash
         run: |
@@ -148,7 +162,9 @@ jobs:
             grep -qx "$path" /tmp/luoshu-candidate-files.txt
           done
           unzip -p "$module" common/background_task.sh | grep -q '_lsd_task'
-          unzip -p "$module" common/background_task.sh | grep -q 'every new worker wrote an empty .task sidecar'
+          unzip -p "$module" common/background_task.sh | grep -q 'luoshu_task_helper launch'
+          unzip -p "$module" common/task_scope.py | grep -q 'PR_SET_CHILD_SUBREAPER'
+          unzip -p "$module" common/retire_global_weight.sh | grep -q 'retired-global-weight'
           unzip -p "$module" common/device_font_template.sh | grep -q 'CAPTURE_REVISION=2'
           unzip -p "$module" common/device_font_cache.sh | grep -q 'alignment-cache-v4'
           unzip -p "$module" common/device_font_cache.sh | grep -q '.font_switch.lock'

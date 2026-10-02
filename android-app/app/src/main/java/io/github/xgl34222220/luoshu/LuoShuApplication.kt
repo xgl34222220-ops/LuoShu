@@ -28,6 +28,7 @@ internal class LuoShuApplication : Application(), ViewModelStoreOwner {
 
     override fun onCreate() {
         super.onCreate()
+        FontLoadDiagnostics.mark("app_start")
         NativeImportNotificationController.ensureChannel(this)
         superviseNativeImport()
     }

@@ -123,7 +123,7 @@ internal fun FontLibraryScreenMaterial(
             MaterialFontCard(
                 font = font,
                 active = state.activeFontId == font.id,
-                busy = state.operationBusy,
+                busy = state.operationBusy || !state.verified,
                 onDetails = { actions.details(font) },
                 onApply = { actions.apply(font) },
                 onDelete = { actions.delete(font) },

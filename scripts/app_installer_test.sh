@@ -126,3 +126,17 @@ grep -q '^status=blocked$' "$MOD/config/app_install_state.conf"
 grep -q 'INSTALL_FAILED_UPDATE_INCOMPATIBLE' "$MOD/logs/app-install.log"
 
 printf 'Bundled App installer tests passed.\n'
+
+# New stable-refactor App is a separate, manual-only test identity.
+sed -i 's/luoshu.debug/luoshu.stabletest/' "$MOD/bundled/app.prop"
+printf 'installPolicy=manual-only\n' >> "$MOD/bundled/app.prop"
+for mode in auto service-retry manual; do
+    rm -f "$CALLS"
+    MOCK_VERSION=0 MOCK_PM_CALLS="$CALLS" \
+    APP_INSTALL_PM_BIN="$BIN/pm" APP_INSTALL_DUMPSYS_BIN="$BIN/dumpsys" \
+    MODDIR="$MOD" sh "$MOD/common/app_installer.sh" "$mode" > "$TMP/manual-only.out"
+    grep -qx 'test-manual-only' "$TMP/manual-only.out"
+    test ! -e "$CALLS"
+    test ! -e "$MOD/config/app_install_pending"
+done
+printf 'Independent stable-test App never auto-installs or replaces existing apps.\n'

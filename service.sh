@@ -2,19 +2,22 @@
 # LuoShu service router.
 # Normal installations keep the current v4 service unchanged. Once the isolated
 # physical compatibility runtime is selected, background v4 payload rebuilds stay off.
-# App font inventory remains prewarmed through config/native_font_index.json.
+# Font inventory is demand-loaded by the App; no startup prewarm.
 set +e
 MODDIR="${0%/*}"
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
+[ ! -f "$MODDIR/common/retire_global_weight.sh" ] || sh "$MODDIR/common/retire_global_weight.sh" "$MODDIR"
 V4_SERVICE="$MODDIR/.luoshu-runtime/core/service.sh"
 
 # Start from the real entry point before either service route is selected. The
 # mount loader sees $0=service_v4.sh on one route and is absent on the other.
 if [ -f "$MODDIR/common/google_font_provider_service.sh" ]; then
-    (
-        MODDIR="$MODDIR" MODULE_DIR="$MODDIR" \
-            sh "$MODDIR/common/google_font_provider_service.sh" boot
-    ) </dev/null >/dev/null 2>&1 &
+    if [ -f "$MODDIR/common/background_task.sh" ]; then
+        . "$MODDIR/common/background_task.sh"
+        luoshu_start_detached "$MODDIR/config/provider_boot.pid" provider-boot \
+            "$MODDIR/logs/google-font-provider.log" \
+            sh "$MODDIR/common/google_font_provider_service.sh" boot || true
+    fi
 fi
 
 if [ ! -f "$LEGACY_MODE" ]; then
@@ -111,7 +114,6 @@ fi
             printf '[%s] deferred stock inventory: %s\n' \
                 "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_stock_scan" >> "$LOG" 2>/dev/null || true
         fi
-        MODDIR="$MODDIR" sh "$MODDIR/common/font_manager.sh" action list --native-index >/dev/null 2>&1 || true
     fi
 
     printf '[%s] physical compatibility service complete: %s (%s)\n' \

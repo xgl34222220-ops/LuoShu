@@ -22,7 +22,7 @@ printf 'One\n' > "$ACTIVE_FONT_CONF"
 FIRST=$(font_library_fingerprint_value)
 SECOND=$(font_library_fingerprint_value)
 test "$FIRST" = "$SECOND"
-printf '%s' "$FIRST" | grep -q '^v3:'
+printf '%s' "$FIRST" | grep -q '^v4:'
 printf '%s' "$FIRST" | grep -q ':2:'
 
 JSON=$(font_library_fingerprint_json)

@@ -15,8 +15,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
@@ -90,6 +91,7 @@ internal data class FontItem(
     val error: String,
     val weights: List<String>,
     val supportsCjk: Boolean = true,
+    val revision: String = "",
 ) {
     val weightLabel: String
         get() = when {
@@ -134,14 +136,9 @@ internal data class MixState(
     val error: String = "",
 )
 
-private data class FontFingerprint(
-    val value: String,
-    val currentFont: String,
-)
-
 internal class LuoShuViewModel(application: Application) : AndroidViewModel(application) {
     private val bridge = "/data/adb/modules/LuoShu/common/app_bridge.sh"
-    private val fingerprintBridge = "/data/adb/modules/LuoShu/common/font_library_cache.sh"
+    private val fontLibrarySource = RootFontLibrarySource()
     private val fontIndexStore = FontIndexStore(application)
     private var watchedTaskId: String = ""
     private var cachedFingerprint: String = ""
@@ -151,7 +148,13 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     private var mixConfigJob: Job? = null
     private val foreground = MutableStateFlow(true)
     private var pendingForceRefresh = false
-    private var prewarmRequested = false
+    private var cachedIndex: CachedFontIndex? = null
+    private var lastFontCheckAt: Long? = null
+    private var fontPollJob: Job? = null
+    private var libraryVisible = false
+    private var fontGeneration = 0L
+    private var fontRequestSequence = 0L
+    private val fontIndexWriteMutex = Mutex()
 
     var snapshot by mutableStateOf(ModuleSnapshot())
         private set
@@ -166,6 +169,9 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         private set
 
     var fontRefreshing by mutableStateOf(false)
+        private set
+
+    var fontIndexVerified by mutableStateOf(false)
         private set
 
     var fontCacheReady by mutableStateOf(false)
@@ -191,13 +197,10 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
 
     private val cacheLoadJob = viewModelScope.launch {
         val cached = withContext(Dispatchers.IO) { fontIndexStore.load() }
-        if (cached != null && cached.fonts.isNotEmpty()) {
-            fonts = cached.fonts
-            cachedFingerprint = cached.fingerprint
-            normalizeMixSelections()
-        }
+        if (cached != null) publishFontIndex(cached, verified = false)
         fontCacheReady = true
-        if (snapshot.installed) requestFontPrewarm()
+        // Fonts are independent of the slower module/ROM status probe.
+        refreshFonts()
     }
 
     val filteredFonts: List<FontItem>
@@ -216,7 +219,40 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun setForeground(visible: Boolean) {
+        val resumed = visible && !foreground.value
         foreground.value = visible
+        if (!visible) {
+            fontPollJob?.cancel()
+            fontPollJob = null
+            fontRequestJob?.cancel()
+        } else {
+            if (resumed) {
+                lastFontCheckAt = null
+                refresh()
+                refreshFonts()
+            }
+            updateFontPolling()
+        }
+    }
+
+    fun setFontLibraryVisible(visible: Boolean) {
+        libraryVisible = visible
+        updateFontPolling()
+    }
+
+    private fun updateFontPolling() {
+        if (!libraryVisible || !foreground.value) {
+            fontPollJob?.cancel()
+            fontPollJob = null
+            return
+        }
+        if (fontPollJob?.isActive == true) return
+        fontPollJob = viewModelScope.launch {
+            while (currentCoroutineContext().isActive) {
+                ensureFonts()
+                delay(30_000L)
+            }
+        }
     }
 
     fun refresh() {
@@ -234,144 +270,106 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                     rootGranted = false,
                     error = result.stderr.ifBlank { "Root 授权失败或 su 不可用" },
                 )
+                fontIndexVerified = false
+                fontError = "Root 权限不可用；当前字体列表尚未核实"
                 return@launch
             }
             val parsed = parseSnapshot(result.stdout)
             snapshot = parsed
             rebootRequired = parsed.rebootRequired
             resumePendingTask(parsed)
-            if (parsed.installed) requestFontPrewarm()
+            if (parsed.installed) ensureFonts()
+            else {
+                fontIndexVerified = false
+                fontError = parsed.error.ifBlank { "模块不可用；当前显示上次保存的字体列表" }
+            }
         }
     }
 
-    fun ensureFonts(force: Boolean = false) {
-        if (force) {
-            refreshFonts(force = true)
-            return
-        }
-        requestFontPrewarm()
-    }
+    fun ensureFonts(force: Boolean = false) = refreshFonts(force)
 
     fun refreshFonts(force: Boolean = false) {
+        if (force) {
+            fontGeneration += 1
+            fontIndexVerified = false
+        }
+        if (!foreground.value) {
+            if (force) pendingForceRefresh = true
+            return
+        }
         if (fontRequestJob?.isActive == true) {
             if (force) pendingForceRefresh = true
             return
         }
-        launchFontWork(force = force, showErrors = force)
-    }
-
-    private fun requestFontPrewarm() {
-        if (prewarmRequested && fonts.isNotEmpty()) return
-        prewarmRequested = true
-        if (fontRequestJob?.isActive == true) return
-        launchFontWork(force = false, showErrors = false)
-    }
-
-    private fun launchFontWork(force: Boolean, showErrors: Boolean) {
+        val forceScan = force || pendingForceRefresh
+        val now = System.nanoTime() / 1_000_000L
+        // Coalesce startup, navigation and status callbacks without suppressing later checks.
+        if (!forceScan && lastFontCheckAt?.let { now - it < 2_000L } == true) return
+        pendingForceRefresh = false
+        lastFontCheckAt = now
+        val generation = fontGeneration
+        val request = ++fontRequestSequence
         fontRequestJob = viewModelScope.launch {
             cacheLoadJob.join()
-            if (!snapshot.installed && snapshot.versionCode == 0) return@launch
-            val hadFonts = fonts.isNotEmpty()
-            fontLoading = !hadFonts
-            fontRefreshing = hadFonts
-            if (showErrors) fontError = ""
+            fontLoading = cachedIndex == null
+            fontRefreshing = cachedIndex != null
+            fontIndexVerified = false
+            fontError = ""
             try {
-                when {
-                    force -> rebuildFontIndex(showErrors = true)
-                    fonts.isEmpty() -> rebuildFontIndex(showErrors = showErrors)
-                    else -> refreshOnlyWhenChanged(showErrors = showErrors)
+                val previous = cachedIndex
+                val index = loadFontLibrary(previous, forceScan, fontLibrarySource) { value, verified ->
+                    if (generation == fontGeneration) publishFontIndex(value, verified)
+                }
+                if (generation == fontGeneration) {
+                    fontError = ""
+                    // No fsync for an unchanged index on every navigation/foreground check.
+                    if (previous?.fingerprint != index.fingerprint || previous.fonts != index.fonts ||
+                        previous.currentFont != index.currentFont
+                    ) persistFontIndex(currentFont = index.currentFont)
+                }
+            } catch (cancelled: CancellationException) {
+                if (request == fontRequestSequence) lastFontCheckAt = null
+                throw cancelled
+            } catch (error: Exception) {
+                if (request == fontRequestSequence && generation == fontGeneration) {
+                    fontIndexVerified = false
+                    fontError = error.message.orEmpty().ifBlank { "字体库核查失败，请检查 Root 与目录权限" } +
+                        if (cachedIndex != null) "；当前仅显示未核实的列表，可刷新重试" else ""
                 }
             } finally {
-                fontLoading = false
-                fontRefreshing = false
-                fontRequestJob = null
-                if (pendingForceRefresh && currentCoroutineContext().isActive) {
-                    pendingForceRefresh = false
-                    refreshFonts(force = true)
+                if (request == fontRequestSequence) {
+                    fontLoading = false
+                    fontRefreshing = false
+                    fontRequestJob = null
+                    if (pendingForceRefresh && foreground.value && currentCoroutineContext().isActive) {
+                        refreshFonts()
+                    }
                 }
             }
         }
     }
 
-    private suspend fun refreshOnlyWhenChanged(showErrors: Boolean) {
-        val fingerprint = readFontFingerprint()
-        if (fingerprint == null) {
-            if (showErrors) fontError = "无法检查字体目录变化，已继续使用本地索引"
-            return
-        }
-        if (fingerprint.currentFont.isNotBlank()) {
-            snapshot = snapshot.copy(activeFont = fingerprint.currentFont)
-        }
-        if (fingerprint.value.isNotBlank() && fingerprint.value == cachedFingerprint) {
-            persistFontIndex(currentFont = fingerprint.currentFont)
-            return
-        }
-        rebuildFontIndex(
-            showErrors = showErrors,
-            knownFingerprint = fingerprint,
-        )
+    private fun publishFontIndex(index: CachedFontIndex, verified: Boolean) {
+        FontLoadDiagnostics.mark(if (verified) "font_index_verified" else "font_index_visible", index.fonts.size, verified)
+        cachedIndex = index
+        fonts = index.fonts
+        cachedFingerprint = index.fingerprint
+        fontIndexVerified = verified
+        fontLoading = false
+        fontRefreshing = !verified
+        // Cached selection is display-only until a live directory check succeeds.
+        if (verified) snapshot = snapshot.copy(activeFont = index.currentFont)
+        normalizeMixSelections()
     }
 
-    private suspend fun rebuildFontIndex(
-        showErrors: Boolean,
-        knownFingerprint: FontFingerprint? = null,
-    ) {
-        val suffix = if (knownFingerprint != null || fonts.isNotEmpty()) " refresh" else ""
-        val result = RootShell.exec(
-            "sh ${RootShell.quote(bridge)} fonts$suffix",
-            timeoutMs = 60_000L,
-        )
-        if (result.code != 0) {
-            if (fonts.isEmpty() || showErrors) {
-                fontError = result.stderr.ifBlank { "字体库读取失败" }
-            }
-            return
-        }
-        try {
-            val root = firstJson(result.stdout)
-            if (root.optString("status") != "ok") error(root.optString("message", "字体库读取失败"))
-            val data = root.getJSONObject("data")
-            val parsedFonts = parseFonts(data.optJSONArray("fonts") ?: JSONArray())
-            val current = data.optString("current", knownFingerprint?.currentFont ?: snapshot.activeFont)
-            val fingerprint = knownFingerprint ?: readFontFingerprint()
-            snapshot = snapshot.copy(activeFont = current)
-            fonts = parsedFonts
-            cachedFingerprint = fingerprint?.value.orEmpty()
-            normalizeMixSelections()
-            persistFontIndex(currentFont = current)
-            fontError = ""
-        } catch (error: Throwable) {
-            if (fonts.isEmpty() || showErrors) {
-                fontError = error.message ?: "字体库解析失败"
-            }
-        }
-    }
-
-    private suspend fun readFontFingerprint(): FontFingerprint? {
-        val result = RootShell.exec(
-            "if [ -f ${RootShell.quote(fingerprintBridge)} ]; then " +
-                "sh ${RootShell.quote(fingerprintBridge)} fingerprint; else exit 127; fi",
-            timeoutMs = 8_000L,
-        )
-        if (result.code != 0) return null
-        return runCatching {
-            val root = firstJson(result.stdout)
-            if (root.optString("status") != "ok") return@runCatching null
-            val data = root.optJSONObject("data") ?: return@runCatching null
-            FontFingerprint(
-                value = data.optString("fingerprint", ""),
-                currentFont = data.optString("current", snapshot.activeFont),
-            )
-        }.getOrNull()
-    }
-
-    private suspend fun persistFontIndex(currentFont: String = snapshot.activeFont) {
+    private suspend fun persistFontIndex(currentFont: String = snapshot.activeFont) = fontIndexWriteMutex.withLock {
         val index = CachedFontIndex(
             fingerprint = cachedFingerprint,
             currentFont = currentFont.ifBlank { "default" },
             fonts = fonts,
             savedAt = System.currentTimeMillis(),
         )
+        cachedIndex = index
         withContext(Dispatchers.IO) {
             runCatching { fontIndexStore.save(index) }
         }
@@ -454,6 +452,11 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun startMix() {
+        if (!fontIndexVerified) {
+            mixState = mixState.copy(error = "请先完成字体库核查后再生成组合")
+            ensureFonts()
+            return
+        }
         if (mixState.busy || operationBusy) return
         val cjk = mixState.cjk
         val latin = mixState.latin
@@ -499,19 +502,12 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
     }
 
-    fun prewarmFont(fontId: String) {
-        if (fontId.isBlank() || fontId == "default" || !snapshot.installed) return
-        viewModelScope.launch(Dispatchers.IO) {
-            runCatching {
-                RootShell.exec(
-                    "sh ${RootShell.quote(bridge)} prewarm ${RootShell.quote(fontId)}",
-                    timeoutMs = 6_000L,
-                )
-            }
-        }
-    }
-
     fun applyFont(fontId: String) {
+        if (fontId != "default" && !fontLibraryContains(fontIndexVerified, fonts, fontId, requireValid = true)) {
+            operationMessage = "字体列表尚未核实，请先刷新字体库"
+            ensureFonts()
+            return
+        }
         if (operationBusy || mixState.busy) return
         operationBusy = true
         operationMessage = if (fontId == "default") "正在准备恢复系统字体…" else "正在验证并应用字体…"
@@ -558,6 +554,11 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
     }
 
     fun deleteFont(fontId: String) {
+        if (!fontLibraryContains(fontIndexVerified, fonts, fontId, requireValid = false)) {
+            operationMessage = "字体列表尚未核实，请先刷新字体库"
+            ensureFonts()
+            return
+        }
         if (operationBusy || mixState.busy || fontId.isBlank() || fontId == "default") return
         operationBusy = true
         operationMessage = "正在删除字体…"
@@ -570,8 +571,10 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 if (result.code != 0) error(result.stderr.ifBlank { "字体删除失败" })
                 val root = firstJson(result.stdout)
                 if (root.optString("status") != "ok") error(root.optString("message", "字体删除失败"))
+                fontGeneration += 1
                 fonts = fonts.filterNot { it.id == fontId }
                 cachedFingerprint = ""
+                fontIndexVerified = false
                 normalizeMixSelections()
                 persistFontIndex()
                 operationMessage = "字体已删除"
@@ -881,36 +884,6 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
                 loading = false,
                 rootGranted = true,
                 error = error.message ?: "模块状态解析失败",
-            )
-        }
-    }
-
-    private fun parseFonts(array: JSONArray): List<FontItem> = buildList {
-        for (index in 0 until array.length()) {
-            val item = array.optJSONObject(index) ?: continue
-            val id = item.optString("id")
-            if (id.isBlank() || id == "default") continue
-            val weightsArray = item.optJSONArray("weights")
-            val weights = buildList {
-                if (weightsArray != null) {
-                    for (weightIndex in 0 until weightsArray.length()) {
-                        weightsArray.optString(weightIndex).takeIf { it.isNotBlank() }?.let(::add)
-                    }
-                }
-            }
-            add(
-                FontItem(
-                    id = id,
-                    name = item.optString("name", id),
-                    format = item.optString("format", "TTF"),
-                    size = item.optString("size", ""),
-                    date = item.optString("date", ""),
-                    variable = item.optBoolean("variable", weights.contains("variable")),
-                    valid = item.optBoolean("valid", true),
-                    error = item.optString("error", ""),
-                    weights = weights,
-                    supportsCjk = item.optBoolean("supportsCjk", true),
-                ),
             )
         }
     }

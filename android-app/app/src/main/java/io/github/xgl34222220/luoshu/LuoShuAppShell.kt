@@ -169,11 +169,12 @@ internal fun LuoShuAppShell(
 
     LaunchedEffect(Unit) {
         viewModel.refresh()
-        features.refreshSystemWeight()
     }
     LaunchedEffect(page) {
+        if (page == AppPage.Library) FontLoadDiagnostics.mark("library_open")
+        viewModel.setFontLibraryVisible(page == AppPage.Library || page == AppPage.Studio)
         when (page) {
-            AppPage.Home -> features.refreshSystemWeight()
+            AppPage.Home -> Unit
             AppPage.Library -> viewModel.ensureFonts()
             AppPage.Studio -> {
                 viewModel.ensureFonts()
@@ -194,7 +195,6 @@ internal fun LuoShuAppShell(
         HomeActions(
             refresh = {
                 viewModel.refresh()
-                features.refreshSystemWeight()
             },
             openFontLibrary = { page = AppPage.Library },
             openFontStudio = { page = AppPage.Studio },
@@ -205,8 +205,6 @@ internal fun LuoShuAppShell(
             openSettings = { page = AppPage.Settings },
             restoreDefault = { restoreDefault = true },
             reboot = viewModel::rebootDevice,
-            previewSystemWeight = features::previewSystemWeight,
-            resetSystemWeight = features::resetSystemWeight,
         )
     }
     val libraryActions = remember(viewModel) {
@@ -215,7 +213,6 @@ internal fun LuoShuAppShell(
             setQuery = viewModel::setSearchQuery,
             apply = {
                 pendingApply = it
-                viewModel.prewarmFont(it.id)
             },
             delete = { pendingDelete = it },
             restoreDefault = { restoreDefault = true },
@@ -364,7 +361,7 @@ internal fun LuoShuAppShell(
                             CompositionLocalProvider(LocalDockContentPadding provides dockContentPadding) {
                                 HomeRoute(
                                     style = appearance.uiStyle,
-                                    state = viewModel.snapshot.toHomeUiState(features.systemWeight),
+                                    state = viewModel.snapshot.toHomeUiState(),
                                     actions = homeActions,
                                 )
                             }

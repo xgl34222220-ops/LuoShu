@@ -35,6 +35,8 @@ case "$1" in
  restore) echo restored >> "$TEST_ROOT/restored"; exit "${TEST_RESTORE_RC:-0}" ;;
 esac
 ''')
+        shutil.copyfile(ROOT / 'common/background_task.sh', self.module / 'common/background_task.sh')
+        shutil.copyfile(ROOT / 'common/task_scope.py', self.module / 'common/task_scope.py')
         self.env = dict(os.environ, MODDIR=str(self.module), TEST_ROOT=str(self.root),
                         PATH=f"{self.bin}:{os.environ['PATH']}",
                         LUOSHU_GOOGLE_FONT_RETRIES='1', LUOSHU_GOOGLE_FONT_WATCH_INTERVAL='30',

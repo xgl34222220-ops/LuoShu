@@ -94,6 +94,11 @@ mix_reconcile_fast() (
         return 1
     }
     mix_worker_alive_fast && return 0
+    for _mrf_file_pid in "$REALMOD/config/axes_worker.pid" "$REALMOD/config/auto_multiweight_worker.pid"; do
+        if [ -s "${_mrf_file_pid}.identity" ]; then
+            luoshu_task_helper reconcile "$_mrf_file_pid" >/dev/null 2>&1 || return 0
+        fi
+    done
     _mrf_started=$(read_value "$_mrf_file" started)
     _mrf_now=$(date +%s 2>/dev/null) || return 0
     case "$_mrf_now" in ''|*[!0-9]*) return 0 ;; esac

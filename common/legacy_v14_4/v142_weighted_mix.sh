@@ -63,6 +63,7 @@ task_worker_alive() {
     if type luoshu_task_pid_alive >/dev/null 2>&1; then
         luoshu_task_pid_alive "$WORKER_PID" "$_twa_task" && return 0
         luoshu_task_pid_alive "$AUTO_WORKER_PID" "$_twa_task" && return 0
+        return 1
     fi
     for _twa_file in "$WORKER_PID" "$AUTO_WORKER_PID"; do
         _twa_pid=$(sed -n '1{s/[^0-9].*$//;p;}' "$_twa_file" 2>/dev/null)
@@ -318,7 +319,8 @@ worker() {
             LuoShuMixCJK LuoShuMixLatin LuoShuMixDigit 2>/dev/null)
     fi
     if [ -z "$_child" ]; then
-        kill "$_starter_pid" 2>/dev/null || true
+        # The finite supervisor reaps the full scope on this failure. Never
+        # signal a saved numeric starter PID that may already have been reused.
         if type luoshu_mix_task_message_from_response >/dev/null 2>&1; then
             _message=$(luoshu_mix_task_message_from_response "$_response_file" 2>/dev/null)
         else
@@ -429,11 +431,8 @@ start_mix() {
     [ ! -f "$TEXT_REBOOT_REQUIRED" ] || {
         printf '{"status":"error","message":"本次开机已更改文字字体，请先重启手机"}\n'; return
     }
-    if [ -s "$WORKER_PID" ]; then
-        _old=$(cat "$WORKER_PID" 2>/dev/null)
-        [ -z "$_old" ] || ! kill -0 "$_old" 2>/dev/null || {
-            printf '{"status":"error","message":"已有字体组合任务正在运行"}\n'; return
-        }
+    if type luoshu_task_pid_alive >/dev/null 2>&1 && luoshu_task_pid_alive "$WORKER_PID"; then
+        printf '{"status":"error","message":"已有字体组合任务正在运行"}\n'; return
     fi
     [ ! -e "$LOCK_FILE" ] || { printf '{"status":"error","message":"字体正在切换中"}\n'; return; }
     [ -n "$_cjk_axes" ] || _cjk_axes='wght=400'
@@ -463,6 +462,9 @@ start_mix() {
 }
 
 recover_task() {
+    if type luoshu_stop_task_pid >/dev/null 2>&1; then
+        luoshu_stop_task_pid "$WORKER_PID" || return 1
+    fi
     MODDIR="$MODDIR" sh "$BASE_ENGINE" recover >/dev/null 2>&1 || true
     if [ -s "$TASK_FILE" ]; then
         _state=$(read_value "$TASK_FILE" state)

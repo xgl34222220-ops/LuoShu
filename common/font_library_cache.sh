@@ -5,25 +5,28 @@
 font_library_fingerprint_value() {
     _font_dir="${USER_FONTS_DIR:-/sdcard/LuoShu/fonts}"
     _config_dir="${CONFIG_DIR:-/data/adb/modules/LuoShu/config}"
+    [ -d "$_font_dir" ] && [ -r "$_font_dir" ] && [ -x "$_font_dir" ] || return 1
     mkdir -p "$_config_dir" 2>/dev/null || true
     _tmp="$_config_dir/.font-fingerprint.$$"
     : > "$_tmp" 2>/dev/null || return 1
-    _count=0
-    _bytes=0
-
+    # One stat invocation for the whole library. The previous per-file basename
+    # and two stat subprocesses made large libraries launch thousands of shells.
+    set --
     for _font_file in "$_font_dir"/*.ttf "$_font_dir"/*.otf "$_font_dir"/*.ttc \
         "$_font_dir"/*.TTF "$_font_dir"/*.OTF "$_font_dir"/*.TTC; do
         [ -f "$_font_file" ] || continue
-        _name=$(basename "$_font_file" 2>/dev/null)
+        _name=${_font_file##*/}
         case "$_name" in SysFont*|SysSans*) continue ;; esac
-        _size=$(stat -c %s "$_font_file" 2>/dev/null)
-        _mtime=$(stat -c '%Y:%y' "$_font_file" 2>/dev/null)
-        case "$_size" in ''|*[!0-9]*) _size=0 ;; esac
-        [ -n "$_mtime" ] || _mtime=0
-        printf '%s|%s|%s\n' "$_name" "$_size" "$_mtime" >> "$_tmp"
-        _count=$((_count + 1))
-        _bytes=$((_bytes + _size))
+        set -- "$@" "$_font_file"
     done
+    _count=$#
+    if [ "$#" -gt 0 ]; then
+        # Mode/inode/ctime detect permission changes and same-size replacements.
+        stat -c '%n|%s|%Y:%y|%a|%i|%Z:%z' "$@" > "$_tmp" 2>/dev/null || {
+            rm -f "$_tmp"; return 1;
+        }
+    fi
+    _bytes=$(awk -F'|' '{sum += $2} END {print sum + 0}' "$_tmp")
 
     LC_ALL=C sort -o "$_tmp" "$_tmp" 2>/dev/null || true
     if command -v sha256sum >/dev/null 2>&1; then
@@ -35,11 +38,11 @@ font_library_fingerprint_value() {
     fi
     rm -f "$_tmp" 2>/dev/null || true
     [ -n "$_digest" ] || _digest="empty"
-    printf 'v3:%s:%s:%s\n' "$_digest" "$_count" "$_bytes"
+    printf 'v4:%s:%s:%s\n' "$_digest" "$_count" "$_bytes"
 }
 
 font_library_fingerprint_json() {
-    _fingerprint=$(font_library_fingerprint_value)
+    _fingerprint=$(font_library_fingerprint_value) || { printf '{"status":"error","message":"字体目录暂不可读"}\n'; return 1; }
     _current="default"
     [ -f "${ACTIVE_FONT_CONF:-}" ] && _current=$(head -n1 "$ACTIVE_FONT_CONF" 2>/dev/null | tr -d '\r\n')
     [ -n "$_current" ] || _current="default"

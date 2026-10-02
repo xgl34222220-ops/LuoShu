@@ -12,15 +12,22 @@ cp -a "$SOURCE" "$STAGE/common/python"
 # Hard links make du report one underlying inode, while the release ZIP stores each path as a separate
 # entry. Measure the actual distributable size instead of filesystem allocation.
 (cd "$STAGE" && zip -9 -r -q "$TMP/runtime-before.zip" common/python)
+_was_pruned=false
+[ -f "$SOURCE/lib/libssl_python.so" ] || _was_pruned=true
 _before_zip=$(wc -c < "$TMP/runtime-before.zip" | tr -d '[:space:]')
 sh "$ROOT/scripts/prune_python_runtime.sh" "$STAGE"
 (cd "$STAGE" && zip -9 -r -q "$TMP/runtime-after.zip" common/python)
 _after_zip=$(wc -c < "$TMP/runtime-after.zip" | tr -d '[:space:]')
 _saved_zip=$((_before_zip - _after_zip))
+if [ "$_was_pruned" = false ]; then
 [ "$_saved_zip" -ge 4200000 ] || {
     echo "runtime pruning saved too little in the release ZIP: $_saved_zip bytes" >&2
     exit 1
 }
+
+else
+  [ "$_after_zip" -le "$_before_zip" ] || { echo "idempotent pruning increased archive" >&2; exit 1; }
+fi
 
 LIB="$STAGE/common/python/lib"
 PYLIB="$LIB/python3.14"

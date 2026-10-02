@@ -1,0 +1,256 @@
+package io.github.xgl34222220.luoshu
+
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import org.json.JSONArray
+import org.junit.Assert.*
+import org.junit.Test
+
+class FontLibraryLoaderTest {
+    private fun index(fingerprint: String = "v4:a", ids: List<String> = listOf("A")) = CachedFontIndex(
+        fingerprint, "default", ids.map { id ->
+            FontItem(id, id, "TTF", "1 MB", "2026-10-02", false, true, "", listOf("regular"))
+        }, 1L,
+    )
+
+    private class Source(var cachedIndex: CachedFontIndex?, var fresh: CachedFontIndex) : FontLibrarySource {
+        var cachedReads = 0
+        var checks = 0
+        var scans = 0
+        var forced = false
+        var checkFailure: Exception? = null
+        var currentFingerprint = fresh.fingerprint
+        var checkGate: CompletableDeferred<Unit>? = null
+        override suspend fun cached(): CachedFontIndex? = cachedIndex.also { cachedReads++ }
+        override suspend fun fingerprint(): FontLibraryFingerprint {
+            checks++
+            checkGate?.await()
+            checkFailure?.let { throw it }
+            return FontLibraryFingerprint(currentFingerprint, "A")
+        }
+        override suspend fun scan(refresh: Boolean): CachedFontIndex {
+            scans++
+            forced = refresh
+            return fresh
+        }
+    }
+
+    @Test
+    fun moduleCacheIsPublishedBeforeBlockedValidation() = runBlocking {
+        val gate = CompletableDeferred<Unit>()
+        val visible = CompletableDeferred<CachedFontIndex>()
+        val source = Source(index(), index()).apply { checkGate = gate }
+        val verified = mutableListOf<Boolean>()
+        val job = launch {
+            loadFontLibrary(null, false, source) { rows, checked ->
+                verified += checked
+                visible.complete(rows)
+            }
+        }
+        withTimeout(1_000L) { assertEquals(listOf("A"), visible.await().fonts.map { it.id }) }
+        assertEquals(listOf(false), verified)
+        assertTrue(job.isActive)
+        gate.complete(Unit)
+        job.join()
+        assertEquals(listOf(false, true), verified)
+        assertEquals(0, source.scans)
+    }
+
+    @Test
+    fun localCacheChecksWithoutReadingModuleCacheOrRescanning() = runBlocking {
+        val known = index()
+        val source = Source(null, known)
+        val loaded = loadFontLibrary(known, false, source) { _, _ -> }
+        assertEquals(0, source.cachedReads)
+        assertEquals(1, source.checks)
+        assertEquals(0, source.scans)
+        assertEquals("A", loaded.currentFont)
+        assertEquals("v4:a", loaded.fonts.single().revision)
+    }
+
+    @Test
+    fun firstRunCacheMissScansWithoutRequiringAnExistingDirectory() = runBlocking {
+        val source = Source(null, index())
+        assertEquals(1, loadFontLibrary(null, false, source) { _, _ -> }.fonts.size)
+        assertEquals(1, source.checks)
+        assertEquals(1, source.scans)
+        assertFalse(source.forced)
+    }
+
+    @Test
+    fun importAndDeleteReplaceTheOldListIncludingAnEmptyResult() = runBlocking {
+        val old = index()
+        val source = Source(null, index("v4:b", listOf("B", "C")))
+        val imported = loadFontLibrary(old, false, source) { _, _ -> }
+        assertEquals(listOf("B", "C"), imported.fonts.map { it.id })
+        assertTrue(source.forced)
+        source.fresh = index("v4:empty", emptyList())
+        source.currentFingerprint = source.fresh.fingerprint
+        val deleted = loadFontLibrary(imported, false, source) { _, _ -> }
+        assertTrue(deleted.fonts.isEmpty())
+        assertEquals("v4:empty", deleted.fingerprint)
+    }
+
+    @Test
+    fun knownEmptyLibraryDoesNotRescanForever() = runBlocking {
+        val empty = index("v4:empty", emptyList())
+        val source = Source(null, empty)
+        loadFontLibrary(empty, false, source) { _, _ -> }
+        assertEquals(0, source.scans)
+        assertEquals(0, source.cachedReads)
+    }
+
+    @Test
+    fun manualRefreshBypassesFingerprintHit() = runBlocking {
+        val source = Source(null, index())
+        loadFontLibrary(index(), true, source) { _, _ -> }
+        assertEquals(1, source.scans)
+        assertTrue(source.forced)
+    }
+
+    @Test
+    fun legacyCacheWithoutFingerprintRemainsVisibleButMustBeScanned() = runBlocking {
+        val source = Source(index(""), index())
+        val states = mutableListOf<Boolean>()
+        loadFontLibrary(null, false, source) { _, verified -> states += verified }
+        assertEquals(listOf(false, true), states)
+        assertEquals(1, source.scans)
+    }
+
+    @Test
+    fun permissionFailureKeepsKnownRowsUnverifiedAndCanRecover() = runBlocking {
+        val source = Source(index(), index()).apply { checkFailure = SecurityException("permission denied") }
+        val states = mutableListOf<Pair<CachedFontIndex, Boolean>>()
+        val result = runCatching { loadFontLibrary(null, false, source) { row, verified -> states += row to verified } }
+        assertTrue(result.exceptionOrNull() is SecurityException)
+        assertEquals(listOf(false), states.map { it.second })
+        assertEquals("A", states.single().first.fonts.single().id)
+        assertEquals(0, source.scans)
+        source.checkFailure = null
+        loadFontLibrary(states.single().first, false, source) { row, verified -> states += row to verified }
+        assertTrue(states.last().second)
+    }
+
+    @Test
+    fun cancellingValidationDoesNotPublishAFalseEmptyOrVerifiedList() = runBlocking {
+        val visible = CompletableDeferred<Unit>()
+        val source = Source(index(), index()).apply { checkGate = CompletableDeferred() }
+        val states = mutableListOf<Boolean>()
+        val job = launch { loadFontLibrary(null, false, source) { _, verified -> states += verified; visible.complete(Unit) } }
+        withTimeout(1_000L) { visible.await() }
+        job.cancelAndJoin()
+        assertEquals(listOf(false), states)
+        assertEquals(0, source.scans)
+    }
+
+    @Test
+    fun scanFingerprintMismatchKeepsRowsUnverifiedWithoutAnAutomaticRescanLoop() = runBlocking {
+        val source = Source(null, index("v4:during-scan")).apply { currentFingerprint = "v4:later" }
+        val published = mutableListOf<Pair<CachedFontIndex, Boolean>>()
+        val failure = runCatching {
+            loadFontLibrary(index(), false, source) { rows, verified -> published += rows to verified }
+        }.exceptionOrNull()
+        assertTrue(failure?.message.orEmpty().contains("扫描期间"))
+        assertEquals("v4:a", published.last().first.fingerprint)
+        assertTrue(published.none { it.second })
+        assertEquals(1, source.scans)
+        assertEquals(2, source.checks)
+        // A later explicit/foreground check can recover once the directory is stable.
+        source.fresh = index("v4:later")
+        val recovered = loadFontLibrary(published.last().first, false, source) { rows, verified -> published += rows to verified }
+        assertEquals("v4:later", recovered.fingerprint)
+        assertTrue(published.last().second)
+    }
+
+    @Test
+    fun knownRowsLoseActionReadinessBeforeABlockedCheck() = runBlocking {
+        val published = CompletableDeferred<Boolean>()
+        val source = Source(null, index()).apply { checkGate = CompletableDeferred() }
+        val job = launch { loadFontLibrary(index(), false, source) { _, verified -> published.complete(verified) } }
+        withTimeout(1_000L) { assertFalse(published.await()) }
+        job.cancelAndJoin()
+        assertEquals(0, source.scans)
+    }
+
+    @Test
+    fun scanPermissionFailureCannotPublishVerifiedRows() = runBlocking {
+        val source = Source(null, index()).apply { checkFailure = SecurityException("permission lost after scan") }
+        val states = mutableListOf<Boolean>()
+        assertTrue(runCatching { loadFontLibrary(null, false, source) { _, verified -> states += verified } }.isFailure)
+        assertEquals(listOf(false), states)
+        assertEquals(1, source.scans)
+    }
+
+    @Test
+    fun unconfirmedEmptyScanCannotClearAKnownLibrary() = runBlocking {
+        val source = Source(null, index("v4:empty", emptyList())).apply {
+            currentFingerprint = "v4:changed-again"
+        }
+        val states = mutableListOf<Pair<CachedFontIndex, Boolean>>()
+        assertTrue(runCatching {
+            loadFontLibrary(index(), false, source) { rows, verified -> states += rows to verified }
+        }.isFailure)
+        assertEquals(listOf("A"), states.last().first.fonts.map { it.id })
+        assertFalse(states.last().second)
+        assertEquals(1, source.scans)
+    }
+
+    @Test
+    fun staleDialogAndPermissionFailureCannotAuthorizeAnAbsentFont() {
+        val old = index().fonts.single()
+        assertFalse(fontLibraryContains(false, listOf(old), old.id, true))
+        assertFalse(fontLibraryContains(true, emptyList(), old.id, true))
+        assertFalse(fontLibraryContains(true, emptyList(), old.id, false))
+        assertTrue(fontLibraryContains(true, listOf(old), old.id, true))
+        val invalid = old.copy(valid = false)
+        assertFalse(fontLibraryContains(true, listOf(invalid), old.id, true))
+        assertTrue(fontLibraryContains(true, listOf(invalid), old.id, false))
+    }
+
+    @Test
+    fun sameNameSameDisplaySizeAndDateReplacementInvalidatesPreviewAndAxes() {
+        val old = index().fonts.single().copy(revision = "before")
+        val replacement = old.copy(revision = "after")
+        assertNotEquals(old.sourceRevision, replacement.sourceRevision)
+    }
+
+    @Test
+    fun parserPreservesNativeWeightsAndVariableCapability() {
+        val fonts = parseFontItems(JSONArray("""[{"id":"variable","variable":true,"weights":["variable"]},{"id":"static","weights":["regular","bold"],"supportsCjk":false}]"""))
+        assertTrue(fonts.first().variable)
+        assertEquals(listOf("regular", "bold"), fonts.last().weights)
+        assertFalse(fonts.last().supportsCjk)
+    }
+
+    @Test
+    fun rootSourceHandlesCacheMissAndNeverRequestsStatus() = runBlocking {
+        val commands = mutableListOf<String>()
+        val source = RootFontLibrarySource { command, _ ->
+            commands += command
+            if (command.endsWith("fonts cached")) ShellResult(1, """{"status":"error","code":"cache_miss","message":"cache miss"}""", "")
+            else ShellResult(0, """{"status":"ok","data":{"fonts":[],"fingerprint":"v4:empty","current":"default"}}""", "")
+        }
+        val result = loadFontLibrary(null, false, source) { _, _ -> }
+        assertTrue(result.fonts.isEmpty())
+        assertEquals(3, commands.size)
+        assertTrue(commands[0].endsWith("fonts cached"))
+        assertTrue(commands[1].endsWith(" fonts"))
+        assertTrue(commands[2].endsWith(" fingerprint"))
+        assertFalse(commands.any { it.contains("status") })
+    }
+
+    @Test
+    fun rootSourceRejectsMalformedSuccessInsteadOfClearingTheIndex() = runBlocking {
+        val source = RootFontLibrarySource { _, _ -> ShellResult(0, """{"status":"ok","data":{}}""", "") }
+        assertTrue(runCatching { source.scan(false) }.isFailure)
+    }
+
+    @Test
+    fun rootSourceDoesNotConvertPermissionDenialIntoCacheMiss() = runBlocking {
+        val source = RootFontLibrarySource { _, _ -> ShellResult(1, "", "permission denied") }
+        assertTrue(runCatching { source.cached() }.exceptionOrNull()?.message.orEmpty().contains("permission denied"))
+    }
+}

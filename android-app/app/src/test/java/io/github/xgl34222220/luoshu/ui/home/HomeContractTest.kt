@@ -1,7 +1,6 @@
 package io.github.xgl34222220.luoshu.ui.home
 
 import io.github.xgl34222220.luoshu.ModuleSnapshot
-import io.github.xgl34222220.luoshu.SystemWeightState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -21,7 +20,7 @@ class HomeContractTest {
             mountState = "failed",
             taskState = "success",
             taskMessage = "字体已准备",
-        ).toHomeUiState(SystemWeightState())
+        ).toHomeUiState()
 
         assertEquals("系统默认字体（DemoFont未生效）", state.currentFont)
         assertEquals("字体未生效", state.taskTitle)
@@ -39,7 +38,7 @@ class HomeContractTest {
             effectiveFont = "DemoFont",
             fontEffectState = "verified",
             mountState = "mounted",
-        ).toHomeUiState(SystemWeightState())
+        ).toHomeUiState()
 
         assertEquals("DemoFont", state.currentFont)
         assertEquals("字体引擎已就绪", state.taskTitle)
@@ -54,7 +53,7 @@ class HomeContractTest {
             effectiveFont = "unknown",
             fontEffectState = "pending-reboot",
             rebootRequired = true,
-        ).toHomeUiState(SystemWeightState())
+        ).toHomeUiState()
 
         assertEquals("DemoFont（等待完整重启）", state.currentFont)
     }
@@ -68,7 +67,7 @@ class HomeContractTest {
             fontEffectState = "failed",
             verificationReason = "dynamic-config-overridden",
             mountState = "mounted",
-        ).toHomeUiState(SystemWeightState())
+        ).toHomeUiState()
 
         assertTrue(state.taskMessage.contains("动态字体配置"))
         assertTrue(state.taskMessage.contains("系统字体"))

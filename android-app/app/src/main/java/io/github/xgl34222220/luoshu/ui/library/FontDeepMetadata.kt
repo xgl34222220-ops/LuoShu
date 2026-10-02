@@ -3,6 +3,7 @@ package io.github.xgl34222220.luoshu.ui.library
 import io.github.xgl34222220.luoshu.FontItem
 import io.github.xgl34222220.luoshu.RootShell
 import org.json.JSONObject
+import kotlinx.coroutines.CancellationException
 
 private const val DETAILS_BRIDGE = "/data/adb/modules/LuoShu/common/font_details.sh"
 
@@ -22,6 +23,8 @@ internal suspend fun loadFontDeepMetadata(font: FontItem): FontDeepMetadata {
         val root = firstMetadataJson(result.stdout)
         if (root.optString("status") != "ok") error(root.optString("message", "字体详情读取失败"))
         formatFontDeepMetadata(root.getJSONObject("data"), font.name)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
     } catch (error: Throwable) {
         FontDeepMetadata(
             title = font.name,

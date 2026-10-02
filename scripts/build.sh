@@ -9,6 +9,7 @@ ZIP="$OUT/LuoShu-${VERSION}.zip"
 ZIP_NAME=$(basename "$ZIP")
 SIZE_REPORT="$OUT/LuoShu-${VERSION}-size.txt"
 APP_APK="${LUOSHU_APP_APK:-}"
+TEST_BUILD_ID="${LUOSHU_TEST_BUILD_ID:-$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)}"
 ALLOW_DEBUG_APP="${LUOSHU_ALLOW_DEBUG_APP:-0}"
 EXPECTED_VERSION_CODE=$((LUOSHU_VERSION_CODE * 100 + 1))
 MAX_ZIP_BYTES="${LUOSHU_MAX_ZIP_BYTES:-11010048}"
@@ -46,7 +47,7 @@ esac
 case "$APP_PACKAGE" in
   io.github.xgl34222220.luoshu)
     ;;
-  io.github.xgl34222220.luoshu.debug)
+  io.github.xgl34222220.luoshu.debug|io.github.xgl34222220.luoshu.stabletest)
     [ "$ALLOW_DEBUG_APP" = "1" ] || {
       echo 'Debug App packaging requires LUOSHU_ALLOW_DEBUG_APP=1.' >&2
       exit 68
@@ -70,6 +71,11 @@ while IFS= read -r path || [ -n "$path" ]; do
 done < "$PAYLOAD_MANIFEST"
 [ ! -f "$STAGE/config/version_notes.conf" ] || sed -i "s/^version=.*/version=$LUOSHU_VERSION/" "$STAGE/config/version_notes.conf"
 
+if [ "$APP_PACKAGE" = io.github.xgl34222220.luoshu.stabletest ]; then
+  sed -i '/^updateJson=/d; s/^name=.*/name=洛书·稳定重构测试/' "$STAGE/module.prop"
+  printf 'testBuildId=%s\n' "$TEST_BUILD_ID" >> "$STAGE/module.prop"
+fi
+
 mkdir -p "$STAGE/bundled"
 cp -f "$APP_APK" "$STAGE/bundled/LuoShu-App.apk"
 APP_SHA256=$(sha256sum "$STAGE/bundled/LuoShu-App.apk" | awk '{print $1}')
@@ -78,6 +84,7 @@ APP_SHA256=$(sha256sum "$STAGE/bundled/LuoShu-App.apk" | awk '{print $1}')
   printf 'versionCode=%s\n' "$APP_VERSION_CODE"
   printf 'versionName=%s\n' "$LUOSHU_VERSION"
   printf 'sha256=%s\n' "$APP_SHA256"
+  [ "$APP_PACKAGE" != io.github.xgl34222220.luoshu.stabletest ] || printf 'installPolicy=manual-only\ntestBuildId=%s\n' "$TEST_BUILD_ID"
 } > "$STAGE/bundled/app.prop"
 chmod 0644 "$STAGE/bundled/LuoShu-App.apk" "$STAGE/bundled/app.prop"
 

@@ -110,3 +110,8 @@ test -s "$PYLIB/argparse.py"
 test -s "$PYLIB/hashlib.py"
 test -s "$PYLIB/tempfile.py"
 test -s "$PYLIB/xml/etree/ElementTree.py"
+
+# Finite task supervision uses the Android libc subreaper API through ctypes.
+test -s "$PYLIB/ctypes/__init__.py"
+find "$DYN" -maxdepth 1 -type f -name '_ctypes.*.so' -print -quit | grep -q .
+test -s "$PYLIB/subprocess.py"

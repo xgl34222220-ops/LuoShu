@@ -275,6 +275,7 @@ preview_export() {
     _weight="${3:-400}"
     case "$_dest" in
         /data/user/0/io.github.xgl34222220.luoshu/cache/*|/data/data/io.github.xgl34222220.luoshu/cache/*|\
+        /data/user/0/io.github.xgl34222220.luoshu.stabletest/cache/*|/data/data/io.github.xgl34222220.luoshu.stabletest/cache/*|\
         /data/user/0/io.github.xgl34222220.luoshu.debug/cache/*|/data/data/io.github.xgl34222220.luoshu.debug/cache/*) ;;
         *) printf '{"status":"error","message":"预览目标目录不受信任"}\n'; return 1 ;;
     esac
@@ -302,6 +303,14 @@ weight_axis_info() {
 case "${1:-status}" in
     status) status_json ;;
     fonts)
+        if [ "${2:-}" = cached ]; then
+            if [ -s "$MODDIR/config/native_font_index.json" ] && grep -q '"status":"ok"' "$MODDIR/config/native_font_index.json"; then
+                cat "$MODDIR/config/native_font_index.json"
+            else
+                printf '{"status":"error","message":"cache miss","code":"cache_miss"}\n'
+            fi
+            exit 0
+        fi
         manager_ready || exit 1
         if [ "${2:-}" = refresh ]; then sh "$FONT_MANAGER" action list refresh
         else sh "$FONT_MANAGER" action list
@@ -318,20 +327,10 @@ case "${1:-status}" in
     preview_export) preview_export "${2:-}" "${3:-}" "${4:-400}" ;;
     weight_axis) weight_axis_info "${2:-}" ;;
     prewarm)
-        if [ -f "$SAFE_SWITCH" ]; then
-            MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-                sh "$SAFE_SWITCH" action prewarm-start "${2:-}" >/dev/null 2>&1 || true
-            printf '{"status":"ok","data":{"font":"%s","scheduled":true}}\n' "$(json_escape "${2:-}")"
-        else
-            printf '{"status":"error","message":"字体预热组件不可用"}\n'
-        fi
+        printf '{"status":"ok","data":{"scheduled":false,"reason":"on-demand-only"}}\n'
         ;;
     validate)
         manager_ready || exit 1
-        if [ -f "$SAFE_SWITCH" ] && [ -n "${2:-}" ] && [ "${2:-}" != default ]; then
-            MODDIR="$MODDIR" LUOSHU_PUBLIC_DIR="${LUOSHU_PUBLIC_DIR:-/sdcard/LuoShu}" \
-                sh "$SAFE_SWITCH" action prewarm-start "${2:-}" >/dev/null 2>&1 || true
-        fi
         sh "$FONT_MANAGER" action validate "${2:-}"
         ;;
     stock_scan) manager_ready || exit 1; sh "$FONT_MANAGER" action stock_scan ;;

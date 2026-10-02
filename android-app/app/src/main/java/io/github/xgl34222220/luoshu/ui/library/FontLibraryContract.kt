@@ -23,6 +23,8 @@ internal enum class FontLibrarySort(val label: String) {
 @Immutable
 internal data class FontLibraryUiState(
     val loading: Boolean = false,
+    val refreshing: Boolean = false,
+    val verified: Boolean = true,
     val operationBusy: Boolean = false,
     val query: String = "",
     val error: String = "",
@@ -106,7 +108,9 @@ internal fun LuoShuViewModel.toFontLibraryUiState(): FontLibraryUiState {
         snapshot.taskType == "switch" && snapshot.taskState == "failed" && it.isNotBlank()
     }.orEmpty()
     return FontLibraryUiState(
-        loading = fontLoading || fontRefreshing,
+        loading = fontLoading || !fontCacheReady,
+        refreshing = fontRefreshing,
+        verified = fontIndexVerified,
         operationBusy = operationBusy || mixState.busy,
         query = searchQuery,
         error = fontError.ifBlank { failedSwitchMessage },
