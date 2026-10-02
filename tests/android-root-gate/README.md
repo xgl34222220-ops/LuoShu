@@ -87,3 +87,18 @@ events `app_start`, `library_open`, `font_index_visible`, `font_index_verified`,
 The usable endpoint is `library_frame verified=true` after the visible frame,
 not cached data visibility. Baseline needs the same isolated measurement-only hook
 or an equivalent UI readiness observation, disclosed with results.
+
+## Existing-sudo CI execution
+
+The second diagnostic run confirmed `/dev/kvm` exists as root:kvm 0660 with CPU
+virtualization, but the hosted runner user is not in kvm. The runner already grants
+NOPASSWD sudo. With authorization for a single privileged emulator lifecycle,
+`run_emulator.py` starts only the official SDK emulator under an owned supervisor.
+It neither changes permissions/groups/udev/sudoers nor disables SELinux. A private
+throwaway HOME/AVD is used; SDK installation does not auto-accept new licenses.
+Cancellation forwards to a supervisor that terminates and reaps its direct child.
+Cleanup evidence and before/after KVM metadata must agree or the job fails.
+
+This host privilege does not grant Android App `su` access or install a root
+manager. App-to-su and real module-manager boot hooks remain separate required
+gates before claiming font-library Root loading or module reboot persistence.

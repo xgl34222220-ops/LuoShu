@@ -27,29 +27,37 @@ jobs:
             https://github.com/xgl34222220-ops/LuoShu/releases/download/refactor-v1.1.1/LuoShu-v1.1.1.zip
           echo "c5c8fa86af4ac196107ba05c5ee8cc1944140ae033cc9e763cec8c76f40c848a  $RUNNER_TEMP/LuoShu-v1.1.1.zip" | sha256sum -c -
           python3 -m unittest discover -s tests/android-root-gate -p 'test_*.py'
-      - name: Check existing KVM access without altering security settings
+      - name: Record KVM access and verify existing sudo access
         shell: bash
         run: |
           set -o pipefail
-          bash tests/android-root-gate/check_kvm.sh 2>&1 | tee root-gate-output/kvm-environment.txt
+          if ! bash tests/android-root-gate/check_kvm.sh 2>&1 | tee root-gate-output/kvm-environment.txt; then
+            test -c /dev/kvm
+            sudo -n test -r /dev/kvm
+            sudo -n test -w /dev/kvm
+            echo 'Using authorized, existing sudo for one emulator process; permissions unchanged.' | tee -a root-gate-output/kvm-environment.txt
+          fi
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-      - name: Qualify standalone original ARM64 ELF before and after reboot
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
-          target: google_apis
-          arch: x86_64
-          profile: pixel_7_pro
-          ram-size: 2048M
-          heap-size: 512M
-          emulator-boot-timeout: 600
-          disable-animations: false
-          disable-linux-hw-accel: false
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          script: python3 tests/android-root-gate/probe.py --module-zip "$RUNNER_TEMP/LuoShu-v1.1.1.zip" --output root-gate-output
+      - name: Prepare official SDK image and disposable AVD
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v sdkmanager
+          command -v avdmanager
+          sdkmanager --install 'platform-tools' 'emulator' 'system-images;android-35;google_apis;x86_64'
+          export HOME="$RUNNER_TEMP/luoshu-emulator-home"
+          export ANDROID_AVD_HOME="$HOME/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          printf 'no\n' | avdmanager create avd --force --name luoshu_gate --package 'system-images;android-35;google_apis;x86_64' --device pixel_7_pro
+          printf '\nhw.ramSize=2048\nvm.heapSize=512\n' >> "$ANDROID_AVD_HOME/luoshu_gate.avd/config.ini"
+          echo "HOME=$HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
+      - name: Qualify original ARM64 runtime under one supervised emulator
+        shell: bash
+        run: python3 tests/android-root-gate/run_emulator.py --module-zip "$RUNNER_TEMP/LuoShu-v1.1.1.zip" --output root-gate-output
       - name: Preserve qualification evidence, including unsupported failures
         if: always()
         uses: actions/upload-artifact@v4
