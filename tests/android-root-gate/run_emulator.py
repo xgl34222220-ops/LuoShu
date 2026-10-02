@@ -13,7 +13,7 @@ import sys
 import time
 
 
-def supervise_root(binary, report):
+def supervise_root(binary, report, ramdisk=None):
     """Own the direct child until reaped; sudo forwards termination here."""
     child = None
     result = {'emulator_started': False, 'emulator_reaped': False}
@@ -22,9 +22,12 @@ def supervise_root(binary, report):
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     try:
-        child = subprocess.Popen([binary, '-avd', 'luoshu_gate', '-port', '5554',
+        command = [binary, '-avd', 'luoshu_gate', '-port', '5554',
             '-no-window', '-gpu', 'swiftshader_indirect', '-no-snapshot', '-noaudio',
-            '-no-boot-anim', '-camera-back', 'none', '-accel', 'on'])
+            '-no-boot-anim', '-camera-back', 'none', '-accel', 'on']
+        if ramdisk:
+            command += ['-ramdisk', ramdisk]
+        child = subprocess.Popen(command)
         result.update(emulator_started=True, pid=child.pid)
         return child.wait()
     finally:
@@ -53,12 +56,15 @@ def main():
     parser.add_argument('--root-supervisor', action='store_true')
     parser.add_argument('--binary')
     parser.add_argument('--cleanup-report')
+    parser.add_argument('--ramdisk')
+    parser.add_argument('--magisk-apk', type=Path)
+    parser.add_argument('--magisk-patch-script', type=Path)
     parser.add_argument('--module-zip', type=Path)
     parser.add_argument('--candidate-zip', type=Path)
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     if args.root_supervisor:
-        return supervise_root(args.binary, args.cleanup_report)
+        return supervise_root(args.binary, args.cleanup_report, args.ramdisk)
     args.output.mkdir(parents=True, exist_ok=True)
     output = args.output.resolve()
     sdk = Path(os.environ['ANDROID_HOME']).resolve()
@@ -70,6 +76,7 @@ def main():
     report = {'kvm_before': kvm_state(), 'result': 'FAIL'}
     root_report = output / 'emulator-cleanup.json'
     launcher = None
+    root_reports = [root_report]
     def stop(signum, frame):
         raise SystemExit(128 + signum)
     signal.signal(signal.SIGTERM, stop)
@@ -103,6 +110,43 @@ def main():
                     '--baseline-zip', str(args.module_zip), '--candidate-zip', str(args.candidate_zip),
                     '--output', str(output)], env=env, timeout=600)
                 report['candidate_gate_exit'] = candidate.returncode
+                if args.magisk_apk:
+                    # A real cold-start regression must be fixed before adding a
+                    # root-manager environment that could obscure its cause.
+                    initial = json.loads((output / 'candidate-gate.json').read_text())
+                    if initial['checks'].get('app_launch_only', {}).get('result') != 'PASS':
+                        raise RuntimeError('Candidate cold start is not proven; Magisk stage not started')
+                    from magisk_avd import prepare, verify
+                    patched = prepare(args.magisk_apk, args.magisk_patch_script, sdk, output, adb)
+                    subprocess.run([adb, '-s', 'emulator-5554', 'emu', 'kill'], capture_output=True, timeout=10)
+                    launcher.wait(timeout=45)
+                    if not json.loads(root_report.read_text()).get('emulator_reaped'):
+                        raise RuntimeError('Stock emulator did not confirm cleanup')
+                    root_report = output / 'magisk-emulator-cleanup.json'
+                    root_reports.append(root_report)
+                    launcher = subprocess.Popen(['sudo', '-n', 'env',
+                        'HOME=' + os.environ['HOME'], 'ANDROID_AVD_HOME=' + os.environ['ANDROID_AVD_HOME'],
+                        'ANDROID_HOME=' + str(sdk), 'ANDROID_SDK_ROOT=' + str(sdk),
+                        sys.executable, str(Path(__file__).resolve()), '--root-supervisor',
+                        '--binary', str(binary), '--cleanup-report', str(root_report),
+                        '--ramdisk', str(patched)], stdout=log, stderr=subprocess.STDOUT)
+                    deadline = time.monotonic() + 600
+                    while time.monotonic() < deadline:
+                        if launcher.poll() is not None:
+                            raise RuntimeError('Patched AVD exited before boot')
+                        boot = subprocess.run([adb, '-s', 'emulator-5554', 'shell', 'getprop', 'sys.boot_completed'],
+                            capture_output=True, text=True, timeout=15)
+                        if boot.returncode == 0 and boot.stdout.strip() == '1':
+                            break
+                        time.sleep(2)
+                    else:
+                        raise RuntimeError('Patched AVD boot timed out')
+                    subprocess.run([adb, '-s', 'emulator-5554', 'root'], check=True, timeout=30)
+                    subprocess.run([adb, '-s', 'emulator-5554', 'wait-for-device'], check=True, timeout=60)
+                    verify(adb, output)
+                    report['magisk_boot'] = 'PASS'
+                    # Full module/App root validation is a distinct next stage.
+                    raise RuntimeError('Magisk boot qualified; module/App-root delivery checks still pending')
                 if candidate.returncode:
                     raise RuntimeError('Candidate delivery gate is incomplete or failed; inspect candidate-gate.json')
             report['result'] = 'PASS'
@@ -129,7 +173,7 @@ def main():
         report['kvm_after'] = kvm_state()
         if report['kvm_before'] != report['kvm_after']:
             report.update(result='FAIL', error='KVM device security metadata changed')
-        if not root_report.exists() or not json.loads(root_report.read_text()).get('emulator_reaped'):
+        if any(not path.exists() or not json.loads(path.read_text()).get('emulator_reaped') for path in root_reports):
             report.update(result='FAIL', error='No confirmed emulator cleanup evidence')
         (output / 'runner-lifecycle.json').write_text(json.dumps(report, indent=2) + '\n')
     return 0 if report['result'] == 'PASS' else 1

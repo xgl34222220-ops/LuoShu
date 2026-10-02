@@ -36,6 +36,20 @@ esac
             p=subprocess.run(['sh',str(ROOT/'common/retire_global_weight.sh'),str(d)])
             self.assertNotEqual(p.returncode,0)
             self.assertTrue((d/'config/font_weight.conf').exists())
+    def test_legacy_weight_retirement_waits_for_android_boot(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t); module=d/'module'; (module/'common').mkdir(parents=True); (module/'config').mkdir()
+            (module/'config/font_runtime_legacy_v14_4.conf').write_text('font=default\n')
+            shutil.copyfile(ROOT/'service.sh', module/'service.sh')
+            (d/'boot').write_text('0\n')
+            (d/'getprop').write_text('#!/bin/sh\ncat "$FIXTURE/boot"\n')
+            (d/'sleep').write_text('#!/bin/sh\necho 1 > "$FIXTURE/boot"\n')
+            (d/'getprop').chmod(0o755); (d/'sleep').chmod(0o755)
+            (module/'common/retire_global_weight.sh').write_text('#!/bin/sh\n[ "$(getprop sys.boot_completed)" = 1 ] || exit 1\ntouch "$FIXTURE/retired"\n')
+            env={**os.environ,'PATH':str(d)+':'+os.environ['PATH'],'FIXTURE':str(d)}
+            subprocess.run(['sh',str(module/'service.sh')],env=env,capture_output=True,timeout=3,check=True)
+            self.assertTrue((d/'retired').exists(), 'legacy route never retired owned global weight after boot')
+
     def test_defaults_are_bounded_and_no_prewarm(self):
         s=(ROOT/'common/google_font_provider_service.sh').read_text()
         self.assertIn('LUOSHU_GOOGLE_FONT_WATCH_CYCLES:-0',s)

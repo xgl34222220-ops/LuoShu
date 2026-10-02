@@ -6,7 +6,6 @@
 set +e
 MODDIR="${0%/*}"
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
-[ ! -f "$MODDIR/common/retire_global_weight.sh" ] || sh "$MODDIR/common/retire_global_weight.sh" "$MODDIR"
 V4_SERVICE="$MODDIR/.luoshu-runtime/core/service.sh"
 
 # Start from the real entry point before either service route is selected. The
@@ -38,6 +37,9 @@ fi
         _wait=$((_wait + 1))
     done
     [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ] || exit 0
+
+    # SettingsProvider must be ready before the one-time owned-value retirement.
+    [ ! -f "$MODDIR/common/retire_global_weight.sh" ] || sh "$MODDIR/common/retire_global_weight.sh" "$MODDIR"
 
     _active=$(sed -n '1p' "$MODDIR/config/active_font.conf" 2>/dev/null | tr -d '\r\n')
     [ -n "$_active" ] || _active=$(sed -n 's/^font=//p' "$LEGACY_MODE" 2>/dev/null | head -n1 | tr -d '\r\n')

@@ -32,14 +32,23 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: LuoShu-Test-Candidate
-          run-id: 37010744032
+          run-id: 37015312589
           github-token: ${{ github.token }}
           path: candidate-artifact
       - name: Verify exploratory candidate identity
         shell: bash
         run: |
-          echo '978adbb8bde77173822330d53b7aed7f4396c4dbaaeb57b949b627ef0ecb43b7  candidate-artifact/LuoShu-v1.1.1.zip' | sha256sum -c -
-          echo 'Exploratory candidate commit: 7d417af120aa0cb0eaa52e6b5926e088f8bbddc4' | tee root-gate-output/candidate-source.txt
+          echo '7a35afe21c860c24e8d7fbef83ec3e8e8c57f3142cabe950768ee922767e7621  candidate-artifact/LuoShu-v1.1.1.zip' | sha256sum -c -
+          echo 'Exploratory candidate commit: d504e8cfcef676ed6ea2d720669837f70fecf2b7' | tee root-gate-output/candidate-source.txt
+      - name: Fetch authorized official Magisk for this disposable AVD
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/luoshu-magisk"
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/luoshu-magisk/Magisk-v30.7.apk" https://github.com/topjohnwu/Magisk/releases/download/v30.7/Magisk-v30.7.apk
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/luoshu-magisk/host_patch.sh" https://raw.githubusercontent.com/topjohnwu/Magisk/v30.7/scripts/host_patch.sh
+          echo "e0d32d2123532860f97123d927b1bb86c4e08e6fd8a48bfc6b5bee0afae9ebd5  $RUNNER_TEMP/luoshu-magisk/Magisk-v30.7.apk" | sha256sum -c -
+          echo "1720669a684f75fe90a7318868dd4528f2e736a5ad5363f92a3c51c848d79703  $RUNNER_TEMP/luoshu-magisk/host_patch.sh" | sha256sum -c -
       - name: Record KVM access and verify existing sudo access
         shell: bash
         run: |
@@ -75,14 +84,14 @@ jobs:
           export HOME="$RUNNER_TEMP/luoshu-emulator-home"
           export ANDROID_AVD_HOME="$HOME/avd"
           mkdir -p "$ANDROID_AVD_HOME"
-          printf 'no\n' | "$AVDMANAGER" create avd --force --name luoshu_gate --package 'system-images;android-35;google_apis;x86_64' --device pixel_7_pro
-          printf '\nhw.ramSize=2048\nvm.heapSize=512\n' >> "$ANDROID_AVD_HOME/luoshu_gate.avd/config.ini"
+          printf 'no\n' | "$AVDMANAGER" create avd --force --name luoshu_gate --package 'system-images;android-35;google_apis;x86_64' --device pixel_2
+          printf '\nhw.ramSize=3072\nvm.heapSize=512\n' >> "$ANDROID_AVD_HOME/luoshu_gate.avd/config.ini"
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "HOME=$HOME" >> "$GITHUB_ENV"
           echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
       - name: Qualify original ARM64 runtime under one supervised emulator
         shell: bash
-        run: python3 tests/android-root-gate/run_emulator.py --module-zip "$RUNNER_TEMP/LuoShu-v1.1.1.zip" --candidate-zip candidate-artifact/LuoShu-v1.1.1.zip --output root-gate-output
+        run: python3 tests/android-root-gate/run_emulator.py --module-zip "$RUNNER_TEMP/LuoShu-v1.1.1.zip" --candidate-zip candidate-artifact/LuoShu-v1.1.1.zip --magisk-apk "$RUNNER_TEMP/luoshu-magisk/Magisk-v30.7.apk" --magisk-patch-script "$RUNNER_TEMP/luoshu-magisk/host_patch.sh" --output root-gate-output
       - name: Preserve qualification evidence, including unsupported failures
         if: always()
         uses: actions/upload-artifact@v4

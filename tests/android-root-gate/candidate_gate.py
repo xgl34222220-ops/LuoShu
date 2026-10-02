@@ -8,10 +8,13 @@ import argparse
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import shlex
 import subprocess
 import tempfile
+import time
+import xml.etree.ElementTree as ET
 import zipfile
 
 from probe import BASELINE_SHA256
@@ -36,6 +39,22 @@ def extract(archive, dest):
             target.write_bytes(z.read(info))
             if info.external_attr >> 16 & 0o111:
                 target.chmod(0o755)
+
+
+def app_launch_result(package, launch_output, logcat, hierarchy, process_alive):
+    if re.search(r'Process: ' + re.escape(package) + r', PID:', logcat) and 'FATAL EXCEPTION:' in logcat:
+        return {'result': 'FAIL', 'reason': 'Actual candidate App fatal exception in logcat'}
+    if "isn't responding" in hierarchy or 'is not responding' in hierarchy:
+        return {'result': 'BLOCKED', 'reason': 'Android system/App ANR dialog prevents UI validation'}
+    if not process_alive:
+        return {'result': 'FAIL', 'reason': 'Candidate process exited after launch'}
+    if 'Status: ok' not in launch_output:
+        return {'result': 'FAIL', 'reason': 'Android activity launch failed'}
+    if 'permissioncontroller' in hierarchy:
+        return {'result': 'BLOCKED', 'reason': 'Permission dialog, not candidate content, is visible'}
+    if package not in hierarchy:
+        return {'result': 'BLOCKED', 'reason': 'Candidate UI is not visible'}
+    return {'result': 'PASS', 'note': 'App launch only; not Root access or usable font-library performance'}
 
 
 def main():
@@ -66,6 +85,12 @@ def main():
         report['selinux'] = run(['shell', 'getenforce']).stdout.strip()
         report['root_manager_probe'] = run(['shell', 'command -v su; command -v magisk; '
             'command -v ksud; ls -ld /data/adb/modules /data/adb/magisk /data/adb/ksu 2>/dev/null'], required=False).stdout
+        su_help = run(['shell', '/system/xbin/su --help'], required=False)
+        su_command = run(['shell', '/system/xbin/su -c id'], required=False)
+        report['su_cli_probe'] = {'caller': 'adb root, not App UID',
+            'help_exit': su_help.returncode, 'help': su_help.stdout + su_help.stderr,
+            'root_shell_syntax_exit': su_command.returncode,
+            'root_shell_syntax_output': su_command.stdout + su_command.stderr}
         with tempfile.TemporaryDirectory(prefix='luoshu-candidate-') as tmp:
             root = Path(tmp)
             for name, archive in [('baseline', args.baseline_zip), ('candidate', args.candidate_zip)]:
@@ -104,18 +129,42 @@ def main():
             run(['install', '-r', str(apk)], timeout=120)
             package = 'io.github.xgl34222220.luoshu.stabletest'
             run(['shell', 'am force-stop ' + package])
+            run(['logcat', '-c'])
             launch = run(['shell', 'am start -W -n ' + package + '/io.github.xgl34222220.luoshu.MainActivity'], timeout=60, required=False)
             report['checks']['app_launch_only'] = {'result': 'PASS' if launch.returncode == 0 and 'Status: ok' in launch.stdout else 'FAIL',
                 'note': 'Launch time is not usable font-library performance', 'am_start_output': launch.stdout}
             run(['shell', 'uiautomator dump ' + DEVICE + '/app.xml'], timeout=45, required=False)
             hierarchy = run(['shell', 'cat ' + DEVICE + '/app.xml'], required=False)
+            # Decline only the nonessential notification request in this fresh
+            # disposable test installation. Never grant unexpected permissions.
+            if ('permissioncontroller' in hierarchy.stdout and
+                    ('notification' in hierarchy.stdout.lower() or '通知' in hierarchy.stdout)):
+                xml = ET.fromstring(hierarchy.stdout)
+                for node in xml.iter('node'):
+                    if node.get('resource-id', '').endswith('/permission_deny_button'):
+                        bounds = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.get('bounds', ''))
+                        if bounds:
+                            x1, y1, x2, y2 = map(int, bounds.groups())
+                            run(['shell', f'input tap {(x1+x2)//2} {(y1+y2)//2}'])
+                            time.sleep(2)
+                            run(['shell', 'uiautomator dump ' + DEVICE + '/app.xml'], timeout=45, required=False)
+                            hierarchy = run(['shell', 'cat ' + DEVICE + '/app.xml'], required=False)
+                        break
             (args.output / 'candidate-app.xml').write_text(hierarchy.stdout)
             logs = run(['logcat', '-d', '-s', 'LuoShuStartup:I', 'AndroidRuntime:E', '*:S'], required=False)
             (args.output / 'candidate-app.log').write_text(logs.stdout)
+            alive = run(['shell', 'pidof ' + package], required=False)
+            report['checks']['app_launch_only'] = app_launch_result(
+                package, launch.stdout, logs.stdout, hierarchy.stdout, bool(alive.stdout.strip()))
+            report['checks']['app_launch_only']['am_start_output'] = launch.stdout
             screenshot = subprocess.run(adb + ['exec-out', 'screencap', '-p'], capture_output=True, timeout=30)
             if screenshot.returncode == 0:
                 (args.output / 'candidate-app.png').write_bytes(screenshot.stdout)
-        report['checks']['app_uid_to_su'] = {'result': 'BLOCKED', 'reason': 'Not proven from the actual App UID/domain; adb root is not App root'}
+        report['checks']['app_uid_to_su'] = {'result': 'BLOCKED',
+            'reason': ('Installed su rejects the actual RootShell su -c syntax even from adb root'
+                       if report['su_cli_probe']['root_shell_syntax_exit'] != 0
+                       else 'su syntax works from adb root; actual App UID/domain grant still unproven'),
+            'note': 'No shell-UID result is treated as an App root grant'}
         report['checks']['module_install_boot_hooks'] = {'result': 'BLOCKED', 'reason': 'No supported module-manager installation was performed'}
         report['checks']['font_mount_rollback_reboot'] = {'result': 'BLOCKED', 'reason': 'Original module lifecycle not yet installed/validated'}
         report['checks']['cold_warm_large_library'] = {'result': 'BLOCKED', 'reason': 'Root data access and synthetic inventory readiness not yet proven'}
