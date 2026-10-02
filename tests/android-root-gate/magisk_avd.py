@@ -96,11 +96,102 @@ def verify(adb, output):
         version = run(shlex.quote(magisk) + ' -v')
         if '30.7' not in version:
             raise RuntimeError('Unexpected Magisk runtime version')
-        uid = run('su -c id -u')
+        env_state = run('if [ -s /data/adb/magisk/util_functions.sh ] && [ -x /data/adb/magisk/busybox ]; then echo ready; else echo missing; fi')
+        report['environment_before_setup'] = env_state
+        if env_state != 'ready':
+            complete_setup(adb, output)
+            report['post_setup_processes'] = run('ps -A -o PID,PPID,NAME,ARGS')
+            if not re.search(r'^\s*\d+\s+\d+\s+magiskd(?:\s|$)', report['post_setup_processes'], re.M):
+                raise RuntimeError('Magisk daemon missing after official setup reboot')
+            if run('getenforce') != 'Enforcing':
+                raise RuntimeError('SELinux invariant failed after official setup')
+        run('test -s /data/adb/magisk/util_functions.sh && test -x /data/adb/magisk/busybox')
+        report['plain_adb_su'] = run('command -v su; su -c id -u', required=False)
+        # Use the existing real Magisk client for admin/module checks. This does
+        # not alter PATH or claim that the App can resolve or use this client.
+        uid = run(shlex.quote(magisk) + " su -c 'id -u'")
         if uid != '0':
             raise RuntimeError('Magisk su shell capability failed')
         report.update(result='PASS', magisk=magisk, version=version, shell_root=True,
-                      app_root='NOT_GRANTED_OR_PROVEN')
+                      app_root='NOT_GRANTED_OR_PROVEN', module_boot_hooks='Pending real module lifecycle test')
         return magisk
     finally:
         (Path(output) / 'magisk-boot.json').write_text(json.dumps(report, indent=2) + '\n')
+
+
+def reviewed_setup_prompt(text):
+    value = text.lower()
+    return ('requires additional setup' in value and
+            'your device needs additional setup for magisk to work properly. do you want to proceed and reboot?' in value)
+
+
+def complete_setup(adb, output):
+    """Complete only the official manager's expected additional-setup dialog."""
+    from adb_ui import dump_ui
+    from adb_utils import ensure_root
+    import time
+    import xml.etree.ElementTree as ET
+    report = {'result': 'FAIL', 'steps': []}
+    output = Path(output)
+    target = [adb, '-s', 'emulator-5554']
+    def run(args, required=True, timeout=60):
+        try:
+            p = subprocess.run(target + args, capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            report['steps'].append({'argv': args, 'result': 'TRANSPORT_TIMEOUT'})
+            if required:
+                raise
+            return ''
+        report['steps'].append({'argv': args, 'exit': p.returncode, 'stdout': p.stdout, 'stderr': p.stderr})
+        if required and p.returncode:
+            raise RuntimeError('Official Magisk manager setup failed: ' + str(args))
+        return p.stdout.strip()
+    def snapshot(label):
+        text = dump_ui(target, '/data/local/tmp/luoshu-magisk-ui', report['steps'])
+        (output / (label + '.xml')).write_text(text)
+        p = subprocess.run(target + ['exec-out', 'screencap', '-p'], capture_output=True, timeout=30)
+        if p.returncode == 0:
+            (output / (label + '.png')).write_bytes(p.stdout)
+        return ET.fromstring(text)
+    def tap(node):
+        bounds = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.get('bounds', ''))
+        if not bounds:
+            raise RuntimeError('Expected setup control has no verified screen bounds')
+        x1, y1, x2, y2 = map(int, bounds.groups())
+        run(['shell', f'input tap {(x1+x2)//2} {(y1+y2)//2}'])
+    try:
+        before = run(['shell', 'cat /proc/sys/kernel/random/boot_id'])
+        run(['shell', 'am start -W -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p com.topjohnwu.magisk'])
+        tree = snapshot('magisk-manager-before')
+        texts = ' '.join(n.get('text', '') for n in tree.iter('node'))
+        if 'notification' in texts.lower():
+            deny = [n for n in tree.iter('node') if n.get('resource-id', '').endswith('/permission_deny_button')]
+            if deny:
+                tap(deny[0]); time.sleep(1)
+                tree = snapshot('magisk-manager-notifications-declined')
+                texts = ' '.join(n.get('text', '') for n in tree.iter('node'))
+        if not reviewed_setup_prompt(texts):
+            raise RuntimeError('Exact reviewed setup-and-reboot prompt not observed; no other control accepted')
+        buttons = [n for n in tree.iter('node') if n.get('text', '').strip().lower() == 'ok'
+                   and n.get('package') in ('com.topjohnwu.magisk', 'android') and n.get('enabled') != 'false']
+        if len(buttons) != 1:
+            raise RuntimeError('Official setup confirmation is not unique')
+        report['accepted_dialog_text'] = texts
+        tap(buttons[0])
+        end = time.monotonic() + 240
+        while time.monotonic() < end:
+            boot = run(['shell', 'cat /proc/sys/kernel/random/boot_id'], required=False, timeout=15)
+            if re.fullmatch(r'[0-9a-f-]{36}', boot) and boot != before and run(['shell', 'getprop sys.boot_completed'], required=False, timeout=15) == '1':
+                ensure_root(target, report['steps'])
+                if run(['shell', 'getenforce']) != 'Enforcing':
+                    raise RuntimeError('SELinux changed during official setup')
+                report.update(result='PASS', boot_id_before=before, boot_id_after=boot)
+                return
+            time.sleep(2)
+        snapshot('magisk-manager-setup-timeout')
+        raise RuntimeError('Official additional setup did not produce a verified completed reboot')
+    except Exception as error:
+        report['error'] = str(error)
+        raise
+    finally:
+        (output / 'magisk-manager-setup.json').write_text(json.dumps(report, indent=2) + '\n')
