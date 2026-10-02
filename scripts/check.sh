@@ -335,6 +335,7 @@ python3 "$ROOT/scripts/stable_cleanup_policy_test.py"
 
 python3 "$ROOT/scripts/task_scope_test.py"
 python3 "$ROOT/scripts/font_coverage_fields_test.py"
+python3 "$ROOT/scripts/font_switch_input_test.py"
 python3 "$ROOT/scripts/font_inventory_batch_test.py"
 python3 "$ROOT/scripts/font_request_scope_test.py"
 

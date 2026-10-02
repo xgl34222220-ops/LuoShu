@@ -214,6 +214,11 @@ os._exit({exitcode})
         common = self.module / 'common'
         common.mkdir()
         (common / 'background_task.sh').write_text((ROOT / 'common/background_task.sh').read_text())
+        for name in ('font_switch_input.sh', 'font_switch_input.py', 'font_inventory_batch.py', 'font_coverage_fields.py'):
+            (common / name).write_text((ROOT / 'common' / name).read_text())
+        public = self.root / 'public'
+        (public / 'fonts').mkdir(parents=True)
+        (public / 'fonts/test-font.ttf').write_bytes(b'\0\1\0\0' + b'x' * 4096)
         helper = common / 'task_scope.py'
         helper.write_text(HELPER.read_text().replace('def pidfd_open(pid):\n',
                           "def pidfd_open(pid):\n    raise OSError(errno.ENOSYS, 'test kernel')\n"))
@@ -229,14 +234,15 @@ os._exit({exitcode})
         code = f"import os,time;from pathlib import Path;Path({str(generator)!r}).write_text(str(os.getpid()));time.sleep(60)"
         import shlex
         manager.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} -c {shlex.quote(code)}\n')
-        env = dict(self.env, LUOSHU_TASK_HELPER=str(helper), LUOSHU_FONT_MANAGER=str(manager),
-                   LUOSHU_SWITCH_TIMEOUT_SECONDS='30', PATH=str(binary) + ':' + self.env['PATH'])
+        env = dict(self.env, LUOSHU_PUBLIC_DIR=str(public), LUOSHU_TASK_HELPER=str(helper), LUOSHU_FONT_MANAGER=str(manager),
+                   LUOSHU_SWITCH_TIMEOUT_SECONDS='30', LUOSHU_TASK_TIMEOUT_SECONDS='60',
+                   PATH=str(binary) + ':' + self.env['PATH'])
         started = subprocess.run(['sh', str(ROOT / 'common/font_switch_task.sh'), 'start', 'test-font'],
                                  env=env, text=True, capture_output=True, timeout=5)
         self.assertIn('"status":"ok"', started.stdout, started.stderr)
         pid = int(wait_for(lambda: scope.read(generator)))
         self.extra_pids.append(pid)
-        wait_for(lambda: not Path(str(self.pidfile) + '.identity').exists(), timeout=10)
+        wait_for(lambda: not Path(str(self.pidfile) + '.identity').exists(), timeout=25)
         self.assertFalse(alive(pid))
         self.assertIn('超过 30 秒', scope.read(self.config / 'switch_task.conf'))
 

@@ -187,7 +187,8 @@ progress_message() {
 
 run_bounded() {
     _font="$1"; _output="$2"; _task="$3"; _started="$4"; _progress_file="$5"
-    LUOSHU_SWITCH_PROGRESS_FILE="$_progress_file" sh "$MANAGER" action switch "$_font" > "$_output" 2>&1 &
+    LUOSHU_SWITCH_TASK_ID="$_task" LUOSHU_SWITCH_PROGRESS_FILE="$_progress_file" sh "$MODDIR/common/font_switch_input.sh" \
+        run "$_font" "${_selection_fingerprint:-}" > "$_output" 2>&1 &
     _child=$!; _switch_child=$_child; _switch_child_start=$(luoshu_pid_start "$_child" 2>/dev/null); _elapsed=0; _next_heartbeat=0
     while [ -n "$_switch_child_start" ] && [ "$(luoshu_pid_start "$_child" 2>/dev/null)" = "$_switch_child_start" ]; do
         if [ "$_elapsed" -ge "$TIMEOUT_SECONDS" ]; then
@@ -229,6 +230,7 @@ worker_signal_exit() {
 
 run_worker() {
     _task="$1"; _font="$2"; _started="$3"
+    _selection_fingerprint="${4:-}"
     _worker_task=$_task
     _output="${TASK_FILE}.output.${_task}"
     _progress="${TASK_FILE}.progress.${_task}"
@@ -274,6 +276,7 @@ run_worker() {
 
 start_task() {
     _font="$1"
+    _selection_fingerprint="${2:-}"
     [ -n "$_font" ] || { printf '{"status":"error","message":"未指定字体"}\n'; return 0; }
     [ -f "$MANAGER" ] || { printf '{"status":"error","message":"字体管理器不存在"}\n'; return 0; }
     start_lock_acquire
@@ -314,7 +317,7 @@ start_task() {
         LUOSHU_SWITCH_HEARTBEAT_INTERVAL="$HEARTBEAT_INTERVAL" LUOSHU_SWITCH_WORKER_PID_FILE="$WORKER_PID_FILE"
 
     if type luoshu_start_detached >/dev/null 2>&1; then
-        luoshu_start_detached "$WORKER_PID_FILE" "$_task" "$LOG_FILE" sh "$0" run "$_task" "$_font" "$_started"
+        luoshu_start_detached "$WORKER_PID_FILE" "$_task" "$LOG_FILE" sh "$0" run "$_task" "$_font" "$_started" "$_selection_fingerprint"
         _start_rc=$?
         if [ "$_start_rc" -ne 0 ]; then
             write_task "$_task" failed "$_font" '无法启动独立字体切换任务' "$_started" "$(date +%s 2>/dev/null || echo 0)" '' '' '' 0 '' false 100
@@ -322,7 +325,7 @@ start_task() {
         fi
         _worker=$(head -n1 "$WORKER_PID_FILE" 2>/dev/null)
     else
-        ( trap '' HUP; exec sh "$0" run "$_task" "$_font" "$_started" ) </dev/null >> "$LOG_FILE" 2>&1 &
+        ( trap '' HUP; exec sh "$0" run "$_task" "$_font" "$_started" "$_selection_fingerprint" ) </dev/null >> "$LOG_FILE" 2>&1 &
         _worker=$!
     fi
     case "$_worker" in ''|*[!0-9]*) _worker='' ;; esac
@@ -353,10 +356,10 @@ status_task() {
 }
 
 case "${1:-status}" in
-    start) start_task "${2:-}" ;;
+    start) start_task "${2:-}" "${3:-}" ;;
     status) status_task "${2:-}" ;;
     reconcile) reconcile_task ;;
-    run) run_worker "${2:-}" "${3:-}" "${4:-0}" ;;
+    run) run_worker "${2:-}" "${3:-}" "${4:-0}" "${5:-}" ;;
     *) printf '{"status":"error","message":"未知切换命令"}\n' ;;
 esac
 exit 0

@@ -516,44 +516,20 @@ internal class LuoShuViewModel(application: Application) : AndroidViewModel(appl
         }
         if (operationBusy || mixState.busy) return
         operationBusy = true
-        operationMessage = if (fontId == "default") "正在准备恢复系统字体…" else "正在验证并应用字体…"
+        operationMessage = if (fontId == "default") "正在准备恢复系统字体…" else "正在预检并提交字体任务…"
         viewModelScope.launch {
             try {
-                if (fontId != "default") {
-                    val validation = RootShell.exec(
-                        "sh ${RootShell.quote(bridge)} validate ${RootShell.quote(fontId)}",
-                        timeoutMs = 35_000L,
-                    )
-                    if (validation.code != 0) error(validation.stderr.ifBlank { "字体验证失败" })
-                    val validationJson = firstJson(validation.stdout)
-                    if (validationJson.optString("status") != "ok" ||
-                        validationJson.optJSONObject("data")?.optBoolean("valid", true) == false
-                    ) {
-                        error(
-                            validationJson.optString(
-                                "message",
-                                validationJson.optJSONObject("data")?.optString("error", "字体文件不可用")
-                                    ?: "字体文件不可用",
-                            ),
-                        )
-                    }
-                }
-
-                val start = RootShell.exec(
-                    "sh ${RootShell.quote(bridge)} switch_start ${RootShell.quote(fontId)}",
-                    timeoutMs = 20_000L,
+                val taskId = admitFontApply(
+                    bridge, fontId, RootShell::fontPreflight, RootShell::exec,
+                    FontLoadDiagnostics::applyRequest,
                 )
-                if (start.code != 0) error(start.stderr.ifBlank { "无法启动字体切换" })
-                val startJson = firstJson(start.stdout)
-                if (startJson.optString("status") != "ok") error(startJson.optString("message", "无法启动字体切换"))
-                val taskId = startJson.optJSONObject("data")?.optString("task").orEmpty()
-                if (taskId.isBlank()) error("字体任务 ID 缺失")
                 watchSwitchTask(taskId, fontId)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
                 operationMessage = error.message ?: "字体应用失败"
                 snapshot = snapshot.copy(taskState = "failed", taskMessage = operationMessage)
+            } finally {
                 operationBusy = false
             }
         }

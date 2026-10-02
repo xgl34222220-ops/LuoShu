@@ -59,6 +59,17 @@ internal object RootShell {
         }
     }
 
+    suspend fun fontPreflight(fontId: String): ShellResult = try {
+        val command = "sh '/data/adb/modules/LuoShu/common/font_switch_input.sh' request ${quote(fontId)}"
+        // 29 s work + 6 s owned cleanup fits the existing 35 s foreground budget.
+        executeProcess(listOf("su", "-c", command), 35_000L,
+            keepStdinOpen = true, cleanupGraceMs = 6_000L)
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (error: Exception) {
+        ShellResult(127, "", error.message.orEmpty().ifBlank { "无法预检字体" })
+    }
+
     fun quote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 }
 

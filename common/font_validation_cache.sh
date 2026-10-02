@@ -115,7 +115,10 @@ luoshu_font_validation_cache_store() {
 # fast: the switch process repeats the full validation inside the transaction guard. Detect the
 # preflight command from the current process command line; tests may use the explicit override.
 luoshu_font_validation_is_preflight() {
-    [ "${LUOSHU_VALIDATION_MODE:-}" = preflight ] && return 0
+    case "${LUOSHU_VALIDATION_MODE:-}" in
+        preflight) return 0 ;;
+        full) return 1 ;;
+    esac
     [ -r "/proc/$$/cmdline" ] || return 1
     _lfvip_cmd=$(tr '\000' ' ' < "/proc/$$/cmdline" 2>/dev/null)
     case "$_lfvip_cmd" in

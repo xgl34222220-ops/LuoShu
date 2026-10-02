@@ -73,9 +73,19 @@ class SwitchFailurePathTest(unittest.TestCase):
         (self.module / 'config').mkdir()
         (self.module / 'logs').mkdir()
         shutil.copyfile(ROOT / 'common/background_task.sh', self.module / 'common/background_task.sh')
+        for name in ('font_switch_input.sh', 'font_switch_input.py', 'font_inventory_batch.py', 'font_coverage_fields.py'):
+            shutil.copyfile(ROOT / 'common' / name, self.module / 'common' / name)
+        public = self.root / 'public'
+        (public / 'fonts').mkdir(parents=True)
+        (public / 'fonts/test-font.ttf').write_bytes(b'\0\1\0\0' + b'x' * 4096)
+        workspace = self.module / 'cache/tasks/failure-token'
+        workspace.mkdir(parents=True)
+        (workspace / '.luoshu-task-owner').write_text('failure-token')
         self.output = self.root / 'manager-output'
         self.manager = self.root / 'manager.sh'
-        self.manager.write_text('#!/bin/sh\ncat "$ERROR_RESPONSE"\nexit 7\n')
+        self.manager.write_text('#!/bin/sh\nif [ "$2" = validate ]; then '
+                                'printf \'%s\\n\' \'{"status":"ok","data":{"valid":true,"cached":false}}\'; '
+                                'exit 0; fi\ncat "$ERROR_RESPONSE"\nexit 7\n')
         binary = self.root / 'bin'
         binary.mkdir()
         sed = binary / 'sed'
@@ -88,6 +98,8 @@ class SwitchFailurePathTest(unittest.TestCase):
         sed.chmod(0o755)
         self.marker = self.root / 'forbidden-sed'
         self.env = dict(os.environ, MODDIR=str(self.module),
+                        LUOSHU_PUBLIC_DIR=str(public), LUOSHU_TASK_SCOPE='failure-token',
+                        LUOSHU_TASK_WORK_DIR=str(workspace),
                         LUOSHU_FONT_MANAGER=str(self.manager), LUOSHU_TASK_HELPER=str(HELPER),
                         LUOSHU_SWITCH_TASK_FILE=str(self.module / 'config/switch_task.conf'),
                         LUOSHU_SWITCH_WORKER_PID_FILE=str(self.module / 'config/switch_task_worker.pid'),

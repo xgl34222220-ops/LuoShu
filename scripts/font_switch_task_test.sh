@@ -15,10 +15,24 @@ export LUOSHU_SWITCH_WORKER_PID_FILE="$MODDIR/config/switch_task_worker.pid"
 mkdir -p "$MODDIR/common" "$MODDIR/config" "$MODDIR/logs"
 cp "$ROOT/common/background_task.sh" "$MODDIR/common/background_task.sh"
 cp "$ROOT/common/util_functions.sh" "$ROOT/common/util_functions_core.sh" "$MODDIR/common/"
+cp "$ROOT/common/font_switch_input.sh" "$ROOT/common/font_switch_input.py" \
+   "$ROOT/common/font_inventory_batch.py" "$ROOT/common/font_coverage_fields.py" "$MODDIR/common/"
+export LUOSHU_PUBLIC_DIR="$TMP/public"
+mkdir -p "$LUOSHU_PUBLIC_DIR/fonts"
+python3 - "$LUOSHU_PUBLIC_DIR/fonts" <<'PY'
+from pathlib import Path
+import sys
+for name in ('good', 'reused', 'bad', 'slow', 'hold'):
+    (Path(sys.argv[1]) / (name + '.ttf')).write_bytes(b'\0\1\0\0' + b'x' * 4096)
+PY
 
 MANAGER="$TMP/fake-manager.sh"
 cat > "$MANAGER" <<'EOF_MANAGER'
 #!/bin/sh
+if [ "${2:-}" = validate ]; then
+    printf '%s\n' '{"status":"ok","data":{"valid":true,"cached":false}}'
+    exit 0
+fi
 case "${3:-}" in
     good) printf '%s\n' '{"status":"ok","data":{"font":"good"}}' ;;
     reused) printf '%s\n' '{"status":"ok","data":{"font":"reused","reused":true}}' ;;

@@ -88,6 +88,8 @@ common/font_runtime_policy.sh
 common/font_safety.sh
 common/font_validation_cache.sh
 common/font_switch_task.sh
+common/font_switch_input.py
+common/font_switch_input.sh
 common/hyperos_global.sh
 common/hyperos_stage_complete.sh
 common/hyperos_metrics_batch.py
