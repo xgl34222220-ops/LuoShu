@@ -19,6 +19,8 @@ from adb_utils import ensure_root
 
 PACKAGE = 'io.github.xgl34222220.luoshu.stabletest'
 MODULE = '/data/adb/modules/LuoShu'
+# Existing private_payload.sh partition contract; absent directories are recorded, not invented.
+FONT_PARTITIONS = 'system system_ext product vendor odm oem my_product my_engineering my_company my_preload my_region my_stock oplus_product oplus_engineering oplus_version oplus_region mi_ext cust hw_product'.split()
 
 
 def resolve_authorized_uid(packages):
@@ -91,7 +93,8 @@ def run_gate(adb, magisk, baseline, candidate, output):
             time.sleep(1)
         raise RuntimeError('Font switch task deadline exceeded')
     def font_hashes():
-        text = root(r"find /system/fonts -maxdepth 1 \( -type f -o -type l \) -exec sha256sum {} \;")
+        directories = ' '.join('/' + part + '/fonts' for part in FONT_PARTITIONS)
+        text = root('for d in ' + directories + r'; do if [ -d "$d" ]; then find "$d" -maxdepth 1 \( -type f -o -type l \) \( -iname "*.ttf" -o -iname "*.otf" -o -iname "*.ttc" \) -exec sha256sum {} \; || exit 1; fi; done')
         values = {}
         for line in text.splitlines():
             parts = line.split(None, 1)
@@ -110,19 +113,29 @@ def run_gate(adb, magisk, baseline, candidate, output):
         active = root('cat ' + MODULE + '/config/active_font.conf').strip()
         if active != font:
             raise RuntimeError('Active font does not match exact requested font')
-        payload = root('find -L ' + MODULE + '/.luoshu-payload/system/fonts -maxdepth 1 -type f -exec sha256sum {} \\;')
-        payload_hashes = {line.split(None, 1)[1].rsplit('/', 1)[-1]: line.split()[0]
+        payload_prefix = MODULE + '/.luoshu-payload'
+        payload = root('find -L ' + payload_prefix + r' -type f \( -iname "*.ttf" -o -iname "*.otf" -o -iname "*.ttc" \) -exec sha256sum {} \;')
+        payload_hashes = {line.split(None, 1)[1].removeprefix(payload_prefix): line.split()[0]
                           for line in payload.splitlines() if re.match(r'^[0-9a-f]{64}  ', line)}
         for path in changed:
-            if payload_hashes.get(path.rsplit('/', 1)[-1]) != live[path]:
+            if payload_hashes.get(path) != live[path]:
                 raise RuntimeError('Live target differs from committed payload: ' + path)
         mounts = root('cat /proc/1/mountinfo')
-        if '/system/fonts' not in mounts:
-            raise RuntimeError('No real system-font mount evidence')
-        return live, {'font': active, 'changed': changed, 'payload_hashes': payload_hashes, 'mountinfo': mounts}
+        mount_records = [line.split() for line in mounts.splitlines() if ' - ' in line]
+        proofs = {}
+        for path in changed:
+            canonical = root('readlink -f ' + shlex.quote(path))
+            matching = [row for row in mount_records if len(row) > 5 and
+                        (row[4] == canonical or canonical.startswith(row[4].rstrip('/') + '/')) and
+                        '/adb/modules/LuoShu/.luoshu-payload/' in row[3]]
+            if not matching:
+                raise RuntimeError('Changed font lacks exact module-payload mount provenance: ' + path)
+            proofs[path] = {'canonical': canonical, 'mount_records': matching}
+        return live, {'font': active, 'changed': changed, 'payload_hashes': payload_hashes, 'mount_proofs': proofs, 'mountinfo': mounts}
     try:
         if shell('getprop ro.kernel.qemu') != '1' or shell('getenforce') != 'Enforcing':
             raise RuntimeError('Only authorized Enforcing disposable AVD is supported')
+        report['font_directories'] = root('for d in ' + ' '.join('/' + part + '/fonts' for part in FONT_PARTITIONS) + '; do if [ -d "$d" ]; then echo PRESENT:$d; else echo ABSENT:$d; fi; done')
         original_fonts = font_hashes()
         for label, archive in [('baseline', baseline), ('candidate', candidate)]:
             cycle = {'label': label, 'result': 'FAIL', 'zip_sha256': hashlib.sha256(Path(archive).read_bytes()).hexdigest()}
@@ -162,7 +175,7 @@ def run_gate(adb, magisk, baseline, candidate, output):
                 root('rm /sdcard/LuoShu/fonts/LuoShuBrokenGate.ttf')
                 if font_hashes() != mounted_fonts or root('cat ' + MODULE + '/config/active_font.conf') != active_before_failure:
                     raise RuntimeError('Failed switch changed prior active font or live mounted bytes')
-                if label == 'candidate':
+                if label in ('baseline', 'candidate'):
                     from commit_fault import mv_wrapper
                     fault_dir = '/data/local/tmp/luoshu-commit-fault-' + str(time.monotonic_ns())
                     marker = fault_dir + '/hit'
@@ -225,6 +238,15 @@ def run_gate(adb, magisk, baseline, candidate, output):
         report['magisk_task_scope'] = json.loads(root('cat /data/local/tmp/luoshu-module-scope.json'))
         if report['magisk_task_scope'].get('result') != 'PASS':
             raise RuntimeError('Installed candidate task ownership failed under Magisk')
+        request_script = Path(__file__).with_name('font_request_scope_device.py')
+        command(['push', str(request_script), '/data/local/tmp/luoshu-request-scope.py'])
+        root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
+             f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload TMPDIR=/data/local/tmp '
+             f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-request-scope.py '
+             f'--helper {MODULE}/common/font_request_scope.py --output /data/local/tmp/luoshu-request-scope.json', timeout=360, required=False)
+        report['magisk_request_scope'] = json.loads(root('cat /data/local/tmp/luoshu-request-scope.json'))
+        if report['magisk_request_scope'].get('result') != 'PASS':
+            raise RuntimeError('Installed synchronous request lease cleanup failed under Magisk')
         with zipfile.ZipFile(candidate) as archive:
             apk_bytes = archive.read('bundled/LuoShu-App.apk')
             expected_apk = hashlib.sha256(apk_bytes).hexdigest()
@@ -264,14 +286,47 @@ def run_gate(adb, magisk, baseline, candidate, output):
         report['app_root'] = 'GRANTED_NOT_PROVEN'
         from app_library_gate import measure
         report['library_timings'] = []
+        report['fixture_inventory'] = []
+        with tempfile.TemporaryDirectory(prefix='luoshu-synthetic-inventory-') as temp:
+            staging = Path(temp)
+            templates = []
+            for index in (0, 1):
+                source = f'/sdcard/LuoShu/fonts/LuoShuSyntheticGate{index:04d}.ttf'
+                target = staging / f'template-{index}.ttf'
+                command(['pull', source, str(target)])
+                data = target.read_bytes()
+                if len(data) <= 4096 or data[:4] != b'\x00\x01\x00\x00':
+                    raise RuntimeError('Original Android-generated TTF template is not valid fixture bytes')
+                if root('sha256sum ' + source).split()[0] != hashlib.sha256(data).hexdigest():
+                    raise RuntimeError('Pulled synthetic fixture changed in transit')
+                templates.append(data)
+            fixture_templates = templates
         for count in (100, 1000):
-            runtime = MODULE + '/common/python'
-            root(f'PYTHONHOME={runtime} PYTHONPATH={runtime}/lib/python3.14:{runtime}/lib/python3.14/site-packages '
-                 f'LD_LIBRARY_PATH={runtime}/lib:{runtime}/lib/python3.14/lib-dynload '
-                 f'{runtime}/bin/luoshu-python /data/local/tmp/luoshu-synthetic-fonts.py --output /sdcard/LuoShu/fonts --count {count}', timeout=300)
+            # Only fixture duplication runs on the host. Module/runtime/App
+            # parsing stays on Android using the unchanged formal ARM64 runtime.
+            # This tests N independent filenames with two distinct TTF contents.
+            with tempfile.TemporaryDirectory(prefix='luoshu-synthetic-inventory-') as temp:
+                fonts_dir = Path(temp) / 'fonts'
+                fonts_dir.mkdir()
+                expected = {}
+                for index in range(count):
+                    name = f'LuoShuSyntheticGate{index:04d}.ttf'
+                    data = fixture_templates[index % 2]
+                    (fonts_dir / name).write_bytes(data)
+                    expected[name] = hashlib.sha256(data).hexdigest()
+                command(['push', str(fonts_dir) + '/.', '/sdcard/LuoShu/fonts/'], timeout=180)
+            hashes = root('sha256sum /sdcard/LuoShu/fonts/LuoShuSyntheticGate*.ttf', timeout=180)
+            actual = {line.split(None, 1)[1].rsplit('/', 1)[-1]: line.split()[0]
+                      for line in hashes.splitlines() if re.match(r'^[0-9a-f]{64}  ', line)}
+            if actual != expected:
+                raise RuntimeError('Actual Android synthetic inventory count or bytes differ from intended fixtures')
+            report['fixture_inventory'].append({'files': count, 'unique_content_hashes': sorted(set(expected.values())),
+                                               'note': 'Two original Android-generated synthetic TTF contents copied into independent filenames; not N distinct font feature sets'})
             print(f'Android module gate: real App library timings for {count} synthetic fonts', flush=True)
             timing = measure(adb, output / f'library-{count}', count)
             report['library_timings'].append(timing)
+            report['app_root'] = 'PROVEN_BY_ACTUAL_APP_VERIFIED_ROOT_LIBRARY'
+            report.setdefault('app_verified_inventory_counts', []).append(count)
         report['app_root'] = 'PROVEN_BY_ACTUAL_APP_VERIFIED_ROOT_LIBRARY'
         from app_library_gate import apply_fixture
         def task_fields(text):
@@ -305,7 +360,7 @@ def run_gate(adb, magisk, baseline, candidate, output):
         if font_hashes() != original_fonts:
             raise RuntimeError('Final actual-App apply rollback did not restore stock font bytes')
         report['delivery_gate'] = 'BLOCKED'
-        report['remaining_coverage'] = ['Preparation and commit failure injection not yet proven', 'Payload targets outside /system/fonts not yet independently mapped']
+        report['remaining_coverage'] = ['Final artifact review of native-crash buffers, UI samples and cleanup evidence is still required']
         report['coverage_note'] = ('Baseline module is CLI/mount reference only; original baseline App was not granted root. '
                                    'App timings are candidate-only on nativebridge x86_64 AVD, not native ARM64 or OEM-ROM validation.')
     except Exception as error:

@@ -93,8 +93,12 @@ def measure(adb, output, count):
                     if alive.strip() != pid:
                         raise RuntimeError('App exited after readiness marker')
                     frames = [int(ms) for event, ms, n, verified in events if event == 'library_frame' and int(ms) >= start]
+                    first_event = next((int(ms), int(n or 0), verified == 'true') for event, ms, n, verified in events if event == 'library_frame' and int(ms) >= start)
+                    inventory_frames = [int(ms) for event, ms, n, verified in events if event == 'library_frame' and n is not None and int(n) == count and int(ms) >= start]
                     opened = [int(ms) for event, ms, _, _ in events if event == 'library_open' and int(ms) >= start]
-                    return {'pid': pid, 'first_frame_ms': min(frames), 'first_frame_elapsed_ms': min(frames) - start,
+                    return {'pid': pid, 'first_frame_count': first_event[1], 'first_frame_verified': first_event[2],
+                            'first_inventory_frame_ms': min(inventory_frames), 'first_inventory_frame_elapsed_ms': min(inventory_frames) - start,
+                            'library_open_to_inventory_first_ms': min(inventory_frames) - opened[-1] if opened else None, 'first_frame_ms': min(frames), 'first_frame_elapsed_ms': min(frames) - start,
                             'library_open_to_verified_ms': frame - opened[-1] if opened else None,
                             'library_open_to_first_ms': min(frames) - opened[-1] if opened else None, 'kind': start_event, 'count': actual, 'verified': True,
                             'start_ms': start, 'frame_ms': frame, 'elapsed_ms': frame - start}
