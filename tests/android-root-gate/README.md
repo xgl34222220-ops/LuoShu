@@ -1,0 +1,89 @@
+# Root Android delivery gate
+
+`luoshu-root-android-probe.yml` is an environment qualification check, **not a
+release check**. PASS proves the unmodified baseline ARM64 ELF can execute its
+Python/FontTools/native extensions and launch children on that specific AVD,
+before and after a verified kernel reboot. It does not prove module installation,
+font activation, rollback, child cleanup, or persistent font mounts.
+
+The probe uses the SHA256-pinned official `refactor-v1.1.1` ZIP. It never replaces
+the runtime with host Python or an x86 build. Executable-format errors, missing
+root, permission errors, native bridge failures, and timeouts fail the job.
+There is no `continue-on-error`, skip-to-green, SELinux disabling, security-setting
+modification, user font inventory, user logs, physical-device access, or release.
+The generated minimal font consists of synthetic triangle outlines and is test
+code under this repository's license. Only synthetic qualification logs upload.
+
+## Run
+
+Owner pushes these files to the authorized test branch; the path-filtered push
+trigger starts the probe. Manual dispatch is also available once GitHub recognizes
+the workflow. For an already running disposable AVD:
+
+```
+python3 tests/android-root-gate/probe.py --module-zip LuoShu-v1.1.1.zip --output root-gate-output
+```
+
+If `/dev/kvm` permissions are unavailable the job stops rather than silently
+changing host security settings. If standalone ARM64 execution fails, report the
+actual evidence. JNI ARM translation support is not evidence for standalone ELF.
+Any proposed x86 Android test runtime needs a separate scope decision and results
+must remain labeled x86; it cannot validate the original ARM64 delivery package.
+
+## Required delivery evidence (all pending until actually executed)
+
+For BOTH exact official baseline and exact candidate package hashes on a qualified
+Root Android target, run the following without editing frozen mount code:
+
+1. Install through the supported module-manager path. Record Android/root-manager,
+   SELinux mode, build fingerprint, kernel and ABI. `adb root` alone does not prove
+   Magisk/KernelSU/APatch installation or module boot lifecycle.
+2. Import only synthetic licensed fonts; switch A to B; assert active hashes,
+   actual system-visible font mount targets and namespace visibility.
+3. Force preparation and commit failures separately; assert prior active payload
+   and mount state survives, rollback restores the original payload, and no temp
+   payload remains active. Unsupported cases are BLOCKED, never PASS.
+4. Success, failure, timeout and cancellation must each leave zero owned child
+   processes (including setsid/double-fork and late forks). Record PID + starttime
+   + boot ID and verify independent sentinel processes survive. Repeat checks
+   after the cleanup deadline; matching a process name is insufficient evidence.
+5. Reboot at least once after a successful switch. Record changed kernel boot ID,
+   boot completion, module lifecycle outcome, active payload and actual mounts.
+   A runtime probe surviving reboot is not font-mount persistence.
+6. Measure App cold start to first usable font library and warm library reopening
+   with identical synthetic inventories on baseline/candidate. Report repetitions,
+   per-sample values, median and p95. `am start -W` launch time alone does not prove
+   the library is usable. Reserve an instrumentation hook that signals library
+   data loaded AND visible; owner/App worker supplies this hook.
+7. Bind results to candidate commit, module ZIP/APK SHA256 and device identity.
+   Any missing, skipped, unsupported or failed requirement blocks delivery.
+
+Do not give a downloadable candidate to the user as "tested" until all applicable
+requirements are evidenced. This probe deliberately reports `delivery_gate:
+NOT_RUN`, including when `qualification: PASS`.
+
+## Architecture references
+
+- Android's official acceleration requirements require matching x86 host/images
+  or ARM64 host/images: https://developer.android.com/studio/run/emulator-acceleration
+- GitHub-hosted runner limitations: https://docs.github.com/en/actions/reference/runners/github-hosted-runners
+- API35 ARM app compatibility is a hypothesis to probe, not a standalone-ELF
+  guarantee: https://github.com/ReactiveCircus/android-emulator-runner/issues/458
+
+## Candidate task cleanup harness
+
+After ARM64 qualification succeeds, push `common/task_scope.py` and
+`tests/android-root-gate/task_scope_device.py` to the disposable AVD test directory.
+Run the harness with the original embedded Python environment, `--helper` pointing
+to the candidate helper and `--output` to a synthetic JSON report path. It rejects
+host Linux and physical devices. It covers success/failure/timeout/cancel,
+double-fork + setsid + TERM-ignoring descendants, delayed cleanup, and unrelated
+sentinel preservation. This tests the candidate helper, not the unchanged baseline
+(which has no such helper) or the entire module's integration.
+
+App worker's proposed debug-only measurement contract uses tag `LuoShuStartup`,
+events `app_start`, `library_open`, `font_index_visible`, `font_index_verified`,
+`library_frame`, monotonic `elapsed_ms`, inventory `count` and `verified` boolean.
+The usable endpoint is `library_frame verified=true` after the visible frame,
+not cached data visibility. Baseline needs the same isolated measurement-only hook
+or an equivalent UI readiness observation, disclosed with results.

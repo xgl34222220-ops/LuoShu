@@ -1,0 +1,57 @@
+name: Root Android ARM64 qualification
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/stable-runtime-cleanup-20261002]
+    paths:
+      - .github/workflows/luoshu-root-android-probe.yml
+      - tests/android-root-gate/**
+permissions:
+  contents: read
+concurrency:
+  group: root-android-qualification-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  qualify:
+    name: Original ARM64 ELF on Root Android API35
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch immutable official baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p root-gate-output
+          curl --fail --location --retry 3 --output "$RUNNER_TEMP/LuoShu-v1.1.1.zip" \
+            https://github.com/xgl34222220-ops/LuoShu/releases/download/refactor-v1.1.1/LuoShu-v1.1.1.zip
+          echo "c5c8fa86af4ac196107ba05c5ee8cc1944140ae033cc9e763cec8c76f40c848a  $RUNNER_TEMP/LuoShu-v1.1.1.zip" | sha256sum -c -
+          python3 -m unittest discover -s tests/android-root-gate -p 'test_*.py'
+      - name: Check existing KVM access without altering security settings
+        run: test -r /dev/kvm && test -w /dev/kvm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Qualify standalone original ARM64 ELF before and after reboot
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7_pro
+          ram-size: 2048M
+          heap-size: 512M
+          emulator-boot-timeout: 600
+          disable-animations: false
+          disable-linux-hw-accel: false
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: python3 tests/android-root-gate/probe.py --module-zip "$RUNNER_TEMP/LuoShu-v1.1.1.zip" --output root-gate-output
+      - name: Preserve qualification evidence, including unsupported failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Root-Android-ARM64-Qualification
+          path: root-gate-output/
+          if-no-files-found: warn
+          retention-days: 7
