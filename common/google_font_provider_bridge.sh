@@ -30,6 +30,7 @@ _gfp_locked() {
     if type luoshu_font_lock_acquire >/dev/null 2>&1; then
         luoshu_font_lock_acquire "$MODDIR/.google-font-provider-bridge.lock" "$$" || return 1
         _gfp_lock_held=1
+        _gfp_cleanup_temporaries
         case "${0##*/}" in
             google_font_provider_bridge.sh|hyperos_theme_font_bridge.sh)
                 # Entry scripts own their traps. A killed apply must release
@@ -44,14 +45,29 @@ _gfp_locked() {
     "$@"
     _gfp_locked_rc=$?
     if [ "${_gfp_lock_held:-0}" = 1 ]; then
-        luoshu_font_lock_release "$MODDIR/.google-font-provider-bridge.lock" "$$" >/dev/null 2>&1 || true
-        _gfp_lock_held=0
+        _gfp_release_lock
     fi
     return "$_gfp_locked_rc"
 }
 
+# The exclusive writer lease, not a reusable PID, proves no current writer
+# owns these reserved journal scratch files. A reboot can bypass EXIT traps.
+# Preserve committed journals, clone fonts, symlinks and unfamiliar filenames.
+_gfp_cleanup_temporaries() {
+    [ "${_gfp_lock_held:-0}" = 1 ] || return 0
+    for _gfp_ct_base in "$STATE" "$MOUNTS"; do
+        for _gfp_ct_file in "${_gfp_ct_base}.tmp."*; do
+            _gfp_ct_pid=${_gfp_ct_file#"${_gfp_ct_base}.tmp."}
+            case "$_gfp_ct_pid" in ''|*[!0-9]*) continue ;; esac
+            [ -f "$_gfp_ct_file" ] && [ ! -L "$_gfp_ct_file" ] || continue
+            rm -f "$_gfp_ct_file" 2>/dev/null || return 1
+        done
+    done
+}
+
 _gfp_release_lock() {
     [ "${_gfp_lock_held:-0}" = 1 ] || return 0
+    _gfp_cleanup_temporaries
     luoshu_font_lock_release "$MODDIR/.google-font-provider-bridge.lock" "$$" >/dev/null 2>&1 || true
     _gfp_lock_held=0
 }

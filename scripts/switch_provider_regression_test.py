@@ -65,6 +65,70 @@ class SwitchProviderTest(unittest.TestCase):
                     time.sleep(.02)
                 self.assertFalse((self.module / 'config/provider_boot.pid').exists(), 'finite provider task did not exit')
 
+    def test_boot_reconciles_recorded_old_scope_before_provider_launch(self):
+        import json
+        shutil.copyfile(ROOT / 'service.sh', self.module / 'service.sh')
+        shutil.copyfile(ROOT / 'common/background_task.sh', self.module / 'common/background_task.sh')
+        self.env['LUOSHU_TASK_HELPER'] = str(ROOT / 'common/task_scope.py')
+        (self.module / '.luoshu-runtime/core').mkdir(parents=True)
+        (self.module / '.luoshu-runtime/core/service.sh').write_text('exit 0\n')
+        token = 'a' * 32
+        workspace = self.module / 'cache/tasks' / token
+        workspace.mkdir(parents=True)
+        (workspace / '.luoshu-task-owner').write_text(token)
+        pidfile = self.module / 'config/switch_task_worker.pid'
+        (Path(str(pidfile) + '.scope')).write_text(token)
+        (Path(str(pidfile) + '.identity')).write_text(json.dumps({
+            'version':1,'task':'old-switch','token':token,'boot':'old-boot',
+            'owner':{'pid':os.getpid(),'start':1},'members':[], 'workspaces':[str(workspace)]}))
+        (self.module / 'common/google_font_provider_service.sh').write_text(
+            '[ ! -e "' + str(workspace) + '" ] || exit 9\n')
+        subprocess.run(['sh', str(self.module / 'service.sh')], env=self.env,
+                       capture_output=True, check=True, timeout=5)
+        self.assertFalse(workspace.exists())
+        self.assertFalse(Path(str(pidfile) + '.identity').exists())
+
+    def journal_fixture(self, writer, refuse=False):
+        state = self.module / 'config/google-font-provider-mounts.conf'
+        mounts = self.module / 'config/google-font-provider-namespaces.conf'
+        script = self.module / 'common/google_font_provider_bridge.sh'
+        body = '\n'.join(function('common/google_font_provider_bridge.sh', name) for name in
+                         ('_gfp_locked', '_gfp_release_lock', '_gfp_cleanup_temporaries'))
+        script.write_text('STATE="' + str(state) + '"\nMOUNTS="' + str(mounts) + '"\n' +
+            '. "' + str(ROOT / 'common/font_switch_lock.sh') + '"\n' + body + '\n' +
+            ('luoshu_font_lock_acquire() { return 1; }\n' if refuse else '') +
+            'writer() {\n' + writer + '\n}\n_gfp_locked writer\n')
+        return script, state, mounts
+
+    def test_provider_reclaims_only_reserved_numeric_journals_under_writer_lock(self):
+        script, state, mounts = self.journal_fixture(': > "${STATE}.tmp.$$"; : > "${MOUNTS}.tmp.$$"')
+        preserved = []
+        for base in (state, mounts):
+            base.write_text('committed journal')
+            Path(str(base) + '.tmp.1234').write_text('interrupted write')
+            other = Path(str(base) + '.tmp.note'); other.write_text('keep'); preserved.append(other)
+            link = Path(str(base) + '.tmp.5678'); link.symlink_to(other); preserved.append(link)
+        subprocess.run(['sh', str(script)], env=self.env, check=True)
+        for base in (state, mounts):
+            self.assertEqual('committed journal', base.read_text())
+            self.assertFalse(Path(str(base) + '.tmp.1234').exists())
+            self.assertEqual(2, len(list(base.parent.glob(base.name + '.tmp.*'))))
+        self.assertTrue(all(p.exists() for p in preserved))
+
+    def test_provider_lock_refusal_never_cleans_another_writer(self):
+        script, state, _ = self.journal_fixture('exit 9', refuse=True)
+        scratch = Path(str(state) + '.tmp.1234'); scratch.write_text('live writer')
+        result = subprocess.run(['sh', str(script)], env=self.env)
+        self.assertEqual(1, result.returncode)
+        self.assertEqual('live writer', scratch.read_text())
+
+    def test_provider_term_cleans_current_journal_before_releasing_lock(self):
+        script, state, _ = self.journal_fixture(': > "${STATE}.tmp.$$"; kill -TERM "$$"')
+        result = subprocess.run(['sh', str(script)], env=self.env)
+        self.assertEqual(143, result.returncode)
+        self.assertEqual([], list(state.parent.glob(state.name + '.tmp.*')))
+        self.assertFalse((self.module / '.google-font-provider-bridge.lock').exists())
+
     def provider_source(self, weight):
         return subprocess.run(['sh', '-c', '. "$1"; _gfp_source_for_weight "$2"',
             'sh', str(ROOT / 'common/google_font_provider_bridge.sh'), str(weight)],

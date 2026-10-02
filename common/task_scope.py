@@ -172,7 +172,10 @@ def atomic_write(path, text):
 def load_identity(pidfile):
     try:
         data = json.loads(read(str(pidfile) + '.identity'))
-        if (not data['boot'] or data['boot'] != boot_id() or
+        # Previous-boot identities still prove ownership of their temporary
+        # files. They must survive loading so recovery can remove those files;
+        # process authority is checked separately against the current boot.
+        if (not isinstance(data['boot'], str) or not data['boot'] or
                 not isinstance(data['token'], str) or len(data['token']) != 32):
             return None
         int(data['owner']['pid']); int(data['owner']['start'])
@@ -182,7 +185,7 @@ def load_identity(pidfile):
 
 
 def identity_alive(data):
-    return bool(data and same_process(data['owner']))
+    return bool(data and data.get('boot') == boot_id() and same_process(data['owner']))
 
 
 def clear_identity(pidfile, token):

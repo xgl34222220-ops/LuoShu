@@ -8,6 +8,18 @@ MODDIR="${0%/*}"
 LEGACY_MODE="$MODDIR/config/font_runtime_legacy_v14_4.conf"
 V4_SERVICE="$MODDIR/.luoshu-runtime/core/service.sh"
 
+# Reclaim only recorded task-owned workspaces after an interrupted boot. The
+# helper checks the saved boot before any process action and leaves live scopes
+# alone; a directory name or stale numeric PID is never cleanup authority.
+if [ -f "$MODDIR/common/background_task.sh" ]; then
+    . "$MODDIR/common/background_task.sh"
+    for _boot_task in switch_task_worker axes_worker auto_multiweight_worker mix_worker provider_boot; do
+        _boot_pidfile="$MODDIR/config/${_boot_task}.pid"
+        [ ! -s "${_boot_pidfile}.identity" ] || \
+            luoshu_task_helper reconcile "$_boot_pidfile" >/dev/null 2>&1 || true
+    done
+fi
+
 # Start from the real entry point before either service route is selected. The
 # mount loader sees $0=service_v4.sh on one route and is absent on the other.
 if [ -f "$MODDIR/common/google_font_provider_service.sh" ]; then

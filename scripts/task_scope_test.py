@@ -246,6 +246,33 @@ os._exit({exitcode})
         self.assertFalse(alive(pid))
         self.assertIn('超过 30 秒', scope.read(self.config / 'switch_task.conf'))
 
+    def test_old_boot_identity_reclaims_only_marked_workspace_without_signalling(self):
+        token = 'a' * 32
+        workspace = self.module / 'cache/tasks' / token
+        workspace.mkdir(parents=True)
+        (workspace / '.luoshu-task-owner').write_text(token)
+        (workspace / 'interrupted-input.ttf').write_text('synthetic bytes')
+        unowned = self.module / 'cache/tasks/unowned'
+        unowned.mkdir()
+        (unowned / '.luoshu-task-owner').write_text('different-token')
+        data = {'version': 1, 'task': 'previous-boot', 'token': token,
+                'boot': 'previous-boot-id', 'owner': scope.proc_info(os.getpid()),
+                'members': [scope.proc_info(os.getpid())],
+                'workspaces': [str(workspace), str(unowned)]}
+        scope.atomic_write(str(self.pidfile) + '.identity', json.dumps(data))
+        scope.atomic_write(str(self.pidfile) + '.scope', token)
+        loaded = scope.load_identity(self.pidfile)
+        self.assertEqual(data, loaded)
+        with mock.patch.object(scope, 'signal_process') as signal_process, \
+                mock.patch.object(scope, 'same_process', return_value=True) as same_process:
+            self.assertFalse(scope.identity_alive(loaded))
+            self.assertEqual(0, scope.reconcile(types.SimpleNamespace(pidfile=self.pidfile)))
+            signal_process.assert_not_called()
+            same_process.assert_not_called()
+        self.assertFalse(workspace.exists())
+        self.assertTrue(unowned.exists())
+        self.assertFalse(Path(str(self.pidfile) + '.identity').exists())
+
     def test_kernel_without_pidfd_refuses_nonchild_signal(self):
         # PID 1 is excluded separately; use our own parent to test the ownership
         # check. waitid must report ECHILD, and no numeric kill may occur.
