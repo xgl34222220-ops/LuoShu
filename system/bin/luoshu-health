@@ -205,6 +205,7 @@ report() {
 
 repair_stale() {
     _rs_changed=0
+    _rs_pending=0
     _rs_lock="$MOD/.font_switch.lock"
     if [ -e "$_rs_lock" ]; then
         if [ -f "$MOD/common/util_functions.sh" ]; then
@@ -234,16 +235,31 @@ repair_stale() {
             esac
         fi
         if [ "$_rs_alive" = 0 ]; then
-            rm -f "$_rs_pidfile" "${_rs_pidfile}.task" "${_rs_pidfile}.boot" 2>/dev/null && \
-                _rs_changed=$((_rs_changed + 1))
+            if [ -f "${_rs_pidfile}.identity" ]; then
+                # Recover proven orphan descendants before discarding identity.
+                # A failed/unsupported recovery must remain visible for retry.
+                if type luoshu_task_helper >/dev/null 2>&1 &&
+                   luoshu_task_helper reconcile "$_rs_pidfile" >/dev/null 2>&1 &&
+                   [ ! -f "${_rs_pidfile}.identity" ]; then
+                    _rs_changed=$((_rs_changed + 1))
+                else
+                    _rs_pending=$((_rs_pending + 1))
+                fi
+            else
+                rm -f "$_rs_pidfile" "${_rs_pidfile}.task" "${_rs_pidfile}.boot" \
+                    "${_rs_pidfile}.start" "${_rs_pidfile}.scope" 2>/dev/null && \
+                    _rs_changed=$((_rs_changed + 1))
+            fi
         fi
     done
-    for _rs_sidecar in "$MOD/config"/*.pid.task "$MOD/config"/*.pid.boot; do
+    for _rs_sidecar in "$MOD/config"/*.pid.task "$MOD/config"/*.pid.boot "$MOD/config"/*.pid.start "$MOD/config"/*.pid.scope; do
         [ -f "$_rs_sidecar" ] || continue
+        [ -f "${_rs_sidecar%.*}.identity" ] && continue
         [ -f "${_rs_sidecar%.*}" ] || rm -f "$_rs_sidecar" 2>/dev/null || true
     done
-    printf 'status=ok\n'
+    if [ "$_rs_pending" -gt 0 ]; then printf 'status=partial\n'; else printf 'status=ok\n'; fi
     printf 'changed=%s\n' "$_rs_changed"
+    printf 'pendingScopes=%s\n' "$_rs_pending"
 }
 
 restore_default() {

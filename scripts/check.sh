@@ -333,3 +333,5 @@ python3 "$ROOT/scripts/stable_mount_boundary_test.py"
 python3 "$ROOT/scripts/stable_cleanup_policy_test.py"
 
 python3 "$ROOT/scripts/task_scope_test.py"
+
+sh "$ROOT/scripts/system_health_test.sh"

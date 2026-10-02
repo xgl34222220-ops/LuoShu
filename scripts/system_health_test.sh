@@ -50,6 +50,9 @@ test ! -e "$MOD/config/dead.pid"
 cp "$ROOT/common/background_task.sh" "$MOD/common/background_task.sh"
 printf '%s\n' "$$" > "$MOD/config/live.pid"
 printf 'active-task-123\n' > "$MOD/config/live.pid.task"
+. "$ROOT/common/background_task.sh"
+luoshu_current_boot_id > "$MOD/config/live.pid.boot"
+luoshu_pid_start "$$" > "$MOD/config/live.pid.start"
 printf '%s\n' "$$" > "$MOD/config/stale-boot.pid"
 printf 'active-task-123\n' > "$MOD/config/stale-boot.pid.task"
 printf 'previous-boot\n' > "$MOD/config/stale-boot.pid.boot"
@@ -67,6 +70,21 @@ test ! -e "$MOD/config/stale-boot.pid"
 test ! -e "$MOD/config/stale-boot.pid.task"
 test ! -e "$MOD/config/stale-boot.pid.boot"
 test ! -e "$MOD/config/orphan.pid.task"
+
+# Failed orphan recovery is not reported as success and cannot delete identity.
+printf '99999999\n' > "$MOD/config/unrecovered.pid"
+printf 'unrecovered-task\n' > "$MOD/config/unrecovered.pid.task"
+printf 'scope-token\n' > "$MOD/config/unrecovered.pid.scope"
+printf '{"invalid":"identity"}\n' > "$MOD/config/unrecovered.pid.identity"
+cat >> "$MOD/common/background_task.sh" <<'RECOVER'
+luoshu_task_helper() { return 1; }
+RECOVER
+BLOCKED=$(MODDIR="$MOD" sh "$ROOT/system/bin/luoshu-health" repair-stale)
+printf '%s\n' "$BLOCKED" | grep -qx status=partial
+printf '%s\n' "$BLOCKED" | grep -qx pendingScopes=1
+test -s "$MOD/config/unrecovered.pid.identity"
+test -s "$MOD/config/unrecovered.pid.task"
+test -s "$MOD/config/unrecovered.pid.scope"
 
 mkdir -p "$OTHER/disable"
 OUT2=$(MODDIR="$MOD" LUOSHU_ADB_ROOT="$TMP/adb" LUOSHU_MODULES_ROOT="$TMP/adb/modules" sh "$ROOT/system/bin/luoshu-health" report)
