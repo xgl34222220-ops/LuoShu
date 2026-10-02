@@ -53,7 +53,9 @@ internal fun ModuleSnapshot.toHomeUiState(): HomeUiState {
             installed -> "模块已连接"
             else -> "正在等待模块连接"
         },
-        taskMessage = if (effectFailed) effectFailureMessage else taskMessage,
+        // A previous activation failure belongs to the effective-font status.
+        // Never combine it with the title/progress of a newer live request.
+        taskMessage = if (!running && effectFailed) effectFailureMessage else taskMessage,
         taskProgress = taskProgress,
         rebootRequired = rebootRequired,
         error = error,

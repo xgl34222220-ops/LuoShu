@@ -311,6 +311,26 @@ _luoshu_atomic_bind_tree() {
     return 0
 }
 
+# Keep useful ROM-relative names without exposing module, staging or user paths.
+_luoshu_atomic_diagnostic_path() (
+    case "$1" in
+        */system/fonts/*) path="system/fonts/${1##*/system/fonts/}" ;;
+        */product/fonts/*) path="product/fonts/${1##*/product/fonts/}" ;;
+        */system_ext/fonts/*) path="system_ext/fonts/${1##*/system_ext/fonts/}" ;;
+        */system/etc/*) path="system/etc/${1##*/system/etc/}" ;;
+        */product/etc/*) path="product/etc/${1##*/product/etc/}" ;;
+        */system_ext/etc/*) path="system_ext/etc/${1##*/system_ext/etc/}" ;;
+        */system/fonts|*/product/fonts|*/system_ext/fonts|*/system/etc|*/product/etc|*/system_ext/etc)
+            path="${1%/*}"; path="${path##*/}/${1##*/}" ;;
+        *) path='[redacted]' ;;
+    esac
+    printf '%s' "$path" | tr -c 'A-Za-z0-9_./[]-' '_'
+)
+
+_luoshu_atomic_preflight_error() {
+    _luoshu_self_log "自挂载预检失败：reason=$1 path=$(_luoshu_atomic_diagnostic_path "$2")"
+}
+
 # Validate every logical path before issuing any payload bind. Successful
 # directory overlays are already present, so independently covered aliases now
 # resolve to distinct paths and remain supported. Failed overlays retain the
@@ -320,26 +340,41 @@ _luoshu_atomic_preflight_targets() (
     _lsap_state=$(_luoshu_self_state_root)
     _lsap_map="$_lsap_state/preflight-targets.$$"
     _lsap_files="$_lsap_state/preflight-files.$$"
-    trap 'rm -f "$_lsap_map" "$_lsap_files"' EXIT
-    : > "$_lsap_map" || exit 1
+    trap 'rm -f "$_lsap_map" "$_lsap_files" 2>/dev/null' EXIT
+    printf '' 2>/dev/null > "$_lsap_map" || {
+        _luoshu_atomic_preflight_error preflight-temporary-io-failed "$_lsap_map"; exit 13;
+    }
+    [ -r "$_lsap_plan" ] && [ -f "$_lsap_plan" ] || {
+        _luoshu_atomic_preflight_error preflight-plan-unreadable "$_lsap_plan"; exit 15;
+    }
     while IFS='|' read -r _lsap_source _lsap_target _lsap_mode; do
-        find "$_lsap_source" -type f > "$_lsap_files" 2>/dev/null || exit 1
+        printf '' 2>/dev/null > "$_lsap_files" || {
+            _luoshu_atomic_preflight_error preflight-temporary-io-failed "$_lsap_files"; exit 13;
+        }
+        find "$_lsap_source" -type f 2>/dev/null > "$_lsap_files" || {
+            _luoshu_atomic_preflight_error preflight-source-scan-failed "$_lsap_source"; exit 12;
+        }
         while IFS= read -r _lsap_src; do
             _lsap_rel=${_lsap_src#$_lsap_source/}
             _lsap_dst="$_lsap_target/$_lsap_rel"
             if [ ! -f "$_lsap_dst" ]; then
                 _luoshu_atomic_missing_target_allowed "$_lsap_rel" "$_lsap_mode" && continue
-                exit 1
+                _luoshu_atomic_preflight_error physical-target-missing "$_lsap_dst"
+                exit 11
             fi
             _lsap_real=$(_luoshu_atomic_real_target "$_lsap_dst")
-            _lsap_prior=$(awk -F '|' -v target="$_lsap_real" '$1 == target {print $2; exit}' "$_lsap_map")
+            _lsap_prior=$(awk -F '|' -v target="$_lsap_real" '$1 == target {print $2; exit}' "$_lsap_map" 2>/dev/null) || {
+                _luoshu_atomic_preflight_error preflight-map-read-failed "$_lsap_map"; exit 16;
+            }
             if [ -n "$_lsap_prior" ]; then
                 if ! _luoshu_atomic_files_equal "$_lsap_prior" "$_lsap_src"; then
-                    _luoshu_self_log "自挂载目标冲突：$_lsap_prior 与 $_lsap_src 解析到 $_lsap_real，无法同时满足"
-                    exit 1
+                    _luoshu_self_log "自挂载预检失败：reason=physical-target-conflict first=$(_luoshu_atomic_diagnostic_path "$_lsap_prior") second=$(_luoshu_atomic_diagnostic_path "$_lsap_src") target=$(_luoshu_atomic_diagnostic_path "$_lsap_real")"
+                    exit 14
                 fi
             else
-                printf '%s|%s\n' "$_lsap_real" "$_lsap_src" >> "$_lsap_map" || exit 1
+                printf '%s|%s\n' "$_lsap_real" "$_lsap_src" 2>/dev/null >> "$_lsap_map" || {
+                    _luoshu_atomic_preflight_error preflight-temporary-io-failed "$_lsap_map"; exit 13;
+                }
             fi
         done < "$_lsap_files"
     done < "$_lsap_plan"
@@ -353,8 +388,21 @@ _luoshu_atomic_finish_plan() {
     _lsafp_payload="$2"
     _lsafp_required="$3"
     _lsafp_ready="${_lsafp_plan}.ready"
-    if ! _luoshu_atomic_preflight_targets "$_lsafp_plan"; then
-        _lsme_failed=physical-target-conflict
+    if _luoshu_atomic_preflight_targets "$_lsafp_plan"; then
+        _lsafp_preflight_rc=0
+    else
+        _lsafp_preflight_rc=$?
+    fi
+    if [ "$_lsafp_preflight_rc" -ne 0 ]; then
+        case "$_lsafp_preflight_rc" in
+            11) _lsme_failed=physical-target-missing ;;
+            12) _lsme_failed=preflight-source-scan-failed ;;
+            13) _lsme_failed=preflight-temporary-io-failed ;;
+            14) _lsme_failed=physical-target-conflict ;;
+            15) _lsme_failed=preflight-plan-unreadable ;;
+            16) _lsme_failed=preflight-map-read-failed ;;
+            *) _lsme_failed=preflight-failed ;;
+        esac
         return 1
     fi
     : > "$_lsafp_ready" || return 1

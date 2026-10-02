@@ -466,6 +466,7 @@ def _resolve_stock(
     logical_value: str,
     explicit: dict[str, Path],
     allow_live: bool,
+    *, target: dict[str, Any] | None = None,
 ) -> Path:
     logical = Path(logical_value)
     failures = []
@@ -516,7 +517,41 @@ def _resolve_stock(
             return candidate
     else:
         failures.append("recovered:no-request-session")
-    raise CompilerError(f"找不到可验证的原厂字体快照：{logical_value}; " + "; ".join(failures[:10]))
+    # OEM font selectors can change their live alias after inventory capture.
+    # Recover only the exact independently proven ROM terminal sealed then;
+    # never use a mutable alias's current data file as original font bytes.
+    if target is not None and view is not None:
+        identity = (target.get("targetContract") or {}).get("stockIdentity") or {}
+        captured = identity.get("provenance") or {}
+        terminal = str(captured.get("resolvedLogicalPath") or "")
+        if (identity.get("logicalPath") == logical_value and captured.get("verified") is True
+                and captured.get("aliasChain") and terminal and terminal != logical_value
+                and captured.get("terminalProvenance")):
+            try:
+                recovered = _resolve_stock(terminal, explicit, allow_live)
+                current = _resolve_stock_proof(terminal, recovered)
+                _verify_sealed_terminal(identity, current, recovered)
+                view.sealed_terminals[(logical_value, str(recovered))] = terminal
+                return recovered
+            except (ValueError, OSError, CompilerError) as error:
+                failures.append("sealed-terminal:" + str(error)[:160])
+    raise CompilerError(f"找不到可验证的原厂字体快照：{logical_value}; " + "; ".join(failures[:11]))
+
+
+def _verify_sealed_terminal(identity, current, stock):
+    captured = identity.get("provenance") or {}
+    previous = captured.get("terminalProvenance") or {}
+    latest = current.get("terminalProvenance") or {}
+    if (captured.get("verified") is not True or not captured.get("aliasChain")
+            or current.get("verified") is not True
+            or current.get("resolvedLogicalPath") != captured.get("resolvedLogicalPath")
+            or any(not previous.get(key) or previous[key] != latest.get(key)
+                   for key in ("device", "filesystem", "filesystemPath"))):
+        raise CompilerError("sealed terminal ROM lineage changed")
+    expected = str(identity.get("sha256") or "")
+    if len(expected) != 64 or _sha256(stock) != expected:
+        raise CompilerError("sealed terminal stock content digest mismatch")
+
 
 
 def _verify_stock_identity(target: dict[str, Any], stock: Path, face_index: int) -> dict[str, Any]:
@@ -548,7 +583,12 @@ def _verify_stock_identity(target: dict[str, Any], stock: Path, face_index: int)
         # Kernel mount IDs/namespace IDs can legitimately change across boots.
         view = stock_font_view.current_view()
         lexical = view.alias_origins.get((logical, str(stock)), stock) if view is not None else stock
-        current = _resolve_stock_proof(logical, lexical)
+        sealed = view.sealed_terminals.get((logical, str(stock))) if view is not None else None
+        current = _resolve_stock_proof(sealed or logical, stock if sealed else lexical)
+        if sealed:
+            _verify_sealed_terminal(identity, current, stock)
+            current = dict(current, stockResolution="sealed-ROM-terminal",
+                           requestedLogicalPath=logical)
         terminal = Path(current.get("resolvedPath") or lexical)
         if terminal.resolve(strict=True) != stock.resolve(strict=True):
             raise ValueError("stock-provenance-resolved-file-mismatch")
@@ -2237,7 +2277,7 @@ def _compile_unit_in_view(
                            elapsedSeconds=round(time.monotonic() - started, 6))
             return result
 
-        stock = _resolve_stock(target_path, stock_paths, allow_live_stock)
+        stock = _resolve_stock(target_path, stock_paths, allow_live_stock, target=target)
         stock_face = max(0, _int(artifact.get("requiredFaceIndex"), 0))
         verified_stock = _validate_stock_contract(target, stock, stock_face)["verifiedStockIdentity"]
         direct_contract = artifact.get('directPathContract')
@@ -2344,7 +2384,7 @@ def _mixed_preflight(units: list[dict[str, Any]], stock_paths: dict[str, Path], 
             "source-style-axis-missing", "source-style-axis-out-of-range"}
         if risks:
             raise CompilerError(f"mixed-preflight: {','.join(sorted(risks))}: {path}")
-        stock = _resolve_stock(path, stock_paths, allow_live_stock)
+        stock = _resolve_stock(path, stock_paths, allow_live_stock, target=target)
         try:
             stock_face = (artifact.get("originalStockFaceIndex")
                           if artifact.get("representation") in fixed_match.REPRESENTATIONS
@@ -2364,7 +2404,7 @@ def _mixed_preflight(units: list[dict[str, Any]], stock_paths: dict[str, Path], 
                 and not _axis_values(artifact.get("requiredAxes"))):
             # Actual collection magic, not a possibly abbreviated topology
             # format label, determines _choose_mode's stock-shell exception.
-            stock = _resolve_stock(path, stock_paths, allow_live_stock)
+            stock = _resolve_stock(path, stock_paths, allow_live_stock, target=target)
             if _magic(stock) != COLLECTION_MAGIC:
                 raise CompilerError(f"mixed-preflight: static source cannot preserve physical variable target: {path}")
 

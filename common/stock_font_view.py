@@ -44,6 +44,7 @@ class StockView:
         self.owned = []
         self.roots = {}
         self.alias_origins = {}
+        self.sealed_terminals = {}
 
     def recover(self, logical: Path):
         # Only the established partition/fonts hierarchy supports this recovery.

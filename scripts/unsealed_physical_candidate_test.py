@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""Synthetic ColorOS-shaped inventory plus live aliases; no device data."""
+from copy import deepcopy
+from pathlib import Path
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+ROOT=Path(__file__).resolve().parents[1]
+sys.path[:0]=[str(ROOT/'common'),str(ROOT/'scripts')]
+from fontTools.ttLib import TTFont
+import font_coverage
+import universal_font_compiler_test as fonts
+from fixed_static_xml_compiler_test import add_points
+import font_topology_snapshot as topology
+import font_role_shadow as roles
+import font_source_profile as profiles
+import universal_font_plan as plans
+import minimal_xml_router as router
+import universal_font_compiler as compiler
+import universal_font_deployment as deployment
+import universal_font_cutover_gate as gate
+
+class CandidateTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.root=Path(self.tmp.name)
+        self.stock=self.root/'stock.ttf';self.source=self.root/'source.ttf'
+        fonts.make_font(self.stock,family='Synthetic OEM');fonts.make_font(self.source,family='Synthetic User')
+        # Make the live Hans candidate selectable before the fix: a Latin-only
+        # source would stop earlier for unrelated coverage reasons.
+        points=set(range(0x4e00,0x4e00+7000)) | set(font_coverage.CJK_COMMON)
+        for path in (self.source,self.stock):
+            add_points(path,points)
+        self.logical='/system/fonts/SysSans-Hans-Regular.ttf'
+        self.alias='/system/fonts/SysFont-Hans-Regular.ttf'
+        slot=fonts.slot_from_stock(self.logical,self.stock,family='sans-serif',source_xml=None,declared=Path(self.logical).name)
+        self.inventory={'schema':'device-font-inventory-v1','state':'ready','scannerRevision':6,
+            'buildKey':'anonymous-coloros','romKind':'coloros','slots':{self.logical:slot},
+            'families':{},'xmlGraph':{'refs':[]}}
+        self.profile=profiles.build([self.source])
+
+    def build(self, inventory=None):
+        top=topology.build_topology(inventory or self.inventory,
+            {'paths':[{'path':self.alias,'candidate':True,'partition':'system'}]},self.alias,None,None,'')
+        rolemap,_=roles.build(top)
+        plan=plans.build_plan(top,rolemap,self.profile)
+        return top,rolemap,plan
+
+    def test_live_alias_stays_visible_but_cannot_become_required_stock(self):
+        top,rolemap,plan=self.build()
+        self.assertNotIn(self.alias,self.inventory['slots'])
+        self.assertIn(self.alias,top['slots'])
+        self.assertEqual(top['slots'][self.alias]['source'],'physical-scan')
+        self.assertEqual(rolemap['slots'][self.alias]['role'],'cjk')
+        target=plan['targets'][self.alias]
+        self.assertEqual(target['action'],'review')
+        self.assertEqual(target['role'],'unknown-protected')
+        self.assertEqual(target['reasons'],['unsealed-physical-candidate'])
+        route=router.build_route_plan(plan,{},None,False)
+        self.assertNotIn(self.alias,route['physicalOnlyTargets'])
+        self.assertIn(self.logical,route['physicalOnlyTargets'])
+        with patch.dict(os.environ,{'LUOSHU_UNIVERSAL_MIX_STRICT':'1'}):
+            artifacts=compiler.compile_all(plan,route,{self.logical:self.stock},self.root/'compiled',False)
+        self.assertTrue(artifacts['summary']['deploymentReady'],artifacts)
+        self.assertNotIn(self.alias,artifacts['physicalTargetMap'])
+        payload=self.root/'payload'
+        deploy=deployment.build_deployment(plan,route,artifacts,payload)
+        result=gate.evaluate(plan,route,artifacts,deploy,payload)
+        self.assertTrue(result['eligible'],result)
+        self.assertEqual(result['summary']['coverage'],'partial-unverified-originals')
+        self.assertEqual(result['summary']['unsealedPhysicalTargets'],[self.alias])
+        self.assertFalse((payload/self.alias.lstrip('/')).exists())
+        self.assertTrue((payload/self.logical.lstrip('/')).is_file())
+        visible=self.root/'visible/system/fonts';visible.mkdir(parents=True)
+        shutil.copyfile(self.stock,visible/Path(self.logical).name)
+        (visible/Path(self.alias).name).symlink_to(Path(self.logical).name)
+        state=self.root/'mount-state';state.mkdir()
+        request=self.root/'mount-plan'
+        script = """
+. "$1"
+_luoshu_self_state_root() { printf '%s\\n' "$STATE"; }
+_luoshu_self_log() { printf '%s\\n' "$*" >&2; }
+_luoshu_atomic_preflight_targets "$2"
+"""
+        def preflight(source):
+            request.write_text(str(source)+'|'+str(visible)+'|bind\n')
+            return subprocess.run(['sh','-s','--',str(ROOT/'common/mount_self_atomic.sh'),str(request)],
+                input=script,text=True,capture_output=True,
+                env=os.environ|{'STATE':str(state),'LUOSHU_REQUIRED_PAYLOAD_FILES':'1'})
+        # Reproduce the observed conflict shape using anonymous generated bytes.
+        legacy=self.root/'legacy/system/fonts';legacy.mkdir(parents=True)
+        shutil.copyfile(payload/self.logical.lstrip('/'),legacy/Path(self.logical).name)
+        (legacy/Path(self.alias).name).write_bytes(b'different legacy alias payload')
+        failed=preflight(legacy)
+        self.assertEqual(failed.returncode,14,failed.stderr)
+        self.assertIn('physical-target-conflict',failed.stderr)
+        safe=preflight(payload/'system/fonts')
+        self.assertEqual(safe.returncode,0,safe.stderr)
+        self.assertEqual((visible/Path(self.logical).name).read_bytes(),self.stock.read_bytes())
+
+
+    def test_captured_physical_candidate_is_still_compiled(self):
+        inv=deepcopy(self.inventory)
+        inv['slots'][self.logical]['source']='physical-scan'
+        _,_,plan=self.build(inv)
+        self.assertIn(plan['targets'][self.logical]['action'],{'compile','replace'})
+        self.assertNotIn('unsealed-physical-candidate',plan['targets'][self.logical]['reasons'])
+
+    def test_verified_rescan_replaces_review_instead_of_caching_it(self):
+        self.alias='/system/fonts/SysFont-Regular.ttf'
+        _,_,before=self.build()
+        self.assertEqual(before['targets'][self.alias]['action'],'review')
+        inv=deepcopy(self.inventory)
+        inv['slots'][self.alias]=fonts.slot_from_stock(self.alias,self.stock,
+            family='sans-serif',source_xml=None,declared=Path(self.alias).name)
+        _,_,after=self.build(inv)
+        self.assertNotEqual(before['planId'],after['planId'])
+        self.assertIn(after['targets'][self.alias]['action'],{'compile','replace'})
+        self.assertNotIn('unsealed-physical-candidate',after['targets'][self.alias]['reasons'])
+
+    def test_known_inventory_without_identity_is_not_silently_skipped(self):
+        inv=deepcopy(self.inventory)
+        inv['slots'][self.logical].pop('stockIdentity')
+        _,_,plan=self.build(inv)
+        self.assertIn(plan['targets'][self.logical]['action'],{'compile','replace'})
+        route=router.build_route_plan(plan,{},None,False)
+        with patch.dict(os.environ,{'LUOSHU_UNIVERSAL_MIX_STRICT':'1'}):
+            with self.assertRaisesRegex(compiler.CompilerError,'missing sealed stock identity'):
+                compiler.compile_all(plan,route,{self.logical:self.stock},self.root/'rejected',False)
+
+if __name__=='__main__':unittest.main(verbosity=2)

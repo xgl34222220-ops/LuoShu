@@ -103,7 +103,7 @@ def preflight_unit(unit, stock_paths, allow_live_stock):
     api = _api()
     _validate_unit(unit)
     target, artifact = unit["target"], unit["artifact"]
-    stock = api._resolve_stock(str(target["path"]), stock_paths, allow_live_stock)
+    stock = api._resolve_stock(str(target["path"]), stock_paths, allow_live_stock, target=target)
     face = artifact["originalStockFaceIndex"]
     verify_original_face(target, stock, face, metadata_only=True)
     with api._open_face(stock, face, lazy=True) as font:
@@ -369,7 +369,7 @@ def prepare_unit(unit, stock_paths, allow_live_stock, *, cache=None):
             raise api.CompilerError("fixed static XML source must be a complete static glyf face")
         if not _upright(original):
             raise api.CompilerError("fixed static XML source metadata is not upright")
-        stock = api._resolve_stock(str(target["path"]), stock_paths, allow_live_stock)
+        stock = api._resolve_stock(str(target["path"]), stock_paths, allow_live_stock, target=target)
         stock_face = artifact["originalStockFaceIndex"]
         verified = verify_original_face(target, stock, stock_face)
         stock_font = api._open_face(stock, stock_face, lazy=True)

@@ -8,6 +8,7 @@ ROOT=Path(__file__).resolve().parents[1]
 sys.path[:0]=[str(ROOT/'common'),str(ROOT/'scripts')]
 import universal_fixed_mixed_shell_test as fixed
 import universal_font_compiler as compiler
+import universal_font_deployment as deployment
 import stock_font_provenance as proof
 import stock_font_view as view
 import stock_geometry_profile as geometry
@@ -75,6 +76,78 @@ class AliasPipelineTests(unittest.TestCase):
         with patch.object(compiler,'_compile_stock_shell',side_effect=AssertionError('must not render')) as render:
             result=self.compile(target)
         self.assertEqual(result['status'],'blocked');self.assertIn('digest mismatch',result['reason']);self.assertEqual(render.call_count,0)
+    def test_coloros_alias_changed_to_userdata_recovers_only_sealed_rom(self):
+        self.logical='/system/fonts/SysFont-Hans-Regular.ttf'
+        self.alias.rename(self.system/'SysFont-Hans-Regular.ttf')
+        self.alias=self.system/'SysFont-Hans-Regular.ttf'
+        target=self.capture()
+        self.alias.unlink();self.alias.symlink_to('/data/system/font/Custom.ttf')
+        with view.session(self.root):
+            with self.assertRaisesRegex(compiler.CompilerError,'not-ROM'):
+                compiler._resolve_stock(self.logical,{},False)
+            actual=compiler._resolve_stock(self.logical,{},False,target=target)
+            self.assertEqual(actual,self.oem)
+            verified=compiler._verify_stock_identity(target,actual,0)
+            self.assertEqual(verified['currentProvenance']['stockResolution'],'sealed-ROM-terminal')
+            result=self.compile(target)
+            self.assertEqual(result['status'],'ready',result)
+        self.assertEqual(os.readlink(self.alias),'/data/system/font/Custom.ttf')
+
+    def test_changed_coloros_alias_retains_exact_original_during_deployment(self):
+        target=self.capture();before=self.oem.read_bytes()
+        self.alias.unlink();self.alias.symlink_to('/data/system/font/Custom.ttf')
+        identity=target['targetContract']['stockIdentity']
+        original={'target':target,'targetPath':self.logical,'faceIndex':0,
+                  'sha256':identity['sha256'],'assetRoot':'/system/fonts',
+                  'fileName':'LuoShu-Original-'+identity['sha256']+'.ttf'}
+        route={'schema':'fixed-static-xml-route-plan-v1','retainedOriginals':{'stock:fixture':original}}
+        stage=self.root/'retained-stage';stage.mkdir();records={}
+        deployment._copy_retained_originals(route,stage,records)
+        output=stage/'system/fonts'/original['fileName']
+        self.assertEqual(output.read_bytes(),before)
+        self.assertEqual(next(iter(records.values()))['kind'],'xml-original')
+        self.assertEqual(self.oem.read_bytes(),before)
+        self.oem.write_bytes(before+b'changed')
+        rejected=self.root/'rejected-stage';rejected.mkdir()
+        with self.assertRaisesRegex(compiler.CompilerError,'digest mismatch'):
+            deployment._copy_retained_originals(route,rejected,{})
+        self.assertFalse(list(rejected.rglob('*.ttf')))
+
+    def test_sealed_terminal_recovery_rejects_changed_bytes_and_unverified_capture(self):
+        target=self.capture()
+        self.alias.unlink();self.alias.symlink_to('/data/system/font/Custom.ttf')
+        with view.session(self.root):
+            bad=deepcopy(target);bad['targetContract']['stockIdentity']['provenance']['verified']=False
+            with self.assertRaises(compiler.CompilerError):
+                compiler._resolve_stock(self.logical,{},False,target=bad)
+            self.oem.write_bytes(self.oem.read_bytes()+b'changed')
+            with self.assertRaisesRegex(compiler.CompilerError,'digest mismatch'):
+                compiler._resolve_stock(self.logical,{},False,target=target)
+
+    def test_sealed_terminal_recovery_needs_complete_matching_rom_identity(self):
+        target=self.capture()
+        self.alias.unlink();self.alias.symlink_to('/data/system/font/Custom.ttf')
+        for change in ('aliasChain','terminalProvenance','device','filesystemPath','logicalPath'):
+            bad=deepcopy(target);identity=bad['targetContract']['stockIdentity']
+            if change=='logicalPath':identity[change]='/system/fonts/Unrelated.ttf'
+            elif change in ('device','filesystemPath'):
+                identity['provenance']['terminalProvenance'][change]='changed'
+            else:identity['provenance'].pop(change)
+            with self.subTest(change=change),view.session(self.root):
+                with self.assertRaises(compiler.CompilerError):
+                    compiler._resolve_stock(self.logical,{},False,target=bad)
+        with self.assertRaises(compiler.CompilerError):
+            compiler._resolve_stock(self.logical,{},False,target=target)
+
+    def test_sealed_terminal_recovery_rechecks_lineage_before_each_read(self):
+        target=self.capture()
+        self.alias.unlink();self.alias.symlink_to('/data/system/font/Custom.ttf')
+        with view.session(self.root):
+            actual=compiler._resolve_stock(self.logical,{},False,target=target)
+            self.info.write_text(self.info.read_text()+f'7 1 253:9 /replacement {self.oem} ro - ext4 /dev/block/data rw\n')
+            with self.assertRaisesRegex(compiler.CompilerError,'provenance rejected'):
+                compiler._verify_stock_identity(target,actual,0)
+
     def test_capture_revision_requires_trusted_rescan_once(self):
         target=self.capture();metrics={'head':{},'coverage':{'synthetic':True}}
         inventory_data={'specializedSnapshotRevision':1, 'specializedSnapshots':{}, 'xmlMemberSnapshotRevision':1,'xmlMemberSnapshots':{},'metricsRevision':scanner.METRICS_REVISION,'slots':{'x':{'metrics':metrics,'stockIdentity':target['targetContract']['stockIdentity'],'stockGeometryProfile':{}}},'mainSlot':{'metrics':metrics}}

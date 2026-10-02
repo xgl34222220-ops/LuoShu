@@ -128,6 +128,11 @@ def evaluate(
         }:
             warnings.append(f"plan-risk:{risk_text}")
 
+    unsealed = [path for path, target in targets.items()
+                if isinstance(target, dict) and "unsealed-physical-candidate" in (target.get("reasons") or [])]
+    if unsealed:
+        warnings.append(f"partial-coverage:unsealed-physical-candidates:{len(unsealed)}")
+
     preserved_math = sum(int((item.get("report") or {}).get("transformed", {}).get("layout", {}).get("preservedMathGlyphs") or 0)
                          for item in artifacts.get("artifacts", []) if isinstance(item, dict))
     preserved_marks = sum(int((item.get("report") or {}).get("transformed", {}).get("layout", {}).get("preservedSharedMarks") or 0)
@@ -161,7 +166,8 @@ def evaluate(
         "payloadDigest": str(deployment.get("payloadDigest") or ""),
         "summary": {
             "slotCount": len(targets),
-            "coverage": ("partial-direct-path-uncovered" if direct_missing else
+            "coverage": ("partial-unverified-originals" if unsealed else
+                         "partial-direct-path-uncovered" if direct_missing else
                          "mixed-static-and-retained-adapters" if static_deferred else
                          "partial-protected-typography" if preserved_math or preserved_marks or preserved_clock else
                          "partial-style-preserved" if preserved_count else "planned-targets"),
@@ -174,6 +180,8 @@ def evaluate(
             "preservedMathGlyphs": preserved_math,
             "preservedClockPunctuation": preserved_clock,
             "preservedStyleRouteCount": preserved_count,
+            "unsealedPhysicalTargetCount": len(unsealed),
+            "unsealedPhysicalTargets": unsealed,
             "replacementCount": replacement_count,
             "xmlScopedTargetCount": scoped_count,
             "roleCounts": dict(sorted(role_counts.items())),

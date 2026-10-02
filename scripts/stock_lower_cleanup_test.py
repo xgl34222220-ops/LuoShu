@@ -21,6 +21,8 @@ _luoshu_mount_cmd() {
  esac
 }
 . "$BACKEND"
+# Copy-only fixture: real propagation proof is covered by namespace tests.
+_luoshu_mount_is_private() { return 0; }
 set -eu
 _lsme_mount_list="$r/owned"
 : > "$_lsme_mount_list"

@@ -97,6 +97,7 @@ luoshu_mount_record() {
 . "$ATOMIC_SCRIPT"
 [ -z "$FINAL_SCRIPT" ] || . "$FINAL_SCRIPT"
 # These copy-based fixtures model mount identities only for orchestration.
+_luoshu_mount_is_private() { return 0; }
 # Real kernel ownership, cancellation and foreign-layer tests run separately.
 _luoshu_visible_mount_id() { awk -F '|' -v p="$1" '$1==p{id=$2}END{print id+0}' "$CASE_ROOT/fake-mount-ids"; }
 _luoshu_inode_identity() { sha256sum "$1" | awk '{print $1}'; }
@@ -241,6 +242,8 @@ FAIL_OVERLAY=system-fonts
 if luoshu_self_mount_ensure; then fail 'conflicting alias bind was accepted'; fi
 test "$(cat "$CASE_ROOT/root/system/fonts/Canonical.ttf")" = stock-canonical || fail 'conflict mutated ROM before preflight'
 grep -q 'physical-target-conflict' "$MODULE_DIR/config/self-mount.conf" || fail 'alias conflict reason missing'
+grep -q 'reason=physical-target-conflict.*system/fonts/.*target=system/fonts/Canonical.ttf' "$MODULE_DIR/logs/self-mount.log" || fail 'conflict diagnostic lacks logical/terminal paths'
+if grep -Fq "$CASE_ROOT" "$MODULE_DIR/logs/self-mount.log"; then fail 'conflict diagnostic exposes private root'; fi
 # The verifier must inspect every logical alias even when the canonical bytes
 # happen to match; this is the original false PASS reproducer.
 cp "$MODULE_DIR/system/fonts/Canonical.ttf" "$CASE_ROOT/root/system/fonts/Canonical.ttf"
@@ -306,6 +309,10 @@ printf changed-xml > "$MODULE_DIR/system/etc/fonts.xml"
 FAIL_OVERLAY=all
 export LUOSHU_REQUIRED_PAYLOAD_FILES=1
 if luoshu_self_mount_ensure; then fail 'missing required XML asset was accepted by bind'; fi
+grep -q '^failed=physical-target-missing$' "$MODULE_DIR/config/self-mount.conf" || fail 'missing target mislabeled as conflict'
+grep -q 'reason=physical-target-missing path=system/fonts/LuoShu-Fixed-required.ttf' "$MODULE_DIR/logs/self-mount.log" || fail 'missing target diagnostic lacks ROM-relative path'
+if grep -Fq "$CASE_ROOT" "$MODULE_DIR/logs/self-mount.log"; then fail 'missing target diagnostic exposes private root'; fi
+test ! -e "$MODULE_DIR/config/self-mount-required.conf" || fail 'missing target committed required manifest'
 test "$(cat "$CASE_ROOT/root/system/fonts/A.ttf")" = original-font || fail 'required asset rejection occurred after a font bind'
 test "$(cat "$CASE_ROOT/root/system/etc/fonts.xml")" = original-xml || fail 'required asset rejection occurred after an XML bind'
 if _luoshu_atomic_tree_visible "$MODULE_DIR/system/fonts" "$CASE_ROOT/root/system/fonts" bind; then fail 'required asset visibility falsely passed'; fi
@@ -328,6 +335,29 @@ if [ -n "$FINAL_SCRIPT" ]; then
 else
     grep -q 'system/fonts-bind-empty' "$MODULE_DIR/config/self-mount.conf" || fail 'empty bind reason absent'
 fi
+
+# Infrastructure failures must never masquerade as conflicting font bytes.
+setup_case preflight-infrastructure-errors
+PLAN="$CASE_ROOT/state/plan"
+printf '%s|%s|overlay\n' "$MODULE_DIR/system/fonts" "$CASE_ROOT/root/system/fonts" > "$PLAN"
+_lsme_failed=''
+if _luoshu_atomic_finish_plan "$PLAN" "$MODULE_DIR" system; then fail 'missing source passed preflight'; fi
+test "$_lsme_failed" = preflight-source-scan-failed || fail 'source scan mislabeled as conflict'
+mkdir -p "$MODULE_DIR/system/fonts" "$CASE_ROOT/state/preflight-targets.$$"
+if _luoshu_atomic_finish_plan "$PLAN" "$MODULE_DIR" system 2>/dev/null; then fail 'unwritable temporary map passed preflight'; fi
+test "$_lsme_failed" = preflight-temporary-io-failed || fail 'temporary map write mislabeled as conflict'
+rmdir "$CASE_ROOT/state/preflight-targets.$$"
+if _luoshu_atomic_finish_plan "$CASE_ROOT/state/absent-plan" "$MODULE_DIR" system; then fail 'unreadable plan passed preflight'; fi
+test "$_lsme_failed" = preflight-plan-unreadable || fail 'unreadable plan mislabeled as conflict'
+(
+    set -e
+    if _luoshu_atomic_finish_plan "$CASE_ROOT/state/absent-plan" "$MODULE_DIR" system; then
+        exit 1
+    fi
+    test "$_lsme_failed" = preflight-plan-unreadable
+) || fail 'errexit caller lost the preflight failure classification'
+test ! -s "$CASE_ROOT/fake-mount-ids" || fail 'failed preflight issued a bind'
+test "$(_luoshu_atomic_diagnostic_path /private/user-upload.ttf)" = '[redacted]' || fail 'unknown path is not redacted'
 
 echo "self-mount transaction tests passed: ${FINAL_SCRIPT:-atomic}"
 

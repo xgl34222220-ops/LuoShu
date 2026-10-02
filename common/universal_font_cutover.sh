@@ -260,7 +260,7 @@ _uc_switch() {
     fi
 
     if [ "${UC_COMPOSITE_REQUEST:-false}" = true ]; then
-        _uc_python - "$UC_ROUTE" "$CONFIG_DIR/universal-mixed-coverage.conf" "$LUOSHU_MIX_REQUEST_ID" "$UC_ARTIFACTS" <<'PYCOVER'
+        _uc_python - "$UC_ROUTE" "$CONFIG_DIR/universal-mixed-coverage.conf" "$LUOSHU_MIX_REQUEST_ID" "$UC_ARTIFACTS" "$UC_PLAN" <<'PYCOVER'
 import json,os,sys
 from pathlib import Path
 route=json.loads(Path(sys.argv[1]).read_text())
@@ -274,10 +274,14 @@ mark_count=sum(int((item.get('report', {}).get('transformed', {}).get('layout', 
                for item in artifacts.get('artifacts', []))
 clock_count=sum(int((item.get('report', {}).get('transformed', {}).get('layout', {}) or {}).get('preservedClockPunctuation') or 0)
                 for item in artifacts.get('artifacts', []))
-coverage=('partial-direct-path-uncovered' if direct_missing else
+plan=json.loads(Path(sys.argv[5]).read_text())
+unsealed=sum('unsealed-physical-candidate' in (t.get('reasons') or []) for t in plan.get('targets',{}).values())
+coverage=('partial-unverified-originals' if unsealed else
+          'partial-direct-path-uncovered' if direct_missing else
           'partial-protected-typography' if math_count or mark_count or clock_count else
           'partial-style-preserved' if count or deferred else 'planned-targets')
 parts=[]
+if unsealed: parts.append('%s 个无法验证原厂来源的路径未覆盖' % unsealed)
 if count: parts.append('保留 %s 条原厂样式路由' % count)
 if deferred: parts.append('%s 条路由仍使用已验证兼容表示' % deferred)
 if direct_missing: parts.append('%s 个原文件路径未覆盖' % direct_missing)
@@ -287,7 +291,7 @@ if clock_count: parts.append('保留 %s 处原厂钟表标点' % clock_count)
 message=('通用引擎已准备，'+ '，'.join(parts)+'（部分覆盖），请完整重启'
          if parts else '通用引擎字体负载已准备，请完整重启')
 p=Path(sys.argv[2]);tmp=p.with_name(p.name+'.tmp.'+str(os.getpid()))
-tmp.write_text('requestId='+sys.argv[3]+'\ncoverage='+coverage+'\npreservedStyleRoutes='+str(count)+'\nrepresentationDeferrals='+str(deferred)+'\ndirectPathUnsupportedCount='+str(direct_missing)+'\npreservedMathGlyphs='+str(math_count)+'\npreservedSharedMarks='+str(mark_count)+'\npreservedClockPunctuation='+str(clock_count)+'\nmessage='+message+'\n')
+tmp.write_text('requestId='+sys.argv[3]+'\ncoverage='+coverage+'\nunsealedPhysicalTargetCount='+str(unsealed)+'\npreservedStyleRoutes='+str(count)+'\nrepresentationDeferrals='+str(deferred)+'\ndirectPathUnsupportedCount='+str(direct_missing)+'\npreservedMathGlyphs='+str(math_count)+'\npreservedSharedMarks='+str(mark_count)+'\npreservedClockPunctuation='+str(clock_count)+'\nmessage='+message+'\n')
 os.replace(tmp,p)
 PYCOVER
         _uc_log "mixed coverage: $(_uc_value "$CONFIG_DIR/universal-mixed-coverage.conf" message)"

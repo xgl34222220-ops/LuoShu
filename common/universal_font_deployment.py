@@ -280,7 +280,7 @@ def _copy_retained_originals(route_plan, stage, records):
     with stock_font_view.session(stage.parent):
         for original_id, original in sorted(route_plan["retainedOriginals"].items()):
             target = original["target"]
-            stock = universal_font_compiler._resolve_stock(original["targetPath"], stock_paths, False)
+            stock = universal_font_compiler._resolve_stock(original["targetPath"], stock_paths, False, target=target)
             import fixed_static_xml_compiler
             evidence = fixed_static_xml_compiler.verify_original_face(target, stock, original["faceIndex"])
             if evidence.get("sha256") != original["sha256"]:

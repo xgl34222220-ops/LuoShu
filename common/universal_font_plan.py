@@ -823,6 +823,20 @@ def _plan_slot(
         )
         return base
 
+    # A live filename probe describes visibility, not a captured stock font.
+    # OEM theme selectors and aliases created by an old module can appear here
+    # while being absent from the proven inventory. Do not promote them to
+    # mandatory compilation inputs or guess another font's original contract.
+    identity = slot.get("stockIdentity") or {}
+    if (slot.get("source") == "physical-scan" and not base["xmlRefs"]
+            and not slot.get("dynamicIdentity")
+            and (identity.get("provenance") or {}).get("verified") is not True):
+        base.update(action="review", status="review", role="unknown-protected",
+                    unverifiedRole=role, roleConfidence=0, roleAction="review",
+                    reasons=["unsealed-physical-candidate"],
+                    risks=["unverified-original-source"])
+        return base
+
     face, selection = _select_face(faces, role, slot)
     base["sourceCandidates"] = [
         _source_ref(candidate)

@@ -4,6 +4,40 @@
 # module content first, captured stock tree last, and source name KSU for unified cleanup.
 set +e
 
+# Diagnostic fields are bounded tokens/counts only. Never copy mount stderr,
+# which may contain private source directories, into a support log.
+_luoshu_backend_log() (
+    type _luoshu_self_log >/dev/null 2>&1 || exit 0
+    _luoshu_self_log "mount-backend $*"
+    exit 0
+)
+
+_luoshu_backend_mount_attempt() (
+    stage="$1"; key="$2"; shift 2
+    key=$(printf '%s' "$key" | tr -c 'A-Za-z0-9_-' '_')
+    if error=$(_luoshu_mount_cmd "$@" 2>&1 >/dev/null); then
+        _luoshu_backend_log "stage=$stage component=$key result=mounted"
+        exit 0
+    else
+        rc=$?
+    fi
+    # mount(8) reports text rather than errno. Preserve its exit code and a
+    # conservative error class; unrecognized/localized errors remain unknown.
+    case "$error" in
+        *'Permission denied'*|*'Operation not permitted'*) reason=permission-denied ;;
+        *'Invalid argument'*) reason=invalid-argument ;;
+        *'No such device'*) reason=no-such-device ;;
+        *'not supported'*) reason=not-supported ;;
+        *'Cannot allocate memory'*|*'Out of memory'*) reason=out-of-memory ;;
+        *'No space left on device'*) reason=no-space ;;
+        *'No such file or directory'*) reason=path-unavailable ;;
+        *'Device or resource busy'*) reason=busy ;;
+        *) reason=unknown ;;
+    esac
+    _luoshu_backend_log "stage=$stage component=$key result=failed exitCode=$rc errorClass=$reason"
+    exit "$rc"
+)
+
 luoshu_self_mount_stage_for_manager() {
     case "${1:-unknown}" in
         APatch|KernelSU|KernelSU*|SukiSU|SukiSU*)
@@ -26,14 +60,46 @@ _luoshu_prepare_lower_mountpoint() (
     mkdir -p "$point" 2>/dev/null
 )
 
+# Command success alone is insufficient: verify the mount actually reached by
+# this path has no propagation peers before exposing any replacement fonts.
+_luoshu_mount_is_private() (
+    point="$1"
+    id=$(_luoshu_visible_mount_id "$point") || exit 1
+    case "$id" in ''|0|*[!0-9]*) exit 1 ;; esac
+    awk -v id="$id" -v p="$point" '
+        $1==id && $5==p {
+            found=1
+            for(i=7;i<=NF && $i!="-";i++)
+                if($i ~ /^(shared|master|propagate_from):/) bad=1
+        }
+        END {exit !found || bad}
+    ' /proc/self/mountinfo
+)
+
+_luoshu_make_private() (
+    point="$1"; key="${1##*/}"
+    if _luoshu_backend_mount_attempt private-option "$key" -o private none "$point" &&
+       _luoshu_mount_is_private "$point"; then
+        exit 0
+    fi
+    # BusyBox builds can reject the two-operand -o spelling while supporting
+    # --make-private. Retry only the same isolation operation, then prove it.
+    if _luoshu_backend_mount_attempt private-long-option "$key" --make-private "$point" &&
+       _luoshu_mount_is_private "$point"; then
+        exit 0
+    fi
+    _luoshu_backend_log 'stage=private-verify result=failed reason=propagation-not-proven'
+    exit 1
+)
+
 _luoshu_bind_private_lower() (
     source="$1";point="$2"
     # Register our empty prepared mount point before a cancellable mount call.
     if [ -n "${_lsme_mount_list:-}" ]; then
         printf '%s\n' "$point" >> "$_lsme_mount_list" || exit 1
     fi
-    if ! _luoshu_mount_cmd -o bind "$source" "$point" >/dev/null 2>&1 ||
-       ! _luoshu_mount_cmd -o private none "$point" >/dev/null 2>&1; then
+    if ! _luoshu_backend_mount_attempt lower-bind "${point##*/}" -o bind "$source" "$point" ||
+       ! _luoshu_make_private "$point"; then
         _luoshu_umount_cmd "$point" >/dev/null 2>&1 || true
         rmdir "$point" 2>/dev/null || true
         exit 1
@@ -159,14 +225,18 @@ _luoshu_overlay_memory_layer() (
     total=$((used + capacity))
     available=$(awk '/^MemAvailable:/{print $2;exit}' /proc/meminfo)
     case "$available" in ''|*[!0-9]*) exit 1 ;; esac
-    [ "$total" -le 262144 ] && [ "$total" -le $((available / 8)) ] || exit 1
+    _luoshu_backend_log "stage=memory-budget payloadAllocatedKiB=$kb requestedKiB=$capacity totalKiB=$total limitKiB=262144 memAvailableKiB=$available"
+    if [ "$total" -gt 262144 ] || [ "$total" -gt $((available / 8)) ]; then
+        _luoshu_backend_log 'stage=memory-budget result=rejected reason=bounded-memory-limit'
+        exit 1
+    fi
     # Reject a nonempty/still-mounted prior view instead of removing its files.
     if [ -e "$point" ]; then rmdir "$point" 2>/dev/null || exit 1; fi
     mkdir -p "$point" || exit 1
     printf '%s\n' "$point" >> "$_lsme_mount_list" || exit 1
     printf '%s\n' "$total" > "$state/memory-layer-kb" || exit 1
-    _luoshu_mount_cmd -t tmpfs -o "size=${capacity}k,mode=0755,nosuid,nodev,noexec" luoshu-layer "$point" >/dev/null 2>&1 || exit 1
-    _luoshu_mount_cmd -o private none "$point" >/dev/null 2>&1 || exit 1
+    _luoshu_backend_mount_attempt memory-tmpfs "${point##*/}" -t tmpfs -o "size=${capacity}k,mode=0755,nosuid,nodev,noexec" luoshu-layer "$point" || exit 1
+    _luoshu_make_private "$point" || exit 1
     cp -R "$source/." "$point/" 2>/dev/null || exit 1
     _luoshu_memory_tree_inventory "$source" "$inventory.after" || exit 1
     _luoshu_memory_tree_inventory "$point" "$inventory.copy" || exit 1
@@ -187,7 +257,7 @@ _luoshu_overlay_try() (
     baseline=$(_luoshu_visible_mount_id "$target") || exit 1
     printf '%s|%s|%s|%s\n' "$source" "$lower" "$target" "$baseline" > "$intent.tmp.$$" || exit 1
     mv "$intent.tmp.$$" "$intent" || exit 1
-    if _luoshu_mount_cmd -t overlay KSU -o "ro,lowerdir=$source:$lower" "$target" >/dev/null 2>&1; then
+    if _luoshu_backend_mount_attempt overlay "$key" -t overlay KSU -o "ro,lowerdir=$source:$lower" "$target"; then
         owned=$(_luoshu_visible_mount_id "$target") || exit 1
         [ "$owned" != "$baseline" ] || exit 1
         printf '%s|%s|%s|%s|%s\n' "$source" "$lower" "$target" "$baseline" "$owned" > "$intent.tmp.$$" || exit 1
@@ -245,6 +315,10 @@ _luoshu_overlay_mount_dir() {
     _lsomb_key="$3"
     _lsomb_state=$(_luoshu_self_state_root)
     _lsomb_lower="$_lsomb_state/lower/$_lsomb_key"
+    _lsomb_diag_key=$(printf '%s' "$_lsomb_key" | tr -c 'A-Za-z0-9_-' '_')
+    _lsomb_payload_kb=$(du -sk "$_lsomb_source" 2>/dev/null | awk '{print $1}')
+    case "$_lsomb_payload_kb" in ''|*[!0-9]*) _lsomb_payload_kb=unknown ;; esac
+    _luoshu_backend_log "stage=component-start component=$_lsomb_diag_key payloadAllocatedKiB=$_lsomb_payload_kb requiredAssets=${LUOSHU_REQUIRED_PAYLOAD_FILES:-0}"
 
     _lsomb_guarded_xml=0
     _lsomb_failure=1
@@ -254,8 +328,12 @@ _luoshu_overlay_mount_dir() {
         _lsomb_failure=3
     fi
     [ -d "$_lsomb_source" ] && [ -d "$_lsomb_target" ] || return "$_lsomb_failure"
-    _luoshu_prepare_lower_mountpoint "$_lsomb_lower" || return "$_lsomb_failure"
-    _luoshu_bind_private_lower "$_lsomb_target" "$_lsomb_lower" || return "$_lsomb_failure"
+    _luoshu_prepare_lower_mountpoint "$_lsomb_lower" || {
+        _luoshu_backend_log "stage=lower-prepare component=$_lsomb_diag_key result=failed"; return "$_lsomb_failure";
+    }
+    _luoshu_bind_private_lower "$_lsomb_target" "$_lsomb_lower" || {
+        _luoshu_backend_log "stage=lower-bind component=$_lsomb_diag_key result=failed"; return "$_lsomb_failure";
+    }
     if [ "$_lsomb_guarded_xml" = 1 ]; then
         _luoshu_config_copy_labels_allowed "$_lsomb_source" "$_lsomb_key" "$_lsomb_lower" || return 3
     fi
@@ -264,6 +342,7 @@ _luoshu_overlay_mount_dir() {
     # A direct source with different labels must take the owned-copy route.
     if [ "$_lsomb_guarded_xml" = 0 ] || _luoshu_config_contexts_match "$_lsomb_source" "$_lsomb_lower"; then
         if _luoshu_overlay_try "$_lsomb_source" "$_lsomb_lower" "$_lsomb_target" "$_lsomb_key" "$_lsomb_state"; then
+            _luoshu_backend_log "stage=selected component=$_lsomb_diag_key backend=direct-overlay"
             return 0
         fi
     fi
@@ -287,12 +366,16 @@ _luoshu_overlay_mount_dir() {
             _luoshu_universal_xml_copy_check "$_lsomb_source" "$_lsomb_lower" "$_lsomb_memory" || return 3
         fi
         if _luoshu_overlay_try "$_lsomb_memory" "$_lsomb_lower" "$_lsomb_target" "$_lsomb_key" "$_lsomb_state"; then
+            _luoshu_backend_log "stage=selected component=$_lsomb_diag_key backend=memory-overlay"
             return 0
         fi
     fi
 
     # 3 is a proof/publication failure, never a request for file-bind fallback.
-    [ "$_lsomb_guarded_xml" = 0 ] || return 3
+    [ "$_lsomb_guarded_xml" = 0 ] || {
+        _luoshu_backend_log "stage=selected component=$_lsomb_diag_key backend=none reason=sealed-xml-overlay-required"; return 3;
+    }
+    _luoshu_backend_log "stage=selected component=$_lsomb_diag_key backend=bind-preflight"
     _luoshu_umount_cmd "$_lsomb_lower" >/dev/null 2>&1 || true
     rmdir "$_lsomb_lower" 2>/dev/null || true
     return 1

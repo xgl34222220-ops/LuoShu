@@ -29,6 +29,40 @@ class HomeContractTest {
     }
 
     @Test
+    fun liveRequestDoesNotReusePreviousMountFailureMessage() {
+        for (taskState in listOf("running", "queued")) {
+            val snapshot = ModuleSnapshot(
+                installed = true,
+                rootGranted = true,
+                activeFont = "PreviousFont",
+                effectiveFont = "default",
+                fontEffectState = "failed",
+                verificationReason = "physical-target-conflict",
+                mountState = "failed",
+                taskState = taskState,
+                taskMessage = "正在准备当前字体任务",
+                taskProgress = 14,
+            )
+            val state = snapshot.toHomeUiState()
+            assertTrue(state.taskRunning)
+            assertEquals("字体任务执行中", state.taskTitle)
+            assertEquals("正在准备当前字体任务", state.taskMessage)
+            assertEquals(14, state.taskProgress)
+            assertEquals("系统默认字体（PreviousFont未生效）", state.currentFont)
+            assertFalse(state.mountHealthy)
+            assertTrue(snapshot.effectFailed)
+            assertTrue(snapshot.effectFailureMessage.isNotBlank())
+
+            // Finishing the new request must not turn an unverified mount green.
+            val finished = snapshot.copy(taskState = "success").toHomeUiState()
+            assertFalse(finished.taskRunning)
+            assertEquals("字体未生效", finished.taskTitle)
+            assertEquals(snapshot.effectFailureMessage, finished.taskMessage)
+            assertFalse(finished.mountHealthy)
+        }
+    }
+
+    @Test
     fun verifiedMountShowsConfiguredFontAsEffective() {
         val state = ModuleSnapshot(
             loading = false,

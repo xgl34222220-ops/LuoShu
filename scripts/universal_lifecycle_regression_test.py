@@ -301,10 +301,11 @@ except OSError as error:
         source=(ROOT/'common/universal_font_cutover.sh').read_text()
         body=source.split("<<'PYCOVER'\n",1)[1].split('\nPYCOVER',1)[0]
         with tempfile.TemporaryDirectory() as raw:
-            t=Path(raw);route=t/'route.json';artifacts=t/'artifacts.json';output=t/'coverage.conf'
+            t=Path(raw);route=t/'route.json';artifacts=t/'artifacts.json';output=t/'coverage.conf';plan=t/'plan.json'
+            plan.write_text(json.dumps({'targets':{}}))
             route.write_text(json.dumps({'preservedRoutes':[{}]}))
             artifacts.write_text(json.dumps({'artifacts':[{'report':{'transformed':{'layout':{'preservedMathGlyphs':3,'preservedSharedMarks':2,'preservedClockPunctuation':1}}}}]}))
-            result=subprocess.run([sys.executable,'-',str(route),str(output),'request-test',str(artifacts)],input=body,text=True,capture_output=True)
+            result=subprocess.run([sys.executable,'-',str(route),str(output),'request-test',str(artifacts),str(plan)],input=body,text=True,capture_output=True)
             self.assertEqual(result.returncode,0,result.stderr)
             content=output.read_text()
             self.assertIn('coverage=partial-protected-typography',content)
@@ -313,6 +314,14 @@ except OSError as error:
             self.assertIn('原厂钟表标点',content)
             self.assertIn('preservedSharedMarks=2',content)
             self.assertIn('部分覆盖',content)
+            plan.write_text(json.dumps({'targets':{'/system/fonts/Unsealed.ttf':{
+                'reasons':['unsealed-physical-candidate']}}}))
+            result=subprocess.run([sys.executable,'-',str(route),str(output),'request-test',str(artifacts),str(plan)],input=body,text=True,capture_output=True)
+            self.assertEqual(result.returncode,0,result.stderr)
+            content=output.read_text()
+            self.assertIn('coverage=partial-unverified-originals',content)
+            self.assertIn('unsealedPhysicalTargetCount=1',content)
+            self.assertIn('无法验证原厂来源的路径未覆盖',content)
 
     def test_dynamic_generation_changed_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
