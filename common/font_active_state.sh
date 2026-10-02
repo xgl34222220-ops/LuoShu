@@ -31,7 +31,15 @@ luoshu_active_payload_verified() {
     _las_verify_active=$(_luoshu_active_state_value "$_las_verify" activeFont)
     [ "$_las_verify_state" = verified ] || return 1
     [ "$_las_verify_active" = "$_las_expected" ] || return 1
-    case "$_las_verify_mode" in aligned|mount-verified|mount-confirmed) ;; *) return 1 ;; esac
+    case "$_las_verify_mode" in aligned) ;; *) return 1 ;; esac
+    _las_now="${LUOSHU_TEST_BOOT_ID:-$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')}"
+    _las_boot="$_las_config/font-payload-boot.conf"
+    _las_generation=$(_luoshu_active_state_value "$_las_boot" generation)
+    [ -n "$_las_now" ] && [ -n "$_las_generation" ] || return 1
+    [ "$(_luoshu_active_state_value "$_las_boot" font)" = "$_las_expected" ] || return 1
+    [ "$(_luoshu_active_state_value "$_las_boot" bootId)" = "$_las_now" ] || return 1
+    [ "$(_luoshu_active_state_value "$_las_verify" bootId)" = "$_las_now" ] || return 1
+    [ "$(_luoshu_active_state_value "$_las_verify" generation)" = "$_las_generation" ] || return 1
     [ "$(_luoshu_active_state_value "$_las_config/self-mount.conf" state)" != failed ] || return 1
     return 0
 }

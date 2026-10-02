@@ -68,60 +68,21 @@ fi
     _boot_id=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')
     _now=$(date +%s 2>/dev/null || echo 0)
 
-    rm -f "$MODDIR/config/text_reboot_required.conf" 2>/dev/null || true
-
-    _verify_state=pending
-    _verify_mode=compatibility
-    _verify_reason=awaiting-mount-confirmation
-    if [ "$_active" = default ]; then
-        _verify_state=not-applicable
-        _verify_mode=system
-        _verify_reason=default-font
-    else
-        case "$_mount_state" in
-            mounted|degraded|confirmed|verified)
-                _verify_state=verified
-                _verify_mode=mount-confirmed
-                _verify_reason=physical-self-mount-active
-                ;;
-            failed)
-                _verify_state=failed
-                _verify_mode=compatibility
-                _verify_reason="self-mount-failed${_mount_failed:+:$_mount_failed}"
-                ;;
-            *)
-                _verify_state=pending
-                _verify_mode=compatibility
-                _verify_reason=mount-state-not-confirmed
-                ;;
-        esac
+    # A mount transaction is not a Typeface consumer proof. The common verifier
+    # binds even mount-only evidence to this boot, generation and selected font.
+    if [ -f "$MODDIR/common/device_font_load_verify.sh" ]; then
+        MODDIR="$MODDIR" MODULE_DIR="$MODDIR" sh "$MODDIR/common/device_font_load_verify.sh" status >> "$LOG" 2>&1 || true
     fi
-
-    {
-        printf 'state=%s\n' "$_verify_state"
-        printf 'mode=%s\n' "$_verify_mode"
-        printf 'activeFont=%s\n' "$_active"
-        printf 'reason=%s\n' "$_verify_reason"
-        printf 'bootId=%s\n' "$_boot_id"
-        printf 'time=%s\n' "$_now"
-    } > "${VERIFY}.tmp.$$" 2>/dev/null && mv -f "${VERIFY}.tmp.$$" "$VERIFY" 2>/dev/null || true
-    chmod 0644 "$VERIFY" 2>/dev/null || true
-
-    case "$_verify_state" in
-        verified|not-applicable)
-            rm -rf "$MODDIR/.luoshu-retired" "$MODDIR"/.luoshu-payload-stage.* 2>/dev/null || true
-            printf '[%s] font load confirmed: active=%s mount=%s\n' \
-                "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_active" "$_mount_state" >> "$LOG" 2>/dev/null
-            ;;
-        failed)
-            printf '[%s] font load FAILED: active=%s mount=%s detail=%s; retired payload retained\n' \
-                "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_active" "$_mount_state" "$_mount_failed" >> "$LOG" 2>/dev/null
-            ;;
-        *)
-            printf '[%s] font load pending: active=%s mount=%s; retired payload retained\n' \
-                "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_active" "${_mount_state:-unknown}" >> "$LOG" 2>/dev/null
-            ;;
-    esac
+    [ ! -f "$MODDIR/common/font_boot_state.sh" ] || . "$MODDIR/common/font_boot_state.sh"
+    type luoshu_android_boot_health_record >/dev/null 2>&1 && luoshu_android_boot_health_record || true
+    _verify_state=$(sed -n 's/^state=//p' "$VERIFY" 2>/dev/null | head -n1)
+    if [ "$_active" = default ]; then
+        rm -rf "$MODDIR/.luoshu-retired" "$MODDIR"/.luoshu-payload-stage.* 2>/dev/null || true
+    fi
+    # Keep rollback assets for custom fonts until actual consumer assurance exists.
+    # Unconfirmed consumption is not a reason to reset a visibly working font.
+    printf '[%s] font evidence: active=%s mount=%s state=%s; custom rollback retained\n' \
+        "$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null)" "$_active" "$_mount_state" "${_verify_state:-pending}" >> "$LOG" 2>/dev/null
 
     if [ -f "$MODDIR/config/app_install_pending" ] && [ -f "$MODDIR/common/app_installer.sh" ]; then
         MODDIR="$MODDIR" sh "$MODDIR/common/app_installer.sh" service-retry >> "$LOG" 2>&1 || true

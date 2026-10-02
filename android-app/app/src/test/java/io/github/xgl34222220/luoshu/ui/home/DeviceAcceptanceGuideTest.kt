@@ -60,7 +60,7 @@ class DeviceAcceptanceGuideTest {
     }
 
     @Test
-    fun compatibilityPayloadWithPid1MountEvidencePassesAcceptance() {
+    fun pid1MountEvidenceDoesNotProveConsumerCoverage() {
         val checks = deviceAcceptanceAutoChecks(
             state = HomeUiState(
                 rootGranted = true,
@@ -79,7 +79,8 @@ class DeviceAcceptanceGuideTest {
             ),
         )
 
-        assertTrue(checks.all { it.automatic && it.passed })
-        assertTrue(checks.first { it.id == "alignment" }.detail.contains("字体负载已生效"))
+        assertFalse(checks.first { it.id == "alignment" }.passed)
+        assertFalse(checks.first { it.id == "alignment" }.blocking)
+        assertTrue(checks.first { it.id == "alignment" }.detail.contains("仍待确认"))
     }
 }

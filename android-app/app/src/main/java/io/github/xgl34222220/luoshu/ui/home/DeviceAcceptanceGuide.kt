@@ -106,8 +106,8 @@ internal fun deviceAcceptanceAutoChecks(
         detail = when {
             trust.alignment == "verified" && trust.mode == "aligned" ->
                 "逐分区开机加载验证通过，当前为设备对齐模式"
-            trust.alignment == "verified" && trust.mode == "mount-verified" ->
-                "逐分区系统可见性验证通过，当前字体负载已生效"
+            trust.mode in setOf("mount-verified", "mount-confirmed") ->
+                "挂载证据已记录，实际应用取字与完整覆盖仍待确认"
             trust.level == DeviceTrustLevel.COMPATIBILITY || trust.mode == "compatibility" ->
                 "兼容映射已生成，但尚无系统实际加载证据，不能判定字体已经生效"
             trust.alignment == "failed" || trust.error.isNotBlank() ->
@@ -116,7 +116,7 @@ internal fun deviceAcceptanceAutoChecks(
             state.rebootRequired -> "当前字体等待完整重启后验证"
             else -> "加载证据正在后台刷新，不需要反复重启"
         },
-        passed = trust.alignment == "verified" && trust.mode in setOf("aligned", "mount-verified"),
+        passed = trust.alignment == "verified" && trust.mode == "aligned",
         automatic = true,
         blocking = trust.alignment == "failed" || trust.error.isNotBlank(),
     ),

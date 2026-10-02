@@ -78,6 +78,29 @@ font_config_boot_guard Demo
 [ "$(luoshu_payload_schema_read)" = "$LUOSHU_PAYLOAD_SCHEMA_CURRENT" ]
 [ -s "$MODDIR/config/font-last-boot-success.conf" ]
 
+# A normal second boot refreshes identity without changing its generation.
+_gen=$(sed -n 's/^generation=//p' "$MODDIR/config/font-payload-boot.conf")
+LUOSHU_CURRENT_BOOT_ID=boot-e
+font_config_boot_guard Demo || exit 1
+[ "$(sed -n 's/^state=//p' "$MODDIR/config/font-payload-boot.conf")" = booting ] || exit 1
+[ "$(sed -n 's/^bootId=//p' "$MODDIR/config/font-payload-boot.conf")" = boot-e ] || exit 1
+[ "$(sed -n 's/^generation=//p' "$MODDIR/config/font-payload-boot.conf")" = "$_gen" ] || exit 1
+
+# Completed Android boots with inconclusive font consumption never look like loops.
+. "$ROOT/common/font_boot_state.sh"
+getprop() { [ "$1" = sys.boot_completed ] && printf '1\n'; }
+printf 'Demo\n' > "$MODDIR/config/active_font.conf"
+for previous in boot-e boot-f boot-g; do
+    LUOSHU_TEST_BOOT_ID=$previous
+    luoshu_android_boot_health_record || exit 1
+    case "$previous" in boot-e) LUOSHU_CURRENT_BOOT_ID=boot-f ;; boot-f) LUOSHU_CURRENT_BOOT_ID=boot-g ;; boot-g) LUOSHU_CURRENT_BOOT_ID=boot-h ;; esac
+    font_config_boot_guard Demo || exit 1
+    [ "$(cat "$MODDIR/config/active_font.conf")" = Demo ] || exit 1
+    [ "$(sed -n 's/^bootId=//p' "$MODDIR/config/font-payload-boot.conf")" = "$LUOSHU_CURRENT_BOOT_ID" ] || exit 1
+done
+unset LUOSHU_TEST_BOOT_ID
+
+
 # Even a structurally valid old payload is rejected before Zygote when its engine schema is stale.
 printf 'schema=legacy-v1\n' >"$MODDIR/config/font-payload-schema.conf"
 if font_config_boot_guard Demo; then

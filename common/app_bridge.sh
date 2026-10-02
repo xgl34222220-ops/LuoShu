@@ -152,7 +152,28 @@ status_json() {
         _verification_active="$(read_prop "$_verification_file" activeFont)"
         _mount_state="$(read_prop "$MODDIR/config/self-mount.conf" state)"
         _mount_failed="$(read_prop "$MODDIR/config/self-mount.conf" failed)"
+        # A filename/layout/mount result does not identify the Typeface in an app.
+        case "$_verification_mode" in
+            mount-verified|mount-confirmed) [ "$_verification_state" != verified ] || _verification_state=mounted ;;
+        esac
         case "$_verification_state" in
+            verified|mounted)
+                _vb="$MODDIR/config/font-payload-boot.conf"
+                _vg=$(read_prop "$_vb" generation)
+                _vn="${LUOSHU_TEST_BOOT_ID:-$(cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n')}"
+                if [ -z "$_vg" ] || [ -z "$_vn" ] ||
+                   [ "$(read_prop "$_vb" font)" != "$_active" ] ||
+                   [ "$_verification_active" != "$_active" ] ||
+                   [ "$(read_prop "$_vb" bootId)" != "$_vn" ] ||
+                   [ "$(read_prop "$_verification_file" bootId)" != "$_vn" ] ||
+                   [ "$(read_prop "$_verification_file" generation)" != "$_vg" ]; then
+                    _verification_state=pending
+                    _verification_reason=stale-verification
+                fi
+                ;;
+        esac
+        case "$_verification_state" in
+            mounted) _verification_grade=WARN ;;
             verified) _verification_grade=PASS ;;
             failed) _verification_grade=FAIL ;;
             *) _verification_grade=PENDING ;;
@@ -233,9 +254,11 @@ status_json() {
         else
             _effective_active=default
         fi
+    elif [ "$_verification_state" = mounted ]; then
+        _font_effect_state=mount-only
     elif [ "$_verification_state" = verified ]; then
         case "$_verification_mode" in
-            aligned|mount-verified|mount-confirmed|universal-pass)
+            aligned|universal-pass)
                 _effective_active="$_active"
                 _font_effect_state=verified
                 ;;

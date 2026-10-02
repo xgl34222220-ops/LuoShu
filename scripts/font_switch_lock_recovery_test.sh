@@ -69,9 +69,10 @@ for f in common/multiweight_mix_task.sh common/weighted_mix_task.sh .luoshu-runt
   grep -q 'luoshu_font_lock_busy' "$ROOT/$f" || fail "$f busy missing"
 done
 # Root service is now a router: it must select the preserved v4 service when legacy mode is absent,
-# while legacy mode intentionally skips v4 load verification/rebuild work entirely.
+# while legacy mode uses only bounded metadata status, never the deep verifier.
 grep -q '.luoshu-runtime/core/service.sh' "$ROOT/service.sh" || fail 'service router missing v4 backend'
 grep -q 'font_runtime_legacy_v14_4.conf' "$ROOT/service.sh" || fail 'service router missing legacy mode guard'
-! grep -q 'device_font_load_verify.sh' "$ROOT/service.sh" || fail 'legacy router unexpectedly owns v4 load verification'
+grep -q 'device_font_load_verify.sh" status' "$ROOT/service.sh" || fail 'legacy metadata status missing'
+! grep -E 'device_font_load_verify.sh" (verify|deep)' "$ROOT/service.sh" || fail 'legacy router runs deep verification'
 grep -q 'luoshu_font_lock_force_clear' "$ROOT/common/module_update_state.sh" || fail 'update force_clear missing'
 echo 'font_switch_lock_recovery_test: PASS'

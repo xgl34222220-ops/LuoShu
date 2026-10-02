@@ -211,7 +211,7 @@ MODULE_DIR="$MODDIR"
             _load_verify_rc=$?
             _load_verify_state=$(sed -n 's/^state=//p' "$MODDIR/config/device-font-load-verification.conf" 2>/dev/null | head -n1)
             case "$_load_verify_state" in
-                verified|not-applicable) break ;;
+                verified|mounted|not-applicable) break ;;
             esac
             [ "$_load_verify_attempt" -lt 3 ] && sleep 3
             _load_verify_attempt=$((_load_verify_attempt + 1))
@@ -225,6 +225,16 @@ MODULE_DIR="$MODDIR"
                 rm -f "$MODDIR/config/font-mount-verify-failures" \
                     "$MODDIR/config/text_reboot_required.conf" 2>/dev/null || true
                 log_service "INFO" "设备字体加载与主命名空间挂载验证完成"
+                ;;
+            mounted)
+                type font_config_mark_boot_success >/dev/null 2>&1 && font_config_mark_boot_success
+                rm -f "$MODDIR/config/font-mount-verify-failures" 2>/dev/null || true
+                log_service "INFO" "挂载事务已核对，应用实际取字尚待验证；保留回滚负载"
+                ;;
+            pending|compatibility|"")
+                # Missing consumer/current-generation evidence is inconclusive,
+                # never a reason to quarantine a visibly working font.
+                log_service "INFO" "字体加载证据未齐，保留当前负载和事务，不累计失败或自动恢复默认"
                 ;;
             not-applicable)
                 rm -f "$MODDIR/config/font-mount-verify-failures" \
@@ -242,6 +252,7 @@ MODULE_DIR="$MODDIR"
                     printf '%s\n' "$_mount_fail_count" > "$_mount_fail_file" 2>/dev/null || true
                     if [ "$_mount_fail_count" -lt 3 ]; then
                         {
+                            sed -n '/^generation=/p; /^bootId=/p' "$MODDIR/config/font-payload-boot.conf"
                             printf 'state=prepared\n'
                             printf 'font=%s\n' "$_active_verify"
                             printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
@@ -256,6 +267,7 @@ MODULE_DIR="$MODDIR"
                         # mount may converge without forcing the user back to the ROM default.
                         printf '3\n' > "$_mount_fail_file" 2>/dev/null || true
                         {
+                            sed -n '/^generation=/p; /^bootId=/p' "$MODDIR/config/font-payload-boot.conf"
                             printf 'state=prepared\n'
                             printf 'font=%s\n' "$_active_verify"
                             printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
@@ -270,6 +282,8 @@ MODULE_DIR="$MODDIR"
                 ;;
         esac
     fi
+    [ ! -f "$MODDIR/common/font_boot_state.sh" ] || . "$MODDIR/common/font_boot_state.sh"
+    type luoshu_android_boot_health_record >/dev/null 2>&1 && luoshu_android_boot_health_record || true
     type luoshu_text_reboot_reconcile >/dev/null 2>&1 && \
         luoshu_text_reboot_reconcile >/dev/null 2>&1 || true
     if [ -f "$MODDIR/common/module_status.sh" ]; then

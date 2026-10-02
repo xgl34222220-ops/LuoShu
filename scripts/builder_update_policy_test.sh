@@ -116,6 +116,9 @@ fi
 # A same-font request must not reuse this old confirmed payload while the new
 # builder is pending. Check a complete proof first to exclude unrelated guards.
 printf 'state=verified\nmode=aligned\nactiveFont=mix\n' > "$NEW/config/device-font-load-verification.conf"
+for proof in font-payload-boot.conf device-font-load-verification.conf; do
+    printf 'bootId=%s\ngeneration=preserved-generation\n' "$(cat /proc/sys/kernel/random/boot_id)" >> "$NEW/config/$proof"
+done
 mv "$NEW/config/font-payload-rebuild-pending.conf" "$TMP/pending.conf"
 MODULE_DIR="$NEW" sh -c '. "$1/common/font_active_state.sh"; luoshu_active_payload_verified mix' sh "$ROOT"
 mv "$TMP/pending.conf" "$NEW/config/font-payload-rebuild-pending.conf"

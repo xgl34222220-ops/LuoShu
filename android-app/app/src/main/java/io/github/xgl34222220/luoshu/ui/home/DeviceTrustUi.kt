@@ -84,8 +84,9 @@ internal data class DeviceTrustState(
             mountState == "failed" -> DeviceTrustLevel.ISSUE
             alignment == "failed" || reason in failedTrustReasons -> DeviceTrustLevel.ISSUE
             reapplyPending -> DeviceTrustLevel.PENDING
-            alignment == "verified" && mode in setOf("aligned", "mount-verified", "mount-confirmed") -> DeviceTrustLevel.VERIFIED
+            alignment == "verified" && mode == "aligned" -> DeviceTrustLevel.VERIFIED
             alignment == "pending" || reason in pendingTrustReasons -> DeviceTrustLevel.PENDING
+            alignment == "mounted" || mode in setOf("mount-verified", "mount-confirmed") -> DeviceTrustLevel.COMPATIBILITY
             alignment == "compatibility" || mode == "compatibility" -> DeviceTrustLevel.COMPATIBILITY
             engine == "installed" -> DeviceTrustLevel.PENDING
             inventory == "available" -> DeviceTrustLevel.COMPATIBILITY
@@ -123,6 +124,23 @@ internal suspend fun loadDeviceTrustState(): DeviceTrustState {
                 reason=stale-verification
             fi
         fi
+        case "${'$'}alignment" in
+            verified|mounted)
+                proof="${'$'}CFG/device-font-load-verification.conf"
+                boot="${'$'}CFG/font-payload-boot.conf"
+                now="${'$'}(cat /proc/sys/kernel/random/boot_id 2>/dev/null)"
+                generation="${'$'}(read_value "${'$'}boot" generation)"
+                if [ -z "${'$'}generation" ] || [ -z "${'$'}now" ] ||
+                   [ "${'$'}(read_value "${'$'}boot" font)" != "${'$'}active" ] ||
+                   [ "${'$'}verifiedActive" != "${'$'}active" ] ||
+                   [ "${'$'}(read_value "${'$'}boot" bootId)" != "${'$'}now" ] ||
+                   [ "${'$'}(read_value "${'$'}proof" bootId)" != "${'$'}now" ] ||
+                   [ "${'$'}(read_value "${'$'}proof" generation)" != "${'$'}generation" ]; then
+                    alignment=pending
+                    reason=stale-verification
+                fi
+                ;;
+        esac
         cachePending=no
         [ -s "${'$'}CFG/device-font-cache-pending.conf" ] && cachePending=yes
         reapplyState="${'$'}(read_value "${'$'}CFG/font-payload-rebuild-pending.conf" state)"
@@ -295,15 +313,15 @@ private fun deviceTrustPresentation(state: DeviceTrustState): DeviceTrustPresent
             Icons.Rounded.CheckCircle,
             scheme.primary,
         )
-        state.level == DeviceTrustLevel.VERIFIED && state.mode == "mount-verified" -> DeviceTrustPresentation(
-            "本次启动字体已验证",
-            "PID 1 可见字体、配置与洛书负载一致",
+        state.level == DeviceTrustLevel.COMPATIBILITY && state.mode == "mount-verified" -> DeviceTrustPresentation(
+            "字体文件挂载已核对",
+            "可见字体文件与负载一致，应用实际取字仍待确认",
             Icons.Rounded.CheckCircle,
             scheme.primary,
         )
-        state.level == DeviceTrustLevel.VERIFIED && state.mode == "mount-confirmed" -> DeviceTrustPresentation(
-            "本次启动字体已确认",
-            "自挂载事务已确认，当前洛书字体负载已生效",
+        state.level == DeviceTrustLevel.COMPATIBILITY && state.mode == "mount-confirmed" -> DeviceTrustPresentation(
+            "字体挂载事务已确认",
+            "实际应用取字尚未验证，不能据此确认完整覆盖",
             Icons.Rounded.CheckCircle,
             scheme.primary,
         )
@@ -368,7 +386,7 @@ private fun friendlyTrustReason(value: String): String = when (value) {
     "stale-verification" -> "验证记录与当前选择的字体不一致"
     "self-mount-not-confirmed" -> "本次启动的自挂载事务尚未确认"
     "current-boot-mount-confirmed" -> "本次启动的字体、配置与挂载事务均已确认"
-    "physical-self-mount-active" -> "本次启动自挂载已确认，当前字体负载已生效"
+    "physical-self-mount-active" -> "本次启动自挂载已确认，实际应用取字仍待验证"
     "dynamic-config-changed" -> "系统在启动后改写了动态字体配置"
     "verified-by-visible-mounts" -> "系统可见字体文件与洛书负载一致"
     "mount-active-visible-layout-differs" -> "挂载事务已确认；系统字体服务使用了不同的可见路径"

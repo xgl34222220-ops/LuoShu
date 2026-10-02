@@ -15,9 +15,15 @@ export MODDIR MODULE_DIR
 printf 'Demo\n' > "$CFG/active_font.conf"
 printf 'state=confirmed\nfont=Demo\n' > "$CFG/font-payload-boot.conf"
 printf 'system/fonts/Demo.ttf|hash|1234\n' > "$CFG/font-payload-manifest.conf"
-printf 'state=verified\nmode=mount-confirmed\nactiveFont=Demo\n' > "$CFG/device-font-load-verification.conf"
+printf 'state=verified\nmode=aligned\nactiveFont=Demo\n' > "$CFG/device-font-load-verification.conf"
 printf 'state=mounted\n' > "$CFG/self-mount.conf"
 
+bind_evidence() {
+    for f in font-payload-boot.conf device-font-load-verification.conf; do
+        printf 'bootId=%s\ngeneration=test-generation\n' "$(cat /proc/sys/kernel/random/boot_id)" >> "$CFG/$f"
+    done
+}
+bind_evidence
 . "$ROOT/common/font_active_state.sh"
 luoshu_active_payload_verified Demo
 if luoshu_active_payload_verified Other; then
@@ -48,7 +54,7 @@ rm -f "$CFG/text_reboot_required.conf"
 
 printf 'mix\n' > "$CFG/active_font.conf"
 printf 'state=confirmed\nfont=mix\n' > "$CFG/font-payload-boot.conf"
-printf 'state=verified\nmode=mount-confirmed\nactiveFont=mix\n' > "$CFG/device-font-load-verification.conf"
+printf 'state=verified\nmode=aligned\nactiveFont=mix\n' > "$CFG/device-font-load-verification.conf"
 cat > "$CFG/font_mix.conf" <<'EOF_MIX'
 cjk=CJK
 latin=Latin
@@ -63,6 +69,7 @@ cjkMode=fixed
 latinMode=auto
 digitMode=fixed
 EOF_MIX
+bind_evidence
 luoshu_mix_request_matches_active CJK Latin Digit wght=400 wght=500 wght=600 fixed auto fixed
 if luoshu_mix_request_matches_active CJK Latin Other wght=400 wght=500 wght=600 fixed auto fixed; then
     echo 'different composite request reused active payload' >&2
@@ -89,5 +96,18 @@ grep -q '^state=success$' "$CFG/axes_task.conf"
 grep -q '^reused=true$' "$CFG/axes_task.conf"
 test ! -e "$CFG/text_reboot_required.conf"
 
+# Mount-only, earlier boots and different generations never authorize reuse.
+for mutation in mount-mode missing-boot stale-boot wrong-generation wrong-font; do
+    cp "$CFG/device-font-load-verification.conf" "$TMP/saved-proof"
+    case "$mutation" in
+        mount-mode) sed -i 's/mode=aligned/mode=mount-confirmed/' "$CFG/device-font-load-verification.conf" ;;
+        missing-boot) sed -i '/^bootId=/d' "$CFG/device-font-load-verification.conf" ;;
+        stale-boot) sed -i 's/^bootId=.*/bootId=old-boot/' "$CFG/device-font-load-verification.conf" ;;
+        wrong-generation) sed -i 's/^generation=.*/generation=older/' "$CFG/device-font-load-verification.conf" ;;
+        wrong-font) sed -i 's/^activeFont=.*/activeFont=another/' "$CFG/device-font-load-verification.conf" ;;
+    esac
+    if luoshu_active_payload_verified mix; then echo "unsafe reuse: $mutation" >&2; exit 1; fi
+    mv "$TMP/saved-proof" "$CFG/device-font-load-verification.conf"
+done
 sh -n "$ROOT/common/font_active_state.sh"
 echo 'Verified active font and identical composite requests reuse metadata only.'

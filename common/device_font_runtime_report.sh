@@ -185,6 +185,7 @@ font_config_mark_boot_success() {
     if [ "$_lmbs_state" = booting ]; then
         _lmbs_font=$(sed -n 's/^font=//p' "$_lmbs_config/font-payload-boot.conf" 2>/dev/null | head -n1)
         {
+            sed -n '/^generation=/p; /^bootId=/p' "$_lmbs_config/font-payload-boot.conf"
             printf 'state=confirmed\n'
             printf 'font=%s\n' "${_lmbs_font:-unknown}"
             printf 'time=%s\n' "$(date +%s)"

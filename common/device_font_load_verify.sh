@@ -38,6 +38,8 @@ _dfload_write_simple() {
         printf 'mode=%s\n' "$_dfload_mode"
         printf 'activeFont=%s\n' "$_dfload_active"
         printf 'reason=%s\n' "$_dfload_reason"
+        printf 'bootId=%s\n' "$(_dfload_boot_id)"
+        printf 'generation=%s\n' "$(_dfload_state_value "$_dfload_module_dir/config/font-payload-boot.conf" generation)"
         printf 'time=%s\n' "$(date +%s 2>/dev/null || echo 0)"
     } > "${_dfload_conf}.tmp.$$" 2>/dev/null || return 1
     mv -f "${_dfload_conf}.tmp.$$" "$_dfload_conf" 2>/dev/null || return 1
@@ -56,6 +58,31 @@ _dfload_state_value() {
     _dfload_file="$1"
     _dfload_key="$2"
     sed -n "s/^${_dfload_key}=//p" "$_dfload_file" 2>/dev/null | head -n1 | tr -d '\r\n'
+}
+
+# Metadata binding is necessary even for mount-only evidence. It is not proof that
+# an Android Typeface consumed the file; keep that distinction in state and UI.
+_dfload_boot_id() {
+    if [ -n "${LUOSHU_TEST_BOOT_ID:-}" ]; then printf '%s\n' "$LUOSHU_TEST_BOOT_ID";
+    else cat /proc/sys/kernel/random/boot_id 2>/dev/null | tr -d '\r\n'; fi
+}
+
+_dfload_boot_current() {
+    _dfload_boot_file="$(_dfload_module)/config/font-payload-boot.conf"
+    _dfload_now=$(_dfload_boot_id)
+    [ -n "$_dfload_now" ] || return 1
+    [ "$(_dfload_state_value "$_dfload_boot_file" bootId)" = "$_dfload_now" ] || return 1
+    [ "$(_dfload_state_value "$_dfload_boot_file" font)" = "$(_dfload_active_font)" ] || return 1
+    [ -n "$(_dfload_state_value "$_dfload_boot_file" generation)" ] || return 1
+    case "$(_dfload_state_value "$_dfload_boot_file" state)" in booting|confirmed) ;; *) return 1 ;; esac
+}
+
+_dfload_evidence_current() {
+    _dfload_evidence="$1"
+    _dfload_boot_current || return 1
+    [ "$(_dfload_state_value "$_dfload_evidence" bootId)" = "$_dfload_now" ] || return 1
+    [ "$(_dfload_state_value "$_dfload_evidence" activeFont)" = "$(_dfload_active_font)" ] || return 1
+    [ "$(_dfload_state_value "$_dfload_evidence" generation)" = "$(_dfload_state_value "$_dfload_boot_file" generation)" ]
 }
 
 _dfload_hash_stream() {
@@ -184,6 +211,7 @@ _dfload_mount_transaction_active() {
     _dfload_module_dir="$(_dfload_module)"
     _dfload_mount_state=$(_dfload_state_value "$_dfload_module_dir/config/self-mount.conf" state)
     _dfload_boot_state=$(_dfload_state_value "$_dfload_module_dir/config/font-payload-boot.conf" state)
+    _dfload_boot_current || return 1
     _dfload_font_count=$(_dfload_manifest_font_count)
     [ "$_dfload_font_count" -gt 0 ] 2>/dev/null || return 1
     case "$_dfload_mount_state:$_dfload_boot_state" in
@@ -203,12 +231,14 @@ device_font_load_status() {
     _dfload_conf="$_dfload_module_dir/config/device-font-load-verification.conf"
     _dfload_verified_state=$(_dfload_state_value "$_dfload_conf" state)
     _dfload_verified_active=$(_dfload_state_value "$_dfload_conf" activeFont)
-    if [ "$_dfload_verified_state" = verified ] && [ "$_dfload_verified_active" = "$_dfload_active" ]; then
+    if [ "$_dfload_verified_state" = verified ] && [ "$_dfload_verified_active" = "$_dfload_active" ] &&
+       _dfload_evidence_current "$_dfload_conf" &&
+       [ "$(_dfload_state_value "$_dfload_conf" mode)" = aligned ]; then
         return 0
     fi
 
     if _dfload_mount_transaction_active; then
-        _dfload_write_simple verified mount-transaction-active "$_dfload_active" mount-confirmed
+        _dfload_write_simple mounted mount-transaction-active "$_dfload_active" mount-confirmed
         return 0
     fi
 
@@ -230,20 +260,20 @@ device_font_load_verify() {
         return 2
     fi
 
-    if _dfload_exact_visible_match; then
-        _dfload_write_simple verified visible-font-files-match "$_dfload_active" mount-verified
+    if _dfload_boot_current && _dfload_exact_visible_match; then
+        _dfload_write_simple mounted visible-font-files-match "$_dfload_active" mount-verified
         _dfload_log "系统可见字体与私有负载完全一致：$_dfload_active"
         return 0
     fi
 
-    if _dfload_mount_guard "$_dfload_active"; then
-        _dfload_write_simple verified pid1-mount-visible "$_dfload_active" mount-verified
+    if _dfload_boot_current && _dfload_mount_guard "$_dfload_active"; then
+        _dfload_write_simple mounted pid1-mount-visible "$_dfload_active" mount-verified
         _dfload_log "PID 1 主命名空间已确认字体挂载；文件布局差异仅保留为诊断信息：$_dfload_active"
         return 0
     fi
 
     if _dfload_mount_transaction_active; then
-        _dfload_write_simple verified mount-active-visible-layout-differs "$_dfload_active" mount-confirmed
+        _dfload_write_simple mounted mount-active-visible-layout-differs "$_dfload_active" mount-confirmed
         _dfload_log "字体挂载事务有效，但系统字体服务暴露的文件布局与负载不同；不再误判失败或恢复默认字体：$_dfload_active"
         return 0
     fi

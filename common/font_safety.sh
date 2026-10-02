@@ -620,6 +620,16 @@ font_config_boot_guard() {
             _lbg_retry_count=$(sed -n 's/^count=//p' "$_lbg_config/font-boot-inconclusive.conf" 2>/dev/null | head -n1)
             case "$_lbg_retry_count" in ''|*[!0-9]*) _lbg_retry_count=0 ;; esac
             [ "$_lbg_retry_generation" = "$_lbg_generation" ] || _lbg_retry_count=0
+            # Android completed the previous boot, even if font consumption was
+            # inconclusive. That is boot-health evidence, never Typeface proof.
+            _lbg_health="$_lbg_config/font-android-boot-health.conf"
+            if [ -n "$_lbg_generation" ] && [ -n "$_lbg_saved_boot" ] &&
+               [ "$(sed -n 's/^bootId=//p' "$_lbg_health" 2>/dev/null | head -n1)" = "$_lbg_saved_boot" ] &&
+               [ "$(sed -n 's/^generation=//p' "$_lbg_health" 2>/dev/null | head -n1)" = "$_lbg_generation" ] &&
+               [ "$(sed -n 's/^font=//p' "$_lbg_health" 2>/dev/null | head -n1)" = "$_lbg_active" ] &&
+               [ "$(sed -n 's/^state=//p' "$_lbg_health" 2>/dev/null | head -n1)" = complete ]; then
+                _lbg_retry_count=0
+            fi
             if [ "$_lbg_retry_count" -ge 1 ]; then
                 luoshu_payload_quarantine
                 return 1
@@ -662,6 +672,16 @@ font_config_boot_guard() {
             ;;
         confirmed)
             luoshu_payload_validate_manifest_fast || { luoshu_payload_quarantine; return 1; }
+            _lbg_current_boot=$(_luoshu_payload_boot_id 2>/dev/null) || return 1
+            _lbg_saved_boot=$(sed -n 's/^bootId=//p' "$_lbg_config/font-payload-boot.conf" 2>/dev/null | head -n1)
+            if [ "$_lbg_saved_boot" != "$_lbg_current_boot" ]; then
+                {
+                    printf 'state=booting\nfont=%s\ngeneration=%s\nbootId=%s\n' \
+                        "$_lbg_active" "$_lbg_generation" "$_lbg_current_boot"
+                    printf 'time=%s\n' "$(date +%s)"
+                } > "$_lbg_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || return 1
+                mv -f "$_lbg_config/font-payload-boot.conf.tmp.$$" "$_lbg_config/font-payload-boot.conf" || return 1
+            fi
             ;;
         *)
             # An older engine has no trusted transaction manifest. Restore the ROM font once instead

@@ -7,6 +7,19 @@ import org.junit.Test
 
 class DeviceTrustUiTest {
     @Test
+    fun oldAndNewMountOnlyRecordsNeverClaimConsumerVerification() {
+        for (alignment in listOf("verified", "mounted")) {
+            for (mode in listOf("mount-confirmed", "mount-verified")) {
+                val state = DeviceTrustState(loading = false, activeFont = "custom",
+                    alignment = alignment, mode = mode, mountState = "mounted")
+                assertEquals(DeviceTrustLevel.COMPATIBILITY, state.level)
+                assertEquals(DeviceTrustLevel.PENDING,
+                    state.copy(alignment = "pending", reason = "stale-verification").level)
+            }
+        }
+    }
+
+    @Test
     fun verifiedDeviceStateIsRecognized() {
         val state = parseDeviceTrustOutput(
             """

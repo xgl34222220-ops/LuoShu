@@ -7,6 +7,7 @@ trap 'rm -rf "$TMP"' EXIT HUP INT TERM
 MODULE="$TMP/module"
 CONFIG="$MODULE/config"
 mkdir -p "$CONFIG"
+printf 'state=confirmed\nfont=DemoFont\ngeneration=test-generation\nbootId=%s\n' "$(cat /proc/sys/kernel/random/boot_id)" > "$CONFIG/font-payload-boot.conf"
 printf 'id=LuoShu\nversion=test\nversionCode=1\n' >"$MODULE/module.prop"
 
 assert_status() {
@@ -18,6 +19,11 @@ assert_status() {
         printf 'bootId=%s\n' "$(cat /proc/sys/kernel/random/boot_id)" >> "$TMP/verification.current"
         grep -E '^(deploymentId|payloadDigest)=' "$CONFIG/universal-font-runtime.conf" >> "$TMP/verification.current" || true
         mv "$TMP/verification.current" "$CONFIG/universal-font-runtime-verification.conf"
+    fi
+    if [ -s "$CONFIG/device-font-load-verification.conf" ]; then
+        sed '/^bootId=/d; /^generation=/d' "$CONFIG/device-font-load-verification.conf" > "$TMP/proof"
+        printf 'bootId=%s\ngeneration=test-generation\n' "$(cat /proc/sys/kernel/random/boot_id)" >> "$TMP/proof"
+        mv "$TMP/proof" "$CONFIG/device-font-load-verification.conf"
     fi
     _output=$(MODDIR="$MODULE" sh "$ROOT/common/app_bridge.sh" status)
     printf '%s' "$_output" | python3 -c '
@@ -35,6 +41,11 @@ assert data["verificationReason"] == expected_reason, data
 
 assert_mount_failure() {
     _expected="$1"
+    if [ -s "$CONFIG/device-font-load-verification.conf" ]; then
+        sed '/^bootId=/d; /^generation=/d' "$CONFIG/device-font-load-verification.conf" > "$TMP/proof"
+        printf 'bootId=%s\ngeneration=test-generation\n' "$(cat /proc/sys/kernel/random/boot_id)" >> "$TMP/proof"
+        mv "$TMP/proof" "$CONFIG/device-font-load-verification.conf"
+    fi
     _output=$(MODDIR="$MODULE" sh "$ROOT/common/app_bridge.sh" status)
     printf '%s' "$_output" | python3 -c '
 import json, sys
@@ -57,11 +68,21 @@ assert_mount_failure oplus_product/fonts
 printf 'state=mounted\nbackend=self-overlay\n' >"$CONFIG/self-mount.conf"
 printf 'state=verified\nmode=mount-verified\nreason=\nactiveFont=DemoFont\n' \
     >"$CONFIG/device-font-load-verification.conf"
-assert_status DemoFont verified ''
+assert_status unknown mount-only ''
 
 printf 'state=verified\nmode=mount-confirmed\nreason=mount-transaction-active\nactiveFont=DemoFont\n' \
     >"$CONFIG/device-font-load-verification.conf"
-assert_status DemoFont verified mount-transaction-active
+assert_status unknown mount-only mount-transaction-active
+
+# A previous-generation mount record must never advertise an effective font.
+sed -i 's/^generation=.*/generation=previous/' "$CONFIG/device-font-load-verification.conf"
+MODDIR="$MODULE" sh "$ROOT/common/app_bridge.sh" status | python3 -c '
+import json,sys
+d=json.load(sys.stdin)["data"]
+assert d["effectiveActive"] == "unknown", d
+assert d["fontEffectState"] == "unverified", d
+assert d["verificationReason"] == "stale-verification", d
+'
 
 printf 'state=failed\nbackend=rollback\nfailed=system/etc\n' >"$CONFIG/self-mount.conf"
 assert_status default failed self-mount-failed
@@ -72,7 +93,7 @@ printf 'state=verified\nmode=mount-verified\nreason=\nactiveFont=OldFont\n' \
 assert_status unknown pending stale-verification
 
 touch "$CONFIG/text_reboot_required.conf"
-assert_status unknown pending-reboot ''
+assert_status unknown pending-reboot stale-verification
 
 # Universal production mode consumes Phase 8 grade and exposes Phase 9 rollback state.
 rm -f "$CONFIG/text_reboot_required.conf" "$CONFIG/device-font-load-verification.conf"

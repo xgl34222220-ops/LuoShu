@@ -19,7 +19,7 @@ versionCode=20191
 EOF_PROP
 printf 'Fixture Font\n' > "$MOD/config/active_font.conf"
 printf 'state=installed\n' > "$MOD/config/device-font-engine.conf"
-printf 'state=booting\nfont=Fixture Font\ntime=1\n' > "$MOD/config/font-payload-boot.conf"
+printf 'state=booting\nfont=Fixture Font\ngeneration=report-generation\nbootId=report-boot\ntime=1\n' > "$MOD/config/font-payload-boot.conf"
 printf 'schema=device-template-v1\n' > "$MOD/config/font-payload-schema.conf"
 printf '{"schema":"device-font-template-v1","slots":[]}' > "$MOD/config/device-font-template.json"
 printf '{"schema":"device-font-payload-v1"}' > "$MOD/config/device-font-payload/manifest.json"
@@ -59,6 +59,8 @@ export PATH="$BIN:$PATH"
 font_config_mark_boot_success
 
 ok grep -q '^state=confirmed$' "$MOD/config/font-payload-boot.conf"
+ok grep -q '^generation=report-generation$' "$MOD/config/font-payload-boot.conf"
+ok grep -q '^bootId=report-boot$' "$MOD/config/font-payload-boot.conf"
 ok grep -q '^moduleVersion=v2.2.0 Alpha 1$' "$REPORT/summary.txt"
 ok grep -q '^activeFont=Fixture Font$' "$REPORT/summary.txt"
 ok grep -q '^engineState=installed$' "$REPORT/summary.txt"

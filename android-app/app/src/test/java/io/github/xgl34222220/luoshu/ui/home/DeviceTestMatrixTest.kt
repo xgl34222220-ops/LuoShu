@@ -119,7 +119,7 @@ class DeviceTestMatrixTest {
     }
 
     @Test
-    fun verifiedCompatibilityMountIsValidReleaseEvidence() {
+    fun compatibilityMountDoesNotProveCompleteLoading() {
         val candidateState = readyState(version = "v2.2.4-alpha1")
         val mountTrust = trust.copy(mode = "mount-verified")
         val record = buildDeviceTestMatrixRecord(candidateState, mountTrust, passedChecks, "", 1000L, 36)
@@ -132,10 +132,10 @@ class DeviceTestMatrixTest {
         )
 
         assertEquals(
-            PreReleaseGateSeverity.READY,
+            PreReleaseGateSeverity.BLOCKER,
             report.checks.first { it.id == "trust" }.severity,
         )
-        assertTrue(report.ready)
+        assertFalse(report.ready)
     }
 
     @Test

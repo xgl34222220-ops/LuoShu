@@ -900,9 +900,10 @@ font_config_mark_boot_success() {
     [ "$_lmbs_state" = booting ] || return 0
     _lmbs_font=$(sed -n 's/^font=//p' "$_lmbs_config/font-payload-boot.conf" 2>/dev/null | head -n1)
     luoshu_mount_verify_active "${_lmbs_font:-unknown}" || return 1
-    printf 'state=confirmed\nfont=%s\ntime=%s\n' \
-        "${_lmbs_font:-unknown}" "$(_luoshu_now)" \
-        > "$_lmbs_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || return 1
+    {
+        sed -n '/^generation=/p; /^bootId=/p' "$_lmbs_config/font-payload-boot.conf"
+        printf 'state=confirmed\nfont=%s\ntime=%s\n' "${_lmbs_font:-unknown}" "$(_luoshu_now)"
+    } > "$_lmbs_config/font-payload-boot.conf.tmp.$$" 2>/dev/null || return 1
     mv -f "$_lmbs_config/font-payload-boot.conf.tmp.$$" \
         "$_lmbs_config/font-payload-boot.conf" 2>/dev/null || return 1
     rm -f \
