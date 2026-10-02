@@ -7,6 +7,8 @@ setenforce, verity disabling, host permission change, or blanket root grant.
 import hashlib
 import json
 import os
+import re
+import shlex
 from pathlib import Path
 import subprocess
 import zipfile
@@ -64,17 +66,34 @@ def prepare(apk, patch_script, sdk, output, adb):
 
 def verify(adb, output):
     report = {'result': 'FAIL', 'steps': []}
-    def run(command):
+    def run(command, required=True):
         p = subprocess.run([adb, '-s', 'emulator-5554', 'shell', command], capture_output=True, text=True, timeout=60)
         report['steps'].append({'command': command, 'exit': p.returncode, 'stdout': p.stdout, 'stderr': p.stderr})
-        if p.returncode:
+        if required and p.returncode:
             raise RuntimeError('Patched AVD verification failed: ' + command)
         return p.stdout.strip()
     try:
         if run('getprop ro.kernel.qemu') != '1' or run('getenforce') != 'Enforcing':
             raise RuntimeError('AVD identity or SELinux invariant failed')
-        magisk = run('command -v magisk')
-        version = run(magisk + ' -v')
+        report['boot_id'] = run('cat /proc/sys/kernel/random/boot_id')
+        report['path'] = run('echo "$PATH"')
+        report['kernel_cmdline'] = run('cat /proc/cmdline', required=False)
+        report['boot_processes'] = run('ps -A -o PID,PPID,NAME,ARGS', required=False)
+        report['known_locations'] = run('ls -la /debug_ramdisk /sbin /data/adb /data/adb/magisk /data/local/tmp/magisk 2>&1', required=False)
+        report['mountinfo'] = run('cat /proc/1/mountinfo', required=False)
+        report['kernel_log'] = run('dmesg', required=False)
+        report['magisk_log'] = run('cat /cache/magisk.log /data/adb/magisk.log 2>/dev/null', required=False)
+        magisk = run('command -v magisk', required=False)
+        if not magisk:
+            magisk = run('for f in /debug_ramdisk/magisk /sbin/magisk /data/adb/magisk/magisk; do if [ -x "$f" ]; then echo "$f"; break; fi; done', required=False)
+        # Querying a standalone binary can start a daemon. Require a daemon to
+        # already exist at boot before invoking any Magisk client, so manual
+        # daemon startup is never mistaken for real magiskinit boot integration.
+        if not re.search(r'^\s*\d+\s+\d+\s+magiskd(?:\s|$)', report['boot_processes'], re.M):
+            raise RuntimeError('Patched Android booted, but no pre-existing magiskd was observed')
+        if not magisk:
+            raise RuntimeError('Magisk daemon exists but no standard client location is visible')
+        version = run(shlex.quote(magisk) + ' -v')
         if '30.7' not in version:
             raise RuntimeError('Unexpected Magisk runtime version')
         uid = run('su -c id -u')

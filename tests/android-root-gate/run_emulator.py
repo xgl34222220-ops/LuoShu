@@ -26,7 +26,7 @@ def supervise_root(binary, report, ramdisk=None):
     try:
         command = [binary, '-avd', 'luoshu_gate', '-port', '5554',
             '-no-window', '-gpu', 'swiftshader_indirect', '-no-snapshot', '-noaudio',
-            '-no-boot-anim', '-camera-back', 'none', '-accel', 'on']
+            '-no-boot-anim', '-camera-back', 'none', '-accel', 'on', '-verbose']
         if ramdisk:
             command += ['-ramdisk', ramdisk]
         child = subprocess.Popen(command)
