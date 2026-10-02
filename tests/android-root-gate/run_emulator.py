@@ -54,6 +54,7 @@ def main():
     parser.add_argument('--binary')
     parser.add_argument('--cleanup-report')
     parser.add_argument('--module-zip', type=Path)
+    parser.add_argument('--candidate-zip', type=Path)
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
     if args.root_supervisor:
@@ -97,6 +98,13 @@ def main():
             report['probe_exit'] = result.returncode
             if result.returncode != 0:
                 raise RuntimeError('ARM64 Android qualification failed; inspect qualification.json')
+            if args.candidate_zip:
+                candidate = subprocess.run([sys.executable, str(Path(__file__).with_name('candidate_gate.py')),
+                    '--baseline-zip', str(args.module_zip), '--candidate-zip', str(args.candidate_zip),
+                    '--output', str(output)], env=env, timeout=600)
+                report['candidate_gate_exit'] = candidate.returncode
+                if candidate.returncode:
+                    raise RuntimeError('Candidate delivery gate is incomplete or failed; inspect candidate-gate.json')
             report['result'] = 'PASS'
     except Exception as error:
         report['error'] = str(error)

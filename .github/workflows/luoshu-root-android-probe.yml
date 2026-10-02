@@ -8,6 +8,7 @@ on:
       - tests/android-root-gate/**
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: root-android-qualification-${{ github.ref }}
   cancel-in-progress: false
@@ -27,6 +28,18 @@ jobs:
             https://github.com/xgl34222220-ops/LuoShu/releases/download/refactor-v1.1.1/LuoShu-v1.1.1.zip
           echo "c5c8fa86af4ac196107ba05c5ee8cc1944140ae033cc9e763cec8c76f40c848a  $RUNNER_TEMP/LuoShu-v1.1.1.zip" | sha256sum -c -
           python3 -m unittest discover -s tests/android-root-gate -p 'test_*.py'
+      - name: Download exact exploratory candidate artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: LuoShu-Test-Candidate
+          run-id: 37010744032
+          github-token: ${{ github.token }}
+          path: candidate-artifact
+      - name: Verify exploratory candidate identity
+        shell: bash
+        run: |
+          echo '978adbb8bde77173822330d53b7aed7f4396c4dbaaeb57b949b627ef0ecb43b7  candidate-artifact/LuoShu-v1.1.1.zip' | sha256sum -c -
+          echo 'Exploratory candidate commit: 7d417af120aa0cb0eaa52e6b5926e088f8bbddc4' | tee root-gate-output/candidate-source.txt
       - name: Record KVM access and verify existing sudo access
         shell: bash
         run: |
@@ -69,7 +82,7 @@ jobs:
           echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
       - name: Qualify original ARM64 runtime under one supervised emulator
         shell: bash
-        run: python3 tests/android-root-gate/run_emulator.py --module-zip "$RUNNER_TEMP/LuoShu-v1.1.1.zip" --output root-gate-output
+        run: python3 tests/android-root-gate/run_emulator.py --module-zip "$RUNNER_TEMP/LuoShu-v1.1.1.zip" --candidate-zip candidate-artifact/LuoShu-v1.1.1.zip --output root-gate-output
       - name: Preserve qualification evidence, including unsupported failures
         if: always()
         uses: actions/upload-artifact@v4
