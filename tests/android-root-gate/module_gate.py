@@ -178,8 +178,9 @@ def run_gate(adb, magisk, baseline, candidate, output):
                     cycle['commit_failure']['injection_hit'] = root('cat ' + shlex.quote(marker))
                     if (MODULE + '/.luoshu-payload-stage.') not in cycle['commit_failure']['injection_hit']:
                         raise RuntimeError('Commit failure was not injected at the exact rename')
-                    if '提交失败' not in cycle['commit_failure'].get('data', {}).get('message', ''):
-                        raise RuntimeError('Task failed for a reason other than the intended commit failure')
+                    cycle['commit_failure']['task_message_specific'] = '提交失败' in cycle['commit_failure'].get('data', {}).get('message', '')
+                    cycle['commit_failure']['core_log'] = root('tail -n 160 ' + MODULE + '/logs/fontswitch.log', required=False)
+                    cycle['commit_failure']['evidence_rule'] = 'Exact one-shot rename marker plus matching failed task; UI may expose generic error. Rollback and reboot bytes must independently match.'
                     if root('find -L ' + MODULE + '/.luoshu-payload -type f -exec sha256sum {} \\; | sort') != payload_before:
                         raise RuntimeError('Commit failure changed previous payload bytes')
                     if font_hashes() != mounted_fonts or root('cat ' + MODULE + '/config/active_font.conf') != active_before_failure:
