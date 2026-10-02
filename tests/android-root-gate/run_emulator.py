@@ -155,10 +155,13 @@ def main():
                         raise RuntimeError('Patched AVD boot timed out')
                     report['patched_root_handshake'] = []
                     ensure_root([adb, '-s', 'emulator-5554'], report['patched_root_handshake'])
-                    verify(adb, output, args.magisk_apk)
+                    magisk_path = verify(adb, output, args.magisk_apk)
                     report['magisk_boot'] = 'PASS'
-                    # Full module/App root validation is a distinct next stage.
-                    raise RuntimeError('Magisk boot qualified; module/App-root delivery checks still pending')
+                    from module_gate import run_gate
+                    delivery = run_gate(adb, magisk_path, args.module_zip, args.candidate_zip, output)
+                    report['module_delivery_gate'] = delivery['delivery_gate']
+                    if delivery['delivery_gate'] != 'PASS':
+                        raise RuntimeError('Full module gate has failures or unproven coverage; inspect module-gate.json')
                 if candidate.returncode:
                     raise RuntimeError('Candidate delivery gate is incomplete or failed; inspect candidate-gate.json')
             report['result'] = 'PASS'

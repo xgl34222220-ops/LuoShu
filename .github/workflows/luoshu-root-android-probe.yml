@@ -16,7 +16,7 @@ jobs:
   qualify:
     name: Original ARM64 ELF on Root Android API35
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v4
       - name: Fetch immutable official baseline
