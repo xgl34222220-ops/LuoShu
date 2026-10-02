@@ -34,14 +34,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: LuoShu-Test-Candidate
-          run-id: 37065383778
+          run-id: 37071674418
           github-token: ${{ github.token }}
           path: candidate-artifact
       - name: Verify exploratory candidate identity
         shell: bash
         run: |
-          echo 'df3a696bf519d8554b59f7373c5fff4dfb1529cbbe1b5486668839377e48a779  candidate-artifact/LuoShu-v1.1.1.zip' | sha256sum -c -
-          echo 'Exploratory candidate commit: 8e7b8b302cd0ad588ec181f086f027c9caae5c0e' | tee root-gate-output/candidate-source.txt
+          echo '69438800abe877a8f3acf72e136554feab55397e918660eab57574ae2afeea24  candidate-artifact/LuoShu-v1.1.1.zip' | sha256sum -c -
+          echo 'Exploratory candidate commit: 9d259fbf9a1f91282fc76dfe3ffc893b94c76105' | tee root-gate-output/candidate-source.txt
       - name: Fetch authorized official Magisk for this disposable AVD
         shell: bash
         run: |
